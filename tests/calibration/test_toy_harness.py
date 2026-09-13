@@ -122,8 +122,8 @@ def test_the_DONORS_GLOBALS_ARE_INJECTED_and_not_silently_refitted(donor, spec, 
     flipped = replace(donor, priors=dataclasses.replace(donor.priors, rna_sense_frac=0.02))
     moved = TH.run_toy(spec, flipped, tmp_path / "b").result
 
-    a = np.asarray(got.mass_gdna_region, np.float64)
-    b = np.asarray(moved.mass_gdna_region, np.float64)
+    a = np.asarray(got.count_gdna_region, np.float64)
+    b = np.asarray(moved.count_gdna_region, np.float64)
     assert not np.allclose(a, b), (
         "flipping the injected kappa from unstranded to strongly stranded changed nothing, so the "
         "injected priors are not reaching calibrate"
@@ -147,8 +147,8 @@ def test_the_LENGTH_MODELS_come_from_the_DONOR_not_from_the_toy(donor, spec, tmp
     spike[min(90, size - 1)] = 1.0
     apart = replace(donor, gdna_fl_pmf=spike)
 
-    base = np.asarray(TH.run_toy(spec, donor, tmp_path / "c").result.mass_gdna_region, np.float64)
-    moved = np.asarray(TH.run_toy(spec, apart, tmp_path / "d").result.mass_gdna_region, np.float64)
+    base = np.asarray(TH.run_toy(spec, donor, tmp_path / "c").result.count_gdna_region, np.float64)
+    moved = np.asarray(TH.run_toy(spec, apart, tmp_path / "d").result.count_gdna_region, np.float64)
     assert not np.allclose(base, moved), (
         "replacing the donor's gDNA length model by a spike changed nothing; the pmfs are not "
         "reaching calibrate"

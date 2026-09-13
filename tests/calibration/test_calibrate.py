@@ -58,24 +58,26 @@ def test_mass_conserved_per_region():
     """A region's gDNA + RNA equals its contained count. There is no spliced term to add: the
     accumulator credits ``region_contained`` only when the fragment used no sj."""
     result = _run()
-    np.testing.assert_allclose(result.mass_gdna_region + result.mass_rna_region, REGION_TOTAL)
+    np.testing.assert_allclose(result.count_gdna_region + result.count_rna_region, REGION_TOTAL)
 
 
 def test_mass_conserved_per_boundary_INCLUDING_the_spliced_crossings():
-    """A boundary's gDNA + RNA equals unspliced + spliced. ``mass_rna_boundary`` is spliced-INCLUSIVE — a
+    """A boundary's gDNA + RNA equals unspliced + spliced. ``count_rna_boundary`` is spliced-INCLUSIVE — a
     certified-RNA crossing is RNA whatever the unspliced mixture resolves to, since gDNA cannot splice
     — so dropping it here would lose 6 of boundary 1's 11 fragments."""
     result = _run()
-    np.testing.assert_allclose(result.mass_gdna_boundary + result.mass_rna_boundary, BOUNDARY_TOTAL)
-    np.testing.assert_allclose(result.mass_rna_spliced_boundary, BOUNDARY_SPLICED)
-    assert np.all(result.mass_rna_boundary >= result.mass_rna_spliced_boundary - 1e-9)
+    np.testing.assert_allclose(
+        result.count_gdna_boundary + result.count_rna_boundary, BOUNDARY_TOTAL
+    )
+    np.testing.assert_allclose(result.count_rna_spliced_boundary, BOUNDARY_SPLICED)
+    assert np.all(result.count_rna_boundary >= result.count_rna_spliced_boundary - 1e-9)
 
 
 def test_sj_flux_is_exported_VERBATIM_and_never_deconvolved():
     """The third axis. A sj boundary is pure mature RNA by construction, so there is nothing to
     split: the result carries ``sj_count`` summed over the genome-strand columns, exactly.
 
-    It is a different population from ``mass_rna_spliced_boundary`` — a molecule that JUMPED rather
+    It is a different population from ``count_rna_spliced_boundary`` — a molecule that JUMPED rather
     than one that crossed contiguously — and the two are far apart in magnitude even in this toy, so
     folding them into one "mature" number would name nothing.
     """
@@ -111,8 +113,8 @@ def test_the_conserved_sj_mass_recovers_the_ACCUMULATORS_OWN_sj_mass_BANK():
 def test_masses_bounded_by_their_own_totals():
     result = _run()
     for g, tot in (
-        (result.mass_gdna_region, REGION_TOTAL),
-        (result.mass_gdna_boundary, BOUNDARY_TOTAL),
+        (result.count_gdna_region, REGION_TOTAL),
+        (result.count_gdna_boundary, BOUNDARY_TOTAL),
     ):
         assert np.all(g >= -1e-9)
         assert np.all(g <= tot + 1e-9)
@@ -120,11 +122,11 @@ def test_masses_bounded_by_their_own_totals():
 
 def test_an_intergenic_region_is_ALL_gDNA():
     """Region 2 carries no exon or intron bit, so no RNA can be contained in it — a structural lock,
-    not an inference. ``mass_rna_region[2] == 0`` exactly; a floored or smoothed answer here would be
+    not an inference. ``count_rna_region[2] == 0`` exactly; a floored or smoothed answer here would be
     manufacturing RNA where the annotation says none exists."""
     result = _run()
-    assert result.mass_rna_region[2] == 0.0
-    assert result.mass_gdna_region[2] == REGION_TOTAL[2]
+    assert result.count_rna_region[2] == 0.0
+    assert result.count_gdna_region[2] == REGION_TOTAL[2]
 
 
 # --- the two geometric supports ---------------------------------------------------------------
@@ -148,7 +150,7 @@ def test_gdna_density_global_is_a_ratio_of_SUMS_over_both_axes():
     """Σ gDNA mass / Σ gDNA support, pooled across regions AND boundaries — never a mean of per-object
     ratios, which is a different number whenever the supports differ."""
     result = _run()
-    expected = (result.mass_gdna_region.sum() + result.mass_gdna_boundary.sum()) / (
+    expected = (result.count_gdna_region.sum() + result.count_gdna_boundary.sum()) / (
         result.gdna_region_eff_len.sum() + result.gdna_boundary_eff_len.sum()
     )
     assert result.gdna_density_global == pytest.approx(expected)
@@ -215,7 +217,7 @@ def test_the_sj_axis_length_is_what_is_checked_not_its_content():
 def test_the_intron_factory_runs_and_conserves_mass():
     result = _run(CalibrationConfig())
     assert isinstance(result, CalibrationResult)
-    np.testing.assert_allclose(result.mass_gdna_region + result.mass_rna_region, REGION_TOTAL)
+    np.testing.assert_allclose(result.count_gdna_region + result.count_rna_region, REGION_TOTAL)
 
 
 def test_the_intron_factory_is_a_noop_without_introns():
@@ -223,4 +225,4 @@ def test_the_intron_factory_is_a_noop_without_introns():
     # no row to write, so every factory row is zero and the solve is the bare pass-0 (`FactoryRows`
     # is ``None`` when no slot is an intron).
     result = _run(CalibrationConfig())
-    np.testing.assert_allclose(result.mass_gdna_region + result.mass_rna_region, REGION_TOTAL)
+    np.testing.assert_allclose(result.count_gdna_region + result.count_rna_region, REGION_TOTAL)

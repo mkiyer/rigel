@@ -545,14 +545,14 @@ def object_rows(r: ToyResult) -> list[dict]:
     spliced = np.asarray(cap.spliced, np.float64)
 
     ov = r.truth.override_masses(ra)
-    tg = {"region": np.asarray(ov["mass_gdna_region"], np.float64),
-          "boundary": np.asarray(ov["mass_gdna_boundary"], np.float64)}
-    tr = {"region": np.asarray(ov["mass_rna_region"], np.float64),
-          "boundary": np.asarray(ov["mass_rna_boundary"], np.float64)}
-    pg = {"region": np.asarray(r.result.mass_gdna_region, np.float64),
-          "boundary": np.asarray(r.result.mass_gdna_boundary, np.float64)}
-    pr = {"region": np.asarray(r.result.mass_rna_region, np.float64),
-          "boundary": np.asarray(r.result.mass_rna_boundary, np.float64)}
+    tg = {"region": np.asarray(ov["count_gdna_region"], np.float64),
+          "boundary": np.asarray(ov["count_gdna_boundary"], np.float64)}
+    tr = {"region": np.asarray(ov["count_rna_region"], np.float64),
+          "boundary": np.asarray(ov["count_rna_boundary"], np.float64)}
+    pg = {"region": np.asarray(r.result.count_gdna_region, np.float64),
+          "boundary": np.asarray(r.result.count_gdna_boundary, np.float64)}
+    pr = {"region": np.asarray(r.result.count_rna_region, np.float64),
+          "boundary": np.asarray(r.result.count_rna_boundary, np.float64)}
 
     rows = []
     for s in range(int(chain.n_slots)):

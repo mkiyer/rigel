@@ -26,11 +26,11 @@ def _valid_kwargs() -> dict:
     region = np.ones(N_REGIONS, dtype=np.float64)
     boundary = np.ones(N_BOUNDARIES, dtype=np.float64)
     return dict(
-        mass_gdna_region=np.zeros(N_REGIONS),
-        mass_rna_region=region.copy(),
-        mass_gdna_boundary=np.zeros(N_BOUNDARIES),
-        mass_rna_boundary=boundary.copy(),
-        mass_rna_spliced_boundary=np.zeros(N_BOUNDARIES),
+        count_gdna_region=np.zeros(N_REGIONS),
+        count_rna_region=region.copy(),
+        count_gdna_boundary=np.zeros(N_BOUNDARIES),
+        count_rna_boundary=boundary.copy(),
+        count_rna_spliced_boundary=np.zeros(N_BOUNDARIES),
         # Geometry, not a split: the mean conserved fragment-mass one crossing carries. 1.0 is the
         # identity — a boundary whose flanks both exceed every fragment length, where an incidence IS
         # a fragment — so a fixture that does not exercise K-inflation states it explicitly.
@@ -75,8 +75,8 @@ def test_zero_gdna_library_constructs():
     # Graceful zero-gDNA: gdna_density_global = 0 and all gDNA mass = 0 must be valid, not a failure.
     kw = _valid_kwargs()
     kw["gdna_density_global"] = 0.0
-    kw["mass_gdna_region"] = np.zeros(N_REGIONS)
-    kw["mass_gdna_boundary"] = np.zeros(N_BOUNDARIES)
+    kw["count_gdna_region"] = np.zeros(N_REGIONS)
+    kw["count_gdna_boundary"] = np.zeros(N_BOUNDARIES)
     CalibrationResult(**kw)
 
 
@@ -98,13 +98,13 @@ def test_a_library_with_no_sj_constructs():
 @pytest.mark.parametrize(
     "field,n_expected",
     [
-        ("mass_gdna_region", N_REGIONS),
-        ("mass_rna_region", N_REGIONS),
+        ("count_gdna_region", N_REGIONS),
+        ("count_rna_region", N_REGIONS),
         ("gdna_region_eff_len", N_REGIONS),
         ("rna_region_eff_len", N_REGIONS),
-        ("mass_gdna_boundary", N_BOUNDARIES),
-        ("mass_rna_boundary", N_BOUNDARIES),
-        ("mass_rna_spliced_boundary", N_BOUNDARIES),
+        ("count_gdna_boundary", N_BOUNDARIES),
+        ("count_rna_boundary", N_BOUNDARIES),
+        ("count_rna_spliced_boundary", N_BOUNDARIES),
         ("gdna_boundary_eff_len", N_BOUNDARIES),
         ("rna_boundary_eff_len", N_BOUNDARIES),
         ("count_rna_sj", N_SJ),
@@ -125,8 +125,8 @@ def test_every_array_is_pinned_to_its_own_axis(field, n_expected):
 
 def test_the_error_names_the_axis_it_expected():
     kw = _valid_kwargs()
-    kw["mass_gdna_boundary"] = np.ones(N_REGIONS)
-    with pytest.raises(ValueError, match="mass_gdna_boundary"):
+    kw["count_gdna_boundary"] = np.ones(N_REGIONS)
+    with pytest.raises(ValueError, match="count_gdna_boundary"):
         CalibrationResult(**kw)
 
 
@@ -138,9 +138,9 @@ def test_the_error_names_the_axis_it_expected():
 @pytest.mark.parametrize(
     "field",
     [
-        "mass_gdna_region",
+        "count_gdna_region",
         "gdna_region_eff_len",
-        "mass_gdna_boundary",
+        "count_gdna_boundary",
         "gdna_boundary_eff_len",
         "rna_region_eff_len",
         "rna_boundary_eff_len",
@@ -176,14 +176,14 @@ def test_still_rejects_a_narrower_float():
     """Integers are exact; float32 is not. Admitting it would silently mix precisions through
     arithmetic that is float64 everywhere else, which is what the dtype gate is actually for."""
     kw = _valid_kwargs()
-    kw["mass_rna_region"] = np.ones(N_REGIONS, dtype=np.float32)
+    kw["count_rna_region"] = np.ones(N_REGIONS, dtype=np.float32)
     with pytest.raises(ValueError, match="float64 or an integer count"):
         CalibrationResult(**kw)
 
 
 def test_still_rejects_a_negative_integer_count():
     kw = _valid_kwargs()
-    kw["mass_rna_region"] = np.array([1, -1, 1, 1], dtype=np.int64)
+    kw["count_rna_region"] = np.array([1, -1, 1, 1], dtype=np.int64)
     with pytest.raises(ValueError, match="non-negative"):
         CalibrationResult(**kw)
 
@@ -243,12 +243,12 @@ def test_the_per_face_fields_are_gone():
     }
 
 
-def test_mass_rna_spliced_has_no_region_twin():
+def test_count_rna_spliced_has_no_region_twin():
     """Structural, not an omission: the accumulator credits ``region_contained`` only when the fragment
     used NO sj, so a region's contained population cannot hold a spliced molecule. A
-    ``mass_rna_spliced_region`` field would be a channel that cannot exist."""
-    assert "mass_rna_spliced_boundary" in CalibrationResult.__dataclass_fields__
-    assert "mass_rna_spliced_region" not in CalibrationResult.__dataclass_fields__
+    ``count_rna_spliced_region`` field would be a channel that cannot exist."""
+    assert "count_rna_spliced_boundary" in CalibrationResult.__dataclass_fields__
+    assert "count_rna_spliced_region" not in CalibrationResult.__dataclass_fields__
 
 
 # ── the three-way composition ─────────────────────────────────────────────────────────────────────

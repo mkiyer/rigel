@@ -90,9 +90,9 @@ def _slot_lookup(chain, n_regions: int, n_boundaries: int):
 def dissect(m, *, axis: str, arm: str, top: int, index) -> dict:
     """Rank one axis of one arm by error mass and assemble the per-object diagnostic table."""
     truth, res = m.truth, m.arms[arm]
-    pred_g = np.asarray(getattr(res, f"mass_gdna_{axis}"), np.float64)
-    true_g = np.asarray(getattr(truth, f"mass_gdna_{axis}"), np.float64)
-    true_r = np.asarray(getattr(truth, f"mass_rna_{axis}"), np.float64)
+    pred_g = np.asarray(getattr(res, f"count_gdna_{axis}"), np.float64)
+    true_g = np.asarray(getattr(truth, f"count_gdna_{axis}"), np.float64)
+    true_r = np.asarray(getattr(truth, f"count_rna_{axis}"), np.float64)
     err = pred_g - true_g
     total = true_g + true_r
     live = total > 0
@@ -119,8 +119,8 @@ def dissect(m, *, axis: str, arm: str, top: int, index) -> dict:
     # per-slot error, so a neighbour's error can be read off directly
     slot_err = np.zeros(chain.kind.shape[0], np.float64)
     for ax, sl in (("region", region_slot), ("boundary", boundary_slot)):
-        tg = np.asarray(getattr(truth, f"mass_gdna_{ax}"), np.float64)
-        pg = np.asarray(getattr(res, f"mass_gdna_{ax}"), np.float64)
+        tg = np.asarray(getattr(truth, f"count_gdna_{ax}"), np.float64)
+        pg = np.asarray(getattr(res, f"count_gdna_{ax}"), np.float64)
         ok = sl >= 0
         slot_err[sl[ok]] = (pg - tg)[ok]
 

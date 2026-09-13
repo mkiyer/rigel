@@ -87,11 +87,11 @@ PRIOR_FIELDS = ("gdna_prior_count", "rna_prior_count", "gdna_eff_len")
 #: re-inject exactly this set from the SHIPPED result and demand byte-identity — an override applied
 #: to a field nothing reads is an override that never ran (TRAPS: an-ablation-that-never-ran).
 OVERRIDE_FIELDS = (
-    "mass_gdna_region",
-    "mass_rna_region",
-    "mass_gdna_boundary",
-    "mass_rna_boundary",
-    "mass_rna_spliced_boundary",
+    "count_gdna_region",
+    "count_rna_region",
+    "count_gdna_boundary",
+    "count_rna_boundary",
+    "count_rna_spliced_boundary",
     "count_rna_sj",
 )
 

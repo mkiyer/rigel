@@ -305,8 +305,8 @@ def assemble_priors(
 
     The RNA prior is the UNSPLICED RNA mass only. A spliced fragment has no gDNA candidate in the
     EM (gDNA does not splice), so it is assigned directly and counting it here would inflate the RNA side
-    of a split that arbitrates only unspliced fragments. ``mass_rna_boundary`` is spliced-inclusive, so
-    ``mass_rna_spliced_boundary`` is subtracted. ⛔ The SJ flux is deliberately NOT added, for the same
+    of a split that arbitrates only unspliced fragments. ``count_rna_boundary`` is spliced-inclusive, so
+    ``count_rna_spliced_boundary`` is subtracted. ⛔ The SJ flux is deliberately NOT added, for the same
     reason — a locus whose RNA is fully spliced SHOULD get a near-zero ``rna_prior_count``.
 
     The contraction is SHRUNK toward the uniform span on the contained evidence ``C``, by
@@ -332,28 +332,28 @@ def assemble_priors(
     # THE TWO PSEUDOCOUNTS. The region term is already a fragment count; only the crossing term is
     # converted, by the accumulator's own conserved mass-per-crossing at that boundary.
     q = np.asarray(calibration.boundary_mass_per_crossing, dtype=np.float64)
-    gdna_boundary = np.asarray(calibration.mass_gdna_boundary, dtype=np.float64) * q
+    gdna_boundary = np.asarray(calibration.count_gdna_boundary, dtype=np.float64) * q
     rna_boundary = (
         np.maximum(
-            np.asarray(calibration.mass_rna_boundary, dtype=np.float64)
-            - np.asarray(calibration.mass_rna_spliced_boundary, dtype=np.float64),
+            np.asarray(calibration.count_rna_boundary, dtype=np.float64)
+            - np.asarray(calibration.count_rna_spliced_boundary, dtype=np.float64),
             0.0,
         )
         * q
     )
     gdna_locus = np.maximum(
-        by_region(calibration.mass_gdna_region) + by_boundary(gdna_boundary), 0.0
+        by_region(calibration.count_gdna_region) + by_boundary(gdna_boundary), 0.0
     )
-    rna_locus = np.maximum(by_region(calibration.mass_rna_region) + by_boundary(rna_boundary), 0.0)
+    rna_locus = np.maximum(by_region(calibration.count_rna_region) + by_boundary(rna_boundary), 0.0)
 
     # gDNA effective length: every object contracted against the SHARED global ρ_ref, PER OBJECT, so the
     # gDNA-vs-transcript density comparison sits on one scale. ρ_ref None (no detectable gDNA) ⇒ no
     # contraction. This is `transcript_capture_eff_lengths`' operation over the locus's object set.
     from .capture_eff_length import _global_reference_density
 
-    region_m = np.asarray(calibration.mass_gdna_region, dtype=np.float64)
+    region_m = np.asarray(calibration.count_gdna_region, dtype=np.float64)
     region_s = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 0.0)
-    boundary_m = np.asarray(calibration.mass_gdna_boundary, dtype=np.float64)
+    boundary_m = np.asarray(calibration.count_gdna_boundary, dtype=np.float64)
     boundary_s = np.maximum(np.asarray(calibration.gdna_boundary_eff_len, dtype=np.float64), 0.0)
     rho_ref = _global_reference_density(region_m, calibration.gdna_region_eff_len)
     if rho_ref is None or rho_ref <= 0.0:
@@ -367,8 +367,8 @@ def assemble_priors(
     elen = by_region(region_e) + by_boundary(boundary_e)
     contained_ev = np.maximum(
         by_region(
-            np.asarray(calibration.mass_gdna_region, dtype=np.float64)
-            + np.asarray(calibration.mass_rna_region, dtype=np.float64)
+            np.asarray(calibration.count_gdna_region, dtype=np.float64)
+            + np.asarray(calibration.count_rna_region, dtype=np.float64)
         ),
         0.0,
     )

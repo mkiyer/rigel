@@ -109,8 +109,8 @@ def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nrna_abundance: float
 
     ambig = np.flatnonzero(np.asarray(ra.strand_class) == TS_AMBIG)
     assert ambig.size >= 1, "the overlapping pair did not form an AMBIG region"
-    g = np.asarray(result.mass_gdna_region)[ambig]
-    r = np.asarray(result.mass_rna_region)[ambig]
+    g = np.asarray(result.count_gdna_region)[ambig]
+    r = np.asarray(result.count_rna_region)[ambig]
     return float(g.sum() / max(g.sum() + r.sum(), 1e-9))
 
 

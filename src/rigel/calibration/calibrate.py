@@ -696,7 +696,7 @@ def _result(
     """The solved chain projected onto the two payload axes and published as the
     :class:`CalibrationResult`, with the library-average gDNA density QC scalar.
 
-    ``mass_rna_spliced_boundary`` is the certified-RNA crossings per BOUNDARY — molecules that crossed
+    ``count_rna_spliced_boundary`` is the certified-RNA crossings per BOUNDARY — molecules that crossed
     contiguously having spliced elsewhere; `chain_boundary_deconv` adds the whole of it to ``rna_mass``
     (``rna = (1−g)·unspliced + spliced``), and `assemble_priors` withholds it from the RNA prior count,
     since a spliced fragment is guaranteed-RNA in the EM. There is no REGION twin, structurally: a
@@ -709,11 +709,11 @@ def _result(
     region_eff_gdna, region_eff_rna = region_eff
     boundary_eff_gdna, boundary_eff_rna = boundary_eff
     return CalibrationResult(
-        mass_gdna_region=regions.gdna_mass,
-        mass_rna_region=regions.rna_mass,
-        mass_gdna_boundary=boundaries.gdna_mass,
-        mass_rna_boundary=boundaries.rna_mass,
-        mass_rna_spliced_boundary=np.asarray(
+        count_gdna_region=regions.gdna_mass,
+        count_rna_region=regions.rna_mass,
+        count_gdna_boundary=boundaries.gdna_mass,
+        count_rna_boundary=boundaries.rna_mass,
+        count_rna_spliced_boundary=np.asarray(
             substrate.boundary_spliced.count, dtype=np.float64
         ).sum(axis=1),
         boundary_mass_per_crossing=substrate.boundary_unspliced.mass_per_crossing,

@@ -153,11 +153,11 @@ def _uniform_library(region_len, rho_g, rho_r, pmf_g, pmf_r) -> CalibrationResul
     _n_g, cont_g, cross_g, _m_g = _enumerate(region_len, int(np.argmax(pmf_g)))
     _n_r, cont_r, cross_r, _m_r = _enumerate(region_len, int(np.argmax(pmf_r)))
     return CalibrationResult(
-        mass_gdna_region=rho_g * cont_g,
-        mass_rna_region=rho_r * cont_r,
-        mass_gdna_boundary=rho_g * cross_g,
-        mass_rna_boundary=rho_r * cross_r,
-        mass_rna_spliced_boundary=np.zeros(ne, dtype=np.float64),
+        count_gdna_region=rho_g * cont_g,
+        count_rna_region=rho_r * cont_r,
+        count_gdna_boundary=rho_g * cross_g,
+        count_rna_boundary=rho_r * cross_r,
+        count_rna_spliced_boundary=np.zeros(ne, dtype=np.float64),
         boundary_mass_per_crossing=_mass_per_crossing(region_len, rho_g, rho_r, pmf_g, pmf_r),
         count_rna_sj=np.zeros(0, dtype=np.float64),
         boundary_spliced_mass_per_crossing=np.ones_like(
@@ -463,7 +463,7 @@ def test_mass_on_a_zero_opportunity_object_STILL_COUNTS_because_a_count_has_no_d
     tiling = [50] * 4
     cal = _zero_rna_opportunity(_uniform_library(tiling, 0.03, 0.0, pmf_g, pmf_r))
     # the difference from the test above: put REAL mass on the zero-opportunity RNA objects
-    stray = dataclasses.replace(cal, mass_rna_region=np.full(4, 2.5))
+    stray = dataclasses.replace(cal, count_rna_region=np.full(4, 2.5))
     regions, loci = _regions_tiling(tiling), _one_locus(int(np.sum(tiling)))
     p = assemble_priors(stray, regions, loci)
     assert np.all(np.isfinite(p.rna_prior_count)), "a floored divisor produced a non-finite prior"
@@ -477,5 +477,5 @@ def _zero_rna_opportunity(cal: CalibrationResult) -> CalibrationResult:
     return dataclasses.replace(
         cal,
         rna_boundary_eff_len=np.zeros_like(cal.rna_boundary_eff_len),
-        mass_rna_boundary=np.zeros_like(cal.mass_rna_boundary),
+        count_rna_boundary=np.zeros_like(cal.count_rna_boundary),
     )

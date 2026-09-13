@@ -154,11 +154,11 @@ def test_the_neighbour_errors_are_ADJACENT_CHAIN_SLOTS_not_adjacent_objects(meas
     kind = np.asarray(chain.kind)
     obj_idx = np.asarray(chain.obj_idx, dtype=np.int64)
 
-    boundary_err = np.asarray(m.arms["pass0"].mass_gdna_boundary, np.float64) - np.asarray(
-        m.truth.mass_gdna_boundary, np.float64
+    boundary_err = np.asarray(m.arms["pass0"].count_gdna_boundary, np.float64) - np.asarray(
+        m.truth.count_gdna_boundary, np.float64
     )
-    region_err = np.asarray(m.arms["pass0"].mass_gdna_region, np.float64) - np.asarray(
-        m.truth.mass_gdna_region, np.float64
+    region_err = np.asarray(m.arms["pass0"].count_gdna_region, np.float64) - np.asarray(
+        m.truth.count_gdna_region, np.float64
     )
 
     checked = differed = 0

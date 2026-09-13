@@ -104,12 +104,12 @@ def boundary_share(payload) -> np.ndarray:
 def assemble_priors_mass(calibration, region_arrays, multi_loci, share, eff_len_source):
     """The prior as a conserved fragment count, with no density conversion::
 
-        a_g(locus) = Sum_r share(r) * mass_gdna_region[r]
-                   + Sum_l share(l) * mass_gdna_boundary[l] * (boundary_unspliced_mass[l] / boundary_count[l])
+        a_g(locus) = Sum_r share(r) * count_gdna_region[r]
+                   + Sum_l share(l) * count_gdna_boundary[l] * (boundary_unspliced_mass[l] / boundary_count[l])
 
     and the same on the RNA masses, spliced withheld exactly as the shipped assembler withholds it.
 
-    ``mass_gdna_region[r]`` is already ``f_g(r) * contained_count[r]`` — one deposit per contained
+    ``count_gdna_region[r]`` is already ``f_g(r) * contained_count[r]`` — one deposit per contained
     fragment — so the region term needs no arithmetic; only the boundary term is rescaled, from the
     K-inflated incidence count onto the conserved mass. No density, span or support-weighted pooling
     enters: the count is in the bank, so nothing manufactures one.
@@ -142,17 +142,17 @@ def assemble_priors_mass(calibration, region_arrays, multi_loci, share, eff_len_
         )
         return np.maximum(region_part + boundary_part, 0.0)
 
-    # the same spliced withholding the shipped assembler does: mass_rna_boundary is spliced-INCLUSIVE by an
+    # the same spliced withholding the shipped assembler does: count_rna_boundary is spliced-INCLUSIVE by an
     # existing per-boundary conservation convention, so the certified fraction is subtracted before the
     # unspliced competition sees it.
     rna_boundary_unspliced = np.maximum(
-        np.asarray(calibration.mass_rna_boundary, np.float64)
-        - np.asarray(calibration.mass_rna_spliced_boundary, np.float64),
+        np.asarray(calibration.count_rna_boundary, np.float64)
+        - np.asarray(calibration.count_rna_spliced_boundary, np.float64),
         0.0,
     )
     return LocusPriors(
-        gdna_prior_count=component(calibration.mass_gdna_region, calibration.mass_gdna_boundary),
-        rna_prior_count=component(calibration.mass_rna_region, rna_boundary_unspliced),
+        gdna_prior_count=component(calibration.count_gdna_region, calibration.count_gdna_boundary),
+        rna_prior_count=component(calibration.count_rna_region, rna_boundary_unspliced),
         gdna_eff_len=np.asarray(eff_len_source.gdna_eff_len, np.float64).copy(),
     )
 

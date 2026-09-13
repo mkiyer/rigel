@@ -98,12 +98,12 @@ def test_oracle_override_conserves_mass_on_EACH_AXIS_SEPARATELY(oracle_scenario,
 
     # REGION axis: a region's contained population holds no spliced molecule, so its total is one bank.
     np.testing.assert_allclose(
-        ov["mass_gdna_region"] + ov["mass_rna_region"],
+        ov["count_gdna_region"] + ov["count_rna_region"],
         np.asarray(full.region_contained.count, np.float64).sum(1),
     )
-    # BOUNDARY axis: unspliced + spliced, because mass_rna_boundary is spliced-inclusive.
+    # BOUNDARY axis: unspliced + spliced, because count_rna_boundary is spliced-inclusive.
     np.testing.assert_allclose(
-        ov["mass_gdna_boundary"] + ov["mass_rna_boundary"],
+        ov["count_gdna_boundary"] + ov["count_rna_boundary"],
         np.asarray(full.boundary_unspliced.count, np.float64).sum(1)
         + np.asarray(full.boundary_spliced.count, np.float64).sum(1),
     )
@@ -130,11 +130,11 @@ def test_the_oracle_result_is_a_VALID_CalibrationResult(oracle_scenario, tmp_pat
     ov = orc.override_masses(ra)
     n, e, j = orc.full.n_regions, orc.full.n_boundaries, orc.full.n_sj
     blank = CalibrationResult(
-        mass_gdna_region=np.zeros(n),
-        mass_rna_region=np.zeros(n),
-        mass_gdna_boundary=np.zeros(e),
-        mass_rna_boundary=np.zeros(e),
-        mass_rna_spliced_boundary=np.zeros(e),
+        count_gdna_region=np.zeros(n),
+        count_rna_region=np.zeros(n),
+        count_gdna_boundary=np.zeros(e),
+        count_rna_boundary=np.zeros(e),
+        count_rna_spliced_boundary=np.zeros(e),
         # GEOMETRY, not a split: the mean conserved fragment-mass one crossing carries. 1.0 is the
         # identity — a boundary whose flanks both exceed every fragment length, where an incidence IS
         # a fragment — so a fixture that does not exercise K-inflation states it explicitly.

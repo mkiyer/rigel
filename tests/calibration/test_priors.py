@@ -63,15 +63,15 @@ def _result(
         ez.copy() if boundary_eff is None else np.asarray(boundary_eff, dtype=np.float64)
     )
     return CalibrationResult(
-        mass_gdna_region=ng,
-        mass_rna_region=np.asarray(region_r, dtype=np.float64),
-        mass_gdna_boundary=ez.copy()
+        count_gdna_region=ng,
+        count_rna_region=np.asarray(region_r, dtype=np.float64),
+        count_gdna_boundary=ez.copy()
         if boundary_g is None
         else np.asarray(boundary_g, dtype=np.float64),
-        mass_rna_boundary=ez.copy()
+        count_rna_boundary=ez.copy()
         if boundary_r is None
         else np.asarray(boundary_r, dtype=np.float64),
-        mass_rna_spliced_boundary=(
+        count_rna_spliced_boundary=(
             ez.copy()
             if boundary_spliced is None
             else np.asarray(boundary_spliced, dtype=np.float64)
@@ -232,8 +232,8 @@ def test_every_OBJECT_has_the_same_density_under_a_uniform_field():
     boundary_eff = np.array([120.0, 120.0])
     rho = 0.02
     cal = _uniform_field(region_eff, boundary_eff, rho)
-    np.testing.assert_allclose(cal.mass_gdna_region / cal.gdna_region_eff_len, rho, rtol=1e-9)
-    np.testing.assert_allclose(cal.mass_gdna_boundary / cal.gdna_boundary_eff_len, rho, rtol=1e-9)
+    np.testing.assert_allclose(cal.count_gdna_region / cal.gdna_region_eff_len, rho, rtol=1e-9)
+    np.testing.assert_allclose(cal.count_gdna_boundary / cal.gdna_boundary_eff_len, rho, rtol=1e-9)
 
 
 # --- mass / projection (independent of the support choice) ----------------------------------------
@@ -288,7 +288,7 @@ def test_gdna_mass_conservation_regions_plus_boundaries():
         cal.boundary_mass_per_crossing, 1.0
     )  # ...the reason it coincides, pinned
     np.testing.assert_allclose(
-        priors.gdna_prior_count.sum(), cal.mass_gdna_region.sum() + cal.mass_gdna_boundary.sum()
+        priors.gdna_prior_count.sum(), cal.count_gdna_region.sum() + cal.count_gdna_boundary.sum()
     )
     assert contended_boundaries(ra, [_ml(0, [(0, 0, 300)])], 1).size == 0  # nothing double-claimed
 
@@ -589,7 +589,7 @@ def test_gdna_eff_len_factor_one_under_uniform_gdna_with_kde_firing():
     rho = 2.0
     cal = _uniform_field(np.full(6, 100.0), np.full(5, 50.0), rho)
     assert _global_reference_density(
-        cal.mass_gdna_region, cal.gdna_region_eff_len
+        cal.count_gdna_region, cal.gdna_region_eff_len
     ) == pytest.approx(rho)
     span = 6 * 100.0 + 5 * 50.0  # 850
     np.testing.assert_allclose(

@@ -159,8 +159,8 @@ def run_arm(arm, arms, c):
         CALMOD.TransferPolicy = TransferPolicy
     kind, obj = c["kind"], c["obj"]
     est = np.zeros(kind.shape[0])
-    est[kind == REGION] = np.asarray(res.mass_gdna_region, float)[obj[kind == REGION]]
-    est[kind == BOUNDARY] = np.asarray(res.mass_gdna_boundary, float)[obj[kind == BOUNDARY]]
+    est[kind == REGION] = np.asarray(res.count_gdna_region, float)[obj[kind == REGION]]
+    est[kind == BOUNDARY] = np.asarray(res.count_gdna_boundary, float)[obj[kind == BOUNDARY]]
     return est
 
 

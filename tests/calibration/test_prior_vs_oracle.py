@@ -164,7 +164,7 @@ def test_the_noop_arm_is_byte_identical_and_the_lever_resolves_a_PICOFRAGMENT(me
     not deconvolution error, and that bug would BE the headline number.
 
     The perturbation site has to be chosen by perturbation, and that is the gate's real content.
-    Nudging ``argmax(mass_gdna_region)`` reads "no effect", because on any genome the largest gDNA
+    Nudging ``argmax(count_gdna_region)`` reads "no effect", because on any genome the largest gDNA
     region is intergenic and ``_project_regions_to_loci`` drops every region overlapping no locus —
     correct behaviour, and it would retire the gate as broken (TRAPS: could-the-arm-have-fired). So
     this asserts both directions: in-locus moves, intergenic does not.
@@ -180,7 +180,7 @@ def test_the_noop_arm_is_byte_identical_and_the_lever_resolves_a_PICOFRAGMENT(me
 
     sig = np.asarray(measured.region_arrays.signature).astype(np.int64)
     in_locus = (sig & _RNA_SIGNATURE_BITS) != 0
-    mass = np.asarray(measured.calibration.mass_gdna_region, np.float64)
+    mass = np.asarray(measured.calibration.count_gdna_region, np.float64)
     inside = int(np.argmax(np.where(in_locus, mass, -1.0)))
     outside = int(np.argmax(np.where(~in_locus, mass, -1.0)))
     assert mass[inside] > 0.0 and mass[outside] > 0.0, (
@@ -189,7 +189,7 @@ def test_the_noop_arm_is_byte_identical_and_the_lever_resolves_a_PICOFRAGMENT(me
     )
 
     base = measured.priors["P"]
-    assert _moved(_nudged_prior(measured, "mass_gdna_region", inside, 1e-12), base), (
+    assert _moved(_nudged_prior(measured, "count_gdna_region", inside, 1e-12), base), (
         "1e-12 fragments at an in-locus region changed no prior — the lever cannot resolve an override"
     )
     # The intergenic direction is asserted on the COUNT fields only. The locus projection drops
@@ -199,7 +199,7 @@ def test_the_noop_arm_is_byte_identical_and_the_lever_resolves_a_PICOFRAGMENT(me
     #   assumption about probe locations") and SNAPS to a real region's density, which can be the
     #   nudged intergenic region itself. Asserting all of ``PRIOR_FIELDS`` here conflated the two
     #   paths and would hold only while the snap happened to land somewhere else.
-    nudged_out = _nudged_prior(measured, "mass_gdna_region", outside, 1.0)
+    nudged_out = _nudged_prior(measured, "count_gdna_region", outside, 1.0)
     count_moved = any(
         not np.array_equal(getattr(nudged_out, f), getattr(base, f))
         for f in ("gdna_prior_count", "rna_prior_count")
@@ -453,13 +453,13 @@ def test_at_zero_gDNA_the_ORACLE_prior_is_identically_zero_and_the_shipped_one_i
 
     cal = _rebuild_calibration(measured_zero)
     truth = measured_zero.oracle.override_masses(measured_zero.region_arrays)
-    seeded = np.array(truth["mass_gdna_region"], copy=True)
+    seeded = np.array(truth["count_gdna_region"], copy=True)
     # the largest RNA region — one with real opportunity, so the mass is not dropped by
     # ``_mass_where_there_is_opportunity``
-    i = int(np.argmax(np.asarray(truth["mass_rna_region"])))
+    i = int(np.argmax(np.asarray(truth["count_rna_region"])))
     seeded[i] = 1.0
     with_one = PV.PRIORS.assemble_priors(
-        dataclasses.replace(cal, **{**truth, "mass_gdna_region": seeded}),
+        dataclasses.replace(cal, **{**truth, "count_gdna_region": seeded}),
         measured_zero.region_arrays,
         measured_zero.multi_loci,
     )

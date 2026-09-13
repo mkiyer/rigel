@@ -183,8 +183,8 @@ def check_same_basis(name: str, arm, full_substrate) -> None:
         axis=1
     ) + np.asarray(full_substrate.boundary_spliced.count, np.float64).sum(axis=1)
     for axis, expect in (("region", region_total), ("boundary", boundary_total)):
-        got = np.asarray(getattr(arm, f"mass_gdna_{axis}"), np.float64) + np.asarray(
-            getattr(arm, f"mass_rna_{axis}"), np.float64
+        got = np.asarray(getattr(arm, f"count_gdna_{axis}"), np.float64) + np.asarray(
+            getattr(arm, f"count_rna_{axis}"), np.float64
         )
         if got.shape != expect.shape or not np.allclose(got, expect, rtol=1e-9, atol=1e-6):
             worst = int(np.argmax(np.abs(got - expect))) if got.shape == expect.shape else -1
@@ -456,8 +456,8 @@ def library_f_gdna(result) -> float:
     it touched). Both axes, always: summing one axis reports a library's gDNA as a fraction of part
     of itself.
     """
-    g = float(np.asarray(result.mass_gdna_region).sum() + np.asarray(result.mass_gdna_boundary).sum())
-    r = float(np.asarray(result.mass_rna_region).sum() + np.asarray(result.mass_rna_boundary).sum())
+    g = float(np.asarray(result.count_gdna_region).sum() + np.asarray(result.count_gdna_boundary).sum())
+    r = float(np.asarray(result.count_rna_region).sum() + np.asarray(result.count_rna_boundary).sum())
     return g / (g + r) if (g + r) > 0 else 0.0
 
 
@@ -585,10 +585,10 @@ def measure_condition(
     def score_all(arm, masks, names):
         out = {}
         for axis in AXES:
-            g = getattr(arm, f"mass_gdna_{axis}")
-            r = getattr(arm, f"mass_rna_{axis}")
-            tg = getattr(truth, f"mass_gdna_{axis}")
-            tr = getattr(truth, f"mass_rna_{axis}")
+            g = getattr(arm, f"count_gdna_{axis}")
+            r = getattr(arm, f"count_rna_{axis}")
+            tg = getattr(truth, f"count_gdna_{axis}")
+            tr = getattr(truth, f"count_rna_{axis}")
             per = {"ALL": score_axis(g, r, tg, tr)}
             for name in names:
                 per[name] = score_axis(g, r, tg, tr, select=masks[axis][name])
@@ -614,8 +614,8 @@ def measure_condition(
     cross = {}
     p0 = arms["pass0"]
     for axis in AXES:
-        g, r = getattr(p0, f"mass_gdna_{axis}"), getattr(p0, f"mass_rna_{axis}")
-        tg, tr = getattr(truth, f"mass_gdna_{axis}"), getattr(truth, f"mass_rna_{axis}")
+        g, r = getattr(p0, f"count_gdna_{axis}"), getattr(p0, f"count_rna_{axis}")
+        tg, tr = getattr(truth, f"count_gdna_{axis}"), getattr(truth, f"count_rna_{axis}")
         cross[axis] = {
             (i, s): score_axis(g, r, tg, tr, select=info_masks[axis][i] & solver_masks[axis][s])
             for i in INFO_CLASSES
@@ -731,7 +731,7 @@ def report(measurements: list[ConditionMeasurement]) -> None:
         print(
             f"   TRUE mass: region contained {_fmt(true_contained)}   "
             f"boundary crossing {_fmt(true_crossing)}   "
-            f"true gDNA region {_fmt(float(np.asarray(m.truth.mass_gdna_region).sum()))}"
+            f"true gDNA region {_fmt(float(np.asarray(m.truth.count_gdna_region).sum()))}"
         )
         for axis in AXES:
             print(f"   {axis.upper():<5} {'arm':<26} {'net err':>13} {'Σ|err|':>13} "

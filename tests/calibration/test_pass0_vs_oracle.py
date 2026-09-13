@@ -277,7 +277,7 @@ def test_T_totals_equal_the_full_payload_PER_AXIS(measured, toy):
     Per axis, never pooled: ``n_regions`` and ``n_boundaries`` differ by only ``n_refs``, so an error on
     one axis cancelling an equal and opposite one on the other is not far-fetched.
 
-    PERTURBATION: drop the spliced term from ``mass_rna_boundary``. That is the exact schema mistake
+    PERTURBATION: drop the spliced term from ``count_rna_boundary``. That is the exact schema mistake
     ``override_masses`` exists to avoid — ``chain_boundary_deconv`` builds ``rna = (1−f_g)·unspliced +
     spliced``, so a T without the spliced term is on a different basis from every P.
     """
@@ -288,7 +288,7 @@ def test_T_totals_equal_the_full_payload_PER_AXIS(measured, toy):
     spliced = np.asarray(full.boundary_spliced.count, np.float64).sum(axis=1)
     assert spliced.sum() > 0, "the toy must EXERCISE the spliced bank or this perturbation is inert"
     broken = dataclasses.replace(
-        measured.truth, mass_rna_boundary=measured.truth.mass_rna_boundary - spliced
+        measured.truth, count_rna_boundary=measured.truth.count_rna_boundary - spliced
     )
     with pytest.raises(ValueError, match="boundary"):
         P0.check_same_basis("T", broken, full)
@@ -313,17 +313,17 @@ def test_P_and_T_are_on_the_SAME_BASIS_per_object(measured, toy):
     p = measured.arms["pass0"]
     with pytest.raises(ValueError):
         P0.score_axis(
-            p.mass_gdna_region,
-            p.mass_rna_region,
-            measured.truth.mass_gdna_boundary,
-            measured.truth.mass_rna_boundary,
+            p.count_gdna_region,
+            p.count_rna_region,
+            measured.truth.count_gdna_boundary,
+            measured.truth.count_rna_boundary,
         )
     with pytest.raises(ValueError):
         P0.score_axis(
-            p.mass_gdna_region * 2.0,
-            p.mass_rna_region * 2.0,
-            measured.truth.mass_gdna_region,
-            measured.truth.mass_rna_region,
+            p.count_gdna_region * 2.0,
+            p.count_rna_region * 2.0,
+            measured.truth.count_gdna_region,
+            measured.truth.count_rna_region,
         )
 
 
@@ -345,14 +345,14 @@ def test_refit_iters_zero_reproduces_debug_belief_pass0(measured, toy):
     debug = measured.debug_final
     from_debug = chain_region_deconv(debug["chain"], debug["belief_pass0"], substrate).gdna_mass
 
-    np.testing.assert_array_equal(measured.arms["pass0"].mass_gdna_region, from_debug)
+    np.testing.assert_array_equal(measured.arms["pass0"].count_gdna_region, from_debug)
 
     one = P0.calibrate_arm(
         measured.payload,
         measured.calibrate_kwargs,
         dataclasses.replace(CalibrationConfig(), calib_refit_iters=1),
     )
-    assert not np.array_equal(one.mass_gdna_region, from_debug), (
+    assert not np.array_equal(one.count_gdna_region, from_debug), (
         "one refit iteration left the answer byte-identical: the lever this instrument depends on "
         "does nothing, so the pass-0/final distinction it reports is fictional."
     )
@@ -422,7 +422,7 @@ def test_an_object_with_no_mass_is_ABSENT_not_a_confident_zero(measured):
     # without, or the boundary above proves nothing about the path the instrument actually runs.
     region = measured.scores["pass0"]["region"]["ALL"]
     live = (
-        np.asarray(measured.truth.mass_gdna_region) + np.asarray(measured.truth.mass_rna_region)
+        np.asarray(measured.truth.count_gdna_region) + np.asarray(measured.truth.count_rna_region)
     ) > 0
     assert region.n_scored == int(live.sum())
     assert (~live).sum() > 0, "the toy has no empty region; the gate would be vacuous"

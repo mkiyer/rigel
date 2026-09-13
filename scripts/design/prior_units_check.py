@@ -45,17 +45,17 @@ def _unspliced_fragments(cal) -> float:
     therefore NOT a fragment count until it is multiplied by ``q``. Summing the raw crossing mass here
     would inflate the denominator and make ``prior/unspl`` read low for a reason that is arithmetic.
 
-    ``mass_rna_spliced_boundary`` is subtracted for the reason ``assemble_priors`` subtracts it: a
+    ``count_rna_spliced_boundary`` is subtracted for the reason ``assemble_priors`` subtracts it: a
     spliced fragment has no gDNA candidate in the EM, so it is not part of the split the prior arbitrates.
     """
     q = np.asarray(cal.boundary_mass_per_crossing, np.float64)
-    crossing = np.asarray(cal.mass_gdna_boundary, np.float64) + np.maximum(
-        np.asarray(cal.mass_rna_boundary, np.float64)
-        - np.asarray(cal.mass_rna_spliced_boundary, np.float64),
+    crossing = np.asarray(cal.count_gdna_boundary, np.float64) + np.maximum(
+        np.asarray(cal.count_rna_boundary, np.float64)
+        - np.asarray(cal.count_rna_spliced_boundary, np.float64),
         0.0,
     )
-    contained = np.asarray(cal.mass_gdna_region, np.float64) + np.asarray(
-        cal.mass_rna_region, np.float64
+    contained = np.asarray(cal.count_gdna_region, np.float64) + np.asarray(
+        cal.count_rna_region, np.float64
     )
     return float(contained.sum() + (crossing * q).sum())
 

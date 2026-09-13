@@ -58,11 +58,11 @@ def _cal(region_arrays: RegionArrays, density, region_eff, boundary_eff) -> Cali
     z = np.zeros(n, dtype=np.float64)
     ez = np.zeros(lo.shape[0], dtype=np.float64)
     return CalibrationResult(
-        mass_gdna_region=d * region_eff,
-        mass_rna_region=z.copy(),
-        mass_gdna_boundary=d[lo] * boundary_eff,
-        mass_rna_boundary=ez.copy(),
-        mass_rna_spliced_boundary=ez.copy(),
+        count_gdna_region=d * region_eff,
+        count_rna_region=z.copy(),
+        count_gdna_boundary=d[lo] * boundary_eff,
+        count_rna_boundary=ez.copy(),
+        count_rna_spliced_boundary=ez.copy(),
         # GEOMETRY, not a split: the mean conserved fragment-mass one crossing carries. 1.0 is the
         # identity — a boundary whose flanks both exceed every fragment length, where an incidence IS
         # a fragment — so a fixture that does not exercise K-inflation states it explicitly.
@@ -403,7 +403,7 @@ def test_a_crossing_object_under_a_uniform_field_reads_RHO(multiexon_index):
     cal = _field_cal(ra, np.full(ra.n_regions, rho))
     # Read straight off the BOUNDARY axis: the incidence helper emits a boundary index, so a
     # boundary's density is read where it lives rather than through a region-shaped copy.
-    boundary_mass = np.asarray(cal.mass_gdna_boundary, dtype=np.float64)
+    boundary_mass = np.asarray(cal.count_gdna_boundary, dtype=np.float64)
     boundary_support = np.asarray(cal.gdna_boundary_eff_len, dtype=np.float64)
     live = boundary_support > 0.0
     assert live.any(), "the fixture produced no boundaries"
@@ -428,7 +428,7 @@ def test_a_boundary_below_the_reference_density_CONTRACTS_rather_than_clipping(m
     dens[-1] = rho_ref  # the last region anchors ρ_ref and is no boundary's LEFT flank
     cal = _field_cal(ra, dens)
 
-    boundary_mass = np.asarray(cal.mass_gdna_boundary, dtype=np.float64)
+    boundary_mass = np.asarray(cal.count_gdna_boundary, dtype=np.float64)
     boundary_support = np.asarray(cal.gdna_boundary_eff_len, dtype=np.float64)
     band = (boundary_support > 0.0) & (boundary_mass > 0.0)
     assert band.any()

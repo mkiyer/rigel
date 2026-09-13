@@ -348,7 +348,7 @@ layering, the gates and the tolerance instrument, the docs. Four items remain, i
 1. DONE 2026-09-13. the stale comment in `pipeline.py` above the second pass's `build_fl_models` (the text "The SAME
    de-tilted RNA pool the calibrator will read": the second pass's fl models are pass one's; the lift's
    docstring above it has it right) — three lines, the suite;
-2. `mass_*_boundary` → `count_*_boundary` on `CalibrationResult` (crossing incidences, 23 files) — a rename
+2. DONE 2026-09-13, EXTENDED to the two region arrays: four instruments build the field name from the axis (`f"…_{axis}"`), so the prefix must be one word — `count_<population>_<axis>` throughout, the form `count_rna_sj` already had. `mass_*_boundary` → `count_*_boundary` on `CalibrationResult` (crossing incidences, 23 files) — a rename
    gated by `rename_identity.py --check` (content, never names), the suite, and a golden regeneration that
    must show only column names moving;
 3. the wave-3 frame migration: all six bank-readers still read pass one's `cache.payload` and none calls

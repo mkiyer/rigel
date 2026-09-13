@@ -556,11 +556,11 @@ class OracleTruth:
         )
         spliced_boundary = total(full, "boundary_spliced")
         return dict(
-            mass_gdna_region=total(subs["gdna"], "region_contained"),
-            mass_rna_region=rna_region,
-            mass_gdna_boundary=total(subs["gdna"], "boundary_unspliced"),
-            mass_rna_boundary=rna_boundary_unspliced + spliced_boundary,
-            mass_rna_spliced_boundary=spliced_boundary,
+            count_gdna_region=total(subs["gdna"], "region_contained"),
+            count_rna_region=rna_region,
+            count_gdna_boundary=total(subs["gdna"], "boundary_unspliced"),
+            count_rna_boundary=rna_boundary_unspliced + spliced_boundary,
+            count_rna_spliced_boundary=spliced_boundary,
             count_rna_sj=total(full, "sj"),
         )
 
@@ -621,8 +621,8 @@ def _main():
         sj=build_sj_geometry_arrays(index),
         boundary_flags=build_boundary_flags_array(index),
     )
-    cal_g = np.asarray(cal.mass_gdna_region, np.float64)
-    cal_r = np.asarray(cal.mass_rna_region, np.float64)
+    cal_g = np.asarray(cal.count_gdna_region, np.float64)
+    cal_r = np.asarray(cal.count_rna_region, np.float64)
     # cal contained total vs the payload's contained count (a region holds no spliced molecule)
     print(
         f"\ncal contained total (g+r)={(cal_g + cal_r).sum():,.0f}  vs TRUE contained={(G + R).sum():,.0f}"

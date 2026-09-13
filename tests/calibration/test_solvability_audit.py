@@ -252,8 +252,8 @@ def test_the_ladders_FINAL_rung_IS_the_arm_it_claims_to_be(audited):
     PERTURBATION: the rungs must not all be identical, or the ladder cannot attribute anything.
     """
     m, a, _ = audited
-    g = np.asarray(m.arms["pass0"].mass_gdna_region, np.float64)
-    r = np.asarray(m.arms["pass0"].mass_rna_region, np.float64)
+    g = np.asarray(m.arms["pass0"].count_gdna_region, np.float64)
+    r = np.asarray(m.arms["pass0"].count_rna_region, np.float64)
     frac, _ = P0.object_fractions(g, r)
     live = a["live"]
     np.testing.assert_allclose(a["ladder"]["f_g"][live], frac[live], rtol=0, atol=1e-12)

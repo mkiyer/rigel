@@ -383,8 +383,8 @@ def zero_controls(result, slots: dict) -> dict:
     mass = np.asarray(slots["count"], np.float64)
     is_r = kind == REGION
     est = np.zeros(kind.shape[0])
-    est[is_r] = np.asarray(result.mass_gdna_region, np.float64)[obj[is_r]]
-    est[~is_r] = np.asarray(result.mass_gdna_boundary, np.float64)[obj[~is_r]]
+    est[is_r] = np.asarray(result.count_gdna_region, np.float64)[obj[is_r]]
+    est[~is_r] = np.asarray(result.count_gdna_boundary, np.float64)[obj[~is_r]]
     err = np.abs(est - n_gdna)
     zg = (n_gdna <= 0.0) & (mass > 0.0)
     zr = (n_rna <= 0.0) & (n_gdna > 0.0)

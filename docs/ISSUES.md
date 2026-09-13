@@ -311,7 +311,6 @@ Each its own commit, none moving the 0.8.0 metric:
   `calibration_truth_ab`) migrate as touched;
 - the index's duplicate map as an alias map `dropped_t_id → kept_t_id` (an index rebuild, no panel re-scan —
   verify with `rescan_panels.py`; `reach` is covered by no other hash);
-- `mass_*_boundary` → `count_*_boundary` (crossing incidences);
 - restore the moment tests deleted with the length channel;
 
 ### oracle-effective-length-diagnostic
@@ -348,7 +347,7 @@ space would break it silently; `_deconvolved_gdna_counts` carries the derivation
 
 ### pure-rna-mirror-asymmetry
 `priority: parked · kind: defect · 2026-08`
-Two exact per-fragment mirrors of a pure-RNA library deconvolve differently in `mass_gdna_region` by a few
+Two exact per-fragment mirrors of a pure-RNA library deconvolve differently in `count_gdna_region` by a few
 percent, neither boundary-only nor monotone in strandedness. An R1-sense library is simulable; no instrument
 yet.
 

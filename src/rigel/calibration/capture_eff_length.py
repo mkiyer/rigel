@@ -208,7 +208,7 @@ def transcript_capture_eff_lengths(
 
     * a per-region CONTAINED region at effective support ``S_r = E[max(0, L_r − ℓ)]`` (mass ``m_r``);
     * a per-interior-BOUNDARY crossing object at support ``S_e = gdna_boundary_eff_len[e] = E_f[w-1]``
-      (mass ``m_e = mass_gdna_boundary[e]``), for boundaries the transcript crosses without a splice,
+      (mass ``m_e = count_gdna_boundary[e]``), for boundaries the transcript crosses without a splice,
       i.e. interior to an exon;
     * a per-SPLICE-SJ crossing object (multi-exon mRNA), same crossing support ``S_j`` but with its
       mass imputed from the two flanking exon densities, ``m_j = 0.5*(rho_left + rho_right)*S_j``.
@@ -248,12 +248,12 @@ def transcript_capture_eff_lengths(
     # per-region CONTAINED object (mass, effective support) and per-interior-BOUNDARY crossing object. The
     # boundary between region r and r+1 is keyed to r — the SAME objects the gDNA component uses
     # (priors._gdna_region_arrays).
-    contained_m = np.asarray(calibration.mass_gdna_region, dtype=np.float64)
+    contained_m = np.asarray(calibration.count_gdna_region, dtype=np.float64)
     contained_S = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9)
-    contained_ev = contained_m + np.asarray(calibration.mass_rna_region, dtype=np.float64)
+    contained_ev = contained_m + np.asarray(calibration.count_rna_region, dtype=np.float64)
     # The per-BOUNDARY crossing objects, on their own axis. `inc_bnd` is a BOUNDARY index, so these are
     # indexed directly — no region-shaped copy, and nothing that reads as an attribution to a region.
-    boundary_m = np.asarray(calibration.mass_gdna_boundary, dtype=np.float64)
+    boundary_m = np.asarray(calibration.count_gdna_boundary, dtype=np.float64)
     boundary_S = np.maximum(np.asarray(calibration.gdna_boundary_eff_len, dtype=np.float64), 0.0)
     # A SPLICE sj is not a contiguous boundary, so it has no entry on the boundary axis — but it is
     # still a crossing, and gDNA's crossing divisor is the same everywhere (UNBOUNDED_REACH both

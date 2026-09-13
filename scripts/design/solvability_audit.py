@@ -151,10 +151,10 @@ def audit(m, *, axis: str = "region", config=None) -> dict:
         name: P0._project(mask, chain, n_regions, n_boundaries)[axis] for name, mask in slots.items()
     }
 
-    g_p = np.asarray(getattr(m.arms["pass0"], f"mass_gdna_{axis}"), np.float64)
-    r_p = np.asarray(getattr(m.arms["pass0"], f"mass_rna_{axis}"), np.float64)
-    g_t = np.asarray(getattr(m.truth, f"mass_gdna_{axis}"), np.float64)
-    r_t = np.asarray(getattr(m.truth, f"mass_rna_{axis}"), np.float64)
+    g_p = np.asarray(getattr(m.arms["pass0"], f"count_gdna_{axis}"), np.float64)
+    r_p = np.asarray(getattr(m.arms["pass0"], f"count_rna_{axis}"), np.float64)
+    g_t = np.asarray(getattr(m.truth, f"count_gdna_{axis}"), np.float64)
+    r_t = np.asarray(getattr(m.truth, f"count_rna_{axis}"), np.float64)
     total = g_t + r_t
     live = total > 0
     f_pred, f_true = P0.object_fractions(g_p, r_p)[0], P0.object_fractions(g_t, r_t)[0]

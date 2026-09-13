@@ -122,7 +122,7 @@ def ruler(calibration, region_arrays, index, fl_eff) -> tuple[RulerScore, np.nda
     return (
         RulerScore(
             rho_ref=_global_reference_density(
-                np.asarray(calibration.mass_gdna_region, np.float64),
+                np.asarray(calibration.count_gdna_region, np.float64),
                 np.maximum(np.asarray(calibration.gdna_region_eff_len, np.float64), 1e-9),
             ),
             total_len=float(np.asarray(eff, np.float64).sum()),
@@ -193,10 +193,10 @@ def vertex_profile(p_arm, o_arm, axis: str) -> list[dict]:
     close would confound it. Objects with no true mass are excluded: they have no ``f_g`` to be right
     or wrong about.
     """
-    gp = np.asarray(getattr(p_arm, f"mass_gdna_{axis}"), np.float64)
-    rp = np.asarray(getattr(p_arm, f"mass_rna_{axis}"), np.float64)
-    go = np.asarray(getattr(o_arm, f"mass_gdna_{axis}"), np.float64)
-    ro = np.asarray(getattr(o_arm, f"mass_rna_{axis}"), np.float64)
+    gp = np.asarray(getattr(p_arm, f"count_gdna_{axis}"), np.float64)
+    rp = np.asarray(getattr(p_arm, f"count_rna_{axis}"), np.float64)
+    go = np.asarray(getattr(o_arm, f"count_gdna_{axis}"), np.float64)
+    ro = np.asarray(getattr(o_arm, f"count_rna_{axis}"), np.float64)
     total = go + ro
     live = total > 0.0
     f_true = np.where(live, go / np.maximum(total, 1e-12), np.nan)
@@ -255,10 +255,10 @@ def uniform_gdna_null(calibration):
         support = np.maximum(
             np.asarray(getattr(calibration, f"gdna_{axis}_eff_len"), np.float64), 1e-9
         )
-        mass = np.asarray(getattr(calibration, f"mass_gdna_{axis}"), np.float64)
+        mass = np.asarray(getattr(calibration, f"count_gdna_{axis}"), np.float64)
         total_support = float(support.sum())
         rho_bar = float(mass.sum()) / total_support if total_support > 0.0 else 0.0
-        out[f"mass_gdna_{axis}"] = rho_bar * support
+        out[f"count_gdna_{axis}"] = rho_bar * support
     return dataclasses.replace(calibration, **out)
 
 
@@ -373,22 +373,22 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
     }
     for axis in AXES:
         s = P0.score_axis(
-            getattr(p_arm, f"mass_gdna_{axis}"), getattr(p_arm, f"mass_rna_{axis}"),
-            getattr(o_arm, f"mass_gdna_{axis}"), getattr(o_arm, f"mass_rna_{axis}"),
+            getattr(p_arm, f"count_gdna_{axis}"), getattr(p_arm, f"count_rna_{axis}"),
+            getattr(o_arm, f"count_gdna_{axis}"), getattr(o_arm, f"count_rna_{axis}"),
         )
         row["axes"][axis] = dataclasses.asdict(s)
         # the full distribution, not just its sum. Objects with no mass at all are excluded: they
         # have no answer to get right, and folding them in puts most of a genome in the exact-0 bar.
-        gp = np.asarray(getattr(p_arm, f"mass_gdna_{axis}"), np.float64)
-        go = np.asarray(getattr(o_arm, f"mass_gdna_{axis}"), np.float64)
-        total = go + np.asarray(getattr(o_arm, f"mass_rna_{axis}"), np.float64)
+        gp = np.asarray(getattr(p_arm, f"count_gdna_{axis}"), np.float64)
+        go = np.asarray(getattr(o_arm, f"count_gdna_{axis}"), np.float64)
+        total = go + np.asarray(getattr(o_arm, f"count_rna_{axis}"), np.float64)
         live = total > 0.0
         row["axes"][axis]["hist"] = signed_histogram(gp[live] - go[live])
         # Δ_RNA ≡ −Δ_gDNA per object, because `check_same_basis` has just established that the two
         # arms carry the same per-object total. Recorded as a gate rather than left implicit: two
         # columns that are the same number would read as two independent measurements.
-        rp = np.asarray(getattr(p_arm, f"mass_rna_{axis}"), np.float64)
-        ro = np.asarray(getattr(o_arm, f"mass_rna_{axis}"), np.float64)
+        rp = np.asarray(getattr(p_arm, f"count_rna_{axis}"), np.float64)
+        ro = np.asarray(getattr(o_arm, f"count_rna_{axis}"), np.float64)
         row["axes"][axis]["rna_mirrors_gdna_max_dev"] = float(
             np.abs((rp - ro)[live] + (gp - go)[live]).max() if live.any() else 0.0
         )
@@ -710,11 +710,11 @@ def _toy_calibration(n_regions: int = 24, n_boundaries: int = 20, n_sj: int = 4,
     gr = rng.uniform(1.0, 9.0, n_regions)
     gb = rng.uniform(1.0, 9.0, n_boundaries)
     return CalibrationResult(
-        mass_gdna_region=gr,
-        mass_rna_region=rng.uniform(1.0, 9.0, n_regions),
-        mass_gdna_boundary=gb,
-        mass_rna_boundary=rng.uniform(1.0, 9.0, n_boundaries),
-        mass_rna_spliced_boundary=np.zeros(n_boundaries),
+        count_gdna_region=gr,
+        count_rna_region=rng.uniform(1.0, 9.0, n_regions),
+        count_gdna_boundary=gb,
+        count_rna_boundary=rng.uniform(1.0, 9.0, n_boundaries),
+        count_rna_spliced_boundary=np.zeros(n_boundaries),
         boundary_mass_per_crossing=ones_b.copy(),
         count_rna_sj=np.zeros(n_sj),
         boundary_spliced_mass_per_crossing=ones_b.copy(),
@@ -751,25 +751,25 @@ def self_test() -> int:
     cal = _toy_calibration()
 
     # ① score_axis against itself is exactly zero, and a one-ULP nudge makes it nonzero.
-    s = P0.score_axis(cal.mass_gdna_region, cal.mass_rna_region,
-                      cal.mass_gdna_region, cal.mass_rna_region)
+    s = P0.score_axis(cal.count_gdna_region, cal.count_rna_region,
+                      cal.count_gdna_region, cal.count_rna_region)
     check("score_axis(P, P) is exactly 0", s.abs_err == 0.0 and s.mwae == 0.0)
-    nudged = np.array(cal.mass_gdna_region, copy=True)
+    nudged = np.array(cal.count_gdna_region, copy=True)
     nudged[3] = np.nextafter(nudged[3], np.inf)
     # the RNA side moves the opposite way so the per-object total is preserved: score_axis refuses
     # two arms on different bases, and a basis refusal is not the perturbation under test.
-    rna_n = np.array(cal.mass_rna_region, copy=True)
+    rna_n = np.array(cal.count_rna_region, copy=True)
     rna_n[3] = np.nextafter(rna_n[3], -np.inf)
-    s1 = P0.score_axis(nudged, rna_n, cal.mass_gdna_region, cal.mass_rna_region)
+    s1 = P0.score_axis(nudged, rna_n, cal.count_gdna_region, cal.count_rna_region)
     check("score_axis resolves a ONE-ULP nudge", s1.abs_err > 0.0)
 
     # ② the noop comparator fires on a one-ULP nudge to an override array, and on the lengths alone.
     eff = np.linspace(100.0, 900.0, 16)
     check("noop comparator is clean on identical input",
           noop_differences(cal, cal, eff, eff) == [])
-    bad_cal = dataclasses.replace(cal, mass_gdna_region=nudged)
+    bad_cal = dataclasses.replace(cal, count_gdna_region=nudged)
     check("noop comparator resolves a ONE-ULP array nudge",
-          noop_differences(cal, bad_cal, eff, eff) == ["mass_gdna_region"])
+          noop_differences(cal, bad_cal, eff, eff) == ["count_gdna_region"])
     eff2 = np.array(eff, copy=True)
     eff2[5] = np.nextafter(eff2[5], np.inf)
     check("noop comparator resolves a ONE-ULP LENGTH nudge, arrays identical",
@@ -819,13 +819,13 @@ def self_test() -> int:
     # ⑤ the U null preserves the gDNA total per axis and flattens the field.
     u = uniform_gdna_null(cal)
     for axis in AXES:
-        before = float(np.asarray(getattr(cal, f"mass_gdna_{axis}")).sum())
-        after = float(np.asarray(getattr(u, f"mass_gdna_{axis}")).sum())
+        before = float(np.asarray(getattr(cal, f"count_gdna_{axis}")).sum())
+        after = float(np.asarray(getattr(u, f"count_gdna_{axis}")).sum())
         check(f"U preserves the gDNA total on the {axis} axis", np.isclose(before, after, rtol=1e-12))
-    rho_u = np.asarray(u.mass_gdna_region) / np.asarray(u.gdna_region_eff_len)
+    rho_u = np.asarray(u.count_gdna_region) / np.asarray(u.gdna_region_eff_len)
     check("U flattens the density field to a constant", np.allclose(rho_u, rho_u[0], rtol=1e-12))
     check("U leaves the RNA arrays untouched",
-          np.array_equal(np.asarray(u.mass_rna_region), np.asarray(cal.mass_rna_region)))
+          np.array_equal(np.asarray(u.count_rna_region), np.asarray(cal.count_rna_region)))
 
     # ⑥ the aggregate is a ratio of sums, not a mean of ratios. Two scores of very different mass
     #    make the two answers differ, which is what makes this a test rather than a tautology.
@@ -884,7 +884,7 @@ def self_test() -> int:
     g_true[10:20], r_true[10:20] = 50.0, 50.0  # truth f_g = 0.5  -> middle bucket
     g_true[20:30], r_true[20:30] = 100.0, 0.0  # truth f_g = 1.0  -> the vertex bucket
     # everything else stays massless and must be dropped entirely
-    o_toy = dataclasses.replace(cal_v, mass_gdna_region=g_true, mass_rna_region=r_true)
+    o_toy = dataclasses.replace(cal_v, count_gdna_region=g_true, count_rna_region=r_true)
     # a perfect arm: predictions equal to truth
     prof = vertex_profile(o_toy, o_toy, "region")
     check("vertex profile drops massless objects",
@@ -897,7 +897,7 @@ def self_test() -> int:
     g_short = g_true.copy()
     r_short = r_true.copy()
     g_short[20:30], r_short[20:30] = 80.0, 20.0  # pred f_g = 0.8 where truth is 1.0
-    p_toy = dataclasses.replace(cal_v, mass_gdna_region=g_short, mass_rna_region=r_short)
+    p_toy = dataclasses.replace(cal_v, count_gdna_region=g_short, count_rna_region=r_short)
     prof2 = vertex_profile(p_toy, o_toy, "region")
     check("a planted vertex shortfall lands in the VERTEX bucket",
           abs(prof2[-1]["mean_shortfall"] - 0.2) < 1e-9)

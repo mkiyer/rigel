@@ -30,8 +30,8 @@ def build_gdna_track(calibration, region_arrays, ref_names) -> pd.DataFrame:
     extent to occupy a row of a track, and attributing its crossing mass to a flank region would
     report a density at a position where that mass was never contained.
     """
-    gdna = np.asarray(calibration.mass_gdna_region, dtype=np.float64)
-    rna = np.asarray(calibration.mass_rna_region, dtype=np.float64)
+    gdna = np.asarray(calibration.count_gdna_region, dtype=np.float64)
+    rna = np.asarray(calibration.count_rna_region, dtype=np.float64)
     efflen = np.asarray(calibration.gdna_region_eff_len, dtype=np.float64)
 
     density = np.where(efflen > _EPS, gdna / np.maximum(efflen, _EPS), 0.0)

@@ -151,8 +151,8 @@ def score_condition(
         for spec in settings:
             config = set_field(config, spec)
         result = calibrate(payload=payload, config=config.calibration, **kwargs)
-        region = np.asarray(result.mass_gdna_region, np.float64)
-        boundary = np.asarray(result.mass_gdna_boundary, np.float64)
+        region = np.asarray(result.count_gdna_region, np.float64)
+        boundary = np.asarray(result.count_gdna_boundary, np.float64)
         rows[name] = dict(
             region=float(np.abs(region - truth["region"]).sum()),
             boundary=float(np.abs(boundary - truth["boundary"]).sum()),

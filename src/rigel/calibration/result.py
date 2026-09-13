@@ -5,17 +5,17 @@
 THREE AXES, ONE PER ACCUMULATOR OBJECT KIND. The calibrator deconvolves a library on the splice
 graph, and the graph has three kinds of object, so the result has three axes::
 
-    regions            N            deconvolved contained mass + its geometric support
-    contiguous boundaries E = N − refs deconvolved crossing mass + its geometric support
+    regions            N            deconvolved contained count + its geometric support
+    contiguous boundaries E = N − refs deconvolved crossing count + its geometric support
     sj boundaries   J            the jumping flux -- certified RNA, never deconvolved
 
 A contiguous boundary is a 0-bp boundary with ONE set of numbers, so there is no ``left``/``right``
-pair and no ½ anywhere: the mass arrays are ``mass_{gdna,rna}_boundary`` and the per-boundary divisor
+pair and no ½ anywhere: the count arrays are ``count_{gdna,rna}_boundary`` and the per-boundary divisor
 is ``crossing_eff_length``, carried here as ``gdna_boundary_eff_len``. ⛔ Do not reintroduce a
 per-face split that a consumer then pools back — that sum-then-halve pattern is exactly what hides a
 factor of 2.
 
-``mass_rna_spliced_boundary`` has no region twin, structurally: ``region_contained`` is credited only
+``count_rna_spliced_boundary`` has no region twin, structurally: ``region_contained`` is credited only
 when the fragment used no sj, so a region's contained population cannot hold a spliced molecule.
 
 ``__post_init__`` enforces the intrinsic invariants (per-axis shape, dtype, finiteness, sign); mass
@@ -74,24 +74,24 @@ class CalibrationResult:
 
     # --- the deconvolved MIXTURE, per region (float64[n_regions]) ---
     #: ``chain_region_deconv``: the region's contained unspliced count split by the converged belief.
-    mass_gdna_region: np.ndarray
-    mass_rna_region: np.ndarray
+    count_gdna_region: np.ndarray
+    count_rna_region: np.ndarray
 
     # --- the deconvolved MIXTURE, per contiguous boundary (float64[n_boundaries]) ---
     #: ``chain_boundary_deconv``: the boundary's unspliced crossing count split by the converged belief.
-    #: ``mass_rna_boundary`` is spliced-INCLUSIVE — a boundary's certified-RNA crossings are RNA whatever the
+    #: ``count_rna_boundary`` is spliced-INCLUSIVE — a boundary's certified-RNA crossings are RNA whatever the
     #: unspliced mixture resolves to, since gDNA cannot be spliced — so per-boundary conservation
-    #: ``mass_gdna_boundary + mass_rna_boundary == unspliced + spliced`` holds.
-    mass_gdna_boundary: np.ndarray
-    mass_rna_boundary: np.ndarray
+    #: ``count_gdna_boundary + count_rna_boundary == unspliced + spliced`` holds.
+    count_gdna_boundary: np.ndarray
+    count_rna_boundary: np.ndarray
 
-    #: float64[n_boundaries] — the ``boundary_spliced`` part of ``mass_rna_boundary``: molecules that crossed this
+    #: float64[n_boundaries] — the ``boundary_spliced`` part of ``count_rna_boundary``: molecules that crossed this
     #: boundary CONTIGUOUSLY having spliced somewhere else. Carried so ``assemble_priors`` can **withhold**
     #: it from ``rna_prior_count``: a spliced fragment has no gDNA candidate in the EM (gDNA does not
     #: splice), so it is guaranteed-RNA and assigned directly — counting it in the prior would double
     #: it and inflate the RNA side of the gDNA-vs-RNA *unspliced* split, which is the only thing the
-    #: prior arbitrates. ``mass_rna_boundary`` itself stays spliced-inclusive so conservation is preserved.
-    mass_rna_spliced_boundary: np.ndarray
+    #: prior arbitrates. ``count_rna_boundary`` itself stays spliced-inclusive so conservation is preserved.
+    count_rna_spliced_boundary: np.ndarray
 
     #: float64[n_boundaries] — THE INCIDENCE→FRAGMENT CONVERSION, per boundary. ``mass / count`` off the
     #: accumulator's conserved-mass bank: the mean fragment-mass ONE crossing at this boundary carries.
@@ -118,11 +118,11 @@ class CalibrationResult:
     #:
     #: Never deconvolved: a sj boundary is pure RNA by construction, so there is nothing to split. It
     #: is the third population at a boundary, and it is routinely orders of magnitude larger than
-    #: ``mass_rna_spliced_boundary`` at the same place: at a donor boundary the sj flux is the gene's
+    #: ``count_rna_spliced_boundary`` at the same place: at a donor boundary the sj flux is the gene's
     #: whole spliced output while the spliced crossing is the handful of molecules that read through
     #: without splicing.
     #: ``assemble_priors`` does NOT consume it, and that is deliberate: sj fragments are certified RNA
-    #: in exactly the sense ``mass_rna_spliced_boundary`` is withheld for, so feeding them to
+    #: in exactly the sense ``count_rna_spliced_boundary`` is withheld for, so feeding them to
     #: ``rna_prior_count`` would load the RNA side of a split that arbitrates only unspliced fragments.
     #: It is exported for QC and reporting — the calibration's output should not be silent about the
     #: population that dominates a donor boundary.
@@ -179,7 +179,7 @@ class CalibrationResult:
     #:
     #: This is AXIOM 0's ``T(slot)``, published. The solve is over
     #: ``{gDNA} ∪ {RNA+ if free_pos} ∪ {RNA− if free_neg}`` at every slot, so the answer is three
-    #: numbers; ``mass_gdna_*`` and ``mass_rna_*`` are that answer with the two RNA strands summed.
+    #: numbers; ``count_gdna_*`` and ``count_rna_*`` are that answer with the two RNA strands summed.
     #:
     #: ⛔ THE THREE DO NOT SUM TO 1 ON ABOUT A QUARTER OF EITHER AXIS, and that is a defect in ψ rather
     #: than a property of this projection. The mechanism is visible at ``sweep.py``'s write-back: the
@@ -219,8 +219,8 @@ class CalibrationResult:
                 )
 
         for name in (
-            "mass_gdna_region",
-            "mass_rna_region",
+            "count_gdna_region",
+            "count_rna_region",
             "gdna_region_eff_len",
             "rna_region_eff_len",
             "gdna_frac_region",
@@ -229,9 +229,9 @@ class CalibrationResult:
         ):
             _check_axis_array(getattr(self, name), name, self.n_regions)
         for name in (
-            "mass_gdna_boundary",
-            "mass_rna_boundary",
-            "mass_rna_spliced_boundary",
+            "count_gdna_boundary",
+            "count_rna_boundary",
+            "count_rna_spliced_boundary",
             "boundary_mass_per_crossing",
             "boundary_spliced_mass_per_crossing",
             "gdna_boundary_eff_len",
@@ -315,9 +315,9 @@ class CalibrationResult:
         region term is already a fragment count and only the crossing term needs converting.
         """
         return float(
-            np.asarray(self.mass_gdna_region, dtype=np.float64).sum()
+            np.asarray(self.count_gdna_region, dtype=np.float64).sum()
             + (
-                np.asarray(self.mass_gdna_boundary, dtype=np.float64)
+                np.asarray(self.count_gdna_boundary, dtype=np.float64)
                 * np.asarray(self.boundary_mass_per_crossing, dtype=np.float64)
             ).sum()
         )
@@ -336,23 +336,23 @@ class CalibrationResult:
         that crossed a boundary and ``sj_mass`` the share in blocks that crossed none — and the two sum to
         exactly one per fragment. Adding both is conservation, not double counting.
 
-        A PROPERTY, never a stored field. ``prior_vs_oracle`` swaps the mass arrays for truth with
+        A PROPERTY, never a stored field. ``prior_vs_oracle`` swaps the deconvolved arrays for truth with
         ``dataclasses.replace``; a cached scalar would survive that swap and silently describe the old
         arrays (``TRAPS: a-hash-that-misses-its-artifact``, in dataclass form). Deriving it means the
         oracle arm's count is the oracle's by construction.
         """
         unspliced_boundary = np.maximum(
-            np.asarray(self.mass_rna_boundary, dtype=np.float64)
-            - np.asarray(self.mass_rna_spliced_boundary, dtype=np.float64),
+            np.asarray(self.count_rna_boundary, dtype=np.float64)
+            - np.asarray(self.count_rna_spliced_boundary, dtype=np.float64),
             0.0,
         )
         return float(
-            np.asarray(self.mass_rna_region, dtype=np.float64).sum()
+            np.asarray(self.count_rna_region, dtype=np.float64).sum()
             + (
                 unspliced_boundary * np.asarray(self.boundary_mass_per_crossing, dtype=np.float64)
             ).sum()
             + (
-                np.asarray(self.mass_rna_spliced_boundary, dtype=np.float64)
+                np.asarray(self.count_rna_spliced_boundary, dtype=np.float64)
                 * np.asarray(self.boundary_spliced_mass_per_crossing, dtype=np.float64)
             ).sum()
             # ONE home for the sj conversion: spelling the product out here as well lets a caller
