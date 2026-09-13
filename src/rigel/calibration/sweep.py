@@ -314,7 +314,7 @@ def solve_chain(
             # assertion needs (TRAPS: an-ablation-that-never-ran), never a config flag it did not thread
             policy_name=str(getattr(policy, "name", type(policy).__name__)),
             solve_grid=_logodds_grid(int(n_grid), float(logodds_window))[1],
-            intron_prior=intron_prior,
+            intron_prior=None if intron_prior is None else np.asarray(intron_prior),
         )
     return RegionBelief(**out, has_composition=has_composition)
 

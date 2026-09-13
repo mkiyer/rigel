@@ -186,9 +186,10 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,434 passed / 0 skipped / 2 xfail, 3,436 collected** (re-derived
+**The standing baseline: 0 failed / 3,435 passed / 0 skipped / 2 xfail, 3,437 collected** (re-derived
 2026-09-12 after the cleanup split, the received tables, the replay's tolerance report — one `tests/` file at +2
-holding two gates, +4 — and the one ψ solver, which retired the float32 hoisting gate, −1: four `src/rigel/calibration/` modules added —
+holding two gates, +4 — the one ψ solver, which retired the float32 hoisting gate, −1, and the memory steps,
+which added the crossing divisor's brute-force gate, +1: four `src/rigel/calibration/` modules added —
 `blocks`, `message_cache`, `messages/faces`, `messages/lanes` — at +3 each, +12; one backbone test retired
 with its premise (a kernel can no longer leave a hop unspoken) and one gate added on the face table, ±0). The 2 xfails are executable records of proven defects whose fixes are elsewhere
 (`ISSUES: two-sided-exon-row`; the antisense prior-assembly casualty) — "fix the test" is a category

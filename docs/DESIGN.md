@@ -1146,8 +1146,22 @@ digit); the replay's tolerance report shows the AMBIG slots' fractions moving by
 neighbouring single-strand slots by less, through the messages; the suite; and timing on a back-to-back
 pair on the deep library — wall 518 → 524 s (1.01), the ψ solves inside the sweep 0.94, untouched stages
 1.00, peak 18.1 → 19.5 GB (the cache's float64 rows). The replay's captures and the identity references
-were re-taken from this tree (`sweeps_MO_3021_step3`, `onesolver_identity_*`): the earlier ones describe
+were re-taken from this tree (`sweeps_MO_3021_step3`, `onesolver_identity_*`; again after the memory steps: `sweeps_MO_3021_step4`, `memory_identity_*`): the earlier ones describe
 the two-solver code and unpickle against the belief's retired fields.
+
+**Memory: the transients, not the sweeps (2026-09-12).** Measured before anything moved (`profiler.py`,
+peak and held per stage): the run's high-water mark was `crossing_eff_length`'s ``(objects × fragment
+lengths)`` matrix chain over the human sj axis, ~9 GB the RSS never gave back, and `fit_landscape`'s
+``(training regions × grid)`` kernel matrices at the true peak. Three rulings, each a numeric no-op on
+the metric: the crossing divisor is a closed form over the pmf's cumulative sums — the four-way min is
+piecewise linear in the fragment length with breaks at the two reaches and their sum, so its expectation
+is three sums read off ``F`` and ``S`` (`effective_length.crossing_eff_length`; the matrix form is the
+brute force its gate compares with); the landscape's kernels are built and summed a row tile at a time
+(`landscape._render`, on ψ's own tiling rule), so a million training regions never exist as a matrix; the
+intron factory's rows are a `calibrate.FactoryRows` the sweep slices per block, never a chain-wide
+array. One back-to-back pair on the deep library: peak 19.2 → 11.4 GB, wall 505 → 498 s, untouched
+stages 1.00. The identity references and the replay captures were re-taken (`memory_identity_*`,
+`sweeps_MO_3021_step4`).
 
 **The received messages are tables (2026-09-12, bit-identical on the replay, the three references and the
 suite).** After a pass every node holds a ROW of the pass's `Received` table — `has_neighbour` (the

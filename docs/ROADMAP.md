@@ -82,7 +82,7 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
    active thread). The locus decomposition is landed and gated (`DESIGN.md` §6b.15); the agreed order
    from here, each step judged by `profiling/profiler.py --compare` on back-to-back pairs and proven a
    no-op with `profiling/sweep_replay.py` (`--block-slots` for the chunk-exactness of the whole sweep) and
-   `design/rename_identity.py --bam` against the `onesolver_identity_*` references:
+   `design/rename_identity.py --bam` against the `memory_identity_*` references:
    ⓪ re-measure the deep library end to end, `main` against the landed tree — the baseline the rest is
    judged against; ① cache the refit-invariant half of `prepare` across the refit sweeps (the face
    rules and lane faces read counts and geometry, only the own claims read the belief), per block, per

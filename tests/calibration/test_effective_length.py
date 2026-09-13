@@ -107,6 +107,42 @@ def test_crossing_is_the_enumerated_placement_count(w, reach_lo, reach_hi):
     assert got == pytest.approx(float(_enumerate_crossing(w, reach_lo, reach_hi)))
 
 
+def _crossing_matrix(fl_pmf, reach_lo, reach_hi):
+    """The brute force: every object against every fragment length, the four-way min materialised."""
+    p = np.asarray(fl_pmf, np.float64) / np.sum(fl_pmf)
+    lengths = np.arange(p.shape[0], dtype=np.float64)
+    lo, hi = np.broadcast_arrays(np.asarray(reach_lo, float), np.asarray(reach_hi, float))
+    lo_col, hi_col = lo.reshape(-1, 1), hi.reshape(-1, 1)
+    placements = np.minimum(
+        np.minimum(lengths - 1.0, np.minimum(lo_col, hi_col)), lo_col + hi_col - lengths + 1.0
+    )
+    return (np.maximum(placements, 0.0) @ p).reshape(lo.shape)
+
+
+def test_crossing_closed_form_equals_the_matrix_brute_force_on_real_valued_reaches():
+    """The closed form over the pmf's cumulative sums against the materialised ``(objects × lengths)``
+    brute force, on real-valued reaches spanning below one base, inside the support, across its end and
+    UNBOUNDED, on a pmf with mass at every length. PERTURBATION: any one of the three segment sums
+    dropped, or a segment end off by one length, moves a reach in the middle of the support by more than
+    the tolerance."""
+    rng = np.random.default_rng(7)
+    pmf = _normal_pmf(200.0, 50.0) + 1e-4  # mass at every length, so every segment end matters
+    lo = np.concatenate(
+        [rng.uniform(0.0, 600.0, 200), [0.0, 0.4, 1.0, 1.5, 349.0, 350.0, 351.0, UNBOUNDED]]
+    )
+    hi = np.concatenate(
+        [rng.uniform(0.0, 600.0, 200), [500.0, 0.6, 1.0, 2.5, 349.0, 350.0, 2000.0, UNBOUNDED]]
+    )
+    got = crossing_eff_length(pmf, lo, hi)
+    want = _crossing_matrix(pmf, lo, hi)
+    np.testing.assert_allclose(got, want, rtol=1e-12, atol=1e-12)
+    # non-integer reaches: the segment ends are floors, and the brute force agrees with them
+    frac = crossing_eff_length(pmf, np.array([120.3, 120.9]), np.array([300.7, 300.1]))
+    np.testing.assert_allclose(
+        frac, _crossing_matrix(pmf, [120.3, 120.9], [300.7, 300.1]), rtol=1e-12
+    )
+
+
 def test_crossing_at_UNBOUNDED_reach_is_the_mean_length_minus_one():
     """gDNA's template is the chromosome, so it never tapers — and then the divisor is just ``mu − 1``.
 

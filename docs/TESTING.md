@@ -642,10 +642,11 @@ per-stage peak and held RSS; `--set` for any config field, `--scan-only` for the
 for two reports) and `scripts/profiling/sweep_replay.py` (one calibration sweep, replayed and compared
 bit for bit; `--block-slots N|none` replays it at another locus-block size, which must move nothing —
 the chunk-exactness of the whole sweep on real data); set `OMP_NUM_THREADS` deliberately. The frozen
-references are `~/Downloads/rigel_runs/arms/onesolver_identity_*.json` (two ladder conditions and the
-LBX0190 library) and the captured sweeps `~/Downloads/rigel_runs/perf/sweeps_MO_3021_step3` — both taken
-from the one-solver tree of 2026-09-12 (`DESIGN.md` §6b.15); the earlier `locus_identity_*` and
-`sweeps_MO_3021_step2` describe the two-solver code and unpickle against the belief's retired fields. The
+references are `~/Downloads/rigel_runs/arms/memory_identity_*.json` (two ladder conditions and the
+LBX0190 library) and the captured sweeps `~/Downloads/rigel_runs/perf/sweeps_MO_3021_step4` — both taken
+from the memory-step tree of 2026-09-12 (`DESIGN.md` §6b.15); the earlier `locus_identity_*` /
+`onesolver_identity_*` and `sweeps_MO_3021_step2` / `_step3` describe earlier code (the step2 captures
+unpickle against the belief's retired fields). The
 refit sweeps' captures carry their message cache, so their replay exercises the cache path and ψ; sweep 0
 exercises the whole message layer. `ISSUES: performance-memory-bounded-solve` carries the work.
 

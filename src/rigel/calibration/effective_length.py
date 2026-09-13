@@ -114,6 +114,9 @@ def crossing_eff_length(
     ``R_lo + R_hi − w + 1``         the molecule is longer than BOTH remainders together
     ==============================  ==================================================================
 
+    Computed in closed form from the pmf's cumulative sums, in ``O(objects)`` with no
+    ``(objects × lengths)`` matrix — that matrix cost 9 GB of transient on the human sj axis
+    (`tests/calibration/test_effective_length.py` holds the enumerated and the matrix brute forces).
     Pass :data:`UNBOUNDED_REACH` on both sides for gDNA and the result is ``mean - 1`` exactly. The
     taper is not a refinement: where the remaining template is shorter than the mean fragment, the
     tapered divisor is an order of magnitude below the untapered one, so using the mean blindly
@@ -122,19 +125,38 @@ def crossing_eff_length(
     ``reach_lo`` and ``reach_hi`` broadcast against each other; the result has their broadcast shape.
     """
     p = _as_pmf(fl_pmf)
-    lengths = np.arange(p.shape[0], dtype=np.float64)
-
+    n = p.shape[0]
+    lengths = np.arange(n, dtype=np.float64)
+    cdf = np.cumsum(p)  # F(x) = Σ_{w ≤ x} f(w)
+    cum_len = np.cumsum(lengths * p)  # S(x) = Σ_{w ≤ x} w f(w)
     lo = np.asarray(reach_lo, dtype=np.float64)
     hi = np.asarray(reach_hi, dtype=np.float64)
     lo, hi = np.broadcast_arrays(lo, hi)
-    # objects on the rows, fragment lengths on the columns
-    lo_col, hi_col = lo.reshape(-1, 1), hi.reshape(-1, 1)
-    placements = np.minimum(
-        np.minimum(lengths - 1.0, np.minimum(lo_col, hi_col)),
-        lo_col + hi_col - lengths + 1.0,
-    )
-    np.maximum(placements, 0.0, out=placements)
-    return (placements @ p).reshape(lo.shape)
+    # The four-way min is piecewise linear in w, with the two reaches ordered a ≤ b:
+    #   w ≤ a + 1:            w − 1              (both sides have room)
+    #   a + 1 < w ≤ b + 1:    a                  (the short side alone binds)
+    #   b + 1 < w ≤ a + b + 1: a + b + 1 − w     (the molecule is longer than both remainders together)
+    #   beyond:               0
+    # so its expectation is three sums over the pmf, each read off the two cumulative sums at the
+    # segment's end — O(objects), and no (objects × lengths) matrix. Beyond the support the full sums
+    # apply, and UNBOUNDED_REACH on both sides gives mean − 1 exactly.
+    a = np.minimum(lo, hi)
+    b = np.maximum(lo, hi)
+
+    def at(x):
+        """``(F, S)`` at the largest length ``≤ x`` inside the support; ``(0, 0)`` below it."""
+        idx = np.floor(np.minimum(x, float(n - 1))).astype(np.int64)
+        below = idx < 0
+        idx = np.maximum(idx, 0)
+        return np.where(below, 0.0, cdf[idx]), np.where(below, 0.0, cum_len[idx])
+
+    f1, s1 = at(a + 1.0)
+    f2, s2 = at(b + 1.0)
+    f3, s3 = at(a + b + 1.0)
+    # the first sum runs from one base: a zero-length molecule places nowhere, and the brute force
+    # clamps it per length where the cumulative sums would credit it (0 − 1)·f(0)
+    out = (s1 - f1 + p[0]) + a * (f2 - f1) + (a + b + 1.0) * (f3 - f2) - (s3 - s2)
+    return np.maximum(out, 0.0).reshape(lo.shape)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════

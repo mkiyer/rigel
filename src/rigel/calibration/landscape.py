@@ -34,6 +34,8 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.special import gammaln
 
+from .simplex_logodds import _block_rows
+
 _EPS = 1e-12
 _LN10 = np.log(10.0)
 
@@ -302,23 +304,33 @@ def _estep_kernels(kernels: np.ndarray, count: np.ndarray, grid: np.ndarray, pre
     return kernels
 
 
-def _render(
-    kernels: np.ndarray, weights: np.ndarray, widths: np.ndarray, grid: np.ndarray
-) -> np.ndarray:
+def _render(count, eff, grid, prev, weights, widths) -> np.ndarray:
     """Sum the weighted kernels, each widened to the population resolution → an unnormalised density.
 
-    Convolution is linear, so widening every kernel and then summing equals summing and then convolving —
-    which is why kernels can be grouped by width and each group convolved once (:data:`_WIDTH_BINS`).
+    Convolution is linear, so widening every kernel and then summing equals summing and then convolving
+    — which is why kernels are grouped by width and each group convolved once (:data:`_WIDTH_BINS`). The
+    kernels are built and summed a row tile at a time (`simplex_logodds._block_rows`, the same
+    working-set rule ψ tiles by): a training set of a million regions never exists as an ``(n, K)``
+    matrix, only its ``_WIDTH_BINS`` weighted sums do.
     """
     step = float(grid[1] - grid[0])
     boundaries = np.quantile(widths, np.linspace(0.0, 1.0, _WIDTH_BINS + 1))
+    # the bin of each width: the last bin includes its upper boundary, every other bin excludes it
+    bin_of = np.clip(np.searchsorted(boundaries, widths, side="right") - 1, 0, _WIDTH_BINS - 1)
+    sums = np.zeros((_WIDTH_BINS, grid.size))
+    rows = _block_rows(grid.size, 8)
+    for r0 in range(0, count.size, rows):
+        sl = slice(r0, r0 + rows)
+        kernels = _estep_kernels(_poisson_kernels(count[sl], eff[sl], grid), count[sl], grid, prev)
+        for b in np.unique(bin_of[sl]):
+            m = bin_of[sl] == b
+            sums[b] += (weights[sl][m][:, None] * kernels[m]).sum(0)
     out = np.zeros_like(grid)
     for b in range(_WIDTH_BINS):
-        upper = widths <= boundaries[b + 1] if b == _WIDTH_BINS - 1 else widths < boundaries[b + 1]
-        m = (widths >= boundaries[b]) & upper
+        m = bin_of == b
         if not m.any():
             continue
-        d = (weights[m][:, None] * kernels[m]).sum(0)
+        d = sums[b]
         h = float(np.mean(widths[m]))
         if h > step:
             k = np.exp(-0.5 * ((grid[:, None] - grid[None, :]) / h) ** 2)
@@ -383,8 +395,7 @@ def fit_landscape(
     centres = np.clip(np.log10(np.maximum(count, 1.0)) - np.log10(eff), grid[0], grid[-1])
     widths = knn_widths(centres, float(grid[1] - grid[0]), knn_scale)
     weights = _reliability(count, var, anchor)
-    kernels = _estep_kernels(_poisson_kernels(count, eff, grid), count, grid, prev)
-    density = _render(kernels, weights, widths, grid)
+    density = _render(count, eff, grid, prev, weights, widths)
     total = float(density.sum())
     if not (total > 0.0 and np.isfinite(total)):
         return None

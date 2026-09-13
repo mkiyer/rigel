@@ -169,44 +169,53 @@ def _project_eff(chain, eff_slots, payload) -> tuple[np.ndarray, np.ndarray]:
     return region_eff, boundary_eff
 
 
-def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config, bg=None):
-    """The gDNA intron factory λ-factor per chain slot.
+class FactoryRows:
+    """The gDNA intron factory's λ-factor rows, built per block on demand and never held for the chain.
 
-    Fits the intergenic-background NegBinom (`fit_intron_background`) and tabulates, for each INTRON REGION
-    slot, ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` over the σ(λ) solve grid → an ``(n_slots, K)`` array,
-    ZERO on every other slot (a no-op there). Returns ``None`` when the factory is disabled, the
-    background pool is uninformative, or there are no intron regions — in which case the sweep is
-    byte-identical to the pre-factory path. gDNA is strand-symmetric, so this factor lives purely on
-    ``λ`` (deconvolves gDNA; the residual RNA's tilt is left to the solver), and is consumed identically by the
-    single-strand and AMBIG per-region solves.
+    For each INTRON REGION slot, ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` over the σ(λ) solve grid
+    (`density_lambda_factor`) — the factory deconvolves confident gDNA from introns against the
+    intergenic background; ZERO on every other slot, a no-op there. BOUNDARY slots are zero structurally:
+    the factor scores a CONTAINED count against a CONTAINED support, and a boundary's count is a
+    crossing with a different divisor. gDNA is strand-symmetric, so the factor lives purely on ``λ`` and
+    is consumed identically by every slot class.
 
-    BOUNDARY slots are zero, structurally. The factor scores a CONTAINED count against a CONTAINED
-    support; a boundary's count is a crossing and its divisor a different formula, so applying the same
-    NegBinom there would be scoring one frame's evidence against another frame's support.
+    ``rows[sl]`` is the ``(len(sl), K)`` array for the slots ``sl`` — the sweep asks for each block's
+    rows as it solves the block, so the chain-wide ``(n_slots, K)`` array (2–5 GB on the human chain,
+    one per bracket) never exists; ``np.asarray(rows)`` materialises the whole chain and is for the
+    diagnostic capture only.
+    """
 
-    ``bg`` (an injected population :class:`GdnaBackground`) overrides the internal fit — a tiny toy's own
-    intergenic pool is too sparse to fit the background the introns are deconvolved against."""
-    if bg is None:
-        bg = fit_intron_background(substrate, region_arrays, region_eff_len, include_introns=False)
-    if not bg.informative:
-        return None
-    kind = np.asarray(chain.kind)
-    idx = np.asarray(chain.obj_idx, dtype=np.int64)
-    rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(
-        np.int64
-    )  # 0/1/2 per REGION
-    R = rtype.shape[0]
-    is_intron = (kind == REGION) & (rtype[np.clip(idx, 0, R - 1)] == 1)  # INTRON == 1
-    if not bool(is_intron.any()):
-        return None
-    _, fg = _logodds_grid(int(config.sweep_n_grid), float(config.sweep_logodds_window))
-    prior = np.zeros((kind.shape[0], fg.shape[0]), dtype=np.float64)
-    ridx = idx[is_intron]
-    # GENOME-strand columns summed: gDNA is strand-symmetric, so the deconvolution is against a total rate.
-    count = np.asarray(substrate.region_contained.count, dtype=np.float64).sum(axis=1)[ridx]
-    eff_g = np.asarray(region_eff_len, dtype=np.float64)[ridx]
-    prior[is_intron] = density_lambda_factor(bg, count, eff_g, fg)
-    return prior
+    def __init__(
+        self, background: GdnaBackground, chain, substrate, region_arrays, region_eff_len, config
+    ):
+        self.background = background
+        kind = np.asarray(chain.kind)
+        idx = np.asarray(chain.obj_idx, dtype=np.int64)
+        rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
+        self.is_intron = (kind == REGION) & (rtype[np.clip(idx, 0, rtype.shape[0] - 1)] == 1)
+        ridx = idx[self.is_intron]
+        n = kind.shape[0]
+        # GENOME-strand columns summed: gDNA is strand-symmetric, so the deconvolution is against a total
+        self.count = np.zeros(n)
+        self.count[self.is_intron] = np.asarray(
+            substrate.region_contained.count, dtype=np.float64
+        ).sum(axis=1)[ridx]
+        self.eff = np.zeros(n)
+        self.eff[self.is_intron] = np.asarray(region_eff_len, dtype=np.float64)[ridx]
+        _, self.fg = _logodds_grid(int(config.sweep_n_grid), float(config.sweep_logodds_window))
+        self.shape = (n, int(self.fg.shape[0]))
+
+    def __getitem__(self, sl) -> np.ndarray:
+        sel = self.is_intron[sl]
+        out = np.zeros((sel.shape[0], self.shape[1]), dtype=np.float64)
+        if sel.any():
+            out[sel] = density_lambda_factor(
+                self.background, self.count[sl][sel], self.eff[sl][sel], self.fg
+            )
+        return out
+
+    def __array__(self, dtype=None, copy=None):
+        return self[:] if dtype is None else self[:].astype(dtype)
 
 
 #: Minimum training regions for a hyperprior fit — below this the population is not a population.
@@ -426,14 +435,13 @@ def _fit_strand(substrate, region_arrays, strand_models, inj) -> _Strand:
 class _IntronFactory:
     """The gDNA INTRON FACTORY: the intergenic background — fitted here with ``include_introns=False``
     (an intron-inclusive pool is inflated by nascent RNA worst exactly where gDNA is scarce), or
-    injected — and its λ-factor rows on a solve grid, ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` per
-    intron slot (`_build_intron_prior`). ``background`` is ``None`` when the factory is off, and
-    ``rows`` is then ``None`` too, which leaves every sweep byte-identical to the pre-factory path.
+    injected — and its λ-factor rows on a solve grid (:class:`FactoryRows`, built per block as the sweep
+    asks). ``background`` is ``None`` when the factory is off, and ``rows`` is then ``None`` too, which
+    leaves every sweep byte-identical to the pre-factory path.
 
     ⛔ The rows are evaluated ON the solve grid, so they are a function of ``(n_grid, L)`` and are
     REBUILT when the bracket widens, never regridded: `_regrid_global` maps between two grids of the
-    same ``L``, and there is no map onto a wider domain the factor was never evaluated on. Memoised,
-    because only two brackets ever occur in one calibration."""
+    same ``L``, and there is no map onto a wider domain the factor was never evaluated on."""
 
     def __init__(
         self, chain, substrate, region_arrays, region_eff_gdna, config, inj, background_pair
@@ -454,20 +462,24 @@ class _IntronFactory:
         self._rows: dict = {}
 
     def rows(self, n_grid: int, window: float):
-        """The λ-factor rows ``(n_slots, K)`` on the grid ``(n_grid, window)``, or ``None``."""
-        if self.background is None:
+        """The λ-factor rows on the grid ``(n_grid, window)`` as a :class:`FactoryRows` — sliced per block
+        by the sweep — or ``None`` when there is nothing to factor (the factory off, the background
+        uninformative, no intron regions), which leaves every sweep byte-identical to the pre-factory
+        path."""
+        if self.background is None or not self.background.informative:
             return None
         key = (int(n_grid), float(window))
         if key not in self._rows:
             chain, substrate, region_arrays, region_eff_gdna, config = self._site
-            self._rows[key] = _build_intron_prior(
+            rows = FactoryRows(
+                self.background,
                 chain,
                 substrate,
                 region_arrays,
                 region_eff_gdna,
                 replace(config, sweep_n_grid=int(n_grid), sweep_logodds_window=float(window)),
-                bg=self.background,
             )
+            self._rows[key] = rows if bool(rows.is_intron.any()) else None
         return self._rows[key]
 
 

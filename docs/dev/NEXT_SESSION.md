@@ -11,9 +11,9 @@ python scripts/design/preflight.py                 # ~2 s: can this session run?
 python -m pytest tests/ -q                         # CLAUDE.md's baseline line is the count to reproduce
 ```
 
-The bit-identity baseline is the one-solver tree (2026-09-12): `~/Downloads/rigel_runs/perf/sweeps_MO_3021_step3`
+The bit-identity baseline is the one-solver tree (2026-09-12): `~/Downloads/rigel_runs/perf/sweeps_MO_3021_step4`
 (four captured sweeps; `sweep_replay.py replay --dir … --call 0..3 [--tolerance]`, `--block-slots N|none`) and
-the three references `~/Downloads/rigel_runs/arms/onesolver_identity_*.json` (`rename_identity.py --check`; the
+the three references `~/Downloads/rigel_runs/arms/memory_identity_*.json` (`rename_identity.py --check`; the
 real BAMs are under `~/Downloads/rigel_runs/cfrna/mctp_<lib>_*/bam/star.srt.rmdup.collate.bam`). The
 older `sweeps_MO_3021*`, `locus_identity_*`, `cleanup_identity_*` and `perf_identity_LBX0190.json` describe
 the two-solver code and are superseded.

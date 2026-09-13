@@ -177,6 +177,19 @@ tolerance gate (promote the tolerant replay comparator into `sweep_replay.py`); 
 block; ⑤ the scan (`ISSUES: scan-thread-split-starves-the-workers`) and the second pass. Two things not
 to do: micro-optimise the Python passes (a silent-hop early exit halves them and the port deletes it),
 and bake the refit sweeps' `n_grid_ss = 513` into the port — an accuracy ruling, kept a parameter.
+MEMORY (plan step D / worklist W4) DONE 2026-09-12, measured first: the peak was not the sweeps' but two
+Python transients — `crossing_eff_length`'s `(404k sj × fragment lengths)` matrix chain, ~9 GB that the RSS
+never gave back (macOS keeps freed arenas), raising the whole run's plateau, and `fit_landscape`'s
+`(training regions × grid)` kernel matrices, +3 GB at the true peak inside the refits. Three landings, each
+a numeric no-op on the metric (worst relative move of any stratum's abs_err 3.4e-15): the crossing divisor
+in closed form over the pmf's cumulative sums (`O(objects)`, 8 ms and 34 MB at the human sj count against
+1.5 s and 9 GB; the matrix form survives as the brute force its gate compares with); the landscape's
+kernels built and summed a row tile at a time (`_render`, 200 MB at a million regions); the factory rows
+as `calibrate.FactoryRows`, built per block as the sweep asks and never held for the chain (④ above,
+2–5 GB freed). One back-to-back pair on the deep library: PEAK 19.2 → 11.4 GB, wall 505 → 498 s,
+`region geometry` 1.44 → 0.20 s, `landscape fit` 6.3 → 4.3 s, untouched stages 1.00. What remains of the
+11.4 GB is the pre-calibration floor (~5.6 GB: the index and the payload) plus the message cache's ~4 GB
+(plan step E, the owner's switch) plus the sweep's own working set.
 
 ### scan-thread-split-starves-the-workers
 `priority: next · kind: decision · 2026-09-11`
