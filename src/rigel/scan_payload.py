@@ -239,18 +239,6 @@ class DrainQC:
                 f"{self.offered} offered fragments; exactly one hypothesis wins each whole fragment."
             )
 
-    @classmethod
-    def from_dict(cls, drain: dict[str, Any]) -> "DrainQC":
-        expected = {field.name for field in dataclasses.fields(cls)} - {"census_before"}
-        missing = expected - set(drain)
-        if missing:
-            raise ValueError(f"the drain block is missing {sorted(missing)}")
-        census = drain["census_before"]
-        return cls(
-            **{name: int(drain[name]) for name in expected},
-            census_before=census if isinstance(census, GapCensus) else GapCensus.from_dict(census),
-        )
-
 
 #: Every two-column bank, with the axis it is indexed on and its dtype. ONE table: `from_scan_result`
 #: validates against it and the drain adds a per-reference delta into it, so a new channel cannot reach one
