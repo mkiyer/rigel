@@ -673,9 +673,6 @@ def _solve_regions_logodds_all(
     def _s(a, msk):
         return None if a is None else np.asarray(a)[msk]
 
-    def _sp(pair, msk):
-        return None if pair is None else (np.asarray(pair[0])[msk], np.asarray(pair[1])[msk])
-
     def _scatter(msk, dc):
         out["fg"][msk] = dc.gdna_frac
         out["fp"][msk] = dc.rna_pos_frac
