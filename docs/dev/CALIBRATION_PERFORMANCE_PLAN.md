@@ -359,8 +359,9 @@ layering, the gates and the tolerance instrument, the docs. Four items remain, i
    (`calibration_inputs(cache, index)["payload"]` plus the partition lift where partitions are read):
    `fl_pool_purity` DONE 2026-09-13 (an open defect at priority next names it; it priced a length model production
    never builds — after the migration the shipped model reads the true gDNA mean exactly at capture-OFF on both
-   fl-gap arms, and −2.9 / −8.5 bp at capture-ON) and `transport_dispersion` (the decomposition the owner asked for; an open question waits on
-   it), each with a recorded before/after;
+   fl-gap arms, and −2.9 / −8.5 bp at capture-ON) and `transport_dispersion` DONE 2026-09-13 (the decomposition the owner asked for; an open question waits on
+   it; in the drained frame the deep pairs' excess disagreement falls ~10 % and the pooled centre halves), each
+   with a recorded before/after in its commit;
 4. DONE 2026-09-13 (33 cases into `test_effective_length.py`; both perturbations fired). the moment tests deleted with the length channel: `git log --diff-filter=D -- tests` and
    `git log -S"moment"`, restore those that gate something still live.
 The index alias map (`dropped_t_id → kept_t_id`, an index rebuild verified with `rescan_panels.py`) stays in

@@ -12,7 +12,10 @@ the transport premise itself. It also reports the single-complete-flank populati
 centre. Fit nothing on shallow pairs: below about 100 flank flux the disagreement is all counting,
 so the tables are read on the deep pairs. The strand-matched arm keys the substrate's count columns
 per sj strand, which is not their key (the columns are genome-strand); its row is kept as the
-falsification of that keying, not as a candidate. Per-exon rows are written to `--out-dir` as npz.
+falsification of that keying, not as a candidate. Per-exon rows are written to `--out-dir` as npz. It
+reads the DRAINED frame the slot truth is certified in (`scan_cache.calibration_inputs`: the whole drained
+as production drains it, the two length models built as production builds them); until 2026-09-13 it read
+pass one's copy in the oracle cache and a length model production never builds.
 
 Usage::
 
@@ -27,18 +30,15 @@ from pathlib import Path
 import numpy as np
 from scipy.special import polygamma
 
-REPO = Path("/Users/mkiyer/proj/rigel")
+REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts" / "design"))
 
-from rigel.calibration.fl import build_fl_models  # noqa: E402
-from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.region_chain import REGION, build_region_chain  # noqa: E402
 from rigel.calibration.region_geometry import (  # noqa: E402
     build_region_geometry,
     build_region_statics,
 )
-from rigel.calibration.sj_opportunity import crossing_probability_from_index  # noqa: E402
 from rigel.calibration.effective_length import crossing_eff_length  # noqa: E402
 from rigel.calibration.splice_graph import (  # noqa: E402
     build_boundary_flags_array,
@@ -47,7 +47,7 @@ from rigel.calibration.splice_graph import (  # noqa: E402
 from rigel.calibration.structural_claims import build_structural_claims  # noqa: E402
 from rigel.calibration.substrate import CalibrationSubstrate  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
-from rigel.scan_cache import read_scan_cache  # noqa: E402
+from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 
 RUNS = Path.home() / "Downloads" / "rigel_runs"
 SUITE = RUNS / "suite" / "ladder"
@@ -142,19 +142,18 @@ def main() -> int:
     sj_col = np.where(np.asarray(sj.strand) == np.int8(Strand.POS), 0, 1)
 
     for condition in conditions:
-        cache = read_scan_cache(args.suite / "oracle_cache" / condition / "_main", index)
-        payload = cache.payload
-        fl = build_fl_models(
-            payload,
-            sj_opportunity=crossing_probability_from_index(index, int(payload.max_length)),
-            gdna_opportunity=gdna_opportunity_from_index(index, int(payload.max_length)),
-        )
+        # the DRAINED frame the slot truth is certified in: the whole drained as production drains it,
+        # and the two length models built as production builds them
+        kw = calibration_inputs(read_scan_cache(args.suite / "scan_cache" / condition, index), index)
+        payload = kw["payload"]
         substrate = CalibrationSubstrate.from_payload(payload, ra)
         chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
-        geometry = build_region_geometry(chain, substrate, ra, sj, fl.gdna_pmf, fl.rna_pmf, None)
+        geometry = build_region_geometry(
+            chain, substrate, ra, sj, kw["gdna_fl_pmf"], kw["rna_fl_pmf"], None
+        )
         statics = build_region_statics(chain, ra, bflags)
         claims = build_structural_claims(chain, statics)
-        routes = build_route_table(sj, substrate, fl.rna_pmf)
+        routes = build_route_table(sj, substrate, kw["rna_fl_pmf"])
         truth = dict(np.load(args.suite / "oracle_cache" / condition / "slot_truth.npz"))
 
         kind = np.asarray(chain.kind)
