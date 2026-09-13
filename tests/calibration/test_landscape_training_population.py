@@ -23,6 +23,7 @@ from types import SimpleNamespace
 import numpy as np
 
 import rigel.calibration.sweep as SW
+from rigel.calibration.blocks import SweepCapture
 from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.region_chain import REGION
 from rigel.calibration.region_geometry import g1_locked
@@ -41,17 +42,13 @@ def _expected_has_composition(sweep_inputs, policy, capture):
     prepared = _prepared(policy, ctx)
     from_left, from_right = _passes(prepared, ctx)
     comp = from_left.has_composition | from_right.has_composition
-    tau = np.asarray(capture["_tau0_lam"], np.float64)
-    return (
-        has_own_composition_evidence(tau)
-        | g1_locked(capture["free_pos"], capture["free_neg"])
-        | comp
-    )
+    tau = np.asarray(capture.tau_lam, np.float64)
+    return has_own_composition_evidence(tau) | g1_locked(capture.free_pos, capture.free_neg) | comp
 
 
 def test_the_solve_publishes_the_informed_predicate_as_the_solve_used_it(sweep_inputs):
     policy, *_ = _full_policy(sweep_inputs)
-    capture: dict = {}
+    capture = SweepCapture()
     out = SW.solve_chain(
         *sweep_inputs["args"], **sweep_inputs["kw"], policy=policy, _capture=capture
     )
@@ -68,12 +65,12 @@ def test_a_bound_with_a_row_does_not_inform_but_a_composition_does(sweep_inputs)
     at BOTH — so "any non-flat row" would give both a composition. Only the composition's slot may."""
     from rigel.calibration.messages import PsiMessage
 
-    cap: dict = {}
+    cap = SweepCapture()
     SW.solve_chain(*sweep_inputs["args"], **sweep_inputs["kw"], policy=SilentPolicy(), _capture=cap)
     blind = np.flatnonzero(
-        ~has_own_composition_evidence(cap["_tau0_lam"])
-        & ~g1_locked(cap["free_pos"], cap["free_neg"])
-        & (np.asarray(cap["left"], np.int64) >= 0)
+        ~has_own_composition_evidence(cap.tau_lam)
+        & ~g1_locked(cap.free_pos, cap.free_neg)
+        & (np.asarray(cap.left, np.int64) >= 0)
     )
     assert blind.size >= 2, "the toy has fewer than two blind slots with a left neighbour"
     lvl_slot, comp_slot = int(blind[0]), int(blind[1])
@@ -128,14 +125,12 @@ def test_silence_shrinks_the_informed_set_to_own_evidence_and_certainty(sweep_in
         SW.solve_chain(*sweep_inputs["args"], **sweep_inputs["kw"], policy=policy).has_composition,
         bool,
     )
-    cap: dict = {}
+    cap = SweepCapture()
     silent = SW.solve_chain(
         *sweep_inputs["args"], **sweep_inputs["kw"], policy=SilentPolicy(), _capture=cap
     )
     silent_has_composition = np.asarray(silent.has_composition, bool)
-    own = has_own_composition_evidence(cap["_tau0_lam"]) | g1_locked(
-        cap["free_pos"], cap["free_neg"]
-    )
+    own = has_own_composition_evidence(cap.tau_lam) | g1_locked(cap.free_pos, cap.free_neg)
     assert np.array_equal(silent_has_composition, own)
     assert (live & ~silent_has_composition).any(), "no slot was has_composition by a message alone"
     assert not (silent_has_composition & ~live).any()

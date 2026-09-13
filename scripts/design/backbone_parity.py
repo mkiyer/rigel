@@ -36,13 +36,11 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rigel.calibration import sweep as SW  # noqa: E402
+from rigel.calibration.blocks import SweepCapture  # noqa: E402
 from rigel.calibration.messages.silent import SilentPolicy  # noqa: E402
 
 #: capture keys that cannot match by construction. Keep this set empty unless the reason is
 #: structural — every entry is a hole in the gate.
-_EXPECTED_ABSENT: set[str] = set()
-
-
 def _cmp(a, b, where: str = ""):
     """Element-wise identity, not closeness. Returns ``(n_elements, n_differing, max_abs_delta)``.
 
@@ -172,7 +170,7 @@ def main() -> int:
     print(f"   captured a chain of {n:,} slots (prior-free pass)", flush=True)
 
     def run(fn, **extra):
-        cap: dict = {}
+        cap = SweepCapture()
         out = fn(
             g["chain"], g["statics"], g["geometry"], g["belief"], g["region_arrays"],
             _capture=cap, **kw, **extra,
@@ -232,26 +230,11 @@ def main() -> int:
             tot_el += el
             tot_diff += nd
 
-    # ── the diagnostics capture: the dissect loop reads it, so a dropped key is a real regression ──────
-    ka, kb = set(cap_old), set(cap_new)
-    missing = sorted(ka - kb)
-    added = sorted((kb - ka) - _EXPECTED_ABSENT)
+    # ── the diagnostics capture: the dissect loop reads it, so a field that moved is a real regression ─
     cap_el = cap_diff = 0
     cap_bad = []
-    for k in sorted(ka & kb):
-        a, b = cap_old[k], cap_new[k]
-        if isinstance(a, list) and isinstance(b, list):
-            if len(a) != len(b):
-                cap_bad.append((f"_capture[{k}] (list len {len(a)} vs {len(b)})", 1, 1, float("inf")))
-                continue
-            for j, (xa, xb) in enumerate(zip(a, b)):
-                for kk in sorted(set(xa) & set(xb)) if isinstance(xa, dict) else []:
-                    el, nd, d = _cmp(xa[kk], xb[kk], f"_capture[{k}][{j}][{kk}]")
-                    cap_el += el
-                    cap_diff += nd
-                    if nd:
-                        cap_bad.append((f"_capture[{k}][{j}][{kk}]", el, nd, d))
-            continue
+    for k in [f.name for f in dataclasses.fields(SweepCapture)]:
+        a, b = getattr(cap_old, k), getattr(cap_new, k)
         if isinstance(a, dict) and isinstance(b, dict):
             for kk in sorted(set(a) & set(b)):
                 el, nd, d = _cmp(a[kk], b[kk], f"_capture[{k}][{kk}]")
@@ -292,20 +275,13 @@ def main() -> int:
             print(f"      {nm:<52} {nd:>9,}/{el:<10,} max {d:.6g}")
         if len(cap_bad) > 40:
             print(f"      … and {len(cap_bad) - 40} more (VALUE deltas are listed first)")
-    if missing:
-        print(f"\n   ⚠ diagnostic keys only ARM A publishes: {missing}")
-        print("      ⭐ EXPECTED for an ablation (a silent or switched-off operator publishes nothing);")
-        print("         a BUG for an identity gate, where both arms must publish the same keys.")
-    if added:
-        print(f"\n   ⚠ diagnostic keys only ARM B publishes: {added}")
-
     # ── the backbone assertions, as violation counts beside their ELIGIBLE sets ──────────────────────
     # An assertion reporting 0 violations where its predicate can never fire is not evidence of
     # anything, so print what each one could have caught beside what it did — for BOTH arms, because a
     # policy that sends nothing skips every check on a message and would otherwise read as "holds"
     # when the truth is "never ran" (`TRAPS: could-the-arm-have-fired`).
-    aa = cap_old.get("backbone_assertions") or {}
-    ab = cap_new.get("backbone_assertions") or {}
+    aa = cap_old.backbone_assertions or {}
+    ab = cap_new.backbone_assertions or {}
     if aa or ab:
         print()
         print("   ⭐ THE FIVE BACKBONE ASSERTIONS — violations / eligible, BOTH arms")
@@ -332,7 +308,7 @@ def main() -> int:
                 verdict = f"{'⛔ WAIVED' if waived else '⛔ UNWAIVED'}, up to {worst:.2f}% of eligible"
             print(f"   {k:<32} {cells[0]:>17} {cells[1]:>17}   {verdict}")
 
-    ok = tot_diff == 0 and cap_diff == 0 and not missing and not added and not cap_bad
+    ok = tot_diff == 0 and cap_diff == 0 and not cap_bad
     if tot_el == 0:
         print("\n   ⛔ COMPARED NOTHING — this gate would have passed vacuously (TRAPS.md byte-identity-gate)")
         return 1

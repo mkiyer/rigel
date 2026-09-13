@@ -441,13 +441,13 @@ def test_the_solver_classes_are_the_solvers_own_predicate(measured, toy):
     cap = measured.debug_pass0["capture"]
     chain = measured.debug_pass0["chain"]
 
-    tau = np.asarray(cap["_tau0_lam"], np.float64)
+    tau = np.asarray(cap.tau_lam, np.float64)
     is_region = np.asarray(chain.kind) == P0.REGION
     # A structurally pure-gDNA object exists on BOTH axes — `_type_belief` locks the class without
     # consulting the axis. A `(~solvable) & is_region` filter files every structurally-locked BOUNDARY
     # as `message_only`, i.e. as an object whose answer came from its neighbours, when nothing was
     # ever asked of it.
-    census_lock = ~np.asarray(cap["free_pos"], bool) & ~np.asarray(cap["free_neg"], bool)
+    census_lock = ~np.asarray(cap.free_pos, bool) & ~np.asarray(cap.free_neg, bool)
     # the SOLVER's own predicate — imported, not restated
     census_no_ev = ~has_own_composition_evidence(tau) & (~census_lock)
 
@@ -463,7 +463,7 @@ def test_the_solver_classes_are_the_solvers_own_predicate(measured, toy):
 
     # PERTURBATION 2: the region-only lock must be a DIFFERENT partition on this fixture, or the
     # correction above is untested and could silently revert.
-    region_only_lock = (~np.asarray(cap["solvable"], bool)) & is_region
+    region_only_lock = (~np.asarray(cap.solvable, bool)) & is_region
     assert not np.array_equal(region_only_lock, census_lock), (
         "the region-only and both-axes locks agree on this fixture, so it cannot demonstrate the "
         "defect — the scenario needs a G1 BOUNDARY carrying mass (an intergenic<->exon boundary)"

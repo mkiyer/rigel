@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 
 from rigel.calibration import sweep as SW
-from rigel.calibration.blocks import block_slice
+from rigel.calibration.blocks import SweepCapture, block_slice
 from rigel.calibration.message_cache import MessageCache
 from rigel.calibration.messages import BlockContext, PsiMessage, Received
 from rigel.calibration.messages.silent import SilentPolicy
@@ -379,8 +379,9 @@ def test_the_backbone_does_not_know_what_a_message_is_about():
         f"policy concepts leaked into the backbone's identifiers: {leaked}"
     )
     cap = sorted(i for i in ident if "capture" in i)
-    assert cap == ["_capture"], (
-        f"the only licensed 'capture' is the diagnostics hook, the parameter. Found {cap}"
+    assert cap == ["_capture", "sweepcapture"], (
+        "the only licensed 'capture' words are the diagnostics hook — the parameter — and its record "
+        f"(`blocks.SweepCapture`). Found {cap}"
     )
 
 
@@ -512,7 +513,7 @@ def test_the_block_solve_is_the_chain_solve_for_every_block_size(sweep_inputs):
     kw.pop("block_slots", None)  # the capture carries calibrate's; this gate sets its own
 
     def run(block_slots):
-        cap: dict = {}
+        cap = SweepCapture()
         out = SW.solve_chain(
             *sweep_inputs["args"], **kw, policy=policy, block_slots=block_slots, _capture=cap
         )
@@ -524,30 +525,22 @@ def test_the_block_solve_is_the_chain_solve_for_every_block_size(sweep_inputs):
         got = run(bs)
         for f in whole:
             assert np.array_equal(got[f], whole[f]), f"block_slots={bs}: {f} differs"
-        for key in (
-            "f_g",
-            "fg_loc",
-            "_tau0_lam",
-            "held_composition",
-            "solvable",
-            "mass_global",
-            "count",
-        ):
-            assert np.array_equal(caps[bs][key], caps[None][key]), (
+        for key in ("f_g", "fg_loc", "tau_lam", "solvable", "mass_global", "count"):
+            assert np.array_equal(getattr(caps[bs], key), getattr(caps[None], key)), (
                 f"block_slots={bs}: capture {key} differs"
             )
-        a, b = caps[bs]["lam_rows"], caps[None]["lam_rows"]
+        a, b = caps[bs].lam_rows, caps[None].lam_rows
         assert (a is None) == (b is None) and (a is None or np.array_equal(a, b))
-        assert caps[bs]["backbone_assertions"] == caps[None]["backbone_assertions"]
+        assert caps[bs].backbone_assertions == caps[None].backbone_assertions
         # what each node HEARD is the same; at a block's first slot — a terminal, which hears nothing
         # by the structural rule — an open side and SILENCE are the same hearing
         for side in ("from_left", "from_right"):
-            heard = [caps[k][side].heard for k in (bs, None)]
+            heard = [getattr(caps[k], side).heard for k in (bs, None)]
             assert np.array_equal(heard[0], heard[1]), (
                 f"block_slots={bs}: {side} differs in what was heard"
             )
             for i in np.flatnonzero(terminal):
-                assert not any(caps[k][side].heard[i] for k in (bs, None))
+                assert not any(getattr(caps[k], side).heard[i] for k in (bs, None))
 
 
 def test_a_block_view_rebases_the_links_and_slices_every_per_slot_array(sweep_inputs):
@@ -704,10 +697,10 @@ def test_a_diagnostic_capture_always_runs_the_full_layer(sweep_inputs):
     kw = _cache_kw(sweep_inputs)
     cache = MessageCache()
     SW.solve_chain(*sweep_inputs["args"], **kw, policy=policy, message_cache=cache)
-    cap: dict = {}
+    cap = SweepCapture()
     hits_before = cache.hits
     out = SW.solve_chain(
         *sweep_inputs["args"], **kw, policy=policy, message_cache=cache, _capture=cap
     )
     assert cache.hits == hits_before, "a captured sweep must not be served from the cache"
-    assert "from_left" in cap and out.has_composition is not None
+    assert cap.from_left is not None and out.has_composition is not None

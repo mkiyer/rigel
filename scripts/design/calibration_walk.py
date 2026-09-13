@@ -64,10 +64,10 @@ def run_arm(payload, kw, *, refits: int | None, messages: bool) -> dict:
               **{k: v for k, v in kw.items() if k != "payload"})
     cap = debug["capture"]
     want = cfg.message_policy if messages else "silent"
-    if cap.get("policy_name") != want:
+    if cap.policy_name != want:
         raise AssertionError(f"messages={messages} but the policy that ran is "
-                             f"{cap.get('policy_name')!r}, not {want!r} — inert or leaking arm")
-    if not messages and not np.array_equal(np.asarray(cap["f_g"]), np.asarray(cap["fg_loc"])):
+                             f"{cap.policy_name!r}, not {want!r} — inert or leaking arm")
+    if not messages and not np.array_equal(np.asarray(cap.f_g), np.asarray(cap.fg_loc)):
         raise AssertionError("muted arm's final belief differs from its local solve — not muted")
     return cap
 
@@ -108,12 +108,12 @@ def main() -> int:
     cell_f = run_arm(payload, kw, refits=None, messages=True)
 
     stages = [
-        ("A init", np.asarray(cell_cd["fg_init"], np.float64)),
-        ("B strand", np.asarray(cell_cd["fg_strand"], np.float64)),
-        ("C local (refit0)", np.asarray(cell_cd["fg_loc"], np.float64)),
-        ("D C+messages", np.asarray(cell_d["f_g"], np.float64)),
-        (f"E C+refits({shipped_refits})", np.asarray(cell_e["f_g"], np.float64)),
-        ("F SHIPPED (refits+msgs)", np.asarray(cell_f["f_g"], np.float64)),
+        ("A init", np.asarray(cell_cd.fg_init, np.float64)),
+        ("B strand", np.asarray(cell_cd.fg_strand, np.float64)),
+        ("C local (refit0)", np.asarray(cell_cd.fg_loc, np.float64)),
+        ("D C+messages", np.asarray(cell_d.f_g, np.float64)),
+        (f"E C+refits({shipped_refits})", np.asarray(cell_e.f_g, np.float64)),
+        ("F SHIPPED (refits+msgs)", np.asarray(cell_f.f_g, np.float64)),
     ]
 
     def err(fg, sel):

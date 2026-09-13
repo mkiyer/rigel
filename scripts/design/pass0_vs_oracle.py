@@ -218,8 +218,8 @@ def solver_slot_classes(capture, chain, eps: float = _EPS) -> dict[str, np.ndarr
     over ``SD_LAMBDA_DECADES``. ``eps`` exists so a gate can move it and watch the partition move;
     production callers must not pass it.
     """
-    tau = np.asarray(capture["_tau0_lam"], np.float64)
-    struct_lock = g1_locked(capture["free_pos"], capture["free_neg"])
+    tau = np.asarray(capture.tau_lam, np.float64)
+    struct_lock = g1_locked(capture.free_pos, capture.free_neg)
     message_only = (tau <= eps) & (~struct_lock)
     return {
         "own_evidence": ~(struct_lock | message_only),

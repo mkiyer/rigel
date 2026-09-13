@@ -76,11 +76,11 @@ def silence(spec):
 def report(spec_name, arm, r, expect, messages):
     """Per object: the counts, the three rungs, and the deviation from a CONSTANT truth."""
     cap = r.capture
-    fg = np.asarray(cap["f_g"], float)
-    loc = np.asarray(cap["fg_loc"], float)
-    strand = np.asarray(cap["fg_strand"], float)
-    tau = np.asarray(cap["_tau0_lam"], float)
-    cnt = np.asarray(cap["count"], float).sum(axis=1)
+    fg = np.asarray(cap.f_g, float)
+    loc = np.asarray(cap.fg_loc, float)
+    strand = np.asarray(cap.fg_strand, float)
+    tau = np.asarray(cap.tau_lam, float)
+    cnt = np.asarray(cap.count, float).sum(axis=1)
     rows = TH.object_rows(r)
     print(f"\n── {spec_name} · {arm} · truth f_g = {expect:.3f} at EVERY object ──────────────────")
     print(f"   {'slot':>4} {'type':<16} {'where':<16} {'n':>8} {'fg_strand':>10} {'fg_loc':>8} "

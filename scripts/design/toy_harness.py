@@ -251,7 +251,7 @@ def harvest(
 def _rate_from_capture(capture, chain, region_arrays) -> float:
     """``sum(count) / sum(eff_gdna)`` over the donor's INTERGENIC region slots.
 
-    Both arrays are the solver's own (``capture['count']`` and ``capture['eff_gdna']``), so the rate
+    Both arrays are the solver's own (``capture.count`` and ``capture.eff_gdna``), so the rate
     is in exactly the frame the toy's own regions will be measured in — no second implementation of an
     effective length (`TRAPS: two-docstrings-one-quantity`).
     """
@@ -261,8 +261,8 @@ def _rate_from_capture(capture, chain, region_arrays) -> float:
     is_region = kind == REGION
     pure = is_region.copy()
     pure[is_region] = rtype[obj[is_region]] == 0
-    count = np.asarray(capture["count"], np.float64).sum(axis=1)
-    eff = np.asarray(capture["eff_gdna"], np.float64)
+    count = np.asarray(capture.count, np.float64).sum(axis=1)
+    eff = np.asarray(capture.eff_gdna, np.float64)
     if not pure.any() or eff[pure].sum() <= 0.0:
         raise ValueError("no intergenic region slots with gDNA opportunity in the donor")
     return float(count[pure].sum() / eff[pure].sum())
@@ -536,13 +536,13 @@ def object_rows(r: ToyResult) -> list[dict]:
     size = np.asarray(ra.region_size_bp, np.float64)
 
     cap = r.capture
-    fg_loc = np.asarray(cap["fg_loc"], np.float64)
-    fg = np.asarray(cap["f_g"], np.float64)
-    var_g = np.asarray(cap["var_g"], np.float64)
-    tau = np.asarray(cap["_tau0_lam"], np.float64)
-    count = np.asarray(cap["count"], np.float64).sum(axis=1)
-    mature = np.asarray(cap["mature"], np.float64)
-    spliced = np.asarray(cap["spliced"], np.float64)
+    fg_loc = np.asarray(cap.fg_loc, np.float64)
+    fg = np.asarray(cap.f_g, np.float64)
+    var_g = np.asarray(cap.var_g, np.float64)
+    tau = np.asarray(cap.tau_lam, np.float64)
+    count = np.asarray(cap.count, np.float64).sum(axis=1)
+    mature = np.asarray(cap.mature, np.float64)
+    spliced = np.asarray(cap.spliced, np.float64)
 
     ov = r.truth.override_masses(ra)
     tg = {"region": np.asarray(ov["mass_gdna_region"], np.float64),

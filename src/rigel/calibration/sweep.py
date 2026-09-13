@@ -52,7 +52,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .blocks import block_slice, gather, view_fields
+from .blocks import SweepCapture, block_slice, view_fields
 from .message_cache import MessageCache
 from .messages import BlockContext, ChainView, PsiMessage, Received
 from .messages.silent import SilentPolicy
@@ -202,7 +202,7 @@ def solve_chain(
     policy=None,
     block_slots: int | None = None,
     message_cache: "MessageCache | None" = None,
-    _capture: dict | None = None,
+    _capture: SweepCapture | None = None,
 ) -> RegionBelief:
     """One forward-backward sweep over the chain. Returns the resolved :class:`RegionBelief`.
 
@@ -284,7 +284,7 @@ def solve_chain(
             n_owned=b.stop - b.start,
             factory_rows=None if intron_prior is None else intron_prior[sl],
             cache=None if _capture is not None else message_cache,
-            _capture={} if _capture is not None else None,
+            _capture=_capture is not None,
         )
         own = slice(b.start, b.stop)
         for k, arr in res["belief"].items():
@@ -302,18 +302,15 @@ def solve_chain(
     if rowless and "lam_rows_finite" in counts:
         counts._add("lam_rows_finite", 0, rowless)
     if _capture is not None:  # inert diagnostic hook
-        _capture.update(gather(diagnostics, n))
-        _capture.update(
-            backbone_assertions=counts,
-            order=np.arange(n, dtype=np.int64),
-            left=np.asarray(chain.left, np.int64),
-            right=np.asarray(chain.right, np.int64),
-            # which policy ran, read off the artifact — the witness an instrument's "the arm ran"
-            # assertion needs (TRAPS: an-ablation-that-never-ran), never a config flag it did not thread
-            policy_name=str(getattr(policy, "name", type(policy).__name__)),
-            solve_grid=_logodds_grid(int(n_grid), float(logodds_window))[1],
-            intron_prior=None if intron_prior is None else np.asarray(intron_prior),
-        )
+        _capture.fill(SweepCapture.gather(diagnostics))
+        _capture.backbone_assertions = counts
+        _capture.left = np.asarray(chain.left, np.int64)
+        _capture.right = np.asarray(chain.right, np.int64)
+        # which policy ran, read off the artifact — the witness an instrument's "the arm ran"
+        # assertion needs (TRAPS: an-ablation-that-never-ran), never a config flag it did not thread
+        _capture.policy_name = str(getattr(policy, "name", type(policy).__name__))
+        _capture.solve_grid = _logodds_grid(int(n_grid), float(logodds_window))[1]
+        _capture.intron_prior = None if intron_prior is None else np.asarray(intron_prior)
     return RegionBelief(**out, has_composition=has_composition)
 
 
@@ -494,15 +491,14 @@ def _write_back(dc, solvable, belief: RegionBelief, n_owned: int, counts: Assert
 
 
 def _block_diagnostics(
-    diag: dict, ctx, own, belief, solvable, msg, out, tables, strand, arms, support
-):
-    """The diagnostic capture of one block — the instruments' view. Two extra solves live here and
-    nowhere in production: the strand-ONLY belief (no prior, no messages), to split the local error into
-    the strand likelihood against the prior's contribution; and the message-free self-solve variance,
-    deliberately AFTER the write-back so its reference is the OUTGOING belief, which an instrument
-    comparing against the shipped solve depends on. The incoming belief and both row factors are
-    published apart, because the final solve's row factor is the factory's rows PLUS the delivered
-    rows and a replay passing the bare factory is unfaithful whenever the policy delivered anything."""
+    ctx, own, belief, solvable, msg, out, tables, strand, support
+) -> SweepCapture:
+    """The diagnostic capture of one block — the instruments' view (:class:`~.blocks.SweepCapture`).
+    One extra solve lives here and nowhere in production: the strand-ONLY belief (no prior, no
+    messages), to split the local error into the strand likelihood against the prior's contribution.
+    The incoming belief and the delivered rows are published apart from the factory's, because the final
+    solve's row factor is the factory's rows PLUS the delivered rows and a replay passing the bare
+    factory is unfaithful whenever the policy delivered anything."""
     kappa, od_g, od_r = strand
     cnt = ctx.unspliced_count
     fg_strand = _solve_regions_logodds_all(
@@ -520,48 +516,29 @@ def _block_diagnostics(
         n_tilt=ctx.n_tilt,
         priors=None,
     ).gdna_frac
-    loc = _psi(
-        ctx,
-        strand,
-        priors=arms,
-        fg_ref=out["f_g"],
-        fpos_ref=out["f_pos"],
-        fneg_ref=out["f_neg"],
-    )
-    from_left, from_right, held_composition = tables
+    from_left, from_right = tables
     mass_global, eff_global = support
-    diag.update(
-        n_slot=ctx.n_slot.copy(),
+    return SweepCapture(
         fg_loc=own.f_g,
         fg_strand=fg_strand,
-        fp_loc=own.f_pos,
-        fn_loc=own.f_neg,
-        vg_loc=loc.gdna_frac_var,
         f_g=out["f_g"].copy(),
-        f_pos=out["f_pos"].copy(),
-        f_neg=out["f_neg"].copy(),
         var_g=out["var_gdna"].copy(),
+        tau_lam=own.tau_lam,
+        fg_init=np.asarray(belief.f_g, np.float64),
         solvable=solvable,
         count=cnt,
         spliced=ctx.spliced_slot,
         mature=ctx.sj_count.sum(axis=1),
         free_pos=np.asarray(ctx.free_pos, bool),
         free_neg=np.asarray(ctx.free_neg, bool),
-        eff_global=eff_global,
-        mass_global=mass_global,
         eff_gdna=ctx.eff_gdna,
         eff_rna=ctx.eff_rna,
-        global_lp=arms,
-        _tau0_lam=own.tau_lam,
-        fg_init=np.asarray(belief.f_g, np.float64),
-        fpos_init=np.asarray(belief.f_pos, np.float64),
-        fneg_init=np.asarray(belief.f_neg, np.float64),
+        mass_global=mass_global,
+        eff_global=eff_global,
         lam_rows=msg.lam_rows,
         cube_rows=msg.cube_rows,
         from_left=from_left,
         from_right=from_right,
-        held_composition=held_composition,
-        solvable_mask=solvable,
     )
 
 
@@ -576,7 +553,7 @@ def _solve_block(
     n_owned: int,
     factory_rows,
     cache: "MessageCache | None",
-    _capture: dict | None,
+    _capture: bool,
 ) -> dict:
     """One block of the chain, solved end to end on its own slice of every input — the whole sweep, on
     ``chain.n_slots`` slots of which the first ``n_owned`` are the block's own (the rest is the terminal
@@ -656,21 +633,20 @@ def _solve_block(
         | g1_locked(ctx.free_pos, ctx.free_neg)
         | held_composition
     )
-    if _capture is not None:  # inert diagnostic hook
-        _block_diagnostics(
-            _capture,
+    diagnostics = None
+    if _capture:  # inert diagnostic hook
+        diagnostics = _block_diagnostics(
             ctx,
             own,
             belief,
             solvable,
             msg,
             out,
-            (from_left, from_right, held_composition),
+            (from_left, from_right),
             strand,
-            arms,
             (mass_global, eff_global),
         )
-    return dict(belief=out, has_composition=has_composition, counts=counts, diagnostics=_capture)
+    return dict(belief=out, has_composition=has_composition, counts=counts, diagnostics=diagnostics)
 
 
 def _pass(seq, nbr, prepared, n_grid: int, *, backward: bool, terminal=None) -> Received:

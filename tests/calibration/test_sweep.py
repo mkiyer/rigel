@@ -20,6 +20,7 @@ import pytest
 
 from rigel.types import Strand
 
+from rigel.calibration.blocks import SweepCapture
 from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.sweep import solve_chain
 
@@ -433,7 +434,7 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
 
 def _sweep(args, kappa=0.95, n_rna_obs=10000.0, n_gdna_obs=10000.0):
     chain, st, geom, belief, ra = args
-    cap = {}
+    cap = SweepCapture()
     final = region_sweep(
         chain,
         st,

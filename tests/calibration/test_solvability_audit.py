@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from rigel.calibration.blocks import SweepCapture
 from rigel.calibration.region_chain import REGION
 from rigel.calibration.region_init import has_own_composition_evidence
 from rigel.config import CalibrationConfig, PipelineConfig
@@ -293,7 +294,7 @@ def test_own_evidence_STRENGTH_is_reported_as_a_CURVE_because_tau_is_CONTINUOUS(
     # channel" and "the evidence is strong enough to score" stay two separate questions. A threshold
     # smuggled in here would silently re-partition every stratum table in the project.
     cap, chain = m.debug_pass0["capture"], m.debug_pass0["chain"]
-    tau = np.asarray(cap["_tau0_lam"], np.float64)
+    tau = np.asarray(cap.tau_lam, np.float64)
     ch = SA.channel_masks(cap, chain, cfg)
     np.testing.assert_array_equal(
         ch["strand"] | ch["factory"],
@@ -304,12 +305,12 @@ def test_own_evidence_STRENGTH_is_reported_as_a_CURVE_because_tau_is_CONTINUOUS(
     # …and on a CONSTRUCTED τ that actually spans the region, because the fixture's own-evidence
     # slots all sit at one strength and a floor placed below them would be invisible here.
     probe_tau = np.array([0.0, 1e-8, 1e-7, 1e-5, 1e-3, 2e-3, 1e-2, 1e-1, 1.0])
-    probe = {
-        "_tau0_lam": probe_tau,
-        "free_pos": np.ones(probe_tau.size, bool),
-        "free_neg": np.zeros(probe_tau.size, bool),
-        "intron_prior": None,
-    }
+    probe = SweepCapture(
+        tau_lam=probe_tau,
+        free_pos=np.ones(probe_tau.size, bool),
+        free_neg=np.zeros(probe_tau.size, bool),
+        intron_prior=None,
+    )
     pchain = type("C", (), {"n_slots": probe_tau.size})()
     pch = SA.channel_masks(probe, pchain, cfg)
     np.testing.assert_array_equal(
@@ -365,7 +366,7 @@ def test_own_evidence_STRENGTH_is_reported_as_a_CURVE_because_tau_is_CONTINUOUS(
 
 
 def test_the_sd_LAMBDA_is_the_solvers_own_tau_and_locked_slots_are_CERTAIN(audited):
-    """``sd_lam`` must be ``1/√τ`` from the solver's own ``_tau0_lam`` — not a re-derivation — with
+    """``sd_lam`` must be ``1/√τ`` from the solver's own ``tau_lam`` — not a re-derivation — with
     ``0`` at a structurally-locked slot (certain, nothing to resolve) and ``inf`` where no channel
     spoke at all. Those two encodings are what make the curve's ends meaningful.
 
@@ -374,7 +375,7 @@ def test_the_sd_LAMBDA_is_the_solvers_own_tau_and_locked_slots_are_CERTAIN(audit
     """
     m, a, cfg = audited
     cap, chain = m.debug_pass0["capture"], m.debug_pass0["chain"]
-    tau = np.asarray(cap["_tau0_lam"], np.float64)
+    tau = np.asarray(cap.tau_lam, np.float64)
     ch = SA.channel_masks(cap, chain, cfg)
     kind = np.asarray(chain.kind)
     axis_sel = kind == REGION  # `audited` is the region axis
@@ -412,8 +413,8 @@ def test_a_STRUCTURALLY_LOCKED_BOUNDARY_is_as_DETERMINED_as_a_locked_region(audi
     m, a, cfg = audited
     cap, chain = m.debug_pass0["capture"], m.debug_pass0["chain"]
     kind = np.asarray(chain.kind)
-    fp = np.asarray(cap["free_pos"], bool)
-    fn = np.asarray(cap["free_neg"], bool)
+    fp = np.asarray(cap.free_pos, bool)
+    fn = np.asarray(cap.free_neg, bool)
     g1 = ~fp & ~fn
 
     ch = SA.channel_masks(cap, chain, cfg)

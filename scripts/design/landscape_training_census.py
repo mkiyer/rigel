@@ -106,14 +106,14 @@ class Spy:
             # the sweep solves the chain a locus block at a time, so the held messages are read off the
             # capture, where the backbone re-keys every block's to the chain (`blocks.gather`)
             out = orig_solve_chain(*a, **k)
-            cap = k.get("_capture") or {}
-            cube = cap.get("cube_rows")
+            cap = k.get("_capture")
+            cube = None if cap is None else cap.cube_rows
             spy.sweeps.append(
                 dict(
                     capture=k.get("_capture"),
                     belief=out,
-                    from_left=cap.get("from_left"),
-                    from_right=cap.get("from_right"),
+                    from_left=None if cap is None else cap.from_left,
+                    from_right=None if cap is None else cap.from_right,
                     cube_slots=() if not cube else tuple(cube),
                 )
             )
@@ -322,20 +322,20 @@ def run_condition(index, region_arrays, sj, boundary_flags, cache_dir: Path, pol
             chain.kind,
             chain.obj_idx,
             region_arrays.signature,
-            cap["free_pos"],
-            cap["free_neg"],
-            cap["mass_global"],
-            cap["eff_global"],
+            cap.free_pos,
+            cap.free_neg,
+            cap.mass_global,
+            cap.eff_global,
             has_composition=sw["belief"].has_composition,
         )
-        gate_selector(sel, anchor, cap["f_g"], cap["mass_global"], cap["eff_global"], fit)
-        fg_grid = np.asarray(cap["solve_grid"], np.float64)  # the capture's grid is f_g = σ(λ)
+        gate_selector(sel, anchor, cap.f_g, cap.mass_global, cap.eff_global, fit)
+        fg_grid = np.asarray(cap.solve_grid, np.float64)  # the capture's grid is f_g = σ(λ)
         lam_grid = np.log(fg_grid) - np.log1p(-fg_grid)
-        fac = density_factor_precision(cap.get("intron_prior"), lam_grid)
+        fac = density_factor_precision(cap.intron_prior, lam_grid)
         comp, bound = held_evidence(sw.get("from_left"), sw.get("from_right"), sw.get("cube_slots", ()), n)
-        locked = g1_locked(cap["free_pos"], cap["free_neg"])
-        evidence = classify_evidence(cap["_tau0_lam"], fac, comp, bound, anchor, locked)
-        rows_held = cap.get("lam_rows")
+        locked = g1_locked(cap.free_pos, cap.free_neg)
+        evidence = classify_evidence(cap.tau_lam, fac, comp, bound, anchor, locked)
+        rows_held = cap.lam_rows
         onesided = None
         if rows_held is not None:
             onesided = np.array([one_sided(rows_held[i]) if np.ptp(rows_held[i]) > TR.EPS else False for i in range(n)])
@@ -363,7 +363,7 @@ def run_condition(index, region_arrays, sj, boundary_flags, cache_dir: Path, pol
         true_gdna=true_gdna,
         node_class=node_class,
         n_slots=n,
-        policy=debug["capture"].get("policy_name"),
+        policy=debug["capture"].policy_name,
         landscape=debug.get("gdna_hyperprior"),
         controls=zero_controls(result, slots),
         sweeps=spy.sweeps,  # the raw per-sweep captures and held messages, for a dissection

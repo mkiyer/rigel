@@ -70,6 +70,7 @@ from .density_deconv import (
     fit_intron_background,
 )
 from .abundance_landscape import AbundanceLandscape, fit_abundance_landscape
+from .blocks import SweepCapture
 from .total_abundance import (
     build_region_wall_mask,
     region_counts_and_exposure,
@@ -658,8 +659,8 @@ def _solve(s: _Solve, _debug):
 
     Returns ``(belief, belief_pass0, hyperprior)`` — the final belief, the prior-free one, and the last
     fitted landscape (``None`` if no refit ran). With ``_debug`` the last sweep fills
-    ``_debug["capture"]``."""
-    capture = {} if _debug is not None else None
+    ``_debug["capture"]`` (a :class:`~.blocks.SweepCapture`)."""
+    capture = SweepCapture() if _debug is not None else None
     belief = _sweep(s, _init_belief(s), None, capture=capture)
     belief_pass0 = belief
     hyperprior: DensityLandscape | None = None
@@ -676,7 +677,7 @@ def _solve(s: _Solve, _debug):
         )
         if hyperprior is None:
             break
-        capture = {} if _debug is not None else None
+        capture = SweepCapture() if _debug is not None else None
         belief = _sweep(s, _init_belief(s), hyperprior, cache, capture=capture)
         logger.debug(
             "calibration: PHASE 2 gDNA-hyperprior refit %d/%d (%d training regions)",

@@ -104,12 +104,12 @@ def dissect(m, *, axis: str, arm: str, top: int, index) -> dict:
     slot_of = region_slot if axis == "region" else boundary_slot
 
     solver, info = m.solver_masks[axis], m.info_masks[axis]
-    tau = np.asarray(cap["_tau0_lam"], np.float64)
-    var_g = np.asarray(cap["var_g"], np.float64)
-    fg_loc = np.asarray(cap["fg_loc"], np.float64)
-    counts = np.asarray(cap["count"], np.float64)
-    eff_g = np.asarray(cap["eff_gdna"], np.float64)
-    eff_r = np.asarray(cap["eff_rna"], np.float64)
+    tau = np.asarray(cap.tau_lam, np.float64)
+    var_g = np.asarray(cap.var_g, np.float64)
+    fg_loc = np.asarray(cap.fg_loc, np.float64)
+    counts = np.asarray(cap.count, np.float64)
+    eff_g = np.asarray(cap.eff_gdna, np.float64)
+    eff_r = np.asarray(cap.eff_rna, np.float64)
 
     rtype = coarse_type_array(np.asarray(ra.signature)).astype(np.int64)
     strand_class = np.asarray(ra.strand_class, np.int64)

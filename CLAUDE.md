@@ -187,7 +187,7 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 ```
 
 **The standing baseline: 0 failed / 3,435 passed / 0 skipped / 2 xfail, 3,437 collected** (re-derived
-2026-09-13 after the tunables census, which added and retired no file — four config switches gone, their
+2026-09-13 after the capture became a typed record and after the tunables census, neither of which added or retired a file — four config switches gone, their
 tests rewritten in place, ±0 — and after the one-lattice landing the same day, which added and retired no file: 21 goldens regenerated, their
 magnitudes read first — transcript counts ≤ 1.5e-3 relative, a tiny toy's `em_effective_length` ≤ 8.4 % — and
 the retired second grid's assertion folded into the chunk-exactness gate, ±0; before that, 2026-09-12: the
@@ -266,7 +266,7 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | `design/module_census.py` | ⭐⭐⭐ **WHERE DOES A CHANGE GO?** The calibration package re-derived from the AST: the layering with every upward import, each module's importers, docstrings naming a sibling with no import, dead public surface. ⛔ It reports; it does not judge |
 | **⭐⭐⭐ the backbone** | |
 | `design/arm_identity.py` | ⭐⭐⭐ **IS THIS ARM BYTE-IDENTICAL TO THAT ONE?** Compares every scored field of every row, where an aggregate hides a difference that cancels between two fields; the row-key sets must be EQUAL. ⛔ Falsified by a 1-ULP nudge |
-| `design/backbone_parity.py` | ⭐⭐⭐ **WHAT DOES ONE MESSAGE OPERATOR DO, PER SLOT?** Two policies on one real chain in one process, every output array and diagnostic key compared element by element. ⭐ Strictly stronger than the panel per condition, so run it first |
+| `design/backbone_parity.py` | ⭐⭐⭐ **WHAT DOES ONE MESSAGE OPERATOR DO, PER SLOT?** Two policies on one real chain in one process, every output array and every field of the diagnostic capture (`blocks.SweepCapture`) compared element by element. ⭐ Strictly stronger than the panel per condition, so run it first |
 | **⭐⭐ the toy harness** | |
 | `design/toy_panel.py` | ⭐⭐ **HOW DOES ONE TOY SPEC BEHAVE ACROSS EVERY CACHED CONDITION AND AN RNA-DENSITY LADDER, scored per object?** It names which object carries the error and whether the messages helped it. ⚠ 13 s per condition — shard with `--conditions` |
 | `design/verify_toy_substrate.py` | ⭐⭐⭐ **IS THE INPUT CORRECT? — no solver runs.** Every accumulator bank re-derived from per-fragment truth by an independent implementation, plus the splice combinatorics and the length marginal. ⛔ Run it on any new toy spec first |

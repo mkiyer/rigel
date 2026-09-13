@@ -95,21 +95,21 @@ def channel_masks(capture, chain, config) -> dict[str, np.ndarray]:
     ``_EPS``, so "has a channel" means what ``region_init.has_own_composition_evidence`` means by it;
     strength is a separate question, reported as the curve over ``SD_LAMBDA_DECADES``.
     """
-    tau = np.asarray(capture["_tau0_lam"], np.float64)
+    tau = np.asarray(capture.tau_lam, np.float64)
     # ``chain`` is here to be checked, not merely passed: a capture built against a different
     # partition would shift every mask by one slot, which is invisible in aggregate.
     if tau.shape != (int(chain.n_slots),):
         raise ValueError(
-            f"capture['_tau0_lam'] has shape {tau.shape}; expected ({int(chain.n_slots)},), one per "
+            f"capture.tau_lam has shape {tau.shape}; expected ({int(chain.n_slots)},), one per "
             f"chain slot. The capture and the chain describe different partitions."
         )
     # G1, from the one definition (`region_geometry.g1_locked`), on both axes.
-    locked = g1_locked(capture["free_pos"], capture["free_neg"])
+    locked = g1_locked(capture.free_pos, capture.free_neg)
     lam_grid, _ = _logodds_grid(
         lattice_points(config.sweep_logodds_window, config.sweep_logodds_step),
         float(config.sweep_logodds_window),
     )
-    fac = density_factor_precision(capture.get("intron_prior"), lam_grid)
+    fac = density_factor_precision(capture.intron_prior, lam_grid)
     fac = np.zeros_like(tau) if fac is None else np.asarray(fac, np.float64)
     factory = (fac > _EPS) & ~locked
     strand = ((tau - fac) > _EPS) & ~locked
@@ -168,7 +168,7 @@ def audit(m, *, axis: str = "region", config=None) -> dict:
         out[obj[sel]] = np.asarray(values, np.float64)[sel]
         return out
 
-    var_log = onto(cap["var_g"])
+    var_log = onto(cap.var_g)
     _, fg_grid = _logodds_grid(
         lattice_points(config.sweep_logodds_window, config.sweep_logodds_step),
         float(config.sweep_logodds_window),
@@ -180,7 +180,7 @@ def audit(m, *, axis: str = "region", config=None) -> dict:
     err = np.where(live, g_p - g_t, 0.0)
     # the own-evidence strength each object earned, in the units the solver works in: sd(λ) = 1/√τ
     # nats. ``inf`` where there is no channel at all, 0 where the object is structurally certain.
-    tau_axis = onto(cap["_tau0_lam"])
+    tau_axis = onto(cap.tau_lam)
     with np.errstate(divide="ignore", invalid="ignore"):
         sd_lam = np.where(tau_axis > 0.0, 1.0 / np.sqrt(np.maximum(tau_axis, _EPS)), np.inf)
     sd_lam = np.where(per_axis["locked"], 0.0, sd_lam)
@@ -196,7 +196,7 @@ def audit(m, *, axis: str = "region", config=None) -> dict:
         "determined": determined,
         "undetermined": undetermined,
         "channels": per_axis,
-        "ladder": {k: onto(cap[k]) for k in ("fg_strand", "fg_loc", "f_g")},
+        "ladder": {k: onto(getattr(cap, k)) for k in ("fg_strand", "fg_loc", "f_g")},
         "f_true": f_true,
         "f_pred": f_pred,
     }
