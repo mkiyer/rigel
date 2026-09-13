@@ -218,9 +218,7 @@ def scan_and_buffer(
     Returns
     -------
     tuple
-        ``(stats, strand_models, buffer, calibration_payload)`` — the last
-        is ``None`` if the index has no ``regions.feather`` (legacy indexes
-        pre-v3).
+        ``(stats, strand_models, buffer, calibration_payload)``.
 
     No fragment-length model comes out of here. Every fragment-length distribution the tool uses is
     built from the payload by :func:`rigel.calibration.fl.build_fl_models`, so length is measured by
@@ -346,15 +344,10 @@ def scan_and_buffer(
     # the C++ scanner's fractional-accumulator results.
     from .scan_payload import AccumulatorPayload
 
-    if result.get("calibration") is not None:
-        # The provenance covers regions AND boundaries. The payload is boundary-keyed by
-        # construction — its sj axis is meaningless against a different sj CSR — whereas
-        # `partition_hash` covers `regions.feather` only, deliberately.
-        calibration_payload = AccumulatorPayload.from_scan_result(
-            result, graph_hash=index.graph_hash
-        )
-    else:
-        calibration_payload = None
+    # The provenance covers regions AND boundaries. The payload is boundary-keyed by
+    # construction — its sj axis is meaningless against a different sj CSR — whereas
+    # `partition_hash` covers `regions.feather` only, deliberately.
+    calibration_payload = AccumulatorPayload.from_scan_result(result, graph_hash=index.graph_hash)
 
     return stats, strand_models, buffer, calibration_payload
 
@@ -520,13 +513,11 @@ def _setup_geometry_and_estimator(
     else:
         effective_lengths = np.maximum(exonic_lengths - _DEFAULT_MEAN_FRAG + 1.0, 1.0)
 
-    effective_lengths_em = None
-    if calibration is not None and region_arrays is not None:
-        from .calibration.capture_eff_length import transcript_capture_eff_lengths
+    from .calibration.capture_eff_length import transcript_capture_eff_lengths
 
-        effective_lengths_em = transcript_capture_eff_lengths(
-            calibration, region_arrays, index, effective_lengths
-        )
+    effective_lengths_em = transcript_capture_eff_lengths(
+        calibration, region_arrays, index, effective_lengths
+    )
 
     transcript_spans = (index.t_df["end"].values - index.t_df["start"].values).astype(np.float64)
 
@@ -913,10 +904,9 @@ def run_pipeline(
     stats, strand_models, buffer, calibration_payload = scan_and_buffer(bam_path, index, scan)
 
     # -- The second pass: drain the side buffer, BEFORE calibration --
-    if calibration_payload is not None:
-        calibration_payload = _drain_side_buffer(
-            calibration_payload, index, strand_models, seed=config.second_pass_seed
-        )
+    calibration_payload = _drain_side_buffer(
+        calibration_payload, index, strand_models, seed=config.second_pass_seed
+    )
 
     # -- Calibration (acyclic) --
     # Build the region geometry, verify it lines up 1:1 with the accumulator
@@ -1082,12 +1072,10 @@ def run_pipeline(
         )
 
     # Genome-wide gDNA track for the QC report (+ bedGraph). Pure persistence of
-    # the per-region calibration solution; skipped if calibration did not run.
-    calibration_track = None
-    if calibration is not None:
-        from .calibration.track import build_gdna_track
+    # the per-region calibration solution.
+    from .calibration.track import build_gdna_track
 
-        calibration_track = build_gdna_track(calibration, region_arrays, index.ref_names)
+    calibration_track = build_gdna_track(calibration, region_arrays, index.ref_names)
 
     return PipelineResult(
         stats=stats,

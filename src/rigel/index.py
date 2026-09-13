@@ -838,7 +838,7 @@ class TranscriptIndex:
 
     def __init__(self):
         self.index_dir: str | None = None
-        #: v8 splice graph, or ``None`` on an index built before it existed (plan W1a).
+        #: the v8 splice graph's region partition; :meth:`load` requires it (older formats are refused).
         self.regions_df = None
         self.edges_df = None
         self.t_df: pd.DataFrame | None = None
