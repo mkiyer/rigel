@@ -163,9 +163,11 @@ def self_test() -> int:
 
     checks.append(("identical => silent", compare(ref, dict(ref)) == []))
 
-    # a renamed field must be invisible; that is the whole design
-    renamed = dict(ref)  # the multiset holds no names at all, so a rename cannot change it
-    checks.append(("a pure rename => silent", compare(ref, renamed) == []))
+    # a renamed field must be invisible; that is the whole design: the multiset holds no names
+    A = dataclasses.make_dataclass("A", [("x", np.ndarray), ("y", np.ndarray)])
+    B = dataclasses.make_dataclass("B", [("renamed_x", np.ndarray), ("renamed_y", np.ndarray)])
+    u, v = np.arange(3), np.ones(4)
+    checks.append(("a pure rename => silent", content_multiset(A(u, v)) == content_multiset(B(u, v))))
 
     # a changed value must be caught, however small; the hash has no tolerance
     moved = dict(ref, payload_multiset=sorted(["int64|(3,)|aaa", "float64|(4,)|bbZ"]))
@@ -190,9 +192,8 @@ def self_test() -> int:
     # the known hole, pinned so nobody mistakes it for coverage: the multiset cannot see two arrays
     # swapping names, because a multiset has no names; the quant digest is what covers that, and this
     # asserts the hole is exactly where it is documented to be
-    swapped = dict(ref)  # same contents, names exchanged — multiset identical BY CONSTRUCTION
     checks.append(("a NAME SWAP is invisible to the multiset (documented hole)",
-                   compare(ref, swapped) == []))
+                   content_multiset(A(u, v)) == content_multiset(A(v, u))))
 
     width = max(len(n) for n, _ in checks)
     for name, ok in checks:

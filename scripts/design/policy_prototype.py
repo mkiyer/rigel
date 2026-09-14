@@ -270,8 +270,27 @@ def self_test() -> int:
     check("an isoform id keeps the whole token", gene_type_token("gB1_capaltstart") == "capaltstart")
     check("a real annotation's gene id yields no type", gene_type_token("ENSG00000123") == "-")
     check("a malformed block id yields no type", gene_type_token("gBx_clean") == "-")
-    # the arm installation is scoped: after run_arm the shipped policy is back in place
-    check("the shipped policy is the module's default", CALMOD.TransferPolicy is TransferPolicy)
+    # the arm installation is scoped: run_arm installs the arm for its calibrate call and puts the
+    # shipped policy back after it, even when calibrate raises
+    class _Arm:
+        pass
+
+    seen, real_calibrate = {}, CALMOD.calibrate
+
+    def _calibrate(**_kw):
+        seen["policy"] = CALMOD.TransferPolicy
+        raise RuntimeError("stub")
+
+    CALMOD.calibrate = _calibrate
+    try:
+        run_arm("proto", {"proto": _Arm}, {"payload": None, "kwargs": {}})
+    except RuntimeError:
+        pass
+    finally:
+        CALMOD.calibrate = real_calibrate
+    check("run_arm installs the arm for its calibrate call", seen.get("policy") is _Arm)
+    check("run_arm restores the shipped policy, even when calibrate raises",
+          CALMOD.TransferPolicy is TransferPolicy)
     print(f"\n   self-test: {ok} passed, {fail} failed")
     return 1 if fail else 0
 
