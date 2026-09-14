@@ -256,7 +256,6 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | `design/total_abundance_audit.py` | ⭐⭐⭐ **IS THE MEASURED TOTAL A TRUE TOTAL?** Five arms against the origin partitions; read ⓔ START/END agreement first — the only field-free arm and the decisive test of the wall rule. `--self-test` 15/15 |
 | `design/landscape_training_census.py` | ⭐⭐⭐ **WHICH SLOTS TRAIN THE gDNA LANDSCAPE PRIOR, WITH WHAT EVIDENCE, AND HOW MUCH OF THAT TRAINING IS FALSE?** Spies each refit's `fit_landscape` inputs and each sweep's held messages; per refit, per node class and per evidence class (anchor · locked · own:strand · own:factory · delivered:composition · delivered:bound · none), the weight the estimator summed, the gDNA trained and its share on certified-zero slots, with both zero controls from the final answer; `--estimator` re-fits the last population at the certified values. ⛔ Reads `Σw`, never the trained mass, on a `g00` row. `--self-test` 17/17 |
 | `design/calibration_walk.py` | ⭐⭐⭐ **WHICH STAGE OF CALIBRATION INTRODUCES THE ERROR?** The solve as a ladder — init → strand → local → +messages → +refits → shipped — each rung scored per stratum against `calibration_oracle.py`, which it refuses to run without |
-| `design/transport_dispersion.py` | ⭐⭐⭐ **WHERE DOES THE FLANK-TRANSPORT DISPERSION COME FROM? — the decomposition against certified truth, no solver.** Pair disagreement vs common-mode center, each charged with counting (flank AND truth side), the length curve, structure and capture. ⛔ Fit nothing on shallow pairs; the truth count's own trigamma must be subtracted before quoting any certified scatter |
 | `design/solvability_audit.py` | ⭐⭐⭐ **WHICH OBJECTS ARE SOLVABLE, WHICH ARE SOLVED WRONG, AND WHICH ARE CONFIDENTLY WRONG? — where pass-0 and 0.8.0 are judged.** ⛔ Honest ignorance is excluded: `f_g ≈ ½` at zero precision with no own evidence is correct. `--suite` runs the panel |
 | `design/prior_vs_oracle.py` | ⭐⭐⭐ **IS `LocusPriors` — the thing the EM actually reads — RIGHT?** Five arms separate calibration's own error from the assembler's, reporting the count, the composition claim and the scale apart, per stratum. ⛔ Undrained on every arm |
 | `design/pass0_vs_oracle.py` | **HOW DOES PASS-0 COMPARE WITH THE ORIGIN-SPLIT PAYLOAD AND TWO LEVERED CEILINGS, per object and per class?** ⛔ Its mass-weighted headline is the wrong yardstick for pass-0 — honest ignorance reads as error there |
@@ -275,8 +274,6 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | `design/rename_identity.py` | ⭐⭐⭐ **IS THIS RENAME, REFACTOR OR SPEED-UP NUMERICALLY A NO-OP?** `--freeze` captures one reference, `--check` compares after every stage — on array CONTENT and the transcript table, never on names; `--bam` takes a real library instead of a panel condition. ⚠ The reference is frozen, never rolling. `--self-test` 8/8 |
 | `design/rename_census.py` | ⭐⭐⭐ **WHICH NAMES DOES A VOCABULARY RULING TOUCH, AND WHICH CARRY TWO SENSES?** Reports by kind — identifiers, C++, prose — and never renames; `--sense <token>` dumps every site with context. ⛔ Run it before renaming anything |
 | `design/module_census.py` | ⭐⭐⭐ **WHERE DOES A CHANGE GO?** The calibration package re-derived from the AST: the layering with every upward import, each module's importers, docstrings naming a sibling with no import, dead public surface. ⛔ It reports; it does not judge |
-| **⭐⭐⭐ the backbone** | |
-| `design/arm_identity.py` | ⭐⭐⭐ **IS THIS ARM BYTE-IDENTICAL TO THAT ONE?** Compares every scored field of every row, where an aggregate hides a difference that cancels between two fields; the row-key sets must be EQUAL. ⛔ Falsified by a 1-ULP nudge |
 | **⭐⭐ the toy harness** | |
 | `design/toy_panel.py` | ⭐⭐ **HOW DOES ONE TOY SPEC BEHAVE ACROSS EVERY CACHED CONDITION AND AN RNA-DENSITY LADDER, scored per object?** It names which object carries the error and whether the messages helped it. ⚠ 13 s per condition — shard with `--conditions` |
 | `design/verify_toy_substrate.py` | ⭐⭐⭐ **IS THE INPUT CORRECT? — no solver runs.** Every accumulator bank re-derived from per-fragment truth by an independent implementation, plus the splice combinatorics and the length marginal. ⛔ Run it on any new toy spec first |
@@ -287,14 +284,8 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | **the substrate — are the panel and the index sound?** | |
 | `design/simulator_gates.py` | **DOES THE SIMULATOR PASS ITS OWN GATES, scored on per-fragment truth?** ⛔ Run it before trusting the panel |
 | `design/suite_resolves.py` | **CAN THE SUITE RESOLVE THE AXIS YOU ARE CHANGING?** ⛔ Run it before quoting any suite number |
-| `design/index_census.py` | **WHAT IS ACTUALLY IN THIS INDEX?** ⛔ Re-derive the census; never quote a stored table |
-| `design/verify_index_rebuild.py` | **DID AN INDEX REBUILD PRESERVE THE STRUCTURE?** Regions byte-identical, boundaries only in contiguous reach |
 | **Stage A — the accumulator** | |
 | `design/fl_pool_purity.py` | ⭐⭐⭐ **ARE THE FOUR gDNA LENGTH POOLS ACTUALLY PURE gDNA, AND WHAT DOES THE SHIPPED LENGTH MODEL SAY AGAINST TRUTH?** Per pool: the gDNA / nascent / mature counts and each component's mean length; then `TRUE` / `POOLED` / `SHIPPED`, so **contamination (`pool−true`) and the divisor+shrinkage (`ship−pool`) are attributed APART**. ⛔⛔ **Run it only where the two components' fragment lengths DIFFER** — the bias is `RNA_share × length gap`, and the ladder and test chromosome give them EQUAL lengths by design, so a 95 %-contaminated pool reads under a bp there. That is why the defect shipped |
-| **diagnostics** | |
-| `design/prior_units_check.py` | **IS THE EM PRIOR IN FRAGMENT UNITS, OR STILL THE OLD INCIDENCE SUM?** |
-| **plumbing** | |
-| `design/accumulator_cost.py` | **HOW MANY ns PER FRAGMENT DOES THE ACCUMULATOR COST, regressed over several BAMs?** |
 
 
 ## CLI

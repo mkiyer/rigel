@@ -230,8 +230,7 @@ across a licensed face and a LEVEL everywhere else. **The population of a messag
 spliced fragments, which splice in to this exon; EXON → BOUNDARY, the SPLICE OUT, excludes them. One rule
 — the message's population is whatever physically enters the destination — evaluated in two directions.
 
-**Measured on the whole panel, 2026-08-19** (the hop-currency instrument, since retired; `transport_dispersion.py`
-is the surviving decomposition): a terminus
+**Measured on the whole panel, 2026-08-19** (the hop-currency instrument, since retired): a terminus
 — a TSS/TES, at a gene edge or inside another transcript — is a POPULATION change and carries a LEVEL; a
 splice site into an exon carries the SPLICE-IN COMPOSITION; an intron into its own boundary carries a
 COMPOSITION (exact to the fragment where a LEVEL is off by 78–98 % under capture); a hop OUT of an exon
@@ -382,7 +381,7 @@ Calibration cost is depth-independent — every region in the index is solved re
   (`TRAPS: self-checking-validator`); `manifest.json` records the sources and the build is deterministic.
 
 ⛔ Never quote a stored census: region and boundary counts are properties of an annotation, not of the
-tool — run `scripts/design/index_census.py`. And `reach` is covered by no existing hash: a rebuild moved
+tool — re-derive them from the index. And `reach` is covered by no existing hash: a rebuild moved
 38 % of human reaches with both `partition_hash` and `graph_hash` byte-identical, so any
 calibration-facing cache needs a third key (`TRAPS: a-hash-that-misses-its-artifact`).
 

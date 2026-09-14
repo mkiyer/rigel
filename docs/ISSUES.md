@@ -187,7 +187,7 @@ not move. The cure is the enrichment witness `ISSUES: two-sided-exon-row` waits 
 The certified flux at a junction is a lower-sided estimate of the exon's strand RNA level priced by the pair
 (`DESIGN.md` §6b.13); the route rate scatters beyond counting (median −3 %, 5–9 % at depth; 0–40 % over on
 nine block readings) and at a pure-RNA exon the price cannot see it, so a lucky over-read is a sharp floor a
-few points too high. `transport_dispersion.py`.
+few points too high. Its decomposition instrument, `transport_dispersion.py`, was retired 2026-09-14 (in git).
 
 ### splice-out-premise-bias-uncorrected
 `priority: later · kind: decision · 2026-09-02`

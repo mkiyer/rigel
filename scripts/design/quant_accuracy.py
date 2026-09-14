@@ -14,7 +14,7 @@ each condition's realised observed fragment count, never the pre-capture molar a
 length model enters the comparison; the TPM rows share the tool's own effective length on both sides
 and so measure assignment only. This is a thermometer above the 0.8.0 metric, never the target.
 Reading rules: ``noop`` and ``oracle_ruler_noop`` must be byte-identical to ``base``
-(``arm_identity.py`` is the gate); ``base_reseed`` is the sampling noise floor and any smaller delta
+(gated in ``tests/calibration/test_quant_accuracy.py``); ``base_reseed`` is the sampling noise floor and any smaller delta
 is noise; the oracle masses are undrained while the shipped pipeline drains, a small conservative
 bias that cannot explain a large surviving error or hide a large removed one. The library-level
 gDNA fraction counts intergenic fragments as gDNA, as ``cli.py`` does.
@@ -27,7 +27,6 @@ Usage::
     python scripts/design/quant_accuracy.py --arm oracle --oracle-cache DIR --out $RIGEL_ARMS/qa_oracle.jsonl
     python scripts/design/quant_accuracy.py --arm oracle_alloc_unspliced --truth-by-transcript TSV --out F.jsonl
     python scripts/design/quant_accuracy.py --arm base --conditions COND --em-seed 1 --suite DIR --index INDEX
-    python scripts/design/arm_identity.py $RIGEL_ARMS/qa_base.jsonl $RIGEL_ARMS/qa_noop.jsonl
     python scripts/design/quant_accuracy.py --report $RIGEL_ARMS/qa_base.jsonl $RIGEL_ARMS/qa_oracle.jsonl
 """
 
