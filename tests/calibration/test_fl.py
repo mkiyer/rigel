@@ -68,7 +68,7 @@ def test_the_pool_indices_ARE_the_specifications_FragmentPool():
     and nothing would look wrong. Checked against the executable specification itself, not a written-out
     list, for the same reason the payload schema test does.
     """
-    from tests.native._accumulator_reference import FragmentPool
+    from native._accumulator_reference import FragmentPool
 
     assert N_FRAGMENT_POOLS == len(FragmentPool)
     assert POOL_DNA_INTERGENIC == FragmentPool.DNA_INTERGENIC

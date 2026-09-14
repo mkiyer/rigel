@@ -551,7 +551,7 @@ calibration-prior change (`TRAPS: hard-labels-miss-soft-change`); the soft 3-poo
 ## 5. The test suite
 
 ```bash
-python -m pytest tests/ -q                     # never bare `pytest` — the repo root must be on sys.path
+python -m pytest tests/ -q
 python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
 ```
 

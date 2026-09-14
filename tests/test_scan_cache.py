@@ -322,9 +322,9 @@ class TestTheKeyRefusesAMovedIndex:
         dtype and shape is untouched, so ``payload_schema_digest``'s name/column half cannot see the
         change; only a behavioural hash can.
         """
-        from tests.native._accumulator_reference import Accumulator, Partition
+        from native._accumulator_reference import Accumulator, Partition
 
-        from tests.native._digest_fixture import reference_deposit_digest
+        from native._digest_fixture import reference_deposit_digest
 
         before = reference_deposit_digest(Accumulator, Partition)
         original = Accumulator.deposit
@@ -350,11 +350,11 @@ class TestTheKeyRefusesAMovedIndex:
         If the two ever drifted, the key would be certifying an artifact nothing writes. This is the
         gate that makes reading the native side safe.
         """
-        from tests.native._accumulator_reference import Accumulator, Partition
+        from native._accumulator_reference import Accumulator, Partition
 
         from rigel.scan_cache import deposit_digest
 
-        from tests.native._digest_fixture import reference_deposit_digest
+        from native._digest_fixture import reference_deposit_digest
 
         assert reference_deposit_digest(Accumulator, Partition) == deposit_digest(), (
             "the specification and the C++ disagree on the digest fixture, so the cache key certifies "

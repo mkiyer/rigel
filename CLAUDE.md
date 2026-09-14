@@ -182,7 +182,7 @@ and the compilers, and the C++ build finds htslib via `$CONDA_PREFIX`.
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 
 pip install --no-build-isolation -e ".[dev]"   # rebuild after ANY src/rigel/native/ change
-python -m pytest tests/ -q                     # never bare `pytest` — the repo root leaves sys.path
+python -m pytest tests/ -q
 python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
