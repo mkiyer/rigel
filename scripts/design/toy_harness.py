@@ -928,6 +928,21 @@ SPECS: dict[str, ToySpec] = {
             _gene("g2", "-", [(50_000, 53_000), (58_000, 61_000)], 400.0),
         ],
     ),
+    "encompassing": ToySpec(
+        name="encompassing",
+        what_it_probes="⭐⭐ OWNER'S SPEC, 2026-09-13 — a single-exon TB− (10,000–30,000) ENCOMPASSING a two-exon "
+        "TA+ (11,000–12,000, 19,000–20,000): every slot from 11,000 to 20,000 is both-stranded, TA+'s exons "
+        "are exons of both genes and its intron is TB−'s exon, and TB−'s level — measured in its single-strand "
+        "flanks — must cross every one of TA+'s boundaries (they carry only TA+'s bits) while TA+'s junction "
+        "flux is the + source at its exons although TA+ has no single-strand exon anywhere. Gated at four "
+        "abundance regimes by `tests/calibration/test_encompassing_locus.py`; this rung is TA+ ≫ TB−.",
+        genome_length=40_000,
+        genes=[
+            _gene("gA", "+", [(11_000, 12_000), (19_000, 20_000)], 1000.0),
+            _gene("gB", "-", [(10_000, 30_000)], 30.0),
+        ],
+        n_rna_fragments=20_000,
+    ),
 }
 
 

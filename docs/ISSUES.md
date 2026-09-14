@@ -150,6 +150,31 @@ with messages on. The owner plans to change the alpha = 0 rule in the post-calib
 the xfail is the executable record of exactly that pending change and closes there, with a test that asserts
 the new rule's promise. Not the pre-port thread's.
 
+### deadband-gates-a-gdna-free-library
+`priority: next · kind: defect · 2026-09-13`
+The strand deadband's noise floor is `σ²_d = ¼(1/N_rna + od_r) + ¼(1/N_gdna + od_g)`
+(`region_init.strand_discriminability`, `EQUATIONS.md` §5.2b), so a library whose fitted gDNA count is exactly
+zero — the modal real case — has `disc = 0` at every κ: no single-strand slot has strand precision, the message
+layer's `split_live` is False, and no strand-derived RNA level is emitted anywhere (the encompassing-locus audit
+on a `g00` donor: nothing held at any slot, the exon∩exon slots reading `f_g` 0.30 / 0.44 against 0). The owner
+ruled it broken: when gDNA is zero every read is RNA and RNA levels are what should flow most. The term has no
+derivation — gDNA's strand mean is ½ by symmetry (§5.3) and needs no observation — but dropping it alone is
+REFUSED with its number: the ladder's unstranded zero control `g00 ss.50 OFF` reads 499 → 21,484 false gDNA
+fragments and the stranded `g00` rows +23 % / +16 %, every contaminated stratum unchanged. Why: the term also
+kills the UNSTRANDED PHANTOM by accident. On an unstranded library the fitted κ̂ sits a few sampling σ from ½
+(`g00 ss.50 OFF`: κ̂ = 0.500298, both overdispersions fitted at 0), and the RNA half of the floor at 1σ is
+~3e−4 — a coin toss — so `disc` turns positive and the binary readers of `strand_live` (`split_live`, the
+lanes' witness column, `has_own_composition`) switch the strand channel on with a precision that is tiny but
+not zero; `1/N_gdna = ∞` at `g00` had been the only thing keeping them off there. Two things are owed, each
+derived: (1) a floor that kills the phantom on its own merits — a 1σ sampling band is not a deadband, and no
+multiple of σ is a derivation; the candidate is the fit's own uncertainty of κ̂ as a distribution rather than
+a point (`fit_strand_balance` is a posterior mean; its posterior width is the floor) or a continuous use of
+`disc` in place of the binary gates; (2) RNA levels read from a single-strand slot's BELIEF (`belief_fg`, which
+always exists) rather than only from its strand claim (`own[x]`, which the deadband can remove), the way the
+gDNA lane reads a full node's own profile through its total — so a gDNA-free library's exons emit their RNA
+levels whatever the strand channel says. Gate: `test_region_init.test_a_gdna_free_stranded_library_keeps_its_strand_channel`
+(xfail, strict). Stress: `deep_stress.py` and `test_encompassing_locus.py` on a `g00` donor.
+
 ### capture-on-strand-pure-ambig-undercall
 `priority: next · kind: defect · 2026-09-13`
 On the ladder's stranded × capture-ON rows the AMBIG slots whose RNA is on ONE strand (or ≤ 5 % on the

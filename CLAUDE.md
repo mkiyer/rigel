@@ -186,15 +186,15 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,426 passed / 0 skipped / 2 xfail, 3,428 collected** (re-derived
-2026-09-13 after W12's θ quadrature landed in both steps, the tilt lattice and `sweep_n_tilt` deleted — seven ψ gates added to an existing test file, +7 cases and ±0 files, two
+**The standing baseline: 0 failed / 3,434 passed / 0 skipped / 4 xfail, 3,438 collected** (re-derived
+2026-09-14 after the lanes worklist L1–L2 and L4: one new `tests/` file (+2 gates, +4 encompassing-locus cases, one of them an xfail until the witnessed atom), four lane gates net of the retired rung-0 identity gate, and the gDNA-free deadband's xfail record; before that, 2026-09-13, after W12's θ quadrature landed in both steps, the tilt lattice and `sweep_n_tilt` deleted — seven ψ gates added to an existing test file, +7 cases and ±0 files, two
 antisense goldens regenerated with their magnitudes read first (transcript counts 5e-5 relative, a tiny toy's
 `em_effective_length` 2.4 % on an 11-bp entry); before that the same day, after W11's tier 3 retired three dead simulator features — the locus sweep, the net-flow module and the synthetic mini-genome suite path — with their wrappers and tests, and after the θ quadrature's derivation note was added to `docs/dev/`, +1 collected, and after four instruments were retired — the structural-claims audit, the gDNA pool census, the truth A/B and the landscape census — −4 collected per `scripts/design/` file, and after the tilted-moment tests deleted with the length channel were restored into an existing file, +33 cases and ±0 files; before that the same day, after the capture became a typed record and after the tunables census, neither of which added or retired a file — four config switches gone, their
 tests rewritten in place, ±0 — and after the one-lattice landing the same day, which added and retired no file: 21 goldens regenerated, their
 magnitudes read first — transcript counts ≤ 1.5e-3 relative, a tiny toy's `em_effective_length` ≤ 8.4 % — and
 the retired second grid's assertion folded into the chunk-exactness gate, ±0; before that, 2026-09-12: the
-cleanup split, the received tables, the replay's tolerance report, one ψ solver, the memory steps). The 2 xfails are executable records of proven defects whose fixes are elsewhere
-(`ISSUES: two-sided-exon-row`; `ISSUES: antisense-prior-assembly-casualty`), both deferred by ruling to later threads — "fix the test" is a category
+cleanup split, the received tables, the replay's tolerance report, one ψ solver, the memory steps). The 4 xfails are executable records of proven defects whose fixes are elsewhere
+(`ISSUES: two-sided-exon-row`; `ISSUES: antisense-prior-assembly-casualty`; `ISSUES: capture-on-strand-pure-ambig-undercall`, closing with the witnessed atom; `ISSUES: deadband-gates-a-gdna-free-library`), deferred by ruling to their threads — "fix the test" is a category
 error, and an xfail is closed by repairing the thing or asserting the invariant structurally, never by
 widening a bound. **Any failure at all is a regression.** A commit that measures the suite updates this
 line.

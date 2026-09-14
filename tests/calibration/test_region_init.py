@@ -14,6 +14,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from rigel.calibration.density_deconv import (
     GdnaBackground,
@@ -110,6 +111,28 @@ def test_strand_evidence_deadband_kills_unstranded():
         u, u, fg, kappa=0.99, od_g=0.03, od_r=0.03, n_gdna_obs=0.0, n_rna_obs=1e4
     )
     assert np.all(tau_nog == 0.0)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="ISSUES: deadband-gates-a-gdna-free-library — the floor's 1/N_gdna term switches the strand "
+    "channel off on a library with exactly zero gDNA (the modal real case), so no strand-derived RNA level "
+    "is emitted there; dropping the term alone is REFUSED (the unstranded zero control 499 → 21,484): the "
+    "term also kills the unstranded phantom by accident, and a derived floor that does so on its own merits "
+    "plus RNA levels read from a slot's belief rather than its strand claim are owed",
+)
+def test_a_gdna_free_stranded_library_keeps_its_strand_channel():
+    """gDNA's strand mean is ½ by symmetry and needs no observation, so a stranded library with no gDNA
+    has as live a strand channel as any other."""
+    u = np.array([100.0, 100.0])
+    fg = np.array([0.5, 0.5])
+    tau_str = strand_evidence(
+        u, u, fg, kappa=0.99, od_g=0.03, od_r=0.03, n_gdna_obs=1e4, n_rna_obs=1e4
+    )
+    tau_nog = strand_evidence(
+        u, u, fg, kappa=0.99, od_g=0.03, od_r=0.03, n_gdna_obs=0.0, n_rna_obs=1e4
+    )
+    assert np.all(tau_nog == tau_str)
 
 
 def test_a_single_strand_slot_solves_and_is_precise():

@@ -189,6 +189,24 @@ precedes F (the port). Status is kept HERE; tick an item by writing DONE and the
 | W12 | **The θ quadrature** — DONE 2026-09-13 (step 1: `DESIGN.md` §6b.15, `EQUATIONS.md` §9e, `ISSUES: theta-quadrature-at-zero-gdna` CLOSED with its numbers; the nodes follow the strand term's peak, `K_t` = 24 derived; the mechanism corrected — one deep interior-tilt slot, a comb, never strand purity; `ISSUES: strand-marginal-volume-factor` opened). Step 2 DONE the same day: the lanes deliver a row's ingredients (`simplex_logodds.CubeRow`) and ψ evaluates them at its nodes; `sweep_n_tilt`, `_tilt_grid` and the row interpolation deleted — no tilt count exists | the one open design item inside ψ, settled in Python before ψ is ported | the marginal against adaptive quadrature, the oracle metric per stratum with both zero controls, the shared-exon deep stress, the AMBIG both-strand census |
 | W13 | **The port's prerequisites** (§8) — DONE 2026-09-13 on `23a431a9`: `sweeps_MO_3021_step5` (four calls, each replays BIT-IDENTICAL: 30.0 / 12.7 / 12.7 / 12.7 s) and `port_identity_{gdna_g05_ss_0.50_nrna_mid_capture_off, gdna_g05_ss_0.99_nrna_mid_capture_on, LBX0190}.json`, each `--check`ed on the tree that froze it | re-capture the deep library's sweeps on the current tree (`sweep_replay.py capture`), since `sweeps_MO_3021_step4` predates the lattice; fresh identity references for the port thread | the captures replay bit-identical on the tree that made them; `rename_identity.py --check` |
 
+
+### THE LANES WORKLIST (owner, 2026-09-13) — precedes the port; each item its own commit, stressed on the encompassing locus
+
+The encompassing-transcript audit (a single-exon TB− over a two-exon TA+) found the message layer switched
+off, and RNA levels not passed, by couplings a whole chromosome never shows. The owner's ruling: whenever a
+strand is active and live (nonzero fragments) an RNA level is passed, alongside composition; real data will
+stress every one of these; everything is fixed, stressed and proven before the port.
+
+| # | item | what | judged by |
+|---|---|---|---|
+| L1 | **The lanes exist whenever their own coordinate does** — DONE 2026-09-13 (local commit) | `prepare` builds the layer without factory rows; the RNA lanes without the gDNA lane; the rung-0 identity gate retired | three gates; byte-identical on both panels |
+| L2 | **One RNA coordinate, so a junction's flux is always a source** — DONE 2026-09-13 (local commit) | a level is absolute and the coordinate only an origin; the library's RNA coordinate is the pooled single-strand exon density of both strands, falling back to all exons; `CubeRow` carries one `rho_ref`; a strand with no single-strand exon still builds its flux levels | a gate on the audit's context (a + junction at a both-stranded exon builds and delivers a + level); the panels |
+| L3 | **The deadband without `1/N_gdna`** — the one-line form REFUSED 2026-09-13 (`g00 ss.50 OFF` 499 → 21,484: the term kills the unstranded phantom by accident); the two-part design in `ISSUES: deadband-gates-a-gdna-free-library`, its gate an xfail | gDNA's strand mean is ½ by symmetry and needs no observations; the noise floor is `¼(1/N_rna + od_r) + ¼·od_g`; a gDNA-free stranded library keeps its strand channel and its strand-derived levels | a gate (`disc > 0` at `N_gdna = 0`, κ = 0.99; `disc = 0` at κ = ½); the panels' g00 rows; EQUATIONS §5.2b |
+| L4 | **The encompassing locus in the toy ladder and the suite** — DONE 2026-09-13 (local commit; the exon∩exon solve gate xfails until L5) | TA+ (1,000–2,000, 10,000–11,000) inside TB− (0–20,000), four regimes: TA+ ≫ TB−, TA+ ≪ TB−, TA+ ≈ TB−, both ≈ 0 (all gDNA); gates: the − level delivered at every AMBIG slot when TB− is expressed, the + flux level at TA+'s exons when TA+ is, the exon∩exon solves within tolerance, all-gDNA reads gDNA | the suite (a stranded donor fixture) |
+| L5 | **The witnessed atom** | as approved: tests, `src/`, docs; judged on the metric per stratum, both zero controls, the census bands, the shared-exon and encompassing stresses | — |
+
+Then the deep-library baseline, fresh references, the port.
+
 Not on the list, and why: the arcsine coordinate (REFUSED with its numbers; logit is finer at the vertex);
 the vertex atom (a prior-family change whose whole ceiling is ≤ 1 % on stranded in-scope rows — see the
 plan's owner note of 2026-09-12 — parked with that number).
