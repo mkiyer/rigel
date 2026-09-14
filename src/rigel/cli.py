@@ -237,11 +237,10 @@ def _fragment_length_report(fl_models):
     ``gdna`` / ``rna``
         the two modelled pools, the empirical views of what scoring and calibration actually use.
     the five ``pool_*`` rows
-        the pure pools **unaggregated**. ``gdna`` is the sum of the two contained rows and ``rna`` is
-        ``pool_rna_spliced``; the two ``*_exon`` crossing rows are ON-TARGET gDNA and are in neither,
-        which is why they are reported separately (``calibration.fl.splash_fl_mass``) — on-target
-        gDNA runs tens of bp shorter than off-target, and a model fitted off-target is mis-centred for
-        exactly the fragments that leak.
+        the five pools **unaggregated** (none is pure). ``gdna`` is the fitted uniform-frame gDNA
+        histogram and ``rna`` the de-tilted ``pool_rna_spliced``; the two ``*_exon`` crossing rows are
+        the on-target gDNA, shown on their own so the off-target / on-target comparison is an output
+        (``calibration.fl.splash_fl_mass``).
 
     There are no per-SpliceType histograms here, deliberately: they would be the scanner's own,
     measured by rules that are neither each other nor ``L``, over a population gated by a unanimity

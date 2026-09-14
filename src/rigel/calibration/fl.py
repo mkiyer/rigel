@@ -170,9 +170,10 @@ class FLModels:
       (:meth:`rna_model` / :meth:`gdna_model` / :meth:`global_model`); the EB smoothing is a small
       perturbation at real library scale and stays internal to scoring.
 
-    ``gdna_counts`` is the four-pool gDNA histogram (:func:`gdna_fl_mass`), which is a mixture and
-    not a deconvolved pure-gDNA distribution. ``rna_counts`` is the annotated-sj histogram
-    (:func:`rna_fl_mass`).
+    ``gdna_counts`` is the uniform-frame gDNA histogram the pmf is shrunk from, as
+    :func:`build_fl_models` builds it: the two-pool contrast when the region inputs are given, else the
+    de-tilted four-pool sum, or the contained pair with no opportunity at all. ``rna_counts`` is the
+    annotated-sj histogram (:func:`rna_fl_mass`).
     """
 
     global_pmf: np.ndarray  # unconditional anchor (no prior)
@@ -180,7 +181,7 @@ class FLModels:
     gdna_pmf: np.ndarray  # gDNA pool, EB-shrunk toward global
     global_counts: np.ndarray  # the accumulator's deposited_lengths — every deposited fragment at L
     rna_counts: np.ndarray  # raw spliced-annotated histogram
-    gdna_counts: np.ndarray  # raw structural pool (intergenic + intronic)
+    gdna_counts: np.ndarray  # the uniform-frame gDNA histogram (see above)
     n_global: float
     n_rna: float
     n_gdna: float
@@ -223,11 +224,8 @@ class FLModels:
         return self._empirical(self.rna_counts)
 
     def gdna_model(self) -> "FragmentLengthModel":
-        """Empirical gDNA structural-pool FL distribution (QC).
-
-        The pool is the intergenic + intronic CONTAINED mass (:func:`gdna_fl_mass`): a gDNA-dominated
-        proxy that also includes intronic/nascent RNA, not a deconvolved pure-gDNA distribution.
-        """
+        """Empirical gDNA FL distribution (QC): ``gdna_counts``, the histogram the gDNA pmf is shrunk
+        from."""
         return self._empirical(self.gdna_counts)
 
 
@@ -271,13 +269,11 @@ def rna_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
 
 
 def splash_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
-    """The ON-TARGET gDNA length histogram — the two crossing pools, for QC.
+    """The ON-TARGET gDNA length histogram — the two crossing pools, reported on their own for QC.
 
-    Never fold this into :func:`gdna_fl_mass`. Under capture the intergenic pool is depleted rather
-    than made impure, so its composition stays clean while its coverage does not, and on-target gDNA
-    fragments run markedly shorter. A model fitted off-target is therefore mis-centred for exactly
-    the fragments that leak, and having this as a named pool makes that comparison an output instead
-    of an assumption.
+    :func:`gdna_fl_mass` includes them, each divided by its own opportunity. Under capture they carry
+    the long fragments the contained pools lose, and naming them makes the off-target / on-target
+    comparison an output instead of an assumption.
     """
     return _pool_sum(payload, _SPLASH_POOLS)
 
@@ -357,18 +353,18 @@ def _deconvolved_gdna_counts(
     in the returned :class:`GdnaContrast`, so a run that corrected nothing cannot be mistaken for
     one that corrected everything.
 
-    The three declines, each derived rather than chosen:
+    The declines, each derived rather than chosen:
 
     * *no density* — the one-sided rate found no support, which is what a zero-gDNA library looks like.
       There is no gDNA length distribution to estimate and inventing one is the failure mode to avoid.
-    * *purities not separated* — the contrast divides by ``a_0 - a_1``, so it needs the two pools to have
-      measurably different compositions. The comparison is against that difference's own sampling
-      error, never a chosen floor: with ``a_p = rho*E_p/n_p`` and ``Var(n_p) ~ n_p``, the delta
-      method gives ``Var(a_0 - a_1) ~ a_0^2/n_0 + a_1^2/n_1`` — the shared ``rho`` term is
-      common-mode and cancels out of the difference — and the fit stands down when the separation
-      does not exceed its own standard error. This is what makes the estimator stand down by itself
-      at a near-pure library, where nothing needs correcting.
-    * *degenerate* — a pool with no fragments at all.
+    * *an empty pool* — a pool with no fragments at all.
+    * *purities identical* — the contrast divides by ``a_0 - a_1``. Short of zero separation there is
+      no threshold: the inversion is blended toward the pools' own mixture by the resolution weight
+      ``sep^2 / (sep^2 + SE^2)``, where with ``a_p = rho*E_p/n_p`` and ``Var(n_p) ~ n_p`` the delta
+      method gives ``SE^2 ~ a_0^2/n_0 + a_1^2/n_1`` — the shared ``rho`` term is common-mode and
+      cancels out of the difference. So the estimator fades out by itself at a near-pure library,
+      where nothing needs correcting.
+    * *empty after the contrast* — nothing survives the projection back onto the cone.
 
     Under hybrid capture the contrast degenerates to the intergenic pool alone, and that is why it
     is safe there. The premise is that both pools' contaminants share a length distribution, and

@@ -40,10 +40,6 @@ _RNA_SIGNATURE_BITS = BIT_EXON_POS | BIT_EXON_NEG | BIT_INTRON_POS | BIT_INTRON_
 _GDNA_EFF_LEN_FLOOR = 1.0
 
 
-# gDNA eff-len reference density ρ* (eff = θ_g/ρ*): the mass-weighted CONTAINED (exon) density G_c/E_c —
-# robust across capture on/off, stranded/unstranded, and gDNA level.
-
-
 @dataclass(frozen=True, slots=True)
 class LocusPriors:
     """Per-locus EM prior scalars (float64[n_loci], indexed by ``multi_locus_id``)."""

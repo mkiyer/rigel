@@ -68,7 +68,7 @@ import numpy as np
 #: carrying neither is rejected by the accumulator rather than filed under one.
 N_STRAND_COLUMNS = 2
 
-#: Five fragment-length pools, each pure by construction. The order is
+#: Five fragment-length pools, each defined by structure. The order is
 #: `rigel::accumulator::FragmentPool` and `_accumulator_reference.FragmentPool`.
 N_FRAGMENT_POOLS = 5
 
@@ -78,15 +78,14 @@ N_FRAGMENT_POOLS = 5
 #: gDNA length model from the RNA pool and nothing downstream would look wrong;
 #: `tests/calibration/test_fl.py` pins them against the executable specification's enum itself.
 #:
-#: Purity is the point: the two DNA_* contained pools are near-pure gDNA on real data, and
-#: RNA_SPLICED used an ANNOTATED sj with the splice OBSERVED — gDNA cannot be spliced. The two
-#: *_EXON "splash" pools are the only ON-TARGET gDNA population, so they are named rather than folded
-#: into the gDNA model: on-target gDNA runs tens of bp shorter than off-target, and pooling them in
-#: biases the fitted gDNA mean far above the pure intergenic pool's.
+#: The two DNA_* contained pools are gDNA-dominated, not pure (`calibration.fl` deconvolves them by a
+#: two-pool contrast); RNA_SPLICED used an ANNOTATED sj with the splice OBSERVED — gDNA cannot be
+#: spliced. The two *_EXON crossing pools hold the gDNA that capture moves out of containment, and enter
+#: the gDNA model through their own opportunity.
 #: There is deliberately NO pool for an exonic contained fragment or a multi-boundary crossing — those are
-#: gDNA/RNA mixtures, and an impure pool is worse than a missing one.
-POOL_DNA_INTERGENIC = 0  # contained in an intergenic region — pure gDNA
-POOL_DNA_INTRONIC = 1  # contained in an intronic region — pure gDNA
+#: gDNA/RNA mixtures by structure.
+POOL_DNA_INTERGENIC = 0  # contained in an intergenic region — gDNA-dominated
+POOL_DNA_INTRONIC = 1  # contained in an intronic region — gDNA-dominated
 POOL_DNA_INTRON_EXON = 2  # crossing one boundary, flanks {intron, exon} — on-target gDNA
 POOL_DNA_INTERGENIC_EXON = 3  # crossing one boundary, {intergenic, exon} — on-target gDNA
 POOL_RNA_SPLICED = 4  # used an annotated sj, splice OBSERVED — pure RNA

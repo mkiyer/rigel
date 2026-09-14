@@ -372,25 +372,19 @@ def region_gdna_geometry(geometry: RegionGeometry):
 @dataclass(frozen=True, slots=True)
 class RegionBelief:
     """Per-region solved state on the chain: the composition pie `(f_pos, f_neg, f_g)` over the region's UNSPLICED
-    mass + the gDNA share's posterior variance in LOG-FRACTION space, `var_gdna` =
-    `Var(log f_c)`, never `Var(f_c)`. All length ``n_slots``.
+    mass + the gDNA share's posterior variance in LOG-FRACTION space, `var_gdna` = `Var(log f_g)` (a grid
+    moment over the λ lattice, `simplex_logodds._solve_logodds`), never `Var(f_g)`. All length ``n_slots``.
 
     The first axis is the unified region+boundary CHAIN, not the region axis: :func:`init_beliefs`
     builds every array from ``geometry.unspliced_count``, which is ``float64[n_slots, 2]``. Sizing a new
     array off "regions" builds the wrong shape.
 
-    The variances are log-space — grid moments of `log f_c` over the λ lattice
-    (`simplex_logodds._solve_logodds`), matching the log-density message currency. They are
-    therefore not bounded by ¼ and routinely exceed it; a consumer needing the linear `Var(f_c)` must
-    convert (delta method `Var(f_c) ≈ f_c²·Var(log f_c)`, as `sweep.solve_chain` does for
-    `composition_logvar`).
-
-    The variance is the precision state: `Var(log f_c)=0` is locked and certain (a forbidden strand, say)
-    and `=∞` is no information (unsolved). It feeds the honest message send — a source's outgoing
-    precision is degraded from its own `Var_own` by the communication noise, so an unsure region speaks
-    quietly. The composition is stored as a FRACTION, the face-invariant quantity, because a boundary has
-    two faces but one composition; the density `ρ=f·M_face/E_face` is the message currency (computed
-    inline in `sweep.solve_chain`) and the mass `m=f·M_face` (`RegionDeconv`) is the output."""
+    The variance is not bounded by ¼ and routinely exceeds it; a consumer needing the linear `Var(f_g)`
+    must convert (delta method `Var(f_g) ≈ f_g²·Var(log f_g)`). It is the precision state:
+    `Var(log f_g)=0` is locked and certain (a forbidden strand, say) and `=∞` is no information (unsolved). The landscape prior reads it as its training weight and its
+    location floor (`calibrate._fit_gdna_hyperprior`); no message reads it. The composition is stored as
+    a FRACTION, the face-invariant quantity, because a boundary has two faces but one composition; the
+    mass `m=f·M_face` (`RegionDeconv`) is the output."""
 
     f_pos: np.ndarray
     f_neg: np.ndarray

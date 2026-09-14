@@ -934,10 +934,10 @@ def run_pipeline(
     # loop and the graph is not a polytree.
     sj = build_sj_geometry_arrays(index)
 
-    # The two COMPONENT fragment-length models the calibrator's effective lengths need, each fitted
-    # from a pool that is PURE BY CONSTRUCTION: gDNA from fragments
-    # contained in an intergenic or intronic region, RNA from fragments that used an annotated sj
-    # with the splice OBSERVED. Both are smooth-EB shrunk toward the unconditional global FL.
+    # The two COMPONENT fragment-length models the calibrator's effective lengths need: gDNA from the
+    # four structural gDNA pools, deconvolved by the two-pool contrast (no pool is pure), RNA from
+    # fragments that used an annotated sj with the splice OBSERVED. Both are smooth-EB shrunk toward
+    # the unconditional global FL.
     #
     # All three come from the PAYLOAD — one object, one frame, one definition of length, the two
     # pools and the anchor they are shrunk toward alike. A

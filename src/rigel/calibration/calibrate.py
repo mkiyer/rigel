@@ -443,8 +443,8 @@ class _IntronFactory:
     leaves every sweep byte-identical to the pre-factory path.
 
     ⛔ The rows are evaluated ON the solve grid, so they are a function of ``(n_grid, L)`` and are
-    REBUILT when the bracket widens, never regridded: `_regrid_global` maps between two grids of the
-    same ``L``, and there is no map onto a wider domain the factor was never evaluated on."""
+    REBUILT when the bracket widens: there is no map onto a wider domain the factor was never evaluated
+    on."""
 
     def __init__(
         self, chain, substrate, region_arrays, region_eff_gdna, config, inj, background_pair

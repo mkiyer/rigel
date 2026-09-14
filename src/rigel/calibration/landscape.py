@@ -17,8 +17,8 @@ covered regions a couple of decades above it; for RNA, a silent majority against
 Two components, one sharp and one broad, several decades apart, so the estimator must resolve a spike
 and a wide bump on the same axis. That requirement fixes the two rules the design rests on:
 
-1. Precision is a continuous weight, never an admission rule: a hard precision cutoff scores worse than
-   ignoring precision altogether. See :func:`_reliability`.
+1. Above the location floor (:data:`_LOCATED_VAR`) precision is a continuous weight, never a tuned
+   admission threshold: a tuned cutoff scores worse than ignoring precision. See :func:`_reliability`.
 2. Resolution is a population quantity, not a measurement one. See :func:`knn_widths`, worth reading
    before touching the kernel.
 

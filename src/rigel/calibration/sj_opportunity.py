@@ -28,17 +28,17 @@ Divide by ``pi``, never by ``A`` alone, and the difference is not cosmetic. ``A`
 distribution lengths were DRAWN from; what every consumer needs is the distribution the library
 REALIZES, which is the drawn one weighted by how many placements each length has — and that weight
 is ``T``. The ratio also makes the correction safe under a wrong ``theta``, because ``A`` and ``T``
-are sums over the same transcripts, so a reweighting moves both: over a theta sweep including
-deliberately pathological regimes the ratio form never does worse than not correcting, while the
-``A``-only form does. ``tests/calibration/test_sj_opportunity.py`` pins both halves of that.
+are sums over the same transcripts, so a reweighting moves both: on a deliberately pathological theta
+the ratio form still beats not correcting while the ``A``-only form overshoots past it.
+``tests/calibration/test_sj_opportunity.py`` pins both halves of that.
 
 ``theta`` is a molar abundance — copies — and never an observed fragment count. ``A_j`` already
 counts start positions, so a count would apply the length weighting twice.
 
 Production uses a UNIFORM theta over the non-synthetic transcripts, which needs no expression
 estimate at all. That is not a shortcut taken for cheapness: the ratio cancels most of the
-dependence on theta, so a uniform weighting lands the corrected pool essentially where the true
-molar abundances do, and the residual sensitivity is measured in the test module.
+dependence on theta, so a uniform weighting lands the corrected pool close to where the true molar
+abundances do.
 """
 
 from __future__ import annotations

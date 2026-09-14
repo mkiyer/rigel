@@ -117,8 +117,8 @@ _JEFFREYS_REF = 0.5
 _DEFAULT_L = 10.0
 
 # Cache-tiling target for BOTH per-region solves, as a working-set size rather than a row count — the per-row
-# footprint differs ~7× between the 1-D grid (K f64) and the 2-D cube (K·K_t f32), so no single row count
-# serves both. `_block_rows` turns it into rows.
+# footprint differs ``K_t + 2`` = 26× between a single-strand row (``K``) and an AMBIG row (``K·(K_t + 2)``),
+# both float64, so no single row count serves both. `_block_rows` turns it into rows.
 #
 # NOT a model parameter. Every region solves independently and every reduction in both solvers is within
 # a row (the ψ logsumexp, the moment sums, the CDF cumsum, and the `post @ log f` gemv), so the block size
@@ -150,11 +150,7 @@ def _lse(a, axis, keepdims=False):
     with np.errstate(
         divide="ignore"
     ):  # all-(-inf) slice ⇒ log(0) = -inf (correct); suppress the warning
-        # Accumulate the sum in float64 even for a float32 cube (a 60-/3600-wide reduction loses too much in
-        # f32), then return the input dtype — keeps the f64 path byte-identical, gives the f32 cube an
-        # accurate normalizer.
-        s = np.sum(np.exp(a - m), axis=axis, keepdims=True, dtype=np.float64)
-        r = (m + np.log(s)).astype(m.dtype, copy=False)
+        r = m + np.log(np.sum(np.exp(a - m), axis=axis, keepdims=True))
     return r if keepdims else np.squeeze(r, axis=axis)
 
 

@@ -28,7 +28,7 @@ against an index load that happens anyway, and a stored copy is how a cache goes
 thing it describes.
 
 There is no separate fragment-length row. Every fragment-length
-histogram — the two pure pools and the unconditional anchor they are EB-shrunk toward — is a field OF
+histogram — the five length pools and the unconditional anchor they are EB-shrunk toward — is a field OF
 the payload, so caching the payload caches them, in one frame, by construction. `build_fl_models`
 remains the single source of truth for the derived pmfs, which are still not cached: freezing its
 output would mean a change to the fl model silently does not reach a cached scan.
@@ -302,7 +302,7 @@ class ScanCache:
     provenance: dict  # the key, the BAM, the scan config, the counts
 
     # No fragment-length row is stored here. Every fragment-length histogram comes off `payload` — the
-    # two pure pools and the unconditional anchor they are EB-shrunk toward — so caching the payload
+    # five length pools and the unconditional anchor they are EB-shrunk toward — so caching the payload
     # caches them in one frame. `fl.npz` is neither written nor read;
     # a cache that still has one on disk loads fine, since an extra file is not a key.
 
@@ -582,7 +582,7 @@ def calibration_inputs(
     supported fl fallback, but it is not what ships, and an instrument must not measure a different
     length model than production's).
 
-    Every fragment-length histogram comes from the PAYLOAD — the two pure pools and the unconditional
+    Every fragment-length histogram comes from the PAYLOAD — the five length pools and the unconditional
     anchor they are shrunk toward. One quantity, one source, one
     frame: the scanner's spliced histogram is transcript-space and requires a UNIQUE transcript, while
     the accumulator's `RNA_SPLICED` pool is a structural rule over a larger population; and the anchor

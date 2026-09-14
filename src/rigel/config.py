@@ -262,8 +262,8 @@ class CalibrationConfig:
     #: landscape prior's derived demand), so widening the bracket never coarsens the lattice. ONE lattice
     #: serves every consumer — the read-out, the message rows, the AMBIG cube's λ axis, the intron
     #: factory's rows and the composition prior (ruled 2026-09-13: a second, finer single-strand grid
-    #: with a linear regrid between the two measured worse than one grid on every stratum of both
-    #: panels, and the regrid was the reason).
+    #: with a linear regrid between the two measured worse than one grid on every in-scope stratum of
+    #: both panels, and the regrid was the reason).
     #:
     #: Dimensionless, so one value serves every depth and genome, and what it guarantees is readable: the
     #: ½-quantile read-out is exact to 1 % of a step once a slot's posterior is wider than the step, and

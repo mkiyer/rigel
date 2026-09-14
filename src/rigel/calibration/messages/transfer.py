@@ -151,8 +151,8 @@ class TransferPolicy:
     """``strand = (kappa, od_g, od_r)`` is the library's fitted strand model, which the exon's and the
     boundary's own claims need; ``None`` leaves every strand claim off. The intron factory's per-slot
     profiles arrive on the context (``factory_rows``, the sweep's own λ-factor on its own grid);
-    ``None`` there means no factory evidence and the policy is silent — byte-identical to
-    `SilentPolicy`."""
+    ``None`` there means the factory has nothing to claim; the faces and the lanes are built as with
+    one."""
 
     name = "transfer"
 

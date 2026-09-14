@@ -181,17 +181,9 @@ class CalibrationResult:
     #: ``{gDNA} ∪ {RNA+ if free_pos} ∪ {RNA− if free_neg}`` at every slot, so the answer is three
     #: numbers; ``count_gdna_*`` and ``count_rna_*`` are that answer with the two RNA strands summed.
     #:
-    #: ⛔ THE THREE DO NOT SUM TO 1 ON ABOUT A QUARTER OF EITHER AXIS, and that is a defect in ψ rather
-    #: than a property of this projection. The mechanism is visible at ``sweep.py``'s write-back: the
-    #: three posterior means are ``np.clip(·, 0, 1)``-ed INDEPENDENTLY, and an unsolvable slot keeps an
-    #: init instead — clipping a simplex component-wise does not preserve the sum. By linearity of
-    #: expectation three posterior means over one lattice should close, so the deficit is not inherent
-    #: to taking means.
-    #:
-    #: They are published AS SOLVED and deliberately NOT renormalised: dividing by the sum would make
-    #: the arrays look like a composition while hiding how far ψ's answer is from being one, and a
-    #: consumer could not then tell a solved object from a short one. The schema gate therefore bounds
-    #: each component to ``[0, 1]`` — which is true — and does not assert closure, which is not.
+    #: The three close by construction: ψ solves ``(f_g, w_pos)`` and `simplex_logodds._compose` maps
+    #: them onto the simplex, while a slot the solve does not reach keeps its signature-binary belief.
+    #: They are published as solved, never renormalised.
     gdna_frac_region: np.ndarray
     rna_pos_frac_region: np.ndarray
     rna_neg_frac_region: np.ndarray
@@ -242,11 +234,8 @@ class CalibrationResult:
         ):
             _check_axis_array(getattr(self, name), name, self.n_boundaries)
 
-        # Each component is a FRACTION, so it is bounded by 1 — the one thing true of all three.
-        # ⛔ Closure (`f_g + f_pos + f_neg == 1`) is deliberately NOT asserted: it fails on about a
-        # quarter of both axes, for the reason the field docstring records, and a gate that fails on
-        # the shipped configuration is a gate nobody can keep green. Assert it the day ψ's write-back
-        # stops clipping the three independently.
+        # Each component is a FRACTION, so it is bounded by 1. Closure holds by construction
+        # (`simplex_logodds._compose`) and is not re-asserted here.
         for name in (
             "gdna_frac_region",
             "rna_pos_frac_region",

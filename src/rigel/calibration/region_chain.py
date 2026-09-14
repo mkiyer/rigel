@@ -92,22 +92,17 @@ class RegionDeconv:
     gdna_frac: (
         np.ndarray
     )  # float64[K] — the region's gDNA composition (face-invariant; mass = frac·M_face)
-    # per-strand RNA fractions of the UNSPLICED mass (posterior means; f_pos+f_neg+gdna_frac = 1), populated
-    # by the simplex sweep for the per-strand RNA imputation (the bipartite R↔B↔R chain).
+    # per-strand RNA fractions of the UNSPLICED mass (the image of `(f_g, w_pos)` under
+    # `simplex_logodds._compose`, so f_pos+f_neg+gdna_frac = 1), populated by the simplex sweep.
     rna_pos_frac: "np.ndarray | None" = None  # float64[K] — f_pos
     rna_neg_frac: "np.ndarray | None" = None  # float64[K] — f_neg
-    # per-component posterior variances in LOG-FRACTION space — `Var(log f_c)`, NOT `Var(f_c)`. They are
-    # grid moments of `log f_c` over the lambda lattice (`simplex_logodds._solve_logodds`), because
-    # the message currency is a log-density and the send precision is log-space throughout. They are
-    # therefore NOT bounded by 1/4 and routinely exceed it — a consumer that needs the LINEAR `Var(f_c)`
-    # must convert (delta method: `Var(f_c) ≈ f_c²·Var(log f_c)`, as `sweep.solve_chain` does when it
-    # builds `_var_fg` for `composition_logvar`). Set by the per-region solve, consumed when a region
-    # emits a message. None on the chain region/boundary projections, where precision is not needed by
-    # the downstream EM prior.
     # the PROJECTION's consumed output (calibrate/derive read ONLY these); None on the per-region solve.
     gdna_mass: "np.ndarray | None" = None  # float64[K]
     rna_mass: "np.ndarray | None" = None  # float64[K]  (= (1−gdna_frac)·M_unspliced + spliced mass)
-    gdna_frac_var: "np.ndarray | None" = None  # float64[K] — Var(log f_g)
+    # `Var(log f_g)`, NOT `Var(f_g)` — a grid moment of `log f_g` over the lambda lattice
+    # (`simplex_logodds._solve_logodds`), so NOT bounded by 1/4. Set by the per-region solve and read by
+    # the landscape prior's training rule; None on the chain region/boundary projections.
+    gdna_frac_var: "np.ndarray | None" = None  # float64[K]
 
 
 def build_region_chain(
