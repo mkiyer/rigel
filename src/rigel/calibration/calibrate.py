@@ -894,11 +894,8 @@ def calibrate(
             substrate=substrate,
             sj=sj,
             region_arrays=region_arrays,
-            gdna_prior=abundance_landscape,  # the TOTAL-density landscape (QC / injection substrate)
             gdna_hyperprior=gdna_hyperprior,  # the DECONVOLVED-gDNA hyperprior (None if no refit)
             rna_sense_frac=strand.rna_sense_frac,
-            region_eff_gdna=region_eff_gdna,
-            boundary_eff_gdna=boundary_eff_gdna,
             # the fitted-or-injected population priors — extract from a population scenario, inject
             # into a toy
             calibration_priors=InjectedCalibrationPriors(

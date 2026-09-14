@@ -67,19 +67,6 @@ class ReportSubstrate:
     def calibration_track(self) -> pd.DataFrame | None:
         return self._feather("calibration_track.feather")
 
-    # -- available for future panels; not read unless accessed --
-    @cached_property
-    def quant(self) -> pd.DataFrame | None:
-        return self._feather("quant.feather")
-
-    @cached_property
-    def nrna_quant(self) -> pd.DataFrame | None:
-        return self._feather("nrna_quant.feather")
-
-    @cached_property
-    def loci(self) -> pd.DataFrame | None:
-        return self._feather("loci.feather")
-
     @property
     def schema_version(self) -> int | None:
         return self.summary.get("schema_version")

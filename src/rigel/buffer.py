@@ -88,10 +88,6 @@ class BufferedFragment:
     intron_bp: np.ndarray | None = None
 
     @property
-    def is_chimeric(self) -> bool:
-        return self.chimera_type != ChimeraType.NONE
-
-    @property
     def is_same_strand(self) -> bool:
         return not self.ambig_strand
 

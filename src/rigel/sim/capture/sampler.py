@@ -60,10 +60,6 @@ class WeightedInterval:
     scale: float = 1.0
     probe_group: int = 0
 
-    @property
-    def length(self) -> int:
-        return self.end - self.start
-
 
 class CaptureSampler:
     """Sparse capture-aware partition functions and start sampling."""
