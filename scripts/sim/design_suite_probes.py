@@ -1,17 +1,12 @@
 """Design a hybrid-capture probe panel over a suite reference. ⭐ This is also the DENSITY STEP.
 
-    TODO item 2, requirement (a)
+⭐ **The panel is not scaffolding.** A benchmark needs *a density step, not just a uniform background*:
+over a run of flat regions a uniform scenario cannot distinguish "the messages work" from "the global
+prior reached it". A capture panel that covers some gene groups and not others IS that step, and a sharp
+one: the captured/uncaptured boundary is a cliff in gDNA density with real transcripts on both sides.
 
-⭐ **The panel is not scaffolding — it is one of the seven requirements.** asks for *a
-density step, not just a uniform background*, because over a run of flat regions a relayed message decays
-geometrically per hop, so a uniform scenario cannot distinguish "the relay works" from "the global prior
-reached it". A capture panel that covers some gene groups and not others IS that step, and a sharp one:
- measures hybrid capture at **~1000x** on exons and 1.0 off target, so the
-captured/uncaptured boundary is a 3-decade cliff in gDNA density with real transcripts on both sides.
-
-⚠ The whole-genome (existing-reference) simulator **requires** a panel when capture is enabled — unlike
-the generated-mini-genome path, it does not design one (`whole_genome.py:170`,
-`require_probes_when_enabled=True`). So this is a prerequisite for the capture axis, not an extra.
+⚠ The whole-genome simulator **requires** a panel when capture is enabled and does not design one
+(`require_probes_when_enabled`), so this is a prerequisite for the capture axis, not an extra.
 
 `capture_fraction` is a scenario parameter, declared in the config exactly like `gdna_rate` — it is
 *which half of the annotation is on-panel*, not a tuned constant.

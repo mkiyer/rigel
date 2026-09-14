@@ -31,9 +31,9 @@
 # ⭐ THE STRAND RULE (owner, 2026-09-02): every group has an explicit strand and the chromosome carries
 # EQUAL representation of + and − (the builder refuses counts differing by more than one) — a sign error
 # in any strand-dependent rule is invisible on a one-strand substrate. Strands here follow
-# (type index + block) mod 2, so every TYPE appears on both strands across its five blocks. This is NOT
-# the both-stranded locus (overlapping transcripts on opposite strands): that is a later step, and
-# every gene here keeps its 20 kb intergenic spacer.
+# (type index + block) mod 2, so every TYPE appears on both strands across its five blocks. Overlapping
+# transcripts on opposite strands are THE BOTH-STRANDED BLOCK below; outside it, every gene keeps its
+# 20 kb intergenic spacer.
 #
 # ── THE ANCHORED TWIN BLOCK (owner design, 2026-08-28) ───────────────────────────────────────────
 # ONE shape: exon 1 kb · intron 7 kb · exon 1 kb · intron 7 kb · exon 1 kb (span 17 kb), 20 kb
@@ -74,7 +74,7 @@
 # A ≫ B (9:1), A ≪ B (1:9) and A ≈ B (1:1), suffixes `_ab`, `_ba`, `_eq` — with the PAIR's total on the
 # mature ladder (10/30/100/300/1000), so the ratio and the depth are separate axes. `altstart` predates
 # the rule and keeps its anti-ladder (U up, T down); it is re-cut under the rule when it is next touched.
-# Queued, each to be added on the day it becomes the target (docs/dev/MESSAGE_RUNGS.md):
+# Queued, each to be added on the day it becomes the target:
 #   nest (a single-exon T nested in U's middle exon → a region walled by termini), instart (T's
 #   alternative first exon inside U's intron).
 # The block starts at 1,365,000, pitch 37,000, 8 types × 5 blocks = 40 gene slots, the types
@@ -129,7 +129,7 @@ ref_name: test_chr
 # gDNA density per base +6 %: the two cannot both be held when 6,600 abundance units join 32,328 and
 # 444 kb join 4.65 Mb).
 #
-# ── THE BOTH-STRANDED BLOCK (owner-approved 2026-09-07; docs/dev/AMBIG_DESIGN.md, phase 0) ────────
+# ── THE BOTH-STRANDED BLOCK (owner-approved 2026-09-07) ───────────────────────────────────────────
 # Overlapping transcripts on OPPOSITE strands — the nodes that admit RNA on both strands (AXIOM 0's two
 # bits both set), 14 % of the ladder's chain and 38–50 % of the landed policy's remaining error on the
 # stranded capture-ON rows. Every locus is TWO genes on opposite strands sharing one type token (the

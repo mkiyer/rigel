@@ -702,7 +702,7 @@ SPECS: dict[str, ToySpec] = {
         "        ⭐⭐ What it adds over every rung before it, and why it is the hard one: the two "
         "exon↔intron BOUNDARIES. Mature RNA cannot cross an exon↔intron boundary contiguously, so their truth "
         "is pure gDNA — but the solver's own continuity gate says a strand IS admissible there "
-        "(nascent RNA could cross), so they are NOT TRAPS: no-magic-numbers and the solver must *derive* what the structure "
+        "(nascent RNA could cross), so they are NOT G1 and the solver must *derive* what the structure "
         "already implies. ⛔ On an `nrna_none` donor that is the maximally-violated case of the "
         "intron↔exon imputation premise, so a nascent rung is the control this one needs.\n"
         "        ⛔⛔ CAPTURE-ON NEEDS `--genome-length 120000` ON THIS RUNG. At 12 kb the whole "
@@ -738,9 +738,8 @@ SPECS: dict[str, ToySpec] = {
         "middle exon and lies inside TB's intron. `splice_both_strands` had that contrast only ACROSS "
         "strands; here it is within one, so no strand bit can separate them and `coarse_type_array` calls "
         "it `exon`.\n"
-        "        ⚠ What it does NOT cover: an BOUNDARY that is one sj's LOW end and another's HIGH end "
-        "at once. That needs one transcript's intron to END where another's BEGINS, and it is gated in "
-        "`tests/calibration/test_splice_flux_reframe.py` rather than simulated here.",
+        "        ⚠ What it does NOT cover: a BOUNDARY that is one sj's LOW end and another's HIGH end "
+        "at once. That needs one transcript's intron to END where another's BEGINS.",
         genome_length=12_000,
         genes=[
             {
@@ -807,11 +806,11 @@ SPECS: dict[str, ToySpec] = {
         "          TB+ (2,000, 10,000)                     1 exon,  + strand, spans TA's intron\n"
         "          TC− (1,000, 11,000)                     1 exon,  − strand, spans everything\n"
         "          TD− (1,000, 2,500) (8,500, 11,000)      2 exons, − strand, intron 2,500-8,500\n"
-        "        ⭐⭐ WHY THIS ONE. Every previous rung let an BOUNDARY answer 'is my neighbour an exon?' "
+        "        ⭐⭐ WHY THIS ONE. Every previous rung let a BOUNDARY answer 'is my neighbour an exon?' "
         "with a yes or a no. Here it cannot: THREE regions are simultaneously an INTRON on one strand and "
         "an EXON on the other — [2,500, 3,000), [3,000, 8,500) and [8,500, 9,000) — so 'exon' is not a "
         "property of a region at all, it is a property of (region, strand). And the two sj are on "
-        "OPPOSITE strands, so an boundary can be the DONOR of one and sit beside the ACCEPTOR of the other.\n"
+        "OPPOSITE strands, so a boundary can be the DONOR of one and sit beside the ACCEPTOR of the other.\n"
         "        ⛔ The question it exists to answer is per (BOUNDARY, side, strand, donor-or-acceptor, "
         "message direction): when this boundary reframes against that neighbour, does its splice flux belong "
         "in the total or not? The derivation is open.\n"
@@ -897,7 +896,7 @@ SPECS: dict[str, ToySpec] = {
     ),
     "deep_exon": ToySpec(
         name="deep_exon",
-        what_it_probes="⭐ TRAPS: a-purity-filter-is-a-length-filter: a LARGE, RNA-rich exon beside an intron — the retired relay pinned these to ~0.85",
+        what_it_probes="⭐ TRAPS: a-purity-filter-is-a-length-filter: a LARGE, RNA-rich exon beside an intron",
         genome_length=80_000,
         genes=[_gene("g1", "+", [(20_000, 34_000), (40_000, 43_000)], 3000.0)],
         n_rna_fragments=120_000,
@@ -1025,20 +1024,17 @@ def sweep_density(
         print("      changed. Which lever helps depends on WHICH object is starved:")
         print("      • an intergenic REGION  — lengthen the chromosome (--genome-length): counts scale")
         print("        with bp at fixed density;")
-        print("      • an BOUNDARY, capture OFF — ⛔ lengthening does NOTHING. A 0-bp line's counts are")
+        print("      • a BOUNDARY, capture OFF — ⛔ lengthening does NOTHING. A 0-bp line's counts are")
         print("        `density x mean_FL`, independent of the chromosome, so the only lever is depth.")
-        print("      • ⭐⭐ an BOUNDARY, capture ON — LENGTHEN IT. This is the opposite of the capture-OFF")
+        print("      • ⭐⭐ a BOUNDARY, capture ON — LENGTHEN IT. This is the opposite of the capture-OFF")
         print("        case and the reason is the sampler's own mass split: the gDNA budget is")
         print("        `rate x genome_length` while the probe footprint is FIXED, and the on-probe share")
         print("        is `binding x overlap / (off_target x L + binding x overlap)`. So a longer")
         print("        chromosome hands capture a bigger budget to concentrate onto the same probes, and")
-        print("        the boundary count grows with L until that ratio saturates. ⭐ Measured on")
-        print("        `spliced_exons` x `g75 ss0.50 capture_on`, 12 kb -> 120 kb: the two intron|exon")
-        print("        BOUNDARIES go 2 -> 20 and 5 -> 36 counts and the gene-boundary BOUNDARIES 1 -> 41 and")
-        print("        2 -> 35, while the intron REGION stays at 1 and the intergenic REGION at ~0 density")
-        print("        — i.e. the signal moves to the BOUNDARIES abutting the exon, which is what capture")
-        print("        does. ⚠ Raising `binding_per_base` also works but un-matches the toy from the")
-        print("        donor's chemistry; lengthening keeps every harvested global intact.")
+        print("        the boundary count grows with L until that ratio saturates: the signal moves to the")
+        print("        BOUNDARIES abutting the exon, which is what capture does. ⚠ Raising `binding_per_base`")
+        print("        also works but un-matches the toy from the donor's chemistry; lengthening keeps every")
+        print("        harvested global intact.")
         print()
     print("   ⭐ THE CHAIN under test:  intergenic → boundary → EXON → boundary → intergenic. With no intron")
     print("      and no sj, the exon's only route to an answer is the two boundaries, so a wrong")

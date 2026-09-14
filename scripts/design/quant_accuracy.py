@@ -415,7 +415,7 @@ def install_ruler_arm(arm: str, oracle: OracleTruth):
 
     ``rigel.calibration.calibrate`` is patched as a MODULE ATTRIBUTE, and that works because
     ``run_pipeline`` does ``from .calibration import calibrate`` function-locally — the name is
-    resolved at call time, not at module load. Same mechanism as :func:`install_computed_weights`.
+    resolved at call time, not at module load.
 
     Calibrate being called is necessary and not sufficient, so the counter watches the ruler.
     ``_setup_geometry_and_estimator`` builds ``effective_lengths_em`` only when it is handed both a

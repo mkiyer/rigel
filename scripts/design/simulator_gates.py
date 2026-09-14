@@ -281,9 +281,8 @@ def main() -> int:
     if not manifest_path.is_file():
         raise SystemExit(
             f"no panel manifest at {manifest_path}\n"
-            f"   `--suite` is a panel directory built by `scripts/sim/panel.py`. ⚠ `pilot`,\n"
-            f"   `flgap_short` and `flgap_long` were deleted on 2026-08-13; `gdna_ladder.yaml`\n"
-            f"   (16 conditions) is the only panel on disk."
+            f"   `--suite` is a panel directory built by `scripts/sim/panel.py`; its `status`\n"
+            f"   names what exists."
         )
     manifest = json.loads(manifest_path.read_text())
     conditions = manifest["conditions"]

@@ -66,8 +66,8 @@ from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.pipeline import _drain_side_buffer, _native_detect_sj_tag, scan_and_buffer  # noqa: E402
 
 _RUNS = Path.home() / "Downloads" / "rigel_runs"
-#: The current panel. Several instruments read this default from here; ``prior_vs_oracle.py``
-#: carries its own copy, so a panel move must update both.
+#: The ladder panel and its index. ⚠ Other instruments hard-code the same two paths, so a panel move
+#: must update every copy.
 DEFAULT_SUITE = _RUNS / "suite" / "ladder"
 DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
@@ -209,7 +209,7 @@ def solver_slot_classes(capture, eps: float = _EPS) -> dict[str, np.ndarray]:
     * ``own_evidence``: everything else, where the strand Beta-Binomial or the intron factory's
       density deconvolution had something to say.
 
-    ``eps`` is the solver's own gate (``own_composition_logvar`` tests ``tau > 1e-9``), so this
+    ``eps`` is the solver's own gate (``has_own_composition_evidence`` tests ``tau_lam > 1e-9``), so this
     partition answers "which mechanism did the solver use here", which is what the cross-tab and
     ``worst_objects.py`` need. It is deliberately not the question "should pass-0 be scored here": a
     fitted κ that misses ½ by a rounding step leaves a τ the solver treats as evidence that can

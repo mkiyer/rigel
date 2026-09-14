@@ -315,7 +315,7 @@ def report(m, a: dict, config=None) -> None:
     print(f"      represent λ ∈ [−{_L:g}, +{_L:g}].  ⛔ A row with sd(λ) far above {2 * _L:g} is scored")
     print("      as SOLVABLE and is not: its own evidence is flat over every λ the solver can express,")
     print("      so its answer came from neighbours and the reference. ⚠ NO threshold decides this —")
-    print("      it is a curve, because τ is CONTINUOUS here and any region_bound would be a tuned constant.")
+    print("      it is a curve, because τ is CONTINUOUS here and any cut would be a tuned constant.")
     print(f"   {'sd(λ) nats':<14} {'objects':>9} {'mass':>14} {'Σ|err|':>14} {'err share':>10} "
           f"{'pred f_g':>9} {'true f_g':>9}")
     _lock = a["channels"]["locked"] & live
@@ -382,8 +382,8 @@ def report(m, a: dict, config=None) -> None:
         d = np.abs(lad[key] - f_true)
         w = total[det]
         print(f"     {name:<28} {float(np.sum(w * d[det]) / max(w.sum(), 1)):>26.4f}")
-    print("   ⭐ A rung that is BETTER than the one below it means that channel HURT. Recovering the")
-    print("      old `P1_OVERRULED` class: strand right and confident, then overruled by the full solve.")
+    print("   ⭐ A rung that is BETTER than the one below it means that channel HURT — e.g. a strand")
+    print("      solve right and confident, then overruled by the full solve.")
 
 
 #: The debug chain, in dependency order. Each link is a precondition for the next, so they are

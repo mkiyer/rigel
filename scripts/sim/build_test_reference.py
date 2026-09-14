@@ -44,8 +44,7 @@ each multi-exon transcript; give it abundance through its contributor's ``nrna_a
 
 ⭐ **Strands (owner, 2026-09-02): every gene carries an explicit strand and the chromosome keeps EQUAL
 representation of + and −** — a sign error in any strand-dependent rule is invisible on a one-strand
-chromosome. This is not the both-stranded (overlapping, opposite-strand) locus, which is a later step;
-the builder refuses a chromosome whose strand counts differ by more than one.
+chromosome. The builder refuses a chromosome whose strand counts differ by more than one.
 
 Usage::
 

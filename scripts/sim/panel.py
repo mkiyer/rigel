@@ -10,8 +10,7 @@
 
 ⛔⛔ **WHY THIS EXISTS: THE RECIPE STOPPED HALFWAY AND THE MISSING HALF WAS THE POINT.** `TESTING.md` §2
 documented five manual shell steps ending at "cache the scans". **Running the tool and scoring it against
-truth — the entire purpose — was in no recipe anywhere**, and had to be reassembled from a 56-row
-instrument table. Worse, the ORACLE cache (the origin-split truth every scoring instrument reads) had no
+truth — the entire purpose — was in no recipe anywhere**. Worse, the ORACLE cache (the origin-split truth every scoring instrument reads) had no
 step at all: it was a *side effect* of running `pass0_vs_oracle.py --oracle-cache`, so a reader who
 followed the documented steps ended up with a panel that every scorer refused.
 

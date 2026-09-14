@@ -228,9 +228,9 @@ def main() -> int:
         if args.reference.is_file():
             raise SystemExit(
                 f"⛔ {args.reference} already exists. The reference is FROZEN on purpose — every stage "
-                "compares to the SAME capture, because the renames compound and a rolling baseline "
-                "would let a stage-2 defect become the accepted truth for stages 3-9. Delete it "
-                "deliberately if the schema genuinely moved (stage 0)."
+                "compares to the SAME capture, because the stages compound and a rolling baseline "
+                "would let one stage's defect become the accepted truth for every later stage. Delete "
+                "it deliberately if the capture's schema genuinely moved."
             )
         args.reference.parent.mkdir(parents=True, exist_ok=True)
         args.reference.write_text(json.dumps(now, indent=2))

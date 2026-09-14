@@ -16,8 +16,7 @@ policy's remaining error sits; on the test chromosome the capture-OFF rows are d
 designed shadow-transcription floor, identical in every arm, so read the capture-ON rows there.
 `--set SECTION.FIELD=VALUE` (repeatable) applies any config value on top of every policy's fields,
 the same spelling `calibration_vs_oracle.py` takes, so a grid arm is read on the panel and on the
-metric from one config value. Other instruments import `PANELS`, `POLICIES`, `score_condition` and
-`_slot_classes`.
+metric from one config value.
 
 Usage::
 

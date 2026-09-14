@@ -1,8 +1,8 @@
 """Which stage of calibration introduces the error?
 
 The solve as a ladder, every rung scored against the certified per-slot truth. It runs `calibrate`
-under a 2x2 of the two big switches, landscape refits x message propagation, and reads the per-slot
-belief at every rung the solver already exposes::
+under a 2x2 of the two big switches, landscape refits x message policy (shipped or `silent`), and
+reads the per-slot belief at every rung the solver already exposes::
 
     A  fg_init      the initialisation belief (before any solve)
     B  fg_strand    the strand likelihood alone

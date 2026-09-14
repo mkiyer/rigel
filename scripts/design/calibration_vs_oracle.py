@@ -3,8 +3,8 @@
 The 0.8.0 metric. ``P = calibrate(...)`` off the cached scan is compared with ``O``, the same
 ``CalibrationResult`` with only its six deconvolved arrays replaced by the origin-split truth
 (`OracleTruth` in the drained frame, sum-to-full gated), per stratum and never pooled; the 0.8.0
-scope is stamped on every row and the deferred stratum is reported, never dropped. It is the only
-instrument that reaches the effective-length shrinkage: `transcript_capture_eff_lengths` is built
+scope is stamped on every row and the deferred stratum is reported, never dropped. It reaches the
+effective-length shrinkage, which no prior-injection arm does: `transcript_capture_eff_lengths` is built
 before `assemble_priors` runs, so an arm that patches the prior assembler never sees the ruler the EM
 divides by, while substituting at the ``calibrate`` boundary reaches both consumers. Two more arms:
 ``noop`` replaces the six arrays with themselves and must be byte-identical to ``P`` on the arrays

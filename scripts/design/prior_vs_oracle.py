@@ -727,9 +727,7 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
 
 
 def stratum(cond: str) -> tuple[str, str]:
-    """The panel's two binary axes. Same definition as ``arm_score.stratum`` — one home would be
-    better, but that module is a scorer for a different file format and importing it here would drag
-    its ``$RIGEL_ARMS`` path resolution in."""
+    """The panel's two binary axes."""
     return (
         "stranded" if "ss_0.99" in cond else "unstranded",
         "capture ON" if "capture_on" in cond else "capture OFF",
@@ -898,8 +896,6 @@ def report(rows: list[dict]) -> None:
     print("  ⑪ ⛔ THE YARDSTICK ITSELF — Fo (the EM's candidates) against F (first-base starts)")
     print("  ⭐ Fo − F is the STRADDLING population: fragments that overlap a locus but start outside "
           "it.")
-    print("  ⛔ Every O−F / S−F number printed before 2026-08-08 was scored against F. The `rel` "
-          "columns say what that cost.")
     print(f"    {'stratum':<26} {'Σ Fo':>13} {'Σ F':>13} {'Σ|Fo−F|':>11} {'rel':>8} "
           f"{'O−F rel':>8} {'O−Fo rel':>8} {'S−F rel':>8} {'S−Fo rel':>8}")
     print("    " + "-" * 112)
@@ -925,7 +921,7 @@ def report(rows: list[dict]) -> None:
     print("  A spliced unit never gets a gDNA candidate (`em_solver.cpp`: has_gdna = !is_spliced && …),")
     print("  so the population `a_g : a_r` describes is gDNA units + UNSPLICED RNA units. ⛔ Scoring it")
     print("  against ALL RNA units reads a phantom +0.07…+0.10 tilt that is the denominator, not the")
-    print("  prior (`TRAPS: score-the-consumers-own-count` — committed, then repeated, 2026-08-08).")
+    print("  prior (`TRAPS: score-the-consumers-own-count`).")
     print(f"    {'stratum':<26} {'pool gDNA':>13} {'pool RNA':>13} {'phi true':>9} {'phi S':>8} "
           f"{'Δ':>8} {'strength':>9} {'spliced RNA':>13}")
     print("    " + "-" * 116)
