@@ -22,8 +22,7 @@ No per-locus EM runs -- the pipeline is stopped after its scoring stage.
 
 This file is also a library: ``object_composition``, ``calibration_vs_oracle`` and
 ``total_abundance_audit`` load its ``stratum``, ``is_zero_gdna``,
-``OVERRIDE_FIELDS``, ``DEFAULT_SUITE`` and ``DEFAULT_INDEX``; ``mass_prior_ab`` runs
-``measure_condition`` and ``score_arm`` on a subsample. Gates:
+``OVERRIDE_FIELDS``, ``DEFAULT_SUITE`` and ``DEFAULT_INDEX``. Gates:
 ``tests/calibration/test_prior_vs_oracle.py``.
 
 Usage::

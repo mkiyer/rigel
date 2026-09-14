@@ -19,7 +19,7 @@ a truth of exactly 0 is saturated. Its mass-weighted headline is the wrong yards
 where honest ignorance reads as error; `solvability_audit.py` is that judge.
 
 Also a library: `calibration_vs_oracle.py`, `solvability_audit.py`, `vertex_ceiling.py`,
-`worst_objects.py`, `toy_panel.py`, `em_fl_ceiling.py`, `backbone_parity.py` and `sim/panel.py`
+`worst_objects.py` and `toy_panel.py`
 import `measure_condition`, `score_axis`, `check_same_basis`, `object_fractions`,
 `truth_length_pmf`, `truth_f_gdna`, `library_f_gdna`, the class tuples and the two defaults.
 
@@ -659,8 +659,7 @@ def truth_length_pmf(condition_dir: Path, kind: str, max_size: int):
     ``max_size + 1``; ``None`` when the condition has no truth file or no fragments of that kind.
 
     Post-capture empirical, not the configured ``frag_mean``: capture selects for length, so the
-    configured parameters describe a library that was never sequenced. Same reader
-    ``em_fl_ceiling.py`` uses for its exact-pmf arm, so a ceiling is the consumer's own lever.
+    configured parameters describe a library that was never sequenced.
     """
     path = condition_dir / "truth_fragment_lengths.tsv"
     if not path.is_file():

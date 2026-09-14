@@ -96,7 +96,7 @@ it: do not propose it, list it or rank it. It does not exist in `src/` (A/B'd on
 shipped), so this is a scope ruling, not a code removal. Three other things called "length" are not
 affected: layer 2's `fl` / `effective_length` / `capture_eff_length` (the OPPORTUNITY model);
 `length_likelihood` in `src/rigel/second_pass.py` (the per-fragment assignment factor of §4); and the fl
-PMFs priced by `em_fl_ceiling.py`. The panel gives both origins the same length distribution (below), so
+PMFs themselves (`calibration.fl.FLModels`). The panel gives both origins the same length distribution (below), so
 it cannot price a length composition channel (`TRAPS: equal-lengths-carry-no-composition`).
 
 ### Calibration is the focus, and the metric is calibration against oracle calibration
@@ -724,8 +724,8 @@ Re-derive this list rather than trusting it: `scripts/design/module_census.py` r
 | `messages/__init__.py` | the interface (`Policy`, `Prepared`), what every node received from one side as a table (`Received`: `has_neighbour`, `has_composition`, the composition rows, three `Levels` lanes; SILENCE and NO NEIGHBOUR are its two states `silence` / `no_neighbour`, not objects), what ψ receives (`PsiMessage`) and what a policy may read (`BlockContext`) | every field of `BlockContext` has a reader in the policy or the backbone |
 
 **A restructure is gated, a rewrite is not.** The split out of the one 1,635-line function passed two
-`TRAPS: byte-identity-gate` gates of opposite direction and, per array on one real 70,176-slot chain
-(`scripts/design/backbone_parity.py`), 421,056 output elements with zero differences. The alternative —
+`TRAPS: byte-identity-gate` gates of opposite direction and, per array on one real 70,176-slot chain,
+421,056 output elements with zero differences. The alternative —
 a clean rebuild — came out +103 %; a refactor gated on byte-identity has exactly zero of that risk.
 
 #### The interface, and its one contract

@@ -15,7 +15,7 @@ class (certified stratum, a boundary's terminus and junction flags, an exon's re
 edge / walled), which judges a message at its destinations where the whole-library number carries
 the refit prior's response; and ``dissect``, every slot of one gene type with its truth beside every
 arm. A prototype that subclasses the shipped policy inherits every mechanism the parent later
-gains, so compare `src` against `src` across a landing. `backbone_parity.py` imports `load_arms`.
+gains, so compare `src` against `src` across a landing.
 
 Usage::
 

@@ -46,8 +46,7 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   slot's strand term, a derived count and no lattice (`DESIGN.md` §6b.15, `EQUATIONS.md` §9e), exact at any
   depth, with the tilt's hypothesis space {pure +, pure −, mixed} (`EQUATIONS.md` §9f); the λ bracket follows
   the landscape prior's derived demand (`landscape.required_logodds_window`).
-- **The prior assembler**: with perfect masses its own error is negligible — `prior_vs_oracle.py`,
-  `mass_prior_ab.py`.
+- **The prior assembler**: with perfect masses its own error is negligible — `prior_vs_oracle.py`.
 - **The largest number on the metric page is the ruler, not the composition**: at `g00` the
   effective-length shrinkage fabricates a reference from the residual false-positive fragments and
   contracts every transcript (`ISSUES: g00-shrinkage-upstream-repair` — the fix is the detector); the

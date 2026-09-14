@@ -7,7 +7,7 @@ shape of the whole file — each assertion has a matching perturbation test that
 committing exactly that defect and asserts the backbone refuses it, because a gate with no firing
 perturbation has not been written yet, it has been typed. Byte-identity against the shipped solver
 per condition is not gated here: it needs a real chain and a BAM, and it is
-``scripts/design/backbone_parity.py``.
+``scripts/design/rename_identity.py`` with ``scripts/profiling/sweep_replay.py``.
 """
 
 from __future__ import annotations

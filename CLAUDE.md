@@ -48,7 +48,7 @@ slot has no channel), so the debug loop must take the worst IN-SCOPE scenario, n
 The fragment-length COMPOSITION channel is retired until after 0.8.0 and may not be proposed; it does not
 exist in `src/`. Three other things called "length" are unaffected: layer 2's `fl` / `effective_length` /
 `capture_eff_length` (the opportunity model), `length_likelihood` in `second_pass.py` (per-fragment
-assignment), and the fl PMFs priced by `em_fl_ceiling.py`. The ladder gives gDNA and RNA EQUAL fragment
+assignment), and the fl PMFs themselves (`calibration.fl.FLModels`). The ladder gives gDNA and RNA EQUAL fragment
 lengths on purpose: the EM already reads the fl distribution, so a gap would let it split origins on length
 alone and mask calibration bugs. Scenarios are cached (`panel.py cache`) so calibration re-runs in seconds.
 The full ruling is `docs/DESIGN.md` §0b; the ranked next steps are `docs/ROADMAP.md`.
@@ -154,7 +154,7 @@ both a process rule and a structurally pure-gDNA object).
 - **The debug loop is the default method**: run the panel → take the worst IN-SCOPE scenario → dissect it
   to the highest-error objects (`worst_objects.py`, `calibration_walk.py`) → find the mechanism → fix →
   re-run the panel.
-- **A ceiling is sometimes the right instrument** (`quant_accuracy.py`'s injection arms; `em_fl_ceiling.py`)
+- **A ceiling is sometimes the right instrument** (`quant_accuracy.py`'s injection arms)
   but prices something that may be unreachable, so it is not the default. Every prior-injection arm patches
   `assemble_priors`, while `pipeline.py` builds `effective_lengths_em` before calling it, so the
   effective-length shrinkage has never been inside any ceiling number.
@@ -270,7 +270,6 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | `sim/build_suite_reference.py` · `design_suite_probes.py` · `simulate_reads.py` | **HOW IS THE PANEL'S SUBSTRATE BUILT?** ⚠ `panel.py build` drives the last two; the reference carve needs the source genome/GTF, which a panel config does not name, so it stays manual |
 | **⭐⭐ the prior assembler, and the end-to-end thermometer above it** | |
 | `design/quant_accuracy.py` | ⭐⭐⭐ **HOW ACCURATE IS THE TOOL END TO END, AND WHAT IS A PERFECT PRIOR WORTH?** `--arm base` plus the oracle and per-field injection arms, scored count against count. ⚠ A THERMOMETER above 0.8.0's metric, never the target |
-| `design/mass_prior_ab.py` | ⭐⭐⭐ **CAN THE PRIOR BE A CONSERVED FRAGMENT COUNT RATHER THAN ONE MANUFACTURED FROM A DENSITY?** Subsamples by qname hash so the whole and all three origin partitions stay consistent. ⛔ The subsample must reproduce the defect first |
 | `design/transcript_truth.py` | ⭐⭐⭐ **WHAT IS THE TRUE PER-TRANSCRIPT COUNT, SPLIT BY SPLICEDNESS?** One pass over the oracle BAM, read names only. ⛔ Splicedness comes from spliced-transcript coordinates, NEVER the CIGAR, which misses every sj in the unsequenced inner gap |
 | **⭐⭐⭐ where to develop** | |
 | `design/rename_identity.py` | ⭐⭐⭐ **IS THIS RENAME, REFACTOR OR SPEED-UP NUMERICALLY A NO-OP?** `--freeze` captures one reference, `--check` compares after every stage — on array CONTENT and the transcript table, never on names; `--bam` takes a real library instead of a panel condition. ⚠ The reference is frozen, never rolling. `--self-test` 8/8 |
@@ -278,7 +277,6 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | `design/module_census.py` | ⭐⭐⭐ **WHERE DOES A CHANGE GO?** The calibration package re-derived from the AST: the layering with every upward import, each module's importers, docstrings naming a sibling with no import, dead public surface. ⛔ It reports; it does not judge |
 | **⭐⭐⭐ the backbone** | |
 | `design/arm_identity.py` | ⭐⭐⭐ **IS THIS ARM BYTE-IDENTICAL TO THAT ONE?** Compares every scored field of every row, where an aggregate hides a difference that cancels between two fields; the row-key sets must be EQUAL. ⛔ Falsified by a 1-ULP nudge |
-| `design/backbone_parity.py` | ⭐⭐⭐ **WHAT DOES ONE MESSAGE OPERATOR DO, PER SLOT?** Two policies on one real chain in one process, every output array and every field of the diagnostic capture (`blocks.SweepCapture`) compared element by element. ⭐ Strictly stronger than the panel per condition, so run it first |
 | **⭐⭐ the toy harness** | |
 | `design/toy_panel.py` | ⭐⭐ **HOW DOES ONE TOY SPEC BEHAVE ACROSS EVERY CACHED CONDITION AND AN RNA-DENSITY LADDER, scored per object?** It names which object carries the error and whether the messages helped it. ⚠ 13 s per condition — shard with `--conditions` |
 | `design/verify_toy_substrate.py` | ⭐⭐⭐ **IS THE INPUT CORRECT? — no solver runs.** Every accumulator bank re-derived from per-fragment truth by an independent implementation, plus the splice combinatorics and the length marginal. ⛔ Run it on any new toy spec first |
@@ -293,11 +291,9 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | `design/verify_index_rebuild.py` | **DID AN INDEX REBUILD PRESERVE THE STRUCTURE?** Regions byte-identical, boundaries only in contiguous reach |
 | **Stage A — the accumulator** | |
 | `design/fl_pool_purity.py` | ⭐⭐⭐ **ARE THE FOUR gDNA LENGTH POOLS ACTUALLY PURE gDNA, AND WHAT DOES THE SHIPPED LENGTH MODEL SAY AGAINST TRUTH?** Per pool: the gDNA / nascent / mature counts and each component's mean length; then `TRUE` / `POOLED` / `SHIPPED`, so **contamination (`pool−true`) and the divisor+shrinkage (`ship−pool`) are attributed APART**. ⛔⛔ **Run it only where the two components' fragment lengths DIFFER** — the bias is `RNA_share × length gap`, and the ladder and test chromosome give them EQUAL lengths by design, so a 95 %-contaminated pool reads under a bp there. That is why the defect shipped |
-| `design/em_fl_ceiling.py` | ⭐⭐⭐ **WHAT IS A PERFECT gDNA fl pmf WORTH END TO END, THROUGH THE EM? — the one fl question that stops at no earlier stage.** Every other fl instrument stops at `calibrate`, but `pipeline.py` also hands `gdna_pmf` to the fragment scorer, so a wrong length model is applied per fragment in the channel that separates origins. ⭐ Read `gdna_frac_est` against `gdna_frac_true` — the PRODUCT; ⛔ the transcript rows flip sign between the two fl-gap arms and are not the deliverable. Three gates: the injection counts its fires, `noop_fl` must be byte-identical, and `base_reseed` is the noise floor. ⛔⛔ Meaningless on an equal-length panel — run both sign arms AND the equal-length control |
 | **diagnostics** | |
 | `design/prior_units_check.py` | **IS THE EM PRIOR IN FRAGMENT UNITS, OR STILL THE OLD INCIDENCE SUM?** |
 | **plumbing** | |
-| `design/native_parity_on_real_data.py` | **DOES NATIVE PARITY HOLD ON REAL cfRNA AT FULL SCALE?** |
 | `design/accumulator_cost.py` | **HOW MANY ns PER FRAGMENT DOES THE ACCUMULATOR COST, regressed over several BAMs?** |
 
 

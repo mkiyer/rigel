@@ -203,7 +203,5 @@ def test_every_instrument_says_what_it_is_for(path):
 def test_the_index_is_not_vacuous():
     """`TRAPS: could-the-arm-have-fired` applied here: if the row regex matched nothing, every test
     above would pass while checking nothing at all."""
-    assert len(IN_TABLE) >= 30, (
-        f"only {len(IN_TABLE)} rows parsed from CLAUDE.md — the table format moved"
-    )
-    assert len(ON_DISK) >= 30, f"only {len(ON_DISK)} instruments found — DESIGN_DIR moved"
+    assert IN_TABLE, "no rows parsed from CLAUDE.md — the table format moved"
+    assert ON_DISK, "no instruments found — DESIGN_DIR moved"

@@ -19,8 +19,7 @@ is noise; the oracle masses are undrained while the shipped pipeline drains, a s
 bias that cannot explain a large surviving error or hide a large removed one. The library-level
 gDNA fraction counts intergenic fragments as gDNA, as ``cli.py`` does.
 
-This file is also a library: ``em_fl_ceiling.py`` runs ``run_condition`` with its own injection
-installed and reads the rows by axis. Gates: ``tests/calibration/test_quant_accuracy.py``.
+Gates: ``tests/calibration/test_quant_accuracy.py``.
 
 Usage::
 

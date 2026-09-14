@@ -69,8 +69,7 @@ not wired: the per-transcript RNA prior (`rna_prior_weight`) is never passed in 
 Kept as a record and a regression check, not as work. Stage A asks whether the information is *there*;
 the 0.8.0 work asks whether calibration *finds* it. The three criteria: **fidelity** — the tally
 reproduces the specification exactly; **bias** — no channel is systematically off against per-fragment
-truth; **sufficiency** — perfecting the stored length information changes nothing downstream, which is
-what `em_fl_ceiling.py` measures, through the EM. Do not chase the gDNA length model's residual under
+truth; **sufficiency** — perfecting the stored length information changes nothing downstream. Do not chase the gDNA length model's residual under
 capture: its cause is known and is not a divisor (both opportunity functions assume uniform placement
 and capture does not).
 
@@ -146,7 +145,7 @@ exists, never an estimator (`TRAPS: no-magic-numbers`):
 
 | | what it is | what its gap to P means |
 |---|---|---|
-| **C_input** | `calibrate` handed the simulator's own post-capture length pmfs — the override `em_fl_ceiling.py` injects — at both solve depths | how much of the error is wrong inputs rather than wrong solving |
+| **C_input** | `calibrate` handed the simulator's own post-capture length pmfs at both solve depths | how much of the error is wrong inputs rather than wrong solving |
 | **C_info** | a classification, per object: is the 2×2 of `EQUATIONS.md` §3.1 identified from this object's own stored channels at all? | not a gap — C_info ignores neighbours and the sweep does not, so it can be "worse" than P |
 
 C_input is a length-input ceiling and under the 0.8.0 scope a diagnostic, not a route (the other
@@ -253,8 +252,6 @@ python scripts/sim/panel.py report --config $CFG --arms base base_reseed oracle
 # 6. STAGE A is CLOSED — this block is a REGRESSION check, run it after an accumulator or native change.
 python -m pytest tests/native tests/calibration -q     # FIDELITY
 python scripts/design/fl_pool_purity.py                #       are the pools pure gDNA (only where the lengths differ)
-python scripts/design/em_fl_ceiling.py --panel $SUITE/flgap_rna_long --index $INDEX   # SUFFICIENCY, through the EM:
-#       fl-gap panels only (equal lengths hide it), both sign arms and the equal-length control
 ```
 
 Steps 0 and 2–4 take about 15 minutes on a built panel; `suite_resolves.py`'s requirement (c),
