@@ -18,8 +18,7 @@ the absolute; an object with no mass is absent, not ``f_g = 0``; zero-gDNA rows 
 a truth of exactly 0 is saturated. Its mass-weighted headline is the wrong yardstick for pass-0,
 where honest ignorance reads as error; `solvability_audit.py` is that judge.
 
-Also a library: `calibration_vs_oracle.py`, `solvability_audit.py`,
-`worst_objects.py` and `toy_panel.py`
+Also a library: `calibration_vs_oracle.py`, `solvability_audit.py` and `worst_objects.py`
 import `measure_condition`, `score_axis`, `check_same_basis`, `object_fractions`,
 `truth_length_pmf`, `truth_f_gdna`, `library_f_gdna`, the class tuples and the two defaults.
 

@@ -330,33 +330,6 @@ transcript the molecule runs right-to-left, so TD−'s biological donor is at 8,
 "genomic-low end of a − intron" or "the transcript's actual donor" decides the sign of a derivation;
 `EQUATIONS.md` §3.5b rules that this family of predicates is written in genomic terms.
 
-This rung is where the substrate verifier's own falsification lives: `verify_toy_substrate.py` takes any
-number of transcripts on either strand, and all six `--perturb` arms fire here, while on `spliced_exons`
-only `drop_sj` fires — there is no − fragment to mirror and the structural-set gate is vacuous. Reading
-those silences as a pass is `TRAPS: could-the-arm-have-fired`.
-
-### `toy_panel.py` — one spec × every cached condition × an RNA-density ladder
-
-```bash
-# all 16 conditions x 7 RNA rungs, prior-free pass-0, per object.   ~13 s per condition
-python scripts/design/toy_panel.py --spec spliced_exons --out rows.jsonl
-
-# capture-ON must be lengthened or it measures an empty chromosome
-python scripts/design/toy_panel.py --spec spliced_exons --genome-length 120000 \
-    --conditions $(ls $SUITE/ladder | grep capture_on)
-
-python scripts/design/toy_panel.py --report rows.jsonl        # re-aggregate, no re-measurement
-```
-
-Prior-free pass-0 by default (`--refit-iters 0`), the substrate the gDNA hyperprior is later fitted
-against; `--refit-iters 3` is the shipped solve, and the two answer different questions. The RNA density
-is a multiple of each donor's own gDNA density, so at rung `m` the exon's true `f_g` is roughly
-`1/(1+m)` on every row. Four tables: the gene's mwae per stratum × rung; per object the error, its share
-of the error mass and whether the messages helped (`loc` vs `pred`); the sweep shape; and who is
-confidently wrong. Shard with `--conditions`. ⚠ Its per-object ceiling is a substitution, not a re-solve:
-honest for a sink, an understatement for a message source, whose value is what it carries to its
-neighbours — for a source, run a real arm.
-
 ### Writing a new spec
 
 Add a `ToySpec` to `SPECS` in the harness. Each rung adds exactly one structure to the one before it, so

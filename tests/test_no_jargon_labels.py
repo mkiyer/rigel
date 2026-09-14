@@ -40,20 +40,16 @@ ALLOWED: dict[str, tuple[str, ...]] = {
     # scopes is what corrupts them: a bulk rename meets `"A1"` in a GTF gene id and in `── GATE A1:`,
     # which are data rather than citations, and rewriting the data passes the gate while destroying the
     # fixture. The scoped exemption is the remedy this file's own assertion message names.
-    # `verify_toy_substrate.py`'s series is S1/S2/S3/A1/A2 — the S rungs need no exemption only because
-    # `S` falls outside LABEL's `[A-G]` class, which is what shows A1/A2 there are the same kind of id.
     "A1": (
         "docs/SUCCESS.md",
         "docs/TRAPS.md",
         "tests/test_second_pass_scoring.py",
         "tests/test_sim_genomic_refs.py",
-        "scripts/design/verify_toy_substrate.py",
     ),
     "A2": (
         "docs/SUCCESS.md",
         "tests/test_second_pass_scoring.py",
         "tests/test_sim_genomic_refs.py",
-        "scripts/design/verify_toy_substrate.py",
     ),
     "A3": ("docs/SUCCESS.md",),
     "B1": ("tests/test_second_pass_scoring.py", "tests/test_sim_genomic_refs.py"),

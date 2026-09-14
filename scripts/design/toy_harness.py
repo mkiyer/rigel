@@ -14,10 +14,10 @@ intergenic slots) times the chromosome length, never chosen. There is no gDNA kn
 the experimental variable. A region's stored counts are contained counts (``density x
 effective_length``, not ``density x bp``), so the sweep reports the density it asked for and the
 counts each object received side by side and never converts one into the other. `SPECS` is an
-ordered ladder, each rung adding one structure to the one before it. This is also the library the toy
-family loads: `toy_panel.py`, `zero_controls.py` and `verify_toy_substrate.py` import `SPECS`,
-`harvest`, `run_toy`, `object_rows`, `exon_bp`, `add_messages_flag`, `messages_on`, `with_messages`,
-`messages_stamp` and `MESSAGES_SHIPPED` from it. Its own report is a reading of one toy on one
+ordered ladder, each rung adding one structure to the one before it. This is also a library: `zero_controls.py`
+imports `SPECS`, `harvest`, `run_toy`, `object_rows`, `add_messages_flag`, `messages_on`,
+`with_messages`, `messages_stamp` and `MESSAGES_SHIPPED` from it, and the calibration tests `harvest`,
+`run_toy` and `object_rows`. Its own report is a reading of one toy on one
 library, not a yardstick. Gated by `tests/calibration/test_toy_harness.py`.
 
 Usage::
@@ -1058,8 +1058,7 @@ def main() -> int:
         help="sweep the transcript's RNA density (counts/bp) instead of one fixed run; "
         "no values = a default decade ladder around the donor's own gDNA density",
     )
-    # `g50` is the ladder's mid rung and also `verify_toy_substrate.py`'s default, so the harness and
-    # its verifier agree by default.
+    # `g50` is the ladder's mid rung.
     ap.add_argument("--donor", default="gdna_g50_ss_0.50_nrna_mid_capture_off")
     ap.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
     ap.add_argument("--index", type=Path, default=DEFAULT_INDEX)

@@ -25,7 +25,7 @@ CLAUDE = ROOT / "CLAUDE.md"
 SCRIPTS = ROOT / "scripts"
 DESIGN_DIR = SCRIPTS / "design"
 
-#: rows look like ``| `design/toy_panel.py` | … |``
+#: rows look like ``| `design/policy_benchmark.py` | … |``
 _ROW = re.compile(r"`design/([a-z0-9_]+\.py)`")
 
 #: Instruments that predate the current campaign, were never run in it, and are recorded as drift rather
