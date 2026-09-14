@@ -245,13 +245,28 @@ nascent model, so a claim spanning the ladder and a side panel varies two things
 call.
 
 ### hygiene-ledger
-`priority: later · kind: hygiene · 2026-08-31`
-One item open, its own commit, moving no number: the index's duplicate map as an alias map
-`dropped_t_id → kept_t_id` (an index rebuild, no panel re-scan, checked with `rename_identity.py`; `reach` is
-covered by no other hash). The wave-3 frame migration and the coverage census closed 2026-09-13 (the plan's
-W10 and W11 rows; the retired instruments and dead code are in git). Kept as coverage GAPS, not dead code: the
-five CLI command bodies, the silent policy through `calibrate`, the simulator's sharded writers and its
-whole-genome path, and the zarr splice blacklist.
+`priority: later · kind: hygiene · 2026-08-31; the review census 2026-09-14`
+Open, each its own commit: the index's duplicate map as an alias map `dropped_t_id → kept_t_id` (an index
+rebuild, no panel re-scan, checked with `rename_identity.py`; `reach` is covered by no other hash). The
+2026-09-14 review census (91 % of `src/rigel` executed by the suite and every `--self-test`; C++ is
+coverage-blind, so its functions were counted by name) cut what was dead and recorded the rest:
+(a) ROTTEN BUT LIVE, each moving an instrument's or a toy's numbers when repaired: `toy_harness.harvest`
+calibrates its donor undrained and without the two-pool contrast, so every toy inherits both;
+`pass0_vs_oracle`'s C_input arms hand the post-capture truth law to geometry, and its C_info tables price the
+retired length channel; `quant_accuracy`'s oracle arms are undrained (documented there);
+`pipeline._DEFAULT_MEAN_FRAG = 200.0` is a magic fallback for an empty RNA length pool.
+(b) VACUOUS GATE CLAUSES, never reached by their substrate: `test_transfer_faces.py`'s "nowhere when the flags
+clear" and `_expected_level_rows`' `level_bound_row` branch; `test_transfer_policy.py`'s LEVEL-face invariants
+(no LEVEL face on its toy); `test_transfer_rna_lanes.py`'s terminus clause and `own_level is None` clause.
+(c) DUPLICATES across the kept instruments: the closure checks, `stratum` / `is_zero_gdna`, `_SCOPE`, `PANELS`,
+`TYPE_NAME`, and the ladder's two paths hard-coded in five instruments.
+(d) CLAIMS NOT RE-DERIVED on the current tree, left standing: that most in-scope error sits at the simplex
+vertices (`simplex_logodds`, a relay-era measurement); `sweep`'s refused deferral of UNIDENTIFIED slots to the
+prior (priced 2026-07, with no refusal entry here); `region_geometry`'s "no per-region spliced floor" A/B
+(relay-era); and `fl`'s crossing pools called "gDNA by structure" because mature RNA never crosses an
+exon|intron boundary, while RNA that has not spliced there does.
+Kept as coverage GAPS, not dead code: the five CLI command bodies, the silent policy through `calibrate`, the
+simulator's sharded writers and its whole-genome grid, and the zarr splice blacklist.
 
 ### drain-contaminates-certified-rna
 `priority: later (parked by the owner, 2026-09-01) · kind: defect · 2026-08-31`
