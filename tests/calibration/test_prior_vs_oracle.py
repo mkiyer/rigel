@@ -454,8 +454,7 @@ def test_at_zero_gDNA_the_ORACLE_prior_is_identically_zero_and_the_shipped_one_i
     cal = _rebuild_calibration(measured_zero)
     truth = measured_zero.oracle.override_masses(measured_zero.region_arrays)
     seeded = np.array(truth["count_gdna_region"], copy=True)
-    # the largest RNA region — one with real opportunity, so the mass is not dropped by
-    # ``_mass_where_there_is_opportunity``
+    # one gDNA fragment, seeded at the largest RNA region
     i = int(np.argmax(np.asarray(truth["count_rna_region"])))
     seeded[i] = 1.0
     with_one = PV.PRIORS.assemble_priors(

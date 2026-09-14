@@ -18,13 +18,13 @@ robust rather than what is likely.
 
 ## THE INDEX — every rule, by section
 
-- **A. Validation and gates** — `self-checking-validator` · `perturb-every-gate` · `a-field-driven-gate-is-atomic` · `waive-with-a-measurement` · `a-docstring-that-misdescribes-the-graph` · `a-flat-pile-is-not-a-knot` · `the-rename-that-corrupted-a-diagram` · `a-constant-parked-a-value-off-a-knife-edge` · `a-gate-that-restates-the-implementation` · `a-gate-that-already-passed` · `right-conditional-wrong-marginal` · `byte-identity-gate` · `the-deliverable-is-not-reproducible-by-default` · `a-clip-hides-a-scale-error` · `an-ablation-that-never-ran` · `a-green-suite-hid-five-dead-instruments` · `compatibility-is-geometry-not-composition` · `a-zero-count-is-a-measurement` · `a-ratio-cannot-carry-zero` · `the-divergence-was-a-barrier` · `deadband-from-the-wrong-sample` · `honesty-metrics-reward-ignorance` · `predicate-contradicts-its-docstring` · `a-test-that-redefines` · `a-gates-power-is-its-invariant-set` · `a-gate-that-reconstructs` · `off-grid-message-mode` · `a-comment-quoted-as-a-finding` · `the-intermediate-is-not-the-deliverable` · `could-the-arm-have-fired` · `prove-the-substrate` · `can-the-benchmark-resolve-it` · `toys-rank-hotspots-backwards` · `an-identity-with-a-qualifier`
+- **A. Validation and gates** — `self-checking-validator` · `perturb-every-gate` · `a-field-driven-gate-is-atomic` · `waive-with-a-measurement` · `a-docstring-that-misdescribes-the-graph` · `a-flat-pile-is-not-a-knot` · `the-rename-that-corrupted-a-diagram` · `a-constant-parked-a-value-off-a-knife-edge` · `a-gate-that-restates-the-implementation` · `a-gate-that-already-passed` · `right-conditional-wrong-marginal` · `byte-identity-gate` · `the-deliverable-is-not-reproducible-by-default` · `a-clip-hides-a-scale-error` · `an-ablation-that-never-ran` · `a-green-suite-hid-five-dead-instruments` · `compatibility-is-geometry-not-composition` · `a-zero-count-is-a-measurement` · `a-ratio-cannot-carry-zero` · `the-divergence-was-a-barrier` · `honesty-metrics-reward-ignorance` · `predicate-contradicts-its-docstring` · `a-test-that-redefines` · `a-gates-power-is-its-invariant-set` · `a-gate-that-reconstructs` · `off-grid-message-mode` · `a-comment-quoted-as-a-finding` · `the-intermediate-is-not-the-deliverable` · `could-the-arm-have-fired` · `prove-the-substrate` · `can-the-benchmark-resolve-it` · `toys-rank-hotspots-backwards` · `an-identity-with-a-qualifier`
 
 - **B. Measurement and inference** — `measure-the-ceiling-first` · `a-broad-population-carries-no-prior` · `attribution-must-survive-a-shuffle` · `score-against-truth` · `zero-target-guards-are-one-sided` · `hard-labels-miss-soft-change` · `never-pool-the-strata` · `a-threshold-on-a-fitted-residue` · `excluding-a-population-hides-it` · `name-the-observable-per-site` · `starved-is-not-depleted` · `the-substrate-knob-fought-back` · `key-on-a-realised-quantity` · `price-the-halves-separately` · `panel-before-src` · `admitting-an-object-costs` · `substitution-understates-a-source` · `a-symptom-is-not-a-second-defect` · `a-locked-object-is-not-a-control` · `draining-breaks-the-oracle` · `an-equal-length-panel-defeats-the-lift` · `a-length-gap-bypasses-calibration` · `weight-it-like-the-consumer` · `a-support-ceiling-is-the-clamp` · `log-variance-is-not-linear` · `re-record-the-baseline` · `a-truth-table-of-aggregates` · `a-single-level-panel-cannot-see-a-constant` · `score-the-consumers-own-count` · `the-floor-must-reproduce-the-selection`
 
 - **C. Pools, selections and divisors** — `a-cancellation-is-conditional-on-its-support` · `a-better-estimator-inside-a-weak-consumer-moves-nothing` · `a-pooled-rate-cannot-see-a-short-object-factor` · `two-estimators-of-one-rate-weight-the-field-differently` · `state-the-population-rule-do-not-inherit-it-from-a-table` · `two-divisors-opposite-sign` · `frame-free-is-not-assumption-free` · `a-purity-filter-is-a-length-filter` · `pure-and-length-censored` · `divide-by-a-probability` · `opposite-tilts-must-not-pool` · `a-mean-of-ratios-inherits-the-partition` · `a-trap-names-the-defect-not-the-repair` · `a-stale-gate-accuses-the-newest-change` · `an-upper-bound-is-not-an-estimate` · `a-gate-on-the-helper-is-not-a-gate-on-the-caller` · `fractional-mass-is-the-problem` · `conservation-misses-mis-attribution` · `a-guard-outlives-its-divisor` · `a-fold-grows-a-heuristic` · `a-ratio-needs-a-population-that-can-supply-its-numerator`
 
-- **D. Estimation and solver design** — `purity-is-a-property-of-the-annotation` · `pair-count-weighting-lets-one-seed-decide` · `we-keep-re-deriving-message-passing` · `one-hop-lifted-out-is-still-the-relay` · `a-variance-cannot-fix-a-bias` · `two-gaussians-one-latent` · `variance-fitted-on-the-belief` · `a-message-from-the-destinations-belief` · `a-total-density-ratio` · `substitute-the-definitions-first` · `the-pin-had-a-fixed-point` · `no-belief-not-no-numbers` · `a-licence-with-no-floor` · `a-multiplication-gated-by-a-trace` · `all-small-singly-large-jointly` · `recompute-from-the-oracle` · `a-cancelling-defect-pair` · `zero-the-precision-with-the-value` · `no-prior-means-haldane` · `prefer-shares-to-differences` · `an-all-zero-factor-is-inert` · `density-below-one-fragment-length` · `identical-paralogs-are-bimodal` · `a-mean-hits-the-mass-weighted-centre-by-luck` · `a-clamp-at-the-closed-end-escapes-the-window` · `the-deconvolution-is-as-good-as-the-density-it-is-handed` · `deriving-one-coordinate-propagates-its-error` · `interpolate-on-the-axis-where-the-lattice-is-uniform` · `read-the-whole-failure-list` · `a-priors-curvature-is-not-the-datas-information` · `a-refutability-test-needs-the-refuting-channel-in-the-fixture` · `a-strength-is-a-nat-a-prior-weight-is-a-count` · `a-four-decimal-print-is-not-a-zero` · `a-constant-in-exact-arithmetic-is-not-constant-in-float64` · `a-toy-and-a-panel-can-disagree-in-rank` · `a-rescale-that-reads-the-source-belief-is-unbounded` · `a-face-total-is-not-a-total-without-its-flux` · `an-imputation-must-cost-something-every-hop` · `a-floored-knob-is-not-the-bandwidth` · `a-mode-count-is-not-a-well-posed-quantity` · `measure-a-default-flip-before-you-write-it`
+- **D. Estimation and solver design** — `purity-is-a-property-of-the-annotation` · `pair-count-weighting-lets-one-seed-decide` · `we-keep-re-deriving-message-passing` · `one-hop-lifted-out-is-still-the-relay` · `a-variance-cannot-fix-a-bias` · `two-gaussians-one-latent` · `variance-fitted-on-the-belief` · `a-message-from-the-destinations-belief` · `a-total-density-ratio` · `substitute-the-definitions-first` · `a-licence-with-no-floor` · `a-multiplication-gated-by-a-trace` · `all-small-singly-large-jointly` · `recompute-from-the-oracle` · `a-cancelling-defect-pair` · `zero-the-precision-with-the-value` · `no-prior-means-haldane` · `prefer-shares-to-differences` · `an-all-zero-factor-is-inert` · `density-below-one-fragment-length` · `identical-paralogs-are-bimodal` · `a-mean-hits-the-mass-weighted-centre-by-luck` · `a-clamp-at-the-closed-end-escapes-the-window` · `the-deconvolution-is-as-good-as-the-density-it-is-handed` · `deriving-one-coordinate-propagates-its-error` · `interpolate-on-the-axis-where-the-lattice-is-uniform` · `read-the-whole-failure-list` · `a-priors-curvature-is-not-the-datas-information` · `a-refutability-test-needs-the-refuting-channel-in-the-fixture` · `a-strength-is-a-nat-a-prior-weight-is-a-count` · `a-four-decimal-print-is-not-a-zero` · `a-constant-in-exact-arithmetic-is-not-constant-in-float64` · `a-toy-and-a-panel-can-disagree-in-rank` · `a-rescale-that-reads-the-source-belief-is-unbounded` · `a-face-total-is-not-a-total-without-its-flux` · `an-imputation-must-cost-something-every-hop` · `a-floored-knob-is-not-the-bandwidth` · `a-mode-count-is-not-a-well-posed-quantity` · `measure-a-default-flip-before-you-write-it`
 
 - **E. Structure, indexes and plumbing** — `one-reference-hides-refid-bugs` · `annotated-is-not-genomic` · `an-sj-is-not-a-gap` · `deposit-at-the-sj` · `splicing-makes-the-graph-cyclic` · `nrna-does-not-mean-synthetic` · `credit-exactly-one-sj` · `strand-completes-the-sj-key` · `a-hash-that-misses-its-artifact` · `integer-channels-reproduce` · `worktrees-run-the-wrong-code` · `checkout-deletes-uncommitted-work` · `two-masks-one-name` · `two-docstrings-one-quantity` · `a-transcript-predicate-must-not-silently-drop-a-molecule` · `an-object-class-does-not-see-a-terminus`
 
@@ -153,12 +153,6 @@ suppressing; an infinity in a damping term is a structural gate wearing a varian
 transfer variance finite turned every zero-mass slot from a chain-cutting barrier into an unscaled conduit
 and one stratum got 20–34 % worse: the infinity had been the only thing pricing the premise that a gDNA
 level does not change across a boundary, which capture falsifies by orders of magnitude.
-
-**deadband-from-the-wrong-sample. A noise deadband whose cushion is supplied by an unrelated sample size
-fails exactly where that sample gets big, silently, into the honesty columns.** The strand gate's cushion
-shrank as gDNA grew, phantom information then scaled with depth, and the damage was not accuracy but the
-solvable fraction collapsing to zero, inflating the column used to pick the worst condition. Propagate a
-variance instead of gating on it. *Sibling:* `TRAPS: honesty-metrics-reward-ignorance`.
 
 **honesty-metrics-reward-ignorance. Every honesty metric improves as the solver stops knowing anything, so
 none is readable without a fixed-denominator accuracy number beside it.** A destruction control made
@@ -576,8 +570,8 @@ observations, never its beliefs, and any "fix" that divides the belief back out 
 check is whether the delivered value is independent of the destination's own state; a prediction that
 does not move when the data move by four orders of magnitude is the tell. A corollary: capping `Var(f_g)`
 at `f_g(1−f_g)` asserts certainty at the corner where an evidence-free init parks, so a composition
-variance comes from the reference prior's own spread. The nine rules that follow are this lesson's other
-costumes, kept because the source cites them.
+variance comes from the reference prior's own spread. The seven rules that follow are this lesson's other
+costumes.
 
 **a-total-density-ratio. A scale factor must be built from the component the claim is about, never from a
 total.** `r = ρ_tot(dst)/ρ_tot(src)` re-creates the parent bug whenever the total is dominated by a
@@ -586,15 +580,6 @@ component the message is not about: a correct gDNA density of 0.026 was delivere
 **substitute-the-definitions-first. Before correcting an operator, substitute its own definitions and read
 what it delivers.** Substituting showed `ρ_c(src)·r ≡ φ_c(src)·ρ_tot(dst)`, a pure composition imputation
 with no level in it, so no corrective factor existed; two sessions had been spent hunting a better `r`.
-
-**the-pin-had-a-fixed-point. A rescale of the form `k = 1/(φ_msg + R_own)` has a fixed point at
-`R_own = ½` and drives the delivered fraction to ½ regardless of truth.** It hid from every aggregate
-because per-step rescales telescope back to 1 at a gene's far end; only a per-object check away from a
-pure-gDNA object sees it.
-
-**no-belief-not-no-numbers. State the licence as "no belief may enter", not "the destination's numbers may
-not enter".** Gating a rescale wherever it read the destination's own density looked clean and broke the
-capture landscape, because the off-probe floor leaked into every exon.
 
 **a-licence-with-no-floor. A licence that tests a precision with no floor is granted by it.** A fitted κ
 within a millionth of ½ on a genuinely unstranded library leaves `I(f_g) ∝ (2κ−1)²` essentially zero yet
@@ -759,7 +744,7 @@ reads any shape statistic off a fitted density: `rho_0` and the containment verd
 two selected modes does not. *Sibling:* `TRAPS: a-floored-knob-is-not-the-bandwidth`.
 
 **measure-a-default-flip-before-you-write-it. A config default and a refusal are one design, and flipping
-the first can invalidate the second.** `CalibrationConfig.abundance_landscape` was written opt-in and
+the first can invalidate the second.** `CalibrationConfig.abundance_landscape` (a switch since retired) was written opt-in and
 refused to run without the wall arrays; flipping the default broke 65 callers on one cause, that unit and
 toy fixtures have no wall arrays. The refusal serves the population that opts in; the default serves the
 population that never thought about it. Re-read what the refusal was protecting against (here the

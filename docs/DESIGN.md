@@ -8,8 +8,7 @@ accumulator, the two-pass structure and the solver as shipped; §6b–§6c the m
 the error sits. What does not belong here: derivations (`EQUATIONS.md`), lessons from mistakes
 (`TRAPS.md`, cited by name), open problems and refusals with their numbers (`ISSUES.md`), the ranked
 next steps (`ROADMAP.md`), how the panels are built (`TESTING.md`), and history (git). Section numbers
-are anchors cited from the source, the tests and the other docs; a gap in the numbering is a deleted
-section.
+are anchors the other docs cite; a gap in the numbering is a deleted section.
 
 ---
 
