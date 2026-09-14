@@ -12,7 +12,7 @@ parts, and ``prepare`` is a table of contents: one named BUILDER per shipped mes
 * Every node's OWN CLAIM (`_claims`): an intron's factory profile (its density against the
   intergenic background — the context's ``factory_rows``, the very array ψ adds as its λ-factor); an
   exon's or a boundary's own strand profile
-  where the solver's derived strand deadband declares the channel live (``strand``); an
+  where the library's strand protocol decision declares the channel live (``strand``); an
   intergenic|exon edge's gDNA COUNT (the level lane: the edge's crossing is structurally pure gDNA).
   ⛔ A claim is data only — never a belief, which already holds the prior and the neighbours.
 * The RECIPIENT's rule per directed face: absent = STOP (composition cannot cross: the recipient
@@ -85,8 +85,8 @@ parts, and ``prepare`` is a table of contents: one named BUILDER per shipped mes
   prior.
 
 The laws the policy keeps: the sender publishes its claim unchanged; the recipient decides; a no-claim
-stays a no-claim — a flat profile, an absent factory, a context with no rows all deliver silence,
-never a zero-filled channel; a message is built from the source's claim and the recipient's constants
+stays a no-claim — a flat profile or an absent factory row is no claim on that channel, never a
+zero-filled one; a message is built from the source's claim and the recipient's constants
 and observations, never the recipient's belief.
 
 THE LIBRARY (`TransferPolicy.library`, once per sweep over the whole chain, `_Library`): the three
@@ -140,7 +140,7 @@ class _Library:
     single-strand exons, both strands pooled, or over every exon when no single-strand exon has counts
     (a level is absolute and the coordinate only its origin, so one serves both strands and a strand with
     no single-strand exon of its own still builds its flux levels). ``split_live``: the strand split is a witness of a strand's RNA somewhere — the
-    derived deadband is open and some single-strand exon has counts."""
+    library's protocol preserves strand and some single-strand exon has counts."""
 
     rho_gdna: float
     rho_rna: float
@@ -182,8 +182,8 @@ class TransferPolicy:
             rho = 0.0
         kappa = None if self._strand is None else float(self._strand[0])
         # the split is a witness of a strand's RNA only where the library's strand channel is live —
-        # the derived deadband's verdict (`ChainView.strand_live`): with it open, every counted
-        # single-strand exon's strand precision is positive; with it shut, none is (an intron's
+        # the protocol decision (`ChainView.strand_live`): where the protocol preserves strand, every
+        # counted single-strand exon's strand precision is positive; where it does not, none is (an intron's
         # factory precision joins its strand term, so introns cannot stand for the channel)
         single = fp != fn
         split_live = (
@@ -352,8 +352,8 @@ class _Chain:
 
 def _claims(c: _Chain) -> list:
     """Every node's OWN CLAIM — data only, never a belief: an intron's factory profile where the
-    factory has one; an exon's own strand profile where the derived strand deadband declares the
-    channel live; a single-strand boundary's own strand profile likewise (an AMBIG boundary's split
+    factory has one; an exon's own strand profile where the node's own strand channel is live
+    (``has_own_composition``); a single-strand boundary's own strand profile likewise (an AMBIG boundary's split
     constrains only the tilt, never the gDNA level — the Schur complement the local solve applies)."""
     own: list = [None] * c.n
     for i in np.flatnonzero(c.is_intron):

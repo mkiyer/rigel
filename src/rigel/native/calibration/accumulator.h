@@ -392,7 +392,7 @@ struct ScoredHypothesis {
 
 struct DepositScratch {
     std::vector<std::pair<std::int64_t, std::int64_t>> introns;   // normalised: sorted, disjoint, clipped
-    std::vector<std::pair<std::int64_t, std::int64_t>> segments;  // the path, introns region_bound out
+    std::vector<std::pair<std::int64_t, std::int64_t>> segments;  // the path, introns cut out
     std::vector<std::int32_t>                         sj_ids;     // annotated sj boundaries used
     /// ⭐ The same resolution kept PER INTRON POSITION, -1 where unannotated. `sj_ids` is filtered, so
     /// it cannot say which of a block's two ends is a sj — and the conserved mass needs exactly

@@ -1,5 +1,5 @@
 """
-rigel.cli — Unified command-boundary interface.
+rigel.cli — Unified command-line interface.
 
 Entry point: ``rigel`` (registered in pyproject.toml).
 

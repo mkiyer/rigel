@@ -50,7 +50,8 @@ spliced there, a channel genuinely disjoint from the (directly observed, already
 
 One solver, :func:`_solve_logodds`, over the ``(λ, θ)`` cube in float64. A single-strand region (exactly
 one of ``allow_pos`` / ``allow_neg``) has its tilt fixed by its live strand, so it is the ``K_t = 1`` case —
-a 1-D solve over ``λ`` at the 1-D cost — and AMBIG regions (both set) marginalise the tilt on the θ grid.
+a 1-D solve over ``λ`` at the 1-D cost — and AMBIG regions (both set) marginalise the tilt over the
+windowed θ nodes and the two atoms.
 ``_solve_regions_logodds_all`` runs the two classes on ONE λ lattice (ruled 2026-09-13: a finer
 single-strand grid with a regrid between the two measured worse than one lattice) and tiles the rows so the
 working set stays in cache. Structurally RNA-free regions (neither
@@ -143,7 +144,7 @@ def _row_moment(post, g):
 def _lse(a, axis, keepdims=False):
     """Lean numpy log-sum-exp — a drop-in for ``scipy.special._lse(a, axis, keepdims)`` without the
     scipy wrapper overhead (arg validation, ``b``/``return_sign`` handling), which the profiler flagged as
-    ~9 s of pure per-call cost across the AMBIG solve. Same max-shift stabilisation; the ``m→0`` guard makes
+    a material per-call cost in the AMBIG solve. Same max-shift stabilisation; the ``m→0`` guard makes
     an all-``-inf`` slice give ``log(0) = -inf`` and avoids ``(-inf)-(-inf) = nan``."""
     m = np.max(a, axis=axis, keepdims=True)
     m = np.where(np.isfinite(m), m, 0.0)
@@ -629,7 +630,7 @@ def _solve_logodds(
     ``λ`` (outer, ``K = n_grid``) and the tilt ANGLE ``θ = arcsin(τ)`` (inner, ``K_t = _TILT_NODES`` nodes
     placed per slot and λ by :func:`_tilt_window`). ψ is the
     same expression for every slot — strand + ``_gdna_arm`` + ``_rna_arm`` + the λ-factor rows (+ the
-    delivered :class:`CubeRow` where there is one) — evaluated on the ``(m, K, K_t)`` cube in float64, and read
+    delivered :class:`CubeRow` where there is one) — evaluated on the ``(m, K, K_t + 2)`` cube in float64, and read
     out once: ``f_g`` is the posterior median over the θ-marginal λ-posterior, ``f_pos`` / ``f_neg`` its
     image under :func:`_compose` with the tilt share ``w_pos`` the RNA-mass-weighted posterior share, and
     ``Var(log f_g)`` is a grid moment over the λ-marginal — the one precision the tool reads (the
@@ -683,7 +684,7 @@ def _solve_logodds(
     m = psi.shape[0]
     # ── ONE posterior over the cube; the λ read-out on its θ-marginal ─────────────────────────────
     flat = psi.reshape(m, -1)
-    post = np.exp(flat - _lse(flat, axis=1, keepdims=True)).reshape(psi.shape)  # (m, K, K_t)
+    post = np.exp(flat - _lse(flat, axis=1, keepdims=True)).reshape(psi.shape)  # (m, K, columns)
     post_lam = post.sum(axis=2)  # the θ-marginal, per row
     f_g = _posterior_median_fg(post_lam, lam)
     log_fg = _log_fg(lam)
@@ -803,11 +804,11 @@ def _solve_regions_logodds_all(
                 ),
             )
     if bool(amb.any()):
-        # The 2-D (λ,θ) cube is (B,K,K_t); materialised for every AMBIG region at once it would be
-        # O(m·K·K_t). AMBIG regions solve independently, so the subset is tiled into row blocks —
-        # bit-identical results, peak memory bounded to one (rows, K, K_t) cube.
+        # The 2-D (λ,θ) cube is (B, K, K_t + 2): the θ nodes and the two atoms. Materialised for every
+        # AMBIG region at once it would be O(m·K·K_t). AMBIG regions solve independently, so the subset is
+        # tiled into row blocks — bit-identical results, peak memory bounded to one (rows, K, K_t + 2) cube.
         amb_idx = np.where(amb)[0]
-        rows = _block_rows(int(n_grid) * _TILT_NODES, 8)
+        rows = _block_rows(int(n_grid) * (_TILT_NODES + 2), 8)
         for s0 in range(0, amb_idx.size, rows):
             bidx = amb_idx[s0 : s0 + rows]
             delivered = None

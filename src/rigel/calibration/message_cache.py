@@ -34,11 +34,10 @@ class MessageCache:
 
     CONTENT-KEYED, so it is safe by construction rather than by trust: an entry's key is a digest of
     every input the layer reads, and a changed belief, row, count, library or grid misses. An entry
-    holds the delivered rows sparsely (only the non-zero rows), the cube rows as the solve reads them,
-    the block's ``held_composition`` and its assertion counts (as a plain dict; the backbone rebuilds its
-    `AssertionCounts` from it). Measured on the 18.6M-fragment library: the refit sweeps served in 38 s
-    instead of 176 s each, the run 0.65 of its wall, 4.1 GB held with float64 cube rows. Diagnostics never read from it: a captured sweep runs the
-    whole layer.
+    holds the delivered rows sparsely (only the non-zero rows), the cube rows as the solve reads them
+    (:class:`~.simplex_logodds.CubeRow` records), the block's ``held_composition`` and its assertion counts
+    (as a plain dict; the backbone rebuilds its `AssertionCounts` from it). Diagnostics never read from it:
+    a captured sweep runs the whole layer.
     """
 
     def __init__(self):

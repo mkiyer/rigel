@@ -654,4 +654,4 @@ def init_beliefs(
 # object's structural class, directly observable on any class with structurally pure-gDNA members. It was
 # built that way (REGION/BOUNDARY x off-probe / half-covered / fully-covered, a pooled ``Σcount/ΣE`` per
 # class) and priced inert: a pure-gDNA object's own observed total already IS its gDNA density at its own
-# capture stratum, so a pooled class ratio only re-derives locally-available information, worse.
+# capture stratum, so a pooled class ratio only re-derives locally-available information.

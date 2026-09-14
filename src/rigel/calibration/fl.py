@@ -431,8 +431,7 @@ def _deconvolved_gdna_counts(
             False, "purities identical", fit.rate, fit.rate_over_pooled, a0, a1, sep
         )
 
-    pi = gdna_opportunity.combined_probability()
-    del pi  # the combined divisor is for the four-pool sum; each pool here takes its OWN
+    # each contained pool takes its OWN opportunity, never the combined divisor of the four-pool sum
     total = np.asarray(gdna_opportunity.total, dtype=np.float64)
     raw = np.asarray(payload.pool_lengths, dtype=np.float64)
     f = []

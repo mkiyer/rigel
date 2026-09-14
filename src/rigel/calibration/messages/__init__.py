@@ -14,7 +14,7 @@ unknown name raises. The default is `"transfer"`.
   cannot cross, each hop priced by the two nodes' counting and their own disagreement
   (`transfer_rows` holds the pure row constructors).
 * :class:`~.silent.SilentPolicy` — sends nothing; the OFF state and the measured floor. Five
-  boundaries long: a reader who holds ``sweep.py`` plus ``silent.py`` in their head holds the entire
+  lines long: a reader who holds ``sweep.py`` plus ``silent.py`` in their head holds the entire
   working system.
 
 THE TWO PHASES. Phase 1, PROPAGATE: a forward pass then a backward pass; at each hop the RECIPIENT
@@ -147,7 +147,8 @@ class Levels:
     last full node — the strand's RNA count read from the node's column split (its asymmetry over the
     protocol's strand contrast) and that estimate's Poisson variance — the pair the next recipient's
     price compares with its own split. ``has_witness`` is False on the gDNA lane and where the library's
-    strand channel is dead (the derived deadband), where the column count is the witness."""
+    strand channel is dead (the protocol decision reads it as unstranded), where the column count is the
+    witness."""
 
     present: np.ndarray  # (n,) bool
     profile: np.ndarray  # (n, K) f64
@@ -362,10 +363,10 @@ class ChainView:
     #: same array ψ adds as its own λ-factor (`sweep.solve_chain`'s ``intron_prior``), so an intron's
     #: own claim and the solver's factor cannot drift apart; ``None`` is no factory
     factory_rows: np.ndarray | None = None
-    #: the derived strand deadband's verdict for the LIBRARY: does the strand split carry composition
-    #: information at all (`region_init.strand_discriminability` > 0)? A κ within its noise of ½ makes
-    #: every single-strand exon's strand precision exactly zero, and a policy reading the split as an
-    #: RNA witness must know that before it prices a single hop
+    #: the strand protocol decision for the LIBRARY: does the spliced 2×2 read the protocol as
+    #: strand-preserving (`region_init.strand_discriminability` > 0)? An unstranded verdict makes every
+    #: single-strand exon's strand precision exactly zero, and a policy reading the split as an RNA
+    #: witness must know that before it prices a single hop
     strand_live: bool = False
 
     @property
@@ -406,7 +407,7 @@ class BlockContext(ChainView):
 
     #: does this node have OWN composition evidence — `RegionInit.tau_lam > 0`, the one bit of the
     #: message-free self-solve a policy may know: the strand term (the node has counts and the library's
-    #: deadband is open) or the factory's row, so it does not depend on the prior a sweep carries. A
+    #: protocol preserves strand) or the factory's row, so it does not depend on the prior a sweep carries. A
     #: policy is not handed the self-solve's fractions or precisions, and that is what lets the message
     #: layer be shared across the refit sweeps (`message_cache.MessageCache`): every input it reads is on this
     #: context and can be digested.

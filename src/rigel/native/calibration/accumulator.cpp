@@ -420,7 +420,7 @@ std::int64_t normalise_introns(const IntronBlock* observed,
     return absorbed;
 }
 
-/// The path's contiguous genomic segments: [start, end) with the (normalised) introns region_bound out.
+/// The path's contiguous genomic segments: [start, end) with the (normalised) introns cut out.
 void build_segments(std::int64_t start,
                     std::int64_t end,
                     const std::vector<std::pair<std::int64_t, std::int64_t>>& introns,

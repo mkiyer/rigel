@@ -2,7 +2,7 @@
 
        Gate: ``tests/calibration/test_sweep_backbone.py``
 
-Five boundaries of behaviour, and that is the point: a reader of ``sweep.py`` plus this file holds
+Five lines of behaviour, and that is the point: a reader of ``sweep.py`` plus this file holds
 the whole working backbone. :mod:`~.transfer` is the shipped policy; this one is what every policy
 is priced against.
 

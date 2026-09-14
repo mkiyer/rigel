@@ -598,7 +598,7 @@ def _empty_piece_ctx(flux: float = 40.0, rate: float = 0.02):
         n_grid=41,
         logodds_window=10.0,
         factory_rows=np.zeros((n, 41)),  # a factory with nothing to say: the lanes alone
-        strand_live=True,  # the deadband is open: the full exon's split is a witness
+        strand_live=True,  # the protocol preserves strand: the full exon's split is a witness
     )
 
 

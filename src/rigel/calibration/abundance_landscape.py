@@ -38,7 +38,7 @@ over-wide enriched basin) and never a hard exclusion.
 data — that module's own warning — so every result reported off this landscape carries the caveat until
 it is priced.
 
-Nothing here decides anything in the solve. Its consumers are the census instrument, the QC surface
+Nothing here decides anything in the solve. Its consumers are the QC surface
 (`CalibrationDiagnostics.from_abundance_landscape`) and the injection substrate. Its own falsification
 is ``tests/calibration/test_abundance_landscape.py``.
 """

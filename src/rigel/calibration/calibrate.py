@@ -20,8 +20,8 @@ where gDNA is scarce). The solver is the belief-propagation SWEEP over the ``N E
       -> signature-binary init (G1/G2/G3)
       -> PASS 1 solve_chain (no fitted prior): ONE forward + ONE backward pass — each object integrates
            its strand likelihood, the intron factory and its neighbours' messages
-      -> fit the phase-2 gDNA-density landscape on the pass-1 belief
-      -> PASS 2 solve_chain (the landscape added per object) -> the converged per-object pie
+      -> REFITS (``calib_refit_iters``): fit the gDNA-density landscape on the current belief, reset
+           the belief, solve_chain again with the landscape added per object -> the per-object pie
       -> chain_region_deconv  -> per-REGION gDNA / RNA contained mass
       -> chain_boundary_deconv  -> per-BOUNDARY gDNA / RNA crossing mass, for the per-locus prior
       -> gdna_density_global (the library-average density QC scalar)
@@ -112,16 +112,16 @@ class InjectedCalibrationPriors:
     population scenario and injects them, letting the toy provide only the controlled per-region GEOMETRY. Every
     field is optional; ``None`` ⇒ fit that prior internally (the default, byte-identical). ``calibrate`` also
     stashes the fitted-or-injected bundle in ``_debug["calibration_priors"]`` so a population scenario's fitted
-    priors can be extracted and re-injected into a toy (`scripts/debug/toy_inject.py`)."""
+    priors can be extracted and re-injected into a toy."""
 
     rna_sense_frac: float | None = None
     n_rna_obs: float | None = None
     gdna_strand_overdispersion: float | None = None
     rna_strand_overdispersion: float | None = None
     intron_background: GdnaBackground | None = None
-    #: the pre-pass-0 TOTAL-density field + mode census — population-scale (a toy cannot fit a
-    #: landscape from a handful of regions), injectable exactly like the enrichment prior it is
-    #: planned to replace. ``None`` ⇒ fit internally when the config asks, else absent.
+    #: the pre-pass-0 TOTAL-density field + mode census — QC-only and population-scale (a toy cannot
+    #: fit a landscape from a handful of regions). ``None`` ⇒ fit internally when the wall inputs are
+    #: given, else absent.
     abundance_landscape: AbundanceLandscape | None = None
 
 

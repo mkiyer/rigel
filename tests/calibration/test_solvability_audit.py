@@ -548,7 +548,7 @@ def test_D4_the_evidence_predicate_has_ONE_home_and_the_instruments_import_it():
     An instrument restating ``_EPS = 1.0e-9`` beside a comment saying it must match the solver does
     not move when the solver does. The instruments import the home
     (`pass0_vs_oracle` — gated in ``test_pass0_vs_oracle``), and
-    on every value the solver publishes — exactly zero where the deadband or the AMBIG gate silenced
+    on every value the solver publishes — exactly zero where the protocol decision or the AMBIG gate silenced
     the channel, a Fisher information otherwise — the home agrees with the transfer policy's own
     liveness test on a node's strand channel, ``tau_lam > 0``."""
     tau = np.array([0.0, 1e-4, 1.0, 850.0])

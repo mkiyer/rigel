@@ -194,7 +194,7 @@ class _Exons:
                 continue
             for ex in tx.exons:
                 if int(ex.end) <= int(ex.start):
-                    continue  # v7 skips a zero/negative-length exon silently; match it exactly
+                    continue  # a zero- or negative-length exon covers no base
                 ref.append(str(tx.ref))
                 start.append(int(ex.start))
                 end.append(int(ex.end))

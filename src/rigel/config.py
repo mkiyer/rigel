@@ -246,9 +246,9 @@ class CalibrationConfig:
     """Configuration for the calibrator (:func:`rigel.calibration.calibrate`).
 
     The calibrator is the belief-propagation sweep over the region-boundary chain — a single
-    forward-backward pass per solve_chain call, with the belief-free Poisson disagreement-variance
-    message precision (``σ²_msg = σ²_imp + 1/n_src``); ``sweep_logodds_step`` sets the per-region
-    log-odds lattice. See :func:`rigel.calibration.calibrate.calibrate`.
+    forward-backward pass per solve_chain call, each hop priced by both witnesses' counting plus the
+    pair's disagreement beyond it (`messages.transfer_rows.hop_price`); ``sweep_logodds_step`` sets the
+    per-region log-odds lattice. See :func:`rigel.calibration.calibrate.calibrate`.
     """
 
     #: The strand-overdispersion CEILING is not config: it lives as the single asserted constant
@@ -269,10 +269,10 @@ class CalibrationConfig:
     #: ½-quantile read-out is exact to 1 % of a step once a slot's posterior is wider than the step, and
     #: quantised by at most ``n·f(1−f)·step/4`` fragments below it — at 0.2 a slot's composition is within
     #: 1.25 % of its mass at worst, 0.6 % on average. The ladder (16 conditions, one lattice, ratio to the
-    #: retired 60/256 pair on the three in-scope strata; cost on the 18.6M-fragment library): 0.69 (30
-    #: points) 1.10–1.22×; 0.34 (60) 1.02–1.04×; 0.20 (101) 0.993 / 0.998 / 1.000 at wall 1.09×, +1.8 GB;
-    #: 0.146 (138) 0.990 at 1.33×, +3.7 GB; 0.10 (201) 0.987 at 1.71×, +9.8 GB. The cost is the AMBIG cube
-    #: (``K × 24`` per slot, the derived tilt node count) and its cached rows; 0.2 is the coarsest step that loses nothing.
+    #: retired 60/256 pair on the three in-scope strata, measured when the lattice was unified): 0.69 (30
+    #: points) 1.10–1.22×; 0.34 (60) 1.02–1.04×; 0.20 (101) 0.993 / 0.998 / 1.000; 0.146 (138) 0.990;
+    #: 0.10 (201) 0.987. The cost grows with ``K`` through the AMBIG cube (``K × (K_t + 2)`` per slot);
+    #: 0.2 is the coarsest step that loses nothing.
     sweep_logodds_step: float = 0.2
 
     #: Log-odds grid FLOOR ``L``: ``λ ∈ [−L, L]`` ⇒ ``f_g ∈ [σ(−L), σ(L)]``. This is the range the
@@ -292,11 +292,9 @@ class CalibrationConfig:
     #: block (`calibration.region_chain.locus_blocks`). A PERFORMANCE tunable and nothing else: the
     #: answer is the same for every value (ψ's read-out is chunk-exact, gated), so it trades the
     #: per-sweep memory — a block's ``(slots, K)`` arrays instead of the whole chain's — against the
-    #: per-block overhead. ``None`` solves the whole chain as one block. The default is the knee of the
-    #: measured ladder on the human chain (2.09M slots, one real sweep, 2026-09-11) — the sweep's own peak
-    #: allocation / its wall time: whole chain 9.87 GB / 41 s; 20,000 slots 0.26 GB / 39 s; 5,000 slots
-    #: 0.19 GB / 39 s; 1,000 slots 0.17 GB / 41 s — every size bit-identical. 5,000 sits on the flat part
-    #: of both curves (about 420 blocks on that chain).
+    #: per-block overhead. ``None`` solves the whole chain as one block. The default sits on the flat part
+    #: of the sweep's peak-allocation and wall-time curves, measured over block sizes on the human chain
+    #: (2.09M slots, about 420 blocks at 5,000); every size is bit-identical.
     sweep_block_slots: int | None = 5000
 
     #: Which (counts, exposure) pair the pooled gDNA background estimators take.
@@ -341,10 +339,7 @@ class CalibrationConfig:
     #: the fitted landscape carries between iterations, and the prior sharpens only where the data has
     #: earned it. ``0`` ⇒ the prior-free pass-0 alone.
     #:
-    #: The bootstrap converges geometrically, with successive increments shrinking by a factor of two
-    #: or three, and it is monotone on every stratum including the zero-gDNA false-positive guard, so
-    #: extra iterations never trade specificity for accuracy. Three captures nearly all of the
-    #: available gain. Cost is linear — one landscape fit plus one full sweep each — so lower it if
+    #: Cost is linear — one landscape fit plus one full sweep each — so lower it if
     #: calibration wall-clock matters more than the last few percent of its accuracy.
     calib_refit_iters: int = 3
 

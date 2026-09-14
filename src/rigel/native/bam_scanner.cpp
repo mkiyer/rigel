@@ -414,8 +414,7 @@ struct WorkerState {
     //
     // ⛔ That restriction is mandatory, not tidiness. `Accumulator::deposit` normalises introns by
     // coordinate alone — it never looks at `IntronBlock::ref_id` — so an intron from another reference
-    // would be region_bound out of this reference's path. `fragment_genomic_spans` filtered by ref explicitly; the
-    // filter has to survive its deletion. Multi-reference fragments DO arrive here: the intergenic call
+    // would be cut out of this reference's path. Multi-reference fragments DO arrive here: the intergenic call
     // site is not chimera-gated, and `detect_chimera` returns CHIMERA_NONE when the blocks carry empty
     // transcript sets.
     rigel::accumulator::DepositScratch deposit_scratch;
@@ -1562,7 +1561,7 @@ private:
         //
         // Turn one assembled fragment into the accumulator's `FragmentPath` and deposit it. The
         // accumulator owns the whole deposit rule; this function's only job is to say what the fragment IS
-        // — its extent on one reference, the introns region_bound out of it, and the two independent strands.
+        // — its extent on one reference, the introns cut out of it, and the two independent strands.
         //
         // ⭐ THE TWO STRANDS ARE INDEPENDENT, and collapsing them is the bug this rewrite deletes.
         //   align_strand  where the read ALIGNED. Every read has one. It selects the array column.

@@ -1,10 +1,9 @@
 """Gates for the transfer policy's shape and for the two mechanisms that belong to the policy
 rather than to any one face.
 
-The shape: the backbone protocol; the silence identity, where an evidence-free transfer is
-byte-identical to `SilentPolicy` through the real backbone; the installer and its refusal of an
-unknown name; the two passes against an independent recursive reference; the no-echo law; the own
-claims' liveness under the strand deadband; and the completion contract, that every directed face
+The shape: the backbone protocol; the installer and its refusal of an unknown name; the two passes
+against an independent recursive reference; the no-echo law; the own claims' liveness under the
+strand protocol decision; and the completion contract, that every directed face
 carries a rule or a lane face or leads into structural pure gDNA. The mechanisms: phase 2's
 ceilings, read only from a face that sent no composition, and the gDNA level lane, where a received
 level is a lower bound the hop widens, two bounds intersect rather than multiply, and an empty node
@@ -220,8 +219,8 @@ def test_PERTURBATION_no_node_ever_hears_its_own_claim_back(sweep_inputs):
 
 
 def test_a_dead_strand_channel_carries_no_own_claim(sweep_inputs):
-    """The vacuity law, for every claim carried by the strand channel: where the solver's derived
-    deadband declares a node's strand channel dead (``own.tau_lam == 0``), that node's OWN CLAIM is
+    """The vacuity law, for every claim carried by the strand channel: where a node's strand channel
+    is dead (``own.tau_lam == 0``), that node's OWN CLAIM is
     absent — an exon's and a boundary's alike — so nothing of its own can travel; and a policy built
     without strand parameters carries no strand claim anywhere."""
     import dataclasses as _dc
