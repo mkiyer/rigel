@@ -227,7 +227,6 @@ python scripts/sim/panel.py cache    --config $CFG --jobs 8
 
 # 2. IS THE SUBSTRATE SOUND?  (TRAPS: prove-the-substrate — prove the simulator before the code)
 python scripts/design/simulator_gates.py --suite $LADDER --reference $SUITE/reference
-python scripts/design/suite_resolves.py $INDEX --suite $LADDER
 
 # 3. THE PRIMARY METRIC — CALIBRATION AGAINST ORACLE CALIBRATION.
 #    (a) the calibration result and the ruler, P vs O vs U, per stratum   ~5-12 s/condition, no EM
@@ -251,11 +250,9 @@ python scripts/sim/panel.py report --config $CFG --arms base base_reseed oracle
 
 # 6. STAGE A is CLOSED — this block is a REGRESSION check, run it after an accumulator or native change.
 python -m pytest tests/native tests/calibration -q     # FIDELITY
-python scripts/design/fl_pool_purity.py                #       are the pools pure gDNA (only where the lengths differ)
 ```
 
-Steps 0 and 2–4 take about 15 minutes on a built panel; `suite_resolves.py`'s requirement (c),
-replicate pairs, is the one known failure, deferred by owner ruling. Run the set together and record it
+Steps 0 and 2–4 take about 15 minutes on a built panel. Run the set together and record it
 together (`TRAPS: re-record-the-baseline`). When dissecting rather than scoring: run the panel → take
 the worst **in-scope** scenario → dissect it to the highest-error object (`worst_objects.py`) → find the
 cause → fix → repeat. The worst scenario overall is the deferred stratum, and picking it is how the

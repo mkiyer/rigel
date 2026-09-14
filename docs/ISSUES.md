@@ -51,7 +51,7 @@ a blind slot. CLOSED here 2026-09-14, (d): a slot whose solve is wider than one 
 trains (`DESIGN.md` §7.1 rule 4) — the vertex-solved exons that trained 3,771 false fragments at the first
 refit on `g00 ss.99 OFF` are out, and the four ladder zero controls read 282 / 194 / 265 / 172. Refused here:
 excluding κ-dead exons (`g50 ss.50 ON` 2,691 → 56,422), AMBIG in the final fit (worse 25/32), and the two
-other readings of the floor (`DESIGN.md` §7.1 rule 4). `landscape_training_census.py`.
+other readings of the floor (`DESIGN.md` §7.1 rule 4). Its instrument, `landscape_training_census.py`, was retired 2026-09-14 (in git).
 
 ### flux-price-witness-units
 `priority: next · kind: problem · 2026-09-09`
@@ -107,8 +107,8 @@ already models the panel; it also blocks `ISSUES: crossing-pool-contrast`.
 `priority: next · kind: defect · 2026-08-31`
 `POOL_EB_PRIOR_ESS = 1000.0` shrinks the gDNA pmf toward `global_pmf` (mostly RNA whenever gDNA is a minority)
 at a magic ESS: inert on the ladder (0.01 bp), dominant on the fl-gap arm at `g05` capture-ON (`ship−pool`
-−23.7 of −31.7 bp). Replacement: reconcile the pools by their precision (`EQUATIONS.md` §6c).
-`fl_pool_purity.py`.
+−23.7 of −31.7 bp). Replacement: reconcile the pools by their precision (`EQUATIONS.md` §6c). Its
+instrument, `fl_pool_purity.py`, was retired 2026-09-14 (in git).
 
 ### refit-vs-message-arbitration
 `priority: next · kind: design · 2026-08`
@@ -203,8 +203,8 @@ takes: `"contained"` (the count over the gDNA contained effective length — unb
 in the divisor) or `"measured_total"` (the START/END banks over the region's own length — pmf-free, refuses
 without the wall inputs). The two agree off capture and part under it, where the contained divisor
 under-reads the true gDNA rate several-fold while the pmf-free pair over-reads on pools carrying nascent RNA.
-A design decision, not a tunable: rule which pair ships (`total_abundance_audit.py` scores them;
-`calibration_vs_oracle.py --set calibration.background_abundance=measured_total` prices the swap) and the
+A design decision, not a tunable: rule which pair ships
+(`calibration_vs_oracle.py --set calibration.background_abundance=measured_total` prices the swap) and the
 field goes with the ruling.
 
 ### the-tilt-census-as-an-instrument
@@ -247,7 +247,7 @@ call.
 ### hygiene-ledger
 `priority: later · kind: hygiene · 2026-08-31`
 One item open, its own commit, moving no number: the index's duplicate map as an alias map
-`dropped_t_id → kept_t_id` (an index rebuild, no panel re-scan — verify with `rescan_panels.py`; `reach` is
+`dropped_t_id → kept_t_id` (an index rebuild, no panel re-scan, checked with `rename_identity.py`; `reach` is
 covered by no other hash). The wave-3 frame migration and the coverage census closed 2026-09-13 (the plan's
 W10 and W11 rows; the retired instruments and dead code are in git). Kept as coverage GAPS, not dead code: the
 five CLI command bodies, the silent policy through `calibrate`, the simulator's sharded writers and its

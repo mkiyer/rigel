@@ -254,7 +254,7 @@ def _posterior_median_fg(post, lam, fg):
 
     Transform-invariant and robust to the skew of the ``f_g`` posterior, which is why ``f_g`` is a median
     and not a mean: the mean is measurably worse at both simplex vertices at every depth, and the vertices
-    are where most of the in-scope calibration error lives (`vertex_ceiling.py --arm psi_mean` prices it).
+    are where most of the in-scope calibration error lives.
 
     It is a continuous quantile, not the grid point where the CDF first reaches ½. The grid mass is
     treated as a histogram, with bin edges at the midpoints, and the crossing bin is interpolated.
@@ -329,7 +329,7 @@ def _compose(f_g, w_pos, allow_pos, allow_neg):
 
     The repair is not "take means everywhere". That closes too, by linearity of expectation, and is
     measurably worse: the median is closer to the truth at both simplex vertices, where most of the
-    in-scope error lives (`vertex_ceiling.py --arm psi_mean`). Nor is it renormalising three numbers at
+    in-scope error lives. Nor is it renormalising three numbers at
     publication, which would make a badly short object indistinguishable from a solved one. Nothing here
     is rescaled: ``f_g`` and the RNA total are exact complements *by parametrisation*, and the tilt is
     estimated as a share because a share is what it is.

@@ -39,7 +39,7 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   row favours `transfer`; `calibration_walk.py` says the messages still carry the stranded capture-ON
   rows and are essential on the deferred stratum.
 - **The gDNA landscape prior**: done for 0.8.0 (`DESIGN.md` §7.1); the zero controls are solved on the
-  metric (`calibration_vs_oracle.py`; `landscape_training_census.py` re-derives the population) and the
+  metric (`calibration_vs_oracle.py`) and the
   in-scope per-object composition error did not move.
 - **ψ**: the composition closes structurally on every published object (`test_vertex_reference.py`);
   the reference location is deleted (`DESIGN.md` §6b.1); the tilt is integrated on nodes that follow each
@@ -79,8 +79,7 @@ mass (`worst_objects.py`, `calibration_walk.py`) → find the mechanism → gate
 transcripts to the test chromosome → re-run → repeat. The facts this ranking leans on, each named with
 its instrument: the ruler's factor at `g00` is the largest in-scope number on the metric page
 (`calibration_vs_oracle.py`); a perfect prior is worth nothing in scope end to end
-(`quant_accuracy.py`); the vertex ceiling is small on every stranded row and larger on the unstranded
-capture-OFF rows, rising with gDNA (`vertex_ceiling.py`); by class the in-scope residual sits on the
+(`quant_accuracy.py`); by class the in-scope residual sits on the
 intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons (stranded ON)
 (`policy_benchmark.py --by-class`).
 
@@ -119,7 +118,7 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
 5. **The intron's own solve on unstranded capture-OFF** — the intron class carries the largest share of
    the in-scope error there (`policy_benchmark.py --by-class`): the factory profile's resolution against
    the intergenic background (`density_deconv`); dissect with `worst_objects.py`.
-6. **The vertex atom** — priced by `vertex_ceiling.py` on silent genes and nascent-free introns; a
+6. **The vertex atom** — on silent genes and nascent-free introns; a
    mechanism for it is the prior's reference (`ISSUES: reference-prior-refuted-at-concept-level`
    constrains the form) or the intron's own solve, not a message.
 7. **The message policy, only where a row is above the bar**: one prototype arm at a time through

@@ -222,8 +222,8 @@ that. The tell was free: diff the two capture arms' truth files.
 
 **can-the-benchmark-resolve-it. Before running a benchmark, prove it can resolve the axis you are
 changing.** A suite judged a partition change for months while its fine region set was row-for-row
-identical to its merged set. `scripts/design/suite_resolves.py` is the lesson made executable: every
-requirement scored against its degenerate value, no tuned thresholds.
+identical to its merged set. The check scores every
+requirement against its degenerate value — what a structurally blind suite scores — with no tuned thresholds.
 
 **toys-rank-hotspots-backwards. A toy ranks performance hotspots backwards; profile on cached real data.**
 Between a toy and the human index the prior's EM went from 28 % of runtime to under 1 %, and a whole
@@ -475,7 +475,7 @@ half on the precision, and the location form sits in the graveyard at +7,269 % o
 Before adopting a mechanism because a trap seems to motivate it, grep the graveyard for the mechanism.
 
 **a-stale-gate-accuses-the-newest-change. A gate whose premise expired does not go quiet; it fails, and it
-blames whatever is in flight.** `rescan_panels.py` gated an irreversible rebuild on byte-identity because
+blames whatever is in flight.** A re-scan gate checked an irreversible rebuild on byte-identity because
 "these are integer tallies"; once six banks became float64 the gate was unsatisfiable, and it then failed a
 schema change on banks that change had not touched. What resolved it was a control on the instrument: scan
 the same BAM twice. When a gate fails on something you did not touch, first ask whether it can still pass.

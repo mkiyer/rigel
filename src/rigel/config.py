@@ -313,7 +313,7 @@ class CalibrationConfig:
     #: while a pmf-free exposure is immune. The cost of the pmf-free form is on pools that carry
     #: nascent RNA: both forms over-read there, and the START form takes slightly more of it, because a
     #: fragment starting in an intron and reaching into an exon books a START there. On a clean pool
-    #: that term is absent. Scored by `total_abundance_audit.py`.
+    #: that term is absent.
     #: ``"measured_total"`` REFUSES to run unless ``calibrate`` is given ``mature_walls`` and
     #: ``boundary_reach`` — a background rate that silently changed estimator is worse than either.
     background_abundance: str = "contained"

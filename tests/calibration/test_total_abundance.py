@@ -573,8 +573,7 @@ def test_the_shipped_default_is_BIT_IDENTICAL_and_the_flag_is_NOT_INERT():
     # this fixture has three regions and ONE intergenic one, so the pooled floor cannot move a
     # deconvolution no matter which pair it is fitted from. What the flag controls at this level is
     # WHICH PAIR the background was fitted from, and that is exactly what is checked here; whether the
-    # deliverable moves is a PANEL question (`total_abundance_audit.py` arm ⓕ prices the estimator, and
-    # the panel prices the deliverable). A unit test that asserted the deliverable would either be
+    # deliverable moves is a PANEL question (`calibration_vs_oracle.py --set` prices it). A unit test that asserted the deliverable would either be
     # vacuous or would be pinning the fixture's arithmetic.
     d_base: dict = {}
     d_swap: dict = {}

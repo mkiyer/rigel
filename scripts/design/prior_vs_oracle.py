@@ -20,8 +20,8 @@ the prior arbitrates. Every arm runs in the drained frame; the drain's spliced-g
 beside the numbers as ``gdna_spliced_leak`` and the lift's attribution error as ``n_ambiguous``.
 No per-locus EM runs -- the pipeline is stopped after its scoring stage.
 
-This file is also a library: ``object_composition``, ``calibration_vs_oracle`` and
-``total_abundance_audit`` load its ``stratum``, ``is_zero_gdna``,
+This file is also a library: ``object_composition`` and ``calibration_vs_oracle``
+load its ``stratum``, ``is_zero_gdna``,
 ``OVERRIDE_FIELDS``, ``DEFAULT_SUITE`` and ``DEFAULT_INDEX``. Gates:
 ``tests/calibration/test_prior_vs_oracle.py``.
 

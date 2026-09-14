@@ -43,12 +43,10 @@
 #   · **at least THREE gDNA levels** — `TRAPS: a-single-level-panel-cannot-see-a-constant`. A channel
 #     that returns a near-CONSTANT scores well on a single-level panel and is refuted the moment a
 #     second level exists. That trap cost a whole analysis.
-#   · ⛔ **`g05`, and it is here because an instrument demanded it.** `suite_resolves.py`'s
-#     requirement (f) is `0 < gdna_rate <= 0.10 WITH capture on`, degenerate value 0 conditions —
-#     "real libraries live at 1-10 % gDNA". A `{g00, g50, g98}` panel scores the degenerate value
-#     EXACTLY and the instrument exits non-zero. ⚠ Note the test is on the RATE, not on `f_gdna`:
-#     the retired ladder's `g10` had rate 0.111 and did NOT qualify either. Owner ruling 2026-08-13:
-#     add the rung rather than record a second known-failing requirement.
+#   · ⛔ **`g05`, the low-gDNA × capture-on corner real libraries live in** (1-10 % gDNA,
+#     `0 < gdna_rate <= 0.10` with capture on); a `{g00, g50, g98}` panel has no condition there.
+#     ⚠ The corner is on the RATE, not on `f_gdna`: the retired ladder's `g10` had rate 0.111 and did
+#     NOT qualify. Owner ruling 2026-08-13: add the rung.
 #
 # ⚠ **"EQUAL" IS A CONFIGURATION, NOT A GUARANTEE — AND IT IS MEASURED, NOT ASSUMED.** Identical
 # parameters for both origins still leave a realised gap, because an mRNA fragment must fit inside

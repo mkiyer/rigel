@@ -2,9 +2,8 @@
 
 **What this file is.** The manual for Rigel's test substrates: the simulated panels and what each can
 judge (§0), how the test chromosome is built, swept and read (§0a), the toy harness (§0b), the
-simulator's backbone and its gaps (§1), the build commands (§2), the simulator's gates (§3), whether a
-suite can resolve an axis (§4), how results are evaluated (§5), the test suite (§6) and the profiling
-substrate (§7). Not here: the 0.8.0 scope, the equal-fragment-length ruling and the nascent scope ruling
+simulator's backbone and its gaps (§1), the build commands (§2), the simulator's gates (§3), how results
+are evaluated (§4), the test suite (§5) and the profiling substrate (§6). Not here: the 0.8.0 scope, the equal-fragment-length ruling and the nascent scope ruling
 (`DESIGN.md` §0b); how performance is judged and the instruments' run order (`SUCCESS.md`); the suite's
 standing pass count (`CLAUDE.md`); lessons (`TRAPS.md`, cited by name); open problems and refusals
 (`ISSUES.md`). The panels' history is git.
@@ -49,7 +48,7 @@ is ruled in `DESIGN.md` §0b. Report per stratum, never pooled (`TRAPS: never-po
 | n_rna | 10.0 M | 9.50 M | 5.00 M | 0.20 M |
 
 `g00` is the required zero-gDNA control, `g98` the top of the range, and `g05` exists because
-`suite_resolves.py`'s requirement (f) needs a gDNA rate in `0 < rate ≤ 0.10` with capture on. Three
+real libraries live at 1–10 % gDNA and that corner needs a rung with capture on (`0 < rate ≤ 0.10`). Three
 levels is a floor (`TRAPS: a-single-level-panel-cannot-see-a-constant`). Real libraries run from almost
 zero gDNA to over 98 %, and the RNA-side accuracy that thins at the top rungs is a property of such
 libraries, not an artefact.
@@ -70,9 +69,8 @@ arms, so a real repair must move them in opposite directions.
 | nascent RNA | `mode: fragment_share`, `shares: [0.20]` | the same |
 
 The configured lengths are a configuration and the gap is a measurement (the sampler is a rejection draw
-truncated to `[frag_min, frag_max]`): read it off the deposit histograms `total_abundance_audit.py`
-prints. What may be read off these arms is everything that stops before the EM
-(`total_abundance_audit.py`, `calibration_vs_oracle.py`) and the library gDNA fraction; the
+truncated to `[frag_min, frag_max]`): read it off the payload's deposit histograms. What may be read off these arms is everything that stops
+before the EM (`calibration_vs_oracle.py`) and the library gDNA fraction; the
 transcript-level number is not a calibration result here, because a length gap hands the EM the answer.
 
 ⛔ **Both side panels carry a different nascent model from the ladder** — `fragment_share` at a flat
@@ -499,7 +497,6 @@ The gates are not stages of `panel.py`; run both before quoting anything:
 
 ```bash
 python scripts/design/simulator_gates.py --suite $SUITE/ladder --reference $SUITE/reference
-python scripts/design/suite_resolves.py $SUITE/rigel_index --suite $SUITE/ladder
 ```
 
 ### Two workflow gotchas
@@ -530,9 +527,6 @@ python scripts/design/suite_resolves.py $SUITE/rigel_index --suite $SUITE/ladder
   which references carry genomic DNA (`TRAPS: annotated-is-not-genomic`).
 * Export `RIGEL_SCRATCH` before a sweep, or the instruments write their per-condition work under `/tmp`
   (tens of GB after a ladder rebuild).
-* A widened bank is a changed bank to `rescan_panels.py` (a shape change fails byte-identity): name it
-  with `--expect-changed <bank>`, which keeps the gate's teeth on every other bank; the certifier, not
-  the rescan report, is the validity authority for the payload.
 
 ---
 
@@ -557,24 +551,7 @@ geometry-confounded and stays inverted under any correct capture model
 
 ---
 
-## 4. Can the suite resolve the axis? — `suite_resolves.py`
-
-No tuned thresholds. Every requirement is scored against its degenerate value — the number a
-structurally blind suite scores — and passes iff it lands strictly on the non-degenerate side: an
-unresolvable partition is exactly 1.000×, a suite with no length variation has variance exactly 0, a
-Poisson simulator has ω exactly 0, a length-neutral capture arm narrows the length gap by exactly 0.00.
-
-The requirements: (a) a capture density step, (b) fragment-length variance, (c) non-Poisson counts,
-(d) termini strictly inside an exon, (e) ample single-stranded regions, (f) a low-gDNA × strong-capture
-corner (the ladder carries `g05` for it), (g) partition resolution, (h) a narrowed length-gap regime.
-(c) is known-failing and is named work — it needs the overdispersion mechanism and replicate conditions.
-The gate's teeth are proven on three degenerate inputs: a reference in which every region is its own
-merged region, a starved toy with no single-stranded regions, and truth files written to sd 0 / capture
-off / no replicates.
-
----
-
-## 5. How results are evaluated
+## 4. How results are evaluated
 
 The 0.8.0 metric is the calibration result scored against oracle calibration, not the end-to-end
 transcript number (`DESIGN.md` §0b; the judging rules are `SUCCESS.md`). Three questions, three
@@ -598,7 +575,7 @@ calibration-prior change (`TRAPS: hard-labels-miss-soft-change`); the soft 3-poo
 
 ---
 
-## 6. The test suite
+## 5. The test suite
 
 ```bash
 python -m pytest tests/ -q                     # never bare `pytest` — the repo root must be on sys.path
@@ -619,7 +596,7 @@ a `base_reseed` noise floor beside the effect).
 
 ---
 
-## 7. Development discipline for test substrates
+## 6. Development discipline for test substrates
 
 Develop on controlled toys, validate on real data — both, in that order: a big suite has confounds that
 hide mechanisms, and a toy ranks hotspots backwards (`TRAPS: toys-rank-hotspots-backwards`).

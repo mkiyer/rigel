@@ -25,7 +25,6 @@ Usage::
 
     python scripts/design/quant_accuracy.py --arm base --out $RIGEL_ARMS/qa_base.jsonl --jobs 4
     python scripts/design/quant_accuracy.py --arm oracle --oracle-cache DIR --out $RIGEL_ARMS/qa_oracle.jsonl
-    python scripts/design/quant_accuracy.py --arm oracle_alloc_unspliced --truth-by-transcript TSV --out F.jsonl
     python scripts/design/quant_accuracy.py --arm base --conditions COND --em-seed 1 --suite DIR --index INDEX
     python scripts/design/quant_accuracy.py --report $RIGEL_ARMS/qa_base.jsonl $RIGEL_ARMS/qa_oracle.jsonl
 """
@@ -75,11 +74,6 @@ DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 #: silent transcript is switched off for free), and pricing what a real weighting function could earn
 #: needs controls this arm deliberately omits.
 #:
-#: ``oracle_alloc_unspliced`` sharpens the target: `oracle_alloc` weights by each transcript's total
-#: observed fragments, but the budget being split is unspliced pseudocounts — a spliced fragment has no
-#: gDNA candidate and is assigned directly. The two arms ask which quantity a weighting function should
-#: estimate. It needs `--truth-by-transcript` (from `transcript_truth.py`).
-#:
 #: The ruler arms are the only arms that substitute at the ``calibrate`` boundary. A
 #: ``CalibrationResult`` has two consumers and every other arm in this file reaches one of them::
 #:
@@ -100,8 +94,7 @@ DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 _RULER_ARMS = {"oracle_ruler": True, "oracle_ruler_noop": False}
 
 ARMS = ("base", "base_reseed", "noop", "oracle", "oracle_gdna", "oracle_rna", "oracle_efflen",
-        "warm_uniform", "oracle_alloc", "oracle_alloc_seed", "oracle_alloc_flip",
-        "oracle_alloc_unspliced") + tuple(_RULER_ARMS)
+        "warm_uniform", "oracle_alloc", "oracle_alloc_seed", "oracle_alloc_flip") + tuple(_RULER_ARMS)
 
 #: The EM seed every arm pins. ``EMConfig.seed`` defaults to ``None`` and ``assignment_mode`` to
 #: ``"sample"``, so the EM's final hard assignment is an unseeded categorical draw and a byte-identical
@@ -396,7 +389,7 @@ def seeded(pipeline_config, arm: str, em_seed: int):
     warm = pipeline_config.em.warm_start
     if arm == "warm_uniform":
         warm = "uniform"
-    elif arm in ("oracle_alloc", "oracle_alloc_unspliced"):
+    elif arm == "oracle_alloc":
         # the seed is zeroed so `theta` starts proportional to the prior alone — otherwise a
         # coverage-weighted seed is multiplied by an allocation from a different method and the result
         # is neither method's answer.
@@ -424,26 +417,6 @@ def truth_weights(truth: pd.DataFrame, index) -> np.ndarray:
     t_index = dict(zip(index.t_df["t_id"].to_numpy(), index.t_df["t_index"].to_numpy(), strict=True))
     w = np.zeros(int(index.num_transcripts), dtype=np.float64)
     for tid, n in zip(truth["transcript_id"], truth[col], strict=True):
-        i = t_index.get(str(tid))
-        if i is not None:
-            w[int(i)] += float(n)
-    return w
-
-
-def unspliced_truth_weights(truth_by_transcript: Path, index) -> np.ndarray:
-    """``float64[n_transcripts]`` — the true UNSPLICED fragment count per transcript.
-
-    The target ``oracle_alloc`` does not aim at. That arm weights by each transcript's total observed
-    fragments, and the budget being allocated is the unspliced pseudocount — spliced fragments have no
-    gDNA candidate in the EM and never enter the split the prior arbitrates. The two differ by exactly
-    how spliced a transcript is, so which one wins names the quantity a weighting function should target.
-
-    ``transcript_truth.py`` already folds exact-duplicate transcripts onto the twin the index kept.
-    """
-    t = pd.read_csv(truth_by_transcript, sep="\t")
-    t_index = dict(zip(index.t_df["t_id"].to_numpy(), index.t_df["t_index"].to_numpy(), strict=True))
-    w = np.zeros(int(index.num_transcripts), dtype=np.float64)
-    for tid, n in zip(t["transcript_id"], t["n_unspliced"], strict=True):
         i = t_index.get(str(tid))
         if i is not None:
             w[int(i)] += float(n)
@@ -562,8 +535,7 @@ def install_truth_weights(weights: np.ndarray):
 
 
 def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
-                  oracle_cache: Path | None, em_seed: int = DEFAULT_EM_SEED,
-                  truth_by_transcript: Path | None = None) -> list[dict]:
+                  oracle_cache: Path | None, em_seed: int = DEFAULT_EM_SEED) -> list[dict]:
     bam = str(suite / condition / "sim_oracle.bam")
     truth = pd.read_csv(suite / condition / "truth_abundances.tsv", sep="\t")
     summary = json.loads((suite / condition / "truth_summary.json").read_text())
@@ -575,11 +547,7 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
             raise SystemExit(f"⛔ arm {arm!r} needs --oracle-cache")
         oracle = load_oracle(bam, index, pipeline_config, oracle_cache, condition)
 
-    if arm == "oracle_alloc_unspliced":
-        if truth_by_transcript is None:
-            raise SystemExit(f"⛔ arm {arm!r} needs --truth-by-transcript (see transcript_truth.py)")
-        restore, fired = install_truth_weights(unspliced_truth_weights(truth_by_transcript, index))
-    elif arm == "oracle_alloc_flip":
+    if arm == "oracle_alloc_flip":
         w = truth_weights(truth, index)
         # falsification of the harness, not a treatment: put the weight where the truth is NOT.
         # If a maximally wrong allocation moves nothing, the allocation never reached the solver.
@@ -905,8 +873,6 @@ def main() -> int:
                     help="⛔ pinned, because the shipped default is None and the EM's hard "
                          "assignment is an unseeded categorical draw — see DEFAULT_EM_SEED")
     ap.add_argument("--jobs", type=int, default=1)
-    ap.add_argument("--truth-by-transcript", type=Path, default=None,
-                    help="transcript_truth.py --out TSV. Required by `oracle_alloc_unspliced`")
     args = ap.parse_args()
 
     if args.report:
@@ -938,8 +904,6 @@ def main() -> int:
                    "--conditions", *sh]
             if cache is not None:
                 cmd += ["--oracle-cache", str(cache)]
-            if args.truth_by_transcript is not None:
-                cmd += ["--truth-by-transcript", str(args.truth_by_transcript)]
             procs.append(subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                           stderr=subprocess.STDOUT, text=True))
         rc = 0
@@ -965,8 +929,7 @@ def main() -> int:
     for name in names:
         print(f"  … {args.arm}  {name}", flush=True)
         rows += run_condition(args.arm, args.suite, index, name, pipeline_config, cache,
-                              em_seed=args.em_seed,
-                              truth_by_transcript=args.truth_by_transcript)
+                              em_seed=args.em_seed)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w") as fh:
         for r in rows:

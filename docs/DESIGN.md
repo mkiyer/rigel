@@ -326,7 +326,7 @@ lower bound is tight at low `f_g` and broken by capture; the slab is bracketed b
 **It escapes the vertex theorem.** `EQUATIONS.md` §9a proves a simplex vertex unreachable without
 evidence for every proper prior with a DENSITY; a spike-and-slab has an ATOM, so its median sits exactly
 at the spike whenever the spike carries half the mass. The theorem stands for priors with a density, and
-the vertex shortfall it prices (`vertex_ceiling.py`) is a property of the prior FAMILY, not of the data.
+the vertex shortfall is a property of the prior FAMILY, not of the data.
 
 **Reconciling with §6b's "RNA is the residual and is never predicted" — by scope.** §6b's ruling is
 about the OFF-TARGET case, where gDNA is near-uniform and RNA has no genomic autocorrelation, so a pooled
@@ -1268,7 +1268,7 @@ the messages rung 8 % better with the channel live (59,456 → 54,874) and the w
 rung (375 → 8,696 before the messages repair it to 728) — 2,700 more exons, the walled and edge-only ones
 whose only composition evidence is their own strand, join the landscape's training population at their
 pass-0 median, which at a pure-RNA vertex sits above zero by the strand term's width
-(`landscape_training_census.py`: own:strand 13,104 slots and 3,771 false fragments trained at the first refit
+(the training census: own:strand 13,104 slots and 3,771 false fragments trained at the first refit
 against 2,627; 585 against 325 at the third). That is the estimator's vertex-resolution bias, filed under
 `ISSUES: gdna-landscape-trains-on-false-positives`, and the owner's ruling stands over it: on a gDNA-free
 library every read is RNA and RNA levels are what must flow. On a `g00` donor the shared-exon stress reads
@@ -1336,7 +1336,7 @@ so `f_g + f_pos + f_neg = 1` identically; 100.00 % of published objects close on
 (against 74.7 % of REGIONs before, when the RNA fractions were independent posterior means and the
 closure error was the posterior's skew). ⛔ Taking means everywhere also closes and is refused: it scores
 1.352 / 1.573 / 3.756 on the three in-scope strata and 1.801 on the zero control
-(`vertex_ceiling.py --arm psi_mean`) — the median is closer to truth at both simplex vertices, where
+— the median is closer to truth at both simplex vertices, where
 49–83 % of in-scope error lives. Nothing is rescaled at publication.
 
 **The ½-quantile is continuous and is read on λ.** Snapping to a lattice point put up to half a grid step
@@ -1398,8 +1398,7 @@ unstranded AMBIG slot has no channel.
 ### 7.1 The landscape prior — who trains it, where its kernels go, and what axis it lives on (owner rulings 2026-09-06 and 2026-09-10; landed 2026-09-10)
 
 **Three rulings, one gate file** (`tests/calibration/test_landscape_training_population.py`; the arms and
-their numbers `ISSUES: the-landscape-training-population-arms`; the instrument
-`landscape_training_census.py`):
+their numbers `ISSUES: the-landscape-training-population-arms`):
 
 1. **A node whose only evidence is a bound, or which has none, does not train the prior.**
    `RegionBelief.has_composition` — an own composition channel (`has_own_composition_evidence`), structural

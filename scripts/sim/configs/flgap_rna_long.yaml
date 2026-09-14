@@ -25,8 +25,8 @@
 # is NOT interpretable as a calibration result** — `quant_accuracy.py`'s table, and anything else
 # downstream of the EM, is being handed the answer by the length gap.
 # ⭐ **WHAT IS STILL VALID HERE, and the distinction matters or the caveat gets over-applied:** every
-# instrument that stops BEFORE the EM. `total_abundance_audit.py` reads banks only; and
-# `calibration_vs_oracle.py` scores a `CalibrationResult` against an oracle-composition
+# instrument that stops BEFORE the EM. `calibration_vs_oracle.py`
+# scores a `CalibrationResult` against an oracle-composition
 # `CalibrationResult` — it runs `calibrate`, never the EM — so it is interpretable on this panel and is
 # the right end-to-end reading for it.
 #

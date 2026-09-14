@@ -113,7 +113,7 @@ contained opportunity is `A(w) = (ell − w + 1)₊`, the shipped deposit `1/(el
 `P(w ≤ ell)` is a pmf functional and differs per component, so at region scale the gDNA-vs-RNA circularity
 this channel exists to remove moves out of the divisor and into the support (exactly zero below
 `ell < frag_min`). ⛔ Do not read the region bank as a model-free total; within a fixed `ell` band it is a
-valid density shape (`total_abundance_audit.py` checks the truncation law on the shipped banks).
+valid density shape.
 
 **2.3 And it fails at a terminus, exactly.** `E[Σ1/L] = ρ · E_f[placements(w)/w]`, which equals `ρ` only
 where placements ∝ `w`. At a point 50 bases from an end, placements = 50 for every `w > 51`, independent
@@ -141,7 +141,7 @@ is component-differential — gDNA's template is the chromosome and never binds,
 its genomic span, a mature molecule's its spliced length — so the distance is taken at the component
 minimum over the populations `T(slot)` admits. The pair also gives a field-free test: `S_r/ℓ` and `E_r/ℓ`
 share their opportunity and read the same field, so their ratio has expectation exactly 1 wherever both
-are exact, and a binding wall moves it in a known direction (`total_abundance_audit.py`'s arm ⓔ). ⛔ A
+are exact, and a binding wall moves it in a known direction. ⛔ A
 comparison against the contained bank is not field-free: the two weight a region's positions differently
 (`TRAPS: two-estimators-of-one-rate-weight-the-field-differently`).
 
@@ -360,8 +360,7 @@ so a length model wrong by `Δ` reports the sj estimator as `1 + 0.0062·Δ` tim
 length marginal by the same opportunity it places with (`wgs_engine._post_capture_length_allocation`), so
 the realised crossing count at length `w` is `f_pre(w)·(w−1)` and the placement factor cancels. The
 inflation is `rho_j`'s: `rho_R(exon) ≥ rho_u(B) + rho_j(B)` is a correct lower bound, diluted by
-`1 + (1−s)(k−1)` with `s` the unspliced share of the exon's RNA. `fl_pool_purity.py` measures the fitted
-mean against truth.
+`1 + (1−s)(k−1)` with `s` the unspliced share of the exon's RNA.
 
 ---
 
@@ -620,7 +619,7 @@ grid-width-stable choice — `TRAPS: no-prior-means-haldane` for what omitting t
 
 ### 9a. Why a simplex vertex is unreachable without evidence — and why that is not headroom
 
-`scripts/design/vertex_ceiling.py` prices it. ψ lands short of `f_g = 1` on unexpressed genes, and that
+ψ lands short of `f_g = 1` on unexpressed genes, and that
 gap is a theorem, not a bug:
 
 * every proper prior with a density on `[0,1]` has a median strictly inside `(0,1)`;

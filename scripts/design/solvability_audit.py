@@ -18,7 +18,7 @@ off the solver's own capture, so nothing is re-solved. Rank a panel on ``mwae_al
 (fixed denominators), never on the columns whose denominator the solver moves; zero-gDNA rows are
 printed as false-positive checks and never averaged in.
 
-Also a library: `vertex_ceiling.py` and the calibration tests import `audit`, `summarise`,
+Also a library: the calibration tests import `audit`, `summarise`,
 `channel_masks`, `standardised_discrepancy`, `resolving_power_rows`, `undetermined_overreach_rows`
 and the band constants.
 
