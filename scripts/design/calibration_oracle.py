@@ -40,11 +40,21 @@ import numpy as np  # noqa: E402
 from _shared import sibling  # noqa: E402
 
 
-OC = sibling("object_composition.py")
+PVO = sibling("prior_vs_oracle.py")
 
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
-from rigel.calibration.region_chain import REGION, build_region_chain  # noqa: E402
-from rigel.calibration.region_geometry import build_region_geometry, build_region_statics  # noqa: E402
+from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain  # noqa: E402
+from rigel.calibration.region_geometry import (  # noqa: E402
+    build_region_geometry,
+    build_region_statics,
+    g1_locked,
+)
+from rigel.calibration.signature import (  # noqa: E402
+    BIT_EXON_NEG,
+    BIT_EXON_POS,
+    RegionType,
+    coarse_type_array,
+)
 from rigel.calibration.splice_graph import build_boundary_flags_array, build_sj_geometry_arrays  # noqa: E402
 from rigel.calibration.substrate import CalibrationSubstrate  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
@@ -53,8 +63,8 @@ from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
 from calibration._oracle import ORIGINS, RNA_STRAND_ORIGINS, OracleTruth, lift_drain_parts  # noqa: E402
 
-DEFAULT_SUITE = OC.DEFAULT_SUITE
-DEFAULT_INDEX = OC.DEFAULT_INDEX
+DEFAULT_SUITE = PVO.DEFAULT_SUITE
+DEFAULT_INDEX = PVO.DEFAULT_INDEX
 _EPS = 1.0e-12
 #: |z| above which a slot is flagged under gdna-field-uniformity. 4 sigma two-sided is ~6e-5 expected
 #: false flags per slot; the gate is on the flag rate and the class ratio, not on any single slot.
@@ -131,6 +141,125 @@ def gate_nascent_scope(n_n: np.ndarray, rna_admissible: np.ndarray) -> dict:
     return {"gate": "gate nascent-in-annotation", "ok": bool(bad == 0.0), "out_of_scope_mass": bad}
 
 
+# ── the per-slot strata and counts the truth table is keyed by, from the annotation and the payload ──
+
+#: Either strand's exon bit: a boundary flank is "exonic" if any transcript has an exon there.
+_EXON_BITS = BIT_EXON_POS | BIT_EXON_NEG
+
+#: The seven slot populations, in report order: mutually exclusive and exhaustive over the chain, asserted
+#: in :func:`stratum_labels`. The boundary axis is split by whether mature RNA can cross, not by whether a
+#: sj attaches: an ``exon|exon`` boundary sits inside a contiguous exonic stretch that mature RNA crosses.
+STRATA = (
+    "R intergenic",
+    "R intron",
+    "R exon",
+    "B exon|intron",
+    "B exon|exon",
+    "B intron|intron",
+    "B gene edge",
+)
+
+#: The gDNA anchor that sits inside genes, and therefore on-target under hybrid capture.
+ONTARGET_GDNA_STRATUM = "B exon|intron"
+
+
+def stratum_labels(chain, statics, region_arrays) -> np.ndarray:
+    """Per-slot stratum label, from the annotation alone, asserted to partition the chain.
+
+    The boundary classification is by exon-ness of the two flanks, because a boundary's
+    unspliced-crossing population is the molecules that crossed it contiguously, which mature RNA can
+    do only where the template is contiguous exon on both sides:
+
+    ================  =================================================================================
+    ``B exon|intron``  exactly one flank exonic, both flanks inside a gene: mature RNA cannot cross, it
+                       splices, so near-pure gDNA under sparse unspliced nascent; in-gene, so the
+                       on-target gDNA anchor under capture
+    ``B exon|exon``    both flanks exonic, an alternative splice site inside a contiguous exonic
+                       stretch; mature RNA crosses it freely, so not an anchor
+    ``B intron|intron`` neither flank exonic, both inside a gene (adjacent introns of different
+                       signature); off-target, nascent-only RNA
+    ``B gene edge``    at least one flank intergenic, a TSS/TES interface; the ``g1_locked`` boundary
+                       class, structurally pure gDNA on both strands
+    ================  =================================================================================
+
+    ``R intergenic`` is cross-checked against ``g1_locked``, the predicate the solver pins on, and
+    ``B exon|intron`` against the solver's own ``mrna_active``; if either pair separates, the labels
+    describe a different population than the one the solver reasons over, and this raises.
+    """
+    kind = np.asarray(chain.kind)
+    obj = np.asarray(chain.obj_idx, np.int64)
+    is_region, is_boundary = kind == REGION, kind == BOUNDARY
+    sig = np.asarray(region_arrays.signature).astype(np.int64)
+    n_regions = sig.shape[0]
+    rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
+    slot_type = np.where(is_region, rtype[np.clip(obj, 0, max(n_regions - 1, 0))], -1)
+    locked = g1_locked(np.asarray(statics.free_pos, bool), np.asarray(statics.free_neg, bool))
+
+    # the two flanks' signatures, through the chain's own adjacency (a BOUNDARY always has a REGION on
+    # both sides, so the ``-1`` branch has no cases — `build_region_statics` makes the same argument)
+    slot_sig = np.where(is_region, sig[np.clip(obj, 0, max(n_regions - 1, 0))] if n_regions else 0, 0)
+    left = np.clip(np.asarray(chain.left), 0, max(int(chain.n_slots) - 1, 0))
+    right = np.clip(np.asarray(chain.right), 0, max(int(chain.n_slots) - 1, 0))
+    sig_l = np.where(is_boundary, slot_sig[left], 0)
+    sig_r = np.where(is_boundary, slot_sig[right], 0)
+    exon_l = (sig_l & _EXON_BITS) != 0
+    exon_r = (sig_r & _EXON_BITS) != 0
+    gene_both = is_boundary & (sig_l != 0) & (sig_r != 0)
+
+    label = np.full(int(chain.n_slots), "", dtype=object)
+    label[is_region & (slot_type == int(RegionType.INTERGENIC))] = "R intergenic"
+    label[is_region & (slot_type == int(RegionType.INTRON))] = "R intron"
+    label[is_region & (slot_type == int(RegionType.EXON))] = "R exon"
+    label[is_boundary & ~gene_both] = "B gene edge"
+    label[gene_both & exon_l & exon_r] = "B exon|exon"
+    label[gene_both & (exon_l ^ exon_r)] = "B exon|intron"
+    label[gene_both & ~exon_l & ~exon_r] = "B intron|intron"
+
+    counted = sum(int(np.sum(label == s)) for s in STRATA)
+    if counted != int(chain.n_slots):
+        raise AssertionError(
+            f"the stratum labels do not partition the chain: {counted:,} labelled of "
+            f"{int(chain.n_slots):,} slots. Every slot must take exactly one label."
+        )
+    if not np.array_equal(label == "R intergenic", is_region & locked):
+        raise AssertionError(
+            f"`intergenic & REGION` ({int(np.sum(label == 'R intergenic')):,}) and `g1_locked & REGION` "
+            f"({int(np.sum(is_region & locked)):,}) have SEPARATED on this index. They are the same "
+            "population by construction — no transcript covers an intergenic region, so neither RNA "
+            "strand is admissible."
+        )
+    # `mrna_active_s` is the solver's own "contiguous exon on both flanks" gate, i.e. "mature RNA of
+    # strand s may cross here". At an `exon|intron` boundary one flank carries no exon bit at all, so
+    # it must be False on both strands.
+    mature_can_cross = np.asarray(statics.mrna_active_pos, bool) | np.asarray(
+        statics.mrna_active_neg, bool
+    )
+    bad = (label == ONTARGET_GDNA_STRATUM) & mature_can_cross
+    if bad.any():
+        raise AssertionError(
+            f"{int(bad.sum()):,} `{ONTARGET_GDNA_STRATUM}` boundaries report `mrna_active`, i.e. the "
+            "solver thinks mature RNA may cross them contiguously. The anchor's whole claim is that it "
+            "cannot, so this classification and the solver's disagree."
+        )
+    return label
+
+
+def slot_counts(payload, region_arrays, chain) -> np.ndarray:
+    """One payload's unspliced/contained count per slot, the mixture ψ deconvolves and nothing else:
+    ``region_contained`` at a REGION, ``boundary_unspliced`` at a BOUNDARY, exactly the populations
+    :attr:`RegionGeometry.unspliced_count` carries, so a truth built from the origin partitions and an
+    estimate built from the full payload are on one basis.
+    """
+    sub = CalibrationSubstrate.from_payload(payload, region_arrays)
+    kind = np.asarray(chain.kind)
+    obj = np.asarray(chain.obj_idx, np.int64)
+    out = np.zeros(int(chain.n_slots), np.float64)
+    r, b = kind == REGION, kind == BOUNDARY
+    out[r] = np.asarray(sub.region_contained.count, np.float64).sum(1)[obj[r]]
+    out[b] = np.asarray(sub.boundary_unspliced.count, np.float64).sum(1)[obj[b]]
+    return out
+
+
 # ── the derivation ────────────────────────────────────────────────────────────────────────────────
 
 
@@ -150,7 +279,7 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
         chain, CalibrationSubstrate.from_payload(payload, region_arrays),
         region_arrays, sj, kw["gdna_fl_pmf"], kw["rna_fl_pmf"],
     )
-    label = OC.strata(chain, statics, geom, region_arrays)["label"]
+    label = stratum_labels(chain, statics, region_arrays)
 
     # sum-to-full is a hard gate inside from_parts, asserted on the drained frame, which makes it
     # the lift's own end-to-end identity check; an exception is the verdict. The parts are loaded
@@ -159,10 +288,10 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
     parts = {k: read_scan_cache(root / k, index).payload for k in ORIGINS}
     truth = OracleTruth.from_cached_parts(payload, parts, lift)
 
-    count = OC.slot_counts(payload, region_arrays, chain)
-    n_g = OC.slot_counts(truth.parts["gdna"], region_arrays, chain)
-    n_n = OC.slot_counts(truth.parts["nrna"], region_arrays, chain)
-    n_m = OC.slot_counts(truth.parts["mrna"], region_arrays, chain)
+    count = slot_counts(payload, region_arrays, chain)
+    n_g = slot_counts(truth.parts["gdna"], region_arrays, chain)
+    n_n = slot_counts(truth.parts["nrna"], region_arrays, chain)
+    n_m = slot_counts(truth.parts["mrna"], region_arrays, chain)
     # the same RNA reads again, keyed by transcript strand: the per-component truth. Refused rather
     # than skipped if absent: an instrument that silently drops to two arms would measure a different thing.
     try:
@@ -180,8 +309,8 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
     strand_drained, n_amb_strand = lift_drain_parts(
         lift, [parts["gdna"], strand_parts["rna_pos"], strand_parts["rna_neg"]]
     )
-    n_rp = OC.slot_counts(strand_drained[1], region_arrays, chain)
-    n_rn = OC.slot_counts(strand_drained[2], region_arrays, chain)
+    n_rp = slot_counts(strand_drained[1], region_arrays, chain)
+    n_rn = slot_counts(strand_drained[2], region_arrays, chain)
 
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)

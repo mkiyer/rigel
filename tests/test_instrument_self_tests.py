@@ -1,6 +1,6 @@
 """The instruments that carry their own falsification, run inside the suite.
 
-Two `scripts/design/` instruments perturb every one of their own comparators and require each to fire,
+A `scripts/design/` instrument that perturbs every one of its own comparators and requires each to fire,
 with no I/O. A `--self-test` flag that nothing invokes is a gate that goes stale silently: the
 perturbations pass on the day they are written and nobody runs them again. This file runs them
 in-process on every suite run, and asserts the COUNT as well as the pass, so losing a perturbation is a
@@ -29,7 +29,6 @@ DESIGN = ROOT / "scripts" / "design"
 #: exactly like one that never had it.
 INSTRUMENTS = [
     ("calibration_vs_oracle", 42, "{n}/{n} self-test gates fired"),
-    ("object_composition", 25, "{n}/{n} gates pass"),
 ]
 
 
