@@ -2,13 +2,13 @@
 #  THE METHOD-DEVELOPMENT SCENARIOS — the test chromosome, swept over the axes that matter
 # ════════════════════════════════════════════════════════════════════════════════════════════════
 #
-# ⭐⭐⭐ WHAT THIS IS. The message-propagation policy is developed against `test_reference/` — a
-# 1 Mb chromosome that grows ONE TRANSCRIPT AT A TIME (owner, 2026-08-19). This config sweeps that
-# reference over the same axes as the big ladder, at a depth that simulates in seconds, so a policy
-# change can be scored end to end in the development loop rather than on a 23 GB panel.
+# ⭐⭐⭐ WHAT THIS IS. Message policies are developed against the test chromosome (`test_reference/`).
+# This config sweeps it over the same axes as the big ladder, at a depth that simulates in seconds,
+# so a policy change can be scored end to end in the development loop rather than on a 23 GB panel.
 #
-# ⛔ THE TRANSCRIPTS AND THEIR ABUNDANCES ARE NOT HERE. They are `test_reference/test_chr.gtf` and
-# `test_reference/test_abundances.tsv`, both hand-edited; the FASTA and this sweep are derived.
+# ⛔ THE TRANSCRIPTS, THEIR ABUNDANCES AND THE PROBES ARE NOT HERE. The one hand-edited file is
+# `scripts/sim/test_reference/test_chr.yaml`: `build_test_reference.py` renders the GTFs, the
+# abundance TSV and the probe panels from it, and the FASTA, the index and this sweep are derived.
 # `docs/TESTING.md` §0a.
 #
 # ⚠ THE `nrna:` BLOCK BELOW IS DEAD BY DESIGN under `abundance.mode: file`: the TSV's
@@ -16,24 +16,15 @@
 # entities, so the sweep is skipped and every condition is labelled `nrna_file`. It is INERT — editing
 # its numbers changes nothing, and it is retained only so the file reads like the other panel configs.
 #
-# ⭐⭐⭐ THE SUBSTRATE DESIGN THE SWEEP ASSUMES (owner, 2026-08-27). The chromosome is EMPTY and
-# the owner authors its transcripts; when they are added, two of the axes below are carried by the
-# SUBSTRATE rather than by this file, and they must be authored to these proportions:
+# ⭐⭐⭐ TWO AXES ARE CARRIED BY THE SUBSTRATE, not by this file (owner, 2026-08-27):
 #
-#   CAPTURE   — under `capture: on`, only about HALF the transcripts are probed. The other half
-#               must have NO probe, so every condition contains both captured and uncaptured
-#               structures and the policy is never tested on a uniformly enriched library.
-#               Probes live in `test_reference/test_probes.bed`.
+#   CAPTURE   — under `capture: on`, about HALF the genes are probed and the rest have NO probe, so
+#               every condition contains both captured and uncaptured structures and the policy is
+#               never tested on a uniformly enriched library.
 #
-#   NASCENT   — SPARSE: up to about HALF the transcripts carry nascent RNA and the rest carry
-#               exactly none, so an intron that is nascent-free and an intron that is not both
-#               exist in every condition. Weights are the `nrna_abundance` column of
-#               `test_reference/test_abundances.tsv`; `rigel index` makes the spanning entity.
-#               ⭐ Hand-author the pattern rather than drawing it: on a chromosome of this size a
-#               Bernoulli draw is mostly sampling noise, and the point of a debug substrate is
-#               that you know WHICH structure carries nascent RNA before reading a number off it.
-#               ⭐ Vary the LEVEL as well as the presence — nascent below, near, and above mature —
-#               so the sweep exercises what the ladder's draw produces statistically.
+#   NASCENT   — SPARSE and hand-authored: the twin block's `nasc` / `capnasc` types carry nascent RNA,
+#               from ten times above to a thousand times below mature, and every other transcript
+#               carries exactly none — so you know WHICH structure carries it before reading a number.
 
 genome: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_chr.fa
 gtf: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_chr.gtf
@@ -87,8 +78,8 @@ gdna:
 # that says whether a policy degrades gracefully across the transition.
 strand_specificities: [0.50, 0.70, 0.99]
 
-# ⛔ INERT under `abundance.mode: file` — the nascent weights come from `test_abundances.tsv` and its
-# hand-authored sparse pattern (the header). Do not "fix" nascent RNA by editing this block.
+# ⛔ INERT under `abundance.mode: file` — the nascent weights come from `test_abundances.tsv`, rendered from
+# the YAML's `nrna_abundance` (the header). Do not "fix" nascent RNA by editing this block.
 nrna:
   mode: fragment_share
   shares:       [0.0]
