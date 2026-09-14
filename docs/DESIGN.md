@@ -815,8 +815,8 @@ density into the exon's frame by the enrichment ratio, subtracting, and rescalin
 CANCELS and only the face's own spliced-to-unspliced ratio survives: `f_b = f_E · (U_b + S_b) / U_b` —
 the splice-in face map solved for the boundary, so the boundary evaluates the exon's likelihood row AT
 the map (`transfer_rows.splice_out_row`). Three rulings the measurements forced: (1) the exon publishes
-its OWN evidence only — its strand row — and only when the solver's derived strand deadband
-(`region_init.strand_evidence`) declares the channel live, so an unstranded library's exon says nothing,
+its OWN evidence only — its strand row — and only when the node's strand channel is live (`tau_lam > 0`,
+the library's protocol decision `region_init.strand_discriminability`), so an unstranded library's exon says nothing,
 exactly, with no constant; (2) both components convert counts to densities with ONE opportunity
 treatment, the capture-blind geometric opportunity for gDNA and RNA alike (a capture-aware opportunity
 on one component alone re-introduces a level across locales — a 12 % harm on sparse probes); (3) the
@@ -836,7 +836,7 @@ delivered verbatim: the boundary's OWN strand row (`simplex_logodds.strand_row_l
 frozen at the boundary's incoming belief — a source-side read), never its belief. The hop adds nothing:
 stage 0 on certified truth reads zero excess variance over counting between an intron's composition and
 its boundaries' on every panel, so no widening ships. The licence: the boundary must admit the intron's
-single strand set (`transfer_rows.boundary_shares_strand`); a terminus flag does not refuse; the deadband
+single strand set (`transfer_rows.boundary_shares_strand`); a terminus flag does not refuse; the gate
 is `tau_lam > 0` at the boundary, so an unstranded library sends nothing. Measured node-locally at the
 receiving introns: −26…−38 % on the ladder's stranded capture-ON rows; the reversed row multiplies the
 destination error by 1.7–30×.
@@ -876,7 +876,7 @@ the boundary's full unspliced crossing, so it is §6b.6's law with the spliced c
 crossing plus the isoform that splices out at this face, measured as the face's route flux `F`, so it is
 §6b.4's law with `S_b + F`. Certified on the ladder: C − pred +0.003 and E − pred −0.002 in f off
 capture; the flanks swapped open ±0.10 OFF, ±0.25 ON. Each flank's own strand row travels to the boundary
-through `splice_out_row` and the boundary's to each flank through `transport_row`, deadband-gated.
+through `splice_out_row` and the boundary's to each flank through `transport_row`, gated on `tau_lam > 0`.
 
 **The discrepancy rule, per pair, and nothing pooled** (owner, 2026-09-03). Delivered at counting width
 the messages harmed the alt-ss boundaries on benign capture-ON rows (`g50 ss.99 ON`: 126 → 249
@@ -1080,8 +1080,8 @@ the last node hears an open side instead of silence and its own flux is not read
 runs once over the whole chain on a `ChainView` — observations and geometry, no beliefs, so a cross-block
 reduction over beliefs has no field to read — and `prepare(ctx, library)` sees one block. The transfer
 policy's library is three reference densities (the gDNA lane's, each RNA lane's) and whether the strand
-split is a live witness, which is now derived from the deadband (`region_init.strand_discriminability`)
-rather than from a per-slot solve. The intron factory's rows travel on the context (`factory_rows`, the
+split is a live witness, which is the library's strand protocol decision
+(`region_init.strand_discriminability`) rather than a per-slot solve. The intron factory's rows travel on the context (`factory_rows`, the
 very array ψ adds as its λ-factor), which retired the policy's grid-keyed row callback.
 
 **ψ's read-out is chunk-exact, and that is what makes the block size a knob rather than a choice.** The

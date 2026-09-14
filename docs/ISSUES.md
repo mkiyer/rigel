@@ -25,7 +25,7 @@ block size moves no number, the refit sweeps share their message layer) and the 
 pre-port and lanes worklists, every ruling in `DESIGN.md` §6b.15). What is OPEN: ③ the C/C++ port of
 `sweep._solve_block` — the passes and `transfer_rows`, then `prepare`'s builders, then ψ (the cube is
 `K × (K_t + 2)`), then threads over blocks, each step behind `sweep_replay.py replay --tolerance` on
-`sweeps_MO_3021_step6`, the `port_identity_*` references and the suite, timed against the 2026-09-14 baseline
+`sweeps_MO_3021_step6`, the `review_identity_*` references and the suite, timed against the 2026-09-14 baseline
 pairs (`perf/baseline_2026-09-14/`; wall 498–502 s, peak 10.8–11.2 GB); ⑤ the scan and the second pass, the
 stages that scale with depth (`ISSUES: scan-thread-split-starves-the-workers`). Not to do: micro-optimise the
 Python passes; bake the λ lattice into the port (`sweep_logodds_step` is a parameter). `profiling/profiler.py`,

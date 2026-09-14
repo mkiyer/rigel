@@ -89,7 +89,7 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
    (the replay captures, the identity references, the
    deep-library baseline pairs). Next is THE PORT of `sweep._solve_block`: the passes and `transfer_rows`
    first, then `prepare`'s builders, then ψ, then threads over blocks — each step behind the replay's
-   tolerance report (a language port cannot be bit-identical), the `port_identity_*` references and the
+   tolerance report (a language port cannot be bit-identical), the `review_identity_*` references and the
    suite, timed by `profiling/profiler.py --compare` against the baseline pairs; then the scan and the
    second pass, the stages that scale with depth. The accuracy frame is unchanged, and no step may move a
    number.

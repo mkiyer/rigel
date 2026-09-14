@@ -592,13 +592,12 @@ per-stage peak and held RSS; `--set` for any config field, `--scan-only` for the
 for two reports) and `scripts/profiling/sweep_replay.py` (one calibration sweep, replayed and compared
 bit for bit; `--block-slots N|none` replays it at another locus-block size, which must move nothing —
 the chunk-exactness of the whole sweep on real data); set `OMP_NUM_THREADS` deliberately. The frozen
-references are `~/Downloads/rigel_runs/arms/port_identity_*.json` (two ladder conditions and the LBX0190
-library) and the captured sweeps `~/Downloads/rigel_runs/perf/sweeps_MO_3021_step6`, both taken from the
-tree of 2026-09-14 that carries the lanes worklist (L1–L5; `DESIGN.md` §6b.15), with the deep library's
-timing baseline beside them in `perf/baseline_2026-09-14/` (two back-to-back pairs at 8 threads); every
-earlier reference and capture (`memory_identity_*`, `hygiene_identity_*`, `arms/port_identity_23a431a9/`,
-`sweeps_MO_3021_step2` … `_step5`) describes earlier code (the step2 captures unpickle against the belief's
-retired fields). The
+references are `~/Downloads/rigel_runs/arms/review_identity_*.json` (two ladder conditions and the LBX0190
+library, frozen on the tree of 2026-09-14 that carries the lanes worklist and the landscape's location floor,
+and bit-identical through the cleanup that followed) and the captured sweeps
+`~/Downloads/rigel_runs/perf/sweeps_MO_3021_step6` (the lanes worklist's tree; `DESIGN.md` §6b.15), with the
+deep library's timing baseline beside them in `perf/baseline_2026-09-14/` (two back-to-back pairs at
+8 threads). The
 refit sweeps' captures carry their message cache, so their replay exercises the cache path and ψ; sweep 0
 exercises the whole message layer. `ISSUES: performance-memory-bounded-solve` carries the work.
 
