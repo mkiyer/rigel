@@ -422,7 +422,7 @@ struct WorkerState {
     std::vector<IntronBlock>           deposit_introns;
     std::vector<rigel::accumulator::GapHypothesis> gap_hypotheses;
 
-    WorkerState(int32_t n_transcripts, int64_t /*unused*/)
+    explicit WorkerState(int32_t n_transcripts)
         : scratch(n_transcripts) {}
 };
 
@@ -456,12 +456,10 @@ static void merge_strand_obs(StrandObservations& dst, StrandObservations& src) {
 
 static void parse_cigar(
     const bam1_t* b,
-    int32_t ref_id,
     int32_t sj_strand,
     std::vector<std::pair<int32_t, int32_t>>& exons,
     std::vector<SJCigarEntry>& sjs)
 {
-    (void)ref_id;  // ref_id carried by the caller; kept for API stability
     exons.clear();
     sjs.clear();
 
@@ -631,7 +629,7 @@ static ParsedAlignment parse_bam_record(
     int32_t mapped_ref_id = (rec.ref_id >= 0 &&
         rec.ref_id < static_cast<int32_t>(tid_to_ref_id.size()))
         ? tid_to_ref_id[rec.ref_id] : -1;
-    parse_cigar(b, mapped_ref_id, STRAND_NONE, rec.exons, rec.sjs);
+    parse_cigar(b, STRAND_NONE, rec.exons, rec.sjs);
     rec.sj_strand = STRAND_NONE;
     if (!rec.sjs.empty()) {
         rec.sj_strand = read_sj_strand(b, sj_tag_mode);
@@ -1315,7 +1313,7 @@ public:
         worker_states.reserve(n_workers);
         for (int i = 0; i < n_workers; i++) {
             int32_t n_transcripts = ctx_->n_transcripts_;
-            auto ws = std::make_unique<WorkerState>(n_transcripts, 0);
+            auto ws = std::make_unique<WorkerState>(n_transcripts);
             // Pre-allocate accumulator for chunk_size
             ws->accumulator.reserve(chunk_size, chunk_size * 3 / 2);
             // Per-worker accumulator: the same partition and the same sj CSR as the shared
@@ -2671,7 +2669,7 @@ public:
             int32_t mapped_ref_id = (rec.ref_id >= 0 &&
                 rec.ref_id < static_cast<int32_t>(tid_to_ref_id_.size()))
                 ? tid_to_ref_id_[rec.ref_id] : -1;
-            parse_cigar(b, mapped_ref_id, STRAND_NONE, rec.exons, rec.sjs);
+            parse_cigar(b, STRAND_NONE, rec.exons, rec.sjs);
             rec.sj_strand = STRAND_NONE;
             if (!rec.sjs.empty()) {
                 rec.sj_strand = read_sj_strand(b, sj_tag_mode_);

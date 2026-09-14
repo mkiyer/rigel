@@ -345,8 +345,7 @@ public:
 // ResolverScratch — per-thread mutable scratch buffers
 // ================================================================
 // Extracted from FragmentResolver so that multiple threads can call
-// _resolve_core() and compute_frag_lengths() concurrently, each with
-// its own scratch. The single-threaded path uses FragmentResolver's
+// _resolve_core() concurrently, each with its own scratch. The single-threaded path uses FragmentResolver's
 // internal scratch_ member.
 
 struct GapBlock {
@@ -687,7 +686,7 @@ public:
 
     /// Set per-transcript nRNA status (uint8, 1 = nRNA synthetic).
     /// ⚠ On a NON-SYNTHETIC row `is_nrna` means "single-exon, so mature == nascent" — NOT
-    /// "manufactured span". Read `nrna_mask()`'s own comment before using it as a realness filter.
+    /// "manufactured span", so it is not a realness filter.
     void set_nrna_status(const std::vector<uint8_t>& t_is_nrna) {
         t_is_nrna_ = t_is_nrna;
     }
@@ -697,10 +696,6 @@ public:
     /// real-transcript hits without bloating the cgranges index.
     void set_nrna_parent_index(const std::vector<int32_t>& nrna_parent) {
         nrna_parent_ = nrna_parent;
-    }
-
-    const uint8_t* nrna_mask() const {
-        return t_is_nrna_.empty() ? nullptr : t_is_nrna_.data();
     }
 
     /// Build per-transcript exon CSR index for FL computation.
@@ -744,10 +739,6 @@ public:
     void set_splicing_anchor_tolerance(int32_t K) {
         if (K < 0) K = 0;
         splicing_anchor_tolerance_ = K;
-    }
-
-    int32_t splicing_anchor_tolerance() const {
-        return splicing_anchor_tolerance_;
     }
 
     /// Does transcript ``t`` contradict the alignment? True when one of its introns overlaps the
@@ -1032,12 +1023,10 @@ public:
 
     /// Thread-safe fragment-length projection.  Results are aligned to
     /// t_inds: frag_lengths[i] is the length for t_inds[i], or -1.
-    void compute_frag_lengths_aligned(
+    void compute_frag_lengths(
         const std::vector<ExonBlock>& exons,
-        const std::vector<IntronBlock>& /*introns*/,
         const std::vector<int32_t>& t_inds,
-        std::vector<int32_t>& frag_lengths,
-        ResolverScratch& /*scratch*/) const
+        std::vector<int32_t>& frag_lengths) const
     {
         frag_lengths.assign(t_inds.size(), -1);
         if (exons.empty() || t_inds.empty()) return;
@@ -1064,18 +1053,6 @@ public:
             int32_t fl = std::abs(tx_e - tx_s);
             if (fl > 0) frag_lengths[i] = fl;
         }
-    }
-
-    /// Backward-compatible wrapper using internal scratch.
-    std::vector<int32_t> compute_frag_lengths(
-        const std::vector<ExonBlock>& exons,
-        const std::vector<IntronBlock>& introns,
-        const std::vector<int32_t>& t_inds)
-    {
-        std::vector<int32_t> frag_lengths;
-        compute_frag_lengths_aligned(exons, introns, t_inds,
-                                     frag_lengths, scratch_);
-        return frag_lengths;
     }
 
     // ----------------------------------------------------------------
@@ -1116,25 +1093,6 @@ public:
                 return;
             }
         }
-    }
-
-    std::vector<int32_t> sj_lookup(int32_t ref_id, int32_t start,
-                                   int32_t end, int32_t strand) const {
-        std::vector<int32_t> out;
-        sj_lookup_into(ref_id, start, end, strand, out);
-        return out;
-    }
-
-    // ----------------------------------------------------------------
-    // Scratch buffer management (delegates to scratch_)
-    // ----------------------------------------------------------------
-
-    void mark_dirty(int32_t t_idx) {
-        scratch_.mark_dirty(t_idx);
-    }
-
-    void clean_scratch() {
-        scratch_.clean();
     }
 
     // ================================================================
@@ -1482,8 +1440,7 @@ public:
 
         // --- Fragment lengths ---
         if (cr.chimera_type == CHIMERA_NONE) {
-            compute_frag_lengths_aligned(exons, introns, cr.t_inds,
-                                         cr.frag_lengths, scratch);
+            compute_frag_lengths(exons, cr.t_inds, cr.frag_lengths);
         }
 
         // --- gap-hypothesis enumeration ---
@@ -1529,7 +1486,7 @@ public:
         return true;
     }
 
-    /// Backward-compatible wrapper using internal scratch.
+    /// The single-threaded path, on the resolver's own scratch.
     bool _resolve_core(
         const std::vector<ExonBlock>& exons,
         const std::vector<IntronBlock>& introns,
