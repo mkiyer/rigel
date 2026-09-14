@@ -303,7 +303,7 @@ def noop_differences(shipped, noop, eff_shipped, eff_noop) -> list[str]:
 # ── one condition ────────────────────────────────────────────────────────────────────────────────
 
 
-def load_oracle(suite: Path, oracle_cache: Path, condition: str, index, drained_payload, lift):
+def load_oracle(oracle_cache: Path, condition: str, index, drained_payload, lift):
     """The origin-split truth for one condition, in the drained frame.
 
     The full side is the very payload ``P`` calibrated: ``_main`` is byte-identical to the plain scan
@@ -316,7 +316,7 @@ def load_oracle(suite: Path, oracle_cache: Path, condition: str, index, drained_
     """
     root = Path(oracle_cache) / condition
     parts = {k: read_scan_cache(root / k, index).payload for k in ORIGINS}
-    return OracleTruth.from_cached_parts(drained_payload, parts, lift), "cached parts, drained frame"
+    return OracleTruth.from_cached_parts(drained_payload, parts, lift)
 
 
 def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle_cache: Path,
@@ -331,7 +331,7 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
     payload = kw["payload"]
     p_arm = calibrate(config=pipeline_config.calibration, **kw)
 
-    oracle, oracle_source = load_oracle(suite, oracle_cache, condition, index, payload, lift)
+    oracle = load_oracle(oracle_cache, condition, index, payload, lift)
     override = oracle.override_masses(region_arrays)
     check_override_field_set(override)
     o_arm = dataclasses.replace(p_arm, **override)
@@ -358,7 +358,6 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
     row = {
         "condition": condition,
         "stratum": list(PVO.stratum(condition)),
-        "oracle_source": oracle_source,
         "gdna_spliced_leak": oracle.gdna_spliced_leak,
         "lift_n_ambiguous": oracle.n_ambiguous,
         "noop_differences": bad,
@@ -477,12 +476,6 @@ def report(rows: list[dict]) -> None:
     print(f"           the effective lengths derived from them, on {len(rows)}/{len(rows)} conditions")
     print("  ✅ GATE  override_masses writes exactly the override field set")
     print("  ✅ GATE  P and O are on the payload's own per-object totals, both axes (check_same_basis)")
-    fallbacks = sorted(r["condition"] for r in rows if r["oracle_source"] != "_main")
-    if fallbacks:
-        print(f"  ⚠  {len(fallbacks)} condition(s) read the full payload from the SCAN CACHE because the")
-        print("           oracle cache holds no `_main` for a zero-gDNA row; sum-to-full passed on each:")
-        for c in fallbacks:
-            print(f"             {c}")
 
     def sel_rows(pred):
         return [r for r in rows if pred(r["condition"])]
@@ -624,10 +617,8 @@ def report(rows: list[dict]) -> None:
         print()
         print(f"  ⑦ ⭐⭐⭐ WHERE THE ERROR SITS ON THE SIMPLEX — {axis.upper()} axis, bucketed by TRUE f_g.")
         print("     `shortfall` = mean(true − pred): + means the solver UNDER-calls gDNA.")
-        print("     ⛔ `closure` = mean(f_g + f_pos + f_neg). It is a CONFOUNDER, not a diagnostic:")
-        print("        f_g is a posterior MEDIAN and f_pos/f_neg are MEANS, so closure = 1 + (median −")
-        print("        mean) exactly — the deficit IS the posterior skew, and a composition prior moves")
-        print("        skew by construction. Read it beside the shortfall, never instead of it.")
+        print("     `closure` = mean(f_g + f_pos + f_neg), which the shipped composition closes identically:")
+        print("        it reads 1.0000, and a row that does not is a bug to chase before its shortfall is read.")
         print(f"    {'stratum':<38} {'true f_g':<15} {'objects':>9} {'mass':>13} "
               f"{'shortfall':>10} {'Σ|Δ| frags':>12} {'of Σ|Δ|':>8} {'closure':>8}")
         print("    " + "-" * 128)

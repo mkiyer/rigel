@@ -811,8 +811,10 @@ def report(rows: list[dict]) -> None:
     print()
     print("=" * 104)
     print("  ⭐⭐⭐ CALIBRATION'S ENDPOINT vs THE ORACLE — LocusPriors, in FRAGMENTS")
-    print(f"  {len(rows)} conditions   messages OFF   length_likelihood OFF   UNDRAINED "
-          "(the drain caveat is priced below)")
+    from rigel.config import CalibrationConfig as _CC
+
+    print(f"  {len(rows)} conditions   calibration: the shipped defaults (message_policy="
+          f"{_CC().message_policy!r})   the drained frame (the drain's leak is reported below)")
     print("=" * 104)
 
     # ── the gate first. A table read before its gate is a table nobody checked. ──

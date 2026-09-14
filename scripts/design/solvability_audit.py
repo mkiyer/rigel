@@ -73,9 +73,7 @@ CHANNELS = ("locked", "strand", "factory", "none")
 #: ``λ = log(f_g/f_R)``, so a slot's own statement carries sd ``1/√τ``, in nats, against a solver that
 #: can only represent ``λ ∈ [−L, +L]``. These are decade boundaries on that sd, read points and not
 #: thresholds. A binary solvable/undetermined cut at ``τ > 1e-9`` is the solver's gate, not a
-#: strength: the strand arm's information is ``∝ (2κ−1)²``, exactly zero at κ = ½, but κ is fitted,
-#: so on an unstranded library τ lands near 1e-7 rather than 0 and the object is scored as solvable
-#: while its own statement has an sd of thousands of nats. A resolving-power floor was refuted by its
+#: strength: an object passes it with its own statement's sd in the thousands of nats. A resolving-power floor was refuted by its
 #: own insensitivity gate (τ is continuous across that region, so any floor is a tuned constant); the
 #: curve lets the reader see how much of the mass sits where nothing could be resolved.
 SD_LAMBDA_DECADES = (1.0, 10.0, 100.0, 1000.0, np.inf)
@@ -329,10 +327,9 @@ def report(m, a: dict, config=None) -> None:
             continue
         print(f"   {label:<14} {n:>9,} {mass:>14,.0f} {e:>14,.0f} "
               f"{e / max(err[det].sum(), 1):>9.1%} {pred:>9.4f} {true:>9.4f}")
-    print(f"   ⚠ κ = {_kappa:.6f}, so the strand arm's information is scaled by (2κ−1)² = "
-          f"{(2 * _kappa - 1) ** 2:.3e}.")
-    print("      At κ = ½ it is EXACTLY zero (EQUATIONS §5.2); a fitted κ makes it merely tiny, and")
-    print("      whether that lands above or below 1e-9 is what the old solvable/undetermined region_bound read.")
+    print(f"   ⚠ κ = {_kappa:.6f}. The strand channel's discriminability is the protocol decision's: 4(κ−½)²")
+    print("      where the library preserves strand and exactly 0 where it does not, so an unstranded library")
+    print("      contributes no strand evidence at all.")
 
     print()
     print("   ⛔⛔ AND THE UNDETERMINED CLASS'S OWN FAILURE MODE — it is EXCLUDED from every error")
@@ -502,7 +499,7 @@ def summarise(a: dict) -> dict:
     # the two fixed-denominator fields (TRAPS: honesty-metrics-reward-ignorance), the reason this
     # table can be ranked on at all. Every field above is defined over the determined set, whose size
     # the solver moves by declining to answer, and the boolean `determined` flips on fitting noise
-    # (TRAPS: deadband-from-the-wrong-sample); these two are defined over the live population, so
+    # (TRAPS: a-threshold-on-a-fitted-residue); these two are defined over the live population, so
     # nothing the solver does to its own confidence can touch them.
     mass_live = float(total[live].sum())
     return_extra = {
@@ -550,7 +547,7 @@ def panel_report(rows: list[tuple[str, float, dict]]) -> None:
     print()
     print("   ⭐⭐ AND RANK ON THE LAST TWO, NOT ON `solv%`/`mwae`/`conf-wrong`/`calib`. Those four")
     print("      share a denominator the SOLVER moves — `determined` is a boolean on a continuous τ,")
-    print("      and it flips on fitting noise (TRAPS deadband-from-the-wrong-sample). `mwae_all` and `Σ|err|` are over every")
+    print("      and it flips on fitting noise (TRAPS a-threshold-on-a-fitted-residue). `mwae_all` and `Σ|err|` are over every")
     print("      LIVE object, so nothing the solver does to its own confidence can touch them.")
     print(f"   {'condition':<46} {'f_gdna':>7} {'solv%':>6} {'weak%':>6} {'mwae':>7} "
           f"{'conf-wrong':>11} {'calib':>6} {'local':>7} {'final':>7} {'msg Δ':>9} "

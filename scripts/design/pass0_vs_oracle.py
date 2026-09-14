@@ -762,7 +762,7 @@ def _report_classes(measurements: list[ConditionMeasurement]) -> None:
     print("═" * 112)
     print("⭐ WHERE THE ERROR IS — pass-0, by the SOLVER's own three-way partition of each object")
     print("═" * 112)
-    print("   own_evidence: strand / intron factory / length spoke here.  message_only: nothing did — "
+    print("   own_evidence: strand / intron factory spoke here.  message_only: nothing did — "
           "the answer\n   came from neighbours and the population prior.  struct_lock: composition "
           "CERTAIN, nothing to decide.")
     for m in measurements:
