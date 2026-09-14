@@ -1,32 +1,47 @@
-# NEXT SESSION — start here (2026-09-13, after W12 and W13; the port is next)
+# NEXT SESSION — start here (2026-09-14, after W12, W13 and the lanes worklist L1/L2/L4)
 
 The whole picture, the reasoning and the ordered plan are in `docs/dev/CALIBRATION_PERFORMANCE_PLAN.md`
-— read it after `CLAUDE.md`; the PRE-PORT WORKLIST is the section before its §C, and §8 is the design of the
-remaining steps. The θ quadrature's derivation is `docs/dev/THETA_QUADRATURE.md`. This file is only how to
-begin.
+(THE LANES WORKLIST table is the section before §C's neighbour "Not on the list"; §F is the port). The θ
+quadrature's derivation, the tilt study and the encompassing-locus audit are `docs/dev/THETA_QUADRATURE.md`
+§§1–14. This file is only how to begin.
 
 ## The prompt for the next session (paste as the first message)
 
-> Start from `main` (clean, the commit after `d4934c5c`). Read `CLAUDE.md`, then `docs/dev/NEXT_SESSION.md`,
-> `docs/dev/CALIBRATION_PERFORMANCE_PLAN.md` and `docs/dev/THETA_QUADRATURE.md`. The PRE-PORT WORKLIST stands
-> at: W1–W11 DONE and committed; W12 DERIVED, its first prototype REFUTED, and its DESIGN DECISION owed — the
-> session's work; W13 (the re-capture of the deep library's sweeps and fresh identity references for the port
-> thread) not started. Run `scripts/design/preflight.py` and the suite before touching anything; `CLAUDE.md`'s
-> baseline line is the count to reproduce (3,419 passed / 2 xfail / 3,421 collected).
+> Start from `main` (clean, at `602d5ab8` or later). Read `CLAUDE.md`, then `docs/dev/NEXT_SESSION.md`,
+> `docs/dev/CALIBRATION_PERFORMANCE_PLAN.md` (THE LANES WORKLIST and §F) and `docs/dev/THETA_QUADRATURE.md`
+> §§12–14. Run `scripts/design/preflight.py` and the suite before touching anything; `CLAUDE.md`'s baseline
+> line is the count to reproduce (3,434 passed / 4 xfail / 3,438 collected).
 >
-> THE STANDING RULINGS are unchanged: elegant, simple, efficient, clear, concise, maintainable code, judged on
-> the oracle metric (`calibration_vs_oracle.py`, per stratum, both zero controls), the panel, the suite, and
-> timing on back-to-back profiler pairs; a restructure is proven bit-identical against fresh references
-> (`hygiene_identity_*` are current as of `d4934c5c`); a removal on the default rows of both substrates
-> (`arms/2026-09-13_preport/oracle_{ladder,test}_default.json`, still current); one mechanism at a time; no
-> magic numbers; each step's plan presented and gated; each item its own commit, committed on my go; never
-> `ruff format scripts/`; patch `calibrate` through `importlib.import_module`; any config value is a `--set`
-> arm. Before migrating or extending an instrument, census it and retire it if its question is closed.
+> THE STANDING RULINGS are unchanged: elegant, simple, efficient, clear, concise, maintainable code, judged
+> on the oracle metric (`calibration_vs_oracle.py`, per stratum, BOTH zero controls), the panel, the suite,
+> the encompassing-locus test and the shared-exon stress; a restructure is proven bit-identical; a change
+> that moves numbers is judged with its magnitudes read first; one mechanism at a time; no magic numbers —
+> every constant derived; a falsification test first, verified failing, then break the fix and watch each
+> gate fire; each item its own commit, committed on my go; never `ruff format scripts/`; patch `calibrate`
+> through `importlib.import_module`; any config value is a `--set` arm.
 >
-> W12 FIRST: the design decision, then DERIVE its error bound, PROTOTYPE outside `src/`, A/B on both panels
-> with both zero controls AND a deep stress (a toy with 500k-fragment pure-RNA AMBIG exons — the ladder is
-> converged at `sweep_n_tilt` 60 and the defect is latent there), then `src/`, the ruling to `DESIGN.md`
-> §6b.15, the derivation to `EQUATIONS.md`, the issue closed with its numbers. Then W13. Then the port.
+> TWO ITEMS, IN ORDER, BEFORE THE PORT:
+>
+> L3 — the g00 case, `ISSUES: deadband-gates-a-gdna-free-library`: a METICULOUSLY FOCUSED derivation,
+> design and fix. A library whose fitted gDNA count is exactly zero — the modal real case — sends no
+> strand-derived RNA level, because the deadband's `1/N_gdna` term switches its strand channel off; the
+> term has no derivation (gDNA's strand mean is ½ by symmetry), but deleting it alone is REFUSED with its
+> number (the unstranded zero control 499 → 21,484): it was killing the unstranded phantom by accident.
+> Derive the floor that kills the phantom on its own merits and the RNA level read from a slot's belief
+> rather than only its strand claim; prototype outside `src/`; A/B on both panels with both zero controls,
+> `test_encompassing_locus.py` and `deep_stress.py` on a `g00` donor; then `src/`, the derivation to
+> `EQUATIONS.md` §5.2b, the ruling to `DESIGN.md`, the xfail flipped, the issue closed with its numbers.
+>
+> L5 — the witnessed atom, `ISSUES: capture-on-strand-pure-ambig-undercall`, approved: the AMBIG tilt's
+> hypothesis space {pure +, pure −, mixed} at equal reference weight, a delivered RNA level on a strand
+> ruling the other strand's pure hypothesis out. The prototype is `tilt_atom.py` in the session scratchpad
+> (arm `atom_w`); the numbers to reproduce are in `THETA_QUADRATURE.md` §12 (ladder stranded ON 471,202 →
+> 427,069, every stratum better, `g00 ss.99 OFF` +28). Gates first (the smoke-test truths, the encompassing
+> exon∩exon xfail flipping), then `src/`, then the metric, the census bands and both stresses; the ruling to
+> `DESIGN.md` §6b.15, the derivation to `EQUATIONS.md`, the issue closed.
+>
+> Then the deep-library baseline (two back-to-back profiler pairs at 8 threads), fresh `port_identity_*`
+> references and `sweep_replay.py capture` on the landed tree, and THE PORT (plan §F).
 
 ## Before anything
 
@@ -36,55 +51,58 @@ python scripts/design/preflight.py                 # ~2 s: can this session run?
 python -m pytest tests/ -q                         # CLAUDE.md's baseline line is the count to reproduce
 ```
 
-## W12 — where it stands
+## Where things stand
 
-Step 1 LANDED 2026-09-13 (uncommitted, the owner's go given): the θ nodes follow the strand term's peak
-(`simplex_logodds._tilt_window`, `_read_row_at`; `_T_NATS` and `_TILT_NODES` = 24 derived), the ruling in
-`DESIGN.md` §6b.15, the derivation `EQUATIONS.md` §9e, `ISSUES: theta-quadrature-at-zero-gdna` CLOSED with its
-numbers, `ISSUES: strand-marginal-volume-factor` OPENED (priority next, after W12 by the owner's word). Seven
-gates in `test_vertex_reference.py` (four marginal-vs-adaptive-quadrature cases, the derived count converged, a
-linear row read exactly, κ = ½ the whole domain); five perturbations fired; two antisense goldens regenerated
-(transcript counts 5e−5 relative, a tiny toy's `em_effective_length` 2.4 % on an 11-bp entry); `preflight.py
---full` 10/10; the metric on both panels and the shared-exon stress reproduce the prototype. The instruments
-(`tilt_census.py`, `deep_stress.py`, `quadrature_check.py`, `theta_window.py`, `oracle_summary.py`) are in the
-session scratchpad `w12/` and cited from `docs/dev/THETA_QUADRATURE.md`; whether any becomes a
-`scripts/design/` instrument (the census is the candidate: the owner's "measure where the tilt matters") is the
-owner's call, after a census of what it would replace.
+Pushed to `origin/main` as four commits after the W11 handoff:
 
-**Step 2 LANDED the same day (uncommitted):** the RNA level lanes deliver a row's ingredients
-(`simplex_logodds.CubeRow` — the two held profiles, the slot's total and RNA opportunity, the lanes' reference
-densities) and ψ evaluates them at its own nodes (`CubeRow.at`); `CalibrationConfig.sweep_n_tilt`,
-`_tilt_grid`, `_read_row_at`, the sweep's `(K, K_t)` shape check and the cache's row arrays are gone. No tilt
-count exists anywhere in the tool: the only θ count is the derived `_TILT_NODES` = 24.
+* `23a431a9` — W12 the θ quadrature, both steps: the nodes follow the strand term's peak (`_tilt_window`,
+  `_TILT_NODES` = 24 derived), the lanes deliver a row's ingredients (`CubeRow`), `sweep_n_tilt` and every
+  θ lattice deleted. W13 — `sweeps_MO_3021_step5` and `port_identity_*` — was done on this commit and its
+  docs rode along with L1.
+* `cfb18e70` — L1: the RNA lanes exist whenever their own coordinate does (not the factory's, not the gDNA
+  lane's); the rung-0 identity gate retired.
+* `9d1375bf` — L2: one RNA coordinate for both lanes, a junction's certified flux always a source.
+* `602d5ab8` — L4: `tests/calibration/test_encompassing_locus.py` (the owner's locus at four regimes, the
+  exon∩exon solve gate an xfail until L5) and the `encompassing` rung of the toy ladder; L3 refused as a
+  one-liner and filed.
 
-W13 DONE the same day (`sweeps_MO_3021_step5`, four calls bit-identical; `port_identity_*` frozen and checked). The agreed order before the port (owner, 2026-09-13): ① the tilt-measure thread — DONE, REFUSED both forms (`ISSUES: strand-marginal-volume-factor`, CLOSED / REFUSED with the ladder's numbers); ② dissect `ISSUES: capture-on-strand-pure-ambig-undercall` (no code unless the dissection names it); ③ re-measure the deep library end to end as the port's baseline, then re-freeze the references if anything moved; ④ THE PORT (plan §F). `ROADMAP.md` rank 2 carries the accuracy items that remain (the owner asked to be taught it; the
-teaching is in the session's closing message and `EQUATIONS.md` §9e's last paragraph).
+W13's captures and references (`sweeps_MO_3021_step5`, `port_identity_*`) describe `23a431a9`; L2 moved
+numbers, so they must be re-taken on the landed tree before the port (the last step above).
 
-## Where the worklist stands
+## The session scratchpad (persists across sessions; cited from the θ note, nothing in the tree cites it)
 
-W1–W10 DONE (W10: `0f3ca3e3`…`bdc1089c`). W11 DONE 2026-09-13 as thirteen commits (`97947ede`…`d4934c5c`):
-the suite and all ten self-tests under coverage, 2,191 never-executed statements reviewed one by one; removed,
-each its own commit, byte-identical on the default rows and the identity references — seven dead members,
-the unreachable no-calibration path, the RNA reach taper's unfed switch, the RNA arm's unfed fitted-prior
-socket (ψ takes one fitted arm, `gdna_logprior`; `CompositionPriors` is gone), and three dead simulator
-features (`sim/locus_sweep`, `sim/net_flow`, the synthetic mini-genome suite path). Net −4,080 lines in 34
-files. Kept as COVERAGE GAPS, not dead code (`ISSUES: hygiene-ledger` lists them): the five CLI command bodies,
-the silent policy through `calibrate`, the simulator's sharded writers and whole-genome path (live in panel
-builds, silent in the suite), the zarr splice blacklist. `preflight.py --full` 10/10 after the deletions.
+`/private/tmp/claude-503/-Users-mkiyer-proj-rigel/25f7f3df-7c89-49bd-826e-4c2efd9184b7/scratchpad/w12/`:
+`tilt_census.py` (where the tilt matters, per stratum — the owner's instrument; arms `reference` /
+`atom` / `atom_w` / `atom_s` / `jeffreys` / `profile`), `deep_stress.py` (the shared-exon toy, spliced and
+mono), `audit_encompass.py` (the owner's locus, slot by slot), `tilt_atom.py` (L5's prototype),
+`tilt_measure.py` (the two refused measures), `theta_window.py` (W12's prototype), `quadrature_check.py`,
+`oracle_summary.py`, and every result json under `oracle/`, `census/`, `measure/`, `atom/`, `study/`,
+`dissect/`, `deep*/`. `study/crosstab.py` is the presence-against-witness cross-tab.
 
-Next: the port (plan §F); the identity references are `port_identity_*` and the captures `sweeps_MO_3021_step5`.
+## L3 — what is known, so the derivation starts where the last session stopped
+
+* The floor: `σ²_d = ¼(1/N_rna + od_r) + ¼(1/N_gdna + od_g)`; `disc = 4·max(0, (κ−½)² − σ²_d)`
+  (`region_init.strand_discriminability`). Binary readers of `disc > 0`: `sweep.solve_chain`'s
+  `strand_live` → `ChainView.strand_live` → the library's `split_live` (the lanes' witness column) and
+  `region_init`'s strand precision `tau_lam` (hence `has_own_composition`, the landscape's training
+  population, the own claims the RNA lanes read as levels).
+* On the ladder's unstranded g00 row: κ̂ = 0.500298, od_g = od_r = 0 (Poisson simulator), N_rna ≈ 1.5M, so
+  the RNA half of the floor at 1σ is ~3e−4 against |κ̂−½| = 3e−4: a coin toss. With `1/N_gdna` gone,
+  `disc` is positive there and the zero control reads 21,484 false fragments (499 with the term).
+* On real data od_r > 0 widens the floor, but no multiple of σ is a derivation. Candidates: κ̂'s posterior
+  width from `fit_strand_balance` as the floor; a continuous use of `disc` in place of the binary gates.
+* The levels: `rna_lanes` builds a single-strand exon's own level from `own[x]` (the strand claim) only;
+  the gDNA lane builds a full node's level from its own profile through its total. An RNA level read from
+  the slot's belief (`belief_fg` always exists) would flow on a gDNA-free library whatever the deadband says.
+* Instruments: the ladder's four g00 rows (both zero controls), `test_encompassing_locus.py` with a g00
+  donor variant, `deep_stress.py` and `audit_encompass.py` on `gdna_g00_ss_0.99_nrna_mid_capture_off`.
 
 ## Decisions on record
 
-* Float64 for the whole of ψ; ONE solver; ONE λ lattice at a dimensionless step with a stated guarantee.
-* The two lattice knobs are the model of a kept knob: dimensionless, a guarantee, a recorded ladder, not on
-  the CLI. The EM's `gdna_em_llr_bias` stays (the owner's).
-* `drain`, `row` and `face` stay (2026-09-13). The arcsine coordinate stays refused; the vertex atom is parked.
-* The deconvolved arrays are `count_<population>_<axis>` (2026-09-13): counts on their axis, never masses.
-* ψ has ONE fitted composition arm, `gdna_logprior`; a fitted RNA arm, if ever built, lands as `_rna_arm`'s
-  second argument (2026-09-13).
-* Four instruments retired rather than migrated (2026-09-13, the owner's ruling after a census); the record and
-  the reasons are in `ISSUES: hygiene-ledger`. Second-tier candidates the owner has not ruled on:
-  `native_parity_on_real_data`, `prior_units_check`, `accumulator_cost`, `verify_index_rebuild`.
+* Float64 for the whole of ψ; ONE solver; ONE λ lattice at a dimensionless step with a stated guarantee; no
+  θ lattice anywhere (the tilt count is derived).
+* The tilt measure stays the arcsine and the marginal exact (both flattenings REFUSED on the ladder).
+* The tilt is not a message; presence per strand is what the atom adds and the lanes witness.
+* `drain`, `row` and `face` stay; the arcsine coordinate stays refused; the vertex atom is parked.
 * The message cache's on/off switch (plan §E) is the owner's; the refit count stays; the scan's thread
   split is the owner's; parallelism waits for the port.

@@ -98,9 +98,13 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
    compiled. The accuracy frame is unchanged, and no step may move a number.
 2. **Calibration accuracy where the strand tilt matters** — the AMBIG slots with RNA on both strands, the
    population the θ quadrature was rebuilt for (`DESIGN.md` §6b.15; the census in
-   `ISSUES: the-tilt-census-as-an-instrument`). Two entries, in order: `ISSUES:
-   capture-on-strand-pure-ambig-undercall` (the largest AMBIG-class error in scope, dissect before touching
-   anything) and the census as an instrument. The θ measure is settled — both ways of flattening the strand
+   `ISSUES: the-tilt-census-as-an-instrument`). Three entries, in order: `ISSUES:
+   deadband-gates-a-gdna-free-library` (a gDNA-free library sends no strand-derived RNA level; the one-line
+   deletion is refused with its number and a derived floor plus belief-read levels are owed), `ISSUES:
+   capture-on-strand-pure-ambig-undercall` (the largest AMBIG-class error in scope; the witnessed atom is
+   approved and prototyped), and the census as an instrument. The RNA lanes' own defects — the layer off
+   without an intron factory, the lanes dead with the gDNA lane, a strand without single-strand exons having
+   no flux source — are FIXED and gated by `test_encompassing_locus.py`. The θ measure is settled — both ways of flattening the strand
    marginal were refused on the ladder (`ISSUES: strand-marginal-volume-factor`, CLOSED / REFUSED: the
    width factor is evidence the panels reward). Each judged on the metric per stratum, both zero controls and the shared-exon
    stress at depth, never on the ladder alone, which is shallow where the tilt matters.
