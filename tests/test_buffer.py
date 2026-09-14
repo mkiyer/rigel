@@ -203,31 +203,25 @@ class TestFragmentAccumulator:
         result = _resolve(mini_index, [_exon("chr1", 120, 180)])
         acc.append(result, 0)
 
-        raw = acc.finalize(mini_index.t_to_strand_arr.tolist())
+        raw = acc.finalize()
         assert isinstance(raw, dict)
         assert raw["size"] == 1
         assert "splice_type" in raw
         assert "t_offsets" in raw
         assert "t_indices" in raw
 
-    def test_finalize_uses_stored_ambig_strand(self, mini_index):
+    def test_finalize_carries_the_stored_ambig_strand(self, mini_index):
         from rigel._resolve_impl import FragmentAccumulator
 
         acc = FragmentAccumulator()
         result = _resolve(mini_index, [_exon("chr1", 120, 180)])
         assert result.ambig_strand == 0
-        candidate_tids = sorted(result.t_inds)
-        assert len(candidate_tids) >= 2
-
-        fake_strands = [int(Strand.POS)] * len(mini_index.t_to_strand_arr)
-        for idx, tid in enumerate(candidate_tids):
-            fake_strands[tid] = int(Strand.POS if idx % 2 == 0 else Strand.NEG)
+        assert len(result.t_inds) >= 2
 
         acc.append(result, 0)
-        raw = acc.finalize(fake_strands)
+        raw = acc.finalize()
 
-        ambig = np.frombuffer(raw["ambig_strand"], dtype=np.uint8)
-        assert ambig.tolist() == [0]
+        assert raw["ambig_strand"].tolist() == [0]
 
     def test_finalize_multiple(self, mini_index):
         from rigel._resolve_impl import FragmentAccumulator
@@ -242,7 +236,7 @@ class TestFragmentAccumulator:
         acc.append(r2, 1)
         assert acc.size == 2
 
-        raw = acc.finalize(mini_index.t_to_strand_arr.tolist())
+        raw = acc.finalize()
         assert raw["size"] == 2
 
     def test_finalize_buffer_payload_dtypes(self, mini_index):
@@ -252,10 +246,10 @@ class TestFragmentAccumulator:
         result = _resolve(mini_index, [_exon("chr1", 120, 180)])
         acc.append(result, 0)
 
-        raw = acc.finalize(mini_index.t_to_strand_arr.tolist())
-        assert np.frombuffer(raw["frag_lengths"], dtype=np.int32).dtype == np.int32
-        assert np.frombuffer(raw["exon_bp"], dtype=np.uint16).dtype == np.uint16
-        assert np.frombuffer(raw["read_length"], dtype=np.uint16).dtype == np.uint16
+        raw = acc.finalize()
+        assert raw["frag_lengths"].dtype == np.int32
+        assert raw["exon_bp"].dtype == np.uint16
+        assert raw["read_length"].dtype == np.uint16
         assert "intron_bp" not in raw
         assert "exon_bp_pos" not in raw
         assert "exon_bp_neg" not in raw
@@ -282,9 +276,8 @@ class TestFragmentAccumulator:
 
         acc = FragmentAccumulator()
         acc.append(result, 0)
-        raw = acc.finalize(mini_index.t_to_strand_arr.tolist())
-        read_length = np.frombuffer(raw["read_length"], dtype=np.uint16)
-        assert read_length.tolist() == [65_535]
+        raw = acc.finalize()
+        assert raw["read_length"].tolist() == [65_535]
 
 
 # =====================================================================
@@ -294,14 +287,14 @@ class TestFragmentAccumulator:
 
 class TestFragmentBufferBasic:
     def test_empty_buffer(self, mini_index):
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf = FragmentBuffer(chunk_size=100)
         buf.finalize()
         assert buf.total_fragments == 0
         assert buf.n_chunks == 0
         assert list(buf) == []
 
     def test_single_fragment(self, mini_index):
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf = FragmentBuffer(chunk_size=100)
         result = _resolve(mini_index, [_exon("chr1", 120, 180)])
         assert result is not None
         buf.append(result)
@@ -319,7 +312,7 @@ class TestFragmentBufferBasic:
         r_unspliced = _resolve(mini_index, [_exon("chr1", 120, 180)])
         assert r_unspliced is not None
 
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf = FragmentBuffer(chunk_size=100)
         buf.append(r_unspliced)
         buf.finalize()
 
@@ -329,7 +322,7 @@ class TestFragmentBufferBasic:
     def test_roundtrip_preserves_strand(self, mini_index):
         """Exon strand should survive through the C++ accumulator."""
         r = _resolve(mini_index, [_exon("chr1", 120, 180, Strand.POS)])
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf = FragmentBuffer(chunk_size=100)
         buf.append(r)
         buf.finalize()
 
@@ -341,7 +334,7 @@ class TestFragmentBufferBasic:
         r1 = _resolve(mini_index, [_exon("chr1", 120, 180)])
         r2 = _resolve(mini_index, [_exon("chr1", 1020, 1080, Strand.NEG)])
 
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf = FragmentBuffer(chunk_size=100)
         buf.append(r1, frag_id=0)
         buf.append(r2, frag_id=1)
         buf.finalize()
@@ -351,7 +344,7 @@ class TestFragmentBufferBasic:
 
     def test_many_fragments_chunking(self, mini_index):
         """Buffer should create multiple chunks when chunk_size is exceeded."""
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=10)
+        buf = FragmentBuffer(chunk_size=10)
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         for i in range(25):
             buf.append(r, frag_id=i)
@@ -371,7 +364,7 @@ class TestFragmentBufferBasic:
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         r.num_hits = 3
 
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf = FragmentBuffer(chunk_size=100)
         buf.append(r)
         buf.finalize()
 
@@ -383,7 +376,7 @@ class TestFragmentBufferBasic:
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         r.nm = 5
 
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf = FragmentBuffer(chunk_size=100)
         buf.append(r)
         buf.finalize()
 
@@ -394,7 +387,7 @@ class TestFragmentBufferBasic:
         """Default NM should be 0."""
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
 
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf = FragmentBuffer(chunk_size=100)
         buf.append(r)
         buf.finalize()
 
@@ -405,7 +398,7 @@ class TestFragmentBufferBasic:
         """Buffer chunks store bounded hot-path payloads as uint16."""
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
 
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf = FragmentBuffer(chunk_size=100)
         buf.append(r)
         buf.finalize()
 
@@ -428,7 +421,7 @@ class TestFragmentBufferBasic:
 class TestFragId:
     def test_frag_id_default_zero(self, mini_index):
         """Default frag_id should be 0."""
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf = FragmentBuffer(chunk_size=100)
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         buf.append(r)
         buf.finalize()
@@ -438,7 +431,7 @@ class TestFragId:
 
     def test_frag_id_preserves_value(self, mini_index):
         """Explicit frag_id should survive append -> finalize -> iterate."""
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf = FragmentBuffer(chunk_size=100)
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         buf.append(r, frag_id=42)
         buf.append(r, frag_id=42)
@@ -452,7 +445,7 @@ class TestFragId:
 
     def test_frag_id_chunk_array(self, mini_index):
         """frag_id should be accessible as chunk array."""
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf = FragmentBuffer(chunk_size=100)
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         for i in range(5):
             buf.append(r, frag_id=i // 2)
@@ -464,7 +457,6 @@ class TestFragId:
     def test_frag_id_survives_spill(self, mini_index, tmp_path):
         """frag_id should survive Arrow IPC spill and reload."""
         buf = FragmentBuffer(
-            t_strand_arr=mini_index.t_to_strand_arr,
             chunk_size=50,
             max_memory_bytes=1,  # force spill
             spill_dir=tmp_path,
@@ -496,7 +488,7 @@ class TestFragmentClasses:
         t_inds = list(r.t_inds)
         assert len(t_inds) == 2  # t3 + synthetic nRNA
 
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf = FragmentBuffer(chunk_size=100)
         buf.append(r)
         buf.finalize()
 
@@ -510,7 +502,7 @@ class TestFragmentClasses:
         assert r.ambig_strand == 0
         assert len(list(r.t_inds)) == 3  # t1, t2 + synthetic nRNA
 
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf = FragmentBuffer(chunk_size=100)
         buf.append(r)
         buf.finalize()
 
@@ -522,7 +514,7 @@ class TestFragmentClasses:
         r = _resolve(mini_index, [_exon("chr1", 1020, 1080, Strand.NEG)])
         r.num_hits = 3
 
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf = FragmentBuffer(chunk_size=100)
         buf.append(r)
         buf.finalize()
 
@@ -536,7 +528,7 @@ class TestFragmentClasses:
         r_mm = _resolve(mini_index, [_exon("chr1", 1020, 1080, Strand.NEG)])
         r_mm.num_hits = 2
 
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf = FragmentBuffer(chunk_size=100)
         buf.append(r_unambig)
         buf.append(r_iso)
         buf.append(r_mm)
@@ -558,7 +550,6 @@ class TestDiskSpill:
     def test_spill_triggers_above_threshold(self, mini_index, tmp_path):
         """When in-memory chunks exceed max_memory_bytes, spill to disk."""
         buf = FragmentBuffer(
-            t_strand_arr=mini_index.t_to_strand_arr,
             chunk_size=50,
             max_memory_bytes=1,
             spill_dir=tmp_path,
@@ -574,7 +565,6 @@ class TestDiskSpill:
     def test_spill_preserves_data(self, mini_index, tmp_path):
         """Data roundtrips correctly through Arrow IPC spill."""
         buf = FragmentBuffer(
-            t_strand_arr=mini_index.t_to_strand_arr,
             chunk_size=50,
             max_memory_bytes=1,
             spill_dir=tmp_path,
@@ -595,12 +585,10 @@ class TestDiskSpill:
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
 
         in_memory = FragmentBuffer(
-            t_strand_arr=mini_index.t_to_strand_arr,
             chunk_size=25,
             max_memory_bytes=0,
         )
         spilled = FragmentBuffer(
-            t_strand_arr=mini_index.t_to_strand_arr,
             chunk_size=25,
             max_memory_bytes=1,
             spill_dir=tmp_path,
@@ -620,7 +608,6 @@ class TestDiskSpill:
 
     def test_iter_chunks_consuming_waits_and_deletes_spill(self, mini_index, tmp_path):
         buf = FragmentBuffer(
-            t_strand_arr=mini_index.t_to_strand_arr,
             chunk_size=20,
             max_memory_bytes=1,
             spill_dir=tmp_path,
@@ -647,7 +634,6 @@ class TestDiskSpill:
 
         monkeypatch.setattr(buffer_mod, "_spill_chunk", fail_spill)
         buf = FragmentBuffer(
-            t_strand_arr=mini_index.t_to_strand_arr,
             chunk_size=10,
             max_memory_bytes=1,
             spill_dir=tmp_path,
@@ -674,7 +660,6 @@ class TestDiskSpill:
 
         monkeypatch.setattr(buffer_mod, "_spill_chunk", slow_spill)
         buf = FragmentBuffer(
-            t_strand_arr=mini_index.t_to_strand_arr,
             chunk_size=10,
             max_memory_bytes=1,
             spill_dir=tmp_path,
@@ -710,7 +695,6 @@ class TestDiskSpill:
 
     def test_release_idempotent_with_spills(self, mini_index, tmp_path):
         buf = FragmentBuffer(
-            t_strand_arr=mini_index.t_to_strand_arr,
             chunk_size=20,
             max_memory_bytes=1,
             spill_dir=tmp_path,
@@ -729,7 +713,6 @@ class TestDiskSpill:
 
     def test_cleanup_removes_files(self, mini_index, tmp_path):
         buf = FragmentBuffer(
-            t_strand_arr=mini_index.t_to_strand_arr,
             chunk_size=50,
             max_memory_bytes=1,
             spill_dir=tmp_path,
@@ -749,7 +732,6 @@ class TestDiskSpill:
 
     def test_context_manager_cleanup(self, mini_index, tmp_path):
         with FragmentBuffer(
-            t_strand_arr=mini_index.t_to_strand_arr,
             chunk_size=50,
             max_memory_bytes=1,
             spill_dir=tmp_path,
@@ -766,7 +748,6 @@ class TestDiskSpill:
     def test_no_spill_when_disabled(self, mini_index):
         """max_memory_bytes=0 disables spilling."""
         buf = FragmentBuffer(
-            t_strand_arr=mini_index.t_to_strand_arr,
             chunk_size=10,
             max_memory_bytes=0,
         )
@@ -781,7 +762,6 @@ class TestDiskSpill:
     def test_no_spill_under_threshold(self, mini_index):
         """Small buffer should not spill."""
         buf = FragmentBuffer(
-            t_strand_arr=mini_index.t_to_strand_arr,
             chunk_size=100,
             max_memory_bytes=100 * 1024**2,
         )
@@ -800,7 +780,7 @@ class TestDiskSpill:
 
 class TestBufferSummary:
     def test_summary_structure(self, mini_index):
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf = FragmentBuffer(chunk_size=100)
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         for i in range(150):
             buf.append(r, frag_id=i)
@@ -820,7 +800,6 @@ class TestBufferSummary:
 
     def test_summary_with_spill(self, mini_index, tmp_path):
         buf = FragmentBuffer(
-            t_strand_arr=mini_index.t_to_strand_arr,
             chunk_size=50,
             max_memory_bytes=1,
             spill_dir=tmp_path,
@@ -847,7 +826,7 @@ class TestBufferSummary:
 
 class TestIterChunks:
     def test_iter_chunks_yields_correct_count(self, mini_index):
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=10)
+        buf = FragmentBuffer(chunk_size=10)
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         for i in range(25):
             buf.append(r, frag_id=i)
@@ -859,7 +838,7 @@ class TestIterChunks:
         assert total == 25
 
     def test_iter_chunks_getitem(self, mini_index):
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf = FragmentBuffer(chunk_size=100)
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         for i in range(5):
             buf.append(r, frag_id=i)
@@ -873,7 +852,7 @@ class TestIterChunks:
             assert bf.frag_id == i
 
     def test_memory_bytes_positive(self, mini_index):
-        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
+        buf = FragmentBuffer(chunk_size=100)
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         for i in range(50):
             buf.append(r, frag_id=i)

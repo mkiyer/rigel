@@ -156,52 +156,27 @@ class _FinalizedChunk:
 
     @classmethod
     def from_raw(cls, raw: dict) -> "_FinalizedChunk":
-        """Build a chunk from the raw dict returned by C++ FragmentAccumulator.
-
-        Accepts both legacy bytes (from ``finalize()``) and zero-copy
-        numpy arrays (from ``finalize_zero_copy()``).  In the zero-copy
-        path — the only one used in production — the C++ accumulator
-        already produces arrays with the exact target dtypes, so this
-        constructor is allocation-free for in-memory chunks.
-        """
-
-        def _arr(val, dtype, src_dtype=None):
-            """Convert bytes or ndarray to a NumPy array of *dtype*.
-
-            Fast path: zero-copy ndarray with matching dtype is
-            returned unchanged (the C++ side guarantees C-contiguity).
-            Slow path: legacy bytes are wrapped via ``np.frombuffer``
-            and copied, then optionally cast.
-            """
-            if isinstance(val, np.ndarray):
-                if val.dtype == dtype:
-                    return val
-                return val.astype(dtype, copy=False)
-            # Legacy path: raw bytes from finalize()
-            read_dtype = src_dtype if src_dtype is not None else dtype
-            arr = np.frombuffer(val, dtype=read_dtype).copy()
-            if read_dtype != dtype:
-                return arr.astype(dtype)
-            return arr
-
+        """Build a chunk from the dict C++ ``FragmentAccumulator.finalize`` returns. The native side
+        hands over its vectors as C-contiguous arrays already carrying the declared dtypes, so nothing
+        is copied or cast."""
         return cls(
-            splice_type=_arr(raw["splice_type"], np.uint8),
-            align_strand=_arr(raw["align_strand"], np.uint8),
-            sj_strand=_arr(raw["sj_strand"], np.uint8),
-            num_hits=_arr(raw["num_hits"], np.uint16),
-            merge_criteria=_arr(raw["merge_criteria"], np.uint8),
-            chimera_type=_arr(raw["chimera_type"], np.uint8),
-            t_offsets=_arr(raw["t_offsets"], np.int32),
-            t_indices=_arr(raw["t_indices"], np.int32),
-            frag_lengths=_arr(raw["frag_lengths"], np.int32),
-            exon_bp=_arr(raw["exon_bp"], np.uint16),
-            ambig_strand=_arr(raw["ambig_strand"], np.uint8),
-            frag_id=_arr(raw["frag_id"], np.int64),
-            read_length=_arr(raw["read_length"], np.uint16),
-            genomic_footprint=_arr(raw["genomic_footprint"], np.int32),
-            genomic_start=_arr(raw["genomic_start"], np.int32),
-            nm=_arr(raw["nm"], np.uint16),
-            size=raw["size"] if isinstance(raw["size"], int) else int(raw["size"]),
+            splice_type=raw["splice_type"],
+            align_strand=raw["align_strand"],
+            sj_strand=raw["sj_strand"],
+            num_hits=raw["num_hits"],
+            merge_criteria=raw["merge_criteria"],
+            chimera_type=raw["chimera_type"],
+            t_offsets=raw["t_offsets"],
+            t_indices=raw["t_indices"],
+            frag_lengths=raw["frag_lengths"],
+            exon_bp=raw["exon_bp"],
+            ambig_strand=raw["ambig_strand"],
+            frag_id=raw["frag_id"],
+            read_length=raw["read_length"],
+            genomic_footprint=raw["genomic_footprint"],
+            genomic_start=raw["genomic_start"],
+            nm=raw["nm"],
+            size=int(raw["size"]),
         )
 
     @property
@@ -491,9 +466,6 @@ class FragmentBuffer:
 
     Parameters
     ----------
-    t_strand_arr : np.ndarray
-        Per-transcript strand array ``int8[n_transcripts]``.  Kept for
-        compatibility with the native accumulator finalizer.
     chunk_size : int
         Number of fragments per chunk (default 1,000,000).
     max_memory_bytes : int
@@ -504,9 +476,9 @@ class FragmentBuffer:
 
     Examples
     --------
-    >>> buf = FragmentBuffer(t_strand_arr, chunk_size=500_000)
-    >>> for resolved in resolved_fragments:
-    ...     buf.append(resolved)
+    >>> buf = FragmentBuffer(chunk_size=500_000)
+    >>> for frag_id, resolved in enumerate(resolved_fragments):
+    ...     buf.append(resolved, frag_id)
     >>> buf.finalize()
     >>> for frag in buf:
     ...     print(frag.splice_type, len(frag.t_inds))
@@ -515,12 +487,10 @@ class FragmentBuffer:
 
     def __init__(
         self,
-        t_strand_arr: np.ndarray,
         chunk_size: int = 1_000_000,
         max_memory_bytes: int = 2 * 1024**3,
         spill_dir: Path | None = None,
     ):
-        self._t_strand_arr = t_strand_arr
         self.chunk_size = chunk_size
         self.max_memory_bytes = max_memory_bytes
         self._spill_dir = spill_dir
@@ -596,9 +566,7 @@ class FragmentBuffer:
         if self._native_acc.size == 0:
             return
 
-        t_strand_list = self._t_strand_arr.tolist()
-        raw = self._native_acc.finalize(t_strand_list)
-        chunk = _FinalizedChunk.from_raw(raw)
+        chunk = _FinalizedChunk.from_raw(self._native_acc.finalize())
 
         self._accept_chunk(chunk)
         self._native_acc = FragmentAccumulator()

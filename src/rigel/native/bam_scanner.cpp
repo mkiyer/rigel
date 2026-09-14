@@ -1277,14 +1277,13 @@ public:
     // Three-thread architecture:
     //   Reader thread (background): BAM I/O → input_queue
     //   Worker threads (background): input_queue → accumulate → output_queue
-    //   Main thread: output_queue → finalize_zero_copy → chunk_callback
+    //   Main thread: output_queue → finalize → chunk_callback
     //
     // The main thread holds the GIL while calling the Python callback
     // and releases it while waiting on the output queue.
 
     nb::dict scan(const std::string& bam_path,
                   nb::callable chunk_callback,
-                  const std::vector<int32_t>& t_strand_arr,
                   int64_t chunk_size = 1000000,
                   int n_workers = 1,
                   int n_decomp_threads = 2,
@@ -1510,9 +1509,9 @@ public:
             {
                 nb::gil_scoped_release release;
                 while (output_queue.pop(acc)) {
-                    // Acquire GIL for finalize_zero_copy + Python callback
+                    // Acquire GIL for finalize + Python callback
                     nb::gil_scoped_acquire acquire;
-                    nb::dict chunk = acc.finalize_zero_copy(t_strand_arr);
+                    nb::dict chunk = acc.finalize();
                     chunk_callback(chunk);
                     // GIL released again at loop top
                 }
@@ -3117,7 +3116,6 @@ NB_MODULE(_bam_impl, m) {
         .def("scan", &BamScanner::scan,
              nb::arg("bam_path"),
              nb::arg("chunk_callback"),
-             nb::arg("t_strand_arr"),
              nb::arg("chunk_size") = 1000000,
              nb::arg("n_workers") = 1,
              nb::arg("n_decomp_threads") = 2,
@@ -3133,8 +3131,6 @@ NB_MODULE(_bam_impl, m) {
              "chunk_callback : callable\n"
              "    Called with a dict of capsule-backed numpy arrays for\n"
              "    each finalized chunk.\n"
-             "t_strand_arr : list[int]\n"
-             "    Per-transcript strand array (int32).\n"
              "chunk_size : int\n"
              "    Target number of fragments per chunk (default 1000000).\n"
              "n_workers : int\n"

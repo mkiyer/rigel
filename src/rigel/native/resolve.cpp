@@ -77,8 +77,7 @@ NB_MODULE(_resolve_impl, m) {
         .def_prop_ro("size", &FragmentAccumulator::get_size,
                      "Number of fragments in the accumulator.")
         .def("finalize", &FragmentAccumulator::finalize,
-             nb::arg("t_strand_arr"),
-             "Finalize to a dict of raw bytes for numpy conversion.")
+             "Finalize to a dict of numpy arrays, leaving the accumulator empty.")
         ;
 
     // --- FragmentResolver ---

@@ -226,7 +226,6 @@ def scan_and_buffer(
     """
     stats = PipelineStats()
     buffer = FragmentBuffer(
-        t_strand_arr=index.t_to_strand_arr,
         chunk_size=scan.fragments_per_chunk,
         max_memory_bytes=scan.buffer_size_bytes,
         spill_dir=scan.spill_dir,
@@ -301,7 +300,6 @@ def scan_and_buffer(
     result = scanner.scan(
         bam_path,
         chunk_callback=_on_chunk,
-        t_strand_arr=index.t_to_strand_arr.tolist(),
         chunk_size=scan.fragments_per_chunk,
         n_workers=n_scan,
         n_decomp_threads=n_bgzf,

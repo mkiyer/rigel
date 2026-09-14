@@ -311,63 +311,11 @@ public:
 
     int32_t get_size() const { return size_; }
 
-    /// Finalize accumulator → dict of raw bytes (for numpy frombuffer).
-    /// The transcript strand array is kept for API compatibility.
-    nb::dict finalize(const std::vector<int32_t>& t_strand_arr) {
-        (void)t_strand_arr;
-
-        auto to_bytes = [](const void* data, size_t nbytes) -> nb::bytes {
-            if (nbytes == 0)
-                return nb::bytes(static_cast<const char*>(nullptr), 0);
-            return nb::bytes(
-                reinterpret_cast<const char*>(data), nbytes);
-        };
-
-        nb::dict result;
-        result["splice_type"] = to_bytes(
-            splice_type_.data(), splice_type_.size());
-        result["align_strand"] = to_bytes(
-            align_strand_.data(), align_strand_.size());
-        result["sj_strand"] = to_bytes(
-            sj_strand_.data(), sj_strand_.size());
-        result["num_hits"] = to_bytes(
-            num_hits_.data(), num_hits_.size() * sizeof(uint16_t));
-        result["merge_criteria"] = to_bytes(
-            merge_criteria_.data(), merge_criteria_.size());
-        result["chimera_type"] = to_bytes(
-            chimera_type_.data(), chimera_type_.size());
-        result["t_indices"] = to_bytes(
-            t_indices_.data(), t_indices_.size() * sizeof(int32_t));
-        result["t_offsets"] = to_bytes(
-            t_offsets_.data(), t_offsets_.size() * sizeof(int32_t));
-        result["frag_lengths"] = to_bytes(
-            frag_lengths_.data(), frag_lengths_.size() * sizeof(int32_t));
-        result["exon_bp"] = to_bytes(
-            exon_bp_.data(), exon_bp_.size() * sizeof(uint16_t));
-        result["ambig_strand"] = to_bytes(ambig_strand_.data(), ambig_strand_.size());
-        result["frag_id"] = to_bytes(
-            frag_id_.data(), frag_id_.size() * sizeof(int64_t));
-        result["read_length"] = to_bytes(
-            read_length_.data(), read_length_.size() * sizeof(uint16_t));
-        result["genomic_footprint"] = to_bytes(
-            genomic_footprint_.data(),
-            genomic_footprint_.size() * sizeof(int32_t));
-        result["genomic_start"] = to_bytes(
-            genomic_start_.data(),
-            genomic_start_.size() * sizeof(int32_t));
-        result["nm"] = to_bytes(
-            nm_.data(), nm_.size() * sizeof(uint16_t));
-        result["size"] = nb::cast(size_);
-
-        return result;
-    }
-
-    /// Zero-copy finalize: moves internal vectors to heap-allocated
-    /// storage and returns capsule-backed numpy arrays.  The accumulator
-    /// is consumed (left empty) after this call.
-    nb::dict finalize_zero_copy(const std::vector<int32_t>& t_strand_arr) {
+    /// Finalize: moves internal vectors to heap-allocated storage and
+    /// returns capsule-backed numpy arrays.  The accumulator is consumed
+    /// (left empty) after this call.
+    nb::dict finalize() {
         int32_t n = size_;
-        (void)t_strand_arr;
 
         nb::dict result;
         result["splice_type"]       = vec_to_ndarray(std::move(splice_type_));
