@@ -154,8 +154,8 @@ rigel index --fasta $T/test_chr.fa --gtf $T/test_chr.gtf --collapse-duplicate-tr
 
 # 2. per panel (seven configs: the benign panel, the two adversarial probe panels, od05, three fl arms)
 CFG=scripts/sim/configs/test_reference.yaml
-python scripts/sim/panel.py simulate --config $CFG --index $T/idx
-python scripts/sim/panel.py cache    --config $CFG --index $T/idx
+python scripts/sim/panel.py simulate --config $CFG
+python scripts/sim/panel.py cache    --config $CFG
 
 # 3. score every policy on every condition — seconds
 python scripts/design/policy_benchmark.py --panel test

@@ -66,15 +66,17 @@ def test_every_path_derives_from_the_config(tmp_path):
     assert p.reference == tmp_path / "suite" / "reference"
     assert p.scan_cache == p.dir / "scan_cache"
     assert p.oracle_cache == p.dir / "oracle_cache"
-    # the index is the ONE derived-by-convention path: a sibling of the reference directory.
+    # with no `index:` the index is the reference directory's sibling, by convention
     assert p.index == tmp_path / "suite" / "rigel_index"
 
 
-def test_the_index_can_be_overridden(tmp_path):
-    """Because the index is a CONVENTION, not a config key, it must be overridable — otherwise a
-    panel built against a non-default index is silently scored against the wrong one."""
-    p = PANEL.Panel(_config(tmp_path), index=tmp_path / "elsewhere")
-    assert p.index == tmp_path / "elsewhere"
+def test_the_index_is_the_configs_and_can_be_overridden(tmp_path):
+    """The simulator reads `index:`, so the workflow must read the same one — a panel scored against an
+    index other than the one it was simulated from is silently wrong. Without the key the reference's
+    sibling is the convention (above), and `--index` overrides either."""
+    cfg = _config(tmp_path, index=str(tmp_path / "idx"))
+    assert PANEL.Panel(cfg).index == tmp_path / "idx"
+    assert PANEL.Panel(cfg, index=tmp_path / "elsewhere").index == tmp_path / "elsewhere"
 
 
 def test_the_probe_panel_is_the_one_the_capture_config_names(tmp_path):

@@ -20,9 +20,9 @@ it — the simulator engine in `rigel.sim`, `build_scan_cache.py`, `pass0_vs_ora
 (`TRAPS: score-the-consumers-own-count`), so the value here is *sequencing and prerequisites*, not new
 arithmetic. Anything this prints about a number, the underlying instrument printed first.
 
-⭐ **EVERY PATH DERIVES FROM THE CONFIG**, which already carries `genome`, `gtf` and `outdir`. The index
-is the one exception — it is a sibling of the reference by convention — so it is derived and
-`--index` overrides it.
+⭐ **EVERY PATH DERIVES FROM THE CONFIG**: `genome`, `gtf`, `outdir`, and `index`, the index the simulator
+reads. A config without `index:` gets the reference directory's sibling by convention, and `--index`
+overrides either.
 
 ⚠ **`status` is the command to run when you do not know where you are.** Each stage is expensive and
 resumable, and the failure mode this replaces is discovering after 20 minutes that step 3 never ran.
@@ -69,9 +69,8 @@ class Panel:
         self.gtf = Path(cfg["gtf"])
         self.dir = Path(cfg["outdir"])
         self.reference = self.gtf.parent
-        # ⚠ DERIVED, not configured: the index is a sibling of the reference directory. `--index`
-        # overrides it rather than this guessing twice.
-        self.index = Path(index) if index else self.reference.parent / "rigel_index"
+        # the index the simulator reads (`index:`), else the reference's sibling by convention
+        self.index = Path(index or cfg.get("index") or self.reference.parent / "rigel_index")
         # the probe panel the capture arm reads, as the config names it: the ladder's designed
         # `capture_panel.tsv` or a substrate's rendered BED. With no capture arm, the ladder's layout.
         named = [c["probes"] for c in (cfg.get("capture") or {}).get("configs", []) if c.get("probes")]
@@ -86,11 +85,6 @@ class Panel:
         if not self.dir.is_dir():
             return []
         return sorted(p.name for p in self.dir.iterdir() if (p / "sim_oracle.bam").is_file())
-
-    @property
-    def planned(self) -> int:
-        """How many conditions the config asks for, so `simulate` can report partial progress."""
-        return len(self.cfg.get("conditions", []) or []) or 0
 
 
 def run(cmd: list[str], *, what: str) -> None:
@@ -134,7 +128,7 @@ def cmd_status(p: Panel, args) -> int:
         ("build", p.genome.is_file() and p.gtf.is_file(), "reference", p.reference),
         ("build", p.index.is_dir(), "index", p.index),
         ("build", p.probes.is_file(), "capture probes", p.probes),
-        ("simulate", bool(conds), f"{len(conds)}/{p.planned or '?'} conditions", p.dir),
+        ("simulate", bool(conds), f"{len(conds)} conditions", p.dir),
         (
             "cache",
             n_scan >= len(conds) and n_scan > 0,
