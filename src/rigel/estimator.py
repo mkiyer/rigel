@@ -167,8 +167,7 @@ class AbundanceEstimator:
     em_config : EMConfig or None
         EM algorithm configuration.  Defaults to ``EMConfig()``.
     geometry : TranscriptGeometry or None
-        Pre-computed transcript/gene geometry.  None for minimal
-        construction (e.g. in tests).
+        The effective lengths.  None gives every transcript length 1 (minimal construction in tests).
     """
 
     def __init__(
@@ -196,26 +195,17 @@ class AbundanceEstimator:
             else np.zeros(num_transcripts, dtype=bool)
         )
 
-        # --- Geometry: from TranscriptGeometry or defaults ---
+        # --- Effective lengths: from TranscriptGeometry, or 1 per transcript ---
         if geometry is not None:
-            self._t_to_g = np.asarray(geometry.t_to_g, dtype=np.int32)
-            self._transcript_spans = np.asarray(geometry.transcript_spans, dtype=np.float64)
-            self._exonic_lengths = np.asarray(geometry.exonic_lengths, dtype=np.float64)
             self._t_eff_len_output = np.maximum(
                 np.asarray(geometry.effective_lengths, dtype=np.float64),
                 1.0,
             )
-            if geometry.effective_lengths_em is None:
-                self._t_eff_len_em = self._t_eff_len_output
-            else:
-                self._t_eff_len_em = np.maximum(
-                    np.asarray(geometry.effective_lengths_em, dtype=np.float64),
-                    1.0,
-                )
+            self._t_eff_len_em = np.maximum(
+                np.asarray(geometry.effective_lengths_em, dtype=np.float64),
+                1.0,
+            )
         else:
-            self._t_to_g = None
-            self._transcript_spans = None
-            self._exonic_lengths = None
             self._t_eff_len_output = np.ones(num_transcripts, dtype=np.float64)
             self._t_eff_len_em = self._t_eff_len_output
 
@@ -249,17 +239,6 @@ class AbundanceEstimator:
     def effective_lengths(self) -> np.ndarray:
         """Per-transcript effective lengths (read-only)."""
         return self._t_eff_len_output
-
-    @property
-    def _t_eff_len(self) -> np.ndarray:
-        """Backward-compatible alias for raw public effective lengths."""
-        return self._t_eff_len_output
-
-    @_t_eff_len.setter
-    def _t_eff_len(self, value: np.ndarray) -> None:
-        arr = np.maximum(np.asarray(value, dtype=np.float64), 1.0)
-        self._t_eff_len_output = arr
-        self._t_eff_len_em = arr
 
     @property
     def gdna_em_count(self) -> float:

@@ -42,8 +42,7 @@ def _make_locus_em_data(
     t_indices_per_unit : list[list[int]]
         GLOBAL mRNA transcript indices per unit.
     rc : AbundanceEstimator or None
-        If provided, used for unambig_counts.  The helper also sets
-        ``_transcript_spans`` and ``_exonic_lengths`` if they are None.
+        If provided, used for unambig_counts.
     include_nrna : bool
         If True, units are marked as unspliced (``is_spliced=False``)
         so the batch C++ adds nRNA shadow candidates.
@@ -124,10 +123,6 @@ def _make_locus_em_data(
 
     index = _MockBatchIndex(n_t)
 
-    # Ensure estimator geometry arrays are set if rc is provided
-    if rc is not None:
-        _ensure_estimator_geometry(rc)
-
     return em_data, loci, gdna_prior_count_arr, index
 
 
@@ -149,15 +144,6 @@ class _MockBatchIndex:
         )
 
 
-def _ensure_estimator_geometry(rc):
-    """Set required geometry arrays on estimator if not already set."""
-    n_t = rc.num_transcripts
-    if rc._transcript_spans is None:
-        rc._transcript_spans = np.full(n_t, 10000.0, dtype=np.float64)
-    if rc._exonic_lengths is None:
-        rc._exonic_lengths = np.full(n_t, 1000.0, dtype=np.float64)
-
-
 def _run_and_assign(rc, em_data, loci=None, index=None, gdna_prior_count=None, *, em_iterations=10):
     """Run batch locus EM via the partitioned path. Returns pool_counts dict.
 
@@ -169,8 +155,6 @@ def _run_and_assign(rc, em_data, loci=None, index=None, gdna_prior_count=None, *
     # Unpack tuple form from _make_locus_em_data
     if isinstance(em_data, tuple):
         em_data, loci, gdna_prior_count, index = em_data
-
-    _ensure_estimator_geometry(rc)
 
     # Partition ScoredFragments into per-locus LocusPartition objects
     partitions = partition_and_free(em_data, loci)

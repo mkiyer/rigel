@@ -109,6 +109,12 @@ def _make_index():
     )
 
 
+def _lengths(values):
+    """One effective length per transcript, the same for the output and the EM (capture-off)."""
+    a = np.asarray(values, dtype=np.float64)
+    return TranscriptGeometry(effective_lengths=a, effective_lengths_em=a)
+
+
 def _make_frag_length_models():
     from rigel.frag_length_model import FragmentLengthModels
 
@@ -611,9 +617,6 @@ class TestCountsOutput:
         index = _make_index()
         geometry = TranscriptGeometry(
             effective_lengths=np.array([100.0, 200.0, 300.0]),
-            exonic_lengths=np.array([100.0, 200.0, 300.0]),
-            t_to_g=index.t_to_g_arr,
-            transcript_spans=np.array([500.0, 500.0, 500.0]),
             effective_lengths_em=np.array([50.0, 100.0, 300.0]),
         )
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42), geometry=geometry)
@@ -675,9 +678,9 @@ class TestCountsOutput:
     def test_gene_effective_length_abundance_weighted(self):
         """Gene effective length is abundance-weighted mean of transcript eff lens."""
         index = _make_index()  # t0,t1 → g0; t2 → g1
-        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        # Set different effective lengths per transcript
-        rc._t_eff_len = np.array([500.0, 1000.0, 300.0])
+        rc = AbundanceEstimator(
+            3, em_config=EMConfig(seed=42), geometry=_lengths([500.0, 1000.0, 300.0])
+        )
         # t0 gets 90% of counts, t1 gets 10% → weighted toward t0
         rc.unambig_counts[0, _UNSPLICED_SENSE] = 90.0
         rc.unambig_counts[1, _UNSPLICED_SENSE] = 10.0
@@ -693,8 +696,9 @@ class TestCountsOutput:
     def test_gene_effective_length_zero_counts_uses_mean(self):
         """Zero-count genes use unweighted mean of transcript effective lengths."""
         index = _make_index()  # t0,t1 → g0; t2 → g1
-        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        rc._t_eff_len = np.array([500.0, 1000.0, 300.0])
+        rc = AbundanceEstimator(
+            3, em_config=EMConfig(seed=42), geometry=_lengths([500.0, 1000.0, 300.0])
+        )
         # No counts at all → both genes are zero-count
 
         df = rc.get_gene_counts_df(index)
@@ -783,7 +787,6 @@ class TestPartitionedEffectiveLength:
             2,
             em_config=EMConfig(seed=42, assignment_mode="fractional"),
         )
-        rc_equal._t_eff_len = np.ones(2, dtype=np.float64)
         _run_and_assign(
             rc_equal,
             _make_locus_em_data(units, num_transcripts=2),
@@ -795,8 +798,8 @@ class TestPartitionedEffectiveLength:
         rc_len = AbundanceEstimator(
             2,
             em_config=EMConfig(seed=42, assignment_mode="fractional"),
+            geometry=_lengths([10.0, 1.0]),
         )
-        rc_len._t_eff_len = np.array([10.0, 1.0], dtype=np.float64)
         _run_and_assign(
             rc_len,
             _make_locus_em_data(units, num_transcripts=2),
@@ -1053,7 +1056,6 @@ def _estimator(
             gdna_em_llr_bias=gdna_em_llr_bias,
         ),
     )
-    est._t_eff_len = np.ones(n_t, dtype=np.float64)
     return est
 
 
@@ -1495,7 +1497,6 @@ def _warm_start_estimator(n_t: int, *, warm_start: str = "coverage", mode: str =
             warm_start=warm_start,
         ),
     )
-    est._t_eff_len = np.ones(n_t, dtype=np.float64)
     return est
 
 

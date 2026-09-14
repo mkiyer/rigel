@@ -417,34 +417,22 @@ class PipelineConfig:
 
 @dataclass
 class TranscriptGeometry:
-    """Pre-computed transcript/gene geometry for the EM solver.
+    """The per-transcript effective lengths the EM reads, computed once at the start of
+    ``quant_from_buffer`` from ``TranscriptIndex`` and the RNA
+    :class:`~rigel.frag_length_model.FragmentLengthModel`. Not user-configurable.
 
-    Computed once from ``TranscriptIndex`` + the RNA :class:`~rigel.frag_length_model.FragmentLengthModel`
-    at the start of ``quant_from_buffer``.  Not user-configurable — these are
-    derived from the reference and the fitted models.
-
-    That model is built by ``FragmentLengthModel.from_pmf`` from ``FLModels.rna_pmf``, which is
-    derived from the accumulator payload alone. The effective
-    lengths here and the calibration divisors read the SAME pmf, so a change to it reaches every
-    transcript in the EM, not only calibration.
+    That model is built by ``FragmentLengthModel.from_pmf`` from ``FLModels.rna_pmf``, which is derived
+    from the accumulator payload alone. The effective lengths here and the calibration divisors read the
+    SAME pmf, so a change to it reaches every transcript in the EM, not only calibration.
 
     Parameters
     ----------
     effective_lengths : np.ndarray
-        float64[n_transcripts] — effective transcript lengths.
-    effective_lengths_em : np.ndarray, optional
-        float64[n_transcripts] — EM-only effective transcript lengths. When
-        omitted, EM uses ``effective_lengths``.
-    exonic_lengths : np.ndarray
-        float64[n_transcripts] — spliced exonic lengths.
-    t_to_g : np.ndarray
-        int32[n_transcripts] — transcript-to-gene mapping.
-    transcript_spans : np.ndarray
-        float64[n_transcripts] — genomic transcript spans.
+        float64[n_transcripts] — effective transcript lengths (the output lengths, TPM's).
+    effective_lengths_em : np.ndarray
+        float64[n_transcripts] — the EM's effective lengths, capture-contracted; equal to
+        ``effective_lengths`` off capture.
     """
 
     effective_lengths: np.ndarray
-    exonic_lengths: np.ndarray
-    t_to_g: np.ndarray
-    transcript_spans: np.ndarray
-    effective_lengths_em: np.ndarray | None = None
+    effective_lengths_em: np.ndarray

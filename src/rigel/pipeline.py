@@ -494,8 +494,8 @@ def _setup_geometry_and_estimator(
     em_config: EMConfig,
     calibration: "CalibrationResult | None" = None,
     region_arrays: "RegionArrays | None" = None,
-) -> tuple["TranscriptGeometry", AbundanceEstimator]:
-    """Compute transcript geometry and create the AbundanceEstimator.
+) -> AbundanceEstimator:
+    """Compute the transcripts' effective lengths and create the AbundanceEstimator.
 
     When ``calibration`` + ``region_arrays`` are given, the EM effective lengths
     (``effective_lengths_em``) are capture-contracted by the per-region gDNA enrichment over each
@@ -518,13 +518,8 @@ def _setup_geometry_and_estimator(
         calibration, region_arrays, index, effective_lengths
     )
 
-    transcript_spans = (index.t_df["end"].values - index.t_df["start"].values).astype(np.float64)
-
     geometry = TranscriptGeometry(
         effective_lengths=effective_lengths,
-        exonic_lengths=exonic_lengths,
-        t_to_g=index.t_to_g_arr,
-        transcript_spans=transcript_spans,
         effective_lengths_em=effective_lengths_em,
     )
 
@@ -535,7 +530,7 @@ def _setup_geometry_and_estimator(
         is_nrna=index.t_df["is_nrna"].values,
         is_synthetic=index.t_df["is_synthetic"].values,
     )
-    return geometry, estimator
+    return estimator
 
 
 def _score_fragments(
@@ -813,7 +808,7 @@ def quant_from_buffer(
     rna_fl = FragmentLengthModel.from_pmf(fl_models.rna_pmf, fl_models.max_size)
     gdna_fl = FragmentLengthModel.from_pmf(fl_models.gdna_realized_pmf, fl_models.max_size)
 
-    geometry, estimator = _setup_geometry_and_estimator(
+    estimator = _setup_geometry_and_estimator(
         index, rna_fl, em_config, calibration=calibration, region_arrays=region_arrays
     )
 
