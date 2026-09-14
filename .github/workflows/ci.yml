@@ -1,10 +1,9 @@
 name: CI
 
+# On demand only (owner, 2026-09-14): the push and pull-request triggers are postponed to save runner cost.
+# Run from the Actions tab; restore `push`/`pull_request` on `main` to re-enable automatic runs.
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
