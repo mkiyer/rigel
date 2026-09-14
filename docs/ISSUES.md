@@ -150,26 +150,36 @@ with messages on. The owner plans to change the alpha = 0 rule in the post-calib
 the xfail is the executable record of exactly that pending change and closes there, with a test that asserts
 the new rule's promise. Not the pre-port thread's.
 
-### strand-marginal-volume-factor
+### capture-on-strand-pure-ambig-undercall
 `priority: next · kind: defect · 2026-09-13`
-The exact θ-marginal of ψ's strand term at an interior tilt is ∝ σ_τ(λ) = σ_p/((1 − f_g)|κ − ½|): the band of
-tilts consistent with the observed strand split widens as f_g → 1, so the marginal likelihood of f_g carries a
-factor 1/(1 − f_g) up to where the band fills the domain (1 − f_g ≈ 1/√n) — an Occam factor of order √n toward
-gDNA at a balanced both-strand slot ("all gDNA explains balanced strands with no parameter; all RNA needs the
-tilt tuned to ±σ_τ"). Bayes-correct under the f_g-independent arcsine measure on τ that ships, and contrary to
-`EQUATIONS.md` §5.2 ("strand reaches gDNA only through the triangle bound"). Its number: a balanced pure-RNA
-slot's OWN solve (no prior, no messages) reads f_g ≈ 1 − 1/√n — 0.960 at n = 500, 0.9955 at 50k, 0.9985 at
-500k (`quadrature_check.py`, the session scratchpad); a mono-exon toy with no junction reads f_g 0.99 on a
-50k-fragment balanced exon at zero gDNA whether or not the refits run. On a real chain the RNA level lanes and
-the landscape prior pin such slots (the ladder's `g00` both-strand slots read ≤ 26 fragments; the spliced
-shared-exon toy at 500k balanced reads 632 at `g00`, 19 at `g50`), so it is latent where junctions certify each
-strand and live where they do not. Visible only now because the windowed θ quadrature integrates the marginal
-exactly at every depth (`DESIGN.md` §6b.15); the fixed lattice realised it at shallow slots and replaced it
-with a comb at deep ones. Candidate: a tilt measure uniform in the observable p over the reachable band —
-|a(λ)| dτ — which cancels the factor exactly and leaves the strand term flat in f_g at an interior tilt, as
-§5.2 says; it changes the zero-control behaviour at strand-pure slots too, so DERIVE → PROTOTYPE → A/B on
-both panels, both zero controls and the shared-exon stress (`deep_stress.py --mono` is the no-junction arm).
-`tilt_census.py` (the session scratchpad) is the instrument: the AMBIG both-strand bands per stratum.
+On the ladder's stranded × capture-ON rows the AMBIG slots whose RNA is on ONE strand (or ≤ 5 % on the
+other) under-call gDNA by a net −26k fragments on `g50 ss.99 ON` (|Δ| 38.8k; −29k net on `g98`), the
+largest single AMBIG-class error in scope. They are strand-pure, so the strand term pins the tilt to the
+boundary and says "pure RNA" with a tail factor ∝ 1/√f_g (`EQUATIONS.md` §9e); what gDNA they hold must
+come from the messages and the prior, and under capture the level lanes' lower bounds are weak (the gDNA
+level is enriched at exons and the lanes carry it only as "at least this much"). The exact θ marginal of
+2026-09-13 deepened the under-call by 3 % (the +0.4 % on the stratum), because the fixed lattice's endpoint
+node had flattened the tail across λ. Explore, in order: (1) `tilt_census.py`'s strand-pure band per stratum
+with the depth split — is the under-call concentrated on deep slots (the tail factor) or on shallow ones (the
+messages)? (2) `calibration_walk.py` on `g50 ss.99 ON` — which rung introduces it; (3) the gDNA level lane
+under capture at an AMBIG exon: does the delivered lower bound reach the truth's density, and if not, is the
+loss in `hop_price` or in the level's own count? Implement only what (1)–(3) name; the candidate is a
+capture-aware level (the enrichment spectrum the landscape already learns, read by the lane). The tilt
+measure is not a route: both forms that flatten the strand marginal were refused on this very band
+(`strand-marginal-volume-factor`, CLOSED / REFUSED). Judged on the metric per stratum, both
+zero controls, and the band.
+
+### the-tilt-census-as-an-instrument
+`priority: later · kind: build · 2026-09-13`
+The owner's question "where does the strand tilt matter, and how does the tool do there" is answered by a
+scratchpad script (`tilt_census.py`, the session of 2026-09-13): per stratum, the AMBIG slots by the RNA on
+each strand (bands of the minor strand's share), their depth, the gDNA error, the TILT read-out's error
+(`|Δτ|·R/2`, RNA fragments on the wrong strand — measured by nothing else) and the predicted θ peak width.
+Before it becomes a `scripts/design/` instrument, census what it would replace (`worst_objects.py` and
+`policy_benchmark.py --by-class` rank by class, neither by strand split or tilt error; `object_composition.py`
+scores composition per stratum) — the tilt error column is new information, the rest overlaps. The
+shared-exon toy (`deep_stress.py`, two spliced genes on opposite strands sharing one exon, a tilt ladder at
+depth) is the stress that found the quadrature's failure and is the natural rung to add to the toy ladder.
 
 ### performance-memory-bounded-solve
 `priority: now · kind: build · 2026-08-17 (mandatory before 0.8.0), re-framed 2026-09-11, the decomposition landed 2026-09-11`
@@ -388,6 +398,32 @@ averaging; the fl-gap panels are not a drop-in (`ISSUES: flgap-panels-stale-nasc
 ---
 
 ## CLOSED / REFUSED — do not rebuild these; append-only
+
+### strand-marginal-volume-factor
+REFUSED 2026-09-13, both forms, with their numbers (the derivation and the arms: the sandbox's θ note §11). The
+finding stands as a property, not a defect: the exact θ-marginal of the strand term at an interior tilt is
+∝ σ_τ(λ) ∝ 1/(1 − f_g), an Occam factor of order √n toward gDNA at a balanced both-strand slot — under a
+proper prior on the tilt it is intrinsic (any normalised prior gives it; "uniform in p" is uniform in τ and
+keeps it), and it is what the strand channel genuinely says: balanced strands are explained by gDNA with no
+parameter. Two ways to remove it were priced on the ladder (Σ|Δ gDNA| both axes, g00 excluded; reference
+249,703 / 471,202 / 308,529 / 3,622,383 on stranded OFF / stranded ON / unstranded OFF / deferred):
+* the tilt's Jeffreys volume, `+ log(1 − f_g)` on the AMBIG cube (the AMBIG reference Beta(½, 3/2)): 267,373 /
+  761,711 / 331,064 / 5,263,361 — +7 / +62 / +7 / +45 %; the g00 rows 2–4 % better; the test chromosome +1–3 %
+  on every stratum. Where: the gDNA-rich AMBIG slots under capture (g98 ss.99 ON strand-pure band 34,056 →
+  120,845, g50 38,823 → 81,151) — where `a(λ)` is small the strand term does not constrain the tilt and the
+  term is a prior shift toward RNA on slots that are mostly gDNA;
+* the PROFILE form, the strand term entering the λ posterior through `max_τ L` (the cap, flat inside it), the
+  tilt integrated only for the rows and the read-out: 253,117 / 687,783 / 308,557 / 3,653,341 — +1.4 / +46 /
+  0 / +0.9 %; g00 marginally better; the test chromosome +0.2 / +0.8 / 0 / 0 %, the same g98 capture-ON bands.
+On the mono shared-exon toy (no junction, nothing guards the slot) both forms do what they claim — a balanced
+500k exon's own solve 0.997 → 0.49 — and on the spliced toy neither moves a number: the factor bites only
+where nothing else informs the slot, and that slot's honest answer under a flat strand marginal is the
+reference median under the cap, not zero. What survives: the width factor at gDNA-rich AMBIG slots is
+evidence the panels reward, so the measure stays the arcsine and the marginal stays exact. The saturating
+variant (normalising by the truncated volume) was refused on paper: it inverts the strand-pure tail. The
+exposure — a deep, balanced, junction-free AMBIG exon in a gDNA-free library reads mostly gDNA — is recorded
+here with the mono toy as its instrument (`deep_stress.py --mono`), and is the RNA level lanes' business (a
+junction on either strand pins it), not ψ's.
 
 ### theta-quadrature-at-zero-gdna
 CLOSED by landing 2026-09-13 (`DESIGN.md` §6b.15; the derivation `EQUATIONS.md` §9e): the θ nodes follow the

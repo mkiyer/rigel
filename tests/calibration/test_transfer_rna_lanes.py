@@ -655,3 +655,115 @@ def test_an_empty_exon_piece_beside_a_lit_junction_is_a_flux_source():
     )
     assert quiet.lanes["pos"].own_level[2] is None
     assert not quiet.lanes["pos"].emit(2, 3, Levels.empty(5, lane.u.shape[0]))
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
+# THE RNA LANES EXIST WHENEVER THEIR OWN COORDINATE EXISTS — not when something else does
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
+#
+# Found by the encompassing-transcript audit (2026-09-13): a single-exon TB− over a two-exon TA+ delivered
+# no RNA level anywhere, because three unrelated things each silenced the lanes — the intron factory had
+# no rows (no coarse intron in the chain), the gDNA lane had no coordinate (a gDNA-free library), and the
+# + lane did not exist (TA+'s exons are both AMBIG, so no single-strand + exon anywhere). A whole
+# chromosome never shows any of the three, which is why they shipped.
+
+
+def _neg_only_ctx():
+    """The empty-piece chain mirrored onto the − strand at slots 0..4 with a both-stranded exon
+    appended: TB− has a single-strand exon (slot 4) whose own claim is a − level, and the + strand has
+    NO single-strand exon anywhere, so the library's + coordinate is zero."""
+
+    from rigel.calibration.messages import BlockContext
+    from rigel.calibration.splice_graph import FLAG_ACCEPTOR_POS
+
+    n = 7
+    fp = np.array([True, True, True, True, True, True, True])
+    fn = np.array([True, True, True, True, True, True, True])
+    flags = np.zeros(n, np.uint16)
+    flags[1] = FLAG_ACCEPTOR_POS
+    n_slot = np.array([300.0, 25.0, 0.0, 0.0, 400.0, 30.0, 500.0])
+    cnt = np.stack([n_slot * 0.1, n_slot * 0.9], axis=1)  # the RNA reads on the − column
+    a_g = np.array([3000.0, 200.0, 40.0, 200.0, 800.0, 200.0, 900.0])
+    a_r = np.array([3000.0, 200.0, 0.0, 200.0, 800.0, 200.0, 900.0])
+    return BlockContext(
+        eff_gdna=a_g,
+        eff_rna=a_r,
+        sj_count=np.zeros((n, 2)),
+        sj_count_lo=np.zeros((n, 2)),
+        sj_count_hi=np.zeros((n, 2)),
+        route_rate_lo=np.zeros((n, 2)),
+        route_rate_hi=np.zeros((n, 2)),
+        unspliced_count=cnt,
+        spliced_count=np.zeros((n, 2)),
+        left=np.array([-1, 0, 1, 2, 3, 4, 5]),
+        right=np.array([1, 2, 3, 4, 5, 6, -1]),
+        is_boundary=np.array([False, True, False, True, False, True, False]),
+        is_exon_region=np.array([False, False, True, False, True, False, True]),
+        free_pos=np.array([False, False, False, False, False, True, True]),
+        free_neg=fn,
+        exon_pos=np.array([False, False, False, False, False, False, True]),
+        exon_neg=np.array([False, False, True, False, True, False, True]),
+        boundary_flags=flags,
+        has_own_composition=np.array([False, False, False, False, True, False, False]),
+        belief_fg=np.full(n, 0.5),
+        n_grid=41,
+        logodds_window=10.0,
+        factory_rows=np.zeros((n, 41)),
+        strand_live=True,
+    )
+
+
+def test_the_lanes_are_built_when_the_intron_factory_has_no_rows():
+    """A chain with no coarse intron has no factory rows; the message layer is still the message
+    layer. PERTURBATION: the same context with rows builds the same lanes."""
+    import dataclasses
+
+    from rigel.calibration.messages.transfer import TransferPolicy
+
+    pol = TransferPolicy(strand=(0.99, 0.02, 0.02))
+    with_rows = _prepared(pol, _neg_only_ctx())
+    no_rows = _prepared(pol, dataclasses.replace(_neg_only_ctx(), factory_rows=None))
+    assert "neg" in with_rows.lanes, "the gate's premise: the − lane exists with rows"
+    assert set(no_rows.lanes) == set(with_rows.lanes), (
+        f"the lanes vanished with the factory rows: {sorted(no_rows.lanes)} against {sorted(with_rows.lanes)}"
+    )
+
+
+def test_the_rna_lanes_are_built_without_a_gdna_lane():
+    """A gDNA-free library has no gDNA level coordinate and hence no gDNA lane; its RNA lanes have
+    their own coordinates and must exist. PERTURBATION: with a positive gDNA density the gDNA lane
+    joins them."""
+    from rigel.calibration.messages.transfer import TransferPolicy, _Library
+
+    pol = TransferPolicy(strand=(0.99, 0.02, 0.02))
+    ctx = _neg_only_ctx()
+    lib = pol.library(ctx)
+    assert lib.rho_rna["neg"] > 0.0, "the gate's premise: the − coordinate exists"
+    gdna_free = _Library(0.0, lib.rho_rna, lib.split_live)
+    prepared = pol.prepare(ctx, gdna_free)
+    assert "gdna" not in prepared.lanes
+    assert "neg" in prepared.lanes, "the − lane died with the gDNA lane"
+    assert "gdna" in pol.prepare(ctx, lib).lanes
+
+
+def test_a_strands_level_is_delivered_to_the_cube_when_the_other_strand_has_no_coordinate():
+    """TB−'s level must reach the both-stranded exon (slot 6) although the + strand has no
+    single-strand exon anywhere, hence no coordinate and no source: the delivery reads whichever RNA
+    lane holds something."""
+    from rigel.calibration.messages import Received
+    from rigel.calibration.messages.transfer import TransferPolicy
+
+    pol = TransferPolicy(strand=(0.99, 0.02, 0.02))
+    ctx = _neg_only_ctx()
+    prepared = _prepared(pol, ctx)
+    assert prepared.lanes["pos"].rho_ref == 0.0 and prepared.lanes["neg"].rho_ref > 0.0, (
+        "the gate's premise"
+    )
+    K = int(ctx.n_grid)
+    from_left, from_right = Received.empty(7, K), Received.empty(7, K)
+    from_left.has_neighbour[6] = True
+    u = prepared.lanes["neg"].u
+    from_left.level_rna_neg.write(6, -0.5 * np.maximum(0.0, (0.0 - u) / 0.3) ** 2, 400.0, 800.0)
+    rows = prepared._cube_rows(from_left, from_right)
+    assert 6 in rows, "the − level held at the both-stranded exon was not delivered"
+    assert rows[6].profile_neg is not None and rows[6].profile_pos is None

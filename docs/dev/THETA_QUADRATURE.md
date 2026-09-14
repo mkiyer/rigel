@@ -223,3 +223,203 @@ The spliced toy (junctions on both strands) pins the exon: g00 500k balanced rea
 candidate is a tilt measure uniform in the observable p over the reachable band (|a(λ)| dτ), which cancels
 the factor exactly and leaves the strand term flat in f_g at an interior tilt, as EQUATIONS §5.2 already
 says it should be. Its own thread: derive → A/B; it changes the zero-control behaviour at strand-pure slots.
+
+## 11. The tilt measure — the derivation (`ISSUES: strand-marginal-volume-factor`, 2026-09-13)
+
+**The factor is intrinsic to marginalising under any proper prior on the tilt.** With `p = ½ + a(λ)τ` the
+strand term at fixed λ is a Gaussian in τ of width `σ_τ = σ_p/|a|`. For ANY normalised prior density `π(τ)`
+that does not depend on λ, the marginal is `∫ L π dτ ≈ L_max · π(τ̂) · √(2π) σ_p / |a(λ)|` wherever the peak is
+interior — the `1/|a| ∝ 1/(1 − f_g)` volume factor. "Uniform in p over the reachable band", normalised per λ,
+is `dp/(2|a|) = dτ/2`: uniform in τ, the factor intact. Normalisation cannot remove it; only a measure whose
+mass scales with `|a|` can.
+
+**Why: the strand channel identifies one number.** `u₊ ~ Binomial(n, p)` observes `p` alone; `(f_g, τ)` are not
+jointly identified by it (`I_ff·I_ττ − I_fτ² = 0`: the information matrix has rank one), so the marginal
+likelihood of `f_g` at an interior tilt is entirely the prior's doing. Under a proper prior it is the Occam
+factor — "gDNA explains balanced strands with no parameter" — of order `√n`. The tool's design says the
+opposite (`EQUATIONS.md` §5.2: strand measures the tilt and reaches gDNA only through the cap), i.e. the
+marginal should be FLAT in `f_g` at an interior tilt. The measure that does that is the unnormalised Jeffreys
+conditional of the observed channel, `√I_ττ = √n |a(λ)| / √(p(1−p))`: `∫ L √I_ττ dτ ≈ L_max √(2π) σ_p /
+√(p̂(1−p̂))`, constant in λ. Its λ-dependence is `|a(λ)| ∝ (1 − f_g)`, so on the AMBIG cube the whole change is
+ONE added term, `+ log(1 − f_g)`, and the `(p(1−p))^{−½}` shape is a λ-constant at the peak.
+
+**Equivalently: the AMBIG reference is Beta(½, 3/2).** `∫ π(f_g, τ) dτ ∝ (1 − f_g) · Beta(½,½)(f_g)`: the
+tilt's one degree of freedom, counted in the reference measure as Jeffreys counts every parameter's volume.
+A single-strand slot has no tilt to count and keeps Beta(½,½); the two classes' references differ by the
+parameter one of them has. This is the honest name of the change and how it should be written in ψ: the RNA
+arm's exponent is `½` on a single-strand slot and `3/2` on an AMBIG one.
+
+**The three regimes under the new measure.**
+* Interior (`|τ̂| < 1`): `M' = |a|·M` is flat in λ up to the cap and the delivered rows — the design's intent.
+* Beyond the boundary (strand-pure, `τ̂ = 1/(1−f_g)`): `M ∝ e^{L(1)} σ_τ /√(τ̂−1)` becomes `M' ∝ e^{L(1)} σ_p
+  √(|a|/(d−a)) ∝ √((1−f_g)/f_g)`: the `1/√f_g` tail toward zero gDNA SURVIVES (it is the data's — a pure
+  strand split is incompatible with `f_g > 0` beyond `σ_p`), the change is the factor `√(1−f_g)`, negligible
+  at small `f_g`. The zero controls should barely move; `ISSUES: capture-on-strand-pure-ambig-undercall` is
+  not this thread's.
+* No strand information (`κ = ½`, or `σ_τ ≥ 1`): the strand term is flat in τ, the untruncated volume
+  `σ_τ√(2π)` exceeds the domain and the marginal saturates at a constant, so `+ log(1 − f_g)` is a pure
+  prior shift on every AMBIG slot — Beta(½,3/2) against Beta(½,½), median 0.17 against 0.50 at zero
+  evidence. On unstranded data this is the whole effect, and the panel must price it (the unstranded ×
+  capture-OFF stratum is in scope; `g00 ss.50` is a zero control). Normalising by the TRUNCATED volume
+  instead (`M/V`, `V = ∫_{−1}^{1} e^{L} dτ`) would remove the saturation problem but inverts the boundary
+  tail (`M/V ∝ √f_g/σ_τ`, because the arcsine weight makes `M`'s tail heavier than `V`'s) and is refused on
+  paper: it would break the zero controls.
+
+**The prototype** (`tilt_measure.py`, the session scratchpad): `_psi` patched to add `log(1 − f_g)` on AMBIG
+cubes; arms `reference` / `jeffreys`; judged on the metric per stratum with both zero controls on both panels,
+the census bands, and the shared-exon stress in its mono (the bare factor) and spliced (with the guards) forms.
+
+**The Jeffreys volume is REFUTED on the ladder (2026-09-13).** `+ log(1 − f_g)` on the AMBIG cube (the arm
+`jeffreys`): Σ|Δ gDNA| both axes, g00 excluded — stranded OFF 249,703 → 267,373 (+7 %), stranded ON 471,202 →
+761,711 (+62 %), unstranded OFF 308,529 → 331,064 (+7 %), deferred 3,622,383 → 5,263,361 (+45 %); the four g00
+rows 2–4 % better (499 → 478, 406 → 397). The test chromosome +1–3 % on every stratum. The census says where:
+the gDNA-rich AMBIG slots under capture — g98 ss.99 ON strand-pure band 34,056 → 120,845, g50 ss.99 ON
+38,823 → 81,151, and the both-strand bands 2–4× — exactly the regime the derivation flagged: where `a(λ)` is
+small the strand term does not constrain the tilt, the untruncated volume exceeds the domain, and the term is
+a prior shift toward RNA on slots that are mostly gDNA. The stress confirms the term's own claim — on the
+mono toy the balanced exon's √n push falls 0.99 → 0.48 at 50k and 500k, on the spliced toy nothing moves —
+so it removes the Occam factor only where nothing guards the slot, and costs a stratum where the guards
+are the answer. No saturating variant survives on paper (§11: the truncated volume inverts the boundary
+tail). Refused. The remaining candidate of the same derivation is the PROFILE form: the strand term enters
+the λ posterior through `max_τ L(λ, τ)` (the cap, flat inside it), and the tilt is integrated only for the
+delivered rows and the tilt read-out — as a cube, `ψ' = ψ + [L_max(λ) − lse_θ(L + log w)]`, a per-(slot, λ)
+constant that leaves the θ-shape (hence `w_pos`) untouched. It has no volume factor, no saturation regime
+and no measure; at a strand-pure slot it drops the tail's `1/√f_g` width factor, which is the family of
+`ISSUES: capture-on-strand-pure-ambig-undercall`. Arm `profile`, judged the same way.
+
+**The profile form is REFUTED too (2026-09-13)**: ladder 253,117 / 687,783 / 308,557 / 3,653,341 (+1.4 / +46 / 0 /
++0.9 %), g00 marginally better, the test chromosome +0.2 / +0.8 / 0 / 0 %, the same g98 capture-ON AMBIG bands
+(19 → 131, 10 → 88); mono toy 0.997 → 0.49 at 500k balanced, spliced unchanged. The thread is closed: the width
+factor is evidence the panels reward; `ISSUES: strand-marginal-volume-factor` carries the record.
+
+## 12. The strand-pure AMBIG under-call — the dissection (`ISSUES: capture-on-strand-pure-ambig-undercall`, 2026-09-13)
+
+**Where it is.** The per-slot census on the ladder's stranded rows (`dissect/census_slots.json`): the AMBIG slots
+whose RNA is on one strand are MOSTLY gDNA — mean true `f_g` 0.53 / 0.85 / 0.89 / 0.85 / 0.36 by depth bin on
+`g50 ss.99 ON`, 0.97 on `g98` — and the under-call sits on the deep ones: slots with ≥ 300 fragments carry
+−23k of the −28k net on `g50 ss.99 ON` and −27k of −30k on `g98`. Boundaries carry three quarters of it.
+By stage: the strand-only solve reads −97k on `g50 ss.99 ON`, the local solve (factory rows) −44k, the shipped
+answer (messages, refits) −28k; off capture (`g50 ss.99 OFF`) the same structure starts at −23k strand-only
+and the prior repairs it to −1.2k. So the bias originates in the own solve and the prior repairs it where
+the landscape is sharp (no capture) and cannot where it is broad (capture).
+
+**The mechanism.** At a slot whose RNA is strand-pure the truth sits AT the strand cap: with `τ = 1` the
+split `p̂ = ½ + (1 − f_g)(κ − ½)` identifies `f_g`, exactly as at a single-strand slot. The AMBIG solve does
+not know the tilt is pure: every `f_g` below the cap fits `p̂` with a slightly impure tilt, the marginal is
+spread over `[0, cap]` (∝ the width factor and the arcsine at `τ̂(λ)`), and its median lands below the cap.
+Prior-free, one slot: `f_true` 0.50 reads 0.31–0.37, 0.85 reads 0.69–0.80, 0.97 reads 0.85–0.95 (n = 30 …
+30k). This is a structural bias of marginalising a tilt whose truth is at its vertex.
+
+**The candidate the dissection names: a tilt atom.** The AMBIG tilt's hypothesis space is {pure +, pure −,
+mixed} at equal reference weight; the pure hypotheses are single-strand solves inside the cube (τ = ±1, no
+tilt parameter), the mixed one today's continuous θ integral with its measure normalised to the domain
+(`dθ/π`). Where the data are pure the pure hypothesis explains them with no parameter and wins the Occam
+contest; the smoke test reads 0.46–0.50 / 0.84–0.88 / 0.91–0.97 at the three truths above. Its cost: at an
+INTERIOR tilt the pure hypothesis at `f_g = cap` ALSO explains `p̂` with no parameter, so the atom pulls a
+both-strand slot toward the cap (`f_true` 0.30 at τ 0.5: 0.46 → 0.64, `w₊` 0.79 → 0.89). The ladder prices
+the net (2,347 strand-pure against ~1,500 both-strand AMBIG slots on `g50 ss.99 ON`); the arm is
+`tilt_atom.py`, judged on the metric, both zero controls, the census bands and the stress.
+
+**The atom's A/B (2026-09-13).** Ladder, Σ|Δ gDNA| both axes, g00 excluded, reference → atom (equal weights) →
+witnessed atom (a pure hypothesis admissible only without a delivered RNA level on the other strand):
+stranded OFF 249,703 → 249,407 → 248,827; stranded ON 471,202 → 424,712 → 427,069 (−9.9 % / −9.4 %);
+unstranded OFF 308,529 → 308,763 → 307,992; deferred 3,622,383 → 3,661,197 → 3,610,370. The zero controls:
+`g00 ss.99 OFF` 405.5 → 445.1 → 433.3 (+28 fragments under the witnessed form, at both-strand slots pulled
+toward the cap: the (0.2, 0.5] band 24 → 55, the (0.05, 0.2] band 15 → 22), `g00 ss.99 ON` 194.0 → 198.3 →
+197.4, both unstranded g00 rows within a fragment. The test chromosome: −0.1 / +0.2 / −0.06 / +0.09 % under
+the witnessed form. The census on `g50 ss.99 ON`: the strand-pure band 38,823 → 23,824 → 27,683 and its tilt
+error 17,123 → 7,817 → 10,582; the near-pure band 14,526 → 7,884 → 9,259; the both-strand bands (0.05, 0.2]
+6,005 → 5,002 → 4,835 and (0.2, 0.5] 11,301 → 11,964 → 12,246 with the tilt error 2,500 → 3,663 → 3,020 —
+the witness removes about a third of the atom's cost at both-strand slots and keeps most of its win. The
+spliced stress is unchanged under the witnessed form on every row (a level on each strand rules both pure
+hypotheses out); the mono stress shows the plain atom's failure bare (no witness: a 20 %-minor exon 0.28 →
+0.40, its tilt read as pure). The residual cost lives at both-strand slots that hold a delivered level on
+only one strand.
+
+## 13. What the atom points to — the study (2026-09-13)
+
+**Was the tilt ever a message?** No. The ruling in `messages/__init__.py` (and `DESIGN.md` §6b.13) says the tilt
+has NO lane — the two RNA levels constrain it through the shares — and the only strand-shaped row in the layer
+(`strand_row_logodds`) is a composition row over λ from a single-strand exon's own strand term. The deleted
+relay carried composition and flux rows. Nothing about the tilt has ever travelled, and the study says it
+should not: a tilt is a RATIO of two levels at one slot, slot-specific by structure; what is conserved along
+a locus is each strand's LEVEL, which the RNA lanes already carry as a lower bound.
+
+**What a "strand-pure AMBIG slot" is, structurally** (`study/structure.json`, `g50 ss.99 ON`, regions): the
+RNA's strand is an exon and the other strand is that gene's INTRON at this slot — 465 slots, 174k RNA — or
+both genes have an exon here and one is silent at the locus — 214 slots, 68k RNA; and 1,484 strand-pure
+BOUNDARIES carry three quarters of the under-call (−21k of −28k). For 78–81 % of pure slots the absent
+strand's gene has RNA elsewhere in the same locus: "pure" is not "the other gene is silent", it is "the
+other strand's RNA here could only be NASCENT" — the nascent scope ruling's own case (`DESIGN.md` §0b:
+absent unless abundant evidence), which the AMBIG cube does not know: it gives the intron strand's RNA the
+same reference measure as the exon strand's, and the tilt marginal then pays the Occam price of a
+continuum whose truth is at its boundary.
+
+**Presence against witness** (`study/crosstab.py`): the lanes delivered a level on neither strand at ~40 % of
+pure slots, on one at ~45 %, on both at ~15 % (a delivered level is a lower bound, sometimes near zero, so
+"witnessed" is coarse). The atom's win sits on pure slots of every witness state (`g50 ss.99 ON`: none
+−14.5k → −5.5k, one −12.9k → −4.2k); its cost on mixed-truth slots with one witness (+2.0k → +7.2k plain,
++4.4k witnessed) — and for 98 % of those (546/558) the unwitnessed strand's gene HAS RNA elsewhere in the
+locus, i.e. the presence witness exists at the locus and the lane did not deliver it to this slot. The
+delivered-level witness recovers a third of the cost; the remainder is a lane reach question, not a tilt
+question.
+
+**So the atom is not a special case.** It is Axiom 0's opportunity geometry applied to the tilt: the
+population set at a slot is `{gDNA} ∪ {RNA+ if free_pos} ∪ {RNA− if free_neg}`, and the AMBIG cube treats both
+RNA members as equally weighted continua; but PRESENCE per strand is structural — exon of s (the gene's
+RNA, if expressed) against intron of s (nascent only, sparse by ruling) — and locus-level (the gene is
+expressed), which the RNA lanes carry as a lower bound. The tilt's hypothesis space {pure +, pure −, mixed}
+makes presence discrete, and the witness that selects among them should be structural first (the per-strand
+exon bits: a strand whose RNA here could only be nascent cannot be the pure carrier) and delivered second
+(a level on a strand rules the opposite pure hypothesis out). The arm `atom_s` prices that. What it points to
+beyond itself: an AMBIG slot that is one strand's exon and the other's intron is a single-strand solve with a
+nascent allowance, and most AMBIG slots are that; the true both-strand solve is the exon∩exon overlap of two
+expressed genes (58–108 slots per ladder row, 2–3 % of AMBIG slots). The cube is the right model for those
+and an over-general one for the rest.
+
+**The structural witness adds nothing measurable (2026-09-13).** Arm `atom_s` (the per-strand exon bits on top
+of the delivered-level witness): ladder 248,789 / 426,720 / 308,050 / 3,615,015 against the witnessed atom's
+248,827 / 427,069 / 307,992 / 3,610,370; `g00 ss.99 OFF` 424.5 against 433.3. By presence truth on
+`g50 ss.99 ON` the two are within 2 %: pure −12,656 / −13,005 net, mixed +7,923 / +7,489. The slots that pay
+are exon∩exon overlaps and boundaries, where the exon bits exclude nothing; the residual cost is the mixed-
+truth slots whose second strand's gene is expressed in the locus (98 %) but reached this slot with no level —
+a lane-reach question, to be filed as its own entry. The delivered-level witness alone is the landing form.
+
+## 14. The encompassing-transcript audit (owner's case, 2026-09-13)
+
+**The case.** A single-exon TB− (10,000–30,000) encompassing a two-exon TA+ (11,000–12,000, 19,000–20,000);
+`audit_encompass.py` in the session scratchpad. The lanes' face rule says TB−'s level crosses every boundary
+here (each carries only TA+'s bits, every region admits −) from its two single-strand exons, and the
+patched tree confirms it on the g50 donor: the − level is held on both sides of every slot from 11,000 to
+20,000 and delivered into every AMBIG cube; its wall reads 1.957/bp against true − densities of
+1.92–2.22/bp; the exon∩exon slots read `f_g` 0.006 / 0.011 against 0.005 / 0.006 (0.29 / 0.44 with no level)
+and the tilt 0.51 / 0.52 against 0.53 / 0.52. The witnessed atom equals the reference there.
+
+**Four couplings that silence the RNA lanes, none of which a whole chromosome shows.** On the shipped tree
+the case delivered NO level anywhere:
+* A — `TransferPolicy.prepare` returned an empty layer (no faces, no lanes) when the intron factory had no
+  rows, i.e. no coarse intron anywhere in the chain. Fixed: a factory with nothing to say is all-zero rows.
+  Gate `test_the_lanes_are_built_when_the_intron_factory_has_no_rows`. This is also why every intron-less
+  TOY (`TA_single_exon`, `one_exon`, the mono shared-exon stress) ran with no message layer at all — the mono
+  toy's "unguarded" reading was the layer being off, not the lanes not reaching.
+* B — the RNA lanes were built only if the gDNA lane existed, so a library with zero gDNA density had none.
+  Fixed: each lane exists iff its own coordinate does (`rna_lanes` takes the grid, not the gDNA lane). Gate
+  `test_the_rna_lanes_are_built_without_a_gdna_lane`.
+* C — (not real) the + lane exists with a zero coordinate rather than being absent; the cube delivery was
+  never blocked by it. The gate written for it (`…when_the_other_strand_has_no_coordinate`) passes and stays.
+* D — OPEN: a strand's flux level — the junction's certified estimate of its exon's RNA — is built only if
+  the strand's library coordinate is positive, and that coordinate is the density over the strand's
+  SINGLE-STRAND exons. TA+ has none, so its certified flux is silently unused and no + level reaches its
+  exons (the audit's `wit` column reads `·−`). The level is absolute, so any positive reference density is a
+  coordinate; the candidate is one RNA coordinate for both strands (the pooled single-strand exon density)
+  or the flux's own. The owner's call: it changes which sources exist on a real chromosome only where a
+  strand has no single-strand exon, i.e. never on the ladder.
+* The g00 donor delivers nothing for a fifth, ruled reason: the derived deadband (`strand_discriminability`,
+  `1/N_gdna`) declares the strand channel uninformative on a library with exactly zero gDNA, so no
+  single-strand exon emits a strand-derived level. The ladder's g00 rows carry a small fitted gDNA count and
+  the channel is live there; a truly gDNA-free real library would not be. A ruling, not this thread's.
+
+**The rung-0 identity gate** (`test_transfer_policy.test_an_evidence_free_transfer_is_byte_identical_to_silence`)
+asserted coupling A as a floor — no factory rows ⇒ the transfer policy IS silence. With A fixed it fails by
+design. The floor the tool has is `SilentPolicy`; retiring the gate is the owner's decision and the fix is
+left uncommitted with it failing until ruled.

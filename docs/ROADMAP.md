@@ -42,8 +42,9 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   metric (`calibration_vs_oracle.py`; `landscape_training_census.py` re-derives the population) and the
   in-scope per-object composition error did not move.
 - **ψ**: the composition closes structurally on every published object (`test_vertex_reference.py`);
-  the reference location is deleted (`DESIGN.md` §6b.1); the λ-bracket widening is built and ships off
-  — `ISSUES: psi-lambda-bracket-unshipped`.
+  the reference location is deleted (`DESIGN.md` §6b.1); the tilt is integrated on nodes that follow each
+  slot's strand term, a derived count and no lattice (`DESIGN.md` §6b.15, `EQUATIONS.md` §9e), exact at any
+  depth; the λ-bracket widening is built and ships off — `ISSUES: psi-lambda-bracket-unshipped`.
 - **The prior assembler**: with perfect masses its own error is negligible — `prior_vs_oracle.py`,
   `mass_prior_ab.py`.
 - **The largest number on the metric page is the ruler, not the composition**: at `g00` the
@@ -82,7 +83,7 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
    active thread). The locus decomposition is landed and gated (`DESIGN.md` §6b.15); the agreed order
    from here, each step judged by `profiling/profiler.py --compare` on back-to-back pairs and proven a
    no-op with `profiling/sweep_replay.py` (`--block-slots` for the chunk-exactness of the whole sweep) and
-   `design/rename_identity.py --bam` against the `memory_identity_*` references:
+   `design/rename_identity.py --bam` against the `port_identity_*` references:
    ⓪ re-measure the deep library end to end, `main` against the landed tree — the baseline the rest is
    judged against; ① cache the refit-invariant half of `prepare` across the refit sweeps (the face
    rules and lane faces read counts and geometry, only the own claims read the belief), per block, per
@@ -95,7 +96,15 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
    port cannot be bit-identical; ④ the intron-factory rows built per block, the last genome-wide arrays;
    ⑤ the scan and the second pass, the stages that scale with depth and the floor once the sweeps are
    compiled. The accuracy frame is unchanged, and no step may move a number.
-2. **The ruler at zero gDNA — `ISSUES: g00-shrinkage-upstream-repair`.** A gDNA-free library is the
+2. **Calibration accuracy where the strand tilt matters** — the AMBIG slots with RNA on both strands, the
+   population the θ quadrature was rebuilt for (`DESIGN.md` §6b.15; the census in
+   `ISSUES: the-tilt-census-as-an-instrument`). Two entries, in order: `ISSUES:
+   capture-on-strand-pure-ambig-undercall` (the largest AMBIG-class error in scope, dissect before touching
+   anything) and the census as an instrument. The θ measure is settled — both ways of flattening the strand
+   marginal were refused on the ladder (`ISSUES: strand-marginal-volume-factor`, CLOSED / REFUSED: the
+   width factor is evidence the panels reward). Each judged on the metric per stratum, both zero controls and the shared-exon
+   stress at depth, never on the ladder alone, which is shallow where the tilt matters.
+3. **The ruler at zero gDNA — `ISSUES: g00-shrinkage-upstream-repair`.** A gDNA-free library is the
    modal real case, the composition there is now right, and the effective length the EM divides by is
    still a fraction of the truth because the reference-density detector accepts any few slots with
    positive mass. Derive what "this library has an enriched gDNA mode" is evidence of (a boolean),
@@ -103,17 +112,17 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
    `calibration_vs_oracle.py`'s ruler table per stratum with both zero controls, then
    `quant_accuracy.py`. Settle first whether the instrument's "exactly 1.000 off capture" contract is
    stale, since both P and O read below it there.
-3. **The rest of the pre-EM setup** — `priors.py` / `result.py` / `derive.py` against
+4. **The rest of the pre-EM setup** — `priors.py` / `result.py` / `derive.py` against
    `prior_vs_oracle.py` (re-run it first) and the ruler column: `ISSUES: prior-fidelity-vs-deliverable`,
    `ISSUES: eb-shrinkage-magic-ess`, `ISSUES: capture-blind-gdna-divisor`,
    `ISSUES: per-transcript-prior-lane`, `ISSUES: u-ruler-arm`.
-4. **The intron's own solve on unstranded capture-OFF** — the intron class carries the largest share of
+5. **The intron's own solve on unstranded capture-OFF** — the intron class carries the largest share of
    the in-scope error there (`policy_benchmark.py --by-class`): the factory profile's resolution against
    the intergenic background (`density_deconv`); dissect with `worst_objects.py`.
-5. **The vertex atom** — priced by `vertex_ceiling.py` on silent genes and nascent-free introns; a
+6. **The vertex atom** — priced by `vertex_ceiling.py` on silent genes and nascent-free introns; a
    mechanism for it is the prior's reference (`ISSUES: reference-prior-refuted-at-concept-level`
    constrains the form) or the intron's own solve, not a message.
-6. **The message policy, only where a row is above the bar**: one prototype arm at a time through
+7. **The message policy, only where a row is above the bar**: one prototype arm at a time through
    `policy_prototype.py --module`, halves apart, pass zero beside the pipeline:
    `ISSUES: flux-price-witness-units`, `ISSUES: two-sided-exon-row`, `ISSUES: flux-floor-dispersion`,
    `ISSUES: ambig-node-as-a-gdna-source`, `ISSUES: message-layer-open-cases`.

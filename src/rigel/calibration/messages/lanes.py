@@ -81,7 +81,7 @@ def gdna_lane(c: _Chain, own: list, faces: Faces, rho_ref: float) -> "LevelLane 
     return LevelLane("gdna", u, c.lam, rho_ref, c.n_u, c.a_g, empty, own_level, face)
 
 
-def rna_lanes(c: _Chain, own: list, gdna: "LevelLane", library: _Library) -> dict:
+def rna_lanes(c: _Chain, own: list, library: _Library) -> dict:
     """THE RNA LEVEL LANES, one per strand (the both-stranded locus).
     FACES from the flag bits: strand ``s``'s level crosses a face iff the boundary carries none of
     ``s``'s four bits and both nodes admit ``s``; across ``s``'s OWN junction it enters ``s``'s
@@ -138,7 +138,7 @@ def rna_lanes(c: _Chain, own: list, gdna: "LevelLane", library: _Library) -> dic
                 parts = []
                 if not empty[x] and single[x] and own[x] is not None and np.ptp(own[x]) > EPS:
                     parts.append(
-                        rna_level_of_profile(own[x], gdna.lam, gdna.u, n_u[x], a_r[x], rho_ref)
+                        rna_level_of_profile(own[x], c.lam, c.lam, n_u[x], a_r[x], rho_ref)
                     )
                 c_sum = a_sum = 0.0
                 if c.is_exon[x]:
@@ -154,7 +154,7 @@ def rna_lanes(c: _Chain, own: list, gdna: "LevelLane", library: _Library) -> dic
                         if not (c_j > 0.0 and r_j > 0.0):
                             continue
                         v = hop_price(c_j, c_j / r_j, cnt[x, col_read], a_r[x])
-                        fl = flux_level(gdna.u, c_j, r_j, rho_ref, v)
+                        fl = flux_level(c.lam, c_j, r_j, rho_ref, v)
                         parts.append(fl)
                         flux_of[(int(x), side_of(int(b), int(x)))] = fl
                         c_sum += c_j
@@ -165,8 +165,8 @@ def rna_lanes(c: _Chain, own: list, gdna: "LevelLane", library: _Library) -> dic
                         flux_witness[x] = (c_sum, a_sum)
         lanes[name] = LevelLane(
             name,
-            gdna.u,
-            gdna.lam,
+            c.lam,
+            c.lam,
             rho_ref,
             cnt[:, col_read],
             a_r,

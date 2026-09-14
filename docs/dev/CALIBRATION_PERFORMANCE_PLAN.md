@@ -63,9 +63,9 @@ Threads were measured and refuted for the Python passes (0.83–0.94× at 8 thre
 ## 2. The rules of the game (unchanged, and load-bearing)
 
 * **Every step is proven before it is believed.** A pure restructure is bit-identical: `sweep_replay.py
-  replay --dir ~/Downloads/rigel_runs/perf/sweeps_MO_3021_step4 --call 0..3` (and `--block-slots N|none`,
+  replay --dir ~/Downloads/rigel_runs/perf/sweeps_MO_3021_step5 --call 0..3` (and `--block-slots N|none`,
   `--tolerance` for the report of what moved) and `rename_identity.py --check --reference
-  ~/Downloads/rigel_runs/arms/memory_identity_*.json` (two ladder conditions and `--bam` LBX0190). A change
+  ~/Downloads/rigel_runs/arms/port_identity_*.json` (two ladder conditions and `--bam` LBX0190). A change
   that may move numbers is judged on the oracle metric per stratum, the panel, and profiler pairs
   (owner, 2026-09-12: minuscule changes are not a concern; elegance is the bar). The suite (`CLAUDE.md`'s baseline line), `ruff`, `preflight.py --full`.
   A timing is read only from back-to-back pairs (`profiler.py --compare`); patch `calibrate` for an arm
@@ -187,7 +187,7 @@ precedes F (the port). Status is kept HERE; tick an item by writing DONE and the
 | W10 | **The hygiene ledger's pure cleanups** (§8) — DONE 2026-09-13, nine commits `0f3ca3e3`…`bdc1089c`: the comment; the rename EXTENDED to all five deconvolved arrays (`count_<population>_<axis>`); 33 moment tests restored; four bank-readers RETIRED after an instrument census (owner's ruling) and two migrated, `fl_pool_purity` now pricing the model production builds (true gDNA mean exactly at capture-OFF). The index alias map stays in the ledger | fresh identity references (`hygiene_identity_*`, bit-identical throughout); the suite 3,452 / 2 xfail / 3,454; each migrated instrument's recorded before/after in its commit |
 | W11 | **The coverage census** (§8) — MEASURED, RULED and LANDED 2026-09-13 (owner: all tiers, converge on the production surface; thirteen commits `97947ede`…`d4934c5c`, the record in `ISSUES: hygiene-ledger`; suite 3,419 / 2 xfail / 3,421; identity references and oracle rows identical throughout). The measurement: the suite (3,452 tests) and all ten `--self-test`s under `coverage` (data in the session scratchpad, not the tree): 13,487 statements in `src/rigel`, 2,191 never executed (84 %), 28 files fully covered; 63 whole functions (1,567 statements, 72 % of the misses) — `sim/locus_sweep.py` entirely (466, one thin wrapper, no manual names it), `sim/net_flow.py` 80 % (no entry point but its test), `sim/suite.py main` + `simulate_suite.py`, the CLI command bodies, the simulator's sharded writers; the calibration package ~107 lines, nearly all guards and degenerate-input branches, plus a dead local helper (`simplex_logodds._sp`), four dead one-line properties, the never-fed `CompositionPriors.rna` socket and the never-set `boundary_rna_reach` taper arm. The owner's decisions are owed on the tiers (the session handoff lists them) | the census itself; anything removed is byte-identical on the default rows |
 | W12 | **The θ quadrature** — DONE 2026-09-13 (step 1: `DESIGN.md` §6b.15, `EQUATIONS.md` §9e, `ISSUES: theta-quadrature-at-zero-gdna` CLOSED with its numbers; the nodes follow the strand term's peak, `K_t` = 24 derived; the mechanism corrected — one deep interior-tilt slot, a comb, never strand purity; `ISSUES: strand-marginal-volume-factor` opened). Step 2 DONE the same day: the lanes deliver a row's ingredients (`simplex_logodds.CubeRow`) and ψ evaluates them at its nodes; `sweep_n_tilt`, `_tilt_grid` and the row interpolation deleted — no tilt count exists | the one open design item inside ψ, settled in Python before ψ is ported | the marginal against adaptive quadrature, the oracle metric per stratum with both zero controls, the shared-exon deep stress, the AMBIG both-strand census |
-| W13 | **The port's prerequisites** (§8) | re-capture the deep library's sweeps on the current tree (`sweep_replay.py capture`), since `sweeps_MO_3021_step4` predates the lattice; fresh identity references for the port thread | the captures replay bit-identical on the tree that made them; `rename_identity.py --check` |
+| W13 | **The port's prerequisites** (§8) — DONE 2026-09-13 on `23a431a9`: `sweeps_MO_3021_step5` (four calls, each replays BIT-IDENTICAL: 30.0 / 12.7 / 12.7 / 12.7 s) and `port_identity_{gdna_g05_ss_0.50_nrna_mid_capture_off, gdna_g05_ss_0.99_nrna_mid_capture_on, LBX0190}.json`, each `--check`ed on the tree that froze it | re-capture the deep library's sweeps on the current tree (`sweep_replay.py capture`), since `sweeps_MO_3021_step4` predates the lattice; fresh identity references for the port thread | the captures replay bit-identical on the tree that made them; `rename_identity.py --check` |
 
 Not on the list, and why: the arcsine coordinate (REFUSED with its numbers; logit is finer at the vertex);
 the vertex atom (a prior-family change whose whole ceiling is ≤ 1 % on stranded in-scope rows — see the
@@ -383,9 +383,9 @@ the design target is a quadrature whose accuracy does not depend on node count, 
 cost lever (K × K_t). DERIVE → PROTOTYPE outside `src/` (patch `_tilt_grid` and `_psi` in both their bindings,
 as `w5/theta_mesh.py` did) → A/B on both panels with both zero controls → then `src/`.
 
-**W13 — the port's prerequisites.** Re-capture the deep library's sweeps on the current tree
-(`sweep_replay.py capture`; `sweeps_MO_3021_step4` predates the lattice and now replays as a design change)
-and prove they replay bit-identical; freeze fresh identity references for the port thread. Then F.
+**W13 — the port's prerequisites.** DONE 2026-09-13: `sweeps_MO_3021_step5` captured on `23a431a9` and every
+call replays bit-identical; `port_identity_*` frozen and checked (two ladder conditions and LBX0190). The
+earlier captures and references describe trees before the θ quadrature. Then F.
 
 ## 4. Two things not to do
 

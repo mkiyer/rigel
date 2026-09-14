@@ -1,4 +1,4 @@
-# NEXT SESSION — start here (2026-09-13, after W10 and W11; W12 is the next session's work, then W13 and the port)
+# NEXT SESSION — start here (2026-09-13, after W12 and W13; the port is next)
 
 The whole picture, the reasoning and the ordered plan are in `docs/dev/CALIBRATION_PERFORMANCE_PLAN.md`
 — read it after `CLAUDE.md`; the PRE-PORT WORKLIST is the section before its §C, and §8 is the design of the
@@ -57,7 +57,7 @@ densities) and ψ evaluates them at its own nodes (`CubeRow.at`); `CalibrationCo
 `_tilt_grid`, `_read_row_at`, the sweep's `(K, K_t)` shape check and the cache's row arrays are gone. No tilt
 count exists anywhere in the tool: the only θ count is the derived `_TILT_NODES` = 24.
 
-Then W13, then the port. Then `ISSUES: strand-marginal-volume-factor` (the owner asked to be taught it; the
+W13 DONE the same day (`sweeps_MO_3021_step5`, four calls bit-identical; `port_identity_*` frozen and checked). The agreed order before the port (owner, 2026-09-13): ① the tilt-measure thread — DONE, REFUSED both forms (`ISSUES: strand-marginal-volume-factor`, CLOSED / REFUSED with the ladder's numbers); ② dissect `ISSUES: capture-on-strand-pure-ambig-undercall` (no code unless the dissection names it); ③ re-measure the deep library end to end as the port's baseline, then re-freeze the references if anything moved; ④ THE PORT (plan §F). `ROADMAP.md` rank 2 carries the accuracy items that remain (the owner asked to be taught it; the
 teaching is in the session's closing message and `EQUATIONS.md` §9e's last paragraph).
 
 ## Where the worklist stands
@@ -72,7 +72,7 @@ files. Kept as COVERAGE GAPS, not dead code (`ISSUES: hygiene-ledger` lists them
 the silent policy through `calibrate`, the simulator's sharded writers and whole-genome path (live in panel
 builds, silent in the suite), the zarr splice blacklist. `preflight.py --full` 10/10 after the deletions.
 
-Next: W12 step 2 (above), then W13, then the port (plan §F).
+Next: the port (plan §F); the identity references are `port_identity_*` and the captures `sweeps_MO_3021_step5`.
 
 ## Decisions on record
 

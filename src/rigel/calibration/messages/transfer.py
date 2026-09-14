@@ -202,9 +202,11 @@ class TransferPolicy:
 
     # ── phase 0: every node's own claim, and the recipient's rule per directed face ──────────────
     def prepare(self, ctx: BlockContext, library: _Library) -> "_PreparedTransfer":
+        # a chain with no coarse intron has no factory rows: a factory with nothing to say, and the
+        # rest of the layer — the faces, the lanes — exactly as with one
         src = ctx.factory_rows
         if src is None:
-            return _PreparedTransfer(None, None, 0)
+            src = np.zeros((int(ctx.n_slots), int(ctx.n_grid)))
         chain = _Chain(ctx, np.asarray(src, np.float64), self._strand)
         own = _claims(chain)
         # the recipient's rule per DIRECTED face, written into the face table by the builder that owns
@@ -215,11 +217,13 @@ class TransferPolicy:
         _edge_level(chain, own, faces)
         _terminus_rules(chain, faces)
         _alternative_splice_site(chain, faces)
+        # each lane exists iff its OWN coordinate does: a gDNA-free library has no gDNA lane and still
+        # has its RNA lanes
         lanes: dict = {}
         gdna = gdna_lane(chain, own, faces, library.rho_gdna)
         if gdna is not None:
             lanes["gdna"] = gdna
-            lanes.update(rna_lanes(chain, own, gdna, library))
+        lanes.update(rna_lanes(chain, own, library))
         site = _SolveSite(chain.fp & chain.fn, {"pos": chain.fp, "neg": chain.fn})
         return _PreparedTransfer(own, faces, chain.K, lanes, site)
 

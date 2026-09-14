@@ -20,7 +20,6 @@ import pytest
 
 import rigel.calibration.sweep as SW
 from rigel.calibration.messages import Policy
-from rigel.calibration.messages.silent import SilentPolicy
 from _transfer_harness import (
     _drive,
     _bits,
@@ -32,7 +31,6 @@ from _transfer_harness import (
     _prepared,
     _rna,
     _rna_lanes_of,
-    _run,
     _with_alt_splice_sites,
 )
 
@@ -41,20 +39,6 @@ def test_the_transfer_policy_satisfies_the_backbone_protocol():
     from rigel.calibration.messages.transfer import TransferPolicy
 
     assert isinstance(TransferPolicy(), Policy)
-
-
-def test_an_evidence_free_transfer_is_byte_identical_to_silence(sweep_inputs):
-    """The rung-0 identity: with no factory rows on the context — the sweep's ``intron_prior`` is
-    the one array both ψ and the policy read, so it is ``None`` in both arms — the policy must
-    reproduce `SilentPolicy` byte-for-byte through the real backbone, and it must do so by delivering
-    a SILENT message, never zero-filled channel arrays, which cost a ULP and break the identity."""
-    from rigel.calibration.messages.transfer import TransferPolicy
-
-    bare = dict(sweep_inputs, kw=dict(sweep_inputs["kw"], intron_prior=None))
-    a = _run(bare, SilentPolicy())
-    b = _run(bare, TransferPolicy())
-    for f in a:
-        np.testing.assert_array_equal(a[f], b[f], err_msg=f)
 
 
 def test_the_policy_name_installs_the_transfer_policy(sweep_inputs):
