@@ -1,135 +1,150 @@
 # NEXT SESSION — start here (2026-09-14, after L3, L5, the landscape's location floor and the port's prerequisites)
 
-The whole picture, the reasoning and the ordered plan are in `docs/dev/CALIBRATION_PERFORMANCE_PLAN.md`
-(THE LANES WORKLIST table — every row now DONE — sits before §C; §F is the port). The θ quadrature's
-derivation, the tilt study and the encompassing-locus audit are `docs/dev/THETA_QUADRATURE.md` §§1–14. This
-file is only how to begin.
+The whole picture and the reasoning are in `docs/dev/CALIBRATION_PERFORMANCE_PLAN.md` (THE LANES WORKLIST table,
+every row DONE, sits before §C; §F is the port); the θ thread's derivations are `docs/dev/THETA_QUADRATURE.md`.
+This file is only how to begin. Everything is committed: `81739da4` (L3), `41b55006` (L5, with the handoff),
+`84923136` (the landscape's location floor); the port's prerequisites are fresh on that tree (below).
 
-## Three commits are waiting for the owner's go — in this order
+## The agreed order of the sessions (owner, 2026-09-14)
 
-The tree holds three landed items, kept apart: **L3 is STAGED** (the git index is exactly L3's change set, 136
-files, most of them the 17 regenerated goldens); **L5** and **the landscape's location floor** are unstaged on
-top, with this handoff. The scratchpad script makes the three commits in order — L3 from the index; L5 from
-the working tree with its own golden set restored from `lp/golden_l5/` and the floor's four source files
-held back; then the floor with its goldens — and the messages are beside it:
+1. **THIS ONE — code review and cleanup.** Dead, stale, legacy, unused, rotten: source, instruments, tests,
+   docs, artefacts on disk. Every step a numeric no-op, proven on the identity references and the replay; the
+   suite's count re-derived; `preflight --full` first and last. The concrete list is below.
+2. **The test chromosome's new structures**, then both panels remeasured: the long single-exon transcript
+   encompassing a multi-exon transcript on the opposite strand; the single-exon antisense gene wholly inside
+   a sense exon (the tilt atom's accepted limit, so the panel carries its number); the shared exon of two
+   spliced genes on opposite strands (the deep stress); a single-exon gene inside the opposite strand's
+   intron (the majority AMBIG class); head-to-head genes with overlapping UTRs. Edit `test_chr.yaml`, rebuild
+   and re-certify by `docs/TESTING.md` §0a (`panel.py status` names each stage); then
+   `calibration_vs_oracle.py` and `policy_benchmark.py --by-class` on both panels become the new standing
+   numbers (`DESIGN.md` §7).
+3. **The ruler at zero gDNA** (`ISSUES: g00-shrinkage-upstream-repair`, the largest in-scope number on the
+   metric page, the modal real case) and **the flux price's witness in whole-strand units**
+   (`ISSUES: flux-price-witness-units`, the one accuracy item inside the port's unit). One mechanism at a
+   time, each its own commit.
+4. **The performance re-baseline** (two back-to-back profiler pairs at 8 threads, fresh `port_identity_*`,
+   `sweep_replay.py capture`, one hour) **and THE PORT** (plan §F).
 
-```bash
-<scratchpad>/lp/commit_three.sh        # l3/COMMIT_MSG_L3.txt · l5/COMMIT_MSG_L5.txt · lp/COMMIT_MSG_LANDSCAPE.txt
-```
-
-The doc edits of the floor (DESIGN §7.1 rule 4, the two ISSUES entries, `CLAUDE.md`'s baseline) ride in the L5
-commit, since the same files carry both; the source and the gate separate cleanly.
+Deferred by the owner: a real-data census of the atom's accepted limit (no representative real data yet).
+Outside the port's unit and after it: the landscape estimator's remaining items (a)–(c) in
+`ISSUES: gdna-landscape-trains-on-false-positives`, the prior assembler's entries (`eb-shrinkage-magic-ess`,
+`capture-blind-gdna-divisor`, `per-transcript-prior-lane`, `u-ruler-arm`, `prior-fidelity-vs-deliverable`)
+and the EM's assignment error (the thermometer).
 
 ## The prompt for the next session (paste as the first message)
 
-> Start from `main` (clean, with L3, L5 and the landscape's location floor committed). Read `CLAUDE.md`, then `docs/dev/NEXT_SESSION.md` and
-> `docs/dev/CALIBRATION_PERFORMANCE_PLAN.md` §F. Run `scripts/design/preflight.py` and the suite before touching
-> anything; `CLAUDE.md`'s baseline line is the count to reproduce (3,458 passed / 3 xfail / 3,461 collected).
+> Start from `main` (clean, at `84923136` or later). Read `CLAUDE.md`, then `docs/dev/NEXT_SESSION.md`. Run
+> `scripts/design/preflight.py --full` and the suite before touching anything; `CLAUDE.md`'s baseline line is
+> the count to reproduce (3,458 passed / 3 xfail / 3,461 collected).
 >
-> THE STANDING RULINGS are unchanged: elegant, simple, efficient, clear, concise, maintainable code, judged on
-> the oracle metric (`calibration_vs_oracle.py`, per stratum, BOTH zero controls), the panel, the suite, the
-> encompassing-locus test and the shared-exon stress; a restructure is proven bit-identical; a change that
-> moves numbers is judged with its magnitudes read first; one mechanism at a time; no magic numbers — every
-> constant derived; a falsification test first, verified failing, then break the fix and watch each gate fire;
-> each item its own commit, committed on my go; never `ruff format scripts/`; patch `calibrate` through
-> `importlib.import_module`; any config value is a `--set` arm.
+> THE STANDING RULINGS are unchanged: elegant, simple, efficient, clear, concise, maintainable code; a
+> restructure is proven bit-identical; no number moves in this session — every step is checked with
+> `rename_identity.py --check` against the three `port_identity_*` references (two ladder conditions and
+> `--bam` LBX0190) and `sweep_replay.py replay --dir ~/Downloads/rigel_runs/perf/sweeps_MO_3021_step6
+> --call 0..3`; the suite's count re-derived, never adjusted; each item its own commit, committed on my go;
+> never `ruff format scripts/`; converge and delete — no legacy, no compatibility shims, no speculative code.
 >
-> THE PORT (plan §F): the unit is `sweep._solve_block`. Order: (i) the passes and `transfer_rows`, (ii)
-> `prepare`'s builders, (iii) ψ (SIMD exp/log, the AMBIG cube — now `K × (K_t + 2)` with the tilt atom's two
-> columns), (iv) threads over blocks. Every step behind the tolerance gate (`sweep_replay.py replay
-> --tolerance` on `sweeps_MO_3021_step6`), the fresh `port_identity_*` references and the suite; the λ lattice
-> stays a parameter (`sweep_logodds_step`). Read a timing only against the baseline pairs of 2026-09-14
-> (`~/Downloads/rigel_runs/perf/baseline_2026-09-14/`, `profiler.py --compare`).
+> THIS SESSION IS CODE REVIEW AND CLEANUP, nothing else lands. Census before you cut: a fresh coverage run
+> of the suite and every `--self-test` (the W11 method, `ISSUES: hygiene-ledger`), then every never-executed
+> statement ruled dead, rotten-but-live, or a gap. The list to start from is in `NEXT_SESSION.md` (source,
+> instruments, tests, docs, disk). Run `preflight.py --full` first and last: a self-test broke unnoticed
+> for a day this week. End with the handoff for the test-chromosome session.
 
-## Before anything
+## The cleanup list — what this week's sessions saw
 
-```bash
-source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
-python scripts/design/preflight.py                 # ~2 s: can this session run?
-python -m pytest tests/ -q                         # CLAUDE.md's baseline line is the count to reproduce
-```
+Source (`src/rigel`, 35,244 lines; calibration 14,344):
+* `scripts/profiling/sweep_replay.py`'s unpickling shim for captures taken before 2026-09-11 (`rows_at`);
+  every capture before `sweeps_MO_3021_step6` is stale, so the shim is legacy.
+* Docstrings that assert measurements: grep `src/` for "measured", "measurably", "refuted" and check each
+  claim against the record — `landscape._reliability`'s claim contradicted the landed floor until 2026-09-14,
+  and `region_init.has_own_composition_evidence`'s described a deadband that no longer exists.
+* Dead parameter plumbing after L3 (`od_g` and `n_gdna_obs` left the strand channel; check every caller and
+  every `_Sweep` / `_Strand` / `InjectedCalibrationPriors` field is read), after the θ landings (any
+  `sweep_n_tilt` / tilt-lattice residue) and after the one-solver landing.
+* The coverage census: W11 found 84 % of `src/rigel` executed and removed 2,191 statements' worth of dead
+  code; L1–L6 and the θ thread changed the surface since. Re-run it; the kept GAPS are listed in
+  `ISSUES: hygiene-ledger`.
+* `landscape_training_census.py` prints `nan%` for an empty evidence class (cosmetic); its selector copy
+  must keep reproducing `_fit_gdna_hyperprior` bit for bit (its gate refuses otherwise).
+
+Docs:
+* `DESIGN.md` §6b.15 is 264 lines and thirteen rulings under one heading, a running log of the pre-port
+  work; split it into named sub-rulings (§6b.15.1 …) with no content change, so a ruling can be cited.
+* `CLAUDE.md`'s baseline paragraph is 27 lines of history; the keep-it-lean ruling wants the count and the
+  last change, one line (the history is git).
+* `TRAPS.md`: 164 traps in 960 lines; a pass for duplicates and for traps whose substrate is gone (the
+  length channel, the relay, the deadband), keeping every lesson that still changes what a session does.
+* `docs/dev/CALIBRATION_PERFORMANCE_PLAN.md`: the DONE rows could be compressed to a ledger; `docs/dev/
+  THETA_QUADRATURE.md` §§12–14 are landed and recorded in the permanent docs (a note at each says where).
+
+Disk (not the repo; the owner's call): `~/Downloads/rigel_runs/arms/` holds 24 identity references of which
+only `port_identity_*` describe the current tree (the `23a431a9` set is in a subfolder); `perf/` holds six
+capture sets of which only `sweeps_MO_3021_step6` replays on the current tree.
+
+Tests: 3 xfails, all executable records (`two-sided-exon-row`, `antisense-prior-assembly-casualty`, the
+encompassing flank under `the-lower-bound-noise-ratchet`); 21 golden scenarios, the four with gDNA identical
+through every landing this week.
+
+## The two pricing questions inside the port's unit — what the owner decides
+
+Both live in `messages/transfer_rows.py` and `messages/lanes.py`, the port's first step, so a fix after the
+port is written twice; the decision is fix-before or accept-and-record.
+
+* **`ISSUES: flux-price-witness-units`.** A junction's certified flux is a lower bound on the exon's RNA
+  level, hence a ceiling on its gDNA. Its price — how much the bound is blurred — is `hop_price`, which
+  compares the junction's route rate (the strand's RNA density in whole-strand units) with the exon's own
+  count on the read column, and that column holds only `(1 − κ')` of the strand's RNA plus half the gDNA.
+  So the two disagree by `log(1 − κ')` even when both are exactly right, and every flux ceiling pays
+  `log(1 − κ')²` nats² of spurious disagreement: negligible at κ = 0.99 (1e−4), 0.13 at ss.65-style
+  protocols, 0.48 on unstranded data — an in-scope stratum. The recorded symptom: the golden
+  `strand_ss65_multi_iso`'s nested exon reads 0.152 gDNA from a ceiling of 0.38 where the flux says ≤ 0.
+  The naive fix (the column split's asymmetry as the witness) was REFUSED — it reads zero at an
+  equal-abundance overlap exon; the owed form is the strand's RNA count in whole-strand units at
+  single-strand exons and a bounded one at both-stranded exons. Recommendation: derive and A/B it in
+  session 3, before the port carves the price.
+* **`ISSUES: the-lower-bound-noise-ratchet`** (the encompassing flank's xfail). A level is a lower bound
+  delivered at the sender's SAMPLED density; the hop's price blurs its edge but cannot move it, so a
+  neighbour whose sample ran 1.6σ high pins the flank above the truth (0.596 against 0.530 on 404
+  fragments; on the ladder 0.8 % of one row). The ruling stands as "later, with the enrichment witness".
+  Recommendation: accept and record; the port carves the level rule as it is.
 
 ## Where things stand
 
-* **L3 — the strand channel's gate is a protocol decision** (`DESIGN.md` §6b.15, `EQUATIONS.md` §5.2b,
-  `ISSUES: deadband-gates-a-gdna-free-library` CLOSED). `region_init.strand_discriminability(kappa, n_rna_obs)`
-  is `4(κ̂−½)²` iff the spliced 2×2's Bayes factor favours a free κ over κ = ½ exactly; `n_gdna_obs` is gone
-  everywhere. All four ladder `g00` rows had `N_gdna = 0`, so the stranded `g00` rows — and every `g00`-donor toy
-  of the θ thread — had run with the channel dead. Ladder identical but unstranded OFF −0.22 %; the stranded
-  zero controls 405 → 497 / 194 → 224 are the LANDSCAPE's vertex bias at the refit rung (filed as
-  `gdna-landscape-trains-on-false-positives` (d)), not the gate's. The belief-read RNA level REFUSED as the relay.
-* **L5 — the tilt atom** (`DESIGN.md` §6b.15, `EQUATIONS.md` §9f, `ISSUES: capture-on-strand-pure-ambig-undercall`
-  CLOSED). Two atoms at `τ = ±1` in ψ's cube beside the continuum (`−log π` on its weights); a held level on a
-  strand rules the other strand's atom out. Ladder stranded ON 470,862 → 427,046 (−9.3 %), every stratum
-  better; stranded zero controls 497 → 550 / 224 → 231. ⚠ Its cost where a strand has NO possible witness is
-  filed with its numbers as `ISSUES: the-atom-at-an-unwitnessed-both-strand-slot` — the golden
-  `antisense_contained` (a single-exon antisense gene inside a sense exon) reads its antisense transcript
-  81 → 0 and 177.6 false gDNA of 1,000; the mono shared-exon stress doubles its false gDNA at 2–20 % minor.
-  The owner's stance (2026-09-14): a limit of the information, accepted — no presence witness; the landscape
-  prior decides on a real library, and its vertex bias (`gdna-landscape-trains-on-false-positives` (d)) is
-  the lever. `ISSUES.md` was pruned the same day (done-records out, seven entries retired into the record).
-* **The landscape's location floor** (`DESIGN.md` §7.1 rule 4; the owner's direction 2026-09-14: which nodes
-  may teach the circular half). A slot trains only if it holds a composition AND its solve locates it,
-  `Var(log f_g) ≤ 1 nat²` (`landscape._LOCATED_VAR`, the E-step's one-fragment floor through
-  `Var(log c) = 1/c`); anchors regardless. The ladder's four zero controls 500 → 282 / 211 → 194 / 550 → 265
-  / 231 → 172, every stratum unchanged or better on both panels (deferred −0.87 %); on `g00 ss.99 OFF` the
-  training set from the second refit is the anchors alone. Two other readings of the floor refused with
-  their numbers (the ruling). The tiny goldens move the other way (`antisense_contained` 177.6 → 200.8): a
-  prior from four anchors pushes less.
-* **The encompassing gate** (`test_encompassing_locus.py`): the exon∩exon slots and the region between TA+'s
-  exons solve within 0.05 in every regime on both donors (un-xfailed); the one remaining miss is TB−'s
-  shallow flank under the intergenic gDNA EDGE level, its own xfail under `the-lower-bound-noise-ratchet`.
-* **The port's prerequisites on the landed tree** (this session, after L5): `sweeps_MO_3021_step6` captured
-  (four calls) and replayed; `port_identity_{gdna_g05_ss_0.50_nrna_mid_capture_off,
-  gdna_g05_ss_0.99_nrna_mid_capture_on, LBX0190}.json` re-frozen and `--check`ed (the `23a431a9` set moved
-  to `arms/port_identity_23a431a9/`); the deep-library baseline (`mctp_vcap_rna20m_dna05m`, 8 threads, two
-  back-to-back pairs) in `perf/baseline_2026-09-14/pair{1,2}_{a,b}.json`. The verdicts and timings are in the
-  section below.
-* `vertex_ceiling.py --self-test` had been broken by L1 (a bare stub context; `prepare` now reads the whole
-  context) — fixed with a real empty block; `preflight --full` reads 10/10.
-
-## The port's prerequisites — the record (2026-09-14, the L5 tree)
-
-All taken on the L5 tree (`cd470d0e` + L3 + L5 uncommitted), the machine otherwise idle.
-
-* **`sweep_replay.py capture`** → `~/Downloads/rigel_runs/perf/sweeps_MO_3021_step6` (the MO_3021 library, 8
-  threads): four calls; each replays **BIT-IDENTICAL** on this tree — 30.0 / 12.9 / 13.0 / 13.1 s (the step5
-  capture on `23a431a9` read 30.0 / 12.7 / 12.7 / 12.7). `step5` and earlier describe trees before L2, L3 and L5.
-* **`rename_identity.py --freeze`** → `~/Downloads/rigel_runs/arms/port_identity_{gdna_g05_ss_0.50_nrna_mid_capture_off,
-  gdna_g05_ss_0.99_nrna_mid_capture_on, LBX0190}.json`, each `--check`ed **BIT-IDENTICAL** on this tree. The
-  `23a431a9` set is in `arms/port_identity_23a431a9/` (stale: L2, L3 and L5 moved numbers).
-* **The deep-library baseline** (`mctp_vcap_rna20m_dna05m`, 18,568,456 fragments, 8 threads, two back-to-back
-  pairs, `profiler.py`) → `perf/baseline_2026-09-14/pair{1,2}_{a,b}.json`: wall 499.4 / 498.8 and 502.0 /
-  498.4 s; peak RSS 11.2 / 11.0 and 10.8 / 11.1 GB; `calibrate` 404.3 / 405.1 and 407.6 / 404.8 s, the four
-  sweeps 394 s of it (the ψ grid solves inside them ~102 s at 1,704 calls), the init ψ 4.5, the landscape fits
-  4.3; scan 32, second pass 22, quant 25. Within each pair every stage reads 0.96–1.02 (`profiler.py --compare`),
-  so the port's timings are read against these four reports, never against a number from another sitting.
+* **L3** — the strand channel's gate is a protocol decision (`DESIGN.md` §6b.15, `EQUATIONS.md` §5.2b).
+* **L5** — the tilt atom (`DESIGN.md` §6b.15, `EQUATIONS.md` §9f); its cost where no witness can exist is an
+  accepted limit (`ISSUES: the-atom-at-an-unwitnessed-both-strand-slot`).
+* **The landscape's location floor** (`DESIGN.md` §7.1 rule 4): a slot trains only if it holds a composition
+  AND its solve locates it, `Var(log f_g) ≤ 1 nat²`; the ladder's four zero controls 500 → 282, 211 → 194,
+  550 → 265, 231 → 172, every stratum unchanged or better on both panels.
+* **The encompassing gate** (`test_encompassing_locus.py`): the atom's population passes on both donors; the
+  flank is the ratchet's xfail.
+* **The port's prerequisites on `84923136`'s content**: `sweeps_MO_3021_step6` (four calls, each replays
+  BIT-IDENTICAL: 30.0 / 12.9 / 13.0 / 13.1 s); `port_identity_{gdna_g05_ss_0.50_nrna_mid_capture_off,
+  gdna_g05_ss_0.99_nrna_mid_capture_on, LBX0190}.json`, each `--check`ed BIT-IDENTICAL; the deep-library
+  baseline `perf/baseline_2026-09-14/pair{1,2}_{a,b}.json` (18,568,456 fragments, 8 threads: wall 499.4 /
+  498.8 and 502.0 / 498.4 s, peak 11.2 / 11.0 and 10.8 / 11.1 GB, `calibrate` 404–408 s of which the four
+  sweeps 394 s, scan 32, second pass 22, quant 25; every stage 0.96–1.02 within a pair). The landscape floor
+  landed after the captures were taken and moved numbers, so the replay's bit-identity is against the L5
+  tree's ψ; re-capture in session 4.
 
 ## The session scratchpad (persists across sessions; nothing in the tree cites it)
 
 `/private/tmp/claude-503/-Users-mkiyer-proj-rigel/4ec3e3a5-268d-4828-a6e7-91f9cd89647e/scratchpad/`:
-`l3/` — `arms.py` (`run <arm> [instrument.py] -- args`: patches both bindings of `strand_discriminability`
-and runs any instrument in-process), `run_oracle.sh` (one process per condition, merged), `strand_scalars.py`
-(κ̂, N, the Bayes factor per condition), `deep_l3.py` / `audit_l3.py` (the θ thread's harnesses with L3 arms),
-`perturb.sh`, the oracle jsons (`ladder_ref/drop/bf`, `test_ref/bf`), the walk, the census, the identity
-references frozen before L3 (`identity/l3_pre_*`, both BIT-IDENTICAL after), the golden diff. `l5/` —
-`tilt_atom.py` (the prototype), `smoke.py` (the strand-pure smoke test), `tilt_census.py`, `run_oracle.sh`,
-the oracle jsons (`ladder_l3/atom_w/landed`, `test_*`), `census/` (the bands, L3 tree vs landed), `deep/`
-(both stresses, before and after), `audit/`, `dissect_encompass.py` (the encompassing regimes slot by slot,
-atoms on and off), `land_atom.py` / `adapt_gates.py` / `perturb.sh`, `port/` (the prerequisites' logs). `lp/` —
-`dump_training.py` (the training rows per fit against truth, four candidate rules scored; `dump/*.json` on
-seven conditions), `arms.py` (the admission arms through the block solve), the oracle jsons for the four
-arms, `census/`, `walk/`, `golden_l5/` (the L5-state goldens the commit script restores), `commit_three.sh`. The
-previous session's scratchpad (`…/25f7f3df-…/scratchpad/w12/`) still holds the θ thread's material.
+`l3/` (the deadband arms and their oracle runs, the walk, the census, the identity references before L3),
+`l5/` (the atom's prototype, the smoke test, the census, both stresses, the audit, the port's logs),
+`lp/` (`dump_training.py` — the training rows per fit against truth with four candidate rules scored,
+`arms.py`, the oracle runs of the four arms, `golden_l5/`, `commit_three.sh`). The previous session's
+`…/25f7f3df-…/scratchpad/w12/` holds the θ thread's material.
 
 ## Decisions on record
 
 * Float64 for the whole of ψ; ONE solver; ONE λ lattice at a dimensionless step with a stated guarantee; no
   θ lattice anywhere (the tilt count is derived); the tilt's hypothesis space is {pure +, pure −, mixed}.
 * The tilt measure stays the arcsine and the marginal exact (both flattenings REFUSED on the ladder).
-* The tilt is not a message; presence per strand is what the atom adds and the lanes witness; the structural
-  witness (the exon bits) adds nothing and is not written.
+* The tilt is not a message; presence per strand is what the atom adds and the lanes witness; no presence
+  witness is built (the owner, 2026-09-14: a limit of the information, accepted).
 * The strand channel's liveness is a protocol decision on the spliced 2×2; gDNA enters nowhere.
+* The landscape trains only where a solve locates a slot; the two other readings of the floor are refused.
 * `drain`, `row` and `face` stay; the arcsine coordinate stays refused; the vertex atom is parked.
 * The message cache's on/off switch (plan §E) is the owner's; the refit count stays; the scan's thread
   split is the owner's; parallelism waits for the port.
