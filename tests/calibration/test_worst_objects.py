@@ -26,8 +26,11 @@ from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 def _sibling(name: str):
     key = name[:-3]
     if key not in sys.modules:
-        path = Path(__file__).resolve().parents[2] / "scripts" / "design" / name
-        spec = importlib.util.spec_from_file_location(key, path)
+        design = Path(__file__).resolve().parents[2] / "scripts" / "design"
+        # the instruments import their sibling `_shared` by name
+        if str(design) not in sys.path:
+            sys.path.insert(0, str(design))
+        spec = importlib.util.spec_from_file_location(key, design / name)
         module = importlib.util.module_from_spec(spec)
         sys.modules[key] = module
         spec.loader.exec_module(module)

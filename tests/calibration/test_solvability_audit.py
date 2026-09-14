@@ -30,8 +30,11 @@ from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 def _sibling(name: str):
     key = name[:-3]
     if key not in sys.modules:
-        path = Path(__file__).resolve().parents[2] / "scripts" / "design" / name
-        spec = importlib.util.spec_from_file_location(key, path)
+        design = Path(__file__).resolve().parents[2] / "scripts" / "design"
+        # the instruments import their sibling `_shared` by name
+        if str(design) not in sys.path:
+            sys.path.insert(0, str(design))
+        spec = importlib.util.spec_from_file_location(key, design / name)
         module = importlib.util.module_from_spec(spec)
         sys.modules[key] = module
         spec.loader.exec_module(module)
@@ -564,18 +567,6 @@ def test_D4_perturbation_a_DIFFERENT_predicate_stops_matching_the_home():
 
 
 def _summarise(fx, det):
-    import importlib.util
-    import sys
-    from pathlib import Path
-
-    key = "solvability_audit"
-    if key not in sys.modules:
-        p = Path(__file__).resolve().parents[2] / "scripts" / "design" / "solvability_audit.py"
-        spec = importlib.util.spec_from_file_location(key, p)
-        m = importlib.util.module_from_spec(spec)
-        sys.modules[key] = m
-        spec.loader.exec_module(m)
-    SA = sys.modules[key]
     n = fx["total"].shape[0]
     a = dict(
         determined=det,
