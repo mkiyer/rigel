@@ -46,8 +46,9 @@ REPO = Path(__file__).resolve().parents[2]
 DESIGN = REPO / "scripts" / "design"
 SIM = REPO / "scripts" / "sim"
 
-#: the three origin partitions the oracle cache holds, plus the undrained full payload.
-ORACLE_PARTS = ("gdna", "mrna", "nrna", "_main")
+#: the three origin partitions the oracle cache holds, the per-strand RNA pair the certifier requires,
+#: and the undrained full payload.
+ORACLE_PARTS = ("gdna", "mrna", "nrna", "rna_pos", "rna_neg", "_main")
 
 
 class Panel:
@@ -72,7 +73,10 @@ class Panel:
         # ⚠ DERIVED, not configured: the index is a sibling of the reference directory. `--index`
         # overrides it rather than this guessing twice.
         self.index = Path(index) if index else self.reference.parent / "rigel_index"
-        self.probes = self.reference / "capture_panel.tsv"
+        # the probe panel the capture arm reads, as the config names it: the ladder's designed
+        # `capture_panel.tsv` or a substrate's rendered BED. With no capture arm, the ladder's layout.
+        named = [c["probes"] for c in (cfg.get("capture") or {}).get("configs", []) if c.get("probes")]
+        self.probes = Path(named[0]) if named else self.reference / "capture_panel.tsv"
         self.scan_cache = self.dir / "scan_cache"
         self.oracle_cache = self.dir / "oracle_cache"
         self.arms = Path(os.environ.get("RIGEL_ARMS", self.dir / "arms"))
@@ -111,7 +115,7 @@ def need(ok: bool, what: str, fix: str) -> None:
 def cmd_status(p: Panel, args) -> int:
     conds = p.conditions
     n_scan = len(list(p.scan_cache.glob("*/payload.npz"))) if p.scan_cache.is_dir() else 0
-    # ⭐ an oracle condition is complete only when ALL FOUR parts are present; counting directories
+    # ⭐ an oracle condition is complete only when every part is present; counting directories
     # would call a half-written condition done (`TRAPS: could-the-arm-have-fired`, storage form).
     n_oracle = 0
     if p.oracle_cache.is_dir():
@@ -236,8 +240,6 @@ def cmd_cache(p: Panel, args) -> int:
             p.index,
             "--suite",
             p.dir,
-            "--out",
-            p.scan_cache,
             *(["--force"] if args.force else []),
             *(["--conditions", *conds] if args.conditions else []),
         ],

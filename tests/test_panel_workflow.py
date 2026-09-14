@@ -77,6 +77,16 @@ def test_the_index_can_be_overridden(tmp_path):
     assert p.index == tmp_path / "elsewhere"
 
 
+def test_the_probe_panel_is_the_one_the_capture_config_names(tmp_path):
+    """A substrate whose probes are rendered (the test chromosome's BED) names them in its capture arm;
+    the ladder's designed `capture_panel.tsv` is named the same way. `status` must check the file the
+    config reads, or a fully built panel reads as unbuilt and `build` is named next."""
+    probes = tmp_path / "rendered" / "probes.bed"
+    capture = {"configs": [{"label": "on", "probes": str(probes)}]}
+    p = PANEL.Panel(_config(tmp_path, capture=capture))
+    assert p.probes == probes
+
+
 @pytest.mark.parametrize("missing", ["genome", "gtf", "outdir"])
 def test_a_config_missing_a_path_key_is_REFUSED(tmp_path, missing):
     """Not defaulted, not guessed. A panel that does not say where it lives cannot be driven, and
@@ -157,21 +167,26 @@ def test_a_failing_stage_STOPS_the_workflow():
 # ── the completeness rule ────────────────────────────────────────────────────────────────────────
 
 
-def test_an_oracle_condition_needs_ALL_FOUR_PARTS(tmp_path, capsys):
-    """`status` counts a condition cached only when `gdna`, `mrna`, `nrna` AND the undrained
-    `_main` payload are all present. Counting directories would call a half-written condition done,
-    and the next stage would fail deep inside an instrument instead of here."""
+def test_an_oracle_condition_needs_every_part(tmp_path, capsys):
+    """`status` counts a condition cached only when the three origin partitions, the per-strand RNA
+    pair the certifier requires, and the undrained `_main` payload are all present. Counting
+    directories would call a half-written condition done, and the next stage would fail deep inside an
+    instrument instead of here."""
     p = PANEL.Panel(_config(tmp_path))
     (p.dir / "c1").mkdir(parents=True)
     (p.dir / "c1" / "sim_oracle.bam").touch()
-    for part in ("gdna", "mrna", "nrna"):  # three of four — deliberately incomplete
+
+    def write(part):
         (p.oracle_cache / "c1" / part).mkdir(parents=True)
         (p.oracle_cache / "c1" / part / "payload.npz").touch()
+
+    for part in ("gdna", "mrna", "nrna", "_main"):  # no strand pair — deliberately incomplete
+        write(part)
     PANEL.cmd_status(p, None)
     assert "oracle cache 0/1" in capsys.readouterr().out
 
-    (p.oracle_cache / "c1" / "_main").mkdir(parents=True)
-    (p.oracle_cache / "c1" / "_main" / "payload.npz").touch()
+    for part in ("rna_pos", "rna_neg"):
+        write(part)
     PANEL.cmd_status(p, None)
     assert "oracle cache 1/1" in capsys.readouterr().out
 
