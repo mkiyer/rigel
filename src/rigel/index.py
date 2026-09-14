@@ -891,8 +891,6 @@ class TranscriptIndex:
     @property
     def num_annotated_genes(self) -> int:
         """Number of real (non-synthetic) gene rows in ``g_df``."""
-        if "is_synthetic" not in self.g_df.columns:
-            return len(self.g_df)
         return int((~self.g_df["is_synthetic"].to_numpy()).sum())
 
     @property
@@ -1187,8 +1185,7 @@ class TranscriptIndex:
         )
         # Re-apply categorical encoding (groupby first() returns plain strings).
         for col in ("ref", "g_id", "g_name"):
-            if col in g_df.columns:
-                g_df[col] = g_df[col].astype("category")
+            g_df[col] = g_df[col].astype("category")
         return g_df
 
     @classmethod
@@ -1446,16 +1443,15 @@ class TranscriptIndex:
         # `_t_exon_intervals` accessor used by tests.  Reconstruct them
         # from t_df (synthetics are single-exon by construction:
         # exon == [start, end)).
-        if "is_synthetic" in self.t_df.columns:
-            syn_mask = self.t_df["is_synthetic"].to_numpy(dtype=bool)
-            if syn_mask.any():
-                syn_t_idx = np.where(syn_mask)[0].astype(np.int32)
-                syn_starts = self.t_df["start"].to_numpy(dtype=np.int32)[syn_mask]
-                syn_ends = self.t_df["end"].to_numpy(dtype=np.int32)[syn_mask]
-                for i, t_idx in enumerate(syn_t_idx):
-                    t_exon_intervals[int(t_idx)] = np.array(
-                        [[syn_starts[i], syn_ends[i]]], dtype=np.int32
-                    )
+        syn_mask = self.t_df["is_synthetic"].to_numpy(dtype=bool)
+        if syn_mask.any():
+            syn_t_idx = np.where(syn_mask)[0].astype(np.int32)
+            syn_starts = self.t_df["start"].to_numpy(dtype=np.int32)[syn_mask]
+            syn_ends = self.t_df["end"].to_numpy(dtype=np.int32)[syn_mask]
+            for i, t_idx in enumerate(syn_t_idx):
+                t_exon_intervals[int(t_idx)] = np.array(
+                    [[syn_starts[i], syn_ends[i]]], dtype=np.int32
+                )
 
         self._t_exon_intervals = t_exon_intervals
         logger.debug(f"Cached exon intervals for {len(t_exon_intervals)} transcripts")
@@ -1628,17 +1624,16 @@ class TranscriptIndex:
         #    Synthetic nRNAs are intentionally absent from cgranges
         #    (see _gen_transcript_intervals).  The resolver materialises
         #    each synthetic candidate from real-tx hits via nrna_parent_.
-        if "is_synthetic" in self.t_df.columns:
-            is_synth = self.t_df["is_synthetic"].to_numpy(dtype=bool)
-            ctx.set_nrna_status(is_synth.astype(np.uint8).tolist())
-            if "nrna_t_index" in self.t_df.columns:
-                nrna_idx = self.t_df["nrna_t_index"].to_numpy(dtype=np.int32)
-                parent = np.full(nrna_idx.shape, -1, dtype=np.int32)
-                valid = (nrna_idx >= 0) & (nrna_idx < is_synth.size)
-                parent_is_synth = np.zeros_like(nrna_idx, dtype=bool)
-                parent_is_synth[valid] = is_synth[nrna_idx[valid]]
-                parent[parent_is_synth] = nrna_idx[parent_is_synth]
-                ctx.set_nrna_parent_index(parent.tolist())
+        is_synth = self.t_df["is_synthetic"].to_numpy(dtype=bool)
+        ctx.set_nrna_status(is_synth.astype(np.uint8).tolist())
+        if "nrna_t_index" in self.t_df.columns:
+            nrna_idx = self.t_df["nrna_t_index"].to_numpy(dtype=np.int32)
+            parent = np.full(nrna_idx.shape, -1, dtype=np.int32)
+            valid = (nrna_idx >= 0) & (nrna_idx < is_synth.size)
+            parent_is_synth = np.zeros_like(nrna_idx, dtype=bool)
+            parent_is_synth[valid] = is_synth[nrna_idx[valid]]
+            parent[parent_is_synth] = nrna_idx[parent_is_synth]
+            ctx.set_nrna_parent_index(parent.tolist())
 
         self.resolver = ctx
         logger.debug("Built native FragmentResolver for C++ resolution")

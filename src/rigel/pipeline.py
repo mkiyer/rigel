@@ -730,10 +730,7 @@ def _run_locus_em_partitioned(
         )
 
     t_to_g = index.t_to_g_arr
-    if "is_synthetic" in index.g_df.columns:
-        is_synth_g = index.g_df["is_synthetic"].to_numpy()
-    else:
-        is_synth_g = np.zeros(len(index.g_df), dtype=bool)
+    is_synth_g = index.g_df["is_synthetic"].to_numpy()
 
     for i, loc in enumerate(multi_loci):
         lid = loc.multi_locus_id
