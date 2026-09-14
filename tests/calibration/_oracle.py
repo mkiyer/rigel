@@ -14,16 +14,12 @@ as well.
 """
 
 from __future__ import annotations
-import argparse
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pysam
 
-from rigel.index import TranscriptIndex
-from rigel.config import PipelineConfig
 from rigel.pipeline import scan_and_buffer, _native_detect_sj_tag
 from rigel.sim.read_name import parse_origin
 
@@ -445,57 +441,6 @@ class OracleTruth:
         tot = G + R
         return np.where(tot > 0, G / np.maximum(tot, 1e-12), np.nan), tot
 
-    def region_pools(self) -> dict:
-        """Per-region TRUE contained count by ORIGIN × GENOME strand.
-
-        Calibration deconvolves the contained count into ``(RNA₊, RNA₋, gDNA)`` and cannot split mature
-        from nascent — that is the downstream EM's job — so ``mat_*``/``nas_*`` here are the TRUE
-        composition of the RNA calibration lumps together. All six components sum to the full per-region
-        contained count (the validated sum-to-full identity).
-        """
-        nc = lambda k: np.asarray(self.parts[k].region_contained_count, np.float64)  # noqa: E731
-        g, m, n = nc("gdna"), nc("mrna"), nc("nrna")
-        return dict(
-            gdna_pos=g[:, 0],
-            gdna_neg=g[:, 1],
-            mat_uns_pos=m[:, 0],
-            mat_uns_neg=m[:, 1],
-            nas_uns_pos=n[:, 0],
-            nas_uns_neg=n[:, 1],
-        )
-
-    def boundary_pools(self) -> dict:
-        """Per-BOUNDARY TRUE crossing counts by ORIGIN × GENOME strand, plus the certified-RNA bank.
-
-        The exact mirror of :meth:`region_pools`, on the basis the solver's BOUNDARY slots use, and it
-        is ONE set of numbers per boundary rather than a left/right pair: the accumulator deposits a
-        crossing once, so there is nothing to sum.
-
-        ``*_spl`` is ``boundary_spliced``: molecules that crossed this boundary CONTIGUOUSLY having spliced
-        elsewhere. It is a different population from ``sj_count`` (:meth:`sj_flux`), which never
-        crossed the boundary at all — it jumped.
-        """
-        eu = lambda k: np.asarray(self.parts[k].boundary_unspliced_count, np.float64)  # noqa: E731
-        es = lambda k: np.asarray(self.parts[k].boundary_spliced_count, np.float64)  # noqa: E731
-        g, m, n = eu("gdna"), eu("mrna"), eu("nrna")
-        return dict(
-            gdna_pos=g[:, 0],
-            gdna_neg=g[:, 1],
-            mat_uns_pos=m[:, 0],
-            mat_uns_neg=m[:, 1],
-            nas_uns_pos=n[:, 0],
-            nas_uns_neg=n[:, 1],
-            mat_spl=es("mrna").sum(1),
-            nas_spl=es("nrna").sum(1),
-        )
-
-    def sj_flux(self) -> dict:
-        """Per-SJ TRUE flux by origin. ``gdna`` is identically zero and is returned anyway — an
-        all-zero row is the statement "gDNA does not splice", and omitting it would make the validator
-        blind to a partition that suddenly produced one."""
-        sj = lambda k: np.asarray(self.parts[k].sj_count, np.float64).sum(1)  # noqa: E731
-        return {k: sj(k) for k in ORIGINS}
-
     def component_shares(self) -> dict:
         """The true per-component share at every boundary, measured rather than modelled.
 
@@ -563,87 +508,3 @@ class OracleTruth:
             count_rna_spliced_boundary=spliced_boundary,
             count_rna_sj=total(full, "sj"),
         )
-
-
-def _main():
-    ap = argparse.ArgumentParser()
-    # Defaults track the CURRENT panel; if they go stale the fix is here, not in the caller.
-    ap.add_argument("condition", nargs="?", default="gdna_gdna100_ss_0.50_nrna_none_capture_on")
-    ap.add_argument("--suite", default=str(Path.home() / "Downloads/rigel_runs/suite/pilot"))
-    ap.add_argument("--index", default=str(Path.home() / "Downloads/rigel_runs/suite/rigel_index"))
-    args = ap.parse_args()
-    os.environ.setdefault("OMP_NUM_THREADS", "1")
-    wd = Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_oracle_split"
-    index = TranscriptIndex.load(args.index)
-    cfg = PipelineConfig()
-    bam = f"{args.suite}/{args.condition}/sim_oracle.bam"
-    print(f"=== ORACLE {args.condition} ===")
-    orc = OracleTruth.from_bam(bam, index, cfg, wd, args.condition)
-    print("VALIDATION PASSED: per-origin partitions sum to the full production payload.")
-
-    G, R = orc.region_unspliced()
-    print(
-        f"\nTRUE contained count: gDNA={G.sum():,.0f}  RNA={R.sum():,.0f}  "
-        f"(RNA = exon-body mRNA + nascent)"
-    )
-
-    # calibration accuracy on the CORRECT basis: compare per-region f_g
-    from rigel.calibration import calibrate
-    from rigel.calibration.region_arrays import RegionArrays
-    from rigel.calibration.fl import build_fl_models
-    from rigel.calibration.splice_graph import (
-        build_boundary_flags_array,
-        build_sj_geometry_arrays,
-    )
-    from dataclasses import replace as dc
-
-    sc = dc(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
-    stats, sm, buffer, payload = scan_and_buffer(bam, index, sc)
-    ra = RegionArrays.from_index(index)
-    # One object, one frame, with both divisors exactly as production passes them — the same call
-    # production makes (TRAPS: pure-and-length-censored). A harness that builds a different model
-    # from the shipped one is calibrating something the tool does not ship.
-    from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
-    from rigel.calibration.sj_opportunity import crossing_probability_from_index
-
-    fl = build_fl_models(
-        payload,
-        sj_opportunity=crossing_probability_from_index(index, int(payload.max_length)),
-        gdna_opportunity=gdna_opportunity_from_index(index, int(payload.max_length)),
-    )
-    cal = calibrate(
-        payload=payload,
-        region_arrays=ra,
-        strand_model=sm,
-        gdna_fl_pmf=fl.gdna_pmf,
-        rna_fl_pmf=fl.rna_pmf,
-        config=cfg.calibration,
-        sj=build_sj_geometry_arrays(index),
-        boundary_flags=build_boundary_flags_array(index),
-    )
-    cal_g = np.asarray(cal.count_gdna_region, np.float64)
-    cal_r = np.asarray(cal.count_rna_region, np.float64)
-    # cal contained total vs the payload's contained count (a region holds no spliced molecule)
-    print(
-        f"\ncal contained total (g+r)={(cal_g + cal_r).sum():,.0f}  vs TRUE contained={(G + R).sum():,.0f}"
-    )
-    true_fg, tot = orc.region_true_fg()
-    cal_fg = np.where((cal_g + cal_r) > 0, cal_g / np.maximum(cal_g + cal_r, 1e-12), np.nan)
-    ok = np.isfinite(true_fg) & np.isfinite(cal_fg)
-    w = tot[ok]
-    print("\n=== CALIBRATION ACCURACY on the correct (accumulator) basis ===")
-    print(
-        f"  contained gDNA mass: cal={cal_g.sum():,.0f}  true={G.sum():,.0f}  "
-        f"net err={(cal_g - G).sum():+,.0f}  Σ|err|={np.abs(cal_g - G).sum():,.0f}"
-    )
-    mwae = float(np.sum(w * np.abs(cal_fg[ok] - true_fg[ok])) / max(w.sum(), 1))
-    print(f"  mass-weighted |Δf_g| = {mwae:.4f}   (0 = perfect per-region gDNA fraction)")
-    dirn = np.maximum(G - cal_g, 0.0)  # gDNA under-called (leaks to RNA)
-    print(
-        f"  directional gDNA under-call (RNA over-attribution) = {dirn.sum():,.0f}  "
-        f"over-call = {np.maximum(cal_g - G, 0).sum():,.0f}"
-    )
-
-
-if __name__ == "__main__":
-    _main()

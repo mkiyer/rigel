@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Two transcripts on opposite strands, overlapping, swept across gDNA and nascent settings.
 
 With neither gDNA nor nascent RNA the two transcripts are independent and must be solved as
@@ -14,7 +13,6 @@ from pathlib import Path
 
 import numpy as np
 import pysam
-import pytest
 
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.pipeline import run_pipeline
@@ -160,14 +158,9 @@ def _extract_results(pr, bench, result):
 
     # Locus details
     for i, lr in enumerate(est.locus_results):
-        if isinstance(lr, dict):
-            info[f"locus_{i}_n_transcripts"] = lr.get("n_transcripts", 0)
-            info[f"locus_{i}_n_em_fragments"] = lr.get("n_em_fragments", 0)
-            info[f"locus_{i}_gdna_prior_count"] = lr.get("gdna_prior_count", 0.0)
-        else:
-            info[f"locus_{i}_n_transcripts"] = lr.n_transcripts
-            info[f"locus_{i}_n_em_fragments"] = lr.n_em_fragments
-            info[f"locus_{i}_gdna_prior_count"] = lr.gdna_prior_count
+        info[f"locus_{i}_n_transcripts"] = lr.get("n_transcripts", 0)
+        info[f"locus_{i}_n_em_fragments"] = lr.get("n_em_fragments", 0)
+        info[f"locus_{i}_gdna_prior_count"] = lr.get("gdna_prior_count", 0.0)
 
     return info
 
@@ -194,12 +187,6 @@ def _compare_results(r1, r2, label=""):
 
 class TestOppositeStrandOverlap:
     """Test two opposite-strand transcripts sharing genomic territory."""
-
-    @pytest.fixture
-    def scenario(self, tmp_path):
-        sc = _build_scenario(tmp_path)
-        yield sc
-        sc.cleanup()
 
     # -------------------------------------------------------------------
     # Part 1: Locus structure under different conditions
@@ -378,37 +365,3 @@ class TestOppositeStrandOverlap:
                 assert v1 == v2, f"Structural difference in {k}: {v1} vs {v2}"
 
         sc.cleanup()
-
-
-# ===========================================================================
-# Direct invocation for quick iteration
-# ===========================================================================
-
-if __name__ == "__main__":
-    import tempfile
-
-    logging.basicConfig(level=logging.WARNING)
-
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        test = TestOppositeStrandOverlap()
-
-        print("=" * 70)
-        print("  OPPOSITE-STRAND OVERLAP TEST")
-        print("=" * 70)
-
-        # Part 1: Locus structure
-        test.test_mrna_only_independent(tmp / "p1a")
-        test.test_nrna_creates_shared_locus(tmp / "p1b")
-        test.test_gdna_creates_shared_locus(tmp / "p1c")
-        test.test_full_stress(tmp / "p1d")
-
-        # Part 2: Fragment ordering
-        print("\n" + "=" * 70)
-        print("  FRAGMENT ORDER SENSITIVITY")
-        print("=" * 70)
-
-        test.test_fragment_order_mrna_only(tmp / "p2a")
-        test.test_fragment_order_with_nrna(tmp / "p2b")
-        test.test_fragment_order_with_gdna(tmp / "p2c")
-        test.test_fragment_order_full_stress(tmp / "p2d")

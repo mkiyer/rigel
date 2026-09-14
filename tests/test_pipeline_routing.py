@@ -85,9 +85,6 @@ class _Chunk:
         self.frag_lengths = np.array(flat_fl, dtype=np.int32)
         self.exon_bp = np.array(flat_exon, dtype=np.uint16)
 
-    def __getitem__(self, idx):
-        return self._bfs[idx]
-
     def to_scoring_arrays(self):
         return (
             np.ascontiguousarray(self.t_offsets, dtype=np.int32),
@@ -109,9 +106,6 @@ class _Buffer:
     def __init__(self, chunks):
         self._chunks = list(chunks)
         self.total_fragments = sum(ch.size for ch in self._chunks)
-
-    def iter_chunks(self):
-        yield from self._chunks
 
     def iter_chunks_consuming(self):
         while self._chunks:
@@ -138,9 +132,6 @@ class _Index:
                 "is_synthetic": np.zeros(self.num_transcripts, dtype=bool),
             }
         )
-
-    def get_exon_intervals(self, t_idx):
-        return None
 
     def build_exon_csr(self):
         n_t = self.num_transcripts

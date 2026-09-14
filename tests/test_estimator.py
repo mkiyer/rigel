@@ -16,7 +16,6 @@ import pytest
 
 from rigel.types import Strand
 from rigel.splice import (
-    SpliceType,
     SpliceStrandCol,
 )
 from rigel.config import EMConfig, TranscriptGeometry
@@ -115,63 +114,34 @@ def _lengths(values):
     return TranscriptGeometry(effective_lengths=a, effective_lengths_em=a)
 
 
-def _make_frag_length_models():
-    from rigel.frag_length_model import FragmentLengthModels
-
-    im = FragmentLengthModels()
-    im.observe(250, SpliceType.UNSPLICED)
-    return im
-
-
-def _make_em_data(
-    t_indices_per_unit,
-    log_liks_per_unit=None,
-    count_cols_per_unit=None,
-    num_transcripts=None,
-):
-    """Build ScoredFragments from a list of per-unit candidate lists.
+def _make_em_data(t_indices_per_unit):
+    """Build ScoredFragments from a list of per-unit candidate lists, every candidate an unspliced
+    sense hit at log-likelihood 0.
 
     The global ScoredFragments contains mRNA + nRNA candidates only (no gDNA).
     """
     offsets = [0]
     flat_t = []
-    flat_lk = []
-    flat_cc = []
-
-    for u, t_list in enumerate(t_indices_per_unit):
-        for j, t_idx in enumerate(t_list):
-            flat_t.append(t_idx)
-            if log_liks_per_unit is not None:
-                flat_lk.append(log_liks_per_unit[u][j])
-            else:
-                flat_lk.append(0.0)
-            if count_cols_per_unit is not None:
-                flat_cc.append(count_cols_per_unit[u][j])
-            else:
-                flat_cc.append(_UNSPLICED_SENSE)
+    for t_list in t_indices_per_unit:
+        flat_t.extend(t_list)
         offsets.append(len(flat_t))
 
     n_units = len(t_indices_per_unit)
     n_candidates = len(flat_t)
 
-    if num_transcripts is None:
-        num_transcripts = (max(flat_t) + 1) if flat_t else 0
-
-    # Build locus tracking arrays
+    # Build locus tracking arrays: each unit's first candidate
     locus_t = np.full(n_units, -1, dtype=np.int32)
     locus_cc = np.zeros(n_units, dtype=np.uint8)
     for u, t_list in enumerate(t_indices_per_unit):
-        cc_list = count_cols_per_unit[u] if count_cols_per_unit else None
-        for j, t_idx in enumerate(t_list):
-            locus_t[u] = t_idx
-            locus_cc[u] = cc_list[j] if cc_list else _UNSPLICED_SENSE
-            break
+        if t_list:
+            locus_t[u] = t_list[0]
+            locus_cc[u] = _UNSPLICED_SENSE
 
     return ScoredFragments(
         offsets=np.array(offsets, dtype=np.int64),
         t_indices=np.array(flat_t, dtype=np.int32),
-        log_liks=np.array(flat_lk, dtype=np.float64),
-        count_cols=np.array(flat_cc, dtype=np.uint8),
+        log_liks=np.zeros(n_candidates, dtype=np.float64),
+        count_cols=np.full(n_candidates, _UNSPLICED_SENSE, dtype=np.uint8),
         coverage_weights=np.ones(n_candidates, dtype=np.float64),
         locus_t_indices=locus_t,
         locus_count_cols=locus_cc,

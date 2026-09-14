@@ -96,11 +96,8 @@ def capture_sweep_inputs(tmp_path_factory):
     )
 
 
-def _run(si, policy, capture=None):
-    kw = dict(si["kw"])
-    if capture is not None:
-        kw["_capture"] = capture
-    out = SW.solve_chain(*si["args"], **kw, policy=policy)
+def _run(si, policy):
+    out = SW.solve_chain(*si["args"], **si["kw"], policy=policy)
     return {f: np.asarray(getattr(out, f)) for f in ("f_g", "f_pos", "f_neg", "var_gdna")}
 
 
@@ -267,10 +264,6 @@ def _drive(prepared, ctx):
 def _drive_the_backbone(prepared, ctx):
     """`_drive`'s rows alone."""
     return _drive(prepared, ctx)[0]
-
-
-def _rows_of(pol, ctx):
-    return _drive_the_backbone(pol.prepare(ctx), ctx)
 
 
 def _strand_row_of(ctx, strand, lam, x):

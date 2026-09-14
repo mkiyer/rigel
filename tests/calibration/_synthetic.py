@@ -56,10 +56,6 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         """
         return np.asarray(counts, np.float64).sum(axis=1) / placements
 
-    def lengths(counts, length):
-        """ONE column, for the same reason :func:`inv` is."""
-        return (np.asarray(counts, np.uint64).sum(axis=1) * np.uint64(length)).astype(np.uint64)
-
     def mass(counts, per_crossing=2):
         """The conserved mass a bank of ``counts`` crossings would deposit, at ``1/per_crossing`` each.
 

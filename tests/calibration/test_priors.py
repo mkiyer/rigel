@@ -666,13 +666,6 @@ def _regions_from_bounds(bounds, signature=None, ref_id=None) -> RegionArrays:
     )
 
 
-def _dense(idx, lid, share, n_boundaries, n_loci) -> np.ndarray:
-    """The (boundary, locus) share triples as a dense matrix — readable assertions, small fixtures only."""
-    out = np.zeros((n_boundaries, n_loci), dtype=np.float64)
-    out[np.asarray(idx, np.int64), np.asarray(lid, np.int64)] = share
-    return out
-
-
 # --- the rule -------------------------------------------------------------------------------------
 
 

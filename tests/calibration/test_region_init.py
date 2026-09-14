@@ -293,20 +293,6 @@ def test_density_factor_precision_flows_into_region_init():
 # ── the signature-only classification the chain carries: free_* beside mrna_active_* ─────────
 
 
-def _substrate(n_regions, n_boundaries):
-    """A zero-count substrate of the right shape — the classifier under test is signature-only, so the
-    counts are irrelevant and only ``boundary_spliced`` is read (for ``spliced_count``)."""
-
-    def view(n):
-        return SimpleNamespace(count=np.zeros((n, 2)))
-
-    return SimpleNamespace(
-        region_contained=view(n_regions),
-        boundary_unspliced=view(n_boundaries),
-        boundary_spliced=view(n_boundaries),
-    )
-
-
 def _build_statics(region_sigs):
     """Build a single-reference chain over ``region_sigs`` (genomic order) and return
     ``(chain, statics)``.

@@ -39,35 +39,6 @@ def _write_bam(path: Path, reads: list[pysam.AlignedSegment]) -> str:
     return bam_path
 
 
-def _make_spliced_read(
-    qname: str,
-    pos: int,
-    *,
-    flag: int = 0x41,  # paired, read1
-    cigar: list[tuple[int, int]] | None = None,
-    tags: list[tuple] | None = None,
-) -> pysam.AlignedSegment:
-    """Create a spliced paired-end read for the test reference."""
-    a = pysam.AlignedSegment()
-    a.query_name = qname
-    a.reference_id = 0
-    a.reference_start = pos
-    a.mapping_quality = 60
-    a.flag = flag
-    if cigar is None:
-        # 50M 200N 50M — two exon blocks separated by a 200bp intron
-        cigar = [(0, 50), (3, 200), (0, 50)]
-    a.cigar = cigar
-    a.query_sequence = "A" * sum(n for op, n in cigar if op in (0, 1, 4))
-    a.query_qualities = pysam.qualitystring_to_array("I" * len(a.query_sequence))
-    a.next_reference_id = 0
-    a.next_reference_start = pos + 300
-    a.template_length = 500
-    if tags is not None:
-        a.set_tags(tags)
-    return a
-
-
 def _make_read_pair(
     qname: str,
     pos: int,
@@ -133,36 +104,6 @@ def _make_read_pair(
         r2.set_tags(r2_tags)
 
     return [r1, r2]
-
-
-def _read_back_tags(bam_path: str) -> list[dict]:
-    """Read back tags from a BAM and return type info for inspection."""
-    results = []
-    with pysam.AlignmentFile(bam_path, "rb") as bam:
-        for read in bam:
-            for tag, val in read.get_tags(with_value_type=True):
-                # get_tags with_value_type returns (tag, value, type_code)
-                pass
-            # Alternative: iterate raw tags
-            raw_tags = {}
-            for tag, val, type_code in read.get_tags(with_value_type=True):
-                raw_tags[tag] = {"value": val, "type": type_code}
-            results.append({"qname": read.query_name, "tags": raw_tags})
-    return results
-
-
-# =====================================================================
-# Helpers — low-level BAM tag writing for exact type control
-# =====================================================================
-
-
-def _set_tag_raw(segment: pysam.AlignedSegment, tag: str, value, type_code: str):
-    """Set a BAM tag with explicit type code using pysam's set_tag().
-
-    This gives precise control over whether a tag is stored as 'A' (char),
-    'Z' (string), 'i' (int32), 'c' (int8), etc.
-    """
-    segment.set_tag(tag, value, type_code)
 
 
 # =====================================================================

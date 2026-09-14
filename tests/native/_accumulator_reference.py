@@ -307,10 +307,6 @@ class Partition:
     sj_strand: np.ndarray  # int8[n_sj]
 
     @property
-    def n_refs(self) -> int:
-        return int(self.ref_region_bound_offsets.shape[0]) - 1
-
-    @property
     def n_regions(self) -> int:
         return int(self.ref_region_offsets[-1])
 
