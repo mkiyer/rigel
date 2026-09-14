@@ -6,9 +6,13 @@ or the node's own flux's) and a cube row are all BOUNDS: the value the solve set
 admitted half-line is the prior's own, so training the prior on it is training the prior on its echo
 (`ISSUES: gdna-landscape-trains-on-false-positives`). `sweep.solve_chain` publishes the predicate as
 `RegionBelief.has_composition`, read off the held messages, and `calibrate._fit_gdna_hyperprior` selects on
-it; the zero-count anchor trains regardless, being a structural statement rather than a solve. "Any
-non-flat λ-row" is NOT the predicate — `PsiMessage.lam_rows` fuses compositions and bounds together,
-so that reading keeps exactly the bound-only slots this rule excludes.
+it AND on whether the solve LOCATES the slot: a posterior wider than one nat² in ``log f_g``
+(`landscape._LOCATED_VAR`, the estimator's one-fragment wall through ``Var(log c) = 1/c``) has no
+location whatever its evidence — a strand term at a pure-RNA vertex, an empty intron's factory row, a
+one-sided delivered row — and its median is the reference's under its bound. The zero-count anchor
+trains regardless, being a structural statement rather than a solve. "Any non-flat λ-row" is NOT the
+predicate — `PsiMessage.lam_rows` fuses compositions and bounds together, so that reading keeps exactly
+the bound-only slots this rule excludes.
 
 PERTURBATION, each watched: with `has_composition` forced True everywhere, with the held compositions
 dropped from the predicate, and with "any non-flat row" in place of the held composition, the
@@ -160,7 +164,7 @@ def _synthetic_population():
     eff = np.full(7, 1000.0)
     belief = SimpleNamespace(
         f_g=np.array([0.0, 0.5, 0.3, 0.5, 1.0, 0.5, 0.9]),
-        var_gdna=np.array([np.inf, 1.0, 2.0, 1.0, 0.0, 1.0, 0.5]),
+        var_gdna=np.array([np.inf, 1.0, 0.8, 1.0, 0.0, 1.0, 0.5]),
         has_composition=np.array([False, True, True, True, True, True, True]),
     )
     return chain, belief, statics, region_arrays, mass, eff
@@ -202,6 +206,40 @@ def test_a_flat_likelihood_slot_is_not_in_the_training_population(monkeypatch):
     # estimator as ``domain`` — the exon that left the training set is still on the axis the prior is
     # read at, and so is every boundary
     assert np.array_equal(part["domain_mass"], np.array([0.0, 5.0, 100.0, 5.0, 80.0, 5.0, 60.0]))
+
+
+def test_a_slot_wider_than_one_nat_does_not_train_whatever_its_evidence(monkeypatch):
+    """THE LOCATION FLOOR: with a composition and a solve narrower than a nat² the exon trains; with the
+    same composition and a solve wider than that it leaves the population (a pure-RNA vertex read at its
+    resolution, the poison of the gDNA-free stranded rows: 3,771 false fragments trained at the first
+    refit); at exactly one nat² it stays, the floor being the count rule's inclusive wall; and a slot
+    with a narrow solve but no composition still does not train — the no-echo rule and the floor are a
+    conjunction, since a bound-only slot sharpened by the prior alone is the prior's echo. The intron
+    (var 0.5) and the locked region (var 0) are untouched throughout."""
+    parts = _synthetic_population()
+    chain, belief, *_ = parts
+    full = _training_counts(monkeypatch, belief, parts)
+    assert full["count"].shape == (4,), "the exon at var 0.8 trains"
+
+    def with_var(v, has=None):
+        var = belief.var_gdna.copy()
+        var[2] = v
+        return SimpleNamespace(
+            f_g=belief.f_g,
+            var_gdna=var,
+            has_composition=belief.has_composition if has is None else has,
+        )
+
+    wide = _training_counts(monkeypatch, with_var(2.0), parts)
+    assert wide["count"].shape == (3,) and np.array_equal(
+        wide["count"], np.array([0.0, 80.0, 54.0])
+    )
+    edge = _training_counts(monkeypatch, with_var(1.0), parts)
+    assert edge["count"].shape == (4,), "the floor is inclusive: one nat² is the wall itself"
+    echo = _training_counts(
+        monkeypatch, with_var(0.3, belief.has_composition & ~(np.arange(7) == 2)), parts
+    )
+    assert echo["count"].shape == (3,), "a bound-only slot does not train however narrow its solve"
 
 
 def test_the_substrate_guard_measures_the_domain_not_the_cut(monkeypatch):

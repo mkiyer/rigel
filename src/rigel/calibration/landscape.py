@@ -62,6 +62,15 @@ _KNN_SCALE = 0.5
 #: down-weighted. Changing it is its own measured experiment; it must not ride along with anything else.
 _S0 = (0.15 * _LN10) ** 2
 
+#: THE LOCATION FLOOR, in the variable every solve reports. The estimator's resolution wall is one fragment
+#: (``max(count, 1)`` centres a kernel; ``count < 1`` is location-free and E-step placed), and a Poisson count
+#: ``c`` has ``Var(log c) = 1/c``, so "below one fragment" is "the log-count is uncertain by more than one nat²".
+#: `RegionBelief.var_gdna` is ``Var(log f_g)`` — at fixed mass, ``Var(log count)`` — whatever produced the
+#: solve (the strand term, the factory, a delivered row), so a slot wider than this has no location by the
+#: same floor the count rule applies, and does not train (`calibrate._fit_gdna_hyperprior`). Not a tuned
+#: constant: the identity's value at the wall. Gate: `test_landscape_training_population.py`.
+_LOCATED_VAR = 1.0
+
 
 @dataclass(frozen=True)
 class DensityLandscape:
@@ -254,10 +263,14 @@ def _reliability(count: np.ndarray, var: np.ndarray, anchor: np.ndarray) -> np.n
     statement and carries ``w = 1``: its density is ``0`` for every ``f_g``, so its composition ambiguity
     is irrelevant.
 
-    Precision belongs here, as a continuous weight, and nowhere else. Expressing it as an admission
-    threshold is measurably worse than ignoring precision entirely, and moving it into the kernel width
-    instead is refuted by its own control: a single constant width performs identically, so that form is a
-    global bandwidth under another name, and it inflates false enrichment on zero-gDNA libraries.
+    Precision enters twice, and the two roles are distinct. ABOVE the location floor (:data:`_LOCATED_VAR`)
+    it is this continuous weight and nothing else: a tuned admission threshold on it was measured worse than
+    ignoring precision, and moving it into the kernel width is refuted by its own control (a single constant
+    width performs identically, so that form is a global bandwidth under another name, and it inflates false
+    enrichment on zero-gDNA libraries). AT the floor it is admission — a slot whose log-count is uncertain by
+    more than one nat² has no location, as a count below one fragment has none, and it is not a training
+    slot (2026-09-14: the four ladder zero controls 500 → 282, 211 → 194, 550 → 265, 231 → 172 with every
+    contaminated stratum unchanged or better).
 
     On unstranded data the weight does not separate enriched from depleted within a region class; it
     separates classes (exons being down-weighted against introns and intergenic), and every enriched

@@ -152,14 +152,15 @@ class Spy:
 
 
 def training_selector(
-    kind, obj_idx, signature, free_pos, free_neg, mass_global, eff_global, has_composition=None
+    kind, obj_idx, signature, free_pos, free_neg, mass_global, eff_global, has_composition=None, var_gdna=None
 ):
     """The refit's training population, re-derived from the statics exactly as
     `calibrate._fit_gdna_hyperprior` selects it: expressed REGIONs that are single-strand or
     structurally locked AND hold a composition (`RegionBelief.has_composition`: a slot whose only evidence
-    is a bound, or which has none, does not train), plus the zero-count anchor (an
-    intergenic or intronic region with opportunity and no unspliced mass). Returns ``(sel, anchor)``;
-    the caller GATES it against the recorded fit."""
+    is a bound, or which has none, does not train) AND are located by their solve (``var_gdna`` within
+    `landscape._LOCATED_VAR`), plus the zero-count anchor (an intergenic or intronic region with
+    opportunity and no unspliced mass). Returns ``(sel, anchor)``; the caller GATES it against the
+    recorded fit."""
     isr = np.asarray(kind) == REGION
     fp = np.asarray(free_pos, bool)
     fn = np.asarray(free_neg, bool)
@@ -172,6 +173,7 @@ def training_selector(
     sel = expressed & ((fp ^ fn) | (~fp & ~fn))
     if has_composition is not None:
         sel &= np.asarray(has_composition, bool)
+        sel &= np.asarray(var_gdna, np.float64) <= LS._LOCATED_VAR
     sel |= anchor
     return sel, anchor
 
@@ -327,6 +329,7 @@ def run_condition(index, region_arrays, sj, boundary_flags, cache_dir: Path, pol
             cap.mass_global,
             cap.eff_global,
             has_composition=sw["belief"].has_composition,
+            var_gdna=sw["belief"].var_gdna,
         )
         gate_selector(sel, anchor, cap.f_g, cap.mass_global, cap.eff_global, fit)
         fg_grid = np.asarray(cap.solve_grid, np.float64)  # the capture's grid is f_g = σ(λ)

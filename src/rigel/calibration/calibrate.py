@@ -84,7 +84,7 @@ from .gdna_strand import (
 )
 from .region_chain import build_region_chain
 from .result import CalibrationResult
-from .landscape import DensityLandscape, fit_landscape
+from .landscape import _LOCATED_VAR, DensityLandscape, fit_landscape
 from .signature import RegionType, coarse_type_array
 from .simplex_logodds import _logodds_grid
 from .strand_balance import fit_strand_balance
@@ -245,7 +245,13 @@ def _fit_gdna_hyperprior(
       density ``0`` for every ``f_g``: "gDNA is absent here" is the strongest depletion evidence there
       is, and this zero-count anchor is what grounds the depleted mode. Dropping it is a large,
       measured loss, worst on zero-gDNA libraries.
-    * precision → a continuous WEIGHT, never admission (`landscape._reliability`).
+    * location → ADMISSION AT THE FLOOR, precision above it → a continuous WEIGHT
+      (`landscape._reliability`). A slot whose solve is wider than one nat² in ``log f_g``
+      (`landscape._LOCATED_VAR`, the count rule's one-fragment wall through ``Var(log c) = 1/c``) has no
+      location, whatever produced its solve: a strand term at a pure-RNA vertex, a factory row on an empty
+      intron, a one-sided delivered row. Its median is where the reference measure sits under its bound,
+      and training on it re-seeds the landscape at that resolution — on a gDNA-free stranded library 3,771
+      false fragments at the first refit from 744 such exons, a false mode two decades above the anchors.
     * geometry → BOUNDARIES ARE EXCLUDED. They cross rather than contain, are about as numerous as
       regions but far less often truly enriched, and their two-flank mixture fills the valley between
       the two true modes.
@@ -287,7 +293,10 @@ def _fit_gdna_hyperprior(
     if int((sel | anchor).sum()) < _MIN_TRAIN:
         return None
     if belief.has_composition is not None:
+        # a composition, AND a solve that locates it: both come from a sweep, so an initial belief
+        # (no predicate, no solve) reads the annotation alone
         sel &= np.asarray(belief.has_composition, dtype=bool)
+        sel &= np.asarray(belief.var_gdna, dtype=np.float64) <= _LOCATED_VAR
     sel |= anchor
     mass = np.asarray(mass_global, dtype=np.float64)[sel]
     return fit_landscape(
