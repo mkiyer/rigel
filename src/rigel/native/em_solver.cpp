@@ -2094,9 +2094,6 @@ batch_locus_em_partitioned(
     // Per-locus grouped additive calibration priors
     f64_1d   locus_gdna_prior_count,
     f64_1d   locus_rna_prior_count,
-    // Temporary compatibility input. Production availability is derived
-    // structurally from per-unit gDNA candidates during sub-problem extraction.
-    u8_1d    locus_enable_gdna,
     // Per-locus FL-marginal overlap effective length for the gDNA component.
     f64_1d   locus_gdna_eff_lens,
     // Per-transcript globals
@@ -2862,7 +2859,6 @@ NB_MODULE(_em_impl, m) {
           nb::arg("locus_transcript_indices"),
           nb::arg("locus_gdna_prior_count"),
           nb::arg("locus_rna_prior_count"),
-          nb::arg("locus_enable_gdna"),
           nb::arg("locus_gdna_eff_lens"),
           nb::arg("unambig_counts"),
           nb::arg("t_eff_lens"),

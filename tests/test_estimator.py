@@ -1067,7 +1067,6 @@ def test_equal_rna_likelihoods_split_evenly():
         locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
         index=None,
-        enable_gdna=np.array([0], dtype=np.uint8),
     )
 
     assert total_gdna == pytest.approx(0.0)
@@ -1084,7 +1083,6 @@ def test_enabled_gdna_component_absorbs_likelihood_mass_without_prior_count():
         locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
         index=None,
-        enable_gdna=np.array([1], dtype=np.uint8),
     )
 
     assert total_gdna > 0.8 * n_units
@@ -1103,7 +1101,6 @@ def test_gdna_effective_length_downweights_gdna_component():
         gdna_prior_count=np.array([0.0], dtype=np.float64),
         index=None,
         gdna_eff_len=np.array([1.0], dtype=np.float64),
-        enable_gdna=np.array([1], dtype=np.uint8),
     )
 
     est_long = _estimator(1, mode="map")
@@ -1113,7 +1110,6 @@ def test_gdna_effective_length_downweights_gdna_component():
         gdna_prior_count=np.array([0.0], dtype=np.float64),
         index=None,
         gdna_eff_len=np.array([100.0], dtype=np.float64),
-        enable_gdna=np.array([1], dtype=np.uint8),
     )
 
     assert gdna_long[0] < gdna_short[0]
@@ -1132,7 +1128,6 @@ def test_gdna_em_llr_bias_favors_gdna_assignment():
         gdna_prior_count=np.array([0.0], dtype=np.float64),
         index=None,
         gdna_eff_len=np.array([1.0], dtype=np.float64),
-        enable_gdna=np.array([1], dtype=np.uint8),
     )
     _t, _r, gdna_neg = _estimator(1, gdna_em_llr_bias=-2.0).run_batch_locus_em_partitioned(**kw)
     _t, _r, gdna_neutral = _estimator(1, gdna_em_llr_bias=0.0).run_batch_locus_em_partitioned(**kw)
@@ -1157,7 +1152,6 @@ def test_aggregate_rna_prior_reduces_gdna_share_without_isoform_floor():
         rna_prior_count=np.array([0.0], dtype=np.float64),
         index=None,
         gdna_eff_len=np.array([1.0], dtype=np.float64),
-        enable_gdna=np.array([1], dtype=np.uint8),
     )
 
     est_rna = _estimator(1, mode="map")
@@ -1168,7 +1162,6 @@ def test_aggregate_rna_prior_reduces_gdna_share_without_isoform_floor():
         rna_prior_count=np.array([10.0], dtype=np.float64),
         index=None,
         gdna_eff_len=np.array([1.0], dtype=np.float64),
-        enable_gdna=np.array([1], dtype=np.uint8),
     )
 
     assert gdna_rna[0] < gdna_unprior[0]
@@ -1185,7 +1178,6 @@ def test_grouped_priors_inactive_without_structural_gdna_candidate():
         gdna_prior_count=np.array([100.0], dtype=np.float64),
         rna_prior_count=np.array([100.0], dtype=np.float64),
         index=None,
-        enable_gdna=np.array([1], dtype=np.uint8),
     )
 
     assert total_gdna == pytest.approx(0.0)
@@ -1201,7 +1193,6 @@ def test_assignment_outputs_follow_partition_units():
         locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
         index=None,
-        enable_gdna=np.array([0], dtype=np.uint8),
         emit_assignments=True,
     )
 
@@ -1213,52 +1204,31 @@ def test_assignment_outputs_follow_partition_units():
 
 
 # ---------------------------------------------------------------------------
-# Structural gDNA eligibility: ``gdna_prior_count`` no longer gates the gDNA
-# component, and the compatibility ``enable_gdna`` array is not a modeling gate
-# — native derives candidate availability from the partition itself.
+# Structural gDNA eligibility: native derives candidate availability from the
+# partition itself, and ``gdna_prior_count`` does not gate the gDNA component.
 # ---------------------------------------------------------------------------
 
 
-def test_compat_enable_false_does_not_disable_structural_candidate():
-    """A compatibility ``enable_gdna=False`` input is ignored by native v3."""
-    n_units = 50
-    est = _estimator(2, mode="map")
-    total_gdna, _rna, _g = est.run_batch_locus_em_partitioned(
-        partition_tuples=[_partition(n_units=n_units, log_liks=(-1.0, -1.0), gdna_log_lik=-0.5)],
-        locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
-        gdna_prior_count=np.array([100.0], dtype=np.float64),
-        index=None,
-        enable_gdna=np.array([0], dtype=np.uint8),
-    )
-
-    assert total_gdna > 0.5 * n_units, (
-        "native should derive gDNA availability from finite unspliced candidates, "
-        f"not the compatibility enable_gdna array; got total_gdna={total_gdna}"
-    )
-
-
-def test_default_enable_gdna_inferred_from_partition():
-    """When ``enable_gdna`` is None, the wrapper computes it from the partition
-    (any unspliced unit with a finite gDNA log-lik ⇒ enabled).
-    """
+def test_gdna_candidates_are_derived_from_the_partition():
+    """A locus admits gDNA iff some unspliced unit carries a finite gDNA log-lik, whatever the
+    prior count."""
     n_units = 20
     locus_t_lists = [np.array([0, 1], dtype=np.int32)]
 
-    # All-spliced partition ⇒ no per-unit gDNA candidate ⇒ enable=0.
+    # All-spliced partition ⇒ no per-unit gDNA candidate.
     spliced_part = _partition(
         n_units=n_units, log_liks=(-1.0, -2.0), gdna_log_lik=-0.5, is_spliced=True
     )
-    # Unspliced partition with finite gDNA log-liks ⇒ enable=1.
+    # Unspliced partition with finite gDNA log-liks ⇒ candidates.
     unspliced_part = _partition(
         n_units=n_units, log_liks=(-1.0, -2.0), gdna_log_lik=-0.5, is_spliced=False
     )
-    # Unspliced but non-finite gDNA log-lik ⇒ enable=0.
+    # Unspliced but non-finite gDNA log-lik ⇒ no candidate.
     nogdna_part = _partition(
         n_units=n_units, log_liks=(-1.0, -2.0), gdna_log_lik=-np.inf, is_spliced=False
     )
 
-    # All three with gdna_prior_count=0 and enable_gdna omitted (inferred).
-    # Only the unspliced+finite case produces gDNA assignments.
+    # All three with gdna_prior_count=0: only the unspliced+finite case produces gDNA assignments.
     g_spl, _, _ = _estimator(2, mode="map").run_batch_locus_em_partitioned(
         [spliced_part],
         locus_t_lists,
@@ -1281,7 +1251,7 @@ def test_default_enable_gdna_inferred_from_partition():
     assert g_spl == 0.0, "spliced partition has no gDNA candidates"
     assert g_no == 0.0, "non-finite gDNA log-liks ⇒ no gDNA candidates"
     assert g_uns > 0.0, (
-        "unspliced+finite gDNA log-lik must enable component even when gdna_prior_count == 0"
+        "unspliced+finite gDNA log-lik must admit the component even when gdna_prior_count == 0"
     )
 
 
@@ -1322,14 +1292,13 @@ class _StubIndex:
         self.t_df = pd.DataFrame({"is_synthetic": np.asarray(flags, dtype=bool)})
 
 
-def _run(est, partition, t_idx, *, index=None, rna_prior=0.0, gdna_prior=0.0, enable_gdna=1):
+def _run(est, partition, t_idx, *, index=None, rna_prior=0.0, gdna_prior=0.0):
     return est.run_batch_locus_em_partitioned(
         partition_tuples=[partition],
         locus_transcript_indices=[np.asarray(t_idx, dtype=np.int32)],
         gdna_prior_count=np.array([gdna_prior], dtype=np.float64),
         rna_prior_count=np.array([rna_prior], dtype=np.float64),
         index=index,
-        enable_gdna=np.array([enable_gdna], dtype=np.uint8),
     )
 
 
@@ -1508,7 +1477,6 @@ def _warm_start_run(
     weight=None,
     rna_prior=0.0,
     gdna_prior=0.0,
-    enable_gdna=1,
     iterations=500,
 ):
     # `em_iterations` is an EXPLICIT argument of the estimator entry point, NOT read from
@@ -1521,7 +1489,6 @@ def _warm_start_run(
         rna_prior_count=np.array([rna_prior], dtype=np.float64),
         rna_prior_weight=None if weight is None else np.asarray(weight, dtype=np.float64),
         index=None,
-        enable_gdna=np.array([enable_gdna], dtype=np.uint8),
     )
     return est.em_counts.sum(axis=1)
 
@@ -1629,13 +1596,13 @@ def test_the_RNA_PRIOR_REACHES_a_locus_with_NO_gDNA_CANDIDATE():
     flat = (0.0, 0.0)
     part = _warm_start_partition(n_units=100, log_liks=flat, gdna_log_lik=-np.inf)
     weighted = _warm_start_run(
-        _warm_start_estimator(2), part, [0, 1], weight=[3.0, 1.0], rna_prior=40.0, enable_gdna=0
+        _warm_start_estimator(2), part, [0, 1], weight=[3.0, 1.0], rna_prior=40.0
     )
     assert weighted[0] / weighted[1] == pytest.approx(3.0, rel=0.05), (
         "the RNA prior was discarded at a locus with no gDNA candidate"
     )
     # and the SHIPPED weights cancel there, which is what makes the defect invisible by default
-    shipped = _warm_start_run(_warm_start_estimator(2), part, [0, 1], rna_prior=40.0, enable_gdna=0)
+    shipped = _warm_start_run(_warm_start_estimator(2), part, [0, 1], rna_prior=40.0)
     assert shipped[0] == pytest.approx(shipped[1], rel=1e-9)
 
 

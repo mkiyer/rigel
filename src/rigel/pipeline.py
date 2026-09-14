@@ -663,8 +663,8 @@ def _run_locus_em_partitioned(
     one ``run_batch_locus_em_partitioned`` call (the solver is OpenMP-parallel
     internally), and appends a per-locus dict to ``estimator.locus_results`` for
     ``get_loci_df``. The calibration prior enters as the two per-locus alpha
-    scalars; ``enable_gdna`` is the structural eligibility (any unspliced unit
-    carrying a finite gDNA log-lik — the rule the C++ extractor uses).
+    scalars; the loci table's ``enable_gdna`` reports the structural eligibility (any
+    unspliced unit carrying a finite gDNA log-lik — the rule the C++ extractor applies).
 
     ``rna_prior_weight`` is the one PER-TRANSCRIPT array here and it is passed FLAT, while every
     other prior array is subscripted by ``ids`` into per-locus order. That asymmetry is the point: the
@@ -717,7 +717,6 @@ def _run_locus_em_partitioned(
         # that the result MOVED can.
         rna_prior_weight=rna_prior_weight,
         gdna_eff_len=g_eff,
-        enable_gdna=enable_gdna,
         em_iterations=em_config.iterations,
         em_convergence_delta=em_config.convergence_delta,
         emit_locus_stats=emit_locus_stats,

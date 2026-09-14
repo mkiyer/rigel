@@ -291,7 +291,6 @@ class AbundanceEstimator:
         rna_prior_count: np.ndarray | None = None,
         rna_prior_weight: np.ndarray | None = None,
         gdna_eff_len: np.ndarray | None = None,
-        enable_gdna: np.ndarray | None = None,
         em_iterations: int = 1000,
         em_convergence_delta: float = 1e-6,
         emit_locus_stats: bool = False,
@@ -327,13 +326,6 @@ class AbundanceEstimator:
             float64 array of length ``n_loci``: FL-marginal overlap
             effective length for each locus's gDNA component. When ``None``,
             defaults to ones for wrapper-level test compatibility.
-        enable_gdna : np.ndarray, optional
-            uint8 array of length ``n_loci``: 1 = gDNA component eligible,
-            0 = disabled. Decoupled from ``gdna_prior_count`` per the Bayesian
-            prior redesign (Phase 0). When ``None`` (default), eligibility
-            is computed per locus as "any unspliced unit carries a finite
-            gDNA log-likelihood" — the same condition the C++ extractor
-            uses to admit per-unit gDNA candidates.
         em_iterations, em_convergence_delta
             EM algorithm parameters.
         emit_locus_stats : bool
@@ -406,24 +398,6 @@ class AbundanceEstimator:
         assignment_mode_int = _ASSIGNMENT_MODE_MAP[self.em_config.assignment_mode]
         rng_seed = int(self._rng.integers(0, 2**63))
 
-        # Default per-locus gDNA eligibility from partition data when the
-        # caller did not supply an explicit array. Mirrors the per-unit
-        # ``has_gdna = !is_spliced && isfinite(gdna_log_lik)`` rule the C++
-        # extractor uses when deciding which units get a gDNA candidate.
-        if enable_gdna is None:
-            enable_gdna = np.zeros(n_loci, dtype=np.uint8)
-            for li, tup in enumerate(partition_tuples):
-                is_spliced = tup[5]
-                gdna_log_liks = tup[6]
-                if is_spliced.size == 0:
-                    continue
-                # Any unit unspliced AND has finite gDNA log-lik?
-                unspliced = is_spliced == 0
-                if np.any(unspliced & np.isfinite(gdna_log_liks)):
-                    enable_gdna[li] = 1
-        else:
-            enable_gdna = np.ascontiguousarray(enable_gdna, dtype=np.uint8)
-
         (
             total_gdna_em,
             locus_mrna,
@@ -437,7 +411,6 @@ class AbundanceEstimator:
             locus_transcript_indices,
             np.ascontiguousarray(gdna_prior_count, dtype=np.float64),
             rna_prior_count,
-            enable_gdna,
             gdna_eff_len,
             self.unambig_counts,
             t_eff_lens,
