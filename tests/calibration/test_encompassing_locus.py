@@ -123,8 +123,7 @@ def runs(donors, tmp_path_factory):
     return out
 
 
-#: the three regimes with RNA, on both donors; the solve gate is L5's xfail on the gDNA donor alone —
-#: without gDNA the strand-pure region between TA+'s exons has no cap for the tilt continuum to sit under
+#: the three regimes with RNA, on both donors
 EXPRESSED = ("ta_high_tb_low", "ta_low_tb_high", "ta_equal_tb")
 DONORS = ("g60", "g00")
 
@@ -179,6 +178,23 @@ def test_ta_plus_junction_flux_is_a_source_at_its_exons(runs, donor_tag):
             )
 
 
+@pytest.mark.parametrize("donor_tag", DONORS)
+def test_the_both_stranded_slots_solve_to_their_truth(runs, donor_tag):
+    """The exon-on-exon slots — mostly +, mostly −, or balanced — and the region between TA+'s exons
+    (TB−'s exon, TA+'s intron: strand-pure and mostly gDNA when TB− is low) read their gDNA fraction
+    within 0.05 of the truth. The tilt atom closed this: the between region read 0.366 against 0.544
+    under the tilt continuum alone (every f_g below the strand cap fitting the split with a slightly
+    impure tilt) and reads 0.511 with the pure hypothesis in the cube; on the gDNA-free donor the slots
+    read 0.002 / 0.005 against 0."""
+    for regime in EXPRESSED:
+        r = runs[donor_tag, regime]
+        exons, between, _flanks, _bnds, _rows = _slots(r)
+        for row in [*exons, between]:
+            assert abs(row["pred_fg"] - row["true_fg"]) < 0.05, (
+                f"{regime}: {row['where']} reads f_g {row['pred_fg']:.3f} against {row['true_fg']:.3f}"
+            )
+
+
 @pytest.mark.parametrize(
     "donor_tag",
     [
@@ -186,23 +202,21 @@ def test_ta_plus_junction_flux_is_a_source_at_its_exons(runs, donor_tag):
             "g60",
             marks=pytest.mark.xfail(
                 strict=True,
-                reason="ISSUES: capture-on-strand-pure-ambig-undercall — the region between TA+'s exons "
-                "(TB−'s exon, TA+'s intron) is strand-pure and mostly gDNA when TB− is low, and the tilt "
-                "continuum's median sits below the strand cap; closes with the witnessed atom (the lanes "
-                "worklist's L5)",
+                reason="ISSUES: the-lower-bound-noise-ratchet — with TB− low its shallow − flank (404 "
+                "fragments, truth 0.530) reads 0.596: the intergenic neighbour's gDNA edge level, a lower "
+                "bound at that neighbour's sampled density (0.298/bp against the flank's realised 0.27), "
+                "ratchets the flank up by the neighbour's 1.6σ excursion; the local solve reads 0.546",
             ),
         ),
         "g00",
     ],
 )
-def test_the_both_stranded_exons_solve_to_their_truth(runs, donor_tag):
-    """The exon-on-exon slots — mostly +, mostly −, or balanced — read their gDNA fraction within 0.05 of
-    the truth once the levels reach them (0.29–0.44 against 0.00 when they did not; on the gDNA-free donor
-    0.054 / 0.046 with the strand channel shut against 0.002 / 0.005 with it live)."""
+def test_tb_minus_flanks_solve_to_their_truth(runs, donor_tag):
+    """TB−'s single-strand flanks read their gDNA fraction within 0.05 of the truth in every regime."""
     for regime in EXPRESSED:
         r = runs[donor_tag, regime]
-        exons, between, flanks, _bnds, _rows = _slots(r)
-        for row in [*exons, between, *flanks]:
+        _exons, _between, flanks, _bnds, _rows = _slots(r)
+        for row in flanks:
             assert abs(row["pred_fg"] - row["true_fg"]) < 0.05, (
                 f"{regime}: {row['where']} reads f_g {row['pred_fg']:.3f} against {row['true_fg']:.3f}"
             )

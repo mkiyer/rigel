@@ -44,7 +44,8 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
 - **ψ**: the composition closes structurally on every published object (`test_vertex_reference.py`);
   the reference location is deleted (`DESIGN.md` §6b.1); the tilt is integrated on nodes that follow each
   slot's strand term, a derived count and no lattice (`DESIGN.md` §6b.15, `EQUATIONS.md` §9e), exact at any
-  depth; the λ-bracket widening is built and ships off — `ISSUES: psi-lambda-bracket-unshipped`.
+  depth, with the tilt's hypothesis space {pure +, pure −, mixed} (`EQUATIONS.md` §9f); the λ bracket follows
+  the landscape prior's derived demand (`landscape.required_logodds_window`).
 - **The prior assembler**: with perfect masses its own error is negligible — `prior_vs_oracle.py`,
   `mass_prior_ab.py`.
 - **The largest number on the metric page is the ruler, not the composition**: at `g00` the
@@ -80,35 +81,25 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
 (`policy_benchmark.py --by-class`).
 
 1. **Calibration's performance — `ISSUES: performance-memory-bounded-solve`** (owner, 2026-09-11: the
-   active thread). The locus decomposition is landed and gated (`DESIGN.md` §6b.15); the agreed order
-   from here, each step judged by `profiling/profiler.py --compare` on back-to-back pairs and proven a
-   no-op with `profiling/sweep_replay.py` (`--block-slots` for the chunk-exactness of the whole sweep) and
-   `design/rename_identity.py --bam` against the `port_identity_*` references:
-   ⓪ re-measure the deep library end to end, `main` against the landed tree — the baseline the rest is
-   judged against; ① cache the refit-invariant half of `prepare` across the refit sweeps (the face
-   rules and lane faces read counts and geometry, only the own claims read the belief), per block, per
-   grid; ② the policy's rules from closures to typed tables — the C/C++ data layout, written in Python
-   first (done: `messages.faces.Faces`); ②′ THE PRE-PORT WORKLIST (owner, 2026-09-12): the Python becomes
-   pristine first — one ψ solver in one precision, `calibrate` as named stages, memory, one grid, the
-   tunables census, the capture as a record, the vocabulary rulings, the two xfails — judged on the metric,
-   the panel and timing pairs, no longer on bit-identity; ③ the port of `sweep._solve_block`, the passes and `transfer_rows` first, then `prepare`, then
-   ψ, then threads over blocks — the replay's tolerance report in place of bit-identity, since a language
-   port cannot be bit-identical; ④ the intron-factory rows built per block, the last genome-wide arrays;
-   ⑤ the scan and the second pass, the stages that scale with depth and the floor once the sweeps are
-   compiled. The accuracy frame is unchanged, and no step may move a number.
-2. **Calibration accuracy where the strand tilt matters** — the AMBIG slots with RNA on both strands, the
-   population the θ quadrature was rebuilt for (`DESIGN.md` §6b.15; the census in
-   `ISSUES: the-tilt-census-as-an-instrument`). Two entries, in order: `ISSUES:
-   capture-on-strand-pure-ambig-undercall` (the largest AMBIG-class error in scope; the witnessed atom is
-   approved and prototyped) and the census as an instrument. The strand channel's gate is a PROTOCOL
-   DECISION since 2026-09-14 (`ISSUES: deadband-gates-a-gdna-free-library`, CLOSED: a gDNA-free stranded
-   library keeps its channel and its strand-derived levels, and the unstranded phantom is dead on its own
-   merits; the belief-read level REFUSED as the relay). The RNA lanes' own defects — the layer off
-   without an intron factory, the lanes dead with the gDNA lane, a strand without single-strand exons having
-   no flux source — are FIXED and gated by `test_encompassing_locus.py`. The θ measure is settled — both ways of flattening the strand
-   marginal were refused on the ladder (`ISSUES: strand-marginal-volume-factor`, CLOSED / REFUSED: the
-   width factor is evidence the panels reward). Each judged on the metric per stratum, both zero controls and the shared-exon
-   stress at depth, never on the ladder alone, which is shallow where the tilt matters.
+   active thread). The decomposition, the shared message layer, the typed tables, the pre-port and lanes
+   worklists are landed (`DESIGN.md` §6b.15), and the port's prerequisites are fresh on the landed tree
+   (the replay captures, the identity references, the
+   deep-library baseline pairs). Next is THE PORT of `sweep._solve_block`: the passes and `transfer_rows`
+   first, then `prepare`'s builders, then ψ, then threads over blocks — each step behind the replay's
+   tolerance report (a language port cannot be bit-identical), the `port_identity_*` references and the
+   suite, timed by `profiling/profiler.py --compare` against the baseline pairs; then the scan and the
+   second pass, the stages that scale with depth. The accuracy frame is unchanged, and no step may move a
+   number.
+2. **Calibration accuracy where the strand tilt matters** — the AMBIG slots with RNA on both strands
+   (`DESIGN.md` §6b.15). The tilt atom and the strand channel's protocol decision landed 2026-09-14 (the
+   strand-pure under-call and the gDNA-free deadband CLOSED); the θ measure is settled (both flattenings
+   REFUSED, `ISSUES: strand-marginal-volume-factor`); the lanes' own defects are fixed and gated by
+   `test_encompassing_locus.py`. What is left is the landscape estimator's vertex bias
+   (`ISSUES: gdna-landscape-trains-on-false-positives` (d) — the lever on the stranded zero controls and
+   on every unwitnessed both-strand slot), the census as an instrument
+   (`ISSUES: the-tilt-census-as-an-instrument`), and a known limit to watch rather than build against
+   (`ISSUES: the-atom-at-an-unwitnessed-both-strand-slot`). Each judged on the metric per stratum, both
+   zero controls and the shared-exon stress at depth, never on the ladder alone.
 3. **The ruler at zero gDNA — `ISSUES: g00-shrinkage-upstream-repair`.** A gDNA-free library is the
    modal real case, the composition there is now right, and the effective length the EM divides by is
    still a fraction of the truth because the reference-density detector accepts any few slots with
@@ -130,18 +121,18 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
 7. **The message policy, only where a row is above the bar**: one prototype arm at a time through
    `policy_prototype.py --module`, halves apart, pass zero beside the pipeline:
    `ISSUES: flux-price-witness-units`, `ISSUES: two-sided-exon-row`, `ISSUES: flux-floor-dispersion`,
-   `ISSUES: ambig-node-as-a-gdna-source`, `ISSUES: message-layer-open-cases`.
+   `ISSUES: message-layer-open-cases`.
 
 Then, in standing order: `ISSUES: scan-thread-split-starves-the-workers` ·
 `ISSUES: refit-vs-message-arbitration` (re-read under the E-step: the walk now says the prior does the
 unstranded rows and the messages the stranded capture-ON ones).
 
-**Later / parked** (each has its entry): `expand-the-gdna-spectrum` · `psi-lambda-bracket-unshipped` ·
-`transfer-variance-premise` · `nascent-stress-sensitivity` · `f32-strand-tilt-at-half` · `hygiene-ledger` ·
-`oracle-effective-length-diagnostic` · `flgap-panels-stale-nascent-model` · `rename-the-drain` ·
+**Later / parked** (each has its entry): `expand-the-gdna-spectrum` · `transfer-variance-premise` ·
+`nascent-stress-sensitivity` · `hygiene-ledger` · `flgap-panels-stale-nascent-model` ·
+`background-abundance-pair-unruled` · `splice-out-premise-bias-uncorrected` ·
 `drain-contaminates-certified-rna` (the ceiling refused the in-solve correction; two recorded
-follow-ups) · `the-cancelling-pair` (refused twice) · `crossing-pool-contrast` (blocked) ·
-`parked-capture-pilot-sign` · `pure-rna-mirror-asymmetry` · `capture-degeneracy-standing-risk`.
+follow-ups) · `crossing-pool-contrast` (blocked) · `pure-rna-mirror-asymmetry` ·
+`capture-degeneracy-standing-risk`.
 
 ## Deliberately not next
 

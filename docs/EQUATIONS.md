@@ -880,6 +880,52 @@ gDNA at a balanced slot — Bayes-correct under an `f_g`-independent arcsine mea
 prior pin such slots; a slot with no junction and no prior reads `f_g ≈ 1 − 1/√n` from its own solve. See
 `ISSUES: strand-marginal-volume-factor`.
 
+## 9f. The tilt atom — the AMBIG tilt's hypothesis space is {pure +, pure −, mixed} (`simplex_logodds._psi`)
+
+**What §9e's exact marginal cannot say.** At an AMBIG slot whose RNA is all on one strand the truth sits AT
+the strand cap: with `τ = 1` the split `p̂ = ½ + (1 − f_g)(κ − ½)` identifies `f_g` exactly as at a
+single-strand slot. But ψ integrated the tilt over a continuum, and every `f_g` below the cap fits the same
+`p̂` with a slightly impure tilt `τ̂(λ) = d/a(λ) < 1`; the θ-marginal is spread over `[0, cap]`, weighted by
+the strand term's width `σ_τ(λ) ∝ 1/(1 − f_g)` (§9e's volume factor), and its median lands below the cap.
+Prior-free, one slot, at the pure tilt: a truth of 0.50 read 0.31–0.37, 0.85 read 0.69–0.80, 0.97 read
+0.85–0.95 (n = 30 … 30k). On the ladder's stranded × capture-ON rows this was the largest AMBIG-class error
+in scope (−26k net on `g50 ss.99 ON`), because under capture the prior that repairs it off capture is broad.
+
+**The hypothesis space.** Axiom 0's opportunity geometry admits both RNA strands at an AMBIG slot, but PRESENCE
+per strand is discrete: the slot's RNA is all on `+`, all on `−`, or on both. The tilt's reference measure is
+therefore a mixture of three hypotheses at equal reference weight,
+
+    P(τ)  =  ⅓·δ(τ − 1)  +  ⅓·δ(τ + 1)  +  ⅓·(arcsine measure on (−1, 1)),
+
+i.e. in `θ = arcsin τ`: two atoms at `±π/2` and the uniform density `dθ/π` between them (§9c's arcsine
+measure, which the θ coordinate carries with no weight). The per-λ marginal is
+
+    M(λ)  =  ⅓·[ e^{L(λ, +1)}  +  e^{L(λ, −1)}  +  (1/π)·∫ e^{L(λ, sin θ)} dθ ]
+
+and the ⅓ cancels from the λ posterior. In ψ this is two more θ columns per slot, `τ = ±1` exactly with
+log-weight 0, beside the continuum's `K_t = 24` windowed nodes whose trapezoid log-weights carry `−log π`
+(the window's share of the domain: with no strand information the window is the whole domain, its weights
+sum to π, and the three hypotheses' masses are equal at every λ — the gate
+`test_vertex_reference.test_the_three_tilt_hypotheses_carry_equal_reference_weight`). The pure columns are
+single-strand solves inside the cube — `f₊ = 1 − f_g, f₋ = 0` and the mirror — the strand term evaluated at
+the vertex, no tilt parameter and no width. Where the data are pure the pure hypothesis explains them with
+no parameter and wins the Occam contest against the continuum's `∝ σ_θ·e^{L_max}`; where they are not, the
+pure column sits `e^{−(1 − τ̂)²/2σ_τ²}` below the peak and vanishes. The read-out is unchanged: `f_g` the
+posterior median over the θ-marginal, `w₊` the RNA-mass-weighted share over every column, atoms included.
+Every θ-independent term (the arms, the λ-factor rows) is common to the three hypotheses and cancels.
+
+**The witness.** An atom's cost is at an INTERIOR tilt: at `f_g = cap` the pure hypothesis also explains
+`p̂` with no parameter, so a both-strand slot is pulled toward the cap (prior-free, a truth of 0.30 at
+`τ = 0.5` reads 0.46 → 0.63 with the plain atom). The RNA level lanes carry each strand's PRESENCE as a
+delivered lower bound (§6b.13), and a held level on strand `s` is a certified witness that `s` carries RNA,
+so it rules the hypothesis "all the RNA is on the other strand" out: in ψ the pure `−s` column is `−∞`
+wherever the slot's `CubeRow` holds a profile on `s`. Nothing is pooled and no constant enters: the witness
+is the delivery itself (a level on `s` says nothing against "pure `s`"; with nothing delivered both atoms
+stand). The structural witness — the per-strand exon bits, a strand whose RNA here could only be nascent
+cannot be the pure carrier — adds nothing measurable on top (the θ note §13: within 2 % by presence truth)
+and is not written. Where a both-strand slot holds a level on only one strand the residual cost remains; it
+is a limit of the information and is accepted as such (`ISSUES: the-atom-at-an-unwitnessed-both-strand-slot`).
+
 ## 10. The second pass's score
 
 `src/rigel/second_pass.py` (`combine_factors`, `choose_hypotheses`). `f(L)` here is the second pass's

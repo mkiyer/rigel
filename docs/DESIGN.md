@@ -1283,6 +1283,47 @@ is the landscape's to say, which it does through ψ's composition arm without a 
 rows read 499 and 211 false fragments of 8M that way), and the two-gene toy that reads ½ there cannot fit a
 landscape at all (two anchors against `_MIN_TRAIN`) — the toy's limit, not a defect.
 
+**The AMBIG tilt's hypothesis space is {pure +, pure −, mixed} — the tilt atom (2026-09-14; L5 of the
+lanes worklist; `EQUATIONS.md` §9f; `ISSUES: capture-on-strand-pure-ambig-undercall` CLOSED).** At a slot whose
+RNA is all on one strand the truth sits AT the strand cap, and the exact θ-marginal of a continuous tilt
+put its median below it — every `f_g` under the cap fitting the split with a slightly impure tilt, weighted by
+the strand term's width — the largest AMBIG-class error in scope (−26k net on `g50 ss.99 ON`; prior-free a
+truth of 0.50 read 0.31–0.37). THE RULING: presence per strand is discrete, so the tilt's reference measure is
+a mixture of three hypotheses at equal weight — two atoms at `τ = ±1` and the arcsine continuum between them
+(`dθ/π`) — written into ψ as two more θ columns per AMBIG slot (`simplex_logodds._psi`; the cube is
+`K × (K_t + 2)`), the continuum's trapezoid weights carrying `−log π` so that the three masses are equal
+wherever the strand term is flat; a held RNA level on a strand (`CubeRow`) is a certified witness that the
+strand carries RNA and rules the OTHER strand's atom out (`−∞`), nothing pooled and no constant. The
+structural witness (the per-strand exon bits) was measured to add nothing and is not written; the tilt still
+has no lane. Judged (the L3 tree → landed): the ladder's stranded ON stratum 470,862 → 427,046 (−9.3 %:
+`g50 ss.99 ON` 217,636 → 199,409, `g98 ss.99 ON` 176,468 → 149,603), stranded OFF −0.35 %, unstranded OFF
+−0.17 %, deferred −0.33 %, fifteen of sixteen contaminated rows better and `g05 ss.99 ON` +1.7 %; the
+unstranded zero controls within a fragment, the stranded ones 497 → 550 and 224 → 231; the test chromosome
+−0.1 / +0.2 / −0.06 / +0.09 %, its six `g00` rows identical; the landed form reproduces the prototype
+(`tilt_atom.py`, arm `atom_w`) exactly on the test chromosome and to ≤ 0.007 % on the ladder (its own
+floating-point association). The census (`tilt_census.py`): on the strand-pure band the gDNA error falls
+28–38 % on the stranded ON rows (38,304 → 27,513; 34,063 → 20,967) and its tilt error 40–80 % on every
+stranded row; the near-pure band likewise; THE COST sits in the both-strand (0.2, 0.5] band at slots holding
+a level on one strand only — `g05 ss.99 ON` 4,942 → 7,005 (the whole of that row's loss), `g50 ss.99 ON`
+11,397 → 12,344, `g00 ss.99 OFF` 35 → 73 (most of its zero control's +53) — where the atom at `f_g = cap`
+also explains the split with no parameter and nothing delivered says otherwise. The stresses: the spliced
+shared exon (a level on each strand) is identical on every both-strand row and reads the strand-pure rows'
+tilt exactly (tilt error 290 → 7 at 500k) for ≤ 44 false fragments in 415k; the mono shared exon, which has
+no junction and so no witness, shows the cost bare — false gDNA roughly doubles on its 2–20 %-minor rows
+(`g00` 50k at 20 %: 10,323 → 19,671 of 50k) on an exon the volume factor already read 27–99 % gDNA. The
+encompassing locus (`test_encompassing_locus.py`): the region between TA+'s exons, strand-pure and mostly
+gDNA when TB− is low, read 0.366 against 0.544 and reads 0.511; the exon∩exon slots and that region now
+solve within 0.05 in every regime on both donors, the gate un-xfailed; the one remaining miss there is TB−'s
+shallow single-strand flank under the intergenic neighbour's gDNA edge level (`ISSUES:
+the-lower-bound-noise-ratchet`, its own xfail). Two goldens moved: `antisense_overlap` by ≤ 5e-4 relative
+on transcript counts, and `antisense_contained` — a single-exon antisense gene wholly inside a sense exon,
+so no junction and no single-strand piece exist to witness the − strand, on a 1,000-fragment toy that fits
+no landscape — by the atom's bare cost: its antisense transcript 81 → 0 and the gDNA-free locus 5.6 → 177.6
+false gDNA fragments. That is the approved form's cost at an unwitnessed both-strand slot, and the owner's
+stance (2026-09-14) is that it is a limit of the information, accepted: no presence witness is built (a locus
+with RNA elsewhere does not imply this slot is expressed), the landscape prior is the deciding voice on a real
+library, and the entry that records it is `ISSUES: the-atom-at-an-unwitnessed-both-strand-slot`.
+
 ## 6c. ψ's composition is a point on the simplex, and closure is structural (2026-08-17)
 
 **The composition has two degrees of freedom, not three.** ψ solves a point on the 2-simplex,
@@ -1382,6 +1423,30 @@ their numbers `ISSUES: the-landscape-training-population-arms`; the instrument
    blind exon's median was decided by that tail against ψ's Beta(½,½) reference's ½-nat/λ slope. The refit
    loop's previous landscape now places those kernels (kernel × P_prev, renormalised); COUNTED kernels
    keep their own location, so an enriched minority cannot be competed away. Nothing chosen.
+4. **The location floor — a slot trains only where its solve LOCATES it** (owner's direction and ruling, 2026-09-14): a
+   composition is necessary and not sufficient. The estimator's resolution wall is one fragment (rule 3's
+   `count < 1`), and a Poisson count has `Var(log c) = 1/c`, so the wall in the variable every solve reports
+   is `Var(log f_g) ≤ 1 nat²` (`landscape._LOCATED_VAR`, the identity's value, not a constant chosen). A
+   slot wider than that has no location whatever produced its solve — a strand term at a pure-RNA vertex
+   (its median sits above zero by the term's width), an empty intron's factory row, a one-sided delivered
+   row — and its median is the reference measure's under its bound; training on it re-seeds the landscape
+   at the slot's resolution, a false mode two decades above the anchors. The rule is the CONJUNCTION of
+   rule 1 and the floor: a bound-only slot sharpened by the prior alone is the prior's echo and stays out.
+   The symmetric floor alone (admission by width, no composition asked) was priced and is worse where echo
+   exists (deferred +0.22 % against −0.87 %, unstranded OFF +0.11 % against −0.01 %); a floor on OWN
+   evidence only, with a delivered row rescuing a wide slot, loses the unstranded OFF zero control
+   (500 → 854: it drops the wide introns that reinforce the depleted mode and keeps the wide delivered
+   exons that spread it). Measured (the ladder, the L5 tree → landed): the four zero controls 500 → 282,
+   211 → 194, 550 → 265, 231 → 172; stranded OFF +0.06 %, stranded ON −0.01 %, unstranded OFF −0.01 %,
+   deferred −0.87 % (`g50 ss.50 ON` −1.0 %, `g05 ss.50 ON` −5.2 %); the test chromosome every stratum
+   better or equal and all six `g00` rows lower. On `g00 ss.99 OFF` the training population at the third
+   refit is the anchors alone (the exons' 585 false fragments gone), the `own:strand` slots wider than a
+   nat² carrying 91 % of the first refit's false mass and, on the contaminated stranded rows, under 2 % of
+   the true mass at the first refit and 0.04 % at the third. The goldens' gDNA-free toys moved ≤ 1.1e-3
+   relative on their transcript counts, but `antisense_contained` reads 177.6 → 200.8 and `strand_ss65`
+   16.8 → 17.4 false gDNA of 1,000: with its unlocated slots out, a 1,000-fragment toy's prior fits from about
+   four anchors and pushes less — the tiny-toy limit, in the direction opposite to the ladder's. Gate:
+   `test_a_slot_wider_than_one_nat_does_not_train_whatever_its_evidence` (three perturbations fired).
 
 The anchor holds 46–94 % of the estimator's weight on every ladder row and the refit loop de-entrenches
 (false gDNA trained 777k → 71k across three refits at `g00 ss.50 OFF`); the zero-row residual was the

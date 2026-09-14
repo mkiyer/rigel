@@ -13,73 +13,45 @@ the changelog is git.
 
 ## OPEN
 
-### splice-out-premise-bias-uncorrected
-`priority: later · kind: decision · 2026-09-02`
-The splice-out message assumes spliced and unspliced fragments at one face share capture affinity; measured,
-the premise fails as a bias under capture (`log a` ≈ 0 off, +0.28 under exon probes, +0.78 under junction
-probes), so only a subtracted level — a cross-locale fudge, the owner's call — would correct it. No instrument
-yet.
+Ordered by priority. An entry says what is open and the number a ranking turns on; what was done is git,
+what was ruled is `DESIGN.md`.
+
+### performance-memory-bounded-solve
+`priority: now · kind: build · 2026-08-17; the decomposition and the shared layer landed 2026-09-11, memory 2026-09-12`
+Calibration is the tool's one unfinished component: the four sweeps are ~394 s of a 500 s run on the
+18.6M-fragment library, on one core, while the locus EM beside them takes 25 s. The decomposition is built
+and gated (`DESIGN.md` §6b.15: a terminal receives nothing, the chain is solved a locus block at a time, the
+block size moves no number, the refit sweeps share their message layer) and the Python is pristine (the
+pre-port and lanes worklists, every ruling in `DESIGN.md` §6b.15). What is OPEN: ③ the C/C++ port of
+`sweep._solve_block` — the passes and `transfer_rows`, then `prepare`'s builders, then ψ (the cube is
+`K × (K_t + 2)`), then threads over blocks, each step behind `sweep_replay.py replay --tolerance` on
+`sweeps_MO_3021_step6`, the `port_identity_*` references and the suite, timed against the 2026-09-14 baseline
+pairs (`perf/baseline_2026-09-14/`; wall 498–502 s, peak 10.8–11.2 GB); ⑤ the scan and the second pass, the
+stages that scale with depth (`ISSUES: scan-thread-split-starves-the-workers`). Not to do: micro-optimise the
+Python passes; bake the λ lattice into the port (`sweep_logodds_step` is a parameter). `profiling/profiler.py`,
+`profiling/sweep_replay.py`.
+
+### g00-shrinkage-upstream-repair
+`priority: now · kind: defect · re-priced 2026-09-10`
+At the zero-gDNA control the effective-length shrinkage contracts most transcripts where the factor should be
+1.000: `calibration_vs_oracle.py` reads 0.150 against the oracle's 1.000 on the `g00` rows (`Σ|Δ len|` 996M
+bp), unchanged after the composition repair, because `capture_eff_length._global_reference_density` detects a
+reference from any five slots with positive mass. The repair is the detector — does the library carry an
+enriched gDNA mode at all, a boolean (`TRAPS: a-total-density-ratio`); `priors.py` shares the function. Decide
+first whether the "exactly 1.000 off capture" contract line is stale (the in-scope capture-OFF strata read
+P 0.954/0.967 against O 0.923/0.926). The oracle effective-length diagnostic that would re-rank this against
+`ISSUES: u-ruler-arm` was started and needs a stashed pre-closure arm to mean anything.
 
 ### gdna-landscape-trains-on-false-positives
-`priority: next · kind: question · 2026-09-02; the defect closed 2026-09-10 (`DESIGN.md` §7.1)`
-The population rule and the E-step landed (`ISSUES: the-landscape-training-population-arms`; the zero controls
-~150k → a few hundred). Open: (a) under capture a short dark region's mass is split over both modes of the
-previous fit (deferred 1.01–1.02×, stranded ON 1.004×); (b) the zero-RNA controls move ±4 % (`g05 ss.99 ON`
-+4.4 %, `g98 ss.50 OFF` −1.4 %); (c) the Beta(½,½) reference still decides a blind slot; (d) a counted
-single-strand exon at a pure-RNA vertex trains at its pass-0 posterior median, which sits above zero by the
-strand term's width (2026-09-14, exposed when the strand channel came on for gDNA-free libraries — `ISSUES:
-deadband-gates-a-gdna-free-library`, CLOSED): on `g00 ss.99 OFF` the refit rung reads 375 → 8,696 before the
-messages repair it to 728 (524 with the channel dead); own:strand 13,104 slots train 3,771 false fragments at
-the first refit against 2,627 — the estimator centres a kernel at a median where the posterior is one-sided,
-so the remedy is the estimator's (a bound-shaped kernel, as the anchor already is), not the channel's.
-Refused here: excluding κ-dead exons (`g50 ss.50 ON` 2,691 → 56,422), AMBIG in the final fit (worse 25/32).
-`landscape_training_census.py`.
-
-### drain-contaminates-certified-rna
-`priority: later (parked by the owner, 2026-09-01) · kind: defect · 2026-08-31`
-The second pass deposits some true-gDNA fragments into the certified-RNA banks: 233 records at
-`g50 ss.99 OFF`, 1,482 at `g98 ss.99 ON` (1.9 % of that in-scope channel). The leak is exactly posterior
-sampling (realized = Σ P(spliced) within 0.0–1.4σ) and a no-leak counterfactual moves the 0.8.0 metric
-−0.60 %/−0.05 % at worst, so the harm is the certainty claim and no in-solve correction is licensed
-(`ISSUES: drain-provenance-split`). To build: `DrainQC` records `Σ q_null`; the middle-bin posterior bias
-repaired as its own A/B. `calibration_vs_oracle.py`.
-
-### measured-prior-rung-4
-`priority: now · kind: build · 2026-08-26`
-ψ's composition reference fitted from composition-free observables (`DESIGN.md` §3.1a-i, `EQUATIONS.md` §2.3b),
-consuming `rho_0`, the per-class enrichment responsibility `w` and the enrichment detector as a boolean —
-never `span_R` (`TRAPS: a-mode-count-is-not-a-well-posed-quantity`). Requirements: span both lattice ends;
-`rho_bg` on-rate for the destination's class (the intergenic pool is the unprobed rate); exact at `g00`; one
-pseudo-fragment; priced with the messages against a shuffle. Not a better tilt
-(`ISSUES: reference-prior-refuted-at-concept-level`, `ISSUES: data-derived-reference-location`).
-The census that surveyed the field per condition was retired 2026-09-13; the fit is
-`calibration.abundance_landscape` (gated by `tests/calibration/test_abundance_landscape.py`) and its measured
-facts are in `DESIGN.md` §3.1a-iii.
-
-### reference-prior-refuted-at-concept-level
-`priority: now · kind: design-constraint · 2026-08-24`
-ψ's reference tilt is refuted at the concept level: on λ = logit(f_g) the data's information
-`I ∝ N_eff·disc·[f_g(1−f_g)]²` is zero at κ = ½ while the tilt holds fixed nats there — overturned at N = 3
-where the strand channel is alive, never at κ = ½ (0.7471 from N = 10 to 10⁶); 82–95 % of unstranded pass-0
-error sits on slots it decides. Refused: another constant (0.75 optimal on none of 16), `σ(L)` (3.3×/10.8×
-worse at the zero controls), re-weighting (up to 2.8× worse), an information-weighted tilt, the arcsine
-coordinate (`ISSUES: arcsine-magnitude-coordinate`). Candidate: extend the density channel
-(`density_lambda_factor`).
-
-### the-lower-bound-noise-ratchet
-`priority: later (with the enrichment witness) · kind: defect · 2026-09-05`
-A level from an RNA-rich node's own strand profile has a mode that is noise around zero; its lower side bounds
-its neighbours and the tightest noisy neighbour wins. Ladder `g05 ss.99 OFF` 44,714 → 45,076; test chromosome
-`g00 ss.99 ON` 64 → 216, 187 of it at `capcluster_ab`'s inner termini with no gDNA. A two-sided own-profile
-level keeps fewer fragments overall (−0.9 %/+1.5 % vs −4.7 %/−0.5 %), so lower-only stays; the cure is the
-enrichment witness `ISSUES: two-sided-exon-row` waits for. `zero_controls.py`.
-
-### flux-floor-dispersion
-`priority: later (with the transport-dispersion decomposition) · kind: question · 2026-09-08`
-The certified flux at a junction is a lower-sided estimate of the exon's strand RNA level priced by the pair
-(`DESIGN.md` §6b.13); the route rate scatters beyond counting (median −3 %, 5–9 % at depth; 0–40 % over on
-nine block readings) and at a pure-RNA exon the price cannot see it, so a lucky over-read is a sharp floor a
-few points too high. `transport_dispersion.py`.
+`priority: later · kind: question · 2026-09-02; the population rule and the E-step landed 2026-09-10, the location floor 2026-09-14 (`DESIGN.md` §7.1)`
+What is still open in the landscape estimator, each with its number: (a) under capture a short dark region's
+mass is split over both modes of the previous fit (deferred 1.01–1.02×, stranded ON 1.004×); (b) the zero-RNA
+controls move ±4 % (`g05 ss.99 ON` +4.4 %, `g98 ss.50 OFF` −1.4 %); (c) the Beta(½,½) reference still decides
+a blind slot. CLOSED here 2026-09-14, (d): a slot whose solve is wider than one nat² in `log f_g` no longer
+trains (`DESIGN.md` §7.1 rule 4) — the vertex-solved exons that trained 3,771 false fragments at the first
+refit on `g00 ss.99 OFF` are out, and the four ladder zero controls read 282 / 194 / 265 / 172. Refused here:
+excluding κ-dead exons (`g50 ss.50 ON` 2,691 → 56,422), AMBIG in the final fit (worse 25/32), and the two
+other readings of the floor (`DESIGN.md` §7.1 rule 4). `landscape_training_census.py`.
 
 ### flux-price-witness-units
 `priority: next · kind: problem · 2026-09-09`
@@ -90,43 +62,15 @@ holds `(1 − κ)` of the strand's RNA, so every flux floor pays `log(1 − κ)�
 at single-strand exons and a bounded one at both-stranded exons (`ISSUES: flux-witness-in-strand-units` is the
 naive form). `policy_prototype.py`.
 
-### ambig-node-as-a-gdna-source
-`priority: after phase 2 · kind: decision, measured once · 2026-09-08`
-A both-stranded node's own counts plus its held RNA levels, read as a gDNA level and emitted lower-sided —
-refused as built: `g05 ss.70 OFF` +2.6 % on all three test panels, +4…+38 % on the weak-κ zero controls,
-ladder `g05 ss.50 OFF` 1.745× / `g05 ss.99 ON` 1.465× (at low gDNA the level's mode is noise and travels as a
-floor); its target, the walled host exon of a `span` locus, gains ~100 fragments. Re-open with a gate on the
-emitted level's own width once phase 2's ceiling is in place; `policy_prototype.py`.
-
 ### message-layer-open-cases
 `priority: next · kind: question · 2026-09-09`
 Four residual cases, none a hole (`DESIGN.md` §6b.4–§6b.14): (a) an exon with both faces speaking — the
-arrivals are summed (`_fuse`) and the price where both carry the same intron's claim is unmeasured; (b) the
-intron factory on a region with both exon and intron bits, under capture; (c) the chain of termini — an empty
+arrivals are summed and the price where both carry the same intron's claim is unmeasured; (b) the intron
+factory on a region with both exon and intron bits, under capture; (c) the chain of termini — an empty
 outside piece (median 12 bp) whose far face is another terminus, half the ladder's terminus-boundary error,
 every upper side refused (`ISSUES: the-edge-upper-side`); (d) substrate `nest` (the prior already serves it,
 0.666 vs 0.630), `div`, the antisense's nascent variant (`docs/TESTING.md` §0a).
 `policy_benchmark.py --by-class`.
-
-### two-sided-exon-row
-`priority: later (deferred by the owner 2026-09-13 to the calibration-accuracy thread) · kind: problem · 2026-09-04`
-Today (the one-lattice tree): the toy harness gate reads a factor of 88 — exon |Δf_g| 0.762 beside a pure-gDNA
-intron, 0.0086 beside a nascent-bearing one (the lattice fixed the wet arm and left the mechanism); on the
-ladder the `R exon (licensed intron face)` class is 4–6 % of the unstranded error with `transfer` at parity or
-better than `silent` there, while on the test chromosome it is 20–32 % and transfer is worse (2,647 → 4,056 at
-`g50 ss.50 OFF`). Not the pre-port thread's; the first step when taken up is the witness's derivation.
-On unstranded data an exon's held row is the intron's composition through the face map, whose upper side is
-the map's plateau above its ceiling — a lower bound on gDNA, so at pass zero an unstranded licensed exon reads
-~9× its true gDNA (+2,000 % at `g25 ss.50 OFF`) and forwarding it compounds the bias (+10 % on the in-scope
-unstranded row; `policy_prototype.py --by-class`). The plateau is honest: every cap, two-sided row or wall is
-refused where junction probes enrich the flux more than the crossing
-(`ISSUES: the-certified-flux-row-as-a-level`, `ISSUES: two-sided-exon-row-forms`,
-`ISSUES: the-discrepancy-priced-cap`, `ISSUES: the-two-sided-level-lane`,
-`ISSUES: the-wall-above-the-face-map-ceiling`). What would license a two-sided level is whether this library's
-gDNA is enriched, witnessed on unstranded data by silent genes' exons against the intergenic density — ruled
-the landscape prior's job (2026-09-06, `ISSUES: gdna-landscape-trains-on-false-positives`). Judge at
-`R exon (licensed)` and the walled classes, halves apart, pass zero beside the pipeline; the toy harness gate
-`test_the_harness_REPRODUCES_the_intron_composition_dependence` is a strict xfail citing this entry.
 
 ### per-transcript-prior-lane
 `priority: next · kind: build · 2026-08-31`
@@ -134,121 +78,16 @@ the landscape prior's job (2026-09-06, `ISSUES: gdna-landscape-trains-on-false-p
 information; a perfect per-transcript prior roughly halves in-scope gene-level error. Two weightings are
 refused (`ISSUES: refused-transcript-weights`, `ISSUES: refused-soft-min-path-weighting`): the support problem
 is the whole problem, so the next candidate is a sparsity mechanism, targeting expressed multi-exon
-transcripts with median exon ≤ 150 bp (`ISSUES: the-rna-length-law-fix`). `quant_accuracy.py`.
-
-### background-abundance-pair-unruled
-`priority: later · kind: decision · 2026-09-13 (from the tunables census, W6)`
-`CalibrationConfig.background_abundance` chooses which (counts, exposure) pair the pooled gDNA background
-takes: `"contained"` (the count over the gDNA contained effective length — unbiased, the fragment-length pmf
-in the divisor) or `"measured_total"` (the START/END banks over the region's own length — pmf-free, refuses
-without the wall inputs). The two agree off capture and part under it, where the contained divisor
-under-reads the true gDNA rate several-fold while the pmf-free pair over-reads on pools carrying nascent
-RNA. That is a design decision, not a tunable: rule which pair ships (`total_abundance_audit.py` scores
-them; `calibration_vs_oracle.py --set calibration.background_abundance=measured_total` prices the swap on
-the metric) and the field goes with the ruling. Kept through W6 for that reason alone.
-
-### antisense-prior-assembly-casualty
-`priority: the prior-assembly session · kind: decision · 2026-08-18 (named 2026-09-13)`
-`tests/scenarios/test_antisense_intronic.py::test_nrna_multiexon_t2_low_ss` is a strict xfail: `assemble_priors`
-pins synthetic nascent RNA at Dirichlet alpha = 0 (`EQUATIONS.md` §9b), so recovered RNA lands on the annotated
-antisense t2 — 72 today against the test's limit of 50 (80 under the relay), while both pool totals are better
-with messages on. The owner plans to change the alpha = 0 rule in the post-calibration prior-assembly session;
-the xfail is the executable record of exactly that pending change and closes there, with a test that asserts
-the new rule's promise. Not the pre-port thread's.
-
-### capture-on-strand-pure-ambig-undercall
-`priority: next · kind: defect · 2026-09-13`
-On the ladder's stranded × capture-ON rows the AMBIG slots whose RNA is on ONE strand (or ≤ 5 % on the
-other) under-call gDNA by a net −26k fragments on `g50 ss.99 ON` (|Δ| 38.8k; −29k net on `g98`), the
-largest single AMBIG-class error in scope. They are strand-pure, so the strand term pins the tilt to the
-boundary and says "pure RNA" with a tail factor ∝ 1/√f_g (`EQUATIONS.md` §9e); what gDNA they hold must
-come from the messages and the prior, and under capture the level lanes' lower bounds are weak (the gDNA
-level is enriched at exons and the lanes carry it only as "at least this much"). The exact θ marginal of
-2026-09-13 deepened the under-call by 3 % (the +0.4 % on the stratum), because the fixed lattice's endpoint
-node had flattened the tail across λ. Explore, in order: (1) `tilt_census.py`'s strand-pure band per stratum
-with the depth split — is the under-call concentrated on deep slots (the tail factor) or on shallow ones (the
-messages)? (2) `calibration_walk.py` on `g50 ss.99 ON` — which rung introduces it; (3) the gDNA level lane
-under capture at an AMBIG exon: does the delivered lower bound reach the truth's density, and if not, is the
-loss in `hop_price` or in the level's own count? Implement only what (1)–(3) name; the candidate is a
-capture-aware level (the enrichment spectrum the landscape already learns, read by the lane). The tilt
-measure is not a route: both forms that flatten the strand marginal were refused on this very band
-(`strand-marginal-volume-factor`, CLOSED / REFUSED). Judged on the metric per stratum, both
-zero controls, and the band.
-
-### the-tilt-census-as-an-instrument
-`priority: later · kind: build · 2026-09-13`
-The owner's question "where does the strand tilt matter, and how does the tool do there" is answered by a
-scratchpad script (`tilt_census.py`, the session of 2026-09-13): per stratum, the AMBIG slots by the RNA on
-each strand (bands of the minor strand's share), their depth, the gDNA error, the TILT read-out's error
-(`|Δτ|·R/2`, RNA fragments on the wrong strand — measured by nothing else) and the predicted θ peak width.
-Before it becomes a `scripts/design/` instrument, census what it would replace (`worst_objects.py` and
-`policy_benchmark.py --by-class` rank by class, neither by strand split or tilt error; `object_composition.py`
-scores composition per stratum) — the tilt error column is new information, the rest overlaps. The
-shared-exon toy (`deep_stress.py`, two spliced genes on opposite strands sharing one exon, a tilt ladder at
-depth) is the stress that found the quadrature's failure and is the natural rung to add to the toy ladder.
-
-### performance-memory-bounded-solve
-`priority: now · kind: build · 2026-08-17 (mandatory before 0.8.0), re-framed 2026-09-11, the decomposition landed 2026-09-11`
-Calibration is the tool's one unfinished component: on 18.6M fragments its four sweeps are 706 s of an
-836 s run and hold the 32 GB peak, on ONE core, while the locus EM beside it takes 8 s; the cost is set by
-the index's 2.09M chain slots, not by depth. THE DECOMPOSITION IS THE LOCUS and it is BUILT
-(`DESIGN.md` §6b.15): a terminal — a region admitting no RNA strand — receives nothing, structurally, so
-the sweep solves the chain a locus block at a time (`sweep.solve_chain`, `region_chain.locus_blocks`),
-the only cross-block information being the policy's library reduction; ψ's read-out is chunk-exact, so
-the block size (`CalibrationConfig.sweep_block_slots`) moves no number and is a working-set knob. What is
-LEFT, and why the serial floor of about 800× is not yet cashed: the block solve is Python, and the two
-passes and the policy's `prepare` — most of a sweep — hold the GIL, so threads cannot speed them
-(measured 0.83–0.94× at 8 threads; processes 6.2×, deferred). The owner's decision (2026-09-11): the
-parallel executor waits for the C/C++ port of `_solve_block`, which lands on this structure; until then the
-sweeps run serially and one block at a time. Also still genome-wide: the memoised intron-factory rows
-(`(n_slots, K)`, 1–2 GB per grid), which a block could build for itself. `profiling/profiler.py`,
-`profiling/sweep_replay.py --block-slots`.
-THE AGREED ORDER (owner, 2026-09-11; `ROADMAP.md` rank 1 carries it without numbers): ⓪ re-measure the
-deep library end to end, `main` against the landed tree, two back-to-back pairs at 8 threads — DONE
-(`~/Downloads/rigel_runs/perf/ab_locus_2026-09-11/`, `profiler.py --compare`): wall 917 → 892 s and
-892 → 875 s (0.97, 0.98), PEAK 33.2 → 14.9 GB and 32.6 → 15.0 GB, the four sweeps 769 → 738 s and
-747 → 727 s (0.96, 0.97), untouched stages at 1.00. The peak is no longer the sweep's (11.5 GB while it
-runs) but `build_region_geometry`'s transient (14.5 GB) and the pre-sweep `init_beliefs` solve — the
-next memory target, after the sweeps' time; the final ψ lost ~7 s to smaller tiles inside 5,000-slot
-blocks (`_block_rows` inside a block), a note for ① and ③; ① DONE, and larger than scoped: the WHOLE message layer — `prepare`, both passes and the
-policy's solve — is refit-invariant given the grid (`DESIGN.md` §6b.15), so the refit sweeps are served
-their messages from a content-keyed `message_cache.MessageCache` and pay only their two ψ solves. Measured on
-the deep library, two back-to-back pairs at 8 threads, cache off → on
-(`~/Downloads/rigel_runs/perf/ab_memo_2026-09-11/`): the refit grid is stable (`n_grid` 138, L 23.18 for
-all three refits), refit 1 misses its 426 blocks and refits 2–3 hit all 426 — 38 s each instead of
-176 s; wall 795 → 515 s and 799 → 515 s (0.65), `calibrate` 704 → 424 s, `prepare`/passes/policy solve
-0.49/0.48/0.45, untouched stages 1.00; the cache holds 2.68 GB (its cube rows as the float32 the AMBIG
-solve casts them to — 4.1 GB as float64), so the peak rose 15.0 → 17.8 GB. Whether a memory-constrained
-run should be able to switch it off is a tunable for the owner to rule on; ② DONE — `messages.faces.Faces`:
-the rules as ``(n, 2)`` typed tables over (destination, side) with five kinds and a row store, the lanes'
-faces as bits, bit-identical (`DESIGN.md` §6b.15); ③ the port
-of `_solve_block` — passes and `transfer_rows`, `prepare`, ψ, then threads over blocks — behind a derived
-tolerance gate (promote the tolerant replay comparator into `sweep_replay.py`); ④ the factory rows per
-block; ⑤ the scan (`ISSUES: scan-thread-split-starves-the-workers`) and the second pass. Two things not
-to do: micro-optimise the Python passes (a silent-hop early exit halves them and the port deletes it),
-and bake the λ lattice into the port — its step (`sweep_logodds_step`) is a parameter (`DESIGN.md` §6b.15).
-MEMORY (plan step D / worklist W4) DONE 2026-09-12, measured first: the peak was not the sweeps' but two
-Python transients — `crossing_eff_length`'s `(404k sj × fragment lengths)` matrix chain, ~9 GB that the RSS
-never gave back (macOS keeps freed arenas), raising the whole run's plateau, and `fit_landscape`'s
-`(training regions × grid)` kernel matrices, +3 GB at the true peak inside the refits. Three landings, each
-a numeric no-op on the metric (worst relative move of any stratum's abs_err 3.4e-15): the crossing divisor
-in closed form over the pmf's cumulative sums (`O(objects)`, 8 ms and 34 MB at the human sj count against
-1.5 s and 9 GB; the matrix form survives as the brute force its gate compares with); the landscape's
-kernels built and summed a row tile at a time (`_render`, 200 MB at a million regions); the factory rows
-as `calibrate.FactoryRows`, built per block as the sweep asks and never held for the chain (④ above,
-2–5 GB freed). One back-to-back pair on the deep library: PEAK 19.2 → 11.4 GB, wall 505 → 498 s,
-`region geometry` 1.44 → 0.20 s, `landscape fit` 6.3 → 4.3 s, untouched stages 1.00. What remains of the
-11.4 GB is the pre-calibration floor (~5.6 GB: the index and the payload) plus the message cache's ~4 GB
-(plan step E, the owner's switch) plus the sweep's own working set.
+transcripts with median exon ≤ 150 bp. `quant_accuracy.py`.
 
 ### scan-thread-split-starves-the-workers
 `priority: next · kind: decision · 2026-09-11`
-`BamScanConfig.resolved_scan_threads` gives BGZF decompression `min(4, total - 1)` threads and the scan
-workers what is left, so a 2-4 thread budget runs ONE worker and decompression is not the bottleneck.
-Scan seconds on the 18.6M-fragment library by (bgzf, workers): total 4 — (3,1) 113.5, (2,2) 59.5, (1,3)
-42.4, (0,4) 33.7; total 8 — (4,4) 34.4, (2,6) 26.4, (1,7) 24.8; total 16 — (4,12) 19.1, (1,15) 19.5,
-(2,14) 17.4. Any new split rule is a tunable and `--scan-bgzf-threads` is a user-facing flag, so the rule
-is the owner's to set. `profiling/profiler.py --scan-only`.
+`BamScanConfig.resolved_scan_threads` gives BGZF decompression `min(4, total − 1)` threads and the scan
+workers what is left, so a 2–4 thread budget runs ONE worker and decompression is not the bottleneck. Scan
+seconds on the 18.6M-fragment library by (bgzf, workers): total 4 — (3,1) 113.5, (2,2) 59.5, (1,3) 42.4,
+(0,4) 33.7; total 8 — (4,4) 34.4, (2,6) 26.4, (1,7) 24.8; total 16 — (4,12) 19.1, (1,15) 19.5, (2,14) 17.4.
+Any new split rule is a tunable and `--scan-bgzf-threads` is a user-facing flag, so the rule is the owner's.
+`profiling/profiler.py --scan-only`.
 
 ### u-ruler-arm
 `priority: next · kind: measurement · 2026-08`
@@ -257,22 +96,12 @@ Price the `U` ruler (the oracle's gDNA total at uniform density) end to end: a p
 with no fitting. Capture-OFF only; read `ruler_n_moved`, never the aggregate. `calibration_vs_oracle.py`
 carries the column.
 
-### g00-shrinkage-upstream-repair
-`priority: now · kind: defect · re-priced 2026-09-10`
-At the zero-gDNA control the effective-length shrinkage contracts most transcripts where the factor should be
-1.000: `calibration_vs_oracle.py` reads 0.150 against the oracle's 1.000 on the `g00` rows (`Σ|Δ len|` 996M
-bp), unchanged after the composition repair (828 invented fragments of 18M), because
-`capture_eff_length._global_reference_density` detects a reference from any five slots with positive mass. The
-repair is the detector — does the library carry an enriched gDNA mode at all, a boolean
-(`TRAPS: a-total-density-ratio`); `priors.py` shares the function. Decide first whether the "exactly 1.000 off
-capture" contract line is stale (the in-scope capture-OFF strata read P 0.954/0.967 against O 0.923/0.926).
-
 ### capture-blind-gdna-divisor
 `priority: next · kind: defect · 2026-08-31`
 `gdna_opportunity_from_index` is computed from the index alone, so under capture it removes ~6 bp of a ~30 bp
-length selection — the gDNA control of the retired `fl_anchor_gap.py` moved +6.0 % on all six capture-ON rows (gDNA has no
-introns to miss), and with `ISSUES: eb-shrinkage-magic-ess` it owns the −5.90 % capture-ON length ceiling.
-`capture_eff_length` already models the panel; it also blocks `ISSUES: crossing-pool-contrast`.
+length selection — the gDNA control moved +6.0 % on all six capture-ON rows (gDNA has no introns to miss),
+and with `ISSUES: eb-shrinkage-magic-ess` it owns the −5.90 % capture-ON length ceiling. `capture_eff_length`
+already models the panel; it also blocks `ISSUES: crossing-pool-contrast`.
 
 ### eb-shrinkage-magic-ess
 `priority: next · kind: defect · 2026-08-31`
@@ -284,8 +113,9 @@ at a magic ESS: inert on the ladder (0.01 bp), dominant on the fl-gap arm at `g0
 ### refit-vs-message-arbitration
 `priority: next · kind: design · 2026-08`
 At the unstranded × capture-OFF exon cell the refitted gDNA prior and the message both impute one slot with
-nothing arbitrating them; the message is the accurate voice there and the refit displaces it. Belongs with
-`ISSUES: measured-prior-rung-4`. `calibration_walk.py` (the refit rung against the message rung).
+nothing arbitrating them; the message is the accurate voice there and the refit displaces it. Re-read under the
+E-step: `calibration_walk.py` now says the prior does the unstranded rows and the messages the stranded
+capture-ON ones. Belongs with `ISSUES: gdna-landscape-trains-on-false-positives`.
 
 ### prior-fidelity-vs-deliverable
 `priority: next · kind: question · 2026-08`
@@ -294,25 +124,98 @@ self-solve with the fitted prior is nearly right and the messages destroy it (me
 confirm on a second stratum). Exclude the ruler first (`ISSUES: u-ruler-arm`,
 `ISSUES: g00-shrinkage-upstream-repair`). `prior_vs_oracle.py`.
 
-### expand-the-gdna-spectrum
-`priority: later · kind: decision · 2026-08`
-Fill the gDNA spectrum (1, 5, 10, 25 % up past 90) without multiplying benchmarks: a level is justified by a
-measured transition and crosses a reduced set of the other axes until an interaction is shown; each condition
-costs a simulate, two caches and a certification (`sim/panel.py`). See
-`ISSUES: flgap-panels-stale-nascent-model`.
+### antisense-prior-assembly-casualty
+`priority: the prior-assembly session · kind: decision · 2026-08-18 (named 2026-09-13)`
+`tests/scenarios/test_antisense_intronic.py::test_nrna_multiexon_t2_low_ss` is a strict xfail: `assemble_priors`
+pins synthetic nascent RNA at Dirichlet alpha = 0 (`EQUATIONS.md` §9b), so recovered RNA lands on the annotated
+antisense t2 — 72 today against the test's limit of 50. The owner plans to change the alpha = 0 rule in the
+post-calibration prior-assembly session; the xfail closes there, with a test that asserts the new rule's promise.
 
-### flgap-panels-stale-nascent-model
-`priority: later · kind: decision · 2026-08-22`
-The two fl-gap side panels were not regenerated in the sparse-nascent rebuild and carry the retired uniform
-nascent model, so a claim spanning the ladder and a side panel varies two things. Re-simulating is the owner's
-call.
+### the-atom-at-an-unwitnessed-both-strand-slot
+`priority: later — accepted as a limit of the information (owner, 2026-09-14) · kind: known limit · 2026-09-14`
+The tilt atom (`DESIGN.md` §6b.15, `EQUATIONS.md` §9f) admits "all of this slot's RNA is on strand s" unless
+a held RNA level on the other strand rules it out. On stranded data at a both-strand slot whose minor strand
+has no witness — no junction certifies it and no single-strand piece of its own exists anywhere, the case of
+a single-exon gene wholly inside another gene's exon — the strand split cannot tell "pure s with gDNA" from
+"both strands without": the pure hypothesis fits the split with no parameter and the atom pushes toward it.
+Measured on the golden toy `antisense_contained` (1,000 fragments): the exon∩exon slot's truth is 0 gDNA;
+prior-free the continuum reads 0.244 and the atom 0.483; with the toy's landscape of 8 training regions
+0.005 and 0.242 — the antisense transcript's count 81 → 0 and 177.6 false gDNA fragments in a gDNA-free locus.
+The mono shared-exon stress (no junction) doubles its false gDNA at 2–20 % minor. On the ladder, where the
+landscape trains on ~15k regions, the same slots cost a few fragments each (the (0.2, 0.5] band, `g05 ss.99 ON`
+4,942 → 7,005, `g00 ss.99 OFF` 35 → 73) against the strand-pure band's −11k / −13k. THE STANCE: this is not
+enough information, and it is accepted as such — no presence witness (a locus with RNA elsewhere does not
+imply this slot is expressed; a per-transcript active set would add bookkeeping and no measurement, since the
+failing structure has no node where the transcript can be measured alone). On a real library the landscape
+prior is the deciding voice; its location floor (`DESIGN.md` §7.1 rule 4, 2026-09-14) is the lever that was
+pulled, and the stranded zero controls read 265 / 172 with it — while the 1,000-fragment golden, whose prior
+now fits from about four anchors, reads 200.8 false gDNA (from 177.6): the toy's limit. On unstranded data the
+atom is inert
+(κ = ½ makes the three hypotheses equal) and such a slot is the prior's entirely. Watch it on the census
+(`ISSUES: the-tilt-census-as-an-instrument`) and the mono stress; a real library that shows it would be a
+nested single-exon antisense gene on a shallow stranded run.
 
-### psi-lambda-bracket-unshipped
-`priority: later · kind: decision · 2026-08`
-ψ's λ bracket was too narrow to express its own prior; `DensityLandscape.required_logodds_window` derives it
-with no constant. Built, gated, priced (nearly every in-scope condition improves); ships OFF pending memory at
-genome scale (a multiple on the lattice's point count) and the thermometer. Re-derive as a `policy_prototype.py --module`
-arm.
+### two-sided-exon-row
+`priority: later (deferred by the owner 2026-09-13) · kind: problem · 2026-09-04`
+On unstranded data an exon's held row is the intron's composition through the face map, whose upper side is
+the map's plateau above its ceiling — a lower bound on gDNA — so at pass zero an unstranded licensed exon
+reads ~9× its true gDNA (+2,000 % at `g25 ss.50 OFF`) and forwarding it compounds the bias. The toy harness
+gate reads a factor of 88 (exon |Δf_g| 0.762 beside a pure-gDNA intron, 0.0086 beside a nascent-bearing one)
+and is a strict xfail citing this entry; on the ladder the class is 4–6 % of the unstranded error with
+`transfer` at parity there, on the test chromosome 20–32 % and transfer worse (2,647 → 4,056 at
+`g50 ss.50 OFF`). Every cap, two-sided row or wall is refused where junction probes enrich the flux more than
+the crossing (`ISSUES: the-certified-flux-row-as-a-level`, `ISSUES: two-sided-exon-row-forms`,
+`ISSUES: the-discrepancy-priced-cap`, `ISSUES: the-two-sided-level-lane`,
+`ISSUES: the-wall-above-the-face-map-ceiling`). What would license a two-sided level is whether this library's
+gDNA is enriched, witnessed on unstranded data by silent genes' exons against the intergenic density — the
+landscape prior's job. The first step when taken up is that witness's derivation; judge at `R exon
+(licensed)` and the walled classes, halves apart. `policy_prototype.py --by-class`.
+
+### the-lower-bound-noise-ratchet
+`priority: later (with the enrichment witness) · kind: defect · 2026-09-05`
+A level from an RNA-rich node's own strand profile has a mode that is noise around zero; its lower side bounds
+its neighbours and the tightest noisy neighbour wins (ladder `g05 ss.99 OFF` 44,714 → 45,076; test chromosome
+`g00 ss.99 ON` 64 → 216, 187 of it at `capcluster_ab`'s inner termini). A two-sided own-profile level keeps
+fewer fragments overall, so lower-only stays. The gDNA lane's EDGE level does it too (2026-09-14,
+`test_encompassing_locus.py`, its xfail): a shallow single-strand flank (404 fragments, truth 0.530, local
+solve 0.546) reads 0.596 under the intergenic neighbour's Poisson level — a lower bound at that neighbour's
+sampled density, 0.298/bp against the flank's realised 0.27, a 1.6σ excursion the hop's price blurs but does
+not move. The cure is the enrichment witness `ISSUES: two-sided-exon-row` waits for. `zero_controls.py`.
+
+### flux-floor-dispersion
+`priority: later (with the transport-dispersion decomposition) · kind: question · 2026-09-08`
+The certified flux at a junction is a lower-sided estimate of the exon's strand RNA level priced by the pair
+(`DESIGN.md` §6b.13); the route rate scatters beyond counting (median −3 %, 5–9 % at depth; 0–40 % over on
+nine block readings) and at a pure-RNA exon the price cannot see it, so a lucky over-read is a sharp floor a
+few points too high. `transport_dispersion.py`.
+
+### splice-out-premise-bias-uncorrected
+`priority: later · kind: decision · 2026-09-02`
+The splice-out message assumes spliced and unspliced fragments at one face share capture affinity; measured,
+the premise fails as a bias under capture (`log a` ≈ 0 off, +0.28 under exon probes, +0.78 under junction
+probes), so only a subtracted level — a cross-locale fudge, the owner's call — would correct it. No instrument
+yet.
+
+### background-abundance-pair-unruled
+`priority: later · kind: decision · 2026-09-13`
+`CalibrationConfig.background_abundance` chooses which (counts, exposure) pair the pooled gDNA background
+takes: `"contained"` (the count over the gDNA contained effective length — unbiased, the fragment-length pmf
+in the divisor) or `"measured_total"` (the START/END banks over the region's own length — pmf-free, refuses
+without the wall inputs). The two agree off capture and part under it, where the contained divisor
+under-reads the true gDNA rate several-fold while the pmf-free pair over-reads on pools carrying nascent RNA.
+A design decision, not a tunable: rule which pair ships (`total_abundance_audit.py` scores them;
+`calibration_vs_oracle.py --set calibration.background_abundance=measured_total` prices the swap) and the
+field goes with the ruling.
+
+### the-tilt-census-as-an-instrument
+`priority: later · kind: build · 2026-09-13`
+"Where does the strand tilt matter, and how does the tool do there" is answered by a scratchpad script
+(`tilt_census.py`): per stratum, the AMBIG slots by the RNA on each strand (bands of the minor strand's
+share), their depth, the gDNA error, the TILT read-out's error (`|Δτ|·R/2`, RNA fragments on the wrong
+strand — measured by nothing else) and the predicted θ peak width. Before it becomes a `scripts/design/`
+instrument, census what it would replace (`worst_objects.py` and `policy_benchmark.py --by-class` rank by
+class, neither by strand split or tilt error): the tilt error column is new, the rest overlaps. The
+shared-exon toy (`deep_stress.py`, spliced and mono) is the natural rung to add to the toy ladder.
 
 ### transfer-variance-premise
 `priority: later · kind: question · 2026-08`
@@ -328,50 +231,35 @@ Does any in-scope verdict depend on the nascent stress level? The ladder runs `o
 rank moves; a verdict that holds only at stress is a robustness finding. `sim/panel.py`,
 `policy_benchmark.py`.
 
+### expand-the-gdna-spectrum
+`priority: later · kind: decision · 2026-08`
+Fill the gDNA spectrum (1, 5, 10, 25 % up past 90) without multiplying benchmarks: a level is justified by a
+measured transition and crosses a reduced set of the other axes until an interaction is shown; each condition
+costs a simulate, two caches and a certification (`sim/panel.py`). See
+`ISSUES: flgap-panels-stale-nascent-model`.
+
+### flgap-panels-stale-nascent-model
+`priority: later · kind: decision · 2026-08-22`
+The two fl-gap side panels were not regenerated in the sparse-nascent rebuild and carry the retired uniform
+nascent model, so a claim spanning the ladder and a side panel varies two things. Re-simulating is the owner's
+call.
+
 ### hygiene-ledger
 `priority: later · kind: hygiene · 2026-08-31`
-Each its own commit, none moving the 0.8.0 metric:
-- the wave-3 frame migration, RULED 2026-09-13 (owner): of the six bank-readers still on pass one, four are
-  RETIRED rather than migrated — their questions closed, superseded or parked, none loaded by a test, none in
-  any procedure — and two migrate to the drained frame the truth is certified in (`fl_pool_purity` and
-  `transport_dispersion`, both migrated 2026-09-13). Retired, each its own commit, all in git: `structural_claims_audit` (stage 0 came
-  out confusion-matrix clean; only a parked, twice-refused issue cited it; its inputs are frame-invariant);
-  `gdna_pool_census` (Stage A is closed and gated by the accumulator's spec test; it overlapped `fl_pool_purity`);
-  `calibration_truth_ab` (its one number is in every `calibration_vs_oracle.py` row's `pools`, in the drained
-  frame with both zero controls; the drain it priced shipped; its length ceiling is `em_fl_ceiling.py`'s,
-  through the EM); `abundance_landscape_census` (the fit it surveys is QC-only — nothing in the solve reads
-  it — its per-condition survey is recorded, and the rung that cited it is not on the roadmap).
-- the index's duplicate map as an alias map `dropped_t_id → kept_t_id` (an index rebuild, no panel re-scan —
-  verify with `rescan_panels.py`; `reach` is covered by no other hash);
-- W11, the coverage census, RULED and LANDED 2026-09-13 (owner: converge on the production surface; my
-  judgement on dead vs. rotten): the suite and all ten self-tests under coverage found 2,191 never-executed
-  statements in `src/rigel` (84 % covered). Removed, each its own commit, byte-identical on the default rows of
-  both substrates and on the three identity references: seven dead members (a local helper, five properties, a
-  method, a loader for a record no cache holds); the unreachable no-calibration path (the index loader refuses
-  every older format); the RNA reach taper's unfed switch; the RNA arm's unfed fitted-prior socket (ψ takes one
-  fitted arm, `gdna_logprior`); and three dead simulator features — `sim/locus_sweep` (0 % executed) with its
-  wrapper, `sim/net_flow` (no entry point) with its test, and the synthetic mini-genome suite path (`sim/suite`,
-  `sim/synthetic_genome`, `simulate_suite.py`, `snapshot_suite.py`, `build_toy_2exon_reference.py`) that
-  `panel.py` superseded. Kept as coverage GAPS, not dead code: the five CLI command bodies, the silent policy
-  through `calibrate` (only the instruments run it), the simulator's sharded writers and its whole-genome path
-  (live in panel builds, silent in the suite), and the zarr splice blacklist (a CLI feature with no test).
+One item open, its own commit, moving no number: the index's duplicate map as an alias map
+`dropped_t_id → kept_t_id` (an index rebuild, no panel re-scan — verify with `rescan_panels.py`; `reach` is
+covered by no other hash). The wave-3 frame migration and the coverage census closed 2026-09-13 (the plan's
+W10 and W11 rows; the retired instruments and dead code are in git). Kept as coverage GAPS, not dead code: the
+five CLI command bodies, the silent policy through `calibrate`, the simulator's sharded writers and its
+whole-genome path, and the zarr splice blacklist.
 
-### oracle-effective-length-diagnostic
-`priority: later · kind: measurement · 2026-08`
-Started, not finished; it re-ranks the two ruler issues. Needs a stashed pre-closure arm or it measures
-nothing — one arm is not an A/B. No instrument yet.
-
-### the-cancelling-pair
-`priority: parked (refused twice) · kind: design · 2026-08-26`
-`struct_lock` rescoped to `g1_locked ∧ REGION` and the `intergenic|exon` boundary claiming its
-RNA-contaminated crossing mass as gDNA: neither half prices alone (`TRAPS: a-cancelling-defect-pair`); five
-xfails go green iff the pair lands. Re-priced 2026-08-26 with the measured intron reference as load: still
-refused (worse on two of three in-scope strata, wins confined to `g00`). The one-sided certified-RNA bound is
-the only mechanism the zero control has endorsed on every row (−81.9 %, 8/8) and is panel-negative alone,
-because the level channel it was covering for is structurally disconnected (bipartite chain; only pure-gDNA
-REGIONs originate a level). Revive only with messages on at `g05 ss0.50 capture_on`. The structural-claims
-audit that scored it was retired 2026-09-13; the confusion matrix is re-derivable from `build_structural_claims`
-against `calibration_oracle.py`'s `slot_truth.npz`.
+### drain-contaminates-certified-rna
+`priority: later (parked by the owner, 2026-09-01) · kind: defect · 2026-08-31`
+The second pass deposits some true-gDNA fragments into the certified-RNA banks: 233 records at
+`g50 ss.99 OFF`, 1,482 at `g98 ss.99 ON` (1.9 % of that in-scope channel). The leak is exactly posterior
+sampling and a no-leak counterfactual moves the 0.8.0 metric −0.60 %/−0.05 % at worst, so the harm is the
+certainty claim and no in-solve correction is licensed (`ISSUES: drain-provenance-split`). To build: `DrainQC`
+records `Σ q_null`; the middle-bin posterior bias repaired as its own A/B. `calibration_vs_oracle.py`.
 
 ### crossing-pool-contrast
 `priority: parked (blocked) · kind: question · 2026-08-31`
@@ -379,15 +267,14 @@ A second gDNA length contrast on the crossing pools: with oracle weights it beat
 capture (TV 0.076 vs 0.136; 0.078 vs 0.182) and starves off capture (pool 3 at 29–630 fragments). Blocked: the
 weight estimator does not transfer under capture (`ISSUES: capture-blind-gdna-divisor`), and no shadow
 transcript overlaps a gene edge, so pool 3 reads exactly 1.0000 pure
-(`TRAPS: purity-is-a-property-of-the-annotation`). The two crossing enrichments are equal (1.002/1.034), so
-only the common level is missing.
+(`TRAPS: purity-is-a-property-of-the-annotation`).
 
 ### capture-degeneracy-standing-risk
 `priority: parked (watch) · kind: risk · 2026-08-31`
 The gDNA two-pool contrast survives capture by a degeneracy: the shared-contaminant assumption is false under
 capture (TV 0.95 vs 0.06–0.14 off) and it is safe only because the intergenic pool is depleted-not-impure, so
-`a_0` clips to 1 and the algebra collapses to `g = f_0` (to 3e-17). A probe panel that put RNA into intergenic
-space would break it silently; `_deconvolved_gdna_counts` carries the derivation. No panel can fire it today.
+`a_0` clips to 1 and the algebra collapses to `g = f_0`. A probe panel that put RNA into intergenic space would
+break it silently; `_deconvolved_gdna_counts` carries the derivation. No panel can fire it today.
 
 ### pure-rna-mirror-asymmetry
 `priority: parked · kind: defect · 2026-08`
@@ -395,40 +282,89 @@ Two exact per-fragment mirrors of a pure-RNA library deconvolve differently in `
 percent, neither boundary-only nor monotone in strandedness. An R1-sense library is simulable; no instrument
 yet.
 
-### parked-capture-pilot-sign
-`priority: parked · kind: question · 2026-08-13`
-Two capture-ON pilot rows disagreed about the sign of every length correction; both panels were deleted and
-the correction lives in the retired length channel. If revisited, find which row is lying rather than
-averaging; the fl-gap panels are not a drop-in (`ISSUES: flgap-panels-stale-nascent-model`).
-
 ---
 
 ## CLOSED / REFUSED — do not rebuild these; append-only
 
+Every entry keeps its stamped measurement exactly as recorded: a graveyard row without its number is an
+invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g10`/`g25`/`g75`/`g90` predates
+the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
+current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
+candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### capture-on-strand-pure-ambig-undercall
+CLOSED by landing 2026-09-14 (`DESIGN.md` §6b.15, `EQUATIONS.md` §9f): the tilt atom — the AMBIG tilt's
+hypothesis space {pure +, pure −, mixed} at equal reference weight, two columns at `τ = ±1` in ψ's cube beside
+the continuum (`−log π` on its trapezoid weights), a held RNA level on a strand ruling the other strand's atom
+out. The mechanism: the continuum's median sat below the strand cap at a strand-pure slot (prior-free, a truth
+of 0.50 read 0.31–0.37; 0.46–0.50 now). Killing numbers, the L3 tree → landed: ladder stranded ON
+470,862 → 427,046 (`g50 ss.99 ON` 217,636 → 199,409, `g98 ss.99 ON` 176,468 → 149,603), every stratum
+better, 15 of 16 contaminated rows better, `g05 ss.99 ON` +1.7 %; stranded zero controls 497 → 550 / 224 → 231,
+unstranded within a fragment; test chromosome −0.1 / +0.2 / −0.06 / +0.09 %; the strand-pure census band
+−28 % / −38 % on `g50` / `g98 ss.99 ON`, its tilt error 40–80 % lower on every stranded row; the spliced stress
+identical on every both-strand row; the encompassing region between TA+'s exons 0.366 → 0.511 against 0.544.
+The source reproduces the prototype exactly on the test chromosome and to ≤ 0.007 % on the ladder. Gates in
+`test_vertex_reference` (four perturbations fired). Not implemented: the structural witness (within 2 % of the
+delivered-level witness). The cost where no witness exists is `the-atom-at-an-unwitnessed-both-strand-slot`.
+
 ### deadband-gates-a-gdna-free-library
-CLOSED by landing 2026-09-14 (`DESIGN.md` §6b.15; the derivation `EQUATIONS.md` §5.2b): the strand channel
-is live iff the protocol preserves strand — the Bayes factor on the spliced 2×2 of a free κ (the fit's own
-Beta(1, 1)) against κ = ½ exactly, closed form and no constant (`region_init.strand_discriminability`, whose
-only inputs are κ̂ and the spliced count); `disc = 4(κ̂−½)²` where live; every gDNA quantity gone from the
-strand channel (`n_gdna_obs` deleted from the strand model, the sweep, the injected priors and the toy
-harness). Killing numbers: the replaced form — an unbiased estimate of `(κ−½)²` floored at zero — is positive
-on 32 % of unstranded libraries; the ladder's `g98 ss.50 OFF` (z = 1.22) shipped LIVE and `g00 ss.50 OFF`
-(z = 1.05) dead only by the gDNA term, without which 499 → 21,484 (20,545 through `tau_lam`'s readers, 0.7
-through the lanes' witness column); all four ladder `g00` rows had `N_gdna = 0` and the channel dead at
-κ = 0.0099, so every g00-donor toy of the θ thread ran without a strand channel. Landed: the ladder identical
-to 0.1 fragment everywhere but unstranded OFF −0.22 % (`g98 ss.50 OFF` 123,657 → 122,981), the test
-chromosome identical on all 30 rows, the unstranded zero controls identical, two contaminated rows
-bit-identical, the stranded zero controls 405 → 497 and 194 → 224 — the refit rung (375 → 8,696 before the
-messages repair it to 728; the messages rung itself 59,456 → 54,874), the landscape's vertex-resolution bias
-on 2,700 newly training exons, filed under `gdna-landscape-trains-on-false-positives` (d). The shared-exon
-stress on the `g00` donor never worse, 139 → 109 / 93 → 64 at 50k (20 % / 50 % minor); the encompassing
-locus's exon∩exon slots 0.054 / 0.046 → 0.002 / 0.005; the goldens' gDNA-free toys ≤ 2e-3 relative on
-transcript counts but `antisense_contained` (false gDNA 78.7 → 5.6 of 1,000). REFUSED with it, the second
-candidate — an RNA level read from a slot's belief: a belief is the prior's answer, and a lane carrying it is
-the relay (`TRAPS: one-hop-lifted-out-is-still-the-relay`); the stranded gDNA-free case needs only the gate,
-and the unstranded one is the landscape's. Gates: `test_region_init` (the structural invariant, the ladder's
-own scalars, the Occam scaling, the no-observation case; five perturbations fired) and
-`test_encompassing_locus` on a gDNA-free donor.
+CLOSED by landing 2026-09-14 (`DESIGN.md` §6b.15, `EQUATIONS.md` §5.2b): the strand channel is live iff the
+protocol preserves strand — the Bayes factor on the spliced 2×2 of a free κ (the fit's own Beta(1, 1)) against
+κ = ½ exactly, closed form, no constant (`region_init.strand_discriminability(κ̂, N)`); `disc = 4(κ̂−½)²` where
+live; `n_gdna_obs` deleted throughout. Killing numbers: the replaced form (an unbiased estimate of `(κ−½)²`
+floored at zero) is positive on 32 % of unstranded libraries — `g98 ss.50 OFF` shipped LIVE at z = 1.22, and
+`g00 ss.50 OFF` was dead only by the gDNA term, without which 499 → 21,484; all four ladder `g00` rows had
+`N_gdna = 0` and the channel dead at κ = 0.0099, so every g00-donor toy of the θ thread had run without a strand
+channel. Landed: the ladder identical everywhere but unstranded OFF −0.22 % (`g98 ss.50 OFF` 123,657 →
+122,981); the test chromosome identical on 30 rows; two contaminated rows bit-identical; the stranded zero
+controls 405 → 497 / 194 → 224, located at the refit rung (the landscape's vertex bias,
+`gdna-landscape-trains-on-false-positives` (d)); the encompassing exon∩exon slots on a gDNA-free donor
+0.054 / 0.046 → 0.002 / 0.005; 17 goldens regenerated (≤ 2e-3 relative, `antisense_contained`'s false gDNA
+78.7 → 5.6). REFUSED with it: an RNA level read from a slot's belief — the prior's answer re-emitted as data,
+the relay (`TRAPS: one-hop-lifted-out-is-still-the-relay`). Gates in `test_region_init` (five perturbations
+fired) and `test_encompassing_locus` on a gDNA-free donor.
+
+### measured-prior-rung-4
+SUPERSEDED 2026-09-14: ψ's composition reference fitted from composition-free observables (`rho_0`, the
+enrichment responsibility, the detector as a boolean) was the measured-prior thread's fourth rung
+(2026-08-26). The gDNA landscape hyperprior (`DESIGN.md` §7.1, trained on the previous solve's deconvolved
+gDNA, the zero controls at a few hundred fragments) is the population prior ψ carries, and ψ has no reference
+location (`DESIGN.md` §6b.1); the total-density landscape it would have consumed is QC-only. The requirements
+it listed (span both lattice ends, exact at `g00`, one pseudo-fragment) are met or moot. Re-open only with a
+measured gap the landscape prior cannot close.
+
+### reference-prior-refuted-at-concept-level
+RECORD (2026-08-24; the ruling is `DESIGN.md` §6b.1): ψ's reference tilt was refuted at the concept level — on
+λ the data's information `I ∝ N_eff·disc·[f_g(1−f_g)]²` is zero at κ = ½ while a tilt holds fixed nats there,
+overturned at N = 3 where the strand channel is alive and never at κ = ½ (0.7471 from N = 10 to 10⁶); 82–95 %
+of unstranded pass-0 error sat on slots it decided. Refused: another constant (0.75 optimal on none of 16),
+`σ(L)` (3.3×/10.8× worse at the zero controls), re-weighting (up to 2.8× worse), an information-weighted tilt,
+the arcsine coordinate (`ISSUES: arcsine-magnitude-coordinate`). The reference location is deleted.
+
+### ambig-node-as-a-gdna-source
+REFUSED as built 2026-09-08: a both-stranded node's own counts plus its held RNA levels, read as a gDNA level
+and emitted lower-sided — `g05 ss.70 OFF` +2.6 % on all three test panels, +4…+38 % on the weak-κ zero
+controls, ladder `g05 ss.50 OFF` 1.745× / `g05 ss.99 ON` 1.465× (at low gDNA the level's mode is noise and
+travels as a floor); its target, the walled host exon of a `span` locus, gains ~100 fragments. Re-open only
+with a gate on the emitted level's own width.
+
+### psi-lambda-bracket-unshipped
+CLOSED 2026-09-14, landed with the one-lattice ruling (W5, `DESIGN.md` §6b.15): the λ bracket follows the
+landscape prior's derived demand (`DensityLandscape.required_logodds_window`, read by `calibrate._sweep`) and
+the point count follows the bracket at the fixed step; nothing ships off.
+
+### the-cancelling-pair
+REFUSED twice (2026-08-26 the last, with the measured intron reference as load): `struct_lock` rescoped to
+`g1_locked ∧ REGION` and the `intergenic|exon` boundary claiming its RNA-contaminated crossing mass as gDNA —
+neither half prices alone (`TRAPS: a-cancelling-defect-pair`), worse on two of three in-scope strata with the
+wins confined to `g00`. The one-sided certified-RNA bound is the only mechanism the zero control endorsed on
+every row (−81.9 %, 8/8) and is panel-negative alone. Revive only with messages on at `g05 ss0.50 capture_on`;
+the confusion matrix is re-derivable from `build_structural_claims` against `slot_truth.npz`.
+
+### parked-capture-pilot-sign
+MOOT 2026-09-14: two capture-ON pilot rows disagreed about the sign of every length correction (2026-08-13);
+both panels were deleted and the correction lives in the length composition channel, retired until after
+0.8.0. If the channel returns, find which row lied rather than averaging.
 
 ### strand-marginal-volume-factor
 REFUSED 2026-09-13, both forms, with their numbers (the derivation and the arms: the sandbox's θ note §11). The
@@ -478,12 +414,6 @@ exists in the tool. What it exposed is `ISSUES: strand-marginal-volume-factor`.
 CLOSED by landing 2026-09-12: the AMBIG cube is float64 like the rest of ψ — the float32 cube was a memory
 choice the tiling made moot, and one solver (`simplex_logodds._solve_logodds`, a single-strand slot the
 ``K_t = 1`` case) has one precision. At κ = ½ the strand mean is ½ identically in float64 and `w_pos` reads ½.
-
-Every entry keeps its stamped measurement exactly as recorded: a graveyard row without its number is an
-invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g10`/`g25`/`g75`/`g90` predates
-the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
-current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
-candidate on top of being refused; the `g00` zero-control column is never moot.
 
 ### landscape-trains-on-real-substrate
 CLOSED 2026-09-10, superseded: the no-evidence share of the prior's training mass is now zero by construction

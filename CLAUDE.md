@@ -186,8 +186,18 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,441 passed / 0 skipped / 3 xfail, 3,444 collected** (re-derived
-2026-09-14 after L3 made the strand channel's gate a protocol decision: five gates added and two retired in
+**The standing baseline: 0 failed / 3,458 passed / 0 skipped / 3 xfail, 3,461 collected** (re-derived
+2026-09-14 after the landscape's location floor landed: one gate added to `test_landscape_training_population.py`,
++1 case and ±0 files; 16 goldens regenerated with their magnitudes read first — fourteen ≤ 1.1e-3 relative on
+transcript counts, `antisense_contained` 177.6 → 200.8 and `strand_ss65` 16.8 → 17.4 false gDNA of 1,000, a
+tiny toy's prior fitting from fewer anchors; before that, the same day, after L5 landed the tilt atom: fourteen ψ gates added to `test_vertex_reference.py` (the strand-pure
+read-out at four depths and three truths, the three hypotheses' equal weight, the witness), the encompassing
+solve gate split into the atom's population — un-xfailed on both donors — and the flanks, whose gDNA donor
+case is the ratchet's xfail, +16 cases and ±0 files; two goldens regenerated with their magnitudes read
+first — `antisense_overlap` ≤ 5e-4 relative on transcript counts, `antisense_contained` the atom's bare cost
+at an unwitnessed slot, its antisense transcript 81 → 0 and its gDNA-free locus 5.6 → 177.6 false gDNA of
+1,000 (`ISSUES: the-atom-at-an-unwitnessed-both-strand-slot`); before that, the same day, after L3 made the
+strand channel's gate a protocol decision: five gates added and two retired in
 `test_region_init.py` with the gDNA-free deadband's xfail flipped into a passing gate, `test_encompassing_locus.py`
 parametrised over a gDNA-free donor, +6 cases and ±0 files; 17 goldens regenerated with their magnitudes read first —
 the gDNA-free toys' transcript counts ≤ 2e-3 relative, `antisense_contained`'s false gDNA 78.7 → 5.6 of 1,000, the
@@ -198,7 +208,7 @@ tests rewritten in place, ±0 — and after the one-lattice landing the same day
 magnitudes read first — transcript counts ≤ 1.5e-3 relative, a tiny toy's `em_effective_length` ≤ 8.4 % — and
 the retired second grid's assertion folded into the chunk-exactness gate, ±0; before that, 2026-09-12: the
 cleanup split, the received tables, the replay's tolerance report, one ψ solver, the memory steps). The 3 xfails are executable records of proven defects whose fixes are elsewhere
-(`ISSUES: two-sided-exon-row`; `ISSUES: antisense-prior-assembly-casualty`; `ISSUES: capture-on-strand-pure-ambig-undercall`, closing with the witnessed atom), deferred by ruling to their threads — "fix the test" is a category
+(`ISSUES: two-sided-exon-row`; `ISSUES: antisense-prior-assembly-casualty`; `ISSUES: the-lower-bound-noise-ratchet`, the encompassing locus's shallow flank under an edge level), deferred by ruling to their threads — "fix the test" is a category
 error, and an xfail is closed by repairing the thing or asserting the invariant structurally, never by
 widening a bound. **Any failure at all is a regression.** A commit that measures the suite updates this
 line.

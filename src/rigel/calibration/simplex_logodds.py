@@ -32,7 +32,17 @@ Three facts that determine this file's shape:
    peak narrows as ``n^{−½}`` (0.005 rad at 50k fragments), so ψ places its nodes across each
    ``(slot, λ)``'s own peak and weights them as the trapezoid rule (:func:`_tilt_window`) — the
    marginal is then exact at every depth with a DERIVED node count (``_TILT_NODES``), where a fixed
-   lattice's sum was a comb. The weights written are the quadrature's (``log h``), never the measure's.
+   lattice's sum was a comb. The weights written are the quadrature's (``log h``) and, with 5, the
+   continuum's share of the reference mass (``−log π``) — never a tilt density.
+5. The AMBIG tilt's hypothesis space is {pure +, pure −, mixed} at equal reference weight — THE TILT
+   ATOM. Presence per strand is discrete, so beside the continuum's nodes ψ carries two columns at
+   ``τ = ±1`` exactly (a single-strand solve inside the cube, no tilt parameter), and the continuum's
+   weights carry ``−log π`` so the three hypotheses' masses are equal wherever the strand term is flat.
+   At a strand-pure slot the atom explains the split with no parameter and the read-out lands at the
+   cap, where the continuum's median sat below it; a held RNA level on a strand (a `CubeRow` profile) is
+   a certified witness of that strand's RNA and rules the OTHER strand's atom out. Gated in
+   ``tests/calibration/test_vertex_reference.py``; the cost at an unwitnessed both-strand slot is the
+   atom's and is recorded where it was measured.
 
 There is NO spliced term: ``mass_spliced`` is consumed only by the returned ``rna_mass``, never by ψ. That
 is correct — at a sj mature RNA *splices*, so the unspliced crossing mass is gDNA plus RNA that has not
@@ -529,9 +539,11 @@ def _psi(
     with the two strand-fraction grids it was evaluated on, ``(f_pos, f_neg)``, and the tilt ``tau`` they
     were built from. A single-strand call (``ambig=False``) has the tilt of each slot's live strand
     (``τ = ±1``), a ``(m, K, 1)`` cube and no weight. An AMBIG call places the θ nodes across each slot's
-    strand term (:func:`_tilt_window`, ``K_t = _TILT_NODES``) and evaluates each delivered
-    :class:`CubeRow` at them (``cube_rows``: one record or ``None`` per slot). :func:`_solve_logodds`
-    reads ψ out; the vertex-reference gates read ψ itself."""
+    strand term (:func:`_tilt_window`, ``K_t = _TILT_NODES``) for the MIXED hypothesis, appends the two
+    PURE hypotheses as the columns ``τ = +1, −1`` (the tilt atom: the three at equal reference weight,
+    a delivered level on a strand ruling the other strand's atom out) and evaluates each delivered
+    :class:`CubeRow` at every column (``cube_rows``: one record or ``None`` per slot), so the cube is
+    ``(m, K, K_t + 2)``. :func:`_solve_logodds` reads ψ out; the vertex-reference gates read ψ itself."""
     ap = np.asarray(allow_pos, bool)
     an = np.asarray(allow_neg, bool)
     u_pos = np.asarray(u_pos, np.float64)
@@ -548,7 +560,19 @@ def _psi(
         theta, log_weight = _tilt_window(
             u_pos, n, fg, float(kappa), float(od_g), float(od_r), f_g_ref, f_pos_ref, f_neg_ref
         )
-        tau = np.sin(theta)  # τ = sin θ, exact across the domain
+        # THE TILT ATOM: the hypothesis space is {pure +, pure −, mixed} at equal reference weight —
+        # two more columns at τ = ±1 exactly (a single-strand solve inside the cube, no tilt parameter,
+        # log-weight 0) beside the mixed continuum, whose trapezoid weights carry −log π so that its
+        # measure is the uniform density over the domain (its window's share of it). Where the data
+        # are pure the atom explains them with no parameter and wins the Occam contest against the
+        # continuum's ∝ σ_θ; where they are not it sits e^{−(1−τ̂)²/2σ_τ²} below the peak and vanishes.
+        m = u_pos.shape[0]
+        tau = np.concatenate(
+            [np.sin(theta), np.ones((m, fg.shape[0], 1)), -np.ones((m, fg.shape[0], 1))], axis=2
+        )  # τ = sin θ, exact across the domain; then the two atoms
+        log_weight = np.concatenate(
+            [log_weight - np.log(np.pi), np.zeros((m, fg.shape[0], 2))], axis=2
+        )
     f_act = (1.0 - fg)[None, :, None]  # (1, K, 1)
     f_pos = f_act * (1.0 + tau) / 2.0  # (m|1, K, K_t)
     f_neg = f_act * (1.0 - tau) / 2.0
@@ -572,6 +596,15 @@ def _psi(
         for j, row in enumerate(cube_rows):
             if row is not None:
                 psi[j] += row.at(fg, tau[j])
+                if ambig:
+                    # THE WITNESS: a held RNA level on a strand certifies that the strand carries RNA,
+                    # so the hypothesis that all of the slot's RNA is on the OTHER strand is out. A level
+                    # on a strand says nothing against that strand's own atom; nothing delivered leaves
+                    # both atoms standing.
+                    if row.profile_neg is not None:
+                        psi[j, :, -2] = -np.inf
+                    if row.profile_pos is not None:
+                        psi[j, :, -1] = -np.inf
     if log_weight is not None:
         psi = psi + log_weight
     return psi, f_pos, f_neg, tau

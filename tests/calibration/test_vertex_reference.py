@@ -544,7 +544,10 @@ def _theta_reference(args, kw):
             epsabs=0,
             epsrel=1e-11,
         )
-        out[j] = peak + np.log(val)
+        # the tilt atom's measure (EQUATIONS §9f): the continuum normalised to the domain plus the two
+        # pure hypotheses at τ = ±1, each at the same reference weight
+        atoms = np.logaddexp(g(0.5 * np.pi), g(-0.5 * np.pi))
+        out[j] = np.logaddexp(peak + np.log(val / np.pi), atoms)
     return out + (SL._gdna_arm(lam, None) + SL._rna_arm(lam))[0]
 
 
@@ -553,10 +556,11 @@ def _theta_reference(args, kw):
     [(500.0, 0.0, 0.0), (50_000.0, 0.0, 0.5), (500_000.0, 0.3, 0.9), (500_000.0, 0.0, 1.0)],
 )
 def test_the_theta_marginal_matches_adaptive_quadrature_at_every_depth(n, fg_true, tau_true):
-    """ψ's θ-marginal, log Σ_k exp ψ(λ, θ_k), against the adaptive reference: the λ-SHAPE of the error
-    (a constant offset is harmless; a λ-dependent one is a gDNA bias) is below 1e−5 nats at 500
-    fragments and at 500k, interior tilt, near-pure tilt and the strand-pure boundary alike. The
-    fixed 60-node lattice read 0.01–0.5 nats at 500 fragments and 90–130 at 500k."""
+    """ψ's θ-marginal, log Σ_k exp ψ(λ, θ_k) over the continuum's nodes and the two atoms, against the
+    adaptive reference under the same measure: the λ-SHAPE of the error (a constant offset is harmless;
+    a λ-dependent one is a gDNA bias) is below 1e−5 nats at 500 fragments and at 500k, interior tilt,
+    near-pure tilt and the strand-pure boundary alike. The fixed 60-node lattice read 0.01–0.5 nats at
+    500 fragments and 90–130 at 500k."""
     args, kw = _theta_case(n, fg_true, tau_true)
     psi, _fp, _fn, _tau = SL._psi(*args, ambig=True, **kw)
     delta = SL._lse(psi, axis=2)[0] - _theta_reference(args, kw)
@@ -605,8 +609,13 @@ def test_a_delivered_row_is_evaluated_at_the_nodes_exactly():
     with_row, _fp, _fn, tau2 = SL._psi(*args, ambig=True, cube_rows=[row], **kw)
     assert np.array_equal(tau, tau2)
     # to rounding: the row is added before the quadrature's log-weights, so the difference of two
-    # sums is not the row to the bit; an interpolated row would miss by 1e-2
-    assert np.allclose(with_row - bare, row.at(kw["fg"], tau[0]), atol=1e-9, rtol=0.0)
+    # sums is not the row to the bit; an interpolated row would miss by 1e-2. The row's + profile is
+    # also the witness that rules the pure − atom out (the last column), so that column is compared
+    # apart: −∞ with the row, finite without
+    assert np.allclose(
+        (with_row - bare)[..., :-1], row.at(kw["fg"], tau[0])[:, :-1], atol=1e-9, rtol=0.0
+    )
+    assert np.all(np.isneginf(with_row[0, :, -1])) and np.all(np.isfinite(bare[0, :, -1]))
     assert not np.array_equal(with_row, bare), "the row must do something"
     empty = SL.CubeRow(None, None, u, 400.0, 100.0, 0.5)
     nothing, *_ = SL._psi(*args, ambig=True, cube_rows=[empty], **kw)
@@ -620,4 +629,73 @@ def test_without_strand_information_the_nodes_are_the_whole_domain():
     kw["kappa"] = 0.5
     _psi_, _fp, _fn, tau = SL._psi(*args, ambig=True, **kw)
     lattice = np.sin(np.linspace(-0.5 * np.pi, 0.5 * np.pi, SL._TILT_NODES))
-    assert np.allclose(np.broadcast_to(lattice, tau.shape), tau, atol=1e-15)
+    mixed = tau[..., : SL._TILT_NODES]  # the continuum's columns; the two atoms follow
+    assert np.allclose(np.broadcast_to(lattice, mixed.shape), mixed, atol=1e-15)
+
+
+# ── the tilt atom: the AMBIG tilt's hypothesis space is {pure +, pure −, mixed} ──────────────────────
+
+
+def _pure_plus_case(n: float, fg_true: float, K: int = 101):
+    """One strand-pure AMBIG slot — all of its RNA on + — with the expected counts and the variance
+    frozen at the truth; prior-free."""
+    args, kw = _theta_case(n, fg_true, 1.0, K=K)
+    u_pos, u_neg, ap, an, fgr, fpr, fnr = args
+    return (u_pos, u_neg, ap, an, fgr, fpr, fnr), dict(
+        kappa=_THETA_KAPPA, od_g=0.0, od_r=0.0, n_grid=K, L=10.0, ambig=True
+    )
+
+
+@pytest.mark.parametrize("fg_true", [0.5, 0.85, 0.97])
+@pytest.mark.parametrize("n", [30.0, 300.0, 3000.0, 30000.0])
+def test_a_strand_pure_slot_reads_its_gdna_at_the_strand_cap(n, fg_true):
+    """At a slot whose RNA is all on one strand the truth sits AT the strand cap, and the pure
+    hypothesis explains the split with no tilt parameter: the prior-free read-out lands within 0.07 of
+    the truth at every depth from 30 to 30k fragments (the tilt continuum alone read 0.31–0.37 for a
+    truth of 0.50, 0.69–0.80 for 0.85 and 0.85–0.95 for 0.97: every f_g below the cap fits the split
+    with a slightly impure tilt, and the marginal's median sat below the cap)."""
+    from rigel.calibration.simplex_logodds import _solve_logodds
+
+    args, kw = _pure_plus_case(n, fg_true)
+    out = _solve_logodds(*args, **kw)
+    assert abs(float(out.gdna_frac[0]) - fg_true) < 0.07, (n, fg_true, float(out.gdna_frac[0]))
+
+
+def test_the_three_tilt_hypotheses_carry_equal_reference_weight():
+    """With no strand information (κ = ½) the strand term is flat in the tilt, so the three hypotheses'
+    marginal masses must be equal at every λ: the mixed continuum's — its nodes across the whole domain
+    with the trapezoid weights, normalised to the domain — equals each atom's. A continuum weighted by
+    the window's length rather than its share of the domain would carry π times an atom's mass."""
+    args, kw = _theta_case(1000.0, 0.2, 0.3)
+    kw["kappa"] = 0.5
+    psi, _fp, _fn, tau = SL._psi(*args, ambig=True, **kw)
+    assert psi.shape[2] == SL._TILT_NODES + 2 and tau.shape[2] == SL._TILT_NODES + 2
+    assert np.all(tau[..., -2] == 1.0) and np.all(tau[..., -1] == -1.0)
+    mixed = SL._lse(psi[..., :-2], axis=2)
+    assert np.allclose(mixed, psi[..., -2], atol=1e-9, rtol=0.0)
+    assert np.allclose(mixed, psi[..., -1], atol=1e-9, rtol=0.0)
+
+
+def test_a_delivered_level_on_a_strand_rules_the_other_strands_pure_hypothesis_out():
+    """A held RNA level on strand s is a certified witness that s carries RNA, so the hypothesis that ALL
+    the slot's RNA is on the other strand is out (−∞ in ψ); a level on s says nothing against "pure s";
+    with nothing delivered both atoms stand. And the witness reaches the read-out: at a strand-pure +
+    slot with a truth of 0.50 a − level pulls f_g back below the cap the atom had recovered."""
+    from rigel.calibration.simplex_logodds import _solve_logodds
+
+    args, kw = _theta_case(3000.0, 0.5, 1.0)
+    u = kw["lam"]
+    floor = -0.5 * np.maximum(0.0, (0.0 - u) / 0.3) ** 2
+    neg_level = SL.CubeRow(None, floor, u, 3000.0, 1000.0, 0.5)
+    pos_level = SL.CubeRow(floor, None, u, 3000.0, 1000.0, 0.5)
+    bare, *_ = SL._psi(*args, ambig=True, **kw)
+    with_neg, *_ = SL._psi(*args, ambig=True, cube_rows=[neg_level], **kw)
+    with_pos, *_ = SL._psi(*args, ambig=True, cube_rows=[pos_level], **kw)
+    assert np.all(np.isfinite(bare[0, :, -2:]))
+    assert np.all(np.isneginf(with_neg[0, :, -2])) and np.all(np.isfinite(with_neg[0, :, -1]))
+    assert np.all(np.isneginf(with_pos[0, :, -1])) and np.all(np.isfinite(with_pos[0, :, -2]))
+    u_pos, u_neg, ap, an, fgr, fpr, fnr = args
+    base = dict(kappa=_THETA_KAPPA, od_g=0.0, od_r=0.0, n_grid=41, L=10.0, ambig=True)
+    unwitnessed = _solve_logodds(u_pos, u_neg, ap, an, fgr, fpr, fnr, **base)
+    witnessed = _solve_logodds(u_pos, u_neg, ap, an, fgr, fpr, fnr, cube_rows=[neg_level], **base)
+    assert float(witnessed.gdna_frac[0]) < float(unwitnessed.gdna_frac[0]) - 0.05

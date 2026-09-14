@@ -294,6 +294,11 @@ factor is evidence the panels reward; `ISSUES: strand-marginal-volume-factor` ca
 
 ## 12. The strand-pure AMBIG under-call — the dissection (`ISSUES: capture-on-strand-pure-ambig-undercall`, 2026-09-13)
 
+*(LANDED 2026-09-14 as the witnessed atom, `DESIGN.md` §6b.15, `EQUATIONS.md` §9f — on the L3 tree, whose g00
+rows have a live strand channel, the ladder reads stranded ON 470,862 → 427,046 and the zero controls
+497 → 550 / 224 → 231; the cost at an unwitnessed both-strand slot is `ISSUES:
+the-atom-at-an-unwitnessed-both-strand-slot`.)*
+
 **Where it is.** The per-slot census on the ladder's stranded rows (`dissect/census_slots.json`): the AMBIG slots
 whose RNA is on one strand are MOSTLY gDNA — mean true `f_g` 0.53 / 0.85 / 0.89 / 0.85 / 0.36 by depth bin on
 `g50 ss.99 ON`, 0.97 on `g98` — and the under-call sits on the deep ones: slots with ≥ 300 fragments carry
