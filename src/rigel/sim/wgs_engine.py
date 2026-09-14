@@ -526,66 +526,6 @@ class WholeGenomeSimulator:
 
     # -- Fragment count accumulation ----------------------------------------
 
-    def _accumulate_pool(
-        self,
-        n_frags: int,
-        abundances: np.ndarray,
-        lengths: np.ndarray,
-        *,
-        space: str,
-    ) -> dict[int, dict[int, int]]:
-        """Sample fragment counts from a single abundance/length pool.
-
-        Returns dict[t_idx, dict[frag_len, count]].
-        """
-        if n_frags <= 0:
-            return {}
-
-        rng = self._rng
-        frag_lengths = self._sample_rna_frag_lengths(n_frags)
-
-        counts: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
-
-        # Only transcripts with nonzero abundance can carry a fragment: `weights` multiplies the
-        # capture-aware effective length by the abundance, so a zero-abundance row contributes zero
-        # whatever its effective length is. Skipping those rows matters because the effective length
-        # is by far the expensive term under capture, and a config expressing half the annotation
-        # leaves half the rows dead. `eff` is still built at full length with zeros in the dead rows,
-        # so `weights`, `probs` and therefore the `rng.choice` draw are bit-identical to computing
-        # every row — a speed change, not a behaviour change, pinned by
-        # `tests/test_sim_capture.py`.
-        live = np.flatnonzero(abundances > 0)
-        live_keys = live.tolist()
-        live_lengths = lengths[live]
-
-        def weights_at(width: int) -> np.ndarray:
-            eff = np.zeros(len(abundances), dtype=np.float64)
-            if live.size:
-                eff[live] = self.capture.partition_array(space, live_keys, live_lengths, width)
-            return abundances * eff
-
-        # The length marginal is the pre-capture draw reweighted by capture-weighted opportunity;
-        # `weights_at(w)` is then the conditional over templates at that length. See
-        # `_post_capture_length_allocation` for why the total must not be normalised away.
-        widths, weights_per_width, counts_per_width = self._post_capture_length_allocation(
-            frag_lengths, weights_at, rng
-        )
-
-        for width, weights, fc in zip(widths, weights_per_width, counts_per_width):
-            fl, fc = int(width), int(fc)
-            if fc <= 0:
-                continue
-            total_w = weights.sum()
-            if total_w <= 0:
-                continue
-            probs = weights / total_w
-            indices = rng.choice(len(abundances), size=fc, p=probs)
-            unique_idx, idx_counts = np.unique(indices, return_counts=True)
-            for idx, cnt in zip(unique_idx, idx_counts):
-                counts[int(idx)][fl] += int(cnt)
-
-        return dict(counts)
-
     def _accumulate_rna_counts(
         self, n_rna: int
     ) -> tuple[dict[int, dict[int, int]], dict[int, dict[int, int]]]:

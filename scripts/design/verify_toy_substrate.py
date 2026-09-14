@@ -405,8 +405,9 @@ def gate_simulator(frags, geoms, abund, nrna_abund, spec, donor):
             check(not bad, f"{tid}{geom.strand}: every nascent interval lies inside [0, {n:,}) of "
                            "PRE-mRNA space", f"{len(bad)} violation(s) of {len(own):,}")
 
-    # the two RNA pools are drawn separately (`wgs_engine._accumulate_pool` per pool), so each gets
-    # its own opportunity-reweighted prediction against its own template lengths.
+    # the two RNA pools share one multinomial (`wgs_engine._accumulate_rna_counts`); at each width a pool's
+    # share is proportional to its abundance-weighted opportunity, so each gets its own
+    # opportunity-reweighted prediction against its own template lengths.
     _pool_length_gate(
         "mRNA", [f["end"] - f["start"] for f in mrna],
         [(abund[t], g.spliced_length) for t, g in geoms.items() if abund.get(t, 0.0) > 0],

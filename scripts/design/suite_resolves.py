@@ -425,7 +425,7 @@ def requirement_c_overdispersion(conditions: list[dict]) -> list[Verdict]:
             replicated,
             0.0,
             "pairs",
-            "The simulator is Poisson by construction (`wgs_engine._accumulate_pool` draws multinomial "
+            "The simulator is Poisson by construction (`wgs_engine._accumulate_rna_counts` draws a multinomial "
             "at fixed abundance; measured omega < 5e-5), so overdispersion must be built IN and then "
             "measured across replicates. Deferred by owner ruling 2026-07-30.",
         )
