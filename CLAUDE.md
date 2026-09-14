@@ -187,32 +187,16 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,458 passed / 0 skipped / 3 xfail, 3,461 collected** (re-derived
-2026-09-14 after the landscape's location floor landed: one gate added to `test_landscape_training_population.py`,
-+1 case and ±0 files; 16 goldens regenerated with their magnitudes read first — fourteen ≤ 1.1e-3 relative on
-transcript counts, `antisense_contained` 177.6 → 200.8 and `strand_ss65` 16.8 → 17.4 false gDNA of 1,000, a
-tiny toy's prior fitting from fewer anchors; before that, the same day, after L5 landed the tilt atom: fourteen ψ gates added to `test_vertex_reference.py` (the strand-pure
-read-out at four depths and three truths, the three hypotheses' equal weight, the witness), the encompassing
-solve gate split into the atom's population — un-xfailed on both donors — and the flanks, whose gDNA donor
-case is the ratchet's xfail, +16 cases and ±0 files; two goldens regenerated with their magnitudes read
-first — `antisense_overlap` ≤ 5e-4 relative on transcript counts, `antisense_contained` the atom's bare cost
-at an unwitnessed slot, its antisense transcript 81 → 0 and its gDNA-free locus 5.6 → 177.6 false gDNA of
-1,000 (`ISSUES: the-atom-at-an-unwitnessed-both-strand-slot`); before that, the same day, after L3 made the
-strand channel's gate a protocol decision: five gates added and two retired in
-`test_region_init.py` with the gDNA-free deadband's xfail flipped into a passing gate, `test_encompassing_locus.py`
-parametrised over a gDNA-free donor, +6 cases and ±0 files; 17 goldens regenerated with their magnitudes read first —
-the gDNA-free toys' transcript counts ≤ 2e-3 relative, `antisense_contained`'s false gDNA 78.7 → 5.6 of 1,000, the
-four gDNA toys identical; before that, the same day, after the lanes worklist L1–L2 and L4: one new `tests/` file (+2 gates, +4 encompassing-locus cases, one of them an xfail until the witnessed atom), four lane gates net of the retired rung-0 identity gate, and the gDNA-free deadband's xfail record; before that, 2026-09-13, after W12's θ quadrature landed in both steps, the tilt lattice and `sweep_n_tilt` deleted — seven ψ gates added to an existing test file, +7 cases and ±0 files, two
-antisense goldens regenerated with their magnitudes read first (transcript counts 5e-5 relative, a tiny toy's
-`em_effective_length` 2.4 % on an 11-bp entry); before that the same day, after W11's tier 3 retired three dead simulator features — the locus sweep, the net-flow module and the synthetic mini-genome suite path — with their wrappers and tests, and after the θ quadrature's derivation note was added to `docs/dev/`, +1 collected, and after four instruments were retired — the structural-claims audit, the gDNA pool census, the truth A/B and the landscape census — −4 collected per `scripts/design/` file, and after the tilted-moment tests deleted with the length channel were restored into an existing file, +33 cases and ±0 files; before that the same day, after the capture became a typed record and after the tunables census, neither of which added or retired a file — four config switches gone, their
-tests rewritten in place, ±0 — and after the one-lattice landing the same day, which added and retired no file: 21 goldens regenerated, their
-magnitudes read first — transcript counts ≤ 1.5e-3 relative, a tiny toy's `em_effective_length` ≤ 8.4 % — and
-the retired second grid's assertion folded into the chunk-exactness gate, ±0; before that, 2026-09-12: the
-cleanup split, the received tables, the replay's tolerance report, one ψ solver, the memory steps). The 3 xfails are executable records of proven defects whose fixes are elsewhere
-(`ISSUES: two-sided-exon-row`; `ISSUES: antisense-prior-assembly-casualty`; `ISSUES: the-lower-bound-noise-ratchet`, the encompassing locus's shallow flank under an edge level), deferred by ruling to their threads — "fix the test" is a category
-error, and an xfail is closed by repairing the thing or asserting the invariant structurally, never by
-widening a bound. **Any failure at all is a regression.** A commit that measures the suite updates this
-line.
+**The standing baseline: 0 failed / 3,374 passed / 0 skipped / 3 xfail, 3,377 collected** (re-derived
+2026-09-14 after the code-review cleanup, every step bit-identical on the review identity references: 21
+instruments retired, −84 by the table below and −1 for one's parametrised self-test entry; one tolerance gate
+added to `test_sweep_replay_tolerance.py` and one probe-panel gate to `test_panel_workflow.py`, +2; the test
+of the batch EM's never-read `locus_enable_gdna` retired with the argument, −1; no golden moved). The 3 xfails
+are executable records of proven defects whose fixes are elsewhere (`ISSUES: two-sided-exon-row`;
+`ISSUES: antisense-prior-assembly-casualty`; `ISSUES: the-lower-bound-noise-ratchet`, the encompassing locus's
+shallow flank under an edge level), deferred by ruling to their threads — "fix the test" is a category error,
+and an xfail is closed by repairing the thing or asserting the invariant structurally, never by widening a
+bound. **Any failure at all is a regression.** A commit that measures the suite updates this line.
 
 **Re-derive a count, never adjust one** (`TRAPS: re-record-the-baseline`). Several gates are parametrised
 over the files on disk, so adding or retiring a file moves the total; account for it from this table and
