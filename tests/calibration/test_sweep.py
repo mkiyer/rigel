@@ -275,8 +275,7 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
         belief,
         region_arrays,
         rna_sense_frac=0.95,
-        n_rna_obs=10000.0,  # library sample sizes so the stranded (κ=0.95) intron seeds fire (τ noise floor)
-        n_gdna_obs=10000.0,
+        n_rna_obs=10000.0,  # the spliced sample behind κ: the stranded (κ=0.95) channel reads live
         n_grid=40,
     )
     # The AMBIG phantom is pulled DOWN from its all-gDNA init (1.0) toward RNA. This chain is the WORST
@@ -426,7 +425,7 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
     return parts.chain, parts.statics, parts.geometry, belief, parts.region_arrays
 
 
-def _sweep(args, kappa=0.95, n_rna_obs=10000.0, n_gdna_obs=10000.0):
+def _sweep(args, kappa=0.95, n_rna_obs=10000.0):
     chain, st, geom, belief, ra = args
     cap = SweepCapture()
     final = region_sweep(
@@ -436,11 +435,10 @@ def _sweep(args, kappa=0.95, n_rna_obs=10000.0, n_gdna_obs=10000.0):
         belief,
         ra,
         rna_sense_frac=kappa,
-        # The τ strand seed needs the library sample sizes to size its overdispersion noise floor
-        # ¼·(1/N + ω); a strongly-stranded fixture (κ=0.95) fires only when N is supplied (the default 0 ⇒
-        # ∞ floor ⇒ gated). Large N here ⇒ floor≈0 ⇒ the (2κ−1)² strand seed fires at full strength.
+        # The strand channel is live iff the protocol decision on (κ, N_rna) says so; with the default
+        # N = 0 there is no decision and the channel is dead, so the fixture supplies the spliced sample
+        # behind its κ = 0.95, which reads live by thousands of nats.
         n_rna_obs=n_rna_obs,
-        n_gdna_obs=n_gdna_obs,
         n_grid=60,
         _capture=cap,
     )

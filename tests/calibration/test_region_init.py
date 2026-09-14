@@ -11,6 +11,7 @@ four boundary types.
 
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 
 import numpy as np
@@ -25,6 +26,7 @@ from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain
 from rigel.calibration.region_geometry import build_region_statics, g1_locked, init_beliefs
 from rigel.calibration.region_init import (
     build_region_init,
+    strand_discriminability,
     strand_evidence,
 )
 from rigel.calibration.signature import (
@@ -76,7 +78,7 @@ def _scenario(kappa=0.9):
     return parts.chain, parts.statics, parts.geometry, belief, parts.region_arrays
 
 
-def _init(kappa=0.9, n_gdna_obs=230.0):
+def _init(kappa=0.9):
     chain, statics, geometry, belief, _ = _scenario(kappa)
     ni = build_region_init(
         statics,
@@ -84,7 +86,6 @@ def _init(kappa=0.9, n_gdna_obs=230.0):
         kappa=kappa,
         od_g=0.2,
         od_r=0.1,
-        n_gdna_obs=n_gdna_obs,
         n_rna_obs=85.0,
         n_grid=60,
         logodds_window=10.0,
@@ -97,42 +98,64 @@ def _init(kappa=0.9, n_gdna_obs=230.0):
 # ── source 3: strand deconvolution evidence ────────────────────────────────────────────────────────────────
 
 
-def test_strand_evidence_deadband_kills_unstranded():
-    """The derived deadband makes I_strand identically 0 on unstranded data (κ=½) and positive on
-    stranded data; a gDNA-free library (N_gdna=0 ⇒ σ²_d→∞) gates it to 0 even when stranded."""
+def test_strand_evidence_is_zero_unstranded_and_positive_stranded():
+    """I_strand is identically 0 on unstranded data (κ = ½) and positive on stranded data."""
     u = np.array([100.0, 100.0])
     fg = np.array([0.5, 0.5])
-    base = dict(od_g=0.03, od_r=0.03, n_gdna_obs=1e4, n_rna_obs=1e4)
-    tau_unstr = strand_evidence(u, u, fg, kappa=0.5, **base)
-    tau_str = strand_evidence(u, u, fg, kappa=0.99, **base)
-    assert np.all(tau_unstr == 0.0)
-    assert np.all(tau_str > 0.0)
-    tau_nog = strand_evidence(
-        u, u, fg, kappa=0.99, od_g=0.03, od_r=0.03, n_gdna_obs=0.0, n_rna_obs=1e4
-    )
-    assert np.all(tau_nog == 0.0)
+    assert np.all(strand_evidence(u, u, fg, kappa=0.5, od_r=0.03, n_rna_obs=1e4) == 0.0)
+    assert np.all(strand_evidence(u, u, fg, kappa=0.99, od_r=0.03, n_rna_obs=1e4) > 0.0)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="ISSUES: deadband-gates-a-gdna-free-library — the floor's 1/N_gdna term switches the strand "
-    "channel off on a library with exactly zero gDNA (the modal real case), so no strand-derived RNA level "
-    "is emitted there; dropping the term alone is REFUSED (the unstranded zero control 499 → 21,484): the "
-    "term also kills the unstranded phantom by accident, and a derived floor that does so on its own merits "
-    "plus RNA levels read from a slot's belief rather than its strand claim are owed",
-)
 def test_a_gdna_free_stranded_library_keeps_its_strand_channel():
-    """gDNA's strand mean is ½ by symmetry and needs no observation, so a stranded library with no gDNA
-    has as live a strand channel as any other."""
+    """gDNA's strand mean is ½ by symmetry and needs no observation, so the channel's liveness is a
+    function of the RNA strand fit alone: neither `strand_discriminability` nor `strand_evidence` takes a
+    gDNA count or the gDNA overdispersion (the invariant, asserted structurally: a ``1/N_gdna`` term had
+    switched every gDNA-free library's channel off, the modal real case), and a stranded library is live
+    at any gDNA content, zero included."""
+    for fn in (strand_discriminability, strand_evidence):
+        names = set(inspect.signature(fn).parameters)
+        assert not names & {"n_gdna_obs", "od_g"}, f"{fn.__name__} reads a gDNA quantity: {names}"
+    assert strand_discriminability(0.99, 1e4) > 0.0
     u = np.array([100.0, 100.0])
     fg = np.array([0.5, 0.5])
-    tau_str = strand_evidence(
-        u, u, fg, kappa=0.99, od_g=0.03, od_r=0.03, n_gdna_obs=1e4, n_rna_obs=1e4
+    assert np.all(strand_evidence(u, u, fg, kappa=0.99, od_r=0.03, n_rna_obs=1e4) > 0.0)
+
+
+def test_the_strand_channel_is_a_protocol_decision_not_a_sampling_band():
+    """The ladder's unstranded zero control fits κ̂ = 0.500298 from 3,090,137 spliced fragments, 1.05σ
+    from ½. An unbiased estimate of (κ−½)² floored at zero — the form this replaced — reads that LIVE (a
+    coin toss lost on 32 % of unstranded libraries; 21,484 false gDNA fragments on this one), while the
+    Bayes factor of a free κ against κ = ½ exactly reads it dead by 6.7 nats and the stranded rows live
+    by 10⁶ nats. At κ = ½ exactly the channel is dead at every N."""
+    kappa, n = 0.500298, 3_090_137.0
+    assert strand_discriminability(kappa, n) == 0.0
+    assert 4.0 * ((kappa - 0.5) ** 2 - 0.25 / n) > 0.0, (
+        "the replaced form's verdict on the same fit"
     )
-    tau_nog = strand_evidence(
-        u, u, fg, kappa=0.99, od_g=0.03, od_r=0.03, n_gdna_obs=0.0, n_rna_obs=1e4
+    assert strand_discriminability(0.009883, 3_093_241.0) == pytest.approx(
+        4.0 * (0.009883 - 0.5) ** 2
     )
-    assert np.all(tau_nog == tau_str)
+    for n in (10.0, 1e3, 1e6):
+        assert strand_discriminability(0.5, n) == 0.0
+
+
+def test_the_occam_penalty_grows_with_the_spliced_sample():
+    """ln BF₁₀ ≈ ½·[z² − ln(2N/π)]: the excursion a sampling fluctuation must clear to read as a protocol
+    grows with the sample — 3σ is live at N = 100 and dead at N = 10⁶, 4σ live at 10⁶ and dead at 10⁸ —
+    so no multiple of σ is the gate; the free parameter's Occam penalty is."""
+
+    def at(z, n):
+        return strand_discriminability(0.5 + z * np.sqrt(0.25 / n), n)
+
+    assert at(3.0, 100.0) > 0.0 and at(3.0, 1e6) == 0.0
+    assert at(4.0, 1e6) > 0.0 and at(4.0, 1e8) == 0.0
+
+
+def test_no_spliced_observations_is_no_protocol_decision():
+    """With no spliced fragment the two hypotheses have equal marginal likelihood, so the channel is dead
+    whatever κ a caller claims (`calibrate` raises before this on a real library)."""
+    assert strand_discriminability(0.99, 0.0) == 0.0
+    assert strand_discriminability(0.5, 0.0) == 0.0
 
 
 def test_a_single_strand_slot_solves_and_is_precise():
@@ -159,9 +182,7 @@ def test_ambig_stranded_strand_gives_zero_fg_precision():
         np.asarray(geometry.unspliced_count, float)[:, 1],
         np.full(chain.n_slots, 0.5),
         kappa=0.9,
-        od_g=0.2,
         od_r=0.1,
-        n_gdna_obs=230.0,
         n_rna_obs=85.0,
     )
     assert (
@@ -192,7 +213,7 @@ def test_measured_intergenic_is_structurally_certain():
 
 def test_unsolved_ambig_unstranded_has_zero_own_evidence():
     """An AMBIG region on unstranded data has no intrinsic gDNA/RNA signal (I_strand=0 by the
-    deadband) and no structural lock, so its own evidence is 0 — the honest "no information"
+    protocol decision) and no structural lock, so its own evidence is 0 — the honest "no information"
     default — with no nan anywhere."""
     ni, _ = _init(kappa=0.5)  # unstranded
     am = 4  # AMBIG region slot
@@ -259,7 +280,6 @@ def test_density_factor_precision_flows_into_region_init():
         kappa=0.5,
         od_g=0.2,
         od_r=0.1,
-        n_gdna_obs=230.0,
         n_rna_obs=85.0,
         n_grid=60,
         logodds_window=10.0,

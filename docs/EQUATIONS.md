@@ -469,22 +469,41 @@ cancels identically. Strand measures the tilt; it reaches gDNA only through the 
 exactly zero at κ = ½ for any count and any overdispersion, and saturating in `N` at
 `(½−κ)²/(p(1−p)·od)` — capped by dispersion, not by depth.
 
-**5.2b What the code additionally does — the derived noise-floor deadband**
-(`region_init.strand_evidence`). `κ` is fitted, so `(2κ−1)²` is a squared point estimate and is strictly
-positive on a genuinely unstranded library. The code therefore evaluates
+**5.2b The strand channel is live iff the protocol preserves strand — a decision, not a band**
+(`region_init.strand_discriminability`, landed 2026-09-14). `κ` is fitted, so `(2κ̂−1)²` is a squared
+point estimate and strictly positive on a genuinely unstranded library. The code therefore evaluates
 
     N_eff  =  N / (1 + (N−1)·od_r)                          the OVERDISPERSED effective count
-    σ²_d   =  ¼·(1/N_rna + od_r)  +  ¼·(1/N_gdna + od_g)     the noise floor on κ̂
-    disc   =  4·max(0, (κ−½)² − σ²_d)                        REPLACES  (2κ−1)² = 4(κ−½)²
+    disc   =  4·(κ̂−½)²  if BF₁₀ > 1  else  0                 REPLACES  (2κ−1)² = 4(κ−½)²
     I_strand  =  N_eff · disc · [f_g(1−f_g)]² / (4·p(1−p))
 
-`p` here is §5.1's `p = ½·f_g + κ·(1−f_g)` (in the code `κ + f_g·(½−κ)`), not §5.2's tilt form. `disc` is
-`(2κ−1)²` with the sampling variance of `κ̂` subtracted and floored at 0: a κ̂ within `√σ²_d` of ½ is not
-composition signal. No constant is chosen — each half is the binomial `¼/N` plus that arm's fitted
-overdispersion (`TRAPS: a-licence-with-no-floor`, `TRAPS: a-threshold-on-a-fitted-residue`). One
-consequence §5.2 does not cover: a gDNA-free library switches the channel off at every κ — `N_gdna = 0`
-is guarded as `max(N_gdna, _EPS)`, so `σ²_d` explodes and `disc = 0` even at κ = 0.99. That is the
-derivation's own boundary case: with no gDNA there is no split for strand to speak about.
+`p` here is §5.1's `p = ½·f_g + κ·(1−f_g)` (in the code `κ + f_g·(½−κ)`), not §5.2's tilt form. `BF₁₀`
+is the Bayes factor, on the spliced 2×2 the strand fit read (`n_same` sense reads of `N`,
+`strand_balance.fit_strand_balance`), of a free `κ` under the fit's own Beta(1, 1) prior (H1: a
+strand-preserving protocol) against `κ = ½` EXACTLY (H0: an unstranded protocol — read 1's strand is
+independent of the transcript's, so every sj reads ½ and the pooled split is Binomial(N, ½) with no free
+parameter). Both marginals are closed form:
+
+    ln BF₁₀  =  N·ln 2 + ln B(a, b),      a = n_same + 1 = κ̂·(N+2),   b = n_opp + 1 = (1−κ̂)·(N+2)
+             ≈  ½·[z² − ln(2N/π)],          z = (κ̂ − ½) / √(¼/N)                          (large N)
+
+so the channel is live iff `BF₁₀ > 1` at equal prior odds — no constant. The asymptotic form is the
+free parameter's Occam penalty: the excursion a sampling fluctuation must clear to be read as a
+protocol grows as `√ln N` (2.0σ at N = 100, 3.0σ at 10⁴, 3.8σ at 3·10⁶), while a stranded library
+clears it by orders of magnitude (the ladder: −2.0 … −7.3 nats on the eight unstranded rows,
++3.9·10⁴ … +2.5·10⁶ on the eight stranded ones). With no spliced observation the two marginals are
+equal and the channel is dead; `calibrate` raises before that on a real library.
+
+What this replaced (2026-08 → 2026-09-14): `disc = 4·max(0, (κ̂−½)² − σ²_d)` with
+`σ²_d = ¼(1/N_rna + od_r) + ¼(1/N_gdna + od_g)`, an unbiased estimate of `(κ−½)²` floored at zero.
+Under H0 `(κ̂−½)²/Var(κ̂)` is χ²₁, so the floored estimate is positive with probability 0.32: a coin
+toss, not a deadband — the ladder's `g98 ss.50 OFF` (z = 1.22) shipped with a live channel, and
+`g00 ss.50 OFF` (z = 1.05) with a dead one only because of the gDNA term, without which it read 21,484
+false gDNA fragments. That term had no derivation: gDNA's strand mean is ½ by symmetry (§5.3) and is
+not estimated, `od_g` is per-slot noise that lives in §5.1's variance and not in `Var(κ̂)`, and its
+`1/N_gdna` switched every gDNA-free library's channel off at any κ (`N_gdna = 0`, the modal real case
+and all four ladder `g00` rows). The `od_r` in `Var(κ̂)` was wrong in the same way: the pooled mean
+averages the per-sj spread over the number of sj, not once.
 
 **5.3 gDNA's strand term is ½** — double-stranded, no sense direction. A fitted mixture marginal was
 implemented and refuted: any constant for the unstranded case cancels out of the orientation

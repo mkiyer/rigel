@@ -171,8 +171,7 @@ class DonorGlobals:
     def describe(self) -> str:
         return (
             f"donor={self.condition}\n"
-            f"  kappa={self.priors.rna_sense_frac:.6f}  n_rna_obs={self.priors.n_rna_obs:,.0f}  "
-            f"n_gdna_obs={self.priors.n_gdna_obs:,.0f}\n"
+            f"  kappa={self.priors.rna_sense_frac:.6f}  n_rna_obs={self.priors.n_rna_obs:,.0f}\n"
             f"  od_rna={self.priors.rna_strand_overdispersion:.4g}  "
             f"od_gdna={self.priors.gdna_strand_overdispersion:.4g}\n"
             f"  gDNA rate = {self.gdna_rate_per_base:.6g} molecules/base   "

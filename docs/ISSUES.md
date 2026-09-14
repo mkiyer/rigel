@@ -25,8 +25,14 @@ yet.
 The population rule and the E-step landed (`ISSUES: the-landscape-training-population-arms`; the zero controls
 ~150k → a few hundred). Open: (a) under capture a short dark region's mass is split over both modes of the
 previous fit (deferred 1.01–1.02×, stranded ON 1.004×); (b) the zero-RNA controls move ±4 % (`g05 ss.99 ON`
-+4.4 %, `g98 ss.50 OFF` −1.4 %); (c) the Beta(½,½) reference still decides a blind slot. Refused here:
-excluding κ-dead exons (`g50 ss.50 ON` 2,691 → 56,422), AMBIG in the final fit (worse 25/32).
++4.4 %, `g98 ss.50 OFF` −1.4 %); (c) the Beta(½,½) reference still decides a blind slot; (d) a counted
+single-strand exon at a pure-RNA vertex trains at its pass-0 posterior median, which sits above zero by the
+strand term's width (2026-09-14, exposed when the strand channel came on for gDNA-free libraries — `ISSUES:
+deadband-gates-a-gdna-free-library`, CLOSED): on `g00 ss.99 OFF` the refit rung reads 375 → 8,696 before the
+messages repair it to 728 (524 with the channel dead); own:strand 13,104 slots train 3,771 false fragments at
+the first refit against 2,627 — the estimator centres a kernel at a median where the posterior is one-sided,
+so the remedy is the estimator's (a bound-shaped kernel, as the anchor already is), not the channel's.
+Refused here: excluding κ-dead exons (`g50 ss.50 ON` 2,691 → 56,422), AMBIG in the final fit (worse 25/32).
 `landscape_training_census.py`.
 
 ### drain-contaminates-certified-rna
@@ -149,31 +155,6 @@ antisense t2 — 72 today against the test's limit of 50 (80 under the relay), w
 with messages on. The owner plans to change the alpha = 0 rule in the post-calibration prior-assembly session;
 the xfail is the executable record of exactly that pending change and closes there, with a test that asserts
 the new rule's promise. Not the pre-port thread's.
-
-### deadband-gates-a-gdna-free-library
-`priority: next · kind: defect · 2026-09-13`
-The strand deadband's noise floor is `σ²_d = ¼(1/N_rna + od_r) + ¼(1/N_gdna + od_g)`
-(`region_init.strand_discriminability`, `EQUATIONS.md` §5.2b), so a library whose fitted gDNA count is exactly
-zero — the modal real case — has `disc = 0` at every κ: no single-strand slot has strand precision, the message
-layer's `split_live` is False, and no strand-derived RNA level is emitted anywhere (the encompassing-locus audit
-on a `g00` donor: nothing held at any slot, the exon∩exon slots reading `f_g` 0.30 / 0.44 against 0). The owner
-ruled it broken: when gDNA is zero every read is RNA and RNA levels are what should flow most. The term has no
-derivation — gDNA's strand mean is ½ by symmetry (§5.3) and needs no observation — but dropping it alone is
-REFUSED with its number: the ladder's unstranded zero control `g00 ss.50 OFF` reads 499 → 21,484 false gDNA
-fragments and the stranded `g00` rows +23 % / +16 %, every contaminated stratum unchanged. Why: the term also
-kills the UNSTRANDED PHANTOM by accident. On an unstranded library the fitted κ̂ sits a few sampling σ from ½
-(`g00 ss.50 OFF`: κ̂ = 0.500298, both overdispersions fitted at 0), and the RNA half of the floor at 1σ is
-~3e−4 — a coin toss — so `disc` turns positive and the binary readers of `strand_live` (`split_live`, the
-lanes' witness column, `has_own_composition`) switch the strand channel on with a precision that is tiny but
-not zero; `1/N_gdna = ∞` at `g00` had been the only thing keeping them off there. Two things are owed, each
-derived: (1) a floor that kills the phantom on its own merits — a 1σ sampling band is not a deadband, and no
-multiple of σ is a derivation; the candidate is the fit's own uncertainty of κ̂ as a distribution rather than
-a point (`fit_strand_balance` is a posterior mean; its posterior width is the floor) or a continuous use of
-`disc` in place of the binary gates; (2) RNA levels read from a single-strand slot's BELIEF (`belief_fg`, which
-always exists) rather than only from its strand claim (`own[x]`, which the deadband can remove), the way the
-gDNA lane reads a full node's own profile through its total — so a gDNA-free library's exons emit their RNA
-levels whatever the strand channel says. Gate: `test_region_init.test_a_gdna_free_stranded_library_keeps_its_strand_channel`
-(xfail, strict). Stress: `deep_stress.py` and `test_encompassing_locus.py` on a `g00` donor.
 
 ### capture-on-strand-pure-ambig-undercall
 `priority: next · kind: defect · 2026-09-13`
@@ -423,6 +404,31 @@ averaging; the fl-gap panels are not a drop-in (`ISSUES: flgap-panels-stale-nasc
 ---
 
 ## CLOSED / REFUSED — do not rebuild these; append-only
+
+### deadband-gates-a-gdna-free-library
+CLOSED by landing 2026-09-14 (`DESIGN.md` §6b.15; the derivation `EQUATIONS.md` §5.2b): the strand channel
+is live iff the protocol preserves strand — the Bayes factor on the spliced 2×2 of a free κ (the fit's own
+Beta(1, 1)) against κ = ½ exactly, closed form and no constant (`region_init.strand_discriminability`, whose
+only inputs are κ̂ and the spliced count); `disc = 4(κ̂−½)²` where live; every gDNA quantity gone from the
+strand channel (`n_gdna_obs` deleted from the strand model, the sweep, the injected priors and the toy
+harness). Killing numbers: the replaced form — an unbiased estimate of `(κ−½)²` floored at zero — is positive
+on 32 % of unstranded libraries; the ladder's `g98 ss.50 OFF` (z = 1.22) shipped LIVE and `g00 ss.50 OFF`
+(z = 1.05) dead only by the gDNA term, without which 499 → 21,484 (20,545 through `tau_lam`'s readers, 0.7
+through the lanes' witness column); all four ladder `g00` rows had `N_gdna = 0` and the channel dead at
+κ = 0.0099, so every g00-donor toy of the θ thread ran without a strand channel. Landed: the ladder identical
+to 0.1 fragment everywhere but unstranded OFF −0.22 % (`g98 ss.50 OFF` 123,657 → 122,981), the test
+chromosome identical on all 30 rows, the unstranded zero controls identical, two contaminated rows
+bit-identical, the stranded zero controls 405 → 497 and 194 → 224 — the refit rung (375 → 8,696 before the
+messages repair it to 728; the messages rung itself 59,456 → 54,874), the landscape's vertex-resolution bias
+on 2,700 newly training exons, filed under `gdna-landscape-trains-on-false-positives` (d). The shared-exon
+stress on the `g00` donor never worse, 139 → 109 / 93 → 64 at 50k (20 % / 50 % minor); the encompassing
+locus's exon∩exon slots 0.054 / 0.046 → 0.002 / 0.005; the goldens' gDNA-free toys ≤ 2e-3 relative on
+transcript counts but `antisense_contained` (false gDNA 78.7 → 5.6 of 1,000). REFUSED with it, the second
+candidate — an RNA level read from a slot's belief: a belief is the prior's answer, and a lane carrying it is
+the relay (`TRAPS: one-hop-lifted-out-is-still-the-relay`); the stranded gDNA-free case needs only the gate,
+and the unstranded one is the landscape's. Gates: `test_region_init` (the structural invariant, the ladder's
+own scalars, the Occam scaling, the no-observation case; five perturbations fired) and
+`test_encompassing_locus` on a gDNA-free donor.
 
 ### strand-marginal-volume-factor
 REFUSED 2026-09-13, both forms, with their numbers (the derivation and the arms: the sandbox's θ note §11). The

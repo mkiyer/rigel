@@ -240,7 +240,7 @@ A real cached condition acts as donor: it is calibrated once and its fitted bund
 
 | the donor supplies | so the toy never invents |
 |---|---|
-| κ, both strand overdispersions, the Fisher noise-floor sample sizes | the strand deadband behaves as it does on real data |
+| κ and the spliced sample behind it, both strand overdispersions | the strand channel's protocol decision (`region_init.strand_discriminability`) reads as it does on real data — a gDNA-free donor keeps its channel |
 | the intron background and the pre-solve total-density landscape (`abundance_landscape`) | a handful of regions cannot fit these |
 | both fragment-length pmfs | passed as `calibrate` kwargs, not part of the priors bundle |
 | capture on/off and its numeric knobs | reproduced in the toy's own simulation, with probes written from the spec |

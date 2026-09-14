@@ -672,7 +672,6 @@ def _neg_only_ctx():
     from rigel.calibration.splice_graph import FLAG_ACCEPTOR_POS
 
     n = 7
-    fp = np.array([True, True, True, True, True, True, True])
     fn = np.array([True, True, True, True, True, True, True])
     flags = np.zeros(n, np.uint16)
     flags[1] = FLAG_ACCEPTOR_POS

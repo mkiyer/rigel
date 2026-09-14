@@ -11,9 +11,10 @@ split, as two things the backbone and the message policy read:
   prior's, from two sources: the STRAND deconvolution (a Beta-Binomial that is RANK-1, so it informs
   only ``p``; at a single-strand slot the tilt is structurally locked and the strand PINS ``f_g``, at
   an AMBIG slot the tilt is free and the strand cancels out of ``f_g`` — the Schur marginal — so the
-  strand term is gated to single-strand slots; identically zero on unstranded data by a derived
-  noise-floor deadband) and the INTRON FACTORY (the curvature of the density deconvolution's per-slot
-  λ-factor, `density_deconv.density_factor_precision`). The message policy reads ``tau_lam`` as the
+  strand term is gated to single-strand slots; identically zero on an unstranded library, where the
+  protocol decision `strand_discriminability` reads the spliced split as κ = ½ exactly) and the INTRON
+  FACTORY (the curvature of the density deconvolution's per-slot λ-factor,
+  `density_deconv.density_factor_precision`). The message policy reads ``tau_lam`` as the
   liveness of a node's strand channel; `has_own_composition_evidence` is the instruments' one
   predicate on it.
 
@@ -30,6 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.special import betaln
 
 from .density_deconv import density_factor_precision
 from .region_geometry import RegionGeometry, RegionStatics
@@ -58,10 +60,10 @@ def has_own_composition_evidence(tau_lam) -> np.ndarray:
 
     ⛔ It is NOT a resolving-power test and must not become one. ``τ`` is continuous across the
     interesting region, so a floor on it is a tuned constant. On an unstranded library the strand arm
-    carries ``I ≈ Var(κ̂)·N_eff/(p(1−p))`` — roughly the region's depth over the library's spliced
-    depth — which is genuinely nonzero and physically nil, and no derivation makes it exactly zero.
-    The consumer's defence is a FIXED-DENOMINATOR score, not a tighter bound here
-    (``solvability_audit.summarise``'s ``all_mwae`` / ``abs_err``, gated in
+    is exactly zero — not by a floor on ``τ`` but because :func:`strand_discriminability` decides the
+    PROTOCOL on the spliced 2×2 and reads κ = ½ exactly there (a sampling excursion of κ̂ is not a
+    protocol). The consumer's defence against a weak live channel is a FIXED-DENOMINATOR score, not a
+    tighter bound here (``solvability_audit.summarise``'s ``all_mwae`` / ``abs_err``, gated in
     ``test_solvability_audit.py``).
 
     The home is production, rather than each instrument restating the constant beside a comment saying
@@ -93,32 +95,49 @@ class RegionInit:
 # ── source 3: the strand composition evidence (I_strand) + the structural lock ─────────────────────────────
 
 
-def strand_discriminability(kappa, od_g, od_r, n_gdna_obs, n_rna_obs) -> float:
-    """The library's strand DISCRIMINABILITY ``disc = 4·max(0, (κ−½)² − σ²_d)`` — the strand Fisher
-    information's library-level factor (:func:`strand_evidence`), with the DERIVED noise floor
-    ``σ²_d = ¼·(1/N_rna + ω_r) + ¼·(1/N_gdna + ω_g)``: a κ within √σ²_d of ½ is not composition signal,
-    the deadband that kills the unstranded phantom, and ``1/N_gdna`` gates a gDNA-free library
-    (N_gdna=0 ⇒ σ²_d→∞ ⇒ disc=0). Exactly zero or strictly positive, and it is the same for every slot:
-    a positive ``disc`` is the one condition under which any counted single-strand slot has a live
-    strand channel, so it is what the message layer reads as "is the strand split a witness at all"
-    (`messages.ChainView.strand_live`). One definition, used by both."""
-    sig2_d = 0.25 * (1.0 / max(float(n_rna_obs), _EPS) + od_r) + 0.25 * (
-        1.0 / max(float(n_gdna_obs), _EPS) + od_g
-    )
-    return 4.0 * max(0.0, (kappa - 0.5) ** 2 - sig2_d)
+def strand_discriminability(kappa, n_rna_obs) -> float:
+    """The library's strand DISCRIMINABILITY: ``4(κ−½)²``, the strand Fisher information's library-level
+    factor (:func:`strand_evidence`), where the PROTOCOL preserves strand, and exactly 0 where it does
+    not. The same for every slot: a positive value is the one condition under which any counted
+    single-strand slot has a live strand channel, so it is also what the message layer reads as "is the
+    strand split a witness at all" (`messages.ChainView.strand_live`). One definition, used by both;
+    gated in ``tests/calibration/test_region_init.py``.
+
+    Whether a protocol preserves strand is a decision between two hypotheses on the spliced 2×2 the
+    strand fit read (`strand_balance.fit_strand_balance`: ``n_same`` sense reads of ``N``). H0, the
+    unstranded protocol: read 1's strand is independent of the transcript's, so every sj reads ½ and the
+    pooled split is ``Binomial(N, ½)`` with no free parameter — κ = ½ EXACTLY, not approximately. H1: κ
+    free under the fit's own ``Beta(1, 1)`` prior. The Bayes factor is closed-form,
+
+        ln BF₁₀ = N·ln 2 + ln B(a, b),   a = n_same + 1 = κ̂·(N + 2),   b = n_opp + 1 = (1 − κ̂)·(N + 2),
+
+    and the channel is live iff ``BF₁₀ > 1`` (equal prior odds; no constant). For large ``N``,
+    ``ln BF₁₀ ≈ ½·[z² − ln(2N/π)]`` with ``z = (κ̂ − ½)/√(¼/N)``: the free parameter's Occam penalty
+    grows with the sample, so the excursion a sampling fluctuation must clear to be read as a protocol
+    grows as ``√ln N`` — 3.8σ at three million spliced fragments — while a stranded library clears it by
+    10⁴–10⁶ nats. The form this replaced, an unbiased estimate of ``(κ−½)²`` floored at zero, was
+    positive on 32 % of genuinely unstranded libraries (a χ²₁ above its mean): a coin toss, not a
+    deadband. gDNA enters nowhere — its strand mean is ½ by symmetry and needs no observation, and a
+    term in its count had switched every gDNA-free library's channel off. With no spliced observation
+    the two hypotheses have equal marginal likelihood and the channel is dead."""
+    n = float(n_rna_obs)
+    if not n > 0.0:
+        return 0.0
+    a = kappa * (n + 2.0)
+    b = (1.0 - kappa) * (n + 2.0)
+    ln_bf = n * np.log(2.0) + float(betaln(a, b))
+    return 4.0 * (kappa - 0.5) ** 2 if ln_bf > 0.0 else 0.0
 
 
-def strand_evidence(u_pos, u_neg, fg_loc, *, kappa, od_g, od_r, n_gdna_obs, n_rna_obs):
+def strand_evidence(u_pos, u_neg, fg_loc, *, kappa, od_r, n_rna_obs):
     """The reference-free strand composition evidence ``τ₀_λ`` (**I_strand**), evaluated at the
     message-free local ``fg_loc``. Pure; no cross-region coupling.
 
     ``I_strand(λ) = N_eff·disc·[f_g(1−f_g)]² / (4 p(1−p))``, ``p = κ + f_g(½−κ)`` — the strand Fisher
-    information, IDENTICALLY 0 at κ=½ (unstranded). The count enters as the OVERDISPERSED effective count
-    ``N_eff = N/(1+(N−1)ω_r)`` (power saturates at ~1/ω, not the raw depth), and the discriminability
-    ``disc = 4·max(0, (κ−½)² − σ²_d)`` carries the DERIVED noise floor
-    ``σ²_d = ¼·(1/N_rna + ω_r) + ¼·(1/N_gdna + ω_g)`` — a κ within √σ²_d of ½ is not composition signal (the
-    deadband that kills the unstranded phantom). ``1/N_gdna`` gates a gDNA-free library (N_gdna=0 ⇒ σ²_d→∞ ⇒
-    disc=0).
+    information, IDENTICALLY 0 on an unstranded library. The count enters as the OVERDISPERSED effective
+    count ``N_eff = N/(1+(N−1)ω_r)`` (power saturates at ~1/ω, not the raw depth), and the
+    discriminability ``disc`` is ``4(κ−½)²`` where the protocol preserves strand and 0 where it does not
+    (:func:`strand_discriminability`, the library's one protocol decision, read once per library).
 
     Structural composition CERTAINTY is not this function's to declare: the one predicate is
     `region_geometry.g1_locked` (neither RNA strand admissible), and the instruments that classify
@@ -127,7 +146,7 @@ def strand_evidence(u_pos, u_neg, fg_loc, *, kappa, od_g, od_r, n_gdna_obs, n_rn
     n_str = n_raw / (1.0 + np.maximum(n_raw - 1.0, 0.0) * od_r)
     fgl = np.clip(np.asarray(fg_loc, np.float64), _EPS, 1.0 - _EPS)
     pmix = np.clip(kappa + fgl * (0.5 - kappa), _EPS, 1.0 - _EPS)
-    disc = strand_discriminability(kappa, od_g, od_r, n_gdna_obs, n_rna_obs)
+    disc = strand_discriminability(kappa, n_rna_obs)
     return n_str * disc * (fgl * (1.0 - fgl)) ** 2 / (4.0 * pmix * (1.0 - pmix))
 
 
@@ -145,7 +164,6 @@ def build_region_init(
     kappa: float,
     od_g: float,
     od_r: float,
-    n_gdna_obs: float,
     n_rna_obs: float,
     n_grid: int,
     logodds_window: float,
@@ -207,9 +225,7 @@ def build_region_init(
         u_neg,
         fg_loc,
         kappa=kappa,
-        od_g=od_g,
         od_r=od_r,
-        n_gdna_obs=n_gdna_obs,
         n_rna_obs=n_rna_obs,
     )
     # The strand Beta-Binomial is

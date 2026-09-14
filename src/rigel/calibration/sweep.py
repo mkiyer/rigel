@@ -200,7 +200,6 @@ def solve_chain(
     rna_sense_frac: float,
     gdna_strand_overdispersion: float = 0.0,
     rna_strand_overdispersion: float = 0.0,
-    n_gdna_obs: float = 0.0,
     n_rna_obs: float = 0.0,
     n_grid: int,
     logodds_window: float = 10.0,
@@ -250,7 +249,7 @@ def solve_chain(
     grid = dict(
         n_grid=int(n_grid),
         logodds_window=float(logodds_window),
-        strand_live=strand_discriminability(kappa, od_g, od_r, n_gdna_obs, n_rna_obs) > 0.0,
+        strand_live=strand_discriminability(kappa, n_rna_obs) > 0.0,
     )
     # THE LIBRARY — the policy's reductions over the WHOLE chain, once, from observations and geometry
     # alone: the only information a message may carry across a locus boundary
@@ -261,7 +260,6 @@ def solve_chain(
         kappa=kappa,
         od_g=od_g,
         od_r=od_r,
-        n_gdna_obs=n_gdna_obs,
         n_rna_obs=n_rna_obs,
         gdna_prior=gdna_prior,
         policy=policy,
@@ -350,14 +348,13 @@ def _structure(chain, statics, region_arrays) -> _Structure:
 
 @dataclass(frozen=True, slots=True)
 class _Sweep:
-    """Everything one sweep's blocks share: the strand model (``κ``, the two overdispersions, the two
-    noise-floor sample sizes), the grids, the composition priors, the policy and its LIBRARY. Built once
-    per sweep by `solve_chain` and read by every block."""
+    """Everything one sweep's blocks share: the strand model (``κ``, the two overdispersions, the
+    spliced sample size the protocol decision reads), the grids, the composition priors, the policy and
+    its LIBRARY. Built once per sweep by `solve_chain` and read by every block."""
 
     kappa: float
     od_g: float
     od_r: float
-    n_gdna_obs: float
     n_rna_obs: float
     n_grid: int
     logodds_window: float
@@ -566,7 +563,6 @@ def _solve_block(
         kappa=sweep.kappa,
         od_g=sweep.od_g,
         od_r=sweep.od_r,
-        n_gdna_obs=sweep.n_gdna_obs,
         n_rna_obs=sweep.n_rna_obs,
         n_grid=sweep.n_grid,
         logodds_window=sweep.logodds_window,

@@ -46,12 +46,12 @@ REGIMES = {
 }
 
 
-@pytest.fixture(scope="module")
-def donor(tmp_path_factory):
-    """A stranded (``ss_0.99``) donor with gDNA, so the harness has a strand model and a gDNA density to
-    match the toy to."""
-    wd = tmp_path_factory.mktemp("encompass_donor")
-    sc = Scenario("donor_ss_0.99_capture_off", genome_length=120_000, seed=11, work_dir=wd / "sim")
+def _donor(tmp_path_factory, *, gdna_fraction: float, tag: str):
+    """A stranded (``ss_0.99``) donor, so the harness has a strand model and a gDNA density to match the
+    toy to — with gDNA (``g60``), and without any (``g00``: the intergenic count is exactly zero, the modal
+    real case, on which a deadband that read a gDNA count switched the strand channel off)."""
+    wd = tmp_path_factory.mktemp(f"encompass_donor_{tag}")
+    sc = Scenario(f"donor_ss_0.99_{tag}", genome_length=120_000, seed=11, work_dir=wd / "sim")
     for i in range(6):
         base = 10_000 + i * 18_000
         sc.add_gene(
@@ -67,7 +67,7 @@ def donor(tmp_path_factory):
         )
     res = sc.build_oracle(
         n_rna_fragments=60_000,
-        gdna_fraction=0.6,
+        gdna_fraction=gdna_fraction,
         sim_config=ReadSimConfig(
             frag_mean=200,
             frag_std=60,
@@ -80,8 +80,16 @@ def donor(tmp_path_factory):
         gdna_config=GDNAConfig(abundance=0.0, frag_mean=200, frag_std=60),
     )
     return TH.harvest(
-        wd, res.index, bam=str(res.bam_path), name="donor_ss_0.99_nrna_none_capture_off"
+        wd, res.index, bam=str(res.bam_path), name=f"donor_ss_0.99_nrna_none_{tag}_capture_off"
     )
+
+
+@pytest.fixture(scope="module")
+def donors(tmp_path_factory):
+    return {
+        "g60": _donor(tmp_path_factory, gdna_fraction=0.6, tag="g60"),
+        "g00": _donor(tmp_path_factory, gdna_fraction=0.0, tag="g00"),
+    }
 
 
 def _spec(regime: str) -> TH.ToySpec:
@@ -102,9 +110,23 @@ def _spec(regime: str) -> TH.ToySpec:
 
 
 @pytest.fixture(scope="module")
-def runs(donor, tmp_path_factory):
+def runs(donors, tmp_path_factory):
+    """Every regime on the gDNA donor; the three expressed regimes on the gDNA-free one too (with neither
+    gDNA nor RNA the silent locus holds nothing to count)."""
     wd = tmp_path_factory.mktemp("encompass")
-    return {regime: TH.run_toy(_spec(regime), donor, wd / regime) for regime in REGIMES}
+    out = {}
+    for tag, donor in donors.items():
+        for regime in REGIMES:
+            if tag == "g00" and regime == "both_silent":
+                continue
+            out[tag, regime] = TH.run_toy(_spec(regime), donor, wd / tag / regime)
+    return out
+
+
+#: the three regimes with RNA, on both donors; the solve gate is L5's xfail on the gDNA donor alone —
+#: without gDNA the strand-pure region between TA+'s exons has no cap for the tilt continuum to sit under
+EXPRESSED = ("ta_high_tb_low", "ta_low_tb_high", "ta_equal_tb")
+DONORS = ("g60", "g00")
 
 
 def _slots(r):
@@ -125,11 +147,13 @@ def _slots(r):
     return exons, between, flanks, ambig_boundaries, rows
 
 
-def test_tb_minus_level_reaches_every_both_stranded_slot(runs):
+@pytest.mark.parametrize("donor_tag", DONORS)
+def test_tb_minus_level_reaches_every_both_stranded_slot(runs, donor_tag):
     """With TB− expressed its level, measured in its single-strand flanks, is delivered into the cube of
-    every both-stranded slot with counts: TA+'s exons, the region between them and the AMBIG boundaries."""
-    for regime in ("ta_high_tb_low", "ta_low_tb_high", "ta_equal_tb"):
-        r = runs[regime]
+    every both-stranded slot with counts: TA+'s exons, the region between them and the AMBIG boundaries —
+    on a gDNA-free library as on any other (the strand channel's liveness reads no gDNA count)."""
+    for regime in EXPRESSED:
+        r = runs[donor_tag, regime]
         exons, between, _flanks, bnds, _rows = _slots(r)
         cube = r.capture.cube_rows or {}
         for row in [*exons, between, *bnds]:
@@ -140,11 +164,12 @@ def test_tb_minus_level_reaches_every_both_stranded_slot(runs):
             )
 
 
-def test_ta_plus_junction_flux_is_a_source_at_its_exons(runs):
+@pytest.mark.parametrize("donor_tag", DONORS)
+def test_ta_plus_junction_flux_is_a_source_at_its_exons(runs, donor_tag):
     """TA+ has no single-strand exon anywhere, so on a per-strand coordinate its junction's certified flux
     was silently unused; the + level must be delivered at both of TA+'s exons whenever TA+ is expressed."""
-    for regime in ("ta_high_tb_low", "ta_low_tb_high", "ta_equal_tb"):
-        r = runs[regime]
+    for regime in EXPRESSED:
+        r = runs[donor_tag, regime]
         exons, _between, _flanks, _bnds, _rows = _slots(r)
         cube = r.capture.cube_rows or {}
         for row in exons:
@@ -154,17 +179,28 @@ def test_ta_plus_junction_flux_is_a_source_at_its_exons(runs):
             )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="ISSUES: capture-on-strand-pure-ambig-undercall — the region between TA+'s exons (TB−'s exon, TA+'s "
-    "intron) is strand-pure and mostly gDNA when TB− is low, and the tilt continuum's median sits below the "
-    "strand cap; closes with the witnessed atom (the lanes worklist's L5)",
+@pytest.mark.parametrize(
+    "donor_tag",
+    [
+        pytest.param(
+            "g60",
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason="ISSUES: capture-on-strand-pure-ambig-undercall — the region between TA+'s exons "
+                "(TB−'s exon, TA+'s intron) is strand-pure and mostly gDNA when TB− is low, and the tilt "
+                "continuum's median sits below the strand cap; closes with the witnessed atom (the lanes "
+                "worklist's L5)",
+            ),
+        ),
+        "g00",
+    ],
 )
-def test_the_both_stranded_exons_solve_to_their_truth(runs):
+def test_the_both_stranded_exons_solve_to_their_truth(runs, donor_tag):
     """The exon-on-exon slots — mostly +, mostly −, or balanced — read their gDNA fraction within 0.05 of
-    the truth once the levels reach them (0.29–0.44 against 0.00 when they did not)."""
-    for regime in ("ta_high_tb_low", "ta_low_tb_high", "ta_equal_tb"):
-        r = runs[regime]
+    the truth once the levels reach them (0.29–0.44 against 0.00 when they did not; on the gDNA-free donor
+    0.054 / 0.046 with the strand channel shut against 0.002 / 0.005 with it live)."""
+    for regime in EXPRESSED:
+        r = runs[donor_tag, regime]
         exons, between, flanks, _bnds, _rows = _slots(r)
         for row in [*exons, between, *flanks]:
             assert abs(row["pred_fg"] - row["true_fg"]) < 0.05, (
@@ -174,7 +210,7 @@ def test_the_both_stranded_exons_solve_to_their_truth(runs):
 
 def test_with_both_genes_silent_the_locus_reads_gdna(runs):
     """No RNA to speak of: every slot with counts is gDNA and must read so."""
-    r = runs["both_silent"]
+    r = runs["g60", "both_silent"]
     _exons, _between, _flanks, _bnds, rows = _slots(r)
     counted = [row for row in rows if row["n"] >= 20 and np.isfinite(row["true_fg"])]
     assert counted, "the silent regime has no counted slot: the gate is vacuous"

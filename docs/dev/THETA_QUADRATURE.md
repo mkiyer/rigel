@@ -416,8 +416,9 @@ the case delivered NO level anywhere:
   strand has no single-strand exon, i.e. never on the ladder.
 * The g00 donor delivers nothing for a fifth, ruled reason: the derived deadband (`strand_discriminability`,
   `1/N_gdna`) declares the strand channel uninformative on a library with exactly zero gDNA, so no
-  single-strand exon emits a strand-derived level. The ladder's g00 rows carry a small fitted gDNA count and
-  the channel is live there; a truly gDNA-free real library would not be. A ruling, not this thread's.
+  single-strand exon emits a strand-derived level. (Corrected 2026-09-14: the ladder's g00 rows have
+  `N_gdna = 0` exactly and the channel was dead on them too, so every g00-donor number above was measured
+  without a strand channel. RESOLVED by L3: the gate is a protocol decision, `DESIGN.md` §6b.15.)
 
 **The rung-0 identity gate** (`test_transfer_policy.test_an_evidence_free_transfer_is_byte_identical_to_silence`)
 asserted coupling A as a floor — no factory rows ⇒ the transfer policy IS silence. With A fixed it fails by

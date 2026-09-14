@@ -1241,6 +1241,48 @@ the converged form, and rows on 24 or 60 were the lattice's own resolution error
 θ-marginal carries a volume factor `∝ σ_τ(λ) ∝ 1/(1 − f_g)`, an Occam push toward gDNA of order `√n` at a
 balanced both-strand slot (`ISSUES: strand-marginal-volume-factor`).
 
+**The strand channel is live iff the protocol preserves strand (2026-09-14; L3 of the lanes worklist;
+`EQUATIONS.md` §5.2b).** The gate on the strand channel — `disc = 4·max(0, (κ̂−½)² − σ²_d)`, a noise floor
+summing the RNA fit's sampling variance and a gDNA term — had two accidents. Its `1/N_gdna` switched the
+channel off on every library whose intergenic count is exactly zero, the modal real case: all four ladder
+`g00` rows ran with the channel dead at κ = 0.0099, and so did every toy on a `g00` donor (the θ thread's
+shared-exon deep stress and the encompassing-locus audit were measured that way). And without that term the
+RNA half was a 1σ band — an unbiased estimate of `(κ−½)²` floored at zero is positive on 32 % of genuinely
+unstranded libraries — so `g98 ss.50 OFF` (z = 1.22) shipped with a live channel, and `g00 ss.50 OFF`
+(z = 1.05) read 499 → 21,484 false gDNA fragments the moment the gDNA term went (20,545 of them through
+`tau_lam`'s readers — the own claims and the landscape's training population — and 0.7 through the lanes'
+witness column). THE RULING: a protocol either preserves strand or does not, so the gate is a decision on the
+spliced 2×2 the strand fit read — the Bayes factor of a free κ under the fit's own Beta(1, 1) against κ = ½
+exactly, closed form, `ln BF₁₀ = N·ln 2 + ln B(κ̂(N+2), (1−κ̂)(N+2))`, live iff positive; its large-N form
+`½·[z² − ln(2N/π)]` is the free parameter's Occam penalty, so no multiple of σ is chosen — and
+`disc = 4(κ̂−½)²` where it is live. gDNA enters nowhere: its strand mean is ½ by symmetry, and `n_gdna_obs`
+is gone from the strand model, the sweep, the injected priors and the toy harness
+(`region_init.strand_discriminability` takes κ̂ and the spliced count, nothing else). Judged: the ladder
+identical to 0.1 fragment on every stratum and both unstranded zero controls except the row the coin toss
+had left live (`g98 ss.50 OFF` 123,657 → 122,981, −0.55 %; unstranded OFF −0.22 %); the test chromosome
+identical on all 30 rows; a stranded and an unstranded contaminated row BIT-IDENTICAL (`tau_lam` is only ever
+thresholded); the goldens' gDNA-free toys move ≤ 2e-3 relative on their transcript counts, except
+`antisense_contained`, whose false gDNA falls 78.7 → 5.6 fragments of 1,000 with the channel on. The stranded
+zero controls read 405 → 497 and 194 → 224, and that cost is located and is not the gate's:
+`calibration_walk.py` reads the strand and local rungs identical (ψ's strand term never read the deadband),
+the messages rung 8 % better with the channel live (59,456 → 54,874) and the whole of the cost at the refit
+rung (375 → 8,696 before the messages repair it to 728) — 2,700 more exons, the walled and edge-only ones
+whose only composition evidence is their own strand, join the landscape's training population at their
+pass-0 median, which at a pure-RNA vertex sits above zero by the strand term's width
+(`landscape_training_census.py`: own:strand 13,104 slots and 3,771 false fragments trained at the first refit
+against 2,627; 585 against 325 at the third). That is the estimator's vertex-resolution bias, filed under
+`ISSUES: gdna-landscape-trains-on-false-positives`, and the owner's ruling stands over it: on a gDNA-free
+library every read is RNA and RNA levels are what must flow. On a `g00` donor the shared-exon stress reads
+the exon never worse and 139 → 109 / 93 → 64 false fragments at 50k (20 % / 50 % minor), and the
+encompassing locus's exon∩exon slots 0.054 / 0.046 → 0.002 / 0.005 against 0; `test_encompassing_locus.py`
+runs every expressed regime on a gDNA-free donor as well. **An RNA level read from a slot's belief is
+REFUSED** (the issue's second candidate): a belief at a slot with no strand information is the prior's
+answer, and a lane carrying it is the deleted relay (`TRAPS: one-hop-lifted-out-is-still-the-relay`). The
+stranded gDNA-free case is fixed by the gate alone; on an unstranded gDNA-free library the exons' composition
+is the landscape's to say, which it does through ψ's composition arm without a lane (the ladder's `g00 ss.50`
+rows read 499 and 211 false fragments of 8M that way), and the two-gene toy that reads ½ there cannot fit a
+landscape at all (two anchors against `_MIN_TRAIN`) — the toy's limit, not a defect.
+
 ## 6c. ψ's composition is a point on the simplex, and closure is structural (2026-08-17)
 
 **The composition has two degrees of freedom, not three.** ψ solves a point on the 2-simplex,

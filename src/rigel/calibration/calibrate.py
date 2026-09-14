@@ -104,8 +104,8 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True, slots=True)
 class InjectedCalibrationPriors:
     """Population-scale calibration priors — the objects that require genome-scale (or many-gene) data to fit and
-    are physically **directly observable** (no deconvolution / no solving): the RNA strand balance, the strand
-    Beta-Binomial overdispersions, the strand-Fisher noise-floor sample sizes, the intergenic
+    are physically **directly observable** (no deconvolution / no solving): the RNA strand balance and the
+    spliced sample size it was fit from, the strand Beta-Binomial overdispersions, the intergenic
     intron-factory background, and the pre-solve TOTAL-density landscape.
 
     A tiny (single-transcript) toy CANNOT fit these — so :func:`calibrate` accepts them pre-fit from a
@@ -116,7 +116,6 @@ class InjectedCalibrationPriors:
 
     rna_sense_frac: float | None = None
     n_rna_obs: float | None = None
-    n_gdna_obs: float | None = None
     gdna_strand_overdispersion: float | None = None
     rna_strand_overdispersion: float | None = None
     intron_background: GdnaBackground | None = None
@@ -328,14 +327,13 @@ _NO_RNA_SEED = (-1, -1, False, float("nan"))
 @dataclass(frozen=True, slots=True)
 class _Strand:
     """The library's strand model as the solve reads it, fitted or injected: the RNA sense fraction
-    ``κ``, the two Beta-Binomial overdispersions, and the strand-Fisher noise-floor sample sizes
-    (``N_rna`` the certified-RNA count κ was fit from, ``N_gdna`` the intergenic unspliced count).
+    ``κ``, ``N_rna`` — the spliced count κ was fit from, the sample the strand channel's protocol
+    decision reads (`region_init.strand_discriminability`) — and the two Beta-Binomial overdispersions.
     The two seeds are QC for the log only — ``(n_seed_regions, n_seed_fragments, fallback, …)``,
     ``-1`` where the value was injected."""
 
     rna_sense_frac: float
     n_rna_obs: float
-    n_gdna_obs: float
     gdna_strand_overdispersion: float
     rna_strand_overdispersion: float
     gdna_seed: tuple = _NO_GDNA_SEED
@@ -354,18 +352,18 @@ class _Strand:
 def _fit_strand(substrate, region_arrays, strand_models, inj) -> _Strand:
     """The strand model, in the order the fits lean on each other.
 
-    ``κ`` first — the posterior-mean spliced sense fraction (`fit_strand_balance`); the strand
-    channel's discriminability ``(2κ−1)²`` is the smooth strand→count deference weight, there is no
-    hard identifiability gate (an unstranded library has κ≈½ ⇒ the count governs at any depth). A
-    library with no spliced reads is not an RNA-seq library and raises. Then the RNA overdispersion
+    ``κ`` first — the posterior-mean spliced sense fraction (`fit_strand_balance`) and the spliced count
+    behind it; the strand channel's discriminability is ``(2κ−1)²`` where the protocol preserves strand
+    and 0 where it does not (`region_init.strand_discriminability`, a decision on that same 2×2, so an
+    unstranded library's count governs at any depth). A library with no spliced reads is not an RNA-seq
+    library and raises. Then the RNA overdispersion
     (mean κ, from the per-sj strand table, certified pure RNA), which is the gDNA fit's fallback; then
     the gDNA overdispersion (mean ½ by dsDNA symmetry) by the AWAY-HALF moment over every genic count-
     and strand-observable object — unbiased under any RNA content of the seeds (`gdna_strand`'s
     lemma), so no seed is weighted and no class asserted pure; intergenic and AMBIG objects cannot be
     oriented and are out. The two are RECONCILED with no conjured target: the weaker-measured
     dispersion shrinks toward the better-measured one by their own null informations — ⛔ only when
-    neither is injected, since an injected value is an arm's whole point. Last the two sample sizes;
-    ``N_gdna = 0`` (a gDNA-free library) gates the strand seed off."""
+    neither is injected, since an injected value is an arm's whole point."""
     if inj is not None and inj.rna_sense_frac is not None:
         rna_sense_frac = float(inj.rna_sense_frac)
         n_rna_obs = float(inj.n_rna_obs) if inj.n_rna_obs is not None else 0.0
@@ -425,14 +423,7 @@ def _fit_strand(substrate, region_arrays, strand_models, inj) -> _Strand:
             gdna_strand.information,
         )
 
-    if inj is not None and inj.n_gdna_obs is not None:
-        n_gdna_obs = float(inj.n_gdna_obs)
-    else:
-        intergenic = coarse_type_array(np.asarray(region_arrays.signature)) == 0
-        n_gdna_obs = float(
-            np.asarray(substrate.region_contained.count, dtype=np.float64)[intergenic].sum()
-        )
-    return _Strand(rna_sense_frac, n_rna_obs, n_gdna_obs, gdna_od, rna_od, gdna_seed, rna_seed)
+    return _Strand(rna_sense_frac, n_rna_obs, gdna_od, rna_od, gdna_seed, rna_seed)
 
 
 class _IntronFactory:
@@ -627,7 +618,6 @@ def _sweep(s: _Solve, belief, prior, cache=None, capture=None):
         rna_sense_frac=s.strand.rna_sense_frac,
         gdna_strand_overdispersion=s.strand.gdna_strand_overdispersion,
         rna_strand_overdispersion=s.strand.rna_strand_overdispersion,
-        n_gdna_obs=s.strand.n_gdna_obs,
         n_rna_obs=s.strand.n_rna_obs,
         n_grid=n_grid,
         logodds_window=window,
@@ -905,7 +895,6 @@ def calibrate(
             calibration_priors=InjectedCalibrationPriors(
                 rna_sense_frac=strand.rna_sense_frac,
                 n_rna_obs=strand.n_rna_obs,
-                n_gdna_obs=strand.n_gdna_obs,
                 gdna_strand_overdispersion=strand.gdna_strand_overdispersion,
                 rna_strand_overdispersion=strand.rna_strand_overdispersion,
                 intron_background=factory.background,

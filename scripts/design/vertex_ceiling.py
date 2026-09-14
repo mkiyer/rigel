@@ -542,19 +542,37 @@ def self_test() -> int:
                    own[2] is not None and np.array_equal(own[2], top)
                    and own[0] is None and own[1] is None and own[3] is None
                    and _FIRED["claimed"] == before["claimed"] + 1))
-    # the pinned policy delivers the delta into ψ at the pinned slot, on top of a silent solve
+    # the pinned policy delivers the delta into ψ at the pinned slot, on top of a silent solve. The
+    # block is four intergenic regions with no counts — terminals, so the shipped layer builds no face,
+    # no lane and no claim — as a real `BlockContext`, with the library the policy reduces from it:
+    # since the lanes worklist `prepare` builds the whole layer whether or not the factory has rows and
+    # reads every field of the context, so a bare stub no longer stands in for one
+    from rigel.calibration.messages import BlockContext
+
+    def silent_block(n: int, k: int) -> BlockContext:
+        z, z2, f = np.zeros(n), np.zeros((n, 2)), np.zeros(n, bool)
+        return BlockContext(
+            eff_gdna=z + 1.0, eff_rna=z, sj_count=z2, sj_count_lo=z2, sj_count_hi=z2,
+            route_rate_lo=z2, route_rate_hi=z2, unspliced_count=z2, spliced_count=z2,
+            left=np.full(n, -1), right=np.full(n, -1), is_boundary=f, is_exon_region=f,
+            free_pos=f, free_neg=f, exon_pos=f, exon_neg=f, boundary_flags=np.zeros(n, np.uint16),
+            n_grid=k, logodds_window=10.0, factory_rows=None, strand_live=False,
+            has_own_composition=f, belief_fg=np.full(n, 0.5),
+        )
+
     pol = CAL.TransferPolicy()
-    prepared = pol.prepare(SimpleNamespace(n_slots=4, n_grid=21, logodds_window=10.0, factory_rows=None), None)
-    msg = prepared.solve([None] * 4, [None] * 4)
+    block = silent_block(4, 21)
+    prepared = pol.prepare(block, pol.library(block))
+    msg = prepared.solve(Received.empty(4, 21), Received.empty(4, 21))
     checks.append(("the pinned policy delivers the delta as the slot's ψ row (fires `delivered`)",
                    msg.lam_rows is not None and msg.lam_rows.shape == (4, 21)
                    and np.array_equal(msg.lam_rows[2], top) and not msg.lam_rows[0].any()
                    and _FIRED["delivered"] == before["delivered"] + 1))
     # perturbation: with no pins the policy is the shipped one, so silent stays silent
     _CTX["pins"] = {}
+    pol = CAL.TransferPolicy()
     checks.append(("with nothing pinned the policy's solve is untouched (silent stays silent)",
-                   CAL.TransferPolicy()
-                   .prepare(SimpleNamespace(n_slots=4, n_grid=21, logodds_window=10.0, factory_rows=None), None)
+                   pol.prepare(block, pol.library(block))
                    .solve(Received.empty(4, 21), Received.empty(4, 21)).is_silent))
     restore()
     checks.append(("…and every patch target is restored after the pin",
