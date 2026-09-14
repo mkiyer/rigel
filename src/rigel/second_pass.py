@@ -507,12 +507,12 @@ def lift_choices(whole: AccumulatorPayload, parts, choices: np.ndarray):
     record's choice is consumed from a per-key queue, so the queue's state has to be shared across the
     partitions or two of them can take the SAME entry and leave another unused — ``Sum(partitions) !=
     whole`` again, by a different route. Taking a sequence makes the identity a property of this
-    function rather than of a caller's discipline (TRAPS: perturb-every-gate). A one-partition caller
+    function rather than of a caller's discipline. A one-partition caller
     passes ``[p]``.
 
     The key is the bank's own canonical sort key — ``_DEFERRED_RECORD_FIELDS``, the tuple the C++
     sorts on before the bank crosses the ABI, imported rather than restated so there is one definition of
-    record identity (TRAPS: a-test-that-redefines). :class:`DeferredFragments` guarantees the property
+    record identity. :class:`DeferredFragments` guarantees the property
     this rests on: two records that tie on that key are identical records, so no tie-break is needed or
     possible. Identical records have identical hypothesis SETS — enumeration reads the span and the
     annotation, never the origin — so a LOCAL hypothesis index transfers between them unchanged.

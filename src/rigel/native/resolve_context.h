@@ -144,15 +144,9 @@ public:
         return val;
     }
 
-    // ⛔ `get_unique_frag_length_mrna` was DELETED by TRAPS: pure-and-length-censored.
-    // It was definition **B**: a TRANSCRIPT-SPACE fragment length, gated on every non-nRNA candidate
-    // agreeing, silently discarding the 4.6 % that did not. Summed into one array with definition
-    // **A** — a GENOMIC footprint over a disjoint subset — and called the library's unconditional
-    // fragment-length distribution, which it was neither unconditional nor one quantity.
-    //
-    // The tool now has ONE definition: the accumulator's `L`, the total length of the fragment's own
-    // path (span minus region_bound introns, mate gap included), proven exhaustively in TRAPS: two-divisors-opposite-sign and binned for
-    // every deposited fragment by TRAPS: a-purity-filter-is-a-length-filter's `deposited_lengths`.
+    // Fragment length has ONE definition: the accumulator's `L`, the total length of the fragment's own
+    // path (span minus region_bound introns, mate gap included), binned for every deposited fragment in
+    // `deposited_lengths`. There is no transcript-space length accessor.
     // Return t_inds as a Python frozenset for compatibility
     nb::object get_t_inds() const {
         nb::set s;

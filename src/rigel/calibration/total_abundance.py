@@ -234,8 +234,8 @@ def region_counts_and_exposure(
     """The side-selected ``(counts, exposure, model_free)`` triple on the REGION axis.
 
     This is the entry point a pooled estimator wants, and it is deliberately not a density. A pooled
-    rate is `Σcounts / Σexposure` — a ratio of sums, never a mean of ratios
-    (`TRAPS: a-mean-of-ratios-inherits-the-partition`) — and a conjugate posterior wants the same pair
+    rate is `Σcounts / Σexposure` — a ratio of sums, never a mean of ratios,
+    which the partition's smallest regions would own — and a conjugate posterior wants the same pair
     (`Gamma(Σcounts + ½, Σexposure)`), so handing a consumer a per-region density would force it to
     re-multiply and lose the pooling. A consumer that pools `count / E_contained` can take this pair
     instead and keep its own estimator unchanged.

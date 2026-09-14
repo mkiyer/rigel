@@ -35,14 +35,13 @@ float64 is the accurate choice and not a concession: against exact rational arit
 reciprocal-opportunity theorem it lands some five orders of magnitude closer than the fixed point it
 replaced. What it costs is bit-identity across worker counts, since float addition is not associative —
 the integer banks reproduce exactly, the float ones agree to ~1e-15, and the tests validate a float bank
-within a DERIVED tolerance (`TRAPS: integer-channels-reproduce`).
+within a DERIVED tolerance.
 
 The reciprocal banks are not called ``density``, and the two rules carry two names. At a boundary the
 opportunity ``w−1`` and the deposit ``1/(w−1)`` cancel with support factor ``P(w ≥ 2) = 1`` — an exact,
 model-free density (``inv_length_sum``). At a region the deposit ``1/(ell−w+1)`` cancels its opportunity
 only ON its support, so ``E[Σ] = ρ·P(w ≤ ell)`` — a per-component truncation, a density SHAPE and not a
-level (``inv_opportunity_sum``; TRAPS: a-cancellation-is-conditional-on-its-support). One word for two
-rules is the defect this naming avoids (TRAPS: two-masks-one-name).
+level (``inv_opportunity_sum``). One word for two rules is the defect this naming avoids.
 
 The trailing ``2`` on every bank is the genome strand — ``Strand.POS`` then ``Strand.NEG``, without
 exception. Sense/antisense is transcript-relative, derived by the consumer from the sj's own strand, and
@@ -138,7 +137,7 @@ class GapCensus:
     Its own axis, and NOT a splice type. It cuts ACROSS the splice census: a certified-RNA
     ``SPLICED_ANNOT`` fragment with an intron in its mate gap needs resolving exactly as much as an
     ``UNSPLICED`` one does, so putting these on ``splice_type`` would need two labels per fragment and would
-    break TRAPS: pure-and-length-censored's property that the splice census sums to the library.
+    break the property that the splice census sums to the library.
 
     There is no ``gap_resolved_unspliced``, and that is not an omission. A spliced hypothesis cuts
     bases the unspliced one keeps, so ``L_spliced <= L_unspliced`` always, and the one arbitration filter is
@@ -556,7 +555,7 @@ class AccumulatorPayload:
     pool_lengths: np.ndarray  # int64[5, max_length + 1]
 
     #: uint32[max_length + 1] — EVERY deposited fragment, binned at its own L, with no purity condition
-    #: (TRAPS: a-purity-filter-is-a-length-filter). The five pools above are deliberately CONDITIONED (an
+    #: (a purity filter is a length filter). The five pools above are deliberately CONDITIONED (an
     #: impure pool is worse than a missing one), so none of them is an unconditional anchor; this bank is
     #: the unconditional anchor the empirical-Bayes shrinkage in `calibration.fl` shrinks a pool towards,
     #: measured in the accumulator's own frame.
@@ -758,7 +757,7 @@ class AccumulatorPayload:
             raise ValueError(
                 f"deposited_lengths has shape {deposited_lengths.shape}, expected ({max_length + 1},)"
             )
-        # The TRAPS: a-purity-filter-is-a-length-filter invariant, checked at the door. Same
+        # The unconditional-length invariant, checked at the door. Same
         # externally-checkable form as
         # ``sum(region_start_count) == deposited`` and a DIFFERENT statement: that one says every fragment
         # was located in space, this one that every fragment was binned by length. A histogram that is

@@ -29,7 +29,6 @@
  *       E[sum 1/A]    = rho * P(A > 0)     <- the cancellation is conditional on its own support
  *                     = rho                 at a BOUNDARY (P(w >= 2) = 1 for any real library)
  *                     = rho * P(w <= ell)   at a REGION -- a per-component pmf functional, NOT rho
- *                                             (TRAPS: a-cancellation-is-conditional-on-its-support)
  *
  * The two rules carry two names -- `unspliced_inv_length_sum` / `sj.inv_length_sum` for the boundary
  * form, `contained_inv_opportunity_sum` for the region form -- and neither is called `density`: the
@@ -485,7 +484,7 @@ public:
     const std::int64_t* pool_lengths_data() const noexcept { return pool_lengths_.data(); }
     std::size_t         pool_lengths_size() const noexcept { return pool_lengths_.size(); }
 
-    /// ⭐ TRAPS: a-purity-filter-is-a-length-filter — EVERY deposited fragment, binned at its own L, with NO purity condition.
+    /// ⭐ EVERY deposited fragment, binned at its own L, with NO purity condition.
     ///
     /// The five pure pools above are deliberately CONDITIONED (an impure
     /// pool is worse than a missing one), so they cannot serve as the unconditional anchor an

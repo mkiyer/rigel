@@ -1665,7 +1665,7 @@ private:
                 // MATE GAP INCLUDED, because the gap is part of the molecule and must count toward L.
                 //
                 // ⛔ A fragment with blocks on MORE THAN ONE REFERENCE deposits nothing. It is not one
-                // molecule (design §3.3), and an `OfferedFragment` cannot express it — it carries one
+                // molecule, and an `OfferedFragment` cannot express it — it carries one
                 // extent on one region_bound axis. The shipped code had no such check on the intergenic path: it
                 // computed a span per reference and deposited ALL of them onto `exons.front().ref_id`, so
                 // chr7 coordinates landed on chr1's region_bound axis. `ws.span_ref` recorded which reference each
@@ -2129,7 +2129,7 @@ private:
 
             const std::size_t pool_row = static_cast<std::size_t>(max_length_) + 1;
             std::vector<int64_t> pool_lengths(kNFragmentPools * pool_row, 0);
-            // ⭐ TRAPS: a-purity-filter-is-a-length-filter — the unconditional histogram, summed over references exactly like the pools.
+            // ⭐ The unconditional length histogram, summed over references exactly like the pools.
             std::vector<uint32_t> deposited_lengths(pool_row, 0u);
 
             rigel::accumulator::DepositCounters qc;
@@ -2198,7 +2198,7 @@ private:
                 }
                 const int64_t* pools = a.pool_lengths_data();
                 for (std::size_t i = 0; i < pool_lengths.size(); ++i) pool_lengths[i] += pools[i];
-                // ⭐ TRAPS: a-purity-filter-is-a-length-filter. Same size guard, same reason: a silently skipped reference would leave the
+                // ⭐ The unconditional length histogram takes the same size guard for the same reason: a silently skipped reference would leave the
                 // anchor short by that reference's fragments with nothing to notice it by, and the
                 // sum(deposited_lengths) == deposited invariant is what would fire -- but only if the
                 // array is the right length in the first place.
@@ -2238,7 +2238,7 @@ private:
             cal["pool_lengths"]           = vec_to_ndarray(std::move(pool_lengths));
             cal["deposited_lengths"]      = vec_to_ndarray(std::move(deposited_lengths));
 
-            // The QC denominators (design §10.3). Every conservation statement downstream has to be able
+            // The QC denominators. Every conservation statement downstream has to be able
             // to name what it excluded, and none of these is derivable after the fact.
             nb::dict qc_dict;
             qc_dict["deposited"]                = qc.deposited;

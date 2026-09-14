@@ -239,7 +239,7 @@ struct RawResolveResult {
     // ⚠ ANNOTATED, not merely leftmost: `sj_strand` is the OR of the ANNOTATED
     // introns' strands only, so an unannotated intron may carry a different (or
     // absent) tag.  Keying on an annotated sj is what makes the 2×2
-    // marginal identity of §2.1 hold unconditionally.
+    // marginal identity hold unconditionally.
     int32_t sj_key_ref = -1;
     int32_t sj_key_start = -1;
     int32_t sj_key_end = -1;

@@ -27,7 +27,7 @@ Anything derivable from the index is rebuilt on load, never stored: it is a frac
 against an index load that happens anyway, and a stored copy is how a cache goes stale against the
 thing it describes.
 
-There is no separate fragment-length row (TRAPS: pure-and-length-censored). Every fragment-length
+There is no separate fragment-length row. Every fragment-length
 histogram — the two pure pools and the unconditional anchor they are EB-shrunk toward — is a field OF
 the payload, so caching the payload caches them, in one frame, by construction. `build_fl_models`
 remains the single source of truth for the derived pmfs, which are still not cached: freezing its
@@ -190,8 +190,7 @@ def payload_schema_digest() -> str:
     :meth:`AccumulatorPayload.from_scan_result`; :func:`_payload_from_parts` puts the ``.npz`` arrays
     straight into the payload with no shape check at all. Collapsing a bank from ``[n, 2]`` to ``[n]``
     therefore leaves every field name identical, and a name-only digest would ACCEPT a stale cache and
-    fail downstream with a shape error pointing nowhere near its cause
-    (``TRAPS: a-hash-that-misses-its-artifact``).
+    fail downstream with a shape error pointing nowhere near its cause.
 
     The column count is taken from the two axis TABLES rather than from the arrays, because the digest
     must be computable without a payload in hand. A bank moving between ``BANK_AXES`` and
@@ -210,7 +209,7 @@ def deposit_digest() -> str:
 
     :func:`payload_schema_digest` hashes field NAMES and column counts, and a deposit-RULE change moves
     neither — so without this a cache written under the old rule is accepted by the key and silently
-    serves OLD VALUES to NEW CODE (``TRAPS: a-hash-that-misses-its-artifact``). A rule change that alters
+    serves OLD VALUES to NEW CODE. A rule change that alters
     no name at all, such as the sj-boundary rule, is caught by nothing else.
 
     It needs no version number (the project bans them) and no constant to maintain: it is a MEASUREMENT
@@ -304,7 +303,7 @@ class ScanCache:
 
     # No fragment-length row is stored here. Every fragment-length histogram comes off `payload` — the
     # two pure pools and the unconditional anchor they are EB-shrunk toward — so caching the payload
-    # caches them in one frame (TRAPS: pure-and-length-censored). `fl.npz` is neither written nor read;
+    # caches them in one frame. `fl.npz` is neither written nor read;
     # a cache that still has one on disk loads fine, since an extra file is not a key.
 
 
@@ -584,7 +583,7 @@ def calibration_inputs(
     length model than production's).
 
     Every fragment-length histogram comes from the PAYLOAD — the two pure pools and the unconditional
-    anchor they are shrunk toward (TRAPS: pure-and-length-censored). One quantity, one source, one
+    anchor they are shrunk toward. One quantity, one source, one
     frame: the scanner's spliced histogram is transcript-space and requires a UNIQUE transcript, while
     the accumulator's `RNA_SPLICED` pool is a structural rule over a larger population; and the anchor
     is `deposited_lengths`, binned at the same `L`.

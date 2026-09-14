@@ -36,7 +36,7 @@ A contiguous boundary is a 0-bp boundary with one count and one divisor, ``cross
 there is no per-face machinery and no ½. A zero-gDNA library (``gdna_density_global == 0``, per-object
 gDNA mass ``0``) is a valid, graceful output.
 
-Known bias (`TRAPS: prove-the-substrate`): the RNA half of an unspliced crossing takes
+Known bias: the RNA half of an unspliced crossing takes
 ``UNBOUNDED_REACH`` rather than its transcript's real remaining length, which over-calls gDNA
 genome-wide and worst in the last region before a polyA site. SpliceJunction boundaries DO take their
 real exonic reach.
@@ -698,8 +698,8 @@ def _result(
     since a spliced fragment is guaranteed-RNA in the EM. There is no REGION twin, structurally: a
     region's contained population cannot hold a spliced molecule. ``count_rna_sj`` is the JUMPING
     population, exported verbatim — pure RNA by construction, nothing to deconvolve. The three
-    ``mass_per_crossing`` are each their own population's incidence→fragment conversion: applying one
-    population's ratio to another is `TRAPS: a-pooled-conversion-applied-per-component`."""
+    ``mass_per_crossing`` are each their own population's incidence→fragment conversion, never applied
+    to another population."""
     regions = chain_region_deconv(chain, belief, substrate)
     boundaries = chain_boundary_deconv(chain, belief, substrate)
     region_eff_gdna, region_eff_rna = region_eff

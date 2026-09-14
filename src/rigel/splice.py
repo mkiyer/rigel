@@ -37,8 +37,7 @@ def census_field(stype: SpliceType) -> str:
     The scanner classifies, so the scanner counts. The per-fragment splice breakdown is scanner QC —
     it has no algorithmic consumer, only the report — so it lives where it is generated and is passed
     through nothing to get there. Reading it off a fragment-length category model instead would count
-    only the fragments that contributed a LENGTH observation, a population nobody states
-    (TRAPS: pure-and-length-censored).
+    only the fragments that contributed a LENGTH observation, a population nobody states.
 
     There is no name table, deliberately. The C++ keys these counters off
     ``splice_type_label`` (``bam_scanner.cpp``), whose strings are exactly these member names

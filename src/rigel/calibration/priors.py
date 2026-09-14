@@ -65,7 +65,7 @@ def _region_locus_shares(
 
     Published as triples rather than folded straight into sums, because the BOUNDARY axis needs the
     same shares (:func:`_boundary_locus_shares`) and a second traversal computing the same predicate is how
-    two homes for one rule come about (``TRAPS: a-test-that-redefines``).
+    two homes for one rule come about.
     """
     r_idx: list[int] = []
     l_idx: list[int] = []

@@ -30,7 +30,7 @@ per-region Poisson (``μ``), the fitted per-region over-dispersion (``α``), and
 the region's own count decides.
 
 ⛔ There must be no fallback branch at ``Σg = 0``. A fallback location built from a mean of reciprocals is
-owned by the smallest regions of the partition (`TRAPS: a-mean-of-ratios-inherits-the-partition`), so a
+owned by the smallest regions of the partition, so a
 single fragment-length sliver can assert a large background on a library whose true background is exactly
 zero, at a claimed precision that counts every empty region as a unit of Fisher information. The
 falsification set is ``test_density_deconv``'s sliver-invariance / smooth-through-zero /
@@ -97,9 +97,8 @@ def fit_gdna_background(g_counts, eff_g) -> GdnaBackground:
     # The location comes from `gdna_density.pooled_log_rate`, so that both estimators of the gDNA
     # background rate live in one module (the other being the contamination-robust `one_sided_rate` the
     # fragment-length model uses). Note that `pooled_log_rate` assumes the pool it is handed is pure,
-    # which this function's pool is not once unannotated transcription exists
-    # (`TRAPS: purity-is-a-property-of-the-annotation`). Adopting the one-sided rate here would be a
-    # separate change to the composition reference and must be priced on its own.
+    # which this function's pool is not once unannotated transcription exists. Adopting the one-sided
+    # rate here would be a separate change to the composition reference and must be priced on its own.
     log_mu_bg = pooled_log_rate(g, E, shape=_JEFFREYS_SHAPE) if informative else -np.inf
 
     alpha = np.inf

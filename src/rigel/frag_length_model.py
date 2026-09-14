@@ -596,7 +596,7 @@ class FragmentLengthModel:
 
 # There is deliberately no plural container of raw per-SpliceType histograms here: mixing a genomic
 # footprint for one subset of fragments with a transcript-space length for a disjoint one gives an
-# anchor measured differently from the pools it anchors (TRAPS: pure-and-length-censored).
+# anchor measured differently from the pools it anchors.
 #
 # `FragmentLengthModel` above is the scoring and effective-length model, built by `from_pmf` from a
 # pmf that `calibration.fl.build_fl_models` derives from the accumulator payload. The per-splice-type

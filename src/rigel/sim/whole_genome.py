@@ -721,8 +721,8 @@ def apply_nrna_fragment_share(
     library, and return the molecular ratio that achieves it.
 
     A config states the fragment share rather than the molecular ratio because the two are far apart
-    and the map between them is a property of the annotation, not a number to hand-write
-    (`TRAPS: no-magic-numbers`): a nascent entity spans a whole gene while a mature transcript is
+    and the map between them is a property of the annotation, not a number to hand-write:
+    a nascent entity spans a whole gene while a mature transcript is
     spliced, so a modest molecular ratio already puts most RNA fragments in nascent RNA.
 
     Each expressed multi-exon transcript contributes ``ratio × abundance`` nascent molecules to its
@@ -811,7 +811,7 @@ def apply_sparse_nrna(
 
     # an entity is eligible iff at least one expressed multi-exon transcript names it: a silent gene
     # is not being transcribed, so it has no pre-mRNA, and that must read as an exact zero rather than
-    # a small number (`TRAPS: starved-is-not-depleted`, the "biology puts nothing there" side)
+    # a small number: biology puts nothing there
     eligible: list[Transcript] = []
     seen: set[int] = set()
     for t in transcripts:

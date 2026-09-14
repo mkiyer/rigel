@@ -14,7 +14,7 @@ Three facts that determine this file's shape:
 
 1. Omitting a component's term is not "no prior" — the grid's own measure supplies one. A bare
    uniform-λ grid IS Haldane per component ⇒ Beta(0,0) on the composition: improper at BOTH vertices, a
-   vertex amplifier. There is no third option (`TRAPS: no-prior-means-haldane`).
+   vertex amplifier. There is no third option.
 2. The composition is a TWO-GROUP split on the λ axis — gDNA against RNA-total — which is what
    calibration models. The per-strand tilt is a nuisance parameter. On the two-group axis the measure
    residual is exactly zero: each ``logP`` is a density in LOG-rate, so its linear-rate conversion
@@ -279,7 +279,7 @@ def _posterior_median_fg(post, lam, fg):
     equivalent and is not — the σ grid is highly non-uniform, spacing ~1e-5 at the ends against ~0.085 in
     the middle, so a bin's midpoint in ``f`` is not the image of its midpoint in ``λ`` and a posterior
     concentrated on one grid point comes back biased toward ½, where on ``λ`` it returns its own grid
-    point to machine precision (`TRAPS: interpolate-on-the-axis-where-the-lattice-is-uniform`). That case
+    point to machine precision. That case
     is not synthetic: an unsolved slot's fed-back belief produces a one-hot posterior.
 
     ``post``: (m,K) normalized posterior; ``lam`` the uniform log-odds grid; ``fg`` = σ(λ). Returns (m,)."""

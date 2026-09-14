@@ -88,7 +88,7 @@ class SweepCapture:
     ``None`` when no block did), ``cube_rows`` ``{slot: CubeRow}`` keyed to the chain, and the two
     :class:`~.messages.Received` tables ``from_left`` / ``from_right``. The chain: its adjacency
     ``left`` / ``right``, the backbone's assertion counts, the name of the policy that RAN (the witness
-    an instrument's "the arm ran" assertion needs — `TRAPS: an-ablation-that-never-ran`), the solve
+    an instrument's "the arm ran" assertion needs), the solve
     grid ``f_g = σ(λ)``, and the intron factory's rows."""
 
     fg_loc: np.ndarray | None = None

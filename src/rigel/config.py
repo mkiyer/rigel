@@ -332,8 +332,7 @@ class CalibrationConfig:
     #: An unknown name RAISES: an arm that silently runs a policy other than the one it names is a
     #: benchmark that cannot be trusted. ⛔ Flipping this default is a config default flip — the trigger
     #: that has left instruments dead while the suite stayed green, because the TEST readers install the
-    #: policy themselves. Run the instruments, not just the suite
-    #: (`TRAPS: a-green-suite-hid-five-dead-instruments`).
+    #: policy themselves. Run the instruments, not just the suite.
     message_policy: str = "transfer"
 
     #: Calibration refit iterations — the prior BOOTSTRAP. Each iteration re-fits the population gDNA
@@ -425,7 +424,7 @@ class TranscriptGeometry:
     derived from the reference and the fitted models.
 
     That model is built by ``FragmentLengthModel.from_pmf`` from ``FLModels.rna_pmf``, which is
-    derived from the accumulator payload alone (TRAPS: pure-and-length-censored). The effective
+    derived from the accumulator payload alone. The effective
     lengths here and the calibration divisors read the SAME pmf, so a change to it reaches every
     transcript in the EM, not only calibration.
 

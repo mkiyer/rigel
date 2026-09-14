@@ -17,7 +17,7 @@ break:
 ===================================================  ====================================================
 the backbone asserts                                 it would have caught
 ===================================================  ====================================================
-the kernel sees only the two NEIGHBOUR states        TRAPS: a-message-from-the-destinations-belief
+the kernel sees only the two NEIGHBOUR states        a message built from the destination's own belief
 every delivered row is one row per slot, finite      a row array off the solve grid, or a NaN reaching ψ
 ``|T| <= 3``                                         AXIOM 0, made executable
 the write-back touches only ``solvable`` slots       a replay that read the untouched mask as a difference
@@ -82,7 +82,7 @@ __all__ = [
 
 # ⛔ ASSERTIONS A SHIPPED POLICY IS KNOWN TO VIOLATE, each entered with the measurement that proved it.
 # An entry is COUNTED and PUBLISHED rather than raised, because widening an assertion to fit a defect is
-# how a gate becomes vacuous (TRAPS: perturb-every-gate / TRAPS: a-gate-that-reconstructs); an entry also
+# how a gate becomes vacuous; an entry also
 # carries a STRICT xfail in the gate file, this project's convention for a PROVEN defect whose fix is
 # panel-negative on its own. The dict is EMPTY, so anything violated raises.
 #: ``name -> why it is not fatal yet``.
@@ -92,10 +92,9 @@ _KNOWN_VIOLATIONS: dict[str, str] = {}
 class AssertionCounts(dict):
     """How many slots violated each backbone assertion, published into the diagnostics capture.
 
-    A count rather than a bool, because TRAPS: could-the-arm-have-fired is the rule: before believing "the
-    arm changed nothing", check it COULD have changed something. An assertion reporting 0 violations on a substrate
-    where the predicate can never fire is not evidence, so the report also carries how many slots were
-    ELIGIBLE for each check.
+    A count rather than a bool: before believing "the arm changed nothing", check it COULD have changed
+    something. An assertion reporting 0 violations on a substrate where the predicate can never fire is
+    not evidence, so the report also carries how many slots were ELIGIBLE for each check.
     """
 
     def note(self, name: str, violated, eligible) -> None:
@@ -127,7 +126,7 @@ def _check_message(
     """The assertions on what the policy actually delivered: the population axiom, and every row
     channel one row per slot on the solve grid and finite.
 
-    TRAPS: a-message-from-the-destinations-belief is not checked here because it is enforced BY
+    That no message is built from the destination's own belief is not checked here because it is enforced BY
     CONSTRUCTION: the propagate kernel is called with two INDICES and builds the message into the
     destination from the source's claim and what the source holds; the backbone writes ``held`` and the
     policy never reaches past its hop. A structural impossibility beats a check. The write-back
@@ -182,8 +181,7 @@ def _check_message(
             bool,
         )
         counts.note("cube_rows_finite", bad, np.ones(bad.shape[0], bool))
-    # ⛔ TRAPS: could-the-arm-have-fired's anti-degeneracy clause, the half that makes the gate mean
-    # anything: on a chain
+    # ⛔ The anti-degeneracy clause, the half that makes the gate mean anything: on a chain
     # where NO slot admits both RNA strands, ``|T| <= 3`` is satisfied by a substrate that never had a
     # three-population slot to test. That is not the axiom holding, it is the check never running — so the
     # eligible set is the slots that actually reach 3, and a substrate with none of them says so.
@@ -310,7 +308,7 @@ def solve_chain(
         _capture.left = np.asarray(chain.left, np.int64)
         _capture.right = np.asarray(chain.right, np.int64)
         # which policy ran, read off the artifact — the witness an instrument's "the arm ran"
-        # assertion needs (TRAPS: an-ablation-that-never-ran), never a config flag it did not thread
+        # assertion needs, never a config flag it did not thread
         _capture.policy_name = str(getattr(policy, "name", type(policy).__name__))
         _capture.solve_grid = _logodds_grid(int(n_grid), float(logodds_window))[1]
         _capture.intron_prior = None if intron_prior is None else np.asarray(intron_prior)
@@ -429,9 +427,9 @@ def _gdna_logprior(gdna_prior, solve_grid, mass_global, eff_global):
 def _message_layer(ctx: BlockContext, policy, library, terminal, cache, n_owned: int):
     """The message layer for one block — served from the cache where its every input is unchanged, else
     run: the policy's claims and rules (`prepare`), PHASE 1 (the FORWARD pass L→R and the BACKWARD pass
-    R→L, ONE each in chain order, which on a chain IS forward-backward: not an iterative scheme,
-    TRAPS: a-comment-quoted-as-a-finding), PHASE 2 (the policy's half of the solve, the two tables into
-    ψ's channels), and the backbone's checks on what was delivered. Returns ``(msg, from_left,
+    R→L, ONE each in chain order, which on a chain IS forward-backward, not an iterative scheme), PHASE 2
+    (the policy's half of the solve, the two tables into ψ's channels), and the backbone's checks on what
+    was delivered. Returns ``(msg, from_left,
     from_right, held_composition, counts)``; the two tables are ``None`` when the cache served the block,
     and ``held_composition`` — a COMPOSITION row received on either side — is read off the tables (see
     ``has_composition`` in `_solve_block` for why not ``msg.lam_rows``)."""
@@ -462,7 +460,7 @@ def _write_back(dc, solvable, belief: RegionBelief, n_owned: int, counts: Assert
     the prior: that arm is refuted, because the prior resolves an imperfectly-solved slot better than a
     deferred ``f_g = 1``. The backbone asserts the mask held on the block's own slots: without that a
     replay compares the solve's raw output against the shipped belief and reads the mask as a difference
-    (TRAPS: byte-identity-gate) — reproducing a pipeline stage means reproducing its write-back."""
+    — reproducing a pipeline stage means reproducing its write-back."""
     incoming = {
         k: np.asarray(getattr(belief, k), np.float64) for k in ("f_pos", "f_neg", "f_g", "var_gdna")
     }
@@ -578,7 +576,7 @@ def _solve_block(
         # the intron factory's rows are an observation on the context: the one array that is both
         # ψ's λ-factor and the intron's own claim
         factory_rows=factory_rows,
-        # beliefs — SOURCE-SIDE ONLY (TRAPS: a-message-from-the-destinations-belief)
+        # beliefs — SOURCE-SIDE ONLY: a message never reads the destination's own belief
         has_own_composition=np.asarray(own.tau_lam, np.float64) > 0.0,
         belief_fg=np.asarray(belief.f_g, np.float64),
     )

@@ -287,7 +287,7 @@ Accumulator::Accumulator(std::vector<std::int64_t> region_bounds,
         region_types_ = std::move(region_types);
     }
     pool_lengths_.assign(kNFragmentPools * (static_cast<std::size_t>(max_length_) + 1), 0);
-    // ⭐ TRAPS: a-purity-filter-is-a-length-filter — allocated ALWAYS, unlike pool_lengths_ which is empty when a reference has no region types.
+    // ⭐ The unconditional length histogram is allocated ALWAYS, unlike pool_lengths_ which is empty when a reference has no region types.
     // The unconditional histogram does not depend on region typing -- a fragment has a length whether or
     // not its region can be classified -- and an anchor that silently vanished on an untyped reference
     // would be exactly the kind of conditioning this row exists to remove.
@@ -610,7 +610,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
                         static_cast<std::size_t>(column)] += 1u;
     region_end_count_[static_cast<std::size_t>(last_region) * kNStrandColumns +
                       static_cast<std::size_t>(column)] += 1u;
-    // ⭐ TRAPS: a-purity-filter-is-a-length-filter — incremented HERE -- beside the start count and the DEPOSITED counter -- so all three
+    // ⭐ The unconditional length histogram is incremented HERE -- beside the start count and the DEPOSITED counter -- so all three
     // describe one population by construction rather than by agreement. `length` is already clipped to
     // the reference and gated by the length limit above.
     deposited_lengths_[static_cast<std::size_t>(length)] += 1u;
@@ -744,8 +744,8 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
         // ⭐⭐ THE RECIPROCAL-OPPORTUNITY DEPOSIT. A length-`w` fragment contained in a region of
         // length `ell` had `ell - w + 1` admissible start positions, so `1/(ell - w + 1)` cancels the
         // opportunity ON ITS OWN SUPPORT: E[SUM] = rho * P(w <= ell), NOT rho -- a fragment with
-        // w > ell deposits NOTHING here, and P(w <= ell) is a per-component pmf functional
-        // (TRAPS: a-cancellation-is-conditional-on-its-support). `1/L` does not cancel it at all:
+        // w > ell deposits NOTHING here, and P(w <= ell) is a per-component pmf functional.
+        // `1/L` does not cancel it at all:
         // measured, that channel read 25.67 density units for short fragments and 1.60 for long ones
         // at the same true density. ⛔ The BOUNDARY rule `1/(L-1)` is NOT this rule's `ell -> 0` limit
         // (that limit is 0 for every w >= 2); it is a DIFFERENT relation -- crossing a designated

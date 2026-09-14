@@ -222,8 +222,7 @@ def scan_and_buffer(
 
     No fragment-length model comes out of here. Every fragment-length distribution the tool uses is
     built from the payload by :func:`rigel.calibration.fl.build_fl_models`, so length is measured by
-    one rule — the accumulator's ``L`` — over one stated population
-    (TRAPS: pure-and-length-censored).
+    one rule — the accumulator's ``L`` — over one stated population.
     """
     stats = PipelineStats()
     buffer = FragmentBuffer(
@@ -372,12 +371,12 @@ def _drain_side_buffer(
     run away.
 
     ``_lift`` is the out-parameter an origin-split ORACLE needs. The drain conditions on the WHOLE
-    tally, so partitions drained independently do not sum to the whole drained
-    (TRAPS: draining-breaks-the-oracle). `second_pass.lift_choices` repairs that by replaying the
+    tally, so partitions drained independently do not sum to the whole drained.
+    `second_pass.lift_choices` repairs that by replaying the
     whole's already-drawn choices inside each partition — which needs the choices, the undrained whole
     they were drawn on, and the two index-derived arrays `drain` takes. All four exist only inside this
-    function, so it publishes them into ``_lift`` rather than letting a caller re-derive them and drift
-    (TRAPS: a-test-that-redefines). Same convention as ``calibrate(_debug=)`` /
+    function, so it publishes them into ``_lift`` rather than letting a caller re-derive them and drift.
+    Same convention as ``calibrate(_debug=)`` /
     ``solve_chain(_capture=)``, and inert in production, where nobody passes it. An empty side buffer
     leaves ``_lift`` UNTOUCHED — the early return below is the "nothing was drained" signal on this
     path too.
@@ -720,7 +719,7 @@ def _run_locus_em_partitioned(
         # parameter is accepted and silently ignored, and every allocation, however extreme, produces
         # byte-identical output. A fire counter cannot see that — it counts nonzero weights, not
         # weights the solver read; only an arm that injects a maximally WRONG allocation and checks
-        # that the result MOVED can (`quant_accuracy.py`, TRAPS: could-the-arm-have-fired).
+        # that the result MOVED can.
         rna_prior_weight=rna_prior_weight,
         gdna_eff_len=g_eff,
         enable_gdna=enable_gdna,
@@ -809,8 +808,8 @@ def quant_from_buffer(
     # The SCORER eats the REALIZED (library-census) law, not the uniform-frame one. The per-fragment
     # length term conditions on "this fragment is IN the library", so capture's selection belongs in
     # its pmf; the opportunity/prior mathematics assumes uniform placement and keeps `gdna_pmf`.
-    # Routing the realized law into geometry instead costs a large number of misassigned transcripts
-    # (`TRAPS: the-intermediate-is-not-the-deliverable`). Off capture the two laws are the same array.
+    # Routing the realized law into geometry instead costs a large number of misassigned transcripts.
+    # Off capture the two laws are the same array.
     rna_fl = FragmentLengthModel.from_pmf(fl_models.rna_pmf, fl_models.max_size)
     gdna_fl = FragmentLengthModel.from_pmf(fl_models.gdna_realized_pmf, fl_models.max_size)
 
@@ -953,7 +952,7 @@ def run_pipeline(
     # with the splice OBSERVED. Both are smooth-EB shrunk toward the unconditional global FL.
     #
     # All three come from the PAYLOAD — one object, one frame, one definition of length, the two
-    # pools and the anchor they are shrunk toward alike (TRAPS: pure-and-length-censored). A
+    # pools and the anchor they are shrunk toward alike. A
     # transcript-space histogram would need a UNIQUE transcript; the accumulator's pool is a
     # structural rule over a larger population and is binned at the same L as everything else. A
     # fragment enters a pool when exactly ONE hypothesis survived, so its `L` is not in doubt however

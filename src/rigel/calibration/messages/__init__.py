@@ -43,8 +43,7 @@ unwritable — and returns whatever library-wide facts its messages need (the tr
 reference densities and whether the strand split is live). ``prepare`` reads a :class:`BlockContext` of
 one block, beliefs included, plus that library. Everything else a message reads is per slot or per face.
 
-⛔ THE CONTRACT, and it is TRAPS: a-message-from-the-destinations-belief, a lesson that has recurred
-nine times in nine costumes:
+⛔ THE CONTRACT:
 
     A message may use the destination's **CONSTANTS** (geometry, effective lengths) and its
     **OBSERVATIONS** (counts, mass). It may **NEVER** use the destination's **BELIEFS**.
@@ -58,13 +57,13 @@ with the shipped policy:
 
 So a destination that receives a claim wildly at odds with what its own data says may DISCOUNT it, and
 that is reception rather than a message built from the destination — the transfer policy's hop price
-does exactly this: the recipient's own counts price the arriving claim's width. The line the trap
+does exactly this: the recipient's own counts price the arriving claim's width. The line the contract
 draws is that a claim's VALUE may never be built from the destination's belief, because that
 manufactures agreement out of nothing. A reception step is safe when it can only ever WIDEN a claim
 and never move its mode — it can discard information, never invent it.
 
 :class:`BlockContext` splits its fields under exactly those three headings, and the heading is what
-turns the trap from a discipline into something a reader — and the backbone — can check. The backbone
+turns the contract from a discipline into something a reader — and the backbone — can check. The backbone
 enforces the half that is enforceable: the kernel is called with two INDICES and builds the message
 into the destination's row from the SOURCE's claim and what the source holds (its own row of the same
 table, written one step earlier); the backbone owns the table and the order, and the policy never
@@ -101,8 +100,8 @@ class PsiMessage:
       profiles, the slot's total and RNA opportunity, the lanes' coordinates), which ψ evaluates at its own
       θ nodes inside the AMBIG solve, the same way.
 
-    A profile on ψ's own grid cannot be delivered off-grid and cannot claim an over-unit share, so the
-    lesson of TRAPS: off-grid-message-mode is structural on this channel rather than asserted. A
+    A profile on ψ's own grid cannot be delivered off-grid and cannot claim an over-unit share, so that
+    guarantee is structural on this channel rather than asserted. A
     fully-``None`` message is :meth:`silent` — the floor the whole message layer is priced against.
     """
 
@@ -303,14 +302,14 @@ class Received:
 @dataclass(frozen=True, slots=True)
 class ChainView:
     """A stretch of the chain as a policy may read it WITHOUT beliefs: the observations and the
-    geometry, under the two headings that make TRAPS: a-message-from-the-destinations-belief legible,
+    geometry, under the two headings that make that contract legible,
     plus the solve's own scalars. `Policy.library` receives the WHOLE chain in this form, so the only
     cross-block information a policy can build is a reduction over observations and geometry — a
     reduction over beliefs has no field to read. :class:`BlockContext` adds the beliefs for one block.
 
     ⛔ The headings are load-bearing. ``observations`` and ``geometry`` may be indexed at either end of
     a hop; ``beliefs`` may be indexed at the SOURCE only. A policy that reads a ``beliefs`` field at the
-    destination is committing TRAPS: a-message-from-the-destinations-belief, and the field's heading is
+    destination is building a message from the destination's belief, and the field's heading is
     what makes that visible in review. The shipped policy reads ``belief_fg`` once, at ``prepare``, for
     the variance freeze of each node's OWN strand profile — a source-side read by construction, since
     the profile is the node's claim before any hop.
@@ -403,7 +402,7 @@ class ChainView:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class BlockContext(ChainView):
     """One block of the chain as `Policy.prepare` reads it: the :class:`ChainView` plus the BELIEFS —
-    SOURCE-SIDE ONLY (TRAPS: a-message-from-the-destinations-belief)."""
+    SOURCE-SIDE ONLY."""
 
     #: does this node have OWN composition evidence — `RegionInit.tau_lam > 0`, the one bit of the
     #: message-free self-solve a policy may know: the strand term (the node has counts and the library's
@@ -438,8 +437,7 @@ class Prepared(Protocol):
     def solve(self, from_left: Received, from_right: Received) -> PsiMessage:
         """PHASE 2, the policy's half: the ψ channels at every slot from the two tables — row ``i`` of
         ``from_left`` is what slot ``i`` holds from its LOW neighbour (no neighbour at a reference
-        start), of ``from_right`` from its HIGH one. Never the destination's belief
-        (TRAPS: a-message-from-the-destinations-belief)."""
+        start), of ``from_right`` from its HIGH one. Never the destination's belief."""
 
 
 @runtime_checkable

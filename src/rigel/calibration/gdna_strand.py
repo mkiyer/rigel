@@ -19,7 +19,7 @@ the raw away-half moment below.
 Breaking the circularity — the away-half estimator. Fitting the gDNA overdispersion needs seeds whose
 RNA content does not masquerade as gDNA strand spread, and a fit that picks a structural class and
 asserts it pure cannot supply them: purity is a property of the annotation and the sample, not of the
-genome (`TRAPS: purity-is-a-property-of-the-annotation`). Pervasive transcription is real, the
+genome. Pervasive transcription is real, the
 intergenic space is whatever the user's GTF leaves over, and most genes are off in any one sample but
 nobody knows which; on a contig fed unannotated transcripts every purity-based fit moves and this one
 does not.
@@ -220,8 +220,7 @@ def between_seed_variance(overdispersion: float, mean: float = 0.5) -> float:
 
     This is why a deep seed is not worth its pair count. Sampling noise vanishes as ``2/(N(N−1))``, but
     this term does not depend on ``N`` at all: past ``c_s·V∞ ≫ ½`` a seed's information about ρ saturates,
-    so weighting by pairs (∝ N²) lets a handful of deep seeds decide the answer
-    (`TRAPS: pair-count-weighting-lets-one-seed-decide`).
+    so weighting by pairs (∝ N²) lets a handful of deep seeds decide the answer.
     """
     r = float(overdispersion)
     q = float(mean) * (1.0 - float(mean))

@@ -15,11 +15,10 @@ all carry the same channels, because a channel is stored only where a named cons
     sj boundaries          (one)       count  inv_length_sum      mass   pure RNA by construction
 
 The two reciprocal banks carry two deposit rules with two targets, so they carry two names
-(TRAPS: two-masks-one-name — one attribute for both is how the REGION truncation stayed invisible):
+(one attribute for both is how the REGION truncation stayed invisible):
 ``inv_length_sum`` is the boundary/sj crossing rule ``1/(w-1)``, expectation ``rho * P(w>=2) = rho``
 on any real library; ``inv_opportunity_sum`` is the region contained rule ``1/(ell-w+1)``,
-expectation ``rho * P(w<=ell)``, which is truncated by a per-component pmf functional
-(TRAPS: a-cancellation-is-conditional-on-its-support).
+expectation ``rho * P(w<=ell)``, which is truncated by a per-component pmf functional.
 
 The columns are GENOME strand without exception. Sense/antisense is transcript-relative, is derived
 by a consumer from an sj's own strand, and is never stored — storing some banks by genome strand and
@@ -56,11 +55,11 @@ class PopulationView:
 
     They answer different questions and are never interchangeable: ``count`` carries the statistical
     power (a Beta-Binomial needs an integer, per strand) and the reciprocal bank carries the level —
-    under two different deposit rules with two different targets, so under two names
-    (TRAPS: two-masks-one-name): :attr:`inv_length_sum` is the boundary/sj crossing rule ``1/(w-1)``
+    under two different deposit rules with two different targets, so under two names:
+    :attr:`inv_length_sum` is the boundary/sj crossing rule ``1/(w-1)``
     (``E[sum] = rho * P(w>=2) = rho``, an exact model-free density), :attr:`inv_opportunity_sum` the
     region contained rule ``1/(ell-w+1)`` (``E[sum] = rho * P(w<=ell)``, a density SHAPE truncated by
-    a per-component pmf functional, TRAPS: a-cancellation-is-conditional-on-its-support). A population
+    a per-component pmf functional). A population
     carries exactly one of them.
 
     A population carries only the channels a named consumer reads; the absent ones are ``None``

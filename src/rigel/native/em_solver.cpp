@@ -843,7 +843,7 @@ static void apply_grouped_prior_update(
     // ⭐ Written in exactly the shipped operation order so that a locus with NO synthetic component
     // (`annotated_count == rna_count`) reproduces `rna_total * raw[i] * (1/rna_count)` BIT FOR BIT.
     // That is what makes the inert-mask arm a real byte-identity control rather than an approximate
-    // one (TRAPS: byte-identity-gate).
+    // one.
     if (rna_count > EM_LOG_EPSILON) {
         const double annotated_total = annotated_count + rna_prior;
         const double inv = (annotated_count > EM_LOG_EPSILON) ? 1.0 / annotated_count : 0.0;

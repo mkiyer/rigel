@@ -298,8 +298,7 @@ class CalibrationResult:
         A PROPERTY, never a stored field, and that is forced rather than preferred: ``count_rna_sj``
         is in ``prior_vs_oracle.OVERRIDE_FIELDS``, an oracle arm swaps it with
         ``dataclasses.replace``, and a cached array would survive that swap and silently describe the
-        array it replaced — ``TRAPS: a-hash-that-misses-its-artifact`` in dataclass form, the same
-        reason :attr:`library_rna_fragments` is derived.
+        array it replaced — the same reason :attr:`library_rna_fragments` is derived.
         """
         return np.asarray(self.count_rna_sj, dtype=np.float64) * np.asarray(
             self.sj_mass_per_crossing, dtype=np.float64
@@ -338,7 +337,7 @@ class CalibrationResult:
 
         A PROPERTY, never a stored field. ``prior_vs_oracle`` swaps the deconvolved arrays for truth with
         ``dataclasses.replace``; a cached scalar would survive that swap and silently describe the old
-        arrays (``TRAPS: a-hash-that-misses-its-artifact``, in dataclass form). Deriving it means the
+        arrays. Deriving it means the
         oracle arm's count is the oracle's by construction.
         """
         unspliced_boundary = np.maximum(

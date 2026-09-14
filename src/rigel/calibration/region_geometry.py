@@ -136,7 +136,7 @@ class RegionGeometry:
     #: real library, so the boundary slots ARE the density, exactly, for any length distribution; at a
     #: REGION ``A = (ell−w+1)₊`` and the slot reads ``rho * P(w ≤ ell)``, a per-component pmf functional
     #: (an order of magnitude at a short exon, exactly 0 below ``frag_min``) — a density SHAPE, not a
-    #: level (`TRAPS: a-cancellation-is-conditional-on-its-support`).
+    #: level.
     #: ⛔ A total abundance must still never be formed as ``mass / effective_length``: that divisor
     #: depends on which component the fragments came from — 100 counts in a 500 bp region reads 0.25 as
     #: pure gDNA and 0.33 as pure RNA at mean lengths 100/200 — which is circular. The boundary-form bank
@@ -153,8 +153,7 @@ class RegionGeometry:
     #: cross an exon|intron boundary contiguously, so an exon and its boundary hold genuinely different
     #: fragment populations and their unspliced totals differ by the whole sj flux, with no enrichment
     #: involved. A transport that reads that difference as enrichment scales gDNA by it, which costs more
-    #: than an order of magnitude even on a condition with no probes at all
-    #: (`TRAPS: a-face-total-is-not-a-total-without-its-flux`).
+    #: than an order of magnitude even on a condition with no probes at all.
     inv_sj_lo: np.ndarray
     inv_sj_hi: np.ndarray
     sj_count_lo: np.ndarray
@@ -252,7 +251,7 @@ def build_region_geometry(
     # No divisor is applied here. A BOUNDARY slot carries ``boundary_unspliced``'s inv-length sum,
     # whose expectation IS the density (``rho * P(w >= 2) = rho``). A REGION slot carries
     # ``region_contained``'s inv-opportunity sum, whose expectation is ``rho * P(w <= ell)`` — a
-    # per-component truncation, not a level (`TRAPS: a-cancellation-is-conditional-on-its-support`), so
+    # per-component truncation, not a level, so
     # every REGION<->BOUNDARY ratio downstream carries that factor. Record the bias; do NOT divide it
     # out here — the pooled ``P_hat(w <= ell)`` resurrects none of the zero banks and re-imports the
     # per-component pmf the channel exists to avoid. Swapping in a truncation-free start bank
@@ -356,8 +355,7 @@ def region_gdna_geometry(geometry: RegionGeometry):
     It returns ``eff_gdna`` and nothing else, so ``rho_g = f_g·M/E_g`` — which is exactly what makes
     ``sum_c rho_c·E_c = M`` hold and therefore what makes ``f_g`` a COUNT share rather than a density
     share. The name must keep saying "gDNA": a reader auditing whether the EM prior mixes the two should
-    not have to open a second file to find out which component this divisor belongs to
-    (`TRAPS: two-masks-one-name`).
+    not have to open a second file to find out which component this divisor belongs to.
 
     No total density may be formed from this pair as ``mass / eff_gdna``: that is a total over one
     component's opportunity model, and :mod:`.abundance_landscape`'s measured totals are what a density
@@ -503,7 +501,7 @@ class RegionStatics:
 
     Raw bits, not pre-derived predicates. Every consumer wants a different combination of them, and a
     single pre-derived "is this a splice site" predicate was measured to be nearly the complement of
-    what it was meant to replace (`TRAPS: a-boundary-with-rna-is-not-an-sj`). Compose with
+    what it was meant to replace. Compose with
     :func:`~rigel.calibration.splice_graph.is_terminus` /
     :func:`~rigel.calibration.splice_graph.is_splice_site`.
     """

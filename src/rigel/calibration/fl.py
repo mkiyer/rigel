@@ -21,8 +21,7 @@ The five pools, as ``rigel.scan_payload`` orders them:
 
 No pool is pure, and nothing here may assume one is. Against an origin-split oracle the intronic
 pool is dominated by RNA inside introns and the intergenic pool carries mature RNA too, because
-"intergenic" is whatever the annotation leaves over
-(`TRAPS: purity-is-a-property-of-the-annotation`). The resulting bias is
+"intergenic" is whatever the annotation leaves over. The resulting bias is
 ``RNA_share x (len_RNA - len_gDNA)``, so it is invisible on any panel that gives the two components
 equal fragment lengths.
 
@@ -705,7 +704,7 @@ def build_fl_models(
 
     All three histograms come off the same object, so they cannot disagree about what a fragment
     length IS. The anchor is ``payload.deposited_lengths`` — every deposited fragment binned at its
-    own ``L`` with no purity condition (TRAPS: a-purity-filter-is-a-length-filter) — and the two
+    own ``L`` with no purity condition — and the two
     component pools, :func:`rna_fl_mass` and :func:`gdna_fl_mass`, are drawn from exactly that
     population. RNA and gDNA are EB-shrunk toward the anchor with a single Dirichlet ``prior_ess``.
 

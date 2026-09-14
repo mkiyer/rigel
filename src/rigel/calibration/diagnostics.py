@@ -54,11 +54,11 @@ class CalibrationDiagnostics:
 
         ``bandwidth`` is the smoothing ACTUALLY IN FORCE — the grid step in decades — not a fitted
         kernel width. Nearly every per-region kernel is clamped to one grid step, so the knn width is
-        not the resolution and reporting it would mislead
-        (`TRAPS: a-floored-knob-is-not-the-bandwidth`). ``n_eff`` is the training-region count.
+        not the resolution and reporting it would mislead.
+        ``n_eff`` is the training-region count.
 
         ``separation_nats`` is the census's mode ratio and is the one field here that is
-        RESOLUTION-SENSITIVE (`TRAPS: a-mode-count-is-not-a-well-posed-quantity`): it is displayed
+        RESOLUTION-SENSITIVE: it is displayed
         rather than consumed, while the depleted level beside it is grid-robust. A reader must not
         treat it as a calibrated enrichment factor."""
         ls = al.landscape
