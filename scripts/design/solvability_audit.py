@@ -408,7 +408,7 @@ CHAIN = (
 )
 
 
-def structural_classes(m, axis: str, config) -> dict[str, np.ndarray]:
+def structural_classes(m, axis: str) -> dict[str, np.ndarray]:
     """Label each object by what it is structurally: a region's region type, or for a contiguous
     boundary the pair of region types it separates.
 
@@ -449,9 +449,9 @@ def structural_classes(m, axis: str, config) -> dict[str, np.ndarray]:
     return out
 
 
-def chain_report(m, a: dict, config) -> None:
+def chain_report(m, a: dict) -> None:
     """The debug chain, in dependency order: the first broken link explains the ones below it."""
-    struct = structural_classes(m, a["axis"], config)
+    struct = structural_classes(m, a["axis"])
     live, total, err = a["live"], a["total"], np.abs(a["err"])
     det, f_true, f_pred = a["determined"], a["f_true"], a["f_pred"]
     print()
@@ -616,7 +616,7 @@ def main() -> int:
             a = audit(m, axis=axis, config=config)
             if len(names) == 1:
                 report(m, a, config)
-                chain_report(m, a, config)
+                chain_report(m, a)
             if axis == ("region" if args.axis != "boundary" else "boundary"):
                 panel.append((name, truth, summarise(a)))
     if len(panel) > 1:

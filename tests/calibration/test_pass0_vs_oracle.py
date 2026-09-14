@@ -451,13 +451,13 @@ def test_the_solver_classes_are_the_solvers_own_predicate(measured, toy):
     # the SOLVER's own predicate — imported, not restated
     census_no_ev = ~has_own_composition_evidence(tau) & (~census_lock)
 
-    slot = P0.solver_slot_classes(cap, chain)
+    slot = P0.solver_slot_classes(cap)
     np.testing.assert_array_equal(slot["struct_lock"], census_lock)
     np.testing.assert_array_equal(slot["message_only"], census_no_ev)
     np.testing.assert_array_equal(slot["own_evidence"], ~(census_lock | census_no_ev))
 
     # PERTURBATION 1: a threshold above every finite tau collapses own-evidence into message-only.
-    moved = P0.solver_slot_classes(cap, chain, eps=float(np.max(tau)) + 1.0)
+    moved = P0.solver_slot_classes(cap, eps=float(np.max(tau)) + 1.0)
     assert moved["own_evidence"].sum() == 0
     assert slot["own_evidence"].sum() > 0, "no slot has own evidence; the gate would be vacuous"
 

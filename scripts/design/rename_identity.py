@@ -38,7 +38,6 @@ os.environ["OMP_NUM_THREADS"] = "1"
 
 import numpy as np  # noqa: E402
 
-_REPO = Path(__file__).resolve().parents[2]
 
 from rigel.config import PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402

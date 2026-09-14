@@ -91,15 +91,6 @@ JUNCTION_BLOCKS = (62, 63)
 HERE = Path(__file__).resolve().parent / "test_reference"
 DEFAULT_SPEC = HERE / "test_chr.yaml"
 DEFAULT_OUT = Path.home() / "Downloads" / "rigel_runs" / "test_reference"
-#: the rendered files, by their names in BOTH the repo directory and the runs directory
-RENDERS = (
-    "test_chr.gtf",
-    "test_shadow.gtf",
-    "test_abundances.tsv",
-    "test_probes.bed",
-    "test_probes_sparse.bed",
-    "test_probes_junction.bed",
-)
 
 
 # ── the spec ─────────────────────────────────────────────────────────────────────────────────────

@@ -130,21 +130,8 @@ def load_oracle(bam: str, index, pipeline_config, cache_root: Path, tag: str) ->
     """
     scan = dataclasses.replace(pipeline_config.scan, sj_strand_tag=_native_detect_sj_tag(bam))
     root = Path(cache_root) / tag
-    # The zero-gDNA rows have no ``_main``, and without this fallback no oracle arm can reach them.
-    # ``pass0_vs_oracle.py`` — which populates this cache — holds every zero-gDNA condition out as a
-    # false-positive check, so it never wrote one for `g00`. That is deliberate on its part and it is
-    # not a reason `g00` cannot be measured: ``_main`` is the undrained full payload, which is the same
-    # quantity as the plain scan cache beside it, and ``from_parts`` re-runs sum-to-full over whichever
-    # one it is handed. The two are two independent scans of one BAM, so they are NOT byte-identical
-    # — float addition is not associative across worker threads and the six float64 banks differ by
-    # ~1e-14 relative. That is inside ``_validate``'s derived budget and far outside anything a real
-    # partition error would produce, so the substitution is sound for measurement — but it must
-    # never be used as a byte-identity gate.
-    main = root / "_main"
-    if not main.is_dir():
-        main = Path(cache_root).parent / "scan_cache" / tag
     try:
-        full = read_scan_cache(main, index, scan).payload
+        full = read_scan_cache(root / "_main", index, scan).payload
         parts = {k: read_scan_cache(root / k, index, scan).payload for k in ORIGINS}
     except (FileNotFoundError, KeyError, ScanCacheKeyError) as exc:
         raise SystemExit(
@@ -745,12 +732,6 @@ def report(paths: list[Path]) -> None:
     for a, name in arms:
         print()
         print(f"    arm: {name}")
-        # An arm file written before this table existed has no pool fields. Say so and skip, rather
-        # than dying on a KeyError halfway through a report whose other seven tables are fine.
-        probe = next((a[(c, "library")] for c in conds if (c, "library") in a), None)
-        if probe is None or any(f not in probe for f in _POOL_FIELDS):
-            print("      ⚠ no pool-level fields in this arm — re-run it to get table ⑥")
-            continue
         print(f"    {'stratum':<26} {'pool':<20} {'est':>15} {'true':>15} {'Δ':>15} {'Δ%':>8}")
         print("    " + "-" * 102)
 

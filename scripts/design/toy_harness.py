@@ -78,9 +78,10 @@ TYPE_NAMES = {0: "intergenic", 1: "intron", 2: "exon"}
 # ──────────────────────────────────────────────────────────────────────────────────────────────────
 #
 # An instrument can die the day a policy default flips while the suite stays green, because the test
-# readers install the policy themselves (`TRAPS: a-green-suite-hid-five-dead-instruments`). So every
-# reader of a calibration capture takes `--messages {off,on}`, prints `messages_stamp()`, and reads
-# its policy off the config it ran — never off a bank a policy may or may not publish.
+# readers install the policy themselves (`TRAPS: a-green-suite-hid-five-dead-instruments`). So an
+# instrument whose question is not the message layer's takes `--messages {off,on}` (`zero_controls.py`),
+# prints `messages_stamp()`, and reads its policy off the config it ran — never off a bank a policy may
+# or may not publish.
 
 #: What the tool ships, re-derived rather than written down — the honest default for an instrument
 #: whose headline question does not involve the message layer at all.

@@ -84,31 +84,15 @@ AXES = P0.AXES
 
 @dataclass(frozen=True, slots=True)
 class RulerScore:
-    """One arm's transcript effective-length ruler. ``factor`` is the opportunity-weighted mean, not
-    a mean of ratios: the per-transcript factors are weighted by the FL-marginal length they scale, so
-    the aggregate is the ratio the EM's total opportunity actually moved by
+    """One arm's transcript effective-length ruler: the EM's total opportunity and the uncontracted
+    length it was contracted from. The report reads their ratio of sums, not a mean of ratios, so the
+    aggregate is what the EM's total opportunity actually moved by
     (TRAPS: a-mean-of-ratios-inherits-the-partition)."""
 
     rho_ref: float | None  #: the detected reference density; ``None`` = too little gDNA to detect one
     total_len: float  #: Σ eff_em over transcripts, the denominator the EM sums
     total_fl: float  #: Σ fl, the uncontracted FL-marginal length
-    sum_ratio: float  #: Σ (eff_em / fl), carried so the unweighted mean is derivable
     n_transcripts: int
-
-    @property
-    def factor(self) -> float:
-        """``Σ eff_em / Σ fl``; 1.0 means no contraction. The aggregate the EM actually moves by."""
-        return self.total_len / self.total_fl if self.total_fl > 0.0 else 1.0
-
-    @property
-    def factor_unweighted(self) -> float:
-        """``mean(eff_em / fl)``, every transcript counted once.
-
-        Carried because the two disagree: the contraction falls hardest on long transcripts, so
-        weighting by the opportunity it scales reads far worse than counting transcripts equally.
-        :attr:`factor` is the one that describes what the EM divides by, and the one to rank on.
-        """
-        return self.sum_ratio / self.n_transcripts if self.n_transcripts else 1.0
 
 
 def ruler(calibration, region_arrays, index, fl_eff) -> tuple[RulerScore, np.ndarray]:
@@ -127,9 +111,6 @@ def ruler(calibration, region_arrays, index, fl_eff) -> tuple[RulerScore, np.nda
             ),
             total_len=float(np.asarray(eff, np.float64).sum()),
             total_fl=float(np.asarray(fl_eff, np.float64).sum()),
-            sum_ratio=float(
-                (np.asarray(eff, np.float64) / np.maximum(np.asarray(fl_eff, np.float64), 1e-9)).sum()
-            ),
             n_transcripts=int(np.asarray(eff).size),
         ),
         np.asarray(eff, np.float64),

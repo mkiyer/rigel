@@ -197,7 +197,7 @@ def check_same_basis(name: str, arm, full_substrate) -> None:
 # ── class 1: where did the answer come from? (the solver's own partition) ────────────────────────
 
 
-def solver_slot_classes(capture, chain, eps: float = _EPS) -> dict[str, np.ndarray]:
+def solver_slot_classes(capture, eps: float = _EPS) -> dict[str, np.ndarray]:
     """Partition the chain's slots three ways, using ``region_init``'s own definitions.
 
     * ``struct_lock``: composition certain, on both axes
@@ -242,7 +242,7 @@ def _project(slot_mask, chain, n_regions: int, n_boundaries: int) -> dict[str, n
 
 def solver_class_masks(capture, chain, n_regions: int, n_boundaries: int) -> dict[str, dict]:
     """:func:`solver_slot_classes`, projected onto the two scored axes."""
-    slots = solver_slot_classes(capture, chain)
+    slots = solver_slot_classes(capture)
     return {
         axis: {name: _project(m, chain, n_regions, n_boundaries)[axis] for name, m in slots.items()}
         for axis in AXES

@@ -55,7 +55,7 @@ EXEMPT = {
     "splice_donor_acceptor": "sim/splice_motif.py — takes the STRAND and returns the GT..AG "
     "dinucleotides. The one place the biology term is used correctly.",
     "donor_dir": "the toy harness's SOURCE CONDITION, not a splice donor",
-    "donor_on": "ditto", "donor_off": "ditto", "donor_name": "ditto", "donor_qname": "ditto",
+    "donor_qname": "ditto",
     "toy_donor": "ditto", "_donor_sim_params": "ditto",
 }
 

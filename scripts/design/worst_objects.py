@@ -189,7 +189,7 @@ def _profile(d: dict, masks: dict, names) -> list[tuple[str, float, float]]:
     return out
 
 
-def report(m, d: dict, axis: str, arm: str, top: int) -> None:
+def report(m, d: dict, axis: str, arm: str) -> None:
     print()
     print("=" * 120)
     print(f"⭐⭐ WORST OBJECTS — {m.condition}   axis={axis}  arm={arm}")
@@ -268,8 +268,7 @@ def main() -> int:
         oracle_cache=args.oracle_cache,
     )
     for axis in (("region", "boundary") if args.axis == "both" else (args.axis,)):
-        report(m, dissect(m, axis=axis, arm=args.arm, top=args.top, index=index), axis, args.arm,
-               args.top)
+        report(m, dissect(m, axis=axis, arm=args.arm, top=args.top, index=index), axis, args.arm)
     return 0
 
 

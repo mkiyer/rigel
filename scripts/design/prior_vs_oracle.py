@@ -29,7 +29,6 @@ Usage::
 
     python scripts/design/prior_vs_oracle.py --suite DIR --oracle-cache DIR/oracle_cache --jobs 6
     python scripts/design/prior_vs_oracle.py --conditions gdna_g50_ss_0.50_nrna_mid_capture_on
-    python scripts/design/prior_vs_oracle.py --json out.json --emit-oracle-masses DIR
     python scripts/design/prior_vs_oracle.py --index INDEX --work-dir SCRATCH
 """
 
@@ -575,7 +574,7 @@ class ConditionResult:
     frag_origin: np.ndarray = None
 
 
-def _oracle_parts(bam, index, scan, pipeline_config, work_dir, tag, cache_root):
+def _oracle_parts(bam, index, scan, work_dir, tag, cache_root):
     """The three origin partitions, from the cache when it is valid — otherwise split and scan.
 
     Keyed by the SHIPPED ``read_scan_cache``, never a home-made key: ``reach`` is covered by no other
@@ -639,8 +638,7 @@ def _calibrate_and_prior(payload, strand_model, buffer, stats, index, ra, pipeli
     return cal, fl, multi_loci, priors, units
 
 
-def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cache=None,
-                      emit_masses=None) -> ConditionResult:
+def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cache=None) -> ConditionResult:
     """Scan once, drain to the production frame, build P / O / S / Fo / F.
 
     One scan plus one pysam WALK of the same BAM, the walk for the ``frag_id → true origin``
@@ -660,7 +658,7 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
     payload = _drain_side_buffer(
         payload, index, strand_model, seed=pipeline_config.second_pass_seed, _lift=lift
     )
-    parts = _oracle_parts(bam, index, scan, pipeline_config, work_dir, tag, oracle_cache)
+    parts = _oracle_parts(bam, index, scan, work_dir, tag, oracle_cache)
     oracle = OracleTruth.from_cached_parts(payload, parts, lift)  # raises if the lift breaks a bank
     frag_origin, walk = frag_id_origins(bam, scan)
     # Before anything is scored: the walk must have issued the same frag_ids the scan did.
@@ -681,14 +679,6 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
     noop_identical = {
         f: bool(np.array_equal(getattr(noop, f), getattr(p_arm, f))) for f in PRIOR_FIELDS
     }
-
-    if emit_masses is not None:
-        # locus-free, on purpose: a consumer must rebuild the oracle prior on the loci its own run
-        # produced. The locus partition is a function of the scoring stage, so an array keyed by
-        # multi_locus_id is not portable between runs.
-        d = Path(emit_masses) / tag
-        d.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(d / "oracle_masses.npz", **oracle.override_masses(ra))
 
     # the drained-frame report: the leak is production's own behaviour, recorded beside the
     # numbers it rides with (`ISSUES: drain-contaminates-certified-rna`); ``n_ambiguous`` bounds the
@@ -1114,8 +1104,6 @@ def main() -> int:
     ap.add_argument("--work-dir", type=Path,
                     default=Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_prior_oracle")
     ap.add_argument("--json", type=Path, default=None)
-    ap.add_argument("--emit-oracle-masses", type=Path, default=None,
-                    help="write the oracle mass override per condition (locus-FREE) for item 3")
     ap.add_argument("--jobs", type=int, default=1,
                     help="run this many conditions CONCURRENTLY by re-invoking on shards. The "
                          "conditions are independent, so this changes no number.")
@@ -1147,8 +1135,6 @@ def main() -> int:
                    "--conditions", *sh]
             if cache is not None:
                 cmd += ["--oracle-cache", str(cache)]
-            if args.emit_oracle_masses is not None:
-                cmd += ["--emit-oracle-masses", str(args.emit_oracle_masses)]
             procs.append(subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                           stderr=subprocess.STDOUT, text=True))
         rc = 0
@@ -1179,7 +1165,7 @@ def main() -> int:
         print(f"  … {name}", flush=True)
         results.append(measure_condition(
             bam, index, pipeline_config, args.work_dir, name,
-            oracle_cache=cache, emit_masses=args.emit_oracle_masses,
+            oracle_cache=cache,
         ))
     payload = to_json(results)
     if args.json is not None:
