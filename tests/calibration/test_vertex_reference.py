@@ -372,7 +372,7 @@ def test_the_old_read_out_did_not_close_and_the_gap_was_the_skew():
         fg=fg,
     )[0][:, :, 0]
     post = np.exp(psi - _lse(psi, axis=1, keepdims=True))
-    median = _posterior_median_fg(post, lam, fg)
+    median = _posterior_median_fg(post, lam)
     mean = np.sum(post * fg[None, :], axis=1)
     old_sum = median + (1.0 - mean)  # a three-read-out composition
     assert np.max(np.abs(old_sum - (1.0 + median - mean))) < 1e-12

@@ -607,7 +607,6 @@ def _check_boundary_flags(boundary_flags, n_boundaries: int) -> np.ndarray:
 
 
 def init_beliefs(
-    chain: RegionChain,
     geometry: RegionGeometry,
     statics: RegionStatics,
     *,

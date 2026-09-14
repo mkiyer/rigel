@@ -265,10 +265,10 @@ def test_parse_yaml_capture_config_sweep(tmp_path):
 
 
 def test_capture_sweep_uses_paired_condition_seed():
-    seed = capture_paired_condition_seed(42, "none", 0.99, "none")
+    seed = capture_paired_condition_seed(42, "none", 0.99)
 
-    assert seed == capture_paired_condition_seed(42, "none", 0.99, "none")
-    assert seed != capture_paired_condition_seed(42, "high", 0.99, "none")
+    assert seed == capture_paired_condition_seed(42, "none", 0.99)
+    assert seed != capture_paired_condition_seed(42, "high", 0.99)
     assert condition_dir_name("none", 0.99, "none", "off") != condition_dir_name(
         "none",
         0.99,

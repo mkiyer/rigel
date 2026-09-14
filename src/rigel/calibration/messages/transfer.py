@@ -229,7 +229,7 @@ class TransferPolicy:
             lanes["gdna"] = gdna
         lanes.update(rna_lanes(chain, own, library))
         site = _SolveSite(chain.fp & chain.fn, {"pos": chain.fp, "neg": chain.fn})
-        return _PreparedTransfer(own, faces, chain.K, lanes, site)
+        return _PreparedTransfer(own, faces, lanes, site)
 
 
 # ══ THE CHAIN AS THE BUILDERS READ IT ═══════════════════════════════════════════════════════════════
@@ -540,9 +540,7 @@ class _PreparedTransfer:
     population (``"gdna"``, ``"pos"``, ``"neg"`` — any may be absent) and the site. The passes' state
     is the backbone's table, never a copy here."""
 
-    def __init__(
-        self, own, faces: "Faces | None", n_grid: int, lanes: dict | None = None, site=None
-    ):
+    def __init__(self, own, faces: "Faces | None", lanes: dict | None = None, site=None):
         self.own = own
         self.faces = faces
         self.lanes: dict = {} if lanes is None else dict(lanes)

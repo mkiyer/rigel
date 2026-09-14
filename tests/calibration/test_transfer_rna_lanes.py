@@ -531,7 +531,7 @@ def test_the_cube_delivery_is_the_intersected_held_levels_and_the_own_flux(sweep
     left, right = np.array([-1, 0, 1, 2]), np.array([1, 2, 3, -1])
     site = _SolveSite(ambig, free)
     prep = _PreparedTransfer(
-        [None] * 4, Faces(lam, left, right), K, {"gdna": gd, "pos": pos, "neg": neg}, site
+        [None] * 4, Faces(lam, left, right), {"gdna": gd, "pos": pos, "neg": neg}, site
     )
     lv_l = -0.5 * np.maximum(0.0, (0.5 - u) / 0.2) ** 2
     lv_r = -0.5 * np.maximum(0.0, (0.0 - u) / 0.2) ** 2

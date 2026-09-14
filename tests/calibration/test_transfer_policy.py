@@ -355,7 +355,7 @@ def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
     gd = LevelLane("gdna", u, lam, 0.5, n_u, a_r, empty, [None] * 5, none)
     site = _SolveSite(fp & fn, {"pos": fp, "neg": fn})
     prep = _PreparedTransfer(
-        [None] * 5, Faces(lam, left, right), K, {"gdna": gd, "pos": pos, "neg": neg}, site
+        [None] * 5, Faces(lam, left, right), {"gdna": gd, "pos": pos, "neg": neg}, site
     )
     comp = -0.5 * ((lam - 1.0) / 0.5) ** 2
     held_l, held_r = floor(0.8), floor(-0.3)

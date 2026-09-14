@@ -117,12 +117,11 @@ def capture_paired_condition_seed(
     base_seed: int,
     gdna_label: str,
     strand_specificity: float,
-    nrna_label: str,
 ) -> int:
     """Seed shared by the capture and nascent variants of one ``(gdna, ss)`` base condition.
 
-    ``nrna_label`` is deliberately excluded from the seed so the variants of one base condition
-    start from the same stream. Nascent rows are drawn in the same multinomial as the mature rows,
+    The nascent label is deliberately not an argument, so the variants of one base condition start
+    from the same stream. Nascent rows are drawn in the same multinomial as the mature rows,
     so a nascent-on cell and its nascent-off twin share the seed but not a bit-identical mature
     stream: turning nascent on re-allocates the RNA budget, as it physically must. The gDNA stream
     is unaffected.
@@ -241,7 +240,7 @@ def run_condition_grid(
                     n_rna, n_gdna = depths.n_rna, depths.n_gdna
 
                     condition_seed = capture_paired_condition_seed(
-                        base_seed, gdna_label, strand_spec, nrna_label
+                        base_seed, gdna_label, strand_spec
                     )
                     cond_dir = outdir / cond_name
                     truth_abundances_name = f"{cond_name}/truth_abundances.tsv"

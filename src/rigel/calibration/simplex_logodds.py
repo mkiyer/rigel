@@ -249,7 +249,7 @@ def _logodds_grid(n_grid: int, L: float = _DEFAULT_L):
     return lam, expit(lam)
 
 
-def _posterior_median_fg(post, lam, fg):
+def _posterior_median_fg(post, lam):
     """Per-region point estimate of ``f_g``: the posterior's ½-QUANTILE, read off the CDF.
 
     Transform-invariant and robust to the skew of the ``f_g`` posterior, which is why ``f_g`` is a median
@@ -282,7 +282,7 @@ def _posterior_median_fg(post, lam, fg):
     point to machine precision. That case
     is not synthetic: an unsolved slot's fed-back belief produces a one-hot posterior.
 
-    ``post``: (m,K) normalized posterior; ``lam`` the uniform log-odds grid; ``fg`` = σ(λ). Returns (m,)."""
+    ``post``: (m,K) normalized posterior; ``lam`` the uniform log-odds grid. Returns (m,)."""
     p = np.asarray(post, np.float64)
     x = np.asarray(lam, np.float64)
     # histogram edges on the UNIFORM λ lattice — the two outer half-bins mirrored.
@@ -689,7 +689,7 @@ def _solve_logodds(
     flat = psi.reshape(m, -1)
     post = np.exp(flat - _lse(flat, axis=1, keepdims=True)).reshape(psi.shape)  # (m, K, K_t)
     post_lam = post.sum(axis=2)  # the θ-marginal, per row
-    f_g = _posterior_median_fg(post_lam, lam, fg)
+    f_g = _posterior_median_fg(post_lam, lam)
     log_fg = _log_fg(lam)
     m_lg = _row_moment(post_lam, log_fg)
     var_g = np.maximum(_row_moment(post_lam, log_fg * log_fg) - m_lg * m_lg, 0.0)

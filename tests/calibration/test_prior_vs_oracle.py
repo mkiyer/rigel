@@ -479,7 +479,7 @@ def test_a_run_that_never_reaches_assemble_priors_RAISES(measured, monkeypatch):
     """
     monkeypatch.setattr(PV, "quant_from_buffer", lambda *a, **k: (None, None))
     with pytest.raises(RuntimeError, match="never called"):
-        PV.capture_priors(None, None, None, None, None, None, None, None, PipelineConfig())
+        PV.capture_priors(None, None, None, None, None, None, None, PipelineConfig())
 
 
 # ── GATE 10: the aggregate re-derives its rates, never averages them ─────────────────────────────

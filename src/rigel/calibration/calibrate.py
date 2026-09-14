@@ -515,9 +515,7 @@ def _background_pair(payload, substrate, region_arrays, config, mature_walls, bo
     return (counts, exposure)
 
 
-def _abundance_landscape(
-    payload, substrate, region_arrays, config, inj, mature_walls, boundary_reach
-):
+def _abundance_landscape(payload, substrate, region_arrays, inj, mature_walls, boundary_reach):
     """THE ABUNDANCE LANDSCAPE — the pre-pass-0 TOTAL-density field + mode census, fitted at INIT from
     counts and lengths only (the wall-exact measured totals), so it is circular with nothing solved. A QC
     and injection surface: it is the sole source of the QC report's gDNA-density panel
@@ -576,7 +574,6 @@ class _Solve:
 def _init_belief(s: _Solve):
     """The signature-binary G1/G2/G3 belief on the chain, before any sweep."""
     return init_beliefs(
-        s.chain,
         s.geometry,
         s.statics,
         rna_sense_frac=s.strand.rna_sense_frac,
@@ -687,7 +684,7 @@ def _solve(s: _Solve, _debug):
 
 
 def _result(
-    substrate, sj, chain, belief, strand: _Strand, region_eff, boundary_eff, config
+    substrate, chain, belief, strand: _Strand, region_eff, boundary_eff, config
 ) -> CalibrationResult:
     """The solved chain projected onto the two payload axes and published as the
     :class:`CalibrationResult`, with the library-average gDNA density QC scalar.
@@ -838,7 +835,7 @@ def calibrate(
         payload, substrate, region_arrays, config, mature_walls, boundary_reach
     )
     abundance_landscape = _abundance_landscape(
-        payload, substrate, region_arrays, config, inj, mature_walls, boundary_reach
+        payload, substrate, region_arrays, inj, mature_walls, boundary_reach
     )
     # the RNA twin: no consumer in the solve (the prior is a conserved FRAGMENT COUNT and divides by
     # nothing on the mass path), kept because it is byte-identically the opportunity the solver used
@@ -875,7 +872,6 @@ def calibrate(
 
     result = _result(
         substrate,
-        sj,
         chain,
         belief,
         strand,

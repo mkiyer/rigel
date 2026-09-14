@@ -226,7 +226,7 @@ def score_eff_len(arm, ref, select=None) -> dict:
 # ── the arms ─────────────────────────────────────────────────────────────────────────────────────
 
 
-def capture_priors(buffer, index, strand_models, fl, region_arrays, stats, calibration, payload,
+def capture_priors(buffer, index, strand_models, fl, region_arrays, stats, calibration,
                    pipeline_config):
     """Run the production quant path far enough to get ``(multi_loci, LocusPriors, units)``, then STOP.
 
@@ -272,7 +272,7 @@ def capture_priors(buffer, index, strand_models, fl, region_arrays, stats, calib
     LOCUS.build_multi_loci = _ml_wrapper
     try:
         quant_from_buffer(
-            buffer, index, strand_models, fl, region_arrays, stats, calibration, payload,
+            buffer, index, strand_models, fl, region_arrays, stats, calibration,
             em_config=pipeline_config.em, scoring=pipeline_config.scoring,
         )
     except _StopAfterPriors:
@@ -633,7 +633,7 @@ def _calibrate_and_prior(payload, strand_model, buffer, stats, index, ra, pipeli
         boundary_flags=build_boundary_flags_array(index),
     )
     multi_loci, priors, units = capture_priors(
-        buffer, index, strand_model, fl, ra, stats, cal, payload, pipeline_config
+        buffer, index, strand_model, fl, ra, stats, cal, pipeline_config
     )
     return cal, fl, multi_loci, priors, units
 

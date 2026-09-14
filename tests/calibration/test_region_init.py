@@ -67,7 +67,6 @@ def _scenario(kappa=0.9):
         rna_fl=_delta_pmf(100),
     )
     belief = init_beliefs(
-        parts.chain,
         parts.geometry,
         parts.statics,
         rna_sense_frac=kappa,

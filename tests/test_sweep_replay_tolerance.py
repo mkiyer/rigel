@@ -29,9 +29,9 @@ def test_the_comparator_fires_its_own_gates():
     assert _replay().self_test() == 0
 
 
-def _read_out(SL, psi, lam, fg) -> float:
+def _read_out(SL, psi, lam) -> float:
     post = np.exp(psi - SL._lse(psi, axis=1, keepdims=True))
-    return float(np.clip(SL._posterior_median_fg(post, lam, fg), 0.0, 1.0)[0])
+    return float(np.clip(SL._posterior_median_fg(post, lam), 0.0, 1.0)[0])
 
 
 def test_the_budget_covers_term_and_intermediate_rounding_and_its_constants_are_load_bearing():
@@ -72,10 +72,10 @@ def test_the_budget_covers_term_and_intermediate_rounding_and_its_constants_are_
             u_b = n * (0.5 * other + kappa * (1.0 - other))
             arms = SL._gdna_arm(lam, None) + SL._rna_arm(lam)
             terms = [strand(u_a, n, share, np.float64), arms, strand(u_b, n, other, np.float64)]
-            exact = _read_out(SL, sum(terms), lam, fg)
+            exact = _read_out(SL, sum(terms), lam)
             rounded_terms = sum(np.asarray(np.asarray(t, F), np.float64) for t in terms)
-            f32_terms = _read_out(SL, rounded_terms, lam, fg)
-            f32_inner = _read_out(SL, strand(u_a, n, share, F) + arms + terms[2], lam, fg)
+            f32_terms = _read_out(SL, rounded_terms, lam)
+            f32_inner = _read_out(SL, strand(u_a, n, share, F) + arms + terms[2], lam)
             b_frac, _b_var = sr.budget(n, kappa, window, sr.EPS32, K)
             for got in (f32_terms, f32_inner):
                 move = abs(got - exact)
