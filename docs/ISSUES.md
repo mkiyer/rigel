@@ -20,7 +20,7 @@ what was ruled is `DESIGN.md`.
 `priority: now · kind: build · 2026-08-17; the decomposition and the shared layer landed 2026-09-11, memory 2026-09-12`
 Calibration is the tool's one unfinished component: the four sweeps are ~394 s of a 500 s run on the
 18.6M-fragment library, on one core, while the locus EM beside them takes 25 s. The decomposition is built
-and gated (`DESIGN.md` §6b.15: a terminal receives nothing, the chain is solved a locus block at a time, the
+and gated (`DESIGN.md` §6b.15.1–§6b.15.4: a terminal receives nothing, the chain is solved a locus block at a time, the
 block size moves no number, the refit sweeps share their message layer) and the Python is pristine (the
 pre-port and lanes worklists, every ruling in `DESIGN.md` §6b.15). What is OPEN: ③ the C/C++ port of
 `sweep._solve_block` — the passes and `transfer_rows`, then `prepare`'s builders, then ψ (the cube is
@@ -133,7 +133,7 @@ post-calibration prior-assembly session; the xfail closes there, with a test tha
 
 ### the-atom-at-an-unwitnessed-both-strand-slot
 `priority: later — accepted as a limit of the information (owner, 2026-09-14) · kind: known limit · 2026-09-14`
-The tilt atom (`DESIGN.md` §6b.15, `EQUATIONS.md` §9f) admits "all of this slot's RNA is on strand s" unless
+The tilt atom (`DESIGN.md` §6b.15.13, `EQUATIONS.md` §9f) admits "all of this slot's RNA is on strand s" unless
 a held RNA level on the other strand rules it out. On stranded data at a both-strand slot whose minor strand
 has no witness — no junction certifies it and no single-strand piece of its own exists anywhere, the case of
 a single-exon gene wholly inside another gene's exon — the strand split cannot tell "pure s with gDNA" from
@@ -293,7 +293,7 @@ current panel. Where a mechanism's only target was unstranded × capture-ON the 
 candidate on top of being refused; the `g00` zero-control column is never moot.
 
 ### capture-on-strand-pure-ambig-undercall
-CLOSED by landing 2026-09-14 (`DESIGN.md` §6b.15, `EQUATIONS.md` §9f): the tilt atom — the AMBIG tilt's
+CLOSED by landing 2026-09-14 (`DESIGN.md` §6b.15.13, `EQUATIONS.md` §9f): the tilt atom — the AMBIG tilt's
 hypothesis space {pure +, pure −, mixed} at equal reference weight, two columns at `τ = ±1` in ψ's cube beside
 the continuum (`−log π` on its trapezoid weights), a held RNA level on a strand ruling the other strand's atom
 out. The mechanism: the continuum's median sat below the strand cap at a strand-pure slot (prior-free, a truth
@@ -308,7 +308,7 @@ The source reproduces the prototype exactly on the test chromosome and to ≤ 0.
 delivered-level witness). The cost where no witness exists is `the-atom-at-an-unwitnessed-both-strand-slot`.
 
 ### deadband-gates-a-gdna-free-library
-CLOSED by landing 2026-09-14 (`DESIGN.md` §6b.15, `EQUATIONS.md` §5.2b): the strand channel is live iff the
+CLOSED by landing 2026-09-14 (`DESIGN.md` §6b.15.12, `EQUATIONS.md` §5.2b): the strand channel is live iff the
 protocol preserves strand — the Bayes factor on the spliced 2×2 of a free κ (the fit's own Beta(1, 1)) against
 κ = ½ exactly, closed form, no constant (`region_init.strand_discriminability(κ̂, N)`); `disc = 4(κ̂−½)²` where
 live; `n_gdna_obs` deleted throughout. Killing numbers: the replaced form (an unbiased estimate of `(κ−½)²`
@@ -349,7 +349,7 @@ travels as a floor); its target, the walled host exon of a `span` locus, gains ~
 with a gate on the emitted level's own width.
 
 ### psi-lambda-bracket-unshipped
-CLOSED 2026-09-14, landed with the one-lattice ruling (W5, `DESIGN.md` §6b.15): the λ bracket follows the
+CLOSED 2026-09-14, landed with the one-lattice ruling (W5, `DESIGN.md` §6b.15.10): the λ bracket follows the
 landscape prior's derived demand (`DensityLandscape.required_logodds_window`, read by `calibrate._sweep`) and
 the point count follows the bracket at the fixed step; nothing ships off.
 
@@ -393,7 +393,7 @@ here with the mono toy as its instrument (`deep_stress.py --mono`), and is the R
 junction on either strand pins it), not ψ's.
 
 ### theta-quadrature-at-zero-gdna
-CLOSED by landing 2026-09-13 (`DESIGN.md` §6b.15; the derivation `EQUATIONS.md` §9e): the θ nodes follow the
+CLOSED by landing 2026-09-13 (`DESIGN.md` §6b.15.11; the derivation `EQUATIONS.md` §9e): the θ nodes follow the
 strand term's peak (`simplex_logodds._tilt_window`), the node count derived (24 = 2T/π + 1, T = −log ε₆₄). The
 recorded mechanism was wrong: the K_t 30 failure was ONE slot (`g00 ss.99 ON`, slot 37345, n 25,242, 28 % of
 its RNA on the minor strand, a 0.006 rad peak) — the fixed lattice's sum is a comb across λ on any deep
@@ -647,7 +647,7 @@ drained records to remove 75 contaminants at `g50 ss.99 OFF`, resurrecting the �
 drain exists to repair (`ISSUES: drain-contaminates-certified-rna`).
 
 ### the-second-lambda-grid-and-its-regrid
-CLOSED by landing 2026-09-13 (`DESIGN.md` §6b.15, W5 the grid study): one λ lattice for every consumer,
+CLOSED by landing 2026-09-13 (`DESIGN.md` §6b.15.10, W5 the grid study): one λ lattice for every consumer,
 `sweep_logodds_step` 0.2; the fine single-strand grid, `_regrid_global` and `_scaled_grid` deleted. Priced on the
 way and REFUSED, each with its number: a CUBIC regrid on λ (`g00` 892×, deferred 1.15 — the spline overshoots the
 landscape prior's floor wall); a SMOOTH-RECONSTRUCTION read-out (a cubic or a monotone cubic of the log-posterior

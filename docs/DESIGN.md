@@ -714,7 +714,7 @@ Re-derive this list rather than trusting it: `scripts/design/module_census.py` r
 |---|---|---|
 | `sweep.py` | **The backbone.** The self-solve, two directional passes, one ψ solve, one write-back, four assertions | It knows nothing about capture, splices, levels, lanes or enrichment — `test_sweep_backbone.py` asserts those words appear in none of its identifiers, read from the AST |
 | `blocks.py` | the block plumbing of the locus solve: `view_fields` (every per-slot array a policy may read), `block_slice` (one block cut out of the chain, its links re-based), `SweepCapture` (the diagnostic capture of a sweep, the instruments' view, never built in production; `SweepCapture.gather` re-assembles the blocks' into the chain's) | nothing about what a solve or a message is |
-| `message_cache.py` | `MessageCache` — the message layer's output shared across the refit sweeps, keyed on a digest of every field of the block's context, the library and the policy (§6b.15) | a field added to the context cannot be left out of the key: the digest iterates the dataclass |
+| `message_cache.py` | `MessageCache` — the message layer's output shared across the refit sweeps, keyed on a digest of every field of the block's context, the library and the policy (§6b.15.4) | a field added to the context cannot be left out of the key: the digest iterates the dataclass |
 | `messages/silent.py` | `SilentPolicy` — sends nothing. **The measured floor**, what `message_policy = "silent"` installs | A reader who holds `sweep.py` plus this holds the entire working system |
 | `messages/transfer.py` | `TransferPolicy` — **the shipped default** (2026-09-09): every node's own claim, one named builder per message, the two passes and the solve (§6b.4–§6b.14) | `prepare` is a table of contents: a reader finds a message by its builder's name |
 | `messages/faces.py` | `Faces` — the composition rules as typed tables over `(destination, side)`, `Faces.apply` the one home of the rule arithmetic, and the three helpers every reader of a face needs (`side_of`, `norm`, `fuse`) | gate: `test_transfer_faces.py` |
@@ -1059,269 +1059,285 @@ exons 182 → 63); whole library every ladder row within 0.3 %. Under sparse pro
 `g98 ss.50 ON` row loses 4.8 % — the level rule's total bound at a depleted face — reported, not a
 target. The substrate is the test chromosome's sj+terminus block (`sjterm` · `capsjterm`).
 
-### 6b.15 The locus is the unit of the solve — a terminal receives nothing, and ψ's read-out is chunk-exact (owner, 2026-09-11)
+### 6b.15 The locus is the unit of the solve, and the rulings built on it (owner, 2026-09-11 → 2026-09-14)
 
-**The decomposition is the locus, exactly as the EM already does it.** An intergenic region — any REGION
-admitting no RNA strand, the predicate the SOLVE gate already locks — is a TERMINAL: structurally pure
-gDNA, solved and fixed before a message exists, so nothing needs to cross it and nothing may. Verified on
-the human chain before it was made structural: of 1,206,202 composition faces and 4,621,302 lane faces
-the shipped policy built, none delivered into an intergenic region, none of a terminal's 65,852 gDNA-lane
-faces ever carried anything (a terminal has no own level), and the policy wrote no held message at one
-in either pass. The backbone now REFUSES to ask a kernel for a hop into a terminal (`sweep._pass`) and the
-lane no longer lists faces from one, so no future policy can move the boundary condition; the terminal
-predicate is `is_region & g1_locked`, one definition (33,120 slots on the human chain, exactly the
-intergenic set). The chain therefore breaks into 33,018 loci (median 19 slots, the largest 2,477 =
-0.12 % of the chain) and `sweep.solve_chain` solves it a LOCUS BLOCK at a time
-(`region_chain.locus_blocks`): each block on its own slice of every input, reading one slot beyond
-itself where that slot is the terminal its last node receives from (the halo is load-bearing: without it
-the last node hears an open side instead of silence and its own flux is not read).
+#### 6b.15.1 The decomposition is the locus, exactly as the EM already does it
 
-**The only information that crosses a block boundary is the policy's LIBRARY.** `Policy.library(view)`
-runs once over the whole chain on a `ChainView` — observations and geometry, no beliefs, so a cross-block
-reduction over beliefs has no field to read — and `prepare(ctx, library)` sees one block. The transfer
-policy's library is three reference densities (the gDNA lane's, each RNA lane's) and whether the strand
-split is a live witness, which is the library's strand protocol decision
-(`region_init.strand_discriminability`) rather than a per-slot solve. The intron factory's rows travel on the context (`factory_rows`, the
-very array ψ adds as its λ-factor), which retired the policy's grid-keyed row callback.
+An intergenic region — any REGION admitting no RNA strand, the predicate the SOLVE gate already locks — is
+a TERMINAL: structurally pure gDNA, solved and fixed before a message exists, so nothing needs to cross it
+and nothing may. Verified on the human chain before it was made structural: of 1,206,202 composition faces
+and 4,621,302 lane faces the shipped policy built, none delivered into an intergenic region, none of a
+terminal's 65,852 gDNA-lane faces ever carried anything (a terminal has no own level), and the policy wrote
+no held message at one in either pass. The backbone now REFUSES to ask a kernel for a hop into a terminal
+(`sweep._pass`) and the lane no longer lists faces from one, so no future policy can move the boundary
+condition; the terminal predicate is `is_region & g1_locked`, one definition (33,120 slots on the human
+chain, exactly the intergenic set). The chain therefore breaks into 33,018 loci (median 19 slots, the
+largest 2,477 = 0.12 % of the chain) and `sweep.solve_chain` solves it a LOCUS BLOCK at a time
+(`region_chain.locus_blocks`): each block on its own slice of every input, reading one slot beyond itself
+where that slot is the terminal its last node receives from (the halo is load-bearing: without it the last
+node hears an open side instead of silence and its own flux is not read).
 
-**ψ's read-out is chunk-exact, and that is what makes the block size a knob rather than a choice.** The
-shipped single-strand read-out was not: a fancy index on the last axis in `_regrid_global` returned an
-F-ordered ψ whose row reductions summed in a row-count-dependent order, and the BLAS matrix–vector
-moments dispatched a different kernel at one row — splitting any real 255-row tile moved ~70 % of its rows
-by ≤ 1e-15, and halving `_SOLVE_BLOCK_BYTES` already moved slots on the shipped path. The repair (a
-contiguous ψ, per-row moment sums) moves the answer by ≤ 3.1e-15 per slot per sweep, does not amplify
-through four sweeps and three refits (the final belief ≤ 3.1e-15, `has_composition` never flips), leaves TPM and
+#### 6b.15.2 The only information that crosses a block boundary is the policy's LIBRARY
+
+`Policy.library(view)` runs once over the whole chain on a `ChainView` — observations and geometry, no
+beliefs, so a cross-block reduction over beliefs has no field to read — and `prepare(ctx, library)` sees
+one block. The transfer policy's library is three reference densities (the gDNA lane's, each RNA lane's)
+and whether the strand split is a live witness, which is the library's strand protocol decision
+(`region_init.strand_discriminability`) rather than a per-slot solve. The intron factory's rows travel on
+the context (`factory_rows`, the very array ψ adds as its λ-factor), which retired the policy's grid-keyed
+row callback.
+
+#### 6b.15.3 ψ's read-out is chunk-exact, and that is what makes the block size a knob rather than a choice
+
+The shipped single-strand read-out was not: a fancy index on the last axis in `_regrid_global` returned an
+F-ordered ψ whose row reductions summed in a row-count-dependent order, and the BLAS matrix–vector moments
+dispatched a different kernel at one row — splitting any real 255-row tile moved ~70 % of its rows by ≤
+1e-15, and halving `_SOLVE_BLOCK_BYTES` already moved slots on the shipped path. The repair (a contiguous
+ψ, per-row moment sums) moves the answer by ≤ 3.1e-15 per slot per sweep, does not amplify through four
+sweeps and three refits (the final belief ≤ 3.1e-15, `has_composition` never flips), leaves TPM and
 effective lengths bit-identical on a real library and every aggregate of `calibration_vs_oracle.py` at the
 last ulp with `ruler_n_moved` identical on all 16 conditions; the owner accepted it as identical to a
 tolerance (2026-09-11). With it, every block size gives the same bits (gated on the toy for six sizes and
 on a real 2.09M-slot sweep for eight), so `CalibrationConfig.sweep_block_slots` sets only the working set.
 
-**The message layer is refit-invariant, so the refit sweeps share it** (derived and measured
-2026-09-11, the first step after the decomposition). Everything the layer reads is on the context —
-observations, geometry, the factory rows, the incoming belief's ``belief_fg`` and the liveness bits
-``has_own_composition`` (`tau_lam > 0`, the one bit of the self-solve a policy may know; the context no longer
-carries the self-solve object) — plus the library and the grid, and never the prior; and `calibrate`
-resets the belief before every sweep. So for one grid every refit sweep's messages are the same:
-measured on the human chain, sweeps 1–3 deliver identical ψ rows and cube rows to the bit and every node
-hears the same thing. `message_cache.MessageCache` holds one grid's delivered messages, content-keyed on a
-digest of every input the layer reads (a changed belief, row, count, library, grid or policy misses —
-each channel gated by perturbation), sparsely (0.17 GB of rows plus 0.39 GB of cube rows per grid on
-the 876k library, against a dense 2 GB); a refit sweep pays its two ψ solves and is served the rest.
-Diagnostics never read from it. Pass 0's grid is never reused, so it is not held. On the 18.6M-fragment
-library the refit grid is stable (`n_grid` 138 for all three refits), refits 2 and 3 are served entirely
-(38 s each against 176 s), the run reads 0.65 of its wall in two back-to-back pairs, and the cache holds
-2.68 GB (peak 15.0 → 17.8 GB) with float32 cube rows; 4.1 GB as float64, the shipped form since the one-solver
-landing of 2026-09-12 made the whole of ψ float64.
+#### 6b.15.4 The message layer is refit-invariant, so the refit sweeps share it (derived and measured 2026-09-11, the first step after the decomposition)
 
-**The rules are typed tables, and a face is a side** (2026-09-11, the port's data layout). Every
-directed face is one of a node's two sides — it hears from its left neighbour or its right — so the
+Everything the layer reads is on the context — observations, geometry, the factory rows, the incoming
+belief's ``belief_fg`` and the liveness bits ``has_own_composition`` (`tau_lam > 0`, the one bit of the
+self-solve a policy may know; the context no longer carries the self-solve object) — plus the library and
+the grid, and never the prior; and `calibrate` resets the belief before every sweep. So for one grid every
+refit sweep's messages are the same: measured on the human chain, sweeps 1–3 deliver identical ψ rows and
+cube rows to the bit and every node hears the same thing. `message_cache.MessageCache` holds one grid's
+delivered messages, content-keyed on a digest of every input the layer reads (a changed belief, row, count,
+library, grid or policy misses — each channel gated by perturbation), sparsely (0.17 GB of rows plus 0.39
+GB of cube rows per grid on the 876k library, against a dense 2 GB); a refit sweep pays its two ψ solves
+and is served the rest. Diagnostics never read from it. Pass 0's grid is never reused, so it is not held.
+On the 18.6M-fragment library the refit grid is stable (`n_grid` 138 for all three refits), refits 2 and 3
+are served entirely (38 s each against 176 s), the run reads 0.65 of its wall in two back-to-back pairs,
+and the cache holds 2.68 GB (peak 15.0 → 17.8 GB) with float32 cube rows; 4.1 GB as float64, the shipped
+form since the one-solver landing of 2026-09-12 made the whole of ψ float64.
+
+#### 6b.15.5 The rules are typed tables, and a face is a side (2026-09-11, the port's data layout)
+
+Every directed face is one of a node's two sides — it hears from its left neighbour or its right — so the
 recipient's composition rule is a KIND and its parameters at ``(destination, side)``:
-`messages.faces.Faces` holds ``(n, 2)`` tables (the kind, the face's unspliced and spliced counts,
-the boundary's and far region's gDNA opportunity, a blur width, the level rule's width) and indices into
-a row store of the ``(K,)`` maps; five kinds cover every shipped message — FORWARD, TRANSPORT (boundary →
-region through the face map), SPLICE-OUT (region → boundary, the map read backwards), EDGE (the
-intergenic|exon edge's one-sided level) and LEVEL (the terminus's level rule) — and `Faces.apply` is
-the one place their arithmetic lives. A face carries ONE rule: the builders' faces are disjoint by
-construction (the splice faces serve intron|exon pairs, the edge rule gene edges, the terminus rules
-unlicensed faces, the alternative splice site junctions with no terminus), so the table refuses a
-second rule at a face as it refuses a rule at a face that does not exist — the earlier "a later builder
-replaces an earlier one" precedence had no instance on the toy or the human chain and was a hidden
-assumption, not a rule. The level lanes hold their faces as ``(n, 2)`` bits and their junction flux as
-a row table. The 1.2M closures, the 4.6M-tuple face sets and the neighbour-pair enumeration are gone,
-bit-identically; `_SolveSite` needs no neighbour arrays. A compiled pass reads these buffers directly.
+`messages.faces.Faces` holds ``(n, 2)`` tables (the kind, the face's unspliced and spliced counts, the
+boundary's and far region's gDNA opportunity, a blur width, the level rule's width) and indices into a row
+store of the ``(K,)`` maps; five kinds cover every shipped message — FORWARD, TRANSPORT (boundary → region
+through the face map), SPLICE-OUT (region → boundary, the map read backwards), EDGE (the intergenic|exon
+edge's one-sided level) and LEVEL (the terminus's level rule) — and `Faces.apply` is the one place their
+arithmetic lives. A face carries ONE rule: the builders' faces are disjoint by construction (the splice
+faces serve intron|exon pairs, the edge rule gene edges, the terminus rules unlicensed faces, the
+alternative splice site junctions with no terminus), so the table refuses a second rule at a face as it
+refuses a rule at a face that does not exist — the earlier "a later builder replaces an earlier one"
+precedence had no instance on the toy or the human chain and was a hidden assumption, not a rule. The level
+lanes hold their faces as ``(n, 2)`` bits and their junction flux as a row table. The 1.2M closures, the
+4.6M-tuple face sets and the neighbour-pair enumeration are gone, bit-identically; `_SolveSite` needs no
+neighbour arrays. A compiled pass reads these buffers directly.
 
-**One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer).** A
-single-strand slot is the cube with a tilt grid of one cell — its tilt is its live strand, `τ = ±1` — so
+#### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer)
+
+A single-strand slot is the cube with a tilt grid of one cell — its tilt is its live strand, `τ = ±1` — so
 `simplex_logodds._solve_logodds` serves both classes, ψ built once by `_psi` on the `(m, K, K_t)` cube and
 read out once: `f_g` the posterior median over the θ-marginal, `Var(log f_g)` its grid moment, the tilt
 share `w_pos` the RNA-mass-weighted posterior share, the composition their image under `_compose`. The
-float32 cube was a memory choice the tiling made moot and is gone (`ISSUES: f32-strand-tilt-at-half`
-closed with it); the cache holds float64 rows (+1.4 GB on the deep library, plan step E's switch). The
-two strand log-variances `Var(log f_±)` are DELETED: nothing downstream read them (`var_gdna` alone feeds
-the landscape's training weight), and computing them at every slot was the whole cost of the unified
-read-out; with them went the pseudo-fragment floor they were the only consumer of. Judged: the oracle
-metric and both panels identical to the printed precision (the metric moves at the ninth significant
-digit); the replay's tolerance report shows the AMBIG slots' fractions moving by ≤ 2e-7 (float32 → 64) and
-neighbouring single-strand slots by less, through the messages; the suite; and timing on a back-to-back
-pair on the deep library — wall 518 → 524 s (1.01), the ψ solves inside the sweep 0.94, untouched stages
-1.00, peak 18.1 → 19.5 GB (the cache's float64 rows). The replay's captures and the identity references
-were re-taken from this tree (`sweeps_MO_3021_step3`, `onesolver_identity_*`; again after the memory steps: `sweeps_MO_3021_step4`, `memory_identity_*`): the earlier ones describe
-the two-solver code and unpickle against the belief's retired fields.
+float32 cube was a memory choice the tiling made moot and is gone (`ISSUES: f32-strand-tilt-at-half` closed
+with it); the cache holds float64 rows (+1.4 GB on the deep library, plan step E's switch). The two strand
+log-variances `Var(log f_±)` are DELETED: nothing downstream read them (`var_gdna` alone feeds the
+landscape's training weight), and computing them at every slot was the whole cost of the unified read-out;
+with them went the pseudo-fragment floor they were the only consumer of. Judged: the oracle metric and both
+panels identical to the printed precision (the metric moves at the ninth significant digit); the replay's
+tolerance report shows the AMBIG slots' fractions moving by ≤ 2e-7 (float32 → 64) and neighbouring
+single-strand slots by less, through the messages; the suite; and timing on a back-to-back pair on the deep
+library — wall 518 → 524 s (1.01), the ψ solves inside the sweep 0.94, untouched stages 1.00, peak 18.1 →
+19.5 GB (the cache's float64 rows). The replay's captures and the identity references were re-taken from
+this tree (`sweeps_MO_3021_step3`, `onesolver_identity_*`; again after the memory steps:
+`sweeps_MO_3021_step4`, `memory_identity_*`): the earlier ones describe the two-solver code and unpickle
+against the belief's retired fields.
 
-**Memory: the transients, not the sweeps (2026-09-12).** Measured before anything moved (`profiler.py`,
-peak and held per stage): the run's high-water mark was `crossing_eff_length`'s ``(objects × fragment
-lengths)`` matrix chain over the human sj axis, ~9 GB the RSS never gave back, and `fit_landscape`'s
-``(training regions × grid)`` kernel matrices at the true peak. Three rulings, each a numeric no-op on
-the metric: the crossing divisor is a closed form over the pmf's cumulative sums — the four-way min is
-piecewise linear in the fragment length with breaks at the two reaches and their sum, so its expectation
-is three sums read off ``F`` and ``S`` (`effective_length.crossing_eff_length`; the matrix form is the
-brute force its gate compares with); the landscape's kernels are built and summed a row tile at a time
-(`landscape._render`, on ψ's own tiling rule), so a million training regions never exist as a matrix; the
-intron factory's rows are a `calibrate.FactoryRows` the sweep slices per block, never a chain-wide
-array. One back-to-back pair on the deep library: peak 19.2 → 11.4 GB, wall 505 → 498 s, untouched
-stages 1.00. The identity references and the replay captures were re-taken (`memory_identity_*`,
-`sweeps_MO_3021_step4`).
+#### 6b.15.7 Memory: the transients, not the sweeps (2026-09-12)
 
-**The received messages are tables (2026-09-12, bit-identical on the replay, the three references and the
-suite).** After a pass every node holds a ROW of the pass's `Received` table — `has_neighbour` (the
-backbone's), `has_composition` and the composition row, and three `Levels` lanes (`present`, the profile,
-the count and opportunity of the last full node, the RNA witness where `has_witness`) — never an object;
-`Message` and `Level` are gone, and SILENCE / NO NEIGHBOUR are the table's two states (`silence`,
-`no_neighbour`). The kernel `receive(source, destination)` reads its far side from row `source` of the same
-table and writes row `destination`; the policy keeps no copy; a lane's `emit` writes the destination's row
-and its `receive` re-prices it in place. The transfer solve fuses the two composition tables as array code in
-the same addition order (left, right, then the gDNA bound); the ceilings and the cube keep their per-node
-loops. Gates: `has_neighbour` equals the chain's links (a pass marking every side fires it); a level never
-sets `has_composition` (the training-population gates fire on the backbone, and a composition arrives only
+Measured before anything moved (`profiler.py`, peak and held per stage): the run's high-water mark was
+`crossing_eff_length`'s ``(objects × fragment lengths)`` matrix chain over the human sj axis, ~9 GB the RSS
+never gave back, and `fit_landscape`'s ``(training regions × grid)`` kernel matrices at the true peak.
+Three rulings, each a numeric no-op on the metric: the crossing divisor is a closed form over the pmf's
+cumulative sums — the four-way min is piecewise linear in the fragment length with breaks at the two
+reaches and their sum, so its expectation is three sums read off ``F`` and ``S``
+(`effective_length.crossing_eff_length`; the matrix form is the brute force its gate compares with); the
+landscape's kernels are built and summed a row tile at a time (`landscape._render`, on ψ's own tiling
+rule), so a million training regions never exist as a matrix; the intron factory's rows are a
+`calibrate.FactoryRows` the sweep slices per block, never a chain-wide array. One back-to-back pair on the
+deep library: peak 19.2 → 11.4 GB, wall 505 → 498 s, untouched stages 1.00. The identity references and the
+replay captures were re-taken (`memory_identity_*`, `sweeps_MO_3021_step4`).
+
+#### 6b.15.8 The received messages are tables (2026-09-12, bit-identical on the replay, the three references and the suite)
+
+After a pass every node holds a ROW of the pass's `Received` table — `has_neighbour` (the backbone's),
+`has_composition` and the composition row, and three `Levels` lanes (`present`, the profile, the count and
+opportunity of the last full node, the RNA witness where `has_witness`) — never an object; `Message` and
+`Level` are gone, and SILENCE / NO NEIGHBOUR are the table's two states (`silence`, `no_neighbour`). The
+kernel `receive(source, destination)` reads its far side from row `source` of the same table and writes row
+`destination`; the policy keeps no copy; a lane's `emit` writes the destination's row and its `receive`
+re-prices it in place. The transfer solve fuses the two composition tables as array code in the same
+addition order (left, right, then the gDNA bound); the ceilings and the cube keep their per-node loops.
+Gates: `has_neighbour` equals the chain's links (a pass marking every side fires it); a level never sets
+`has_composition` (the training-population gates fire on the backbone, and a composition arrives only
 through a face with a composition rule — `test_transfer_policy` — fires on the kernel).
 
-**Threads are the wrong tool for this sweep, and the executor waits for the port.** Measured on the real
-sweep: the locus-split passes at 8 threads 0.83–0.94× (GIL-bound Python), ψ's grid solves 2.06×, the same
-passes in 8 forked processes 6.16×. The owner's decision: no parallelism until the C/C++ port of the block
-solve, which parallelises there; this ruling delivers the structure the port lands on and the memory half
-of the problem — measured end to end on the 18.6M-fragment library at 8 threads, two back-to-back pairs:
-the run's peak RSS 33.2 → 14.9 GB and 32.6 → 15.0 GB, the wall 0.97–0.98, the sweeps 0.96–0.97, and the
-peak now set outside the solve (`build_region_geometry`, `init_beliefs`).
+#### 6b.15.9 Threads are the wrong tool for this sweep, and the executor waits for the port
 
-**One λ lattice, parametrised by its step (2026-09-13; W5, the grid study).** ψ had two λ grids — a coarse
-one (`sweep_n_grid` 60, ~138 after the bracket widened) for the AMBIG cube, the message rows, the factory rows
-and the composition prior, and a fine one (`sweep_n_grid_single_strand` 256, ~557) for the single-strand
-read-out, with `_regrid_global` interpolating priors and rows between them linearly in ``f``. Measured on both
-panels with every consumer on one grid (`calibration_vs_oracle.py --set`, 21 arms a substrate, per stratum,
-both zero controls): the fine read-out was converged at 128 points and 256 bought nothing (0.994–1.005 of the
-pair); the pair's remaining cost was the REGRID, a linear interpolation of log-profiles that loses their
-curvature (≈ 1 % in scope on the ladder, ≈ 10 % on the test chromosome's unstranded rows, and all of it in the
-message layer — the silent floor barely moves); refining the coarse grid alone recovered the whole gain, in the
-introns (`density_factor_precision` reads a factory row's precision as a grid variance) and the AMBIG exons
-(the cube's λ axis). One grid at 138 or more beats the pair by 1.0–1.3 % on every in-scope stratum; the
-deferred stratum reads +1.4 % at every K and `g98` +0.8 %, the pair's regrid being an incidental smoothing
-that happens to help there (flat in K, independent of the interpolation axis). The read-out converges
-quadratically in K and is exact to 1 % of a step once a slot's posterior is wider than the step. THE RULING:
-one lattice for every consumer, `CalibrationConfig.sweep_logodds_step` = 0.2 nats — 101 points at the floor
-bracket, ~220 on the refits, ``K = round(2L/step) + 1`` at whatever bracket the landscape prior demands, so the
-step is the invariant `_scaled_grid` used to hold and `_scaled_grid`, the second field, the regrid and the
-CLI's single-strand flag are gone; `sweep_n_tilt` = 60 explicit, decoupled from K (retired with the θ quadrature the same day — no tilt count exists). The step is the coarsest
-that loses nothing against the pair (in scope 0.993 / 0.998 / 1.000, `g00` 0.994; the panel's two bars
-unchanged on the ladder, the transfer policy's unstranded losses on the test chromosome repaired, 15/20 →
-19/20 with the worst row 1.22× → 1.00×), and the landed tree costs 1.07× wall, 1.08× `calibrate`, +1.8 GB
-on the deep library (the sweeps' own ψ solves 0.96–0.97×; the passes 1.10×), because the AMBIG cube and its
-cached rows scale with K × K_t: 0.146 (138 points) buys −1.0 % for
+Measured on the real sweep: the locus-split passes at 8 threads 0.83–0.94× (GIL-bound Python), ψ's grid
+solves 2.06×, the same passes in 8 forked processes 6.16×. The owner's decision: no parallelism until the
+C/C++ port of the block solve, which parallelises there; this ruling delivers the structure the port lands
+on and the memory half of the problem — measured end to end on the 18.6M-fragment library at 8 threads, two
+back-to-back pairs: the run's peak RSS 33.2 → 14.9 GB and 32.6 → 15.0 GB, the wall 0.97–0.98, the sweeps
+0.96–0.97, and the peak now set outside the solve (`build_region_geometry`, `init_beliefs`).
+
+#### 6b.15.10 One λ lattice, parametrised by its step (2026-09-13; W5, the grid study)
+
+ψ had two λ grids — a coarse one (`sweep_n_grid` 60, ~138 after the bracket widened) for the AMBIG cube,
+the message rows, the factory rows and the composition prior, and a fine one (`sweep_n_grid_single_strand`
+256, ~557) for the single-strand read-out, with `_regrid_global` interpolating priors and rows between them
+linearly in ``f``. Measured on both panels with every consumer on one grid (`calibration_vs_oracle.py
+--set`, 21 arms a substrate, per stratum, both zero controls): the fine read-out was converged at 128
+points and 256 bought nothing (0.994–1.005 of the pair); the pair's remaining cost was the REGRID, a linear
+interpolation of log-profiles that loses their curvature (≈ 1 % in scope on the ladder, ≈ 10 % on the test
+chromosome's unstranded rows, and all of it in the message layer — the silent floor barely moves); refining
+the coarse grid alone recovered the whole gain, in the introns (`density_factor_precision` reads a factory
+row's precision as a grid variance) and the AMBIG exons (the cube's λ axis). One grid at 138 or more beats
+the pair by 1.0–1.3 % on every in-scope stratum; the deferred stratum reads +1.4 % at every K and `g98`
++0.8 %, the pair's regrid being an incidental smoothing that happens to help there (flat in K, independent
+of the interpolation axis). The read-out converges quadratically in K and is exact to 1 % of a step once a
+slot's posterior is wider than the step. THE RULING: one lattice for every consumer,
+`CalibrationConfig.sweep_logodds_step` = 0.2 nats — 101 points at the floor bracket, ~220 on the refits,
+``K = round(2L/step) + 1`` at whatever bracket the landscape prior demands, so the step is the invariant
+`_scaled_grid` used to hold and `_scaled_grid`, the second field, the regrid and the CLI's single-strand
+flag are gone; `sweep_n_tilt` = 60 explicit, decoupled from K (retired with the θ quadrature the same day —
+no tilt count exists). The step is the coarsest that loses nothing against the pair (in scope 0.993 / 0.998
+/ 1.000, `g00` 0.994; the panel's two bars unchanged on the ladder, the transfer policy's unstranded losses
+on the test chromosome repaired, 15/20 → 19/20 with the worst row 1.22× → 1.00×), and the landed tree costs
+1.07× wall, 1.08× `calibrate`, +1.8 GB on the deep library (the sweeps' own ψ solves 0.96–0.97×; the passes
+1.10×), because the AMBIG cube and its cached rows scale with K × K_t: 0.146 (138 points) buys −1.0 % for
 1.33× and +3.7 GB, 0.10 (201) −1.3 % for 1.71× and +9.8 GB. What the step guarantees, in a user's units: a
 slot's composition is quantised by at most ``n·f(1−f)·step/4`` fragments, 1.25 % of its mass at worst and
 0.6 % on average. The refused forms carry their numbers in `ISSUES: the-second-lambda-grid-and-its-regrid`.
 
-**The θ nodes follow the strand term's peak (2026-09-13; W12, the θ quadrature).** ψ no longer integrates
-the tilt on a fixed lattice. At fixed λ the strand term is an exact Gaussian in τ whose θ peak narrows as
-`n^{−½}` (0.005 rad at 50k fragments against a 60-node lattice's 0.053 step), so wherever a slot is deep the
-lattice's sum was a COMB across λ — a factor between 1 and `e^{−100}` chosen by where the peak fell between
-nodes — and the read-out a coin toss on node placement: the recorded K_t 30 failure (`g00 ss.99 ON`, 9,637
-false fragments) was ONE 25k-fragment slot with 28 % of its RNA on the minor strand, which 60 nodes happened
-to land on; the strand-purity story was not the mechanism. The rule (`simplex_logodds._tilt_window`,
-`EQUATIONS.md` §9e): per `(slot, λ)` a window where the term is within `T` nats of its maximum on the domain,
-one closed form for interior, boundary and beyond-boundary peaks; `K_t` uniform nodes in θ across it; the
-trapezoid weights, exact at a domain end because the integrand is even there; `log h` written into ψ.
-Both constants are DERIVED: `T = −log ε₆₄`, and `K_t = 2T/π + 1 = 24` (`_TILT_NODES`) resolves the peak
-to `e^{−T}`. Judged: the marginal matches adaptive quadrature to 2·10⁻⁶ nats at every depth (the lattice at
-60: 90–130 nats at 500k); on the ladder the change is a numeric near-no-op because its both-strand AMBIG
-slots are shallow (median 35 fragments) — the metric's stranded OFF and unstranded strata unchanged, stranded
-ON +0.4 % (the exact marginal at strand-pure slots, which the lattice's endpoint node flattered), the four
-`g00` rows identical to 0.1 fragment, the test chromosome within ±3 fragments everywhere, and the tilt
-read-out on the ladder's both-strand slots now what the lattice reached only at 120 nodes; on the
-shared-exon stress (`deep_stress.py`, two spliced genes on opposite strands, 500k fragments) a balanced exon
-at `g50` read 102,076 false gDNA fragments under the lattice and reads 19 (truth 498), a 20 %-minor exon
-11,448 → 11, with the tilt error down 6–70×. The cube is `K × 24` instead of `K × 60`. **There is no θ lattice
-anywhere and no tilt knob** (the second step, the same day): the RNA level lanes deliver a row's
-INGREDIENTS — `simplex_logodds.CubeRow`, the two held profiles, the slot's total and RNA opportunity, the
-lanes' reference densities — and ψ evaluates them at its own nodes (`CubeRow.at`); `sweep_n_tilt`,
-`_tilt_grid`, the row interpolation and the cache's `(K, K_t)` row arrays are gone (a delivered row is three
-`(K,)` arrays and four scalars). Measured on the shared-exon stress before the step: 24 nodes with the rows
-on a 240-node lattice equal 60 nodes with the same rows on every row, so evaluating the rows exactly is
-the converged form, and rows on 24 or 60 were the lattice's own resolution error. What the exact marginal made visible is a separate issue, not the quadrature's: the strand term's
-θ-marginal carries a volume factor `∝ σ_τ(λ) ∝ 1/(1 − f_g)`, an Occam push toward gDNA of order `√n` at a
-balanced both-strand slot (`ISSUES: strand-marginal-volume-factor`).
+#### 6b.15.11 The θ nodes follow the strand term's peak (2026-09-13; W12, the θ quadrature)
 
-**The strand channel is live iff the protocol preserves strand (2026-09-14; L3 of the lanes worklist;
-`EQUATIONS.md` §5.2b).** The gate on the strand channel — `disc = 4·max(0, (κ̂−½)² − σ²_d)`, a noise floor
-summing the RNA fit's sampling variance and a gDNA term — had two accidents. Its `1/N_gdna` switched the
-channel off on every library whose intergenic count is exactly zero, the modal real case: all four ladder
-`g00` rows ran with the channel dead at κ = 0.0099, and so did every toy on a `g00` donor (the θ thread's
-shared-exon deep stress and the encompassing-locus audit were measured that way). And without that term the
-RNA half was a 1σ band — an unbiased estimate of `(κ−½)²` floored at zero is positive on 32 % of genuinely
-unstranded libraries — so `g98 ss.50 OFF` (z = 1.22) shipped with a live channel, and `g00 ss.50 OFF`
-(z = 1.05) read 499 → 21,484 false gDNA fragments the moment the gDNA term went (20,545 of them through
-`tau_lam`'s readers — the own claims and the landscape's training population — and 0.7 through the lanes'
-witness column). THE RULING: a protocol either preserves strand or does not, so the gate is a decision on the
-spliced 2×2 the strand fit read — the Bayes factor of a free κ under the fit's own Beta(1, 1) against κ = ½
-exactly, closed form, `ln BF₁₀ = N·ln 2 + ln B(κ̂(N+2), (1−κ̂)(N+2))`, live iff positive; its large-N form
-`½·[z² − ln(2N/π)]` is the free parameter's Occam penalty, so no multiple of σ is chosen — and
-`disc = 4(κ̂−½)²` where it is live. gDNA enters nowhere: its strand mean is ½ by symmetry, and `n_gdna_obs`
-is gone from the strand model, the sweep, the injected priors and the toy harness
-(`region_init.strand_discriminability` takes κ̂ and the spliced count, nothing else). Judged: the ladder
-identical to 0.1 fragment on every stratum and both unstranded zero controls except the row the coin toss
-had left live (`g98 ss.50 OFF` 123,657 → 122,981, −0.55 %; unstranded OFF −0.22 %); the test chromosome
-identical on all 30 rows; a stranded and an unstranded contaminated row BIT-IDENTICAL (`tau_lam` is only ever
-thresholded); the goldens' gDNA-free toys move ≤ 2e-3 relative on their transcript counts, except
-`antisense_contained`, whose false gDNA falls 78.7 → 5.6 fragments of 1,000 with the channel on. The stranded
-zero controls read 405 → 497 and 194 → 224, and that cost is located and is not the gate's:
-`calibration_walk.py` reads the strand and local rungs identical (ψ's strand term never read the deadband),
-the messages rung 8 % better with the channel live (59,456 → 54,874) and the whole of the cost at the refit
-rung (375 → 8,696 before the messages repair it to 728) — 2,700 more exons, the walled and edge-only ones
-whose only composition evidence is their own strand, join the landscape's training population at their
-pass-0 median, which at a pure-RNA vertex sits above zero by the strand term's width
-(the training census: own:strand 13,104 slots and 3,771 false fragments trained at the first refit
-against 2,627; 585 against 325 at the third). That is the estimator's vertex-resolution bias, filed under
-`ISSUES: gdna-landscape-trains-on-false-positives`, and the owner's ruling stands over it: on a gDNA-free
-library every read is RNA and RNA levels are what must flow. On a `g00` donor the shared-exon stress reads
-the exon never worse and 139 → 109 / 93 → 64 false fragments at 50k (20 % / 50 % minor), and the
-encompassing locus's exon∩exon slots 0.054 / 0.046 → 0.002 / 0.005 against 0; `test_encompassing_locus.py`
-runs every expressed regime on a gDNA-free donor as well. **An RNA level read from a slot's belief is
-REFUSED** (the issue's second candidate): a belief at a slot with no strand information is the prior's
-answer, and a lane carrying it is the deleted relay (`TRAPS: one-hop-lifted-out-is-still-the-relay`). The
-stranded gDNA-free case is fixed by the gate alone; on an unstranded gDNA-free library the exons' composition
-is the landscape's to say, which it does through ψ's composition arm without a lane (the ladder's `g00 ss.50`
-rows read 499 and 211 false fragments of 8M that way), and the two-gene toy that reads ½ there cannot fit a
-landscape at all (two anchors against `_MIN_TRAIN`) — the toy's limit, not a defect.
+ψ no longer integrates the tilt on a fixed lattice. At fixed λ the strand term is an exact Gaussian in τ
+whose θ peak narrows as `n^{−½}` (0.005 rad at 50k fragments against a 60-node lattice's 0.053 step), so
+wherever a slot is deep the lattice's sum was a COMB across λ — a factor between 1 and `e^{−100}` chosen by
+where the peak fell between nodes — and the read-out a coin toss on node placement: the recorded K_t 30
+failure (`g00 ss.99 ON`, 9,637 false fragments) was ONE 25k-fragment slot with 28 % of its RNA on the minor
+strand, which 60 nodes happened to land on; the strand-purity story was not the mechanism. The rule
+(`simplex_logodds._tilt_window`, `EQUATIONS.md` §9e): per `(slot, λ)` a window where the term is within `T`
+nats of its maximum on the domain, one closed form for interior, boundary and beyond-boundary peaks; `K_t`
+uniform nodes in θ across it; the trapezoid weights, exact at a domain end because the integrand is even
+there; `log h` written into ψ. Both constants are DERIVED: `T = −log ε₆₄`, and `K_t = 2T/π + 1 = 24`
+(`_TILT_NODES`) resolves the peak to `e^{−T}`. Judged: the marginal matches adaptive quadrature to 2·10⁻⁶
+nats at every depth (the lattice at 60: 90–130 nats at 500k); on the ladder the change is a numeric
+near-no-op because its both-strand AMBIG slots are shallow (median 35 fragments) — the metric's stranded
+OFF and unstranded strata unchanged, stranded ON +0.4 % (the exact marginal at strand-pure slots, which the
+lattice's endpoint node flattered), the four `g00` rows identical to 0.1 fragment, the test chromosome
+within ±3 fragments everywhere, and the tilt read-out on the ladder's both-strand slots now what the
+lattice reached only at 120 nodes; on the shared-exon stress (`deep_stress.py`, two spliced genes on
+opposite strands, 500k fragments) a balanced exon at `g50` read 102,076 false gDNA fragments under the
+lattice and reads 19 (truth 498), a 20 %-minor exon 11,448 → 11, with the tilt error down 6–70×. The cube
+is `K × 24` instead of `K × 60`. **There is no θ lattice anywhere and no tilt knob** (the second step, the
+same day): the RNA level lanes deliver a row's INGREDIENTS — `simplex_logodds.CubeRow`, the two held
+profiles, the slot's total and RNA opportunity, the lanes' reference densities — and ψ evaluates them at
+its own nodes (`CubeRow.at`); `sweep_n_tilt`, `_tilt_grid`, the row interpolation and the cache's `(K,
+K_t)` row arrays are gone (a delivered row is three `(K,)` arrays and four scalars). Measured on the
+shared-exon stress before the step: 24 nodes with the rows on a 240-node lattice equal 60 nodes with the
+same rows on every row, so evaluating the rows exactly is the converged form, and rows on 24 or 60 were the
+lattice's own resolution error. What the exact marginal made visible is a separate issue, not the
+quadrature's: the strand term's θ-marginal carries a volume factor `∝ σ_τ(λ) ∝ 1/(1 − f_g)`, an Occam push
+toward gDNA of order `√n` at a balanced both-strand slot (`ISSUES: strand-marginal-volume-factor`).
 
-**The AMBIG tilt's hypothesis space is {pure +, pure −, mixed} — the tilt atom (2026-09-14; L5 of the
-lanes worklist; `EQUATIONS.md` §9f; `ISSUES: capture-on-strand-pure-ambig-undercall` CLOSED).** At a slot whose
-RNA is all on one strand the truth sits AT the strand cap, and the exact θ-marginal of a continuous tilt
-put its median below it — every `f_g` under the cap fitting the split with a slightly impure tilt, weighted by
-the strand term's width — the largest AMBIG-class error in scope (−26k net on `g50 ss.99 ON`; prior-free a
-truth of 0.50 read 0.31–0.37). THE RULING: presence per strand is discrete, so the tilt's reference measure is
-a mixture of three hypotheses at equal weight — two atoms at `τ = ±1` and the arcsine continuum between them
-(`dθ/π`) — written into ψ as two more θ columns per AMBIG slot (`simplex_logodds._psi`; the cube is
-`K × (K_t + 2)`), the continuum's trapezoid weights carrying `−log π` so that the three masses are equal
-wherever the strand term is flat; a held RNA level on a strand (`CubeRow`) is a certified witness that the
-strand carries RNA and rules the OTHER strand's atom out (`−∞`), nothing pooled and no constant. The
-structural witness (the per-strand exon bits) was measured to add nothing and is not written; the tilt still
-has no lane. Judged (the L3 tree → landed): the ladder's stranded ON stratum 470,862 → 427,046 (−9.3 %:
-`g50 ss.99 ON` 217,636 → 199,409, `g98 ss.99 ON` 176,468 → 149,603), stranded OFF −0.35 %, unstranded OFF
-−0.17 %, deferred −0.33 %, fifteen of sixteen contaminated rows better and `g05 ss.99 ON` +1.7 %; the
-unstranded zero controls within a fragment, the stranded ones 497 → 550 and 224 → 231; the test chromosome
-−0.1 / +0.2 / −0.06 / +0.09 %, its six `g00` rows identical; the landed form reproduces the prototype
-(`tilt_atom.py`, arm `atom_w`) exactly on the test chromosome and to ≤ 0.007 % on the ladder (its own
-floating-point association). The census (`tilt_census.py`): on the strand-pure band the gDNA error falls
-28–38 % on the stranded ON rows (38,304 → 27,513; 34,063 → 20,967) and its tilt error 40–80 % on every
-stranded row; the near-pure band likewise; THE COST sits in the both-strand (0.2, 0.5] band at slots holding
-a level on one strand only — `g05 ss.99 ON` 4,942 → 7,005 (the whole of that row's loss), `g50 ss.99 ON`
-11,397 → 12,344, `g00 ss.99 OFF` 35 → 73 (most of its zero control's +53) — where the atom at `f_g = cap`
-also explains the split with no parameter and nothing delivered says otherwise. The stresses: the spliced
-shared exon (a level on each strand) is identical on every both-strand row and reads the strand-pure rows'
-tilt exactly (tilt error 290 → 7 at 500k) for ≤ 44 false fragments in 415k; the mono shared exon, which has
-no junction and so no witness, shows the cost bare — false gDNA roughly doubles on its 2–20 %-minor rows
-(`g00` 50k at 20 %: 10,323 → 19,671 of 50k) on an exon the volume factor already read 27–99 % gDNA. The
-encompassing locus (`test_encompassing_locus.py`): the region between TA+'s exons, strand-pure and mostly
-gDNA when TB− is low, read 0.366 against 0.544 and reads 0.511; the exon∩exon slots and that region now
-solve within 0.05 in every regime on both donors, the gate un-xfailed; the one remaining miss there is TB−'s
-shallow single-strand flank under the intergenic neighbour's gDNA edge level (`ISSUES:
-the-lower-bound-noise-ratchet`, its own xfail). Two goldens moved: `antisense_overlap` by ≤ 5e-4 relative
-on transcript counts, and `antisense_contained` — a single-exon antisense gene wholly inside a sense exon,
-so no junction and no single-strand piece exist to witness the − strand, on a 1,000-fragment toy that fits
-no landscape — by the atom's bare cost: its antisense transcript 81 → 0 and the gDNA-free locus 5.6 → 177.6
-false gDNA fragments. That is the approved form's cost at an unwitnessed both-strand slot, and the owner's
-stance (2026-09-14) is that it is a limit of the information, accepted: no presence witness is built (a locus
-with RNA elsewhere does not imply this slot is expressed), the landscape prior is the deciding voice on a real
-library, and the entry that records it is `ISSUES: the-atom-at-an-unwitnessed-both-strand-slot`.
+#### 6b.15.12 The strand channel is live iff the protocol preserves strand (2026-09-14; L3 of the lanes worklist; `EQUATIONS.md` §5.2b)
+
+The gate on the strand channel — `disc = 4·max(0, (κ̂−½)² − σ²_d)`, a noise floor summing the RNA fit's
+sampling variance and a gDNA term — had two accidents. Its `1/N_gdna` switched the channel off on every
+library whose intergenic count is exactly zero, the modal real case: all four ladder `g00` rows ran with
+the channel dead at κ = 0.0099, and so did every toy on a `g00` donor (the θ thread's shared-exon deep
+stress and the encompassing-locus audit were measured that way). And without that term the RNA half was a
+1σ band — an unbiased estimate of `(κ−½)²` floored at zero is positive on 32 % of genuinely unstranded
+libraries — so `g98 ss.50 OFF` (z = 1.22) shipped with a live channel, and `g00 ss.50 OFF` (z = 1.05) read
+499 → 21,484 false gDNA fragments the moment the gDNA term went (20,545 of them through `tau_lam`'s readers
+— the own claims and the landscape's training population — and 0.7 through the lanes' witness column). THE
+RULING: a protocol either preserves strand or does not, so the gate is a decision on the spliced 2×2 the
+strand fit read — the Bayes factor of a free κ under the fit's own Beta(1, 1) against κ = ½ exactly, closed
+form, `ln BF₁₀ = N·ln 2 + ln B(κ̂(N+2), (1−κ̂)(N+2))`, live iff positive; its large-N form `½·[z² −
+ln(2N/π)]` is the free parameter's Occam penalty, so no multiple of σ is chosen — and `disc = 4(κ̂−½)²`
+where it is live. gDNA enters nowhere: its strand mean is ½ by symmetry, and `n_gdna_obs` is gone from the
+strand model, the sweep, the injected priors and the toy harness (`region_init.strand_discriminability`
+takes κ̂ and the spliced count, nothing else). Judged: the ladder identical to 0.1 fragment on every
+stratum and both unstranded zero controls except the row the coin toss had left live (`g98 ss.50 OFF`
+123,657 → 122,981, −0.55 %; unstranded OFF −0.22 %); the test chromosome identical on all 30 rows; a
+stranded and an unstranded contaminated row BIT-IDENTICAL (`tau_lam` is only ever thresholded); the
+goldens' gDNA-free toys move ≤ 2e-3 relative on their transcript counts, except `antisense_contained`,
+whose false gDNA falls 78.7 → 5.6 fragments of 1,000 with the channel on. The stranded zero controls read
+405 → 497 and 194 → 224, and that cost is located and is not the gate's: `calibration_walk.py` reads the
+strand and local rungs identical (ψ's strand term never read the deadband), the messages rung 8 % better
+with the channel live (59,456 → 54,874) and the whole of the cost at the refit rung (375 → 8,696 before the
+messages repair it to 728) — 2,700 more exons, the walled and edge-only ones whose only composition
+evidence is their own strand, join the landscape's training population at their pass-0 median, which at a
+pure-RNA vertex sits above zero by the strand term's width (the training census: own:strand 13,104 slots
+and 3,771 false fragments trained at the first refit against 2,627; 585 against 325 at the third). That is
+the estimator's vertex-resolution bias, filed under `ISSUES: gdna-landscape-trains-on-false-positives`, and
+the owner's ruling stands over it: on a gDNA-free library every read is RNA and RNA levels are what must
+flow. On a `g00` donor the shared-exon stress reads the exon never worse and 139 → 109 / 93 → 64 false
+fragments at 50k (20 % / 50 % minor), and the encompassing locus's exon∩exon slots 0.054 / 0.046 → 0.002 /
+0.005 against 0; `test_encompassing_locus.py` runs every expressed regime on a gDNA-free donor as well.
+**An RNA level read from a slot's belief is REFUSED** (the issue's second candidate): a belief at a slot
+with no strand information is the prior's answer, and a lane carrying it is the deleted relay (`TRAPS:
+one-hop-lifted-out-is-still-the-relay`). The stranded gDNA-free case is fixed by the gate alone; on an
+unstranded gDNA-free library the exons' composition is the landscape's to say, which it does through ψ's
+composition arm without a lane (the ladder's `g00 ss.50` rows read 499 and 211 false fragments of 8M that
+way), and the two-gene toy that reads ½ there cannot fit a landscape at all (two anchors against
+`_MIN_TRAIN`) — the toy's limit, not a defect.
+
+#### 6b.15.13 The AMBIG tilt's hypothesis space is {pure +, pure −, mixed} — the tilt atom (2026-09-14; L5 of the lanes worklist; `EQUATIONS.md` §9f; `ISSUES: capture-on-strand-pure-ambig-undercall` CLOSED)
+
+At a slot whose RNA is all on one strand the truth sits AT the strand cap, and the exact θ-marginal of a
+continuous tilt put its median below it — every `f_g` under the cap fitting the split with a slightly
+impure tilt, weighted by the strand term's width — the largest AMBIG-class error in scope (−26k net on `g50
+ss.99 ON`; prior-free a truth of 0.50 read 0.31–0.37). THE RULING: presence per strand is discrete, so the
+tilt's reference measure is a mixture of three hypotheses at equal weight — two atoms at `τ = ±1` and the
+arcsine continuum between them (`dθ/π`) — written into ψ as two more θ columns per AMBIG slot
+(`simplex_logodds._psi`; the cube is `K × (K_t + 2)`), the continuum's trapezoid weights carrying `−log π`
+so that the three masses are equal wherever the strand term is flat; a held RNA level on a strand
+(`CubeRow`) is a certified witness that the strand carries RNA and rules the OTHER strand's atom out
+(`−∞`), nothing pooled and no constant. The structural witness (the per-strand exon bits) was measured to
+add nothing and is not written; the tilt still has no lane. Judged (the L3 tree → landed): the ladder's
+stranded ON stratum 470,862 → 427,046 (−9.3 %: `g50 ss.99 ON` 217,636 → 199,409, `g98 ss.99 ON` 176,468 →
+149,603), stranded OFF −0.35 %, unstranded OFF −0.17 %, deferred −0.33 %, fifteen of sixteen contaminated
+rows better and `g05 ss.99 ON` +1.7 %; the unstranded zero controls within a fragment, the stranded ones
+497 → 550 and 224 → 231; the test chromosome −0.1 / +0.2 / −0.06 / +0.09 %, its six `g00` rows identical;
+the landed form reproduces the prototype (`tilt_atom.py`, arm `atom_w`) exactly on the test chromosome and
+to ≤ 0.007 % on the ladder (its own floating-point association). The census (`tilt_census.py`): on the
+strand-pure band the gDNA error falls 28–38 % on the stranded ON rows (38,304 → 27,513; 34,063 → 20,967)
+and its tilt error 40–80 % on every stranded row; the near-pure band likewise; THE COST sits in the
+both-strand (0.2, 0.5] band at slots holding a level on one strand only — `g05 ss.99 ON` 4,942 → 7,005 (the
+whole of that row's loss), `g50 ss.99 ON` 11,397 → 12,344, `g00 ss.99 OFF` 35 → 73 (most of its zero
+control's +53) — where the atom at `f_g = cap` also explains the split with no parameter and nothing
+delivered says otherwise. The stresses: the spliced shared exon (a level on each strand) is identical on
+every both-strand row and reads the strand-pure rows' tilt exactly (tilt error 290 → 7 at 500k) for ≤ 44
+false fragments in 415k; the mono shared exon, which has no junction and so no witness, shows the cost bare
+— false gDNA roughly doubles on its 2–20 %-minor rows (`g00` 50k at 20 %: 10,323 → 19,671 of 50k) on an
+exon the volume factor already read 27–99 % gDNA. The encompassing locus (`test_encompassing_locus.py`):
+the region between TA+'s exons, strand-pure and mostly gDNA when TB− is low, read 0.366 against 0.544 and
+reads 0.511; the exon∩exon slots and that region now solve within 0.05 in every regime on both donors, the
+gate un-xfailed; the one remaining miss there is TB−'s shallow single-strand flank under the intergenic
+neighbour's gDNA edge level (`ISSUES: the-lower-bound-noise-ratchet`, its own xfail). Two goldens moved:
+`antisense_overlap` by ≤ 5e-4 relative on transcript counts, and `antisense_contained` — a single-exon
+antisense gene wholly inside a sense exon, so no junction and no single-strand piece exist to witness the −
+strand, on a 1,000-fragment toy that fits no landscape — by the atom's bare cost: its antisense transcript
+81 → 0 and the gDNA-free locus 5.6 → 177.6 false gDNA fragments. That is the approved form's cost at an
+unwitnessed both-strand slot, and the owner's stance (2026-09-14) is that it is a limit of the information,
+accepted: no presence witness is built (a locus with RNA elsewhere does not imply this slot is expressed),
+the landscape prior is the deciding voice on a real library, and the entry that records it is `ISSUES:
+the-atom-at-an-unwitnessed-both-strand-slot`.
 
 ## 6c. ψ's composition is a point on the simplex, and closure is structural (2026-08-17)
 

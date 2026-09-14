@@ -43,7 +43,7 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   in-scope per-object composition error did not move.
 - **ψ**: the composition closes structurally on every published object (`test_vertex_reference.py`);
   the reference location is deleted (`DESIGN.md` §6b.1); the tilt is integrated on nodes that follow each
-  slot's strand term, a derived count and no lattice (`DESIGN.md` §6b.15, `EQUATIONS.md` §9e), exact at any
+  slot's strand term, a derived count and no lattice (`DESIGN.md` §6b.15.11, `EQUATIONS.md` §9e), exact at any
   depth, with the tilt's hypothesis space {pure +, pure −, mixed} (`EQUATIONS.md` §9f); the λ bracket follows
   the landscape prior's derived demand (`landscape.required_logodds_window`).
 - **The prior assembler**: with perfect masses its own error is negligible — `prior_vs_oracle.py`.
@@ -54,7 +54,7 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
 - **Calibration's performance**: the one unfinished component — the sweeps dominate a deep run, on a
   single core, while the locus EM beside them is a rounding error. The decomposition is built: a
   terminal receives nothing, the sweep solves the chain a locus block at a time, the block size moves no
-  number (`DESIGN.md` §6b.15); what remains is the C/C++ port of the block solve, where the parallelism
+  number (`DESIGN.md` §6b.15.1–§6b.15.3); what remains is the C/C++ port of the block solve, where the parallelism
   goes — `profiling/profiler.py`, `profiling/sweep_replay.py --block-slots`.
 - **Panels**: the sparse-nascent 16-condition ladder and the 30-condition test chromosome, both cached
   and certified — `panel.py status`; the fl-gap side panels carry a different nascent model —
@@ -94,7 +94,7 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
    second pass, the stages that scale with depth. The accuracy frame is unchanged, and no step may move a
    number.
 2. **Calibration accuracy where the strand tilt matters** — the AMBIG slots with RNA on both strands
-   (`DESIGN.md` §6b.15). The tilt atom and the strand channel's protocol decision landed 2026-09-14 (the
+   (`DESIGN.md` §6b.15.12–§6b.15.13). The tilt atom and the strand channel's protocol decision landed 2026-09-14 (the
    strand-pure under-call and the gDNA-free deadband CLOSED); the θ measure is settled (both flattenings
    REFUSED, `ISSUES: strand-marginal-volume-factor`); the lanes' own defects are fixed and gated by
    `test_encompassing_locus.py`. What is left is the landscape estimator's vertex bias
