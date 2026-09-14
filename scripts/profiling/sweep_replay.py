@@ -20,7 +20,7 @@ magnitude, and every term is bounded by ``A = max(c_κ·N, K²/2)`` — the stra
 ``c_κ·n`` with ``c_κ = 1/(2κ(1−κ))`` and ``N`` the largest slot count on the chain (strand
 overdispersion above zero caps it at ``c_κ/od`` however deep the slot, so the bound is looser there), and
 the fitted arms' kernel range on the ``K``-cell grid — so ``|δ_k| ≤ ε·T·A``. The rounding unit is the
-solve's (float32 on the AMBIG cube while it has one). The bound is loose by construction — achievable
+solve's, float64's, at every slot. The bound is loose by construction — achievable
 rounding lands orders inside it, since neighbouring cells' errors are incoherent and the read-out averages
 them — and it is a bound on the MEAN; the median the fraction is read from shares it where the posterior
 is unimodal, while a balanced bimodal posterior has none (its median jumps between the modes under any
@@ -51,18 +51,6 @@ from pathlib import Path
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 import numpy as np  # noqa: E402
-
-
-class FrozenRows:
-    """Unpickling shim for captures taken before 2026-09-11, whose policy carried a ``rows_at`` closure
-    frozen as this table; the intron factory's rows now travel on the sweep's context and a capture
-    pickles the policy as it is."""
-
-    def __init__(self, table: dict):
-        self.table = table
-
-    def __call__(self, n_grid, window):
-        return self.table[(int(n_grid), float(window))]
 
 
 def capture(bam: str, index_dir: str, out: Path, threads: int | None) -> int:
@@ -172,22 +160,19 @@ def moves(a, b) -> dict:
 def tolerance_report(expected, result, args, kwargs) -> list[str]:
     """The report lines for one replayed sweep: every belief array, its moves, and the budget the slots
     that moved are held to. The budget's inputs are read off the captured call: the largest slot count,
-    the strand model's κ, the window, and each slot's rounding unit (float32 where both strands are
-    live — the AMBIG cube — else float64)."""
-    _chain, statics, geometry, _belief, _ra = args
+    the strand model's κ and the window; the rounding unit is float64's at every slot, since ψ is float64
+    throughout."""
+    _chain, _statics, geometry, _belief, _ra = args
     counts = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1) + np.asarray(
         geometry.spliced_count, np.float64
     ).sum(axis=1)
-    ambig = np.asarray(statics.free_pos, bool) & np.asarray(statics.free_neg, bool)
-    eps = np.where(ambig, EPS32, EPS64)
     kappa = float(kwargs["rna_sense_frac"])
     window = float(kwargs.get("logodds_window", 10.0))
     n_grid = int(kwargs["n_grid"])
-    b_frac, b_var = budget(float(counts.max()) if counts.size else 0.0, kappa, window, eps, n_grid)
+    b_frac, b_var = budget(float(counts.max()) if counts.size else 0.0, kappa, window, EPS64, n_grid)
     lines = [
         f"     tolerance: N = {counts.max():.0f}, κ = {kappa:.4f}, L = {window:g}, K = {n_grid}; the budget "
-        f"is ½·ε·T·max(c_κ·N, K²/2) on a fraction ({b_frac.min():.2e} at float64, {b_frac.max():.2e} at "
-        f"float32) and L̃² of it on a log-variance"
+        f"is ½·ε·T·max(c_κ·N, K²/2) on a fraction ({b_frac:.2e}, float64) and L̃² of it on a log-variance"
     ]
     for f in dataclasses.fields(expected):
         a, b = getattr(expected, f.name), getattr(result, f.name)
@@ -198,7 +183,7 @@ def tolerance_report(expected, result, args, kwargs) -> list[str]:
         if m["moved"] == 0:
             lines.append(f"     {f.name:<16} 0 moved")
             continue
-        bound = (b_var if f.name.startswith("var") else b_frac)[m["where"]]
+        bound = b_var if f.name.startswith("var") else b_frac
         ratio = float((m["per_slot"] / bound).max()) if "per_slot" in m else float("nan")
         verdict = "within the budget" if ratio <= 1.0 else "BEYOND the budget — look at these slots"
         lines.append(

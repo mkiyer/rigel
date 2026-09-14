@@ -85,3 +85,34 @@ def test_the_budget_covers_term_and_intermediate_rounding_and_its_constants_are_
     # the achieved worst ratio sits orders inside the bound (rounding errors on neighbouring cells are
     # incoherent and the read-out averages them); a bound is what it is — this records the scale
     assert worst < 1e-2, f"the brute force came within 1 % of the bound: re-derive it ({worst:.3e})"
+
+
+def test_an_ambig_slot_is_held_to_the_float64_budget():
+    """ψ is float64 at every slot, AMBIG ones included, so the report must hold a move at an AMBIG slot to
+    the float64 budget: a 1e-9 move there is orders past it and must read BEYOND, where a float32 unit
+    would call it within."""
+    import dataclasses
+    from types import SimpleNamespace
+
+    sr = _replay()
+
+    @dataclasses.dataclass
+    class Belief:
+        f_g: np.ndarray
+
+    n = 4
+    # every slot AMBIG: both strands admissible
+    statics = SimpleNamespace(free_pos=np.ones(n, bool), free_neg=np.ones(n, bool))
+    geometry = SimpleNamespace(
+        unspliced_count=np.full((n, 2), 50.0), spliced_count=np.zeros((n, 2))
+    )
+    args = (None, statics, geometry, None, None)
+    kwargs = {"rna_sense_frac": 0.99, "logodds_window": 10.0, "n_grid": 138}
+    expected = Belief(f_g=np.full(n, 0.25))
+    moved = expected.f_g.copy()
+    moved[2] += 1e-9
+    b_frac, _ = sr.budget(100.0, 0.99, 10.0, sr.EPS64, 138)
+    assert 1e-9 > b_frac, "the move must exceed the float64 budget for this gate to mean anything"
+    report = sr.tolerance_report(expected, Belief(f_g=moved), args, kwargs)
+    line = next(row for row in report if "f_g" in row)
+    assert "BEYOND the budget" in line, line

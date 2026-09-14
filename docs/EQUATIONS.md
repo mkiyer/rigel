@@ -801,7 +801,7 @@ neither scale beyond them. With `N` the largest slot count on the chain,
     A = max(c_κ · N, K²/2),      B_f = ½ · ε · T · A,      B_var = L̃² · ε · T · A,
 
 with `T = 6` (the strand term, two arms, the factory rows, the message rows, the cube row) and `ε` the
-solve's rounding unit — float64's `2⁻⁵³`, or float32's `2⁻²⁴` on the AMBIG cube while it has one. The
+solve's rounding unit — float64's `2⁻⁵³`, the whole of ψ's precision. The
 bound is loose by construction (a full cancellation at a high-weight cell is assumed), which is why the
 report always shows the actual move beside it. Achievable rounding lands orders inside it: float32
 rounding of every term and of the strand mean at disagreeing slots moves a fraction by 10⁻⁴–10⁻⁵ of the
