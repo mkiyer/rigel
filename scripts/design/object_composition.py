@@ -285,7 +285,6 @@ def measure_condition(index, region_arrays, sj, boundary_flags, suite: Path, ora
         sj,
         kw["gdna_fl_pmf"],
         kw["rna_fl_pmf"],
-        None,
     )
     cls = strata(chain, statics, geometry, region_arrays)
     label, locked, has_sj, on_target = (

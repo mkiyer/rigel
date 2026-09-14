@@ -634,7 +634,7 @@ def load_condition(suite: Path, condition: str, index, cached: dict) -> tuple[ob
     chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
     substrate = CalibrationSubstrate.from_payload(payload, ra)
     geometry = build_region_geometry(
-        chain, substrate, ra, cached["sj"], kw["gdna_fl_pmf"], kw["rna_fl_pmf"], None
+        chain, substrate, ra, cached["sj"], kw["gdna_fl_pmf"], kw["rna_fl_pmf"]
     )
     statics = build_region_statics(chain, ra, cached["bflags"])
     label = OC.strata(chain, statics, geometry, ra)["label"].astype(str)

@@ -148,7 +148,7 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
     statics = build_region_statics(chain, region_arrays, bflags)
     geom = build_region_geometry(
         chain, CalibrationSubstrate.from_payload(payload, region_arrays),
-        region_arrays, sj, kw["gdna_fl_pmf"], kw["rna_fl_pmf"], None,
+        region_arrays, sj, kw["gdna_fl_pmf"], kw["rna_fl_pmf"],
     )
     label = OC.strata(chain, statics, geom, region_arrays)["label"]
 
