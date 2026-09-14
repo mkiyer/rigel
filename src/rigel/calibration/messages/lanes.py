@@ -96,9 +96,10 @@ def rna_lanes(c: _Chain, own: list, library: _Library) -> dict:
     composition already carries it. An EMPTY exon piece beside a lit junction is a source too: its
     level is priced on its zero count — counting alone — and the piece emits it with the flux's own
     witness, the pooled spliced count on the pooled route opportunity, so the next full node prices
-    the hop as a full exon prices its flux. The coordinate ``rho_ref_s`` is the library's strand-``s``
-    unspliced density over its single-strand exons, and whether the split is a witness at all is the
-    library's verdict too — both from `TransferPolicy.library`. Nothing pooled, no constant."""
+    the hop as a full exon prices its flux. The coordinate is the library's one RNA coordinate (`_Library.rho_rna`) — a level
+    is absolute and its coordinate only an origin, so both strands share it and a strand with no
+    single-strand exon of its own still builds its flux levels — and whether the split is a witness at
+    all is the library's verdict too. Nothing pooled, no constant."""
     n_u, a_r, cnt = c.n_u, c.a_r, c.cnt
     empty = ~(n_u > 0.0) | ~(a_r > 0.0)
     single = ~(c.fp & c.fn)
@@ -129,7 +130,7 @@ def rna_lanes(c: _Chain, own: list, library: _Library) -> dict:
             into_own_intron = ~crossing & ((f & term_bits) == 0) & intron_s[reg]
             face[:, side] = ok & (crossing | into_own_intron)
             two_sided[:, side] = ok & ((crossing & intron_s[reg]) | into_own_intron)
-        rho_ref = float(library.rho_rna[name])
+        rho_ref = float(library.rho_rna)
         own_level: list = [None] * c.n
         flux_of: dict = {}
         flux_witness: list = [None] * c.n

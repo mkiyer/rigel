@@ -385,7 +385,8 @@ def _rna_arm(lam):
 class CubeRow:
     """The RNA level lanes' delivery at an AMBIG slot, as what it is made of: per strand the held level
     profile over ``u = log(ρ/ρ_ref)`` on the solve grid (either may be absent), the slot's total and its
-    RNA opportunity, and each lane's reference density. ψ evaluates it at its own θ nodes (:meth:`at`) —
+    RNA opportunity, and the lanes' one reference density (a level is absolute; the coordinate is only
+    its origin, and both strands share it). ψ evaluates it at its own θ nodes (:meth:`at`) —
     there is no θ lattice for a row to be built on, so nothing is interpolated. A one-sided profile stays
     one-sided through the map (it is monotone in each share), so "at least this much RNA+" arrives as a
     wall in the cube and no parametric summary is made."""
@@ -395,8 +396,7 @@ class CubeRow:
     u: np.ndarray
     total: float
     opportunity: float
-    rho_ref_pos: float
-    rho_ref_neg: float
+    rho_ref: float
 
     def at(self, fg, tau) -> np.ndarray:
         """The row over ψ's cells: at each ``(λ, θ)`` the strand's share ``f_s = (1 − f_g)(1 ± τ)/2``
@@ -410,15 +410,12 @@ class CubeRow:
         f_act = (1.0 - fg)[:, None]
         out = np.zeros(np.broadcast_shapes(f_act.shape, tau.shape))
         scale = float(self.total) / float(self.opportunity)
-        for prof, sign, rho in (
-            (self.profile_pos, 1.0, self.rho_ref_pos),
-            (self.profile_neg, -1.0, self.rho_ref_neg),
-        ):
+        for prof, sign in ((self.profile_pos, 1.0), (self.profile_neg, -1.0)):
             if prof is None:
                 continue
             prof = np.asarray(prof, np.float64)
             with np.errstate(divide="ignore"):
-                u_s = np.log(f_act * (1.0 + sign * tau) / 2.0 * scale) - np.log(float(rho))
+                u_s = np.log(f_act * (1.0 + sign * tau) / 2.0 * scale) - np.log(float(self.rho_ref))
             out += np.interp(
                 u_s, np.asarray(self.u, np.float64), prof, left=prof[0], right=prof[-1]
             )

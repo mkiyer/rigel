@@ -399,7 +399,7 @@ def test_the_cube_channel_is_checked_per_ambig_slot_and_shape():
     K = int(ctx.n_grid)
 
     def row(prof):
-        return CubeRow(prof, None, np.linspace(-10.0, 10.0, K), 100.0, 50.0, 0.5, 0.5)
+        return CubeRow(prof, None, np.linspace(-10.0, 10.0, K), 100.0, 50.0, 0.5)
 
     ok = _counts(PsiMessage(cube_rows={0: row(np.zeros(K))}), ctx)
     assert ok["cube_rows_finite"] == {"violations": 0, "eligible": 1}
@@ -433,7 +433,7 @@ def test_the_solvers_cube_is_inert_when_absent_and_walls_the_tilt_when_present()
     u = np.linspace(-10.0, 10.0, K)
     # "at least 30 % RNA+": a wall below the density that share implies, n = 100, a_r = 100, ρ_ref = 1
     floor = np.where(u < np.log(0.3), -50.0, 0.0)
-    wall = CubeRow(floor, None, u, 100.0, 100.0, 1.0, 1.0)
+    wall = CubeRow(floor, None, u, 100.0, 100.0, 1.0)
     walled = _solve_regions_logodds_all(
         u_pos, u_neg, ap, an, u_pos + u_neg, np.zeros(m), cube_rows={1: wall}, **kw
     )

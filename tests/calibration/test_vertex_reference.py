@@ -599,8 +599,7 @@ def test_a_delivered_row_is_evaluated_at_the_nodes_exactly():
         u=u,
         total=400.0,
         opportunity=100.0,
-        rho_ref_pos=0.5,
-        rho_ref_neg=0.5,
+        rho_ref=0.5,
     )
     bare, _fp, _fn, tau = SL._psi(*args, ambig=True, **kw)
     with_row, _fp, _fn, tau2 = SL._psi(*args, ambig=True, cube_rows=[row], **kw)
@@ -609,7 +608,7 @@ def test_a_delivered_row_is_evaluated_at_the_nodes_exactly():
     # sums is not the row to the bit; an interpolated row would miss by 1e-2
     assert np.allclose(with_row - bare, row.at(kw["fg"], tau[0]), atol=1e-9, rtol=0.0)
     assert not np.array_equal(with_row, bare), "the row must do something"
-    empty = SL.CubeRow(None, None, u, 400.0, 100.0, 0.5, 0.5)
+    empty = SL.CubeRow(None, None, u, 400.0, 100.0, 0.5)
     nothing, *_ = SL._psi(*args, ambig=True, cube_rows=[empty], **kw)
     assert np.array_equal(nothing, bare)
 

@@ -136,12 +136,14 @@ class _Library:
     """What the whole library says, reduced once per sweep and read by every block — the only
     cross-block information a message may use. ``rho_gdna``: the structurally pure gDNA density, the
     gDNA lane's coordinate (``0.0``: no positive density anywhere, so no level lane can be built).
-    ``rho_rna``: per strand, its unspliced density over its single-strand exons, the RNA lanes'
-    coordinates. ``split_live``: the strand split is a witness of a strand's RNA somewhere — the
+    ``rho_rna``: the RNA lanes' one coordinate — the unspliced RNA density over the library's
+    single-strand exons, both strands pooled, or over every exon when no single-strand exon has counts
+    (a level is absolute and the coordinate only its origin, so one serves both strands and a strand with
+    no single-strand exon of its own still builds its flux levels). ``split_live``: the strand split is a witness of a strand's RNA somewhere — the
     derived deadband is open and some single-strand exon has counts."""
 
     rho_gdna: float
-    rho_rna: dict
+    rho_rna: float
     split_live: bool
 
 
@@ -189,15 +191,17 @@ class TransferPolicy:
             and bool(view.strand_live)
             and bool(np.any(is_exon & single & (n_u > 0.0)))
         )
-        rho_rna = {}
-        for name, free, col in (("pos", fp, 0), ("neg", fn, 1)):
-            # the lane's coordinate: the library's strand-``s`` unspliced density over its single-strand
-            # exons, on the column strand-``s`` RNA reads on (`read_column`)
+        # the RNA lanes' coordinate: the unspliced RNA density over the single-strand exons, each strand
+        # read on its own column (`read_column`), both strands pooled; every exon when none has counts
+        num = den = 0.0
+        for free, col in ((fp, 0), (fn, 1)):
             sel = is_exon & free & single & (a_r > 0.0)
-            col_read = read_column(col, kappa)
-            rho_rna[name] = (
-                float(cnt[sel, col_read].sum() / a_r[sel].sum()) if a_r[sel].sum() > 0.0 else 0.0
-            )
+            num += float(cnt[sel, read_column(col, kappa)].sum())
+            den += float(a_r[sel].sum())
+        if den <= 0.0:
+            sel = is_exon & (a_r > 0.0)
+            num, den = float(cnt[sel].sum()), float(a_r[sel].sum())
+        rho_rna = num / den if den > 0.0 else 0.0
         return _Library(rho, rho_rna, split_live)
 
     # ── phase 0: every node's own claim, and the recipient's rule per directed face ──────────────
@@ -671,7 +675,6 @@ class _PreparedTransfer:
                     u=pos.u,
                     total=float(pos.total[i]),
                     opportunity=float(pos.a[i]),
-                    rho_ref_pos=float(pos.rho_ref),
-                    rho_ref_neg=float(neg.rho_ref),
+                    rho_ref=float(pos.rho_ref),
                 )
         return out

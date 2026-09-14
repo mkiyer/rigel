@@ -423,9 +423,9 @@ def test_a_lower_only_profile_stays_one_sided_on_the_cube():
     fg = 1.0 / (1.0 + np.exp(-lam))
     u = lam
     floor = -0.5 * np.maximum(0.0, (0.0 - u) / 0.3) ** 2
-    row = CubeRow(floor, None, u, 400.0, 100.0, 0.5, 0.5).at(fg, tau)
+    row = CubeRow(floor, None, u, 400.0, 100.0, 0.5).at(fg, tau)
     assert np.all(np.diff(row, axis=1) >= -1e-9) and np.all(np.diff(row, axis=0) <= 1e-9)
-    two = CubeRow(-0.5 * (u / 0.3) ** 2, None, u, 400.0, 100.0, 0.5, 0.5).at(fg, tau)
+    two = CubeRow(-0.5 * (u / 0.3) ** 2, None, u, 400.0, 100.0, 0.5).at(fg, tau)
     assert not (np.all(np.diff(two, axis=1) >= -1e-9) and np.all(np.diff(two, axis=0) <= 1e-9))
 
 
@@ -477,9 +477,9 @@ def test_THE_BRACKET_THEOREM_three_lower_bounds_and_the_strand_equation_bracket_
             s: floor(np.log(truth[s] * n / a_r / rho[s])) for s in ("pos", "neg") if s not in drop
         }
         if profiles:
-            psi += sl.CubeRow(
-                profiles.get("pos"), profiles.get("neg"), u, n, a_r, rho["pos"], rho["neg"]
-            ).at(fg, tau)
+            psi += sl.CubeRow(profiles.get("pos"), profiles.get("neg"), u, n, a_r, rho["pos"]).at(
+                fg, tau
+            )
         if "g" not in drop:
             lvl = floor(np.log(truth["g"] * n / a_g / rho["g"]))
             psi += profile_of_level(lvl, u, lam, n, a_g, rho["g"])[:, None]
@@ -549,12 +549,7 @@ def test_the_cube_delivery_is_the_intersected_held_levels_and_the_own_flux(sweep
     )
     np.testing.assert_allclose(got.profile_neg, intersect([lv_n]), atol=1e-12)
     assert np.array_equal(got.u, u)
-    assert (got.total, got.opportunity, got.rho_ref_pos, got.rho_ref_neg) == (
-        400.0,
-        100.0,
-        0.5,
-        0.4,
-    )
+    assert (got.total, got.opportunity, got.rho_ref) == (400.0, 100.0, 0.5)
 
 
 def _empty_piece_ctx(flux: float = 40.0, rate: float = 0.02):
@@ -738,7 +733,7 @@ def test_the_rna_lanes_are_built_without_a_gdna_lane():
     pol = TransferPolicy(strand=(0.99, 0.02, 0.02))
     ctx = _neg_only_ctx()
     lib = pol.library(ctx)
-    assert lib.rho_rna["neg"] > 0.0, "the gate's premise: the − coordinate exists"
+    assert lib.rho_rna > 0.0, "the gate's premise: the RNA coordinate exists"
     gdna_free = _Library(0.0, lib.rho_rna, lib.split_live)
     prepared = pol.prepare(ctx, gdna_free)
     assert "gdna" not in prepared.lanes
@@ -756,9 +751,7 @@ def test_a_strands_level_is_delivered_to_the_cube_when_the_other_strand_has_no_c
     pol = TransferPolicy(strand=(0.99, 0.02, 0.02))
     ctx = _neg_only_ctx()
     prepared = _prepared(pol, ctx)
-    assert prepared.lanes["pos"].rho_ref == 0.0 and prepared.lanes["neg"].rho_ref > 0.0, (
-        "the gate's premise"
-    )
+    assert prepared.lanes["pos"].rho_ref > 0.0, "one coordinate serves both strands"
     K = int(ctx.n_grid)
     from_left, from_right = Received.empty(7, K), Received.empty(7, K)
     from_left.has_neighbour[6] = True
@@ -767,3 +760,34 @@ def test_a_strands_level_is_delivered_to_the_cube_when_the_other_strand_has_no_c
     rows = prepared._cube_rows(from_left, from_right)
     assert 6 in rows, "the − level held at the both-stranded exon was not delivered"
     assert rows[6].profile_neg is not None and rows[6].profile_pos is None
+
+
+def test_a_junctions_flux_is_a_source_when_the_strand_has_no_single_strand_exon():
+    """TA+'s exons are both both-stranded, so + has no single-strand exon and, on the old per-strand
+    coordinate, no coordinate and no source: its junction's certified flux was silently unused. A level
+    is absolute and the coordinate only an origin, so one RNA coordinate serves both strands and the +
+    flux level is built at the exon and delivered into its cube. PERTURBATION: the same context with no
+    spliced fragments at the junction builds no + level."""
+    import dataclasses
+
+    from rigel.calibration.messages import Received
+    from rigel.calibration.messages.transfer import TransferPolicy
+    from rigel.calibration.splice_graph import FLAG_ACCEPTOR_POS
+
+    pol = TransferPolicy(strand=(0.99, 0.02, 0.02))
+    base = _neg_only_ctx()
+    flags = base.boundary_flags.copy()
+    flags[5] = FLAG_ACCEPTOR_POS  # the + junction's acceptor, its exon (slot 6) to the right
+    sj_hi, rr_hi = np.zeros((7, 2)), np.zeros((7, 2))
+    sj_hi[5, 0], rr_hi[5, 0] = 40.0, 0.02
+    lit = dataclasses.replace(
+        base, boundary_flags=flags, sj_count=sj_hi.copy(), sj_count_hi=sj_hi, route_rate_hi=rr_hi
+    )
+    prepared = _prepared(pol, lit)
+    lane = prepared.lanes["pos"]
+    assert lane.own_level[6] is not None, "the + junction's flux built no level at its exon"
+    K = int(lit.n_grid)
+    rows = prepared._cube_rows(Received.empty(7, K), Received.empty(7, K))
+    assert 6 in rows and rows[6].profile_pos is not None, "the + flux level was not delivered"
+    dark = _prepared(pol, base)
+    assert dark.lanes["pos"].own_level[6] is None
