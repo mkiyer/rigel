@@ -388,3 +388,12 @@ test_chr	7025938	7026063	sparse_B2_capshared_ba_H_e0	0	.	7025938	7026063	0	1	125
 test_chr	7039938	7040063	sparse_B2_capshared_ba_H_e1	0	.	7039938	7040063	0	1	125	0
 test_chr	7125938	7126063	sparse_B2_capshared_eq_H_e0	0	.	7125938	7126063	0	1	125	0
 test_chr	7139938	7140063	sparse_B2_capshared_eq_H_e1	0	.	7139938	7140063	0	1	125	0
+test_chr	7212438	7212563	sparse_B2_capinintron_ab_H_e0	0	.	7212438	7212563	0	1	125	0
+test_chr	7220438	7220563	sparse_B2_capinintron_ab_H_e1	0	.	7220438	7220563	0	1	125	0
+test_chr	7228438	7228563	sparse_B2_capinintron_ab_H_e2	0	.	7228438	7228563	0	1	125	0
+test_chr	7286438	7286563	sparse_B2_capinintron_ba_H_e0	0	.	7286438	7286563	0	1	125	0
+test_chr	7294438	7294563	sparse_B2_capinintron_ba_H_e1	0	.	7294438	7294563	0	1	125	0
+test_chr	7302438	7302563	sparse_B2_capinintron_ba_H_e2	0	.	7302438	7302563	0	1	125	0
+test_chr	7360438	7360563	sparse_B2_capinintron_eq_H_e0	0	.	7360438	7360563	0	1	125	0
+test_chr	7368438	7368563	sparse_B2_capinintron_eq_H_e1	0	.	7368438	7368563	0	1	125	0
+test_chr	7376438	7376563	sparse_B2_capinintron_eq_H_e2	0	.	7376438	7376563	0	1	125	0

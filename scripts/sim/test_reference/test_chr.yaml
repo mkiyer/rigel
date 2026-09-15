@@ -212,7 +212,20 @@ ref_name: test_chr
 # 6 loci = 12 genes at pitch 50,000 from 6,875,000.
 # The chromosome grows to 7.175 Mb and the fragment budget from 1,090 k to 1,120 k (600 abundance
 # units join 46,135: RNA depth per existing transcript +1.4 %, gDNA density per base -1.5 %).
-genome_length: 7175000      # the shared block's last gene ends at 7,155,000; the 20 kb spacer follows
+# ── THE IN-INTRON BLOCK (session 2026-09-14) ────────────────────────────────────────────────────────
+# A SINGLE-EXON gene inside the opposite strand's INTRON — the majority AMBIG class: the slot admits gDNA,
+# the host's unspliced RNA+ and the antisense's RNA−, the antisense has no junction, and the only message
+# source on its strand is its own gene edge (the mono block's case, now both-stranded). On the ladder: 203
+# gene pairs — processed pseudogenes and lncRNAs of median 567 bp (the small-RNA classes excluded) in
+# introns of median 20 kb: RPL31P62 (−, 328 bp) in IL17RA's intron, ENSG00000279390 (+, 2,191 bp) in
+# NRIP1's, RPL32P5 (+, 373 bp) in ADA2's. `asin` is the SPLICED antisense in the first intron; this is the
+# unspliced one. Here: host H = the twin shape on +; antisense A = one 600 bp exon [o+4,200, o+4,800) on −,
+# centred in H's first intron with 3.2 kb of intron on each side. Regimes ab 90 : 10, ba 10 : 90, eq 50 : 50,
+# pair total 100; unprobed / host-only probed (`cap`); ids `gB2_{cap}inintron_{regime}_H` / `_A`. 6 loci =
+# 12 genes at pitch 37,000 from 7,175,000.
+# The chromosome grows to 7.397 Mb and the fragment budget from 1,120 k to 1,140 k (600 abundance
+# units join 46,735: RNA depth per existing transcript +0.5 %, gDNA density per base -1.3 %).
+genome_length: 7397000      # the inintron block's last gene ends at 7,377,000; the 20 kb spacer follows
 seed: 20260819
 blank:
   ref_name: test_blank
@@ -1742,6 +1755,70 @@ genes:
     probed: false
     transcripts:
       - {t_id: B2_capshared_eq_A, exons: [[7135000, 7145000], [7153000, 7155000]], abundance: 50}
+
+  # ── THE IN-INTRON BLOCK (2026-09-14): a 600 bp single-exon antisense A on − in H's first intron;
+  #    regimes ab 90:10 / ba 10:90 / eq 50:50, unprobed / host-only probed (cap); 6 loci at pitch 37,000
+  #    from 7,175,000
+  - gene_id: gB2_inintron_ab_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_inintron_ab_H, exons: [[7175000, 7176000], [7183000, 7184000], [7191000, 7192000]], abundance: 90}
+  - gene_id: gB2_inintron_ab_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_inintron_ab_A, exons: [[7179200, 7179800]], abundance: 10}
+  - gene_id: gB2_capinintron_ab_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capinintron_ab_H, exons: [[7212000, 7213000], [7220000, 7221000], [7228000, 7229000]], abundance: 90}
+  - gene_id: gB2_capinintron_ab_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capinintron_ab_A, exons: [[7216200, 7216800]], abundance: 10}
+  - gene_id: gB2_inintron_ba_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_inintron_ba_H, exons: [[7249000, 7250000], [7257000, 7258000], [7265000, 7266000]], abundance: 10}
+  - gene_id: gB2_inintron_ba_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_inintron_ba_A, exons: [[7253200, 7253800]], abundance: 90}
+  - gene_id: gB2_capinintron_ba_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capinintron_ba_H, exons: [[7286000, 7287000], [7294000, 7295000], [7302000, 7303000]], abundance: 10}
+  - gene_id: gB2_capinintron_ba_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capinintron_ba_A, exons: [[7290200, 7290800]], abundance: 90}
+  - gene_id: gB2_inintron_eq_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_inintron_eq_H, exons: [[7323000, 7324000], [7331000, 7332000], [7339000, 7340000]], abundance: 50}
+  - gene_id: gB2_inintron_eq_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_inintron_eq_A, exons: [[7327200, 7327800]], abundance: 50}
+  - gene_id: gB2_capinintron_eq_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capinintron_eq_H, exons: [[7360000, 7361000], [7368000, 7369000], [7376000, 7377000]], abundance: 50}
+  - gene_id: gB2_capinintron_eq_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capinintron_eq_A, exons: [[7364200, 7364800]], abundance: 50}
 
 shadow_genes:
   - gene_id: gshadow_U1
