@@ -373,3 +373,12 @@ test_chr	6538938	6539063	sparse_B2_capenc_ba_H_e2	0	.	6538938	6539063	0	1	125	0
 test_chr	6602938	6603063	sparse_B2_capenc_eq_H_e0	0	.	6602938	6603063	0	1	125	0
 test_chr	6610938	6611063	sparse_B2_capenc_eq_H_e1	0	.	6610938	6611063	0	1	125	0
 test_chr	6618938	6619063	sparse_B2_capenc_eq_H_e2	0	.	6618938	6619063	0	1	125	0
+test_chr	6680438	6680563	sparse_B2_capinexon_ab_H_e0	0	.	6680438	6680563	0	1	125	0
+test_chr	6688438	6688563	sparse_B2_capinexon_ab_H_e1	0	.	6688438	6688563	0	1	125	0
+test_chr	6697438	6697563	sparse_B2_capinexon_ab_H_e2	0	.	6697438	6697563	0	1	125	0
+test_chr	6758438	6758563	sparse_B2_capinexon_ba_H_e0	0	.	6758438	6758563	0	1	125	0
+test_chr	6766438	6766563	sparse_B2_capinexon_ba_H_e1	0	.	6766438	6766563	0	1	125	0
+test_chr	6775438	6775563	sparse_B2_capinexon_ba_H_e2	0	.	6775438	6775563	0	1	125	0
+test_chr	6836438	6836563	sparse_B2_capinexon_eq_H_e0	0	.	6836438	6836563	0	1	125	0
+test_chr	6844438	6844563	sparse_B2_capinexon_eq_H_e1	0	.	6844438	6844563	0	1	125	0
+test_chr	6853438	6853563	sparse_B2_capinexon_eq_H_e2	0	.	6853438	6853563	0	1	125	0

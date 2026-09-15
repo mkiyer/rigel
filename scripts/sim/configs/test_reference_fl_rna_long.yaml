@@ -42,8 +42,8 @@ outdir: /Users/mkiyer/Downloads/rigel_runs/test_reference/scenarios_fl_rna_long
 
 simulation:
   # ⭐ small on purpose — the point of this reference is a SECONDS-long loop
-  n_total_fragments: 1060000
-  n_rna_fragments: 1060000
+  n_total_fragments: 1090000
+  n_rna_fragments: 1090000
   sim_seed: 42
   # ⛔ DELIBERATELY DIFFERENT from the gdna block below (this is the fl-GAP arm; the base arm keeps them equal
   # rather than letting the EM split the origins on length alone (`docs/TESTING.md` §0).

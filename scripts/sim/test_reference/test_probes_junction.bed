@@ -216,3 +216,9 @@ test_chr	6523438	6530563	junction_B2_capenc_ba_H_sj0	0	.	6523438	6530563	0	2	62,
 test_chr	6531438	6538563	junction_B2_capenc_ba_H_sj1	0	.	6531438	6538563	0	2	62,63	0,7062
 test_chr	6603438	6610563	junction_B2_capenc_eq_H_sj0	0	.	6603438	6610563	0	2	62,63	0,7062
 test_chr	6611438	6618563	junction_B2_capenc_eq_H_sj1	0	.	6611438	6618563	0	2	62,63	0,7062
+test_chr	6680938	6688063	junction_B2_capinexon_ab_H_sj0	0	.	6680938	6688063	0	2	62,63	0,7062
+test_chr	6688938	6696063	junction_B2_capinexon_ab_H_sj1	0	.	6688938	6696063	0	2	62,63	0,7062
+test_chr	6758938	6766063	junction_B2_capinexon_ba_H_sj0	0	.	6758938	6766063	0	2	62,63	0,7062
+test_chr	6766938	6774063	junction_B2_capinexon_ba_H_sj1	0	.	6766938	6774063	0	2	62,63	0,7062
+test_chr	6836938	6844063	junction_B2_capinexon_eq_H_sj0	0	.	6836938	6844063	0	2	62,63	0,7062
+test_chr	6844938	6852063	junction_B2_capinexon_eq_H_sj1	0	.	6844938	6852063	0	2	62,63	0,7062

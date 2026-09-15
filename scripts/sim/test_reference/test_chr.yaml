@@ -183,7 +183,21 @@ ref_name: test_chr
 # 20 kb + the 20 kb spacer) from 6,401,000.
 # The chromosome grows to 6.641 Mb and the fragment budget from 1,030 k to 1,060 k (600 abundance
 # units join 44,935: RNA depth per existing transcript +1.6 %, gDNA density per base -0.8 %).
-genome_length: 6641000      # the enc block's last gene ends at 6,621,000; the 20 kb spacer follows
+# ── THE IN-EXON BLOCK (session 2026-09-14) ──────────────────────────────────────────────────────────
+# A short SINGLE-EXON antisense gene wholly INSIDE one exon of the host, with no junction and no
+# single-strand piece of its own anywhere — the slot the tilt atom's accepted limit names (`ISSUES:
+# the-atom-at-an-unwitnessed-both-strand-slot`; the golden `antisense_contained`, a 1,000-fragment toy on
+# which the atom reads 177.6 false gDNA of 1,000), so the panel carries its number. On the ladder: 13 gene
+# pairs, six of them in a protein-coding gene's LAST exon — ENSG00000273300 (+, 427 bp, expressed) inside
+# UFD1's 4.2 kb last exon, TSSK2 (+, 1,315 bp) inside ESS2's, RNF185-AS1 (−, 353 bp) inside RNF185's.
+# Here: host H = the twin shape on + with a 3 kb LAST exon [o+16,000, o+19,000) (the 3' UTR); antisense
+# A = one 500 bp exon [o+17,000, o+17,500) on −, 1 kb of single-strand host exon before it and 1.5 kb
+# after (the host's TES side). Regimes ab
+# 90 : 10 (the realistic case), ba 10 : 90, eq 50 : 50, pair total 100; unprobed / host-only probed
+# (`cap`); ids `gB2_{cap}inexon_{regime}_H` / `_A`. 6 loci = 12 genes at pitch 39,000 from 6,641,000.
+# The chromosome grows to 6.875 Mb and the fragment budget from 1,060 k to 1,090 k (600 abundance
+# units join 45,535: RNA depth per existing transcript +1.5 %, gDNA density per base -0.7 %).
+genome_length: 6875000      # the inexon block's last gene ends at 6,855,000; the 20 kb spacer follows
 seed: 20260819
 blank:
   ref_name: test_blank
@@ -1585,6 +1599,70 @@ genes:
     probed: false
     transcripts:
       - {t_id: B2_capenc_eq_A, exons: [[6601000, 6621000]], abundance: 50}
+
+  # ── THE IN-EXON BLOCK (2026-09-14): a 500 bp single-exon antisense A on − inside H's 3 kb last exon;
+  #    regimes ab 90:10 / ba 10:90 / eq 50:50, unprobed / host-only probed (cap); 6 loci at pitch 39,000
+  #    from 6,641,000
+  - gene_id: gB2_inexon_ab_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_inexon_ab_H, exons: [[6641000, 6642000], [6649000, 6650000], [6657000, 6660000]], abundance: 90}
+  - gene_id: gB2_inexon_ab_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_inexon_ab_A, exons: [[6658000, 6658500]], abundance: 10}
+  - gene_id: gB2_capinexon_ab_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capinexon_ab_H, exons: [[6680000, 6681000], [6688000, 6689000], [6696000, 6699000]], abundance: 90}
+  - gene_id: gB2_capinexon_ab_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capinexon_ab_A, exons: [[6697000, 6697500]], abundance: 10}
+  - gene_id: gB2_inexon_ba_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_inexon_ba_H, exons: [[6719000, 6720000], [6727000, 6728000], [6735000, 6738000]], abundance: 10}
+  - gene_id: gB2_inexon_ba_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_inexon_ba_A, exons: [[6736000, 6736500]], abundance: 90}
+  - gene_id: gB2_capinexon_ba_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capinexon_ba_H, exons: [[6758000, 6759000], [6766000, 6767000], [6774000, 6777000]], abundance: 10}
+  - gene_id: gB2_capinexon_ba_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capinexon_ba_A, exons: [[6775000, 6775500]], abundance: 90}
+  - gene_id: gB2_inexon_eq_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_inexon_eq_H, exons: [[6797000, 6798000], [6805000, 6806000], [6813000, 6816000]], abundance: 50}
+  - gene_id: gB2_inexon_eq_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_inexon_eq_A, exons: [[6814000, 6814500]], abundance: 50}
+  - gene_id: gB2_capinexon_eq_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capinexon_eq_H, exons: [[6836000, 6837000], [6844000, 6845000], [6852000, 6855000]], abundance: 50}
+  - gene_id: gB2_capinexon_eq_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capinexon_eq_A, exons: [[6853000, 6853500]], abundance: 50}
 
 shadow_genes:
   - gene_id: gshadow_U1
