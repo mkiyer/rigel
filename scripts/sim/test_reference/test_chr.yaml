@@ -167,7 +167,23 @@ ref_name: test_chr
 # strand alternating within a block and flipping between them. The chromosome grows to 6.401 Mb and the
 # fragment budget from 960 k to 1,030 k (2,970 abundance units join 41,965: RNA depth per existing
 # transcript +0.2 %, gDNA density per base +0.3 %).
-genome_length: 6401000      # the sj+terminus block's last gene ends at 6,381,000; the 20 kb spacer follows
+# ── THE ENCOMPASSING BLOCK (session 2026-09-14; the second both-stranded block) ────────────────────
+# A long SINGLE-EXON antisense whose one exon ENCOMPASSES the whole of a spliced host on the other strand:
+# every one of the host's slots admits RNA on both strands (its exons are exon∩exon, its introns are the
+# antisense's exon), every boundary carries only the host's bits, and the antisense's level is measured
+# nowhere but in its two single-strand FLANKS — the owner's encompassing locus (`tests/calibration/
+# test_encompassing_locus.py`, a single-exon TB− over a two-exon TA+, 2026-09-13), whose remaining miss is
+# the shallow flank under the intergenic gDNA edge level (`ISSUES: the-lower-bound-noise-ratchet`). On the
+# ladder: 6 gene pairs — ENSG00000280007 (−, a 20.4 kb exon) over TUBA8's four-exon isoform, ENSG00000279080
+# (+, 20.4 kb) over PLA2G6's three-exon isoform, ENSG00000279159 (−, 49 kb) over MTMR3's — all of the
+# encompassing transcripts silent in the ladder's draw, so this is where the case is expressed. Here: host
+# H = the twin shape on + at o+1,500; antisense A = one exon [o, o+20,000) on −, 1.5 kb of single-strand
+# flank on each side. Regimes (H : A) ab 90 : 10, ba 10 : 90, eq 50 : 50, pair total 100; unprobed and
+# HOST-ONLY probed (`cap`); ids `gB2_{cap}enc_{regime}_H` / `_A`. 6 loci = 12 genes at pitch 40,000 (span
+# 20 kb + the 20 kb spacer) from 6,401,000.
+# The chromosome grows to 6.641 Mb and the fragment budget from 1,030 k to 1,060 k (600 abundance
+# units join 44,935: RNA depth per existing transcript +1.6 %, gDNA density per base -0.8 %).
+genome_length: 6641000      # the enc block's last gene ends at 6,621,000; the 20 kb spacer follows
 seed: 20260819
 blank:
   ref_name: test_blank
@@ -1505,6 +1521,70 @@ genes:
       - {t_id: B4_capsjterm_eq_U, exons: [[6364000, 6365000], [6372000, 6373000], [6380000, 6381000]], abundance: 150}
       - {t_id: B4_capsjterm_eq_S, exons: [[6372000, 6373000], [6380000, 6381000]], abundance: 150}
       - {t_id: B4_capsjterm_eq_E, exons: [[6364000, 6365000], [6372000, 6373000]], abundance: 150}
+
+  # ── THE ENCOMPASSING BLOCK (2026-09-14): a 20 kb single-exon antisense A on − over the twin-shape
+  #    host H on +; regimes ab 90:10 / ba 10:90 / eq 50:50, unprobed / host-only probed (cap); 6 loci at
+  #    pitch 40,000 from 6,401,000
+  - gene_id: gB2_enc_ab_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_enc_ab_H, exons: [[6402500, 6403500], [6410500, 6411500], [6418500, 6419500]], abundance: 90}
+  - gene_id: gB2_enc_ab_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_enc_ab_A, exons: [[6401000, 6421000]], abundance: 10}
+  - gene_id: gB2_capenc_ab_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capenc_ab_H, exons: [[6442500, 6443500], [6450500, 6451500], [6458500, 6459500]], abundance: 90}
+  - gene_id: gB2_capenc_ab_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capenc_ab_A, exons: [[6441000, 6461000]], abundance: 10}
+  - gene_id: gB2_enc_ba_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_enc_ba_H, exons: [[6482500, 6483500], [6490500, 6491500], [6498500, 6499500]], abundance: 10}
+  - gene_id: gB2_enc_ba_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_enc_ba_A, exons: [[6481000, 6501000]], abundance: 90}
+  - gene_id: gB2_capenc_ba_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capenc_ba_H, exons: [[6522500, 6523500], [6530500, 6531500], [6538500, 6539500]], abundance: 10}
+  - gene_id: gB2_capenc_ba_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capenc_ba_A, exons: [[6521000, 6541000]], abundance: 90}
+  - gene_id: gB2_enc_eq_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_enc_eq_H, exons: [[6562500, 6563500], [6570500, 6571500], [6578500, 6579500]], abundance: 50}
+  - gene_id: gB2_enc_eq_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_enc_eq_A, exons: [[6561000, 6581000]], abundance: 50}
+  - gene_id: gB2_capenc_eq_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capenc_eq_H, exons: [[6602500, 6603500], [6610500, 6611500], [6618500, 6619500]], abundance: 50}
+  - gene_id: gB2_capenc_eq_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capenc_eq_A, exons: [[6601000, 6621000]], abundance: 50}
 
 shadow_genes:
   - gene_id: gshadow_U1
