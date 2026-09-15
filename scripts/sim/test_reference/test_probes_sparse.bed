@@ -382,3 +382,9 @@ test_chr	6775438	6775563	sparse_B2_capinexon_ba_H_e2	0	.	6775438	6775563	0	1	125
 test_chr	6836438	6836563	sparse_B2_capinexon_eq_H_e0	0	.	6836438	6836563	0	1	125	0
 test_chr	6844438	6844563	sparse_B2_capinexon_eq_H_e1	0	.	6844438	6844563	0	1	125	0
 test_chr	6853438	6853563	sparse_B2_capinexon_eq_H_e2	0	.	6853438	6853563	0	1	125	0
+test_chr	6925938	6926063	sparse_B2_capshared_ab_H_e0	0	.	6925938	6926063	0	1	125	0
+test_chr	6939938	6940063	sparse_B2_capshared_ab_H_e1	0	.	6939938	6940063	0	1	125	0
+test_chr	7025938	7026063	sparse_B2_capshared_ba_H_e0	0	.	7025938	7026063	0	1	125	0
+test_chr	7039938	7040063	sparse_B2_capshared_ba_H_e1	0	.	7039938	7040063	0	1	125	0
+test_chr	7125938	7126063	sparse_B2_capshared_eq_H_e0	0	.	7125938	7126063	0	1	125	0
+test_chr	7139938	7140063	sparse_B2_capshared_eq_H_e1	0	.	7139938	7140063	0	1	125	0

@@ -197,7 +197,22 @@ ref_name: test_chr
 # (`cap`); ids `gB2_{cap}inexon_{regime}_H` / `_A`. 6 loci = 12 genes at pitch 39,000 from 6,641,000.
 # The chromosome grows to 6.875 Mb and the fragment budget from 1,060 k to 1,090 k (600 abundance
 # units join 45,535: RNA depth per existing transcript +1.5 %, gDNA density per base -0.7 %).
-genome_length: 6875000      # the inexon block's last gene ends at 6,855,000; the 20 kb spacer follows
+# ── THE SHARED-EXON BLOCK (session 2026-09-14; the deep stress) ─────────────────────────────────────
+# Two SPLICED genes on opposite strands sharing ONE exon exactly: the host's junction certifies RNA+ at the
+# exon's left face and the antisense's certifies RNA− at its right face, so the RNA level lanes deliver a
+# level on EACH strand into one AMBIG exon, and each face pairs a junction on one strand with a terminus
+# on the other, with no single-strand exon piece anywhere on it — the W12 deep stress (`deep_stress.py`,
+# 2026-09-13; DESIGN.md §6b.15.13 judged the tilt atom on it), here at the pair total's depth rather than
+# the toy's 500k. On the ladder the tail-to-tail shared LAST exon is the largest exon∩exon class: 74 of
+# 241 spliced pairs — SMARCB1 (+) × DERL3 (−) share 2,715 bp of their last exons, PPIL2 × YPEL1 2,480 bp,
+# DDTL × DDT 1,271 bp; the exact coincidence is the stress's idealisation. `conv` is the partial form (TR's
+# last exon inside TF's, its acceptor at TF's TES); this is the exact one. Here: H + exons [o, o+2,000)
+# [o+10,000, o+20,000); A − exons [o+10,000, o+20,000) [o+28,000, o+30,000). Regimes ab 90 : 10, ba 10 : 90,
+# eq 50 : 50, pair total 100; unprobed / host-only probed (`cap`); ids `gB2_{cap}shared_{regime}_H` / `_A`.
+# 6 loci = 12 genes at pitch 50,000 from 6,875,000.
+# The chromosome grows to 7.175 Mb and the fragment budget from 1,090 k to 1,120 k (600 abundance
+# units join 46,135: RNA depth per existing transcript +1.4 %, gDNA density per base -1.5 %).
+genome_length: 7175000      # the shared block's last gene ends at 7,155,000; the 20 kb spacer follows
 seed: 20260819
 blank:
   ref_name: test_blank
@@ -1663,6 +1678,70 @@ genes:
     probed: false
     transcripts:
       - {t_id: B2_capinexon_eq_A, exons: [[6853000, 6853500]], abundance: 50}
+
+  # ── THE SHARED-EXON BLOCK (2026-09-14): H + and A − share one exact 10 kb last exon (the deep
+  #    stress); regimes ab 90:10 / ba 10:90 / eq 50:50, unprobed / host-only probed (cap); 6 loci at
+  #    pitch 50,000 from 6,875,000
+  - gene_id: gB2_shared_ab_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_shared_ab_H, exons: [[6875000, 6877000], [6885000, 6895000]], abundance: 90}
+  - gene_id: gB2_shared_ab_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_shared_ab_A, exons: [[6885000, 6895000], [6903000, 6905000]], abundance: 10}
+  - gene_id: gB2_capshared_ab_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capshared_ab_H, exons: [[6925000, 6927000], [6935000, 6945000]], abundance: 90}
+  - gene_id: gB2_capshared_ab_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capshared_ab_A, exons: [[6935000, 6945000], [6953000, 6955000]], abundance: 10}
+  - gene_id: gB2_shared_ba_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_shared_ba_H, exons: [[6975000, 6977000], [6985000, 6995000]], abundance: 10}
+  - gene_id: gB2_shared_ba_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_shared_ba_A, exons: [[6985000, 6995000], [7003000, 7005000]], abundance: 90}
+  - gene_id: gB2_capshared_ba_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capshared_ba_H, exons: [[7025000, 7027000], [7035000, 7045000]], abundance: 10}
+  - gene_id: gB2_capshared_ba_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capshared_ba_A, exons: [[7035000, 7045000], [7053000, 7055000]], abundance: 90}
+  - gene_id: gB2_shared_eq_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_shared_eq_H, exons: [[7075000, 7077000], [7085000, 7095000]], abundance: 50}
+  - gene_id: gB2_shared_eq_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_shared_eq_A, exons: [[7085000, 7095000], [7103000, 7105000]], abundance: 50}
+  - gene_id: gB2_capshared_eq_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capshared_eq_H, exons: [[7125000, 7127000], [7135000, 7145000]], abundance: 50}
+  - gene_id: gB2_capshared_eq_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capshared_eq_A, exons: [[7135000, 7145000], [7153000, 7155000]], abundance: 50}
 
 shadow_genes:
   - gene_id: gshadow_U1
