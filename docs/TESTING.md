@@ -132,7 +132,7 @@ substrate rather than the config, so that no condition is uniform in either:
 transition rung between the two regimes the bars below are written for. The nascent pattern is
 hand-authored, not drawn: on a chromosome this small a draw is mostly sampling noise, and the point of a
 debug substrate is knowing which structure carries nascent RNA before reading a number. Depth is
-`n_total_fragments: 1030000` per condition, raised with each block so per-transcript depth holds. The
+`n_total_fragments: 1170000` per condition, raised with each block so per-transcript depth holds. The
 config's `nrna:` block is dead by design (`abundance.mode: file` makes the rendered TSV the one source).
 
 ### The commands — from the YAML to a scored benchmark
@@ -153,6 +153,9 @@ python scripts/sim/build_test_reference.py
 rigel index --fasta $T/test_chr.fa --gtf $T/test_chr.gtf --collapse-duplicate-transcripts --no-mappability --no-tsv -o $T/idx
 
 # 2. per panel (seven configs: the benign panel, the two adversarial probe panels, od05, three fl arms)
+#    ⛔ ONE panel's `cache` at a time, or give each its own RIGEL_SCRATCH: the origin split writes
+#    $RIGEL_SCRATCH/rigel_pass0_oracle/<condition>.<origin>.bam, and six of the seven configs share their
+#    condition names, so two caching side by side corrupt each other's partition (sum-to-full fails).
 CFG=scripts/sim/configs/test_reference.yaml
 python scripts/sim/panel.py simulate --config $CFG
 python scripts/sim/panel.py cache    --config $CFG
@@ -182,7 +185,7 @@ default rather than a measurement.
 strata, and the halves are judged against different bars. A toy and the panel can disagree in rank
 (`TRAPS: a-toy-and-a-panel-can-disagree-in-rank`): develop on the test chromosome, confirm on the ladder.
 
-### The substrate — one hand-edited file, seven blocks
+### The substrate — one hand-edited file, twelve blocks
 
 `scripts/sim/test_reference/test_chr.yaml` is the one hand-edited file: the `rigel sim` scenario schema
 (`genes → {gene_id, strand, transcripts: [{t_id, exons, abundance, nrna_abundance}]}`, exons 0-based
@@ -198,8 +201,13 @@ block; this table says only what each one stresses.
 | terminus-cluster | ten transcript ends 126–147 bp into a shared last exon (mirrored from MIR99AHG) — the empty exon pieces the level lane crosses | `cluster` `capcluster` |
 | both-stranded | two genes per locus on opposite strands, the host and its antisense (mirrored from TTC28-AS1, PPM1F-AS1, and a convergent pair) — the AMBIG nodes' substrate | `asin` `asinrev` `span` `conv` |
 | sj+terminus | one boundary carrying a junction and a terminus of the same strand (mirrored from RUNX1 and LARGE1) | `sjterm` `capsjterm` |
+| encompassing | a 20 kb single-exon antisense over the whole twin-shape host (mirrored from ENSG00000280007 over TUBA8): every host slot admits both strands, every boundary carries only the host's bits, the antisense's level lives in its two 1.5 kb single-strand flanks — the owner's encompassing locus on the panel | `enc` `capenc` |
+| in-exon | a 500 bp single-exon antisense wholly inside the host's 3 kb last exon (mirrored from ENSG00000273300 in UFD1's 3' UTR): no junction and no single-strand piece of its own, the tilt atom's accepted limit | `inexon` `capinexon` |
+| shared-exon | two spliced genes sharing one exact 10 kb last exon (the W12 deep stress; the tail-to-tail class of SMARCB1 × DERL3): a level on each strand into one walled AMBIG exon whose faces each pair a junction with a terminus | `shared` `capshared` |
+| in-intron | a 600 bp single-exon gene centred in the opposite strand's first intron (mirrored from the ladder's 203 intronic pseudogenes and lncRNAs): the majority AMBIG class, walled, its only message source its own termini | `inintron` `capinintron` |
+| head-to-head | `conv` with the strands swapped and nothing else: two 5' ends overlap in a 2 kb exon∩exon piece (mirrored from TRMT2A ⟷ RANBP1), a TSS and a donor of different strands on one boundary | `div` `capdiv` |
 
-205 genes on a 6.401 Mb chromosome (`genome_length` in the YAML). Every gene carries an explicit strand
+265 genes on a 7.637 Mb chromosome (`genome_length` in the YAML). Every gene carries an explicit strand
 and the chromosome keeps equal + / − representation — a sign error is invisible on one strand, and the
 builder refuses an imbalance. Abundances are molar ladders in half-decade steps with mature up the
 blocks and nascent down (10/30/100/300/1000 against 100/30/10/3/1), independent levels, as the ladder

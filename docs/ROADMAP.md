@@ -70,7 +70,7 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
 ## Next — the recommended order
 
 The session order agreed 2026-09-14 (owner): the test chromosome's new structures with both panels
-remeasured; then the ruler at zero gDNA and the flux price's witness derivation, the one accuracy item inside
+remeasured (done 2026-09-14, `DESIGN.md` §7); then the ruler at zero gDNA and the flux price's witness derivation, the one accuracy item inside
 the port's unit; then the performance re-baseline and the port. The ranked list below is the substance of each.
 
 The method is the dissection loop: run the panel → worst in-scope scenario → rank its objects by error

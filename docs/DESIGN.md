@@ -1404,11 +1404,39 @@ library the density model carries the entire own-evidence budget: at κ = ½ the
 (`EQUATIONS.md` §5), and the intron factory is what makes such a library solvable at all. Pass-0 scores
 honest ignorance as error, which is the wrong question: an object with no own evidence reporting
 `f_g ≈ ½` at zero precision is stating a true fact, and the measurement that matters is solvable → right /
-wrong → confidently wrong (`solvability_audit.py`). Where it stands (re-derived 2026-09-10,
-`policy_benchmark.py --by-class`; `ROADMAP.md` carries the ranking): in scope the residual sits on the
-intron's own solve on unstranded capture-OFF and on `exon|exon` boundaries and walled exons on stranded
-capture-ON; the deferred stratum is blind because the gDNA fraction cancels from the strand mean, so an
-unstranded AMBIG slot has no channel.
+wrong → confidently wrong (`solvability_audit.py`). Where it stands (re-derived 2026-09-14 on both panels
+after the test chromosome's twelfth block, `policy_benchmark.py --by-class` and `calibration_vs_oracle.py`;
+`ROADMAP.md` carries the ranking): in scope the residual sits on the intron's own solve on unstranded
+capture-OFF (the ladder: introns 45 % of `transfer`'s error, `exon|intron` boundaries 14 %, `exon|exon
+[term]` 13 %) and on `exon|exon` boundaries and walled exons on stranded capture-ON (27 % + 18 % + 18 %,
+`exon|intron` 15 %); on the test chromosome the stranded capture-ON residual is the probed exon's own solve
+(licensed-face exons 49 %, walled exons 23 %). The deferred stratum is blind because the gDNA fraction
+cancels from the strand mean, so an unstranded AMBIG slot has no channel.
+
+**The standing numbers** (2026-09-14; the tree at `1f885a7e` on the twelve-block test chromosome, 265 genes,
+7.637 Mb, budget 1,170 k; the ladder unchanged) — per stratum, never pooled; `policy_benchmark.py` is
+`silent → transfer`, whole-library Σ|gDNA − truth| in fragments; `calibration_vs_oracle.py` is `P/O gDNA`,
+the region-axis Σ|Δ| and the ruler's `P/O` factor. A mechanism is judged against this table.
+
+| panel · stratum | `policy_benchmark` silent → transfer | `calibration_vs_oracle` P/O · region Σ\|Δ\| · ruler |
+|---|---|---|
+| ladder · unstranded OFF | 358,551 → 307,281 (0.86×) | 0.9938 · 185,536 · 1.047 |
+| ladder · stranded OFF | 292,673 → 248,975 (0.85×) | 0.9949 · 146,781 · 1.037 |
+| ladder · stranded ON | 598,645 → 427,003 (0.71×) | 0.9954 · 147,454 · 1.011 |
+| ladder · unstranded ON (deferred) | 18,794,723 → 3,578,926 (0.19×) | 0.8546 · 1,036,142 · 0.990 |
+| ladder · g00, four rows (ss .50 OFF / ON, ss .99 OFF / ON) | 396 / 270 / 397 / 247 → 367 / 258 / 353 / 233 | 913 false gDNA of 40.0 M; ruler 0.154 |
+| test chromosome · unstranded OFF | 54,436 → 51,230 (0.94×) | 1.0088 · 92,425 · 1.011 |
+| test chromosome · stranded OFF | 47,114 → 43,710 (0.93×) | 1.0071 · 39,986 · 1.007 |
+| test chromosome · stranded ON | 64,200 → 41,866 (0.65×) | 1.0028 · 32,501 · 1.011 |
+| test chromosome · unstranded ON (deferred) | 1,930,576 → 194,992 (0.10×) | 1.0220 · 208,302 · 1.000 |
+| test chromosome · ss 0.70, eight rows (the transition rung) | 150,048 → 113,062 (0.75×) | — |
+| test chromosome · g00, six rows (ss .50 / .70 / .99 × OFF / ON) | 8,883 / 3,764 / 24,804 / 6,269 / 36,491 / 6,586 → 8,882 / 28 / 8,812 / 96 / 9,040 / 31 | 26,876 false gDNA of 7.0 M; ruler 0.141 |
+
+The test chromosome's capture-OFF zero rows are the shadow floor: 8,873 / 8,799 / 9,032 of those fragments
+are the unannotated transcription on `test_blank`, pinned gDNA by structure (the designed control,
+`TESTING.md` §0a), and the annotated chromosome's own zero rows read 8–13 fragments capture-OFF and 28–96
+capture-ON. The ruler's factor at `g00` (0.154 / 0.141 against 1.000) is the largest in-scope number on the
+metric page (`ISSUES: g00-shrinkage-upstream-repair`).
 
 ### 7.1 The landscape prior — who trains it, where its kernels go, and what axis it lives on (owner rulings 2026-09-06 and 2026-09-10; landed 2026-09-10)
 

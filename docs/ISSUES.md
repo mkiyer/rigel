@@ -69,7 +69,7 @@ arrivals are summed and the price where both carry the same intron's claim is un
 factory on a region with both exon and intron bits, under capture; (c) the chain of termini — an empty
 outside piece (median 12 bp) whose far face is another terminus, half the ladder's terminus-boundary error,
 every upper side refused (`ISSUES: the-edge-upper-side`); (d) substrate `nest` (the prior already serves it,
-0.666 vs 0.630), `div`, the antisense's nascent variant (`docs/TESTING.md` §0a).
+0.666 vs 0.630) and the antisense's nascent variant (`docs/TESTING.md` §0a; `div` was built 2026-09-14).
 `policy_benchmark.py --by-class`.
 
 ### per-transcript-prior-lane
