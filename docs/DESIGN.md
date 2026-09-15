@@ -1036,6 +1036,20 @@ anywhere in the transfer policy; the bar is about one percent of a row.
   every flux counts them twice (the weak-κ zero control 42 → 1,540).
 * **Measured at landing** (full pipeline, halves apart): the ladder wins every non-zero row of both halves
   (unstranded 6/6, worst 1.000×; stranded 6/6, worst 0.994×; `g98 ss.99 ON` 201,578 → 176,703).
+* **The exon's witness of the flux price is its column count on the protocol's share of the opportunity**
+  (2026-09-14; `EQUATIONS.md` §12; `ISSUES: flux-price-witness-units` CLOSED). The junction's `c_J` at
+  `r_J` is whole-strand (keyed by the junction's transcript strand); the exon's count on the column the
+  strand reads on holds `κ_read` of its RNA, so read on the whole opportunity `a_r` the price carried
+  `log(κ_read)²` of spurious disagreement — 0.48 nats² on every flux level of every unstranded library —
+  and the golden `strand_ss65_multi_iso`'s gDNA-free exon read 0.235 gDNA from a ceiling widened by it. The
+  witness is now `(c_s, κ_read·a_r)`: the column's count at its own precision on the opportunity the
+  protocol gives the strand's RNA to land there — the total's density at κ = ½, the column's at κ → 1, the
+  strand's own share at a both-stranded exon. The same chain delivers the level at counting alone at every
+  κ when the pair agrees (gated). Priced on both panels: the ladder in scope within 0.01 % on the metric and 0.01 % on the benchmark (stranded ON −0.01 %), the
+deferred stratum +0.3 % / +0.07 %, the four zero rows within a fragment (367 / 258 / 353 / 233 → 366 / 258 / 353 / 233). Refused with numbers
+  (`EQUATIONS.md` §12): the total unspliced count as the witness (right unstranded, wrong at a both-stranded
+  exon on stranded data: two AMBIG exons on the stranded capture-ON zero row read 0.60 / 0.18 gDNA, that
+  row 233 → 435), the total as a one-sided bound, and the split's strand count at its own precision.
 * ⛔ Refused with numbers, recorded in `ISSUES.md`: the gDNA lane emitting on every face (a one-sided
   floor arriving at a node with no channel of its own is a tilt, not a floor: ladder `g05 ss.99 OFF`
   +7 %); and a both-stranded node emitting its gDNA level (`ISSUES: ambig-node-as-a-gdna-source`).
@@ -1413,25 +1427,24 @@ capture-OFF (the ladder: introns 45 % of `transfer`'s error, `exon|intron` bound
 (licensed-face exons 49 %, walled exons 23 %). The deferred stratum is blind because the gDNA fraction
 cancels from the strand mean, so an unstranded AMBIG slot has no channel.
 
-**The standing numbers** (2026-09-14; the composition on the tree at `1f885a7e` on the twelve-block test
-chromosome, 265 genes, 7.637 Mb, budget 1,170 k, the ladder unchanged; the ruler column after §7.2 landed
-the same day, the composition being untouched by it) — per stratum, never pooled; `policy_benchmark.py` is
+**The standing numbers** (2026-09-14, the tree with §7.2 and §6b.13's witness landed, on the twelve-block
+test chromosome, 265 genes, 7.637 Mb, budget 1,170 k, and the unchanged ladder) — per stratum, never pooled; `policy_benchmark.py` is
 `silent → transfer`, whole-library Σ|gDNA − truth| in fragments; `calibration_vs_oracle.py` is `P/O gDNA`,
 the region-axis Σ|Δ| and the ruler's `P/O` factor. A mechanism is judged against this table.
 
 | panel · stratum | `policy_benchmark` silent → transfer | `calibration_vs_oracle` P/O · region Σ\|Δ\| · ruler |
 |---|---|---|
-| ladder · unstranded OFF | 358,551 → 307,281 (0.86×) | 0.9938 · 185,536 · 1.000 |
-| ladder · stranded OFF | 292,673 → 248,975 (0.85×) | 0.9949 · 146,781 · 1.000 |
-| ladder · stranded ON | 598,645 → 427,003 (0.71×) | 0.9954 · 147,454 · 1.013 |
-| ladder · unstranded ON (deferred) | 18,794,723 → 3,578,926 (0.19×) | 0.8546 · 1,036,142 · 0.941 |
-| ladder · g00, four rows (ss .50 OFF / ON, ss .99 OFF / ON) | 396 / 270 / 397 / 247 → 367 / 258 / 353 / 233 | 913 false gDNA of 40.0 M; ruler 1.000, nothing moved |
-| test chromosome · unstranded OFF | 54,436 → 51,230 (0.94×) | 1.0088 · 92,425 · 1.000 |
+| ladder · unstranded OFF | 358,551 → 307,288 (0.86×) | 0.9938 · 185,554 · 1.000 |
+| ladder · stranded OFF | 292,673 → 248,976 (0.85×) | 0.9949 · 146,781 · 1.000 |
+| ladder · stranded ON | 598,645 → 426,974 (0.71×) | 0.9954 · 147,440 · 1.013 |
+| ladder · unstranded ON (deferred) | 18,794,723 → 3,581,253 (0.19×) | 0.8543 · 1,039,430 · 0.939 |
+| ladder · g00, four rows (ss .50 OFF / ON, ss .99 OFF / ON) | 396 / 270 / 397 / 247 → 366 / 258 / 353 / 233 | 912 false gDNA of 40.0 M; ruler 1.000, nothing moved |
+| test chromosome · unstranded OFF | 54,436 → 51,145 (0.94×) | 1.0089 · 92,361 · 1.000 |
 | test chromosome · stranded OFF | 47,114 → 43,710 (0.93×) | 1.0071 · 39,986 · 1.000 |
-| test chromosome · stranded ON | 64,200 → 41,866 (0.65×) | 1.0028 · 32,501 · 1.015 |
-| test chromosome · unstranded ON (deferred) | 1,930,576 → 194,992 (0.10×) | 1.0220 · 208,302 · 1.080 |
-| test chromosome · ss 0.70, eight rows (the transition rung) | 150,048 → 113,062 (0.75×) | — |
-| test chromosome · g00, six rows (ss .50 / .70 / .99 × OFF / ON) | 8,883 / 3,764 / 24,804 / 6,269 / 36,491 / 6,586 → 8,882 / 28 / 8,812 / 96 / 9,040 / 31 | 26,876 false gDNA of 7.0 M; ruler 1.000, nothing moved |
+| test chromosome · stranded ON | 64,200 → 41,856 (0.65×) | 1.0028 · 32,493 · 1.015 |
+| test chromosome · unstranded ON (deferred) | 1,930,576 → 175,343 (0.09×) | 1.0174 · 191,091 · 1.065 |
+| test chromosome · ss 0.70, eight rows (the transition rung) | 150,048 → 113,267 (0.75×) | — |
+| test chromosome · g00, six rows (ss .50 / .70 / .99 × OFF / ON) | 8,883 / 3,764 / 24,804 / 6,269 / 36,491 / 6,586 → 8,881 / 28 / 8,812 / 96 / 9,040 / 31 | 26,840 false gDNA of 7.0 M; ruler 1.000, nothing moved |
 
 The test chromosome's capture-OFF zero rows are the shadow floor: 8,873 / 8,799 / 9,032 of those fragments
 are the unannotated transcription on `test_blank`, pinned gDNA by structure (the designed control,
@@ -1527,7 +1540,7 @@ capture-OFF (`O` 0.923/0.926 against a contract of exactly 1.000), an estimator 
 cure. Measured (`calibration_vs_oracle.py` ③, both panels): the zero controls' factor 0.141 / 0.154 →
 1.000 with nothing moved (5,108 / 51,436 transcripts had moved); both in-scope capture-OFF strata
 P = O = 1.000 with nothing moved (from P 0.946–0.970, O 0.923–0.939); stranded capture-ON P/O 1.015
-against 1.011 on the test chromosome and LADDER_ON_PLACEHOLDER on the ladder, with `ρ_ref` within 4 % of
+against 1.011 on the test chromosome and 1.013 against 1.011 on the ladder, with `ρ_ref` within 4 % of
 the truth's mass-weighted median on every capture-ON row measured; the solve untouched (`policy_benchmark.py`
 identical). The `U` arm is retired: with the reference a property of the solve, a uniform field against it
 is a number about nothing, and its question — what a noise-free field leaves — is answered structurally by

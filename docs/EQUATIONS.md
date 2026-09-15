@@ -990,3 +990,42 @@ anchors' wall, with any false-positive basin above it a lone kernel). The plug-i
 a noisy uniform field is biased below 1 (Jensen plus the clip), which is why a per-object reference
 read from the field itself contracted the oracle's own counts by 8 % at capture-OFF; a modal decision
 has no per-object noise to clip.
+
+## 12. The flux price's witness — the column count on the protocol's share of the opportunity (`lanes.rna_lanes`)
+
+The certified flux at one of an exon's junctions is that strand's RNA level at the exon (§6b.13's source):
+the spliced count `c_J` at the junction's route rate `r_J = Σ flux / A_route`, and every hop pays the
+pair's price (`hop_price`) — both witnesses' counting plus the disagreement of the two densities beyond
+what counting explains, `max(0, log(r)² − (1/n_s + 1/n_x))`. The junction's side is in WHOLE-STRAND units:
+`sj_count` and `route_rate` are keyed by the junction's own transcript strand, so `c_J` is every spliced
+fragment of that strand's routes whatever column its reads landed on. The exon's side must be priced in
+the same units. Its witness is the unspliced count on the column strand `s`'s RNA reads on, and under a
+protocol whose read rate is `κ_read = max(κ, 1 − κ)` that column holds
+
+    E[c_s] = κ_read·R_s + (1 − κ_read)·R_o + g/2,
+
+so read on the exon's whole opportunity `a_r` the ratio to the junction's rate is `κ_read` when the pair
+agrees at a single-strand gDNA-free exon, and the price carried `log(κ_read)²` of disagreement that is not
+there — 0.48 nats² at κ = ½, on every flux level of every unstranded library. THE CORRECTION IS TO THE
+OPPORTUNITY, NOT THE COUNT: a column is an opportunity of `κ_read·a_r` for the strand's RNA to be counted
+on it, so the witness is `(c_s, κ_read·a_r)` — the column's own count, at its own counting precision, on
+the protocol's share of the exon's opportunity. At κ = ½ its density is the exon's total, `2c_s/a_r`, a
+bound on `R_s` (the two columns are exchangeable there); at κ → 1 it is the column's; at a both-stranded
+exon on a strand-preserving protocol it is the strand's own share `R_s + g/2` and not the other strand's.
+Nothing chosen: `κ` is the fitted strand model's.
+
+Measured: the same chain at κ = 0.99, 0.7 and ½ delivers the flux level at counting alone whenever the
+pair agrees in whole-strand units (the gate in `test_transfer_rna_lanes.py`); the golden
+`strand_ss65_multi_iso`'s exon inside the other isoform's intron, with no gDNA in the library, reads
+0.008 gDNA against 0.235 under the uncorrected witness.
+
+Refused with numbers (2026-09-14): the exon's TOTAL unspliced count as the witness (whole units, two-sided)
+is right on unstranded data but at a both-stranded exon on a strand-preserving protocol it mixes the other
+strand in, widens the strand's level, and two AMBIG exons on the ladder's stranded capture-ON zero row read
+0.60 and 0.18 gDNA in a gDNA-free library (233 → 435 false fragments on that row); the total as a one-sided
+BOUND (only a junction rate above the exon's density contradicts a lower bound) loses stranded capture-ON
+8–10 % on the test chromosome and 1.5 % on the ladder (the exon-holds-more widening protects the probed
+exons); and the strand's own count from the column split, `R̂_s = (c_s − c_o)/(2κ − 1)` at its
+Poisson-equivalent precision `(c_s − c_o)²/(c_s + c_o)`, loosens the golden's ceiling to 0.323 at κ = 0.65
+(the asymmetry's precision is low and the price widens the level away) — the failure
+`ISSUES: flux-witness-in-strand-units` recorded.

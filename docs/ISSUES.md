@@ -42,15 +42,6 @@ refit on `g00 ss.99 OFF` are out, and the four ladder zero controls read 282 / 1
 excluding κ-dead exons (`g50 ss.50 ON` 2,691 → 56,422), AMBIG in the final fit (worse 25/32), and the two
 other readings of the floor (`DESIGN.md` §7.1 rule 4). Its instrument, `landscape_training_census.py`, was retired 2026-09-14 (in git).
 
-### flux-price-witness-units
-`priority: next · kind: problem · 2026-09-09`
-The flux price compares the junction's route rate (whole-strand units) with the exon's column count; a column
-holds `(1 − κ)` of the strand's RNA, so every flux floor pays `log(1 − κ)²` nats² that is no disagreement
-(0.14 at κ = 0.31, 0.48 unstranded). Record: the golden `strand_ss65_multi_iso`'s nested exon (no gDNA) reads
-0.152 gDNA from a ceiling of `f_g ≤ 0.38` where the flux says ≤ 0. Needed: the strand's RNA count as witness
-at single-strand exons and a bounded one at both-stranded exons (`ISSUES: flux-witness-in-strand-units` is the
-naive form). `policy_prototype.py`.
-
 ### nested-antisense-leak-under-the-sane-ruler
 `priority: later (EM-side, with the per-transcript prior lane) · kind: defect · 2026-09-14`
 With the EM's ruler honest — a gDNA-free library contracts nothing (`DESIGN.md` §7.2) — the negative control
@@ -697,3 +688,18 @@ was the per-object clip, and with the reference a property of the solve the U ru
 construction (no reference) or `ρ̄/ρ_ref` against P's reference (0.06 on capture-ON, a number about
 nothing). Its question — what a noise-free uniform field leaves — is answered structurally: nothing, the O
 arm at capture-OFF reads 1.000 with no fitting. The arm is deleted from `calibration_vs_oracle.py`.
+
+### flux-price-witness-units
+CLOSED by landing 2026-09-14 (`DESIGN.md` §6b.13, `EQUATIONS.md` §12): the exon's witness of the junction→exon
+price is its column count on the PROTOCOL'S SHARE of its RNA opportunity, `(c_s, κ_read · a_r)` — a column is
+that much opportunity for the strand's RNA to be counted on it — so the junction's whole-strand rate and the
+exon's density are in one unit and the pair's agreement is priced as counting alone at every κ (gated on a
+hand-built chain at κ 0.99 / 0.7 / ½). The record: the golden `strand_ss65_multi_iso`'s gDNA-free exon reads
+0.008 gDNA against 0.235. Both panels: the ladder in scope within 0.01 % on the metric and 0.01 % on the benchmark (stranded ON −0.01 %), the
+deferred stratum +0.3 % / +0.07 %, the four zero rows identical (366 / 258 / 353 / 233); the test chromosome in scope within 0.2 %
+(`policy_benchmark.py` −0.17 / 0 / −0.02 %), the deferred stratum −10 % on the benchmark and −8 % on the
+metric, the zero controls identical. Three other forms priced and refused (`EQUATIONS.md` §12): the total
+unspliced count (right unstranded, wrong at a both-stranded exon on stranded data — the ladder's
+`g00 ss.99 ON` 233 → 435 on two AMBIG exons), the total as a one-sided bound (stranded capture-ON −8–10 %),
+and the split's strand count at its own precision (the golden's ceiling 0.323, the refused
+`flux-witness-in-strand-units` again).

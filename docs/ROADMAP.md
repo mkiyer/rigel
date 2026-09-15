@@ -71,7 +71,8 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
 
 The session order agreed 2026-09-14 (owner): the test chromosome's new structures with both panels
 remeasured (done 2026-09-14, `DESIGN.md` §7); then the ruler at zero gDNA (done 2026-09-14, `DESIGN.md` §7.2) and the flux
-price's witness derivation, the one accuracy item inside the port's unit; then the performance re-baseline and the port. The
+price's witness (done 2026-09-14, `DESIGN.md` §6b.13), the one accuracy item inside the port's unit; then the performance
+re-baseline and the port. The
 ranked list below is the substance of each.
 
 The method is the dissection loop: run the panel → worst in-scope scenario → rank its objects by error
@@ -115,7 +116,7 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
    constrains the form) or the intron's own solve, not a message.
 6. **The message policy, only where a row is above the bar**: one prototype arm at a time through
    `policy_prototype.py --module`, halves apart, pass zero beside the pipeline:
-   `ISSUES: flux-price-witness-units`, `ISSUES: two-sided-exon-row`, `ISSUES: flux-floor-dispersion`,
+   `ISSUES: two-sided-exon-row`, `ISSUES: flux-floor-dispersion`,
    `ISSUES: message-layer-open-cases`.
 
 Then, in standing order: `ISSUES: scan-thread-split-starves-the-workers` ·

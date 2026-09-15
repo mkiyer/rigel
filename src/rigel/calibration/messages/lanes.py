@@ -90,8 +90,11 @@ def rna_lanes(c: _Chain, own: list, library: _Library) -> dict:
     shared unspliced population; the intron test is PER STRAND). SOURCES: a single-strand node's
     own claim read as its live strand's RNA level, and the certified flux at each of an exon's
     junctions as that strand's level at the exon — the junction's estimate of the exon's RNA
-    abundance, priced by THE NODE PAIR (the junction's spliced count at its route rate against the
-    exon's own count of that strand per RNA opportunity), kept LOWER-SIDED because a two-sided
+    abundance, priced by THE NODE PAIR (the junction's spliced count at its route rate, whole-strand
+    units, against the exon's count on the column that strand reads on, over the PROTOCOL'S SHARE of
+    the exon's RNA opportunity, ``kappa_read · a_r`` — a column is that much opportunity for the strand's
+    RNA to be counted on it, so the two densities are in one unit and the pair's agreement is priced as
+    counting alone at every kappa; `EQUATIONS.md` §12), kept LOWER-SIDED because a two-sided
     estimate over-claims at the probe cliff; kept per FACE so the solve can tell which face's
     composition already carries it. An EMPTY exon piece beside a lit junction is a source too: its
     level is priced on its zero count — counting alone — and the piece emits it with the flux's own
@@ -104,6 +107,8 @@ def rna_lanes(c: _Chain, own: list, library: _Library) -> dict:
     empty = ~(n_u > 0.0) | ~(a_r > 0.0)
     single = ~(c.fp & c.fn)
     kappa = None if c.strand is None else float(c.strand[0])
+    # the protocol's read rate: the share of a strand's RNA that reads on the column it reads on
+    kappa_read = 0.5 if kappa is None else max(kappa, 1.0 - kappa)
     split_live = library.split_live
     lanes = {}
     for name, free, col in (("pos", c.fp, 0), ("neg", c.fn, 1)):
@@ -154,7 +159,11 @@ def rna_lanes(c: _Chain, own: list, library: _Library) -> dict:
                         c_j, r_j = float(c.sj_count[hi][b, col]), float(c.route_rate[hi][b, col])
                         if not (c_j > 0.0 and r_j > 0.0):
                             continue
-                        v = hop_price(c_j, c_j / r_j, cnt[x, col_read], a_r[x])
+                        # the junction's rate is whole-strand; the column count is priced on the
+                        # protocol's share of the exon's opportunity, so the units agree (the exon's
+                        # total density at kappa = ½, the column's at kappa → 1, the strand's own share
+                        # at a both-stranded exon) — `EQUATIONS.md` §12
+                        v = hop_price(c_j, c_j / r_j, cnt[x, col_read], kappa_read * a_r[x])
                         fl = flux_level(c.lam, c_j, r_j, rho_ref, v)
                         parts.append(fl)
                         flux_of[(int(x), side_of(int(b), int(x)))] = fl

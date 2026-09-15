@@ -790,3 +790,71 @@ def test_a_junctions_flux_is_a_source_when_the_strand_has_no_single_strand_exon(
     assert 6 in rows and rows[6].profile_pos is not None, "the + flux level was not delivered"
     dark = _prepared(pol, base)
     assert dark.lanes["pos"].own_level[6] is None
+
+
+def _flux_pair_ctx(kappa: float):
+    """Three slots, hand-built: an intron of ``+`` | its ACCEPTOR carrying 40 spliced crossings at a
+    route rate of 0.1/bp | a FULL single-strand ``+`` exon holding 200 unspliced fragments on 2,000 bp
+    of RNA opportunity — 0.1/bp, so the pair AGREES in whole-strand units, and no gDNA anywhere. The
+    exon's reads sit on the two genome-strand columns by the protocol's ``kappa`` and nothing else in
+    the chain depends on it."""
+    from rigel.calibration.messages import BlockContext
+    from rigel.calibration.splice_graph import FLAG_ACCEPTOR_POS
+
+    n = 3
+    flags = np.zeros(n, np.uint16)
+    flags[1] = FLAG_ACCEPTOR_POS
+    n_slot = np.array([300.0, 25.0, 200.0])
+    cnt = np.stack([n_slot * kappa, n_slot * (1.0 - kappa)], axis=1)
+    a_g = np.array([3000.0, 200.0, 2000.0])
+    a_r = np.array([3000.0, 200.0, 2000.0])
+    sj_hi = np.zeros((n, 2))
+    rr_hi = np.zeros((n, 2))
+    sj_hi[1, 0], rr_hi[1, 0] = 40.0, 0.1
+    return BlockContext(
+        eff_gdna=a_g,
+        eff_rna=a_r,
+        sj_count=sj_hi.copy(),
+        sj_count_lo=np.zeros((n, 2)),
+        sj_count_hi=sj_hi,
+        route_rate_lo=np.zeros((n, 2)),
+        route_rate_hi=rr_hi,
+        unspliced_count=cnt,
+        spliced_count=np.zeros((n, 2)),
+        left=np.array([-1, 0, 1]),
+        right=np.array([1, 2, -1]),
+        is_boundary=np.array([False, True, False]),
+        is_exon_region=np.array([False, False, True]),
+        free_pos=np.ones(n, bool),
+        free_neg=np.zeros(n, bool),
+        exon_pos=np.array([False, False, True]),
+        exon_neg=np.zeros(n, bool),
+        boundary_flags=flags,
+        has_own_composition=np.zeros(n, bool),
+        belief_fg=np.full(n, 0.5),
+        n_grid=41,
+        logodds_window=10.0,
+        factory_rows=np.zeros((n, 41)),
+        strand_live=kappa > 0.5,
+    )
+
+
+def test_the_flux_price_carries_no_disagreement_when_the_pair_agrees_in_whole_strand_units():
+    """ISSUES: flux-price-witness-units. A junction's flux is whole-strand RNA of a known strand and its
+    route rate is a whole-strand density; the exon's reads land on the two genome-strand columns by the
+    protocol's kappa. When the exon's strand-s RNA density equals the junction's rate the pair AGREES, so
+    the hop's price is the two witnesses' counting and nothing more — at every kappa. A witness read as a
+    column count on the exon's whole opportunity is priced against the whole-strand rate as a log(kappa)²
+    disagreement that is not there (0.48 nats² at kappa = ½)."""
+    from rigel.calibration.messages.transfer import TransferPolicy
+    from rigel.calibration.messages.transfer_rows import count_logvar, flux_level
+
+    for kappa in (0.99, 0.7, 0.5):
+        ctx = _flux_pair_ctx(kappa)
+        lane = _prepared(TransferPolicy(strand=(kappa, 0.02, 0.02)), ctx).lanes["pos"]
+        got = lane.flux_at(2, 0)
+        assert got is not None, "no flux level at the exon"
+        # the price the agreement owes: the junction's counting and the exon's column count's counting
+        v = float(count_logvar(40.0) + count_logvar(ctx.unspliced_count[2, 0]))
+        expected = flux_level(lane.u, 40.0, 0.1, lane.rho_ref, v)
+        np.testing.assert_allclose(got, expected, atol=1e-9, err_msg=f"kappa = {kappa}")
