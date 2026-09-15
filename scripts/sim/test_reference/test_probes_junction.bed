@@ -231,3 +231,6 @@ test_chr	7286938	7294063	junction_B2_capinintron_ba_H_sj0	0	.	7286938	7294063	0	
 test_chr	7294938	7302063	junction_B2_capinintron_ba_H_sj1	0	.	7294938	7302063	0	2	62,63	0,7062
 test_chr	7360938	7368063	junction_B2_capinintron_eq_H_sj0	0	.	7360938	7368063	0	2	62,63	0,7062
 test_chr	7368938	7376063	junction_B2_capinintron_eq_H_sj1	0	.	7368938	7376063	0	2	62,63	0,7062
+test_chr	7437938	7446063	junction_B2_capdiv_ab_H_sj0	0	.	7437938	7446063	0	2	62,63	0,8062
+test_chr	7517938	7526063	junction_B2_capdiv_ba_H_sj0	0	.	7517938	7526063	0	2	62,63	0,8062
+test_chr	7597938	7606063	junction_B2_capdiv_eq_H_sj0	0	.	7597938	7606063	0	2	62,63	0,8062

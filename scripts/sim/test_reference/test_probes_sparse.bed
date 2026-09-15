@@ -397,3 +397,9 @@ test_chr	7302438	7302563	sparse_B2_capinintron_ba_H_e2	0	.	7302438	7302563	0	1	1
 test_chr	7360438	7360563	sparse_B2_capinintron_eq_H_e0	0	.	7360438	7360563	0	1	125	0
 test_chr	7368438	7368563	sparse_B2_capinintron_eq_H_e1	0	.	7368438	7368563	0	1	125	0
 test_chr	7376438	7376563	sparse_B2_capinintron_eq_H_e2	0	.	7376438	7376563	0	1	125	0
+test_chr	7437438	7437563	sparse_B2_capdiv_ab_H_e0	0	.	7437438	7437563	0	1	125	0
+test_chr	7448938	7449063	sparse_B2_capdiv_ab_H_e1	0	.	7448938	7449063	0	1	125	0
+test_chr	7517438	7517563	sparse_B2_capdiv_ba_H_e0	0	.	7517438	7517563	0	1	125	0
+test_chr	7528938	7529063	sparse_B2_capdiv_ba_H_e1	0	.	7528938	7529063	0	1	125	0
+test_chr	7597438	7597563	sparse_B2_capdiv_eq_H_e0	0	.	7597438	7597563	0	1	125	0
+test_chr	7608938	7609063	sparse_B2_capdiv_eq_H_e1	0	.	7608938	7609063	0	1	125	0
