@@ -29,7 +29,7 @@ end-to-end figure cannot say which of the two moved.
 
 | | what is scored | against | instrument |
 |---|---|---|---|
-| **primary** | the `CalibrationResult` itself: the six deconvolved arrays and the effective-length ruler derived from them | `O`, the same result with only the deconvolved arrays replaced by the origin-split truth; `U`, the no-enrichment null | `calibration_vs_oracle.py` — read `ruler_n_moved`, never the aggregate |
+| **primary** | the `CalibrationResult` itself: the six deconvolved arrays and the effective-length ruler derived from them | `O`, the same result with only the deconvolved arrays replaced by the origin-split truth (at capture-OFF it carries no enriched mode and is the no-enrichment null) | `calibration_vs_oracle.py` — read `ruler_n_moved`, never the aggregate |
 | **primary, the prior** | the prior calibration ships — `gdna_prior_count`, `rna_prior_count`, `gdna_eff_len` per multi-locus | `O`, the same assembler fed the origin-split truth masses | `prior_vs_oracle.py` (`P − O`) |
 | **primary, per object** | each region's and boundary's own `f_g`, and whether it is confidently wrong | the oracle payload: the production accumulator run on the BAM split by true origin | `solvability_audit.py` |
 | **primary, one number** | the library `f_gdna` | the simulator's per-fragment truth | `calibration_vs_oracle.py` — each row's `pools` block, `P_gdna` against `true_gdna` |
@@ -53,12 +53,12 @@ so a ceiling measured that way has never priced the ruler. `calibration_vs_oracl
 `calibrate` boundary and is the one instrument that reaches it. ⛔ Say which call your arm patches, and
 check it sits downstream of everything you mean to price.
 
-The ruler's defect is a symptom, not an independent bug: at zero gDNA the shrinkage contracts
-transcripts when the correct factor is exactly 1 (even off capture, where its own contract says so),
-because `rho_ref` is fabricated from false-positive gDNA — and substituting only the composition arrays
-into the shipped shrinkage gives the truth factor. ⛔ Fix the composition and check that the factor
-follows; a separate shrinkage repair would be half of a cancelling pair
-(`TRAPS: a-cancelling-defect-pair`; `ISSUES: g00-shrinkage-upstream-repair`). A second lane is built and
+The ruler's reference is the located enriched mode of the fitted gDNA landscape, on the result
+(`DESIGN.md` §7.2): with no enriched mode — capture-OFF, or no gDNA — nothing contracts, exactly, and the
+zero controls and both capture-OFF strata read 1.000 with nothing moved. The composition was fixed first
+and the factor did not follow (a few hundred false fragments still made a reference for the detector this
+replaced), so the repair was the detector, not a cancelling pair (`ISSUES: g00-shrinkage-upstream-repair`,
+CLOSED). A second lane is built and
 not wired: the per-transcript RNA prior (`rna_prior_weight`) is never passed in production
 (`ISSUES: per-transcript-prior-lane`).
 
@@ -229,7 +229,7 @@ python scripts/sim/panel.py cache    --config $CFG --jobs 8
 python scripts/design/simulator_gates.py --suite $LADDER --reference $SUITE/reference
 
 # 3. THE PRIMARY METRIC — CALIBRATION AGAINST ORACLE CALIBRATION.
-#    (a) the calibration result and the ruler, P vs O vs U, per stratum   ~5-12 s/condition, no EM
+#    (a) the calibration result and the ruler, P vs O, per stratum        ~5-12 s/condition, no EM
 python scripts/design/calibration_vs_oracle.py --suite $LADDER --index $INDEX \
        --oracle-cache $LADDER/oracle_cache
 #    (b) the PRIOR the EM actually reads, P vs O, per stratum   ~50 s/condition with the cache warm

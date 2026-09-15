@@ -943,3 +943,50 @@ fragments would draw identically and a 60/40 posterior would collapse to 100/0.
 Known approximation: `ρ` enters as a hard multiplicative zero, but zero observations is
 `P(0 | λ, E) = e^(−λE)`, not zero. The hard zero is the large-exposure limit of the correct likelihood, so
 it is right where the library is deep and wrong where it is shallow.
+
+## 11. The ruler's reference — the located enriched mode (`capture_eff_length`, `abundance_landscape.located_enriched_mode`)
+
+Under hybrid capture the EM divides a transcript by its FL-marginal length times the fraction of its
+footprint sampled at the fully-captured level,
+
+    eff_em_t = fl_t · factor_t,    factor_t = Σ_n S_n · min(ρ_n / ρ_ref, 1) / Σ_n S_n,
+
+over the objects `n` the transcript occupies contiguously (§2's supports `S_n`), with `ρ_n = m_n / S_n` the
+object's deconvolved gDNA density — gDNA because it is source-uniform, so its density pattern is the
+probe pattern and carries no expression dynamic range — and `ρ_ref` the fully-captured gDNA density.
+`factor_t ∈ (0, 1]`, and it is exactly 1 when no object is depleted relative to any other.
+
+**`ρ_ref` is a population quantity.** It is the enriched mode of the population density `P(log ρ_g)`, and
+the tool fits exactly that density: `landscape.DensityLandscape`, ψ's composition arm on the refits,
+trained on the located compositions and the zero-count anchors (DESIGN §7.1). Its census
+(`abundance_landscape._census`) partitions the grid into basins at the minima between interior maxima;
+`split_basins` names the depleted basin as the largest by mass (for gDNA the unprobed objects outnumber
+the probed ones — 0.70–1.00 of the mass on every row of both panels) and the enriched basin as the
+largest by mass strictly above it, `None` when nothing lies above.
+
+**The location floor on the mode.** A basin is a mode only if it is located: the kernels whose centres
+lie in it are its members, and the median of their rendered widths — the population resolution
+`landscape.knn_widths` gave each kernel, half its distance to its √n-th nearest neighbour, floored at
+the grid step — satisfies
+
+    median(width_k)² ≤ _LOCATED_VAR = 1 nat²,
+
+the floor DESIGN §7.1 rule 4 applies to a slot, in the same variable — not a constant chosen but the
+identity's value at the one-fragment wall (`Var(log c) = 1/c`), read here at the population's own
+resolution. A lone region far from every other renders decades wide however much mass it holds, and a
+cluster smaller than √n reaches outside itself for its √n-th neighbour, so neither is a mode; the
+within-basin spread is NOT the statement, because a basin cut by the grid's edge is narrow whatever its
+kernels' widths (a 1-fragment exon piece on 0.008 bp of support rendered a 0.30-nat basin at the top of
+the ladder's `g98 ss.50 OFF` grid). `DensityLandscape` publishes the centres and widths it rendered
+(`centre`, `width`, in nats) so the consumer reads the fit's own numbers and never re-derives them.
+Measured: the blank contig's shadow transcription (one region at 10^-2.23 fragments/bp, pinned gDNA by
+structure) renders about 4 nats wide; every real enriched mode on both panels has its members at the
+grid-step floor, at a peak stable to 0.02 decades across an 8× range of the render resolution.
+
+**No enriched mode ⇒ no contraction, exactly.** `CalibrationResult.gdna_reference_density` is `None`;
+the ruler returns `fl` verbatim and `assemble_priors` leaves the locus gDNA effective length at the span.
+This is the capture-OFF field (unimodal, Poisson noise around one level) and the gDNA-free field (the
+anchors' wall, with any false-positive basin above it a lone kernel). The plug-in `min(ρ_n/ρ_ref, 1)` on
+a noisy uniform field is biased below 1 (Jensen plus the clip), which is why a per-object reference
+read from the field itself contracted the oracle's own counts by 8 % at capture-OFF; a modal decision
+has no per-object noise to clip.

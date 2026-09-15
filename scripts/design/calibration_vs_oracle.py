@@ -6,12 +6,13 @@ The 0.8.0 metric. ``P = calibrate(...)`` off the cached scan is compared with ``
 scope is stamped on every row and the deferred stratum is reported, never dropped. It reaches the
 effective-length shrinkage, which no prior-injection arm does: `transcript_capture_eff_lengths` is built
 before `assemble_priors` runs, so an arm that patches the prior assembler never sees the ruler the EM
-divides by, while substituting at the ``calibrate`` boundary reaches both consumers. Two more arms:
+divides by, while substituting at the ``calibrate`` boundary reaches both consumers. One more arm:
 ``noop`` replaces the six arrays with themselves and must be byte-identical to ``P`` on the arrays
-and on the derived effective lengths (the gate runs before any table); ``U`` lays ``O``'s gDNA total
-down at exactly uniform density, a no-enrichment null and never a composition arm, so at capture-OFF
-its ruler factor should read 1.000 (any contraction is manufactured) and at capture-ON it destroys
-the real enrichment, so a factor near 1 there is the estimator working. No solver, no EM, no BAM
+and on the derived effective lengths (the gate runs before any table). The ruler's reference is the
+result's own (`CalibrationResult.gdna_reference_density`, the located enriched mode of the fitted gDNA
+landscape), so every arm contracts against the one reference the solve found: at capture-OFF there is
+none and the factor is exactly 1.000 for ``P`` and ``O`` alike, with no fitting — the no-enrichment
+null a separate uniform-density arm used to stand for (retired 2026-09-14). No solver, no EM, no BAM
 re-scan, and the prior is not re-scored here (`prior_vs_oracle.py` owns `LocusPriors`). Read
 ``ruler_n_moved`` rather than the aggregate factor: the total can barely move while nearly every
 transcript is redistributed. `--set SECTION.FIELD=VALUE` (any config field, typed from the field,
@@ -53,10 +54,7 @@ P0 = sibling("pass0_vs_oracle.py")
 PVO = sibling("prior_vs_oracle.py")
 
 from rigel.calibration import calibrate  # noqa: E402
-from rigel.calibration.capture_eff_length import (  # noqa: E402
-    _global_reference_density,
-    transcript_capture_eff_lengths,
-)
+from rigel.calibration.capture_eff_length import transcript_capture_eff_lengths  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.substrate import CalibrationSubstrate  # noqa: E402
 from rigel.config import PipelineConfig  # noqa: E402
@@ -89,7 +87,7 @@ class RulerScore:
     aggregate is what the EM's total opportunity actually moved by
     (TRAPS: a-mean-of-ratios-inherits-the-partition)."""
 
-    rho_ref: float | None  #: the detected reference density; ``None`` = too little gDNA to detect one
+    rho_ref: float | None  #: the result's reference density; ``None`` = no enriched gDNA mode
     total_len: float  #: Σ eff_em over transcripts, the denominator the EM sums
     total_fl: float  #: Σ fl, the uncontracted FL-marginal length
     n_transcripts: int
@@ -105,10 +103,7 @@ def ruler(calibration, region_arrays, index, fl_eff) -> tuple[RulerScore, np.nda
     eff = transcript_capture_eff_lengths(calibration, region_arrays, index, fl_eff)
     return (
         RulerScore(
-            rho_ref=_global_reference_density(
-                np.asarray(calibration.count_gdna_region, np.float64),
-                np.maximum(np.asarray(calibration.gdna_region_eff_len, np.float64), 1e-9),
-            ),
+            rho_ref=calibration.gdna_reference_density,
             total_len=float(np.asarray(eff, np.float64).sum()),
             total_fl=float(np.asarray(fl_eff, np.float64).sum()),
             n_transcripts=int(np.asarray(eff).size),
@@ -219,30 +214,6 @@ def pool_ledger(condition_dir: Path) -> dict:
     return {k: float(counts.get(k, 0.0)) for k in ("gdna", "mrna", "nrna")}
 
 
-def uniform_gdna_null(calibration):
-    """``U``: the same gDNA total, laid down at exactly uniform density on both axes.
-
-    Under uniform genomic gDNA at density ``rho`` the expected contained mass at an object is exactly
-    ``rho * eff_len``, the invariant the whole contraction rests on. Replacing each object's mass by
-    ``rho_bar * eff_len``, with ``rho_bar = Σmass / Σeff_len``, removes the sampling noise and changes
-    nothing else: the library total is preserved exactly, per axis.
-
-    Not a composition arm: its RNA arrays are untouched, so per-object conservation does not hold and
-    it must never be handed to ``score_axis``. It answers only how much of the contraction survives
-    when the field is noise-free, a question about the estimator.
-    """
-    out = {}
-    for axis in AXES:
-        support = np.maximum(
-            np.asarray(getattr(calibration, f"gdna_{axis}_eff_len"), np.float64), 1e-9
-        )
-        mass = np.asarray(getattr(calibration, f"count_gdna_{axis}"), np.float64)
-        total_support = float(support.sum())
-        rho_bar = float(mass.sum()) / total_support if total_support > 0.0 else 0.0
-        out[f"count_gdna_{axis}"] = rho_bar * support
-    return dataclasses.replace(calibration, **out)
-
-
 # ── the gates, which run before any number is printed ────────────────────────────────────────────
 
 
@@ -330,8 +301,7 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
         index.t_df["length"].values.astype(np.int64)
     )
     rulers, lengths = {}, {}
-    for name, arm in (("P", p_arm), ("O", o_arm), ("noop", noop_arm),
-                      ("U", uniform_gdna_null(o_arm))):
+    for name, arm in (("P", p_arm), ("O", o_arm), ("noop", noop_arm)):
         rulers[name], lengths[name] = ruler(arm, region_arrays, index, fl_eff)
 
     bad = noop_differences(p_arm, noop_arm, lengths["P"], lengths["noop"])
@@ -537,7 +507,7 @@ def report(rows: list[dict]) -> None:
     print("     No other instrument reaches this: it is built BEFORE `assemble_priors`, which is what")
     print("     every other arm patches. `factor` is Σ eff_em / Σ fl; 1.000 means no contraction.")
     print("     ⛔ At capture-OFF the contract says the factor is EXACTLY 1.000 — there are no probes.")
-    print(f"    {'stratum':<38} {'factor P':>9} {'factor O':>9} {'factor U':>9} "
+    print(f"    {'stratum':<38} {'factor P':>9} {'factor O':>9} "
           f"{'P/O':>8} {'Σ|Δ len|':>15} {'moved':>9}")
     print("    " + "-" * 120)
     for title, pred in _SELECTIONS:
@@ -548,11 +518,11 @@ def report(rows: list[dict]) -> None:
         if not sub:
             continue
         fac = {}
-        for arm in ("P", "O", "U"):
+        for arm in ("P", "O"):
             tl = sum(r["ruler"][arm]["total_len"] for r in sub)
             tf = sum(r["ruler"][arm]["total_fl"] for r in sub)
             fac[arm] = tl / tf if tf > 0 else float("nan")
-        print(f"    {title:<38} {fac['P']:>9.4f} {fac['O']:>9.4f} {fac['U']:>9.4f} "
+        print(f"    {title:<38} {fac['P']:>9.4f} {fac['O']:>9.4f} "
               f"{fac['P'] / fac['O'] if fac['O'] else float('nan'):>8.3f} "
               f"{sum(r['ruler_abs_err'] for r in sub):>15,.0f} "
               f"{sum(r['ruler_n_moved'] for r in sub):>9,}")
@@ -702,6 +672,7 @@ def _toy_calibration(n_regions: int = 24, n_boundaries: int = 20, n_sj: int = 4,
         rna_pos_frac_boundary=np.full(n_boundaries, 0.25),
         rna_neg_frac_boundary=np.full(n_boundaries, 0.25),
         gdna_density_global=0.1,
+        gdna_reference_density=None,
         rna_sense_frac=0.5,
         gdna_strand_overdispersion=0.0,
         rna_strand_overdispersion=0.0,
@@ -764,40 +735,19 @@ def self_test() -> int:
             fired = True
         check(f"field-set gate refuses {label}", fired)
 
-    # ④ the invariant the U null rests on: an exactly uniform field returns its own density, so
-    #    `min(rho/rho_ref, 1)` is 1 everywhere and the contraction is exactly none.
-    support = np.asarray(cal.gdna_region_eff_len, np.float64)
-    rho_true = 0.037
-    rr = _global_reference_density(rho_true * support, support)
-    check("uniform field: rho_ref recovers its own density EXACTLY", rr == rho_true)
-    # stated as "no contraction survives", not as bit-equality of the ratio: the realised density is
-    # `(rho*S)/S`, and a multiply-then-divide does not round-trip, so demanding an exact 1.0 would test
-    # float associativity rather than the invariant.
-    weights = np.minimum((rho_true * support / support) / rr, 1.0)
-    check("uniform field: the contraction it leaves is at float noise",
-          float(1.0 - weights.min()) < 1e-12)
-    # and not vacuous: an object genuinely below the reference must still be contracted.
-    depleted = np.array(rho_true * support, copy=True)
-    depleted[0] *= 0.25
-    check("a genuinely depleted object IS contracted",
-          np.isclose(min((depleted[0] / support[0]) / rr, 1.0), 0.25, rtol=1e-9))
-    # and it must not be blind: a bimodal field must return the enriched mode, not the depleted one.
-    bimodal = rho_true * support
-    hot = np.arange(0, support.size, 3)
-    bimodal[hot] *= 100.0
-    rr_bi = _global_reference_density(bimodal, support)
-    check("bimodal field: rho_ref finds the ENRICHED mode", rr_bi is not None and rr_bi > 10 * rho_true)
-
-    # ⑤ the U null preserves the gDNA total per axis and flattens the field.
-    u = uniform_gdna_null(cal)
-    for axis in AXES:
-        before = float(np.asarray(getattr(cal, f"count_gdna_{axis}")).sum())
-        after = float(np.asarray(getattr(u, f"count_gdna_{axis}")).sum())
-        check(f"U preserves the gDNA total on the {axis} axis", np.isclose(before, after, rtol=1e-12))
-    rho_u = np.asarray(u.count_gdna_region) / np.asarray(u.gdna_region_eff_len)
-    check("U flattens the density field to a constant", np.allclose(rho_u, rho_u[0], rtol=1e-12))
-    check("U leaves the RNA arrays untouched",
-          np.array_equal(np.asarray(u.count_rna_region), np.asarray(cal.count_rna_region)))
+    # ④ the ruler reads the result's reference and nothing else: with no enriched mode nothing contracts,
+    #    exactly; with one, an object below it contracts and nothing ever expands.
+    check("the synthetic result carries no reference", cal.gdna_reference_density is None)
+    cal_ref = dataclasses.replace(cal, gdna_reference_density=float(np.max(
+        np.asarray(cal.count_gdna_region) / np.asarray(cal.gdna_region_eff_len))))
+    check("a positive finite reference is accepted on the result", cal_ref.gdna_reference_density > 0.0)
+    for bad in (0.0, -1.0, float("nan")):
+        try:
+            dataclasses.replace(cal, gdna_reference_density=bad)
+            fired = False
+        except ValueError:
+            fired = True
+        check(f"a reference of {bad} is refused by the result", fired)
 
     # ⑥ the aggregate is a ratio of sums, not a mean of ratios. Two scores of very different mass
     #    make the two answers differ, which is what makes this a test rather than a tautology.

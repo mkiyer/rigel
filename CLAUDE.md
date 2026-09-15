@@ -187,16 +187,17 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,374 passed / 0 skipped / 3 xfail, 3,377 collected** (re-derived
-2026-09-14 after the code-review cleanup, every step bit-identical on the review identity references: 21
-instruments retired, −84 by the table below and −1 for one's parametrised self-test entry; one tolerance gate
-added to `test_sweep_replay_tolerance.py` and one probe-panel gate to `test_panel_workflow.py`, +2; the test
-of the batch EM's never-read `locus_enable_gdna` retired with the argument, −1; no golden moved). The 3 xfails
-are executable records of proven defects whose fixes are elsewhere (`ISSUES: two-sided-exon-row`;
-`ISSUES: antisense-prior-assembly-casualty`; `ISSUES: the-lower-bound-noise-ratchet`, the encompassing locus's
-shallow flank under an edge level), deferred by ruling to their threads — "fix the test" is a category error,
-and an xfail is closed by repairing the thing or asserting the invariant structurally, never by widening a
-bound. **Any failure at all is a regression.** A commit that measures the suite updates this line.
+**The standing baseline: 0 failed / 3,378 passed / 0 skipped / 5 xfail, 3,383 collected** (re-derived
+2026-09-14 after the ruler landed: +6 collected — four selector gates in `test_abundance_landscape.py`, the
+result-schema gate for `gdna_reference_density`, the calibrate-level wiring gate; three kernel-density
+detector tests replaced by three ruler tests, net zero; 13 goldens regenerated with their magnitudes in the
+commit). The 5 xfails are executable records of proven defects whose fixes are elsewhere
+(`ISSUES: two-sided-exon-row`; `ISSUES: antisense-prior-assembly-casualty`;
+`ISSUES: the-lower-bound-noise-ratchet`, the encompassing locus's shallow flank under an edge level;
+`ISSUES: nested-antisense-leak-under-the-sane-ruler`, two strand rungs of one negative control — the EM's
+assignment at an unwitnessed nested transcript, uncovered when the ruler stopped contracting a gDNA-free
+library), deferred by ruling to their threads — "fix the test" is a category error, and an xfail is closed
+by repairing the thing or asserting the invariant structurally, never by widening a bound. **Any failure at all is a regression.** A commit that measures the suite updates this line.
 
 **Re-derive a count, never adjust one** (`TRAPS: re-record-the-baseline`). Several gates are parametrised
 over the files on disk, so adding or retiring a file moves the total; account for it from this table and
@@ -235,7 +236,7 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | `design/policy_prototype.py` | ⭐⭐⭐ **HOW DOES A PROTOTYPE MESSAGE POLICY SCORE, PER GENE TYPE AND PER SLOT, AGAINST CERTIFIED TRUTH?** — the harness every message rung is developed on before `src/`. Installs a class from `--module` in place of the shipped policy for the `transfer` arm; whole-library and per-type tables, `--by-class` (the error at each NODE CLASS — the view that judges a message at its destinations), `dissect` for one gene type slot by slot. ⛔ Compare src-vs-src across a landing (`TRAPS: a-harness-on-the-parent-class-dies-when-the-parent-gains-the-mechanism`). `--self-test` |
 | `design/policy_benchmark.py` | ⭐⭐⭐ **HOW DOES EACH POLICY SCORE, PER CONDITION, AGAINST CERTIFIED TRUTH?** Whole-library gDNA error in fragments, per axis, one row per condition, for `silent` and `transfer`. ⭐ `--panel test` is the test chromosome (seconds — the development loop); `--panel ladder` is the 16-condition benchmark. ⭐ **`--by-class`: WHERE DOES A POLICY'S REMAINING ERROR SIT, BY NODE CLASS?** — per certified stratum, boundaries split by terminus flag, exons by reach (licensed face / edge only / walled); the instrument that ranks the rebuild's holes. `--set SECTION.FIELD=VALUE` applies a config value on top of every policy, the same spelling as `calibration_vs_oracle.py`. ⛔ NEVER POOLED, and the two halves are judged against DIFFERENT bars: unstranded rows are where a policy must WIN, stranded rows are where it must do minimal HARM against silence |
 | **⭐⭐⭐ 0.8.0'S METRIC — calibration against ORACLE CALIBRATION** | |
-| `design/calibration_vs_oracle.py` | ⭐⭐⭐ **IS THE CALIBRATION RESULT ITSELF RIGHT, SCORED AGAINST AN ORACLE CALIBRATION? — 0.8.0's metric, and it reaches the effective-length shrinkage, which no prior-injection arm does.** `P = calibrate(...)` against the same payload with only the six deconvolved arrays swapped, per stratum, plus `U`, the no-enrichment null no other instrument carries; `--set SECTION.FIELD=VALUE` prices any config value on both arms — `--set calibration.message_policy=silent` is the ship protocol's first item — so a policy or a grid arm is a config value and nothing in `src/` moves to price it. ⛔ Read `ruler_n_moved`, never the aggregate: the total can barely move while nearly every transcript is redistributed. No solver, no EM, no re-scan — ~5–12 s/condition. `--self-test` 42/42 |
+| `design/calibration_vs_oracle.py` | ⭐⭐⭐ **IS THE CALIBRATION RESULT ITSELF RIGHT, SCORED AGAINST AN ORACLE CALIBRATION? — 0.8.0's metric, and it reaches the effective-length shrinkage, which no prior-injection arm does.** `P = calibrate(...)` against the same payload with only the six deconvolved arrays swapped, per stratum (the ruler's reference is the result's own, so at capture-OFF `O` is the no-enrichment null with no fitting); `--set SECTION.FIELD=VALUE` prices any config value on both arms — `--set calibration.message_policy=silent` is the ship protocol's first item — so a policy or a grid arm is a config value and nothing in `src/` moves to price it. ⛔ Read `ruler_n_moved`, never the aggregate: the total can barely move while nearly every transcript is redistributed. No solver, no EM, no re-scan — ~5–12 s/condition. `--self-test` 39/39 |
 | `design/calibration_oracle.py` | ⭐⭐⭐ **WHAT IS THE CERTIFIED PER-OBJECT TRUTH? — run this before debugging calibration against anything.** Every REGION and BOUNDARY's count, its realized `n_gdna`/`n_nrna`/`n_mrna` and `true_f_g`, at two certification levels: COMPOSITION (no opportunity model anywhere in it) and FIELD (densities too). ⛔ REFUSED unless its named gates pass — sum-to-full, partition-projects-exactly, gdna-field-uniformity, exact-zeros, nascent-in-annotation, rna-strands-close — because a merely plausible oracle is how a calibration bug and a truth bug survive each other. Writes `slot_truth.npz` beside each oracle cache; `--self-test` 13/13 |
 | `design/calibration_walk.py` | ⭐⭐⭐ **WHICH STAGE OF CALIBRATION INTRODUCES THE ERROR?** The solve as a ladder — init → strand → local → +messages → +refits → shipped — each rung scored per stratum against `calibration_oracle.py`, which it refuses to run without |
 | `design/solvability_audit.py` | ⭐⭐⭐ **WHICH OBJECTS ARE SOLVABLE, WHICH ARE SOLVED WRONG, AND WHICH ARE CONFIDENTLY WRONG? — where pass-0 and 0.8.0 are judged.** ⛔ Honest ignorance is excluded: `f_g ≈ ½` at zero precision with no own evidence is correct. Omit `--condition` to run the panel |

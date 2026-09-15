@@ -24,7 +24,8 @@ where gDNA is scarce). The solver is the belief-propagation SWEEP over the ``N E
            the belief, solve_chain again with the landscape added per object -> the per-object pie
       -> chain_region_deconv  -> per-REGION gDNA / RNA contained mass
       -> chain_boundary_deconv  -> per-BOUNDARY gDNA / RNA crossing mass, for the per-locus prior
-      -> gdna_density_global (the library-average density QC scalar)
+      -> gdna_density_global (the library-average density QC scalar) and gdna_reference_density (the
+         located enriched mode of the last refit's landscape — the ruler's reference; None ⇒ no contraction)
 
 ⛔ THE GEOMETRY IS BUILT FIRST, AND IT OWNS EVERY DIVISOR. ``build_region_geometry`` produces the
 per-slot ``eff_gdna``/``eff_rna`` before anything reads a count, and everything downstream — the
@@ -69,7 +70,7 @@ from .density_deconv import (
     density_lambda_factor,
     fit_intron_background,
 )
-from .abundance_landscape import AbundanceLandscape, fit_abundance_landscape
+from .abundance_landscape import AbundanceLandscape, fit_abundance_landscape, located_enriched_mode
 from .blocks import SweepCapture
 from .total_abundance import (
     build_region_wall_mask,
@@ -684,7 +685,14 @@ def _solve(s: _Solve, _debug):
 
 
 def _result(
-    substrate, chain, belief, strand: _Strand, region_eff, boundary_eff, config
+    substrate,
+    chain,
+    belief,
+    strand: _Strand,
+    region_eff,
+    boundary_eff,
+    config,
+    gdna_reference_density: float | None,
 ) -> CalibrationResult:
     """The solved chain projected onto the two payload axes and published as the
     :class:`CalibrationResult`, with the library-average gDNA density QC scalar.
@@ -728,6 +736,7 @@ def _result(
         gdna_density_global=gdna_density_global(
             regions, boundaries, region_eff_gdna, boundary_eff_gdna
         ),
+        gdna_reference_density=gdna_reference_density,
         rna_sense_frac=strand.rna_sense_frac,
         gdna_strand_overdispersion=strand.gdna_strand_overdispersion,
         rna_strand_overdispersion=strand.rna_strand_overdispersion,
@@ -863,6 +872,11 @@ def calibrate(
         eff_global,
     )
     belief, belief_pass0, gdna_hyperprior = _solve(solve, _debug)
+    # THE RULER'S REFERENCE: the fully-captured gDNA level is the located enriched mode of the fitted
+    # landscape, or nothing — capture-OFF and gDNA-free libraries carry no enriched mode and contract
+    # nothing (DESIGN.md §7.2). One definition, read by `capture_eff_length` and `priors`.
+    enriched = located_enriched_mode(gdna_hyperprior) if gdna_hyperprior is not None else None
+    gdna_reference_density = float(np.exp(enriched.log_rho)) if enriched is not None else None
     logger.debug(
         "calibration: PHASE 1 prior-free initial solve (abundance landscape: %s)",
         "none"
@@ -878,6 +892,7 @@ def calibrate(
         (region_eff_gdna, region_eff_rna),
         (boundary_eff_gdna, boundary_eff_rna),
         config,
+        gdna_reference_density,
     )
 
     if _debug is not None:  # inert diagnostic hook — the solved chain internals

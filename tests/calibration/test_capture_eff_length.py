@@ -19,7 +19,6 @@ import pandas as pd
 import pytest
 
 from rigel.calibration.capture_eff_length import (
-    _global_reference_density,
     _transcript_region_incidence,
     transcript_capture_eff_lengths,
 )
@@ -38,7 +37,9 @@ from _index_builder import build_test_index
 _CROSSING_EFF = 180.0
 
 
-def _cal(region_arrays: RegionArrays, density, region_eff, boundary_eff) -> CalibrationResult:
+def _cal(
+    region_arrays: RegionArrays, density, region_eff, boundary_eff, reference: float | None = None
+) -> CalibrationResult:
     """THE fixture, and there is only one: a deposition-faithful result for an arbitrary per-region
     gDNA DENSITY field, where every object's mass is ``ρ × its own effective support`` on both axes.
 
@@ -49,6 +50,9 @@ def _cal(region_arrays: RegionArrays, density, region_eff, boundary_eff) -> Cali
 
     A boundary's density is its LEFT flank's. With a varying field the two flanks disagree, so the
     fixture must SAY which it means rather than average them into a number that is neither.
+
+    ``reference`` is the result's fully-captured level (`CalibrationResult.gdna_reference_density`):
+    ``None`` is a field with no enriched mode, which contracts nothing; a capture field states it.
     """
     d = np.asarray(density, dtype=np.float64)
     region_eff = np.asarray(region_eff, dtype=np.float64)
@@ -81,6 +85,7 @@ def _cal(region_arrays: RegionArrays, density, region_eff, boundary_eff) -> Cali
         rna_pos_frac_boundary=np.zeros(len(boundary_eff)),
         rna_neg_frac_boundary=np.zeros(len(boundary_eff)),
         gdna_density_global=float(d.mean()),
+        gdna_reference_density=reference,
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,
         rna_strand_overdispersion=0.05,
@@ -247,17 +252,16 @@ def test_transcript_factor_one_under_uniform_gdna(misaligned_index):
 
 
 def test_transcript_contracts_under_concentrated_gdna(multiexon_index):
-    """Under a realistic capture field (a subset of regions enriched, the rest depleted — a genuine bimodal
-    region-density distribution the global detector can resolve), transcripts overlapping the DEPLETED regions
-    contract below their FL-marginal length, and contraction never expands. (A single enriched region is NOT
-    a detectable capture pattern under the global reference — that regime is correctly left uncontracted.)"""
+    """Under a realistic capture field (a subset of regions enriched, the rest depleted, the enriched level
+    on the result as its reference), transcripts overlapping the DEPLETED regions contract below their
+    FL-marginal length, and contraction never expands."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     n = ra.n_regions
     starts, ends = np.asarray(ra.start), np.asarray(ra.end)
     dens = np.full(n, 0.1)  # depleted (off-target) background
     dens[(ends > 1000) & (starts < 1500)] = 100.0  # capture the first exon (enriched on-target)
-    cal = _field_cal(ra, dens)
+    cal = _field_cal(ra, dens, reference=100.0)
     fl = np.maximum(idx.t_df["length"].to_numpy(dtype=np.float64) - 180.0, 1.0)
     eff = transcript_capture_eff_lengths(cal, ra, idx, fl)
     assert np.all(eff <= fl + 1e-9)  # contraction never expands
@@ -294,7 +298,10 @@ def _tidx(idx, tid: str) -> int:
 
 
 def _field_cal(
-    region_arrays: RegionArrays, density: np.ndarray, frag: float = _CROSSING_EFF
+    region_arrays: RegionArrays,
+    density: np.ndarray,
+    frag: float = _CROSSING_EFF,
+    reference: float | None = None,
 ) -> CalibrationResult:
     """An arbitrary per-region gDNA DENSITY field with an FL-MARGINAL region support
     (``region_eff = size − frag``). That makes a multi-exon mRNA's sj-dropped ``span_full`` fall
@@ -302,7 +309,13 @@ def _field_cal(
     every object's m/S = density ⇒ factor 1 (the bedrock invariant), independent of the field values."""
     size = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
     n_boundaries = boundary_region_indices(np.asarray(region_arrays.ref_id))[0].shape[0]
-    return _cal(region_arrays, density, np.maximum(size - frag, 1e-9), np.full(n_boundaries, frag))
+    return _cal(
+        region_arrays,
+        density,
+        np.maximum(size - frag, 1e-9),
+        np.full(n_boundaries, frag),
+        reference,
+    )
 
 
 def test_sj_incidence_multiexon_only(multiexon_index):
@@ -334,7 +347,7 @@ def test_no_nascent_mature_inversion_under_capture(multiexon_index):
     starts, ends = np.asarray(ra.start), np.asarray(ra.end)
     dens = np.full(n, 0.1)  # depleted off-target
     dens[(ends > 1000) & (starts < 1500)] = 100.0  # capture the first exon [1000,1500)
-    cal = _field_cal(ra, dens)
+    cal = _field_cal(ra, dens, reference=100.0)
     frag = 180.0
     fl = np.maximum(
         idx.t_df["length"].to_numpy(dtype=np.float64) - frag, 1.0
@@ -360,27 +373,64 @@ def test_spliced_factor_one_under_uniform(multiexon_index):
 # --- the enriched-mode reference detector's core contract (locks the <5-region fallback + the enriched mode) ---
 
 
-def test_global_reference_density_needs_five_gdna_regions():
-    # Fewer than 5 gDNA-bearing regions ⇒ None (no reference ⇒ no contraction), even with a clean bimodal split.
-    mass = np.array([100.0, 100.0, 1.0, 1.0])  # 4 gDNA-bearing regions
-    support = np.full(4, 100.0)
-    assert _global_reference_density(mass, support) is None
+def _noisy_uniform_cal(ra: RegionArrays, rho: float, seed: int = 0) -> CalibrationResult:
+    """A uniform field with Poisson counting noise: every object's density is ``rho`` in expectation and
+    nothing is enriched, so the result carries no reference and the contraction must be exactly none."""
+    rng = np.random.default_rng(seed)
+    size = np.asarray(ra.region_size_bp, dtype=np.float64)
+    n_b = boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0]
+    density = rng.poisson(rho * size) / size
+    return _cal(ra, density, size, np.full(n_b, _CROSSING_EFF))
 
 
-def test_global_reference_density_single_enriched_region_is_none():
-    # A single enriched region among empties ⇒ only 1 gDNA-bearing region ⇒ None (not a detectable pattern).
-    mass = np.array([100.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-    support = np.full(6, 100.0)
-    assert _global_reference_density(mass, support) is None
+def test_a_poisson_noisy_uniform_field_contracts_nothing(misaligned_index):
+    """Capture-OFF: no probes, so no region is depleted relative to any other, and counting noise is
+    not enrichment. The contract is ``eff_em == fl`` EXACTLY, not within float noise: a clipped noise
+    term is a systematic contraction (0.92 on the ladder's oracle arm under the retired per-object
+    reference), not a rounding. The falsification test of the ruler at zero gDNA, verified failing on
+    the kernel-density detector it replaced."""
+    idx = misaligned_index
+    ra = RegionArrays.from_index(idx)
+    cal = _noisy_uniform_cal(ra, rho=0.05)
+    fl = np.linspace(800.0, 2000.0, len(idx.t_df))
+    eff = transcript_capture_eff_lengths(cal, ra, idx, fl)
+    np.testing.assert_array_equal(eff, fl)
 
 
-def test_global_reference_density_bimodal_returns_enriched_mode_snapped():
-    # >=5 gDNA regions, bimodal (5 enriched at density 1.0 + 3 depleted at 0.01). The MASS-weighted KDE mode is
-    # the enriched level, SNAPPED to an actual region density (exactly 1.0 here), not a grid value.
-    mass = np.array([100.0, 100.0, 100.0, 100.0, 100.0, 1.0, 1.0, 1.0])
-    support = np.full(8, 100.0)
-    rho = _global_reference_density(mass, support)
-    assert rho == pytest.approx(1.0, rel=1e-9)
+def test_specks_of_gdna_in_a_gdna_free_library_contract_nothing(multiexon_index):
+    """Zero gDNA: the deconvolution leaves a few false-positive fragments — well under one each — on the
+    introns and flanks, and none on the expressed exons. Five slots with mass are not an enriched mode
+    (the kernel-density detector took them for one), and the ruler stays the FL-marginal length for
+    every transcript, RNA mass and all (the multimapper weight ``c/(c+1)`` reads 1 on an expressed exon)."""
+    import dataclasses
+
+    idx = multiexon_index
+    ra = RegionArrays.from_index(idx)
+    size = np.asarray(ra.region_size_bp, dtype=np.float64)
+    starts, ends = np.asarray(ra.start), np.asarray(ra.end)
+    exon = np.zeros(size.shape[0], bool)
+    for s0 in range(1000, 6500, 1000):
+        exon |= (ends > s0) & (starts < s0 + 500)
+    density = np.where(exon, 0.0, 0.4 / size)  # 0.4 of a fragment on every non-exon region
+    cal = dataclasses.replace(_field_cal(ra, density), count_rna_region=np.where(exon, 1000.0, 0.0))
+    fl = np.maximum(idx.t_df["length"].to_numpy(dtype=np.float64) - 180.0, 1.0)
+    eff = transcript_capture_eff_lengths(cal, ra, idx, fl)
+    np.testing.assert_array_equal(eff, fl)
+
+
+def test_the_reference_on_the_result_is_the_only_thing_the_ruler_reads(multiexon_index):
+    """The same enriched field contracts with its reference and not without it: the ruler reads the
+    result's ``gdna_reference_density`` and re-derives nothing from the counts."""
+    idx = multiexon_index
+    ra = RegionArrays.from_index(idx)
+    starts, ends = np.asarray(ra.start), np.asarray(ra.end)
+    dens = np.full(ra.n_regions, 0.1)
+    dens[(ends > 1000) & (starts < 1500)] = 100.0
+    fl = np.maximum(idx.t_df["length"].to_numpy(dtype=np.float64) - 180.0, 1.0)
+    with_ref = transcript_capture_eff_lengths(_field_cal(ra, dens, reference=100.0), ra, idx, fl)
+    without = transcript_capture_eff_lengths(_field_cal(ra, dens), ra, idx, fl)
+    assert np.any(with_ref < fl - 1e-6)
+    np.testing.assert_array_equal(without, fl)
 
 
 # ---------------------------------------------------------------------------

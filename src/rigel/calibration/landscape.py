@@ -80,6 +80,12 @@ class DensityLandscape:
     log_rho: np.ndarray
     logP: np.ndarray
     n_train: int
+    #: The kernels this density was rendered from, one per training region: the centre
+    #: ``log(max(count, 1) / E)`` and the rendered width (:func:`knn_widths`, the population resolution),
+    #: both in nats. Published so a consumer reading a mode off the density can ask whether the mode's
+    #: members are located (`abundance_landscape.located_enriched_mode`) without re-deriving either.
+    centre: np.ndarray
+    width: np.ndarray
 
     def logprior(self, frac_grid, mass, eff) -> np.ndarray:
         """Project onto the ψ solve grid → ``(n_slots, K)`` additive term ``= log P(log ρ_c)`` evaluated at
@@ -417,4 +423,6 @@ def fit_landscape(
         log_rho=grid * _LN10,
         logP=np.log(density / density.sum()),
         n_train=int(live.sum()),
+        centre=centres * _LN10,
+        width=widths * _LN10,
     )

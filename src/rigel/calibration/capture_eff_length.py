@@ -144,54 +144,6 @@ def _transcript_region_incidence(
     )
 
 
-# KDE smoothing params (log-density space): a fixed bandwidth + a peak-prominence floor. Standard KDE
-# smoothing, not tuned to a target; validated across the 16-scenario suite (kde_mode_scan.py). Could be made
-# data-driven (Silverman) later if needed.
-_KDE_BW = 0.4
-_KDE_PROM = 0.05
-
-
-def _global_reference_density(mass: np.ndarray, support: np.ndarray) -> "float | None":
-    """The global enriched-mode gDNA reference density for the eff-length contraction.
-
-    The rightmost significant peak of the **mass-weighted** log-density KDE over the per-region gDNA
-    densities ``ρ = mass/support`` — the fully-captured gDNA level, detected from the data with no assumption
-    about probe locations. Mass-weighting is the
-    key: a small captured panel is a tiny COUNT bump but the dominant MASS peak (enriched regions carry ~100×
-    the mass), so its enriched mode is detectable. Unimodal (capture-off / no enrichment) ⇒ the single mode
-    ⇒ every region lands at ``w = 1`` ⇒ no contraction. The result is SNAPPED to a real region density so a
-    uniform field returns its density EXACTLY (factor 1, capture-off bit-identical). Returns ``None`` if
-    there is too little gDNA to detect a reference (⇒ no contraction)."""
-    m = np.asarray(mass, dtype=np.float64)
-    s = np.maximum(np.asarray(support, dtype=np.float64), 1e-9)
-    rho = m / s
-    ok = np.isfinite(rho) & (rho > 1e-12) & (m > 0.0)
-    if int(ok.sum()) < 5:
-        return None
-    x = np.log(rho[ok])
-    wt = m[ok]
-    grid = np.linspace(float(x.min()) - 1.0, float(x.max()) + 1.0, 512)
-    wn = wt / wt.sum()
-    # the mass-weighted log-density KDE, one grid point at a time: the same elementwise terms and the
-    # same per-point sum as a (grid × regions) matrix, without holding that matrix
-    km = np.empty(grid.shape[0], dtype=np.float64)
-    for g in range(grid.shape[0]):
-        d = (grid[g] - x) / _KDE_BW
-        km[g] = (wn * np.exp(-0.5 * d * d)).sum()
-    pk = np.where((km[1:-1] >= km[:-2]) & (km[1:-1] > km[2:]))[0] + 1
-    if pk.size == 0:
-        mode = grid[int(np.argmax(km))]
-    elif pk.size == 1:
-        mode = grid[int(pk[0])]
-    else:  # rightmost peak with height ≥ _KDE_PROM of the tallest (a real mode, not a tail wiggle)
-        h = km[pk]
-        sig = pk[h >= _KDE_PROM * float(h.max())]
-        mode = grid[int((sig if sig.size else pk)[-1])]
-    # snap to the nearest ACTUAL region density: exact ρ under a uniform field (⇒ factor 1), a real density
-    # under capture — no grid-quantization contraction is fabricated.
-    return float(rho[ok][int(np.argmin(np.abs(x - mode)))])
-
-
 def transcript_capture_eff_lengths(
     calibration: "CalibrationResult",
     region_arrays: "RegionArrays",
@@ -199,7 +151,8 @@ def transcript_capture_eff_lengths(
     fl_eff_lengths: np.ndarray,
 ) -> np.ndarray:
     """Capture-contract each transcript's EM effective length by the per-region gDNA-enrichment density,
-    against a single GLOBAL reference density ``ρ_ref`` (the fully-captured level; ``_global_reference_density``).
+    against a single GLOBAL reference density ``ρ_ref`` — the fully-captured level, the located enriched
+    mode of the fitted gDNA landscape, ``calibration.gdna_reference_density`` (`EQUATIONS.md` §11).
 
     ``eff_em_t = fl_t · factor_t``, ``factor_t = [Σ_{n∈t} S_n·min(ρ_n/ρ_ref, 1)] / [Σ_{n∈t} S_n]`` — the
     enrichment-weighted fraction of the transcript's footprint that survives at the reference density, over
@@ -226,12 +179,11 @@ def transcript_capture_eff_lengths(
 
     A single O(incidence) pass (``np.add.at``) does every transcript at once. Properties:
 
-    * uniform gDNA (capture off, unimodal density) gives ``rho_ref = rho``, so every region has
-      ``min(rho/rho_ref, 1) = 1``, the factor is 1 and ``eff_em == fl``, bit-identical to the
-      FL-marginal length. That holds for a noise-free uniform field; on Poisson-noisy capture-off
-      data the mass-weighted mode can sit slightly above the median and manufacture a small
-      spurious contraction, and there is no unimodality guard against it;
-    * no detectable gDNA gives ``rho_ref = None`` and a factor of 1, i.e. no contraction;
+    * a field with no enriched mode — capture off (one level, Poisson noise around it) or a
+      gDNA-free library (the anchors' wall, false-positive specks above it) — carries no reference:
+      ``rho_ref`` is ``None``, the factor is 1 and ``eff_em == fl``, bit-identical to the
+      FL-marginal length. A modal decision has no per-object noise to clip, which is why a
+      per-object reference read from the field itself could not keep this contract;
     * concentrated gDNA (capture) leaves depleted regions with ``rho_n`` far below ``rho_ref``, so
       ``min(m_n/rho_ref, S_n)`` falls well below ``S_n`` and the effective length contracts to the
       enriched footprint.
@@ -262,14 +214,12 @@ def transcript_capture_eff_lengths(
     crossing_S = float(boundary_S[boundary_S > 0.0][0]) if np.any(boundary_S > 0.0) else 0.0
 
     rt, rr, bt, br, jt, jl, jr = _transcript_region_incidence(index, region_arrays)
-    # GLOBAL reference density ρ_ref = the enriched mode of the MASS-WEIGHTED region-density KDE — the
-    # fully-captured gDNA level detected from the data (no probe assumptions), SHARED across all transcripts
-    # so eff(nascent) ≥ eff(mature) by construction. Unimodal (capture-off / no enrichment) ⇒ single mode ⇒
-    # every region weighs 1 and there is no contraction. A per-transcript reference would instead
-    # contract on within-transcript density variation including noise, firing even with no gDNA.
-    rho_ref = _global_reference_density(contained_m, contained_S)
-    if rho_ref is None or rho_ref <= 0.0:
-        return fl.copy()  # no detectable gDNA reference ⇒ no contraction
+    # THE REFERENCE is the result's: the located enriched mode of the fitted gDNA landscape, SHARED
+    # across all transcripts so eff(nascent) ≥ eff(mature) by construction. No enriched mode (capture-off,
+    # or no gDNA at all) ⇒ nothing is depleted relative to anything ⇒ no contraction, exactly.
+    rho_ref = calibration.gdna_reference_density
+    if rho_ref is None:
+        return fl.copy()
     inv = 1.0 / rho_ref
     # Per-transcript enrichment-weighted length num = Σ_n min(m_n/ρ_ref, S_n) = Σ_n S_n·min(ρ_n/ρ_ref, 1),
     # the uniform-case length span_full = Σ_n S_n, and the contained evidence (multimapper shrinkage), over

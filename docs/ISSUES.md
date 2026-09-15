@@ -31,17 +31,6 @@ stages that scale with depth (`ISSUES: scan-thread-split-starves-the-workers`). 
 Python passes; bake the λ lattice into the port (`sweep_logodds_step` is a parameter). `profiling/profiler.py`,
 `profiling/sweep_replay.py`.
 
-### g00-shrinkage-upstream-repair
-`priority: now · kind: defect · re-priced 2026-09-10`
-At the zero-gDNA control the effective-length shrinkage contracts most transcripts where the factor should be
-1.000: `calibration_vs_oracle.py` reads 0.150 against the oracle's 1.000 on the `g00` rows (`Σ|Δ len|` 996M
-bp), unchanged after the composition repair, because `capture_eff_length._global_reference_density` detects a
-reference from any five slots with positive mass. The repair is the detector — does the library carry an
-enriched gDNA mode at all, a boolean (`TRAPS: a-total-density-ratio`); `priors.py` shares the function. Decide
-first whether the "exactly 1.000 off capture" contract line is stale (the in-scope capture-OFF strata read
-P 0.954/0.967 against O 0.923/0.926). The oracle effective-length diagnostic that would re-rank this against
-`ISSUES: u-ruler-arm` was started and needs a stashed pre-closure arm to mean anything.
-
 ### gdna-landscape-trains-on-false-positives
 `priority: later · kind: question · 2026-09-02; the population rule and the E-step landed 2026-09-10, the location floor 2026-09-14 (`DESIGN.md` §7.1)`
 What is still open in the landscape estimator, each with its number: (a) under capture a short dark region's
@@ -61,6 +50,19 @@ holds `(1 − κ)` of the strand's RNA, so every flux floor pays `log(1 − κ)�
 0.152 gDNA from a ceiling of `f_g ≤ 0.38` where the flux says ≤ 0. Needed: the strand's RNA count as witness
 at single-strand exons and a bounded one at both-stranded exons (`ISSUES: flux-witness-in-strand-units` is the
 naive form). `policy_prototype.py`.
+
+### nested-antisense-leak-under-the-sane-ruler
+`priority: later (EM-side, with the per-transcript prior lane) · kind: defect · 2026-09-14`
+With the EM's ruler honest — a gDNA-free library contracts nothing (`DESIGN.md` §7.2) — the negative control
+of `tests/scenarios/test_antisense_intronic.py` (a single-exon antisense `t2` inside the host's intron,
+truth 0, host nascent RNA at 50) receives the strand-flipped intronic nascent fragments: 24 of 2,000 at
+SS 0.9 and 124 at SS 0.65 (the bounds were 5 and 20; both parametrisations are strict xfails). The bounds
+had held only because the retired kernel-density reference, fabricated from 1.1 false gDNA fragments,
+contracted the host mRNA 4.7× and its nascent entity 3.9× while leaving `t2` at full length, so the
+nascent entity's rate per base was inflated fourfold and nothing reached `t2`. The defect is the EM's
+assignment at a nested transcript nothing witnesses — the EM-side twin of
+`ISSUES: the-atom-at-an-unwitnessed-both-strand-slot` — and its lever is the per-transcript prior lane
+(`ISSUES: per-transcript-prior-lane`), not calibration. `quant_accuracy.py`.
 
 ### message-layer-open-cases
 `priority: next · kind: question · 2026-09-09`
@@ -89,13 +91,6 @@ seconds on the 18.6M-fragment library by (bgzf, workers): total 4 — (3,1) 113.
 Any new split rule is a tunable and `--scan-bgzf-threads` is a user-facing flag, so the rule is the owner's.
 `profiling/profiler.py --scan-only`.
 
-### u-ruler-arm
-`priority: next · kind: measurement · 2026-08`
-Price the `U` ruler (the oracle's gDNA total at uniform density) end to end: a perfect-composition ruler is a
-~2× loss on the two capture-OFF in-scope strata, where the correct factor is exactly 1.000 and `U` reads it
-with no fitting. Capture-OFF only; read `ruler_n_moved`, never the aggregate. `calibration_vs_oracle.py`
-carries the column.
-
 ### capture-blind-gdna-divisor
 `priority: next · kind: defect · 2026-08-31`
 `gdna_opportunity_from_index` is computed from the index alone, so under capture it removes ~6 bp of a ~30 bp
@@ -121,8 +116,8 @@ capture-ON ones. Belongs with `ISSUES: gdna-landscape-trains-on-false-positives`
 `priority: next · kind: question · 2026-08`
 Why is prior fidelity anti-correlated with deliverable quality? Leading answer: at the worst slots the
 self-solve with the fitted prior is nearly right and the messages destroy it (measured at a retired rung;
-confirm on a second stratum). Exclude the ruler first (`ISSUES: u-ruler-arm`,
-`ISSUES: g00-shrinkage-upstream-repair`). `prior_vs_oracle.py`.
+confirm on a second stratum). The ruler is out of the way (`ISSUES: g00-shrinkage-upstream-repair`,
+CLOSED). `prior_vs_oracle.py`.
 
 ### antisense-prior-assembly-casualty
 `priority: the prior-assembly session · kind: decision · 2026-08-18 (named 2026-09-13)`
@@ -681,3 +676,24 @@ plan's §7 should the ruling ever be revisited.
 RULED 2026-09-13 (owner): both terms stay. `row` (a slot's max-normalised log-profile over the solve grid;
 1,236 src sites, two senses) and `face` (one directed side of a boundary, the `(destination, side)` pair a
 rule is keyed by; 303 src sites) keep their names; the census and the candidates are in the plan's §7.
+
+### g00-shrinkage-upstream-repair
+CLOSED by landing 2026-09-14 (`DESIGN.md` §7.2, `EQUATIONS.md` §11): the ruler's reference is the located
+enriched mode of the fitted gDNA landscape, published as `CalibrationResult.gdna_reference_density` and read
+by `capture_eff_length` and `priors`; the kernel-density detector and its two constants are deleted. On both
+panels (`calibration_vs_oracle.py` ③): the zero controls' factor 0.154 / 0.141 → 1.000 with nothing moved
+(51,436 / 5,108 transcripts had moved); both in-scope capture-OFF strata P = O = 1.000 with nothing moved
+(from P 0.957 / 0.970 and O 0.923 / 0.926 on the ladder, P 0.946 / 0.949 on the test chromosome — the
+"exactly 1.000 off capture" contract line was not stale, the per-object clip of Poisson noise was the
+defect); stranded capture-ON P/O 1.013 / 1.015 against 1.011 / 1.011, the reference within 4 % of the
+truth's mass-weighted median on every capture-ON row measured; the deferred stratum 0.941 / 1.080 against
+0.990 / 1.000 (one reference for both arms now, where two detectors had agreed by luck). The composition
+was fixed first and the factor did not follow: 178–189 false fragments on 35,135 regions still made a
+reference. The solve is untouched (`policy_benchmark.py` identical on both panels).
+
+### u-ruler-arm
+CLOSED 2026-09-14 with `g00-shrinkage-upstream-repair`: the "~2× loss on the two capture-OFF in-scope strata"
+was the per-object clip, and with the reference a property of the solve the U ruler reads 1.000 by
+construction (no reference) or `ρ̄/ρ_ref` against P's reference (0.06 on capture-ON, a number about
+nothing). Its question — what a noise-free uniform field leaves — is answered structurally: nothing, the O
+arm at capture-OFF reads 1.000 with no fitting. The arm is deleted from `calibration_vs_oracle.py`.

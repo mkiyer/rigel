@@ -40,6 +40,7 @@ def _result(
     boundary_spliced=None,
     mass_per_crossing=None,
     gdna_density_global=0.01,
+    gdna_reference_density=None,
     rna_region_eff=None,
     rna_boundary_eff=None,
 ) -> CalibrationResult:
@@ -105,6 +106,7 @@ def _result(
         rna_pos_frac_boundary=ez.copy(),
         rna_neg_frac_boundary=ez.copy(),
         gdna_density_global=gdna_density_global,
+        gdna_reference_density=gdna_reference_density,
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,
         rna_strand_overdispersion=0.05,
@@ -441,9 +443,10 @@ def _six_region_ra():
 
 def _global_bimodal_cal(rna0: float, gdna0: float = 1.0) -> CalibrationResult:
     """6-region calibration for the CONTAINED-EVIDENCE SHRINKAGE under the GLOBAL reference. Five ENRICHED
-    background regions (gDNA density 1.0) fix ρ_ref at the enriched mode; region 0 is DEPLETED (density
-    gdna0/100 ≪ ρ_ref) so it contracts (elen ≪ span). ``rna0`` tunes the contained evidence
-    C = gdna0 + rna0 that drives the shrinkage weight w = C/(C+1). No crossing mass; region_eff = 100."""
+    background regions (gDNA density 1.0) sit at the reference the result states, ρ_ref = 1.0; region 0
+    is DEPLETED (density gdna0/100 ≪ ρ_ref) so it contracts (elen ≪ span). ``rna0`` tunes the contained
+    evidence C = gdna0 + rna0 that drives the shrinkage weight w = C/(C+1). No crossing mass;
+    region_eff = 100."""
     mg = np.full(6, 100.0)
     mg[0] = gdna0
     mr = np.zeros(6)
@@ -454,6 +457,7 @@ def _global_bimodal_cal(rna0: float, gdna0: float = 1.0) -> CalibrationResult:
         region_eff=np.full(6, 100.0),
         boundary_eff=np.full(5, 50.0),
         gdna_density_global=0.5,
+        gdna_reference_density=1.0,
     )
 
 
@@ -494,7 +498,7 @@ def test_contained_evidence_shrinkage_reverts_to_span_when_blind():
 
 
 def _stray_on_a_dead_boundary_cal(stray: float) -> CalibrationResult:
-    """7 regions at a UNIFORM gDNA density of 1.0 (so ρ_ref = 1.0 and the KDE fires), 6 boundaries.
+    """7 regions at a gDNA density of 1.0, the reference the result states (ρ_ref = 1.0), 6 boundaries.
 
     Region 0 is intergenic, so ``boundary_owner_regions`` re-keys boundary 0 onto region 1 — which therefore owns
     BOTH boundary 0 (support **0**, carrying ``stray``) and boundary 1 (support 50, DEPLETED at mass 5). The
@@ -508,6 +512,7 @@ def _stray_on_a_dead_boundary_cal(stray: float) -> CalibrationResult:
         boundary_g=[stray, 5.0, 50.0, 50.0, 50.0, 50.0],
         boundary_eff=[0.0, 50.0, 50.0, 50.0, 50.0, 50.0],
         gdna_density_global=1.0,
+        gdna_reference_density=1.0,
     )
 
 
@@ -579,18 +584,17 @@ def test_region_count_mismatch_raises():
         assemble_priors(cal, ra, [_ml(0, [(0, 0, 100)])])
 
 
-def test_gdna_eff_len_factor_one_under_uniform_gdna_with_kde_firing():
-    # Priors-side factor-1: 6 regions at UNIFORM gDNA density ⇒ the KDE detector FIRES (≥6 gDNA objects)
-    # but is unimodal ⇒ ρ_ref = ρ ⇒ every object min(m/ρ_ref, S) = S ⇒ gdna_eff_len == span EXACTLY.
-    # The other gDNA-eff tests run in the <5-object regime that returns None, so this locks the KDE path.
-    from rigel.calibration.capture_eff_length import _global_reference_density
+def test_gdna_eff_len_is_the_span_when_every_object_sits_at_the_reference():
+    # Priors-side factor-1 WITH a reference: 6 regions at density ρ and a result stating ρ_ref = ρ ⇒ every
+    # object min(m/ρ_ref, S) = S ⇒ gdna_eff_len == span EXACTLY. (With no reference on the result the
+    # contraction is skipped outright — `test_factor_one_under_uniform_gdna`; this locks the clip.)
+    import dataclasses
 
     ra = _six_region_ra()
     rho = 2.0
-    cal = _uniform_field(np.full(6, 100.0), np.full(5, 50.0), rho)
-    assert _global_reference_density(
-        cal.count_gdna_region, cal.gdna_region_eff_len
-    ) == pytest.approx(rho)
+    cal = dataclasses.replace(
+        _uniform_field(np.full(6, 100.0), np.full(5, 50.0), rho), gdna_reference_density=rho
+    )
     span = 6 * 100.0 + 5 * 50.0  # 850
     np.testing.assert_allclose(
         assemble_priors(cal, ra, [_ml(0, [(0, 0, 600)])]).gdna_eff_len[0], span, rtol=1e-9
@@ -610,9 +614,10 @@ def test_the_contraction_is_applied_PER_OBJECT_not_over_a_folded_total():
     would compensate the depleted one's deficit under a fold and cancel — while per object the excess is
     clipped and the deficit survives.
 
-    6 regions at density 1.0 fix ρ_ref; the locus is region 0 (density 0.1 — depleted) plus its two boundaries,
-    one of which is ENRICHED at 5×. Per object: the enriched boundary clips to its support. Folded: the
-    boundary's 5× mass pays for the region's shortfall and the locus reads as unenriched.
+    The result states ρ_ref = 1.0 (the density of the five background regions); the locus is region 0
+    (density 0.1 — depleted) plus its two boundaries, one of which is ENRICHED at 5×. Per object: the
+    enriched boundary clips to its support. Folded: the boundary's 5× mass pays for the region's shortfall
+    and the locus reads as unenriched.
     """
     ra = _six_region_ra()
     mg = np.full(6, 100.0)
@@ -626,6 +631,7 @@ def test_the_contraction_is_applied_PER_OBJECT_not_over_a_folded_total():
         boundary_g=eg,
         boundary_eff=np.full(5, 50.0),
         gdna_density_global=1.0,
+        gdna_reference_density=1.0,
     )
     ml = [_ml(0, [(0, 0, 100)])]
     eff = assemble_priors(cal, ra, ml).gdna_eff_len[0]

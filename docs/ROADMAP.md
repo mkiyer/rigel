@@ -24,8 +24,8 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   `solvability_audit.py`, `policy_benchmark.py --by-class`.
 - **Transcript assignment**: a large share of RNA fragments is misassigned even under a perfect prior —
   calibration and assignment are two problems in two files; in scope a perfect prior no longer improves
-  the transcript number, and the `g00` rows carry the largest transcript error of any stratum under
-  both arms (the ruler, below) — `quant_accuracy.py` (the thermometer).
+  the transcript number, and the `g00` rows carried the largest transcript error of any stratum under
+  both arms until the ruler was repaired (below) — `quant_accuracy.py` (the thermometer).
 - **Stage A (the accumulator)**: done; the fragment ledger closes exactly — `calibration_oracle.py`.
 - **Fragment lengths**: closed, both halves — gDNA by the two-pool contrast (`calibration/fl.py`,
   `gdna_density.py`; gates `test_fl.py`, `test_gdna_density.py`), RNA sound as shipped
@@ -47,10 +47,10 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   depth, with the tilt's hypothesis space {pure +, pure −, mixed} (`EQUATIONS.md` §9f); the λ bracket follows
   the landscape prior's derived demand (`landscape.required_logodds_window`).
 - **The prior assembler**: with perfect masses its own error is negligible — `prior_vs_oracle.py`.
-- **The largest number on the metric page is the ruler, not the composition**: at `g00` the
-  effective-length shrinkage fabricates a reference from the residual false-positive fragments and
-  contracts every transcript (`ISSUES: g00-shrinkage-upstream-repair` — the fix is the detector); the
-  never-passed per-transcript prior lane (`ISSUES: per-transcript-prior-lane`) is the other.
+- **The ruler reads the landscape's located enriched mode** (`DESIGN.md` §7.2): with no enriched gDNA
+  mode nothing contracts, so the zero controls and both capture-OFF strata read a factor of exactly
+  1.000 with nothing moved, and what remains on the metric page is the composition; the never-passed
+  per-transcript prior lane (`ISSUES: per-transcript-prior-lane`) is the other pre-EM item.
 - **Calibration's performance**: the one unfinished component — the sweeps dominate a deep run, on a
   single core, while the locus EM beside them is a rounding error. The decomposition is built: a
   terminal receives nothing, the sweep solves the chain a locus block at a time, the block size moves no
@@ -70,13 +70,14 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
 ## Next — the recommended order
 
 The session order agreed 2026-09-14 (owner): the test chromosome's new structures with both panels
-remeasured (done 2026-09-14, `DESIGN.md` §7); then the ruler at zero gDNA and the flux price's witness derivation, the one accuracy item inside
-the port's unit; then the performance re-baseline and the port. The ranked list below is the substance of each.
+remeasured (done 2026-09-14, `DESIGN.md` §7); then the ruler at zero gDNA (done 2026-09-14, `DESIGN.md` §7.2) and the flux
+price's witness derivation, the one accuracy item inside the port's unit; then the performance re-baseline and the port. The
+ranked list below is the substance of each.
 
 The method is the dissection loop: run the panel → worst in-scope scenario → rank its objects by error
 mass (`worst_objects.py`, `calibration_walk.py`) → find the mechanism → gated fix → add the offending
 transcripts to the test chromosome → re-run → repeat. The facts this ranking leans on, each named with
-its instrument: the ruler's factor at `g00` is the largest in-scope number on the metric page
+its instrument: the ruler reads 1.000 at `g00` and off capture, so the metric page is the composition's
 (`calibration_vs_oracle.py`); a perfect prior is worth nothing in scope end to end
 (`quant_accuracy.py`); by class the in-scope residual sits on the
 intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons (stranded ON)
@@ -102,25 +103,17 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
    (`ISSUES: the-tilt-census-as-an-instrument`), and a known limit to watch rather than build against
    (`ISSUES: the-atom-at-an-unwitnessed-both-strand-slot`). Each judged on the metric per stratum, both
    zero controls and the shared-exon stress at depth, never on the ladder alone.
-3. **The ruler at zero gDNA — `ISSUES: g00-shrinkage-upstream-repair`.** A gDNA-free library is the
-   modal real case, the composition there is now right, and the effective length the EM divides by is
-   still a fraction of the truth because the reference-density detector accepts any few slots with
-   positive mass. Derive what "this library has an enriched gDNA mode" is evidence of (a boolean),
-   prototype it outside `src/` in `_global_reference_density`'s caller, judge on
-   `calibration_vs_oracle.py`'s ruler table per stratum with both zero controls, then
-   `quant_accuracy.py`. Settle first whether the instrument's "exactly 1.000 off capture" contract is
-   stale, since both P and O read below it there.
-4. **The rest of the pre-EM setup** — `priors.py` / `result.py` / `derive.py` against
+3. **The rest of the pre-EM setup** — `priors.py` / `result.py` / `derive.py` against
    `prior_vs_oracle.py` (re-run it first) and the ruler column: `ISSUES: prior-fidelity-vs-deliverable`,
    `ISSUES: eb-shrinkage-magic-ess`, `ISSUES: capture-blind-gdna-divisor`,
-   `ISSUES: per-transcript-prior-lane`, `ISSUES: u-ruler-arm`.
-5. **The intron's own solve on unstranded capture-OFF** — the intron class carries the largest share of
+   `ISSUES: per-transcript-prior-lane`.
+4. **The intron's own solve on unstranded capture-OFF** — the intron class carries the largest share of
    the in-scope error there (`policy_benchmark.py --by-class`): the factory profile's resolution against
    the intergenic background (`density_deconv`); dissect with `worst_objects.py`.
-6. **The vertex atom** — on silent genes and nascent-free introns; a
+5. **The vertex atom** — on silent genes and nascent-free introns; a
    mechanism for it is the prior's reference (`ISSUES: reference-prior-refuted-at-concept-level`
    constrains the form) or the intron's own solve, not a message.
-7. **The message policy, only where a row is above the bar**: one prototype arm at a time through
+6. **The message policy, only where a row is above the bar**: one prototype arm at a time through
    `policy_prototype.py --module`, halves apart, pass zero beside the pipeline:
    `ISSUES: flux-price-witness-units`, `ISSUES: two-sided-exon-row`, `ISSUES: flux-floor-dispersion`,
    `ISSUES: message-layer-open-cases`.

@@ -193,6 +193,11 @@ class CalibrationResult:
 
     # --- library scalars ---
     gdna_density_global: float  # >= 0, global gDNA density (mass/bp); 0 in a zero-gDNA library
+    #: The fully-captured gDNA density the ruler and the locus gDNA effective length contract against:
+    #: the located enriched mode of the last refit's fitted landscape (`abundance_landscape.located_enriched_mode`),
+    #: or ``None`` — no enriched gDNA mode, which is every capture-OFF and every gDNA-free library, and
+    #: then nothing contracts. A positive finite density when present.
+    gdna_reference_density: float | None
     rna_sense_frac: float  # in [0, 1], RNA sense fraction used by the strand clue
     gdna_strand_overdispersion: float  # in [0, 1), fitted gDNA strand Beta-Binomial dispersion
     rna_strand_overdispersion: float  # in [0, 1), fitted RNA strand Beta-Binomial dispersion
@@ -254,6 +259,13 @@ class CalibrationResult:
         for name in ("count_rna_sj", "sj_mass_per_crossing"):
             _check_axis_array(getattr(self, name), name, self.n_sj)
 
+        if self.gdna_reference_density is not None and not (
+            np.isfinite(self.gdna_reference_density) and self.gdna_reference_density > 0.0
+        ):
+            raise ValueError(
+                "CalibrationResult.gdna_reference_density must be None or finite and > 0; "
+                f"got {self.gdna_reference_density}."
+            )
         if not np.isfinite(self.gdna_density_global) or self.gdna_density_global < 0.0:
             raise ValueError(
                 "CalibrationResult.gdna_density_global must be finite and >= 0; "

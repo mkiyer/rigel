@@ -192,13 +192,11 @@ def test_the_noop_arm_is_byte_identical_and_the_lever_resolves_a_PICOFRAGMENT(me
     assert _moved(_nudged_prior(measured, "count_gdna_region", inside, 1e-12), base), (
         "1e-12 fragments at an in-locus region changed no prior — the lever cannot resolve an override"
     )
-    # The intergenic direction is asserted on the COUNT fields only. The locus projection drops
-    #   intergenic regions from the counts — that is what this gate protects — but ``gdna_eff_len``
-    #   may legitimately move: the eff-length contraction's ``_global_reference_density`` KDE reads
-    #   EVERY region's gDNA density by design (its docstring: "detected from the data with no
-    #   assumption about probe locations") and SNAPS to a real region's density, which can be the
-    #   nudged intergenic region itself. Asserting all of ``PRIOR_FIELDS`` here conflated the two
-    #   paths and would hold only while the snap happened to land somewhere else.
+    # The intergenic direction is asserted on the COUNT fields only: the locus projection dropping
+    #   intergenic regions from the counts is what this gate protects. ``gdna_eff_len`` is the
+    #   contraction's business — it reads the result's reference density and the locus's own objects —
+    #   and has its own gates in ``test_priors.py``; asserting all of ``PRIOR_FIELDS`` here conflated
+    #   the two.
     nudged_out = _nudged_prior(measured, "count_gdna_region", outside, 1.0)
     count_moved = any(
         not np.array_equal(getattr(nudged_out, f), getattr(base, f))

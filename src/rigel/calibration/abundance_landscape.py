@@ -49,7 +49,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .landscape import _KNN_SCALE, DensityLandscape, _poisson_kernels, fit_landscape
+from .landscape import _KNN_SCALE, _LOCATED_VAR, DensityLandscape, _poisson_kernels, fit_landscape
 from .signature import BIT_EXON_NEG, BIT_EXON_POS, BIT_INTRON_NEG, BIT_INTRON_POS
 from .total_abundance import RegionWallMask, region_counts_and_exposure
 
@@ -61,6 +61,7 @@ __all__ = [
     "AbundanceLandscape",
     "AbundanceMode",
     "fit_abundance_landscape",
+    "located_enriched_mode",
     "split_basins",
 ]
 
@@ -178,6 +179,36 @@ def split_basins(
     above = [m for m in modes if m.lo >= depleted.hi - _EPS and m is not depleted]
     enriched = max(above, key=lambda m: m.basin_mass) if above else None
     return depleted, enriched
+
+
+def located_enriched_mode(landscape: DensityLandscape) -> AbundanceMode | None:
+    """The mode a gDNA-density consumer may take as the fully-captured level, or ``None``.
+
+    The census names the depleted basin as the largest by mass and the enriched one as the largest by
+    mass strictly above it (:func:`split_basins` with no anchor: for gDNA the unprobed regions always
+    outnumber the probed ones). A basin is a MODE only if it is LOCATED — the median rendered width of
+    its member kernels (``landscape.width``, :func:`~.landscape.knn_widths`' population resolution) is
+    at most one nat, :data:`~.landscape._LOCATED_VAR`, the location floor in the population's own
+    variable. A lone region, or a cluster smaller than √n, reaches decades for its √n-th neighbour and
+    renders that wide however much mass it holds, so it names no reference; the within-basin spread is
+    NOT the statement, since a basin cut by the grid's edge is narrow whatever its kernels' widths
+    (one false-positive fragment on 0.008 bp of support rendered a 0.30-nat basin at the top of a
+    zero-enrichment ladder row's grid). ``None`` is "no enriched mode" — the capture-OFF field and
+    the gDNA-free field alike — and the consumer then contracts nothing (`capture_eff_length`,
+    `priors`). The verdict and the peak are stable across an 8× range of the render resolution
+    (`TRAPS: a-mode-count-is-not-a-well-posed-quantity`).
+    """
+    _depleted, enriched = split_basins(_census(landscape), float("nan"))
+    if enriched is None:
+        return None
+    centre = np.asarray(landscape.centre, dtype=np.float64)
+    members = (centre >= enriched.lo) & (centre <= enriched.hi)
+    if not members.any():
+        return None
+    width = np.asarray(landscape.width, dtype=np.float64)[members]
+    if float(np.median(width)) ** 2 > _LOCATED_VAR:
+        return None
+    return enriched
 
 
 def fit_abundance_landscape(

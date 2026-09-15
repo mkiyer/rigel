@@ -175,6 +175,7 @@ def _uniform_library(region_len, rho_g, rho_r, pmf_g, pmf_r) -> CalibrationResul
         rna_pos_frac_boundary=np.zeros_like(cross_g),
         rna_neg_frac_boundary=np.zeros_like(cross_g),
         gdna_density_global=rho_g,
+        gdna_reference_density=None,
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,
         rna_strand_overdispersion=0.05,

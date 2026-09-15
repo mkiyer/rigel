@@ -14,6 +14,8 @@ the density's own statement of its resolution, never a chosen number.
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import pytest
 
@@ -559,3 +561,69 @@ def test_split_basins_is_the_shipped_rule_importable_on_its_own():
     base = AbundanceMode(log_rho=-4.0, basin_mass=0.60, width=0.3, lo=-6.0, hi=-2.0)
     dep5, enr5 = split_basins((base, mid, top), -4.5)
     assert dep5 is base and enr5 is mid
+
+
+# ── the located enriched mode: the ruler's reference ────────────────────────────────────────────────
+
+
+def _hand_landscape(peaks, sds, masses, kernel_width_nats, lo=-16.0, hi=3.0, n=400):
+    """A DensityLandscape rendered by hand — a mixture of Gaussians in natural-log density — with one
+    published kernel per peak, so a test controls where each basin sits, how much it holds and how wide
+    its member kernels were rendered (`knn_widths`' population resolution)."""
+    from rigel.calibration.landscape import DensityLandscape
+
+    x = np.linspace(lo, hi, n)
+    p = np.zeros_like(x)
+    for mu, sd, m in zip(peaks, sds, masses, strict=True):
+        p += m * np.exp(-0.5 * ((x - mu) / sd) ** 2) / sd
+    p /= p.sum()
+    return DensityLandscape(
+        log_rho=x,
+        logP=np.log(p + 1e-300),
+        n_train=int(sum(masses)),
+        centre=np.asarray(peaks, dtype=np.float64),
+        width=np.asarray(kernel_width_nats, dtype=np.float64),
+    )
+
+
+def test_a_unimodal_landscape_names_NO_enriched_mode():
+    """Capture-OFF: one basin, nothing above the depleted mode, no reference, no contraction."""
+    from rigel.calibration.abundance_landscape import located_enriched_mode
+
+    assert located_enriched_mode(_hand_landscape([-3.0], [0.3], [1000], [0.06])) is None
+
+
+def test_a_bimodal_landscape_names_the_LOCATED_upper_mode_at_its_peak():
+    """Capture-ON: the largest-mass basin above the depleted one, its members at the grid-step floor."""
+    from rigel.calibration.abundance_landscape import located_enriched_mode
+
+    mode = located_enriched_mode(
+        _hand_landscape([-7.0, 0.5], [0.4, 0.25], [700, 300], [0.06, 0.06])
+    )
+    assert mode is not None and abs(mode.log_rho - 0.5) < 0.05
+
+
+def test_a_lone_region_is_not_a_mode_however_much_mass_it_holds():
+    """The blank contig's shadow transcription, or one false-positive fragment on a sliver of support:
+    one kernel far above the anchors is rendered decades wide by its nearest-neighbour spacing, so its
+    basin — however narrow the density's cut makes it — is not located and names no reference.
+    PERTURBATION: the same landscape with the kernel at the floor width IS a mode."""
+    from rigel.calibration.abundance_landscape import located_enriched_mode
+
+    lone = _hand_landscape([-14.0, -5.0], [0.5, 0.2], [998, 2], [0.06, 4.4])
+    assert located_enriched_mode(lone) is None
+    resolved = _hand_landscape([-14.0, -5.0], [0.5, 0.2], [998, 2], [0.06, 0.06])
+    assert located_enriched_mode(resolved) is not None
+
+
+def test_the_enriched_mode_is_chosen_by_MASS_above_the_depleted_one():
+    """Two basins above the depleted one: the reference is the one that holds the population, not a
+    thin spike higher up; and a basin with no member kernel is nothing."""
+    from rigel.calibration.abundance_landscape import located_enriched_mode
+
+    ls = _hand_landscape([-7.0, -1.0, 0.8], [0.4, 0.3, 0.1], [700, 250, 5], [0.06, 0.06, 0.06])
+    mode = located_enriched_mode(ls)
+    assert mode is not None and abs(mode.log_rho - (-1.0)) < 0.05
+    empty = _hand_landscape([-7.0, 0.5], [0.4, 0.25], [700, 300], [0.06, 0.06])
+    empty = dataclasses.replace(empty, centre=np.array([-7.0]), width=np.array([0.06]))
+    assert located_enriched_mode(empty) is None

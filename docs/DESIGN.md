@@ -1413,30 +1413,31 @@ capture-OFF (the ladder: introns 45 % of `transfer`'s error, `exon|intron` bound
 (licensed-face exons 49 %, walled exons 23 %). The deferred stratum is blind because the gDNA fraction
 cancels from the strand mean, so an unstranded AMBIG slot has no channel.
 
-**The standing numbers** (2026-09-14; the tree at `1f885a7e` on the twelve-block test chromosome, 265 genes,
-7.637 Mb, budget 1,170 k; the ladder unchanged) — per stratum, never pooled; `policy_benchmark.py` is
+**The standing numbers** (2026-09-14; the composition on the tree at `1f885a7e` on the twelve-block test
+chromosome, 265 genes, 7.637 Mb, budget 1,170 k, the ladder unchanged; the ruler column after §7.2 landed
+the same day, the composition being untouched by it) — per stratum, never pooled; `policy_benchmark.py` is
 `silent → transfer`, whole-library Σ|gDNA − truth| in fragments; `calibration_vs_oracle.py` is `P/O gDNA`,
 the region-axis Σ|Δ| and the ruler's `P/O` factor. A mechanism is judged against this table.
 
 | panel · stratum | `policy_benchmark` silent → transfer | `calibration_vs_oracle` P/O · region Σ\|Δ\| · ruler |
 |---|---|---|
-| ladder · unstranded OFF | 358,551 → 307,281 (0.86×) | 0.9938 · 185,536 · 1.047 |
-| ladder · stranded OFF | 292,673 → 248,975 (0.85×) | 0.9949 · 146,781 · 1.037 |
-| ladder · stranded ON | 598,645 → 427,003 (0.71×) | 0.9954 · 147,454 · 1.011 |
-| ladder · unstranded ON (deferred) | 18,794,723 → 3,578,926 (0.19×) | 0.8546 · 1,036,142 · 0.990 |
-| ladder · g00, four rows (ss .50 OFF / ON, ss .99 OFF / ON) | 396 / 270 / 397 / 247 → 367 / 258 / 353 / 233 | 913 false gDNA of 40.0 M; ruler 0.154 |
-| test chromosome · unstranded OFF | 54,436 → 51,230 (0.94×) | 1.0088 · 92,425 · 1.011 |
-| test chromosome · stranded OFF | 47,114 → 43,710 (0.93×) | 1.0071 · 39,986 · 1.007 |
-| test chromosome · stranded ON | 64,200 → 41,866 (0.65×) | 1.0028 · 32,501 · 1.011 |
-| test chromosome · unstranded ON (deferred) | 1,930,576 → 194,992 (0.10×) | 1.0220 · 208,302 · 1.000 |
+| ladder · unstranded OFF | 358,551 → 307,281 (0.86×) | 0.9938 · 185,536 · 1.000 |
+| ladder · stranded OFF | 292,673 → 248,975 (0.85×) | 0.9949 · 146,781 · 1.000 |
+| ladder · stranded ON | 598,645 → 427,003 (0.71×) | 0.9954 · 147,454 · 1.013 |
+| ladder · unstranded ON (deferred) | 18,794,723 → 3,578,926 (0.19×) | 0.8546 · 1,036,142 · 0.941 |
+| ladder · g00, four rows (ss .50 OFF / ON, ss .99 OFF / ON) | 396 / 270 / 397 / 247 → 367 / 258 / 353 / 233 | 913 false gDNA of 40.0 M; ruler 1.000, nothing moved |
+| test chromosome · unstranded OFF | 54,436 → 51,230 (0.94×) | 1.0088 · 92,425 · 1.000 |
+| test chromosome · stranded OFF | 47,114 → 43,710 (0.93×) | 1.0071 · 39,986 · 1.000 |
+| test chromosome · stranded ON | 64,200 → 41,866 (0.65×) | 1.0028 · 32,501 · 1.015 |
+| test chromosome · unstranded ON (deferred) | 1,930,576 → 194,992 (0.10×) | 1.0220 · 208,302 · 1.080 |
 | test chromosome · ss 0.70, eight rows (the transition rung) | 150,048 → 113,062 (0.75×) | — |
-| test chromosome · g00, six rows (ss .50 / .70 / .99 × OFF / ON) | 8,883 / 3,764 / 24,804 / 6,269 / 36,491 / 6,586 → 8,882 / 28 / 8,812 / 96 / 9,040 / 31 | 26,876 false gDNA of 7.0 M; ruler 0.141 |
+| test chromosome · g00, six rows (ss .50 / .70 / .99 × OFF / ON) | 8,883 / 3,764 / 24,804 / 6,269 / 36,491 / 6,586 → 8,882 / 28 / 8,812 / 96 / 9,040 / 31 | 26,876 false gDNA of 7.0 M; ruler 1.000, nothing moved |
 
 The test chromosome's capture-OFF zero rows are the shadow floor: 8,873 / 8,799 / 9,032 of those fragments
 are the unannotated transcription on `test_blank`, pinned gDNA by structure (the designed control,
 `TESTING.md` §0a), and the annotated chromosome's own zero rows read 8–13 fragments capture-OFF and 28–96
-capture-ON. The ruler's factor at `g00` (0.154 / 0.141 against 1.000) is the largest in-scope number on the
-metric page (`ISSUES: g00-shrinkage-upstream-repair`).
+capture-ON. The ruler reads exactly 1.000 at `g00` and on both capture-OFF strata with nothing moved (§7.2;
+it had read 0.154 / 0.141 at `g00`), so the metric page is the composition's.
 
 ### 7.1 The landscape prior — who trains it, where its kernels go, and what axis it lives on (owner rulings 2026-09-06 and 2026-09-10; landed 2026-09-10)
 
@@ -1504,3 +1505,32 @@ losing row a zero control at that floor; every contaminated row still favours `t
 ⛔ Refused with numbers, in `ISSUES: the-landscape-training-population-arms`: every reading of "a bound"
 that reaches the DELIVERED rows (under capture the probed exons' one-sided rows ARE the enriched mode's
 witness), the likelihood-kernel estimator, the all-kernel E-step and six refits.
+
+### 7.2 The ruler reads the landscape's located enriched mode (2026-09-14; `ISSUES: g00-shrinkage-upstream-repair` CLOSED)
+
+The EM's effective length under capture (`capture_eff_length`, `EQUATIONS.md` §11) contracts a transcript
+by the enriched-footprint fraction of its gDNA density against a reference `ρ_ref`, the fully-captured
+level. THE RULING: `ρ_ref` is the located enriched mode of the fitted gDNA landscape — the same
+`DensityLandscape` ψ's composition arm reads on the refits — published on the result as
+`CalibrationResult.gdna_reference_density` (`None` when no refit fit a landscape or no located mode lies
+above the depleted one), and read by both consumers, the transcript ruler and `assemble_priors`' locus
+gDNA effective length; the private mass-weighted kernel density with its bandwidth and prominence
+constants, which accepted a mode from any five slots with positive mass, is deleted. Depleted is the
+largest-mass basin, enriched the largest-mass basin above it (`abundance_landscape.split_basins`), and a
+mode is located iff the median rendered width of its member kernels is at most one nat
+(`landscape._LOCATED_VAR`, §7.1 rule 4 read at the population's own resolution, `knn_widths`; the
+within-basin spread is not the statement — a basin cut by the grid's edge is narrow whatever its kernels). Why this and not a repair of the composition: the composition had been
+fixed first and the factor did not follow — the ladder's zero rows carry 178–189 false fragments on
+35,135 regions (one slot at or above one fragment) and still read 0.51 / 0.12 / 0.62, because a detector
+that always returns a mode reads specks as a mode; and the oracle's own counts contracted 8 % at
+capture-OFF (`O` 0.923/0.926 against a contract of exactly 1.000), an estimator defect no composition can
+cure. Measured (`calibration_vs_oracle.py` ③, both panels): the zero controls' factor 0.141 / 0.154 →
+1.000 with nothing moved (5,108 / 51,436 transcripts had moved); both in-scope capture-OFF strata
+P = O = 1.000 with nothing moved (from P 0.946–0.970, O 0.923–0.939); stranded capture-ON P/O 1.015
+against 1.011 on the test chromosome and LADDER_ON_PLACEHOLDER on the ladder, with `ρ_ref` within 4 % of
+the truth's mass-weighted median on every capture-ON row measured; the solve untouched (`policy_benchmark.py`
+identical). The `U` arm is retired: with the reference a property of the solve, a uniform field against it
+is a number about nothing, and its question — what a noise-free field leaves — is answered structurally by
+`O` at capture-OFF reading 1.000 with no fitting (`ISSUES: u-ruler-arm` CLOSED). The verdict and the
+reference are stable across an 8× range of the landscape's render resolution
+(`TRAPS: a-mode-count-is-not-a-well-posed-quantity`).

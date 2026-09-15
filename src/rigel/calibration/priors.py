@@ -343,16 +343,15 @@ def assemble_priors(
     rna_locus = np.maximum(by_region(calibration.count_rna_region) + by_boundary(rna_boundary), 0.0)
 
     # gDNA effective length: every object contracted against the SHARED global ρ_ref, PER OBJECT, so the
-    # gDNA-vs-transcript density comparison sits on one scale. ρ_ref None (no detectable gDNA) ⇒ no
-    # contraction. This is `transcript_capture_eff_lengths`' operation over the locus's object set.
-    from .capture_eff_length import _global_reference_density
-
+    # gDNA-vs-transcript density comparison sits on one scale. ρ_ref is the result's — the located enriched
+    # mode of the fitted gDNA landscape; None (no enriched mode: capture-off, or no gDNA) ⇒ no contraction.
+    # This is `transcript_capture_eff_lengths`' operation over the locus's object set.
     region_m = np.asarray(calibration.count_gdna_region, dtype=np.float64)
     region_s = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 0.0)
     boundary_m = np.asarray(calibration.count_gdna_boundary, dtype=np.float64)
     boundary_s = np.maximum(np.asarray(calibration.gdna_boundary_eff_len, dtype=np.float64), 0.0)
-    rho_ref = _global_reference_density(region_m, calibration.gdna_region_eff_len)
-    if rho_ref is None or rho_ref <= 0.0:
+    rho_ref = calibration.gdna_reference_density
+    if rho_ref is None:
         region_e, boundary_e = region_s, boundary_s
     else:
         inv = 1.0 / rho_ref
