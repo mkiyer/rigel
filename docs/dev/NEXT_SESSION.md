@@ -15,6 +15,40 @@ derivations are `docs/dev/THETA_QUADRATURE.md`.
    `sweep_replay.py capture` (`sweeps_MO_3021_step6` predates the location floor, the ruler and the witness),
    then the port of the block solve, gated bit-identical on every stage.
 
+## ⛔ Read first — 2026-09-15, after the two commits landed: the ruler was scored against the simulator's own truth
+
+The owner ruled (2026-09-15): the gDNA landscape stays the ruler's witness, with the honest admission that it
+fails where there is no gDNA to read. The experiments ran the same day (`docs/dev/EFFECTIVE_LENGTH_UNDER_CAPTURE.md`
+§9 has the numbers; the instruments are `s4/` under `~/Downloads/rigel_runs/prototypes/2026-09-15_ruler` — `ruler_vs_sampler.py` scores
+any ruler against `CaptureSampler.partition_array`, `ruler_variants.py` is the prototype, `operating_curve.py`
+the depth ladder, whose three scenario sets are cached under the test reference as `scenarios_depth_*`).
+
+SESSION 4 IS THE RULER'S REPAIR, one mechanism through the full loop, BEFORE the port's re-baseline. The owner
+agreed the plan on 2026-09-16 and ruled on its open questions: try each way on the truth instrument and show that
+it works — every open question is two arms, and the table decides. The plan —
+the derivation items with the decision each needs, the commit sequence of four commits, the gates and the owner's open
+questions — is `docs/dev/EXPECTATION_RULER_PLAN.md`; the summary:
+
+1. `ISSUES: ruler-multimapper-floor-caps-the-correction` — the expectation ruler (the posterior mean of the
+   clipped efficiency under the fitted landscape) in place of the plug-in and the floor, on the per-base LENGTH (the
+   transcript's own bases at their pieces' efficiencies; no boundary or junction object; a piece shorter than a
+   fragment keeps its weight) with every overlapping unspliced gDNA object as EVIDENCE, edge crossings included
+   (the plan's §2.3, and a tiny-exon block for the test chromosome to gate it), in `capture_eff_length` and `assemble_priors`; falsification test first on a probed/unprobed
+   pair; gated by the truth instrument on both panels, the ladder's
+   two rows and the depth ladder.
+2. `ISSUES: the-ruler-reference-on-sparse-real-libraries` — membership on located kernels; the regime on the
+   result; the four real libraries as test inputs.
+3. Promote `ruler_vs_sampler.py` to `scripts/design/` with a self-test and its index row: it answers a question
+   no instrument answered (is the ruler's formula right?), which is the instrument ruling's test.
+
+
+
+`ISSUES: the-ruler-reference-on-sparse-real-libraries`: on two of the four real libraries the ruler's
+reference is chosen by anchors' resolution walls, not by a located population (the entry has the numbers, the
+mechanism, the bounded failure direction and the repair). Take it BEFORE the port's re-baseline: the port
+freezes the identity references on the accuracy tree, and this moves a number on real libraries. The real
+libraries are the test inputs; the derivation is the one-fragment rule applied to the kernels' centres.
+
 ## What this session left, and how to commit it (owner's go)
 
 The two commits are prepared, not made (the standing ruling: committed on your go): the working tree holds
@@ -77,7 +111,7 @@ the ladder, then landed with a falsification test verified failing first and eve
 
 ## The session scratchpad (persists; nothing in the tree cites it)
 
-`/private/tmp/claude-503/-Users-mkiyer-proj-rigel/23defdd7-4a51-4398-89bc-ac9b16e623dc/scratchpad/`:
+`~/Downloads/rigel_runs/prototypes/2026-09-15_ruler/s3_arms/` (copied from the session's scratchpad):
 `commits/7_ruler`, `commits/8_flux` (the two snapshots with `MESSAGE.txt`; `commits/commit_series.sh` replays every
 `[0-9]_*` snapshot in order — the first six are already committed), `s3/` (the harnesses `ruler_arms.py`,
 `flux_arms.py`, `landscape_probe.py`, `leak_diag.py`, `nested_diag.py`; the arms' outputs under `s3/cvo`, `s3/flux`;
