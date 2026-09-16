@@ -400,6 +400,57 @@ own perturbation; the donor is a scenario the gates build, so none silently skip
 
 ---
 
+## 0c. The ruler's truth instrument and the gDNA-depth ladder
+
+`scripts/design/ruler_vs_truth.py` scores the EM's effective length under capture — the ruler,
+`capture_eff_length.transcript_capture_eff_lengths` — against the simulator's own capture-aware effective
+length, per transcript: `CaptureSampler.partition_array` is what drew the reads, so the truth is
+`Σ_w f_pre(w) · partition_t(w)` over the pre-capture fragment-length pmf and the plain length is
+`Σ_w f_pre(w) · off_target_weight · (L_t − w + 1)+`; their ratio is the truth factor, an arm's factor is
+its effective length over the same plain lengths, and the two are compared in the log anchored on the
+fully probed transcripts (a global scale is free) per class — the probed fraction of the transcript's
+bases, read off the sampler's partition at a one-base fragment — and per kind (mRNA / annotated single-exon
+/ synthetic nascent entity). It reads the same caches as every other instrument and calibrates in
+seconds; `--condition` prints the per-class table, without it every capture-ON condition prints one line
+(the probed class's share within ±0.1 nat, the unprobed and partial classes' median error, per arm).
+
+```bash
+python scripts/design/ruler_vs_truth.py --panel test --condition gdna_g05_ss_0.99_nrna_file_capture_on
+python scripts/design/ruler_vs_truth.py --panel ladder                       # one line per capture-ON row
+python scripts/design/ruler_vs_truth.py --panel test --condition C --module proto.py --out table.tsv
+python scripts/design/ruler_vs_truth.py --panel test --panel-dir ~/Downloads/rigel_runs/test_reference/scenarios_depth_d10
+```
+
+The arms: `shipped` is the ruler in `src/` on the shipped calibration; `oracle_gdna` feeds the same ruler
+the certified true gDNA counts per object (`slot_truth.npz`) with the reference read off a landscape
+fitted on the truth — the ideal witness, so the gap between the two is the calibration's and what remains
+under `oracle_gdna` is the ruler's own or the panel's geometry; `--module proto.py` names a file defining
+`ARMS = {name: ruler}` with `ruler(calibration, region_arrays, index, fl, **inputs)` — `inputs` is
+`calibrate`'s debug bundle (the last refit's `DensityLandscape` under `gdna_hyperprior`, the prior an
+expectation arm reads; the chain and the belief) plus the two fragment-length pmfs — run beside the shipped
+one on the same calibration
+— DERIVE → PROTOTYPE happens there, and nothing in `src/` moves to price an arm; `--set SECTION.FIELD=VALUE`
+prices a config value on every arm. Read the classes apart: the probed class is where the formula is exact
+when its witness is; the unprobed class is where a floor or the reference bites; the partial classes are
+where the junction rule lives. What no gDNA ruler can see is declared, not repaired: a probe spanning a
+junction or centred on an exon shorter than a fragment is captured on gDNA at a fraction of the cDNA's
+overlap (`ISSUES: ruler-witness-geometry-on-transcript-panels`).
+
+**The gDNA-depth ladder** is three side configs of the test chromosome, everything but the fragment
+budget and the gDNA rungs identical to `test_reference.yaml`, stranded only, built the same way (§0a's
+commands with `--config` pointing at each; one `cache` at a time or a `RIGEL_SCRATCH` each):
+
+| config | depth | gDNA rungs | what it answers |
+|---|---|---|---|
+| `test_reference_depth_d10.yaml` | 117 k fragments | `g00 g001 g01 g05 g25 g50` | where the reference is `None` and where the probed class reads within ±0.1 nat, at a tenth of the depth |
+| `test_reference_depth_d100.yaml` | 11.7 k | the same six | the same curve at a hundredth — the axis is gDNA fragments per probed piece, not the fraction |
+| `test_reference_depth_full_lowg.yaml` | 1.17 M | `g001 g01` | the two rungs the panel lacks at full depth |
+
+`ruler_vs_truth.py --panel-dir` scores each set; the curve is one line per condition. It is a side panel
+in the sense of §0 — its transcript-level number is not a calibration result — and never a ladder rung.
+
+---
+
 ## 1. The simulated panel (shared backbone)
 
 A real human backbone, not a generated mini-genome: `chr21` + `chr22` + the 92 ERCC spike-in references,
