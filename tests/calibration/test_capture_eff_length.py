@@ -86,6 +86,7 @@ def _cal(
         rna_neg_frac_boundary=np.zeros(len(boundary_eff)),
         gdna_density_global=float(d.mean()),
         gdna_reference_density=reference,
+        gdna_reference_members=0 if reference is None else 1,
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,
         rna_strand_overdispersion=0.05,

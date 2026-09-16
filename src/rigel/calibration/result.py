@@ -198,6 +198,10 @@ class CalibrationResult:
     #: or ``None`` — no enriched gDNA mode, which is every capture-OFF and every gDNA-free library, and
     #: then nothing contracts. A positive finite density when present.
     gdna_reference_density: float | None
+    #: The regime behind the reference: how many LOCATED kernels (`landscape.DensityLandscape.located`)
+    #: the enriched mode rests on — the located population's own resolution is ``√n``, so this is the
+    #: number a reader compares against; ``0`` exactly when the reference is ``None``.
+    gdna_reference_members: int
     rna_sense_frac: float  # in [0, 1], RNA sense fraction used by the strand clue
     gdna_strand_overdispersion: float  # in [0, 1), fitted gDNA strand Beta-Binomial dispersion
     rna_strand_overdispersion: float  # in [0, 1), fitted RNA strand Beta-Binomial dispersion
@@ -265,6 +269,11 @@ class CalibrationResult:
             raise ValueError(
                 "CalibrationResult.gdna_reference_density must be None or finite and > 0; "
                 f"got {self.gdna_reference_density}."
+            )
+        if (int(self.gdna_reference_members) > 0) != (self.gdna_reference_density is not None):
+            raise ValueError(
+                "CalibrationResult.gdna_reference_members must be > 0 exactly when a reference is "
+                f"present; got {self.gdna_reference_members} with reference {self.gdna_reference_density}."
             )
         if not np.isfinite(self.gdna_density_global) or self.gdna_density_global < 0.0:
             raise ValueError(

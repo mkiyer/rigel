@@ -49,7 +49,14 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .landscape import _KNN_SCALE, _LOCATED_VAR, DensityLandscape, _poisson_kernels, fit_landscape
+from .landscape import (
+    _KNN_SCALE,
+    _LOCATED_VAR,
+    DensityLandscape,
+    _poisson_kernels,
+    fit_landscape,
+    knn_widths,
+)
 from .signature import BIT_EXON_NEG, BIT_EXON_POS, BIT_INTRON_NEG, BIT_INTRON_POS
 from .total_abundance import RegionWallMask, region_counts_and_exposure
 
@@ -60,6 +67,7 @@ _GENE_BITS = BIT_INTRON_POS | BIT_INTRON_NEG | BIT_EXON_POS | BIT_EXON_NEG
 __all__ = [
     "AbundanceLandscape",
     "AbundanceMode",
+    "LocatedMode",
     "fit_abundance_landscape",
     "located_enriched_mode",
     "split_basins",
@@ -181,34 +189,62 @@ def split_basins(
     return depleted, enriched
 
 
-def located_enriched_mode(landscape: DensityLandscape) -> AbundanceMode | None:
+@dataclass(frozen=True, slots=True)
+class LocatedMode:
+    """A mode of the located population: the basin, and the number of located kernels behind it — the
+    regime a consumer publishes beside the reference it reads off ``mode.log_rho``."""
+
+    mode: AbundanceMode
+    n_members: int
+
+
+def located_enriched_mode(landscape: DensityLandscape) -> LocatedMode | None:
     """The mode a gDNA-density consumer may take as the fully-captured level, or ``None``.
 
-    The census names the depleted basin as the largest by mass and the enriched one as the largest by
-    mass strictly above it (:func:`split_basins` with no anchor: for gDNA the unprobed regions always
-    outnumber the probed ones). A basin is a MODE only if it is LOCATED — the median rendered width of
-    its member kernels (``landscape.width``, :func:`~.landscape.knn_widths`' population resolution) is
-    at most one nat, :data:`~.landscape._LOCATED_VAR`, the location floor in the population's own
-    variable. A lone region, or a cluster smaller than √n, reaches decades for its √n-th neighbour and
-    renders that wide however much mass it holds, so it names no reference; the within-basin spread is
-    NOT the statement, since a basin cut by the grid's edge is narrow whatever its kernels' widths
-    (one false-positive fragment on 0.008 bp of support rendered a 0.30-nat basin at the top of a
-    zero-enrichment ladder row's grid). ``None`` is "no enriched mode" — the capture-OFF field and
-    the gDNA-free field alike — and the consumer then contracts nothing (`capture_eff_length`,
-    `priors`). The verdict and the peak are stable across an 8× range of the render resolution
+    The census names the depleted basin as the largest by rendered mass (for gDNA the unprobed
+    regions always outnumber the probed ones, and the zero-count anchors are that population's own
+    statement). Above it the candidate is the basin holding the most LOCATED kernels — a kernel with a
+    location, ``landscape.located``, is one that counted at least a fragment; an anchor's or a
+    sub-fragment kernel's centre is its resolution wall ``1/E`` and is no member of anything. A human
+    index trains a quarter of a million anchors whose walls span every decade, and a basin above the
+    bulk can be packed with them around ten measured kernels (`ISSUES: the-ruler-reference-on-sparse-real-libraries`).
+
+    The candidate is a MODE only if its members resolve it at the located population's own
+    resolution: with ``k = √n_located`` (:func:`~.landscape.knn_widths`' population ``k``), each
+    member's width is half the distance to its ``k``-th nearest MEMBER, and the median of those
+    satisfies ``width² ≤`` :data:`~.landscape._LOCATED_VAR`, the one-fragment floor in the population's
+    own variable. A basin with ``k`` members or fewer has no ``k``-th neighbour inside itself — the
+    cluster smaller than ``√n`` that reaches outside itself — and is no mode, however narrow the
+    rendered density's cut made it; the within-basin spread is NOT the statement, since a basin cut by
+    the grid's edge is narrow whatever its kernels. ``None`` is "no enriched mode" — the capture-OFF
+    field, the gDNA-free field, and a library whose gDNA is too sparse to locate its probed level —
+    and the consumer then contracts nothing (`capture_eff_length`, `priors`). The verdict and the peak
+    are stable across an 8× range of the render resolution
     (`TRAPS: a-mode-count-is-not-a-well-posed-quantity`).
     """
-    _depleted, enriched = split_basins(_census(landscape), float("nan"))
-    if enriched is None:
+    modes = _census(landscape)
+    depleted, _enriched = split_basins(modes, float("nan"))
+    above = [m for m in modes if m.lo >= depleted.hi - _EPS and m is not depleted]
+    if not above:
         return None
     centre = np.asarray(landscape.centre, dtype=np.float64)
-    members = (centre >= enriched.lo) & (centre <= enriched.hi)
-    if not members.any():
+    located = np.asarray(landscape.located, dtype=bool)
+    n_located = int(located.sum())
+    k = max(int(round(np.sqrt(n_located))), 2)
+
+    def members(m: AbundanceMode) -> np.ndarray:
+        return located & (centre >= m.lo) & (centre <= m.hi)
+
+    enriched = max(above, key=lambda m: int(members(m).sum()))
+    mem = members(enriched)
+    n_members = int(mem.sum())
+    if n_members <= k:
         return None
-    width = np.asarray(landscape.width, dtype=np.float64)[members]
+    step = float(landscape.log_rho[1] - landscape.log_rho[0])
+    width = knn_widths(centre[mem], step, k=k)
     if float(np.median(width)) ** 2 > _LOCATED_VAR:
         return None
-    return enriched
+    return LocatedMode(mode=enriched, n_members=n_members)
 
 
 def fit_abundance_landscape(

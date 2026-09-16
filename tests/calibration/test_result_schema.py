@@ -58,6 +58,7 @@ def _valid_kwargs() -> dict:
         rna_neg_frac_boundary=np.zeros(N_BOUNDARIES),
         gdna_density_global=1e-3,
         gdna_reference_density=None,
+        gdna_reference_members=0,
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,
         rna_strand_overdispersion=0.05,
@@ -377,8 +378,27 @@ def test_the_reference_density_is_None_or_positive_and_finite():
     kw = _valid_kwargs()
     assert CalibrationResult(**kw).gdna_reference_density is None
     kw["gdna_reference_density"] = 0.37
+    kw["gdna_reference_members"] = 12
     assert CalibrationResult(**kw).gdna_reference_density == 0.37
     for bad in (0.0, -1.0, float("nan"), float("inf")):
         kw["gdna_reference_density"] = bad
         with pytest.raises(ValueError):
             CalibrationResult(**kw)
+
+
+def test_the_reference_members_count_the_kernels_behind_a_reference_and_are_ZERO_without_one():
+    """`gdna_reference_members` is the regime: the located kernels the enriched mode rests on. It is
+    positive exactly when a reference is present — a reference from no kernel and a member count with
+    no reference are both refused, so a consumer reading the pair cannot see a half-published state."""
+    kw = _valid_kwargs()
+    assert CalibrationResult(**kw).gdna_reference_members == 0
+    kw["gdna_reference_density"] = 0.37
+    kw["gdna_reference_members"] = 12
+    assert CalibrationResult(**kw).gdna_reference_members == 12
+    kw["gdna_reference_members"] = 0
+    with pytest.raises(ValueError, match="gdna_reference_members"):
+        CalibrationResult(**kw)
+    kw["gdna_reference_density"] = None
+    kw["gdna_reference_members"] = 3
+    with pytest.raises(ValueError, match="gdna_reference_members"):
+        CalibrationResult(**kw)

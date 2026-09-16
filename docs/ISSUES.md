@@ -91,39 +91,6 @@ hold no gDNA fragment at all and still read +2.0 nat without the floor: the cali
 that have none, the stranded capture-ON composition residual the standing numbers already carry, which the ruler
 inherits and cannot repair.
 
-### the-ruler-reference-on-sparse-real-libraries
-`priority: next — before the port's re-baseline freezes the references · kind: defect · 2026-09-15`
-`abundance_landscape.located_enriched_mode` (`DESIGN.md` §7.2) decides a basin's location on `landscape.centre`,
-and a kernel's centre is `log(max(count, 1)/E)` — for a zero-count anchor or a sub-fragment kernel that is its
-resolution WALL, not a location. A human index trains ~250–325 k anchors whose walls span every decade (short
-intronic and intergenic pieces), so on a sparse library the basin above the depleted one can be "located" by
-anchors alone. Measured on the four real libraries under `~/Downloads/rigel_runs/cfrna` with the pipeline as
-shipped (the census and the member dissection are `s3_real/` under `~/Downloads/rigel_runs/prototypes/2026-09-15_ruler`): LBX0190
-(3,434 gDNA fragments on regions, 1,118 kernels with a location) chooses 10^-1.57/bp from a basin of 16,931
-members, 16,918 of them anchors and 10 located, while the probed level (599 fragments in 3 regions near
-10^-0.5) is no population at all; MO_3021 (65,874 / 15,088) chooses 10^-1.35/bp from 20,053 anchors and 16
-located members (1.66 nat on those alone, unlocated), the probed level 10^-0.2 holding 1,078 fragments in 4
-regions. LBX0588 (698,480 / 33,943) and the VCaP RNA-plus-gDNA library (932,175 / 74,968) read genuine modes
-(11,579 and 24,496 located members, the reference inside the probed population). The failure direction is
-bounded: for a transcript far below the reference the shrinkage floor `1/(C+1)` makes the factor nearly
-independent of `ρ_ref`, and a reference too LOW compresses the correction toward none — so it is an
-under-correction of the moderately enriched and a floor-bounded contraction where the honest verdict is "no
-mode", never a correction beyond the truth. The synthetic panels cannot expose it: their anchors are long
-pieces whose walls sit decades below any enriched level. Measured boundary on the depth ladder (`s4/operating_curve.py`, 2026-09-15; the test chromosome's 108 probed genes, ~350
-probed pieces): the reference is `None` below about 120 gDNA fragments and the probed transcripts read within ±0.1
-nat for 30 % at ~1,200 fragments, 80–90 % at ~6,000, 92–98 % at ~12,000 and all of them from ~30,000, at every
-depth — the axis is gDNA fragments per probed piece, roughly 3 / 17 / 35 / 85. Measured need for a mode (`s3_real/thin_panel.py`, the
-probed genes thinned in the training set): about √n_train located kernels — on the test chromosome
-(√n ≈ 30, ~3 kernels per probed gene) the verdict holds at 10 genes and flips at 5; on the ladder (√n ≈ 90–120,
-~4 per gene) it holds at 30 and flips at 10–20; and once the ladder's `g50 ss.50 ON` row is thinned below 200
-genes "largest mass above the depleted" picks the probe flanks at 10^-0.6 over the probed level at 10^+0.24.
-The repair, through the full loop: a member must have a location (count ≥ 1, the one-fragment rule
-`_LOCATED_VAR` is derived from, applied to the array it was meant for), the knn widths read among the located
-kernels, and the choice among the basins above the depleted one re-derived (the largest LOCATED mass, or the
-highest located population, are the candidates). Gate: both panels unchanged to the fragment
-(`calibration_vs_oracle.py` ③, `policy_benchmark.py`), the two sparse libraries reading `None` or the probed
-level, the two deep ones unchanged; the identity references re-frozen with the reason.
-
 ### nested-antisense-leak-under-the-sane-ruler
 `priority: later (EM-side, with the per-transcript prior lane) · kind: defect · 2026-09-14`
 With the EM's ruler honest — a gDNA-free library contracts nothing (`DESIGN.md` §7.2) — the negative control
@@ -374,6 +341,31 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### the-ruler-reference-on-sparse-real-libraries
+CLOSED by landing 2026-09-16 (`DESIGN.md` §7.2, `EQUATIONS.md` §11): a basin's members are the kernels with a
+location (count ≥ 1, `DensityLandscape.located`), the enriched candidate is the basin above the depleted one
+with the most located members, and it is a mode iff more than `k = √n_located` members resolve it at the
+population's k (the median width to the k-th nearest member ≤ 1 nat); the regime is on the result
+(`gdna_reference_members`). The defect: `located_enriched_mode` tested membership on every kernel centre, and
+a zero-count anchor's centre is its resolution wall `1/E` — a human index trains ~250–325 k anchors whose walls
+span every decade, so on a sparse library a basin above the bulk was "located" by walls: LBX0190 (3,434 gDNA
+fragments on regions, 1,118 located kernels) chose 10^-1.57/bp from 16,931 members, 16,918 of them anchors and
+10 located, while its probed level (599 fragments in 3 regions near 10^-0.5) is no population; MO_3021
+(65,874 / 15,088) chose 10^-1.35/bp from 20,053 anchors and 16 located members. Killing numbers, landed: both
+panels' 46 rows and the depth ladder's 26 capture-ON rows unchanged to the reference (the enriched modes hold
+257–3,606 located members); LBX0190 and MO_3021 read `None` (no basin above the bulk holds more than 11 / 16
+located kernels against k = 33 / 123); LBX0588 (33,943 located, 11,579 members at 10^-0.53) and the VCaP
+library (74,968, 24,496 members at 10^-1.07) unchanged; two capture-OFF rows of the depth ladder at a tenth of
+the depth (`g00`, `g001`) that had read a reference from one located kernel among 37–43 walls read `None`,
+restoring the capture-OFF contract there. The choice rule (largest rendered mass, most located members, largest
+located weight, highest located basin) agrees on every row measured once the members are located, so the
+most-located-members rule ships by derivation, not by number. Falsification test verified failing on the
+shipped reader (a fitted basin of 600 short anchors' walls around twelve located kernels read a located mode of
+612 members) and the perturbations fired: walls admitted as members, the k rule dropped, the members read at
+their own √n_members. The three `review_identity_*` references re-frozen (LBX0190's reference is `None` now,
+by design). The measured operating boundary stands: the reference is `None` below about 120 gDNA fragments on
+the test chromosome, and about √n_train located probed pieces at one fragment or more are needed for a mode.
 
 ### capture-on-strand-pure-ambig-undercall
 CLOSED by landing 2026-09-14 (`DESIGN.md` §6b.15.13, `EQUATIONS.md` §9f): the tilt atom — the AMBIG tilt's

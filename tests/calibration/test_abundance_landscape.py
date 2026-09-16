@@ -14,7 +14,6 @@ the density's own statement of its resolution, never a chosen number.
 
 from __future__ import annotations
 
-import dataclasses
 
 import numpy as np
 import pytest
@@ -566,10 +565,12 @@ def test_split_basins_is_the_shipped_rule_importable_on_its_own():
 # ── the located enriched mode: the ruler's reference ────────────────────────────────────────────────
 
 
-def _hand_landscape(peaks, sds, masses, kernel_width_nats, lo=-16.0, hi=3.0, n=400):
-    """A DensityLandscape rendered by hand — a mixture of Gaussians in natural-log density — with one
-    published kernel per peak, so a test controls where each basin sits, how much it holds and how wide
-    its member kernels were rendered (`knn_widths`' population resolution)."""
+def _hand_landscape(peaks, sds, masses, members, walls=(), spread=0.1, lo=-16.0, hi=3.0, n=400):
+    """A DensityLandscape rendered by hand — a mixture of Gaussians in natural-log density — with its
+    kernels stated outright: per peak, ``members`` LOCATED kernels spread evenly across ±``spread`` nat
+    of it, and ``walls`` as ``(centre, n)`` pairs of location-free kernels (anchors' resolution walls) —
+    so a test controls where each basin sits, how much it holds, and how many located kernels stand
+    behind it."""
     from rigel.calibration.landscape import DensityLandscape
 
     x = np.linspace(lo, hi, n)
@@ -577,12 +578,19 @@ def _hand_landscape(peaks, sds, masses, kernel_width_nats, lo=-16.0, hi=3.0, n=4
     for mu, sd, m in zip(peaks, sds, masses, strict=True):
         p += m * np.exp(-0.5 * ((x - mu) / sd) ** 2) / sd
     p /= p.sum()
+    centre = [
+        np.linspace(mu - spread, mu + spread, k) for mu, k in zip(peaks, members, strict=True)
+    ]
+    located = [np.ones(k, dtype=bool) for k in members]
+    for mu, k in walls:
+        centre.append(np.linspace(mu - 0.1, mu + 0.1, k))
+        located.append(np.zeros(k, dtype=bool))
     return DensityLandscape(
         log_rho=x,
         logP=np.log(p + 1e-300),
-        n_train=int(sum(masses)),
-        centre=np.asarray(peaks, dtype=np.float64),
-        width=np.asarray(kernel_width_nats, dtype=np.float64),
+        n_train=int(sum(members) + sum(k for _, k in walls)),
+        centre=np.concatenate(centre),
+        located=np.concatenate(located),
     )
 
 
@@ -590,40 +598,112 @@ def test_a_unimodal_landscape_names_NO_enriched_mode():
     """Capture-OFF: one basin, nothing above the depleted mode, no reference, no contraction."""
     from rigel.calibration.abundance_landscape import located_enriched_mode
 
-    assert located_enriched_mode(_hand_landscape([-3.0], [0.3], [1000], [0.06])) is None
+    assert located_enriched_mode(_hand_landscape([-3.0], [0.3], [1000], [400])) is None
 
 
-def test_a_bimodal_landscape_names_the_LOCATED_upper_mode_at_its_peak():
-    """Capture-ON: the largest-mass basin above the depleted one, its members at the grid-step floor."""
+def test_a_bimodal_landscape_names_the_LOCATED_upper_mode_at_its_peak_with_its_members():
+    """Capture-ON: the basin above the depleted one holding the most located kernels, resolved by them
+    (60 members against k = √300 ≈ 17); the reference is its peak and the members are published."""
     from rigel.calibration.abundance_landscape import located_enriched_mode
 
-    mode = located_enriched_mode(
-        _hand_landscape([-7.0, 0.5], [0.4, 0.25], [700, 300], [0.06, 0.06])
+    ref = located_enriched_mode(_hand_landscape([-7.0, 0.5], [0.4, 0.25], [700, 300], [240, 60]))
+    assert ref is not None and abs(ref.mode.log_rho - 0.5) < 0.05
+    assert ref.n_members == 60
+
+
+def test_a_basin_of_fewer_than_k_located_kernels_is_not_a_mode_however_narrow():
+    """The blank contig's shadow transcription, a few false-positive fragments on slivers of support, or a
+    sparse library's tail of a dozen measured exons: a basin whose located members number at most
+    k = √n_located has no k-th neighbour inside itself and is no mode, whatever the density's cut made
+    of it. PERTURBATION: the same landscape with the cluster grown past k IS a mode."""
+    from rigel.calibration.abundance_landscape import located_enriched_mode
+
+    # 400 located kernels in all ⇒ k = 20; 20 members do not resolve the basin, 21 do
+    assert (
+        located_enriched_mode(_hand_landscape([-14.0, -5.0], [0.5, 0.2], [998, 2], [380, 20]))
+        is None
     )
-    assert mode is not None and abs(mode.log_rho - 0.5) < 0.05
+    grown = located_enriched_mode(_hand_landscape([-14.0, -5.0], [0.5, 0.2], [998, 2], [379, 21]))
+    assert grown is not None and abs(grown.mode.log_rho - (-5.0)) < 0.05 and grown.n_members == 21
+    # and the members are read at the POPULATION's k, not their own √21: the same 21 strewn across
+    # ±1.5 nat put every member's 20th neighbour ~3 nat away, and that is no location either
+    strewn = _hand_landscape([-14.0, -5.0], [0.5, 2.0], [998, 2], [379, 21], spread=1.5)
+    assert located_enriched_mode(strewn) is None
 
 
-def test_a_lone_region_is_not_a_mode_however_much_mass_it_holds():
-    """The blank contig's shadow transcription, or one false-positive fragment on a sliver of support:
-    one kernel far above the anchors is rendered decades wide by its nearest-neighbour spacing, so its
-    basin — however narrow the density's cut makes it — is not located and names no reference.
-    PERTURBATION: the same landscape with the kernel at the floor width IS a mode."""
+def test_anchors_walls_are_not_members_and_cannot_locate_a_basin():
+    """`ISSUES: the-ruler-reference-on-sparse-real-libraries`, the reader's half: a basin above the bulk
+    packed with 20,000 anchors' resolution walls around twelve located kernels names no reference — the
+    walls are not members, and twelve is below k = √n_located. PERTURBATION: admitting every centre as a
+    member (the shipped rule) reads the walls as a located mode of 20,012 members."""
     from rigel.calibration.abundance_landscape import located_enriched_mode
 
-    lone = _hand_landscape([-14.0, -5.0], [0.5, 0.2], [998, 2], [0.06, 4.4])
-    assert located_enriched_mode(lone) is None
-    resolved = _hand_landscape([-14.0, -5.0], [0.5, 0.2], [998, 2], [0.06, 0.06])
-    assert located_enriched_mode(resolved) is not None
+    ls = _hand_landscape([-7.0, -1.5], [0.4, 0.2], [700, 300], [1000, 12], walls=[(-1.5, 20_000)])
+    assert located_enriched_mode(ls) is None
+    # and with the same twelve grown into a population the walls change nothing either way
+    ls2 = _hand_landscape([-7.0, -1.5], [0.4, 0.2], [700, 300], [1000, 200], walls=[(-1.5, 20_000)])
+    ref = located_enriched_mode(ls2)
+    assert ref is not None and ref.n_members == 200
 
 
-def test_the_enriched_mode_is_chosen_by_MASS_above_the_depleted_one():
-    """Two basins above the depleted one: the reference is the one that holds the population, not a
-    thin spike higher up; and a basin with no member kernel is nothing."""
+def test_the_enriched_mode_is_chosen_by_LOCATED_MEMBERS_above_the_depleted_one():
+    """Two basins above the depleted one: the reference is the one holding the located population, not
+    the one holding the most rendered mass — here the upper basin carries more density (walls render
+    mass too) but thirty located kernels against the middle basin's 250, so the middle one is the
+    reference. PERTURBATION: chosen by rendered mass, the upper basin is the candidate, and with thirty
+    members against k = 31 it is no mode at all. A basin with no located member is nothing."""
     from rigel.calibration.abundance_landscape import located_enriched_mode
 
-    ls = _hand_landscape([-7.0, -1.0, 0.8], [0.4, 0.3, 0.1], [700, 250, 5], [0.06, 0.06, 0.06])
-    mode = located_enriched_mode(ls)
-    assert mode is not None and abs(mode.log_rho - (-1.0)) < 0.05
-    empty = _hand_landscape([-7.0, 0.5], [0.4, 0.25], [700, 300], [0.06, 0.06])
-    empty = dataclasses.replace(empty, centre=np.array([-7.0]), width=np.array([0.06]))
+    ls = _hand_landscape([-7.0, -1.0, 0.8], [0.4, 0.3, 0.1], [700, 100, 250], [700, 250, 30])
+    ref = located_enriched_mode(ls)
+    assert ref is not None and abs(ref.mode.log_rho - (-1.0)) < 0.05 and ref.n_members == 250
+    empty = _hand_landscape([-7.0, 0.5], [0.4, 0.25], [700, 300], [700, 0])
     assert located_enriched_mode(empty) is None
+
+
+def _walls_around_a_tail(seed=0, n_long=20_000, n_dep=200, n_short=600, n_tail=12):
+    """A sparse human-like library, refitted through the loop's own E-step: the depleted bulk is 20,000
+    long anchors (walls at 10^-5) with 200 located intron pieces at the depleted level; 600 SHORT anchors —
+    20–60 bp intergenic slivers that sequenced nothing — whose resolution walls 1/E sit between 10^-1.8
+    and 10^-1.3; and twelve located exon kernels near 10^-1.3, a tail and not a population."""
+    from rigel.calibration.landscape import fit_landscape
+
+    rng = np.random.default_rng(seed)
+    eff = np.concatenate(
+        [
+            np.full(n_long, 1e5),
+            np.full(n_dep, 1e5),
+            rng.uniform(20.0, 60.0, n_short),
+            np.full(n_tail, 300.0),
+        ]
+    )
+    count = np.concatenate(
+        [
+            np.zeros(n_long),
+            rng.poisson(3e-5 * 1e5, n_dep) + 1.0,
+            np.zeros(n_short),
+            rng.poisson(0.05 * 300.0, n_tail) + 1.0,
+        ]
+    )
+    mass = np.maximum(count * 2.0, 1.0)
+    var = np.where(count > 0, 0.1, np.inf)
+    anchor = count <= 0.0
+    ls = None
+    for _ in range(
+        3
+    ):  # calib_refit_iters: the E-step moves the walls' mass to the bulk, not their centres
+        ls = fit_landscape(count, mass, eff, var, anchor=anchor, prev=ls)
+    return ls
+
+
+def test_a_fitted_basin_of_walls_around_a_handful_of_located_kernels_is_NOT_a_mode():
+    """LBX0190's defect through the estimator itself (the falsification test, verified failing on the
+    shipped reader, which read a located mode of 612 members here): the walls' centres pack the basin
+    above the bulk so densely that every rendered width there sits at the grid step. A wall is not a
+    location: the basin's located members are twelve, fewer than k = √212, and it names no reference."""
+    from rigel.calibration.abundance_landscape import located_enriched_mode
+
+    ls = _walls_around_a_tail()
+    assert ls is not None
+    assert int(ls.located.sum()) == 212
+    assert located_enriched_mode(ls) is None

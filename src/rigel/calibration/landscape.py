@@ -81,11 +81,13 @@ class DensityLandscape:
     logP: np.ndarray
     n_train: int
     #: The kernels this density was rendered from, one per training region: the centre
-    #: ``log(max(count, 1) / E)`` and the rendered width (:func:`knn_widths`, the population resolution),
-    #: both in nats. Published so a consumer reading a mode off the density can ask whether the mode's
-    #: members are located (`abundance_landscape.located_enriched_mode`) without re-deriving either.
+    #: ``log(max(count, 1) / E)`` in nats, and whether it is a LOCATION — a count of at least one
+    #: fragment, the same wall :data:`_LOCATED_VAR` is read at. A zero-count anchor or a sub-fragment
+    #: kernel is centred at its resolution wall ``1/E``, which says where the kernel could not see, not
+    #: where a density is; a consumer reading a mode off the density (`abundance_landscape.located_enriched_mode`)
+    #: counts members among the located kernels only, and never re-derives either array.
     centre: np.ndarray
-    width: np.ndarray
+    located: np.ndarray
 
     def logprior(self, frac_grid, mass, eff) -> np.ndarray:
         """Project onto the ψ solve grid → ``(n_slots, K)`` additive term ``= log P(log ρ_c)`` evaluated at
@@ -198,8 +200,15 @@ def _poisson_kernels(count: np.ndarray, eff: np.ndarray, grid: np.ndarray) -> np
     return pn / np.maximum(pn.sum(1, keepdims=True), _EPS)
 
 
-def knn_widths(centres: np.ndarray, grid_step: float, scale: float = _KNN_SCALE) -> np.ndarray:
+def knn_widths(
+    centres: np.ndarray, grid_step: float, scale: float = _KNN_SCALE, k: int | None = None
+) -> np.ndarray:
     """The population resolution: ``h_i = scale · dist(a_i, k-th nearest neighbour)``, ``k = √n``.
+
+    ``k`` is the population's own by default; a caller asking about a SUBSET of the population at the
+    population's resolution passes the population's ``k`` (`abundance_landscape.located_enriched_mode`
+    reads a basin's members at the located population's ``√n``, so a cluster smaller than ``k`` is not
+    narrow but unresolved).
 
     ⛔ Read this before changing the kernel. The per-region Poisson likelihood is a measurement width, and
     on the log axis it is ``1/(√g·ln10)`` decades, so it shrinks as ρ^(−1/2) — by well over an order of
@@ -232,7 +241,7 @@ def knn_widths(centres: np.ndarray, grid_step: float, scale: float = _KNN_SCALE)
     range.
     """
     n = centres.size
-    k = max(int(round(np.sqrt(n))), 2)
+    k = max(int(round(np.sqrt(n))), 2) if k is None else int(k)
     srt = np.sort(centres)
     if n <= k:
         return np.full(n, max(float(srt[-1] - srt[0]), grid_step))
@@ -424,5 +433,5 @@ def fit_landscape(
         logP=np.log(density / density.sum()),
         n_train=int(live.sum()),
         centre=centres * _LN10,
-        width=widths * _LN10,
+        located=count >= 1.0,
     )

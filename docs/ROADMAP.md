@@ -49,7 +49,9 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
 - **The prior assembler**: with perfect masses its own error is negligible — `prior_vs_oracle.py`.
 - **The ruler reads the landscape's located enriched mode** (`DESIGN.md` §7.2): with no enriched gDNA
   mode nothing contracts, so the zero controls and both capture-OFF strata read a factor of exactly
-  1.000 with nothing moved, and what remains on the metric page is the composition; the never-passed
+  1.000 with nothing moved, and what remains on the metric page is the composition; a mode's members are
+  kernels with a location, so a sparse library is told it has no reference rather than handed one read off
+  anchors' walls (`CalibrationResult.gdna_reference_members` is the regime); the never-passed
   per-transcript prior lane (`ISSUES: per-transcript-prior-lane`) is the other pre-EM item.
 - **Calibration's performance**: the one unfinished component — the sweeps dominate a deep run, on a
   single core, while the locus EM beside them is a rounding error. The decomposition is built: a

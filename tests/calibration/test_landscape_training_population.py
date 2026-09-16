@@ -303,7 +303,7 @@ def _prev_at_floor(grid_log10):
         logP=np.log(p / p.sum()),
         n_train=1,
         centre=np.array([grid_log10[0] * np.log(10.0)]),
-        width=np.array([0.1 * np.log(10.0)]),
+        located=np.array([True]),
     )
 
 
@@ -382,7 +382,7 @@ def test_the_result_publishes_the_last_landscapes_located_enriched_mode(sweep_in
     """The reference the ruler and the prior assembler read is the located enriched mode of the LAST
     refit's landscape, published on the result; with no refit there is no landscape and no reference.
     PERTURBATION: with the located-mode reader forced to answer, the result carries exactly that answer."""
-    from rigel.calibration.abundance_landscape import AbundanceMode
+    from rigel.calibration.abundance_landscape import AbundanceMode, LocatedMode
     from rigel.config import CalibrationConfig
 
     res0 = CAL.calibrate(
@@ -409,10 +409,14 @@ def test_the_result_publishes_the_last_landscapes_located_enriched_mode(sweep_in
     assert len(seen) == 1, "the reader runs once, on the last landscape"
     if seen[0] is None:
         assert res.gdna_reference_density is None
+        assert res.gdna_reference_members == 0
     else:
-        assert res.gdna_reference_density == pytest.approx(float(np.exp(seen[0].log_rho)))
+        assert res.gdna_reference_density == pytest.approx(float(np.exp(seen[0].mode.log_rho)))
+        assert res.gdna_reference_members == seen[0].n_members > 0
 
-    forced = AbundanceMode(log_rho=-2.0, basin_mass=0.3, width=0.1, lo=-3.0, hi=-1.0)
+    forced = LocatedMode(
+        mode=AbundanceMode(log_rho=-2.0, basin_mass=0.3, width=0.1, lo=-3.0, hi=-1.0), n_members=7
+    )
     monkeypatch.setattr(CAL, "located_enriched_mode", lambda ls: forced)
     res2 = CAL.calibrate(
         payload=sweep_inputs["payload"],
@@ -420,3 +424,4 @@ def test_the_result_publishes_the_last_landscapes_located_enriched_mode(sweep_in
         **sweep_inputs["calibrate_kw"],
     )
     assert res2.gdna_reference_density == pytest.approx(float(np.exp(-2.0)))
+    assert res2.gdna_reference_members == 7

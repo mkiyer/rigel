@@ -154,6 +154,7 @@ def test_the_oracle_result_is_a_VALID_CalibrationResult(oracle_scenario, tmp_pat
         rna_neg_frac_boundary=np.zeros(e),
         gdna_density_global=0.0,
         gdna_reference_density=None,
+        gdna_reference_members=0,
         rna_sense_frac=0.5,
         gdna_strand_overdispersion=0.0,
         rna_strand_overdispersion=0.0,

@@ -41,6 +41,7 @@ def _result(
     mass_per_crossing=None,
     gdna_density_global=0.01,
     gdna_reference_density=None,
+    gdna_reference_members=0,
     rna_region_eff=None,
     rna_boundary_eff=None,
 ) -> CalibrationResult:
@@ -107,6 +108,7 @@ def _result(
         rna_neg_frac_boundary=ez.copy(),
         gdna_density_global=gdna_density_global,
         gdna_reference_density=gdna_reference_density,
+        gdna_reference_members=0 if gdna_reference_density is None else 1,
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,
         rna_strand_overdispersion=0.05,
@@ -458,6 +460,7 @@ def _global_bimodal_cal(rna0: float, gdna0: float = 1.0) -> CalibrationResult:
         boundary_eff=np.full(5, 50.0),
         gdna_density_global=0.5,
         gdna_reference_density=1.0,
+        gdna_reference_members=1,
     )
 
 
@@ -513,6 +516,7 @@ def _stray_on_a_dead_boundary_cal(stray: float) -> CalibrationResult:
         boundary_eff=[0.0, 50.0, 50.0, 50.0, 50.0, 50.0],
         gdna_density_global=1.0,
         gdna_reference_density=1.0,
+        gdna_reference_members=1,
     )
 
 
@@ -593,7 +597,9 @@ def test_gdna_eff_len_is_the_span_when_every_object_sits_at_the_reference():
     ra = _six_region_ra()
     rho = 2.0
     cal = dataclasses.replace(
-        _uniform_field(np.full(6, 100.0), np.full(5, 50.0), rho), gdna_reference_density=rho
+        _uniform_field(np.full(6, 100.0), np.full(5, 50.0), rho),
+        gdna_reference_density=rho,
+        gdna_reference_members=1,
     )
     span = 6 * 100.0 + 5 * 50.0  # 850
     np.testing.assert_allclose(
@@ -632,6 +638,7 @@ def test_the_contraction_is_applied_PER_OBJECT_not_over_a_folded_total():
         boundary_eff=np.full(5, 50.0),
         gdna_density_global=1.0,
         gdna_reference_density=1.0,
+        gdna_reference_members=1,
     )
     ml = [_ml(0, [(0, 0, 100)])]
     eff = assemble_priors(cal, ra, ml).gdna_eff_len[0]

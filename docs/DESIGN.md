@@ -1547,3 +1547,24 @@ is a number about nothing, and its question — what a noise-free field leaves �
 `O` at capture-OFF reading 1.000 with no fitting (`ISSUES: u-ruler-arm` CLOSED). The verdict and the
 reference are stable across an 8× range of the landscape's render resolution
 (`TRAPS: a-mode-count-is-not-a-well-posed-quantity`).
+
+**The members have a location (2026-09-16; `ISSUES: the-ruler-reference-on-sparse-real-libraries`
+CLOSED).** A basin's members are the kernels with a location — a count of at least one fragment, the wall
+`_LOCATED_VAR` is read at, published by the fit as `DensityLandscape.located`; a zero-count anchor's or a
+sub-fragment kernel's centre is its resolution wall `1/E`, which says where the kernel could not see and is
+no member of anything. The enriched candidate is the basin above the depleted one holding the most located
+kernels, and it is a mode iff its members resolve it at the located population's own resolution: with
+`k = √n_located`, the median of the members' widths to their k-th nearest MEMBER is at most one nat, so a
+basin with k members or fewer — the cluster smaller than √n that reaches outside itself — is no mode however
+narrow the rendered density's cut. The result carries the regime beside the reference
+(`CalibrationResult.gdna_reference_members`, the CLI summary and the calibration log), and a library whose
+gDNA is too sparse to locate its probed level is told so. Why: a human index trains a quarter of a million
+anchors whose walls span every decade, and on the two sparse real libraries the shipped rule chose a
+reference an order of magnitude below the probed level from a basin of 16,931 and 20,071 walls around 10
+and 16 located kernels. Measured: both panels' 46 rows and the depth ladder's 26 capture-ON rows unchanged
+to the reference, the two sparse libraries (LBX0190 1,118 located kernels, MO_3021 15,088) `None`, the two
+deep ones unchanged (LBX0588 at 10^-0.53 from 11,579 members, the VCaP library at 10^-1.07 from 24,496);
+two capture-OFF rows of the depth ladder at a tenth of the depth that had read a reference from one located
+kernel among walls read `None`. The choice rule cannot be discriminated by number — the largest rendered
+mass, the most located members, the largest located weight and the highest located basin agree on every row
+measured once the members are located — so the most-located-members rule ships by derivation.

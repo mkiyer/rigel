@@ -673,6 +673,7 @@ def _toy_calibration(n_regions: int = 24, n_boundaries: int = 20, n_sj: int = 4,
         rna_neg_frac_boundary=np.full(n_boundaries, 0.25),
         gdna_density_global=0.1,
         gdna_reference_density=None,
+        gdna_reference_members=0,
         rna_sense_frac=0.5,
         gdna_strand_overdispersion=0.0,
         rna_strand_overdispersion=0.0,
@@ -739,7 +740,7 @@ def self_test() -> int:
     #    exactly; with one, an object below it contracts and nothing ever expands.
     check("the synthetic result carries no reference", cal.gdna_reference_density is None)
     cal_ref = dataclasses.replace(cal, gdna_reference_density=float(np.max(
-        np.asarray(cal.count_gdna_region) / np.asarray(cal.gdna_region_eff_len))))
+        np.asarray(cal.count_gdna_region) / np.asarray(cal.gdna_region_eff_len))), gdna_reference_members=1)
     check("a positive finite reference is accepted on the result", cal_ref.gdna_reference_density > 0.0)
     for bad in (0.0, -1.0, float("nan")):
         try:

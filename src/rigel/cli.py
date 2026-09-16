@@ -413,6 +413,13 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         if cal is None
         else {
             "gdna_density_global": round(float(cal.gdna_density_global), 8),
+            # the ruler's regime: the fully-captured gDNA level the effective lengths were contracted
+            # against (None = no located enriched mode, nothing contracted) and the located kernels it
+            # rests on
+            "gdna_reference_density": (
+                None if cal.gdna_reference_density is None else float(cal.gdna_reference_density)
+            ),
+            "gdna_reference_members": int(cal.gdna_reference_members),
             "rna_sense_frac": round(float(cal.rna_sense_frac), 6),
             "gdna_strand_overdispersion": round(float(cal.gdna_strand_overdispersion), 6),
             "rna_strand_overdispersion": round(float(cal.rna_strand_overdispersion), 6),

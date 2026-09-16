@@ -964,24 +964,31 @@ trained on the located compositions and the zero-count anchors (DESIGN §7.1). I
 the probed ones — 0.70–1.00 of the mass on every row of both panels) and the enriched basin as the
 largest by mass strictly above it, `None` when nothing lies above.
 
-**The location floor on the mode.** A basin is a mode only if it is located: the kernels whose centres
-lie in it are its members, and the median of their rendered widths — the population resolution
-`landscape.knn_widths` gave each kernel, half its distance to its √n-th nearest neighbour, floored at
-the grid step — satisfies
+**The location floor on the mode.** A basin's MEMBERS are the kernels with a location: a count of at
+least one fragment, published by the fit as `DensityLandscape.located` beside each kernel's `centre`
+(`log(max(count, 1)/E)`, in nats). A zero-count anchor or a sub-fragment kernel is centred at its
+resolution wall `1/E`, which is where the kernel could not see and not where a density is, so it is no
+member; a human index trains ~250–325 k anchors whose walls span every decade, and on a sparse library a
+basin above the bulk can be packed with them around ten measured kernels
+(`ISSUES: the-ruler-reference-on-sparse-real-libraries`). The candidate is the basin above the depleted one
+holding the most located kernels, and it is a mode only if its members resolve it at the located
+population's own resolution, `k = √n_located` (`landscape.knn_widths`' k): each member's width is half the
+distance to its k-th nearest MEMBER, and
 
-    median(width_k)² ≤ _LOCATED_VAR = 1 nat²,
+    n_members > k   and   median(width_k)² ≤ _LOCATED_VAR = 1 nat²,
 
 the floor DESIGN §7.1 rule 4 applies to a slot, in the same variable — not a constant chosen but the
-identity's value at the one-fragment wall (`Var(log c) = 1/c`), read here at the population's own
-resolution. A lone region far from every other renders decades wide however much mass it holds, and a
-cluster smaller than √n reaches outside itself for its √n-th neighbour, so neither is a mode; the
-within-basin spread is NOT the statement, because a basin cut by the grid's edge is narrow whatever its
-kernels' widths (a 1-fragment exon piece on 0.008 bp of support rendered a 0.30-nat basin at the top of
-the ladder's `g98 ss.50 OFF` grid). `DensityLandscape` publishes the centres and widths it rendered
-(`centre`, `width`, in nats) so the consumer reads the fit's own numbers and never re-derives them.
-Measured: the blank contig's shadow transcription (one region at 10^-2.23 fragments/bp, pinned gDNA by
-structure) renders about 4 nats wide; every real enriched mode on both panels has its members at the
-grid-step floor, at a peak stable to 0.02 decades across an 8× range of the render resolution.
+identity's value at the one-fragment wall (`Var(log c) = 1/c`), read at the population's own resolution. A
+basin with k members or fewer has no k-th neighbour inside itself — the cluster smaller than √n that reaches
+outside itself — and is no mode however narrow the rendered density's cut made it; the within-basin spread
+is NOT the statement, because a basin cut by the grid's edge is narrow whatever its kernels (a 1-fragment
+exon piece on 0.008 bp of support rendered a 0.30-nat basin at the top of the ladder's `g98 ss.50 OFF`
+grid). Reading the members at their own √n_members instead would call twenty-one kernels strewn across
+three nats a mode. The result publishes the count behind the reference
+(`CalibrationResult.gdna_reference_members`). Measured: every enriched mode on both panels has 257–3,606
+members at widths at the grid step, at a peak stable to 0.02 decades across an 8× range of the render
+resolution; the two sparse real libraries hold 10–16 located kernels in any basin above the bulk against
+k = 33 and 123, and read `None`.
 
 **No enriched mode ⇒ no contraction, exactly.** `CalibrationResult.gdna_reference_density` is `None`;
 the ruler returns `fl` verbatim and `assemble_priors` leaves the locus gDNA effective length at the span.

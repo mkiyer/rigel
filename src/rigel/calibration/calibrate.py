@@ -693,6 +693,7 @@ def _result(
     boundary_eff,
     config,
     gdna_reference_density: float | None,
+    gdna_reference_members: int,
 ) -> CalibrationResult:
     """The solved chain projected onto the two payload axes and published as the
     :class:`CalibrationResult`, with the library-average gDNA density QC scalar.
@@ -737,6 +738,7 @@ def _result(
             regions, boundaries, region_eff_gdna, boundary_eff_gdna
         ),
         gdna_reference_density=gdna_reference_density,
+        gdna_reference_members=gdna_reference_members,
         rna_sense_frac=strand.rna_sense_frac,
         gdna_strand_overdispersion=strand.gdna_strand_overdispersion,
         rna_strand_overdispersion=strand.rna_strand_overdispersion,
@@ -758,6 +760,18 @@ def _log_summary(result: CalibrationResult, strand: _Strand, substrate, sj) -> N
     spl_total = float(flux.sum())
     sj_sense_frac = spl_sense / spl_total if spl_total > 0.0 else float("nan")
     gd, rn = strand.gdna_seed, strand.rna_seed
+    if result.gdna_reference_density is None:
+        logger.info(
+            "calibration: no located enriched gDNA mode — effective lengths are not corrected for "
+            "capture (the reference needs about √n located probed pieces at one gDNA fragment or more)"
+        )
+    else:
+        logger.info(
+            "calibration: capture reference %.3e gDNA fragments/bp, the located enriched mode of %d "
+            "kernels at one fragment or more",
+            result.gdna_reference_density,
+            result.gdna_reference_members,
+        )
     logger.debug(
         "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
         "gdna_strand_overdispersion=%.4g (%d seed regions, %d frags, %.1f effective%s%s) "
@@ -876,7 +890,8 @@ def calibrate(
     # landscape, or nothing — capture-OFF and gDNA-free libraries carry no enriched mode and contract
     # nothing (DESIGN.md §7.2). One definition, read by `capture_eff_length` and `priors`.
     enriched = located_enriched_mode(gdna_hyperprior) if gdna_hyperprior is not None else None
-    gdna_reference_density = float(np.exp(enriched.log_rho)) if enriched is not None else None
+    gdna_reference_density = float(np.exp(enriched.mode.log_rho)) if enriched is not None else None
+    gdna_reference_members = enriched.n_members if enriched is not None else 0
     logger.debug(
         "calibration: PHASE 1 prior-free initial solve (abundance landscape: %s)",
         "none"
@@ -893,6 +908,7 @@ def calibrate(
         (boundary_eff_gdna, boundary_eff_rna),
         config,
         gdna_reference_density,
+        gdna_reference_members,
     )
 
     if _debug is not None:  # inert diagnostic hook — the solved chain internals
