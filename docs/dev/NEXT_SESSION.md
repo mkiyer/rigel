@@ -1,119 +1,91 @@
-# NEXT SESSION — start here (2026-09-14, after the ruler and the flux-witness session)
+# NEXT SESSION — start here (2026-09-16, after the ruler's repair)
 
 This file is only how to begin. The port is `docs/dev/CALIBRATION_PERFORMANCE_PLAN.md` §F; the θ thread's
-derivations are `docs/dev/THETA_QUADRATURE.md`.
+derivations are `docs/dev/THETA_QUADRATURE.md`; the ruler's plan, EXECUTED, is `docs/dev/EXPECTATION_RULER_PLAN.md`.
 
-## The agreed order of the sessions (owner, 2026-09-14)
+## The agreed order of the sessions (owner, 2026-09-14; session 4 inserted 2026-09-16)
 
 1. ~~Code review and cleanup~~ — DONE 2026-09-14.
-2. ~~The test chromosome's new structures, both panels remeasured~~ — DONE 2026-09-14 (six commits after `1f885a7e`).
-3. ~~The ruler at zero gDNA and the flux price's witness~~ — LANDED 2026-09-14, two commits PREPARED for your go
-   (below).
-4. **THIS ONE — the performance re-baseline and THE PORT** (`ISSUES: performance-memory-bounded-solve`,
-   plan §F): two back-to-back profiler pairs at 8 threads on the deep library, identity references frozen
-   fresh on that tree (they are fresh on this one: re-frozen after each mechanism, reasons in the commits),
-   `sweep_replay.py capture` (`sweeps_MO_3021_step6` predates the location floor, the ruler and the witness),
-   then the port of the block solve, gated bit-identical on every stage.
+2. ~~The test chromosome's new structures, both panels remeasured~~ — DONE 2026-09-14.
+3. ~~The ruler at zero gDNA and the flux price's witness~~ — DONE 2026-09-15 (`aeb465fa`, `f5b7471f`).
+4. ~~The ruler's repair~~ — DONE 2026-09-16, four commits PREPARED for your go (below).
+5. **THIS ONE — the performance re-baseline and THE PORT** (`ISSUES: performance-memory-bounded-solve`, plan §F):
+   two back-to-back profiler pairs at 8 threads on the deep library, identity references frozen fresh on that tree
+   (they are fresh on this one: re-frozen after commit 3 with the reason in its message), `sweep_replay.py capture`
+   (`sweeps_MO_3021_step6` predates the location floor, the ruler, the witness and the repair), then the port of the
+   block solve, gated bit-identical on every stage. Take `ISSUES: multimapper-blind-support` right after the port: it
+   is the first ruler question on real libraries and its repair is in the opportunity model, not the solve.
 
-## ⛔ Read first — 2026-09-15, after the two commits landed: the ruler was scored against the simulator's own truth
+## What session 4 left, and how to commit it (owner's go)
 
-The owner ruled (2026-09-15): the gDNA landscape stays the ruler's witness, with the honest admission that it
-fails where there is no gDNA to read. The experiments ran the same day (`docs/dev/EFFECTIVE_LENGTH_UNDER_CAPTURE.md`
-§9 has the numbers; the instruments are `s4/` under `~/Downloads/rigel_runs/prototypes/2026-09-15_ruler` — `ruler_vs_sampler.py` scores
-any ruler against `CaptureSampler.partition_array`, `ruler_variants.py` is the prototype, `operating_curve.py`
-the depth ladder, whose three scenario sets are cached under the test reference as `scenarios_depth_*`).
+Four commits are prepared, not made: the working tree holds all four and each one's file state is snapshotted with
+its message under the session scratchpad's `commits/1_members`, `2_truth_instrument`, `3_expectation_ruler`,
+`4_multimapper_check` (`commits/commit_series.sh` replays them in order and leaves the tree clean; `cat
+commits/*/MESSAGE.txt` and `git diff` are the review). Every gate is on record in the messages: the falsification
+tests verified failing first, every perturbation fired, the suite re-derived file by file (3,414 / 5 xfail / 3,419),
+the goldens unchanged to the bit, the three `review_identity_*` references re-frozen after commit 3 with the reason,
+both panels' instruments run on the landed tree against `DESIGN.md` §7's standing numbers.
 
-SESSION 4 IS THE RULER'S REPAIR, one mechanism through the full loop, BEFORE the port's re-baseline. The owner
-agreed the plan on 2026-09-16 and ruled on its open questions: try each way on the truth instrument and show that
-it works — every open question is two arms, and the table decides. The plan —
-the derivation items with the decision each needs, the commit sequence of four commits, the gates and the owner's open
-questions — is `docs/dev/EXPECTATION_RULER_PLAN.md`; the summary:
+1. **The reference's members** (`ISSUES: the-ruler-reference-on-sparse-real-libraries` CLOSED): members are
+   kernels with a location, widths read among them, located iff more than √n members at a median knn width within
+   1 nat; the regime on the result (`gdna_reference_members`, in `summary.json`). Both panels unchanged to the
+   fragment; LBX0190 and MO_3021 `None → no contraction` (their walls-only landscapes had read a false reference).
+2. **`ruler_vs_truth.py`** promoted from the prototype, `--self-test` 20/20, its index row and `TESTING.md` §0c; the
+   depth-ladder configs given a home under `scripts/sim/configs/test_reference_depth_*.yaml`.
+3. **The expectation ruler on the per-base length** (`ISSUES: ruler-multimapper-floor-caps-the-correction` CLOSED;
+   `DESIGN.md` §7.2, `EQUATIONS.md` §11): efficiencies are posterior means under the landscape from own counts and
+   apportioned crossings, published on the result; the transcript length a taper-weighted sum over its own bases;
+   the locus prior's gDNA length the count's own objects at their efficiencies; floor, junction objects and flank
+   imputation deleted. Every open question of the plan tried both ways, the refused arms with their numbers in §7.2.
+   The ladder thermometer's capture-ON misassignment 0.45× stranded / 0.68× unstranded, OFF strata identical.
+4. **The multimapper check** (`ISSUES: multimapper-blind-support` OPENED, read-only): on both captured real
+   libraries the factor falls monotonically with the transcript's multimapper share (VCaP median 0.231 → 0.002 from
+   below 1 % to ≥ 50 %); the repair is a mappable support in the opportunity model.
 
-1. `ISSUES: ruler-multimapper-floor-caps-the-correction` — the expectation ruler (the posterior mean of the
-   clipped efficiency under the fitted landscape) in place of the plug-in and the floor, on the per-base LENGTH (the
-   transcript's own bases at their pieces' efficiencies; no boundary or junction object; a piece shorter than a
-   fragment keeps its weight) with every overlapping unspliced gDNA object as EVIDENCE, edge crossings included
-   (the plan's §2.3, and a tiny-exon block for the test chromosome to gate it), in `capture_eff_length` and `assemble_priors`; falsification test first on a probed/unprobed
-   pair; gated by the truth instrument on both panels, the ladder's
-   two rows and the depth ladder.
-2. `ISSUES: the-ruler-reference-on-sparse-real-libraries` — membership on located kernels; the regime on the
-   result; the four real libraries as test inputs.
-3. Promote `ruler_vs_sampler.py` to `scripts/design/` with a self-test and its index row: it answers a question
-   no instrument answered (is the ruler's formula right?), which is the instrument ruling's test.
+## ⛔ Read first — three things the repair uncovered
 
+* **The capture-OFF identity digest moves by one ulp** after commit 3 (one transcript's posterior mean, 1.1e-16 on
+  the ladder's `g05 ss.50 OFF` row): the old floor's `w·span + (1−w)·span` arithmetic against the exact span. Every
+  count and every calibration array is bit-identical; the references are re-frozen. Do not chase it.
+* **A per-transcript Python loop over the real index is quadratic.** `transcript_piece_lengths` ran LBX0588 and
+  VCaP for 70 minutes until `BaseTaper.interval_sums` took one template length per interval; now 160 s and 667 s
+  against the shipped tree's 136 s and 616 s. Time every new per-transcript pass on `rigel_index` (457,371
+  transcripts), never only on the ladder. Its perturbation found a hole in a green gate — no template length between
+  one and two fragment lengths had been parametrised — closed with 600 and 998.
+* **The ladder's panel spans junctions** (`ISSUES: ruler-witness-geometry-on-transcript-panels`, amended): the
+  probed class reads 35 % within ±0.1 nat under every gDNA ruler, the certified true counts included, where the
+  test chromosome's benign panel reads 99 %. A correction from the probe design is observable in principle; it is
+  not this release's.
 
+## The test chromosome moved (commit 3)
 
-`ISSUES: the-ruler-reference-on-sparse-real-libraries`: on two of the four real libraries the ruler's
-reference is chosen by anchors' resolution walls, not by a located population (the entry has the numbers, the
-mechanism, the bounded failure direction and the repair). Take it BEFORE the port's re-baseline: the port
-freezes the identity references on the accuracy tree, and this moves a number on real libraries. The real
-libraries are the test inputs; the derivation is the one-fragment rule applied to the kernels' centres.
-
-## What this session left, and how to commit it (owner's go)
-
-The two commits are prepared, not made (the standing ruling: committed on your go): the working tree holds
-both mechanisms and the session's docs, and each mechanism's file state is snapshotted with its message
-under the session scratchpad's `commits/7_ruler` and `commits/8_flux` (the first six snapshots, already on
-`main`, moved to `commits/committed/`). `commits/commit_series.sh` replays the two in order and leaves the
-tree clean; `cat commits/*/MESSAGE.txt` and `git diff` are the review. Every gate is on record in the messages:
-the falsification tests verified failing first, the perturbations fired, the suite re-derived, the three
-`review_identity_*` references re-frozen after each mechanism with the reason stated and checked 3/3
-BIT-IDENTICAL on this tree, both panels' instruments run on the landed tree.
-
-### The two mechanisms
-
-TWO MECHANISMS, one commit each, both derived, prototyped outside `src/` on the test chromosome, confirmed on
-the ladder, then landed with a falsification test verified failing first and every gate watched firing:
-
-* **The ruler at zero gDNA** (`DESIGN.md` §7.2, `EQUATIONS.md` §11; `ISSUES: g00-shrinkage-upstream-repair`
-  and `u-ruler-arm` CLOSED). The reference the EM's effective length contracts against is the located
-  enriched mode of the fitted gDNA landscape, on the result as `CalibrationResult.gdna_reference_density`;
-  no enriched mode ⇒ no contraction, exactly. Both panels: the zero controls 0.154 / 0.141 → 1.000 with
-  nothing moved (51,436 / 5,108 transcripts had moved); both in-scope capture-OFF strata P = O = 1.000
-  (from P 0.957 / 0.970, O 0.923 / 0.926 on the ladder); stranded capture-ON P/O 1.013 / 1.015 against
-  1.011; the solve untouched (`policy_benchmark.py` identical). The private kernel density and its two
-  constants deleted; the U arm retired. 13 goldens moved — gDNA-free and capture-OFF toys whose old rulers
-  had contracted transcripts 49× and 74× against false-positive specks; the antisense_contained golden's
-  antisense count 0.0 → 107.4 against a truth near 104 (its 0 was the ruler, not the tilt atom).
-* **The flux price's witness** (`DESIGN.md` §6b.13, `EQUATIONS.md` §12; `ISSUES: flux-price-witness-units`
-  CLOSED). The exon's witness of the junction→exon price is its column count on the protocol's share of the
-  opportunity, `(c_s, κ_read · a_r)`: whole-strand units on both sides, the pair's agreement priced as
-  counting alone at every κ. Correct by derivation and neutral on both panels in scope (within 0.3 %), −10 %
-  on the test chromosome's deferred stratum, the ten zero rows within a fragment, the golden's record exon 0.235 →
-  0.008 gDNA. The cost the issue named (0.48 nats² on every unstranded flux level) was real in the price and
-  worth ~0 on the metric: the flux ceilings do not bind in scope. Three forms refused with numbers.
-
-## What the mechanisms uncovered — recorded, not fixed
-
-* **`ISSUES: nested-antisense-leak-under-the-sane-ruler`** (EM-side, priority later with the per-transcript
-  prior lane): with the EM's ruler honest, a gDNA-free library's strand-flipped intronic nascent fragments are
-  assigned to a nested antisense transcript nothing witnesses — 24 of 2,000 at SS 0.9, 124 at SS 0.65 on the
-  negative control of `tests/scenarios/test_antisense_intronic.py`; the old bounds held only because a
-  fabricated reference had contracted the host's nascent entity 3.9×. Two strict xfails (5 in the suite now).
-* **The flux ceilings do not bind in scope**: the 0.48 nats² the witness issue named cost nothing measurable
-  on either panel's in-scope strata — the unstranded residual sits elsewhere (`policy_benchmark.py
-  --by-class`: introns 45 %, `exon|intron` boundaries 14 % on the ladder's unstranded OFF).
-* **The FIELD gate flake** on λ ≈ 7 boundaries (DEFERRED by the owner, 2026-09-14) and the certifier's
-  one-panel-at-a-time cache rule are in `docs/dev/` of the previous handoff and `TESTING.md` §0a.
+The tiny-exon block (`TESTING.md` §0a: ten 40 bp exons at 1,040 bp pitch, and the same run between two 1 kb exons,
+unprobed and probed; 273 genes on 7.930 Mb, the budget unchanged) moved the test chromosome's benchmark rows: the
+40 bp pieces are a new stress for the message layer (stranded ON 41,856 → 54,362, the ss 0.70 ON rows 64,174 →
+105,997), the same on the shipped and the landed tree, so it is the substrate and not the mechanism. `DESIGN.md` §7
+carries the new standing numbers; the superseded scenario sets are under
+`~/Downloads/rigel_runs/test_reference_superseded_2026-09-16/`. The benign panel's rule gained one clause (a union
+piece shorter than one probe gets a single probe centred on it).
 
 ## Decisions on record (unchanged, carried)
 
 * Float64 for the whole of ψ; ONE solver; ONE λ lattice at a dimensionless step with a stated guarantee; no θ
   lattice anywhere; the tilt's hypothesis space is {pure +, pure −, mixed}.
 * The strand channel's liveness is a protocol decision on the spliced 2×2; gDNA enters nowhere.
-* The landscape trains only where a solve locates a slot; the ruler reads its located enriched mode.
+* The landscape trains only where a solve locates a slot; the ruler reads its located enriched mode, and admits
+  failure where there is no gDNA to read (owner, 2026-09-15).
+* Real data is a test input, never a design input; the four cfRNA libraries are re-run with the regime printed.
 * A few high-quality instruments, kept current; no suite gate polices instruments; the source cites no doc.
-* `EMConfig.warm_start`'s `prior` and `uniform` arms stay; the `gdna_none_` condition names stay.
 * The message cache's on/off switch, the refit count and the scan's thread split are the owner's; parallelism
   waits for the port. CI runs on demand only.
-* The certifier's FIELD gate flake on λ ≈ 7 boundaries is DEFERRED (owner, 2026-09-14); the shadow floor on the
-  test chromosome's zero rows is the designed control.
+* The certifier's FIELD gate flake on λ ≈ 7 boundaries is DEFERRED (owner, 2026-09-14).
 
 ## The session scratchpad (persists; nothing in the tree cites it)
 
-`~/Downloads/rigel_runs/prototypes/2026-09-15_ruler/s3_arms/` (copied from the session's scratchpad):
-`commits/7_ruler`, `commits/8_flux` (the two snapshots with `MESSAGE.txt`; `commits/commit_series.sh` replays every
-`[0-9]_*` snapshot in order — the first six are already committed), `s3/` (the harnesses `ruler_arms.py`,
-`flux_arms.py`, `landscape_probe.py`, `leak_diag.py`, `nested_diag.py`; the arms' outputs under `s3/cvo`, `s3/flux`;
-the landed runs under `s3/final` (ruler) and `s3/final2` (both); the derivation notes `DERIVATION_ruler.md`,
-`EQUATIONS_11.md`, `EQUATIONS_12.md`; the previous identity references in `s3/identity_prev`).
+Copy `/private/tmp/claude-503/-Users-mkiyer-proj-rigel/d290397d-5368-4194-86e0-5e1ccf118452/scratchpad/` to
+`~/Downloads/rigel_runs/prototypes/2026-09-16_ruler_repair/` before it is lost: `commits/` (the four snapshots with
+`MESSAGE.txt`, `snapshot.sh`, `commit_series.sh`), `s5/` (the arms `member_arms.py`, `ruler_arms.py`, `converge.py`,
+the falsification harnesses, `gates3/` with every instrument's output on the landed tree, `identity_prev/` with the
+identity references before commits 1 and 3), `real/` (`real_ruler.py`, `multimapper_check.py`, the four
+`landed_<lib>/` outputs with `ruler.npz` and the check's tables), `head_tree/` + `shipped_site/sitecustomize.py`
+(how the shipped tree is run beside an editable install: the scikit-build redirecting finder must be stripped).

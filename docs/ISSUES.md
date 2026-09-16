@@ -62,6 +62,28 @@ principle observable. The ladder row's unprobed transcripts hold no gDNA fragmen
 to exons that have none, the stranded capture-ON composition residual the standing numbers already carry, which
 the ruler inherits and cannot repair.
 
+### multimapper-blind-support
+`priority: next after the port (the first ruler question on real libraries) · kind: defect · 2026-09-16`
+The accumulator drops every fragment with `NH > 1`, so a piece whose gDNA fragments are multimappers holds no
+count the calibration can see, and the expectation ruler — which reads a piece's efficiency from its own count and
+its crossings against the fully captured level — reads it at the DEPLETED level: the transcript is contracted as if
+unprobed. Measured read-only on the two captured real libraries after the ruler's repair (the session's
+`multimapper_check.py`: per transcript with ≥ 20 fragments over its pieces, the share of multimapping reads among
+them from the BAM's `NH` tag, then the ruler factor's quantiles per share bin): LBX0588 (reference 2.977e-01/bp, 11,579
+kernels) median factor 0.076 / 0.003 / 0.013 / 0.001 at a share below 1 % / 1–10 % / 10–50 % / ≥ 50 % (n 36,446 /
+6,161 / 1,429 / 928), the share below 1/10 rising 55 → 90 %; VCaP (8.593e-02/bp, 24,496 kernels) 0.231 / 0.149 / 0.028
+/ 0.002 (n 280,227 / 35,494 / 2,237 / 1,103), the share below 1/10 36 → 95 %. A hundredfold gap between the
+unique-mapping and the repeat-rich transcripts, monotone in the share, on both libraries; the two libraries without
+a reference read every transcript at 1 and are uninformative. The confound is real and unmeasured here — a repeat-rich
+transcript may also be unprobed by design — so the number is an upper bound on the blindness, not its size; the
+floor `C/(C+1)` the repair deleted had hidden it behind a +3.4 nat bias on every unprobed transcript
+(`ISSUES: ruler-multimapper-floor-caps-the-correction`, CLOSED). The repair is in the OPPORTUNITY, not the posterior:
+a piece's contained and crossing supports should count only the starts a fragment could be uniquely placed at — a
+mappability of the support from the index, so that a wholly repeated piece has `S = 0`, no evidence, and reads the
+population's clipped mean rather than the depleted level. Instrument: `ruler_vs_truth.py` cannot see it (the
+simulator's reads are unique); the truth on a real library is the multimapper share against the factor as above,
+and the repair's gate is that the four bins read alike.
+
 ### nested-antisense-leak-under-the-sane-ruler
 `priority: later (EM-side, with the per-transcript prior lane) · kind: defect · 2026-09-14`
 With the EM's ruler honest — a gDNA-free library contracts nothing (`DESIGN.md` §7.2) — the negative control
