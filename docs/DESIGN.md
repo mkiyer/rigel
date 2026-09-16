@@ -1427,30 +1427,52 @@ capture-OFF (the ladder: introns 45 % of `transfer`'s error, `exon|intron` bound
 (licensed-face exons 49 %, walled exons 23 %). The deferred stratum is blind because the gDNA fraction
 cancels from the strand mean, so an unstranded AMBIG slot has no channel.
 
-**The standing numbers** (2026-09-14, the tree with §7.2 and §6b.13's witness landed, on the twelve-block
-test chromosome, 265 genes, 7.637 Mb, budget 1,170 k, and the unchanged ladder) — per stratum, never pooled; `policy_benchmark.py` is
+**The standing numbers** (2026-09-16, the tree with the expectation ruler on the per-base length and the
+reference's located members landed, on the thirteen-block test chromosome, 273 genes, 7.930 Mb, budget
+1,170 k, and the unchanged ladder) — per stratum, never pooled; `policy_benchmark.py` is
 `silent → transfer`, whole-library Σ|gDNA − truth| in fragments; `calibration_vs_oracle.py` is `P/O gDNA`,
-the region-axis Σ|Δ| and the ruler's `P/O` factor. A mechanism is judged against this table.
+the region-axis Σ|Δ| and the ruler's factor `P` (the factor the EM divided by; `O`'s equals it by
+construction, since the efficiencies are the solve's output published on the result, so the ruler's truth
+is `ruler_vs_truth.py`, the table after this one). A mechanism is judged against this table. The
+tiny-exon block moved the test chromosome's benchmark rows (its 40 bp pieces are a new stress for the
+message layer: stranded ON 41,856 → 54,362, the ss 0.70 ON rows 64,174 → 105,997), the same on the shipped
+and the landed tree.
 
-| panel · stratum | `policy_benchmark` silent → transfer | `calibration_vs_oracle` P/O · region Σ\|Δ\| · ruler |
+| panel · stratum | `policy_benchmark` silent → transfer | `calibration_vs_oracle` P/O · region Σ\|Δ\| · ruler P |
 |---|---|---|
 | ladder · unstranded OFF | 358,551 → 307,288 (0.86×) | 0.9938 · 185,554 · 1.000 |
 | ladder · stranded OFF | 292,673 → 248,976 (0.85×) | 0.9949 · 146,781 · 1.000 |
-| ladder · stranded ON | 598,645 → 426,974 (0.71×) | 0.9954 · 147,440 · 1.013 |
-| ladder · unstranded ON (deferred) | 18,794,723 → 3,581,253 (0.19×) | 0.8543 · 1,039,430 · 0.939 |
+| ladder · stranded ON | 598,645 → 426,974 (0.71×) | 0.9954 · 147,440 · 0.057 |
+| ladder · unstranded ON (deferred) | 18,794,723 → 3,581,253 (0.19×) | 0.8543 · 1,039,430 · 0.052 |
 | ladder · g00, four rows (ss .50 OFF / ON, ss .99 OFF / ON) | 396 / 270 / 397 / 247 → 366 / 258 / 353 / 233 | 912 false gDNA of 40.0 M; ruler 1.000, nothing moved |
-| test chromosome · unstranded OFF | 54,436 → 51,145 (0.94×) | 1.0089 · 92,361 · 1.000 |
-| test chromosome · stranded OFF | 47,114 → 43,710 (0.93×) | 1.0071 · 39,986 · 1.000 |
-| test chromosome · stranded ON | 64,200 → 41,856 (0.65×) | 1.0028 · 32,493 · 1.015 |
-| test chromosome · unstranded ON (deferred) | 1,930,576 → 175,343 (0.09×) | 1.0174 · 191,091 · 1.065 |
-| test chromosome · ss 0.70, eight rows (the transition rung) | 150,048 → 113,267 (0.75×) | — |
-| test chromosome · g00, six rows (ss .50 / .70 / .99 × OFF / ON) | 8,883 / 3,764 / 24,804 / 6,269 / 36,491 / 6,586 → 8,881 / 28 / 8,812 / 96 / 9,040 / 31 | 26,840 false gDNA of 7.0 M; ruler 1.000, nothing moved |
+| test chromosome · unstranded OFF | 54,758 → 51,114 (0.93×) | 1.0077 · 91,631 · 1.000 |
+| test chromosome · stranded OFF | 48,304 → 45,194 (0.94×) | 1.0062 · 41,080 · 1.000 |
+| test chromosome · stranded ON | 64,955 → 54,362 (0.84×) | 0.9953 · 38,162 · 0.154 |
+| test chromosome · unstranded ON (deferred) | 1,961,507 → 256,702 (0.13×) | 1.0012 · 210,054 · 0.150 |
+| test chromosome · ss 0.70, eight rows (the transition rung) | 148,705 → 155,636 (1.05×) | — |
+| test chromosome · g00, six rows (ss .50 / .70 / .99 × OFF / ON) | 8,758 / 25 / 25,127 / 3,638 / 34,563 / 6,355 → 8,757 / 24 / 8,743 / 24 / 8,946 / 46 | 26,518 false gDNA of 7.0 M; ruler 1.000, nothing moved |
 
-The test chromosome's capture-OFF zero rows are the shadow floor: 8,873 / 8,799 / 9,032 of those fragments
-are the unannotated transcription on `test_blank`, pinned gDNA by structure (the designed control,
-`TESTING.md` §0a), and the annotated chromosome's own zero rows read 8–13 fragments capture-OFF and 28–96
-capture-ON. The ruler reads exactly 1.000 at `g00` and on both capture-OFF strata with nothing moved (§7.2;
-it had read 0.154 / 0.141 at `g00`), so the metric page is the composition's.
+The test chromosome's capture-OFF zero rows are the shadow floor: the unannotated transcription on
+`test_blank`, pinned gDNA by structure (the designed control, `TESTING.md` §0a). The ruler reads exactly
+1.000 at `g00` and on both capture-OFF strata with nothing moved (§7.2), so the metric page is the
+composition's.
+
+**The ruler against the simulator's own effective length** (`ruler_vs_truth.py`, 2026-09-16): the probed
+class's share within ±0.1 nat and the unprobed class's median log error, capture-ON rows, mRNA and
+annotated single-exon transcripts with at least 20 fragments. The test chromosome's in-scope stranded rows:
+`g05` 99 % / +0.19, `g25` 99 % / −0.03, `g50` 99 % / −0.04, `g98` 100 % / — (no unprobed transcript
+qualifies); the deferred unstranded rows `g05` 85 % / −0.52, `g25` 94 % / −0.33, `g50` 98 % / −0.15, `g98`
+99 %; the `g00` rows `None`, everything at factor 1 (declared). The depth ladder at a tenth of the depth:
+`None` below about 120 gDNA fragments, then 12 / 86 / 99 / 99 % of the probed class within ±0.1 at 1 / 5 /
+25 / 50 % gDNA; at a hundredth: `None` through 1 %, then 16 / 91 / 91 % at 5 / 25 / 50 %; at full depth the
+two low rungs 18 % / +1.61 (0.1 %) and 97 % / +0.07 (1 %). The ladder's eight capture-ON rows (about 10 min
+each — the truth sampler on 10 M fragments): the unprobed class +0.33 / +0.45 / +0.43 / +0.35 at `g05 ss.50` /
+`g05 ss.99` / `g50 ss.50` / `g50 ss.99` (none qualifies at `g98`), the partial class within +0.06 to +0.10
+everywhere, the probed class 19–43 % — the junction-spanning panel's witness geometry, 32–38 % under the
+certified true counts too (`ISSUES: ruler-witness-geometry-on-transcript-panels`); the `g00` rows `None`, the
+unprobed class +6.97 at factor 1 (declared). The floor read the unprobed class at +3.4 to
++3.8 nat on every row; the ideal witness (the certified true counts through the same ruler) reads it at
++0.06 on `g05 ss.99`.
 
 ### 7.1 The landscape prior — who trains it, where its kernels go, and what axis it lives on (owner rulings 2026-09-06 and 2026-09-10; landed 2026-09-10)
 
@@ -1568,3 +1590,50 @@ two capture-OFF rows of the depth ladder at a tenth of the depth that had read a
 kernel among walls read `None`. The choice rule cannot be discriminated by number — the largest rendered
 mass, the most located members, the largest located weight and the highest located basin agree on every row
 measured once the members are located — so the most-located-members rule ships by derivation.
+
+**The expectation ruler on the per-base length (2026-09-16; `ISSUES: ruler-multimapper-floor-caps-the-correction`
+CLOSED; `EQUATIONS.md` §11).** THE RULING: a transcript's effective length under capture is its own bases at
+their pieces' capture efficiencies, weighted by the fragment-length end taper — `factor_t = Σ_p ℓ_p^τ c̃_p /
+Σ_p ℓ_p^τ` over the pieces its exons overlap, no boundary object, no junction object and no contained support
+in the length — and a piece's efficiency `c̃_p = E[min(ρ_p/ρ_ref, 1) | evidence]` is the posterior mean of its
+clipped gDNA density under the fitted landscape, from its own contained count and from the crossing counts at
+every boundary within a fragment's reach, each crossing apportioned to the pieces its fragments cover in
+proportion to their geometry times their own-count densities, one pass. `calibrate` computes the efficiencies
+and publishes them per region and per boundary (`CalibrationResult.gdna_capture_efficiency_region`,
+`_boundary`, a boundary's being the posterior of its own crossing count); `capture_eff_length` is
+geometry — the pieces' taper-weighted base counts (`effective_length.BaseTaper`) and the sum — and
+`assemble_priors` reads the count's own objects at their supports and efficiencies, `Σ S_r c̃_r + Σ S_e
+c̃_e` — NOT the locus's bases: the base form dropped the boundary objects the count keeps and the gDNA
+component over-claimed (the test chromosome's `g50 ss.99 ON` row, gene-level Σ|Δ| 25,633 → 38,174
+against 23,967 with the object form); and not the boundary support at the count's `q`, which collapses
+the length on short pieces and saturates the gDNA component (the thermometer's injection gate goes
+insensitive on a contaminated toy, the capture-OFF strata 1–2 % worse, for 21,733 on that row).
+The multimapper floor `w = C/(C+1)` is deleted from both, the splice-junction objects and the flank
+imputation with it. Why: the floor was a +3.4 to +3.7 nat bias on every unprobed transcript at every gDNA level (a factor of
+30–40, the unprobed class's whole error), a piece shorter than a fragment has no contained support and read 0
+then the floor, and forty junction objects imputed from unsupported flanks swamped four hundred bases of
+measurement on the ladder's dense annotation; the accumulator counts a fragment at every boundary it crosses,
+so a tiny exon's evidence is its edge crossings against the intron's own level, and its length its bases.
+Measured (`ruler_vs_truth.py`, the class median log error and the probed class's share within ±0.1 nat; the
+test chromosome's `g05 ss.99 ON` row, then `g25`, `g50 ss.50`, `g50 ss.99`): the unprobed class +3.41 / +3.32 /
++3.74 / +3.76 nat under the shipped ruler → +0.19 / −0.03 / −0.15 / −0.04 under the expectation ruler on the
+per-base length, the probed class 97–98 % → 99 %; the tiny-exon block's probed `capmixed` transcripts −0.63 →
++0.07, its unprobed `mixed` +5.9 → +0.2; the depth ladder's probed class at a tenth of the depth 75 / 93 / 97 %
+→ 86 / 99 / 99 % at 5 / 25 / 50 % gDNA and at a hundredth 63 / 62 % → 91 / 91 % at 25 / 50 %; the ladder's
+`g05 ss.99 ON` row's unprobed class +4.40 → +0.45 with its probed class at 35 % under every gDNA ruler, the
+certified true counts included — the junction-designed panel's witness geometry. REFUSED with numbers (every
+open question tried each way, the owner's ruling of 2026-09-16): the solve's own posterior (the belief's `f_g`
+and `Var(log f_g)` as a log-normal, closed form) — +1.25 nat on the test chromosome's unprobed class and +4.96 on
+the ladder's, since a slot the solve does not locate has no posterior of its own; the clip outside the
+expectation, `min(E[ρ]/ρ_ref, 1)` — indistinguishable from the clip inside on every row (±0.01 nat), so the
+derivation's form ships; the evidence from the piece's own count alone — the unprobed class at +4.5 nat on the
+ladder and the tiny exons at the prior's mean, since a piece without support has no own count; the plug-in in
+place of the posterior — +3.36 on the ladder's unprobed class from the pieces with no support; iterating the
+apportionment to convergence (EM on the joint, 13 passes on the test chromosome and 59 on the ladder at the grid
+step) — identical on every test chromosome row and +0.44 against +0.46 nat on the ladder's unprobed class, so
+the one pass ships; a joint update of neighbours in place of the apportionment — never converges, 64–66
+pieces of the test chromosome and ~2,000 of the ladder flipping by 8 nat every pass. What no gDNA ruler can
+see is declared (`ISSUES: ruler-witness-geometry-on-transcript-panels`): a probe across a junction is captured
+on gDNA at a fifth of the cDNA's weight and a probe centred on a 40 bp exon binds gDNA over 125 bp while the
+simulator's non-stacking rule binds a spliced fragment over 40, so the probed tiny-exon transcripts read
++1.03 nat against the sampler's truth with the mechanism reading their edges exactly.

@@ -1,22 +1,31 @@
-"""Capture-aware EM effective lengths — the gDNA enrichment contraction, applied to every component.
+"""Capture-aware EM effective lengths — a transcript's own bases at their pieces' capture efficiencies.
 
 Under hybrid capture a transcript's usable length is not its full length: only the probe-enriched part
-of its footprint is sampled. Contracting the gDNA component alone leaves it artificially concentrated,
-so it out-competes the RNA components for the enriched reads. This module therefore contracts EVERY
-transcript's EM effective length by the SAME per-region gDNA enrichment, over the transcript's own
-region set.
+of its footprint is sampled, and contracting the gDNA component alone would leave it artificially
+concentrated against the RNA components. So EVERY transcript's EM effective length is contracted by the
+same per-piece efficiencies — the calibration's own, read off the deconvolved gDNA against the fully
+captured level (`capture_efficiency`; `CalibrationResult.gdna_capture_efficiency_region`) — over the
+transcript's own bases (gate: ``tests/calibration/test_capture_eff_length.py``).
 
-gDNA is the right readout of that enrichment because it is source-uniform within a locus, so its
-per-region density is the probe pattern and carries none of the expression dynamic range that would
-poison a coverage-based readout. The region set is the regions the transcript's exons overlap: exon
-regions for a spliced mRNA, since introns are gaps, and the full span for an unspliced component,
-whose single full-span exon covers introns too.
+THE LENGTH IS A SUM OVER BASES. A transcript's effective length under capture is the sum over its start
+positions of the efficiency of the fragment starting there, and a fragment's efficiency is the mean
+per-base efficiency over the bases it covers, so
 
-The contraction is applied in FL-marginal units — it scales the existing ``effective_lengths`` by the
-enrichment ratio over the transcript's regions — so a uniform enrichment reduces exactly to the input
-length and a capture-off run is bit-identical; only the captured case contracts. It introduces no new
-readout, reusing the calibration's per-region gDNA mass and the same divisors the calibrator itself
-used.
+    eff_t = Σ_x c̃(x) · τ(x),      τ(x) = E_f[(starts whose fragment covers x) / w],
+
+over the transcript's own bases ``x`` in transcript coordinates, with ``τ`` the fragment-length end taper
+(`effective_length.BaseTaper`; ``Σ_x τ(x)`` is the fl-marginal length exactly). With ``c̃`` constant on a
+piece — a region of the partition the transcript's exons overlap —
+
+    factor_t = Σ_p ℓ_p^τ · c̃_p / Σ_p ℓ_p^τ,      eff_t = fl_t · factor_t,
+
+``ℓ_p^τ`` the taper-weighted count of the transcript's bases in piece ``p``. No boundary object, no
+junction object and no contained support enters the length: a junction-spanning start is counted
+through the bases it covers, a piece shorter than a fragment carries its bases' weight, and ``span = fl``
+holds for every structure by construction. The region set is every piece the transcript's exons overlap
+(a spliced mRNA drops its introns; an unspliced entity's single exon is its span, introns included). The
+contraction scales the FL-marginal ``fl_eff_lengths`` the pipeline built, so a field with no reference —
+every efficiency 1 — returns them bit-identically; only the captured case contracts.
 """
 
 from __future__ import annotations
@@ -28,120 +37,82 @@ import numpy as np
 import pandas as pd
 
 from ..types import IntervalType
-from .region_arrays import overlapping_region_runs, region_right_boundary
+from .effective_length import base_taper
+from .region_arrays import overlapping_region_runs
 
 if TYPE_CHECKING:
     from ..index import TranscriptIndex
     from .region_arrays import RegionArrays
     from .result import CalibrationResult
 
-__all__ = ["transcript_capture_eff_lengths"]
+__all__ = ["transcript_capture_eff_lengths", "transcript_piece_lengths"]
 
 
-def _transcript_region_incidence(
-    index: "TranscriptIndex", region_arrays: "RegionArrays"
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Per-transcript membership — the regions, boundaries and splice junctions a component crosses.
+def transcript_piece_lengths(
+    index: "TranscriptIndex", region_arrays: "RegionArrays", rna_fl_pmf: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(t, piece, ltau)`` — for every transcript, the pieces its exons (or an unspliced entity's span)
+    overlap and the taper-weighted count ``ℓ_p^τ`` of its bases in each, in transcript coordinates.
 
-    Returns ``(inc_t_reg, inc_reg, inc_t_bnd, inc_bnd, inc_t_junc, inc_junc_left, inc_junc_right)``:
-    region incidence ``(t, r)``; interior-boundary incidence ``(t, e)`` where ``e`` is a CONTIGUOUS
-    BOUNDARY INDEX, since a boundary is a first-class object on its own axis and a consumer indexes
-    the per-boundary arrays directly; and splice-sj incidence ``(t, r_left, r_right)``, one per
-    adjacent exon pair of a multi-exon mRNA, where ``r_left`` is the previous exon's last region and
-    ``r_right`` this exon's first region. The intron between them carries no gDNA and is no
-    genomic-adjacent boundary, so the sj's crossing mass is imputed by
-    ``transcript_capture_eff_lengths`` from the two flanking exon densities. That stitches the
-    spliced transcript into one contiguous ruler, so its ``span_full`` equals its FL-marginal
-    length; dropping the sj instead under-states the mature footprint and the resulting
-    ``fl/span_full`` inflation lifts a spliced mRNA's EM effective length above its unspliced
-    parent's, which is impossible.
-
-    A component's effective length is the IPR over exactly the regions it occupies contiguously (the
-    transcript-structure gate, from first principles):
-
-    * A **region** is in the set if an exon (mRNA) / the full span (nRNA) overlaps it.
-    * A **boundary** is in the set iff the component crosses it *without a splice* — i.e. it lies STRICTLY
-      INTERIOR to a single exon / span. For an exon ``[a, b)`` spanning region range ``[lo, hi)`` the interior
-      boundaries are ``r ∈ [lo, hi-1)``: their genomic positions ``end[r] = start[r+1]`` all satisfy ``a < · < b``
-      (``lo`` is the first region with ``end > a``; ``hi-1`` the last with ``start < b``). Boundaries at the exon
-      BOUNDARIES (splice donor/acceptor, or the transcript's outer ends) sit at ``a`` or ``b`` ⇒ index ``< lo`` or
-      ``≥ hi-1`` ⇒ excluded automatically. Introns lie in no exon's range ⇒ their regions and boundaries are
-      excluded. So a MULTI-exon mRNA drops its introns + splice-junction boundaries but KEEPS an
-      exon-interior boundary that merely marks a signature change (an antisense feature overlapping on the
-      other strand — crossed contiguously); a SINGLE-exon mRNA / nRNA keeps every interior region (introns
-      included, for nRNA); the outer boundaries are never interior ⇒ excluded (they belong to gDNA, which
-      spans the chromosome). Annotation-only (sample-independent) — could be precomputed at index build.
+    Exons are taken in genomic order per transcript; the taper is symmetric in the two ends, so the
+    strand does not matter. Annotation and pmf only — sample-independent, so a consumer computes it once
+    per index and pmf.
     """
     starts = np.asarray(region_arrays.start, dtype=np.int64)
     ends = np.asarray(region_arrays.end, dtype=np.int64)
     ref_off = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
-    name_to_id = index.ref_name_to_id
+    taper = base_taper(rna_fl_pmf)
 
-    def _ranges(ref, a, b):
-        """Per row, the region run ``[lo, hi)`` overlapping ``[a, b)``; ``valid`` is False for a reference
-        the partition does not carry or an empty run."""
-        rid = pd.Series(np.asarray(ref)).astype(str).map(name_to_id).fillna(-1).to_numpy(np.int64)
-        lo, hi = overlapping_region_runs(rid, a, b, starts, ends, ref_off)
-        return lo, hi, (rid >= 0) & (hi > lo)
-
-    def _expand(first, width, label):
-        """Row ``k`` emits ``first[k] .. first[k] + width[k] - 1`` labelled ``label[k]``, rows in order."""
-        ramp = np.arange(int(width.sum()), dtype=np.int64) - np.repeat(
-            np.cumsum(width) - width, width
-        )
-        return np.repeat(label, width), np.repeat(first, width) + ramp
-
-    # A region is in a component's set if its exon (mRNA) or full span (nRNA) overlaps it; an interior
-    # boundary r in [lo, hi-1) is crossed without a splice. Rows emit in exon order, then the synthetic
-    # spans, exactly the order the per-transcript arrays are consumed in.
     iv = pd.read_feather(os.path.join(index.index_dir, "intervals.feather"))
     ex = iv[(iv["interval_type"] == int(IntervalType.EXON)) & (iv["t_index"] >= 0)]
-    # genomic order per transcript so consecutive rows of one transcript are ADJACENT exons — the pairs
-    # whose SPLICE JUNCTION must be stitched (the intron between them carries no gDNA ⇒ it is not a
-    # genomic-adjacent boundary; its crossing mass is imputed downstream from the flanking EXON densities).
-    ex = ex.sort_values(["t_index", "start"], kind="stable")
-    ex_t = ex["t_index"].to_numpy(np.int64)
-    lo, hi, ok = _ranges(ex["ref"], ex["start"].to_numpy(np.int64), ex["end"].to_numpy(np.int64))
-    parts = [(ex_t[ok], lo[ok], hi[ok])]
-    # an exon→exon junction joins consecutive valid exons of one transcript: the previous exon's last
-    # region and this exon's first
-    vt, vlo, vhi = ex_t[ok], lo[ok], hi[ok]
-    joined = np.flatnonzero(vt[1:] == vt[:-1]) + 1
-    j_t, j_l, j_r = vt[joined], vhi[joined - 1] - 1, vlo[joined]
-
+    parts = [
+        (
+            ex["t_index"].to_numpy(np.int64),
+            ex["ref"].astype(str).to_numpy(),
+            ex["start"].to_numpy(np.int64),
+            ex["end"].to_numpy(np.int64),
+        )
+    ]
     tdf = index.t_df
     if tdf is not None and "is_synthetic" in tdf.columns:
         syn = tdf[tdf["is_synthetic"].to_numpy(dtype=bool)]
-        syn = syn[~np.isin(syn["t_index"].to_numpy(np.int64), ex_t)]
-        s_t = syn["t_index"].to_numpy(np.int64)
-        s_lo, s_hi, s_ok = _ranges(
-            syn["ref"], syn["start"].to_numpy(np.int64), syn["end"].to_numpy(np.int64)
-        )
+        syn = syn[~np.isin(syn["t_index"].to_numpy(np.int64), parts[0][0])]
         parts.append(
-            (s_t[s_ok], s_lo[s_ok], s_hi[s_ok])
-        )  # single-exon spans (nRNA): no splice junctions
+            (
+                syn["t_index"].to_numpy(np.int64),
+                syn["ref"].astype(str).to_numpy(),
+                syn["start"].to_numpy(np.int64),
+                syn["end"].to_numpy(np.int64),
+            )
+        )
+    t = np.concatenate([p[0] for p in parts])
+    ref = np.concatenate([p[1] for p in parts])
+    a = np.concatenate([p[2] for p in parts])
+    b = np.concatenate([p[3] for p in parts])
+    order = np.lexsort((a, t))
+    t, ref, a, b = t[order], ref[order], a[order], b[order]
+    rid = pd.Series(ref).astype(str).map(index.ref_name_to_id).fillna(-1).to_numpy(np.int64)
+    lo, hi = overlapping_region_runs(rid, a, b, starts, ends, ref_off)
+    ok = (rid >= 0) & (hi > lo)
 
-    t_all = np.concatenate([p[0] for p in parts])
-    lo_all = np.concatenate([p[1] for p in parts])
-    hi_all = np.concatenate([p[2] for p in parts])
-    r_t, r_r = _expand(lo_all, hi_all - lo_all, t_all)
-    b_t, b_r = _expand(lo_all, np.maximum(hi_all - 1 - lo_all, 0), t_all)
+    # transcript coordinates: cumulative exon lengths per transcript, restarting at each transcript
+    exlen = b - a
+    n_t = int(tdf.shape[0])
+    L_t = np.zeros(n_t, dtype=np.int64)
+    np.add.at(L_t, t, exlen)
+    off = np.cumsum(exlen) - exlen
+    first = np.r_[True, t[1:] != t[:-1]]
+    off = off - np.repeat(off[first], np.diff(np.r_[np.flatnonzero(first), t.size]))
 
-    e = np.empty(0, dtype=np.int64)
-    # The boundary axis is emitted as a BOUNDARY index, not a left-region index. A boundary is a
-    # first-class object with its own axis, so a consumer indexes the per-boundary arrays directly;
-    # returning the left region instead forces every caller through a region-shaped copy, which
-    # reads as an attribution of the boundary's mass to a region and is not one.
-    right_boundary = region_right_boundary(np.asarray(region_arrays.ref_id))
-    return (
-        r_t,
-        r_r,
-        b_t,
-        right_boundary[b_r] if b_r.size else e,
-        j_t.astype(np.int64) if j_t.size else e,
-        j_l.astype(np.int64) if j_l.size else e,
-        j_r.astype(np.int64) if j_r.size else e,
-    )
+    # expand each exon into its pieces
+    width = np.where(ok, hi - lo, 0)
+    ramp = np.arange(int(width.sum()), dtype=np.int64) - np.repeat(np.cumsum(width) - width, width)
+    k = np.repeat(np.arange(t.size), width)
+    piece = np.repeat(lo, width) + ramp
+    x0 = np.maximum(starts[piece], a[k]) - a[k] + off[k]
+    x1 = np.minimum(ends[piece], b[k]) - a[k] + off[k]
+    tk = t[k]
+    return tk, piece, taper.interval_sums(x0, x1, L_t[tk])
 
 
 def transcript_capture_eff_lengths(
@@ -149,121 +120,27 @@ def transcript_capture_eff_lengths(
     region_arrays: "RegionArrays",
     index: "TranscriptIndex",
     fl_eff_lengths: np.ndarray,
+    rna_fl_pmf: np.ndarray,
 ) -> np.ndarray:
-    """Capture-contract each transcript's EM effective length by the per-region gDNA-enrichment density,
-    against a single GLOBAL reference density ``ρ_ref`` — the fully-captured level, the located enriched
-    mode of the fitted gDNA landscape, ``calibration.gdna_reference_density`` (`EQUATIONS.md` §11).
+    """``eff_em_t = fl_t · Σ_p ℓ_p^τ c̃_p / Σ_p ℓ_p^τ`` — each transcript's FL-marginal length times the
+    taper-weighted mean of its pieces' capture efficiencies (gate:
+    ``tests/calibration/test_capture_eff_length.py``).
 
-    ``eff_em_t = fl_t · factor_t``, ``factor_t = [Σ_{n∈t} S_n·min(ρ_n/ρ_ref, 1)] / [Σ_{n∈t} S_n]`` — the
-    enrichment-weighted fraction of the transcript's footprint that survives at the reference density, over
-    exactly the regions it occupies CONTIGUOUSLY (``_transcript_region_incidence``), differing ONLY in the region
-    set:
-
-    * a per-region CONTAINED region at effective support ``S_r = E[max(0, L_r − ℓ)]`` (mass ``m_r``);
-    * a per-interior-BOUNDARY crossing object at support ``S_e = gdna_boundary_eff_len[e] = E_f[w-1]``
-      (mass ``m_e = count_gdna_boundary[e]``), for boundaries the transcript crosses without a splice,
-      i.e. interior to an exon;
-    * a per-SPLICE-SJ crossing object (multi-exon mRNA), same crossing support ``S_j`` but with its
-      mass imputed from the two flanking exon densities, ``m_j = 0.5*(rho_left + rho_right)*S_j``.
-      The intron between the exons holds no gDNA, so the sj's enrichment is that of the exonic
-      sequence a spliced fragment covers — neither zero, which dropping it would imply, nor full
-      length, which the FL marginal implies.
-
-    gDNA, a contiguous genomic interval, takes ALL regions; an unspliced component keeps every
-    interior region, introns included; a spliced mRNA takes its exon regions plus its interior and
-    splice-junction boundaries, dropping only the introns. Keeping the sj boundaries makes a spliced
-    mRNA's ``span_full`` equal its FL-marginal length. Without them the ``fl/span_full`` ratio
-    exceeds 1, growing with exon count, and inflates a spliced mRNA's effective length above its
-    unspliced parent's, which is impossible: the parent's genomic region set strictly contains the
-    child's.
-
-    A single O(incidence) pass (``np.add.at``) does every transcript at once. Properties:
-
-    * a field with no enriched mode — capture off (one level, Poisson noise around it) or a
-      gDNA-free library (the anchors' wall, false-positive specks above it) — carries no reference:
-      ``rho_ref`` is ``None``, the factor is 1 and ``eff_em == fl``, bit-identical to the
-      FL-marginal length. A modal decision has no per-object noise to clip, which is why a
-      per-object reference read from the field itself could not keep this contract;
-    * concentrated gDNA (capture) leaves depleted regions with ``rho_n`` far below ``rho_ref``, so
-      ``min(m_n/rho_ref, S_n)`` falls well below ``S_n`` and the effective length contracts to the
-      enriched footprint.
-
-    The reference density is a single GLOBAL number shared by every transcript. That makes
-    ``eff(unspliced) >= eff(spliced)`` hold by construction, with no inversion, and it is stable
-    because gDNA barely varies across loci, unlike RNA. A per-transcript reference instead
-    contracts on within-transcript density variation including noise, which fires even with no gDNA
-    present.
+    The efficiencies are the result's, ``gdna_capture_efficiency_region``: the posterior mean of each
+    piece's clipped gDNA density against the located enriched mode of the fitted landscape, 1 everywhere
+    when the field carries no reference (capture off, or no gDNA), so that case returns ``fl`` verbatim.
+    One O(incidence) pass does every transcript at once; ``fl · factor ≤ fl`` since every efficiency is
+    at most 1, and a global reference shared by every transcript keeps ``eff(unspliced) ≥ eff(spliced)``
+    for a parent and its child by construction.
     """
     fl = np.asarray(fl_eff_lengths, dtype=np.float64)
-    n_t = fl.shape[0]
-
-    # per-region CONTAINED object (mass, effective support) and per-interior-BOUNDARY crossing object. The
-    # boundary between region r and r+1 is keyed to r — the SAME objects the gDNA component uses
-    # (priors._gdna_region_arrays).
-    contained_m = np.asarray(calibration.count_gdna_region, dtype=np.float64)
-    contained_S = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9)
-    contained_ev = contained_m + np.asarray(calibration.count_rna_region, dtype=np.float64)
-    # The per-BOUNDARY crossing objects, on their own axis. `inc_bnd` is a BOUNDARY index, so these are
-    # indexed directly — no region-shaped copy, and nothing that reads as an attribution to a region.
-    boundary_m = np.asarray(calibration.count_gdna_boundary, dtype=np.float64)
-    boundary_S = np.maximum(np.asarray(calibration.gdna_boundary_eff_len, dtype=np.float64), 0.0)
-    # A SPLICE sj is not a contiguous boundary, so it has no entry on the boundary axis — but it is
-    # still a crossing, and gDNA's crossing divisor is the same everywhere (UNBOUNDED_REACH both
-    # sides gives mu_g - 1). Take it from the boundary supports, not a length model recomputed here: one
-    # definition, and it cannot drift from the one the calibrator divided by.
-    crossing_S = float(boundary_S[boundary_S > 0.0][0]) if np.any(boundary_S > 0.0) else 0.0
-
-    rt, rr, bt, br, jt, jl, jr = _transcript_region_incidence(index, region_arrays)
-    # THE REFERENCE is the result's: the located enriched mode of the fitted gDNA landscape, SHARED
-    # across all transcripts so eff(nascent) ≥ eff(mature) by construction. No enriched mode (capture-off,
-    # or no gDNA at all) ⇒ nothing is depleted relative to anything ⇒ no contraction, exactly.
-    rho_ref = calibration.gdna_reference_density
-    if rho_ref is None:
+    c = np.asarray(calibration.gdna_capture_efficiency_region, dtype=np.float64)
+    if calibration.gdna_reference_density is None:
         return fl.copy()
-    inv = 1.0 / rho_ref
-    # Per-transcript enrichment-weighted length num = Σ_n min(m_n/ρ_ref, S_n) = Σ_n S_n·min(ρ_n/ρ_ref, 1),
-    # the uniform-case length span_full = Σ_n S_n, and the contained evidence (multimapper shrinkage), over
-    # the region set (regions + interior boundaries + splice-junction boundaries). factor = num/span_full ∈ (0, 1].
-    num = np.zeros(n_t)
-    span_full = np.zeros(n_t)
-    c_ev = np.zeros(n_t)
-    if rt.size:
-        np.add.at(num, rt, np.minimum(contained_m[rr] * inv, contained_S[rr]))
-        np.add.at(span_full, rt, contained_S[rr])
-        np.add.at(c_ev, rt, contained_ev[rr])
-    if bt.size:
-        np.add.at(num, bt, np.minimum(boundary_m[br] * inv, boundary_S[br]))
-        np.add.at(span_full, bt, boundary_S[br])
-    if jt.size:
-        # SPLICE-SJ boundaries (multi-exon mRNA). The intron between the two exons carries no gDNA, so
-        # the sj crossing is NOT a genomic-adjacent boundary — its mass is IMPUTED from the two flanking
-        # EXON densities ρ = m/S (the exonic sequence a sj-spanning fragment actually covers), at the
-        # same crossing support every genomic boundary uses. Stitching these in makes span_full == fl
-        # for a spliced mRNA, so the sj-dropped fl/span_full inflation — which lifts a spliced
-        # transcript's eff_em above its unspliced parent's, an impossible inversion — vanishes.
-        # Under uniform gDNA m_j = ρ·S_j like every other region,
-        # so factor stays EXACTLY 1 (capture-off bit-identical); under capture the sj contributes at
-        # its flanking-exon enrichment, not the fabricated full-length weight.
-        rho_l = contained_m[jl] / contained_S[jl]
-        rho_r = contained_m[jr] / contained_S[jr]
-        # The sj boundary's SUPPORT is the gDNA crossing effective length: one number, the same one
-        # every contiguous boundary uses, taken from the boundary supports rather than re-derived
-        # here, so it cannot drift from the divisor the calibrator applied. The `0.5·(rho_l + rho_r)`
-        # below is a genuine AVERAGE OF DENSITIES — the sj's imputed density is the mean of its two
-        # flanks — and is unrelated to the support.
-        s_j = np.full(jt.shape[0], crossing_S, dtype=np.float64)
-        m_j = 0.5 * (rho_l + rho_r) * s_j
-        np.add.at(num, jt, np.minimum(m_j * inv, s_j))
-        np.add.at(span_full, jt, s_j)
-
-    with np.errstate(divide="ignore", invalid="ignore"):
-        # factor = Σ min(m_n/ρ_ref, S_n) / Σ S_n ∈ (0, 1] (num ≤ span_full since min(·, S_n) ≤ S_n). Under
-        # uniform gDNA every region sits at ρ_ref ⇒ num = span_full ⇒ factor 1 (capture-off bit-identical);
-        # under capture depleted regions contribute min(m_n/ρ_ref, S_n) ≪ S_n ⇒ contracts to the enriched
-        # footprint. ONE global ρ_ref for every transcript ⇒ eff(unspliced) ≥ eff(spliced), no inversion.
-        factor = np.where(span_full > 1e-9, num / np.maximum(span_full, 1e-9), 1.0)
-        # multimapper-blindness shrinkage: shrink the contraction toward 1 (no contraction) on sparse
-        # CONTAINED evidence (the accumulator is unique-mapper-fed), smoothly (w = C/(C+1), magic-free).
-        w = c_ev / (c_ev + 1.0)
-        factor = w * factor + (1.0 - w)
+    t, piece, ltau = transcript_piece_lengths(index, region_arrays, rna_fl_pmf)
+    num = np.zeros(fl.shape[0])
+    den = np.zeros(fl.shape[0])
+    np.add.at(num, t, ltau * c[piece])
+    np.add.at(den, t, ltau)
+    factor = np.where(den > 0.0, num / np.maximum(den, 1e-300), 1.0)
     return np.minimum(fl * factor, fl)

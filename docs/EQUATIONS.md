@@ -944,25 +944,113 @@ Known approximation: `ρ` enters as a hard multiplicative zero, but zero observa
 `P(0 | λ, E) = e^(−λE)`, not zero. The hard zero is the large-exposure limit of the correct likelihood, so
 it is right where the library is deep and wrong where it is shallow.
 
-## 11. The ruler's reference — the located enriched mode (`capture_eff_length`, `abundance_landscape.located_enriched_mode`)
+## 11. The ruler — a transcript's bases at their pieces' capture efficiencies (`capture_eff_length`, `capture_efficiency`, `priors.assemble_priors`; the reference, `abundance_landscape.located_enriched_mode`)
 
-Under hybrid capture the EM divides a transcript by its FL-marginal length times the fraction of its
-footprint sampled at the fully-captured level,
+Under hybrid capture the EM divides a transcript by its effective length under capture: its
+FL-marginal length times the mean capture efficiency of its bases,
 
-    eff_em_t = fl_t · factor_t,    factor_t = Σ_n S_n · min(ρ_n / ρ_ref, 1) / Σ_n S_n,
+    eff_em_t = fl_t · factor_t,    factor_t = Σ_p ℓ_p^τ · c̃_p / Σ_p ℓ_p^τ,
 
-over the objects `n` the transcript occupies contiguously (§2's supports `S_n`), with `ρ_n = m_n / S_n` the
-object's deconvolved gDNA density — gDNA because it is source-uniform, so its density pattern is the
-probe pattern and carries no expression dynamic range — and `ρ_ref` the fully-captured gDNA density.
-`factor_t ∈ (0, 1]`, and it is exactly 1 when no object is depleted relative to any other.
+over the pieces `p` (regions of the partition) the transcript's exons overlap, with `c̃_p` the piece's
+capture efficiency — its gDNA density against the fully captured level `ρ_ref`, clipped at 1 — and
+`ℓ_p^τ` the taper-weighted count of the transcript's bases in the piece. `factor_t ∈ (0, 1]`, and it is
+exactly 1 when no piece is depleted relative to the reference. The locus gDNA component takes the same
+sum over the locus's pieces, introns included, since gDNA's template is the genome.
 
-**`ρ_ref` is a population quantity.** It is the enriched mode of the population density `P(log ρ_g)`, and
-the tool fits exactly that density: `landscape.DensityLandscape`, ψ's composition arm on the refits,
+**The length is a sum over bases (role one).** A transcript's effective length under capture is the
+sum over its start positions of the efficiency of the fragment starting there, and a fragment's
+efficiency is the mean per-base efficiency over the bases it covers, so
+
+    eff_t = Σ_x c̃(x) · τ(x),      τ(x) = E_f[ (starts whose fragment covers base x) / w ],
+
+over the transcript's own bases `x` in transcript coordinates. A fragment of length `w` starting at
+`s` covers `x` iff `s ≤ x < s + w` with `0 ≤ s ≤ L − w`, which is `min(x + 1, w, L − x, L − w + 1)⁺`
+starts, each spreading its unit over `w` bases; so `Σ_x τ(x) = Σ_w f(w)(L − w + 1)⁺ = fl_t` exactly —
+the per-base frame partitions the start count, it does not re-derive it — and away from both ends
+`τ = 1`, only the bases within a fragment of an end being tapered (`effective_length.BaseTaper`; for
+`L ≥ 2 w_max − 1` the four-way min is `min(d, w)` with `d = min(x + 1, L − x)` and one cumulative
+table serves every template). With `c̃` constant on a piece the sum is the factor above. No boundary
+object, no junction object and no contained support enters the length: a junction-spanning start is
+counted through the bases it covers, a piece shorter than a fragment carries its bases' weight, and
+`span = fl` holds for every structure by construction — the property the junction objects were built
+to secure, which they secured by imputing forty junctions from pieces that had no support on the
+ladder's dense annotation.
+
+**The locus gDNA length counts the count's own objects.** The EM's gDNA component for a locus carries
+a COUNT, the calibration's gDNA mass on the locus's regions and boundaries (one crossing converted by
+`q`, the conserved mass per crossing), and the length it divides that count by is those same objects'
+starts at their own efficiencies:
+
+    eff_g = Σ_r S_r · c̃_r + Σ_e S_e · c̃_e,
+
+the contained support of every region at its efficiency and the crossing support of every boundary at
+the boundary's own efficiency `c̃_e = E[min(ρ_e/ρ_ref, 1) | k_e, S_e]`. At uniform efficiency it is the
+plain `Σ S_r + Σ S_e`, the span the prior read before the efficiencies existed, so a capture-OFF
+library's prior is bit-identical to what it was. Two other forms are refused by measurement. The
+transcript's per-base form over the locus's bases drops the boundary objects whose masses the count
+keeps, and where the calibration's crossing masses sit above their geometry the gDNA component then
+reads denser than its objects, over-claims the exonic unspliced fragments and every probed gene
+under-calls — the test chromosome's `g50 ss.99 ON` row through the thermometer, gene-level Σ|Δ| 25,633
+→ 38,174 against 23,967 with the object form, and the gDNA pool +5.5 % against −0.1 %. And the boundary
+support converted by `q` (the count's conserved mass per crossing) so that each crossing start is counted
+once, as each fragment is in the count, collapses the length where pieces are short: the gDNA component
+saturates, the EM stops responding to its own gDNA pseudocount (the thermometer's injection gate on a
+contaminated toy goes insensitive) and both capture-OFF strata read 1–2 % worse, for 21,733 on that one
+row — the count's `q` undoes an inflation of mass, not of starts.
+
+**The evidence is every unspliced gDNA object over the piece (role two).** gDNA is one template at a
+uniform rate before capture, so its density after capture on a piece is that piece's efficiency up to
+the one unit `ρ_ref`; and the accumulator counts a fragment at every boundary it crosses, so a piece
+too short to contain a fragment is witnessed at its edges. Two kinds of count: the piece's own
+CONTAINED count `k_p` on its support `S_p = E_f[(ℓ_p − w + 1)⁺]`, `E[k_p] = ρ_p S_p`; and the CROSSING
+count `k_e` at every boundary within a fragment's reach, whose fragments' bases lie in the pieces they
+cover in proportions the geometry fixes,
+
+    E[k_e] = Σ_q A_eq · ρ_q,      A_eq = Σ_w f(w) Σ_{a=1}^{w−1} (bases of the placement in q) / w,
+
+with `A_eq = G(c_j) − G(c_{j−1})` for the piece at cumulative distance `(c_{j−1}, c_j]` on a side,
+`G(c) = Σ_w f(w) Σ_{a=1}^{w−1} min(a, c)/w`, and `Σ_q A_eq = E_f[w − 1]` exactly, the crossing
+opportunity partitioned over the bases it counts (`effective_length.crossing_base_shares`, gated
+against enumeration). A crossing at an interior boundary of a long exon has its bases in two pieces of
+equal efficiency and reads that efficiency directly; a crossing at the edge of a 40 bp exon has a share
+`≈ 35 / 216` of its base-starts in the exon and the rest in the intron, whose efficiency is pinned by
+its own long contained count, so the exon's efficiency is identified from the edge counts against the
+intron's known level.
+
+**The efficiency is a posterior mean, not a plug-in.** Under the fitted gDNA landscape `P(log ρ)` — the
+same `DensityLandscape` ψ's composition arm reads on the refits, the population's own statement of
+where gDNA densities sit — and the Poisson counting rule as the likelihood,
+
+    c̃_p = E[ min(ρ_p / ρ_ref, 1) | k_p, S_p, {z_ep, A_ep}_e ],
+
+on the landscape's grid, with the crossings APPORTIONED: a crossing count is a Poisson sum over the
+pieces within reach, and the E-step of a Poisson sum attributes it,
+`z_eq = k_e · A_eq ρ̄_q / Σ_q' A_eq' ρ̄_q'` with `ρ̄` the pieces' own-count posterior means, each piece
+then reading its share as a count on its own exposure `A_eq` (the terms of one piece pool exactly into
+one Poisson term). The neighbours are held at what their own counts say — one pass. At high depth the
+posterior is the plug-in `min(k/S/ρ_ref, 1)`; at low depth it is the population's mixture weighted by
+the piece's own likelihood; a piece with no evidence reads the population's clipped mean; no constant
+enters, and no floor: the multimapper floor `w = C/(C+1)` this replaces was a +3.4 to +3.7 nat bias on
+every unprobed transcript at every gDNA level, protecting against a plug-in's exact zero that a
+posterior mean never produces. `k_p` and `k_e` are deconvolved masses, so the Poisson enters through
+the gamma function as a continuation, and `k_p` already carries the landscape through the solve, so the
+prior enters twice in a small way — measured against the solve's own posterior (the belief's `f_g` and
+`Var(log f_g)` as a log-normal, closed form), which loses badly where a slot is not solved
+(+1.25 to +4.96 nat on the unprobed class), and against the clip taken outside the expectation,
+`min(E[ρ]/ρ_ref, 1)`, which is indistinguishable on every row measured. Iterating the apportionment
+with the updated means is EM on the joint and converges (13 passes on the test chromosome, 59 on the
+ladder, at the grid step), changing nothing the truth instrument can see — identical on every test
+chromosome row, +0.44 against +0.46 nat on the ladder's `g05 ss.99 ON` unprobed class — so the one pass
+ships; a joint update of neighbours instead (each conditioning on the other's mean with the whole count)
+never settles, 64–66 pieces of the test chromosome and ~2,000 of the ladder flipping by 8 nat every pass.
+
+**`ρ_ref` is a population quantity.** It is the enriched mode of the population density `P(log ρ_g)`,
+and the tool fits exactly that density: `landscape.DensityLandscape`, ψ's composition arm on the refits,
 trained on the located compositions and the zero-count anchors (DESIGN §7.1). Its census
 (`abundance_landscape._census`) partitions the grid into basins at the minima between interior maxima;
-`split_basins` names the depleted basin as the largest by mass (for gDNA the unprobed objects outnumber
-the probed ones — 0.70–1.00 of the mass on every row of both panels) and the enriched basin as the
-largest by mass strictly above it, `None` when nothing lies above.
+the depleted basin is the largest by rendered mass (for gDNA the unprobed objects outnumber the probed
+ones — 0.70–1.00 of the mass on every row of both panels), and the enriched candidate is the basin
+above it holding the most located kernels, `None` when nothing lies above.
 
 **The location floor on the mode.** A basin's MEMBERS are the kernels with a location: a count of at
 least one fragment, published by the fit as `DensityLandscape.located` beside each kernel's `centre`
@@ -970,10 +1058,9 @@ least one fragment, published by the fit as `DensityLandscape.located` beside ea
 resolution wall `1/E`, which is where the kernel could not see and not where a density is, so it is no
 member; a human index trains ~250–325 k anchors whose walls span every decade, and on a sparse library a
 basin above the bulk can be packed with them around ten measured kernels
-(`ISSUES: the-ruler-reference-on-sparse-real-libraries`). The candidate is the basin above the depleted one
-holding the most located kernels, and it is a mode only if its members resolve it at the located
-population's own resolution, `k = √n_located` (`landscape.knn_widths`' k): each member's width is half the
-distance to its k-th nearest MEMBER, and
+(`ISSUES: the-ruler-reference-on-sparse-real-libraries`). The candidate is a mode only if its members
+resolve it at the located population's own resolution, `k = √n_located` (`landscape.knn_widths`' k):
+each member's width is half the distance to its k-th nearest MEMBER, and
 
     n_members > k   and   median(width_k)² ≤ _LOCATED_VAR = 1 nat²,
 
@@ -990,13 +1077,22 @@ members at widths at the grid step, at a peak stable to 0.02 decades across an 8
 resolution; the two sparse real libraries hold 10–16 located kernels in any basin above the bulk against
 k = 33 and 123, and read `None`.
 
-**No enriched mode ⇒ no contraction, exactly.** `CalibrationResult.gdna_reference_density` is `None`;
-the ruler returns `fl` verbatim and `assemble_priors` leaves the locus gDNA effective length at the span.
-This is the capture-OFF field (unimodal, Poisson noise around one level) and the gDNA-free field (the
-anchors' wall, with any false-positive basin above it a lone kernel). The plug-in `min(ρ_n/ρ_ref, 1)` on
-a noisy uniform field is biased below 1 (Jensen plus the clip), which is why a per-object reference
-read from the field itself contracted the oracle's own counts by 8 % at capture-OFF; a modal decision
-has no per-object noise to clip.
+**No enriched mode ⇒ no contraction, exactly.** `CalibrationResult.gdna_reference_density` is `None`,
+every efficiency is exactly 1 on both axes (`gdna_capture_efficiency_region`, `_boundary`, which the
+result refuses otherwise), the ruler returns `fl` verbatim and `assemble_priors` reads the locus's
+uncontracted span. This is the capture-OFF field (unimodal, Poisson noise around
+one level) and the gDNA-free field (the anchors' wall, with any false-positive basin above it a lone
+kernel). The plug-in `min(ρ_n/ρ_ref, 1)` on a noisy uniform field is biased below 1 (Jensen plus the
+clip), which is why a per-object reference read from the field itself contracted the oracle's own
+counts by 8 % at capture-OFF; a modal decision has no per-object noise to clip.
+
+**What the witness cannot see.** A probe is captured in genomic coordinates on gDNA and in transcript
+coordinates on cDNA, and the two differ within a fragment of every junction a probe spans and at every
+exon shorter than a fragment: on the ladder's transcript-designed panel gDNA at a split probe is captured
+at a fifth of the cDNA's weight, and on the test chromosome's tiny-exon block a probe centred on a 40 bp
+exon binds a gDNA fragment over 125 bp while the simulator's non-stacking rule binds a spliced fragment
+over one exon's 40. The efficiency reads the gDNA and the transcript's factor inherits the difference
+(`ISSUES: ruler-witness-geometry-on-transcript-panels`), declared and not repaired.
 
 ## 12. The flux price's witness — the column count on the protocol's share of the opportunity (`lanes.rna_lanes`)
 

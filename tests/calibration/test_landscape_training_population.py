@@ -410,9 +410,11 @@ def test_the_result_publishes_the_last_landscapes_located_enriched_mode(sweep_in
     if seen[0] is None:
         assert res.gdna_reference_density is None
         assert res.gdna_reference_members == 0
+        np.testing.assert_array_equal(res.gdna_capture_efficiency_region, 1.0)
     else:
         assert res.gdna_reference_density == pytest.approx(float(np.exp(seen[0].mode.log_rho)))
         assert res.gdna_reference_members == seen[0].n_members > 0
+        assert np.any(res.gdna_capture_efficiency_region < 1.0)
 
     forced = LocatedMode(
         mode=AbundanceMode(log_rho=-2.0, basin_mass=0.3, width=0.1, lo=-3.0, hi=-1.0), n_members=7

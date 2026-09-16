@@ -187,13 +187,15 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,381 passed / 0 skipped / 5 xfail, 3,386 collected** (re-derived
-2026-09-16 after two sandbox notes on the ruler under capture were added, +2 by the `docs/dev/` row of the table
-below; the code tree is unchanged since 2026-09-14, when the ruler and the flux witness landed: +6 collected with the
-ruler — four selector gates in `test_abundance_landscape.py`, the result-schema gate for `gdna_reference_density`, the
-calibrate-level wiring gate, three kernel-density detector tests replaced by three ruler tests — and +1 with the
-witness, the every-kappa gate in `test_transfer_rna_lanes.py`; 13 then 11 goldens regenerated with their magnitudes
-in the commits). The 5 xfails are executable records of proven defects whose fixes are elsewhere
+**The standing baseline: 0 failed / 3,414 passed / 0 skipped / 5 xfail, 3,419 collected** (re-derived
+2026-09-16 after the ruler's repair, +33 from 3,386 against the shipped tree file by file: the members rule +3 — two
+selector gates in `test_abundance_landscape.py`, the result-schema gate for `gdna_reference_members`; the truth
+instrument +5 — `ruler_vs_truth.py` by the `scripts/design/` row, its self-test in `test_instrument_self_tests.py`;
+the expectation ruler +25 — `capture_efficiency.py` by the module row (+3) with its seven gates in
+`test_capture_efficiency.py` (+2 by the `tests/` row, +7), the taper, crossing-share and per-interval-length gates in
+`test_effective_length.py` (+18), `test_capture_eff_length.py` rewritten 15 → 12, `test_priors.py` 29 → 27 with the
+floor's tests replaced by the object-form length tests; the goldens unchanged to the bit). The 5 xfails are executable
+records of proven defects whose fixes are elsewhere
 (`ISSUES: two-sided-exon-row`; `ISSUES: antisense-prior-assembly-casualty`;
 `ISSUES: the-lower-bound-noise-ratchet`, the encompassing locus's shallow flank under an edge level;
 `ISSUES: nested-antisense-leak-under-the-sane-ruler`, two strand rungs of one negative control — the EM's

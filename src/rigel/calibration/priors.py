@@ -46,7 +46,7 @@ class LocusPriors:
 
     gdna_prior_count: np.ndarray  # gDNA-component Dirichlet pseudocount
     rna_prior_count: np.ndarray  # RNA-group Dirichlet pseudocount (the EM splits it by evidence)
-    gdna_eff_len: np.ndarray  # IPR-contracted effective length of the gDNA component
+    gdna_eff_len: np.ndarray  # capture-contracted effective length of the gDNA component
 
 
 def _region_locus_shares(
@@ -266,9 +266,11 @@ def assemble_priors(
         {gdna,rna}_prior_count = Σ_regions share(r,L)·mass_c_region[r]
                                + Σ_boundaries share(e,L)·mass_c_boundary[e]·q[e]
 
-        gdna_eff_len = clamp( w·elen + (1−w)·span ),          w = C/(C+1)
-            elen = Σ_regions share·min(m_r/ρ_ref, S_r) + Σ_boundaries share·min(m_e/ρ_ref, S_e)
-            span = Σ_regions share·S_r                 + Σ_boundaries share·S_e
+        gdna_eff_len = clamp( Σ_regions share·S_r·c̃_r  +  Σ_boundaries share·S_e·c̃_e )
+
+    ``c̃`` is each object's capture efficiency, the calibration's own
+    (`CalibrationResult.gdna_capture_efficiency_region` / ``_boundary``; `capture_efficiency`) and ``S``
+    its support.
 
     THE PRIOR IS A CONSERVED FRAGMENT COUNT. The EM adds these scalars straight to its own soft
     counts (``G = n_gdna + a_g``, ``em_solver.cpp:apply_grouped_prior_update``), where ``n_gdna`` counts
@@ -284,20 +286,26 @@ def assemble_priors(
     that a *first-base* count of the locus's fragments is NOT this quantity — it drops exactly the
     straddlers — so an oracle built that way reads a one-way excess here that is semantics, not error.
 
-    The zero-opportunity guard is structural: ``min(m/ρ_ref, S)`` is applied PER OBJECT, so an object
-    with ``S = 0`` contributes exactly 0 to ``elen`` and 0 to ``span`` with no test and no floor.
-    ⛔ Do not sum the supports first and take one ``min()`` over the pair: that needs an explicit
-    zero-opportunity test and a cap, and it UNDER-contracts a captured exon whose boundary runs into a
-    depleted intron.
+    THE gDNA EFFECTIVE LENGTH COUNTS THE SAME OBJECTS AS THE COUNT. The prior's count is the calibration's
+    gDNA mass on the locus's regions and on its boundaries, so the length the EM divides that count by is
+    those same objects' supports at their own efficiencies: every region's contained support ``S_r`` at
+    ``c̃_r`` and every boundary's crossing support ``S_e`` at ``c̃_e``. ⛔ Two other forms are refused by
+    measurement. A length over the locus's BASES at the regions' efficiencies alone — the transcript
+    ruler's form, right for a template's capture — drops the boundary objects whose masses the count
+    keeps, and where the calibration's crossing masses sit above their geometry the gDNA component reads
+    denser than its objects, over-claims the exonic unspliced fragments and every probed gene under-calls
+    (the test chromosome's `g50 ss.99 ON` row: gene-level Σ|Δ| 25,633 → 38,174 against 23,967 here). And
+    the boundary support converted by ``q`` to count each crossing start once, as the count counts each
+    fragment once, collapses the length where pieces are short: the gDNA component then saturates, the
+    EM stops responding to its own gDNA pseudocount (the thermometer's injection gate on a contaminated
+    toy goes insensitive) and both capture-OFF strata read 1–2 % worse, for 21,733 on that one row; the
+    crossing support enters at its full opportunity, as the count's ``q`` undoes an inflation of MASS
+    and not of starts.
 
-    The bedrock invariant — factor 1 under uniform gDNA. Dividing each object's mass by its EFFECTIVE
-    sampling support makes its density ``m/S`` exactly the true ρ under a uniform (unenriched) library,
-    because the accumulator deposits ``ρ·E_f[(L−w+1)+]`` of contained mass on a region and ``ρ·E_f[w−1]``
-    of crossing mass on a boundary. Every object's ``min(m/ρ_ref, S)`` then returns ``S``, so
-    ``gdna_eff_len == span`` exactly: an unenriched library contracts NOTHING. ⛔ Using the genomic
-    ``region_size_bp`` instead understates short-region density and fabricates a contraction with no
-    capture bias present. Under capture the contraction falls below ``span`` toward the probed
-    footprint.
+    The bedrock invariant — factor 1 under uniform gDNA. With no reference every efficiency is exactly
+    1 and ``gdna_eff_len == span == Σ S`` bit-identically: an unenriched library contracts NOTHING and
+    reads what it read before the efficiencies existed. Under capture a depleted object contributes its
+    support at its efficiency and the length contracts toward the probed footprint.
 
     The RNA prior is the UNSPLICED RNA mass only. A spliced fragment has no gDNA candidate in the
     EM (gDNA does not splice), so it is assigned directly and counting it here would inflate the RNA side
@@ -305,10 +313,10 @@ def assemble_priors(
     ``count_rna_spliced_boundary`` is subtracted. ⛔ The SJ flux is deliberately NOT added, for the same
     reason — a locus whose RNA is fully spliced SHOULD get a near-zero ``rna_prior_count``.
 
-    The contraction is SHRUNK toward the uniform span on the contained evidence ``C``, by
-    ``w = C/(C+1)`` — one pseudo-observation, no tunable. Calibration's accumulator is fed by unique
-    mappers only, so a multimapper-dominated locus has little contained mass and an unreliable reference
-    read; ``C = 0`` ⇒ ``span`` exactly.
+    No floor and no shrinkage: the efficiencies are posterior means under the population landscape, so a
+    locus with little evidence reads the population's own level, never a fabricated 0 and never the
+    uncontracted span (the multimapper floor ``C/(C+1)`` this replaces cost the unprobed class 30×;
+    `ISSUES: ruler-multimapper-floor-caps-the-correction`).
     """
     if calibration.n_regions != region_arrays.n_regions:
         raise ValueError(
@@ -342,40 +350,20 @@ def assemble_priors(
     )
     rna_locus = np.maximum(by_region(calibration.count_rna_region) + by_boundary(rna_boundary), 0.0)
 
-    # gDNA effective length: every object contracted against the SHARED global ρ_ref, PER OBJECT, so the
-    # gDNA-vs-transcript density comparison sits on one scale. ρ_ref is the result's — the located enriched
-    # mode of the fitted gDNA landscape; None (no enriched mode: capture-off, or no gDNA) ⇒ no contraction.
-    # This is `transcript_capture_eff_lengths`' operation over the locus's object set.
-    region_m = np.asarray(calibration.count_gdna_region, dtype=np.float64)
+    # THE gDNA EFFECTIVE LENGTH: the count's own objects at their own supports and efficiencies.
     region_s = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 0.0)
-    boundary_m = np.asarray(calibration.count_gdna_boundary, dtype=np.float64)
     boundary_s = np.maximum(np.asarray(calibration.gdna_boundary_eff_len, dtype=np.float64), 0.0)
-    rho_ref = calibration.gdna_reference_density
-    if rho_ref is None:
-        region_e, boundary_e = region_s, boundary_s
-    else:
-        inv = 1.0 / rho_ref
-        region_e = np.minimum(region_m * inv, region_s)
-        boundary_e = np.minimum(boundary_m * inv, boundary_s)
-
+    c_region = np.asarray(calibration.gdna_capture_efficiency_region, dtype=np.float64)
+    c_boundary = np.asarray(calibration.gdna_capture_efficiency_boundary, dtype=np.float64)
     span = by_region(region_s) + by_boundary(boundary_s)
-    elen = by_region(region_e) + by_boundary(boundary_e)
-    contained_ev = np.maximum(
-        by_region(
-            np.asarray(calibration.count_gdna_region, dtype=np.float64)
-            + np.asarray(calibration.count_rna_region, dtype=np.float64)
-        ),
-        0.0,
-    )
-    w = contained_ev / (contained_ev + 1.0)
-    eff_len = w * elen + (1.0 - w) * span
+    eff_len = by_region(region_s * c_region) + by_boundary(boundary_s * c_boundary)
 
     return LocusPriors(
         gdna_prior_count=gdna_locus,
         rna_prior_count=rna_locus,
         # Clamp into [min(floor, span), span]: the 1 bp floor matches the EM's own eff-len floor but must
-        # never exceed the locus's own effective span, or a degenerate sub-basepair span (a microexon-only
-        # locus) would return eff_len > span, breaking eff_len ∈ (0, span].
+        # never exceed the locus's own uncontracted span, or a degenerate sub-basepair span (a
+        # microexon-only locus) would return eff_len > span, breaking eff_len ∈ (0, span].
         gdna_eff_len=np.minimum(np.maximum(eff_len, _GDNA_EFF_LEN_FLOOR), np.maximum(span, 1e-9)),
     )
 

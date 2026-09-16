@@ -59,6 +59,8 @@ def _valid_kwargs() -> dict:
         gdna_density_global=1e-3,
         gdna_reference_density=None,
         gdna_reference_members=0,
+        gdna_capture_efficiency_region=np.ones(N_REGIONS),
+        gdna_capture_efficiency_boundary=np.ones(N_BOUNDARIES),
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,
         rna_strand_overdispersion=0.05,

@@ -461,11 +461,11 @@ def install_ruler_arm(arm: str, oracle: OracleTruth):
             return dataclasses.replace(cal, **{f: getattr(cal, f) for f in override})
         return dataclasses.replace(cal, **override)
 
-    def ruler_wrapper(calibration, region_arrays, index, fl_eff_lengths):
-        out = orig_ruler(calibration, region_arrays, index, fl_eff_lengths)
+    def ruler_wrapper(calibration, region_arrays, index, fl_eff_lengths, rna_fl_pmf):
+        out = orig_ruler(calibration, region_arrays, index, fl_eff_lengths, rna_fl_pmf)
         # the shipped ruler, computed alongside, so "did this arm move the ruler" is a number rather
         # than an inference; cheap against a run measured in minutes.
-        base = orig_ruler(shipped["cal"], region_arrays, index, fl_eff_lengths)
+        base = orig_ruler(shipped["cal"], region_arrays, index, fl_eff_lengths, rna_fl_pmf)
         fired["ruler"] += 1
         fired["max_abs_delta"] = max(
             fired["max_abs_delta"], float(np.abs(np.asarray(out) - np.asarray(base)).max())

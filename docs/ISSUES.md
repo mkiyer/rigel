@@ -42,54 +42,25 @@ refit on `g00 ss.99 OFF` are out, and the four ladder zero controls read 282 / 1
 excluding κ-dead exons (`g50 ss.50 ON` 2,691 → 56,422), AMBIG in the final fit (worse 25/32), and the two
 other readings of the floor (`DESIGN.md` §7.1 rule 4). Its instrument, `landscape_training_census.py`, was retired 2026-09-14 (in git).
 
-### ruler-multimapper-floor-caps-the-correction
-`priority: next — with the reference repair, one mechanism · kind: defect · 2026-09-15`
-`capture_eff_length`'s multimapper-blindness shrinkage `w = C/(C+1)` (and `assemble_priors`' copy) pulls every
-factor toward 1 by `1/(C+1)`, so a transcript with `C` contained fragments can never contract below about
-`1/(C+1)` whatever its gDNA says. Measured against the simulator's own capture-aware effective length
-(`CaptureSampler.partition_array`, the truth the reads were drawn with; the instrument is `s4/ruler_vs_sampler.py`
-under `~/Downloads/rigel_runs/prototypes/2026-09-15_ruler`, scores anchored on the fully probed transcripts so a global scale is free):
-on the test chromosome the formula is exact where the reference applies — probed transcripts 99–100 % within
-±0.1 nat, partial 73–93 % — but the unprobed class reads +3.4 to +3.7 nat (a factor 30–40) at EVERY gDNA level
-from 5 % to 50 %, and the floor is the whole of it: with the floor removed the same class reads +0.12 at 5 % and
-within ±0.1 at 25–50 %, and the expectation ruler (each object's clipped efficiency as the posterior mean under
-the fitted gDNA landscape, `E[min(ρ/ρ_ref, 1) | k, S]`, no floor, no constant — the working note's §8) reads
-−0.001 at 5 %, +0.01 at 25 %, +0.05 at 50 %, and on the depth ladder 91 % of probed transcripts within ±0.1 where
-the shipped plug-in reads 65 % (5,850 gDNA fragments at a hundredth of the depth). The floor protected against a
-zero-gDNA object's factor of exactly 0; the posterior mean has no zero to protect against. The total-density
-ruler was measured on the same ladder and fails as the sandbox working note on effective length under capture derives (its §6):
-"largest mass above the depleted" finds the unprobed-expression level and corrects nothing (+7.0 on unprobed),
-the highest located basin gives a probed-class spread of ±1.5 nat with the error sloped +0.4 to +0.75 per nat of
-true expression, and on capture-OFF it contracts a field that must read exactly 1. The repair carries the splice-junction rule with it: a junction is imputed from the two pieces beside it, and
-on a dense annotation those pieces are often shorter than a fragment with no contained support, so the flank
-reads 0 (plug-in), fully captured (plug-in with any gDNA) or the prior's mean (posterior, 0.096 on the ladder's
-`g50 ss.50 ON` row), and forty junctions at the crossing support swamp four hundred bases of measured regions.
-Four rules measured on the ladder (probed transcripts within ±0.1 nat / unprobed median, `g05 ss.99 ON` and
-`g50 ss.50 ON`): the flanks 36 % / +2.0 and 24 % / +0.3 without the floor, 36 % / +4.4 and 25 % / +2.8 for the
-expectation ruler; the exons' pooled pieces 41 % / +1.7 and 25 % / +0.2, 41 % / +3.6 and 28 % / +0.7; the flank
-where it has a base of support else the transcript's pool 41 % / +1.9 and 27 % / +0.2, 43 % / +3.5 and 29 % / +0.7;
-the TRANSCRIPT's support-weighted pool over its supported pieces 47 % / +0.8 and 42 % / +0.3, 54 % / +1.5 and
-38 % / +0.4. The transcript pool is the rule that survives the dense annotation; its cost is the test chromosome's
-designed half-probed transcripts (partial ≤ ½ within ±0.1: 60 % → 33–40 % of 15), whose junctions truly read the
-flanks' mean, and the derivation that reconciles the two — the flank's evidence shrunk toward the transcript's
-pool by its own support — is the next session's. Repair, through the full loop: the expectation ruler in place of
-the plug-in and the floor, with the junction rule, in `capture_eff_length` and `assemble_priors` alike, gated by
-the truth instrument on both panels and the depth ladder (`scenarios_depth_d10`, `_d100`, `_full_lowg` under the
-test reference), with the identity references re-frozen.
-
 ### ruler-witness-geometry-on-transcript-panels
-`priority: later (measure on real panels first) · kind: limit · 2026-09-15`
+`priority: later (measure on real panels first) · kind: limit · 2026-09-15, amended 2026-09-16`
 gDNA is captured in genomic coordinates and a transcript's RNA in its own, and the two differ within a fragment
-length of every splice junction a probe spans. The ladder's panel is designed in transcript coordinates, so its
-probes span junctions, and the simulator captures gDNA at a split probe at `gdna_split_penalty` 0.2 of the cDNA's
-weight: on the ladder's `g05 ss.99 ON` row the ruler's probed transcripts scatter −0.5 to +0.3 nat (35 % within
-±0.1) even when fed the CERTIFIED TRUE gDNA counts (18 %), where the test chromosome's benign panel, which spans
-no junction, reads 99 %. The gDNA witness under-reads the mRNA's capture at every junction probe by a factor the
-panel's design sets, and no estimator on gDNA alone can see it; the annotation knows where the junctions are,
-so a taper of the gDNA density toward exon ends is in principle observable. The same row's unprobed transcripts
-hold no gDNA fragment at all and still read +2.0 nat without the floor: the calibration assigns gDNA to exons
-that have none, the stranded capture-ON composition residual the standing numbers already carry, which the ruler
-inherits and cannot repair.
+length of every splice junction a probe spans and at every exon shorter than a fragment. The ladder's panel is
+designed in transcript coordinates, so its probes span junctions, and the simulator captures gDNA at a split
+probe at `gdna_split_penalty` 0.2 of the cDNA's weight: on the ladder's `g05 ss.99 ON` row the probed
+transcripts scatter −0.5 to +0.3 nat (35–36 % within ±0.1, under the shipped ruler and the expectation ruler on
+the per-base length alike) even when fed the CERTIFIED TRUE gDNA counts (20 %), where the test chromosome's
+benign panel, which spans no junction, reads 99 %. The other direction is the tiny-exon block: a probe centred
+on a 40 bp exon binds a gDNA fragment over its full 125 bp while the simulator's non-stacking rule binds a spliced
+fragment over one exon's 40 bp, so the probed `captiny` transcripts read +1.03 nat against the sampler's truth
+with the mechanism reading their edge crossings exactly (`ruler_vs_truth.py --condition
+gdna_g05_ss_0.99_nrna_file_capture_on --out`, the `captiny` rows). The gDNA witness reads the panel's capture
+of gDNA, not of cDNA, by a factor the panel's design sets, and no estimator on gDNA alone can see it; the
+annotation knows where the junctions and the tiny exons are, so a correction from the probe design is in
+principle observable. The ladder row's unprobed transcripts hold no gDNA fragment at all and still read
++0.45 nat under the expectation ruler (+2.0 without the floor on the object set): the calibration assigns gDNA
+to exons that have none, the stranded capture-ON composition residual the standing numbers already carry, which
+the ruler inherits and cannot repair.
 
 ### nested-antisense-leak-under-the-sane-ruler
 `priority: later (EM-side, with the per-transcript prior lane) · kind: defect · 2026-09-14`
@@ -341,6 +312,31 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### ruler-multimapper-floor-caps-the-correction
+CLOSED by landing 2026-09-16 (`DESIGN.md` §7.2, `EQUATIONS.md` §11): the expectation ruler on the per-base
+length — a transcript's own bases at their pieces' capture efficiencies with the fragment-length end taper, no
+boundary or junction object in the length; a piece's efficiency the posterior mean of its clipped gDNA density
+under the fitted landscape from its own contained count and the crossings at every boundary within a fragment's
+reach, each crossing apportioned to the pieces its fragments cover by geometry times their own-count densities,
+one pass — in `capture_efficiency` (computed by `calibrate`, published on the result), `capture_eff_length` and
+`assemble_priors`; the multimapper floor `w = C/(C+1)`, the splice-junction objects and the flank imputation
+deleted. The defect: the floor pulled every factor toward 1 by `1/(C+1)`, a +3.4 to +3.7 nat bias on the
+unprobed class at every gDNA level; a piece shorter than a fragment had no contained support and read 0 then
+the floor; forty junction objects imputed from unsupported flanks swamped four hundred bases of measurement on
+the ladder. Killing numbers (`ruler_vs_truth.py`, the unprobed class's median log error; the test chromosome's
+`g05 ss.99 / g25 ss.99 / g50 ss.50 / g50 ss.99 ON` rows): shipped +3.41 / +3.32 / +3.74 / +3.76 → landed +0.20 /
+−0.03 / −0.15 / −0.03, the probed class 97–98 % → 99 % within ±0.1; the tiny-exon block's `capmixed` −0.63 →
++0.07 and `mixed` +5.9 → +0.2 (the unprobed `tiny` +7.0 → +0.7 / +1.9 at 5 % gDNA, where its edges hold 0.04
+expected fragments and the posterior is the prior's valley); the depth ladder's probed class 75 / 93 / 97 % →
+86 / 99 / 99 % at a tenth of the depth and 63 / 62 % → 91 / 91 % at a hundredth; the ladder's `g05 ss.99 ON`
+unprobed class +4.40 → +0.45. Refused with numbers, each open question tried each way (`DESIGN.md` §7.2): the
+solve's own posterior (+1.25 / +4.96 nat unprobed), the clip outside the expectation (indistinguishable), the
+own count alone (+4.5), the plug-in (+3.36), the apportionment iterated to convergence (identical on the test
+chromosome, +0.44 against +0.46 on the ladder), a joint update of neighbours (never converges). The
+falsification tests were verified failing on the shipped ruler through its own fixture: an unprobed exon with
+no gDNA fragment read the floor at +3.19 nat over the depleted level, a transcript of 40 bp exons read 0 and
+then the floor. The multimapper blindness the floor stood for is `ISSUES: multimapper-blind-support`.
 
 ### the-ruler-reference-on-sparse-real-libraries
 CLOSED by landing 2026-09-16 (`DESIGN.md` §7.2, `EQUATIONS.md` §11): a basin's members are the kernels with a

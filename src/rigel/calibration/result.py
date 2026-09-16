@@ -202,6 +202,18 @@ class CalibrationResult:
     #: the enriched mode rests on — the located population's own resolution is ``√n``, so this is the
     #: number a reader compares against; ``0`` exactly when the reference is ``None``.
     gdna_reference_members: int
+    #: float64[n_regions] — each piece's capture efficiency ``E[min(ρ/ρ_ref, 1)]``, the posterior mean
+    #: of its clipped gDNA density against the reference under the fitted landscape, from its own
+    #: contained count and the crossings at every boundary within a fragment's reach
+    #: (`capture_efficiency.capture_efficiencies`); exactly 1 everywhere when the reference is ``None``.
+    #: The ruler and the locus prior read this and re-derive nothing (`capture_eff_length`, `priors`).
+    gdna_capture_efficiency_region: np.ndarray
+    #: float64[n_boundaries] — each boundary's own capture efficiency, the posterior mean of its clipped
+    #: gDNA density from its crossing count on its crossing support; exactly 1 everywhere when the
+    #: reference is ``None``. The locus prior reads it beside its count (`priors`): the count is the
+    #: calibration's masses on regions and boundaries, and the length is those objects at their
+    #: efficiencies. The transcript ruler never reads it — no boundary object enters a length over bases.
+    gdna_capture_efficiency_boundary: np.ndarray
     rna_sense_frac: float  # in [0, 1], RNA sense fraction used by the strand clue
     gdna_strand_overdispersion: float  # in [0, 1), fitted gDNA strand Beta-Binomial dispersion
     rna_strand_overdispersion: float  # in [0, 1), fitted RNA strand Beta-Binomial dispersion
@@ -262,6 +274,27 @@ class CalibrationResult:
                 )
         for name in ("count_rna_sj", "sj_mass_per_crossing"):
             _check_axis_array(getattr(self, name), name, self.n_sj)
+        _check_axis_array(
+            self.gdna_capture_efficiency_region, "gdna_capture_efficiency_region", self.n_regions
+        )
+        c = np.asarray(self.gdna_capture_efficiency_region, dtype=np.float64)
+        if np.any(c < 0.0) or np.any(c > 1.0 + 1e-9):
+            raise ValueError("CalibrationResult.gdna_capture_efficiency_region must lie in [0, 1].")
+        _check_axis_array(
+            self.gdna_capture_efficiency_boundary,
+            "gdna_capture_efficiency_boundary",
+            self.n_boundaries,
+        )
+        cb = np.asarray(self.gdna_capture_efficiency_boundary, dtype=np.float64)
+        if np.any(cb < 0.0) or np.any(cb > 1.0 + 1e-9):
+            raise ValueError(
+                "CalibrationResult.gdna_capture_efficiency_boundary must lie in [0, 1]."
+            )
+        if self.gdna_reference_density is None and (np.any(c != 1.0) or np.any(cb != 1.0)):
+            raise ValueError(
+                "CalibrationResult.gdna_capture_efficiency_region and _boundary must be exactly 1 "
+                "everywhere when there is no reference: nothing is depleted relative to anything."
+            )
 
         if self.gdna_reference_density is not None and not (
             np.isfinite(self.gdna_reference_density) and self.gdna_reference_density > 0.0

@@ -47,11 +47,15 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   depth, with the tilt's hypothesis space {pure +, pure −, mixed} (`EQUATIONS.md` §9f); the λ bracket follows
   the landscape prior's derived demand (`landscape.required_logodds_window`).
 - **The prior assembler**: with perfect masses its own error is negligible — `prior_vs_oracle.py`.
-- **The ruler reads the landscape's located enriched mode** (`DESIGN.md` §7.2): with no enriched gDNA
-  mode nothing contracts, so the zero controls and both capture-OFF strata read a factor of exactly
-  1.000 with nothing moved, and what remains on the metric page is the composition; a mode's members are
-  kernels with a location, so a sparse library is told it has no reference rather than handed one read off
-  anchors' walls (`CalibrationResult.gdna_reference_members` is the regime); the never-passed
+- **The ruler is the transcript's bases at their pieces' capture efficiencies, against the landscape's
+  located enriched mode** (`DESIGN.md` §7.2, `EQUATIONS.md` §11): each efficiency a posterior mean from the
+  piece's own count and its edge crossings, no floor and no junction object, so the unprobed class reads
+  within ±0.2 nat of the simulator's truth where the floor read +3.4 (`ruler_vs_truth.py`); with no enriched
+  gDNA mode nothing contracts, so the zero controls and both capture-OFF strata read a factor of exactly
+  1.000 with nothing moved; a mode's members are kernels with a location, so a sparse library is told it
+  has no reference rather than handed one read off anchors' walls (`gdna_reference_members` is the
+  regime); what the gDNA witness cannot see of a transcript-designed panel is declared
+  (`ISSUES: ruler-witness-geometry-on-transcript-panels`); the never-passed
   per-transcript prior lane (`ISSUES: per-transcript-prior-lane`) is the other pre-EM item.
 - **Calibration's performance**: the one unfinished component — the sweeps dominate a deep run, on a
   single core, while the locus EM beside them is a rounding error. The decomposition is built: a

@@ -94,6 +94,9 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "density_model",
             "density_deconv",
             "landscape",
+            # `capture_efficiency` is the per-piece capture efficiency: a posterior under the landscape
+            # prior from the deconvolved gDNA, read by the ruler and the locus prior through the result.
+            "capture_efficiency",
             # `abundance_landscape` is the pre-pass-0 TOTAL-density field + mode census — it reuses
             # `landscape`'s estimator sideways and reads `total_abundance` (layer 3) down.
             "abundance_landscape",

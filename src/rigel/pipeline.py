@@ -513,7 +513,7 @@ def _setup_geometry_and_estimator(
     from .calibration.capture_eff_length import transcript_capture_eff_lengths
 
     effective_lengths_em = transcript_capture_eff_lengths(
-        calibration, region_arrays, index, effective_lengths
+        calibration, region_arrays, index, effective_lengths, rna_fl.pmf
     )
 
     geometry = TranscriptGeometry(

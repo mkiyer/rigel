@@ -349,3 +349,159 @@ def test_the_moments_normaliser_IS_the_solver_divisor(pmf_name):
         float(crossing_eff_length(pmf, unbounded, unbounded)[0]),
         rtol=1e-12,
     )
+
+
+# ---------------------------------------------------------------------------
+# the per-base frame — the taper and the crossing base shares against enumeration
+# ---------------------------------------------------------------------------
+
+
+def _enumerate_tau(L: int, pmf: np.ndarray) -> np.ndarray:
+    """τ(x) by brute force: every start of every length, each start spread over its w bases."""
+    p = np.asarray(pmf, np.float64) / np.sum(pmf)
+    tau = np.zeros(L)
+    for w in range(1, p.shape[0]):
+        if p[w] == 0.0:
+            continue
+        for s in range(0, L - w + 1):
+            tau[s : s + w] += p[w] / w
+    return tau
+
+
+@pytest.mark.parametrize("L", [1, 30, 99, 100, 250, 600, 998, 999, 1000, 1500])
+def test_the_taper_interval_sums_are_the_enumerated_per_base_weights(L):
+    """Long templates through the table, short ones base by base — both against the brute force. 600 and
+    998 sit between one and two fragment lengths, where the table's collapse of the four-way min is
+    invalid: a threshold at one fragment length passed every other length here."""
+    from rigel.calibration.effective_length import base_taper
+
+    pmf = _normal_pmf(200.0, 60.0, n=501)
+    tap = base_taper(pmf)
+    tau = _enumerate_tau(L, pmf)
+    cum = np.concatenate([[0.0], np.cumsum(tau)])
+    x0 = np.array([0, 0, L // 3, max(L - 7, 0)])
+    x1 = np.array([L, min(5, L), min(L // 3 + 40, L), L])
+    np.testing.assert_allclose(
+        tap.interval_sums(x0, x1, L), cum[x1] - cum[x0], rtol=1e-10, atol=1e-12
+    )
+
+
+def test_the_taper_interval_sums_take_one_template_length_per_interval():
+    """One call over intervals on many templates — long and short, in any order — is bit-identical to
+    the per-template calls: the vectorised path is the same arithmetic grouped, and it is what makes a
+    real library's 457,000 transcripts one pass rather than one loop."""
+    from rigel.calibration.effective_length import base_taper
+
+    tap = base_taper(_normal_pmf(200.0, 60.0, n=501))
+    rng = np.random.default_rng(7)
+    L = rng.choice([1, 30, 99, 250, 999, 1000, 1500, 20000], size=200)
+    x0 = (rng.random(200) * L).astype(np.int64)
+    x1 = x0 + (rng.random(200) * (L - x0)).astype(np.int64)
+    expect = np.array([tap.interval_sums([a], [b], int(n))[0] for a, b, n in zip(x0, x1, L)])
+    np.testing.assert_array_equal(tap.interval_sums(x0, x1, L), expect)
+
+
+@pytest.mark.parametrize("L", [1, 60, 500, 3000])
+def test_the_taper_partitions_the_fl_marginal_length_exactly(L):
+    """Σ_x τ(x) over the whole template is Σ_w f(w)(L − w + 1)⁺ — the per-base frame is a partition of
+    the start count, never a second definition of it."""
+    from rigel.calibration.effective_length import base_taper
+
+    pmf = _normal_pmf(200.0, 60.0, n=501)
+    w = np.arange(pmf.shape[0], dtype=np.float64)
+    fl = float((pmf * np.maximum(L - w + 1.0, 0.0)).sum())
+    assert base_taper(pmf).interval_sums(np.array([0]), np.array([L]), L)[0] == pytest.approx(fl)
+
+
+def _regions(lengths):
+    import pandas as pd
+
+    from rigel.calibration.region_arrays import RegionArrays
+
+    lengths = np.asarray(lengths, dtype=np.int64)
+    b = np.concatenate([[0], np.cumsum(lengths)])
+    frame = pd.DataFrame(
+        {
+            "region_id": np.arange(lengths.size, dtype=np.int64),
+            "ref_name": pd.array(["chr1"] * lengths.size, dtype="string"),
+            "start": b[:-1],
+            "end": b[1:],
+            "length": lengths,
+            "signature": np.zeros(lengths.size, np.uint8),
+        }
+    )
+    return RegionArrays.from_frame(frame, {"chr1": 0})
+
+
+def _enumerate_base_shares(lengths, e, pmf):
+    """Base-starts per piece by brute force: every crossing placement (w, a) at boundary e, each base of
+    the fragment attributed to the piece it lies in."""
+    p = np.asarray(pmf, np.float64) / np.sum(pmf)
+    b = np.concatenate([[0], np.cumsum(lengths)])
+    B = b[e + 1]
+    shares = np.zeros(len(lengths))
+    for w in range(2, p.shape[0]):
+        if p[w] == 0.0:
+            continue
+        for a in range(1, w):
+            for x in range(B - a, B - a + w):
+                q = int(np.searchsorted(b, x, side="right") - 1)
+                if 0 <= q < len(lengths):
+                    shares[q] += p[w] / w
+    return shares
+
+
+def test_the_crossing_base_shares_are_the_enumerated_placements():
+    """Tiny pieces beside long ones: the enumeration attributes every base of every placement to the
+    piece it lies in, and the closed form must match piece by piece."""
+    from rigel.calibration.effective_length import crossing_base_shares
+
+    pmf = _normal_pmf(60.0, 15.0, n=121)
+    lengths = [500, 25, 300, 7, 9, 400]
+    E, Q, A = crossing_base_shares(_regions(lengths), pmf)
+    for e in range(len(lengths) - 1):
+        got = np.zeros(len(lengths))
+        np.add.at(got, Q[E == e], A[E == e])
+        np.testing.assert_allclose(
+            got, _enumerate_base_shares(lengths, e, pmf), rtol=1e-9, atol=1e-12
+        )
+
+
+def test_the_crossing_base_shares_sum_to_the_crossing_opportunity():
+    """Σ_q share_eq = E_f[w − 1] at every boundary whose pieces reach a fragment on both sides — the
+    crossing divisor, partitioned over the bases it counts."""
+    from rigel.calibration.effective_length import UNBOUNDED_REACH, crossing_base_shares
+
+    pmf = _normal_pmf(200.0, 60.0, n=501)
+    ra = _regions([5000, 40, 1000, 40, 300, 30, 8000])
+    E, Q, A = crossing_base_shares(ra, pmf)
+    S_e = float(
+        crossing_eff_length(pmf, np.array([UNBOUNDED_REACH]), np.array([UNBOUNDED_REACH]))[0]
+    )
+    total = np.zeros(6)
+    np.add.at(total, E, A)
+    np.testing.assert_allclose(total, S_e, rtol=1e-10)
+    # and the left side alone is half of it: the two sides are symmetric
+    left = np.zeros(6)
+    np.add.at(left, E[Q < E + 1], A[Q < E + 1])
+    np.testing.assert_allclose(left, S_e / 2.0, rtol=1e-10)
+
+
+def test_a_length_model_with_mass_at_zero_length_tapers_without_a_nan():
+    """A smoothed real-library model put mass at ``w = 0`` and the human library's factors went NaN
+    (found on LBX0588 the day the taper landed): a zero-length fragment covers no base and is dropped,
+    so the taper equals the taper of the same pmf with that mass removed, on long and short templates."""
+    from rigel.calibration.effective_length import base_taper
+
+    pmf = _normal_pmf(200.0, 60.0, n=501)
+    with_zero = pmf.copy()
+    with_zero[0] = 0.05
+    clean = base_taper(pmf)
+    dirty = base_taper(with_zero)
+    for L in (30, 1500):
+        x0, x1 = np.array([0, L // 3]), np.array([L, L // 3 + 20])
+        got = dirty.interval_sums(x0, x1, L)
+        assert np.all(np.isfinite(got))
+        # the pmf is normalised over all its mass and the zero-length part then dropped, so the positive
+        # lengths carry their weights scaled by the total, 1/1.05 — a ratio of tapers is unmoved
+        np.testing.assert_allclose(got, clean.interval_sums(x0, x1, L) / 1.05, rtol=1e-12)

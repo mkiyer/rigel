@@ -93,14 +93,14 @@ class RulerScore:
     n_transcripts: int
 
 
-def ruler(calibration, region_arrays, index, fl_eff) -> tuple[RulerScore, np.ndarray]:
+def ruler(calibration, region_arrays, index, fl_eff, rna_fl_pmf) -> tuple[RulerScore, np.ndarray]:
     """The shipped shrinkage, run on one arm. Returns its score and the per-transcript lengths.
 
     ``transcript_capture_eff_lengths`` is called unmodified: the question is what a wrong input does
     to the shipped function, so re-deriving the contraction here would answer a different question and
     could be wrong in the same direction as the thing under test.
     """
-    eff = transcript_capture_eff_lengths(calibration, region_arrays, index, fl_eff)
+    eff = transcript_capture_eff_lengths(calibration, region_arrays, index, fl_eff, rna_fl_pmf)
     return (
         RulerScore(
             rho_ref=calibration.gdna_reference_density,
@@ -302,7 +302,7 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
     )
     rulers, lengths = {}, {}
     for name, arm in (("P", p_arm), ("O", o_arm), ("noop", noop_arm)):
-        rulers[name], lengths[name] = ruler(arm, region_arrays, index, fl_eff)
+        rulers[name], lengths[name] = ruler(arm, region_arrays, index, fl_eff, kw["rna_fl_pmf"])
 
     bad = noop_differences(p_arm, noop_arm, lengths["P"], lengths["noop"])
 
@@ -674,6 +674,8 @@ def _toy_calibration(n_regions: int = 24, n_boundaries: int = 20, n_sj: int = 4,
         gdna_density_global=0.1,
         gdna_reference_density=None,
         gdna_reference_members=0,
+        gdna_capture_efficiency_region=np.ones(n_regions),
+        gdna_capture_efficiency_boundary=np.ones(n_boundaries),
         rna_sense_frac=0.5,
         gdna_strand_overdispersion=0.0,
         rna_strand_overdispersion=0.0,
@@ -736,15 +738,24 @@ def self_test() -> int:
             fired = True
         check(f"field-set gate refuses {label}", fired)
 
-    # ④ the ruler reads the result's reference and nothing else: with no enriched mode nothing contracts,
-    #    exactly; with one, an object below it contracts and nothing ever expands.
+    # ④ the ruler reads the result's efficiencies and nothing else: with no reference every efficiency
+    #    is exactly 1 (the result refuses anything else), with one an efficiency below 1 is admitted.
     check("the synthetic result carries no reference", cal.gdna_reference_density is None)
+    check("...and its efficiencies are exactly 1", bool(np.all(cal.gdna_capture_efficiency_region == 1.0)))
     cal_ref = dataclasses.replace(cal, gdna_reference_density=float(np.max(
-        np.asarray(cal.count_gdna_region) / np.asarray(cal.gdna_region_eff_len))), gdna_reference_members=1)
-    check("a positive finite reference is accepted on the result", cal_ref.gdna_reference_density > 0.0)
+        np.asarray(cal.count_gdna_region) / np.asarray(cal.gdna_region_eff_len))), gdna_reference_members=1,
+        gdna_capture_efficiency_region=np.full(cal.n_regions, 0.5),
+        gdna_capture_efficiency_boundary=np.full(cal.n_boundaries, 0.5))
+    check("a positive finite reference admits efficiencies below 1", cal_ref.gdna_reference_density > 0.0)
+    try:
+        dataclasses.replace(cal, gdna_capture_efficiency_region=np.full(cal.n_regions, 0.5))
+        fired = False
+    except ValueError:
+        fired = True
+    check("an efficiency below 1 with no reference is refused by the result", fired)
     for bad in (0.0, -1.0, float("nan")):
         try:
-            dataclasses.replace(cal, gdna_reference_density=bad)
+            dataclasses.replace(cal_ref, gdna_reference_density=bad)
             fired = False
         except ValueError:
             fired = True

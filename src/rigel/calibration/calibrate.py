@@ -71,6 +71,8 @@ from .density_deconv import (
     fit_intron_background,
 )
 from .abundance_landscape import AbundanceLandscape, fit_abundance_landscape, located_enriched_mode
+from .capture_efficiency import capture_efficiencies
+from .effective_length import crossing_base_shares
 from .blocks import SweepCapture
 from .total_abundance import (
     build_region_wall_mask,
@@ -686,14 +688,16 @@ def _solve(s: _Solve, _debug):
 
 def _result(
     substrate,
-    chain,
-    belief,
+    regions,
+    boundaries,
     strand: _Strand,
     region_eff,
     boundary_eff,
     config,
     gdna_reference_density: float | None,
     gdna_reference_members: int,
+    efficiency: np.ndarray,
+    efficiency_boundary: np.ndarray,
 ) -> CalibrationResult:
     """The solved chain projected onto the two payload axes and published as the
     :class:`CalibrationResult`, with the library-average gDNA density QC scalar.
@@ -706,8 +710,6 @@ def _result(
     population, exported verbatim — pure RNA by construction, nothing to deconvolve. The three
     ``mass_per_crossing`` are each their own population's incidence→fragment conversion, never applied
     to another population."""
-    regions = chain_region_deconv(chain, belief, substrate)
-    boundaries = chain_boundary_deconv(chain, belief, substrate)
     region_eff_gdna, region_eff_rna = region_eff
     boundary_eff_gdna, boundary_eff_rna = boundary_eff
     return CalibrationResult(
@@ -739,6 +741,8 @@ def _result(
         ),
         gdna_reference_density=gdna_reference_density,
         gdna_reference_members=gdna_reference_members,
+        gdna_capture_efficiency_region=efficiency,
+        gdna_capture_efficiency_boundary=efficiency_boundary,
         rna_sense_frac=strand.rna_sense_frac,
         gdna_strand_overdispersion=strand.gdna_strand_overdispersion,
         rna_strand_overdispersion=strand.rna_strand_overdispersion,
@@ -892,23 +896,37 @@ def calibrate(
     enriched = located_enriched_mode(gdna_hyperprior) if gdna_hyperprior is not None else None
     gdna_reference_density = float(np.exp(enriched.mode.log_rho)) if enriched is not None else None
     gdna_reference_members = enriched.n_members if enriched is not None else 0
-    logger.debug(
-        "calibration: PHASE 1 prior-free initial solve (abundance landscape: %s)",
-        "none"
-        if abundance_landscape is None
-        else f"{abundance_landscape.n_train} training regions, {len(abundance_landscape.modes)} modes",
-    )
-
+    # THE CAPTURE EFFICIENCIES: every piece's clipped gDNA density against the reference, the posterior
+    # mean under the landscape from its own contained count and the crossings within a fragment's
+    # reach, and every boundary's from its own crossing count (`capture_efficiency`); published on the
+    # result for the ruler and the locus prior. No reference ⇒ every efficiency is exactly 1.
+    regions = chain_region_deconv(chain, belief, substrate)
+    boundaries = chain_boundary_deconv(chain, belief, substrate)
+    if gdna_reference_density is None:
+        efficiency = np.ones(int(substrate.n_regions))
+        efficiency_boundary = np.ones(int(substrate.n_boundaries))
+    else:
+        efficiency, efficiency_boundary = capture_efficiencies(
+            gdna_hyperprior,
+            gdna_reference_density,
+            regions.gdna_mass,
+            region_eff_gdna,
+            boundaries.gdna_mass,
+            boundary_eff_gdna,
+            crossing_base_shares(region_arrays, gdna_fl_pmf),
+        )
     result = _result(
         substrate,
-        chain,
-        belief,
+        regions,
+        boundaries,
         strand,
         (region_eff_gdna, region_eff_rna),
         (boundary_eff_gdna, boundary_eff_rna),
         config,
         gdna_reference_density,
         gdna_reference_members,
+        efficiency,
+        efficiency_boundary,
     )
 
     if _debug is not None:  # inert diagnostic hook — the solved chain internals

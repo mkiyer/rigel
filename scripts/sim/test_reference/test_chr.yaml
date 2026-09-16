@@ -238,7 +238,30 @@ ref_name: test_chr
 # `gB2_{cap}div_{regime}_H` / `_A`. 6 loci = 12 genes at pitch 40,000 from 7,397,000.
 # The chromosome grows to 7.637 Mb and the fragment budget from 1,140 k to 1,170 k (600 abundance
 # units join 47,335: RNA depth per existing transcript +1.3 %, gDNA density per base -0.6 %).
-genome_length: 7637000      # the div block's last gene ends at 7,617,000; the 20 kb spacer follows
+#
+# ── THE TINY-EXON BLOCK (session 2026-09-16; the RULER's substrate) ─────────────────────────────────
+# Exons SHORTER THAN A FRAGMENT: a piece that holds no contained fragment has no contained gDNA evidence,
+# and the ruler that read a transcript's length from its objects' contained supports read such a
+# transcript as 0 and then its floor (`ISSUES: ruler-multimapper-floor-caps-the-correction`). The
+# accumulator counts a fragment at EVERY boundary it crosses, so a tiny exon's evidence is its two edge
+# crossings against the intron's level, and its length is its own bases. Two structures, unprobed / probed
+# (cap*):
+#   tiny    ten 40 bp exons at 1,040 bp pitch (introns 1,000 bp; span 9,400): no piece of the transcript
+#           holds a fragment (frag_min 50), every base of it is crossing-witnessed
+#   mixed   exon 1 kb · eight 40 bp exons at 1,040 bp pitch · exon 1 kb (span 11,320): the junction beside a
+#           long exon has one supported flank and one empty one — the flank-versus-pool case
+# Blocks B2 (×3) and B4 (×30) of the twin ladder; no nascent RNA; 4 types × 2 blocks = 8 genes, slots at
+# pitch 37,000 from 7,637,000, the strands alternating within a block and flipped between the two blocks. THE BENIGN PANEL's rule gains one clause with this
+# block: a union piece shorter than one probe gets a single probe centred on it (spilling into its flanks,
+# as a real panel's probe over a tiny exon does) — no existing probed gene has such a piece, so no existing
+# panel line changes. The witness geometry is declared, not repaired: a gDNA fragment over a centred probe
+# overlaps at most 125 bp of it while a spliced fragment over four tiny exons overlaps its whole length,
+# so the gDNA witness under-reads a probed tiny transcript's capture by that ratio
+# (`ISSUES: ruler-witness-geometry-on-transcript-panels`).
+# The chromosome grows to 7.93 Mb; the fragment budget stays at 1,170 k (1,320 abundance units join
+# 47,935, but on 400–2,400 bp of spliced length they draw under 1 % of the RNA fragments; gDNA density
+# per base −3.7 %).
+genome_length: 7930000      # the tiny block's last gene ends at 7,907,320; the 20 kb spacer follows
 seed: 20260819
 blank:
   ref_name: test_blank
@@ -1896,6 +1919,49 @@ genes:
     probed: false
     transcripts:
       - {t_id: B2_capdiv_eq_A, exons: [[7610000, 7612000], [7616000, 7617000]], abundance: 50}
+
+  # ── THE TINY-EXON BLOCK (2026-09-16): exons shorter than a fragment, unprobed / probed; blocks B2 (×3)
+  #    and B4 (×30); 8 genes at pitch 37,000 from 7,637,000
+  - gene_id: gB2_tiny
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_tiny, exons: [[7637000, 7637040], [7638040, 7638080], [7639080, 7639120], [7640120, 7640160], [7641160, 7641200], [7642200, 7642240], [7643240, 7643280], [7644280, 7644320], [7645320, 7645360], [7646360, 7646400]], abundance: 30}
+  - gene_id: gB2_captiny
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_captiny, exons: [[7674000, 7674040], [7675040, 7675080], [7676080, 7676120], [7677120, 7677160], [7678160, 7678200], [7679200, 7679240], [7680240, 7680280], [7681280, 7681320], [7682320, 7682360], [7683360, 7683400]], abundance: 30}
+  - gene_id: gB2_mixed
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_mixed, exons: [[7711000, 7712000], [7713000, 7713040], [7714040, 7714080], [7715080, 7715120], [7716120, 7716160], [7717160, 7717200], [7718200, 7718240], [7719240, 7719280], [7720280, 7720320], [7721320, 7722320]], abundance: 30}
+  - gene_id: gB2_capmixed
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capmixed, exons: [[7748000, 7749000], [7750000, 7750040], [7751040, 7751080], [7752080, 7752120], [7753120, 7753160], [7754160, 7754200], [7755200, 7755240], [7756240, 7756280], [7757280, 7757320], [7758320, 7759320]], abundance: 30}
+  - gene_id: gB4_tiny
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B4_tiny, exons: [[7785000, 7785040], [7786040, 7786080], [7787080, 7787120], [7788120, 7788160], [7789160, 7789200], [7790200, 7790240], [7791240, 7791280], [7792280, 7792320], [7793320, 7793360], [7794360, 7794400]], abundance: 300}
+  - gene_id: gB4_captiny
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B4_captiny, exons: [[7822000, 7822040], [7823040, 7823080], [7824080, 7824120], [7825120, 7825160], [7826160, 7826200], [7827200, 7827240], [7828240, 7828280], [7829280, 7829320], [7830320, 7830360], [7831360, 7831400]], abundance: 300}
+  - gene_id: gB4_mixed
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B4_mixed, exons: [[7859000, 7860000], [7861000, 7861040], [7862040, 7862080], [7863080, 7863120], [7864120, 7864160], [7865160, 7865200], [7866200, 7866240], [7867240, 7867280], [7868280, 7868320], [7869320, 7870320]], abundance: 300}
+  - gene_id: gB4_capmixed
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B4_capmixed, exons: [[7896000, 7897000], [7898000, 7898040], [7899040, 7899080], [7900080, 7900120], [7901120, 7901160], [7902160, 7902200], [7903200, 7903240], [7904240, 7904280], [7905280, 7905320], [7906320, 7907320]], abundance: 300}
 
 shadow_genes:
   - gene_id: gshadow_U1

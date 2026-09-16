@@ -1,3 +1,5 @@
+# ⛔ EXECUTED 2026-09-16 (session 4). The rulings are `DESIGN.md` §7.2 and `EQUATIONS.md` §11, the closures are in `ISSUES.md`, the instrument is `scripts/design/ruler_vs_truth.py`; nothing below is current. Kept as the record of the plan the session ran.
+
 # The expectation ruler — derivation and implementation plan (working note, 2026-09-15)
 
 The plan for the ruler's repair: what is settled by measurement, what remains to derive and the decision each

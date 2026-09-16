@@ -544,6 +544,14 @@ B2_div_eq_H	50	0
 B2_div_eq_A	50	0
 B2_capdiv_eq_H	50	0
 B2_capdiv_eq_A	50	0
+B2_tiny	30	0
+B2_captiny	30	0
+B2_mixed	30	0
+B2_capmixed	30	0
+B4_tiny	300	0
+B4_captiny	300	0
+B4_mixed	300	0
+B4_capmixed	300	0
 shadow_U1_SE2kb_plus	250	0
 shadow_U2_SE2kb_minus	75	0
 shadow_U3_SE10kb_plus	25	0

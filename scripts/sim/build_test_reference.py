@@ -353,6 +353,12 @@ def probe_lines(genes: list[Gene], mode: str) -> list[str]:
         ref = g.transcripts[0].ref
         if mode == "benign":
             for k, (s, e) in enumerate(exon_union(g), 1):
+                if e - s < PROBE_LEN:
+                    # a piece shorter than one probe gets a single probe CENTRED on it, spilling into its
+                    # flanks as a real panel's probe over a tiny exon does (the tiny-exon block)
+                    a = (s + e) // 2 - PROBE_LEN // 2
+                    emit(_bed12(ref, a, a + PROBE_LEN, f"probe_{g.gene_id}_e{k}_0", [PROBE_LEN], [0]))
+                    continue
                 for j in range(PROBES_PER_PIECE):
                     a = s + PROBE_LEN * j
                     if a + PROBE_LEN > e:
@@ -378,7 +384,8 @@ def probe_lines(genes: list[Gene], mode: str) -> list[str]:
 
 _PROBE_HEADERS = {
     "benign": ("# THE BENIGN CAPTURE PANEL — each probed gene's exon UNION tiled 8 x 125 bp seamless from each\n"
-               "# union piece's start, so no probe spans an sj (a split probe suppresses exactly the\n"
+               "# union piece's start (a piece shorter than one probe gets a single probe centred on it), so\n"
+               "# no probe spans an sj (a split probe suppresses exactly the\n"
                "# boundary-crossing gDNA). BED12, 0-based half-open."),
     "sparse": ("# THE SPARSE ADVERSARIAL PANEL (owner directive 2026-09-01) — one 125 bp probe CENTRED on\n"
                "# every annotated exon of a probed gene: faces depleted, mid-exon enriched. BED12."),
@@ -604,6 +611,13 @@ def self_test() -> int:
     check("the benign tiling follows the union, 8 per piece, from the union start",
           len(ben2) == 16 and ben2[0].split("\t")[1] == "500")
     check("a shared sj yields ONE junction probe", len(probe_lines(iso.genes, "junction")) == 1)
+    # a union piece shorter than one probe (a tiny exon) gets a single probe centred on it
+    tiny = spec_from_dict({**cfg, "genes": [
+        {"gene_id": "gT", "strand": "+", "probed": True, "transcripts": [
+            {"t_id": "T", "exons": [[1000, 1040], [3000, 3040], [5000, 6000]], "abundance": 1}]}]})
+    ben3 = probe_lines(tiny.genes, "benign")
+    check("a tiny exon gets ONE centred probe and a long one its tiling",
+          len(ben3) == 10 and ben3[0].split("\t")[1:3] == ["958", "1083"] and ben3[1].split("\t")[1:3] == ["2958", "3083"])
     check("the sparse panel keeps each isoform's own exon centre", len(probe_lines(iso.genes, "sparse")) == 3)
     check("an unprobed gene contributes to no panel",
           not any("gJ" in line or "_J_" in line for m in ("benign", "sparse", "junction") for line in probe_lines(iso.genes, m)))

@@ -49,16 +49,18 @@ prints it beside the effect and must be re-run in the same session (`TRAPS: re-r
 
 `effective_lengths_em` is built inside `_setup_geometry_and_estimator` before `pipeline.py` calls
 `assemble_priors`, and an arm that patches `assemble_priors` leaves the shipped shrinkage installed —
-so a ceiling measured that way has never priced the ruler. `calibration_vs_oracle.py` substitutes at the
-`calibrate` boundary and is the one instrument that reaches it. ⛔ Say which call your arm patches, and
-check it sits downstream of everything you mean to price.
+so a ceiling measured that way has never priced the ruler. The ruler's truth is `ruler_vs_truth.py`: the
+simulator's own capture-aware effective length per transcript, the one instrument that scores the ruler
+against what generated the reads (`docs/TESTING.md` §0c). `calibration_vs_oracle.py`'s `O` arm swaps the
+six deconvolved arrays only, and the efficiencies the ruler reads are the solve's own output published on
+the result, so its ruler column reads `P` — the factor the EM divided by — and `P/O` is 1 by construction.
+⛔ Say which call your arm patches, and check it sits downstream of everything you mean to price.
 
-The ruler's reference is the located enriched mode of the fitted gDNA landscape, on the result
-(`DESIGN.md` §7.2): with no enriched mode — capture-OFF, or no gDNA — nothing contracts, exactly, and the
-zero controls and both capture-OFF strata read 1.000 with nothing moved. The composition was fixed first
-and the factor did not follow (a few hundred false fragments still made a reference for the detector this
-replaced), so the repair was the detector, not a cancelling pair (`ISSUES: g00-shrinkage-upstream-repair`,
-CLOSED). A second lane is built and
+The ruler is the transcript's own bases at their pieces' capture efficiencies, each efficiency the
+posterior mean of the piece's clipped gDNA density against the located enriched mode of the fitted gDNA
+landscape (`DESIGN.md` §7.2, `EQUATIONS.md` §11): with no enriched mode — capture-OFF, or no gDNA, or a
+library too sparse to locate its probed level — nothing contracts, exactly, and the zero controls and
+both capture-OFF strata read 1.000 with nothing moved. A second lane is built and
 not wired: the per-transcript RNA prior (`rna_prior_weight`) is never passed in production
 (`ISSUES: per-transcript-prior-lane`).
 

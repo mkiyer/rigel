@@ -206,8 +206,9 @@ block; this table says only what each one stresses.
 | shared-exon | two spliced genes sharing one exact 10 kb last exon (the W12 deep stress; the tail-to-tail class of SMARCB1 × DERL3): a level on each strand into one walled AMBIG exon whose faces each pair a junction with a terminus | `shared` `capshared` |
 | in-intron | a 600 bp single-exon gene centred in the opposite strand's first intron (mirrored from the ladder's 203 intronic pseudogenes and lncRNAs): the majority AMBIG class, walled, its only message source its own termini | `inintron` `capinintron` |
 | head-to-head | `conv` with the strands swapped and nothing else: two 5' ends overlap in a 2 kb exon∩exon piece (mirrored from TRMT2A ⟷ RANBP1), a TSS and a donor of different strands on one boundary | `div` `capdiv` |
+| tiny-exon | exons shorter than a fragment — ten 40 bp exons at 1,040 bp pitch, and the same run between two 1 kb exons: no piece holds a contained fragment, so a piece's evidence is its edge crossings and its length its bases (the ruler's substrate, `EQUATIONS.md` §11) | `tiny` `captiny` `mixed` `capmixed` |
 
-265 genes on a 7.637 Mb chromosome (`genome_length` in the YAML). Every gene carries an explicit strand
+273 genes on a 7.930 Mb chromosome (`genome_length` in the YAML). Every gene carries an explicit strand
 and the chromosome keeps equal + / − representation — a sign error is invisible on one strand, and the
 builder refuses an imbalance. Abundances are molar ladders in half-decade steps with mature up the
 blocks and nascent down (10/30/100/300/1000 against 100/30/10/3/1), independent levels, as the ladder
@@ -217,7 +218,8 @@ draws them.
 and the index never sees — the control for anything that trusts the annotation's notion of "pure gDNA".
 The GTFs, `test_abundances.tsv` and the three probe BEDs are rendered by `build_test_reference.py` and
 versioned beside the YAML (`--check` and `tests/test_test_reference_renders.py` refuse a drifted render);
-the benign panel tiles each probed gene's exon union 8 × 125 bp, never spanning an sj, the sparse panel
+the benign panel tiles each probed gene's exon union 8 × 125 bp, never spanning an sj (a union piece shorter
+than one probe gets a single probe centred on it, spilling into its flanks as a real panel's does), the sparse panel
 centres one probe per exon, the junction panel places one two-block probe per sj. The FASTA
 (`test_chr.fa`, both contigs), the index, the reads and the caches are derived, never hand-edited: a
 spliced transcript needs a GT..AG at every intron or the aligner and the simulator disagree with the

@@ -1,117 +1,109 @@
-"""``capture_eff_length``: the exon→region incidence must cover every region containing an exon.
+"""``capture_eff_length``: a transcript's effective length under capture is its own bases at their
+pieces' efficiencies, weighted by the fragment-length end taper.
 
-``_transcript_region_incidence`` has to map an exon to every region that CONTAINS it, whatever
-partition it is handed — reading the lower bound from region starts instead of region ends skips the
-region holding an exon's left boundary whenever that boundary falls in a region's interior, which
-drops fully contained exons and produces the geometrically impossible ``len_t < exonic``. The shipped
-partition can no longer produce that geometry, because every exon boundary is a region interface in
-the splice graph, so the coarse partition is built here by hand (:func:`_coarsened`) rather than taken
-from an index: losing that fixture would silently retire the guard. The rest of the file holds what
-the contraction itself must do — factor 1 under a uniform field, contraction but never expansion
-under capture, no nascent/mature inversion once splice-junction boundaries are imputed, and a crossing
-object reading its own density with no factor to get wrong.
+The geometry half: ``transcript_piece_lengths`` must map every transcript to every piece its exons
+overlap, on any partition it is handed (the coarse partition built here by hand still has exon
+boundaries in a region's interior, which the shipped partition no longer produces — losing that fixture
+would retire the guard), and the taper-weighted base counts of a transcript's pieces must sum to its
+fl-marginal length exactly, so the per-base frame is a partition of the start count and never a second
+definition of it. The contraction half: every efficiency 1 (a field with no reference) returns the
+FL-marginal lengths bit-identically; a field contracts and never expands; a piece shorter than a
+fragment carries its bases' weight and nothing else; the ruler reads the result's efficiencies and
+re-derives nothing from the counts; a nascent parent never reads shorter than its spliced child.
 """
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import pandas as pd
 import pytest
-
-from rigel.calibration.capture_eff_length import (
-    _transcript_region_incidence,
-    transcript_capture_eff_lengths,
-)
-from rigel.calibration.region_arrays import (
-    RegionArrays,
-    boundary_region_indices,
-    region_right_boundary,
-)
-from rigel.calibration.result import CalibrationResult
-from rigel.config import CalibrationConfig
 from _index_builder import build_test_index
 
-#: The gDNA crossing effective length every boundary carries. In production this is
-#: ``crossing_eff_length(pmf, UNBOUNDED_REACH, UNBOUNDED_REACH) = mu_g − 1``, the SAME number at every
-# boundary, because gDNA's template is the chromosome and takes no reach taper.
-_CROSSING_EFF = 180.0
+from rigel.calibration.capture_eff_length import (
+    transcript_capture_eff_lengths,
+    transcript_piece_lengths,
+)
+from rigel.calibration.region_arrays import RegionArrays, boundary_region_indices
+from rigel.calibration.result import CalibrationResult
+from rigel.config import CalibrationConfig
 
 
-def _cal(
-    region_arrays: RegionArrays, density, region_eff, boundary_eff, reference: float | None = None
-) -> CalibrationResult:
-    """THE fixture, and there is only one: a deposition-faithful result for an arbitrary per-region
-    gDNA DENSITY field, where every object's mass is ``ρ × its own effective support`` on both axes.
+def _pmf(mean=200.0, sd=50.0, lo=100, hi=300) -> np.ndarray:
+    w = np.arange(hi + 1, dtype=np.float64)
+    p = np.exp(-0.5 * ((w - mean) / sd) ** 2)
+    p[(w < lo) | (w > hi)] = 0.0
+    return p / p.sum()
 
-    One builder rather than several is itself the guard. A contiguous boundary is a 0-bp boundary with
-    ONE mass and ONE support, so there is no face, no half and nothing for two fixtures to disagree
-    about — and a disagreement of exactly that shape, a per-side length halved in one place and not
-    another, can cancel a spurious ½ and hide a factor of 2 from every assertion in this file.
 
-    A boundary's density is its LEFT flank's. With a varying field the two flanks disagree, so the
-    fixture must SAY which it means rather than average them into a number that is neither.
+PMF = _pmf()
 
-    ``reference`` is the result's fully-captured level (`CalibrationResult.gdna_reference_density`):
-    ``None`` is a field with no enriched mode, which contracts nothing; a capture field states it.
-    """
-    d = np.asarray(density, dtype=np.float64)
-    region_eff = np.asarray(region_eff, dtype=np.float64)
-    boundary_eff = np.asarray(boundary_eff, dtype=np.float64)
+
+def _fl(lengths, pmf=PMF) -> np.ndarray:
+    """The fl-marginal length ``Σ_w f(w)(L − w + 1)⁺`` per transcript."""
+    w = np.arange(pmf.shape[0], dtype=np.float64)
+    L = np.asarray(lengths, dtype=np.float64)[:, None]
+    return (pmf[None, :] * np.maximum(L - w[None, :] + 1.0, 0.0)).sum(1)
+
+
+def _cal(region_arrays: RegionArrays, efficiency, reference: float | None) -> CalibrationResult:
+    """THE fixture: a result whose per-piece capture efficiencies are stated outright, with counts and
+    supports that carry nothing — the ruler must read the efficiencies and nothing else. ``reference``
+    ``None`` is a field with no enriched mode, where the efficiencies must all be 1."""
+    n = int(region_arrays.n_regions)
     lo, _hi = boundary_region_indices(np.asarray(region_arrays.ref_id))
-    n = region_eff.shape[0]
-    z = np.zeros(n, dtype=np.float64)
-    ez = np.zeros(lo.shape[0], dtype=np.float64)
+    ne = lo.shape[0]
+    z = np.zeros(n)
+    ez = np.zeros(ne)
     return CalibrationResult(
-        count_gdna_region=d * region_eff,
+        count_gdna_region=z.copy(),
         count_rna_region=z.copy(),
-        count_gdna_boundary=d[lo] * boundary_eff,
+        count_gdna_boundary=ez.copy(),
         count_rna_boundary=ez.copy(),
         count_rna_spliced_boundary=ez.copy(),
-        # GEOMETRY, not a split: the mean conserved fragment-mass one crossing carries. 1.0 is the
-        # identity — a boundary whose flanks both exceed every fragment length, where an incidence IS
-        # a fragment — so a fixture that does not exercise K-inflation states it explicitly.
-        boundary_mass_per_crossing=np.ones_like(ez),
-        count_rna_sj=np.zeros(0, dtype=np.float64),
-        boundary_spliced_mass_per_crossing=np.ones_like(ez),
-        sj_mass_per_crossing=np.ones(0, dtype=np.float64),
-        gdna_region_eff_len=region_eff,
-        gdna_boundary_eff_len=boundary_eff,
-        rna_region_eff_len=region_eff,
-        rna_boundary_eff_len=boundary_eff,
-        gdna_frac_region=np.zeros(len(region_eff)),
-        rna_pos_frac_region=np.zeros(len(region_eff)),
-        rna_neg_frac_region=np.zeros(len(region_eff)),
-        gdna_frac_boundary=np.zeros(len(boundary_eff)),
-        rna_pos_frac_boundary=np.zeros(len(boundary_eff)),
-        rna_neg_frac_boundary=np.zeros(len(boundary_eff)),
-        gdna_density_global=float(d.mean()),
+        boundary_mass_per_crossing=np.ones(ne),
+        count_rna_sj=np.zeros(0),
+        boundary_spliced_mass_per_crossing=np.ones(ne),
+        sj_mass_per_crossing=np.ones(0),
+        gdna_region_eff_len=np.asarray(region_arrays.region_size_bp, dtype=np.float64),
+        gdna_boundary_eff_len=np.full(ne, 180.0),
+        rna_region_eff_len=np.asarray(region_arrays.region_size_bp, dtype=np.float64),
+        rna_boundary_eff_len=np.full(ne, 180.0),
+        gdna_frac_region=z.copy(),
+        rna_pos_frac_region=z.copy(),
+        rna_neg_frac_region=z.copy(),
+        gdna_frac_boundary=ez.copy(),
+        rna_pos_frac_boundary=ez.copy(),
+        rna_neg_frac_boundary=ez.copy(),
+        gdna_density_global=0.01,
         gdna_reference_density=reference,
         gdna_reference_members=0 if reference is None else 1,
+        gdna_capture_efficiency_region=np.asarray(efficiency, dtype=np.float64),
+        gdna_capture_efficiency_boundary=np.ones(ne),
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,
         rna_strand_overdispersion=0.05,
         n_regions=n,
-        n_boundaries=lo.shape[0],
+        n_boundaries=ne,
         n_sj=0,
         config=CalibrationConfig(),
     )
 
 
-def _uniform_field_cal(region_arrays: RegionArrays, rho: float) -> CalibrationResult:
-    """A genuinely UNIFORM gDNA field: every object's density is exactly ``rho``, with the region support
-    the full genomic size. The factor-1-under-uniform invariant ⇒ every transcript's contraction factor
-    is 1 ⇒ ``eff_em == fl``, even for exon flanks shorter than one fragment."""
-    size = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
-    n_boundaries = boundary_region_indices(np.asarray(region_arrays.ref_id))[0].shape[0]
-    return _cal(
-        region_arrays, np.full(size.shape[0], rho), size, np.full(n_boundaries, _CROSSING_EFF)
-    )
+def _exon_mask(ra: RegionArrays, a: int, b: int) -> np.ndarray:
+    s, e = np.asarray(ra.start), np.asarray(ra.end)
+    return (e > a) & (s < b)
+
+
+def _tidx(idx, tid: str) -> int:
+    tdf = idx.t_df
+    return int(tdf.loc[tdf["t_id"] == tid, "t_index"].iloc[0])
 
 
 # Two same-strand transcripts sharing gene g1. t1's first exon [150, 300) is a sub-interval of t0's
-# [100, 300); both halves carry the identical EXON_POS signature, so the partition MERGES them into a
-# single region [100, 300) whose interior holds t1's exon start (150) — the exact misalignment the bug
-# mishandled (t1's first exon would otherwise be dropped, since 150 is interior to the region).
+# [100, 300); both halves carry the identical EXON_POS signature, so the coarse partition MERGES them
+# into a single region [100, 300) whose interior holds t1's exon start (150).
 _MISALIGNED_GTF = """\
 chr1\ttest\texon\t101\t300\t.\t+\t.\tgene_id "g1"; transcript_id "t0";
 chr1\ttest\texon\t501\t700\t.\t+\t.\tgene_id "g1"; transcript_id "t0";
@@ -119,20 +111,55 @@ chr1\ttest\texon\t151\t300\t.\t+\t.\tgene_id "g1"; transcript_id "t1";
 chr1\ttest\texon\t501\t700\t.\t+\t.\tgene_id "g1"; transcript_id "t1";
 """
 
+# six 500 bp exons + a single-exon nascent parent covering the whole 1000..6500 span
+_MULTIEXON_GTF = (
+    "".join(
+        f'chr1\ttest\texon\t{s + 1}\t{s + 500}\t.\t+\t.\tgene_id "gm"; transcript_id "mrna";\n'
+        for s in range(1000, 6500, 1000)
+    )
+    + 'chr1\ttest\texon\t1001\t6500\t.\t+\t.\tgene_id "gm"; transcript_id "nasc";\n'
+)
+
+# ten exons of 40 bp at 1,040 bp pitch: every piece shorter than the shortest fragment (100 bp)
+_TINY_GTF = "".join(
+    f'chr1\ttest\texon\t{1001 + i * 1040}\t{1040 + i * 1040}\t.\t+\t.\tgene_id "gt"; transcript_id "tiny";\n'
+    for i in range(10)
+)
+
+_TWO_REF_GTF = "".join(
+    f'chrA\ttest\texon\t{s + 1}\t{s + 400}\t.\t+\t.\tgene_id "ga"; transcript_id "ta";\n'
+    for s in (200, 800)
+) + "".join(
+    f'chrB\ttest\texon\t{s + 1}\t{s + 400}\t.\t+\t.\tgene_id "gb"; transcript_id "tb";\n'
+    for s in (200, 800)
+)
+
 
 @pytest.fixture(scope="module")
 def misaligned_index(tmp_path_factory):
     return build_test_index(tmp_path_factory, _MISALIGNED_GTF, genome_size=1000, name="misaligned")
 
 
+@pytest.fixture(scope="module")
+def multiexon_index(tmp_path_factory):
+    return build_test_index(tmp_path_factory, _MULTIEXON_GTF, genome_size=7000, name="multiexon")
+
+
+@pytest.fixture(scope="module")
+def tiny_index(tmp_path_factory):
+    return build_test_index(tmp_path_factory, _TINY_GTF, genome_size=14000, name="tiny")
+
+
+@pytest.fixture(scope="module")
+def two_ref_index(tmp_path_factory):
+    return build_test_index(
+        tmp_path_factory, _TWO_REF_GTF, name="tworef", refs={"chrA": 2000, "chrB": 2000}
+    )
+
+
 def _coarsened(idx) -> RegionArrays:
     """The index's regions with adjacent equal-signature neighbours MERGED — a deliberately coarse
-    partition whose regions contain interior exon boundaries.
-
-    This is the geometry the off-by-one mishandled. It is constructed here because no index emits it
-    any more, and the function must still be correct on it: a caller may legitimately hand
-    ``_transcript_region_incidence`` any partition that contains the exons.
-    """
+    partition whose regions contain interior exon boundaries."""
     n = idx.regions_df
     ref = n["ref_name"].astype(str).to_numpy()
     sig = n["signature"].to_numpy(np.uint8)
@@ -148,398 +175,167 @@ def _coarsened(idx) -> RegionArrays:
     return RegionArrays.from_frame(merged, idx.ref_name_to_id)
 
 
-def test_incidence_maps_every_transcript(misaligned_index):
-    """No transcript (mature or nRNA span) is dropped by the exon→region incidence."""
+# --- the geometry: every transcript, every piece, and the taper partitions the start count -----------
+
+
+@pytest.mark.parametrize("partition", ["coarse", "live"])
+def test_every_transcript_maps_to_the_pieces_its_exons_overlap(misaligned_index, partition):
+    """No transcript (mature or nascent entity) is dropped, and the piece covering the exon start that
+    sits INTERIOR to a merged region is mapped — the off-by-one that skipped it on the coarse partition
+    and the live partition, where that start is a region interface, both."""
     idx = misaligned_index
-    ra = _coarsened(idx)
-    inc_t, *_ = _transcript_region_incidence(idx, ra)
-    n_t = len(idx.t_df)
-    mapped = set(int(t) for t in inc_t)
-    dropped = set(range(n_t)) - mapped
-    assert not dropped, f"transcripts dropped by incidence: {sorted(dropped)}"
-
-
-def test_incidence_len_t_ge_exonic(misaligned_index):
-    """Σ(region lengths over a transcript's incidence) ≥ its exonic/span length.
-
-    Regions always *contain* the exons mapped to them, so ``len_t < exonic`` is impossible —
-    the old searchsorted-on-starts off-by-one produced exactly that by skipping/dropping the
-    region containing an interior exon boundary.
-    """
-    idx = misaligned_index
-    ra = _coarsened(idx)
-    inc_t, inc_r, *_ = _transcript_region_incidence(idx, ra)
-    n_t = len(idx.t_df)
-    region_len = np.asarray(ra.region_size_bp, dtype=np.float64)
-    len_t = np.zeros(n_t)
-    np.add.at(len_t, inc_t, region_len[inc_r])
-    exonic = idx.t_df["length"].to_numpy(dtype=np.float64)
-    bad = np.flatnonzero(len_t < exonic - 1e-6)
-    assert bad.size == 0, (
-        f"len_t < exonic (geometrically impossible) for transcripts {bad.tolist()}: "
-        f"len_t={len_t[bad].tolist()} exonic={exonic[bad].tolist()}"
-    )
-
-
-def test_merged_region_interior_exon_is_mapped(misaligned_index):
-    """The transcript whose exon starts interior to a merged region maps to that region.
-
-    Directly pins the fix: t1's first exon [150,300) lies inside the merged region [100,300); its
-    incidence must include that region (the old code skipped to the next region, or dropped it)."""
-    idx = misaligned_index
-    ra = _coarsened(idx)
-    inc_t, inc_r, *_ = _transcript_region_incidence(idx, ra)
-    starts = np.asarray(ra.start)
-    ends = np.asarray(ra.end)
-    # the region covering position 150 (interior to a merged exon region)
-    covering = np.flatnonzero((starts <= 150) & (ends > 150))
-    assert covering.size == 1, f"expected one region covering pos 150, got {covering.tolist()}"
-    region_at_150 = int(covering[0])
-    # every transcript whose exonic footprint includes position 150 must map to that region
-    t_df = idx.t_df
-    for t in range(len(t_df)):
-        a, b = int(t_df["start"].iloc[t]), int(t_df["end"].iloc[t])
-        if a <= 150 < b:
-            regions_for_t = set(int(inc_r[k]) for k in np.flatnonzero(inc_t == t))
-            assert region_at_150 in regions_for_t, (
-                f"transcript {t} spans pos 150 but its incidence {sorted(regions_for_t)} omits "
-                f"the covering region {region_at_150}"
-            )
-
-
-def test_incidence_is_correct_on_the_v8_partition_too(misaligned_index):
-    """The LIVE path: production builds this geometry with ``from_index``, on a region partition where
-    the alternative exon start at 150 is a region interface rather than a region interior.
-
-    The three tests above pin the function against a partition that still has interior exon
-    boundaries; this one pins it against the partition it actually runs on. Both properties must hold,
-    and only one of them is reachable from an index.
-    """
-    idx = misaligned_index
-    ra = RegionArrays.from_index(idx)
-    assert ra.n_regions == len(idx.regions_df) > _coarsened(idx).n_regions  # it really does split
-    assert 150 in set(ra.start.tolist())  # ...and it splits HERE
-
-    inc_t, inc_r, *_ = _transcript_region_incidence(idx, ra)
-    assert set(int(t) for t in inc_t) == set(range(len(idx.t_df))), "a transcript was dropped"
-
-    len_t = np.zeros(len(idx.t_df))
-    np.add.at(len_t, inc_t, np.asarray(ra.region_size_bp, dtype=np.float64)[inc_r])
-    exonic = idx.t_df["length"].to_numpy(dtype=np.float64)
-    bad = np.flatnonzero(len_t < exonic - 1e-6)
-    assert bad.size == 0, f"len_t < exonic (geometrically impossible) for {bad.tolist()}"
-
-
-# --- the bedrock invariant for the transcript path: factor = 1 under uniform gDNA -----------------
-
-
-def test_transcript_factor_one_under_uniform_gdna(misaligned_index):
-    """A uniform (unenriched) gDNA field contracts NO transcript's effective length: eff_em == fl.
-
-    The density-correct effective-support divisor (gdna_region_eff_len for regions, the averaged
-    per-side density length ½·(E[min(ℓ,L_r)]+E[min(ℓ,L_{r+1})]) for the pooled boundaries) makes every region's
-    density ρ, so the Laplace-smoothed IPR over any transcript's region set returns its full effective
-    support (factor 1). With the genomic ``region_size_bp`` divisor a short exon would fabricate a
-    contraction even here — this pins that it does not."""
-    idx = misaligned_index
-    ra = RegionArrays.from_index(idx)
-    cal = _uniform_field_cal(ra, rho=0.02)
-    n_t = len(idx.t_df)
-    fl = np.linspace(
-        800.0, 2000.0, n_t
-    )  # arbitrary FL-marginal lengths; the factor must be exactly 1
-    eff = transcript_capture_eff_lengths(cal, ra, idx, fl)
-    np.testing.assert_allclose(eff, fl, rtol=1e-9)
-
-
-def test_transcript_contracts_under_concentrated_gdna(multiexon_index):
-    """Under a realistic capture field (a subset of regions enriched, the rest depleted, the enriched level
-    on the result as its reference), transcripts overlapping the DEPLETED regions contract below their
-    FL-marginal length, and contraction never expands."""
-    idx = multiexon_index
-    ra = RegionArrays.from_index(idx)
-    n = ra.n_regions
+    ra = _coarsened(idx) if partition == "coarse" else RegionArrays.from_index(idx)
+    t, piece, _ltau = transcript_piece_lengths(idx, ra, PMF)
+    assert set(int(x) for x in t) == set(range(len(idx.t_df))), "a transcript was dropped"
     starts, ends = np.asarray(ra.start), np.asarray(ra.end)
-    dens = np.full(n, 0.1)  # depleted (off-target) background
-    dens[(ends > 1000) & (starts < 1500)] = 100.0  # capture the first exon (enriched on-target)
-    cal = _field_cal(ra, dens, reference=100.0)
-    fl = np.maximum(idx.t_df["length"].to_numpy(dtype=np.float64) - 180.0, 1.0)
-    eff = transcript_capture_eff_lengths(cal, ra, idx, fl)
-    assert np.all(eff <= fl + 1e-9)  # contraction never expands
-    assert np.any(eff < fl - 1e-6)  # at least one transcript genuinely contracts
-
-
-# --- nascent<mature inversion guard: splice-junction boundaries ---------------------------------------
-# A multi-exon mRNA and a single-exon nascent parent covering the SAME genomic span. A nascent's genomic
-# region set STRICTLY CONTAINS its mature child's, so its EM effective length can never be shorter. With
-# the splice junctions DROPPED a multi-exon mRNA's span_full falls below its contiguous FL-marginal
-# length, and the fl/span_full ratio (growing with exon count) inflates the mature's eff_em ABOVE its
-# nascent parent's under capture — a physically impossible inversion. Imputing the sj boundaries is what
-# closes the gap, and these pin it.
-
-# six 500bp exons + a single-exon nascent covering the whole 1000..6500 span (genomic order per transcript
-# so the incidence pairs adjacent exons into splice junctions).
-_MULTIEXON_GTF = (
-    "".join(
-        f'chr1\ttest\texon\t{s + 1}\t{s + 500}\t.\t+\t.\tgene_id "gm"; transcript_id "mrna";\n'
-        for s in range(1000, 6500, 1000)
-    )
-    + 'chr1\ttest\texon\t1001\t6500\t.\t+\t.\tgene_id "gm"; transcript_id "nasc";\n'
-)
-
-
-@pytest.fixture(scope="module")
-def multiexon_index(tmp_path_factory):
-    return build_test_index(tmp_path_factory, _MULTIEXON_GTF, genome_size=7000, name="multiexon")
-
-
-def _tidx(idx, tid: str) -> int:
+    covering = int(np.flatnonzero((starts <= 150) & (ends > 150))[0])
     tdf = idx.t_df
-    return int(tdf.loc[tdf["t_id"] == tid, "t_index"].iloc[0])
+    for ti in range(len(tdf)):
+        a, b = int(tdf["start"].iloc[ti]), int(tdf["end"].iloc[ti])
+        if a <= 150 < b:
+            assert covering in set(int(p) for p in piece[t == ti])
 
 
-def _field_cal(
-    region_arrays: RegionArrays,
-    density: np.ndarray,
-    frag: float = _CROSSING_EFF,
-    reference: float | None = None,
-) -> CalibrationResult:
-    """An arbitrary per-region gDNA DENSITY field with an FL-MARGINAL region support
-    (``region_eff = size − frag``). That makes a multi-exon mRNA's sj-dropped ``span_full`` fall
-    BELOW its contiguous FL-marginal length — the exact gap the sj boundaries close. Uniform density ⇒
-    every object's m/S = density ⇒ factor 1 (the bedrock invariant), independent of the field values."""
-    size = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
-    n_boundaries = boundary_region_indices(np.asarray(region_arrays.ref_id))[0].shape[0]
-    return _cal(
-        region_arrays,
-        density,
-        np.maximum(size - frag, 1e-9),
-        np.full(n_boundaries, frag),
-        reference,
-    )
+@pytest.mark.parametrize("partition", ["coarse", "live"])
+def test_a_transcripts_taper_weighted_pieces_sum_to_its_fl_marginal_length(
+    misaligned_index, partition
+):
+    """Σ_p ℓ_p^τ over a transcript's pieces is Σ_w f(w)(L − w + 1)⁺ — on the coarse partition, whose
+    pieces spill beyond the exons and must be clipped to them, and on the live one."""
+    idx = misaligned_index
+    ra = _coarsened(idx) if partition == "coarse" else RegionArrays.from_index(idx)
+    t, _piece, ltau = transcript_piece_lengths(idx, ra, PMF)
+    total = np.zeros(len(idx.t_df))
+    np.add.at(total, t, ltau)
+    np.testing.assert_allclose(total, _fl(idx.t_df["length"].to_numpy()), rtol=1e-9)
 
 
-def test_sj_incidence_multiexon_only(multiexon_index):
-    """A multi-exon mRNA yields one splice-junction boundary per adjacent exon pair; a single-exon nRNA yields
-    none, and each sj's flanking regions straddle the intron between the two exons."""
+def test_the_pieces_are_on_the_transcripts_own_reference(two_ref_index):
+    """A second reference numbers its regions after the first's: every piece of a transcript must lie on
+    the transcript's reference, or a region index would silently read another chromosome's efficiency."""
+    idx = two_ref_index
+    ra = RegionArrays.from_index(idx)
+    t, piece, _ = transcript_piece_lengths(idx, ra, PMF)
+    ref_of_t = idx.t_df["ref"].astype(str).map(idx.ref_name_to_id).to_numpy()
+    np.testing.assert_array_equal(np.asarray(ra.ref_id)[piece], ref_of_t[t])
+
+
+# --- the contraction: efficiencies 1 return fl, a field contracts, a tiny exon carries its bases -----
+
+
+def test_no_reference_returns_the_fl_marginal_lengths_bit_identically(multiexon_index):
+    """Capture off, or no gDNA: every efficiency is 1 and the ruler is ``fl`` EXACTLY, not within float
+    noise — a contraction from rounding is a systematic bias, not a tolerance."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
-    _, _, _, _, jt, jl, jr = _transcript_region_incidence(idx, ra)
-    mrna, nasc = _tidx(idx, "mrna"), _tidx(idx, "nasc")
-    assert (jt == mrna).sum() == 5, "a 6-exon mRNA must have 5 splice-junction boundaries"
-    assert (jt == nasc).sum() == 0, "a single-exon nRNA must have NO splice junctions"
-    starts, ends = np.asarray(ra.start), np.asarray(ra.end)
-    for k in np.flatnonzero(jt == mrna):
-        assert ends[jl[k]] <= starts[jr[k]], (
-            "sj left flank must end at/before the right flank starts"
-        )
+    fl = np.linspace(900.0, 2000.0, len(idx.t_df))
+    eff = transcript_capture_eff_lengths(_cal(ra, np.ones(ra.n_regions), None), ra, idx, fl, PMF)
+    np.testing.assert_array_equal(eff, fl)
+
+
+def test_efficiencies_of_one_everywhere_under_a_reference_contract_nothing(multiexon_index):
+    """With a reference and every piece at it, the factor is 1 to floating point on every transcript,
+    spliced and unspliced alike: the taper's numerator and denominator are the same sum."""
+    idx = multiexon_index
+    ra = RegionArrays.from_index(idx)
+    fl = _fl(idx.t_df["length"].to_numpy())
+    eff = transcript_capture_eff_lengths(_cal(ra, np.ones(ra.n_regions), 1.0), ra, idx, fl, PMF)
+    np.testing.assert_allclose(eff, fl, rtol=1e-12)
+
+
+def test_a_field_contracts_and_never_expands(multiexon_index):
+    idx = multiexon_index
+    ra = RegionArrays.from_index(idx)
+    c = np.full(ra.n_regions, 0.001)
+    c[_exon_mask(ra, 1000, 1500)] = 1.0  # the first exon captured, everything else depleted
+    fl = _fl(idx.t_df["length"].to_numpy())
+    eff = transcript_capture_eff_lengths(_cal(ra, c, 1.0), ra, idx, fl, PMF)
+    assert np.all(eff <= fl + 1e-9)
+    assert np.any(eff < fl - 1e-6)
+
+
+def test_the_length_is_the_taper_weighted_mean_of_the_pieces_efficiencies(multiexon_index):
+    """The claim, computed independently: the six-exon mRNA with exons 1–3 at efficiency 1 and 4–6 at
+    0.2 reads ``Σ_p ℓ_p^τ c̃_p / Σ_p ℓ_p^τ`` with ``ℓ^τ`` from the taper on the 3,000 bp cDNA."""
+    from rigel.calibration.effective_length import base_taper
+
+    idx = multiexon_index
+    ra = RegionArrays.from_index(idx)
+    c = np.full(ra.n_regions, 0.001)
+    for k, s in enumerate(range(1000, 6500, 1000)):
+        c[_exon_mask(ra, s, s + 500)] = 1.0 if k < 3 else 0.2
+    m = _tidx(idx, "mrna")
+    fl = _fl(idx.t_df["length"].to_numpy())
+    eff = transcript_capture_eff_lengths(_cal(ra, c, 1.0), ra, idx, fl, PMF)
+    tap = base_taper(PMF)
+    L = int(idx.t_df["length"].iloc[m])
+    first_half = tap.interval_sums(np.array([0]), np.array([1500]), L)[0]
+    second_half = tap.interval_sums(np.array([1500]), np.array([3000]), L)[0]
+    expected = fl[m] * (first_half * 1.0 + second_half * 0.2) / (first_half + second_half)
+    assert eff[m] == pytest.approx(expected, rel=1e-9)
+
+
+def test_a_transcript_of_exons_shorter_than_a_fragment_carries_its_bases_weight(tiny_index):
+    """Ten 40 bp exons against a 100–300 bp pmf: no piece can contain a fragment, so an object-set
+    ruler on contained supports read this transcript as 0 and then its floor. Its length is its bases:
+    at efficiency ½ on every exon the factor is exactly ½, and with half the exons at 1 and half at
+    0.001 it is the taper-weighted base mean — the tapered ends carry less than the middle exons."""
+    from rigel.calibration.effective_length import base_taper
+
+    idx = tiny_index
+    ra = RegionArrays.from_index(idx)
+    t = _tidx(idx, "tiny")
+    fl = _fl(idx.t_df["length"].to_numpy())
+    exons = [_exon_mask(ra, 1000 + i * 1040, 1040 + i * 1040) for i in range(10)]
+    half = np.full(ra.n_regions, 0.001)
+    for m in exons:
+        half[m] = 0.5
+    eff = transcript_capture_eff_lengths(_cal(ra, half, 1.0), ra, idx, fl, PMF)
+    assert eff[t] == pytest.approx(0.5 * fl[t], rel=1e-12)
+    mixed = np.full(ra.n_regions, 0.001)
+    for i, m in enumerate(exons):
+        mixed[m] = 1.0 if i < 5 else 0.001
+    eff = transcript_capture_eff_lengths(_cal(ra, mixed, 1.0), ra, idx, fl, PMF)
+    tap = base_taper(PMF)
+    L = 400
+    w_first = tap.interval_sums(np.array([0]), np.array([200]), L)[0]
+    w_last = tap.interval_sums(np.array([200]), np.array([400]), L)[0]
+    expected = fl[t] * (w_first * 1.0 + w_last * 0.001) / (w_first + w_last)
+    assert eff[t] == pytest.approx(expected, rel=1e-9)
+    assert 0.3 * fl[t] < eff[t] < 0.7 * fl[t]
+
+
+def test_the_ruler_reads_the_efficiencies_and_nothing_from_the_counts(multiexon_index):
+    """Two results with the same efficiencies and wildly different counts and supports give the same
+    lengths: the evidence was weighed upstream (`capture_efficiency`), and the ruler is geometry."""
+    idx = multiexon_index
+    ra = RegionArrays.from_index(idx)
+    c = np.full(ra.n_regions, 0.3)
+    c[_exon_mask(ra, 1000, 1500)] = 1.0
+    fl = _fl(idx.t_df["length"].to_numpy())
+    cal = _cal(ra, c, 1.0)
+    loud = dataclasses.replace(
+        cal,
+        count_gdna_region=np.full(ra.n_regions, 1e6),
+        gdna_region_eff_len=np.full(ra.n_regions, 1e-9),
+        count_gdna_boundary=np.full(cal.n_boundaries, 1e6),
+    )
+    np.testing.assert_array_equal(
+        transcript_capture_eff_lengths(cal, ra, idx, fl, PMF),
+        transcript_capture_eff_lengths(loud, ra, idx, fl, PMF),
+    )
 
 
 def test_no_nascent_mature_inversion_under_capture(multiexon_index):
-    """THE regression guard: under capture on a single exon, eff_em(nascent) >= eff_em(mature).
-
-    Without the sj boundaries a 6-exon mRNA's fl/span_full ratio inflates its eff_em above its nascent
-    parent's, which is an inversion because the nascent's region set strictly contains the mature's.
-    The imputed sj boundaries close the gap. Also asserts the mature genuinely CONTRACTS, since a
-    guard that silently disabled capture contraction would pass the inequality trivially."""
+    """A nascent parent's bases contain its spliced child's, and its taper at every exonic base is at
+    least the child's (a base interior to the span is interior to the child at most), so
+    ``eff(nascent) ≥ eff(mature)`` for any field; and the mature genuinely contracts here."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
-    n = ra.n_regions
-    starts, ends = np.asarray(ra.start), np.asarray(ra.end)
-    dens = np.full(n, 0.1)  # depleted off-target
-    dens[(ends > 1000) & (starts < 1500)] = 100.0  # capture the first exon [1000,1500)
-    cal = _field_cal(ra, dens, reference=100.0)
-    frag = 180.0
-    fl = np.maximum(
-        idx.t_df["length"].to_numpy(dtype=np.float64) - frag, 1.0
-    )  # contiguous FL-marginal
-    eff = transcript_capture_eff_lengths(cal, ra, idx, fl)
+    c = np.full(ra.n_regions, 0.001)
+    c[_exon_mask(ra, 1000, 1500)] = 1.0
+    fl = _fl(idx.t_df["length"].to_numpy())
+    eff = transcript_capture_eff_lengths(_cal(ra, c, 1.0), ra, idx, fl, PMF)
     mrna, nasc = _tidx(idx, "mrna"), _tidx(idx, "nasc")
-    assert eff[nasc] >= eff[mrna] - 1e-6, (
-        f"INVERSION: nascent eff_em {eff[nasc]:.2f} < mature eff_em {eff[mrna]:.2f}"
-    )
-    assert eff[mrna] < fl[mrna] - 1e-6, "the mature must genuinely contract under capture"
-
-
-def test_spliced_factor_one_under_uniform(multiexon_index):
-    """Capture-off bit-identity WITH sj boundaries: uniform gDNA ⇒ eff_em == fl for the multi-exon mRNA."""
-    idx = multiexon_index
-    ra = RegionArrays.from_index(idx)
-    cal = _field_cal(ra, np.full(ra.n_regions, 0.02))
-    fl = np.linspace(900.0, 2000.0, len(idx.t_df))
-    eff = transcript_capture_eff_lengths(cal, ra, idx, fl)
-    np.testing.assert_allclose(eff, fl, rtol=1e-9)
-
-
-# --- the enriched-mode reference detector's core contract (locks the <5-region fallback + the enriched mode) ---
-
-
-def _noisy_uniform_cal(ra: RegionArrays, rho: float, seed: int = 0) -> CalibrationResult:
-    """A uniform field with Poisson counting noise: every object's density is ``rho`` in expectation and
-    nothing is enriched, so the result carries no reference and the contraction must be exactly none."""
-    rng = np.random.default_rng(seed)
-    size = np.asarray(ra.region_size_bp, dtype=np.float64)
-    n_b = boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0]
-    density = rng.poisson(rho * size) / size
-    return _cal(ra, density, size, np.full(n_b, _CROSSING_EFF))
-
-
-def test_a_poisson_noisy_uniform_field_contracts_nothing(misaligned_index):
-    """Capture-OFF: no probes, so no region is depleted relative to any other, and counting noise is
-    not enrichment. The contract is ``eff_em == fl`` EXACTLY, not within float noise: a clipped noise
-    term is a systematic contraction (0.92 on the ladder's oracle arm under the retired per-object
-    reference), not a rounding. The falsification test of the ruler at zero gDNA, verified failing on
-    the kernel-density detector it replaced."""
-    idx = misaligned_index
-    ra = RegionArrays.from_index(idx)
-    cal = _noisy_uniform_cal(ra, rho=0.05)
-    fl = np.linspace(800.0, 2000.0, len(idx.t_df))
-    eff = transcript_capture_eff_lengths(cal, ra, idx, fl)
-    np.testing.assert_array_equal(eff, fl)
-
-
-def test_specks_of_gdna_in_a_gdna_free_library_contract_nothing(multiexon_index):
-    """Zero gDNA: the deconvolution leaves a few false-positive fragments — well under one each — on the
-    introns and flanks, and none on the expressed exons. Five slots with mass are not an enriched mode
-    (the kernel-density detector took them for one), and the ruler stays the FL-marginal length for
-    every transcript, RNA mass and all (the multimapper weight ``c/(c+1)`` reads 1 on an expressed exon)."""
-    import dataclasses
-
-    idx = multiexon_index
-    ra = RegionArrays.from_index(idx)
-    size = np.asarray(ra.region_size_bp, dtype=np.float64)
-    starts, ends = np.asarray(ra.start), np.asarray(ra.end)
-    exon = np.zeros(size.shape[0], bool)
-    for s0 in range(1000, 6500, 1000):
-        exon |= (ends > s0) & (starts < s0 + 500)
-    density = np.where(exon, 0.0, 0.4 / size)  # 0.4 of a fragment on every non-exon region
-    cal = dataclasses.replace(_field_cal(ra, density), count_rna_region=np.where(exon, 1000.0, 0.0))
-    fl = np.maximum(idx.t_df["length"].to_numpy(dtype=np.float64) - 180.0, 1.0)
-    eff = transcript_capture_eff_lengths(cal, ra, idx, fl)
-    np.testing.assert_array_equal(eff, fl)
-
-
-def test_the_reference_on_the_result_is_the_only_thing_the_ruler_reads(multiexon_index):
-    """The same enriched field contracts with its reference and not without it: the ruler reads the
-    result's ``gdna_reference_density`` and re-derives nothing from the counts."""
-    idx = multiexon_index
-    ra = RegionArrays.from_index(idx)
-    starts, ends = np.asarray(ra.start), np.asarray(ra.end)
-    dens = np.full(ra.n_regions, 0.1)
-    dens[(ends > 1000) & (starts < 1500)] = 100.0
-    fl = np.maximum(idx.t_df["length"].to_numpy(dtype=np.float64) - 180.0, 1.0)
-    with_ref = transcript_capture_eff_lengths(_field_cal(ra, dens, reference=100.0), ra, idx, fl)
-    without = transcript_capture_eff_lengths(_field_cal(ra, dens), ra, idx, fl)
-    assert np.any(with_ref < fl - 1e-6)
-    np.testing.assert_array_equal(without, fl)
-
-
-# ---------------------------------------------------------------------------
-# The crossing-object density — the TRAPS: prefer-shares-to-differences factor-2 guard.
-# ---------------------------------------------------------------------------
-#
-# The arithmetic that once made a factor of 2 available here is unrepresentable now: a contiguous
-# boundary is a 0-bp boundary with one mass and one support, so there is no per-side length to halve,
-# no pair of faces to sum, and no choice between a sum and an average. The PROPERTY that guarded is
-# still real and is kept below — a crossing object under a uniform field must read ρ, and a boundary
-# genuinely below the reference density must contract rather than clip.
-
-
-def test_a_crossing_object_under_a_uniform_field_reads_RHO(multiexon_index):
-    """One half of TRAPS: prefer-shares-to-differences. A boundary's mass over its own support is the
-    true density — exactly, with no factor to get wrong — so a factor-of-2 regression in the crossing
-    arithmetic reappears here first."""
-    ra = RegionArrays.from_index(multiexon_index)
-    rho = 0.037
-    cal = _field_cal(ra, np.full(ra.n_regions, rho))
-    # Read straight off the BOUNDARY axis: the incidence helper emits a boundary index, so a
-    # boundary's density is read where it lives rather than through a region-shaped copy.
-    boundary_mass = np.asarray(cal.count_gdna_boundary, dtype=np.float64)
-    boundary_support = np.asarray(cal.gdna_boundary_eff_len, dtype=np.float64)
-    live = boundary_support > 0.0
-    assert live.any(), "the fixture produced no boundaries"
-    np.testing.assert_allclose(boundary_mass[live] / boundary_support[live], rho, rtol=1e-12)
-
-
-def test_a_boundary_below_the_reference_density_CONTRACTS_rather_than_clipping(multiexon_index):
-    """TRAPS: prefer-shares-to-differences' other half, kept because the ``min(ρ/ρ_ref, 1)`` clip is
-    still there and still hides anything that reads a density too HIGH.
-
-    Put the true boundary density strictly inside ``(ρ_ref/2, ρ_ref)``: read correctly it is below the
-    reference and must contract; read at any inflated multiple it lands above, clips to 1, and
-    contributes no contraction at all — silent on exactly the boundaries the shrinkage exists to act on.
-
-    The ρ_ref anchor sits on the LAST region, not the first. A boundary takes its LEFT flank's density
-    (:func:`_cal`), so anchoring on region 0 would put boundary 0 itself at ρ_ref and the assertion would
-    fail on the fixture rather than on the code.
-    """
-    ra = RegionArrays.from_index(multiexon_index)
-    rho_ref, rho_boundary = 1.0, 0.7  # 0.7 ∈ (0.5, 1.0)
-    dens = np.full(ra.n_regions, rho_boundary)
-    dens[-1] = rho_ref  # the last region anchors ρ_ref and is no boundary's LEFT flank
-    cal = _field_cal(ra, dens)
-
-    boundary_mass = np.asarray(cal.count_gdna_boundary, dtype=np.float64)
-    boundary_support = np.asarray(cal.gdna_boundary_eff_len, dtype=np.float64)
-    band = (boundary_support > 0.0) & (boundary_mass > 0.0)
-    assert band.any()
-    ratio = (boundary_mass[band] / boundary_support[band]) / rho_ref
-    assert np.all(ratio < 1.0 - 1e-9), (
-        f"boundary density reads {ratio.max():.3f}×ρ_ref — at or above the reference it CLIPS and "
-        "contributes no contraction, which is precisely how the factor-2 stayed invisible"
-    )
-
-
-# --- the boundary axis is a BOUNDARY index, and only a MULTI-reference index can prove it -------------
-
-_TWO_REF_GTF = "".join(
-    f'chrA\ttest\texon\t{s + 1}\t{s + 400}\t.\t+\t.\tgene_id "ga"; transcript_id "ta";\n'
-    for s in (200, 800)
-) + "".join(
-    f'chrB\ttest\texon\t{s + 1}\t{s + 400}\t.\t+\t.\tgene_id "gb"; transcript_id "tb";\n'
-    for s in (200, 800)
-)
-
-
-@pytest.fixture(scope="module")
-def two_ref_index(tmp_path_factory):
-    return build_test_index(
-        tmp_path_factory, _TWO_REF_GTF, name="tworef", refs={"chrA": 2000, "chrB": 2000}
-    )
-
-
-def test_the_boundary_incidence_is_an_BOUNDARY_index_not_a_left_region_index(two_ref_index):
-    """The gate a single-reference fixture cannot provide.
-
-    ``region_right_boundary`` numbers boundaries over adjacent same-reference region pairs, so on ONE
-    reference ``boundary(r) == r`` and a left-region index is indistinguishable from a boundary index.
-    PERTURBATION: substituting one for the other changes nothing on any single-reference fixture here,
-    which is how the conversion came to be untested (``TRAPS: perturb-every-gate``).
-
-    On a second reference the two axes diverge by one per preceding reference boundary, and indexing a
-    per-boundary array with a region index then reads THE WRONG BOUNDARY'S MASS — silently, since both
-    are in range. This pins the axis: every emitted boundary index must be a valid boundary whose
-    flanking regions are the ones the transcript actually crosses.
-    """
-    ra = RegionArrays.from_index(two_ref_index)
-    _rt, _rr, bt, br, *_ = _transcript_region_incidence(two_ref_index, ra)
-    lo, hi = boundary_region_indices(np.asarray(ra.ref_id))
-    assert br.size, "the fixture produced no interior boundaries"
-    assert br.max() < lo.shape[0], "a boundary index outside the boundary axis"
-
-    # the discriminating claim: each emitted boundary's flanks are same-reference neighbours, and the
-    # transcript that emitted it overlaps BOTH of them.
-    ref_id = np.asarray(ra.ref_id)
-    np.testing.assert_array_equal(ref_id[lo[br]], ref_id[hi[br]])
-    reg_t, reg_r = _rt, _rr
-    for t, e in zip(bt.tolist(), br.tolist()):
-        owned = set(reg_r[reg_t == t].tolist())
-        assert lo[e] in owned and hi[e] in owned, (
-            f"transcript {t} was given boundary {e} between regions {lo[e]},{hi[e]} — which it does not span"
-        )
-
-    # ...and the two axes genuinely differ here, so the assertions above are not vacuous
-    right_boundary = region_right_boundary(ref_id)
-    assert not np.array_equal(right_boundary[: lo.shape[0]], np.arange(lo.shape[0])), (
-        "fixture is degenerate: the region and boundary axes coincide, so this test proves nothing"
-    )
+    assert eff[nasc] >= eff[mrna] - 1e-9
+    assert eff[mrna] < fl[mrna] - 1e-6
