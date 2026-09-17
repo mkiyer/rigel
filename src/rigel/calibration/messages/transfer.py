@@ -105,7 +105,7 @@ import numpy as np
 from ...native import transfer_pass
 from ..simplex_logodds import CubeRow, strand_row_logodds
 from . import BlockContext, ChainView, PsiMessage, Received
-from .faces import EDGE, FORWARD, LEVEL, SPLICE_OUT, TRANSPORT, Faces, fuse, norm
+from .faces import EDGE, FORWARD, LEVEL, SPLICE_OUT, TRANSPORT, Faces, RowTable, fuse, norm
 from .lanes import gdna_lane, rna_lanes
 from .transfer_rows import (
     _MARGINAL_NODES,
@@ -352,12 +352,13 @@ class _Chain:
 # ══ THE BUILDERS — one per shipped message ══════════════════════════════════════════════════════════
 
 
-def _claims(c: _Chain) -> list:
+def _claims(c: _Chain) -> RowTable:
     """Every node's OWN CLAIM — data only, never a belief: an intron's factory profile where the
     factory has one; an exon's own strand profile where the node's own strand channel is live
     (``has_own_composition``); a single-strand boundary's own strand profile likewise (an AMBIG boundary's split
-    constrains only the tilt, never the gDNA level — the Schur complement the local solve applies)."""
-    own: list = [None] * c.n
+    constrains only the tilt, never the gDNA level — the Schur complement the local solve applies).
+    Written into the table the native pass reads (`RowTable`)."""
+    own = RowTable(c.n, c.K)
     for i in np.flatnonzero(c.is_intron):
         if np.ptp(c.src[i]) > EPS:
             own[i] = norm(c.src[i])
@@ -398,7 +399,7 @@ def _splice_faces(c: _Chain, faces: Faces) -> None:
         faces.set(e, b, SPLICE_OUT, n_u=c.n_u[b], n_s=s, a_b=c.a_g[b], a_x=c.a_g[e])
 
 
-def _edge_level(c: _Chain, own: list, faces: Faces) -> None:
+def _edge_level(c: _Chain, own: RowTable, faces: Faces) -> None:
     """THE INTERGENIC|EXON EDGE → its exon: A LEVEL, one-sided. The edge's own claim is its gDNA
     COUNT — a marker profile; the rule reads the
     count, and nothing is held at an edge — and the exon converts it through its own total: the exon
@@ -538,77 +539,39 @@ class _SolveSite:
 
 
 class _PreparedTransfer:
-    """One sweep's working object: every node's own claim, the rules per directed face, the lanes by
-    population (``"gdna"``, ``"pos"``, ``"neg"`` — any may be absent) and the site. The passes' state
-    is the backbone's table, never a copy here."""
+    """One sweep's working object: every node's own claim (a `RowTable`), the rules per directed face
+    (`Faces`), the lanes by population (``"gdna"``, ``"pos"``, ``"neg"`` — any may be absent) and the
+    site. The passes' state is the backbone's table, never a copy here."""
 
     def __init__(self, own, faces: "Faces | None", lanes: dict | None = None, site=None):
         self.own = own
         self.faces = faces
         self.lanes: dict = {} if lanes is None else dict(lanes)
         self.site = site
-        self._packed = None
 
     # ── phase 1, natively: the whole pass on the table in one call ─────────────────────────────────
-    def _pack(self) -> dict:
-        """The tables as the native pass reads them, built once per block and shared by both passes:
-        every node's own claim as a row matrix with a presence mask, the faces' arrays and their row
-        store as one matrix, each lane's arrays likewise."""
-        if self._packed is not None:
-            return self._packed
+    def tables(self) -> dict:
+        """The tables the native pass reads, by the kernel's argument names — the builders' own, shared
+        by both passes: every node's own claim with its mask, the faces' arrays and their row store,
+        each lane's arrays (`LevelLane.tables`). Nothing is copied."""
         faces = self.faces
-        K, n = faces.lam.shape[0], faces.kind.shape[0]
-
-        def rows_of(items):
-            mask = np.fromiter((r is not None for r in items), bool, n)
-            mat = np.zeros((n, K))
-            if mask.any():
-                mat[mask] = np.stack([r for r in items if r is not None])
-            return mat, mask
-
-        own, own_mask = rows_of(self.own)
-        lanes = []
-        for ln in self.lanes.values():
-            level, level_mask = rows_of(ln.own_level)
-            witness = np.zeros((n, 2))
-            witness_mask = np.zeros(n, bool)
-            for i, w in enumerate(ln.flux_witness):
-                if w is not None:
-                    witness[i] = w
-                    witness_mask[i] = True
-            lanes.append(
-                (
-                    Received.LANES.index(ln.field),
-                    np.ascontiguousarray(ln.face, bool),
-                    np.ascontiguousarray(ln.two_sided, bool),
-                    np.ascontiguousarray(ln.empty, bool),
-                    level,
-                    level_mask,
-                    np.ascontiguousarray(ln.count, np.float64),
-                    np.ascontiguousarray(ln.a, np.float64),
-                    None if ln.other is None else np.ascontiguousarray(ln.other, np.float64),
-                    witness,
-                    witness_mask,
-                )
-            )
-        self._packed = dict(
-            lam=np.ascontiguousarray(faces.lam, np.float64),
-            own=own,
-            own_mask=own_mask,
-            f_kind=np.ascontiguousarray(faces.kind, np.int8),
-            f_row=np.ascontiguousarray(faces.row, np.int32),
-            f_row2=np.ascontiguousarray(faces.row2, np.int32),
-            f_n_u=np.ascontiguousarray(faces.n_u, np.float64),
-            f_n_s=np.ascontiguousarray(faces.n_s, np.float64),
-            f_a_b=np.ascontiguousarray(faces.a_b, np.float64),
-            f_a_x=np.ascontiguousarray(faces.a_x, np.float64),
-            f_width=np.ascontiguousarray(faces.width, np.float64),
-            f_var=np.ascontiguousarray(faces.var, np.float64),
-            f_rows=np.ascontiguousarray(np.stack(faces.rows) if faces.rows else np.zeros((0, K))),
-            marginal_nodes=np.ascontiguousarray(_MARGINAL_NODES, np.float64),
-            lanes=lanes,
+        return dict(
+            lam=faces.lam,
+            own=self.own.rows,
+            own_mask=self.own.mask,
+            f_kind=faces.kind,
+            f_row=faces.row,
+            f_row2=faces.row2,
+            f_n_u=faces.n_u,
+            f_n_s=faces.n_s,
+            f_a_b=faces.a_b,
+            f_a_x=faces.a_x,
+            f_width=faces.width,
+            f_var=faces.var,
+            f_rows=faces.rows[: faces.n_rows],
+            marginal_nodes=_MARGINAL_NODES,
+            lanes=[ln.tables() for ln in self.lanes.values()],
         )
-        return self._packed
 
     def run_pass(self, received: Received, seq, nbr, terminal, *, backward: bool) -> None:
         """PHASE 1 on the table in one native call (`native.transfer_pass`): the same hops, in the same
@@ -638,7 +601,7 @@ class _PreparedTransfer:
             has_composition=received.has_composition,
             composition=received.composition,
             levels=levels,
-            **self._pack(),
+            **self.tables(),
         )
 
     # ── phase 1: propagate — the recipient's kernel, run by the backbone in chain order ──────────

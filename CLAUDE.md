@@ -187,8 +187,10 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,426 passed / 0 skipped / 5 xfail, 3,431 collected** (re-derived
-2026-09-17 after the native pass: +7 — the three gates of `test_pass_kernel.py` with the `tests/` row's +2, and +2
+**The standing baseline: 0 failed / 3,428 passed / 0 skipped / 5 xfail, 3,433 collected** (re-derived
+2026-09-17 after the builders' layout: +2 — the `RowTable` gate in `test_transfer_faces.py` and the
+tables-without-a-copy gate in `test_pass_kernel.py`; before that +7 after the native pass — the three gates of
+`test_pass_kernel.py` with the `tests/` row's +2, and +2
 for `native/pass_kernel.cpp` by the row below; before that +5 when the yield's floors were deleted — the
 common-thinning invariance and the cannot-emit rule in `test_estimator.py`, each over both EM modes, and the
 unfloored locus yield in `test_priors.py`; and +33 from 3,386 with the ruler's repair of 2026-09-16, file by file:

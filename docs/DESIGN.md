@@ -1161,8 +1161,14 @@ replay on `sweeps_MO_3021_step7` moves the first sweep's `f_g` on 16,021 slots b
 `var_gdna` by 5.7e-14 — 2.1e-6 of the derived budget — and the three refit sweeps are bit-identical. The hop
 went from 2.2 µs to 0.33 µs (the kernel 9.1 → 1.4 s on that sweep) and the pass census says what remains:
 259 k Gaussian blurs a sweep at a median 93 taps, against 4.3 M lane hops that forward or say nothing and
-1.1 M forward rules; the builders' lists packed into the tables once per block now cost 1.0 s a sweep, which
-is why step (ii) is `prepare`'s builders writing the tables directly.
+1.1 M forward rules; the builders' lists packed into the tables once per block cost 1.0 s a sweep, which is
+why step (ii) is `prepare`'s builders writing the tables directly. **The builders write the tables** (step
+(ii-a), 2026-09-17): every optional row per node — a claim, a level, a flux witness, a junction flux level
+per side — is a `RowTable` (`messages/faces.py`: a matrix and a presence mask, `t[i]` a row or nothing),
+the face row store is a matrix with a written prefix, and the per-block packing is deleted; the pass reads
+the builders' own arrays, none copied (`test_pass_kernel.py`). A pure re-layout, gated bit-identical: every
+table of MO_3021's 426 blocks against the pre-step tree, the four captured sweeps, the three identity
+references. The builders themselves are 15.4 s of that 30.8 s sweep, which is what step (ii-b) ports.
 
 #### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer)
 

@@ -1016,3 +1016,27 @@ def test_the_alt_splice_rules_carry_both_flanks_with_the_pair_width(sweep_inputs
 def widths_keys(widths):
     """The junction boundaries the recompute served (its width keys are ``(boundary, flank)`` pairs)."""
     return {int(k[0]) if isinstance(k, tuple) else int(k) for k in widths}
+
+
+def test_a_row_table_is_a_matrix_and_a_mask_the_builders_write_directly():
+    """`RowTable`: the one shape of an optional row per node, in the layout the native pass reads. A
+    fresh table has no row and an all-zero matrix; a written row reads back as itself — a view of the
+    matrix, so the matrix IS the table — and sets its mask; clearing a row zeroes it and clears its
+    mask; a zero row is a row (the edge's level claim); ``len`` is the node count. PERTURBATION: a
+    table whose mask is not kept in step with its matrix fails here — the mask, never the matrix, says
+    whether a node has a claim."""
+    from rigel.calibration.messages.faces import RowTable
+
+    t = RowTable(4, 5)
+    assert len(t) == 4 and not t.mask.any() and not t.rows.any()
+    assert all(t[i] is None for i in range(4))
+    row = np.arange(5.0) - 2.0
+    t[2] = row
+    assert t.mask.tolist() == [False, False, True, False]
+    np.testing.assert_array_equal(t[2], row)
+    np.testing.assert_array_equal(t.rows[2], row)
+    assert np.shares_memory(t[2], t.rows)
+    t[2] = None
+    assert t[2] is None and not t.mask[2] and not t.rows[2].any()
+    t[0] = 0.0
+    assert t[0] is not None and t.mask[0] and not t.rows[0].any()

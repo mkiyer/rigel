@@ -103,3 +103,29 @@ def test_the_backbone_runs_the_shipped_policys_pass_natively(sweep_inputs, monke
     silent = SilentPolicy().prepare(ctx, SilentPolicy().library(ctx))
     table = SW._pass(order, list(ctx.left), silent, n_grid, backward=False)
     assert calls == [1] and table.has_neighbour.any() and not table.heard.any()
+
+
+def test_the_pass_reads_the_builders_own_tables_without_a_copy(sweep_inputs):
+    """The tables `run_pass` hands the native kernel are the builders' own arrays — the claims' matrix
+    and mask, the faces' arrays and the written prefix of their row store, each lane's arrays — every
+    one C-contiguous (the binding would copy a strided one silently), none built at the call.
+    PERTURBATION: a builder that keeps a strided column, or a table packed at the call, fails here."""
+    pol, _rows, _n_grid, _window = _full_policy(sweep_inputs)
+    ctx = _ctx_of(sweep_inputs)
+    prepared = _prepared(pol, ctx)
+    t = prepared.tables()
+    assert t["own"] is prepared.own.rows and t["own_mask"] is prepared.own.mask
+    assert t["f_rows"].shape[0] == prepared.faces.n_rows > 0
+    assert np.shares_memory(t["f_rows"], prepared.faces.rows)
+    assert {lane[0] for lane in t["lanes"]} == {0, 1, 2}
+    for lane, ln in zip(t["lanes"], prepared.lanes.values()):
+        assert lane[4] is ln.own_level.rows and lane[9] is ln.flux_witness.rows
+        assert lane[6] is ln.count and lane[7] is ln.a
+    arrays = [(k, v) for k, v in t.items() if k != "lanes"] + [
+        (f"lane[{j}][{e}]", x)
+        for j, lane in enumerate(t["lanes"])
+        for e, x in enumerate(lane)
+        if isinstance(x, np.ndarray)
+    ]
+    for name, a in arrays:
+        assert a.flags.c_contiguous, f"{name} is not C-contiguous"

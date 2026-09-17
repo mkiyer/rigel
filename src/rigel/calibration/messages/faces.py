@@ -7,7 +7,9 @@ A directed face is ``(destination, side)``: a node hears from its LEFT neighbour
 pass) or its RIGHT (side 1, the backward pass), so a rule needs no pair and no lookup (`side_of`). A
 rule is a KIND and its parameters; `Faces.apply` is the one home of the rule arithmetic, on the row
 constructors of `transfer_rows`. The builders that write the rules live in `transfer`; the level lanes
-that serve every face left without one live in `lanes`.
+that serve every face left without one live in `lanes`. `RowTable` is the one shape of an OPTIONAL row
+per node — a claim, a level, a witness — as the native pass reads it: a matrix and a presence mask,
+which the builders write directly.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ __all__ = [
     "TRANSPORT",
     "FaceRule",
     "Faces",
+    "RowTable",
     "fuse",
     "norm",
     "side_of",
@@ -53,6 +56,36 @@ def side_of(s: int, i: int) -> int:
     smaller id — which is why a directed face needs no pair and no lookup: it IS ``(destination,
     side)``, and every table below is indexed that way."""
     return 0 if s < i else 1
+
+
+class RowTable:
+    """OPTIONAL ROWS over the nodes, in the layout the native pass reads: an ``(n, K)`` matrix and an
+    ``(n,)`` presence mask, written by the builders directly. ``t[i]`` is node ``i``'s row (a view into
+    the matrix) or ``None``; ``t[i] = row`` writes it and marks it present; ``t[i] = None`` clears it. An
+    absent row reads as zeros in the matrix, so the matrix alone never says whether a node has a claim —
+    the mask does, and every reader of the matrix reads the mask beside it. ``shape`` may be ``(n, 2)``
+    for a row per directed face — ``t[x, side]`` — as the lanes' junction flux levels are kept."""
+
+    __slots__ = ("rows", "mask")
+
+    def __init__(self, shape, K: int):
+        shape = (int(shape),) if np.ndim(shape) == 0 else tuple(int(s) for s in shape)
+        self.rows = np.zeros((*shape, int(K)))
+        self.mask = np.zeros(shape, bool)
+
+    def __len__(self) -> int:
+        return self.mask.shape[0]
+
+    def __getitem__(self, i):
+        return self.rows[i] if self.mask[i] else None
+
+    def __setitem__(self, i, row) -> None:
+        if row is None:
+            self.rows[i] = 0.0
+            self.mask[i] = False
+        else:
+            self.rows[i] = row
+            self.mask[i] = True
 
 
 #: the five KINDS of composition rule a directed face can carry (``NONE``: the face has no rule and the
@@ -83,7 +116,8 @@ class Faces:
     scalar parameters ``n_u`` / ``n_s`` / ``a_b`` / ``a_x`` (the face's unspliced and spliced counts,
     the boundary's and the far region's gDNA opportunity), ``width`` (a blur variance beyond counting)
     and ``var`` (the level rule's width), and ``row`` / ``row2``, indices into ``rows`` — the ``(K,)``
-    maps a rule needs (a face map's λ image, a level map, the edge's level, the level rule's bound).
+    maps a rule needs (a face map's λ image, a level map, the edge's level, the level rule's bound),
+    a matrix of which the first ``n_rows`` are written.
     ``nbr[i, side]`` names the neighbour each face hears from, so a builder cannot write a rule at a
     face that does not exist; and a face carries ONE rule — a second write is refused — because the
     builders' faces are disjoint by construction (the splice faces serve intron|exon pairs, the edge
@@ -118,6 +152,7 @@ class Faces:
         "width",
         "var",
         "rows",
+        "n_rows",
     )
 
     def __init__(self, lam, left, right):
@@ -133,7 +168,11 @@ class Faces:
         self.a_x = np.zeros((n, 2))
         self.width = np.zeros((n, 2))
         self.var = np.zeros((n, 2))
-        self.rows: list = []
+        # the row store, as the native pass reads it: a rule keeps at most two rows (a map and a
+        # bound) and a face carries one rule, so two rows per face is its capacity; the unwritten
+        # rows are never read
+        self.rows = np.empty((2 * int((self.nbr >= 0).sum()), self.lam.shape[0]))
+        self.n_rows = 0
 
     def set(
         self,
@@ -172,8 +211,10 @@ class Faces:
     def _keep(self, row) -> int:
         if row is None:
             return -1
-        self.rows.append(np.asarray(row, np.float64))
-        return len(self.rows) - 1
+        k = self.n_rows
+        self.rows[k] = row
+        self.n_rows = k + 1
+        return k
 
     def any(self) -> bool:
         return bool((self.kind != NONE).any())

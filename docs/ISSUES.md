@@ -25,11 +25,12 @@ block size moves no number, the refit sweeps share their message layer) and the 
 pre-port and lanes worklists, every ruling in `DESIGN.md` §6b.15). What is OPEN: ③ the C/C++ port of
 `sweep._solve_block` — (i) the passes and `transfer_rows` LANDED 2026-09-17 (`native.transfer_pass`,
 `DESIGN.md` §6b.15.5: one native call per pass, the hop 2.2 → 0.33 µs, the replay six orders inside its
-budget), then (ii) `prepare`'s builders — the per-block packing of their lists into the tables the native
-pass reads is now the larger cost, 1.0 s a sweep against the kernel's 1.4 s on MO_3021, and the builders
-should write the tables directly — then (iii) ψ (the cube is `K × (K_t + 2)`), then (iv) threads over
-blocks, each step behind `sweep_replay.py replay --tolerance` on `sweeps_MO_3021_step7` (captured 2026-09-17
-before the port, on the sweep code of `a79004b5`), the `review_identity_*` references and the suite, timed against the 2026-09-17 baseline
+budget), then (ii) `prepare`'s builders — (ii-a) the layout LANDED 2026-09-17 (the builders write the tables
+the native pass reads directly, `RowTable`; the per-block packing deleted, bit-identical), and (ii-b) their
+arithmetic in C++ is the open half: the builders are 15.4 s of MO_3021's 30.8 s first sweep — then (iii) ψ
+(the cube is `K × (K_t + 2)`), then (iv) threads over
+blocks, each step behind `sweep_replay.py replay --tolerance` on `sweeps_MO_3021_step8` (captured 2026-09-17
+after step (i), on the sweep code of `8a9c25c4`), the `review_identity_*` references and the suite, timed against the 2026-09-17 baseline
 pair (`perf/baseline_2026-09-17/pair1_*`, the pushed tree at 8 threads on VCaP; the native pass read 526 → 403 s
 and 519 → 410 s on two interleaved pairs, `perf/port_2026-09-17/`); ⑤ the scan and the second pass, the
 stages that scale with depth (`ISSUES: scan-thread-split-starves-the-workers`). Not to do: micro-optimise the

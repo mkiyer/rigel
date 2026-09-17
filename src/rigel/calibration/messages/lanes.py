@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from . import Levels
-from .faces import NONE, side_of
+from . import Levels, Received
+from .faces import NONE, RowTable, side_of
 from .transfer_rows import (
     EPS,
     blur_row,
@@ -44,7 +44,7 @@ __all__ = ["LevelLane", "gdna_lane", "rna_lanes"]
 _FIELD = {"gdna": "level_gdna", "pos": "level_rna_pos", "neg": "level_rna_neg"}
 
 
-def gdna_lane(c: _Chain, own: list, faces: Faces, rho_ref: float) -> "LevelLane | None":
+def gdna_lane(c: _Chain, own: RowTable, faces: Faces, rho_ref: float) -> "LevelLane | None":
     """THE LEVEL LANE: the default of every directed face that has no composition rule. A gDNA level
     is absolute (a profile over ``u = log(rho / rho_ref)``), so it needs no map and no recipient: it
     crosses the faces composition cannot (strand changes, termini both ways, the AMBIG complex) and
@@ -63,7 +63,7 @@ def gdna_lane(c: _Chain, own: list, faces: Faces, rho_ref: float) -> "LevelLane 
     gene_edge[bnd] = ((lo >= 0) & c.is_intergenic[np.maximum(lo, 0)]) | (
         (hi_ >= 0) & c.is_intergenic[np.maximum(hi_, 0)]
     )
-    own_level: list = [None] * c.n
+    own_level = RowTable(c.n, c.K)
     for x in np.flatnonzero(~empty & ~c.is_intergenic):
         if gene_edge[x]:
             own_level[x] = poisson_level(u, c.n_u[x], c.a_g[x], rho_ref)
@@ -81,7 +81,7 @@ def gdna_lane(c: _Chain, own: list, faces: Faces, rho_ref: float) -> "LevelLane 
     return LevelLane("gdna", u, c.lam, rho_ref, c.n_u, c.a_g, empty, own_level, face)
 
 
-def rna_lanes(c: _Chain, own: list, library: _Library) -> dict:
+def rna_lanes(c: _Chain, own: RowTable, library: _Library) -> dict:
     """THE RNA LEVEL LANES, one per strand (the both-stranded locus).
     FACES from the flag bits: strand ``s``'s level crosses a face iff the boundary carries none of
     ``s``'s four bits and both nodes admit ``s``; across ``s``'s OWN junction it enters ``s``'s
@@ -136,9 +136,9 @@ def rna_lanes(c: _Chain, own: list, library: _Library) -> dict:
             face[:, side] = ok & (crossing | into_own_intron)
             two_sided[:, side] = ok & ((crossing & intron_s[reg]) | into_own_intron)
         rho_ref = float(library.rho_rna)
-        own_level: list = [None] * c.n
-        flux_of: dict = {}
-        flux_witness: list = [None] * c.n
+        own_level = RowTable(c.n, c.K)
+        flux = RowTable((c.n, 2), c.K)  # the junction flux levels, per (exon, side of its junction)
+        flux_witness = RowTable(c.n, 2)  # per empty flux source: (spliced count, route opportunity)
         if rho_ref > 0.0:
             for x in np.flatnonzero(free):
                 parts = []
@@ -166,27 +166,28 @@ def rna_lanes(c: _Chain, own: list, library: _Library) -> dict:
                         v = hop_price(c_j, c_j / r_j, cnt[x, col_read], kappa_read * a_r[x])
                         fl = flux_level(c.lam, c_j, r_j, rho_ref, v)
                         parts.append(fl)
-                        flux_of[(int(x), side_of(int(b), int(x)))] = fl
+                        flux[x, side_of(int(b), int(x))] = fl
                         c_sum += c_j
                         a_sum += c_j / r_j
                 if parts:
                     own_level[x] = intersect(parts)
                     if empty[x]:
                         flux_witness[x] = (c_sum, a_sum)
+        # the two columns as contiguous arrays: the native pass reads them as they are
         lanes[name] = LevelLane(
             name,
             c.lam,
             c.lam,
             rho_ref,
-            cnt[:, col_read],
+            np.ascontiguousarray(cnt[:, col_read]),
             a_r,
             empty,
             own_level,
             face,
             two_sided=two_sided,
             total=n_u,
-            flux=flux_of,
-            other=cnt[:, 1 - col_read] if split_live else None,
+            flux=flux,
+            other=np.ascontiguousarray(cnt[:, 1 - col_read]) if split_live else None,
             flux_witness=flux_witness,
         )
     return lanes
@@ -207,12 +208,14 @@ class LevelLane:
     WHOLE profile crosses (none on the gDNA lane: every gDNA hop is a lower bound; an intron and its
     own boundary on an RNA lane: one shared unspliced population). ``total`` is every node's total,
     through which a held level is read back as the node's composition (`row`); ``own_level`` each
-    node's own level; ``faces`` the directed faces the lane serves; ``flux``, per node,
-    ``{boundary: level}`` — the junction's priced estimate of the exon's RNA, kept per FACE so the
-    solve can tell which face's composition already carries it; ``flux_witness``, per EMPTY node
+    node's own level (a `RowTable`); ``faces`` the directed faces the lane serves; ``flux``, per
+    ``(exon, side)`` — the junction's priced estimate of the exon's RNA, kept per FACE (a `RowTable`
+    over the node's two sides) so the solve can tell which face's composition already carries it;
+    ``flux_witness``, per EMPTY node
     whose own level is a flux level, the witness that level travels with — the pooled spliced count
     on the pooled route opportunity of the node's lit junctions (an empty node has no count of its
-    own to stamp a level with)."""
+    own to stamp a level with), a `RowTable` of ``(count, opportunity)`` pairs. Every array is in the
+    layout the native pass reads (`tables`)."""
 
     __slots__ = (
         "population",
@@ -227,8 +230,7 @@ class LevelLane:
         "own_level",
         "face",
         "two_sided",
-        "flux_row",
-        "flux_rows",
+        "flux",
         "other",
         "flux_witness",
     )
@@ -262,15 +264,29 @@ class LevelLane:
         self.two_sided = (
             np.zeros((n, 2), bool) if two_sided is None else np.asarray(two_sided, bool)
         )
-        # the junction flux levels, per (exon, side of its junction): ``{(x, side): level}`` in,
-        # a row table out
-        self.flux_row = np.full((n, 2), -1, np.int32)
-        self.flux_rows: list = []
-        for (x, side), level in (flux or {}).items():
-            self.flux_row[int(x), int(side)] = len(self.flux_rows)
-            self.flux_rows.append(np.asarray(level, np.float64))
+        # the junction flux levels, per (exon, side of its junction)
+        self.flux = RowTable((n, 2), self.own_level.rows.shape[1]) if flux is None else flux
         self.other = other
-        self.flux_witness = [None] * n if flux_witness is None else flux_witness
+        self.flux_witness = RowTable(n, 2) if flux_witness is None else flux_witness
+
+    def tables(self) -> tuple:
+        """The lane as the native pass reads it (`native.transfer_pass`'s ``lanes`` entry): which
+        `Received` table it writes, its faces, its two-sided faces, its emptiness, the own levels with
+        their mask, the witness counts and opportunities, the other column or ``None``, and the flux
+        witnesses with their mask — the arrays themselves, nothing copied."""
+        return (
+            Received.LANES.index(self.field),
+            self.face,
+            self.two_sided,
+            self.empty,
+            self.own_level.rows,
+            self.own_level.mask,
+            self.count,
+            self.a,
+            self.other,
+            self.flux_witness.rows,
+            self.flux_witness.mask,
+        )
 
     def serves(self, s: int, x: int) -> bool:
         """Does the lane carry its level across the face into ``x`` from ``s``?"""
@@ -279,8 +295,7 @@ class LevelLane:
     def flux_at(self, x: int, side: int):
         """The junction flux level ``x`` holds at its ``side`` (0: from its left junction, 1: its right),
         or ``None``."""
-        r = self.flux_row[int(x), int(side)]
-        return None if r < 0 else self.flux_rows[r]
+        return self.flux[int(x), int(side)]
 
     def witness(self, y: int):
         """The strand's RNA count at ``y`` and its Poisson variance, read from the column split: the

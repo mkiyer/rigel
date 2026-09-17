@@ -15,6 +15,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.special import polygamma
 
+from rigel.calibration.messages.faces import RowTable
 from _transfer_harness import (
     _passes,
     _bits,
@@ -191,7 +192,7 @@ def test_the_rna_sources_are_single_strand_claims_and_the_flux_at_the_exon_only(
                 # an EMPTY source is an exon piece beside a lit junction, its level the flux's
                 # alone, travelling with the flux's witness
                 if lane.empty[x]:
-                    assert is_exon[x] and (lane.flux_row[x] >= 0).any()
+                    assert is_exon[x] and lane.flux.mask[x].any()
                     assert lane.flux_witness[x] is not None
                     assert lane.flux_witness[x][0] > 0.0
         for b in np.flatnonzero(is_bnd):
@@ -268,7 +269,7 @@ def test_the_two_sided_hop_keeps_the_whole_profile_and_pays_the_pairs_price():
     # the pair AGREES (one density on both sides): the price is counting alone and the upper side stands
     count = np.array([30.0, 300.0])
     a = np.array([300.0, 3000.0])
-    empty, none = np.zeros(2, bool), [None, None]
+    empty, none = np.zeros(2, bool), RowTable(2, u.shape[0])
     one_face = _bits(2, [(0, 1)])
     lane = LevelLane("pos", u, u, 0.5, count, a, empty, none, one_face, two_sided=one_face)
     two = received(lane, 30.0, 300.0)
@@ -317,7 +318,7 @@ def test_the_rna_hop_witness_is_the_split_where_the_strand_channel_is_live():
     count = np.array([5.0, 367.0])  # this strand's read column
     other = np.array([8.0, 400.0])  # the other column: no asymmetry on either node
     a = np.array([277.0, 223.0])
-    empty, none = np.zeros(2, bool), [None, None]
+    empty, none = np.zeros(2, bool), RowTable(2, u.shape[0])
     one_face = _bits(2, [(0, 1)])
     lane = LevelLane(
         "pos", u, u, 0.5, count, a, empty, none, one_face, two_sided=one_face, other=other
@@ -364,6 +365,8 @@ def test_the_rna_hop_witness_is_the_split_where_the_strand_channel_is_live():
     other = np.array([0.0, 0.0, 10.0])
     a = np.array([14054.0, 50.0, 227.0])
     empty = np.array([False, True, False])
+    source = RowTable(3, u.shape[0])
+    source[0] = prof
     chain = LevelLane(
         "pos",
         u,
@@ -372,7 +375,7 @@ def test_the_rna_hop_witness_is_the_split_where_the_strand_channel_is_live():
         count,
         a,
         empty,
-        [prof, None, None],
+        source,
         _bits(3, [(0, 1), (1, 2)]),
         other=other,
     )
@@ -399,7 +402,7 @@ def test_the_rna_hop_witness_is_the_split_where_the_strand_channel_is_live():
         np.array([69.0, 198.0]),
         np.array([14054.0, 227.0]),
         np.zeros(2, bool),
-        [None, None],
+        RowTable(2, u.shape[0]),
         one_face,
         two_sided=one_face,
     )
@@ -516,22 +519,19 @@ def test_the_cube_delivery_is_the_intersected_held_levels_and_the_own_flux(sweep
     n_u = np.array([50.0, 400.0, 0.0, 300.0])
     a_r = np.array([100.0, 100.0, 100.0, 100.0])
     empty = ~(n_u > 0)
-    own_pos = [
-        None,
-        -0.5 * np.maximum(0.0, (1.0 - u) / 0.3) ** 2 - 0.5 * (u / 5.0) ** 2,
-        None,
-        None,
-    ]
+    own_pos = RowTable(4, K)
+    own_pos[1] = -0.5 * np.maximum(0.0, (1.0 - u) / 0.3) ** 2 - 0.5 * (u / 5.0) ** 2
     none = _bits(4, [])
+    no_levels = RowTable(4, K)
     pos = LevelLane("pos", u, lam, 0.5, n_u / 2, a_r, empty, own_pos, none, total=n_u)
-    neg = LevelLane("neg", u, lam, 0.4, n_u / 2, a_r, empty, [None] * 4, none, total=n_u)
-    gd = LevelLane("gdna", u, lam, 0.5, n_u, a_r, empty, [None] * 4, none)
+    neg = LevelLane("neg", u, lam, 0.4, n_u / 2, a_r, empty, no_levels, none, total=n_u)
+    gd = LevelLane("gdna", u, lam, 0.5, n_u, a_r, empty, no_levels, none)
     ambig = np.array([False, True, True, True])
     free = {"pos": np.ones(4, bool), "neg": ambig}
     left, right = np.array([-1, 0, 1, 2]), np.array([1, 2, 3, -1])
     site = _SolveSite(ambig, free)
     prep = _PreparedTransfer(
-        [None] * 4, Faces(lam, left, right), {"gdna": gd, "pos": pos, "neg": neg}, site
+        RowTable(4, K), Faces(lam, left, right), {"gdna": gd, "pos": pos, "neg": neg}, site
     )
     lv_l = -0.5 * np.maximum(0.0, (0.5 - u) / 0.2) ** 2
     lv_r = -0.5 * np.maximum(0.0, (0.0 - u) / 0.2) ** 2

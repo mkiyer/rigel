@@ -19,6 +19,7 @@ import pytest
 
 import rigel.calibration.sweep as SW
 from rigel.calibration.messages import Policy
+from rigel.calibration.messages.faces import RowTable
 from _transfer_harness import (
     _drive,
     _bits,
@@ -200,7 +201,7 @@ def test_PERTURBATION_no_node_ever_hears_its_own_claim_back(sweep_inputs):
     for i in probes[:12]:
         base_rows, fl, br = _drive(prepared, ctx)
         held_before = [t.composition[i] if t.has_composition[i] else None for t in (fl, br)]
-        saved = prepared.own[i]
+        saved = prepared.own[i].copy()  # a row of the table: copy before the row is rewritten
         prepared.own[i] = -0.5 * ((lam - 3.3) / 0.2) ** 2  # a spike nowhere near any real claim
         rows, fl, br = _drive(prepared, ctx)
         held_after = [t.composition[i] if t.has_composition[i] else None for t in (fl, br)]
@@ -344,17 +345,16 @@ def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
     def floor(u_b):
         return -0.5 * np.maximum(0.0, (u_b - u) / 0.2) ** 2
 
-    flux = {
-        (1, 0): floor(0.4),
-        (1, 1): floor(0.1),
-    }  # exon 1's junctions: slot 0 to its left, 2 right
+    flux = RowTable((5, 2), K)  # exon 1's junctions: slot 0 to its left, 2 right
+    flux[1, 0], flux[1, 1] = floor(0.4), floor(0.1)
     none = _bits(5, [])
-    pos = LevelLane("pos", u, lam, 0.5, n_u / 2, a_r, empty, [None] * 5, none, total=n_u, flux=flux)
-    neg = LevelLane("neg", u, lam, 0.4, n_u / 2, a_r, empty, [None] * 5, none, total=n_u)
-    gd = LevelLane("gdna", u, lam, 0.5, n_u, a_r, empty, [None] * 5, none)
+    no_levels = RowTable(5, K)
+    pos = LevelLane("pos", u, lam, 0.5, n_u / 2, a_r, empty, no_levels, none, total=n_u, flux=flux)
+    neg = LevelLane("neg", u, lam, 0.4, n_u / 2, a_r, empty, no_levels, none, total=n_u)
+    gd = LevelLane("gdna", u, lam, 0.5, n_u, a_r, empty, no_levels, none)
     site = _SolveSite(fp & fn, {"pos": fp, "neg": fn})
     prep = _PreparedTransfer(
-        [None] * 5, Faces(lam, left, right), {"gdna": gd, "pos": pos, "neg": neg}, site
+        RowTable(5, K), Faces(lam, left, right), {"gdna": gd, "pos": pos, "neg": neg}, site
     )
     comp = -0.5 * ((lam - 1.0) / 0.5) ** 2
     held_l, held_r = floor(0.8), floor(-0.3)
@@ -459,7 +459,7 @@ def test_a_received_gdna_level_is_a_lower_bound_and_the_hop_widens_it():
         np.array([1.0e6, 1.0e6]),
         np.array([1.0e4, 1.0e4]),
         np.zeros(2, bool),
-        [None, None],
+        RowTable(2, u.shape[0]),
         _bits(2, [(0, 1)]),
     )
     held = Levels.empty(2, u.shape[0])
@@ -479,7 +479,7 @@ def test_a_received_gdna_level_is_a_lower_bound_and_the_hop_widens_it():
         np.array([1.0e6, 1.0e6]),
         np.array([1.0e4, 4.0e4]),
         np.zeros(2, bool),
-        [None, None],
+        RowTable(2, u.shape[0]),
         _bits(2, [(0, 1)]),
     )
     held.write(1, two_sided, 1.0e6, 1.0e4)
@@ -533,7 +533,8 @@ def test_a_full_node_emits_the_intersection_of_its_own_lower_side_and_what_it_ho
     from rigel.calibration.messages.transfer_rows import intersect, lower_side
 
     u = np.linspace(-10, 10, 60)
-    own = [None, -0.5 * ((u + 1.0) / 1.5) ** 2, None]
+    own = RowTable(3, u.shape[0])
+    own[1] = -0.5 * ((u + 1.0) / 1.5) ** 2
     lane = LevelLane(
         "gdna",
         u,
