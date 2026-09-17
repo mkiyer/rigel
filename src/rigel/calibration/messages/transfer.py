@@ -102,11 +102,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from ...native import transfer_pass
 from ..simplex_logodds import CubeRow, strand_row_logodds
 from . import BlockContext, ChainView, PsiMessage, Received
 from .faces import EDGE, FORWARD, LEVEL, SPLICE_OUT, TRANSPORT, Faces, fuse, norm
 from .lanes import gdna_lane, rna_lanes
 from .transfer_rows import (
+    _MARGINAL_NODES,
     EPS,
     SJ_FLAGS,
     boundary_shares_strand,
@@ -545,6 +547,99 @@ class _PreparedTransfer:
         self.faces = faces
         self.lanes: dict = {} if lanes is None else dict(lanes)
         self.site = site
+        self._packed = None
+
+    # ── phase 1, natively: the whole pass on the table in one call ─────────────────────────────────
+    def _pack(self) -> dict:
+        """The tables as the native pass reads them, built once per block and shared by both passes:
+        every node's own claim as a row matrix with a presence mask, the faces' arrays and their row
+        store as one matrix, each lane's arrays likewise."""
+        if self._packed is not None:
+            return self._packed
+        faces = self.faces
+        K, n = faces.lam.shape[0], faces.kind.shape[0]
+
+        def rows_of(items):
+            mask = np.fromiter((r is not None for r in items), bool, n)
+            mat = np.zeros((n, K))
+            if mask.any():
+                mat[mask] = np.stack([r for r in items if r is not None])
+            return mat, mask
+
+        own, own_mask = rows_of(self.own)
+        lanes = []
+        for ln in self.lanes.values():
+            level, level_mask = rows_of(ln.own_level)
+            witness = np.zeros((n, 2))
+            witness_mask = np.zeros(n, bool)
+            for i, w in enumerate(ln.flux_witness):
+                if w is not None:
+                    witness[i] = w
+                    witness_mask[i] = True
+            lanes.append(
+                (
+                    Received.LANES.index(ln.field),
+                    np.ascontiguousarray(ln.face, bool),
+                    np.ascontiguousarray(ln.two_sided, bool),
+                    np.ascontiguousarray(ln.empty, bool),
+                    level,
+                    level_mask,
+                    np.ascontiguousarray(ln.count, np.float64),
+                    np.ascontiguousarray(ln.a, np.float64),
+                    None if ln.other is None else np.ascontiguousarray(ln.other, np.float64),
+                    witness,
+                    witness_mask,
+                )
+            )
+        self._packed = dict(
+            lam=np.ascontiguousarray(faces.lam, np.float64),
+            own=own,
+            own_mask=own_mask,
+            f_kind=np.ascontiguousarray(faces.kind, np.int8),
+            f_row=np.ascontiguousarray(faces.row, np.int32),
+            f_row2=np.ascontiguousarray(faces.row2, np.int32),
+            f_n_u=np.ascontiguousarray(faces.n_u, np.float64),
+            f_n_s=np.ascontiguousarray(faces.n_s, np.float64),
+            f_a_b=np.ascontiguousarray(faces.a_b, np.float64),
+            f_a_x=np.ascontiguousarray(faces.a_x, np.float64),
+            f_width=np.ascontiguousarray(faces.width, np.float64),
+            f_var=np.ascontiguousarray(faces.var, np.float64),
+            f_rows=np.ascontiguousarray(np.stack(faces.rows) if faces.rows else np.zeros((0, K))),
+            marginal_nodes=np.ascontiguousarray(_MARGINAL_NODES, np.float64),
+            lanes=lanes,
+        )
+        return self._packed
+
+    def run_pass(self, received: Received, seq, nbr, terminal, *, backward: bool) -> None:
+        """PHASE 1 on the table in one native call (`native.transfer_pass`): the same hops, in the same
+        order, as ``propagate``'s kernel run by the backbone; nothing to say anywhere is a no-op. Gate:
+        ``tests/calibration/test_pass_kernel.py``."""
+        faces = self.faces
+        if self.own is None or not (
+            faces.any() or any(ln.face.any() for ln in self.lanes.values())
+        ):
+            return
+        levels = [
+            (
+                lv.present,
+                lv.profile,
+                lv.count,
+                lv.opportunity,
+                lv.has_witness,
+                lv.rna_count,
+                lv.rna_count_var,
+            )
+            for lv in (received.level_gdna, received.level_rna_pos, received.level_rna_neg)
+        ]
+        transfer_pass(
+            seq=np.ascontiguousarray(seq, np.int64),
+            nbr=np.ascontiguousarray(nbr, np.int64),
+            terminal=np.ascontiguousarray(terminal, bool),
+            has_composition=received.has_composition,
+            composition=received.composition,
+            levels=levels,
+            **self._pack(),
+        )
 
     # ── phase 1: propagate — the recipient's kernel, run by the backbone in chain order ──────────
     def propagate(self, received: Received, *, backward: bool):

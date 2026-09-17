@@ -23,10 +23,15 @@ Calibration is the tool's one unfinished component: the four sweeps are ~394 s o
 and gated (`DESIGN.md` §6b.15.1–§6b.15.4: a terminal receives nothing, the chain is solved a locus block at a time, the
 block size moves no number, the refit sweeps share their message layer) and the Python is pristine (the
 pre-port and lanes worklists, every ruling in `DESIGN.md` §6b.15). What is OPEN: ③ the C/C++ port of
-`sweep._solve_block` — the passes and `transfer_rows`, then `prepare`'s builders, then ψ (the cube is
-`K × (K_t + 2)`), then threads over blocks, each step behind `sweep_replay.py replay --tolerance` on
-`sweeps_MO_3021_step6`, the `review_identity_*` references and the suite, timed against the 2026-09-14 baseline
-pairs (`perf/baseline_2026-09-14/`; wall 498–502 s, peak 10.8–11.2 GB); ⑤ the scan and the second pass, the
+`sweep._solve_block` — (i) the passes and `transfer_rows` LANDED 2026-09-17 (`native.transfer_pass`,
+`DESIGN.md` §6b.15.5: one native call per pass, the hop 2.2 → 0.33 µs, the replay six orders inside its
+budget), then (ii) `prepare`'s builders — the per-block packing of their lists into the tables the native
+pass reads is now the larger cost, 1.0 s a sweep against the kernel's 1.4 s on MO_3021, and the builders
+should write the tables directly — then (iii) ψ (the cube is `K × (K_t + 2)`), then (iv) threads over
+blocks, each step behind `sweep_replay.py replay --tolerance` on `sweeps_MO_3021_step7` (captured 2026-09-17
+before the port, on the sweep code of `a79004b5`), the `review_identity_*` references and the suite, timed against the 2026-09-17 baseline
+pair (`perf/baseline_2026-09-17/pair1_*`, the pushed tree at 8 threads on VCaP; the native pass read 526 → 403 s
+and 519 → 410 s on two interleaved pairs, `perf/port_2026-09-17/`); ⑤ the scan and the second pass, the
 stages that scale with depth (`ISSUES: scan-thread-split-starves-the-workers`). Not to do: micro-optimise the
 Python passes; bake the λ lattice into the port (`sweep_logodds_step` is a parameter). `profiling/profiler.py`,
 `profiling/sweep_replay.py`.

@@ -1,64 +1,91 @@
-# NEXT SESSION — start here (2026-09-16, after the ruler's repair)
+# NEXT SESSION — start here (2026-09-17, after the port's step (i))
 
-This file is only how to begin. The port is `docs/dev/CALIBRATION_PERFORMANCE_PLAN.md` §F; the θ thread's
-derivations are `docs/dev/THETA_QUADRATURE.md`; the ruler's plan, EXECUTED, is `docs/dev/EXPECTATION_RULER_PLAN.md`.
+This file is only how to begin. The port's plan is `docs/dev/CALIBRATION_PERFORMANCE_PLAN.md` §F (the order of its
+four steps) and §G (the scan and the second pass after it); the LIVE status with numbers is
+`ISSUES: performance-memory-bounded-solve`; step (i)'s record is the closing paragraph of `DESIGN.md` §6b.15.5.
 
-## The agreed order of the sessions (owner, 2026-09-14; session 4 inserted 2026-09-16)
+## The order (owner, 2026-09-17: the release ships the contraction as it stands; performance until the tool is fast)
 
-1. ~~Code review and cleanup~~ — DONE 2026-09-14.
-2. ~~The test chromosome's new structures, both panels remeasured~~ — DONE 2026-09-14.
-3. ~~The ruler at zero gDNA and the flux price's witness~~ — DONE 2026-09-15 (`aeb465fa`, `f5b7471f`).
-4. ~~The ruler's repair~~ — DONE 2026-09-16, four commits PREPARED for your go (below).
-5. **THIS ONE — the performance re-baseline and THE PORT** (`ISSUES: performance-memory-bounded-solve`, plan §F):
-   two back-to-back profiler pairs at 8 threads on the deep library, identity references frozen fresh on that tree
-   (they are fresh on this one: re-frozen after commit 3 with the reason in its message), `sweep_replay.py capture`
-   (`sweeps_MO_3021_step6` predates the location floor, the ruler, the witness and the repair), then the port of the
-   block solve, gated bit-identical on every stage. Take `ISSUES: multimapper-blind-support` right after the port: it
-   is the first ruler question on real libraries and its repair is in the opportunity model, not the solve.
+1. ~~The ruler's repair~~ — DONE 2026-09-16 (four commits, `e51d91c6` … `64b79e9a`).
+2. ~~The yield's floors~~ — DONE 2026-09-17 (`a79004b5`).
+3. ~~The port, step (i): the directional pass native~~ — DONE 2026-09-17 (the commit this file rides in:
+   `native.transfer_pass`; VCaP 526 → 403 s and 519 → 410 s at 8 threads).
+4. **THIS ONE — step (ii): `prepare`'s builders write the tables the native pass reads**, then
+5. step (iii): ψ native (`simplex_logodds`; the two ψ solves are 46 + 58 s of the 397 s sweep on VCaP), then
+6. step (iv): threads over blocks (the blocks are independent given the library; `solve_chain`'s loop), then
+7. §G: the scan (33 s) and the second pass (22 s), the stages that scale with depth.
 
-## What session 4 left, and how to commit it (owner's go)
+## Step (ii), concretely
 
-Four commits are prepared, not made: the working tree holds all four and each one's file state is snapshotted with
-its message under the session scratchpad's `commits/1_members`, `2_truth_instrument`, `3_expectation_ruler`,
-`4_multimapper_check` (`commits/commit_series.sh` replays them in order and leaves the tree clean; `cat
-commits/*/MESSAGE.txt` and `git diff` are the review). Every gate is on record in the messages: the falsification
-tests verified failing first, every perturbation fired, the suite re-derived file by file (3,414 / 5 xfail / 3,419),
-the goldens unchanged to the bit, the three `review_identity_*` references re-frozen after commit 3 with the reason,
-both panels' instruments run on the landed tree against `DESIGN.md` §7's standing numbers.
+`TransferPolicy.prepare` (`src/rigel/calibration/messages/transfer.py`) builds, per block, every node's own claim
+(`_claims`: a Python list of `(K,)` rows or `None`), the composition rules (`Faces`, already typed tables plus a
+row store), and the level lanes (`lanes.gdna_lane`, `lanes.rna_lanes`: `LevelLane` objects whose `own_level` and
+`flux_witness` are Python lists). `_PreparedTransfer._pack` turns those lists into `(n, K)` matrices with masks once
+per block — 1.0 s a sweep on MO_3021 against the native kernel's 1.4 s — and the builders themselves are 101 s of
+VCaP's 397 s sweep (`profiler.py`: RNA lanes 43, gDNA lane 22, claims 16, splice faces 11, alternative splice site 4,
+terminus rules 4). Two sub-steps, each its own commit:
 
-1. **The reference's members** (`ISSUES: the-ruler-reference-on-sparse-real-libraries` CLOSED): members are
-   kernels with a location, widths read among them, located iff more than √n members at a median knn width within
-   1 nat; the regime on the result (`gdna_reference_members`, in `summary.json`). Both panels unchanged to the
-   fragment; LBX0190 and MO_3021 `None → no contraction` (their walls-only landscapes had read a false reference).
-2. **`ruler_vs_truth.py`** promoted from the prototype, `--self-test` 20/20, its index row and `TESTING.md` §0c; the
-   depth-ladder configs given a home under `scripts/sim/configs/test_reference_depth_*.yaml`.
-3. **The expectation ruler on the per-base length** (`ISSUES: ruler-multimapper-floor-caps-the-correction` CLOSED;
-   `DESIGN.md` §7.2, `EQUATIONS.md` §11): efficiencies are posterior means under the landscape from own counts and
-   apportioned crossings, published on the result; the transcript length a taper-weighted sum over its own bases;
-   the locus prior's gDNA length the count's own objects at their efficiencies; floor, junction objects and flank
-   imputation deleted. Every open question of the plan tried both ways, the refused arms with their numbers in §7.2.
-   The ladder thermometer's capture-ON misassignment 0.45× stranded / 0.68× unstranded, OFF strata identical.
-4. **The multimapper check** (`ISSUES: multimapper-blind-support` OPENED, read-only): on both captured real
-   libraries the factor falls monotonically with the transcript's multimapper share (VCaP median 0.231 → 0.002 from
-   below 1 % to ≥ 50 %); the repair is a mappable support in the opportunity model.
+* **(ii-a) the layout** — the builders write matrices and masks directly (`own` as `(n, K)` + mask,
+  `LevelLane.own_level` likewise, `flux_witness` as `(n, 2)` + mask, `Faces.rows` a matrix), `_pack` deleted. A pure
+  re-layout: gate it BIT-IDENTICAL — the two-kernel harness pattern (`s7/pass_ab.py`, old prepare against new on the
+  captured blocks, every table equal), the replay on a FRESH capture of this tree (`sweep_replay.py capture … --out
+  perf/sweeps_MO_3021_step8`, five minutes; `step7` was captured before step (i) and already differs at ulp), the
+  suite, and the three `review_identity_*` references, which must read BIT-IDENTICAL.
+* **(ii-b) the arithmetic** — the builders' per-node work in C++ beside `pass_kernel.cpp` (one call per block,
+  `transfer_prepare`): the strand profiles (`simplex_logodds.strand_row_logodds`), `level_of_profile`,
+  `poisson_level`, `flux_level`, the face rules' rows (`face_map_lambda`, `level_map_lambda`, `edge_level_row`,
+  `level_bound_row`), the face and lane bits. A port that changes summation order moves at ulp: gate it to the replay's
+  `--tolerance` budget, re-freeze the references with the reason, time it on interleaved pairs.
 
-## 2026-09-17 addendum — the yield's endpoint, and a fifth commit prepared
+Read the Python first; it is the executable specification, and every function above is unit-gated in
+`tests/calibration/test_transfer_*.py` and `test_sweep_backbone.py`.
 
-The owner ruled TPM stays on the plain fragment-length-marginal length (kept constant for now) and asked for the
-yield's variance to be modelled. The session's `s6/` scratchpad holds the work: `lever_census.py` (the pipeline
-twice, contracted vs plain transcript yields), `census_flips.py`, `yield_draws.py` (every piece efficiency drawn
-from its posterior; the count as the expectation over draws) and `draws_census.py`. What was found is in
-`DESIGN.md` §7.2 (the yield's two consumers, and its endpoint) and two new entries, `ISSUES:
-yield-variance-beside-the-count` (later, with the per-transcript prior lane: the analytic yield sd beside the
-count, gated against the draws' spread) and `ISSUES: capture-premise-untested-on-cdna` (watch). **Commit 5 is this
-commit** (`commits/5_floors`): the 1 bp
-floors deleted for the cannot-emit rule, five gates, four perturbations fired, the thermometer neutral within the
-reseed floor, the capture-ON identity reference re-frozen with the reason. The isoform flips the census found
-(VCaP 39 % of multi-isoform genes) are the model's answer under the capture premise and are stable under the yield's
-posterior — not a defect to fix, a limit to disclose (`count_unambig` beside `count`). The owner's order after it (2026-09-17):
-the release ships this contraction as it stands; PERFORMANCE next — the tool must be blazingly fast and is painfully
-slow — which is item 5 below; the variance metric and the prior's allocation across transcripts come with the
-per-transcript prior lane, after.
+## The protocol for every step (unchanged since the plan)
+
+1. `python scripts/design/preflight.py` first; the suite's standing count is in `CLAUDE.md`.
+2. DERIVE from the Python → the C++ in-tree (`src/rigel/native/`, a `nanobind_add_module` in `CMakeLists.txt`, the
+   import in `src/rigel/native.py`; `pip install --no-build-isolation -e ".[dev]"` rebuilds in 30 s) → a two-kernel
+   harness on real captured blocks before wiring (copy `s7/pass_ab.py`: it monkeypatches `sweep._pass`, runs both
+   kernels on every block and compares every field) → wire → `tests/calibration/test_pass_kernel.py`'s pattern for
+   the gate file (equality on every bit and count, 1e-12 on profiles, a spy for the wiring) → `python
+   scripts/profiling/sweep_replay.py replay --dir ~/Downloads/rigel_runs/perf/sweeps_MO_3021_step8 --call C
+   --tolerance` for C in 0–3 → the suite → `rename_identity.py --check` on the three references → interleaved
+   timing pairs at 8 threads on VCaP.
+3. The timing arms: a worktree of the PRE-step commit with this build's binaries — `git worktree add
+   /tmp/rigel_pre <SHA>`, copy `build/cp312-abi3-macosx_26_0_arm64/_*_impl*.so` into `<worktree>/src/rigel/`
+   (copy to a new name, then `mv`), run it with `PYTHONPATH=<dir holding sitecustomize.py>` (the file that strips the
+   editable install's redirecting finder is `shipped_site/sitecustomize.py` in the scratchpad copy) — then, in one
+   sitting, `profiler.py --bam <VCaP> --index <index> --threads 8 --out pairN_pre.json` from the worktree and the
+   same from the working tree, twice; `profiler.py --compare A.json B.json`; the untouched stages must read ~1.00.
+   The libraries: VCaP `~/Downloads/rigel_runs/cfrna/mctp_vcap_rna20m_dna05m/bam/star.srt.rmdup.collate.bam`
+   (18.6 M fragments, the timing library), MO_3021 (the capture library); the index `~/Downloads/rigel_runs/refs/rigel_index`.
+4. Each step its own commit, PREPARED (`commits/N_name/files/` by `snapshot.sh`, the message beside it) and committed
+   on the owner's go: move the committed snapshots to `commits/committed/`, `git stash push -u`, run
+   `commit_series.sh`, verify `git diff stash@{0}` shows only the stash's untracked files and `cmp` those against
+   HEAD, drop the stash, push.
+
+## ⛔ Traps met in this session (also in memory)
+
+* Never edit `src/` while a background measurement is starting runs: an import added before its module was built
+  killed the second baseline pair and the capture at import.
+* `import rigel.calibration.calibrate as X` binds the FUNCTION the package re-exports, not the module; patch
+  submodule globals through `importlib.import_module`.
+* A scripted edit that asserts several anchors must write per file, or a failed later anchor silently loses the
+  earlier edits — `git status` and `grep` after every scripted edit.
+* The jargon gate reads C++: aliases like `F1` / `B2` are numbered rule labels; name them.
+* Counting: a `native/*.cpp` is +2 collected (jargon, docs-boundary); a `tests/` file +2 plus its tests.
+
+## Where everything is
+
+* The synced scratchpad: `~/Downloads/rigel_runs/prototypes/2026-09-16_ruler_repair/` — `commits/` (the snapshots,
+  `snapshot.sh`, `commit_series.sh`), `s7/` (`pass_ab.py`, `pass_census.py`), `s6/` (the lever census and the
+  yield draws), `s5/` (the ruler's arms), `real/` (the real-library harnesses), `shipped_site/sitecustomize.py`.
+* Captures and baselines: `~/Downloads/rigel_runs/perf/sweeps_MO_3021_step7` (before step (i)),
+  `perf/baseline_2026-09-17/pair1_*` (the pre-port tree, 524 / 528 s), `perf/port_2026-09-17/` (the two
+  interleaved pairs of step (i), with the stage tree each side).
+* The identity references: `~/Downloads/rigel_runs/arms/review_identity_*.json`, frozen on this tree.
+
+---
 
 ## ⛔ Read first — three things the repair uncovered
 

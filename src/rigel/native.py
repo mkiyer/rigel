@@ -9,6 +9,7 @@ _bam_impl     : BAM scanning, annotation writing, SJ tag detection (htslib)
 _resolve_impl : Fragment overlap resolution against the reference index
 _scoring_impl : Per-fragment likelihood scoring (strand, coverage, splice)
 _em_impl      : Locus-level EM solver, connected components, effective-length normalization
+_pass_impl    : One directional pass of the calibration sweep's composition transfer
 _cgranges_impl: Interval overlap queries (vendored cgranges)
 """
 
@@ -45,6 +46,10 @@ from ._em_impl import scatter_units_i32
 from ._em_impl import scatter_units_i64
 from ._em_impl import scatter_units_u8
 
+# -- The calibration sweep's directional pass ------------------------------
+from ._pass_impl import transfer_pass
+from ._pass_impl import trigamma
+
 # -- Interval overlap -------------------------------------------------------
 from ._cgranges_impl import cgranges
 
@@ -75,6 +80,9 @@ __all__ = [
     "scatter_units_i32",
     "scatter_units_i64",
     "scatter_units_u8",
+    # The sweep's pass
+    "transfer_pass",
+    "trigamma",
     # Intervals
     "cgranges",
 ]

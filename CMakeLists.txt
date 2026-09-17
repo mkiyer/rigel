@@ -188,6 +188,21 @@ target_compile_options(_em_impl PRIVATE -g)
 
 install(TARGETS _em_impl LIBRARY DESTINATION rigel)
 
+# --- Build the _pass_impl extension -------------------------------------------
+
+# One directional pass of the composition-transfer policy (the calibration sweep's phase 1): the
+# per-hop arithmetic of messages/faces.py, lanes.py and transfer_rows.py on the backbone's tables,
+# with the per-hop Python call removed. Pure C++17 + nanobind + numpy.
+nanobind_add_module(
+  _pass_impl
+  NOMINSIZE
+  STABLE_ABI
+  src/rigel/native/pass_kernel.cpp
+)
+target_compile_options(_pass_impl PRIVATE -g)
+
+install(TARGETS _pass_impl LIBRARY DESTINATION rigel)
+
 # --- SIMD / Architecture Detection -------------------------------------------
 #
 # Detect CPU architecture and report available SIMD instruction sets.

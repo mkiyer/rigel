@@ -655,9 +655,12 @@ bit for bit; `--block-slots N|none` replays it at another locus-block size, whic
 the chunk-exactness of the whole sweep on real data); set `OMP_NUM_THREADS` deliberately. The frozen
 references are `~/Downloads/rigel_runs/arms/review_identity_*.json` (two ladder conditions and the LBX0190
 library, frozen on the tree of 2026-09-14 that carries the lanes worklist and the landscape's location floor,
-and bit-identical through the cleanup that followed) and the captured sweeps
-`~/Downloads/rigel_runs/perf/sweeps_MO_3021_step6` (the lanes worklist's tree; `DESIGN.md` §6b.15), with the
-deep library's timing baseline beside them in `perf/baseline_2026-09-14/` (two back-to-back pairs at
+re-frozen with the reason after every landing since — the ruler's repair, the yield's floors, the native
+pass, each in its commit) and the captured sweeps `~/Downloads/rigel_runs/perf/sweeps_MO_3021_step7` (2026-09-17,
+before the port, on the sweep code of the pushed `a79004b5`; `step6` is the lanes worklist's tree; `DESIGN.md` §6b.15). A port is
+held to the replay's `--tolerance` budget and to `tests/calibration/test_pass_kernel.py`, which runs the
+per-hop Python kernel and the native pass on the same tables. The deep library's timing baseline is
+`perf/baseline_2026-09-17/pair1_*` (the pushed tree at 8 threads on VCaP; `baseline_2026-09-14/` two back-to-back pairs at
 8 threads). The
 refit sweeps' captures carry their message cache, so their replay exercises the cache path and ψ; sweep 0
 exercises the whole message layer. `ISSUES: performance-memory-bounded-solve` carries the work.

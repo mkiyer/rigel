@@ -435,6 +435,14 @@ class Prepared(Protocol):
         its HIGH one; on a chain that IS forward-backward, and nothing here iterates.
         """
 
+    def run_pass(self, received: Received, seq, nbr, terminal, *, backward: bool) -> None:
+        """PHASE 1 in one call, OPTIONAL: run the whole pass on the table — for every destination in
+        ``seq`` (chain order) whose neighbour ``nbr[i] >= 0`` and which is not a terminal, what
+        ``receive(nbr[i], i)`` would do — without a per-hop Python call. The backbone prefers it where a
+        policy offers it (the shipped policy's is native, `native.transfer_pass`) and runs ``propagate``'s
+        kernel otherwise; the two are one pass, and `tests/calibration/test_pass_kernel.py` holds them to
+        each other."""
+
     def solve(self, from_left: Received, from_right: Received) -> PsiMessage:
         """PHASE 2, the policy's half: the ψ channels at every slot from the two tables — row ``i`` of
         ``from_left`` is what slot ``i`` holds from its LOW neighbour (no neighbour at a reference

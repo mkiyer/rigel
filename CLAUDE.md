@@ -187,16 +187,18 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,419 passed / 0 skipped / 5 xfail, 3,424 collected** (re-derived
-2026-09-17 after the yield's floors were deleted: +5 content gates — the common-thinning invariance and the cannot-emit
-rule in `test_estimator.py`, each over both EM modes, and the unfloored locus yield in `test_priors.py`; before that
-+33 from 3,386 with the ruler's repair of 2026-09-16, file by file: the members rule +3 — two selector gates in
-`test_abundance_landscape.py`, the result-schema gate for `gdna_reference_members`; the truth instrument +5 —
-`ruler_vs_truth.py` by the `scripts/design/` row, its self-test in `test_instrument_self_tests.py`; the expectation
-ruler +25 — `capture_efficiency.py` by the module row (+3) with its seven gates in `test_capture_efficiency.py` (+2 by
-the `tests/` row, +7), the taper, crossing-share and per-interval-length gates in `test_effective_length.py` (+18),
-`test_capture_eff_length.py` rewritten 15 → 12, `test_priors.py` 29 → 27 with the floor's tests replaced by the
-object-form length tests; the goldens unchanged to the bit). The 5 xfails are executable
+**The standing baseline: 0 failed / 3,426 passed / 0 skipped / 5 xfail, 3,431 collected** (re-derived
+2026-09-17 after the native pass: +7 — the three gates of `test_pass_kernel.py` with the `tests/` row's +2, and +2
+for `native/pass_kernel.cpp` by the row below; before that +5 when the yield's floors were deleted — the
+common-thinning invariance and the cannot-emit rule in `test_estimator.py`, each over both EM modes, and the
+unfloored locus yield in `test_priors.py`; and +33 from 3,386 with the ruler's repair of 2026-09-16, file by file:
+the members rule +3 — two selector gates in `test_abundance_landscape.py`, the result-schema gate for
+`gdna_reference_members`; the truth instrument +5 — `ruler_vs_truth.py` by the `scripts/design/` row, its self-test
+in `test_instrument_self_tests.py`; the expectation ruler +25 — `capture_efficiency.py` by the module row (+3) with
+its seven gates in `test_capture_efficiency.py` (+2 by the `tests/` row, +7), the taper, crossing-share and
+per-interval-length gates in `test_effective_length.py` (+18), `test_capture_eff_length.py` rewritten 15 → 12,
+`test_priors.py` 29 → 27 with the floor's tests replaced by the object-form length tests; the goldens unchanged to
+the bit). The 5 xfails are executable
 records of proven defects whose fixes are elsewhere
 (`ISSUES: two-sided-exon-row`; `ISSUES: antisense-prior-assembly-casualty`;
 `ISSUES: the-lower-bound-noise-ratchet`, the encompassing locus's shallow flank under an edge level;
@@ -213,6 +215,7 @@ confirm with `pytest --collect-only -q | grep <stem>`:
 |---|---|---|
 | `src/rigel/calibration/` module | **+3** | jargon, docs-boundary, and layering *if declared in `_layers.py`* |
 | `tests/` file (any directory) | **+2** | jargon, docs-boundary |
+| `src/rigel/` file outside `calibration/` (a `.py`, or a `native/*.cpp`) | **+2** | jargon, docs-boundary |
 | `scripts/design/` (or `sim/`, `profiling/`) file | **+4** | imports, says-what-it-is-for, jargon, docs-boundary |
 | `docs/dev/` file | **+1** | jargon only |
 | top-level `docs/` .md (an owner decision — the permanent-set gate pins the list) | **+2** | jargon, docs-boundary |

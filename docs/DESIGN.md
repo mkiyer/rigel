@@ -1148,6 +1148,22 @@ lanes hold their faces as ``(n, 2)`` bits and their junction flux as a row table
 4.6M-tuple face sets and the neighbour-pair enumeration are gone, bit-identically; `_SolveSite` needs no
 neighbour arrays. A compiled pass reads these buffers directly.
 
+**The passes are native** (2026-09-17; the port's step (i), `ISSUES: performance-memory-bounded-solve` ③).
+`native.transfer_pass` (`src/rigel/native/pass_kernel.cpp`) runs one directional pass in one call — the
+face's rule and each lane's emit and receive, in chain order, on exactly these tables — and the backbone
+prefers it where a policy offers `run_pass` beside `propagate`'s per-hop kernel (the Prepared protocol; the
+silent policy and a prototype policy still run the per-hop path). Every row operation is the Python's term
+for term and only the summation orders differ, so the gate is agreement and a budget, not bits:
+`tests/calibration/test_pass_kernel.py` holds the two passes to equality on every presence bit, count and
+witness and to 1e-12 on every profile (the toy's captured sweep; the wiring by a spy), and on MO_3021's
+first sweep — 852 block-passes, 4.1 M hops — no boolean or count differs and profiles agree to 3.4e-13. The
+replay on `sweeps_MO_3021_step7` moves the first sweep's `f_g` on 16,021 slots by at most 5.6e-16 and its
+`var_gdna` by 5.7e-14 — 2.1e-6 of the derived budget — and the three refit sweeps are bit-identical. The hop
+went from 2.2 µs to 0.33 µs (the kernel 9.1 → 1.4 s on that sweep) and the pass census says what remains:
+259 k Gaussian blurs a sweep at a median 93 taps, against 4.3 M lane hops that forward or say nothing and
+1.1 M forward rules; the builders' lists packed into the tables once per block now cost 1.0 s a sweep, which
+is why step (ii) is `prepare`'s builders writing the tables directly.
+
 #### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer)
 
 A single-strand slot is the cube with a tilt grid of one cell — its tilt is its live strand, `τ = ±1` — so

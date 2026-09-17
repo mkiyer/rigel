@@ -642,24 +642,30 @@ def _pass(seq, nbr, prepared, n_grid: int, *, backward: bool, terminal=None) -> 
     from one side, every other node from two. A node with a neighbour whose row stays empty holds
     SILENCE: delivered, and nothing to say. The two states are the table's, so a kernel cannot leave a
     node "never spoken to" — it either writes the row or it does not. A policy that sends nothing at
-    all returns no kernel, and every node then holds silence from this side.
+    all returns no kernel, and every node then holds silence from this side. A policy that offers
+    ``run_pass`` (the shipped transfer policy, whose kernel is native) runs the whole pass on the table
+    in one call: the same order and the same two rules.
 
     ``terminal`` (a bool per node, or ``None`` for none) marks the nodes that RECEIVE NOTHING: the hop
     into one is never asked of the kernel and the node holds silence — delivered, and empty. What a
     terminal SENDS is the policy's business as for any node; what it hears is not, and that is the
     boundary condition the locus solve stands on.
     """
-    received = Received.empty(len(seq), int(n_grid))
+    seq = np.asarray(seq, np.int64)
+    nbr = np.asarray(nbr, np.int64)
+    term = np.zeros(seq.shape[0], bool) if terminal is None else np.asarray(terminal, bool)
+    received = Received.empty(seq.shape[0], int(n_grid))
+    received.has_neighbour[seq] = nbr[seq] >= 0  # the backbone's: the side exists
+    run = getattr(prepared, "run_pass", None)
+    if run is not None:  # the policy runs the whole pass natively on the table (the shipped policy)
+        run(received, seq, nbr, term, backward=backward)
+        return received
     receive = prepared.propagate(received, backward=backward)
-    has_neighbour = received.has_neighbour
-    for i in seq:
-        s = nbr[i]
-        if s < 0:
-            continue
-        has_neighbour[i] = True
-        if terminal is not None and terminal[i]:
-            continue
-        if receive is not None:
+    if receive is None:
+        return received
+    for i in seq.tolist():
+        s = int(nbr[i])
+        if s >= 0 and not term[i]:
             receive(s, i)
     return received
 
