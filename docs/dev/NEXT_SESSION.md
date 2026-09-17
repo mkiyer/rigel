@@ -72,7 +72,7 @@ Read the Python first; it is the executable specification, and every function ab
   submodule globals through `importlib.import_module`.
 * A scripted edit that asserts several anchors must write per file, or a failed later anchor silently loses the
   earlier edits — `git status` and `grep` after every scripted edit.
-* The jargon gate reads C++: aliases like `F1` / `B2` are numbered rule labels; name them.
+* The jargon gate reads C++: a one-letter-one-digit type alias reads as a numbered rule label; name aliases.
 * Counting: a `native/*.cpp` is +2 collected (jargon, docs-boundary); a `tests/` file +2 plus its tests.
 
 ## Where everything is
