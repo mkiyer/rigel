@@ -1168,7 +1168,24 @@ per side — is a `RowTable` (`messages/faces.py`: a matrix and a presence mask,
 the face row store is a matrix with a written prefix, and the per-block packing is deleted; the pass reads
 the builders' own arrays, none copied (`test_pass_kernel.py`). A pure re-layout, gated bit-identical: every
 table of MO_3021's 426 blocks against the pre-step tree, the four captured sweeps, the three identity
-references. The builders themselves are 15.4 s of that 30.8 s sweep, which is what step (ii-b) ports.
+references. **The builders are native** (step (ii-b), 2026-09-17): `native.transfer_prepare`
+(`src/rigel/native/prepare_kernel.cpp`, the `_prepare_impl` module) builds one block's claims, face rules and
+level lanes into those tables in one call — the strand profiles, the face maps, the edge level, the terminus
+level rule with the pair's discrepancies, the alternative splice site, the gDNA lane's Poisson and
+profile-read levels, the RNA lanes' faces from the flag bits, their flux levels and witnesses — on the row
+constructors of `native/transfer_rows.h`, shared with the pass kernel. `TransferPolicy.prepare` calls it;
+the Python builders remain as `_prepare_reference`, the executable specification, which
+`tests/calibration/test_prepare_kernel.py` holds the native call to table by table on the toy's captured sweep
+(five contexts: the bare toy, the populated terminus insides, the alternative splice sites, no strand model,
+no gDNA coordinate; every boolean, index, count and witness equal, every row within 1e-9 — the compiler's
+fused multiply-add is the whole difference). On MO_3021's first sweep (426 blocks): no boolean or index
+differs, rows agree to 2.3e-10, the builders 20.0 → 2.5 s; the replay on `sweeps_MO_3021_step8` moves the
+first sweep's fractions by at most 1.1e-15 and `var_gdna` by 5.7e-14 — 4.1e-6 of the derived budget — and the
+refit sweeps are bit-identical. Timed on VCaP at 8 threads, two interleaved pairs against the pre-step worktree:
+wall 409 → 315 s and 403 → 314 s (0.77×), the sweep 281 → 191 s and 278 → 190 s (0.68×), the builders
+103 → 18 s (0.18×), the pass 41 → 37 s (the packing that lived inside it), ψ and every untouched stage at
+0.93–1.03, peak 11.3 → 11.1 GB (`perf/port_ii_2026-09-17/`). What remains of the sweep is ψ: the self-solve's
+46 s and the final solve's 57 s of 190 s — step (iii).
 
 #### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer)
 

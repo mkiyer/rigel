@@ -8,14 +8,10 @@
 // side, and each level lane whose faces include this one carrying its population's level (the sender
 // emits; a full recipient prices the hop and takes the lower side). This file is that arithmetic on
 // the same tables the Python reads (`Faces`, `LevelLane`, `Received`), row by row over the solve grid,
-// with the per-hop Python call removed. The executable specification is the Python; the gates are
+// with the per-hop Python call removed; the row constructors are `transfer_rows.h`, shared with the
+// builders (`prepare_kernel.cpp`). The executable specification is the Python; the gates are
 // `tests/calibration/test_pass_kernel.py` (both passes on real captured blocks, every table compared)
 // and `profiling/sweep_replay.py replay --tolerance` on a captured sweep.
-//
-// Numerics: every row operation is the Python one term for term (max-normalisation, the edge-padded
-// Gaussian blur at half-width ceil(4 sqrt(v) / dlam), linear interpolation with numpy's end rules,
-// trigamma for the counting variance). Summation orders differ from numpy's, so a port is held to
-// the replay's derived budget, not to bits.
 
 #include <algorithm>
 #include <cmath>
@@ -27,7 +23,10 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 
+#include "transfer_rows.h"
+
 namespace nb = nanobind;
+using namespace transfer_rows;
 
 namespace {
 
@@ -38,193 +37,6 @@ using BoolMat = nb::ndarray<bool, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
 using IdxVec = nb::ndarray<int64_t, nb::ndim<1>, nb::c_contig, nb::device::cpu>;
 using IdxMat = nb::ndarray<int32_t, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
 using KindMat = nb::ndarray<int8_t, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
-
-constexpr double EPS = 1.0e-9;  // transfer_rows.EPS
-constexpr double TINY = 1.0e-300;
-constexpr int NONE = 0, FORWARD = 1, TRANSPORT = 2, SPLICE_OUT = 3, EDGE = 4, LEVEL = 5;
-
-// ---- scalar pieces ---------------------------------------------------------------------------------
-
-// trigamma(x) = zeta(2, x): the recurrence up to x >= 12, then the asymptotic series through
-// B_14 / x^15, whose truncation there is below 1e-17 relative.
-double trigamma(double x) {
-    double acc = 0.0;
-    while (x < 12.0) {
-        acc += 1.0 / (x * x);
-        x += 1.0;
-    }
-    const double x2 = 1.0 / (x * x);
-    double s = 1.0 / x + 0.5 * x2;
-    double p = x2 / x;  // 1/x^3
-    s += p / 6.0;
-    p *= x2; s -= p / 30.0;
-    p *= x2; s += p / 42.0;
-    p *= x2; s -= p / 30.0;
-    p *= x2; s += p * 5.0 / 66.0;
-    p *= x2; s -= p * 691.0 / 2730.0;
-    p *= x2; s += p * 7.0 / 6.0;
-    return acc + s;
-}
-
-inline double count_logvar(double n) { return trigamma(n + 0.5); }
-
-// hop_price(n_s, a_s, n_x, a_x): both counts' counting plus the discrepancy beyond it.
-double hop_price(double n_s, double a_s, double n_x, double a_x) {
-    double v = count_logvar(n_s) + count_logvar(n_x);
-    if (n_s > 0.0 && n_x > 0.0) {
-        const double l = std::log((n_x / a_x) / (n_s / a_s));
-        v += std::max(0.0, l * l - (1.0 / n_s + 1.0 / n_x));
-    }
-    return v;
-}
-
-// ---- row pieces (length K) ---------------------------------------------------------------------------
-
-inline double vmax(const double* r, int K) {
-    double m = r[0];
-    for (int j = 1; j < K; ++j) if (r[j] > m) m = r[j];
-    return m;
-}
-inline double vmin(const double* r, int K) {
-    double m = r[0];
-    for (int j = 1; j < K; ++j) if (r[j] < m) m = r[j];
-    return m;
-}
-inline double ptp(const double* r, int K) { return vmax(r, K) - vmin(r, K); }
-inline void norm_inplace(double* r, int K) {
-    const double m = vmax(r, K);
-    for (int j = 0; j < K; ++j) r[j] -= m;
-}
-
-// numpy.interp(x, xp, fp, left, right) for increasing (not necessarily strictly) xp of length K.
-void interp(const double* x, int n, const double* xp, const double* fp, int K, double left,
-            double right, double* out) {
-    for (int i = 0; i < n; ++i) {
-        const double xv = x[i];
-        if (std::isnan(xv)) { out[i] = xv; continue; }
-        if (xv < xp[0]) { out[i] = left; continue; }
-        if (xv > xp[K - 1]) { out[i] = right; continue; }
-        int lo = 0, hi = K;  // upper_bound: the largest j with xp[j] <= xv
-        while (lo < hi) {
-            const int mid = (lo + hi) >> 1;
-            if (xp[mid] <= xv) lo = mid + 1; else hi = mid;
-        }
-        const int j = lo - 1;
-        if (j >= K - 1 || xv == xp[j]) { out[i] = fp[j]; continue; }
-        out[i] = fp[j] + (fp[j + 1] - fp[j]) / (xp[j + 1] - xp[j]) * (xv - xp[j]);
-    }
-}
-
-// blur_row: the delta-method counting width — a Gaussian blur of variance v along lam on a
-// max-normalised log-row, edge-padded; a non-positive v only re-normalises.
-void blur_row(const double* row, int K, const double* lam, double v, double* out,
-              std::vector<double>& scratch) {
-    const double m = vmax(row, K);
-    for (int j = 0; j < K; ++j) out[j] = row[j] - m;
-    if (v > 0.0 && K > 1) {
-        const double dlam = lam[1] - lam[0];
-        const int half = std::max(static_cast<int>(std::ceil(4.0 * std::sqrt(v) / dlam)), 1);
-        const int W = 2 * half + 1;
-        scratch.resize(static_cast<size_t>(W) + static_cast<size_t>(K + 2 * half) + static_cast<size_t>(K));
-        double* kern = scratch.data();
-        double* edged = kern + W;
-        double* pr = edged + (K + 2 * half);
-        double ksum = 0.0;
-        for (int t = 0; t < W; ++t) {
-            const double x = (t - half) * dlam;
-            kern[t] = std::exp(-0.5 * x * x / v);
-            ksum += kern[t];
-        }
-        for (int t = 0; t < W; ++t) kern[t] /= ksum;
-        const double e0 = std::exp(out[0]), e1 = std::exp(out[K - 1]);
-        for (int t = 0; t < half; ++t) edged[t] = e0;
-        for (int j = 0; j < K; ++j) edged[half + j] = std::exp(out[j]);
-        for (int t = 0; t < half; ++t) edged[half + K + t] = e1;
-        // numpy.convolve(edged, kern, "valid") reads the kernel reversed; it is symmetric term for
-        // term (kern[t] and kern[W-1-t] are the same expression of the same |x|), so read it forward
-        for (int j = 0; j < K; ++j) {
-            double s = 0.0;
-            const double* e = edged + j;
-            for (int t = 0; t < W; ++t) s += e[t] * kern[t];
-            pr[j] = s;
-        }
-        for (int j = 0; j < K; ++j) out[j] = std::log(std::max(pr[j], TINY));
-    }
-    norm_inplace(out, K);
-}
-
-inline void lower_side(const double* p, int K, double* out) {
-    double m = -std::numeric_limits<double>::infinity();
-    for (int j = 0; j < K; ++j) {
-        if (p[j] > m) m = p[j];
-        out[j] = m;
-    }
-    norm_inplace(out, K);
-}
-
-// face_map_lambda(lam, n_u, a_g_b, a_r_b, e_g_e, e_r_e, s)
-void face_map_lambda(const double* lam, int K, double n_u, double a_g_b, double a_r_b, double e_g_e,
-                     double e_r_e, double s, double* out) {
-    for (int j = 0; j < K; ++j) {
-        const double sig = 1.0 / (1.0 + std::exp(-lam[j]));
-        const double g_arm = n_u * sig / a_g_b * e_g_e;
-        const double r_arm = (n_u * (1.0 - sig) / a_r_b + s) * e_r_e;
-        out[j] = std::log(std::max(g_arm, TINY)) - std::log(std::max(r_arm, TINY));
-    }
-}
-
-struct Scratch {
-    std::vector<double> a, b, c, d, e, f, blur;
-    explicit Scratch(int K) : a(K), b(K), c(K), d(K), e(K), f(K) {}
-};
-
-// transport_row(row, lam, lam_e_of_u, n_u, n_s)
-void transport_row(const double* row, const double* lam, int K, const double* map, double n_u,
-                   double n_s, Scratch& S, double* out) {
-    const double m = vmax(row, K);
-    for (int j = 0; j < K; ++j) S.a[j] = row[j] - m;
-    interp(lam, K, map, lam, K, lam[0], lam[K - 1], S.b.data());  // lam_u_of_x
-    interp(S.b.data(), K, lam, S.a.data(), K, S.a[0], S.a[K - 1], S.c.data());
-    blur_row(S.c.data(), K, lam, trigamma(n_u + 0.5) + trigamma(n_s + 0.5), out, S.blur);
-}
-
-// splice_out_row(row_e, lam, n_u, n_s, a_g_b, a_g_e)
-void splice_out_row(const double* row_e, const double* lam, int K, double n_u, double n_s,
-                    double a_g_b, double a_g_e, const double* nodes, int n_nodes, Scratch& S,
-                    double* out) {
-    if (!(n_u > 0.0 && a_g_b > 0.0 && a_g_e > 0.0) || ptp(row_e, K) <= EPS) {
-        std::fill(out, out + K, 0.0);
-        return;
-    }
-    const double m = vmax(row_e, K);
-    for (int j = 0; j < K; ++j) S.a[j] = row_e[j] - m;
-    const double sd = std::sqrt(trigamma(n_s + 0.5) + trigamma(n_u + 0.5));
-    std::fill(S.d.begin(), S.d.end(), 0.0);
-    for (int t = 0; t < n_nodes; ++t) {
-        const double s = n_s / a_g_b * std::exp(nodes[t] * sd);
-        face_map_lambda(lam, K, n_u, a_g_b, a_g_b, a_g_e, a_g_e, s, S.b.data());
-        interp(S.b.data(), K, lam, S.a.data(), K, S.a[0], S.a[K - 1], S.c.data());
-        for (int j = 0; j < K; ++j) S.d[j] += std::exp(S.c[j]);
-    }
-    for (int j = 0; j < K; ++j) out[j] = std::log(std::max(S.d[j] / n_nodes, TINY));
-    norm_inplace(out, K);
-    if (ptp(out, K) <= EPS) std::fill(out, out + K, 0.0);
-}
-
-// level_row(row_b, lam, lam_i_of_b, v)
-void level_row(const double* row_b, const double* lam, int K, const double* map, double v, Scratch& S,
-               double* out) {
-    if (ptp(row_b, K) <= EPS) {
-        std::fill(out, out + K, 0.0);
-        return;
-    }
-    const double m = vmax(row_b, K);
-    for (int j = 0; j < K; ++j) S.a[j] = row_b[j] - m;
-    interp(lam, K, map, lam, K, lam[0], lam[K - 1], S.b.data());  // the preimage
-    interp(S.b.data(), K, lam, S.a.data(), K, S.a[0], S.a[K - 1], S.c.data());
-    blur_row(S.c.data(), K, lam, v, out, S.blur);
-    if (ptp(out, K) <= EPS) std::fill(out, out + K, 0.0);
-}
 
 // ---- the tables ---------------------------------------------------------------------------------------
 

@@ -240,7 +240,8 @@ The unit is `sweep._solve_block`: one block's own claims, the policy's claims an
 tables, the row stores), the two passes writing `Received` tables, the solve, the write-back. Order inside
 the port: (i) the passes and `transfer_rows` (the highest ratio of Python overhead to arithmetic), (ii)
 `prepare`'s builders, (iii) ψ (SIMD exp/log, the AMBIG cube), (iv) threads over blocks — the parallelism
-the owner deferred to the port. Every step behind the tolerance gate of C, the references, the suite. Keep
+the owner deferred to the port. STATUS 2026-09-17: (i) landed (`553b3dfc`), (ii) prepared as two commits (the
+layout, then `native.transfer_prepare`); `ISSUES: performance-memory-bounded-solve` carries the numbers. Every step behind the tolerance gate of C, the references, the suite. Keep
 the λ lattice a parameter (`sweep_logodds_step`, its point count following the bracket through
 `calibrate.lattice_points`: an accuracy ruling, not a performance one). "Satisfied with the Python" means: A–D landed, one representation for the received
 messages, the layering clean, the gates and the tolerance instrument in place, the docs current.

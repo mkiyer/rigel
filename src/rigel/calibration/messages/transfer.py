@@ -102,11 +102,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ...native import transfer_pass
+from ...native import transfer_pass, transfer_prepare
 from ..simplex_logodds import CubeRow, strand_row_logodds
 from . import BlockContext, ChainView, PsiMessage, Received
 from .faces import EDGE, FORWARD, LEVEL, SPLICE_OUT, TRANSPORT, Faces, RowTable, fuse, norm
-from .lanes import gdna_lane, rna_lanes
+from .lanes import LevelLane, gdna_lane, rna_lanes
 from .transfer_rows import (
     _MARGINAL_NODES,
     EPS,
@@ -213,25 +213,137 @@ class TransferPolicy:
         src = ctx.factory_rows
         if src is None:
             src = np.zeros((int(ctx.n_slots), int(ctx.n_grid)))
-        chain = _Chain(ctx, np.asarray(src, np.float64), self._strand)
-        own = _claims(chain)
-        # the recipient's rule per DIRECTED face, written into the face table by the builder that owns
-        # that kind of face (the faces are disjoint: a second rule at a face is refused); the level lane
-        # serves every face left without one
-        faces = Faces(chain.lam, chain.left, chain.right)
-        _splice_faces(chain, faces)
-        _edge_level(chain, own, faces)
-        _terminus_rules(chain, faces)
-        _alternative_splice_site(chain, faces)
-        # each lane exists iff its OWN coordinate does: a gDNA-free library has no gDNA lane and still
-        # has its RNA lanes
-        lanes: dict = {}
-        gdna = gdna_lane(chain, own, faces, library.rho_gdna)
-        if gdna is not None:
-            lanes["gdna"] = gdna
-        lanes.update(rna_lanes(chain, own, library))
-        site = _SolveSite(chain.fp & chain.fn, {"pos": chain.fp, "neg": chain.fn})
-        return _PreparedTransfer(own, faces, lanes, site)
+        return _prepare_native(_Chain(ctx, np.asarray(src, np.float64), self._strand), library)
+
+
+def _prepare_reference(chain: _Chain, library: _Library) -> "_PreparedTransfer":
+    """THE BUILDERS IN PYTHON — the executable specification of `_prepare_native`, which
+    ``tests/calibration/test_prepare_kernel.py`` holds it to table by table. Every node's own claim; the
+    recipient's rule per DIRECTED face, written into the face table by the builder that owns that kind of
+    face (the faces are disjoint: a second rule at a face is refused); the level lanes, which serve every
+    face left without a rule — each lane exists iff its OWN coordinate does: a gDNA-free library has no gDNA
+    lane and still has its RNA lanes."""
+    own = _claims(chain)
+    faces = Faces(chain.lam, chain.left, chain.right)
+    _splice_faces(chain, faces)
+    _edge_level(chain, own, faces)
+    _terminus_rules(chain, faces)
+    _alternative_splice_site(chain, faces)
+    lanes: dict = {}
+    gdna = gdna_lane(chain, own, faces, library.rho_gdna)
+    if gdna is not None:
+        lanes["gdna"] = gdna
+    lanes.update(rna_lanes(chain, own, library))
+    site = _SolveSite(chain.fp & chain.fn, {"pos": chain.fp, "neg": chain.fn})
+    return _PreparedTransfer(own, faces, lanes, site)
+
+
+def _prepare_native(c: _Chain, library: _Library) -> "_PreparedTransfer":
+    """THE BUILDERS IN ONE NATIVE CALL (`native.transfer_prepare`): the tables allocated here — the
+    claims, the face tables, each lane's arrays in the layout the pass reads — written there, and wrapped as
+    `_prepare_reference` wraps its own. The lanes' coordinates, witnesses and emptiness are the chain's
+    arrays, as in `lanes`; the kernel writes the faces, the own levels, the flux levels and the flux
+    witnesses. Gate: ``tests/calibration/test_prepare_kernel.py``."""
+    n, K, lam = c.n, c.K, c.lam
+    own = RowTable(n, K)
+    faces = Faces(lam, c.left, c.right)
+    kappa = None if c.strand is None else float(c.strand[0])
+    split_live = library.split_live
+
+    def lane(name, rho_ref, count, a, other=None):
+        empty = ~(c.n_u > 0.0) | ~(a > 0.0)
+        return LevelLane(
+            name,
+            lam,
+            lam,
+            rho_ref,
+            count,
+            a,
+            empty,
+            RowTable(n, K),
+            np.zeros((n, 2), bool),
+            two_sided=np.zeros((n, 2), bool),
+            total=c.n_u,
+            flux=RowTable((n, 2), K),
+            other=other,
+            flux_witness=RowTable(n, 2),
+        )
+
+    def tables(ln):
+        return (
+            ln.face,
+            ln.two_sided,
+            ln.own_level.rows,
+            ln.own_level.mask,
+            ln.flux.rows,
+            ln.flux.mask,
+            ln.flux_witness.rows,
+            ln.flux_witness.mask,
+        )
+
+    lanes: dict = {}
+    if library.rho_gdna > 0.0:
+        lanes["gdna"] = lane("gdna", library.rho_gdna, c.n_u, c.a_g)
+    for name, col in (("pos", 0), ("neg", 1)):
+        col_read = read_column(col, kappa)
+        lanes[name] = lane(
+            name,
+            library.rho_rna,
+            np.ascontiguousarray(c.cnt[:, col_read]),
+            c.a_r,
+            other=np.ascontiguousarray(c.cnt[:, 1 - col_read]) if split_live else None,
+        )
+    strand = (False, 0.0, 0.0, 0.0) if c.strand is None else (True, *c.strand)
+    faces.n_rows = transfer_prepare(
+        lam=lam,
+        is_boundary=c.is_bnd,
+        is_exon=c.is_exon,
+        free_pos=c.fp,
+        free_neg=c.fn,
+        exon_pos=c.exon_of["pos"],
+        exon_neg=c.exon_of["neg"],
+        left=c.left,
+        right=c.right,
+        flags=c.flags,
+        n_u=c.n_u,
+        n_s=c.n_s,
+        a_g=c.a_g,
+        a_r=c.a_r,
+        cnt=c.cnt,
+        belief=c.belief,
+        has_own_composition=c.has_own_composition,
+        flux=c.flux,
+        route_rate_lo=c.route_rate[0],
+        route_rate_hi=c.route_rate[1],
+        sj_count_lo=c.sj_count[0],
+        sj_count_hi=c.sj_count[1],
+        src=c.src,
+        has_strand=strand[0],
+        kappa=strand[1],
+        od_g=strand[2],
+        od_r=strand[3],
+        rho_gdna=float(library.rho_gdna),
+        rho_rna=float(library.rho_rna),
+        own=own.rows,
+        own_mask=own.mask,
+        faces=(
+            faces.kind,
+            faces.row,
+            faces.row2,
+            faces.n_u,
+            faces.n_s,
+            faces.a_b,
+            faces.a_x,
+            faces.width,
+            faces.var,
+            faces.rows,
+        ),
+        gdna=None if "gdna" not in lanes else tables(lanes["gdna"]),
+        pos=tables(lanes["pos"]),
+        neg=tables(lanes["neg"]),
+    )
+    site = _SolveSite(c.fp & c.fn, {"pos": c.fp, "neg": c.fn})
+    return _PreparedTransfer(own, faces, lanes, site)
 
 
 # ══ THE CHAIN AS THE BUILDERS READ IT ═══════════════════════════════════════════════════════════════

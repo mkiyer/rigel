@@ -187,8 +187,10 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,428 passed / 0 skipped / 5 xfail, 3,433 collected** (re-derived
-2026-09-17 after the builders' layout: +2 — the `RowTable` gate in `test_transfer_faces.py` and the
+**The standing baseline: 0 failed / 3,439 passed / 0 skipped / 5 xfail, 3,444 collected** (re-derived
+2026-09-17 after the native builders: +11 — the five gates of `test_prepare_kernel.py` with the `tests/` row's +2,
++2 for `native/prepare_kernel.cpp` and +2 for `native/transfer_rows.h` by the row below; before that +2 after the
+builders' layout — the `RowTable` gate in `test_transfer_faces.py` and the
 tables-without-a-copy gate in `test_pass_kernel.py`; before that +7 after the native pass — the three gates of
 `test_pass_kernel.py` with the `tests/` row's +2, and +2
 for `native/pass_kernel.cpp` by the row below; before that +5 when the yield's floors were deleted — the
@@ -217,7 +219,7 @@ confirm with `pytest --collect-only -q | grep <stem>`:
 |---|---|---|
 | `src/rigel/calibration/` module | **+3** | jargon, docs-boundary, and layering *if declared in `_layers.py`* |
 | `tests/` file (any directory) | **+2** | jargon, docs-boundary |
-| `src/rigel/` file outside `calibration/` (a `.py`, or a `native/*.cpp`) | **+2** | jargon, docs-boundary |
+| `src/rigel/` file outside `calibration/` (a `.py`, or a `native/*.cpp` or `*.h`) | **+2** | jargon, docs-boundary |
 | `scripts/design/` (or `sim/`, `profiling/`) file | **+4** | imports, says-what-it-is-for, jargon, docs-boundary |
 | `docs/dev/` file | **+1** | jargon only |
 | top-level `docs/` .md (an owner decision — the permanent-set gate pins the list) | **+2** | jargon, docs-boundary |

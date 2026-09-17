@@ -203,6 +203,22 @@ target_compile_options(_pass_impl PRIVATE -g)
 
 install(TARGETS _pass_impl LIBRARY DESTINATION rigel)
 
+# --- Build the _prepare_impl extension ----------------------------------------
+
+# The composition-transfer policy's builders for one block (the calibration sweep's phase 0): every
+# node's own claim, the rule per directed face and the level lanes of messages/transfer.py and lanes.py,
+# written into the policy's tables in one call; the row constructors are shared with _pass_impl through
+# native/transfer_rows.h. Pure C++17 + nanobind + numpy.
+nanobind_add_module(
+  _prepare_impl
+  NOMINSIZE
+  STABLE_ABI
+  src/rigel/native/prepare_kernel.cpp
+)
+target_compile_options(_prepare_impl PRIVATE -g)
+
+install(TARGETS _prepare_impl LIBRARY DESTINATION rigel)
+
 # --- SIMD / Architecture Detection -------------------------------------------
 #
 # Detect CPU architecture and report available SIMD instruction sets.

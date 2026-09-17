@@ -10,6 +10,7 @@ _resolve_impl : Fragment overlap resolution against the reference index
 _scoring_impl : Per-fragment likelihood scoring (strand, coverage, splice)
 _em_impl      : Locus-level EM solver, connected components, effective-length normalization
 _pass_impl    : One directional pass of the calibration sweep's composition transfer
+_prepare_impl : The composition transfer's builders for one block — claims, face rules, level lanes
 _cgranges_impl: Interval overlap queries (vendored cgranges)
 """
 
@@ -46,7 +47,8 @@ from ._em_impl import scatter_units_i32
 from ._em_impl import scatter_units_i64
 from ._em_impl import scatter_units_u8
 
-# -- The calibration sweep's directional pass ------------------------------
+# -- The calibration sweep's composition transfer: the builders and the directional pass ---
+from ._prepare_impl import transfer_prepare
 from ._pass_impl import transfer_pass
 from ._pass_impl import trigamma
 
@@ -80,7 +82,8 @@ __all__ = [
     "scatter_units_i32",
     "scatter_units_i64",
     "scatter_units_u8",
-    # The sweep's pass
+    # The sweep's composition transfer
+    "transfer_prepare",
     "transfer_pass",
     "trigamma",
     # Intervals
