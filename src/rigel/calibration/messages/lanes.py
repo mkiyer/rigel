@@ -1,196 +1,36 @@
-"""The LEVEL LANES — the gDNA lane and one RNA lane per strand — and the class they are built on.
+"""The LEVEL LANES — the gDNA lane and one RNA lane per strand — the class they are built on.
 
        Gate: ``tests/calibration/test_transfer_rna_lanes.py``, ``test_transfer_policy.py``
 
 A level is a population's density as an ABSOLUTE profile over ``u = log(rho / rho_ref)`` on the solve
-grid, so it needs no map and no recipient and crosses the faces composition cannot (`LevelLane`).
-`gdna_lane` serves every directed face left without a composition rule (`faces.Faces`); `rna_lanes`
-serve each strand's faces read off the flag bits. Both are built by `TransferPolicy.prepare` from the
-chain as the builders read it and the library's coordinates, which they take as arguments.
+grid, so it needs no map and no recipient and crosses the faces composition cannot (`LevelLane`). The
+gDNA lane serves every directed face left without a composition rule (`faces.Faces`); each RNA lane
+serves its strand's faces read off the flag bits. Both are built by `native.transfer_prepare`
+(`native/prepare_kernel.cpp`'s `gdna_lane` and `rna_lane`) into the tables `TransferPolicy.prepare`
+allocates on a `LevelLane` — its faces, own levels, junction flux levels and flux witnesses; its
+coordinates, witnesses and emptiness are the chain's arrays.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import numpy as np
 
 from . import Levels, Received
-from .faces import NONE, RowTable, side_of
+from .faces import RowTable, side_of
 from .transfer_rows import (
-    EPS,
     blur_row,
     count_logvar,
-    flux_level,
     hop_price,
     intersect,
-    level_of_profile,
     lower_side,
-    poisson_level,
     profile_of_level,
-    read_column,
-    rna_level_of_profile,
     rna_row_of_level,
-    strand_bits,
 )
 
-if TYPE_CHECKING:
-    from .faces import Faces
-    from .transfer import _Chain, _Library
-
-__all__ = ["LevelLane", "gdna_lane", "rna_lanes"]
+__all__ = ["LevelLane"]
 
 
 _FIELD = {"gdna": "level_gdna", "pos": "level_rna_pos", "neg": "level_rna_neg"}
-
-
-def gdna_lane(c: _Chain, own: RowTable, faces: Faces, rho_ref: float) -> "LevelLane | None":
-    """THE LEVEL LANE: the default of every directed face that has no composition rule. A gDNA level
-    is absolute (a profile over ``u = log(rho / rho_ref)``), so it needs no map and no recipient: it
-    crosses the faces composition cannot (strand changes, termini both ways, the AMBIG complex) and
-    the EMPTY node — a piece with no total, which many exon pieces are — which forwards it
-    unchanged. Every full node's own level: a gene edge's crossing as a Poisson level (structurally
-    pure gDNA), any other node's own profile read through its total. ``rho_ref`` is the lane's
-    coordinate, the library's structurally pure gDNA density (`TransferPolicy.library`); ``None``
-    when the library has no positive density to serve as one."""
-    empty = ~(c.n_u > 0.0) | ~(c.a_g > 0.0)
-    if not rho_ref > 0.0:
-        return None
-    u = c.lam
-    gene_edge = np.zeros(c.n, bool)
-    bnd = np.flatnonzero(c.is_bnd)
-    lo, hi_ = c.left[bnd], c.right[bnd]
-    gene_edge[bnd] = ((lo >= 0) & c.is_intergenic[np.maximum(lo, 0)]) | (
-        (hi_ >= 0) & c.is_intergenic[np.maximum(hi_, 0)]
-    )
-    own_level = RowTable(c.n, c.K)
-    for x in np.flatnonzero(~empty & ~c.is_intergenic):
-        if gene_edge[x]:
-            own_level[x] = poisson_level(u, c.n_u[x], c.a_g[x], rho_ref)
-        elif own[x] is not None and np.ptp(own[x]) > EPS:
-            own_level[x] = level_of_profile(own[x], c.lam, u, c.n_u[x], c.a_g[x], rho_ref)
-    # the lane's faces, per (destination, side): every face with no composition rule whose two ends
-    # are not terminals — a terminal neither receives nor sends on the lane: nothing is imputed at
-    # structurally pure gDNA, and it has no own level to send; its far side is another locus
-    face = np.zeros((c.n, 2), bool)
-    for side, nbr in enumerate((c.left, c.right)):
-        s = np.maximum(nbr, 0)
-        face[:, side] = (
-            (nbr >= 0) & ~c.is_intergenic & ~c.is_intergenic[s] & (faces.kind[:, side] == NONE)
-        )
-    return LevelLane("gdna", u, c.lam, rho_ref, c.n_u, c.a_g, empty, own_level, face)
-
-
-def rna_lanes(c: _Chain, own: RowTable, library: _Library) -> dict:
-    """THE RNA LEVEL LANES, one per strand (the both-stranded locus).
-    FACES from the flag bits: strand ``s``'s level crosses a face iff the boundary carries none of
-    ``s``'s four bits and both nodes admit ``s``; across ``s``'s OWN junction it enters ``s``'s
-    intron — the crossing IS the intron's unspliced population — and not ``s``'s exon; a terminus of
-    ``s`` stops ``s`` both ways. TWO-SIDED only between an intron of ``s`` and its own boundary (one
-    shared unspliced population; the intron test is PER STRAND). SOURCES: a single-strand node's
-    own claim read as its live strand's RNA level, and the certified flux at each of an exon's
-    junctions as that strand's level at the exon — the junction's estimate of the exon's RNA
-    abundance, priced by THE NODE PAIR (the junction's spliced count at its route rate, whole-strand
-    units, against the exon's count on the column that strand reads on, over the PROTOCOL'S SHARE of
-    the exon's RNA opportunity, ``kappa_read · a_r`` — a column is that much opportunity for the strand's
-    RNA to be counted on it, so the two densities are in one unit and the pair's agreement is priced as
-    counting alone at every kappa; `EQUATIONS.md` §12), kept LOWER-SIDED because a two-sided
-    estimate over-claims at the probe cliff; kept per FACE so the solve can tell which face's
-    composition already carries it. An EMPTY exon piece beside a lit junction is a source too: its
-    level is priced on its zero count — counting alone — and the piece emits it with the flux's own
-    witness, the pooled spliced count on the pooled route opportunity, so the next full node prices
-    the hop as a full exon prices its flux. The coordinate is the library's one RNA coordinate (`_Library.rho_rna`) — a level
-    is absolute and its coordinate only an origin, so both strands share it and a strand with no
-    single-strand exon of its own still builds its flux levels — and whether the split is a witness at
-    all is the library's verdict too. Nothing pooled, no constant."""
-    n_u, a_r, cnt = c.n_u, c.a_r, c.cnt
-    empty = ~(n_u > 0.0) | ~(a_r > 0.0)
-    single = ~(c.fp & c.fn)
-    kappa = None if c.strand is None else float(c.strand[0])
-    # the protocol's read rate: the share of a strand's RNA that reads on the column it reads on
-    kappa_read = 0.5 if kappa is None else max(kappa, 1.0 - kappa)
-    split_live = library.split_live
-    lanes = {}
-    for name, free, col in (("pos", c.fp, 0), ("neg", c.fn, 1)):
-        all_bits, _sj_bits, term_bits = strand_bits[name]
-        # the lane's WITNESS is the count of the reads strand-``s`` RNA produces: its own genome-strand
-        # column when the library reads sense, the other under an antisense protocol (`read_column`).
-        # ⛔ Under a strongly antisense protocol the own column holds almost nothing, so reading it
-        # prices every hop as counting on an empty witness and blurs every floor away.
-        col_read = read_column(col, kappa)
-        intron_s = ~c.is_bnd & free & ~c.exon_of[name]
-        # a face crosses when its boundary carries none of the strand's bits; across the strand's own
-        # (non-terminus) bits it still enters the strand's intron, and every face into that intron is
-        # two-sided — per (destination, side), the source being the neighbour on that side
-        face = np.zeros((c.n, 2), bool)
-        two_sided = np.zeros((c.n, 2), bool)
-        dest = np.arange(c.n)
-        for side, nbr in enumerate((c.left, c.right)):
-            s = np.maximum(nbr, 0)
-            ok = (nbr >= 0) & ~c.is_intergenic & free[s] & free
-            b = np.where(c.is_bnd[s], s, dest)
-            reg = np.where(c.is_bnd[s], dest, s)
-            f = c.flags[b].astype(np.int64)
-            crossing = (f & all_bits) == 0
-            into_own_intron = ~crossing & ((f & term_bits) == 0) & intron_s[reg]
-            face[:, side] = ok & (crossing | into_own_intron)
-            two_sided[:, side] = ok & ((crossing & intron_s[reg]) | into_own_intron)
-        rho_ref = float(library.rho_rna)
-        own_level = RowTable(c.n, c.K)
-        flux = RowTable((c.n, 2), c.K)  # the junction flux levels, per (exon, side of its junction)
-        flux_witness = RowTable(c.n, 2)  # per empty flux source: (spliced count, route opportunity)
-        if rho_ref > 0.0:
-            for x in np.flatnonzero(free):
-                parts = []
-                if not empty[x] and single[x] and own[x] is not None and np.ptp(own[x]) > EPS:
-                    parts.append(
-                        rna_level_of_profile(own[x], c.lam, c.lam, n_u[x], a_r[x], rho_ref)
-                    )
-                c_sum = a_sum = 0.0
-                if c.is_exon[x]:
-                    # the junction's flux is a measurement of THIS exon's RNA whether or not the piece
-                    # holds a fragment of its own: at an EMPTY piece — one shorter than a
-                    # fragment, or dark — the level is built too, priced on the piece's zero count (the
-                    # counting rule every hop pays), and the piece emits it with the flux's witness
-                    for b in (c.left[x], c.right[x]):
-                        if b < 0 or not c.is_bnd[b]:
-                            continue
-                        hi = 1 if c.left[x] == b else 0
-                        c_j, r_j = float(c.sj_count[hi][b, col]), float(c.route_rate[hi][b, col])
-                        if not (c_j > 0.0 and r_j > 0.0):
-                            continue
-                        # the junction's rate is whole-strand; the column count is priced on the
-                        # protocol's share of the exon's opportunity, so the units agree (the exon's
-                        # total density at kappa = ½, the column's at kappa → 1, the strand's own share
-                        # at a both-stranded exon) — `EQUATIONS.md` §12
-                        v = hop_price(c_j, c_j / r_j, cnt[x, col_read], kappa_read * a_r[x])
-                        fl = flux_level(c.lam, c_j, r_j, rho_ref, v)
-                        parts.append(fl)
-                        flux[x, side_of(int(b), int(x))] = fl
-                        c_sum += c_j
-                        a_sum += c_j / r_j
-                if parts:
-                    own_level[x] = intersect(parts)
-                    if empty[x]:
-                        flux_witness[x] = (c_sum, a_sum)
-        # the two columns as contiguous arrays: the native pass reads them as they are
-        lanes[name] = LevelLane(
-            name,
-            c.lam,
-            c.lam,
-            rho_ref,
-            np.ascontiguousarray(cnt[:, col_read]),
-            a_r,
-            empty,
-            own_level,
-            face,
-            two_sided=two_sided,
-            total=n_u,
-            flux=flux,
-            other=np.ascontiguousarray(cnt[:, 1 - col_read]) if split_live else None,
-            flux_witness=flux_witness,
-        )
-    return lanes
 
 
 class LevelLane:

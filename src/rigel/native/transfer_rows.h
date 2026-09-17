@@ -2,8 +2,8 @@
 // `calibration/messages/transfer_rows.py` (and the strand row of `simplex_logodds.strand_row_logodds`),
 // shared by the directional pass (`pass_kernel.cpp`) and the builders (`prepare_kernel.cpp`). Every
 // function here is a pure function of one face's or one node's numbers over the solve grid `lam`
-// (`f_g = sigma(lam)`, K points), writing a max-normalised log-row. The executable specification is the
-// Python; the gates are `tests/calibration/test_pass_kernel.py` and `test_prepare_kernel.py`.
+// (`f_g = sigma(lam)`, K points), writing a max-normalised log-row. The gates are
+// `tests/calibration/test_pass_kernel.py` and the transfer gates (`test_transfer_*.py`).
 //
 // Numerics: every operation is the Python one term for term (max-normalisation, the edge-padded Gaussian
 // blur at half-width ceil(4 sqrt(v) / dlam), linear interpolation with numpy's end rules, trigamma for the

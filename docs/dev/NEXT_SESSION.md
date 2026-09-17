@@ -80,14 +80,18 @@ a port must keep to the bit-budget, not to bits.
 * A scripted edit that asserts several anchors must write per file — one that asserts after writing loses nothing,
   one that asserts BEFORE writing loses the whole edit silently; `grep` after every scripted edit.
 
-## An owner decision to take
+## The one-path ruling (owner, 2026-09-17)
 
-The Python builders (`transfer._prepare_reference`, with `_claims`, `_splice_faces`, `_edge_level`,
-`_terminus_rules`, `_alternative_splice_site`, `lanes.gdna_lane`, `lanes.rna_lanes`) no longer run in production:
-they are the executable specification `test_prepare_kernel.py` holds the native call to, on the layer-4
-`strand_likelihood` precedent. The alternative is to delete them and hold the C++ to the unit gates of
-`test_transfer_*.py` alone (independent recomputes from `transfer_rows`, which those gates already pass on the
-native builders). The same question will arise for ψ.
+One production code path. Once native code is validated, the Python it replaces is deleted — no reference
+implementation is kept to gate against, and a small floating-point tolerance between implementations is
+accepted for the speed. Applied the same day to step (ii): the Python builders and `test_prepare_kernel.py` are
+gone; the transfer gates hold the native tables to independent recomputes. STILL DUPLICATED, to converge next:
+the per-hop Python pass kernel (`_PreparedTransfer.propagate`, `Faces.apply`, `LevelLane.emit` / `receive`) and
+the Python row constructors of `transfer_rows.py` that only the pass kernel and the unit gates' recomputes read
+(`face_map_lambda`, `edge_level_row`, `level_map_lambda`, `level_bound_row`, `poisson_level`, `level_of_profile`,
+`rna_level_of_profile`, `flux_level`, the flag helpers, `strand_bits`) — the convergence is: bind the C++ row
+constructors for the unit gates, rewrite the per-hop gates to drive `run_pass` on small tables, delete the Python
+copies; `test_pass_kernel.py`'s two-kernel gate goes with them. ψ (step (iii)) is built one-path from the start.
 
 ## Where everything is
 

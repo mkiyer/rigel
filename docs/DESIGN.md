@@ -288,7 +288,7 @@ held to.
 ### 0c.1 The mechanism is built and ships — do not build it again
 
 The hop the derivation above asks for is the transfer policy's SPLICE-IN FACE MAP
-(`messages/transfer._splice_faces`, `transfer_rows.face_map_lambda`; §6b.9 and §6b.12): the BOUNDARY's
+(`native/prepare_kernel.cpp`'s `splice_faces`, `transfer_rows.face_map_lambda`; §6b.9 and §6b.12): the BOUNDARY's
 measured sj flux is a density at the source, which joins the RNA claim entering the destination EXON —
 the certified flux caps the claimable gDNA share. Only an EXON receives it; the flux is a measurement
 with its own counting width, never an imputation; and it is registered by geometry, never gated on the
@@ -717,7 +717,7 @@ Re-derive this list rather than trusting it: `scripts/design/module_census.py` r
 | `messages/silent.py` | `SilentPolicy` — sends nothing. **The measured floor**, what `message_policy = "silent"` installs | A reader who holds `sweep.py` plus this holds the entire working system |
 | `messages/transfer.py` | `TransferPolicy` — **the shipped default** (2026-09-09): every node's own claim, one named builder per message, the two passes and the solve (§6b.4–§6b.14) | `prepare` is a table of contents: a reader finds a message by its builder's name |
 | `messages/faces.py` | `Faces` — the composition rules as typed tables over `(destination, side)`, `Faces.apply` the one home of the rule arithmetic, and the three helpers every reader of a face needs (`side_of`, `norm`, `fuse`) | gate: `test_transfer_faces.py` |
-| `messages/lanes.py` | `LevelLane` — one class for the three populations' levels — and its two builders, `gdna_lane` (every face left without a composition rule) and `rna_lanes` (one per strand, faces from the flag bits) | gate: `test_transfer_rna_lanes.py` |
+| `messages/lanes.py` | `LevelLane` — one class for the three populations' levels, built by `native/prepare_kernel.cpp`'s `gdna_lane` (every face left without a composition rule) and `rna_lane` (one per strand, faces from the flag bits) | gate: `test_transfer_rna_lanes.py` |
 | `messages/transfer_rows.py` | the pure row constructors — every map, level, price and coordinate change, each a function of one face's numbers | `count_logvar` is the one home of the counting term; every hop price reads it |
 | `messages/__init__.py` | the interface (`Policy`, `Prepared`), what every node received from one side as a table (`Received`: `has_neighbour`, `has_composition`, the composition rows, three `Levels` lanes; SILENCE and NO NEIGHBOUR are its two states `silence` / `no_neighbour`, not objects), what ψ receives (`PsiMessage`) and what a policy may read (`BlockContext`) | every field of `BlockContext` has a reader in the policy or the backbone |
 
@@ -1173,12 +1173,15 @@ references. **The builders are native** (step (ii-b), 2026-09-17): `native.trans
 level lanes into those tables in one call — the strand profiles, the face maps, the edge level, the terminus
 level rule with the pair's discrepancies, the alternative splice site, the gDNA lane's Poisson and
 profile-read levels, the RNA lanes' faces from the flag bits, their flux levels and witnesses — on the row
-constructors of `native/transfer_rows.h`, shared with the pass kernel. `TransferPolicy.prepare` calls it;
-the Python builders remain as `_prepare_reference`, the executable specification, which
-`tests/calibration/test_prepare_kernel.py` holds the native call to table by table on the toy's captured sweep
-(five contexts: the bare toy, the populated terminus insides, the alternative splice sites, no strand model,
-no gDNA coordinate; every boolean, index, count and witness equal, every row within 1e-9 — the compiler's
-fused multiply-add is the whole difference). On MO_3021's first sweep (426 blocks): no boolean or index
+constructors of `native/transfer_rows.h`, shared with the pass kernel. `TransferPolicy.prepare` calls it,
+and the Python builders are DELETED (owner, 2026-09-17: ONE production code path; no reference implementation
+is kept to gate against, and a small floating-point tolerance between implementations is accepted for the
+speed) — the transfer gates (`test_transfer_faces.py`, `test_transfer_policy.py`, `test_transfer_rna_lanes.py`)
+hold the native builders' tables to independent recomputes, and before the deletion the port was held to
+the Python table by table on the toy's captured sweep in five contexts (the bare toy, the populated terminus
+insides, the alternative splice sites, no strand model, no gDNA coordinate; every boolean, index, count and
+witness equal, every row within 1e-9 — the compiler's fused multiply-add the whole difference). On MO_3021's
+first sweep (426 blocks): no boolean or index
 differs, rows agree to 2.3e-10, the builders 20.0 → 2.5 s; the replay on `sweeps_MO_3021_step8` moves the
 first sweep's fractions by at most 1.1e-15 and `var_gdna` by 5.7e-14 — 4.1e-6 of the derived budget — and the
 refit sweeps are bit-identical. Timed on VCaP at 8 threads, two interleaved pairs against the pre-step worktree:

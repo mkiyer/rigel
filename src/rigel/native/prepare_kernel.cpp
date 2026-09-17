@@ -1,14 +1,14 @@
 // prepare_kernel.cpp — the BUILDERS of the composition-transfer policy for one block, as one native call.
 //
-// `TransferPolicy.prepare` (`calibration/messages/transfer.py`) builds, per block, every node's own claim
-// (`_claims`), the recipient's rule per directed face (`_splice_faces`, `_edge_level`, `_terminus_rules`,
-// `_alternative_splice_site`, written into the `Faces` tables) and the level lanes (`lanes.gdna_lane`,
-// `lanes.rna_lanes`: each lane's faces, own levels, junction flux levels and flux witnesses). This file is
-// that arithmetic on the same tables, written in place, with the per-node Python removed: the Python
-// builders are the executable specification and the reference the gate compares against
-// (`tests/calibration/test_prepare_kernel.py`: every table of both on the toy's captured sweep; the wiring by
-// a spy), with `profiling/sweep_replay.py replay --tolerance` on a captured sweep as the second verdict. The
-// row constructors are `transfer_rows.h`, shared with the pass kernel.
+// `TransferPolicy.prepare` (`calibration/messages/transfer.py`) allocates, per block, the tables the
+// directional pass reads — every node's own claim, the recipient's rule per directed face (the `Faces`
+// tables), each level lane's faces, own levels, junction flux levels and flux witnesses — and this file
+// builds them in one call: the claims (`claims`), the rules (`splice_faces`, `edge_level`, `terminus_rules`,
+// `alternative_splice_site`) and the lanes (`gdna_lane`, `rna_lane`). It is the one implementation of the
+// builders: the gates are the transfer gates (`tests/calibration/test_transfer_faces.py`,
+// `test_transfer_policy.py`, `test_transfer_rna_lanes.py`), which hold the tables to independent recomputes,
+// and `profiling/sweep_replay.py replay --tolerance` on a captured sweep. The row constructors are
+// `transfer_rows.h`, shared with the pass kernel.
 
 #include <algorithm>
 #include <cmath>

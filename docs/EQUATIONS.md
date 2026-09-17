@@ -183,8 +183,8 @@ per-fragment shares, so `1/mass` is not a counting variance. The shipped countin
 `1/n` from `n ≈ 10` and `π²/2` at `n = 0`: a zero count is a measurement, not an absence.
 
 **3.5 A composition crosses only where the population is shared; a gDNA level crosses unscaled.**
-`messages/transfer.py`: the face maps (`_splice_faces`, `_terminus_rules`) carry a composition under
-§3.5b's licence; `lanes.gdna_lane` / `lanes.LevelLane` carry the gDNA level everywhere else. Why the level needs its
+`native/prepare_kernel.cpp`: the face maps (`splice_faces`, `terminus_rules`) carry a composition under
+§3.5b's licence; `gdna_lane` / `lanes.LevelLane` carry the gDNA level everywhere else. Why the level needs its
 own lane is one substitution. Rescaling a source's density by the ratio of totals
 `r = ρ_tot(dst)/ρ_tot(src)` and writing `ρ_c(src) = φ_c(src)·ρ_tot(src)` gives
 
@@ -226,7 +226,7 @@ terms, never in TSS/TES, which the strand flips:
 transcript simply begins. That is the derived line between the two treatments.
 
 **3.5e The two operators and the terminus, in `{gDNA, RNA+, RNA−}`.** The ruling is `DESIGN.md` §0c.0
-(2026-08-19); `transfer.py`'s `_splice_faces` and `_terminus_rules` implement it. A message is the three
+(2026-08-19); `prepare_kernel.cpp`'s `splice_faces` and `terminus_rules` implement it. A message is the three
 densities `{gDNA, RNA+, RNA−}`, always: an operator that pools the two RNA components has not measured
 what the policy carries.
 
@@ -243,7 +243,7 @@ what the policy carries.
   2000 and sharing an exon to 5000: an unspliced fragment crossing 2000 is compatible with the first and
   with gDNA, not with the second, so the population in (2000, 5000) is not the population at the
   boundary. The rescale cannot account for a transcript that originates after the boundary; only the
-  level can be propagated inward (THE LEVEL RULE, `_terminus_rules`). A terminus at a splice junction is
+  level can be propagated inward (THE LEVEL RULE, `terminus_rules`). A terminus at a splice junction is
   still a terminus: `sj+term` is ruled with `term`, never with `sj`.
 
 **3.5g A total abundance must not be `mass / effective_length` — the accumulator already deposits the
@@ -265,7 +265,7 @@ any enrichment ratio between boundaries, uses none.
 
 **3.5h The premise variance — why an imputation must cost something on every hop.** The ruling is
 `DESIGN.md` §0c.0c; `messages/transfer_rows.hop_price` and the pair terms in `transfer.py`'s
-`_terminus_rules` and `_alternative_splice_site` implement it. Every variance that scales with counts
+`terminus_rules` and `alternative_splice_site` implement it. Every variance that scales with counts
 vanishes between two deeply-counted slots, so a layer built only from counting terms delivers an
 imputation at full strength beside a measurement. The premise of a hop — "my neighbour's values apply
 here" — is not a counting statement and does not shrink with depth; it is estimable from the pair itself
@@ -280,7 +280,7 @@ own witness and never pooled across pairs, it makes a deep imputation arrive wea
 and a measurement outweigh both.
 
 **3.6 The two faces of an `intron|exon` boundary — component-set matching.** Ruling 2026-08-04;
-`transfer.py:_splice_faces`. At one boundary the accumulator stores three populations, and their
+`prepare_kernel.cpp`'s `splice_faces`. At one boundary the accumulator stores three populations, and their
 component sets differ:
 
 | bank | what it counted | components |
@@ -320,7 +320,7 @@ as the splice-in map's cap rather than solving face (II) outright (`DESIGN.md` �
 
 **3.6c The splice-flux reframe — a boundary has two totals, one per flank.** Ruling 2026-08-05;
 `BlockContext.sj_count_lo` / `sj_count_hi` (`messages/__init__.py`) carry the split and
-`transfer.py:_splice_faces` reads it. §3.6 made per step: which flank is a hop talking to? Numerator and
+`prepare_kernel.cpp`'s `splice_faces` reads it. §3.6 made per step: which flank is a hop talking to? Numerator and
 denominator of a composition imputation must be totals over the same component set, and a molecule
 counted in `J` spliced at this position, so its body lies in the exon on exactly one side:
 
@@ -1094,7 +1094,7 @@ exon binds a gDNA fragment over 125 bp while the simulator's non-stacking rule b
 over one exon's 40. The efficiency reads the gDNA and the transcript's factor inherits the difference
 (`ISSUES: ruler-witness-geometry-on-transcript-panels`), declared and not repaired.
 
-## 12. The flux price's witness — the column count on the protocol's share of the opportunity (`lanes.rna_lanes`)
+## 12. The flux price's witness — the column count on the protocol's share of the opportunity (`prepare_kernel.cpp`'s `rna_lane`)
 
 The certified flux at one of an exon's junctions is that strand's RNA level at the exon (§6b.13's source):
 the spliced count `c_J` at the junction's route rate `r_J = Σ flux / A_route`, and every hop pays the
