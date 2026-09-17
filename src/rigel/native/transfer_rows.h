@@ -60,6 +60,26 @@ inline double hop_price(double n_s, double a_s, double n_x, double a_x) {
 }
 
 inline double sigmoid(double x) { return 1.0 / (1.0 + std::exp(-x)); }  // scipy.special.expit
+// scipy.special.log_expit: log sigma(x), exact in the depleted tail (never forms 1 - sigma)
+inline double log_expit(double x) { return x < 0.0 ? x - std::log1p(std::exp(x)) : -std::log1p(std::exp(-x)); }
+
+// THE FROZEN STRAND VARIANCE (simplex_logodds: the count-zero-information freeze): the mixture's variance at
+// the REFERENCE composition (f_ref, ref_pos, ref_neg) — the count sets precision, never composition.
+inline double strand_variance(double n, double f_ref, double ref_pos, double ref_neg, double kappa, double od_g,
+                              double od_r) {
+    const double rscale = kappa * (1.0 - kappa);
+    const double p_ref = 0.5 * f_ref + kappa * ref_pos + (1.0 - kappa) * ref_neg;
+    const double nf = n * f_ref, np = n * ref_pos, nn = n * ref_neg;
+    const double var = n * p_ref * (1.0 - p_ref) + (nf * nf) * 0.25 * od_g + (np * np) * rscale * od_r +
+                       (nn * nn) * rscale * od_r;
+    return std::max(var, EPS);
+}
+// THE STRAND TERM at one cell: the Gaussian log-likelihood of the + column count u_pos at the mean n·p,
+// p = ½ f_g + κ f_+ + (1 − κ) f_−, at the frozen variance.
+inline double strand_term(double u_pos, double n, double p, double var, double half_log_var) {
+    const double d = u_pos - n * p;
+    return -0.5 * (d * d) / var - half_log_var;
+}
 
 // ---- row pieces (length K) ---------------------------------------------------------------------------
 
@@ -317,19 +337,12 @@ inline void strand_row(const double* lam, int K, double u_pos, double u_neg, boo
     const double n = u_pos + u_neg;
     f_ref = std::clamp(f_ref, EPS, 1.0 - EPS);
     const double ref_pos = live_pos ? 1.0 - f_ref : 0.0, ref_neg = live_pos ? 0.0 : 1.0 - f_ref;
-    const double rscale = kappa * (1.0 - kappa);
-    const double p_ref = 0.5 * f_ref + kappa * ref_pos + (1.0 - kappa) * ref_neg;
-    const double nf = n * f_ref, np = n * ref_pos, nn = n * ref_neg;
-    double var = n * p_ref * (1.0 - p_ref) + (nf * nf) * 0.25 * od_g + (np * np) * rscale * od_r +
-                 (nn * nn) * rscale * od_r;
-    var = std::max(var, EPS);
+    const double var = strand_variance(n, f_ref, ref_pos, ref_neg, kappa, od_g, od_r);
     const double half_log_var = 0.5 * std::log(var);
     for (int j = 0; j < K; ++j) {
         const double fg = sigmoid(lam[j]);
         const double f_pos = live_pos ? 1.0 - fg : 0.0, f_neg = live_pos ? 0.0 : 1.0 - fg;
-        const double p = 0.5 * fg + kappa * f_pos + (1.0 - kappa) * f_neg;
-        const double d = u_pos - n * p;
-        out[j] = -0.5 * (d * d) / var - half_log_var;
+        out[j] = strand_term(u_pos, n, 0.5 * fg + kappa * f_pos + (1.0 - kappa) * f_neg, var, half_log_var);
     }
     norm_inplace(out, K);
 }

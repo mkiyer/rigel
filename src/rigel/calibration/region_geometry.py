@@ -373,7 +373,7 @@ def region_gdna_geometry(geometry: RegionGeometry):
 class RegionBelief:
     """Per-region solved state on the chain: the composition pie `(f_pos, f_neg, f_g)` over the region's UNSPLICED
     mass + the gDNA share's posterior variance in LOG-FRACTION space, `var_gdna` = `Var(log f_g)` (a grid
-    moment over the λ lattice, `simplex_logodds._solve_logodds`), never `Var(f_g)`. All length ``n_slots``.
+    moment over the λ lattice, `simplex_logodds._solve_regions_logodds_all`), never `Var(f_g)`. All length ``n_slots``.
 
     The first axis is the unified region+boundary CHAIN, not the region axis: :func:`init_beliefs`
     builds every array from ``geometry.unspliced_count``, which is ``float64[n_slots, 2]``. Sizing a new

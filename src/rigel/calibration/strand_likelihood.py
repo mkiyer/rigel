@@ -2,7 +2,7 @@
 
 This is an executable reference, not a production path, and saying so is the point. Nothing in ``src/``
 calls it. What ships is the three-component generalization in
-``simplex_logodds._mixture_strand_loglik``, and this two-component special case is what that form is
+the native strand term of ``native/transfer_rows.h`` (read through ``simplex_logodds.psi_cube``), and this two-component special case is what that form is
 gated against: ``tests/calibration/test_strand_likelihood_reference.py`` asserts the collapse when one
 RNA strand is dead, so a drift between them fires a test instead of a comment being quietly wrong.
 

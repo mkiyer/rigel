@@ -304,10 +304,12 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
 def _gdna_share_row(n_grid, mode_share, prec):
     """A claim on the gDNA share delivered as a λ-row on the solve grid — the message layer's one
     currency: a Gaussian on ``log f_g`` at ``log mode_share`` with precision ``prec``."""
-    from rigel.calibration.simplex_logodds import _log_fg, _logodds_grid
+    from scipy.special import log_expit
+
+    from rigel.calibration.simplex_logodds import _logodds_grid
 
     lam, _ = _logodds_grid(int(n_grid), 10.0)
-    return (-0.5 * float(prec) * (_log_fg(lam) - np.log(float(mode_share))) ** 2)[None, :]
+    return (-0.5 * float(prec) * (log_expit(lam) - np.log(float(mode_share))) ** 2)[None, :]
 
 
 def test_a_delivered_row_pulls_two_sided_and_not_to_the_vertex():

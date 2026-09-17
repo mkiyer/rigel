@@ -1,9 +1,9 @@
 """The two-component strand likelihood is an executable REFERENCE, and this is its gate.
 
-`simplex_logodds._mixture_strand_loglik` is the production form: three components, vectorised over a
-lattice, hard to read by hand. `strand_likelihood.strand_loglik` is the two-component special case it
-must collapse to. Nothing in `src/` calls the reference, and that is the point — it is a second,
-readable statement of one predicate, and this file is what stops the two drifting apart
+ψ's strand term is the production form: three components, native (`native/transfer_rows.h`, read through
+`simplex_logodds.psi_cube`), hard to read by hand. `strand_likelihood.strand_loglik` is the two-component
+special case it must collapse to. Nothing in `src/` calls the reference, and that is the point — it is a
+second, readable statement of one predicate, and this file is what stops the two drifting apart
 (TRAPS: a-test-that-redefines). The pattern is the one `tests/native/_accumulator_reference.py`
 established: keep the readable form, and gate the production form against it.
 """
@@ -12,26 +12,48 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from _psi_reference import jeffreys_arms, strand_loglik_mixture
 
-from rigel.calibration.simplex_logodds import _mixture_strand_loglik
+from rigel.calibration.simplex_logodds import psi_cube
 from rigel.calibration.strand_likelihood import strand_loglik
 
 #: the candidate gDNA fractions both forms are evaluated on
 GRID = np.linspace(0.02, 0.98, 25)
 
 
-def _three(u_pos, n, f_g, kappa, od_g, od_r, *, tilt=1.0):
-    """ψ's three-component form with ALL the RNA on the ``+`` strand — the single-strand special case.
+def _three(u_pos, n, f_g, kappa, od_g, od_r):
+    """ψ's production strand term with ALL the RNA on the ``+`` strand — the single-strand special case,
+    read out of the solver's own cube: one slot per grid point, each with its variance frozen at the live
+    composition of that point (`strand_loglik` has no count-zero-information freeze — it evaluates the
+    variance at the same composition as the mean, so a different reference would be comparing two
+    estimators, not two forms of one), the λ grid the logit of ``f_g``, the arms subtracted, the diagonal
+    ``psi[j, j]`` the term at point ``j``."""
+    f_g = np.asarray(f_g, np.float64)
+    m = f_g.shape[0]
+    lam = np.log(f_g / (1.0 - f_g))
+    psi, _fp, _fn, _tau = psi_cube(
+        np.full(m, float(u_pos)),
+        np.full(m, float(n - u_pos)),
+        np.ones(m, bool),
+        np.zeros(m, bool),
+        f_g,
+        1.0 - f_g,
+        np.zeros(m),
+        kappa=kappa,
+        od_g=od_g,
+        od_r=od_r,
+        lam=lam,
+        ambig=False,
+    )
+    return psi[np.arange(m), np.arange(m), 0] - jeffreys_arms(lam)
 
-    ``tilt = 1`` means ``f_neg = 0``, which is the structural state of a single-strand region: one strand is
-    not admissible, so the tilt is not a free nuisance and the mixture reduces to two components.
-    The variance reference is passed equal to the live composition, because `strand_loglik` has no
-    count-zero-information freeze — it evaluates the variance at the same composition as the mean. Passing a
-    different reference would be comparing two different estimators, not two forms of one.
-    """
+
+def _three_readable(u_pos, n, f_g, kappa, od_g, od_r, *, tilt=1.0):
+    """The readable three-component term (`_psi_reference`) at an arbitrary tilt — the perturbation's
+    handle, since the solver's single-strand cube has no tilt to give the dead strand mass with."""
     f_rna = 1.0 - f_g
     f_pos, f_neg = f_rna * tilt, f_rna * (1.0 - tilt)
-    return _mixture_strand_loglik(u_pos, n, f_g, f_pos, f_neg, kappa, od_g, od_r, f_g, f_pos, f_neg)
+    return strand_loglik_mixture(u_pos, n, f_g, f_pos, f_neg, kappa, od_g, od_r, f_g, f_pos, f_neg)
 
 
 @pytest.mark.parametrize("sense,antisense", [(30.0, 10.0), (126.0, 26.0), (5.0, 4.0), (0.0, 12.0)])
@@ -90,7 +112,14 @@ def test_PERTURBATION_giving_the_dead_strand_mass_BREAKS_the_collapse():
     sense, antisense, kappa = 30.0, 10.0, 0.9
     n = sense + antisense
     ref = strand_loglik(GRID, sense, antisense, kappa, gdna_strand_overdispersion=0.0)
-    both = _three(sense, n, GRID, kappa, 0.0, 0.0, tilt=0.5)
+    both = _three_readable(sense, n, GRID, kappa, 0.0, 0.0, tilt=0.5)
+    # and the readable term at the single-strand tilt IS the production term, so the perturbation is
+    # a statement about the same form
+    np.testing.assert_allclose(
+        _three_readable(sense, n, GRID, kappa, 0.0, 0.0) - _three(sense, n, GRID, kappa, 0.0, 0.0),
+        0.0,
+        atol=1e-9,
+    )
     with pytest.raises(AssertionError):
         np.testing.assert_allclose(both - both.mean(), ref - ref.mean(), rtol=0, atol=1e-9)
 

@@ -187,8 +187,10 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,433 passed / 0 skipped / 5 xfail, 3,438 collected** (re-derived
-2026-09-17 after the one-path cleanup deleted the Python builders and their two-kernel gate: −7 — the five gates
+**The standing baseline: 0 failed / 3,437 passed / 0 skipped / 5 xfail, 3,442 collected** (re-derived
+2026-09-17 after ψ went native: +4 — +2 for `native/psi_kernel.cpp` and +2 for the gates' oracle module
+`tests/calibration/_psi_reference.py` by the rows below, the rewritten ψ gates moving nothing; before that
+after the one-path cleanup deleted the Python builders and their two-kernel gate: −7 — the five gates
 of `test_prepare_kernel.py` and its `tests/` row's 2 — and +1 for `docs/dev/PSI_PORT_PLAN.md` by the `docs/dev/`
 row; before that +11 after the native builders — those five gates
 with the `tests/` row's +2, +2 for `native/prepare_kernel.cpp` and +2 for `native/transfer_rows.h` by the row

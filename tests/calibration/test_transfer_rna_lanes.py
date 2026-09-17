@@ -416,7 +416,8 @@ def test_the_rna_hop_witness_is_the_split_where_the_strand_channel_is_live():
 
 
 def test_a_lower_only_profile_stays_one_sided_on_the_cube():
-    """`CubeRow.at`: a lower-only RNA+ profile evaluated on the ``(λ, θ)`` cube is non-decreasing in θ
+    """The delivered row's map (`_psi_reference.row_at`, the kernel's): a lower-only RNA+ profile
+    evaluated on the ``(λ, θ)`` cube is non-decreasing in θ
     (the + share rises with τ) and non-increasing in λ (it falls with the gDNA share) — one-sided through
     the map, no parametric summary. PERTURBATION: a two-sided profile is not monotone."""
     from rigel.calibration.simplex_logodds import CubeRow
@@ -426,9 +427,11 @@ def test_a_lower_only_profile_stays_one_sided_on_the_cube():
     fg = 1.0 / (1.0 + np.exp(-lam))
     u = lam
     floor = -0.5 * np.maximum(0.0, (0.0 - u) / 0.3) ** 2
-    row = CubeRow(floor, None, u, 400.0, 100.0, 0.5).at(fg, tau)
+    from _psi_reference import row_at
+
+    row = row_at(CubeRow(floor, None, u, 400.0, 100.0, 0.5), fg, tau)
     assert np.all(np.diff(row, axis=1) >= -1e-9) and np.all(np.diff(row, axis=0) <= 1e-9)
-    two = CubeRow(-0.5 * (u / 0.3) ** 2, None, u, 400.0, 100.0, 0.5).at(fg, tau)
+    two = row_at(CubeRow(-0.5 * (u / 0.3) ** 2, None, u, 400.0, 100.0, 0.5), fg, tau)
     assert not (np.all(np.diff(two, axis=1) >= -1e-9) and np.all(np.diff(two, axis=0) <= 1e-9))
 
 
@@ -438,6 +441,8 @@ def test_THE_BRACKET_THEOREM_three_lower_bounds_and_the_strand_equation_bracket_
     strand counts give a two-sided gDNA share (a 90 % interval narrower than 0.15 that contains the
     truth), on stranded (κ = 0.99) and unstranded (κ = 0.5) data alike. Removing the gDNA bound
     opens the lower side and removing either RNA bound opens the upper side."""
+    from _psi_reference import jeffreys_arms, row_at, strand_loglik_mixture
+
     import rigel.calibration.simplex_logodds as sl
     from rigel.calibration.messages.transfer_rows import profile_of_level
 
@@ -460,7 +465,7 @@ def test_THE_BRACKET_THEOREM_three_lower_bounds_and_the_strand_equation_bracket_
         tau = np.sin(theta)
         fpk = ((1 - fg)[:, None] * (1 + tau)[None, :] / 2).astype(F)
         fnk = ((1 - fg)[:, None] * (1 - tau)[None, :] / 2).astype(F)
-        psi = sl._mixture_strand_loglik(
+        psi = strand_loglik_mixture(
             np.asarray([u_pos], F)[:, None, None],
             np.asarray([n], F)[:, None, None],
             fg.astype(F)[None, :, None],
@@ -473,15 +478,13 @@ def test_THE_BRACKET_THEOREM_three_lower_bounds_and_the_strand_equation_bracket_
             np.asarray([0.25], F)[:, None, None],
             np.asarray([0.25], F)[:, None, None],
         )[0].astype(np.float64)
-        psi += np.asarray(sl._gdna_arm(lam, None) + sl._rna_arm(lam), np.float64).reshape(-1)[
-            :, None
-        ]
+        psi += jeffreys_arms(lam)[:, None]
         profiles = {
             s: floor(np.log(truth[s] * n / a_r / rho[s])) for s in ("pos", "neg") if s not in drop
         }
         if profiles:
-            psi += sl.CubeRow(profiles.get("pos"), profiles.get("neg"), u, n, a_r, rho["pos"]).at(
-                fg, tau
+            psi += row_at(
+                sl.CubeRow(profiles.get("pos"), profiles.get("neg"), u, n, a_r, rho["pos"]), fg, tau
             )
         if "g" not in drop:
             lvl = floor(np.log(truth["g"] * n / a_g / rho["g"]))

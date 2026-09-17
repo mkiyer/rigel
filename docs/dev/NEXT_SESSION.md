@@ -1,108 +1,104 @@
-# NEXT SESSION — start here (2026-09-17, after the port's step (ii))
+# NEXT SESSION — start here (2026-09-17, after the port's step (iii))
 
 This file is only how to begin. The port's plan is `docs/dev/CALIBRATION_PERFORMANCE_PLAN.md` §F (the order of its
 four steps) and §G (the scan and the second pass after it); the LIVE status with numbers is
-`ISSUES: performance-memory-bounded-solve`; steps (i) and (ii)'s record is the closing paragraphs of `DESIGN.md`
-§6b.15.5.
+`ISSUES: performance-memory-bounded-solve`; steps (i)–(iii)'s record is the closing paragraphs of `DESIGN.md`
+§6b.15.5; ψ's design is `docs/dev/PSI_PORT_PLAN.md`.
 
 ## The order (owner, 2026-09-17: the release ships the contraction as it stands; performance until the tool is fast)
 
-1. ~~The ruler's repair~~ — DONE 2026-09-16 (four commits, `e51d91c6` … `64b79e9a`).
-2. ~~The yield's floors~~ — DONE 2026-09-17 (`a79004b5`).
+1. ~~The ruler's repair~~ — DONE 2026-09-16.
+2. ~~The yield's floors~~ — DONE 2026-09-17.
 3. ~~The port, step (i): the directional pass native~~ — DONE 2026-09-17 (`553b3dfc`; VCaP 526 → 403 s).
-4. ~~The port, step (ii): the builders~~ — DONE 2026-09-17, two commits prepared for the owner's go (the
-   scratchpad's `commits/7_layout` and `commits/8_prepare_kernel`, snapshots with their messages): (ii-a) the
-   layout (`RowTable`, `_pack` deleted, bit-identical) and (ii-b) `native.transfer_prepare` (the builders
-   20.0 → 2.5 s on MO_3021's first sweep; VCaP 409 → 315 s and 403 → 314 s at 8 threads, the sweep 0.68×, the
-   builders 0.18×, ψ and every untouched stage 0.93–1.03 — `perf/port_ii_2026-09-17/`).
-5. **THIS ONE — step (iii): ψ native** (`simplex_logodds`), then
-6. step (iv): threads over blocks (the blocks are independent given the library; `solve_chain`'s loop), then
-7. §G: the scan (33 s) and the second pass (22 s), the stages that scale with depth.
+4. ~~The port, step (ii): the builders~~ — DONE 2026-09-17 (`78d4a075`, `584fd9e6`; VCaP 409 → 315 s), and the
+   one-path cleanup that followed it (`5c49447c`: the Python builders deleted).
+5. ~~The port, step (iii): ψ native~~ — DONE 2026-09-17 (the commit this file rides in; ψ 4.3 → 1.6 s on
+   MO_3021's first sweep, the replay 8e-6 of its budget; VCaP 341 → 285 s and 324 → 269 s at 8 threads, the
+   sweep 0.73×, ψ 109 → 55 s, untouched stages 0.97–1.03 — `perf/port_iii_2026-09-17/`).
+6. **THIS ONE — what is left of the sweep, and step (iv)**: read "Where the time is now" before choosing.
+7. §G: the scan (32 s) and the second pass (22 s), the stages that scale with depth.
 
-## Step (iii), concretely
+## Where the time is now (MO_3021's first sweep replayed, cProfile, 8.7 s)
 
-After step (ii) the sweep's time on VCaP is ψ's: the stage tree of step (ii)'s port run (`perf/port_ii_2026-09-17/
-pair1_port.log`) reads 45.4 s for the self-solve's ψ (`build_region_init`, 1,704 calls) and 57.3 s for the final
-solve's (`_solve_block`, 1,704 calls) of a 191 s sweep, beside 18 s of builders (one native call per block plus the
-Python allocation and wrapping), 36.7 s of native passes and 6.9 s of the policy's solve. ψ is `simplex_logodds._solve_regions_logodds_all` → `_solve_logodds` → `_psi`: one solver for
-both slot classes on the `(m, K, K_t + 2)` cube in float64 (`DESIGN.md` §6b.15.6) — the strand term, the two
-arms (`_gdna_arm`, `_rna_arm`), the λ-factor rows, the delivered `lam_rows` and, at AMBIG slots, the `CubeRow`
-delivery evaluated at ψ's own θ nodes (`_tilt_window`, `_TILT_NODES` derived), then the read-out: `f_g` the
-posterior median over the θ-marginal (`_posterior_median_fg`, a continuous quantile), `Var(log f_g)` its grid
-moment (`_row_moment`), the tilt share, `_compose`. Everything is numpy over tiles of rows (`_block_rows`). The
-port is the same shape as steps (i) and (ii): DERIVE the C++ from the Python (the executable specification),
-build it in-tree beside `pass_kernel.cpp` / `prepare_kernel.cpp` (a `_psi_impl` module; the row pieces of
-`native/transfer_rows.h` are not ψ's — ψ needs `exp`/`log` over the cube, the log-sum-exp `_lse`, the quantile),
-a two-kernel harness on real captured blocks BEFORE wiring (copy the pattern of the scratchpad's
-`s8/prepare_ab.py`: wrap the production call, run both, compare every output field), wire, gate
-(`tests/calibration/test_psi_kernel.py` on the pattern of `test_prepare_kernel.py`: every output within the
-budget, the wiring by a spy), the replay's `--tolerance` on `sweeps_MO_3021_step8` for calls 0–3, the suite, the
-three references re-frozen with the reason, interleaved timing pairs on VCaP. ⛔ Float64 for the whole of ψ,
-ONE solver, the λ lattice a parameter (`sweep_logodds_step` through `calibrate.lattice_points`) — decisions on
-record. ⛔ Read `tests/calibration/test_vertex_reference.py`, `test_simplex_logodds*.py` and `test_sweep.py`
-first: the read-out's rules (the median not the mean, the tilt atom at τ = ±1, the reference measure) are what
-a port must keep to the bit-budget, not to bits.
+| stage | s | what it is |
+|---|---|---|
+| `TransferPolicy.prepare` | 2.2 | the native builders ~0.7 s inside a Python wrapper of 1.45 s: `_Chain`'s `asarray` copies, the `LevelLane` constructions, and the TABLE ALLOCATIONS — `numpy.zeros` is 1.3 s of the whole sweep over 40,897 calls: every `RowTable` (own, three own levels, two `(n, 2, K)` flux tables) and both `Received` tables (composition + three level profiles, per pass) zero-filled per block, ~64 MB a block, ~27 GB a sweep |
+| ψ (`_solve_regions_logodds_all`) | 1.65 | the native solve (1.6 s); the AMBIG cube's 2,600 exponentials per slot are the floor |
+| `_PreparedTransfer.solve` | 1.34 | PYTHON: `_ceilings` 0.47 (per single-strand node, `rna_row_of_level`, `intersect`), `_cube_rows`, the held-level rows through `profile_of_level` (32 k calls) |
+| `run_pass` (×2) | 0.85 | the native passes |
+| the factory rows (`calibrate.__getitem__` → `density_lambda_factor`, `_log_negbinom`) | 0.6 | the intron factory's per-block λ rows, numpy |
+| `solve_chain` / `_solve_block` self, `block_slice`, `view_fields`, the checks | ~1.0 | the block plumbing |
 
-## The protocol for every step (unchanged since the plan)
+The native kernels are 3.2 s of 8.7; the Python around them is the majority. Two ways forward, to put to the owner:
+
+* **(a) finish the block in native**: the policy's `solve` (the two held tables → ψ's `lam_rows` and `cube_rows`;
+  the same shape as the builders — one call per block writing rows), and the allocations (`RowTable` and
+  `Received` tables as `np.empty` where every reader goes through a mask — CHECK every reader first: the
+  diagnostics capture concatenates the whole `Received` tables, so an instrument may read an absent row; or
+  allocate once per sweep at the largest block and slice). Each a bounded step with the same gates.
+* **(b) step (iv), threads**: ψ over slots inside `psi_solve` is deterministic (nothing is shared between
+  slots) and one `thread_pool.h` loop away — but ψ is 19 % of the sweep now, so it caps at ~15 %; threads over
+  BLOCKS parallelise everything, and need either the whole block in native (a) or the native calls releasing
+  the GIL (`nb::call_guard<nb::gil_scoped_release>`) with Python threads driving `_solve_block` — the Python
+  parts then still serialise. (a) first makes (b) worth more.
+
+## The one-path ruling (owner, 2026-09-17) — what is still duplicated
+
+One production code path; once native code is validated the Python it replaces is deleted; a small
+floating-point tolerance is accepted. Applied to the builders (`5c49447c`) and to ψ (this commit). STILL
+DUPLICATED, to converge next on the same pattern (bind the C++ pieces for the unit gates, rewrite the per-hop
+gates to drive `run_pass` on small tables, delete the Python): the per-hop pass kernel
+(`_PreparedTransfer.propagate`, `Faces.apply`, `LevelLane.emit` / `receive`) and the row constructors of
+`transfer_rows.py` that only it and the gates' recomputes read (`face_map_lambda`, `edge_level_row`,
+`level_map_lambda`, `level_bound_row`, `poisson_level`, `level_of_profile`, `rna_level_of_profile`, `flux_level`,
+`transport_row`, `splice_out_row`, `level_row`, `blur_row`, the flag helpers, `strand_bits`);
+`test_pass_kernel.py`'s two-kernel gate goes with them. What the policy's `solve` still reads in Python
+(`intersect`, `lower_side`, `profile_of_level`, `rna_row_of_level`, `hop_price`, `count_logvar`) converges when
+`solve` does. The layer-4 `strand_likelihood` "executable reference" module is the same kind of duplicate
+(its gate now reads the native strand term through `psi_cube`) — the owner's call.
+
+## The protocol for every step (unchanged)
 
 1. `python scripts/design/preflight.py` first; the suite's standing count is in `CLAUDE.md`.
-2. DERIVE from the Python → the C++ in-tree (`src/rigel/native/`, a `nanobind_add_module` in `CMakeLists.txt`, the
-   import in `src/rigel/native.py`; `pip install --no-build-isolation -e ".[dev]"` rebuilds in 30 s) → a two-kernel
-   harness on real captured blocks before wiring → wire → the gate file (equality on every bit and count, a
-   budget on every profile, a spy for the wiring) → `python scripts/profiling/sweep_replay.py replay --dir
-   ~/Downloads/rigel_runs/perf/sweeps_MO_3021_step8 --call C --tolerance` for C in 0–3 → the suite →
-   `rename_identity.py --check` on the three references (they MOVE under a port: re-freeze with the reason, the old
-   ones kept under the scratchpad) → interleaved timing pairs at 8 threads on VCaP.
-3. The timing arms: a worktree of the PRE-step commit with this build's binaries — `git worktree add
-   /tmp/rigel_pre <SHA>`, copy `build/cp312-abi3-macosx_26_0_arm64/_*_impl.abi3.so` into `<worktree>/src/rigel/`
-   (copy to a new name, then `mv`), run it with `PYTHONPATH=<dir holding sitecustomize.py>` (the file that strips the
-   editable install's redirecting finder and puts the worktree's `src` first: `pre_site/sitecustomize.py` in the
-   scratchpad; edit its `PRE` path) — then, in one sitting with nothing else running, the scratchpad's
-   `s8/time_pairs.sh` pattern: pre, port, pre, port; `profiler.py --compare A.json B.json`; the untouched stages must
-   read ~1.00. The libraries: VCaP `~/Downloads/rigel_runs/cfrna/mctp_vcap_rna20m_dna05m/bam/star.srt.rmdup.collate.bam`
-   (18.6 M fragments, the timing library), MO_3021 (the capture library); the index `~/Downloads/rigel_runs/refs/rigel_index`.
-4. Each step its own commit, PREPARED (`commits/N_name/files/` by `snapshot.sh`, the message beside it) and committed
-   on the owner's go: move the committed snapshots to `commits/committed/`, `git stash push -u`, run
-   `commit_series.sh`, verify `git diff stash@{0}` shows only the stash's untracked files and `cmp` those against
-   HEAD, drop the stash, push.
+2. A fresh capture of the tree before any `src/` edit (`sweep_replay.py capture` on MO_3021 at 8 threads, ~5 min,
+   3.5 GB; delete the superseded one).
+3. DERIVE from the Python → the C++ in-tree (a `nanobind_add_module` in `CMakeLists.txt`; the import in
+   `src/rigel/native.py` only AFTER the build) → a scratchpad harness that wraps the production call and runs
+   both on every call of a captured sweep, comparing every output against the replay's derived budget
+   (`s9/psi_ab.py`, `s8/prepare_ab.py`) → wire, delete the Python, rewrite the gates to the bindings → the
+   suite → `sweep_replay.py replay --tolerance` for calls 0–3 → the three references re-frozen with the reason →
+   two interleaved timing pairs at 8 threads on VCaP against a worktree of the pre-step commit carrying this
+   build's binaries (`/tmp/rigel_pre`, `pre_site/sitecustomize.py`, `s9/time_pairs.sh`).
+4. Each step its own commit; the owner drives the push.
 
 ## ⛔ Traps met in this session (also in memory)
 
-* A pure re-layout is gated by DIGESTS of every table from two trees (`s8/prepare_digest.py`: the pass's kwargs
-  dict per block from the pre-step worktree and from the tree), never by reading the code twice.
-* Identity checks and the suite measure the tree they STARTED on: finish every `src/` edit of a commit first, then
-  run them; a check started before the last edit is wasted (and editing `src/` while one starts is the step-(i)
-  trap). Docs may be edited while they run; they read no docs.
-* The jargon and docs-boundary gates collect `.h` files too: a header under `src/rigel/native/` is +2, like a `.cpp`.
-* The compiler contracts `a*b + c` into a fused multiply-add: a C++ port agrees with numpy at a few ulps of the raw
-  terms, never to the bit, even where `exp`, `log` and `expit` match libm exactly — so a gate on real data is a
-  budget (the toy's small rows passed the existing gates' 1e-10..1e-12 tolerances unchanged).
-* A scripted edit that asserts several anchors must write per file — one that asserts after writing loses nothing,
-  one that asserts BEFORE writing loses the whole edit silently; `grep` after every scripted edit.
+* `np.finfo(np.float64).eps` is `std::numeric_limits<double>::epsilon()` (2⁻⁵²), NOT half of it: the quadrature's
+  truncation constant read T = 36.7 instead of 36.0 and widened every AMBIG window — invisible on a toy,
+  1e-4 on deep slots. Derive constants from the same definition on both sides and print them.
+* A rotation recurrence for `sin` leaves [−1, 1] by an ulp at a domain end; a share `(1 ∓ τ)/2` below zero has no
+  logarithm. Clamp to the function's range whenever a recurrence replaces the function.
+* The harness must pass the PRODUCTION inputs: the toy agreed while real blocks (priors, message rows,
+  delivered levels, a belief of `f_g = 1`) did not; catch the first mismatching call and dump the slot.
+* A Python script that edits several files must write per file, and one that asserts several anchors in one
+  file loses the whole file's edits on the first miss — re-run it, never patch by hand.
+* Doc gates read `docs/` and `docs/dev/` while the suite runs: edit docs before launching it or after it ends.
 
-## The one-path ruling (owner, 2026-09-17)
+## Storage (2026-09-17)
 
-One production code path. Once native code is validated, the Python it replaces is deleted — no reference
-implementation is kept to gate against, and a small floating-point tolerance between implementations is
-accepted for the speed. Applied the same day to step (ii): the Python builders and `test_prepare_kernel.py` are
-gone; the transfer gates hold the native tables to independent recomputes. STILL DUPLICATED, to converge next:
-the per-hop Python pass kernel (`_PreparedTransfer.propagate`, `Faces.apply`, `LevelLane.emit` / `receive`) and
-the Python row constructors of `transfer_rows.py` that only the pass kernel and the unit gates' recomputes read
-(`face_map_lambda`, `edge_level_row`, `level_map_lambda`, `level_bound_row`, `poisson_level`, `level_of_profile`,
-`rna_level_of_profile`, `flux_level`, the flag helpers, `strand_bits`) — the convergence is: bind the C++ row
-constructors for the unit gates, rewrite the per-hop gates to drive `run_pass` on small tables, delete the Python
-copies; `test_pass_kernel.py`'s two-kernel gate goes with them. ψ (step (iii)) is built one-path from the start.
+Freed today: the superseded test-reference sets (35 GB), the previous session's scratchpad (29 GB, synced first),
+the `step6`/`step7`/`step8` captures (10.5 GB). Kept: `perf/sweeps_MO_3021_step9` (3.5 GB, this tree before
+step (iii); the next step captures `step10` and deletes it). Still large and regenerable:
+`prototypes/2026-09-16_ruler_repair/s5/scratch_test_reference*` (six scratch renders, 22 GB) — the owner's.
 
 ## Where everything is
 
-* The synced scratchpad: `~/Downloads/rigel_runs/prototypes/2026-09-17_port_ii/` — `commits/` (`7_layout`,
-  `8_prepare_kernel`, `snapshot.sh`, `commit_series.sh`), `s8/` (`prepare_digest.py`, `prepare_ab.py`,
-  `time_pairs.sh`, every gate's log, `identity_prev/` with the references before the re-freeze), `pre_site/`.
-* Captures and baselines: `~/Downloads/rigel_runs/perf/sweeps_MO_3021_step8` (this tree before step (ii), 8a9c25c4),
-  `perf/port_2026-09-17/` (step (i)'s pairs), `perf/port_ii_2026-09-17/` (step (ii)'s pairs).
-* The identity references: `~/Downloads/rigel_runs/arms/review_identity_*.json`, frozen on the (ii-b) tree.
-* The pre-step worktree `/tmp/rigel_pre` (8a9c25c4) — remove it with `git worktree remove /tmp/rigel_pre` when the
-  timing is no longer needed; `git worktree prune` after.
+* The synced scratchpad: `~/Downloads/rigel_runs/prototypes/2026-09-17_port_ii/` — `commits/committed/`
+  (7–10 with their messages), `s8/` (step (ii)'s harnesses and logs), `s9/` (`psi_ab.py`, the step (iii) logs,
+  `identity_prev/`, `time_pairs.sh`, `refreeze.sh`), `pre_site/`.
+* Captures and reports: `perf/sweeps_MO_3021_step9`; `perf/port_ii_2026-09-17/`, `perf/port_iii_2026-09-17/`.
+* The identity references: `~/Downloads/rigel_runs/arms/review_identity_*.json`, frozen on this tree.
+* The worktree `/tmp/rigel_pre` (5c49447c) — `git worktree remove /tmp/rigel_pre` when the timing is done.
 
 ## Decisions on record (unchanged, carried)
 
@@ -113,6 +109,6 @@ copies; `test_pass_kernel.py`'s two-kernel gate goes with them. ψ (step (iii)) 
   failure where there is no gDNA to read (owner, 2026-09-15).
 * Real data is a test input, never a design input; the four cfRNA libraries are re-run with the regime printed.
 * A few high-quality instruments, kept current; no suite gate polices instruments; the source cites no doc.
-* The message cache's on/off switch, the refit count and the scan's thread split are the owner's; parallelism
-  waits for the port. CI runs on demand only.
+* The message cache's on/off switch, the refit count and the scan's thread split are the owner's. CI runs on
+  demand only.
 * The certifier's FIELD gate flake on λ ≈ 7 boundaries is DEFERRED (owner, 2026-09-14).

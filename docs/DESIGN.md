@@ -1190,7 +1190,23 @@ wall 409 → 315 s and 403 → 314 s (0.77×), the sweep 281 → 191 s and 278 �
 0.93–1.03, peak 11.3 → 11.1 GB (`perf/port_ii_2026-09-17/`). What remains of the sweep is ψ: the self-solve's
 46 s and the final solve's 57 s of 190 s — step (iii).
 
-#### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer)
+**ψ is native** (step (iii), 2026-09-17, one path from the start): `native.psi_solve`
+(`src/rigel/native/psi_kernel.cpp`, the `_psi_impl` module) solves every slot the dispatcher selects on its own
+`(λ, θ)` cube in one pass — the strand term (`transfer_rows.h`, shared with the builders), the two Jeffreys
+arms, the fitted gDNA prior, the λ-factor row, the delivered `CubeRow` read at each cell, the θ window's
+nodes (τ = sin θ by a rotation recurrence, clamped to the sine's range) with their trapezoid log-weights and
+the two atoms — then the read-out: the ½-quantile on λ, the log-variance moment, the RNA-mass-weighted tilt
+share, the composition. `simplex_logodds._solve_regions_logodds_all` is the dispatcher (the reference
+defaults, the signal mask, the delivered rows packed, one call), the Python ψ is DELETED, and the gates read ψ
+through the same code: `psi_cube` (the cube), `posterior_median_fg` (the quantile), `compose` (the
+composition); their readable oracles — the strand term, the arms, the row's map — live in
+`tests/calibration/_psi_reference.py`, and the reference-exponent ablations that patched the arms are now
+λ-rows (the arms are additive). Judged: on MO_3021's first sweep (852 dispatcher calls, 306 k single-strand and
+52 k AMBIG slot-solves) every output within 1.6e-15 on a fraction and 4.2e-13 on `var_gdna` — 8e-6 of the
+derived budget — and ψ 4.31 → 1.60 s, the AMBIG cube's 2,600 exponentials per slot the arithmetic floor (the
+EM's 25-ulp exponential bought nothing over libm's and was not kept). Timed on VCaP at 8 threads, two interleaved pairs against a worktree of the cleanup commit: wall 341 → 285 s and 324 → 269 s (0.84×), the sweep 204 → 149 s and 194 → 141 s (0.73×), ψ 109 → 55 s (the self-solve's 0.44×, the final solve's 0.55×), every untouched stage at 0.97–1.03 (`perf/port_iii_2026-09-17/`); the day's four ports took the deep library from 526 s to 270–285 s and the sweep from 396 s to 141–149 s. What remains of the sweep is the Python around the kernels: the policy's `solve`, the tables' zero-fills, the factory rows.
+
+#### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer; native since 2026-09-17, §6b.15.5)
 
 A single-strand slot is the cube with a tilt grid of one cell — its tilt is its live strand, `τ = ±1` — so
 `simplex_logodds._solve_logodds` serves both classes, ψ built once by `_psi` on the `(m, K, K_t)` cube and

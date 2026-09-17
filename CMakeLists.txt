@@ -219,6 +219,21 @@ target_compile_options(_prepare_impl PRIVATE -g)
 
 install(TARGETS _prepare_impl LIBRARY DESTINATION rigel)
 
+# --- Build the _psi_impl extension --------------------------------------------
+
+# ψ, the calibration sweep's per-slot solve on the (λ, θ) cube (simplex_logodds' one solver), one call per
+# block; the cube, the quantile read-out and the composition are bound for the gates from the same code.
+# Pure C++17 + nanobind + numpy; the strand term and the sigmoid are native/transfer_rows.h's.
+nanobind_add_module(
+  _psi_impl
+  NOMINSIZE
+  STABLE_ABI
+  src/rigel/native/psi_kernel.cpp
+)
+target_compile_options(_psi_impl PRIVATE -g)
+
+install(TARGETS _psi_impl LIBRARY DESTINATION rigel)
+
 # --- SIMD / Architecture Detection -------------------------------------------
 #
 # Detect CPU architecture and report available SIMD instruction sets.

@@ -810,7 +810,7 @@ read-out averages them; the chunk-exact reordering of 2026-09-11 moved ≤ 3.1e-
 read-out's own rounding, `K · ε`, with no term re-rounded. Gate: `tests/test_sweep_replay_tolerance.py`
 — the budget covers float32 rounding of the terms and of the strand mean at every strength.
 
-## 9e. ψ's θ quadrature — the nodes follow the strand term's peak (`simplex_logodds._tilt_window`)
+## 9e. ψ's θ quadrature — the nodes follow the strand term's peak (`native/psi_kernel.cpp`'s `tilt_window`)
 
 **The integrand.** At an AMBIG slot ψ is read out on its θ-marginal, `M(λ) = ∫ exp ψ(λ, sin θ) dθ` over
 `θ ∈ [−π/2, π/2]` (§9c: the arcsine measure on the tilt `τ` is cancelled by the θ coordinate, so no measure
@@ -867,7 +867,7 @@ at 24 nodes (12 nodes reach 0.07 and are refused); the fixed lattice at 60 reads
 (`simplex_logodds.CubeRow`: the held profile per strand over `u = log(ρ/ρ_ref)`, the slot's total `n` and RNA
 opportunity `a_r`, each lane's `ρ_ref`) and ψ evaluates them at its own nodes: at each cell the strand's share
 `f_s = (1 − f_g)(1 ± τ)/2` implies the density `f_s·n/a_r`, and the held profile is read at `log(ρ_s/ρ_ref)`
-(`CubeRow.at`, the `profile_of_level` map with the tilt inside). No θ lattice exists for a row to be built
+(the kernel's row map, `profile_of_level` with the tilt inside; the readable form is the gates' `_psi_reference.row_at`). No θ lattice exists for a row to be built
 on and nothing is interpolated. Before this, rows built on a 60-node lattice equalled rows on 240 on the
 shared-exon stress and rows on 24 did not — the lattice's own resolution error, now gone with it.
 
@@ -879,7 +879,7 @@ gDNA at a balanced slot — Bayes-correct under an `f_g`-independent arcsine mea
 prior pin such slots; a slot with no junction and no prior reads `f_g ≈ 1 − 1/√n` from its own solve. See
 `ISSUES: strand-marginal-volume-factor`.
 
-## 9f. The tilt atom — the AMBIG tilt's hypothesis space is {pure +, pure −, mixed} (`simplex_logodds._psi`)
+## 9f. The tilt atom — the AMBIG tilt's hypothesis space is {pure +, pure −, mixed} (`native/psi_kernel.cpp`'s `slot_cube`)
 
 **What §9e's exact marginal cannot say.** At an AMBIG slot whose RNA is all on one strand the truth sits AT
 the strand cap: with `τ = 1` the split `p̂ = ½ + (1 − f_g)(κ − ½)` identifies `f_g` exactly as at a

@@ -418,7 +418,7 @@ def _gdna_logprior(gdna_prior, solve_grid, mass_global, eff_global):
     COMPOSITION prior and only that: a total-density model is an ENRICHMENT model, and letting it vote a
     slot's ``f_g`` is the count-votes-composition regression. ``None`` means the arm takes its derived
     reference in the solve — the prior-free solve pass-0 runs by design. The RNA arm has no fitted form
-    (`simplex_logodds._rna_arm`)."""
+    (the RNA arm is the Jeffreys reference alone, `native/psi_kernel.cpp`)."""
     if gdna_prior is None:
         return None
     return gdna_prior.logprior(solve_grid, mass_global, eff_global)

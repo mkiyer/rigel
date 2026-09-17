@@ -11,6 +11,7 @@ _scoring_impl : Per-fragment likelihood scoring (strand, coverage, splice)
 _em_impl      : Locus-level EM solver, connected components, effective-length normalization
 _pass_impl    : One directional pass of the calibration sweep's composition transfer
 _prepare_impl : The composition transfer's builders for one block — claims, face rules, level lanes
+_psi_impl     : ψ, the sweep's per-slot solve on the (λ, θ) cube, and its pieces for the gates
 _cgranges_impl: Interval overlap queries (vendored cgranges)
 """
 
@@ -52,6 +53,12 @@ from ._prepare_impl import transfer_prepare
 from ._pass_impl import transfer_pass
 from ._pass_impl import trigamma
 
+# -- The calibration sweep's per-slot solve, ψ -------------------------------
+from ._psi_impl import psi_solve
+from ._psi_impl import psi_cube as psi_cube_native
+from ._psi_impl import posterior_median as psi_posterior_median
+from ._psi_impl import compose as psi_compose
+
 # -- Interval overlap -------------------------------------------------------
 from ._cgranges_impl import cgranges
 
@@ -86,6 +93,11 @@ __all__ = [
     "transfer_prepare",
     "transfer_pass",
     "trigamma",
+    # ψ
+    "psi_solve",
+    "psi_cube_native",
+    "psi_posterior_median",
+    "psi_compose",
     # Intervals
     "cgranges",
 ]

@@ -1,4 +1,4 @@
-# ψ native — the port's step (iii), the design (2026-09-17)
+# ψ native — the port's step (iii), the design (2026-09-17) — LANDED the same day as designed; the record is `DESIGN.md` §6b.15.5
 
 The frame: `ISSUES: performance-memory-bounded-solve` ③ (iii); the rulings ψ keeps are `DESIGN.md` §6b.15.3
 (chunk-exact read-out), §6b.15.6 (one solver, float64), §6b.15.11 (the θ nodes follow the peak), §6b.15.13 (the

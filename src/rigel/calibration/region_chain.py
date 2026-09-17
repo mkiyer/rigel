@@ -100,7 +100,7 @@ class RegionDeconv:
     gdna_mass: "np.ndarray | None" = None  # float64[K]
     rna_mass: "np.ndarray | None" = None  # float64[K]  (= (1−gdna_frac)·M_unspliced + spliced mass)
     # `Var(log f_g)`, NOT `Var(f_g)` — a grid moment of `log f_g` over the lambda lattice
-    # (`simplex_logodds._solve_logodds`), so NOT bounded by 1/4. Set by the per-region solve and read by
+    # (`simplex_logodds._solve_regions_logodds_all`), so NOT bounded by 1/4. Set by the per-region solve and read by
     # the landscape prior's training rule; None on the chain region/boundary projections.
     gdna_frac_var: "np.ndarray | None" = None  # float64[K]
 

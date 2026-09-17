@@ -29,8 +29,9 @@ budget), (ii) `prepare`'s builders LANDED 2026-09-17 in two commits — (ii-a) t
 the tables the native pass reads directly, `RowTable`; the per-block packing deleted, bit-identical) and (ii-b)
 the arithmetic (`native.transfer_prepare`, one call per block; the builders 20.0 → 2.5 s on MO_3021's first
 sweep, 103 → 18 s on VCaP, the replay 4.1e-6 of its budget; VCaP 409 → 315 s and 403 → 314 s at 8 threads on
-two interleaved pairs, `perf/port_ii_2026-09-17/`) — then (iii) ψ (the cube is `K × (K_t + 2)`; the two ψ
-solves are 46 + 57 s of the 190 s sweep, the largest stage left inside it), then (iv) threads over
+two interleaved pairs, `perf/port_ii_2026-09-17/`), (iii) ψ LANDED 2026-09-17 (`native.psi_solve`, one path,
+the Python deleted; ψ 4.31 → 1.60 s on MO_3021's first sweep, the replay 8e-6 of its budget;
+VCaP 341 → 285 s and 324 → 269 s at 8 threads on two interleaved pairs, the sweep 0.73×, ψ 109 → 55 s, `perf/port_iii_2026-09-17/`; the Python around the kernels — the policy's `solve`, the tables' zero-fills, the factory rows — is now the sweep's majority), then (iv) threads over
 blocks, each step behind `sweep_replay.py replay --tolerance` on `sweeps_MO_3021_step8` (captured 2026-09-17
 after step (i), on the sweep code of `8a9c25c4`), the `review_identity_*` references and the suite, timed against the 2026-09-17 baseline
 pair (`perf/baseline_2026-09-17/pair1_*`, the pushed tree at 8 threads on VCaP; the native pass read 526 → 403 s
