@@ -34,11 +34,6 @@ if TYPE_CHECKING:
 # rebuild the same in-locus predicate rather than restate the bits.
 _RNA_SIGNATURE_BITS = BIT_EXON_POS | BIT_EXON_NEG | BIT_INTRON_POS | BIT_INTRON_NEG
 
-# Numerical floor for the gDNA-component effective length: matches the EM's own
-# default (``run_batch_locus_em_partitioned`` floors at 1.0), avoiding a zero
-# denominator when the EM normalises the gDNA component's abundance.
-_GDNA_EFF_LEN_FLOOR = 1.0
-
 
 @dataclass(frozen=True, slots=True)
 class LocusPriors:
@@ -266,7 +261,7 @@ def assemble_priors(
         {gdna,rna}_prior_count = Σ_regions share(r,L)·mass_c_region[r]
                                + Σ_boundaries share(e,L)·mass_c_boundary[e]·q[e]
 
-        gdna_eff_len = clamp( Σ_regions share·S_r·c̃_r  +  Σ_boundaries share·S_e·c̃_e )
+        gdna_eff_len = Σ_regions share·S_r·c̃_r  +  Σ_boundaries share·S_e·c̃_e
 
     ``c̃`` is each object's capture efficiency, the calibration's own
     (`CalibrationResult.gdna_capture_efficiency_region` / ``_boundary``; `capture_efficiency`) and ``S``
@@ -361,10 +356,9 @@ def assemble_priors(
     return LocusPriors(
         gdna_prior_count=gdna_locus,
         rna_prior_count=rna_locus,
-        # Clamp into [min(floor, span), span]: the 1 bp floor matches the EM's own eff-len floor but must
-        # never exceed the locus's own uncontracted span, or a degenerate sub-basepair span (a
-        # microexon-only locus) would return eff_len > span, breaking eff_len ∈ (0, span].
-        gdna_eff_len=np.minimum(np.maximum(eff_len, _GDNA_EFF_LEN_FLOOR), np.maximum(span, 1e-9)),
+        # ≤ span by construction (every efficiency ≤ 1); the minimum absorbs an ulp. No floor: a locus
+        # with no start position has a yield of 0, and the EM reads a zero yield as "cannot emit".
+        gdna_eff_len=np.minimum(eff_len, span),
     )
 
 

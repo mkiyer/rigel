@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -535,7 +536,7 @@ static inline void em_step_kernel_range(
                 col_acc[j].add(row[j]);
             }
         } else {
-            // col_acc: adding 0.0 is a no-op, skip
+            // a row no component can emit (every weight -inf) lands here: outside the model, skipped
         }
     }
 
@@ -1003,6 +1004,7 @@ static double marginal_data_loglik(
                 double v = ll[i * k + j] + log_weights[cidx[j]];
                 if (v > mx) mx = v;
             }
+            if (!(mx > -std::numeric_limits<double>::infinity())) continue;  // no component can emit it
             double s = 0.0;
             for (int j = 0; j < k; ++j) {
                 s += std::exp((ll[i * k + j] + log_weights[cidx[j]]) - mx);
@@ -2047,24 +2049,25 @@ static void extract_locus_sub_problem_from_partition(
         }
     }
 
+    // A component's yield enters unfloored. A yield of 0 is a component with no start position, which
+    // cannot emit: +inf here is -inf in every E-step weight, and a row no component can emit is skipped.
+    const double kInf = std::numeric_limits<double>::infinity();
     sub.log_eff_len.assign(nc, 0.0);
     for (int i = 0; i < n_t; ++i) {
         double Le = all_t_eff_lens[t_arr[i]];
-        if (!(Le >= 1.0)) Le = 1.0;
-        sub.log_eff_len[i] = std::log(Le);
+        sub.log_eff_len[i] = Le > 0.0 ? std::log(Le) : kInf;
     }
     // gDNA component: FL-marginal overlap effective length for this
     // MultiLocus. The scorer contributes log h_G(ell_f); the EM applies
     // -log L̃_gDNA here, matching the RNA component contract.
     double GLe = gdna_eff_len;
-    if (!(GLe >= 1.0)) GLe = 1.0;
     // gDNA FP-aversion: a global log-odds bias on the gDNA component. The E-step
     // weight is log_weight = log(theta) - log_eff_len, so subtracting the bias
     // from log_eff_len here ADDS it to the gDNA log-weight. A positive bias favors
     // gDNA at every fragment (fewer gDNA->RNA leaks, more RNA->gDNA siphons);
     // 0.0 is neutral. It flows through the E-step, M-step, and hard assignment
     // identically because they all read log_eff_len.
-    sub.log_eff_len[sub.gdna_idx] = std::log(GLe) - gdna_em_llr_bias;
+    sub.log_eff_len[sub.gdna_idx] = (GLe > 0.0 ? std::log(GLe) : kInf) - gdna_em_llr_bias;
 
     // Clean up local_map scratch for next call
     for (int i = 0; i < n_t; ++i) {
@@ -2400,8 +2403,9 @@ batch_locus_em_partitioned(
                 prof.squarem_grouped_fallback_used = result.squarem_grouped_fallback_used;
                 prof.squarem_grouped_stabilization_fail_count =
                     result.squarem_grouped_stabilization_fail_count;
-                prof.gdna_eff_len = gel_ptr[li] >= 1.0 ? gel_ptr[li] : 1.0;
-                prof.gdna_log_eff_len = std::log(prof.gdna_eff_len);
+                prof.gdna_eff_len = gel_ptr[li];
+                prof.gdna_log_eff_len = gel_ptr[li] > 0.0
+                    ? std::log(gel_ptr[li]) : -std::numeric_limits<double>::infinity();
                 {
                     // Marginal data log-lik at the converged theta (which fixed point is the MLE).
                     std::vector<double> lw(static_cast<size_t>(nc));

@@ -1272,6 +1272,90 @@ def _run(est, partition, t_idx, *, index=None, rna_prior=0.0, gdna_prior=0.0):
     )
 
 
+def _mixed_partition(unique: tuple[int, ...], shared: int, gdna_log_lik: float = -np.inf):
+    """One locus: ``unique[t]`` fragments compatible with transcript ``t`` alone, then ``shared``
+    fragments compatible with every transcript, all at log-likelihood 0."""
+    cands = [[t] for t, n in enumerate(unique) for _ in range(n)]
+    cands += [list(range(len(unique)))] * shared
+    offsets = np.cumsum([0] + [len(c) for c in cands]).astype(np.int64)
+    flat = np.concatenate([np.asarray(c, dtype=np.int32) for c in cands])
+    n_units, n_cand = len(cands), flat.shape[0]
+    return (
+        offsets,
+        flat,
+        np.zeros(n_cand, dtype=np.float64),
+        np.ones(n_cand, dtype=np.float64),
+        np.zeros(n_cand, dtype=np.uint8),
+        np.zeros(n_units, dtype=np.uint8),
+        np.full(n_units, gdna_log_lik, dtype=np.float64),
+        np.zeros(n_units, dtype=np.int32),
+        np.zeros(n_units, dtype=np.uint8),
+    )
+
+
+def _yield_estimator(yields, *, mode: str) -> AbundanceEstimator:
+    return AbundanceEstimator(
+        num_transcripts=len(yields),
+        em_config=EMConfig(
+            mode=mode, iterations=200, convergence_delta=1e-9, assignment_mode="fractional", seed=0
+        ),
+        geometry=_lengths(yields),
+    )
+
+
+@pytest.mark.parametrize("mode", ["map", "vbem"])
+def test_the_split_is_invariant_to_a_common_thinning_of_every_yield(mode):
+    """Capture thins the yield of every component in a locus; thinned by ONE factor, no count may move,
+    because the E-step reads each component's count against its yield and only the ratios within the
+    locus decide. Written first and verified failing: the 1 bp floor clamped a 300 bp yield thinned a
+    thousandfold to 1 and moved the split of the shared fragments."""
+
+    def counts(scale):
+        est = _yield_estimator([300.0 * scale, 3000.0 * scale], mode=mode)
+        _run(est, _mixed_partition((100, 100), 200), [0, 1])
+        return est.em_counts.sum(axis=1)
+
+    full, thinned = counts(1.0), counts(1e-3)
+    assert full[0] > 100.0 and full[1] > 100.0, full  # the shared fragments are split, not dumped
+    np.testing.assert_allclose(thinned, full, rtol=1e-9)
+
+
+@pytest.mark.parametrize("mode", ["map", "vbem"])
+def test_a_transcript_with_no_start_position_cannot_emit(mode):
+    """A transcript shorter than every fragment has a yield of exactly 0 and produced nothing: its share
+    of every fragment is 0 — not the share of a 1 bp yield, which made it the densest component in the
+    locus and handed it every shared fragment. The fragments go to the components that can emit; a
+    fragment no component can emit is left unassigned, and nothing is NaN."""
+    est = _yield_estimator([0.0, 1000.0], mode=mode)
+    est.run_batch_locus_em_partitioned(
+        partition_tuples=[_mixed_partition((100, 0), 200)],
+        locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
+        gdna_prior_count=np.array([0.0], dtype=np.float64),
+        rna_prior_count=np.array([0.0], dtype=np.float64),
+        index=None,
+        emit_locus_stats=True,
+    )
+    np.testing.assert_allclose(est.em_counts.sum(axis=1), [0.0, 200.0], atol=1e-9)
+    assert np.isfinite(
+        est.locus_stats[0]["final_data_loglik"]
+    )  # the unemittable rows are outside it
+
+    est = _yield_estimator([0.0], mode=mode)
+    _t, rna, gdna = est.run_batch_locus_em_partitioned(
+        partition_tuples=[_mixed_partition((0,), 100, gdna_log_lik=0.0)],
+        locus_transcript_indices=[np.array([0], dtype=np.int32)],
+        gdna_prior_count=np.array([0.0], dtype=np.float64),
+        index=None,
+        gdna_eff_len=np.array([100.0], dtype=np.float64),
+    )
+    assert gdna[0] == pytest.approx(100.0) and rna[0] == pytest.approx(0.0)
+
+    est = _yield_estimator([0.0], mode=mode)
+    _t, rna, gdna = _run(est, _mixed_partition((0,), 100), [0])
+    assert rna[0] == 0.0 and gdna[0] == 0.0
+    assert np.all(np.isfinite(est.em_counts)) and est.em_counts.sum() == 0.0
+
+
 @pytest.mark.parametrize("mode", ["map", "vbem"])
 def test_a_locus_with_no_synthetic_component_is_BIT_IDENTICAL(mode):
     """The control. The rule must be invisible where it does not apply — and BIT-identical, not

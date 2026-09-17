@@ -42,6 +42,24 @@ both panels' instruments run on the landed tree against `DESIGN.md` §7's standi
    libraries the factor falls monotonically with the transcript's multimapper share (VCaP median 0.231 → 0.002 from
    below 1 % to ≥ 50 %); the repair is a mappable support in the opportunity model.
 
+## 2026-09-17 addendum — the yield's endpoint, and a fifth commit prepared
+
+The owner ruled TPM stays on the plain fragment-length-marginal length (kept constant for now) and asked for the
+yield's variance to be modelled. The session's `s6/` scratchpad holds the work: `lever_census.py` (the pipeline
+twice, contracted vs plain transcript yields), `census_flips.py`, `yield_draws.py` (every piece efficiency drawn
+from its posterior; the count as the expectation over draws) and `draws_census.py`. What was found is in
+`DESIGN.md` §7.2 (the yield's two consumers, and its endpoint) and two new entries, `ISSUES:
+yield-variance-beside-the-count` (later, with the per-transcript prior lane: the analytic yield sd beside the
+count, gated against the draws' spread) and `ISSUES: capture-premise-untested-on-cdna` (watch). **Commit 5 is this
+commit** (`commits/5_floors`): the 1 bp
+floors deleted for the cannot-emit rule, five gates, four perturbations fired, the thermometer neutral within the
+reseed floor, the capture-ON identity reference re-frozen with the reason. The isoform flips the census found
+(VCaP 39 % of multi-isoform genes) are the model's answer under the capture premise and are stable under the yield's
+posterior — not a defect to fix, a limit to disclose (`count_unambig` beside `count`). The owner's order after it (2026-09-17):
+the release ships this contraction as it stands; PERFORMANCE next — the tool must be blazingly fast and is painfully
+slow — which is item 5 below; the variance metric and the prior's allocation across transcripts come with the
+per-transcript prior lane, after.
+
 ## ⛔ Read first — three things the repair uncovered
 
 * **The capture-OFF identity digest moves by one ulp** after commit 3 (one transcript's posterior mean, 1.1e-16 on

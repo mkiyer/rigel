@@ -201,10 +201,12 @@ class AbundanceEstimator:
                 np.asarray(geometry.effective_lengths, dtype=np.float64),
                 1.0,
             )
-            self._t_eff_len_em = np.maximum(
-                np.asarray(geometry.effective_lengths_em, dtype=np.float64),
-                1.0,
-            )
+            # The EM's yields, unfloored: a yield of 0 is a component that cannot emit (the C++ reads it
+            # so) and every positive yield enters as it is — the E-step decides on ratios within a locus.
+            em = np.asarray(geometry.effective_lengths_em, dtype=np.float64)
+            if not np.all(np.isfinite(em)) or np.any(em < 0.0):
+                raise ValueError("effective_lengths_em must be finite and non-negative")
+            self._t_eff_len_em = em
         else:
             self._t_eff_len_output = np.ones(num_transcripts, dtype=np.float64)
             self._t_eff_len_em = self._t_eff_len_output

@@ -84,6 +84,40 @@ population's clipped mean rather than the depleted level. Instrument: `ruler_vs_
 simulator's reads are unique); the truth on a real library is the multimapper share against the factor as above,
 and the repair's gate is that the four bins read alike.
 
+### yield-variance-beside-the-count
+`priority: later, with the per-transcript prior lane (owner, 2026-09-17: the release ships the contraction as it stands; performance next) · kind: build · 2026-09-17`
+The capture-contracted yield is a posterior mean and carries no variance, so a count on a small yield reads as a
+large abundance with the same error bar as any other. Measured on VCaP by drawing every piece efficiency from its
+posterior on the landscape grid and re-running the EM (eight draws, the EM's seed fixed; the session's
+`yield_draws.py`, scored by `draws_census.py`): the counts themselves are stable — the dominant isoform under the
+draws' mean equals the point estimate's in 98.5 % of multi-isoform genes with ≥ 20 fragments and is identical in
+every draw for 90.6 % — while the yield's uncertainty is a CV of 0.006 / 0.061 / 0.317 at the 10th / 50th / 90th
+percentile of transcripts with ≥ 20 fragments, above the Poisson CV (median 0.100) for 36.4 % of them. So the
+variance need not be propagated through the EM; it is a per-transcript number to publish beside the count: the
+yield's posterior sd from the pieces' posterior variances, `Var[eff_t] = Σ_p (ℓ_p^τ)² Var[c̃_p]` under the
+landscape (the pieces' posteriors are what `capture_efficiency` already computes; the second moment is one more
+`w @ clipped²`), so that a user's abundance carries `CV² = 1/k + Var[eff_t]/eff_t²`. Derive → gate against the
+draws' spread on VCaP → `src/`: a result field per object and an `em_effective_length_sd` column. Its consumer is
+the allocation of the pooled RNA prior across a locus's transcripts (`ISSUES: per-transcript-prior-lane`): today
+the transcripts duel for the ambiguous fragments with no per-transcript prior, and a variance per transcript is
+what an allocation better than equal shares would read (owner, 2026-09-17). Instrument: the
+draws' spread is the truth the analytic form is gated against.
+
+### capture-premise-untested-on-cdna
+`priority: watch (no library in hand can test it) · kind: risk · 2026-09-17`
+The ruler reads the panel from gDNA and applies the same efficiency to cDNA: the premise that off-target cDNA is
+depleted as off-target gDNA is, which the simulator satisfies by construction and which cross-hybridisation of
+cDNA to paralog probes or nonspecific binding could make milder by an order of magnitude. Its exposure is not the
+scale (TPM is on the plain length by ruling and counts see only ratios within a locus) but the isoform split:
+on VCaP 4,677 of 12,039 multi-isoform genes with ≥ 20 fragments change dominant isoform between the contracted and
+the plain yield (`DESIGN.md` §7.2, the yield's two consumers), two thirds of the isoform-level fragment mass with
+them, stable under the yield's posterior — so the flips are the model's answer, right if the premise holds. The
+one experiment that settles it: a sample sequenced both ways, panel and whole transcriptome — the count ratio on
+unprobed transcripts is the cDNA depletion directly, and the ruler gives the gDNA depletion on the same pieces. The
+lab has no such pair (owner, 2026-09-17); the session's `lever_census.py` is the read-only smoke test to re-run on
+any new captured library, and `count_unambig` beside `count` is what tells a user which isoform assignments rest on
+shared fragments alone.
+
 ### nested-antisense-leak-under-the-sane-ruler
 `priority: later (EM-side, with the per-transcript prior lane) · kind: defect · 2026-09-14`
 With the EM's ruler honest — a gDNA-free library contracts nothing (`DESIGN.md` §7.2) — the negative control

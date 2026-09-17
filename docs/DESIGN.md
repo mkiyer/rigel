@@ -1637,3 +1637,31 @@ see is declared (`ISSUES: ruler-witness-geometry-on-transcript-panels`): a probe
 on gDNA at a fifth of the cDNA's weight and a probe centred on a 40 bp exon binds gDNA over 125 bp while the
 simulator's non-stacking rule binds a spliced fragment over 40, so the probed tiny-exon transcripts read
 +1.03 nat against the sampler's truth with the mechanism reading their edges exactly.
+
+**The yield's two consumers, and its endpoint** (owner rulings 2026-09-17). The capture-contracted length is a
+YIELD — fragments per unit of abundance — and it enters two places only: the E-step, where every component's
+count is read against its yield and only the ratios within a locus decide, so a common thinning of a locus
+moves nothing (gate `test_the_split_is_invariant_to_a_common_thinning_of_every_yield`); and the locus prior's
+gDNA length. TPM is normalised by the plain fragment-length-marginal length, by ruling and kept constant for
+now: a fragment is a fragment, Rigel never knows which transcripts a panel probes, and the capture correction
+never reaches the table's scale; the yield is published as `em_effective_length` for a user who wants the
+corrected abundance and its detection limit from it. The yield has no floor. A component with no start
+position has a yield of exactly 0 and cannot emit — its E-step weight is −∞, and a fragment no component can
+emit is left unassigned, never NaN (gate `test_a_transcript_with_no_start_position_cannot_emit`) — and every
+positive yield enters as it is. The 1 bp floors the EM and the assembler carried were geometric guards that
+capture had turned into efficiency clamps: on LBX0588 every transcript shorter than a kilobase sat on them,
+and the floor was the mechanism deciding the isoform split of 319 of 725 multi-isoform genes (the lever
+census, 2026-09-17). What the census then showed is a property of the model and not of the floor: on VCaP
+4,677 of 12,039 multi-isoform genes with ≥ 20 fragments change dominant isoform between the contracted and the
+plain yield, the median winner with no unique fragment, and 97 % of them are near-ties — contracted yields within
+1.5× where the plain yields differed 2× or more — because capture removes the length differences between a gene's
+isoforms (the differing bases are the unprobed ones, which contribute no opportunity), so the split of the shared
+fragments is decided by the per-fragment terms that remain. That decision is STABLE under the yield's posterior:
+with every piece efficiency drawn from its posterior on the landscape grid (eight draws, the EM's seed fixed) the
+dominant isoform under the mean of the draws equals the point estimate's in 98.5 % of genes and is the same in
+every draw for 90.6 % (84.7 % of the flipped ones), and the winners' shares do not soften (0.69 → 0.68). What the
+draws measure is the error bar the point estimate lacks: the yield's uncertainty is a CV of 6 % at the median and
+32 % at the 90th percentile of transcripts with ≥ 20 fragments, above the Poisson CV for 36 % of them — so the
+abundance's variance is Poisson plus the yield's, and the yield's is published beside the count rather than
+propagated through the EM (`ISSUES: yield-variance-beside-the-count`). What no library in hand can test is the
+premise that off-target cDNA is depleted as off-target gDNA is (`ISSUES: capture-premise-untested-on-cdna`).

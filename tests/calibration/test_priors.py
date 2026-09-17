@@ -578,6 +578,29 @@ def test_the_length_is_the_counts_objects_at_their_efficiencies():
     assert not np.isclose(eff, 10.0)
 
 
+def test_a_locus_yield_below_one_base_is_not_floored():
+    """A 100-base support at efficiency 0.001 beside a 50-base crossing support at 0.001 is a yield of
+    0.15 fragments per unit abundance and reads 0.15; at efficiency 0 it reads 0, which the EM takes as
+    "cannot emit". The 1 bp floor was a geometric guard that under capture clamped every depleted locus
+    shorter than a kilobase to one yield, breaking the E-step's invariance to a common thinning."""
+    ra = _six_region_ra()
+    for c, expect in ((0.001, 0.15), (0.0, 0.0)):
+        cal = _result(
+            region_g=np.full(6, 100.0),
+            region_r=np.zeros(6),
+            region_eff=np.full(6, 100.0),
+            boundary_g=np.full(5, 50.0),
+            boundary_eff=np.full(5, 50.0),
+            gdna_density_global=1.0,
+            gdna_reference_density=1.0,
+            gdna_reference_members=1,
+            efficiency=[c, 1.0, 1.0, 1.0, 1.0, 1.0],
+            efficiency_boundary=[c, 1.0, 1.0, 1.0, 1.0],
+        )
+        eff = assemble_priors(cal, ra, [_ml(0, [(0, 0, 100)])]).gdna_eff_len[0]
+        np.testing.assert_allclose(eff, expect, rtol=1e-12, atol=0.0)
+
+
 # ── the locus projection underneath: a locus collects REGIONS and BOUNDARIES alike ────────────
 
 
