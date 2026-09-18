@@ -45,6 +45,8 @@ real exonic reach.
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
 import logging
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
@@ -219,6 +221,18 @@ class FactoryRows:
                 self.background, self.count[sl][sel], self.eff[sl][sel], self.fg
             )
         return out
+
+    def digest(self, sl) -> bytes:
+        """What ``self[sl]`` is a pure function of, digested — the background's fields, the block's intron
+        mask, counts and opportunities, the grid: the message cache's key for a block's rows
+        (`message_cache.MessageCache.key`), at 1/K of hashing the rows themselves."""
+        h = hashlib.blake2b(digest_size=16)
+        h.update(repr(dataclasses.astuple(self.background)).encode())
+        for a in (self.is_intron[sl], self.count[sl], self.eff[sl], self.fg):
+            a = np.ascontiguousarray(a)
+            h.update(f"{a.dtype.str}{a.shape}".encode())
+            h.update(a)
+        return h.digest()
 
     def __array__(self, dtype=None, copy=None):
         return self[:] if dtype is None else self[:].astype(dtype)

@@ -48,6 +48,7 @@ Both come from the region SIGNATURE and never from the counts:
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 
 import numpy as np
@@ -269,6 +270,7 @@ def solve_chain(
     counts = AssertionCounts()
     diagnostics: list = []
     rowless = 0  # slots owned by blocks whose policy delivered no row array
+    factory = _factory_of(intron_prior)
     for b in locus_blocks(chain, structure.terminal, block_slots):
         sl = slice(b.start, b.end)
         res = _solve_block(
@@ -279,7 +281,8 @@ def solve_chain(
             block_slice(structure, sl),
             sweep,
             n_owned=b.stop - b.start,
-            factory_rows=None if intron_prior is None else intron_prior[sl],
+            factory_rows=None if factory is None else factory[sl],
+            factory_digest=None if factory is None else factory.digest(sl),
             cache=None if _capture is not None else message_cache,
             _capture=_capture is not None,
         )
@@ -359,6 +362,35 @@ class _Sweep:
     n_threads: int
 
 
+class _RowsOfArray:
+    """The λ-factor rows given as ONE array (a gate's synthetic rows): sliced per block and digested per
+    block by content — the two calls `calibrate.FactoryRows` answers from its inputs."""
+
+    __slots__ = ("_rows",)
+
+    def __init__(self, rows):
+        self._rows = np.asarray(rows, np.float64)
+
+    def __getitem__(self, sl):
+        return self._rows[sl]
+
+    def digest(self, sl) -> bytes:
+        a = np.ascontiguousarray(self._rows[sl])
+        h = hashlib.blake2b(digest_size=16)
+        h.update(f"{a.dtype.str}{a.shape}".encode())
+        h.update(a)
+        return h.digest()
+
+
+def _factory_of(intron_prior):
+    """The λ-factor rows as the sweep reads them per block — ``rows[sl]`` and ``digest(sl)`` — from the
+    factory (`calibrate.FactoryRows`: a block's rows built on demand, their inputs digested) or from one
+    array of rows; ``None`` is no factory."""
+    if intron_prior is None:
+        return None
+    return intron_prior if hasattr(intron_prior, "digest") else _RowsOfArray(intron_prior)
+
+
 def _psi(
     ctx: BlockContext,
     strand: tuple,
@@ -423,7 +455,9 @@ def _gdna_logprior(gdna_prior, solve_grid, mass_global, eff_global):
     return gdna_prior.logprior(solve_grid, mass_global, eff_global)
 
 
-def _message_layer(ctx: BlockContext, policy, library, terminal, cache, n_owned: int):
+def _message_layer(
+    ctx: BlockContext, policy, library, terminal, cache, n_owned: int, factory_digest=None
+):
     """The message layer for one block — served from the cache where its every input is unchanged, else
     run: the policy's claims and rules (`prepare`), PHASE 1 (the FORWARD pass L→R and the BACKWARD pass
     R→L, ONE each in chain order, which on a chain IS forward-backward, not an iterative scheme), PHASE 2
@@ -432,7 +466,7 @@ def _message_layer(ctx: BlockContext, policy, library, terminal, cache, n_owned:
     from_right, held_composition, counts)``; the two tables are ``None`` when the cache served the block,
     and ``held_composition`` — a COMPOSITION row received on either side — is read off the tables (see
     ``has_composition`` in `_solve_block` for why not ``msg.lam_rows``)."""
-    key = None if cache is None else cache.key(ctx, library, policy)
+    key = None if cache is None else cache.key(ctx, library, policy, factory_digest)
     entry = None if key is None else cache.get(key)
     if entry is not None:
         return cache.message(entry), None, None, entry[2].copy(), AssertionCounts(entry[3])
@@ -540,6 +574,7 @@ def _solve_block(
     *,
     n_owned: int,
     factory_rows,
+    factory_digest,
     cache: "MessageCache | None",
     _capture: bool,
 ) -> dict:
@@ -585,7 +620,7 @@ def _solve_block(
     solvable = (ctx.free_pos | ctx.free_neg) & (ctx.n_slot > 0.0)
 
     msg, from_left, from_right, held_composition, counts = _message_layer(
-        ctx, sweep.policy, sweep.library, structure.terminal, cache, n_owned
+        ctx, sweep.policy, sweep.library, structure.terminal, cache, n_owned, factory_digest
     )
     # THE CITIZENSHIP SEAM: a delivered claim joins the λ-factor rows in the FINAL solve only. Phase-A
     # (`build_region_init`) and the own-evidence precision never see it — an imputation may inform the

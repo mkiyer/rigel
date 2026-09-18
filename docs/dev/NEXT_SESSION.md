@@ -30,7 +30,9 @@ building, is `docs/dev/THREADS_PLAN.md`.
    (`perf/sweeps_VCaP_step13`), the whole run profiled twice (`perf/vcap_baseline_2026-09-17/`), the sweeps dissected
    with the census and the kernel wrappers, the ranked opportunities in `ISSUES: performance-memory-bounded-solve`;
    the MO_3021 captures and the timing worktree removed; snapshot `commits/14_vcap_baseline/` (docs only).
-8. §G: the stages outside calibration — 110 s of 264 on VCaP: the scan 35, the second pass 22, the two
+8. ~~The cache key on the factory's inputs~~ — DONE 2026-09-18 (exact; the key 3.2 s → 0.27 s a refit
+   sweep; `sweeps_VCaP_step16` is the capture now); snapshot `commits/16_cache_key/`.
+9. §G: the stages outside calibration — 110 s of 264 on VCaP: the scan 35, the second pass 22, the two
    fragment-length fits 16.6, quant 37 (the locus EM 15, the capture effective lengths 8), the index load 6.5.
 
 ## Where the time is now (VCaP, the deep library; `s12/kernel_times_vcap.log`, `s12/census_vcap.log`, `perf/vcap_baseline_2026-09-17/`)
@@ -71,7 +73,7 @@ reference" module (its gate reads the native strand term through `psi_cube`) —
 ## The protocol for every step (unchanged)
 
 1. `python scripts/design/preflight.py` first; the suite's standing count is in `CLAUDE.md`.
-2. The capture: `perf/sweeps_VCaP_step13` (9.0 GB; the deep library, VCaP, taken from this tree at 8 threads, ~4 min)
+2. The capture: `perf/sweeps_VCaP_step16` (9.0 GB; the deep library, VCaP, taken from this tree at 8 threads, ~4 min)
    replays BIT-IDENTICAL — use it; take a fresh one only after a commit that moves numbers, and delete the superseded
    one once its successor replays. The MO_3021 captures are gone: the optimisation target is VCaP (owner, 2026-09-17).
 3. DERIVE from the Python → the C++ in-tree → a scratchpad harness that runs both on every call of a captured sweep

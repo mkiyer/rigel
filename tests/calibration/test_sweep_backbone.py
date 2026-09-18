@@ -715,3 +715,100 @@ def test_a_diagnostic_capture_always_runs_the_full_layer(sweep_inputs):
     )
     assert cache.hits == hits_before, "a captured sweep must not be served from the cache"
     assert cap.from_left is not None and out.has_composition is not None
+
+
+def test_the_factory_rows_enter_the_key_by_the_digest_of_their_inputs():
+    """`calibrate.FactoryRows.digest(sl)` is a digest of what a block's rows are a pure function of — the
+    background's fields, the block's intron mask, counts and opportunities, the grid — never of the rows'
+    bytes: two factories on identical inputs digest alike per block; a changed count at one intron changes
+    ITS block's digest and no other's; a changed background changes every block's; and a factory whose
+    rows are only ever read through the digest hashes 1/K of the bytes. PERTURBATION: a digest that
+    skipped the counts fails here."""
+    from rigel.calibration.calibrate import FactoryRows
+    from rigel.calibration.density_deconv import GdnaBackground
+
+    def factory(count, background):
+        f = object.__new__(FactoryRows)
+        f.background = background
+        f.is_intron = np.array([True, False, True, True, False, True])
+        f.count = np.asarray(count, np.float64)
+        f.eff = np.array([100.0, 0.0, 250.0, 80.0, 0.0, 300.0])
+        f.fg = np.linspace(0.01, 0.99, 7)
+        f.shape = (6, 7)
+        return f
+
+    bg = GdnaBackground(log_mu_bg=-3.0, alpha=12.0, size=40.5, n_regions=9, informative=True)
+    a = factory([5.0, 0.0, 12.0, 3.0, 0.0, 8.0], bg)
+    b = factory([5.0, 0.0, 12.0, 3.0, 0.0, 8.0], bg)
+    blocks = (slice(0, 3), slice(3, 6))
+    for sl in blocks:
+        assert a.digest(sl) == b.digest(sl)
+    c = factory([5.0, 0.0, 12.0, 3.0, 0.0, 9.0], bg)  # one intron's count, in the second block
+    assert c.digest(blocks[0]) == a.digest(blocks[0]) and c.digest(blocks[1]) != a.digest(blocks[1])
+    d = factory([5.0, 0.0, 12.0, 3.0, 0.0, 8.0], GdnaBackground(-3.1, 12.0, 40.5, 9, True))
+    assert all(d.digest(sl) != a.digest(sl) for sl in blocks)
+
+
+def test_the_cache_keys_a_blocks_rows_by_the_factorys_digest(sweep_inputs):
+    """The wiring: `solve_chain` asks the factory for a block's rows AND its digest, and the cache keys on the
+    digest — a factory answering the same digest hits although its rows are rebuilt, and one whose digest
+    moves misses (rows given as one array keep digesting by content: the perturbation gate above)."""
+    from _transfer_harness import _full_policy
+
+    policy, rows, _g, _w = _full_policy(sweep_inputs)
+    chain, statics, geometry, belief, ra = sweep_inputs["args"]
+    kw = _cache_kw(sweep_inputs)
+    kw.pop("intron_prior", None)  # the factory below stands in for the captured rows
+
+    class _Factory:
+        def __init__(self, rows, salt):
+            self.rows, self.salt, self.asked = np.asarray(rows, np.float64), salt, 0
+
+        def __getitem__(self, sl):
+            return self.rows[sl].copy()  # rebuilt: a fresh array each time, the same numbers
+
+        def digest(self, sl):
+            self.asked += 1
+            return f"{self.salt}:{sl.start}:{sl.stop}".encode()
+
+    cache = MessageCache()
+    first = _Factory(rows, "a")
+    SW.solve_chain(
+        chain,
+        statics,
+        geometry,
+        belief,
+        ra,
+        **kw,
+        intron_prior=first,
+        policy=policy,
+        message_cache=cache,
+    )
+    misses = cache.misses
+    assert misses > 0 and first.asked == misses
+    same = _Factory(rows, "a")
+    SW.solve_chain(
+        chain,
+        statics,
+        geometry,
+        belief,
+        ra,
+        **kw,
+        intron_prior=same,
+        policy=policy,
+        message_cache=cache,
+    )
+    assert cache.misses == misses and cache.hits == misses, "the same digest must hit"
+    other = _Factory(rows, "b")
+    SW.solve_chain(
+        chain,
+        statics,
+        geometry,
+        belief,
+        ra,
+        **kw,
+        intron_prior=other,
+        policy=policy,
+        message_cache=cache,
+    )
+    assert cache.misses == 2 * misses, "another digest must miss"

@@ -33,7 +33,9 @@ class MessageCache:
     the two ψ solves.
 
     CONTENT-KEYED, so it is safe by construction rather than by trust: an entry's key is a digest of
-    every input the layer reads, and a changed belief, row, count, library or grid misses. An entry
+    every input the layer reads, and a changed belief, row, count, library or grid misses; the factory
+    rows enter by the digest of their inputs (`calibrate.FactoryRows.digest`), which they are a pure
+    function of, rather than of their ``(n, K)`` bytes — the same key at 1/K of the hashing. An entry
     holds the delivered rows sparsely (only the non-zero rows), the cube rows as the solve reads them
     (a :class:`~.simplex_logodds.CubeRows` table), the block's ``held_composition`` and its assertion counts
     (as a plain dict; the backbone rebuilds its `AssertionCounts` from it). Diagnostics never read from it:
@@ -46,14 +48,20 @@ class MessageCache:
         self.misses = 0
 
     @staticmethod
-    def key(ctx: BlockContext, library, policy) -> bytes:
+    def key(ctx: BlockContext, library, policy, factory_digest: bytes | None = None) -> bytes:
         """The digest of everything the message layer reads for one block: every field of the block's
         context — iterated from the dataclass, so a field added to the context cannot be left out of the
-        digest — then the policy's library and the policy's name and strand model."""
+        digest — then the policy's library and the policy's name and strand model. ``factory_digest``
+        stands in for the ``factory_rows`` field where the rows come from a factory: the digest of what
+        they are a pure function of (the background, the block's intron counts and opportunities, the
+        grid), so the rows' bytes are never hashed; rows given as an array digest by content."""
         h = hashlib.blake2b(digest_size=16)
         for f in dataclasses.fields(ctx):
             part = getattr(ctx, f.name)
-            if isinstance(part, np.ndarray):
+            if f.name == "factory_rows" and factory_digest is not None:
+                h.update(b"factory_rows:digest")
+                h.update(factory_digest)
+            elif isinstance(part, np.ndarray):
                 a = np.ascontiguousarray(part)
                 h.update(f"{f.name}{a.dtype.str}{a.shape}".encode())
                 h.update(a)

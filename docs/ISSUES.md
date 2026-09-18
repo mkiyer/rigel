@@ -76,8 +76,9 @@ against these numbers: (1) ψ over slots inside `psi_solve` — 58 s of 264, bit
 threads; VCaP 267 → 214 s and 261 → 213 s at 8 threads (0.80 / 0.82), ψ 57.4 → 8.3 s, the sweep 135 → 88 s, `perf/psi_threads_2026-09-18/`); (2) the pass's blur — 36 s: the reduction over the taps is a scalar
 sum the compiler does not reassociate, so an explicit four-lane sum is a summation-order change behind the replay's
 tolerance budget, and a pass threaded over blocks halves it again; (3) the builders — 17 s, the RNA lanes 57 % of it,
-threads over blocks; (4) the refit sweeps' Python — the cache key digesting the factory rows' INPUTS (−9 s a run, exact),
-the gDNA arm inside ψ (−7 s, tolerance-gated), the factory rows (−3 s, inside a native block); (5) outside calibration,
+threads over blocks; (4) the refit sweeps' Python — the cache key digesting the factory rows' INPUTS LANDED 2026-09-18 (exact; the key
+3.2 s → 0.27 s a refit sweep on VCaP, the capture re-taken as `sweeps_VCaP_step16`), the gDNA arm inside ψ
+(−7 s, tolerance-gated), the factory rows (−3 s, inside a native block); (5) outside calibration,
 110 s untouched by any of the above: the scan (`ISSUES: scan-thread-split-starves-the-workers`), the second pass's
 scoring, the two fragment-length fits (16.6 s together), quant's locus EM and capture effective lengths — the stages that
 scale with depth (§G) and the whole problem past 100 M fragments.

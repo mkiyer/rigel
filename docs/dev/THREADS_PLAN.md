@@ -91,7 +91,7 @@ block's write-back is a disjoint slice of `out`; `AssertionCounts.absorb` is a s
 The Python per block that must shrink first — each EXACT (bit-identical, or inside the derived budget where
 stated), each its own commit, in the order of its size:
 
-1. **The cache key on the factory's INPUTS, not its rows** (2.88 → ~0.05 s a refit sweep). The rows are a
+1. **The cache key on the factory's INPUTS, not its rows** — LANDED 2026-09-18 (3.2 s → 0.27 s a refit sweep on VCaP). The rows are a
    pure function of the background's parameters, the per-slot count and eff (already per slot on the factory)
    and the grid; digesting those keeps the key content-keyed — every input the layer reads is digested, and a
    changed background, count, eff or grid still misses — at 1/K of the bytes. The context field stays the rows

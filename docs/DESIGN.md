@@ -1295,6 +1295,21 @@ identity references BIT-IDENTICAL, now solving at every core; the suite 3,433 pa
 collected. Timed on VCaP at 8 threads, two interleaved pairs against a worktree of the VCaP-baseline commit carrying its
 own ψ module (the argument shape changed): wall 266.6 → 214.4 s and 260.5 → 213.0 s (0.80 / 0.82), calibrate 154.4 → 104.4 s and 154.7 → 105.8 s (0.68 / 0.68), the sweep 135.0 → 88.2 s and 135.0 → 89.4 s (0.65 / 0.66); ψ's three stages at 0.14–0.17 — the self-solves 20.6 → 3.0 s, the final solves 32.9 → 4.7 s, the pre-sweep solve 3.8 → 0.6 s, 57.4 → 8.3 s in all, 6.9× on 12 performance and 4 efficiency cores — and every other stage at 0.97–1.05 (the builders 0.99 / 1.00, the pass 0.98 / 1.00, the solve 0.97 / 0.99, the scan 1.00 / 1.04, the second pass 0.99 / 1.02, quant 0.94 / 0.97, the locus EM 0.99 / 1.01), peak 11.1 → 11.0 GB and 11.0 → 11.2 GB (`perf/psi_threads_2026-09-18/`).
 
+**The message cache keys a block's factory rows by the digest of their inputs** (2026-09-18; owner: the key on inputs,
+not rows). The key was a blake2b over every array of the block's context, and on the deep library the factory rows —
+``(5,000, 233)`` doubles a block at the refit sweeps' bracket, 9 MB — were most of its bytes: 4 GB a sweep hashed,
+3.2 s of a refit sweep's 23 s. The rows are a pure function of the background's five fields, the block's intron
+mask, counts and opportunities, and the grid, so `calibrate.FactoryRows.digest(sl)` digests those (120 KB a block) and
+`sweep.solve_chain` hands the digest to `MessageCache.key` beside the rows; the key is content-keyed as before — every
+input the layer reads is digested, and a changed count, opportunity, background or grid misses — at 1/K of the hashing:
+0.27 s a refit sweep. Rows given as one array (the gates' synthetic rows) digest by content through
+`sweep._RowsOfArray`, so the perturbation gate on a changed row stands. Gated: `FactoryRows.digest` — alike on identical
+inputs per block, moved by one intron's count in its block alone, moved everywhere by the background (broken to skip the
+counts it fired); the key wired to the digest — a factory answering the same digest hits though its rows are rebuilt,
+another digest misses; the four VCaP sweeps BIT-IDENTICAL at 8 threads (the captured cache's entries, keyed the old way,
+miss, so the refit sweeps re-run their layer to the same bits); the three identity references BIT-IDENTICAL; the suite
+3,435 passed / 5 xfail / 3,440 collected. The capture is re-taken with the new keys (`sweeps_VCaP_step16`).
+
 #### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer; native since 2026-09-17, §6b.15.5)
 
 A single-strand slot is the cube with a tilt grid of one cell — its tilt is its live strand, `τ = ±1` — so
