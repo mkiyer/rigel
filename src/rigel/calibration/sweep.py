@@ -151,36 +151,27 @@ def _check_message(
                 "deliver one row per slot on the solve grid"
             )
         counts.note("lam_rows_finite", ~np.isfinite(rows[:n]).all(axis=1), np.ones(n, bool))
-    # ── the cube channel: a CubeRow per AMBIG slot, or absent ──────────────────────────────────────
+    # ── the cube channel: a table of rows at AMBIG slots, or absent ─────────────────────────────────
     if msg.cube_rows is not None:
+        cube = msg.cube_rows
         amb = np.asarray(ctx.free_pos, bool) & np.asarray(ctx.free_neg, bool)
-        for slot, row in msg.cube_rows.items():
-            if not (0 <= int(slot) < ctx.n_slots) or not amb[int(slot)]:
-                raise ValueError(
-                    f"cube_rows carries slot {slot}, which is not an AMBIG slot — a cube exists only "
-                    "where both strands are live"
-                )
-            profiles = [p for p in (row.profile_pos, row.profile_neg) if p is not None]
-            if np.asarray(row.u).shape != (int(ctx.n_grid),) or any(
-                np.asarray(p).shape != (int(ctx.n_grid),) for p in profiles
-            ):
-                raise ValueError(
-                    f"cube_rows[{slot}]'s profiles are not ({ctx.n_grid},) — a held level is a profile "
-                    "on the solve grid"
-                )
-        bad = np.array(
-            [
-                not all(
-                    np.isfinite(np.asarray(p)).all()
-                    for p in (r.profile_pos, r.profile_neg)
-                    if p is not None
-                )
-                for k, r in msg.cube_rows.items()
-                if int(k) < n
-            ],
-            bool,
+        slots = np.asarray(cube.slot, np.int64)
+        in_range = (slots >= 0) & (slots < ctx.n_slots)
+        if not (in_range.all() and amb[slots[in_range]].all()):
+            raise ValueError(
+                "cube_rows carries a slot that is not an AMBIG slot — a cube exists only where both "
+                "strands are live"
+            )
+        K = int(ctx.n_grid)
+        if cube.u.shape != (K,) or cube.profile_pos.shape[1] != K or cube.profile_neg.shape[1] != K:
+            raise ValueError(
+                f"cube_rows' profiles are not ({K},) — a held level is a profile on the solve grid"
+            )
+        owned = slots < n
+        bad = (cube.has_pos & ~np.isfinite(cube.profile_pos).all(axis=1)) | (
+            cube.has_neg & ~np.isfinite(cube.profile_neg).all(axis=1)
         )
-        counts.note("cube_rows_finite", bad, np.ones(bad.shape[0], bool))
+        counts.note("cube_rows_finite", bad[owned], np.ones(int(owned.sum()), bool))
     # ⛔ The anti-degeneracy clause, the half that makes the gate mean anything: on a chain
     # where NO slot admits both RNA strands, ``|T| <= 3`` is satisfied by a substrate that never had a
     # three-population slot to test. That is not the axiom holding, it is the check never running — so the

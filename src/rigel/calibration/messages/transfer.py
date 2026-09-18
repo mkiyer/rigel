@@ -21,7 +21,7 @@ parts, and ``prepare`` is a table of contents: one named BUILDER per shipped mes
   pair's own discrepancy). The rules are TYPED TABLES (`faces.Faces`): every directed face is one of a
   node's two sides — it hears from its left neighbour or its right — so a rule is a KIND and its
   parameters at ``(destination, side)``, five kinds in all, and the passes read the table. The rules
-  ARE the shipped messages, each built by the builder named — a function of `native/prepare_kernel.cpp`,
+  ARE the shipped messages, each built by the builder named — a function of `native/transfer_kernel.cpp`,
   which builds a whole block's claims, rules and lanes in one call (`native.transfer_prepare`) into the
   tables ``prepare`` allocates:
 
@@ -70,10 +70,10 @@ parts, and ``prepare`` is a table of contents: one named BUILDER per shipped mes
     level; the certified flux at each of an exon's junctions as that strand's level at the exon (one
     hop, boundary → exon; two junctions pay their pair's disagreement beyond counting) — at an EMPTY
     exon piece too, which emits it with the flux's own witness. DELIVERED at AMBIG nodes as one row
-    over ψ's (λ, θ) cube (`PsiMessage.cube_rows`): a lower bound on RNA+ is an upper bound on the
+    over ψ's (λ, θ) cube (`PsiMessage.cube_rows`, a `CubeRows` table): a lower bound on RNA+ is an upper bound on the
     gDNA share through the node's own strand counts — the side the gDNA lane cannot give (the bracket
     theorem, gated); and at SINGLE-STRAND nodes as a CEILING on the gDNA share, read only from a face
-    that sent no composition (`_PreparedTransfer._ceilings`). The tilt needs no lane of its own.
+    that sent no composition (the policy's solve, `native.transfer_solve`). The tilt needs no lane of its own.
 
 * The two passes and the solve (`_PreparedTransfer.propagate` / `solve`): a node SENDS two
   things apart — its own claim (a measurement) and what it holds from its far side (an imputation) —
@@ -104,18 +104,14 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ...native import transfer_pass, transfer_prepare
-from ..simplex_logodds import CubeRow
+from ...native import transfer_pass, transfer_prepare, transfer_solve
+from ..simplex_logodds import CubeRows
 from . import BlockContext, ChainView, PsiMessage, Received
-from .faces import Faces, RowTable, fuse, norm
+from .faces import Faces, RowTable, norm
 from .lanes import LevelLane
-from .transfer_rows import _MARGINAL_NODES, EPS, intersect, lower_side, read_column
+from .transfer_rows import _MARGINAL_NODES, EPS, read_column
 
 __all__ = ["TransferPolicy"]
-
-#: the three populations' lanes: the `Message` field each population's level travels on
-
-_RNA = ("pos", "neg")
 
 
 @dataclass(frozen=True, slots=True)
@@ -306,8 +302,7 @@ def _prepare(c: _Chain, library: _Library) -> "_PreparedTransfer":
         pos=tables(lanes["pos"]),
         neg=tables(lanes["neg"]),
     )
-    site = _SolveSite(c.fp & c.fn, {"pos": c.fp, "neg": c.fn})
-    return _PreparedTransfer(own, faces, lanes, site)
+    return _PreparedTransfer(own, faces, lanes, c.fp, c.fn)
 
 
 # ══ THE CHAIN AS THE BUILDERS READ IT ═══════════════════════════════════════════════════════════════
@@ -386,26 +381,19 @@ class _Chain:
         )
 
 
-class _SolveSite:
-    """What the solve's two RNA deliveries read at a node: the AMBIG mask and each strand's admitting
-    nodes."""
-
-    __slots__ = ("ambig", "free")
-
-    def __init__(self, ambig, free):
-        self.ambig, self.free = ambig, free
-
-
 class _PreparedTransfer:
     """One sweep's working object: every node's own claim (a `RowTable`), the rules per directed face
-    (`Faces`), the lanes by population (``"gdna"``, ``"pos"``, ``"neg"`` — any may be absent) and the
-    site. The passes' state is the backbone's table, never a copy here."""
+    (`Faces`), the lanes by population (``"gdna"``, ``"pos"``, ``"neg"`` — any may be absent) and which
+    strands each node admits (the solve's site: an AMBIG node admits both). The passes' state is the
+    backbone's table, never a copy here."""
 
-    def __init__(self, own, faces: "Faces | None", lanes: dict | None = None, site=None):
+    def __init__(self, own, faces: "Faces | None", lanes: dict | None, free_pos, free_neg):
         self.own = own
         self.faces = faces
         self.lanes: dict = {} if lanes is None else dict(lanes)
-        self.site = site
+        self.free_pos = np.ascontiguousarray(free_pos, bool)
+        self.free_neg = np.ascontiguousarray(free_neg, bool)
+        self.ambig = self.free_pos & self.free_neg
 
     # ── phase 1, natively: the whole pass on the table in one call ─────────────────────────────────
     def tables(self) -> dict:
@@ -497,98 +485,69 @@ class _PreparedTransfer:
 
         return receive
 
-    # ── phase 2: solve — the policy's half ───────────────────────────────────────────────────────
+    # ── phase 2: solve — the policy's half, one native call ─────────────────────────────────────
     def solve(self, from_left: Received, from_right: Received) -> PsiMessage:
-        if self.own is None:
-            return PsiMessage.silent()
-        # the two held compositions add (independent witnesses about one slot), in table order: left,
-        # right — an absent one adds nothing
-        rows = np.where(from_left.has_composition[:, None], from_left.composition, 0.0) + np.where(
-            from_right.has_composition[:, None], from_right.composition, 0.0
+        """The two held tables into ψ's two channels (`native.transfer_solve`). The λ ROWS: at every node
+        the two held compositions add (independent witnesses about one slot), a held gDNA level on either
+        side is read as the node's composition row through its own total (two bounds on one density
+        intersect) and joins them, and the fused row is re-normalised; at a SINGLE-STRAND node an RNA level
+        of its live strand — read ONLY from a face that sent no composition, because a licensed face's map
+        already carries the flux as its cap and a composition already carries its sender's witnesses —
+        intersected with the node's own junction flux at that face is THE CEILING, "at most this much gDNA",
+        and joins the row. THE CUBE at an AMBIG node: per strand the held levels and the node's own level's
+        lower side intersected, delivered with the node's total, RNA opportunity and the lanes' reference
+        density (:class:`CubeRows`), which ψ evaluates at its own θ nodes. Nothing here reads a belief."""
+        lam = self.faces.lam
+        n, K = self.faces.kind.shape[0], lam.shape[0]
+        rows = np.zeros((n, K))
+        pos, neg, gdna = self.lanes.get("pos"), self.lanes.get("neg"), self.lanes.get("gdna")
+        n_cube = int((self.ambig & ~pos.empty).sum()) if pos is not None and neg is not None else 0
+        cube = CubeRows.blank(n_cube, lam)
+
+        def held(t: Received):
+            return (
+                t.has_neighbour,
+                t.has_composition,
+                t.composition,
+                *((getattr(t, lane).present, getattr(t, lane).profile) for lane in Received.LANES),
+            )
+
+        def lane(ln):
+            if ln is None:
+                return None
+            return (
+                Received.LANES.index(ln.field),
+                ln.empty,
+                ln.total,
+                ln.a,
+                float(ln.rho_ref),
+                ln.own_level.rows,
+                ln.own_level.mask,
+                ln.flux.rows,
+                ln.flux.mask,
+            )
+
+        live, delivered = transfer_solve(
+            lam=lam,
+            from_left=held(from_left),
+            from_right=held(from_right),
+            gdna=lane(gdna),
+            pos=lane(pos),
+            neg=lane(neg),
+            ambig=self.ambig,
+            free_pos=self.free_pos,
+            free_neg=self.free_neg,
+            out_rows=rows,
+            cube_slot=cube.slot,
+            cube_pos=cube.profile_pos,
+            cube_has_pos=cube.has_pos,
+            cube_neg=cube.profile_neg,
+            cube_has_neg=cube.has_neg,
+            cube_total=cube.total,
+            cube_opportunity=cube.opportunity,
+            cube_rho=cube.rho_ref,
         )
-        fused = from_left.has_composition | from_right.has_composition
-        gdna = self.lanes.get("gdna")
-        if gdna is not None:
-            # a held gDNA level read as the node's composition row through its own total; two bounds on
-            # one density intersect (the tighter wins) and join the compositions as one more witness
-            held = (from_left.level_gdna, from_right.level_gdna)
-            for i in np.flatnonzero((held[0].present | held[1].present) & ~gdna.empty):
-                bound = intersect([gdna.row(lv.profile[i], i) for lv in held if lv.present[i]])
-                rows[i] = rows[i] + bound if fused[i] else bound
-                fused[i] = True
-        rows[fused] -= rows[fused].max(axis=1, keepdims=True)  # `fuse`: add, then re-normalise
-        live = bool(fused.any())
-        live = self._ceilings(from_left, from_right, rows) or live
-        cube = self._cube_rows(from_left, from_right)
-        if not live and not cube:
-            return PsiMessage.silent()
-        return PsiMessage(lam_rows=rows if live else None, cube_rows=cube or None)
-
-    def _ceilings(self, from_left, from_right, rows) -> bool:
-        """THE UPPER SIDE AT SINGLE-STRAND NODES: an RNA level of the node's live strand says "at most
-        this much gDNA". ⛔ Read ONLY from a face that sent no composition — a held level on that
-        side, and the node's own junction flux at that face — because a licensed face's splice-in map
-        already carries the flux as its cap and a composition already carries its sender's witnesses,
-        so reading them again counts the same evidence twice. Bounds intersect; the row joins the
-        node's other witnesses. Returns whether anything was added."""
-        site = self.site
-        if site is None:
-            return False
-        added = False
-        for name in _RNA:
-            rl = self.lanes.get(name)
-            if rl is None:
-                continue
-            for i in np.flatnonzero(site.free[name] & ~site.ambig & ~rl.empty):
-                bounds = []
-                for side, t in ((0, from_left), (1, from_right)):
-                    if not t.has_neighbour[i] or t.has_composition[i]:
-                        continue
-                    lv = getattr(t, rl.field)
-                    if lv.present[i]:
-                        bounds.append(lv.profile[i])
-                    fx = rl.flux_at(i, side)
-                    if fx is not None:
-                        bounds.append(fx)
-                if not bounds:
-                    continue
-                row = rl.row(intersect(bounds), i)
-                if np.ptp(row) <= EPS:
-                    continue
-                rows[i] = fuse([rows[i], row]) if np.ptp(rows[i]) > EPS else row
-                added = True
-        return added
-
-    def _cube_rows(self, from_left, from_right) -> dict:
-        """THE DELIVERY AT AMBIG NODES: the held RNA levels — both sides intersected, plus the node's
-        OWN flux level (the spliced claim's one hop, boundary → exon, read at the exon; an AMBIG node
-        has no own strand claim, so its own level is the flux alone) — as a :class:`CubeRow`, the row's
-        ingredients, which ψ evaluates at its own θ nodes. The tilt needs no lane of its own: both
-        strands' bounds constrain it through the shares."""
-        site = self.site
-        pos, neg = self.lanes.get("pos"), self.lanes.get("neg")
-        if site is None or pos is None or neg is None:
-            return {}
-        out = {}
-        for i in np.flatnonzero(site.ambig & ~pos.empty):
-            profiles = {}
-            for rl in (pos, neg):
-                bounds = [
-                    getattr(t, rl.field).profile[i]
-                    for t in (from_left, from_right)
-                    if getattr(t, rl.field).present[i]
-                ]
-                if rl.own_level[i] is not None:
-                    bounds.append(lower_side(rl.own_level[i]))
-                if bounds:
-                    profiles[rl.population] = intersect(bounds)
-            if profiles:
-                out[int(i)] = CubeRow(
-                    profile_pos=profiles.get("pos"),
-                    profile_neg=profiles.get("neg"),
-                    u=pos.u,
-                    total=float(pos.total[i]),
-                    opportunity=float(pos.a[i]),
-                    rho_ref=float(pos.rho_ref),
-                )
-        return out
+        return PsiMessage(
+            lam_rows=rows if live else None,
+            cube_rows=cube.select(slice(0, delivered)) if delivered else None,
+        )

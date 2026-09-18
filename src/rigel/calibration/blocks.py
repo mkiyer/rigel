@@ -19,6 +19,7 @@ import numpy as np
 
 from .messages import Received
 from .region_chain import REGION, RegionChain
+from .simplex_logodds import CubeRows
 
 __all__ = ["SweepCapture", "block_slice", "view_fields"]
 
@@ -85,7 +86,7 @@ class SweepCapture:
     ``solvable``; the observations ``count`` ``(n, 2)``, ``spliced``, ``mature``, ``free_pos``,
     ``free_neg``, ``eff_gdna``, ``eff_rna``, and the gDNA support ``mass_global``, ``eff_global``.
     The message layer's delivery: ``lam_rows`` ``(n, K)`` (zero rows where a block delivered nothing,
-    ``None`` when no block did), ``cube_rows`` ``{slot: CubeRow}`` keyed to the chain, and the two
+    ``None`` when no block did), ``cube_rows`` (a `CubeRows` table keyed to the chain), and the two
     :class:`~.messages.Received` tables ``from_left`` / ``from_right``. The chain: its adjacency
     ``left`` / ``right``, the backbone's assertion counts, the name of the policy that RAN (the witness
     an instrument's "the arm ran" assertion needs), the solve
@@ -108,7 +109,7 @@ class SweepCapture:
     mass_global: np.ndarray | None = None
     eff_global: np.ndarray | None = None
     lam_rows: np.ndarray | None = None
-    cube_rows: dict | None = None
+    cube_rows: CubeRows | None = None
     from_left: Received | None = None
     from_right: Received | None = None
     left: np.ndarray | None = None
@@ -161,12 +162,12 @@ class SweepCapture:
                     for k, c in owned
                 ]
             )
-        cube: dict = {}
-        for b, c in blocks:
-            for slot, row in (c.cube_rows or {}).items():
-                if int(slot) < b.stop - b.start:
-                    cube[int(slot) + b.start] = row
-        out.cube_rows = cube or None
+        cubes = [
+            c.cube_rows.select(c.cube_rows.slot < (b.stop - b.start)).shifted(b.start)
+            for b, c in blocks
+            if c.cube_rows is not None
+        ]
+        out.cube_rows = CubeRows.concat(cubes) if cubes else None
         return out
 
     def fill(self, other: "SweepCapture") -> None:

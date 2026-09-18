@@ -3,13 +3,16 @@
 ψ is native (`native/psi_kernel.cpp`, read through `simplex_logodds.psi_cube`); the gates that hold it to its
 derivations need the derivations written down once, in numpy, small enough to read against `EQUATIONS.md`:
 the three-component strand term with the variance frozen at a reference composition, the two Jeffreys arms,
-the delivered row's map onto the cube, and a log-sum-exp. Nothing here asserts and nothing in `src/` reads it.
+the delivered row's map onto the cube, a log-sum-exp, and the delivery table stated by hand. Nothing here
+asserts and nothing in `src/` reads it.
 """
 
 from __future__ import annotations
 
 import numpy as np
 from scipy.special import log_expit, logsumexp
+
+from rigel.calibration.simplex_logodds import CubeRows
 
 
 def strand_loglik_mixture(
@@ -42,7 +45,8 @@ def jeffreys_arms(lam, c_g: float = 0.5, c_r: float = 0.5):
 
 
 def row_at(row, fg, tau):
-    """A delivered `CubeRow` evaluated over ψ's cells — at each ``(λ, θ)`` the strand's share
+    """One delivered row (a record with ``profile_pos``, ``profile_neg``, ``u``, ``total``, ``opportunity``,
+    ``rho_ref``) evaluated over ψ's cells — at each ``(λ, θ)`` the strand's share
     ``f_s = (1 − f_g)(1 ± τ)/2`` implies the density ``f_s·n/a_r``, and the held profile is read at
     ``log(ρ_s/ρ_ref)``; the strands' rows add and the result is max-normalised over the whole row (the
     kernel's map, `EQUATIONS.md` §9e). ``fg`` is ``(K,)``; ``tau`` ``(K_t,)`` or ``(K, K_t)``."""
@@ -66,3 +70,41 @@ def row_at(row, fg, tau):
 def lse(a, axis, keepdims=False):
     """log Σ exp along ``axis``; an all-``−∞`` slice gives ``−∞``."""
     return logsumexp(np.asarray(a, np.float64), axis=axis, keepdims=keepdims)
+
+
+def cube_rows_of(rows: dict, u) -> CubeRows:
+    """A `CubeRows` table from ``{slot: (profile_pos | None, profile_neg | None, total, opportunity,
+    rho_ref)}`` on the grid ``u`` — how a gate states a delivery by hand."""
+    u = np.asarray(u, np.float64)
+    slots = sorted(rows)
+    t = CubeRows.blank(len(slots), u)
+    for r, k in enumerate(slots):
+        pos, neg, total, opportunity, rho_ref = rows[k]
+        t.slot[r] = k
+        if pos is not None:
+            t.profile_pos[r] = pos
+            t.has_pos[r] = True
+        if neg is not None:
+            t.profile_neg[r] = neg
+            t.has_neg[r] = True
+        t.total[r], t.opportunity[r], t.rho_ref[r] = total, opportunity, rho_ref
+    return t
+
+
+class Row:
+    """One delivered row as a record, for `row_at` — what a gate reads out of a `CubeRows` table."""
+
+    def __init__(self, table: CubeRows, r: int):
+        self.profile_pos = table.profile_pos[r] if table.has_pos[r] else None
+        self.profile_neg = table.profile_neg[r] if table.has_neg[r] else None
+        self.u = table.u
+        self.total, self.opportunity, self.rho_ref = (
+            table.total[r],
+            table.opportunity[r],
+            table.rho_ref[r],
+        )
+
+
+def row_record(profile_pos, profile_neg, u, total, opportunity, rho_ref) -> Row:
+    """One delivered row stated by hand, for `row_at`."""
+    return Row(cube_rows_of({0: (profile_pos, profile_neg, total, opportunity, rho_ref)}, u), 0)

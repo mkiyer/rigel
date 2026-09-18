@@ -18,7 +18,7 @@ import itertools
 import numpy as np
 import pytest
 
-from _psi_reference import jeffreys_arms, lse, row_at, strand_loglik_mixture
+from _psi_reference import Row, cube_rows_of, jeffreys_arms, lse, row_at, strand_loglik_mixture
 from scipy.special import expit, log_expit
 
 from rigel.calibration import simplex_logodds as SL
@@ -599,35 +599,31 @@ def test_the_derived_node_count_is_converged():
 
 
 def test_a_delivered_row_is_evaluated_at_the_nodes_exactly():
-    """The RNA level lanes deliver a row's INGREDIENTS (`CubeRow`: the held profiles, the slot's total
+    """The RNA level lanes deliver a row's INGREDIENTS (`CubeRows`: the held profiles, the slot's total
     and RNA opportunity, the lanes' coordinates) and ψ evaluates them at its own nodes — no lattice, no
     interpolation in θ: ψ with the row minus ψ without it IS the row's map (`_psi_reference.row_at`) on
     ψ's own tilt. A row with no profile changes nothing."""
     args, kw = _theta_case(50_000.0, 0.0, 0.5)
     u = kw["lam"]
     floor = -0.5 * np.maximum(0.0, (0.0 - u) / 0.3) ** 2
-    row = SL.CubeRow(
-        profile_pos=floor,
-        profile_neg=None,
-        u=u,
-        total=400.0,
-        opportunity=100.0,
-        rho_ref=0.5,
-    )
+    rows = cube_rows_of({0: (floor, None, 400.0, 100.0, 0.5)}, u)
     bare, _fp, _fn, tau = psi_cube(*args, ambig=True, **kw)
-    with_row, _fp, _fn, tau2 = psi_cube(*args, ambig=True, cube_rows={0: row}, **kw)
+    with_row, _fp, _fn, tau2 = psi_cube(*args, ambig=True, cube_rows=rows, **kw)
     assert np.array_equal(tau, tau2)
     # to rounding: the row is added before the quadrature's log-weights, so the difference of two
     # sums is not the row to the bit; an interpolated row would miss by 1e-2. The row's + profile is
     # also the witness that rules the pure − atom out (the last column), so that column is compared
     # apart: −∞ with the row, finite without
     assert np.allclose(
-        (with_row - bare)[..., :-1], row_at(row, expit(u), tau[0])[:, :-1], atol=1e-9, rtol=0.0
+        (with_row - bare)[..., :-1],
+        row_at(Row(rows, 0), expit(u), tau[0])[:, :-1],
+        atol=1e-9,
+        rtol=0.0,
     )
     assert np.all(np.isneginf(with_row[0, :, -1])) and np.all(np.isfinite(bare[0, :, -1]))
     assert not np.array_equal(with_row, bare), "the row must do something"
-    empty = SL.CubeRow(None, None, u, 400.0, 100.0, 0.5)
-    nothing, *_ = psi_cube(*args, ambig=True, cube_rows={0: empty}, **kw)
+    empty = cube_rows_of({0: (None, None, 400.0, 100.0, 0.5)}, u)
+    nothing, *_ = psi_cube(*args, ambig=True, cube_rows=empty, **kw)
     assert np.array_equal(nothing, bare)
 
 
@@ -687,14 +683,18 @@ def test_a_delivered_level_on_a_strand_rules_the_other_strands_pure_hypothesis_o
     args, kw = _theta_case(3000.0, 0.5, 1.0)
     u = kw["lam"]
     floor = -0.5 * np.maximum(0.0, (0.0 - u) / 0.3) ** 2
-    neg_level = SL.CubeRow(None, floor, u, 3000.0, 1000.0, 0.5)
-    pos_level = SL.CubeRow(floor, None, u, 3000.0, 1000.0, 0.5)
+    neg_level = cube_rows_of({0: (None, floor, 3000.0, 1000.0, 0.5)}, u)
+    pos_level = cube_rows_of({0: (floor, None, 3000.0, 1000.0, 0.5)}, u)
     bare, *_ = psi_cube(*args, ambig=True, **kw)
-    with_neg, *_ = psi_cube(*args, ambig=True, cube_rows={0: neg_level}, **kw)
-    with_pos, *_ = psi_cube(*args, ambig=True, cube_rows={0: pos_level}, **kw)
+    with_neg, *_ = psi_cube(*args, ambig=True, cube_rows=neg_level, **kw)
+    with_pos, *_ = psi_cube(*args, ambig=True, cube_rows=pos_level, **kw)
     assert np.all(np.isfinite(bare[0, :, -2:]))
     assert np.all(np.isneginf(with_neg[0, :, -2])) and np.all(np.isfinite(with_neg[0, :, -1]))
     assert np.all(np.isneginf(with_pos[0, :, -1])) and np.all(np.isfinite(with_pos[0, :, -2]))
     unwitnessed = _solve_case(args, n_grid=41)
-    witnessed = _solve_case(args, cube_rows={0: neg_level}, n_grid=41)
+    witnessed = _solve_case(
+        args,
+        cube_rows=cube_rows_of({0: (None, floor, 3000.0, 1000.0, 0.5)}, _logodds_grid(41, 10.0)[0]),
+        n_grid=41,
+    )
     assert float(witnessed.gdna_frac[0]) < float(unwitnessed.gdna_frac[0]) - 0.05

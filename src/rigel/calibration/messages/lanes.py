@@ -6,7 +6,7 @@ A level is a population's density as an ABSOLUTE profile over ``u = log(rho / rh
 grid, so it needs no map and no recipient and crosses the faces composition cannot (`LevelLane`). The
 gDNA lane serves every directed face left without a composition rule (`faces.Faces`); each RNA lane
 serves its strand's faces read off the flag bits. Both are built by `native.transfer_prepare`
-(`native/prepare_kernel.cpp`'s `gdna_lane` and `rna_lane`) into the tables `TransferPolicy.prepare`
+(`native/transfer_kernel.cpp`'s `gdna_lane` and `rna_lane`) into the tables `TransferPolicy.prepare`
 allocates on a `LevelLane` — its faces, own levels, junction flux levels and flux witnesses; its
 coordinates, witnesses and emptiness are the chain's arrays.
 """
@@ -17,15 +17,7 @@ import numpy as np
 
 from . import Levels, Received
 from .faces import RowTable, side_of
-from .transfer_rows import (
-    blur_row,
-    count_logvar,
-    hop_price,
-    intersect,
-    lower_side,
-    profile_of_level,
-    rna_row_of_level,
-)
+from .transfer_rows import blur_row, count_logvar, hop_price, intersect, lower_side
 
 __all__ = ["LevelLane"]
 
@@ -47,7 +39,7 @@ class LevelLane:
     column split's asymmetry against ``other``, the other column) — and ``two_sided``, the faces the
     WHOLE profile crosses (none on the gDNA lane: every gDNA hop is a lower bound; an intron and its
     own boundary on an RNA lane: one shared unspliced population). ``total`` is every node's total,
-    through which a held level is read back as the node's composition (`row`); ``own_level`` each
+    through which the solve reads a held level back as the node's composition; ``own_level`` each
     node's own level (a `RowTable`); ``faces`` the directed faces the lane serves; ``flux``, per
     ``(exon, side)`` — the junction's priced estimate of the exon's RNA, kept per FACE (a `RowTable`
     over the node's two sides) so the solve can tell which face's composition already carries it;
@@ -210,10 +202,3 @@ class LevelLane:
         if self.other is not None:
             rna_count, rna_var = self.witness(x)
         levels.write(x, p, self.count[x], self.a[x], rna_count, rna_var)
-
-    def row(self, profile, x: int):
-        """A held level's profile read as ``x``'s composition row through its own total — a pure
-        coordinate change (the level was priced on arrival): "at least this much gDNA" is a floor on
-        the gDNA share; "at least this much RNA" of the node's live strand is a ceiling on it."""
-        read = profile_of_level if self.population == "gdna" else rna_row_of_level
-        return read(profile, self.u, self.lam, self.total[x], self.a[x], self.rho_ref)

@@ -1,24 +1,33 @@
-// prepare_kernel.cpp — the BUILDERS of the composition-transfer policy for one block, as one native call.
+// transfer_kernel.cpp — the COMPOSITION TRANSFER policy's three kernels, one native module (`_transfer_impl`):
 //
-// `TransferPolicy.prepare` (`calibration/messages/transfer.py`) allocates, per block, the tables the
-// directional pass reads — every node's own claim, the recipient's rule per directed face (the `Faces`
-// tables), each level lane's faces, own levels, junction flux levels and flux witnesses — and this file
-// builds them in one call: the claims (`claims`), the rules (`splice_faces`, `edge_level`, `terminus_rules`,
-// `alternative_splice_site`) and the lanes (`gdna_lane`, `rna_lane`). It is the one implementation of the
-// builders: the gates are the transfer gates (`tests/calibration/test_transfer_faces.py`,
-// `test_transfer_policy.py`, `test_transfer_rna_lanes.py`), which hold the tables to independent recomputes,
-// and `profiling/sweep_replay.py replay --tolerance` on a captured sweep. The row constructors are
-// `transfer_rows.h`, shared with the pass kernel.
+//   transfer_prepare  the BUILDERS for one block (phase 0): every node's own claim, the recipient's rule per
+//                     directed face and the level lanes, written into the tables `TransferPolicy.prepare`
+//                     allocates (`calibration/messages/transfer.py`, `faces.py`, `lanes.py`);
+//   transfer_pass     ONE DIRECTIONAL PASS (phase 1): in chain order the recipient receives what its neighbour
+//                     sends — the face's composition rule and each lane's level — writing the `Received`
+//                     tables in place (`calibration/sweep.py::_pass`);
+//   transfer_solve    THE SOLVE (phase 2, the policy's half): the two held tables into ψ's two channels — the
+//                     fused λ rows and the cube delivery at the AMBIG nodes (`_PreparedTransfer.solve`).
+//
+// The row constructors are `transfer_rows.h`, shared with ψ's kernel. This file is the one implementation
+// of the policy's arithmetic: its gates are the transfer gates (`tests/calibration/test_transfer_faces.py`,
+// `test_transfer_policy.py`, `test_transfer_rna_lanes.py`, the tables and the delivered channels against
+// independent recomputes), `test_pass_kernel.py` (the pass against the per-hop Python kernel) and
+// `profiling/sweep_replay.py replay --tolerance` on a captured sweep.
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
+#include <nanobind/stl/pair.h>
 
 #include "transfer_rows.h"
 
@@ -36,6 +45,8 @@ using IdxVec = nb::ndarray<int64_t, nb::ndim<1>, nb::c_contig, nb::device::cpu>;
 using IdxMat = nb::ndarray<int32_t, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
 using KindMat = nb::ndarray<int8_t, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
 using FlagVec = nb::ndarray<uint16_t, nb::ndim<1>, nb::c_contig, nb::device::cpu>;
+
+// ═══ THE BUILDERS (phase 0) ═══════════════════════════════════════════════════════════════════════════
 
 // ---- the boundary flags (calibration/splice_graph.py) ----------------------------------------------
 
@@ -405,7 +416,7 @@ void rna_lane(const Chain& c, const RowsOut& own, int strand, double rho_ref, La
 
 // ---- the call --------------------------------------------------------------------------------------------
 
-LaneOut lane_view(nb::tuple t, int K) {
+LaneOut lane_tables(nb::tuple t, int K) {
     LaneOut L;
     L.face = nb::cast<BoolMat>(t[0]).data();
     L.two_sided = nb::cast<BoolMat>(t[1]).data();
@@ -460,19 +471,419 @@ int transfer_prepare(Vec lam, BoolVec is_boundary, BoolVec is_exon, BoolVec free
     terminus_rules(c, F, S);
     alternative_splice_site(c, F, S);
     if (!gdna.is_none()) {
-        LaneOut G = lane_view(nb::cast<nb::tuple>(gdna), c.K);
+        LaneOut G = lane_tables(nb::cast<nb::tuple>(gdna), c.K);
         gdna_lane(c, claims_out, F, rho_gdna, G, S);
     }
-    LaneOut P = lane_view(pos, c.K), N = lane_view(neg, c.K);
+    LaneOut P = lane_tables(pos, c.K), N = lane_tables(neg, c.K);
     rna_lane(c, claims_out, 0, rho_rna, P, S);
     rna_lane(c, claims_out, 1, rho_rna, N, S);
     return F.n_rows;
 }
 
+
+// ═══ THE PASS (phase 1) ═══════════════════════════════════════════════════════════════════════════════
+
+// ---- the tables ---------------------------------------------------------------------------------------
+
+struct FacesView {
+    KindMat kind; IdxMat row; IdxMat row2;
+    Mat n_u, n_s, a_b, a_x, width, var;
+    Mat rows;
+};
+
+struct LevelsView {  // one lane's Received table, written in place
+    BoolVec present; Mat profile; Vec count; Vec opportunity; BoolVec has_witness; Vec rna_count; Vec rna_count_var;
+};
+
+struct LaneView {
+    int field;  // 0 gdna, 1 rna_pos, 2 rna_neg — which Levels table of the Received
+    BoolMat face; BoolMat two_sided; BoolVec empty;
+    Mat own_level; BoolVec own_mask;
+    Vec count; Vec a;
+    bool has_other; Vec other;
+    Mat flux_witness; BoolVec flux_mask;  // (n, 2): count, opportunity
+};
+
+inline const double* row_of(const Mat& m, int i) { return m.data() + static_cast<size_t>(i) * m.shape(1); }
+inline double* row_of(Mat& m, int i) { return m.data() + static_cast<size_t>(i) * m.shape(1); }
+inline bool at2(const BoolMat& m, int i, int side) { return m.data()[static_cast<size_t>(i) * 2 + side]; }
+
+inline void levels_write(LevelsView& L, int K, int i, const double* profile, double count,
+                         double opportunity, bool witness, double rna_count, double rna_var) {
+    L.present.data()[i] = true;
+    double* dest = row_of(L.profile, i);
+    if (dest != profile) std::copy(profile, profile + K, dest);
+    L.count.data()[i] = count;
+    L.opportunity.data()[i] = opportunity;
+    L.has_witness.data()[i] = witness;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    L.rna_count.data()[i] = witness ? rna_count : nan;
+    L.rna_count_var.data()[i] = witness ? rna_var : nan;
+}
+
+inline void levels_forward(LevelsView& L, int K, int s, int i) {
+    L.present.data()[i] = L.present.data()[s];
+    std::copy(row_of(L.profile, s), row_of(L.profile, s) + K, row_of(L.profile, i));
+    L.count.data()[i] = L.count.data()[s];
+    L.opportunity.data()[i] = L.opportunity.data()[s];
+    L.has_witness.data()[i] = L.has_witness.data()[s];
+    L.rna_count.data()[i] = L.rna_count.data()[s];
+    L.rna_count_var.data()[i] = L.rna_count_var.data()[s];
+}
+
+// intersect the present parts (pointwise minimum), max-normalised, into out; whether any part
+bool intersect2(const double* p, const double* q, int K, double* out) {
+    if (p == nullptr && q == nullptr) return false;
+    if (p != nullptr && q != nullptr) {
+        for (int j = 0; j < K; ++j) out[j] = std::min(p[j], q[j]);
+    } else {
+        const double* r = p != nullptr ? p : q;
+        std::copy(r, r + K, out);
+    }
+    norm_inplace(out, K);
+    return true;
+}
+
+// LevelLane.emit(s, x, levels): what s sends toward x, written into row x. Whether anything was sent.
+bool lane_emit(const LaneView& ln, LevelsView& L, int K, int s, int x, int side, Scratch& S) {
+    const double* own = ln.own_mask.data()[s] ? row_of(ln.own_level, s) : nullptr;
+    const bool far = L.present.data()[s];
+    if (ln.empty.data()[s] && own == nullptr) {
+        if (far) levels_forward(L, K, s, x);
+        return far;
+    }
+    const double* own_used = own;
+    if (own != nullptr && !at2(ln.two_sided, x, side)) {
+        lower_side(own, K, S.a.data());
+        own_used = S.a.data();
+    }
+    const double* held = far ? row_of(L.profile, s) : nullptr;
+    if (!intersect2(own_used, held, K, S.b.data())) return false;
+    if (ln.empty.data()[s]) {
+        if (!ln.flux_mask.data()[s]) throw std::runtime_error("an empty node with an own level has no flux witness");
+        const double* w = row_of(ln.flux_witness, s);
+        levels_write(L, K, x, S.b.data(), w[0], w[1], false, 0.0, 0.0);
+        return true;
+    }
+    if (ln.has_other) {
+        const double c_r = ln.count.data()[s], c_o = ln.other.data()[s];
+        levels_write(L, K, x, S.b.data(), c_r, ln.a.data()[s], true, c_r - c_o, c_r + c_o);
+    } else {
+        levels_write(L, K, x, S.b.data(), ln.count.data()[s], ln.a.data()[s], false, 0.0, 0.0);
+    }
+    return true;
+}
+
+// LevelLane.receive(levels, s, x): a FULL recipient re-prices row x in place.
+void lane_receive(const LaneView& ln, LevelsView& L, int K, const double* lam, int x, int side,
+                  Scratch& S) {
+    const double n_sent = L.count.data()[x], a_sent = L.opportunity.data()[x];
+    const double cnt = ln.count.data()[x], a_x = ln.a.data()[x];
+    double v;
+    if (!ln.has_other || !L.has_witness.data()[x]) {
+        v = hop_price(n_sent, a_sent, cnt, a_x);
+    } else {
+        v = count_logvar(n_sent) + count_logvar(cnt);
+        const double n_s = L.rna_count.data()[x], v_s = L.rna_count_var.data()[x];
+        const double n_x = cnt - ln.other.data()[x], v_x = cnt + ln.other.data()[x];
+        if (n_s > 0.0 && n_x > 0.0) {
+            const double l = std::log((n_x / a_x) / (n_s / a_sent));
+            v += std::max(0.0, l * l - (v_s / (n_s * n_s) + v_x / (n_x * n_x)));
+        }
+    }
+    const double* held = row_of(L.profile, x);
+    const double* p = held;
+    if (!at2(ln.two_sided, x, side)) {
+        lower_side(held, K, S.a.data());
+        p = S.a.data();
+    }
+    if (v > 0.0) {
+        blur_row(p, K, lam, v, S.b.data(), S.blur);
+        p = S.b.data();
+    }
+    if (ln.has_other) {
+        const double c_o = ln.other.data()[x];
+        levels_write(L, K, x, p, cnt, a_x, true, cnt - c_o, cnt + c_o);
+    } else {
+        levels_write(L, K, x, p, cnt, a_x, false, 0.0, 0.0);
+    }
+}
+
+// Faces.apply(s, i, own, held): the composition rule at the face into i from side; the row for i in
+// out, or nullptr for no claim.
+const double* faces_apply(const FacesView& F, int i, int side, const double* own, const double* held,
+                          const double* lam, int K, const double* nodes, int n_nodes, Scratch& S,
+                          double* out) {
+    const size_t at = static_cast<size_t>(i) * 2 + side;
+    const int k = F.kind.data()[at];
+    if (k == FORWARD) {
+        if (own == nullptr && held == nullptr) return nullptr;
+        for (int j = 0; j < K; ++j) out[j] = (own ? own[j] : 0.0) + (held ? held[j] : 0.0);
+        norm_inplace(out, K);
+        return out;
+    }
+    if (k == EDGE) {
+        const int r = F.row.data()[at];
+        if (r < 0) return nullptr;
+        const double* row = row_of(F.rows, r);
+        if (ptp(row, K) <= EPS) return nullptr;
+        std::copy(row, row + K, out);
+        return out;
+    }
+    if (k == LEVEL) {
+        if (own == nullptr) {
+            const int r2 = F.row2.data()[at];
+            if (r2 < 0) return nullptr;
+            std::copy(row_of(F.rows, r2), row_of(F.rows, r2) + K, out);
+            return out;
+        }
+        level_row(own, lam, K, row_of(F.rows, F.row.data()[at]), F.var.data()[at], S, out);
+        return out;
+    }
+    if (k != TRANSPORT && k != SPLICE_OUT) return nullptr;
+    if (own == nullptr && held == nullptr) return nullptr;
+    double* sending = S.e.data();
+    for (int j = 0; j < K; ++j) sending[j] = (own ? own[j] : 0.0) + (held ? held[j] : 0.0);
+    norm_inplace(sending, K);
+    const double n_u = F.n_u.data()[at], n_s = F.n_s.data()[at];
+    double* tmp = S.f.data();
+    if (k == TRANSPORT) {
+        transport_row(sending, lam, K, row_of(F.rows, F.row.data()[at]), n_u, n_s, S, tmp);
+    } else {
+        splice_out_row(sending, lam, K, n_u, n_s, F.a_b.data()[at], F.a_x.data()[at], nodes, n_nodes, S, tmp);
+    }
+    const double w = F.width.data()[at];
+    if (w > 0.0) {
+        blur_row(tmp, K, lam, w, out, S.blur);
+    } else {
+        std::copy(tmp, tmp + K, out);
+    }
+    return out;
+}
+
+// ---- the pass -----------------------------------------------------------------------------------------
+
+void transfer_pass(Vec lam, IdxVec seq, IdxVec nbr, BoolVec terminal, Mat own, BoolVec own_mask, KindMat f_kind, IdxMat f_row,
+                   IdxMat f_row2, Mat f_n_u, Mat f_n_s, Mat f_a_b, Mat f_a_x, Mat f_width, Mat f_var, Mat f_rows,
+                   Vec marginal_nodes, nb::list lanes, BoolVec has_composition, Mat composition, nb::list levels) {
+    const int K = static_cast<int>(lam.shape(0));
+    const int n = static_cast<int>(seq.shape(0));
+    if (static_cast<int>(composition.shape(1)) != K || static_cast<int>(own.shape(1)) != K)
+        throw std::invalid_argument("transfer_pass: the rows and the grid disagree");
+    FacesView F{f_kind, f_row, f_row2, f_n_u, f_n_s, f_a_b, f_a_x, f_width, f_var, f_rows};
+    std::vector<LevelsView> tables;
+    for (nb::handle h : levels) {
+        nb::tuple t = nb::cast<nb::tuple>(h);
+        tables.push_back(LevelsView{nb::cast<BoolVec>(t[0]), nb::cast<Mat>(t[1]), nb::cast<Vec>(t[2]),
+                                    nb::cast<Vec>(t[3]), nb::cast<BoolVec>(t[4]), nb::cast<Vec>(t[5]),
+                                    nb::cast<Vec>(t[6])});
+    }
+    std::vector<LaneView> lns;
+    for (nb::handle h : lanes) {
+        nb::tuple t = nb::cast<nb::tuple>(h);
+        LaneView ln{nb::cast<int>(t[0]), nb::cast<BoolMat>(t[1]), nb::cast<BoolMat>(t[2]), nb::cast<BoolVec>(t[3]),
+                    nb::cast<Mat>(t[4]), nb::cast<BoolVec>(t[5]), nb::cast<Vec>(t[6]), nb::cast<Vec>(t[7]),
+                    !t[8].is_none(), Vec(), nb::cast<Mat>(t[9]), nb::cast<BoolVec>(t[10])};
+        if (ln.has_other) ln.other = nb::cast<Vec>(t[8]);
+        if (ln.field < 0 || ln.field >= static_cast<int>(tables.size()))
+            throw std::invalid_argument("transfer_pass: a lane names a table the Received does not hold");
+        lns.push_back(std::move(ln));
+    }
+    const double* L = lam.data();
+    const double* nodes = marginal_nodes.data();
+    const int n_nodes = static_cast<int>(marginal_nodes.shape(0));
+    Scratch S(K);
+    std::vector<double> out(K);
+    const int64_t* seqp = seq.data();
+    const int64_t* nbrp = nbr.data();
+    const bool* term = terminal.data();
+    bool* has_comp = has_composition.data();
+    for (int idx = 0; idx < n; ++idx) {
+        const int i = static_cast<int>(seqp[idx]);
+        const int s = static_cast<int>(nbrp[i]);
+        if (s < 0 || term[i]) continue;
+        const int side = s < i ? 0 : 1;
+        if (F.kind.data()[static_cast<size_t>(i) * 2 + side] != NONE) {
+            const double* own_s = own_mask.data()[s] ? row_of(own, s) : nullptr;
+            const double* held = has_comp[s] ? row_of(composition, s) : nullptr;
+            const double* r = faces_apply(F, i, side, own_s, held, L, K, nodes, n_nodes, S, out.data());
+            if (r != nullptr && ptp(r, K) > EPS) {
+                double* dest = row_of(composition, i);
+                std::copy(r, r + K, dest);
+                norm_inplace(dest, K);
+                has_comp[i] = true;
+            }
+        }
+        for (const LaneView& ln : lns) {
+            if (!at2(ln.face, i, side)) continue;
+            LevelsView& T = tables[ln.field];
+            if (lane_emit(ln, T, K, s, i, side, S) && !ln.empty.data()[i]) lane_receive(ln, T, K, L, i, side, S);
+        }
+    }
+}
+
+
+// ═══ THE SOLVE (phase 2) ══════════════════════════════════════════════════════════════════════════════
+
+// ---- THE SOLVE (phase 2, the policy's half): the two held tables into ψ's channels ----------------------
+//
+// `_PreparedTransfer.solve` (`calibration/messages/transfer.py`): at every node the two held compositions
+// add (independent witnesses about one slot); a held gDNA level on either side is read as the node's
+// composition row through its own total (two bounds on one density intersect) and joins them; the fused
+// row is re-normalised. THE CEILINGS at single-strand nodes: an RNA level of the node's live strand, read
+// ONLY from a face that sent no composition (a licensed face's map already carries the flux and a
+// composition already carries its sender's witnesses), intersected with the node's own junction flux at
+// that face, says "at most this much gDNA" and joins the row. THE CUBE at AMBIG nodes: per strand the
+// held levels intersected with the node's own level's lower side, delivered with the node's total, RNA
+// opportunity and the lanes' reference density — the ingredients ψ evaluates at its own θ nodes
+// (`psi_kernel.cpp`). Gates: `tests/calibration/test_transfer_policy.py`, `test_transfer_rna_lanes.py`.
+
+struct Held {  // one side's Received table, read only
+    BoolVec has_neighbour, has_composition; Mat composition;
+    std::array<BoolVec, 3> present; std::array<Mat, 3> profile;  // the three level lanes, in Received.LANES order
+};
+
+struct SolveLane {  // a level lane as the solve reads it
+    bool built = false; int field = 0;
+    BoolVec empty; Vec total; Vec a; double rho_ref = 0.0;
+    Mat own_rows; BoolVec own_mask;      // the node's own level (an RNA lane's sources)
+    Cube flux_rows; BoolMat flux_mask;   // the junction flux levels per (node, side)
+};
+
+Held held_view(nb::tuple t) {
+    Held h{nb::cast<BoolVec>(t[0]), nb::cast<BoolVec>(t[1]), nb::cast<Mat>(t[2]), {}, {}};
+    for (int l = 0; l < 3; ++l) {
+        nb::tuple lv = nb::cast<nb::tuple>(t[3 + l]);
+        h.present[l] = nb::cast<BoolVec>(lv[0]);
+        h.profile[l] = nb::cast<Mat>(lv[1]);
+    }
+    return h;
+}
+
+SolveLane solve_lane(nb::object o) {
+    SolveLane L;
+    if (o.is_none()) return L;
+    nb::tuple t = nb::cast<nb::tuple>(o);
+    L.built = true;
+    L.field = nb::cast<int>(t[0]);
+    L.empty = nb::cast<BoolVec>(t[1]); L.total = nb::cast<Vec>(t[2]); L.a = nb::cast<Vec>(t[3]);
+    L.rho_ref = nb::cast<double>(t[4]);
+    L.own_rows = nb::cast<Mat>(t[5]); L.own_mask = nb::cast<BoolVec>(t[6]);
+    L.flux_rows = nb::cast<Cube>(t[7]); L.flux_mask = nb::cast<BoolMat>(t[8]);
+    return L;
+}
+
+// the pointwise-minimum accumulator of bounds on one density: the first part is copied, the rest folded
+struct Intersection {
+    double* acc; int K; int n = 0;
+    void add(const double* p) {
+        if (n++ == 0) std::copy(p, p + K, acc); else fold_min(p, K, acc);
+    }
+    bool any() const { return n > 0; }
+    void finish() { norm_inplace(acc, K); }
+};
+
+std::pair<bool, int> transfer_solve(Vec lam, nb::tuple from_left, nb::tuple from_right, nb::object gdna,
+                                    nb::object pos, nb::object neg, BoolVec ambig, BoolVec free_pos,
+                                    BoolVec free_neg, Mat out_rows, IdxVec cube_slot, Mat cube_pos,
+                                    BoolVec cube_has_pos, Mat cube_neg, BoolVec cube_has_neg, Vec cube_total,
+                                    Vec cube_opportunity, Vec cube_rho) {
+    const int K = static_cast<int>(lam.shape(0)), n = static_cast<int>(out_rows.shape(0));
+    if (static_cast<int>(out_rows.shape(1)) != K) throw std::invalid_argument("transfer_solve: the rows and the grid disagree");
+    const double* u = lam.data();  // a level's coordinate is the solve grid
+    Held sides[2] = {held_view(from_left), held_view(from_right)};
+    SolveLane G = solve_lane(gdna);
+    SolveLane rna[2] = {solve_lane(pos), solve_lane(neg)};
+    const bool* free_of[2] = {free_pos.data(), free_neg.data()};
+    Scratch S(K);
+    std::vector<double> bound(K), row(K);
+    const int cube_capacity = static_cast<int>(cube_slot.shape(0));
+    bool live = false;
+    int d = 0;
+    for (int i = 0; i < n; ++i) {
+        double* r = out_rows.data() + static_cast<size_t>(i) * K;
+        // the two held compositions add
+        bool fused = false;
+        for (const Held& h : sides) {
+            if (!h.has_composition.data()[i]) continue;
+            const double* c = h.composition.data() + static_cast<size_t>(i) * K;
+            if (!fused) std::copy(c, c + K, r); else for (int j = 0; j < K; ++j) r[j] += c[j];
+            fused = true;
+        }
+        // a held gDNA level on either side, read through the node's own total, joins as one more witness
+        if (G.built && !G.empty.data()[i]) {
+            Intersection inter{bound.data(), K};
+            for (const Held& h : sides) {
+                if (!h.present[G.field].data()[i]) continue;
+                profile_of_level(h.profile[G.field].data() + static_cast<size_t>(i) * K, u, u, K, G.total.data()[i],
+                                 G.a.data()[i], G.rho_ref, S, row.data());
+                inter.add(row.data());
+            }
+            if (inter.any()) {
+                inter.finish();
+                if (fused) for (int j = 0; j < K; ++j) r[j] += bound[j]; else std::copy(bound.begin(), bound.end(), r);
+                fused = true;
+            }
+        }
+        if (fused) { norm_inplace(r, K); live = true; }
+        // THE CEILINGS at a single-strand node, from the faces that sent no composition
+        if (!ambig.data()[i]) {
+            for (int s = 0; s < 2; ++s) {
+                const SolveLane& L = rna[s];
+                if (!L.built || !free_of[s][i] || L.empty.data()[i]) continue;
+                Intersection inter{bound.data(), K};
+                for (int side = 0; side < 2; ++side) {
+                    const Held& h = sides[side];
+                    if (!h.has_neighbour.data()[i] || h.has_composition.data()[i]) continue;
+                    if (h.present[L.field].data()[i]) inter.add(h.profile[L.field].data() + static_cast<size_t>(i) * K);
+                    if (L.flux_mask.data()[static_cast<size_t>(i) * 2 + side])
+                        inter.add(L.flux_rows.data() + (static_cast<size_t>(i) * 2 + side) * K);
+                }
+                if (!inter.any()) continue;
+                inter.finish();
+                rna_row_of_level(bound.data(), u, u, K, L.total.data()[i], L.a.data()[i], L.rho_ref, S, row.data());
+                if (ptp(row.data(), K) <= EPS) continue;
+                if (ptp(r, K) > EPS) { for (int j = 0; j < K; ++j) r[j] += row[j]; norm_inplace(r, K); }
+                else std::copy(row.begin(), row.end(), r);
+                live = true;
+            }
+        }
+        // THE CUBE at an AMBIG node: per strand, the held levels and the own level's lower side intersected
+        if (ambig.data()[i] && rna[0].built && rna[1].built && !rna[0].empty.data()[i]) {
+            if (d >= cube_capacity) throw std::runtime_error("transfer_solve: the cube table is full");
+            bool any_profile = false;
+            for (int s = 0; s < 2; ++s) {
+                const SolveLane& L = rna[s];
+                double* dest = (s == 0 ? cube_pos.data() : cube_neg.data()) + static_cast<size_t>(d) * K;
+                Intersection inter{dest, K};
+                for (const Held& h : sides)
+                    if (h.present[L.field].data()[i]) inter.add(h.profile[L.field].data() + static_cast<size_t>(i) * K);
+                if (L.own_mask.data()[i]) {
+                    lower_side(L.own_rows.data() + static_cast<size_t>(i) * K, K, row.data());
+                    inter.add(row.data());
+                }
+                if (inter.any()) inter.finish();
+                (s == 0 ? cube_has_pos : cube_has_neg).data()[d] = inter.any();
+                any_profile |= inter.any();
+            }
+            if (any_profile) {
+                cube_slot.data()[d] = i;
+                cube_total.data()[d] = rna[0].total.data()[i];
+                cube_opportunity.data()[d] = rna[0].a.data()[i];
+                cube_rho.data()[d] = rna[0].rho_ref;
+                ++d;
+            } else {
+                cube_has_pos.data()[d] = false; cube_has_neg.data()[d] = false;
+            }
+        }
+    }
+    return {live, d};
+}
+
 }  // namespace
 
-NB_MODULE(_prepare_impl, m) {
-    m.doc() = "The composition-transfer policy's builders for one block, on the policy's tables.";
+NB_MODULE(_transfer_impl, m) {
+    m.doc() = "The composition-transfer policy's builders, directional pass and solve, on the policy's tables.";
     m.def("transfer_prepare", &transfer_prepare, nb::arg("lam"), nb::arg("is_boundary"), nb::arg("is_exon"),
           nb::arg("free_pos"), nb::arg("free_neg"), nb::arg("exon_pos"), nb::arg("exon_neg"), nb::arg("left"),
           nb::arg("right"), nb::arg("flags"), nb::arg("n_u"), nb::arg("n_s"), nb::arg("a_g"), nb::arg("a_r"),
@@ -485,4 +896,20 @@ NB_MODULE(_prepare_impl, m) {
           "`own_mask` (the claims), `faces` (kind, row, row2, n_u, n_s, a_b, a_x, width, var, rows), and per "
           "lane (face, two_sided, own rows, own mask, flux rows, flux mask, witness rows, witness mask) — the "
           "gDNA lane's `None` when the library has no gDNA coordinate. Returns the number of face rows written.");
+    m.def("transfer_pass", &transfer_pass, nb::arg("lam"), nb::arg("seq"), nb::arg("nbr"),
+          nb::arg("terminal"), nb::arg("own"), nb::arg("own_mask"), nb::arg("f_kind"), nb::arg("f_row"),
+          nb::arg("f_row2"), nb::arg("f_n_u"), nb::arg("f_n_s"), nb::arg("f_a_b"), nb::arg("f_a_x"),
+          nb::arg("f_width"), nb::arg("f_var"), nb::arg("f_rows"), nb::arg("marginal_nodes"),
+          nb::arg("lanes"), nb::arg("has_composition"), nb::arg("composition"), nb::arg("levels"),
+          "Run one pass in chain order: for every destination in `seq` with a neighbour `nbr[i] >= 0` "
+          "that is not a terminal, apply the face's composition rule and carry each lane's level, "
+          "writing the Received tables in place.");
+    m.def("trigamma", &trigamma, nb::arg("x"), "zeta(2, x), the counting variance's one home in C++.");
+    m.def("transfer_solve", &transfer_solve, nb::arg("lam"), nb::arg("from_left"), nb::arg("from_right"),
+          nb::arg("gdna").none(), nb::arg("pos").none(), nb::arg("neg").none(), nb::arg("ambig"),
+          nb::arg("free_pos"), nb::arg("free_neg"), nb::arg("out_rows"), nb::arg("cube_slot"), nb::arg("cube_pos"),
+          nb::arg("cube_has_pos"), nb::arg("cube_neg"), nb::arg("cube_has_neg"), nb::arg("cube_total"),
+          nb::arg("cube_opportunity"), nb::arg("cube_rho"),
+          "The policy's solve for one block: the two held tables into the fused λ rows (written in place) and the "
+          "cube delivery at the AMBIG nodes (the cube arrays, written in place). Returns (live, delivered rows).");
 }

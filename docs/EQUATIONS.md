@@ -183,7 +183,7 @@ per-fragment shares, so `1/mass` is not a counting variance. The shipped countin
 `1/n` from `n ≈ 10` and `π²/2` at `n = 0`: a zero count is a measurement, not an absence.
 
 **3.5 A composition crosses only where the population is shared; a gDNA level crosses unscaled.**
-`native/prepare_kernel.cpp`: the face maps (`splice_faces`, `terminus_rules`) carry a composition under
+`native/transfer_kernel.cpp`: the face maps (`splice_faces`, `terminus_rules`) carry a composition under
 §3.5b's licence; `gdna_lane` / `lanes.LevelLane` carry the gDNA level everywhere else. Why the level needs its
 own lane is one substitution. Rescaling a source's density by the ratio of totals
 `r = ρ_tot(dst)/ρ_tot(src)` and writing `ρ_c(src) = φ_c(src)·ρ_tot(src)` gives
@@ -226,7 +226,7 @@ terms, never in TSS/TES, which the strand flips:
 transcript simply begins. That is the derived line between the two treatments.
 
 **3.5e The two operators and the terminus, in `{gDNA, RNA+, RNA−}`.** The ruling is `DESIGN.md` §0c.0
-(2026-08-19); `prepare_kernel.cpp`'s `splice_faces` and `terminus_rules` implement it. A message is the three
+(2026-08-19); `transfer_kernel.cpp`'s `splice_faces` and `terminus_rules` implement it. A message is the three
 densities `{gDNA, RNA+, RNA−}`, always: an operator that pools the two RNA components has not measured
 what the policy carries.
 
@@ -280,7 +280,7 @@ own witness and never pooled across pairs, it makes a deep imputation arrive wea
 and a measurement outweigh both.
 
 **3.6 The two faces of an `intron|exon` boundary — component-set matching.** Ruling 2026-08-04;
-`prepare_kernel.cpp`'s `splice_faces`. At one boundary the accumulator stores three populations, and their
+`transfer_kernel.cpp`'s `splice_faces`. At one boundary the accumulator stores three populations, and their
 component sets differ:
 
 | bank | what it counted | components |
@@ -320,7 +320,7 @@ as the splice-in map's cap rather than solving face (II) outright (`DESIGN.md` �
 
 **3.6c The splice-flux reframe — a boundary has two totals, one per flank.** Ruling 2026-08-05;
 `BlockContext.sj_count_lo` / `sj_count_hi` (`messages/__init__.py`) carry the split and
-`prepare_kernel.cpp`'s `splice_faces` reads it. §3.6 made per step: which flank is a hop talking to? Numerator and
+`transfer_kernel.cpp`'s `splice_faces` reads it. §3.6 made per step: which flank is a hop talking to? Numerator and
 denominator of a composition imputation must be totals over the same component set, and a molecule
 counted in `J` spliced at this position, so its body lies in the exon on exactly one side:
 
@@ -864,7 +864,7 @@ at 24 nodes (12 nodes reach 0.07 and are refused); the fixed lattice at 60 reads
 `test_vertex_reference.test_the_theta_marginal_matches_adaptive_quadrature_at_every_depth`.
 
 **A delivered row is evaluated at the nodes.** The RNA level lanes deliver a row's ingredients
-(`simplex_logodds.CubeRow`: the held profile per strand over `u = log(ρ/ρ_ref)`, the slot's total `n` and RNA
+(a row of `simplex_logodds.CubeRows`: the held profile per strand over `u = log(ρ/ρ_ref)`, the slot's total `n` and RNA
 opportunity `a_r`, each lane's `ρ_ref`) and ψ evaluates them at its own nodes: at each cell the strand's share
 `f_s = (1 − f_g)(1 ± τ)/2` implies the density `f_s·n/a_r`, and the held profile is read at `log(ρ_s/ρ_ref)`
 (the kernel's row map, `profile_of_level` with the tilt inside; the readable form is the gates' `_psi_reference.row_at`). No θ lattice exists for a row to be built
@@ -918,7 +918,7 @@ Every θ-independent term (the arms, the λ-factor rows) is common to the three 
 `τ = 0.5` reads 0.46 → 0.63 with the plain atom). The RNA level lanes carry each strand's PRESENCE as a
 delivered lower bound (§6b.13), and a held level on strand `s` is a certified witness that `s` carries RNA,
 so it rules the hypothesis "all the RNA is on the other strand" out: in ψ the pure `−s` column is `−∞`
-wherever the slot's `CubeRow` holds a profile on `s`. Nothing is pooled and no constant enters: the witness
+wherever the slot's delivered row holds a profile on `s`. Nothing is pooled and no constant enters: the witness
 is the delivery itself (a level on `s` says nothing against "pure `s`"; with nothing delivered both atoms
 stand). The structural witness — the per-strand exon bits, a strand whose RNA here could only be nascent
 cannot be the pure carrier — adds nothing measurable on top (the θ note §13: within 2 % by presence truth)
@@ -1094,7 +1094,7 @@ exon binds a gDNA fragment over 125 bp while the simulator's non-stacking rule b
 over one exon's 40. The efficiency reads the gDNA and the transcript's factor inherits the difference
 (`ISSUES: ruler-witness-geometry-on-transcript-panels`), declared and not repaired.
 
-## 12. The flux price's witness — the column count on the protocol's share of the opportunity (`prepare_kernel.cpp`'s `rna_lane`)
+## 12. The flux price's witness — the column count on the protocol's share of the opportunity (`transfer_kernel.cpp`'s `rna_lane`)
 
 The certified flux at one of an exon's junctions is that strand's RNA level at the exon (§6b.13's source):
 the spliced count `c_J` at the junction's route rate `r_J = Σ flux / A_route`, and every hop pays the

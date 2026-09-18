@@ -1,6 +1,6 @@
 // transfer_rows.h — the ROW CONSTRUCTORS of the composition transfer, in C++ term for term the Python of
 // `calibration/messages/transfer_rows.py` (and the strand row of `simplex_logodds.strand_row_logodds`),
-// shared by the directional pass (`pass_kernel.cpp`) and the builders (`prepare_kernel.cpp`). Every
+// shared by the transfer's three kernels (`transfer_kernel.cpp`) and ψ's (`psi_kernel.cpp`). Every
 // function here is a pure function of one face's or one node's numbers over the solve grid `lam`
 // (`f_g = sigma(lam)`, K points), writing a max-normalised log-row. The gates are
 // `tests/calibration/test_pass_kernel.py` and the transfer gates (`test_transfer_*.py`).
@@ -312,6 +312,25 @@ inline void rna_level_of_profile(const double* row, const double* lam, const dou
     }
     interp(S.b.data(), K, lam, S.a.data(), K, S.a[0], S.a[K - 1], out);
     for (int j = 0; j < K; ++j) out[j] += total_tail(rho_ref * std::exp(u[j]) * a_r, n);
+    norm_inplace(out, K);
+}
+
+// profile_of_level(profile, u, lam, n, a, rho_ref): a held gDNA level read as THIS node's composition row
+// through its own total — a pure coordinate change, u(lam) = log(sigma(lam) n / (a rho_ref)).
+inline void profile_of_level(const double* p, const double* u, const double* lam, int K, double n, double a,
+                             double rho_ref, Scratch& S, double* out) {
+    for (int j = 0; j < K; ++j) S.a[j] = std::log(sigmoid(lam[j]) * n / (a * rho_ref));
+    interp(S.a.data(), K, u, p, K, p[0], p[K - 1], out);
+    norm_inplace(out, K);
+}
+
+// rna_row_of_level(profile, u, lam, n, a_r, rho_ref): a held RNA level read as a single-strand node's
+// composition row — u_s(lam) = log((1 − sigma(lam)) n / (a_r rho_ref)); a lower-only level (non-decreasing
+// in u) is non-increasing in lam: "at least this much RNA" is "at most this much gDNA".
+inline void rna_row_of_level(const double* p, const double* u, const double* lam, int K, double n, double a_r,
+                             double rho_ref, Scratch& S, double* out) {
+    for (int j = 0; j < K; ++j) S.a[j] = std::log(1.0 / (1.0 + std::exp(lam[j])) * n / (a_r * rho_ref));
+    interp(S.a.data(), K, u, p, K, p[0], p[K - 1], out);
     norm_inplace(out, K);
 }
 

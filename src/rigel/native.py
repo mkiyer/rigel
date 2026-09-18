@@ -9,8 +9,7 @@ _bam_impl     : BAM scanning, annotation writing, SJ tag detection (htslib)
 _resolve_impl : Fragment overlap resolution against the reference index
 _scoring_impl : Per-fragment likelihood scoring (strand, coverage, splice)
 _em_impl      : Locus-level EM solver, connected components, effective-length normalization
-_pass_impl    : One directional pass of the calibration sweep's composition transfer
-_prepare_impl : The composition transfer's builders for one block — claims, face rules, level lanes
+_transfer_impl: The calibration sweep's composition transfer — the builders, the directional pass, the solve
 _psi_impl     : ψ, the sweep's per-slot solve on the (λ, θ) cube, and its pieces for the gates
 _cgranges_impl: Interval overlap queries (vendored cgranges)
 """
@@ -48,10 +47,11 @@ from ._em_impl import scatter_units_i32
 from ._em_impl import scatter_units_i64
 from ._em_impl import scatter_units_u8
 
-# -- The calibration sweep's composition transfer: the builders and the directional pass ---
-from ._prepare_impl import transfer_prepare
-from ._pass_impl import transfer_pass
-from ._pass_impl import trigamma
+# -- The calibration sweep's composition transfer: the builders, the pass, the solve ------
+from ._transfer_impl import transfer_prepare
+from ._transfer_impl import transfer_pass
+from ._transfer_impl import transfer_solve
+from ._transfer_impl import trigamma
 
 # -- The calibration sweep's per-slot solve, ψ -------------------------------
 from ._psi_impl import psi_solve
@@ -92,6 +92,7 @@ __all__ = [
     # The sweep's composition transfer
     "transfer_prepare",
     "transfer_pass",
+    "transfer_solve",
     "trigamma",
     # ψ
     "psi_solve",

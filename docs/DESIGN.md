@@ -288,7 +288,7 @@ held to.
 ### 0c.1 The mechanism is built and ships — do not build it again
 
 The hop the derivation above asks for is the transfer policy's SPLICE-IN FACE MAP
-(`native/prepare_kernel.cpp`'s `splice_faces`, `transfer_rows.face_map_lambda`; §6b.9 and §6b.12): the BOUNDARY's
+(`native/transfer_kernel.cpp`'s `splice_faces`, `transfer_rows.face_map_lambda`; §6b.9 and §6b.12): the BOUNDARY's
 measured sj flux is a density at the source, which joins the RNA claim entering the destination EXON —
 the certified flux caps the claimable gDNA share. Only an EXON receives it; the flux is a measurement
 with its own counting width, never an imputation; and it is registered by geometry, never gated on the
@@ -717,7 +717,7 @@ Re-derive this list rather than trusting it: `scripts/design/module_census.py` r
 | `messages/silent.py` | `SilentPolicy` — sends nothing. **The measured floor**, what `message_policy = "silent"` installs | A reader who holds `sweep.py` plus this holds the entire working system |
 | `messages/transfer.py` | `TransferPolicy` — **the shipped default** (2026-09-09): every node's own claim, one named builder per message, the two passes and the solve (§6b.4–§6b.14) | `prepare` is a table of contents: a reader finds a message by its builder's name |
 | `messages/faces.py` | `Faces` — the composition rules as typed tables over `(destination, side)`, `Faces.apply` the one home of the rule arithmetic, and the three helpers every reader of a face needs (`side_of`, `norm`, `fuse`) | gate: `test_transfer_faces.py` |
-| `messages/lanes.py` | `LevelLane` — one class for the three populations' levels, built by `native/prepare_kernel.cpp`'s `gdna_lane` (every face left without a composition rule) and `rna_lane` (one per strand, faces from the flag bits) | gate: `test_transfer_rna_lanes.py` |
+| `messages/lanes.py` | `LevelLane` — one class for the three populations' levels, built by `native/transfer_kernel.cpp`'s `gdna_lane` (every face left without a composition rule) and `rna_lane` (one per strand, faces from the flag bits) | gate: `test_transfer_rna_lanes.py` |
 | `messages/transfer_rows.py` | the pure row constructors — every map, level, price and coordinate change, each a function of one face's numbers | `count_logvar` is the one home of the counting term; every hop price reads it |
 | `messages/__init__.py` | the interface (`Policy`, `Prepared`), what every node received from one side as a table (`Received`: `has_neighbour`, `has_composition`, the composition rows, three `Levels` lanes; SILENCE and NO NEIGHBOUR are its two states `silence` / `no_neighbour`, not objects), what ψ receives (`PsiMessage`) and what a policy may read (`BlockContext`) | every field of `BlockContext` has a reader in the policy or the backbone |
 
@@ -1025,7 +1025,7 @@ anywhere in the transfer policy; the bar is about one percent of a row.
   control 94 → 448). **An empty exon piece beside a lit junction is a source too** (landed 2026-09-09):
   the level is built there, priced by `hop_price` on the piece's zero count, and emitted with the flux's
   own witness (`ISSUES: the-empty-flux-source-at-the-junctions-counting-alone`).
-* **The delivery at AMBIG nodes** (`PsiMessage.cube_rows`, `simplex_logodds.CubeRow`): the held levels per strand as ONE
+* **The delivery at AMBIG nodes** (`PsiMessage.cube_rows`, a `simplex_logodds.CubeRows` table): the held levels per strand as ONE
   row over ψ's `(λ, θ)` cube — at each cell `f_s = (1 − σ)(1 ± τ)/2`, the profile read at
   `log(ρ_s / ρ_ref,s)`; a one-sided profile stays one-sided (gated). The backbone adds the row inside the
   AMBIG solve, final solve only; absent, byte-identical (gated).
@@ -1149,7 +1149,7 @@ lanes hold their faces as ``(n, 2)`` bits and their junction flux as a row table
 neighbour arrays. A compiled pass reads these buffers directly.
 
 **The passes are native** (2026-09-17; the port's step (i), `ISSUES: performance-memory-bounded-solve` ③).
-`native.transfer_pass` (`src/rigel/native/pass_kernel.cpp`) runs one directional pass in one call — the
+`native.transfer_pass` (`src/rigel/native/transfer_kernel.cpp`) runs one directional pass in one call — the
 face's rule and each lane's emit and receive, in chain order, on exactly these tables — and the backbone
 prefers it where a policy offers `run_pass` beside `propagate`'s per-hop kernel (the Prepared protocol; the
 silent policy and a prototype policy still run the per-hop path). Every row operation is the Python's term
@@ -1169,7 +1169,7 @@ the face row store is a matrix with a written prefix, and the per-block packing 
 the builders' own arrays, none copied (`test_pass_kernel.py`). A pure re-layout, gated bit-identical: every
 table of MO_3021's 426 blocks against the pre-step tree, the four captured sweeps, the three identity
 references. **The builders are native** (step (ii-b), 2026-09-17): `native.transfer_prepare`
-(`src/rigel/native/prepare_kernel.cpp`, the `_prepare_impl` module) builds one block's claims, face rules and
+(`src/rigel/native/transfer_kernel.cpp`, the `_transfer_impl` module) builds one block's claims, face rules and
 level lanes into those tables in one call — the strand profiles, the face maps, the edge level, the terminus
 level rule with the pair's discrepancies, the alternative splice site, the gDNA lane's Poisson and
 profile-read levels, the RNA lanes' faces from the flag bits, their flux levels and witnesses — on the row
@@ -1193,7 +1193,7 @@ wall 409 → 315 s and 403 → 314 s (0.77×), the sweep 281 → 191 s and 278 �
 **ψ is native** (step (iii), 2026-09-17, one path from the start): `native.psi_solve`
 (`src/rigel/native/psi_kernel.cpp`, the `_psi_impl` module) solves every slot the dispatcher selects on its own
 `(λ, θ)` cube in one pass — the strand term (`transfer_rows.h`, shared with the builders), the two Jeffreys
-arms, the fitted gDNA prior, the λ-factor row, the delivered `CubeRow` read at each cell, the θ window's
+arms, the fitted gDNA prior, the λ-factor row, the delivered row read at each cell, the θ window's
 nodes (τ = sin θ by a rotation recurrence, clamped to the sine's range) with their trapezoid log-weights and
 the two atoms — then the read-out: the ½-quantile on λ, the log-variance moment, the RNA-mass-weighted tilt
 share, the composition. `simplex_logodds._solve_regions_logodds_all` is the dispatcher (the reference
@@ -1205,6 +1205,21 @@ composition); their readable oracles — the strand term, the arms, the row's ma
 52 k AMBIG slot-solves) every output within 1.6e-15 on a fraction and 4.2e-13 on `var_gdna` — 8e-6 of the
 derived budget — and ψ 4.31 → 1.60 s, the AMBIG cube's 2,600 exponentials per slot the arithmetic floor (the
 EM's 25-ulp exponential bought nothing over libm's and was not kept). Timed on VCaP at 8 threads, two interleaved pairs against a worktree of the cleanup commit: wall 341 → 285 s and 324 → 269 s (0.84×), the sweep 204 → 149 s and 194 → 141 s (0.73×), ψ 109 → 55 s (the self-solve's 0.44×, the final solve's 0.55×), every untouched stage at 0.97–1.03 (`perf/port_iii_2026-09-17/`); the day's four ports took the deep library from 526 s to 270–285 s and the sweep from 396 s to 141–149 s. What remains of the sweep is the Python around the kernels: the policy's `solve`, the tables' zero-fills, the factory rows.
+
+**The policy's solve is native, and the transfer is one module** (2026-09-17, the block-in-native step the
+owner chose over threads). `native.transfer_solve` (`src/rigel/native/transfer_kernel.cpp`, which now holds
+the builders, the pass and the solve as the `_transfer_impl` module) turns the two held tables into ψ's two
+channels in one call per block: the fused λ rows — the held compositions added, a held gDNA level read
+through the node's total and intersected, the single-strand ceiling from the faces that sent no composition
+— and THE CUBE DELIVERY AS A TABLE: `simplex_logodds.CubeRows` (per delivered AMBIG slot the two held-and-own
+level profiles with presence bits, the total, the opportunity, the reference density, on the one grid)
+replaces the dict of `CubeRow` records everywhere — the message, the cache, the diagnostics capture, the
+backbone's checks, ψ's dispatcher, whose arguments the table's arrays now are. The Python `solve`,
+`_ceilings`, `_cube_rows`, `_SolveSite` and `LevelLane.row` are deleted; the gates drive `solve` and read the
+table (`_psi_reference.cube_rows_of` states a delivery by hand). Judged BIT-IDENTICAL: the native solve against
+the Python solve on every block of MO_3021's first sweep (426 blocks, 175,819 delivered λ rows, 6,847 cube
+rows; the solve 0.96 → 0.13 s), the replayed first sweep against its capture, the three identity references.
+Timed on VCaP at 8 threads, two interleaved pairs against the ψ commit's worktree: wall 270 → 263 s and 270 → 264 s, the policy's solve 7.0 → 2.0 s on both, the sweep 0.95×, every other stage at 0.98–1.03 (`perf/port_solve_2026-09-17/`). The day's ports took the deep library from 526 s to 264 s and the sweep from 396 s to 135 s; what remains of the sweep is the tables' allocations, the factory rows and the block plumbing.
 
 #### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer; native since 2026-09-17, §6b.15.5)
 
@@ -1315,9 +1330,9 @@ lattice reached only at 120 nodes; on the shared-exon stress (`deep_stress.py`, 
 opposite strands, 500k fragments) a balanced exon at `g50` read 102,076 false gDNA fragments under the
 lattice and reads 19 (truth 498), a 20 %-minor exon 11,448 → 11, with the tilt error down 6–70×. The cube
 is `K × 24` instead of `K × 60`. **There is no θ lattice anywhere and no tilt knob** (the second step, the
-same day): the RNA level lanes deliver a row's INGREDIENTS — `simplex_logodds.CubeRow`, the two held
+same day): the RNA level lanes deliver a row's INGREDIENTS — a row of `simplex_logodds.CubeRows`, the two held
 profiles, the slot's total and RNA opportunity, the lanes' reference densities — and ψ evaluates them at
-its own nodes (`CubeRow.at`); `sweep_n_tilt`, `_tilt_grid`, the row interpolation and the cache's `(K,
+its own nodes (the kernel's row map); `sweep_n_tilt`, `_tilt_grid`, the row interpolation and the cache's `(K,
 K_t)` row arrays are gone (a delivered row is three `(K,)` arrays and four scalars). Measured on the
 shared-exon stress before the step: 24 nodes with the rows on a 240-node lattice equal 60 nodes with the
 same rows on every row, so evaluating the rows exactly is the converged form, and rows on 24 or 60 were the
@@ -1378,7 +1393,7 @@ tilt's reference measure is a mixture of three hypotheses at equal weight — tw
 arcsine continuum between them (`dθ/π`) — written into ψ as two more θ columns per AMBIG slot
 (`simplex_logodds._psi`; the cube is `K × (K_t + 2)`), the continuum's trapezoid weights carrying `−log π`
 so that the three masses are equal wherever the strand term is flat; a held RNA level on a strand
-(`CubeRow`) is a certified witness that the strand carries RNA and rules the OTHER strand's atom out
+(a delivered row) is a certified witness that the strand carries RNA and rules the OTHER strand's atom out
 (`−∞`), nothing pooled and no constant. The structural witness (the per-strand exon bits) was measured to
 add nothing and is not written; the tilt still has no lane. Judged (the L3 tree → landed): the ladder's
 stranded ON stratum 470,862 → 427,046 (−9.3 %: `g50 ss.99 ON` 217,636 → 199,409, `g98 ss.99 ON` 176,468 →

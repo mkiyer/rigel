@@ -105,7 +105,7 @@ neighbour it has → `solve(from_left, from_right)`, which hands ψ two row chan
 | policy | |
 |---|---|
 | `silent` | the measured floor (`messages/silent.py`) |
-| `transfer` | the shipped default (`messages/transfer.py`; the face table in `messages/faces.py`, the level lanes in `messages/lanes.py`, pure row constructors in `messages/transfer_rows.py`). `prepare` is one native call per block (`native.transfer_prepare`, `native/prepare_kernel.cpp`), a table of contents of named builders, one per message: `claims`, `splice_faces`, `edge_level`, `terminus_rules`, `alternative_splice_site`, `gdna_lane`, `rna_lane`; the passes are native too (`transfer_pass`, `pass_kernel.cpp`), the row constructors shared in `transfer_rows.h`. Every hop pays its pair's counting plus the disagreement beyond it |
+| `transfer` | the shipped default (`messages/transfer.py`; the face table in `messages/faces.py`, the level lanes in `messages/lanes.py`, pure row constructors in `messages/transfer_rows.py`). `prepare` is one native call per block (`native.transfer_prepare`, `native/transfer_kernel.cpp`), a table of contents of named builders, one per message: `claims`, `splice_faces`, `edge_level`, `terminus_rules`, `alternative_splice_site`, `gdna_lane`, `rna_lane`; the passes are native too (`transfer_pass`, the same file), the row constructors shared in `transfer_rows.h`. Every hop pays its pair's counting plus the disagreement beyond it |
 
 Messages exist for the slots whose own solve has no composition channel — unstranded data and AMBIG
 slots. **We do not expect to beat `silent`**: on strand-specific data a sighted exon's own solve is
@@ -187,13 +187,14 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,437 passed / 0 skipped / 5 xfail, 3,442 collected** (re-derived
-2026-09-17 after ψ went native: +4 — +2 for `native/psi_kernel.cpp` and +2 for the gates' oracle module
+**The standing baseline: 0 failed / 3,435 passed / 0 skipped / 5 xfail, 3,440 collected** (re-derived
+2026-09-17 after the solve went native and the transfer's two `.cpp` files became one `transfer_kernel.cpp`: −2 by
+the row below; before that after ψ went native: +4 — +2 for `native/psi_kernel.cpp` and +2 for the gates' oracle module
 `tests/calibration/_psi_reference.py` by the rows below, the rewritten ψ gates moving nothing; before that
 after the one-path cleanup deleted the Python builders and their two-kernel gate: −7 — the five gates
 of `test_prepare_kernel.py` and its `tests/` row's 2 — and +1 for `docs/dev/PSI_PORT_PLAN.md` by the `docs/dev/`
 row; before that +11 after the native builders — those five gates
-with the `tests/` row's +2, +2 for `native/prepare_kernel.cpp` and +2 for `native/transfer_rows.h` by the row
+with the `tests/` row's +2, +2 for `native/transfer_kernel.cpp` and +2 for `native/transfer_rows.h` by the row
 below; before that +2 after the
 builders' layout — the `RowTable` gate in `test_transfer_faces.py` and the
 tables-without-a-copy gate in `test_pass_kernel.py`; before that +7 after the native pass — the three gates of

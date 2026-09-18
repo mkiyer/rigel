@@ -146,6 +146,16 @@ def _slots(r):
     return exons, between, flanks, ambig_boundaries, rows
 
 
+def _delivered(cube, slot):
+    """The cube row delivered at ``slot`` — a `CubeRows` table read by slot — or ``None``."""
+    from _psi_reference import Row
+
+    if cube is None:
+        return None
+    r = np.flatnonzero(cube.slot == int(slot))
+    return Row(cube, int(r[0])) if r.size else None
+
+
 @pytest.mark.parametrize("donor_tag", DONORS)
 def test_tb_minus_level_reaches_every_both_stranded_slot(runs, donor_tag):
     """With TB− expressed its level, measured in its single-strand flanks, is delivered into the cube of
@@ -154,10 +164,9 @@ def test_tb_minus_level_reaches_every_both_stranded_slot(runs, donor_tag):
     for regime in EXPRESSED:
         r = runs[donor_tag, regime]
         exons, between, _flanks, bnds, _rows = _slots(r)
-        cube = r.capture.cube_rows or {}
         for row in [*exons, between, *bnds]:
             assert row["n"] > 0, (regime, row["where"])
-            got = cube.get(int(row["slot"]))
+            got = _delivered(r.capture.cube_rows, row["slot"])
             assert got is not None and got.profile_neg is not None, (
                 f"{regime}: no − level delivered at {row['where']} (slot {row['slot']})"
             )
@@ -170,9 +179,8 @@ def test_ta_plus_junction_flux_is_a_source_at_its_exons(runs, donor_tag):
     for regime in EXPRESSED:
         r = runs[donor_tag, regime]
         exons, _between, _flanks, _bnds, _rows = _slots(r)
-        cube = r.capture.cube_rows or {}
         for row in exons:
-            got = cube.get(int(row["slot"]))
+            got = _delivered(r.capture.cube_rows, row["slot"])
             assert got is not None and got.profile_pos is not None, (
                 f"{regime}: no + level delivered at TA+'s exon {row['where']}"
             )

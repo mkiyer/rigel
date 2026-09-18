@@ -35,7 +35,7 @@ class MessageCache:
     CONTENT-KEYED, so it is safe by construction rather than by trust: an entry's key is a digest of
     every input the layer reads, and a changed belief, row, count, library or grid misses. An entry
     holds the delivered rows sparsely (only the non-zero rows), the cube rows as the solve reads them
-    (:class:`~.simplex_logodds.CubeRow` records), the block's ``held_composition`` and its assertion counts
+    (a :class:`~.simplex_logodds.CubeRows` table), the block's ``held_composition`` and its assertion counts
     (as a plain dict; the backbone rebuilds its `AssertionCounts` from it). Diagnostics never read from it:
     a captured sweep runs the whole layer.
     """
@@ -82,10 +82,9 @@ class MessageCache:
             rows = np.asarray(rows)
             idx = np.flatnonzero(np.any(rows != 0.0, axis=1))
             sparse = (rows.shape, idx, rows[idx].copy())
-        cube = None if msg.cube_rows is None else {int(k): v for k, v in msg.cube_rows.items()}
         self._entries[key] = (
             sparse,
-            cube,
+            msg.cube_rows,
             np.array(held_composition, bool),
             dict(counts),
         )
@@ -100,7 +99,7 @@ class MessageCache:
             shape, idx, kept = sparse
             rows = np.zeros(shape)
             rows[idx] = kept
-        return PsiMessage(lam_rows=rows, cube_rows=None if cube is None else dict(cube))
+        return PsiMessage(lam_rows=rows, cube_rows=cube)
 
     @property
     def nbytes(self) -> int:
@@ -108,12 +107,7 @@ class MessageCache:
         for sparse, cube, held, _counts in self._entries.values():
             if sparse is not None:
                 total += sparse[1].nbytes + sparse[2].nbytes
-            if cube:
-                total += sum(
-                    p.nbytes
-                    for v in cube.values()
-                    for p in (v.profile_pos, v.profile_neg, v.u)
-                    if p is not None
-                )
+            if cube is not None:
+                total += cube.nbytes
             total += held.nbytes
         return total

@@ -318,7 +318,7 @@ def test_an_rna_level_reads_as_a_ceiling_on_the_gdna_share_and_round_trips():
 
 
 def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
-    """`_PreparedTransfer._ceilings` on a hand-built single-strand exon: the left face sent a
+    """The policy's solve on a hand-built single-strand exon — THE CEILING: the left face sent a
     COMPOSITION with an RNA level and a junction flux — nothing of it is read (the face map already
     carries them); the right face sent an RNA level and no composition, and the exon has a flux at that
     junction — both are read, intersected, and delivered as a non-increasing row. An AMBIG node, an
@@ -327,7 +327,8 @@ def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
     from rigel.calibration.messages import Received
     from rigel.calibration.messages.faces import Faces
     from rigel.calibration.messages.lanes import LevelLane
-    from rigel.calibration.messages.transfer import _PreparedTransfer, _SolveSite
+    from rigel.calibration.messages.faces import fuse
+    from rigel.calibration.messages.transfer import _PreparedTransfer
     from rigel.calibration.messages.transfer_rows import intersect, rna_row_of_level
 
     K = 41
@@ -352,9 +353,8 @@ def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
     pos = LevelLane("pos", u, lam, 0.5, n_u / 2, a_r, empty, no_levels, none, total=n_u, flux=flux)
     neg = LevelLane("neg", u, lam, 0.4, n_u / 2, a_r, empty, no_levels, none, total=n_u)
     gd = LevelLane("gdna", u, lam, 0.5, n_u, a_r, empty, no_levels, none)
-    site = _SolveSite(fp & fn, {"pos": fp, "neg": fn})
     prep = _PreparedTransfer(
-        RowTable(5, K), Faces(lam, left, right), {"gdna": gd, "pos": pos, "neg": neg}, site
+        RowTable(5, K), Faces(lam, left, right), {"gdna": gd, "pos": pos, "neg": neg}, fp, fn
     )
     comp = -0.5 * ((lam - 1.0) / 0.5) ** 2
     held_l, held_r = floor(0.8), floor(-0.3)
@@ -363,18 +363,20 @@ def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
     from_left.composition[1], from_left.has_composition[1] = comp, True
     from_left.level_rna_pos.write(1, held_l, 25.0, 100.0)
     from_right.level_rna_pos.write(1, held_r, 25.0, 100.0)
-    rows = np.zeros((5, K))
-    assert prep._ceilings(from_left, from_right, rows)
-    want = rna_row_of_level(intersect([held_r, flux[(1, 1)]]), u, lam, 400.0, 100.0, 0.5)
-    np.testing.assert_allclose(rows[1], want, atol=1e-12)
-    assert np.all(np.diff(rows[1]) <= 1e-9)
+    rows = prep.solve(from_left, from_right).lam_rows
+    assert rows is not None
+    ceiling = rna_row_of_level(intersect([held_r, flux[(1, 1)]]), u, lam, 400.0, 100.0, 0.5)
+    assert np.all(np.diff(ceiling) <= 1e-9)
+    # the delivered row is the held composition fused with the ceiling — the left face's level and
+    # flux are NOT in it
+    np.testing.assert_allclose(rows[1], fuse([comp - comp.max(), ceiling]), atol=1e-12)
     assert not rows[[0, 2, 3, 4]].any()
     # the perturbation: the left composition removed → its level and flux join
     from_left2 = Received.empty(5, K)
     from_left2.has_neighbour[1] = True
     from_left2.level_rna_pos.write(1, held_l, 25.0, 100.0)
-    rows2 = np.zeros((5, K))
-    assert prep._ceilings(from_left2, from_right, rows2)
+    rows2 = prep.solve(from_left2, from_right).lam_rows
+    assert rows2 is not None
     want2 = rna_row_of_level(
         intersect([held_l, flux[(1, 0)], held_r, flux[(1, 1)]]),
         u,
@@ -384,6 +386,7 @@ def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
         0.5,
     )
     np.testing.assert_allclose(rows2[1], want2, atol=1e-12)
+    assert np.all(np.diff(rows2[1]) <= 1e-9)  # a ceiling alone: non-increasing in the gDNA share
     assert not np.allclose(rows2[1], rows[1])
 
 
@@ -413,24 +416,28 @@ def test_the_flux_is_kept_per_face_and_a_licensed_face_keeps_the_ceiling_out(swe
     without = np.zeros_like(rows)
     n = len(prepared.own)
     from rigel.calibration.messages.faces import fuse
-    from rigel.calibration.messages.transfer_rows import intersect
+    from rigel.calibration.messages.transfer_rows import intersect, profile_of_level
 
+    gd = prepared.lanes["gdna"]
     for i in range(n):
         parts, bounds = [], []
         for t in (fl, br):
             if t.has_composition[i]:
                 parts.append(t.composition[i])
-            if t.level_gdna.present[i] and not prepared.lanes["gdna"].empty[i]:
-                bounds.append(prepared.lanes["gdna"].row(t.level_gdna.profile[i], i))
+            if t.level_gdna.present[i] and not gd.empty[i]:
+                bounds.append(
+                    profile_of_level(
+                        t.level_gdna.profile[i], gd.u, gd.lam, gd.total[i], gd.a[i], gd.rho_ref
+                    )
+                )
         if bounds:
             parts.append(intersect(bounds))
         if parts:
             without[i] = fuse(parts)
-    site = prepared.site
-    fp, fn = site.free["pos"], site.free["neg"]
+    fp, fn = prepared.free_pos, prepared.free_neg
     # every side that exists sent a composition
     all_comp = (fl.has_composition | ~fl.has_neighbour) & (br.has_composition | ~br.has_neighbour)
-    single = (fp ^ fn) & ~site.ambig
+    single = (fp ^ fn) & ~prepared.ambig
     quiet = single & all_comp
     assert quiet.sum() > 0
     np.testing.assert_allclose(rows[quiet], without[quiet], atol=1e-12)

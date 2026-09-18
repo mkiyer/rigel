@@ -188,36 +188,21 @@ target_compile_options(_em_impl PRIVATE -g)
 
 install(TARGETS _em_impl LIBRARY DESTINATION rigel)
 
-# --- Build the _pass_impl extension -------------------------------------------
+# --- Build the _transfer_impl extension ---------------------------------------
 
-# One directional pass of the composition-transfer policy (the calibration sweep's phase 1): the
-# per-hop arithmetic of messages/faces.py, lanes.py and transfer_rows.py on the backbone's tables,
-# with the per-hop Python call removed. Pure C++17 + nanobind + numpy.
+# The composition-transfer policy's three kernels (the calibration sweep's message layer): the builders
+# for one block (phase 0), one directional pass (phase 1) and the solve (phase 2), on the policy's tables
+# (messages/faces.py, lanes.py, transfer.py); the row constructors are native/transfer_rows.h, shared with
+# ψ. Pure C++17 + nanobind + numpy.
 nanobind_add_module(
-  _pass_impl
+  _transfer_impl
   NOMINSIZE
   STABLE_ABI
-  src/rigel/native/pass_kernel.cpp
+  src/rigel/native/transfer_kernel.cpp
 )
-target_compile_options(_pass_impl PRIVATE -g)
+target_compile_options(_transfer_impl PRIVATE -g)
 
-install(TARGETS _pass_impl LIBRARY DESTINATION rigel)
-
-# --- Build the _prepare_impl extension ----------------------------------------
-
-# The composition-transfer policy's builders for one block (the calibration sweep's phase 0): every
-# node's own claim, the rule per directed face and the level lanes of messages/transfer.py and lanes.py,
-# written into the policy's tables in one call; the row constructors are shared with _pass_impl through
-# native/transfer_rows.h. Pure C++17 + nanobind + numpy.
-nanobind_add_module(
-  _prepare_impl
-  NOMINSIZE
-  STABLE_ABI
-  src/rigel/native/prepare_kernel.cpp
-)
-target_compile_options(_prepare_impl PRIVATE -g)
-
-install(TARGETS _prepare_impl LIBRARY DESTINATION rigel)
+install(TARGETS _transfer_impl LIBRARY DESTINATION rigel)
 
 # --- Build the _psi_impl extension --------------------------------------------
 

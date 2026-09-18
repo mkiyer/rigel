@@ -39,7 +39,7 @@ Three facts that determine this file's shape:
    ``τ = ±1`` exactly (a single-strand solve inside the cube, no tilt parameter), and the continuum's
    weights carry ``−log π`` so the three hypotheses' masses are equal wherever the strand term is flat.
    At a strand-pure slot the atom explains the split with no parameter and the read-out lands at the
-   cap, where the continuum's median sat below it; a held RNA level on a strand (a `CubeRow` profile) is
+   cap, where the continuum's median sat below it; a held RNA level on a strand (a `CubeRows` profile) is
    a certified witness of that strand's RNA and rules the OTHER strand's atom out. Gated in
    ``tests/calibration/test_vertex_reference.py``; the cost at an unwitnessed both-strand slot is the
    atom's and is recorded where it was measured.
@@ -73,7 +73,7 @@ from .region_chain import RegionDeconv
 
 # Public surface consumed by sweep / messages / region_geometry, and the pieces the gates read.
 __all__ = [
-    "CubeRow",
+    "CubeRows",
     "_logodds_grid",
     "_solve_regions_logodds_all",
     "compose",
@@ -139,23 +139,96 @@ def _logodds_grid(n_grid: int, L: float = _DEFAULT_L):
 
 
 @dataclass(frozen=True)
-class CubeRow:
-    """The RNA level lanes' delivery at an AMBIG slot, as what it is made of: per strand the held level
-    profile over ``u = log(ρ/ρ_ref)`` on the solve grid (either may be absent), the slot's total and its
-    RNA opportunity, and the lanes' one reference density (a level is absolute; the coordinate is only
-    its origin, and both strands share it). ψ evaluates it at its own θ nodes — at each ``(λ, θ)`` the
-    strand's share ``f_s = (1 − f_g)(1 ± τ)/2`` implies the density ``f_s·n/a_r``, and the held profile is
-    read at ``log(ρ_s/ρ_ref)``, the `profile_of_level` map on the λ axis with the tilt inside — so
-    there is no θ lattice for a row to be built on and nothing is interpolated in θ. A one-sided profile
-    stays one-sided through the map (it is monotone in each share), so "at least this much RNA+" arrives
-    as a wall in the cube and no parametric summary is made."""
+class CubeRows:
+    """The RNA level lanes' delivery at the AMBIG slots of a block, as a TABLE — one row per delivered slot:
+    per strand the held level profile over ``u = log(ρ/ρ_ref)`` on the solve grid with its presence bit
+    (either may be absent), the slot's total and its RNA opportunity, and the lanes' one reference density
+    (a level is absolute; the coordinate is only its origin, and both strands share it); ``u`` is the one
+    grid every row is on. ψ evaluates a row at its own θ nodes — at each ``(λ, θ)`` the strand's share
+    ``f_s = (1 − f_g)(1 ± τ)/2`` implies the density ``f_s·n/a_r``, and the held profile is read at
+    ``log(ρ_s/ρ_ref)``, the `profile_of_level` map on the λ axis with the tilt inside — so there is no θ
+    lattice for a row to be built on and nothing is interpolated in θ. A one-sided profile stays one-sided
+    through the map (it is monotone in each share), so "at least this much RNA+" arrives as a wall in the
+    cube and no parametric summary is made. Built by the policy's solve (`native.transfer_solve`), read by
+    ψ (`native.psi_solve`); the arrays ARE the kernels' arguments."""
 
-    profile_pos: np.ndarray | None
-    profile_neg: np.ndarray | None
-    u: np.ndarray
-    total: float
-    opportunity: float
-    rho_ref: float
+    slot: np.ndarray  # (d,) int64 — the block's slot each row belongs to
+    profile_pos: np.ndarray  # (d, K)
+    has_pos: np.ndarray  # (d,) bool
+    profile_neg: np.ndarray  # (d, K)
+    has_neg: np.ndarray  # (d,) bool
+    u: np.ndarray  # (K,)
+    total: np.ndarray  # (d,)
+    opportunity: np.ndarray  # (d,)
+    rho_ref: np.ndarray  # (d,)
+
+    #: the per-row arrays, in field order
+    PER_ROW = (
+        "slot",
+        "profile_pos",
+        "has_pos",
+        "profile_neg",
+        "has_neg",
+        "total",
+        "opportunity",
+        "rho_ref",
+    )
+
+    @classmethod
+    def blank(cls, d: int, u) -> CubeRows:
+        """``d`` rows with nothing delivered yet — the table a solve writes into."""
+        u = np.ascontiguousarray(u, np.float64)
+        K = u.shape[0]
+        return cls(
+            np.zeros(d, np.int64),
+            np.zeros((d, K)),
+            np.zeros(d, bool),
+            np.zeros((d, K)),
+            np.zeros(d, bool),
+            u,
+            np.zeros(d),
+            np.zeros(d),
+            np.zeros(d),
+        )
+
+    def __len__(self) -> int:
+        return int(self.slot.shape[0])
+
+    def select(self, keep) -> CubeRows:
+        """The rows ``keep`` (a mask or index array) as a table on the same grid."""
+        return CubeRows(**{f: getattr(self, f)[keep] for f in self.PER_ROW}, u=self.u)
+
+    def shifted(self, offset: int) -> CubeRows:
+        """The same rows with their slots re-keyed by ``offset`` — a block's table as the chain's."""
+        return CubeRows(
+            **{f: getattr(self, f) for f in self.PER_ROW if f != "slot"},
+            slot=self.slot + int(offset),
+            u=self.u,
+        )
+
+    @classmethod
+    def concat(cls, parts: list) -> CubeRows:
+        return cls(
+            **{f: np.concatenate([getattr(q, f) for q in parts]) for f in cls.PER_ROW}, u=parts[0].u
+        )
+
+    @property
+    def nbytes(self) -> int:
+        return sum(getattr(self, f).nbytes for f in self.PER_ROW) + self.u.nbytes
+
+    def kernel_args(self) -> dict:
+        """The table as ψ's kernel takes it, by argument name."""
+        return dict(
+            cube_slot=self.slot,
+            cube_pos=self.profile_pos,
+            cube_has_pos=self.has_pos,
+            cube_neg=self.profile_neg,
+            cube_has_neg=self.has_neg,
+            cube_u=self.u,
+            cube_total=self.total,
+            cube_opportunity=self.opportunity,
+            cube_rho=self.rho_ref,
+        )
 
 
 # The θ quadrature's truncation: the strand term's mass outside a window is below double precision.
@@ -172,35 +245,13 @@ _T_NATS = -np.log(np.finfo(np.float64).eps)
 _TILT_NODES = int(np.ceil(2.0 * _T_NATS / np.pi)) + 1
 
 
-def _pack_rows(cube_rows, K: int) -> dict:
-    """The delivered cube rows as the kernel reads them: ``{slot: CubeRow}`` (or ``None``) to parallel
-    arrays over the delivered slots — the slot, each strand's profile with its presence bit, ``u``, the
-    total, the opportunity and the reference density."""
-    rows = sorted((int(k), v) for k, v in (cube_rows or {}).items() if v is not None)
-    d = len(rows)
-    out = dict(
-        cube_slot=np.array([k for k, _ in rows], np.int64),
-        cube_pos=np.zeros((d, K)),
-        cube_has_pos=np.zeros(d, bool),
-        cube_neg=np.zeros((d, K)),
-        cube_has_neg=np.zeros(d, bool),
-        cube_u=np.zeros((d, K)),
-        cube_total=np.zeros(d),
-        cube_opportunity=np.zeros(d),
-        cube_rho=np.zeros(d),
-    )
-    for r, (_k, row) in enumerate(rows):
-        if row.profile_pos is not None:
-            out["cube_pos"][r] = row.profile_pos
-            out["cube_has_pos"][r] = True
-        if row.profile_neg is not None:
-            out["cube_neg"][r] = row.profile_neg
-            out["cube_has_neg"][r] = True
-        out["cube_u"][r] = row.u
-        out["cube_total"][r] = float(row.total)
-        out["cube_opportunity"][r] = float(row.opportunity)
-        out["cube_rho"][r] = float(row.rho_ref)
-    return out
+def _cube_args(cube_rows, u) -> dict:
+    """The delivered rows as ψ's kernel takes them — the table's arrays, or an empty table's on this grid."""
+    if cube_rows is None:
+        return CubeRows.blank(0, u).kernel_args()
+    if cube_rows.u.shape != u.shape or not np.array_equal(cube_rows.u, u):
+        raise ValueError("the delivered rows are not on the solve grid")
+    return cube_rows.kernel_args()
 
 
 def _reference_composition(allow_pos, allow_neg, fg_ref, fpos_ref, fneg_ref):
@@ -283,7 +334,7 @@ def psi_cube(
         lam=lam,
         gdna_logprior=_prior(gdna_logprior, K),
         lam_logprior=_prior(lam_logprior, K),
-        **_pack_rows(cube_rows, K),
+        **_cube_args(cube_rows, lam),
         n_tilt=n_tilt,
         ambig=bool(ambig),
         out_psi=psi,
@@ -357,8 +408,8 @@ def _solve_regions_logodds_all(
     composition. Zero-count slots report 0.
 
     All array inputs are full length ``m``; ``gdna_logprior`` and ``lam_logprior`` are ``(m, K)`` on the
-    σ(λ) grid; ``cube_rows`` is ``{slot: CubeRow}`` for AMBIG slots (the RNA level lanes' delivery),
-    evaluated at each slot's own θ nodes inside its ψ; ``None`` or an absent slot changes nothing. EMPTY
+    σ(λ) grid; ``cube_rows`` is the RNA level lanes' delivery at the AMBIG slots (:class:`CubeRows`, on this
+    grid), evaluated at each slot's own θ nodes inside its ψ; ``None`` or an absent slot changes nothing. EMPTY
     slots — no per-strand count and no unspliced or spliced mass — are not solved: at genome scale most
     slots carry no fragments, and their zeros are the solve's own answer. ``n_tilt`` is the derived
     ``_TILT_NODES`` unless a gate asks for another count."""
@@ -389,7 +440,7 @@ def _solve_regions_logodds_all(
             lam=lam,
             gdna_logprior=_prior(gdna_logprior, lam.shape[0]),
             lam_logprior=_prior(lam_logprior, lam.shape[0]),
-            **_pack_rows(cube_rows, lam.shape[0]),
+            **_cube_args(cube_rows, lam),
             n_tilt=int(_TILT_NODES if n_tilt is None else n_tilt),
             out_fg=out["fg"],
             out_fpos=out["fp"],

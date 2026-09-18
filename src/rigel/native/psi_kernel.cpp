@@ -51,8 +51,9 @@ const double NEG_INF = -std::numeric_limits<double>::infinity();
 // resolves the peak inside that window is derived from it in the dispatcher (simplex_logodds._TILT_NODES)
 const double T_NATS = -std::log(std::numeric_limits<double>::epsilon());
 
-// a delivered RNA level row (simplex_logodds.CubeRow): the held profile per strand over u = log(ρ/ρ_ref),
-// the slot's total and RNA opportunity, the lanes' reference density
+// a delivered RNA level row (one row of simplex_logodds.CubeRows): the held profile per strand over
+// u = log(ρ/ρ_ref) — the one grid `u` every row is on — the slot's total and RNA opportunity, the lanes'
+// reference density
 struct Delivered {
     const double* pos; const double* neg; const double* u;  // nullptr where a strand's profile is absent
     double total, opportunity, rho_ref;
@@ -160,7 +161,7 @@ void slot_cube(const Grid& g, const SlotInputs& s, bool ambig, double* psi, doub
             psi[at] = strand_term(s.u_pos, n, p, var, half_log_var) + base;
         }
     }
-    // the delivered row (CubeRow.at): each held profile read at the density every cell implies,
+    // the delivered row's map: each held profile read at the density every cell implies,
     // f_s·n/a_r relative to ρ_ref, summed over the strands and max-normalised over the whole row
     if (s.row != nullptr && (s.row->pos != nullptr || s.row->neg != nullptr)) {
         std::vector<double> rv(static_cast<size_t>(K) * C, 0.0);
@@ -300,11 +301,11 @@ struct Rows {  // the delivered cube rows, packed by the dispatcher: parallel ar
 };
 
 Rows unpack_rows(int m, int K, IdxVec& cube_slot, Mat& cube_pos, BoolVec& has_pos, Mat& cube_neg, BoolVec& has_neg,
-                 Mat& cube_u, Vec& cube_total, Vec& cube_opportunity, Vec& cube_rho) {
+                 Vec& cube_u, Vec& cube_total, Vec& cube_opportunity, Vec& cube_rho) {
     Rows R;
     R.index.assign(m, -1);
     const int d = static_cast<int>(cube_slot.shape(0));
-    if (d && (static_cast<int>(cube_pos.shape(1)) != K || static_cast<int>(cube_u.shape(1)) != K))
+    if (d && (static_cast<int>(cube_pos.shape(1)) != K || static_cast<int>(cube_u.shape(0)) != K))
         throw std::invalid_argument("psi: a delivered row is not on the solve grid");
     for (int r = 0; r < d; ++r) {
         const int slot = static_cast<int>(cube_slot.data()[r]);
@@ -312,7 +313,7 @@ Rows unpack_rows(int m, int K, IdxVec& cube_slot, Mat& cube_pos, BoolVec& has_po
         R.index[slot] = r;
         R.rows.push_back(Delivered{has_pos.data()[r] ? cube_pos.data() + static_cast<size_t>(r) * K : nullptr,
                                    has_neg.data()[r] ? cube_neg.data() + static_cast<size_t>(r) * K : nullptr,
-                                   cube_u.data() + static_cast<size_t>(r) * K, cube_total.data()[r],
+                                   cube_u.data(), cube_total.data()[r],
                                    cube_opportunity.data()[r], cube_rho.data()[r]});
     }
     return R;
@@ -325,7 +326,7 @@ inline const double* prior_row(Mat& holder, bool present, int i) {
 void psi_solve(IdxVec slots, Vec u_pos, Vec u_neg, BoolVec allow_pos, BoolVec allow_neg, Vec fg_ref, Vec fpos_ref,
                Vec fneg_ref, double kappa, double od_g, double od_r, Vec lam, nb::object gdna_logprior,
                nb::object lam_logprior, IdxVec cube_slot, Mat cube_pos, BoolVec cube_has_pos, Mat cube_neg,
-               BoolVec cube_has_neg, Mat cube_u, Vec cube_total, Vec cube_opportunity, Vec cube_rho, int n_tilt,
+               BoolVec cube_has_neg, Vec cube_u, Vec cube_total, Vec cube_opportunity, Vec cube_rho, int n_tilt,
                Vec out_fg, Vec out_fpos, Vec out_fneg, Vec out_var) {
     const int m = static_cast<int>(u_pos.shape(0)), K = static_cast<int>(lam.shape(0));
     if (n_tilt < 2) throw std::invalid_argument("psi_solve: the tilt needs at least two nodes");
@@ -352,7 +353,7 @@ void psi_solve(IdxVec slots, Vec u_pos, Vec u_neg, BoolVec allow_pos, BoolVec al
 // every slot of one class (ambig: n_tilt + 2 columns; else one)
 void psi_cube(Vec u_pos, Vec u_neg, BoolVec allow_pos, BoolVec allow_neg, Vec fg_ref, Vec fpos_ref, Vec fneg_ref,
               double kappa, double od_g, double od_r, Vec lam, nb::object gdna_logprior, nb::object lam_logprior,
-              IdxVec cube_slot, Mat cube_pos, BoolVec cube_has_pos, Mat cube_neg, BoolVec cube_has_neg, Mat cube_u,
+              IdxVec cube_slot, Mat cube_pos, BoolVec cube_has_pos, Mat cube_neg, BoolVec cube_has_neg, Vec cube_u,
               Vec cube_total, Vec cube_opportunity, Vec cube_rho, int n_tilt, bool ambig, Cube out_psi, Cube out_fpos,
               Cube out_fneg, Cube out_tau) {
     const int m = static_cast<int>(u_pos.shape(0)), K = static_cast<int>(lam.shape(0));

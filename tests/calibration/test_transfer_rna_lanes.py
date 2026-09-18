@@ -420,18 +420,16 @@ def test_a_lower_only_profile_stays_one_sided_on_the_cube():
     evaluated on the ``(λ, θ)`` cube is non-decreasing in θ
     (the + share rises with τ) and non-increasing in λ (it falls with the gDNA share) — one-sided through
     the map, no parametric summary. PERTURBATION: a two-sided profile is not monotone."""
-    from rigel.calibration.simplex_logodds import CubeRow
+    from _psi_reference import row_at, row_record
 
     lam = np.linspace(-10.0, 10.0, 60)
     tau = np.sin(np.linspace(-0.5 * np.pi, 0.5 * np.pi, 60))
     fg = 1.0 / (1.0 + np.exp(-lam))
     u = lam
     floor = -0.5 * np.maximum(0.0, (0.0 - u) / 0.3) ** 2
-    from _psi_reference import row_at
-
-    row = row_at(CubeRow(floor, None, u, 400.0, 100.0, 0.5), fg, tau)
+    row = row_at(row_record(floor, None, u, 400.0, 100.0, 0.5), fg, tau)
     assert np.all(np.diff(row, axis=1) >= -1e-9) and np.all(np.diff(row, axis=0) <= 1e-9)
-    two = row_at(CubeRow(-0.5 * (u / 0.3) ** 2, None, u, 400.0, 100.0, 0.5), fg, tau)
+    two = row_at(row_record(-0.5 * (u / 0.3) ** 2, None, u, 400.0, 100.0, 0.5), fg, tau)
     assert not (np.all(np.diff(two, axis=1) >= -1e-9) and np.all(np.diff(two, axis=0) <= 1e-9))
 
 
@@ -441,9 +439,8 @@ def test_THE_BRACKET_THEOREM_three_lower_bounds_and_the_strand_equation_bracket_
     strand counts give a two-sided gDNA share (a 90 % interval narrower than 0.15 that contains the
     truth), on stranded (κ = 0.99) and unstranded (κ = 0.5) data alike. Removing the gDNA bound
     opens the lower side and removing either RNA bound opens the upper side."""
-    from _psi_reference import jeffreys_arms, row_at, strand_loglik_mixture
+    from _psi_reference import jeffreys_arms, row_at, row_record, strand_loglik_mixture
 
-    import rigel.calibration.simplex_logodds as sl
     from rigel.calibration.messages.transfer_rows import profile_of_level
 
     K = 60
@@ -484,7 +481,7 @@ def test_THE_BRACKET_THEOREM_three_lower_bounds_and_the_strand_equation_bracket_
         }
         if profiles:
             psi += row_at(
-                sl.CubeRow(profiles.get("pos"), profiles.get("neg"), u, n, a_r, rho["pos"]), fg, tau
+                row_record(profiles.get("pos"), profiles.get("neg"), u, n, a_r, rho["pos"]), fg, tau
             )
         if "g" not in drop:
             lvl = floor(np.log(truth["g"] * n / a_g / rho["g"]))
@@ -506,14 +503,16 @@ def test_THE_BRACKET_THEOREM_three_lower_bounds_and_the_strand_equation_bracket_
 
 
 def test_the_cube_delivery_is_the_intersected_held_levels_and_the_own_flux(sweep_inputs):
-    """`_PreparedTransfer._cube_rows` on a hand-built AMBIG node: the delivered `CubeRow` carries, per
-    strand, the intersection of the two held levels and the node's own (flux) level's lower side, with the
-    node's total and RNA opportunity and the lanes' reference densities; a non-AMBIG node, an empty node
-    and a node holding nothing deliver no row."""
+    """The policy's solve on a hand-built AMBIG node: the delivered row carries, per strand, the
+    intersection of the two held levels and the node's own (flux) level's lower side, with the node's total
+    and RNA opportunity and the lanes' reference densities; a non-AMBIG node, an empty node and a node
+    holding nothing deliver no row."""
+    from _psi_reference import Row
+
     from rigel.calibration.messages import Received
     from rigel.calibration.messages.faces import Faces
     from rigel.calibration.messages.lanes import LevelLane
-    from rigel.calibration.messages.transfer import _PreparedTransfer, _SolveSite
+    from rigel.calibration.messages.transfer import _PreparedTransfer
     from rigel.calibration.messages.transfer_rows import intersect, lower_side
 
     K = 41
@@ -530,11 +529,13 @@ def test_the_cube_delivery_is_the_intersected_held_levels_and_the_own_flux(sweep
     neg = LevelLane("neg", u, lam, 0.4, n_u / 2, a_r, empty, no_levels, none, total=n_u)
     gd = LevelLane("gdna", u, lam, 0.5, n_u, a_r, empty, no_levels, none)
     ambig = np.array([False, True, True, True])
-    free = {"pos": np.ones(4, bool), "neg": ambig}
     left, right = np.array([-1, 0, 1, 2]), np.array([1, 2, 3, -1])
-    site = _SolveSite(ambig, free)
     prep = _PreparedTransfer(
-        RowTable(4, K), Faces(lam, left, right), {"gdna": gd, "pos": pos, "neg": neg}, site
+        RowTable(4, K),
+        Faces(lam, left, right),
+        {"gdna": gd, "pos": pos, "neg": neg},
+        np.ones(4, bool),
+        ambig,
     )
     lv_l = -0.5 * np.maximum(0.0, (0.5 - u) / 0.2) ** 2
     lv_r = -0.5 * np.maximum(0.0, (0.0 - u) / 0.2) ** 2
@@ -544,9 +545,9 @@ def test_the_cube_delivery_is_the_intersected_held_levels_and_the_own_flux(sweep
     from_left.level_rna_pos.write(1, lv_l, 25.0, 100.0)
     from_right.level_rna_pos.write(1, lv_r, 25.0, 100.0)
     from_right.level_rna_neg.write(1, lv_n, 25.0, 100.0)
-    rows = prep._cube_rows(from_left, from_right)
-    assert set(rows) == {1}
-    got = rows[1]
+    cube = prep.solve(from_left, from_right).cube_rows
+    assert list(cube.slot) == [1]
+    got = Row(cube, 0)
     np.testing.assert_allclose(
         got.profile_pos, intersect([lv_l, lv_r, lower_side(own_pos[1])]), atol=1e-12
     )
@@ -759,9 +760,12 @@ def test_a_strands_level_is_delivered_to_the_cube_when_the_other_strand_has_no_c
     from_left.has_neighbour[6] = True
     u = prepared.lanes["neg"].u
     from_left.level_rna_neg.write(6, -0.5 * np.maximum(0.0, (0.0 - u) / 0.3) ** 2, 400.0, 800.0)
-    rows = prepared._cube_rows(from_left, from_right)
-    assert 6 in rows, "the − level held at the both-stranded exon was not delivered"
-    assert rows[6].profile_neg is not None and rows[6].profile_pos is None
+    cube = prepared.solve(from_left, from_right).cube_rows
+    assert cube is not None and 6 in cube.slot, (
+        "the − level held at the both-stranded exon was not delivered"
+    )
+    r = list(cube.slot).index(6)
+    assert cube.has_neg[r] and not cube.has_pos[r]
 
 
 def test_a_junctions_flux_is_a_source_when_the_strand_has_no_single_strand_exon():
@@ -789,8 +793,9 @@ def test_a_junctions_flux_is_a_source_when_the_strand_has_no_single_strand_exon(
     lane = prepared.lanes["pos"]
     assert lane.own_level[6] is not None, "the + junction's flux built no level at its exon"
     K = int(lit.n_grid)
-    rows = prepared._cube_rows(Received.empty(7, K), Received.empty(7, K))
-    assert 6 in rows and rows[6].profile_pos is not None, "the + flux level was not delivered"
+    cube = prepared.solve(Received.empty(7, K), Received.empty(7, K)).cube_rows
+    assert cube is not None and 6 in cube.slot, "the + flux level was not delivered"
+    assert cube.has_pos[list(cube.slot).index(6)]
     dark = _prepared(pol, base)
     assert dark.lanes["pos"].own_level[6] is None
 
