@@ -331,7 +331,8 @@ def profile_run(bam: str, index_dir: str, *, threads: int | None, knobs: list[st
     cfg = PipelineConfig()
     if threads is not None:
         cfg = dataclasses.replace(cfg, scan=dataclasses.replace(cfg.scan, total_threads=threads),
-                                  em=dataclasses.replace(cfg.em, n_threads=threads))
+                                  em=dataclasses.replace(cfg.em, n_threads=threads),
+                                  calibration=dataclasses.replace(cfg.calibration, n_threads=threads))
     for knob in knobs:
         cfg = set_field(cfg, knob)
 
@@ -496,7 +497,7 @@ def main() -> int:
     ap.add_argument("--bam", help="name-sorted BAM with NH tags")
     ap.add_argument("--index", help="rigel index directory")
     ap.add_argument("--label", default=None, help="report label (default: the library directory)")
-    ap.add_argument("--threads", type=int, default=None, help="scan and EM thread budget")
+    ap.add_argument("--threads", type=int, default=None, help="the scan's, the EM's and calibration's thread budget")
     ap.add_argument("--set", dest="knobs", action="append", default=[], metavar="SECTION.FIELD=VALUE",
                     help="override one PipelineConfig field; repeatable")
     ap.add_argument("--cprofile", default=None, metavar="OUT.prof", help="also write a cProfile dump")

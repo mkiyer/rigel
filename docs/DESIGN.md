@@ -1280,6 +1280,21 @@ against 0.26 M blurs on MO_3021 — and the refit sweeps run on the landscape's 
 101, so the cache-missing sweep pays the layer at 2.3× and every refit sweep pays ψ at 2.3×.
 `ISSUES: performance-memory-bounded-solve` carries the baseline and the ranked opportunities.
 
+**ψ is threaded over slots** (2026-09-18, the port's step (iv-a); owner: `CalibrationConfig.n_threads`, fed by the
+CLI's `--threads`). `psi_solve` pulls the dispatcher's slot list ONE SLOT AT A TIME by a pool of threads — the locus
+EM's `EStepThreadPool` (`native/thread_pool.h`), persistent across the 852 calls a sweep and rebuilt only when the
+budget changes, the GIL released around it — and every slot is solved by the same arithmetic on its own scratch and
+writes its own four outputs, so the answer is BIT-IDENTICAL at every thread count: the budget is a resource, not a
+tunable of the answer. One slot at a time, no chunk and no granularity constant, is what balances the load on the M3's
+asymmetric cores. `CalibrationConfig.n_threads` (0, the default, is every core — the EM's reading of the same number)
+is the budget; the CLI's `--threads` fans out to the scan's, the EM's and calibration's budgets alike, the profiler
+sets the three together, and `sweep_replay.py replay --threads N` holds a threaded sweep to the serial capture. Judged:
+the four VCaP sweeps BIT-IDENTICAL at 1, 2 and 8 threads (`test_sweep.test_the_psi_solve_is_thread_exact…` says the
+same on the chunk gate's substrate at 2, 3 and every-core threads, and broken to skip one slot it fired); the three
+identity references BIT-IDENTICAL, now solving at every core; the suite 3,433 passed / 5 xfail / 3,438
+collected. Timed on VCaP at 8 threads, two interleaved pairs against a worktree of the VCaP-baseline commit carrying its
+own ψ module (the argument shape changed): wall 266.6 → 214.4 s and 260.5 → 213.0 s (0.80 / 0.82), calibrate 154.4 → 104.4 s and 154.7 → 105.8 s (0.68 / 0.68), the sweep 135.0 → 88.2 s and 135.0 → 89.4 s (0.65 / 0.66); ψ's three stages at 0.14–0.17 — the self-solves 20.6 → 3.0 s, the final solves 32.9 → 4.7 s, the pre-sweep solve 3.8 → 0.6 s, 57.4 → 8.3 s in all, 6.9× on 12 performance and 4 efficiency cores — and every other stage at 0.97–1.05 (the builders 0.99 / 1.00, the pass 0.98 / 1.00, the solve 0.97 / 0.99, the scan 1.00 / 1.04, the second pass 0.99 / 1.02, quant 0.94 / 0.97, the locus EM 0.99 / 1.01), peak 11.1 → 11.0 GB and 11.0 → 11.2 GB (`perf/psi_threads_2026-09-18/`).
+
 #### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer; native since 2026-09-17, §6b.15.5)
 
 A single-strand slot is the cube with a tilt grid of one cell — its tilt is its live strand, `τ = ±1` — so

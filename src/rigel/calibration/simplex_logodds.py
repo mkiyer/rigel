@@ -389,6 +389,7 @@ def _solve_regions_logodds_all(
     fneg_ref=None,
     cube_rows=None,
     n_tilt: int | None = None,
+    n_threads: int = 1,
 ) -> RegionDeconv:
     """THE per-slot solve for every slot of a block, dispatched: one native call (`native.psi_solve`) over
     the slots that admit a strand and carry a fragment, each on its own ``(λ, θ)`` cube — ψ built as
@@ -412,7 +413,9 @@ def _solve_regions_logodds_all(
     grid), evaluated at each slot's own θ nodes inside its ψ; ``None`` or an absent slot changes nothing. EMPTY
     slots — no per-strand count and no unspliced or spliced mass — are not solved: at genome scale most
     slots carry no fragments, and their zeros are the solve's own answer. ``n_tilt`` is the derived
-    ``_TILT_NODES`` unless a gate asks for another count."""
+    ``_TILT_NODES`` unless a gate asks for another count. ``n_threads`` is the kernel's thread budget
+    (``CalibrationConfig.n_threads``; 0 is every core): the slots are pulled one at a time by a pool, and
+    the answer is bit-identical at every count (gate: ``test_sweep.test_the_psi_solve_is_thread_exact…``)."""
     u_pos = np.ascontiguousarray(u_pos, np.float64)
     u_neg = np.ascontiguousarray(u_neg, np.float64)
     m = u_pos.shape[0]
@@ -446,6 +449,7 @@ def _solve_regions_logodds_all(
             out_fpos=out["fp"],
             out_fneg=out["fn"],
             out_var=out["vg"],
+            n_threads=int(n_threads),
         )
     return RegionDeconv(
         gdna_frac=out["fg"],

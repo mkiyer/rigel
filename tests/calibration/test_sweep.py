@@ -737,3 +737,38 @@ def test_the_psi_solve_is_chunk_exact_so_a_block_split_moves_no_number():
     # not vacuous: both paths solved, with a fitted arm
     assert (args[2] ^ args[3]).any() and (args[2] & args[3]).any()
     assert kw["gdna_logprior"] is not None
+
+
+def test_the_psi_solve_is_thread_exact_so_the_thread_count_moves_no_number():
+    """ψ's slots are pulled one at a time by a pool of threads, each slot solved by the same arithmetic
+    on its own scratch and written to its own four outputs — so the answer at 2, 3 and every-core threads
+    is the serial answer to the bit on every field of both paths (the single-strand solve and the AMBIG
+    cube), and the budget is a resource, not a tunable. PERTURBATION: a kernel whose threads shared a
+    scratch, or skipped or doubled a slot, fails here."""
+    from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
+
+    m, args, kw = _chunk_substrate()
+    serial = _solve_regions_logodds_all(*args, **kw, n_threads=1)
+    for n_threads in (2, 3, 0):
+        got = _solve_regions_logodds_all(*args, **kw, n_threads=n_threads)
+        for f in ("gdna_frac", "rna_pos_frac", "rna_neg_frac", "gdna_frac_var"):
+            a, b = np.asarray(getattr(got, f)), np.asarray(getattr(serial, f))
+            assert np.array_equal(a, b), (
+                f"{n_threads} threads: {f} moved at {int((a != b).sum())} of {m} slots — the solve is not thread-exact"
+            )
+    assert m >= 3 and (args[2] & args[3]).any(), (
+        "the substrate must carry AMBIG slots and more slots than threads"
+    )
+
+
+def test_the_thread_budget_is_a_non_negative_count_and_the_cli_fans_it_out():
+    """`CalibrationConfig.n_threads`: 0 is every core (the locus EM's reading), a negative count is
+    refused; the default is 0."""
+    import pytest
+
+    from rigel.config import CalibrationConfig
+
+    assert CalibrationConfig().n_threads == 0
+    assert CalibrationConfig(n_threads=4).n_threads == 4
+    with pytest.raises(ValueError, match="n_threads"):
+        CalibrationConfig(n_threads=-1)

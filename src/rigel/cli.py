@@ -837,9 +837,10 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     # -- CalibrationConfig: advanced --
     _ParamSpec("calib_refit_iters", "calibration.calib_refit_iters"),
     _ParamSpec("sweep_block_slots", "calibration.sweep_block_slots"),
-    # -- Fan-out: total threads → both EM and scan budgets --
+    # -- Fan-out: total threads → the EM's, the scan's and calibration's budgets --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.total_threads"),
+    _ParamSpec("threads", "calibration.n_threads"),
     # -- BamScanConfig: buffer sizing --
     _ParamSpec("scan_buffer_size", "scan.buffer_size_bytes", "gb_to_bytes"),
     # -- Top-level PipelineConfig --

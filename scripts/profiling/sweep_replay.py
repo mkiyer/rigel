@@ -234,6 +234,7 @@ def replay(
     cprofile_path: str | None,
     block_slots: str | None = None,
     tolerance: bool = False,
+    threads: int | None = None,
 ) -> int:
     """Run the current ``solve_chain`` on one captured call and compare with the captured result.
 
@@ -246,6 +247,8 @@ def replay(
         args, kwargs = pickle.load(fh)
     if block_slots is not None:
         kwargs = dict(kwargs, block_slots=None if block_slots.lower() == "none" else int(block_slots))
+    if threads is not None:
+        kwargs = dict(kwargs, n_threads=int(threads))  # ψ's budget: the answer must not move with it
     with open(directory / f"sweep_{call}.out.pkl", "rb") as fh:
         expected = pickle.load(fh)
     profiler = cProfile.Profile() if cprofile_path else None
@@ -264,7 +267,7 @@ def replay(
         profiler.dump_stats(cprofile_path)
     seconds = time.perf_counter() - t0
     diffs = _compare(expected, result)
-    tag = "" if block_slots is None else f" [block_slots={block_slots}]"
+    tag = ("" if block_slots is None else f" [block_slots={block_slots}]") + ("" if threads is None else f" [threads={threads}]")
     print(f"  sweep {call}:{tag} {seconds:.2f} s   " + ("BIT-IDENTICAL" if not diffs else f"{len(diffs)} FIELD(S) DIFFER"))
     for d in diffs[:12]:
         print(f"     {d}")
@@ -294,13 +297,15 @@ def main() -> int:
                    help="override the locus-block size the replayed sweep solves in; the answer must not move")
     r.add_argument("--tolerance", action="store_true",
                    help="beside the bit verdict, per output array: slots moved, max |Δ|, max rel Δ, the derived budget")
+    r.add_argument("--threads", type=int, default=None, metavar="N",
+                   help="override ψ's thread budget for the replayed sweep (0: every core); the answer must not move")
     sub.add_parser("self-test", help="the comparator's own falsification")
     args = ap.parse_args()
     if args.cmd == "capture":
         return capture(args.bam, args.index, args.out, args.threads)
     if args.cmd == "self-test":
         return self_test()
-    return replay(args.dir, args.call, args.cprofile, args.block_slots, args.tolerance)
+    return replay(args.dir, args.call, args.cprofile, args.block_slots, args.tolerance, args.threads)
 
 
 if __name__ == "__main__":

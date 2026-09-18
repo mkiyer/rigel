@@ -348,6 +348,7 @@ class TestConfigRoundTrip:
         cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
         assert cfg.em.n_threads == 8
         assert cfg.scan.total_threads == 8
+        assert cfg.calibration.n_threads == 8
         assert cfg.scan.bgzf_threads == 2
         assert cfg.scan.buffer_size_bytes == int(1.5 * 1024**3)
         assert cfg.scan.fragments_per_chunk == 1234

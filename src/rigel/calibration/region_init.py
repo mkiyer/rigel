@@ -170,6 +170,7 @@ def build_region_init(
     belief,
     gdna_logprior=None,
     intron_prior=None,
+    n_threads: int = 1,
 ) -> RegionInit:
     """The pass-0 per-slot self-solve → :class:`RegionInit`. Runs the message-free strand deconvolution
     (`simplex_logodds`) and compiles the strand + intron-factory composition evidence ``tau_lam`` (see
@@ -206,6 +207,7 @@ def build_region_init(
         fg_ref=np.asarray(belief.f_g, np.float64),
         fpos_ref=np.asarray(belief.f_pos, np.float64),
         fneg_ref=np.asarray(belief.f_neg, np.float64),
+        n_threads=n_threads,
     )
     fg_loc = np.asarray(dc.gdna_frac, np.float64)
     fp_loc = np.asarray(dc.rna_pos_frac, np.float64)

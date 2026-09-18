@@ -1,4 +1,4 @@
-# Threads — the port's step (iv), the design (2026-09-17; put to the owner BEFORE building)
+# Threads — the port's step (iv), the design (2026-09-17; the owner's answers 2026-09-18: `CalibrationConfig.n_threads` fed by `--threads` — YES; the cache key on the factory's inputs — YES; the block in ONE native call over Python threads — PREFERRED). (iv-a) LANDED 2026-09-18
 
 The frame: `ISSUES: performance-memory-bounded-solve` ③ (iv). The rulings this plan stands on: `DESIGN.md`
 §6b.15.1–§6b.15.2 (the locus block is the unit of the solve, and the only information that crosses a block
@@ -41,7 +41,7 @@ native, 0.26 M blurs, 0.08 M mapped hops — and is retired as a target.
 
 ## What is parallel, and what it costs
 
-### (iv-a) ψ over slots, inside `psi_solve` — first, and alone
+### (iv-a) ψ over slots, inside `psi_solve` — LANDED 2026-09-18 (267 → 214 s and 261 → 213 s at 8 threads (0.80 / 0.82), ψ 57.4 → 8.3 s, the sweep 135 → 88 s); the record is `DESIGN.md` §6b.15.5
 
 Every slot is solved on its own cube with nothing shared but the read-only `Grid` and the delivered `Rows`
 (`psi_kernel.cpp`: `solve_slot` reads `SlotInputs` and writes the slot's four outputs; no reduction crosses

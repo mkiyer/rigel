@@ -197,6 +197,7 @@ def solve_chain(
     policy=None,
     block_slots: int | None = None,
     message_cache: "MessageCache | None" = None,
+    n_threads: int = 1,
     _capture: SweepCapture | None = None,
 ) -> RegionBelief:
     """One forward-backward sweep over the chain. Returns the resolved :class:`RegionBelief`.
@@ -221,6 +222,9 @@ def solve_chain(
     :class:`~.messages.silent.SilentPolicy`, which sends nothing — so a reader of this file plus five
     lines holds the whole working system. The shipped answer is
     :class:`~.messages.transfer.TransferPolicy`, which ``calibrate`` passes explicitly.
+
+    ``n_threads`` is ψ's thread budget (`CalibrationConfig.n_threads`; 0 is every core): the slots of a
+    block are solved by a pool, bit-identically at every count.
 
     ``gdna_prior=None`` is a first-class PRIOR-FREE solve: ψ then carries the Jeffreys reference
     measure alone on both arms. Prior-free is not reference-free. That pass's only job is to be a
@@ -253,6 +257,7 @@ def solve_chain(
         gdna_prior=gdna_prior,
         policy=policy,
         library=policy.library(view),
+        n_threads=int(n_threads),
         **grid,
     )
 
@@ -351,6 +356,7 @@ class _Sweep:
     gdna_prior: object
     policy: object
     library: object
+    n_threads: int
 
 
 def _psi(
@@ -363,6 +369,7 @@ def _psi(
     fneg_ref,
     lam_rows=None,
     cube_rows=None,
+    n_threads: int = 1,
 ):
     """ψ's per-slot solve on one block (`simplex_logodds`), every input read off the context. The
     λ-factor is the intron factory's rows — anchored, per intron, zero elsewhere: it deconvolves confident
@@ -401,6 +408,7 @@ def _psi(
         fpos_ref=fpos_ref,
         fneg_ref=fneg_ref,
         cube_rows=cube_rows,
+        n_threads=n_threads,
     )
 
 
@@ -471,7 +479,7 @@ def _write_back(dc, solvable, belief: RegionBelief, n_owned: int, counts: Assert
 
 
 def _block_diagnostics(
-    ctx, own, belief, solvable, msg, out, tables, strand, support
+    ctx, own, belief, solvable, msg, out, tables, strand, support, n_threads: int
 ) -> SweepCapture:
     """The diagnostic capture of one block — the instruments' view (:class:`~.blocks.SweepCapture`).
     One extra solve lives here and nowhere in production: the strand-ONLY belief (no prior, no
@@ -494,6 +502,7 @@ def _block_diagnostics(
         n_grid=int(ctx.n_grid),
         L=float(ctx.logodds_window),
         gdna_logprior=None,
+        n_threads=n_threads,
     ).gdna_frac
     from_left, from_right = tables
     mass_global, eff_global = support
@@ -558,6 +567,7 @@ def _solve_block(
         belief=belief,
         gdna_logprior=arms,
         intron_prior=factory_rows,
+        n_threads=sweep.n_threads,
     )
     ctx = BlockContext(
         **fields,
@@ -590,6 +600,7 @@ def _solve_block(
         fneg_ref=belief.f_neg,
         lam_rows=msg.lam_rows,
         cube_rows=msg.cube_rows,
+        n_threads=sweep.n_threads,
     )
     out = _write_back(final, solvable, belief, n_owned, counts)
 
@@ -619,6 +630,7 @@ def _solve_block(
             (from_left, from_right),
             strand,
             (mass_global, eff_global),
+            sweep.n_threads,
         )
     return dict(belief=out, has_composition=has_composition, counts=counts, diagnostics=diagnostics)
 

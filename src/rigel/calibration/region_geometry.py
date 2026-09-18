@@ -609,6 +609,7 @@ def init_beliefs(
     rna_strand_overdispersion: float = 0.0,
     n_grid: int,
     logodds_window: float = 10.0,
+    n_threads: int = 1,
 ) -> RegionBelief:
     """The signature-binary G1/G2/G3 initial :class:`RegionBelief` on the unified chain.
 
@@ -638,6 +639,7 @@ def init_beliefs(
         od_r=rna_strand_overdispersion,
         n_grid=n_grid,
         L=logodds_window,
+        n_threads=n_threads,
     )
     f_pos, f_neg, f_g, var_g = _type_belief(fp, fn, deconv, count.sum(axis=1))
     return RegionBelief(f_pos=f_pos, f_neg=f_neg, f_g=f_g, var_gdna=var_g)

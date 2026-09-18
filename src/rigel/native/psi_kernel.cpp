@@ -14,15 +14,20 @@
 // `test_sweep.py` (chunk-exactness), `profiling/sweep_replay.py replay --tolerance` on a captured sweep.
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 
+#include "thread_pool.h"
 #include "transfer_rows.h"
 
 namespace nb = nanobind;
@@ -323,11 +328,35 @@ inline const double* prior_row(Mat& holder, bool present, int i) {
     return present ? holder.data() + static_cast<size_t>(i) * holder.shape(1) : nullptr;
 }
 
+// THE THREADS. Every slot is solved on its own cube with nothing shared but the read-only grid and the
+// delivered rows, and writes its own four outputs, so the slot list is pulled one slot at a time by a pool
+// of threads: the same arithmetic per slot in the same order within the slot, whatever thread takes it and
+// in whatever order — BIT-IDENTICAL to the serial loop at every thread count. One slot at a time (no
+// chunk, no granularity constant) balances the load on asymmetric cores; an AMBIG slot is n_tilt + 2
+// columns against a single-strand slot's one. The pool persists across calls (852 a sweep) and is rebuilt
+// only when the budget changes; the calls are serialised on it. `n_threads` is the budget: 0 is every
+// core, as the locus EM reads it.
+rigel::EStepThreadPool& pool_of(int n_threads) {
+    static std::unique_ptr<rigel::EStepThreadPool> pool;
+    if (!pool || pool->n_threads() != n_threads) pool = std::make_unique<rigel::EStepThreadPool>(n_threads);
+    return *pool;
+}
+std::mutex& pool_mutex() {
+    static std::mutex m;
+    return m;
+}
+int resolve_threads(int n_threads, int64_t n_slots) {
+    int t = n_threads > 0 ? n_threads : static_cast<int>(std::thread::hardware_concurrency());
+    if (t < 1) t = 1;
+    if (static_cast<int64_t>(t) > n_slots) t = static_cast<int>(std::max<int64_t>(n_slots, 1));
+    return t;
+}
+
 void psi_solve(IdxVec slots, Vec u_pos, Vec u_neg, BoolVec allow_pos, BoolVec allow_neg, Vec fg_ref, Vec fpos_ref,
                Vec fneg_ref, double kappa, double od_g, double od_r, Vec lam, nb::object gdna_logprior,
                nb::object lam_logprior, IdxVec cube_slot, Mat cube_pos, BoolVec cube_has_pos, Mat cube_neg,
                BoolVec cube_has_neg, Vec cube_u, Vec cube_total, Vec cube_opportunity, Vec cube_rho, int n_tilt,
-               Vec out_fg, Vec out_fpos, Vec out_fneg, Vec out_var) {
+               Vec out_fg, Vec out_fpos, Vec out_fneg, Vec out_var, int n_threads) {
     const int m = static_cast<int>(u_pos.shape(0)), K = static_cast<int>(lam.shape(0));
     if (n_tilt < 2) throw std::invalid_argument("psi_solve: the tilt needs at least two nodes");
     const bool has_g = !gdna_logprior.is_none(), has_l = !lam_logprior.is_none();
@@ -338,15 +367,32 @@ void psi_solve(IdxVec slots, Vec u_pos, Vec u_neg, BoolVec allow_pos, BoolVec al
     Rows R = unpack_rows(m, K, cube_slot, cube_pos, cube_has_pos, cube_neg, cube_has_neg, cube_u, cube_total,
                          cube_opportunity, cube_rho);
     const Grid g(lam.data(), K, kappa, od_g, od_r, n_tilt);
-    Scratch S;
+    const int64_t n_sel = static_cast<int64_t>(slots.shape(0));
     const int64_t* sl = slots.data();
-    for (int64_t q = 0; q < static_cast<int64_t>(slots.shape(0)); ++q) {
+    const double *up = u_pos.data(), *un = u_neg.data(), *fr = fg_ref.data(), *pr = fpos_ref.data(), *nr = fneg_ref.data();
+    const bool *ap = allow_pos.data(), *an = allow_neg.data();
+    double *o_fg = out_fg.data(), *o_fp = out_fpos.data(), *o_fn = out_fneg.data(), *o_v = out_var.data();
+    auto solve_one = [&](int64_t q, Scratch& S) {
         const int i = static_cast<int>(sl[q]);
-        SlotInputs s{u_pos.data()[i], u_neg.data()[i], fg_ref.data()[i], fpos_ref.data()[i], fneg_ref.data()[i],
-                     allow_pos.data()[i], allow_neg.data()[i], prior_row(g_prior, has_g, i),
+        SlotInputs s{up[i], un[i], fr[i], pr[i], nr[i], ap[i], an[i], prior_row(g_prior, has_g, i),
                      prior_row(l_prior, has_l, i), R.index[i] >= 0 ? &R.rows[R.index[i]] : nullptr};
-        solve_slot(g, s, S, out_fg.data()[i], out_fpos.data()[i], out_fneg.data()[i], out_var.data()[i]);
+        solve_slot(g, s, S, o_fg[i], o_fp[i], o_fn[i], o_v[i]);
+    };
+    const int T = resolve_threads(n_threads, n_sel);
+    if (T == 1) {
+        Scratch S;
+        for (int64_t q = 0; q < n_sel; ++q) solve_one(q, S);
+        return;
     }
+    std::vector<Scratch> scratch(T);
+    std::atomic<int64_t> next{0};
+    auto worker = [&](int tid) {
+        Scratch& S = scratch[tid];
+        for (int64_t q; (q = next.fetch_add(1, std::memory_order_relaxed)) < n_sel;) solve_one(q, S);
+    };
+    nb::gil_scoped_release release;
+    std::lock_guard<std::mutex> lock(pool_mutex());
+    pool_of(T).run_parallel(worker);
 }
 
 // ψ itself, for the gates: the cube (m, K, C) with the two strand-fraction grids and the tilt beside it,
@@ -400,8 +446,9 @@ NB_MODULE(_psi_impl, m) {
           nb::arg("lam_logprior").none(), nb::arg("cube_slot"), nb::arg("cube_pos"), nb::arg("cube_has_pos"),
           nb::arg("cube_neg"), nb::arg("cube_has_neg"), nb::arg("cube_u"), nb::arg("cube_total"),
           nb::arg("cube_opportunity"), nb::arg("cube_rho"), nb::arg("n_tilt"), nb::arg("out_fg"), nb::arg("out_fpos"),
-          nb::arg("out_fneg"), nb::arg("out_var"),
-          "Solve every slot in `slots` on its own cube and write f_g, f_pos, f_neg and Var(log f_g) in place.");
+          nb::arg("out_fneg"), nb::arg("out_var"), nb::arg("n_threads"),
+          "Solve every slot in `slots` on its own cube and write f_g, f_pos, f_neg and Var(log f_g) in place, on "
+          "`n_threads` threads (0: every core) — bit-identical at every thread count.");
     m.def("psi_cube", &psi_cube, nb::arg("u_pos"), nb::arg("u_neg"), nb::arg("allow_pos"), nb::arg("allow_neg"),
           nb::arg("fg_ref"), nb::arg("fpos_ref"), nb::arg("fneg_ref"), nb::arg("kappa"), nb::arg("od_g"),
           nb::arg("od_r"), nb::arg("lam"), nb::arg("gdna_logprior").none(), nb::arg("lam_logprior").none(),

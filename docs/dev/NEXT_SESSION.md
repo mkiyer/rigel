@@ -14,8 +14,9 @@ building, is `docs/dev/THREADS_PLAN.md`.
 4. ~~The block in native, step 2: the tables' allocations~~ — DONE 2026-09-17, PREPARED AS A SNAPSHOT for the owner's
    go (`commits/12_alloc/` in the synced scratchpad: the files, `MESSAGE.txt`; the tree at `28bd174c` + these edits IS
    the snapshot). The factory rows were priced and not ported alone (`ISSUES: performance-memory-bounded-solve`).
-5. **THIS ONE — step (iv), threads: read `docs/dev/THREADS_PLAN.md` (its numbers are VCaP's now), take the owner's
-   answers to its three open questions, then build (iv-a) — ψ over slots inside `psi_solve` — as its own commit**: the EM's pool
+5. ~~Step (iv-a), ψ over slots~~ — DONE 2026-09-18 with the owner's answers (`CalibrationConfig.n_threads` fed by
+   `--threads`; the cache key on the factory's inputs; the block in ONE native call preferred over Python threads);
+   VCaP 267 → 214 s and 261 → 213 s at 8 threads (0.80 / 0.82), ψ 57.4 → 8.3 s, the sweep 135 → 88 s; snapshot `commits/15_psi_threads/`. As built: the EM's pool
    (`native/thread_pool.h`), a cost-balanced partition of the slot list (26 columns an AMBIG slot, 1 a single-strand
    one), a `Scratch` per thread, the GIL released; gate: the replay of `sweeps_MO_3021_step11` at 1, 2 and 8 threads
    BIT-IDENTICAL on all four sweeps, the suite, the three references; two interleaved pairs on VCaP at `--threads 8`.

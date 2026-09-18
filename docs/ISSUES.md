@@ -71,8 +71,9 @@ K = 101 cells — 8.1 G multiply-adds, which IS the pass. The refit sweeps run o
 (against the first sweep's 101): sweep 1, a cache miss in production, pays the layer at 2.3×, and every refit sweep pays
 ψ 15.5 s and 7.7 s of Python (the message cache's key 3.2 — blake2b over the block context, the factory rows most of its
 bytes; the gDNA arm's `np.interp` 2.3; the factory rows 1.1, lgamma 85 % of it). THE RANKED OPPORTUNITIES, each priced
-against these numbers: (1) ψ over slots inside `psi_solve` — 58 s of 264, bit-identical by construction, ~−50 s at
-8 threads (the threads design, awaiting the owner); (2) the pass's blur — 36 s: the reduction over the taps is a scalar
+against these numbers: (1) ψ over slots inside `psi_solve` — 58 s of 264, bit-identical by construction — LANDED 2026-09-18
+(`CalibrationConfig.n_threads`, 0 = every core, fed by the CLI's `--threads`; the four VCaP sweeps BIT-IDENTICAL at 1/2/8
+threads; VCaP 267 → 214 s and 261 → 213 s at 8 threads (0.80 / 0.82), ψ 57.4 → 8.3 s, the sweep 135 → 88 s, `perf/psi_threads_2026-09-18/`); (2) the pass's blur — 36 s: the reduction over the taps is a scalar
 sum the compiler does not reassociate, so an explicit four-lane sum is a summation-order change behind the replay's
 tolerance budget, and a pass threaded over blocks halves it again; (3) the builders — 17 s, the RNA lanes 57 % of it,
 threads over blocks; (4) the refit sweeps' Python — the cache key digesting the factory rows' INPUTS (−9 s a run, exact),

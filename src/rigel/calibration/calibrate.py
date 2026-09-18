@@ -584,6 +584,7 @@ def _init_belief(s: _Solve):
         rna_strand_overdispersion=s.strand.rna_strand_overdispersion,
         n_grid=lattice_points(s.config.sweep_logodds_window, s.config.sweep_logodds_step),
         logodds_window=s.config.sweep_logodds_window,
+        n_threads=int(s.config.n_threads),
     )
 
 
@@ -635,6 +636,7 @@ def _sweep(s: _Solve, belief, prior, cache=None, capture=None):
         policy=s.policy,
         block_slots=cfg.sweep_block_slots,
         message_cache=cache,
+        n_threads=int(cfg.n_threads),
         _capture=capture,
     )
 

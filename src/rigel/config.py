@@ -343,7 +343,15 @@ class CalibrationConfig:
     #: calibration wall-clock matters more than the last few percent of its accuracy.
     calib_refit_iters: int = 3
 
+    #: ψ's thread budget: the slots of a block are solved by a pool of this many threads (``0``, the
+    #: default, is every core — the locus EM's reading of the same number), and the CLI's ``--threads``
+    #: sets it beside the scan's and the EM's. A resource budget, not a tunable of the answer: the solve is
+    #: bit-identical at every count (`simplex_logodds._solve_regions_logodds_all`).
+    n_threads: int = 0
+
     def __post_init__(self) -> None:
+        if self.n_threads < 0:
+            raise ValueError(f"CalibrationConfig.n_threads must be >= 0; got {self.n_threads}.")
         if self.calib_refit_iters < 0:
             raise ValueError(
                 f"CalibrationConfig.calib_refit_iters must be >= 0; got {self.calib_refit_iters}."

@@ -187,8 +187,9 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,431 passed / 0 skipped / 5 xfail, 3,436 collected** (re-derived
-2026-09-17 after the one-path convergence of the pass: −6 for `test_pass_kernel.py` (its four gates and the `tests/` row's 2),
+**The standing baseline: 0 failed / 3,433 passed / 0 skipped / 5 xfail, 3,438 collected** (re-derived
+2026-09-18 after ψ went threaded: +2 the thread-exactness and budget gates in `test_sweep.py`; before that after
+the one-path convergence of the pass: −6 for `test_pass_kernel.py` (its four gates and the `tests/` row's 2),
 +3 for the gates that moved or joined (the wiring and no-copy gates in `test_transfer_policy.py`, the trigamma gate in
 `test_zero_count_is_a_measurement.py`), −3 for `messages/transfer_rows.py` by the module row; before that after the
 tables' allocations: +1 the poison gate in `test_transfer_policy.py`, +1 `docs/dev/THREADS_PLAN.md`
