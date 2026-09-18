@@ -1,7 +1,8 @@
 """``native.transfer_pass`` — the composition transfer's directional pass as ONE native call — against
 the Python kernel it replaces (`sweep._pass` running ``propagate``'s ``receive(source, destination)``
 hop by hop), on the toy's captured sweep: both passes of the shipped policy, every table compared field
-by field. The port is the same arithmetic in another summation order, so profiles are held to 1e-12 and
+by field — a row matrix under its presence bits, since the matrices are allocated unfilled and an absent
+row is no row. The port is the same arithmetic in another summation order, so profiles are held to 1e-12 and
 every boolean, count and witness to equality; ``trigamma`` is held to SciPy's Hurwitz zeta. The wiring
 gate proves the backbone reaches the native kernel for the shipped policy and still runs the per-hop
 path for a policy that offers no whole-pass kernel.
@@ -9,41 +10,25 @@ path for a policy that offers no whole-pass kernel.
 
 from __future__ import annotations
 
-import dataclasses
-
 import numpy as np
 import pytest
-from _transfer_harness import _ctx_of, _full_policy, _passes, _prepared, capture_sweep_inputs
+from _transfer_harness import (
+    _ctx_of,
+    _full_policy,
+    _leaves,
+    _native_passes,
+    _passes,
+    _prepared,
+    capture_sweep_inputs,
+)
 
 import rigel.calibration.sweep as SW
-from rigel.calibration.messages import Received
 from rigel.native import trigamma
 
 
 @pytest.fixture(scope="module")
 def sweep_inputs(tmp_path_factory):
     return capture_sweep_inputs(tmp_path_factory)
-
-
-def _leaves(a, b, prefix=""):
-    for f in dataclasses.fields(a):
-        x, y = getattr(a, f.name), getattr(b, f.name)
-        if dataclasses.is_dataclass(x):
-            yield from _leaves(x, y, prefix + f.name + ".")
-        else:
-            yield prefix + f.name, np.asarray(x), np.asarray(y)
-
-
-def _native_passes(prepared, ctx, n_grid):
-    order = np.arange(int(ctx.n_slots), dtype=np.int64)
-    out = []
-    for nbr, seq, backward in ((ctx.left, order, False), (ctx.right, order[::-1], True)):
-        nbr = np.asarray(nbr, np.int64)
-        received = Received.empty(order.size, int(n_grid))
-        received.has_neighbour[seq] = nbr[seq] >= 0
-        prepared.run_pass(received, seq, nbr, np.zeros(order.size, bool), backward=backward)
-        out.append(received)
-    return tuple(out)
 
 
 def test_trigamma_is_scipys_hurwitz_zeta():
@@ -56,13 +41,13 @@ def test_trigamma_is_scipys_hurwitz_zeta():
 
 def test_the_native_pass_is_the_python_kernels_pass_on_every_table(sweep_inputs):
     """Both passes of the shipped policy on the toy's captured sweep, the per-hop kernel against the
-    native call: every presence bit, count, opportunity and witness equal, every profile within 1e-12,
-    and the tables not trivially silent."""
-    pol, _rows, n_grid, _window = _full_policy(sweep_inputs)
+    native call: every presence bit, count, opportunity and witness equal, every present row within
+    1e-12, and the tables not trivially silent."""
+    pol, _rows, _n_grid, _window = _full_policy(sweep_inputs)
     ctx = _ctx_of(sweep_inputs)
     prepared = _prepared(pol, ctx)
     python = _passes(prepared, ctx)
-    native = _native_passes(prepared, ctx, n_grid)
+    native = _native_passes(prepared, ctx)
     assert python[0].heard.any() and python[1].heard.any(), "the toy's sweep must carry messages"
     for py, nat in zip(python, native):
         for name, x, y in _leaves(py, nat):

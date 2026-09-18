@@ -33,10 +33,19 @@ two interleaved pairs, `perf/port_ii_2026-09-17/`), (iii) ψ LANDED 2026-09-17 (
 the Python deleted; ψ 4.31 → 1.60 s on MO_3021's first sweep, the replay 8e-6 of its budget;
 VCaP 341 → 285 s and 324 → 269 s at 8 threads on two interleaved pairs, the sweep 0.73×, ψ 109 → 55 s, `perf/port_iii_2026-09-17/`; the Python around the kernels — the policy's `solve`, the tables' zero-fills, the factory rows — is now the sweep's majority); the policy's solve LANDED native the same day
 (`native.transfer_solve`, bit-identical; the cube delivery a table, `CubeRows`; the transfer's three kernels one
-module, `transfer_kernel.cpp`; VCaP 270 → 263 s and 270 → 264 s at 8 threads, the solve 7.0 → 2.0 s, `perf/port_solve_2026-09-17/`), then the tables' allocations (1.25 s of MO_3021's 7.2 s first sweep in `numpy.zeros`) and the factory rows, then
+module, `transfer_kernel.cpp`; VCaP 270 → 263 s and 270 → 264 s at 8 threads, the solve 7.0 → 2.0 s, `perf/port_solve_2026-09-17/`); the tables' allocations LANDED 2026-09-17 (every optional-row table allocated
+unfilled under its presence bit, `np.empty`, the reader audit executable as a poison gate; BIT-IDENTICAL on the four
+captured sweeps, the three references and the suite; MO_3021's first sweep 6.85 → 6.08 s, `numpy.zeros` 1.20 → 0.14 s,
+~0.3 s of it returning as first-touch faults inside the kernels; VCaP 277 → 275 s and 271 → 268 s at 8 threads (0.99 / 0.99), the builders' stage 19.2 → 17.9 s and 18.7 → 17.3 s, the pass 38.4 → 38.0 s and 37.7 → 36.8 s, `perf/block_alloc_2026-09-17/`);
+the factory rows PRICED and not ported alone (lgamma is 85 % of `_log_negbinom`'s 0.46–0.90 s a sweep: a port saves
+~0.1 s and moves numbers); the sweep measured for the threads design — a refit sweep runs on the landscape's bracket
+(K = 202 against the first sweep's 101, every per-cell cost 2×) and is 10.0 s of which ψ 3.19, the message cache's key
+2.88 (blake2b over the factory rows' bytes), the gDNA arm's interpolation 1.51, the factory rows 0.90; then
 (iv) threads over
-blocks, each step behind `sweep_replay.py replay --tolerance` on `sweeps_MO_3021_step8` (captured 2026-09-17
-after step (i), on the sweep code of `8a9c25c4`), the `review_identity_*` references and the suite, timed against the 2026-09-17 baseline
+blocks — DESIGNED 2026-09-17 and put to the owner before building: ψ over slots inside `psi_solve` first (bit-identical
+by construction, the replay at 1/2/8 threads its gate, ~0.83× on VCaP), then the cache key on the factory's inputs, the
+gDNA arm inside ψ, the block in one native call with a pool over blocks — each step behind `sweep_replay.py replay --tolerance` on the current capture (`sweeps_MO_3021_step11`, taken from
+`28bd174c`; a step that moves numbers re-captures and deletes the superseded one), the `review_identity_*` references and the suite, timed against the 2026-09-17 baseline
 pair (`perf/baseline_2026-09-17/pair1_*`, the pushed tree at 8 threads on VCaP; the native pass read 526 → 403 s
 and 519 → 410 s on two interleaved pairs, `perf/port_2026-09-17/`); ⑤ the scan and the second pass, the
 stages that scale with depth (`ISSUES: scan-thread-split-starves-the-workers`). Not to do: micro-optimise the

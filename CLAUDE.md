@@ -187,8 +187,9 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,435 passed / 0 skipped / 5 xfail, 3,440 collected** (re-derived
-2026-09-17 after the solve went native and the transfer's two `.cpp` files became one `transfer_kernel.cpp`: −2 by
+**The standing baseline: 0 failed / 3,437 passed / 0 skipped / 5 xfail, 3,442 collected** (re-derived
+2026-09-17 after the tables' allocations: +1 the poison gate in `test_transfer_policy.py`, +1 `docs/dev/THREADS_PLAN.md`
+by the `docs/dev/` row; before that after the solve went native and the transfer's two `.cpp` files became one `transfer_kernel.cpp`: −2 by
 the row below; before that after ψ went native: +4 — +2 for `native/psi_kernel.cpp` and +2 for the gates' oracle module
 `tests/calibration/_psi_reference.py` by the rows below, the rewritten ψ gates moving nothing; before that
 after the one-path cleanup deleted the Python builders and their two-kernel gate: −7 — the five gates

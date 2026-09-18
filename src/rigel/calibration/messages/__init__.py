@@ -141,7 +141,9 @@ class Levels:
     prices its hop from them — both totals' counting, and the abundance discrepancy beyond it, per hop
     and nothing pooled. An EMPTY node (no total) forwards a level unchanged and leaves them as they
     were: a few bases of the same gDNA density — unless it is itself a flux SOURCE on an RNA lane, whose
-    level travels with the flux's witness (the spliced count on the route rate's opportunity).
+    level travels with the flux's witness (the spliced count on the route rate's opportunity). The
+    profile matrix is allocated UNFILLED: row ``i`` is a level only where ``present[i]``, its cells are
+    unspecified elsewhere, and every reader reads the bit before the row.
 
     ``rna_count`` / ``rna_count_var`` are an RNA lane's witness of ITS strand's abundance at that same
     last full node — the strand's RNA count read from the node's column split (its asymmetry over the
@@ -151,7 +153,7 @@ class Levels:
     witness."""
 
     present: np.ndarray  # (n,) bool
-    profile: np.ndarray  # (n, K) f64
+    profile: np.ndarray  # (n, K) f64, where present; unspecified elsewhere
     count: np.ndarray  # (n,) f64
     opportunity: np.ndarray  # (n,) f64
     has_witness: np.ndarray  # (n,) bool
@@ -162,7 +164,7 @@ class Levels:
     def empty(cls, n: int, K: int) -> Levels:
         return cls(
             np.zeros(n, bool),
-            np.zeros((n, K)),
+            np.empty((n, K)),
             np.zeros(n),
             np.zeros(n),
             np.zeros(n, bool),
@@ -236,12 +238,13 @@ class Received:
     and had nothing to say, or the node is a terminal, which receives nothing. NO NEIGHBOUR
     (:attr:`no_neighbour`): the side is open — a reference start or end, or a block's edge — and there
     was no hop at all. The backbone writes ``has_neighbour``; a policy's kernel writes the lanes and
-    nothing else; the two states need no word of their own.
+    nothing else; the two states need no word of their own. The row matrices are allocated UNFILLED
+    (``composition``, each lane's ``profile``): a row exists where its bit says so and nowhere else.
     """
 
     has_neighbour: np.ndarray  # (n,) bool — the backbone's: the side exists
     has_composition: np.ndarray  # (n,) bool
-    composition: np.ndarray  # (n, K) f64, where has_composition
+    composition: np.ndarray  # (n, K) f64, where has_composition; unspecified elsewhere
     level_gdna: Levels
     level_rna_pos: Levels
     level_rna_neg: Levels
@@ -254,7 +257,7 @@ class Received:
         return cls(
             np.zeros(n, bool),
             np.zeros(n, bool),
-            np.zeros((n, K)),
+            np.empty((n, K)),
             Levels.empty(n, K),
             Levels.empty(n, K),
             Levels.empty(n, K),

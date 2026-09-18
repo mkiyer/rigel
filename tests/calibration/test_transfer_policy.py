@@ -27,10 +27,14 @@ from _transfer_harness import (
     _dead_boundaries,
     _drive_the_backbone,
     _full_policy,
+    _leaves,
+    _native_passes,
     _pairs,
+    _passes,
     _prepared,
     _rna,
     _rna_lanes_of,
+    _run,
     _with_alt_splice_sites,
 )
 
@@ -684,3 +688,77 @@ def test_the_face_table_holds_one_of_five_kinds_with_finite_parameters_at_real_f
     # addressing another's face, refused rather than silently winning or losing by order
     with pytest.raises(ValueError, match="already carries"):
         table.set(int(left[i]), i, TRANSPORT)
+
+
+def test_the_layer_reads_a_row_only_under_its_mask(sweep_inputs, monkeypatch):
+    """THE TABLES ARE ALLOCATED UNFILLED (`RowTable`, `Received.empty`, the face row store), so this is
+    the reader audit made executable: every table's matrix is poisoned with NaN at allocation — the
+    claims, each lane's own levels, flux levels and flux witnesses, the face rows, both `Received`
+    tables' compositions and level profiles — and the layer's output is bit-identical to the unpoisoned
+    run: the native pass's tables and the per-hop kernel's (every bit, count and witness, every PRESENT
+    row), the delivered λ rows and cube, and the whole sweep's belief. A written row overwrites its
+    poison; one reader of an ABSENT row — in the builders, either pass kernel, the solve or ψ — and NaN
+    reaches a number. PERTURBATION: a kernel reading a row without its bit (`lane_emit` taking the own
+    level unmasked; `RowTable.__getitem__` ignoring the mask) fails here."""
+    from rigel.calibration.messages import Received
+    from rigel.calibration.messages.faces import Faces
+
+    pol, _rows, _n_grid, _window = _full_policy(sweep_inputs)
+    ctx = _ctx_of(sweep_inputs)
+
+    def run():
+        prepared = _prepared(pol, ctx)
+        native = _native_passes(prepared, ctx)
+        msg = prepared.solve(*native)
+        return native, _passes(prepared, ctx), msg, _run(sweep_inputs, pol)
+
+    plain = run()
+    assert plain[0][0].heard.any() and plain[2].lam_rows is not None, "the toy must carry messages"
+
+    row_init, faces_init, received_empty = RowTable.__init__, Faces.__init__, Received.empty
+
+    def poisoned_rows(self, shape, K):
+        row_init(self, shape, K)
+        self.rows.fill(np.nan)
+
+    def poisoned_faces(self, lam, left, right):
+        faces_init(self, lam, left, right)
+        self.rows.fill(np.nan)
+
+    def poisoned_received(n, K):
+        t = received_empty(n, K)
+        t.composition.fill(np.nan)
+        for lane in Received.LANES:
+            getattr(t, lane).profile.fill(np.nan)
+        return t
+
+    monkeypatch.setattr(RowTable, "__init__", poisoned_rows)
+    monkeypatch.setattr(Faces, "__init__", poisoned_faces)
+    monkeypatch.setattr(Received, "empty", staticmethod(poisoned_received))
+    poisoned = run()
+
+    for kernel, a_tables, b_tables in (
+        ("native", plain[0], poisoned[0]),
+        ("per-hop", plain[1], poisoned[1]),
+    ):
+        for a, b in zip(a_tables, b_tables):
+            for name, x, y in _leaves(a, b):
+                if x.dtype != bool and x.ndim == 2:
+                    assert np.isfinite(x).all(), (
+                        f"{kernel} {name}: the plain run holds a non-finite row"
+                    )
+                assert np.array_equal(x, y, equal_nan=True), f"{kernel} {name} moved under poison"
+    rows, prows = plain[2].lam_rows, poisoned[2].lam_rows
+    assert np.isfinite(rows).all() and np.array_equal(rows, prows), "the delivered λ rows moved"
+    cube, pcube = plain[2].cube_rows, poisoned[2].cube_rows
+    assert (cube is None) == (pcube is None)
+    if cube is not None:
+        for f in cube.PER_ROW:
+            x, y = getattr(cube, f), getattr(pcube, f)
+            if f in ("profile_pos", "profile_neg"):
+                keep = getattr(cube, "has_pos" if f == "profile_pos" else "has_neg")
+                x, y = x[keep], y[keep]
+                assert np.isfinite(x).all(), f"cube {f}: the plain run holds a non-finite row"
+            assert np.array_equal(x, y), f"cube {f} moved under poison"
+    for k, v in plain[3].items():
+        assert np.array_equal(v, poisoned[3][k]), f"the sweep's {k} moved under poison"

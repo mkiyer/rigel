@@ -1221,6 +1221,35 @@ the Python solve on every block of MO_3021's first sweep (426 blocks, 175,819 de
 rows; the solve 0.96 → 0.13 s), the replayed first sweep against its capture, the three identity references.
 Timed on VCaP at 8 threads, two interleaved pairs against the ψ commit's worktree: wall 270 → 263 s and 270 → 264 s, the policy's solve 7.0 → 2.0 s on both, the sweep 0.95×, every other stage at 0.98–1.03 (`perf/port_solve_2026-09-17/`). The day's ports took the deep library from 526 s to 264 s and the sweep from 396 s to 135 s; what remains of the sweep is the tables' allocations, the factory rows and the block plumbing.
 
+**The tables are allocated unfilled** (2026-09-17, the block-in-native step 2: a pure allocation change). Every
+optional-row table the layer allocates per block — the claims, each lane's own levels, junction flux levels and
+flux witnesses (`RowTable`), both `Received` tables' compositions and level profiles (`Levels.empty`,
+`Received.empty`) — is `np.empty`: a row exists where its presence bit says so and nowhere else, and every reader
+reads the bit before the row — the builders (`RowsOut::get`), the pass (`lane_emit`'s own level and held profile,
+`faces_apply`'s own and held rows), the solve (every held composition and level under its bit, every flux level
+under its mask), the per-hop Python kernel (`RowTable.__getitem__`, `LevelLane.emit`), the diagnostics capture
+(whole tables concatenated, which no instrument reads unmasked) and the gates. The solve's λ rows (`out_rows`)
+stay zero-filled: an all-zero row is the channel's inert value, read whole by the cache's sparsity, the finiteness
+check and ψ. The audit is executable — `test_transfer_policy.test_the_layer_reads_a_row_only_under_its_mask`
+poisons every table's matrix with NaN at allocation and holds the native pass's tables, the per-hop kernel's, the
+delivered channels and the whole sweep's belief bit-identical to the unpoisoned run — and broken three ways it
+fired three ways (the Python reader ignoring its mask: the per-hop table's bits moved; `lane_emit` taking the own
+level unmasked: the kernel's own witness guard; the solve reading a composition without its bit: the backbone's
+`lam_rows_finite`). Judged BIT-IDENTICAL: the four captured sweeps of `sweeps_MO_3021_step11`, the three identity
+references, the suite. On MO_3021's first sweep `numpy.zeros` fell from 1.20 s over 41,363 calls to 0.14 s and the
+sweep from 6.85 to 6.08 s; about 0.3 s reappeared inside the builders and the pass as first-touch page faults on
+the fresh pages — the part an arena per sweep would keep resident, priced and not built: the refit sweeps allocate
+none of these tables under the message cache, so the arena's whole gain is ≤ 0.3 s of a run's first sweep. Timed on
+VCaP at 8 threads, two interleaved pairs against a worktree of the solve commit: wall 277.5 → 274.6 s and 270.5 → 267.9 s (0.99 / 0.99), the sweep 140.8 → 139.5 s and 137.1 → 135.5 s (0.99 / 0.99), the builders' stage — where the tables are allocated — 19.2 → 17.9 s and 18.7 → 17.3 s (0.93 / 0.92), the pass 38.4 → 38.0 s and 37.7 → 36.8 s (0.99 / 0.98), every other stage at 0.97–1.04 (ψ 1.00 / 1.01, the solve 1.02 / 0.99, the scan 1.01 / 1.00, the second pass 1.02 / 0.98, quant 0.93 / 0.99, the locus EM 1.00 / 0.99), the run's peak — in quant, not the sweep — 11.3 → 11.6 GB and 11.3 → 11.2 GB
+(`perf/block_alloc_2026-09-17/`). What the sweep is now, measured for the threads design: the kernels are 64 % of a
+first sweep (ψ 1.57 s, the builders 1.61, the pass 0.99, the solve 0.12, of 6.7 s) and 32 % of a refit sweep (ψ 3.19
+of 10.0 s), which runs on the landscape's own bracket — K = 202 against the first sweep's 101, so every per-cell
+cost doubles for the same slots — and whose Python is the message cache's key (2.88 s: blake2b over the block
+context, the factory rows' n × K bytes most of it), the gDNA arm's interpolation (1.51 s) and the factory rows
+(0.90 s, of which lgamma 85 %: a NegBinom port alone would save ~0.1 s a sweep and move numbers — priced, not
+taken). The threads design starts from these numbers and is put to the owner before anything is built
+(`ISSUES: performance-memory-bounded-solve`).
+
 #### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer; native since 2026-09-17, §6b.15.5)
 
 A single-strand slot is the cube with a tilt grid of one cell — its tilt is its live strand, `τ = ±1` — so

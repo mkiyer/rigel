@@ -61,16 +61,18 @@ def side_of(s: int, i: int) -> int:
 class RowTable:
     """OPTIONAL ROWS over the nodes, in the layout the native pass reads: an ``(n, K)`` matrix and an
     ``(n,)`` presence mask, written by the builders directly. ``t[i]`` is node ``i``'s row (a view into
-    the matrix) or ``None``; ``t[i] = row`` writes it and marks it present; ``t[i] = None`` clears it. An
-    absent row reads as zeros in the matrix, so the matrix alone never says whether a node has a claim —
-    the mask does, and every reader of the matrix reads the mask beside it. ``shape`` may be ``(n, 2)``
-    for a row per directed face — ``t[x, side]`` — as the lanes' junction flux levels are kept."""
+    the matrix) or ``None``; ``t[i] = row`` writes it and marks it present; ``t[i] = None`` clears it.
+    THE MASK, never the matrix, says whether a node has a row: the matrix is allocated UNFILLED
+    (``np.empty`` — a sweep allocates these tables per block, and filling them was a cost with no
+    reader), so an absent row's cells are unspecified and every reader — the kernels, the solve, the
+    gates — reads the mask before the row. ``shape`` may be ``(n, 2)`` for a row per directed face —
+    ``t[x, side]`` — as the lanes' junction flux levels are kept."""
 
     __slots__ = ("rows", "mask")
 
     def __init__(self, shape, K: int):
         shape = (int(shape),) if np.ndim(shape) == 0 else tuple(int(s) for s in shape)
-        self.rows = np.zeros((*shape, int(K)))
+        self.rows = np.empty((*shape, int(K)))
         self.mask = np.zeros(shape, bool)
 
     def __len__(self) -> int:
@@ -81,7 +83,6 @@ class RowTable:
 
     def __setitem__(self, i, row) -> None:
         if row is None:
-            self.rows[i] = 0.0
             self.mask[i] = False
         else:
             self.rows[i] = row

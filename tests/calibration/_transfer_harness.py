@@ -247,6 +247,45 @@ def _passes(prepared, ctx):
     return tuple(tables)
 
 
+def _native_passes(prepared, ctx):
+    """The backbone's two directional passes through the policy's whole-pass kernel (`run_pass`, native for
+    the shipped policy) on tables allocated as `sweep._pass` allocates them; no terminal. Returns the two
+    tables, ``(from_left, from_right)``."""
+    from rigel.calibration.messages import Received
+
+    order = np.arange(int(ctx.n_slots), dtype=np.int64)
+    tables = []
+    for nbr, seq, backward in ((ctx.left, order, False), (ctx.right, order[::-1], True)):
+        nbr = np.asarray(nbr, np.int64)
+        received = Received.empty(order.size, int(ctx.n_grid))
+        received.has_neighbour[seq] = nbr[seq] >= 0
+        prepared.run_pass(received, seq, nbr, np.zeros(order.size, bool), backward=backward)
+        tables.append(received)
+    return tuple(tables)
+
+
+#: a row matrix of a `Received` table and the presence bits that say which of its rows are rows at all
+_ROWS_OF = {"composition": "has_composition", "profile": "present"}
+
+
+def _leaves(a, b, prefix=""):
+    """Every array of two `Received` tables side by side, as ``(name, x, y)``, a row matrix restricted
+    to the rows ``a``'s bits say are present — the matrices are allocated unfilled, so an absent row is
+    not compared; the bits themselves are leaves and are compared whole."""
+    import dataclasses
+
+    for f in dataclasses.fields(a):
+        x, y = getattr(a, f.name), getattr(b, f.name)
+        if dataclasses.is_dataclass(x):
+            yield from _leaves(x, y, prefix + f.name + ".")
+            continue
+        x, y = np.asarray(x), np.asarray(y)
+        if f.name in _ROWS_OF:
+            keep = np.asarray(getattr(a, _ROWS_OF[f.name]), bool)
+            x, y = x[keep], y[keep]
+        yield prefix + f.name, x, y
+
+
 def _drive(prepared, ctx):
     """The backbone's own contract, reproduced: the two passes (`_passes`) and the solve, which receives
     the two tables. Returns ``(rows, from_left, from_right)`` — the delivered rows (zeros when the
