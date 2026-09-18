@@ -34,7 +34,7 @@ from rigel.calibration.region_chain import REGION
 from rigel.calibration.region_geometry import g1_locked
 from rigel.calibration.region_init import has_own_composition_evidence
 from rigel.calibration.signature import RegionType
-from _transfer_harness import _ctx_of, _full_policy, _passes, _prepared
+from _transfer_harness import _ctx_of, _full_policy, _native_passes, _prepared
 
 CAL = sys.modules["rigel.calibration.calibrate"]
 
@@ -45,7 +45,7 @@ def _expected_has_composition(sweep_inputs, policy, capture):
     is live, or it is structurally certain. A level, a ceiling or a cube row does not count."""
     ctx = _ctx_of(sweep_inputs)
     prepared = _prepared(policy, ctx)
-    from_left, from_right = _passes(prepared, ctx)
+    from_left, from_right = _native_passes(prepared, ctx)
     comp = from_left.has_composition | from_right.has_composition
     tau = np.asarray(capture.tau_lam, np.float64)
     return has_own_composition_evidence(tau) | g1_locked(capture.free_pos, capture.free_neg) | comp
@@ -87,18 +87,17 @@ def test_a_bound_with_a_row_does_not_inform_but_a_composition_does(sweep_inputs)
         def __init__(self, n):
             self.n = n
 
-        def propagate(self, received, *, backward):
+        def run_pass(self, received, seq, nbr, terminal, *, backward):
             if backward:
-                return None
-
-            def receive(s, i):
+                return
+            for i in np.asarray(seq).tolist():
+                if nbr[i] < 0 or terminal[i]:
+                    continue
                 if i == lvl_slot:
                     received.level_gdna.write(i, row, 3.0, 100.0)
                 if i == comp_slot:
                     received.composition[i] = row
                     received.has_composition[i] = True
-
-            return receive
 
         def solve(self, from_left, from_right):
             rows = np.zeros((self.n, K))

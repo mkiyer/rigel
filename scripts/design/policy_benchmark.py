@@ -42,7 +42,7 @@ if str(REPO / "src") not in sys.path:
     sys.path.insert(0, str(REPO / "src"))
 
 from rigel.calibration.calibrate import calibrate  # noqa: E402
-from rigel.calibration.messages.transfer_rows import TERMINUS  # noqa: E402
+from rigel.calibration.splice_graph import FLAG_TERMINUS  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain  # noqa: E402
 from rigel.calibration.splice_graph import (  # noqa: E402
@@ -99,7 +99,7 @@ def _slot_classes(truth: dict, payload, boundary_flags) -> np.ndarray:
     right = np.asarray(chain.right, np.int64)
     is_b = kind == BOUNDARY
     term = np.zeros(kind.shape[0], bool)
-    term[is_b] = (np.asarray(boundary_flags, np.uint16)[obj[is_b]] & TERMINUS) != 0
+    term[is_b] = (np.asarray(boundary_flags, np.uint16)[obj[is_b]] & FLAG_TERMINUS) != 0
     cls = strata.astype(object)
     for i in np.flatnonzero(is_b & term):
         cls[i] = strata[i] + " [term]"

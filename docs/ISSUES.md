@@ -37,7 +37,9 @@ module, `transfer_kernel.cpp`; VCaP 270 → 263 s and 270 → 264 s at 8 threads
 unfilled under its presence bit, `np.empty`, the reader audit executable as a poison gate; BIT-IDENTICAL on the four
 captured sweeps, the three references and the suite; MO_3021's first sweep 6.85 → 6.08 s, `numpy.zeros` 1.20 → 0.14 s,
 ~0.3 s of it returning as first-touch faults inside the kernels; VCaP 277 → 275 s and 271 → 268 s at 8 threads (0.99 / 0.99), the builders' stage 19.2 → 17.9 s and 18.7 → 17.3 s, the pass 38.4 → 38.0 s and 37.7 → 36.8 s, `perf/block_alloc_2026-09-17/`);
-the factory rows PRICED and not ported alone (lgamma is 85 % of `_log_negbinom`'s 0.46–0.90 s a sweep: a port saves
+the one-path convergence of the pass DONE 2026-09-17 (the per-hop Python kernel and `transfer_rows.py` deleted, the
+protocol `prepare / run_pass / solve`, the constructors and predicates bound for the gates as `native.transfer_rows`,
+BIT-IDENTICAL on the four captured sweeps and the three references); the factory rows PRICED and not ported alone (lgamma is 85 % of `_log_negbinom`'s 0.46–0.90 s a sweep: a port saves
 ~0.1 s and moves numbers); the sweep measured for the threads design — a refit sweep runs on the landscape's bracket
 (K = 202 against the first sweep's 101, every per-cell cost 2×) and is 10.0 s of which ψ 3.19, the message cache's key
 2.88 (blake2b over the factory rows' bytes), the gDNA arm's interpolation 1.51, the factory rows 0.90; then
@@ -303,7 +305,7 @@ shared-exon toy (`deep_stress.py`, spliced and mono) is the natural rung to add 
 ### transfer-variance-premise
 `priority: later · kind: question · 2026-08`
 Does a hop's transfer variance price a ratio built on a handful of counts? The policy prices every hop by both
-witnesses' counting plus the pair's disagreement (`transfer_rows.hop_price`); whether that is right where a
+witnesses' counting plus the pair's disagreement (``hop_price``, `native/transfer_rows.h`); whether that is right where a
 pair agrees by coincidence is the open half (the landscape is no substitute: ~10× over-stated). `EQUATIONS.md`
 §3.5h.
 

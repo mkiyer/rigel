@@ -1,15 +1,15 @@
 """The composition rules as TYPED TABLES — what a recipient does with a composition that arrives at
-each of its two sides — and the three small functions every reader of a face needs.
+each of its two sides — and the two small helpers every reader of a face needs.
 
        Gate: ``tests/calibration/test_transfer_faces.py``
 
 A directed face is ``(destination, side)``: a node hears from its LEFT neighbour (side 0, the forward
 pass) or its RIGHT (side 1, the backward pass), so a rule needs no pair and no lookup (`side_of`). A
-rule is a KIND and its parameters; `Faces.apply` is the one home of the rule arithmetic, on the row
-constructors of `transfer_rows`. The builders that write the rules live in `transfer`; the level lanes
-that serve every face left without one live in `lanes`. `RowTable` is the one shape of an OPTIONAL row
-per node — a claim, a level, a witness — as the native pass reads it: a matrix and a presence mask,
-which the builders write directly.
+rule is a KIND and its parameters; the pass kernel (``faces_apply`` in `native/transfer_kernel.cpp`) is
+the one home of the rule arithmetic, on the row constructors of `native/transfer_rows.h`. The builders
+that write the rules live in `transfer`; the level lanes that serve every face left without one live in
+`lanes`. `RowTable` is the one shape of an OPTIONAL row per node — a claim, a level, a witness — as the
+native pass reads it: a matrix and a presence mask, which the builders write directly.
 """
 
 from __future__ import annotations
@@ -17,8 +17,6 @@ from __future__ import annotations
 from typing import NamedTuple
 
 import numpy as np
-
-from .transfer_rows import EPS, blur_row, level_row, splice_out_row, transport_row
 
 __all__ = [
     "EDGE",
@@ -31,23 +29,8 @@ __all__ = [
     "FaceRule",
     "Faces",
     "RowTable",
-    "fuse",
-    "norm",
     "side_of",
 ]
-
-
-def norm(row):
-    row = np.asarray(row, np.float64)
-    return row - row.max()
-
-
-def fuse(parts):
-    """Independent witnesses about one slot: log-profiles add, then re-normalise."""
-    out = None
-    for p in parts:
-        out = p if out is None else out + p
-    return None if out is None else norm(out)
 
 
 def side_of(s: int, i: int) -> int:
@@ -90,7 +73,8 @@ class RowTable:
 
 
 #: the five KINDS of composition rule a directed face can carry (``NONE``: the face has no rule and the
-#: level lane serves it). Each is one arithmetic of `transfer_rows` with the parameters `Faces` holds.
+#: level lane serves it). Each is one arithmetic of `native/transfer_rows.h` with the parameters `Faces`
+#: holds; the kernel's ``faces_apply`` reads the kind and applies it.
 NONE, FORWARD, TRANSPORT, SPLICE_OUT, EDGE, LEVEL = range(6)
 RULE_NAMES = ("none", "forward", "transport", "splice_out", "edge", "level")
 
@@ -125,17 +109,18 @@ class Faces:
     rule gene edges, the terminus rules unlicensed faces, the alternative splice site junctions with
     no terminus), and a precedence that nothing exercises is a hidden assumption, not a rule.
 
-    :meth:`apply` is the one place a rule's arithmetic lives:
+    The pass kernel's ``faces_apply`` (`native/transfer_kernel.cpp`) is the one place a rule's arithmetic
+    lives, on the row constructors of `native/transfer_rows.h`:
 
     ==========  ===============================================================================
     FORWARD     the identity: the sender's claim and what it holds, fused
-    TRANSPORT   boundary → region through the face map ``rows[row]`` (`transport_row`), blurred by
+    TRANSPORT   boundary → region through the face map ``rows[row]`` (``transport_row``), blurred by
                 ``width`` where a pair's discrepancy adds one
-    SPLICE_OUT  region → boundary, the face map read backwards (`splice_out_row`), likewise
+    SPLICE_OUT  region → boundary, the face map read backwards (``splice_out_row``), likewise
     EDGE        the intergenic|exon edge's one-sided level ``rows[row]``, a constant; a flat one
                 is no claim
     LEVEL       the terminus's level rule: the sender's OWN claim through the level map
-                ``rows[row]`` at width ``var`` (`level_row`), or the crossing total's bound
+                ``rows[row]`` at width ``var`` (``level_row``), or the crossing total's bound
                 ``rows[row2]`` when it has none — never what it holds
     ==========  ===============================================================================
     """
@@ -228,7 +213,7 @@ class Faces:
 
     def at(self, s, i) -> "FaceRule":
         """The rule at one face as a record — its kind, parameters and resolved rows — for a reader or a
-        gate; the passes read the tables directly."""
+        gate; the pass reads the tables directly."""
         i, side = int(i), side_of(int(s), int(i))
         r, r2 = int(self.row[i, side]), int(self.row2[i, side])
         return FaceRule(
@@ -247,33 +232,3 @@ class Faces:
         """Every directed face ``(s, i)`` that carries a rule, in table order."""
         i_idx, sides = np.nonzero(self.kind != NONE)
         return [(int(self.nbr[i, side]), int(i)) for i, side in zip(i_idx.tolist(), sides.tolist())]
-
-    def apply(self, s, i, own, held):
-        """The rule at the face into ``i`` from ``s``, applied to what ``s`` sends: its OWN claim and what
-        it HOLDS from its far side — each ``None`` where absent. Returns the row for ``i``, or ``None``
-        for no claim."""
-        i, side = int(i), side_of(int(s), int(i))
-        k = self.kind[i, side]
-        if k == FORWARD:
-            return fuse([r for r in (own, held) if r is not None])
-        if k == EDGE:
-            r = self.rows[self.row[i, side]]
-            return r if np.ptp(r) > EPS else None
-        if k == LEVEL:
-            if own is None:
-                return self.rows[self.row2[i, side]]
-            return level_row(own, self.lam, self.rows[self.row[i, side]], float(self.var[i, side]))
-        sending = fuse([r for r in (own, held) if r is not None])
-        if sending is None:
-            return None
-        n_u, n_s = float(self.n_u[i, side]), float(self.n_s[i, side])
-        if k == TRANSPORT:
-            out = transport_row(sending, self.lam, self.rows[self.row[i, side]], n_u, n_s)
-        elif k == SPLICE_OUT:
-            out = splice_out_row(
-                sending, self.lam, n_u, n_s, float(self.a_b[i, side]), float(self.a_x[i, side])
-            )
-        else:
-            return None
-        w = float(self.width[i, side])
-        return blur_row(out, self.lam, w) if w > 0.0 else out

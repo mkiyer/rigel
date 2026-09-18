@@ -176,7 +176,7 @@ across a capture cliff, an absolute density does not.
 moves `M/Σρ_c E_c` by only ×1.04 on a contained region and ×1.50 at a crossing, so a large violation is
 accumulated drift, never one hop.
 
-**3.4 Why an integer count must be stored** (`messages/transfer_rows.count_logvar`, the one home of the
+**3.4 Why an integer count must be stored** (``count_logvar`` in `native/transfer_rows.h`, the one home of the
 counting term). `Var(log ρ_c) = 1/(f_c·n) ≡ Var(log f_c) + 1/n`, exactly. Mass sums fractional
 per-fragment shares, so `1/mass` is not a counting variance. The shipped counting term is
 `trigamma(n + ½)` — the Jeffreys posterior's exact `Var(log ρ)` at every count including zero, which is
@@ -201,7 +201,7 @@ boundary's level is a lower bound on the exon inside it — a fragment spanning 
 only partly under the probe — which is why every gDNA-lane hop is lower-only.
 
 **3.5b The licence — "is the source measuring the same thing I am?"** (ruling 2026-08-04;
-`messages/transfer_rows.outside_flank` and `boundary_shares_strand` are the predicates). A composition may
+``outside_flank`` and ``boundary_shares_strand`` in `native/transfer_kernel.cpp` are the predicates). A composition may
 be imputed across a step iff both hold:
 
 * **SUPPLY** — the source supplied both components of the pair (a statement about precision): a source
@@ -264,7 +264,7 @@ per-component divisors `E_g`, `E_r` stay length models; what this buys is that a
 any enrichment ratio between boundaries, uses none.
 
 **3.5h The premise variance — why an imputation must cost something on every hop.** The ruling is
-`DESIGN.md` §0c.0c; `messages/transfer_rows.hop_price` and the pair terms in `transfer.py`'s
+`DESIGN.md` §0c.0c; ``hop_price`` in `native/transfer_rows.h` and the pair terms in the builders'
 `terminus_rules` and `alternative_splice_site` implement it. Every variance that scales with counts
 vanishes between two deeply-counted slots, so a layer built only from counting terms delivers an
 imputation at full strength beside a measurement. The premise of a hop — "my neighbour's values apply

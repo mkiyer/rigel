@@ -20,8 +20,8 @@ __all__ = ["SilentPolicy"]
 
 
 class _PreparedSilence:
-    def propagate(self, received, *, backward: bool):
-        return None  # sends nothing: every node with a neighbour holds silence from this side
+    def run_pass(self, received, seq, nbr, terminal, *, backward: bool) -> None:
+        return  # sends nothing: every node with a neighbour holds silence from this side
 
     def solve(self, from_left, from_right) -> PsiMessage:
         return PsiMessage.silent()

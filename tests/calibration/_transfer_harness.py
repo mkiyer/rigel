@@ -1,7 +1,7 @@
 """The shared harness of the transfer policy's gate files (`test_transfer_*.py`): ONE real
 `solve_chain` call captured from a calibrate run on the toy — the backbone-parity pattern, so every
 gate re-runs the sweep with a different policy on byte-identical inputs — plus the policy, context
-and pass builders they share. Not a test module: `capture_sweep_inputs` is what each gate file's
+and pass drivers they share — whole passes and single hops of the native pass. Not a test module: `capture_sweep_inputs` is what each gate file's
 ``sweep_inputs`` fixture returns, and nothing here asserts."""
 
 from __future__ import annotations
@@ -222,29 +222,84 @@ def _dead_boundaries(ctx):
     return _dc.replace(ctx, has_own_composition=live)
 
 
-def _passes(prepared, ctx):
-    """The backbone's two directional passes, reproduced (`sweep._pass`): each pass owns a `Received`
-    table, marks ``has_neighbour`` and calls ``receive(source, destination)`` over the chain order — the
-    forward pass reading each slot's LOW neighbour, the backward pass its HIGH one. Returns the two
-    tables, ``(from_left, from_right)``."""
+def _hop(prepared, s, i, received=None):
+    """ONE hop of the native pass — the recipient ``i`` receives from ``s`` (its neighbour on that side):
+    the face's composition rule on what ``s`` sends, and every lane face into ``i`` — on ``received``, a
+    fresh table when none is given, so what ``s`` holds is whatever the caller wrote into row ``s``.
+    Returns the table."""
     from rigel.calibration.messages import Received
 
-    order = list(range(ctx.n_slots))
-    tables = []
-    for nbr, seq, backward in (
-        (np.asarray(ctx.left, np.int64), order, False),
-        (np.asarray(ctx.right, np.int64), order[::-1], True),
-    ):
-        received = Received.empty(len(order), int(ctx.n_grid))
-        receive = prepared.propagate(received, backward=backward)
-        for i in seq:
-            s = int(nbr[i])
-            if s >= 0:
-                received.has_neighbour[i] = True
-                if receive is not None:
-                    receive(s, i)
-        tables.append(received)
-    return tuple(tables)
+    n, K = len(prepared.own), prepared.own.rows.shape[1]
+    if received is None:
+        received = Received.empty(n, K)
+    nbr = np.full(n, -1, np.int64)
+    nbr[int(i)] = int(s)
+    received.has_neighbour[int(i)] = True
+    prepared.run_pass(
+        received, np.array([int(i)], np.int64), nbr, np.zeros(n, bool), backward=int(s) > int(i)
+    )
+    return received
+
+
+_KEEP = object()
+
+
+def _rule(prepared, s, i, *, own=_KEEP, held=None):
+    """The composition rule at the face into ``i`` from ``s``, applied to what ``s`` sends: its own claim
+    — or ``own``, a substituted row, or ``None`` for no claim — composed with ``held``, what it holds from
+    its far side (a row, or nothing). One hop of the native pass on a fresh table; the row ``i``
+    receives, max-normalised, or ``None`` for no claim."""
+    from rigel.calibration.messages import Received
+
+    table = prepared.own
+    kept_mask, kept_row = bool(table.mask[s]), table.rows[s].copy()
+    if own is not _KEEP:
+        table[s] = own
+    received = Received.empty(len(table), table.rows.shape[1])
+    if held is not None:
+        received.composition[s] = held
+        received.has_composition[s] = True
+    try:
+        _hop(prepared, s, i, received)
+    finally:
+        table.rows[s], table.mask[s] = kept_row, kept_mask
+    return received.composition[int(i)].copy() if received.has_composition[int(i)] else None
+
+
+def _lane_prepared(lane, left, right):
+    """A hand-built lane as the pass reads it: a prepared policy with no claims and no composition rules,
+    that one lane, and the chain's two neighbour arrays."""
+    from rigel.calibration.messages.faces import Faces, RowTable
+    from rigel.calibration.messages.transfer import _PreparedTransfer
+
+    n, K = len(lane.own_level), lane.own_level.rows.shape[1]
+    return _PreparedTransfer(
+        RowTable(n, K),
+        Faces(lane.lam, left, right),
+        {lane.population: lane},
+        np.ones(n, bool),
+        np.zeros(n, bool),
+    )
+
+
+def norm(row):
+    """A row max-normalised (the oracle)."""
+    row = np.asarray(row, np.float64)
+    return row - row.max()
+
+
+def fuse(parts):
+    """Independent witnesses about one slot: log-profiles add, then re-normalise (the oracle)."""
+    return norm(sum(np.asarray(q, np.float64) for q in parts))
+
+
+def intersect(bounds):
+    """Two or more bounds on ONE density combine by INTERSECTION: the pointwise minimum of their
+    log-profiles, max-normalised — bounds intersect, they do not multiply (the oracle)."""
+    out = np.asarray(bounds[0], np.float64)
+    for b in bounds[1:]:
+        out = np.minimum(out, np.asarray(b, np.float64))
+    return norm(out)
 
 
 def _native_passes(prepared, ctx):
@@ -290,7 +345,7 @@ def _drive(prepared, ctx):
     """The backbone's own contract, reproduced: the two passes (`_passes`) and the solve, which receives
     the two tables. Returns ``(rows, from_left, from_right)`` — the delivered rows (zeros when the
     policy is silent) and the tables."""
-    from_left, from_right = _passes(prepared, ctx)
+    from_left, from_right = _native_passes(prepared, ctx)
     msg = prepared.solve(from_left, from_right)
     rows = (
         np.zeros((int(ctx.n_slots), int(ctx.n_grid)))
@@ -373,7 +428,7 @@ def _with_populated_inside(ctx):
     opportunity, for the policy and the independent recompute alike."""
     import dataclasses as _dc
 
-    from rigel.calibration.messages.transfer_rows import outside_flank
+    from rigel.native import transfer_rows as R
 
     is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
@@ -390,7 +445,7 @@ def _with_populated_inside(ctx):
         lo, hi = left[b], right[b]
         if lo < 0 or hi < 0 or not (is_exon[lo] and is_exon[hi]):
             continue
-        _o, i = outside_flank(flags[b], lo, hi)
+        _o, i = R.outside_flank(int(flags[b]), int(lo), int(hi))
         if i is None:
             continue
         cnt[i] = next(fills)
@@ -411,8 +466,7 @@ def _with_alt_splice_sites(ctx):
     populate the pieces beyond them — a context is data; the policy and the recompute read the same."""
     import dataclasses as _dc
 
-    from rigel.calibration.messages.transfer_rows import TERMINUS
-    from rigel.calibration.splice_graph import FLAG_ACCEPTOR_NEG, FLAG_DONOR_POS
+    from rigel.calibration.splice_graph import FLAG_ACCEPTOR_NEG, FLAG_DONOR_POS, FLAG_TERMINUS
 
     base = _with_populated_inside(ctx)
     is_bnd = np.asarray(base.is_boundary, bool)
@@ -423,7 +477,7 @@ def _with_alt_splice_sites(ctx):
     kinds = iter([(FLAG_DONOR_POS, (40.0, 0.0)), (FLAG_ACCEPTOR_NEG, (0.0, 50.0))])
     for b in np.flatnonzero(is_bnd):
         lo, hi = left[b], right[b]
-        if lo < 0 or hi < 0 or not (is_exon[lo] and is_exon[hi]) or not (flags[b] & TERMINUS):
+        if lo < 0 or hi < 0 or not (is_exon[lo] and is_exon[hi]) or not (flags[b] & FLAG_TERMINUS):
             continue
         kind, fl = next(kinds)
         flags[b] = kind

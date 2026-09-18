@@ -247,7 +247,7 @@ class CalibrationConfig:
 
     The calibrator is the belief-propagation sweep over the region-boundary chain — a single
     forward-backward pass per solve_chain call, each hop priced by both witnesses' counting plus the
-    pair's disagreement beyond it (`messages.transfer_rows.hop_price`); ``sweep_logodds_step`` sets the
+    pair's disagreement beyond it (``hop_price``, `native/transfer_rows.h`); ``sweep_logodds_step`` sets the
     per-region log-odds lattice. See :func:`rigel.calibration.calibrate.calibrate`.
     """
 

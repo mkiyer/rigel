@@ -9,11 +9,12 @@
 //   transfer_solve    THE SOLVE (phase 2, the policy's half): the two held tables into ψ's two channels — the
 //                     fused λ rows and the cube delivery at the AMBIG nodes (`_PreparedTransfer.solve`).
 //
-// The row constructors are `transfer_rows.h`, shared with ψ's kernel. This file is the one implementation
-// of the policy's arithmetic: its gates are the transfer gates (`tests/calibration/test_transfer_faces.py`,
-// `test_transfer_policy.py`, `test_transfer_rna_lanes.py`, the tables and the delivered channels against
-// independent recomputes), `test_pass_kernel.py` (the pass against the per-hop Python kernel) and
-// `profiling/sweep_replay.py replay --tolerance` on a captured sweep.
+// The row constructors are `transfer_rows.h`, shared with ψ's kernel. This file is the ONE implementation
+// of the policy's arithmetic — there is no Python kernel beside it — and its gates are the transfer gates
+// (`tests/calibration/test_transfer_faces.py`, `test_transfer_policy.py`, `test_transfer_rna_lanes.py`: the
+// tables, single hops of the pass and the delivered channels against independent recomputes, the row
+// constructors and flag predicates held to their analytic properties through the `rows` submodule bound at
+// the end of this file) and `profiling/sweep_replay.py replay` on a captured sweep.
 
 #include <algorithm>
 #include <array>
@@ -58,7 +59,7 @@ constexpr int SJ_FLAGS = DON_POS | DON_NEG | ACC_POS | ACC_NEG;
 constexpr int BODY_RIGHT = TSS_POS | TES_NEG, BODY_LEFT = TES_POS | TSS_NEG;
 //: a DONOR bit marks the intron's LOW end (the intron lies right), an ACCEPTOR its HIGH end
 constexpr int INTRON_RIGHT = DON_POS | DON_NEG, INTRON_LEFT = ACC_POS | ACC_NEG;
-//: a strand's four boundary bits and its terminus bits (transfer_rows.strand_bits), by strand 0 = +, 1 = −
+//: a strand's four boundary bits and its terminus bits, by strand 0 = +, 1 = −
 constexpr int ALL_BITS[2] = {TSS_POS | TES_POS | DON_POS | ACC_POS, TSS_NEG | TES_NEG | DON_NEG | ACC_NEG};
 constexpr int TERM_BITS[2] = {TSS_POS | TES_POS, TSS_NEG | TES_NEG};
 
@@ -880,6 +881,151 @@ std::pair<bool, int> transfer_solve(Vec lam, nb::tuple from_left, nb::tuple from
     return {live, d};
 }
 
+
+// ═══ THE ROW CONSTRUCTORS AND FLAG PREDICATES, BOUND FOR THE GATES ═══════════════════════════════════════
+// The one implementation of every row constructor (`transfer_rows.h`) and flag predicate (above) is read by
+// the gates through these bindings — as ψ's is through `psi_cube` — each a fresh array from the constructor's
+// own arguments, on a scratch of its own. Nothing in `src/` reads them.
+
+using Row = nb::ndarray<nb::numpy, double, nb::ndim<1>>;
+
+Row make_row(std::vector<double>&& v) {
+    auto* p = new std::vector<double>(std::move(v));
+    nb::capsule owner(p, [](void* q) noexcept { delete static_cast<std::vector<double>*>(q); });
+    const size_t shape[1] = {p->size()};
+    return Row(p->data(), 1, shape, std::move(owner));
+}
+
+int K_of(const Vec& v) { return static_cast<int>(v.shape(0)); }
+
+nb::object flank(int64_t x) { return x < 0 ? nb::none() : nb::cast(x); }
+
+void bind_rows(nb::module_& m) {
+    nb::module_ r = m.def_submodule(
+        "rows", "The row constructors of transfer_rows.h and the builders' flag predicates, bound for the gates.");
+    r.attr("EPS") = EPS;
+    r.def("trigamma", &trigamma, nb::arg("x"), "zeta(2, x), the counting variance's one home.");
+    r.def("count_logvar", &count_logvar, nb::arg("n"));
+    r.def("hop_price", &hop_price, nb::arg("n_s"), nb::arg("a_s"), nb::arg("n_x"), nb::arg("a_x"));
+    r.def("blur_row", [](Vec row, Vec lam, double v) {
+        const int K = K_of(row);
+        std::vector<double> out(K), scratch;
+        blur_row(row.data(), K, lam.data(), v, out.data(), scratch);
+        return make_row(std::move(out));
+    }, nb::arg("row"), nb::arg("lam"), nb::arg("v"));
+    r.def("lower_side", [](Vec p) {
+        const int K = K_of(p);
+        std::vector<double> out(K);
+        lower_side(p.data(), K, out.data());
+        return make_row(std::move(out));
+    }, nb::arg("profile"));
+    r.def("face_map_lambda", [](Vec lam, double n_u, double a_g_b, double a_r_b, double e_g_e, double e_r_e, double s) {
+        const int K = K_of(lam);
+        std::vector<double> out(K);
+        face_map_lambda(lam.data(), K, n_u, a_g_b, a_r_b, e_g_e, e_r_e, s, out.data());
+        return make_row(std::move(out));
+    }, nb::arg("lam"), nb::arg("n_u"), nb::arg("a_g_b"), nb::arg("a_r_b"), nb::arg("e_g_e"), nb::arg("e_r_e"), nb::arg("s"));
+    r.def("transport_row", [](Vec row, Vec lam, Vec map, double n_u, double n_s) {
+        const int K = K_of(lam);
+        Scratch S(K);
+        std::vector<double> out(K);
+        transport_row(row.data(), lam.data(), K, map.data(), n_u, n_s, S, out.data());
+        return make_row(std::move(out));
+    }, nb::arg("row"), nb::arg("lam"), nb::arg("lam_e_of_u"), nb::arg("n_u"), nb::arg("n_s"));
+    r.def("splice_out_row", [](Vec row_e, Vec lam, double n_u, double n_s, double a_g_b, double a_g_e, Vec nodes) {
+        const int K = K_of(lam);
+        Scratch S(K);
+        std::vector<double> out(K);
+        splice_out_row(row_e.data(), lam.data(), K, n_u, n_s, a_g_b, a_g_e, nodes.data(), K_of(nodes), S, out.data());
+        return make_row(std::move(out));
+    }, nb::arg("row_e"), nb::arg("lam"), nb::arg("n_u"), nb::arg("n_s"), nb::arg("a_g_b"), nb::arg("a_g_e"), nb::arg("nodes"));
+    r.def("level_map_lambda", [](Vec lam, double density_b, double opportunity_i, double total_i) {
+        const int K = K_of(lam);
+        std::vector<double> out(K);
+        level_map_lambda(lam.data(), K, density_b, opportunity_i, total_i, out.data());
+        return make_row(std::move(out));
+    }, nb::arg("lam"), nb::arg("density_b"), nb::arg("opportunity_i"), nb::arg("total_i"));
+    r.def("level_row", [](Vec row_b, Vec lam, Vec map, double v) {
+        const int K = K_of(lam);
+        Scratch S(K);
+        std::vector<double> out(K);
+        level_row(row_b.data(), lam.data(), K, map.data(), v, S, out.data());
+        return make_row(std::move(out));
+    }, nb::arg("row_b"), nb::arg("lam"), nb::arg("lam_i_of_b"), nb::arg("v"));
+    r.def("level_bound_row", [](Vec lam, double density_b, double opportunity_i, double total_i, double v) {
+        const int K = K_of(lam);
+        std::vector<double> out(K);
+        level_bound_row(lam.data(), K, density_b, opportunity_i, total_i, v, out.data());
+        return make_row(std::move(out));
+    }, nb::arg("lam"), nb::arg("density_b"), nb::arg("opportunity_i"), nb::arg("total_i"), nb::arg("v"));
+    r.def("edge_level_row", [](Vec lam, double n_b, double n_e, double a_g_b, double a_g_e) {
+        const int K = K_of(lam);
+        std::vector<double> out(K);
+        edge_level_row(lam.data(), K, n_b, n_e, a_g_b, a_g_e, out.data());
+        return make_row(std::move(out));
+    }, nb::arg("lam"), nb::arg("n_b"), nb::arg("n_e"), nb::arg("a_g_b"), nb::arg("a_g_e"));
+    r.def("poisson_level", [](Vec u, double n, double a, double rho_ref) {
+        const int K = K_of(u);
+        std::vector<double> out(K);
+        poisson_level(u.data(), K, n, a, rho_ref, out.data());
+        return make_row(std::move(out));
+    }, nb::arg("u"), nb::arg("n"), nb::arg("a"), nb::arg("rho_ref"));
+    r.def("level_of_profile", [](Vec row, Vec lam, Vec u, double n, double a, double rho_ref) {
+        const int K = K_of(lam);
+        Scratch S(K);
+        std::vector<double> out(K);
+        level_of_profile(row.data(), lam.data(), u.data(), K, n, a, rho_ref, S, out.data());
+        return make_row(std::move(out));
+    }, nb::arg("row"), nb::arg("lam"), nb::arg("u"), nb::arg("n"), nb::arg("a"), nb::arg("rho_ref"));
+    r.def("rna_level_of_profile", [](Vec row, Vec lam, Vec u, double n, double a_r, double rho_ref) {
+        const int K = K_of(lam);
+        Scratch S(K);
+        std::vector<double> out(K);
+        rna_level_of_profile(row.data(), lam.data(), u.data(), K, n, a_r, rho_ref, S, out.data());
+        return make_row(std::move(out));
+    }, nb::arg("row"), nb::arg("lam"), nb::arg("u"), nb::arg("n"), nb::arg("a_r"), nb::arg("rho_ref"));
+    r.def("profile_of_level", [](Vec p, Vec u, Vec lam, double n, double a, double rho_ref) {
+        const int K = K_of(lam);
+        Scratch S(K);
+        std::vector<double> out(K);
+        profile_of_level(p.data(), u.data(), lam.data(), K, n, a, rho_ref, S, out.data());
+        return make_row(std::move(out));
+    }, nb::arg("profile"), nb::arg("u"), nb::arg("lam"), nb::arg("n"), nb::arg("a"), nb::arg("rho_ref"));
+    r.def("rna_row_of_level", [](Vec p, Vec u, Vec lam, double n, double a_r, double rho_ref) {
+        const int K = K_of(lam);
+        Scratch S(K);
+        std::vector<double> out(K);
+        rna_row_of_level(p.data(), u.data(), lam.data(), K, n, a_r, rho_ref, S, out.data());
+        return make_row(std::move(out));
+    }, nb::arg("profile"), nb::arg("u"), nb::arg("lam"), nb::arg("n"), nb::arg("a_r"), nb::arg("rho_ref"));
+    r.def("flux_level", [](Vec u, double count, double rate, double rho_ref, double v) -> nb::object {
+        const int K = K_of(u);
+        Scratch S(K);
+        std::vector<double> out(K);
+        if (!flux_level(u.data(), K, count, rate, rho_ref, v, S, out.data())) return nb::none();
+        return nb::cast(make_row(std::move(out)));
+    }, nb::arg("u"), nb::arg("count"), nb::arg("rate"), nb::arg("rho_ref"), nb::arg("v") = 0.0,
+       "The certified flux as a lower-sided RNA level, or None for a zero count.");
+    // the builders' flag predicates, on the boundary flags
+    r.def("face_is_licensed", [](int64_t f, bool fp_e, bool fn_e, bool fp_i, bool fn_i) {
+        return face_is_licensed(static_cast<int>(f), fp_e, fn_e, fp_i, fn_i);
+    }, nb::arg("flags"), nb::arg("fp_e"), nb::arg("fn_e"), nb::arg("fp_i"), nb::arg("fn_i"));
+    r.def("boundary_shares_strand", &boundary_shares_strand, nb::arg("fp_b"), nb::arg("fn_b"), nb::arg("fp_i"), nb::arg("fn_i"));
+    r.def("outside_flank", [](int64_t f, int64_t left, int64_t right) {
+        int64_t o, i;
+        outside_flank(static_cast<int>(f), left, right, o, i);
+        return nb::make_tuple(flank(o), flank(i));
+    }, nb::arg("flags"), nb::arg("left"), nb::arg("right"), "(outside, inside) of a terminus boundary, or (None, None).");
+    r.def("junction_exon_side", [](int64_t f, int64_t left, int64_t right) {
+        return flank(junction_exon_side(static_cast<int>(f), left, right));
+    }, nb::arg("flags"), nb::arg("left"), nb::arg("right"), "The flank on a junction's exon side, or None.");
+    r.def("junction_flanks", [](int64_t f, int64_t left, int64_t right) {
+        int64_t c, e;
+        junction_flanks(static_cast<int>(f), left, right, c, e);
+        return nb::make_tuple(flank(c), flank(e));
+    }, nb::arg("flags"), nb::arg("left"), nb::arg("right"), "(C, E) at an exon|exon junction with no terminus, or (None, None).");
+}
+
 }  // namespace
 
 NB_MODULE(_transfer_impl, m) {
@@ -904,7 +1050,6 @@ NB_MODULE(_transfer_impl, m) {
           "Run one pass in chain order: for every destination in `seq` with a neighbour `nbr[i] >= 0` "
           "that is not a terminal, apply the face's composition rule and carry each lane's level, "
           "writing the Received tables in place.");
-    m.def("trigamma", &trigamma, nb::arg("x"), "zeta(2, x), the counting variance's one home in C++.");
     m.def("transfer_solve", &transfer_solve, nb::arg("lam"), nb::arg("from_left"), nb::arg("from_right"),
           nb::arg("gdna").none(), nb::arg("pos").none(), nb::arg("neg").none(), nb::arg("ambig"),
           nb::arg("free_pos"), nb::arg("free_neg"), nb::arg("out_rows"), nb::arg("cube_slot"), nb::arg("cube_pos"),
@@ -912,4 +1057,5 @@ NB_MODULE(_transfer_impl, m) {
           nb::arg("cube_opportunity"), nb::arg("cube_rho"),
           "The policy's solve for one block: the two held tables into the fused λ rows (written in place) and the "
           "cube delivery at the AMBIG nodes (the cube arrays, written in place). Returns (live, delivered rows).");
+    bind_rows(m);
 }

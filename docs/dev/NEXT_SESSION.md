@@ -21,7 +21,8 @@ building, is `docs/dev/THREADS_PLAN.md`.
    BIT-IDENTICAL on all four sweeps, the suite, the three references; two interleaved pairs on VCaP at `--threads 8`.
    Then the cache key on the factory's inputs, the gDNA arm inside ψ, and the block in one native call — in that order,
    each its own commit, each gated as the plan says.
-6. The one-path convergence still owed (below).
+6. ~~The one-path convergence of the pass~~ — DONE 2026-09-17, prepared as snapshot `commits/13_one_path/`
+   (the per-hop Python kernel and `transfer_rows.py` deleted; the constructors bound for the gates).
 7. §G: the scan (35 s) and the second pass (22 s), the stages that scale with depth.
 
 ## Where the time is now (MO_3021 replayed, this tree; `s10/kernel_times_quiet.log`)
@@ -46,16 +47,12 @@ sweep is 135 s of 264 s, ψ 53 s of it; the allocation step 277 → 275 s and 27
 ## The one-path ruling (owner, 2026-09-17) — what is still duplicated
 
 One production code path; once native code is validated the Python it replaces is deleted; a small floating-point
-tolerance is accepted. STILL DUPLICATED, to converge on the same pattern (bind the C++ pieces for the unit gates,
-rewrite the per-hop gates to drive `run_pass` on small tables, delete the Python): the per-hop pass kernel
-(`_PreparedTransfer.propagate`, `Faces.apply`, `LevelLane.emit` / `receive`) and the row constructors of
-`transfer_rows.py` that only it and the gates' recomputes read (`face_map_lambda`, `edge_level_row`,
-`level_map_lambda`, `level_bound_row`, `poisson_level`, `level_of_profile`, `rna_level_of_profile`, `flux_level`,
-`transport_row`, `splice_out_row`, `level_row`, `blur_row`, the flag helpers, `strand_bits`);
-`test_pass_kernel.py`'s two-kernel gate goes with them (the poison gate's per-hop half goes with it too). What the
-policy's `solve` still reads in Python (`intersect`, `lower_side`, `profile_of_level`, `rna_row_of_level`,
-`hop_price`, `count_logvar`) converges when `solve` does. The layer-4 `strand_likelihood` "executable reference"
-module is the same kind of duplicate — the owner's call.
+tolerance is accepted. Applied to the builders, ψ, the policy's solve and now the pass: the per-hop Python kernel
+(`_PreparedTransfer.propagate`, `Faces.apply`, `LevelLane.emit` / `receive`) and `messages/transfer_rows.py` are
+deleted; the row constructors and flag predicates the gates need are the native ones, bound as
+`native.transfer_rows`; a rule or a lane hop is gated by driving ONE hop of the native pass
+(`_transfer_harness._hop` / `_rule`). What remains duplicated: the layer-4 `strand_likelihood` "executable
+reference" module (its gate reads the native strand term through `psi_cube`) — the owner's call.
 
 ## The protocol for every step (unchanged)
 

@@ -2,7 +2,7 @@
 """How does a prototype message policy score, per gene type and per slot, against certified truth?
 This is the harness a message mechanism is developed on before it touches `src/`. A prototype is a
 Python class with the backbone's ``Policy`` shape (``library(view)`` once over the whole chain, and
-``prepare(ctx, library)`` returning an object with ``propagate`` / ``solve``; constructed as
+``prepare(ctx, library)`` returning an object with ``run_pass`` / ``solve``; constructed as
 ``PolicyClass(strand=...)``), named in an ``ARMS = {"my_arm": PolicyClass, ...}`` table in the module
 ``--module`` points at; the harness installs it in place of ``calibrate``'s ``TransferPolicy`` for
 the ``transfer`` arm and scores it beside ``silent`` and the shipped ``transfer`` on a cached,
@@ -168,7 +168,7 @@ def slot_classes(c, bflags):
     """One label per slot: the certified stratum (``R exon``, ``B exon|exon`` …), a boundary's terminus /
     junction flags, and an exon's reach — ``licensed`` (an intron|exon face without a terminus),
     ``edge`` (an intergenic|exon edge and no licensed face), or ``walled`` (neither)."""
-    from rigel.calibration.messages.transfer_rows import SJ_FLAGS, TERMINUS
+    from rigel.calibration.splice_graph import FLAG_JUNCTION, FLAG_TERMINUS
 
     kind, obj, chain, strata = c["kind"], c["obj"], c["chain"], c["strata"]
     left = np.asarray(chain.left, np.int64)
@@ -178,7 +178,7 @@ def slot_classes(c, bflags):
     is_bnd = kind == BOUNDARY
     for b in np.flatnonzero(is_bnd):
         f = int(flags[obj[b]])
-        labels[b] = strata[b] + (" [term]" if f & TERMINUS else "") + (" [sj]" if f & SJ_FLAGS else "")
+        labels[b] = strata[b] + (" [term]" if f & FLAG_TERMINUS else "") + (" [sj]" if f & FLAG_JUNCTION else "")
     for e in np.flatnonzero(strata == "R exon"):
         reach = "walled"
         for b in (left[e], right[e]):
@@ -187,7 +187,7 @@ def slot_classes(c, bflags):
             o = right[b] if left[b] == e else left[b]
             if o < 0:
                 continue
-            if strata[o] == "R intron" and not (int(flags[obj[b]]) & TERMINUS):
+            if strata[o] == "R intron" and not (int(flags[obj[b]]) & FLAG_TERMINUS):
                 reach = "licensed"
                 break
             if strata[o] == "R intergenic":

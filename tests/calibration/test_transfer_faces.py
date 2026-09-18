@@ -1,5 +1,7 @@
 """Gates for the transfer policy's per-face message builders, every row recomputed on the live
-toy by a second implementation so a policy bug cannot hide.
+toy by a second implementation so a policy bug cannot hide; the row constructors and flag predicates are
+the native ones (`native.transfer_rows`, bound for the gates), and a rule is applied to a claim by driving
+one hop of the native pass (`_transfer_harness._rule`).
 
 The intron|exon face: the licence refuses unmeasured population changes; the splice-in face map is
 monotone and capped by a measured flux, with its width exactly the face's counting variance; the
@@ -17,12 +19,15 @@ import numpy as np
 import pytest
 from scipy.special import polygamma
 
+from rigel.calibration.messages.transfer import MARGINAL_NODES
+from rigel.native import transfer_rows as R
 from _transfer_harness import (
     _ctx_of,
     _expected_pairs,
     _full_policy,
     _intron_mask,
     _prepared,
+    _rule,
     _strand_of,
     _strand_row_of,
     _with_alt_splice_sites,
@@ -77,9 +82,8 @@ def _expected_exon_rows(si, ctx, src, lam, strand_of_si=None):
                 continue
             if not (A_g[b] > 0 and A_g[e] > 0 and n_u[e] > 0):
                 continue
-            from rigel.calibration.messages.transfer_rows import edge_level_row
 
-            r = edge_level_row(lam, n_u[b], n_u[e], A_g[b], A_g[e])
+            r = R.edge_level_row(lam, n_u[b], n_u[e], A_g[b], A_g[e])
             if np.ptp(r) <= 1e-9:
                 continue
             add += r - r.max()
@@ -123,7 +127,6 @@ def test_the_face_licence_refuses_unmeasured_population_changes():
     """The licence predicate, gated directly: the integration gate cannot falsify the terminus
     branch on this toy, because no terminus-flagged intron|exon face exists there, so the pure
     function carries the falsification instead."""
-    from rigel.calibration.messages.transfer_rows import face_is_licensed
     from rigel.calibration.splice_graph import (
         FLAG_TES_NEG,
         FLAG_TES_POS,
@@ -131,30 +134,31 @@ def test_the_face_licence_refuses_unmeasured_population_changes():
         FLAG_TSS_POS,
     )
 
-    assert face_is_licensed(0, True, False, True, False)
+    assert R.face_is_licensed(0, True, False, True, False)
     for flag in (FLAG_TSS_POS, FLAG_TSS_NEG, FLAG_TES_POS, FLAG_TES_NEG):
-        assert not face_is_licensed(flag, True, False, True, False), f"terminus {flag} must refuse"
-    assert not face_is_licensed(0, True, False, True, True), "a strand-set change must refuse"
-    assert not face_is_licensed(0, True, True, False, True), "a strand-set change must refuse"
-    assert face_is_licensed(0, True, True, True, True), "matching AMBIG sides are licensed"
+        assert not R.face_is_licensed(flag, True, False, True, False), (
+            f"terminus {flag} must refuse"
+        )
+    assert not R.face_is_licensed(0, True, False, True, True), "a strand-set change must refuse"
+    assert not R.face_is_licensed(0, True, True, False, True), "a strand-set change must refuse"
+    assert R.face_is_licensed(0, True, True, True, True), "matching AMBIG sides are licensed"
 
 
 def test_the_face_map_is_monotone_and_flux_capped():
     """The map lam_e(lam_u) is monotone nondecreasing; a measured spliced density CAPS the
     exon's claimable f_g at the closed-form ceiling; s = 0 degenerates to a pure shift by the
     opportunity ratio."""
-    from rigel.calibration.messages.transfer_rows import face_map_lambda
 
     lam = np.linspace(-10, 10, 401)
     n_u, A_g_b, A_r_b, A_g_e, A_r_e, s = 40.0, 200.0, 210.0, 800.0, 790.0, 3.0
-    le = face_map_lambda(lam, n_u, A_g_b, A_r_b, A_g_e, A_r_e, s)
+    le = R.face_map_lambda(lam, n_u, A_g_b, A_r_b, A_g_e, A_r_e, s)
     assert np.all(np.diff(le) >= -1e-12), "the map must be monotone nondecreasing"
     ceiling = np.log(n_u / A_g_b * A_g_e) - np.log(s * A_r_e)
     # the ceiling is a SUPREMUM: the grid's last point sits sigma(+L)-short of it (~5e-5 nats
     # at L = 10), so approach is asserted at that scale and the CAP is asserted hard.
     assert le[-1] == pytest.approx(ceiling, abs=1e-3)
     assert le.max() <= ceiling + 1e-9, "certified flux must CAP the claimable f_g"
-    le0 = face_map_lambda(lam, n_u, A_g_b, A_r_b, A_g_e, A_r_e, 0.0)
+    le0 = R.face_map_lambda(lam, n_u, A_g_b, A_r_b, A_g_e, A_r_e, 0.0)
     shift = np.log((A_g_e / A_g_b) / (A_r_e / A_r_b))
     np.testing.assert_allclose(le0, lam + shift, rtol=0, atol=1e-9)
 
@@ -165,13 +169,11 @@ def test_the_ingredient_width_adds_the_counting_variance():
     analytic property an inverted or mis-scaled kernel cannot fake."""
     from scipy.special import polygamma
 
-    from rigel.calibration.messages.transfer_rows import transport_row
-
     lam = np.linspace(-10, 10, 401)
     row = -0.5 * (lam - 0.8) ** 2  # unit-variance Gaussian factor
     n_u, n_s = 9.0, 3.0
     v = float(polygamma(1, n_u + 0.5) + polygamma(1, n_s + 0.5))
-    out = transport_row(row, lam, lam.copy(), n_u, n_s)  # identity map isolates the width
+    out = R.transport_row(row, lam, lam.copy(), n_u, n_s)  # identity map isolates the width
 
     def _var(r):
         w = np.exp(r - r.max())
@@ -267,7 +269,6 @@ def test_the_splice_out_row_is_the_count_form_widened_by_the_marginal():
     mode sits at f_b = f_E (U+S)/U, the enrichment ratio having cancelled;
     (ii) more gDNA at the boundary than in the exon whenever S > 0 (the reversed subtraction cannot
     pass); (iii) the marginal over log rho is WIDER at a thin face than at a deep one."""
-    from rigel.calibration.messages.transfer_rows import splice_out_row
 
     lam = np.linspace(-8, 8, 801)
     sig = 1 / (1 + np.exp(-lam))
@@ -283,13 +284,19 @@ def test_the_splice_out_row_is_the_count_form_widened_by_the_marginal():
         m = w @ lam
         return float(w @ (lam * lam) - m * m)
 
-    deep = splice_out_row(row_e, lam, n_u=2000.0, n_s=3000.0, a_g_b=210.0, a_g_e=210.0)
+    deep = R.splice_out_row(
+        row_e, lam, n_u=2000.0, n_s=3000.0, a_g_b=210.0, a_g_e=210.0, nodes=MARGINAL_NODES
+    )
     assert _mode_f(deep) == pytest.approx(f_e * (2000 + 3000) / 2000, abs=0.01)
     assert _mode_f(deep) > f_e
-    thin = splice_out_row(row_e, lam, n_u=6.0, n_s=9.0, a_g_b=210.0, a_g_e=210.0)
+    thin = R.splice_out_row(
+        row_e, lam, n_u=6.0, n_s=9.0, a_g_b=210.0, a_g_e=210.0, nodes=MARGINAL_NODES
+    )
     assert _var(thin) > 3 * _var(deep), "a thin face must deliver a much wider claim"
     assert abs(float(deep.max())) < 1e-12 and abs(float(thin.max())) < 1e-12
-    assert not splice_out_row(row_e, lam, n_u=0.0, n_s=9.0, a_g_b=210.0, a_g_e=210.0).any()
+    assert not R.splice_out_row(
+        row_e, lam, n_u=0.0, n_s=9.0, a_g_b=210.0, a_g_e=210.0, nodes=MARGINAL_NODES
+    ).any()
 
 
 def _expected_boundary_rows(si, ctx, strand, lam):
@@ -334,13 +341,12 @@ def test_the_boundary_strand_licence_requires_one_shared_strand():
     shares one strand), so the pure function carries the falsification: one strand, shared by both
     flanks, is licensed; an AMBIG pair (whose strand split constrains the tilt, never f_g), a
     strand-set change and an empty boundary refuse."""
-    from rigel.calibration.messages.transfer_rows import boundary_shares_strand
 
-    assert boundary_shares_strand(True, False, True, False)
-    assert boundary_shares_strand(False, True, False, True)
-    assert not boundary_shares_strand(True, True, True, True), "an AMBIG pair must refuse"
-    assert not boundary_shares_strand(True, False, True, True), "a strand-set change must refuse"
-    assert not boundary_shares_strand(False, False, True, False), "an empty boundary must refuse"
+    assert R.boundary_shares_strand(True, False, True, False)
+    assert R.boundary_shares_strand(False, True, False, True)
+    assert not R.boundary_shares_strand(True, True, True, True), "an AMBIG pair must refuse"
+    assert not R.boundary_shares_strand(True, False, True, True), "a strand-set change must refuse"
+    assert not R.boundary_shares_strand(False, False, True, False), "an empty boundary must refuse"
 
 
 def test_the_intron_face_carries_the_pair_identity_and_the_face_map(sweep_inputs):
@@ -377,7 +383,7 @@ def test_the_intron_face_carries_the_pair_identity_and_the_face_map(sweep_inputs
             claim = prepared.own[i] if (i >= 0 and intron[i]) else prepared.own[b]
             if claim is None:
                 continue
-            r = prepared.faces.apply(b, e, claim, None)
+            r = _rule(prepared, b, e, own=claim)
             if r is not None and np.ptp(r) > 1e-9:
                 acc = (r - r.max()) if acc is None else acc + (r - r.max())
         if int(e) in exon_rows:
@@ -420,7 +426,7 @@ def test_the_exon_and_boundary_own_claims_are_the_strand_rows_and_their_rules_th
             other = left[b] if right[b] == e else right[b]
             if other < 0 or not intron[other]:
                 continue  # the terminus and alternative-splice rules leave through exon|exon faces: their own gates
-            r = prepared.faces.apply(e, b, prepared.own[e], None)
+            r = _rule(prepared, e, b)
             if r is not None and np.ptp(r) > 1e-9:
                 got[int(b)] = got.get(int(b), 0.0) + (r - r.max())
     assert set(got) == set(expected), set(got) ^ set(expected)
@@ -456,12 +462,11 @@ def test_the_edge_level_is_one_sided_and_a_zero_count_is_vacuous():
     Poisson — the exon has at least the edge's gDNA density; nothing above it, because no local
     witness prices capture's enrichment of the interior; and a zero count is vacuous, because
     darkness under capture is not absence."""
-    from rigel.calibration.messages.transfer_rows import edge_level_row
 
     lam = np.linspace(-8, 8, 801)
     sig = 1 / (1 + np.exp(-lam))
     n_e, a_b, a_e = 400.0, 200.0, 800.0
-    row = edge_level_row(
+    row = R.edge_level_row(
         lam, 25.0, n_e, a_b, a_e
     )  # the implied edge count is 100 f: the level at f = 0.25
     c = sig * n_e * a_b / a_e
@@ -471,14 +476,13 @@ def test_the_edge_level_is_one_sided_and_a_zero_count_is_vacuous():
     assert float(np.interp(np.log(0.1 / 0.9), lam, row)) < -3.0, (
         "below it the count's own Poisson charges"
     )
-    assert not edge_level_row(lam, 0.0, n_e, a_b, a_e).any(), "a zero count is vacuous"
+    assert not R.edge_level_row(lam, 0.0, n_e, a_b, a_e).any(), "a zero count is vacuous"
 
 
 def _item5_slots(ctx):
     """The terminus rules' delivery sites — every exon|exon boundary carrying one terminus direction and no sj
     whose outside flank shares its single strand, and that outside exon — derived from the flags
     alone, so the earlier gates can hand these slots to the terminus's own gate."""
-    from rigel.calibration.messages.transfer_rows import boundary_shares_strand, outside_flank
 
     is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
@@ -490,8 +494,10 @@ def _item5_slots(ctx):
         lo, hi = left[b], right[b]
         if lo < 0 or hi < 0 or not (is_exon[lo] and is_exon[hi]):
             continue
-        o, _i = outside_flank(flags[b], lo, hi)
-        if o is not None and boundary_shares_strand(fp[b], fn[b], fp[o], fn[o]):
+        o, _i = R.outside_flank(int(flags[b]), int(lo), int(hi))
+        if o is not None and R.boundary_shares_strand(
+            bool(fp[b]), bool(fn[b]), bool(fp[o]), bool(fn[o])
+        ):
             out |= {int(b), int(o)}
     return out
 
@@ -501,7 +507,7 @@ def _terminus_flags_cleared(ctx):
     every other message is unchanged (they read flags at intron|exon faces only)."""
     import dataclasses as _dc
 
-    from rigel.calibration.messages.transfer_rows import TERMINUS
+    from rigel.calibration.splice_graph import FLAG_TERMINUS
 
     is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
@@ -509,7 +515,7 @@ def _terminus_flags_cleared(ctx):
     flags = np.asarray(ctx.boundary_flags, np.uint16).copy()
     for b in np.flatnonzero(is_bnd):
         if left[b] >= 0 and right[b] >= 0 and is_exon[left[b]] and is_exon[right[b]]:
-            flags[b] &= ~TERMINUS
+            flags[b] &= ~FLAG_TERMINUS
     return _dc.replace(ctx, boundary_flags=flags)
 
 
@@ -519,7 +525,6 @@ def test_the_terminus_orientation_reads_the_flag_alone():
     pointing both ways or no terminus at all give no side. A splice junction sharing the boundary does
     NOT change the side, which is the sj+terminus case: the four ladder families resolve as their
     terminus does, and a junction with no terminus still gives no side (the perturbation)."""
-    from rigel.calibration.messages.transfer_rows import junction_exon_side, outside_flank
     from rigel.calibration.splice_graph import (
         FLAG_ACCEPTOR_NEG,
         FLAG_ACCEPTOR_POS,
@@ -531,41 +536,43 @@ def test_the_terminus_orientation_reads_the_flag_alone():
         FLAG_TSS_POS,
     )
 
-    assert outside_flank(FLAG_TSS_POS, 7, 9) == (7, 9)
-    assert outside_flank(FLAG_TES_NEG, 7, 9) == (7, 9)
-    assert outside_flank(FLAG_TES_POS, 7, 9) == (9, 7)
-    assert outside_flank(FLAG_TSS_NEG, 7, 9) == (9, 7)
-    assert outside_flank(FLAG_TSS_POS | FLAG_TES_POS, 7, 9) == (None, None), "both ways: no side"
-    assert outside_flank(0, 7, 9) == (None, None), "no terminus: no side"
+    assert R.outside_flank(FLAG_TSS_POS, 7, 9) == (7, 9)
+    assert R.outside_flank(FLAG_TES_NEG, 7, 9) == (7, 9)
+    assert R.outside_flank(FLAG_TES_POS, 7, 9) == (9, 7)
+    assert R.outside_flank(FLAG_TSS_NEG, 7, 9) == (9, 7)
+    assert R.outside_flank(FLAG_TSS_POS | FLAG_TES_POS, 7, 9) == (None, None), "both ways: no side"
+    assert R.outside_flank(0, 7, 9) == (None, None), "no terminus: no side"
     # the sj+terminus families: the terminus decides, the junction says where its flux belongs
-    assert outside_flank(FLAG_TSS_POS | FLAG_ACCEPTOR_POS, 7, 9) == (
+    assert R.outside_flank(FLAG_TSS_POS | FLAG_ACCEPTOR_POS, 7, 9) == (
         7,
         9,
     )  # a start at an exon's low edge
-    assert outside_flank(FLAG_TES_POS | FLAG_DONOR_POS, 7, 9) == (
+    assert R.outside_flank(FLAG_TES_POS | FLAG_DONOR_POS, 7, 9) == (
         9,
         7,
     )  # an end at an exon's high edge
-    assert outside_flank(FLAG_TSS_NEG | FLAG_DONOR_NEG, 7, 9) == (
+    assert R.outside_flank(FLAG_TSS_NEG | FLAG_DONOR_NEG, 7, 9) == (
         9,
         7,
     )  # a − start at an exon's high edge
-    assert outside_flank(FLAG_TES_NEG | FLAG_ACCEPTOR_NEG, 7, 9) == (
+    assert R.outside_flank(FLAG_TES_NEG | FLAG_ACCEPTOR_NEG, 7, 9) == (
         7,
         9,
     )  # a − end at an exon's low edge
     assert (
-        junction_exon_side(FLAG_TSS_POS | FLAG_ACCEPTOR_POS, 7, 9) == 9
+        R.junction_exon_side(FLAG_TSS_POS | FLAG_ACCEPTOR_POS, 7, 9) == 9
     )  # ACC: the intron is left
-    assert junction_exon_side(FLAG_TES_POS | FLAG_DONOR_POS, 7, 9) == 7  # DON: the intron is right
-    assert junction_exon_side(FLAG_TSS_POS, 7, 9) is None
-    assert junction_exon_side(FLAG_DONOR_POS | FLAG_ACCEPTOR_POS, 7, 9) is None, (
+    assert (
+        R.junction_exon_side(FLAG_TES_POS | FLAG_DONOR_POS, 7, 9) == 7
+    )  # DON: the intron is right
+    assert R.junction_exon_side(FLAG_TSS_POS, 7, 9) is None
+    assert R.junction_exon_side(FLAG_DONOR_POS | FLAG_ACCEPTOR_POS, 7, 9) is None, (
         "junctions both ways"
     )
     # the perturbations: a junction alone gives no side; termini both ways with a junction give none
-    assert outside_flank(FLAG_DONOR_POS, 7, 9) == (None, None)
-    assert outside_flank(FLAG_ACCEPTOR_NEG | FLAG_DONOR_NEG, 7, 9) == (None, None)
-    assert outside_flank(FLAG_TSS_POS | FLAG_TES_POS | FLAG_ACCEPTOR_POS, 7, 9) == (None, None)
+    assert R.outside_flank(FLAG_DONOR_POS, 7, 9) == (None, None)
+    assert R.outside_flank(FLAG_ACCEPTOR_NEG | FLAG_DONOR_NEG, 7, 9) == (None, None)
+    assert R.outside_flank(FLAG_TSS_POS | FLAG_TES_POS | FLAG_ACCEPTOR_POS, 7, 9) == (None, None)
 
 
 def test_the_sj_terminus_boundary_places_the_flux_where_the_junctions_exon_is(sweep_inputs):
@@ -577,8 +584,12 @@ def test_the_sj_terminus_boundary_places_the_flux_where_the_junctions_exon_is(sw
     that face. PERTURBATION: with the flux zeroed the price rises back to the plain form's."""
     import dataclasses
 
-    from rigel.calibration.messages.transfer_rows import SJ_FLAGS, TERMINUS, junction_exon_side
-    from rigel.calibration.splice_graph import FLAG_ACCEPTOR_POS, FLAG_TSS_POS
+    from rigel.calibration.splice_graph import (
+        FLAG_ACCEPTOR_POS,
+        FLAG_JUNCTION,
+        FLAG_TERMINUS,
+        FLAG_TSS_POS,
+    )
 
     pol, _p, _g, _w = _full_policy(sweep_inputs)
     ctx = _ctx_of(sweep_inputs)
@@ -606,8 +617,10 @@ def test_the_sj_terminus_boundary_places_the_flux_where_the_junctions_exon_is(sw
     i = int(right[b])
     flags[b] = np.uint16(int(flags[b]) | int(FLAG_TSS_POS))
     ctx2 = dataclasses.replace(ctx, boundary_flags=flags)
-    assert (int(flags[b]) & TERMINUS) and (int(flags[b]) & SJ_FLAGS)
-    assert junction_exon_side(flags[b], left[b], right[b]) == i  # the junction's exon is the inside
+    assert (int(flags[b]) & FLAG_TERMINUS) and (int(flags[b]) & FLAG_JUNCTION)
+    assert (
+        R.junction_exon_side(int(flags[b]), int(left[b]), int(right[b])) == i
+    )  # the junction's exon is the inside
     from rigel.calibration.messages.faces import LEVEL
 
     prep = _prepared(pol, ctx2)
@@ -635,13 +648,6 @@ def _expected_level_rows(si, ctx, strand, lam):
     disagreement beyond counting and, where both strand channels are live, the two strand modes'
     disagreement beyond counting. With no own row the crossing total's one-sided upper bound. Keyed by
     the inside slot; ``(rows, served pairs)``."""
-    from rigel.calibration.messages.transfer_rows import (
-        boundary_shares_strand,
-        level_bound_row,
-        level_map_lambda,
-        level_row,
-        outside_flank,
-    )
 
     kappa, od_g, od_r = strand
     is_bnd = np.asarray(ctx.is_boundary, bool)
@@ -660,10 +666,10 @@ def _expected_level_rows(si, ctx, strand, lam):
         lo, hi = left[b], right[b]
         if lo < 0 or hi < 0:
             continue
-        o, i = outside_flank(flags[b], lo, hi)
+        o, i = R.outside_flank(int(flags[b]), int(lo), int(hi))
         if i is None or not is_exon[i] or not (is_exon[o] or is_intron[o]):
             continue
-        if not boundary_shares_strand(fp[b], fn[b], fp[i], fn[i]):
+        if not R.boundary_shares_strand(bool(fp[b]), bool(fn[b]), bool(fp[i]), bool(fn[i])):
             continue
         if not (n_u[b] > 0 and n_u[i] > 0 and A_g[b] > 0 and A_g[i] > 0):
             continue
@@ -688,11 +694,11 @@ def _expected_level_rows(si, ctx, strand, lam):
                 dd = np.log(f_i / (1 - f_i)) - np.log(f_pred / (1 - f_pred))
                 v += max(0.0, dd * dd - (v_b + v_i + 1.0 / n_u[i] + 1.0 / T_b))
         v += float(polygamma(1, n_u[b] + 0.5) + polygamma(1, n_u[i] + 0.5))
-        m = level_map_lambda(lam, d_b, A_g[i], n_u[i])
+        m = R.level_map_lambda(lam, d_b, A_g[i], n_u[i])
         if live[b] and fp[b] != fn[b]:
-            row = level_row(_strand_row_of(ctx, strand, lam, b), lam, m, v)
+            row = R.level_row(_strand_row_of(ctx, strand, lam, b), lam, m, v)
         else:
-            row = level_bound_row(lam, d_b, A_g[i], n_u[i], v)
+            row = R.level_bound_row(lam, d_b, A_g[i], n_u[i], v)
         if np.ptp(row) > 1e-9:
             out.setdefault(int(i), np.zeros(lam.shape[0]))
             out[int(i)] += row
@@ -705,11 +711,6 @@ def test_the_level_map_keeps_the_level_and_the_bound_is_vacuous_below_the_total(
     the inside's own total supplying the rest); the map is monotone; a profile read through it keeps
     its peak there and its width grows with the dampening; the total's upper bound charges nothing
     below the crossing's density and charges above it."""
-    from rigel.calibration.messages.transfer_rows import (
-        level_bound_row,
-        level_map_lambda,
-        level_row,
-    )
 
     lam = np.linspace(-8, 8, 801)
     sig = 1 / (1 + np.exp(-lam))
@@ -718,12 +719,12 @@ def test_the_level_map_keeps_the_level_and_the_bound_is_vacuous_below_the_total(
         500.0,
         200.0,
     )  # the boundary crosses 0.2 fragments/base; the inside holds 200
-    m = level_map_lambda(lam, d_b, E_i, T_i)
+    m = R.level_map_lambda(lam, d_b, E_i, T_i)
     assert np.all(np.diff(m) >= 0.0)
     f_b = 0.4
     row_b = -0.5 * ((lam - np.log(f_b / (1 - f_b))) / 0.05) ** 2
     want = f_b * d_b * E_i / T_i  # 0.2: the level kept
-    tight = level_row(row_b, lam, m, 0.001)
+    tight = R.level_row(row_b, lam, m, 0.001)
     assert float(sig[np.argmax(tight)]) == pytest.approx(want, abs=0.01)
 
     def _var(r):
@@ -732,10 +733,10 @@ def test_the_level_map_keeps_the_level_and_the_bound_is_vacuous_below_the_total(
         mu = w @ lam
         return float(w @ (lam * lam) - mu * mu)
 
-    wide = level_row(row_b, lam, m, 0.5)
+    wide = R.level_row(row_b, lam, m, 0.5)
     assert _var(wide) > 3 * _var(tight), "the dampening must widen the delivered profile"
-    assert not level_row(np.zeros_like(lam), lam, m, 0.1).any(), "a flat profile is vacuous"
-    ub = level_bound_row(lam, d_b, E_i, T_i, 0.01)
+    assert not R.level_row(np.zeros_like(lam), lam, m, 0.1).any(), "a flat profile is vacuous"
+    ub = R.level_bound_row(lam, d_b, E_i, T_i, 0.01)
     below = sig * T_i / E_i < d_b  # inside gDNA density below the crossing's total density
     assert np.all(ub[below] == 0.0) and np.all(ub[~below] <= 0.0) and np.any(ub[~below] < 0.0)
 
@@ -745,11 +746,6 @@ def test_the_terminus_rules_land_at_the_outside_pair_and_nowhere_when_the_flags_
     applied to the exon's claim is the independently recomputed splice-out row with the SPLICED
     crossing, the rule boundary → outside exon applied to the boundary's claim the recomputed face-map
     row; the rules exist exactly at the outside pairs and vanish when the terminus bits are cleared."""
-    from rigel.calibration.messages.transfer_rows import (
-        face_map_lambda,
-        splice_out_row,
-        transport_row,
-    )
     from rigel.calibration.simplex_logodds import _logodds_grid
 
     pol, _p, n_grid, window = _full_policy(sweep_inputs)
@@ -784,16 +780,16 @@ def test_the_terminus_rules_land_at_the_outside_pair_and_nowhere_when_the_flags_
             else (None,)
         )
         assert o is not None
-        want = splice_out_row(
-            _strand_row_of(ctx, strand, lam, o), lam, n_u[b], n_s[b], A_g[b], A_g[o]
+        want = R.splice_out_row(
+            _strand_row_of(ctx, strand, lam, o), lam, n_u[b], n_s[b], A_g[b], A_g[o], MARGINAL_NODES
         )
         if live[o] and prepared.own[o] is not None:
-            got = prepared.faces.apply(o, b, prepared.own[o], None)
+            got = _rule(prepared, o, b)
             np.testing.assert_allclose(got - got.max(), want - want.max(), rtol=0, atol=1e-10)
         if live[b]:
-            le = face_map_lambda(lam, n_u[b], A_g[b], A_g[b], A_g[o], A_g[o], n_s[b] / A_g[b])
-            want_o = transport_row(_strand_row_of(ctx, strand, lam, b), lam, le, n_u[b], n_s[b])
-            got_o = prepared.faces.apply(b, o, prepared.own[b], None)
+            le = R.face_map_lambda(lam, n_u[b], A_g[b], A_g[b], A_g[o], A_g[o], n_s[b] / A_g[b])
+            want_o = R.transport_row(_strand_row_of(ctx, strand, lam, b), lam, le, n_u[b], n_s[b])
+            got_o = _rule(prepared, b, o)
             np.testing.assert_allclose(
                 got_o - got_o.max(), want_o - want_o.max(), rtol=0, atol=1e-10
             )
@@ -831,16 +827,16 @@ def test_the_level_rule_serves_every_terminus_inside_from_the_measurement_alone(
     spike = -0.5 * ((lam - 2.0) / 0.1) ** 2  # a held imputation that must not cross a level face
     for b, i, _kind in served:
         assert prepared.faces.has(b, i), f"no level rule at terminus pair ({b}, {i})"
-        got = prepared.faces.apply(b, i, prepared.own[b], None)
+        got = _rule(prepared, b, i)
         np.testing.assert_allclose(
             got - got.max(), expected[i] - expected[i].max(), rtol=0, atol=1e-10
         )
         np.testing.assert_array_equal(
-            prepared.faces.apply(b, i, prepared.own[b], spike),
+            _rule(prepared, b, i, held=spike),
             got,
             err_msg="what is held crossed a level face",
         )
-        bound = prepared.faces.apply(b, i, None, spike)
+        bound = _rule(prepared, b, i, own=None, held=spike)
         assert bound is not None and np.ptp(bound) > 0.0 and np.all(bound <= 0.0), (
             "no upper bound without a claim"
         )
@@ -853,8 +849,8 @@ def test_the_level_rule_serves_every_terminus_inside_from_the_measurement_alone(
     cnt[i1] = cnt[i1] * 3.0 + 7.0
     other = _prepared(pol, _dc.replace(ctx, unspliced_count=cnt))
     np.testing.assert_array_equal(
-        other.faces.apply(b0, i0, other.own[b0], None),
-        prepared.faces.apply(b0, i0, prepared.own[b0], None),
+        _rule(other, b0, i0),
+        _rule(prepared, b0, i0),
     )
 
 
@@ -865,7 +861,6 @@ def test_the_junction_flanks_read_the_flag_kind_alone():
     """The flank predicate, gated DIRECTLY: a DONOR bit puts the intron to the right on either strand
     (the flags are genomic-order), an ACCEPTOR bit to the left; a terminus on the boundary, no junction,
     or junctions both ways give no flanks."""
-    from rigel.calibration.messages.transfer_rows import junction_flanks
     from rigel.calibration.splice_graph import (
         FLAG_ACCEPTOR_NEG,
         FLAG_ACCEPTOR_POS,
@@ -874,15 +869,15 @@ def test_the_junction_flanks_read_the_flag_kind_alone():
         FLAG_TSS_POS,
     )
 
-    assert junction_flanks(FLAG_DONOR_POS, 7, 9) == (9, 7)
-    assert junction_flanks(FLAG_DONOR_NEG, 7, 9) == (9, 7)
-    assert junction_flanks(FLAG_ACCEPTOR_POS, 7, 9) == (7, 9)
-    assert junction_flanks(FLAG_ACCEPTOR_NEG, 7, 9) == (7, 9)
-    assert junction_flanks(FLAG_DONOR_POS | FLAG_TSS_POS, 7, 9) == (None, None), (
+    assert R.junction_flanks(FLAG_DONOR_POS, 7, 9) == (9, 7)
+    assert R.junction_flanks(FLAG_DONOR_NEG, 7, 9) == (9, 7)
+    assert R.junction_flanks(FLAG_ACCEPTOR_POS, 7, 9) == (7, 9)
+    assert R.junction_flanks(FLAG_ACCEPTOR_NEG, 7, 9) == (7, 9)
+    assert R.junction_flanks(FLAG_DONOR_POS | FLAG_TSS_POS, 7, 9) == (None, None), (
         "sj+terminus: its own item"
     )
-    assert junction_flanks(0, 7, 9) == (None, None)
-    assert junction_flanks(FLAG_DONOR_POS | FLAG_ACCEPTOR_NEG, 7, 9) == (None, None), (
+    assert R.junction_flanks(0, 7, 9) == (None, None)
+    assert R.junction_flanks(FLAG_DONOR_POS | FLAG_ACCEPTOR_NEG, 7, 9) == (None, None), (
         "junctions both ways"
     )
 
@@ -893,14 +888,6 @@ def _expected_alt_splice_rows(si, ctx, strand, lam):
     S_b + F, C with S_b) into the boundary, and the boundary's own row through the face map into
     each flank, each blurred by the pair's OWN disagreement beyond counting — per pair, nothing
     pooled. Keyed by slot; the pair widths returned beside."""
-    from rigel.calibration.messages.transfer_rows import (
-        blur_row,
-        boundary_shares_strand,
-        face_map_lambda,
-        junction_flanks,
-        splice_out_row,
-        transport_row,
-    )
 
     kappa, od_g, od_r = strand
     is_bnd = np.asarray(ctx.is_boundary, bool)
@@ -937,11 +924,14 @@ def _expected_alt_splice_rows(si, ctx, strand, lam):
         lo, hi = left[b], right[b]
         if lo < 0 or hi < 0 or not (is_exon[lo] and is_exon[hi]):
             continue
-        c_side, e_side = junction_flanks(flags[b], lo, hi)
+        c_side, e_side = R.junction_flanks(int(flags[b]), int(lo), int(hi))
         if c_side is None or not (n_u[b] > 0 and A_g[b] > 0):
             continue
         for x, s_out, kind in ((e_side, n_s[b] + flux[b], "E"), (c_side, n_s[b], "C")):
-            if boundary_shares_strand(fp[b], fn[b], fp[x], fn[x]) and A_g[x] > 0:
+            if (
+                R.boundary_shares_strand(bool(fp[b]), bool(fn[b]), bool(fp[x]), bool(fn[x]))
+                and A_g[x] > 0
+            ):
                 served.append((int(b), int(x), float(s_out), kind))
     width = {}
     for b, x, s_out, _kind in served:
@@ -965,16 +955,18 @@ def _expected_alt_splice_rows(si, ctx, strand, lam):
     for b, x, s_out, _kind in served:
         w = width.get((b, x), 0.0)
         if live[x] and fp[x] != fn[x]:
-            row = splice_out_row(strand_row(x), lam, n_u[b], s_out, A_g[b], A_g[x])
+            row = R.splice_out_row(
+                strand_row(x), lam, n_u[b], s_out, A_g[b], A_g[x], MARGINAL_NODES
+            )
             if np.ptp(row) > 1e-9:
                 out.setdefault(b, np.zeros(lam.shape[0]))
-                out[b] += blur_row(row, lam, w)
+                out[b] += R.blur_row(row, lam, w)
         if live[b]:
-            le = face_map_lambda(lam, n_u[b], A_g[b], A_g[b], A_g[x], A_g[x], s_out / A_g[b])
-            row = transport_row(strand_row(b), lam, le, n_u[b], s_out)
+            le = R.face_map_lambda(lam, n_u[b], A_g[b], A_g[b], A_g[x], A_g[x], s_out / A_g[b])
+            row = R.transport_row(strand_row(b), lam, le, n_u[b], s_out)
             if np.ptp(row) > 1e-9:
                 out.setdefault(x, np.zeros(lam.shape[0]))
-                out[x] += blur_row(row, lam, w)
+                out[x] += R.blur_row(row, lam, w)
     return out, width
 
 
@@ -1003,7 +995,7 @@ def test_the_alt_splice_rules_carry_both_flanks_with_the_pair_width(sweep_inputs
             continue
         if prepared.own[s] is None:
             continue
-        r = prepared.faces.apply(s, d, prepared.own[s], None)
+        r = _rule(prepared, s, d)
         if r is not None and np.ptp(r) > 1e-9:
             got[int(d)] = got.get(int(d), 0.0) + (r - r.max())
     for slot, want in expected.items():

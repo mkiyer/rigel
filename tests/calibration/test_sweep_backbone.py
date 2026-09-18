@@ -85,12 +85,13 @@ class _Echo:
     def prepare(self, ctx, library):
         return self
 
-    def propagate(self, received, *, backward: bool):
-        def receive(s, i):
-            self.hops[backward].append((int(s), int(i)))
+    def run_pass(self, received, seq, nbr, terminal, *, backward: bool):
+        for i in np.asarray(seq).tolist():
+            s = int(nbr[i])
+            if s < 0 or terminal[i]:
+                continue
+            self.hops[backward].append((s, i))
             received.level_gdna.write(i, np.zeros(received.composition.shape[1]), float(s), 0.0)
-
-        return receive
 
     def solve(self, from_left, from_right):
         self.held = (from_left, from_right)
@@ -160,12 +161,12 @@ def test_the_passes_run_in_chain_order_and_read_one_side_each():
 
 
 def test_a_policy_that_sends_nothing_leaves_silence_at_every_node_with_a_neighbour():
-    """``propagate`` returning no kernel means every node holds SILENCE from that side — a neighbour
-    and nothing present — distinguishable from the open side of the chain."""
+    """A pass that writes nothing means every node holds SILENCE from that side — a neighbour and
+    nothing present — distinguishable from the open side of the chain."""
 
     class _Quiet(_Echo):
-        def propagate(self, received, *, backward: bool):
-            return None
+        def run_pass(self, received, seq, nbr, terminal, *, backward: bool):
+            return
 
     fl, br = _passes(_Quiet(), _ctx())
     for t in (fl, br):
@@ -183,15 +184,15 @@ def test_every_lane_written_at_a_hop_reaches_the_solve_in_the_same_table():
     row = -0.5 * np.linspace(-1.0, 1.0, K) ** 2
 
     class _Full(_Echo):
-        def propagate(self, received, *, backward: bool):
-            def receive(s, i):
+        def run_pass(self, received, seq, nbr, terminal, *, backward: bool):
+            for i in np.asarray(seq).tolist():
+                if nbr[i] < 0 or terminal[i]:
+                    continue
                 received.composition[i] = row
                 received.has_composition[i] = True
                 received.level_gdna.write(i, row - 2.0, 0.1, 1.0)
                 received.level_rna_pos.write(i, row - 3.0, 0.2, 1.0, 4.0, 4.0)
                 received.level_rna_neg.write(i, row - 4.0, 0.3, 1.0)
-
-            return receive
 
     pol = _Full()
     fl, br = _passes(pol, ctx)
@@ -333,8 +334,11 @@ def test_solve_chains_parameter_default_is_silent_and_sends_nothing():
     ctx = _ctx()
     prepared = SilentPolicy().prepare(ctx, None)
     nothing = Received.empty(N, int(ctx.n_grid))
-    assert prepared.propagate(nothing, backward=False) is None, "a silent policy must send nothing"
-    assert prepared.propagate(nothing, backward=True) is None
+    order = np.arange(N, dtype=np.int64)
+    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
+    prepared.run_pass(nothing, order, left, np.zeros(N, bool), backward=False)
+    prepared.run_pass(nothing, order[::-1], right, np.zeros(N, bool), backward=True)
+    assert not nothing.heard.any(), "a silent policy must send nothing"
     assert prepared.solve(nothing, nothing).is_silent
 
 

@@ -99,6 +99,8 @@ __all__ = [
     "FLAG_DONOR_NEG",
     "FLAG_ACCEPTOR_POS",
     "FLAG_ACCEPTOR_NEG",
+    "FLAG_TERMINUS",
+    "FLAG_JUNCTION",
     "build_splice_graph",
     "build_region_partition_arrays",
     "build_boundary_flags_array",
@@ -170,6 +172,9 @@ FLAG_DONOR_POS = np.uint16(1 << 4)
 FLAG_DONOR_NEG = np.uint16(1 << 5)
 FLAG_ACCEPTOR_POS = np.uint16(1 << 6)
 FLAG_ACCEPTOR_NEG = np.uint16(1 << 7)
+#: the four terminus bits, and the four junction bits, together
+FLAG_TERMINUS = FLAG_TSS_POS | FLAG_TSS_NEG | FLAG_TES_POS | FLAG_TES_NEG
+FLAG_JUNCTION = FLAG_DONOR_POS | FLAG_DONOR_NEG | FLAG_ACCEPTOR_POS | FLAG_ACCEPTOR_NEG
 
 
 # ---------------------------------------------------------------------------

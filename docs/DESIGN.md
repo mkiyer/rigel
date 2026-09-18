@@ -42,7 +42,7 @@ minus-strand ones — the code is correct — so an identifier such as `donor_cu
 `boundary_left` / `boundary_right`, or `_lo` / `_hi`. The index's structural flag bits are the one place
 the words survive, and they are the hazard itself: `FLAG_DONOR_s` marks the genomic-LOW end of an
 `s`-strand intron on both strands, so on `−` it sits at the transcript's biological ACCEPTOR;
-`region_geometry.py`, `transfer_rows.junction_exon_side` and `outside_flank` read the bits in genomic
+`region_geometry.py`, and the builders' ``junction_exon_side`` and ``outside_flank`` (`native/transfer_kernel.cpp`) read the bits in genomic
 terms, gated on a `−`-strand sj specifically.
 
 **`splice-out` / `splice-in` are directional, and that is the whole reason for the pair.** The same
@@ -288,7 +288,7 @@ held to.
 ### 0c.1 The mechanism is built and ships — do not build it again
 
 The hop the derivation above asks for is the transfer policy's SPLICE-IN FACE MAP
-(`native/transfer_kernel.cpp`'s `splice_faces`, `transfer_rows.face_map_lambda`; §6b.9 and §6b.12): the BOUNDARY's
+(`native/transfer_kernel.cpp`'s `splice_faces`, ``face_map_lambda`` in `native/transfer_rows.h`; §6b.9 and §6b.12): the BOUNDARY's
 measured sj flux is a density at the source, which joins the RNA claim entering the destination EXON —
 the certified flux caps the claimable gDNA share. Only an EXON receives it; the flux is a measurement
 with its own counting width, never an imputation; and it is registered by geometry, never gated on the
@@ -645,7 +645,7 @@ chosen hypothesis alone — a set of size one, so arbitration is degenerate and 
 | | |
 |---|---|
 | **a composition may be imputed across a step iff the source supplied both components AND the two objects measure the same RNA population** | owner, 2026-08-04: *"is the source of the message measuring the same thing that I am measuring?"* — if yes, attribute the density discrepancy to capture enrichment; if no, enrichment and a population difference cannot be told apart. Termini only — DONOR/ACCEPTOR change the population too, but their flux is *measured* and the splice-in and splice-out route it |
-| **the population test is written in genomic terms, never TSS/TES** | the strand flips which flank a terminus implicates; `transfer_rows.outside_flank` is the one home (TSS+ / TES− bodies extend genomic-right, so the outside is the LEFT flank; TES+ / TSS− the reverse), gated on mirror-image annotations |
+| **the population test is written in genomic terms, never TSS/TES** | the strand flips which flank a terminus implicates; the builders' ``outside_flank`` (`native/transfer_kernel.cpp`) is the one home (TSS+ / TES− bodies extend genomic-right, so the outside is the LEFT flank; TES+ / TSS− the reverse), gated on mirror-image annotations |
 | gDNA's strand term is **0.5** | double-stranded, no sense direction. A fitted mixture marginal was implemented and refuted (`EQUATIONS.md` §5) |
 | a flat-zero factor is **skipped**, not multiplied | `TRAPS: an-all-zero-factor-is-inert` |
 | the draw is keyed on **queue position**, never content | `EQUATIONS.md` §10 |
@@ -689,7 +689,7 @@ transcripts and materialized as ordinary transcript rows in `index.t_df`, flagge
 `scan_cache` `locus` `locus_partition` `scored_fragments` `estimator` `strand_model` `frag_length_model`
 `second_pass` `splice` `splice_blacklist` `native` `gtf` `transcript` `annotate` `stats` `types`, plus the
 `report/` and `sim/` subpackages. `calibration/`: `calibrate` (orchestrator) · `splice_graph` (the v8
-index) · `sweep` (the backbone) and `messages/` (the policy: `silent` · `transfer` + `transfer_rows`) ·
+index) · `sweep` (the backbone) and `messages/` (the policy: `silent` · `transfer`; the row constructors `native/transfer_rows.h`) ·
 `region_chain` `region_geometry` `region_init` `structural_claims` · `substrate` `region_arrays`
 `signature` · `effective_length` `capture_eff_length` `fl` `sj_opportunity` `gdna_opportunity` ·
 `strand_likelihood` `gdna_strand` `strand_balance` `strand_summary` · `density_deconv`
@@ -716,9 +716,8 @@ Re-derive this list rather than trusting it: `scripts/design/module_census.py` r
 | `message_cache.py` | `MessageCache` — the message layer's output shared across the refit sweeps, keyed on a digest of every field of the block's context, the library and the policy (§6b.15.4) | a field added to the context cannot be left out of the key: the digest iterates the dataclass |
 | `messages/silent.py` | `SilentPolicy` — sends nothing. **The measured floor**, what `message_policy = "silent"` installs | A reader who holds `sweep.py` plus this holds the entire working system |
 | `messages/transfer.py` | `TransferPolicy` — **the shipped default** (2026-09-09): every node's own claim, one named builder per message, the two passes and the solve (§6b.4–§6b.14) | `prepare` is a table of contents: a reader finds a message by its builder's name |
-| `messages/faces.py` | `Faces` — the composition rules as typed tables over `(destination, side)`, `Faces.apply` the one home of the rule arithmetic, and the three helpers every reader of a face needs (`side_of`, `norm`, `fuse`) | gate: `test_transfer_faces.py` |
+| `messages/faces.py` | `Faces` — the composition rules as typed tables over `(destination, side)` (the rule arithmetic is the pass kernel's ``faces_apply``), `RowTable`, and `side_of` (`side_of`, `norm`, `fuse`) | gate: `test_transfer_faces.py` |
 | `messages/lanes.py` | `LevelLane` — one class for the three populations' levels, built by `native/transfer_kernel.cpp`'s `gdna_lane` (every face left without a composition rule) and `rna_lane` (one per strand, faces from the flag bits) | gate: `test_transfer_rna_lanes.py` |
-| `messages/transfer_rows.py` | the pure row constructors — every map, level, price and coordinate change, each a function of one face's numbers | `count_logvar` is the one home of the counting term; every hop price reads it |
 | `messages/__init__.py` | the interface (`Policy`, `Prepared`), what every node received from one side as a table (`Received`: `has_neighbour`, `has_composition`, the composition rows, three `Levels` lanes; SILENCE and NO NEIGHBOUR are its two states `silence` / `no_neighbour`, not objects), what ψ receives (`PsiMessage`) and what a policy may read (`BlockContext`) | every field of `BlockContext` has a reader in the policy or the backbone |
 
 **A restructure is gated, a rewrite is not.** The split out of the one 1,635-line function passed two
@@ -730,7 +729,7 @@ a clean rebuild — came out +103 %; a refactor gated on byte-identity has exact
 
 ```python
 prepared = policy.prepare(ctx, library)            # one working object per block: every node's OWN claim
-receive  = prepared.propagate(received, backward=False)  # phase 1: the recipient's kernel, writing rows of
+prepared.run_pass(received, seq, nbr, terminal, backward=False)  # phase 1: ONE directional pass on the backbone's table, writing rows of
                                                    #   the pass's `Received` table, or None ⇒ all silence
 receive(source, destination)                       # ... the BACKBONE owns the table and runs the pass
 evidence = prepared.solve(from_left, from_right)   # phase 2, the policy's half -> PsiMessage
@@ -813,7 +812,7 @@ boundary message removes the mature share — the SPLICE-OUT direction. Rescalin
 density into the exon's frame by the enrichment ratio, subtracting, and rescaling back, the enrichment
 CANCELS and only the face's own spliced-to-unspliced ratio survives: `f_b = f_E · (U_b + S_b) / U_b` —
 the splice-in face map solved for the boundary, so the boundary evaluates the exon's likelihood row AT
-the map (`transfer_rows.splice_out_row`). Three rulings the measurements forced: (1) the exon publishes
+the map (``splice_out_row``, `native/transfer_rows.h`). Three rulings the measurements forced: (1) the exon publishes
 its OWN evidence only — its strand row — and only when the node's strand channel is live (`tau_lam > 0`,
 the library's protocol decision `region_init.strand_discriminability`), so an unstranded library's exon says nothing,
 exactly, with no constant; (2) both components convert counts to densities with ONE opportunity
@@ -835,7 +834,7 @@ delivered verbatim: the boundary's OWN strand row (`simplex_logodds.strand_row_l
 frozen at the boundary's incoming belief — a source-side read), never its belief. The hop adds nothing:
 stage 0 on certified truth reads zero excess variance over counting between an intron's composition and
 its boundaries' on every panel, so no widening ships. The licence: the boundary must admit the intron's
-single strand set (`transfer_rows.boundary_shares_strand`); a terminus flag does not refuse; the gate
+single strand set (``boundary_shares_strand``, `native/transfer_kernel.cpp`); a terminus flag does not refuse; the gate
 is `tau_lam > 0` at the boundary, so an unstranded library sends nothing. Measured node-locally at the
 receiving introns: −26…−38 % on the ladder's stranded capture-ON rows; the reversed row multiplies the
 destination error by 1.7–30×.
@@ -844,7 +843,7 @@ destination error by 1.7–30×.
 
 A transcript terminus at an `exon|exon` boundary covers exactly one flank, the INSIDE; the OUTSIDE is
 read off the flag alone (TSS+ and TES− bodies extend genomic-right, so the outside is the left flank;
-TES+ and TSS− the reverse; termini pointing both ways give no side — `transfer_rows.outside_flank`).
+TES+ and TSS− the reverse; termini pointing both ways give no side — ``outside_flank``, `native/transfer_kernel.cpp`).
 Certified: the outside flank's composition matches the crossing (13,985 ladder pairs) while the inside
 flank differs by +0.25…+0.51 nats. The licence is NOT verbatim: a mature fragment that crosses an
 `exon|exon` boundary and splices within its own extent is counted in the boundary's SPLICED bank, not
@@ -870,7 +869,7 @@ the boundary's level and the precision is dampened by the pair's own discrepanci
 An `exon|exon` boundary carrying a splice junction and no terminus: one isoform continues contiguously
 across it, the other splices out there. Read off the flag alone (a DONOR bit marks the intron's LOW end
 on either strand; an ACCEPTOR bit its high end), the two flanks are C, the flank on the junction's
-intron side, and E, the flank where both isoforms are exonic (`transfer_rows.junction_flanks`). C shares
+intron side, and E, the flank where both isoforms are exonic (``junction_flanks``, `native/transfer_kernel.cpp`). C shares
 the boundary's full unspliced crossing, so it is §6b.6's law with the spliced crossing alone; E holds the
 crossing plus the isoform that splices out at this face, measured as the face's route flux `F`, so it is
 §6b.4's law with `S_b + F`. Certified on the ladder: C − pred +0.003 and E − pred −0.002 in f off
@@ -946,7 +945,7 @@ neighbour it has — silence being a neighbour with nothing present and a missin
 the two states the `Received` table expresses (2026-09-12: what a node holds is a ROW of the pass's
 table, never an object). `solve` — every node once, from its own evidence, the two tables and the gDNA
 hyperprior. The names are
-`prepare / propagate(backward) → receive(source, destination) / solve(from_left, from_right)`; the
+`prepare / run_pass(received, seq, nbr, terminal, backward) / solve(from_left, from_right)`; the
 per-sweep object is `Prepared`. Measured before the ruling: the formal form with the same messages won
 both halves of the ladder against the one-hop form, 7/8 and 7/8 (`policy_prototype.py`).
 
@@ -1138,7 +1137,7 @@ recipient's composition rule is a KIND and its parameters at ``(destination, sid
 boundary's and far region's gDNA opportunity, a blur width, the level rule's width) and indices into a row
 store of the ``(K,)`` maps; five kinds cover every shipped message — FORWARD, TRANSPORT (boundary → region
 through the face map), SPLICE-OUT (region → boundary, the map read backwards), EDGE (the intergenic|exon
-edge's one-sided level) and LEVEL (the terminus's level rule) — and `Faces.apply` is the one place their
+edge's one-sided level) and LEVEL (the terminus's level rule) — and the pass kernel's ``faces_apply`` is the one place their
 arithmetic lives. A face carries ONE rule: the builders' faces are disjoint by construction (the splice
 faces serve intron|exon pairs, the edge rule gene edges, the terminus rules unlicensed faces, the
 alternative splice site junctions with no terminus), so the table refuses a second rule at a face as it
@@ -1227,7 +1226,7 @@ flux witnesses (`RowTable`), both `Received` tables' compositions and level prof
 `Received.empty`) — is `np.empty`: a row exists where its presence bit says so and nowhere else, and every reader
 reads the bit before the row — the builders (`RowsOut::get`), the pass (`lane_emit`'s own level and held profile,
 `faces_apply`'s own and held rows), the solve (every held composition and level under its bit, every flux level
-under its mask), the per-hop Python kernel (`RowTable.__getitem__`, `LevelLane.emit`), the diagnostics capture
+under its mask), the per-hop Python kernel (`RowTable.__getitem__`, `LevelLane.emit`; since deleted), the diagnostics capture
 (whole tables concatenated, which no instrument reads unmasked) and the gates. The solve's λ rows (`out_rows`)
 stay zero-filled: an all-zero row is the channel's inert value, read whole by the cache's sparsity, the finiteness
 check and ψ. The audit is executable — `test_transfer_policy.test_the_layer_reads_a_row_only_under_its_mask`
@@ -1249,6 +1248,27 @@ context, the factory rows' n × K bytes most of it), the gDNA arm's interpolatio
 (0.90 s, of which lgamma 85 %: a NegBinom port alone would save ~0.1 s a sweep and move numbers — priced, not
 taken). The threads design starts from these numbers and is put to the owner before anything is built
 (`ISSUES: performance-memory-bounded-solve`).
+
+**One path: the per-hop Python kernel is deleted** (2026-09-17, the one-path ruling applied to the pass). The
+per-hop Python kernel — `_PreparedTransfer.propagate`, `Faces.apply`, `LevelLane.emit` / `receive` / `witness` — and
+`messages/transfer_rows.py`, the Python row constructors that only it and the gates' recomputes read, are GONE.
+The protocol is `prepare / run_pass / solve`: `run_pass` on every policy (the silent policy's writes nothing), and
+the backbone's `_pass` calls it and nothing else. What production still needed of the module moved to where it is
+read — `read_column` and the splice-out marginal's nodes to `transfer.py`, the terminus and junction bit
+combinations to `splice_graph` (`FLAG_TERMINUS`, `FLAG_JUNCTION`), which the scripts read. The gates read the ONE
+implementation: the row constructors of `native/transfer_rows.h` and the builders' flag predicates are bound as
+`native.transfer_rows` (the `rows` submodule of `_transfer_impl`, each a fresh array from its own arguments; nothing
+in `src/` reads them) and held to the analytic properties they were held to before — the face map monotone and
+flux-capped, the transport width the counting variance, the splice-out form, the one-sided edge level, the level
+map and bound, the orientation predicates, the coordinates' round trips, the hop price, the flux level, trigamma
+against scipy — and a rule applied to a claim, or a lane's hop, is ONE hop of the native pass on a fresh table
+(`_transfer_harness._hop`, `_rule`: the destination alone in ``seq``, its neighbour the sender, the sender's own row
+or a substituted one, a held row written into the table beforehand); the recursive reference of the passes
+composes such hops, and the sender in a lane gate is an EMPTY node holding the profile with its witness, so it
+forwards and the recipient prices. The two-kernel gate went with the second kernel; the wiring and no-copy gates
+moved to `test_transfer_policy.py`, the trigamma gate to `test_zero_count_is_a_measurement.py`. The production path
+did not change: BIT-IDENTICAL on the four captured sweeps of `sweeps_MO_3021_step11` and the three identity
+references. What is still duplicated is the layer-4 `strand_likelihood` executable reference — the owner's call.
 
 #### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer; native since 2026-09-17, §6b.15.5)
 

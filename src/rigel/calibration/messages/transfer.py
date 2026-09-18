@@ -4,7 +4,8 @@ own claim, every directed face carries a recipient's rule, and the two passes do
        Gate: ``tests/calibration/test_transfer_policy.py``
 
 Every message is a COMPOSITION PROFILE — a max-normalised log-likelihood over the solve grid of the
-destination's gDNA share — carried across ONE face by a derived map from `transfer_rows`, or a
+destination's gDNA share — carried across ONE face by a derived map (the row constructors of
+`native/transfer_rows.h`), or a
 population's LEVEL — an absolute profile over the log density — carried where composition cannot
 cross, so no level ever crosses a capture cliff and no constant is anywhere. The policy has three
 parts, and ``prepare`` is a table of contents: one named BUILDER per shipped message.
@@ -75,7 +76,7 @@ parts, and ``prepare`` is a table of contents: one named BUILDER per shipped mes
     theorem, gated); and at SINGLE-STRAND nodes as a CEILING on the gDNA share, read only from a face
     that sent no composition (the policy's solve, `native.transfer_solve`). The tilt needs no lane of its own.
 
-* The two passes and the solve (`_PreparedTransfer.propagate` / `solve`): a node SENDS two
+* The two passes and the solve (`native.transfer_pass` / `native.transfer_solve`): a node SENDS two
   things apart — its own claim (a measurement) and what it holds from its far side (an imputation) —
   and the recipient's rule decides what to do with each: a composition rule composes them (a witness
   product: profiles add) and maps the product; a level rule reads the measurement only, because an
@@ -103,15 +104,28 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.stats import norm as _normal
 
 from ...native import transfer_pass, transfer_prepare, transfer_solve
 from ..simplex_logodds import CubeRows
 from . import BlockContext, ChainView, PsiMessage, Received
-from .faces import Faces, RowTable, norm
+from .faces import Faces, RowTable
 from .lanes import LevelLane
-from .transfer_rows import _MARGINAL_NODES, EPS, read_column
 
-__all__ = ["TransferPolicy"]
+__all__ = ["MARGINAL_NODES", "TransferPolicy", "read_column"]
+
+#: the splice-out row's marginal over ``log rho`` is taken on equal-probability nodes of the standard
+#: normal — quadrature resolution, like ``n_grid``, not a model constant; the pass kernel takes them
+MARGINAL_NODES = _normal.ppf((np.arange(9) + 0.5) / 9.0)
+
+
+def read_column(col, kappa):
+    """The genome-strand column strand ``col``'s RNA READS on: its own when the library reads sense
+    (``kappa >= 1/2``, or no fitted strand model), the other under an antisense protocol. A junction's
+    route rate is in transcript-strand terms, so the exon count it is priced against must be the
+    count of the reads that strand's RNA produces; reading the other column inverts a node's strand
+    share and blurs its floor to nothing."""
+    return int(col) if (kappa is None or float(kappa) >= 0.5) else 1 - int(col)
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,9 +174,8 @@ class TransferPolicy:
         pure = is_intergenic & (a_g > 0.0)
         rho = float(n_u[pure].sum() / a_g[pure].sum()) if a_g[pure].sum() > 0.0 else 0.0
         if not rho > 0.0:
-            rho = float(n_u[a_g > 0.0].sum() / max(a_g[a_g > 0.0].sum(), EPS))
-        if not rho > 0.0:
-            rho = 0.0
+            den = float(a_g[a_g > 0.0].sum())
+            rho = float(n_u[a_g > 0.0].sum()) / den if den > 0.0 else 0.0
         kappa = None if self._strand is None else float(self._strand[0])
         # the split is a witness of a strand's RNA only where the library's strand channel is live —
         # the protocol decision (`ChainView.strand_live`): where the protocol preserves strand, every
@@ -387,15 +400,15 @@ class _PreparedTransfer:
     strands each node admits (the solve's site: an AMBIG node admits both). The passes' state is the
     backbone's table, never a copy here."""
 
-    def __init__(self, own, faces: "Faces | None", lanes: dict | None, free_pos, free_neg):
+    def __init__(self, own: RowTable, faces: Faces, lanes: dict, free_pos, free_neg):
         self.own = own
         self.faces = faces
-        self.lanes: dict = {} if lanes is None else dict(lanes)
+        self.lanes: dict = dict(lanes)
         self.free_pos = np.ascontiguousarray(free_pos, bool)
         self.free_neg = np.ascontiguousarray(free_neg, bool)
         self.ambig = self.free_pos & self.free_neg
 
-    # ── phase 1, natively: the whole pass on the table in one call ─────────────────────────────────
+    # ── phase 1: the pass on the table, one native call ────────────────────────────────────────────
     def tables(self) -> dict:
         """The tables the native pass reads, by the kernel's argument names — the builders' own, shared
         by both passes: every node's own claim with its mask, the faces' arrays and their row store,
@@ -415,18 +428,19 @@ class _PreparedTransfer:
             f_width=faces.width,
             f_var=faces.var,
             f_rows=faces.rows[: faces.n_rows],
-            marginal_nodes=_MARGINAL_NODES,
+            marginal_nodes=MARGINAL_NODES,
             lanes=[ln.tables() for ln in self.lanes.values()],
         )
 
     def run_pass(self, received: Received, seq, nbr, terminal, *, backward: bool) -> None:
-        """PHASE 1 on the table in one native call (`native.transfer_pass`): the same hops, in the same
-        order, as ``propagate``'s kernel run by the backbone; nothing to say anywhere is a no-op. Gate:
-        ``tests/calibration/test_pass_kernel.py``."""
+        """PHASE 1 on the table in one native call (`native.transfer_pass`): for every destination in
+        ``seq`` (chain order) whose neighbour ``nbr[i] >= 0`` and which is not a terminal, the recipient
+        receives what its neighbour sends — its own claim and what it holds, through the face's rule —
+        and each lane's level across the faces the lane serves; nothing to say anywhere is a no-op.
+        ``backward`` names the pass; the tables say the rest. Gates: the transfer gates drive single hops
+        of it (``_transfer_harness._hop``) and the whole pass (``_native_passes``)."""
         faces = self.faces
-        if self.own is None or not (
-            faces.any() or any(ln.face.any() for ln in self.lanes.values())
-        ):
+        if not (faces.any() or any(ln.face.any() for ln in self.lanes.values())):
             return
         levels = [
             (
@@ -449,41 +463,6 @@ class _PreparedTransfer:
             levels=levels,
             **self.tables(),
         )
-
-    # ── phase 1: propagate — the recipient's kernel, run by the backbone in chain order ──────────
-    def propagate(self, received: Received, *, backward: bool):
-        faces = self.faces
-        if self.own is None or not (
-            faces.any() or any(ln.face.any() for ln in self.lanes.values())
-        ):
-            return None  # nothing to say anywhere: every node holds silence
-        # each lane's faces, its table and its emptiness, unpacked once rather than per node
-        lanes = tuple(
-            (ln, ln.face, getattr(received, ln.field), ln.empty.tolist())
-            for ln in self.lanes.values()
-        )
-        kind, apply, own = faces.kind, faces.apply, self.own
-        composition, has_composition = received.composition, received.has_composition
-
-        def receive(s: int, i: int):
-            """``s`` sends two things apart — its own claim and what it holds from its far side (its own
-            row of this pass's table, written one step earlier) — and the face decides: a composition
-            rule composes and maps (MODIFY), passes (FORWARD) or reads the measurement only (a level
-            face); each lane whose faces include this one carries its population's level; absent all (a
-            structural pure-gDNA neighbour) STOP, and row ``i`` stays silent. A face is ``(i, side)``:
-            the side of ``i`` that ``s`` is on."""
-            side = 0 if s < i else 1
-            if kind[i, side]:
-                far = composition[s] if has_composition[s] else None
-                out = apply(s, i, own[s], far)
-                if out is not None and out.max() - out.min() > EPS:
-                    composition[i] = norm(out)
-                    has_composition[i] = True
-            for lane, face, levels, empty in lanes:
-                if face[i, side] and lane.emit(s, i, levels) and not empty[i]:
-                    lane.receive(levels, s, i)
-
-        return receive
 
     # ── phase 2: solve — the policy's half, one native call ─────────────────────────────────────
     def solve(self, from_left: Received, from_right: Received) -> PsiMessage:

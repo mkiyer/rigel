@@ -115,12 +115,11 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "message_cache",
             "sweep",
             "messages",
-            # `messages/__init__` is the two-phase protocol (prepare / propagate → receive / solve)
-            # and the message type; `messages/silent` is the measured floor every policy is judged
-            # against; `messages/transfer` is the shipped composition-transfer policy and
-            # `messages/transfer_rows` its pure row constructors, the one home of the counting term.
+            # `messages/__init__` is the two-phase protocol (prepare / run_pass / solve) and the message
+            # type; `messages/silent` is the measured floor every policy is judged against;
+            # `messages/transfer` is the shipped composition-transfer policy, its row constructors native
+            # (`native/transfer_rows.h`, the one home of the counting term).
             "messages/silent",
-            "messages/transfer_rows",
             # `messages/faces` is the typed face table and the three helpers every reader of a face
             # needs; `messages/lanes` the level lanes — both sideways of `messages/transfer`, which
             # builds the rules and the lanes and runs the passes and the solve.

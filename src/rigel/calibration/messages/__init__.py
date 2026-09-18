@@ -12,7 +12,7 @@ unknown name raises. The default is `"transfer"`.
 * :class:`~.transfer.TransferPolicy` — the shipped policy: every message is either a composition
   profile carried across one face by a derived map, or a population's LEVEL carried where composition
   cannot cross, each hop priced by the two nodes' counting and their own disagreement
-  (`transfer_rows` holds the pure row constructors).
+  (its row constructors are `native/transfer_rows.h`).
 * :class:`~.silent.SilentPolicy` — sends nothing; the OFF state and the measured floor. Five
   lines long: a reader who holds ``sweep.py`` plus ``silent.py`` in their head holds the entire
   working system.
@@ -30,10 +30,9 @@ The interface
 
     library  = policy.library(view)               # once per sweep, over the WHOLE chain: the only
                                                   #   cross-block reductions a message may use
-    prepared = policy.prepare(ctx, library)       # per block: every node's OWN claim
-    receive  = prepared.propagate(received, backward=False)  # phase 1: the recipient's kernel writing
-                                                  #   rows of the pass's table, or None ⇒ all silence
-    receive(source, destination)                  # ... the BACKBONE runs the pass, in chain order
+    prepared = policy.prepare(ctx, library)       # per block: every node's OWN claim, its rules, its lanes
+    prepared.run_pass(received, seq, nbr, terminal, backward=False)   # phase 1: ONE directional pass
+                                                  #   on the BACKBONE's table, in chain order
     evidence = prepared.solve(from_left, from_right)   # phase 2, the policy's half -> PsiMessage
 
 The chain is solved a LOCUS BLOCK at a time (`sweep.solve_chain`, `region_chain.locus_blocks`), and the
@@ -63,11 +62,12 @@ manufactures agreement out of nothing. A reception step is safe when it can only
 and never move its mode — it can discard information, never invent it.
 
 :class:`BlockContext` splits its fields under exactly those three headings, and the heading is what
-turns the contract from a discipline into something a reader — and the backbone — can check. The backbone
-enforces the half that is enforceable: the kernel is called with two INDICES and builds the message
-into the destination's row from the SOURCE's claim and what the source holds (its own row of the same
-table, written one step earlier); the backbone owns the table and the order, and the policy never
-reaches past its hop, so a message built from the destination's belief has nowhere to come from.
+turns the contract from a discipline into something a reader — and the backbone — can check. The
+backbone enforces the half that is enforceable: it owns the table and the chain order, and the pass
+builds each destination's row from the SOURCE's claim and what the source holds (its own row of the same
+table, written by this pass one hop earlier); the only beliefs on a policy's context are SOURCE-SIDE
+(``belief_fg``, read at ``prepare`` for a node's own claim), so a message built from the destination's
+belief has no field to come from.
 """
 
 from __future__ import annotations
@@ -356,7 +356,8 @@ class ChainView:
     exon_pos: np.ndarray
     exon_neg: np.ndarray
     #: the terminus and junction bits per BOUNDARY slot (0 at a region): which faces composition may
-    #: cross, the outside flank of a terminus, the junction's exon side (`transfer_rows`)
+    #: cross, the outside flank of a terminus, the junction's exon side (the builders,
+    #: `native/transfer_kernel.cpp`)
     boundary_flags: np.ndarray
 
     # ── the solve's own scalars (neither observation nor belief) ──────────────────────────────────────
@@ -420,31 +421,18 @@ class BlockContext(ChainView):
 
 @runtime_checkable
 class Prepared(Protocol):
-    """A policy's per-sweep working object: every node's own claim, the propagate kernel, the solve."""
-
-    def propagate(self, received: Received, *, backward: bool):
-        """PHASE 1. Return ``receive(source, destination)`` for one direction — the kernel that writes
-        row ``destination`` of ``received``, the pass's table — or ``None`` when this policy sends
-        nothing (every node with a neighbour then holds silence from that side).
-
-        The BACKBONE owns the table and runs the pass: it marks ``has_neighbour`` and, in chain order,
-        for every destination with a neighbour on that side that is not a terminal, calls
-        ``receive(source, destination)``. Inside ``receive`` the policy composes what the source sends
-        — its own claim with what the source holds from ITS far side, row ``source`` of the same
-        table, written by this same pass one step earlier — and applies the recipient's decision for
-        the face: STOP (write nothing: the row stays silent), FORWARD, or MODIFY.
-
-        ONE pass per direction: the forward pass reads each node's LOW neighbour and the backward pass
-        its HIGH one; on a chain that IS forward-backward, and nothing here iterates.
-        """
+    """A policy's per-block working object: every node's own claim, the pass, the solve."""
 
     def run_pass(self, received: Received, seq, nbr, terminal, *, backward: bool) -> None:
-        """PHASE 1 in one call, OPTIONAL: run the whole pass on the table — for every destination in
-        ``seq`` (chain order) whose neighbour ``nbr[i] >= 0`` and which is not a terminal, what
-        ``receive(nbr[i], i)`` would do — without a per-hop Python call. The backbone prefers it where a
-        policy offers it (the shipped policy's is native, `native.transfer_pass`) and runs ``propagate``'s
-        kernel otherwise; the two are one pass, and `tests/calibration/test_pass_kernel.py` holds them to
-        each other."""
+        """PHASE 1, ONE directional pass on the backbone's table: for every destination in ``seq``
+        (chain order) whose neighbour ``nbr[destination] >= 0`` and which is not a terminal, the
+        recipient receives what that neighbour sends — the source's own claim composed with what the
+        source holds from ITS far side, row ``source`` of this same table, written by this pass one hop
+        earlier — and decides: STOP (write nothing: the row stays silent), FORWARD, or MODIFY. The
+        backbone owns the table, marks ``has_neighbour`` and calls this once per direction: the forward
+        pass reads each node's LOW neighbour and the backward pass its HIGH one, so on a chain the two
+        passes ARE forward-backward, and nothing here iterates. A policy that sends nothing leaves the
+        table as it found it. The shipped policy's pass is native (`native.transfer_pass`)."""
 
     def solve(self, from_left: Received, from_right: Received) -> PsiMessage:
         """PHASE 2, the policy's half: the ψ channels at every slot from the two tables — row ``i`` of

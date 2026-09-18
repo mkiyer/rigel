@@ -5,7 +5,7 @@
 Each slot's unspliced fragment mass is deconvolved into a pie ``(f_pos, f_neg, f_g)`` — sense-RNA /
 antisense-RNA / gDNA — over the ``N E N E … N`` chain (`region_chain`), on the TWO-PHASE shape: every
 node's own claim (`prepare`), a forward pass then a backward pass in which each RECIPIENT receives what
-its neighbour sends (`propagate`), and ONE solve per node from its own evidence, the two held messages
+its neighbour sends (the pass), and ONE solve per node from its own evidence, the two held messages
 and the prior (`solve`). The chain is a forest of linear paths, so that is exact belief propagation, not
 an iteration.
 
@@ -127,9 +127,9 @@ def _check_message(
     channel one row per slot on the solve grid and finite.
 
     That no message is built from the destination's own belief is not checked here because it is enforced BY
-    CONSTRUCTION: the propagate kernel is called with two INDICES and builds the message into the
-    destination from the source's claim and what the source holds; the backbone writes ``held`` and the
-    policy never reaches past its hop. A structural impossibility beats a check. The write-back
+    CONSTRUCTION: the pass builds each destination's row from the source's claim and what the source
+    holds, on the backbone's table in the backbone's order, and the only beliefs on the policy's context
+    are source-side (`BlockContext`). A structural impossibility beats a check. The write-back
     assertion is checked at the write-back, where its basis lives.
 
     ``n_owned`` restricts the COUNTS to the block's own slots (its first ``n_owned``); the shape checks
@@ -628,36 +628,24 @@ def _pass(seq, nbr, prepared, n_grid: int, *, backward: bool, terminal=None) -> 
     the node RECEIVES from its neighbour of the other kind, into its row of the pass's table.
 
     The whole direction dependence is which neighbour array is read. The backbone owns the table
-    (:class:`~.messages.Received`) and writes ``has_neighbour``; the policy's kernel writes the lanes.
-    ``-1`` is a reference terminal: the node has NO NEIGHBOUR there — the chain's two end nodes hear
-    from one side, every other node from two. A node with a neighbour whose row stays empty holds
-    SILENCE: delivered, and nothing to say. The two states are the table's, so a kernel cannot leave a
-    node "never spoken to" — it either writes the row or it does not. A policy that sends nothing at
-    all returns no kernel, and every node then holds silence from this side. A policy that offers
-    ``run_pass`` (the shipped transfer policy, whose kernel is native) runs the whole pass on the table
-    in one call: the same order and the same two rules.
+    (:class:`~.messages.Received`) and writes ``has_neighbour``; the policy's pass writes the lanes
+    (`Prepared.run_pass`; the shipped policy's is native). ``-1`` is a reference terminal: the node has
+    NO NEIGHBOUR there — the chain's two end nodes hear from one side, every other node from two. A node
+    with a neighbour whose row stays empty holds SILENCE: delivered, and nothing to say. The two states
+    are the table's, so a pass cannot leave a node "never spoken to" — it either writes the row or it
+    does not; a policy that sends nothing at all leaves every node holding silence from this side.
 
     ``terminal`` (a bool per node, or ``None`` for none) marks the nodes that RECEIVE NOTHING: the hop
-    into one is never asked of the kernel and the node holds silence — delivered, and empty. What a
-    terminal SENDS is the policy's business as for any node; what it hears is not, and that is the
-    boundary condition the locus solve stands on.
+    into one is never made and the node holds silence — delivered, and empty. What a terminal SENDS is
+    the policy's business as for any node; what it hears is not, and that is the boundary condition the
+    locus solve stands on.
     """
     seq = np.asarray(seq, np.int64)
     nbr = np.asarray(nbr, np.int64)
     term = np.zeros(seq.shape[0], bool) if terminal is None else np.asarray(terminal, bool)
     received = Received.empty(seq.shape[0], int(n_grid))
     received.has_neighbour[seq] = nbr[seq] >= 0  # the backbone's: the side exists
-    run = getattr(prepared, "run_pass", None)
-    if run is not None:  # the policy runs the whole pass natively on the table (the shipped policy)
-        run(received, seq, nbr, term, backward=backward)
-        return received
-    receive = prepared.propagate(received, backward=backward)
-    if receive is None:
-        return received
-    for i in seq.tolist():
-        s = int(nbr[i])
-        if s >= 0 and not term[i]:
-            receive(s, i)
+    prepared.run_pass(received, seq, nbr, term, backward=backward)
     return received
 
 

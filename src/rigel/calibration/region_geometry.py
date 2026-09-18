@@ -28,7 +28,7 @@ Contents:
 Layering: LAYER 3. It imports DOWN to `region_chain` and `signature` (0) and `effective_length` (2),
 and SIDEWAYS to `simplex_logodds` (3) — never `sweep` (layer 6) or `landscape` (layer 5), so it sits
 cleanly below both. The flags array travels through `RegionStatics` without this module knowing what
-any bit means: the terminus and junction bits are read by `messages.transfer_rows`.
+any bit means: the terminus and junction bits are read by the transfer's builders (`native/transfer_kernel.cpp`).
 """
 
 from __future__ import annotations
