@@ -92,14 +92,15 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
 
 1. **Calibration's performance — `ISSUES: performance-memory-bounded-solve`** (owner, 2026-09-11: the
    active thread). The decomposition, the shared message layer, the typed tables, the pre-port and lanes
-   worklists are landed (`DESIGN.md` §6b.15), and the port's prerequisites are fresh on the landed tree
-   (the replay captures, the identity references, the
-   deep-library baseline pairs). Next is THE PORT of `sweep._solve_block`: the passes and `transfer_rows`
-   first, then `prepare`'s builders, then ψ, then threads over blocks — each step behind the replay's
-   tolerance report (a language port cannot be bit-identical), the `review_identity_*` references and the
-   suite, timed by `profiling/profiler.py --compare` against the baseline pairs; then the scan and the
-   second pass, the stages that scale with depth. The accuracy frame is unchanged, and no step may move a
-   number.
+   worklists and THE PORT — the pass, the builders, ψ and the policy's solve native, ONE code path with the
+   Python kernels deleted, the tables allocated unfilled — are landed (`DESIGN.md` §6b.15). The optimisation
+   target is the deep library (VCaP): its four sweeps are captured for replay (`profiling/sweep_replay.py`)
+   and the whole run profiled (`profiling/profiler.py`), and every step is judged there. Next: threads — ψ over
+   slots first, then the per-block Python of a refit sweep (the message cache's key, the gDNA arm), then the
+   block in one native call with a pool over blocks; the pass's blur is the kernel's floor, a summation-order
+   change behind the replay's tolerance budget (the ranked list with its numbers is
+   `ISSUES: performance-memory-bounded-solve`); then the scan, the second pass and quant, the stages that
+   scale with depth. The accuracy frame is unchanged, and no step may move a number beyond the budget.
 2. **Calibration accuracy where the strand tilt matters** — the AMBIG slots with RNA on both strands
    (`DESIGN.md` §6b.15.12–§6b.15.13). The tilt atom and the strand channel's protocol decision landed 2026-09-14 (the
    strand-pure under-call and the gDNA-free deadband CLOSED); the θ measure is settled (both flattenings

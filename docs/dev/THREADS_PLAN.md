@@ -7,37 +7,37 @@ boundary is the policy's library), §6b.15.3 (ψ's read-out is chunk-exact: ever
 what the port has made possible), and the owner's order of 2026-09-17: finish the block in native before threads,
 and design threads on paper first. Nothing here is built.
 
-## Where the time is (this tree, after the tables' allocations)
+## Where the time is (this tree, on the deep library — the optimisation target from 2026-09-17)
 
-MO_3021 replayed (`sweeps_MO_3021_step11`), blocks of 5,000 slots — 426 blocks over 2,087,476 slots, 357,738 of
-them solved per ψ call-set and 51,734 of those AMBIG. The four native calls are timed by wrappers (a nanobind call
-is invisible to cProfile), the rest by cProfile; the machine quiet (`s10/kernel_times_quiet.log`,
-`s10/psi_sweep_compare.log`, `s10/grid_per_sweep.log` in the synced scratchpad).
+VCaP (18.6 M fragments) at 8 threads, two back-to-back runs (`perf/vcap_baseline_2026-09-17/run{1,2}.json`): wall
+263.6 and 265.5 s, the stages drifting 0.98–1.07 between the runs. Calibrate is 154 s, the sweep 134 s of it; 110 s are
+outside calibration (the scan 35, the second pass 22, the fragment-length models 8.3 twice, quant 37, the index load
+6.5). The sweep's stages over the four sweeps: ψ 21.6 (the self-solves) + 32.7 (the final solves), the pass 36.5, the
+builders 17.2, the solve 2.0, the Python between the kernels ~24.
 
-The first sweep and the refit sweeps are DIFFERENT PROBLEMS: the first sweep solves on K = 101 cells at the
-window L = 10; the three refit sweeps on the landscape's own bracket, K = 202 at L = 20.09 (`calibrate` derives
-the bracket from the fitted prior's support, `landscape.required_logodds_window`). Every per-cell cost — ψ, the
-factory rows, the gDNA arm, the cache key's bytes — is therefore 2× on a refit sweep for the same slots (measured:
-ψ's per-call time ratio 2.02 at the median over the 852 matched calls, the slot sets identical). In a production
-run sweep 1 also MISSES the message cache and runs the whole layer at K = 202; sweeps 2–3 are served.
+Per sweep (`sweeps_VCaP_step13` replayed; the four native calls timed by wrappers, the transfer kernels counted by the
+census — a scratch copy with counters swapped in for the three calls, `s12/census_run.py`; the machine quiet;
+`s12/kernel_times_vcap.log`, `s12/census_vcap.log` in the synced scratchpad). The chain is the annotation's: 2,087,476
+slots in 426 blocks of 5,000, 357,738 solved per ψ call-set, 51,734 of them AMBIG. The first sweep and the refit sweeps are
+DIFFERENT PROBLEMS: the first solves on K = 101 cells at L = 10; the three refit sweeps on the landscape's own bracket,
+K = 233 here (`landscape.required_logodds_window`), so every per-cell cost is 2.3× there for the same slots. In
+production sweep 1 also MISSES the message cache and runs the whole layer at K = 233; sweeps 2–3 are served.
 
-| stage, per sweep | first sweep (K = 101) | refit sweep (K = 202, cache-served) | scales with |
+| stage, per sweep | first sweep (K = 101) | refit sweep (K = 233, cache-served) | scales with |
 |---|---|---|---|
-| ψ native, the self-solve + the final solve (`psi_solve`, 852 calls) | 1.57 s | 3.19 s | K × (n_tilt + 2) per AMBIG slot, K per single-strand slot |
-| the builders native (`transfer_prepare`) | 1.61 s | served | K, the nodes |
-| the pass native (`transfer_pass`, both directions) | 0.99 s | served | the hops, K |
-| the policy's solve native (`transfer_solve`) | 0.12 s | served | |
-| the message cache's key (`MessageCache.key`: blake2b over every array of the block context — the factory rows are n × K × 8 bytes of it, 1.7–3.4 GB a sweep) | — | 2.88 s | K |
-| the gDNA arm (`landscape.logprior`: `np.interp` over an (m, K) matrix per block) | — | 1.51 s | K |
-| the factory rows (`calibrate.__getitem__` → `density_lambda_factor` → `_log_negbinom`; `gammaln` is 85 % of it) | 0.46 s | 0.90 s | K, the introns |
-| the cache's dense rows (`MessageCache.message`) | — | 0.13 s | |
-| the glue: `solve_chain`'s loop, `_psi`'s row add (`factory + lam_rows`, an (n, K) add per block, 0.28 s), `build_region_init`'s strand evidence and factor precision, `block_slice`, the checks, the write-back | ~1.9 s | ~1.3 s | the slots |
-| **the sweep** | **6.7 s** (native 64 %) | **10.0 s** (native 32 %) | |
+| ψ native, the self-solve + the final solve (`psi_solve`, 852 calls) | 6.7 s | 15.5 s | K × (n_tilt + 2) per AMBIG slot, K per single-strand slot |
+| the pass native (`transfer_pass`, both directions): 4.1 M hops, 2.1 M through a rule, 1.55 M compositions written, 1.39 M levels emitted; 1.43 M BLURS at a mean of 56 taps over K cells = 8.1 G multiply-adds | 10.4 s | served (~24 s at the miss) | the blurs × taps × K |
+| the builders native (`transfer_prepare`): the RNA lanes 2.7, the gDNA lane 1.2, the claims 0.3, the splice faces 0.3, the terminus and alternative-splice rules 0.2 | 4.7 s | served (~11 s at the miss) | K, the nodes |
+| the policy's solve native (`transfer_solve`) | 0.5 s | served | |
+| the message cache's key (blake2b over the block context, the factory rows most of its bytes) | — | 3.2 s | K |
+| the gDNA arm (`landscape.logprior`: `np.interp` over (m, K)) | — | 2.3 s | K |
+| the factory rows (`_log_negbinom`; lgamma 85 %) | 0.5 s | 1.1 s | K, the introns |
+| the glue | ~1.8 s | ~1.2 s | the slots |
+| **the sweep** | **24.7 s** (native 91 %) | **23.3 s** (native 67 %) | |
 
-On the deep library (VCaP, 18.6 M fragments, 8 threads, the solve commit's report `perf/port_solve_2026-09-17/`)
-the four sweeps are 135 s of 264 s: ψ 53 s (the self-solves 20, the final solves 33), the pass 37 s, the builders
-18 s, the solve 2 s, the rest the Python above. The allocation step moved these by about a second
-(`perf/block_alloc_2026-09-17/`).
+The kernels are the sweep on the deep library: 91 % of a first sweep and, once ψ is threaded, the whole of what is
+left there. MO_3021 (the sparse capture library the port was developed on) had a different shape — a first sweep 64 %
+native, 0.26 M blurs, 0.08 M mapped hops — and is retired as a target.
 
 ## What is parallel, and what it costs
 
@@ -65,10 +65,10 @@ sweeps), the suite, the three identity references; then two interleaved timing p
   semantics, fed by the pipeline from the one `--threads` budget the scan and the EM already share. It is a
   resource budget, not a tunable of the answer (the answer is bit-identical at every value), so it is not a
   magic number — but it is a new config field, which is the owner's call.
-* Expected: ψ 1.57 → ~0.25 s on the first sweep and 3.19 → ~0.45 s on a refit sweep at 8 threads (the machine
-  has 12 performance cores of 16, an M3 Max; the AMBIG chunks bound the balance; the per-slot working set, ≤ 170 KB at
-  K = 202, sits in cache, so the kernel is compute-bound on `exp`). On VCaP: ψ 53 s → ~8 s of 264 s, the run
-  ~0.83×. Memory: a `Scratch` per thread, ~50 KB.
+* Expected: ψ 6.7 → ~1 s on the first sweep and 15.5 → ~2.3 s on a refit sweep at 8 threads (the machine has 12
+  performance cores of 16, an M3 Max; the AMBIG chunks bound the balance; the per-slot working set, ≤ 200 KB at
+  K = 233, sits in cache, so the kernel is compute-bound on `exp`). On VCaP: ψ 58 s → ~8 s of 264 s, the run
+  ~0.81×. Memory: a `Scratch` per thread, ~50 KB.
 
 ### (iv-b) the blocks in parallel — after the Python per block has shrunk
 
@@ -77,10 +77,12 @@ block's write-back is a disjoint slice of `out`; `AssertionCounts.absorb` is a s
 `put` needs a lock; the diagnostic capture (instruments only) stays serial. Two forms:
 
 * PYTHON THREADS over blocks (`concurrent.futures.ThreadPoolExecutor`), the four kernels releasing the GIL.
-  Bounded by the serial Python (Amdahl): on the first sweep 2.4 s of 6.7 s is Python, so the sweep is at best
-  2.4 + 4.3/T = 2.9 s at T = 8 (2.3×); on a refit sweep 6.8 s of 10.0 s is Python, so at best 7.2 s (1.4×) —
-  and once (iv-a) has taken ψ to ~0.4 s, a refit sweep is ~7 s of Python that threads over blocks cannot
-  touch. So (iv-b) is worth building only after the Python per block has been made small.
+  Bounded by the serial Python (Amdahl). On the deep library the first sweep — and the miss sweep, which is the
+  same work at K = 233 — is 91 % native: 2.3 s of 24.7 s is Python, so the first sweep is at best 2.3 + 22.4/T =
+  5.1 s at T = 8 (4.8×) and the miss sweep ~14 s from ~59 — the two layer-running sweeps are where this form pays.
+  A cache-served refit sweep is 67 % native: 7.7 s of 23.3 s is Python, so at best 9.6 s (2.4×), and once (iv-a)
+  has taken ψ to ~2 s it is ~8 s of Python that threads over blocks cannot touch — the per-block items below
+  are what shrinks it.
 * ONE NATIVE CALL PER BLOCK — `solve_block` in C++: the self-solve ψ, the builders, the two passes, the solve,
   the final ψ, the write-back — and a C++ pool over blocks. The Python per block is then the slicing and the
   loop (~1 ms). This is the block-in-native end-state the owner named; it subsumes the items below and is the
@@ -107,6 +109,16 @@ stated), each its own commit, in the order of its size:
 5. **`build_region_init`'s glue** (`strand_evidence`, `density_factor_precision`, the where's; ~0.3 s): part of
    the block port.
 
+### (v) The blur's reduction — a summation-order change, priced by the census
+
+The pass is the blur: 1.43 M calls a first sweep at a mean of 56 taps over K = 101 cells (8.1 G multiply-adds of
+the pass's 10.4 s; ~2.3× at the miss sweep's K = 233). `blur_row`'s inner loop is a floating-point reduction over
+the taps, which the compiler does not reassociate, so it runs scalar at about a nanosecond a tap. An explicit
+four-lane partial sum changes the summation order and nothing else — a port-class change, held to the replay's
+tolerance budget, worth ~−20 s a run on its own and multiplying with a pass threaded over blocks. The constant
+edge pads are prefix sums, a smaller saving. A recursive (IIR) Gaussian would change the blur's VALUE, not its
+summation order — an accuracy question, not proposed.
+
 ### What is not proposed
 
 * Threads inside a pass: a hop reads the row the previous hop wrote, in chain order — sequential by
@@ -119,12 +131,15 @@ stated), each its own commit, in the order of its size:
 
 ## The order proposed
 
-1. (iv-a) ψ over slots — one commit; the replay at 1/2/8 threads BIT-IDENTICAL, the suite, the references;
-   two interleaved pairs on VCaP at `--threads 8`.
-2. The cache key on the factory's inputs (exact; the largest Python item of a refit sweep).
-3. The gDNA arm inside ψ (tolerance-gated); `_psi`'s row add with it.
-4. The block in one native call with a C++ pool over blocks — or Python threads over blocks with GIL-releasing
-   kernels — judged on the Python floor measured after 2–3.
+1. (iv-a) ψ over slots — one commit; the replay at 1/2/8 threads BIT-IDENTICAL on `sweeps_VCaP_step13`, the suite,
+   the references; two interleaved pairs on VCaP at `--threads 8`. (58 s of 264.)
+2. (v) the blur's four-lane reduction — one commit, tolerance-gated on the replay; the census re-run to show the
+   taps unchanged and the time moved. (~36 s of 264, the pass.)
+3. The cache key on the factory's inputs (exact; the largest Python item of a refit sweep).
+4. The gDNA arm inside ψ (tolerance-gated); `_psi`'s row add with it.
+5. The block in one native call with a C++ pool over blocks — or Python threads over blocks with GIL-releasing
+   kernels, which on the deep library's layer-running sweeps already pays — judged on the Python floor measured
+   after 3–4.
 
 ## Open for the owner
 

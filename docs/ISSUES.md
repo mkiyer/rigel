@@ -46,13 +46,40 @@ BIT-IDENTICAL on the four captured sweeps and the three references); the factory
 (iv) threads over
 blocks — DESIGNED 2026-09-17 and put to the owner before building: ψ over slots inside `psi_solve` first (bit-identical
 by construction, the replay at 1/2/8 threads its gate, ~0.83× on VCaP), then the cache key on the factory's inputs, the
-gDNA arm inside ψ, the block in one native call with a pool over blocks — each step behind `sweep_replay.py replay --tolerance` on the current capture (`sweeps_MO_3021_step11`, taken from
-`28bd174c`; a step that moves numbers re-captures and deletes the superseded one), the `review_identity_*` references and the suite, timed against the 2026-09-17 baseline
+gDNA arm inside ψ, the block in one native call with a pool over blocks — each step behind `sweep_replay.py replay --tolerance` on the current capture (`sweeps_VCaP_step13`: the deep library, taken from
+the tree after the one-path convergence; a step that moves numbers re-captures and deletes the superseded one), the `review_identity_*` references and the suite, timed against the 2026-09-17 baseline
 pair (`perf/baseline_2026-09-17/pair1_*`, the pushed tree at 8 threads on VCaP; the native pass read 526 → 403 s
 and 519 → 410 s on two interleaved pairs, `perf/port_2026-09-17/`); ⑤ the scan and the second pass, the
 stages that scale with depth (`ISSUES: scan-thread-split-starves-the-workers`). Not to do: micro-optimise the
 Python passes; bake the λ lattice into the port (`sweep_logodds_step` is a parameter). `profiling/profiler.py`,
 `profiling/sweep_replay.py`.
+THE FRESH BASELINE ON THE DEEP LIBRARY (owner, 2026-09-17: the optimisation target is VCaP, 18.6 M fragments; the
+MO_3021 captures are retired). This tree — the one-path convergence — at 8 threads, two back-to-back runs,
+`perf/vcap_baseline_2026-09-17/run{1,2}.json`: wall 263.6 and 265.5 s, peak 11.0 GB; the stages drift 0.98–1.07
+between the two runs, the noise floor every pair is read against. Where it goes: calibrate 154 s, of which the sweep
+134 s — ψ 21.6 (the self-solves) + 32.7 (the final solves) + 3.8 before the sweep, the pass 36.5, the builders 17.2, the
+solve 2.0, the Python between the kernels ~24; the landscape fit 4.2 — and 110 s outside calibration: the scan 35, the
+second pass 22 (scoring the held fragments 12, the fragment-length models 8.3), the fragment-length models again before
+calibration 8.3 (a second fit, on the drained tally, by design), quant 37 (the locus EM 15, the capture effective lengths
+8, scoring 6, the partition 3, the priors 3.8), the index load 6.5. Per sweep (`sweeps_VCaP_step13` replayed; the
+transfer kernels' CENSUS — a scratch copy of the kernels with counters, swapped in — `s12/census_run.py`, and the kernel
+wrappers `s12/kernel_times_vcap.py`, in the synced scratchpad): the first sweep (K = 101, the layer runs) 24.7 s, 91 %
+native — the pass 10.4, ψ 6.7, the builders 4.7 (the RNA lanes 2.7, the gDNA lane 1.2), the solve 0.5; the pass is
+4.1 M hops, 2.1 M through a rule (0.96 M transport and splice-out maps against MO_3021's 0.08 M: the deep library has
+counts at most faces), 1.55 M compositions written, 1.39 M levels emitted, and 1.43 M BLURS at a mean of 56 taps over
+K = 101 cells — 8.1 G multiply-adds, which IS the pass. The refit sweeps run on the landscape's bracket, K = 233 here
+(against the first sweep's 101): sweep 1, a cache miss in production, pays the layer at 2.3×, and every refit sweep pays
+ψ 15.5 s and 7.7 s of Python (the message cache's key 3.2 — blake2b over the block context, the factory rows most of its
+bytes; the gDNA arm's `np.interp` 2.3; the factory rows 1.1, lgamma 85 % of it). THE RANKED OPPORTUNITIES, each priced
+against these numbers: (1) ψ over slots inside `psi_solve` — 58 s of 264, bit-identical by construction, ~−50 s at
+8 threads (the threads design, awaiting the owner); (2) the pass's blur — 36 s: the reduction over the taps is a scalar
+sum the compiler does not reassociate, so an explicit four-lane sum is a summation-order change behind the replay's
+tolerance budget, and a pass threaded over blocks halves it again; (3) the builders — 17 s, the RNA lanes 57 % of it,
+threads over blocks; (4) the refit sweeps' Python — the cache key digesting the factory rows' INPUTS (−9 s a run, exact),
+the gDNA arm inside ψ (−7 s, tolerance-gated), the factory rows (−3 s, inside a native block); (5) outside calibration,
+110 s untouched by any of the above: the scan (`ISSUES: scan-thread-split-starves-the-workers`), the second pass's
+scoring, the two fragment-length fits (16.6 s together), quant's locus EM and capture effective lengths — the stages that
+scale with depth (§G) and the whole problem past 100 M fragments.
 
 ### gdna-landscape-trains-on-false-positives
 `priority: later · kind: question · 2026-09-02; the population rule and the E-step landed 2026-09-10, the location floor 2026-09-14 (`DESIGN.md` §7.1)`

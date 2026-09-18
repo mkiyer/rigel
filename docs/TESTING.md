@@ -656,14 +656,15 @@ the chunk-exactness of the whole sweep on real data); set `OMP_NUM_THREADS` deli
 references are `~/Downloads/rigel_runs/arms/review_identity_*.json` (two ladder conditions and the LBX0190
 library, frozen on the tree of 2026-09-14 that carries the lanes worklist and the landscape's location floor,
 re-frozen with the reason after every landing since — the ruler's repair, the yield's floors, the native
-pass, the native builders, each in its commit) and the captured sweeps `~/Downloads/rigel_runs/perf/sweeps_MO_3021_step8`
-(2026-09-17, after the native pass, on the sweep code of `8a9c25c4`; `step7` is the tree before the port, `step6`
-the lanes worklist's tree; `DESIGN.md` §6b.15). A port is
+pass, the native builders, each in its commit) and the captured sweeps `~/Downloads/rigel_runs/perf/sweeps_VCaP_step13`
+(2026-09-17: the deep library, VCaP, on the tree after the one-path convergence of the pass — the replay target from
+here on; a step that moves numbers re-captures and deletes the superseded one; `DESIGN.md` §6b.15). A port is
 held to the replay's `--tolerance` budget and to the transfer gates, which hold the native builders' tables to
-independent recomputes (`tests/calibration/test_pass_kernel.py` still runs the per-hop Python kernel and the
-native pass on the same tables). The deep library's timing baseline is
-`perf/baseline_2026-09-17/pair1_*` (the pushed tree at 8 threads on VCaP; `baseline_2026-09-14/` two back-to-back pairs at
-8 threads). The
+independent recomputes and drive single hops of the native pass (`tests/calibration/_transfer_harness.py`; the row
+constructors and flag predicates the gates recompute with are the native ones, `native.transfer_rows`). The deep library's timing baseline is
+`perf/vcap_baseline_2026-09-17/run{1,2}.json` (the tree after the one-path convergence at 8 threads on VCaP, two
+back-to-back runs; the drift between them, 0.98–1.07 per stage, is the noise floor a pair is read against; the earlier
+`baseline_2026-09-17/pair1_*` is the pushed tree of that morning). The
 refit sweeps' captures carry their message cache, so their replay exercises the cache path and ψ; sweep 0
 exercises the whole message layer. `ISSUES: performance-memory-bounded-solve` carries the work.
 

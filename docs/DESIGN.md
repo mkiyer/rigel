@@ -1270,6 +1270,16 @@ moved to `test_transfer_policy.py`, the trigamma gate to `test_zero_count_is_a_m
 did not change: BIT-IDENTICAL on the four captured sweeps of `sweeps_MO_3021_step11` and the three identity
 references. What is still duplicated is the layer-4 `strand_likelihood` executable reference — the owner's call.
 
+**The optimisation target is the deep library** (owner, 2026-09-17). Every performance number from here is VCaP's
+(18.6 M fragments): its four sweeps are captured for replay (`sweeps_VCaP_step13`; the refit sweeps' pickles carry a
+message cache three times MO_3021's) and the whole run is profiled at 8 threads, twice back to back
+(`perf/vcap_baseline_2026-09-17/`); the MO_3021 captures are retired. Measured on it with the transfer kernels' census
+(a scratch copy of the kernels with counters, swapped in for the three native calls on a replayed sweep): the pass IS the
+blur — on the first sweep 1.43 M Gaussian blurs at a mean of 56 taps over 101 cells, 8.1 G multiply-adds of its 10.4 s,
+against 0.26 M blurs on MO_3021 — and the refit sweeps run on the landscape's bracket, K = 233 against the first sweep's
+101, so the cache-missing sweep pays the layer at 2.3× and every refit sweep pays ψ at 2.3×.
+`ISSUES: performance-memory-bounded-solve` carries the baseline and the ranked opportunities.
+
 #### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer; native since 2026-09-17, §6b.15.5)
 
 A single-strand slot is the cube with a tilt grid of one cell — its tilt is its live strand, `τ = ±1` — so
