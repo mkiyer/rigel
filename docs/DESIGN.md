@@ -1310,6 +1310,21 @@ another digest misses; the four VCaP sweeps BIT-IDENTICAL at 8 threads (the capt
 miss, so the refit sweeps re-run their layer to the same bits); the three identity references BIT-IDENTICAL; the suite
 3,435 passed / 5 xfail / 3,440 collected. The capture is re-taken with the new keys (`sweeps_VCaP_step16`).
 
+**The splice-out marginal hoists what every node shares** (2026-09-18; exact). The census's TIMERS corrected the
+inference drawn from its counts: on the deep library's first sweep the blur is 3.5 s of the pass's 9.6 s, and the
+splice-out row's nine-node marginal (``splice_out_row``, 357 k calls) is 6.3 s — 65 % of the pass — because every node
+recomputed the whole face map, a sigmoid and two logs per cell, although the map's gDNA arm and the RNA arm's unspliced
+density depend on the face alone and only the node's spliced density joins. They are computed once per face now: the
+same IEEE operations in the same order per cell, so the same bits, at half the node loop's transcendentals — the marginal
+6.3 → 4.15 s and the pass 9.6 → 8.5 s on the first sweep. BIT-IDENTICAL on the four VCaP sweeps at 8 threads, the three
+identity references and the suite (3,435 / 5 xfail / 3,440, no gate added: the constructor's analytic gates and the
+replay hold it); timed on VCaP at 8 threads, two interleaved pairs against a worktree carrying the original marginal:
+the pass 36.6 → 29.2 s and 36.2 → 29.2 s (0.80 / 0.81), the sweep 80.5 → 72.7 s and 79.6 → 72.4 s (0.90 / 0.91), calibrate 97.0 → 88.8 s and 95.2 → 88.8 s, the whole run 205.4 → 195.1 s and 201.5 → 197.4 s (0.95 / 0.98 — the scan drifted +1.8 s against the second pair), every other stage 0.94–1.09 (`perf/splice_out_2026-09-18/`). PRICED AND NOT TAKEN: interchanging the blur's loops — one tap at a
+time into every cell, the inner loop a contiguous multiply-add — takes the blur from 3.5 to 2.0 s a first sweep, about
+5 s a run, at a summation-order change that moves `f_g` by at most 2.9e-15 (1.9e-7 of the replay's budget): a number
+moved for 2 % of the run, the owner's call. What the pass still is on the first sweep: the splice-out marginal 4.2 s (a
+log and an exp per cell per node, its floor), the blur 3.5, the transport rows 1.7, the lane hops 1.9.
+
 #### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer; native since 2026-09-17, §6b.15.5)
 
 A single-strand slot is the cube with a tilt grid of one cell — its tilt is its live strand, `τ = ±1` — so

@@ -183,8 +183,8 @@ inline void face_map_lambda(const double* lam, int K, double n_u, double a_g_b, 
 }
 
 struct Scratch {
-    std::vector<double> a, b, c, d, e, f, blur;
-    explicit Scratch(int K) : a(K), b(K), c(K), d(K), e(K), f(K) {}
+    std::vector<double> a, b, c, d, e, f, g, h, blur;
+    explicit Scratch(int K) : a(K), b(K), c(K), d(K), e(K), f(K), g(K), h(K) {}
 };
 
 // transport_row(row, lam, lam_e_of_u, n_u, n_s)
@@ -208,10 +208,22 @@ inline void splice_out_row(const double* row_e, const double* lam, int K, double
     const double m = vmax(row_e, K);
     for (int j = 0; j < K; ++j) S.a[j] = row_e[j] - m;
     const double sd = std::sqrt(trigamma(n_s + 0.5) + trigamma(n_u + 0.5));
+    // the map at every node is face_map_lambda(lam, n_u, a_g_b, a_g_b, a_g_e, a_g_e, s) term for term, with
+    // its node-independent half hoisted: the gDNA arm's log and the RNA arm's unspliced density are the
+    // same at every node (only the node's spliced density s joins the RNA arm), so they are computed once
+    // per face — the same operations in the same order per cell, so the same bits, at half the node loop's
+    // transcendentals (the census: this marginal was 65 % of the deep library's pass, DESIGN.md §6b.15.5)
+    double* g_log = S.g.data();
+    double* r_unspl = S.h.data();
+    for (int j = 0; j < K; ++j) {
+        const double sig = sigmoid(lam[j]);
+        g_log[j] = std::log(std::max(n_u * sig / a_g_b * a_g_e, TINY));
+        r_unspl[j] = n_u * (1.0 - sig) / a_g_b;
+    }
     std::fill(S.d.begin(), S.d.end(), 0.0);
     for (int t = 0; t < n_nodes; ++t) {
         const double s = n_s / a_g_b * std::exp(nodes[t] * sd);
-        face_map_lambda(lam, K, n_u, a_g_b, a_g_b, a_g_e, a_g_e, s, S.b.data());
+        for (int j = 0; j < K; ++j) S.b[j] = g_log[j] - std::log(std::max((r_unspl[j] + s) * a_g_e, TINY));
         interp(S.b.data(), K, lam, S.a.data(), K, S.a[0], S.a[K - 1], S.c.data());
         for (int j = 0; j < K; ++j) S.d[j] += std::exp(S.c[j]);
     }

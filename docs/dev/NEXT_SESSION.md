@@ -1,4 +1,4 @@
-# NEXT SESSION — start here (2026-09-17 night: the one-path convergence and the VCaP baseline; the threads design awaits the owner)
+# NEXT SESSION — start here (2026-09-18: ψ threaded, the cache key on inputs, the splice-out marginal hoisted; the block in one native call is next)
 
 This file is only how to begin. The port's plan is `docs/dev/CALIBRATION_PERFORMANCE_PLAN.md` §F and §G; the LIVE
 status with numbers is `ISSUES: performance-memory-bounded-solve`; the day's record is the closing paragraphs of
@@ -20,10 +20,8 @@ building, is `docs/dev/THREADS_PLAN.md`.
    (`native/thread_pool.h`), a cost-balanced partition of the slot list (26 columns an AMBIG slot, 1 a single-strand
    one), a `Scratch` per thread, the GIL released; gate: the replay of `sweeps_MO_3021_step11` at 1, 2 and 8 threads
    BIT-IDENTICAL on all four sweeps, the suite, the three references; two interleaved pairs on VCaP at `--threads 8`.
-   Then (v) the blur's four-lane reduction (the pass IS the blur on the deep library: 1.43 M blurs a first sweep,
-   8.1 G multiply-adds; a summation-order change behind the replay's tolerance budget), the cache key on the
-   factory's inputs, the gDNA arm inside ψ, and the block in one native call — in that order, each its own
-   commit, each gated as the plan says.
+   Then the cache key on the factory's inputs, the pass's constructors, the gDNA arm inside ψ, and the block in one
+   native call — in that order, each its own commit, each gated as the plan says.
 6. ~~The one-path convergence of the pass~~ — DONE 2026-09-17, prepared as snapshot `commits/13_one_path/`
    (the per-hop Python kernel and `transfer_rows.py` deleted; the constructors bound for the gates).
 7. ~~The optimisation target moved to VCaP~~ — DONE 2026-09-17 (owner): the four sweeps captured
@@ -32,7 +30,11 @@ building, is `docs/dev/THREADS_PLAN.md`.
    the MO_3021 captures and the timing worktree removed; snapshot `commits/14_vcap_baseline/` (docs only).
 8. ~~The cache key on the factory's inputs~~ — DONE 2026-09-18 (exact; the key 3.2 s → 0.27 s a refit
    sweep; `sweeps_VCaP_step16` is the capture now); snapshot `commits/16_cache_key/`.
-9. §G: the stages outside calibration — 110 s of 264 on VCaP: the scan 35, the second pass 22, the two
+9. ~~The splice-out marginal's hoist~~ — DONE 2026-09-18 (exact; the census's timers put the marginal at 65 % of the
+   pass and the blur at 3.5 s of 9.6 — the earlier "the pass IS the blur" was an inference from the tap counts, now
+   corrected; the pass 36.6 → 29.2 s and 36.2 → 29.2 s at 8 threads (0.80 / 0.81), the sweep 80 → 73 s, the run 205 → 195 s and 202 → 197 s); snapshot `commits/17_splice_out/`. The blur's loop interchange is PRICED and not
+   taken (−1.5 s a first sweep, a summation-order change 1.9e-7 of the budget) — the owner's call.
+10. §G: the stages outside calibration — 110 s of 264 on VCaP: the scan 35, the second pass 22, the two
    fragment-length fits 16.6, quant 37 (the locus EM 15, the capture effective lengths 8), the index load 6.5.
 
 ## Where the time is now (VCaP, the deep library; `s12/kernel_times_vcap.log`, `s12/census_vcap.log`, `perf/vcap_baseline_2026-09-17/`)
@@ -45,7 +47,7 @@ index load 6.5).
 | per sweep | first sweep (K = 101, the layer runs) | refit sweep (K = 233, cache-served) |
 |---|---|---|
 | ψ native (self-solve + final) | 6.7 s | 15.5 s |
-| the pass native (both): 1.43 M blurs at a mean of 56 taps — 8.1 G multiply-adds | 10.4 s | — (~24 s at the miss) |
+| the pass native (both): the splice-out marginal 4.2 s (was 6.3), the blur 3.5, the transport rows 1.7, the lane hops 1.9 | 8.5 s (was 10.4) | — (~20 s at the miss) |
 | the builders native (the RNA lanes 2.7, the gDNA lane 1.2) | 4.7 s | — (~11 s at the miss) |
 | the policy's solve native | 0.5 s | — |
 | the message cache's key (blake2b over the block context) | — | 3.2 s |
@@ -81,8 +83,9 @@ reference" module (its gate reads the native strand term through `psi_cube`) —
    `sweep_replay.py replay [--tolerance]` for calls 0–3 → the references (re-frozen only with the reason) → two
    interleaved timing pairs at 8 threads on VCaP against a worktree of the pre-step commit carrying the SAME
    binaries (`git worktree add --detach /tmp/rigel_pre <commit>`, the installed `site-packages/rigel/*.so` copied in,
-   `pre_site_28bd174c/sitecustomize.py` on `PYTHONPATH`; `s10/time_pairs.sh`) — the worktree was removed after the
-   allocation step's timing and is recreated when needed.
+   `pre_site/sitecustomize.py` on `PYTHONPATH`; `s15/time_pairs.sh`). When a step changes a native module's argument
+   shape, build that module from the worktree's own source in a separate CMake build directory (`s13/pre_worktree.sh`,
+   `s15/pre_worktree_blur.sh` are the two forms).
 4. Each step its own commit, prepared as a snapshot; the owner drives the commit and the push.
 
 ## ⛔ Traps met in this session (also in memory)
@@ -101,23 +104,24 @@ reference" module (its gate reads the native strand term through `psi_cube`) —
   outputs bit-identical) — and any gate that compared whole matrices (`test_pass_kernel`'s leaves, the `RowTable`
   gate's fresh-table check) had to be rewritten to compare under the bits.
 
-## Storage (2026-09-17 night)
+## Storage (2026-09-18)
 
-`perf/sweeps_VCaP_step13` (9.0 GB; the refit sweeps' pickles are 2.9 GB each, their message cache) is THIS tree's
-capture and stays until a step moves numbers. Removed tonight: the MO_3021 capture (3.6 GB), the timing worktree
-`/tmp/rigel_pre` (recreate from the pre-step commit with the installed binaries when a step is timed), the retired
-modules' binaries (`s9/pre_so`). Still large and regenerable: `prototypes/2026-09-16_ruler_repair/s5/scratch_test_reference*`
-(22 GB) — the owner's.
+`perf/sweeps_VCaP_step16` (9.0 GB; the refit sweeps' pickles are 2.9 GB each, their message cache, keyed as this tree
+keys it) is THIS tree's capture and stays until a step moves numbers (`step13` deleted). The worktree `/tmp/rigel_pre`
+stands at 9e5131aa + snapshots 15 and 16 with `_transfer_impl` built from its own source (the pre-hoist marginal):
+`git worktree remove --force /tmp/rigel_pre` when it is next moved. Still large and regenerable:
+`prototypes/2026-09-16_ruler_repair/s5/scratch_test_reference*` (22 GB) — the owner's.
 
 ## Where everything is
 
-* The synced scratchpad: `~/Downloads/rigel_runs/prototypes/2026-09-17_port_ii/` — `commits/committed/` (7–11),
-  `commits/12_alloc/`, `commits/13_one_path/` (with its `DELETED.txt`), `commits/14_vcap_baseline/` (the snapshots
-  and messages awaiting the go, in order), `s8/`, `s9/`, `s10/` (the allocation step), `s11/` (the convergence: the
-  edit scripts, the replay and identity logs), `s12/` (the VCaP baseline: the census instrument, its harness, the
-  kernel timings, the profiles' logs), `pre_site_28bd174c/`.
-* Captures and reports: `perf/sweeps_VCaP_step13`; `perf/vcap_baseline_2026-09-17/` (the two runs of this tree);
-  the earlier `perf/block_alloc_2026-09-17/`, `perf/port_*_2026-09-17/`.
+* The synced scratchpad: `~/Downloads/rigel_runs/prototypes/2026-09-17_port_ii/` — `commits/committed/` (7–14,
+  landed; 12–14 as a3b7a23f / a1e5be03 / 9e5131aa), `commits/15_psi_threads/`, `16_cache_key/`, `17_splice_out/` (the
+  snapshots and messages awaiting the go, in order; `commit_series.sh` replays them onto 9e5131aa), `s8/`–`s11/` (the earlier steps), `s12/` (the VCaP baseline and the census instrument),
+  `s13/` (ψ threads: the replay-at-threads and timing scripts, the threaded kernel's copy), `s14/` (the cache key),
+  `s15/` (the splice-out hoist; `edit_blur.py` is the priced interchange, unapplied), `pre_site/`.
+* Captures and reports: `perf/sweeps_VCaP_step16`; `perf/vcap_baseline_2026-09-17/` (two runs of the tree before ψ
+  went threaded), `perf/psi_threads_2026-09-18/` and `perf/splice_out_2026-09-18/` (the two steps' interleaved
+  pairs); the earlier `perf/block_alloc_2026-09-17/`, `perf/port_*_2026-09-17/`.
 * The identity references: `~/Downloads/rigel_runs/arms/review_identity_*.json`, frozen 2026-09-17 on `80b459bf`'s
   numbers, BIT-IDENTICAL on this tree.
 

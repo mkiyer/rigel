@@ -109,15 +109,16 @@ stated), each its own commit, in the order of its size:
 5. **`build_region_init`'s glue** (`strand_evidence`, `density_factor_precision`, the where's; ~0.3 s): part of
    the block port.
 
-### (v) The blur's reduction — a summation-order change, priced by the census
+### (v) The pass's constructors — the census's timers, and what they changed (2026-09-18)
 
-The pass is the blur: 1.43 M calls a first sweep at a mean of 56 taps over K = 101 cells (8.1 G multiply-adds of
-the pass's 10.4 s; ~2.3× at the miss sweep's K = 233). `blur_row`'s inner loop is a floating-point reduction over
-the taps, which the compiler does not reassociate, so it runs scalar at about a nanosecond a tap. An explicit
-four-lane partial sum changes the summation order and nothing else — a port-class change, held to the replay's
-tolerance budget, worth ~−20 s a run on its own and multiplying with a pass threaded over blocks. The constant
-edge pads are prefix sums, a smaller saving. A recursive (IIR) Gaussian would change the blur's VALUE, not its
-summation order — an accuracy question, not proposed.
+Timers on the census (the blur, each row constructor, each rule kind, the two lane hops) corrected the inference from
+its counts: on the first sweep the blur is 3.5 s of the pass's 9.6 s, and `splice_out_row`'s nine-node marginal is
+6.3 s — 65 % — because every node recomputed the whole face map. Its node-independent half is HOISTED (exact,
+bit-identical; the marginal 6.3 → 4.15 s, the pass 9.6 → 8.5 s a first sweep; the pass 36.6 → 29.2 s and 36.2 → 29.2 s at 8 threads (0.80 / 0.81), the sweep 80 → 73 s, the run 205 → 195 s and 202 → 197 s). The blur's loop
+interchange (one tap at a time into every cell) takes the blur to 2.0 s a first sweep, ~5 s a run, at a
+summation-order change 1.9e-7 of the replay's budget — priced, not taken. The pass's floor on the first sweep is now
+the marginal's log and exp per cell per node (4.2 s), the blur (3.5 s), the transport rows (1.7 s) and the lane hops
+(1.9 s); a pass threaded over blocks divides all of it.
 
 ### What is not proposed
 
@@ -133,8 +134,8 @@ summation order — an accuracy question, not proposed.
 
 1. (iv-a) ψ over slots — one commit; the replay at 1/2/8 threads BIT-IDENTICAL on `sweeps_VCaP_step13`, the suite,
    the references; two interleaved pairs on VCaP at `--threads 8`. (58 s of 264.)
-2. (v) the blur's four-lane reduction — one commit, tolerance-gated on the replay; the census re-run to show the
-   taps unchanged and the time moved. (~36 s of 264, the pass.)
+2. ~~(v) the pass's constructors~~ — the splice-out marginal's hoist LANDED 2026-09-18 (exact); the blur's interchange
+   priced and not taken (a number moved for 2 % of the run).
 3. The cache key on the factory's inputs (exact; the largest Python item of a refit sweep).
 4. The gDNA arm inside ψ (tolerance-gated); `_psi`'s row add with it.
 5. The block in one native call with a C++ pool over blocks — or Python threads over blocks with GIL-releasing

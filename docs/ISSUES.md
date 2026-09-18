@@ -67,15 +67,17 @@ wrappers `s12/kernel_times_vcap.py`, in the synced scratchpad): the first sweep 
 native — the pass 10.4, ψ 6.7, the builders 4.7 (the RNA lanes 2.7, the gDNA lane 1.2), the solve 0.5; the pass is
 4.1 M hops, 2.1 M through a rule (0.96 M transport and splice-out maps against MO_3021's 0.08 M: the deep library has
 counts at most faces), 1.55 M compositions written, 1.39 M levels emitted, and 1.43 M BLURS at a mean of 56 taps over
-K = 101 cells — 8.1 G multiply-adds, which IS the pass. The refit sweeps run on the landscape's bracket, K = 233 here
+K = 101 cells — 8.1 G multiply-adds, which the census's TIMERS later put at 3.5 s of the pass's 9.6 (the splice-out
+marginal 6.3). The refit sweeps run on the landscape's bracket, K = 233 here
 (against the first sweep's 101): sweep 1, a cache miss in production, pays the layer at 2.3×, and every refit sweep pays
 ψ 15.5 s and 7.7 s of Python (the message cache's key 3.2 — blake2b over the block context, the factory rows most of its
 bytes; the gDNA arm's `np.interp` 2.3; the factory rows 1.1, lgamma 85 % of it). THE RANKED OPPORTUNITIES, each priced
 against these numbers: (1) ψ over slots inside `psi_solve` — 58 s of 264, bit-identical by construction — LANDED 2026-09-18
 (`CalibrationConfig.n_threads`, 0 = every core, fed by the CLI's `--threads`; the four VCaP sweeps BIT-IDENTICAL at 1/2/8
-threads; VCaP 267 → 214 s and 261 → 213 s at 8 threads (0.80 / 0.82), ψ 57.4 → 8.3 s, the sweep 135 → 88 s, `perf/psi_threads_2026-09-18/`); (2) the pass's blur — 36 s: the reduction over the taps is a scalar
-sum the compiler does not reassociate, so an explicit four-lane sum is a summation-order change behind the replay's
-tolerance budget, and a pass threaded over blocks halves it again; (3) the builders — 17 s, the RNA lanes 57 % of it,
+threads; VCaP 267 → 214 s and 261 → 213 s at 8 threads (0.80 / 0.82), ψ 57.4 → 8.3 s, the sweep 135 → 88 s, `perf/psi_threads_2026-09-18/`); (2) the pass — 36 s: the census's timers put the
+splice-out marginal at 65 % of it — its node-independent half HOISTED 2026-09-18, exact (the pass 36.6 → 29.2 s and 36.2 → 29.2 s at 8 threads (0.80 / 0.81), the sweep 80 → 73 s, the run 205 → 195 s and 202 → 197 s,
+`perf/splice_out_2026-09-18/`) — the blur at 3.5 s of a first sweep's 9.6 (its loops interchanged would take it to 2.0 s at
+a summation-order change 1.9e-7 of the budget: priced, not taken), and a pass threaded over blocks divides the rest; (3) the builders — 17 s, the RNA lanes 57 % of it,
 threads over blocks; (4) the refit sweeps' Python — the cache key digesting the factory rows' INPUTS LANDED 2026-09-18 (exact; the key
 3.2 s → 0.27 s a refit sweep on VCaP, the capture re-taken as `sweeps_VCaP_step16`), the gDNA arm inside ψ
 (−7 s, tolerance-gated), the factory rows (−3 s, inside a native block); (5) outside calibration,
