@@ -118,8 +118,7 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
    `ISSUES: two-sided-exon-row`, `ISSUES: flux-floor-dispersion`,
    `ISSUES: message-layer-open-cases`.
 
-Then, in standing order: `ISSUES: scan-thread-split-starves-the-workers` ·
-`ISSUES: refit-vs-message-arbitration` (re-read under the E-step: the walk now says the prior does the
+Then, in standing order: `ISSUES: refit-vs-message-arbitration` (re-read under the E-step: the walk now says the prior does the
 unstranded rows and the messages the stranded capture-ON ones).
 
 **Later / parked** (each has its entry): `expand-the-gdna-spectrum` · `transfer-variance-premise` ·

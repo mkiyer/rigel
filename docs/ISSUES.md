@@ -45,9 +45,11 @@ one region-to-locus overlap computed twice although `_region_locus_shares` says 
 WHAT IS OPEN, ranked, each its own commit with its own gate: ① ~~the exact micro-wins~~ LANDED 2026-09-18,
 bit-identical: the bisection ends when its bracket does (the magic 200 gone), the Poisson identity's log-gamma
 is a table at its integer argument, the region-to-locus overlap is traversed once per assembly — the rate fit
-261 → 46 ms on 80,000 objects at the same rate to every digit, four fits a run, and one 1.7 s traversal gone; ② the scan's
-thread split (≈ 8 s, MEASURED, `ISSUES: scan-thread-split-starves-the-workers`; ⛔ a different worker count
-changes who deposits, so the real-library identity reference decides whether it is free or priced); ③ the
+261 → 46 ms on 80,000 objects at the same rate to every digit, four fits a run, and one 1.7 s traversal gone; ② ~~the scan's
+thread split~~ LANDED 2026-09-19, bit-identical on all three references including the real-library one that runs
+the scan: the budget is split by the measured ratio of one decompression thread per eight workers, the scan
+34.5 → 25.8 s at 8 threads and 20.1 → 17.6 s at 16 (`ISSUES: scan-thread-split-starves-the-workers` carries the
+table); ③ the
 second pass's boundary lookups — bind the two C++ lookups BATCHED, prove the id spaces agree, restructure
 the loop around one pre-pass per reference, delete the Python mirrors (≈ 7 s, and the one-path duplicate goes
 with it); ④ the two fragment-length fits — the adjacent-pair loop and the per-exon filter vectorise BIT-EXACTLY
@@ -183,15 +185,6 @@ information; a perfect per-transcript prior roughly halves in-scope gene-level e
 refused (`ISSUES: refused-transcript-weights`, `ISSUES: refused-soft-min-path-weighting`): the support problem
 is the whole problem, so the next candidate is a sparsity mechanism, targeting expressed multi-exon
 transcripts with median exon ≤ 150 bp. `quant_accuracy.py`.
-
-### scan-thread-split-starves-the-workers
-`priority: next · kind: decision · 2026-09-11`
-`BamScanConfig.resolved_scan_threads` gives BGZF decompression `min(4, total − 1)` threads and the scan
-workers what is left, so a 2–4 thread budget runs ONE worker and decompression is not the bottleneck. Scan
-seconds on the 18.6M-fragment library by (bgzf, workers): total 4 — (3,1) 113.5, (2,2) 59.5, (1,3) 42.4,
-(0,4) 33.7; total 8 — (4,4) 34.4, (2,6) 26.4, (1,7) 24.8; total 16 — (4,12) 19.1, (1,15) 19.5, (2,14) 17.4.
-Any new split rule is a tunable and `--scan-bgzf-threads` is a user-facing flag, so the rule is the owner's.
-`profiling/profiler.py --scan-only`.
 
 ### capture-blind-gdna-divisor
 `priority: next · kind: defect · 2026-08-31`
@@ -403,6 +396,18 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### scan-thread-split-starves-the-workers
+CLOSED by landing 2026-09-19: the budget is split by the measured RATIO — one BGZF decompression thread keeps
+about eight scan workers fed — instead of reserving a fixed four, so `bgzf_threads` defaults to deriving
+`total // 8` and an explicit `--scan-bgzf-threads` still overrides. The old rule picked the worst measured cell
+at every budget. Scan seconds on the 18.6M-fragment library, two interleaved rounds each, by (budget,
+decompression threads): 4 — (0) 32.0, (1) 41.2; 8 — (1) 25.8, (2) 26.2, (0) 28.3, (4) 34.5; 16 — (2) 17.6,
+(1) 19.6, (4) 20.1; the 2026-09-11 table it reproduces is (3,1) 113.5, (2,2) 59.5, (1,3) 42.4, (0,4) 33.7 at
+total 4 and (4,4) 34.4, (2,6) 26.4, (1,7) 24.8 at total 8. BIT-IDENTICAL on all three identity references
+including the real-library one that runs the scan, which is structural rather than lucky: every accumulator
+bank is a sum of integers, and `test_scan_order_independence.py` holds the tally identical at 1, 2, 4 and 8
+workers. `profiling/profiler.py --scan-only`.
 
 ### ruler-multimapper-floor-caps-the-correction
 CLOSED by landing 2026-09-16 (`DESIGN.md` §7.2, `EQUATIONS.md` §11): the expectation ruler on the per-base
