@@ -195,8 +195,11 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,414 passed / 0 skipped / 5 xfail, 3,419 collected** (re-derived
-2026-09-18 after `strand_likelihood.py` was converged into the gates' oracle module: −3 by the module row; before that after `policy_prototype.py` was retired: −4 by the `scripts/design/` row; before that after the message cache was deleted: −3 for `message_cache.py` by the module row, −6 gates — the five cache
+**The standing baseline: 0 failed / 3,419 passed / 0 skipped / 5 xfail, 3,424 collected** (re-derived
+2026-09-18 after the performance plan's phase 1: +4 gates — the bisection's bit-equality against the old fixed
+loop and the log-gamma table's against the direct form in `test_gdna_density.py`, the one-traversal spy and the
+handed-in shares in `test_priors.py`; before that +1 for `docs/dev/PERFORMANCE_PLAN.md` by the `docs/dev/` row;
+before that after `strand_likelihood.py` was converged into the gates' oracle module: −3 by the module row; before that after `policy_prototype.py` was retired: −4 by the `scripts/design/` row; before that after the message cache was deleted: −3 for `message_cache.py` by the module row, −6 gates — the five cache
 gates of `test_sweep_backbone.py` and the served-injection gate of `test_landscape_training_population.py`; before that
 after the block went into one native call: −10 for the four files deleted — `messages/faces.py` and
 `messages/lanes.py` by the module row (−3 each), `native/psi_kernel.cpp` and `native/transfer_kernel.cpp` by the row

@@ -42,9 +42,10 @@ fragment-length fit; 808 `poisson_lower_mean` calls, four `one_sided_rate` fits 
 about 60 close a float64 bracket; 1,982 short-length table builds in `effective_length.interval_sums`; and
 one region-to-locus overlap computed twice although `_region_locus_shares` says "computed exactly once".
 
-WHAT IS OPEN, ranked, each its own commit with its own gate: ① the exact micro-wins — the bisection stops
-when the bracket is closed (the magic 200 dies with it), the Poisson identity's log-gamma becomes a table at
-integer arguments, the locus overlap is computed once (≈ 4 s, bit-identical by construction); ② the scan's
+WHAT IS OPEN, ranked, each its own commit with its own gate: ① ~~the exact micro-wins~~ LANDED 2026-09-18,
+bit-identical: the bisection ends when its bracket does (the magic 200 gone), the Poisson identity's log-gamma
+is a table at its integer argument, the region-to-locus overlap is traversed once per assembly — the rate fit
+261 → 46 ms on 80,000 objects at the same rate to every digit, four fits a run, and one 1.7 s traversal gone; ② the scan's
 thread split (≈ 8 s, MEASURED, `ISSUES: scan-thread-split-starves-the-workers`; ⛔ a different worker count
 changes who deposits, so the real-library identity reference decides whether it is free or priced); ③ the
 second pass's boundary lookups — bind the two C++ lookups BATCHED, prove the id spaces agree, restructure
