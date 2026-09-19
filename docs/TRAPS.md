@@ -218,9 +218,14 @@ one-sj fixture left a deleted deposit rule fully green because no block was ever
 every fixture whether it could have failed.
 
 **prove-the-substrate. Prove the substrate before proving the code: when a simulated axis is the axis you
-are judging, gate the simulator on it.** For two milestones the panel's post-capture fragment-length
-distribution was byte-identical to its pre-capture one, and everything measured against it inherited
-that. The tell was free: diff the two capture arms' truth files.
+are judging, gate the simulator on it, and when an error concentrates on one simulated mechanism, A/B THE
+SIMULATOR'S ASSUMPTION before engineering against it.** For two milestones the panel's post-capture
+fragment-length distribution was byte-identical to its pre-capture one, and everything measured against it
+inherited that. The tell was free: diff the two capture arms' truth files. And the stranded capture-ON error
+that ranked first on 2026-09-19 was mostly the simulator binding a half-matched junction probe at full strength
+in cDNA and a fifth in gDNA — an asymmetry no physics supports. Re-simulating two rungs with the two alike took
+an hour and moved the shipped tool from 10.5 % to 4.7 % at `g05`; the ladder was rebuilt on the corrected rule
+(`ISSUES: ruler-witness-geometry-on-transcript-panels`).
 
 **can-the-benchmark-resolve-it. Before running a benchmark, prove it can resolve the axis you are
 changing.** A suite judged a partition change for months while its fine region set was row-for-row

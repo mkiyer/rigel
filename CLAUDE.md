@@ -200,8 +200,11 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,422 passed / 0 skipped / 5 xfail, 3,427 collected** (re-derived
-2026-09-19 after the cache key and the ruler arm: +2 in `test_scan_cache.py`, where three gates — a thread count is
+**The standing baseline: 0 failed / 3,425 passed / 0 skipped / 5 xfail, 3,430 collected** (re-derived
+2026-09-19 after the simulator's capture physics: +2 in `test_sim_capture.py` — gDNA and cDNA bind the same half
+of a split probe alike, and a capture key the loader does not know is refused — and +1 for
+`docs/dev/CAPTURE_WITHOUT_THE_PANEL.md` by the `docs/dev/` row; before that 3,422 / 3,427 after the cache key and
+the ruler arm: +2 in `test_scan_cache.py`, where three gates — a thread count is
 not the key, a tally setting is, the key is derived from the recorded settings — replaced the one that tampered a
 stored digest; +4 in `test_quant_accuracy.py` — the ruler arm reaching the EM with its noop inert, its guard, the
 capture truth's anchor, the refusal of mixed assignment modes; before that 3,416 / 3,421 when the seven SPENT

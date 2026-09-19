@@ -29,16 +29,17 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   (measured only at the panel's nascent stress share), and under capture it gives probed gDNA to isoform-rich
   genes, both against a calibration that had the split right (`ISSUES: em-overturns-the-calibrated-gdna-split`).
 
-- **The deliverable, end to end** (2026-09-19; `quant_accuracy.py --set em.assignment_mode=fractional`,
-  transcript-level Σ|Δ| as a share of the true RNA at `g00` / `g05` / `g50` / `g98`): unstranded OFF 3.1 / 3.4 /
-  4.2 / 35.0 %, stranded OFF 3.3 / 2.9 / 3.9 / 24.8 %, stranded ON 7.4 / 10.5 / 13.9 / 98.8 %, deferred 9.0 / 16.7 /
-  28.3 / 804 %; gene level in scope 1.3–5.2 % below `g98`, where RNA is 2 % of the library and the error is gDNA
-  on transcripts. A perfect prior recovers at most 5 % in scope and nothing measurable at `g05`: the residual is
-  the EM's and the assignment's (`ISSUES: end-to-end-error-unattributed`, CLOSED). Stranded × capture-ON, the
-  stratum above the owner's 5 % bar, is the capture ruler under junction-spanning probes — the simulator's own
-  capture-aware length takes it to 2.9 / 3.6 / 8.4 % (`ISSUES: ruler-witness-geometry-on-transcript-panels`) —
-  and what remains at `g50` is the EM's gDNA under-call (`ISSUES: em-overturns-the-calibrated-gdna-split`). Truth
-  as the per-transcript weights removes about half of the error everywhere (`ISSUES: per-transcript-prior-lane`).
+- **The deliverable, end to end** (2026-09-19, on the ladder REBUILT under the corrected capture physics;
+  `quant_accuracy.py --set em.assignment_mode=fractional`, transcript-level Σ|Δ| as a share of the true RNA at
+  `g00` / `g05` / `g50` / `g98`): unstranded OFF 3.1 / 3.4 / 4.2 / 35.0 %, stranded OFF 3.3 / 2.9 / 3.9 / 24.8 %,
+  stranded ON 6.8 / 4.5 / 7.8 / 109.8 %, deferred 8.3 / 12.4 / 20.8 / 739.5 %; at gene level 1.3–4.8 % in scope
+  below `g98`, where RNA is 2 % of the library. The reseed floor is 0–82 fragments under fractional assignment, so
+  everything above it is signal. A perfect prior recovers nothing in scope and moves `g98` alone (109.8 → 69.1 %).
+  What remains in scope is two things: the capture ruler where no gDNA witnesses it — the simulator's own lengths
+  take stranded ON to 2.6 / 3.4 / 8.6 % (`ISSUES: ruler-witness-geometry-on-transcript-panels`) — and the EM's
+  gDNA split under capture, the table reading 0.4793 against 0.50 at `g50 ss.99 ON` while calibration reads +0.9 %
+  (`ISSUES: em-overturns-the-calibrated-gdna-split`). The capture-OFF strata are bit-identical to the retired
+  ladder's, which is the rebuild's own control.
 - **Stage A (the accumulator)**: done; the fragment ledger closes exactly — `calibration_oracle.py`.
 - **Fragment lengths**: closed, both halves — gDNA by the two-pool contrast (`calibration/fl.py`,
   `gdna_density.py`; gates `test_fl.py`, `test_gdna_density.py`), RNA sound as shipped
@@ -71,9 +72,10 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   1.000 with nothing moved; a mode's members are kernels with a location, so a sparse library is told it
   has no reference rather than handed one read off anchors' walls (`gdna_reference_members` is the
   regime); what the gDNA witness cannot see of a transcript-designed panel is declared
-  (`ISSUES: ruler-witness-geometry-on-transcript-panels`) — and on the ladder's junction-spanning panel it costs
-  more than it corrects: switched off, stranded × capture-ON at `g05` falls from 10.5 to 7.8 %
-  (`quant_accuracy.py --arm oracle_ruler` prices it end to end); the never-passed per-transcript prior lane
+  (`ISSUES: ruler-witness-geometry-on-transcript-panels`) — and what it cannot see is the capture a probe gives
+  only to the isoforms holding a junction: `quant_accuracy.py --arm oracle_ruler` prices that at 4.2 points of
+  stranded capture-ON at `g00`, where no gDNA witnesses the panel at all, and 1.1 at `g05`; the never-passed
+  per-transcript prior lane
   (`ISSUES: per-transcript-prior-lane`) is the other pre-EM item.
 - **Performance**: the port and the work outside it are done, and a deep run is 0.87 of what it was
   (`DESIGN.md` §6b.15). The sweep is ONE native call over a pool of threads, bit-identical at every thread
@@ -81,9 +83,12 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   What remains is ranked and resumable in `ISSUES: performance-memory-bounded-solve`, whose next item — the
   short-template taper table — is already derived and measured two ways, one bit-identical and one priced. The
   thread is PARKED by the owner, not finished — `profiling/profiler.py`, `profiling/sweep_replay.py --threads`.
-- **Panels**: the sparse-nascent 16-condition ladder and the 30-condition test chromosome, both cached
-  and certified — `panel.py status`; the fl-gap side panels carry a different nascent model —
-  `ISSUES: flgap-panels-stale-nascent-model`. The ladder's nascent level is a development stress
+- **Panels**: the 16-condition ladder was REBUILT 2026-09-19 under the corrected capture physics — its
+  capture-OFF rows bit-identical to the retired one, its simulator gates 6/6, cached and certified. The
+  30-condition test chromosome is cached and certified but predates the physics, which changes only a panel whose
+  probes span junctions: its benign panel re-simulates bit-identical, its junction-probed twin does not and is
+  STALE. The fl-gap side panels share the ladder's panel and are stale on the physics as well as on the nascent
+  model — `panel.py status`, `ISSUES: flgap-panels-stale-nascent-model`. The ladder's nascent level is a development stress
   (`DESIGN.md` §0b).
 - **Oracle FIELD certification**: every ladder row is stamped, but the uniformity gate is vacuous on
   capture-ON and zero-gDNA rows — read the stamp with its vacuity flag — `calibration_oracle.py`.
@@ -109,39 +114,35 @@ The method is the dissection loop: run the panel → worst in-scope scenario →
 mass (`worst_objects.py`, `calibration_walk.py`) → find the mechanism → gated fix → add the offending
 transcripts to the test chromosome → re-run → repeat. The facts this ranking leans on, each named with
 its instrument: the ruler reads 1.000 at `g00` and off capture, so the metric page is the composition's
-(`calibration_vs_oracle.py`); a perfect prior is worth 3–5 % of the in-scope transcript error end to end and
-nothing measurable at `g05` (`quant_accuracy.py`); by class the in-scope residual sits on the
+(`calibration_vs_oracle.py`); a perfect prior is worth nothing in scope end to end on the rebuilt ladder
+(`quant_accuracy.py`); by class the in-scope residual sits on the
 intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons (stranded ON)
 (`policy_benchmark.py --by-class`).
 
-1. **Stranded × capture-ON: the capture ruler under junction-spanning probes** (owner, 2026-09-19: the focus,
-   with a target below 5 %) — `ISSUES: ruler-witness-geometry-on-transcript-panels`. Root-caused: a probe across a
-   junction makes capture isoform-specific, the EM's isoform split reads the ratio of capture-aware lengths, and
-   the gDNA witness cannot see a junction (at zero gDNA there is no witness at all); the simulator's own length
-   takes the stratum to 2.9 / 3.6 % at `g00` / `g05`. The repair needs an owner decision, because the one
-   observable that sees isoform-specific capture is the probe design and Rigel reads no panel — and the first
-   question is whether the panels Rigel will meet span junctions. Judged on `quant_accuracy.py` with
-   `oracle_ruler` as the ceiling and the test chromosome's benign and junction-probed panels as the control.
+1. **The EM does not hold calibration's gDNA split** — `ISSUES: em-overturns-the-calibrated-gdna-split`, the
+   dominant in-scope residual on the rebuilt ladder and the whole of `g98`. Under capture the table under-calls
+   gDNA (0.4793 against 0.50 at `g50 ss.99 ON`) while calibration reads +0.9 %, and the missing mass lands on the
+   isoforms of heavily probed, isoform-rich genes; at capture-OFF the same EM over-calls gDNA by taking unspliced
+   RNA, measured only at the nascent stress share, so THAT half is sized at the realistic share first
+   (`ISSUES: nascent-stress-sensitivity`). Neither the prior, the ruler nor the gDNA component's length moves it.
 
-2. **The EM's residual: the per-transcript allocation** — `ISSUES: per-transcript-prior-lane`. `rna_prior_weight`
-   is built end to end and never passed; truth as the allocation weights removes about half the transcript
-   error in every stratum, the gDNA-free `g00` rows included, and still halves what `oracle_ruler` leaves on
-   stranded × capture-ON. A wiring gap plus a support decision: that arm hands over the true support, two
-   weightings are refused with their numbers, and the next candidate is a sparsity mechanism.
-   `ISSUES: nested-antisense-leak-under-the-sane-ruler` sits in it.
+2. **The capture ruler where no gDNA witnesses it** — `ISSUES: ruler-witness-geometry-on-transcript-panels`. A
+   probe spanning a junction gives extra capture only to the isoforms that hold it, which gDNA cannot see and
+   which at zero gDNA has no witness at all: the simulator's own lengths are worth 4.2 points of stranded
+   capture-ON at `g00` and 1.1 at `g05`. The repair needs the owner's decision, since the one observable is the
+   probe design and Rigel reads no panel; the candidates are data-derived (a fitted capture field, a per-kit
+   profile learned across a cohort).
 
-3. **The EM does not hold calibration's gDNA split** — `ISSUES: em-overturns-the-calibrated-gdna-split`, in both
-   directions: at capture-OFF it takes unspliced RNA into gDNA (`g05 ss.50 OFF` 0.104 against 0.05, measured only
-   at the nascent stress share, so SIZED first at the realistic share, `ISSUES: nascent-stress-sensitivity`), and
-   under capture it gives probed gDNA to isoform-rich genes (`g50 ss.99 ON` −3 % against a calibration at +0.4 %),
-   under a perfect prior, a true ruler and a true gDNA length alike.
+3. **The per-transcript allocation** — `ISSUES: per-transcript-prior-lane`. `rna_prior_weight` is built end to end
+   and `pipeline.py` omits it; truth as the allocation weights is the largest single lever measured on the EM's
+   isoform split. A wiring gap plus a support decision, and the next candidate is a sparsity mechanism, which is
+   also the safety net under any capture error.
 
-4. **The pre-EM prior chain** — what the oracle arms price it at on the deliverable. `rna_prior_count` carries
-   almost all of a perfect prior's value, at `g98`; `gdna_eff_len` at truth moves nothing above the floor in
-   scope, so `ISSUES: capture-blind-gdna-divisor` and `ISSUES: eb-shrinkage-magic-ess` are near zero on the
-   ladder's table (the ESS still dominates the fl-gap arm); `ISSUES: antisense-prior-assembly-casualty` owns an
-   xfail. Each judged on the deliverable AND on `prior_vs_oracle.py`, so a repair that moves the prior and not
-   the user's number is visible as that.
+4. **The pre-EM prior chain** — what the oracle arms price it at on the deliverable: a perfect prior recovers
+   nothing in scope on the rebuilt ladder and moves `g98` alone, so `ISSUES: capture-blind-gdna-divisor`,
+   `ISSUES: eb-shrinkage-magic-ess` and `ISSUES: antisense-prior-assembly-casualty` are ranked by their own
+   instrument (`prior_vs_oracle.py`) rather than by the table. ⛔ `ISSUES: oracle-cache-key-hashes-a-thread-count`
+   is CLOSED, so the oracle arms read the shared caches again.
 
 5. **Calibration accuracy where the strand tilt matters** — the AMBIG slots with RNA on both strands
    (`DESIGN.md` §6b.15.12–§6b.15.13). The tilt atom and the strand channel's protocol decision landed 2026-09-14 (the

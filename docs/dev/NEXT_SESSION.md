@@ -1,37 +1,44 @@
-# NEXT SESSION — start here (2026-09-19, late: stranded × capture-ON is root-caused; the repair waits on an owner decision)
+# NEXT SESSION — start here (2026-09-19, night: the capture physics is corrected and the ladder is rebuilt)
 
 This file is only how to begin. The ranked view is `docs/ROADMAP.md`, the open problems are `docs/ISSUES.md`,
 the rulings and the record are `docs/DESIGN.md` (§0b carries the scope and its 2026-09-19 amendment), what
 "done" means is `docs/SUCCESS.md`, the lessons are `docs/TRAPS.md` cited by name, and the release procedure is
 `docs/MANUAL.md` / `docs/PUBLISHING.md`.
 
-## Where the tool is
+## What changed today
 
-The end-to-end baseline is measured (`ISSUES: end-to-end-error-unattributed`, CLOSED) and the owner made
-stranded × capture-ON the focus, with a target below 5 %. Every benchmark now runs under fractional assignment
-(`quant_accuracy.py --set em.assignment_mode=fractional`, owner 2026-09-19; the report refuses to mix modes).
+THE SIMULATOR'S CAPTURE PHYSICS (owner ruling, 2026-09-19). A molecule hybridises through ONE contiguous part of
+a probe: a transcript holding the junction a probe spans binds it whole, while gDNA, a nascent span and an isoform
+without the junction hold its parts apart and bind the better one. That geometry is gDNA's whole disadvantage —
+the `gdna_split_penalty` that bound a gDNA half-match at a fifth of the identical cDNA one is gone, and the loader
+refuses a config that still carries the key. THE LADDER WAS DELETED AND REBUILT under it (23 GB, 16 conditions,
+cached and certified, simulator gates 6/6); its capture-OFF rows are bit-identical to the retired ladder's, which
+is the rebuild's own control, and the capture-ON identity reference was re-frozen (the capture-OFF one still
+passes `--check` bit-identically).
 
-THE ROOT CAUSE (`ISSUES: ruler-witness-geometry-on-transcript-panels`): the ladder's panel places probes along
-transcripts, so 24 % of them span a splice junction, and such a probe captures only the isoforms that hold the
-junction. Capture becomes isoform-specific, and the EM splits a gene's shared fragments by the ratio of its
-isoforms' capture-aware lengths. The shipped ruler reads capture from gDNA, which has no junctions, and at zero
-gDNA it has nothing to read, so on this panel it costs more than it corrects (stranded ON `g05` 10.5 %, 7.8 % with
-it switched off). The simulator's own length (`quant_accuracy.py --arm oracle_ruler`) takes the stratum to 2.9 /
-3.6 / 8.4 % at `g00` / `g05` / `g50`. The test chromosome is the control: its benign panel reads capture-OFF
-levels, its junction-probed twin 35–41 % at every gDNA level. What remains at `g50` is the EM's gDNA under-call
-under capture (`ISSUES: em-overturns-the-calibrated-gdna-split`).
+THE DELIVERABLE, on the rebuilt ladder, is in `ROADMAP.md`'s claim: stranded × capture-ON now reads 6.8 / 4.5 /
+7.8 / 109.8 % at `g00` / `g05` / `g50` / `g98`, where the retired ladder read 7.4 / 10.5 / 13.9 / 98.8 %. Most of
+what ranked first this morning was the simulator's asymmetry (`TRAPS: prove-the-substrate`).
 
-## The decision it waits on
+## What is ranked now (`ROADMAP.md`)
 
-The one observable that sees isoform-specific capture is the probe design, and Rigel reads no panel
-(`DESIGN.md` §7.2). So before any build: do the panels Rigel will meet span junctions (exome-style panels on
-genomic exons do not; transcript-designed ones do), and does Rigel take the probe design as an input? Both are the
-owner's. Everything a candidate needs to be judged is in place: `oracle_ruler` is the ceiling, `ruler_vs_truth.py`
-scores a ruler per transcript (read its within-gene spread, `TRAPS: judge-a-ruler-by-its-within-gene-spread`), and
-the test chromosome's two panels are the controlled pair.
+1. **The EM does not hold calibration's gDNA split** (`ISSUES: em-overturns-the-calibrated-gdna-split`) — the
+   dominant in-scope residual and the whole of `g98`: the table reads 0.4793 against 0.50 at `g50 ss.99 ON` while
+   calibration reads +0.9 %. Neither the prior, the ruler nor the gDNA length moves it. Its capture-OFF half is
+   sized at the realistic nascent share first (`ISSUES: nascent-stress-sensitivity`).
+2. **The capture ruler where no gDNA witnesses it** (`ISSUES: ruler-witness-geometry-on-transcript-panels`) — worth
+   4.2 points of stranded capture-ON at `g00` and 1.1 at `g05`. It waits on an owner decision, because the only
+   observable that sees isoform-specific capture is the probe design and Rigel reads no panel.
+3. **The per-transcript allocation** (`ISSUES: per-transcript-prior-lane`) — true weights halve every stratum.
+4. The pre-EM prior chain, now ranked by `prior_vs_oracle.py` rather than by the table.
 
-Then `ROADMAP.md` items 2–4: the per-transcript prior lane, the EM's gDNA split in both directions (the
-capture-OFF half sized at the realistic nascent share first), the rest of the prior chain.
+## What is stale, and what it costs to fix
+
+The physics changes only a panel whose probes span junctions. The test chromosome's benign panel re-simulates
+BIT-IDENTICAL (checked), so its 30 conditions and the depth/fl/odg variants stand. Its junction-probed twin
+(`scenarios_probes_junction`, 271 split probe blocks) and the two fl-gap side panels (they share the ladder's
+panel) are STALE: re-simulating the twin is minutes, the fl-gap panels hours, and the fl-gap pair is already
+stale on its nascent model (`ISSUES: flgap-panels-stale-nascent-model`).
 
 ## The five xfails are proven defects, each deferred to its thread
 
@@ -66,7 +73,10 @@ of what ships.
   attributions and the taper study that the parked thread resumes from).
 * Captures and reports: `perf/sweeps_VCaP_step19` (the sweep replay's capture, bit-identical on this tree);
   `perf/plan_final_2026-09-19/` is the deep run's current before-and-after.
-* THE BASELINE: `~/Downloads/rigel_runs/arms/2026-09-19_e2e_baseline/` (sampled assignment, the per-stratum
+* THE REBUILT LADDER's results: `~/Downloads/rigel_runs/suite/ladder/arms/` (the four `quant_accuracy` arms plus
+  `oracle_alloc_seed`, and `calibration_vs_oracle.json`) with every stage's log in
+  `~/Downloads/rigel_runs/logs/ladder_*.log` and the chain that produced them in `ladder_rebuild_2026-09-19.sh`.
+* THE BASELINE on the RETIRED ladder: `~/Downloads/rigel_runs/arms/2026-09-19_e2e_baseline/` (sampled assignment, the per-stratum
   `qa_report.txt`, `decomposition.txt`, `alloc.txt`). THE STRANDED × ON DISSECTION:
   `~/Downloads/rigel_runs/arms/2026-09-19_stranded_on/` — `all_scenarios.txt` (the fractional panel),
   `stranded_on_arms.txt` (every ruler and prior arm), `tables/` (per-transcript tables per arm), `testchr/` (the
