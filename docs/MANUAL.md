@@ -187,7 +187,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--threads N` | 0 (all cores) | Total thread budget. During scan it splits between scan workers and `--scan-bgzf-threads`; locus EM reuses the same budget (stages run serially). |
-| `--scan-bgzf-threads N` | `4` | BGZF decompression threads reserved from `--threads` during scan. `0` disables htslib threaded decompression. |
+| `--scan-bgzf-threads N` | derived | BGZF decompression threads reserved from `--threads` during scan. The default divides the budget by the measured ratio — one decompression thread keeps about eight scan workers fed — so 4 threads spend none on it, 8 spend one and 16 spend two. `0` disables htslib threaded decompression. |
 | `--scan-buffer-size GiB` | `2` | Max scan buffer before chunks spill to disk |
 | `--tmpdir DIR` | system temp | Directory for buffer spill files |
 | `--scan-fragments-per-chunk N` | `1000000` | Buffered fragments per scan chunk before the native scanner hands off to the Python buffer |

@@ -185,6 +185,39 @@ def test_frag_id_IS_AN_IDENTITY_which_is_what_makes_it_a_legal_sort_key(oracle):
     )
 
 
+# ── The SPLIT — how the budget is divided between decompression and workers ─────────────────────
+
+
+def test_the_thread_split_is_derived_from_the_budget_and_an_explicit_one_still_wins():
+    """The split is a RATIO, not a count: one decompression thread keeps about eight scan workers fed,
+    so the budget is divided by that ratio rather than by a fixed reservation.
+
+    Measured on the 18.6M-fragment library, scan seconds by budget and decompression threads — 4: (0)
+    32.0, (1) 41.2; 8: (1) 25.8, (2) 26.2, (0) 28.3, (4) 34.5; 16: (2) 17.6, (1) 19.6, (4) 20.1 — so the
+    derived cell is the best one at every budget measured, and the old fixed 4 was the worst at all
+    three. What this gate holds is the ARITHMETIC: every thread is spent, none is spent twice, at least
+    one worker always runs, and an explicit request still overrides. The answer itself cannot move with
+    the split — that is the tally's own gate below, and the reason is that every bank is a sum of
+    integers.
+    """
+    for total, expect in (
+        (1, (1, 0)),
+        (2, (2, 0)),
+        (4, (4, 0)),
+        (8, (7, 1)),
+        (16, (14, 2)),
+        (64, (56, 8)),
+    ):
+        got = BamScanConfig(total_threads=total).resolved_scan_threads()
+        assert got == expect, f"budget {total} split {got}, expected {expect}"
+        workers, bgzf = got
+        assert workers + bgzf == total and workers >= 1
+    # an explicit request is honoured, and still capped to leave a worker
+    assert BamScanConfig(total_threads=8, bgzf_threads=4).resolved_scan_threads() == (4, 4)
+    assert BamScanConfig(total_threads=8, bgzf_threads=0).resolved_scan_threads() == (8, 0)
+    assert BamScanConfig(total_threads=2, bgzf_threads=9).resolved_scan_threads() == (1, 1)
+
+
 # ── The TALLY — the same BAM gives the same accumulator payload at any worker count, bit for bit ─
 #
 # This is what every channel being an integer buys. A float accumulator differs between worker counts

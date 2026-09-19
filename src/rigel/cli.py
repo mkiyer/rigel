@@ -1320,8 +1320,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="BGZF decompression threads reserved from --threads during "
-        "BAM scan (default: 4). Set to 0 to disable htslib threaded "
-        "decompression.",
+        "BAM scan (default: derived from the budget, one per eight threads). "
+        "Set to 0 to disable htslib threaded decompression.",
     )
     perf_grp.add_argument(
         "--scan-buffer-size",

@@ -141,6 +141,12 @@ class FragmentScoringConfig:
 # ======================================================================
 
 
+#: Scan workers one BGZF decompression thread keeps fed, measured on the deep library
+#: (`BamScanConfig.resolved_scan_threads` carries the table): the budget is split by this ratio, so a
+#: 4-thread run spends none on decompression and a 16-thread run spends two.
+_SCAN_WORKERS_PER_BGZF_THREAD = 8
+
+
 @dataclass(frozen=True)
 class BamScanConfig:
     """Configuration for the BAM scanning and buffering stage.
@@ -159,11 +165,12 @@ class BamScanConfig:
         Log progress every N read-name groups (default 1M).
     total_threads : int
         Total thread budget available to the scan stage (default 0 = all cores).
-        Rigel reserves ``bgzf_threads`` from this budget for BAM decompression
-        and uses the remainder for scan workers.
-    bgzf_threads : int
-        Requested BGZF decompression threads within the scan thread budget
-        (default 4).
+        Rigel reserves decompression threads from this budget and uses the
+        remainder for scan workers.
+    bgzf_threads : int or None
+        BGZF decompression threads within the scan thread budget. ``None``, the
+        default, DERIVES them from the budget (see
+        :meth:`BamScanConfig.resolved_scan_threads`); an integer overrides.
     fragments_per_chunk : int
         Buffered fragments per chunk (default 1M).
     read_name_batch_size : int
@@ -180,7 +187,7 @@ class BamScanConfig:
     sj_strand_tag: str | tuple[str, ...] = "auto"
     log_every: int = 1_000_000
     total_threads: int = 0
-    bgzf_threads: int = 4
+    bgzf_threads: int | None = None
     fragments_per_chunk: int = 1_000_000
     read_name_batch_size: int = 512
     buffer_size_bytes: int = 2 * 1024**3
@@ -202,8 +209,10 @@ class BamScanConfig:
     def __post_init__(self) -> None:
         if self.total_threads < 0:
             raise ValueError(f"BamScanConfig.total_threads must be >= 0; got {self.total_threads}.")
-        if self.bgzf_threads < 0:
-            raise ValueError(f"BamScanConfig.bgzf_threads must be >= 0; got {self.bgzf_threads}.")
+        if self.bgzf_threads is not None and self.bgzf_threads < 0:
+            raise ValueError(
+                f"BamScanConfig.bgzf_threads must be >= 0 or None; got {self.bgzf_threads}."
+            )
         if self.fragments_per_chunk < 1:
             raise ValueError(
                 f"BamScanConfig.fragments_per_chunk must be >= 1; got {self.fragments_per_chunk}."
@@ -229,9 +238,23 @@ class BamScanConfig:
         return self.total_threads
 
     def resolved_scan_threads(self) -> tuple[int, int]:
-        """Return ``(scan_worker_threads, bgzf_threads)`` within the budget."""
+        """Return ``(scan_worker_threads, bgzf_threads)`` within the budget.
+
+        The split is DERIVED from the budget, because the two sides do not scale alike: one
+        decompression thread keeps about eight scan workers fed on a coordinate-sorted BAM, so every
+        thread given to decompression beyond that ratio is a worker taken away. Measured on the
+        18.6M-fragment library, scan seconds by budget and decompression threads — 4: (0) 32.0, (1)
+        41.2; 8: (1) 25.8, (2) 26.2, (0) 28.3, (4) 34.5; 16: (2) 17.6, (1) 19.6, (4) 20.1 — so
+        ``total // 8`` names the best cell at every budget measured and the ratio, not the count, is
+        the thing being set. ``bgzf_threads`` overrides it, and `--scan-bgzf-threads` is the flag.
+        """
         total = self.resolved_total_threads()
-        bgzf = min(self.bgzf_threads, max(total - 1, 0))
+        want = (
+            total // _SCAN_WORKERS_PER_BGZF_THREAD
+            if self.bgzf_threads is None
+            else self.bgzf_threads
+        )
+        bgzf = min(want, max(total - 1, 0))
         scan_workers = max(1, total - bgzf)
         return scan_workers, bgzf
 

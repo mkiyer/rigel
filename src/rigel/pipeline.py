@@ -289,7 +289,7 @@ def scan_and_buffer(
 
     # Execute the full BAM scan in C++ with streaming chunk output
     n_scan, n_bgzf = scan.resolved_scan_threads()
-    if n_bgzf != scan.bgzf_threads:
+    if scan.bgzf_threads is not None and n_bgzf != scan.bgzf_threads:
         logger.info(
             "[scan] Capped BGZF decompression threads from %d to %d to fit "
             "within total thread budget %d.",
