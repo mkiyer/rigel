@@ -659,9 +659,12 @@ re-frozen with the reason after every landing since — the ruler's repair, the 
 pass, the native builders, the factory's log-gamma (2026-09-18, libm's for cephes'), each in its commit) and the captured
 sweeps `~/Downloads/rigel_runs/perf/sweeps_VCaP_step19` (2026-09-18: the deep library, VCaP, on the tree after the
 factory's log-gamma became the kernel's — the replay target from here on; a step that moves numbers re-captures and deletes the superseded one; `DESIGN.md` §6b.15). A port is
-held to the replay's `--tolerance` budget and to the transfer gates, which hold the native builders' tables to
-independent recomputes and drive single hops of the native pass (`tests/calibration/_transfer_harness.py`; the row
-constructors and flag predicates the gates recompute with are the native ones, `native.transfer_rows`). The deep library's timing baseline is
+held to the replay's `--tolerance` budget and to the transfer gates, which hold the kernel's tables — returned by
+`native.transfer_prepare` — to independent recomputes and drive single hops of the native pass through
+`native.transfer_pass` (`tests/calibration/_transfer_harness.py`, where the tables' containers live; the row constructors
+and flag predicates the gates recompute with are the native ones, `native.transfer_rows`). The sweep itself is one native
+call (`native.solve_blocks`): `sweep_replay.py replay --threads N` and `--block-slots N` hold it to a capture at any thread
+count and block size. The deep library's timing baseline is
 `perf/vcap_baseline_2026-09-17/run{1,2}.json` (the tree after the one-path convergence at 8 threads on VCaP, two
 back-to-back runs; the drift between them, 0.98–1.07 per stage, is the noise floor a pair is read against; the earlier
 `baseline_2026-09-17/pair1_*` is the pushed tree of that morning). The

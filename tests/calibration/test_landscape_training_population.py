@@ -11,7 +11,7 @@ it AND on whether the solve LOCATES the slot: a posterior wider than one nat² i
 location whatever its evidence — a strand term at a pure-RNA vertex, an empty intron's factory row, a
 one-sided delivered row — and its median is the reference's under its bound. The zero-count anchor
 trains regardless, being a structural statement rather than a solve. "Any non-flat λ-row" is NOT the
-predicate — `PsiMessage.lam_rows` fuses compositions and bounds together, so that reading keeps exactly
+predicate — the delivered rows fuse compositions and bounds together, so that reading keeps exactly
 the bound-only slots this rule excludes.
 
 PERTURBATION, each watched: with `has_composition` forced True everywhere, with the held compositions
@@ -65,13 +65,18 @@ def test_the_solve_publishes_the_informed_predicate_as_the_solve_used_it(sweep_i
 
 
 def test_a_bound_with_a_row_does_not_inform_but_a_composition_does(sweep_inputs):
-    """THE DISTINCTION THE RULING TURNS ON, on two blind slots (no own channel, not locked): a stub
-    policy delivers a LEVEL to one and a COMPOSITION to the other, and its solve writes a non-flat row
-    at BOTH — so "any non-flat row" would give both a composition. Only the composition's slot may."""
-    from rigel.calibration.messages import PsiMessage
+    """THE DISTINCTION THE RULING TURNS ON, on two blind slots (no own channel, not locked), through the
+    production path: the message cache SERVES the kernel a block's delivery — the delivered rows and the
+    held-composition bits apart — so a delivery is written by hand that puts the same non-flat row at BOTH
+    slots and marks a held composition at ONE. "Any non-flat row" would give both a composition; only the
+    marked slot may — the predicate is read off the held bits, never the rows."""
+    from rigel.calibration.message_cache import MessageCache
 
     cap = SweepCapture()
-    SW.solve_chain(*sweep_inputs["args"], **sweep_inputs["kw"], policy=SilentPolicy(), _capture=cap)
+    kw = dict(sweep_inputs["kw"])
+    kw.pop("message_cache", None)
+    kw.pop("block_slots", None)
+    SW.solve_chain(*sweep_inputs["args"], **kw, policy=SilentPolicy(), _capture=cap)
     blind = np.flatnonzero(
         ~has_own_composition_evidence(cap.tau_lam)
         & ~g1_locked(cap.free_pos, cap.free_neg)
@@ -79,45 +84,31 @@ def test_a_bound_with_a_row_does_not_inform_but_a_composition_does(sweep_inputs)
     )
     assert blind.size >= 2, "the toy has fewer than two blind slots with a left neighbour"
     lvl_slot, comp_slot = int(blind[0]), int(blind[1])
-    K = int(sweep_inputs["kw"]["n_grid"])
-    lam = np.linspace(-1.0, 1.0, K)
-    row = -0.5 * lam**2
-
-    class _Prepared:
-        def __init__(self, n):
-            self.n = n
-
-        def run_pass(self, received, seq, nbr, terminal, *, backward):
-            if backward:
-                return
-            for i in np.asarray(seq).tolist():
-                if nbr[i] < 0 or terminal[i]:
-                    continue
-                if i == lvl_slot:
-                    received.level_gdna.write(i, row, 3.0, 100.0)
-                if i == comp_slot:
-                    received.composition[i] = row
-                    received.has_composition[i] = True
-
-        def solve(self, from_left, from_right):
-            rows = np.zeros((self.n, K))
-            rows[lvl_slot] = row
-            rows[comp_slot] = row
-            return PsiMessage(lam_rows=rows)
-
-    class _Stub:
-        name = "bound-vs-composition-stub"
-
-        def library(self, view):
-            return None
-
-        def prepare(self, ctx, library):
-            return _Prepared(int(ctx.n_slots))
-
-    out = SW.solve_chain(*sweep_inputs["args"], **sweep_inputs["kw"], policy=_Stub())
+    K = int(kw["n_grid"])
+    row = -0.5 * np.linspace(-1.0, 1.0, K) ** 2
+    # the whole chain as one block: one entry, keyed as the sweep keys it
+    cache = MessageCache()
+    SW.solve_chain(
+        *sweep_inputs["args"], **kw, policy=SilentPolicy(), block_slots=None, message_cache=cache
+    )
+    assert cache.misses == 1 and len(cache._entries) == 1
+    ((key, _entry),) = cache._entries.items()
+    n = int(sweep_inputs["args"][0].n_slots)
+    held = np.zeros(n, bool)
+    held[comp_slot] = True
+    cache.put(
+        key,
+        (True, np.array([lvl_slot, comp_slot], np.int64), np.stack([row, row]), None, held),
+    )
+    out = SW.solve_chain(
+        *sweep_inputs["args"], **kw, policy=SilentPolicy(), block_slots=None, message_cache=cache
+    )
+    assert cache.hits == 1, "the hand-written delivery was not served"
     has_composition = np.asarray(out.has_composition, bool)
-    assert has_composition[comp_slot], "a received composition must inform"
-    assert not has_composition[lvl_slot], "a level with a row is a bound only and must not inform"
+    assert has_composition[comp_slot], "a held composition must inform"
+    assert not has_composition[lvl_slot], (
+        "a row with no held composition is a bound only and must not inform"
+    )
 
 
 def test_silence_shrinks_the_informed_set_to_own_evidence_and_certainty(sweep_inputs):

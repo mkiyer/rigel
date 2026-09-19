@@ -261,6 +261,13 @@ def replay(
     dropped = sorted(k for k in kwargs if k not in accepted)
     if dropped:
         print(f"     replay: the capture carries {dropped}, which solve_chain no longer takes; dropped")
+    # a captured POLICY outlives its class too: it is rebuilt through the current constructor from the strand
+    # model it carried, whatever attribute the class of its day kept it under
+    pol = kwargs.get("policy")
+    if pol is not None:
+        state = getattr(pol, "__dict__", {})
+        strand = state.get("strand", state.get("_strand"))
+        kwargs["policy"] = type(pol)(strand) if strand is not None or "strand" in state or "_strand" in state else type(pol)()
     result = sweep.solve_chain(*args, **{k: v for k, v in kwargs.items() if k in accepted})
     if profiler is not None:
         profiler.disable()

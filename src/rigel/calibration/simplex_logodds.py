@@ -30,7 +30,7 @@ Three facts that determine this file's shape:
    ``−¼·log(1−τ²)``.)*
 4. The θ nodes are not a fixed lattice: at fixed λ the strand term is an exact Gaussian in τ whose θ
    peak narrows as ``n^{−½}`` (0.005 rad at 50k fragments), so ψ places its nodes across each
-   ``(slot, λ)``'s own peak and weights them as the trapezoid rule (`psi_kernel.cpp`'s ``tilt_window``) — the
+   ``(slot, λ)``'s own peak and weights them as the trapezoid rule (`psi_kernel.h`'s ``tilt_window``) — the
    marginal is then exact at every depth with a DERIVED node count (``_TILT_NODES``), where a fixed
    lattice's sum was a comb. The weights written are the quadrature's (``log h``) and, with 5, the
    continuum's share of the reference mass (``−log π``) — never a tilt density.
@@ -48,7 +48,7 @@ There is NO spliced term: ``mass_spliced`` is consumed only by the returned ``rn
 is correct — at a sj mature RNA *splices*, so the unspliced crossing mass is gDNA plus RNA that has not
 spliced there, a channel genuinely disjoint from the (directly observed, already-pure-RNA) spliced mass.
 
-One solver, native (`native.psi_solve`, ``src/rigel/native/psi_kernel.cpp``), over the ``(λ, θ)`` cube in
+One solver, native (`native.psi_solve`, ``src/rigel/native/psi_kernel.h``), over the ``(λ, θ)`` cube in
 float64, one slot at a time on the slot's own cube. A single-strand region (exactly one of ``allow_pos`` /
 ``allow_neg``) has its tilt fixed by its live strand, so it is the one-column case — a 1-D solve over ``λ``
 at the 1-D cost — and AMBIG regions (both set) marginalise the tilt over the windowed θ nodes and the two
@@ -111,7 +111,7 @@ _JEFFREYS_REF = 0.5
 # ⛔ It is scoped to prior-free ψ, because with a FITTED landscape installed the pipeline fails it:
 # widening only the bracket (at fixed lattice spacing) moves the answer, and a resolution-only control
 # moves it the other way, so the effect is the bracket and not the lattice. The mechanism is the fitted
-# prior — `landscape.logprior` evaluates at `log rho = log f_c + log M − log E` and ψ can only offer
+# prior — ψ's arm reads the landscape's curve at `log rho = log f_c + log M − log E` and ψ can only offer
 # `f_c ∈ [σ(−L), σ(L)]`, so on a gDNA-poor library σ(−10) sits well ABOVE the density the prior points
 # at and the low end of the bracket is a wall the prior pushes against rather than empty state space.
 # `landscape.required_logodds_window` is the derived demand. Do not read any of this as licence to widen
@@ -235,7 +235,7 @@ class CubeRows:
 # The θ quadrature's truncation: the strand term's mass outside a window is below double precision.
 # DERIVED, not tuned — ``erfc(√T) ≈ e^{−T}/√(πT) < ε₆₄`` at ``T = −log ε₆₄`` — so nothing about the window
 # is a choice; a wider one adds nodes where the integrand is zero to the last bit. The kernel carries the
-# same constant (`psi_kernel.cpp`); this one derives the node count below.
+# same constant (`psi_kernel.h`); this one derives the node count below.
 _T_NATS = -np.log(np.finfo(np.float64).eps)
 
 # The node count that resolves the peak inside its window. The interior window is ``2√(2T)·σ_θ`` wide and

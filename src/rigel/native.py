@@ -9,9 +9,10 @@ _bam_impl     : BAM scanning, annotation writing, SJ tag detection (htslib)
 _resolve_impl : Fragment overlap resolution against the reference index
 _scoring_impl : Per-fragment likelihood scoring (strand, coverage, splice)
 _em_impl      : Locus-level EM solver, connected components, effective-length normalization
-_transfer_impl: The calibration sweep's composition transfer — the builders, the directional pass, the solve,
-               and `rows`, the row constructors and flag predicates bound for the gates
-_psi_impl     : ψ, the sweep's per-slot solve on the (λ, θ) cube, and its pieces for the gates
+_solve_impl   : The calibration solve — the sweep's block pipeline in one call (`solve_blocks`), ψ (`psi_solve`
+               and its pieces for the gates), the composition transfer's builders, pass and solve on tables the
+               call allocates (for the gates), and `rows`, the row constructors, flag predicates and absorbed
+               constructions bound for the gates
 _cgranges_impl: Interval overlap queries (vendored cgranges)
 """
 
@@ -48,20 +49,20 @@ from ._em_impl import scatter_units_i32
 from ._em_impl import scatter_units_i64
 from ._em_impl import scatter_units_u8
 
-# -- The calibration sweep's composition transfer: the builders, the pass, the solve ------
-from ._transfer_impl import transfer_prepare
-from ._transfer_impl import transfer_pass
-from ._transfer_impl import transfer_solve
+# -- The calibration solve: the sweep's block pipeline, ψ, the transfer kernels for the gates -----
+from ._solve_impl import solve_blocks
+from ._solve_impl import psi_solve
+from ._solve_impl import psi_cube as psi_cube_native
+from ._solve_impl import posterior_median as psi_posterior_median
+from ._solve_impl import compose as psi_compose
+from ._solve_impl import gdna_arm as psi_gdna_arm
 
-# the row constructors and flag predicates, bound for the gates (nothing in src/ reads them)
-from ._transfer_impl import rows as transfer_rows
-
-# -- The calibration sweep's per-slot solve, ψ -------------------------------
-from ._psi_impl import psi_solve
-from ._psi_impl import psi_cube as psi_cube_native
-from ._psi_impl import posterior_median as psi_posterior_median
-from ._psi_impl import compose as psi_compose
-from ._psi_impl import gdna_arm as psi_gdna_arm
+# the transfer's three kernels on tables the call allocates, the row constructors, the flag predicates and the
+# constructions the block pipeline absorbed — bound for the gates (nothing in src/ reads them)
+from ._solve_impl import transfer_prepare
+from ._solve_impl import transfer_pass
+from ._solve_impl import transfer_solve
+from ._solve_impl import rows as transfer_rows
 
 # -- Interval overlap -------------------------------------------------------
 from ._cgranges_impl import cgranges
@@ -93,7 +94,8 @@ __all__ = [
     "scatter_units_i32",
     "scatter_units_i64",
     "scatter_units_u8",
-    # The sweep's composition transfer
+    # The solve
+    "solve_blocks",
     "transfer_prepare",
     "transfer_pass",
     "transfer_solve",

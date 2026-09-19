@@ -16,9 +16,14 @@ from __future__ import annotations
 import numpy as np
 from scipy.special import polygamma
 
-from rigel.calibration.messages.faces import RowTable
 from rigel.native import transfer_rows as R
 from _transfer_harness import (
+    BlockContext,
+    Faces,
+    LevelLane,
+    Prepared,
+    Received,
+    RowTable,
     _bits,
     _held_rna,
     _hop,
@@ -162,7 +167,11 @@ def test_the_flux_level_is_a_lower_bound_priced_by_the_node_pair():
     `read_column`: the exon count a junction is priced against is the strand's own column when the
     library reads sense and the other column under an antisense protocol (PERTURBATION: the wrong column
     reads a 90 % transcript as 10 % and prices the floor away)."""
-    from rigel.calibration.messages.transfer import read_column
+
+    def read_column(
+        col, kappa
+    ):  # the kernel's: the strand's own column under a sense protocol, else the other
+        return int(R.read_column(col, kappa is not None, 0.0 if kappa is None else kappa))
 
     u = np.linspace(-10.0, 10.0, 60)
     rho = 0.02
@@ -212,7 +221,7 @@ def test_the_rna_sources_are_single_strand_claims_and_the_flux_at_the_exon_only(
                 # an EMPTY source is an exon piece beside a lit junction, its level the flux's
                 # alone, travelling with the flux's witness
                 if lane.empty[x]:
-                    assert is_exon[x] and lane.flux.mask[x].any()
+                    assert is_exon[x] and (lane.flux_index[x] >= 0).any()
                     assert lane.flux_witness[x] is not None
                     assert lane.flux_witness[x][0] > 0.0
         for b in np.flatnonzero(is_bnd):
@@ -273,9 +282,6 @@ def test_the_two_sided_hop_keeps_the_whole_profile_and_pays_the_pairs_price():
     disagrees by a cliff the upper side is blurred away — under a counting-only exemption a lit intron's
     sharp upper side crosses a probe cliff unpriced and reads a mostly-RNA junction as mostly gDNA. The
     sender is EMPTY and holds the profile with its witness, so it forwards and the recipient prices."""
-    from rigel.calibration.messages import Received
-    from rigel.calibration.messages.lanes import LevelLane
-
     u = np.linspace(-10.0, 10.0, 60)
     prof = -0.5 * ((u - 0.0) / 0.4) ** 2
 
@@ -330,9 +336,6 @@ def test_the_rna_hop_witness_is_the_split_where_the_strand_channel_is_live():
     full node and not the empty; (iv) with no other column the column count is the witness (`hop_price`
     on the column counts). Falsified by making the column count the witness again (i fires) and by the
     counting-only exemption (ii fires)."""
-    from rigel.calibration.messages import Received
-    from rigel.calibration.messages.lanes import LevelLane
-
     u = np.linspace(-10.0, 10.0, 60)
     prof = -0.5 * ((u - 0.0) / 0.4) ** 2
     K = u.shape[0]
@@ -529,11 +532,6 @@ def test_the_cube_delivery_is_the_intersected_held_levels_and_the_own_flux(sweep
     holding nothing deliver no row."""
     from _psi_reference import Row
 
-    from rigel.calibration.messages import Received
-    from rigel.calibration.messages.faces import Faces
-    from rigel.calibration.messages.lanes import LevelLane
-    from rigel.calibration.messages.transfer import _PreparedTransfer
-
     K = 41
     lam = np.linspace(-6.0, 6.0, K)
     u = lam
@@ -549,7 +547,7 @@ def test_the_cube_delivery_is_the_intersected_held_levels_and_the_own_flux(sweep
     gd = LevelLane("gdna", u, lam, 0.5, n_u, a_r, empty, no_levels, none)
     ambig = np.array([False, True, True, True])
     left, right = np.array([-1, 0, 1, 2]), np.array([1, 2, 3, -1])
-    prep = _PreparedTransfer(
+    prep = Prepared.hand_built(
         RowTable(4, K),
         Faces(lam, left, right),
         {"gdna": gd, "pos": pos, "neg": neg},
@@ -582,7 +580,6 @@ def _empty_piece_ctx(flux: float = 40.0, rate: float = 0.02):
     every lane; empty, so it forwards) | a full single-strand ``+`` exon. The strand channel is live (``tau_lam > 0`` at the
     full exon, κ = 0.99)."""
 
-    from rigel.calibration.messages import BlockContext
     from rigel.calibration.splice_graph import FLAG_ACCEPTOR_POS
 
     n = 5
@@ -649,8 +646,6 @@ def test_an_empty_exon_piece_beside_a_lit_junction_is_a_flux_source():
     v = R.hop_price(40.0, 40.0 / 0.02, 0.0, 0.0)
     np.testing.assert_allclose(own, R.flux_level(lane.u, 40.0, 0.02, lane.rho_ref, v), atol=1e-12)
     # the piece EMITS its level with the flux's witness (the empty boundary beyond it does not price)
-    from rigel.calibration.messages import Received
-
     sent = _hop(prepared, 2, 3).level_rna_pos
     assert sent.present[3]
     assert (sent.count[3], sent.opportunity[3]) == (40.0, 40.0 / 0.02) and not sent.has_witness[3]
@@ -689,7 +684,6 @@ def _neg_only_ctx():
     appended: TB− has a single-strand exon (slot 4) whose own claim is a − level, and the + strand has
     NO single-strand exon anywhere, so the library's + coordinate is zero."""
 
-    from rigel.calibration.messages import BlockContext
     from rigel.calibration.splice_graph import FLAG_ACCEPTOR_POS
 
     n = 7
@@ -755,17 +749,16 @@ def test_the_rna_lanes_are_built_without_a_gdna_lane():
     lib = pol.library(ctx)
     assert lib.rho_rna > 0.0, "the gate's premise: the RNA coordinate exists"
     gdna_free = _Library(0.0, lib.rho_rna, lib.split_live)
-    prepared = pol.prepare(ctx, gdna_free)
+    prepared = _prepared(pol, ctx, gdna_free)
     assert "gdna" not in prepared.lanes
     assert "neg" in prepared.lanes, "the − lane died with the gDNA lane"
-    assert "gdna" in pol.prepare(ctx, lib).lanes
+    assert "gdna" in _prepared(pol, ctx, lib).lanes
 
 
 def test_a_strands_level_is_delivered_to_the_cube_when_the_other_strand_has_no_coordinate():
     """TB−'s level must reach the both-stranded exon (slot 6) although the + strand has no
     single-strand exon anywhere, hence no coordinate and no source: the delivery reads whichever RNA
     lane holds something."""
-    from rigel.calibration.messages import Received
     from rigel.calibration.messages.transfer import TransferPolicy
 
     pol = TransferPolicy(strand=(0.99, 0.02, 0.02))
@@ -793,7 +786,6 @@ def test_a_junctions_flux_is_a_source_when_the_strand_has_no_single_strand_exon(
     spliced fragments at the junction builds no + level."""
     import dataclasses
 
-    from rigel.calibration.messages import Received
     from rigel.calibration.messages.transfer import TransferPolicy
     from rigel.calibration.splice_graph import FLAG_ACCEPTOR_POS
 
@@ -823,7 +815,6 @@ def _flux_pair_ctx(kappa: float):
     of RNA opportunity — 0.1/bp, so the pair AGREES in whole-strand units, and no gDNA anywhere. The
     exon's reads sit on the two genome-strand columns by the protocol's ``kappa`` and nothing else in
     the chain depends on it."""
-    from rigel.calibration.messages import BlockContext
     from rigel.calibration.splice_graph import FLAG_ACCEPTOR_POS
 
     n = 3

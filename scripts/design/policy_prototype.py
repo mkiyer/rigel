@@ -1,29 +1,24 @@
-#!/usr/bin/env python3
-"""How does a prototype message policy score, per gene type and per slot, against certified truth?
-This is the harness a message mechanism is developed on before it touches `src/`. A prototype is a
-Python class with the backbone's ``Policy`` shape (``library(view)`` once over the whole chain, and
-``prepare(ctx, library)`` returning an object with ``run_pass`` / ``solve``; constructed as
-``PolicyClass(strand=...)``), named in an ``ARMS = {"my_arm": PolicyClass, ...}`` table in the module
-``--module`` points at; the harness installs it in place of ``calibrate``'s ``TransferPolicy`` for
-the ``transfer`` arm and scores it beside ``silent`` and the shipped ``transfer`` on a cached,
-certified condition, with the shipped class restored afterwards. The error is |gDNA estimate -
-truth| in fragments against `slot_truth.npz`; no EM runs and nothing is re-scanned. Three views,
-never pooled with each other: the whole-library number per condition with its region/boundary
-split and a per-gene-type table (a gene's type is the token after ``gB<k>_`` in its test-chromosome
-``gene_id``, so a moved number names its structure); ``--by-class``, the same error summed per node
-class (certified stratum, a boundary's terminus and junction flags, an exon's reach: licensed /
-edge / walled), which judges a message at its destinations where the whole-library number carries
-the refit prior's response; and ``dissect``, every slot of one gene type with its truth beside every
-arm. A prototype that subclasses the shipped policy inherits every mechanism the parent later
-gains, so compare `src` against `src` across a landing.
+"""How do the shipped message policies score, per gene type and per slot, against certified truth?
+This is the harness a message mechanism is judged on before it ships. The message layer runs inside the
+solve's native kernel (the block in one native call), so a mechanism is prototyped in C++ — a builder or
+a rule in `native/transfer_kernel.h`, the module rebuilt — and scored here, where the two shipped
+policies, ``silent`` and ``transfer``, are each a config value run on a cached, certified condition. The
+error is |gDNA estimate - truth| in fragments against `slot_truth.npz`; no EM runs and nothing is
+re-scanned. Three views, never pooled with each other: the whole-library number per condition with its
+region/boundary split and a per-gene-type table (a gene's type is the token after ``gB<k>_`` in its
+test-chromosome ``gene_id``, so a moved number names its structure); ``--by-class``, the same error
+summed per node class (certified stratum, a boundary's terminus and junction flags, an exon's reach:
+licensed / edge / walled), which judges a message at its destinations where the whole-library number
+carries the refit prior's response; and ``dissect``, every slot of one gene type with its truth beside
+every arm. Compare `src` against `src` across a landing: the tree without the mechanism in a worktree,
+the tree carrying it here, the same condition.
 
 Usage::
 
-    python scripts/design/policy_prototype.py --panel test --arms transfer my_arm \\
-        --module path/to/proto.py --conditions gdna_g50_ss_0.99_nrna_file_capture_on
-    python scripts/design/policy_prototype.py --panel test --arms transfer my_arm --module p.py --all
-    python scripts/design/policy_prototype.py --panel test --arms transfer my_arm --module p.py --all --by-class
-    python scripts/design/policy_prototype.py dissect --panel test --arms transfer my_arm --module p.py \\
+    python scripts/design/policy_prototype.py --panel test --conditions gdna_g50_ss_0.99_nrna_file_capture_on
+    python scripts/design/policy_prototype.py --panel test --all
+    python scripts/design/policy_prototype.py --panel test --all --by-class
+    python scripts/design/policy_prototype.py dissect --panel test \\
         --condition gdna_g50_ss_0.99_nrna_file_capture_on --type capnasc
     python scripts/design/policy_prototype.py --self-test
 """
@@ -31,7 +26,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import importlib.util
+import importlib
 import os
 import sys
 import time
@@ -42,7 +37,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 import numpy as np  # noqa: E402
 
-from rigel.calibration.messages.transfer import TransferPolicy  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain  # noqa: E402
 from rigel.calibration.splice_graph import (  # noqa: E402
@@ -144,19 +138,20 @@ def condition_setup(index, ra, sj, bflags, suite, cond):
     )
 
 
-def run_arm(arm, arms, c):
-    """One arm's per-slot gDNA estimate. ``silent`` and ``transfer`` are the shipped policies; any other
-    name is looked up in ``arms`` and installed in place of ``TransferPolicy``."""
-    if arm == "silent":
-        cfg = CalibrationConfig(message_policy="silent")
-        CALMOD.TransferPolicy = TransferPolicy
-    else:
-        cfg = CalibrationConfig(message_policy="transfer")
-        CALMOD.TransferPolicy = TransferPolicy if arm == "transfer" else arms[arm]
-    try:
-        res = CALMOD.calibrate(payload=c["payload"], config=cfg, **c["kwargs"])
-    finally:
-        CALMOD.TransferPolicy = TransferPolicy
+SHIPPED = ("silent", "transfer")  #: the policies `CalibrationConfig.message_policy` selects
+
+
+def run_arm(arm, c):
+    """One arm's per-slot gDNA estimate: a shipped policy, selected by its config value."""
+    if arm not in SHIPPED:
+        raise SystemExit(
+            f"⛔ the arm {arm!r} is not a shipped policy, and the message layer runs inside the solve's native\n"
+            "   kernel (the block in one native call): a Python class cannot be installed in the backbone, and an\n"
+            "   arm that silently ran the shipped policy under a prototype's name would be a benchmark that cannot\n"
+            "   be trusted. Prototype a mechanism in C++ (`native/transfer_kernel.h`), rebuild, and score the tree\n"
+            "   carrying it against the tree without it (a worktree) on the same condition."
+        )
+    res = CALMOD.calibrate(payload=c["payload"], config=CalibrationConfig(message_policy=arm), **c["kwargs"])
     kind, obj = c["kind"], c["obj"]
     est = np.zeros(kind.shape[0])
     est[kind == REGION] = np.asarray(res.count_gdna_region, float)[obj[kind == REGION]]
@@ -196,16 +191,16 @@ def slot_classes(c, bflags):
     return labels
 
 
-def score(panel, arm_names, arms, conds, by_class=False):
+def score(panel, conds, by_class=False):
     index, ra, sj, bflags, suite = load_panel(panel)
     if conds == ["all"]:
         conds = sorted(d.name for d in (suite / "oracle_cache").iterdir() if (d / "slot_truth.npz").exists())
     for cond in conds:
         c = condition_setup(index, ra, sj, bflags, suite, cond)
         line, per, axis = {}, {}, {}
-        for arm in ["silent", *arm_names]:
+        for arm in SHIPPED:
             t0 = time.perf_counter()
-            err = np.abs(run_arm(arm, arms, c) - c["truth_gdna"])
+            err = np.abs(run_arm(arm, c) - c["truth_gdna"])
             line[arm] = (float(err.sum()), time.perf_counter() - t0)
             per[arm] = {t: float(err[c["types"] == t].sum()) for t in np.unique(c["types"])}
             axis[arm] = (float(err[c["kind"] == REGION].sum()), float(err[c["kind"] == BOUNDARY].sum()))
@@ -218,7 +213,7 @@ def score(panel, arm_names, arms, conds, by_class=False):
                 print(f"  {t:<14}" + "".join(f"{per[a][t]:>11,.0f}" for a in line))
         if by_class:
             labels = slot_classes(c, bflags)
-            errs = {arm: np.abs(run_arm(arm, arms, c) - c["truth_gdna"]) for arm in ["silent", *arm_names]}
+            errs = {arm: np.abs(run_arm(arm, c) - c["truth_gdna"]) for arm in SHIPPED}
             mass = c["count"]
             print(f"  {'node class':<36}{'slots':>7}{'mass':>11}" + "".join(f"{a:>12}" for a in errs))
             for lab in sorted(set(labels), key=lambda x: -float(mass[labels == x].sum())):
@@ -226,10 +221,10 @@ def score(panel, arm_names, arms, conds, by_class=False):
                 print(f"  {lab:<36}{int(m.sum()):>7}{float(mass[m].sum()):>11,.0f}" + "".join(f"{float(errs[a][m].sum()):>12,.0f}" for a in errs))
 
 
-def dissect(panel, arm_names, arms, cond, gtype):
+def dissect(panel, cond, gtype):
     index, ra, sj, bflags, suite = load_panel(panel)
     c = condition_setup(index, ra, sj, bflags, suite, cond)
-    ests = {arm: run_arm(arm, arms, c) for arm in ["silent", *arm_names]}
+    ests = {arm: run_arm(arm, c) for arm in SHIPPED}
     kind, cnt, tg, types = c["kind"], c["count"], c["truth_gdna"], c["types"]
     starts = np.asarray(ra.start, np.int64)
     ends = np.asarray(ra.end, np.int64)
@@ -243,16 +238,6 @@ def dissect(panel, arm_names, arms, cond, gtype):
         row += "".join(f"{(ests[a][i] / cnt[i] if cnt[i] > 0 else float('nan')):>9.3f}" for a in ests)
         row += "   " + " ".join(f"{abs(ests[a][i] - tg[i]):>5.0f}" for a in ests)
         print(row)
-
-
-def load_arms(module_path):
-    if module_path is None:
-        return {}
-    spec = importlib.util.spec_from_file_location("policy_prototype_arms", module_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return dict(module.ARMS)
 
 
 def self_test() -> int:
@@ -270,27 +255,24 @@ def self_test() -> int:
     check("an isoform id keeps the whole token", gene_type_token("gB1_capaltstart") == "capaltstart")
     check("a real annotation's gene id yields no type", gene_type_token("ENSG00000123") == "-")
     check("a malformed block id yields no type", gene_type_token("gBx_clean") == "-")
-    # the arm installation is scoped: run_arm installs the arm for its calibrate call and puts the
-    # shipped policy back after it, even when calibrate raises
-    class _Arm:
-        pass
-
+    # a prototype cannot be a Python class any more: an arm that is not a shipped policy is refused before
+    # calibrate runs, so no benchmark can run the shipped policy under another name
     seen, real_calibrate = {}, CALMOD.calibrate
 
     def _calibrate(**_kw):
-        seen["policy"] = CALMOD.TransferPolicy
+        seen["ran"] = True
         raise RuntimeError("stub")
 
     CALMOD.calibrate = _calibrate
     try:
-        run_arm("proto", {"proto": _Arm}, {"payload": None, "kwargs": {}})
-    except RuntimeError:
-        pass
+        run_arm("proto", {"payload": None, "kwargs": {}})
+        refused = False
+    except SystemExit:
+        refused = True
     finally:
         CALMOD.calibrate = real_calibrate
-    check("run_arm installs the arm for its calibrate call", seen.get("policy") is _Arm)
-    check("run_arm restores the shipped policy, even when calibrate raises",
-          CALMOD.TransferPolicy is TransferPolicy)
+    check("an arm that is not a shipped policy is refused", refused)
+    check("the refusal comes before calibrate runs", "ran" not in seen)
     print(f"\n   self-test: {ok} passed, {fail} failed")
     return 1 if fail else 0
 
@@ -299,8 +281,6 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("mode", nargs="?", default="score", choices=("score", "dissect"))
     ap.add_argument("--panel", default="test", choices=sorted(PANELS))
-    ap.add_argument("--arms", nargs="+", default=["transfer"])
-    ap.add_argument("--module", type=Path, default=None, help="a .py defining ARMS = {name: PolicyClass}")
     ap.add_argument("--conditions", nargs="*", default=None)
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--condition", default=None)
@@ -310,16 +290,15 @@ def main() -> int:
     args = ap.parse_args()
     if args.self_test:
         return self_test()
-    arms = load_arms(args.module)
     if args.mode == "dissect":
         if not (args.condition and args.type):
             raise SystemExit("dissect needs --condition and --type")
-        dissect(args.panel, args.arms, arms, args.condition, args.type)
+        dissect(args.panel, args.condition, args.type)
         return 0
     conds = ["all"] if args.all else (args.conditions or [])
     if not conds:
         raise SystemExit("name --conditions or pass --all")
-    score(args.panel, args.arms, arms, conds, by_class=args.by_class)
+    score(args.panel, conds, by_class=args.by_class)
     return 0
 
 

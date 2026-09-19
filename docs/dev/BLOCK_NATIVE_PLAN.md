@@ -1,4 +1,4 @@
-# The block in one native call — the design (2026-09-18), and the three commits that land it
+# The block in one native call — the design (2026-09-18), and the three commits that land it — ALL THREE LANDED 2026-09-18 (snapshots 18–20 awaiting the go)
 
 The owner's decision of 2026-09-18: the block in ONE native call, a C++ pool over blocks, preferred over Python
 threads over blocks. The rulings it stands on: `DESIGN.md` §6b.15.1–§6b.15.3 (the locus block is the unit of the
@@ -7,7 +7,7 @@ solve, the only information that crosses a block boundary is the policy's LIBRAR
 last step), the one-path ruling of 2026-09-17 (one production code path; the Python a validated kernel replaces is
 deleted; a small floating-point tolerance is accepted for speed), and the working rules: one mechanism per commit,
 each gated as `THREADS_PLAN.md`'s protocol says. This file is the design put on paper before anything is built; the
-record of what landed goes to `DESIGN.md` §6b.15.5 and `ISSUES: performance-memory-bounded-solve`.
+record of what landed is `DESIGN.md` §6b.15.5 and `ISSUES: performance-memory-bounded-solve`. As built: VCaP at 8 threads 198 → 144 s and 194 → 138 s (0.73 / 0.71), calibrate 85.6 → 33.7 s, the four sweeps 68.8 → 16.8 s and 66.3 → 15.9 s (0.24).
 
 ## 1. Where the time is, and what a native block buys
 

@@ -1,6 +1,6 @@
 """The readable statements of ψ's pieces that the gates recompute with — the oracles, not a second solver.
 
-ψ is native (`native/psi_kernel.cpp`, read through `simplex_logodds.psi_cube`); the gates that hold it to its
+ψ is native (`native/psi_kernel.h`, read through `simplex_logodds.psi_cube`); the gates that hold it to its
 derivations need the derivations written down once, in numpy, small enough to read against `EQUATIONS.md`:
 the three-component strand term with the variance frozen at a reference composition, the two Jeffreys arms,
 the delivered row's map onto the cube, a log-sum-exp, and the delivery table stated by hand. Nothing here

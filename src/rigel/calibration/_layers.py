@@ -105,26 +105,22 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (
         6,
         "the solve — what one neighbour tells another",
-        # The backbone and the message policy. `sweep` owns the shape of the solve and its assertions;
-        # `messages/` owns every argument about what a message should say.
+        # The backbone and the message policy. `sweep` owns the shape of the solve and its assertions and
+        # runs it in one native call; `messages/` owns every argument about what a message should say.
         (
+            # `region_init` is the strand protocol decision and the own-evidence predicate
             "region_init",
-            # `sweep` is the backbone; `blocks` cuts one locus block out of the chain and puts its
-            # results back; `message_cache` shares the message layer's output across the refit sweeps.
+            # `sweep` is the backbone; `blocks` is the diagnostics capture and the chain's view;
+            # `message_cache` shares the message layer's output across the refit sweeps.
             "blocks",
             "message_cache",
             "sweep",
             "messages",
-            # `messages/__init__` is the two-phase protocol (prepare / run_pass / solve) and the message
-            # type; `messages/silent` is the measured floor every policy is judged against;
-            # `messages/transfer` is the shipped composition-transfer policy, its row constructors native
-            # (`native/transfer_rows.h`, the one home of the counting term).
+            # `messages/__init__` is the policy's interface (a name, a strand model, a library) and the
+            # chain view; `messages/silent` is the measured floor every policy is judged against;
+            # `messages/transfer` is the shipped composition-transfer policy's name, strand model and
+            # library — its builders, passes and solve are the kernel's (`native/transfer_kernel.h`).
             "messages/silent",
-            # `messages/faces` is the typed face table and the three helpers every reader of a face
-            # needs; `messages/lanes` the level lanes — both sideways of `messages/transfer`, which
-            # builds the rules and the lanes and runs the passes and the solve.
-            "messages/faces",
-            "messages/lanes",
             "messages/transfer",
         ),
     ),

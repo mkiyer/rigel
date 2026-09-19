@@ -17,17 +17,13 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from rigel.calibration.density_deconv import (
-    GdnaBackground,
-    density_factor_precision,
-    density_lambda_factor,
-)
+from rigel.calibration.blocks import SweepCapture
+from rigel.calibration.density_deconv import GdnaBackground
+from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain
 from rigel.calibration.region_geometry import build_region_statics, g1_locked, init_beliefs
 from rigel.calibration.region_init import (
-    build_region_init,
     strand_discriminability,
-    strand_evidence,
 )
 from rigel.calibration.signature import (
     BIT_EXON_NEG,
@@ -37,11 +33,46 @@ from rigel.calibration.signature import (
     transcript_strand_class,
 )
 from rigel.calibration.simplex_logodds import _logodds_grid
+from rigel.calibration.sweep import solve_chain
+from rigel.native import transfer_rows as R
 
 from _synthetic import make_chain_parts
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+def strand_evidence(u_pos, u_neg, fg_loc, *, kappa, od_r, n_rna_obs):
+    """The kernel's I_strand (`native.transfer_rows.strand_evidence`): the reference-free strand composition
+    evidence at ``fg_loc``, the count overdispersed, the protocol's discriminability its library-level factor."""
+    disc = strand_discriminability(kappa, n_rna_obs)
+    f64 = lambda a: np.ascontiguousarray(a, np.float64)  # noqa: E731
+    return R.strand_evidence(
+        f64(u_pos), f64(u_neg), f64(fg_loc), float(kappa), float(od_r), float(disc)
+    )
+
+
+def density_factor_precision(rows, lam):
+    """The kernel's factor precision (`native.transfer_rows.factor_precision`)."""
+    return R.factor_precision(
+        np.ascontiguousarray(rows, np.float64), np.ascontiguousarray(lam, np.float64)
+    )
+
+
+def density_lambda_factor(bg, count, eff_g, fg_grid):
+    """The kernel's factory rows (`native.transfer_rows.factory_rows`), every slot an intron."""
+    fg = np.asarray(fg_grid, np.float64)
+    count = np.ascontiguousarray(count, np.float64)
+    return R.factory_rows(
+        np.ones(count.shape[0], bool),
+        count,
+        np.ascontiguousarray(eff_g, np.float64),
+        float(bg.log_mu_bg),
+        float(bg.alpha),
+        float(bg.size),
+        bool(bg.informative),
+        np.log(fg) - np.log1p(-fg),
+    )
 
 
 def _delta_pmf(length):
@@ -77,18 +108,34 @@ def _scenario(kappa=0.9):
     return parts.chain, parts.statics, parts.geometry, belief, parts.region_arrays
 
 
-def _init(kappa=0.9):
-    chain, statics, geometry, belief, _ = _scenario(kappa)
-    ni = build_region_init(
+def _init(kappa=0.9, intron_prior=None):
+    """The message-free self-solve of the scenario, read off the sweep under the SILENT policy: no message is
+    sent, so a slot's final solve IS its self-solve (the same inputs to ψ), and the capture carries the own
+    evidence ``tau_lam`` and the self-solve's ``fg_loc`` (`blocks.SweepCapture`)."""
+    chain, statics, geometry, belief, ra = _scenario(kappa)
+    cap = SweepCapture()
+    out = solve_chain(
+        chain,
         statics,
         geometry,
-        kappa=kappa,
-        od_g=0.2,
-        od_r=0.1,
+        belief,
+        ra,
+        rna_sense_frac=kappa,
+        gdna_strand_overdispersion=0.2,
+        rna_strand_overdispersion=0.1,
         n_rna_obs=85.0,
         n_grid=60,
         logodds_window=10.0,
-        belief=belief,
+        intron_prior=intron_prior,
+        policy=SilentPolicy(),
+        _capture=cap,
+    )
+    ni = SimpleNamespace(
+        f_g=np.asarray(out.f_g),
+        f_pos=np.asarray(out.f_pos),
+        f_neg=np.asarray(out.f_neg),
+        tau_lam=np.asarray(cap.tau_lam),
+        fg_loc=np.asarray(cap.fg_loc),
     )
     # ONE count per slot: it is both the density numerator and the Poisson n.
     return ni, np.asarray(geometry.unspliced_count, float).sum(axis=1)
@@ -111,9 +158,12 @@ def test_a_gdna_free_stranded_library_keeps_its_strand_channel():
     gDNA count or the gDNA overdispersion (the invariant, asserted structurally: a ``1/N_gdna`` term had
     switched every gDNA-free library's channel off, the modal real case), and a stranded library is live
     at any gDNA content, zero included."""
-    for fn in (strand_discriminability, strand_evidence):
-        names = set(inspect.signature(fn).parameters)
-        assert not names & {"n_gdna_obs", "od_g"}, f"{fn.__name__} reads a gDNA quantity: {names}"
+    names = set(inspect.signature(strand_discriminability).parameters)
+    assert not names & {"n_gdna_obs", "od_g"}, (
+        f"strand_discriminability reads a gDNA quantity: {names}"
+    )
+    doc = R.strand_evidence.__doc__  # the kernel's binding, its arguments in its signature line
+    assert "od_r" in doc and "od_g" not in doc and "gdna" not in doc.lower().split("disc")[0], doc
     assert strand_discriminability(0.99, 1e4) > 0.0
     u = np.array([100.0, 100.0])
     fg = np.array([0.5, 0.5])
@@ -172,7 +222,7 @@ def test_ambig_stranded_strand_gives_zero_fg_precision():
     """The strand Beta-Binomial is rank-1 — it informs only p — so at an AMBIG region, where the
     tilt is a free nuisance, the strand cancels out of f_g in the Schur-marginal λ-precision and
     contributes zero. The un-gated `strand_evidence` still computes a positive single-strand λ-term
-    there, which is the phantom source, but `build_region_init` gates it to single-strand regions,
+    there, which is the phantom source, but the kernel gates it to single-strand regions,
     so the AMBIG region's τ_λ from the strand is 0. Only a density prior can pin its f_g."""
     chain, statics, geometry, belief, ra = _scenario(kappa=0.9)
     am = 4  # AMBIG region slot (both strands live); no intron prior in _init ⇒ no density evidence
@@ -221,8 +271,8 @@ def test_unsolved_ambig_unstranded_has_zero_own_evidence():
         assert not np.any(np.isnan(arr))
 
 
-def test_build_region_init_all_finite():
-    """No init produces a nan/negative evidence or an off-simplex composition."""
+def test_the_self_solve_is_all_finite():
+    """No self-solve produces a nan/negative evidence or an off-simplex composition."""
     for kappa in (0.5, 0.9, 0.99):
         ni, _ = _init(kappa=kappa)
         assert np.all(np.isfinite(ni.tau_lam)) and np.all(ni.tau_lam >= 0.0)
@@ -234,9 +284,8 @@ def test_build_region_init_all_finite():
 
 
 def test_density_factor_precision_flat_carries_no_evidence():
-    """A flat λ-factor row carries τ = 0, not the solve grid's own width; None ⇒ None (factory off)."""
+    """A flat λ-factor row carries τ = 0, not the solve grid's own width."""
     lam, _ = _logodds_grid(60, 10.0)
-    assert density_factor_precision(None, lam) is None
     assert np.all(density_factor_precision(np.zeros((4, lam.shape[0])), lam) == 0.0)
 
 
@@ -265,27 +314,16 @@ def test_density_factor_precision_tracks_curvature_and_count():
     assert tau[1] > tau[0] > 0.0
 
 
-def test_density_factor_precision_flows_into_region_init():
+def test_density_factor_precision_flows_into_the_own_evidence():
     """End-to-end: passing an intron λ-factor lifts the intron's own evidence above its strand-only value
     (the factory learning, registered as τ so the intron can propagate)."""
-    chain, statics, geometry, belief, region_arrays = _scenario(
-        kappa=0.5
-    )  # unstranded ⇒ strand τ=0
+    chain, *_ = _scenario(kappa=0.5)  # unstranded ⇒ strand τ=0
     # a sharp λ-factor on the AMBIG region (id 5) — stand in for a confident intron deconvolve
     lam, _ = _logodds_grid(60, 10.0)
     prior = np.zeros((chain.n_slots, lam.shape[0]))
     prior[4] = -0.5 * ((lam - 2.0) ** 2) / 0.05
-    common = dict(
-        kappa=0.5,
-        od_g=0.2,
-        od_r=0.1,
-        n_rna_obs=85.0,
-        n_grid=60,
-        logodds_window=10.0,
-        belief=belief,
-    )
-    ni_off = build_region_init(statics, geometry, **common)
-    ni_on = build_region_init(statics, geometry, intron_prior=prior, **common)
+    ni_off, _ = _init(kappa=0.5)
+    ni_on, _ = _init(kappa=0.5, intron_prior=prior)
     assert ni_off.tau_lam[4] == 0.0  # unstranded, no factory ⇒ silent
     assert ni_on.tau_lam[4] > 0.0  # factory ⇒ the region can now speak
 

@@ -2,35 +2,52 @@
 
 The four: every node ends the two passes holding one message from each neighbour it has; every
 delivered row is one row per slot on the solve grid and finite; a slot's population set has at most
-three members; and the write-back touches only solvable slots. TRAPS: perturb-every-gate is the
-shape of the whole file — each assertion has a matching perturbation test that constructs a policy
-committing exactly that defect and asserts the backbone refuses it, because a gate with no firing
-perturbation has not been written yet, it has been typed. Byte-identity against the shipped solver
-per condition is not gated here: it needs a real chain and a BAM, and it is
-``scripts/design/rename_identity.py`` with ``scripts/profiling/sweep_replay.py``.
+three members; and the write-back touches only solvable slots. The kernel counts them per block
+(`native/solve_kernel.cpp`) and the backbone judges (`sweep.AssertionCounts`). TRAPS: perturb-every-gate
+is the shape of the whole file — each assertion has a matching perturbation test that hands the backbone
+exactly that defect and asserts it refuses, because a gate with no firing perturbation has not been
+written yet, it has been typed. The pass's order and sides, the two states a node can hold from a side
+and the terminal rule are read off the kernel's received tables on hand-built chains through the gates'
+harness (`_transfer_harness`). Byte-identity against the shipped solver per condition is not gated here:
+it needs a real chain and a BAM, and it is ``scripts/design/rename_identity.py`` with
+``scripts/profiling/sweep_replay.py``.
 """
 
 from __future__ import annotations
+
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from rigel.calibration import sweep as SW
-from rigel.calibration.blocks import SweepCapture, block_slice
+from rigel.calibration.blocks import SweepCapture
 from rigel.calibration.message_cache import MessageCache
-from rigel.calibration.messages import BlockContext, PsiMessage, Received
-from rigel.calibration.messages.silent import SilentPolicy
+from rigel.calibration.messages import ChainView
+from _transfer_harness import (
+    FORWARD,
+    Faces,
+    LevelLane,
+    Prepared,
+    Received,
+    RowTable,
+    _lane_prepared,
+    _native_passes,
+    norm,
+)
 
 
 N = 8
+K = 60
 
 
-def _ctx(*, free_pos=None, free_neg=None, n_grid=60) -> BlockContext:
-    """A minimal BlockContext. Only the fields the assertions read need to be real."""
+def _ctx(*, free_pos=None, free_neg=None, n_grid=K) -> ChainView:
+    """A minimal chain view: a chain of N slots, ``N E N E …``, every side linked. Only the fields the
+    assertions and the passes read need to be real."""
     ones = np.ones(N)
     fp = np.ones(N, bool) if free_pos is None else np.asarray(free_pos, bool)
     fn = np.zeros(N, bool) if free_neg is None else np.asarray(free_neg, bool)
-    return BlockContext(
+    return ChainView(
         eff_gdna=ones * 200.0,
         eff_rna=ones * 200.0,
         sj_count=np.zeros((N, 2)),
@@ -48,63 +65,57 @@ def _ctx(*, free_pos=None, free_neg=None, n_grid=60) -> BlockContext:
         free_neg=fn,
         exon_pos=np.zeros(N, bool),
         exon_neg=np.zeros(N, bool),
-        boundary_flags=np.zeros(N, np.int64),
-        has_own_composition=np.zeros(N, bool),
-        belief_fg=ones,
+        boundary_flags=np.zeros(N, np.uint16),
         n_grid=n_grid,
         logodds_window=10.0,
     )
 
 
-def _counts(msg: PsiMessage, ctx: BlockContext | None = None):
-    c = SW.AssertionCounts()
-    SW._check_message(msg, ctx if ctx is not None else _ctx(), c)
-    return c
-
-
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
-# ASSERTION 1 — THE TWO PHASES: every node holds a message from each neighbour
-# it has; a real hop must ARRIVE; a missing neighbour is not silence; the kernel sees indices only.
+# ASSERTION 1 — THE TWO PHASES: every node holds a message from each neighbour it has; a real hop must
+# ARRIVE; a missing neighbour is not silence; the passes run in chain order and read one side each.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
-class _Echo:
-    """A policy whose kernel records every hop and writes a gDNA level naming its source into the
-    destination's row — so the pass's ORDER and SIDES are observable, and so the solve can be shown the
-    two tables."""
-
-    name = "echo"
-
-    def __init__(self):
-        self.hops = {False: [], True: []}
-        self.held = None
-
-    def library(self, view):
-        return None
-
-    def prepare(self, ctx, library):
-        return self
-
-    def run_pass(self, received, seq, nbr, terminal, *, backward: bool):
-        for i in np.asarray(seq).tolist():
-            s = int(nbr[i])
-            if s < 0 or terminal[i]:
-                continue
-            self.hops[backward].append((s, i))
-            received.level_gdna.write(i, np.zeros(received.composition.shape[1]), float(s), 0.0)
-
-    def solve(self, from_left, from_right):
-        self.held = (from_left, from_right)
-        return PsiMessage.silent()
+def _echo_lane(u):
+    """A gDNA lane on a chain of EMPTY nodes, each holding its own lower-sided level with a flux witness
+    NAMING ITSELF. An empty node forwards what it holds and emits the intersection of its own level and the
+    held one with ITS witness, and an empty recipient does not re-price — so after a pass the count a node
+    holds names the node it received from, and the pass's order and sides are observable."""
+    own = RowTable(N, u.shape[0])
+    witness = RowTable(N, 2)
+    for i in range(N):
+        own[i] = np.where(u < -5.0 + 0.5 * i, -50.0, 0.0)
+        witness[i] = np.array([float(i), 1.0])
+    return LevelLane(
+        "gdna",
+        u,
+        u,
+        0.5,
+        np.zeros(N),
+        np.ones(N),
+        np.ones(N, bool),
+        own,
+        np.ones((N, 2), bool),
+        flux_witness=witness,
+    )
 
 
-def _passes(pol, ctx, terminal=None):
-    K = int(ctx.n_grid)
-    prepared = pol.prepare(ctx, None)
-    order = list(range(int(ctx.n_slots)))
-    fl = SW._pass(order, list(ctx.left), prepared, K, backward=False, terminal=terminal)
-    br = SW._pass(order[::-1], list(ctx.right), prepared, K, backward=True, terminal=terminal)
-    return fl, br
+def _echo(ctx, terminal=None):
+    """The two passes of the echo lane on the chain view's links; ``terminal`` marks the nodes that receive
+    nothing. Returns ``(from_left, from_right)``."""
+    u = np.linspace(-10.0, 10.0, int(ctx.n_grid))
+    prepared = _lane_prepared(_echo_lane(u), ctx.left, ctx.right)
+    order = np.arange(N, dtype=np.int64)
+    term = np.zeros(N, bool) if terminal is None else np.asarray(terminal, bool)
+    tables = []
+    for nbr, seq, backward in ((ctx.left, order, False), (ctx.right, order[::-1], True)):
+        nbr = np.asarray(nbr, np.int64)
+        received = Received.empty(N, int(ctx.n_grid))
+        received.has_neighbour[seq] = nbr[seq] >= 0
+        prepared.run_pass(received, seq, nbr, term, backward=backward)
+        tables.append(received)
+    return tuple(tables)
 
 
 def test_an_empty_table_is_the_two_states_and_nothing_heard():
@@ -136,7 +147,7 @@ def test_every_node_holds_what_each_neighbour_it_has_sent_and_an_open_side_is_no
     NEIGHBOUR on the open side — which is not silence — and a level that arrived is not a composition."""
     ctx = _ctx()
     left, right = np.asarray(ctx.left), np.asarray(ctx.right)
-    fl, br = _passes(_Echo(), ctx)
+    fl, br = _echo(ctx)
     assert np.array_equal(fl.has_neighbour, left >= 0) and np.array_equal(
         br.has_neighbour, right >= 0
     )
@@ -152,87 +163,92 @@ def test_every_node_holds_what_each_neighbour_it_has_sent_and_an_open_side_is_no
 
 
 def test_the_passes_run_in_chain_order_and_read_one_side_each():
-    """The forward pass visits low→high reading each node's LOW neighbour; the backward pass the
-    mirror — so what a source holds from its far side is written before it is asked to send."""
-    pol = _Echo()
-    _passes(pol, _ctx())
-    assert pol.hops[False] == [(i - 1, i) for i in range(1, N)]
-    assert pol.hops[True] == [(i + 1, i) for i in range(N - 2, -1, -1)]
+    """The forward pass visits low→high reading each node's LOW neighbour, the backward pass the mirror,
+    so what a source holds from its far side is written before it is asked to send: on a chain of
+    FORWARD faces with a distinct own claim at every node, the composition a node holds from the left is
+    its low neighbour's claim fused with what THAT neighbour held — the recursion down the chain — and
+    from the right the mirror. PERTURBATION: a pass out of order, or one reading the wrong side, composes
+    the wrong claims and fails the recursion at the first interior node."""
+    ctx = _ctx()
+    lam = np.linspace(-10.0, 10.0, K)
+    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
+    own = RowTable(N, K)
+    for i in range(N):
+        own[i] = norm(-0.5 * ((lam - (-6.0 + 1.6 * i)) / 0.4) ** 2)
+    faces = Faces(lam, left, right)
+    faces.kind[left >= 0, 0] = FORWARD
+    faces.kind[right >= 0, 1] = FORWARD
+    prepared = Prepared.hand_built(own, faces, {}, np.ones(N, bool), np.zeros(N, bool))
+    fl, br = _native_passes(prepared, ctx)
+    want_l, want_r = [None] * N, [None] * N
+    for i in range(1, N):
+        s = i - 1
+        want_l[i] = norm(own[s] if want_l[s] is None else own[s] + want_l[s])
+    for i in range(N - 2, -1, -1):
+        s = i + 1
+        want_r[i] = norm(own[s] if want_r[s] is None else own[s] + want_r[s])
+    for i in range(N):
+        assert fl.has_composition[i] == (want_l[i] is not None)
+        assert br.has_composition[i] == (want_r[i] is not None)
+        if want_l[i] is not None:
+            np.testing.assert_allclose(fl.composition[i], want_l[i], atol=1e-12)
+        if want_r[i] is not None:
+            np.testing.assert_allclose(br.composition[i], want_r[i], atol=1e-12)
+    assert not fl.has_level.any() and not br.has_level.any(), "a FORWARD face carries no level"
 
 
 def test_a_policy_that_sends_nothing_leaves_silence_at_every_node_with_a_neighbour():
-    """A pass that writes nothing means every node holds SILENCE from that side — a neighbour and
-    nothing present — distinguishable from the open side of the chain."""
-
-    class _Quiet(_Echo):
-        def run_pass(self, received, seq, nbr, terminal, *, backward: bool):
-            return
-
-    fl, br = _passes(_Quiet(), _ctx())
-    for t in (fl, br):
+    """A pass through tables that carry no rule and no lane writes nothing, so every node holds SILENCE
+    from that side — a neighbour and nothing present — distinguishable from the open side of the chain."""
+    ctx = _ctx()
+    lam = np.linspace(-10.0, 10.0, K)
+    quiet = Prepared.hand_built(
+        RowTable(N, K), Faces(lam, ctx.left, ctx.right), {}, np.ones(N, bool), np.zeros(N, bool)
+    )
+    for t in _native_passes(quiet, ctx):
         assert np.array_equal(t.silence, t.has_neighbour) and t.silence.sum() == N - 1
         assert np.array_equal(t.no_neighbour, ~t.has_neighbour) and t.no_neighbour.sum() == 1
         assert not t.heard.any()
 
 
-def test_every_lane_written_at_a_hop_reaches_the_solve_in_the_same_table():
-    """The lanes: a kernel that fills every lane — the composition and the three levels — leaves them in
-    the destination's row, and the solve receives the very tables the passes filled. The backbone
-    carries; it never reads a lane."""
-    ctx = _ctx()
-    K = int(ctx.n_grid)
-    row = -0.5 * np.linspace(-1.0, 1.0, K) ** 2
-
-    class _Full(_Echo):
-        def run_pass(self, received, seq, nbr, terminal, *, backward: bool):
-            for i in np.asarray(seq).tolist():
-                if nbr[i] < 0 or terminal[i]:
-                    continue
-                received.composition[i] = row
-                received.has_composition[i] = True
-                received.level_gdna.write(i, row - 2.0, 0.1, 1.0)
-                received.level_rna_pos.write(i, row - 3.0, 0.2, 1.0, 4.0, 4.0)
-                received.level_rna_neg.write(i, row - 4.0, 0.3, 1.0)
-
-    pol = _Full()
-    fl, br = _passes(pol, ctx)
-    pol.solve(fl, br)
-    assert pol.held[0] is fl and pol.held[1] is br, (
-        "the solve must receive the tables the passes filled"
-    )
-    for t, nbr in ((fl, np.asarray(ctx.left)), (br, np.asarray(ctx.right))):
-        has = nbr >= 0
-        assert np.array_equal(t.has_composition, has) and np.array_equal(t.heard, has)
-        assert np.array_equal(t.composition[has], np.tile(row, (int(has.sum()), 1)))
-        for lane, shift in zip(Received.LANES, (2.0, 3.0, 4.0)):
-            lv = getattr(t, lane)
-            assert np.array_equal(lv.present, has)
-            assert np.array_equal(lv.profile[has], np.tile(row - shift, (int(has.sum()), 1)))
-        assert (
-            np.array_equal(t.level_rna_pos.has_witness, has) and not t.level_gdna.has_witness.any()
-        )
-
-
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
-# ASSERTION 2 — every delivered ROW is one row per slot on the solve grid, and finite.
+# ASSERTION 2 — every delivered ROW is finite (one row per slot on the solve grid is structural now: the
+# kernel's rows are the grid's), counted per block by the kernel and judged by the backbone.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
+_NAMES = (
+    "population_at_most_three",
+    "population_reaches_three",
+    "lam_rows_finite",
+    "cube_rows_finite",
+    "writeback_only_solvable",
+)
 
-def test_lambda_rows_are_checked_for_shape_and_finiteness():
-    """The λ-row channel: one row per slot on the solve grid is accepted and counted finite; a row array
-    of another shape is REFUSED outright; a non-finite row is COUNTED and, with no waiver, raises."""
-    ctx = _ctx()
-    K = int(ctx.n_grid)
-    ok = _counts(PsiMessage(lam_rows=np.zeros((N, K))), ctx)
-    assert ok["lam_rows_finite"] == {"violations": 0, "eligible": N}
-    with pytest.raises(ValueError, match="lam_rows has shape"):
-        _counts(PsiMessage(lam_rows=np.zeros((N + 1, K))), ctx)
-    with pytest.raises(ValueError, match="lam_rows has shape"):
-        _counts(PsiMessage(lam_rows=np.zeros(N)), ctx)
-    bad = np.zeros((N, K))
-    bad[2, 0] = np.nan
+
+def _counts(per_block, rows_delivered, cube_delivered, n_owned):
+    """`AssertionCounts.of_blocks` on hand-written per-block counts ``{name: [(violations, eligible), …]}``."""
+    B = len(n_owned)
+    arr = np.zeros((B, len(_NAMES), 2), np.int64)
+    for a, name in enumerate(_NAMES):
+        for b, pair in enumerate(per_block.get(name, [(0, 0)] * B)):
+            arr[b, a] = pair
+    delivered = {
+        "rows_delivered": np.asarray(rows_delivered, bool),
+        "cube_delivered": np.asarray(cube_delivered, bool),
+    }
+    return SW.AssertionCounts.of_blocks(list(_NAMES), arr, delivered, np.asarray(n_owned))
+
+
+def test_a_non_finite_delivered_row_is_counted_and_refused():
+    """The λ-row channel: finite rows are counted eligible; a non-finite row is COUNTED and, with no
+    waiver, raises — and the check is absent from the report when no block delivered rows at all."""
+    ok = _counts({"lam_rows_finite": [(0, 5), (0, 3)]}, [True, True], [False, False], [5, 3])
+    assert ok["lam_rows_finite"] == {"violations": 0, "eligible": 8}
+    assert "cube_rows_finite" not in ok
     with pytest.raises(AssertionError, match="lam_rows_finite"):
-        _counts(PsiMessage(lam_rows=bad), ctx)
+        _counts({"lam_rows_finite": [(0, 5), (1, 3)]}, [True, True], [False, False], [5, 3])
+    quiet = _counts({}, [False, False], [False, False], [5, 3])
+    assert "lam_rows_finite" not in quiet and "cube_rows_finite" not in quiet
 
 
 def test_a_waiver_is_never_silent():
@@ -267,7 +283,7 @@ def test_PERTURBATION_a_fourth_population_is_REFUSED():
     time."""
     counts = SW.AssertionCounts()
     with pytest.raises(AssertionError, match="population_at_most_three"):
-        counts.note("population_at_most_three", np.array([4, 4, 5]) > 3, np.ones(3, bool))
+        counts.note("population_at_most_three", 3, 3)
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -284,17 +300,14 @@ def test_PERTURBATION_a_writeback_outside_solvable_is_REFUSED():
     A locked slot — one with no admissible RNA strand — is never solved and keeps its
     signature-binary init, because RNA cannot cross a gene boundary so its unspliced mass is purely
     gDNA."""
-    untouched = np.array([False, True, True, False])
-    changed = np.array([False, False, True, False])
     counts = SW.AssertionCounts()
     with pytest.raises(AssertionError, match="writeback_only_solvable"):
-        counts.note("writeback_only_solvable", untouched & changed, untouched)
+        counts.note("writeback_only_solvable", 1, 2)
 
 
 def test_a_writeback_confined_to_solvable_is_accepted():
     counts = SW.AssertionCounts()
-    untouched = np.array([False, True, True, False])
-    counts.note("writeback_only_solvable", untouched & np.zeros(4, bool), untouched)
+    counts.note("writeback_only_solvable", 0, 2)
     assert counts["writeback_only_solvable"] == {"violations": 0, "eligible": 2}
 
 
@@ -327,19 +340,19 @@ def test_the_message_policy_is_a_config_decision_and_defaults_to_transfer():
     )
 
 
-def test_solve_chains_parameter_default_is_silent_and_sends_nothing():
+def test_solve_chains_parameter_default_is_silent_and_sends_nothing(sweep_inputs):
     """``SilentPolicy`` is ``solve_chain``'s parameter default (the shipped config installs the
     transfer policy), and it is the MEASURED floor every policy is judged against: win on unstranded
-    data, minimal harm on stranded data, never pooled."""
-    ctx = _ctx()
-    prepared = SilentPolicy().prepare(ctx, None)
-    nothing = Received.empty(N, int(ctx.n_grid))
-    order = np.arange(N, dtype=np.int64)
-    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
-    prepared.run_pass(nothing, order, left, np.zeros(N, bool), backward=False)
-    prepared.run_pass(nothing, order[::-1], right, np.zeros(N, bool), backward=True)
-    assert not nothing.heard.any(), "a silent policy must send nothing"
-    assert prepared.solve(nothing, nothing).is_silent
+    data, minimal harm on stranded data, never pooled. The kernel runs no layer for it: the capture of a
+    default sweep names the silent policy and holds no received table and no delivered row."""
+    import inspect
+
+    assert inspect.signature(SW.solve_chain).parameters["policy"].default is None
+    assert SW._POLICY_KERNEL["silent"] == 0
+    cap = SweepCapture()
+    out = SW.solve_chain(*sweep_inputs["args"], **sweep_inputs["kw"], _capture=cap)
+    assert cap.policy_name == "silent" and cap.from_left is None and cap.lam_rows is None
+    assert out.has_composition is not None and "lam_rows_finite" not in cap.backbone_assertions
 
 
 def test_the_backbone_does_not_know_what_a_message_is_about():
@@ -389,30 +402,19 @@ def test_the_backbone_does_not_know_what_a_message_is_about():
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
-# THE CUBE CHANNEL (the both-stranded locus): a (K, K_t) row per AMBIG slot, final solve only
+# THE CUBE CHANNEL (the both-stranded locus): a row per delivered AMBIG slot, final solve only
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
-def test_the_cube_channel_is_checked_per_ambig_slot_and_shape():
-    """`_check_message`: a delivered row at an AMBIG slot with ``(K,)`` profiles passes; one at a
-    single-strand slot is REFUSED (a cube exists only where both strands are live); a profile that is not
-    ``(n_grid,)`` is REFUSED; a non-finite profile is REFUSED by the backbone's assertion."""
-    from _psi_reference import cube_rows_of
-
-    ctx = _ctx(free_pos=np.ones(N, bool), free_neg=np.array([i % 2 == 0 for i in range(N)]))
-    K = int(ctx.n_grid)
-
-    def rows(slot, prof, k=K):
-        return cube_rows_of({slot: (prof, None, 100.0, 50.0, 0.5)}, np.linspace(-10.0, 10.0, k))
-
-    ok = _counts(PsiMessage(cube_rows=rows(0, np.zeros(K))), ctx)
-    assert ok["cube_rows_finite"] == {"violations": 0, "eligible": 1}
-    with pytest.raises(ValueError, match="not an AMBIG slot"):
-        _counts(PsiMessage(cube_rows=rows(1, np.zeros(K))), ctx)
-    with pytest.raises(ValueError, match="solve grid"):
-        _counts(PsiMessage(cube_rows=rows(0, np.zeros(K + 1), K + 1)), ctx)
+def test_the_cube_channel_is_counted_where_a_cube_was_delivered():
+    """The cube rows' finiteness is counted over the delivered rows at a block's OWNED slots — absent
+    from the report when no block delivered a cube, a non-finite profile refused — and the kernel's
+    solve writes a cube row only at an AMBIG node (`transfer_kernel.h`), so a cube at a single-strand
+    slot cannot be built."""
+    ok = _counts({"cube_rows_finite": [(0, 2), (0, 0)]}, [True, True], [True, False], [5, 3])
+    assert ok["cube_rows_finite"] == {"violations": 0, "eligible": 2}
     with pytest.raises(AssertionError, match="cube_rows_finite"):
-        _counts(PsiMessage(cube_rows=rows(0, np.full(K, np.nan))), ctx)
+        _counts({"cube_rows_finite": [(1, 2), (0, 0)]}, [True, True], [True, False], [5, 3])
 
 
 def test_the_solvers_cube_is_inert_when_absent_and_walls_the_tilt_when_present():
@@ -423,14 +425,14 @@ def test_the_solvers_cube_is_inert_when_absent_and_walls_the_tilt_when_present()
 
     from rigel.calibration.simplex_logodds import CubeRows, _solve_regions_logodds_all
 
-    m, K = 4, 40
+    m, K_ = 4, 40
     u_pos = np.array([50.0, 50.0, 50.0, 50.0])
     u_neg = np.array([50.0, 50.0, 50.0, 50.0])
     ap = np.ones(m, bool)
     an = np.array([True, True, False, True])
-    kw = dict(kappa=0.99, od_g=0.0, od_r=0.0, n_grid=K, L=10.0)
+    kw = dict(kappa=0.99, od_g=0.0, od_r=0.0, n_grid=K_, L=10.0)
     base = _solve_regions_logodds_all(u_pos, u_neg, ap, an, u_pos + u_neg, np.zeros(m), **kw)
-    u = np.linspace(-10.0, 10.0, K)
+    u = np.linspace(-10.0, 10.0, K_)
     for empty in (None, CubeRows.blank(0, u)):
         again = _solve_regions_logodds_all(
             u_pos, u_neg, ap, an, u_pos + u_neg, np.zeros(m), cube_rows=empty, **kw
@@ -458,42 +460,42 @@ def test_the_solvers_cube_is_inert_when_absent_and_walls_the_tilt_when_present()
 
 def test_a_terminal_receives_nothing_and_the_kernel_is_never_asked_for_the_hop_into_it():
     """The boundary condition the locus solve stands on: a node marked terminal holds SILENCE from a
-    side it has a neighbour on, and the policy's kernel is never called with it as the destination —
-    so what a policy WOULD deliver there cannot exist. PERTURBATION: the same kernel with no terminal
-    marked delivers its message, which is what proves the mask does the work. What the terminal SENDS
-    is untouched: its neighbour still receives from it."""
+    side it has a neighbour on, and the kernel is never asked for the hop into it — so what a policy
+    WOULD deliver there cannot exist. PERTURBATION: the same pass with no terminal marked delivers its
+    level, which is what proves the mask does the work. What the terminal SENDS is untouched: its
+    neighbour still receives from it."""
     ctx = _ctx()
-    terminal = [False] * N
+    terminal = np.zeros(N, bool)
     terminal[4] = True
-    pol = _Echo()
-    held, _br = _passes(pol, ctx, terminal=terminal)
+    held, _br = _echo(ctx, terminal=terminal)
     assert held.has_neighbour[4] and held.silence[4], (
         "a terminal holds SILENCE: a neighbour, nothing present"
     )
-    assert (3, 4) not in pol.hops[False], "the kernel was asked for the hop into the terminal"
     assert held.level_gdna.count[5] == 4.0, (
         "the terminal's own sending was blocked; only receiving is"
     )
     assert held.no_neighbour[0], "a terminal rule must not turn an open side into silence"
-    loud = _Echo()
-    unmasked, _br = _passes(loud, ctx)
-    assert unmasked.level_gdna.count[4] == 3.0 and (3, 4) in loud.hops[False]
+    unmasked, _br = _echo(ctx)
+    assert unmasked.level_gdna.present[4] and unmasked.level_gdna.count[4] == 3.0
 
 
 def test_the_terminal_predicate_is_the_solve_gates_lock_on_a_region():
     """One predicate, two names must not appear: the slots the backbone never delivers into are exactly
     the REGIONS `g1_locked` locks — no admissible RNA strand — read off the source, so a reader cannot
-    find a second definition of "terminal" in the file."""
+    find a second definition of "terminal" in the file; and the kernel is told them."""
     import inspect
     import re
 
     src = inspect.getsource(SW)
     assert re.search(r"terminal ?= ?.*is_region & g1_locked\(fp, fn\)", src), "the predicate moved"
-    assert re.search(r"_pass\(.*terminal=", src), "the passes are no longer told the terminals"
+    assert re.search(r"terminal=bits\(terminal\)", src), (
+        "the kernel is no longer told the terminals"
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
-# THE LOCUS BLOCKS — the sweep solved a block at a time is the sweep, for every block size.
+# THE LOCUS BLOCKS — the sweep solved a block at a time is the sweep, for every block size and every
+# thread count.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
@@ -536,7 +538,7 @@ def test_the_block_solve_is_the_chain_solve_for_every_block_size(sweep_inputs):
         got = run(bs)
         for f in whole:
             assert np.array_equal(got[f], whole[f]), f"block_slots={bs}: {f} differs"
-        for key in ("f_g", "fg_loc", "tau_lam", "solvable", "mass_global", "count"):
+        for key in ("f_g", "fg_loc", "tau_lam", "tau_fac", "solvable", "mass_global", "count"):
             assert np.array_equal(getattr(caps[bs], key), getattr(caps[None], key)), (
                 f"block_slots={bs}: capture {key} differs"
             )
@@ -546,48 +548,55 @@ def test_the_block_solve_is_the_chain_solve_for_every_block_size(sweep_inputs):
         # what each node HEARD is the same; at a block's first slot — a terminal, which hears nothing
         # by the structural rule — an open side and SILENCE are the same hearing
         for side in ("from_left", "from_right"):
-            heard = [getattr(caps[k], side).heard for k in (bs, None)]
+            heard = [Received.from_kernel(getattr(caps[k], side)).heard for k in (bs, None)]
             assert np.array_equal(heard[0], heard[1]), (
                 f"block_slots={bs}: {side} differs in what was heard"
             )
             for i in np.flatnonzero(terminal):
-                assert not any(getattr(caps[k], side).heard[i] for k in (bs, None))
+                assert not any(h[i] for h in heard)
 
 
-def test_a_block_view_rebases_the_links_and_slices_every_per_slot_array(sweep_inputs):
-    """`blocks.block_slice`: a neighbour outside the block is no neighbour; every per-slot array is the chain's
-    slice; a 2-D bank keeps its columns; ``n_slots`` follows."""
-    chain, statics, geometry, belief, _ra = sweep_inputs["args"]
-    n = int(chain.n_slots)
-    sl = slice(2, min(9, n))
-    c = block_slice(chain, sl)
-    assert c.n_slots == sl.stop - sl.start and np.array_equal(c.kind, np.asarray(chain.kind)[sl])
-    left = np.asarray(chain.left)[sl] - sl.start
-    assert np.array_equal(c.left, np.where((left >= 0) & (left < c.n_slots), left, -1))
-    assert c.left[0] == -1 and c.right[-1] == -1
-    g = block_slice(geometry, sl)
-    assert g.n_slots == c.n_slots and g.unspliced_count.shape == (c.n_slots, 2)
-    assert np.array_equal(g.eff_gdna, np.asarray(geometry.eff_gdna)[sl])
-    b = block_slice(belief, sl)
-    assert np.array_equal(b.f_g, np.asarray(belief.f_g)[sl])
-    assert block_slice(statics, sl).boundary_flags.shape == (c.n_slots,)
+def test_the_block_solve_is_thread_exact_so_the_thread_count_moves_no_number(sweep_inputs):
+    """The blocks are pulled one at a time by a pool of threads, each block solved by the same arithmetic
+    on its own arena and written to its own slots, so the sweep is BIT-IDENTICAL at every thread count —
+    the budget is a resource, not a tunable of the answer. On the toy cut into many blocks, at 1, 2, 3 and
+    every core."""
+    from _transfer_harness import _full_policy
+
+    policy = _full_policy(sweep_inputs)[0]
+    kw = dict(sweep_inputs["kw"])
+    kw.pop("block_slots", None)
+    kw.pop("n_threads", None)
+    serial = _six(
+        SW.solve_chain(*sweep_inputs["args"], **kw, policy=policy, block_slots=2, n_threads=1)
+    )
+    for n_threads in (2, 3, 0):
+        got = _six(
+            SW.solve_chain(
+                *sweep_inputs["args"], **kw, policy=policy, block_slots=2, n_threads=n_threads
+            )
+        )
+        for f in serial:
+            assert np.array_equal(got[f], serial[f]), f"{n_threads} threads: {f} moved"
 
 
 def test_the_checks_count_only_the_owned_slots():
-    """`_check_message(n_owned=...)`: the read-ahead terminal at the end of a block is not counted as
-    eligible, and a row array is still required to cover every slot the policy saw."""
-    ctx = _ctx()
-    K = int(ctx.n_grid)
-    c = SW.AssertionCounts()
-    SW._check_message(PsiMessage(lam_rows=np.zeros((N, K))), ctx, c, n_owned=N - 1)
-    assert c["lam_rows_finite"] == {"violations": 0, "eligible": N - 1}
-    assert c["population_at_most_three"]["eligible"] == N - 1
-    with pytest.raises(ValueError, match="lam_rows has shape"):
-        SW._check_message(PsiMessage(lam_rows=np.zeros((N - 1, K))), ctx, c, n_owned=N - 1)
+    """The λ-row check's ELIGIBLE set reads as the chain's: where any block delivered rows, a block that
+    delivered none holds zero rows — finite rows that were checked — so the published count does not
+    depend on how the chain was cut; and the kernel counts each block's OWNED slots only (its read-ahead
+    terminal is another block's)."""
+    two = _counts(
+        {"lam_rows_finite": [(0, 5), (0, 0)], "population_at_most_three": [(0, 5), (0, 3)]},
+        [True, False],
+        [False, False],
+        [5, 3],
+    )
+    assert two["lam_rows_finite"] == {"violations": 0, "eligible": 8}
+    assert two["population_at_most_three"] == {"violations": 0, "eligible": 8}
     merged = SW.AssertionCounts()
-    merged.absorb(c)
-    merged.absorb(c)
-    assert merged["lam_rows_finite"] == {"violations": 0, "eligible": 2 * (N - 1)}
+    merged.note("lam_rows_finite", 0, 7)
+    merged.note("lam_rows_finite", 0, 7)
+    assert merged["lam_rows_finite"] == {"violations": 0, "eligible": 14}
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -603,10 +612,10 @@ def _cache_kw(sweep_inputs):
 
 
 def test_a_cache_hit_reproduces_the_uncached_sweep_to_the_bit_and_skips_the_layer(sweep_inputs):
-    """Two sweeps on identical inputs through one cache: the second hits every block, never calls the
-    policy's `prepare`, and returns the same belief and the same ``has_composition`` as the first and as a
-    sweep with no cache at all. Not vacuous: the toy delivers rows, so a stale or empty hit would move
-    the numbers."""
+    """Two sweeps on identical inputs through one cache: the second is served every block — the kernel
+    runs no layer for a served block — and returns the same belief and the same ``has_composition`` as
+    the first and as a sweep with no cache at all. Not vacuous: the toy delivers rows, so a stale or empty
+    hit would move the numbers."""
     from _transfer_harness import _full_policy
 
     policy = _full_policy(sweep_inputs)[0]
@@ -618,21 +627,9 @@ def test_a_cache_hit_reproduces_the_uncached_sweep_to_the_bit_and_skips_the_laye
     )
     assert cache.misses > 0 and cache.hits == 0
     n_blocks = cache.misses
-    calls = []
-    orig = type(policy).prepare
-
-    def spy(self, ctx, library):
-        calls.append(ctx.n_slots)
-        return orig(self, ctx, library)
-
-    type(policy).prepare = spy
-    try:
-        second = SW.solve_chain(
-            *sweep_inputs["args"], **kw, policy=policy, block_slots=5, message_cache=cache
-        )
-    finally:
-        type(policy).prepare = orig
-    assert not calls, "a hit must not prepare the policy"
+    second = SW.solve_chain(
+        *sweep_inputs["args"], **kw, policy=policy, block_slots=5, message_cache=cache
+    )
     assert cache.hits == n_blocks and cache.misses == n_blocks
     for out in (first, second):
         for f in ("f_g", "f_pos", "f_neg", "var_gdna", "has_composition"):
@@ -642,8 +639,8 @@ def test_a_cache_hit_reproduces_the_uncached_sweep_to_the_bit_and_skips_the_laye
 
 def test_PERTURBATION_the_cache_misses_when_any_input_the_message_layer_reads_changes(sweep_inputs):
     """The key is a digest of EVERY input the message layer reads, so it is safe by construction: a
-    changed belief, liveness bit, factory row, observation, library or grid must miss — and a cache that
-    hit on any of them would deliver another sweep's messages as this one's."""
+    changed belief, factory row, observation, library or grid must miss — and a cache that hit on any of
+    them would deliver another sweep's messages as this one's."""
     import dataclasses as _dc
 
     from _transfer_harness import _full_policy
@@ -700,7 +697,7 @@ def test_PERTURBATION_the_cache_misses_when_any_input_the_message_layer_reads_ch
 
 
 def test_a_diagnostic_capture_always_runs_the_full_layer(sweep_inputs):
-    """An instrument's capture reads the held lists, so with ``_capture`` the layer runs even on a cache
+    """An instrument's capture reads the held tables, so with ``_capture`` the layer runs even on a cache
     that would hit — and what it delivers equals the cache's, so the two paths cannot drift."""
     from _transfer_harness import _full_policy
 
@@ -718,7 +715,7 @@ def test_a_diagnostic_capture_always_runs_the_full_layer(sweep_inputs):
 
 
 def test_the_factory_rows_enter_the_key_by_the_digest_of_their_inputs():
-    """`calibrate.FactoryRows.digest(sl)` is a digest of what a block's rows are a pure function of — the
+    """`calibrate.FactoryRows.digest(block)` is a digest of what a block's rows are a pure function of — the
     background's fields, the block's intron mask, counts and opportunities, the grid — never of the rows'
     bytes: two factories on identical inputs digest alike per block; a changed count at one intron changes
     ITS block's digest and no other's; a changed background changes every block's; and a factory whose
@@ -740,19 +737,22 @@ def test_the_factory_rows_enter_the_key_by_the_digest_of_their_inputs():
     bg = GdnaBackground(log_mu_bg=-3.0, alpha=12.0, size=40.5, n_regions=9, informative=True)
     a = factory([5.0, 0.0, 12.0, 3.0, 0.0, 8.0], bg)
     b = factory([5.0, 0.0, 12.0, 3.0, 0.0, 8.0], bg)
-    blocks = (slice(0, 3), slice(3, 6))
-    for sl in blocks:
-        assert a.digest(sl) == b.digest(sl)
+    blocks = (SimpleNamespace(start=0, stop=3, end=3), SimpleNamespace(start=3, stop=6, end=6))
+    for bl in blocks:
+        assert a.digest(bl) == b.digest(bl)
     c = factory([5.0, 0.0, 12.0, 3.0, 0.0, 9.0], bg)  # one intron's count, in the second block
     assert c.digest(blocks[0]) == a.digest(blocks[0]) and c.digest(blocks[1]) != a.digest(blocks[1])
     d = factory([5.0, 0.0, 12.0, 3.0, 0.0, 8.0], GdnaBackground(-3.1, 12.0, 40.5, 9, True))
-    assert all(d.digest(sl) != a.digest(sl) for sl in blocks)
+    assert all(d.digest(bl) != a.digest(bl) for bl in blocks)
+    inputs = a.kernel()
+    assert inputs[0] == "inputs" and inputs[1].dtype == bool and inputs[-1] is True
 
 
 def test_the_cache_keys_a_blocks_rows_by_the_factorys_digest(sweep_inputs):
-    """The wiring: `solve_chain` asks the factory for a block's rows AND its digest, and the cache keys on the
-    digest — a factory answering the same digest hits although its rows are rebuilt, and one whose digest
-    moves misses (rows given as one array keep digesting by content: the perturbation gate above)."""
+    """The wiring: `solve_chain` hands the kernel the factory's inputs AND asks it for each block's digest,
+    and the cache keys on the digest — a factory answering the same digest hits although its rows are
+    rebuilt, and one whose digest moves misses (rows given as one array keep digesting by content: the
+    perturbation gate above)."""
     from _transfer_harness import _full_policy
 
     policy, rows, _g, _w = _full_policy(sweep_inputs)
@@ -764,12 +764,12 @@ def test_the_cache_keys_a_blocks_rows_by_the_factorys_digest(sweep_inputs):
         def __init__(self, rows, salt):
             self.rows, self.salt, self.asked = np.asarray(rows, np.float64), salt, 0
 
-        def __getitem__(self, sl):
-            return self.rows[sl].copy()  # rebuilt: a fresh array each time, the same numbers
+        def kernel(self):
+            return ("rows", self.rows.copy())  # rebuilt: a fresh array each time, the same numbers
 
-        def digest(self, sl):
+        def digest(self, block):
             self.asked += 1
-            return f"{self.salt}:{sl.start}:{sl.stop}".encode()
+            return f"{self.salt}:{block.start}:{block.stop}".encode()
 
     cache = MessageCache()
     first = _Factory(rows, "a")

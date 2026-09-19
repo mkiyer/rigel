@@ -1,129 +1,112 @@
-# NEXT SESSION — start here (2026-09-18: ψ threaded, the cache key on inputs, the splice-out marginal hoisted; the block in one native call is next)
+# NEXT SESSION — start here (2026-09-18 evening: the block in one native call is built, bit-identical; snapshots 18–20 await the go; §G — the stages outside calibration — is next)
 
 This file is only how to begin. The port's plan is `docs/dev/CALIBRATION_PERFORMANCE_PLAN.md` §F and §G; the LIVE
 status with numbers is `ISSUES: performance-memory-bounded-solve`; the day's record is the closing paragraphs of
-`DESIGN.md` §6b.15.5; ψ's design is `docs/dev/PSI_PORT_PLAN.md`; THE THREADS DESIGN, put to the owner before
-building, is `docs/dev/THREADS_PLAN.md`.
+`DESIGN.md` §6b.15.5; THE BLOCK'S DESIGN, written before it was built, is `docs/dev/BLOCK_NATIVE_PLAN.md` (the
+threads design it grew from is `docs/dev/THREADS_PLAN.md`).
 
-## The order (owner, 2026-09-17: the release ships the contraction as it stands; performance until the tool is fast;
-## finish the block in native BEFORE threads; design threads on paper first)
+## The order (owner, 2026-09-17/18: the release ships the contraction as it stands; performance until the tool is fast;
+## the block in ONE native call, designed on paper first, preferred over Python threads over blocks)
 
 1. ~~The ruler's repair, the yield's floors~~ — DONE 2026-09-16/17.
-2. ~~The port, steps (i)–(iii): the pass, the builders, ψ~~ — DONE 2026-09-17, with the one-path cleanup.
-3. ~~The block in native, step 1: the policy's solve~~ — DONE 2026-09-17 (`28bd174c`).
-4. ~~The block in native, step 2: the tables' allocations~~ — DONE 2026-09-17, PREPARED AS A SNAPSHOT for the owner's
-   go (`commits/12_alloc/` in the synced scratchpad: the files, `MESSAGE.txt`; the tree at `28bd174c` + these edits IS
-   the snapshot). The factory rows were priced and not ported alone (`ISSUES: performance-memory-bounded-solve`).
-5. ~~Step (iv-a), ψ over slots~~ — DONE 2026-09-18 with the owner's answers (`CalibrationConfig.n_threads` fed by
-   `--threads`; the cache key on the factory's inputs; the block in ONE native call preferred over Python threads);
-   VCaP 267 → 214 s and 261 → 213 s at 8 threads (0.80 / 0.82), ψ 57.4 → 8.3 s, the sweep 135 → 88 s; snapshot `commits/15_psi_threads/`. As built: the EM's pool
-   (`native/thread_pool.h`), a cost-balanced partition of the slot list (26 columns an AMBIG slot, 1 a single-strand
-   one), a `Scratch` per thread, the GIL released; gate: the replay of `sweeps_MO_3021_step11` at 1, 2 and 8 threads
-   BIT-IDENTICAL on all four sweeps, the suite, the three references; two interleaved pairs on VCaP at `--threads 8`.
-   Then the cache key on the factory's inputs, the pass's constructors, the gDNA arm inside ψ, and the block in one
-   native call — in that order, each its own commit, each gated as the plan says.
-6. ~~The one-path convergence of the pass~~ — DONE 2026-09-17, prepared as snapshot `commits/13_one_path/`
-   (the per-hop Python kernel and `transfer_rows.py` deleted; the constructors bound for the gates).
-7. ~~The optimisation target moved to VCaP~~ — DONE 2026-09-17 (owner): the four sweeps captured
-   (`perf/sweeps_VCaP_step13`), the whole run profiled twice (`perf/vcap_baseline_2026-09-17/`), the sweeps dissected
-   with the census and the kernel wrappers, the ranked opportunities in `ISSUES: performance-memory-bounded-solve`;
-   the MO_3021 captures and the timing worktree removed; snapshot `commits/14_vcap_baseline/` (docs only).
-8. ~~The cache key on the factory's inputs~~ — DONE 2026-09-18 (exact; the key 3.2 s → 0.27 s a refit
-   sweep; `sweeps_VCaP_step16` is the capture now); snapshot `commits/16_cache_key/`.
-9. ~~The splice-out marginal's hoist~~ — DONE 2026-09-18 (exact; the census's timers put the marginal at 65 % of the
-   pass and the blur at 3.5 s of 9.6 — the earlier "the pass IS the blur" was an inference from the tap counts, now
-   corrected; the pass 36.6 → 29.2 s and 36.2 → 29.2 s at 8 threads (0.80 / 0.81), the sweep 80 → 73 s, the run 205 → 195 s and 202 → 197 s); snapshot `commits/17_splice_out/`. The blur's loop interchange is PRICED and not
-   taken (−1.5 s a first sweep, a summation-order change 1.9e-7 of the budget) — the owner's call.
-10. §G: the stages outside calibration — 110 s of 264 on VCaP: the scan 35, the second pass 22, the two
-   fragment-length fits 16.6, quant 37 (the locus EM 15, the capture effective lengths 8), the index load 6.5.
+2. ~~The port, steps (i)–(iii): the pass, the builders, ψ; the block in native steps 1–2; the one-path convergence~~ —
+   DONE 2026-09-17 (landed through `a1e5be03`).
+3. ~~The optimisation target moved to VCaP~~ — DONE 2026-09-17 (`9e5131aa`).
+4. ~~ψ threaded over slots; the cache key on the factory's inputs; the splice-out marginal's hoist~~ — DONE 2026-09-18,
+   LANDED AND PUSHED as `81d53c8b`, `5d76d55b`, `4ace210e` (main == origin/main).
+5. ~~The block in one native call~~ — BUILT 2026-09-18 as THREE SNAPSHOTS awaiting the go (`commits/18_psi_priors/`,
+   `19_lgamma/`, `20_block_native/`; `commit_series.sh` replays them onto `4ace210e`):
+   * 18 — ψ takes its priors apart: the gDNA arm interpolated per cell inside the kernel from the landscape's curve, the
+     factory row and the delivered row two inputs; `landscape.logprior` deleted. EXACT.
+   * 19 — the factory's log-gamma is libm's (for scipy's cephes `gammaln`): THE ONE NUMBER-MOVING COMMIT, `f_g` by at most
+     5.7e-14 (3.7e-6 of the budget); the three identity references RE-FROZEN (the previous set in
+     `arms/pre_lgamma_2026-09-18/`); the capture re-taken as `perf/sweeps_VCaP_step19`.
+   * 20 — `native.solve_blocks`: ONE call per sweep, a pool of threads pulling the locus blocks, each block end to end
+     (the prior rows, the self-solve ψ, the layer unless silent or served, the final ψ, the write-back, the counts) on
+     its own arena; the Python per block deleted (`messages/faces.py`, `messages/lanes.py`, the backbone's per-block
+     functions, `region_init`'s solve, `density_deconv`'s factor functions); one module `_solve_impl`
+     (`solve_kernel.cpp` + `transfer_kernel.h` + `psi_kernel.h` + `transfer_rows.h` + `thread_pool.h`). BIT-IDENTICAL
+     on the four VCaP sweeps at 8 threads and at 1, at another block size, on the served-cache path, on the three
+     references; the suite 3,430 passed / 5 xfail / 3,435 collected; VCaP at 8 threads 198 → 144 s and 194 → 138 s (0.73 / 0.71), calibrate 85.6 → 33.7 s, the four sweeps 68.8 → 16.8 s and 66.3 → 15.9 s (0.24).
+6. §G: the stages outside calibration — on VCaP the scan, the second pass, the two fragment-length fits, quant (the locus
+   EM, the capture effective lengths), the index load; they scale with depth and are now the larger half of a run.
+   Where the time is now (VCaP at 8 threads, commit 20's post runs, `perf/block_native_2026-09-18/`): the whole run 144 / 138 s. Calibrate 33.7 / 31.9 s: the four sweeps 16.8 / 15.9 (the kernel 15.7 / 14.9 — the first sweep ≈ 2.8 s, the refit that misses the cache ≈ 7.4 s, the two served refits ≈ 3 s each), the landscape fits 4.5, ψ before the sweep 0.65, and about 11 s of calibrate's OWN Python outside every probe (the chain, the statics, the beliefs' init and reset, the deconv) — the next thing to dissect inside calibration. Outside calibration 104 s: the scan 36 / 32, the second pass 22 (the fl models 8.4, scoring 12), the second fl fit 8.4, quant 36 (the locus EM 14.5, the capture effective lengths 5.7–8.2, scoring 6–7), the index load 6.6.
 
-## Where the time is now (VCaP, the deep library; `s12/kernel_times_vcap.log`, `s12/census_vcap.log`, `perf/vcap_baseline_2026-09-17/`)
-
-The whole run at 8 threads: 264 s (two back-to-back runs 263.6 / 265.5, the stages drifting 0.98–1.07). Calibrate 154 s
-(the sweep 134: ψ 54, the pass 36.5, the builders 17.2, the solve 2.0, Python ~24; the landscape fit 4.2; ψ before the
-sweep 3.8); outside calibration 110 s (the scan 35, the second pass 22, the fragment-length models 8.3 + 8.3, quant 37, the
-index load 6.5).
-
-| per sweep | first sweep (K = 101, the layer runs) | refit sweep (K = 233, cache-served) |
-|---|---|---|
-| ψ native (self-solve + final) | 6.7 s | 15.5 s |
-| the pass native (both): the splice-out marginal 4.2 s (was 6.3), the blur 3.5, the transport rows 1.7, the lane hops 1.9 | 8.5 s (was 10.4) | — (~20 s at the miss) |
-| the builders native (the RNA lanes 2.7, the gDNA lane 1.2) | 4.7 s | — (~11 s at the miss) |
-| the policy's solve native | 0.5 s | — |
-| the message cache's key (blake2b over the block context) | — | 3.2 s |
-| the gDNA arm (`np.interp` over (m, K)) | — | 2.3 s |
-| the factory rows (lgamma 85 %) | 0.5 s | 1.1 s |
-| the glue | ~1.8 s | ~1.2 s |
-| the sweep | 24.7 s (native 91 %) | 23.3 s (native 67 %) |
-
-⛔ The refit sweeps run on the landscape's bracket — K = 233 on VCaP against the first sweep's K = 101 — so every per-cell
-cost is 2.3× there for the same slots, and sweep 1 misses the cache in production and runs the whole layer at that K;
-profile `replay --call 1` beside `--call 0`. ⛔ The census is a SCRATCH instrument (`s12/census/`: a patched copy of
-`transfer_kernel.cpp` and `transfer_rows.h` built as `_transfer_census` and swapped in for the three native calls by
-`s12/census_run.py`); rebuild it from the current kernel sources before trusting it after any kernel change.
-
-## The one-path ruling (owner, 2026-09-17) — what is still duplicated
+## The one-path ruling (owner, 2026-09-17) — applied to the block
 
 One production code path; once native code is validated the Python it replaces is deleted; a small floating-point
-tolerance is accepted. Applied to the builders, ψ, the policy's solve and now the pass: the per-hop Python kernel
-(`_PreparedTransfer.propagate`, `Faces.apply`, `LevelLane.emit` / `receive`) and `messages/transfer_rows.py` are
-deleted; the row constructors and flag predicates the gates need are the native ones, bound as
-`native.transfer_rows`; a rule or a lane hop is gated by driving ONE hop of the native pass
-(`_transfer_harness._hop` / `_rule`). What remains duplicated: the layer-4 `strand_likelihood` "executable
-reference" module (its gate reads the native strand term through `psi_cube`) — the owner's call.
+tolerance is accepted. The whole block is that one path now: the gates read the ONE implementation through bindings
+that allocate and return fresh tables (`native.transfer_prepare` / `transfer_pass` / `transfer_solve`,
+`native.transfer_rows.*`), and the tables' containers (`RowTable`, `Faces`, `LevelLane`, `Received`, `Levels`) live in
+`tests/calibration/_transfer_harness.py`, not in `src/`. What remains duplicated: the layer-4 `strand_likelihood`
+"executable reference" module (its gate reads the native strand term through `psi_cube`) — the owner's call.
 
-## The protocol for every step (unchanged)
+## Open for the owner (asked in the handoff report)
+
+* THE MESSAGE CACHE — keep or delete. in production the last two refit sweeps are SERVED (the pre run's policy prepare ran 852 = 2 × 426 times over four sweeps, the first sweep and the first refit missing); with the block native a refit sweep that misses replays at 7.4 s at 8 threads and a served one at 3.0 s, so the cache saves about 9 s of a 140 s run (6 %) and costs 2.3 GB held through calibrate at K = 233 (the deliveries: the written rows with their slots, the cubes, the held bits), the keys (0.27 s a sweep) and the deliveries' round trip through Python — message_cache.py, the served list, the deliveries return and their gates; keep or delete is the owner's call. The kernel returns and takes back deliveries only so the cache can
+  exist; deleting it removes `message_cache.py`, the keys, `served`, the deliveries' round trip and their gates.
+* `policy_prototype.py` — its mechanism (a Python class installed in the backbone) cannot exist any more; it now scores
+  the two SHIPPED policies per gene type / per node class / slot by slot and refuses any other arm. Keep as that, or
+  retire (`policy_benchmark.py --by-class` covers the per-class view; the per-type table and `dissect` are its own).
+  CLAUDE.md's working rule "prototyped outside `src/`" now means, for a message mechanism, a C++ builder in a WORKTREE
+  scored against the tree without it — the rule's wording is the owner's.
+* `strand_likelihood` (above). The blur's loop interchange (−1.5 s a first sweep, a summation-order change 1.9e-7 of the
+  budget; `s15/edit_blur.py`) — priced, not taken.
+
+## The protocol for every step (unchanged in form)
 
 1. `python scripts/design/preflight.py` first; the suite's standing count is in `CLAUDE.md`.
-2. The capture: `perf/sweeps_VCaP_step16` (9.0 GB; the deep library, VCaP, taken from this tree at 8 threads, ~4 min)
-   replays BIT-IDENTICAL — use it; take a fresh one only after a commit that moves numbers, and delete the superseded
-   one once its successor replays. The MO_3021 captures are gone: the optimisation target is VCaP (owner, 2026-09-17).
-3. DERIVE from the Python → the C++ in-tree → a scratchpad harness that runs both on every call of a captured sweep
-   against the replay's derived budget → wire, delete the Python, rewrite the gates → the suite →
-   `sweep_replay.py replay [--tolerance]` for calls 0–3 → the references (re-frozen only with the reason) → two
-   interleaved timing pairs at 8 threads on VCaP against a worktree of the pre-step commit carrying the SAME
-   binaries (`git worktree add --detach /tmp/rigel_pre <commit>`, the installed `site-packages/rigel/*.so` copied in,
-   `pre_site/sitecustomize.py` on `PYTHONPATH`; `s15/time_pairs.sh`). When a step changes a native module's argument
-   shape, build that module from the worktree's own source in a separate CMake build directory (`s13/pre_worktree.sh`,
-   `s15/pre_worktree_blur.sh` are the two forms).
-4. Each step its own commit, prepared as a snapshot; the owner drives the commit and the push.
+2. The capture: `perf/sweeps_VCaP_step19` (9.0 GB; VCaP at 8 threads from the log-gamma tree) replays BIT-IDENTICAL on
+   the block tree — `sweep_replay.py replay --dir … --call N --threads 8 [--block-slots N] [--tolerance]`; take a fresh
+   one only after a commit that moves numbers, and delete the superseded one once its successor replays. ⛔ The replay
+   carries NO message cache: calls 1–3 replay as cache misses (the layer runs at K = 233), which is why a refit sweep
+   replays at ~7.4 s while a production refit sweep served from the cache runs at ~3 s.
+3. DERIVE → the C++ in-tree → the replay on calls 0–3 (bit or `--tolerance`) → the references (re-frozen only with the
+   reason) → the suite with its count re-derived → PERTURB the kernel and watch the replay fire, restoring from a saved
+   copy → two interleaved timing pairs at 8 threads on VCaP against a worktree of the pre-step commit carrying its OWN
+   modules (`s17/pre_worktree.sh` builds the pre tree's modules from its own source when an argument shape changed;
+   `s17/time_pairs.sh` runs the pairs; `pre_site/sitecustomize.py` on `PYTHONPATH` points the worktree's import at itself).
+4. Each step its own commit, prepared as a snapshot (`commits/snapshot.sh N_NAME file…` — pass the files literally,
+   never through an unquoted variable; `DELETED.txt` beside `FILES.txt` for removals); the owner drives the commit.
 
 ## ⛔ Traps met in this session (also in memory)
 
-* A `sed` revert with an unescaped `*` or `[i]` in its PATTERN silently matches nothing: two perturbations stayed in
-  the source, the "clean" rebuild was doubly broken, and its binary was copied to the timing worktree. Perturb and
-  revert with exact-string Python edits and `git checkout -- FILE`; assert the anchor count; check `git diff` after
-  every revert.
-* The timing worktree must carry the binaries the working tree IMPORTS (`site-packages/rigel/*.so`), not the
-  `build/` directory's — the scanner's differed there.
-* A zero-fill's cost does not vanish when the fill does: the allocator returns freed pages and the first touch in
-  the kernel pays the fault — read the kernels' times beside the allocation line, never the allocation line alone.
-* The refit sweeps are a different problem from the first (K = 202 against 101): a mechanism found on `--call 0`
-  can be half the story.
-* A `np.empty` table needs a gate that a `np.zeros` table never needed: the poison gate (NaN in every unmasked cell,
-  outputs bit-identical) — and any gate that compared whole matrices (`test_pass_kernel`'s leaves, the `RowTable`
-  gate's fresh-table check) had to be rewritten to compare under the bits.
+* A CONSTANT TYPED FROM MEMORY: the nine splice-out marginal nodes hand-typed in the header were off at 1e-8 and moved
+  `f_g` by 1e-7 on the replay. Print the oracle's `repr` and paste it; check `np.array_equal` against the oracle.
+* FMA CONTRACTION: clang fuses `a*b + c` inside one expression (`-ffp-contract=on`), one rounding fewer than numpy's
+  separate multiply and add — the factory rows differed at 1e-14 until every product became a named temporary. Do NOT
+  set `-ffp-contract=off` for the module: numpy's own `np.interp` IS fused, so `interp`'s `fp + slope*(x − xp)` matches
+  numpy only with contraction on. numpy's `sum(axis=1)` is a PAIRWISE sum (8 accumulators, blocks of 128, halving) —
+  reproduced as `pairwise_sum` so the factor precision is exact.
+* BRANCH ORDER: a served block must be checked BEFORE the silent policy's branch, and a silent block stores an EMPTY
+  delivery when deliveries are wanted — otherwise a silent sweep's served-cache gate has nothing to serve.
+* A PERTURBATION MUST TARGET WHAT THE PATH RELIES ON: removing the `held` clear proved nothing (the transfer path writes
+  every held bit; the silent path never sets one); removing the own-mask clear or the received-bits clear moved
+  600,000+ slots. Skipping a block in the pool moved 2,028 slots. The small-chain suite gates do not see a stale
+  arena between blocks — only the replay does.
+* The captured pickled policy carries the fields of the constructor it was pickled with; the replay rebuilds it through
+  the CURRENT constructor (instrument-side), never a shim in `src/`.
+* An identifier containing `capture` in the backbone trips the backbone gate — the kernel's diagnostics local is `diag`.
 
-## Storage (2026-09-18)
+## Storage (2026-09-18 evening; 90 GB free)
 
-`perf/sweeps_VCaP_step16` (9.0 GB; the refit sweeps' pickles are 2.9 GB each, their message cache, keyed as this tree
-keys it) is THIS tree's capture and stays until a step moves numbers (`step13` deleted). The worktree `/tmp/rigel_pre`
-stands at 9e5131aa + snapshots 15 and 16 with `_transfer_impl` built from its own source (the pre-hoist marginal):
-`git worktree remove --force /tmp/rigel_pre` when it is next moved. Still large and regenerable:
+`perf/sweeps_VCaP_step19` (9.0 GB) is THIS tree's capture (step16 deleted). The worktree `/tmp/rigel_pre` stands at
+`4ace210e` + snapshots 18 and 19 with `_transfer_impl` and `_psi_impl` built from its own source (the timing baseline for
+commit 20): `git worktree remove --force /tmp/rigel_pre` when it is next moved. Still large and regenerable:
 `prototypes/2026-09-16_ruler_repair/s5/scratch_test_reference*` (22 GB) — the owner's.
 
 ## Where everything is
 
-* The synced scratchpad: `~/Downloads/rigel_runs/prototypes/2026-09-17_port_ii/` — `commits/committed/` (7–14,
-  landed; 12–14 as a3b7a23f / a1e5be03 / 9e5131aa), `commits/15_psi_threads/`, `16_cache_key/`, `17_splice_out/` (the
-  snapshots and messages awaiting the go, in order; `commit_series.sh` replays them onto 9e5131aa), `s8/`–`s11/` (the earlier steps), `s12/` (the VCaP baseline and the census instrument),
-  `s13/` (ψ threads: the replay-at-threads and timing scripts, the threaded kernel's copy), `s14/` (the cache key),
-  `s15/` (the splice-out hoist; `edit_blur.py` is the priced interchange, unapplied), `pre_site/`.
-* Captures and reports: `perf/sweeps_VCaP_step16`; `perf/vcap_baseline_2026-09-17/` (two runs of the tree before ψ
-  went threaded), `perf/psi_threads_2026-09-18/` and `perf/splice_out_2026-09-18/` (the two steps' interleaved
-  pairs); the earlier `perf/block_alloc_2026-09-17/`, `perf/port_*_2026-09-17/`.
-* The identity references: `~/Downloads/rigel_runs/arms/review_identity_*.json`, frozen 2026-09-17 on `80b459bf`'s
-  numbers, BIT-IDENTICAL on this tree.
+* The synced scratchpad: `~/Downloads/rigel_runs/prototypes/2026-09-17_port_ii/` — `commits/committed/` (7–17, landed),
+  `commits/18_psi_priors/`, `19_lgamma/`, `20_block_native/` (awaiting the go, in order; `commit_series.sh` replays them
+  onto `4ace210e`), `s16/` (18 and 19: the edit scripts, the pre copies of the deleted `.cpp` kernels, the tolerance
+  logs), `s17/` (20: the header and kernel drafts, `perturb*.sh` and their logs, `identity_checks.sh`,
+  `pre_worktree.sh`, `time_pairs.sh`, `finish_docs_20.py`), `pre_site/`.
+* Captures and reports: `perf/sweeps_VCaP_step19`; `perf/block_native_2026-09-18/` (commit 20's two interleaved pairs);
+  `perf/psi_threads_2026-09-18/`, `perf/splice_out_2026-09-18/`, `perf/vcap_baseline_2026-09-17/` (the earlier steps).
+* The identity references: `~/Downloads/rigel_runs/arms/review_identity_*.json`, RE-FROZEN 2026-09-18 on the log-gamma
+  tree's numbers (the reason in `DESIGN.md` §6b.15.5), BIT-IDENTICAL on the block tree; the previous set in
+  `arms/pre_lgamma_2026-09-18/`.
 
 ## Decisions on record (unchanged, carried)
 
@@ -134,6 +117,7 @@ stands at 9e5131aa + snapshots 15 and 16 with `_transfer_impl` built from its ow
   failure where there is no gDNA to read (owner, 2026-09-15).
 * Real data is a test input, never a design input; the four cfRNA libraries are re-run with the regime printed.
 * A few high-quality instruments, kept current; no suite gate polices instruments; the source cites no doc.
-* The message cache's on/off switch, the refit count and the scan's thread split are the owner's. CI runs on
-  demand only.
+* One production path (owner, 2026-09-17); `CalibrationConfig.n_threads` fed by `--threads`; the cache key on inputs;
+  the block in ONE native call (owner, 2026-09-18). The message cache's existence, the refit count and the scan's
+  thread split are the owner's. CI runs on demand only.
 * The certifier's FIELD gate flake on λ ≈ 7 boundaries is DEFERRED (owner, 2026-09-14).

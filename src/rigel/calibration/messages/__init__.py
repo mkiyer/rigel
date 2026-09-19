@@ -3,8 +3,11 @@
        Gate: ``tests/calibration/test_sweep_backbone.py``
 
 The backbone (:mod:`rigel.calibration.sweep`) owns the SHAPE of the solve — the self-solve, two
-directional passes over the ``N E N E … N`` chain, one ψ solve, one write-back, and four assertions.
-Everything about *what a message says* is a policy, and it lives here.
+directional passes over the ``N E N E … N`` chain, one ψ solve, one write-back, and four assertions —
+and runs it in ONE native call per sweep (`native.solve_blocks`, `native/solve_kernel.cpp`). Everything
+about *what a message says* is a policy, and the policy's arithmetic — its builders, its passes, its
+solve — is the kernel's (`native/transfer_kernel.h`). What lives here is what the kernel is TOLD: which
+policy runs, the strand model its own claims read, and its LIBRARY.
 
 Two policies exist; `CalibrationConfig.message_policy` selects which one `calibrate` installs, and an
 unknown name raises. The default is `"transfer"`.
@@ -13,9 +16,9 @@ unknown name raises. The default is `"transfer"`.
   profile carried across one face by a derived map, or a population's LEVEL carried where composition
   cannot cross, each hop priced by the two nodes' counting and their own disagreement
   (its row constructors are `native/transfer_rows.h`).
-* :class:`~.silent.SilentPolicy` — sends nothing; the OFF state and the measured floor. Five
-  lines long: a reader who holds ``sweep.py`` plus ``silent.py`` in their head holds the entire
-  working system.
+* :class:`~.silent.SilentPolicy` — sends nothing; the OFF state and the measured floor: the kernel runs
+  no layer for it, and ψ solves every slot on its own evidence and the prior alone. Five lines long: a
+  reader who holds ``sweep.py`` plus ``silent.py`` in their head holds the entire working system.
 
 THE TWO PHASES. Phase 1, PROPAGATE: a forward pass then a backward pass; at each hop the RECIPIENT
 receives what its neighbour sends — the sender's own claim composed with what the sender holds from
@@ -28,19 +31,17 @@ The interface
 -------------
 ::
 
-    library  = policy.library(view)               # once per sweep, over the WHOLE chain: the only
-                                                  #   cross-block reductions a message may use
-    prepared = policy.prepare(ctx, library)       # per block: every node's OWN claim, its rules, its lanes
-    prepared.run_pass(received, seq, nbr, terminal, backward=False)   # phase 1: ONE directional pass
-                                                  #   on the BACKBONE's table, in chain order
-    evidence = prepared.solve(from_left, from_right)   # phase 2, the policy's half -> PsiMessage
+    library = policy.library(view)   # once per sweep, over the WHOLE chain: the only cross-block
+                                     #   reductions a message may use
+    policy.name                      # which layer the kernel runs for the chain's blocks
+    policy.strand                    # the strand model its own claims read — (κ, od_gdna, od_rna) or None
 
-The chain is solved a LOCUS BLOCK at a time (`sweep.solve_chain`, `region_chain.locus_blocks`), and the
-two calls above are the two scopes a policy sees: ``library`` reads a :class:`ChainView` of the whole
-chain — observations and geometry, NO beliefs, which is what makes a cross-block reduction over beliefs
-unwritable — and returns whatever library-wide facts its messages need (the transfer policy's: three
-reference densities and whether the strand split is live). ``prepare`` reads a :class:`BlockContext` of
-one block, beliefs included, plus that library. Everything else a message reads is per slot or per face.
+The chain is solved a LOCUS BLOCK at a time (`sweep.solve_chain`, `region_chain.locus_blocks`), and
+``library`` is the one scope a policy sees in Python: a :class:`ChainView` of the whole chain —
+observations and geometry, NO beliefs, which is what makes a cross-block reduction over beliefs
+unwritable — from which it returns whatever library-wide facts its messages need (the transfer
+policy's: three reference densities and whether the strand split is live). The kernel then sees one
+block at a time: the same arrays, the incoming belief, and the library.
 
 ⛔ THE CONTRACT:
 
@@ -61,264 +62,41 @@ draws is that a claim's VALUE may never be built from the destination's belief, 
 manufactures agreement out of nothing. A reception step is safe when it can only ever WIDEN a claim
 and never move its mode — it can discard information, never invent it.
 
-:class:`BlockContext` splits its fields under exactly those three headings, and the heading is what
-turns the contract from a discipline into something a reader — and the backbone — can check. The
-backbone enforces the half that is enforceable: it owns the table and the chain order, and the pass
-builds each destination's row from the SOURCE's claim and what the source holds (its own row of the same
-table, written by this pass one hop earlier); the only beliefs on a policy's context are SOURCE-SIDE
-(``belief_fg``, read at ``prepare`` for a node's own claim), so a message built from the destination's
-belief has no field to come from.
+The kernel enforces the half that is enforceable, BY CONSTRUCTION: the pass builds each destination's
+row from the SOURCE's claim and what the source holds (its own row of the same received table, written
+by this pass one hop earlier), in the backbone's chain order on the backbone's table; and the only
+belief the layer reads is the incoming belief at a node's OWN claim — the variance freeze of its own
+strand profile, a source-side read, since the profile is the node's claim before any hop. A message
+built from the destination's belief has no input to come from.
 """
 
 from __future__ import annotations
 
-import dataclasses
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 import numpy as np
 
 __all__ = [
-    "BlockContext",
     "ChainView",
-    "Levels",
     "Policy",
-    "Prepared",
-    "PsiMessage",
-    "Received",
 ]
 
 
 @dataclass(frozen=True, slots=True)
-class PsiMessage:
-    """What the two neighbours jointly tell ψ about this slot, and **nothing else** — two row channels,
-    each a max-normalised log-profile on the solve grid, each ``None`` when the policy has no claim:
-
-    * ``lam_rows`` — ``(n_slots, K)`` over ψ's log-odds grid ``λ``, added into the FINAL solve only
-      (never phase-A, never the own-evidence precision);
-    * ``cube_rows`` — a `CubeRows` table (`simplex_logodds`) over the AMBIG slots only: each row's
-      INGREDIENTS (the held RNA level profiles, the slot's total and RNA opportunity, the lanes'
-      coordinates), which ψ evaluates at its own θ nodes inside the AMBIG solve, the same way.
-
-    A profile on ψ's own grid cannot be delivered off-grid and cannot claim an over-unit share, so that
-    guarantee is structural on this channel rather than asserted. A
-    fully-``None`` message is :meth:`silent` — the floor the whole message layer is priced against.
-    """
-
-    #: THE λ ROWS — an ``(n_slots, K)`` λ-factor row array in ψ's general evidence currency
-    #: (θ-independent, finite, an all-zero row is inert), or ``None`` for no claim: what the two held
-    #: messages say about a slot's composition, delivered as a row over the solve grid (the transfer
-    #: policy's `solve` sums the held profiles per slot into it). The backbone adds the rows into the
-    #: FINAL solve only: never phase-A, never the own-evidence precision — that citizenship is the
-    #: entire difference from the intron factory's factor.
-    lam_rows: np.ndarray | None = None
-    #: THE CUBE CHANNEL: a ``CubeRows`` table over the AMBIG slots only — the delivery of the RNA LEVEL lanes
-    #: at a node where both strands are live, as its ingredients; ψ reads each held strand level at the
-    #: density every one of ITS cells implies (``f_s = (1 − σ)(1 ± τ)/2``, ``ρ_s = f_s n / a_r``), so there
-    #: is no θ lattice. The backbone adds it to ψ inside the AMBIG solve, FINAL solve only, like
-    #: ``lam_rows``; ``None`` or an absent slot leaves the solve exactly as it is without the channel.
-    #: A single-strand slot has no cube and may not appear here.
-    cube_rows: object = None
-
-    @classmethod
-    def silent(cls) -> PsiMessage:
-        """No claim on either channel — what :class:`~.silent.SilentPolicy` delivers, the measured floor."""
-        return cls()
-
-    @property
-    def is_silent(self) -> bool:
-        return self.lam_rows is None and self.cube_rows is None
-
-
-@dataclass(slots=True)
-class Levels:
-    """One population's LEVEL lane as RECEIVED: row ``i`` is the level node ``i`` holds on this lane from
-    one side after a pass, or nothing (``present[i]`` False). A level is a max-normalised log-profile
-    over ``u = log(rho / rho_ref)`` — the population's density in counts per base of its opportunity,
-    relative to the library's structurally pure gDNA density ``rho_ref`` — on the solve grid (``K``
-    points, the ``lam`` window: a coordinate choice, no constant). ``count`` and ``opportunity`` are the
-    total and the opportunity of the last node WITH a total the claim passed through: the next recipient
-    prices its hop from them — both totals' counting, and the abundance discrepancy beyond it, per hop
-    and nothing pooled. An EMPTY node (no total) forwards a level unchanged and leaves them as they
-    were: a few bases of the same gDNA density — unless it is itself a flux SOURCE on an RNA lane, whose
-    level travels with the flux's witness (the spliced count on the route rate's opportunity). The
-    profile matrix is allocated UNFILLED: row ``i`` is a level only where ``present[i]``, its cells are
-    unspecified elsewhere, and every reader reads the bit before the row.
-
-    ``rna_count`` / ``rna_count_var`` are an RNA lane's witness of ITS strand's abundance at that same
-    last full node — the strand's RNA count read from the node's column split (its asymmetry over the
-    protocol's strand contrast) and that estimate's Poisson variance — the pair the next recipient's
-    price compares with its own split. ``has_witness`` is False on the gDNA lane and where the library's
-    strand channel is dead (the protocol decision reads it as unstranded), where the column count is the
-    witness."""
-
-    present: np.ndarray  # (n,) bool
-    profile: np.ndarray  # (n, K) f64, where present; unspecified elsewhere
-    count: np.ndarray  # (n,) f64
-    opportunity: np.ndarray  # (n,) f64
-    has_witness: np.ndarray  # (n,) bool
-    rna_count: np.ndarray  # (n,) f64, NaN without a witness
-    rna_count_var: np.ndarray  # (n,) f64, NaN without a witness
-
-    @classmethod
-    def empty(cls, n: int, K: int) -> Levels:
-        return cls(
-            np.zeros(n, bool),
-            np.empty((n, K)),
-            np.zeros(n),
-            np.zeros(n),
-            np.zeros(n, bool),
-            np.full(n, np.nan),
-            np.full(n, np.nan),
-        )
-
-    def write(self, i, profile, count, opportunity, rna_count=None, rna_count_var=None) -> None:
-        """Row ``i`` holds this level (a hop wrote it, or re-priced what it had written)."""
-        i = int(i)
-        self.present[i] = True
-        self.profile[i] = profile
-        self.count[i], self.opportunity[i] = float(count), float(opportunity)
-        self.has_witness[i] = rna_count is not None
-        self.rna_count[i] = np.nan if rna_count is None else float(rna_count)
-        self.rna_count_var[i] = np.nan if rna_count_var is None else float(rna_count_var)
-
-    def forward(self, s, i) -> None:
-        """Row ``i`` holds exactly what row ``s`` holds — an EMPTY node forwards a level unchanged."""
-        s, i = int(s), int(i)
-        for f in dataclasses.fields(self):
-            getattr(self, f.name)[i] = getattr(self, f.name)[s]
-
-    def take(self, n: int) -> Levels:
-        return Levels(*(getattr(self, f.name)[:n] for f in dataclasses.fields(self)))
-
-    @classmethod
-    def concat(cls, parts: list) -> Levels:
-        return cls(
-            *(
-                np.concatenate([getattr(q, f.name) for q in parts], axis=0)
-                for f in dataclasses.fields(cls)
-            )
-        )
-
-
-@dataclass(slots=True)
-class Received:
-    """What every node of a block RECEIVED from one side after one pass — the transfer policy's message,
-    as a table: row ``i`` is what node ``i`` holds from its neighbour on that side. ``from_left`` and
-    ``from_right`` are two of these per block.
-
-    THE LANES. A node's unknown is its COMPOSITION on the simplex ``(f_g, f_+, f_-)`` — two degrees of
-    freedom where both strands are live, one where a single strand is — and, where composition cannot
-    cross a face, the LEVELS of the three populations. So a row carries up to four lanes, every one
-    optional:
-
-    * ``composition`` (where ``has_composition``) — the gDNA-versus-RNA PROFILE: a max-normalised
-      log-likelihood over the solve grid of the destination's gDNA share (``lam = log f_g/(1-f_g)``,
-      ``K = n_grid`` points). Scale-free, so it crosses a face by a derived map and never carries a
-      level across a capture cliff.
-    * ``level_gdna``, ``level_rna_pos``, ``level_rna_neg`` — a LEVEL claim per population
-      (:class:`Levels`: a PROFILE over the log density relative to the library's structurally pure gDNA
-      density, on the same grid as ``lam``), for faces composition cannot cross: gDNA is genomically
-      continuous across ANY face; a strand's RNA continues across a face where that strand's
-      population is unchanged (an AMBIG region's two degrees of freedom are imputed by exactly these).
-      A level is ABSOLUTE — it needs no map and no knowledge of its recipient, which is what lets it
-      cross a node that has no total at all — and it is a profile, not a Gaussian pair, because the
-      claims that travel on it are LOWER-ONLY (a level says "at least this much gDNA") and a Gaussian
-      summary of a one-sided profile invents a value.
-
-    THE RNA LANES: a single-strand node's own claim read as its live strand's RNA level, and the
-    certified flux at an exon's junctions as that strand's level at the exon; per-strand faces from the
-    flag bits; two-sided only between an intron and its own boundary; delivered at AMBIG nodes on ψ's
-    cube (`PsiMessage.cube_rows`). The tilt — the RNA+ versus RNA− degree of freedom at a both-stranded
-    node — has NO lane: the two RNA levels constrain it inside the cube, and a tilt profile from the
-    same witnesses would count them twice.
-
-    THE TWO STATES the table expresses where a node ``heard`` nothing. SILENCE (:attr:`silence`): the
-    node HAS a neighbour on this side (``has_neighbour``) and nothing is present — the neighbour spoke
-    and had nothing to say, or the node is a terminal, which receives nothing. NO NEIGHBOUR
-    (:attr:`no_neighbour`): the side is open — a reference start or end, or a block's edge — and there
-    was no hop at all. The backbone writes ``has_neighbour``; a policy's kernel writes the lanes and
-    nothing else; the two states need no word of their own. The row matrices are allocated UNFILLED
-    (``composition``, each lane's ``profile``): a row exists where its bit says so and nowhere else.
-    """
-
-    has_neighbour: np.ndarray  # (n,) bool — the backbone's: the side exists
-    has_composition: np.ndarray  # (n,) bool
-    composition: np.ndarray  # (n, K) f64, where has_composition; unspecified elsewhere
-    level_gdna: Levels
-    level_rna_pos: Levels
-    level_rna_neg: Levels
-
-    #: the three level lanes, by field name
-    LANES = ("level_gdna", "level_rna_pos", "level_rna_neg")
-
-    @classmethod
-    def empty(cls, n: int, K: int) -> Received:
-        return cls(
-            np.zeros(n, bool),
-            np.zeros(n, bool),
-            np.empty((n, K)),
-            Levels.empty(n, K),
-            Levels.empty(n, K),
-            Levels.empty(n, K),
-        )
-
-    @property
-    def has_level(self) -> np.ndarray:
-        """A level is present on some lane — a BOUND arrived (never a composition)."""
-        return self.level_gdna.present | self.level_rna_pos.present | self.level_rna_neg.present
-
-    @property
-    def heard(self) -> np.ndarray:
-        """Something arrived on this side: a composition or a level."""
-        return self.has_composition | self.has_level
-
-    @property
-    def silence(self) -> np.ndarray:
-        """A neighbour on this side, and nothing heard from it."""
-        return self.has_neighbour & ~self.heard
-
-    @property
-    def no_neighbour(self) -> np.ndarray:
-        """No side to hear from: an open end of the chain, or of the block."""
-        return ~self.has_neighbour
-
-    def take(self, n: int) -> Received:
-        """The first ``n`` rows — a block's OWNED slots, without the terminal it read beyond them."""
-        return Received(
-            self.has_neighbour[:n],
-            self.has_composition[:n],
-            self.composition[:n],
-            *(getattr(self, lane).take(n) for lane in self.LANES),
-        )
-
-    @classmethod
-    def concat(cls, parts: list) -> Received:
-        """The blocks' tables as the chain's, in block order."""
-        return cls(
-            np.concatenate([q.has_neighbour for q in parts]),
-            np.concatenate([q.has_composition for q in parts]),
-            np.concatenate([q.composition for q in parts], axis=0),
-            *(Levels.concat([getattr(q, lane) for q in parts]) for lane in cls.LANES),
-        )
-
-
-@dataclass(frozen=True, slots=True)
 class ChainView:
-    """A stretch of the chain as a policy may read it WITHOUT beliefs: the observations and the
-    geometry, under the two headings that make that contract legible,
-    plus the solve's own scalars. `Policy.library` receives the WHOLE chain in this form, so the only
-    cross-block information a policy can build is a reduction over observations and geometry — a
-    reduction over beliefs has no field to read. :class:`BlockContext` adds the beliefs for one block.
+    """The chain as a policy may read it WITHOUT beliefs: the observations and the geometry, under the two
+    headings that make that contract legible, plus the solve's own scalars. `Policy.library` receives the
+    WHOLE chain in this form, so the only cross-block information a policy can build is a reduction over
+    observations and geometry — a reduction over beliefs has no field to read. These are also the arrays
+    the backbone hands the kernel (`sweep.solve_chain`), which reads them a block at a time beside the
+    incoming belief; and the arrays the message cache digests per block (`message_cache.MessageCache`).
 
     ⛔ The headings are load-bearing. ``observations`` and ``geometry`` may be indexed at either end of
-    a hop; ``beliefs`` may be indexed at the SOURCE only. A policy that reads a ``beliefs`` field at the
-    destination is building a message from the destination's belief, and the field's heading is
-    what makes that visible in review. The shipped policy reads ``belief_fg`` once, at ``prepare``, for
-    the variance freeze of each node's OWN strand profile — a source-side read by construction, since
-    the profile is the node's claim before any hop.
+    a hop; a belief may be read at the SOURCE only, and the kernel reads the incoming belief once, at a
+    node's OWN strand claim, before any hop.
 
-    Every field here has a reader in the transfer policy or the backbone.
+    Every field here has a reader in the transfer policy, the kernel or the backbone.
     """
 
     # ── OBSERVATIONS — readable at either end of a hop ────────────────────────────────────────────────
@@ -357,16 +135,12 @@ class ChainView:
     exon_neg: np.ndarray
     #: the terminus and junction bits per BOUNDARY slot (0 at a region): which faces composition may
     #: cross, the outside flank of a terminus, the junction's exon side (the builders,
-    #: `native/transfer_kernel.cpp`)
+    #: `native/transfer_kernel.h`)
     boundary_flags: np.ndarray
 
     # ── the solve's own scalars (neither observation nor belief) ──────────────────────────────────────
     n_grid: int
     logodds_window: float
-    #: the intron factory's per-slot λ-factor rows on THIS grid, ``(n_slots, K)`` or ``None`` — the
-    #: same array ψ adds as its own λ-factor (`sweep.solve_chain`'s ``intron_prior``), so an intron's
-    #: own claim and the solver's factor cannot drift apart; ``None`` is no factory
-    factory_rows: np.ndarray | None = None
     #: the strand protocol decision for the LIBRARY: does the spliced 2×2 read the protocol as
     #: strand-preserving (`region_init.strand_discriminability` > 0)? An unstranded verdict makes every
     #: single-strand exon's strand precision exactly zero, and a policy reading the split as an RNA
@@ -404,53 +178,17 @@ class ChainView:
         )
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class BlockContext(ChainView):
-    """One block of the chain as `Policy.prepare` reads it: the :class:`ChainView` plus the BELIEFS —
-    SOURCE-SIDE ONLY."""
-
-    #: does this node have OWN composition evidence — `RegionInit.tau_lam > 0`, the one bit of the
-    #: message-free self-solve a policy may know: the strand term (the node has counts and the library's
-    #: protocol preserves strand) or the factory's row, so it does not depend on the prior a sweep carries. A
-    #: policy is not handed the self-solve's fractions or precisions, and that is what lets the message
-    #: layer be shared across the refit sweeps (`message_cache.MessageCache`): every input it reads is on this
-    #: context and can be digested.
-    has_own_composition: np.ndarray
-    belief_fg: np.ndarray  # the INCOMING belief: the variance freeze of a node's own strand profile
-
-
-@runtime_checkable
-class Prepared(Protocol):
-    """A policy's per-block working object: every node's own claim, the pass, the solve."""
-
-    def run_pass(self, received: Received, seq, nbr, terminal, *, backward: bool) -> None:
-        """PHASE 1, ONE directional pass on the backbone's table: for every destination in ``seq``
-        (chain order) whose neighbour ``nbr[destination] >= 0`` and which is not a terminal, the
-        recipient receives what that neighbour sends — the source's own claim composed with what the
-        source holds from ITS far side, row ``source`` of this same table, written by this pass one hop
-        earlier — and decides: STOP (write nothing: the row stays silent), FORWARD, or MODIFY. The
-        backbone owns the table, marks ``has_neighbour`` and calls this once per direction: the forward
-        pass reads each node's LOW neighbour and the backward pass its HIGH one, so on a chain the two
-        passes ARE forward-backward, and nothing here iterates. A policy that sends nothing leaves the
-        table as it found it. The shipped policy's pass is native (`native.transfer_pass`)."""
-
-    def solve(self, from_left: Received, from_right: Received) -> PsiMessage:
-        """PHASE 2, the policy's half: the ψ channels at every slot from the two tables — row ``i`` of
-        ``from_left`` is what slot ``i`` holds from its LOW neighbour (no neighbour at a reference
-        start), of ``from_right`` from its HIGH one. Never the destination's belief."""
-
-
 @runtime_checkable
 class Policy(Protocol):
-    """A message-composition policy. ``name`` appears in diagnostics and in arm output."""
+    """A message-composition policy: what the kernel is told. ``name`` selects the layer the kernel runs
+    (``"silent"``: none; ``"transfer"``: the composition transfer) and appears in diagnostics and in arm
+    output; ``strand`` is the strand model the policy's own claims read — ``(κ, od_gdna, od_rna)`` — or
+    ``None`` for no strand claim; ``library`` is its one look across the chain."""
 
     name: str
+    strand: tuple | None
 
     def library(self, view: ChainView):
         """Once per sweep, over the WHOLE chain: whatever library-wide facts this policy's messages
         need, reduced from observations and geometry alone (the view carries no belief), or ``None``.
-        This is the ONLY place a policy may look across the chain; ``prepare`` sees one block."""
-
-    def prepare(self, ctx: BlockContext, library) -> Prepared:
-        """Derive whatever this policy needs for the block ``ctx`` covers, given its own ``library``:
-        every node's OWN claim, the rules per face, the lanes."""
+        This is the ONLY place a policy may look across the chain; the kernel sees one block."""

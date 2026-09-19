@@ -312,7 +312,7 @@ def test_own_evidence_STRENGTH_is_reported_as_a_CURVE_because_tau_is_CONTINUOUS(
         tau_lam=probe_tau,
         free_pos=np.ones(probe_tau.size, bool),
         free_neg=np.zeros(probe_tau.size, bool),
-        intron_prior=None,
+        tau_fac=np.zeros(probe_tau.size),
     )
     pchain = type("C", (), {"n_slots": probe_tau.size})()
     pch = SA.channel_masks(probe, pchain, cfg)

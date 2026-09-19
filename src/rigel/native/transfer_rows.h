@@ -1,9 +1,8 @@
-// transfer_rows.h — the ROW CONSTRUCTORS of the composition transfer, in C++ term for term the Python of
-// `calibration/messages/transfer_rows.py` (and the strand row of `simplex_logodds.strand_row_logodds`),
-// shared by the transfer's three kernels (`transfer_kernel.cpp`) and ψ's (`psi_kernel.cpp`). Every
-// function here is a pure function of one face's or one node's numbers over the solve grid `lam`
-// (`f_g = sigma(lam)`, K points), writing a max-normalised log-row. The gates are
-// `tests/calibration/test_pass_kernel.py` and the transfer gates (`test_transfer_*.py`).
+// transfer_rows.h — the ROW CONSTRUCTORS of the composition transfer, shared by the transfer's builders, pass
+// and solve (`transfer_kernel.h`) and ψ's kernel (`psi_kernel.h`), and bound for the gates as `native.transfer_rows`.
+// Every function here is a pure function of one face's or one node's numbers over the solve grid `lam`
+// (`f_g = sigma(lam)`, K points), writing a max-normalised log-row. The gates are the transfer gates
+// (`tests/calibration/test_transfer_*.py`), which recompute with these very functions.
 //
 // Numerics: every operation is the Python one term for term (max-normalisation, the edge-padded Gaussian
 // blur at half-width ceil(4 sqrt(v) / dlam), linear interpolation with numpy's end rules, trigamma for the

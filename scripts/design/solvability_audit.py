@@ -47,7 +47,6 @@ from _shared import sibling  # noqa: E402
 P0 = sibling("pass0_vs_oracle.py")
 
 from rigel.calibration.calibrate import lattice_points  # noqa: E402
-from rigel.calibration.density_deconv import density_factor_precision  # noqa: E402
 from rigel.calibration.region_chain import BOUNDARY, REGION  # noqa: E402
 from rigel.calibration.region_geometry import g1_locked  # noqa: E402
 from rigel.calibration.simplex_logodds import _logodds_grid  # noqa: E402
@@ -85,8 +84,8 @@ def channel_masks(capture, chain, config) -> dict[str, np.ndarray]:
     Overlapping capability flags, not a partition: ``strand`` and ``factory`` are both live on a
     single-stranded intron region, because ``tau_lam`` is their sum; only ``none`` excludes the others.
     Decomposed from ``tau_lam`` rather than re-derived: the factory arm is recovered exactly by
-    re-reading the captured ``intron_prior`` through the same ``density_factor_precision`` the solver
-    used, and whatever remains of ``tau_lam`` is the strand arm, so these are the solver's own numbers
+    reading the factory's part of it the solver published (``capture.tau_fac``), and whatever remains of
+    ``tau_lam`` is the strand arm, so these are the solver's own numbers
     split, not a second opinion. ``locked`` is the G1 class on both axes
     (:func:`~rigel.calibration.region_geometry.g1_locked`): a structurally-locked boundary is certain
     and right, not ignorant, and must not fall into ``none``. The τ tests stay at the solver's own
@@ -103,12 +102,7 @@ def channel_masks(capture, chain, config) -> dict[str, np.ndarray]:
         )
     # G1, from the one definition (`region_geometry.g1_locked`), on both axes.
     locked = g1_locked(capture.free_pos, capture.free_neg)
-    lam_grid, _ = _logodds_grid(
-        lattice_points(config.sweep_logodds_window, config.sweep_logodds_step),
-        float(config.sweep_logodds_window),
-    )
-    fac = density_factor_precision(capture.intron_prior, lam_grid)
-    fac = np.zeros_like(tau) if fac is None else np.asarray(fac, np.float64)
+    fac = np.asarray(capture.tau_fac, np.float64)  # the factory's part of tau, the solver's own
     factory = (fac > _EPS) & ~locked
     strand = ((tau - fac) > _EPS) & ~locked
     return {
@@ -146,7 +140,8 @@ def audit(m, *, axis: str = "region", config=None) -> dict:
 
     slots = channel_masks(cap, chain, config)
     per_axis = {
-        name: P0._project(mask, chain, n_regions, n_boundaries)[axis] for name, mask in slots.items()
+        name: P0._project(mask, chain, n_regions, n_boundaries)[axis]
+        for name, mask in slots.items()
     }
 
     g_p = np.asarray(getattr(m.arms["pass0"], f"count_gdna_{axis}"), np.float64)
@@ -225,14 +220,16 @@ def undetermined_overreach_rows(a: dict) -> list[tuple]:
     for hi in OVERREACH_BANDS:
         b = und & (off >= lo) & ((off < hi) if hi < 0.5 else (off <= hi))
         w = tot[b]
-        out.append((
-            f"{lo:.2f}–{hi:.2f}",
-            int(b.sum()),
-            float(w.sum()),
-            float(err[b].sum()),
-            float((off[b] * w).sum() / max(w.sum(), _EPS)),
-            float(w[np.isfinite(sd[b]) & (sd[b] > _EPS)].sum() / max(w.sum(), _EPS)),
-        ))
+        out.append(
+            (
+                f"{lo:.2f}–{hi:.2f}",
+                int(b.sum()),
+                float(w.sum()),
+                float(err[b].sum()),
+                float((off[b] * w).sum() / max(w.sum(), _EPS)),
+                float(w[np.isfinite(sd[b]) & (sd[b] > _EPS)].sum() / max(w.sum(), _EPS)),
+            )
+        )
         lo = hi
     return out
 
@@ -257,14 +254,16 @@ def resolving_power_rows(a: dict, mask: np.ndarray) -> list[tuple]:
         b = mask & (sd >= lo) & ((sd < hi) if np.isfinite(hi) else np.ones_like(sd, bool))
         w = total[b]
         label = f"{lo:g}–{hi:g}" if np.isfinite(hi) else f">= {lo:g}"
-        out.append((
-            label,
-            int(b.sum()),
-            float(w.sum()),
-            float(err[b].sum()),
-            float((fp[b] * w).sum() / max(w.sum(), _EPS)),
-            float((ft[b] * w).sum() / max(w.sum(), _EPS)),
-        ))
+        out.append(
+            (
+                label,
+                int(b.sum()),
+                float(w.sum()),
+                float(err[b].sum()),
+                float((fp[b] * w).sum() / max(w.sum(), _EPS)),
+                float((ft[b] * w).sum() / max(w.sum(), _EPS)),
+            )
+        )
         lo = hi
     return out
 
@@ -292,57 +291,97 @@ def report(m, a: dict, config=None) -> None:
     print("=" * 112)
     print(f"⭐⭐ SOLVABILITY AUDIT — {m.condition}   axis={a['axis']}   arm=pass-0 (prior-free)")
     print("=" * 112)
-    print("   ⛔ Pass-0's job is to be a SUBSTRATE for the gDNA prior, not to be accurate everywhere.")
+    print(
+        "   ⛔ Pass-0's job is to be a SUBSTRATE for the gDNA prior, not to be accurate everywhere."
+    )
     print("      An object with no own evidence reporting f_g ~ 1/2 at zero precision is CORRECT.")
     print()
-    print(f"   {'population':<34} {'objects':>9} {'mass':>14} {'share':>7} {'Σ|err|':>14} {'share':>7}")
+    print(
+        f"   {'population':<34} {'objects':>9} {'mass':>14} {'share':>7} {'Σ|err|':>14} {'share':>7}"
+    )
     for label, mask in (("UNDETERMINED (excluded)", und), ("SOLVABLE (scored)", det)):
-        print(f"   {label:<34} {int(mask.sum()):>9,} {total[mask].sum():>14,.0f} "
-              f"{total[mask].sum() / max(mass_all, 1):>6.1%} {err[mask].sum():>14,.0f} "
-              f"{err[mask].sum() / max(err_all, 1):>6.1%}")
+        print(
+            f"   {label:<34} {int(mask.sum()):>9,} {total[mask].sum():>14,.0f} "
+            f"{total[mask].sum() / max(mass_all, 1):>6.1%} {err[mask].sum():>14,.0f} "
+            f"{err[mask].sum() / max(err_all, 1):>6.1%}"
+        )
     print()
     print("   by own-evidence CHANNEL (which can speak here at all). ⚠ THESE OVERLAP — a")
-    print("   single-stranded intron region has both strand and factory — so mass DOUBLE-COUNTS here.")
+    print(
+        "   single-stranded intron region has both strand and factory — so mass DOUBLE-COUNTS here."
+    )
     print("   The partition that adds up is the determined/undetermined split above.")
     for name in CHANNELS:
         c = a["channels"][name] & live
-        print(f"     {name:<12} {int(c.sum()):>9,} objects  mass {total[c].sum():>13,.0f} "
-              f"({total[c].sum() / max(mass_all, 1):>5.1%})   Σ|err| {err[c].sum():>13,.0f} "
-              f"({err[c].sum() / max(err_all, 1):>5.1%})")
+        print(
+            f"     {name:<12} {int(c.sum()):>9,} objects  mass {total[c].sum():>13,.0f} "
+            f"({total[c].sum() / max(mass_all, 1):>5.1%})   Σ|err| {err[c].sum():>13,.0f} "
+            f"({err[c].sum() / max(err_all, 1):>5.1%})"
+        )
 
     print()
-    print("   ⭐⭐ HOW STRONG IS THAT OWN EVIDENCE?  sd(λ) = 1/√τ nats, against a solver that can only")
-    print(f"      represent λ ∈ [−{_L:g}, +{_L:g}].  ⛔ A row with sd(λ) far above {2 * _L:g} is scored")
-    print("      as SOLVABLE and is not: its own evidence is flat over every λ the solver can express,")
-    print("      so its answer came from neighbours and the reference. ⚠ NO threshold decides this —")
-    print("      it is a curve, because τ is CONTINUOUS here and any cut would be a tuned constant.")
-    print(f"   {'sd(λ) nats':<14} {'objects':>9} {'mass':>14} {'Σ|err|':>14} {'err share':>10} "
-          f"{'pred f_g':>9} {'true f_g':>9}")
+    print(
+        "   ⭐⭐ HOW STRONG IS THAT OWN EVIDENCE?  sd(λ) = 1/√τ nats, against a solver that can only"
+    )
+    print(
+        f"      represent λ ∈ [−{_L:g}, +{_L:g}].  ⛔ A row with sd(λ) far above {2 * _L:g} is scored"
+    )
+    print(
+        "      as SOLVABLE and is not: its own evidence is flat over every λ the solver can express,"
+    )
+    print(
+        "      so its answer came from neighbours and the reference. ⚠ NO threshold decides this —"
+    )
+    print(
+        "      it is a curve, because τ is CONTINUOUS here and any cut would be a tuned constant."
+    )
+    print(
+        f"   {'sd(λ) nats':<14} {'objects':>9} {'mass':>14} {'Σ|err|':>14} {'err share':>10} "
+        f"{'pred f_g':>9} {'true f_g':>9}"
+    )
     _lock = a["channels"]["locked"] & live
-    print(f"   {'CERTAIN (G1)':<14} {int(_lock.sum()):>9,} {total[_lock].sum():>14,.0f} "
-          f"{err[_lock].sum():>14,.0f} {err[_lock].sum() / max(err[det].sum(), 1):>9.1%} "
-          f"{'—':>9} {'—':>9}   structurally pure gDNA; nothing was asked of it")
+    print(
+        f"   {'CERTAIN (G1)':<14} {int(_lock.sum()):>9,} {total[_lock].sum():>14,.0f} "
+        f"{err[_lock].sum():>14,.0f} {err[_lock].sum() / max(err[det].sum(), 1):>9.1%} "
+        f"{'—':>9} {'—':>9}   structurally pure gDNA; nothing was asked of it"
+    )
     for label, n, mass, e, pred, true in resolving_power_rows(a, det & ~_lock):
         if n == 0:
             continue
-        print(f"   {label:<14} {n:>9,} {mass:>14,.0f} {e:>14,.0f} "
-              f"{e / max(err[det].sum(), 1):>9.1%} {pred:>9.4f} {true:>9.4f}")
-    print(f"   ⚠ κ = {_kappa:.6f}. The strand channel's discriminability is the protocol decision's: 4(κ−½)²")
-    print("      where the library preserves strand and exactly 0 where it does not, so an unstranded library")
+        print(
+            f"   {label:<14} {n:>9,} {mass:>14,.0f} {e:>14,.0f} "
+            f"{e / max(err[det].sum(), 1):>9.1%} {pred:>9.4f} {true:>9.4f}"
+        )
+    print(
+        f"   ⚠ κ = {_kappa:.6f}. The strand channel's discriminability is the protocol decision's: 4(κ−½)²"
+    )
+    print(
+        "      where the library preserves strand and exactly 0 where it does not, so an unstranded library"
+    )
     print("      contributes no strand evidence at all.")
 
     print()
     print("   ⛔⛔ AND THE UNDETERMINED CLASS'S OWN FAILURE MODE — it is EXCLUDED from every error")
-    print("      total above, so this is the only place it can be seen. Its correct answer is f_g = ½")
-    print("      at sd = ∞; a row far from ½, and worse a row far from ½ CLAIMING precision, is the")
-    print("      messages asserting an answer the object never had. ⚠ 0.0 % scored means 0.0 % reported.")
-    print(f"   {'|f_pred − ½|':<14} {'objects':>9} {'mass':>14} {'Σ|err|':>14} {'mean |f−½|':>11} "
-          f"{'claims sd':>10}")
+    print(
+        "      total above, so this is the only place it can be seen. Its correct answer is f_g = ½"
+    )
+    print(
+        "      at sd = ∞; a row far from ½, and worse a row far from ½ CLAIMING precision, is the"
+    )
+    print(
+        "      messages asserting an answer the object never had. ⚠ 0.0 % scored means 0.0 % reported."
+    )
+    print(
+        f"   {'|f_pred − ½|':<14} {'objects':>9} {'mass':>14} {'Σ|err|':>14} {'mean |f−½|':>11} "
+        f"{'claims sd':>10}"
+    )
     for label, n, mass, e, mean_off, prec_share in undetermined_overreach_rows(a):
         if n == 0:
             continue
-        print(f"   {label:<14} {n:>9,} {mass:>14,.0f} {e:>14,.0f} {mean_off:>11.4f} "
-              f"{prec_share:>9.1%}")
+        print(
+            f"   {label:<14} {n:>9,} {mass:>14,.0f} {e:>14,.0f} {mean_off:>11.4f} "
+            f"{prec_share:>9.1%}"
+        )
 
     print()
     print("   ⭐⭐ OF THE SOLVABLE OBJECTS — is the solver SURE when it is WRONG?")
@@ -351,11 +390,17 @@ def report(m, a: dict, config=None) -> None:
     for label, n, mass, e in _band_table(a, det):
         print(f"   {label:<14} {n:>9,} {mass:>14,.0f} {e:>14,.0f} {e / max(det_err, 1):>9.1%}")
     print("   ⛔ The bottom rows are the defect: the solve is many sd from truth and SURE of it.")
-    print("      A wrong value with a tight variance outvotes correct neighbours and anchors the prior.")
+    print(
+        "      A wrong value with a tight variance outvotes correct neighbours and anchors the prior."
+    )
 
     print()
-    print("   ⭐ IS THE DECLARED PRECISION EARNED?  realised RMS(log error) vs claimed sd, by decile")
-    print("      of claimed sd. ⚠ Ratio ~1 = honest. >1 = OVERCONFIDENT. No threshold decides this.")
+    print(
+        "   ⭐ IS THE DECLARED PRECISION EARNED?  realised RMS(log error) vs claimed sd, by decile"
+    )
+    print(
+        "      of claimed sd. ⚠ Ratio ~1 = honest. >1 = OVERCONFIDENT. No threshold decides this."
+    )
     sd, gap = a["sd"], a["gap"]
     ok = det & np.isfinite(gap) & (sd > _EPS)
     if int(ok.sum()) >= 10:
@@ -367,8 +412,10 @@ def report(m, a: dict, config=None) -> None:
                 continue
             claimed = float(np.sqrt(np.mean(sd[b] ** 2)))
             realised = float(np.sqrt(np.mean(gap[b] ** 2)))
-            print(f"     {i + 1:<8} {int(b.sum()):>8,} {claimed:>12.4f} {realised:>14.4f} "
-                  f"{realised / max(claimed, _EPS):>8.2f}")
+            print(
+                f"     {i + 1:<8} {int(b.sum()):>8,} {claimed:>12.4f} {realised:>14.4f} "
+                f"{realised / max(claimed, _EPS):>8.2f}"
+            )
     else:
         print("     (too few solvable objects with a finite precision to form deciles)")
 
@@ -377,12 +424,17 @@ def report(m, a: dict, config=None) -> None:
     print("      strand-only -> local (strand+factory+reference) -> FINAL (after the messages)")
     lad, f_true = a["ladder"], a["f_true"]
     print(f"     {'rung':<28} {'mass-wtd |Δf_g| vs truth':>26}")
-    for name, key in (("strand only", "fg_strand"), ("local (message-free)", "fg_loc"),
-                      ("FINAL (with messages)", "f_g")):
+    for name, key in (
+        ("strand only", "fg_strand"),
+        ("local (message-free)", "fg_loc"),
+        ("FINAL (with messages)", "f_g"),
+    ):
         d = np.abs(lad[key] - f_true)
         w = total[det]
         print(f"     {name:<28} {float(np.sum(w * d[det]) / max(w.sum(), 1)):>26.4f}")
-    print("   ⭐ A rung that is BETTER than the one below it means that channel HURT — e.g. a strand")
+    print(
+        "   ⭐ A rung that is BETTER than the one below it means that channel HURT — e.g. a strand"
+    )
     print("      solve right and confident, then overruled by the full solve.")
 
 
@@ -455,10 +507,14 @@ def chain_report(m, a: dict) -> None:
     live, total, err = a["live"], a["total"], np.abs(a["err"])
     det, f_true, f_pred = a["determined"], a["f_true"], a["f_pred"]
     print()
-    print("   ⭐⭐ THE DEBUG CHAIN — each link is a precondition for the next. Read TOP-DOWN: the first")
+    print(
+        "   ⭐⭐ THE DEBUG CHAIN — each link is a precondition for the next. Read TOP-DOWN: the first"
+    )
     print("      one that is wrong explains everything below it.")
-    print(f"   {'structural class':<28} {'objects':>8} {'mass':>13} {'solv%':>6} "
-          f"{'true f_g':>9} {'pred f_g':>9} {'mwae':>8} {'Σ|err|':>12}")
+    print(
+        f"   {'structural class':<28} {'objects':>8} {'mass':>13} {'solv%':>6} "
+        f"{'true f_g':>9} {'pred f_g':>9} {'mwae':>8} {'Σ|err|':>12}"
+    )
     for key in CHAIN:
         c = struct[key] & live
         if not c.any():
@@ -467,9 +523,13 @@ def chain_report(m, a: dict) -> None:
         tf = float(np.sum(w * f_true[c]) / w.sum())
         pf = float(np.sum(w * f_pred[c]) / w.sum())
         solv = float(total[c & det].sum() / w.sum())
-        print(f"   {key:<28} {int(c.sum()):>8,} {w.sum():>13,.0f} {solv:>5.1%} "
-              f"{tf:>9.4f} {pf:>9.4f} {err[c].sum() / w.sum():>8.4f} {err[c].sum():>12,.0f}")
-    print("   ⚠ true/pred f_g are MASS-WEIGHTED means over the class, so they say whether the class is")
+        print(
+            f"   {key:<28} {int(c.sum()):>8,} {w.sum():>13,.0f} {solv:>5.1%} "
+            f"{tf:>9.4f} {pf:>9.4f} {err[c].sum() / w.sum():>8.4f} {err[c].sum():>12,.0f}"
+        )
+    print(
+        "   ⚠ true/pred f_g are MASS-WEIGHTED means over the class, so they say whether the class is"
+    )
     print("     biased as a whole; mwae says whether its individual objects are right.")
 
 
@@ -535,23 +595,43 @@ def panel_report(rows: list[tuple[str, float, dict]]) -> None:
     print("=" * 124)
     print("⭐⭐ THE PANEL, SCORED ON THE SOLVABLE POPULATION ONLY (pass-0)")
     print("=" * 124)
-    print("   ⛔ Objects with no own evidence are EXCLUDED: in pass-0 they are correctly saying they")
+    print(
+        "   ⛔ Objects with no own evidence are EXCLUDED: in pass-0 they are correctly saying they"
+    )
     print("      cannot be solved without a prior. Scoring them buries everything that matters.")
-    print("   ⭐ message_delta = final − local on the solvable set. POSITIVE means the message layer")
+    print(
+        "   ⭐ message_delta = final − local on the solvable set. POSITIVE means the message layer"
+    )
     print("      moved objects that HAD their own answer away from truth.")
-    print("   ⛔⛔ READ `weak%` BEFORE `mwae`. `solv%` counts what the SOLVER treats as evidenced, and")
-    print("      that admits a strand arm whose own statement is 10³ nats wide against a ±10-nat grid")
-    print("      (TRAPS a-threshold-on-a-fitted-residue). `weak%` is the share of the scored ERROR sitting on objects with")
-    print("      sd(λ) ≥ 10 nats — i.e. on objects that had no answer of their own after all. A row")
+    print(
+        "   ⛔⛔ READ `weak%` BEFORE `mwae`. `solv%` counts what the SOLVER treats as evidenced, and"
+    )
+    print(
+        "      that admits a strand arm whose own statement is 10³ nats wide against a ±10-nat grid"
+    )
+    print(
+        "      (TRAPS a-threshold-on-a-fitted-residue). `weak%` is the share of the scored ERROR sitting on objects with"
+    )
+    print(
+        "      sd(λ) ≥ 10 nats — i.e. on objects that had no answer of their own after all. A row"
+    )
     print("      with weak% near 100 is reporting the messages and the reference, not a solve.")
     print()
-    print("   ⭐⭐ AND RANK ON THE LAST TWO, NOT ON `solv%`/`mwae`/`conf-wrong`/`calib`. Those four")
-    print("      share a denominator the SOLVER moves — `determined` is a boolean on a continuous τ,")
-    print("      and it flips on fitting noise (TRAPS a-threshold-on-a-fitted-residue). `mwae_all` and `Σ|err|` are over every")
+    print(
+        "   ⭐⭐ AND RANK ON THE LAST TWO, NOT ON `solv%`/`mwae`/`conf-wrong`/`calib`. Those four"
+    )
+    print(
+        "      share a denominator the SOLVER moves — `determined` is a boolean on a continuous τ,"
+    )
+    print(
+        "      and it flips on fitting noise (TRAPS a-threshold-on-a-fitted-residue). `mwae_all` and `Σ|err|` are over every"
+    )
     print("      LIVE object, so nothing the solver does to its own confidence can touch them.")
-    print(f"   {'condition':<46} {'f_gdna':>7} {'solv%':>6} {'weak%':>6} {'mwae':>7} "
-          f"{'conf-wrong':>11} {'calib':>6} {'local':>7} {'final':>7} {'msg Δ':>9} "
-          f"{'mwae_all':>9} {'Σ|err|':>11}")
+    print(
+        f"   {'condition':<46} {'f_gdna':>7} {'solv%':>6} {'weak%':>6} {'mwae':>7} "
+        f"{'conf-wrong':>11} {'calib':>6} {'local':>7} {'final':>7} {'msg Δ':>9} "
+        f"{'mwae_all':>9} {'Σ|err|':>11}"
+    )
     print("   " + "-" * 125)
     for name, truth, s in rows:
         print(
@@ -568,12 +648,16 @@ def panel_report(rows: list[tuple[str, float, dict]]) -> None:
     zero = [r for r in rows if r[1] <= 0.0]
     if zero:
         print(f"\n   ⚠ {len(zero)} zero-gDNA row(s) shown above are FALSE-POSITIVE CHECKS and are")
-        print("     excluded from the aggregates (truth = 0 exactly ⇒ the comparison is one-sided).")
+        print(
+            "     excluded from the aggregates (truth = 0 exactly ⇒ the comparison is one-sided)."
+        )
     if not scored:
         return
     hurt = [r for r in scored if r[2]["message_delta"] > 0]
-    print(f"\n   ⭐ the messages HURT the solvable set on {len(hurt)}/{len(scored)} CONTAMINATED "
-          f"conditions   (mean Δ {np.mean([r[2]['message_delta'] for r in scored]):+.4f})")
+    print(
+        f"\n   ⭐ the messages HURT the solvable set on {len(hurt)}/{len(scored)} CONTAMINATED "
+        f"conditions   (mean Δ {np.mean([r[2]['message_delta'] for r in scored]):+.4f})"
+    )
     over = [r for r in scored if r[2]["calibration_ratio"] > 1.0]
     print(f"   ⭐ the declared precision is NOT earned (ratio > 1) on {len(over)}/{len(scored)}")
 
@@ -605,14 +689,19 @@ def main() -> int:
         truth = P0.truth_f_gdna(cond) or 0.0
         print(f"  {name} …", flush=True)
         m = P0.measure_condition(
-            bam=str(cond / "sim_oracle.bam"), index=index, pipeline_config=PipelineConfig(),
-            calibration_config=config, work_dir=args.work_dir / "rigel_pass0_oracle", tag=name,
+            bam=str(cond / "sim_oracle.bam"),
+            index=index,
+            pipeline_config=PipelineConfig(),
+            calibration_config=config,
+            work_dir=args.work_dir / "rigel_pass0_oracle",
+            tag=name,
             truth_pmfs=lambda size, d=cond: (
-                P0.truth_length_pmf(d, "gdna", size), P0.truth_length_pmf(d, "rna", size)
+                P0.truth_length_pmf(d, "gdna", size),
+                P0.truth_length_pmf(d, "rna", size),
             ),
             oracle_cache=args.oracle_cache,
         )
-        for axis in (("region", "boundary") if args.axis == "both" else (args.axis,)):
+        for axis in ("region", "boundary") if args.axis == "both" else (args.axis,):
             a = audit(m, axis=axis, config=config)
             if len(names) == 1:
                 report(m, a, config)

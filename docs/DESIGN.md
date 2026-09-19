@@ -1351,6 +1351,41 @@ effect the replay's tolerance report attributes: on the four VCaP sweeps at 8 th
 this reason (`arms/review_identity_*.json`, the previous set kept beside them as `pre_lgamma_2026-09-18/`); the suite
 3,437 passed / 5 xfail / 3,442 collected (unchanged). The block commit that follows is then owed bit-identity against this tree.
 
+**The block in one native call** (2026-09-18; the third of the three commits; the owner's preferred form of the port's
+step (iv), designed on paper first; bit-identical). THE SWEEP IS ONE NATIVE CALL: `native.solve_blocks`
+(`src/rigel/native/solve_kernel.cpp`, the `_solve_impl` module — ψ's kernel `psi_kernel.h`, the transfer's builders, pass and
+solve `transfer_kernel.h` on plain views of their tables, the row constructors, the locus EM's pool) takes the chain's arrays
+whole, the block table, the priors as their INPUTS — the landscape's curve, the intron factory's background, mask, counts and
+opportunities — the message cache's served deliveries and the thread budget, and runs every locus block end to end on a
+pool of threads pulling the blocks one at a time, each on its own thread and arena: the factory's rows and the arm's shift,
+the SELF-SOLVE ψ, the own-evidence precision (the strand evidence at ``fg_loc``, the factor's curvature with numpy's pairwise
+sums), the LAYER — the builders into the arena's tables, the two passes, the solve — unless the policy is silent or the cache
+served the block, the FINAL ψ with the factory row and the delivered row added per cell, the write-back on the owned slots,
+``has_composition``, and the four assertions as integer counts. Nothing is reduced across blocks but those counts, so the
+answer is BIT-IDENTICAL at every thread count and every block size. The Python that ran per block is GONE: `blocks.block_slice`,
+`sweep._solve_block` / `_message_layer` / `_psi` / `_pass` / `_check_message` / `_write_back` / `_block_diagnostics`,
+`region_init.build_region_init` / `strand_evidence` / `RegionInit`, `density_deconv.density_lambda_factor` / `_log_negbinom` /
+`density_factor_precision`, `messages/faces.py` (`Faces`, `RowTable`), `messages/lanes.py` (`LevelLane`), the `Received` /
+`Levels` / `PsiMessage` / `BlockContext` / `Prepared` types and `TransferPolicy.prepare` / `_PreparedTransfer` — a policy is a
+NAME the kernel switches on, a strand model and a LIBRARY; `sweep.solve_chain` is the structure, the library, the blocks,
+the cache's keys, one call, the counts, the cache's puts and the capture. The cache's key digests the block's slice of the
+very arrays the kernel reads (the chain view, the incoming belief), the factory's digest, the library and the policy — a
+node's own-evidence bit needs no field of its own, being a function of what the key already holds — and an entry is the
+block's delivery as the kernel returns and takes it back (the written rows with their slots, the cube, the owned held bits;
+a silent block's is empty and stored all the same). The gates read the ONE implementation through bindings that allocate
+and return fresh tables (`transfer_prepare` / `transfer_pass` / `transfer_solve`; `transfer_rows.factory_rows` /
+`factor_precision` / `strand_evidence` / `log_negbinom` / `gdna_arm`), the containers moved verbatim from `src/` to
+`tests/calibration/_transfer_harness.py`; the backbone gates drive hand-built chains through the kernel (the echo lane names
+its source, a FORWARD chain recurses); the poison gate poisons the kernel's own tables; the diagnostics capture publishes
+``tau_fac`` beside ``tau_lam`` (`solvability_audit.py` reads it) and the received tables as the kernel's arrays. Two slips the
+replay caught on the way, recorded as traps: the nine marginal nodes typed by hand were off at 1e-8 and moved `f_g` by 1e-7
+(they are scipy's digits now); a product left inside a sum let the compiler fuse it into a multiply-add, one rounding fewer than
+numpy's separate operations (every product is a named temporary). Judged BIT-IDENTICAL: the four VCaP sweeps of
+`sweeps_VCaP_step19` at 8 threads and at 1, the first at another block size, the cache's served path (a sweep served all 426
+of its blocks reproduces the miss sweep and the capture to the bit); the three identity references; the suite 3,430 passed / 5 xfail / 3,435 collected. Timed on
+VCaP at 8 threads, two interleaved pairs against a worktree of the log-gamma commit carrying its own modules: the whole run 198.4 → 144.1 s and 193.9 → 137.6 s (0.73 / 0.71); calibrate 85.6 → 33.7 s and 82.7 → 31.9 s (0.39 / 0.39); the four sweeps 68.8 → 16.8 s and 66.3 → 15.9 s (0.24 / 0.24), the kernel's call 15.7 / 14.9 s of that and the Python around it 1.1 s (the first sweep ≈ 2.8 s, the refit sweep that misses the cache ≈ 7.4 s, each served refit sweep ≈ 3.0 s, from the replay); the peak RSS 11,281 → 10,591 MB and 11,346 → 10,926 MB; the stages outside calibration inside the drift (the scan 0.97 / 0.88, the second pass 1.02 / 0.97, quant 0.94 / 1.01)
+(`perf/block_native_2026-09-18/`). THE CACHE, PRICED FOR THE OWNER: in production the last two refit sweeps are SERVED (the pre run's policy prepare ran 852 = 2 × 426 times over four sweeps, the first sweep and the first refit missing); with the block native a refit sweep that misses replays at 7.4 s at 8 threads and a served one at 3.0 s, so the cache saves about 9 s of a 140 s run (6 %) and costs 2.3 GB held through calibrate at K = 233 (the deliveries: the written rows with their slots, the cubes, the held bits), the keys (0.27 s a sweep) and the deliveries' round trip through Python — message_cache.py, the served list, the deliveries return and their gates; keep or delete is the owner's call.
+
 #### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer; native since 2026-09-17, §6b.15.5)
 
 A single-strand slot is the cube with a tilt grid of one cell — its tilt is its live strand, `τ = ±1` — so

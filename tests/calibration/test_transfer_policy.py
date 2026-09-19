@@ -19,10 +19,23 @@ import numpy as np
 import pytest
 
 import rigel.calibration.sweep as SW
+from rigel.calibration.blocks import SweepCapture
 from rigel.calibration.messages import Policy
-from rigel.calibration.messages.faces import RowTable
+from rigel.calibration.messages.silent import SilentPolicy
 from rigel.native import transfer_rows as R
 from _transfer_harness import (
+    EDGE,
+    FORWARD,
+    LEVEL,
+    NONE,
+    RULE_NAMES,
+    SPLICE_OUT,
+    TRANSPORT,
+    Faces,
+    LevelLane,
+    Prepared,
+    Received,
+    RowTable,
     _drive,
     _bits,
     _ctx_of,
@@ -32,13 +45,11 @@ from _transfer_harness import (
     _hop,
     _lane_prepared,
     _leaves,
-    _native_passes,
     _pairs,
     _prepared,
     _rna,
     _rna_lanes_of,
     _rule,
-    _run,
     _with_alt_splice_sites,
     fuse,
     intersect,
@@ -77,7 +88,7 @@ def test_the_policy_name_installs_the_transfer_policy(sweep_inputs):
     finally:
         calibrate_mod.solve_chain = orig
     assert seen and all(isinstance(p, TransferPolicy) for p in seen)
-    assert all(p._strand is not None for p in seen), (
+    assert all(p.strand is not None for p in seen), (
         "the exon -> boundary message must be ON in production"
     )
     with pytest.raises(ValueError, match="unknown message_policy"):
@@ -324,11 +335,6 @@ def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
     junction — both are read, intersected, and delivered as a non-increasing row. An AMBIG node, an
     empty node and a node whose live strand admits nothing get no ceiling. PERTURBATION: with the left
     message's composition removed, its level and flux join the intersection and the row changes."""
-    from rigel.calibration.messages import Received
-    from rigel.calibration.messages.faces import Faces
-    from rigel.calibration.messages.lanes import LevelLane
-    from rigel.calibration.messages.transfer import _PreparedTransfer
-
     K = 41
     lam = np.linspace(-6.0, 6.0, K)
     u = lam
@@ -351,7 +357,7 @@ def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
     pos = LevelLane("pos", u, lam, 0.5, n_u / 2, a_r, empty, no_levels, none, total=n_u, flux=flux)
     neg = LevelLane("neg", u, lam, 0.4, n_u / 2, a_r, empty, no_levels, none, total=n_u)
     gd = LevelLane("gdna", u, lam, 0.5, n_u, a_r, empty, no_levels, none)
-    prep = _PreparedTransfer(
+    prep = Prepared.hand_built(
         RowTable(5, K), Faces(lam, left, right), {"gdna": gd, "pos": pos, "neg": neg}, fp, fn
     )
     comp = -0.5 * ((lam - 1.0) / 0.5) ** 2
@@ -446,9 +452,6 @@ def test_a_received_gdna_level_is_a_lower_bound_and_the_hop_widens_it():
     non-decreasing in u (a level that crosses a face says "at least this much gDNA" and nothing more), a
     two-sided input loses only its upper side, and a hop across a density cliff — a larger price — widens
     it. The sender is EMPTY and holds the level with its witness, so it forwards and the recipient prices."""
-    from rigel.calibration.messages import Received
-    from rigel.calibration.messages.lanes import LevelLane
-
     u = np.linspace(-10, 10, 60)
     two_sided = -0.5 * ((u - 1.0) / 0.4) ** 2
     two_sided -= two_sided.max()
@@ -521,9 +524,6 @@ def test_a_full_node_emits_the_intersection_of_its_own_lower_side_and_what_it_ho
     holds — never their sum, which sharpened a chain of nine one-fragment boundaries into a hard bound
     on the ladder. The recipient is EMPTY, so the hop stops at the emission and it is read as sent.
     PERTURBATION: a pass whose full node multiplies fails here."""
-    from rigel.calibration.messages import Received
-    from rigel.calibration.messages.lanes import LevelLane
-
     u = np.linspace(-10, 10, 60)
     own = RowTable(3, u.shape[0])
     own[1] = -0.5 * ((u + 1.0) / 1.5) ** 2
@@ -571,8 +571,6 @@ def test_a_composition_arrives_only_through_a_face_with_a_composition_rule(sweep
     it: on the live toy a node holds a composition from a side only where the directed face into it
     carries a composition rule, and a node that heard something through a face with NO rule heard a
     level. PERTURBATION: a kernel that marks a level as a composition fails here."""
-    from rigel.calibration.messages.faces import NONE
-
     ctx = _ctx_of(sweep_inputs)
     prepared = _prepared(_full_policy(sweep_inputs)[0], ctx)
     _rows, fl, br = _drive(prepared, ctx)
@@ -622,21 +620,9 @@ def test_the_face_table_holds_one_of_five_kinds_with_finite_parameters_at_real_f
     """`Faces`, the rules as typed tables: on the live toy every rule the builders wrote is one of the
     five kinds, its scalar parameters and its rows are finite, `at` reads back what the table holds,
     and every ruled face is a real face (the source is the destination's neighbour on that side).
-    PERTURBATION: a rule at a face that does not exist is refused, so a builder cannot address the
-    wrong neighbour; a second rule at a face is refused, so the builders' faces stay disjoint."""
-    import pytest
-
-    from rigel.calibration.messages.faces import (
-        EDGE,
-        FORWARD,
-        LEVEL,
-        NONE,
-        RULE_NAMES,
-        SPLICE_OUT,
-        TRANSPORT,
-        Faces,
-    )
-
+    A rule at a face that does not exist, or a second rule at a face, is refused by the kernel's own table
+    writer (`transfer_kernel.h`, ``FacesOut::set``), so a builder cannot address the wrong neighbour and
+    the builders' faces stay disjoint."""
     ctx = _ctx_of(sweep_inputs)
     prepared = _prepared(_full_policy(sweep_inputs)[0], ctx)
     faces = prepared.faces
@@ -658,67 +644,45 @@ def test_the_face_table_holds_one_of_five_kinds_with_finite_parameters_at_real_f
             assert f.row is not None and f.row2 is not None and f.var > 0.0
     assert {FORWARD, TRANSPORT, SPLICE_OUT} <= seen, [RULE_NAMES[k] for k in sorted(seen)]
     assert len(RULE_NAMES) == 6
-    # a rule can only be written at a face that exists
-    n = int(ctx.n_slots)
-    table = Faces(np.linspace(-1.0, 1.0, int(ctx.n_grid)), left, right)
-    i = int(np.flatnonzero(left >= 0)[0])
-    table.set(int(left[i]), i, FORWARD)
-    assert table.kind_at(int(left[i]), i) == FORWARD and table.has(int(left[i]), i)
-    stranger = int(left[i]) - 1 if int(left[i]) > 0 else (i + 2 if i + 2 < n else i - 2)
-    with pytest.raises(ValueError, match="no face into"):
-        table.set(stranger, i, FORWARD)
-    # and a face carries one rule: the builders' faces are disjoint, so a second write is a builder
-    # addressing another's face, refused rather than silently winning or losing by order
-    with pytest.raises(ValueError, match="already carries"):
-        table.set(int(left[i]), i, TRANSPORT)
 
 
-def test_the_layer_reads_a_row_only_under_its_mask(sweep_inputs, monkeypatch):
-    """THE TABLES ARE ALLOCATED UNFILLED (`RowTable`, `Received.empty`, the face row store), so this is
-    the reader audit made executable: every table's matrix is poisoned with NaN at allocation — the
-    claims, each lane's own levels, flux levels and flux witnesses, the face rows, both `Received`
-    tables' compositions and level profiles — and the layer's output is bit-identical to the unpoisoned
-    run: the pass's tables (every bit, count and witness, every PRESENT row), the delivered λ rows and
-    cube, and the whole sweep's belief. A written row overwrites its poison; one reader of an ABSENT row
-    — in the builders, the pass, the solve or ψ — and NaN reaches a number. PERTURBATION: a kernel reading
+def test_the_layer_reads_a_row_only_under_its_mask(sweep_inputs):
+    """THE TABLES ARE ALLOCATED UNFILLED, so this is the reader audit made executable on the kernel's own
+    tables: every matrix the builders returned is poisoned with NaN where its mask says no row — the
+    claims, each lane's own levels (the face rows and the flux store hold written rows only) — and both
+    received tables' compositions and level profiles are poisoned whole before the passes; the pass's
+    tables (every bit, count and witness, every PRESENT row) and the delivered channels are bit-identical
+    to the unpoisoned run. One reader of an ABSENT row — in the pass or the solve — and NaN reaches a
+    number. The block pipeline's arena holds the same unfilled matrices and reads them through the same
+    code (`native/solve_kernel.cpp`), which the replay holds bit-identical. PERTURBATION: a kernel reading
     a row without its bit (`lane_emit` taking the own level unmasked; the solve reading a composition
     without its bit) fails here."""
-    from rigel.calibration.messages import Received
-    from rigel.calibration.messages.faces import Faces
-
     pol, _rows, _n_grid, _window = _full_policy(sweep_inputs)
     ctx = _ctx_of(sweep_inputs)
+    n, K = int(ctx.n_slots), int(ctx.n_grid)
 
-    def run():
+    def run(poison):
         prepared = _prepared(pol, ctx)
-        native = _native_passes(prepared, ctx)
-        return native, prepared.solve(*native), _run(sweep_inputs, pol)
+        if poison:
+            prepared.own.rows[~prepared.own.mask] = np.nan
+            for ln in prepared.lanes.values():
+                ln.own_level.rows[~ln.own_level.mask] = np.nan
+        order = np.arange(n, dtype=np.int64)
+        tables = []
+        for nbr, seq, backward in ((ctx.left, order, False), (ctx.right, order[::-1], True)):
+            nbr = np.asarray(nbr, np.int64)
+            received = Received.empty(n, K)
+            if poison:
+                received.composition.fill(np.nan)
+                for lane in Received.LANES:
+                    getattr(received, lane).profile.fill(np.nan)
+            received.has_neighbour[seq] = nbr[seq] >= 0
+            prepared.run_pass(received, seq, nbr, np.zeros(n, bool), backward=backward)
+            tables.append(received)
+        return tables, prepared.solve(*tables)
 
-    plain = run()
+    plain, poisoned = run(False), run(True)
     assert plain[0][0].heard.any() and plain[1].lam_rows is not None, "the toy must carry messages"
-
-    row_init, faces_init, received_empty = RowTable.__init__, Faces.__init__, Received.empty
-
-    def poisoned_rows(self, shape, K):
-        row_init(self, shape, K)
-        self.rows.fill(np.nan)
-
-    def poisoned_faces(self, lam, left, right):
-        faces_init(self, lam, left, right)
-        self.rows.fill(np.nan)
-
-    def poisoned_received(n, K):
-        t = received_empty(n, K)
-        t.composition.fill(np.nan)
-        for lane in Received.LANES:
-            getattr(t, lane).profile.fill(np.nan)
-        return t
-
-    monkeypatch.setattr(RowTable, "__init__", poisoned_rows)
-    monkeypatch.setattr(Faces, "__init__", poisoned_faces)
-    monkeypatch.setattr(Received, "empty", staticmethod(poisoned_received))
-    poisoned = run()
-
     for a, b in zip(plain[0], poisoned[0]):
         for name, x, y in _leaves(a, b):
             if x.dtype != bool and x.ndim == 2:
@@ -736,56 +700,27 @@ def test_the_layer_reads_a_row_only_under_its_mask(sweep_inputs, monkeypatch):
                 x, y = x[keep], y[keep]
                 assert np.isfinite(x).all(), f"cube {f}: the plain run holds a non-finite row"
             assert np.array_equal(x, y), f"cube {f} moved under poison"
-    for k, v in plain[2].items():
-        assert np.array_equal(v, poisoned[2][k]), f"the sweep's {k} moved under poison"
 
 
-def test_the_backbone_runs_the_shipped_policys_pass_natively(sweep_inputs, monkeypatch):
-    """The wiring: `sweep._pass` reaches `native.transfer_pass` for the transfer policy — a spy counts the
-    calls and the table it fills carries messages — while the silent policy's pass writes nothing and
-    yields an all-silence table with its neighbours marked."""
-    import rigel.calibration.messages.transfer as TP
-    from rigel.calibration.messages.silent import SilentPolicy
-
+def test_the_backbone_runs_the_sweep_in_one_native_call(sweep_inputs, monkeypatch):
+    """The wiring: `sweep.solve_chain` reaches `native.solve_blocks` ONCE per sweep, whatever the policy —
+    a spy counts the calls and reads the policy the kernel was told — and the transfer sweep's capture
+    holds received tables that heard something, while the silent sweep runs no layer and holds none."""
     calls = []
-    real = TP.transfer_pass
+    real = SW.solve_blocks
 
     def spy(**kw):
-        calls.append(1)
+        calls.append(int(kw["policy"]))
         return real(**kw)
 
-    monkeypatch.setattr(TP, "transfer_pass", spy)
-    pol, _rows, n_grid, _window = _full_policy(sweep_inputs)
-    ctx = _ctx_of(sweep_inputs)
-    order = list(range(int(ctx.n_slots)))
-    from_left = SW._pass(order, list(ctx.left), _prepared(pol, ctx), n_grid, backward=False)
-    assert calls == [1] and from_left.heard.any()
-    silent = SilentPolicy().prepare(ctx, SilentPolicy().library(ctx))
-    table = SW._pass(order, list(ctx.left), silent, n_grid, backward=False)
-    assert calls == [1] and table.has_neighbour.any() and not table.heard.any()
-
-
-def test_the_pass_reads_the_builders_own_tables_without_a_copy(sweep_inputs):
-    """The tables `run_pass` hands the native kernel are the builders' own arrays — the claims' matrix
-    and mask, the faces' arrays and the written prefix of their row store, each lane's arrays — every
-    one C-contiguous (the binding would copy a strided one silently), none built at the call.
-    PERTURBATION: a builder that keeps a strided column, or a table packed at the call, fails here."""
-    pol, _rows, _n_grid, _window = _full_policy(sweep_inputs)
-    ctx = _ctx_of(sweep_inputs)
-    prepared = _prepared(pol, ctx)
-    t = prepared.tables()
-    assert t["own"] is prepared.own.rows and t["own_mask"] is prepared.own.mask
-    assert t["f_rows"].shape[0] == prepared.faces.n_rows > 0
-    assert np.shares_memory(t["f_rows"], prepared.faces.rows)
-    assert {lane[0] for lane in t["lanes"]} == {0, 1, 2}
-    for lane, ln in zip(t["lanes"], prepared.lanes.values()):
-        assert lane[4] is ln.own_level.rows and lane[9] is ln.flux_witness.rows
-        assert lane[6] is ln.count and lane[7] is ln.a
-    arrays = [(k, v) for k, v in t.items() if k != "lanes"] + [
-        (f"lane[{j}][{e}]", x)
-        for j, lane in enumerate(t["lanes"])
-        for e, x in enumerate(lane)
-        if isinstance(x, np.ndarray)
-    ]
-    for name, a in arrays:
-        assert a.flags.c_contiguous, f"{name} is not C-contiguous"
+    monkeypatch.setattr(SW, "solve_blocks", spy)
+    pol = _full_policy(sweep_inputs)[0]
+    cap = SweepCapture()
+    SW.solve_chain(*sweep_inputs["args"], **sweep_inputs["kw"], policy=pol, _capture=cap)
+    assert calls == [1] and cap.from_left is not None
+    assert Received.from_kernel(cap.from_left).heard.any() and cap.policy_name == "transfer"
+    quiet = SweepCapture()
+    SW.solve_chain(
+        *sweep_inputs["args"], **sweep_inputs["kw"], policy=SilentPolicy(), _capture=quiet
+    )
+    assert calls == [1, 0] and quiet.from_left is None and quiet.policy_name == "silent"

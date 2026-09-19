@@ -1,6 +1,7 @@
 """The generic density-deconvolution primitive, of which the intron factory is one special case.
 
-What is gated here is the factor arithmetic: the NegBinom log-pmf against scipy's own, and the
+What is gated here is the factor arithmetic — the kernel's, read through `native.transfer_rows` — the
+NegBinom log-pmf against scipy's own, and the
 per-intron λ-factor's mode, precision and limiting regimes — a confident background deconvolve, the
 no-nascent and nascent-rich extremes, the sharpening with count, the widening with overdispersion,
 and the flat factor an empty pool must produce. The background posterior itself is held at the end,
@@ -13,12 +14,8 @@ import numpy as np
 import pytest
 from scipy.stats import nbinom, poisson
 
-from rigel.calibration.density_deconv import (
-    GdnaBackground,
-    _log_negbinom,
-    density_lambda_factor,
-    fit_gdna_background,
-)
+from rigel.calibration.density_deconv import GdnaBackground, fit_gdna_background
+from rigel.native import transfer_rows as R
 
 _GRID = np.linspace(1e-6, 1.0 - 1e-6, 400)  # dense f_g grid to locate the peak
 
@@ -35,6 +32,36 @@ def _bg(log_mu_bg, alpha=np.inf, size=1.0e6, informative=True):
 
 def _peak_fg(factor_row):
     return _GRID[int(np.argmax(factor_row))]
+
+
+def _log_negbinom(g, mu, size):
+    """The kernel's NegBinom cell (`native.transfer_rows.log_negbinom`), elementwise."""
+    g, mu = np.broadcast_arrays(np.asarray(g, np.float64), np.asarray(mu, np.float64))
+    return R.log_negbinom(np.ascontiguousarray(g), np.ascontiguousarray(mu), float(size))
+
+
+def density_lambda_factor(bg, count, eff_g, fg_grid):
+    """The kernel's factory rows (`native.transfer_rows.factory_rows`) on a fraction grid, every slot an
+    intron: the row ``log NegBinom(f_g·C; ρ_bg·E, α_eff)``, max-normalised."""
+    fg = np.asarray(fg_grid, np.float64)
+    count = np.ascontiguousarray(count, np.float64)
+    return R.factory_rows(
+        np.ones(count.shape[0], bool),
+        count,
+        np.ascontiguousarray(eff_g, np.float64),
+        float(bg.log_mu_bg),
+        float(bg.alpha),
+        float(bg.size),
+        bool(bg.informative),
+        np.log(fg) - np.log1p(-fg),
+    )
+
+
+def density_factor_precision(rows, lam):
+    """The kernel's factor precision (`native.transfer_rows.factor_precision`): 1/Var_λ under each row."""
+    return R.factor_precision(
+        np.ascontiguousarray(rows, np.float64), np.ascontiguousarray(lam, np.float64)
+    )
 
 
 # ---- the NegBinom log-pmf primitive ----
@@ -197,8 +224,6 @@ def test_an_empty_pool_is_not_confident():
     """Σg=0 says "around 1/(2ΣE), and I genuinely do not know" — the factor must neither place the
     deconvolve away from ~0 on a dense intron NOR carry populated-pool precision. A branching fit
     reads an enormous precision here and calls most nascent intron mass gDNA."""
-    from rigel.calibration.density_deconv import density_factor_precision
-
     E = np.full(500, 10_000.0)
     empty = fit_gdna_background(np.zeros(500), E)
     # the information HALF of the contract, pinned directly: an empty region is not a unit of Fisher
@@ -230,8 +255,6 @@ def test_the_factor_precision_is_chunk_exact():
     precision is a per-row moment and must not depend on which rows share the call — the locus
     solve reads it per block. A BLAS matrix-vector product breaks this at a one-row call (the
     library dispatches a different kernel), so the moments are per-row sums instead."""
-    from rigel.calibration.density_deconv import density_factor_precision
-
     rng = np.random.default_rng(11)
     lam = np.linspace(-10.0, 10.0, 60)
     rows = (

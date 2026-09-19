@@ -188,36 +188,21 @@ target_compile_options(_em_impl PRIVATE -g)
 
 install(TARGETS _em_impl LIBRARY DESTINATION rigel)
 
-# --- Build the _transfer_impl extension ---------------------------------------
+# --- Build the _solve_impl extension ------------------------------------------
 
-# The composition-transfer policy's three kernels (the calibration sweep's message layer): the builders
-# for one block (phase 0), one directional pass (phase 1) and the solve (phase 2), on the policy's tables
-# (messages/faces.py, lanes.py, transfer.py); the row constructors are native/transfer_rows.h, shared with
-# ψ. Pure C++17 + nanobind + numpy.
+# The calibration solve's kernels, one module: the block pipeline of the sweep in one call per sweep with a pool of
+# threads over the locus blocks (native/solve_kernel.cpp), on ψ's kernel (psi_kernel.h) and the composition transfer's
+# builders, pass and solve (transfer_kernel.h), the row constructors (transfer_rows.h) and the locus EM's thread pool
+# (thread_pool.h); the same code bound for the gates. Pure C++17 + nanobind + numpy.
 nanobind_add_module(
-  _transfer_impl
+  _solve_impl
   NOMINSIZE
   STABLE_ABI
-  src/rigel/native/transfer_kernel.cpp
+  src/rigel/native/solve_kernel.cpp
 )
-target_compile_options(_transfer_impl PRIVATE -g)
+target_compile_options(_solve_impl PRIVATE -g)
 
-install(TARGETS _transfer_impl LIBRARY DESTINATION rigel)
-
-# --- Build the _psi_impl extension --------------------------------------------
-
-# ψ, the calibration sweep's per-slot solve on the (λ, θ) cube (simplex_logodds' one solver), one call per
-# block; the cube, the quantile read-out and the composition are bound for the gates from the same code.
-# Pure C++17 + nanobind + numpy; the strand term and the sigmoid are native/transfer_rows.h's.
-nanobind_add_module(
-  _psi_impl
-  NOMINSIZE
-  STABLE_ABI
-  src/rigel/native/psi_kernel.cpp
-)
-target_compile_options(_psi_impl PRIVATE -g)
-
-install(TARGETS _psi_impl LIBRARY DESTINATION rigel)
+install(TARGETS _solve_impl LIBRARY DESTINATION rigel)
 
 # --- SIMD / Architecture Detection -------------------------------------------
 #

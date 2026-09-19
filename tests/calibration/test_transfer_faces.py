@@ -19,9 +19,10 @@ import numpy as np
 import pytest
 from scipy.special import polygamma
 
-from rigel.calibration.messages.transfer import MARGINAL_NODES
 from rigel.native import transfer_rows as R
 from _transfer_harness import (
+    FORWARD,
+    LEVEL,
     _ctx_of,
     _expected_pairs,
     _full_policy,
@@ -33,6 +34,9 @@ from _transfer_harness import (
     _with_alt_splice_sites,
     _with_populated_inside,
 )
+
+#: the nine equal-probability nodes the splice-out marginal is taken on — the kernel's
+MARGINAL_NODES = np.asarray(R.MARGINAL_NODES)
 
 
 # ── the intron|exon face: the licence, the splice-in map and the splice-out row ──────────────────
@@ -354,7 +358,6 @@ def test_the_intron_face_carries_the_pair_identity_and_the_face_map(sweep_inputs
     each boundary is the identity (FORWARD); the rule from a licensed face into the exon, applied to
     the intron's claim and summed with the edge's level rule, equals the independently recomputed
     splice-in + edge rows of that exon; an unlicensed face has no rule into the exon."""
-    from rigel.calibration.messages.faces import FORWARD
     from rigel.calibration.messages.transfer import TransferPolicy
     from rigel.calibration.simplex_logodds import _logodds_grid
 
@@ -401,7 +404,6 @@ def test_the_exon_and_boundary_own_claims_are_the_strand_rows_and_their_rules_th
     recomputed splice-out rows; at every intron|exon pair sharing one strand with a live boundary,
     the rule boundary → intron is the identity and the boundary's claim, summed per intron, equals
     the independently recomputed strand rows."""
-    from rigel.calibration.messages.faces import FORWARD
     from rigel.calibration.simplex_logodds import _logodds_grid
 
     pol, _p, n_grid, window = _full_policy(sweep_inputs)
@@ -621,7 +623,6 @@ def test_the_sj_terminus_boundary_places_the_flux_where_the_junctions_exon_is(sw
     assert (
         R.junction_exon_side(int(flags[b]), int(left[b]), int(right[b])) == i
     )  # the junction's exon is the inside
-    from rigel.calibration.messages.faces import LEVEL
 
     prep = _prepared(pol, ctx2)
     face = prep.faces.at(b, i)
@@ -1008,27 +1009,3 @@ def test_the_alt_splice_rules_carry_both_flanks_with_the_pair_width(sweep_inputs
 def widths_keys(widths):
     """The junction boundaries the recompute served (its width keys are ``(boundary, flank)`` pairs)."""
     return {int(k[0]) if isinstance(k, tuple) else int(k) for k in widths}
-
-
-def test_a_row_table_is_a_matrix_and_a_mask_the_builders_write_directly():
-    """`RowTable`: the one shape of an optional row per node, in the layout the native pass reads. A
-    fresh table has no row; a written row reads back as itself — a view of the matrix, so the matrix IS
-    the table — and sets its mask; clearing a row clears its mask; a zero row is a row (the edge's level
-    claim); ``len`` is the node count. The matrix is allocated unfilled, so the MASK, never the matrix,
-    says whether a node has a row — a fresh table's matrix is not read. PERTURBATION: a table whose mask
-    is not kept in step with its writes fails here."""
-    from rigel.calibration.messages.faces import RowTable
-
-    t = RowTable(4, 5)
-    assert len(t) == 4 and not t.mask.any()
-    assert all(t[i] is None for i in range(4))
-    row = np.arange(5.0) - 2.0
-    t[2] = row
-    assert t.mask.tolist() == [False, False, True, False]
-    np.testing.assert_array_equal(t[2], row)
-    np.testing.assert_array_equal(t.rows[2], row)
-    assert np.shares_memory(t[2], t.rows)
-    t[2] = None
-    assert t[2] is None and not t.mask[2]
-    t[0] = 0.0
-    assert t[0] is not None and t.mask[0] and not t.rows[0].any()

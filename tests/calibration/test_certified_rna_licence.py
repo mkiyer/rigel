@@ -36,7 +36,7 @@ import pytest
 from scipy.special import expit, log_expit
 from scipy.stats import beta as _Beta, poisson as _Poisson
 
-from rigel.calibration.density_deconv import density_factor_precision
+from rigel.native import transfer_rows as R
 from rigel.calibration.simplex_logodds import _JEFFREYS_REF, _logodds_grid
 
 #: Every gate below scores against ``scipy.stats``' OWN Poisson / Beta rather than a log-pmf written
@@ -45,6 +45,14 @@ from rigel.calibration.simplex_logodds import _JEFFREYS_REF, _logodds_grid
 #: exactly this pmf.
 _C_GRID = (1e-4, 0.03, 1.0, 40.0)
 _M_GRID = (5.0, 900.0, 20000.0)
+
+
+def _factor_precision(rows, lam):
+    """The kernel's factor precision (`native.transfer_rows.factor_precision`): the composition evidence a
+    λ-factor row carries, read off its own curvature."""
+    return R.factor_precision(
+        np.ascontiguousarray(rows, np.float64), np.ascontiguousarray(lam, np.float64)
+    )
 
 
 def _residual(S, c, M, lam):
@@ -213,7 +221,7 @@ def test_C4_psi_reference_plus_the_term_is_EXACTLY_Beta_half_half_plus_S(S):
 
 
 def test_C5_density_factor_precision_reads_the_GRID_WINDOW_on_a_MONOTONE_factor():
-    """The obvious wiring — ``tau_lam += density_factor_precision(cert, lam_grid)``, exactly as
+    """The obvious wiring — ``tau_lam += _factor_precision(cert, lam_grid)``, exactly as
     ``tau_len`` is wired — is out of contract for this factor, and the tell is measurable.
 
     ``density_factor_precision`` reads ``1/Var_λ`` under the NORMALIZED factor. For a peaked factor that
@@ -230,10 +238,8 @@ def test_C5_density_factor_precision_reads_the_GRID_WINDOW_on_a_MONOTONE_factor(
     got_cert, got_peak = [], []
     for L in (6.0, 10.0, 20.0):
         lam, _ = _logodds_grid(4096, L)
-        got_cert.append(float(density_factor_precision((1e4 * log_expit(-lam))[None, :], lam)[0]))
-        got_peak.append(
-            float(density_factor_precision((-0.5 * 25.0 * (lam - 1.0) ** 2)[None, :], lam)[0])
-        )
+        got_cert.append(float(_factor_precision((1e4 * log_expit(-lam))[None, :], lam)[0]))
+        got_peak.append(float(_factor_precision((-0.5 * 25.0 * (lam - 1.0) ** 2)[None, :], lam)[0]))
     assert np.allclose(got_peak, 25.0, rtol=1e-6), got_peak  # a real factor: L-invariant
     assert max(got_cert) / min(got_cert) > 100.0, got_cert  # the certified one: it IS the window
     # and the analytic form it should be replaced by has no grid in it at all: evaluated at a given

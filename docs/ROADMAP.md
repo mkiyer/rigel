@@ -57,11 +57,12 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   regime); what the gDNA witness cannot see of a transcript-designed panel is declared
   (`ISSUES: ruler-witness-geometry-on-transcript-panels`); the never-passed
   per-transcript prior lane (`ISSUES: per-transcript-prior-lane`) is the other pre-EM item.
-- **Calibration's performance**: the one unfinished component — the sweeps dominate a deep run, on a
-  single core, while the locus EM beside them is a rounding error. The decomposition is built: a
-  terminal receives nothing, the sweep solves the chain a locus block at a time, the block size moves no
-  number (`DESIGN.md` §6b.15.1–§6b.15.3); what remains is the C/C++ port of the block solve, where the parallelism
-  goes — `profiling/profiler.py`, `profiling/sweep_replay.py --block-slots`.
+- **Calibration's performance**: the one unfinished component — the sweeps dominate a deep run while the
+  locus EM beside them is a rounding error. The decomposition is built and the block is native: a terminal
+  receives nothing, the sweep solves the chain a locus block at a time, the block size moves no number, and
+  the whole sweep is ONE native call that runs the blocks on a pool of threads, bit-identical at every thread
+  count (`DESIGN.md` §6b.15.1–§6b.15.5); what remains is the kernels' own cost and the stages outside
+  calibration that scale with depth — `profiling/profiler.py`, `profiling/sweep_replay.py --threads`.
 - **Panels**: the sparse-nascent 16-condition ladder and the 30-condition test chromosome, both cached
   and certified — `panel.py status`; the fl-gap side panels carry a different nascent model —
   `ISSUES: flgap-panels-stale-nascent-model`. The ladder's nascent level is a development stress
@@ -95,9 +96,10 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
    worklists and THE PORT — the pass, the builders, ψ and the policy's solve native, ONE code path with the
    Python kernels deleted, the tables allocated unfilled — are landed (`DESIGN.md` §6b.15). The optimisation
    target is the deep library (VCaP): its four sweeps are captured for replay (`profiling/sweep_replay.py`)
-   and the whole run profiled (`profiling/profiler.py`), and every step is judged there. Next: threads — ψ over
-   slots first, then the per-block Python of a refit sweep (the message cache's key, the gDNA arm), then the
-   block in one native call with a pool over blocks; the pass's blur is the kernel's floor, a summation-order
+   and the whole run profiled (`profiling/profiler.py`), and every step is judged there. The block is ONE native
+   call (2026-09-18) — ψ threaded over slots, the cache's key on the factory's inputs, the splice-out marginal
+   hoisted, then every locus block end to end on a pool of threads, bit-identical at every thread count; what
+   remains inside a sweep is the kernels' own cost — the pass's blur is the kernel's floor, a summation-order
    change behind the replay's tolerance budget (the ranked list with its numbers is
    `ISSUES: performance-memory-bounded-solve`); then the scan, the second pass and quant, the stages that
    scale with depth. The accuracy frame is unchanged, and no step may move a number beyond the budget.
@@ -121,8 +123,8 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
 5. **The vertex atom** — on silent genes and nascent-free introns; a
    mechanism for it is the prior's reference (`ISSUES: reference-prior-refuted-at-concept-level`
    constrains the form) or the intron's own solve, not a message.
-6. **The message policy, only where a row is above the bar**: one prototype arm at a time through
-   `policy_prototype.py --module`, halves apart, pass zero beside the pipeline:
+6. **The message policy, only where a row is above the bar**: one prototype mechanism at a time, in C++,
+   judged on `policy_prototype.py` against the tree without it, halves apart, pass zero beside the pipeline:
    `ISSUES: two-sided-exon-row`, `ISSUES: flux-floor-dispersion`,
    `ISSUES: message-layer-open-cases`.
 

@@ -79,7 +79,7 @@ class DensityLandscape:
 
     ψ reads the curve ITSELF, at the density every cell of every slot implies — ``log ρ_c = log f_g + log M −
     log E`` on the slot's gDNA support — with numpy's interpolation and the ends held constant off the grid
-    (`native/psi_kernel.cpp`, ``Arm``; `sweep._gdna_arm` hands the kernel the curve and the per-slot support).
+    (`native/psi_kernel.h`, ``Arm``; `sweep._gdna_arm` hands the kernel the curve and the per-slot support).
     Bare: no reference prior, no measure term, no Jacobian — ``logP`` is a density in log-rate, so its
     conversion to a linear-rate density cancels the ``log σ'(λ)`` change of variable exactly, per component,
     and ψ's arm adds the reference itself. The grid already spans the data's own support (:func:`_grid`), so

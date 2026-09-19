@@ -173,7 +173,7 @@ def test_the_arm_tracks_the_region_mass():
 
 
 def test_the_kernels_arm_is_numpys_interpolation_of_the_curve_to_the_bit():
-    """The arm ψ reads per cell (`native/psi_kernel.cpp`, ``Arm``) is the former ``(n, K)`` projection to the
+    """The arm ψ reads per cell (`native/psi_kernel.h`, ``Arm``) is the former ``(n, K)`` projection to the
     bit: ``np.interp`` of the curve at ``log σ(λ) + log M − log E`` with the ends held, the fraction, mass and
     opportunity clipped at the landscape's guard. Scored against numpy, a different implementation (TRAPS:
     a-test-that-redefines). PERTURBATION: an arm that extrapolated past the grid, or skipped a clip, fails here."""

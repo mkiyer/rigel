@@ -183,8 +183,8 @@ per-fragment shares, so `1/mass` is not a counting variance. The shipped countin
 `1/n` from `n ≈ 10` and `π²/2` at `n = 0`: a zero count is a measurement, not an absence.
 
 **3.5 A composition crosses only where the population is shared; a gDNA level crosses unscaled.**
-`native/transfer_kernel.cpp`: the face maps (`splice_faces`, `terminus_rules`) carry a composition under
-§3.5b's licence; `gdna_lane` / `lanes.LevelLane` carry the gDNA level everywhere else. Why the level needs its
+`native/transfer_kernel.h`: the face maps (`splice_faces`, `terminus_rules`) carry a composition under
+§3.5b's licence; `gdna_lane` carries the gDNA level everywhere else. Why the level needs its
 own lane is one substitution. Rescaling a source's density by the ratio of totals
 `r = ρ_tot(dst)/ρ_tot(src)` and writing `ρ_c(src) = φ_c(src)·ρ_tot(src)` gives
 
@@ -201,7 +201,7 @@ boundary's level is a lower bound on the exon inside it — a fragment spanning 
 only partly under the probe — which is why every gDNA-lane hop is lower-only.
 
 **3.5b The licence — "is the source measuring the same thing I am?"** (ruling 2026-08-04;
-``outside_flank`` and ``boundary_shares_strand`` in `native/transfer_kernel.cpp` are the predicates). A composition may
+``outside_flank`` and ``boundary_shares_strand`` in `native/transfer_kernel.h` are the predicates). A composition may
 be imputed across a step iff both hold:
 
 * **SUPPLY** — the source supplied both components of the pair (a statement about precision): a source
@@ -226,7 +226,7 @@ terms, never in TSS/TES, which the strand flips:
 transcript simply begins. That is the derived line between the two treatments.
 
 **3.5e The two operators and the terminus, in `{gDNA, RNA+, RNA−}`.** The ruling is `DESIGN.md` §0c.0
-(2026-08-19); `transfer_kernel.cpp`'s `splice_faces` and `terminus_rules` implement it. A message is the three
+(2026-08-19); `transfer_kernel.h`'s `splice_faces` and `terminus_rules` implement it. A message is the three
 densities `{gDNA, RNA+, RNA−}`, always: an operator that pools the two RNA components has not measured
 what the policy carries.
 
@@ -280,7 +280,7 @@ own witness and never pooled across pairs, it makes a deep imputation arrive wea
 and a measurement outweigh both.
 
 **3.6 The two faces of an `intron|exon` boundary — component-set matching.** Ruling 2026-08-04;
-`transfer_kernel.cpp`'s `splice_faces`. At one boundary the accumulator stores three populations, and their
+`transfer_kernel.h`'s `splice_faces`. At one boundary the accumulator stores three populations, and their
 component sets differ:
 
 | bank | what it counted | components |
@@ -319,8 +319,8 @@ survives it (`TRAPS: capture-inverts-the-counted-side`). The transfer policy car
 as the splice-in map's cap rather than solving face (II) outright (`DESIGN.md` §6b.13).
 
 **3.6c The splice-flux reframe — a boundary has two totals, one per flank.** Ruling 2026-08-05;
-`BlockContext.sj_count_lo` / `sj_count_hi` (`messages/__init__.py`) carry the split and
-`transfer_kernel.cpp`'s `splice_faces` reads it. §3.6 made per step: which flank is a hop talking to? Numerator and
+`ChainView.sj_count_lo` / `sj_count_hi` (`messages/__init__.py`) carry the split and
+`transfer_kernel.h`'s `splice_faces` reads it. §3.6 made per step: which flank is a hop talking to? Numerator and
 denominator of a composition imputation must be totals over the same component set, and a molecule
 counted in `J` spliced at this position, so its body lies in the exon on exactly one side:
 
@@ -732,7 +732,7 @@ the mass outside `L = 10`); (iii) proper for every `m ∈ (0,1)`; (iv) substitut
 ⛔ **ψ ships without this term.** A reference location built on it was refuted and deleted on
 2026-08-24 (`DESIGN.md` §6b.1): a location is a prior assertion at fixed strength, and where the strand
 channel is dead it was the entire answer at any depth. Background information enters as likelihood terms
-whose precision scales with counts (`density_deconv.density_lambda_factor`, the landscape prior). The
+whose precision scales with counts (the intron factory's rows, built in the solve's kernel from `density_deconv`'s background; the landscape prior). The
 derivation stays because it is what any future location would be judged against.
 
 ### 9c.1 The strength of a reference mean is a log-odds, and one pseudo-observation sets it
@@ -810,7 +810,7 @@ read-out averages them; the chunk-exact reordering of 2026-09-11 moved ≤ 3.1e-
 read-out's own rounding, `K · ε`, with no term re-rounded. Gate: `tests/test_sweep_replay_tolerance.py`
 — the budget covers float32 rounding of the terms and of the strand mean at every strength.
 
-## 9e. ψ's θ quadrature — the nodes follow the strand term's peak (`native/psi_kernel.cpp`'s `tilt_window`)
+## 9e. ψ's θ quadrature — the nodes follow the strand term's peak (`native/psi_kernel.h`'s `tilt_window`)
 
 **The integrand.** At an AMBIG slot ψ is read out on its θ-marginal, `M(λ) = ∫ exp ψ(λ, sin θ) dθ` over
 `θ ∈ [−π/2, π/2]` (§9c: the arcsine measure on the tilt `τ` is cancelled by the θ coordinate, so no measure
@@ -879,7 +879,7 @@ gDNA at a balanced slot — Bayes-correct under an `f_g`-independent arcsine mea
 prior pin such slots; a slot with no junction and no prior reads `f_g ≈ 1 − 1/√n` from its own solve. See
 `ISSUES: strand-marginal-volume-factor`.
 
-## 9f. The tilt atom — the AMBIG tilt's hypothesis space is {pure +, pure −, mixed} (`native/psi_kernel.cpp`'s `slot_cube`)
+## 9f. The tilt atom — the AMBIG tilt's hypothesis space is {pure +, pure −, mixed} (`native/psi_kernel.h`'s `slot_cube`)
 
 **What §9e's exact marginal cannot say.** At an AMBIG slot whose RNA is all on one strand the truth sits AT
 the strand cap: with `τ = 1` the split `p̂ = ½ + (1 − f_g)(κ − ½)` identifies `f_g` exactly as at a
@@ -1094,7 +1094,7 @@ exon binds a gDNA fragment over 125 bp while the simulator's non-stacking rule b
 over one exon's 40. The efficiency reads the gDNA and the transcript's factor inherits the difference
 (`ISSUES: ruler-witness-geometry-on-transcript-panels`), declared and not repaired.
 
-## 12. The flux price's witness — the column count on the protocol's share of the opportunity (`transfer_kernel.cpp`'s `rna_lane`)
+## 12. The flux price's witness — the column count on the protocol's share of the opportunity (`transfer_kernel.h`'s `rna_lane`)
 
 The certified flux at one of an exon's junctions is that strand's RNA level at the exon (§6b.13's source):
 the spliced count `c_J` at the junction's route rate `r_J = Σ flux / A_route`, and every hop pays the

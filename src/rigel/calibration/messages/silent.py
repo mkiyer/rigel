@@ -2,39 +2,19 @@
 
        Gate: ``tests/calibration/test_sweep_backbone.py``
 
-Five lines of behaviour, and that is the point: a reader of ``sweep.py`` plus this file holds
-the whole working backbone. :mod:`~.transfer` is the shipped policy; this one is what every policy
-is priced against.
-
-It is a MEASURED floor, not a placeholder. On strand-specific data a sighted exon's own solve is
-already excellent and a message can mostly only disturb it, so the bar a policy is held to is: WIN
-on unstranded data, do minimal HARM against this floor on stranded data, the two halves never
-pooled (`scripts/design/policy_benchmark.py` prints them apart).
+The kernel runs no layer for it (`native/solve_kernel.cpp`): every node holds silence from each side it
+has a neighbour on, and ψ solves every slot on its own evidence and the prior alone. Every message policy
+is judged against this floor — win on unstranded data, minimal harm on stranded data, never pooled.
 """
 
 from __future__ import annotations
 
-from . import ChainView, PsiMessage, BlockContext
-
 __all__ = ["SilentPolicy"]
 
 
-class _PreparedSilence:
-    def run_pass(self, received, seq, nbr, terminal, *, backward: bool) -> None:
-        return  # sends nothing: every node with a neighbour holds silence from this side
-
-    def solve(self, from_left, from_right) -> PsiMessage:
-        return PsiMessage.silent()
-
-
 class SilentPolicy:
-    """Sends nothing on any channel. ψ then carries the slot's OWN evidence alone — its two strand counts,
-    its spliced count, the fitted gDNA prior and the intron factory."""
-
     name = "silent"
+    strand = None
 
-    def library(self, view: ChainView) -> None:
-        return None  # nothing to reduce: no message needs a library-wide fact
-
-    def prepare(self, ctx: BlockContext, library) -> _PreparedSilence:
-        return _PreparedSilence()
+    def library(self, view):
+        return None

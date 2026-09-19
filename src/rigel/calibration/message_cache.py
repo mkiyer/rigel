@@ -2,10 +2,11 @@
 
        Gate: ``tests/calibration/test_sweep_backbone.py`` (the cache tests)
 
-`sweep._solve_block` asks the cache for a block's delivered messages before it runs the policy, and
-stores them after; `calibrate` builds one cache per run and hands it to every refit sweep. What the layer
-reads, and so what the key digests, is the block's :class:`~.messages.BlockContext`, the policy's library
-and the policy itself — never the prior.
+`sweep.solve_chain` asks the cache, per block, for the block's delivery before the kernel runs, hands the
+kernel what it holds, and stores what the kernel delivered for the blocks it ran; `calibrate` builds one
+cache per run and hands it to every refit sweep. What the layer reads, and so what the key digests, is
+the block's slice of the chain's arrays (:class:`~.messages.ChainView`), the incoming belief, the
+factory's digest, the library and the policy — never the prior.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import hashlib
 
 import numpy as np
 
-from .messages import BlockContext, PsiMessage
+from .messages import ChainView
 
 __all__ = ["MessageCache"]
 
@@ -23,23 +24,25 @@ __all__ = ["MessageCache"]
 class MessageCache:
     """The message layer's output, shared across the sweeps that would recompute it identically.
 
-    The message layer — the policy's ``prepare``, the two passes and its ``solve`` — reads only the
-    context (observations, geometry, the factory rows, the incoming belief's ``belief_fg`` and the
-    own-composition bits ``has_own_composition``), the library and the grid; never the prior.
-    ``calibrate`` resets the belief before every sweep, so for the refit sweeps that share a grid every one of those inputs is
-    identical and so is every message delivered (measured on the human chain: sweeps 1–3 deliver the
-    same ψ rows and cube rows to the bit, and every node hears the same thing). Only the own-claims
-    solve and the final ψ see the prior. So a refit sweep's blocks are served from here and pay only
-    the two ψ solves.
+    The message layer — the policy's builders, the two passes and its solve, run per block inside the
+    kernel — reads only the block's slice of the chain's observations and geometry, the incoming belief
+    (the variance freeze of every node's own strand claim), the factory's rows, the grid, the library and
+    the policy; never the prior. ``calibrate`` resets the belief before every sweep, so for the refit
+    sweeps that share a grid every one of those inputs is identical and so is every message delivered
+    (measured on the human chain: sweeps 1–3 deliver the same ψ rows and cube rows to the bit, and every
+    node hears the same thing). Only the own-claims solve and the final ψ see the prior. So a refit
+    sweep's blocks are served from here and pay only the two ψ solves.
 
     CONTENT-KEYED, so it is safe by construction rather than by trust: an entry's key is a digest of
-    every input the layer reads, and a changed belief, row, count, library or grid misses; the factory
+    every input the layer reads, and a changed belief, row, count, library or grid misses. The factory
     rows enter by the digest of their inputs (`calibrate.FactoryRows.digest`), which they are a pure
-    function of, rather than of their ``(n, K)`` bytes — the same key at 1/K of the hashing. An entry
-    holds the delivered rows sparsely (only the non-zero rows), the cube rows as the solve reads them
-    (a :class:`~.simplex_logodds.CubeRows` table), the block's ``held_composition`` and its assertion counts
-    (as a plain dict; the backbone rebuilds its `AssertionCounts` from it). Diagnostics never read from it:
-    a captured sweep runs the whole layer.
+    function of, rather than of their ``(n, K)`` bytes — the same key at 1/K of the hashing; a node's
+    own-evidence bit, which the layer also reads, is a function of what the key already holds (a count
+    above zero, the protocol's liveness, the single-strand bits, the factory row's curvature) and needs no
+    field of its own. An entry is the block's delivery exactly as the kernel returns it and takes it back
+    — whether rows were delivered, the delivered rows with their slots (sparse by construction: the solve
+    knows which rows it wrote), the cube table or ``None``, the owned slots' held-composition bits.
+    Diagnostics never read from it: a captured sweep runs the whole layer.
     """
 
     def __init__(self):
@@ -48,33 +51,36 @@ class MessageCache:
         self.misses = 0
 
     @staticmethod
-    def key(ctx: BlockContext, library, policy, factory_digest: bytes | None = None) -> bytes:
-        """The digest of everything the message layer reads for one block: every field of the block's
-        context — iterated from the dataclass, so a field added to the context cannot be left out of the
-        digest — then the policy's library and the policy's name and strand model. ``factory_digest``
-        stands in for the ``factory_rows`` field where the rows come from a factory: the digest of what
-        they are a pure function of (the background, the block's intron counts and opportunities, the
-        grid), so the rows' bytes are never hashed; rows given as an array digest by content."""
+    def key(
+        view: ChainView, block, belief_fg, factory_digest: bytes | None, library, policy
+    ) -> bytes:
+        """The digest of everything the message layer reads for one block: the block's slice of every
+        array field of the chain view — iterated from the dataclass, so a field added to the view cannot
+        be left out of the digest — and its scalars, the block's slice of the incoming belief, the
+        factory's digest for the block (or its absence), then the policy's library, name and strand
+        model."""
         h = hashlib.blake2b(digest_size=16)
-        for f in dataclasses.fields(ctx):
-            part = getattr(ctx, f.name)
-            if f.name == "factory_rows" and factory_digest is not None:
-                h.update(b"factory_rows:digest")
-                h.update(factory_digest)
-            elif isinstance(part, np.ndarray):
-                a = np.ascontiguousarray(part)
-                h.update(f"{f.name}{a.dtype.str}{a.shape}".encode())
-                h.update(a)
+        sl = slice(int(block.start), int(block.end))
+
+        def array(name, a):
+            a = np.ascontiguousarray(a)
+            h.update(f"{name}{a.dtype.str}{a.shape}".encode())
+            h.update(a)
+
+        for f in dataclasses.fields(view):
+            part = getattr(view, f.name)
+            if isinstance(part, np.ndarray):
+                array(f.name, part[sl])
             else:
                 h.update(f"{f.name}={part!r}".encode())
-        h.update(
-            repr(
-                (library, getattr(policy, "name", None), getattr(policy, "_strand", None))
-            ).encode()
-        )
+        array("belief_fg", np.asarray(belief_fg, np.float64)[sl])
+        h.update(b"factory:" + (b"none" if factory_digest is None else factory_digest))
+        h.update(repr((library, policy.name, policy.strand)).encode())
         return h.digest()
 
-    def get(self, key: bytes):
+    def served(self, key: bytes):
+        """The block's delivery under ``key`` — as the kernel takes it — or ``None``; counted as a hit or a
+        miss."""
         entry = self._entries.get(key)
         if entry is None:
             self.misses += 1
@@ -82,40 +88,16 @@ class MessageCache:
         self.hits += 1
         return entry
 
-    def put(self, key: bytes, msg: PsiMessage, held_composition, counts: dict) -> None:
-        rows = msg.lam_rows
-        if rows is None:
-            sparse = None
-        else:
-            rows = np.asarray(rows)
-            idx = np.flatnonzero(np.any(rows != 0.0, axis=1))
-            sparse = (rows.shape, idx, rows[idx].copy())
-        self._entries[key] = (
-            sparse,
-            msg.cube_rows,
-            np.array(held_composition, bool),
-            dict(counts),
-        )
-
-    @staticmethod
-    def message(entry) -> PsiMessage:
-        """The stored entry as the message the solve receives — the rows dense again, zeros exact."""
-        sparse, cube, _held, _counts = entry
-        if sparse is None:
-            rows = None
-        else:
-            shape, idx, kept = sparse
-            rows = np.zeros(shape)
-            rows[idx] = kept
-        return PsiMessage(lam_rows=rows, cube_rows=cube)
+    def put(self, key: bytes, delivery) -> None:
+        """The kernel's delivery for a block it ran the layer on: ``(rows_delivered, slot, rows, cube or
+        None, held)``."""
+        self._entries[key] = delivery
 
     @property
     def nbytes(self) -> int:
         total = 0
-        for sparse, cube, held, _counts in self._entries.values():
-            if sparse is not None:
-                total += sparse[1].nbytes + sparse[2].nbytes
+        for _live, slot, rows, cube, held in self._entries.values():
+            total += slot.nbytes + rows.nbytes + held.nbytes
             if cube is not None:
-                total += cube.nbytes
-            total += held.nbytes
+                total += sum(a.nbytes for a in cube)
         return total

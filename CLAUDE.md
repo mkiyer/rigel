@@ -98,14 +98,18 @@ the graph from the AST.
 
 `CalibrationConfig.message_policy = "transfer"` ships (the default since 2026-09-09; `"silent"` is the
 floor, and the one field selects — the `message_propagation` switch retired 2026-09-13). Two policies, selected by one config value (an unknown name raises), both on the two-phase
-backbone (`docs/DESIGN.md` §6b.11–§6b.12): `prepare` (every node's own claim) → a forward pass and a
-backward pass of `receive(source, destination)`, so every node ends with one message from each
-neighbour it has → `solve(from_left, from_right)`, which hands ψ two row channels and nothing else.
+backbone (`docs/DESIGN.md` §6b.11–§6b.12): every node's own claim → a forward pass and a backward pass in
+which each recipient receives what its neighbour sends, so every node ends with one message from each
+neighbour it has → the solve, which hands ψ two row channels and nothing else. THE SWEEP IS ONE NATIVE CALL
+(`native.solve_blocks`, `native/solve_kernel.cpp`, since 2026-09-18): the chain's locus blocks are solved on a pool
+of threads, one block at a time, end to end — the prior rows, the self-solve, the layer, the final solve, the
+write-back — bit-identical at every thread count; `sweep.solve_chain` cuts the blocks, reduces the library, asks
+the message cache, makes the call and judges the assertions' counts.
 
 | policy | |
 |---|---|
 | `silent` | the measured floor (`messages/silent.py`) |
-| `transfer` | the shipped default (`messages/transfer.py`; the face table in `messages/faces.py`, the level lanes in `messages/lanes.py`; the row constructors are `native/transfer_rows.h`, bound for the gates as `native.transfer_rows`). `prepare` is one native call per block (`native.transfer_prepare`, `native/transfer_kernel.cpp`), a table of contents of named builders, one per message: `claims`, `splice_faces`, `edge_level`, `terminus_rules`, `alternative_splice_site`, `gdna_lane`, `rna_lane`; the passes are native too (`transfer_pass`, the same file), the row constructors shared in `transfer_rows.h`. Every hop pays its pair's counting plus the disagreement beyond it |
+| `transfer` | the shipped default (`messages/transfer.py`: the policy's name, its strand model and its LIBRARY — the three level lanes' coordinates and the strand witness's liveness, the only cross-block reduction a message may use). Everything else is the kernel's (`native/transfer_kernel.h`, run per block inside `native.solve_blocks`): the builders — a table of contents of named builders, one per message: `claims`, `splice_faces`, `edge_level`, `terminus_rules`, `alternative_splice_site`, `gdna_lane`, `rna_lane` — the two passes and the solve, on the row constructors of `native/transfer_rows.h` (bound for the gates as `native.transfer_rows`). Every hop pays its pair's counting plus the disagreement beyond it. The gates read the kernel's tables through `native.transfer_prepare` / `transfer_pass` / `transfer_solve` (`tests/calibration/_transfer_harness.py`) |
 
 Messages exist for the slots whose own solve has no composition channel — unstranded data and AMBIG
 slots. **We do not expect to beat `silent`**: on strand-specific data a sighted exon's own solve is
@@ -187,8 +191,13 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,437 passed / 0 skipped / 5 xfail, 3,442 collected** (re-derived
-2026-09-18 after ψ took its priors apart: +1 the bit-equality gate on the kernel's arm in `test_landscape.py`, +1 for
+**The standing baseline: 0 failed / 3,430 passed / 0 skipped / 5 xfail, 3,435 collected** (re-derived
+2026-09-18 after the block went into one native call: −10 for the four files deleted — `messages/faces.py` and
+`messages/lanes.py` by the module row (−3 each), `native/psi_kernel.cpp` and `native/transfer_kernel.cpp` by the row
+below (−2 each) — +6 for `native/solve_kernel.cpp`, `transfer_kernel.h` and `psi_kernel.h` (+2 each), −1 the `RowTable`
+gate and −1 the no-copy gate (the Python tables they tested are gone), −2 the two backbone gates on those tables (a
+lane reaching the solve in the same table, the block view's slicing), +1 the thread gate on `solve_chain`; before that
+after ψ took its priors apart: +1 the bit-equality gate on the kernel's arm in `test_landscape.py`, +1 for
 `docs/dev/BLOCK_NATIVE_PLAN.md` by the `docs/dev/` row; before that after the cache key moved to the factory's inputs: +2 the digest gates in `test_sweep_backbone.py`; before
 that after ψ went threaded: +2 the thread-exactness and budget gates in `test_sweep.py`; before that after
 the one-path convergence of the pass: −6 for `test_pass_kernel.py` (its four gates and the `tests/` row's 2),
@@ -259,7 +268,7 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | **⭐⭐⭐ START A SESSION HERE** | |
 | `design/preflight.py` | ⭐⭐⭐ **CAN THIS SESSION RUN AND REGENERATE EVERYTHING? — one command, one verdict, before anything else.** Checks the toolchain (the `rigel` env, the native extension, the CLI), both references, both panels (scan caches, oracle caches with every part `panel.py` requires, the certified `slot_truth`) and that every `scripts/design/` instrument IMPORTS. ⛔ It changes nothing and measures nothing — every check is a read or an import, and a ✘ prints the exact command that regenerates the missing artifact. ⭐ **The default is ~2 s**; `--full` adds every instrument's `--self-test`, in seconds. `--self-test` 7/7 |
 | **⭐⭐⭐ THE POLICY BENCHMARK — where a message-policy change is judged** | |
-| `design/policy_prototype.py` | ⭐⭐⭐ **HOW DOES A PROTOTYPE MESSAGE POLICY SCORE, PER GENE TYPE AND PER SLOT, AGAINST CERTIFIED TRUTH?** — the harness every message rung is developed on before `src/`. Installs a class from `--module` in place of the shipped policy for the `transfer` arm; whole-library and per-type tables, `--by-class` (the error at each NODE CLASS — the view that judges a message at its destinations), `dissect` for one gene type slot by slot. ⛔ Compare src-vs-src across a landing (`TRAPS: a-harness-on-the-parent-class-dies-when-the-parent-gains-the-mechanism`). `--self-test` |
+| `design/policy_prototype.py` | ⭐⭐⭐ **HOW DO THE SHIPPED MESSAGE POLICIES SCORE, PER GENE TYPE AND PER SLOT, AGAINST CERTIFIED TRUTH?** — the harness a message mechanism is judged on before it ships. The layer runs inside the solve's native kernel, so a mechanism is prototyped in C++ (`native/transfer_kernel.h`) and scored here against the tree without it, in a worktree, on the same condition; whole-library and per-type tables, `--by-class` (the error at each NODE CLASS — the view that judges a message at its destinations), `dissect` for one gene type slot by slot. ⛔ Compare src-vs-src across a landing (`TRAPS: a-harness-on-the-parent-class-dies-when-the-parent-gains-the-mechanism`). `--self-test` |
 | `design/policy_benchmark.py` | ⭐⭐⭐ **HOW DOES EACH POLICY SCORE, PER CONDITION, AGAINST CERTIFIED TRUTH?** Whole-library gDNA error in fragments, per axis, one row per condition, for `silent` and `transfer`. ⭐ `--panel test` is the test chromosome (seconds — the development loop); `--panel ladder` is the 16-condition benchmark. ⭐ **`--by-class`: WHERE DOES A POLICY'S REMAINING ERROR SIT, BY NODE CLASS?** — per certified stratum, boundaries split by terminus flag, exons by reach (licensed face / edge only / walled); the instrument that ranks the rebuild's holes. `--set SECTION.FIELD=VALUE` applies a config value on top of every policy, the same spelling as `calibration_vs_oracle.py`. ⛔ NEVER POOLED, and the two halves are judged against DIFFERENT bars: unstranded rows are where a policy must WIN, stranded rows are where it must do minimal HARM against silence |
 | **⭐⭐⭐ 0.8.0'S METRIC — calibration against ORACLE CALIBRATION** | |
 | `design/calibration_vs_oracle.py` | ⭐⭐⭐ **IS THE CALIBRATION RESULT ITSELF RIGHT, SCORED AGAINST AN ORACLE CALIBRATION? — 0.8.0's metric, and it reaches the effective-length shrinkage, which no prior-injection arm does.** `P = calibrate(...)` against the same payload with only the six deconvolved arrays swapped, per stratum (the ruler's reference is the result's own, so at capture-OFF `O` is the no-enrichment null with no fitting); `--set SECTION.FIELD=VALUE` prices any config value on both arms — `--set calibration.message_policy=silent` is the ship protocol's first item — so a policy or a grid arm is a config value and nothing in `src/` moves to price it. ⛔ Read `ruler_n_moved`, never the aggregate: the total can barely move while nearly every transcript is redistributed. No solver, no EM, no re-scan — ~5–12 s/condition. `--self-test` 39/39 |

@@ -69,7 +69,6 @@ from .derive import gdna_density_global
 from .errors import CalibrationStrandError
 from .density_deconv import (
     GdnaBackground,
-    density_lambda_factor,
     fit_intron_background,
 )
 from .abundance_landscape import AbundanceLandscape, fit_abundance_landscape, located_enriched_mode
@@ -175,19 +174,17 @@ def _project_eff(chain, eff_slots, payload) -> tuple[np.ndarray, np.ndarray]:
 
 
 class FactoryRows:
-    """The gDNA intron factory's λ-factor rows, built per block on demand and never held for the chain.
+    """The gDNA intron factory's λ-factor rows as their INPUTS: the background, the intron mask, each
+    intron's count and opportunity, the grid — the solve's kernel builds the rows per block from these
+    (`native/solve_kernel.cpp`, ``factory_row``), so no ``(n_slots, K)`` array ever exists.
 
-    For each INTRON REGION slot, ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` over the σ(λ) solve grid
-    (`density_lambda_factor`) — the factory deconvolves confident gDNA from introns against the
-    intergenic background; ZERO on every other slot, a no-op there. BOUNDARY slots are zero structurally:
-    the factor scores a CONTAINED count against a CONTAINED support, and a boundary's count is a
-    crossing with a different divisor. gDNA is strand-symmetric, so the factor lives purely on ``λ`` and
-    is consumed identically by every slot class.
-
-    ``rows[sl]`` is the ``(len(sl), K)`` array for the slots ``sl`` — the sweep asks for each block's
-    rows as it solves the block, so the chain-wide ``(n_slots, K)`` array (2–5 GB on the human chain,
-    one per bracket) never exists; ``np.asarray(rows)`` materialises the whole chain and is for the
-    diagnostic capture only.
+    For each INTRON REGION slot the row is ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` over the σ(λ) solve
+    grid — the factory deconvolves confident gDNA from introns against the intergenic background; NONE on
+    every other slot, a no-op there. BOUNDARY slots carry none structurally: the factor scores a CONTAINED
+    count against a CONTAINED support, and a boundary's count is a crossing with a different divisor. gDNA
+    is strand-symmetric, so the factor lives purely on ``λ`` and is consumed identically by every slot
+    class. ``kernel()`` is the tuple the sweep hands the kernel; ``digest(block)`` the message cache's key
+    for a block's rows.
     """
 
     def __init__(
@@ -213,19 +210,26 @@ class FactoryRows:
         )
         self.shape = (n, int(self.fg.shape[0]))
 
-    def __getitem__(self, sl) -> np.ndarray:
-        sel = self.is_intron[sl]
-        out = np.zeros((sel.shape[0], self.shape[1]), dtype=np.float64)
-        if sel.any():
-            out[sel] = density_lambda_factor(
-                self.background, self.count[sl][sel], self.eff[sl][sel], self.fg
-            )
-        return out
+    def kernel(self) -> tuple:
+        """The factory as the kernel takes it: its inputs — the intron mask, every slot's contained count and
+        gDNA opportunity, the background's location, over-dispersion, size and whether it is informative."""
+        bg = self.background
+        return (
+            "inputs",
+            np.ascontiguousarray(self.is_intron, bool),
+            np.ascontiguousarray(self.count, np.float64),
+            np.ascontiguousarray(self.eff, np.float64),
+            float(bg.log_mu_bg),
+            float(bg.alpha),
+            float(bg.size),
+            bool(bg.informative),
+        )
 
-    def digest(self, sl) -> bytes:
-        """What ``self[sl]`` is a pure function of, digested — the background's fields, the block's intron
+    def digest(self, block) -> bytes:
+        """What a block's rows are a pure function of, digested — the background's fields, the block's intron
         mask, counts and opportunities, the grid: the message cache's key for a block's rows
         (`message_cache.MessageCache.key`), at 1/K of hashing the rows themselves."""
+        sl = slice(int(block.start), int(block.end))
         h = hashlib.blake2b(digest_size=16)
         h.update(repr(dataclasses.astuple(self.background)).encode())
         for a in (self.is_intron[sl], self.count[sl], self.eff[sl], self.fg):
@@ -233,9 +237,6 @@ class FactoryRows:
             h.update(f"{a.dtype.str}{a.shape}".encode())
             h.update(a)
         return h.digest()
-
-    def __array__(self, dtype=None, copy=None):
-        return self[:] if dtype is None else self[:].astype(dtype)
 
 
 #: Minimum training regions for a hyperprior fit — below this the population is not a population.
@@ -455,9 +456,9 @@ def _fit_strand(substrate, region_arrays, strand_models, inj) -> _Strand:
 class _IntronFactory:
     """The gDNA INTRON FACTORY: the intergenic background — fitted here with ``include_introns=False``
     (an intron-inclusive pool is inflated by nascent RNA worst exactly where gDNA is scarce), or
-    injected — and its λ-factor rows on a solve grid (:class:`FactoryRows`, built per block as the sweep
-    asks). ``background`` is ``None`` when the factory is off, and ``rows`` is then ``None`` too, which
-    leaves every sweep byte-identical to the pre-factory path.
+    injected — and its λ-factor rows on a solve grid (:class:`FactoryRows`: the inputs the kernel builds
+    each block's rows from). ``background`` is ``None`` when the factory is off, and ``rows`` is then
+    ``None`` too, which leaves every sweep byte-identical to the pre-factory path.
 
     ⛔ The rows are evaluated ON the solve grid, so they are a function of ``(n_grid, L)`` and are
     REBUILT when the bracket widens: there is no map onto a wider domain the factor was never evaluated
@@ -480,8 +481,8 @@ class _IntronFactory:
         self._rows: dict = {}
 
     def rows(self, n_grid: int, window: float):
-        """The λ-factor rows on the grid ``(n_grid, window)`` as a :class:`FactoryRows` — sliced per block
-        by the sweep — or ``None`` when there is nothing to factor (the background uninformative, no
+        """The λ-factor rows on the grid ``(n_grid, window)`` as a :class:`FactoryRows` — the inputs the
+        kernel builds each block's rows from — or ``None`` when there is nothing to factor (the background uninformative, no
         intron regions), which leaves every sweep byte-identical to the pre-factory
         path."""
         if self.background is None or not self.background.informative:

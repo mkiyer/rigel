@@ -136,9 +136,8 @@ the marginal's log and exp per cell per node (4.2 s), the blur (3.5 s), the tran
    priced and not taken (a number moved for 2 % of the run).
 3. The cache key on the factory's inputs (exact; the largest Python item of a refit sweep).
 4. ~~The gDNA arm inside ψ; `_psi`'s row add~~ — LANDED 2026-09-18, exact.
-5. The block in one native call with a C++ pool over blocks — or Python threads over blocks with GIL-releasing
-   kernels, which on the deep library's layer-running sweeps already pays — judged on the Python floor measured
-   after 3–4.
+5. ~~The block in one native call with a C++ pool over blocks~~ — LANDED 2026-09-18 (`BLOCK_NATIVE_PLAN.md`'s commit 20;
+   VCaP at 8 threads 198 → 144 s and 194 → 138 s (0.73 / 0.71), calibrate 85.6 → 33.7 s, the four sweeps 68.8 → 16.8 s and 66.3 → 15.9 s (0.24)).
 
 ## Open for the owner
 
