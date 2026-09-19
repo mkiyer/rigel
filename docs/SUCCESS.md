@@ -270,11 +270,12 @@ python scripts/design/solvability_audit.py --suite $LADDER --index $INDEX \
 # 4. THE TWO ZERO CONTROLS — owner-required on EVERY experiment, both arms.
 python scripts/design/zero_controls.py
 
-# 5. THE THERMOMETER — the tool end to end, and the prior-injection ceiling above it.
+# 5. THE NUMBER THE RELEASE SHIPS ON — the tool end to end, with the ceiling arms above it.
+#    `panel.py score` reads every arm under fractional assignment (the protocol above).
 #    --jobs 2, not more: run_pipeline holds 7-8.5 GB per 10 M-fragment condition.
 #    `base_reseed` is the noise floor; any arm delta inside it is a sampling draw.
-python scripts/sim/panel.py score  --config $CFG --arms base base_reseed oracle --jobs 2
-python scripts/sim/panel.py report --config $CFG --arms base base_reseed oracle
+python scripts/sim/panel.py score  --config $CFG --arms base base_reseed oracle oracle_ruler --jobs 2
+python scripts/sim/panel.py report --config $CFG --arms base base_reseed oracle oracle_ruler
 
 # 6. STAGE A is CLOSED — this block is a REGRESSION check, run it after an accumulator or native change.
 python -m pytest tests/native tests/calibration -q     # FIDELITY

@@ -263,12 +263,28 @@ nothing arbitrating them; the message is the accurate voice there and the refit 
 E-step: `calibration_walk.py` now says the prior does the unstranded rows and the messages the stranded
 capture-ON ones. Belongs with `ISSUES: gdna-landscape-trains-on-false-positives`.
 
-### antisense-prior-assembly-casualty
-`priority: the prior-assembly session · kind: decision · 2026-08-18 (named 2026-09-13)`
-`tests/scenarios/test_antisense_intronic.py::test_nrna_multiexon_t2_low_ss` is a strict xfail: `assemble_priors`
-pins synthetic nascent RNA at Dirichlet alpha = 0 (`EQUATIONS.md` §9b), so recovered RNA lands on the annotated
-antisense t2 — 72 today against the test's limit of 50. The owner plans to change the alpha = 0 rule in the
-post-calibration prior-assembly session; the xfail closes there, with a test that asserts the new rule's promise.
+### nascent-gets-no-rna-prior
+`priority: NOW — the next session's first build (owner, 2026-09-19: "it's a hack; restore nascent RNA fairness") · kind: decision · 2026-08-18 (named 2026-09-13, re-scoped 2026-09-19)`
+The EM hands the locus's RNA pseudocount only to the components the annotation asserts exist: a synthetic nascent
+entity is excluded and receives none (Dirichlet alpha = 0). The rule is in
+`native/em_solver.cpp:apply_grouped_prior_update`, fed by `estimator.run_batch_locus_em_partitioned`'s
+`t_is_synthetic`, and derived in `EQUATIONS.md` §9b/§9b.1; `assemble_priors` only supplies the per-locus total.
+THE OWNER'S RULING: it is a hack, and nascent fairness is restored so that the per-transcript prior can be
+described as distributing the RNA pseudocounts uniformly over the RNA components — no component singled out for
+zero. ⭐ THE ONE OPEN CHOICE is the weight, and §9b.1 already derives what hangs on it: the shipped allocation is
+`a_i = P · raw[i] / Σ_eligible raw`, proportional to the EM's own belief, and at `raw[i] = 0` it is ABSORBING —
+which is what stops a zombie entity being revived by prior mass alone. Admitting entities at that weight keeps the
+absorbing state; giving every component an equal share removes it, and `EQUATIONS.md` §9b.1 names the activation
+threshold to design against (the VBEM fixed point, ~0.16–0.47 alpha units, not the exponential cutoff 0.0014).
+The gDNA:RNA split must not move: the prior is redistributed strictly WITHIN the RNA pool and the per-M-step
+identity is `Σ out = rna_count + rna_prior` either way (a gate in `test_estimator.py` holds it).
+WHAT MOVES WITH IT: `EQUATIONS.md` §9b and §9b.1, the gates in `tests/test_estimator.py` that pin the synthetic
+branch (including the bit-identity of a locus with no synthetic component), and the strict xfail
+`tests/scenarios/test_antisense_intronic.py::test_nrna_multiexon_t2_low_ss`, which the alpha = 0 rule owns: 72
+fragments on the annotated antisense `t2` against the test's limit of 50. If the restoration closes it, the xfail
+goes with a test asserting the new rule's promise; if it does not, the entry says so with the number. Then
+RE-MEASURE the baseline on the rebuilt ladder before anything else is built on it.
+`quant_accuracy.py` per stratum above `--arm base_reseed`, `zero_controls.py`, `prior_vs_oracle.py`.
 
 ### the-atom-at-an-unwitnessed-both-strand-slot
 `priority: later — accepted as a limit of the information (owner, 2026-09-14) · kind: known limit · 2026-09-14`

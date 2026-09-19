@@ -255,7 +255,7 @@ per-interval-length gates in `test_effective_length.py` (+18), `test_capture_eff
 `test_priors.py` 29 → 27 with the floor's tests replaced by the object-form length tests; the goldens unchanged to
 the bit). The 5 xfails are executable
 records of proven defects whose fixes are elsewhere
-(`ISSUES: two-sided-exon-row`; `ISSUES: antisense-prior-assembly-casualty`;
+(`ISSUES: two-sided-exon-row`; `ISSUES: nascent-gets-no-rna-prior`;
 `ISSUES: the-lower-bound-noise-ratchet`, the encompassing locus's shallow flank under an edge level;
 `ISSUES: nested-antisense-leak-under-the-sane-ruler`, two strand rungs of one negative control — the EM's
 assignment at an unwitnessed nested transcript, uncovered when the ruler stopped contracting a gDNA-free
@@ -313,8 +313,8 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | `sim/panel.py` | ⭐⭐⭐ **HOW IS A PANEL BUILT, SIMULATED, CACHED AND SCORED? — one command per stage**: `status` / `build` / `simulate` / `cache` / `score` / `report`, every path derived from one panel YAML. ⭐ Run `status` FIRST — every stage is expensive and resumable, and it names the next one. ⛔ It adds no measurement code: each stage shells out to the instrument that already owns it. ⛔ `cache` builds BOTH caches, and the oracle one is the origin-split truth every scoring instrument reads. Gated by `tests/test_panel_workflow.py` |
 | `design/build_scan_cache.py` | **SCAN ONCE, CALIBRATE MANY TIMES.** ⛔ The cache key hashes `accumulator.cpp`'s deposit rule and not `resolve.cpp`'s fragment construction, so for a change to which fragments are OFFERED use `--force` or delete the caches by hand |
 | `sim/build_suite_reference.py` · `design_suite_probes.py` · `simulate_reads.py` | **HOW IS THE PANEL'S SUBSTRATE BUILT?** ⚠ `panel.py build` drives the last two; the reference carve needs the source genome/GTF, which a panel config does not name, so it stays manual |
-| **⭐⭐ the prior assembler, and the end-to-end thermometer above it** | |
-| `design/quant_accuracy.py` | ⭐⭐⭐ **HOW ACCURATE IS THE TOOL END TO END, AND WHAT IS A PERFECT PRIOR WORTH?** `--arm base` plus the oracle and per-field injection arms, scored count against count. ⚠ A THERMOMETER above 0.8.0's metric, never the target |
+| **⭐⭐⭐ the prior assembler, and THE NUMBER THE RELEASE SHIPS ON** | |
+| `design/quant_accuracy.py` | ⭐⭐⭐ **HOW ACCURATE IS THE TOOL END TO END, AND WHAT IS A PERFECT PRIOR WORTH?** `--arm base` plus the oracle and per-field injection arms, scored count against count. ⭐ Read per stratum, above `--arm base_reseed`, and under `--set em.assignment_mode=fractional` (owner, 2026-09-19): one of 0.8.0's TWO primary numbers beside the calibration metric, never a stand-in for it |
 | **⭐⭐⭐ where to develop** | |
 | `design/rename_identity.py` | ⭐⭐⭐ **IS THIS RENAME, REFACTOR OR SPEED-UP NUMERICALLY A NO-OP?** `--freeze` captures one reference, `--check` compares after every stage — on array CONTENT and the transcript table, never on names; `--bam` takes a real library instead of a panel condition. ⚠ The reference is frozen, never rolling. `--self-test` 8/8 |
 | `design/rename_census.py` | ⭐⭐⭐ **WHICH NAMES DOES A VOCABULARY RULING TOUCH, AND WHICH CARRY TWO SENSES?** Reports by kind — identifiers, C++, prose — and never renames; `--sense <token>` dumps every site with context. ⛔ Run it before renaming anything |

@@ -405,8 +405,9 @@ floor that cannot be falsified by turning the conditioning off is not a floor.
 
 **judge-a-ruler-by-its-within-gene-spread. A length model closer to the truth transcript by transcript can
 still be worse end to end, because the EM reads only the ratios inside a locus.** On the ladder's stranded
-capture-ON `g05` row the shipped capture ruler was off by more than 0.5 nat on 15 % of transcripts against 33 %
-with no ruler at all, and it misassigned a third more fragments (10.5 % against 7.8 % of the RNA): no ruler is
+capture-ON `g05` row (the ladder retired 2026-09-19, before the capture physics was corrected — the ranking is
+the lesson, not the level) the shipped capture ruler was off by more than 0.5 nat on 15 % of transcripts against
+33 % with no ruler at all, and it misassigned a third more fragments (10.5 % against 7.8 % of the RNA): no ruler is
 wrong consistently inside a gene and the error cancels in the split, while the shipped ruler's errors are
 independent across isoforms and do not. The within-gene spread of the log error ranked every ruler tried in the
 order of its end-to-end error (0.036 / 0.072 / 0.098 nat, 2026-09-19). Score anything the EM divides by — a

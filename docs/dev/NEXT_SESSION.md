@@ -1,52 +1,89 @@
-# NEXT SESSION — start here (2026-09-19, night: the capture physics is corrected and the ladder is rebuilt)
+# NEXT SESSION — start here (2026-09-19, end of day: restore nascent RNA's share of the prior, re-measure, then the EM's gDNA split)
 
 This file is only how to begin. The ranked view is `docs/ROADMAP.md`, the open problems are `docs/ISSUES.md`,
 the rulings and the record are `docs/DESIGN.md` (§0b carries the scope and its 2026-09-19 amendment), what
 "done" means is `docs/SUCCESS.md`, the lessons are `docs/TRAPS.md` cited by name, and the release procedure is
 `docs/MANUAL.md` / `docs/PUBLISHING.md`.
 
-## What changed today
+## Where the tool is
 
-THE SIMULATOR'S CAPTURE PHYSICS (owner ruling, 2026-09-19). A molecule hybridises through ONE contiguous part of
-a probe: a transcript holding the junction a probe spans binds it whole, while gDNA, a nascent span and an isoform
-without the junction hold its parts apart and bind the better one. That geometry is gDNA's whole disadvantage —
-the `gdna_split_penalty` that bound a gDNA half-match at a fifth of the identical cDNA one is gone, and the loader
-refuses a config that still carries the key. THE LADDER WAS DELETED AND REBUILT under it (23 GB, 16 conditions,
-cached and certified, simulator gates 6/6); its capture-OFF rows are bit-identical to the retired ladder's, which
-is the rebuild's own control, and the capture-ON identity reference was re-frozen (the capture-OFF one still
-passes `--check` bit-identically).
+Everything through `61e82758` is landed and pushed; the tree is clean, the suite is 3,425 passed / 5 xfail /
+3,430 collected and `preflight.py --full` is green. The ladder was REBUILT today under corrected capture physics
+(a fragment binds through one contiguous part of a probe; the `gdna_split_penalty` is gone), and on it the
+deliverable reads, under fractional assignment, transcript-level Σ|Δ| as a share of the true RNA at
+`g00` / `g05` / `g50` / `g98`:
 
-THE DELIVERABLE, on the rebuilt ladder, is in `ROADMAP.md`'s claim: stranded × capture-ON now reads 6.8 / 4.5 /
-7.8 / 109.8 % at `g00` / `g05` / `g50` / `g98`, where the retired ladder read 7.4 / 10.5 / 13.9 / 98.8 %. Most of
-what ranked first this morning was the simulator's asymmetry (`TRAPS: prove-the-substrate`).
+| stratum | numbers |
+|---|---|
+| unstranded × OFF | 3.1 / 3.4 / 4.2 / 35.0 % |
+| stranded × OFF | 3.3 / 2.9 / 3.9 / 24.8 % |
+| stranded × ON | 6.8 / 4.5 / 7.8 / 109.8 % |
+| unstranded × ON (deferred) | 8.3 / 12.4 / 20.8 / 739.5 % |
 
-## What is ranked now (`ROADMAP.md`)
+The reseed floor is 0–82 fragments. A perfect prior recovers nothing in scope; the simulator's own capture
+lengths take stranded ON to 2.6 / 3.4 / 8.6 %; true per-transcript weights halve every stratum.
 
-1. **The EM does not hold calibration's gDNA split** (`ISSUES: em-overturns-the-calibrated-gdna-split`) — the
-   dominant in-scope residual and the whole of `g98`: the table reads 0.4793 against 0.50 at `g50 ss.99 ON` while
-   calibration reads +0.9 %. Neither the prior, the ruler nor the gDNA length moves it. Its capture-OFF half is
-   sized at the realistic nascent share first (`ISSUES: nascent-stress-sensitivity`).
-2. **The capture ruler where no gDNA witnesses it** (`ISSUES: ruler-witness-geometry-on-transcript-panels`) — worth
-   4.2 points of stranded capture-ON at `g00` and 1.1 at `g05`. It waits on an owner decision, because the only
-   observable that sees isoform-specific capture is the probe design and Rigel reads no panel.
-3. **The per-transcript allocation** (`ISSUES: per-transcript-prior-lane`) — true weights halve every stratum.
-4. The pre-EM prior chain, now ranked by `prior_vs_oracle.py` rather than by the table.
+## ① THE FIRST JOB — restore nascent RNA's share of the RNA prior (`ISSUES: nascent-gets-no-rna-prior`)
 
-## What is stale, and what it costs to fix
+The owner's ruling (2026-09-19): the present rule is a HACK and nascent fairness is restored, so that the
+per-transcript prior can be described as distributing the RNA pseudocounts uniformly over the RNA components —
+none singled out for zero.
 
-The physics changes only a panel whose probes span junctions. The test chromosome's benign panel re-simulates
-BIT-IDENTICAL (checked), so its 30 conditions and the depth/fl/odg variants stand. Its junction-probed twin
-(`scenarios_probes_junction`, 271 split probe blocks) and the two fl-gap side panels (they share the ladder's
-panel) are STALE: re-simulating the twin is minutes, the fl-gap panels hours, and the fl-gap pair is already
-stale on its nascent model (`ISSUES: flgap-panels-stale-nascent-model`).
+**What it is today.** `native/em_solver.cpp:apply_grouped_prior_update` hands the locus's RNA pseudocount only to
+components the annotation asserts exist; a synthetic nascent entity is excluded (Dirichlet `alpha = 0`). The flag
+arrives as `t_is_synthetic` from `estimator.run_batch_locus_em_partitioned`; `assemble_priors` supplies only the
+per-locus total. The derivation is `EQUATIONS.md` §9b and §9b.1.
+
+**The one open choice — read §9b.1 before deciding.** The shipped allocation is `a_i = P · raw[i] / Σ_eligible raw`
+— in proportion to the EM's own current belief — and at `raw[i] = 0` it is ABSORBING, which is what stops a zombie
+entity being revived by prior mass alone. Admitting the entities at that same weight keeps the absorbing state and
+is the smaller change; an equal share per component removes it, and §9b.1 names the activation threshold to design
+against (the VBEM fixed point, ~0.16–0.47 alpha units, not the exponential cutoff 0.0014). Decide it explicitly
+and write the reason down.
+
+**The invariant that may not move.** The prior is redistributed strictly WITHIN the RNA pool: `Σ out over the RNA
+components = rna_count + rna_prior` per M-step, so the library gDNA fraction cannot move by this rule. A gate in
+`tests/test_estimator.py` holds it — keep it, and watch it fail under a perturbation that leaks the prior across
+the gDNA boundary.
+
+**What moves with the change.** `EQUATIONS.md` §9b and §9b.1; the gates in `tests/test_estimator.py` that pin the
+synthetic branch (including the bit-identity of a locus with no synthetic component); the strict xfail
+`tests/scenarios/test_antisense_intronic.py::test_nrna_multiexon_t2_low_ss`, which this rule owns (72 fragments on
+the annotated antisense `t2` against a limit of 50) — if the restoration closes it, replace it with a test that
+asserts the new rule's promise, and if it does not, record the number in the entry. If the `is_synthetic` plumbing
+ends up unused, delete it rather than leave it dead (`TRAPS: converge-and-delete`). It is a native change, so
+rebuild (`pip install --no-build-isolation -e ".[dev]"`).
+
+**Then RE-MEASURE, before anything else is built on it.** On the rebuilt ladder: `panel.py score` (it passes
+`--set em.assignment_mode=fractional` itself) for `base base_reseed oracle oracle_ruler`, plus
+`calibration_vs_oracle.py`, `zero_controls.py` and `policy_benchmark.py --panel ladder`. Put the numbers in
+`ROADMAP.md`'s deliverable claim beside today's, so the effect of the restoration is visible as its own step.
+
+## ② THEN the EM's gDNA split (`ISSUES: em-overturns-the-calibrated-gdna-split`)
+
+The dominant in-scope residual and the whole of `g98`: under capture the table reads 0.4793 against 0.50 at
+`g50 ss.99 ON` while calibration reads +0.9 %; at capture-OFF the same EM over-calls gDNA by taking unspliced RNA
+(a nascent-stress reading, so that half is sized at the realistic share first,
+`ISSUES: nascent-stress-sensitivity`). Neither the prior, the true ruler nor the gDNA component's length moves it.
+
+The leading hypothesis, to test first: the EM gives each locus ONE gDNA rate spread uniformly along it, while
+under capture gDNA's density is an order of magnitude higher at probed exons — where the RNA also sits. Inside a
+probed exon the model then under-predicts gDNA and the surplus goes to RNA. It fits the direction, the
+concentration in heavily probed isoform-rich genes, and its immunity to the prior and the ruler. Calibration
+already publishes per-piece efficiencies, so the test is whether a position-dependent gDNA weight closes the
+split. Start with a per-locus attribution on `g50 ss.99 ON` (the EM's gDNA against the certified truth, ranked by
+mass), then the alternatives: the prior's weight against the likelihood, and gDNA's strand handling at ss 0.99.
+The per-fragment instrument is `confusion.py` beside the dissection data (below).
+
+Then `ROADMAP.md` items ③ (the capture ruler, which waits on an owner decision) and ④ (the per-transcript lane).
 
 ## The five xfails are proven defects, each deferred to its thread
 
-`ISSUES: two-sided-exon-row`; `ISSUES: antisense-prior-assembly-casualty`;
+`ISSUES: two-sided-exon-row`; `ISSUES: nascent-gets-no-rna-prior`;
 `ISSUES: the-lower-bound-noise-ratchet`; `ISSUES: nested-antisense-leak-under-the-sane-ruler` (two rungs).
 Closing one means repairing the thing or asserting the invariant structurally, never widening a bound.
 
-## What gates the release (`ROADMAP.md` item 8)
+## What gates the release (`ROADMAP.md`'s last item)
 
 `PUBLISHING.md` is two commands and a wait; the STATE is what gates it. The deliverable measured and not
 regressed per stratum; the zero controls at 0.000 and 1.000 (`zero_controls.py`, and the `g00` rung); the
