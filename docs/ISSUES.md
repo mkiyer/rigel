@@ -49,10 +49,13 @@ is a table at its integer argument, the region-to-locus overlap is traversed onc
 thread split~~ LANDED 2026-09-19, bit-identical on all three references including the real-library one that runs
 the scan: the budget is split by the measured ratio of one decompression thread per eight workers, the scan
 34.5 → 25.8 s at 8 threads and 20.1 → 17.6 s at 16 (`ISSUES: scan-thread-split-starves-the-workers` carries the
-table); ③ the
-second pass's boundary lookups — bind the two C++ lookups BATCHED, prove the id spaces agree, restructure
-the loop around one pre-pass per reference, delete the Python mirrors (≈ 7 s, and the one-path duplicate goes
-with it); ④ the two fragment-length fits — the adjacent-pair loop and the per-exon filter vectorise BIT-EXACTLY
+table); ③ ~~the
+second pass's boundary lookups~~ LANDED 2026-09-19, bit-identical: `Accumulator::sj_edge_ids` bound, one
+pre-pass per reference, `_sj_id` and `_exact_region_bound` deleted — scoring the held fragments 11.85 → 8.66 s
+and 11.82 → 8.64 s on two interleaved pairs (`perf/phase3_2026-09-19/`), against an estimate of 7 s: ⛔ THE
+cProfile SHARE OVERSTATED IT, because that instrument's per-call overhead inflates exactly the functions with
+millions of tiny calls, which is the shape every candidate in this entry has. Read an attribution as a
+RANKING and never as a saving; ④ the two fragment-length fits — the adjacent-pair loop and the per-exon filter vectorise BIT-EXACTLY
 (`np.bincount` accumulates in input order, and an exon has at most two flanking boundaries, so a grouped mean
 equals `np.mean` on the list), while the surviving accumulation is the one item that may move a number and is
 isolated and priced for that reason (≈ 11 s of 16.3); ⑤ memory — the sweep's arena is 1.19 GB at eight threads

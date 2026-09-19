@@ -195,8 +195,10 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,420 passed / 0 skipped / 5 xfail, 3,425 collected** (re-derived
-2026-09-19 after the performance plan's phase 2: +1 the split's arithmetic gate in
+**The standing baseline: 0 failed / 3,422 passed / 0 skipped / 5 xfail, 3,427 collected** (re-derived
+2026-09-19 after the performance plan's phase 3: +2 gates — the batched sj lookup's parity with the scalar rule in
+`tests/native/test_accumulator_native_parity.py` and the two-reference id-and-motif gate in
+`test_second_pass_scoring.py`; before that after phase 2: +1 the split's arithmetic gate in
 `test_scan_order_independence.py`; before that after phase 1: +4 gates — the bisection's bit-equality against the old fixed
 loop and the log-gamma table's against the direct form in `test_gdna_density.py`, the one-traversal spy and the
 handed-in shares in `test_priors.py`; before that +1 for `docs/dev/PERFORMANCE_PLAN.md` by the `docs/dev/` row;
