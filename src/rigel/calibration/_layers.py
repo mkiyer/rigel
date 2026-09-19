@@ -81,10 +81,9 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (
         4,
         "strand — which strand a fragment came from",
-        # `strand_likelihood` is the two-component executable REFERENCE that psi's three-component
-        # form is gated against; `strand_summary` is the dependency-light QC view the pipeline reads
-        # without importing calibration; the other two are production.
-        ("strand_likelihood", "strand_balance", "strand_summary", "gdna_strand"),
+        # `strand_summary` is the dependency-light QC view the pipeline reads without importing
+        # calibration; the other two are production.
+        ("strand_balance", "strand_summary", "gdna_strand"),
     ),
     (
         5,

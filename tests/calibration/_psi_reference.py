@@ -2,7 +2,8 @@
 
 ψ is native (`native/psi_kernel.h`, read through `simplex_logodds.psi_cube`); the gates that hold it to its
 derivations need the derivations written down once, in numpy, small enough to read against `EQUATIONS.md`:
-the three-component strand term with the variance frozen at a reference composition, the two Jeffreys arms,
+the three-component strand term with the variance frozen at a reference composition and its two-component
+special case (the collapse `test_strand_likelihood_reference.py` gates), the two Jeffreys arms,
 the delivered row's map onto the cube, a log-sum-exp, and the delivery table stated by hand. Nothing here
 asserts and nothing in `src/` reads it.
 """
@@ -34,6 +35,60 @@ def strand_loglik_mixture(
     )
     var = np.maximum(var, 1.0e-9)
     return -0.5 * (u_pos - mean) ** 2 / var - 0.5 * np.log(var)
+
+
+def strand_loglik(
+    gdna_frac: np.ndarray,
+    sense: float,
+    antisense: float,
+    rna_sense_frac: float,
+    *,
+    gdna_strand_overdispersion: float = 0.0,
+    rna_strand_overdispersion: float = 0.0,
+) -> np.ndarray:
+    """The TWO-component gDNA/RNA strand log-likelihood of one region over a ``gdna_frac`` grid — the readable
+    special case ψ's three-component term (`strand_loglik_mixture`, the kernel's `strand_term`) collapses onto
+    when one RNA strand is dead; the gate is `test_strand_likelihood_reference.py`.
+
+    Of ``N = sense + antisense`` discrete unspliced fragments, a fraction ``gdna_frac`` are gDNA
+    (oriented-sense rate ½, intra-class correlation ``gdna_strand_overdispersion``) and
+    ``1 − gdna_frac`` are RNA (oriented-sense rate ``rna_sense_frac``, intra-class correlation
+    ``rna_strand_overdispersion``). The mixture sense count has mean ``N·p`` and a variance in
+    three parts — the Binomial mixture variance plus the excess variance each component's shared
+    per-region sense rate contributes, scaled by that component's own ``μ_c(1−μ_c)``: the
+    ``N·gdna_frac`` gDNA fragments (mean ½) add ``(N·gdna_frac)²·¼·gdna_strand_overdispersion`` and
+    the ``N·(1−gdna_frac)`` RNA fragments (mean κ) add
+    ``(N·(1−gdna_frac))²·κ(1−κ)·rna_strand_overdispersion``. Normal moment approximation::
+
+        p   = ½·gdna_frac + rna_sense_frac·(1 − gdna_frac);  mean = N·p
+        var = N·p·(1 − p)
+            + (N·gdna_frac)²·¼·gdna_strand_overdispersion
+            + (N·(1 − gdna_frac))²·κ(1 − κ)·rna_strand_overdispersion
+        loglik(gdna_frac) = −½·(sense − mean)² / var  −  ½·log(var)
+
+    Limits: ``gdna_frac → 1`` ⇒ Beta-Binomial(½, od_gdna); ``gdna_frac → 0`` ⇒ Beta-Binomial(κ,
+    od_rna); both ``od → 0`` ⇒ the Binomial mixture exactly. Symmetry: at ``κ = ½`` the RNA scale
+    ``κ(1−κ)`` equals the gDNA ¼, so with
+    ``od_gdna = od_rna`` the variance is flat in ``gdna_frac`` (the means coincide and only the
+    ``g² + (1−g)²`` scaling depends on ``gdna_frac``) — an unstranded region is uninformative. Each
+    component's excess variance uses its own mean ``μ_c(1−μ_c)``, consistent with the moment fit in
+    :mod:`gdna_strand`; the normal-moment vs exact-mixture discrepancy is small and ~constant in
+    ``N``.
+    """
+    # Fully elementwise in (sense, antisense, gdna_frac), so it broadcasts: scalar (sense, antisense)
+    # with a 1-D grid returns one region's curve; column (sense, antisense) of shape (K, 1) with a row
+    # grid of shape (1, n_grid) returns the whole (K, n_grid) batch at once.
+    n = sense + antisense
+    p = 0.5 * gdna_frac + rna_sense_frac * (1.0 - gdna_frac)
+    mean = n * p
+    rna_var_scale = rna_sense_frac * (1.0 - rna_sense_frac)  # κ(1−κ); the RNA component's μ(1−μ)
+    var = (
+        n * p * (1.0 - p)
+        + (n * gdna_frac) ** 2 * 0.25 * gdna_strand_overdispersion
+        + (n * (1.0 - gdna_frac)) ** 2 * rna_var_scale * rna_strand_overdispersion
+    )
+    var = np.maximum(var, 1.0e-9)
+    return -0.5 * (sense - mean) ** 2 / var - 0.5 * np.log(var)
 
 
 def jeffreys_arms(lam, c_g: float = 0.5, c_r: float = 0.5):

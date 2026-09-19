@@ -23,7 +23,7 @@ from rigel.calibration.gdna_strand import (
     fit_rna_strand_overdispersion,
     overdispersion_for_beta,
 )
-from rigel.calibration.strand_likelihood import strand_loglik
+from _psi_reference import strand_loglik
 
 
 def _beta_binom_regions(rng, n_regions, depth, overdispersion, mean):

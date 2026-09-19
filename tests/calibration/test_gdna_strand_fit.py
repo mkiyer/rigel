@@ -51,7 +51,7 @@ from rigel.calibration.signature import (
     TS_NONE,
     TS_POS,
 )
-from rigel.calibration.strand_likelihood import strand_loglik
+from _psi_reference import strand_loglik
 from rigel.config import CalibrationConfig
 from rigel.scan_payload import (
     N_FRAGMENT_POOLS,
@@ -900,7 +900,7 @@ def test_boundary_seeds_never_straddle_a_reference():
     assert sense.shape == (0,)
 
 
-# --- the deconv application (strand_likelihood) ---------------------------------------------
+# --- the deconv application (the strand likelihood's two-component reference) ------------------
 
 
 def test_strand_loglik_od_zero_is_binomial_variance():

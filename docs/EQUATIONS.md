@@ -452,8 +452,8 @@ landscape the tool cannot see. That residual is a placement model, not a better 
 
 ## 5. Strand
 
-**5.1 The likelihood — the only intrinsic gDNA/RNA signal** (`strand_likelihood.strand_loglik`, a gated
-executable reference; `simplex_logodds._mixture_strand_loglik` is the shipped row).
+**5.1 The likelihood — the only intrinsic gDNA/RNA signal** (the kernel's `strand_term`, `native/transfer_rows.h`;
+its two-component form is the gates' readable reference, `tests/calibration/_psi_reference.strand_loglik`).
 
     p    =  ½·f_g + κ·(1−f_g)
     var  =  N·p(1−p)  +  (N·f_g)²·¼·od_g  +  (N(1−f_g))²·κ(1−κ)·od_r

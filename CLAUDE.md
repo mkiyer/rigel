@@ -89,7 +89,7 @@ the graph from the AST.
 | what a fragment tally MEANS | **1 · the payload view** — `splice_graph` `substrate` `region_arrays` |
 | how many places a fragment COULD have sat | **2 · opportunity** — `effective_length` `capture_eff_length` `sj_opportunity` `gdna_opportunity` `fl` |
 | one slot's own numbers, ψ, and its total | **3 · geometry + the per-slot solve** — `region_geometry` `simplex_logodds` `total_abundance` |
-| which strand a fragment came from | **4 · strand** — `gdna_strand` `strand_balance` `strand_summary`, and `strand_likelihood` (a gated executable reference) |
+| which strand a fragment came from | **4 · strand** — `gdna_strand` `strand_balance` `strand_summary` |
 | how dense a component is, and the priors | **5 · density and prior** — `density_model` `density_deconv` `landscape` `abundance_landscape` |
 | what one neighbour tells another | **6 · the solve** — `sweep` (the backbone) + `blocks` (the chain view's fields and the diagnostic capture) + `messages/` (the policy) + `region_init` |
 | turning the solve into a result | **7 · assemble** — `calibrate` `priors` `result` `derive` `diagnostics` `track` |
@@ -195,8 +195,8 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,417 passed / 0 skipped / 5 xfail, 3,422 collected** (re-derived
-2026-09-18 after `policy_prototype.py` was retired: −4 by the `scripts/design/` row; before that after the message cache was deleted: −3 for `message_cache.py` by the module row, −6 gates — the five cache
+**The standing baseline: 0 failed / 3,414 passed / 0 skipped / 5 xfail, 3,419 collected** (re-derived
+2026-09-18 after `strand_likelihood.py` was converged into the gates' oracle module: −3 by the module row; before that after `policy_prototype.py` was retired: −4 by the `scripts/design/` row; before that after the message cache was deleted: −3 for `message_cache.py` by the module row, −6 gates — the five cache
 gates of `test_sweep_backbone.py` and the served-injection gate of `test_landscape_training_population.py`; before that
 after the block went into one native call: −10 for the four files deleted — `messages/faces.py` and
 `messages/lanes.py` by the module row (−3 each), `native/psi_kernel.cpp` and `native/transfer_kernel.cpp` by the row

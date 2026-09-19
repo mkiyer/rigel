@@ -692,7 +692,7 @@ transcripts and materialized as ordinary transcript rows in `index.t_df`, flagge
 index) · `sweep` (the backbone) and `messages/` (the policy: `silent` · `transfer`; the row constructors `native/transfer_rows.h`) ·
 `region_chain` `region_geometry` `region_init` `structural_claims` · `substrate` `region_arrays`
 `signature` · `effective_length` `capture_eff_length` `fl` `sj_opportunity` `gdna_opportunity` ·
-`strand_likelihood` `gdna_strand` `strand_balance` `strand_summary` · `density_deconv`
+`gdna_strand` `strand_balance` `strand_summary` · `density_deconv`
 `density_model` `landscape` `abundance_landscape` `total_abundance` · `simplex_logodds` `derive` ·
 `priors` `result` `errors` `diagnostics` `track` · `_layers` (the layering the imports already had).
 Re-derive this list rather than trusting it: `scripts/design/module_census.py` reads it off the AST.
@@ -1263,7 +1263,7 @@ composes such hops, and the sender in a lane gate is an EMPTY node holding the p
 forwards and the recipient prices. The two-kernel gate went with the second kernel; the wiring and no-copy gates
 moved to `test_transfer_policy.py`, the trigamma gate to `test_zero_count_is_a_measurement.py`. The production path
 did not change: BIT-IDENTICAL on the four captured sweeps of `sweeps_MO_3021_step11` and the three identity
-references. What is still duplicated is the layer-4 `strand_likelihood` executable reference — the owner's call.
+references. The last duplicate, the layer-4 `strand_likelihood` executable reference, was converged 2026-09-18 (below).
 
 **The optimisation target is the deep library** (owner, 2026-09-17). Every performance number from here is VCaP's
 (18.6 M fragments): its four sweeps are captured for replay (`sweeps_VCaP_step13`; the refit sweeps' pickles carry a
@@ -1404,6 +1404,14 @@ an arm that ran the shipped policy under a prototype's name would have been a be
 message mechanism is prototyped in C++ in a worktree and the two trees are scored with `policy_benchmark.py
 --by-class` on the same conditions (the working rule in CLAUDE.md); the per-gene-type table and the slot-by-slot
 dissect went with the harness — `worst_objects.py` and `calibration_walk.py` dissect a condition.
+
+**The strand likelihood's executable reference is converged** (2026-09-18; owner: one production path). The
+layer-4 module `strand_likelihood.py` held the two-component gDNA/RNA strand log-likelihood as a readable
+reference that nothing in `src/` called — a second statement of ψ's strand term, kept only for the gate that holds
+the kernel's three-component form to its collapse when one RNA strand is dead. The reference now lives where the
+gates' other oracles live, `tests/calibration/_psi_reference.py` (`strand_loglik` beside `strand_loglik_mixture`), the
+gate is unchanged, and layer 4 is `gdna_strand`, `strand_balance` and `strand_summary`: production only. The suite
+−3 by the module row; nothing in production moved.
 
 #### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer; native since 2026-09-17, §6b.15.5)
 

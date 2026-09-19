@@ -57,8 +57,8 @@ by seed count lets a mass of singletons outvote everything on a library that has
 :func:`_null_information` for the null form and :func:`influence_weights` for the fitted one.
 
 The method of moments is closed-form, ``O(n_seed_regions)``, and uses the same variance decomposition
-the deconvolution applies (ψ's strand term, ``native/transfer_rows.h``, whose two-component reference
-is :mod:`strand_likelihood`), so fit and application stay consistent. The ceiling is the only asserted
+the deconvolution applies (ψ's strand term, ``native/transfer_rows.h``; its two-component reference is the
+gates' ``tests/calibration/_psi_reference.py``), so fit and application stay consistent. The ceiling is the only asserted
 constant left in the pair of fits, and ``tests/calibration/test_sweep.py`` pins that.
 
 Each component pairs a pure estimator with a thin seed-extraction wrapper, so the estimator itself is
