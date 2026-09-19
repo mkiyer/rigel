@@ -946,7 +946,7 @@ table, never an object). `solve` — every node once, from its own evidence, the
 hyperprior. The names are
 `prepare / run_pass(received, seq, nbr, terminal, backward) / solve(from_left, from_right)`; the
 per-sweep object is `Prepared`. Measured before the ruling: the formal form with the same messages won
-both halves of the ladder against the one-hop form, 7/8 and 7/8 (`policy_prototype.py`).
+both halves of the ladder against the one-hop form, 7/8 and 7/8 (`policy_prototype.py`, retired 2026-09-18).
 
 **The message's lanes.** A node's unknown is its COMPOSITION on the simplex — two degrees of freedom
 where both strands are live — and, where composition cannot cross a face, the LEVELS of the three
@@ -1397,6 +1397,13 @@ passes. The kernel's contract is arrays in, arrays out, integer counts. BIT-IDEN
 refit sweeps replay 7.4 → 7.0 s, the packaging gone), the three identity references; the suite 3,421 passed / 5 xfail /
 3,426 collected. Timed on VCaP at 8 threads, two interleaved pairs against a worktree of the block commit carrying its own
 module: the whole run 140.6 → 148.4 s and 138.1 → 145.1 s (1.06 / 1.05); calibrate 32.4 → 41.6 s and 31.6 → 40.6 s (1.28 / 1.28); the four sweeps 16.1 → 24.8 s and 16.0 → 24.7 s (1.54 / 1.54 — the two refit sweeps that were served now run the layer at K = 233); calibrate's peak RSS 9,430 → 8,163 MB and 9,416 → 7,858 MB, the run's 10,851 → 10,632 MB and 10,452 → 10,326 MB (its peak sits in quant); the stages outside calibration inside the drift (the scan 0.97 / 0.95, the second pass 1.00 / 1.00, quant 1.00 / 1.02) (`perf/cache_deleted_2026-09-18/`).
+
+**`policy_prototype.py` is retired** (2026-09-18; owner). Its mechanism — a Python policy class installed in the
+backbone for one arm, scored beside the shipped policies — cannot exist since the layer runs inside the kernel, and
+an arm that ran the shipped policy under a prototype's name would have been a benchmark that cannot be trusted. A
+message mechanism is prototyped in C++ in a worktree and the two trees are scored with `policy_benchmark.py
+--by-class` on the same conditions (the working rule in CLAUDE.md); the per-gene-type table and the slot-by-slot
+dissect went with the harness — `worst_objects.py` and `calibration_walk.py` dissect a condition.
 
 #### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer; native since 2026-09-17, §6b.15.5)
 

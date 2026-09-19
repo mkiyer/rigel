@@ -13,7 +13,8 @@ reads the per-slot belief at every rung the solver already exposes::
 
 A and B are ingredient views rather than stages C is built on, so the sequential chain scored for
 "largest error introduced" is C onward. "Messages on" is the whole shipped transfer policy, certified
-flux included; to see one mechanism apart, prototype it (`policy_prototype.py --module`). Truth comes only from `calibration_oracle.py`'s ``slot_truth.npz``:
+flux included; to see one mechanism apart, prototype it in a worktree and score both trees
+(`policy_benchmark.py --by-class`). Truth comes only from `calibration_oracle.py`'s ``slot_truth.npz``:
 this file recomputes nothing about truth and refuses to run on a condition whose table is missing,
 and prints the table's ``field_certified`` stamp with every run. Every arm asserts what ran: the
 backbone stamps the policy's name into the capture, and a muted arm must reproduce ``f_g == fg_loc``

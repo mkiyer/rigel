@@ -149,8 +149,12 @@ both a process rule and a structurally pure-gDNA object).
 ## Working rules
 
 - **DERIVE → DESIGN → PLAN → PROTOTYPE → A/B → only then `src/`.** No idea enters the production source
-  before it has been derived on paper, prototyped outside `src/`, and A/B'd against the policies that
-  already exist. One mechanism at a time: a change that cannot be A/B'd alone cannot be judged alone.
+  before it has been derived on paper, prototyped OUTSIDE THE MAIN TREE, and A/B'd against what already
+  ships, on the same conditions. The solve is native, so anything inside the block — a builder, a rule, a
+  row constructor, ψ — is prototyped in C++ in a worktree and the two trees are scored against each other
+  (`policy_benchmark.py --by-class`, `calibration_vs_oracle.py`); what is still Python (the library, the
+  fits, the assembly) is prototyped in Python the same way. One mechanism at a time: a change that cannot
+  be A/B'd alone cannot be judged alone.
 - **No magic numbers.** Stop and discuss before adding any constant, heuristic or tunable. Every divisor
   must be derived from the deposit rule and unit-tested against brute-force enumeration.
 - **A falsification test first, verified failing — then break the fixed code and watch each gate fire.**
@@ -191,8 +195,8 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,421 passed / 0 skipped / 5 xfail, 3,426 collected** (re-derived
-2026-09-18 after the message cache was deleted: −3 for `message_cache.py` by the module row, −6 gates — the five cache
+**The standing baseline: 0 failed / 3,417 passed / 0 skipped / 5 xfail, 3,422 collected** (re-derived
+2026-09-18 after `policy_prototype.py` was retired: −4 by the `scripts/design/` row; before that after the message cache was deleted: −3 for `message_cache.py` by the module row, −6 gates — the five cache
 gates of `test_sweep_backbone.py` and the served-injection gate of `test_landscape_training_population.py`; before that
 after the block went into one native call: −10 for the four files deleted — `messages/faces.py` and
 `messages/lanes.py` by the module row (−3 each), `native/psi_kernel.cpp` and `native/transfer_kernel.cpp` by the row
@@ -270,7 +274,6 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | **⭐⭐⭐ START A SESSION HERE** | |
 | `design/preflight.py` | ⭐⭐⭐ **CAN THIS SESSION RUN AND REGENERATE EVERYTHING? — one command, one verdict, before anything else.** Checks the toolchain (the `rigel` env, the native extension, the CLI), both references, both panels (scan caches, oracle caches with every part `panel.py` requires, the certified `slot_truth`) and that every `scripts/design/` instrument IMPORTS. ⛔ It changes nothing and measures nothing — every check is a read or an import, and a ✘ prints the exact command that regenerates the missing artifact. ⭐ **The default is ~2 s**; `--full` adds every instrument's `--self-test`, in seconds. `--self-test` 7/7 |
 | **⭐⭐⭐ THE POLICY BENCHMARK — where a message-policy change is judged** | |
-| `design/policy_prototype.py` | ⭐⭐⭐ **HOW DO THE SHIPPED MESSAGE POLICIES SCORE, PER GENE TYPE AND PER SLOT, AGAINST CERTIFIED TRUTH?** — the harness a message mechanism is judged on before it ships. The layer runs inside the solve's native kernel, so a mechanism is prototyped in C++ (`native/transfer_kernel.h`) and scored here against the tree without it, in a worktree, on the same condition; whole-library and per-type tables, `--by-class` (the error at each NODE CLASS — the view that judges a message at its destinations), `dissect` for one gene type slot by slot. ⛔ Compare src-vs-src across a landing (`TRAPS: a-harness-on-the-parent-class-dies-when-the-parent-gains-the-mechanism`). `--self-test` |
 | `design/policy_benchmark.py` | ⭐⭐⭐ **HOW DOES EACH POLICY SCORE, PER CONDITION, AGAINST CERTIFIED TRUTH?** Whole-library gDNA error in fragments, per axis, one row per condition, for `silent` and `transfer`. ⭐ `--panel test` is the test chromosome (seconds — the development loop); `--panel ladder` is the 16-condition benchmark. ⭐ **`--by-class`: WHERE DOES A POLICY'S REMAINING ERROR SIT, BY NODE CLASS?** — per certified stratum, boundaries split by terminus flag, exons by reach (licensed face / edge only / walled); the instrument that ranks the rebuild's holes. `--set SECTION.FIELD=VALUE` applies a config value on top of every policy, the same spelling as `calibration_vs_oracle.py`. ⛔ NEVER POOLED, and the two halves are judged against DIFFERENT bars: unstranded rows are where a policy must WIN, stranded rows are where it must do minimal HARM against silence |
 | **⭐⭐⭐ 0.8.0'S METRIC — calibration against ORACLE CALIBRATION** | |
 | `design/calibration_vs_oracle.py` | ⭐⭐⭐ **IS THE CALIBRATION RESULT ITSELF RIGHT, SCORED AGAINST AN ORACLE CALIBRATION? — 0.8.0's metric, and it reaches the effective-length shrinkage, which no prior-injection arm does.** `P = calibrate(...)` against the same payload with only the six deconvolved arrays swapped, per stratum (the ruler's reference is the result's own, so at capture-OFF `O` is the no-enrichment null with no fitting); `--set SECTION.FIELD=VALUE` prices any config value on both arms — `--set calibration.message_policy=silent` is the ship protocol's first item — so a policy or a grid arm is a config value and nothing in `src/` moves to price it. ⛔ Read `ruler_n_moved`, never the aggregate: the total can barely move while nearly every transcript is redistributed. No solver, no EM, no re-scan — ~5–12 s/condition. `--self-test` 39/39 |

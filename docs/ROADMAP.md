@@ -123,8 +123,8 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
 5. **The vertex atom** — on silent genes and nascent-free introns; a
    mechanism for it is the prior's reference (`ISSUES: reference-prior-refuted-at-concept-level`
    constrains the form) or the intron's own solve, not a message.
-6. **The message policy, only where a row is above the bar**: one prototype mechanism at a time, in C++,
-   judged on `policy_prototype.py` against the tree without it, halves apart, pass zero beside the pipeline:
+6. **The message policy, only where a row is above the bar**: one prototype mechanism at a time, in C++ in
+   a worktree, the two trees scored with `policy_benchmark.py --by-class`, halves apart, pass zero beside the pipeline:
    `ISSUES: two-sided-exon-row`, `ISSUES: flux-floor-dispersion`,
    `ISSUES: message-layer-open-cases`.
 

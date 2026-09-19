@@ -293,7 +293,7 @@ the crossing (`ISSUES: the-certified-flux-row-as-a-level`, `ISSUES: two-sided-ex
 `ISSUES: the-wall-above-the-face-map-ceiling`). What would license a two-sided level is whether this library's
 gDNA is enriched, witnessed on unstranded data by silent genes' exons against the intergenic density — the
 landscape prior's job. The first step when taken up is that witness's derivation; judge at `R exon
-(licensed)` and the walled classes, halves apart. `policy_prototype.py --by-class`.
+(licensed)` and the walled classes, halves apart. `policy_benchmark.py --by-class`.
 
 ### the-lower-bound-noise-ratchet
 `priority: later (with the enrichment witness) · kind: defect · 2026-09-05`
