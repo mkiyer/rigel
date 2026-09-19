@@ -31,15 +31,17 @@ cannot say which of the two moved — and a calibration figure cannot say whethe
 | the question | the number | the instrument | how it is read |
 |---|---|---|---|
 | **is CALIBRATION right?** — the number that ranks a calibration mechanism | the `CalibrationResult` against an oracle calibration | `calibration_vs_oracle.py` | per stratum, never pooled |
-| **is THE TOOL right?** — the number the release ships on | the transcript table against per-transcript truth | `quant_accuracy.py --arm base` | per stratum, and only above `--arm base_reseed` |
+| **is THE TOOL right?** — the number the release ships on | the transcript table against per-transcript truth | `quant_accuracy.py --arm base --set em.assignment_mode=fractional` | per stratum, and only above `--arm base_reseed` |
 
-⛔ THE END-TO-END NUMBER HAS A FLOOR AND A DECOMPOSITION, and both are part of reading it. The deliverable is
-not reproducible by default, so `base_reseed` is re-derived in the same session and any delta below it is
-sampling noise, not a result. And the arms decompose it: `oracle` is what a perfect prior is worth end to
-end, so what remains under it belongs to the EM and the assignment rather than to calibration. Every one of
-them wraps `assemble_priors`, so none reaches the effective-length shrinkage; `oracle_ruler`, which substitutes
-at the `calibrate` boundary to reach it, swaps count arrays the ruler no longer reads and cannot fire on this
-tree (`ISSUES: oracle-ruler-arm-cannot-reach-the-ruler`).
+⛔ THE END-TO-END NUMBER IS READ UNDER FRACTIONAL ASSIGNMENT, ABOVE A FLOOR, WITH A DECOMPOSITION (owner,
+2026-09-19). The shipped EM assigns by a sampled draw, so every arm runs with `--set
+em.assignment_mode=fractional`, which removes the draw from the comparison; each row records its mode and the
+report refuses to set two modes side by side. `base_reseed` is still re-derived in the same session, and any
+delta below it is noise, not a result. The arms decompose it: `oracle` is what a perfect prior is worth end to
+end, so what remains under it belongs to the EM and the assignment rather than to calibration; every prior arm
+wraps `assemble_priors`, so none reaches the lengths the EM divides by. `oracle_ruler` does: it hands the EM the
+simulator's own capture-aware length in place of the shipped ruler's, so under capture it prices the ruler end
+to end (`ISSUES: ruler-witness-geometry-on-transcript-panels`).
 
 ---
 

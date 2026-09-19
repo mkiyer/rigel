@@ -16,8 +16,54 @@ the changelog is git.
 Ordered by priority. An entry says what is open and the number a ranking turns on; what was done is git,
 what was ruled is `DESIGN.md`.
 
+### ruler-witness-geometry-on-transcript-panels
+`priority: now — the root cause of the stranded × capture-ON error; its repair needs an owner decision · kind: defect · 2026-09-15, amended 2026-09-16, re-measured end to end 2026-09-19`
+A probe that spans a splice junction captures only the isoforms that hold the junction, so under such a panel
+capture is ISOFORM-SPECIFIC — and the EM splits a gene's shared fragments by the ratio of its isoforms'
+capture-aware lengths (the "ruler"), so every within-gene error in that ratio moves fragments. Nothing Rigel reads
+can see it: gDNA has no junctions (the simulator captures it at a split probe at `gdna_split_penalty` 0.2 of the
+cDNA's weight), and at zero gDNA there is no witness at all. MEASURED 2026-09-19, `quant_accuracy.py --set
+em.assignment_mode=fractional`, stranded × capture-ON, transcript-level Σ|Δ| as a share of the true RNA, `g00` /
+`g05` / `g50`: shipped 7.4 / 10.5 / 13.9 %; the ruler switched off 7.4 (at `g00` the shipped ruler already is the
+plain length) / 7.8 / 10.1 %; the shipped formula fed the certified true gDNA counts 13.0 / 14.8 % (`g05` / `g50`);
+`oracle_ruler`, the simulator's own capture-aware length (the sampler's partition), 2.9 / 3.6 / 8.4 % — at the
+capture-OFF level at low gDNA and below the owner's 5 % target. The error sits in ~15–20 highly expressed
+multi-isoform genes whose TOTALS are right (`g05`: 14 genes carry half, genes with four or more isoforms 93 %); in
+the same top genes the within-gene error is 3.8 % capture-OFF, 8.9 % at `g00` ON, 22.8 % at `g05` ON. CACNA1I: the
+true factors of its two long isoforms are 0.872 / 0.900, the shipped 0.630 / 0.780, and the silent isoform takes
+38,493 fragments (0 with no ruler). The shipped ruler's error follows the share of a transcript's probed bases that
+sit under junction-spanning probes (median log error +0.10 with none, −0.63 above three quarters; Spearman −0.72
+over transcripts with ≥ 20 fragments), 24 % of the ladder's probes span one, and it is judged by its WITHIN-GENE
+spread, not its per-transcript accuracy (`TRAPS: judge-a-ruler-by-its-within-gene-spread`): 0.036 nat with no
+ruler, 0.072 shipped, 0.098 with true gDNA counts, the order of their errors. The controlled case is the test
+chromosome, the same libraries under two panels: capture-ON at 5–12 % on the benign panel (capture-OFF level) and
+35–41 % on the junction-probed twin at EVERY gDNA level, `g00` included. THE DECISION: the one observable that sees
+isoform-specific capture is the probe design, and Rigel reads no panel (`DESIGN.md` §7.2, "Rigel never knows which
+transcripts a panel probes") — so the repair is an owner decision on a probe-design input, and whether the panels
+Rigel will meet span junctions is a fact about them (exome-style panels on genomic exons do not;
+transcript-designed ones do). Data: `~/Downloads/rigel_runs/arms/2026-09-19_stranded_on/`. `quant_accuracy.py --arm
+oracle_ruler`, `ruler_vs_truth.py`.
+
+The witness, measured 2026-09-15/16: gDNA is captured in genomic coordinates and a transcript's RNA in its own, and
+the two differ within a fragment length of every splice junction a probe spans and at every exon shorter than a
+fragment. The ladder's panel is designed in transcript coordinates, so its probes span junctions, and the simulator
+captures gDNA at a split probe at `gdna_split_penalty` 0.2 of the cDNA's weight: on the ladder's `g05 ss.99 ON` row
+the probed transcripts scatter −0.5 to +0.3 nat (35–36 % within ±0.1, under the shipped ruler and the expectation
+ruler on the per-base length alike) even when fed the CERTIFIED TRUE gDNA counts (20 %), where the test
+chromosome's benign panel, which spans no junction, reads 99 %. The other direction is the tiny-exon block: a probe
+centred on a 40 bp exon binds a gDNA fragment over its full 125 bp while the simulator's non-stacking rule binds a
+spliced fragment over one exon's 40 bp, so the probed `captiny` transcripts read +1.03 nat against the sampler's
+truth with the mechanism reading their edge crossings exactly (`ruler_vs_truth.py --condition
+gdna_g05_ss_0.99_nrna_file_capture_on --out`, the `captiny` rows). The gDNA witness reads the panel's capture of
+gDNA, not of cDNA, by a factor the panel's design sets, and no estimator on gDNA alone can see it; the annotation
+knows where the junctions and the tiny exons are, so a correction from the probe design is in principle observable.
+The ladder row's unprobed transcripts hold no gDNA fragment at all and still read +0.45 nat under the expectation
+ruler (+2.0 without the floor on the object set): the calibration assigns gDNA to exons that have none, the
+stranded capture-ON composition residual the standing numbers already carry, which the ruler inherits and cannot
+repair.
+
 ### per-transcript-prior-lane
-`priority: now — the next build (owner, 2026-09-19; the baseline of the same day puts it first) · kind: build · 2026-08-31`
+`priority: next, after the stranded × capture-ON root cause (owner, 2026-09-19) · kind: build · 2026-08-31`
 `rna_prior_weight` is built end to end but `pipeline.py` omits it, so the shipped EM carries no per-transcript
 information. It is the largest lever measured on the residual the EM owns — at least 95 % of the in-scope
 transcript error survives a perfect prior (`ISSUES: end-to-end-error-unattributed`, CLOSED). Truth as the
@@ -28,36 +74,13 @@ level, and 45–51 % at transcript level on the gDNA-free `g00` rows, where no p
 arm is a capability proof and never headroom: it hands over the true support, and a zero weight is absorbing.
 Two weightings are refused (`ISSUES: refused-transcript-weights`, `ISSUES: refused-soft-min-path-weighting`): the
 support problem is the whole problem, so the next candidate is a sparsity mechanism, targeting expressed
-multi-exon transcripts with median exon ≤ 150 bp. It does not reach
+multi-exon transcripts with median exon ≤ 150 bp. On stranded × capture-ON the same arm removes 52–68 % (fractional,
+`g00`–`g50`), and under `oracle_ruler` it still takes `g05` 3.6 → 1.6 % and `g50` 8.4 → 4.0 %. It does not reach
 `ISSUES: em-overturns-the-calibrated-gdna-split`, which the same arm leaves exactly where it was.
 `quant_accuracy.py`, per stratum above `--arm base_reseed`.
 
-### oracle-cache-key-hashes-a-thread-count
-`priority: now — before any oracle arm runs again · kind: defect (instrument) · 2026-09-19`
-`scan_cache._scan_config_digest` hashes the whole `BamScanConfig`, its two thread counts included, and `109d8aac`
-moved the `bgzf_threads` default from 4 to None; every oracle cache on the ladder was written at 4 (2026-08-22).
-The three instruments that key an oracle load on the pipeline's own scan config therefore disagree with every
-cache: `quant_accuracy.py` REFUSES every oracle arm (the 2026-09-19 baseline ran them through a scratchpad
-wrapper that built the lookup key at 4 and changed nothing else), while `prior_vs_oracle.py` and
-`pass0_vs_oracle.py` fall back without a word to re-splitting the BAM and re-scanning, and then WRITE the result
-over the certified cache parts. A thread count cannot change a tally (`test_scan_order_independence.py`), so it
-has no place in a key: the repair is in `scan_cache.py`, an owner's call because it is `src/`, and a no-op on
-every number. `preflight.py --full` stays green because it checks that the caches are present, not that they
-still load (`TRAPS: a-green-suite-hid-five-dead-instruments`).
-
-### oracle-ruler-arm-cannot-reach-the-ruler
-`priority: now, with the key — repair or retire (the instrument ruling defaults to retire) · kind: defect (instrument) · 2026-09-19`
-`quant_accuracy.py --arm oracle_ruler` swaps the six deconvolved COUNT arrays at `calibrate`. Since `c44fc306`
-(the expectation ruler, 2026-09-16) the ruler reads `gdna_capture_efficiency_region` and
-`gdna_reference_density` instead, which the swap leaves as the shipped solve's, so the arm cannot move
-`effective_lengths_em` by one ulp and its own guard refuses every condition — measured 2026-09-19 on all six
-contaminated capture-ON rows, as well as capture-OFF and `g00`, where the factor is 1.000 by construction. The
-effective-length shrinkage is therefore inside NO end-to-end ceiling on this tree; the ruler's own truth is
-`ruler_vs_truth.py`. A repair needs an oracle efficiency (the efficiency posterior run on the origin-split
-counts), which is an instrument build and not a field swap.
-
 ### em-overturns-the-calibrated-gdna-split
-`priority: next — sized at the realistic nascent share before anything is built on it · kind: defect · 2026-09-19`
+`priority: next — sized at the realistic nascent share before anything is built on it · kind: defect · 2026-09-19 (the capture-ON direction the same day)`
 At capture-OFF calibration's library split is right and the transcript table's is not. `g05 ss.50 OFF`:
 calibration 490,967 gDNA fragments against 500,004 true (`calibration_vs_oracle.py`, the row's `pools`), the table
 1,037,727 — a gDNA fraction of 0.104 against 0.05; `g05 ss.99 OFF` 489,187 against 628,152 in the table (0.063);
@@ -72,6 +95,13 @@ share (20.2 % of RNA fragments capture-OFF, `DESIGN.md` §0b): a robustness fail
 decision may be driven from it until `ISSUES: nascent-stress-sensitivity` sizes it at the realistic share. When it
 is taken up, the question is what outweighs the prior when the EM assigns unspliced intronic fragments between
 gDNA and RNA — the prior is a pseudo-count. `quant_accuracy.py` (the pool rows), `calibration_vs_oracle.py`.
+UNDER CAPTURE the same EM moves the other way: at `g50 ss.99 ON` calibration reads 5,021,464 gDNA fragments
+against 5,000,000 (+0.4 %) and the table 4,854,322 (−2.9 %), the missing gDNA on isoforms of heavily probed,
+isoform-rich genes (HPS4, 49 isoforms; EPIC1, 73) — per fragment, 8.6 % of the gDNA lands on mRNA, almost all of it
+under a probe. It moves with neither the ruler (`oracle_ruler` −3.0 %), the prior (`oracle` −2.8 %) nor the gDNA
+component's length taken from the ideal witness's efficiencies (no change); true allocation weights halve it. It is
+most of what `oracle_ruler` leaves at `g50` (8.4 %). One question in both directions: the EM does not hold the gDNA
+split calibration measured.
 
 ### nascent-stress-sensitivity
 `priority: next — it sizes `ISSUES: em-overturns-the-calibrated-gdna-split` · kind: question · 2026-08-22`
@@ -144,26 +174,6 @@ trains (`DESIGN.md` §7.1 rule 4) — the vertex-solved exons that trained 3,771
 refit on `g00 ss.99 OFF` are out, and the four ladder zero controls read 282 / 194 / 265 / 172. Refused here:
 excluding κ-dead exons (`g50 ss.50 ON` 2,691 → 56,422), AMBIG in the final fit (worse 25/32), and the two
 other readings of the floor (`DESIGN.md` §7.1 rule 4). Its instrument, `landscape_training_census.py`, was retired 2026-09-14 (in git).
-
-### ruler-witness-geometry-on-transcript-panels
-`priority: later (measure on real panels first) · kind: limit · 2026-09-15, amended 2026-09-16`
-gDNA is captured in genomic coordinates and a transcript's RNA in its own, and the two differ within a fragment
-length of every splice junction a probe spans and at every exon shorter than a fragment. The ladder's panel is
-designed in transcript coordinates, so its probes span junctions, and the simulator captures gDNA at a split
-probe at `gdna_split_penalty` 0.2 of the cDNA's weight: on the ladder's `g05 ss.99 ON` row the probed
-transcripts scatter −0.5 to +0.3 nat (35–36 % within ±0.1, under the shipped ruler and the expectation ruler on
-the per-base length alike) even when fed the CERTIFIED TRUE gDNA counts (20 %), where the test chromosome's
-benign panel, which spans no junction, reads 99 %. The other direction is the tiny-exon block: a probe centred
-on a 40 bp exon binds a gDNA fragment over its full 125 bp while the simulator's non-stacking rule binds a spliced
-fragment over one exon's 40 bp, so the probed `captiny` transcripts read +1.03 nat against the sampler's truth
-with the mechanism reading their edge crossings exactly (`ruler_vs_truth.py --condition
-gdna_g05_ss_0.99_nrna_file_capture_on --out`, the `captiny` rows). The gDNA witness reads the panel's capture
-of gDNA, not of cDNA, by a factor the panel's design sets, and no estimator on gDNA alone can see it; the
-annotation knows where the junctions and the tiny exons are, so a correction from the probe design is in
-principle observable. The ladder row's unprobed transcripts hold no gDNA fragment at all and still read
-+0.45 nat under the expectation ruler (+2.0 without the floor on the object set): the calibration assigns gDNA
-to exons that have none, the stranded capture-ON composition residual the standing numbers already carry, which
-the ruler inherits and cannot repair.
 
 ### multimapper-blind-support
 `priority: next after the port (the first ruler question on real libraries) · kind: defect · 2026-09-16`
@@ -444,6 +454,25 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### oracle-cache-key-hashes-a-thread-count
+CLOSED by landing 2026-09-19 (owner): the scan settings' part of a cache's key is DERIVED at read time from the
+settings the manifest records, and leaves out the two thread counts (`scan_cache._WORK_ONLY_FIELDS`), which divide
+the work and not the tally (`test_scan_order_independence.py`, one worker to eight). No digest string is stored
+any more, so the key's definition can move without stranding a cache: every oracle cache written 2026-08-22 at
+`bgzf_threads` 4 loads again under the default config, with no re-scan. The five other resource settings
+(`log_every`, `fragments_per_chunk`, `read_name_batch_size`, `buffer_size_bytes`, `spill_dir`) stay in the key:
+their invariance is not gated. Gates in `test_scan_cache.py` (a thread count is not the key; a tally setting is; the
+key is derived and no stored string decides), each watched to fail under its perturbation.
+
+### oracle-ruler-arm-cannot-reach-the-ruler
+CLOSED by landing 2026-09-19 (owner): `quant_accuracy.py --arm oracle_ruler` now hands the EM `fl × factor`, the
+factor being the simulator's own capture-aware length (`ruler_vs_truth.load_truth`), anchored on the fully probed
+class, cached per capture label beside the oracle caches; `oracle_ruler_noop` builds the same and hands back the
+shipped lengths. The arm it replaced swapped calibration's count arrays, which the ruler stopped reading at
+`c44fc306`, and refused every condition. Gates in `test_quant_accuracy.py` (the lengths reach the EM's published
+`em_effective_length` and move the split, the noop reproduces `base`, the guard, the anchor), each watched to fail
+under its perturbation — the anchor's first fixture could not tell the two pools apart and was repaired.
 
 ### end-to-end-error-unattributed
 CLOSED by measurement 2026-09-19: the residual is the EM's and the assignment's. `quant_accuracy.py` on the

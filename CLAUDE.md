@@ -169,9 +169,9 @@ both a process rule and a structurally pure-gDNA object).
 - **A ceiling is sometimes the right instrument** (`quant_accuracy.py`'s injection arms)
   but prices something that may be unreachable, so it is not the default. Every prior-injection arm patches
   `assemble_priors`, while `pipeline.py` builds `effective_lengths_em` before calling it, so the
-  effective-length shrinkage is inside no prior-injection ceiling. `oracle_ruler` was built to reach it and
-  cannot on this tree: it swaps the count arrays and the ruler reads the published efficiencies
-  (`ISSUES: oracle-ruler-arm-cannot-reach-the-ruler`), so no end-to-end ceiling reaches the shrinkage today.
+  effective-length shrinkage is inside no prior-injection ceiling; only `oracle_ruler`, which hands the EM
+  the simulator's own capture-aware length, reaches it. Benchmark every arm with
+  `--set em.assignment_mode=fractional` (owner, 2026-09-19): the shipped assignment is a sampled draw.
 - **One thing varied per experiment**, a baseline re-recorded from the current tree in the same session,
   and **score against truth** (the oracle BAM's read names), never against the previous run.
 - **No legacy, no backwards compatibility, no speculative code.** Converge and delete. No version
@@ -200,8 +200,12 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,416 passed / 0 skipped / 5 xfail, 3,421 collected** (re-derived
-2026-09-19 when the seven SPENT sandbox notes were retired — every plan whose work had landed and whose record
+**The standing baseline: 0 failed / 3,422 passed / 0 skipped / 5 xfail, 3,427 collected** (re-derived
+2026-09-19 after the cache key and the ruler arm: +2 in `test_scan_cache.py`, where three gates — a thread count is
+not the key, a tally setting is, the key is derived from the recorded settings — replaced the one that tampered a
+stored digest; +4 in `test_quant_accuracy.py` — the ruler arm reaching the EM with its noop inert, its guard, the
+capture truth's anchor, the refusal of mixed assignment modes; before that 3,416 / 3,421 when the seven SPENT
+sandbox notes were retired — every plan whose work had landed and whose record
 had moved to a permanent doc: −7 by the `docs/dev/` row; before that −1 for the performance plan itself, when
 it was retired into `DESIGN.md` §6b.15 and `ISSUES: performance-memory-bounded-solve`; before that after its
 phase 4: +2 gates in `test_fl.py` — the adjacent-pair table against a
