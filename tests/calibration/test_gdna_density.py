@@ -101,6 +101,46 @@ def test_uncontaminated_poisson_recovers_its_own_rate():
     assert fit.rate_over_pooled == pytest.approx(1.0, rel=0.05)
 
 
+def test_the_bisection_on_its_closed_bracket_is_the_fixed_200_step_loop_TO_THE_BIT():
+    """The termination rule moved from a step count to the bracket's own closure, and the answer may not
+    move with it: a float64 bracket closes in about sixty halvings, so the 140 further steps the old loop
+    always ran reassigned a value that could no longer change.
+
+    The oracle here is that old loop, written out. PERTURBATION: stopping the shipped loop one halving
+    EARLY — the same code with ``mid <= lo`` relaxed to a relative width — moves the rate, so this gate is
+    not vacuous about where closure sits.
+    """
+    from rigel.calibration.gdna_density import poisson_lower_mean as _plm
+
+    def fixed_200(n, e):
+        total_e, total_n = float(e.sum()), float(n.sum())
+        pooled = total_n / total_e
+
+        def f(rho):
+            lam = rho * e
+            return float(np.clip(lam - n, 0.0, None).sum() - _plm(lam).sum())
+
+        lo, hi = 0.0, 10.0 * pooled
+        assert f(lo) <= 0.0 <= f(hi)
+        for _ in range(200):
+            mid = 0.5 * (lo + hi)
+            if f(mid) > 0.0:
+                hi = mid
+            else:
+                lo = mid
+        return 0.5 * (lo + hi)
+
+    rng = np.random.default_rng(5)
+    for scale, size in ((0.002, 500), (0.02, 4000), (2.0, 300), (1e-5, 1000)):
+        e = rng.uniform(50.0, 5000.0, size=size)
+        n = rng.poisson(scale * e).astype(float)
+        if n.sum() == 0.0:
+            continue
+        got = one_sided_rate(n, e)
+        assert got.bracket_ok
+        assert got.rate == fixed_200(n, e), f"the closed bracket moved the rate at rho={scale}"
+
+
 def test_contamination_moves_the_pooled_rate_but_not_the_one_sided_one():
     """The point of the module: same gDNA, half the objects given a large additive contaminant."""
     rng = np.random.default_rng(3)

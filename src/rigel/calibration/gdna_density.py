@@ -55,10 +55,6 @@ __all__ = [
     "region_lengths_from_partition",
 ]
 
-#: Bisection steps. 200 halvings take a float64 bracket below its own resolution, so this is a
-#: termination guarantee rather than a tuned iteration count.
-_BISECT_STEPS = 200
-
 #: The bracket's upper end as a multiple of the pooled rate. The one-sided root is always BELOW the
 #: pooled rate (contamination only inflates it), so any multiple above 1 brackets it; the value is a
 #: headroom guard, and ``bracket_ok`` reports if it ever failed to.
@@ -145,6 +141,12 @@ def one_sided_rate(counts, exposure) -> GdnaDensityFit:
     whenever any object carries a count, the first midpoints test negative and the lower end walks
     off zero on its own. The early return above is what guarantees that premise, so no separate
     guard against the boundary root is needed.
+
+    THE LOOP ENDS WHEN THE BRACKET DOES, and that is a property of float64 rather than a step count: the
+    midpoint of two ADJACENT floats rounds to one of them, so once ``mid`` is no longer strictly inside
+    ``(lo, hi)`` every further halving reassigns the value it already holds and the returned
+    ``½(lo + hi)`` cannot move again. Testing for that is the whole termination rule — no iteration
+    budget to choose and none to justify.
     """
     n = np.asarray(counts, dtype=np.float64).ravel()
     e = np.asarray(exposure, dtype=np.float64).ravel()
@@ -167,8 +169,10 @@ def one_sided_rate(counts, exposure) -> GdnaDensityFit:
     lo, hi = 0.0, _BRACKET_HEADROOM * pooled
     if not (f(lo) <= 0.0 <= f(hi)):
         return GdnaDensityFit(pooled, pooled, int(n.size), total_n, total_e, bracket_ok=False)
-    for _ in range(_BISECT_STEPS):
+    while True:
         mid = 0.5 * (lo + hi)
+        if mid <= lo or mid >= hi:  # the bracket is closed to the last float
+            break
         if f(mid) > 0.0:
             hi = mid
         else:
