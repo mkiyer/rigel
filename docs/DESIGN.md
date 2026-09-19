@@ -1341,6 +1341,16 @@ BIT-IDENTICAL: the four VCaP sweeps at 8 threads (the kernel's `sigmoid` is scip
 grid, checked first), the three identity references; the suite 3,437 passed / 5 xfail / 3,442 collected. No timing pairs: an enabling step for the
 block in one native call, where no ``(n, K)`` prior may cross to Python.
 
+**The factory's log-gamma is the kernel's** (2026-09-18; the second of the three commits; the one that moves a number).
+The intron factory's rows — ``log NegBinom(f_g·C; ρ_bg·E, α_eff)`` per intron slot and cell (`density_deconv._log_negbinom`)
+— read scipy's ``gammaln`` (cephes); inside a native block they are built by the kernel, whose log-gamma is libm's, and the
+two differ in the last bits. So the log-gamma moves FIRST and ALONE: `_log_negbinom` reads `transfer_rows.lgamma`, bound
+beside the trigamma that is the counting variance's one home, and nothing else changes — a two-line change whose whole
+effect the replay's tolerance report attributes: on the four VCaP sweeps at 8 threads every field moves and stays inside the budget — the first sweep's `f_g` on 81,609 slots by at most 5.7e-14 (3.7e-6 of the derived budget), its `var_gdna` on 251,610 by 5.8e-14 (1.9e-8); each refit sweep's `f_g` on about 27,000 slots by at most 2.3e-15 (1.5e-7), `var_gdna` on about 60,000 by 5.9e-14 (3.5e-9); `has_composition` unmoved everywhere. The negative-binomial gates hold the rows to
+``scipy.stats.nbinom`` at their existing tolerance; the three identity references DIFFER at the ulp and are RE-FROZEN with
+this reason (`arms/review_identity_*.json`, the previous set kept beside them as `pre_lgamma_2026-09-18/`); the suite
+3,437 passed / 5 xfail / 3,442 collected (unchanged). The block commit that follows is then owed bit-identity against this tree.
+
 #### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer; native since 2026-09-17, §6b.15.5)
 
 A single-strand slot is the cube with a tilt grid of one cell — its tilt is its live strand, `τ = ±1` — so

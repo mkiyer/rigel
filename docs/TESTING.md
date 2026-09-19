@@ -656,9 +656,9 @@ the chunk-exactness of the whole sweep on real data); set `OMP_NUM_THREADS` deli
 references are `~/Downloads/rigel_runs/arms/review_identity_*.json` (two ladder conditions and the LBX0190
 library, frozen on the tree of 2026-09-14 that carries the lanes worklist and the landscape's location floor,
 re-frozen with the reason after every landing since — the ruler's repair, the yield's floors, the native
-pass, the native builders, each in its commit) and the captured sweeps `~/Downloads/rigel_runs/perf/sweeps_VCaP_step13`
-(2026-09-17: the deep library, VCaP, on the tree after the one-path convergence of the pass — the replay target from
-here on; a step that moves numbers re-captures and deletes the superseded one; `DESIGN.md` §6b.15). A port is
+pass, the native builders, the factory's log-gamma (2026-09-18, libm's for cephes'), each in its commit) and the captured
+sweeps `~/Downloads/rigel_runs/perf/sweeps_VCaP_step19` (2026-09-18: the deep library, VCaP, on the tree after the
+factory's log-gamma became the kernel's — the replay target from here on; a step that moves numbers re-captures and deletes the superseded one; `DESIGN.md` §6b.15). A port is
 held to the replay's `--tolerance` budget and to the transfer gates, which hold the native builders' tables to
 independent recomputes and drive single hops of the native pass (`tests/calibration/_transfer_harness.py`; the row
 constructors and flag predicates the gates recompute with are the native ones, `native.transfer_rows`). The deep library's timing baseline is

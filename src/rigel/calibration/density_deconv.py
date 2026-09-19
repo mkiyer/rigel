@@ -42,7 +42,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.special import gammaln
+from ..native import transfer_rows as _rows
 
 from .gdna_density import pooled_log_rate
 from .signature import coarse_type_array
@@ -159,22 +159,30 @@ def fit_intron_background(
     return fit_gdna_background(counts[pool], eff[pool])
 
 
+def _lgamma(x):
+    """``log Γ(x)`` elementwise — THE KERNEL'S OWN (`native.transfer_rows.lgamma`, libm's), so the factory rows
+    are the same bits wherever they are built; scipy's ``gammaln`` (cephes) differs in the last bits."""
+    a = np.ascontiguousarray(x, dtype=np.float64)
+    return _rows.lgamma(a.ravel()).reshape(a.shape)
+
+
 def _log_negbinom(g: np.ndarray, mu: np.ndarray, size: float) -> np.ndarray:
     """``log NegBinom(g; mean=mu, size)`` for continuous ``g ≥ 0`` (the ``f_g``-grid gives fractional counts).
 
     Mean-``μ`` / size-``r`` parameterization: ``p = r/(r+μ)``,
     ``log NB = Γln(g+r) − Γln(r) − Γln(g+1) + r·log(r/(r+μ)) + g·log(μ/(r+μ))``. ``r → ∞`` is the exact Poisson
-    limit ``g·log μ − μ − Γln(g+1)`` (used directly to avoid the ``Γln(∞)`` overflow)."""
+    limit ``g·log μ − μ − Γln(g+1)`` (used directly to avoid the ``Γln(∞)`` overflow). The log-gamma is the
+    kernel's (`_lgamma`)."""
     g = np.asarray(g, dtype=np.float64)
     mu = np.maximum(np.asarray(mu, dtype=np.float64), _EPS)
     if not np.isfinite(size):  # α = ∞ ⇒ Poisson
-        return g * np.log(mu) - mu - gammaln(g + 1.0)
+        return g * np.log(mu) - mu - _lgamma(g + 1.0)
     r = max(float(size), _EPS)
     rpm = r + mu
     return (
-        gammaln(g + r)
-        - gammaln(r)
-        - gammaln(g + 1.0)
+        _lgamma(g + r)
+        - _lgamma(r)
+        - _lgamma(g + 1.0)
         + r * (np.log(r) - np.log(rpm))
         + g * (np.log(mu) - np.log(rpm))
     )

@@ -81,7 +81,9 @@ a summation-order change 1.9e-7 of the budget: priced, not taken), and a pass th
 THE BLOCK IN ONE NATIVE CALL is designed on paper (2026-09-18; the design sits in the dev sandbox until it lands) and
 lands in three commits —
 ψ's priors as their inputs (LANDED 2026-09-18, exact: the arm interpolated per cell in the kernel, the two rows added
-per cell, `landscape.logprior` deleted), the factory's log-gamma as the kernel's, then the block itself; (3) the builders — 17 s, the RNA lanes 57 % of it,
+per cell, `landscape.logprior` deleted), the factory's log-gamma as the kernel's (LANDED 2026-09-18: libm's `lgamma` for
+scipy's cephes `gammaln` in `_log_negbinom`, the one number-moving commit of the three — the replay's tolerance report
+attributes it: on the four VCaP sweeps at 8 threads every field moves and stays inside the budget — the first sweep's `f_g` on 81,609 slots by at most 5.7e-14 (3.7e-6 of the derived budget), its `var_gdna` on 251,610 by 5.8e-14 (1.9e-8); each refit sweep's `f_g` on about 27,000 slots by at most 2.3e-15 (1.5e-7), `var_gdna` on about 60,000 by 5.9e-14 (3.5e-9); `has_composition` unmoved everywhere; the references re-frozen with the reason), then the block itself; (3) the builders — 17 s, the RNA lanes 57 % of it,
 threads over blocks; (4) the refit sweeps' Python — the cache key digesting the factory rows' INPUTS LANDED 2026-09-18 (exact; the key
 3.2 s → 0.27 s a refit sweep on VCaP, the capture re-taken as `sweeps_VCaP_step16`), the gDNA arm inside ψ
 (−7 s, tolerance-gated), the factory rows (−3 s, inside a native block); (5) outside calibration,

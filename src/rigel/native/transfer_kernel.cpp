@@ -905,6 +905,13 @@ void bind_rows(nb::module_& m) {
         "rows", "The row constructors of transfer_rows.h and the builders' flag predicates, bound for the gates.");
     r.attr("EPS") = EPS;
     r.def("trigamma", &trigamma, nb::arg("x"), "zeta(2, x), the counting variance's one home.");
+    r.def("lgamma", [](Vec x) {
+        const int n = K_of(x);
+        std::vector<double> out(n);
+        for (int i = 0; i < n; ++i) out[i] = std::lgamma(x.data()[i]);
+        return make_row(std::move(out));
+    }, nb::arg("x"), "log Γ(x) per element — libm's, the kernel's own log-gamma: the factory rows' one arithmetic "
+       "wherever they are built (scipy's gammaln, cephes, differs in the last bits).");
     r.def("count_logvar", &count_logvar, nb::arg("n"));
     r.def("hop_price", &hop_price, nb::arg("n_s"), nb::arg("a_s"), nb::arg("n_x"), nb::arg("a_x"));
     r.def("blur_row", [](Vec row, Vec lam, double v) {
