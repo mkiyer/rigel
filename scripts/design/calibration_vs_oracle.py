@@ -624,8 +624,8 @@ def report(rows: list[dict]) -> None:
     print()
     print("  ④ PER CONDITION — rank within a stratum, never across one")
     print(f"    {'condition':<44} {'mwae reg':>9} {'mwae bnd':>9} {'lib P':>8} {'lib O':>8} "
-          f"{'rho_ref P':>10} {'rho_ref O':>10} {'fac P':>7} {'fac O':>7} {'fac U':>7} {'s':>6}")
-    print("    " + "-" * 146)
+          f"{'rho_ref P':>10} {'rho_ref O':>10} {'fac P':>7} {'fac O':>7} {'s':>6}")
+    print("    " + "-" * 139)
     for r in sorted(rows, key=lambda x: (tuple(x["stratum"]), x["condition"])):
         rl = r["ruler"]
         print(f"    {r['condition']:<44} {r['axes']['region']['mwae']:>9.4f} "
@@ -633,8 +633,7 @@ def report(rows: list[dict]) -> None:
               f"{r['library_f_gdna_O']:>8.4f} {_fmt_rho(rl['P']['rho_ref'])} "
               f"{_fmt_rho(rl['O']['rho_ref'])} "
               f"{rl['P']['total_len'] / rl['P']['total_fl']:>7.4f} "
-              f"{rl['O']['total_len'] / rl['O']['total_fl']:>7.4f} "
-              f"{rl['U']['total_len'] / rl['U']['total_fl']:>7.4f} {r['seconds']:>6.1f}")
+              f"{rl['O']['total_len'] / rl['O']['total_fl']:>7.4f} {r['seconds']:>6.1f}")
     print()
     print(f"  total wall clock {sum(r['seconds'] for r in rows):.1f} s over {len(rows)} conditions")
 

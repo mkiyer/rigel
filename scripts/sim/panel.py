@@ -346,6 +346,10 @@ def cmd_score(p: Panel, args) -> int:
                 p.oracle_cache,
                 "--out",
                 p.arms / f"qa_{p.dir.name}_{arm}.jsonl",
+                # the benchmark protocol (owner, 2026-09-19): the shipped assignment is a sampled draw,
+                # so every arm is read under fractional assignment
+                "--set",
+                "em.assignment_mode=fractional",
                 *(["--conditions", *args.conditions] if args.conditions else []),
             ],
             what=f"score --arm {arm}",
