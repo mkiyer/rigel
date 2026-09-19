@@ -17,7 +17,7 @@ Ordered by priority. An entry says what is open and the number a ranking turns o
 what was ruled is `DESIGN.md`.
 
 ### performance-memory-bounded-solve
-`priority: now · kind: build · 2026-08-17; the port landed 2026-09-17/18, the work outside calibration 2026-09-19 (`DESIGN.md` §6b.15)`
+`priority: PARKED 2026-09-19 (owner: the method is the focus; this is machine work and resumes on its own) · kind: build · 2026-08-17; the port landed 2026-09-17/18, the work outside calibration 2026-09-19 (`DESIGN.md` §6b.15)`
 A deep run must be fast enough to iterate on, and memory-bounded. TWO CAMPAIGNS ARE DONE and their record is
 `DESIGN.md` §6b.15: the port, which made the sweep one native call over a pool of threads, and the work OUTSIDE
 calibration that followed it, which took a deep run from 145 s to 125 s without moving a number.
@@ -31,14 +31,35 @@ own Python 10.3), quant 33.7 (the locus EM 14.4, the capture effective lengths 5
 QUANT: the scan's fragment buffer stays alive until quant reads it, the index holds 1.4 GB, and quant's own
 2.2 GB is the EM's candidate CSR in int32, float32 and uint8 — the data the EM reads, not a tunable.
 
-WHAT IS OPEN, ranked: ① calibrate's own Python, 10.3 s that no probe covers — the chain, the statics, the
-beliefs' init and reset, the deconvolution — measure it before proposing anything; ② quant's 33.7 s, of which
-the locus EM is 14.4 and already native, the capture effective lengths 5.2 with `effective_length._cum_short`'s
-1,982 table builds inside them, and scoring 5.7; ③ the scan's own 28.4 s, now that its thread split is derived
-(`CLOSED: scan-thread-split-starves-the-workers`) — the scanner's throughput is a study of its own; ④ the
-index load's 6.4 s, unexamined; ⑤ the sweeps' 24.0 s, where the blur's loop interchange is priced at −1.5 s for
-a summation-order change 1.9e-6 of the replay's budget and remains the owner's call; ⑥ the whole problem past
-100 M fragments.
+WHAT IS OPEN, ranked, and RESUMABLE — the attribution below is a fresh cProfile of the landed tree
+(2026-09-19, `s21/vcap_after.prof` in the synced scratchpad; shares, never timings):
+
+① **The short-template taper table** (`effective_length._cum_short`), the largest Python item left: 1,982 table
+builds inside quant's capture effective lengths, which the probe reads at 5.2 s. Two rewrites are already
+DERIVED AND MEASURED on a realistic pmf (`s21/taper_study.py`, 1,445 lengths): the table's weight depends on
+the position only through the distance to the nearer end, which takes ⌈L/2⌉ values rather than L, so halving
+it is BIT-IDENTICAL — 4.37 → 2.05 s; and `min(d, w, L−w+1) = min(d, g(w))` with `g(w) = min(w, L−w+1)` splits
+the sum into two prefix sums over the widths, 4.37 → 0.04 s, at a 2.4e-15 relative move in the cumulative
+table. Take the exact half first; the prefix-sum form is a PRICED commit against the three references and
+`calibration_vs_oracle.py`, like the log-gamma one was.
+
+② **The second pass's factor combiner** (`second_pass.combine_factors`), 355,180 calls on arrays of two to four
+elements — numpy's per-call overhead paid once per fragment, inside a stage the probe reads at 8.7 s. The
+combine can be hoisted out of the per-fragment loop and done once with segment operations over the hypothesis
+CSR; exactness needs checking, since a segment sum and `.sum()` agree only below numpy's pairwise threshold.
+
+③ **The landscape fitting family**, about 5 s: `landscape._poisson_kernels` 3,659 calls, `_fit_gdna_hyperprior`
+and `_abundance_landscape` beside it. Unexamined — ask first whether the kernels are rebuilt per refit.
+
+④ **The sweeps' 24.0 s**, where the blur's loop interchange is priced at −1.5 s for a summation-order change
+1.9e-6 of the replay's budget and remains the owner's call. ⑤ The problem past 100 M fragments.
+
+⛔ TWO CANDIDATES RESEARCHED AND REFUSED AS TARGETS, so they are not re-opened without a new reason. THE SCAN
+(28.4 s, the largest stage) is at its floor for an eight-thread budget: the library is 4.5 GB compressed,
+htslib here already links libdeflate, and the split curve puts one and two decompression threads within 0.4 s
+of each other, so decompression and workers are balanced — it is 17.6 s at sixteen threads, which is a budget
+question and not a code one. THE INDEX LOAD (6.4 s) is already mostly native: its Python is about 1 s, the rest
+is the cgranges build and the resolver projection.
 
 ⛔ TWO RULES THIS CAMPAIGN PAID FOR. A cProfile share RANKS candidates and never prices them: it charges its own
 per-call overhead to the callee, so it inflates exactly the functions with millions of tiny calls, and the one

@@ -665,9 +665,10 @@ held to the replay's `--tolerance` budget and to the transfer gates, which hold 
 and flag predicates the gates recompute with are the native ones, `native.transfer_rows`). The sweep itself is one native
 call (`native.solve_blocks`): `sweep_replay.py replay --threads N` and `--block-slots N` hold it to a capture at any thread
 count and block size. The deep library's timing baseline is
-`perf/vcap_baseline_2026-09-17/run{1,2}.json` (the tree after the one-path convergence at 8 threads on VCaP, two
-back-to-back runs; the drift between them, 0.98–1.07 per stage, is the noise floor a pair is read against; the earlier
-`baseline_2026-09-17/pair1_*` is the pushed tree of that morning). Every
+`perf/plan_final_2026-09-19/pair{1,2}_post.json` (the landed tree at 8 threads on VCaP, the post arm of two
+interleaved pairs; the pre arm beside it is the tree before the work outside calibration, and the drift between two
+runs of one arm, 0.98–1.07 per stage, is the noise floor a pair is read against). ⛔ Read a stage row from a PAIR,
+never a wall from two sittings, and never a profiler's share as a saving (`TRAPS: a-profile-share-is-a-ranking`). Every
 captured sweep replays the whole message layer at its own bracket (the refit sweeps at K = 233 against the first
 sweep's 101). `ISSUES: performance-memory-bounded-solve` carries the work.
 

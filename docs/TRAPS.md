@@ -20,7 +20,7 @@ robust rather than what is likely.
 
 - **A. Validation and gates** — `self-checking-validator` · `perturb-every-gate` · `a-field-driven-gate-is-atomic` · `waive-with-a-measurement` · `a-docstring-that-misdescribes-the-graph` · `a-flat-pile-is-not-a-knot` · `the-rename-that-corrupted-a-diagram` · `a-constant-parked-a-value-off-a-knife-edge` · `a-gate-that-restates-the-implementation` · `a-gate-that-already-passed` · `right-conditional-wrong-marginal` · `byte-identity-gate` · `the-deliverable-is-not-reproducible-by-default` · `a-clip-hides-a-scale-error` · `an-ablation-that-never-ran` · `a-green-suite-hid-five-dead-instruments` · `compatibility-is-geometry-not-composition` · `a-zero-count-is-a-measurement` · `a-ratio-cannot-carry-zero` · `the-divergence-was-a-barrier` · `honesty-metrics-reward-ignorance` · `predicate-contradicts-its-docstring` · `a-test-that-redefines` · `a-gates-power-is-its-invariant-set` · `a-gate-that-reconstructs` · `off-grid-message-mode` · `a-comment-quoted-as-a-finding` · `the-intermediate-is-not-the-deliverable` · `could-the-arm-have-fired` · `prove-the-substrate` · `can-the-benchmark-resolve-it` · `toys-rank-hotspots-backwards` · `an-identity-with-a-qualifier`
 
-- **B. Measurement and inference** — `measure-the-ceiling-first` · `a-broad-population-carries-no-prior` · `attribution-must-survive-a-shuffle` · `score-against-truth` · `zero-target-guards-are-one-sided` · `hard-labels-miss-soft-change` · `never-pool-the-strata` · `a-threshold-on-a-fitted-residue` · `excluding-a-population-hides-it` · `name-the-observable-per-site` · `starved-is-not-depleted` · `the-substrate-knob-fought-back` · `key-on-a-realised-quantity` · `price-the-halves-separately` · `panel-before-src` · `admitting-an-object-costs` · `substitution-understates-a-source` · `a-symptom-is-not-a-second-defect` · `a-locked-object-is-not-a-control` · `draining-breaks-the-oracle` · `an-equal-length-panel-defeats-the-lift` · `a-length-gap-bypasses-calibration` · `weight-it-like-the-consumer` · `a-support-ceiling-is-the-clamp` · `log-variance-is-not-linear` · `re-record-the-baseline` · `a-truth-table-of-aggregates` · `a-single-level-panel-cannot-see-a-constant` · `score-the-consumers-own-count` · `the-floor-must-reproduce-the-selection`
+- **B. Measurement and inference** — `measure-the-ceiling-first` · `a-broad-population-carries-no-prior` · `attribution-must-survive-a-shuffle` · `score-against-truth` · `zero-target-guards-are-one-sided` · `hard-labels-miss-soft-change` · `never-pool-the-strata` · `a-threshold-on-a-fitted-residue` · `excluding-a-population-hides-it` · `name-the-observable-per-site` · `starved-is-not-depleted` · `the-substrate-knob-fought-back` · `key-on-a-realised-quantity` · `price-the-halves-separately` · `panel-before-src` · `admitting-an-object-costs` · `substitution-understates-a-source` · `a-symptom-is-not-a-second-defect` · `a-locked-object-is-not-a-control` · `draining-breaks-the-oracle` · `an-equal-length-panel-defeats-the-lift` · `a-length-gap-bypasses-calibration` · `weight-it-like-the-consumer` · `a-support-ceiling-is-the-clamp` · `log-variance-is-not-linear` · `re-record-the-baseline` · `a-profile-share-is-a-ranking` · `a-truth-table-of-aggregates` · `a-single-level-panel-cannot-see-a-constant` · `score-the-consumers-own-count` · `the-floor-must-reproduce-the-selection`
 
 - **C. Pools, selections and divisors** — `a-cancellation-is-conditional-on-its-support` · `a-better-estimator-inside-a-weak-consumer-moves-nothing` · `a-pooled-rate-cannot-see-a-short-object-factor` · `two-estimators-of-one-rate-weight-the-field-differently` · `state-the-population-rule-do-not-inherit-it-from-a-table` · `two-divisors-opposite-sign` · `frame-free-is-not-assumption-free` · `a-purity-filter-is-a-length-filter` · `pure-and-length-censored` · `divide-by-a-probability` · `opposite-tilts-must-not-pool` · `a-mean-of-ratios-inherits-the-partition` · `a-trap-names-the-defect-not-the-repair` · `a-stale-gate-accuses-the-newest-change` · `an-upper-bound-is-not-an-estimate` · `a-gate-on-the-helper-is-not-a-gate-on-the-caller` · `fractional-mass-is-the-problem` · `conservation-misses-mis-attribution` · `a-guard-outlives-its-divisor` · `a-fold-grows-a-heuristic` · `a-ratio-needs-a-population-that-can-supply-its-numerator`
 
@@ -45,7 +45,11 @@ corrupting its input.
 **perturb-every-gate. Writing the falsification test first is half the discipline; the other half is
 breaking the fixed code and watching each gate fire.** Perturbation has found holes in already-green gates
 repeatedly, once 7 of 9, including a gate that did not fire on its own named perturbation because a
-redundant backstop was silently doing the guard's job.
+redundant backstop was silently doing the guard's job. ⛔ AND A PERTURBATION THAT FIRES NOTHING NAMES A
+MISSING GATE, not a wrong perturbation: three did in one session, and each one was a fixture that could not
+see the rule — a single-reference fixture cannot see a per-reference id base, a fixture whose fragments
+carry no observed motif cannot see which strand a lookup filters on, and a symmetric fixture cannot tell two
+classes apart because swapping their labels swaps two equal sums. Fix the fixture, then perturb again.
 
 **a-field-driven-gate-is-atomic. A gate that enumerates the specification's fields fuses spec,
 implementation and schema into one commit, so plan the change that way or the tree is red in between.**
@@ -358,6 +362,13 @@ overconfidence figure computed without the conversion is void, not merely imprec
 
 **re-record-the-baseline. A delta is only attributable if its baseline came from the same tree in the same
 session; re-record the before-picture, never quote a stored one.**
+
+**a-profile-share-is-a-ranking. A profiler's share of a stage RANKS candidates; only an interleaved pair
+PRICES one.** cProfile charges its own per-call overhead to the callee, so it inflates exactly the functions
+with millions of tiny calls — which is the shape of every Python hot spot worth removing. A stage whose
+share said 7 s gave 3.2 when the work was actually removed and timed against a worktree of the parent
+commit. Use the share to choose what to open; never quote it as a saving, and never rank two candidates
+whose call counts differ by orders of magnitude against each other on it alone.
 
 **a-truth-table-of-aggregates. A truth table's label column may hold nested aggregates, and summing it
 double-counts, with the control arm unaffected, the most persuasive shape a wrong result can take.**

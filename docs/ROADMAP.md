@@ -60,8 +60,9 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
 - **Performance**: the port and the work outside it are done, and a deep run is 0.87 of what it was
   (`DESIGN.md` §6b.15). The sweep is ONE native call over a pool of threads, bit-identical at every thread
   count; the scan's split, the second pass's lookups, the fragment-length fits and the sweep's arena followed.
-  What remains is ranked in `ISSUES: performance-memory-bounded-solve`, and the largest piece of it is
-  calibrate's own Python, which no probe covers — `profiling/profiler.py`, `profiling/sweep_replay.py --threads`.
+  What remains is ranked and resumable in `ISSUES: performance-memory-bounded-solve`, whose next item — the
+  short-template taper table — is already derived and measured two ways, one bit-identical and one priced. The
+  thread is PARKED by the owner, not finished — `profiling/profiler.py`, `profiling/sweep_replay.py --threads`.
 - **Panels**: the sparse-nascent 16-condition ladder and the 30-condition test chromosome, both cached
   and certified — `panel.py status`; the fl-gap side panels carry a different nascent model —
   `ISSUES: flgap-panels-stale-nascent-model`. The ladder's nascent level is a development stress
@@ -75,8 +76,14 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
 
 ## Next — the recommended order
 
-The owner's standing order (2026-09-17): the release ships the contraction as it stands, and performance
-runs until the tool is fast. The ranked list below is the substance of each item.
+The owner's standing order (2026-09-19): THE METHOD, back to the front. Performance ran until the tool was
+fast enough to iterate on — a deep run is 0.87 of what it was and every step of it was bit-identical
+(`DESIGN.md` §6b.15) — and it is now a PARKED THREAD of its own kind: machine work, judged on seconds and
+bytes, with its own ranked list and its own instruments in `ISSUES: performance-memory-bounded-solve`.
+Nothing it did moved a number, so every accuracy measurement recorded before it still stands.
+
+The ranked list below is the method: what the tool ANSWERS, judged on 0.8.0's metric per stratum. It is the
+substance of each item.
 
 The method is the dissection loop: run the panel → worst in-scope scenario → rank its objects by error
 mass (`worst_objects.py`, `calibration_walk.py`) → find the mechanism → gated fix → add the offending
@@ -87,13 +94,7 @@ its instrument: the ruler reads 1.000 at `g00` and off capture, so the metric pa
 intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons (stranded ON)
 (`policy_benchmark.py --by-class`).
 
-1. **Performance — `ISSUES: performance-memory-bounded-solve`** (owner, 2026-09-11: the active thread).
-   The port is landed and the sweep is one native call; what is ranked there now is the work OUTSIDE
-   calibration, which is the larger half of a deep run: the exact micro-wins, the scan's thread split, the
-   second pass's boundary lookups, the two fragment-length fits, and memory. The optimisation target is the
-   deep library and every step is judged on it — two interleaved pairs at 8 threads, the three identity
-   references, and no number moved beyond a priced budget.
-2. **Calibration accuracy where the strand tilt matters** — the AMBIG slots with RNA on both strands
+1. **Calibration accuracy where the strand tilt matters** — the AMBIG slots with RNA on both strands
    (`DESIGN.md` §6b.15.12–§6b.15.13). The tilt atom and the strand channel's protocol decision landed 2026-09-14 (the
    strand-pure under-call and the gDNA-free deadband CLOSED); the θ measure is settled (both flattenings
    REFUSED, `ISSUES: strand-marginal-volume-factor`); the lanes' own defects are fixed and gated by
@@ -103,23 +104,28 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
    (`ISSUES: the-tilt-census-as-an-instrument`), and a known limit to watch rather than build against
    (`ISSUES: the-atom-at-an-unwitnessed-both-strand-slot`). Each judged on the metric per stratum, both
    zero controls and the shared-exon stress at depth, never on the ladder alone.
-3. **The rest of the pre-EM setup** — `priors.py` / `result.py` / `derive.py` against
+2. **The rest of the pre-EM setup** — `priors.py` / `result.py` / `derive.py` against
    `prior_vs_oracle.py` (re-run it first) and the ruler column: `ISSUES: prior-fidelity-vs-deliverable`,
    `ISSUES: eb-shrinkage-magic-ess`, `ISSUES: capture-blind-gdna-divisor`,
    `ISSUES: per-transcript-prior-lane`.
-4. **The intron's own solve on unstranded capture-OFF** — the intron class carries the largest share of
+3. **The intron's own solve on unstranded capture-OFF** — the intron class carries the largest share of
    the in-scope error there (`policy_benchmark.py --by-class`): the factory profile's resolution against
    the intergenic background (`density_deconv`); dissect with `worst_objects.py`.
-5. **The vertex atom** — on silent genes and nascent-free introns; a
+4. **The vertex atom** — on silent genes and nascent-free introns; a
    mechanism for it is the prior's reference (`ISSUES: reference-prior-refuted-at-concept-level`
    constrains the form) or the intron's own solve, not a message.
-6. **The message policy, only where a row is above the bar**: one prototype mechanism at a time, in C++ in
+5. **The message policy, only where a row is above the bar**: one prototype mechanism at a time, in C++ in
    a worktree, the two trees scored with `policy_benchmark.py --by-class`, halves apart, pass zero beside the pipeline:
    `ISSUES: two-sided-exon-row`, `ISSUES: flux-floor-dispersion`,
    `ISSUES: message-layer-open-cases`.
 
 Then, in standing order: `ISSUES: refit-vs-message-arbitration` (re-read under the E-step: the walk now says the prior does the
 unstranded rows and the messages the stranded capture-ON ones).
+
+**The other kind of work, parked and resumable**: `ISSUES: performance-memory-bounded-solve` carries the
+machine thread — what a deep run costs now, what is ranked next with its measured price, and the two
+candidates already researched and not taken. It resumes without re-deriving anything, and it is judged on
+seconds, bytes and bit-identity rather than on the metric.
 
 **Later / parked** (each has its entry): `expand-the-gdna-spectrum` · `transfer-variance-premise` ·
 `nascent-stress-sensitivity` · `hygiene-ledger` · `flgap-panels-stale-nascent-model` ·
