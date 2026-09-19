@@ -1,4 +1,4 @@
-# NEXT SESSION — start here (2026-09-19: 0.8.0 is a RELEASE OF THE TOOL; the first job is the end-to-end baseline)
+# NEXT SESSION — start here (2026-09-19, evening: the end-to-end baseline is measured; the EM owns the residual)
 
 This file is only how to begin. The ranked view is `docs/ROADMAP.md`, the open problems are `docs/ISSUES.md`,
 the rulings and the record are `docs/DESIGN.md` (§0b carries the scope and its 2026-09-19 amendment), what
@@ -7,51 +7,43 @@ the rulings and the record are `docs/DESIGN.md` (§0b carries the scope and its 
 
 ## Where the tool is
 
-Everything through `aaa0d8a2` is landed and pushed; the tree is clean and `main == origin/main`. Calibration is
-measured against an oracle per stratum and is no longer the thing in the way; two machine campaigns made the
-sweep one native call and took a deep run from 145 s to 125 s, and **not one of those commits moved a number**,
-so every accuracy measurement recorded before them still stands. The machine thread is parked and resumable
-(`ISSUES: performance-memory-bounded-solve`).
+The tree is `cffca248` plus a docs-only change: the baseline's numbers, the re-ranked roadmap, the issues
+it closed and opened. No `src/` line moved in the measurement session. The suite stands at 3,416 passed / 5
+xfail, and `preflight.py --full` is green.
 
-What changed on 2026-09-19 is the FRAME: the release is the whole tool, so the transcript table is a
-first-class number beside the calibration metric. The two answer different questions and neither stands in for
-the other (`DESIGN.md` §0b, `SUCCESS.md`).
+THE BASELINE (`ISSUES: end-to-end-error-unattributed`, CLOSED, has every number): in scope the transcript
+table misassigns 4.4 / 3.9 / 12.8 % of the RNA (unstranded OFF / stranded OFF / stranded ON), 150 / 78 / 519 times its
+reseed floor, and a perfect prior recovers only 3–5 % of that — almost all at `g98`, and nothing measurable at
+`g05`. What survives splits in two, and neither half is the prior chain's:
 
-## The first job: measure the deliverable (`ISSUES: end-to-end-error-unattributed`)
+* the per-transcript allocation — truth as the weights removes about half of the transcript error in every
+  stratum, the gDNA-free `g00` rows included (`ISSUES: per-transcript-prior-lane`);
+* the capture-OFF gDNA over-call — calibration's library split is right (`g05 ss.50 OFF` 0.049
+  against 0.05) and the table's is not (0.104), under a perfect prior and under true allocation weights alike
+  (`ISSUES: em-overturns-the-calibrated-gdna-split`), measured only at the nascent stress share.
 
-⛔ A MEASUREMENT SESSION. No `src/` change belongs in it, because the point is a baseline nothing has been
-tuned against, and because the order of everything after it depends on what it says.
+## The next build: the per-transcript prior lane (`ROADMAP.md` item 1)
 
-1. `python scripts/design/preflight.py --full`, then `python -m pytest tests/ -q` against the standing count
-   in `CLAUDE.md`. ANY failure is a regression.
-2. `quant_accuracy.py --arm base` on the ladder, and `--arm base_reseed` IN THE SAME SESSION. The floor is
-   not optional: the deliverable is not reproducible by default, and a delta below the floor is sampling
-   noise, not a result (`TRAPS: re-record-the-baseline`).
-3. The decomposition, same session, same conditions: `oracle` (all three prior fields at truth),
-   `oracle_gdna`, `oracle_rna`, `oracle_efflen`, and `oracle_ruler` — the only arm that reaches the
-   effective-length shrinkage, because it substitutes at the `calibrate` boundary while every other arm wraps
-   `assemble_priors`.
-4. Read it PER STRATUM, never pooled (`TRAPS: never-pool-the-strata`), with the deferred stratum reported and
-   not ranked. What remains under `oracle` belongs to the EM and the assignment by construction; what
-   `oracle` recovers belongs to the prior chain.
-5. Write the numbers into `ROADMAP.md`'s state claim for the deliverable, close or re-rank
-   `ISSUES: end-to-end-error-unattributed`, and only then choose between roadmap items 2 and 3.
+`rna_prior_weight` is built end to end and `pipeline.py` omits it. A wiring gap plus a support decision; two
+weightings are already refused with their numbers, and the next candidate is a sparsity mechanism
+(`ISSUES: per-transcript-prior-lane`). DERIVE → DESIGN → PLAN → PROTOTYPE → A/B before `src/`, judged on the
+deliverable per stratum above `--arm base_reseed`, with both zero controls. `oracle_alloc_seed` is the
+capability proof, never the headroom: it hands over the true support.
 
-## Then: the pre-EM setup (`ROADMAP.md` item 2), in this order
+Then `ROADMAP.md` item 2 — size the capture-OFF over-call at the realistic nascent share
+(`ISSUES: nascent-stress-sensitivity`) before anything is built on it — and item 3, the rest of the prior
+chain, which the oracle arms price near zero on the ladder's table.
 
-The bridge between a good calibration and the user's number. Ranked by what is already measured:
+## ⛔ Two instrument defects the baseline found — repair before the next oracle arm
 
-1. **`ISSUES: per-transcript-prior-lane`** — `rna_prior_weight` is built end to end and `pipeline.py` omits
-   it, so the shipped EM carries NO per-transcript information; a perfect version of it roughly halves
-   in-scope gene-level error. It is a wiring gap plus a support decision, and two weightings are already
-   refused with their numbers.
-2. **`ISSUES: capture-blind-gdna-divisor`** — +6.0 % on all six capture-ON rows.
-3. **`ISSUES: eb-shrinkage-magic-ess`** — a magic ESS, inert on the ladder and dominant on the fl-gap arm.
-4. **`ISSUES: prior-fidelity-vs-deliverable`** — the anti-correlation; the baseline's arms may answer it.
-5. **`ISSUES: antisense-prior-assembly-casualty`** — the assembler's alpha = 0 rule, which owns an xfail.
-
-Each judged on BOTH numbers: the deliverable above its floor, and `prior_vs_oracle.py` for the assembler's own
-error, so a repair that moves the prior and not the user's number is visible as exactly that.
+* `ISSUES: oracle-cache-key-hashes-a-thread-count` — `109d8aac` moved `bgzf_threads`' default and the cache
+  digest hashes it, so `quant_accuracy.py` refuses every oracle arm, and `prior_vs_oracle.py` /
+  `pass0_vs_oracle.py` quietly re-scan and overwrite the certified oracle caches. The repair is in
+  `scan_cache.py` (the owner's call) and is a no-op on every number. Until it lands, the oracle arms run through
+  the key-only wrapper `qa_keyed.py` beside the baseline's data (below); do NOT run `prior_vs_oracle.py`
+  against the shared caches.
+* `ISSUES: oracle-ruler-arm-cannot-reach-the-ruler` — the arm swaps count arrays the ruler stopped reading at
+  `c44fc306`, so it refuses every condition. Repair (an oracle efficiency) or retire.
 
 ## The five xfails are proven defects, each deferred to its thread
 
@@ -86,5 +78,9 @@ of what ships.
   attributions and the taper study that the parked thread resumes from).
 * Captures and reports: `perf/sweeps_VCaP_step19` (the sweep replay's capture, bit-identical on this tree);
   `perf/plan_final_2026-09-19/` is the deep run's current before-and-after.
+* THE BASELINE: `~/Downloads/rigel_runs/arms/2026-09-19_e2e_baseline/` — one `qa_<arm>.jsonl` per arm, the
+  per-stratum `qa_report.txt` (`quant_accuracy.py --report`), the floor-and-arm table `decomposition.txt`, the
+  allocation arm `alloc.txt`, calibration's own split on the capture-OFF rows (`cvo*.json`), `tree.txt`, and
+  `qa_keyed.py`, the wrapper the oracle arms ran through.
 * The identity references: `~/Downloads/rigel_runs/arms/review_identity_*.json`, BIT-IDENTICAL on this tree.
   They are the gate for any change that must not move a number.
