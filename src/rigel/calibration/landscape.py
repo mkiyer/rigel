@@ -75,7 +75,16 @@ _LOCATED_VAR = 1.0
 @dataclass(frozen=True)
 class DensityLandscape:
     """A fitted population gDNA-density hyperprior: ``logP`` over a natural-log rate grid, entering ψ
-    as exact Bayes (a temperature on the term was a tunable nothing ever moved; retired 2026-09-13)."""
+    as exact Bayes (a temperature on the term was a tunable nothing ever moved; retired 2026-09-13).
+
+    ψ reads the curve ITSELF, at the density every cell of every slot implies — ``log ρ_c = log f_g + log M −
+    log E`` on the slot's gDNA support — with numpy's interpolation and the ends held constant off the grid
+    (`native/psi_kernel.cpp`, ``Arm``; `sweep._gdna_arm` hands the kernel the curve and the per-slot support).
+    Bare: no reference prior, no measure term, no Jacobian — ``logP`` is a density in log-rate, so its
+    conversion to a linear-rate density cancels the ``log σ'(λ)`` change of variable exactly, per component,
+    and ψ's arm adds the reference itself. The grid already spans the data's own support (:func:`_grid`), so
+    the held ends fire only on ψ's extreme fractions, where the honest statement is "no more information out
+    here", not a linear extension of the last slope."""
 
     log_rho: np.ndarray
     logP: np.ndarray
@@ -89,41 +98,10 @@ class DensityLandscape:
     centre: np.ndarray
     located: np.ndarray
 
-    def logprior(self, frac_grid, mass, eff) -> np.ndarray:
-        """Project onto the ψ solve grid → ``(n_slots, K)`` additive term ``= log P(log ρ_c)`` evaluated at
-        ``ρ_c = f_c·M/E_c``. Bare — no reference prior, no measure term, no Jacobian; ψ's arm adds the
-        reference itself.
-
-        ``frac_grid`` is the component's fraction, which is what makes this serve either component. The
-        caller passes ``f_g`` for gDNA and ``1 − f_g`` for RNA, with that component's own opportunity as
-        ``eff``. Nothing else differs between the two: the arithmetic below is
-        ``log ρ_c = log f_c + log M − log E_c`` for whichever component is asked about.
-
-        The first axis is ``n_slots``, not ``n_regions``: the unified region+boundary chain, the same axis
-        as ``u_pos``/``u_neg``. A reader sizing a new array off "regions" builds the wrong shape.
-
-        The latents are rates, conditioning on ``M`` contributes no ``f_c``-dependent Jacobian, and because
-        ``logP`` is a density in log-rate its conversion to a linear-rate density cancels the
-        ``log σ'(λ)`` change-of-variable exactly — so neither is written, here or in the caller. That
-        cancellation is per component, which is why it keeps holding when both arms carry a fitted prior.
-
-        Off-grid values clamp to the end values rather than extrapolating: the grid already spans the data's
-        own support (:func:`_grid`), so this only fires on the ψ grid's extreme fractions, where the honest
-        statement is "no more information out here", not a linear extension of the last slope.
-        """
-        eff = np.maximum(np.asarray(eff, dtype=np.float64), _EPS)
-        mass = np.maximum(np.asarray(mass, dtype=np.float64), _EPS)
-        frac = np.clip(np.asarray(frac_grid, dtype=np.float64), _EPS, 1.0 - _EPS)
-        log_rho_c = np.log(frac)[None, :] + (np.log(mass) - np.log(eff))[:, None]
-        lp = np.interp(
-            log_rho_c.ravel(), self.log_rho, self.logP, left=self.logP[0], right=self.logP[-1]
-        ).reshape(log_rho_c.shape)
-        return lp
-
     def required_logodds_window(self, mass, eff) -> float:
         """The λ bracket this prior's own support demands — derived, with no constant chosen.
 
-        :meth:`logprior` is evaluated at ``log ρ_i(f) = log f + log M_i − log E_i`` and ψ can only offer
+        ψ reads the curve at ``log ρ_i(f) = log f + log M_i − log E_i`` and can only offer
         ``f ∈ [σ(−L), σ(L)]``. So this prior is expressible at slot ``i`` only if ψ can place that slot on
         the landscape's own floor ``ρ_floor = exp(log_rho[0])`` — :func:`_grid`'s resolution wall::
 
@@ -159,7 +137,7 @@ class DensityLandscape:
 
 
 def _grid(mass: np.ndarray, eff: np.ndarray) -> np.ndarray:
-    """The log10 rate axis: exactly the domain :meth:`DensityLandscape.logprior` can be asked about. No
+    """The log10 rate axis: exactly the domain ψ's fitted arm can ask the curve about. No
     asserted range, and nothing left over to choose.
 
     ψ evaluates the prior at ``ρ_g = f_g·M/E`` for ``f_g ∈ (0, 1]``, so:

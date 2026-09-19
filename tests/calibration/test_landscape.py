@@ -147,22 +147,61 @@ def test_knn_width_widens_as_the_sample_thins():
     assert np.median(thin) > np.median(full)
 
 
-def test_logprior_shape():
+def _arm(ls, fg, mass, eff):
+    """ψ's fitted gDNA arm on a fraction grid, read through the kernel's own construction
+    (`simplex_logodds.gdna_arm`): the curve at ``log f_g + log M − log E`` per slot and cell."""
+    from rigel.calibration.simplex_logodds import gdna_arm
+
+    fg = np.asarray(fg, np.float64)
+    return gdna_arm(ls.log_rho, ls.logP, np.log(fg / (1.0 - fg)), mass, eff)
+
+
+def test_the_arm_is_one_row_per_slot_and_finite():
     count, mass, eff, var = _two_mode()
     ls = fit_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))
-    fg = np.linspace(0.01, 0.99, 7)
-    lp = ls.logprior(fg, np.full(4, 1000.0), np.full(4, 500.0))
+    lp = _arm(ls, np.linspace(0.01, 0.99, 7), np.full(4, 1000.0), np.full(4, 500.0))
     assert lp.shape == (4, 7) and np.isfinite(lp).all()
 
 
-def test_logprior_tracks_the_region_mass():
+def test_the_arm_tracks_the_region_mass():
     """ρ_g = f_g·M/E, so at fixed f_g a heavier region sits higher on the landscape."""
     count, mass, eff, var = _two_mode()
     ls = fit_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))
-    fg = np.array([0.5])
-    lo = ls.logprior(fg, np.array([100.0]), np.array([500.0]))
-    hi = ls.logprior(fg, np.array([100000.0]), np.array([500.0]))
+    lo = _arm(ls, [0.5], [100.0], [500.0])
+    hi = _arm(ls, [0.5], [100000.0], [500.0])
     assert not np.allclose(lo, hi)
+
+
+def test_the_kernels_arm_is_numpys_interpolation_of_the_curve_to_the_bit():
+    """The arm ψ reads per cell (`native/psi_kernel.cpp`, ``Arm``) is the former ``(n, K)`` projection to the
+    bit: ``np.interp`` of the curve at ``log σ(λ) + log M − log E`` with the ends held, the fraction, mass and
+    opportunity clipped at the landscape's guard. Scored against numpy, a different implementation (TRAPS:
+    a-test-that-redefines). PERTURBATION: an arm that extrapolated past the grid, or skipped a clip, fails here."""
+    from scipy.special import expit
+
+    from rigel.calibration.simplex_logodds import _logodds_grid, gdna_arm
+
+    count, mass, eff, var = _two_mode()
+    ls = fit_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))
+    lam, _fg = _logodds_grid(101, 10.0)
+    rng = np.random.default_rng(7)
+    m = 40
+    # two masses below the guard, one opportunity below it, and one heavy slot on a short opportunity that
+    # lands above the curve's top: both held ends and every clip are exercised
+    slot_mass = np.concatenate([rng.uniform(0.0, 3000.0, m - 3), [0.0, 1e-15, 1e6]])
+    slot_eff = np.concatenate([rng.uniform(1.0, 5000.0, m - 2), [0.0, 1.0]])
+    eps = 1e-12
+    frac = np.clip(expit(lam), eps, 1.0 - eps)
+    x = (
+        np.log(frac)[None, :]
+        + (np.log(np.maximum(slot_mass, eps)) - np.log(np.maximum(slot_eff, eps)))[:, None]
+    )
+    want = np.interp(x.ravel(), ls.log_rho, ls.logP, left=ls.logP[0], right=ls.logP[-1]).reshape(
+        x.shape
+    )
+    got = gdna_arm(ls.log_rho, ls.logP, lam, slot_mass, slot_eff)
+    assert np.array_equal(got, want), f"max |Δ| {np.abs(got - want).max():.3e}"
+    assert (x < ls.log_rho[0]).any() and (x > ls.log_rho[-1]).any(), "the ends were not exercised"
 
 
 def test_declines_gracefully_on_degenerate_input():

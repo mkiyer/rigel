@@ -77,7 +77,11 @@ against these numbers: (1) ψ over slots inside `psi_solve` — 58 s of 264, bit
 threads; VCaP 267 → 214 s and 261 → 213 s at 8 threads (0.80 / 0.82), ψ 57.4 → 8.3 s, the sweep 135 → 88 s, `perf/psi_threads_2026-09-18/`); (2) the pass — 36 s: the census's timers put the
 splice-out marginal at 65 % of it — its node-independent half HOISTED 2026-09-18, exact (the pass 36.6 → 29.2 s and 36.2 → 29.2 s at 8 threads (0.80 / 0.81), the sweep 80 → 73 s, the run 205 → 195 s and 202 → 197 s,
 `perf/splice_out_2026-09-18/`) — the blur at 3.5 s of a first sweep's 9.6 (its loops interchanged would take it to 2.0 s at
-a summation-order change 1.9e-7 of the budget: priced, not taken), and a pass threaded over blocks divides the rest; (3) the builders — 17 s, the RNA lanes 57 % of it,
+a summation-order change 1.9e-7 of the budget: priced, not taken), and a pass threaded over blocks divides the rest;
+THE BLOCK IN ONE NATIVE CALL is designed on paper (2026-09-18; the design sits in the dev sandbox until it lands) and
+lands in three commits —
+ψ's priors as their inputs (LANDED 2026-09-18, exact: the arm interpolated per cell in the kernel, the two rows added
+per cell, `landscape.logprior` deleted), the factory's log-gamma as the kernel's, then the block itself; (3) the builders — 17 s, the RNA lanes 57 % of it,
 threads over blocks; (4) the refit sweeps' Python — the cache key digesting the factory rows' INPUTS LANDED 2026-09-18 (exact; the key
 3.2 s → 0.27 s a refit sweep on VCaP, the capture re-taken as `sweeps_VCaP_step16`), the gDNA arm inside ψ
 (−7 s, tolerance-gated), the factory rows (−3 s, inside a native block); (5) outside calibration,

@@ -395,7 +395,8 @@ def _psi(
     ctx: BlockContext,
     strand: tuple,
     *,
-    gdna_logprior,
+    gdna_prior,
+    gdna_support,
     fg_ref,
     fpos_ref,
     fneg_ref,
@@ -406,8 +407,9 @@ def _psi(
     """ψ's per-slot solve on one block (`simplex_logodds`), every input read off the context. The
     λ-factor is the intron factory's rows — anchored, per intron, zero elsewhere: it deconvolves confident
     gDNA from introns against the intergenic background and takes part in the self-solve AND the message
-    layer — plus the policy's delivered ``lam_rows`` where the final solve passes them; ``cube_rows`` is
-    the RNA level lanes' delivery at AMBIG slots, final solve only.
+    layer — and the policy's delivered ``lam_rows`` where the final solve passes them enter beside it, the
+    two rows added per cell in the kernel; ``cube_rows`` is the RNA level lanes' delivery at AMBIG slots,
+    final solve only. ``gdna_prior`` / ``gdna_support`` are the fitted arm as `_gdna_arm` hands it over.
 
     ``strand`` is ``(κ, od_gdna, od_rna)``. ``fg_ref`` / ``fpos_ref`` / ``fneg_ref`` are the
     count-zero-information variance freeze: the incoming belief, so the variance — hence the message
@@ -415,13 +417,6 @@ def _psi(
     the outgoing belief instead."""
     kappa, od_g, od_r = strand
     cnt = ctx.unspliced_count
-    factory = ctx.factory_rows
-    if lam_rows is None:
-        lam_logprior = factory
-    elif factory is None:
-        lam_logprior = np.asarray(lam_rows, np.float64)
-    else:
-        lam_logprior = factory + np.asarray(lam_rows, np.float64)
     return _solve_regions_logodds_all(
         cnt[:, 0],
         cnt[:, 1],
@@ -434,8 +429,10 @@ def _psi(
         od_r=od_r,
         n_grid=int(ctx.n_grid),
         L=float(ctx.logodds_window),
-        gdna_logprior=gdna_logprior,
-        lam_logprior=lam_logprior,
+        gdna_prior=gdna_prior,
+        gdna_support=gdna_support,
+        lam_logprior=ctx.factory_rows,
+        row_logprior=lam_rows,
         fg_ref=fg_ref,
         fpos_ref=fpos_ref,
         fneg_ref=fneg_ref,
@@ -444,15 +441,17 @@ def _psi(
     )
 
 
-def _gdna_logprior(gdna_prior, solve_grid, mass_global, eff_global):
-    """ψ's fitted composition arm on the solve grid — ONE construction site. THE gDNA ARM is the
-    COMPOSITION prior and only that: a total-density model is an ENRICHMENT model, and letting it vote a
-    slot's ``f_g`` is the count-votes-composition regression. ``None`` means the arm takes its derived
-    reference in the solve — the prior-free solve pass-0 runs by design. The RNA arm has no fitted form
-    (the RNA arm is the Jeffreys reference alone, `native/psi_kernel.cpp`)."""
+def _gdna_arm(gdna_prior, mass_global, eff_global):
+    """ψ's fitted composition arm as the kernel reads it — the landscape's curve ``(log_rho, logP)`` and the
+    per-slot gDNA support ``(mass, eff)`` it is evaluated on, at every cell's density ``log f_g + log M − log E``
+    inside the solve (`native/psi_kernel.cpp`, ``Arm``; no ``(n, K)`` matrix of the arm exists) — ONE
+    construction site. THE gDNA ARM is the COMPOSITION prior and only that: a total-density model is an
+    ENRICHMENT model, and letting it vote a slot's ``f_g`` is the count-votes-composition regression.
+    ``(None, None)`` means the arm takes its derived reference in the solve — the prior-free solve pass-0 runs
+    by design. The RNA arm has no fitted form (the RNA arm is the Jeffreys reference alone)."""
     if gdna_prior is None:
-        return None
-    return gdna_prior.logprior(solve_grid, mass_global, eff_global)
+        return None, None
+    return (gdna_prior.log_rho, gdna_prior.logP), (mass_global, eff_global)
 
 
 def _message_layer(
@@ -535,7 +534,6 @@ def _block_diagnostics(
         od_r=od_r,
         n_grid=int(ctx.n_grid),
         L=float(ctx.logodds_window),
-        gdna_logprior=None,
         n_threads=n_threads,
     ).gdna_frac
     from_left, from_right = tables
@@ -587,8 +585,7 @@ def _solve_block(
     fields = view_fields(chain, statics, geometry, structure)
     # the per-slot gDNA support — the basis the composition prior is fit and projected on
     mass_global, eff_global = region_gdna_geometry(geometry)
-    _, solve_grid = _logodds_grid(sweep.n_grid, sweep.logodds_window)
-    arms = _gdna_logprior(sweep.gdna_prior, solve_grid, mass_global, eff_global)
+    arm, support = _gdna_arm(sweep.gdna_prior, mass_global, eff_global)
 
     own = build_region_init(
         statics,
@@ -600,7 +597,8 @@ def _solve_block(
         n_grid=sweep.n_grid,
         logodds_window=sweep.logodds_window,
         belief=belief,
-        gdna_logprior=arms,
+        gdna_prior=arm,
+        gdna_support=support,
         intron_prior=factory_rows,
         n_threads=sweep.n_threads,
     )
@@ -629,7 +627,8 @@ def _solve_block(
     final = _psi(
         ctx,
         strand,
-        gdna_logprior=arms,
+        gdna_prior=arm,
+        gdna_support=support,
         fg_ref=belief.f_g,
         fpos_ref=belief.f_pos,
         fneg_ref=belief.f_neg,

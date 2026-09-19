@@ -97,12 +97,10 @@ stated), each its own commit, in the order of its size:
    changed background, count, eff or grid still misses — at 1/K of the bytes. The context field stays the rows
    (the layer reads them); only what the KEY hashes for that field changes. Owner: this changes what
    "content-keyed" means for one field.
-2. **The gDNA arm inside ψ** (1.51 s a refit sweep, and 4 MB a block of traffic). The kernel already takes a
-   per-slot prior row; give it the landscape's curve (`log_rho`, `logP`) and the per-slot (mass, eff) instead
-   of the (m, K) matrix and let it interpolate at its own K cells. `np.interp` and a C++ linear interpolation
-   agree to the ulp only when written identically; hold it to the replay's tolerance budget.
-3. **`_psi`'s row add** (0.28 s): the kernel takes the factory row and the delivered row apart (it sums per cell
-   already); no (n, K) add in Python.
+2. ~~**The gDNA arm inside ψ**~~ — LANDED 2026-09-18 (commit 18 of `BLOCK_NATIVE_PLAN.md`): the kernel takes the
+   curve and the per-slot support and interpolates at its own cells; BIT-IDENTICAL on the four VCaP sweeps (numpy's
+   formula in numpy's order).
+3. ~~**`_psi`'s row add**~~ — LANDED with it: the factory row and the delivered row are two inputs added per cell.
 4. **The factory rows** (0.46–0.90 s): lgamma is 85 % of `_log_negbinom`, so a serial port saves ~0.1 s a sweep
    and moves numbers (libm against cephes) — NOT worth its own port and protocol; inside one native call per
    block, threaded over rows, it costs ~0.1 s at 8 threads. Part of the block port, not a step.
@@ -137,7 +135,7 @@ the marginal's log and exp per cell per node (4.2 s), the blur (3.5 s), the tran
 2. ~~(v) the pass's constructors~~ — the splice-out marginal's hoist LANDED 2026-09-18 (exact); the blur's interchange
    priced and not taken (a number moved for 2 % of the run).
 3. The cache key on the factory's inputs (exact; the largest Python item of a refit sweep).
-4. The gDNA arm inside ψ (tolerance-gated); `_psi`'s row add with it.
+4. ~~The gDNA arm inside ψ; `_psi`'s row add~~ — LANDED 2026-09-18, exact.
 5. The block in one native call with a C++ pool over blocks — or Python threads over blocks with GIL-releasing
    kernels, which on the deep library's layer-running sweeps already pays — judged on the Python floor measured
    after 3–4.

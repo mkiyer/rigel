@@ -68,7 +68,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.special import expit
 
-from ..native import psi_compose, psi_cube_native, psi_posterior_median, psi_solve
+from ..native import psi_compose, psi_cube_native, psi_gdna_arm, psi_posterior_median, psi_solve
 from .region_chain import RegionDeconv
 
 # Public surface consumed by sweep / messages / region_geometry, and the pieces the gates read.
@@ -77,6 +77,7 @@ __all__ = [
     "_logodds_grid",
     "_solve_regions_logodds_all",
     "compose",
+    "gdna_arm",
     "posterior_median_fg",
     "psi_cube",
 ]
@@ -272,7 +273,8 @@ def _reference_composition(allow_pos, allow_neg, fg_ref, fpos_ref, fneg_ref):
 
 
 def _prior(rows, K: int):
-    """A per-slot ``(m, K)`` log-prior on the solve grid as the kernel reads it, or ``None`` for none."""
+    """A per-slot ``(m, K)`` log-prior row array on the solve grid as the kernel reads it — the λ-factor rows or
+    the delivered rows — or ``None`` for none."""
     if rows is None:
         return None
     rows = np.ascontiguousarray(rows, np.float64)
@@ -281,6 +283,49 @@ def _prior(rows, K: int):
             f"a ψ prior must be (m, K) on the solve grid; got {rows.shape} for K = {K}"
         )
     return rows
+
+
+def _arm(gdna_prior, gdna_support, m: int):
+    """THE FITTED gDNA ARM as the kernel takes it — ``(log_rho, logP, mass, eff)``: the landscape's curve, a density
+    in log-rate over a natural-log density grid (`landscape.DensityLandscape`), and the per-slot gDNA support it is
+    read on. ψ evaluates the arm at every cell's density ``log ρ_c = log f_g + log M − log E`` itself (numpy's
+    interpolation, the ends held constant off the grid), so no ``(m, K)`` matrix of it ever exists. ``None`` is no
+    fitted arm: the Jeffreys reference alone. Both arrive as tuples of arrays and never as the landscape: this
+    module is layer 3 and imports nothing from layer 5."""
+    if gdna_prior is None:
+        if gdna_support is not None:
+            raise ValueError(
+                "a gDNA support without a curve: the arm is the curve read on the support"
+            )
+        return None
+    if gdna_support is None:
+        raise ValueError("the fitted gDNA arm needs its per-slot support (mass, eff) to be read on")
+    log_rho, logP = (np.ascontiguousarray(a, np.float64) for a in gdna_prior)
+    mass, eff = (np.ascontiguousarray(a, np.float64) for a in gdna_support)
+    if log_rho.ndim != 1 or log_rho.shape != logP.shape or log_rho.shape[0] < 1:
+        raise ValueError("the gDNA arm's curve must be two (G,) arrays")
+    if mass.shape != (m,) or eff.shape != (m,):
+        raise ValueError(
+            f"the gDNA arm's support must be (mass, eff) of shape ({m},); got {mass.shape} and {eff.shape}"
+        )
+    return log_rho, logP, mass, eff
+
+
+def gdna_arm(log_rho, logP, lam, mass, eff):
+    """The fitted gDNA arm as an ``(m, K)`` matrix — the kernel's own construction, for the gates: the curve
+    ``(log_rho, logP)`` read at ``log σ(λ) + log M − log E`` for every slot and cell (`native.psi_gdna_arm`)."""
+    lam = np.ascontiguousarray(lam, np.float64)
+    mass = np.ascontiguousarray(mass, np.float64)
+    out = np.zeros((mass.shape[0], lam.shape[0]))
+    psi_gdna_arm(
+        np.ascontiguousarray(log_rho, np.float64),
+        np.ascontiguousarray(logP, np.float64),
+        lam,
+        mass,
+        np.ascontiguousarray(eff, np.float64),
+        out,
+    )
+    return out
 
 
 def psi_cube(
@@ -297,13 +342,16 @@ def psi_cube(
     od_r,
     lam,
     ambig: bool,
-    gdna_logprior=None,
+    gdna_prior=None,
+    gdna_support=None,
     lam_logprior=None,
+    row_logprior=None,
     cube_rows=None,
     n_tilt: int | None = None,
 ):
     """ψ ITSELF over the ``(λ, θ)`` cube for ``m`` slots of one class — the strand term + the two Jeffreys
-    arms (``_JEFFREYS_REF``) + the fitted gDNA prior + the λ-factor rows (+ the delivered cube rows) + the
+    arms (``_JEFFREYS_REF``) + the fitted gDNA arm (the curve ``gdna_prior`` read on ``gdna_support`` at each
+    cell's density) + the λ-factor rows and the delivered rows, added per cell (+ the delivered cube rows) + the
     θ quadrature's log-weights — as ``(m, K, C)`` in float64, with the two strand-fraction grids it was
     evaluated on, ``(f_pos, f_neg)``, and the tilt ``tau`` they were built from. A single-strand call
     (``ambig=False``) has one column, the tilt of each slot's live strand (``τ = ±1``) and no weight. An
@@ -332,8 +380,9 @@ def psi_cube(
         od_g=float(od_g),
         od_r=float(od_r),
         lam=lam,
-        gdna_logprior=_prior(gdna_logprior, K),
+        gdna=_arm(gdna_prior, gdna_support, m),
         lam_logprior=_prior(lam_logprior, K),
+        row_logprior=_prior(row_logprior, K),
         **_cube_args(cube_rows, lam),
         n_tilt=n_tilt,
         ambig=bool(ambig),
@@ -382,8 +431,10 @@ def _solve_regions_logodds_all(
     od_r,
     n_grid,
     L: float = _DEFAULT_L,
-    gdna_logprior=None,
+    gdna_prior=None,
+    gdna_support=None,
     lam_logprior=None,
+    row_logprior=None,
     fg_ref=None,
     fpos_ref=None,
     fneg_ref=None,
@@ -408,8 +459,11 @@ def _solve_regions_logodds_all(
     incoming belief; the structural-neutral default at init), so the count sets precision and not
     composition. Zero-count slots report 0.
 
-    All array inputs are full length ``m``; ``gdna_logprior`` and ``lam_logprior`` are ``(m, K)`` on the
-    σ(λ) grid; ``cube_rows`` is the RNA level lanes' delivery at the AMBIG slots (:class:`CubeRows`, on this
+    All array inputs are full length ``m``. ``gdna_prior`` is the landscape's curve ``(log_rho, logP)`` and
+    ``gdna_support`` the per-slot ``(mass, eff)`` it is read on: the kernel evaluates the fitted arm at each
+    cell's density itself, so no ``(m, K)`` arm exists (`_arm`). ``lam_logprior`` (the intron factory's λ-factor
+    rows) and ``row_logprior`` (the policy's delivered rows) are ``(m, K)`` on the σ(λ) grid, added per cell in
+    the kernel; ``cube_rows`` is the RNA level lanes' delivery at the AMBIG slots (:class:`CubeRows`, on this
     grid), evaluated at each slot's own θ nodes inside its ψ; ``None`` or an absent slot changes nothing. EMPTY
     slots — no per-strand count and no unspliced or spliced mass — are not solved: at genome scale most
     slots carry no fragments, and their zeros are the solve's own answer. ``n_tilt`` is the derived
@@ -441,8 +495,9 @@ def _solve_regions_logodds_all(
             od_g=float(od_g),
             od_r=float(od_r),
             lam=lam,
-            gdna_logprior=_prior(gdna_logprior, lam.shape[0]),
+            gdna=_arm(gdna_prior, gdna_support, m),
             lam_logprior=_prior(lam_logprior, lam.shape[0]),
+            row_logprior=_prior(row_logprior, lam.shape[0]),
             **_cube_args(cube_rows, lam),
             n_tilt=int(_TILT_NODES if n_tilt is None else n_tilt),
             out_fg=out["fg"],

@@ -52,6 +52,7 @@ from ._em_impl import scatter_units_u8
 from ._transfer_impl import transfer_prepare
 from ._transfer_impl import transfer_pass
 from ._transfer_impl import transfer_solve
+
 # the row constructors and flag predicates, bound for the gates (nothing in src/ reads them)
 from ._transfer_impl import rows as transfer_rows
 
@@ -60,6 +61,7 @@ from ._psi_impl import psi_solve
 from ._psi_impl import psi_cube as psi_cube_native
 from ._psi_impl import posterior_median as psi_posterior_median
 from ._psi_impl import compose as psi_compose
+from ._psi_impl import gdna_arm as psi_gdna_arm
 
 # -- Interval overlap -------------------------------------------------------
 from ._cgranges_impl import cgranges
@@ -101,6 +103,7 @@ __all__ = [
     "psi_cube_native",
     "psi_posterior_median",
     "psi_compose",
+    "psi_gdna_arm",
     # Intervals
     "cgranges",
 ]

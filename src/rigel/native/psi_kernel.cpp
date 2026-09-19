@@ -4,8 +4,9 @@
 // delivered cube rows packed) makes one call here for every slot with a live strand and a fragment; each
 // slot is solved on its own (λ, θ) cube in one pass, so the read-out is chunk-exact by construction and the
 // slots are independent. Per slot: ψ = the strand term (`transfer_rows.h`) + the two Jeffreys arms (½ log f_g
-// + ½ log(1 − f_g)) + the fitted gDNA prior + the λ-factor row + the delivered RNA level row + the θ
-// quadrature's log-weights, over K λ cells and — at an AMBIG slot — `n_tilt` θ nodes across the strand
+// + ½ log(1 − f_g)) + the fitted gDNA arm — the landscape's curve read at the density each cell implies (`Arm`;
+// no (n, K) matrix of it ever exists) — + the λ-factor row + the delivered composition row, the two added per
+// cell, + the delivered RNA level row + the θ quadrature's log-weights, over K λ cells and — at an AMBIG slot — `n_tilt` θ nodes across the strand
 // term's peak plus the two tilt atoms (τ = ±1), a single-strand slot's one column being its live strand;
 // then the read-out: `f_g` the continuous ½-quantile of the θ-marginal on λ (through σ), `Var(log f_g)` its
 // grid moment, `w_+` the RNA-mass-weighted share of the + strand over every column, the composition their
@@ -64,6 +65,33 @@ struct Delivered {
     double total, opportunity, rho_ref;
 };
 
+// THE FITTED gDNA ARM: the landscape's curve — `logP` over a natural-log density grid `log_rho`
+// (`landscape.DensityLandscape`) — read at the density every cell implies, log ρ_c = log f_g + log M − log E (the
+// slot's unspliced count on its gDNA opportunity), with numpy's interpolation and its end rules: the ends held
+// constant off the grid ("no more information out here", never a linear extension of the last slope). Bare — no
+// reference, no measure term, no Jacobian: the curve is a density in log-rate, so its conversion to a linear-rate
+// density cancels the change of variable exactly, per component. Formerly `landscape.logprior`, an (n, K) matrix
+// built in Python per block; the same arithmetic per cell here.
+constexpr double ARM_EPS = 1.0e-12;  // landscape._EPS: the clips on the fraction, the mass and the opportunity
+
+inline double arm_abscissa(double fg) { return std::log(std::clamp(fg, ARM_EPS, 1.0 - ARM_EPS)); }
+
+struct Arm {
+    const double* log_rho = nullptr; const double* logP = nullptr; int G = 0;
+    const double* mass = nullptr; const double* eff = nullptr;  // the per-slot gDNA support
+    bool built() const { return log_rho != nullptr; }
+    // the slot's shift of a cell's log-fraction onto the density axis: log M − log E
+    double shift(int i) const {
+        return std::log(std::max(mass[i], ARM_EPS)) - std::log(std::max(eff[i], ARM_EPS));
+    }
+    double at(double log_frac, double shift) const {
+        const double x = log_frac + shift;
+        double out;
+        interp(&x, 1, log_rho, logP, G, logP[0], logP[G - 1], &out);
+        return out;
+    }
+};
+
 // ---- the θ window for one (slot, λ) --------------------------------------------------------------------
 // EQUATIONS.md §9e: at fixed λ the strand term is a Gaussian in τ with centre τ̂ = d/a and width σ_τ = σ_p/|a|
 // (a = (1 − f_g)(κ − ½), d = u₊/n − ½); the window is where the term lies within T of its maximum ON the
@@ -92,21 +120,26 @@ inline void tilt_window(double u_pos, double n, double var, double fg, double ka
 struct SlotInputs {
     double u_pos, u_neg, fg_ref, fpos_ref, fneg_ref;
     bool ap, an;
-    const double* gdna_prior;  // (K,) or nullptr
-    const double* lam_prior;   // (K,) or nullptr
-    const Delivered* row;      // or nullptr
+    bool has_arm; double arm_shift;  // the fitted gDNA arm at this slot — its log M − log E — or no arm
+    const double* lam_prior;   // (K,) the λ-factor row, or nullptr
+    const double* row_prior;   // (K,) the delivered composition row, or nullptr
+    const Delivered* row;      // the delivered RNA level row, or nullptr
 };
 
 struct Grid {
     const double* lam; int K;
-    std::vector<double> fg, arm;  // σ(λ), and ½ log f_g + ½ log(1 − f_g) per cell
+    // σ(λ); the two Jeffreys arms ½ log f_g + ½ log(1 − f_g); log of the clipped σ(λ), the fitted arm's abscissa
+    std::vector<double> fg, jeffreys, log_frac;
     double kappa, od_g, od_r;
     int n_tilt;
-    explicit Grid(const double* lam_, int K_, double kappa_, double od_g_, double od_r_, int n_tilt_)
-        : lam(lam_), K(K_), fg(K_), arm(K_), kappa(kappa_), od_g(od_g_), od_r(od_r_), n_tilt(n_tilt_) {
+    const Arm* arm;  // the fitted gDNA arm, built or not
+    explicit Grid(const double* lam_, int K_, double kappa_, double od_g_, double od_r_, int n_tilt_, const Arm* arm_)
+        : lam(lam_), K(K_), fg(K_), jeffreys(K_), log_frac(K_), kappa(kappa_), od_g(od_g_), od_r(od_r_),
+          n_tilt(n_tilt_), arm(arm_) {
         for (int k = 0; k < K; ++k) {
             fg[k] = sigmoid(lam[k]);
-            arm[k] = JEFFREYS_REF * log_expit(lam[k]) + JEFFREYS_REF * log_expit(-lam[k]);
+            jeffreys[k] = JEFFREYS_REF * log_expit(lam[k]) + JEFFREYS_REF * log_expit(-lam[k]);
+            log_frac[k] = arm_abscissa(fg[k]);
         }
     }
     int columns(bool ambig) const { return ambig ? n_tilt + 2 : 1; }
@@ -153,10 +186,12 @@ void slot_cube(const Grid& g, const SlotInputs& s, bool ambig, double* psi, doub
             wk[Kt] = 0.0; wk[Kt + 1] = 0.0;
         }
     }
-    // ψ before the delivered row and the weights: strand + arms + the fitted prior + the λ-factor row
+    // ψ before the delivered level row and the weights: strand + the Jeffreys arms + the fitted arm at the cell's
+    // density + (the λ-factor row + the delivered composition row)
     for (int k = 0; k < K; ++k) {
         const double fg = g.fg[k], f_act = 1.0 - fg;
-        const double base = g.arm[k] + (s.gdna_prior ? s.gdna_prior[k] : 0.0) + (s.lam_prior ? s.lam_prior[k] : 0.0);
+        const double base = g.jeffreys[k] + (s.has_arm ? g.arm->at(g.log_frac[k], s.arm_shift) : 0.0) +
+                            ((s.lam_prior ? s.lam_prior[k] : 0.0) + (s.row_prior ? s.row_prior[k] : 0.0));
         for (int t = 0; t < C; ++t) {
             const size_t at = static_cast<size_t>(k) * C + t;
             const double tv = tau[at];
@@ -328,6 +363,40 @@ inline const double* prior_row(Mat& holder, bool present, int i) {
     return present ? holder.data() + static_cast<size_t>(i) * holder.shape(1) : nullptr;
 }
 
+// the fitted gDNA arm's arrays as a call receives them: None, or (log_rho, logP, mass, eff)
+struct ArmArrays {
+    Vec log_rho, logP, mass, eff;
+    Arm arm;
+    ArmArrays(nb::object gdna, int m) {
+        if (gdna.is_none()) return;
+        nb::tuple t = nb::cast<nb::tuple>(gdna);
+        log_rho = nb::cast<Vec>(t[0]); logP = nb::cast<Vec>(t[1]); mass = nb::cast<Vec>(t[2]); eff = nb::cast<Vec>(t[3]);
+        if (log_rho.shape(0) < 1 || logP.shape(0) != log_rho.shape(0))
+            throw std::invalid_argument("psi: the gDNA arm's curve is not two (G,) arrays");
+        if (static_cast<int>(mass.shape(0)) != m || static_cast<int>(eff.shape(0)) != m)
+            throw std::invalid_argument("psi: the gDNA arm's support is not one (mass, eff) per slot");
+        arm = Arm{log_rho.data(), logP.data(), static_cast<int>(log_rho.shape(0)), mass.data(), eff.data()};
+    }
+};
+
+// the two prior rows (the λ-factor's, the delivered composition's) as a call receives them: None or (m, K)
+struct RowPriors {
+    bool has_l, has_r;
+    Mat l, r;
+    RowPriors(nb::object lam_logprior, nb::object row_logprior, int K)
+        : has_l(!lam_logprior.is_none()), has_r(!row_logprior.is_none()) {
+        if (has_l) l = nb::cast<Mat>(lam_logprior);
+        if (has_r) r = nb::cast<Mat>(row_logprior);
+        if ((has_l && static_cast<int>(l.shape(1)) != K) || (has_r && static_cast<int>(r.shape(1)) != K))
+            throw std::invalid_argument("psi: a prior row is not on the solve grid");
+    }
+    SlotInputs inputs(const Arm& arm, int i, double u_pos, double u_neg, double fg_ref, double fpos_ref, double fneg_ref,
+                      bool ap, bool an, const Delivered* row) {
+        return SlotInputs{u_pos, u_neg, fg_ref, fpos_ref, fneg_ref, ap, an, arm.built(), arm.built() ? arm.shift(i) : 0.0,
+                          prior_row(l, has_l, i), prior_row(r, has_r, i), row};
+    }
+};
+
 // THE THREADS. Every slot is solved on its own cube with nothing shared but the read-only grid and the
 // delivered rows, and writes its own four outputs, so the slot list is pulled one slot at a time by a pool
 // of threads: the same arithmetic per slot in the same order within the slot, whatever thread takes it and
@@ -353,20 +422,17 @@ int resolve_threads(int n_threads, int64_t n_slots) {
 }
 
 void psi_solve(IdxVec slots, Vec u_pos, Vec u_neg, BoolVec allow_pos, BoolVec allow_neg, Vec fg_ref, Vec fpos_ref,
-               Vec fneg_ref, double kappa, double od_g, double od_r, Vec lam, nb::object gdna_logprior,
-               nb::object lam_logprior, IdxVec cube_slot, Mat cube_pos, BoolVec cube_has_pos, Mat cube_neg,
+               Vec fneg_ref, double kappa, double od_g, double od_r, Vec lam, nb::object gdna, nb::object lam_logprior,
+               nb::object row_logprior, IdxVec cube_slot, Mat cube_pos, BoolVec cube_has_pos, Mat cube_neg,
                BoolVec cube_has_neg, Vec cube_u, Vec cube_total, Vec cube_opportunity, Vec cube_rho, int n_tilt,
                Vec out_fg, Vec out_fpos, Vec out_fneg, Vec out_var, int n_threads) {
     const int m = static_cast<int>(u_pos.shape(0)), K = static_cast<int>(lam.shape(0));
     if (n_tilt < 2) throw std::invalid_argument("psi_solve: the tilt needs at least two nodes");
-    const bool has_g = !gdna_logprior.is_none(), has_l = !lam_logprior.is_none();
-    Mat g_prior = has_g ? nb::cast<Mat>(gdna_logprior) : Mat();
-    Mat l_prior = has_l ? nb::cast<Mat>(lam_logprior) : Mat();
-    if ((has_g && static_cast<int>(g_prior.shape(1)) != K) || (has_l && static_cast<int>(l_prior.shape(1)) != K))
-        throw std::invalid_argument("psi_solve: a prior is not on the solve grid");
+    ArmArrays A(gdna, m);
+    RowPriors P(lam_logprior, row_logprior, K);
     Rows R = unpack_rows(m, K, cube_slot, cube_pos, cube_has_pos, cube_neg, cube_has_neg, cube_u, cube_total,
                          cube_opportunity, cube_rho);
-    const Grid g(lam.data(), K, kappa, od_g, od_r, n_tilt);
+    const Grid g(lam.data(), K, kappa, od_g, od_r, n_tilt, &A.arm);
     const int64_t n_sel = static_cast<int64_t>(slots.shape(0));
     const int64_t* sl = slots.data();
     const double *up = u_pos.data(), *un = u_neg.data(), *fr = fg_ref.data(), *pr = fpos_ref.data(), *nr = fneg_ref.data();
@@ -374,8 +440,8 @@ void psi_solve(IdxVec slots, Vec u_pos, Vec u_neg, BoolVec allow_pos, BoolVec al
     double *o_fg = out_fg.data(), *o_fp = out_fpos.data(), *o_fn = out_fneg.data(), *o_v = out_var.data();
     auto solve_one = [&](int64_t q, Scratch& S) {
         const int i = static_cast<int>(sl[q]);
-        SlotInputs s{up[i], un[i], fr[i], pr[i], nr[i], ap[i], an[i], prior_row(g_prior, has_g, i),
-                     prior_row(l_prior, has_l, i), R.index[i] >= 0 ? &R.rows[R.index[i]] : nullptr};
+        const SlotInputs s = P.inputs(A.arm, i, up[i], un[i], fr[i], pr[i], nr[i], ap[i], an[i],
+                                      R.index[i] >= 0 ? &R.rows[R.index[i]] : nullptr);
         solve_slot(g, s, S, o_fg[i], o_fp[i], o_fn[i], o_v[i]);
     };
     const int T = resolve_threads(n_threads, n_sel);
@@ -398,15 +464,14 @@ void psi_solve(IdxVec slots, Vec u_pos, Vec u_neg, BoolVec allow_pos, BoolVec al
 // ψ itself, for the gates: the cube (m, K, C) with the two strand-fraction grids and the tilt beside it,
 // every slot of one class (ambig: n_tilt + 2 columns; else one)
 void psi_cube(Vec u_pos, Vec u_neg, BoolVec allow_pos, BoolVec allow_neg, Vec fg_ref, Vec fpos_ref, Vec fneg_ref,
-              double kappa, double od_g, double od_r, Vec lam, nb::object gdna_logprior, nb::object lam_logprior,
-              IdxVec cube_slot, Mat cube_pos, BoolVec cube_has_pos, Mat cube_neg, BoolVec cube_has_neg, Vec cube_u,
-              Vec cube_total, Vec cube_opportunity, Vec cube_rho, int n_tilt, bool ambig, Cube out_psi, Cube out_fpos,
-              Cube out_fneg, Cube out_tau) {
+              double kappa, double od_g, double od_r, Vec lam, nb::object gdna, nb::object lam_logprior,
+              nb::object row_logprior, IdxVec cube_slot, Mat cube_pos, BoolVec cube_has_pos, Mat cube_neg,
+              BoolVec cube_has_neg, Vec cube_u, Vec cube_total, Vec cube_opportunity, Vec cube_rho, int n_tilt,
+              bool ambig, Cube out_psi, Cube out_fpos, Cube out_fneg, Cube out_tau) {
     const int m = static_cast<int>(u_pos.shape(0)), K = static_cast<int>(lam.shape(0));
-    const bool has_g = !gdna_logprior.is_none(), has_l = !lam_logprior.is_none();
-    Mat g_prior = has_g ? nb::cast<Mat>(gdna_logprior) : Mat();
-    Mat l_prior = has_l ? nb::cast<Mat>(lam_logprior) : Mat();
-    const Grid g(lam.data(), K, kappa, od_g, od_r, n_tilt);
+    ArmArrays A(gdna, m);
+    RowPriors P(lam_logprior, row_logprior, K);
+    const Grid g(lam.data(), K, kappa, od_g, od_r, n_tilt, &A.arm);
     const int C = g.columns(ambig);
     if (static_cast<int>(out_psi.shape(1)) != K || static_cast<int>(out_psi.shape(2)) != C)
         throw std::invalid_argument("psi_cube: the output is not (m, K, columns)");
@@ -414,9 +479,9 @@ void psi_cube(Vec u_pos, Vec u_neg, BoolVec allow_pos, BoolVec allow_neg, Vec fg
                          cube_opportunity, cube_rho);
     std::vector<double> scratch;
     for (int i = 0; i < m; ++i) {
-        SlotInputs s{u_pos.data()[i], u_neg.data()[i], fg_ref.data()[i], fpos_ref.data()[i], fneg_ref.data()[i],
-                     allow_pos.data()[i], allow_neg.data()[i], prior_row(g_prior, has_g, i),
-                     prior_row(l_prior, has_l, i), R.index[i] >= 0 ? &R.rows[R.index[i]] : nullptr};
+        const SlotInputs s = P.inputs(A.arm, i, u_pos.data()[i], u_neg.data()[i], fg_ref.data()[i], fpos_ref.data()[i],
+                                      fneg_ref.data()[i], allow_pos.data()[i], allow_neg.data()[i],
+                                      R.index[i] >= 0 ? &R.rows[R.index[i]] : nullptr);
         const size_t off = static_cast<size_t>(i) * K * C;
         slot_cube(g, s, ambig, out_psi.data() + off, out_fpos.data() + off, out_fneg.data() + off, out_tau.data() + off,
                   scratch);
@@ -427,6 +492,23 @@ void posterior_median_rows(Mat post, Vec lam, Vec out) {
     const int m = static_cast<int>(post.shape(0)), K = static_cast<int>(post.shape(1));
     std::vector<double> cdf;
     for (int i = 0; i < m; ++i) out.data()[i] = posterior_median(post.data() + static_cast<size_t>(i) * K, lam.data(), K, cdf);
+}
+
+// the fitted gDNA arm as an (m, K) matrix, for the gates: the kernel's own construction at every (slot, cell)
+void gdna_arm_rows(Vec log_rho, Vec logP, Vec lam, Vec mass, Vec eff, Mat out) {
+    const int m = static_cast<int>(mass.shape(0)), K = static_cast<int>(lam.shape(0));
+    if (static_cast<int>(out.shape(0)) != m || static_cast<int>(out.shape(1)) != K)
+        throw std::invalid_argument("gdna_arm: the output is not (m, K)");
+    if (logP.shape(0) != log_rho.shape(0) || log_rho.shape(0) < 1 || static_cast<int>(eff.shape(0)) != m)
+        throw std::invalid_argument("gdna_arm: the curve is two (G,) arrays and the support one (mass, eff) per slot");
+    const Arm arm{log_rho.data(), logP.data(), static_cast<int>(log_rho.shape(0)), mass.data(), eff.data()};
+    std::vector<double> log_frac(K);
+    for (int k = 0; k < K; ++k) log_frac[k] = arm_abscissa(sigmoid(lam.data()[k]));
+    for (int i = 0; i < m; ++i) {
+        const double sh = arm.shift(i);
+        double* o = out.data() + static_cast<size_t>(i) * K;
+        for (int k = 0; k < K; ++k) o[k] = arm.at(log_frac[k], sh);
+    }
 }
 
 void compose_rows(Vec f_g, Vec w_pos, BoolVec allow_pos, BoolVec allow_neg, Vec out_fpos, Vec out_fneg) {
@@ -442,17 +524,18 @@ NB_MODULE(_psi_impl, m) {
     m.doc() = "ψ, the calibration sweep's per-slot solve on the (λ, θ) cube, and its pieces for the gates.";
     m.def("psi_solve", &psi_solve, nb::arg("slots"), nb::arg("u_pos"), nb::arg("u_neg"), nb::arg("allow_pos"),
           nb::arg("allow_neg"), nb::arg("fg_ref"), nb::arg("fpos_ref"), nb::arg("fneg_ref"), nb::arg("kappa"),
-          nb::arg("od_g"), nb::arg("od_r"), nb::arg("lam"), nb::arg("gdna_logprior").none(),
-          nb::arg("lam_logprior").none(), nb::arg("cube_slot"), nb::arg("cube_pos"), nb::arg("cube_has_pos"),
-          nb::arg("cube_neg"), nb::arg("cube_has_neg"), nb::arg("cube_u"), nb::arg("cube_total"),
+          nb::arg("od_g"), nb::arg("od_r"), nb::arg("lam"), nb::arg("gdna").none(),
+          nb::arg("lam_logprior").none(), nb::arg("row_logprior").none(), nb::arg("cube_slot"), nb::arg("cube_pos"),
+          nb::arg("cube_has_pos"), nb::arg("cube_neg"), nb::arg("cube_has_neg"), nb::arg("cube_u"), nb::arg("cube_total"),
           nb::arg("cube_opportunity"), nb::arg("cube_rho"), nb::arg("n_tilt"), nb::arg("out_fg"), nb::arg("out_fpos"),
           nb::arg("out_fneg"), nb::arg("out_var"), nb::arg("n_threads"),
           "Solve every slot in `slots` on its own cube and write f_g, f_pos, f_neg and Var(log f_g) in place, on "
-          "`n_threads` threads (0: every core) — bit-identical at every thread count.");
+          "`n_threads` threads (0: every core) — bit-identical at every thread count. `gdna` is the fitted arm as "
+          "(log_rho, logP, mass, eff) or None; `lam_logprior` / `row_logprior` the λ-factor and delivered rows or None.");
     m.def("psi_cube", &psi_cube, nb::arg("u_pos"), nb::arg("u_neg"), nb::arg("allow_pos"), nb::arg("allow_neg"),
           nb::arg("fg_ref"), nb::arg("fpos_ref"), nb::arg("fneg_ref"), nb::arg("kappa"), nb::arg("od_g"),
-          nb::arg("od_r"), nb::arg("lam"), nb::arg("gdna_logprior").none(), nb::arg("lam_logprior").none(),
-          nb::arg("cube_slot"), nb::arg("cube_pos"), nb::arg("cube_has_pos"), nb::arg("cube_neg"),
+          nb::arg("od_r"), nb::arg("lam"), nb::arg("gdna").none(), nb::arg("lam_logprior").none(),
+          nb::arg("row_logprior").none(), nb::arg("cube_slot"), nb::arg("cube_pos"), nb::arg("cube_has_pos"), nb::arg("cube_neg"),
           nb::arg("cube_has_neg"), nb::arg("cube_u"), nb::arg("cube_total"), nb::arg("cube_opportunity"),
           nb::arg("cube_rho"), nb::arg("n_tilt"), nb::arg("ambig"), nb::arg("out_psi"), nb::arg("out_fpos"),
           nb::arg("out_fneg"), nb::arg("out_tau"),
@@ -462,4 +545,8 @@ NB_MODULE(_psi_impl, m) {
     m.def("compose", &compose_rows, nb::arg("f_g"), nb::arg("w_pos"), nb::arg("allow_pos"), nb::arg("allow_neg"),
           nb::arg("out_fpos"), nb::arg("out_fneg"),
           "The composition as the image of (f_g, w_pos) on the admissible strands.");
+    m.def("gdna_arm", &gdna_arm_rows, nb::arg("log_rho"), nb::arg("logP"), nb::arg("lam"), nb::arg("mass"), nb::arg("eff"),
+          nb::arg("out"),
+          "The fitted gDNA arm as (m, K): the landscape's curve at log σ(λ) + log M − log E per slot and cell, numpy's "
+          "interpolation with the ends held — the kernel's own construction, written in place for the gates.");
 }

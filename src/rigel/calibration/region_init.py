@@ -168,7 +168,8 @@ def build_region_init(
     n_grid: int,
     logodds_window: float,
     belief,
-    gdna_logprior=None,
+    gdna_prior=None,
+    gdna_support=None,
     intron_prior=None,
     n_threads: int = 1,
 ) -> RegionInit:
@@ -178,8 +179,9 @@ def build_region_init(
 
     The strand deconvolution reference (`fg_ref`/`fpos_ref`/`fneg_ref`) is the incoming ``belief`` — the
     count-zero-information variance freeze evaluates the composition variance near the truth, not at a flat ½.
-    ``gdna_logprior`` (ψ's fitted gDNA arm, ``(m, K)`` or ``None``) and ``intron_prior`` (the intron
-    factory ``λ``-factor, ``(m, K)``) enter ψ; ``intron_prior`` additionally seeds I_factory."""
+    ``gdna_prior`` / ``gdna_support`` (ψ's fitted gDNA arm: the landscape's curve and the per-slot support the
+    kernel reads it on, or ``None``) and ``intron_prior`` (the intron factory ``λ``-factor, ``(m, K)``) enter ψ;
+    ``intron_prior`` additionally seeds I_factory."""
     fp = np.asarray(statics.free_pos, bool)
     fn = np.asarray(statics.free_neg, bool)
     # The counts come from the GEOMETRY, their single source: the unspliced ``count`` is both the
@@ -202,7 +204,8 @@ def build_region_init(
         od_r=od_r,
         n_grid=int(n_grid),
         L=float(logodds_window),
-        gdna_logprior=gdna_logprior,
+        gdna_prior=gdna_prior,
+        gdna_support=gdna_support,
         lam_logprior=intron_prior,
         fg_ref=np.asarray(belief.f_g, np.float64),
         fpos_ref=np.asarray(belief.f_pos, np.float64),

@@ -660,8 +660,9 @@ def test_region_sweep_deterministic():
 
 
 def _chunk_substrate(m=255, K=120, seed=3):
-    """A mixed substrate: single-strand and AMBIG slots, a fitted composition arm, non-flat λ-factor
-    rows, and a per-slot freeze reference."""
+    """A mixed substrate: single-strand and AMBIG slots, a fitted composition arm (a curve on a per-slot
+    support, as the kernel reads it), non-flat λ-factor rows, delivered rows, and a per-slot freeze
+    reference."""
     rng = np.random.default_rng(seed)
     u_pos = rng.integers(0, 60, m).astype(float)
     u_neg = rng.integers(0, 60, m).astype(float)
@@ -669,8 +670,11 @@ def _chunk_substrate(m=255, K=120, seed=3):
     an = rng.random(m) < 0.55
     ap[~(ap | an)] = True  # no locked slot: every row solves
     lam = np.linspace(-10.0, 10.0, K)
-    prior = -0.5 * ((lam[None, :] - rng.normal(0.0, 2.0, m)[:, None]) / 3.0) ** 2
+    log_rho = np.linspace(-12.0, 2.0, 80)
+    log_p = -0.5 * ((log_rho + 4.0) / 1.5) ** 2
+    mass, eff = rng.uniform(5.0, 500.0, m), rng.uniform(100.0, 2000.0, m)
     rows = -0.02 * (lam[None, :] - rng.normal(0.0, 1.0, m)[:, None]) ** 2
+    delivered = -0.05 * (lam[None, :] - rng.normal(1.0, 1.5, m)[:, None]) ** 2
     fg_ref = rng.uniform(0.05, 0.95, m)
     rest = 1.0 - fg_ref
     fpos_ref = np.where(ap & an, rest / 2, np.where(ap, rest, 0.0))
@@ -682,8 +686,10 @@ def _chunk_substrate(m=255, K=120, seed=3):
         od_r=0.03,
         n_grid=K,
         L=10.0,
-        gdna_logprior=prior,
+        gdna_prior=(log_rho, log_p),
+        gdna_support=(mass, eff),
         lam_logprior=rows,
+        row_logprior=delivered,
         fg_ref=fg_ref,
         fpos_ref=fpos_ref,
         fneg_ref=fneg_ref,
@@ -702,8 +708,9 @@ def _solve_in_chunks(args, kw, edges):
     for a, b in edges:
         sub_args = tuple(x[a:b] for x in args)
         sub_kw = dict(kw)
-        for key in ("gdna_logprior", "lam_logprior", "fg_ref", "fpos_ref", "fneg_ref"):
+        for key in ("lam_logprior", "row_logprior", "fg_ref", "fpos_ref", "fneg_ref"):
             sub_kw[key] = kw[key][a:b]
+        sub_kw["gdna_support"] = tuple(x[a:b] for x in kw["gdna_support"])
         dc = _solve_regions_logodds_all(*sub_args, **sub_kw)
         for f in fields:
             out[f][a:b] = getattr(dc, f)
@@ -736,7 +743,7 @@ def test_the_psi_solve_is_chunk_exact_so_a_block_split_moves_no_number():
             )
     # not vacuous: both paths solved, with a fitted arm
     assert (args[2] ^ args[3]).any() and (args[2] & args[3]).any()
-    assert kw["gdna_logprior"] is not None
+    assert kw["gdna_prior"] is not None and kw["gdna_support"] is not None
 
 
 def test_the_psi_solve_is_thread_exact_so_the_thread_count_moves_no_number():

@@ -1325,6 +1325,22 @@ time into every cell, the inner loop a contiguous multiply-add — takes the blu
 moved for 2 % of the run, the owner's call. What the pass still is on the first sweep: the splice-out marginal 4.2 s (a
 log and an exp per cell per node, its floor), the blur 3.5, the transport rows 1.7, the lane hops 1.9.
 
+**ψ takes its priors apart** (2026-09-18; the first of the three commits that land the block in one native call,
+designed on paper first; exact).
+The fitted gDNA arm reached the kernel as an ``(n, K)`` matrix built per block in Python — `landscape.logprior`,
+``np.interp`` of the landscape's curve at ``log f_g + log M − log E``, 2.3 s a refit sweep on VCaP — and the λ-factor
+rows and the delivered rows as one ``(n, K)`` sum. Now `psi_solve` and `psi_cube` take the CURVE ``(log_rho, logP)``
+with the per-slot support ``(mass, eff)`` and read the arm at every cell themselves (`psi_kernel.cpp`'s ``Arm``:
+numpy's interpolation in numpy's order, the ends held, the landscape's clips), and take the λ-factor row and the
+delivered composition row as two inputs added per cell; the dispatcher's ``gdna_prior`` / ``gdna_support`` /
+``lam_logprior`` / ``row_logprior`` are arrays, so layer 3 imports nothing from layer 5. `sweep._gdna_arm` hands the
+curve and the support over (ONE construction site, as before), `landscape.logprior` and `_psi`'s add are deleted, and
+the gates read the arm through `simplex_logodds.gdna_arm` — held to ``np.interp`` of the curve TO THE BIT at both held
+ends and every clip (`test_landscape`), the chunk and thread gates' substrate now carrying a curve on a support. Judged
+BIT-IDENTICAL: the four VCaP sweeps at 8 threads (the kernel's `sigmoid` is scipy's `expit` to the bit on every solve
+grid, checked first), the three identity references; the suite 3,437 passed / 5 xfail / 3,442 collected. No timing pairs: an enabling step for the
+block in one native call, where no ``(n, K)`` prior may cross to Python.
+
 #### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer; native since 2026-09-17, §6b.15.5)
 
 A single-strand slot is the cube with a tilt grid of one cell — its tilt is its live strand, `τ = ±1` — so
