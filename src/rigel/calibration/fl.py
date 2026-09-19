@@ -459,6 +459,32 @@ def _deconvolved_gdna_counts(
     )
 
 
+def _adjacent_pairs(region_offsets, boundary_offsets) -> tuple[np.ndarray, np.ndarray]:
+    """Every adjacent region pair of every reference, as ``(left region, the boundary between them)``.
+
+    A reference contributes its regions in order and one boundary between each consecutive pair, so the
+    pair table is a property of the PARTITION and not of any fit — built once, read by both passes of
+    the census. A reference with fewer than two regions contributes nothing, and one whose boundary
+    count disagrees with its region count is skipped rather than guessed at: the two axes are built by
+    the same partition, so a disagreement is a corrupt payload, not a case to interpret.
+    """
+    roff = np.asarray(region_offsets, dtype=np.int64)
+    boff = np.asarray(boundary_offsets, dtype=np.int64)
+    n_regions = np.diff(roff)
+    n_bounds = np.diff(boff)
+    usable = (n_regions >= 2) & (n_bounds == n_regions - 1)
+    if not usable.any():
+        return np.zeros(0, np.int64), np.zeros(0, np.int64)
+    counts = (n_regions - 1)[usable]
+    starts_r = roff[:-1][usable]
+    starts_b = boff[:-1][usable]
+    # one contiguous run per reference, concatenated in reference order — the order the loop walked
+    within = np.arange(int(counts.sum()), dtype=np.int64) - np.repeat(
+        np.concatenate(([0], np.cumsum(counts)[:-1])), counts
+    )
+    return np.repeat(starts_r, counts) + within, np.repeat(starts_b, counts) + within
+
+
 def _realized_gdna_counts(
     payload,
     gdna_opportunity: "GdnaOpportunity",
@@ -532,44 +558,50 @@ def _realized_gdna_counts(
     boff = np.asarray(payload.ref_boundary_offsets, dtype=np.int64)
     exon = int(RegionType.EXON)
 
+    # THE EXON-FLANKING PAIRS, as arrays. Walking every adjacent region pair of every reference in
+    # Python costs a second a fit on a human index and says nothing a mask cannot: the pair table is a
+    # property of the partition, so it is built once, and the arithmetic over it is the same sums in the
+    # same order (`np.bincount` accumulates in input order, which is the order the loop visited).
+    left, boundary = _adjacent_pairs(roff, boff)
+    right = left + 1
+    tl, tr = ty[left], ty[right]
+    l_exon, r_exon = tl == exon, tr == exon
+    keep = (l_exon & ~r_exon) | (r_exon & ~l_exon)
+    nb_all = bnd[boundary]
+    keep &= nb_all > 0.0
+    left, right, boundary = left[keep], right[keep], boundary[keep]
+    l_exon = l_exon[keep]
+    adj = np.where(l_exon, right, left)
+    other = np.where(l_exon, ty[right], ty[left])
+    exon_region = np.where(l_exon, left, right)
+    nb_pair = bnd[boundary]
+    # class 2 is an exon against an INTRON, class 3 an exon against anything else
+    cls = np.where(other == int(RegionType.INTRON), 0, 1)
+    rho_adj = rho_r[adj]
+    n_exons = ty.shape[0]
+
     mu_g = float((g_C * L_axis).sum())
     g_B, a2 = None, float("nan")
-    a3, exon_eps = float("nan"), {}
+    a3 = float("nan")
+    eps_sum = np.zeros(n_exons)
+    eps_count = np.zeros(n_exons)
+    weight_sum = np.zeros(n_exons)
     for _ in range(2):  # one refresh of mu_g from the boundary law; measured stable
-        num = {2: 0.0, 3: 0.0}
-        den = {2: 0.0, 3: 0.0}
-        exon_eps = {}
-        for r in range(roff.size - 1):
-            r_lo, r_hi = int(roff[r]), int(roff[r + 1])
-            b_lo, b_hi = int(boff[r]), int(boff[r + 1])
-            if r_hi - r_lo < 2 or b_hi - b_lo != r_hi - r_lo - 1:
-                continue
-            for j in range(r_hi - r_lo - 1):
-                left, right = r_lo + j, r_lo + j + 1
-                tl, tr = int(ty[left]), int(ty[right])
-                if tl == exon and tr != exon:
-                    adj, other, exon_region = right, tr, left
-                elif tr == exon and tl != exon:
-                    adj, other, exon_region = left, tl, right
-                else:
-                    continue
-                nb = float(bnd[b_lo + j])
-                if nb <= 0.0:
-                    continue
-                cls = 2 if other == int(RegionType.INTRON) else 3
-                r_b = (
-                    (rho_r[adj] / max(rho_off, 1e-30))
-                    * max(mu_r - 1.0, 1e-9)
-                    / max(mu_g - 1.0, 1e-9)
-                )
-                a_b = 1.0 / (1.0 + r_b)
-                num[cls] += a_b * nb
-                den[cls] += nb
-                # SIGNED enrichment ratio (1 = uniform); the clip lives at the exon mean so noise
-                # cancels instead of accumulating one-sidedly.
-                exon_eps.setdefault(exon_region, []).append(
-                    ((a_b * nb) / max(rho_off * max(mu_g - 1.0, 1e-9), 1e-30), a_b * nb)
-                )
+        r_b = (rho_adj / max(rho_off, 1e-30)) * max(mu_r - 1.0, 1e-9) / max(mu_g - 1.0, 1e-9)
+        a_b = 1.0 / (1.0 + r_b)
+        weighted = a_b * nb_pair
+        num = np.bincount(cls, weights=weighted, minlength=2)
+        den = np.bincount(cls, weights=nb_pair, minlength=2)
+        # SIGNED enrichment ratio (1 = uniform); the clip lives at the exon mean so noise
+        # cancels instead of accumulating one-sidedly. An exon has at most two flanking boundaries, so
+        # the per-exon mean below is a sum of at most two terms — the same arithmetic as the list it
+        # replaces, in the same order.
+        eps_pair = weighted / max(rho_off * max(mu_g - 1.0, 1e-9), 1e-30)
+        eps_sum = np.bincount(exon_region, weights=eps_pair, minlength=n_exons)
+        eps_count = np.bincount(exon_region, minlength=n_exons).astype(np.float64)
+        weight_sum = np.bincount(exon_region, weights=weighted, minlength=n_exons)
+        num = {2: float(num[0]), 3: float(num[1])}
+        den = {2: float(den[0]), 3: float(den[1])}
         if den[2] <= 0.0 or den[3] <= 0.0:
             break
         a2, a3 = num[2] / den[2], num[3] / den[3]
@@ -604,15 +636,17 @@ def _realized_gdna_counts(
 
     # ── the on-target excess: exon classes no pool samples, at (eps - 1)+ only
     is_ex = (ty == exon) & (ell > 0.0)
-    all_eps = [e for v in exon_eps.values() for e, _ in v]
-    mean_eps = float(np.mean(all_eps)) if all_eps else 1.0
     h_E = np.zeros_like(g_C)
     m_E = 0.0
-    if exon_eps:
-        for e_idx in np.flatnonzero(is_ex):
-            obs_e = exon_eps.get(int(e_idx), [(mean_eps, 0.0)])
-            eps_e = float(np.mean([e for e, _ in obs_e]))
-            n_e = float(sum(w for _, w in obs_e))
+    # ⛔ An exon no boundary pair witnessed contributes NOTHING, and that is arithmetic rather than a
+    # choice: its weight is `_resolution_weight(signal, inf) = 0`, so its excess is 0 and it is skipped.
+    # The old code still averaged every observed ratio to hand such an exon a default it then multiplied
+    # by that zero — 1.4 M values summed per fit for a number the answer cannot see.
+    witnessed = is_ex & (eps_count > 0.0)
+    if witnessed.any():
+        for e_idx in np.flatnonzero(witnessed):
+            eps_e = float(eps_sum[e_idx] / eps_count[e_idx])
+            n_e = float(weight_sum[e_idx])
             # The excess has its OWN resolution weight, and it is not `lam`: `lam` asks whether the
             # two strata's LAWS differ, while this asks whether this exon's ENRICHMENT differs from
             # 1, and gating one on the other suppresses a real correction. Same helper, its own

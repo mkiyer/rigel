@@ -294,6 +294,40 @@ def _models(**kw):
 # ── the field exists and is never None: the scorer must be able to read it unconditionally ───────
 
 
+def test_the_adjacent_pair_table_IS_the_reference_major_walk():
+    """The census used to walk every adjacent region pair of every reference in Python. The table it
+    walked is a property of the partition, so it is built once as arrays — and this asserts that the
+    arrays are the SAME pairs in the SAME order, because the order is what makes the sums over them
+    reproduce the loop's arithmetic bit for bit.
+
+    Three references on purpose: one ordinary, one with a single region, which contributes no pair, and
+    one whose boundary count disagrees with its region count, which the walk skipped rather than
+    guessed at. PERTURBATION: dropping the usable mask emits pairs for the malformed reference, and
+    ordering by anything but reference-major changes which sums land where.
+    """
+    from rigel.calibration.fl import _adjacent_pairs
+
+    # ref 0: regions 0..3, boundaries 0..2 (3 = 4 - 1) — usable
+    # ref 1: one region, no boundary — no pair
+    # ref 2: regions 5..8, but only 2 boundaries where 3 are needed — skipped
+    region_offsets = np.array([0, 4, 5, 9], dtype=np.int64)
+    boundary_offsets = np.array([0, 3, 3, 5], dtype=np.int64)
+    left, boundary = _adjacent_pairs(region_offsets, boundary_offsets)
+    assert left.tolist() == [0, 1, 2]
+    assert boundary.tolist() == [0, 1, 2]
+
+    # and the plain case: two usable references, concatenated in reference order
+    left, boundary = _adjacent_pairs(
+        np.array([0, 3, 6], dtype=np.int64), np.array([0, 2, 4], dtype=np.int64)
+    )
+    assert left.tolist() == [0, 1, 3, 4]
+    assert boundary.tolist() == [0, 1, 2, 3]
+    # an empty partition is legal and gives empty arrays, not an error
+    for empty in (np.array([0], np.int64), np.array([0, 1], np.int64)):
+        got_left, got_boundary = _adjacent_pairs(empty, np.zeros(empty.size, np.int64))
+        assert got_left.size == 0 and got_boundary.size == 0
+
+
 def test_the_realized_law_is_always_present():
     m = _models()
     assert m.gdna_realized_pmf is not None
@@ -338,6 +372,35 @@ def _payload_fixture(boundary_excess: float):
     from _fl_realized_fixture import build_fixture
 
     return build_fixture(boundary_excess)
+
+
+def test_the_two_boundary_CLASSES_are_told_apart_by_what_flanks_the_exon():
+    """A boundary's class is the NON-exon side: an exon against an INTRON is one estimand, an exon
+    against anything else the other, and the two are inverted against different crossing pools. The
+    fixture's symmetric form cannot see the difference — every off-target region carries exactly the
+    uniform expectation, so both classes get the same weight and swapping their labels swaps two equal
+    sums.
+
+    So this breaks the symmetry: the intron carries RNA-side excess and the intergenic flanks do not,
+    which pushes the intron-flanking class's weight below 1 while the intergenic one stays at it.
+    PERTURBATION: swapping the two class labels fires this and nothing else in the file.
+    """
+    import dataclasses
+
+    from rigel.calibration.fl import _realized_gdna_counts
+
+    payload, opp, rl, rt, rna_pmf, uniform = _payload_fixture(boundary_excess=50.0)
+    counts = np.array(payload.region_contained_count, dtype=np.float64, copy=True)
+    counts[2] *= 40.0  # the INTRON alone reads far above the uniform field: RNA, not gDNA
+    payload = dataclasses.replace(payload, region_contained_count=counts)
+
+    _counts, _uniform_out, diag = _realized_gdna_counts(payload, opp, rl, rt, rna_pmf, uniform)
+    assert diag.applied
+    assert diag.intron_exon_share < diag.intergenic_exon_share, (
+        "the intron-flanking class carries the RNA-diluted weight; the intergenic one does not"
+    )
+    # not vacuous: the intergenic class is essentially undiluted, so the gap is the intron's doing
+    assert diag.intergenic_exon_share > 0.99
 
 
 def test_no_enrichment_excess_means_no_on_target_correction():
