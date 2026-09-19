@@ -17,81 +17,53 @@ Ordered by priority. An entry says what is open and the number a ranking turns o
 what was ruled is `DESIGN.md`.
 
 ### performance-memory-bounded-solve
-`priority: now · kind: build · 2026-08-17; the decomposition and the shared layer landed 2026-09-11, memory 2026-09-12`
-Calibration is the tool's one unfinished component: the four sweeps are ~394 s of a 500 s run on the
-18.6M-fragment library, on one core, while the locus EM beside them takes 25 s. The decomposition is built
-and gated (`DESIGN.md` §6b.15.1–§6b.15.4: a terminal receives nothing, the chain is solved a locus block at a time, the
-block size moves no number, the refit sweeps share their message layer) and the Python is pristine (the
-pre-port and lanes worklists, every ruling in `DESIGN.md` §6b.15). What is OPEN: ③ the C/C++ port of
-`sweep._solve_block` — (i) the passes and `transfer_rows` LANDED 2026-09-17 (`native.transfer_pass`,
-`DESIGN.md` §6b.15.5: one native call per pass, the hop 2.2 → 0.33 µs, the replay six orders inside its
-budget), (ii) `prepare`'s builders LANDED 2026-09-17 in two commits — (ii-a) the layout (the builders write
-the tables the native pass reads directly, `RowTable`; the per-block packing deleted, bit-identical) and (ii-b)
-the arithmetic (`native.transfer_prepare`, one call per block; the builders 20.0 → 2.5 s on MO_3021's first
-sweep, 103 → 18 s on VCaP, the replay 4.1e-6 of its budget; VCaP 409 → 315 s and 403 → 314 s at 8 threads on
-two interleaved pairs, `perf/port_ii_2026-09-17/`), (iii) ψ LANDED 2026-09-17 (`native.psi_solve`, one path,
-the Python deleted; ψ 4.31 → 1.60 s on MO_3021's first sweep, the replay 8e-6 of its budget;
-VCaP 341 → 285 s and 324 → 269 s at 8 threads on two interleaved pairs, the sweep 0.73×, ψ 109 → 55 s, `perf/port_iii_2026-09-17/`; the Python around the kernels — the policy's `solve`, the tables' zero-fills, the factory rows — is now the sweep's majority); the policy's solve LANDED native the same day
-(`native.transfer_solve`, bit-identical; the cube delivery a table, `CubeRows`; the transfer's three kernels one
-module, `transfer_kernel.cpp`; VCaP 270 → 263 s and 270 → 264 s at 8 threads, the solve 7.0 → 2.0 s, `perf/port_solve_2026-09-17/`); the tables' allocations LANDED 2026-09-17 (every optional-row table allocated
-unfilled under its presence bit, `np.empty`, the reader audit executable as a poison gate; BIT-IDENTICAL on the four
-captured sweeps, the three references and the suite; MO_3021's first sweep 6.85 → 6.08 s, `numpy.zeros` 1.20 → 0.14 s,
-~0.3 s of it returning as first-touch faults inside the kernels; VCaP 277 → 275 s and 271 → 268 s at 8 threads (0.99 / 0.99), the builders' stage 19.2 → 17.9 s and 18.7 → 17.3 s, the pass 38.4 → 38.0 s and 37.7 → 36.8 s, `perf/block_alloc_2026-09-17/`);
-the one-path convergence of the pass DONE 2026-09-17 (the per-hop Python kernel and `transfer_rows.py` deleted, the
-protocol `prepare / run_pass / solve`, the constructors and predicates bound for the gates as `native.transfer_rows`,
-BIT-IDENTICAL on the four captured sweeps and the three references); the factory rows PRICED and not ported alone (lgamma is 85 % of `_log_negbinom`'s 0.46–0.90 s a sweep: a port saves
-~0.1 s and moves numbers); the sweep measured for the threads design — a refit sweep runs on the landscape's bracket
-(K = 202 against the first sweep's 101, every per-cell cost 2×) and is 10.0 s of which ψ 3.19, the message cache's key
-2.88 (blake2b over the factory rows' bytes), the gDNA arm's interpolation 1.51, the factory rows 0.90; then
-(iv) threads over
-blocks — DESIGNED 2026-09-17 and put to the owner before building: ψ over slots inside `psi_solve` first (bit-identical
-by construction, the replay at 1/2/8 threads its gate, ~0.83× on VCaP), then the cache key on the factory's inputs, the
-gDNA arm inside ψ, the block in one native call with a pool over blocks — each step behind `sweep_replay.py replay --tolerance` on the current capture (`sweeps_VCaP_step13`: the deep library, taken from
-the tree after the one-path convergence; a step that moves numbers re-captures and deletes the superseded one), the `review_identity_*` references and the suite, timed against the 2026-09-17 baseline
-pair (`perf/baseline_2026-09-17/pair1_*`, the pushed tree at 8 threads on VCaP; the native pass read 526 → 403 s
-and 519 → 410 s on two interleaved pairs, `perf/port_2026-09-17/`); ⑤ the scan and the second pass, the
-stages that scale with depth (`ISSUES: scan-thread-split-starves-the-workers`). Not to do: micro-optimise the
-Python passes; bake the λ lattice into the port (`sweep_logodds_step` is a parameter). `profiling/profiler.py`,
-`profiling/sweep_replay.py`.
-THE FRESH BASELINE ON THE DEEP LIBRARY (owner, 2026-09-17: the optimisation target is VCaP, 18.6 M fragments; the
-MO_3021 captures are retired). This tree — the one-path convergence — at 8 threads, two back-to-back runs,
-`perf/vcap_baseline_2026-09-17/run{1,2}.json`: wall 263.6 and 265.5 s, peak 11.0 GB; the stages drift 0.98–1.07
-between the two runs, the noise floor every pair is read against. Where it goes: calibrate 154 s, of which the sweep
-134 s — ψ 21.6 (the self-solves) + 32.7 (the final solves) + 3.8 before the sweep, the pass 36.5, the builders 17.2, the
-solve 2.0, the Python between the kernels ~24; the landscape fit 4.2 — and 110 s outside calibration: the scan 35, the
-second pass 22 (scoring the held fragments 12, the fragment-length models 8.3), the fragment-length models again before
-calibration 8.3 (a second fit, on the drained tally, by design), quant 37 (the locus EM 15, the capture effective lengths
-8, scoring 6, the partition 3, the priors 3.8), the index load 6.5. Per sweep (`sweeps_VCaP_step13` replayed; the
-transfer kernels' CENSUS — a scratch copy of the kernels with counters, swapped in — `s12/census_run.py`, and the kernel
-wrappers `s12/kernel_times_vcap.py`, in the synced scratchpad): the first sweep (K = 101, the layer runs) 24.7 s, 91 %
-native — the pass 10.4, ψ 6.7, the builders 4.7 (the RNA lanes 2.7, the gDNA lane 1.2), the solve 0.5; the pass is
-4.1 M hops, 2.1 M through a rule (0.96 M transport and splice-out maps against MO_3021's 0.08 M: the deep library has
-counts at most faces), 1.55 M compositions written, 1.39 M levels emitted, and 1.43 M BLURS at a mean of 56 taps over
-K = 101 cells — 8.1 G multiply-adds, which the census's TIMERS later put at 3.5 s of the pass's 9.6 (the splice-out
-marginal 6.3). The refit sweeps run on the landscape's bracket, K = 233 here
-(against the first sweep's 101): sweep 1, a cache miss in production, pays the layer at 2.3×, and every refit sweep pays
-ψ 15.5 s and 7.7 s of Python (the message cache's key 3.2 — blake2b over the block context, the factory rows most of its
-bytes; the gDNA arm's `np.interp` 2.3; the factory rows 1.1, lgamma 85 % of it). THE RANKED OPPORTUNITIES, each priced
-against these numbers: (1) ψ over slots inside `psi_solve` — 58 s of 264, bit-identical by construction — LANDED 2026-09-18
-(`CalibrationConfig.n_threads`, 0 = every core, fed by the CLI's `--threads`; the four VCaP sweeps BIT-IDENTICAL at 1/2/8
-threads; VCaP 267 → 214 s and 261 → 213 s at 8 threads (0.80 / 0.82), ψ 57.4 → 8.3 s, the sweep 135 → 88 s, `perf/psi_threads_2026-09-18/`); (2) the pass — 36 s: the census's timers put the
-splice-out marginal at 65 % of it — its node-independent half HOISTED 2026-09-18, exact (the pass 36.6 → 29.2 s and 36.2 → 29.2 s at 8 threads (0.80 / 0.81), the sweep 80 → 73 s, the run 205 → 195 s and 202 → 197 s,
-`perf/splice_out_2026-09-18/`) — the blur at 3.5 s of a first sweep's 9.6 (its loops interchanged would take it to 2.0 s at
-a summation-order change 1.9e-7 of the budget: priced, not taken), and a pass threaded over blocks divides the rest;
-THE BLOCK IN ONE NATIVE CALL is designed on paper (2026-09-18; the design sits in the dev sandbox until it lands) and
-lands in three commits —
-ψ's priors as their inputs (LANDED 2026-09-18, exact: the arm interpolated per cell in the kernel, the two rows added
-per cell, `landscape.logprior` deleted), the factory's log-gamma as the kernel's (LANDED 2026-09-18: libm's `lgamma` for
-scipy's cephes `gammaln` in `_log_negbinom`, the one number-moving commit of the three — the replay's tolerance report
-attributes it: on the four VCaP sweeps at 8 threads every field moves and stays inside the budget — the first sweep's `f_g` on 81,609 slots by at most 5.7e-14 (3.7e-6 of the derived budget), its `var_gdna` on 251,610 by 5.8e-14 (1.9e-8); each refit sweep's `f_g` on about 27,000 slots by at most 2.3e-15 (1.5e-7), `var_gdna` on about 60,000 by 5.9e-14 (3.5e-9); `has_composition` unmoved everywhere; the references re-frozen with the reason), then THE BLOCK ITSELF — LANDED 2026-09-18, bit-identical:
-`native.solve_blocks`, one call per sweep, a pool over the blocks (VCaP at 8 threads 198 → 144 s and 194 → 138 s (0.73 / 0.71), calibrate 85.6 → 33.7 s, the four sweeps 68.8 → 16.8 s and 66.3 → 15.9 s (0.24); `perf/block_native_2026-09-18/`);
-the message cache priced for the owner (in production the last two refit sweeps are SERVED (the pre run's policy prepare ran 852 = 2 × 426 times over four sweeps, the first sweep and the first refit missing); with the block native a refit sweep that misses replays at 7.4 s at 8 threads and a served one at 3.0 s, so the cache saves about 9 s of a 140 s run (6 %) and costs 2.3 GB held through calibrate at K = 233 (the deliveries: the written rows with their slots, the cubes, the held bits), the keys (0.27 s a sweep) and the deliveries' round trip through Python — message_cache.py, the served list, the deliveries return and their gates; keep or delete is the owner's call.) — DELETED 2026-09-18 (owner): every sweep runs the layer, VCaP at 8 threads 141 → 148 s and 138 → 145 s (1.06 / 1.05), the four sweeps 16.1 → 24.8 s (1.54), calibrate's peak RSS −1.3 GB; (3) the builders — 17 s, the RNA lanes 57 % of it — INSIDE THE BLOCK'S POOL since the block landed; (4) the refit sweeps' Python — the cache key digesting the factory rows' INPUTS LANDED 2026-09-18 (exact; the key
-3.2 s → 0.27 s a refit sweep on VCaP, the capture re-taken as `sweeps_VCaP_step16`), the gDNA arm inside ψ
-LANDED 2026-09-18 (exact, interpolated per cell in the kernel), the factory rows inside the block LANDED 2026-09-18
-(the log-gamma commit attributed the one move); (5) outside calibration,
-110 s untouched by any of the above: the scan (`ISSUES: scan-thread-split-starves-the-workers`), the second pass's
-scoring, the two fragment-length fits (16.6 s together), quant's locus EM and capture effective lengths — the stages that
-scale with depth (§G) and the whole problem past 100 M fragments.
+`priority: now · kind: build · 2026-08-17; the port and the block in one native call landed 2026-09-17/18 (`DESIGN.md` §6b.15)`
+A deep run must be fast enough to iterate on, and memory-bounded. THE PORT IS DONE and its record is
+`DESIGN.md` §6b.15.1–§6b.15.5: the chain is solved a locus block at a time, the block size moves no number,
+and the whole sweep is ONE native call over a pool of threads, bit-identical at every thread count. THE
+BALANCE THEREFORE CHANGED, and this entry is ranked against the new one, not the old.
+
+THE BASELINE (VCaP, 18,568,456 fragments, `--threads 8`, the tree at `e921869c`, two interleaved pairs of
+2026-09-18, `perf/cache_deleted_2026-09-18/`): the run 148.4 s and 145.1 s, peak RSS 10.6 GB and 10.3 GB.
+By stage, from the faster pair: calibrate 40.6 (the four sweeps 24.7, the landscape fits 4.2, its own Python
+10.6), quant 34.2 (the locus EM 14.3, the capture effective lengths 6.0, scoring 5.9, the priors 3.7, the
+partition 3.0), the scan 33.0, the second pass 21.6 (scoring the held fragments 11.8, a fragment-length fit
+8.3, the drain 1.3), a second fragment-length fit 8.0, the index load 6.5. Calibration is 28 % of the run and
+the sweeps inside it 17 %: the reducible work is now OUTSIDE calibration, and nearly all of it is Python
+doing per-object work that numpy or the C++ beside it already does per array. ⛔ Read a saving from the
+STAGE row of an interleaved pair, never from the wall: a few seconds is inside the wall's own drift.
+
+THE ATTRIBUTION, one `profiler.py --cprofile` run on the same library (2026-09-18; it inflates the wall to
+172 s, so its numbers are SHARES and never timings), by call count per run: 2,708,183 scalar
+`np.searchsorted` calls in the second pass's scoring, from `_exact_region_bound` (1,853,986) and `_sj_id`
+(926,993), both of which say in their own docstrings that they mirror `Accumulator::sj_edge_id` and
+`Accumulator::exact_region_bound`; 1,429,451 `np.mean` calls on lists of at most two, one per exon per
+fragment-length fit; 808 `poisson_lower_mean` calls, four `one_sided_rate` fits at 202 bisection steps where
+about 60 close a float64 bracket; 1,982 short-length table builds in `effective_length.interval_sums`; and
+one region-to-locus overlap computed twice although `_region_locus_shares` says "computed exactly once".
+
+WHAT IS OPEN, ranked, each its own commit with its own gate: ① the exact micro-wins — the bisection stops
+when the bracket is closed (the magic 200 dies with it), the Poisson identity's log-gamma becomes a table at
+integer arguments, the locus overlap is computed once (≈ 4 s, bit-identical by construction); ② the scan's
+thread split (≈ 8 s, MEASURED, `ISSUES: scan-thread-split-starves-the-workers`; ⛔ a different worker count
+changes who deposits, so the real-library identity reference decides whether it is free or priced); ③ the
+second pass's boundary lookups — bind the two C++ lookups BATCHED, prove the id spaces agree, restructure
+the loop around one pre-pass per reference, delete the Python mirrors (≈ 7 s, and the one-path duplicate goes
+with it); ④ the two fragment-length fits — the adjacent-pair loop and the per-exon filter vectorise BIT-EXACTLY
+(`np.bincount` accumulates in input order, and an exon has at most two flanking boundaries, so a grouped mean
+equals `np.mean` on the list), while the surviving accumulation is the one item that may move a number and is
+isolated and priced for that reason (≈ 11 s of 16.3); ⑤ memory — the sweep's arena is 1.19 GB at eight threads
+and `CalibrationConfig.sweep_block_slots` scales it linearly while moving no number (`block_slots = 1000`
+replays the first sweep at 3.01 s against 2.82 s), while the run's own peak sits in quant, whose 2.2 GB of
+scored candidates is measured before anything is proposed; ⑥ what is left after that — `_cum_short`'s 1,982
+table builds, the locus EM's 14.3 s, the index load's 6.5 s, the scanner's own throughput, and the whole
+problem past 100 M fragments.
+
+⛔ THE GATE FOR EVERY ITEM BUT ⑤: the sweep replay covers the sweep and nothing else, so what sees these is
+`rename_identity.py --check` on the three frozen references — and only the `--bam` one runs the scan and the
+second pass. Not to do: micro-optimise inside the kernels; bake the λ lattice into the port
+(`sweep_logodds_step` is a parameter); trade a calibration number for speed anywhere except where an item
+says it is priced. `profiling/profiler.py`, `profiling/sweep_replay.py`.
 
 ### gdna-landscape-trains-on-false-positives
 `priority: later · kind: question · 2026-09-02; the population rule and the E-step landed 2026-09-10, the location floor 2026-09-14 (`DESIGN.md` §7.1)`

@@ -57,12 +57,11 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   regime); what the gDNA witness cannot see of a transcript-designed panel is declared
   (`ISSUES: ruler-witness-geometry-on-transcript-panels`); the never-passed
   per-transcript prior lane (`ISSUES: per-transcript-prior-lane`) is the other pre-EM item.
-- **Calibration's performance**: the one unfinished component — the sweeps dominate a deep run while the
-  locus EM beside them is a rounding error. The decomposition is built and the block is native: a terminal
-  receives nothing, the sweep solves the chain a locus block at a time, the block size moves no number, and
-  the whole sweep is ONE native call that runs the blocks on a pool of threads, bit-identical at every thread
-  count (`DESIGN.md` §6b.15.1–§6b.15.5); what remains is the kernels' own cost and the stages outside
-  calibration that scale with depth — `profiling/profiler.py`, `profiling/sweep_replay.py --threads`.
+- **Performance**: the port is done and the balance has moved. The sweep is ONE native call over a pool of
+  threads, bit-identical at every thread count (`DESIGN.md` §6b.15.1–§6b.15.5), so calibration is a quarter of
+  a deep run and the stages outside it are the rest. What remains is Python doing per-object work beside array
+  code that already exists, ranked with its attribution in `ISSUES: performance-memory-bounded-solve` —
+  `profiling/profiler.py`, `profiling/sweep_replay.py --threads`.
 - **Panels**: the sparse-nascent 16-condition ladder and the 30-condition test chromosome, both cached
   and certified — `panel.py status`; the fl-gap side panels carry a different nascent model —
   `ISSUES: flgap-panels-stale-nascent-model`. The ladder's nascent level is a development stress
@@ -76,11 +75,8 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
 
 ## Next — the recommended order
 
-The session order agreed 2026-09-14 (owner): the test chromosome's new structures with both panels
-remeasured (done 2026-09-14, `DESIGN.md` §7); then the ruler at zero gDNA (done 2026-09-14, `DESIGN.md` §7.2) and the flux
-price's witness (done 2026-09-14, `DESIGN.md` §6b.13), the one accuracy item inside the port's unit; then the performance
-re-baseline and the port. The
-ranked list below is the substance of each.
+The owner's standing order (2026-09-17): the release ships the contraction as it stands, and performance
+runs until the tool is fast. The ranked list below is the substance of each item.
 
 The method is the dissection loop: run the panel → worst in-scope scenario → rank its objects by error
 mass (`worst_objects.py`, `calibration_walk.py`) → find the mechanism → gated fix → add the offending
@@ -91,18 +87,12 @@ its instrument: the ruler reads 1.000 at `g00` and off capture, so the metric pa
 intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons (stranded ON)
 (`policy_benchmark.py --by-class`).
 
-1. **Calibration's performance — `ISSUES: performance-memory-bounded-solve`** (owner, 2026-09-11: the
-   active thread). The decomposition, the shared message layer, the typed tables, the pre-port and lanes
-   worklists and THE PORT — the pass, the builders, ψ and the policy's solve native, ONE code path with the
-   Python kernels deleted, the tables allocated unfilled — are landed (`DESIGN.md` §6b.15). The optimisation
-   target is the deep library (VCaP): its four sweeps are captured for replay (`profiling/sweep_replay.py`)
-   and the whole run profiled (`profiling/profiler.py`), and every step is judged there. The block is ONE native
-   call (2026-09-18) — ψ threaded over slots, the cache's key on the factory's inputs, the splice-out marginal
-   hoisted, then every locus block end to end on a pool of threads, bit-identical at every thread count; what
-   remains inside a sweep is the kernels' own cost — the pass's blur is the kernel's floor, a summation-order
-   change behind the replay's tolerance budget (the ranked list with its numbers is
-   `ISSUES: performance-memory-bounded-solve`); then the scan, the second pass and quant, the stages that
-   scale with depth. The accuracy frame is unchanged, and no step may move a number beyond the budget.
+1. **Performance — `ISSUES: performance-memory-bounded-solve`** (owner, 2026-09-11: the active thread).
+   The port is landed and the sweep is one native call; what is ranked there now is the work OUTSIDE
+   calibration, which is the larger half of a deep run: the exact micro-wins, the scan's thread split, the
+   second pass's boundary lookups, the two fragment-length fits, and memory. The optimisation target is the
+   deep library and every step is judged on it — two interleaved pairs at 8 threads, the three identity
+   references, and no number moved beyond a priced budget.
 2. **Calibration accuracy where the strand tilt matters** — the AMBIG slots with RNA on both strands
    (`DESIGN.md` §6b.15.12–§6b.15.13). The tilt atom and the strand channel's protocol decision landed 2026-09-14 (the
    strand-pure under-call and the gDNA-free deadband CLOSED); the θ measure is settled (both flattenings
