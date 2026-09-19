@@ -17,62 +17,36 @@ Ordered by priority. An entry says what is open and the number a ranking turns o
 what was ruled is `DESIGN.md`.
 
 ### performance-memory-bounded-solve
-`priority: now · kind: build · 2026-08-17; the port and the block in one native call landed 2026-09-17/18 (`DESIGN.md` §6b.15)`
-A deep run must be fast enough to iterate on, and memory-bounded. THE PORT IS DONE and its record is
-`DESIGN.md` §6b.15.1–§6b.15.5: the chain is solved a locus block at a time, the block size moves no number,
-and the whole sweep is ONE native call over a pool of threads, bit-identical at every thread count. THE
-BALANCE THEREFORE CHANGED, and this entry is ranked against the new one, not the old.
+`priority: now · kind: build · 2026-08-17; the port landed 2026-09-17/18, the work outside calibration 2026-09-19 (`DESIGN.md` §6b.15)`
+A deep run must be fast enough to iterate on, and memory-bounded. TWO CAMPAIGNS ARE DONE and their record is
+`DESIGN.md` §6b.15: the port, which made the sweep one native call over a pool of threads, and the work OUTSIDE
+calibration that followed it, which took a deep run from 145 s to 125 s without moving a number.
 
-THE BASELINE (VCaP, 18,568,456 fragments, `--threads 8`, the tree at `e921869c`, two interleaved pairs of
-2026-09-18, `perf/cache_deleted_2026-09-18/`): the run 148.4 s and 145.1 s, peak RSS 10.6 GB and 10.3 GB.
-By stage, from the faster pair: calibrate 40.6 (the four sweeps 24.7, the landscape fits 4.2, its own Python
-10.6), quant 34.2 (the locus EM 14.3, the capture effective lengths 6.0, scoring 5.9, the priors 3.7, the
-partition 3.0), the scan 33.0, the second pass 21.6 (scoring the held fragments 11.8, a fragment-length fit
-8.3, the drain 1.3), a second fragment-length fit 8.0, the index load 6.5. Calibration is 28 % of the run and
-the sweeps inside it 17 %: the reducible work is now OUTSIDE calibration, and nearly all of it is Python
-doing per-object work that numpy or the C++ beside it already does per array. ⛔ Read a saving from the
-STAGE row of an interleaved pair, never from the wall: a few seconds is inside the wall's own drift.
+THE BASELINE (VCaP, 18,568,456 fragments, `--threads 8`, the tree at `4abc3bed`, two interleaved pairs of
+2026-09-19, `perf/plan_final_2026-09-19/`): the run 125.6 s and 125.3 s, 0.88 and 0.87 of the tree the campaign
+started from. By stage, from the second pair: calibrate 39.5 (the four sweeps 24.0, the landscape fits 4.1, its
+own Python 10.3), quant 33.7 (the locus EM 14.4, the capture effective lengths 5.2, scoring 5.7, the partition
+3.0, the priors 2.0), the scan 28.4, the second pass 13.0 (scoring the held fragments 8.7, a fragment-length fit
+2.8, the drain 1.4), a second fragment-length fit 2.8, the index load 6.4. Peak RSS 10.3 GB, and it sits in
+QUANT: the scan's fragment buffer stays alive until quant reads it, the index holds 1.4 GB, and quant's own
+2.2 GB is the EM's candidate CSR in int32, float32 and uint8 — the data the EM reads, not a tunable.
 
-THE ATTRIBUTION, one `profiler.py --cprofile` run on the same library (2026-09-18; it inflates the wall to
-172 s, so its numbers are SHARES and never timings), by call count per run: 2,708,183 scalar
-`np.searchsorted` calls in the second pass's scoring, from `_exact_region_bound` (1,853,986) and `_sj_id`
-(926,993), both of which say in their own docstrings that they mirror `Accumulator::sj_edge_id` and
-`Accumulator::exact_region_bound`; 1,429,451 `np.mean` calls on lists of at most two, one per exon per
-fragment-length fit; 808 `poisson_lower_mean` calls, four `one_sided_rate` fits at 202 bisection steps where
-about 60 close a float64 bracket; 1,982 short-length table builds in `effective_length.interval_sums`; and
-one region-to-locus overlap computed twice although `_region_locus_shares` says "computed exactly once".
+WHAT IS OPEN, ranked: ① calibrate's own Python, 10.3 s that no probe covers — the chain, the statics, the
+beliefs' init and reset, the deconvolution — measure it before proposing anything; ② quant's 33.7 s, of which
+the locus EM is 14.4 and already native, the capture effective lengths 5.2 with `effective_length._cum_short`'s
+1,982 table builds inside them, and scoring 5.7; ③ the scan's own 28.4 s, now that its thread split is derived
+(`CLOSED: scan-thread-split-starves-the-workers`) — the scanner's throughput is a study of its own; ④ the
+index load's 6.4 s, unexamined; ⑤ the sweeps' 24.0 s, where the blur's loop interchange is priced at −1.5 s for
+a summation-order change 1.9e-6 of the replay's budget and remains the owner's call; ⑥ the whole problem past
+100 M fragments.
 
-WHAT IS OPEN, ranked, each its own commit with its own gate: ① ~~the exact micro-wins~~ LANDED 2026-09-18,
-bit-identical: the bisection ends when its bracket does (the magic 200 gone), the Poisson identity's log-gamma
-is a table at its integer argument, the region-to-locus overlap is traversed once per assembly — the rate fit
-261 → 46 ms on 80,000 objects at the same rate to every digit, four fits a run, and one 1.7 s traversal gone; ② ~~the scan's
-thread split~~ LANDED 2026-09-19, bit-identical on all three references including the real-library one that runs
-the scan: the budget is split by the measured ratio of one decompression thread per eight workers, the scan
-34.5 → 25.8 s at 8 threads and 20.1 → 17.6 s at 16 (`ISSUES: scan-thread-split-starves-the-workers` carries the
-table); ③ ~~the
-second pass's boundary lookups~~ LANDED 2026-09-19, bit-identical: `Accumulator::sj_edge_ids` bound, one
-pre-pass per reference, `_sj_id` and `_exact_region_bound` deleted — scoring the held fragments 11.85 → 8.66 s
-and 11.82 → 8.64 s on two interleaved pairs (`perf/phase3_2026-09-19/`), against an estimate of 7 s: ⛔ THE
-cProfile SHARE OVERSTATED IT, because that instrument's per-call overhead inflates exactly the functions with
-millions of tiny calls, which is the shape every candidate in this entry has. Read an attribution as a
-RANKING and never as a saving; ④ ~~the two fragment-length fits~~ LANDED
-2026-09-19, bit-identical: the adjacent-pair table is built once from the reference offsets and the per-exon
-average is a grouped sum, both exact by construction (`np.bincount` accumulates in input order, and an exon has
-at most two flanking boundaries), and the mean of 1.4 M ratios that fed exons whose weight is identically zero
-is gone — each fit 6.5 → 2.8 s on two interleaved pairs (`perf/phase4_2026-09-19/`), two fits a run, and
-16.3 → 5.6 s counting phase ①'s share of the same stage. The third item, the surviving accumulation, was NOT
-needed: the filter left the loop cold; ⑤ memory — the sweep's arena is 1.19 GB at eight threads
-and `CalibrationConfig.sweep_block_slots` scales it linearly while moving no number (`block_slots = 1000`
-replays the first sweep at 3.01 s against 2.82 s), while the run's own peak sits in quant, whose 2.2 GB of
-scored candidates is measured before anything is proposed; ⑥ what is left after that — `_cum_short`'s 1,982
-table builds, the locus EM's 14.3 s, the index load's 6.5 s, the scanner's own throughput, and the whole
-problem past 100 M fragments.
-
-⛔ THE GATE FOR EVERY ITEM BUT ⑤: the sweep replay covers the sweep and nothing else, so what sees these is
-`rename_identity.py --check` on the three frozen references — and only the `--bam` one runs the scan and the
-second pass. Not to do: micro-optimise inside the kernels; bake the λ lattice into the port
-(`sweep_logodds_step` is a parameter); trade a calibration number for speed anywhere except where an item
-says it is priced. `profiling/profiler.py`, `profiling/sweep_replay.py`.
+⛔ TWO RULES THIS CAMPAIGN PAID FOR. A cProfile share RANKS candidates and never prices them: it charges its own
+per-call overhead to the callee, so it inflates exactly the functions with millions of tiny calls, and the one
+phase estimated from it predicted 7 s and delivered 3.2. And a knob's cost is measured, not assumed: the sweep's
+block size was believed to trade memory for time, and eight interleaved runs found the wall flat while the
+memory scaled with the arena's own arithmetic. Not to do: micro-optimise inside the kernels; bake the λ lattice
+into the port (`sweep_logodds_step` is a parameter); trade a calibration number for speed anywhere.
+`profiling/profiler.py`, `profiling/sweep_replay.py`.
 
 ### gdna-landscape-trains-on-false-positives
 `priority: later · kind: question · 2026-09-02; the population rule and the E-step landed 2026-09-10, the location floor 2026-09-14 (`DESIGN.md` §7.1)`

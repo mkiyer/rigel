@@ -57,11 +57,11 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   regime); what the gDNA witness cannot see of a transcript-designed panel is declared
   (`ISSUES: ruler-witness-geometry-on-transcript-panels`); the never-passed
   per-transcript prior lane (`ISSUES: per-transcript-prior-lane`) is the other pre-EM item.
-- **Performance**: the port is done and the balance has moved. The sweep is ONE native call over a pool of
-  threads, bit-identical at every thread count (`DESIGN.md` §6b.15.1–§6b.15.5), so calibration is a quarter of
-  a deep run and the stages outside it are the rest. What remains is Python doing per-object work beside array
-  code that already exists, ranked with its attribution in `ISSUES: performance-memory-bounded-solve` —
-  `profiling/profiler.py`, `profiling/sweep_replay.py --threads`.
+- **Performance**: the port and the work outside it are done, and a deep run is 0.87 of what it was
+  (`DESIGN.md` §6b.15). The sweep is ONE native call over a pool of threads, bit-identical at every thread
+  count; the scan's split, the second pass's lookups, the fragment-length fits and the sweep's arena followed.
+  What remains is ranked in `ISSUES: performance-memory-bounded-solve`, and the largest piece of it is
+  calibrate's own Python, which no probe covers — `profiling/profiler.py`, `profiling/sweep_replay.py --threads`.
 - **Panels**: the sparse-nascent 16-condition ladder and the 30-condition test chromosome, both cached
   and certified — `panel.py status`; the fl-gap side panels carry a different nascent model —
   `ISSUES: flgap-panels-stale-nascent-model`. The ladder's nascent level is a development stress

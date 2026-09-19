@@ -1413,6 +1413,45 @@ gates' other oracles live, `tests/calibration/_psi_reference.py` (`strand_loglik
 gate is unchanged, and layer 4 is `gdna_strand`, `strand_balance` and `strand_summary`: production only. The suite
 −3 by the module row; nothing in production moved.
 
+**The work outside calibration** (2026-09-19; six phases, each its own commit, all of them bit-identical on the
+three frozen references). The block in one native call changed the balance: calibration became a quarter of a
+deep run and the stages around it the rest, and almost all of the reducible part was PYTHON doing per-object
+work beside array code that already existed. What landed, in order, with what an interleaved pair measured:
+
+* **The gDNA rate's bisection ends when its bracket does.** 200 halvings of a float64 bracket, where about 60
+  close it and the rest reassign a value that can no longer change. The magic constant dies with the loop: the
+  termination rule is now the bracket's own statement about itself. The fit 261 → 163 ms on 80,000 objects.
+* **The Poisson identity's log-gamma is a table.** Its argument is `floor(lam) + 1`, an INTEGER, so the distinct
+  arguments are the integers up to the largest — orders of magnitude fewer than the objects it was evaluated
+  over at every bisection step. The fit 163 → 46 ms, and the values identical rather than approximated.
+* **The region-to-locus overlap is traversed once per assembly**, as `_region_locus_shares` always claimed in
+  its own docstring; `assemble_priors` now hands its triples to the boundary projection. The priors 3.7 → 2.0 s.
+* **The scan's thread budget is split by a measured ratio**, one decompression thread per eight workers, instead
+  of reserving a fixed four — which was the WORST measured cell at every budget (`CLOSED:
+  scan-thread-split-starves-the-workers` keeps both tables). The answer cannot move with it, because every
+  accumulator bank is a sum of integers.
+* **The second pass asks the region-bound axis once per reference.** Its two helpers said in their docstrings
+  that they mirror `Accumulator::sj_edge_id` and `exact_region_bound`, and the scorer already held that
+  accumulator for `length_under`; the rule now has ONE home, bound as a batched `sj_edge_ids`, and a pre-pass
+  answers every question before the loop starts. 2.7 M scalar numpy searches a run become two per reference;
+  scoring the held fragments 11.7 → 8.6 s.
+* **The realized-gDNA census reads its region pairs as arrays.** The adjacent-pair table is a property of the
+  partition, built once from the reference offsets; the per-exon average is a grouped sum, exact because
+  `np.bincount` accumulates in input order and an exon has at most two flanking boundaries. The mean of 1.4 M
+  ratios that fed exons whose weight is identically zero is gone. Each fragment-length fit 8.1 → 2.7 s, and the
+  two together 16.3 → 5.5 s counting the bisection's share.
+* **The sweep's default block size is 1,000 slots.** It sizes the kernel's per-thread arena —
+  `16 · slots · K · 8 B · threads`, 1.19 GB at the old 5,000 — and eight interleaved runs found the sweep's wall
+  FLAT across four sizes while the peak fell by the arena's own arithmetic. What was assumed to be a
+  memory-for-speed trade is not one; calibrate's peak 8.0 → 7.3 GB and the sweep's own 8.0 → 6.8 GB.
+
+THE RUN, two interleaved pairs against a worktree of the tree it started from (`perf/plan_final_2026-09-19/`):
+141.8 → 125.6 s and 143.3 → 125.3 s, 0.88 and 0.87. Calibrate and quant are unchanged by design — nothing here
+touched a kernel — and the run's peak still sits in quant, whose 2.2 GB is the EM's candidate CSR. The suite
+3,423 passed / 5 xfail / 3,428 collected. Two rules this paid for, both now in `ISSUES:
+performance-memory-bounded-solve`: a cProfile share RANKS candidates and never prices them, and a knob's cost is
+measured rather than assumed.
+
 #### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer; native since 2026-09-17, §6b.15.5)
 
 A single-strand slot is the cube with a tilt grid of one cell — its tilt is its live strand, `τ = ±1` — so
