@@ -533,6 +533,16 @@ public:
                               std::size_t hypothesis_index,
                               DepositScratch& scratch) const;
 
+    /// The annotated sj id for each of `n` introns, or -1 — `sj_edge_id` over arrays, written out here
+    /// for the same reason `length_under` is: the second pass asks it once per hypothesis intron, and a
+    /// Python reimplementation would be a second definition of the lookup the deposit already owns.
+    /// Ids are slots in THIS reference's CSR, as `set_sj` defines them.
+    void sj_edge_ids(const std::int64_t* starts,
+                     const std::int64_t* ends,
+                     const std::int32_t* sj_strand,
+                     std::size_t n,
+                     std::int64_t* out) const noexcept;
+
     /// Element-wise sum of `other` into this accumulator. Requires identical region_bound positions.
     void merge_from(const Accumulator& other);
 

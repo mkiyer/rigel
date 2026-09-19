@@ -94,39 +94,9 @@ class HeldScores:
         return int(self.score.shape[0])
 
 
-def _exact_region_bound(region_bounds: np.ndarray, lo: int, hi: int, position: int) -> int:
-    """Flat region_bound index of ``position`` within ``region_bounds[lo:hi]``, or -1 if it is not a region_bound there."""
-    k = lo + int(np.searchsorted(region_bounds[lo:hi], position))
-    return k if k < hi and int(region_bounds[k]) == position else -1
-
-
-def _sj_id(sj, region_bounds, lo, hi, start, end, sj_strand) -> int:
-    """The annotated sj slot for one intron, or -1.
-
-    Mirrors ``Accumulator::sj_edge_id`` — same CSR, same strand rule (the filter applies only when the
-    motif strand is DEFINITE; a non-definite one matches on coordinates alone). Not a duplicate of the
-    length definition: this is a lookup into the index's own table, and the slot IS the payload's sj
-    axis index.
-    """
-    donor = _exact_region_bound(region_bounds, lo, hi, start)
-    if donor < 0:
-        return -1
-    acceptor = _exact_region_bound(region_bounds, lo, hi, end)
-    if acceptor < 0:
-        return -1
-    definite = sj_strand in (int(Strand.POS), int(Strand.NEG))
-    for k in range(int(sj.offsets[donor]), int(sj.offsets[donor + 1])):
-        if int(sj.boundary_right[k]) != acceptor:
-            continue
-        if definite and int(sj.strand[k]) != sj_strand:
-            continue
-        return k
-    return -1
-
-
 def _distinguishing_boundaries(
-    region_bounds: np.ndarray, lo: int, hi: int, start: int, end: int
-) -> tuple[int, int]:
+    region_bounds: np.ndarray, starts: np.ndarray, ends: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
     """The LOCAL boundary range that separates ∅ from a path splicing ``[start, end)``. Endpoints INCLUDED.
 
     Read off the deposit rule, not chosen (``tests/native/_accumulator_reference.py``, the per-segment
@@ -146,8 +116,8 @@ def _distinguishing_boundaries(
     discriminators and returns an EMPTY range whenever the intron spans one region, which hands the
     unspliced path a structural ``rho`` of 0 on a large share of held fragments.
     """
-    first = int(np.searchsorted(region_bounds[lo:hi], start, side="left"))
-    last = int(np.searchsorted(region_bounds[lo:hi], end, side="right"))
+    first = np.searchsorted(region_bounds, starts, side="left")
+    last = np.searchsorted(region_bounds, ends, side="right")
     return first, last
 
 
@@ -262,6 +232,64 @@ def _bottleneck(values: list[float]) -> float:
     return float(min(values)) if values else 0.0
 
 
+def _resolve_intron_lookups(payload, accumulators) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Every question the scoring loop will ask of the region-bound axis, answered per reference.
+
+    The loop asks two things about each hypothesis intron: which annotated sj it is, if any — the
+    kernel's own `Accumulator.sj_edge_ids`, so the rule has ONE home and this file no longer carries a
+    second copy of it — and the local boundary range that separates the genomic path from a path
+    splicing it (:func:`_distinguishing_boundaries`). Asked one intron at a time each was a numpy call,
+    2.7 M of them on a deep library; asked per reference they are two.
+
+    Returns three arrays over the FLAT hypothesis-intron axis (`hypothesis_intron_offsets` indexes it):
+    the payload's sj id or -1, and the range's two ends, which are LOCAL to the reference exactly as the
+    loop consumes them.
+    """
+    d = payload.deferred
+    n_intron = int(d.hypothesis_introns.shape[0]) // 2
+    sj_of = np.full(n_intron, -1, dtype=np.int64)
+    first_of = np.zeros(n_intron, dtype=np.int64)
+    last_of = np.zeros(n_intron, dtype=np.int64)
+    if n_intron == 0:
+        return sj_of, first_of, last_of
+
+    starts = np.ascontiguousarray(d.hypothesis_introns[0::2], dtype=np.int64)
+    ends = np.ascontiguousarray(d.hypothesis_introns[1::2], dtype=np.int64)
+    # which hypothesis each intron belongs to, and which fragment each hypothesis belongs to
+    hyp_of = np.repeat(
+        np.arange(d.n_hypotheses, dtype=np.int64), np.diff(d.hypothesis_intron_offsets)
+    )
+    frag_of = np.repeat(np.arange(d.n_fragments, dtype=np.int64), np.diff(d.hypothesis_offsets))[
+        hyp_of
+    ]
+    # the motif the lookup filters on: the OBSERVED one when the aligner wrote it, else the hypothesis's
+    # own implied strand — the rule `_sj_id` applied per intron
+    observed = np.asarray(d.sj_strand, dtype=np.int64)[frag_of]
+    implied = np.asarray(d.hypothesis_sj_strand, dtype=np.int64)[hyp_of]
+    motif = np.where(observed != int(Strand.NONE), observed, implied).astype(np.int32)
+
+    refs = np.asarray(d.ref, dtype=np.int64)[frag_of]
+    bounds = np.asarray(payload.region_bounds, dtype=np.int64)
+    for ref in np.unique(refs):
+        here = refs == ref
+        ref = int(ref)
+        lo = int(payload.ref_region_bound_offsets[ref])
+        hi = int(payload.ref_region_bound_offsets[ref + 1])
+        s_here, e_here = starts[here], ends[here]
+        first_of[here], last_of[here] = _distinguishing_boundaries(bounds[lo:hi], s_here, e_here)
+        # the accumulator answers in its own ref-local slots, and `_Accumulators` has already pinned
+        # that base to the payload's own `ref_sj_offsets`
+        local = np.asarray(
+            accumulators[ref].sj_edge_ids(
+                starts=s_here, ends=e_here, sj_strand=np.ascontiguousarray(motif[here])
+            ),
+            dtype=np.int64,
+        )
+        base = int(payload.ref_sj_offsets[ref])
+        sj_of[here] = np.where(local < 0, -1, local + base)
+    return sj_of, first_of, last_of
+
+
 class _Accumulators:
     """A lazy ``ref -> Accumulator`` map built from the PAYLOAD's own region_bound axis, sj installed.
 
@@ -367,11 +395,12 @@ def score_held_fragments(
     strand = np.ones(n_hyp, np.float64)
     score = np.zeros(n_hyp, np.float64)
 
-    region_bounds = payload.region_bounds
     rna_pmf, global_pmf = fl_models.rna_pmf, fl_models.global_pmf
     max_size = int(fl_models.max_size)
 
     accumulators = _Accumulators(payload, region_types, sj)
+    sj_of, first_of, last_of = _resolve_intron_lookups(payload, accumulators)
+    intron_offsets = np.asarray(deferred.hypothesis_intron_offsets, dtype=np.int64)
 
     n_undecided = 0
     for i in range(deferred.n_fragments):
@@ -389,16 +418,14 @@ def score_held_fragments(
             for h in range(h0, h1)
         ]
         acc = accumulators[ref]
-        region_bound_lo, region_bound_hi = (
-            int(payload.ref_region_bound_offsets[ref]),
-            int(payload.ref_region_bound_offsets[ref + 1]),
-        )
         boundary_base = int(payload.ref_boundary_offsets[ref])
         # The region the GENOMIC hypothesis claims is contiguous and every spliced one jumps: the union
         # of the competing implied introns. Scoring `∅` over exactly this — rather than over its whole
         # path — is what keeps the comparison symmetric, since otherwise `∅` is penalised simply for
         # touching more objects than a path that jumps them.
-        contested = [intron for introns, _ in hypotheses for intron in introns]
+        # The fragment's hypothesis introns are one contiguous run of the flat axis, and that run IS
+        # `contested`: the union of what the competing paths jump, in the order they declared it.
+        contested_lo, contested_hi = int(intron_offsets[h0]), int(intron_offsets[h1])
 
         # `length_under` needs the hypothesis objects back in the shape the binding reads.
         spans = [_Span(introns, sj) for introns, sj in hypotheses]
@@ -423,10 +450,9 @@ def score_held_fragments(
                 # A spliced path's evidence is the sj it uses. `sj_inv_length_sum` is deposited
                 # by the SAME rule as a contiguous boundary, so the two are the same quantity on the same
                 # scale — that is what makes this comparable to `∅`'s number at all.
-                motif = observed_motif if observed_motif != int(Strand.NONE) else implied_strand
                 observed_densities = []
-                for a, b in introns:
-                    jid = _sj_id(sj, region_bounds, region_bound_lo, region_bound_hi, a, b, motif)
+                for t in range(int(intron_offsets[slot]), int(intron_offsets[slot + 1])):
+                    jid = int(sj_of[t])
                     observed_densities.append(
                         0.0 if jid < 0 else float(payload.sj_inv_length_sum[jid])
                     )
@@ -434,11 +460,8 @@ def score_held_fragments(
             else:
                 # The genomic path's evidence is the unspliced crossing density where the others jump.
                 boundary_densities = []
-                for a, b in contested:
-                    first, last = _distinguishing_boundaries(
-                        region_bounds, region_bound_lo, region_bound_hi, a, b
-                    )
-                    for boundary in range(first, last):
+                for t in range(contested_lo, contested_hi):
+                    for boundary in range(int(first_of[t]), int(last_of[t])):
                         boundary_densities.append(
                             float(
                                 payload.boundary_unspliced_inv_length_sum[

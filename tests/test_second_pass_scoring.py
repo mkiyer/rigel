@@ -277,6 +277,86 @@ def _terms(payload, result, base: int) -> dict[tuple, tuple]:
 # ── arms 1 and 2: the deep sj wins, and the answer FLIPS when the depth moves ────────────────
 
 
+def test_the_sj_ids_the_scorer_reads_are_the_PAYLOAD_axis_on_every_reference():
+    """The scorer asks the kernel for sj ids, and the kernel answers in ITS OWN reference-local slots.
+    The payload's axis is the concatenation of those, so every reference but the first needs its base
+    added — and a fixture with one reference cannot tell a correct base from a missing one.
+
+    So this builds TWO references whose sj blocks are both non-empty, and asserts the flat ids. It also
+    pins the MOTIF the lookup filters on, which is the observed one when the aligner wrote it and the
+    hypothesis's own implied strand otherwise: the third fragment below observes ``+`` while its
+    hypothesis implies ``−`` at a junction annotated ``−``, so the rule decides between a match and a
+    miss.
+
+    PERTURBATIONS, both watched: dropping the base returns the second reference's junction as the
+    first's slot, which would silently score one chromosome's traffic onto another's; taking the implied
+    strand over an observed one turns that third fragment's miss into a hit. With one reference and no
+    observed motif, neither mistake fires anything in this file.
+    """
+    from types import SimpleNamespace
+
+    from rigel._bam_impl import Accumulator as NativeAccumulator
+    from rigel.second_pass import _resolve_intron_lookups
+    from rigel.types import Strand
+
+    def accumulator(ref, bounds, offsets, right, strand):
+        a = NativeAccumulator(
+            region_bounds=np.asarray(bounds, np.int64),
+            region_types=np.zeros(max(len(bounds) - 1, 0), np.uint8),
+            max_length=1000,
+            ref=ref,
+        )
+        a.set_sj(
+            np.asarray(offsets, np.int32), np.asarray(right, np.int32), np.asarray(strand, np.int8)
+        )
+        return a
+
+    # ref 0: bounds [0,100,200], one junction 0→100. ref 1: bounds [10,200,300,400], two junctions.
+    accumulators = {
+        0: accumulator(0, [0, 100, 200], [0, 1, 1, 1], [1], [int(Strand.POS)]),
+        1: accumulator(
+            1, [10, 200, 300, 400], [0, 1, 1, 2, 2], [1, 3], [int(Strand.POS), int(Strand.NEG)]
+        ),
+    }
+    deferred = SimpleNamespace(
+        ref=np.array([0, 1, 1], np.int64),
+        # the third fragment OBSERVED a + motif; its hypothesis implies − at a − junction
+        sj_strand=np.array([int(Strand.NONE), int(Strand.NONE), int(Strand.POS)], np.int64),
+        hypothesis_offsets=np.array([0, 1, 2, 3], np.int64),
+        hypothesis_sj_strand=np.array(
+            [int(Strand.POS), int(Strand.POS), int(Strand.NEG)], np.int64
+        ),
+        hypothesis_intron_offsets=np.array([0, 1, 2, 3], np.int64),
+        hypothesis_introns=np.array([0, 100, 10, 200, 300, 400], np.int64),
+        n_fragments=3,
+        n_hypotheses=3,
+    )
+    payload = SimpleNamespace(
+        deferred=deferred,
+        region_bounds=np.array([0, 100, 200, 10, 200, 300, 400], np.int64),
+        ref_region_bound_offsets=np.array([0, 3, 7], np.int64),
+        ref_sj_offsets=np.array([0, 1, 3], np.int64),
+    )
+
+    sj_of, first_of, last_of = _resolve_intron_lookups(payload, accumulators)
+    assert sj_of.tolist() == [0, 1, -1], (
+        "reference 1's junction is payload slot 1, not its ref-local 0, and the third fragment's "
+        "observed + motif must not match a − junction"
+    )
+    # the distinguishing range comes back LOCAL to each reference, as the loop consumes it
+    assert first_of.tolist() == [0, 0, 2] and last_of.tolist() == [2, 2, 4]
+    # not vacuous: the second reference's base is what makes the first two ids differ at all, and the
+    # third fragment's junction IS annotated — it is the motif that rejects it
+    assert int(payload.ref_sj_offsets[1]) > 0
+    heard_none = dict(deferred.__dict__)
+    heard_none["sj_strand"] = np.array([int(Strand.NONE)] * 3, np.int64)
+    with_none = _resolve_intron_lookups(
+        SimpleNamespace(**{**payload.__dict__, "deferred": SimpleNamespace(**heard_none)}),
+        accumulators,
+    )[0]
+    assert with_none.tolist() == [0, 1, 2], "with no observed motif the implied strand must find it"
+
+
 def test_the_STRAND_term_decides_when_rho_and_LENGTH_both_tie(scored):
     """Arm 7. PERTURBATION: dropping the strand term entirely passes arms 1–6, because every locus there
     offers hypotheses of one strand and the term cancels. This locus offers two.

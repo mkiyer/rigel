@@ -3081,6 +3081,30 @@ NB_MODULE(_bam_impl, m) {
                  nb::arg("hypotheses") = nb::tuple(),
                  nb::arg("hypothesis_index") = 0)
 
+            // ⭐ The annotated sj id for MANY introns at once — `sj_edge_id`, the deposit's own lookup,
+            // applied per element. The second pass asks it once per hypothesis intron, which as a numpy
+            // call each was 0.9 M calls on a deep library; per reference it is one call. The ids are
+            // REF-LOCAL slots, the same space `set_sj` above pins to `ref_sj_offsets`, so a caller holding
+            // the payload's flat axis adds that base. -1 where the intron is not annotated.
+            .def("sj_edge_ids",
+                 [](const Accumulator& a,
+                    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> starts,
+                    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ends,
+                    nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> sj_strand) {
+                     const std::size_t n = starts.shape(0);
+                     if (ends.shape(0) != n || sj_strand.shape(0) != n)
+                         throw std::invalid_argument(
+                             "sj_edge_ids: starts, ends and sj_strand must be aligned per intron");
+                     std::vector<int64_t> out(n);
+                     a.sj_edge_ids(starts.data(), ends.data(), sj_strand.data(), n, out.data());
+                     return rigel::vec_to_ndarray(std::move(out));
+                 },
+                 nb::arg("starts"),
+                 nb::arg("ends"),
+                 nb::arg("sj_strand"),
+                 "The annotated sj id per intron, or -1 — `sj_edge_id` over arrays. Ids are\n"
+                 "ref-local slots, as `set_sj` defines them.")
+
             // Element-wise sum of `other` into this accumulator — the per-worker merge the parallel scan
             // performs internally, exposed so the DETERMINISM contract can be tested directly: shard one
             // fragment corpus K ways, merge, and require bit-identity with the unsharded run. Every channel

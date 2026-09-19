@@ -365,6 +365,15 @@ std::int64_t Accumulator::sj_edge_id(std::int64_t intron_start,
     return -1;
 }
 
+void Accumulator::sj_edge_ids(const std::int64_t* starts,
+                              const std::int64_t* ends,
+                              const std::int32_t* sj_strand,
+                              std::size_t n,
+                              std::int64_t* out) const noexcept
+{
+    for (std::size_t i = 0; i < n; ++i) out[i] = sj_edge_id(starts[i], ends[i], sj_strand[i]);
+}
+
 // ============================================================================
 // the deposit
 // ============================================================================

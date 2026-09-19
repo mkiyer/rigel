@@ -677,6 +677,72 @@ def test_ten_thousand_random_fragments_are_byte_identical():
     _assert_parity(reference, native, "10,000 random fragments")
 
 
+def test_the_batched_sj_lookup_IS_the_scalar_rule_the_second_pass_used_to_keep():
+    """`sj_edge_ids` answers many introns at once, and the second pass reads it instead of carrying its
+    own copy of the rule in Python.
+
+    The oracle is that copy, written out here — the two endpoints must be region bounds, the CSR is
+    walked from the donor, and the strand filter applies ONLY when the motif is definite — because the
+    shipped Python was deleted when the loop started asking the kernel. What is asserted is that the two
+    agree on every case the fixture can pose: the three annotated junctions at their own strand, at the
+    opposite strand, and at NONE; the strand-discriminating pair that shares an acceptor; endpoints that
+    are not region bounds at all; and a reversed pair.
+
+    PERTURBATION: an oracle that applies the strand filter to a NONE motif disagrees on three rows, and
+    one that skips the acceptor check disagrees on the reversed pair.
+    """
+    _, native = _pair()
+    partition = Partition.from_region_bounds(
+        _REGION_BOUNDS_PER_REF, region_types=_TYPES_PER_REF, sj=SJ
+    )
+    offsets = np.asarray(partition.sj_offsets, dtype=np.int64)
+    right = np.asarray(partition.sj_boundary_right, dtype=np.int64)
+    strand = np.asarray(partition.sj_strand, dtype=np.int64)
+    bounds = np.asarray(REGION_BOUNDS, dtype=np.int64)
+
+    def oracle(start: int, end: int, motif: int) -> int:
+        def bound(position: int) -> int:
+            k = int(np.searchsorted(bounds, position))
+            return k if k < bounds.size and int(bounds[k]) == position else -1
+
+        donor, acceptor = bound(start), bound(end)
+        if donor < 0 or acceptor < 0:
+            return -1
+        definite = motif in (int(Strand.POS), int(Strand.NEG))
+        for k in range(int(offsets[donor]), int(offsets[donor + 1])):
+            if int(right[k]) != acceptor:
+                continue
+            if definite and int(strand[k]) != motif:
+                continue
+            return k
+        return -1
+
+    cases = []
+    for a, b in ((201, 900), (100, 200), (400, 900), (900, 201), (0, 1000), (150, 900), (100, 201)):
+        for motif in (int(Strand.POS), int(Strand.NEG), int(Strand.NONE)):
+            cases.append((a, b, motif))
+    starts = np.array([c[0] for c in cases], dtype=np.int64)
+    ends = np.array([c[1] for c in cases], dtype=np.int64)
+    motifs = np.array([c[2] for c in cases], dtype=np.int32)
+
+    got = np.asarray(native.sj_edge_ids(starts=starts, ends=ends, sj_strand=motifs), dtype=np.int64)
+    want = np.array([oracle(*c) for c in cases], dtype=np.int64)
+    assert np.array_equal(got, want), dict(zip(cases, zip(got.tolist(), want.tolist())))
+    # not vacuous: the grid must find junctions AND miss some, or it proves nothing
+    assert (want >= 0).any() and (want < 0).any()
+    # and the empty call is legal, because a fragment set with no implied intron reaches it
+    assert (
+        np.asarray(
+            native.sj_edge_ids(
+                starts=np.zeros(0, np.int64),
+                ends=np.zeros(0, np.int64),
+                sj_strand=np.zeros(0, np.int32),
+            )
+        ).size
+        == 0
+    )
+
+
 def test_the_per_worker_merge_is_bit_identical_at_any_shard_count():
     """The reason every count channel is an integer.
 
