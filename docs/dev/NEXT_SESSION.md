@@ -1,4 +1,4 @@
-# NEXT SESSION — start here (2026-09-18 night: everything below is LANDED AND PUSHED through `e921869c` — the block in one native call, the message cache deleted, the prototype harness retired, the strand reference converged; §G — the stages outside calibration — is next)
+# NEXT SESSION — start here (2026-09-19: everything below is LANDED AND PUSHED through `2834ecf7` — the block in one native call, then the performance campaign OUTSIDE calibration; a deep run is 125 s, 0.87 of where the campaign started; what is open is `ISSUES: performance-memory-bounded-solve`)
 
 This file is only how to begin. The port's plan is `docs/dev/CALIBRATION_PERFORMANCE_PLAN.md` §F and §G; the LIVE
 status with numbers is `ISSUES: performance-memory-bounded-solve`; the day's record is the closing paragraphs of
@@ -40,8 +40,14 @@ threads design it grew from is `docs/dev/THREADS_PLAN.md`).
    * 23 — `strand_likelihood.py` CONVERGED: `strand_loglik` lives in `tests/calibration/_psi_reference.py` beside the other
      oracles; layer 4 is production only; suite 3,414 / 5 / 3,419 (the standing baseline). The three identity references on
      the landed tree: BIT-IDENTICAL on all three (capture off, capture on, the LBX0190 library); preflight `--full` green.
-7. §G: the stages outside calibration — on VCaP the scan, the second pass, the two fragment-length fits, quant (the locus
-   EM, the capture effective lengths), the index load; they scale with depth and are now the larger half of a run.
+7. ~~The stages outside calibration~~ — DONE 2026-09-19 as a six-phase campaign, planned on paper first and then
+   deleted into the permanent record (`DESIGN.md` §6b.15): the gDNA rate's bisection and its log-gamma table, the
+   locus overlap traversed once, the scan's split derived from a measured ratio, the second pass's lookups batched
+   into the kernel with its two Python mirrors deleted, the realized-gDNA census vectorised, the sweep's arena sized
+   by a block size of 1,000. Every phase BIT-IDENTICAL on the three references; the run 141.8 → 125.6 s and
+   143.3 → 125.3 s on two interleaved pairs (`perf/plan_final_2026-09-19/`).
+8. WHAT IS OPEN is ranked in `ISSUES: performance-memory-bounded-solve`: calibrate's own 10.3 s of Python that no
+   probe covers, quant's 33.7 s, the scanner's own throughput, the index load, the sweeps' kernels.
    Where the time is now (VCaP at 8 threads, commit 20's post runs, `perf/block_native_2026-09-18/`): the whole run 144 / 138 s. Calibrate 33.7 / 31.9 s: the four sweeps 16.8 / 15.9 (the kernel 15.7 / 14.9 — the first sweep ≈ 2.8 s, the refit that misses the cache ≈ 7.4 s, the two served refits ≈ 3 s each), the landscape fits 4.5, ψ before the sweep 0.65, and about 11 s of calibrate's OWN Python outside every probe (the chain, the statics, the beliefs' init and reset, the deconv) — the next thing to dissect inside calibration. Outside calibration 104 s: the scan 36 / 32, the second pass 22 (the fl models 8.4, scoring 12), the second fl fit 8.4, quant 36 (the locus EM 14.5, the capture effective lengths 5.7–8.2, scoring 6–7), the index load 6.6.
 
 ## The one-path ruling (owner, 2026-09-17) — applied to the block
@@ -65,9 +71,8 @@ in, arrays out, integer counts (under a capture: the cube rows and the received 
 
 ## Still open for the owner
 
-* The blur's loop interchange (−1.5 s a first sweep, a summation-order change 1.9e-7 of the budget; `s15/edit_blur.py`) —
-  priced, not taken.
-* Calibrate's own Python outside the sweep (~11 s of a 148 s run) and §G's stages: the next performance targets.
+* The blur's loop interchange (−1.5 s a first sweep, a summation-order change 1.9e-6 of the budget; `s15/edit_blur.py`) —
+  priced, not taken. It is the only performance item left that would move a number.
 
 ## The protocol for every step (unchanged in form)
 
@@ -102,6 +107,12 @@ in, arrays out, integer counts (under a capture: the cube rows and the received 
 * The captured pickled policy carries the fields of the constructor it was pickled with; the replay rebuilds it through
   the CURRENT constructor (instrument-side), never a shim in `src/`. A captured kwarg whose CLASS is about to be deleted
   (the pickled `MessageCache`) must be stripped from the pickles BEFORE the class goes (`s18/strip_cache.py`).
+* ⛔ A cProfile share RANKS candidates and never PRICES them: it charges its own per-call overhead to the callee, so it
+  inflates exactly the functions with millions of tiny calls. Only an interleaved pair is a saving.
+* ⛔ `git checkout -- FILE` to undo a perturbation reverts the WHOLE file, including the new code beside it. Copy first.
+* ⛔ When a perturbation fires NOTHING, the gate is missing — not the perturbation wrong. Three did during the campaign,
+  and each named a real hole: a single-reference fixture cannot see a per-reference base, no fixture carried an observed
+  motif, and a symmetric fixture cannot tell two boundary classes apart.
 * A SEQUENCE OF EDIT SCRIPTS UNDER `set -e` WITH `&&` CHAINS DOES NOT STOP when a script fails mid-chain: two anchor
   failures left the tree mixed and two snapshots captured partial states. Recover by stashing, re-applying the last
   verified snapshot and re-running each script; an anchor must never contain a placeholder that an earlier step fills.
@@ -120,9 +131,10 @@ any commit (it copies the installed `.so` files in and builds from the worktree'
   all of 21–23 landed too; nothing awaits the go), `s16/` (18 and 19), `s17/` (20: the header and kernel drafts,
   `perturb*.sh`, `identity_checks.sh`, `pre_worktree.sh`, `time_pairs.sh`, `finish_docs_20.py`), `s18/` (21–23:
   `strip_cache.py`, `commit22.py`, `commit23.py`, `snapshot_n.sh`, `pre_worktree.sh`, `time_pairs.sh`, the logs),
-  `pre_site/`.
-* Captures and reports: `perf/sweeps_VCaP_step19`; `perf/block_native_2026-09-18/` (commit 20's two interleaved pairs),
-  `perf/cache_deleted_2026-09-18/` (commit 21's);
+  `pre_site/`, `s19/` (the cProfile attribution), `s20/` (the campaign: the scan-split and arena measurements, the
+  worktree and timing scripts, every phase's identity log).
+* Captures and reports: `perf/sweeps_VCaP_step19`; `perf/block_native_2026-09-18/`, `perf/cache_deleted_2026-09-18/`,
+  and the campaign's `perf/phase3_2026-09-19/`, `perf/phase4_2026-09-19/`, `perf/plan_final_2026-09-19/`;
   `perf/psi_threads_2026-09-18/`, `perf/splice_out_2026-09-18/`, `perf/vcap_baseline_2026-09-17/` (the earlier steps).
 * The identity references: `~/Downloads/rigel_runs/arms/review_identity_*.json`, RE-FROZEN 2026-09-18 on the log-gamma
   tree's numbers (the reason in `DESIGN.md` §6b.15.5), BIT-IDENTICAL on the block tree; the previous set in
