@@ -45,8 +45,6 @@ real exonic reach.
 
 from __future__ import annotations
 
-import dataclasses
-import hashlib
 import logging
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
@@ -62,7 +60,6 @@ from .region_geometry import (
     init_beliefs,
     region_gdna_geometry,
 )
-from .message_cache import MessageCache
 from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
 from .density_model import count_observable_masks
 from .derive import gdna_density_global
@@ -183,8 +180,7 @@ class FactoryRows:
     every other slot, a no-op there. BOUNDARY slots carry none structurally: the factor scores a CONTAINED
     count against a CONTAINED support, and a boundary's count is a crossing with a different divisor. gDNA
     is strand-symmetric, so the factor lives purely on ``λ`` and is consumed identically by every slot
-    class. ``kernel()`` is the tuple the sweep hands the kernel; ``digest(block)`` the message cache's key
-    for a block's rows.
+    class. ``kernel()`` is the tuple the sweep hands the kernel.
     """
 
     def __init__(
@@ -224,19 +220,6 @@ class FactoryRows:
             float(bg.size),
             bool(bg.informative),
         )
-
-    def digest(self, block) -> bytes:
-        """What a block's rows are a pure function of, digested — the background's fields, the block's intron
-        mask, counts and opportunities, the grid: the message cache's key for a block's rows
-        (`message_cache.MessageCache.key`), at 1/K of hashing the rows themselves."""
-        sl = slice(int(block.start), int(block.end))
-        h = hashlib.blake2b(digest_size=16)
-        h.update(repr(dataclasses.astuple(self.background)).encode())
-        for a in (self.is_intron[sl], self.count[sl], self.eff[sl], self.fg):
-            a = np.ascontiguousarray(a)
-            h.update(f"{a.dtype.str}{a.shape}".encode())
-            h.update(a)
-        return h.digest()
 
 
 #: Minimum training regions for a hyperprior fit — below this the population is not a population.
@@ -603,7 +586,7 @@ def _init_belief(s: _Solve):
     )
 
 
-def _sweep(s: _Solve, belief, prior, cache=None, capture=None):
+def _sweep(s: _Solve, belief, prior, capture=None):
     """One sweep of the chain from ``belief``, with the composition prior ``prior`` (``None``: the
     prior-free pass) — the λ bracket first, then `solve_chain`.
 
@@ -650,7 +633,6 @@ def _sweep(s: _Solve, belief, prior, cache=None, capture=None):
         intron_prior=s.factory.rows(n_grid, window),
         policy=s.policy,
         block_slots=cfg.sweep_block_slots,
-        message_cache=cache,
         n_threads=int(cfg.n_threads),
         _capture=capture,
     )
@@ -665,10 +647,10 @@ def _solve(s: _Solve, _debug):
     selects the training substrate), reset the belief in FULL — nothing from pass 0 survives but the
     fitted landscape, so an over-confident region cannot refuse to budge when the prior lands — and
     re-solve with it as ψ's composition arm; ``calib_refit_iters`` times, each refit's landscape the
-    E-step's start for the next. THE REFIT SWEEPS SHARE THEIR MESSAGE LAYER: the belief is reset before
-    each and the messages never read the prior, so for one grid every input the layer reads is
-    identical from refit to refit, and a refit pays only its two ψ solves (`MessageCache`,
-    content-keyed; a widened bracket misses). Pass 0's grid is never reused.
+    E-step's start for the next. Every sweep runs the whole message layer: the messages never read the
+    prior, so on one grid a refit's messages equal the previous refit's, and recomputing them costs the
+    kernel about four seconds a sweep on the deep library at eight threads — cheaper than the cache that
+    once shared them (deleted 2026-09-18).
 
     Returns ``(belief, belief_pass0, hyperprior)`` — the final belief, the prior-free one, and the last
     fitted landscape (``None`` if no refit ran). With ``_debug`` the last sweep fills
@@ -677,7 +659,6 @@ def _solve(s: _Solve, _debug):
     belief = _sweep(s, _init_belief(s), None, capture=capture)
     belief_pass0 = belief
     hyperprior: DensityLandscape | None = None
-    cache = MessageCache()
     for it in range(int(s.config.calib_refit_iters)):
         hyperprior = _fit_gdna_hyperprior(
             s.chain,
@@ -691,7 +672,7 @@ def _solve(s: _Solve, _debug):
         if hyperprior is None:
             break
         capture = SweepCapture() if _debug is not None else None
-        belief = _sweep(s, _init_belief(s), hyperprior, cache, capture=capture)
+        belief = _sweep(s, _init_belief(s), hyperprior, capture=capture)
         logger.debug(
             "calibration: PHASE 2 gDNA-hyperprior refit %d/%d (%d training regions)",
             it + 1,

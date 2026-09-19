@@ -64,53 +64,6 @@ def test_the_solve_publishes_the_informed_predicate_as_the_solve_used_it(sweep_i
     assert has_composition.any() and (~has_composition).any()
 
 
-def test_a_bound_with_a_row_does_not_inform_but_a_composition_does(sweep_inputs):
-    """THE DISTINCTION THE RULING TURNS ON, on two blind slots (no own channel, not locked), through the
-    production path: the message cache SERVES the kernel a block's delivery — the delivered rows and the
-    held-composition bits apart — so a delivery is written by hand that puts the same non-flat row at BOTH
-    slots and marks a held composition at ONE. "Any non-flat row" would give both a composition; only the
-    marked slot may — the predicate is read off the held bits, never the rows."""
-    from rigel.calibration.message_cache import MessageCache
-
-    cap = SweepCapture()
-    kw = dict(sweep_inputs["kw"])
-    kw.pop("message_cache", None)
-    kw.pop("block_slots", None)
-    SW.solve_chain(*sweep_inputs["args"], **kw, policy=SilentPolicy(), _capture=cap)
-    blind = np.flatnonzero(
-        ~has_own_composition_evidence(cap.tau_lam)
-        & ~g1_locked(cap.free_pos, cap.free_neg)
-        & (np.asarray(cap.left, np.int64) >= 0)
-    )
-    assert blind.size >= 2, "the toy has fewer than two blind slots with a left neighbour"
-    lvl_slot, comp_slot = int(blind[0]), int(blind[1])
-    K = int(kw["n_grid"])
-    row = -0.5 * np.linspace(-1.0, 1.0, K) ** 2
-    # the whole chain as one block: one entry, keyed as the sweep keys it
-    cache = MessageCache()
-    SW.solve_chain(
-        *sweep_inputs["args"], **kw, policy=SilentPolicy(), block_slots=None, message_cache=cache
-    )
-    assert cache.misses == 1 and len(cache._entries) == 1
-    ((key, _entry),) = cache._entries.items()
-    n = int(sweep_inputs["args"][0].n_slots)
-    held = np.zeros(n, bool)
-    held[comp_slot] = True
-    cache.put(
-        key,
-        (True, np.array([lvl_slot, comp_slot], np.int64), np.stack([row, row]), None, held),
-    )
-    out = SW.solve_chain(
-        *sweep_inputs["args"], **kw, policy=SilentPolicy(), block_slots=None, message_cache=cache
-    )
-    assert cache.hits == 1, "the hand-written delivery was not served"
-    has_composition = np.asarray(out.has_composition, bool)
-    assert has_composition[comp_slot], "a held composition must inform"
-    assert not has_composition[lvl_slot], (
-        "a row with no held composition is a bound only and must not inform"
-    )
-
-
 def test_silence_shrinks_the_informed_set_to_own_evidence_and_certainty(sweep_inputs):
     """PERTURBATION: with no messages, the delivered rows vanish and the ``has_composition`` set must shrink to
     the own channel plus structural certainty — and at least one slot must change, or the message

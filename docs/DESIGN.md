@@ -711,11 +711,10 @@ Re-derive this list rather than trusting it: `scripts/design/module_census.py` r
 
 | | | |
 |---|---|---|
-| `sweep.py` | **The backbone.** The self-solve, two directional passes, one ψ solve, one write-back, four assertions | It knows nothing about capture, splices, levels, lanes or enrichment — `test_sweep_backbone.py` asserts those words appear in none of its identifiers, read from the AST |
-| `blocks.py` | the block plumbing of the locus solve: `view_fields` (every per-slot array a policy may read), `block_slice` (one block cut out of the chain, its links re-based), `SweepCapture` (the diagnostic capture of a sweep, the instruments' view, never built in production; `SweepCapture.gather` re-assembles the blocks' into the chain's) | nothing about what a solve or a message is |
-| `message_cache.py` | `MessageCache` — the message layer's output shared across the refit sweeps, keyed on a digest of every field of the block's context, the library and the policy (§6b.15.4) | a field added to the context cannot be left out of the key: the digest iterates the dataclass |
+| `sweep.py` | **The backbone.** The structure, the library, the blocks, ONE native call (`native.solve_blocks`: per block the self-solve, the two passes, the solve, the write-back), the assertions' counts | It knows nothing about capture, splices, levels, lanes or enrichment — `test_sweep_backbone.py` asserts those words appear in none of its identifiers, read from the AST |
+| `blocks.py` | the block plumbing of the locus solve: `view_fields` (every per-slot array a policy may read — the arrays the kernel takes), `SweepCapture` (the diagnostic capture of a sweep, the instruments' view, never built in production) | nothing about what a solve or a message is |
 | `messages/silent.py` | `SilentPolicy` — sends nothing. **The measured floor**, what `message_policy = "silent"` installs | A reader who holds `sweep.py` plus this holds the entire working system |
-| `messages/transfer.py` | `TransferPolicy` — **the shipped default** (2026-09-09): every node's own claim, one named builder per message, the two passes and the solve (§6b.4–§6b.14) | `prepare` is a table of contents: a reader finds a message by its builder's name |
+| `messages/transfer.py` | `TransferPolicy` — **the shipped default** (2026-09-09): its name, its strand model and its library; the builders, the two passes and the solve are the kernel's (`native/transfer_kernel.h`, §6b.4–§6b.14) | `prepare_block` is a table of contents: a reader finds a message by its builder's name |
 | `messages/faces.py` | `Faces` — the composition rules as typed tables over `(destination, side)` (the rule arithmetic is the pass kernel's ``faces_apply``), `RowTable`, and `side_of` (`side_of`, `norm`, `fuse`) | gate: `test_transfer_faces.py` |
 | `messages/lanes.py` | `LevelLane` — one class for the three populations' levels, built by `native/transfer_kernel.cpp`'s `gdna_lane` (every face left without a composition rule) and `rna_lane` (one per strand, faces from the flag bits) | gate: `test_transfer_rna_lanes.py` |
 | `messages/__init__.py` | the interface (`Policy`, `Prepared`), what every node received from one side as a table (`Received`: `has_neighbour`, `has_composition`, the composition rows, three `Levels` lanes; SILENCE and NO NEIGHBOUR are its two states `silence` / `no_neighbour`, not objects), what ψ receives (`PsiMessage`) and what a policy may read (`BlockContext`) | every field of `BlockContext` has a reader in the policy or the backbone |
@@ -1112,22 +1111,18 @@ last ulp with `ruler_n_moved` identical on all 16 conditions; the owner accepted
 tolerance (2026-09-11). With it, every block size gives the same bits (gated on the toy for six sizes and
 on a real 2.09M-slot sweep for eight), so `CalibrationConfig.sweep_block_slots` sets only the working set.
 
-#### 6b.15.4 The message layer is refit-invariant, so the refit sweeps share it (derived and measured 2026-09-11, the first step after the decomposition)
+#### 6b.15.4 The message layer is refit-invariant (derived and measured 2026-09-11); the cache that shared it across the refit sweeps was deleted 2026-09-18
 
 Everything the layer reads is on the context — observations, geometry, the factory rows, the incoming
 belief's ``belief_fg`` and the liveness bits ``has_own_composition`` (`tau_lam > 0`, the one bit of the
 self-solve a policy may know; the context no longer carries the self-solve object) — plus the library and
 the grid, and never the prior; and `calibrate` resets the belief before every sweep. So for one grid every
 refit sweep's messages are the same: measured on the human chain, sweeps 1–3 deliver identical ψ rows and
-cube rows to the bit and every node hears the same thing. `message_cache.MessageCache` holds one grid's
-delivered messages, content-keyed on a digest of every input the layer reads (a changed belief, row, count,
-library, grid or policy misses — each channel gated by perturbation), sparsely (0.17 GB of rows plus 0.39
-GB of cube rows per grid on the 876k library, against a dense 2 GB); a refit sweep pays its two ψ solves
-and is served the rest. Diagnostics never read from it. Pass 0's grid is never reused, so it is not held.
-On the 18.6M-fragment library the refit grid is stable (`n_grid` 138 for all three refits), refits 2 and 3
-are served entirely (38 s each against 176 s), the run reads 0.65 of its wall in two back-to-back pairs,
-and the cache holds 2.68 GB (peak 15.0 → 17.8 GB) with float32 cube rows; 4.1 GB as float64, the shipped
-form since the one-solver landing of 2026-09-12 made the whole of ψ float64.
+cube rows to the bit and every node hears the same thing. A content-keyed cache (`MessageCache`, 2026-09-11 to
+2026-09-18) held one grid's delivered messages and served the refit sweeps from it — on the 18.6M-fragment
+library refits 2 and 3 entirely, 38 s each against 176 s when the layer was Python. With the block in one
+native call the whole layer costs the kernel about four seconds a refit sweep at 8 threads, and the cache was
+DELETED on its price (§6b.15.5). Every sweep runs the whole layer; nothing is held across sweeps.
 
 #### 6b.15.5 The rules are typed tables, and a face is a side (2026-09-11, the port's data layout)
 
@@ -1385,6 +1380,23 @@ numpy's separate operations (every product is a named temporary). Judged BIT-IDE
 of its blocks reproduces the miss sweep and the capture to the bit); the three identity references; the suite 3,430 passed / 5 xfail / 3,435 collected. Timed on
 VCaP at 8 threads, two interleaved pairs against a worktree of the log-gamma commit carrying its own modules: the whole run 198.4 → 144.1 s and 193.9 → 137.6 s (0.73 / 0.71); calibrate 85.6 → 33.7 s and 82.7 → 31.9 s (0.39 / 0.39); the four sweeps 68.8 → 16.8 s and 66.3 → 15.9 s (0.24 / 0.24), the kernel's call 15.7 / 14.9 s of that and the Python around it 1.1 s (the first sweep ≈ 2.8 s, the refit sweep that misses the cache ≈ 7.4 s, each served refit sweep ≈ 3.0 s, from the replay); the peak RSS 11,281 → 10,591 MB and 11,346 → 10,926 MB; the stages outside calibration inside the drift (the scan 0.97 / 0.88, the second pass 1.02 / 0.97, quant 0.94 / 1.01)
 (`perf/block_native_2026-09-18/`). THE CACHE, PRICED FOR THE OWNER: in production the last two refit sweeps are SERVED (the pre run's policy prepare ran 852 = 2 × 426 times over four sweeps, the first sweep and the first refit missing); with the block native a refit sweep that misses replays at 7.4 s at 8 threads and a served one at 3.0 s, so the cache saves about 9 s of a 140 s run (6 %) and costs 2.3 GB held through calibrate at K = 233 (the deliveries: the written rows with their slots, the cubes, the held bits), the keys (0.27 s a sweep) and the deliveries' round trip through Python — message_cache.py, the served list, the deliveries return and their gates; keep or delete is the owner's call.
+
+**The message cache is deleted** (2026-09-18; owner, on the price above). What it saved once the block was native —
+about 9 s of a 140 s run, the two served refit sweeps at 3.0 s against 7.4 s — no longer paid for what it cost: 2.3 GB
+held through calibrate at K = 233; a key that had to name every input the layer reads, three of them (the incoming
+belief, the factory's digest, the library with the policy) wired by hand beside the view's fields, so that a kernel input
+added without its key field would have served stale messages silently; and the deliveries' round trip — the kernel
+packaging every block's written rows, cube and held bits into Python objects and parsing them back on the served path,
+the served branch ordered before the silent one, a silent block's empty entry stored so the next sweep could hit it.
+GONE: `message_cache.py`; `FactoryRows.digest` and `_RowsOfArray.digest`; `solve_chain`'s ``message_cache``; the kernel's
+``served`` and ``deliveries`` arguments, `ServedBlock` and the delivery packaging (under a capture the kernel returns the
+cube rows it delivered and the received tables, nothing else beyond the counts); six gates — the five cache gates of
+`test_sweep_backbone.py` and the served-injection gate of `test_landscape_training_population.py`, whose ruling (that
+`has_composition` reads the held compositions and never the rows) the identity gate beside it holds through the native
+passes. The kernel's contract is arrays in, arrays out, integer counts. BIT-IDENTICAL: the four captured sweeps (the
+refit sweeps replay 7.4 → 7.0 s, the packaging gone), the three identity references; the suite 3,421 passed / 5 xfail /
+3,426 collected. Timed on VCaP at 8 threads, two interleaved pairs against a worktree of the block commit carrying its own
+module: the whole run 140.6 → 148.4 s and 138.1 → 145.1 s (1.06 / 1.05); calibrate 32.4 → 41.6 s and 31.6 → 40.6 s (1.28 / 1.28); the four sweeps 16.1 → 24.8 s and 16.0 → 24.7 s (1.54 / 1.54 — the two refit sweeps that were served now run the layer at K = 233); calibrate's peak RSS 9,430 → 8,163 MB and 9,416 → 7,858 MB, the run's 10,851 → 10,632 MB and 10,452 → 10,326 MB (its peak sits in quant); the stages outside calibration inside the drift (the scan 0.97 / 0.95, the second pass 1.00 / 1.00, quant 1.00 / 1.02) (`perf/cache_deleted_2026-09-18/`).
 
 #### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer; native since 2026-09-17, §6b.15.5)
 

@@ -91,7 +91,7 @@ the graph from the AST.
 | one slot's own numbers, ψ, and its total | **3 · geometry + the per-slot solve** — `region_geometry` `simplex_logodds` `total_abundance` |
 | which strand a fragment came from | **4 · strand** — `gdna_strand` `strand_balance` `strand_summary`, and `strand_likelihood` (a gated executable reference) |
 | how dense a component is, and the priors | **5 · density and prior** — `density_model` `density_deconv` `landscape` `abundance_landscape` |
-| what one neighbour tells another | **6 · the solve** — `sweep` (the backbone) + `blocks` (one locus block cut out and put back) + `message_cache` + `messages/` (the policy) + `region_init` |
+| what one neighbour tells another | **6 · the solve** — `sweep` (the backbone) + `blocks` (the chain view's fields and the diagnostic capture) + `messages/` (the policy) + `region_init` |
 | turning the solve into a result | **7 · assemble** — `calibrate` `priors` `result` `derive` `diagnostics` `track` |
 
 ## The message layer
@@ -103,8 +103,8 @@ which each recipient receives what its neighbour sends, so every node ends with 
 neighbour it has → the solve, which hands ψ two row channels and nothing else. THE SWEEP IS ONE NATIVE CALL
 (`native.solve_blocks`, `native/solve_kernel.cpp`, since 2026-09-18): the chain's locus blocks are solved on a pool
 of threads, one block at a time, end to end — the prior rows, the self-solve, the layer, the final solve, the
-write-back — bit-identical at every thread count; `sweep.solve_chain` cuts the blocks, reduces the library, asks
-the message cache, makes the call and judges the assertions' counts.
+write-back — bit-identical at every thread count; `sweep.solve_chain` cuts the blocks, reduces the library, makes
+the call and judges the assertions' counts.
 
 | policy | |
 |---|---|
@@ -191,8 +191,10 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,430 passed / 0 skipped / 5 xfail, 3,435 collected** (re-derived
-2026-09-18 after the block went into one native call: −10 for the four files deleted — `messages/faces.py` and
+**The standing baseline: 0 failed / 3,421 passed / 0 skipped / 5 xfail, 3,426 collected** (re-derived
+2026-09-18 after the message cache was deleted: −3 for `message_cache.py` by the module row, −6 gates — the five cache
+gates of `test_sweep_backbone.py` and the served-injection gate of `test_landscape_training_population.py`; before that
+after the block went into one native call: −10 for the four files deleted — `messages/faces.py` and
 `messages/lanes.py` by the module row (−3 each), `native/psi_kernel.cpp` and `native/transfer_kernel.cpp` by the row
 below (−2 each) — +6 for `native/solve_kernel.cpp`, `transfer_kernel.h` and `psi_kernel.h` (+2 each), −1 the `RowTable`
 gate and −1 the no-copy gate (the Python tables they tested are gone), −2 the two backbone gates on those tables (a

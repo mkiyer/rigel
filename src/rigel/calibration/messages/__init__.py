@@ -90,7 +90,7 @@ class ChainView:
     WHOLE chain in this form, so the only cross-block information a policy can build is a reduction over
     observations and geometry — a reduction over beliefs has no field to read. These are also the arrays
     the backbone hands the kernel (`sweep.solve_chain`), which reads them a block at a time beside the
-    incoming belief; and the arrays the message cache digests per block (`message_cache.MessageCache`).
+    incoming belief.
 
     ⛔ The headings are load-bearing. ``observations`` and ``geometry`` may be indexed at either end of
     a hop; a belief may be read at the SOURCE only, and the kernel reads the incoming belief once, at a

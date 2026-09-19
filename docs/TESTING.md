@@ -667,9 +667,9 @@ call (`native.solve_blocks`): `sweep_replay.py replay --threads N` and `--block-
 count and block size. The deep library's timing baseline is
 `perf/vcap_baseline_2026-09-17/run{1,2}.json` (the tree after the one-path convergence at 8 threads on VCaP, two
 back-to-back runs; the drift between them, 0.98–1.07 per stage, is the noise floor a pair is read against; the earlier
-`baseline_2026-09-17/pair1_*` is the pushed tree of that morning). The
-refit sweeps' captures carry their message cache, so their replay exercises the cache path and ψ; sweep 0
-exercises the whole message layer. `ISSUES: performance-memory-bounded-solve` carries the work.
+`baseline_2026-09-17/pair1_*` is the pushed tree of that morning). Every
+captured sweep replays the whole message layer at its own bracket (the refit sweeps at K = 233 against the first
+sweep's 101). `ISSUES: performance-memory-bounded-solve` carries the work.
 
 A both-strand stress test needs ample single-stranded regions (the population prior trains on them).
 How to A/B honestly: in-process, opposite extremes, never on a saturated condition, one thing varied,

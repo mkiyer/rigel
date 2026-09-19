@@ -111,9 +111,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             # `region_init` is the strand protocol decision and the own-evidence predicate
             "region_init",
             # `sweep` is the backbone; `blocks` is the diagnostics capture and the chain's view;
-            # `message_cache` shares the message layer's output across the refit sweeps.
             "blocks",
-            "message_cache",
             "sweep",
             "messages",
             # `messages/__init__` is the policy's interface (a name, a strand model, a library) and the

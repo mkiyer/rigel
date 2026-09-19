@@ -9,7 +9,7 @@ neighbour sends, and ONE solve per node from its own evidence, the two held mess
 chain is a forest of linear paths, so that is exact belief propagation, not an iteration.
 
 THE SWEEP IS ONE NATIVE CALL (`native.solve_blocks`, `native/solve_kernel.cpp`). This file cuts the chain
-into locus blocks, reduces the policy's library over the whole chain, asks the message cache which blocks
+into locus blocks, reduces the policy's library over the whole chain,
 it can serve, hands the kernel the chain's arrays, the blocks, the priors' INPUTS (the landscape's curve;
 the intron factory's background, mask, counts and opportunities) and the served deliveries, and reads
 back the belief, ``has_composition``, the assertions' counts and — for the cache — each block's delivery.
@@ -63,14 +63,12 @@ Both come from the region SIGNATURE and never from the counts:
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 
 import numpy as np
 
 from ..native import solve_blocks
 from .blocks import SweepCapture, view_fields
-from .message_cache import MessageCache
 from .messages import ChainView
 from .messages.silent import SilentPolicy
 from .region_geometry import (
@@ -170,15 +168,10 @@ def solve_chain(
     intron_prior=None,
     policy=None,
     block_slots: int | None = None,
-    message_cache: "MessageCache | None" = None,
     n_threads: int = 1,
     _capture: SweepCapture | None = None,
 ) -> RegionBelief:
     """One forward-backward sweep over the chain. Returns the resolved :class:`RegionBelief`.
-
-    ``message_cache`` shares the message layer's output between sweeps whose inputs to it are identical
-    (:class:`MessageCache`): a block whose digest is held is served its delivery and pays only its two ψ
-    solves. ``None`` runs the layer for every block, as does a diagnostic capture.
 
     THE SWEEP IS SOLVED A LOCUS BLOCK AT A TIME, IN ONE NATIVE CALL. The chain breaks at every TERMINAL —
     a region that admits no RNA strand, structurally pure gDNA, which receives nothing (the module
@@ -228,17 +221,6 @@ def solve_chain(
     lam, _ = _logodds_grid(int(n_grid), float(logodds_window))
     blocks = locus_blocks(chain, structure.terminal, block_slots)
     factory = _factory_of(intron_prior)
-    cache = None if _capture is not None else message_cache
-    keys = served = None
-    if cache is not None:
-        keys = [
-            cache.key(
-                view, b, belief.f_g, None if factory is None else factory.digest(b), library, policy
-            )
-            for b in blocks
-        ]
-        served = [cache.served(k) for k in keys]
-
     out = {
         k: np.ascontiguousarray(getattr(belief, k), dtype=np.float64).copy()
         for k in ("f_pos", "f_neg", "f_g", "var_gdna")
@@ -276,23 +258,17 @@ def solve_chain(
             np.ascontiguousarray(gdna_prior.logP, np.float64),
         ),
         factory=None if factory is None else factory.kernel(),
-        served=[None] * len(blocks) if served is None else served,
         out_fpos=out["f_pos"],
         out_fneg=out["f_neg"],
         out_fg=out["f_g"],
         out_var=out["var_gdna"],
         out_has_composition=has_composition,
-        deliveries=cache is not None,
         diagnostics=diag,
         n_threads=int(n_threads),
     )
     n_owned = np.array([b.stop - b.start for b in blocks], np.int64)
     delivered = {k: np.asarray(res[k], bool) for k in ("rows_delivered", "cube_delivered")}
     counts = AssertionCounts.of_blocks(res["assertions"], res["counts"], delivered, n_owned)
-    if cache is not None:
-        for key, delivery in zip(keys, res["deliveries"]):
-            if delivery is not None:
-                cache.put(key, delivery)
     if _capture is not None:  # inert diagnostic hook
         _capture.fill(
             _gather_diagnostics(chain, view, belief, out, diag, res, blocks, geometry, lam)
@@ -368,8 +344,8 @@ def _structure(chain, statics, region_arrays) -> _Structure:
 
 
 class _RowsOfArray:
-    """The λ-factor rows given as ONE ``(n, K)`` array (a gate's synthetic rows): handed to the kernel whole
-    and digested per block by content — the two calls `calibrate.FactoryRows` answers from its inputs."""
+    """The λ-factor rows given as ONE ``(n, K)`` array (a gate's synthetic rows), handed to the kernel whole —
+    the call `calibrate.FactoryRows` answers from its inputs."""
 
     __slots__ = ("_rows",)
 
@@ -379,35 +355,28 @@ class _RowsOfArray:
     def kernel(self) -> tuple:
         return ("rows", self._rows)
 
-    def digest(self, block) -> bytes:
-        a = np.ascontiguousarray(self._rows[block.start : block.end])
-        h = hashlib.blake2b(digest_size=16)
-        h.update(f"{a.dtype.str}{a.shape}".encode())
-        h.update(a)
-        return h.digest()
-
 
 def _factory_of(intron_prior):
-    """The λ-factor as the sweep hands it to the kernel — ``kernel()`` and ``digest(block)`` — from the
-    factory (`calibrate.FactoryRows`: the rows built per block inside the kernel from their inputs, the
-    inputs digested) or from one array of rows; ``None`` is no factory."""
+    """The λ-factor as the sweep hands it to the kernel — ``kernel()`` — from the factory (`calibrate.FactoryRows`:
+    the rows built per block inside the kernel from their inputs) or from one array of rows; ``None`` is no
+    factory."""
     if intron_prior is None:
         return None
-    return intron_prior if hasattr(intron_prior, "digest") else _RowsOfArray(intron_prior)
+    return intron_prior if hasattr(intron_prior, "kernel") else _RowsOfArray(intron_prior)
 
 
 def _gather_diagnostics(chain, view, belief, out, diag, res, blocks, geometry, lam) -> SweepCapture:
     """The diagnostic capture of one sweep — the instruments' view (:class:`~.blocks.SweepCapture`),
-    assembled from the kernel's per-slot arrays and its per-block deliveries and received tables. One extra
+    assembled from the kernel's per-slot arrays and its per-block cube rows and received tables. One extra
     solve lives in the kernel's capture mode and nowhere in production: the strand-ONLY belief (no prior, no
     messages), to split the local error into the strand likelihood against the prior's contribution."""
     fp, fn = np.asarray(view.free_pos, bool), np.asarray(view.free_neg, bool)
     mass_global, eff_global = region_gdna_geometry(geometry)
     cubes = []
-    for b, delivery in zip(blocks, res["deliveries"]):
-        if delivery is None or delivery[3] is None:
+    for b, cube in zip(blocks, res["cubes"]):
+        if cube is None:
             continue
-        slot, pos, has_pos, neg, has_neg, total, opportunity, rho = delivery[3]
+        slot, pos, has_pos, neg, has_neg, total, opportunity, rho = cube
         keep = np.asarray(slot) < (
             b.stop - b.start
         )  # the block's own slots, not its read-ahead terminal

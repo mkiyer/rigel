@@ -4,10 +4,10 @@
 //
 //   solve_blocks     THE SWEEP: every locus block of the chain — the prior rows (the fitted gDNA arm read from the
 //                    landscape's curve, the intron factory's rows), the SELF-SOLVE ψ, the own-evidence precision, the
-//                    message LAYER (the builders, the two passes, the solve — unless the policy is silent or the cache
-//                    served the block), the FINAL ψ, the write-back on the owned slots, `has_composition`, the counts of
+//                    message LAYER (the builders, the two passes, the solve — unless the policy is silent), the FINAL ψ,
+//                    the write-back on the owned slots, `has_composition`, the counts of
 //                    the backbone's assertions — each block on one thread of a pool, on that thread's arena; the belief
-//                    written in place, the deliveries returned for the cache, the diagnostics capture on request.
+//                    written in place, the diagnostics capture on request.
 //                    Bit-identical at every thread count: a block's arithmetic is the same whatever thread takes it, and
 //                    nothing is reduced across blocks but integer counts (`sweep.solve_chain`).
 //   psi_solve        ψ over a slot list, the slots pulled one at a time by the same pool — the pre-sweep solve
@@ -411,14 +411,6 @@ struct Factory {  // the intron factory: its inputs (the rows built per block), 
     const double* rows = nullptr;  // (n, K) chain-wide, ROWS only
 };
 
-struct ServedBlock {  // a block the cache served: the layer's delivery, in the block's local slots
-    bool served = false, has_rows = false;
-    int64_t m = 0; const int64_t* slot = nullptr; const double* rows = nullptr;  // the delivered rows
-    int d = 0; const int64_t* cslot = nullptr; const double *cpos = nullptr, *cneg = nullptr;
-    const bool *chas_pos = nullptr, *chas_neg = nullptr; const double *ctotal = nullptr, *copp = nullptr, *crho = nullptr;
-    const bool* held = nullptr;  // (n_owned,) a composition held from either side
-};
-
 struct Outputs {  // written in place, the owned slots of each block
     double *fpos, *fneg, *fg, *var; bool* has_comp;
     // the diagnostics capture, or nullptr
@@ -432,12 +424,10 @@ struct RecvCopy { std::vector<uint8_t> has_nbr, has_comp; std::vector<double> co
 
 struct BlockResult {
     int64_t counts[N_ASSERT][2] = {};
-    bool rows_delivered = false, cube_delivered = false, delivery = false, captured = false;
-    // the delivery (for the cache): the written rows with their local slots, the cube, the owned held bits
-    std::vector<int64_t> slot; std::vector<double> rows;
+    bool rows_delivered = false, cube_delivered = false, captured = false;
+    // the capture: the cube rows the solve delivered (in the block's local slots) and the two received tables on
+    // the owned slots
     std::vector<int64_t> cslot; std::vector<double> cpos, cneg, ctotal, copp, crho; std::vector<uint8_t> chas_pos, chas_neg;
-    std::vector<uint8_t> held;
-    // the capture: the two received tables on the owned slots
     RecvCopy recv[2];
 };
 
@@ -494,8 +484,8 @@ struct Arena {
 
 // one locus block, end to end, on one thread
 void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, const Landscape& L, const Factory& F,
-                     int64_t start, int64_t stop, int64_t end, const ServedBlock& served, bool want_delivery,
-                     bool want_capture, Outputs& out, Arena& A, BlockResult& res) {
+                     int64_t start, int64_t stop, int64_t end, bool want_capture, Outputs& out, Arena& A,
+                     BlockResult& res) {
     const int n = static_cast<int>(end - start), n_owned = static_cast<int>(stop - start), K = p.K;
     A.size(n, K);
     Scratch& S = *A.S;
@@ -568,7 +558,7 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
     int d = 0;
     P::Rows delivered;
     std::fill_n(as_bool(A.held), n, false);
-    const bool run_layer = p.policy == TRANSFER && !served.served;
+    const bool run_layer = p.policy == TRANSFER;
     if (run_layer) {
         Chain c;
         c.n = n; c.K = K; c.lam = p.lam;
@@ -659,14 +649,8 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
             delivered = P::unpack_rows(n, K, d, A.cube_slot.data(), A.cube_pos.data(), as_bool(A.cube_has_pos),
                                        A.cube_neg.data(), as_bool(A.cube_has_neg), p.lam, A.cube_total.data(),
                                        A.cube_opp.data(), A.cube_rho.data());
-        if (want_delivery) {
-            res.delivery = true;
-            for (int i = 0; i < n; ++i) {
-                if (!as_bool(A.written)[i]) continue;
-                res.slot.push_back(i);
-                const double* r = A.rows.data() + static_cast<size_t>(i) * K;
-                res.rows.insert(res.rows.end(), r, r + K);
-            }
+        if (want_capture) {
+            res.captured = true;
             for (int q = 0; q < d; ++q) {
                 res.cslot.push_back(A.cube_slot[q]);
                 const double *cp = A.cube_pos.data() + static_cast<size_t>(q) * K, *cn = A.cube_neg.data() + static_cast<size_t>(q) * K;
@@ -674,10 +658,6 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
                 res.chas_pos.push_back(as_bool(A.cube_has_pos)[q]); res.chas_neg.push_back(as_bool(A.cube_has_neg)[q]);
                 res.ctotal.push_back(A.cube_total[q]); res.copp.push_back(A.cube_opp[q]); res.crho.push_back(A.cube_rho[q]);
             }
-            res.held.assign(A.held.begin(), A.held.begin() + n_owned);
-        }
-        if (want_capture) {
-            res.captured = true;
             for (int s = 0; s < 2; ++s) {
                 RecvCopy& rc = res.recv[s];
                 rc.has_nbr.assign(A.has_nbr[s].begin(), A.has_nbr[s].begin() + n_owned);
@@ -695,23 +675,6 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
                 }
             }
         }
-    } else if (served.served) {
-        has_rows = served.has_rows;
-        if (has_rows) {
-            std::fill_n(A.rows.data(), static_cast<size_t>(n) * K, 0.0);
-            for (int64_t q = 0; q < served.m; ++q)
-                std::copy(served.rows + q * K, served.rows + (q + 1) * K, A.rows.data() + served.slot[q] * K);
-        }
-        d = served.d;
-        if (d)
-            delivered = P::unpack_rows(n, K, d, served.cslot, served.cpos, served.chas_pos, served.cneg, served.chas_neg,
-                                       p.lam, served.ctotal, served.copp, served.crho);
-        std::copy(served.held, served.held + n_owned, as_bool(A.held));
-    } else if (p.policy == SILENT && want_delivery) {
-        // a silent block's delivery is empty, and it is stored all the same: the next sweep is served it and
-        // the cache reads as it did when the layer ran here (a hit, nothing to add)
-        res.delivery = true;
-        res.held.assign(n_owned, 0);
     }
     for (int i = 0; i < n; ++i) A.row_ptr[i] = has_rows ? A.rows.data() + static_cast<size_t>(i) * K : nullptr;
     // THE CHECKS on what was delivered, over the owned slots
@@ -735,7 +698,7 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
     if (d > 0) {
         for (int q = 0; q < d; ++q) {
             const P::Delivered& row = delivered.rows[q];
-            const int64_t i = run_layer ? A.cube_slot[q] : served.cslot[q];
+            const int64_t i = A.cube_slot[q];
             if (i >= n_owned) continue;
             bool bad = false;
             for (const double* prof : {row.pos, row.neg}) {
@@ -806,20 +769,20 @@ nb::dict lane_capture(Lane3&& ln, int n_owned, int K) {
 }
 
 // THE SWEEP'S CALL. `blocks` is (B, 3) int64: start, stop, end per block. `gdna` is None or (log_rho, logP); `factory`
-// None, ("inputs", is_intron, count, eff, log_mu_bg, alpha, size, informative) or ("rows", rows). `served` is a list per
-// block: None, or (has_rows, slot, rows, cube | None, held) with cube = (slot, pos, has_pos, neg, has_neg, total,
-// opportunity, rho). The belief arrays are written in place on the owned slots (they arrive as copies of the incoming
-// belief); `diagnostics` is None or a dict of the capture's arrays to fill. Returns a dict: `counts` (B, 5, 2) int64 per
-// assertion (violations, eligible), `rows_delivered` / `cube_delivered` (B,) bool, `deliveries` a list per block (None,
-// or the delivery in the served tuple's shape), `received` a list per block (None, or the two received tables as dicts).
+// None, ("inputs", is_intron, count, eff, log_mu_bg, alpha, size, informative) or ("rows", rows). The belief arrays are
+// written in place on the owned slots (they arrive as copies of the incoming belief); `diagnostics` is None or a dict of
+// the capture's arrays to fill. Returns a dict: `counts` (B, 5, 2) int64 per assertion (violations, eligible),
+// `rows_delivered` / `cube_delivered` (B,) bool, and under a capture `cubes` — a list per block: None, or the cube rows the
+// solve delivered as (slot, pos, has_pos, neg, has_neg, total, opportunity, rho) in the block's local slots — and
+// `received`, a list per block (None, or the two received tables as dicts).
 nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, BoolVec free_neg, BoolVec exon_pos, BoolVec exon_neg,
                       BoolVec terminal, IdxVec left, IdxVec right, FlagVec flags, Mat cnt, Mat spliced, Mat sj_count,
                       Mat sj_count_lo, Mat sj_count_hi, Mat route_rate_lo, Mat route_rate_hi, Vec eff_gdna, Vec eff_rna,
                       Vec belief_fpos, Vec belief_fneg, Vec belief_fg, nb::ndarray<int64_t, nb::ndim<2>, nb::c_contig> blocks,
                       double kappa, double od_g, double od_r, double disc, Vec lam, int n_tilt, int policy, bool has_strand,
                       double policy_kappa, double policy_od_g, double policy_od_r, double rho_gdna, double rho_rna,
-                      bool split_live, nb::object gdna, nb::object factory, nb::list served,
-                      Vec out_fpos, Vec out_fneg, Vec out_fg, Vec out_var, BoolVec out_has_composition, bool deliveries,
+                      bool split_live, nb::object gdna, nb::object factory,
+                      Vec out_fpos, Vec out_fneg, Vec out_fg, Vec out_var, BoolVec out_has_composition,
                       nb::object diagnostics, int n_threads) {
     const int64_t n = static_cast<int64_t>(free_pos.shape(0));
     const int K = static_cast<int>(lam.shape(0)), B = static_cast<int>(blocks.shape(0));
@@ -860,26 +823,6 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
             throw std::invalid_argument("solve_blocks: the factory is None, ('inputs', ...) or ('rows', rows)");
         }
     }
-    if (static_cast<int>(served.size()) != B) throw std::invalid_argument("solve_blocks: one served entry per block");
-    std::vector<ServedBlock> sv(B);
-    for (int b = 0; b < B; ++b) {
-        nb::object o = served[b];
-        if (o.is_none()) continue;
-        nb::tuple t = nb::cast<nb::tuple>(o);
-        ServedBlock& s = sv[b];
-        s.served = true;
-        s.has_rows = nb::cast<bool>(t[0]);
-        IdxVec slot = nb::cast<IdxVec>(t[1]);
-        s.m = static_cast<int64_t>(slot.shape(0)); s.slot = opt<IdxVec>(t[1], keep); s.rows = opt<Mat>(t[2], keep);
-        if (!t[3].is_none()) {
-            nb::tuple c = nb::cast<nb::tuple>(t[3]);
-            s.d = static_cast<int>(nb::cast<IdxVec>(c[0]).shape(0));
-            s.cslot = opt<IdxVec>(c[0], keep); s.cpos = opt<Mat>(c[1], keep); s.chas_pos = opt<BoolVec>(c[2], keep);
-            s.cneg = opt<Mat>(c[3], keep); s.chas_neg = opt<BoolVec>(c[4], keep); s.ctotal = opt<Vec>(c[5], keep);
-            s.copp = opt<Vec>(c[6], keep); s.crho = opt<Vec>(c[7], keep);
-        }
-        s.held = opt<BoolVec>(t[4], keep);
-    }
     Outputs out{out_fpos.data(), out_fneg.data(), out_fg.data(), out_var.data(), out_has_composition.data()};
     const bool want_capture = !diagnostics.is_none();
     if (want_capture) {
@@ -888,7 +831,6 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
         out.tau_lam = nb::cast<Vec>(cd["tau_lam"]).data(); out.tau_fac = nb::cast<Vec>(cd["tau_fac"]).data();
         out.lam_rows = cd["lam_rows"].is_none() ? nullptr : nb::cast<Mat>(cd["lam_rows"]).data();
     }
-    const bool want_delivery = deliveries || want_capture;
     const int64_t* bl = blocks.data();
     P::Arm curve{L.log_rho, L.logP, L.G, nullptr, nullptr};
     const P::Grid g(lam.data(), K, kappa, od_g, od_r, n_tilt, &curve);
@@ -903,8 +845,8 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
             Arena& A = arenas[tid];
             for (int64_t b; (b = next.fetch_add(1, std::memory_order_relaxed)) < B;) {
                 try {
-                    solve_one_block(C, p, g, L, F, bl[3 * b], bl[3 * b + 1], bl[3 * b + 2], sv[b], want_delivery, want_capture,
-                                    out, A, results[b]);
+                    solve_one_block(C, p, g, L, F, bl[3 * b], bl[3 * b + 1], bl[3 * b + 2], want_capture, out, A,
+                                    results[b]);
                 } catch (...) {
                     std::lock_guard<std::mutex> lk(err_mutex);
                     if (!err) err = std::current_exception();
@@ -920,10 +862,10 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
         }
         if (err) std::rethrow_exception(err);
     }
-    // the results, under the GIL: the counts, the deliveries, the capture
+    // the results, under the GIL: the counts, the capture
     std::vector<int64_t> counts(static_cast<size_t>(B) * N_ASSERT * 2);
     std::vector<uint8_t> rows_del(B), cube_del(B);
-    nb::list deliv, received;
+    nb::list cubes, received;
     for (int b = 0; b < B; ++b) {
         BlockResult& r = results[b];
         for (int a = 0; a < N_ASSERT; ++a) {
@@ -931,20 +873,15 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
             counts[(static_cast<size_t>(b) * N_ASSERT + a) * 2 + 1] = r.counts[a][1];
         }
         rows_del[b] = r.rows_delivered; cube_del[b] = r.cube_delivered;
-        if (!r.delivery) { deliv.append(nb::none()); }
+        if (!r.captured) { cubes.append(nb::none()); received.append(nb::none()); }
         else {
-            const size_t m = r.slot.size(), d = r.cslot.size();
-            nb::object cube = nb::none();
-            if (d) {
-                cube = nb::make_tuple(own1(std::move(r.cslot)), own2(std::move(r.cpos), d, K), own_bool1(std::move(r.chas_pos)),
-                                      own2(std::move(r.cneg), d, K), own_bool1(std::move(r.chas_neg)), own1(std::move(r.ctotal)),
-                                      own1(std::move(r.copp)), own1(std::move(r.crho)));
-            }
-            deliv.append(nb::make_tuple(r.rows_delivered, own1(std::move(r.slot)), own2(std::move(r.rows), m, K), cube,
-                                        own_bool1(std::move(r.held))));
-        }
-        if (!r.captured) { received.append(nb::none()); }
-        else {
+            const size_t d = r.cslot.size();
+            if (!d) cubes.append(nb::none());
+            else
+                cubes.append(nb::make_tuple(own1(std::move(r.cslot)), own2(std::move(r.cpos), d, K),
+                                            own_bool1(std::move(r.chas_pos)), own2(std::move(r.cneg), d, K),
+                                            own_bool1(std::move(r.chas_neg)), own1(std::move(r.ctotal)),
+                                            own1(std::move(r.copp)), own1(std::move(r.crho))));
             const int n_owned = static_cast<int>(bl[3 * b + 1] - bl[3 * b]);
             nb::list sides;
             for (int s = 0; s < 2; ++s) {
@@ -968,7 +905,7 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
     result["counts"] = nb::ndarray<nb::numpy, int64_t, nb::ndim<3>>(cp->data(), 3, shape, std::move(owner));
     result["rows_delivered"] = own_bool1(std::move(rows_del));
     result["cube_delivered"] = own_bool1(std::move(cube_del));
-    result["deliveries"] = deliv;
+    result["cubes"] = cubes;
     result["received"] = received;
     nb::list names;
     for (int a = 0; a < N_ASSERT; ++a) names.append(nb::str(ASSERTION_NAMES[a]));
@@ -1428,12 +1365,12 @@ NB_MODULE(_solve_impl, m) {
           nb::arg("belief_fneg"), nb::arg("belief_fg"), nb::arg("blocks"), nb::arg("kappa"), nb::arg("od_g"), nb::arg("od_r"),
           nb::arg("disc"), nb::arg("lam"), nb::arg("n_tilt"), nb::arg("policy"), nb::arg("has_strand"),
           nb::arg("policy_kappa"), nb::arg("policy_od_g"), nb::arg("policy_od_r"), nb::arg("rho_gdna"),
-          nb::arg("rho_rna"), nb::arg("split_live"), nb::arg("gdna").none(), nb::arg("factory").none(), nb::arg("served"),
+          nb::arg("rho_rna"), nb::arg("split_live"), nb::arg("gdna").none(), nb::arg("factory").none(),
           nb::arg("out_fpos"), nb::arg("out_fneg"), nb::arg("out_fg"), nb::arg("out_var"), nb::arg("out_has_composition"),
-          nb::arg("deliveries"), nb::arg("diagnostics").none(), nb::arg("n_threads"),
+          nb::arg("diagnostics").none(), nb::arg("n_threads"),
           "Solve every locus block of the chain — the prior rows, the self-solve, the own evidence, the message layer, the "
           "final solve, the write-back, the assertions' counts — on a pool of threads, one block at a time; the belief and "
-          "`has_composition` written in place on the owned slots; the counts, the deliveries and the capture returned. "
+          "`has_composition` written in place on the owned slots; the counts and the capture returned. "
           "Bit-identical at every thread count.");
     m.def("psi_solve", &psi_solve, nb::arg("slots"), nb::arg("u_pos"), nb::arg("u_neg"), nb::arg("allow_pos"),
           nb::arg("allow_neg"), nb::arg("fg_ref"), nb::arg("fpos_ref"), nb::arg("fneg_ref"), nb::arg("kappa"),
