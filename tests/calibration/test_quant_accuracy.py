@@ -14,6 +14,7 @@ written yet.
 from __future__ import annotations
 
 import dataclasses
+import json
 import importlib.util
 from pathlib import Path
 
@@ -526,3 +527,102 @@ def test_a_missing_or_stale_oracle_cache_ABORTS(toy, tmp_path):
     this asserts the refusal is propagated rather than swallowed."""
     with pytest.raises(SystemExit, match="no valid oracle cache"):
         QA.load_oracle(str(toy.bam_path), toy.index, PipelineConfig(), tmp_path, "absent")
+
+
+# ── GATE 7: the ruler arm hands the EM the lengths it names, and its noop is inert ──────────────────
+
+
+def _quant_ruler(toy, arm, factor, seed=QA.DEFAULT_EM_SEED):
+    """One full ``run_pipeline`` with the EM's effective lengths under ``install_ruler_arm``."""
+    from rigel.pipeline import run_pipeline
+
+    cfg = PipelineConfig()
+    cfg = dataclasses.replace(cfg, em=dataclasses.replace(cfg.em, seed=seed))
+    restore, fired = QA.install_ruler_arm(arm, factor)
+    try:
+        result = run_pipeline(str(toy.bam_path), toy.index, cfg)
+    finally:
+        restore()
+    return result.estimator.get_counts_df(toy.index), fired
+
+
+def test_the_ruler_arm_hands_the_EM_the_lengths_it_names_and_its_noop_is_inert(toy):
+    """The arm's claim is that the EM divided by ``fl × factor``, so the gate reads the EM's own published
+    length (``em_effective_length``) rather than the wrapper's return value — a length dropped between the
+    wrapper and the solver would leave the wrapper healthy (TRAPS: could-the-arm-have-fired). The factor
+    differs between isoforms of one gene, the shape that moves a split, so the arm must move the counts;
+    the noop builds the same factor and hands back the shipped lengths, so it must reproduce ``base`` by
+    the noop gate's own two standards. On this capture-OFF toy the shipped lengths are the plain ones."""
+    base, _ = _quant(toy, "base", None)
+    ids = toy.index.t_df["t_id"].to_numpy()
+    factor = np.where(np.isin(ids, ["t1b", "t3b"]), 0.25, 1.0)
+
+    sub, fired = _quant_ruler(toy, "oracle_ruler", factor)
+    plain = base.set_index("transcript_id")["em_effective_length"]
+    want = plain * pd.Series(factor, index=ids).reindex(plain.index)
+    got = sub.set_index("transcript_id")["em_effective_length"].reindex(plain.index)
+    np.testing.assert_allclose(got.to_numpy(), want.to_numpy(), rtol=1e-12, atol=0.0)
+    assert fired["ruler"] >= 1 and fired["max_abs_delta"] > 0.0
+    assert not sub["count"].equals(base["count"]), (
+        "a quarter of the length on two isoforms moved no count — the lengths never reached the split"
+    )
+
+    noop, fired_noop = _quant_ruler(toy, "oracle_ruler_noop", factor)
+    assert fired_noop["ruler"] >= 1 and fired_noop["truth_delta"] > 0.0
+    assert fired_noop["max_abs_delta"] == 0.0
+    exact = [c for c in base.columns if c != "posterior_mean"]
+    pd.testing.assert_frame_equal(base[exact], noop[exact], check_exact=True)
+    pd.testing.assert_series_equal(
+        base["posterior_mean"], noop["posterior_mean"], check_exact=False, rtol=1e-9, atol=0.0
+    )
+
+
+def test_the_ruler_guard_refuses_an_arm_that_could_not_have_measured():
+    """The arm must move the lengths wherever the truth differs from the shipped ruler, its noop must not
+    move them at all, and a shrinkage that never ran is no measurement. Where the truth IS the shipped
+    ruler — capture-OFF, the plain length on both sides — the arm is the identity and says so rather than
+    refusing."""
+    fired = dict(n=1, ruler=1, max_abs_delta=3.0, truth_delta=3.0)
+    QA.check_ruler_arm("c", "oracle_ruler", fired)
+    QA.check_ruler_arm("c", "oracle_ruler", dict(fired, max_abs_delta=0.0, truth_delta=0.0))
+    with pytest.raises(RuntimeError, match="did not move"):
+        QA.check_ruler_arm("c", "oracle_ruler", dict(fired, max_abs_delta=0.0))
+    with pytest.raises(RuntimeError, match="NOOP"):
+        QA.check_ruler_arm("c", "oracle_ruler_noop", dict(fired, max_abs_delta=1e-9))
+    with pytest.raises(RuntimeError, match="never ran"):
+        QA.check_ruler_arm("c", "oracle_ruler", dict(fired, ruler=0))
+
+
+def test_the_capture_truth_is_anchored_on_the_fully_probed_class():
+    """The shipped ruler's convention is a fully probed transcript at 1 and every other one below it, so
+    the simulator's factor is divided by the fully probed class's median; a transcript with no length is
+    the identity; and with no probed class at all (capture-OFF) every factor is exactly 1. The fixture's
+    median over every transcript (~5.5) is not the probed class's (10), so an anchor read off the wrong
+    pool is visible."""
+    factor = np.array([10.0, 10.0, 12.0, 1.0, 2.0, 3.0, np.nan])
+    probed = np.array([1.0, 0.95, 0.92, 0.0, 0.1, 0.2, 0.0])
+    plain = np.array([100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 0.0])
+    got = QA.anchor_capture_factor(factor, probed, plain)
+    np.testing.assert_allclose(got, [1.0, 1.0, 1.2, 0.1, 0.2, 0.3, 1.0], rtol=1e-12)
+    off = QA.anchor_capture_factor(np.full(4, 3.0), np.zeros(4), np.full(4, 100.0))
+    assert np.array_equal(off, np.ones(4))
+
+
+# ── GATE 8: arms scored under different assignment modes are refused, never compared ──────────────
+
+
+def test_the_report_REFUSES_arms_scored_under_different_assignment_modes(tmp_path):
+    """``--set em.assignment_mode=fractional`` changes every count, so a fractional arm beside a sampled
+    one would report the mode's effect as the arm's. Every row carries its mode, and the report refuses a
+    mix — a file written before the stamp existed counts as a different mode, not as agreement."""
+    row = dict(
+        condition="gdna_g05_ss_0.99_nrna_mid_capture_on", axis="transcript", count_abs_err=1.0
+    )
+    a, b = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
+    a.write_text(json.dumps(dict(row, assignment_mode="fractional")) + "\n")
+    b.write_text(json.dumps(dict(row, assignment_mode="sample")) + "\n")
+    with pytest.raises(SystemExit, match="assignment mode"):
+        QA.report([a, b])
+    b.write_text(json.dumps(row) + "\n")
+    with pytest.raises(SystemExit, match="assignment mode"):
+        QA.report([a, b])

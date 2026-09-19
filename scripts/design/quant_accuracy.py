@@ -5,8 +5,9 @@
 against the simulator's own per-transcript truth. Every other arm runs the identical pipeline with
 one thing substituted -- the oracle ``LocusPriors`` built from the origin-split truth (``oracle``, or
 one of its three arrays alone: ``oracle_gdna``, ``oracle_rna``, ``oracle_efflen``), the ruler the EM
-divides by (``oracle_ruler``, the only arm that substitutes at the ``calibrate`` boundary and so
-reaches the effective-length shrinkage), the EM's seed (``warm_uniform``), or the per-transcript
+divides by (``oracle_ruler``: the SIMULATOR's capture-aware effective length in place of the shipped
+ruler's, the only arm that reaches the lengths the EM divides by), the EM's seed (``warm_uniform``), or
+the per-transcript
 allocation weights (the ``oracle_alloc*`` arms, a capability proof and never a headroom claim) -- and
 the difference from ``base`` is what that one thing is worth. One scorer serves every arm, so the
 ceiling and the baseline cannot drift apart. The primary score is count against count: the truth is
@@ -27,6 +28,7 @@ Usage::
     python scripts/design/quant_accuracy.py --arm oracle --oracle-cache DIR --out $RIGEL_ARMS/qa_oracle.jsonl
     python scripts/design/quant_accuracy.py --arm base --conditions COND --em-seed 1 --suite DIR --index INDEX
     python scripts/design/quant_accuracy.py --report $RIGEL_ARMS/qa_base.jsonl $RIGEL_ARMS/qa_oracle.jsonl
+    python scripts/design/quant_accuracy.py --arm base --set em.assignment_mode=fractional --out F   # a config arm
 """
 
 from __future__ import annotations
@@ -50,6 +52,7 @@ sys.path.insert(0, str(_REPO / "tests" / "calibration"))
 sys.path.insert(0, str(_REPO / "scripts" / "design"))
 
 from _oracle import ORIGINS, OracleTruth  # noqa: E402
+from _shared import set_field  # noqa: E402
 
 
 import rigel.calibration.priors as PRIORS  # noqa: E402
@@ -74,23 +77,24 @@ DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 #: silent transcript is switched off for free), and pricing what a real weighting function could earn
 #: needs controls this arm deliberately omits.
 #:
-#: The ruler arms are the only arms that substitute at the ``calibrate`` boundary. A
-#: ``CalibrationResult`` has two consumers and every other arm in this file reaches one of them::
+#: The ruler arms substitute the lengths the EM divides by. A transcript's capture-aware effective length
+#: (``calibration.capture_eff_length.transcript_capture_eff_lengths``, the "ruler") is built by
+#: ``pipeline._setup_geometry_and_estimator`` BEFORE ``assemble_priors`` runs, so no prior arm reaches it::
 #:
-#:     calibrate(...)                          <- the ruler arms substitute HERE
-#:       |-- transcript_capture_eff_lengths()  <- consumer A: `effective_lengths_em`, the EM's RULER
-#:       |-- assemble_priors()                 <- consumer B: `LocusPriors`  (every other arm wraps this)
+#:     calibrate(...)
+#:       |-- transcript_capture_eff_lengths()  <- the ruler arms substitute HERE: `effective_lengths_em`
+#:       |-- assemble_priors()                 <- every prior arm wraps this: `LocusPriors`
 #:
-#: ``pipeline._setup_geometry_and_estimator`` builds consumer A before ``assemble_priors`` runs, so
-#: an arm that wraps only ``assemble_priors`` never reaches the effective-length shrinkage.
+#: ``oracle_ruler`` hands the EM ``fl × factor``, the factor being the SIMULATOR's own capture factor per
+#: transcript (``ruler_vs_truth.load_truth``: the sampler's partition, the truth the reads were drawn with),
+#: anchored so the fully probed class reads 1 as the shipped ruler's does (``anchor_capture_factor``), and
+#: never clipped — the anchor is a median, so the fully probed class straddles 1. It varies one thing against
+#: ``base``: the priors stay as shipped. Under capture a panel's probes can make capture ISOFORM-specific (a
+#: probe across a junction captures only the isoforms holding it), and the split between isoforms is decided
+#: by the ratio of their lengths, so this arm prices the ruler end to end; capture-OFF, the truth is the plain
+#: length and the arm is the identity. It replaced an arm that swapped calibration's count arrays, which the
+#: ruler stopped reading at ``c44fc306`` and so could not move it by one ulp.
 #:
-#: ``oracle_ruler`` minus ``oracle`` is the shrinkage and nothing else: ``LocusPriors`` has exactly
-#: three fields and ``oracle`` already takes all three from O, so the two arms differ in one thing —
-#: whether the ruler the EM divides by was built from the true split or the shipped one.
-#:
-#: The value is a bool — substitute, or take nothing — and the dispatch is exact membership rather
-#: than a prefix test, so a name that passes one arm test and fails another cannot be scored as the
-#: thing it never installed (TRAPS: an-ablation-that-never-ran).
 _RULER_ARMS = {"oracle_ruler": True, "oracle_ruler_noop": False}
 
 ARMS = ("base", "base_reseed", "noop", "oracle", "oracle_gdna", "oracle_rna", "oracle_efflen",
@@ -410,76 +414,115 @@ def truth_weights(truth: pd.DataFrame, index) -> np.ndarray:
     return w
 
 
-def install_ruler_arm(arm: str, oracle: OracleTruth):
-    """Wrap ``calibrate`` so a corrected split reaches BOTH consumers. Returns ``(restore, fired)``.
+def anchor_capture_factor(factor, probed_frac, plain_length) -> np.ndarray:
+    """The simulator's capture factor in the shipped ruler's convention: divided by the median over the
+    fully probed class (probed fraction ≥ 0.9), every transcript when no such class exists (capture-OFF),
+    and the identity where the factor is undefined (a transcript with no plain length). The anchor is the
+    one ``ruler_vs_truth.score`` reads its errors against."""
+    f = np.asarray(factor, dtype=np.float64)
+    ok = np.isfinite(f) & (f > 0.0) & (np.asarray(plain_length, dtype=np.float64) > 0.0)
+    logf = np.where(ok, np.log(np.where(ok, f, 1.0)), 0.0)
+    probed = ok & (np.asarray(probed_frac, dtype=np.float64) >= 0.9)
+    pool = probed if probed.any() else ok
+    scale = float(np.median(logf[pool])) if pool.any() else 0.0
+    return np.where(ok, np.exp(logf - scale), 1.0)
 
-    ``rigel.calibration.calibrate`` is patched as a MODULE ATTRIBUTE, and that works because
-    ``run_pipeline`` does ``from .calibration import calibrate`` function-locally — the name is
-    resolved at call time, not at module load.
 
-    Calibrate being called is necessary and not sufficient, so the counter watches the ruler.
-    ``_setup_geometry_and_estimator`` builds ``effective_lengths_em`` only when it is handed both a
-    calibration and the region arrays; hand it ``None`` for either and the substituted result would
-    reach the prior alone, the arm would silently become ``oracle``, and the difference between them —
-    the one quantity this arm exists to measure — would read as exactly zero. Counting where the
-    SHRINKAGE runs makes that impossible to miss, exactly as ``install_truth_weights`` counts where the
-    solver receives its weights rather than where they were handed over.
+def capture_truth_factor(suite: Path, index, condition: str) -> np.ndarray:
+    """``float64[n_transcripts]`` — the anchored capture factor on the index's axis, for the condition's
+    capture label. It depends on the panel's capture config, the probe file, the simulated fragment-length
+    law and the annotation, never on the condition, so it is computed once per label and cached at
+    ``<suite>/oracle_cache/capture_truth_<label>.npz`` under a key over all four; a different key is
+    recomputed, never read. Computing it integrates the sampler over every fragment length, minutes on the
+    ladder."""
+    import hashlib
 
-    ``max_abs_delta`` is the end-to-end half of the same check and it is recorded per condition:
-    ``oracle_ruler`` MUST move the ruler and ``oracle_ruler_noop`` must not move it at all. An arm that
-    cannot move the number it names is not a measurement of zero effect.
+    label = "on" if condition.endswith("_capture_on") else "off"
+    manifest = json.loads((Path(suite) / "manifest.json").read_text())
+    capture = next(c["config"] for c in manifest["capture_configs"] if c["label"] == label)
+    probes = capture.get("probes")
+    key_parts = {
+        "capture": capture,
+        "probes_sha": hashlib.sha256(Path(probes).read_bytes()).hexdigest() if probes else None,
+        "fl": {k: manifest["simulation"][k] for k in ("frag_mean", "frag_std", "frag_min", "frag_max")},
+        "t_id": [str(x) for x in index.t_df["t_id"]],
+        "length": [int(x) for x in index.t_df["length"]],
+    }
+    key = hashlib.sha256(json.dumps(key_parts, sort_keys=True, default=str).encode()).hexdigest()[:16]
+    path = Path(suite) / "oracle_cache" / f"capture_truth_{label}.npz"
+    if path.exists():
+        with np.load(path) as z:
+            if str(z["key"]) == key:
+                return anchor_capture_factor(z["factor"], z["probed_frac"], z["L_plain"])
+    from _shared import sibling
 
-    The ``noop`` variant still reads the oracle, still builds the override and still calls
-    ``dataclasses.replace`` — it takes no field. A noop that short-circuits earlier would prove the
-    ``if`` works and nothing else (TRAPS: could-the-arm-have-fired).
+    truth = sibling("ruler_vs_truth.py").load_truth(index, Path(index.index_dir), Path(suite), condition)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.stem}.{os.getpid()}.npz")
+    np.savez(tmp, key=key, factor=truth.factor, probed_frac=truth.probed_frac, L_plain=truth.L_plain)
+    tmp.replace(path)
+    return anchor_capture_factor(truth.factor, truth.probed_frac, truth.L_plain)
+
+
+def install_ruler_arm(arm: str, factor: np.ndarray):
+    """Wrap the ruler so the EM divides by ``fl × factor``. Returns ``(restore, fired)``.
+
+    ``transcript_capture_eff_lengths`` is patched as a MODULE ATTRIBUTE, which works because
+    ``pipeline._setup_geometry_and_estimator`` imports it function-locally, at call time.
+
+    The wrapper is identical for both arms: it runs the shipped ruler, builds the substitute, and records
+    how far the substitute sits from the shipped lengths (``truth_delta``) and how far what it RETURNED
+    sits from them (``max_abs_delta``). ``oracle_ruler_noop`` then hands back the shipped lengths' own
+    object, so it is a test of the whole wrapper and not of an ``if`` (TRAPS: could-the-arm-have-fired).
+    ``check_ruler_arm`` reads the counter: the arm must move the lengths wherever the truth differs from
+    them, the noop must not move them at all.
     """
-    import rigel.calibration as CAL
     from rigel.calibration import capture_eff_length as CEL
 
     substitute = _RULER_ARMS[arm]
-    orig_calibrate = CAL.calibrate
+    factor = np.asarray(factor, dtype=np.float64)
     orig_ruler = CEL.transcript_capture_eff_lengths
-    shipped: dict = {"cal": None}
-    fired = {"n": 0, "ruler": 0, "max_abs_delta": 0.0}
-
-    def cal_wrapper(*a, **kw):
-        cal = orig_calibrate(*a, **kw)
-        region_arrays = kw.get("region_arrays")
-        if region_arrays is None:
-            raise RuntimeError(
-                "⛔ calibrate was not called with region_arrays by keyword — the pipeline boundary "
-                "moved, and override_masses cannot be built without it."
-            )
-        override = oracle.override_masses(region_arrays)
-        shipped["cal"] = cal
-        fired["n"] += 1
-        if not substitute:
-            # The noop's field set is read off ``override`` ITSELF, never from a local copy of the
-            # list. A second copy is a second home, and the day ``override_masses`` writes a seventh
-            # field the noop would replace six with themselves while the arm replaced seven — and both
-            # would still print the word "identical".
-            return dataclasses.replace(cal, **{f: getattr(cal, f) for f in override})
-        return dataclasses.replace(cal, **override)
+    fired = {"n": 0, "ruler": 0, "max_abs_delta": 0.0, "truth_delta": 0.0}
 
     def ruler_wrapper(calibration, region_arrays, index, fl_eff_lengths, rna_fl_pmf):
-        out = orig_ruler(calibration, region_arrays, index, fl_eff_lengths, rna_fl_pmf)
-        # the shipped ruler, computed alongside, so "did this arm move the ruler" is a number rather
-        # than an inference; cheap against a run measured in minutes.
-        base = orig_ruler(shipped["cal"], region_arrays, index, fl_eff_lengths, rna_fl_pmf)
+        shipped = orig_ruler(calibration, region_arrays, index, fl_eff_lengths, rna_fl_pmf)
+        base = np.asarray(shipped, dtype=np.float64)
+        truth = np.asarray(fl_eff_lengths, dtype=np.float64) * factor
+        out = truth if substitute else shipped
+        fired["n"] += 1
         fired["ruler"] += 1
+        fired["truth_delta"] = max(fired["truth_delta"], float(np.abs(truth - base).max()))
         fired["max_abs_delta"] = max(
-            fired["max_abs_delta"], float(np.abs(np.asarray(out) - np.asarray(base)).max())
+            fired["max_abs_delta"], float(np.abs(np.asarray(out, dtype=np.float64) - base).max())
         )
         return out
 
-    CAL.calibrate = cal_wrapper
     CEL.transcript_capture_eff_lengths = ruler_wrapper
 
     def restore():
-        CAL.calibrate = orig_calibrate
         CEL.transcript_capture_eff_lengths = orig_ruler
 
     return restore, fired
+
+
+def check_ruler_arm(condition: str, arm: str, fired: dict) -> None:
+    """Refuse a ruler arm that could not have measured what it names. The shrinkage must have run; the
+    substituting arm must move the EM's lengths wherever the truth differs from the shipped ones (where it
+    does not — capture-OFF — the arm is the identity and that is its answer); the noop must move nothing."""
+    if fired["ruler"] == 0:
+        raise RuntimeError(
+            f"{condition} [{arm}]: the ruler never ran, so this arm substituted nothing the EM read."
+        )
+    if _RULER_ARMS[arm] and fired["truth_delta"] > 0.0 and fired["max_abs_delta"] == 0.0:
+        raise RuntimeError(
+            f"{condition} [{arm}]: the truth differs from the shipped ruler by {fired['truth_delta']:.3g} "
+            "but the EM's lengths did not move — an arm that cannot move the quantity it names has not "
+            "measured it."
+        )
+    if not _RULER_ARMS[arm] and fired["max_abs_delta"] != 0.0:
+        raise RuntimeError(
+            f"{condition} [{arm}]: the NOOP arm moved the EM's lengths by {fired['max_abs_delta']:.3e}."
+        )
 
 
 def install_truth_weights(weights: np.ndarray):
@@ -529,7 +572,8 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
     pipeline_config = seeded(pipeline_config, arm, em_seed)
 
     oracle = None
-    if not (arm in ("base", "base_reseed", "warm_uniform") or arm.startswith("oracle_alloc")):
+    if not (arm in ("base", "base_reseed", "warm_uniform") or arm.startswith("oracle_alloc")
+            or arm in _RULER_ARMS):
         if oracle_cache is None:
             raise SystemExit(f"⛔ arm {arm!r} needs --oracle-cache")
         oracle = load_oracle(bam, index, pipeline_config, oracle_cache, condition)
@@ -552,7 +596,7 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
         # exact membership, and placed before the fall-through: `oracle_ruler` starts with "oracle"
         # and would otherwise land in `install_arm`, whose `_ARM_FIELDS[arm]` would raise — or worse,
         # would not have, had the name been one letter different.
-        restore, fired = install_ruler_arm(arm, oracle)
+        restore, fired = install_ruler_arm(arm, capture_truth_factor(suite, index, condition))
     else:
         restore, fired = install_arm(arm, oracle)
     start = time.perf_counter()
@@ -567,34 +611,21 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
             "measurement of zero effect."
         )
     if arm in _RULER_ARMS:
-        # The ruler arms carry a SECOND requirement, because reaching `assemble_priors` is the thing
-        # they were built NOT to settle for: the shrinkage must have run on the substituted result, and
-        # the substituting arm must have MOVED it.
-        if fired["ruler"] == 0:
-            raise RuntimeError(
-                f"{condition} [{arm}]: the effective-length shrinkage never ran, so this arm reached "
-                "the prior only — which is the `oracle` arm, measured under a different name."
-            )
-        if _RULER_ARMS[arm] and fired["max_abs_delta"] == 0.0:
-            raise RuntimeError(
-                f"{condition} [{arm}]: the substitution did not move `effective_lengths_em` by one "
-                "ULP. An arm that cannot move the quantity it names has not measured it."
-            )
-        if not _RULER_ARMS[arm] and fired["max_abs_delta"] != 0.0:
-            raise RuntimeError(
-                f"{condition} [{arm}]: the NOOP arm moved `effective_lengths_em` by "
-                f"{fired['max_abs_delta']:.3e}. Replacing six arrays with themselves must be inert."
-            )
+        # the ruler arms carry a second requirement: the EM's lengths are what they name (check_ruler_arm)
+        check_ruler_arm(condition, arm, fired)
     seconds = time.perf_counter() - start
 
     quant = result.estimator.get_counts_df(index)
     common = {"arm": arm, "condition": condition, "seconds": seconds,
-              "em_seed": int(pipeline_config.em.seed)}
+              "em_seed": int(pipeline_config.em.seed),
+              # stamped on every row, so a fractional run cannot be reported as a sampled one
+              "assignment_mode": pipeline_config.em.assignment_mode}
     if arm in _RULER_ARMS:
-        # How far the substituted split moved the EM's ruler, in base pairs of opportunity on the
-        # worst transcript. Recorded rather than only asserted, so the arm's REACH is readable off the
-        # output file beside the score it produced.
+        # How far the arm moved the EM's lengths, and how far the truth sits from the shipped ruler, in
+        # base pairs of opportunity on the worst transcript — recorded beside the score, so the arm's
+        # REACH is readable off the output file.
         common["ruler_max_abs_delta"] = float(fired["max_abs_delta"])
+        common["ruler_truth_delta"] = float(fired["truth_delta"])
     return [
         {**common, "axis": "transcript", **score_transcripts(quant, truth)},
         # the SAME scorer over genes — isoform ambiguity summed away, see score_genes
@@ -628,6 +659,14 @@ def report(paths: list[Path]) -> None:
     """One or more arms, per stratum. Never pooled — the panel total hides a sign flip between
     strata, and on this panel one stratum carries almost all of the error."""
     arms = [(_load(p), Path(p).stem) for p in paths]
+    modes = {(name, r.get("assignment_mode")) for a, name in arms for r in a.values()}
+    if len({m for _n, m in modes}) > 1:
+        # `--set em.assignment_mode=fractional` moves every count, so a mix would report the mode's
+        # effect as an arm's; a file written before the stamp existed is a different mode, not agreement.
+        raise SystemExit(
+            f"⛔ the arms were scored under different assignment modes {sorted(modes, key=str)} — "
+            "compare arms run under one mode."
+        )
     keys = set(arms[0][0])
     for a, name in arms[1:]:
         if set(a) != keys:
@@ -853,6 +892,9 @@ def main() -> int:
                     help="⛔ pinned, because the shipped default is None and the EM's hard "
                          "assignment is an unseeded categorical draw — see DEFAULT_EM_SEED")
     ap.add_argument("--jobs", type=int, default=1)
+    ap.add_argument("--set", dest="settings", action="append", default=[], metavar="SECTION.FIELD=VALUE",
+                    help="a config value applied to every arm, repeatable (e.g. --set "
+                         "em.assignment_mode=fractional); the same parser as every instrument's --set")
     args = ap.parse_args()
 
     if args.report:
@@ -867,6 +909,13 @@ def main() -> int:
     cache = args.oracle_cache
     if cache is None and (args.suite / "oracle_cache").is_dir():
         cache = args.suite / "oracle_cache"
+    if args.arm in _RULER_ARMS:
+        # the capture truth is minutes per label and shared by every condition: build it once, here,
+        # before any shard could race to build it too
+        truth_index = TranscriptIndex.load(str(args.index))
+        for label in sorted({n.endswith("_capture_on") for n in names}):
+            first = next(n for n in names if n.endswith("_capture_on") == label)
+            capture_truth_factor(args.suite, truth_index, first)
 
     if args.jobs > 1 and len(names) > 1:
         # Shards, not threads. Conditions share nothing but a read-only index and cache, so this
@@ -884,6 +933,8 @@ def main() -> int:
                    "--conditions", *sh]
             if cache is not None:
                 cmd += ["--oracle-cache", str(cache)]
+            for spec in args.settings:
+                cmd += ["--set", spec]
             procs.append(subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                           stderr=subprocess.STDOUT, text=True))
         rc = 0
@@ -905,6 +956,9 @@ def main() -> int:
 
     index = TranscriptIndex.load(str(args.index))
     pipeline_config = PipelineConfig()
+    for spec in args.settings:
+        pipeline_config = set_field(pipeline_config, spec)
+        print(f"  ⭐ --set {spec}", flush=True)
     rows = []
     for name in names:
         print(f"  … {args.arm}  {name}", flush=True)
