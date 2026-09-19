@@ -21,11 +21,31 @@ forcing function are `DESIGN.md` §0b; every table in this file is read per stra
 
 ---
 
-## The metric — the calibration result against oracle calibration
+## Two primary numbers, and what each one answers (owner, 2026-09-19: `DESIGN.md` §0b's amendment)
 
-The primary number is calibration scored against an oracle calibration; the end-to-end transcript
-number is a thermometer. The transcript table is downstream of calibration and of the EM, and a single
-end-to-end figure cannot say which of the two moved.
+0.8.0 is a release of the TOOL, so the transcript table is a first-class number beside the calibration
+metric rather than a thermometer under it. They answer different questions and neither stands in for the
+other: the transcript table is downstream of both calibration and the EM, so a single end-to-end figure
+cannot say which of the two moved — and a calibration figure cannot say whether the user's number improved.
+
+| the question | the number | the instrument | how it is read |
+|---|---|---|---|
+| **is CALIBRATION right?** — the number that ranks a calibration mechanism | the `CalibrationResult` against an oracle calibration | `calibration_vs_oracle.py` | per stratum, never pooled |
+| **is THE TOOL right?** — the number the release ships on | the transcript table against per-transcript truth | `quant_accuracy.py --arm base` | per stratum, and only above `--arm base_reseed` |
+
+⛔ THE END-TO-END NUMBER HAS A FLOOR AND A DECOMPOSITION, and both are part of reading it. The deliverable is
+not reproducible by default, so `base_reseed` is re-derived in the same session and any delta below it is
+sampling noise, not a result. And the arms decompose it: `oracle` is what a perfect prior is worth end to
+end, so what remains under it belongs to the EM and the assignment rather than to calibration; `oracle_ruler`
+is the only arm that reaches the effective-length shrinkage, because it substitutes at the `calibrate`
+boundary while every other arm wraps `assemble_priors`.
+
+---
+
+## The calibration metric — the result against oracle calibration
+
+The number that ranks a calibration mechanism is calibration scored against an oracle calibration. Ranking a
+calibration mechanism on the transcript table stays REFUSED for the reason above.
 
 | | what is scored | against | instrument |
 |---|---|---|---|
@@ -34,16 +54,18 @@ end-to-end figure cannot say which of the two moved.
 | **primary, per object** | each region's and boundary's own `f_g`, and whether it is confidently wrong | the oracle payload: the production accumulator run on the BAM split by true origin | `solvability_audit.py` |
 | **primary, one number** | the library `f_gdna` | the simulator's per-fragment truth | `calibration_vs_oracle.py` — each row's `pools` block, `P_gdna` against `true_gdna` |
 | **controls** | zero-gDNA and zero-RNA, where truth is a constant | 0.000 and 1.000 exactly | `zero_controls.py`, and the `g00` rung |
-| **thermometer** | the transcript table a user reads | `truth_abundances.tsv` | `quant_accuracy.py --arm base` |
+| **the deliverable** | the transcript table a user reads | `truth_abundances.tsv` | `quant_accuracy.py --arm base`, above `--arm base_reseed` |
 
 Why `P − O` and not the transcript number: attribution. `O` is calibration done perfectly with the
 shipped assembler, so `P − O` is calibration's own error and nothing else; the transcript number adds
 the assembler, the effective-length model, the EM's ambiguity and the annotation. `prior_vs_oracle.py`
 reports `O − Fo` (the assembler's error) beside it, because they are different repairs in different files.
-Read the thermometer, do not steer by it: most of the stranded × capture-OFF misassignment is ordinary
-isoform ambiguity, and a calibration change that improves `P − O` and leaves the transcript table flat
-has done its job. Its noise floor is measured, not assumed — `quant_accuracy.py --arm base_reseed`
-prints it beside the effect and must be re-run in the same session (`TRAPS: re-record-the-baseline`).
+Steer a CALIBRATION change by `P − O`, not by the transcript table: most of the stranded × capture-OFF
+misassignment is ordinary isoform ambiguity, and a calibration change that improves `P − O` and leaves the
+transcript table flat has done its job. The transcript table is what the RELEASE ships on, and it steers the
+work downstream of calibration — the assembler, the ruler, the EM. Its noise floor is measured, not assumed:
+`quant_accuracy.py --arm base_reseed` prints it beside the effect and must be re-run in the same session
+(`TRAPS: re-record-the-baseline`).
 
 ### The ruler — the effective-length shrinkage sits outside every ceiling's patch point
 
@@ -183,8 +205,9 @@ on each is an owner call and is not invented here.
    arrays are substituted. A separate shrinkage correction is a defect, not a fix.
 4. **Pass-0 is monotone**: adding real evidence to an object never moves its answer away from truth.
 5. **Pass-0 depends on no quantity a later iteration produces** — no feedback in the first solve.
-6. **The three in-scope strata do not regress on the thermometer**, and the deferred stratum is reported
-   on every table.
+6. **The three in-scope strata improve, or at worst hold, on the DELIVERABLE** — the transcript table above
+   its reseed floor, decomposed by the arms so that what moved is attributable — and the deferred stratum is
+   reported on every table.
 
 The gate that held this work back, kept because it will apply again: a solve tuned against a wrong
 input on exactly the conditions it is meant to rescue is tuned against a manufactured discriminant

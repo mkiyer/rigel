@@ -8,10 +8,13 @@ is judged is `SUCCESS.md`; rulings are `DESIGN.md`; lessons are `TRAPS.md`, cite
 
 ## The 0.8.0 frame
 
-The version on disk is `pyproject.toml`'s; the target is 0.8.0, a calibration release, and the metric is
-the calibration result scored against oracle calibration (`calibration_vs_oracle.py`,
-`solvability_audit.py`, `prior_vs_oracle.py`) — the transcript number is a thermometer, never the
-ranking. Three strata are in scope (unstranded × capture-OFF, stranded × capture-OFF, stranded ×
+The version on disk is `pyproject.toml`'s; the target is 0.8.0, A RELEASE OF THE TOOL (owner, 2026-09-19,
+`DESIGN.md` §0b's amendment). Two numbers are primary and they answer different questions: the transcript
+table against per-transcript truth is what the release ships on (`quant_accuracy.py`, read only above its
+reseed floor), and the calibration result against an oracle calibration is what ranks a calibration
+mechanism (`calibration_vs_oracle.py`, `solvability_audit.py`, `prior_vs_oracle.py`). Neither stands in for
+the other: the transcript table cannot say whether calibration or the EM moved, and a calibration figure
+cannot say whether the user's number improved. Three strata are in scope (unstranded × capture-OFF, stranded × capture-OFF, stranded ×
 capture-ON); unstranded × capture-ON is deferred — reported on every benchmark, never a development
 target, and never ranked on a pooled total (`TRAPS: never-pool-the-strata`). The fragment-length
 composition channel is retired until after 0.8.0. The full ruling, including why the ladder gives gDNA
@@ -22,10 +25,11 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
 - **Library gDNA fraction**: accurate on the three in-scope strata, structurally blind on the deferred
   one (at κ = ½ no channel reaches an AMBIG slot; the θ-independent-channel search is closed) —
   `solvability_audit.py`, `policy_benchmark.py --by-class`.
-- **Transcript assignment**: a large share of RNA fragments is misassigned even under a perfect prior —
-  calibration and assignment are two problems in two files; in scope a perfect prior no longer improves
-  the transcript number, and the `g00` rows carried the largest transcript error of any stratum under
-  both arms until the ruler was repaired (below) — `quant_accuracy.py` (the thermometer).
+- **The deliverable, end to end**: UNMEASURED on the current tree. The last reading predates the ruler's
+  repair and both machine campaigns, and it said a large share of RNA fragments is misassigned even under a
+  perfect prior — calibration and assignment being two problems in two files. Re-derive it before ranking
+  anything downstream of calibration: `quant_accuracy.py`, `--arm base` with `--arm base_reseed` beside it
+  and the oracle arms for the decomposition (`ISSUES: end-to-end-error-unattributed`).
 - **Stage A (the accumulator)**: done; the fragment ledger closes exactly — `calibration_oracle.py`.
 - **Fragment lengths**: closed, both halves — gDNA by the two-pool contrast (`calibration/fl.py`,
   `gdna_density.py`; gates `test_fl.py`, `test_gdna_density.py`), RNA sound as shipped
@@ -46,7 +50,10 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   slot's strand term, a derived count and no lattice (`DESIGN.md` §6b.15.11, `EQUATIONS.md` §9e), exact at any
   depth, with the tilt's hypothesis space {pure +, pure −, mixed} (`EQUATIONS.md` §9f); the λ bracket follows
   the landscape prior's derived demand (`landscape.required_logodds_window`).
-- **The prior assembler**: with perfect masses its own error is negligible — `prior_vs_oracle.py`.
+- **The prior assembler**: with perfect masses its own error is negligible — `prior_vs_oracle.py`. What is
+  NOT measured is the lane the EM never receives: `rna_prior_weight` is built end to end and `pipeline.py`
+  omits it, so the shipped EM carries no per-transcript information at all
+  (`ISSUES: per-transcript-prior-lane`).
 - **The ruler is the transcript's bases at their pieces' capture efficiencies, against the landscape's
   located enriched mode** (`DESIGN.md` §7.2, `EQUATIONS.md` §11): each efficiency a posterior mean from the
   piece's own count and its edge crossings, no floor and no junction object, so the unprobed class reads
@@ -94,7 +101,26 @@ its instrument: the ruler reads 1.000 at `g00` and off capture, so the metric pa
 intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons (stranded ON)
 (`policy_benchmark.py --by-class`).
 
-1. **Calibration accuracy where the strand tilt matters** — the AMBIG slots with RNA on both strands
+1. **THE END-TO-END BASELINE, and its decomposition** — `ISSUES: end-to-end-error-unattributed`. Nothing
+   below can be ranked until the deliverable is measured on this tree: `quant_accuracy.py --arm base` with
+   `--arm base_reseed` in the same session for the floor, and `oracle` / `oracle_gdna` / `oracle_rna` /
+   `oracle_efflen` / `oracle_ruler` to split the error into what a perfect prior is worth and what the EM
+   and the assignment own. Per stratum, never pooled. It is a MEASUREMENT session: no `src/` change.
+
+2. **The pre-EM setup — where calibration's answer reaches the EM, or does not** (owner, 2026-09-19: the
+   next build). Ranked inside it by what is measured: the per-transcript prior lane the pipeline omits
+   (`ISSUES: per-transcript-prior-lane`, a wiring gap plus a support decision, and a perfect version of it
+   roughly halves in-scope gene-level error); the capture-blind gDNA divisor
+   (`ISSUES: capture-blind-gdna-divisor`, +6.0 % on all six capture-ON rows); the magic shrinkage ESS
+   (`ISSUES: eb-shrinkage-magic-ess`); the anti-correlation the baseline may explain outright
+   (`ISSUES: prior-fidelity-vs-deliverable`); and the assembler's alpha = 0 rule that owns an xfail
+   (`ISSUES: antisense-prior-assembly-casualty`). Each judged on the deliverable AND on
+   `prior_vs_oracle.py`, so a repair that moves the prior and not the user's number is visible as that.
+
+3. **Whatever the baseline says owns the residual** — if it is the EM and the assignment rather than the
+   prior, that is the next thread and `ISSUES: nested-antisense-leak-under-the-sane-ruler` sits in it.
+
+4. **Calibration accuracy where the strand tilt matters** — the AMBIG slots with RNA on both strands
    (`DESIGN.md` §6b.15.12–§6b.15.13). The tilt atom and the strand channel's protocol decision landed 2026-09-14 (the
    strand-pure under-call and the gDNA-free deadband CLOSED); the θ measure is settled (both flattenings
    REFUSED, `ISSUES: strand-marginal-volume-factor`); the lanes' own defects are fixed and gated by
@@ -104,23 +130,25 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
    (`ISSUES: the-tilt-census-as-an-instrument`), and a known limit to watch rather than build against
    (`ISSUES: the-atom-at-an-unwitnessed-both-strand-slot`). Each judged on the metric per stratum, both
    zero controls and the shared-exon stress at depth, never on the ladder alone.
-2. **The rest of the pre-EM setup** — `priors.py` / `result.py` / `derive.py` against
-   `prior_vs_oracle.py` (re-run it first) and the ruler column: `ISSUES: prior-fidelity-vs-deliverable`,
-   `ISSUES: eb-shrinkage-magic-ess`, `ISSUES: capture-blind-gdna-divisor`,
-   `ISSUES: per-transcript-prior-lane`.
-3. **The intron's own solve on unstranded capture-OFF** — the intron class carries the largest share of
+5. **The intron's own solve on unstranded capture-OFF** — the intron class carries the largest share of
    the in-scope error there (`policy_benchmark.py --by-class`): the factory profile's resolution against
    the intergenic background (`density_deconv`); dissect with `worst_objects.py`.
-4. **The vertex atom** — on silent genes and nascent-free introns; a
+6. **The vertex atom** — on silent genes and nascent-free introns; a
    mechanism for it is the prior's reference (`ISSUES: reference-prior-refuted-at-concept-level`
    constrains the form) or the intron's own solve, not a message.
-5. **The message policy, only where a row is above the bar**: one prototype mechanism at a time, in C++ in
+7. **The message policy, only where a row is above the bar**: one prototype mechanism at a time, in C++ in
    a worktree, the two trees scored with `policy_benchmark.py --by-class`, halves apart, pass zero beside the pipeline:
    `ISSUES: two-sided-exon-row`, `ISSUES: flux-floor-dispersion`,
    `ISSUES: message-layer-open-cases`.
 
 Then, in standing order: `ISSUES: refit-vs-message-arbitration` (re-read under the E-step: the walk now says the prior does the
 unstranded rows and the messages the stranded capture-ON ones).
+
+8. **The release itself** — `docs/PUBLISHING.md` is the procedure and it is two commands plus a wait. What
+   gates it is not the procedure but the state: the deliverable measured and not regressed per stratum, the
+   zero controls at 0.000 and 1.000, the suite at its standing count, `preflight.py --full` green, the
+   standing risks re-read (`ISSUES: capture-degeneracy-standing-risk`,
+   `ISSUES: flgap-panels-stale-nascent-model`), and the manual true of what ships.
 
 **The other kind of work, parked and resumable**: `ISSUES: performance-memory-bounded-solve` carries the
 machine thread — what a deep run costs now, what is ranked next with its measured price, and the two

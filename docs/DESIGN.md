@@ -61,10 +61,34 @@ this section is the canonical one. Re-derive the state of any remaining banned w
 
 ---
 
-## 0b. The 0.8.0 release scope (owner ruling, 2026-08-14)
+## 0b. The 0.8.0 release scope (owner ruling, 2026-08-14; AMENDED 2026-09-19)
 
 The shipped version is `0.7.1` (`pyproject.toml`); the target is 0.8.0. `ROADMAP.md` ranks the work
 *inside* this scope; what is in it and what is out of it is decided here.
+
+### The amendment: 0.8.0 is a RELEASE OF THE TOOL, and the transcript table is a first-class number (owner, 2026-09-19)
+
+Calibration was the release's subject while it was the thing in the way. It no longer is: it is measured
+against an oracle per stratum, it is fast, and two campaigns of machine work moved no number. So the owner
+moved the frame from the component to the DELIVERABLE — the transcript table a user reads — and with it the
+order of the remaining work: FIRST an end-to-end baseline with its attribution floor, THEN the pre-EM setup
+that carries calibration's answer into the EM, then whatever that baseline says owns the residual.
+
+What this amendment does NOT do is demote the calibration metric. Ranking a CALIBRATION mechanism on the
+transcript number remains refused, for the reason it always was: the transcript table is downstream of both
+calibration and the EM, so a single end-to-end figure cannot say which moved (`TRAPS:
+the-intermediate-is-not-the-deliverable` is the mirror of this — neither end stands in for the other). The
+two numbers answer two different questions and both are now primary:
+
+| the question | the number | the instrument |
+|---|---|---|
+| is CALIBRATION right? — ranks a calibration mechanism | the `CalibrationResult` against an oracle calibration, per stratum | `calibration_vs_oracle.py` |
+| is THE TOOL right? — what the release ships on | the transcript table against per-transcript truth, per stratum, above the reseed floor | `quant_accuracy.py` |
+
+⛔ The end-to-end number is only attributable above its own floor: the deliverable is not reproducible by
+default, so `--arm base_reseed` is re-derived in the same session and any delta below it is noise. And the
+decomposition is the point of the arms, not a nicety — `oracle` says what a perfect prior is worth end to
+end, so what remains under it is the EM's and the assignment's, not calibration's.
 
 ### Three strata are the optimisation target, and the fourth is deferred
 

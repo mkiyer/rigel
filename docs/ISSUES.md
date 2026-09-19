@@ -16,6 +16,28 @@ the changelog is git.
 Ordered by priority. An entry says what is open and the number a ranking turns on; what was done is git,
 what was ruled is `DESIGN.md`.
 
+### end-to-end-error-unattributed
+`priority: now (the release's first measurement) · kind: question · 2026-09-19`
+The deliverable — the transcript table a user reads — is UNMEASURED on the current tree, and every ranking
+downstream of calibration depends on it. The last reading predates the ruler's repair of 2026-09-16 and both
+machine campaigns, and what it said was that a large share of RNA fragments is misassigned EVEN UNDER A
+PERFECT PRIOR: in scope, a perfect prior no longer improved the transcript number. If that still holds, the
+release's remaining error is the EM's and the assignment's and the pre-EM work is worth less than it looks;
+if it does not, the pre-EM chain is exactly where to spend. The measurement decides which, and no `src/`
+change belongs in the session that takes it.
+
+WHAT TO RUN, per stratum and never pooled: `quant_accuracy.py --arm base` for the number, `--arm base_reseed`
+IN THE SAME SESSION for the floor below which no delta is attributable (the deliverable is not reproducible
+by default), and the injection arms for the decomposition — `oracle` (all three prior fields at truth),
+`oracle_gdna` / `oracle_rna` / `oracle_efflen` (one field each), and `oracle_ruler`, which is the ONLY arm
+that reaches the effective-length shrinkage because it substitutes at the `calibrate` boundary while every
+other arm wraps `assemble_priors`. ⛔ Read the arms as a decomposition, not a ceiling ladder: what remains
+under `oracle` is the EM's and the assignment's by construction.
+
+WHAT IT CLOSES OR RE-RANKS: `ISSUES: prior-fidelity-vs-deliverable` (the anti-correlation may be visible
+directly in the arms), and the order of everything in `ROADMAP.md` items 2 and 3. Record the numbers in the
+roadmap's state claim, not here: this entry is the question, and it closes when the measurement answers it.
+
 ### performance-memory-bounded-solve
 `priority: PARKED 2026-09-19 (owner: the method is the focus; this is machine work and resumes on its own) · kind: build · 2026-08-17; the port landed 2026-09-17/18, the work outside calibration 2026-09-19 (`DESIGN.md` §6b.15)`
 A deep run must be fast enough to iterate on, and memory-bounded. TWO CAMPAIGNS ARE DONE and their record is
@@ -180,7 +202,7 @@ every upper side refused (`ISSUES: the-edge-upper-side`); (d) substrate `nest` (
 `policy_benchmark.py --by-class`.
 
 ### per-transcript-prior-lane
-`priority: next · kind: build · 2026-08-31`
+`priority: the pre-EM thread, FIRST (owner, 2026-09-19) · kind: build · 2026-08-31`
 `rna_prior_weight` is built end to end but `pipeline.py` omits it, so the shipped EM carries no per-transcript
 information; a perfect per-transcript prior roughly halves in-scope gene-level error. Two weightings are
 refused (`ISSUES: refused-transcript-weights`, `ISSUES: refused-soft-min-path-weighting`): the support problem
@@ -188,14 +210,14 @@ is the whole problem, so the next candidate is a sparsity mechanism, targeting e
 transcripts with median exon ≤ 150 bp. `quant_accuracy.py`.
 
 ### capture-blind-gdna-divisor
-`priority: next · kind: defect · 2026-08-31`
+`priority: the pre-EM thread · kind: defect · 2026-08-31`
 `gdna_opportunity_from_index` is computed from the index alone, so under capture it removes ~6 bp of a ~30 bp
 length selection — the gDNA control moved +6.0 % on all six capture-ON rows (gDNA has no introns to miss),
 and with `ISSUES: eb-shrinkage-magic-ess` it owns the −5.90 % capture-ON length ceiling. `capture_eff_length`
 already models the panel; it also blocks `ISSUES: crossing-pool-contrast`.
 
 ### eb-shrinkage-magic-ess
-`priority: next · kind: defect · 2026-08-31`
+`priority: the pre-EM thread · kind: defect · 2026-08-31`
 `POOL_EB_PRIOR_ESS = 1000.0` shrinks the gDNA pmf toward `global_pmf` (mostly RNA whenever gDNA is a minority)
 at a magic ESS: inert on the ladder (0.01 bp), dominant on the fl-gap arm at `g05` capture-ON (`ship−pool`
 −23.7 of −31.7 bp). Replacement: reconcile the pools by their precision (`EQUATIONS.md` §6c). Its
@@ -209,7 +231,7 @@ E-step: `calibration_walk.py` now says the prior does the unstranded rows and th
 capture-ON ones. Belongs with `ISSUES: gdna-landscape-trains-on-false-positives`.
 
 ### prior-fidelity-vs-deliverable
-`priority: next · kind: question · 2026-08`
+`priority: the pre-EM thread, and `ISSUES: end-to-end-error-unattributed` may answer it outright · kind: question · 2026-08`
 Why is prior fidelity anti-correlated with deliverable quality? Leading answer: at the worst slots the
 self-solve with the fitted prior is nearly right and the messages destroy it (measured at a retired rung;
 confirm on a second stratum). The ruler is out of the way (`ISSUES: g00-shrinkage-upstream-repair`,

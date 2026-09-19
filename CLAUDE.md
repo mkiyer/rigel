@@ -37,9 +37,13 @@ nascent share is a stress reading, never a design driver.
 
 ## The 0.8.0 scope
 
-The focus is CALIBRATION, and the metric is the calibration result scored against oracle calibration
-(`calibration_vs_oracle.py`, `solvability_audit.py`, `prior_vs_oracle.py`), never the end-to-end
-transcript number, which stays a thermometer (`docs/SUCCESS.md`). Three strata are in scope — unstranded ×
+0.8.0 is A RELEASE OF THE TOOL (owner, 2026-09-19; `docs/DESIGN.md` §0b's amendment). TWO numbers are primary
+and they answer different questions: the transcript table against per-transcript truth is what the release
+ships on (`quant_accuracy.py`, read per stratum and only above `--arm base_reseed`, its noise floor), and the
+calibration result against an oracle calibration is what ranks a CALIBRATION mechanism
+(`calibration_vs_oracle.py`, `solvability_audit.py`, `prior_vs_oracle.py`). Neither stands in for the other,
+and ranking a calibration mechanism on the transcript number stays refused: the table is downstream of both
+calibration and the EM, so one figure cannot say which moved. Three strata are in scope — unstranded ×
 capture-OFF, stranded × capture-OFF, stranded × capture-ON — and **unstranded × capture-ON is DEFERRED**:
 still reported on every benchmark, never a development target until the other three are optimised. It is
 also where most of the error is (the gDNA fraction cancels from the strand mean, so an unstranded AMBIG
