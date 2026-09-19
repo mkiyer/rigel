@@ -1390,9 +1390,10 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Calibration working set: the chain is solved one locus block at a time, the pieces between "
-        "intergenic regions merged up to this many slots per block (default 5000; 'none' is not accepted here — the whole chain is a config choice). "
-        "Performance only — the answer is the same for every value; smaller blocks use less memory per "
-        "sweep, larger ones amortise the per-block overhead. Advanced calibration knob.",
+        "intergenic regions merged up to this many slots per block (default 1000; 'none' is not accepted here — the whole chain is a config choice). "
+        "Performance only — the answer is the same for every value; it sizes the solver's per-thread "
+        "arena, so smaller blocks use less memory per sweep at no measured cost in time. Advanced "
+        "calibration knob.",
     )
     adv.add_argument(
         "--gdna-em-llr-bias",

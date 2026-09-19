@@ -313,12 +313,19 @@ class CalibrationConfig:
     #: The sweep's WORKING SET: the chain is solved one LOCUS BLOCK at a time — the chain cut at every
     #: intergenic region (where message passing ends) and the pieces merged up to this many slots per
     #: block (`calibration.region_chain.locus_blocks`). A PERFORMANCE tunable and nothing else: the
-    #: answer is the same for every value (ψ's read-out is chunk-exact, gated), so it trades the
-    #: per-sweep memory — a block's ``(slots, K)`` arrays instead of the whole chain's — against the
-    #: per-block overhead. ``None`` solves the whole chain as one block. The default sits on the flat part
-    #: of the sweep's peak-allocation and wall-time curves, measured over block sizes on the human chain
-    #: (2.09M slots, about 420 blocks at 5,000); every size is bit-identical.
-    sweep_block_slots: int | None = 5000
+    #: answer is the same for every value (ψ's read-out is chunk-exact, gated). ``None`` solves the whole
+    #: chain as one block.
+    #:
+    #: It SIZES THE KERNEL'S ARENA, which is what makes it a memory knob rather than a batching one: each
+    #: thread holds sixteen ``(slots, grid)`` float64 tables for the block it is solving, so the arena is
+    #: ``16 · slots · K · 8 B · threads`` — 1.19 GB at 5,000 slots, the refits' grid of 233 and eight
+    #: threads. Measured on the deep library at eight threads, two interleaved rounds, the sweep's seconds
+    #: and calibrate's peak by block size: 5,000 — 23.65 / 23.79 s, 8,431 / 8,271 MB; 2,000 — 23.63 /
+    #: 23.31 s, 7,687 / 7,558 MB; 1,000 — 23.22 / 23.26 s, 7,703 / 7,368 MB; 500 — 23.54 / 23.21 s,
+    #: 7,414 / 7,645 MB. The wall is FLAT and the memory is not, so the per-block overhead this used to
+    #: amortise is not measurable beside the arena it pays for; the default is the smallest size whose
+    #: memory gain is still larger than the run-to-run noise.
+    sweep_block_slots: int | None = 1000
 
     #: Which (counts, exposure) pair the pooled gDNA background estimators take.
     #: ``"contained"`` (the default) pools the CONTAINED count over the gDNA contained effective
