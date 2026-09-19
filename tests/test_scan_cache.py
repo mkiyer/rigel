@@ -231,8 +231,8 @@ class TestTheKeyRefusesAMovedIndex:
     def test_a_cache_from_a_DIFFERENT_ACCUMULATOR_SCHEMA_is_refused(self, scanned, tmp_path):
         """The gap none of the other three keys covers: the ACCUMULATOR's own field list.
 
-        `graph_hash` describes the index, `reach_digest` the reaches, `scan_config_digest` the scan
-        settings — none of them moves when the accumulator gains or loses a bank. Without this key such
+        `graph_hash` describes the index, `reach_digest` the reaches, the recorded `scan_config` the
+        scan settings — none of them moves when the accumulator gains or loses a bank. Without this key such
         a cache is accepted and then dies deep in `_payload_from_parts` with a bare `KeyError`, which
         reads as a bug rather than as a stale cache.
         """
@@ -430,13 +430,41 @@ class TestTheKeyRefusesAMovedIndex:
                 nested.__dataclass_fields__ = original
         assert payload_schema_digest() == before
 
-    def test_a_changed_scan_config_is_refused(self, scanned, tmp_path):
+    def test_a_changed_TALLY_setting_is_refused(self, scanned, tmp_path):
+        """Two scans of one BAM under different tally settings are different tallies: the key refuses one
+        read against the other's settings."""
+        index, _bam, scan, *_ = scanned
+        cache_dir, _cache = round_trip(scanned, tmp_path)
+        other = dataclasses.replace(scan, include_multimap=not scan.include_multimap)
+        with pytest.raises(ScanCacheKeyError, match="scan"):
+            read_scan_cache(cache_dir, index, other)
+
+    def test_a_THREAD_COUNT_is_not_part_of_the_key(self, scanned, tmp_path):
+        """A thread count divides the work and not the tally (`test_scan_order_independence.py` holds the
+        tally identical from one worker to eight), so a cache scanned under one budget reads under any
+        other. A key that hashed it refused every cache on disk the day a default moved."""
+        index, _bam, scan, *_ = scanned
+        cache_dir, _cache = round_trip(scanned, tmp_path)
+        other = dataclasses.replace(scan, total_threads=7, bgzf_threads=3)
+        read_scan_cache(cache_dir, index, other)
+
+    def test_the_key_is_DERIVED_from_the_recorded_settings_and_no_stored_string_decides(
+        self, scanned, tmp_path
+    ):
+        """The manifest records the settings the scan ran under, and the key is computed from them at
+        read time. So a stored digest string decides nothing — a manifest still carrying one written
+        under an older key definition reads clean — while an edit to a recorded TALLY setting is refused
+        against the settings the reader holds."""
+        index, _bam, scan, *_ = scanned
         cache_dir, _cache = round_trip(scanned, tmp_path)
         manifest = json.loads((cache_dir / "manifest.json").read_text())
         manifest["scan_config_digest"] = "0" * 16
         (cache_dir / "manifest.json").write_text(json.dumps(manifest))
+        read_scan_cache(cache_dir, index, scan)
+        manifest["scan_config"]["max_frag_length"] = scan.max_frag_length + 1
+        (cache_dir / "manifest.json").write_text(json.dumps(manifest))
         with pytest.raises(ScanCacheKeyError, match="scan"):
-            read_scan_cache(cache_dir, scanned[0])
+            read_scan_cache(cache_dir, index, scan)
 
     @pytest.mark.parametrize("column", REACH_COLUMNS)
     def test_the_reach_digest_depends_on_EVERY_reach_column(self, scanned, column):

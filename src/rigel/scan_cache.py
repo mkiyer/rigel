@@ -174,7 +174,7 @@ def payload_schema_digest() -> str:
     the fields of every bank nested inside it.
 
     No other key covers this. ``graph_hash`` describes the index, ``reach_digest`` the reaches,
-    ``scan_config_digest`` the scan settings — none of them changes when the ACCUMULATOR changes. Adding
+    the recorded ``scan_config`` the scan settings — none of them changes when the ACCUMULATOR changes. Adding
     a field to a population without this key means a cache written beforehand is accepted and then fails
     deep inside ``_payload_from_parts`` with a bare ``KeyError``, which reads as a bug in the cache
     rather than as a stale cache.
@@ -284,13 +284,22 @@ def _schema_shapes() -> list[str]:
     ]
 
 
+#: Settings that divide the scan's WORK and not its tally. ``test_scan_order_independence.py`` holds the tally
+#: identical from one worker to eight, a range that crosses both decompression splits the budget derives, so a
+#: cache scanned under one budget is the tally under any other. Hashing them refused every cache on disk the
+#: day a default moved (``bgzf_threads`` 4 → derived from the budget).
+_WORK_ONLY_FIELDS = ("total_threads", "bgzf_threads")
+
+
 def _scan_config_digest(scan_config) -> str:
+    """The scan settings' part of the key: every field that can change a tally, and none that cannot."""
     fields = (
         dataclasses.asdict(scan_config)
         if dataclasses.is_dataclass(scan_config)
         else dict(scan_config)
     )
-    return _digest(json.dumps(fields, sort_keys=True, default=str).encode())
+    tally = {k: v for k, v in fields.items() if k not in _WORK_ONLY_FIELDS}
+    return _digest(json.dumps(tally, sort_keys=True, default=str).encode())
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -400,12 +409,14 @@ def write_scan_cache(
         "graph_hash": payload.graph_hash,
         "reach_digest": reach_digest(index),
         "payload_schema_digest": payload_schema_digest(),
-        "scan_config_digest": _scan_config_digest(scan_config),
-        # ── provenance: what this cache is OF ────────────────────────────────────────────────────
-        "bam": str(Path(bam).resolve()),
+        # The settings the scan ran under. Their part of the key is DERIVED from this record when the
+        # cache is read (`check_scan_config`), never stored beside it: a stored digest is a second home
+        # that goes stale the day the key's definition changes.
         "scan_config": dataclasses.asdict(scan_config)
         if dataclasses.is_dataclass(scan_config)
         else dict(scan_config),
+        # ── provenance: what this cache is OF ────────────────────────────────────────────────────
+        "bam": str(Path(bam).resolve()),
         "payload_scalars": scalars,
     }
     (cache_dir / MANIFEST_JSON).write_text(
@@ -443,13 +454,6 @@ def read_scan_cache(cache_dir: str | Path, index: "TranscriptIndex", scan_config
             f"{expected_schema!r}. The ACCUMULATOR's schema moved, so these arrays are not the fields "
             f"this build reads — a missing one would otherwise surface as a bare KeyError far from here. "
             f"Re-scan; nothing derivable from the index needs rebuilding."
-        )
-
-    recorded_scan_digest = _scan_config_digest(manifest["scan_config"])
-    if manifest["scan_config_digest"] != recorded_scan_digest:
-        raise ScanCacheKeyError(
-            f"cache scan_config_digest {manifest['scan_config_digest']} does not match the scan "
-            f"config it records ({recorded_scan_digest}). The manifest is inconsistent with itself."
         )
 
     payload_scalars = manifest["payload_scalars"]
@@ -517,13 +521,16 @@ def check_scan_config(cache: ScanCache, scan_config) -> None:
     """Refuse a cache produced under a different scan configuration.
 
     Called by :func:`read_scan_cache` when it is given a ``scan_config``. Two scans of one BAM under
-    different settings are different tallies, and nothing else notices.
+    different tally settings are different tallies, and nothing else notices. Both sides of the comparison
+    are computed here, from the settings the manifest records and the ones the caller holds, so a thread
+    count on either side decides nothing (``_WORK_ONLY_FIELDS``).
     """
+    recorded = _scan_config_digest(cache.provenance["scan_config"])
     expected = _scan_config_digest(scan_config)
-    if cache.provenance["scan_config_digest"] != expected:
+    if recorded != expected:
         raise ScanCacheKeyError(
-            f"cache scan_config_digest {cache.provenance['scan_config_digest']} != {expected}. Two "
-            f"scans of one BAM under different settings are different tallies."
+            f"cache scan settings digest {recorded} != {expected}. Two scans of one BAM under different "
+            f"tally settings are different tallies."
         )
 
 
