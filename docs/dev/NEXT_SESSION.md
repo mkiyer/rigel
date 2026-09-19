@@ -1,4 +1,4 @@
-# NEXT SESSION — start here (2026-09-18 night: the block in one native call is LANDED AND PUSHED (`7dad00d7`); the owner's four decisions are executed as snapshots 21–23 awaiting the go; §G — the stages outside calibration — is next)
+# NEXT SESSION — start here (2026-09-18 night: everything below is LANDED AND PUSHED through `e921869c` — the block in one native call, the message cache deleted, the prototype harness retired, the strand reference converged; §G — the stages outside calibration — is next)
 
 This file is only how to begin. The port's plan is `docs/dev/CALIBRATION_PERFORMANCE_PLAN.md` §F and §G; the LIVE
 status with numbers is `ISSUES: performance-memory-bounded-solve`; the day's record is the closing paragraphs of
@@ -28,8 +28,7 @@ threads design it grew from is `docs/dev/THREADS_PLAN.md`).
      (`solve_kernel.cpp` + `transfer_kernel.h` + `psi_kernel.h` + `transfer_rows.h` + `thread_pool.h`). BIT-IDENTICAL
      on the four VCaP sweeps at 8 threads and at 1, at another block size, on the served-cache path, on the three
      references; the suite 3,430 passed / 5 xfail / 3,435 collected; VCaP at 8 threads 198 → 144 s and 194 → 138 s (0.73 / 0.71), calibrate 85.6 → 33.7 s, the four sweeps 68.8 → 16.8 s and 66.3 → 15.9 s (0.24).
-6. ~~The owner's four decisions (2026-09-18 night)~~ — EXECUTED as THREE SNAPSHOTS awaiting the go (`commits/21_cache_deleted/`,
-   `22_prototype_retired/`, `23_strand_reference/`; `commit_series.sh` replays them onto `7dad00d7`):
+6. ~~The owner's four decisions (2026-09-18 night)~~ — LANDED AND PUSHED as `25511abe`, `4d1a444d`, `e921869c`:
    * 21 — THE MESSAGE CACHE DELETED: every sweep runs the whole layer in the kernel; `message_cache.py`, the digests, the
      kernel's `served`/`deliveries` and `ServedBlock`, six gates gone; the replay capture rewritten without the pickled
      cache (9.0 → 2.7 GB). BIT-IDENTICAL on the four sweeps (the refits replay 7.4 → 7.0 s); suite 3,421 / 5 / 3,426.
@@ -39,8 +38,8 @@ threads design it grew from is `docs/dev/THREADS_PLAN.md`).
    * 22 — `policy_prototype.py` RETIRED; the working rule in CLAUDE.md says how a mechanism is prototyped now (C++ in a
      worktree, both trees scored with `policy_benchmark.py --by-class`); suite 3,417 / 5 / 3,422.
    * 23 — `strand_likelihood.py` CONVERGED: `strand_loglik` lives in `tests/calibration/_psi_reference.py` beside the other
-     oracles; layer 4 is production only; suite 3,414 / 5 / 3,419. The three identity references on the final tree:
-     BIT-IDENTICAL on all three (capture off, capture on, the LBX0190 library); preflight `--full` green.
+     oracles; layer 4 is production only; suite 3,414 / 5 / 3,419 (the standing baseline). The three identity references on
+     the landed tree: BIT-IDENTICAL on all three (capture off, capture on, the LBX0190 library); preflight `--full` green.
 7. §G: the stages outside calibration — on VCaP the scan, the second pass, the two fragment-length fits, quant (the locus
    EM, the capture effective lengths), the index load; they scale with depth and are now the larger half of a run.
    Where the time is now (VCaP at 8 threads, commit 20's post runs, `perf/block_native_2026-09-18/`): the whole run 144 / 138 s. Calibrate 33.7 / 31.9 s: the four sweeps 16.8 / 15.9 (the kernel 15.7 / 14.9 — the first sweep ≈ 2.8 s, the refit that misses the cache ≈ 7.4 s, the two served refits ≈ 3 s each), the landscape fits 4.5, ψ before the sweep 0.65, and about 11 s of calibrate's OWN Python outside every probe (the chain, the statics, the beliefs' init and reset, the deconv) — the next thing to dissect inside calibration. Outside calibration 104 s: the scan 36 / 32, the second pass 22 (the fl models 8.4, scoring 12), the second fl fit 8.4, quant 36 (the locus EM 14.5, the capture effective lengths 5.7–8.2, scoring 6–7), the index load 6.6.
@@ -110,16 +109,15 @@ in, arrays out, integer counts (under a capture: the cube rows and the received 
 
 ## Storage (2026-09-18 evening; 90 GB free)
 
-`perf/sweeps_VCaP_step19` (2.7 GB) is THIS tree's capture (step16 deleted). The worktree `/tmp/rigel_pre` stands at
-`7dad00d7` with `_solve_impl` built from its own source (the timing baseline for commit 21): `git worktree remove
---force /tmp/rigel_pre` when it is next moved. Still large and regenerable:
+`perf/sweeps_VCaP_step19` (2.7 GB) is THIS tree's capture (step16 deleted) and replays bit-identical on `e921869c`. No
+timing worktree stands: `/tmp/rigel_pre` was removed after commit 21's pairs, and `s18/pre_worktree.sh` rebuilds one for
+any commit (it copies the installed `.so` files in and builds from the worktree's own source what the step changed). Still large and regenerable:
 `prototypes/2026-09-16_ruler_repair/s5/scratch_test_reference*` (22 GB) — the owner's.
 
 ## Where everything is
 
-* The synced scratchpad: `~/Downloads/rigel_runs/prototypes/2026-09-17_port_ii/` — `commits/committed/` (7–20, landed),
-  `commits/21_cache_deleted/`, `22_prototype_retired/`, `23_strand_reference/` (awaiting the go, in order;
-  `commit_series.sh` replays them onto `7dad00d7`), `s16/` (18 and 19), `s17/` (20: the header and kernel drafts,
+* The synced scratchpad: `~/Downloads/rigel_runs/prototypes/2026-09-17_port_ii/` — `commits/committed/` (7–23, landed;
+  all of 21–23 landed too; nothing awaits the go), `s16/` (18 and 19), `s17/` (20: the header and kernel drafts,
   `perturb*.sh`, `identity_checks.sh`, `pre_worktree.sh`, `time_pairs.sh`, `finish_docs_20.py`), `s18/` (21–23:
   `strip_cache.py`, `commit22.py`, `commit23.py`, `snapshot_n.sh`, `pre_worktree.sh`, `time_pairs.sh`, the logs),
   `pre_site/`.
