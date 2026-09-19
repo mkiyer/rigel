@@ -55,10 +55,13 @@ pre-pass per reference, `_sj_id` and `_exact_region_bound` deleted — scoring t
 and 11.82 → 8.64 s on two interleaved pairs (`perf/phase3_2026-09-19/`), against an estimate of 7 s: ⛔ THE
 cProfile SHARE OVERSTATED IT, because that instrument's per-call overhead inflates exactly the functions with
 millions of tiny calls, which is the shape every candidate in this entry has. Read an attribution as a
-RANKING and never as a saving; ④ the two fragment-length fits — the adjacent-pair loop and the per-exon filter vectorise BIT-EXACTLY
-(`np.bincount` accumulates in input order, and an exon has at most two flanking boundaries, so a grouped mean
-equals `np.mean` on the list), while the surviving accumulation is the one item that may move a number and is
-isolated and priced for that reason (≈ 11 s of 16.3); ⑤ memory — the sweep's arena is 1.19 GB at eight threads
+RANKING and never as a saving; ④ ~~the two fragment-length fits~~ LANDED
+2026-09-19, bit-identical: the adjacent-pair table is built once from the reference offsets and the per-exon
+average is a grouped sum, both exact by construction (`np.bincount` accumulates in input order, and an exon has
+at most two flanking boundaries), and the mean of 1.4 M ratios that fed exons whose weight is identically zero
+is gone — each fit 6.5 → 2.8 s on two interleaved pairs (`perf/phase4_2026-09-19/`), two fits a run, and
+16.3 → 5.6 s counting phase ①'s share of the same stage. The third item, the surviving accumulation, was NOT
+needed: the filter left the loop cold; ⑤ memory — the sweep's arena is 1.19 GB at eight threads
 and `CalibrationConfig.sweep_block_slots` scales it linearly while moving no number (`block_slots = 1000`
 replays the first sweep at 3.01 s against 2.82 s), while the run's own peak sits in quant, whose 2.2 GB of
 scored candidates is measured before anything is proposed; ⑥ what is left after that — `_cum_short`'s 1,982
