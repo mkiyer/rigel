@@ -133,6 +133,8 @@ def _boundary_locus_shares(
     region_arrays: "RegionArrays",
     multi_loci: "list[MultiLocus]",
     n_loci: int,
+    *,
+    region_shares: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """``(edge_idx, locus_idx, share)`` — a locus's boundaries are the boundaries that touch its regions.
 
@@ -158,8 +160,16 @@ def _boundary_locus_shares(
     a candidate in both and the union-find has already merged them into one multi-locus. The
     configuration is therefore unreachable for a boundary with mass, and it is *reported* by
     :func:`contended_boundaries` rather than silently renormalised.
+
+    ``region_shares`` is :func:`_region_locus_shares`'s triples when the caller already holds them, which is
+    what makes that function's "computed exactly once" true on the pipeline's path: `assemble_priors` needs
+    the region projection itself and hands the same triples down instead of paying for a second traversal.
     """
-    r_idx, l_idx, w = _region_locus_shares(region_arrays, multi_loci, n_loci)
+    r_idx, l_idx, w = (
+        _region_locus_shares(region_arrays, multi_loci, n_loci)
+        if region_shares is None
+        else region_shares
+    )
     lo, hi = boundary_region_indices(np.asarray(region_arrays.ref_id))
     if r_idx.size == 0 or lo.size == 0:
         return (np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0, np.float64))
@@ -320,7 +330,9 @@ def assemble_priors(
         )
     n_loci = len(multi_loci)
     r_idx, r_lid, r_w = _region_locus_shares(region_arrays, multi_loci, n_loci)
-    e_idx, e_lid, e_w = _boundary_locus_shares(region_arrays, multi_loci, n_loci)
+    e_idx, e_lid, e_w = _boundary_locus_shares(
+        region_arrays, multi_loci, n_loci, region_shares=(r_idx, r_lid, r_w)
+    )
 
     def by_region(values):
         return _sum_by_locus(r_idx, r_lid, r_w, values, n_loci)

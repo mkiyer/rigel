@@ -695,6 +695,48 @@ def test_an_boundary_takes_the_MAX_share_of_its_two_flanks():
     assert dict(zip(lid.tolist(), w.tolist())) == {0: pytest.approx(1.0), 1: pytest.approx(0.5)}
 
 
+def test_the_region_locus_overlap_is_traversed_ONCE_per_assembly(monkeypatch):
+    """`_region_locus_shares` says "computed exactly once" and on the pipeline's path it now is: the
+    assembler needs the region projection itself, so it hands the SAME triples to the boundary
+    projection, which used to traverse for them again. On the deep library that second traversal is
+    1.7 s of every run.
+
+    Counted through a spy rather than asserted about the output, because the output was never wrong —
+    what was wrong was paying for it twice. PERTURBATION: dropping ``region_shares`` at the call site
+    makes this two.
+    """
+    import rigel.calibration.priors as P
+
+    calls = {"n": 0}
+    real = P._region_locus_shares
+
+    def counting(*a, **k):
+        calls["n"] += 1
+        return real(*a, **k)
+
+    monkeypatch.setattr(P, "_region_locus_shares", counting)
+    cal = _result(
+        region_g=[1.0, 2.0, 1.5],
+        region_r=[3.0, 4.0, 5.0],
+        region_eff=[100.0, 200.0, 150.0],
+        boundary_eff=[150.0, 150.0],
+    )
+    ra = _regions([0, 100, 300], [100, 300, 450])
+    P.assemble_priors(cal, ra, [_ml(0, [(0, 0, 450)])])
+    assert calls["n"] == 1, f"the region-to-locus overlap was traversed {calls['n']} times"
+
+
+def test_the_boundary_shares_are_the_same_whether_the_triples_are_handed_in_or_not():
+    """The new argument is a hand-down, not a second rule: the same triples in gives the same projection
+    out, to the bit, as computing them inside."""
+    ra = _regions_from_bounds([0, 100, 200])
+    ml = [_ml(0, [(0, 0, 150)]), _ml(1, [(0, 150, 200)])]
+    inside = _boundary_locus_shares(ra, ml, 2)
+    handed = _boundary_locus_shares(ra, ml, 2, region_shares=_region_locus_shares(ra, ml, 2))
+    for a, b in zip(inside, handed):
+        assert np.array_equal(a, b)
+
+
 def test_a_contended_boundary_carries_no_mass():
     """The claim the rule rests on, as a measurement rather than an assumption.
 
