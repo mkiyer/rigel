@@ -103,8 +103,26 @@ def poisson_lower_mean(lam: np.ndarray) -> np.ndarray:
     lp = lam[pos]
     k = np.floor(lp)
     # in log space: a large `lam` overflows `lam**(k+1)` and `k!` separately while their ratio is O(sqrt(lam))
-    out[pos] = np.exp((k + 1.0) * np.log(lp) - lp - gammaln(k + 1.0))
+    out[pos] = np.exp((k + 1.0) * np.log(lp) - lp - _log_factorial(k))
     return out
+
+
+def _log_factorial(k: np.ndarray) -> np.ndarray:
+    """``gammaln(k + 1)`` for integer-valued ``k``, by table whenever the table is smaller than the data.
+
+    The log-gamma above is evaluated at ``floor(lam) + 1``, which is an INTEGER, and `one_sided_rate`
+    evaluates it over every object at every step of its bisection. The distinct arguments are therefore the
+    integers up to the largest, which on a real library is orders of magnitude fewer than the objects. The
+    table holds that same function at those same points, so its values are IDENTICAL rather than
+    approximated, and the direct form stays for the case where the table would be the larger of the two.
+    """
+    if k.size == 0:
+        return gammaln(k + 1.0)
+    kmax = float(k.max())
+    if not np.isfinite(kmax) or kmax + 2.0 > k.size:
+        return gammaln(k + 1.0)
+    table = gammaln(np.arange(int(kmax) + 2, dtype=np.float64))
+    return table[k.astype(np.int64) + 1]
 
 
 def pooled_log_rate(counts, exposure, *, shape: float = 0.0) -> float:

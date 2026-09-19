@@ -88,6 +88,31 @@ def test_pooled_log_rate_reports_no_support_rather_than_raising():
     assert pooled_log_rate(np.array([1.0]), np.array([0.0])) == -np.inf
 
 
+def test_the_log_gamma_table_is_the_direct_form_TO_THE_BIT():
+    """The log-gamma inside the Poisson identity is evaluated at integers, so it is tabulated. A table of
+    the same function at the same points is exact, and this asserts that rather than trusting it: over a
+    dense grid, the two forms must be EQUAL, not close.
+
+    Both branches are covered on purpose — the table is used only when it is smaller than the data, so the
+    short arrays here fall back to the direct call and the long ones take the table. PERTURBATION: a table
+    built at ``k`` instead of ``k + 1`` fires this gate on every row.
+    """
+    from scipy.special import gammaln
+
+    from rigel.calibration.gdna_density import _log_factorial
+
+    for size in (1, 5, 1000, 200000):
+        rng = np.random.default_rng(size)
+        for hi in (0.5, 3.0, 40.0, 5000.0):
+            k = np.floor(rng.uniform(0.0, hi, size=size))
+            assert np.array_equal(_log_factorial(k), gammaln(k + 1.0)), f"size={size} hi={hi}"
+    # the degenerate ends: an empty array, every k zero, and one huge k that must take the fallback
+    assert np.array_equal(_log_factorial(np.zeros(0)), gammaln(np.zeros(0) + 1.0))
+    assert np.array_equal(_log_factorial(np.zeros(7)), gammaln(np.zeros(7) + 1.0))
+    big = np.array([1e9, 2.0, 3.0])
+    assert np.array_equal(_log_factorial(big), gammaln(big + 1.0))
+
+
 # ── the one-sided rate ───────────────────────────────────────────────────────────────────────────
 
 
