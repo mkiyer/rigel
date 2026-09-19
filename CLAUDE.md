@@ -169,8 +169,9 @@ both a process rule and a structurally pure-gDNA object).
 - **A ceiling is sometimes the right instrument** (`quant_accuracy.py`'s injection arms)
   but prices something that may be unreachable, so it is not the default. Every prior-injection arm patches
   `assemble_priors`, while `pipeline.py` builds `effective_lengths_em` before calling it, so the
-  effective-length shrinkage is inside no prior-injection ceiling; only `oracle_ruler`, which substitutes at
-  `calibrate`, reaches it.
+  effective-length shrinkage is inside no prior-injection ceiling. `oracle_ruler` was built to reach it and
+  cannot on this tree: it swaps the count arrays and the ruler reads the published efficiencies
+  (`ISSUES: oracle-ruler-arm-cannot-reach-the-ruler`), so no end-to-end ceiling reaches the shrinkage today.
 - **One thing varied per experiment**, a baseline re-recorded from the current tree in the same session,
   and **score against truth** (the oracle BAM's read names), never against the previous run.
 - **No legacy, no backwards compatibility, no speculative code.** Converge and delete. No version

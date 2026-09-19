@@ -22,14 +22,26 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
 
 ## Where the tool is — one line per claim; run the named instrument for a current number
 
-- **Library gDNA fraction**: accurate on the three in-scope strata, structurally blind on the deferred
-  one (at κ = ½ no channel reaches an AMBIG slot; the θ-independent-channel search is closed) —
-  `solvability_audit.py`, `policy_benchmark.py --by-class`.
-- **The deliverable, end to end**: UNMEASURED on the current tree. The last reading predates the ruler's
-  repair and both machine campaigns, and it said a large share of RNA fragments is misassigned even under a
-  perfect prior — calibration and assignment being two problems in two files. Re-derive it before ranking
-  anything downstream of calibration: `quant_accuracy.py`, `--arm base` with `--arm base_reseed` beside it
-  and the oracle arms for the decomposition (`ISSUES: end-to-end-error-unattributed`).
+- **Library gDNA fraction**: calibration's is accurate on the three in-scope strata and structurally blind on the
+  deferred one (at κ = ½ no channel reaches an AMBIG slot; the θ-independent-channel search is closed) —
+  `solvability_audit.py`, `policy_benchmark.py --by-class`. The transcript table the user reads does not keep it
+  at capture-OFF: the EM assigns to gDNA unspliced RNA the simulator drew as nascent, against a calibrated prior
+  that had the split right, measured only at the panel's nascent stress share
+  (`ISSUES: em-overturns-the-calibrated-gdna-split`).
+
+- **The deliverable, end to end** (2026-09-19, `cffca248`; the ladder's `g05`–`g98` rows summed per stratum,
+  unstranded OFF / stranded OFF / stranded ON, deferred last): transcript-level Σ|Δ| 520,117 / 453,135 /
+  1,833,492 / 4,487,120 fragments — 4.4 / 3.9 / 12.8 / 31.3 % of the true annotated RNA — above reseed floors of
+  3,478 / 5,802 / 3,532 / 5,079; gene level 2.1 / 1.8 / 4.2 / 18.4 %. A perfect prior recovers 5.1 / 2.8 / 4.1 %
+  of the transcript error (gene 10.1 / 5.5 / 12.4 %), almost all through `rna_prior_count` and almost all at
+  `g98`; at `g05` it is below the floor. So 95–97 % of the in-scope transcript error is the EM's and the
+  assignment's: the per-transcript allocation (truth as the weights removes 49 / 46 / 61 %,
+  `ISSUES: per-transcript-prior-lane`) and the capture-OFF gDNA over-call
+  (`ISSUES: em-overturns-the-calibrated-gdna-split`). `quant_accuracy.py`, `--arm base` above
+  `--arm base_reseed`, the oracle arms for the decomposition; the record is
+  `ISSUES: end-to-end-error-unattributed` (CLOSED). `oracle_ruler` cannot fire on this tree
+  (`ISSUES: oracle-ruler-arm-cannot-reach-the-ruler`) and every oracle arm is refused its cache until
+  `ISSUES: oracle-cache-key-hashes-a-thread-count` is repaired.
 - **Stage A (the accumulator)**: done; the fragment ledger closes exactly — `calibration_oracle.py`.
 - **Fragment lengths**: closed, both halves — gDNA by the two-pool contrast (`calibration/fl.py`,
   `gdna_density.py`; gates `test_fl.py`, `test_gdna_density.py`), RNA sound as shipped
@@ -50,10 +62,10 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   slot's strand term, a derived count and no lattice (`DESIGN.md` §6b.15.11, `EQUATIONS.md` §9e), exact at any
   depth, with the tilt's hypothesis space {pure +, pure −, mixed} (`EQUATIONS.md` §9f); the λ bracket follows
   the landscape prior's derived demand (`landscape.required_logodds_window`).
-- **The prior assembler**: with perfect masses its own error is negligible — `prior_vs_oracle.py`. What is
-  NOT measured is the lane the EM never receives: `rna_prior_weight` is built end to end and `pipeline.py`
-  omits it, so the shipped EM carries no per-transcript information at all
-  (`ISSUES: per-transcript-prior-lane`).
+- **The prior assembler**: with perfect masses its own error is negligible — `prior_vs_oracle.py` — and a
+  perfect `LocusPriors` is worth 3–5 % of the in-scope transcript error — `quant_accuracy.py --arm oracle`. The
+  lane the EM never receives is worth far more: `rna_prior_weight` is built end to end and `pipeline.py` omits
+  it, so the shipped EM carries no per-transcript information at all (`ISSUES: per-transcript-prior-lane`).
 - **The ruler is the transcript's bases at their pieces' capture efficiencies, against the landscape's
   located enriched mode** (`DESIGN.md` §7.2, `EQUATIONS.md` §11): each efficiency a posterior mean from the
   piece's own count and its edge crossings, no floor and no junction object, so the unprobed class reads
@@ -76,8 +88,9 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   (`DESIGN.md` §0b).
 - **Oracle FIELD certification**: every ladder row is stamped, but the uniformity gate is vacuous on
   capture-ON and zero-gDNA rows — read the stamp with its vacuity flag — `calibration_oracle.py`.
-- **Attribution floor**: the deliverable is not reproducible by default; no `quant_accuracy` delta
-  below the reseed floor is attributable — re-derive `--arm base_reseed` in the same session.
+- **Attribution floor**: the deliverable is not reproducible by default, and not bit-reproducible at a pinned
+  seed either (`TRAPS: the-deliverable-is-not-reproducible-by-default`); no `quant_accuracy` delta below the
+  reseed floor is attributable — re-derive `--arm base_reseed` in the same session.
 - **Reading rules**: rank per stratum; quote `mwae_all` / Σ|err| and the shipped column, never `solv%`
   or pass-0 (`TRAPS: the-intermediate-is-not-the-deliverable`).
 
@@ -96,29 +109,34 @@ The method is the dissection loop: run the panel → worst in-scope scenario →
 mass (`worst_objects.py`, `calibration_walk.py`) → find the mechanism → gated fix → add the offending
 transcripts to the test chromosome → re-run → repeat. The facts this ranking leans on, each named with
 its instrument: the ruler reads 1.000 at `g00` and off capture, so the metric page is the composition's
-(`calibration_vs_oracle.py`); a perfect prior is worth nothing in scope end to end
-(`quant_accuracy.py`); by class the in-scope residual sits on the
+(`calibration_vs_oracle.py`); a perfect prior is worth 3–5 % of the in-scope transcript error end to end and
+nothing measurable at `g05` (`quant_accuracy.py`); by class the in-scope residual sits on the
 intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons (stranded ON)
 (`policy_benchmark.py --by-class`).
 
-1. **THE END-TO-END BASELINE, and its decomposition** — `ISSUES: end-to-end-error-unattributed`. Nothing
-   below can be ranked until the deliverable is measured on this tree: `quant_accuracy.py --arm base` with
-   `--arm base_reseed` in the same session for the floor, and `oracle` / `oracle_gdna` / `oracle_rna` /
-   `oracle_efflen` / `oracle_ruler` to split the error into what a perfect prior is worth and what the EM
-   and the assignment own. Per stratum, never pooled. It is a MEASUREMENT session: no `src/` change.
+1. **The EM's residual: the per-transcript allocation** (owner, 2026-09-19: the next build) —
+   `ISSUES: per-transcript-prior-lane`. The baseline puts 95–97 % of the in-scope transcript error under a
+   perfect prior, so it is the EM's and the assignment's, and the largest lever measured on it is the lane the
+   pipeline omits: `rna_prior_weight` is built end to end and never passed, and truth as the allocation
+   weights removes about half the transcript error in every stratum, the gDNA-free `g00` rows included. A
+   wiring gap plus a support decision: that arm hands over the true support, two weightings are refused with
+   their numbers, and the next candidate is a sparsity mechanism. `ISSUES: nested-antisense-leak-under-the-sane-ruler`
+   sits in it. Judged on the deliverable per stratum above the reseed floor, with both zero controls.
 
-2. **The pre-EM setup — where calibration's answer reaches the EM, or does not** (owner, 2026-09-19: the
-   next build). Ranked inside it by what is measured: the per-transcript prior lane the pipeline omits
-   (`ISSUES: per-transcript-prior-lane`, a wiring gap plus a support decision, and a perfect version of it
-   roughly halves in-scope gene-level error); the capture-blind gDNA divisor
-   (`ISSUES: capture-blind-gdna-divisor`, +6.0 % on all six capture-ON rows); the magic shrinkage ESS
-   (`ISSUES: eb-shrinkage-magic-ess`); the anti-correlation the baseline may explain outright
-   (`ISSUES: prior-fidelity-vs-deliverable`); and the assembler's alpha = 0 rule that owns an xfail
-   (`ISSUES: antisense-prior-assembly-casualty`). Each judged on the deliverable AND on
-   `prior_vs_oracle.py`, so a repair that moves the prior and not the user's number is visible as that.
+2. **The EM's gDNA over-call at capture-OFF** — `ISSUES: em-overturns-the-calibrated-gdna-split`.
+   Calibration's library split is right and the table the user reads is not (`g05 ss.50 OFF` 0.104 against
+   0.05), under a perfect prior and under true allocation weights alike. It is measured only at the panel's
+   nascent stress share, so it is SIZED first at the realistic share (`ISSUES: nascent-stress-sensitivity`)
+   and ranked on that size; nothing is built on the stress reading.
 
-3. **Whatever the baseline says owns the residual** — if it is the EM and the assignment rather than the
-   prior, that is the next thread and `ISSUES: nested-antisense-leak-under-the-sane-ruler` sits in it.
+3. **The pre-EM prior chain** — what the oracle arms price it at on the deliverable. `rna_prior_count` carries
+   almost all of a perfect prior's value, at `g98`; `gdna_eff_len` at truth moves nothing above the floor in
+   scope, so `ISSUES: capture-blind-gdna-divisor` and `ISSUES: eb-shrinkage-magic-ess` are near zero on the
+   ladder's table (the ESS still dominates the fl-gap arm); `ISSUES: antisense-prior-assembly-casualty` owns an
+   xfail. Each judged on the deliverable AND on `prior_vs_oracle.py`, so a repair that moves the prior and not
+   the user's number is visible as that. ⛔ Before any oracle arm or `prior_vs_oracle.py` runs:
+   `ISSUES: oracle-cache-key-hashes-a-thread-count` (a `src/` repair, the owner's call, a no-op on every
+   number) and `ISSUES: oracle-ruler-arm-cannot-reach-the-ruler` (repair or retire).
 
 4. **Calibration accuracy where the strand tilt matters** — the AMBIG slots with RNA on both strands
    (`DESIGN.md` §6b.15.12–§6b.15.13). The tilt atom and the strand channel's protocol decision landed 2026-09-14 (the

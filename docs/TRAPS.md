@@ -112,7 +112,11 @@ session; if HEAD-vs-baseline is not 100 %, the baseline is what is broken.
 assignment, so an end-to-end A/B on the default config measures its effect plus a sampling draw.** Two
 identical runs differed by up to 43 fragments on the gate toy. Pin the seed (or use fractional assignment)
 on every measurement arm and print a reseeded noise floor beside the effect; whether the default should
-change is an owner call.
+change is an owner call. A pinned seed is not enough on the panel at the default thread budget: two runs of
+one ladder condition at one seed differed by 67 fragments and `quant_accuracy.py`'s `noop` matched `base` to
+≤ 9, not to the byte (2026-09-19; the source is not located — `rename_identity.py` pins both thread counts to
+1 for exactly this reason). The byte-identity gate holds on its own toy fixture only; on the panel, read `noop`
+against the floor.
 
 **a-clip-hides-a-scale-error. A clip hides errors on both sides of it.** A `min()` clip hid an exact
 factor of 2 for months because the fixtures cancelled it, and a two-endpoint clip with reversed or equal

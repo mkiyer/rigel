@@ -16,27 +16,70 @@ the changelog is git.
 Ordered by priority. An entry says what is open and the number a ranking turns on; what was done is git,
 what was ruled is `DESIGN.md`.
 
-### end-to-end-error-unattributed
-`priority: now (the release's first measurement) · kind: question · 2026-09-19`
-The deliverable — the transcript table a user reads — is UNMEASURED on the current tree, and every ranking
-downstream of calibration depends on it. The last reading predates the ruler's repair of 2026-09-16 and both
-machine campaigns, and what it said was that a large share of RNA fragments is misassigned EVEN UNDER A
-PERFECT PRIOR: in scope, a perfect prior no longer improved the transcript number. If that still holds, the
-release's remaining error is the EM's and the assignment's and the pre-EM work is worth less than it looks;
-if it does not, the pre-EM chain is exactly where to spend. The measurement decides which, and no `src/`
-change belongs in the session that takes it.
+### per-transcript-prior-lane
+`priority: now — the next build (owner, 2026-09-19; the baseline of the same day puts it first) · kind: build · 2026-08-31`
+`rna_prior_weight` is built end to end but `pipeline.py` omits it, so the shipped EM carries no per-transcript
+information. It is the largest lever measured on the residual the EM owns — at least 95 % of the in-scope
+transcript error survives a perfect prior (`ISSUES: end-to-end-error-unattributed`, CLOSED). Truth as the
+allocation weights (`quant_accuracy.py --arm oracle_alloc_seed`, 2026-09-19, the ladder's `g05`–`g98` rows per
+stratum) removes 49 / 46 / 61 % of the transcript-level error on unstranded OFF / stranded OFF / stranded ON
+(−255,047 / −206,981 / −1,111,758 fragments against floors of 3,478 / 5,802 / 3,532) and 34 / 30 / 30 % at gene
+level, and 45–51 % at transcript level on the gDNA-free `g00` rows, where no prior has anything to correct. That
+arm is a capability proof and never headroom: it hands over the true support, and a zero weight is absorbing.
+Two weightings are refused (`ISSUES: refused-transcript-weights`, `ISSUES: refused-soft-min-path-weighting`): the
+support problem is the whole problem, so the next candidate is a sparsity mechanism, targeting expressed
+multi-exon transcripts with median exon ≤ 150 bp. It does not reach
+`ISSUES: em-overturns-the-calibrated-gdna-split`, which the same arm leaves exactly where it was.
+`quant_accuracy.py`, per stratum above `--arm base_reseed`.
 
-WHAT TO RUN, per stratum and never pooled: `quant_accuracy.py --arm base` for the number, `--arm base_reseed`
-IN THE SAME SESSION for the floor below which no delta is attributable (the deliverable is not reproducible
-by default), and the injection arms for the decomposition — `oracle` (all three prior fields at truth),
-`oracle_gdna` / `oracle_rna` / `oracle_efflen` (one field each), and `oracle_ruler`, which is the ONLY arm
-that reaches the effective-length shrinkage because it substitutes at the `calibrate` boundary while every
-other arm wraps `assemble_priors`. ⛔ Read the arms as a decomposition, not a ceiling ladder: what remains
-under `oracle` is the EM's and the assignment's by construction.
+### oracle-cache-key-hashes-a-thread-count
+`priority: now — before any oracle arm runs again · kind: defect (instrument) · 2026-09-19`
+`scan_cache._scan_config_digest` hashes the whole `BamScanConfig`, its two thread counts included, and `109d8aac`
+moved the `bgzf_threads` default from 4 to None; every oracle cache on the ladder was written at 4 (2026-08-22).
+The three instruments that key an oracle load on the pipeline's own scan config therefore disagree with every
+cache: `quant_accuracy.py` REFUSES every oracle arm (the 2026-09-19 baseline ran them through a scratchpad
+wrapper that built the lookup key at 4 and changed nothing else), while `prior_vs_oracle.py` and
+`pass0_vs_oracle.py` fall back without a word to re-splitting the BAM and re-scanning, and then WRITE the result
+over the certified cache parts. A thread count cannot change a tally (`test_scan_order_independence.py`), so it
+has no place in a key: the repair is in `scan_cache.py`, an owner's call because it is `src/`, and a no-op on
+every number. `preflight.py --full` stays green because it checks that the caches are present, not that they
+still load (`TRAPS: a-green-suite-hid-five-dead-instruments`).
 
-WHAT IT CLOSES OR RE-RANKS: `ISSUES: prior-fidelity-vs-deliverable` (the anti-correlation may be visible
-directly in the arms), and the order of everything in `ROADMAP.md` items 2 and 3. Record the numbers in the
-roadmap's state claim, not here: this entry is the question, and it closes when the measurement answers it.
+### oracle-ruler-arm-cannot-reach-the-ruler
+`priority: now, with the key — repair or retire (the instrument ruling defaults to retire) · kind: defect (instrument) · 2026-09-19`
+`quant_accuracy.py --arm oracle_ruler` swaps the six deconvolved COUNT arrays at `calibrate`. Since `c44fc306`
+(the expectation ruler, 2026-09-16) the ruler reads `gdna_capture_efficiency_region` and
+`gdna_reference_density` instead, which the swap leaves as the shipped solve's, so the arm cannot move
+`effective_lengths_em` by one ulp and its own guard refuses every condition — measured 2026-09-19 on all six
+contaminated capture-ON rows, as well as capture-OFF and `g00`, where the factor is 1.000 by construction. The
+effective-length shrinkage is therefore inside NO end-to-end ceiling on this tree; the ruler's own truth is
+`ruler_vs_truth.py`. A repair needs an oracle efficiency (the efficiency posterior run on the origin-split
+counts), which is an instrument build and not a field swap.
+
+### em-overturns-the-calibrated-gdna-split
+`priority: next — sized at the realistic nascent share before anything is built on it · kind: defect · 2026-09-19`
+At capture-OFF calibration's library split is right and the transcript table's is not. `g05 ss.50 OFF`:
+calibration 490,967 gDNA fragments against 500,004 true (`calibration_vs_oracle.py`, the row's `pools`), the table
+1,037,727 — a gDNA fraction of 0.104 against 0.05; `g05 ss.99 OFF` 489,187 against 628,152 in the table (0.063);
+`g50 ss.50 OFF` 4,985,891 and `g50 ss.99 OFF` 4,982,822 against 5,000,000 true, the table 5,740,272 and 5,518,768
+(0.574 / 0.552 against 0.50). The table's excess is the shortfall on the RNA the simulator drew as nascent, almost
+fragment for fragment (+537,723 gDNA / −660,315; +128,148 / −236,894; +740,272 / −811,100; +518,768 / −589,942),
+and it does not move under a perfect prior (`oracle`: +545,876 / +134,274 / +742,986 / +525,880) or under true
+per-transcript allocation weights (`oracle_alloc_seed`: 0.104 / 0.063 / 0.576 / 0.553). So the EM's gDNA component
+takes RNA the simulator drew as nascent, against a calibrated prior that had the split right. Stranded capture-ON
+holds (0.050 / 0.486 / 0.957 against 0.05 / 0.50 / 0.98). ⛔ Every number here is at the panel's nascent STRESS
+share (20.2 % of RNA fragments capture-OFF, `DESIGN.md` §0b): a robustness failure at stress, and no design
+decision may be driven from it until `ISSUES: nascent-stress-sensitivity` sizes it at the realistic share. When it
+is taken up, the question is what outweighs the prior when the EM assigns unspliced intronic fragments between
+gDNA and RNA — the prior is a pseudo-count. `quant_accuracy.py` (the pool rows), `calibration_vs_oracle.py`.
+
+### nascent-stress-sensitivity
+`priority: next — it sizes `ISSUES: em-overturns-the-calibrated-gdna-split` · kind: question · 2026-08-22`
+Does any in-scope verdict depend on the nascent stress level? The ladder runs `on_fraction 0.50`; realistic is
+~0.10 (`DESIGN.md` §0b). Re-simulate the worst in-scope scenario at the realistic level and check whether any
+rank moves; a verdict that holds only at stress is a robustness finding. The first verdict it must size is the
+capture-OFF gDNA over-call, measured only at stress (`g05 ss.50 OFF` 0.104 against 0.05). `sim/panel.py`,
+`quant_accuracy.py`, `policy_benchmark.py`.
 
 ### performance-memory-bounded-solve
 `priority: PARKED 2026-09-19 (owner: the method is the focus; this is machine work and resumes on its own) · kind: build · 2026-08-17; the port landed 2026-09-17/18, the work outside calibration 2026-09-19 (`DESIGN.md` §6b.15)`
@@ -201,27 +244,23 @@ every upper side refused (`ISSUES: the-edge-upper-side`); (d) substrate `nest` (
 0.666 vs 0.630) and the antisense's nascent variant (`docs/TESTING.md` §0a; `div` was built 2026-09-14).
 `policy_benchmark.py --by-class`.
 
-### per-transcript-prior-lane
-`priority: the pre-EM thread, FIRST (owner, 2026-09-19) · kind: build · 2026-08-31`
-`rna_prior_weight` is built end to end but `pipeline.py` omits it, so the shipped EM carries no per-transcript
-information; a perfect per-transcript prior roughly halves in-scope gene-level error. Two weightings are
-refused (`ISSUES: refused-transcript-weights`, `ISSUES: refused-soft-min-path-weighting`): the support problem
-is the whole problem, so the next candidate is a sparsity mechanism, targeting expressed multi-exon
-transcripts with median exon ≤ 150 bp. `quant_accuracy.py`.
-
 ### capture-blind-gdna-divisor
-`priority: the pre-EM thread · kind: defect · 2026-08-31`
+`priority: the pre-EM prior chain, after the EM's residual · kind: defect · 2026-08-31`
 `gdna_opportunity_from_index` is computed from the index alone, so under capture it removes ~6 bp of a ~30 bp
 length selection — the gDNA control moved +6.0 % on all six capture-ON rows (gDNA has no introns to miss),
 and with `ISSUES: eb-shrinkage-magic-ess` it owns the −5.90 % capture-ON length ceiling. `capture_eff_length`
-already models the panel; it also blocks `ISSUES: crossing-pool-contrast`.
+already models the panel; it also blocks `ISSUES: crossing-pool-contrast`. On the deliverable it is priced near
+zero on the ladder: `gdna_eff_len` at truth (`quant_accuracy.py --arm oracle_efflen`, 2026-09-19) moves the in-scope
+transcript error −50 / +22 / −1,104 fragments on unstranded OFF / stranded OFF / stranded ON, against floors of
+3,478 / 5,802 / 3,532, and the −1,104 is `g98`'s.
 
 ### eb-shrinkage-magic-ess
-`priority: the pre-EM thread · kind: defect · 2026-08-31`
+`priority: the pre-EM prior chain, after the EM's residual · kind: defect · 2026-08-31`
 `POOL_EB_PRIOR_ESS = 1000.0` shrinks the gDNA pmf toward `global_pmf` (mostly RNA whenever gDNA is a minority)
 at a magic ESS: inert on the ladder (0.01 bp), dominant on the fl-gap arm at `g05` capture-ON (`ship−pool`
 −23.7 of −31.7 bp). Replacement: reconcile the pools by their precision (`EQUATIONS.md` §6c). Its
-instrument, `fl_pool_purity.py`, was retired 2026-09-14 (in git).
+instrument, `fl_pool_purity.py`, was retired 2026-09-14 (in git). The ladder's deliverable cannot see it
+(`ISSUES: capture-blind-gdna-divisor` has the `oracle_efflen` number); only the fl-gap arm can.
 
 ### refit-vs-message-arbitration
 `priority: next · kind: design · 2026-08`
@@ -229,13 +268,6 @@ At the unstranded × capture-OFF exon cell the refitted gDNA prior and the messa
 nothing arbitrating them; the message is the accurate voice there and the refit displaces it. Re-read under the
 E-step: `calibration_walk.py` now says the prior does the unstranded rows and the messages the stranded
 capture-ON ones. Belongs with `ISSUES: gdna-landscape-trains-on-false-positives`.
-
-### prior-fidelity-vs-deliverable
-`priority: the pre-EM thread, and `ISSUES: end-to-end-error-unattributed` may answer it outright · kind: question · 2026-08`
-Why is prior fidelity anti-correlated with deliverable quality? Leading answer: at the worst slots the
-self-solve with the fitted prior is nearly right and the messages destroy it (measured at a retired rung;
-confirm on a second stratum). The ruler is out of the way (`ISSUES: g00-shrinkage-upstream-repair`,
-CLOSED). `prior_vs_oracle.py`.
 
 ### antisense-prior-assembly-casualty
 `priority: the prior-assembly session · kind: decision · 2026-08-18 (named 2026-09-13)`
@@ -337,13 +369,6 @@ witnesses' counting plus the pair's disagreement (``hop_price``, `native/transfe
 pair agrees by coincidence is the open half (the landscape is no substitute: ~10× over-stated). `EQUATIONS.md`
 §3.5h.
 
-### nascent-stress-sensitivity
-`priority: later · kind: question · 2026-08-22`
-Does any in-scope verdict depend on the nascent stress level? The ladder runs `on_fraction 0.50`; realistic is
-~0.10 (`DESIGN.md` §0b). Re-simulate the worst in-scope scenario at the realistic level and check whether any
-rank moves; a verdict that holds only at stress is a robustness finding. `sim/panel.py`,
-`policy_benchmark.py`.
-
 ### expand-the-gdna-spectrum
 `priority: later · kind: decision · 2026-08`
 Fill the gDNA spectrum (1, 5, 10, 25 % up past 90) without multiplying benchmarks: a level is justified by a
@@ -419,6 +444,43 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### end-to-end-error-unattributed
+CLOSED by measurement 2026-09-19: the residual is the EM's and the assignment's. `quant_accuracy.py` on the
+16-condition ladder at `cffca248`, seed 20260807, arms `base`, `base_reseed`, `noop`, `oracle`, `oracle_gdna`,
+`oracle_rna`, `oracle_efflen` and `oracle_alloc_seed` (`~/Downloads/rigel_runs/arms/2026-09-19_e2e_baseline/`,
+`decomposition.txt`). Per stratum, the `g05`–`g98` rows summed, in the order unstranded OFF / stranded OFF /
+stranded ON and then the deferred one: transcript-level Σ|Δ| 520,117 / 453,135 / 1,833,492 / 4,487,120 fragments,
+4.4 / 3.9 / 12.8 / 31.3 % of the true annotated RNA, against floors |base − base_reseed| of 3,478 / 5,802 / 3,532 /
+5,079; gene level 246,441 / 210,165 / 601,452 / 2,640,220 (2.1 / 1.8 / 4.2 / 18.4 %), floors 558 / 282 / 2,228 /
+3,605. The gDNA-free `g00` rows read 3.4 / 3.6 / 7.5 / 9.1 % at transcript level and `g05` 3.7 / 3.2 / 10.5 /
+16.6 %, so most in-scope error exists with no gDNA at all. A PERFECT PRIOR (`oracle`) recovers 26,401 / 12,837 /
+75,687 fragments at transcript level (5.1 / 2.8 / 4.1 %) and 24,913 / 11,497 / 74,687 at gene level (10.1 / 5.5 /
+12.4 %); `oracle_rna` alone carries 21,697 / 14,074 / 73,855 of it, `oracle_gdna` 1,805 / 2,433 / 3,523, and
+`oracle_efflen` −50 / +22 / −1,104, which is nothing. By rung it is `g98`'s: at `g05` the move is below the floor
+in all three strata (−1,694 against 2,431; +2,013 against 3,722; −1,373 against 1,942), at `g50` it is 2.0 / 2.8 /
+1.2 %, at `g98` 37 / 25 / 35 %. Deferred: 40.9 % transcript, 70.4 % gene. So 95–97 % of the in-scope transcript
+error and 88–95 % of the gene-level error survive a perfect prior, and what survives splits in two — the
+per-transcript allocation (`ISSUES: per-transcript-prior-lane`: truth as the weights removes 49 / 46 / 61 %) and
+the capture-OFF gDNA over-call (`ISSUES: em-overturns-the-calibrated-gdna-split`), which neither arm
+moves. THE OLD CLAIM — in scope a perfect prior no longer improved the transcript number (2026-09-10:
+`oracle`/`base` 1.019 / 1.026 / 0.978 transcript, 1.087 / 1.169 / 0.905 gene) — no longer holds as worded: today
+0.949 / 0.972 / 0.959 and 0.899 / 0.945 / 0.876, each above its floor except at `g05`; which of the commits
+between the two readings dissolved it is not attributed. Its substance holds and is now measured: the prior is
+worth little in scope and the EM owns the rest. Two instruments were broken on the way in: `oracle_ruler` could
+not fire (`ISSUES: oracle-ruler-arm-cannot-reach-the-ruler`), so the effective-length shrinkage sits inside no
+ceiling here, and the oracle arms ran through a key-only wrapper (`ISSUES: oracle-cache-key-hashes-a-thread-count`).
+The panel is not bit-reproducible at a pinned seed: `noop` matched `base` to ≤ 9 fragments per condition and two
+direct `base` runs of one condition differed by 67, all below the floor.
+
+### prior-fidelity-vs-deliverable
+CLOSED by measurement 2026-09-19 (`ISSUES: end-to-end-error-unattributed`): the anti-correlation is gone on this
+tree. A perfect prior now improves the deliverable in every in-scope stratum at both axes — `oracle`/`base` 0.949 /
+0.972 / 0.959 at transcript level and 0.899 / 0.945 / 0.876 at gene level on unstranded OFF / stranded OFF /
+stranded ON — where on 2026-09-10 it made both capture-OFF strata worse (1.019 / 1.026 transcript, 1.087 / 1.169
+gene). The one in-scope row where it still reads worse, `g05 ss.99 OFF` (+2,013), is below its floor (3,722). The
+leading answer (the messages destroying a nearly right self-solve at the worst slots) was never confirmed on a
+second stratum and is no longer needed. `quant_accuracy.py`.
 
 ### scan-thread-split-starves-the-workers
 CLOSED by landing 2026-09-19: the budget is split by the measured RATIO — one BGZF decompression thread keeps

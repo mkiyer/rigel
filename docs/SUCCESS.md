@@ -36,9 +36,10 @@ cannot say which of the two moved — and a calibration figure cannot say whethe
 ⛔ THE END-TO-END NUMBER HAS A FLOOR AND A DECOMPOSITION, and both are part of reading it. The deliverable is
 not reproducible by default, so `base_reseed` is re-derived in the same session and any delta below it is
 sampling noise, not a result. And the arms decompose it: `oracle` is what a perfect prior is worth end to
-end, so what remains under it belongs to the EM and the assignment rather than to calibration; `oracle_ruler`
-is the only arm that reaches the effective-length shrinkage, because it substitutes at the `calibrate`
-boundary while every other arm wraps `assemble_priors`.
+end, so what remains under it belongs to the EM and the assignment rather than to calibration. Every one of
+them wraps `assemble_priors`, so none reaches the effective-length shrinkage; `oracle_ruler`, which substitutes
+at the `calibrate` boundary to reach it, swaps count arrays the ruler no longer reads and cannot fire on this
+tree (`ISSUES: oracle-ruler-arm-cannot-reach-the-ruler`).
 
 ---
 
