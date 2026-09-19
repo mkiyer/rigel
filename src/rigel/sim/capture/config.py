@@ -26,15 +26,14 @@ class CaptureConfig:
         Baseline weight for every legal fragment start.  A positive value
         keeps off-target fragments possible.
     binding_per_base : float
-        Additional weight per base of the best overlapping probe.  For example, with
-        ``off_target_weight=1`` and ``binding_per_base=10``, a full 120 bp
-        probe overlap has weight 1201 relative to weight 1 off target.
-        Overlapping probes do not stack; the best single scaled overlap is used.
-    gdna_split_penalty : float
-        Multiplier applied to projected genomic/pre-mRNA blocks when a probe
-        is split across exon-exon sj.  Mature RNA sees the contiguous
-        transcript probe; unspliced molecules and gDNA only see separated
-        genomic blocks and therefore get less binding weight.
+        Additional weight per base of the fragment's best overlap with one
+        contiguous probe part.  For example, with ``off_target_weight=1`` and
+        ``binding_per_base=10``, a full 120 bp probe overlap has weight 1201
+        relative to weight 1 off target.  Overlapping probes do not stack, and
+        neither do the parts of a probe split across a splice junction: a
+        transcript holding the junction sees the probe whole, while gDNA, a
+        nascent span and an isoform without the junction see its parts and bind
+        the better one.  That geometry is the only price gDNA pays.
     min_overlap : int
         Minimum overlap, in bases, required before a probe contributes weight.
     """
@@ -43,7 +42,6 @@ class CaptureConfig:
     probe_format: str = "auto"
     off_target_weight: float = 1.0
     binding_per_base: float = 10.0
-    gdna_split_penalty: float = 0.2
     min_overlap: int = 1
 
 

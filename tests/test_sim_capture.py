@@ -20,7 +20,7 @@ import pytest
 from rigel.sim.annotation import GeneBuilder
 from rigel.sim.capture import CaptureConfig, CaptureSampler
 from rigel.sim.capture.design import design_capture_probe_intervals, write_random_capture_probes
-from rigel.sim.capture.sampler import WeightedInterval
+from rigel.sim.capture.sampler import ProbeInterval
 from rigel.sim.genome import MutableGenome, random_dna_array
 from rigel.sim.manifest import condition_dir_name
 from rigel.sim.orchestrator import capture_paired_condition_seed
@@ -73,34 +73,53 @@ def test_transcript_probe_weights_match_overlap_example(tmp_path):
     assert sampler.fragment_weight("mrna", 0, 2000, 1480, 200) == pytest.approx(121.0)
 
 
-def test_transcript_probe_crossing_sj_penalizes_gdna_and_the_nascent_entity(tmp_path):
-    """A probe across a splice junction binds the spliced transcript whole (scale 1), and binds gDNA
-    and the NASCENT ENTITY — a single-exon transcript over the span, the index's nRNA row — as two
-    separated genomic pieces at ``gdna_split_penalty``. The entity is an ordinary transcript in the
-    list: its capture comes from every probe whose genomic blocks it overlaps, so its weight equals
-    the gDNA weight at the same position, which is the physics."""
+def test_a_split_probe_binds_every_template_through_ONE_contiguous_part(tmp_path):
+    """A probe across a splice junction is one contiguous 60-mer only in a transcript that holds the
+    junction; everywhere else — gDNA, the NASCENT ENTITY (a single-exon transcript over the span, the
+    index's nRNA row), an isoform that lacks the junction — it is two separate parts, and a fragment
+    hybridises through one contiguous stretch, so it binds the better part and never the sum. There is
+    no penalty beyond that geometry: the part it does hold binds as it would for any molecule
+    (owner, 2026-09-19). Here the probe is 20 bases in the first exon and 40 in the second."""
     probes = tmp_path / "sj_probe.tsv"
     probes.write_text("transcript_id\tstart\tend\nT\t80\t140\n")
     transcript = _transcript("T", [(100, 200), (400, 500)])
     entity = _transcript("T_nascent", [(100, 500)])
     sampler = CaptureSampler.from_config(
-        CaptureConfig(
-            probes=str(probes),
-            binding_per_base=1.0,
-            off_target_weight=1.0,
-            gdna_split_penalty=0.2,
-        ),
+        CaptureConfig(probes=str(probes), binding_per_base=1.0, off_target_weight=1.0),
         [transcript, entity],
         {"chr1": 1000},
     )
 
+    # the spliced transcript holds the whole probe contiguously
     assert sampler.fragment_weight("mrna", 0, 200, 80, 60) == pytest.approx(61.0)
-    assert sampler.fragment_weight("gdna", "chr1", 1000, 170, 280) == pytest.approx(13.0)
+    # gDNA over both parts, across the intron: the better part (40), not their sum
+    assert sampler.fragment_weight("gdna", "chr1", 1000, 170, 280) == pytest.approx(41.0)
     # the entity: transcript coordinate 70 of its 400-bp span is genomic 170, the same fragment
-    assert sampler.fragment_weight("mrna", 1, 400, 70, 280) == pytest.approx(13.0)
+    assert sampler.fragment_weight("mrna", 1, 400, 70, 280) == pytest.approx(41.0)
     # there is no per-transcript nascent space: the entity IS a transcript row
     with pytest.raises(ValueError):
         sampler.fragment_weight("nrna", 0, 400, 70, 280)
+
+
+def test_gdna_and_cdna_bind_the_SAME_half_of_a_split_probe_alike(tmp_path):
+    """Hybridisation does not know what a molecule is: a gDNA fragment and a cDNA fragment of an
+    isoform that lacks the junction hold the same 20 bases of the probe's first part, and weigh the
+    same. Only a molecule holding the junction can bind the probe whole."""
+    probes = tmp_path / "sj_probe.tsv"
+    probes.write_text("transcript_id\tstart\tend\nT\t80\t140\n")
+    with_junction = _transcript("T", [(100, 200), (400, 500)])
+    without_junction = _transcript("T2", [(100, 200), (600, 700)])
+    sampler = CaptureSampler.from_config(
+        CaptureConfig(probes=str(probes), binding_per_base=1.0, off_target_weight=1.0),
+        [with_junction, without_junction],
+        {"chr1": 1000},
+    )
+
+    # T2 coordinates 60..120 are genomic 160..200 then 600..620: they hold genomic 180..200
+    cdna_half = sampler.fragment_weight("mrna", 1, 200, 60, 60)
+    gdna_half = sampler.fragment_weight("gdna", "chr1", 1000, 150, 60)
+    assert cdna_half == pytest.approx(21.0)
+    assert gdna_half == pytest.approx(cdna_half)
 
 
 def test_a_probe_reaches_every_transcript_its_genomic_blocks_overlap(tmp_path):
@@ -144,14 +163,14 @@ def test_bed12_probe_projects_to_transcript_and_gdna(tmp_path):
             probe_format="bed12",
             binding_per_base=1.0,
             off_target_weight=1.0,
-            gdna_split_penalty=0.2,
         ),
         [transcript],
         {"chr1": 1000},
     )
 
     assert sampler.fragment_weight("mrna", 0, 200, 80, 60) == pytest.approx(61.0)
-    assert sampler.fragment_weight("gdna", "chr1", 1000, 170, 280) == pytest.approx(13.0)
+    # gDNA holds the two blocks apart across the intron and binds the better one (40)
+    assert sampler.fragment_weight("gdna", "chr1", 1000, 170, 280) == pytest.approx(41.0)
 
 
 def test_capture_partition_increases_targeted_transcript_weight(tmp_path):
@@ -222,7 +241,6 @@ def test_parse_yaml_capture_config(tmp_path):
         f"  format: transcript\n"
         f"  off_target_weight: 0.5\n"
         f"  binding_per_base: 7\n"
-        f"  gdna_split_penalty: 0.15\n"
         f"  min_overlap: 4\n"
     )
 
@@ -232,8 +250,24 @@ def test_parse_yaml_capture_config(tmp_path):
     assert cfg.capture.probe_format == "transcript"
     assert cfg.capture.off_target_weight == pytest.approx(0.5)
     assert cfg.capture.binding_per_base == pytest.approx(7.0)
-    assert cfg.capture.gdna_split_penalty == pytest.approx(0.15)
     assert cfg.capture.min_overlap == 4
+
+
+def test_a_capture_key_the_loader_does_not_know_is_REFUSED(tmp_path):
+    """Ignored, an unknown key would read as applied — a config still carrying the retired
+    ``gdna_split_penalty`` would simulate the new physics while its YAML claimed the old."""
+    probes = tmp_path / "probes.tsv"
+    probes.write_text("T1\t10\t130\n")
+    config = tmp_path / "sim.yaml"
+    config.write_text(
+        f"genome: genome.fa\n"
+        f"gtf: annotation.gtf\n"
+        f"capture:\n"
+        f"  probes: {probes}\n"
+        f"  gdna_split_penalty: 0.2\n"
+    )
+    with pytest.raises(ValueError, match="gdna_split_penalty"):
+        parse_yaml_config(config)
 
 
 def test_parse_yaml_capture_config_sweep(tmp_path):
@@ -468,7 +502,7 @@ def test_random_probe_writer_selects_capture_pool_by_gene(tmp_path):
 
 
 def brute_force_partition(
-    intervals: list[WeightedInterval],
+    intervals: list[ProbeInterval],
     seq_len: int,
     frag_len: int,
     *,
@@ -476,39 +510,29 @@ def brute_force_partition(
     binding_per_base: float,
     min_overlap: int,
 ) -> float:
-    """The definition, spelled out: for every start, the best single probe GROUP, summed.
-
-    Groups are summed within, then maxed across — a probe split across exons contributes the sum of its
-    pieces, and a fragment is credited by its best single probe.
-    """
-    eff_len = seq_len - frag_len + 1
-    if eff_len <= 0:
-        return 0.0
-    total = off_target_weight * eff_len
-    for start in range(eff_len):
-        per_group: dict[int, float] = {}
+    """The definition, spelled out: for every start, the fragment's best overlap with ONE contiguous
+    probe part, summed over starts. A fragment hybridises through one contiguous stretch, so separate
+    parts — of different probes, or of one probe split across an intron — never add."""
+    total = 0.0
+    for start in range(max(0, seq_len - frag_len + 1)):
+        total += off_target_weight
+        best = 0
         for interval in intervals:
             overlap = min(start + frag_len, interval.end) - max(start, interval.start)
             if overlap < min_overlap or overlap <= 0:
                 continue
-            per_group[interval.probe_group] = (
-                per_group.get(interval.probe_group, 0.0) + overlap * interval.scale
-            )
-        if per_group:
-            total += binding_per_base * max(per_group.values())
+            best = max(best, overlap)
+        total += binding_per_base * best
     return total
 
 
-def make_sampler(
-    intervals_by_key: dict[int, list[WeightedInterval]], **overrides
-) -> CaptureSampler:
+def make_sampler(intervals_by_key: dict[int, list[ProbeInterval]], **overrides) -> CaptureSampler:
     """A sampler whose mRNA intervals are injected directly, bypassing probe-file parsing."""
     config = CaptureConfig(
         probes="unused",
         probe_format="transcript",
         off_target_weight=overrides.get("off_target_weight", 1.0),
         binding_per_base=overrides.get("binding_per_base", 10.0),
-        gdna_split_penalty=0.2,
         min_overlap=overrides.get("min_overlap", 1),
     )
     # Built through the real `__init__`, never `__new__`: only the probe intervals are then injected,
@@ -521,55 +545,31 @@ def make_sampler(
     return sampler
 
 
-def iv(start: int, end: int, *, group: int = 0, scale: float = 1.0) -> WeightedInterval:
-    return WeightedInterval(start=start, end=end, scale=scale, probe_group=group)
+def iv(start: int, end: int) -> ProbeInterval:
+    return ProbeInterval(start=start, end=end)
 
 
 # ── the layouts. Each is a named shape the optimisation could get wrong differently ────────────────
-LAYOUTS: dict[str, list[WeightedInterval]] = {
+LAYOUTS: dict[str, list[ProbeInterval]] = {
     "single probe, mid-template": [iv(300, 420)],
     "single probe, flush at start": [iv(0, 120)],
     "single probe, flush at end": [iv(880, 1000)],
-    "two probes, far apart": [iv(100, 220, group=0), iv(700, 820, group=1)],
-    "two probes, adjacent (gap 2)": [iv(100, 220, group=0), iv(222, 342, group=1)],
-    "two probes, UNEQUAL length": [iv(100, 160, group=0), iv(300, 700, group=1)],
-    "two probes, unequal SCALE": [
-        iv(100, 220, group=0, scale=0.2),
-        iv(300, 420, group=1, scale=1.0),
-    ],
-    "three probes, dense": [
-        iv(100, 220, group=0),
-        iv(240, 360, group=1),
-        iv(380, 500, group=2),
-    ],
-    "one probe SPLIT across two pieces (same group)": [
-        iv(100, 160, group=7),
-        iv(400, 460, group=7),
-    ],
+    "two probes, far apart": [iv(100, 220), iv(700, 820)],
+    "two probes, adjacent (gap 2)": [iv(100, 220), iv(222, 342)],
+    "two probes, UNEQUAL length": [iv(100, 160), iv(300, 700)],
+    "two parts, OVERLAPPING": [iv(100, 220), iv(160, 280)],
+    "three probes, dense": [iv(100, 220), iv(240, 360), iv(380, 500)],
+    "a split probe's two separate parts": [iv(100, 160), iv(400, 460)],
     "no probes": [],
 }
 
-#: Every layout goes through the batched path, INCLUDING the split probe group. A split group falling
-#: back to the per-key loop is what leaves the gDNA space off the fast path entirely, since a probe
-#: spanning an intron always splits into several genomic pieces.
-SPLIT_GROUP_LAYOUT = "one probe SPLIT across two pieces (same group)"
+#: The layout the gDNA space is made of: every probe that spans an intron lands in genomic coordinates as
+#: separate parts.
+SPLIT_LAYOUT = "a split probe's two separate parts"
 BATCHABLE_LAYOUTS = list(LAYOUTS)
 
 FRAGMENT_LENGTHS = [1, 2, 50, 119, 120, 121, 200, 500, 999, 1000, 1001, 2000]
 SEQ_LEN = 1000
-
-
-def assert_batched_path_is_live(sampler: CaptureSampler) -> None:
-    """Without this, the whole file tests nothing.
-
-    `_flat_probes` returns `None` — falling back to the per-key loop for the ENTIRE space — as soon
-    as one probe group holds more than one interval. PERTURBATION: with a split-group layout in the
-    shared pool every case silently runs the fallback, and almost every deliberate perturbation to
-    the batched code passes. Assert the path under test is the path being taken.
-    """
-    assert sampler._flat_probes("mrna") is not None, (
-        "the batched path is NOT live for this sampler, so this test is exercising the fallback"
-    )
 
 
 class TestAgainstBruteForce:
@@ -580,8 +580,6 @@ class TestAgainstBruteForce:
     def test_partition_array_matches_enumeration(self, layout_name: str, frag_len: int) -> None:
         intervals = LAYOUTS[layout_name]
         sampler = make_sampler({0: intervals} if intervals else {})
-        if intervals:
-            assert_batched_path_is_live(sampler)
         expected = brute_force_partition(
             intervals,
             SEQ_LEN,
@@ -601,7 +599,7 @@ class TestAgainstBruteForce:
     def test_the_scalar_path_also_matches_enumeration(
         self, layout_name: str, frag_len: int
     ) -> None:
-        """The per-key fallback is still reachable (split probe groups), so it is gated too."""
+        """`partition` (one key) is gated against the same enumeration as the batched call."""
         intervals = LAYOUTS[layout_name]
         sampler = make_sampler({0: intervals} if intervals else {})
         expected = brute_force_partition(
@@ -621,7 +619,6 @@ class TestAgainstBruteForce:
     def test_min_overlap_gate_matches_enumeration(self, min_overlap: int, frag_len: int) -> None:
         intervals = LAYOUTS["three probes, dense"]
         sampler = make_sampler({0: intervals}, min_overlap=min_overlap)
-        assert_batched_path_is_live(sampler)
         expected = brute_force_partition(
             intervals,
             SEQ_LEN,
@@ -640,7 +637,6 @@ class TestAgainstBruteForce:
         names = list(BATCHABLE_LAYOUTS)
         intervals_by_key = {i: LAYOUTS[name] for i, name in enumerate(names)}
         sampler = make_sampler(intervals_by_key)
-        assert_batched_path_is_live(sampler)
         lengths = np.array([SEQ_LEN + 137 * i for i in range(len(names))], dtype=np.int64)
 
         for frag_len in (50, 200, 500, 1200):
@@ -658,15 +654,14 @@ class TestAgainstBruteForce:
                     f"key {key} ({name}) at w={frag_len}"
                 )
 
-    def test_a_split_probe_group_is_batched_and_still_summed_within_the_group(self) -> None:
-        """A probe split across exons must have its pieces SUMMED before the max across probes.
-
-        This is the case the gDNA space is made of — every probe that spans an intron splits when
-        projected to genomic coordinates — so it must be on the FAST path, not a fallback.
-        """
-        intervals = LAYOUTS[SPLIT_GROUP_LAYOUT]
+    def test_a_split_probes_parts_are_never_SUMMED(self) -> None:
+        """A fragment over both parts of a split probe binds the better part, not their sum. This is
+        the case the gDNA space is made of, so the gate reads a fragment long enough to hold both."""
+        intervals = LAYOUTS[SPLIT_LAYOUT]
         sampler = make_sampler({0: intervals})
-        assert_batched_path_is_live(sampler)
+        # a 400-base fragment from 80 holds 60 of each part: its weight is one part's, 1 + 10 * 60
+        assert sampler.fragment_weight("mrna", 0, SEQ_LEN, 80, 400) == pytest.approx(601.0)
+        sampler = make_sampler({0: intervals})
         lengths = np.array([SEQ_LEN], dtype=np.int64)
         for frag_len in (50, 200, 500):
             expected = brute_force_partition(
@@ -692,7 +687,6 @@ class TestPartitionArray:
         intervals_by_key[len(names)] = []  # a transcript with no probes, in the middle of the pool
         lengths = np.array([SEQ_LEN + 37 * i for i in range(len(intervals_by_key))], dtype=np.int64)
         sampler = make_sampler(intervals_by_key)
-        assert_batched_path_is_live(sampler)
 
         actual = sampler.partition_array("mrna", range(len(lengths)), lengths, frag_len)
         expected = np.array(
@@ -712,7 +706,6 @@ class TestPartitionArray:
             2: LAYOUTS["single probe, mid-template"],
         }
         sampler = make_sampler(intervals_by_key)
-        assert_batched_path_is_live(sampler)
         lengths_all = np.array([SEQ_LEN, SEQ_LEN + 500, SEQ_LEN + 900], dtype=np.int64)
         full = sampler.partition_array("mrna", [0, 1, 2], lengths_all, 200)
         subset = sampler.partition_array("mrna", [0, 2], lengths_all[[0, 2]], 200)

@@ -1961,10 +1961,13 @@ apportionment to convergence (EM on the joint, 13 passes on the test chromosome 
 step) — identical on every test chromosome row and +0.44 against +0.46 nat on the ladder's unprobed class, so
 the one pass ships; a joint update of neighbours in place of the apportionment — never converges, 64–66
 pieces of the test chromosome and ~2,000 of the ladder flipping by 8 nat every pass. What no gDNA ruler can
-see is declared (`ISSUES: ruler-witness-geometry-on-transcript-panels`): a probe across a junction is captured
-on gDNA at a fifth of the cDNA's weight and a probe centred on a 40 bp exon binds gDNA over 125 bp while the
-simulator's non-stacking rule binds a spliced fragment over 40, so the probed tiny-exon transcripts read
-+1.03 nat against the sampler's truth with the mechanism reading their edges exactly.
+see is declared (`ISSUES: ruler-witness-geometry-on-transcript-panels`): only a transcript holding the junction
+a probe spans binds that probe whole, so the extra capture of junction-spanning fragments is isoform-specific and
+gDNA cannot witness it (the simulator's half-match rule was symmetric from 2026-09-19: before then it also bound a
+gDNA half-match at a fifth of the identical cDNA one, which is what most of the ladder's stranded capture-ON error
+turned out to be). And a probe centred on a 40 bp exon binds gDNA over 125 bp while the simulator's non-stacking
+rule binds a spliced fragment over 40, so the probed tiny-exon transcripts read +1.03 nat against the sampler's
+truth with the mechanism reading their edges exactly.
 
 **The yield's two consumers, and its endpoint** (owner rulings 2026-09-17). The capture-contracted length is a
 YIELD — fragments per unit of abundance — and it enters two places only: the E-step, where every component's

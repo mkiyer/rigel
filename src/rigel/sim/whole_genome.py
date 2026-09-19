@@ -89,6 +89,23 @@ from rigel.sim.manifest import (
 logger = logging.getLogger(__name__)
 
 
+#: Every key a capture mapping may carry: the scenario's own (``label``/``name``, ``enabled``) and the
+#: ``CaptureConfig`` fields, ``format`` an alias of ``probe_format``.
+_CAPTURE_KEYS = frozenset(
+    {
+        "label",
+        "name",
+        "enabled",
+        "probes",
+        "probe_format",
+        "format",
+        "off_target_weight",
+        "binding_per_base",
+        "min_overlap",
+    }
+)
+
+
 def _capture_config_from_mapping(
     raw: dict,
     defaults: dict | None = None,
@@ -96,9 +113,15 @@ def _capture_config_from_mapping(
     label: str = "capture",
     require_probes_when_enabled: bool = False,
 ) -> CaptureConfig:
-    """Build a CaptureConfig from a YAML mapping plus optional defaults."""
+    """Build a CaptureConfig from a YAML mapping plus optional defaults. A key it does not know is refused:
+    silently ignored, it would read as applied — a retired ``gdna_split_penalty`` above all."""
     merged = dict(defaults or {})
     merged.update(raw)
+    unknown = sorted(set(merged) - _CAPTURE_KEYS)
+    if unknown:
+        raise ValueError(
+            f"capture config '{label}': unknown key(s) {unknown}; known: {sorted(_CAPTURE_KEYS)}"
+        )
     enabled = bool(merged.get("enabled", True))
     if not enabled:
         return CaptureConfig()
@@ -114,7 +137,6 @@ def _capture_config_from_mapping(
         probe_format=str(merged.get("probe_format", merged.get("format", "auto"))),
         off_target_weight=float(merged.get("off_target_weight", 1.0)),
         binding_per_base=float(merged.get("binding_per_base", 10.0)),
-        gdna_split_penalty=float(merged.get("gdna_split_penalty", 0.2)),
         min_overlap=int(merged.get("min_overlap", 1)),
     )
 

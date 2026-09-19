@@ -386,10 +386,10 @@ post-truncation realised mean is fed back as the pre-truncation generating mean,
 bp longer than its donor.
 
 **Probes tile per exon.** Probes are written in transcript space, so a probe spanning an internal sj has
-a two-block genomic footprint, and `sim/capture/sampler._split_scale` multiplies every gDNA fragment
-overlapping it by `gdna_split_penalty`; tiling across the whole transcript suppressed exactly the
-population that spans an `intron|exon` boundary. `_toy_probes` tiles within each exon, so every probe
-is unsplit and ends on the boundary. The split-probe case is real in a real panel and deserves its own rung.
+a two-block genomic footprint, and a gDNA fragment binds only the better of the two blocks; tiling across
+the whole transcript halved the capture of exactly the population that spans an `intron|exon` boundary.
+`_toy_probes` tiles within each exon, so every probe is unsplit and ends on the boundary. The split-probe
+case is real in a real panel and deserves its own rung.
 
 ### What a toy cannot judge
 
@@ -480,7 +480,7 @@ covers the span). `transcript_filter` is refused — filter the GTF before build
 |---|---|
 | nascent RNA is a transcript, not a parallel space | its molecules are `entity.nrna_abundance`, sampled on its own template, its reads keep the `nrna_` origin tag. Under `sparse` the level is drawn per entity — off with probability `1 − on_fraction`, else log-uniform over `abundance_ranges`, independent of the mature level; under `additive_ratio` and `fragment_share` it is `Σ abundance × nrna_ratio` over contributors |
 | one multinomial over every RNA row | mature and entity rows together, `prob ∝ abundance × capture-aware effective length`; the mature/nascent split follows from molecules and lengths, so a nascent-on condition and its nascent-off twin do not share a bit-identical mature stream |
-| capture binds by genomic overlap | every probe → genomic blocks → gDNA, projected onto every transcript whose exons it touches, either strand (ds-cDNA at capture); intron-split pieces take `gdna_split_penalty`. gDNA and nascent are enriched at the same rate under one probe, which is the physics |
+| capture binds by genomic overlap | every probe → genomic blocks → gDNA, projected onto every transcript whose exons it touches, either strand (ds-cDNA at capture). A fragment binds through ONE contiguous part of a probe: a transcript holding the junction a probe spans holds it whole, while gDNA, a nascent span and an isoform without the junction hold its parts apart and bind the better one — never the sum, and with no other penalty, since the part a molecule holds binds alike whatever the molecule (owner, 2026-09-19; it replaced a `gdna_split_penalty` of 0.2 that bound a gDNA half-match at a fifth of the identical cDNA one). gDNA and nascent are enriched at the same rate under one probe, which is the physics |
 
 Two consequences ruled correct (owner, 2026-08-19): capture depletes nascent RNA about 8× (roughly 20 %
 of RNA fragments off capture, under 3 % on — read a condition's `truth_summary.json`), because probes

@@ -29,7 +29,7 @@ Quick Start
 
 from .annotation import GeneBuilder
 from .benchmark import BenchmarkResult, TranscriptAccuracy, run_benchmark
-from .capture import CaptureConfig, CaptureSampler, WeightedInterval
+from .capture import CaptureConfig, CaptureSampler, ProbeInterval
 from .genome import MutableGenome, reverse_complement
 from .manifest import (
     condition_dir_name,
@@ -53,7 +53,7 @@ __all__ = [
     "Scenario",
     "ReadSimConfig",
     "TranscriptAccuracy",
-    "WeightedInterval",
+    "ProbeInterval",
     "condition_dir_name",
     "condition_manifest_map",
     "load_manifest",

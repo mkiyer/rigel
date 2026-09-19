@@ -5,6 +5,6 @@ Re-exports the public API: configuration (:mod:`capture.config`) + runtime sampl
 """
 
 from .config import CaptureConfig, CaptureScenario
-from .sampler import CaptureSampler, WeightedInterval
+from .sampler import CaptureSampler, ProbeInterval
 
-__all__ = ["CaptureConfig", "CaptureScenario", "CaptureSampler", "WeightedInterval"]
+__all__ = ["CaptureConfig", "CaptureScenario", "CaptureSampler", "ProbeInterval"]

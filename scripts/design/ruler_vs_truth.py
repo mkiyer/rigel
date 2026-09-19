@@ -97,7 +97,6 @@ _CAPTURE_KEYS = (
     "probe_format",
     "off_target_weight",
     "binding_per_base",
-    "gdna_split_penalty",
     "min_overlap",
 )
 
@@ -548,7 +547,6 @@ def self_test() -> int:
                 probe_format="bed12",
                 off_target_weight=off,
                 binding_per_base=binding,
-                gdna_split_penalty=0.2,
                 min_overlap=1,
             ),
             transcripts,

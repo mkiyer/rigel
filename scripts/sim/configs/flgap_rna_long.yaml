@@ -161,7 +161,6 @@ capture:
   probe_format: transcript
   off_target_weight: 1.0
   binding_per_base: 10.0
-  gdna_split_penalty: 0.2
   min_overlap: 1
   configs:
     - {label: "off", enabled: false}

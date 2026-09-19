@@ -10,13 +10,16 @@ uniform starts and plain effective lengths. The weight model's parameters are :m
 generating synthetic panels is :mod:`capture.design`.
 
 A fragment's weight is ``off_target_weight + binding_per_base * overlap``, where ``overlap`` is the
-best single probe group's total overlap with the fragment: a probe group is one physical probe, so
-pieces of it split across exons are summed before the maximum is taken across probes, and a probe
-whose pieces are not contiguous in template coordinates is scaled by ``gdna_split_penalty``. Probes
-arrive as a transcript TSV or BED12, autodetected, and each is mapped by genomic overlap onto gDNA
-and onto every transcript on that reference whose exons it touches — any gene, any isoform, any
-strand, since the library is DNA at capture time. Mapping is by overlap, not containment: a probe
-hanging off an exon edge still binds the bases that are there.
+fragment's best overlap with a single CONTIGUOUS part of a probe in the fragment's own template. A molecule
+hybridises through one contiguous stretch, so a probe split across a splice junction is one part in a
+transcript that holds the junction and two separate parts everywhere else — in gDNA, in a nascent
+entity's span, in an isoform without the junction — and a fragment there binds the better part, never
+their sum; overlapping probes do not stack either. That geometry is the whole of gDNA's disadvantage at a
+junction probe: the part a molecule holds binds as it would for any other molecule (owner, 2026-09-19).
+Probes arrive as a transcript TSV or BED12, autodetected, and each is mapped by genomic overlap onto gDNA
+and onto every transcript on that reference whose exons it touches — any gene, any isoform, any strand,
+since the library is DNA at capture time. Mapping is by overlap, not containment: a probe hanging off an
+exon edge still binds the bases that are there.
 
 Everything reduces to one vectorised computation over merged probe runs
 (:meth:`CaptureSampler._run_landscape`), so the effective length and the start distribution cannot
@@ -48,17 +51,15 @@ from .config import CaptureConfig
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CaptureSampler", "WeightedInterval"]
+__all__ = ["CaptureSampler", "ProbeInterval"]
 
 
 @dataclass(frozen=True, slots=True)
-class WeightedInterval:
-    """A probe interval on one coordinate axis with a binding multiplier."""
+class ProbeInterval:
+    """One contiguous part of a probe on one coordinate axis — the unit a fragment binds through."""
 
     start: int
     end: int
-    scale: float = 1.0
-    probe_group: int = 0
 
 
 class CaptureSampler:
@@ -113,13 +114,11 @@ class CaptureSampler:
         #: an entity's span reaches the entity exactly as it reaches the gDNA there. There is
         #: deliberately no per-transcript nascent space: scoping a pre-mRNA's capture to its own
         #: transcript's probes would under-enrich nascent RNA against the gDNA beside it.
-        self._mrna_intervals: dict[int, list[WeightedInterval]] = defaultdict(list)
-        self._gdna_intervals: dict[str, list[WeightedInterval]] = defaultdict(list)
-        self._next_probe_group = 1
+        self._mrna_intervals: dict[int, list[ProbeInterval]] = defaultdict(list)
+        self._gdna_intervals: dict[str, list[ProbeInterval]] = defaultdict(list)
 
         #: Probe layout per space, flattened once. Independent of fragment length, so it is built on
-        #: first use and never rebuilt. A one-tuple holding ``None`` means "this space needs the
-        #: per-key path" (a probe group with more than one interval); see `_flat_probes`.
+        #: first use and never rebuilt; see `_flat_probes`.
         self._flat_probe_cache: dict[str, tuple] = {}
         #: Partition memo. The capture-aware effective length depends only on the probe panel, the
         #: templates and the fragment width — never on abundances, gDNA rate, strand specificity or
@@ -209,13 +208,10 @@ class CaptureSampler:
     def _flat_probes(self, space: str) -> tuple[np.ndarray, ...] | None:
         """Flatten a space's probe intervals once — the layout does not depend on fragment length.
 
-        Returns ``(keys, start, end, scale, probe_group)`` in ``(key, start)`` order, which is what
-        lets `partition_array` find merged probe runs with a single prefix maximum. Built on first
-        use and never rebuilt.
-
-        ``group`` is carried through rather than collapsed: a group is one physical probe, and a
-        probe split across exons must have its pieces summed before the max across probes.
-        `partition_array` slots on ``(group, piece)`` for exactly that reason.
+        Returns ``(keys, start, end)`` in ``(key, start)`` order, which is what lets `partition_array`
+        find merged probe runs with a single prefix maximum. Every entry is one contiguous probe part and
+        a fragment binds the best of them, so no probe identity is carried. Built on first use and never
+        rebuilt.
         """
         cached = self._flat_probe_cache.get(space)
         if cached is not None:
@@ -229,22 +225,16 @@ class CaptureSampler:
         keys: list[int | str] = []
         starts: list[int] = []
         ends: list[int] = []
-        scales: list[float] = []
-        groups: list[int] = []
         for key, intervals in intervals_by_key.items():
             for interval in sorted(intervals, key=lambda i: (i.start, i.end)):
                 keys.append(key)
                 starts.append(interval.start)
                 ends.append(interval.end)
-                scales.append(interval.scale)
-                groups.append(interval.probe_group)
 
         flat = (
             keys,
             np.asarray(starts, dtype=np.int64),
             np.asarray(ends, dtype=np.int64),
-            np.asarray(scales, dtype=np.float64),
-            np.asarray(groups, dtype=np.int64),
         )
         self._flat_probe_cache[space] = (flat,)
         return flat
@@ -287,7 +277,7 @@ class CaptureSampler:
             return cached.copy()
 
         flat = self._flat_probes(space)
-        flat_keys, starts, ends, scales, probe_groups = flat
+        flat_keys, starts, ends = flat
         if not flat_keys:
             self._partition_memo[memo_key] = result
             return result.copy()
@@ -296,9 +286,7 @@ class CaptureSampler:
         positions = np.fromiter(
             (key_to_pos.get(key, -1) for key in flat_keys), dtype=np.int64, count=len(flat_keys)
         )
-        landscape = self._run_landscape(
-            positions, starts, ends, scales, probe_groups, eff, int(frag_len)
-        )
+        landscape = self._run_landscape(positions, starts, ends, eff, int(frag_len))
         if landscape is None:
             self._partition_memo[memo_key] = result
             return result.copy()
@@ -310,7 +298,7 @@ class CaptureSampler:
         self._partition_memo[memo_key] = result
         return result.copy()
 
-    def _run_landscape(self, positions, starts, ends, scales, probe_groups, eff, width):
+    def _run_landscape(self, positions, starts, ends, eff, width):
         """The capture landscape over merged probe runs — the one hot computation, shared by both users.
 
         `partition_array` reduces it to a per-key sum and `_extra_landscape` reads out its nonzero
@@ -318,8 +306,8 @@ class CaptureSampler:
         cannot disagree.
 
         Returns ``(buffer, run_offset, run_start, run_first, positions)`` or ``None`` if nothing is live.
-        The buffer holds ``w(s)`` — the best single probe group's total overlap — over the concatenated
-        runs, so run ``r`` covers template positions ``[run_start[r], run_start[r] + run_len[r])``.
+        The buffer holds ``w(s)`` — the best overlap with a single contiguous probe part — over the
+        concatenated runs, so run ``r`` covers template positions ``[run_start[r], run_start[r] + run_len[r])``.
         """
         key_eff = np.where(positions >= 0, eff[positions], 0)
         lo = np.maximum(0, starts - width + 1)
@@ -327,12 +315,10 @@ class CaptureSampler:
         alive = (positions >= 0) & (hi > lo)
         if not alive.any():
             return None
-        positions, starts, ends, scales, probe_groups, lo, hi = (
+        positions, starts, ends, lo, hi = (
             positions[alive],
             starts[alive],
             ends[alive],
-            scales[alive],
-            probe_groups[alive],
             lo[alive],
             hi[alive],
         )
@@ -361,35 +347,17 @@ class CaptureSampler:
         buffer = np.zeros(int(run_offset[-1]), dtype=np.float64)
         base = run_offset[run_id] - run_start[run_id]
 
-        # ── slots: a probe GROUP's rank within its run, and a piece's rank within its group ────────
+        # ── slots: a part's rank within its run ────────────────────────────────────────────────────
         # Ranking within the key does not work in the gDNA space, where one chromosome carries every
-        # probe. Within a run it is a handful, and two probes sharing a slot are then always in
-        # different runs — disjoint buffer ranges, which keeps the scatter duplicate-free.
-        order = np.lexsort((probe_groups, run_id))
-        ordered_run, ordered_group = run_id[order], probe_groups[order]
-        opens_group = np.empty(len(order), dtype=bool)
-        opens_group[0] = True
-        opens_group[1:] = (ordered_run[1:] != ordered_run[:-1]) | (
-            ordered_group[1:] != ordered_group[:-1]
-        )
-        group_first = np.flatnonzero(opens_group)
-        group_sizes = np.diff(np.r_[group_first, len(order)])
-        group_run = ordered_run[group_first]
-        opens_group_run = np.empty(len(group_first), dtype=bool)
-        opens_group_run[0] = True
-        opens_group_run[1:] = group_run[1:] != group_run[:-1]
-        run_first_group = np.maximum.accumulate(
-            np.where(opens_group_run, np.arange(len(group_first)), 0)
-        )
-        group_slot = np.empty(len(order), dtype=np.int64)
-        piece_slot = np.empty(len(order), dtype=np.int64)
-        group_slot[order] = np.repeat(np.arange(len(group_first)) - run_first_group, group_sizes)
-        piece_slot[order] = np.arange(len(order)) - np.repeat(group_first, group_sizes)
+        # probe. Within a run it is a handful, and two parts sharing a slot are then always in
+        # different runs — disjoint buffer ranges, which keeps the scatter duplicate-free. Parts are in
+        # (key, start) order and a run is a contiguous stretch of them, so the rank is an offset.
+        slot = np.arange(len(lo)) - run_first[run_id]
 
         def scatter(selection):
-            """Buffer indices and capture weights for one slot's probes."""
+            """Buffer indices and capture weights for one slot's parts."""
             s_lo, s_counts = lo[selection], counts[selection]
-            s_start, s_end, s_scale = starts[selection], ends[selection], scales[selection]
+            s_start, s_end = starts[selection], ends[selection]
             total = int(s_counts.sum())
             segment = np.repeat(np.arange(len(s_counts)), s_counts)
             within = np.arange(total) - np.repeat(np.cumsum(s_counts) - s_counts, s_counts)
@@ -399,29 +367,13 @@ class CaptureSampler:
             )
             if self.config.min_overlap > 1:
                 overlap = np.where(overlap >= self.config.min_overlap, overlap, 0)
-            weights = np.maximum(overlap, 0).astype(np.float64) * s_scale[segment]
+            weights = np.maximum(overlap, 0).astype(np.float64)
             return base[selection][segment] + position, weights
 
-        group_buffer = np.zeros_like(buffer)
-        n_pieces = int(piece_slot.max()) + 1
-        for slot in range(int(group_slot.max()) + 1):
-            in_slot = group_slot == slot
-            touched = []
-            for piece in range(n_pieces):
-                selection = in_slot & (piece_slot == piece)
-                if not selection.any():
-                    continue
-                index, weights = scatter(selection)
-                # A probe group is one physical probe; pieces split across exons must be summed at a
-                # shared start before the max across probes. Indices are unique within one
-                # (slot, piece), so `+=` accumulates across pieces without `np.add.at`.
-                group_buffer[index] += weights
-                touched.append(index)
-            if not touched:
-                continue
-            index = np.concatenate(touched)
-            buffer[index] = np.maximum(buffer[index], group_buffer[index])
-            group_buffer[index] = 0.0
+        # A fragment binds through its best single part: the max across parts, never their sum.
+        for rank in range(int(slot.max()) + 1):
+            index, weights = scatter(slot == rank)
+            buffer[index] = np.maximum(buffer[index], weights)
 
         return buffer, run_offset, run_start, run_first, positions
 
@@ -487,15 +439,12 @@ class CaptureSampler:
         eff_len = int(seq_len) - int(frag_len) + 1
         if eff_len <= 0 or frag_start < 0 or frag_start >= eff_len:
             return 0.0
-        group_scores: dict[int, float] = {}
         frag_end = frag_start + frag_len
+        score = 0
         for interval in self._get_intervals(space, key):
             overlap = min(frag_end, interval.end) - max(frag_start, interval.start)
             if overlap >= self.config.min_overlap:
-                group_scores[interval.probe_group] = (
-                    group_scores.get(interval.probe_group, 0.0) + interval.scale * overlap
-                )
-        score = max(group_scores.values(), default=0.0)
+                score = max(score, overlap)
         return self.config.off_target_weight + self.config.binding_per_base * score
 
     # -- Probe loading -----------------------------------------------------
@@ -582,10 +531,9 @@ class CaptureSampler:
                 f"[{start}, {end}) outside transcript length {tx_len}"
             )
 
-        probe_group = self._new_probe_group()
         transcript = self.transcripts[t_idx]
         blocks = transcript_to_genomic_blocks(start, end, transcript)
-        self._add_genomic_probe(str(transcript.ref), blocks, probe_group)
+        self._add_genomic_probe(str(transcript.ref), blocks)
 
     def _add_bed12_probe(
         self,
@@ -596,26 +544,21 @@ class CaptureSampler:
         # ``strand`` is parsed and ignored: the library is DNA at capture time, so a probe binds the
         # molecules of either strand that carry its sequence.
         del strand
-        self._add_genomic_probe(ref, blocks, self._new_probe_group())
+        self._add_genomic_probe(ref, blocks)
 
-    def _add_genomic_probe(
-        self,
-        ref: str,
-        blocks: Sequence[tuple[int, int]],
-        probe_group: int,
-    ) -> None:
+    def _add_genomic_probe(self, ref: str, blocks: Sequence[tuple[int, int]]) -> None:
         """One probe, as genomic blocks, mapped by overlap to gDNA and to every transcript on the
         reference whose exons it touches.
 
-        Per transcript each block is clipped to the exons it overlaps and projected into transcript
-        coordinates — overlap, not containment: a fragment carries whatever probe bases it holds, and
-        the weight is the fragment's overlap with those, exactly as it is for gDNA at an exon edge.
-        The landed pieces keep the full scale when they sit contiguously in transcript coordinates;
-        pieces separated by an intron — a nascent entity's span, like gDNA — take
-        ``gdna_split_penalty``, the model's one price for a probe that cannot hybridise as a
-        contiguous whole.
+        What each template receives is the probe's CONTIGUOUS parts in its own coordinates, because a
+        molecule hybridises through one contiguous stretch: a transcript holding the junction a probe
+        spans receives it whole (its landed pieces merge into one interval), while gDNA, a nascent
+        entity's span and an isoform without the junction receive the separate parts, and a fragment
+        there binds the better one. Per transcript each block is clipped to the exons it overlaps and
+        projected into transcript coordinates — overlap, not containment: a fragment carries whatever
+        probe bases it holds, exactly as it does for gDNA at an exon edge.
         """
-        self._add_gdna_blocks(ref, blocks, self._split_scale(blocks), probe_group)
+        self._add_gdna_blocks(ref, merge_intervals(blocks))
         lo = min(b[0] for b in blocks)
         hi = max(b[1] for b in blocks)
         for t_idx in self._transcripts_overlapping(ref, lo, hi):
@@ -623,41 +566,19 @@ class CaptureSampler:
             landed = _clip_blocks_to_transcript(transcript, blocks)
             if not landed:
                 continue
-            merged = merge_intervals(landed)
-            scale = 1.0 if len(merged) == 1 else self.config.gdna_split_penalty
-            for start, end in merged:
-                self._mrna_intervals[int(t_idx)].append(
-                    WeightedInterval(start, end, scale, probe_group)
-                )
+            for start, end in merge_intervals(landed):
+                self._mrna_intervals[int(t_idx)].append(ProbeInterval(start, end))
 
-    def _add_gdna_blocks(
-        self,
-        ref: str,
-        blocks: Sequence[tuple[int, int]],
-        scale: float,
-        probe_group: int,
-    ) -> None:
+    def _add_gdna_blocks(self, ref: str, blocks: Sequence[tuple[int, int]]) -> None:
         ref_len = self.ref_lengths.get(ref)
         if ref_len is None:
             return
         for start, end in blocks:
-            interval = _clip_interval(start, end, ref_len, scale, probe_group)
+            interval = _clip_interval(start, end, ref_len)
             if interval is not None:
                 self._gdna_intervals[ref].append(interval)
 
-    def _new_probe_group(self) -> int:
-        group = self._next_probe_group
-        self._next_probe_group += 1
-        return group
-
-    def _split_scale(self, blocks: Sequence[tuple[int, int]]) -> float:
-        if len(blocks) <= 1:
-            return 1.0
-        return self.config.gdna_split_penalty
-
-    # -- Sparse math -------------------------------------------------------
-
-    def _get_intervals(self, space: str, key: int | str) -> list[WeightedInterval]:
+    def _get_intervals(self, space: str, key: int | str) -> list[ProbeInterval]:
         if space == "mrna":
             return self._mrna_intervals.get(int(key), [])
         if space == "gdna":
@@ -671,7 +592,7 @@ class CaptureSampler:
         seq_len: int,
         frag_len: int,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Return start positions and best single-probe-group overlap weights, ascending by position.
+        """Return start positions and best single-part overlap weights, ascending by position.
 
         Reads out `_run_landscape`, the same vectorised computation `partition_array` uses, so the
         start distribution and the effective length cannot disagree. Doing it per probe in Python
@@ -697,8 +618,6 @@ class CaptureSampler:
             np.zeros(n, dtype=np.int64),
             np.fromiter((i.start for i in ordered), dtype=np.int64, count=n),
             np.fromiter((i.end for i in ordered), dtype=np.int64, count=n),
-            np.fromiter((i.scale for i in ordered), dtype=np.float64, count=n),
-            np.fromiter((i.probe_group for i in ordered), dtype=np.int64, count=n),
             np.array([eff_len], dtype=np.int64),
             width,
         )
@@ -721,8 +640,6 @@ def _validate_config(config: CaptureConfig) -> None:
         raise ValueError("capture.off_target_weight must be >= 0")
     if config.binding_per_base < 0:
         raise ValueError("capture.binding_per_base must be >= 0")
-    if config.gdna_split_penalty < 0:
-        raise ValueError("capture.gdna_split_penalty must be >= 0")
     if config.min_overlap < 1:
         raise ValueError("capture.min_overlap must be >= 1")
 
@@ -799,18 +716,12 @@ def _parse_bed_list(text: str) -> list[int]:
     return [int(part) for part in text.rstrip(",").split(",") if part]
 
 
-def _clip_interval(
-    start: int,
-    end: int,
-    length: int,
-    scale: float,
-    probe_group: int,
-) -> WeightedInterval | None:
+def _clip_interval(start: int, end: int, length: int) -> ProbeInterval | None:
     start = max(0, int(start))
     end = min(int(length), int(end))
-    if end <= start or scale <= 0:
+    if end <= start:
         return None
-    return WeightedInterval(start, end, float(scale), int(probe_group))
+    return ProbeInterval(start, end)
 
 
 # Interval helpers (merge_intervals / project_genomic_block(s)_to_transcript) live in

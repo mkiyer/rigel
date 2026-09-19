@@ -305,7 +305,6 @@ def _donor_sim_params(donor_dir: Path, name: str) -> dict:
         "capture_knobs": {
             "off_target_weight": 1.0,
             "binding_per_base": 10.0,
-            "gdna_split_penalty": 0.2,
             "min_overlap": 1,
             "probe_length": 120,
             "capture_fraction": 1.0,
@@ -380,11 +379,11 @@ def _toy_probes(spec: "ToySpec", out: Path, knobs: dict) -> str:
             #
             # And tiled per exon, so every probe abuts the intron|exon boundaries and none straddles a
             # sj. Probes are written in transcript space, so a probe spanning an internal sj offset has
-            # a genomic footprint in two blocks, and `capture/sampler._split_scale` then multiplies
-            # every gDNA fragment overlapping it by ``gdna_split_penalty`` — suppressing exactly the
-            # population that spans an intron|exon boundary. Per-exon tiling leaves every probe inside
-            # one exon, unsplit, ending exactly on the boundary, so a boundary-crossing fragment takes
-            # the full binding weight for its exon-side overlap. It is also the honest geometry: a
+            # a genomic footprint in two blocks, and a gDNA fragment then binds only the better of the
+            # two parts — the population that spans an intron|exon boundary loses the other half.
+            # Per-exon tiling leaves every probe inside one exon, unsplit, ending exactly on the
+            # boundary, so a boundary-crossing fragment takes the full binding weight for its exon-side
+            # overlap. It is also the honest geometry: a
             # probe boundary at an exon end is what a real panel produces, and the split-probe case is
             # a separate population worth its own rung.
             off = 0
@@ -452,7 +451,6 @@ def run_toy(
             probe_format="transcript",
             off_target_weight=float(k["off_target_weight"]),
             binding_per_base=float(k["binding_per_base"]),
-            gdna_split_penalty=float(k["gdna_split_penalty"]),
             min_overlap=int(k["min_overlap"]),
         )
 

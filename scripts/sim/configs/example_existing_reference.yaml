@@ -92,7 +92,6 @@ capture:
   probe_format: auto         # auto | transcript (TSV: transcript_id start end, 0-based) | bed12
   off_target_weight: 1.0     # baseline weight for every legal fragment start
   binding_per_base: 10.0     # extra weight per overlapping probe base
-  gdna_split_penalty: 0.2    # multiplier for probes split by introns when projected to gDNA/pre-mRNA
   min_overlap: 1             # min fragment/probe overlap (bp) to add capture weight
   configs:
     - {label: off, enabled: false}                 # capture-off arm
