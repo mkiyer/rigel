@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import collections
 import dataclasses
-import pathlib
-import tempfile
 from types import SimpleNamespace
 
 import numpy as np
@@ -47,8 +45,8 @@ TOLERANCE = 0.03
 
 
 def _strand_model(strand_specificity: float, *, r1_sense: bool = False):
-    tmp = pathlib.Path(tempfile.mkdtemp())
-    scenario = Scenario("sense", genome_length=9000, seed=SEED, work_dir=tmp / "s")
+    # the scenario owns its working directory, so `cleanup()` below removes it
+    scenario = Scenario("sense", genome_length=9000, seed=SEED)
     for gene, strand, transcripts in GENES:
         scenario.add_gene(gene, strand, transcripts)
     result = scenario.build_oracle(
@@ -202,8 +200,8 @@ def _deconvolve(*, r1_sense: bool):
     (`TRAPS: could-the-arm-have-fired`). The true fraction is therefore counted off the oracle BAM's own
     read names and asserted, rather than assumed from the knob.
     """
-    tmp = pathlib.Path(tempfile.mkdtemp())
-    scenario = Scenario("proto", genome_length=9000, seed=SEED, work_dir=tmp / "s")
+    # the scenario owns its working directory, so `cleanup()` below removes it
+    scenario = Scenario("proto", genome_length=9000, seed=SEED)
     for gene, strand, transcripts in GENES:
         scenario.add_gene(gene, strand, transcripts)
     result = scenario.build_oracle(
@@ -286,8 +284,8 @@ def test_the_DECONVOLUTION_recovers_the_SAME_BIOLOGY_under_EITHER_protocol():
 
 def _r1_orientation(*, r1_sense: bool, strand_specificity: float = 0.8):
     """``{qname: R1 is_reverse}`` for one protocol, on a fixed RNG stream."""
-    tmp = pathlib.Path(tempfile.mkdtemp())
-    scenario = Scenario("mirror", genome_length=9000, seed=SEED, work_dir=tmp / "s")
+    # the scenario owns its working directory, so `cleanup()` below removes it
+    scenario = Scenario("mirror", genome_length=9000, seed=SEED)
     for gene, strand, transcripts in GENES:
         scenario.add_gene(gene, strand, transcripts)
     result = scenario.build_oracle(

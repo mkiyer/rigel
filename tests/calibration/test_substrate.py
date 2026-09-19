@@ -300,11 +300,8 @@ SEED = 4321
 
 
 @pytest.fixture(scope="module")
-def scanned():
-    import tempfile
-    from pathlib import Path
-
-    work = Path(tempfile.mkdtemp())
+def scanned(tmp_path_factory):
+    work = tmp_path_factory.mktemp("subcons")
     sc = Scenario("subcons", genome_length=6000, seed=SEED, work_dir=work / "subcons")
     sc.add_gene("g1", "+", [{"t_id": "t1", "exons": [(300, 600), (900, 1200)], "abundance": 60}])
     sc.add_gene("g2", "-", [{"t_id": "t2", "exons": [(3000, 3300), (3700, 4000)], "abundance": 40}])
