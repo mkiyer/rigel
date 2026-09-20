@@ -103,27 +103,7 @@ class TestAntisenseIntronicOverlap:
         if nrna > 0:
             assert_nrna_detected(bench, nrna)
 
-    @pytest.mark.parametrize(
-        "ss",
-        [
-            pytest.param(
-                s,
-                marks=pytest.mark.xfail(
-                    strict=True,
-                    reason="ISSUES: nested-antisense-leak-under-the-sane-ruler — with the EM's ruler "
-                    "honest (a gDNA-free library contracts nothing, DESIGN.md §7.2) the strand-flipped "
-                    "intronic nascent fragments over t2 are assigned to it: 24 of 2,000 at SS 0.9, 124 at "
-                    "0.65. The old bound was met only because a fabricated reference had contracted the "
-                    "host's nascent entity 3.9×; the EM's assignment at an unwitnessed nested transcript "
-                    "is the defect, and it is EM-side",
-                ),
-            )
-            if s < 1.0
-            else s
-            for s in STRAND_LEVELS
-        ],
-        ids=[f"ss_{s}" for s in STRAND_LEVELS],
-    )
+    @pytest.mark.parametrize("ss", STRAND_LEVELS, ids=[f"ss_{s}" for s in STRAND_LEVELS])
     def test_strand_sweep_with_nrna(self, request, scenario, ss):
         """Nascent RNA at reduced strand specificity, which is where the separating channel weakens.
 
@@ -133,6 +113,13 @@ class TestAntisenseIntronicOverlap:
         strand, so whatever the solver cannot place on the host lands somewhere wrong. The bound is
         left tight (5 at SS ≥ 0.9, 20 below) rather than tracking the current answer, so a regression
         shows.
+
+        ⭐ Both sub-1.0 rungs were strict xfails (`ISSUES: nested-antisense-leak-under-the-sane-ruler`)
+        and the RNA prior's restoration closed them: 124 → 14 at SS 0.65 and 24 → 2 at SS 0.9. The
+        leaked fragments were the host's NASCENT entity's, denied their share of the locus's RNA
+        pseudocount and landing on the one annotated transcript that could also explain them — so the
+        "EM-side assignment at an unwitnessed nested transcript" the entry named was downstream of the
+        allocation rule, not of the ruler. The residue at SS 0.65 is real and inside the bound.
         """
         bench = build_and_run(
             scenario,
@@ -314,22 +301,18 @@ class TestAntisenseIntronicMultiExonT2:
         t2 = next(t for t in bench.transcripts if t.t_id == "t2")
         assert t2.observed <= 2, f"T2 mRNA leak with multi-exon T2: {t2.observed:.0f}"
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="ISSUES: antisense-prior-assembly-casualty — ⛔ A PRIOR-ASSEMBLY CASUALTY, NOT A CALIBRATION OR MESSAGE-LAYER DEFECT — owner diagnosis, "
-        "2026-08-18, measured under the relay policy of the day. `assemble_priors` pins synthetic nascent RNA at Dirichlet alpha = 0 "
-        "(EQUATIONS.md §9b): gDNA gets an additive prior, annotated RNA a multiplicative one, and "
-        "nascent must out-evidence both. On this scenario 1,600 true nascent fragments yield only "
-        "~536 called, and with the transfer policy the messages recover MORE RNA overall "
-        "(536 vs 334 muted; false gDNA 879 vs 1,144) — the recovered mass lands on the annotated "
-        "antisense t2 (80 > the 50 limit) because the alpha = 0 rule forbids it landing on nascent. "
-        "Measured: the leak is 80 under every single message-operator ablation and passes only with "
-        "messages fully off, while BOTH pool totals are better messages-on — so the test's threshold "
-        "is a casualty of a change that is net-helpful, and the repair belongs in the prior "
-        "assembler's nascent handling, not in calibration.",
-    )
     def test_nrna_multiexon_t2_low_ss(self, scenario):
-        """nRNA + multi-exon T2 + SS=0.65 (worst case)."""
+        """nRNA + multi-exon T2 + SS=0.65 (worst case).
+
+        ⭐ The gate `ISSUES: nascent-gets-no-rna-prior` owned, and what closing it is worth. This was
+        a strict xfail reading 70 fragments of leak against the limit of 50: the host's synthetic
+        nascent entity was denied its share of the locus's RNA pseudocount, so the nascent fragments
+        it should have held landed on the annotated antisense `t2` — the only other component that
+        could explain them. With the prior distributed over every RNA component the leak is **0**.
+
+        The bound stays at 50 rather than tightening to the current answer, so the next regression
+        shows as a number rather than as a pass.
+        """
         bench = build_and_run(
             scenario,
             nrna_abundance=50,

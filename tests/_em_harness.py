@@ -10,7 +10,6 @@ has one.
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 
 from rigel.locus import Locus, MultiLocus
 from rigel.scored_fragments import ScoredFragments
@@ -32,9 +31,9 @@ def _make_locus_em_data(
     gdna_log_lik=0.0,
     gdna_prior_count=1.0,
 ):
-    """Build (ScoredFragments, [Locus], gdna_prior_count, index) for batch EM tests.
+    """Build (ScoredFragments, [Locus], gdna_prior_count) for batch EM tests.
 
-    Returns a tuple (em_data, loci, gdna_prior_count_arr, index) suitable for
+    Returns a tuple (em_data, loci, gdna_prior_count_arr) suitable for
     ``run_batch_locus_em()``.
 
     Parameters
@@ -121,40 +120,20 @@ def _make_locus_em_data(
 
     gdna_prior_count_arr = np.array([gdna_prior_count if include_gdna else 0.0], dtype=np.float64)
 
-    index = _MockBatchIndex(n_t)
-
-    return em_data, loci, gdna_prior_count_arr, index
+    return em_data, loci, gdna_prior_count_arr
 
 
-class _MockBatchIndex:
-    """Minimal index mock for batch locus EM tests."""
-
-    def __init__(self, num_transcripts):
-        self.num_transcripts = num_transcripts
-        self.t_df = pd.DataFrame(
-            {
-                "t_id": [f"t{i}" for i in range(num_transcripts)],
-                "ref": ["chr1"] * num_transcripts,
-                "start": np.zeros(num_transcripts, dtype=np.int64),
-                "end": np.full(num_transcripts, 10000, dtype=np.int64),
-                "length": np.full(num_transcripts, 1000, dtype=np.int64),
-                "is_nrna": np.zeros(num_transcripts, dtype=bool),
-                "is_synthetic": np.zeros(num_transcripts, dtype=bool),
-            }
-        )
-
-
-def _run_and_assign(rc, em_data, loci=None, index=None, gdna_prior_count=None, *, em_iterations=10):
+def _run_and_assign(rc, em_data, loci=None, gdna_prior_count=None, *, em_iterations=10):
     """Run batch locus EM via the partitioned path. Returns pool_counts dict.
 
-    Accepts either the tuple form (em_data, loci, gdna_prior_count, index)
-    separately, or the tuple returned by ``_make_locus_em_data`` as ``em_data``.
+    Accepts either the tuple form (em_data, loci, gdna_prior_count) separately,
+    or the tuple returned by ``_make_locus_em_data`` as ``em_data``.
     """
     from rigel.locus_partition import partition_and_free
 
     # Unpack tuple form from _make_locus_em_data
     if isinstance(em_data, tuple):
-        em_data, loci, gdna_prior_count, index = em_data
+        em_data, loci, gdna_prior_count = em_data
 
     # Partition ScoredFragments into per-locus LocusPartition objects
     partitions = partition_and_free(em_data, loci)
@@ -180,7 +159,6 @@ def _run_and_assign(rc, em_data, loci=None, index=None, gdna_prior_count=None, *
         partition_tuples,
         locus_t_lists,
         gdna_prior_count,
-        index,
         em_iterations=em_iterations,
     )
     rc._gdna_em_total += total_gdna

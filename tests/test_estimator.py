@@ -1036,7 +1036,6 @@ def test_equal_rna_likelihoods_split_evenly():
         partition_tuples=[_partition(n_units=n_units, log_liks=(0.0, 0.0))],
         locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
-        index=None,
     )
 
     assert total_gdna == pytest.approx(0.0)
@@ -1052,7 +1051,6 @@ def test_enabled_gdna_component_absorbs_likelihood_mass_without_prior_count():
         partition_tuples=[_partition(n_units=n_units, log_liks=(-1.0, -1.0), gdna_log_lik=0.0)],
         locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
-        index=None,
     )
 
     assert total_gdna > 0.8 * n_units
@@ -1069,7 +1067,6 @@ def test_gdna_effective_length_downweights_gdna_component():
         partition_tuples=[partition],
         locus_transcript_indices=[np.array([0], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
-        index=None,
         gdna_eff_len=np.array([1.0], dtype=np.float64),
     )
 
@@ -1078,7 +1075,6 @@ def test_gdna_effective_length_downweights_gdna_component():
         partition_tuples=[partition],
         locus_transcript_indices=[np.array([0], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
-        index=None,
         gdna_eff_len=np.array([100.0], dtype=np.float64),
     )
 
@@ -1096,7 +1092,6 @@ def test_gdna_em_llr_bias_favors_gdna_assignment():
         partition_tuples=[partition],
         locus_transcript_indices=[np.array([0], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
-        index=None,
         gdna_eff_len=np.array([1.0], dtype=np.float64),
     )
     _t, _r, gdna_neg = _estimator(1, gdna_em_llr_bias=-2.0).run_batch_locus_em_partitioned(**kw)
@@ -1120,7 +1115,6 @@ def test_aggregate_rna_prior_reduces_gdna_share_without_isoform_floor():
         locus_transcript_indices=[np.array([0], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
         rna_prior_count=np.array([0.0], dtype=np.float64),
-        index=None,
         gdna_eff_len=np.array([1.0], dtype=np.float64),
     )
 
@@ -1130,7 +1124,6 @@ def test_aggregate_rna_prior_reduces_gdna_share_without_isoform_floor():
         locus_transcript_indices=[np.array([0], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
         rna_prior_count=np.array([10.0], dtype=np.float64),
-        index=None,
         gdna_eff_len=np.array([1.0], dtype=np.float64),
     )
 
@@ -1147,7 +1140,6 @@ def test_grouped_priors_inactive_without_structural_gdna_candidate():
         locus_transcript_indices=[np.array([0], dtype=np.int32)],
         gdna_prior_count=np.array([100.0], dtype=np.float64),
         rna_prior_count=np.array([100.0], dtype=np.float64),
-        index=None,
     )
 
     assert total_gdna == pytest.approx(0.0)
@@ -1162,7 +1154,6 @@ def test_assignment_outputs_follow_partition_units():
         partition_tuples=[_partition(n_units=n_units, log_liks=(0.0, -4.0))],
         locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
-        index=None,
         emit_assignments=True,
     )
 
@@ -1203,19 +1194,16 @@ def test_gdna_candidates_are_derived_from_the_partition():
         [spliced_part],
         locus_t_lists,
         np.zeros(1),
-        index=None,
     )
     g_uns, _, _ = _estimator(2, mode="map").run_batch_locus_em_partitioned(
         [unspliced_part],
         locus_t_lists,
         np.zeros(1),
-        index=None,
     )
     g_no, _, _ = _estimator(2, mode="map").run_batch_locus_em_partitioned(
         [nogdna_part],
         locus_t_lists,
         np.zeros(1),
-        index=None,
     )
 
     assert g_spl == 0.0, "spliced partition has no gDNA candidates"
@@ -1233,7 +1221,6 @@ def test_positive_gdna_prior_produces_finite_outputs():
         partition_tuples=[_partition(n_units=n_units, log_liks=(-1.0, -2.0), gdna_log_lik=-1.0)],
         locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
         gdna_prior_count=np.array([5.0], dtype=np.float64),
-        index=None,
     )
 
     # Outputs must be finite and sum to total fragments.
@@ -1245,30 +1232,26 @@ def test_positive_gdna_prior_produces_finite_outputs():
     assert assigned == pytest.approx(30.0, rel=1e-9)
 
 
-# ── SYNTHETIC NASCENT ENTITIES GET NO RNA PRIOR ──────────────────────────────────────────────────
+# ── EVERY RNA COMPONENT GETS ITS SHARE OF THE RNA PRIOR ──────────────────────────────────────────
 #
-# A synthetic nascent entity is a shadow span the INDEX manufactured; no annotation asserts it exists.
-# The null hypothesis is therefore that it is ABSENT, and it earns mass only from fragments the data
-# cannot explain any other way. These gates pin that behaviour and, just as importantly, pin the two
-# things it must NOT do: kill an entity the data supports, and disturb a locus that has none.
+# The RNA pseudocount is distributed over the locus's RNA components in proportion to the evidence
+# each already carries, and NO component is singled out for zero (owner, 2026-09-19;
+# `EQUATIONS.md` §9b). RNA is RNA: whether the annotation happens to assert a given RNA component is
+# not a fact about this locus's composition, so the allocation does not read it.
+#
+# Its predecessor withheld the share from SYNTHETIC nascent entities — spans the index manufactured —
+# on the null that they are absent until the data proves otherwise. That made the prior's factor
+# un-common over the pool, so the prior ALONE redistributed RNA between entities the data cannot tell
+# apart. These gates pin the restored rule and the one guard it keeps: a component with no evidence
+# still cannot be revived by prior mass, because the weights are the evidence.
 
 
-class _StubIndex:
-    """The minimum `run_batch_locus_em_partitioned` reads: `t_df["is_synthetic"]`."""
-
-    def __init__(self, flags):
-        import pandas as pd
-
-        self.t_df = pd.DataFrame({"is_synthetic": np.asarray(flags, dtype=bool)})
-
-
-def _run(est, partition, t_idx, *, index=None, rna_prior=0.0, gdna_prior=0.0):
+def _run(est, partition, t_idx, *, rna_prior=0.0, gdna_prior=0.0):
     return est.run_batch_locus_em_partitioned(
         partition_tuples=[partition],
         locus_transcript_indices=[np.asarray(t_idx, dtype=np.int32)],
         gdna_prior_count=np.array([gdna_prior], dtype=np.float64),
         rna_prior_count=np.array([rna_prior], dtype=np.float64),
-        index=index,
     )
 
 
@@ -1332,7 +1315,6 @@ def test_a_transcript_with_no_start_position_cannot_emit(mode):
         locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
         rna_prior_count=np.array([0.0], dtype=np.float64),
-        index=None,
         emit_locus_stats=True,
     )
     np.testing.assert_allclose(est.em_counts.sum(axis=1), [0.0, 200.0], atol=1e-9)
@@ -1345,7 +1327,6 @@ def test_a_transcript_with_no_start_position_cannot_emit(mode):
         partition_tuples=[_mixed_partition((0,), 100, gdna_log_lik=0.0)],
         locus_transcript_indices=[np.array([0], dtype=np.int32)],
         gdna_prior_count=np.array([0.0], dtype=np.float64),
-        index=None,
         gdna_eff_len=np.array([100.0], dtype=np.float64),
     )
     assert gdna[0] == pytest.approx(100.0) and rna[0] == pytest.approx(0.0)
@@ -1356,120 +1337,164 @@ def test_a_transcript_with_no_start_position_cannot_emit(mode):
     assert np.all(np.isfinite(est.em_counts)) and est.em_counts.sum() == 0.0
 
 
-@pytest.mark.parametrize("mode", ["map", "vbem"])
-def test_a_locus_with_no_synthetic_component_is_BIT_IDENTICAL(mode):
-    """The control. The rule must be invisible where it does not apply — and BIT-identical, not
-    close: the C++ skips the annotated/synthetic split entirely when the mask is empty, and that is
-    what makes every other number here attributable (TRAPS: byte-identity-gate)."""
-    outs = []
-    for index in (None, _StubIndex([False, False])):
-        est = _estimator(2, mode=mode)
-        _run(
-            est,
-            _partition(n_units=100, log_liks=(0.0, -0.5), gdna_log_lik=-1.0),
-            [0, 1],
-            index=index,
-            rna_prior=50.0,
-            gdna_prior=20.0,
-        )
-        outs.append(est.em_counts.sum(axis=1).copy())
-    np.testing.assert_array_equal(outs[0], outs[1])
+_SHAPES = {
+    # every component holds fragments only IT can explain, so none is pruned and the within-RNA
+    # split is genuinely at stake
+    "tied2": ((100, 100), 0),
+    "shared2": ((60, 60), 80),
+    "skewed3": ((60, 40, 20), 80),
+    "wide4": ((50, 40, 30, 20), 60),
+}
 
 
-@pytest.mark.parametrize("mode", ["map", "vbem"])
-def test_a_SHARED_ONLY_synthetic_entity_LOSES_mass_to_the_annotated_one(mode):
-    """The zombie. Every fragment it holds is equally well explained by the annotated transcript,
-    so it has no evidence of its own and the prior no longer props it up."""
-    part = _partition(n_units=200, log_liks=(0.0, 0.0), gdna_log_lik=-2.0)
-    counts = {}
-    for tag, index in (("shipped", None), ("gated", _StubIndex([False, True]))):
-        est = _estimator(2, mode=mode)
-        _run(est, part, [0, 1], index=index, rna_prior=100.0, gdna_prior=10.0)
-        counts[tag] = est.em_counts.sum(axis=1).copy()
-    assert counts["gated"][1] < counts["shipped"][1], (
-        f"the synthetic component did not lose mass: {counts}"
+def _counts_against_prior(shape, *, mode, priors=(0.0, 500.0)):
+    """The same locus solved at two RNA-prior magnitudes. No gDNA candidate anywhere
+    (`_mixed_partition`'s default `gdna_log_lik = -inf`), so `theta` normalises over the RNA
+    components alone and the prior's only possible effect is the one under test."""
+    unique, shared = shape
+    part = _mixed_partition(unique, shared)
+    out = []
+    for rna_prior in priors:
+        est = _estimator(len(unique), mode=mode)
+        _run(est, part, list(range(len(unique))), rna_prior=rna_prior)
+        out.append(est.em_counts.sum(axis=1).copy())
+    return out
+
+
+@pytest.mark.parametrize("shape", list(_SHAPES), ids=list(_SHAPES))
+def test_the_RNA_prior_moves_NO_component_s_SHARE_of_the_RNA_pool_under_MAP(shape):
+    """The restored rule's promise, stated where it is EXACTLY true.
+
+    The RNA pseudocount reaches every RNA component as the same factor `(1 + rna_prior/rna_count)`,
+    and under MAP `theta` is proportional to those counts — so the factor cancels and no prior
+    magnitude whatsoever can move the answer. That is what "distributed over the RNA components, none
+    singled out for zero" MEANS, and it is exactly what a per-component eligibility test breaks: hold
+    one component out and the factor stops being common, so the prior ALONE redistributes RNA between
+    entities the data cannot tell apart.
+
+    Written first and verified failing against the rule it replaced. On a tied two-component locus,
+    with one component flagged synthetic, a prior of 500 did not merely tilt the split: it drove that
+    component from 100.0 fragments to 2.79e-298 and handed all 200 to the other, because the withheld
+    factor compounds once per M-step over 200 iterations.
+
+    ⛔ The equality is EXACT, not approximate. One common multiply leaves `theta` bit for bit where it
+    was; anything that reads a component would not.
+    """
+    none, large = _counts_against_prior(_SHAPES[shape], mode="map")
+    np.testing.assert_array_equal(
+        large, none, err_msg=f"the RNA prior redistributed the RNA pool: {none} -> {large}"
     )
-    assert counts["gated"][0] > counts["shipped"][0], (
-        f"the annotated component did not gain what the synthetic lost: {counts}"
+
+
+@pytest.mark.parametrize("shape", list(_SHAPES), ids=list(_SHAPES))
+def test_under_VBEM_the_prior_moves_the_split_only_by_the_DIGAMMA_CORRECTION(shape):
+    """The same claim under the shipped mode, where it is exact only in the limit — and the bound is
+    DERIVED rather than chosen.
+
+    VBEM's M-step is `theta_i ∝ exp(psi(alpha_i))`, which is NOT scale-equivariant, so a common factor
+    `c = 1 + rna_prior/rna_count` on every RNA alpha does not cancel the way it does under MAP. With
+    `psi(x) = log x − 1/(2x) + O(x^-2)`,
+
+        psi(c·alpha_i) − psi(alpha_i) = log c + (1 − 1/c)/(2·alpha_i) + O(alpha_i^-2)
+
+    and `log c` IS common, so it normalises away. What is left is a per-component residual
+    `(1 − 1/c)/(2·alpha_i)`, largest at the smallest alpha and bounded by `1/(2·alpha_min)` since
+    `c ≥ 1`. So the uniformity of the allocation survives; only the M-step's own nonlinearity moves
+    the shares, by an amount that vanishes as the locus deepens.
+
+    ⭐ It still separates the two rules by orders of magnitude, which is what a gate is for. Measured
+    on `skewed3`: this residual moves a share by 1.4e-3 against a bound of 1.5e-2, while the
+    eligibility rule this replaced moved a component by 100 % of its mass.
+    """
+    none, large = _counts_against_prior(_SHAPES[shape], mode="vbem")
+    share_none, share_large = none / none.sum(), large / large.sum()
+    bound = 1.0 / (2.0 * none.min())
+    moved = np.abs(share_large / share_none - 1.0)
+    assert moved.max() <= bound, (
+        f"the prior moved a share by {moved.max():.3e}, beyond the digamma residual's "
+        f"bound 1/(2·alpha_min) = {bound:.3e}: {none} -> {large}"
     )
 
 
 @pytest.mark.parametrize("mode", ["map", "vbem"])
-def test_a_synthetic_entity_the_DATA_SUPPORTS_still_survives(mode):
-    """The gate that stops this becoming "kill all nascent RNA". A rule that zeroes everything
-    passes the zombie test above; only this one separates the two. The synthetic component is the
-    strictly better explanation here, and it must keep the mass."""
-    est = _estimator(2, mode=mode)
+def test_a_SHADOW_SPAN_STILL_LOSES_to_the_transcript_it_shadows(mode):
+    """What now guards against a zombie, and the whole of what the restoration cost.
+
+    The prior used to help: withholding it from a synthetic component multiplied that component down
+    by `(1 + rna_prior/annotated_count)` every M-step. It no longer does, so the decay rests on the
+    LIKELIHOOD alone — and the likelihood is sufficient for free. A shadow span is longer than the
+    transcript it shadows, so at equal per-fragment likelihood its yield ratio `kappa = w_N/w_T` is
+    strictly below 1 and a component with no evidence of its own decays geometrically at that rate
+    (`EQUATIONS.md` §9b).
+
+    Component 1 here explains nothing component 0 does not, and its yield is 10× longer. It must lose
+    the shared mass even with a large RNA prior in play.
+    """
+    est = _yield_estimator([1000.0, 10000.0], mode=mode)
+    _run(
+        est,
+        _partition(n_units=200, log_liks=(0.0, 0.0), gdna_log_lik=-2.0),
+        [0, 1],
+        rna_prior=100.0,
+        gdna_prior=10.0,
+    )
+    counts = est.em_counts.sum(axis=1)
+    assert counts[1] < 0.01 * counts.sum(), (
+        f"a shadow span with no evidence of its own kept mass: {counts}"
+    )
+
+
+@pytest.mark.parametrize("mode", ["map", "vbem"])
+def test_a_component_the_DATA_SUPPORTS_keeps_its_mass(mode):
+    """The gate that stops the one above becoming "kill every long component". A rule that zeroes
+    anything with a long yield passes it; only this separates the two. Component 1 is the strictly
+    better explanation here — a 10× longer yield against a likelihood advantage of `e^8` — and it
+    must keep the mass."""
+    est = _yield_estimator([1000.0, 10000.0], mode=mode)
     _run(
         est,
         _partition(n_units=200, log_liks=(-8.0, 0.0), gdna_log_lik=-8.0),
         [0, 1],
-        index=_StubIndex([False, True]),
         rna_prior=100.0,
         gdna_prior=10.0,
     )
     counts = est.em_counts.sum(axis=1)
     assert counts[1] > 0.9 * counts.sum(), (
-        f"a synthetic entity with decisive likelihood support was suppressed anyway: {counts}"
+        f"a component with decisive likelihood support was suppressed anyway: {counts}"
     )
 
 
 @pytest.mark.parametrize("mode", ["map", "vbem"])
-def test_an_ALL_SYNTHETIC_locus_takes_NO_rna_prior(mode):
-    """The degenerate locus of the derivation: no annotated component means no eligible recipient,
-    so the RNA prior is 0 and the pool must outcompete gDNA unaided. It must not silently fall back
-    to handing the prior to the synthetic components after all."""
-    part = _partition(n_units=100, log_liks=(0.0, 0.0), gdna_log_lik=0.0)
-    res = {}
-    for tag, rna_prior in (("no_prior", 0.0), ("big_prior", 500.0)):
-        est = _estimator(2, mode=mode)
-        _total, _rna, gdna = _run(
-            est, part, [0, 1], index=_StubIndex([True, True]), rna_prior=rna_prior, gdna_prior=10.0
-        )
-        res[tag] = (est.em_counts.sum(axis=1).copy(), float(gdna[0]))
-    np.testing.assert_allclose(res["no_prior"][0], res["big_prior"][0], rtol=1e-9, atol=1e-9)
-    assert res["no_prior"][1] == pytest.approx(res["big_prior"][1], rel=1e-9), (
-        "the RNA prior reached an all-synthetic locus and moved the gDNA split"
-    )
+def test_a_ZERO_EVIDENCE_component_is_NOT_revived_by_the_prior(mode):
+    """The guard the restoration keeps, and the reason the weights are the evidence rather than a
+    flat share (`EQUATIONS.md` §9b.1). `out[i]` is proportional to `raw[i]`, so `out[i] = 0` is an
+    ABSORBING STATE that no prior magnitude escapes — and the RNA pseudocount is a FRAGMENT COUNT,
+    tens to thousands on an expressed locus, so a flat share would hand every component far more than
+    the ~0.16–0.47 alpha units at which one activates.
+
+    Component 1 is unreachable: it is a candidate for no unit at all, so its warm start is 0.
+    """
+    part = _mixed_partition((200, 0), 0, gdna_log_lik=-2.0)
+    est = _yield_estimator([1000.0, 1000.0], mode=mode)
+    _run(est, part, [0, 1], rna_prior=5000.0, gdna_prior=10.0)
+    counts = est.em_counts.sum(axis=1)
+    assert counts[1] == 0.0, f"a component with no evidence was revived by prior mass: {counts}"
 
 
-def test_is_synthetic_is_read_NOT_is_nrna():
-    """A single-exon annotated transcript carries `is_nrna = True` and is simultaneously the
-    nascent and the mature form of a REAL gene. It must keep its prior. The estimator must key on
-    `is_synthetic` alone, so an index carrying only `is_nrna` changes nothing."""
-    import pandas as pd
-
-    class _NrnaOnlyIndex:
-        def __init__(self):
-            self.t_df = pd.DataFrame({"is_nrna": [False, True]})
-
-    est = AbundanceEstimator(num_transcripts=2, em_config=EMConfig(mode="map"))
-    np.testing.assert_array_equal(est._t_is_synthetic(_NrnaOnlyIndex(), 2), np.zeros(0, np.uint8))
-    np.testing.assert_array_equal(
-        est._t_is_synthetic(_StubIndex([False, False]), 2), np.zeros(0, np.uint8)
-    )
-    np.testing.assert_array_equal(
-        est._t_is_synthetic(_StubIndex([False, True]), 2), np.array([0, 1], np.uint8)
-    )
-
-
-# The one invariant this design rests on has no test, and cannot have one from Python.
+# The per-M-step identity this design rests on is gated in C++, not here.
 #
 # `apply_grouped_prior_update` guarantees, FOR A GIVEN raw_counts VECTOR, that the RNA components sum
-# to `rna_count + rna_prior` — so withholding the prior from synthetic components redistributes mass
-# strictly WITHIN the RNA pool. It is asserted only in a C++ comment.
+# to `rna_count + rna_prior`, so the RNA prior is redistributed strictly WITHIN the RNA pool and the
+# library gDNA fraction cannot move by this rule. The function is `static` in `em_solver.cpp`; the
+# test-only binding `_apply_grouped_prior_update_test` reaches it and
+# `tests/native/test_grouped_prior_update.py` holds the identity.
 #
-# It is a PER-M-STEP algebraic identity, NOT an end-to-end one, and conflating the two has produced a
-# wrong test twice. End to end the gDNA total legitimately DEPENDS on `rna_prior`: setting the
+# ⚠ It is a PER-M-STEP algebraic identity, NOT an end-to-end one, and conflating the two has produced
+# a wrong test three times. End to end the gDNA total legitimately DEPENDS on `rna_prior`: setting the
 # gDNA:RNA split is the prior's whole purpose (`gdna_total = gdna_count + gdna_prior`,
 # `rna_total = rna_count + rna_prior`), and a larger RNA prior shifts theta, hence the E-step, hence
-# the next iteration's `gdna_count`. A test asserting "the gDNA total is invariant to rna_prior" is
-# therefore asserting something false by design, and it fails on the no-synthetic configuration too.
-#
-# The function is `static` in em_solver.cpp, so nothing can call it directly. Exposing it behind a
-# test-only binding — the executable-specification pattern this repo already uses for the accumulator
-# — is the way to gate the identity, and it is a prerequisite for per-transcript prior work, since a
-# per-transcript vector makes the identity harder rather than easier to hold.
+# the next iteration's `gdna_count`. A test asserting "the library gDNA fraction is invariant to
+# rna_prior" is asserting something FALSE BY DESIGN.
 
 
 # ── ``EMConfig.warm_start`` — what the EM's initial ``theta`` is derived FROM ─────────────────────
@@ -1542,7 +1567,6 @@ def _warm_start_run(
         gdna_prior_count=np.array([gdna_prior], dtype=np.float64),
         rna_prior_count=np.array([rna_prior], dtype=np.float64),
         rna_prior_weight=None if weight is None else np.asarray(weight, dtype=np.float64),
-        index=None,
     )
     return est.em_counts.sum(axis=1)
 

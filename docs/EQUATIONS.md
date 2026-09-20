@@ -648,53 +648,100 @@ by a measurement that places it, and none ships.
 
 ---
 
-## 9b. The EM's RNA prior, and why a synthetic nascent entity gets none
+## 9b. The EM's RNA prior goes to every RNA component, in proportion to its evidence
 
 `calibration/priors.assemble_priors` hands the EM two per-locus pseudocounts;
 `native/em_solver.cpp:apply_grouped_prior_update` applies them. The gDNA one lands additively on the
-single gDNA component; the RNA one is shared among the RNA components in proportion to the evidence each
-already carries:
+single gDNA component; the RNA one is shared among the RNA components in proportion to the evidence
+each already carries:
 
-    rna_count      = Σ_{i ≠ g} raw[i]                       the whole RNA pool
-    annotated_count = Σ_{i ≠ g, i not synthetic} raw[i]      the prior's eligible recipients
+    rna_count = Σ_{i ≠ g} raw[i]                     the whole RNA pool, and the whole set of recipients
 
     out[g] = raw[g] + gdna_prior
-    out[i] = raw[i] · (1 + rna_prior/annotated_count)        i annotated
-    out[i] = raw[i]                                          i SYNTHETIC nascent
+    out[i] = raw[i] · (1 + rna_prior/rna_count)      every i ≠ g
 
-Summed over the RNA components this is exactly `rna_count + rna_prior` either way, so the gDNA:RNA split
-is unchanged and the rule redistributes strictly within the RNA pool. ⛔ That is a per-M-step identity
+Summed over the RNA components this is exactly `rna_count + rna_prior`, so the gDNA:RNA split is
+unchanged and the rule redistributes strictly within the RNA pool. ⛔ That is a per-M-step identity
 for given `raw` counts, not an end-to-end invariant: the EM iterates, a different `theta` gives a
 different E-step, hence different `raw`, hence a different converged split.
 
-**Why the synthetic branch exists.** A synthetic nascent entity is a shadow span the index manufactured;
-no annotation asserts it exists, so the null is that it is absent until the data proves otherwise — a
-Dirichlet `alpha = 0` on those components, no constant. Two consequences follow from the arithmetic: a
-zero-count component cannot be revived by the prior, because `out[i]` is proportional to `raw[i]`, so the
-coverage-weighted warm start is the only spark a synthetic entity gets and must stay strictly positive
-(`theta = 0` is a fixed point); and a zombie decays geometrically at `kappa/(1 + rna_prior/annotated_count)`
-per iteration, with `kappa = w_N/w_T < 1` for free, since a shadow span is longer than the transcript it
-shadows. The survival criterion is derived, not chosen: with `m` fragments whose only RNA candidate is
-the entity, it grows iff `m·w_N > Total·theta_g·w_g` — it survives exactly when its intron-exclusive
-evidence exceeds what gDNA alone would explain there. Under the NASCENT SCOPE RULING (`DESIGN.md` §0b)
-`alpha = 0` is the right default rather than a placeholder.
+**Why every RNA component, with none singled out** (owner, 2026-09-19). RNA is RNA (Axiom 0). Whether
+the annotation happens to assert a given RNA component — a synthetic nascent entity is a shadow span
+the index manufactured — is a fact about the annotation, not about this locus's composition, and the
+pseudocount is a statement about composition. One consequence makes the rule sayable in a line and is
+the whole reason to want it: because the weights echo the EM's own current belief, the prior enters
+every RNA component as the SAME factor `(1 + rna_prior/rna_count)`, so it moves the gDNA:RNA split —
+which is what it is for — and nothing else.
 
-### 9b.1 The prior is already an additive per-component pseudocount — the weights are the design
+**What the withheld share did, measured.** The rule this replaced held synthetic entities out of the
+denominator and left them unscaled, on the null that a manufactured span is absent until the data
+proves otherwise. That made the factor un-common over the pool, so the prior ALONE redistributed RNA
+between entities the data cannot tell apart. On a locus of two components explaining all 200 fragments
+equally well, one of them synthetic, a prior of 500 drove the synthetic component from 100.0 fragments
+to 2.79e-298 and handed all 200 to the other — the withheld factor compounds once per M-step
+(`tests/test_estimator.py`). On the antisense-intronic scenarios the displaced mass landed on the one
+annotated transcript that could also explain it: the leak onto an unexpressed antisense `t2` fell from
+70 fragments to 0 at SS 0.65, and the two nested-antisense rungs from 124 → 14 and 24 → 2
+(`tests/scenarios/test_antisense_intronic.py`; `ISSUES: nested-antisense-leak-under-the-sane-ruler`,
+closed by this rule).
+
+**A zombie still decays, on the likelihood alone.** The withheld factor was also an anti-zombie force,
+and dropping it is the restoration's whole price: the geometric decay rate of a shadow entity holding
+nothing of its own falls from `kappa/(1 + rna_prior/annotated_count)` per iteration — the withheld
+rule's own denominator, over the components it did admit — to `kappa = w_N/w_T`.
+That is still strictly below 1 for free, since a shadow span is longer than the transcript it shadows,
+so the decay survives — slower, and now a property of the likelihood rather than of the prior. The
+survival criterion is unchanged and still derived, not chosen: with `m` fragments whose only RNA
+candidate is the entity, it grows iff `m·w_N > Total·theta_g·w_g` — it survives exactly when its
+intron-exclusive evidence exceeds what gDNA alone would explain there. Under the NASCENT SCOPE RULING
+(`DESIGN.md` §0b) nascent RNA is modelled for robustness, which is an argument for treating it like
+any other RNA here and not for a null that suppresses it.
+
+### 9b.1 The prior is an additive per-component pseudocount — the weights are the design
 
 `em_solver.cpp`. The rule above is habitually described as "multiplicative, hence neutral on the
 within-RNA split". That is a description of one choice of weights, not of a different kind of update.
-Writing `A` for `annotated_count` and `P` for `rna_prior`:
+Writing `R` for `rna_count` and `P` for `rna_prior`:
 
-    out[i] = raw[i]·(1 + P/A)  ==  raw[i] + P·raw[i]/A  ==  raw[i] + a_i,    Σ a_i = P
+    out[i] = raw[i]·(1 + P/R)  ==  raw[i] + P·raw[i]/R  ==  raw[i] + a_i,    Σ a_i = P
 
-so the shipped prior is `a_i = P · w_i / Σ_eligible w` at `w_i = raw[i]` — an allocation in proportion to
-the EM's own current belief. A prior that echoes the posterior carries no information, which is exactly
-why it is neutral. The one place the weights are not interchangeable is `raw[i] = 0`: with `w_i = raw[i]`,
-`out[i] = 0` is an absorbing state — no prior magnitude revives a component with no warm-start evidence,
-since `alpha` floors to `EM_LOG_EPSILON` and `digamma` of that is `−1e300`. That absorbing state is the
-structural guard against zombie revival, so a weight vector that lifts every entity off zero removes it.
-The threshold to design against is the VBEM fixed point `alpha = Σ_u resp(alpha)`, at which a component
+so the prior is `a_i = P · w_i / Σ w` at `w_i = raw[i]` — an allocation in proportion to the EM's own
+current belief. A prior that echoes the posterior carries no information, which is exactly why it is
+neutral on the split it does not exist to set. `AggregatePrior::component_rna_prior_weight` generalises
+`w`; the lane is built end to end and `pipeline.py` passes none
+(`ISSUES: per-transcript-prior-lane`), so `w_i = raw[i]` is what ships.
+
+**The one place the weights are not interchangeable is `raw[i] = 0`, and it is why an EQUAL SHARE was
+refused** (owner, 2026-09-19). With `w_i = raw[i]`, `out[i] = 0` is an absorbing state — no prior
+magnitude revives a component with no warm-start evidence, since `alpha` floors to `EM_LOG_EPSILON`
+and `digamma` of that is `−1e300`. A weight vector that lifts every component off zero removes it, and
+the threshold to clear is the VBEM fixed point `alpha = Σ_u resp(alpha)`, at which a component
 actually activates (~0.16–0.47 alpha units on the shipped EM), not the exponential cutoff (0.0014).
+`P` is a conserved FRAGMENT COUNT — calibration's unspliced RNA mass on the locus
+(`priors.assemble_priors`), tens to thousands on an expressed locus — so a flat `P/n` would clear that
+threshold by one to two orders of magnitude at every component, reviving any shadow entity outright
+and flattening the within-RNA split toward uniform, an assertion nothing measured licenses. Admitting
+every RNA component at `w_i = raw[i]` restores fairness and keeps the absorbing state, because the
+state is a property of the WEIGHTS and not of the eligibility test that was removed.
+
+### 9b.2 The prior cancels exactly under MAP; under VBEM the digamma residual is what is left
+
+`em_solver.cpp`, gated in `tests/test_estimator.py`. §9b's "it moves the gDNA:RNA split and nothing
+else" is exact in the MAP M-step, where `theta_i ∝ alpha_i`: the common factor `c = 1 + P/R` divides
+out of every within-RNA ratio and the converged answer is bit-for-bit what it was at `P = 0`. Under
+VBEM — the shipped mode — `theta_i ∝ exp(psi(alpha_i))`, which is not scale-equivariant, so the
+cancellation is asymptotic rather than exact. With `psi(x) = log x − 1/(2x) + O(x^-2)`,
+
+    psi(c·alpha_i) − psi(alpha_i) = log c + (1 − 1/c)/(2·alpha_i) + O(alpha_i^-2)
+
+and `log c` is common, so it normalises away. What survives is a per-component residual
+`(1 − 1/c)/(2·alpha_i)`, largest at the smallest alpha and bounded by `1/(2·alpha_min)` since `c ≥ 1`.
+So the allocation's uniformity is intact and only the M-step's own nonlinearity moves a share, by an
+amount that vanishes as the locus deepens. ⭐ It is still two orders of magnitude from the thing a
+gate must separate: on a three-component locus the residual moves a share by 1.4e-3 against its bound
+of 1.5e-2, while the eligibility rule §9b replaced moved a component by 100 % of its mass. ⛔ Do not
+read a small VBEM drift here as a defect in the allocation, and do not widen the MAP gate to
+accommodate it — they are different statements about different M-steps.
 
 ## 9c. ψ's composition reference is a Beta, and its mean would be a third term
 

@@ -669,14 +669,6 @@ struct AggregatePrior {
     int    gdna_index = -1;
     bool   has_gdna_candidate = false;
 
-    //: Per-component flag: 1 where the component is a SYNTHETIC nascent entity — one this index
-    //: MANUFACTURED as a shadow span, which no annotation asserts exists. `nullptr` means the locus
-    //: has none, which is the common case and skips the split entirely.
-    //: ⛔ This is `is_synthetic`, NEVER `is_nrna`. A single-exon annotated transcript carries
-    //: `is_nrna = true` — it is simultaneously the nascent and the mature form of a real annotated
-    //: gene — and it must keep its prior like any other annotated transcript.
-    const uint8_t* component_is_synthetic = nullptr;
-
     //: ⭐⭐ Per-component ALLOCATION WEIGHT for the RNA prior. `nullptr` means "allocate in proportion
     //: to the evidence each component already carries", which is the shipped rule and the one this
     //: field generalises.
@@ -684,9 +676,9 @@ struct AggregatePrior {
     //: ⭐ THE SHIPPED RULE IS ALREADY AN ADDITIVE PER-COMPONENT PSEUDOCOUNT, and seeing that is what
     //: makes this one field rather than a second mechanism:
     //:
-    //:     out[i] = raw[i] · (1 + rna_prior/annotated_count)  ==  raw[i] + rna_prior·raw[i]/annotated_count
+    //:     out[i] = raw[i] · (1 + rna_prior/rna_count)  ==  raw[i] + rna_prior·raw[i]/rna_count
     //:
-    //: so it is `raw[i] + a_i` with `a_i = rna_prior · w_i / Σ_eligible w` at `w_i = raw[i]`. The two
+    //: so it is `raw[i] + a_i` with `a_i = rna_prior · w_i / Σ w` at `w_i = raw[i]`. The two
     //: designs differ ONLY in the weights. Calling the shipped one "multiplicative, hence neutral"
     //: describes the CONSEQUENCE of choosing `w_i = raw[i]` — a prior that echoes the EM's own current
     //: belief carries no information — not a different kind of update.
@@ -705,15 +697,33 @@ static inline double nonnegative_finite(double x) {
 // Split the locus into gDNA and RNA, add the calibration prior to each, and hand the RNA share out
 // among the RNA components in proportion to the evidence each already carries.
 //
-// ⭐ THE RNA PRIOR GOES ONLY TO COMPONENTS THE ANNOTATION ASSERTS EXIST. A synthetic nascent entity
-// is a shadow span this index manufactured; nothing vouches for it, so the null hypothesis is that it
-// is ABSENT and it earns mass only from fragments the data cannot explain any other way. Giving it
-// prior mass would assert it exists before looking.
+// ⭐ EVERY RNA COMPONENT RECEIVES ITS SHARE, AND NONE IS SINGLED OUT FOR ZERO (owner, 2026-09-19).
+// RNA is RNA: whether the annotation happens to assert a given RNA component — a synthetic nascent
+// entity is a shadow span this index manufactured — is not a fact about this locus's composition, so
+// the allocation does not read it. The rule the prior implements is therefore sayable in one line:
+// the RNA pseudocount is distributed over the RNA components in proportion to the evidence each
+// already carries.
 //
-// ⛔ THE gDNA:RNA SPLIT IS UNCHANGED BY THAT CHOICE, EXACTLY. The RNA components still sum to
-// `rna_count + rna_prior`, because the prior is redistributed WITHIN the RNA pool rather than
-// withheld from it. So the library gDNA fraction — the number calibration exists to produce — cannot
-// move. Any movement in it is a bug in this function, not an effect of the rule.
+// ⭐ WHAT THAT BUYS, AND WHAT IT COSTS. Because the weights echo the EM's own current belief the
+// prior carries no information ABOUT THE SPLIT WITHIN RNA — it enters every RNA component as the
+// same factor `(1 + rna_prior/rna_count)`, so it moves only the gDNA:RNA split, which is the one
+// thing it is for. Its predecessor withheld the share from synthetic components, which made the
+// factor un-common and let the prior ALONE redistribute RNA between entities the data cannot tell
+// apart; at a locus of two equally-good explanations that drove the synthetic one to 1e-298. The
+// price of dropping it is that the prior no longer helps a shadow entity decay: the geometric rate
+// falls from `kappa/(1 + rna_prior/rna_count)` to `kappa = w_N/w_T < 1`, which is still strictly
+// less than one for free, since a shadow span is longer than the transcript it shadows.
+//
+// ⛔ A ZERO-EVIDENCE COMPONENT STILL CANNOT BE REVIVED. `out[i]` is proportional to `raw[i]`, so
+// `out[i] = 0` remains an ABSORBING STATE under these weights — that is the structural guard against
+// a zombie entity, and it survives the restoration untouched because it is a property of the WEIGHTS
+// and not of the eligibility test that was removed. Gate:
+// `tests/native/test_grouped_prior_update.py::test_a_zero_count_component_CANNOT_be_revived_by_the_prior`.
+//
+// ⛔ THE gDNA:RNA SPLIT IS UNCHANGED, EXACTLY. The RNA components sum to `rna_count + rna_prior`,
+// because the prior is redistributed WITHIN the RNA pool rather than withheld from it. So the
+// library gDNA fraction — the number calibration exists to produce — cannot move. Any movement in it
+// is a bug in this function, not an effect of the rule.
 static void apply_grouped_prior_update(
     const double* raw_counts,
     const double* carried_state,
@@ -724,38 +734,31 @@ static void apply_grouped_prior_update(
     const int gdna_index = aggregate_prior.gdna_index;
     const bool has_gdna = aggregate_prior.has_gdna_candidate
         && gdna_index >= 0 && gdna_index < n_components;
-    const uint8_t* is_synthetic = aggregate_prior.component_is_synthetic;
 
-    // `rna_*` is the whole RNA pool and sets the gDNA:RNA split. `annotated_*` is the subset eligible
-    // to RECEIVE prior mass. They differ only where the locus holds synthetic entities.
+    // The whole RNA pool, which is also the whole set of recipients: the prior's arithmetic and the
+    // gDNA:RNA split it sets are now answers to the same sum, and there is no second total.
     double rna_count = 0.0, rna_carried = 0.0;
-    double annotated_count = 0.0, annotated_carried = 0.0;
     for (int i = 0; i < n_components; ++i) {
         if (i == gdna_index) continue;
-        const double count = nonnegative_finite(raw_counts[i]);
-        const double carried = (carried_state != nullptr)
-            ? nonnegative_finite(carried_state[i]) : 0.0;
-        rna_count += count;
-        rna_carried += carried;
-        if (is_synthetic == nullptr || !is_synthetic[i]) {
-            annotated_count += count;
-            annotated_carried += carried;
+        rna_count += nonnegative_finite(raw_counts[i]);
+        if (carried_state != nullptr) {
+            rna_carried += nonnegative_finite(carried_state[i]);
         }
     }
 
-    // ⭐ The eligible components' total ALLOCATION WEIGHT, when the caller supplied one. Computed here,
-    // beside the count and carried totals, because it is the third answer to the same question — "who
-    // may receive the RNA prior?" — and the gate below has to choose between all three.
+    // ⭐ The RNA components' total ALLOCATION WEIGHT, when the caller supplied one. Computed here,
+    // beside the count and carried totals, because it is the third answer to the same question — in
+    // what proportion is the RNA prior shared out? — and the gate below has to choose between all
+    // three.
     const double* rna_prior_weight = aggregate_prior.component_rna_prior_weight;
-    double annotated_weight = 0.0;
+    double rna_weight = 0.0;
     if (rna_prior_weight != nullptr) {
         for (int i = 0; i < n_components; ++i) {
             if (i == gdna_index) continue;
-            if (is_synthetic != nullptr && is_synthetic[i]) continue;
-            annotated_weight += nonnegative_finite(rna_prior_weight[i]);
+            rna_weight += nonnegative_finite(rna_prior_weight[i]);
         }
     }
-    const bool weighted = annotated_weight > EM_LOG_EPSILON;
+    const bool weighted = rna_weight > EM_LOG_EPSILON;
 
     // ⭐ The gDNA pseudocount is gated on there BEING a gDNA component — without one there is nowhere
     // to put it, and adding it anywhere else would invent mass.
@@ -765,36 +768,30 @@ static void apply_grouped_prior_update(
     // whole RNA prior at any locus none of whose units carries one — that is a locus whose fragments
     // are ALL SPLICED, since a gDNA candidate is appended to every unspliced unit.
     //
-    // ⭐ **Why it was invisible.** Under the shipped evidence-proportional weights the RNA prior enters
-    // as a COMMON factor `(1 + rna_prior/annotated_count)` over the eligible components, and a common
-    // factor cancels when `theta` is normalised — so at a locus with no gDNA component the shipped
-    // prior genuinely cannot move `theta`, and suppressing it changed nothing observable. ⚠ It is
-    // observable in two cases the gate was hiding: when the locus holds SYNTHETIC components (they are
-    // ineligible, so the factor is not common and the split does move), and — the reason this was
-    // found — when the allocation is an informative per-component WEIGHT, where the prior says
-    // something the evidence does not and cancels nothing.
+    // ⭐ **Why it was invisible.** Under the evidence-proportional weights the RNA prior enters as a
+    // COMMON factor `(1 + rna_prior/rna_count)` over the RNA components, and a common factor cancels
+    // when `theta` is normalised — so at a locus with no gDNA component the prior genuinely cannot
+    // move `theta`, and suppressing it changed nothing observable. ⚠ It is observable when the
+    // allocation is an informative per-component WEIGHT, where the prior says something the evidence
+    // does not and cancels nothing.
     double rna_prior  = nonnegative_finite(aggregate_prior.rna_prior_fragments);
-    // ⚠ Gated on the ANNOTATED totals, not the RNA totals: in a locus whose every RNA component is
-    // synthetic there is no eligible recipient, so the RNA prior is zero and the locus's RNA pool
-    // must outcompete gDNA unaided. Conservation still holds — `rna_total` falls to `rna_count`.
-    //
     // ⛔⛔ THE GATE MUST NAME THE DENOMINATOR THE CHOSEN BRANCH ACTUALLY DIVIDES BY. It briefly tested
-    // `annotated_count && annotated_carried` while the count branch divides by `annotated_count`
-    // ALONE — so a locus with zero annotated COUNT but nonzero carried alpha kept a live `rna_prior`,
-    // multiplied it by `inv = 0`, and silently dropped it: the RNA pool summed to `rna_count` while
-    // gDNA still received `gdna_count + gdna_prior`, MOVING the gDNA:RNA split this function exists to
-    // hold fixed. Reachable under VBEM, which is the shipped default and passes `alpha` as the carried
-    // state. Gate: `tests/native/test_grouped_prior_update.py`, specifically
-    // `test_a_locus_with_NO_annotated_carried_alpha_drops_the_prior_from_BOTH_sides`.
+    // one total while the branch below divided by another — so a locus with zero RNA count but
+    // nonzero carried alpha kept a live `rna_prior`, multiplied it by `inv = 0` and silently dropped
+    // it: the RNA pool summed to `rna_count` while gDNA still received `gdna_count + gdna_prior`,
+    // MOVING the gDNA:RNA split this function exists to hold fixed. Reachable under VBEM, which is
+    // the shipped default and passes `alpha` as the carried state. Gate:
+    // `tests/native/test_grouped_prior_update.py`, specifically
+    // `test_a_locus_with_NO_rna_evidence_AT_ALL_drops_the_rna_prior`.
     //
     // With an explicit allocation weight the denominator is the weight total, so that is what the
     // gate must name. This is not a refinement — it is the case the weighted lane exists FOR. A
-    // locus with no RNA evidence at all has `annotated_count == annotated_carried == 0`, so the
-    // count-based gate zeroes the prior and the pool stays empty; that is right when the only thing
-    // saying where mass belongs IS the evidence, and wrong when the caller has said so directly.
+    // locus with no RNA evidence at all has `rna_count == rna_carried == 0`, so the count-based gate
+    // zeroes the prior and the pool stays empty; that is right when the only thing saying where mass
+    // belongs IS the evidence, and wrong when the caller has said so directly.
     const double prior_recipients = weighted
-        ? annotated_weight
-        : ((rna_count > EM_LOG_EPSILON) ? annotated_count : annotated_carried);
+        ? rna_weight
+        : ((rna_count > EM_LOG_EPSILON) ? rna_count : rna_carried);
     if (prior_recipients <= EM_LOG_EPSILON) {
         rna_prior = 0.0;
     }
@@ -809,63 +806,50 @@ static void apply_grouped_prior_update(
     }
 
     // ⭐⭐ THE WEIGHTED ALLOCATION. When the caller supplies a per-component weight the prior is a
-    // genuine additive pseudocount `a_i = rna_prior · w_i / Σ_eligible w`, and the whole update is one
-    // loop:
+    // genuine additive pseudocount `a_i = rna_prior · w_i / Σ w`, and the whole update is one loop:
     //
-    //     out[i] = raw[i] + a_i        (eligible)
-    //     out[i] = raw[i]              (SYNTHETIC — ineligible, exactly as in the shipped rule)
+    //     out[i] = raw[i] + a_i
     //
     // ⭐ Conservation is immediate and needs no case analysis: Σ_{i≠g} out[i] = rna_count + rna_prior,
     // because the `a_i` sum to `rna_prior` by construction. That is why this branch has no
     // `rna_count`/`rna_carried` split — the CARRIED STATE existed only to answer "who should receive
     // the prior when there is no evidence?", and an explicit weight answers it directly.
     //
-    // ⛔ A ZERO WEIGHT TOTAL FALLS BACK TO THE SHIPPED RULE rather than dropping the prior. Dropping it
-    // would leave gDNA holding `gdna_prior` while the RNA pool summed to `rna_count` — MOVING the split
-    // this function exists to hold fixed, which is the exact defect the `prior_recipients` paragraph
-    // above records. A weight vector that says "nobody" is a weight vector with nothing to say.
+    // ⛔ A ZERO WEIGHT TOTAL FALLS BACK TO THE EVIDENCE-PROPORTIONAL RULE rather than dropping the
+    // prior. Dropping it would leave gDNA holding `gdna_prior` while the RNA pool summed to
+    // `rna_count` — MOVING the split this function exists to hold fixed, which is the exact defect
+    // the `prior_recipients` paragraph above records. A weight vector that says "nobody" is a weight
+    // vector with nothing to say.
     if (weighted) {
-        const double scale = rna_prior / annotated_weight;
+        const double scale = rna_prior / rna_weight;
         for (int i = 0; i < n_components; ++i) {
             if (i == gdna_index) continue;
-            const double count = nonnegative_finite(raw_counts[i]);
-            const bool eligible = (is_synthetic == nullptr) || !is_synthetic[i];
-            out_counts[i] = eligible
-                ? count + nonnegative_finite(rna_prior_weight[i]) * scale
-                : count;
+            out_counts[i] = nonnegative_finite(raw_counts[i])
+                + nonnegative_finite(rna_prior_weight[i]) * scale;
         }
         return;
     }
 
-    // An eligible component takes its evidence scaled up to absorb the prior; a synthetic one keeps
-    // its evidence unscaled. Summed over the RNA components:
-    //     annotated_total * (annotated/annotated) + synthetic = annotated_count + rna_prior
-    //                                                         + synthetic_count = rna_total.
-    // ⭐ Written in exactly the shipped operation order so that a locus with NO synthetic component
-    // (`annotated_count == rna_count`) reproduces `rna_total * raw[i] * (1/rna_count)` BIT FOR BIT.
-    // That is what makes the inert-mask arm a real byte-identity control rather than an approximate
-    // one.
+    // Each RNA component takes its evidence scaled up to absorb its share of the prior. Summed over
+    // the pool: `rna_total · (rna_count/rna_count) = rna_count + rna_prior`.
+    // ⭐ Written in exactly the operation order its predecessor used on a locus holding no synthetic
+    // component (`annotated_count == rna_count`, so `annotated_total == rna_total`), which makes
+    // every such locus — the overwhelming majority — BIT-IDENTICAL across the restoration.
     if (rna_count > EM_LOG_EPSILON) {
-        const double annotated_total = annotated_count + rna_prior;
-        const double inv = (annotated_count > EM_LOG_EPSILON) ? 1.0 / annotated_count : 0.0;
+        const double inv = 1.0 / rna_count;
         for (int i = 0; i < n_components; ++i) {
             if (i == gdna_index) continue;
-            const double count = nonnegative_finite(raw_counts[i]);
-            const bool eligible = (is_synthetic == nullptr) || !is_synthetic[i];
-            out_counts[i] = eligible ? annotated_total * count * inv : count;
+            out_counts[i] = rna_total * nonnegative_finite(raw_counts[i]) * inv;
         }
     } else if (rna_carried > EM_LOG_EPSILON && carried_state != nullptr) {
-        // The zero-evidence path, live under VBEM (which passes `alpha` as the carried state).
-        // ⚠ Here the pool is prior-only, so a synthetic component correctly receives nothing — the
-        // locus holds no RNA evidence for it to have earned. Unreachable from the warm start, which
-        // passes `carried_state = nullptr`, so this never zeroes a component at initialisation.
-        const double inv =
-            (annotated_carried > EM_LOG_EPSILON) ? 1.0 / annotated_carried : 0.0;
+        // The zero-evidence path, live under VBEM (which passes `alpha` as the carried state). The
+        // pool is prior-only, so it is shared in proportion to the carried alpha — over every RNA
+        // component, on the same rule as above. Unreachable from the warm start, which passes
+        // `carried_state = nullptr`, so this never zeroes a component at initialisation.
+        const double inv = 1.0 / rna_carried;
         for (int i = 0; i < n_components; ++i) {
             if (i == gdna_index) continue;
-            const double carried = nonnegative_finite(carried_state[i]);
-            const bool eligible = (is_synthetic == nullptr) || !is_synthetic[i];
-            out_counts[i] = eligible ? rna_total * carried * inv : 0.0;
+            out_counts[i] = rna_total * nonnegative_finite(carried_state[i]) * inv;
         }
     }
 }
@@ -1411,10 +1395,6 @@ struct LocusSubProblem {
     // Per-component
     std::vector<double>   unambig_totals;   // [n_components]
     std::vector<double>   log_eff_len;      // [n_components] log L̃ per component
-    //: [n_components] 1 where the component is a SYNTHETIC nascent entity the index manufactured.
-    //: The gDNA component is never synthetic. Empty when the locus holds none, which lets the prior
-    //: update skip the annotated/synthetic split entirely and stay bit-identical there.
-    std::vector<uint8_t>  component_is_synthetic;
     //: [n_components] the RNA prior's per-component ALLOCATION WEIGHT, remapped from the flat
     //: per-transcript lane. Empty when the caller supplied none, and the prior update then allocates
     //: in proportion to current evidence — the shipped rule, bit-identical.
@@ -1887,7 +1867,6 @@ static void extract_locus_sub_problem_from_partition(
     double gdna_em_llr_bias,
     const double*  all_unambig_row_sums,
     const double*  all_t_eff_lens,
-    const uint8_t* all_t_is_synthetic,
     const double*  all_t_rna_prior_weight,
     int32_t* local_map, int local_map_size)
 {
@@ -2018,29 +1997,11 @@ static void extract_locus_sub_problem_from_partition(
         sub.unambig_totals[i] = all_unambig_row_sums[t_arr[i]];
     }
 
-    // Synthetic nascent entities, per component. ⭐ Left EMPTY when the locus holds none — the prior
-    // update then takes the shipped code path unchanged, so the overwhelming majority of loci are
-    // bit-identical and the arm that plumbs this mask without consulting it is a true byte-identity
-    // control. The gDNA component (index n_t) is never synthetic and stays 0.
-    sub.component_is_synthetic.clear();
-    if (all_t_is_synthetic != nullptr) {
-        bool any = false;
-        for (int i = 0; i < n_t; ++i) {
-            if (all_t_is_synthetic[t_arr[i]]) { any = true; break; }
-        }
-        if (any) {
-            sub.component_is_synthetic.assign(nc, 0);
-            for (int i = 0; i < n_t; ++i) {
-                sub.component_is_synthetic[i] = all_t_is_synthetic[t_arr[i]];
-            }
-        }
-    }
-
     // The RNA prior's per-component allocation weight, remapped off the same flat per-transcript lane
-    // `t_eff_lens` and `t_is_synthetic` ride. ⭐ Left EMPTY when the caller supplied none, so the
-    // shipped evidence-proportional rule is reached by the same `nullptr` test everywhere and a run
-    // that plumbs this without supplying it is bit-identical. ⚠ The gDNA component (index n_t) has no
-    // weight and keeps 0 — it is not a recipient of the RNA prior.
+    // `t_eff_lens` rides. ⭐ Left EMPTY when the caller supplied none, so the evidence-proportional
+    // rule is reached by the same `nullptr` test everywhere and a run that plumbs this without
+    // supplying it is bit-identical. ⚠ The gDNA component (index n_t) has no weight and keeps 0 — it
+    // is not a recipient of the RNA prior.
     sub.component_rna_prior_weight.clear();
     if (all_t_rna_prior_weight != nullptr) {
         sub.component_rna_prior_weight.assign(nc, 0.0);
@@ -2102,7 +2063,6 @@ batch_locus_em_partitioned(
     // Per-transcript globals
     f64_2d   unambig_counts,
     f64_1d   t_eff_lens_arr,
-    u8_1d    t_is_synthetic_arr,
     //: ⭐ The RNA prior's per-transcript ALLOCATION WEIGHT, on the same flat lane. EMPTY means
     //: "allocate in proportion to current evidence" — the shipped rule, bit-identical.
     f64_1d   t_rna_prior_weight_arr,
@@ -2178,11 +2138,6 @@ batch_locus_em_partitioned(
     const double*   gel_ptr = locus_gdna_eff_lens.data();
     const double*   uac    = unambig_counts.data();
     const double*   tel_ptr = t_eff_lens_arr.data();
-    // ⛔ `is_synthetic`, never `is_nrna`: a single-exon annotated transcript is flagged `is_nrna`
-    // because it is simultaneously the nascent and the mature form of a real gene, and it must keep
-    // its prior. Only entities this index MANUFACTURED are excluded.
-    const uint8_t*  tsyn_ptr = (t_is_synthetic_arr.size() == 0)
-        ? nullptr : t_is_synthetic_arr.data();
     // ⚠ Length-checked against the TRANSCRIPT axis, not the locus one. The two lanes differ by orders
     // of magnitude here, so a wrong-axis array would index far out of bounds rather than merely read
     // the wrong number — which is why this is a hard refusal and not a resize.
@@ -2304,7 +2259,7 @@ batch_locus_em_partitioned(
                 sub, pv,
                 gel_ptr[li],
                 gdna_em_llr_bias,
-                unambig_row_sums.data(), tel_ptr, tsyn_ptr, trpw_ptr,
+                unambig_row_sums.data(), tel_ptr, trpw_ptr,
                 local_map_vec.data(), local_map_size);
             auto t2 = hrclock::now();
 
@@ -2341,8 +2296,6 @@ batch_locus_em_partitioned(
                 nonnegative_finite(rp_ptr[li]),
                 sub.gdna_idx,
                 sub.has_gdna_candidate,
-                sub.component_is_synthetic.empty()
-                    ? nullptr : sub.component_is_synthetic.data(),
                 sub.component_rna_prior_weight.empty()
                     ? nullptr : sub.component_rna_prior_weight.data(),
             };
@@ -2866,7 +2819,6 @@ NB_MODULE(_em_impl, m) {
           nb::arg("locus_gdna_eff_lens"),
           nb::arg("unambig_counts"),
           nb::arg("t_eff_lens"),
-          nb::arg("t_is_synthetic"),
           nb::arg("t_rna_prior_weight"),
           nb::arg("warm_start_mode"),
           nb::arg("em_counts_out"),
@@ -2933,14 +2885,13 @@ NB_MODULE(_em_impl, m) {
     // fraction cannot move is asserting something FALSE BY DESIGN — that
     // mistake has been made three times.
     //
-    // ⚠ An EMPTY `carried_state` / `is_synthetic` means `nullptr`, which is the
-    // convention `batch_locus_em_partitioned` already uses for `t_is_synthetic`
-    // — one spelling for "this locus has none", not two.
+    // ⚠ An EMPTY `carried_state` / `rna_prior_weight` means `nullptr`, which is
+    // the convention `batch_locus_em_partitioned` already uses on its flat
+    // per-transcript lane — one spelling for "this locus has none", not two.
     // ----------------------------------------------------------------
     m.def("_apply_grouped_prior_update_test",
           [](f64_1d raw_counts,
              f64_1d carried_state,
-             u8_1d  is_synthetic,
              f64_1d rna_prior_weight,
              double gdna_prior_fragments,
              double rna_prior_fragments,
@@ -2950,11 +2901,6 @@ NB_MODULE(_em_impl, m) {
               if (carried_state.size() != 0 && carried_state.shape(0) != n) {
                   throw std::runtime_error(
                       "_apply_grouped_prior_update_test: carried_state must be empty or "
-                      "the same length as raw_counts");
-              }
-              if (is_synthetic.size() != 0 && is_synthetic.shape(0) != n) {
-                  throw std::runtime_error(
-                      "_apply_grouped_prior_update_test: is_synthetic must be empty or "
                       "the same length as raw_counts");
               }
               if (rna_prior_weight.size() != 0 && rna_prior_weight.shape(0) != n) {
@@ -2967,8 +2913,6 @@ NB_MODULE(_em_impl, m) {
               aggregate_prior.rna_prior_fragments  = rna_prior_fragments;
               aggregate_prior.gdna_index           = gdna_index;
               aggregate_prior.has_gdna_candidate   = has_gdna_candidate;
-              aggregate_prior.component_is_synthetic =
-                  (is_synthetic.size() == 0) ? nullptr : is_synthetic.data();
               aggregate_prior.component_rna_prior_weight =
                   (rna_prior_weight.size() == 0) ? nullptr : rna_prior_weight.data();
 
@@ -2986,14 +2930,13 @@ NB_MODULE(_em_impl, m) {
           },
           nb::arg("raw_counts"),
           nb::arg("carried_state"),
-          nb::arg("is_synthetic"),
           nb::arg("rna_prior_weight"),
           nb::arg("gdna_prior_fragments"),
           nb::arg("rna_prior_fragments"),
           nb::arg("gdna_index"),
           nb::arg("has_gdna_candidate"),
           "Run one grouped prior update and return out_counts (test-only).\n\n"
-          "Empty carried_state / is_synthetic / rna_prior_weight mean nullptr.");
+          "Empty carried_state / rna_prior_weight mean nullptr.");
 
     // ----------------------------------------------------------------
     // Test-only: expose fast_exp for accuracy validation from Python

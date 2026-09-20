@@ -26,7 +26,7 @@ robust rather than what is likely.
 
 - **D. Estimation and solver design** — `purity-is-a-property-of-the-annotation` · `pair-count-weighting-lets-one-seed-decide` · `we-keep-re-deriving-message-passing` · `one-hop-lifted-out-is-still-the-relay` · `a-variance-cannot-fix-a-bias` · `two-gaussians-one-latent` · `variance-fitted-on-the-belief` · `a-message-from-the-destinations-belief` · `a-total-density-ratio` · `substitute-the-definitions-first` · `a-licence-with-no-floor` · `a-multiplication-gated-by-a-trace` · `all-small-singly-large-jointly` · `recompute-from-the-oracle` · `a-cancelling-defect-pair` · `zero-the-precision-with-the-value` · `no-prior-means-haldane` · `prefer-shares-to-differences` · `an-all-zero-factor-is-inert` · `density-below-one-fragment-length` · `identical-paralogs-are-bimodal` · `a-mean-hits-the-mass-weighted-centre-by-luck` · `a-clamp-at-the-closed-end-escapes-the-window` · `the-deconvolution-is-as-good-as-the-density-it-is-handed` · `deriving-one-coordinate-propagates-its-error` · `interpolate-on-the-axis-where-the-lattice-is-uniform` · `read-the-whole-failure-list` · `a-priors-curvature-is-not-the-datas-information` · `a-refutability-test-needs-the-refuting-channel-in-the-fixture` · `a-strength-is-a-nat-a-prior-weight-is-a-count` · `a-four-decimal-print-is-not-a-zero` · `a-constant-in-exact-arithmetic-is-not-constant-in-float64` · `a-toy-and-a-panel-can-disagree-in-rank` · `a-rescale-that-reads-the-source-belief-is-unbounded` · `a-face-total-is-not-a-total-without-its-flux` · `an-imputation-must-cost-something-every-hop` · `a-floored-knob-is-not-the-bandwidth` · `a-mode-count-is-not-a-well-posed-quantity` · `measure-a-default-flip-before-you-write-it`
 
-- **E. Structure, indexes and plumbing** — `one-reference-hides-refid-bugs` · `annotated-is-not-genomic` · `an-sj-is-not-a-gap` · `deposit-at-the-sj` · `splicing-makes-the-graph-cyclic` · `nrna-does-not-mean-synthetic` · `credit-exactly-one-sj` · `strand-completes-the-sj-key` · `a-hash-that-misses-its-artifact` · `integer-channels-reproduce` · `worktrees-run-the-wrong-code` · `checkout-deletes-uncommitted-work` · `two-masks-one-name` · `two-docstrings-one-quantity` · `a-transcript-predicate-must-not-silently-drop-a-molecule` · `an-object-class-does-not-see-a-terminus`
+- **E. Structure, indexes and plumbing** — `one-reference-hides-refid-bugs` · `annotated-is-not-genomic` · `an-sj-is-not-a-gap` · `deposit-at-the-sj` · `splicing-makes-the-graph-cyclic` · `nrna-does-not-mean-synthetic` · `credit-exactly-one-sj` · `strand-completes-the-sj-key` · `a-hash-that-misses-its-artifact` · `integer-channels-reproduce` · `worktrees-run-the-wrong-code` · `checkout-deletes-uncommitted-work` · `a-rebuild-can-silently-no-op` · `two-masks-one-name` · `two-docstrings-one-quantity` · `a-transcript-predicate-must-not-silently-drop-a-molecule` · `an-object-class-does-not-see-a-terminus`
 
 - **F. Domain facts that read like defects** — `specificity-and-sense-are-complements` · `strand-measures-the-tilt` · `a-linear-likelihood-emits-a-sign` · `a-pooled-conversion-applied-per-component` · `capture-inverts-the-counted-side` · `equal-lengths-carry-no-composition` · `capture-is-1000x-on-exons` · `capture-selects-for-length` · `on-target-by-start-is-geometry` · `eff-lengths-do-not-cancel-at-an-end` · `configured-lengths-are-not-realised` · `mature-rna-never-crosses-a-boundary` · `a-boundary-with-rna-is-not-an-sj`
 
@@ -115,7 +115,10 @@ on every measurement arm and print a reseeded noise floor beside the effect; whe
 change is an owner call. A pinned seed is not enough on the panel at the default thread budget: two runs of
 one ladder condition at one seed differed by 67 fragments and `quant_accuracy.py`'s `noop` matched `base` to
 ≤ 9, not to the byte (2026-09-19; the source is not located — `rename_identity.py` pins both thread counts to
-1 for exactly this reason). The byte-identity gate holds on its own toy fixture only; on the panel, read `noop`
+1 for exactly this reason). NARROWED 2026-09-19: at the default budget four runs of `g50 ss.99 OFF` spanned
+145 fragments of transcript `Σ|Δ|` (99,319–99,463); with `--set em.n_threads=1` under `OMP_NUM_THREADS=1`
+two runs still differed, by 12.5. So the thread budget is MOST of it and something smaller survives at one
+thread — the EM's own pool is not the whole source, and the next search starts upstream of it. The byte-identity gate holds on its own toy fixture only; on the panel, read `noop`
 against the floor.
 
 **a-clip-hides-a-scale-error. A clip hides errors on both sides of it.** A `min()` clip hid an exact
@@ -141,8 +144,11 @@ quantity by the producer's own expression, never an algebraic equivalent, becaus
 **compatibility-is-geometry-not-composition. Any RNA-vs-gDNA question resolved by set membership will be
 answered by geometry, because gDNA is compatible with everything unspliced; resolve it by likelihood,
 where the populations actually differ.** A warm-start gate keyed on RNA-unambiguous support revived more
-nascent entities the more gDNA the library carried, the inverse of the intent. Nascent entities get no
-prior mass and earn their place by likelihood (`DESIGN.md` §0b).
+nascent entities the more gDNA the library carried, the inverse of the intent. Nascent entities earn
+their place by likelihood, and the second half of that sentence used to read "get no prior mass" — a
+membership rule wearing a prior's clothes, retired 2026-09-19 (`DESIGN.md` §0b, `EQUATIONS.md` §9b).
+What holds an unsupported entity down is the likelihood: zero evidence is an absorbing state under
+evidence-proportional weights, and a shadow span decays at `w_N/w_T < 1`.
 
 **a-zero-count-is-a-measurement. A zero count is a measurement of a density, not an absence of data;
 keying precision on the count makes the strongest statement in the library the quietest.** Zero fragments
@@ -839,6 +845,14 @@ finder beats `PYTHONPATH`, so an A/B inside a git worktree executes the main rep
 **checkout-deletes-uncommitted-work. `git checkout -- <file>` does not undo a perturbation when the work
 is uncommitted; it deletes the work.** A perturbation harness must restore from a copy of the working
 tree. Cost one full re-implementation.
+
+**a-rebuild-can-silently-no-op. `pip install -e` keys on mtime, so a source file restored from an archive
+or copied back can be OLDER than the object built from it: the build prints success, exits 0 and changes
+nothing.** The run then measures the PREVIOUS binary and reads as "no effect" — indistinguishable from a
+real null result. Restoring from a `tar` archive is the reliable way to hit it, because `tar` preserves
+mtimes by design. `touch` the sources before every rebuild, and verify the ARTIFACT rather than the build's
+exit code — a deleted parameter should be gone from the binding's signature. Cost one control measurement
+that had to be re-run.
 
 **two-masks-one-name. Two different masks shared the word `struct_lock`, and both were right.** One meant
 "pinned and certain", the other "may emit composition certainty". Two correct predicates under one name

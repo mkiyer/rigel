@@ -706,7 +706,6 @@ def _run_locus_em_partitioned(
         partition_tuples,
         locus_t_lists,
         gdna_prior,
-        index,
         rna_prior_count=rna_prior,
         # FLAT and per-TRANSCRIPT — deliberately not `[ids]`. If this boundary is dropped the
         # parameter is accepted and silently ignored, and every allocation, however extreme, produces

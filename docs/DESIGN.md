@@ -174,6 +174,20 @@ What this ruling is not: a licence to break AXIOM 0 (unspliced RNA at an intron 
 deletion of robustness — the synthetic nascent entity, the `--nrna` harness arms and the zero controls
 all stay. It re-ranks concerns; it does not remove the model.
 
+**Where the "absent until proven" default does and does not live (owner, 2026-09-19).** It is the
+LIKELIHOOD's, never the prior's. The EM's RNA pseudocount used to be withheld from synthetic nascent
+entities to implement that null, and that was a hack: the pseudocount is a statement about a locus's
+gDNA:RNA composition, and withholding it from one class of RNA made it redistribute RNA instead —
+displacing nascent mass onto whatever annotated transcript could also explain it (70 fragments onto an
+unexpressed antisense transcript; up to 100 % of a tied component). The RNA pseudocount now goes to
+every RNA component in proportion to its evidence, with none singled out for zero (`EQUATIONS.md`
+§9b). The default survives intact and structurally, in two places that cost nothing: a component with
+no evidence still receives nothing, because the weights ARE the evidence — `out[i] = 0` is absorbing
+(`EQUATIONS.md` §9b.1) — and a shadow entity holding nothing of its own still decays geometrically at
+`kappa = w_N/w_T < 1`, on the likelihood alone. ⛔ A nascent entity is not held off by making the
+prior unfair to it; if a future mechanism wants to suppress one, it must do so where the populations
+actually differ.
+
 ### What "sparse" means as a model (owner, 2026-08-22; the simulator's `sparse` mode)
 
 Sparsity is a per-gene-span ON/OFF pattern, not a low global level. The three rulings that define the
