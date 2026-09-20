@@ -64,46 +64,6 @@ exon ≤ 150 bp — which is also the safety net under a capture error the ruler
 `ISSUES: em-overturns-the-calibrated-gdna-split`, which the same arm only halves.
 `quant_accuracy.py`, per stratum above `--arm base_reseed`.
 
-### em-overturns-the-calibrated-gdna-split
-`priority: now — the capture-ON half is the dominant in-scope residual and the restoration of the RNA prior made it WORSE; the capture-OFF half largely closed with that landing · kind: defect · 2026-09-19 (re-measured 2026-09-19 after `nascent-gets-no-rna-prior`)`
-⭐⭐ RE-MEASURED after nascent RNA's share of the RNA prior was restored, and the entry SPLIT IN TWO BY SIGN.
-THE CAPTURE-OFF HALF LARGELY CLOSED, and its cause was the allocation rule rather than the EM's arbitration:
-`g05 ss.50 OFF` reads a gDNA fraction of 0.0538 against 0.05 (it read 0.104), `g50 ss.50 OFF` 0.5127 and
-`g50 ss.99 OFF` 0.5071 against 0.50 (they read 0.574 and 0.552). The nascent shortfall that mirrored it closed
-with it — `g00 ss.50 OFF` nascent reads 2,018,540 against 2,024,341 true, where it read 1,901,090.
-⛔⛔ THE CAPTURE-ON HALF GOT WORSE, and that is now the whole of this entry: `g50 ss.99 ON` reports 0.4465
-against 0.50 (it reported 0.4793) and `g98 ss.99 ON` 0.9189 against 0.98 (0.9402). The mass did not return to
-the annotated transcripts — it went to the NASCENT channel, which now over-calls under capture: `g50 ss.99 ON`
-691,648 against 150,432 true (4.6×) and `g98 ss.99 ON` 596,395 against 5,989 (100×). So the α = 0 rule had been
-MASKING a nascent-vs-gDNA competition under capture by suppressing one of the two competitors, and the question
-this entry now asks is what arbitrates them where gDNA's density is an order of magnitude higher at probed
-exons — exactly where the nascent entity also sits. ⚠ Unlike the capture-OFF half, this is NOT only a stress
-reading: capture-ON runs at a 2.6 % nascent fragment share, near the realistic 4.2 %.
-The pre-restoration record, kept because the capture-OFF half's diagnosis rests on it:
-At capture-OFF calibration's library split is right and the transcript table's is not. `g05 ss.50 OFF`:
-calibration 490,967 gDNA fragments against 500,004 true (`calibration_vs_oracle.py`, the row's `pools`), the table
-1,037,727 — a gDNA fraction of 0.104 against 0.05; `g05 ss.99 OFF` 489,187 against 628,152 in the table (0.063);
-`g50 ss.50 OFF` 4,985,891 and `g50 ss.99 OFF` 4,982,822 against 5,000,000 true, the table 5,740,272 and 5,518,768
-(0.574 / 0.552 against 0.50). The table's excess is the shortfall on the RNA the simulator drew as nascent, almost
-fragment for fragment (+537,723 gDNA / −660,315; +128,148 / −236,894; +740,272 / −811,100; +518,768 / −589,942),
-and it does not move under a perfect prior (`oracle`: +545,876 / +134,274 / +742,986 / +525,880) or under true
-per-transcript allocation weights (`oracle_alloc_seed`: 0.104 / 0.063 / 0.576 / 0.553). So the EM's gDNA component
-takes RNA the simulator drew as nascent, against a calibrated prior that had the split right. Stranded capture-ON
-holds (0.050 / 0.486 / 0.957 against 0.05 / 0.50 / 0.98). ⛔ Every number here is at the panel's nascent STRESS
-share (20.2 % of RNA fragments capture-OFF, `DESIGN.md` §0b): a robustness failure at stress, and no design
-decision may be driven from it until `ISSUES: nascent-stress-sensitivity` sizes it at the realistic share. When it
-is taken up, the question is what outweighs the prior when the EM assigns unspliced intronic fragments between
-gDNA and RNA — the prior is a pseudo-count. `quant_accuracy.py` (the pool rows), `calibration_vs_oracle.py`.
-UNDER CAPTURE the same EM moves the other way, and on the REBUILT ladder (2026-09-19, the corrected half-match
-physics) this is the dominant in-scope residual: at `g50 ss.99 ON` calibration reads 5,045,956 gDNA fragments
-against 5,000,000 true (+0.9 %) while the table reports a fraction of 0.4793 against 0.50, and at `g98 ss.99 ON`
-calibration reads −0.7 % while the table reports 0.9402 against 0.98. The missing gDNA lands on isoforms of
-heavily probed, isoform-rich genes (HPS4, 49 isoforms; EPIC1, 73); per fragment, measured on the retired ladder,
-8.6 % of the gDNA went to mRNA, almost all of it under a probe. It moves with neither the ruler (the true one
-leaves `g50` at 8.6 % against the shipped 7.8 %), the prior (`oracle`: no change in scope) nor the gDNA
-component's length taken from the ideal witness's efficiencies; true allocation weights halve it. One question in
-both directions: the EM does not hold the gDNA split calibration measured.
-
 ### nascent-stress-sensitivity
 `priority: next — it sizes `ISSUES: em-overturns-the-calibrated-gdna-split` · kind: question · 2026-08-22`
 Does any in-scope verdict depend on the nascent stress level? The ladder runs `on_fraction 0.50`; realistic is
@@ -266,6 +226,58 @@ At the unstranded × capture-OFF exon cell the refitted gDNA prior and the messa
 nothing arbitrating them; the message is the accurate voice there and the refit displaces it. Re-read under the
 E-step: `calibration_walk.py` now says the prior does the unstranded rows and the messages the stranded
 capture-ON ones. Belongs with `ISSUES: gdna-landscape-trains-on-false-positives`.
+
+### nascent-siphons-gdna-under-capture
+`priority: NOW — the dominant in-scope residual, and the next session's whole subject · kind: defect · 2026-09-19 (supersedes the capture-ON half of `em-overturns-the-calibrated-gdna-split`)`
+⭐⭐⭐ IT IS AN EXCHANGE, AND THE TWO SIDES ARE NASCENT AND gDNA. Under capture the synthetic nascent
+entities take fragments from gDNA almost one for one, with the ANNOTATED pool barely moving — which is
+what makes "siphon" the right word and rules out a general nascent bias. Measured on the rebuilt ladder
+(`quant_accuracy.py --arm base`, fractional, est − true in fragments):
+
+| condition | nascent Δ | gDNA Δ | sum | annotated Δ |
+|---|---:|---:|---:|---:|
+| `g05 ss.99 ON` | +69,268 | −66,516 | +2,752 | −2,752 |
+| `g50 ss.99 ON` | +541,216 | −534,656 | +6,560 | −6,560 |
+| `g98 ss.99 ON` | +590,406 | −611,173 | −20,767 | +20,767 |
+| `g50 ss.99 OFF` | −66,752 | +70,572 | +3,820 | −3,820 |
+
+⭐ CAPTURE FLIPS THE SIGN. Off capture gDNA takes from nascent (`g50 ss.50 OFF` −122,615 / +127,041);
+on capture nascent takes from gDNA. So it is not "nascent over-calls" — it is one contested pool of
+unspliced fragments whose arbitration capture reverses.
+
+⛔ `g00` CAPTURE-ON IS A DIFFERENT SUB-CASE and must not be pooled with the rest: there is no gDNA to
+take, and nascent instead LOSES 132,921 to the annotated pool (`g00 ss.99 ON`). The true ruler fixes it
+outright (−132,921 → +774), so that rung is a length problem and is already understood.
+
+**What the arms say, and it is not what either standing hypothesis predicts.**
+* A PERFECT `LocusPriors` (`--arm oracle`) removes essentially NOTHING in scope: `g50 ss.99 ON`
+  541,216 → 541,762, `g05` 69,268 → 70,280. Whatever admits the nascent entity, it is not the per-locus
+  prior's magnitude. ⚠ It does NOT test a per-TRANSCRIPT allocation — that is `oracle_alloc_seed`, whose
+  arm on disk is STALE (it predates the prior's restoration and was not re-run), so the strong form of
+  the "zombie" hypothesis is UNTESTED and re-running that arm is the cheapest first move.
+* The SIMULATOR'S OWN capture-aware lengths (`--arm oracle_ruler`) remove 13–28 %: `g50 ss.99 ON`
+  541,216 → 471,727, `g05` → 54,608, `g98` → 423,558 — real, partial, and not the bulk.
+
+**The length asymmetry, measured.** The true capture factor on the ladder's capture-ON label
+(`capture_truth_on.npz`, the index's own axis, all 15,669 rows) has median **555.7 for ANNOTATED
+transcripts and 41.0 for SYNTHETIC nascent entities** — a 13.5× gap — while a nascent entity's probed
+fraction is a median 0.0246 of its span against 0.271 for an annotated transcript. A nascent entity is
+a single-exon span, genomically continuous, and therefore geometrically INDISTINGUISHABLE FROM gDNA,
+which is what the capture efficiencies are measured on; an annotated transcript is spliced, and a probe
+over a junction captures a molecule gDNA can never produce there. That is the same witness geometry as
+`ISSUES: ruler-witness-geometry-on-transcript-panels`, pointed at the nascent-vs-gDNA competition
+instead of the isoform split. ⚠ Two annotated rows carry a non-finite factor; both have `L_plain == 0`
+and `probed_frac == 0` — degenerate, not a lead.
+
+**What changed it.** Restoring nascent RNA's share of the RNA prior (`nascent-gets-no-rna-prior`, CLOSED
+2026-09-19) made this half WORSE — `g50 ss.99 ON` 0.4793 → 0.4465 against 0.50 — because the retired
+`alpha = 0` rule had been MASKING the competition by suppressing one of the two competitors. The
+restoration is not the defect; it removed a hack that was hiding this one. ⚠ Unlike the capture-OFF half
+this is not only a stress reading: capture-ON runs at a 2.6 % nascent fragment share against a realistic
+4.2 %.
+
+`quant_accuracy.py` (the pool rows and `nrna_est`), `ruler_vs_truth.py`, `calibration_vs_oracle.py` as
+the control that must not move.
 
 ### the-atom-at-an-unwitnessed-both-strand-slot
 `priority: later — accepted as a limit of the information (owner, 2026-09-14) · kind: known limit · 2026-09-14`
@@ -435,6 +447,20 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### em-overturns-the-calibrated-gdna-split
+CLOSED 2026-09-19, in two halves and by two different things. THE CAPTURE-OFF HALF CLOSED BY LANDING
+`nascent-gets-no-rna-prior`: the EM's gDNA over-call there was the RNA prior's eligibility rule and not
+the EM's arbitration — `g50 ss.50 OFF` reads a library gDNA fraction of 0.5127 against 0.50 where it
+read 0.574, `g05 ss.50 OFF` 0.0538 where it read 0.104, and the nascent shortfall that mirrored it
+closed with it (`g00 ss.50 OFF` nascent 1,901,090 → 2,018,540 against 2,024,341 true). THE CAPTURE-ON
+HALF IS SUPERSEDED by `ISSUES: nascent-siphons-gdna-under-capture`, which names it correctly: the
+missing gDNA does not go to the isoforms of probed genes, it goes to the SYNTHETIC NASCENT entities,
+one fragment for one. The entry's own leading hypothesis — one gDNA rate spread uniformly along a locus
+while capture concentrates gDNA at probed exons — survives intact and is carried there as a candidate;
+what did not survive is the claim that the mass lands on annotated isoforms, which the pool rows refute
+(annotated Δ is −2,752 / −6,560 / +20,767 at `g05` / `g50` / `g98` `ss.99 ON` against a nascent Δ of
++69,268 / +541,216 / +590,406). Do not re-open this name; the open thread is the siphon's.
 
 ### nascent-gets-no-rna-prior
 CLOSED by landing 2026-09-19 (owner: "it's a hack; restore nascent RNA fairness"). The EM's RNA pseudocount

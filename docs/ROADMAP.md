@@ -25,9 +25,9 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
 - **Library gDNA fraction**: calibration's is accurate on the three in-scope strata and structurally blind on the
   deferred one (at κ = ½ no channel reaches an AMBIG slot; the θ-independent-channel search is closed) —
   `solvability_audit.py`, `policy_benchmark.py --by-class`. The transcript table the user reads does not keep it,
-  in either direction: at capture-OFF the EM assigns to gDNA unspliced RNA the simulator drew as nascent
-  (measured only at the panel's nascent stress share), and under capture it gives probed gDNA to isoform-rich
-  genes, both against a calibration that had the split right (`ISSUES: em-overturns-the-calibrated-gdna-split`).
+  under capture: the EM hands gDNA's fragments to the SYNTHETIC nascent entities, one for one, against a
+  calibration that had the split right (`ISSUES: nascent-siphons-gdna-under-capture`). The capture-OFF half of
+  that defect closed with the RNA prior's restoration.
 
 - **The deliverable, end to end** (2026-09-19, on the ladder REBUILT under the corrected capture physics, and
   RE-MEASURED after nascent RNA's share of the RNA prior was restored; `quant_accuracy.py --set
@@ -47,9 +47,10 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   lengths take stranded ON to 1.3 / 1.7 / 3.0 / 30.8 %, so it is worth 5.2 points at `g00` and 1.8 at `g05`
   (`ISSUES: ruler-witness-geometry-on-transcript-panels`). And the EM's gDNA split under capture, which the
   restoration made WORSE and changed the character of: the table now reads 0.4465 against 0.50 at
-  `g50 ss.99 ON` (it read 0.4793), and the mass went to a nascent channel that over-calls 4.6× there and 100×
-  at `g98 ss.99 ON` — at capture-OFF the same split improved (`g50 ss.99 OFF` 0.5524 → 0.5071)
-  (`ISSUES: em-overturns-the-calibrated-gdna-split`). The three calibration-side instruments are CONTROLS
+  `g50 ss.99 ON` (it read 0.4793), and the mass went one-for-one to the SYNTHETIC NASCENT entities, which
+  over-call 4.6× there and 100× at `g98 ss.99 ON` — at capture-OFF the same split improved
+  (`g50 ss.99 OFF` 0.5524 → 0.5071)
+  (`ISSUES: nascent-siphons-gdna-under-capture`). The three calibration-side instruments are CONTROLS
   across this change and came back identical on every metric — `calibration_vs_oracle.py`, `zero_controls.py`
   (byte-identical) and `policy_benchmark.py --panel ladder` — which is what says the change stayed inside the
   EM.
@@ -133,16 +134,16 @@ its instrument: the ruler reads 1.000 at `g00` and off capture, so the metric pa
 intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons (stranded ON)
 (`policy_benchmark.py --by-class`).
 
-1. **The EM does not hold calibration's gDNA split, UNDER CAPTURE** —
-   `ISSUES: em-overturns-the-calibrated-gdna-split`, the dominant in-scope residual and the whole of `g98`.
-   Restoring nascent RNA's share of the prior closed the capture-OFF half (`g50 ss.50 OFF` 0.574 → 0.5127
-   against 0.50) and made the capture-ON half WORSE: the table reports 0.4465 against 0.50 at `g50 ss.99 ON`
-   (it reported 0.4793) while calibration reads +0.9 %. The mass went to the NASCENT channel, which now
-   over-calls 4.6× there and 100× at `g98 ss.99 ON` — so the retired α = 0 rule had been masking a
-   nascent-vs-gDNA competition under capture by suppressing one competitor. The question is what arbitrates
-   the two where gDNA's density is an order of magnitude higher at probed exons, which is exactly where the
-   nascent entity sits. ⚠ Not only a stress reading: capture-ON runs at a 2.6 % nascent fragment share against
-   a realistic 4.2 %. Neither the prior, the ruler nor the gDNA component's length moves it.
+1. **Nascent RNA siphons gDNA under capture** — `ISSUES: nascent-siphons-gdna-under-capture`, the
+   dominant in-scope residual and the whole of `g98`. It is an EXCHANGE and the two sides are nascent
+   and gDNA: at `g50 ss.99 ON` nascent reads +541,216 against gDNA's −534,656, with the annotated pool
+   moving −6,560 — so the missing gDNA goes to the SYNTHETIC entities, one fragment for one, and not to
+   the isoforms of probed genes. Capture flips its sign; off capture gDNA takes from nascent instead.
+   Neither standing explanation covers it: a perfect `LocusPriors` removes ~0 in scope and the
+   simulator's own capture-aware lengths remove 13–28 %. The measured asymmetry to start from is that a
+   nascent entity is a single-exon span — geometrically indistinguishable from the gDNA the capture
+   efficiencies are measured on — while an annotated transcript is spliced, and the true capture factor
+   differs 13.5× between them. `ISSUES: em-overturns-the-calibrated-gdna-split` is CLOSED into this one.
 
 2. **The capture ruler where no gDNA witnesses it** — `ISSUES: ruler-witness-geometry-on-transcript-panels`. A
    probe spanning a junction gives extra capture only to the isoforms that hold it, which gDNA cannot see and
