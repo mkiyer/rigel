@@ -87,10 +87,38 @@ which is also the safety net under a capture error the ruler cannot see
 since it is the one lever that can move a within-RNA split.
 `quant_accuracy.py`, per stratum above `--arm base_reseed`.
 
+### overlapping-synthetic-shadows
+`priority: an owner decision on the index; not a 0.8.0 number · kind: design · 2026-09-20`
+`create_nrna_transcripts` clusters TSS/TES within a tolerance per strand and manufactures one synthetic
+nascent entity per merged span, so a gene with several isoform clusters carries several near-coincident
+shadows: 6,366 of the ladder index's 6,919 overlap a same-strand twin, 5,879 at ≥ 90 %, degrees up to 240.
+The twins are indistinguishable to the EM, which puts a family's mass on an arbitrary holder (the live
+entity is the holder in 78 % of live families off capture, 42 % on), so every PER-ENTITY nascent number is
+a coin flip and the family is the unit that can be scored. They do not cause the capture-ON siphon —
+collapsing every family to one component in the shipped EM reads 843k against 692k nascent at `g50 ss.99
+ON` — and they cost 7 % of live nascent off capture (live families 942,567 against 1,013,400 at
+`g50 ss.99 OFF`). The pool rows and the transcript table do not see them (synthetic rows are dropped);
+`worst_objects.py`-style per-entity diagnostics do. The decision is whether the index should merge them
+(one span per gene per strand) or the scoring should. `quant_accuracy.py`, the per-family scoring in
+`~/Downloads/rigel_runs/prototypes/2026-09-20_siphon_mechanism/`.
+
+### rna-prior-floor-at-pure-gdna-loci
+`priority: g98's own residual; the pre-EM prior chain · kind: defect · 2026-09-20`
+`rna_prior_count` over-states by +64.5 % at `g98 ss.99 ON` (180,806 against 109,915) and +32.4 % at
+`g98 ss.99 OFF`, and it is a diffuse positive floor, not a few loci: 1,089 of 1,149 loci read high, 55k
+of the 73k excess sits in loci that are over 99 % gDNA where the true RNA is 544 fragments over 867 loci,
+and it scales as ~0.8–0.9 % of the locus's gDNA read as RNA. A one-sided estimator at the boundary
+(`TRAPS: zero-target-guards-are-one-sided`); calibration-side, so `prior_vs_oracle.py` and
+`calibration_vs_oracle.py` are its instruments. At `g50` the same floor is +4,309 on 519 near-pure loci
+and invisible in the pool. It is why the per-transcript allocation makes `g98` capture-ON worse
+(`ISSUES: per-transcript-prior-lane`).
+
 ### nascent-stress-sensitivity
 `priority: next — it sizes `ISSUES: em-overturns-the-calibrated-gdna-split` · kind: question · 2026-08-22`
 Does any in-scope verdict depend on the nascent stress level? The ladder runs `on_fraction 0.50`; realistic is
-~0.10 (`DESIGN.md` §0b). Re-simulate the worst in-scope scenario at the realistic level and check whether any
+~0.10 (`DESIGN.md` §0b). MEASURED 2026-09-20 for the siphon: `g50 ss.99 ON` re-simulated at 0.10
+(`~/Downloads/rigel_runs/suite/ladder_nrna_lo`) reads a siphon of +522,205 against +541,216 at 0.50, so that
+verdict does not depend on the stress level — the repair is worth the full amount in the expected case. Re-simulate the worst in-scope scenario at the realistic level and check whether any
 rank moves; a verdict that holds only at stress is a robustness finding. The first verdict it must size is the
 capture-OFF gDNA over-call, measured only at stress (`g05 ss.50 OFF` 0.104 against 0.05). `sim/panel.py`,
 `quant_accuracy.py`, `policy_benchmark.py`.
@@ -251,27 +279,62 @@ E-step: `calibration_walk.py` now says the prior does the unstranded rows and th
 capture-ON ones. Belongs with `ISSUES: gdna-landscape-trains-on-false-positives`.
 
 ### nascent-siphons-gdna-under-capture
-`priority: NOW — the dominant in-scope residual; ROOT CAUSE FOUND 2026-09-19, the repair is open · kind: defect · 2026-09-19 (supersedes the capture-ON half of `em-overturns-the-calibrated-gdna-split`)`
-⭐⭐⭐ **THE ROOT CAUSE: `theta_n = 0` IS AN UNSTABLE FIXED POINT OF THE SHADOW-vs-gDNA CONTEST.** The EM
-gives a whole MultiLocus ONE gDNA component with ONE opportunity `L_g` over the entire connected
-component, while every synthetic nascent entity inside it carries only its own gene's span `L_n`. A
-connected component is a union of gene spans, so `L_g > L_n` STRUCTURALLY. Near zero the shadow's density
-is multiplied by `L_g/L_n > 1` every iteration, so a shadow holding NOTHING climbs off zero and settles at
-a share of the locus's gDNA that only the strand channel and `gdna_prior` bound (`EQUATIONS.md` §9b;
-gates `tests/test_estimator.py`). ⛔ The threshold is EXACTLY 1 and it is derived, not chosen.
+`priority: NOW — the dominant in-scope residual; MECHANISM MEASURED AND THE REPAIR PREPARED 2026-09-20 (snapshots, awaiting the go) · kind: defect · 2026-09-19 (supersedes the capture-ON half of `em-overturns-the-calibrated-gdna-split`)`
+⭐⭐⭐ **THE MECHANISM (measured 2026-09-20, per fragment against the read names' truth): THE gDNA
+COMPONENT'S OPPORTUNITY COUNTS A CROSSING START AT EVERY BOUNDARY ITS FRAGMENT CROSSES, WHILE ITS PSEUDOCOUNT
+COUNTS THE FRAGMENT ONCE.** `assemble_priors` converts a boundary's incidence count by the accumulator's
+`q` and left its incidence SUPPORT unconverted (`EQUATIONS.md` §11), so a locus whose fragments span short
+pieces reads its gDNA at `q̄` of the field's density. Off capture the crossing support is 15 % of a locus's
+opportunity and nothing shows; under capture the introns contribute nothing and the probed exons are
+shorter than a fragment, so it is 64 % over the `g50 ss.99 ON` loci and 84 % in the leaking ones, and the
+boundary term reads `1/q̄` times the once-counted crossing gDNA it holds (correlation 0.988 over 722
+loci). The leak follows it: 17.1 % of a locus's gDNA where every crossing fragment spans a short exon
+(`q̄` 0.45–0.55), 9.6 % at 0.55–0.70, 3.5 % at 0.70–0.85, 0.5 % where crossings cross one boundary. A gDNA
+component priced at `ρ q̄` hands its sense fragments at the probed exons to the RNA hypotheses; the
+isoforms are pinned by their spliced fragments, the shadows by nothing, and the shadows take it — 95 % of
+the gDNA they hold is exon-contained sense fragments where isoforms are also candidates, and the leak per
+gDNA fragment rises with the locus's mature RNA load (7 % below 0.05 mRNA/gDNA, 31–37 % above 1).
+**The proof is one E-step from the TRUE counts**: off capture the truth is a fixed point (shadows −1.6 %);
+on capture it drifts +24 % per step (+47 % with the priors off, which pull the right way), gDNA handing the
+RNA hypotheses 540,074 fragments and getting 433,802 back; with the gDNA opportunity set from each locus's
+true gDNA count the imbalance falls 73 % (+106,272 → +28,815) and the drift to +9 %; a global gDNA density
+×1.25 balances the flows. Everything else was switched off in that step and moved nothing: the
+fragment-length ratio (+117k), the isoform rulers at the simulator's truth (+122k), the shadow rulers at
+the truth (+104k), the unambiguous spliced counts (+116k). Converged A/Bs on the same row: a prior-only
+warm start 696k (unchanged), every twin family collapsed to one component 843k (worse), the scorer's
+realized gDNA length law replaced by the opportunity's 761k (worse). ⛔ The siphon does not need nascent
+RNA: at `on_fraction` 0.10 (`~/Downloads/rigel_runs/suite/ladder_nrna_lo`, cached and certified) it is
++522,205 against +541,216 at 0.50, with a seed floor of 0 / 81 fragments (transcript / gene).
 
-**The number that proves it, on the shipped solver.** One locus, 20,000 fragments ALL gDNA in truth,
-`ss 0.99`, half on each genome strand, at positions no mature isoform reaches. The shadow's share:
+**THE REPAIR PREPARED 2026-09-20 — the crossing support converted by the same `q` (one factor, the
+accumulator's own; gates in `tests/calibration/test_priors.py`, the enumeration verified failing on the
+shipped form and both gates watched to fire under the perturbation).** `g50 ss.99 ON`: nascent
++541,216 → +32,908, gDNA −626,550 → −56,319, transcript Σ|Δ| 5.21 → 5.50 %, gene 1.73 → 1.91 %,
+false-positive mass 33,944 → 25,634 (transcript) and 10,544 → 3,920 (gene), the annotated pool
+−6,560 → −68,483: the isoforms now lose 1.4 % of their mass to a gDNA component no longer under-priced,
+which is the isoform ruler's own +6–9 % over-statement (`ISSUES: ruler-witness-geometry-on-transcript-panels`)
+standing unmasked. `g50 ss.99 OFF`: transcript 2.50 → 2.49 %, gene 0.31 → 0.34 %, nascent −66,752 →
+−119,265, EM gDNA +55,312. `calibration_vs_oracle.py`, `zero_controls.py` and `policy_benchmark.py --panel
+ladder` identical on every metric — the change stayed inside the assembler. Five goldens moved by 0.2–2.1 %
+on two- and three-transcript scenarios. THE FULL LADDER on the patched tree (`arms/qa_ladder_base_q.jsonl`
+beside `qa_ladder_base.jsonl`, fractional, floors from `_base_reseed_q`), nascent Δ shipped → patched and
+transcript Σ|Δ| as a share of the true annotated RNA at `g00` / `g05` / `g50` / `g98`: stranded ON
+−132,921 / +69,268 / +541,216 / +590,406 → −132,665 / −6,837 / +32,905 / +128,212, transcripts
+6.53 / 3.50 / 5.21 / 32.99 → 6.53 / 3.49 / 5.50 / 31.03 % (gene 2.35 / 0.45 / 1.73 / 20.32 → 2.35 / 0.44 /
+1.91 / 16.87 %); stranded OFF transcripts 2.02 / 1.60 / 2.50 / 15.39 → 2.01 / 1.59 / 2.49 / 15.70 % with the
+nascent under-call growing (`g50` −66,752 → −119,261); unstranded OFF 1.74 / 1.91 / 2.52 / 17.78 →
+1.73 / 1.93 / 2.55 / 18.35 % (`g50` nascent −122,615 → −211,189); the deferred stratum 7.31 / 10.90 / 10.50 /
+102.01 → 7.32 / 11.00 / 10.11 / 90.63 %, its `g50` siphon +1,567,550 → +569,674. ⛔ `g00` capture-ON is
+unchanged: its −132,921 is the RNA-fed channel the true ruler fixes, a different defect. ⛔ Read `g98` apart
+on every stratum: its pool improves and its transcript rows move by ±0.3–0.6 points, on a true RNA pool of
+160–194 k where the RNA prior floor lives (`ISSUES: rna-prior-floor-at-pure-gdna-loci`). The seed floors
+are 0–233 fragments in scope.
 
-| `L_g/L_n` | 0.5 | 1.0 | 2.0 | 4.326 | 6.223 | 20 |
-|---|---:|---:|---:|---:|---:|---:|
-| no gDNA prior | 0 | **0** | 35.2 % | 48.1 % | 52.7 % | 82.0 % |
-| `gdna_prior = N/2` | 0 | 0 | 17.2 % | 39.0 % | 44.4 % | 58.2 % |
-
-4.326 and 6.223 are the ladder's own paired medians at `g50 ss.99` OFF and ON. The closed form and the
-native solver agree to two decimals, so this is the model's ML answer and not an EM artefact. With the
-strand term removed the contest is fully degenerate and goes to the CORNER — the shorter component takes
-everything — so strand does not open the channel, it only bounds it.
+⛔ **THE OFF-CAPTURE "SILENT SHADOW" NUMBER BELOW IS NOT A LEAK.** The index manufactures overlapping
+synthetic entities (6,366 of 6,919 overlap a same-strand twin, 5,879 at ≥ 90 %), the EM picks an arbitrary
+holder, and per-entity nascent scoring is a coin flip: at `g50 ss.99 OFF` silent families with no live twin
+hold 4,211 fragments in all, and the 257,002 "on silent shadows" is live families' mass on their twins
+(`ISSUES: overlapping-synthetic-shadows`). The OFF residual is nascent −7 % and gDNA +1.4 %.
 
 **End to end on the worst in-scope scenario.** Scaling ONLY the shadows' EM effective length by `lambda`
 at `g50 ss.99 ON` (base arm, fractional). ⛔ A FALSIFICATION PROBE, NEVER A REPAIR:
@@ -411,17 +474,11 @@ the gDNA pseudocount the EM ALREADY RECEIVES; at the panel's mass-weighted 9.7 i
 Strengthening the pseudocount instead is not a route: closing the channel that way needs 1× the data at
 ratio 2, 5–10× at 6.2 and 50× at 20, and a prior many times the data is not a prior.
 
-**THE REPAIR IS OPEN AND NEEDS THE OWNER.** The threshold says what would close it — a shadow must not be
-the shorter component against the pooled gDNA opportunity. THE TWO CANDIDATES ARE NOW PRICED.
-(1) A PER-GENE gDNA OPPORTUNITY — it needs no new information and the toy says it closes the channel
-outright, but it changes `LocusPriors`, so calibration's own consumers and all three controls become
-live. (2) THE MEASURED PER-TRANSCRIPT PRIOR on the tested components only — 96 % of the siphon at
-`g50 ss.99 ON` for 0.64 points, no harm off capture, but it needs `raw[i]`, which lives in the kernel and
-not in the static lane, so the shippable form is a small `em_solver.cpp` change rather than a Python
-producer; and `g98` needs `rna_prior_count`'s +64.5 % over-call fixed first or the error simply moves to
-the transcript table. ⛔ Not a length knob: the probe above shows it kills the live entities with the
-dead ones. ⛔ Not a stronger gDNA pseudocount: it would take 50× the data.
-
+**WHAT REMAINS AFTER THE REPAIR.** With the opportunity at its oracle value the truth still drifts +9 % per
+step on capture: the shadow is an unpinned RNA hypothesis at the probed exons, and any residual gDNA
+under-density is amplified through it. That residual is where the measured per-transcript prior on
+components with exclusive evidence belongs (`ISSUES: per-transcript-prior-lane`), second. THE PER-GENE gDNA
+OPPORTUNITY IS REFUSED (`ISSUES: per-gene-gdna-opportunity`).
 `quant_accuracy.py` (the pool rows and `nrna_est`), `tests/test_estimator.py` (the threshold),
 `ruler_vs_truth.py`, `calibration_vs_oracle.py` / `zero_controls.py` / `policy_benchmark.py` as the
 controls that must not move — all three confirmed unmoved across this session.
@@ -594,6 +651,17 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### per-gene-gdna-opportunity
+REFUSED 2026-09-20, before it was built, on the measurement its premise fails. The candidate (2026-09-19)
+rested on a toy in which every fragment of the locus sits inside the shadow's footprint, where the
+shadow's growth factor is `L_g/L_n`; in a locus whose gDNA is uniform the footprint holds its share and
+the factor is the density ratio, so pooling a locus's genes under one opportunity destabilises nothing by
+itself. Measured on `g50 ss.99`: off capture `L_g/L_fam` reaches 5 with families UNDER-calling 7 %; on
+capture families over-claim 3.5× where their own footprint's gDNA density per unit of the longest twin's
+opportunity is exactly the locus's (D 0.8–1.2), and single-twin families leak 4.3× against 3.7× for
+families of ten. A per-gene split of the shipped opportunity would inherit the twice-counted crossing per
+gene (`ISSUES: nascent-siphons-gdna-under-capture`). Do not rebuild it.
 
 ### em-overturns-the-calibrated-gdna-split
 CLOSED 2026-09-19, in two halves and by two different things. THE CAPTURE-OFF HALF CLOSED BY LANDING

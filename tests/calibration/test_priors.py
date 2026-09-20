@@ -235,12 +235,13 @@ def test_eff_len_uses_effective_support_not_genomic_size():
     assert not np.isclose(priors.gdna_eff_len[0], 300.0 + sum(boundary_eff))
 
 
-def test_a_boundary_enters_the_length_at_its_full_crossing_support_not_at_q():
-    # The count converts a boundary's mass by q, the conserved mass per crossing; the length does NOT
-    # convert the boundary's support: with q = ½ on every boundary the length is still Σ S_r + Σ S_e.
-    # REFUSED by measurement (2026-09-16): S_e · q collapses the length where pieces are short, the gDNA
-    # component saturates and the EM stops responding to its own gDNA pseudocount — the thermometer's
-    # injection gate on a contaminated toy went insensitive and both capture-OFF strata read 1–2 % worse.
+def test_a_boundary_enters_the_length_at_its_crossing_support_CONVERTED_BY_q():
+    # The count converts a boundary's mass by q, the conserved mass per crossing; the length converts the
+    # boundary's support by the SAME q, so a start is counted once however many boundaries its fragment
+    # crosses. Three 40-bp pieces, fragments of ~181 bp, q = ½ on both boundaries: every crossing start spans
+    # a piece and is in both supports, so the length is 30 + ½·360 = 210 and the density 4.2/210 = 0.02,
+    # the field's (region 0.2/10, boundary 3.6/180). The unconverted 30 + 360 = 390 read the same locus at
+    # half its density; it was pinned here until 2026-09-20 on a capture-OFF transcript-number measurement.
     region_eff = [10.0, 10.0, 10.0]
     boundary_eff = [180.0, 180.0]
     cal = _result(
@@ -253,8 +254,88 @@ def test_a_boundary_enters_the_length_at_its_full_crossing_support_not_at_q():
     )
     ra = _regions([0, 40, 80], [40, 80, 120])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 120)])])
-    np.testing.assert_allclose(priors.gdna_eff_len, [30.0 + 360.0], rtol=1e-9)
-    assert not np.isclose(priors.gdna_eff_len[0], 30.0 + 0.5 * 360.0)
+    np.testing.assert_allclose(priors.gdna_eff_len, [30.0 + 0.5 * 360.0], rtol=1e-9)
+    np.testing.assert_allclose(priors.gdna_prior_count / priors.gdna_eff_len, [0.02], rtol=1e-9)
+    assert not np.isclose(priors.gdna_eff_len[0], 30.0 + 360.0)
+
+
+@pytest.mark.parametrize(
+    "lengths",
+    [(60,), (50, 60, 70)],
+    ids=["one-length", "three-lengths"],
+)
+def test_the_length_counts_each_crossing_start_once_as_the_count_counts_each_fragment_once(lengths):
+    """THE CONSISTENCY THE TWO LEDGERS MUST SHARE, by brute-force enumeration against the deposit rule
+    (the executable specification is ``tests/native/_accumulator_reference.py``: a crossing fragment
+    deposits a count of +1 at EVERY boundary it crosses and a mass summing to 1 across them).
+
+    The pseudocount converts a boundary's incidence count to fragments by ``q = mass / count``. The
+    length must convert the boundary's incidence SUPPORT by the same ``q``, so that a start position is
+    counted once however many boundaries its fragment crosses. Three 40-bp pieces inside a long reference
+    with fragments longer than a piece: every crossing start that spans a piece would otherwise be
+    counted at both of its boundaries, and the locus's gDNA would read at HALF the field's density.
+
+    Under a uniform field of one fragment per start position the pseudocount is the number of distinct
+    starts overlapping the locus, and so must the length be: their ratio is the field's density, 1.
+    """
+    from rigel.calibration.effective_length import (
+        UNBOUNDED_REACH,
+        contained_eff_length,
+        crossing_eff_length,
+    )
+
+    starts = np.array([0, 400, 440, 480, 520])
+    ends = np.array([400, 440, 480, 520, 1000])
+    ra = _regions(starts, ends)
+    lo, hi = boundary_region_indices(ra.ref_id)
+    bpos = ends[lo]  # the boundary's coordinate: the end of its lower flank
+    n_r, n_e = len(starts), len(bpos)
+    pmf = np.zeros(max(lengths) + 1)
+    pmf[list(lengths)] = 1.0 / len(lengths)
+    S_r = contained_eff_length(ends - starts, pmf)
+    S_e = crossing_eff_length(pmf, np.full(n_e, UNBOUNDED_REACH), np.full(n_e, UNBOUNDED_REACH))
+
+    # the enumeration: one fragment per (start, length) at the pmf's weight, deposited by the rule
+    count_r, count_e, mass_e = np.zeros(n_r), np.zeros(n_e), np.zeros(n_e)
+    distinct_starts_in_locus = 0.0
+    for w in lengths:
+        wt = 1.0 / len(lengths)
+        for s in range(0, 1000 - w + 1):
+            e = s + w
+            if s < 520 and e > 400:
+                distinct_starts_in_locus += wt
+            crossed = [j for j in range(n_e) if s < bpos[j] < e]
+            if not crossed:
+                r = int(np.searchsorted(ends, s, side="right"))
+                assert starts[r] <= s and e <= ends[r]
+                count_r[r] += wt
+            else:
+                for j in crossed:
+                    count_e[j] += wt
+                    mass_e[j] += wt / len(crossed)
+    # every object reads its own density, 1 — the enumeration and the module's geometry agree exactly
+    np.testing.assert_allclose(count_r, S_r, rtol=1e-12)
+    np.testing.assert_allclose(count_e, S_e, rtol=1e-12)
+    q = mass_e / count_e
+
+    cal = _result(
+        region_g=count_r,
+        region_r=np.zeros(n_r),
+        region_eff=S_r,
+        boundary_g=count_e,
+        boundary_eff=S_e,
+        mass_per_crossing=q,
+    )
+    priors = assemble_priors(cal, ra, [_ml(0, [(0, 400, 520)])])
+    # the pseudocount already counts each fragment once
+    np.testing.assert_allclose(priors.gdna_prior_count, [distinct_starts_in_locus], rtol=1e-12)
+    # ...and so must the length: the density under a uniform field is the field's, 1
+    np.testing.assert_allclose(priors.gdna_eff_len, [distinct_starts_in_locus], rtol=1e-12)
+    np.testing.assert_allclose(priors.gdna_prior_count / priors.gdna_eff_len, [1.0], rtol=1e-12)
+    # PERTURBATION: the incidence total counts a spanning start at both of its boundaries
+    incidences = float(S_r[1:4].sum() + S_e.sum())
+    assert incidences > distinct_starts_in_locus * 1.2
+    assert not np.isclose(priors.gdna_eff_len[0], incidences)
 
 
 def test_every_OBJECT_has_the_same_density_under_a_uniform_field():

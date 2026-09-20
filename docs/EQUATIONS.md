@@ -691,29 +691,29 @@ a shadow entity holding nothing of its own falls from `kappa/(1 + rna_prior/anno
 iteration — the withheld rule's own denominator, over the components it did admit — to `kappa = w_N/w_T`.
 That is still strictly below 1 for free, since a shadow span is longer than the transcript it shadows, so
 the decay against the MATURE isoform survives — slower, and now a property of the likelihood rather than
-of the prior. ⛔⛔ **THAT GUARANTEE DOES NOT COVER THE OTHER COMPETITOR, AND THE INEQUALITY THERE RUNS THE
-OTHER WAY** (`ISSUES: nascent-siphons-gdna-under-capture`, 2026-09-19). The survival criterion is
-unchanged and still derived: with `m` fragments whose only RNA candidate is the entity, it grows iff
-`m·w_N > Total·theta_g·w_g`. Write it in lengths. The EM gives a whole MultiLocus ONE gDNA component with
-ONE opportunity `L_g` over the entire connected component, while a shadow carries its own gene's span
-`L_n`, so `w_N/w_g = L_g/L_n` — and a connected component is a union of gene spans, so `L_g > L_n`
-STRUCTURALLY, the more so the more genes it holds. Near `theta_n = 0` the shadow's density is therefore
-multiplied by `L_g/L_n > 1` every iteration: **`theta_n = 0` is an UNSTABLE fixed point of the shadow-vs-gDNA
-contest**, and the shadow climbs off it on any locus carrying gDNA at all.
-
-    d(b/a) per iteration = (b/a) · L_g/L_n ,    a = theta_g/L_g ,  b = theta_n/L_n
-
-What it settles at is bounded only by the strand channel and by `gdna_prior`. On a pool of `N` fragments
-that only gDNA and the shadow can explain, split evenly by genome strand, the fixed point in `r = b/a` is
+of the prior. ⛔⛔ **THAT GUARANTEE DOES NOT COVER THE OTHER COMPETITOR.** The survival criterion is unchanged and
+still derived: with `m` fragments whose only RNA candidate is the entity, it grows iff
+`m·w_N > Total·theta_g·w_g`. Written in densities that is `m/L_n > Total·theta_g/L_g` — the entity's
+footprint against the gDNA component's average — and in a locus whose gDNA is uniform the footprint holds
+its share of it (`m ∝ L_n/L_g` of the total), so the factor is the density ratio and not `L_g/L_n`: a
+whole MultiLocus's one gDNA opportunity does not by itself destabilise a shadow. What makes `theta_n = 0`
+unstable under capture is the gDNA component priced at `ρ q̄` of its density (§11), and it is measured
+with one E-step from the TRUE counts (2026-09-20): off capture the truth is a fixed point (the shadows
+return −1.6 %); on capture it drifts +24 % per step, +47 % without the priors, and +9 % with the gDNA
+opportunity at its oracle value. The toy below is a locus with ALL of its gDNA under one shadow — the
+contest the note of 2026-09-19 solved — and is kept as the record of what the solver does there, not of
+the ladder: off capture `L_g/L_fam` reaches 5 with no leak, on capture families over-claim 3.5× where
+the ratio is 1, and single-twin families leak 4.3× against 3.7× for families of ten
+(`ISSUES: nascent-siphons-gdna-under-capture`). On a pool of `N` fragments that only gDNA and the
+shadow can explain, split evenly by genome strand, the fixed point in `r = b/a` is
 
     r · L_n/L_g = [ ss·r/(ss·r + ½) + (1−ss)·r/((1−ss)·r + ½) ]
                 / [    ½/(ss·r + ½) +        ½/((1−ss)·r + ½) ]
 
-whose only root at `L_n ≥ L_g` is `r = 0` — the correct answer, and stable. Solved and confirmed against
-the shipped solver (`tests/test_estimator.py`), at `ss = 0.99` the shadow's share of `N` runs 0 % at
-`L_g/L_n = 1`, 35.2 % at 2, 52.7 % at 6.2 and 82.0 % at 20 — 44.4 % at 6.2 with a `gdna_prior` of `N/2`.
-⛔ **The threshold is exactly 1, and it is derived, not chosen**: nothing is tunable here, and a length
-knob is not the repair — it kills the live entities with the dead ones. Under the NASCENT SCOPE RULING
+whose only root at `L_n ≥ L_g` is `r = 0`. Solved and confirmed against the shipped solver
+(`tests/test_estimator.py`), at `ss = 0.99` the shadow's share of `N` runs 0 % at `L_g/L_n = 1`, 35.2 %
+at 2, 52.7 % at 6.2 and 82.0 % at 20 — 44.4 % at 6.2 with a `gdna_prior` of `N/2`. ⛔ A length knob is not
+a repair here either — it kills the live entities with the dead ones. Under the NASCENT SCOPE RULING
 (`DESIGN.md` §0b) nascent RNA is modelled for robustness, which is an argument for treating it like
 any other RNA here and not for a null that suppresses it.
 
@@ -1043,27 +1043,47 @@ counted through the bases it covers, a piece shorter than a fragment carries its
 to secure, which they secured by imputing forty junctions from pieces that had no support on the
 ladder's dense annotation.
 
-**The locus gDNA length counts the count's own objects.** The EM's gDNA component for a locus carries
+**The locus gDNA length counts what the count counts.** The EM's gDNA component for a locus carries
 a COUNT, the calibration's gDNA mass on the locus's regions and boundaries (one crossing converted by
 `q`, the conserved mass per crossing), and the length it divides that count by is those same objects'
-starts at their own efficiencies:
+starts at their own efficiencies, each start counted ONCE:
 
-    eff_g = Σ_r S_r · c̃_r + Σ_e S_e · c̃_e,
+    eff_g = Σ_r S_r · c̃_r + Σ_e q_e · S_e · c̃_e,
 
 the contained support of every region at its efficiency and the crossing support of every boundary at
-the boundary's own efficiency `c̃_e = E[min(ρ_e/ρ_ref, 1) | k_e, S_e]`. At uniform efficiency it is the
-plain `Σ S_r + Σ S_e`, the span the prior read before the efficiencies existed, so a capture-OFF
-library's prior is bit-identical to what it was. Two other forms are refused by measurement. The
-transcript's per-base form over the locus's bases drops the boundary objects whose masses the count
-keeps, and where the calibration's crossing masses sit above their geometry the gDNA component then
-reads denser than its objects, over-claims the exonic unspliced fragments and every probed gene
-under-calls — the test chromosome's `g50 ss.99 ON` row through the thermometer, gene-level Σ|Δ| 25,633
-→ 38,174 against 23,967 with the object form, and the gDNA pool +5.5 % against −0.1 %. And the boundary
-support converted by `q` (the count's conserved mass per crossing) so that each crossing start is counted
-once, as each fragment is in the count, collapses the length where pieces are short: the gDNA component
-saturates, the EM stops responding to its own gDNA pseudocount (the thermometer's injection gate on a
-contaminated toy goes insensitive) and both capture-OFF strata read 1–2 % worse, for 21,733 on that one
-row — the count's `q` undoes an inflation of mass, not of starts.
+the boundary's own efficiency `c̃_e = E[min(ρ_e/ρ_ref, 1) | k_e, S_e]`, converted by that boundary's `q_e`.
+The conversion is the deposit rule's own: a crossing fragment deposits a count of +1 at EVERY boundary it
+crosses and a mass summing to 1 across them, so a boundary's crossing support `E_f[w − 1]` (§2; gDNA's
+reach is unbounded) counts INCIDENCES, and a start whose fragment spans a piece shorter than itself sits
+in the support of both of that piece's boundaries. Under a uniform field of ρ fragments per start every
+object reads its own density (`k_e = ρ S_e`, `m_r = ρ S_r`), the count is `ρ (Σ S_r + Σ q_e S_e) = ρ N_starts`,
+and the UNconverted length `Σ S_r + Σ S_e` is `N_incidences`, so a component read against it has density
+`ρ · N_starts / N_incidences = ρ q̄` — the field's only where no fragment crosses two boundaries. Enumerated
+(`tests/calibration/test_priors.py`: three 40-bp pieces inside a long reference, four boundaries counting the
+locus's outer two, fragments of 60), 179 distinct starts overlap the locus against 236 incidences,
+`q = 49.5/59` at the outer boundaries and `40/59` at the inner ones, and `Σ q_e S_e = 179` exactly. At
+`q = 1` — flanks longer than every fragment — the two forms coincide, so the factor-one identity holds as
+before and a capture-OFF prior moves only at loci whose fragments span short pieces.
+
+**What the unconverted support cost (shipped 2026-09-16 → 2026-09-20).** It had been refused by a
+measurement on the test chromosome's capture-OFF transcript number, before nascent RNA's share of the RNA
+prior was restored — 1–2 % worse, a contaminated toy's injection gate insensitive — which ranked a
+calibration input on the thermometer and read the unmasking of a cancelling error as harm. Under capture
+the introns contribute no opportunity and the probed exons are shorter than a fragment, so the crossing
+support is 64 % of the locus length over the ladder's `g50 ss.99 ON` loci and 84 % in the loci that leak
+(15 % off capture), and the boundary term reads `1/q̄` times the once-counted crossing gDNA it holds
+(correlation 0.988 over 722 loci). A gDNA component priced at `ρ q̄` hands its sense fragments at the
+probed exons to the RNA hypotheses, and the synthetic nascent entities, pinned by nothing, take them
+(`ISSUES: nascent-siphons-gdna-under-capture`). Converting the support takes that row's siphon from
++541,216 to +32,908 fragments and its gDNA pool from −626,550 to −56,319, with `calibration_vs_oracle.py`,
+`zero_controls.py` and `policy_benchmark.py` identical on every metric.
+
+One other form stays refused by measurement: the transcript's per-base form over the locus's bases drops
+the boundary objects whose masses the count keeps, and where the calibration's crossing masses sit above
+their geometry the gDNA component then reads denser than its objects, over-claims the exonic unspliced
+fragments and every probed gene under-calls — the test chromosome's `g50 ss.99 ON` row through the
+thermometer, gene-level Σ|Δ| 25,633 → 38,174 against 23,967 with the object form, and the gDNA pool +5.5 %
+against −0.1 %.
 
 **The evidence is every unspliced gDNA object over the piece (role two).** gDNA is one template at a
 uniform rate before capture, so its density after capture on a piece is that piece's efficiency up to

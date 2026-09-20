@@ -1,6 +1,13 @@
 # The nascent RNA siphon — what causes it, what does not, and what to build
 
-**Status.** Diagnosis complete and priced; no repair landed. Written 2026-09-19/20 against `f77d43e1`.
+**Status (2026-09-20, later).** SUPERSEDED ON THE MECHANISM: §2.3's fixed-point reading models a locus with all
+of its gDNA under one shadow and does not describe the ladder; the measured driver is the gDNA opportunity's
+twice-counted crossing support (`EQUATIONS.md` §11, `ISSUES: nascent-siphons-gdna-under-capture`), candidate A
+is refused (`ISSUES: per-gene-gdna-opportunity`), and §1's OFF "silent shadow" number is twin redistribution
+(`ISSUES: overlapping-synthetic-shadows`). The measurements that stand: §1, §2.1–§2.2, §2.5, §4–§6. The
+session's harnesses: `~/Downloads/rigel_runs/prototypes/2026-09-20_siphon_mechanism/`.
+
+**Original status.** Diagnosis complete and priced; no repair landed. Written 2026-09-19/20 against `f77d43e1`.
 Nothing in `src/` changed while this was measured. The settled parts have moved to their permanent
 homes — the derivation to `EQUATIONS.md` §9b, the record and the numbers to
 `ISSUES: nascent-siphons-gdna-under-capture` and `ISSUES: per-transcript-prior-lane`, the lesson to

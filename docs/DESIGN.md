@@ -1944,12 +1944,15 @@ proportion to their geometry times their own-count densities, one pass. `calibra
 and publishes them per region and per boundary (`CalibrationResult.gdna_capture_efficiency_region`,
 `_boundary`, a boundary's being the posterior of its own crossing count); `capture_eff_length` is
 geometry — the pieces' taper-weighted base counts (`effective_length.BaseTaper`) and the sum — and
-`assemble_priors` reads the count's own objects at their supports and efficiencies, `Σ S_r c̃_r + Σ S_e
-c̃_e` — NOT the locus's bases: the base form dropped the boundary objects the count keeps and the gDNA
-component over-claimed (the test chromosome's `g50 ss.99 ON` row, gene-level Σ|Δ| 25,633 → 38,174
-against 23,967 with the object form); and not the boundary support at the count's `q`, which collapses
-the length on short pieces and saturates the gDNA component (the thermometer's injection gate goes
-insensitive on a contaminated toy, the capture-OFF strata 1–2 % worse, for 21,733 on that row).
+`assemble_priors` reads the count's own objects at their supports and efficiencies, the crossing support
+converted by the count's own `q`: `Σ S_r c̃_r + Σ q_e S_e c̃_e` (2026-09-20, `EQUATIONS.md` §11; snapshots
+awaiting the go) — NOT the locus's bases: the base form dropped the boundary objects the count keeps and
+the gDNA component over-claimed (the test chromosome's `g50 ss.99 ON` row, gene-level Σ|Δ| 25,633 → 38,174
+against 23,967 with the object form). The UNconverted support shipped from 2026-09-16 on a capture-OFF
+thermometer measurement (1–2 % worse, an injection gate insensitive on a contaminated toy) and priced the
+gDNA component at `q̄` of its density wherever fragments span short pieces — under capture, most of a
+probed locus's opportunity — which was the nascent siphon's driver: `g50 ss.99 ON` +541,216 → +32,908
+(`ISSUES: nascent-siphons-gdna-under-capture`).
 The multimapper floor `w = C/(C+1)` is deleted from both, the splice-junction objects and the flank
 imputation with it. Why: the floor was a +3.4 to +3.7 nat bias on every unprobed transcript at every gDNA level (a factor of
 30–40, the unprobed class's whole error), a piece shorter than a fragment has no contained support and read 0

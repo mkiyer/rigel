@@ -26,9 +26,11 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   deferred one (at κ = ½ no channel reaches an AMBIG slot; the θ-independent-channel search is closed) —
   `solvability_audit.py`, `policy_benchmark.py --by-class`. The transcript table the user reads does not keep it,
   under capture: the EM hands gDNA's fragments to the SYNTHETIC nascent entities, one for one, against a
-  calibration that had the split right — because `theta_n = 0` is an unstable fixed point of the shadow-vs-gDNA
-  contest (`ISSUES: nascent-siphons-gdna-under-capture`, root cause found 2026-09-19; `EQUATIONS.md` §9b). The
-  same channel is open off capture and is masked there by a compensating under-call.
+  calibration that had the split right — because the gDNA component's opportunity counted crossing starts
+  once per boundary crossed while its pseudocount counted fragments once, pricing the component at `q̄` of its
+  density under capture (`ISSUES: nascent-siphons-gdna-under-capture`, mechanism measured 2026-09-20;
+  `EQUATIONS.md` §11); the repair is prepared. Off capture the same term is 15 % of the opportunity and the
+  residual there is nascent −7 %.
 
 - **The deliverable, end to end** (2026-09-19, on the ladder REBUILT under the corrected capture physics, and
   RE-MEASURED after nascent RNA's share of the RNA prior was restored; `quant_accuracy.py --set
@@ -136,23 +138,23 @@ its instrument: the ruler reads 1.000 at `g00` and off capture, so the metric pa
 intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons (stranded ON)
 (`policy_benchmark.py --by-class`).
 
-1. **Nascent RNA siphons gDNA under capture — ROOT CAUSE FOUND, THE REPAIR IS OPEN** —
-   `ISSUES: nascent-siphons-gdna-under-capture`, the dominant in-scope residual and the whole of `g98`.
-   `theta_n = 0` is an UNSTABLE fixed point: the EM gives a whole MultiLocus one gDNA opportunity `L_g`
-   while each synthetic shadow carries one gene's span `L_n`, and `L_g > L_n` structurally, so a shadow
-   holding nothing climbs off zero at rate `L_g/L_n` per iteration (`EQUATIONS.md` §9b; the threshold is
-   exactly 1 and is pinned against the shipped solver in `tests/test_estimator.py`). 84 % of the siphon
-   sits on shadows whose true count is zero, it is exactly 0 at every locus with no certified gDNA, and
-   it scales with the component's gene count. CAPTURE DOES NOT REVERSE THE ARBITRATION — the same
-   channel leaks 257,002 off capture and 452,854 on it; the sign flip is the TRUE nascent pool
-   collapsing 6.7× under capture so the under-call that was masking it disappears. Ruled out with
-   numbers: the ruler already reproduces the 13.5× capture gap (0.0773 against a true 0.0738) and the
-   two contractions agree to 1.03 over coincident footprints. The ranked repair is the per-transcript
-   allocation (item 3): calibration's per-locus gDNA count is right to ±1 % on every in-scope condition
-   and the EM discards 196,217 fragments of it on the 20 worst loci alone, while a MEASURED weight on the
-   components the data can speak about removes 96 % of the siphon at `g50 ss.99 ON` for 0.64 points of
-   transcript error. A per-gene gDNA opportunity would close it with no new information at all.
-   `ISSUES: em-overturns-the-calibrated-gdna-split` is CLOSED into this one.
+1. **Nascent RNA siphons gDNA under capture — MECHANISM MEASURED, THE REPAIR PREPARED (snapshots await the
+   go)** — `ISSUES: nascent-siphons-gdna-under-capture`. The gDNA component's opportunity counted a crossing
+   start at every boundary its fragment crosses while its pseudocount counted the fragment once
+   (`EQUATIONS.md` §11); under capture the crossing support is most of a probed locus's opportunity, so the
+   component was priced at `q̄` of its density and the unpinned synthetic entities took what it lost. One
+   E-step from the true counts is the proof (off capture a fixed point, on capture +24 % per step, 73 % of it
+   the opportunity), and the repair is the count's own `q` on the support: `g50 ss.99 ON` siphon +541,216 →
+   +32,908, gDNA −626,550 → −56,319, at 0.3 points of transcript error, with the three calibration
+   instruments identical; on the full ladder the in-scope capture-ON siphon falls at every rung (`g05` +69,268 →
+   −6,837, `g98` +590,406 → +128,212, whose transcript table reads 32.99 → 31.03 %), both capture-OFF strata
+   hold on the transcript table to within 0.05 points except their `g98` rows (+0.3 / +0.6), and the deferred
+   stratum improves throughout. The residual is the isoform ruler's over-statement now standing unmasked (item 2)
+   and the shadow as an unpinned hypothesis at the probed exons (item 3). The per-gene opportunity is
+   refused (`ISSUES: per-gene-gdna-opportunity`); the twins are an index decision
+   (`ISSUES: overlapping-synthetic-shadows`); `g98`'s RNA prior floor is its own entry
+   (`ISSUES: rna-prior-floor-at-pure-gdna-loci`). At `on_fraction` 0.10 the siphon is +522,205, so it is worth
+   the full amount in the expected case.
 
 2. **The capture ruler where no gDNA witnesses it** — `ISSUES: ruler-witness-geometry-on-transcript-panels`. A
    probe spanning a junction gives extra capture only to the isoforms that hold it, which gDNA cannot see and

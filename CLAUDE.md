@@ -200,8 +200,15 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,450 passed / 0 skipped / 2 xfail, 3,452 collected** (re-derived
-2026-09-20: +1 for `docs/dev/NASCENT_SIPHON.md` by the `docs/dev/` row — the siphon's findings and the two
+**The standing baseline: 0 failed / 3,452 passed / 0 skipped / 2 xfail, 3,454 collected** (re-derived
+2026-09-20, later: +2 in `tests/calibration/test_priors.py`, the brute-force enumeration gate on the gDNA opportunity
+parametrised over two fragment-length laws, so `collected` moved by the case count alone; the gate that pinned the
+unconverted boundary support is rewritten to its inverse in place, ±0. ⚠ Five goldens moved with the assembler's
+crossing support now converted by the count's own `q` — `gdna_light` / `gdna_heavy` / `nrna_moderate_ss90` /
+`combo_moderate` / `combo_extreme`, by 0.2–2.1 % on two- and three-transcript scenarios, the gDNA component
+denser — and the truth-scored instruments were read first (`g50 ss.99 ON` siphon +541,216 → +32,908;
+`calibration_vs_oracle.py`, `zero_controls.py`, `policy_benchmark.py` identical). Before that 3,450 / 3,452 with
++1 for `docs/dev/NASCENT_SIPHON.md` by the `docs/dev/` row — the siphon's findings and the two
 priced repair candidates, written for the next session. Before that 3,449 / 3,451 after the nascent siphon's
 ROOT CAUSE: +9, all in existing files, so `collected` moved by the case count alone — +6 in `test_estimator.py` pinning the shadow-vs-gDNA threshold against the SHIPPED solver
 (two rows below `L_g/L_n = 1` where a shadow holding nothing must decay to exactly 0, three above it against
