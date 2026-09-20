@@ -200,9 +200,10 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,449 passed / 0 skipped / 2 xfail, 3,451 collected** (re-derived
-2026-09-19 after the nascent siphon's ROOT CAUSE: +9, all in existing files, so `collected` moves by the
-case count alone — +6 in `test_estimator.py` pinning the shadow-vs-gDNA threshold against the SHIPPED solver
+**The standing baseline: 0 failed / 3,450 passed / 0 skipped / 2 xfail, 3,452 collected** (re-derived
+2026-09-20: +1 for `docs/dev/NASCENT_SIPHON.md` by the `docs/dev/` row — the siphon's findings and the two
+priced repair candidates, written for the next session. Before that 3,449 / 3,451 after the nascent siphon's
+ROOT CAUSE: +9, all in existing files, so `collected` moved by the case count alone — +6 in `test_estimator.py` pinning the shadow-vs-gDNA threshold against the SHIPPED solver
 (two rows below `L_g/L_n = 1` where a shadow holding nothing must decay to exactly 0, three above it against
 `EQUATIONS.md` §9b's closed form, and the gDNA pseudocount as a bound that does not close the channel), and
 +3 in `test_quant_accuracy.py` on the allocation arm's weights, which read a MATURE-only truth column and so

@@ -30,22 +30,43 @@ only the strand channel and `gdna_prior` stop it. The threshold is exactly 1, de
 mass-weighted) and collapses the TRUE nascent pool 6.7× (1,013,400 → 150,405), so the compensating
 under-call on LIVE shadows that was masking the false positive disappears.
 
-## What the next session should do — the repair, and it needs an owner decision
+## The owner's question, answered (2026-09-19, second round)
 
-The threshold says what would close it: **a shadow must not be the shorter component against the pooled
-gDNA opportunity.** Three candidates, each judged on `quant_accuracy.py` per stratum above
-`--arm base_reseed`, fractional, with `calibration_vs_oracle.py` / `zero_controls.py` /
-`policy_benchmark.py` as the controls that must not move:
+**"If calibration can tell us there is no evidence for a shadow, can we give it zero prior?"** Calibration
+CAN tell us, it is RIGHT, and the EM never receives it.
 
-1. ⭐ **A sparsity mechanism on shadow support** — already ranked next as
-   `ISSUES: per-transcript-prior-lane`, and now priced on a REPAIRED arm at **67 % of the siphon** at
-   `g50 ss.99 ON` (+541,216 → +181,136). It is the one lever that can move a within-RNA split, since the
-   RNA prior's factor is common over RNA components by construction.
-2. **A per-gene rather than per-component gDNA opportunity.** This is the defect stated directly — but it
-   changes `LocusPriors` and therefore reaches calibration's own consumers, so the controls become live and
-   it is the expensive option. Derive before prototyping.
-3. **§9b's own survival criterion made a GATE rather than an outcome**: admit a shadow only where its
-   intron-exclusive evidence exceeds what gDNA alone would explain there (`m·w_N > Total·theta_g·w_g`).
+* `gdna_prior_count` is accurate to **±1 % on every in-scope condition**; `rna_prior_count` to ±1 % on
+  three of four (`g98 ON` over-states 64.5 %). At the INTRON-ONLY regions — the only place nascent RNA can
+  sit — calibration says 5,951 fragments against a true 92, while the EM's shadows hold 476,270.
+* On the 20 loci carrying the most shadow false positives at `g98 ss.99 ON` the EM **discards 196,217
+  gDNA fragments calibration had right** (161,476 at `g50 ss.99 ON`).
+* ⛔ `rna_prior_weight` is PLUMBED end to end and **NOTHING IN `src/` FILLS IT**. The solver therefore
+  always takes `w_i = raw[i]`, which echoes its own belief and cannot contradict it.
+
+## What the next session should do — two priced candidates, and the choice is the owner's
+
+Judged on `quant_accuracy.py` per stratum above `--arm base_reseed`, fractional, with
+`calibration_vs_oracle.py` / `zero_controls.py` / `policy_benchmark.py` as the controls:
+
+1. ⭐⭐ **A PER-GENE gDNA OPPORTUNITY.** It needs NO new information: the severity is set by `L_g/L_n`, and
+   at the ratio a per-gene opportunity gives (1.25) the shipped solver leaves the shadow at **0.00 %**
+   with the gDNA pseudocount it ALREADY receives, against 45–49 % at the panel's mass-weighted 9.7. It
+   changes `LocusPriors`, so all three controls become live — the expensive option, and the clean one.
+   Derive before prototyping.
+2. ⭐ **THE MEASURED PER-TRANSCRIPT PRIOR, on the tested components only.** A component reaching an object
+   no other component's structure reaches has an independently measurable mass; one whose opportunity is
+   wholly shared has none. That test selects 97.4 % of shadow spans and **0 % of annotated transcripts**.
+   Priced (diagnostic, the untested half circular): `g50 ss.99 ON` +541,216 → **+22,187**, 96 % of the
+   siphon, for 5.21 → 5.85 % of transcript error; `g50 ss.99 OFF` unharmed (2.50 → 2.53 %). ⛔ It needs
+   `raw[i]`, which lives in the kernel, so the shippable form is a small `em_solver.cpp` change, NOT a
+   Python producer filling the static lane — filling that lane wholesale reallocates the entire RNA
+   pseudocount (2,793,710 fragments at `g50 ss.99 ON`) and takes the transcript table to 53 %.
+   ⛔ `g98` first needs `rna_prior_count`'s +64.5 % over-call fixed: its pseudocount (180,806) is nearly
+   the whole true RNA (194,011) and the shadows were acting as its SINK, so removing them without fixing
+   it just moves the error to the transcript table (33.0 → 65.7 %).
+
+⛔ **NOT a stronger gDNA pseudocount.** Closing the channel that way needs 1× the data at ratio 2, 5–10×
+at 6.2 and 50× at 20 — and a prior many times the data is not a prior.
 
 ⛔ **NOT A LENGTH KNOB.** Scaling the shadows' EM length by 2 removes 97 % of the siphon and returns
 437,761 fragments to gDNA — and makes the transcript table WORSE (252,376 → 386,614 Σ|Δ|), because it kills

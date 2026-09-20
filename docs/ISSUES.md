@@ -50,9 +50,17 @@ constant and isoform usage is not; and a sparsity prior on isoform support as th
 
 ### per-transcript-prior-lane
 `priority: the third item, behind the EM's gDNA split and the capture ruler (owner, 2026-09-19); RE-MEASURED 2026-09-19 on a repaired instrument · kind: build · 2026-08-31`
-`rna_prior_weight` is built end to end but `pipeline.py` omits it, so the shipped EM carries no
-per-transcript information. It is the largest single lever measured on the isoform split AND on
-`ISSUES: nascent-siphons-gdna-under-capture`.
+`rna_prior_weight` is PLUMBED end to end — `pipeline.py` → `estimator.py` → `em_solver.cpp` — and
+⛔ **NOTHING IN `src/` FILLS IT**: there is no producer, only a parameter. So the solver always takes
+the fallback `w_i = raw[i]`, which echoes the EM's own belief and cannot contradict it. It is the
+largest single lever measured on the isoform split AND on
+`ISSUES: nascent-siphons-gdna-under-capture`, where a measured weight on the components the data can
+speak about removes 96 % of the siphon at `g50 ss.99 ON` for 0.64 points of transcript error (that entry
+carries the measurement). ⚠ THE LANE IS A SINGLE STATIC ARRAY, so filling it reallocates the WHOLE RNA
+pseudocount — 2,793,710 fragments at `g50 ss.99 ON`, as large as the unspliced RNA itself — and a
+coverage-derived weight is a far worse isoform allocator than the EM's own likelihood (5.21 → 53.37 %).
+A weight that keeps `raw[i]` where the data cannot speak needs `raw[i]`, which lives in the kernel, so
+the shippable form is a small `em_solver.cpp` change and not a Python producer.
 ⛔⛔ **THE ARM THAT PRICED IT WAS BROKEN UNTIL 2026-09-19 AND ITS OLD NUMBERS ARE RETIRED.**
 `quant_accuracy.truth_weights` read `observed_mrna_fragments`, which is identically 0 on every SYNTHETIC
 row — the nascent truth lives in `observed_nrna_fragments` — so the arm handed all 6,919 shadow entities
@@ -353,13 +361,66 @@ Separately unexplained and NOT this entry: the LIVE shadows' under-call off capt
 silent-shadow mass is 68,684 and is RNA-fed, a different channel, and nascent LOSES 132,921 to the
 annotated pool. The true ruler fixes it outright (−132,921 → +774).
 
+**THE PRE-EM PER-TRANSCRIPT PRIOR, MEASURED (owner's question, 2026-09-19).**
+⭐⭐⭐ CALIBRATION IS RIGHT AND THE EM DISCARDS IT. The per-locus prior the EM receives, against the
+certified truth through the SAME assembler: `gdna_prior_count` is accurate to **±1 % on every in-scope
+condition** (`g05 ON` 505,889 / 501,158; `g50 OFF` 2,380,225 / 2,404,082; `g50 ON` 4,954,189 / 4,937,801;
+`g98 ON` 9,551,684 / 9,614,034) and `rna_prior_count` to ±1 % on three of the four (`g98 ON` over-states
+by +64.5 %, 180,806 against 109,915). On the 20 loci carrying the most shadow false positives at
+`g98 ss.99 ON`, calibration says 1,101,626 gDNA against a certified 1,110,372 — and the EM outputs
+914,155, DISCARDING 196,217 fragments calibration had right; at `g50 ss.99 ON` the same 20 loci lose
+161,476. Per object it is just as good: at the INTRON-ONLY regions, where nascent RNA is the only RNA
+that can sit, calibration says 5,951 fragments against a true 92 — an over-call of 5,859 in a library
+where the EM's shadows hold 476,270.
+⛔ **THE LANE HAS NO PRODUCER.** `rna_prior_weight` is plumbed end to end — `pipeline.py` →
+`estimator.py` → `em_solver.cpp` — and NOTHING IN `src/` FILLS IT, so the solver falls back to the
+evidence-proportional rule `w_i = raw[i]`, which echoes the EM's own belief and therefore cannot
+contradict it. `nascent-gets-no-rna-prior` left the lane free for exactly this.
+**WHAT A MEASURED WEIGHT IS WORTH.** Deconvolving calibration's per-region RNA onto the transcripts
+under the same opportunity model the EM uses (`r_o ≈ Σ_t θ_t·a[t,o]/L_t`) estimates the SHADOW pool at
+997,068 against a true 1,013,538 off capture (0.98×) and 9,744 against 5,989 at `g98 ON` (1.6×), where
+the EM reads 596,171 (99.5×). Fed in as the whole weight it removes 55–87 % of the siphon and DESTROYS
+the transcript table (`g50 ss.99 ON` 5.21 → 53.37 %), because a single static lane reallocates the
+WHOLE RNA pseudocount — which at `g50 ss.99 ON` is 2,793,710 fragments, as large as the unspliced RNA
+itself — and a coverage-derived weight is a far worse isoform allocator than the EM's own likelihood.
+Adding the CERTIFIED spliced mass (13,482 junctions, 45,609 (sj, transcript) pairs, **0 synthetic
+holders**) does not fix it (52.86 %), so the damage is the isoform split and not the shadow/annotated
+balance.
+⭐ **THE HALF THAT WORKS, PRICED ALONE.** A component that reaches an object NO OTHER component's
+structure reaches has an independently measurable mass; one whose opportunity is entirely shared has
+none. That test selects **97.4 % of shadow spans and 0 % of annotated transcripts** (measured on all
+four conditions). Correcting only the tested components and leaving every other weight alone
+(DIAGNOSTIC — the untested half reads the base run's own counts and is circular, so it cannot ship):
+
+| `ss 0.99` | nascent Δ base | tested-only | siphon left | tx Σ\|Δ\| base | tested-only |
+|---|---:|---:|---:|---:|---:|
+| `g50 ON` | +541,216 | **+22,187** | **4 %** | 5.21 % | **5.85 %** |
+| `g50 OFF` | −66,752 | −45,507 | 68 % | 2.50 % | **2.53 %** |
+| `g98 ON` | +590,406 | +278,411 | 47 % | 32.99 % | 65.69 % |
+
+96 % of the siphon at the worst well-calibrated condition for 0.64 points of transcript error, and no
+harm off capture. ⛔ `g98` is the exception and it is a CANCELLING DEFECT PAIR: its RNA pseudocount
+(180,806) is nearly the whole true RNA (194,011) and over-states by 64.5 %, so the shadows had been
+acting as its SINK — removing the sink without fixing the over-call moves the error onto the transcript
+table.
+⭐⭐ **THE STRUCTURAL ALTERNATIVE NEEDS NO NEW INFORMATION AT ALL.** The leak's severity is set by
+`L_g/L_n`, and that ratio is large only because ONE gDNA component covers a whole connected component.
+On the shipped solver, at the ratio a PER-GENE gDNA opportunity would give (1.25 — single-gene loci
+measure `span_g/fl_n` 1.21 with the two contractions agreeing to 1.03), the shadow takes **0.00 %** with
+the gDNA pseudocount the EM ALREADY RECEIVES; at the panel's mass-weighted 9.7 it takes 45–49 %.
+Strengthening the pseudocount instead is not a route: closing the channel that way needs 1× the data at
+ratio 2, 5–10× at 6.2 and 50× at 20, and a prior many times the data is not a prior.
+
 **THE REPAIR IS OPEN AND NEEDS THE OWNER.** The threshold says what would close it — a shadow must not be
-the shorter component against the pooled gDNA opportunity — and the candidates are a sparsity mechanism on
-shadow support (which `ISSUES: per-transcript-prior-lane` already ranks next and which the fixed alloc arm
-prices at 67 %), a per-gene rather than per-component gDNA opportunity, or admitting a shadow only where
-its intron-exclusive evidence exceeds what gDNA alone explains there (§9b's own survival criterion, made a
-gate rather than an outcome). ⛔ Not a length knob: the probe above shows it kills the live entities with
-the dead ones.
+the shorter component against the pooled gDNA opportunity. THE TWO CANDIDATES ARE NOW PRICED.
+(1) A PER-GENE gDNA OPPORTUNITY — it needs no new information and the toy says it closes the channel
+outright, but it changes `LocusPriors`, so calibration's own consumers and all three controls become
+live. (2) THE MEASURED PER-TRANSCRIPT PRIOR on the tested components only — 96 % of the siphon at
+`g50 ss.99 ON` for 0.64 points, no harm off capture, but it needs `raw[i]`, which lives in the kernel and
+not in the static lane, so the shippable form is a small `em_solver.cpp` change rather than a Python
+producer; and `g98` needs `rna_prior_count`'s +64.5 % over-call fixed first or the error simply moves to
+the transcript table. ⛔ Not a length knob: the probe above shows it kills the live entities with the
+dead ones. ⛔ Not a stronger gDNA pseudocount: it would take 50× the data.
 
 `quant_accuracy.py` (the pool rows and `nrna_est`), `tests/test_estimator.py` (the threshold),
 `ruler_vs_truth.py`, `calibration_vs_oracle.py` / `zero_controls.py` / `policy_benchmark.py` as the

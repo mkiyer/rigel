@@ -148,7 +148,10 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
    collapsing 6.7× under capture so the under-call that was masking it disappears. Ruled out with
    numbers: the ruler already reproduces the 13.5× capture gap (0.0773 against a true 0.0738) and the
    two contractions agree to 1.03 over coincident footprints. The ranked repair is the per-transcript
-   allocation (item 3), which on a REPAIRED instrument removes 67 % of it at `g50 ss.99 ON`.
+   allocation (item 3): calibration's per-locus gDNA count is right to ±1 % on every in-scope condition
+   and the EM discards 196,217 fragments of it on the 20 worst loci alone, while a MEASURED weight on the
+   components the data can speak about removes 96 % of the siphon at `g50 ss.99 ON` for 0.64 points of
+   transcript error. A per-gene gDNA opportunity would close it with no new information at all.
    `ISSUES: em-overturns-the-calibrated-gdna-split` is CLOSED into this one.
 
 2. **The capture ruler where no gDNA witnesses it** — `ISSUES: ruler-witness-geometry-on-transcript-panels`. A
