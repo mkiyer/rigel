@@ -17,7 +17,7 @@ Ordered by priority. An entry says what is open and the number a ranking turns o
 what was ruled is `DESIGN.md`.
 
 ### ruler-witness-geometry-on-transcript-panels
-`priority: next — the capture ruler at low and zero gDNA; its repair needs an owner decision · kind: defect · 2026-09-15, amended 2026-09-16 and 2026-09-19 (the physics), re-measured on the rebuilt ladder 2026-09-19`
+`priority: DEFERRED post-0.8.0 by owner ruling 2026-09-20 — Rigel stays panel-agnostic and takes no panel input; the junction witness is a data-derived design to be derived on paper against the oracle-ruler ceiling first (1.34 / 1.71 / 2.90 / 24.66 % on stranded ON, the committed tree, against 6.53 / 3.49 / 5.50 / 31.03) · kind: defect · 2026-09-15, amended 2026-09-16 and 2026-09-19 (the physics), re-measured 2026-09-20`
 Only a transcript holding the junction a probe spans binds that probe whole, so the extra capture of
 junction-spanning fragments is ISOFORM-SPECIFIC, and the EM splits a gene's shared fragments by the ratio of its
 isoforms' capture-aware lengths. Nothing Rigel reads sees it: gDNA holds the probe's parts apart and binds the
@@ -49,7 +49,7 @@ constant and isoform usage is not; and a sparsity prior on isoform support as th
 `quant_accuracy.py --arm oracle_ruler`, `ruler_vs_truth.py`.
 
 ### per-transcript-prior-lane
-`priority: the third item, behind the EM's gDNA split and the capture ruler (owner, 2026-09-19); RE-MEASURED 2026-09-19 on a repaired instrument · kind: build · 2026-08-31`
+`priority: NOW — the next session's job, in three gated steps (owner, 2026-09-20): the cheapest data-derived support rule as an ARM priced against the ceiling, then the producer with the kernel's own-count fallback, then the census if it recovers little · kind: build · 2026-08-31`
 `rna_prior_weight` is PLUMBED end to end — `pipeline.py` → `estimator.py` → `em_solver.cpp` — and
 ⛔ **NOTHING IN `src/` FILLS IT**: there is no producer, only a parameter. So the solver always takes
 the fallback `w_i = raw[i]`, which echoes the EM's own belief and cannot contradict it. It is the
@@ -78,6 +78,8 @@ stranded OFF 2.0 / 1.6 / 2.5 / 15.4 → **0.4 / 0.4 / 0.7 / 6.6 %**, stranded ON
 gDNA the true weights hand over a support so sparse that what the EM loses elsewhere is not recovered.
 On the pool split it removes 67 % of the nascent siphon at `g50 ss.99 ON` (+541,216 → +181,136) and 52 %
 at `g98 ss.99 ON`.
+RE-MEASURED 2026-09-20 ON THE COMMITTED TREE (`c52c9b93`, the gDNA opportunity corrected; `arms/qa_ladder_oracle_alloc_seed_q.jsonl`): stranded OFF 2.01 / 1.59 / 2.49 / 15.70 → **0.43 / 0.43 / 0.70 / 6.38 %**, unstranded OFF 1.73 / 1.93 / 2.55 / 18.35 → **0.42 / 0.45 / 0.81 / 8.35 %**, stranded ON 6.53 / 3.49 / 5.50 / 31.03 → **2.91 / 1.08 / 2.07 / 18.00 %** (gene 2.35 / 0.44 / 1.91 / 16.87 → 1.92 / 0.23 / 1.21 / 16.41 %); the deferred stratum 7.32 / 11.00 / 10.11 / 90.63 → 3.41 / 2.67 / 4.03 / 221.15 %. ⭐ `g98` capture-ON now IMPROVES under the allocation (31.0 → 18.0) where it read 33.0 → 49.6 before the gDNA opportunity was corrected: the shadows had been the allocation's sink (`ISSUES: nascent-siphons-gdna-under-capture`). This is the largest lever on every in-scope stratum, and the only one with no capture in it off capture.
+THE THREE GATED STEPS (owner, 2026-09-20). ① A data-derived support rule as an ARM in `quant_accuracy.py`, nothing in `src/`: an isoform is supported iff its EXCLUSIVE spliced evidence says so (its exclusive junctions carry reads at a depth where its siblings' do), every other weight the EM's own; priced per stratum above the floor against `base` and this ceiling, `g98` apart. ② Only if ① recovers a meaningful fraction at `g05` and `g50`: the producer for `rna_prior_weight` and the kernel's own-count fallback for components whose structure cannot speak (`em_solver.cpp`, small), falsification test first, A/B, the ladder, the report. ③ If ① recovers little: the census of which genes carry the error — the near-tied multi-isoform genes — before anything larger is designed.
 That arm is a capability proof and never headroom: it hands over the true support, and a zero weight is
 absorbing. Two weightings are refused (`ISSUES: refused-transcript-weights`,
 `ISSUES: refused-soft-min-path-weighting`): the support problem is the whole problem, so the next
@@ -105,13 +107,22 @@ ON` — and they cost 7 % of live nascent off capture (live families 942,567 aga
 ### rna-prior-floor-at-pure-gdna-loci
 `priority: g98's own residual; the pre-EM prior chain · kind: defect · 2026-09-20`
 `rna_prior_count` over-states by +64.5 % at `g98 ss.99 ON` (180,806 against 109,915) and +32.4 % at
-`g98 ss.99 OFF`, and it is a diffuse positive floor, not a few loci: 1,089 of 1,149 loci read high, 55k
-of the 73k excess sits in loci that are over 99 % gDNA where the true RNA is 544 fragments over 867 loci,
-and it scales as ~0.8–0.9 % of the locus's gDNA read as RNA. A one-sided estimator at the boundary
-(`TRAPS: zero-target-guards-are-one-sided`); calibration-side, so `prior_vs_oracle.py` and
-`calibration_vs_oracle.py` are its instruments. At `g50` the same floor is +4,309 on 519 near-pure loci
-and invisible in the pool. It is why the per-transcript allocation makes `g98` capture-ON worse
-(`ISSUES: per-transcript-prior-lane`).
+`g98 ss.99 OFF`, and it is a diffuse positive floor, not a few loci: 1,089 of 1,149 loci read high and 55k
+of the 73k excess sits in loci that are over 99 % gDNA where the true RNA is 544 fragments over 867 loci.
+DISSECTED per object (2026-09-20, `g98 ss.99 ON`): on the 14,280 regions holding gDNA and NO RNA the
+calibration places 19,538 RNA fragments, on 97 % of them, and the floor is per OBJECT and grows roughly as
+the square root of the object's gDNA — a median 0.14 fragments on regions of 1–10 gDNA (11.6 % of their
+gDNA), 1.8 at 100–1,000 (1.2 %), 26 at 10,000+ (0.19 %) — the signature of a posterior MEAN of a composition
+whose likelihood sits at the boundary `f_r = 0` with a width `~1/√n` (`TRAPS: zero-target-guards-are-one-sided`).
+Most of the mass is on BOUNDARIES: 231,410 RNA incidences against 63,972 true, +85,112 on boundaries with
+no RNA at all (1.6 % of their gDNA incidences) and +82,326 on mixed ones; regions carry +24,291. ⛔ NOT a
+constant fraction and NOT a cheap fix: it is the composition solve's estimator at a pure-gDNA object — a
+posterior mean cannot read zero — so the repair is an atom at `f_r = 0` in ψ's hypothesis space (the tilt
+already carries {pure +, pure −, mixed}; the composition does not) or a different estimand there, a solver
+design item, and it lives at the stress rung (at `g50` the same floor is +4,309 on 519 near-pure loci,
+0.15 % of the RNA, invisible in the pool). `prior_vs_oracle.py`, `calibration_vs_oracle.py`,
+`solvability_audit.py` (the confidently-wrong class). It is why the per-transcript allocation made `g98`
+capture-ON worse before the gDNA opportunity was corrected (`ISSUES: per-transcript-prior-lane`).
 
 ### nascent-stress-sensitivity
 `priority: next — it sizes `ISSUES: em-overturns-the-calibrated-gdna-split` · kind: question · 2026-08-22`
@@ -279,7 +290,7 @@ E-step: `calibration_walk.py` now says the prior does the unstranded rows and th
 capture-ON ones. Belongs with `ISSUES: gdna-landscape-trains-on-false-positives`.
 
 ### nascent-siphons-gdna-under-capture
-`priority: NOW — the dominant in-scope residual; MECHANISM MEASURED AND THE REPAIR PREPARED 2026-09-20 (snapshots, awaiting the go) · kind: defect · 2026-09-19 (supersedes the capture-ON half of `em-overturns-the-calibrated-gdna-split`)`
+`priority: LANDED 2026-09-20 (`c52c9b93`) — the residual (+32,905 at `g50 ss.99 ON`, +128,212 at `g98`) is the unpinned shadow and rides with `per-transcript-prior-lane` · kind: defect · 2026-09-19 (supersedes the capture-ON half of `em-overturns-the-calibrated-gdna-split`)`
 ⭐⭐⭐ **THE MECHANISM (measured 2026-09-20, per fragment against the read names' truth): THE gDNA
 COMPONENT'S OPPORTUNITY COUNTS A CROSSING START AT EVERY BOUNDARY ITS FRAGMENT CROSSES, WHILE ITS PSEUDOCOUNT
 COUNTS THE FRAGMENT ONCE.** `assemble_priors` converts a boundary's incidence count by the accumulator's
@@ -306,7 +317,7 @@ realized gDNA length law replaced by the opportunity's 761k (worse). ⛔ The sip
 RNA: at `on_fraction` 0.10 (`~/Downloads/rigel_runs/suite/ladder_nrna_lo`, cached and certified) it is
 +522,205 against +541,216 at 0.50, with a seed floor of 0 / 81 fragments (transcript / gene).
 
-**THE REPAIR PREPARED 2026-09-20 — the crossing support converted by the same `q` (one factor, the
+**THE REPAIR LANDED 2026-09-20 (`c52c9b93`) — the crossing support converted by the same `q` (one factor, the
 accumulator's own; gates in `tests/calibration/test_priors.py`, the enumeration verified failing on the
 shipped form and both gates watched to fire under the perturbation).** `g50 ss.99 ON`: nascent
 +541,216 → +32,908, gDNA −626,550 → −56,319, transcript Σ|Δ| 5.21 → 5.50 %, gene 1.73 → 1.91 %,

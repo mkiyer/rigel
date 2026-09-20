@@ -1945,8 +1945,8 @@ and publishes them per region and per boundary (`CalibrationResult.gdna_capture_
 `_boundary`, a boundary's being the posterior of its own crossing count); `capture_eff_length` is
 geometry — the pieces' taper-weighted base counts (`effective_length.BaseTaper`) and the sum — and
 `assemble_priors` reads the count's own objects at their supports and efficiencies, the crossing support
-converted by the count's own `q`: `Σ S_r c̃_r + Σ q_e S_e c̃_e` (2026-09-20, `EQUATIONS.md` §11; snapshots
-awaiting the go) — NOT the locus's bases: the base form dropped the boundary objects the count keeps and
+converted by the count's own `q`: `Σ S_r c̃_r + Σ q_e S_e c̃_e` (2026-09-20, `EQUATIONS.md` §11; landed as
+`c52c9b93`) — NOT the locus's bases: the base form dropped the boundary objects the count keeps and
 the gDNA component over-claimed (the test chromosome's `g50 ss.99 ON` row, gene-level Σ|Δ| 25,633 → 38,174
 against 23,967 with the object form). The UNconverted support shipped from 2026-09-16 on a capture-OFF
 thermometer measurement (1–2 % worse, an injection gate insensitive on a contaminated toy) and priced the

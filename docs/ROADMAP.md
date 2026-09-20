@@ -29,8 +29,8 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   calibration that had the split right — because the gDNA component's opportunity counted crossing starts
   once per boundary crossed while its pseudocount counted fragments once, pricing the component at `q̄` of its
   density under capture (`ISSUES: nascent-siphons-gdna-under-capture`, mechanism measured 2026-09-20;
-  `EQUATIONS.md` §11); the repair is prepared. Off capture the same term is 15 % of the opportunity and the
-  residual there is nascent −7 %.
+  `EQUATIONS.md` §11); the repair LANDED 2026-09-20 (`c52c9b93`): `g50 ss.99 ON` siphon +541,216 → +32,905.
+  Off capture the same term is 15 % of the opportunity and the residual there is nascent −7 %.
 
 - **The deliverable, end to end** (2026-09-19, on the ladder REBUILT under the corrected capture physics, and
   RE-MEASURED after nascent RNA's share of the RNA prior was restored; `quant_accuracy.py --set
@@ -138,45 +138,30 @@ its instrument: the ruler reads 1.000 at `g00` and off capture, so the metric pa
 intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons (stranded ON)
 (`policy_benchmark.py --by-class`).
 
-1. **Nascent RNA siphons gDNA under capture — MECHANISM MEASURED, THE REPAIR PREPARED (snapshots await the
-   go)** — `ISSUES: nascent-siphons-gdna-under-capture`. The gDNA component's opportunity counted a crossing
-   start at every boundary its fragment crosses while its pseudocount counted the fragment once
-   (`EQUATIONS.md` §11); under capture the crossing support is most of a probed locus's opportunity, so the
-   component was priced at `q̄` of its density and the unpinned synthetic entities took what it lost. One
-   E-step from the true counts is the proof (off capture a fixed point, on capture +24 % per step, 73 % of it
-   the opportunity), and the repair is the count's own `q` on the support: `g50 ss.99 ON` siphon +541,216 →
-   +32,908, gDNA −626,550 → −56,319, at 0.3 points of transcript error, with the three calibration
-   instruments identical; on the full ladder the in-scope capture-ON siphon falls at every rung (`g05` +69,268 →
-   −6,837, `g98` +590,406 → +128,212, whose transcript table reads 32.99 → 31.03 %), both capture-OFF strata
-   hold on the transcript table to within 0.05 points except their `g98` rows (+0.3 / +0.6), and the deferred
-   stratum improves throughout. The residual is the isoform ruler's over-statement now standing unmasked (item 2)
-   and the shadow as an unpinned hypothesis at the probed exons (item 3). The per-gene opportunity is
-   refused (`ISSUES: per-gene-gdna-opportunity`); the twins are an index decision
-   (`ISSUES: overlapping-synthetic-shadows`); `g98`'s RNA prior floor is its own entry
-   (`ISSUES: rna-prior-floor-at-pure-gdna-loci`). At `on_fraction` 0.10 the siphon is +522,205, so it is worth
-   the full amount in the expected case.
+1. **The isoform allocation — three gated steps (owner, 2026-09-20)** — `ISSUES: per-transcript-prior-lane`.
+   With the gDNA opportunity corrected it is the largest lever on every in-scope stratum, and the one that is
+   panel-agnostic by construction: truth as the support weights reads stranded OFF 2.0 / 1.6 / 2.5 / 15.7 →
+   0.4 / 0.4 / 0.7 / 6.4 %, unstranded OFF 1.7 / 1.9 / 2.6 / 18.4 → 0.4 / 0.5 / 0.8 / 8.4 %, stranded ON
+   6.5 / 3.5 / 5.5 / 31.0 → 2.9 / 1.1 / 2.1 / 18.0 % (`quant_accuracy.py --arm oracle_alloc_seed`, the
+   committed tree) — a CEILING, since the arm hands over the true support. Step one: the cheapest
+   data-derived support rule as an ARM in `quant_accuracy.py` with nothing in `src/` — an isoform is
+   supported iff its exclusive spliced evidence says so — priced per stratum above the floor against the base
+   and the ceiling. Step two, only if it recovers a meaningful fraction at `g05` and `g50`: the producer for
+   `rna_prior_weight` (the lane `pipeline.py` never fills) with the kernel's own-count fallback for components
+   whose structure cannot speak, falsification test first, A/B, the ladder, the report. Step three, if it
+   recovers little: the census of which genes carry the error (the near-tied multi-isoform genes) before
+   anything larger is designed. The nascent siphon's residual (+32,905 at `g50 ss.99 ON`) is the same unpinned
+   hypothesis and rides with this item.
 
-2. **The capture ruler where no gDNA witnesses it** — `ISSUES: ruler-witness-geometry-on-transcript-panels`. A
-   probe spanning a junction gives extra capture only to the isoforms that hold it, which gDNA cannot see and
-   which at zero gDNA has no witness at all: the simulator's own lengths take stranded capture-ON to
-   1.3 / 1.7 / 3.0 / 30.8 %, so they are worth 5.2 points at `g00` and 1.8 at `g05`. The repair needs the owner's decision, since the one observable is the
-   probe design and Rigel reads no panel; the candidates are data-derived (a fitted capture field, a per-kit
-   profile learned across a cohort).
+2. **Deferred by owner rulings of 2026-09-20, post-0.8.0.** The capture ruler where no gDNA witnesses it
+   (`ISSUES: ruler-witness-geometry-on-transcript-panels`): Rigel stays panel-agnostic and takes no panel
+   input, and the junction witness is a data-derived design to be derived on paper against the oracle-ruler
+   ceiling (1.34 / 1.71 / 2.90 / 24.66 % on stranded ON, the committed tree) before any prototype. The pre-EM
+   prior chain (`ISSUES: capture-blind-gdna-divisor`, `ISSUES: eb-shrinkage-magic-ess`): a perfect prior moves
+   nothing in scope on the committed tree. `g98`'s RNA prior floor (`ISSUES: rna-prior-floor-at-pure-gdna-loci`):
+   a composition-solve estimator item at the stress rung, invisible at `g05` and `g50`.
 
-3. **The per-transcript allocation** — `ISSUES: per-transcript-prior-lane`. `rna_prior_weight` is built end to end
-   and `pipeline.py` omits it; truth as the allocation weights is the largest single lever measured on the EM's
-   isoform split AND on item 1. ⛔ RE-MEASURED 2026-09-19 on a repaired instrument — the arm had been reading a
-   MATURE-only truth column and weighting every synthetic entity at zero, which reproduced the retired
-   `alpha = 0` rule rather than an allocation. A wiring gap plus a support decision, and the next candidate is a
-   sparsity mechanism, which is also the safety net under any capture error and the ranked repair for item 1.
-
-4. **The pre-EM prior chain** — what the oracle arms price it at on the deliverable: a perfect prior recovers
-   nothing in scope on the rebuilt ladder and moves `g98` alone, so `ISSUES: capture-blind-gdna-divisor`,
-   `ISSUES: eb-shrinkage-magic-ess` and the assembler's remaining rules are ranked by their own
-   instrument (`prior_vs_oracle.py`) rather than by the table. ⛔ `ISSUES: oracle-cache-key-hashes-a-thread-count`
-   is CLOSED, so the oracle arms read the shared caches again.
-
-5. **Calibration accuracy where the strand tilt matters** — the AMBIG slots with RNA on both strands
+3. **Calibration accuracy where the strand tilt matters** — the AMBIG slots with RNA on both strands
    (`DESIGN.md` §6b.15.12–§6b.15.13). The tilt atom and the strand channel's protocol decision landed 2026-09-14 (the
    strand-pure under-call and the gDNA-free deadband CLOSED); the θ measure is settled (both flattenings
    REFUSED, `ISSUES: strand-marginal-volume-factor`); the lanes' own defects are fixed and gated by
@@ -186,13 +171,13 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
    (`ISSUES: the-tilt-census-as-an-instrument`), and a known limit to watch rather than build against
    (`ISSUES: the-atom-at-an-unwitnessed-both-strand-slot`). Each judged on the metric per stratum, both
    zero controls and the shared-exon stress at depth, never on the ladder alone.
-6. **The intron's own solve on unstranded capture-OFF** — the intron class carries the largest share of
+4. **The intron's own solve on unstranded capture-OFF** — the intron class carries the largest share of
    the in-scope error there (`policy_benchmark.py --by-class`): the factory profile's resolution against
    the intergenic background (`density_deconv`); dissect with `worst_objects.py`.
-7. **The vertex atom** — on silent genes and nascent-free introns; a
+5. **The vertex atom** — on silent genes and nascent-free introns; a
    mechanism for it is the prior's reference (`ISSUES: reference-prior-refuted-at-concept-level`
    constrains the form) or the intron's own solve, not a message.
-8. **The message policy, only where a row is above the bar**: one prototype mechanism at a time, in C++ in
+6. **The message policy, only where a row is above the bar**: one prototype mechanism at a time, in C++ in
    a worktree, the two trees scored with `policy_benchmark.py --by-class`, halves apart, pass zero beside the pipeline:
    `ISSUES: two-sided-exon-row`, `ISSUES: flux-floor-dispersion`,
    `ISSUES: message-layer-open-cases`.
@@ -200,7 +185,7 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
 Then, in standing order: `ISSUES: refit-vs-message-arbitration` (re-read under the E-step: the walk now says the prior does the
 unstranded rows and the messages the stranded capture-ON ones).
 
-9. **The release itself** — `docs/PUBLISHING.md` is the procedure and it is two commands plus a wait. What
+7. **The release itself** — `docs/PUBLISHING.md` is the procedure and it is two commands plus a wait. What
    gates it is not the procedure but the state: the deliverable measured and not regressed per stratum, the
    zero controls at 0.000 and 1.000, the suite at its standing count, `preflight.py --full` green, the
    standing risks re-read (`ISSUES: capture-degeneracy-standing-risk`,
