@@ -200,8 +200,13 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,440 passed / 0 skipped / 2 xfail, 3,442 collected** (re-derived
-2026-09-19 after `quant_accuracy.py --markdown`, the per-scenario release report: +8 in
+**The standing baseline: 0 failed / 3,443 passed / 0 skipped / 2 xfail, 3,445 collected** (re-derived
+2026-09-19 after the allocation arm's weights were repaired: +3 in `test_quant_accuracy.py`, all in an
+existing file, so `collected` moves by the case count alone — the arm read a MATURE-only truth column and so
+handed all 6,919 synthetic entities a weight of zero, an oracle arm silently re-running the retired
+`alpha = 0` rule (`TRAPS: an-oracle-column-that-omits-a-population`). ⚠ No golden moved and no `src/` file
+changed: the fix is in `scripts/design/quant_accuracy.py`, so `--arm oracle_alloc_seed` is the only arm whose
+numbers move. Before that 3,440 / 3,442 after `quant_accuracy.py --markdown`, the per-scenario release report: +8 in
 `tests/calibration/test_quant_accuracy.py`, every one a way the RENDERING can lie while the numbers
 underneath are right — the gDNA column scored without its intergenic half, a ratio invented at a truth of
 zero, the two RNA pools folded together, a ragged table, the deferred stratum unmarked, a column that

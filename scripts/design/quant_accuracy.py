@@ -391,23 +391,47 @@ def seeded(pipeline_config, arm: str, em_seed: int):
     return out
 
 
+#: The truth table's RNA fragment columns, most realised first. Each entry is the MATURE and the
+#: NASCENT column together, and that pairing is the point: a synthetic shadow entity emits no mature
+#: RNA, so its whole realised mass sits in the nascent column of its OWN row, while a single-exon
+#: annotated transcript carries both. A mature column read alone weights every shadow at zero.
+_WEIGHT_COLUMNS = (
+    ("observed_mrna_fragments", "observed_nrna_fragments"),
+    ("mrna_abundance", "nrna_abundance"),
+)
+
+
 def truth_weights(truth: pd.DataFrame, index) -> np.ndarray:
-    """``float64[n_transcripts]`` — the TRUE realised fragment count per transcript, on the EM's axis.
+    """``float64[n_transcripts]`` — the TRUE realised RNA fragment count per transcript, on the EM's axis.
 
     This is the whole of ``oracle_alloc``'s input: the relative abundances the simulator actually produced.
     Within a locus the EM only reads their RATIOS, so no normalisation is needed here.
+
+    ⛔ THE WEIGHT IS MATURE **AND** NASCENT, because the RNA prior's recipients are every RNA component
+    and a synthetic shadow entity is one of them (`EQUATIONS.md` §9b). A shadow's realised fragments are
+    the NASCENT column of its own row and its mature column is identically zero, so reading the mature
+    column alone hands every shadow a weight of exactly zero — which is not an allocation but the
+    retired ``alpha = 0`` rule (`ISSUES: nascent-gets-no-rna-prior`, CLOSED) under an oracle's name, and
+    it reads as a perfect allocation removing the nascent over-call. Gated by
+    ``tests/calibration/test_quant_accuracy.py``. A table with no nascent column cannot express a
+    shadow's allocation and is refused rather than silently weighted at zero.
 
     Exact-duplicate transcripts are folded onto the twin the index kept — the truth table is keyed on
     the un-collapsed annotation, so without the fold their fragments would be dropped rather than
     attributed. For such a pair the per-transcript truth is not merely awkward, it is UNDEFINED: the
     two are the same molecule and only the group total is a fact about the world.
     """
-    col = next((c for c in ("observed_mrna_fragments", "mrna_abundance") if c in truth.columns), None)
-    if col is None:
-        raise SystemExit("⛔ truth table has neither observed_mrna_fragments nor mrna_abundance")
+    pair = next((p for p in _WEIGHT_COLUMNS if all(c in truth.columns for c in p)), None)
+    if pair is None:
+        raise SystemExit(
+            "⛔ truth table carries no mature+nascent RNA pair "
+            f"({' or '.join('+'.join(p) for p in _WEIGHT_COLUMNS)}); a mature column alone cannot "
+            "express a synthetic nascent entity's allocation"
+        )
+    total = truth[pair[0]].to_numpy(np.float64) + truth[pair[1]].to_numpy(np.float64)
     t_index = dict(zip(index.t_df["t_id"].to_numpy(), index.t_df["t_index"].to_numpy(), strict=True))
     w = np.zeros(int(index.num_transcripts), dtype=np.float64)
-    for tid, n in zip(truth["transcript_id"], truth[col], strict=True):
+    for tid, n in zip(truth["transcript_id"], total, strict=True):
         i = t_index.get(str(tid))
         if i is not None:
             w[int(i)] += float(n)

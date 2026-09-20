@@ -803,3 +803,87 @@ def test_the_report_does_NOT_call_the_truth_table_s_ROW_COUNT_a_transcript_count
     assert "| 10 |" not in body, "the truth table's row count was reported as a transcript count"
     assert "| 4 |" not in body, "the gene axis reported its grouping-key count"
     assert "expressed" in body and "detected" in body
+
+
+# ── GATE 16: the allocation arm's weights must reach every transcript the simulator gave RNA ──────
+
+
+def _alloc_truth_table():
+    """Two annotated transcripts and the SYNTHETIC shadow of each of their genes, as the simulator
+    writes them: a shadow's fragments are ``observed_nrna_fragments`` on its OWN row, and its
+    ``observed_mrna_fragments`` is zero because a shadow emits no mature RNA. A single-exon annotated
+    transcript carries both columns."""
+    return pd.DataFrame(
+        {
+            "transcript_id": ["t_spliced", "t_single_exon", "nrna_gene_a", "nrna_gene_b"],
+            "observed_mrna_fragments": [900.0, 100.0, 0.0, 0.0],
+            "observed_nrna_fragments": [0.0, 7.0, 300.0, 50.0],
+            "mrna_abundance": [900.0, 100.0, 0.0, 0.0],
+            "nrna_abundance": [0.0, 7.0, 300.0, 50.0],
+        }
+    )
+
+
+class _AllocIndex:
+    """The three columns ``truth_weights`` reads off an index."""
+
+    def __init__(self, t_ids):
+        self.t_df = pd.DataFrame(
+            {"t_id": list(t_ids), "t_index": np.arange(len(t_ids), dtype=np.int64)}
+        )
+        self.num_transcripts = len(t_ids)
+
+
+def test_the_allocation_arm_does_NOT_hand_a_weight_of_ZERO_to_an_RNA_EMITTING_transcript():
+    """⛔ THE ARM MUST WEIGH EVERY RNA COMPONENT, AND A SYNTHETIC SHADOW IS ONE (`EQUATIONS.md` §9b).
+
+    ``--arm oracle_alloc*`` claims to hand the EM the true per-transcript allocation. Reading a MATURE
+    column alone gives every synthetic nascent entity a weight of exactly zero — on the ladder, 6,919
+    of 15,669 rows and all 150,432 nascent fragments — which is not a true allocation but the retired
+    ``alpha = 0`` rule (`ISSUES: nascent-gets-no-rna-prior`, CLOSED) wearing an oracle's name. The arm
+    then reads as "a perfect allocation removes the nascent over-call", when what removed it was
+    suppressing the component (TRAPS: could-the-arm-have-fired).
+
+    The invariant is structural and needs no number: a transcript the simulator gave RNA fragments
+    must receive a POSITIVE weight, and one it gave none must receive zero.
+
+    Perturbation: reading ``observed_mrna_fragments`` alone zeroes both shadow rows here, and on the
+    ladder turns the arm into a re-run of ``alpha = 0`` — its nascent estimate tracks the
+    pre-restoration baseline to within 15 % on every in-scope condition.
+    """
+    truth = _alloc_truth_table()
+    index = _AllocIndex(truth["transcript_id"])
+    w = QA.truth_weights(truth, index)
+
+    emits = (truth["observed_mrna_fragments"] + truth["observed_nrna_fragments"]).to_numpy()
+    assert np.all(w[emits > 0] > 0.0), (
+        "a transcript the simulator gave RNA fragments received a weight of ZERO — a zero weight is "
+        "a suppression, not an allocation"
+    )
+    assert np.all(w[emits == 0] == 0.0), "a silent transcript received prior mass"
+    # the weights are the RNA the simulator realised, mature and nascent alike
+    np.testing.assert_allclose(w, [900.0, 107.0, 300.0, 50.0], rtol=1e-12)
+
+
+def test_the_allocation_weights_fall_back_to_the_ABUNDANCE_pair_not_to_a_MATURE_column():
+    """With no ``observed_*`` columns the fallback must still be a PAIR. Falling back to
+    ``mrna_abundance`` alone reinstates the same zero on every shadow row on any panel whose truth
+    table predates the observed columns.
+
+    Perturbation: a single-column fallback gives ``nrna_gene_a`` weight 0 here.
+    """
+    truth = _alloc_truth_table().drop(
+        columns=["observed_mrna_fragments", "observed_nrna_fragments"]
+    )
+    w = QA.truth_weights(truth, _AllocIndex(truth["transcript_id"]))
+    np.testing.assert_allclose(w, [900.0, 107.0, 300.0, 50.0], rtol=1e-12)
+
+
+def test_the_allocation_weights_REFUSE_a_truth_table_that_carries_no_nascent_column():
+    """A truth table with a mature column and no nascent one cannot express a shadow's allocation, so
+    the arm refuses rather than silently weighting every shadow at zero."""
+    truth = _alloc_truth_table().drop(
+        columns=["observed_nrna_fragments", "nrna_abundance", "mrna_abundance"]
+    )
+    with pytest.raises(SystemExit, match="nascent"):
+        QA.truth_weights(truth, _AllocIndex(truth["transcript_id"]))
