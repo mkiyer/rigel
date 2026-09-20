@@ -23,9 +23,12 @@ junction-spanning fragments is ISOFORM-SPECIFIC, and the EM splits a gene's shar
 isoforms' capture-aware lengths. Nothing Rigel reads sees it: gDNA holds the probe's parts apart and binds the
 better one, and at zero gDNA there is no witness at all. MEASURED on the rebuilt ladder (2026-09-19, the corrected
 half-match physics, `quant_accuracy.py` under fractional assignment, stranded × capture-ON, transcript-level Σ|Δ|
-as a share of the true RNA at `g00` / `g05` / `g50`): shipped 6.8 / 4.5 / 7.8 %, the simulator's own lengths
-(`--arm oracle_ruler`) 2.6 / 3.4 / 8.6 %. So the ruler costs 4.2 points where there is no gDNA to read it from,
-1.1 points at `g05`, and nothing at `g50`, where the residual is the EM's gDNA split
+as a share of the true RNA at `g00` / `g05` / `g50`): shipped 6.5 / 3.5 / 5.2 %, the simulator's own lengths
+(`--arm oracle_ruler`) 1.3 / 1.7 / 3.0 % — RE-MEASURED 2026-09-19 after nascent RNA's share of the RNA prior
+was restored, which moved both arms (they read 6.8 / 4.5 / 7.8 and 2.6 / 3.4 / 8.6). So the ruler costs 5.2
+points where there is no gDNA to read it from, 1.8 at `g05` and 2.2 at `g50` — the `g50` cost is new: under the
+retired allocation the true ruler read WORSE there (8.6 against 7.8), which the restoration reversed, so this
+entry no longer hands `g50` wholly to the EM's gDNA split
 (`ISSUES: em-overturns-the-calibrated-gdna-split`). On the DEFERRED stratum the same arm reads 3.0 / 4.0 /
 19.4 % against 8.3 / 12.4 / 20.8 % shipped. The error sits in highly expressed multi-isoform genes whose TOTALS
 are right, and a ruler is judged by the WITHIN-GENE spread of its error
@@ -62,7 +65,21 @@ exon ≤ 150 bp — which is also the safety net under a capture error the ruler
 `quant_accuracy.py`, per stratum above `--arm base_reseed`.
 
 ### em-overturns-the-calibrated-gdna-split
-`priority: now — the capture-ON half is the dominant in-scope residual on the rebuilt ladder; the capture-OFF half is sized at the realistic nascent share before anything is built on it · kind: defect · 2026-09-19`
+`priority: now — the capture-ON half is the dominant in-scope residual and the restoration of the RNA prior made it WORSE; the capture-OFF half largely closed with that landing · kind: defect · 2026-09-19 (re-measured 2026-09-19 after `nascent-gets-no-rna-prior`)`
+⭐⭐ RE-MEASURED after nascent RNA's share of the RNA prior was restored, and the entry SPLIT IN TWO BY SIGN.
+THE CAPTURE-OFF HALF LARGELY CLOSED, and its cause was the allocation rule rather than the EM's arbitration:
+`g05 ss.50 OFF` reads a gDNA fraction of 0.0538 against 0.05 (it read 0.104), `g50 ss.50 OFF` 0.5127 and
+`g50 ss.99 OFF` 0.5071 against 0.50 (they read 0.574 and 0.552). The nascent shortfall that mirrored it closed
+with it — `g00 ss.50 OFF` nascent reads 2,018,540 against 2,024,341 true, where it read 1,901,090.
+⛔⛔ THE CAPTURE-ON HALF GOT WORSE, and that is now the whole of this entry: `g50 ss.99 ON` reports 0.4465
+against 0.50 (it reported 0.4793) and `g98 ss.99 ON` 0.9189 against 0.98 (0.9402). The mass did not return to
+the annotated transcripts — it went to the NASCENT channel, which now over-calls under capture: `g50 ss.99 ON`
+691,648 against 150,432 true (4.6×) and `g98 ss.99 ON` 596,395 against 5,989 (100×). So the α = 0 rule had been
+MASKING a nascent-vs-gDNA competition under capture by suppressing one of the two competitors, and the question
+this entry now asks is what arbitrates them where gDNA's density is an order of magnitude higher at probed
+exons — exactly where the nascent entity also sits. ⚠ Unlike the capture-OFF half, this is NOT only a stress
+reading: capture-ON runs at a 2.6 % nascent fragment share, near the realistic 4.2 %.
+The pre-restoration record, kept because the capture-OFF half's diagnosis rests on it:
 At capture-OFF calibration's library split is right and the transcript table's is not. `g05 ss.50 OFF`:
 calibration 490,967 gDNA fragments against 500,004 true (`calibration_vs_oracle.py`, the row's `pools`), the table
 1,037,727 — a gDNA fraction of 0.104 against 0.05; `g05 ss.99 OFF` 489,187 against 628,152 in the table (0.063);
@@ -215,19 +232,6 @@ lab has no such pair (owner, 2026-09-17); the session's `lever_census.py` is the
 any new captured library, and `count_unambig` beside `count` is what tells a user which isoform assignments rest on
 shared fragments alone.
 
-### nested-antisense-leak-under-the-sane-ruler
-`priority: later (EM-side, with the per-transcript prior lane) · kind: defect · 2026-09-14`
-With the EM's ruler honest — a gDNA-free library contracts nothing (`DESIGN.md` §7.2) — the negative control
-of `tests/scenarios/test_antisense_intronic.py` (a single-exon antisense `t2` inside the host's intron,
-truth 0, host nascent RNA at 50) receives the strand-flipped intronic nascent fragments: 24 of 2,000 at
-SS 0.9 and 124 at SS 0.65 (the bounds were 5 and 20; both parametrisations are strict xfails). The bounds
-had held only because the retired kernel-density reference, fabricated from 1.1 false gDNA fragments,
-contracted the host mRNA 4.7× and its nascent entity 3.9× while leaving `t2` at full length, so the
-nascent entity's rate per base was inflated fourfold and nothing reached `t2`. The defect is the EM's
-assignment at a nested transcript nothing witnesses — the EM-side twin of
-`ISSUES: the-atom-at-an-unwitnessed-both-strand-slot` — and its lever is the per-transcript prior lane
-(`ISSUES: per-transcript-prior-lane`), not calibration. `quant_accuracy.py`.
-
 ### message-layer-open-cases
 `priority: next · kind: question · 2026-09-09`
 Four residual cases, none a hole (`DESIGN.md` §6b.4–§6b.14): (a) an exon with both faces speaking — the
@@ -262,29 +266,6 @@ At the unstranded × capture-OFF exon cell the refitted gDNA prior and the messa
 nothing arbitrating them; the message is the accurate voice there and the refit displaces it. Re-read under the
 E-step: `calibration_walk.py` now says the prior does the unstranded rows and the messages the stranded
 capture-ON ones. Belongs with `ISSUES: gdna-landscape-trains-on-false-positives`.
-
-### nascent-gets-no-rna-prior
-`priority: NOW — the next session's first build (owner, 2026-09-19: "it's a hack; restore nascent RNA fairness") · kind: decision · 2026-08-18 (named 2026-09-13, re-scoped 2026-09-19)`
-The EM hands the locus's RNA pseudocount only to the components the annotation asserts exist: a synthetic nascent
-entity is excluded and receives none (Dirichlet alpha = 0). The rule is in
-`native/em_solver.cpp:apply_grouped_prior_update`, fed by `estimator.run_batch_locus_em_partitioned`'s
-`t_is_synthetic`, and derived in `EQUATIONS.md` §9b/§9b.1; `assemble_priors` only supplies the per-locus total.
-THE OWNER'S RULING: it is a hack, and nascent fairness is restored so that the per-transcript prior can be
-described as distributing the RNA pseudocounts uniformly over the RNA components — no component singled out for
-zero. ⭐ THE ONE OPEN CHOICE is the weight, and §9b.1 already derives what hangs on it: the shipped allocation is
-`a_i = P · raw[i] / Σ_eligible raw`, proportional to the EM's own belief, and at `raw[i] = 0` it is ABSORBING —
-which is what stops a zombie entity being revived by prior mass alone. Admitting entities at that weight keeps the
-absorbing state; giving every component an equal share removes it, and `EQUATIONS.md` §9b.1 names the activation
-threshold to design against (the VBEM fixed point, ~0.16–0.47 alpha units, not the exponential cutoff 0.0014).
-The gDNA:RNA split must not move: the prior is redistributed strictly WITHIN the RNA pool and the per-M-step
-identity is `Σ out = rna_count + rna_prior` either way (a gate in `test_estimator.py` holds it).
-WHAT MOVES WITH IT: `EQUATIONS.md` §9b and §9b.1, the gates in `tests/test_estimator.py` that pin the synthetic
-branch (including the bit-identity of a locus with no synthetic component), and the strict xfail
-`tests/scenarios/test_antisense_intronic.py::test_nrna_multiexon_t2_low_ss`, which the alpha = 0 rule owns: 72
-fragments on the annotated antisense `t2` against the test's limit of 50. If the restoration closes it, the xfail
-goes with a test asserting the new rule's promise; if it does not, the entry says so with the number. Then
-RE-MEASURE the baseline on the rebuilt ladder before anything else is built on it.
-`quant_accuracy.py` per stratum above `--arm base_reseed`, `zero_controls.py`, `prior_vs_oracle.py`.
 
 ### the-atom-at-an-unwitnessed-both-strand-slot
 `priority: later — accepted as a limit of the information (owner, 2026-09-14) · kind: known limit · 2026-09-14`
@@ -454,6 +435,45 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### nascent-gets-no-rna-prior
+CLOSED by landing 2026-09-19 (owner: "it's a hack; restore nascent RNA fairness"). The EM's RNA pseudocount
+now goes to EVERY RNA component in proportion to the evidence it already carries, with none singled out for
+zero; the eligibility test, the per-component `component_is_synthetic` flag, the `t_is_synthetic` lane and the
+`index` parameter it was the only reader of are deleted (`EQUATIONS.md` §9b–§9b.2, `DESIGN.md` §0b).
+THE WEIGHT — the one open choice — is `w_i = raw[i]`, the shipped weights, admitting every component at them
+rather than an equal share (owner, 2026-09-19). Three reasons, each with its number: it keeps §9b.1's ABSORBING
+STATE at zero evidence for free, since the state is a property of the weights and not of the eligibility test;
+an equal share would be a strong informative prior rather than a neutral one, because `rna_prior_count` is a
+conserved FRAGMENT COUNT (tens to thousands on an expressed locus), so `P/n` clears the ~0.16–0.47-alpha-unit
+activation threshold by one to two orders of magnitude at every component; and it leaves
+`component_rna_prior_weight` free for `ISSUES: per-transcript-prior-lane`, whose whole point is to fill that
+lane with a MEASURED weight. THE PRICE, stated: the prior no longer helps a shadow entity decay — the rate
+falls from `kappa/(1 + P/R)` per M-step to `kappa = w_N/w_T`, still strictly below 1 for free.
+MEASURED. The defect was far larger than the entry recorded: on a tied two-component locus with one component
+synthetic, a prior of 500 drove it from 100.0 fragments to 2.79e-298 and handed all 200 to the other. The
+strict xfail this entry owned reads 70 → **0** fragments of leak onto the unexpressed antisense `t2`
+(`test_nrna_multiexon_t2_low_ss`; the "72" in this entry and in `NEXT_SESSION.md` was stale). The gDNA:RNA
+split does not move: the per-M-step identity `Σ out over RNA = rna_count + rna_prior` is gated unconditionally
+in `tests/native/test_grouped_prior_update.py` and watched to fail under a perturbation that leaks the prior
+across the gDNA boundary. A locus with no synthetic component is BIT-IDENTICAL — the operation order is
+preserved for exactly that reason. Gates in `tests/test_estimator.py` (the prior moves no component's share of
+the RNA pool, exact under MAP and within the derived digamma residual under VBEM; a shadow span still loses to
+the transcript it shadows; a supported component keeps its mass; a zero-evidence component is not revived),
+each watched to fail under its perturbation. ⚠ It also closed `nested-antisense-leak-under-the-sane-ruler`.
+
+### nested-antisense-leak-under-the-sane-ruler
+CLOSED by landing 2026-09-19, as a consequence of `nascent-gets-no-rna-prior` rather than by its own thread.
+Both strict xfail rungs pass: the leak onto the unexpressed antisense `t2` falls 124 → **14** at SS 0.65 and
+24 → **2** at SS 0.9, against the tight bounds of 20 and 5 the tests were written with. The entry blamed "the
+EM's assignment at a nested transcript nothing witnesses" and ranked its lever as the per-transcript prior
+lane; the diagnosis was one layer too deep. The leaked fragments were the HOST's nascent entity's, denied
+their share of the locus's RNA pseudocount and landing on the one annotated transcript that could also explain
+them — so the allocation rule was the mechanism, and the ruler was never implicated. ⚠ The residue at SS 0.65
+is real: 14 of 2,000 fragments still reach a transcript whose truth is 0, at the strand specificity where the
+separating channel is weakest. It is inside the bound and no longer an xfail; if it grows, it is the
+unwitnessed-nested-transcript effect and `ISSUES: the-atom-at-an-unwitnessed-both-strand-slot` is its twin.
+`tests/scenarios/test_antisense_intronic.py`, `quant_accuracy.py`.
 
 ### oracle-cache-key-hashes-a-thread-count
 CLOSED by landing 2026-09-19 (owner): the scan settings' part of a cache's key is DERIVED at read time from the

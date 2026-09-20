@@ -200,8 +200,25 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,425 passed / 0 skipped / 5 xfail, 3,430 collected** (re-derived
-2026-09-19 after the simulator's capture physics: +2 in `test_sim_capture.py` — gDNA and cDNA bind the same half
+**The standing baseline: 0 failed / 3,440 passed / 0 skipped / 2 xfail, 3,442 collected** (re-derived
+2026-09-19 after `quant_accuracy.py --markdown`, the per-scenario release report: +8 in
+`tests/calibration/test_quant_accuracy.py`, every one a way the RENDERING can lie while the numbers
+underneath are right — the gDNA column scored without its intergenic half, a ratio invented at a truth of
+zero, the two RNA pools folded together, a ragged table, the deferred stratum unmarked, a column that
+CANNOT FIRE reported as a score (`fn_mass` is identically 0 under fractional assignment), and the truth
+table's ROW COUNT passed off as a transcript count (15,669 rows, 8,750 annotated; 9,385 gene rows, 2,466
+real genes). Before that 3,432 / 3,434 after nascent RNA's share of the RNA prior was restored: +5 in `test_estimator.py` — five gates on
+the restored allocation (two parametrised over four locus shapes, three over both EM modes) replacing the four
+that pinned the eligibility test and the one that pinned its flag — and −1 in
+`tests/native/test_grouped_prior_update.py`, where the identity's table loses its all-synthetic row and the
+mask's byte-identity pair becomes one property gate over the space; THREE XFAILS CLOSED by the same landing
+(5 → 2), which moves `passed` and not `collected` — `ISSUES: nascent-gets-no-rna-prior` and both rungs of
+`ISSUES: nested-antisense-leak-under-the-sane-ruler`. ⚠ The goldens moved: 5 of 21 scenarios materially (the
+ones holding a LIVE nascent entity — nascent mass up, `gdna_rate` down, e.g. `combo_moderate` 52.93 → 171.21
+and 0.5672 → 0.3958), the other 16 at the denormal floor only. The calibration columns
+`gdna_prior_count` / `rna_prior_count` also moved by 1e-16 to 1e-12, and that is NOT this change: regenerating
+at HEAD moves them by byte-identical amounts, so the committed goldens carried that staleness already, under
+`rtol=1e-6`. Before that 3,425 / 3,430 after the simulator's capture physics: +2 in `test_sim_capture.py` — gDNA and cDNA bind the same half
 of a split probe alike, and a capture key the loader does not know is refused — and +1 for
 `docs/dev/CAPTURE_WITHOUT_THE_PANEL.md` by the `docs/dev/` row; before that 3,422 / 3,427 after the cache key and
 the ruler arm: +2 in `test_scan_cache.py`, where three gates — a thread count is
@@ -253,13 +270,10 @@ in `test_instrument_self_tests.py`; the expectation ruler +25 — `capture_effic
 its seven gates in `test_capture_efficiency.py` (+2 by the `tests/` row, +7), the taper, crossing-share and
 per-interval-length gates in `test_effective_length.py` (+18), `test_capture_eff_length.py` rewritten 15 → 12,
 `test_priors.py` 29 → 27 with the floor's tests replaced by the object-form length tests; the goldens unchanged to
-the bit). The 5 xfails are executable
+the bit). The 2 xfails are executable
 records of proven defects whose fixes are elsewhere
-(`ISSUES: two-sided-exon-row`; `ISSUES: nascent-gets-no-rna-prior`;
-`ISSUES: the-lower-bound-noise-ratchet`, the encompassing locus's shallow flank under an edge level;
-`ISSUES: nested-antisense-leak-under-the-sane-ruler`, two strand rungs of one negative control — the EM's
-assignment at an unwitnessed nested transcript, uncovered when the ruler stopped contracting a gDNA-free
-library), deferred by ruling to their threads — "fix the test" is a category error, and an xfail is closed
+(`ISSUES: two-sided-exon-row`; `ISSUES: the-lower-bound-noise-ratchet`, the encompassing locus's shallow
+flank under an edge level), deferred by ruling to their threads — "fix the test" is a category error, and an xfail is closed
 by repairing the thing or asserting the invariant structurally, never by widening a bound. **Any failure at all is a regression.** A commit that measures the suite updates this line.
 
 **Re-derive a count, never adjust one** (`TRAPS: re-record-the-baseline`). Several gates are parametrised
@@ -314,7 +328,7 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | `design/build_scan_cache.py` | **SCAN ONCE, CALIBRATE MANY TIMES.** ⛔ The cache key hashes `accumulator.cpp`'s deposit rule and not `resolve.cpp`'s fragment construction, so for a change to which fragments are OFFERED use `--force` or delete the caches by hand |
 | `sim/build_suite_reference.py` · `design_suite_probes.py` · `simulate_reads.py` | **HOW IS THE PANEL'S SUBSTRATE BUILT?** ⚠ `panel.py build` drives the last two; the reference carve needs the source genome/GTF, which a panel config does not name, so it stays manual |
 | **⭐⭐⭐ the prior assembler, and THE NUMBER THE RELEASE SHIPS ON** | |
-| `design/quant_accuracy.py` | ⭐⭐⭐ **HOW ACCURATE IS THE TOOL END TO END, AND WHAT IS A PERFECT PRIOR WORTH?** `--arm base` plus the oracle and per-field injection arms, scored count against count. ⭐ Read per stratum, above `--arm base_reseed`, and under `--set em.assignment_mode=fractional` (owner, 2026-09-19): one of 0.8.0's TWO primary numbers beside the calibration metric, never a stand-in for it |
+| `design/quant_accuracy.py` | ⭐⭐⭐ **HOW ACCURATE IS THE TOOL END TO END, AND WHAT IS A PERFECT PRIOR WORTH?** `--arm base` plus the oracle and per-field injection arms, scored count against count. ⭐ Read per stratum, above `--arm base_reseed`, and under `--set em.assignment_mode=fractional` (owner, 2026-09-19): one of 0.8.0's TWO primary numbers beside the calibration metric, never a stand-in for it. ⭐ **`--report FILES… --markdown OUT`: THE PER-SCENARIO RELEASE REPORT** — every condition's three pools (gDNA / SYNTHETIC nascent / annotated) against truth in raw counts and per cent, then transcript and gene error inside the annotated pool alone, then the per-stratum roll-up. It renders arm jsonl and runs nothing |
 | **⭐⭐⭐ where to develop** | |
 | `design/rename_identity.py` | ⭐⭐⭐ **IS THIS RENAME, REFACTOR OR SPEED-UP NUMERICALLY A NO-OP?** `--freeze` captures one reference, `--check` compares after every stage — on array CONTENT and the transcript table, never on names; `--bam` takes a real library instead of a panel condition. ⚠ The reference is frozen, never rolling. `--self-test` 8/8 |
 | `design/rename_census.py` | ⭐⭐⭐ **WHICH NAMES DOES A VOCABULARY RULING TOUCH, AND WHICH CARRY TWO SENSES?** Reports by kind — identifiers, C++, prose — and never renames; `--sense <token>` dumps every site with context. ⛔ Run it before renaming anything |
