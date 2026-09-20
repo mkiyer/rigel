@@ -49,19 +49,34 @@ constant and isoform usage is not; and a sparsity prior on isoform support as th
 `quant_accuracy.py --arm oracle_ruler`, `ruler_vs_truth.py`.
 
 ### per-transcript-prior-lane
-`priority: the third item, behind the EM's gDNA split and the capture ruler (owner, 2026-09-19) · kind: build · 2026-08-31`
-`rna_prior_weight` is built end to end but `pipeline.py` omits it, so the shipped EM carries no per-transcript
-information. It is the largest single lever measured on the isoform split. Truth as the allocation weights
-(`quant_accuracy.py --arm oracle_alloc_seed`, the ladder REBUILT under the corrected capture physics, fractional
-assignment, transcript-level Σ|Δ| as a share of the true RNA at `g00` / `g05` / `g50`): unstranded OFF 3.1 / 3.4 /
-4.2 → 1.1 / 1.2 / 1.6 %, stranded OFF 3.3 / 2.9 / 3.9 → 1.1 / 1.1 / 1.4 %, stranded ON 6.8 / 4.5 / 7.8 → 3.2 / 1.6 /
-3.6 %, the deferred stratum 8.3 / 12.4 / 20.8 → 3.8 / 3.3 / 9.0 %. That arm is a capability proof and never
-headroom: it hands over the true support, and a zero weight is absorbing. Two weightings are refused
-(`ISSUES: refused-transcript-weights`, `ISSUES: refused-soft-min-path-weighting`): the support problem is the whole
-problem, so the next candidate is a sparsity mechanism, targeting expressed multi-exon transcripts with median
-exon ≤ 150 bp — which is also the safety net under a capture error the ruler cannot see
-(`ISSUES: ruler-witness-geometry-on-transcript-panels`). It does not reach
-`ISSUES: em-overturns-the-calibrated-gdna-split`, which the same arm only halves.
+`priority: the third item, behind the EM's gDNA split and the capture ruler (owner, 2026-09-19); RE-MEASURED 2026-09-19 on a repaired instrument · kind: build · 2026-08-31`
+`rna_prior_weight` is built end to end but `pipeline.py` omits it, so the shipped EM carries no
+per-transcript information. It is the largest single lever measured on the isoform split AND on
+`ISSUES: nascent-siphons-gdna-under-capture`.
+⛔⛔ **THE ARM THAT PRICED IT WAS BROKEN UNTIL 2026-09-19 AND ITS OLD NUMBERS ARE RETIRED.**
+`quant_accuracy.truth_weights` read `observed_mrna_fragments`, which is identically 0 on every SYNTHETIC
+row — the nascent truth lives in `observed_nrna_fragments` — so the arm handed all 6,919 shadow entities
+a weight of ZERO. That is not an allocation but the retired `alpha = 0` rule (`nascent-gets-no-rna-prior`,
+CLOSED) under an oracle's name: its nascent estimate tracked the pre-restoration baseline to within 15 %
+on every in-scope condition (`g50 ss.99 ON` 150,214 against 134,639). Fixed and gated
+(`tests/calibration/test_quant_accuracy.py`); `TRAPS: an-oracle-column-that-omits-a-population`.
+MEASURED with the true weights, mature AND nascent (`--arm oracle_alloc_seed`, the ladder rebuilt under
+the corrected capture physics, fractional, transcript-level Σ\|Δ\| as a share of the true RNA at
+`g00` / `g05` / `g50` / `g98`): unstranded OFF 1.7 / 1.9 / 2.5 / 17.8 → **0.4 / 0.5 / 0.7 / 9.4 %**,
+stranded OFF 2.0 / 1.6 / 2.5 / 15.4 → **0.4 / 0.4 / 0.7 / 6.6 %**, stranded ON 6.5 / 3.5 / 5.2 / 33.0 →
+**2.9 / 1.0 / 2.7 / 49.6 %**, the deferred stratum 7.3 / 10.9 / 10.5 / 102.0 → **3.4 / 2.7 / 7.2 /
+321.9 %**. ⚠ READ `g98` APART: a perfect allocation makes both capture-ON `g98` rows markedly WORSE
+(33.0 → 49.6, 102.0 → 321.9), which the broken arm also showed and which nothing yet explains — at 98 %
+gDNA the true weights hand over a support so sparse that what the EM loses elsewhere is not recovered.
+On the pool split it removes 67 % of the nascent siphon at `g50 ss.99 ON` (+541,216 → +181,136) and 52 %
+at `g98 ss.99 ON`.
+That arm is a capability proof and never headroom: it hands over the true support, and a zero weight is
+absorbing. Two weightings are refused (`ISSUES: refused-transcript-weights`,
+`ISSUES: refused-soft-min-path-weighting`): the support problem is the whole problem, so the next
+candidate is a sparsity mechanism, targeting expressed multi-exon transcripts with median exon ≤ 150 bp —
+which is also the safety net under a capture error the ruler cannot see
+(`ISSUES: ruler-witness-geometry-on-transcript-panels`) AND the ranked candidate for the siphon's repair,
+since it is the one lever that can move a within-RNA split.
 `quant_accuracy.py`, per stratum above `--arm base_reseed`.
 
 ### nascent-stress-sensitivity
@@ -228,56 +243,127 @@ E-step: `calibration_walk.py` now says the prior does the unstranded rows and th
 capture-ON ones. Belongs with `ISSUES: gdna-landscape-trains-on-false-positives`.
 
 ### nascent-siphons-gdna-under-capture
-`priority: NOW — the dominant in-scope residual, and the next session's whole subject · kind: defect · 2026-09-19 (supersedes the capture-ON half of `em-overturns-the-calibrated-gdna-split`)`
-⭐⭐⭐ IT IS AN EXCHANGE, AND THE TWO SIDES ARE NASCENT AND gDNA. Under capture the synthetic nascent
-entities take fragments from gDNA almost one for one, with the ANNOTATED pool barely moving — which is
-what makes "siphon" the right word and rules out a general nascent bias. Measured on the rebuilt ladder
-(`quant_accuracy.py --arm base`, fractional, est − true in fragments):
+`priority: NOW — the dominant in-scope residual; ROOT CAUSE FOUND 2026-09-19, the repair is open · kind: defect · 2026-09-19 (supersedes the capture-ON half of `em-overturns-the-calibrated-gdna-split`)`
+⭐⭐⭐ **THE ROOT CAUSE: `theta_n = 0` IS AN UNSTABLE FIXED POINT OF THE SHADOW-vs-gDNA CONTEST.** The EM
+gives a whole MultiLocus ONE gDNA component with ONE opportunity `L_g` over the entire connected
+component, while every synthetic nascent entity inside it carries only its own gene's span `L_n`. A
+connected component is a union of gene spans, so `L_g > L_n` STRUCTURALLY. Near zero the shadow's density
+is multiplied by `L_g/L_n > 1` every iteration, so a shadow holding NOTHING climbs off zero and settles at
+a share of the locus's gDNA that only the strand channel and `gdna_prior` bound (`EQUATIONS.md` §9b;
+gates `tests/test_estimator.py`). ⛔ The threshold is EXACTLY 1 and it is derived, not chosen.
 
-| condition | nascent Δ | gDNA Δ | sum | annotated Δ |
+**The number that proves it, on the shipped solver.** One locus, 20,000 fragments ALL gDNA in truth,
+`ss 0.99`, half on each genome strand, at positions no mature isoform reaches. The shadow's share:
+
+| `L_g/L_n` | 0.5 | 1.0 | 2.0 | 4.326 | 6.223 | 20 |
+|---|---:|---:|---:|---:|---:|---:|
+| no gDNA prior | 0 | **0** | 35.2 % | 48.1 % | 52.7 % | 82.0 % |
+| `gdna_prior = N/2` | 0 | 0 | 17.2 % | 39.0 % | 44.4 % | 58.2 % |
+
+4.326 and 6.223 are the ladder's own paired medians at `g50 ss.99` OFF and ON. The closed form and the
+native solver agree to two decimals, so this is the model's ML answer and not an EM artefact. With the
+strand term removed the contest is fully degenerate and goes to the CORNER — the shorter component takes
+everything — so strand does not open the channel, it only bounds it.
+
+**End to end on the worst in-scope scenario.** Scaling ONLY the shadows' EM effective length by `lambda`
+at `g50 ss.99 ON` (base arm, fractional). ⛔ A FALSIFICATION PROBE, NEVER A REPAIR:
+
+| `lambda` | nascent est (true 150,432) | gDNA est (true 5,000,000) | transcript Σ\|Δ\| |
+|---|---:|---:|---:|
+| 1 (shipped) | 691,709 | 4,465,354 | 252,376 |
+| 2 | 18,023 | 4,903,115 | 386,614 |
+| 6.22 | 738 | 4,916,794 | 390,454 |
+
+Doubling `L_n` alone removes 97 % of the siphon and returns 437,761 fragments to gDNA — a CLIFF, the
+signature of a threshold rather than a bias. It also destroys the TRUE nascent signal (the transcript
+table worsens 252,376 → 386,614), which is why a length knob is not the repair. At capture-OFF the same
+knob moves the same mass (`lambda = 2`: nascent 946,781 → 449,852, gDNA 5,070,574 → 5,511,384), so the
+channel is open in BOTH regimes.
+
+**What the leak is made of** (`g50 ss.99 ON`): 84 % of it — 452,854 of 541,116 fragments — sits on 5,540
+shadows whose true nascent count is EXACTLY ZERO, and 97.5 % of THAT sits on shadows whose own GENE is
+expressed. It is diffuse (the top 100 of 6,919 carry 32 %), so it is a systematic bias, not a set of
+pathological loci. ⭐ THE CONTROL: at every locus with ZERO certified gDNA the silent-shadow mass is
+EXACTLY 0 (33 loci at `g50 ON`, 44 at `g50 OFF`, 28 / 14 at `g98`) — the leak is gDNA-fed. And it scales
+with the component's gene count, which is what sets `L_g/L_n`: 1 gene 64,317 fragments (ratio 2.50),
+2-3 genes 134,558 (8.11), 4-9 genes 222,722 (15.75), 10+ 31,251 (17.25) — 85.8 % in multi-gene loci.
+
+⭐⭐ **CAPTURE DOES NOT REVERSE THE ARBITRATION; THE SIGN FLIP IS ARITHMETIC.** The same channel is open
+in both regimes at the same order:
+
+| `g50 ss.99` | capture OFF | capture ON |
+|---|---:|---:|
+| false positive on SILENT shadows | +257,002 | +452,854 |
+| delta on LIVE shadows | −323,623 | +88,262 |
+| **net nascent delta** | **−66,621** | **+541,116** |
+| TRUE nascent pool | 1,013,400 | 150,405 |
+| shadow-exclusive gDNA pool | 2,212,935 | 2,142,952 |
+| leak rate on that pool | 11.6 % | 21.1 % |
+| mass-weighted `L_g/L_n` | 3.57 | 9.70 |
+
+Capture changes two things and neither is the direction: it raises `L_g/L_n` 2.7x (the shadow contracts
+harder than the pooled component opportunity), which roughly doubles the leak rate; and it collapses the
+TRUE nascent pool 6.7x — nascent RNA is intron-heavy and unprobed — so the compensating under-call on LIVE
+shadows that was masking the false positive off capture disappears.
+
+**What is ruled out, with the killing number.**
+* THE RULER'S WITNESS GEOMETRY IS NOT THE DRIVER. The shipped ruler ALREADY reproduces the 13.5x
+  annotated-vs-synthetic capture gap: shipped contraction factors at `g50 ss.99 ON` are 0.4491 (annotated
+  median) and 0.0347 (synthetic), ratio **0.0773**, against the simulator's own anchored 41.0/555.7 =
+  **0.0738** — 5 % agreement. And over COINCIDENT footprints (single-gene single-shadow loci) the gDNA
+  component's mean efficiency and the shadow's agree to a median **1.031** ON and exactly **1.000** OFF,
+  so the two contractions are not mis-weighted against each other either. The junction-probe blindness is
+  real and is `ISSUES: ruler-witness-geometry-on-transcript-panels`; it is worth 13-28 % here and is not
+  this defect.
+* THE SHADOW-EXCLUSIVE INTRONIC POOL IS NOT WHERE IT COMES FROM UNDER CAPTURE. Only 2.76 % of the gDNA's
+  CONTAINED fragments sit in intron-only regions at `g50 ss.99 ON` (70,288 against a leak of 452,854).
+  Under capture the pool is made of CROSSING fragments — 4,336,797 of them, against 385,866 off capture —
+  and 2,072,664 straddle an exon|intron edge, which no mature isoform can produce.
+* THE PER-LOCUS PRIOR CANNOT REACH IT, and that is structural rather than a magnitude: the RNA prior
+  enters every RNA component as the same factor (`EQUATIONS.md` §9b), so it moves the gDNA:RNA split and
+  not a within-RNA one. `--arm oracle` 541,216 → 541,762.
+
+**What the per-transcript allocation is worth, measured on a REPAIRED instrument.** ⛔ The arm that had
+been used to test this was BROKEN: `quant_accuracy.truth_weights` read `observed_mrna_fragments`, which is
+identically 0 on all 6,919 synthetic rows, so `--arm oracle_alloc*` handed every shadow a weight of ZERO —
+the retired `alpha = 0` rule under an oracle's name, tracking the pre-restoration baseline to within 15 %
+on every in-scope condition. Fixed and gated 2026-09-19. With the true weights (mature AND nascent):
+
+| `ss 0.99` | nascent Δ base | fixed alloc | gDNA Δ base | fixed alloc |
 |---|---:|---:|---:|---:|
-| `g05 ss.99 ON` | +69,268 | −66,516 | +2,752 | −2,752 |
-| `g50 ss.99 ON` | +541,216 | −534,656 | +6,560 | −6,560 |
-| `g98 ss.99 ON` | +590,406 | −611,173 | −20,767 | +20,767 |
-| `g50 ss.99 OFF` | −66,752 | +70,572 | +3,820 | −3,820 |
+| `g05 ON` | +69,268 | +29,820 | −66,516 | −44,886 |
+| `g50 ON` | +541,216 | **+181,136** | −534,656 | −279,029 |
+| `g98 ON` | +590,406 | +281,327 | −611,173 | −376,063 |
+| `g50 OFF` | −66,752 | −41,574 | +70,572 | +43,778 |
 
-⭐ CAPTURE FLIPS THE SIGN. Off capture gDNA takes from nascent (`g50 ss.50 OFF` −122,615 / +127,041);
-on capture nascent takes from gDNA. So it is not "nascent over-calls" — it is one contested pool of
-unspliced fragments whose arbitration capture reverses.
+67 % removed at `g50 ON`, 52 % at `g98 ON` — the largest lever measured on this defect and consistent
+with the mechanism, since the allocation is the one thing that CAN move a within-RNA split. It is not the
+root cause: 181,136 survives a PERFECT allocation, because an allocation cannot stabilise an unstable
+fixed point. ⚠ It is a capability proof, not headroom.
 
-⛔ `g00` CAPTURE-ON IS A DIFFERENT SUB-CASE and must not be pooled with the rest: there is no gDNA to
-take, and nascent instead LOSES 132,921 to the annotated pool (`g00 ss.99 ON`). The true ruler fixes it
-outright (−132,921 → +774), so that rung is a length problem and is already understood.
+**WHAT IS STILL UNEXPLAINED.** The bare two-component contest predicts 44-53 % of the shadow-exclusive
+pool at the measured geometry; the panel leaks 21.1 % (ON) and 11.6 % (OFF), so the fixed point
+over-predicts by 2-4x. The damping is the mature isoforms competing at exonic positions — pinned by
+spliced fragments the shadow can never claim — and the per-locus gDNA pseudocount, whose bite is visible
+at `g98 OFF` (1.0 % of its pool against 21.1 % at `g50 ON`). That factor is not closed quantitatively.
+Separately unexplained and NOT this entry: the LIVE shadows' under-call off capture (−323,623 at
+`g50 OFF`), which is what masks the false positive there.
 
-**What the arms say, and it is not what either standing hypothesis predicts.**
-* A PERFECT `LocusPriors` (`--arm oracle`) removes essentially NOTHING in scope: `g50 ss.99 ON`
-  541,216 → 541,762, `g05` 69,268 → 70,280. Whatever admits the nascent entity, it is not the per-locus
-  prior's magnitude. ⚠ It does NOT test a per-TRANSCRIPT allocation — that is `oracle_alloc_seed`, whose
-  arm on disk is STALE (it predates the prior's restoration and was not re-run), so the strong form of
-  the "zombie" hypothesis is UNTESTED and re-running that arm is the cheapest first move.
-* The SIMULATOR'S OWN capture-aware lengths (`--arm oracle_ruler`) remove 13–28 %: `g50 ss.99 ON`
-  541,216 → 471,727, `g05` → 54,608, `g98` → 423,558 — real, partial, and not the bulk.
+⛔ `g00` CAPTURE-ON REMAINS A DIFFERENT SUB-CASE and must not be pooled: with no gDNA anywhere the
+silent-shadow mass is 68,684 and is RNA-fed, a different channel, and nascent LOSES 132,921 to the
+annotated pool. The true ruler fixes it outright (−132,921 → +774).
 
-**The length asymmetry, measured.** The true capture factor on the ladder's capture-ON label
-(`capture_truth_on.npz`, the index's own axis, all 15,669 rows) has median **555.7 for ANNOTATED
-transcripts and 41.0 for SYNTHETIC nascent entities** — a 13.5× gap — while a nascent entity's probed
-fraction is a median 0.0246 of its span against 0.271 for an annotated transcript. A nascent entity is
-a single-exon span, genomically continuous, and therefore geometrically INDISTINGUISHABLE FROM gDNA,
-which is what the capture efficiencies are measured on; an annotated transcript is spliced, and a probe
-over a junction captures a molecule gDNA can never produce there. That is the same witness geometry as
-`ISSUES: ruler-witness-geometry-on-transcript-panels`, pointed at the nascent-vs-gDNA competition
-instead of the isoform split. ⚠ Two annotated rows carry a non-finite factor; both have `L_plain == 0`
-and `probed_frac == 0` — degenerate, not a lead.
+**THE REPAIR IS OPEN AND NEEDS THE OWNER.** The threshold says what would close it — a shadow must not be
+the shorter component against the pooled gDNA opportunity — and the candidates are a sparsity mechanism on
+shadow support (which `ISSUES: per-transcript-prior-lane` already ranks next and which the fixed alloc arm
+prices at 67 %), a per-gene rather than per-component gDNA opportunity, or admitting a shadow only where
+its intron-exclusive evidence exceeds what gDNA alone explains there (§9b's own survival criterion, made a
+gate rather than an outcome). ⛔ Not a length knob: the probe above shows it kills the live entities with
+the dead ones.
 
-**What changed it.** Restoring nascent RNA's share of the RNA prior (`nascent-gets-no-rna-prior`, CLOSED
-2026-09-19) made this half WORSE — `g50 ss.99 ON` 0.4793 → 0.4465 against 0.50 — because the retired
-`alpha = 0` rule had been MASKING the competition by suppressing one of the two competitors. The
-restoration is not the defect; it removed a hack that was hiding this one. ⚠ Unlike the capture-OFF half
-this is not only a stress reading: capture-ON runs at a 2.6 % nascent fragment share against a realistic
-4.2 %.
-
-`quant_accuracy.py` (the pool rows and `nrna_est`), `ruler_vs_truth.py`, `calibration_vs_oracle.py` as
-the control that must not move.
+`quant_accuracy.py` (the pool rows and `nrna_est`), `tests/test_estimator.py` (the threshold),
+`ruler_vs_truth.py`, `calibration_vs_oracle.py` / `zero_controls.py` / `policy_benchmark.py` as the
+controls that must not move — all three confirmed unmoved across this session.
 
 ### the-atom-at-an-unwitnessed-both-strand-slot
 `priority: later — accepted as a limit of the information (owner, 2026-09-14) · kind: known limit · 2026-09-14`

@@ -685,15 +685,35 @@ annotated transcript that could also explain it: the leak onto an unexpressed an
 (`tests/scenarios/test_antisense_intronic.py`; `ISSUES: nested-antisense-leak-under-the-sane-ruler`,
 closed by this rule).
 
-**A zombie still decays, on the likelihood alone.** The withheld factor was also an anti-zombie force,
-and dropping it is the restoration's whole price: the geometric decay rate of a shadow entity holding
-nothing of its own falls from `kappa/(1 + rna_prior/annotated_count)` per iteration — the withheld
-rule's own denominator, over the components it did admit — to `kappa = w_N/w_T`.
-That is still strictly below 1 for free, since a shadow span is longer than the transcript it shadows,
-so the decay survives — slower, and now a property of the likelihood rather than of the prior. The
-survival criterion is unchanged and still derived, not chosen: with `m` fragments whose only RNA
-candidate is the entity, it grows iff `m·w_N > Total·theta_g·w_g` — it survives exactly when its
-intron-exclusive evidence exceeds what gDNA alone would explain there. Under the NASCENT SCOPE RULING
+**A zombie decays against the TRANSCRIPT it shadows, and GROWS against gDNA.** The withheld factor was
+also an anti-zombie force, and dropping it is the restoration's whole price: the geometric decay rate of
+a shadow entity holding nothing of its own falls from `kappa/(1 + rna_prior/annotated_count)` per
+iteration — the withheld rule's own denominator, over the components it did admit — to `kappa = w_N/w_T`.
+That is still strictly below 1 for free, since a shadow span is longer than the transcript it shadows, so
+the decay against the MATURE isoform survives — slower, and now a property of the likelihood rather than
+of the prior. ⛔⛔ **THAT GUARANTEE DOES NOT COVER THE OTHER COMPETITOR, AND THE INEQUALITY THERE RUNS THE
+OTHER WAY** (`ISSUES: nascent-siphons-gdna-under-capture`, 2026-09-19). The survival criterion is
+unchanged and still derived: with `m` fragments whose only RNA candidate is the entity, it grows iff
+`m·w_N > Total·theta_g·w_g`. Write it in lengths. The EM gives a whole MultiLocus ONE gDNA component with
+ONE opportunity `L_g` over the entire connected component, while a shadow carries its own gene's span
+`L_n`, so `w_N/w_g = L_g/L_n` — and a connected component is a union of gene spans, so `L_g > L_n`
+STRUCTURALLY, the more so the more genes it holds. Near `theta_n = 0` the shadow's density is therefore
+multiplied by `L_g/L_n > 1` every iteration: **`theta_n = 0` is an UNSTABLE fixed point of the shadow-vs-gDNA
+contest**, and the shadow climbs off it on any locus carrying gDNA at all.
+
+    d(b/a) per iteration = (b/a) · L_g/L_n ,    a = theta_g/L_g ,  b = theta_n/L_n
+
+What it settles at is bounded only by the strand channel and by `gdna_prior`. On a pool of `N` fragments
+that only gDNA and the shadow can explain, split evenly by genome strand, the fixed point in `r = b/a` is
+
+    r · L_n/L_g = [ ss·r/(ss·r + ½) + (1−ss)·r/((1−ss)·r + ½) ]
+                / [    ½/(ss·r + ½) +        ½/((1−ss)·r + ½) ]
+
+whose only root at `L_n ≥ L_g` is `r = 0` — the correct answer, and stable. Solved and confirmed against
+the shipped solver (`tests/test_estimator.py`), at `ss = 0.99` the shadow's share of `N` runs 0 % at
+`L_g/L_n = 1`, 35.2 % at 2, 52.7 % at 6.2 and 82.0 % at 20 — 44.4 % at 6.2 with a `gdna_prior` of `N/2`.
+⛔ **The threshold is exactly 1, and it is derived, not chosen**: nothing is tunable here, and a length
+knob is not the repair — it kills the live entities with the dead ones. Under the NASCENT SCOPE RULING
 (`DESIGN.md` §0b) nascent RNA is modelled for robustness, which is an argument for treating it like
 any other RNA here and not for a null that suppresses it.
 

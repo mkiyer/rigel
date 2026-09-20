@@ -1,4 +1,4 @@
-# NEXT SESSION — the nascent RNA siphon: trace it to a root cause (2026-09-19, end of day)
+# NEXT SESSION — the nascent siphon's ROOT CAUSE is found; the repair is the job (2026-09-19, end of day)
 
 This file is only how to begin. The ranked view is `docs/ROADMAP.md`, the open problems are
 `docs/ISSUES.md`, the rulings and the record are `docs/DESIGN.md`, what "done" means is
@@ -7,75 +7,75 @@ This file is only how to begin. The ranked view is `docs/ROADMAP.md`, the open p
 
 ## Where the tool is
 
-Everything through `d8d563a2` is landed and pushed; the tree is clean, the suite is
-**3,440 passed / 0 failed / 2 xfail / 3,442 collected**, `preflight.py --full` is green. Today landed
-the RNA prior's restoration (`ISSUES: nascent-gets-no-rna-prior`, CLOSED — every ladder condition
-improved, three xfails closed), its re-measurement, the per-scenario release report
-(`quant_accuracy.py --markdown`) and the `ladder-report` skill that rebuilds and republishes it.
+Everything through `7eab2b47` is landed and pushed. Today's work is PREPARED AS SNAPSHOTS AND AWAITS THE
+OWNER'S GO (`~/Downloads/rigel_runs/prototypes/2026-09-19_siphon_root_cause/commits/`). The suite is
+**3,449 passed / 0 failed / 2 xfail / 3,451 collected**. ⛔ NOTHING IN `src/` CHANGED TODAY — the only code
+change is one instrument, `scripts/design/quant_accuracy.py`, so every deliverable number stands exactly as
+`docs/ROADMAP.md` records it and the release report needs no rebuild.
 
-The deliverable, transcript-level Σ|Δ| as a share of the true annotated RNA at `g00`/`g05`/`g50`/`g98`:
-unstranded OFF 1.7 / 1.9 / 2.5 / 17.8 %, stranded OFF 2.0 / 1.6 / 2.5 / 15.4 %, stranded ON
-6.5 / 3.5 / 5.2 / 33.0 %, deferred 7.3 / 10.9 / 10.5 / 102.0 %.
+## THE FINDING — `ISSUES: nascent-siphons-gdna-under-capture`
 
-## THE WHOLE JOB — `ISSUES: nascent-siphons-gdna-under-capture`
+Read that entry; it carries every number. In one line:
 
-Read that entry first; it carries every number below and the two arms that already constrain the answer.
+**`theta_n = 0` is an UNSTABLE fixed point of the shadow-vs-gDNA contest.** The EM gives a whole MultiLocus
+ONE gDNA component with ONE opportunity `L_g` over the entire connected component, while every synthetic
+nascent entity carries only its own gene's span `L_n`. A connected component is a union of gene spans, so
+`L_g > L_n` STRUCTURALLY and grows with the component's gene count. Near zero the shadow's density is
+multiplied by `L_g/L_n > 1` every iteration, so a shadow holding NOTHING climbs off zero and settles where
+only the strand channel and `gdna_prior` stop it. The threshold is exactly 1, derived not chosen
+(`EQUATIONS.md` §9b), and it is pinned against the SHIPPED solver in `tests/test_estimator.py`.
 
-**What is measured and not in dispute.** Under capture the SYNTHETIC nascent entities take fragments
-from gDNA almost one for one, with the annotated pool barely moving: at `g50 ss.99 ON` nascent is
-+541,216 and gDNA −534,656 (annotated −6,560). Capture flips the sign — off capture gDNA takes from
-nascent instead. `g00` capture-ON is a separate sub-case (no gDNA to take; nascent loses 132,921 to
-annotated, and the true ruler fixes it outright) and must not be pooled with the rest.
+⭐ **Capture does not reverse the arbitration.** The same channel leaks 257,002 fragments off capture and
+452,854 on it. The library-level sign flip is arithmetic: capture raises `L_g/L_n` 2.7× (3.57 → 9.70,
+mass-weighted) and collapses the TRUE nascent pool 6.7× (1,013,400 → 150,405), so the compensating
+under-call on LIVE shadows that was masking the false positive disappears.
 
-**What the existing arms already rule out.** A perfect `LocusPriors` removes ~0 of it in scope
-(`g50 ss.99 ON` 541,216 → 541,762). The simulator's own capture-aware lengths remove 13–28 %. So
-neither the per-locus prior's magnitude nor the transcript ruler alone is the mechanism, and the bulk
-is unexplained — that is the session's subject.
+## What the next session should do — the repair, and it needs an owner decision
 
-### The owner's two hypotheses, and the state of each
+The threshold says what would close it: **a shadow must not be the shorter component against the pooled
+gDNA opportunity.** Three candidates, each judged on `quant_accuracy.py` per stratum above
+`--arm base_reseed`, fractional, with `calibration_vs_oracle.py` / `zero_controls.py` /
+`policy_benchmark.py` as the controls that must not move:
 
-**(A) The capture contraction is derived from gDNA, which is unspliced, and nascent entities are
-unspliced too.** A nascent entity is a single-exon span over the whole gene — geometrically
-indistinguishable from gDNA, which is exactly what the per-piece capture efficiencies are measured on.
-An annotated transcript is spliced, and a probe lying over a junction captures a molecule gDNA can
-never produce there, so gDNA cannot witness that probe's effect on the mature isoform. Measured on
-`capture_truth_on.npz`: the TRUE capture factor's median is **555.7 for annotated transcripts and 41.0
-for synthetic entities**, a 13.5× gap, while a nascent entity's probed fraction is a median 0.0246 of
-its span against 0.271 for an annotated one. PARTLY SUPPORTED — the true ruler removes 13–28 %, and all
-of the `g00` sub-case. Not yet the bulk. Its twin is
-`ISSUES: ruler-witness-geometry-on-transcript-panels`, the same witness geometry pointed at the isoform
-split; start by reading that entry, because whatever is derived here may close both.
+1. ⭐ **A sparsity mechanism on shadow support** — already ranked next as
+   `ISSUES: per-transcript-prior-lane`, and now priced on a REPAIRED arm at **67 % of the siphon** at
+   `g50 ss.99 ON` (+541,216 → +181,136). It is the one lever that can move a within-RNA split, since the
+   RNA prior's factor is common over RNA components by construction.
+2. **A per-gene rather than per-component gDNA opportunity.** This is the defect stated directly — but it
+   changes `LocusPriors` and therefore reaches calibration's own consumers, so the controls become live and
+   it is the expensive option. Derive before prototyping.
+3. **§9b's own survival criterion made a GATE rather than an outcome**: admit a shadow only where its
+   intron-exclusive evidence exceeds what gDNA alone would explain there (`m·w_N > Total·theta_g·w_g`).
 
-**(B) The prior lets silent synthetics rise as zombies and steal fragments.** UNTESTED IN ITS STRONG
-FORM. The `oracle` arm is a perfect PER-LOCUS prior and it moves nothing, but the per-TRANSCRIPT
-allocation is a different lever and its arm (`oracle_alloc_seed`) on disk is STALE — it predates the
-prior's restoration and was never re-run. ⭐ Re-running it is the cheapest decisive move in the whole
-session; do it first and let it run while reading. ⚠ Note what the restoration did and did NOT change:
-the ABSORBING STATE survives, so a component with zero evidence still cannot be revived by prior mass
-— but a nascent entity spanning a gene always has some coverage-weighted warm start, and the prior no
-longer helps it decay (the rate fell from `kappa/(1 + P/A)` to `kappa = w_N/w_T`). "Zombie" here means
-"decays too slowly", not "revived from exactly zero" (`EQUATIONS.md` §9b).
+⛔ **NOT A LENGTH KNOB.** Scaling the shadows' EM length by 2 removes 97 % of the siphon and returns
+437,761 fragments to gDNA — and makes the transcript table WORSE (252,376 → 386,614 Σ|Δ|), because it kills
+the live entities with the dead ones. That probe is a falsification instrument and is recorded as one.
 
-### A third candidate the closed entry leaves on the table
+⚠ **AND SIZE IT FIRST.** `ISSUES: nascent-stress-sensitivity` is now the gating question, not a footnote:
+the whole defect is a competition between gDNA and a nascent pool the ladder runs at a 0.50 `on_fraction`
+DEVELOPMENT STRESS. Re-simulate `g50 ss.99 ON` at the realistic 0.10 and re-read the siphon before paying
+for a mechanism — a repair worth 541,216 fragments at stress may be worth a fifth of that in the expected
+case (`DESIGN.md` §0b).
 
-The EM gives each locus ONE gDNA rate spread uniformly along it, while under capture gDNA's density is
-an order of magnitude higher at probed exons — which is exactly where the nascent entity also sits,
-since it spans the whole gene. Inside a probed exon the model under-predicts gDNA and the surplus goes
-to whichever component has the most opportunity there. Calibration already publishes per-piece
-efficiencies, so the test is whether a position-dependent gDNA weight closes it. This came from
-`ISSUES: em-overturns-the-calibrated-gdna-split` (now CLOSED into the siphon entry) and survives intact.
+## What is unexplained, and should not be quietly dropped
 
-### How to work it
+* **The damping factor.** The bare two-component fixed point predicts 44–53 % of the shadow-exclusive pool
+  at the measured geometry; the panel leaks 21.1 % (ON) and 11.6 % (OFF). The mature isoforms competing at
+  exonic positions and the per-locus gDNA pseudocount are the two damping forces and neither is closed
+  quantitatively.
+* **The LIVE shadows' under-call off capture** (−323,623 at `g50 ss.99 OFF`), which is what masks the false
+  positive there. Not the same defect and not yet its own entry.
+* **A perfect allocation makes `g98` capture-ON markedly WORSE** (33.0 → 49.6 %, and 102.0 → 321.9 % on the
+  deferred stratum). Both the broken and the repaired arm show it. Unexplained.
 
-The debug loop, and the worst IN-SCOPE scenario is `g50 ss.99 ON` or `g98 ss.99 ON` — never the
-deferred `ss_0.50` rows. Per-locus attribution first (the EM's gDNA against the certified truth, ranked
-by mass) with `nrna_est` read beside it, then `ruler_vs_truth.py` per class and kind on the nascent
-entities specifically, then `confusion.py` for per-fragment truth against assignment. ⛔ Derive on
-paper, prototype outside the main tree, A/B against what ships on the same conditions, one mechanism at
-a time. No magic numbers.
+## The instrument defect found on the way — read before trusting ANY oracle arm
 
-⛔ `calibration_vs_oracle.py`, `zero_controls.py` and `policy_benchmark.py` run no EM: they are the
-CONTROLS for anything done here and must come back identical. If one moves, the change leaked upstream.
+`quant_accuracy.truth_weights` read `observed_mrna_fragments`, identically 0 on all 6,919 SYNTHETIC rows
+(the nascent truth is `observed_nrna_fragments`), so `--arm oracle_alloc*` handed every shadow a weight of
+ZERO and was re-running the retired `alpha = 0` rule under an oracle's name — tracking the pre-restoration
+baseline to within 15 % on every in-scope condition. Fixed, gated three ways, each watched to fire.
+`TRAPS: an-oracle-column-that-omits-a-population`. ⛔ The arm's headline in
+`ISSUES: per-transcript-prior-lane` was re-measured; the old numbers are retired.
 
 ## The 2 xfails are proven defects, each deferred to its thread
 
@@ -83,13 +83,12 @@ CONTROLS for anything done here and must come back identical. If one moves, the 
 
 ## What gates the release
 
-⚠ `zero_controls.py` EXITS 1 on this tree and did before today too — byte-identical across the
-restoration, so it is a standing state and not a regression: five controls off by more than 0.01 on a
-constant truth, worst `TA_single_exon · ZERO gDNA` at 0.5931. The `g00` ladder rung is solved (library
-gDNA fraction 0.0002–0.0005 against 0). The rest: the deliverable measured and not regressed per
+⚠ `zero_controls.py` EXITS 1 on this tree and did before today — reproduced byte-identically this session,
+so it is a standing state and not a regression: five controls off by more than 0.01 on a constant truth,
+worst `TA_single_exon · ZERO gDNA` at 0.5931. The rest: the deliverable measured and not regressed per
 stratum; the suite at its standing count; `preflight.py --full` green; the standing risks re-read
-(`ISSUES: capture-degeneracy-standing-risk`, `ISSUES: flgap-panels-stale-nascent-model`); the manual
-true of what ships.
+(`ISSUES: capture-degeneracy-standing-risk`, `ISSUES: flgap-panels-stale-nascent-model`); the manual true of
+what ships.
 
 ## Standing rulings carried (unchanged)
 
@@ -104,17 +103,20 @@ true of what ships.
 
 ## Where everything is
 
-* THE ARMS: `~/Downloads/rigel_runs/suite/ladder/arms/` (base, base_reseed, oracle, oracle_ruler — all
-  re-scored today on the restored prior), with the PRE-RESTORATION set preserved beside them in
-  `arms_baseline_alpha0_2026-09-19/`. ⛔ `qa_ladder_oracle_alloc_seed.jsonl` is STALE — it was not
-  re-run and must not be put in a table with the others.
+* THE ARMS: `~/Downloads/rigel_runs/suite/ladder/arms/`. `base`, `base_reseed`, `oracle`, `oracle_ruler`
+  are UNCHANGED from 2026-09-19 and current. ⭐ `qa_ladder_oracle_alloc_seed.jsonl` was RE-SCORED today on
+  the repaired instrument and is the only arm whose numbers moved; the two superseded versions are kept
+  beside it as `STALE_*.bak` (pre-restoration) and `*_MATURE_COLUMN_ONLY_*.bak` (the defect, on the current
+  tree) — ⛔ neither may go in a table with the others.
 * THE REPORT: `~/Downloads/rigel_runs/reports/ladder_accuracy_2026-09-19.md` and the Artifact at
-  `https://claude.ai/artifact/Cek2wmKtitgbDyfM5gNqyj`. Rebuild and republish both with the
-  `ladder-report` skill (`.claude/skills/ladder-report/`), which updates that same URL in place.
-  ⛔ The report is a RENDERING: re-score the arms first or it will show stale numbers and look current.
-* THE TRUE CAPTURE FACTOR: `~/Downloads/rigel_runs/suite/ladder/oracle_cache/capture_truth_on.npz`
-  (`factor`, `probed_frac`, `L_plain` on the index's own 15,669-row axis, synthetics included).
-* The snapshots of today's four commits:
-  `~/Downloads/rigel_runs/prototypes/2026-09-19_nascent_prior/commits/`.
+  `https://claude.ai/artifact/Cek2wmKtitgbDyfM5gNqyj`. ⭐ NOT REBUILT TODAY AND CORRECTLY SO: it renders
+  `base` / `base_reseed` / `oracle` / `oracle_ruler`, none of which moved, so a rebuild would republish the
+  same numbers. Rebuild with the `ladder-report` skill the moment a repair lands.
+* THE INVESTIGATION, kept: `~/Downloads/rigel_runs/prototypes/2026-09-19_siphon_root_cause/investigation/`
+  — the per-locus dissection (`dissect2.py` and eight `d2_*.npz`, one per in-scope condition), the analyses
+  (`an1`–`an10`), the closed-form fixed point (`derive.py`), the solver toy (`shadow_toy.py`), the λ probe
+  (`lambda_probe.py`, with its two arm files) and the corrected-allocation prototype (`alloc_fixed.py`).
+  Every number in `ISSUES: nascent-siphons-gdna-under-capture` is re-derivable from these.
+* The snapshots: `~/Downloads/rigel_runs/prototypes/2026-09-19_siphon_root_cause/commits/`.
 * The identity references `~/Downloads/rigel_runs/arms/review_identity_*.json` are NOT bit-identical on
-  this tree any more — the restoration moves the EM's counts by design. Re-freeze before a rename.
+  this tree — the RNA prior's restoration moved the EM's counts by design. Re-freeze before a rename.

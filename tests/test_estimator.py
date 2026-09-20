@@ -1689,3 +1689,101 @@ def test_an_unknown_warm_start_is_REFUSED():
     explicitly, or it silently falls through to the shipped path."""
     with pytest.raises(ValueError, match="Unknown warm start"):
         EMConfig(warm_start="zero")
+
+
+# ── The shadow-vs-gDNA contest: theta_n = 0 is stable only while L_n >= L_g ──────────────────────
+
+
+def _shadow_locus(n_sense: int, n_anti: int, ss: float = 0.99):
+    """One locus of unspliced fragments that ONLY gDNA and the gene's shadow span can explain — an
+    intronic position, where no mature isoform reaches. Every fragment is gDNA in truth. gDNA is
+    strandless (½ either way); the shadow carries the library's strandedness."""
+    ti, ll, gll = [], [], []
+    for n, p_rna in ((n_sense, ss), (n_anti, 1.0 - ss)):
+        for _ in range(int(n)):
+            ti += [0, 1]  # [0] the mature isoform, out of reach here; [1] the shadow
+            ll += [-np.inf, float(np.log(p_rna))]
+            gll.append(float(np.log(0.5)))
+    n_units = int(n_sense + n_anti)
+    return (
+        np.arange(n_units + 1, dtype=np.int64) * 2,
+        np.asarray(ti, dtype=np.int32),
+        np.asarray(ll, dtype=np.float64),
+        np.ones(n_units * 2, dtype=np.float64),
+        np.zeros(n_units * 2, dtype=np.uint8),
+        np.zeros(n_units, dtype=np.uint8),
+        np.asarray(gll, dtype=np.float64),
+        np.zeros(n_units, dtype=np.int32),
+        np.zeros(n_units, dtype=np.uint8),
+    )
+
+
+def _shadow_share(ratio: float, *, n: int = 20_000, gdna_prior: float = 0.0) -> float:
+    """The shadow's share of ``n`` fragments that are ALL gDNA in truth, at ``L_g / L_n = ratio``."""
+    L_n = 10_000.0
+    est = AbundanceEstimator(
+        2,
+        em_config=EMConfig(
+            mode="vbem",
+            iterations=400,
+            convergence_delta=1e-12,
+            assignment_mode="fractional",
+            seed=0,
+        ),
+        # the mature isoform's own length is irrelevant here — it reaches no fragment in this locus
+        geometry=_lengths([L_n * 10.0, L_n]),
+    )
+    est.run_batch_locus_em_partitioned(
+        partition_tuples=[_shadow_locus(n // 2, n // 2)],
+        locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
+        gdna_prior_count=np.array([gdna_prior], dtype=np.float64),
+        gdna_eff_len=np.array([L_n * ratio], dtype=np.float64),
+    )
+    return float(est.em_counts[1].sum()) / n
+
+
+@pytest.mark.parametrize("ratio", [0.5, 1.0])
+def test_a_shadow_entity_holding_NOTHING_decays_to_ZERO_while_it_is_the_LONGER_component(ratio):
+    """⛔ THE THRESHOLD IS `L_g / L_n = 1`, AND IT IS DERIVED (`EQUATIONS.md` §9b), NOT CHOSEN.
+
+    Every fragment here is gDNA, so the only correct answer is that the shadow holds none of them.
+    While the shadow's effective length is at least the gDNA component's, `theta_n = 0` is the fixed
+    point the EM reaches and stays at: the shadow's density is multiplied by `L_g/L_n <= 1` each
+    iteration and collapses.
+    """
+    assert _shadow_share(ratio) == pytest.approx(0.0, abs=1e-9)
+
+
+@pytest.mark.parametrize(
+    "ratio,expected",
+    [(2.0, 0.3519), (6.223, 0.5269), (20.0, 0.8204)],
+)
+def test_a_shadow_entity_holding_NOTHING_GROWS_once_it_is_the_SHORTER_component(ratio, expected):
+    """⛔⛔ THE SIPHON'S MECHANISM (`ISSUES: nascent-siphons-gdna-under-capture`). Past the threshold
+    `theta_n = 0` is UNSTABLE — the shadow's density is multiplied by `L_g/L_n > 1` every iteration and
+    climbs off zero — and it settles where the strand channel alone stops it. The shares here are the
+    closed-form fixed point of `EQUATIONS.md` §9b, so this gate pins the SOLVER against the derivation
+    rather than against a recorded run.
+
+    ⭐ `L_g` is the whole MultiLocus's opportunity and `L_n` one gene's span, so `L_g > L_n` is
+    structural and grows with the component's gene count: on the ladder at `g50 ss.99 ON` the ratio's
+    mass-weighted mean over the leaked fragments is 9.7.
+
+    Perturbation: dividing the shadow by the locus's `L_g` instead of its own length reads 0.0 on every
+    row. Dropping the strand term leaves the contest fully degenerate and it goes to the CORNER — the
+    shorter component takes everything: 1.0 at every ratio above 1, exactly 0.5 at 1, 0.0 below. So the
+    strand channel is not what opens this channel, only what bounds it.
+    """
+    assert _shadow_share(ratio) == pytest.approx(expected, abs=2e-3)
+
+
+def test_the_gDNA_PSEUDOCOUNT_bounds_the_shadow_but_does_NOT_close_the_channel():
+    """The calibration's own gDNA count anchors `theta_g`, so it damps the climb — which is why the
+    ladder leaks ~10-20 % of the contested pool where the bare contest gives ~50 %. It is a bound, not
+    a fix: the shadow still takes a large share, and at `g98`, where the anchor is strongest, the
+    capture-ON rows still over-call nascent by 100x.
+    """
+    free = _shadow_share(6.223, gdna_prior=0.0)
+    anchored = _shadow_share(6.223, gdna_prior=10_000.0)  # half the locus's fragments
+    assert anchored < free, "the gDNA pseudocount did not damp the shadow at all"
+    assert anchored > 0.3, "the pseudocount closed a channel it can only bound"

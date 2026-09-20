@@ -26,8 +26,9 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   deferred one (at κ = ½ no channel reaches an AMBIG slot; the θ-independent-channel search is closed) —
   `solvability_audit.py`, `policy_benchmark.py --by-class`. The transcript table the user reads does not keep it,
   under capture: the EM hands gDNA's fragments to the SYNTHETIC nascent entities, one for one, against a
-  calibration that had the split right (`ISSUES: nascent-siphons-gdna-under-capture`). The capture-OFF half of
-  that defect closed with the RNA prior's restoration.
+  calibration that had the split right — because `theta_n = 0` is an unstable fixed point of the shadow-vs-gDNA
+  contest (`ISSUES: nascent-siphons-gdna-under-capture`, root cause found 2026-09-19; `EQUATIONS.md` §9b). The
+  same channel is open off capture and is masked there by a compensating under-call.
 
 - **The deliverable, end to end** (2026-09-19, on the ladder REBUILT under the corrected capture physics, and
   RE-MEASURED after nascent RNA's share of the RNA prior was restored; `quant_accuracy.py --set
@@ -50,10 +51,10 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   `g50 ss.99 ON` (it read 0.4793), and the mass went one-for-one to the SYNTHETIC NASCENT entities, which
   over-call 4.6× there and 100× at `g98 ss.99 ON` — at capture-OFF the same split improved
   (`g50 ss.99 OFF` 0.5524 → 0.5071)
-  (`ISSUES: nascent-siphons-gdna-under-capture`). The three calibration-side instruments are CONTROLS
-  across this change and came back identical on every metric — `calibration_vs_oracle.py`, `zero_controls.py`
-  (byte-identical) and `policy_benchmark.py --panel ladder` — which is what says the change stayed inside the
-  EM.
+  (`ISSUES: nascent-siphons-gdna-under-capture`, whose root cause is now found and whose repair is open). The
+  three calibration-side instruments are CONTROLS across this change and came back identical on every metric —
+  `calibration_vs_oracle.py`, `zero_controls.py` (byte-identical) and `policy_benchmark.py --panel ladder` —
+  which is what says the change stayed inside the EM.
 - **Stage A (the accumulator)**: done; the fragment ledger closes exactly — `calibration_oracle.py`.
 - **Fragment lengths**: closed, both halves — gDNA by the two-pool contrast (`calibration/fl.py`,
   `gdna_density.py`; gates `test_fl.py`, `test_gdna_density.py`), RNA sound as shipped
@@ -77,7 +78,8 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
 - **The prior assembler**: with perfect masses its own error is negligible — `prior_vs_oracle.py` — and a
   perfect `LocusPriors` is worth 3–5 % of the in-scope transcript error — `quant_accuracy.py --arm oracle`. The
   lane the EM never receives is worth far more: `rna_prior_weight` is built end to end and `pipeline.py` omits
-  it, so the shipped EM carries no per-transcript information at all (`ISSUES: per-transcript-prior-lane`).
+  it, so the shipped EM carries no per-transcript information at all (`ISSUES: per-transcript-prior-lane`,
+  re-measured 2026-09-19 on a repaired arm).
 - **The ruler is the transcript's bases at their pieces' capture efficiencies, against the landscape's
   located enriched mode** (`DESIGN.md` §7.2, `EQUATIONS.md` §11): each efficiency a posterior mean from the
   piece's own count and its edge crossings, no floor and no junction object, so the unprobed class reads
@@ -134,16 +136,20 @@ its instrument: the ruler reads 1.000 at `g00` and off capture, so the metric pa
 intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons (stranded ON)
 (`policy_benchmark.py --by-class`).
 
-1. **Nascent RNA siphons gDNA under capture** — `ISSUES: nascent-siphons-gdna-under-capture`, the
-   dominant in-scope residual and the whole of `g98`. It is an EXCHANGE and the two sides are nascent
-   and gDNA: at `g50 ss.99 ON` nascent reads +541,216 against gDNA's −534,656, with the annotated pool
-   moving −6,560 — so the missing gDNA goes to the SYNTHETIC entities, one fragment for one, and not to
-   the isoforms of probed genes. Capture flips its sign; off capture gDNA takes from nascent instead.
-   Neither standing explanation covers it: a perfect `LocusPriors` removes ~0 in scope and the
-   simulator's own capture-aware lengths remove 13–28 %. The measured asymmetry to start from is that a
-   nascent entity is a single-exon span — geometrically indistinguishable from the gDNA the capture
-   efficiencies are measured on — while an annotated transcript is spliced, and the true capture factor
-   differs 13.5× between them. `ISSUES: em-overturns-the-calibrated-gdna-split` is CLOSED into this one.
+1. **Nascent RNA siphons gDNA under capture — ROOT CAUSE FOUND, THE REPAIR IS OPEN** —
+   `ISSUES: nascent-siphons-gdna-under-capture`, the dominant in-scope residual and the whole of `g98`.
+   `theta_n = 0` is an UNSTABLE fixed point: the EM gives a whole MultiLocus one gDNA opportunity `L_g`
+   while each synthetic shadow carries one gene's span `L_n`, and `L_g > L_n` structurally, so a shadow
+   holding nothing climbs off zero at rate `L_g/L_n` per iteration (`EQUATIONS.md` §9b; the threshold is
+   exactly 1 and is pinned against the shipped solver in `tests/test_estimator.py`). 84 % of the siphon
+   sits on shadows whose true count is zero, it is exactly 0 at every locus with no certified gDNA, and
+   it scales with the component's gene count. CAPTURE DOES NOT REVERSE THE ARBITRATION — the same
+   channel leaks 257,002 off capture and 452,854 on it; the sign flip is the TRUE nascent pool
+   collapsing 6.7× under capture so the under-call that was masking it disappears. Ruled out with
+   numbers: the ruler already reproduces the 13.5× capture gap (0.0773 against a true 0.0738) and the
+   two contractions agree to 1.03 over coincident footprints. The ranked repair is the per-transcript
+   allocation (item 3), which on a REPAIRED instrument removes 67 % of it at `g50 ss.99 ON`.
+   `ISSUES: em-overturns-the-calibrated-gdna-split` is CLOSED into this one.
 
 2. **The capture ruler where no gDNA witnesses it** — `ISSUES: ruler-witness-geometry-on-transcript-panels`. A
    probe spanning a junction gives extra capture only to the isoforms that hold it, which gDNA cannot see and
@@ -154,8 +160,10 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
 
 3. **The per-transcript allocation** — `ISSUES: per-transcript-prior-lane`. `rna_prior_weight` is built end to end
    and `pipeline.py` omits it; truth as the allocation weights is the largest single lever measured on the EM's
-   isoform split. A wiring gap plus a support decision, and the next candidate is a sparsity mechanism, which is
-   also the safety net under any capture error.
+   isoform split AND on item 1. ⛔ RE-MEASURED 2026-09-19 on a repaired instrument — the arm had been reading a
+   MATURE-only truth column and weighting every synthetic entity at zero, which reproduced the retired
+   `alpha = 0` rule rather than an allocation. A wiring gap plus a support decision, and the next candidate is a
+   sparsity mechanism, which is also the safety net under any capture error and the ranked repair for item 1.
 
 4. **The pre-EM prior chain** — what the oracle arms price it at on the deliverable: a perfect prior recovers
    nothing in scope on the rebuilt ladder and moves `g98` alone, so `ISSUES: capture-blind-gdna-divisor`,

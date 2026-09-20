@@ -200,10 +200,13 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,443 passed / 0 skipped / 2 xfail, 3,445 collected** (re-derived
-2026-09-19 after the allocation arm's weights were repaired: +3 in `test_quant_accuracy.py`, all in an
-existing file, so `collected` moves by the case count alone — the arm read a MATURE-only truth column and so
-handed all 6,919 synthetic entities a weight of zero, an oracle arm silently re-running the retired
+**The standing baseline: 0 failed / 3,449 passed / 0 skipped / 2 xfail, 3,451 collected** (re-derived
+2026-09-19 after the nascent siphon's ROOT CAUSE: +9, all in existing files, so `collected` moves by the
+case count alone — +6 in `test_estimator.py` pinning the shadow-vs-gDNA threshold against the SHIPPED solver
+(two rows below `L_g/L_n = 1` where a shadow holding nothing must decay to exactly 0, three above it against
+`EQUATIONS.md` §9b's closed form, and the gDNA pseudocount as a bound that does not close the channel), and
++3 in `test_quant_accuracy.py` on the allocation arm's weights, which read a MATURE-only truth column and so
+handed all 6,919 synthetic entities a weight of zero — an oracle arm that was silently re-running the retired
 `alpha = 0` rule (`TRAPS: an-oracle-column-that-omits-a-population`). ⚠ No golden moved and no `src/` file
 changed: the fix is in `scripts/design/quant_accuracy.py`, so `--arm oracle_alloc_seed` is the only arm whose
 numbers move. Before that 3,440 / 3,442 after `quant_accuracy.py --markdown`, the per-scenario release report: +8 in
