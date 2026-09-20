@@ -626,3 +626,180 @@ def test_the_report_REFUSES_arms_scored_under_different_assignment_modes(tmp_pat
     b.write_text(json.dumps(row) + "\n")
     with pytest.raises(SystemExit, match="assignment mode"):
         QA.report([a, b])
+
+
+# ── the markdown report — what a release is judged on ────────────────────────────────────────────
+#
+# The report RENDERS numbers the arm files already hold, so every way of getting it wrong produces a
+# plausible-looking table: the wrong gDNA column, a ratio invented where the truth is zero, a pool
+# silently folded into another. These gates are those ways.
+
+
+def _arm_rows(tmp_path, **over):
+    """One condition, three axes, written as an arm jsonl. The numbers are chosen so that every
+    quantity the report derives is distinguishable from every other."""
+    cond = "gdna_g50_ss_0.99_nrna_mid_capture_off"
+    lib = {
+        "condition": cond,
+        "axis": "library",
+        "arm": "a",
+        "assignment_mode": "fractional",
+        "mrna_est": 4_000.0,
+        "mrna_true": 4_100.0,
+        "nrna_est": 900.0,
+        "nrna_true": 1_000.0,
+        "rna_est": 4_900.0,
+        "rna_true": 5_100.0,
+        #: EM-only. The comparable total is this PLUS the intergenic fragments.
+        "gdna_est": 2_000.0,
+        "n_intergenic": 3_100.0,
+        "gdna_true": 4_900.0,
+        "gdna_frac_est": 0.51,
+        "gdna_frac_true": 0.49,
+    }
+    lib.update(over)
+    axis = {
+        "condition": cond,
+        "arm": "a",
+        "assignment_mode": "fractional",
+        "n_tx": 10,
+        "n_expressed": 6,
+        "n_detected": 7,
+        "count_true": 4_100.0,
+        "count_est": 4_000.0,
+        "count_abs_err": 410.0,
+        "count_net_err": -100.0,
+        "count_over": 155.0,
+        "count_under": 255.0,
+        "fp_mass": 33.0,
+        "fp_n": 2,
+        "fn_mass": 11.0,
+        "fn_n": 1,
+        "spearman": 0.9,
+        "pearson_log2": 0.8,
+        "mard": 0.25,
+    }
+    tx = dict(axis, axis="transcript", median_rel_err=0.12, tpm_abs_err=1.0, tpm_fp=0.5)
+    gene = dict(axis, axis="gene", n_tx=4, count_abs_err=41.0)
+    p = tmp_path / "qa_arm.jsonl"
+    p.write_text("\n".join(json.dumps(r) for r in (lib, tx, gene)) + "\n")
+    return p, cond
+
+
+def _render(tmp_path, **over):
+    qa = _load_sibling("quant_accuracy.py")
+    src, _cond = _arm_rows(tmp_path, **over)
+    out = tmp_path / "report.md"
+    qa.markdown_report([src], out)
+    return out.read_text()
+
+
+def test_the_report_scores_gDNA_INCLUDING_the_intergenic_fragments(tmp_path):
+    """⛔ The failure this exists for. ``gdna_est`` is the EM's number and EXCLUDES fragments that
+    reached no locus, while ``gdna_true`` counts every gDNA fragment there was. Off capture the
+    intergenic half is the larger one, so a report that prints ``gdna_est`` against that truth
+    understates the estimate by more than half and reads as a catastrophic under-call that is not
+    there. The comparable estimate is ``gdna_est + n_intergenic``.
+
+    Perturbation: rendering ``gdna_est`` alone prints 2,000 and a −59.2 % error.
+    """
+    md = _render(tmp_path)
+    assert "5,100" in md, "the gDNA estimate did not include the intergenic fragments"
+    assert "| 2,000 |" not in md, "the report printed the EM's gDNA alone against the full truth"
+    assert "+4.1 %" in md, f"expected (5,100-4,900)/4,900; got:\n{md}"
+
+
+def test_a_percent_error_is_REFUSED_where_the_truth_is_zero(tmp_path):
+    """The `g00` rung's true gDNA count is exactly 0, and a percent error there would invent a scale
+    (TRAPS: a-ratio-cannot-carry-zero). The raw count is the whole of the answer; the ratio is `n/a`.
+
+    Perturbation: dividing anyway yields `inf %` on every zero-gDNA row.
+    """
+    md = _render(tmp_path, gdna_true=0.0)
+    assert "n/a" in md
+    assert "inf" not in md.lower() and "nan %" not in md.lower()
+
+
+def test_the_three_pools_are_reported_APART_and_the_synthetic_one_by_name(tmp_path):
+    """The split is on ``is_synthetic``, and the report must say so where a reader will see it: a
+    single-exon ANNOTATED transcript carries ``is_nrna`` and belongs to the ANNOTATED pool
+    (TRAPS: nrna-does-not-mean-synthetic). Folding the two RNA pools together would hide the
+    false-positive channel the nascent row exists to expose."""
+    md = _render(tmp_path)
+    assert "SYNTHETIC entities only" in md
+    assert "is_synthetic`, never `is_nrna" in md
+    for n in ("900", "1,000", "4,000", "4,100"):  # nascent est/true, annotated est/true
+        assert n in md, f"pool figure {n} missing"
+
+
+def test_the_transcript_and_gene_sections_score_the_ANNOTATED_POOL_ALONE(tmp_path):
+    """The transcript table a user reads holds no synthetic entity — ``get_counts_df`` drops them —
+    so the transcript and gene truth must equal the library's ANNOTATED truth and not the RNA total.
+    Scoring against ``rna_true`` instead would silently credit the tool for nascent mass that is not
+    in the table at all."""
+    md = _render(tmp_path)
+    qa = _load_sibling("quant_accuracy.py")
+    src, cond = _arm_rows(tmp_path)
+    rows = qa._load(src)
+    assert rows[(cond, "transcript")]["count_true"] == rows[(cond, "library")]["mrna_true"]
+    assert rows[(cond, "transcript")]["count_true"] != rows[(cond, "library")]["rna_true"]
+    assert "10.00 %" in md, "Σ|Δ| as a share of the annotated truth (410/4,100) is missing"
+
+
+def test_every_table_in_the_report_is_RECTANGULAR(tmp_path):
+    """A ragged markdown table renders as a wrong table rather than as an error, and the escaped
+    pipes in a `Σ|Δ|` header are cell CONTENT — counting them as delimiters put phantom columns in
+    every separator row, which is the defect this gate was written on."""
+    md = _render(tmp_path)
+    for block in md.split("\n\n"):
+        lines = [x for x in block.splitlines() if x.startswith("|")]
+        if len(lines) < 2:
+            continue
+        widths = {len(x.replace("\\|", "").split("|")) for x in lines}
+        assert len(widths) == 1, f"ragged table {widths}: {lines[0][:80]}"
+
+
+def test_the_DEFERRED_stratum_is_MARKED_wherever_it_appears(tmp_path):
+    """Unstranded × capture-ON is reported on every benchmark and is never a development target, and
+    it carries most of the error — so a reader who does not see the mark will read a pooled total as
+    the tool's accuracy (TRAPS: never-pool-the-strata)."""
+    qa = _load_sibling("quant_accuracy.py")
+    lib, tx, gene = (json.loads(x) for x in _arm_rows(tmp_path)[0].read_text().splitlines())
+    for r in (lib, tx, gene):
+        r["condition"] = "gdna_g50_ss_0.50_nrna_mid_capture_on"
+    src = tmp_path / "def.jsonl"
+    src.write_text("\n".join(json.dumps(r) for r in (lib, tx, gene)) + "\n")
+    out = tmp_path / "d.md"
+    qa.markdown_report([src], out)
+    md = out.read_text()
+    assert md.count("DEFERRED") >= 4, "the deferred stratum is unmarked in at least one section"
+
+
+def test_the_report_does_NOT_present_a_column_that_cannot_fire(tmp_path):
+    """``fn_mass`` needs an estimate of EXACTLY zero. Under fractional assignment a posterior
+    essentially never is, so it reads 0.0 on every condition of every arm — and a column of zeros
+    beside "false-negative mass" reads as a perfect score for something that was never measured
+    (TRAPS: could-the-arm-have-fired). ``count_under`` is the live quantity and is reported instead.
+
+    Perturbation: restoring the ``false-negative mass`` column prints 11 here and 0 on the panel.
+    """
+    md = _render(tmp_path)
+    assert "false-negative" not in md.split("## 2.")[1], "a column that cannot fire was reported"
+    assert "under-assigned" in md and "over-assigned" in md
+    assert "255" in md, "count_under (the live under-assignment) is missing"
+
+
+def test_the_report_does_NOT_call_the_truth_table_s_ROW_COUNT_a_transcript_count(tmp_path):
+    """The truth table carries one row per SYNTHETIC nascent entity as well as per annotated
+    transcript — on the ladder, 6,919 of 15,669 — and those rows are zero on BOTH sides, so they
+    enter no figure. Printing the row count as "transcripts" claims thousands of perfectly scored
+    transcripts that were never scored. The scored sets are ``expressed`` and ``detected``.
+
+    Perturbation: printing ``n_tx`` puts 10 in the transcript row and 4 in the gene row here, and
+    15,669 / 9,385 on the panel.
+    """
+    md = _render(tmp_path)
+    body = md.split("## 2.")[1]
+    assert "| 10 |" not in body, "the truth table's row count was reported as a transcript count"
+    assert "| 4 |" not in body, "the gene axis reported its grouping-key count"
+    assert "expressed" in body and "detected" in body

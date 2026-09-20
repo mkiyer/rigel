@@ -655,6 +655,249 @@ def _load(path: Path) -> dict:
     return {(r["condition"], r["axis"]): r for r in rows}
 
 
+_GDNA_LEVEL = {"g00": "0 %", "g05": "5 %", "g50": "50 %", "g98": "98 %"}
+
+
+def _level(cond: str) -> str:
+    """The condition's designed gDNA level, from its name."""
+    for k in _GDNA_LEVEL:
+        if f"_{k}_" in cond:
+            return k
+    return "?"
+
+
+def _pct(est: float, true: float) -> str:
+    """Percent error against the realised truth. ⛔ UNDEFINED at a truth of zero, and printed as
+    such rather than as a large number: at `g00` the true gDNA count IS zero, and a ratio there
+    would invent a scale (`TRAPS: a-ratio-cannot-carry-zero`)."""
+    if true <= 0.0:
+        return "n/a"
+    return f"{100.0 * (est - true) / true:+,.1f} %"
+
+
+def _signed(x: float) -> str:
+    return f"{x:+,.0f}"
+
+
+def markdown_report(paths: list[Path], out: Path) -> None:
+    """The full per-scenario accuracy report, as markdown — what a release is judged on.
+
+    THREE POOLS AND THEY ARE NOT THE SAME QUESTION. Every fragment in the library is gDNA, SYNTHETIC
+    nascent RNA, or ANNOTATED RNA, and the split is on ``is_synthetic`` — a span this index
+    manufactured — never on ``is_nrna``. A single-exon ANNOTATED transcript carries ``is_nrna`` because
+    it is at once the nascent and the mature form of a real gene, and it belongs to the ANNOTATED pool
+    (`TRAPS: nrna-does-not-mean-synthetic`). The transcript and gene sections then score the annotated
+    pool ALONE, because that is the table a user reads: synthetic entities are absent from it by
+    construction and their mass is reported on the pool rows instead.
+
+    ⛔ The gDNA estimate is ``gdna_em + n_intergenic``. Intergenic fragments reach no locus, so they
+    never enter the EM, but they ARE gDNA and the truth counts them — comparing the EM's number alone
+    against that truth would understate the estimate by more than half at capture-OFF.
+
+    The first path is the arm reported; an arm whose stem contains ``reseed`` is used as the
+    ATTRIBUTION FLOOR and printed beside every transcript row, because no delta below it is
+    attributable (`TRAPS: the-deliverable-is-not-reproducible-by-default`).
+    """
+    arms = [(_load(p), Path(p).stem) for p in paths]
+    primary, pname = arms[0]
+    floor = next((a for a, n in arms if "reseed" in n), None)
+
+    modes = {r.get("assignment_mode") for r in primary.values()}
+    conds = sorted({c for c, _ax in primary})
+    stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(Path(paths[0]).stat().st_mtime))
+    from rigel.config import CalibrationConfig as _CC
+
+    L = []
+    w = L.append
+    w("# Rigel — end-to-end accuracy on the gDNA ladder")
+    w("")
+    w(f"**Arm** `{pname}` · **{len(conds)} conditions** · **assignment** "
+      f"`{'/'.join(sorted(str(m) for m in modes))}` · **calibration** "
+      f"`message_policy={_CC().message_policy!r}` · **scored** {stamp}")
+    w("")
+    w("Every number is scored against the simulator's own REALISED per-fragment truth — each fragment "
+      "counted exactly once, never a pre-capture molar abundance — so a difference is a fragment the "
+      "tool put somewhere the simulator did not.")
+    w("")
+    w("## How to read this")
+    w("")
+    w("- **Three pools, and they answer different questions.** `gDNA` is contamination the "
+      "deconvolution must remove; `nascent RNA` is the SYNTHETIC entity this index manufactures for "
+      "each multi-exon gene; `annotated RNA` is the transcript table a user reads. The split is on "
+      "`is_synthetic`, never `is_nrna` — a single-exon annotated transcript is ANNOTATED RNA.")
+    w("- **The gDNA estimate includes intergenic fragments**, which reach no locus and never enter "
+      "the EM. Off capture they are more than half of all gDNA.")
+    w("- **Percent error is undefined where the truth is zero** and is printed `n/a`. At `g00` the "
+      "true gDNA count is exactly 0; the raw count beside it is the whole of the answer there.")
+    w("- **Read per stratum, never pooled.** Three strata are in scope. `unstranded × capture ON` is "
+      "DEFERRED — reported on every benchmark, never a development target — and it carries most of "
+      "the error, so a pooled total would be its total.")
+    w("- **Nothing below the attribution floor is attributable.** The floor is the same arm re-run "
+      "under a different EM seed; it is printed beside every transcript row. ⚠ Re-running the "
+      "IDENTICAL command moves these figures by the same order — four runs of `g50 ss.99 OFF` spanned "
+      "145 fragments against a floor of ±144 — and it is not the seed: it persists with the seed "
+      "pinned, and shrinks to 12.5 fragments only at `em.n_threads=1` under `OMP_NUM_THREADS=1` "
+      "(`TRAPS: the-deliverable-is-not-reproducible-by-default`). Treat every figure here as carrying "
+      "that much noise.")
+    w("- **`expressed` and `detected` are the scored sets, and the truth table is larger than "
+      "either.** It carries one row per SYNTHETIC nascent entity as well, and those rows are zero on "
+      "both sides — zero truth and zero estimate, since the transcript table drops them — so they "
+      "enter no figure here. A raw row count would read as thousands of transcripts scored perfectly; "
+      "it is not reported for that reason.")
+    w("- **There is no false-negative column, because under fractional assignment it cannot fire.** "
+      "A false negative needs an estimate of EXACTLY zero, and a fractional posterior essentially "
+      "never is; it reads 0 on all 16 conditions and would look like a perfect score for something "
+      "unmeasured. `under-assigned` is the live quantity and it is reported instead.")
+    w("- **`MARD` is the SYMMETRIC mean absolute relative difference**, `|est−true| / (|est|+|true|)` "
+      "averaged over the expressed set, so it is bounded in [0, 1] and finite at a zero estimate — "
+      "0.5 is a 3× error, not a 50 % one. `median rel. err` is the ordinary `|est−true|/true`, over "
+      "the same set. Both are unweighted by mass: a 1-fragment transcript counts as much as a "
+      "25,000-fragment one.")
+    w("- **One asymmetry in the pool rows.** The ESTIMATE splits on `is_synthetic` (the entity) while "
+      "the TRUTH splits on the simulator's template kind, and a handful of annotated single-exon "
+      "transcripts serve as their own nascent entity — their nascent fragments count in `nascent "
+      "truth` while the tool's counts for them land in `annotated`. It is ~300 fragments of ~1.9 M "
+      "and it cannot be removed by relabelling; it is recorded so the pool rows are not read as one "
+      "partition measured twice.")
+    w("- **Every stratum row includes its `g00` rung.** The terminal report excludes the zero-gDNA "
+      "control from its roll-up; this one keeps it, so the two do not agree by construction.")
+    w("")
+
+    # ── pools ────────────────────────────────────────────────────────────────────────────────────
+    w("## 1. Pool level — where the library's fragments went")
+    w("")
+    w("One row per scenario, grouped by stratum. `Δ` is `estimate − truth` in fragments.")
+    w("")
+    for pool, est_f, true_f, label in (
+        ("gDNA", None, "gdna_true", "gDNA (EM + intergenic)"),
+        ("nascent", "nrna_est", "nrna_true", "Nascent RNA — SYNTHETIC entities only"),
+        ("annotated", "mrna_est", "mrna_true", "Annotated RNA — the transcript table"),
+    ):
+        w(f"### {label}")
+        w("")
+        w("| scenario | gDNA level | estimated | truth | Δ | % error |")
+        w("|---|---|---:|---:|---:|---:|")
+        for st in _STRATA:
+            rows = [c for c in conds if stratum(c) == st]
+            if not rows:
+                continue
+            tag = f"{st[0]} × {st[1]}" + ("  ⛔ DEFERRED" if st == ("unstranded", "capture ON") else "")
+            w(f"| **{tag}** | | | | | |")
+            for c in rows:
+                r = primary[(c, "library")]
+                est = (r["gdna_est"] + r["n_intergenic"]) if est_f is None else r[est_f]
+                true = r[true_f]
+                w(f"| `{c}` | {_GDNA_LEVEL[_level(c)]} | {est:,.0f} | {true:,.0f} | "
+                  f"{_signed(est - true)} | {_pct(est, true)} |")
+        w("")
+
+    w("### Library gDNA fraction — the thermometer")
+    w("")
+    w("What `rigel quant` reports as the library's gDNA share. This is the number calibration exists "
+      "to produce; the transcript table does not always keep it.")
+    w("")
+    w("| scenario | estimated | truth | Δ |")
+    w("|---|---:|---:|---:|")
+    for st in _STRATA:
+        rows = [c for c in conds if stratum(c) == st]
+        if not rows:
+            continue
+        w(f"| **{st[0]} × {st[1]}** | | | |")
+        for c in rows:
+            r = primary[(c, "library")]
+            e, t = r["gdna_frac_est"], r["gdna_frac_true"]
+            w(f"| `{c}` | {e:.4f} | {t:.4f} | {e - t:+.4f} |")
+    w("")
+
+    # ── transcript and gene ──────────────────────────────────────────────────────────────────────
+    for axis, title, blurb in (
+        ("transcript", "2. Transcript level — inside the annotated RNA pool",
+         "Scored over the annotated transcripts alone: gDNA and the synthetic nascent entities are "
+         "excluded, so what is left is how well the tool splits the RNA it kept. `Σ|Δ|` sums "
+         "`|estimate − truth|` over every annotated transcript, SILENT ONES INCLUDED, and splits into "
+         "`over-assigned` + `under-assigned`; `false-positive mass` is the part of the over-assignment "
+         "that landed on a transcript the simulator gave ZERO fragments, so it is a subset of `Σ|Δ|` "
+         "and the number this tool exists for."),
+        ("gene", "3. Gene level — the same, with isoform ambiguity summed away",
+         "The same scorer over genes, and the difference from the transcript row is the point: "
+         "summing a gene's isoforms collapses exactly the error that comes from not knowing WHICH "
+         "isoform a fragment came from. What survives is error in deciding whether the fragment was "
+         "RNA from this gene at all, which is the question Rigel is for."),
+    ):
+        w(f"## {title}")
+        w("")
+        w(blurb)
+        w("")
+        unit = "expressed" if axis == "transcript" else "expressed genes"
+        head = (f"| scenario | {unit} | detected | Σ\\|Δ\\| | Σ\\|Δ\\| as % of true | net Δ | "
+                "over-assigned | under-assigned | false-positive mass | on n | MARD | Spearman |")
+        if axis == "transcript":
+            head = head.replace("| MARD |", "| median rel. err | MARD |")
+        if floor is not None and axis == "transcript":
+            head = head.replace("| net Δ |", "| net Δ | seed floor |")
+        # ⛔ Count columns with the ESCAPED pipes removed. `Σ\|Δ\|` carries two literal `|`
+        # characters that are cell CONTENT, not delimiters, and counting them put three phantom
+        # columns in every separator row.
+        ncols = head.replace("\\|", "").count("|") - 1
+        w(head)
+        w("|---" + "|---:" * (ncols - 1) + "|")
+        for st in _STRATA:
+            rows = [c for c in conds if stratum(c) == st]
+            if not rows:
+                continue
+            tag = f"{st[0]} × {st[1]}" + ("  ⛔ DEFERRED" if st == ("unstranded", "capture ON") else "")
+            w(f"| **{tag}** |" + " |" * (ncols - 1))
+            for c in rows:
+                r = primary[(c, axis)]
+                share = 100.0 * r["count_abs_err"] / r["count_true"] if r["count_true"] > 0 else float("nan")
+                cells = [f"`{c}`", f"{r['n_expressed']:,}", f"{r['n_detected']:,}",
+                         f"{r['count_abs_err']:,.0f}", f"{share:.2f} %", _signed(r["count_net_err"])]
+                if floor is not None and axis == "transcript":
+                    f_r = floor.get((c, axis))
+                    cells.append(f"±{abs(r['count_abs_err'] - f_r['count_abs_err']):,.0f}"
+                                 if f_r else "—")
+                cells += [f"{r['count_over']:,.0f}", f"{r['count_under']:,.0f}",
+                          f"{r['fp_mass']:,.0f}", f"{r['fp_n']:,}"]
+                if axis == "transcript":
+                    cells.append(f"{r['median_rel_err']:.3f}")
+                cells += [f"{r['mard']:.3f}", f"{r['spearman']:.4f}"]
+                w("| " + " | ".join(cells) + " |")
+        w("")
+
+    # ── rollup ───────────────────────────────────────────────────────────────────────────────────
+    w("## 4. Per stratum, summed over its four gDNA levels")
+    w("")
+    w("⛔ Summed WITHIN a stratum only. The four strata are never added together.")
+    w("")
+    w("| stratum | annotated truth | transcript Σ\\|Δ\\| | % | gene Σ\\|Δ\\| | % | nascent est | "
+      "nascent truth | gDNA est | gDNA truth |")
+    w("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    for st in _STRATA:
+        rows = [c for c in conds if stratum(c) == st]
+        if not rows:
+            continue
+        tx = sum(primary[(c, "transcript")]["count_abs_err"] for c in rows)
+        gn = sum(primary[(c, "gene")]["count_abs_err"] for c in rows)
+        tt = sum(primary[(c, "transcript")]["count_true"] for c in rows)
+        ne = sum(primary[(c, "library")]["nrna_est"] for c in rows)
+        nt = sum(primary[(c, "library")]["nrna_true"] for c in rows)
+        ge = sum(primary[(c, "library")]["gdna_est"] + primary[(c, "library")]["n_intergenic"] for c in rows)
+        gt = sum(primary[(c, "library")]["gdna_true"] for c in rows)
+        tag = f"{st[0]} × {st[1]}" + (" ⛔ DEFERRED" if st == ("unstranded", "capture ON") else "")
+        w(f"| {tag} | {tt:,.0f} | {tx:,.0f} | {100 * tx / tt:.2f} % | {gn:,.0f} | "
+          f"{100 * gn / tt:.2f} % | {ne:,.0f} | {nt:,.0f} | {ge:,.0f} | {gt:,.0f} |")
+    w("")
+    w("---")
+    w("")
+    w(f"Generated by `scripts/design/quant_accuracy.py --markdown` from `{pname}.jsonl`"
+      + (" with the seed floor from the `reseed` arm." if floor is not None else "."))
+    w("")
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(L))
+    print(f"  ⭐ markdown report -> {out}  ({len(L)} lines, {len(conds)} conditions)")
+
+
 def report(paths: list[Path]) -> None:
     """One or more arms, per stratum. Never pooled — the panel total hides a sign flip between
     strata, and on this panel one stratum carries almost all of the error."""
@@ -881,6 +1124,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--report", nargs="+", type=Path, default=None,
                     help="print the per-stratum tables from arm jsonl files and exit")
+    ap.add_argument("--markdown", type=Path, default=None,
+                    help="with --report: also write the full per-scenario report as markdown. The "
+                         "first --report file is the arm reported; an arm whose name contains "
+                         "'reseed' becomes the attribution floor printed beside it")
     ap.add_argument("--arm", choices=ARMS, default=None)
     ap.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
     ap.add_argument("--index", type=Path, default=DEFAULT_INDEX)
@@ -899,7 +1146,11 @@ def main() -> int:
 
     if args.report:
         report(args.report)
+        if args.markdown:
+            markdown_report(args.report, args.markdown)
         return 0
+    if args.markdown:
+        raise SystemExit("--markdown needs --report FILES... (it renders arm jsonl, it runs nothing)")
     if args.arm is None or args.out is None:
         raise SystemExit("--arm and --out are required (or use --report)")
 
