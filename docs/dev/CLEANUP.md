@@ -27,6 +27,8 @@ is the working ledger; when the cleanup is done it is deleted and `NEXT_SESSION.
 | 09-22 | `pass0_vs_oracle.py` retired: its library became the helper `scripts/design/_oracle_arms.py` (T, the two arms, the solver classes, the cache builder; the C_input ceiling and the C_info classification — both pricing the retired length channel — deleted with their gate), its oracle-cache build became `calibration_oracle.py --build [--jobs N]`, which `panel.py cache` now runs (no zero-gDNA hold-out, no hidden `--_prewarm`), and `solvability_audit.py` / `calibration_vs_oracle.py` read the helper; `test_pass0_vs_oracle.py` → `test_oracle_arms.py`; `effective_length.build_slot_moments` (the classification's only reader) deleted | the gates of both test files and `test_panel_workflow.py`; a `--build` smoke run on two test-chromosome rows; preflight `--full` |
 | 09-22 | Comments: the twelve `SRD v2` spec-revision labels rewritten as what the code does (`constants.h`, `resolve_context.h`, `scoring.cpp`, `bam_scanner.cpp`, `splice.py`, `buffer.py`, `index.py`); the estimator's two "wrapper-level test compatibility" phrasings replaced by what the defaults mean (15 test call sites rely on them, so the defaults stay) | comments only |
 | 09-22 | `ROADMAP.md` rewritten to its own rule: one line per claim naming its instrument, no numbers, no history, 210 → 88 lines; the next steps are the cleanup, the length, the prior, the release | docs |
+| 09-22 | `effective_length.contained_moments` / `crossing_moments` / `LandedMoments` and their gates deleted (owner): the maths of the retired fragment-length composition channel, no production reader; the derivation stays in `EQUATIONS.md` §3.1 | suite; identity check on the `g05 ss.99 ON` reference |
+| 09-22 | The eleven stale local branches deleted (owner): six were merged into `main`, five carried June/July prototype commits against modules that no longer exist | git |
 | 09-22 | `pipeline._DEFAULT_MEAN_FRAG = 200.0`, the magic fallback for an empty RNA length pool (never executed by the suite), replaced by a refusal that names the condition; the falsification test in `tests/test_d7_transcript_eff_lengths.py` was written first and watched fail | suite; no number moves (the branch was unreachable) |
 | 09-22 | `EMConfig.gdna_em_llr_bias` and `--gdna-em-llr-bias` deleted (config, CLI, estimator, `em_solver.cpp`, manual, two tests): an underived odds knob, default 0, used by no arm | suite green; `rename_identity.py --check` BIT-IDENTICAL on the `g05 ss.99 ON` reference at the time (the default call had no reference and printed so — read a log, never an exit code); the other two references are re-checked at the day's end, below |
 
@@ -36,7 +38,8 @@ The suite after the above: 0 failed / 3,414 passed / 2 xfail, 3,416 collected �
 (its two rows and six cases), −5 the swap's tests in `test_total_abundance.py`, −1 in `test_abundance_landscape.py`, +2 the
 toy harness by the `tests/` row = 3,416; then −4 `pass0_vs_oracle.py` +4 `_oracle_arms.py` by the `scripts/design/` row (a `_` helper
 is still import-, docstring-, jargon- and boundary-gated), −1 the C_info gate, −1 the zero-gDNA predicate's test = 3,414: 3,412 passed / 2 xfail)
-and matched by the suite.
+and matched by the suite; then −33 the moment gates (`test_effective_length.py`'s own parametrisations) = 3,381: 3,379 passed / 2 xfail, matched
+by the suite.
 
 **End of day 1, the whole tree:** `rename_identity.py --check` BIT-IDENTICAL on all three references — `g05 ss.99 ON`,
 `g05 ss.50 OFF` and the LBX0190 library (`--bam`); `preflight.py --full` 5/5 over 12 instruments; the suite as above. ⚠
@@ -90,16 +93,13 @@ The instrument's default `--reference` path does not exist and it prints ⛔ rat
    `quant_accuracy.py`), `calibration_walk`, `module_census`, `rename_census`, `simulator_gates`, with their two
    test files and every current-doc mention (`TESTING.md` §0b and §3 deleted). `pass0_vs_oracle.py` followed the same day (the row above).
 6. **The `rigel-pin` worktree** REMOVED with its branch (no commit of it ever reached `main`; `c52c9b93` was made on
-   `main`). The ten stale branches are still listed for a separate decision.
+   `main`). The eleven stale branches were deleted the same day.
 7. **The simulator's error model and sharded writers** STAY (a coverage gap, to be worked on eventually).
 8. `_DEFAULT_MEAN_FRAG` → a refusal (done, above).
 
 ## Decisions still open
 
-* `effective_length.contained_moments` / `crossing_moments` (`LandedMoments`): gated by `test_effective_length.py`, no
-  production reader since the C_info classification went — the retired length channel's functionals. Keep the gated
-  maths for the channel's return after 0.8.0, or delete with the gates?
-* The ten stale local branches.
+* The `Development Status` classifier in `pyproject.toml` at the release.
 
 ## Stages ahead
 
