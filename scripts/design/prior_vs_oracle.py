@@ -20,9 +20,9 @@ the prior arbitrates. Every arm runs in the drained frame; the drain's spliced-g
 beside the numbers as ``gdna_spliced_leak`` and the lift's attribution error as ``n_ambiguous``.
 No per-locus EM runs -- the pipeline is stopped after its scoring stage.
 
-This file is also a library: ``calibration_vs_oracle`` loads its ``stratum``, ``is_zero_gdna``,
-``OVERRIDE_FIELDS``, ``DEFAULT_SUITE`` and ``DEFAULT_INDEX``, and ``calibration_oracle`` and
-``calibration_walk`` the two defaults. Gates:
+The panel's default paths, the six override fields and the stratum readers this and the other oracle
+instruments share live in ``_shared`` (``DEFAULT_SUITE``, ``DEFAULT_INDEX``, ``OVERRIDE_FIELDS``, ``stratum``,
+``is_zero_gdna``), so no instrument loads another to read them. Gates:
 ``tests/calibration/test_prior_vs_oracle.py``.
 
 Usage::
@@ -50,6 +50,9 @@ import numpy as np  # noqa: E402
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "tests" / "calibration"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _shared import DEFAULT_INDEX, DEFAULT_SUITE, OVERRIDE_FIELDS, is_zero_gdna, stratum  # noqa: E402,F401
 
 from _oracle import (  # noqa: E402
     ORIGIN_CODE,
@@ -74,24 +77,9 @@ from rigel.pipeline import (  # noqa: E402
 )
 from rigel.scan_cache import ScanCacheKeyError, read_scan_cache, write_scan_cache  # noqa: E402
 
-_RUNS = Path.home() / "Downloads" / "rigel_runs"
-DEFAULT_SUITE = _RUNS / "suite" / "ladder"
-DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
-
 #: The three ``LocusPriors`` fields, in the order every table prints them.
 PRIOR_FIELDS = ("gdna_prior_count", "rna_prior_count", "gdna_eff_len")
 
-#: The mass arrays ``OracleTruth.override_masses`` replaces. Named here so the ``noop`` gate can
-#: re-inject exactly this set from the SHIPPED result and demand byte-identity — an override applied
-#: to a field nothing reads is an override that never ran (TRAPS: an-ablation-that-never-ran).
-OVERRIDE_FIELDS = (
-    "count_gdna_region",
-    "count_rna_region",
-    "count_gdna_boundary",
-    "count_rna_boundary",
-    "count_rna_spliced_boundary",
-    "count_rna_sj",
-)
 
 
 # ── the scoring ──────────────────────────────────────────────────────────────────────────────────
@@ -724,21 +712,6 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
 
 
 # ── reporting ────────────────────────────────────────────────────────────────────────────────────
-
-
-def stratum(cond: str) -> tuple[str, str]:
-    """The panel's two binary axes."""
-    return (
-        "stranded" if "ss_0.99" in cond else "unstranded",
-        "capture ON" if "capture_on" in cond else "capture OFF",
-    )
-
-
-def is_zero_gdna(cond: str) -> bool:
-    """``g00`` — the owner-required ZERO-gDNA control. Truth is exactly 0, so every gDNA fragment in
-    the prior there is a false positive with nothing to cancel it, and a relative change is unbounded.
-    Reported on its own row, never inside ALL."""
-    return "_g00_" in cond
 
 
 def _agg(scores):

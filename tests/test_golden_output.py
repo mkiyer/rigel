@@ -228,9 +228,15 @@ def _compare_df(actual, expected, numeric_cols, label):
     assert len(actual) == len(expected), (
         f"{label}: row count mismatch: {len(actual)} vs {len(expected)}"
     )
-    for col in numeric_cols:
-        if col not in actual.columns:
-            continue
+    # A column the golden carries and the output lacks (or the reverse) is a changed table, never a skip:
+    # silently skipping it is how a dropped column would pass as "unchanged".
+    in_expected = [c for c in numeric_cols if c in expected.columns]
+    in_actual = [c for c in numeric_cols if c in actual.columns]
+    assert in_expected == in_actual, (
+        f"{label}: numeric column set differs — only in golden {sorted(set(in_expected) - set(in_actual))}, "
+        f"only in output {sorted(set(in_actual) - set(in_expected))}"
+    )
+    for col in in_expected:
         a = actual[col].values.astype(np.float64)
         e = expected[col].values.astype(np.float64)
         # Handle NaN equality

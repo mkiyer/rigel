@@ -6,7 +6,8 @@ registers it in ``sys.modules`` under its stem BEFORE executing it (a dataclass 
 resolves its own module through ``sys.modules`` at class-creation time), and returns the cached module on
 every later call, so two instruments loading the same sibling share one copy of it. This is a helper, not
 an instrument: it answers no question and has no row in the instrument table. It also holds
-``set_field``, the one ``SECTION.FIELD=VALUE`` parser behind every instrument's ``--set``.
+``set_field``, the one ``SECTION.FIELD=VALUE`` parser behind every instrument's ``--set``, and the panel's
+default paths, the six override fields and the two stratum readers the oracle instruments share.
 
 Usage::
 
@@ -23,6 +24,39 @@ import typing
 from pathlib import Path
 
 DESIGN = Path(__file__).resolve().parent
+
+
+#: The panel every instrument reads by default, and its index — one spelling, here, for every instrument.
+RUNS = Path.home() / "Downloads" / "rigel_runs"
+DEFAULT_SUITE = RUNS / "suite" / "ladder"
+DEFAULT_INDEX = RUNS / "suite" / "rigel_index"
+
+#: The mass arrays ``OracleTruth.override_masses`` replaces. Named here so the ``noop`` gate can
+#: re-inject exactly this set from the SHIPPED result and demand byte-identity — an override applied
+#: to a field nothing reads is an override that never ran (TRAPS: an-ablation-that-never-ran).
+OVERRIDE_FIELDS = (
+    "count_gdna_region",
+    "count_rna_region",
+    "count_gdna_boundary",
+    "count_rna_boundary",
+    "count_rna_spliced_boundary",
+    "count_rna_sj",
+)
+
+
+def stratum(cond: str) -> tuple[str, str]:
+    """The panel's two binary axes."""
+    return (
+        "stranded" if "ss_0.99" in cond else "unstranded",
+        "capture ON" if "capture_on" in cond else "capture OFF",
+    )
+
+
+def is_zero_gdna(cond: str) -> bool:
+    """``g00`` — the owner-required ZERO-gDNA control. Truth is exactly 0, so every gDNA fragment in
+    the prior there is a false positive with nothing to cancel it, and a relative change is unbounded.
+    Reported on its own row, never inside ALL."""
+    return "_g00_" in cond
 
 
 def sibling(name: str):
@@ -53,9 +87,16 @@ def set_field(cfg, spec: str):
     if field_name not in {f.name for f in dataclasses.fields(section)}:
         raise SystemExit(f"⛔ --set: {section_name} has no field {field_name!r}")
     hint = typing.get_type_hints(type(section))[field_name]
+    # A ``Literal[...]`` field admits exactly its listed values, by membership: its "args" are the values
+    # themselves, not callables, so the kind-based coercion below cannot apply to it (it once raised on
+    # every ``em.mode=map`` and ``em.warm_start=...``, leaving no instrument able to run a MAP arm).
+    literal = typing.get_origin(hint) is typing.Literal
     kinds = [t for t in (typing.get_args(hint) or (hint,)) if t is not type(None)]
     try:
-        if len(kinds) < len(typing.get_args(hint) or (hint,)) and raw.lower() == "none":
+        if literal:
+            allowed = {str(v): v for v in typing.get_args(hint)}
+            value = allowed[raw]
+        elif len(kinds) < len(typing.get_args(hint) or (hint,)) and raw.lower() == "none":
             value = None
         elif bool in kinds:
             words = {"true": True, "false": False, "1": True, "0": False, "yes": True, "no": False}

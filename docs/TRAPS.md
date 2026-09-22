@@ -20,17 +20,17 @@ robust rather than what is likely.
 
 - **A. Validation and gates** — `self-checking-validator` · `perturb-every-gate` · `a-field-driven-gate-is-atomic` · `waive-with-a-measurement` · `a-docstring-that-misdescribes-the-graph` · `a-flat-pile-is-not-a-knot` · `the-rename-that-corrupted-a-diagram` · `a-constant-parked-a-value-off-a-knife-edge` · `a-gate-that-restates-the-implementation` · `a-gate-that-already-passed` · `right-conditional-wrong-marginal` · `byte-identity-gate` · `the-deliverable-is-not-reproducible-by-default` · `a-clip-hides-a-scale-error` · `an-ablation-that-never-ran` · `a-green-suite-hid-five-dead-instruments` · `compatibility-is-geometry-not-composition` · `a-zero-count-is-a-measurement` · `a-ratio-cannot-carry-zero` · `the-divergence-was-a-barrier` · `honesty-metrics-reward-ignorance` · `predicate-contradicts-its-docstring` · `a-test-that-redefines` · `a-gates-power-is-its-invariant-set` · `a-gate-that-reconstructs` · `off-grid-message-mode` · `a-comment-quoted-as-a-finding` · `the-intermediate-is-not-the-deliverable` · `could-the-arm-have-fired` · `an-oracle-column-that-omits-a-population` · `prove-the-substrate` · `can-the-benchmark-resolve-it` · `toys-rank-hotspots-backwards` · `an-identity-with-a-qualifier`
 
-- **B. Measurement and inference** — `measure-the-ceiling-first` · `a-broad-population-carries-no-prior` · `attribution-must-survive-a-shuffle` · `score-against-truth` · `zero-target-guards-are-one-sided` · `hard-labels-miss-soft-change` · `never-pool-the-strata` · `a-threshold-on-a-fitted-residue` · `excluding-a-population-hides-it` · `name-the-observable-per-site` · `starved-is-not-depleted` · `the-substrate-knob-fought-back` · `key-on-a-realised-quantity` · `price-the-halves-separately` · `panel-before-src` · `admitting-an-object-costs` · `substitution-understates-a-source` · `a-symptom-is-not-a-second-defect` · `a-locked-object-is-not-a-control` · `draining-breaks-the-oracle` · `an-equal-length-panel-defeats-the-lift` · `a-length-gap-bypasses-calibration` · `weight-it-like-the-consumer` · `a-support-ceiling-is-the-clamp` · `log-variance-is-not-linear` · `re-record-the-baseline` · `a-profile-share-is-a-ranking` · `a-truth-table-of-aggregates` · `a-single-level-panel-cannot-see-a-constant` · `score-the-consumers-own-count` · `the-floor-must-reproduce-the-selection` · `judge-a-ruler-by-its-within-gene-spread`
+- **B. Measurement and inference** — `measure-the-ceiling-first` · `a-broad-population-carries-no-prior` · `attribution-must-survive-a-shuffle` · `score-against-truth` · `zero-target-guards-are-one-sided` · `hard-labels-miss-soft-change` · `never-pool-the-strata` · `a-threshold-on-a-fitted-residue` · `excluding-a-population-hides-it` · `name-the-observable-per-site` · `starved-is-not-depleted` · `the-substrate-knob-fought-back` · `key-on-a-realised-quantity` · `price-the-halves-separately` · `panel-before-src` · `admitting-an-object-costs` · `substitution-understates-a-source` · `a-symptom-is-not-a-second-defect` · `a-locked-object-is-not-a-control` · `draining-breaks-the-oracle` · `an-equal-length-panel-defeats-the-lift` · `a-length-gap-bypasses-calibration` · `weight-it-like-the-consumer` · `a-support-ceiling-is-the-clamp` · `log-variance-is-not-linear` · `re-record-the-baseline` · `a-profile-share-is-a-ranking` · `a-truth-table-of-aggregates` · `a-single-level-panel-cannot-see-a-constant` · `score-the-consumers-own-count` · `the-floor-must-reproduce-the-selection` · `judge-a-ruler-by-its-within-gene-spread` · `a-per-base-truth-is-not-a-probed-fraction`
 
 - **C. Pools, selections and divisors** — `a-cancellation-is-conditional-on-its-support` · `a-better-estimator-inside-a-weak-consumer-moves-nothing` · `a-pooled-rate-cannot-see-a-short-object-factor` · `two-estimators-of-one-rate-weight-the-field-differently` · `state-the-population-rule-do-not-inherit-it-from-a-table` · `two-divisors-opposite-sign` · `frame-free-is-not-assumption-free` · `a-purity-filter-is-a-length-filter` · `pure-and-length-censored` · `divide-by-a-probability` · `opposite-tilts-must-not-pool` · `a-mean-of-ratios-inherits-the-partition` · `a-trap-names-the-defect-not-the-repair` · `a-stale-gate-accuses-the-newest-change` · `an-upper-bound-is-not-an-estimate` · `a-gate-on-the-helper-is-not-a-gate-on-the-caller` · `fractional-mass-is-the-problem` · `conservation-misses-mis-attribution` · `a-guard-outlives-its-divisor` · `a-fold-grows-a-heuristic` · `a-ratio-needs-a-population-that-can-supply-its-numerator`
 
 - **D. Estimation and solver design** — `purity-is-a-property-of-the-annotation` · `pair-count-weighting-lets-one-seed-decide` · `we-keep-re-deriving-message-passing` · `one-hop-lifted-out-is-still-the-relay` · `a-variance-cannot-fix-a-bias` · `two-gaussians-one-latent` · `variance-fitted-on-the-belief` · `a-message-from-the-destinations-belief` · `a-total-density-ratio` · `substitute-the-definitions-first` · `a-licence-with-no-floor` · `a-multiplication-gated-by-a-trace` · `all-small-singly-large-jointly` · `recompute-from-the-oracle` · `a-cancelling-defect-pair` · `zero-the-precision-with-the-value` · `no-prior-means-haldane` · `prefer-shares-to-differences` · `an-all-zero-factor-is-inert` · `density-below-one-fragment-length` · `identical-paralogs-are-bimodal` · `a-mean-hits-the-mass-weighted-centre-by-luck` · `a-clamp-at-the-closed-end-escapes-the-window` · `the-deconvolution-is-as-good-as-the-density-it-is-handed` · `deriving-one-coordinate-propagates-its-error` · `interpolate-on-the-axis-where-the-lattice-is-uniform` · `read-the-whole-failure-list` · `a-priors-curvature-is-not-the-datas-information` · `a-refutability-test-needs-the-refuting-channel-in-the-fixture` · `a-strength-is-a-nat-a-prior-weight-is-a-count` · `a-four-decimal-print-is-not-a-zero` · `a-constant-in-exact-arithmetic-is-not-constant-in-float64` · `a-toy-and-a-panel-can-disagree-in-rank` · `a-rescale-that-reads-the-source-belief-is-unbounded` · `a-face-total-is-not-a-total-without-its-flux` · `an-imputation-must-cost-something-every-hop` · `a-floored-knob-is-not-the-bandwidth` · `a-mode-count-is-not-a-well-posed-quantity` · `measure-a-default-flip-before-you-write-it`
 
-- **E. Structure, indexes and plumbing** — `one-reference-hides-refid-bugs` · `annotated-is-not-genomic` · `an-sj-is-not-a-gap` · `deposit-at-the-sj` · `splicing-makes-the-graph-cyclic` · `nrna-does-not-mean-synthetic` · `credit-exactly-one-sj` · `strand-completes-the-sj-key` · `a-hash-that-misses-its-artifact` · `integer-channels-reproduce` · `worktrees-run-the-wrong-code` · `checkout-deletes-uncommitted-work` · `a-rebuild-can-silently-no-op` · `two-masks-one-name` · `two-docstrings-one-quantity` · `a-transcript-predicate-must-not-silently-drop-a-molecule` · `an-object-class-does-not-see-a-terminus`
+- **E. Structure, indexes and plumbing** — `one-reference-hides-refid-bugs` · `annotated-is-not-genomic` · `an-sj-is-not-a-gap` · `deposit-at-the-sj` · `splicing-makes-the-graph-cyclic` · `nrna-does-not-mean-synthetic` · `credit-exactly-one-sj` · `strand-completes-the-sj-key` · `a-hash-that-misses-its-artifact` · `integer-channels-reproduce` · `worktrees-run-the-wrong-code` · `checkout-deletes-uncommitted-work` · `a-rebuild-can-silently-no-op` · `two-masks-one-name` · `two-docstrings-one-quantity` · `a-transcript-predicate-must-not-silently-drop-a-molecule` · `an-object-class-does-not-see-a-terminus` · `a-kernel-edit-moves-ulps-under-fma-contraction`
 
 - **F. Domain facts that read like defects** — `specificity-and-sense-are-complements` · `strand-measures-the-tilt` · `a-linear-likelihood-emits-a-sign` · `a-pooled-conversion-applied-per-component` · `capture-inverts-the-counted-side` · `equal-lengths-carry-no-composition` · `capture-is-1000x-on-exons` · `capture-selects-for-length` · `on-target-by-start-is-geometry` · `eff-lengths-do-not-cancel-at-an-end` · `configured-lengths-are-not-realised` · `mature-rna-never-crosses-a-boundary` · `a-boundary-with-rna-is-not-an-sj`
 
-- **G. Process** — `no-magic-numbers` · `one-thing-varied` · `a-harness-on-the-parent-class-dies-when-the-parent-gains-the-mechanism` · `converge-and-delete` · `the-source-does-not-cite-docs` · `real-data-is-a-test-input` · `running-an-arm-is-a-fresh-process` · `shard-an-arm-sweep-by-condition` · `no-enumeration-without-a-census`
+- **G. Process** — `no-magic-numbers` · `one-thing-varied` · `a-harness-on-the-parent-class-dies-when-the-parent-gains-the-mechanism` · `converge-and-delete` · `the-source-does-not-cite-docs` · `real-data-is-a-test-input` · `running-an-arm-is-a-fresh-process` · `shard-an-arm-sweep-by-condition` · `no-enumeration-without-a-census` · `a-harness-that-imports-an-instrument-runs-that-repo`
 
 ---
 
@@ -429,6 +429,15 @@ ruler, an effective length — by the within-gene spread of its error, and price
 `quant_accuracy.py --arm oracle_ruler`, never by its per-transcript accuracy alone
 (`ISSUES: ruler-witness-geometry-on-transcript-panels`).
 
+**a-per-base-truth-is-not-a-probed-fraction. Under the simulator's capture rule — a placement binds its best
+single probe part, never the sum — a region's yield is not its probed fraction, and three "truths" gave three
+answers: the probed fraction said partially probed exons read 1.6–2.1× high, the contained frame 1.11–1.14×, the
+per-base covering mean 1.12–1.22×. The arbiter is the yield the reads were drawn with, per hypothesis, unanchored
+(`ruler_vs_truth.py --scale`); a per-piece truth is only a decomposition of it, and a decomposition is exact for
+the template that contains every base a placement covers and short for one that does not.** The calibrated-
+likelihood campaign spent a turn on the probed fraction before the covering truth showed the spans and footprints
+explained to 0.995 and the isoforms to 0.858 by the same numbers.
+
 ## C. Pools, selections and divisors
 
 **a-cancellation-is-conditional-on-its-support. A reciprocal-opportunity deposit cancels its opportunity
@@ -647,7 +656,7 @@ destination held RNA fragments where the source held none.
 **a-cancelling-defect-pair. Fixing one of two errors that cancel is worse than fixing neither.** Correcting
 one hop alone more than doubled a toy's evidence-free exon error while the rung it targeted improved.
 Price such a fix in the arm that also removes the other defect; a cancelling pair is one experiment, not
-two.
+two. The calibrated-likelihood campaign's pair (2026-09-21): the pseudocount prior's 1.29 bias toward gDNA and the gDNA component's length rule 14–16 % off the transcripts' — removing either alone made the tool worse, measured both ways.
 
 **zero-the-precision-with-the-value. A refused claim must lose its precision in the same statement that
 zeroes its value.** A value zeroed at one line and a precision handed back at a later one is the confident
@@ -884,6 +893,14 @@ at a splice site it enters by the sj and the composition does. A hop type is `ob
 sj+term}`, read off `RegionStatics.boundary_flags`; the classes stay right for ψ's reference, the hop
 needs the second bit. *Sibling:* `TRAPS: two-masks-one-name`.
 
+**a-kernel-edit-moves-ulps-under-fma-contraction. `_em_impl` is built with `-ffp-contract=fast`, so an edit
+that only adds an unused field and a loop still moves fused-multiply-add contraction elsewhere in the file, and
+the EM's fixed-point iteration amplifies the ulps to 0.04 transcript points; the E-step's task partition also
+depends on the thread count. Compare arms on ONE binary at ONE thread count, take the same binary's own shipped
+arm as the baseline, and read a cross-tree difference below 0.05 points as build noise.** A worktree rebuilt with
+main's own build backend still differed from main on 26 fields at `g05 ss.99 ON`; the same-tree reseed floor under
+fractional assignment is 0.000–0.007 points. *Sibling:* `TRAPS: worktrees-run-the-wrong-code`.
+
 ## F. Domain facts that read like defects
 
 **specificity-and-sense-are-complements. Strand specificity is two different quantities and they are
@@ -997,3 +1014,10 @@ instrument writes.
 **no-enumeration-without-a-census. Do not re-propose path or cell enumeration without a memory census.**
 Possible unspliced paths are about a million regions times a few reachable ends at ~100 B each, several
 hundred MB, plus spliced paths. It was killed by memory, and no consumer needs it.
+
+**a-harness-that-imports-an-instrument-runs-that-repo. An instrument under `scripts/design/` puts its own
+repository's `src/` first on `sys.path`, so a harness that imports it from the main checkout runs main's package
+whatever the worktree shim says — and main's checkout holds no compiled modules, so it fails at the first native
+import, or worse, runs the wrong code silently. A harness that must run against a worktree takes the scripts
+directory as a parameter and imports the WORKTREE's copy of the instrument.** Two prototype runs of the
+calibrated-likelihood campaign died this way before `RIGEL_SCRIPTS` existed. *Sibling:* `TRAPS: worktrees-run-the-wrong-code`.

@@ -28,8 +28,8 @@ DESIGN = ROOT / "scripts" / "design"
 #: instrument's own output rather than adjusting it here: a self-test that quietly lost a case reads
 #: exactly like one that never had it.
 INSTRUMENTS = [
-    ("calibration_vs_oracle", 41, "{n}/{n} self-test gates fired"),
-    ("ruler_vs_truth", 20, "{n}/{n} self-test gates fired"),
+    ("calibration_vs_oracle", 43, "{n}/{n} self-test gates fired"),
+    ("ruler_vs_truth", 30, "{n}/{n} self-test gates fired"),
 ]
 
 

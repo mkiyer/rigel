@@ -47,11 +47,10 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 
-from _shared import set_field, sibling  # noqa: E402
+from _shared import DEFAULT_INDEX, DEFAULT_SUITE, OVERRIDE_FIELDS, is_zero_gdna, set_field, sibling, stratum  # noqa: E402
 
 
 P0 = sibling("pass0_vs_oracle.py")
-PVO = sibling("prior_vs_oracle.py")
 
 from rigel.calibration import calibrate  # noqa: E402
 from rigel.calibration.capture_eff_length import transcript_capture_eff_lengths  # noqa: E402
@@ -68,10 +67,7 @@ from calibration._oracle import ORIGINS, OracleTruth  # noqa: E402
 #: The six deconvolved fields an oracle may substitute are ``prior_vs_oracle``'s list, not a second
 #: copy: a set that drifted between two instruments would make their noop gates test different things
 #: while both printed the word "identical".
-OVERRIDE_FIELDS = PVO.OVERRIDE_FIELDS
 
-DEFAULT_SUITE = PVO.DEFAULT_SUITE
-DEFAULT_INDEX = PVO.DEFAULT_INDEX
 
 #: The two axes ``CalibrationResult`` deconvolves; the sj axis is certified RNA and is never split.
 AXES = P0.AXES
@@ -308,7 +304,7 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
 
     row = {
         "condition": condition,
-        "stratum": list(PVO.stratum(condition)),
+        "stratum": list(stratum(condition)),
         "gdna_spliced_leak": oracle.gdna_spliced_leak,
         "lift_n_ambiguous": oracle.n_ambiguous,
         "noop_differences": bad,
@@ -377,12 +373,12 @@ _SCOPE = {
 #: and not others. ``None`` is a rule boundary.
 _SELECTIONS = (
     *(
-        (f"{' x '.join(st)}  [{_SCOPE[st]}]", (lambda c, st=st: PVO.stratum(c) == tuple(st)
-                                               and not PVO.is_zero_gdna(c)))
+        (f"{' x '.join(st)}  [{_SCOPE[st]}]", (lambda c, st=st: stratum(c) == tuple(st)
+                                               and not is_zero_gdna(c)))
         for st in _SCOPE
     ),
     (None, None),
-    ("⛔ g00 ZERO-gDNA control (all strata)", PVO.is_zero_gdna),
+    ("⛔ g00 ZERO-gDNA control (all strata)", is_zero_gdna),
 )
 
 
@@ -878,6 +874,12 @@ def self_test() -> int:
     check("--set refuses an unknown section", refuses("nowhere.sweep_block_slots=1"))
     check("--set refuses a value the field's type cannot take",
           refuses("calibration.sweep_block_slots=sixty"))
+    # a ``Literal`` field is filled by membership — the EM's mode and warm start are such fields, and a
+    # parser that coerced through the literal's own values refused every MAP arm ever asked for
+    check("--set fills a Literal field by membership",
+          set_field(base, "em.mode=map").em.mode == "map"
+          and set_field(base, "em.warm_start=uniform").em.warm_start == "uniform")
+    check("--set refuses a value outside a Literal field's set", refuses("em.mode=maximum"))
 
     width = max(len(n) for n, _ in checks)
     for name, ok in checks:

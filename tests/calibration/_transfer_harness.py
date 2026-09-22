@@ -12,10 +12,8 @@ nothing here asserts."""
 from __future__ import annotations
 
 import dataclasses
-import importlib.util
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
@@ -427,13 +425,9 @@ def capture_sweep_inputs(tmp_path_factory):
     """ONE real `solve_chain` call captured from a calibrate run on the toy — the backbone-parity
     pattern: every gate re-runs the sweep with a different policy on byte-identical inputs. Each gate
     file wraps this in its own module-scoped ``sweep_inputs`` fixture."""
-    spec = importlib.util.spec_from_file_location(
-        "tpo_for_transfer_policy", Path(__file__).parent / "test_prior_vs_oracle.py"
-    )
-    m = importlib.util.module_from_spec(spec)
-    sys.modules["tpo_for_transfer_policy"] = m
-    spec.loader.exec_module(m)
-    toy = m.toy.__wrapped__(tmp_path_factory)
+    from _prior_toy import build_toy
+
+    toy = build_toy(tmp_path_factory)
 
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index

@@ -37,10 +37,9 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 
-from _shared import sibling  # noqa: E402
+from _shared import DEFAULT_INDEX, DEFAULT_SUITE  # noqa: E402
 
 
-PVO = sibling("prior_vs_oracle.py")
 
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain  # noqa: E402
@@ -63,8 +62,6 @@ from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
 from calibration._oracle import ORIGINS, RNA_STRAND_ORIGINS, OracleTruth, lift_drain_parts  # noqa: E402
 
-DEFAULT_SUITE = PVO.DEFAULT_SUITE
-DEFAULT_INDEX = PVO.DEFAULT_INDEX
 _EPS = 1.0e-12
 #: |z| above which a slot is flagged under gdna-field-uniformity. 4 sigma two-sided is ~6e-5 expected
 #: false flags per slot; the gate is on the flag rate and the class ratio, not on any single slot.

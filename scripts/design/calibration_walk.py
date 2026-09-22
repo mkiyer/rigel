@@ -39,18 +39,15 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 
-from _shared import sibling  # noqa: E402
+from _shared import DEFAULT_INDEX, DEFAULT_SUITE  # noqa: E402
 
 
-PVO = sibling("prior_vs_oracle.py")
 
 from rigel.calibration import calibrate  # noqa: E402
 from rigel.config import CalibrationConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 
-DEFAULT_SUITE = PVO.DEFAULT_SUITE
-DEFAULT_INDEX = PVO.DEFAULT_INDEX
 
 
 def run_arm(payload, kw, *, refits: int | None, messages: bool) -> dict:
