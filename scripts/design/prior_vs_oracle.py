@@ -589,27 +589,10 @@ def _oracle_parts(bam, index, scan, work_dir, tag, cache_root):
 
 def _calibrate_and_prior(payload, strand_model, buffer, stats, index, ra, pipeline_config):
     """calibrate → score → ``(calibration, fl, multi_loci, LocusPriors)`` on ONE payload."""
-    from rigel.calibration.fl import build_fl_models
-    from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
-    from rigel.calibration.sj_opportunity import crossing_probability_from_index
-    from rigel.calibration.splice_graph import (
-        build_boundary_flags_array,
-        build_sj_geometry_arrays,
-    )
+    from rigel.calibration.splice_graph import build_boundary_flags_array, build_sj_geometry_arrays
+    from rigel.pipeline import library_fl_models
 
-    from rigel.calibration.gdna_density import region_lengths_from_partition
-    from rigel.calibration.splice_graph import build_region_partition_arrays
-
-    max_size = int(payload.max_length)
-    _fb, _fo, _frt = build_region_partition_arrays(index)
-    fl = build_fl_models(
-        payload,
-        sj_opportunity=crossing_probability_from_index(index, max_size),
-        gdna_opportunity=gdna_opportunity_from_index(index, max_size),
-        # production parity: the region args enable the two-pool contrast, exactly as pipeline.py
-        region_lengths=region_lengths_from_partition(_fb, _fo, len(_frt)),
-        region_types=_frt,
-    )
+    fl = library_fl_models(payload, index)
     cal = calibrate(
         payload=payload,
         region_arrays=ra,

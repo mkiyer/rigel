@@ -18,7 +18,7 @@ input                        origin                                      cached?
 ``region_arrays``            ``RegionArrays.from_index``                 no
 ``boundary_flags``           ``build_boundary_flags_array``              no
 ``sj``                       ``build_sj_geometry_arrays``                no
-``gdna_fl_pmf``/``rna_fl_pmf``  ``build_fl_models(payload)``             no — derived
+``gdna_fl_pmf``/``rna_fl_pmf``  ``pipeline.library_fl_models``             no — derived
 ``config``                   the thing you are varying                   no
 ``injected_priors``          fitted BY ``calibrate``                     no
 ===========================  ==========================================  ==========
@@ -584,27 +584,10 @@ def calibration_inputs(
     needs to put cached ORACLE PARTITIONS into the same frame; it stays EMPTY when the side buffer
     held nothing, in which case pass one already IS the drained frame.
 
-    The fl models are built exactly as production builds them — on the DRAINED payload, with
-    ``region_lengths``/``region_types`` supplied so the two-pool contrast runs (omitting them is a
-    supported fl fallback, but it is not what ships, and an instrument must not measure a different
-    length model than production's).
-
-    Every fragment-length histogram comes from the PAYLOAD — the five length pools and the unconditional
-    anchor they are shrunk toward. One quantity, one source, one
-    frame: the scanner's spliced histogram is transcript-space and requires a UNIQUE transcript, while
-    the accumulator's `RNA_SPLICED` pool is a structural rule over a larger population; and the anchor
-    is `deposited_lengths`, binned at the same `L`.
-
-    The one thing that does NOT come from the payload is the RNA pool's de-tilt: "used an annotated
-    sj" is a length-dependent selection, and how much so is a fact about the ANNOTATION.
+    The fl models are production's own (`pipeline.library_fl_models`), built on the DRAINED payload.
     """
-    from .calibration.fl import build_fl_models
-    from .calibration.gdna_density import region_lengths_from_partition
-    from .calibration.gdna_opportunity import gdna_opportunity_from_index
-    from .calibration.sj_opportunity import crossing_probability_from_index
-    from .calibration.splice_graph import build_region_partition_arrays
     from .config import PipelineConfig
-    from .pipeline import _drain_side_buffer
+    from .pipeline import _drain_side_buffer, library_fl_models
 
     if drain_seed is None:
         drain_seed = PipelineConfig().second_pass_seed
@@ -612,15 +595,7 @@ def calibration_inputs(
     payload = _drain_side_buffer(
         cache.payload, index, cache.strand_model, seed=int(drain_seed), _lift=lift
     )
-
-    bounds, offsets, region_types = build_region_partition_arrays(index)
-    fl_models = build_fl_models(
-        payload,
-        sj_opportunity=crossing_probability_from_index(index, int(payload.max_length)),
-        gdna_opportunity=gdna_opportunity_from_index(index, int(payload.max_length)),
-        region_lengths=region_lengths_from_partition(bounds, offsets, len(region_types)),
-        region_types=region_types,
-    )
+    fl_models = library_fl_models(payload, index)
     return {
         "payload": payload,
         "strand_model": cache.strand_model,

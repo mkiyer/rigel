@@ -382,33 +382,3 @@ def test_build_fl_models_WITHOUT_the_divisor_is_unchanged():
         "the sj divisor must not touch the gDNA pool",
     )
     assert tilted.n_rna == pytest.approx(plain.n_rna), "the EB evidence weight moved"
-
-
-def test_EVERY_production_caller_of_build_fl_models_passes_the_divisor():
-    """The divisor is optional so tests without an annotation can still build a model — which means
-    forgetting it in production is silent, and the pool goes back to being tilted with nothing to
-    show for it. So the call sites themselves are pinned.
-
-    Source-level on purpose: a runtime check would need a full pipeline run per call site, and the
-    failure this guards against is somebody adding a fifth caller.
-    """
-    import ast
-    import inspect
-
-    from rigel import pipeline, scan_cache
-
-    for module in (pipeline, scan_cache):
-        tree = ast.parse(inspect.getsource(module))
-        calls = [
-            region
-            for region in ast.walk(tree)
-            if isinstance(region, ast.Call)
-            and isinstance(region.func, ast.Name)
-            and region.func.id == "build_fl_models"
-        ]
-        assert calls, f"{module.__name__} no longer calls build_fl_models — retarget this test"
-        for call in calls:
-            assert any(k.arg == "sj_opportunity" for k in call.keywords), (
-                f"{module.__name__}:{call.lineno} builds FL models without the sj divisor, "
-                "so the RNA pool stays tilted long"
-            )

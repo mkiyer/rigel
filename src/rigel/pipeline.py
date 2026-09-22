@@ -346,6 +346,37 @@ def scan_and_buffer(
     return stats, strand_models, buffer, calibration_payload
 
 
+def library_fl_models(payload, index: TranscriptIndex) -> "FLModels":
+    """The fragment-length models from one payload, exactly as production builds them.
+
+    All three histograms come from the PAYLOAD — one frame, one definition of length. A fragment
+    enters a pool when exactly one hypothesis survived, so its ``L`` is not in doubt. The RNA pool is
+    de-tilted by its own sj opportunity ("used an annotated sj" is a length-dependent selection), and
+    the gDNA pools — none of them pure — are deconvolved by the two-pool contrast, which needs the
+    partition the scanner deposits into (`calibration.fl`). Both components are smooth-EB shrunk toward
+    the unconditional anchor.
+
+    The one home for this call: the second pass scores on pass one's payload, calibration fits on the
+    drained one, and an instrument that measured a different length model than production's would be
+    measuring a tool that does not ship.
+    """
+    from .calibration.fl import build_fl_models
+    from .calibration.gdna_density import region_lengths_from_partition
+    from .calibration.gdna_opportunity import gdna_opportunity_from_index
+    from .calibration.sj_opportunity import crossing_probability_from_index
+    from .calibration.splice_graph import build_region_partition_arrays
+
+    bounds, offsets, region_types = build_region_partition_arrays(index)
+    max_length = int(payload.max_length)
+    return build_fl_models(
+        payload,
+        sj_opportunity=crossing_probability_from_index(index, max_length),
+        gdna_opportunity=gdna_opportunity_from_index(index, max_length),
+        region_lengths=region_lengths_from_partition(bounds, offsets, len(region_types)),
+        region_types=region_types,
+    )
+
+
 def _drain_side_buffer(
     payload, index: TranscriptIndex, strand_models, *, seed: int, _lift: dict | None = None
 ):
@@ -376,10 +407,6 @@ def _drain_side_buffer(
     leaves ``_lift`` UNTOUCHED — the early return below is the "nothing was drained" signal on this
     path too.
     """
-    from .calibration.fl import build_fl_models
-    from .calibration.gdna_density import region_lengths_from_partition
-    from .calibration.gdna_opportunity import gdna_opportunity_from_index
-    from .calibration.sj_opportunity import crossing_probability_from_index
     from .calibration.splice_graph import build_sj_arrays, build_region_partition_arrays
     from .second_pass import choose_hypotheses, drain, score_held_fragments
 
@@ -391,26 +418,15 @@ def _drain_side_buffer(
         return payload
 
     start = time.perf_counter()
-    _region_bounds, _offsets, region_types = build_region_partition_arrays(index)
+    _, _, region_types = build_region_partition_arrays(index)
     sj = build_sj_arrays(index)
     scores = score_held_fragments(
         payload,
-        # Pass one's length models, de-tilted the way calibration's are (`build_fl_models`): the
-        # scorer weighs a candidate length by `f(L)`, so the raw sj-tilted RNA pool would make it
-        # prefer the longer hypothesis for the same reason that pool is long. Calibration refits on
-        # the drained tally — fit once, score once, drain once (the docstring above).
-        fl_models=build_fl_models(
-            payload,
-            sj_opportunity=crossing_probability_from_index(index, int(payload.max_length)),
-            gdna_opportunity=gdna_opportunity_from_index(index, int(payload.max_length)),
-            # The gDNA pools are NOT pure, so the length model deconvolves them (`calibration.fl`).
-            # `_region_bounds`/`_offsets`/`region_types` are the partition the scanner itself deposits
-            # into, already built above — the same frame as the banks being indexed.
-            region_lengths=region_lengths_from_partition(
-                _region_bounds, _offsets, len(region_types)
-            ),
-            region_types=region_types,
-        ),
+        # Pass one's length models, de-tilted the way calibration's are: the scorer weighs a candidate
+        # length by `f(L)`, so the raw sj-tilted RNA pool would make it prefer the longer hypothesis for
+        # the same reason that pool is long. Calibration refits on the drained tally — fit once, score
+        # once, drain once (the docstring above).
+        fl_models=library_fl_models(payload, index),
         # `P(align_strand agrees | RNA)`. On an R1-antisense (dUTP) library it is near 0, so
         # DISAGREEMENT is the likely case.
         rna_sense_frac=strand_models.p_r1_sense,
@@ -929,38 +945,9 @@ def run_pipeline(
     # loop and the graph is not a polytree.
     sj = build_sj_geometry_arrays(index)
 
-    # The two COMPONENT fragment-length models the calibrator's effective lengths need: gDNA from the
-    # four structural gDNA pools, deconvolved by the two-pool contrast (no pool is pure), RNA from
-    # fragments that used an annotated sj with the splice OBSERVED. Both are smooth-EB shrunk toward
-    # the unconditional global FL.
-    #
-    # All three come from the PAYLOAD — one object, one frame, one definition of length, the two
-    # pools and the anchor they are shrunk toward alike. A
-    # transcript-space histogram would need a UNIQUE transcript; the accumulator's pool is a
-    # structural rule over a larger population and is binned at the same L as everything else. A
-    # fragment enters a pool when exactly ONE hypothesis survived, so its `L` is not in doubt however
-    # it was arrived at — determinacy, not provenance.
-    #
-    # The RNA pool is de-tilted by its own sj opportunity: "used an annotated sj" is a
-    # length-dependent selection, so the raw pool is measurably longer than the library.
-    from .calibration.fl import build_fl_models
-    from .calibration.gdna_density import region_lengths_from_partition
-    from .calibration.gdna_opportunity import gdna_opportunity_from_index
-    from .calibration.sj_opportunity import crossing_probability_from_index
-    from .calibration.splice_graph import build_region_partition_arrays
-
-    # The partition the scanner deposits into, so the per-region banks and the lengths that divide
-    # them are addressed in one frame (`calibration.fl` derives what the deconvolution needs it for).
-    _fl_bounds, _fl_offsets, _fl_region_types = build_region_partition_arrays(index)
-    fl_models = build_fl_models(
-        calibration_payload,
-        sj_opportunity=crossing_probability_from_index(index, int(calibration_payload.max_length)),
-        gdna_opportunity=gdna_opportunity_from_index(index, int(calibration_payload.max_length)),
-        region_lengths=region_lengths_from_partition(
-            _fl_bounds, _fl_offsets, len(_fl_region_types)
-        ),
-        region_types=_fl_region_types,
-    )
+    # The two COMPONENT fragment-length models the calibrator's effective lengths need, refit on the
+    # drained tally.
+    fl_models = library_fl_models(calibration_payload, index)
     gdna_fl_pmf = fl_models.gdna_pmf
     _bins = np.arange(gdna_fl_pmf.size, dtype=np.float64)
     logger.info(

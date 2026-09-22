@@ -268,32 +268,36 @@ class TestWiredIntoTheModel:
         # The RNA pool is untouched by the gDNA divisor — the two selections are different objects.
         assert plain.rna_pmf == pytest.approx(detilted.rna_pmf)
 
-    def test_EVERY_production_caller_of_build_fl_models_passes_THE_GDNA_DIVISOR(self):
-        """Same gate as the sj divisor's, for the same reason: optional means silently absent.
+    def test_EVERY_production_caller_of_build_fl_models_passes_the_annotation_inputs(self):
+        """Every annotation input to `build_fl_models` is optional, so tests without an index can build a
+        model — which makes forgetting one in production silent. Without ``sj_opportunity`` the RNA pool
+        stays tilted long; without ``gdna_opportunity`` the gDNA pool falls back to the contained pair and
+        reads ~15 % short under capture; without ``region_lengths`` / ``region_types`` the two-pool
+        contrast never runs. So every call site in the package is pinned.
 
-        Source-level on purpose — a runtime check would need a full pipeline run per call site, and
-        the failure this guards against is somebody adding a fourth caller.
+        Source-level on purpose — a runtime check would need a full pipeline run per call site — and over
+        every module, so a new caller anywhere is checked without this test being retargeted.
         """
         import ast
-        import inspect
+        from pathlib import Path
 
-        from rigel import pipeline, scan_cache
+        import rigel
 
-        for module in (pipeline, scan_cache):
-            tree = ast.parse(inspect.getsource(module))
-            calls = [
-                region
-                for region in ast.walk(tree)
-                if isinstance(region, ast.Call)
-                and isinstance(region.func, ast.Name)
-                and region.func.id == "build_fl_models"
-            ]
-            assert calls, f"{module.__name__} no longer calls build_fl_models — retarget this test"
-            for call in calls:
-                assert any(k.arg == "gdna_opportunity" for k in call.keywords), (
-                    f"{module.__name__}:{call.lineno} builds FL models without the gDNA divisor, so "
-                    "the gDNA pool falls back to the contained pair and reads ~15 % short under capture"
-                )
+        required = {"sj_opportunity", "gdna_opportunity", "region_lengths", "region_types"}
+        package = Path(rigel.__file__).parent
+        calls = []
+        for path in sorted(package.rglob("*.py")):
+            for node in ast.walk(ast.parse(path.read_text())):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "build_fl_models"
+                ):
+                    calls.append((path.relative_to(package), node))
+        assert calls, "nothing in the package calls build_fl_models — retarget this test"
+        for where, call in calls:
+            missing = required - {k.arg for k in call.keywords}
+            assert not missing, f"{where}:{call.lineno} builds FL models without {sorted(missing)}"
 
 
 class TestFromTheIndex:
