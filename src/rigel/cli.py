@@ -185,10 +185,10 @@ def _build_pipeline_config(args: argparse.Namespace, seed: int) -> "PipelineConf
     return cfg
 
 
-#: summary.json schema version, which a consumer should read before parsing. Version 2 keeps the
-#: fragment-length histograms out of the JSON — they live in ``fragment_lengths.feather`` — and
-#: carries the splice and strand-contamination diagnostics.
-SUMMARY_SCHEMA_VERSION = 2
+#: summary.json schema version, which a consumer should read before parsing. The fragment-length
+#: histograms live in ``fragment_lengths.feather``, not the JSON; the JSON carries the splice and
+#: strand-contamination diagnostics; ``gdna_eff_len`` summarises the loci table's one gDNA length column.
+SUMMARY_SCHEMA_VERSION = 3
 
 
 #: ``fragment_lengths.feather``'s pure-pool categories, in ``FragmentPool`` order. Named here rather
@@ -516,7 +516,6 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         "calibration": cal_dict,
         "gdna_eff_len": {
             "em": _df_series_summary(loci_df, "gdna_eff_len_em"),
-            "per_bp": _df_series_summary(loci_df, "gdna_eff_len_per_bp"),
         },
         "fragment_length": fl_summary,
         "quantification": {

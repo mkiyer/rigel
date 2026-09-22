@@ -34,7 +34,7 @@ _HAS_VEGA = importlib.util.find_spec("vl_convert") is not None
 def _write_substrate(d: Path) -> Path:
     d.mkdir(parents=True, exist_ok=True)
     summary = {
-        "schema_version": 2,
+        "schema_version": 3,
         "rigel_version": "0.7.0",
         "timestamp": "2026-07-11 09:42",
         "input": {"bam_file": "/data/SampleX.bam", "index_dir": "/refs/gencode"},
@@ -164,7 +164,7 @@ def test_load_substrate_missing(tmp_path):
 def test_view_model_shape(tmp_path):
     d = _write_substrate(tmp_path / "run")
     sub = load_substrate(d)
-    assert sub.schema_version == 2
+    assert sub.schema_version == 3
     assert sub.sample_name == "SampleX"
     vm = build_view_model(sub)
 

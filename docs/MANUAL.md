@@ -356,7 +356,7 @@ Pass `--tsv` to also write `.tsv` mirrors, or convert afterward with
 | `gene_quant.feather` | Gene-level aggregation |
 | `nrna_quant.feather` | nRNA entity estimates |
 | `loci.feather` | Per-locus EM summary |
-| `summary.json` | Run-level QC manifest + calibration scalars (`schema_version` 2) |
+| `summary.json` | Run-level QC manifest + calibration scalars (`schema_version` 3) |
 | `fragment_lengths.feather` | Raw fragment-length histograms, tidy `(category, length, count)` |
 | `calibration_track.feather` | Per-region gDNA solution: `(ref, start, end, gdna_mass, rna_mass, gdna_density, gdna_frac)` |
 | `calibration_track.bedgraph` | Per-region gDNA density as a genome-browser track (IGV / UCSC) |
@@ -474,11 +474,7 @@ components (one per transcript row + one gDNA).
 | `gdna_prior_count` | Calibrated per-locus gDNA Dirichlet prior scalar |
 | `rna_prior_count` | Calibrated per-locus RNA Dirichlet prior scalar |
 | `enable_gdna` | `1` if the gDNA component is enabled for this locus |
-| `n_regions_touched` | Number of calibration regions overlapping the locus |
-| `multi_locus_region_mass` | Fragment mass in regions shared with other loci |
-| `partial_coverage_region_mass` | Fragment mass in partially covered regions |
 | `gdna_eff_len_em` | Exposure-adjusted EM effective length of the locus gDNA component |
-| `gdna_eff_len_per_bp` | `gdna_eff_len_em / locus_span_bp` diagnostic ratio |
 
 ### fragment_lengths.feather / fragment_lengths.tsv
 
@@ -515,7 +511,7 @@ the current version is **2**. Top-level keys:
 | `fragment_stats` | Total, genic, intergenic, and chimeric breakdowns; annotated/unannotated SJ counts; a `splice` sub-block with the per-fragment splice-type breakdown (`unspliced`, `spliced_annotated`, `spliced_unannotated`, `spliced_implicit`, `splice_artifact`) plus `sj_blacklisted`, and blacklist provenance `sj_blacklist_size` / `sj_blacklist_loaded` (so `splice_artifact: 0` reads as "detection off — no blacklist in the index" vs "detection on, none found") |
 | `strand_model` | Protocol (`R1-sense` / `R1-antisense`), strand specificity, `p_r1_sense`, training count, posterior variance, 95% CI, and a `diagnostics` sub-block comparing the all-exonic model to the spliced-only model (`contamination_gap` — a positive value flags unstranded gDNA contamination) |
 | `calibration` | Library-scalar calibration outputs (see below) |
-| `gdna_eff_len` | Summary of the per-locus gDNA effective-length series (`em`, `per_bp`) |
+| `gdna_eff_len` | Summary of the per-locus gDNA effective-length series (`em`) |
 | `fragment_length` | Per-category FL **summary statistics only** (`n_observations`, `mean`, `std`, `median`, `mode`, `max_size`, `overflow_count`, `overflow_fraction`) for `global`, `gdna`, `rna`, and each splice category. The raw per-bin histograms are in `fragment_lengths.feather` |
 | `quantification` | `n_transcripts`, `n_genes`, `n_loci`, assignment counts, and mRNA/nRNA/gDNA totals + fractions |
 

@@ -219,7 +219,6 @@ _LOCI_NUMERIC_COLS = [
     "rna_prior_count",
     "count_unambig",
     "gdna_eff_len_em",
-    "gdna_eff_len_per_bp",
 ]
 
 

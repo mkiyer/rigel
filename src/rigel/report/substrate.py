@@ -24,7 +24,7 @@ import pandas as pd
 
 #: summary.json schema this builder targets. Reports still build on other
 #: versions, but a mismatch is surfaced as a warning banner.
-EXPECTED_SCHEMA_VERSION = 2
+EXPECTED_SCHEMA_VERSION = 3
 
 
 class SubstrateError(Exception):

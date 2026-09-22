@@ -56,6 +56,9 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 8).
 
 ### Removed
 
+- Four `loci.feather` columns no code ever filled (`n_regions_touched`, `multi_locus_region_mass`,
+  `partial_coverage_region_mass`, `gdna_eff_len_per_bp`, always 0), and `summary.json`'s
+  `gdna_eff_len.per_bp`, which summarised them; `summary.json` is schema 3.
 - The fragment-length composition channel and the NPMLE gDNA prior: measured and retired.
 - `--mappability-read-length` (a no-op), `--gdna-prior-mixture-bridge`, `--sweep-n-grid-single-strand`
   and `--gdna-em-llr-bias` (an underived odds dial), and the `measured_total` background estimator.

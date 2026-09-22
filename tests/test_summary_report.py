@@ -187,7 +187,7 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     summary = json.loads((out / "summary.json").read_text())
 
     # versioned schema
-    assert summary["schema_version"] == cli.SUMMARY_SCHEMA_VERSION == 2
+    assert summary["schema_version"] == cli.SUMMARY_SCHEMA_VERSION == 3
 
     # fragment_length is stats-only — the histogram bloat is gone
     fl = summary["fragment_length"]

@@ -800,13 +800,8 @@ class AbundanceEstimator:
         gdna_prior_count : float, per-locus gDNA Dirichlet prior scalar
         rna_prior_count : float, per-locus RNA Dirichlet prior scalar
         enable_gdna : bool, whether the locus admits a gDNA component
-        n_regions_touched : int, calibration regions overlapping the locus
-        multi_locus_region_mass : float, region mass shared across loci
-        partial_coverage_region_mass : float, region mass partially covered by the locus
         gdna_eff_len_em : float
             Exposure-adjusted EM effective length for the locus gDNA component.
-        gdna_eff_len_per_bp : float
-            ``gdna_eff_len_em / locus_span_bp`` diagnostic ratio.
         """
         cols = [
             "locus_id",
@@ -825,11 +820,7 @@ class AbundanceEstimator:
             "gdna_prior_count",
             "rna_prior_count",
             "enable_gdna",
-            "n_regions_touched",
-            "multi_locus_region_mass",
-            "partial_coverage_region_mass",
             "gdna_eff_len_em",
-            "gdna_eff_len_per_bp",
         ]
         if not self.locus_results:
             return pd.DataFrame(columns=cols)
@@ -874,18 +865,10 @@ class AbundanceEstimator:
             gdna = float(r["gdna"])
             total = mrna + nrna + gdna
             rate = gdna / total if total > 0 else 0.0
-            gdna_prior_count = float(r.get("gdna_prior_count", 0.0))
-            rna_prior_count = float(r.get("rna_prior_count", 0.0))
-            enable_gdna = int(r.get("enable_gdna", 0))
-            n_regions_touched = int(r.get("n_regions_touched", 0))
-            multi_locus_region_mass = float(r.get("multi_locus_region_mass", 0.0))
-            partial_coverage_region_mass = float(r.get("partial_coverage_region_mass", 0.0))
-            gdna_eff_len_em = float(r.get("gdna_eff_len_em", r.get("gdna_eff_len", 1.0)))
-            gdna_eff_len_per_bp = float(r.get("gdna_eff_len_per_bp", 0.0))
             rows.append(
                 {
                     "locus_id": lid,
-                    "locus_span_bp": r.get("locus_span_bp", 0),
+                    "locus_span_bp": r["locus_span_bp"],
                     "n_transcripts": r["n_transcripts"],
                     "n_annotated_transcripts": n_annot,
                     "n_nrna_entities": n_nrna,
@@ -897,14 +880,10 @@ class AbundanceEstimator:
                     "gdna": gdna,
                     "total": total,
                     "gdna_rate": rate,
-                    "gdna_prior_count": gdna_prior_count,
-                    "rna_prior_count": rna_prior_count,
-                    "enable_gdna": enable_gdna,
-                    "n_regions_touched": n_regions_touched,
-                    "multi_locus_region_mass": multi_locus_region_mass,
-                    "partial_coverage_region_mass": partial_coverage_region_mass,
-                    "gdna_eff_len_em": gdna_eff_len_em,
-                    "gdna_eff_len_per_bp": gdna_eff_len_per_bp,
+                    "gdna_prior_count": float(r["gdna_prior_count"]),
+                    "rna_prior_count": float(r["rna_prior_count"]),
+                    "enable_gdna": int(r["enable_gdna"]),
+                    "gdna_eff_len_em": float(r["gdna_eff_len_em"]),
                 }
             )
         return pd.DataFrame(rows, columns=cols)
