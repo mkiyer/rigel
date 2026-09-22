@@ -154,7 +154,7 @@ rigel index --fasta $T/test_chr.fa --gtf $T/test_chr.gtf --collapse-duplicate-tr
 
 # 2. per panel (seven configs: the benign panel, the two adversarial probe panels, od05, three fl arms)
 #    ⛔ ONE panel's `cache` at a time, or give each its own RIGEL_SCRATCH: the origin split writes
-#    $RIGEL_SCRATCH/rigel_pass0_oracle/<condition>.<origin>.bam, and six of the seven configs share their
+#    $RIGEL_SCRATCH/rigel_oracle_build/w_<condition>/<condition>.<origin>.bam, and six of the seven configs share their
 #    condition names, so two caching side by side corrupt each other's partition (sum-to-full fails).
 CFG=scripts/sim/configs/test_reference.yaml
 python scripts/sim/panel.py simulate --config $CFG
@@ -365,23 +365,14 @@ python scripts/sim/build_suite_reference.py \
   `simulate_reads.py` with no such flag, and the simulator skips a condition whose oracle BAM already
   exists (`skip_existing`). So editing a config and re-running `panel.py simulate --force` reports
   success and reproduces the old reads. Delete the condition directories first.
-* ⛔ **The zero-gDNA rows are held out of the oracle sweep** (`pass0_vs_oracle.py` scores no row whose
-  truth is exactly zero), and `status` counts an oracle condition complete only when `gdna`, `mrna`,
-  `nrna` and `_main` are all present. `panel.py cache` fills the `g00` rows with the per-condition
-  prewarm and copies `_main` from the scan cache; a panel cached only by running `pass0_vs_oracle.py`
-  directly reads ✘ on those rows while being complete for every scorer. One row by hand:
+* `calibration_oracle.py --build` builds every row's oracle cache alike — the zero-gDNA rows too, there is no
+  hold-out — and `status` counts an oracle condition complete only when `gdna`, `mrna`, `nrna`, the two strand
+  partitions and `_main` are all present. One row by hand:
 
   ```bash
-  python scripts/design/pass0_vs_oracle.py --suite $SUITE/ladder --index $SUITE/rigel_index \
-      --oracle-cache $SUITE/ladder/oracle_cache --_prewarm gdna_g00_ss_0.50_nrna_mid_capture_off
+  python scripts/design/calibration_oracle.py --suite $SUITE/ladder --index $SUITE/rigel_index --build \
+      --condition gdna_g00_ss_0.50_nrna_mid_capture_off
   ```
-
-  `--_prewarm` is the worker half of `--jobs`, hidden from `--help`, and reuses the shipped loader so a
-  stale cache is still refused; do not also pass `--conditions <that row>`, or the hold-out exits first
-  with "no contaminated conditions found". A `_main` beside a `g00` row proves nothing about what has
-  been measured there (`TRAPS: shard-an-arm-sweep-by-condition`), and `status`'s four-part count is not
-  a scorer's requirement — `calibration_oracle.py` needs the five partitions and refuses without them.
-
 * Every panel config states `gdna.genomic_refs: [chr21, chr22]` explicitly; the engine does not infer
   which references carry genomic DNA (`TRAPS: annotated-is-not-genomic`).
 * Export `RIGEL_SCRATCH` before a sweep, or the instruments write their per-condition work under `/tmp`
@@ -397,7 +388,7 @@ instruments:
 
 | question | instrument |
 |---|---|
-| how wrong is calibration, against oracle calibration? — the 0.8.0 metric | `calibration_vs_oracle.py` · `prior_vs_oracle.py` (the `LocusPriors` the EM reads) · `solvability_audit.py` (pass-0) · `pass0_vs_oracle.py` for the T/C/P decomposition |
+| how wrong is calibration, against oracle calibration? — the 0.8.0 metric | `calibration_vs_oracle.py` · `prior_vs_oracle.py` (the `LocusPriors` the EM reads) · `solvability_audit.py` (pass-0, per object) |
 | how wrong is the end-to-end answer? — per transcript, per pool, against per-fragment truth | `panel.py score` / `report`, i.e. `quant_accuracy.py` — the only end-to-end scorer, a thermometer rather than the target |
 
 ⛔ A ceiling only prices what its arm can reach: the effective-length shrinkage is built before

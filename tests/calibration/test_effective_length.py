@@ -244,9 +244,9 @@ def test_the_THREE_OLD_DIVISORS_ARE_GONE():
 # ---------------------------------------------------------------------------
 #
 # `contained_moments` / `crossing_moments` are the moments of the OPPORTUNITY-TILTED length
-# distribution at an object — functionals of the same placement counts enumerated above, read by
-# `pass0_vs_oracle.info_class_masks` (the identified-or-undetermined classifier). Restored 2026-09-13:
-# they went with the deleted length channel, and the purge itself marked the coverage as owed.
+# distribution at an object — functionals of the same placement counts enumerated above. Restored
+# 2026-09-13: they went with the deleted length channel, and the purge itself marked the coverage as owed;
+# their one reader outside the geometry (the identified-or-undetermined classifier) was retired 2026-09-22.
 
 _MOMENTS = ("m1", "m2", "q1", "q2", "q12", "eff")
 

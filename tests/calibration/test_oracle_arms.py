@@ -1,4 +1,4 @@
-"""Falsification gates for ``scripts/design/pass0_vs_oracle.py`` — Stage B step 1's instrument.
+"""Falsification gates for the oracle arms, ``scripts/design/_oracle_arms.py`` — the helper the truth instruments share.
 
 The instrument answers: does calibration's PRIOR-FREE first solve find what the payload actually
 contains, and where it does not, was the information destroyed by the accumulator or missed by the
@@ -57,7 +57,7 @@ def _load_sibling(name: str):
 
 
 _MODULES: dict = {}
-P0 = _load_sibling("pass0_vs_oracle.py")
+P0 = _load_sibling("_oracle_arms.py")
 
 
 # ── the toy ──────────────────────────────────────────────────────────────────────────────────────
@@ -117,12 +117,7 @@ def toy(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def measured(toy, tmp_path_factory):
-    """One full run of the instrument on the toy — the object every gate below interrogates.
-
-    The two ``truth`` pmfs handed in are DELIBERATELY separated far beyond anything the toy realises.
-    C_input's job here is to prove the lever is wired, and a lever that changes nothing proves
-    nothing (TRAPS: could-the-arm-have-fired).
-    """
+    """One full run of the oracle arms on the toy — the object every gate below interrogates."""
     return P0.measure_condition(
         bam=str(toy.bam_path),
         index=toy.index,
@@ -130,15 +125,7 @@ def measured(toy, tmp_path_factory):
         calibration_config=CalibrationConfig(),
         work_dir=tmp_path_factory.mktemp("p0_split"),
         tag="toy",
-        truth_pmfs=lambda size: (_spike_pmf(90, size + 1), _spike_pmf(330, size + 1)),
     )
-
-
-def _spike_pmf(mean: int, size: int) -> np.ndarray:
-    """A narrow triangular pmf centred on ``mean`` — a length model with a known, wide separation."""
-    w = np.arange(size, dtype=np.float64)
-    p = np.maximum(30.0 - np.abs(w - mean), 0.0)
-    return p / p.sum()
 
 
 # ── GATE 0: the oracle cache HITS, is REFUSED when stale, and is still validated ──────────────────
@@ -158,7 +145,7 @@ def test_the_oracle_cache_hits_and_the_cached_path_is_STILL_VALIDATED(toy, tmp_p
     """
     import _oracle
 
-    import pass0_vs_oracle as mod
+    import _oracle_arms as mod
 
     from rigel.config import PipelineConfig as PC
 
@@ -205,7 +192,7 @@ def test_a_cache_that_does_not_describe_this_SCAN_is_rebuilt_not_reused(toy, tmp
     """
     import _oracle
 
-    import pass0_vs_oracle as mod
+    import _oracle_arms as mod
 
     from rigel.config import PipelineConfig as PC
 
@@ -361,38 +348,6 @@ def test_refit_iters_zero_reproduces_debug_belief_pass0(measured, toy):
 # ── GATE 5: the undetermined class exists, is reported, and responds to the length gap ────────────
 
 
-def test_the_UNDETERMINED_class_is_reported_and_tracks_the_length_gap(measured, toy):
-    """C_info classifies each object as identified-or-not by the 2×2, and the undetermined class must
-    be a reported CLASS carrying its own mass share — never averaged into the rest.
-
-    PERTURBATIONS, in both directions:
-      * two IDENTICAL length pmfs ⇒ the 2×2 has no separation anywhere ⇒ nothing is identified;
-      * two widely separated pmfs ⇒ something is.
-    """
-    ra = RegionArrays.from_frame(toy.index.regions_df, toy.index.ref_name_to_id)
-    substrate = CalibrationSubstrate.from_payload(measured.payload, ra)
-    chain = measured.debug_final["chain"]
-
-    size = int(measured.payload.max_length) + 1
-    same = _spike_pmf(200, size)
-    flat = P0.info_class_masks(chain, ra, substrate, same, same.copy())
-    apart = P0.info_class_masks(chain, ra, substrate, _spike_pmf(150, size), _spike_pmf(330, size))
-
-    for axis in ("region", "boundary"):
-        live = ~flat[axis]["absent"]
-        assert live.sum() > 0, f"the toy has no live {axis} objects; the gate would be vacuous"
-        # equal means ⇒ the length channel carries EXACTLY zero information, at any depth.
-        assert flat[axis]["identified"].sum() == 0
-        assert (flat[axis]["undet_no_separation"] & live).sum() == int(live.sum())
-        # a wide separation must rescue some of them, or the classifier is not reading the pmfs
-        assert apart[axis]["identified"].sum() > 0
-
-    # and the share is REPORTED, mass-weighted, for every class — an unreported class is an averaged
-    # -away class.
-    shares = measured.info_shares["region"]
-    assert set(shares) == set(P0.INFO_CLASSES)
-    assert abs(sum(shares.values()) - 1.0) < 1e-9
-
 
 # ── GATE 6: no data is ABSENT, never f_g = 0 ──────────────────────────────────────────────────────
 
@@ -494,8 +449,8 @@ def test_the_classes_PARTITION_the_mass_and_the_error(measured):
     scenario (``struct_lock`` is, on a toy with no intergenic pure-gDNA region) can be removed with
     no effect whatsoever, and the gate would then "pass" while testing nothing.
     """
-    for kind, table in (("solver", measured.scores), ("info", measured.info_scores)):
-        names = P0.SOLVER_CLASSES if kind == "solver" else P0.INFO_CLASSES
+    for table in (measured.scores,):
+        names = P0.SOLVER_CLASSES
         for arm in table:
             for axis in ("region", "boundary"):
                 per_class = table[arm][axis]

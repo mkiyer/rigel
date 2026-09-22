@@ -88,7 +88,7 @@ PRIOR_FIELDS = ("gdna_prior_count", "rna_prior_count", "gdna_eff_len")
 def composition(gdna: np.ndarray, rna: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """``(phi, scale)`` per locus — ``phi = a_g/(a_g+a_r)`` is NaN where the prior is empty.
 
-    NaN, never 0, and for the same reason ``pass0_vs_oracle.object_fractions`` gives: a locus whose
+    NaN, never 0, and for the same reason ``_oracle_arms.object_fractions`` gives: a locus whose
     prior is ``(0, 0)`` makes no composition claim at all, and a floored 0 reads as the confident claim
     "no gDNA here". The mass-weighted mean is blind to the difference — a zero-scale locus carries zero
     weight — so it shows up only in the COUNT of loci scored, which is exactly where an inflated
@@ -567,7 +567,7 @@ def _oracle_parts(bam, index, scan, work_dir, tag, cache_root):
 
     Keyed by the SHIPPED ``read_scan_cache``, never a home-made key: ``reach`` is covered by no other
     hash, so a rebuilt index would verify clean against one. Same argument as
-    ``pass0_vs_oracle.load_or_build_oracle``, which this deliberately mirrors.
+    ``_oracle_arms.load_or_build_oracle``, which this deliberately mirrors.
     """
     if cache_root is not None:
         dirs = {k: Path(cache_root) / tag / k for k in ORIGINS}

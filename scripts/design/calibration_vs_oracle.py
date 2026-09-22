@@ -50,7 +50,7 @@ import numpy as np  # noqa: E402
 from _shared import DEFAULT_INDEX, DEFAULT_SUITE, OVERRIDE_FIELDS, is_zero_gdna, set_field, sibling, stratum  # noqa: E402
 
 
-P0 = sibling("pass0_vs_oracle.py")
+OA = sibling("_oracle_arms.py")
 
 from rigel.calibration import calibrate  # noqa: E402
 from rigel.calibration.capture_eff_length import transcript_capture_eff_lengths  # noqa: E402
@@ -70,7 +70,7 @@ from calibration._oracle import ORIGINS, OracleTruth  # noqa: E402
 
 
 #: The two axes ``CalibrationResult`` deconvolves; the sj axis is certified RNA and is never split.
-AXES = P0.AXES
+AXES = OA.AXES
 
 
 # ── the ruler: what the EM divides a transcript by ───────────────────────────────────────────────
@@ -288,8 +288,8 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
     # both arms must be on the payload's own per-object totals, per axis; without that identity a
     # mass-weighted mean of fractions is an average over different denominators.
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
-    P0.check_same_basis("P", p_arm, substrate)
-    P0.check_same_basis("O", o_arm, substrate)
+    OA.check_same_basis("P", p_arm, substrate)
+    OA.check_same_basis("O", o_arm, substrate)
 
     # -- the ruler, on the FL-marginal lengths the pipeline builds it from --
     rna_fl = FragmentLengthModel.from_pmf(kw["rna_fl_pmf"], int(payload.max_length))
@@ -309,8 +309,8 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
         "lift_n_ambiguous": oracle.n_ambiguous,
         "noop_differences": bad,
         "seconds": time.perf_counter() - start,
-        "library_f_gdna_P": P0.library_f_gdna(p_arm),
-        "library_f_gdna_O": P0.library_f_gdna(o_arm),
+        "library_f_gdna_P": OA.library_f_gdna(p_arm),
+        "library_f_gdna_O": OA.library_f_gdna(o_arm),
         "axes": {},
         "ruler": {k: dataclasses.asdict(v) for k, v in rulers.items()},
         # Σ|Δ| over the ruler itself, in base pairs of opportunity, the quantity the EM divides by.
@@ -318,7 +318,7 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
         "ruler_n_moved": int(np.sum(lengths["P"] != lengths["O"])),
     }
     for axis in AXES:
-        s = P0.score_axis(
+        s = OA.score_axis(
             getattr(p_arm, f"count_gdna_{axis}"), getattr(p_arm, f"count_rna_{axis}"),
             getattr(o_arm, f"count_gdna_{axis}"), getattr(o_arm, f"count_rna_{axis}"),
         )
@@ -692,7 +692,7 @@ def self_test() -> int:
     cal = _toy_calibration()
 
     # ① score_axis against itself is exactly zero, and a one-ULP nudge makes it nonzero.
-    s = P0.score_axis(cal.count_gdna_region, cal.count_rna_region,
+    s = OA.score_axis(cal.count_gdna_region, cal.count_rna_region,
                       cal.count_gdna_region, cal.count_rna_region)
     check("score_axis(P, P) is exactly 0", s.abs_err == 0.0 and s.mwae == 0.0)
     nudged = np.array(cal.count_gdna_region, copy=True)
@@ -701,7 +701,7 @@ def self_test() -> int:
     # two arms on different bases, and a basis refusal is not the perturbation under test.
     rna_n = np.array(cal.count_rna_region, copy=True)
     rna_n[3] = np.nextafter(rna_n[3], -np.inf)
-    s1 = P0.score_axis(nudged, rna_n, cal.count_gdna_region, cal.count_rna_region)
+    s1 = OA.score_axis(nudged, rna_n, cal.count_gdna_region, cal.count_rna_region)
     check("score_axis resolves a ONE-ULP nudge", s1.abs_err > 0.0)
 
     # ② the noop comparator fires on a one-ULP nudge to an override array, and on the lengths alone.

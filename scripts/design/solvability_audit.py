@@ -4,7 +4,7 @@
 Pass-0 is the prior-free solve, and its job is to produce the substrate the gDNA prior is fitted on,
 not to be accurate everywhere: an object with no own evidence that reports ``f_g ≈ ½`` at zero
 precision is correctly saying it cannot be solved without a prior, and counting that as error buries
-what matters. So this audit takes `pass0_vs_oracle.measure_condition`'s truth and pass-0 arm and
+what matters. So this audit takes the oracle arms' truth and pass-0 arm (`_oracle_arms.measure_condition`) and
 separates three populations a mass-weighted error lumps together: undetermined (no own-evidence
 channel; excluded from the error denominator, and checked only for the opposite failure, a value far
 from ½ claiming a finite precision), solvable and right, and solvable and wrong, the last split by
@@ -41,10 +41,10 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 
-from _shared import sibling  # noqa: E402
+from _shared import DEFAULT_INDEX, DEFAULT_SUITE, sibling  # noqa: E402
 
 
-P0 = sibling("pass0_vs_oracle.py")
+OA = sibling("_oracle_arms.py")
 
 from rigel.calibration.calibrate import lattice_points  # noqa: E402
 from rigel.calibration.region_chain import BOUNDARY, REGION  # noqa: E402
@@ -140,7 +140,7 @@ def audit(m, *, axis: str = "region", config=None) -> dict:
 
     slots = channel_masks(cap, chain, config)
     per_axis = {
-        name: P0._project(mask, chain, n_regions, n_boundaries)[axis]
+        name: OA._project(mask, chain, n_regions, n_boundaries)[axis]
         for name, mask in slots.items()
     }
 
@@ -150,7 +150,7 @@ def audit(m, *, axis: str = "region", config=None) -> dict:
     r_t = np.asarray(getattr(m.truth, f"count_rna_{axis}"), np.float64)
     total = g_t + r_t
     live = total > 0
-    f_pred, f_true = P0.object_fractions(g_p, r_p)[0], P0.object_fractions(g_t, r_t)[0]
+    f_pred, f_true = OA.object_fractions(g_p, r_p)[0], OA.object_fractions(g_t, r_t)[0]
 
     # the solver's per-slot state, projected onto this axis
     def onto(values):
@@ -665,8 +665,8 @@ def panel_report(rows: list[tuple[str, float, dict]]) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--condition", default=None, help="one condition; omit for the whole panel")
-    ap.add_argument("--suite", type=Path, default=P0.DEFAULT_SUITE)
-    ap.add_argument("--index", type=Path, default=P0.DEFAULT_INDEX)
+    ap.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
+    ap.add_argument("--index", type=Path, default=DEFAULT_INDEX)
     ap.add_argument("--axis", default="region", choices=("region", "boundary", "both"))
     ap.add_argument("--work-dir", type=Path, default=Path(os.environ.get("RIGEL_SCRATCH", "/tmp")))
     ap.add_argument("--oracle-cache", type=Path, default=None)
@@ -686,19 +686,15 @@ def main() -> int:
     panel: list[tuple[str, float, dict]] = []
     for name in names:
         cond = args.suite / name
-        truth = P0.truth_f_gdna(cond) or 0.0
+        truth = OA.truth_f_gdna(cond) or 0.0
         print(f"  {name} …", flush=True)
-        m = P0.measure_condition(
+        m = OA.measure_condition(
             bam=str(cond / "sim_oracle.bam"),
             index=index,
             pipeline_config=PipelineConfig(),
             calibration_config=config,
             work_dir=args.work_dir / "rigel_pass0_oracle",
             tag=name,
-            truth_pmfs=lambda size, d=cond: (
-                P0.truth_length_pmf(d, "gdna", size),
-                P0.truth_length_pmf(d, "rna", size),
-            ),
             oracle_cache=args.oracle_cache,
         )
         for axis in ("region", "boundary") if args.axis == "both" else (args.axis,):

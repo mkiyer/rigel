@@ -8,7 +8,7 @@ failure rather than a quieter green.
 
 In-process, never a subprocess: a subprocess would need the panel's conda environment resolved from
 inside pytest and would hide an import error as a non-zero exit code, and importing the module is also
-what proves the shared sibling loader still finds `pass0_vs_oracle` and `prior_vs_oracle`.
+what proves the shared sibling loader still finds the instruments' helpers.
 """
 
 from __future__ import annotations

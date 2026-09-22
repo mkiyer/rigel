@@ -1,7 +1,7 @@
 """The one loader the instruments use to import a sibling instrument by path.
 
 An instrument runs as ``python scripts/design/<name>.py``, so ``scripts/design/`` is not a package and a
-sibling cannot be imported by name. ``sibling("pass0_vs_oracle.py")`` loads the file beside this one,
+sibling cannot be imported by name. ``sibling("_oracle_arms.py")`` loads the file beside this one,
 registers it in ``sys.modules`` under its stem BEFORE executing it (a dataclass defined in the sibling
 resolves its own module through ``sys.modules`` at class-creation time), and returns the cached module on
 every later call, so two instruments loading the same sibling share one copy of it. This is a helper, not
@@ -12,7 +12,7 @@ default paths, the six override fields and the two stratum readers the oracle in
 Usage::
 
     from _shared import sibling
-    P0 = sibling("pass0_vs_oracle.py")
+    OA = sibling("_oracle_arms.py")
 """
 
 from __future__ import annotations

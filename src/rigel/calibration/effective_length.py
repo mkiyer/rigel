@@ -43,14 +43,12 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .region_chain import BOUNDARY, REGION, RegionChain
 
 __all__ = [
     "UNBOUNDED_REACH",
     "BaseTaper",
     "LandedMoments",
     "base_taper",
-    "build_slot_moments",
     "contained_eff_length",
     "contained_moments",
     "crossing_base_shares",
@@ -306,36 +304,6 @@ def _normalise(eff, e_u, e_w, e_uu, e_ww, e_uw) -> LandedMoments:
         return np.divide(x, eff, out=np.zeros(eff.shape, dtype=np.float64), where=live)
 
     return LandedMoments(m1=d(e_u), m2=d(e_w), q1=d(e_uu), q2=d(e_ww), q12=d(e_uw), eff=eff)
-
-
-def build_slot_moments(chain: RegionChain, region_arrays, fl_pmf: np.ndarray) -> LandedMoments:
-    """Scatter the two frames' moments onto the chain: contained at REGION slots, crossing at BOUNDARY slots.
-
-    The same slot layout `build_region_geometry` uses for ``eff_gdna`` / ``eff_rna``, so
-    ``moments.eff`` is meant to BE that array.
-
-    That identity is ungated: nothing under ``tests/`` imports this function, and its only caller is
-    `scripts/design/pass0_vs_oracle.py`. Gating it means asserting that
-    ``build_slot_moments(...).eff`` equals `region_geometry.build_region_geometry`'s ``eff_gdna`` /
-    ``eff_rna`` element for element on one real chain. Until then the identity is an intention.
-    """
-    kind = np.asarray(chain.kind)
-    obj = np.asarray(chain.obj_idx, dtype=np.int64)
-    is_region, is_boundary = kind == REGION, kind == BOUNDARY
-    n = int(chain.n_slots)
-
-    region_len = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
-    region_m = contained_moments(region_len, fl_pmf) if region_len.shape[0] else None
-    boundary_m = crossing_moments(fl_pmf)
-
-    fields = {}
-    for name in ("m1", "m2", "q1", "q2", "q12", "eff"):
-        out = np.zeros(n, dtype=np.float64)
-        if region_m is not None:
-            out[is_region] = getattr(region_m, name)[obj[is_region]]
-        out[is_boundary] = float(getattr(boundary_m, name))
-        fields[name] = out
-    return LandedMoments(**fields)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════

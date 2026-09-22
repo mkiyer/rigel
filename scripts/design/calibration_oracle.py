@@ -17,10 +17,17 @@ oracle is how a calibration bug and a truth bug survive each other. The analytic
 expectation is not certified here; the RNA truth is realized. No solver runs. Writes ``slot_truth.npz``
 beside each oracle cache, which every slot-scored instrument reads.
 
+``--build`` first BUILDS the origin-split caches every truth instrument reads — the oracle BAM split by
+read-name origin, each partition scanned by the production scanner, the two transcript-strand
+partitions beside them, and the whole scan copied in as ``_main`` — keyed by the shipped scan-cache
+loader so a stale cache is refused rather than reused, in parallel over conditions with ``--jobs``
+(one condition saturates one core at ~2 GB), then certifies. ``panel.py cache`` runs it.
+
 Usage::
 
     python scripts/design/calibration_oracle.py --condition <name>     # certify one condition
     python scripts/design/calibration_oracle.py                        # certify the whole ladder
+    python scripts/design/calibration_oracle.py --build --jobs 8       # build every cache, then certify
     python scripts/design/calibration_oracle.py --condition <name> --out truth.npz
     python scripts/design/calibration_oracle.py --self-test            # perturb every gate, no I/O
 """
@@ -29,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -37,7 +45,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 
-from _shared import DEFAULT_INDEX, DEFAULT_SUITE  # noqa: E402
+from _shared import DEFAULT_INDEX, DEFAULT_SUITE, sibling  # noqa: E402
 
 
 
@@ -56,6 +64,7 @@ from rigel.calibration.signature import (  # noqa: E402
 )
 from rigel.calibration.splice_graph import build_boundary_flags_array, build_sj_geometry_arrays  # noqa: E402
 from rigel.calibration.substrate import CalibrationSubstrate  # noqa: E402
+from rigel.config import PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 
@@ -296,7 +305,7 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
     except Exception as exc:  # noqa: BLE001
         raise FileNotFoundError(
             f"{root} has no {list(RNA_STRAND_ORIGINS)} partitions ({type(exc).__name__}). They are "
-            "built by `pass0_vs_oracle.py` (via `panel.py cache`) alongside the three ORIGINS ones; "
+            "built by `calibration_oracle.py --build` (via `panel.py cache`) alongside the three ORIGINS ones; "
             "without them there is no per-strand RNA truth and the three-arm map cannot be scored."
         ) from exc
     # the second exact partitioning of the same whole, drained with the same choice queue, gdna
@@ -460,13 +469,65 @@ def self_test() -> int:
     return 1 if fail else 0
 
 
+def build_one(index, suite: Path, condition: str, work_dir: Path) -> None:
+    """One condition's oracle cache under ``<suite>/oracle_cache/<condition>``: the three origin
+    partitions and the two transcript-strand ones (`_oracle_arms.load_or_build_oracle`, which
+    re-runs sum-to-full on a cache hit and rebuilds on a miss), and ``_main`` — the whole scan — copied
+    from the scan cache when absent. The drained frame: the partitions are lifted by replaying the
+    whole's drain, exactly as `derive` reads them."""
+    OA = sibling("_oracle_arms.py")
+    root = Path(suite) / "oracle_cache" / condition
+    scan_dir = Path(suite) / "scan_cache" / condition
+    if not (scan_dir / "payload.npz").is_file():
+        raise FileNotFoundError(f"no scan cache at {scan_dir} — run build_scan_cache.py first")
+    cache = read_scan_cache(scan_dir, index)
+    lift: dict = {}
+    kw = calibration_inputs(cache, index, lift_out=lift)
+    bam = str(Path(suite) / condition / "sim_oracle.bam")
+    OA.load_or_build_oracle(
+        bam, index, PipelineConfig(), Path(work_dir) / f"w_{condition}", condition, kw["payload"],
+        Path(suite) / "oracle_cache", lift,
+    )
+    if not (root / "_main" / "payload.npz").is_file():
+        shutil.copytree(scan_dir, root / "_main", dirs_exist_ok=True)
+
+
+def build(index, suite: Path, conds: list[str], jobs: int, work_dir: Path, args_index: Path) -> None:
+    """Every condition's cache, in parallel over conditions when ``jobs > 1`` — each worker is this
+    script on one condition with ``--skip-certify``; a worker that fails is rebuilt serially here, so
+    the numbers do not depend on ``jobs``."""
+    todo = list(conds)
+    if jobs > 1 and len(todo) > 1:
+        import concurrent.futures as cf
+        import subprocess
+
+        base = [sys.executable, str(Path(__file__).resolve()), "--suite", str(suite), "--index",
+                str(args_index), "--work-dir", str(work_dir), "--build", "--skip-certify", "--condition"]
+
+        def one(c):
+            return c, subprocess.run(base + [c], capture_output=True, text=True).returncode
+
+        n = max(1, min(int(jobs), len(todo)))
+        print(f"  building {len(todo)} oracle cache(s), {n} worker(s) …", flush=True)
+        with cf.ThreadPoolExecutor(max_workers=n) as ex:
+            for c, rc in ex.map(one, todo):
+                print(f"    {'✔' if rc == 0 else '⚠ rebuilding serially'} {c}", flush=True)
+    for c in todo:
+        build_one(index, suite, c, work_dir)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
     ap.add_argument("--index", type=Path, default=DEFAULT_INDEX)
-    ap.add_argument("--condition", default=None)
+    ap.add_argument("--condition", nargs="*", default=None, help="one or more conditions (default: every one with a scan cache)")
     ap.add_argument("--out", type=Path, default=None,
                     help="write the certified per-slot table as .npz (default: <suite>/oracle_cache/<condition>/slot_truth.npz)")
+    ap.add_argument("--build", action="store_true", help="build the origin-split caches before certifying")
+    ap.add_argument("--jobs", type=int, default=1, help="--build's worker processes, one condition each")
+    ap.add_argument("--work-dir", type=Path, default=Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_oracle_build",
+                    help="--build's scratch for the split BAMs")
+    ap.add_argument("--skip-certify", action="store_true", help="--build only (the worker half of --jobs)")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
     if args.self_test:
@@ -474,9 +535,13 @@ def main() -> int:
 
     index = TranscriptIndex.load(args.index)
     region_arrays = RegionArrays.from_index(index)
-    conds = [args.condition] if args.condition else sorted(
+    conds = args.condition or sorted(
         p.name for p in (args.suite / "scan_cache").iterdir()
     )
+    if args.build:
+        build(index, args.suite, conds, args.jobs, args.work_dir, args.index)
+        if args.skip_certify:
+            return 0
     bad = 0
     for c in conds:
         try:

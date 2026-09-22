@@ -11,11 +11,11 @@
 ⛔⛔ **WHY THIS EXISTS: THE RECIPE STOPPED HALFWAY AND THE MISSING HALF WAS THE POINT.** `TESTING.md` §2
 documented five manual shell steps ending at "cache the scans". **Running the tool and scoring it against
 truth — the entire purpose — was in no recipe anywhere**. Worse, the ORACLE cache (the origin-split truth every scoring instrument reads) had no
-step at all: it was a *side effect* of running `pass0_vs_oracle.py --oracle-cache`, so a reader who
+step at all: it was a *side effect* of running an instrument's `--oracle-cache`, so a reader who
 followed the documented steps ended up with a panel that every scorer refused.
 
 ⭐ **THIS SCRIPT ADDS NO MEASUREMENT CODE.** Every stage shells out to the instrument that already owns
-it — the simulator engine in `rigel.sim`, `build_scan_cache.py`, `pass0_vs_oracle.py`,
+it — the simulator engine in `rigel.sim`, `build_scan_cache.py`, `calibration_oracle.py --build`,
 `quant_accuracy.py`. Duplicating a scorer is how a baseline and a ceiling drift apart
 (`TRAPS: score-the-consumers-own-count`), so the value here is *sequencing and prerequisites*, not new
 arithmetic. Anything this prints about a number, the underlying instrument printed first.
@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -214,9 +213,9 @@ def cmd_cache(p: Panel, args) -> int:
     """⛔ BOTH caches, and the oracle one is the reason this stage exists as a named step.
 
     The scan cache makes calibration re-runnable without rescanning. The ORACLE cache is the
-    origin-split truth — `gdna` / `mrna` / `nrna` partitions plus the undrained `_main` payload — and
-    every truth-scoring instrument refuses to run without it. It is populated as a side effect of
-    `pass0_vs_oracle.py`, which is why it was invisible in the documented recipe."""
+    origin-split truth — `gdna` / `mrna` / `nrna` and the two transcript-strand partitions plus the
+    `_main` payload — and every truth-scoring instrument refuses to run without it; `calibration_oracle.py
+    --build` builds it, every row alike, and certifies `slot_truth.npz` in the same run."""
     need(bool(p.conditions), f"simulated conditions in {p.dir}", "panel.py simulate")
     conds = args.conditions or p.conditions
     # ⛔ `--force` MUST reach the scan cache, and this used to be the one stage it did not. A scan cache
@@ -238,92 +237,34 @@ def cmd_cache(p: Panel, args) -> int:
         ],
         what=f"scan cache -> {p.scan_cache}",
     )
-    # ⭐ `--jobs` reaches the oracle stage too. Building one condition's cache is a BAM split plus four
-    #    scans, ~95 % of this stage's wall clock, and it saturates exactly ONE core at ~2 GB of real
-    #    memory — so the stage is core-bound and shards cleanly. Measured 2026-08-19: serial, the stage
-    #    used 1 of 16 cores.
-    run(
-        [
-            sys.executable,
-            DESIGN / "pass0_vs_oracle.py",
-            "--suite",
-            p.dir,
-            "--index",
-            p.index,
-            "--oracle-cache",
-            p.oracle_cache,
-            "--jobs",
-            str(args.jobs),
-            *(["--conditions", *conds] if args.conditions else []),
-        ],
-        what=f"oracle cache (origin-split truth) -> {p.oracle_cache}",
-    )
-    # ⭐ The zero-gDNA rows are HELD OUT of pass-0's scoring sweep (a saturated row cannot be scored),
-    #    so their oracle partitions must be pre-warmed one by one, and their `_main` payload — which the
-    #    pre-warm never writes — is the scan cache's own (value-identical up to accumulation-order ULPs).
-    #    Until 2026-09-02 these two steps and the certification below lived only in a session recipe.
-    for c in conds:
-        if not _is_zero_gdna(c):
-            continue
-        if not all(
-            (p.oracle_cache / c / part / "payload.npz").is_file()
-            for part in ORACLE_PARTS
-            if part != "_main"
-        ):
-            run(
-                [
-                    sys.executable,
-                    DESIGN / "pass0_vs_oracle.py",
-                    "--suite",
-                    p.dir,
-                    "--index",
-                    p.index,
-                    "--oracle-cache",
-                    p.oracle_cache,
-                    "--_prewarm",
-                    c,
-                ],
-                what=f"oracle cache, zero-gDNA row {c} (pre-warm)",
-            )
-        main = p.oracle_cache / c / "_main"
-        if not (main / "payload.npz").is_file():
-            need(
-                (p.scan_cache / c / "payload.npz").is_file(),
-                f"the scan cache of {c}",
-                "panel.py cache",
-            )
-            shutil.copytree(p.scan_cache / c, main, dirs_exist_ok=True)
-    # ⭐ CERTIFY: every scoring instrument reads `slot_truth.npz`, which only `calibration_oracle.py`
-    #    writes — and it exits non-zero when a FIELD gate fails while still writing the COMPOSITION-level
-    #    table, so its exit code is reported, not fatal.
-    rc = subprocess.run(
-        [
-            sys.executable,
-            str(DESIGN / "calibration_oracle.py"),
-            "--suite",
-            str(p.dir),
-            "--index",
-            str(p.index),
-        ],
-        cwd=str(REPO),
-    ).returncode
+    # ⭐ BUILD + CERTIFY in one run. `--jobs` reaches the build: one condition's cache is a BAM split plus
+    #    five scans, core-bound, ~2 GB of real memory, so it shards cleanly. The exit code is reported,
+    #    not fatal: `calibration_oracle.py` exits non-zero when a FIELD gate fails while still writing
+    #    the COMPOSITION-level table.
+    cmd = [
+        sys.executable,
+        str(DESIGN / "calibration_oracle.py"),
+        "--suite",
+        str(p.dir),
+        "--index",
+        str(p.index),
+        "--build",
+        "--jobs",
+        str(args.jobs),
+        *(["--condition", *conds] if args.conditions else []),
+    ]
+    print(f"\n\033[1m── oracle cache (origin-split truth) + certification -> {p.oracle_cache}\033[0m\n   $ {' '.join(cmd)}\n", flush=True)
+    rc = subprocess.run(cmd, cwd=str(REPO)).returncode
     n_cert = sum((p.oracle_cache / c / "slot_truth.npz").is_file() for c in conds)
     print(
         f"\n   slot_truth certified: {n_cert}/{len(conds)}"
         + (
             ""
             if rc == 0
-            else "   (⚠ a certification gate failed on some row — read the table above)"
+            else "   (⚠ a build or certification gate failed on some row — read the table above)"
         )
     )
     return 0
-
-
-def _is_zero_gdna(condition: str) -> bool:
-    """A condition simulated with NO gDNA — the `g00` rung of the ladder and test-chromosome sweeps
-    (`gdna_g00_...`), and the older `gdna_none_...` naming. Its truth is exactly zero, so pass-0 holds
-    it out of its scoring sweep."""
-    return condition.startswith(("gdna_g00_", "gdna_none_"))
 
 
 def cmd_score(p: Panel, args) -> int:

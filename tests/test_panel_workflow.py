@@ -216,43 +216,36 @@ def test_the_shipped_panel_configs_all_load(tmp_path):
 # ── the cache stage ──────────────────────────────────────────────────────────────────────────────
 
 
-def test_cache_prewarms_the_zero_gdna_rows_copies_their_main_payload_and_certifies(
+def test_cache_builds_the_scan_cache_then_builds_and_certifies_the_oracle_in_one_run(
     tmp_path, monkeypatch
 ):
-    """Three steps every scorer needs, none of which the sweep does on its own: the `g00` rows are
-    held out of pass-0's sweep and need a per-row pre-warm; their `_main` payload is the scan
-    cache's, because the pre-warm never writes it; and `slot_truth.npz` is written only by
-    `calibration_oracle.py`. `cache` must issue all three, and a non-zero certification exit must not
-    stop the workflow (a failed FIELD gate still writes the COMPOSITION table)."""
+    """Two commands, in order: the scan cache (a stage that must STOP the workflow on failure), then
+    `calibration_oracle.py --build`, which builds every row's origin-split cache alike — the zero-gDNA
+    rows too, there is no hold-out — and certifies `slot_truth.npz` in the same run. Its exit code is
+    reported, never fatal: a failed FIELD gate still writes the COMPOSITION table."""
     p = PANEL.Panel(_config(tmp_path))
     for c in ("gdna_g00_ss_0.50_x", "gdna_g50_ss_0.50_x"):
         (p.dir / c).mkdir(parents=True)
         (p.dir / c / "sim_oracle.bam").touch()
-        (p.scan_cache / c).mkdir(parents=True)
-        (p.scan_cache / c / "payload.npz").write_bytes(b"scan")
     issued = []
     monkeypatch.setattr(
         PANEL, "run", lambda cmd, *, what: issued.append((what, [str(c) for c in cmd]))
     )
+    launched = []
 
     class _Done:
         returncode = 1  # a certification gate "failed" — must be reported, not fatal
 
-    monkeypatch.setattr(PANEL.subprocess, "run", lambda *a, **k: _Done())
-    args = type("A", (), {"jobs": 1, "conditions": None, "force": False})()
-    assert PANEL.cmd_cache(p, args) == 0
-    whats = [w for w, _ in issued]
-    assert any("pre-warm" in w and "gdna_g00_ss_0.50_x" in w for w in whats), whats
-    assert not any("pre-warm" in w and "g50" in w for w in whats), (
-        "only zero-gDNA rows are pre-warmed"
+    monkeypatch.setattr(
+        PANEL.subprocess, "run", lambda cmd, **k: (launched.append([str(c) for c in cmd]), _Done())[1]
     )
-    prewarm = next(cmd for w, cmd in issued if "pre-warm" in w)
-    assert "--_prewarm" in prewarm and "gdna_g00_ss_0.50_x" in prewarm
-    assert (p.oracle_cache / "gdna_g00_ss_0.50_x" / "_main" / "payload.npz").read_bytes() == b"scan"
-    assert not (p.oracle_cache / "gdna_g50_ss_0.50_x" / "_main").exists()
+    args = type("A", (), {"jobs": 3, "conditions": ["gdna_g00_ss_0.50_x"], "force": False})()
+    assert PANEL.cmd_cache(p, args) == 0
+    assert [w for w, _ in issued] == [f"scan cache -> {p.scan_cache}"]
+    assert len(launched) == 1
+    cmd = launched[0]
+    assert cmd[1].endswith("calibration_oracle.py")
+    assert "--build" in cmd and cmd[cmd.index("--jobs") + 1] == "3"
+    assert cmd[cmd.index("--condition") + 1] == "gdna_g00_ss_0.50_x"
+    assert not any("prewarm" in c for c in cmd), "there is no zero-gDNA hold-out to pre-warm"
 
-
-def test_the_zero_gdna_predicate_names_both_conventions():
-    assert PANEL._is_zero_gdna("gdna_g00_ss_0.99_nrna_file_capture_on")
-    assert PANEL._is_zero_gdna("gdna_none_ss_0.50_nrna_none")
-    assert not PANEL._is_zero_gdna("gdna_g05_ss_0.50_nrna_file_capture_off")

@@ -140,7 +140,7 @@ def load_oracle(bam: str, index, pipeline_config, cache_root: Path, tag: str) ->
     except (FileNotFoundError, KeyError, ScanCacheKeyError) as exc:
         raise SystemExit(
             f"⛔ {tag}: no valid oracle cache under {root} ({exc}). Build it first with "
-            "pass0_vs_oracle.py --oracle-cache or prior_vs_oracle.py --oracle-cache; this script "
+            "calibration_oracle.py --build (panel.py cache runs it); this script "
             "refuses to invent a truth."
         ) from exc
     return OracleTruth.from_parts(full, parts)

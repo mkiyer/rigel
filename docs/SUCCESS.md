@@ -163,32 +163,16 @@ region. Read `weak%` before `mwae`: a row near 100 is reporting the messages and
 solve. `locked` is the structurally pure-gDNA class on both axes (`region_geometry.g1_locked`), never
 `~solvable & is_region` (`TRAPS: two-masks-one-name`).
 
-### The instrument — `scripts/design/pass0_vs_oracle.py`
+### The oracle arms — `scripts/design/_oracle_arms.py`
 
-It scans, builds T, runs its arms, and scores every one per object and per class; it also populates
-the oracle cache every other scorer reads, which is why `panel.py cache` runs it (gates:
-`tests/calibration/test_pass0_vs_oracle.py`). C is two ceilings, each defined by a lever that already
-exists, never an estimator (`TRAPS: no-magic-numbers`):
-
-| | what it is | what its gap to P means |
-|---|---|---|
-| **C_input** | `calibrate` handed the simulator's own post-capture length pmfs at both solve depths | how much of the error is wrong inputs rather than wrong solving |
-| **C_info** | a classification, per object: is the 2×2 of `EQUATIONS.md` §3.1 identified from this object's own stored channels at all? | not a gap — C_info ignores neighbours and the sweep does not, so it can be "worse" than P |
-
-C_input is a length-input ceiling and under the 0.8.0 scope a diagnostic, not a route (the other
-library-level inputs are injectable via `InjectedCalibrationPriors` but the simulator writes no truth
-for them; κ is not free either, `TRAPS: specificity-and-sense-are-complements`). ⛔ Do not read it as an
-argument for the length channel, which is deferred by ruling.
-
-The cross-tab is the point: objects undetermined by C_info *and* carried entirely by the messages have
-no answer of their own, and that cell is reported with its mass share and its error share, needing no
-threshold because it is a cell of a partition. The two classifications are each exhaustive (gated): the
-solver's own — `own_evidence` / `message_only` / `struct_lock`, from
-`region_init.has_own_composition_evidence` and `region_geometry.g1_locked` — and C_info's —
-`identified` / `undet_no_separation` / `undet_out_of_range` / `absent`. Every arm, T included, is in
-the DRAINED frame: draining three origin partitions separately is not the same operation as draining the
-whole, so the partitions are lifted by replaying the whole's choices (`lift_drain_parts`) and the
-sum-to-full identity is asserted on the drained frame.
+One condition scanned, split by true origin into T, calibrated at pass-0 and in full, and scored per object
+and per solver class (`own_evidence` / `message_only` / `struct_lock`, from
+`region_init.has_own_composition_evidence` and `region_geometry.g1_locked`, exhaustive and gated). A helper,
+not an instrument: `solvability_audit.py` and `calibration_vs_oracle.py` read it, and
+`calibration_oracle.py --build` uses its cache builder, which is why `panel.py cache` runs that. Every arm, T
+included, is in the DRAINED frame: draining three origin partitions separately is not the same operation as
+draining the whole, so the partitions are lifted by replaying the whole's choices (`lift_drain_parts`) and
+the sum-to-full identity is asserted on the drained frame (gates: `tests/calibration/test_oracle_arms.py`).
 
 ---
 
@@ -198,8 +182,8 @@ Each row names the quantity that is the bar, on which strata, against what truth
 on each is an owner call and is not invented here.
 
 1. **`P − O` is small on all three in-scope strata**, and the residual is attributed — to the assembler
-   (`O − Fo`), to the composition, or to a class that is provably undetermined. It is not done while the
-   residual sits on objects `C_info` calls identified (`solvability_audit.py` re-derives the share).
+   (`O − Fo`), to the composition, or to a class with no evidence of its own. It is not done while the
+   residual sits on objects with own evidence (`solvability_audit.py` re-derives the share).
 2. **The zero controls read zero**: the `g00` rung of the ladder, on every instrument that reads it.
    An in-scope stratum can read healthy on every contaminated row and still claim gDNA in a library
    containing none; only a zero control finds that.
