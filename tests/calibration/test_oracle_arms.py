@@ -41,13 +41,17 @@ def _load_sibling(name: str):
 
     The module goes into ``sys.modules`` BEFORE it is executed. ``@dataclass`` resolves its own
     class's ``__module__`` through that table, so a module that is not registered fails at class
-    definition with an ``AttributeError`` on ``None`` — nothing to do with the script.
+    definition with an ``AttributeError`` on ``None`` — nothing to do with the script. The scripts'
+    directory goes on ``sys.path`` too, as running a script puts it there: the instruments import
+    their shared helper ``_shared`` by name.
     """
     import sys
 
     key = name[:-3]
     if key not in _MODULES:
         path = Path(__file__).resolve().parents[2] / "scripts" / "design" / name
+        if str(path.parent) not in sys.path:
+            sys.path.insert(0, str(path.parent))
         spec = importlib.util.spec_from_file_location(key, path)
         module = importlib.util.module_from_spec(spec)
         sys.modules[key] = module
@@ -346,7 +350,6 @@ def test_refit_iters_zero_reproduces_debug_belief_pass0(measured, toy):
 
 
 # ── GATE 5: the undetermined class exists, is reported, and responds to the length gap ────────────
-
 
 
 # ── GATE 6: no data is ABSENT, never f_g = 0 ──────────────────────────────────────────────────────

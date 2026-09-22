@@ -237,7 +237,9 @@ def test_cache_builds_the_scan_cache_then_builds_and_certifies_the_oracle_in_one
         returncode = 1  # a certification gate "failed" — must be reported, not fatal
 
     monkeypatch.setattr(
-        PANEL.subprocess, "run", lambda cmd, **k: (launched.append([str(c) for c in cmd]), _Done())[1]
+        PANEL.subprocess,
+        "run",
+        lambda cmd, **k: (launched.append([str(c) for c in cmd]), _Done())[1],
     )
     args = type("A", (), {"jobs": 3, "conditions": ["gdna_g00_ss_0.50_x"], "force": False})()
     assert PANEL.cmd_cache(p, args) == 0
@@ -248,4 +250,3 @@ def test_cache_builds_the_scan_cache_then_builds_and_certifies_the_oracle_in_one
     assert "--build" in cmd and cmd[cmd.index("--jobs") + 1] == "3"
     assert cmd[cmd.index("--condition") + 1] == "gdna_g00_ss_0.50_x"
     assert not any("prewarm" in c for c in cmd), "there is no zero-gDNA hold-out to pre-warm"
-
