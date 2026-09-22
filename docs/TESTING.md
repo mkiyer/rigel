@@ -448,12 +448,21 @@ per-stage peak and held RSS; `--set` for any config field, `--scan-only` for the
 for two reports) and `scripts/profiling/sweep_replay.py` (one calibration sweep, replayed and compared
 bit for bit; `--block-slots N|none` replays it at another locus-block size, which must move nothing —
 the chunk-exactness of the whole sweep on real data); set `OMP_NUM_THREADS` deliberately. The frozen
-references are `~/Downloads/rigel_runs/arms/review_identity_*.json` (two ladder conditions and the LBX0190
-library, frozen on the tree of 2026-09-14 that carries the lanes worklist and the landscape's location floor,
-re-frozen with the reason after every landing since — the ruler's repair, the yield's floors, the native
-pass, the native builders, the factory's log-gamma (2026-09-18, libm's for cephes'), each in its commit) and the captured
-sweeps `~/Downloads/rigel_runs/perf/sweeps_VCaP_step19` (2026-09-18: the deep library, VCaP, on the tree after the
-factory's log-gamma became the kernel's — the replay target from here on; a step that moves numbers re-captures and deletes the superseded one; `DESIGN.md` §6b.15). A port is
+references are `~/Downloads/rigel_runs/arms/review_identity_<condition>.json` — two ladder conditions and the
+LBX0190 library, last re-frozen at `71037f6c` with the reason in `arms/refreeze_2026-09-21.log`. The instrument's
+default `--reference` does not exist and it prints ⛔ rather than failing, so pass each one and read the log, never
+the exit code:
+
+    A=~/Downloads/rigel_runs/arms
+    for c in gdna_g05_ss_0.99_nrna_mid_capture_on gdna_g05_ss_0.50_nrna_mid_capture_off; do
+      python scripts/design/rename_identity.py --check --condition $c --reference $A/review_identity_$c.json
+    done
+    python scripts/design/rename_identity.py --check --index ~/Downloads/rigel_runs/refs/rigel_index \
+      --bam ~/Downloads/rigel_runs/cfrna/mctp_LBX0190_SI_43883_HHHKGDRX7/bam/star.srt.rmdup.collate.bam \
+      --reference $A/review_identity_LBX0190.json
+
+The captured sweeps are `~/Downloads/rigel_runs/perf/sweeps_VCaP_step19` (the deep library, VCaP) — the replay
+target; a step that moves numbers re-captures and deletes the superseded one (`DESIGN.md` §6b.15). A port is
 held to the replay's `--tolerance` budget and to the transfer gates, which hold the kernel's tables — returned by
 `native.transfer_prepare` — to independent recomputes and drive single hops of the native pass through
 `native.transfer_pass` (`tests/calibration/_transfer_harness.py`, where the tables' containers live; the row constructors

@@ -723,8 +723,8 @@ transcripts and materialized as ordinary transcript rows in `index.t_df`, flagge
 **Python.** Top level: `cli` `pipeline` `config` `index` `scan` `scoring` `buffer` `scan_payload`
 `scan_cache` `locus` `locus_partition` `scored_fragments` `estimator` `strand_model` `frag_length_model`
 `second_pass` `splice` `splice_blacklist` `native` `gtf` `transcript` `annotate` `stats` `types`, plus the
-`report/` and `sim/` subpackages. `calibration/`: `calibrate` (orchestrator) · `splice_graph` (the v8
-index) · `sweep` (the backbone) and `messages/` (the policy: `silent` · `transfer`; the row constructors `native/transfer_rows.h`) ·
+`report/` and `sim/` subpackages. `calibration/`: `calibrate` (orchestrator) · `splice_graph` (the
+index's graph) · `sweep` (the backbone) and `messages/` (the policy: `silent` · `transfer`; the row constructors `native/transfer_rows.h`) ·
 `region_chain` `region_geometry` `region_init` · `substrate` `region_arrays`
 `signature` · `effective_length` `capture_eff_length` `fl` `sj_opportunity` `gdna_opportunity` ·
 `gdna_strand` `strand_balance` `strand_summary` · `density_deconv`
@@ -732,12 +732,13 @@ index) · `sweep` (the backbone) and `messages/` (the policy: `silent` · `trans
 `priors` `result` `errors` `diagnostics` `track` · `_layers` (the layering the imports already had).
 Re-derive this list from `calibration/_layers.py` and the imports rather than trusting it.
 
-**C++** (`src/rigel/native/`, nanobind, C++17, `-O3`, LTO, OpenMP):
+**C++** (`src/rigel/native/`, nanobind, C++17, `-O3`, LTO; threads from its own pool, `thread_pool.h`):
 
 | module | source | purpose |
 |---|---|---|
-| `_bam_impl` | `bam_scanner.cpp`, `calibration/accumulator.cpp` | BAM parsing, fragment grouping, model training, the accumulator |
-| `_em_impl` | `em_solver.cpp` | per-locus EM, connected components (Kahan summation, SIMD `fast_exp.h`) |
+| `_bam_impl` | `bam_scanner.cpp`, `calibration/accumulator.cpp` | BAM parsing, fragment grouping, strand-model training, the accumulator |
+| `_em_impl` | `em_solver.cpp` | per-locus EM, connected components (Kahan summation, SIMD `fast_exp.h`, `-ffp-contract=fast`) |
+| `_solve_impl` | `solve_kernel.cpp` (`psi_kernel.h`, `transfer_kernel.h`, `transfer_rows.h`) | the calibration sweep in one call (§6b.15.5) and the bindings the gates read |
 | `_scoring_impl` | `scoring.cpp` | fragment likelihood scoring (`-ffast-math`, no SIMD) |
 | `_resolve_impl` | `resolve.cpp` | fragment→transcript resolution via cgranges |
 | `_cgranges_impl` | vendored | interval overlap |
@@ -750,9 +751,7 @@ Re-derive this list from `calibration/_layers.py` and the imports rather than tr
 | `blocks.py` | the block plumbing of the locus solve: `view_fields` (every per-slot array a policy may read — the arrays the kernel takes), `SweepCapture` (the diagnostic capture of a sweep, the instruments' view, never built in production) | nothing about what a solve or a message is |
 | `messages/silent.py` | `SilentPolicy` — sends nothing. **The measured floor**, what `message_policy = "silent"` installs | A reader who holds `sweep.py` plus this holds the entire working system |
 | `messages/transfer.py` | `TransferPolicy` — **the shipped default** (2026-09-09): its name, its strand model and its library; the builders, the two passes and the solve are the kernel's (`native/transfer_kernel.h`, §6b.4–§6b.14) | `prepare_block` is a table of contents: a reader finds a message by its builder's name |
-| `messages/faces.py` | `Faces` — the composition rules as typed tables over `(destination, side)` (the rule arithmetic is the pass kernel's ``faces_apply``), `RowTable`, and `side_of` (`side_of`, `norm`, `fuse`) | gate: `test_transfer_faces.py` |
-| `messages/lanes.py` | `LevelLane` — one class for the three populations' levels, built by `native/transfer_kernel.cpp`'s `gdna_lane` (every face left without a composition rule) and `rna_lane` (one per strand, faces from the flag bits) | gate: `test_transfer_rna_lanes.py` |
-| `messages/__init__.py` | the interface (`Policy`, `Prepared`), what every node received from one side as a table (`Received`: `has_neighbour`, `has_composition`, the composition rows, three `Levels` lanes; SILENCE and NO NEIGHBOUR are its two states `silence` / `no_neighbour`, not objects), what ψ receives (`PsiMessage`) and what a policy may read (`BlockContext`) | every field of `BlockContext` has a reader in the policy or the backbone |
+| `messages/__init__.py` | the interface (`Policy`: a name, a strand model, a library) and `ChainView`, the whole chain's observations and geometry with no beliefs — the one scope a policy sees in Python | gate: `test_sweep_backbone.py` |
 
 **A restructure is gated, a rewrite is not.** The split out of the one 1,635-line function passed two
 `TRAPS: byte-identity-gate` gates of opposite direction and, per array on one real 70,176-slot chain,
@@ -762,19 +761,19 @@ a clean rebuild — came out +103 %; a refactor gated on byte-identity has exact
 #### The interface, and its one contract
 
 ```python
-prepared = policy.prepare(ctx, library)            # one working object per block: every node's OWN claim
-prepared.run_pass(received, seq, nbr, terminal, backward=False)  # phase 1: ONE directional pass on the backbone's table, writing rows of
-                                                   #   the pass's `Received` table, or None ⇒ all silence
-receive(source, destination)                       # ... the BACKBONE owns the table and runs the pass
-evidence = prepared.solve(from_left, from_right)   # phase 2, the policy's half -> PsiMessage
+library = policy.library(view)   # once per sweep, over the WHOLE chain (a ChainView: no beliefs) — the
+                                 #   only cross-block reductions a message may use
+policy.name                      # which layer the kernel runs for the chain's blocks
+policy.strand                    # the strand model its own claims read — (κ, od_gdna, od_rna) or None
 ```
 
-`TRAPS: a-message-from-the-destinations-belief`, and the backbone enforces the enforceable half by
-construction: the kernel is called with two indices and builds the message into the destination from the
-SOURCE's claim and what the source holds; the backbone writes `held` and the policy never reaches past its
-hop. `BlockContext` splits its fields under three headings — **observations** (either end), **geometry /
-structure** (either end), **beliefs** (source-side only). The shipped policy reads `belief_fg` once, at
-`prepare`, for the variance freeze of each node's own strand profile — a source-side read by construction.
+A message may use the destination's CONSTANTS and OBSERVATIONS and never its BELIEFS
+(`TRAPS: a-message-from-the-destinations-belief`); the rule is about sending — a recipient may discount an
+arriving claim by its own counts, which only widens it. The kernel enforces the enforceable half by
+construction: the pass builds each destination's row from the SOURCE's claim and what the source holds, in the
+backbone's chain order, and the only belief the layer reads is the incoming belief at a node's OWN claim (the
+variance freeze of its own strand profile, a source-side read). `messages/__init__.py` states the contract in
+full.
 
 #### The backbone's assertions, and why they live in the backbone
 
@@ -785,8 +784,8 @@ structure** (either end), **beliefs** (source-side only). The shipped policy rea
 | `\|T\| ≤ 3` | AXIOM 0, made executable (on the ladder's `g50 ss0.50 capture_on`: 0 / 70,176, and 9,912 slots reach 3 so it is not vacuous) |
 | the write-back touches only `solvable` slots | the basis mismatch that made a byte-identity gate read `max\|Δ\| = 1.0` |
 
-The transfer policy delivers max-normalised profiles on ψ's own grid (`PsiMessage.lam_rows`,
-`cube_rows`), which cannot be off-grid and claim no share. ⛔ An assertion the shipped policy violates is
+The transfer policy delivers max-normalised profiles on ψ's own grid (the λ rows and the AMBIG cube rows),
+which cannot be off-grid and claim no share. ⛔ An assertion the shipped policy violates is
 waived with its measurement, never widened: the waiver table (`sweep._KNOWN_VIOLATIONS`) is empty, and
 `test_sweep_backbone.py` asserts that any future entry carries a written reason. Each assertion also
 reports how many slots were eligible for it (`TRAPS: could-the-arm-have-fired`).
@@ -1159,333 +1158,58 @@ library refits 2 and 3 entirely, 38 s each against 176 s when the layer was Pyth
 native call the whole layer costs the kernel about four seconds a refit sweep at 8 threads, and the cache was
 DELETED on its price (§6b.15.5). Every sweep runs the whole layer; nothing is held across sweeps.
 
-#### 6b.15.5 The rules are typed tables, and a face is a side (2026-09-11, the port's data layout)
+#### 6b.15.5 The rules are typed tables, the sweep is one native call, and there is one path (2026-09-11 → 09-19, the port)
 
-Every directed face is one of a node's two sides — it hears from its left neighbour or its right — so the
-recipient's composition rule is a KIND and its parameters at ``(destination, side)``:
-`messages.faces.Faces` holds ``(n, 2)`` tables (the kind, the face's unspliced and spliced counts, the
-boundary's and far region's gDNA opportunity, a blur width, the level rule's width) and indices into a row
-store of the ``(K,)`` maps; five kinds cover every shipped message — FORWARD, TRANSPORT (boundary → region
-through the face map), SPLICE-OUT (region → boundary, the map read backwards), EDGE (the intergenic|exon
-edge's one-sided level) and LEVEL (the terminus's level rule) — and the pass kernel's ``faces_apply`` is the one place their
-arithmetic lives. A face carries ONE rule: the builders' faces are disjoint by construction (the splice
-faces serve intron|exon pairs, the edge rule gene edges, the terminus rules unlicensed faces, the
-alternative splice site junctions with no terminus), so the table refuses a second rule at a face as it
-refuses a rule at a face that does not exist — the earlier "a later builder replaces an earlier one"
-precedence had no instance on the toy or the human chain and was a hidden assumption, not a rule. The level
-lanes hold their faces as ``(n, 2)`` bits and their junction flux as a row table. The 1.2M closures, the
-4.6M-tuple face sets and the neighbour-pair enumeration are gone, bit-identically; `_SolveSite` needs no
-neighbour arrays. A compiled pass reads these buffers directly.
+**A face is a side.** Every directed face is one of a node's two sides, so a recipient's composition rule is a
+KIND and its parameters at ``(destination, side)``: ``(n, 2)`` tables of the kind, the face's unspliced and
+spliced counts, the boundary's and far region's gDNA opportunity, a blur width and the level rule's width, with
+indices into a row store of ``(K,)`` maps. Five kinds cover every shipped message — FORWARD, TRANSPORT (boundary →
+region through the face map), SPLICE-OUT (the map read backwards), EDGE (the intergenic|exon edge's one-sided
+level), LEVEL (the terminus's level rule). A face carries ONE rule: the builders' faces are disjoint by
+construction, and the table writer refuses a second rule at a face exactly as it refuses a face that does not
+exist — a "later builder wins" precedence had no instance and was a hidden assumption. Optional per-node rows (a
+claim, a level, a flux witness) are a matrix beside a presence mask, allocated unfilled: every reader reads the bit
+before the row, and `test_transfer_policy.test_the_layer_reads_a_row_only_under_its_mask` poisons every table with
+NaN and holds the passes and the delivered channels bit-identical.
 
-**The passes are native** (2026-09-17; the port's step (i), `ISSUES: performance-memory-bounded-solve` ③).
-`native.transfer_pass` (`src/rigel/native/transfer_kernel.cpp`) runs one directional pass in one call — the
-face's rule and each lane's emit and receive, in chain order, on exactly these tables — and the backbone
-prefers it where a policy offers `run_pass` beside `propagate`'s per-hop kernel (the Prepared protocol; the
-silent policy and a prototype policy still run the per-hop path). Every row operation is the Python's term
-for term and only the summation orders differ, so the gate is agreement and a budget, not bits:
-`tests/calibration/test_pass_kernel.py` holds the two passes to equality on every presence bit, count and
-witness and to 1e-12 on every profile (the toy's captured sweep; the wiring by a spy), and on MO_3021's
-first sweep — 852 block-passes, 4.1 M hops — no boolean or count differs and profiles agree to 3.4e-13. The
-replay on `sweeps_MO_3021_step7` moves the first sweep's `f_g` on 16,021 slots by at most 5.6e-16 and its
-`var_gdna` by 5.7e-14 — 2.1e-6 of the derived budget — and the three refit sweeps are bit-identical. The hop
-went from 2.2 µs to 0.33 µs (the kernel 9.1 → 1.4 s on that sweep) and the pass census says what remains:
-259 k Gaussian blurs a sweep at a median 93 taps, against 4.3 M lane hops that forward or say nothing and
-1.1 M forward rules; the builders' lists packed into the tables once per block cost 1.0 s a sweep, which is
-why step (ii) is `prepare`'s builders writing the tables directly. **The builders write the tables** (step
-(ii-a), 2026-09-17): every optional row per node — a claim, a level, a flux witness, a junction flux level
-per side — is a `RowTable` (`messages/faces.py`: a matrix and a presence mask, `t[i]` a row or nothing),
-the face row store is a matrix with a written prefix, and the per-block packing is deleted; the pass reads
-the builders' own arrays, none copied (`test_pass_kernel.py`). A pure re-layout, gated bit-identical: every
-table of MO_3021's 426 blocks against the pre-step tree, the four captured sweeps, the three identity
-references. **The builders are native** (step (ii-b), 2026-09-17): `native.transfer_prepare`
-(`src/rigel/native/transfer_kernel.cpp`, the `_transfer_impl` module) builds one block's claims, face rules and
-level lanes into those tables in one call — the strand profiles, the face maps, the edge level, the terminus
-level rule with the pair's discrepancies, the alternative splice site, the gDNA lane's Poisson and
-profile-read levels, the RNA lanes' faces from the flag bits, their flux levels and witnesses — on the row
-constructors of `native/transfer_rows.h`, shared with the pass kernel. `TransferPolicy.prepare` calls it,
-and the Python builders are DELETED (owner, 2026-09-17: ONE production code path; no reference implementation
-is kept to gate against, and a small floating-point tolerance between implementations is accepted for the
-speed) — the transfer gates (`test_transfer_faces.py`, `test_transfer_policy.py`, `test_transfer_rna_lanes.py`)
-hold the native builders' tables to independent recomputes, and before the deletion the port was held to
-the Python table by table on the toy's captured sweep in five contexts (the bare toy, the populated terminus
-insides, the alternative splice sites, no strand model, no gDNA coordinate; every boolean, index, count and
-witness equal, every row within 1e-9 — the compiler's fused multiply-add the whole difference). On MO_3021's
-first sweep (426 blocks): no boolean or index
-differs, rows agree to 2.3e-10, the builders 20.0 → 2.5 s; the replay on `sweeps_MO_3021_step8` moves the
-first sweep's fractions by at most 1.1e-15 and `var_gdna` by 5.7e-14 — 4.1e-6 of the derived budget — and the
-refit sweeps are bit-identical. Timed on VCaP at 8 threads, two interleaved pairs against the pre-step worktree:
-wall 409 → 315 s and 403 → 314 s (0.77×), the sweep 281 → 191 s and 278 → 190 s (0.68×), the builders
-103 → 18 s (0.18×), the pass 41 → 37 s (the packing that lived inside it), ψ and every untouched stage at
-0.93–1.03, peak 11.3 → 11.1 GB (`perf/port_ii_2026-09-17/`). What remains of the sweep is ψ: the self-solve's
-46 s and the final solve's 57 s of 190 s — step (iii).
+**The sweep is one native call.** `native.solve_blocks` (`native/solve_kernel.cpp`) takes the chain's arrays whole,
+the block table, the priors as their INPUTS (the landscape's curve with the per-slot support, the intron factory's
+background, mask, counts and opportunities) and the thread budget, and runs every locus block end to end on a pool
+of threads pulling blocks one at a time, each on its own arena: the factory rows and the arm's shift, the
+self-solve ψ, the own-evidence precision, the layer (the builders into the arena's tables, the two passes, the
+solve) unless the policy is silent, the final ψ with the factory row and the delivered row added per cell, the
+write-back on the owned slots, ``has_composition`` and the four assertions as integer counts. Nothing is reduced
+across blocks but those counts, so the answer is BIT-IDENTICAL at every thread count and block size; ψ's slot pool
+is threaded the same way (one slot at a time), so `CalibrationConfig.n_threads` is a resource, never a tunable of
+the answer. No ``(n, K)`` prior crosses to Python. The kernel's constants are scipy's digits, never typed by hand,
+and every product is a named temporary so the compiler cannot fuse it into a multiply-add numpy does not do — both
+slips moved `f_g` in the replay before they were fixed. The default block (1,000 slots) sizes the per-thread arena,
+``16 · slots · K · 8 B · threads``; interleaved runs found the wall flat across four sizes, so it is memory, not
+speed.
 
-**ψ is native** (step (iii), 2026-09-17, one path from the start): `native.psi_solve`
-(`src/rigel/native/psi_kernel.cpp`, the `_psi_impl` module) solves every slot the dispatcher selects on its own
-`(λ, θ)` cube in one pass — the strand term (`transfer_rows.h`, shared with the builders), the two Jeffreys
-arms, the fitted gDNA prior, the λ-factor row, the delivered row read at each cell, the θ window's
-nodes (τ = sin θ by a rotation recurrence, clamped to the sine's range) with their trapezoid log-weights and
-the two atoms — then the read-out: the ½-quantile on λ, the log-variance moment, the RNA-mass-weighted tilt
-share, the composition. `simplex_logodds._solve_regions_logodds_all` is the dispatcher (the reference
-defaults, the signal mask, the delivered rows packed, one call), the Python ψ is DELETED, and the gates read ψ
-through the same code: `psi_cube` (the cube), `posterior_median_fg` (the quantile), `compose` (the
-composition); their readable oracles — the strand term, the arms, the row's map — live in
-`tests/calibration/_psi_reference.py`, and the reference-exponent ablations that patched the arms are now
-λ-rows (the arms are additive). Judged: on MO_3021's first sweep (852 dispatcher calls, 306 k single-strand and
-52 k AMBIG slot-solves) every output within 1.6e-15 on a fraction and 4.2e-13 on `var_gdna` — 8e-6 of the
-derived budget — and ψ 4.31 → 1.60 s, the AMBIG cube's 2,600 exponentials per slot the arithmetic floor (the
-EM's 25-ulp exponential bought nothing over libm's and was not kept). Timed on VCaP at 8 threads, two interleaved pairs against a worktree of the cleanup commit: wall 341 → 285 s and 324 → 269 s (0.84×), the sweep 204 → 149 s and 194 → 141 s (0.73×), ψ 109 → 55 s (the self-solve's 0.44×, the final solve's 0.55×), every untouched stage at 0.97–1.03 (`perf/port_iii_2026-09-17/`); the day's four ports took the deep library from 526 s to 270–285 s and the sweep from 396 s to 141–149 s. What remains of the sweep is the Python around the kernels: the policy's `solve`, the tables' zero-fills, the factory rows.
+**One production path** (owner, 2026-09-17). The Python builders, pass, solve, ψ and per-hop kernel were each ported
+and then DELETED — no reference implementation is kept to gate against, and a small floating-point tolerance between
+implementations was accepted once, at the port. The gates read the ONE implementation through bindings that return
+fresh tables (`native.transfer_prepare` / `transfer_pass` / `transfer_solve`, `native.transfer_rows`,
+`tests/calibration/_transfer_harness.py`) and hold it to independent recomputes and analytic properties; readable
+oracles (ψ's strand term, the arms) live in `tests/calibration/_psi_reference.py`. A message mechanism is prototyped
+in C++ in a worktree and the two trees are scored against each other (`CLAUDE.md`'s working rule); a Python policy
+class installed for one arm cannot exist any more. The one change that moved a number on the way was the factory's
+log-gamma becoming libm's (at the ulp; the identity references were re-frozen with that reason).
 
-**The policy's solve is native, and the transfer is one module** (2026-09-17, the block-in-native step the
-owner chose over threads). `native.transfer_solve` (`src/rigel/native/transfer_kernel.cpp`, which now holds
-the builders, the pass and the solve as the `_transfer_impl` module) turns the two held tables into ψ's two
-channels in one call per block: the fused λ rows — the held compositions added, a held gDNA level read
-through the node's total and intersected, the single-strand ceiling from the faces that sent no composition
-— and THE CUBE DELIVERY AS A TABLE: `simplex_logodds.CubeRows` (per delivered AMBIG slot the two held-and-own
-level profiles with presence bits, the total, the opportunity, the reference density, on the one grid)
-replaces the dict of `CubeRow` records everywhere — the message, the cache, the diagnostics capture, the
-backbone's checks, ψ's dispatcher, whose arguments the table's arrays now are. The Python `solve`,
-`_ceilings`, `_cube_rows`, `_SolveSite` and `LevelLane.row` are deleted; the gates drive `solve` and read the
-table (`_psi_reference.cube_rows_of` states a delivery by hand). Judged BIT-IDENTICAL: the native solve against
-the Python solve on every block of MO_3021's first sweep (426 blocks, 175,819 delivered λ rows, 6,847 cube
-rows; the solve 0.96 → 0.13 s), the replayed first sweep against its capture, the three identity references.
-Timed on VCaP at 8 threads, two interleaved pairs against the ψ commit's worktree: wall 270 → 263 s and 270 → 264 s, the policy's solve 7.0 → 2.0 s on both, the sweep 0.95×, every other stage at 0.98–1.03 (`perf/port_solve_2026-09-17/`). The day's ports took the deep library from 526 s to 264 s and the sweep from 396 s to 135 s; what remains of the sweep is the tables' allocations, the factory rows and the block plumbing.
+**The message cache is deleted** (owner, 2026-09-18, on its price): once the block was native it saved about 9 s of
+a 140 s deep run and cost 2.3 GB held through calibrate, a key that had to name every kernel input by hand (one
+forgotten field serves stale messages silently), and the deliveries' round trip through Python. The kernel's
+contract is arrays in, arrays out, integer counts.
 
-**The tables are allocated unfilled** (2026-09-17, the block-in-native step 2: a pure allocation change). Every
-optional-row table the layer allocates per block — the claims, each lane's own levels, junction flux levels and
-flux witnesses (`RowTable`), both `Received` tables' compositions and level profiles (`Levels.empty`,
-`Received.empty`) — is `np.empty`: a row exists where its presence bit says so and nowhere else, and every reader
-reads the bit before the row — the builders (`RowsOut::get`), the pass (`lane_emit`'s own level and held profile,
-`faces_apply`'s own and held rows), the solve (every held composition and level under its bit, every flux level
-under its mask), the per-hop Python kernel (`RowTable.__getitem__`, `LevelLane.emit`; since deleted), the diagnostics capture
-(whole tables concatenated, which no instrument reads unmasked) and the gates. The solve's λ rows (`out_rows`)
-stay zero-filled: an all-zero row is the channel's inert value, read whole by the cache's sparsity, the finiteness
-check and ψ. The audit is executable — `test_transfer_policy.test_the_layer_reads_a_row_only_under_its_mask`
-poisons every table's matrix with NaN at allocation and holds the native pass's tables, the per-hop kernel's, the
-delivered channels and the whole sweep's belief bit-identical to the unpoisoned run — and broken three ways it
-fired three ways (the Python reader ignoring its mask: the per-hop table's bits moved; `lane_emit` taking the own
-level unmasked: the kernel's own witness guard; the solve reading a composition without its bit: the backbone's
-`lam_rows_finite`). Judged BIT-IDENTICAL: the four captured sweeps of `sweeps_MO_3021_step11`, the three identity
-references, the suite. On MO_3021's first sweep `numpy.zeros` fell from 1.20 s over 41,363 calls to 0.14 s and the
-sweep from 6.85 to 6.08 s; about 0.3 s reappeared inside the builders and the pass as first-touch page faults on
-the fresh pages — the part an arena per sweep would keep resident, priced and not built: the refit sweeps allocate
-none of these tables under the message cache, so the arena's whole gain is ≤ 0.3 s of a run's first sweep. Timed on
-VCaP at 8 threads, two interleaved pairs against a worktree of the solve commit: wall 277.5 → 274.6 s and 270.5 → 267.9 s (0.99 / 0.99), the sweep 140.8 → 139.5 s and 137.1 → 135.5 s (0.99 / 0.99), the builders' stage — where the tables are allocated — 19.2 → 17.9 s and 18.7 → 17.3 s (0.93 / 0.92), the pass 38.4 → 38.0 s and 37.7 → 36.8 s (0.99 / 0.98), every other stage at 0.97–1.04 (ψ 1.00 / 1.01, the solve 1.02 / 0.99, the scan 1.01 / 1.00, the second pass 1.02 / 0.98, quant 0.93 / 0.99, the locus EM 1.00 / 0.99), the run's peak — in quant, not the sweep — 11.3 → 11.6 GB and 11.3 → 11.2 GB
-(`perf/block_alloc_2026-09-17/`). What the sweep is now, measured for the threads design: the kernels are 64 % of a
-first sweep (ψ 1.57 s, the builders 1.61, the pass 0.99, the solve 0.12, of 6.7 s) and 32 % of a refit sweep (ψ 3.19
-of 10.0 s), which runs on the landscape's own bracket — K = 202 against the first sweep's 101, so every per-cell
-cost doubles for the same slots — and whose Python is the message cache's key (2.88 s: blake2b over the block
-context, the factory rows' n × K bytes most of it), the gDNA arm's interpolation (1.51 s) and the factory rows
-(0.90 s, of which lgamma 85 %: a NegBinom port alone would save ~0.1 s a sweep and move numbers — priced, not
-taken). The threads design starts from these numbers and is put to the owner before anything is built
-(`ISSUES: performance-memory-bounded-solve`).
-
-**One path: the per-hop Python kernel is deleted** (2026-09-17, the one-path ruling applied to the pass). The
-per-hop Python kernel — `_PreparedTransfer.propagate`, `Faces.apply`, `LevelLane.emit` / `receive` / `witness` — and
-`messages/transfer_rows.py`, the Python row constructors that only it and the gates' recomputes read, are GONE.
-The protocol is `prepare / run_pass / solve`: `run_pass` on every policy (the silent policy's writes nothing), and
-the backbone's `_pass` calls it and nothing else. What production still needed of the module moved to where it is
-read — `read_column` and the splice-out marginal's nodes to `transfer.py`, the terminus and junction bit
-combinations to `splice_graph` (`FLAG_TERMINUS`, `FLAG_JUNCTION`), which the scripts read. The gates read the ONE
-implementation: the row constructors of `native/transfer_rows.h` and the builders' flag predicates are bound as
-`native.transfer_rows` (the `rows` submodule of `_transfer_impl`, each a fresh array from its own arguments; nothing
-in `src/` reads them) and held to the analytic properties they were held to before — the face map monotone and
-flux-capped, the transport width the counting variance, the splice-out form, the one-sided edge level, the level
-map and bound, the orientation predicates, the coordinates' round trips, the hop price, the flux level, trigamma
-against scipy — and a rule applied to a claim, or a lane's hop, is ONE hop of the native pass on a fresh table
-(`_transfer_harness._hop`, `_rule`: the destination alone in ``seq``, its neighbour the sender, the sender's own row
-or a substituted one, a held row written into the table beforehand); the recursive reference of the passes
-composes such hops, and the sender in a lane gate is an EMPTY node holding the profile with its witness, so it
-forwards and the recipient prices. The two-kernel gate went with the second kernel; the wiring and no-copy gates
-moved to `test_transfer_policy.py`, the trigamma gate to `test_zero_count_is_a_measurement.py`. The production path
-did not change: BIT-IDENTICAL on the four captured sweeps of `sweeps_MO_3021_step11` and the three identity
-references. The last duplicate, the layer-4 `strand_likelihood` executable reference, was converged 2026-09-18 (below).
-
-**The optimisation target is the deep library** (owner, 2026-09-17). Every performance number from here is VCaP's
-(18.6 M fragments): its four sweeps are captured for replay (`sweeps_VCaP_step13`; the refit sweeps' pickles carry a
-message cache three times MO_3021's) and the whole run is profiled at 8 threads, twice back to back
-(`perf/vcap_baseline_2026-09-17/`); the MO_3021 captures are retired. Measured on it with the transfer kernels' census
-(a scratch copy of the kernels with counters, swapped in for the three native calls on a replayed sweep): the pass IS the
-blur — on the first sweep 1.43 M Gaussian blurs at a mean of 56 taps over 101 cells, 8.1 G multiply-adds of its 10.4 s,
-against 0.26 M blurs on MO_3021 — and the refit sweeps run on the landscape's bracket, K = 233 against the first sweep's
-101, so the cache-missing sweep pays the layer at 2.3× and every refit sweep pays ψ at 2.3×.
-`ISSUES: performance-memory-bounded-solve` carries the baseline and the ranked opportunities.
-
-**ψ is threaded over slots** (2026-09-18, the port's step (iv-a); owner: `CalibrationConfig.n_threads`, fed by the
-CLI's `--threads`). `psi_solve` pulls the dispatcher's slot list ONE SLOT AT A TIME by a pool of threads — the locus
-EM's `EStepThreadPool` (`native/thread_pool.h`), persistent across the 852 calls a sweep and rebuilt only when the
-budget changes, the GIL released around it — and every slot is solved by the same arithmetic on its own scratch and
-writes its own four outputs, so the answer is BIT-IDENTICAL at every thread count: the budget is a resource, not a
-tunable of the answer. One slot at a time, no chunk and no granularity constant, is what balances the load on the M3's
-asymmetric cores. `CalibrationConfig.n_threads` (0, the default, is every core — the EM's reading of the same number)
-is the budget; the CLI's `--threads` fans out to the scan's, the EM's and calibration's budgets alike, the profiler
-sets the three together, and `sweep_replay.py replay --threads N` holds a threaded sweep to the serial capture. Judged:
-the four VCaP sweeps BIT-IDENTICAL at 1, 2 and 8 threads (`test_sweep.test_the_psi_solve_is_thread_exact…` says the
-same on the chunk gate's substrate at 2, 3 and every-core threads, and broken to skip one slot it fired); the three
-identity references BIT-IDENTICAL, now solving at every core; the suite 3,433 passed / 5 xfail / 3,438
-collected. Timed on VCaP at 8 threads, two interleaved pairs against a worktree of the VCaP-baseline commit carrying its
-own ψ module (the argument shape changed): wall 266.6 → 214.4 s and 260.5 → 213.0 s (0.80 / 0.82), calibrate 154.4 → 104.4 s and 154.7 → 105.8 s (0.68 / 0.68), the sweep 135.0 → 88.2 s and 135.0 → 89.4 s (0.65 / 0.66); ψ's three stages at 0.14–0.17 — the self-solves 20.6 → 3.0 s, the final solves 32.9 → 4.7 s, the pre-sweep solve 3.8 → 0.6 s, 57.4 → 8.3 s in all, 6.9× on 12 performance and 4 efficiency cores — and every other stage at 0.97–1.05 (the builders 0.99 / 1.00, the pass 0.98 / 1.00, the solve 0.97 / 0.99, the scan 1.00 / 1.04, the second pass 0.99 / 1.02, quant 0.94 / 0.97, the locus EM 0.99 / 1.01), peak 11.1 → 11.0 GB and 11.0 → 11.2 GB (`perf/psi_threads_2026-09-18/`).
-
-**The message cache keys a block's factory rows by the digest of their inputs** (2026-09-18; owner: the key on inputs,
-not rows). The key was a blake2b over every array of the block's context, and on the deep library the factory rows —
-``(5,000, 233)`` doubles a block at the refit sweeps' bracket, 9 MB — were most of its bytes: 4 GB a sweep hashed,
-3.2 s of a refit sweep's 23 s. The rows are a pure function of the background's five fields, the block's intron
-mask, counts and opportunities, and the grid, so `calibrate.FactoryRows.digest(sl)` digests those (120 KB a block) and
-`sweep.solve_chain` hands the digest to `MessageCache.key` beside the rows; the key is content-keyed as before — every
-input the layer reads is digested, and a changed count, opportunity, background or grid misses — at 1/K of the hashing:
-0.27 s a refit sweep. Rows given as one array (the gates' synthetic rows) digest by content through
-`sweep._RowsOfArray`, so the perturbation gate on a changed row stands. Gated: `FactoryRows.digest` — alike on identical
-inputs per block, moved by one intron's count in its block alone, moved everywhere by the background (broken to skip the
-counts it fired); the key wired to the digest — a factory answering the same digest hits though its rows are rebuilt,
-another digest misses; the four VCaP sweeps BIT-IDENTICAL at 8 threads (the captured cache's entries, keyed the old way,
-miss, so the refit sweeps re-run their layer to the same bits); the three identity references BIT-IDENTICAL; the suite
-3,435 passed / 5 xfail / 3,440 collected. The capture is re-taken with the new keys (`sweeps_VCaP_step16`).
-
-**The splice-out marginal hoists what every node shares** (2026-09-18; exact). The census's TIMERS corrected the
-inference drawn from its counts: on the deep library's first sweep the blur is 3.5 s of the pass's 9.6 s, and the
-splice-out row's nine-node marginal (``splice_out_row``, 357 k calls) is 6.3 s — 65 % of the pass — because every node
-recomputed the whole face map, a sigmoid and two logs per cell, although the map's gDNA arm and the RNA arm's unspliced
-density depend on the face alone and only the node's spliced density joins. They are computed once per face now: the
-same IEEE operations in the same order per cell, so the same bits, at half the node loop's transcendentals — the marginal
-6.3 → 4.15 s and the pass 9.6 → 8.5 s on the first sweep. BIT-IDENTICAL on the four VCaP sweeps at 8 threads, the three
-identity references and the suite (3,435 / 5 xfail / 3,440, no gate added: the constructor's analytic gates and the
-replay hold it); timed on VCaP at 8 threads, two interleaved pairs against a worktree carrying the original marginal:
-the pass 36.6 → 29.2 s and 36.2 → 29.2 s (0.80 / 0.81), the sweep 80.5 → 72.7 s and 79.6 → 72.4 s (0.90 / 0.91), calibrate 97.0 → 88.8 s and 95.2 → 88.8 s, the whole run 205.4 → 195.1 s and 201.5 → 197.4 s (0.95 / 0.98 — the scan drifted +1.8 s against the second pair), every other stage 0.94–1.09 (`perf/splice_out_2026-09-18/`). PRICED AND NOT TAKEN: interchanging the blur's loops — one tap at a
-time into every cell, the inner loop a contiguous multiply-add — takes the blur from 3.5 to 2.0 s a first sweep, about
-5 s a run, at a summation-order change that moves `f_g` by at most 2.9e-15 (1.9e-7 of the replay's budget): a number
-moved for 2 % of the run, the owner's call. What the pass still is on the first sweep: the splice-out marginal 4.2 s (a
-log and an exp per cell per node, its floor), the blur 3.5, the transport rows 1.7, the lane hops 1.9.
-
-**ψ takes its priors apart** (2026-09-18; the first of the three commits that land the block in one native call,
-designed on paper first; exact).
-The fitted gDNA arm reached the kernel as an ``(n, K)`` matrix built per block in Python — `landscape.logprior`,
-``np.interp`` of the landscape's curve at ``log f_g + log M − log E``, 2.3 s a refit sweep on VCaP — and the λ-factor
-rows and the delivered rows as one ``(n, K)`` sum. Now `psi_solve` and `psi_cube` take the CURVE ``(log_rho, logP)``
-with the per-slot support ``(mass, eff)`` and read the arm at every cell themselves (`psi_kernel.cpp`'s ``Arm``:
-numpy's interpolation in numpy's order, the ends held, the landscape's clips), and take the λ-factor row and the
-delivered composition row as two inputs added per cell; the dispatcher's ``gdna_prior`` / ``gdna_support`` /
-``lam_logprior`` / ``row_logprior`` are arrays, so layer 3 imports nothing from layer 5. `sweep._gdna_arm` hands the
-curve and the support over (ONE construction site, as before), `landscape.logprior` and `_psi`'s add are deleted, and
-the gates read the arm through `simplex_logodds.gdna_arm` — held to ``np.interp`` of the curve TO THE BIT at both held
-ends and every clip (`test_landscape`), the chunk and thread gates' substrate now carrying a curve on a support. Judged
-BIT-IDENTICAL: the four VCaP sweeps at 8 threads (the kernel's `sigmoid` is scipy's `expit` to the bit on every solve
-grid, checked first), the three identity references; the suite 3,437 passed / 5 xfail / 3,442 collected. No timing pairs: an enabling step for the
-block in one native call, where no ``(n, K)`` prior may cross to Python.
-
-**The factory's log-gamma is the kernel's** (2026-09-18; the second of the three commits; the one that moves a number).
-The intron factory's rows — ``log NegBinom(f_g·C; ρ_bg·E, α_eff)`` per intron slot and cell (`density_deconv._log_negbinom`)
-— read scipy's ``gammaln`` (cephes); inside a native block they are built by the kernel, whose log-gamma is libm's, and the
-two differ in the last bits. So the log-gamma moves FIRST and ALONE: `_log_negbinom` reads `transfer_rows.lgamma`, bound
-beside the trigamma that is the counting variance's one home, and nothing else changes — a two-line change whose whole
-effect the replay's tolerance report attributes: on the four VCaP sweeps at 8 threads every field moves and stays inside the budget — the first sweep's `f_g` on 81,609 slots by at most 5.7e-14 (3.7e-6 of the derived budget), its `var_gdna` on 251,610 by 5.8e-14 (1.9e-8); each refit sweep's `f_g` on about 27,000 slots by at most 2.3e-15 (1.5e-7), `var_gdna` on about 60,000 by 5.9e-14 (3.5e-9); `has_composition` unmoved everywhere. The negative-binomial gates hold the rows to
-``scipy.stats.nbinom`` at their existing tolerance; the three identity references DIFFER at the ulp and are RE-FROZEN with
-this reason (`arms/review_identity_*.json`, the previous set kept beside them as `pre_lgamma_2026-09-18/`); the suite
-3,437 passed / 5 xfail / 3,442 collected (unchanged). The block commit that follows is then owed bit-identity against this tree.
-
-**The block in one native call** (2026-09-18; the third of the three commits; the owner's preferred form of the port's
-step (iv), designed on paper first; bit-identical). THE SWEEP IS ONE NATIVE CALL: `native.solve_blocks`
-(`src/rigel/native/solve_kernel.cpp`, the `_solve_impl` module — ψ's kernel `psi_kernel.h`, the transfer's builders, pass and
-solve `transfer_kernel.h` on plain views of their tables, the row constructors, the locus EM's pool) takes the chain's arrays
-whole, the block table, the priors as their INPUTS — the landscape's curve, the intron factory's background, mask, counts and
-opportunities — the message cache's served deliveries and the thread budget, and runs every locus block end to end on a
-pool of threads pulling the blocks one at a time, each on its own thread and arena: the factory's rows and the arm's shift,
-the SELF-SOLVE ψ, the own-evidence precision (the strand evidence at ``fg_loc``, the factor's curvature with numpy's pairwise
-sums), the LAYER — the builders into the arena's tables, the two passes, the solve — unless the policy is silent or the cache
-served the block, the FINAL ψ with the factory row and the delivered row added per cell, the write-back on the owned slots,
-``has_composition``, and the four assertions as integer counts. Nothing is reduced across blocks but those counts, so the
-answer is BIT-IDENTICAL at every thread count and every block size. The Python that ran per block is GONE: `blocks.block_slice`,
-`sweep._solve_block` / `_message_layer` / `_psi` / `_pass` / `_check_message` / `_write_back` / `_block_diagnostics`,
-`region_init.build_region_init` / `strand_evidence` / `RegionInit`, `density_deconv.density_lambda_factor` / `_log_negbinom` /
-`density_factor_precision`, `messages/faces.py` (`Faces`, `RowTable`), `messages/lanes.py` (`LevelLane`), the `Received` /
-`Levels` / `PsiMessage` / `BlockContext` / `Prepared` types and `TransferPolicy.prepare` / `_PreparedTransfer` — a policy is a
-NAME the kernel switches on, a strand model and a LIBRARY; `sweep.solve_chain` is the structure, the library, the blocks,
-the cache's keys, one call, the counts, the cache's puts and the capture. The cache's key digests the block's slice of the
-very arrays the kernel reads (the chain view, the incoming belief), the factory's digest, the library and the policy — a
-node's own-evidence bit needs no field of its own, being a function of what the key already holds — and an entry is the
-block's delivery as the kernel returns and takes it back (the written rows with their slots, the cube, the owned held bits;
-a silent block's is empty and stored all the same). The gates read the ONE implementation through bindings that allocate
-and return fresh tables (`transfer_prepare` / `transfer_pass` / `transfer_solve`; `transfer_rows.factory_rows` /
-`factor_precision` / `strand_evidence` / `log_negbinom` / `gdna_arm`), the containers moved verbatim from `src/` to
-`tests/calibration/_transfer_harness.py`; the backbone gates drive hand-built chains through the kernel (the echo lane names
-its source, a FORWARD chain recurses); the poison gate poisons the kernel's own tables; the diagnostics capture publishes
-``tau_fac`` beside ``tau_lam`` (`solvability_audit.py` reads it) and the received tables as the kernel's arrays. Two slips the
-replay caught on the way, recorded as traps: the nine marginal nodes typed by hand were off at 1e-8 and moved `f_g` by 1e-7
-(they are scipy's digits now); a product left inside a sum let the compiler fuse it into a multiply-add, one rounding fewer than
-numpy's separate operations (every product is a named temporary). Judged BIT-IDENTICAL: the four VCaP sweeps of
-`sweeps_VCaP_step19` at 8 threads and at 1, the first at another block size, the cache's served path (a sweep served all 426
-of its blocks reproduces the miss sweep and the capture to the bit); the three identity references; the suite 3,430 passed / 5 xfail / 3,435 collected. Timed on
-VCaP at 8 threads, two interleaved pairs against a worktree of the log-gamma commit carrying its own modules: the whole run 198.4 → 144.1 s and 193.9 → 137.6 s (0.73 / 0.71); calibrate 85.6 → 33.7 s and 82.7 → 31.9 s (0.39 / 0.39); the four sweeps 68.8 → 16.8 s and 66.3 → 15.9 s (0.24 / 0.24), the kernel's call 15.7 / 14.9 s of that and the Python around it 1.1 s (the first sweep ≈ 2.8 s, the refit sweep that misses the cache ≈ 7.4 s, each served refit sweep ≈ 3.0 s, from the replay); the peak RSS 11,281 → 10,591 MB and 11,346 → 10,926 MB; the stages outside calibration inside the drift (the scan 0.97 / 0.88, the second pass 1.02 / 0.97, quant 0.94 / 1.01)
-(`perf/block_native_2026-09-18/`). THE CACHE, PRICED FOR THE OWNER: in production the last two refit sweeps are SERVED (the pre run's policy prepare ran 852 = 2 × 426 times over four sweeps, the first sweep and the first refit missing); with the block native a refit sweep that misses replays at 7.4 s at 8 threads and a served one at 3.0 s, so the cache saves about 9 s of a 140 s run (6 %) and costs 2.3 GB held through calibrate at K = 233 (the deliveries: the written rows with their slots, the cubes, the held bits), the keys (0.27 s a sweep) and the deliveries' round trip through Python — message_cache.py, the served list, the deliveries return and their gates; keep or delete is the owner's call.
-
-**The message cache is deleted** (2026-09-18; owner, on the price above). What it saved once the block was native —
-about 9 s of a 140 s run, the two served refit sweeps at 3.0 s against 7.4 s — no longer paid for what it cost: 2.3 GB
-held through calibrate at K = 233; a key that had to name every input the layer reads, three of them (the incoming
-belief, the factory's digest, the library with the policy) wired by hand beside the view's fields, so that a kernel input
-added without its key field would have served stale messages silently; and the deliveries' round trip — the kernel
-packaging every block's written rows, cube and held bits into Python objects and parsing them back on the served path,
-the served branch ordered before the silent one, a silent block's empty entry stored so the next sweep could hit it.
-GONE: `message_cache.py`; `FactoryRows.digest` and `_RowsOfArray.digest`; `solve_chain`'s ``message_cache``; the kernel's
-``served`` and ``deliveries`` arguments, `ServedBlock` and the delivery packaging (under a capture the kernel returns the
-cube rows it delivered and the received tables, nothing else beyond the counts); six gates — the five cache gates of
-`test_sweep_backbone.py` and the served-injection gate of `test_landscape_training_population.py`, whose ruling (that
-`has_composition` reads the held compositions and never the rows) the identity gate beside it holds through the native
-passes. The kernel's contract is arrays in, arrays out, integer counts. BIT-IDENTICAL: the four captured sweeps (the
-refit sweeps replay 7.4 → 7.0 s, the packaging gone), the three identity references; the suite 3,421 passed / 5 xfail /
-3,426 collected. Timed on VCaP at 8 threads, two interleaved pairs against a worktree of the block commit carrying its own
-module: the whole run 140.6 → 148.4 s and 138.1 → 145.1 s (1.06 / 1.05); calibrate 32.4 → 41.6 s and 31.6 → 40.6 s (1.28 / 1.28); the four sweeps 16.1 → 24.8 s and 16.0 → 24.7 s (1.54 / 1.54 — the two refit sweeps that were served now run the layer at K = 233); calibrate's peak RSS 9,430 → 8,163 MB and 9,416 → 7,858 MB, the run's 10,851 → 10,632 MB and 10,452 → 10,326 MB (its peak sits in quant); the stages outside calibration inside the drift (the scan 0.97 / 0.95, the second pass 1.00 / 1.00, quant 1.00 / 1.02) (`perf/cache_deleted_2026-09-18/`).
-
-**`policy_prototype.py` is retired** (2026-09-18; owner). Its mechanism — a Python policy class installed in the
-backbone for one arm, scored beside the shipped policies — cannot exist since the layer runs inside the kernel, and
-an arm that ran the shipped policy under a prototype's name would have been a benchmark that cannot be trusted. A
-message mechanism is prototyped in C++ in a worktree and the two trees are scored with `policy_benchmark.py
---by-class` on the same conditions (the working rule in CLAUDE.md); the per-gene-type table and the slot-by-slot
-dissect went with the harness — `solvability_audit.py` dissects a condition.
-
-**The strand likelihood's executable reference is converged** (2026-09-18; owner: one production path). The
-layer-4 module `strand_likelihood.py` held the two-component gDNA/RNA strand log-likelihood as a readable
-reference that nothing in `src/` called — a second statement of ψ's strand term, kept only for the gate that holds
-the kernel's three-component form to its collapse when one RNA strand is dead. The reference now lives where the
-gates' other oracles live, `tests/calibration/_psi_reference.py` (`strand_loglik` beside `strand_loglik_mixture`), the
-gate is unchanged, and layer 4 is `gdna_strand`, `strand_balance` and `strand_summary`: production only. The suite
-−3 by the module row; nothing in production moved.
-
-**The work outside calibration** (2026-09-19; six phases, each its own commit, all of them bit-identical on the
-three frozen references). The block in one native call changed the balance: calibration became a quarter of a
-deep run and the stages around it the rest, and almost all of the reducible part was PYTHON doing per-object
-work beside array code that already existed. What landed, in order, with what an interleaved pair measured:
-
-* **The gDNA rate's bisection ends when its bracket does.** 200 halvings of a float64 bracket, where about 60
-  close it and the rest reassign a value that can no longer change. The magic constant dies with the loop: the
-  termination rule is now the bracket's own statement about itself. The fit 261 → 163 ms on 80,000 objects.
-* **The Poisson identity's log-gamma is a table.** Its argument is `floor(lam) + 1`, an INTEGER, so the distinct
-  arguments are the integers up to the largest — orders of magnitude fewer than the objects it was evaluated
-  over at every bisection step. The fit 163 → 46 ms, and the values identical rather than approximated.
-* **The region-to-locus overlap is traversed once per assembly**, as `_region_locus_shares` always claimed in
-  its own docstring; `assemble_priors` now hands its triples to the boundary projection. The priors 3.7 → 2.0 s.
-* **The scan's thread budget is split by a measured ratio**, one decompression thread per eight workers, instead
-  of reserving a fixed four — which was the WORST measured cell at every budget (`CLOSED:
-  scan-thread-split-starves-the-workers` keeps both tables). The answer cannot move with it, because every
-  accumulator bank is a sum of integers.
-* **The second pass asks the region-bound axis once per reference.** Its two helpers said in their docstrings
-  that they mirror `Accumulator::sj_edge_id` and `exact_region_bound`, and the scorer already held that
-  accumulator for `length_under`; the rule now has ONE home, bound as a batched `sj_edge_ids`, and a pre-pass
-  answers every question before the loop starts. 2.7 M scalar numpy searches a run become two per reference;
-  scoring the held fragments 11.7 → 8.6 s.
-* **The realized-gDNA census reads its region pairs as arrays.** The adjacent-pair table is a property of the
-  partition, built once from the reference offsets; the per-exon average is a grouped sum, exact because
-  `np.bincount` accumulates in input order and an exon has at most two flanking boundaries. The mean of 1.4 M
-  ratios that fed exons whose weight is identically zero is gone. Each fragment-length fit 8.1 → 2.7 s, and the
-  two together 16.3 → 5.5 s counting the bisection's share.
-* **The sweep's default block size is 1,000 slots.** It sizes the kernel's per-thread arena —
-  `16 · slots · K · 8 B · threads`, 1.19 GB at the old 5,000 — and eight interleaved runs found the sweep's wall
-  FLAT across four sizes while the peak fell by the arena's own arithmetic. What was assumed to be a
-  memory-for-speed trade is not one; calibrate's peak 8.0 → 7.3 GB and the sweep's own 8.0 → 6.8 GB.
-
-THE RUN, two interleaved pairs against a worktree of the tree it started from (`perf/plan_final_2026-09-19/`):
-141.8 → 125.6 s and 143.3 → 125.3 s, 0.88 and 0.87. Calibrate and quant are unchanged by design — nothing here
-touched a kernel — and the run's peak still sits in quant, whose 2.2 GB is the EM's candidate CSR. The suite
-3,423 passed / 5 xfail / 3,428 collected. Two rules this paid for, both now in `ISSUES:
-performance-memory-bounded-solve`: a cProfile share RANKS candidates and never prices them, and a knob's cost is
-measured rather than assumed.
+**The measured price** (VCaP, 18.6 M fragments, 8 threads, interleaved pairs; `perf/` holds each step): the port took
+the deep library from 526 s to 144 s and the four sweeps from 396 s to 16 s (24.8 s once the cache went); the work
+outside calibration that followed — a bisection that ends when its bracket does, the Poisson identity's log-gamma as
+an integer table, one region-to-locus traversal per assembly, the scan's thread split by a measured ratio
+(`ISSUES: scan-thread-split-starves-the-workers`), the second pass asking the region-bound axis once per reference,
+the realized-gDNA census as arrays — took it to 125 s, every step bit-identical on the three frozen references.
+PRICED AND NOT TAKEN: interchanging the blur's loops (about −5 s a run at a summation-order change of 1.9e-7 of the
+replay's budget), the owner's call (`ISSUES: performance-memory-bounded-solve`).
 
 #### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer; native since 2026-09-17, §6b.15.5)
 
@@ -1757,61 +1481,15 @@ library the density model carries the entire own-evidence budget: at κ = ½ the
 (`EQUATIONS.md` §5), and the intron factory is what makes such a library solvable at all. Pass-0 scores
 honest ignorance as error, which is the wrong question: an object with no own evidence reporting
 `f_g ≈ ½` at zero precision is stating a true fact, and the measurement that matters is solvable → right /
-wrong → confidently wrong (`solvability_audit.py`). Where it stands (re-derived 2026-09-14 on both panels
-after the test chromosome's twelfth block, `policy_benchmark.py --by-class` and `calibration_vs_oracle.py`;
-`ROADMAP.md` carries the ranking): in scope the residual sits on the intron's own solve on unstranded
-capture-OFF (the ladder: introns 45 % of `transfer`'s error, `exon|intron` boundaries 14 %, `exon|exon
-[term]` 13 %) and on `exon|exon` boundaries and walled exons on stranded capture-ON (27 % + 18 % + 18 %,
-`exon|intron` 15 %); on the test chromosome the stranded capture-ON residual is the probed exon's own solve
-(licensed-face exons 49 %, walled exons 23 %). The deferred stratum is blind because the gDNA fraction
+wrong → confidently wrong (`solvability_audit.py`). The deferred stratum is blind because the gDNA fraction
 cancels from the strand mean, so an unstranded AMBIG slot has no channel.
 
-**The standing numbers** (2026-09-16, the tree with the expectation ruler on the per-base length and the
-reference's located members landed, on the thirteen-block test chromosome, 273 genes, 7.930 Mb, budget
-1,170 k, and the unchanged ladder) — per stratum, never pooled; `policy_benchmark.py` is
-`silent → transfer`, whole-library Σ|gDNA − truth| in fragments; `calibration_vs_oracle.py` is `P/O gDNA`,
-the region-axis Σ|Δ| and the ruler's factor `P` (the factor the EM divided by; `O`'s equals it by
-construction, since the efficiencies are the solve's output published on the result, so the ruler's truth
-is `ruler_vs_truth.py`, the table after this one). A mechanism is judged against this table. The
-tiny-exon block moved the test chromosome's benchmark rows (its 40 bp pieces are a new stress for the
-message layer: stranded ON 41,856 → 54,362, the ss 0.70 ON rows 64,174 → 105,997), the same on the shipped
-and the landed tree.
-
-| panel · stratum | `policy_benchmark` silent → transfer | `calibration_vs_oracle` P/O · region Σ\|Δ\| · ruler P |
-|---|---|---|
-| ladder · unstranded OFF | 358,551 → 307,288 (0.86×) | 0.9938 · 185,554 · 1.000 |
-| ladder · stranded OFF | 292,673 → 248,976 (0.85×) | 0.9949 · 146,781 · 1.000 |
-| ladder · stranded ON | 598,645 → 426,974 (0.71×) | 0.9954 · 147,440 · 0.057 |
-| ladder · unstranded ON (deferred) | 18,794,723 → 3,581,253 (0.19×) | 0.8543 · 1,039,430 · 0.052 |
-| ladder · g00, four rows (ss .50 OFF / ON, ss .99 OFF / ON) | 396 / 270 / 397 / 247 → 366 / 258 / 353 / 233 | 912 false gDNA of 40.0 M; ruler 1.000, nothing moved |
-| test chromosome · unstranded OFF | 54,758 → 51,114 (0.93×) | 1.0077 · 91,631 · 1.000 |
-| test chromosome · stranded OFF | 48,304 → 45,194 (0.94×) | 1.0062 · 41,080 · 1.000 |
-| test chromosome · stranded ON | 64,955 → 54,362 (0.84×) | 0.9953 · 38,162 · 0.154 |
-| test chromosome · unstranded ON (deferred) | 1,961,507 → 256,702 (0.13×) | 1.0012 · 210,054 · 0.150 |
-| test chromosome · ss 0.70, eight rows (the transition rung) | 148,705 → 155,636 (1.05×) | — |
-| test chromosome · g00, six rows (ss .50 / .70 / .99 × OFF / ON) | 8,758 / 25 / 25,127 / 3,638 / 34,563 / 6,355 → 8,757 / 24 / 8,743 / 24 / 8,946 / 46 | 26,518 false gDNA of 7.0 M; ruler 1.000, nothing moved |
-
-The test chromosome's capture-OFF zero rows are the shadow floor: the unannotated transcription on
-`test_blank`, pinned gDNA by structure (the designed control, `TESTING.md` §0a). The ruler reads exactly
-1.000 at `g00` and on both capture-OFF strata with nothing moved (§7.2), so the metric page is the
-composition's.
-
-**The ruler against the simulator's own effective length** (`ruler_vs_truth.py`, 2026-09-16): the probed
-class's share within ±0.1 nat and the unprobed class's median log error, capture-ON rows, mRNA and
-annotated single-exon transcripts with at least 20 fragments. The test chromosome's in-scope stranded rows:
-`g05` 99 % / +0.19, `g25` 99 % / −0.03, `g50` 99 % / −0.04, `g98` 100 % / — (no unprobed transcript
-qualifies); the deferred unstranded rows `g05` 85 % / −0.52, `g25` 94 % / −0.33, `g50` 98 % / −0.15, `g98`
-99 %; the `g00` rows `None`, everything at factor 1 (declared). The depth ladder at a tenth of the depth:
-`None` below about 120 gDNA fragments, then 12 / 86 / 99 / 99 % of the probed class within ±0.1 at 1 / 5 /
-25 / 50 % gDNA; at a hundredth: `None` through 1 %, then 16 / 91 / 91 % at 5 / 25 / 50 %; at full depth the
-two low rungs 18 % / +1.61 (0.1 %) and 97 % / +0.07 (1 %). The ladder's eight capture-ON rows (about 10 min
-each — the truth sampler on 10 M fragments): the unprobed class +0.33 / +0.45 / +0.43 / +0.35 at `g05 ss.50` /
-`g05 ss.99` / `g50 ss.50` / `g50 ss.99` (none qualifies at `g98`), the partial class within +0.06 to +0.10
-everywhere, the probed class 19–43 % — the junction-spanning panel's witness geometry, 32–38 % under the
-certified true counts too (`ISSUES: ruler-witness-geometry-on-transcript-panels`); the `g00` rows `None`, the
-unprobed class +6.97 at factor 1 (declared). The floor read the unprobed class at +3.4 to
-+3.8 nat on every row; the ideal witness (the certified true counts through the same ruler) reads it at
-+0.06 on `g05 ss.99`.
+Where the error sits, and the standing numbers a mechanism is judged against, are re-derived by the instruments
+and never kept here — per stratum, never pooled: `policy_benchmark.py --by-class` (by node class; the ranking is
+`ROADMAP.md`'s), `calibration_vs_oracle.py` (P/O, the region Σ|Δ|, the ruler's factor), `ruler_vs_truth.py` (the
+ruler against the simulator's own capture-aware length, per probed class). The ruler reads exactly 1 at `g00`
+and on both capture-OFF strata with nothing moved (§7.2); the test chromosome's capture-OFF zero rows carry the
+unannotated transcription on `test_blank`, pinned gDNA by structure (`TESTING.md` §0a).
 
 ### 7.1 The landscape prior — who trains it, where its kernels go, and what axis it lives on (owner rulings 2026-09-06 and 2026-09-10; landed 2026-09-10)
 
