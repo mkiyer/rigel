@@ -156,12 +156,12 @@ class TestPipelineSmoke:
     # -- loci output --
 
     def test_loci_df_schema(self):
-        df = self.pr.estimator.get_loci_df()
+        df = self.pr.estimator.get_loci_df(self.index)
         required = {"locus_id", "mrna", "gdna"}
         assert required.issubset(df.columns), f"Missing columns: {required - set(df.columns)}"
 
     def test_loci_df_nonempty(self):
-        df = self.pr.estimator.get_loci_df()
+        df = self.pr.estimator.get_loci_df(self.index)
         assert len(df) > 0
 
     # -- pipeline stats --

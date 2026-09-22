@@ -7,18 +7,16 @@ locus-level EM.
 For unambiguously-mapping fragments, assignment is deterministic.
 For ambiguous fragments, transcript abundances are estimated via
 per-locus EM, then counts are accumulated from the converged posterior.
-The EM is initialized by a coverage-weighted warm start (each fragment's
-coverage split equally across its candidates) and uses ONLY a pool-level
-gDNA-vs-RNA prior (additive ``a_g`` on gDNA; ``a_r`` on the RNA pool,
-distributed among RNA components in proportion to their current EM count).
-There is NO per-transcript / One-Virtual-Read / Jeffreys prior: a component
-with zero current count receives zero prior mass (em_solver.cpp
-``apply_grouped_prior_update``). The transcript distribution within the RNA
-pool is defined by the data, not a prior.
+The EM starts from the warm start ``EMConfig.warm_start`` names and adds a
+pool-level gDNA-vs-RNA prior per locus (additive ``a_g`` on gDNA; ``a_r`` on
+the RNA pool, shared among the RNA components in proportion to their current
+EM count unless ``rna_prior_weight`` names the shares — em_solver.cpp
+``apply_grouped_prior_update``). Nothing in production fills that lane yet, so
+the transcript distribution within the RNA pool is the data's.
 
 Data containers (``ScoredFragments``, ``Locus``, ``LocusPartition``)
-live in ``rigel.scored_fragments``.  Calibration and prior computation
-live in ``rigel.calibration`` and ``rigel.locus``.
+live in ``rigel.scored_fragments``; the per-locus prior is assembled in
+``rigel.calibration.priors``.
 """
 
 import logging
@@ -28,12 +26,7 @@ import pandas as pd
 
 from .config import EMConfig, TranscriptGeometry
 from .native import batch_locus_em_partitioned as _batch_locus_em_partitioned
-from .splice import (
-    SpliceType,
-    SpliceStrandCol,
-    NUM_SPLICE_STRAND_COLS,
-    SPLICED_COLS,
-)
+from .splice import NUM_SPLICE_STRAND_COLS, SPLICED_COLS
 
 logger = logging.getLogger(__name__)
 
@@ -218,8 +211,7 @@ class AbundanceEstimator:
         # Total gDNA count as assigned by locus EM (sum across all loci)
         self._gdna_em_total = 0.0
 
-        # Per-locus results (locus_id, ref, n_transcripts, n_genes,
-        # n_em_fragments, mrna, gdna, gdna_prior_count).
+        # Per-locus results, one dict per locus (``pipeline._run_locus_em_partitioned``).
         self.locus_results: list[dict] = []
 
         # Per-transcript locus_id assignment (-1 = no locus).
@@ -604,9 +596,8 @@ class AbundanceEstimator:
         # effective lengths.  For genes with zero counts, use the
         # unweighted mean of transcript effective lengths.
         t_eff = self._t_eff_len_output
-        t_counts_flat = total.sum(axis=1)
-        g_eff_num = _aggregate_to_gene(t_to_g, n_genes, t_counts_flat * t_eff)
-        g_eff_den = _aggregate_to_gene(t_to_g, n_genes, t_counts_flat)
+        g_eff_num = _aggregate_to_gene(t_to_g, n_genes, t_counts_all * t_eff)
+        g_eff_den = _aggregate_to_gene(t_to_g, n_genes, t_counts_all)
         g_eff_sum = _aggregate_to_gene(t_to_g, n_genes, t_eff)
         g_eff_cnt = _aggregate_to_gene(t_to_g, n_genes, np.ones_like(t_eff))
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -785,7 +776,7 @@ class AbundanceEstimator:
     # Output - locus-level breakdown
     # ------------------------------------------------------------------
 
-    def get_loci_df(self, index=None) -> pd.DataFrame:
+    def get_loci_df(self, index) -> pd.DataFrame:
         """Locus-level output with three-pool breakdown.
 
         Returns an empty DataFrame (with correct columns) if no loci
@@ -846,12 +837,8 @@ class AbundanceEstimator:
         # Pre-compute per-transcript counts and masks
         t_total = self.t_counts.sum(axis=1)
         t_unambig = self.unambig_counts.sum(axis=1)
-        if index is not None:
-            is_nrna = index.t_df["is_nrna"].values
-            is_synthetic = index.t_df["is_synthetic"].values
-        else:
-            is_nrna = np.zeros(self.num_transcripts, dtype=bool)
-            is_synthetic = np.zeros(self.num_transcripts, dtype=bool)
+        is_nrna = index.t_df["is_nrna"].values
+        is_synthetic = index.t_df["is_synthetic"].values
         locus_ids = self.locus_id_per_transcript
 
         rows = []
@@ -921,57 +908,3 @@ class AbundanceEstimator:
                 }
             )
         return pd.DataFrame(rows, columns=cols)
-
-    # ------------------------------------------------------------------
-    # Output - detail (long format QC breakdown)
-    # ------------------------------------------------------------------
-
-    def get_detail_df(self, index) -> pd.DataFrame:
-        """Detailed counts in long format for QC."""
-        t_ids = index.t_df["t_id"].values
-        g_ids = index.t_df["g_id"].values
-
-        frames = []
-        for source_name, counts in (
-            ("unambig", self.unambig_counts),
-            ("em", self.em_counts),
-        ):
-            cat_counts = np.zeros(
-                (self.num_transcripts, len(SpliceType)),
-                dtype=np.float64,
-            )
-            for cat in SpliceType:
-                sense_col = SpliceStrandCol.from_category(cat, False)
-                anti_col = SpliceStrandCol.from_category(cat, True)
-                cat_counts[:, int(cat)] = counts[:, sense_col] + counts[:, anti_col]
-
-            nz_t, nz_cat = np.nonzero(cat_counts)
-            if len(nz_t) == 0:
-                continue
-            cat_order = [c.name.lower() for c in SpliceType]
-            frames.append(
-                pd.DataFrame(
-                    {
-                        "transcript_id": t_ids[nz_t],
-                        "gene_id": g_ids[nz_t],
-                        "category": pd.Categorical(
-                            [SpliceType(c).name.lower() for c in nz_cat],
-                            categories=cat_order,
-                        ),
-                        "source": source_name,
-                        "count": cat_counts[nz_t, nz_cat],
-                    }
-                )
-            )
-
-        if not frames:
-            return pd.DataFrame(
-                columns=[
-                    "transcript_id",
-                    "gene_id",
-                    "category",
-                    "source",
-                    "count",
-                ]
-            )
-        return pd.concat(frames, ignore_index=True)

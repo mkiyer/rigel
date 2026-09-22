@@ -101,8 +101,8 @@ class TestCrossChunkRegression:
         self._compare_df(df_big, df_tiny, "gene_id")
 
     def test_loci_match(self):
-        df_big = self.pr_big.estimator.get_loci_df()
-        df_tiny = self.pr_tiny.estimator.get_loci_df()
+        df_big = self.pr_big.estimator.get_loci_df(self.index)
+        df_tiny = self.pr_tiny.estimator.get_loci_df(self.index)
         self._compare_df(df_big, df_tiny, "locus_id")
 
     def test_stats_match(self):

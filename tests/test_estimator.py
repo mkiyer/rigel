@@ -701,52 +701,6 @@ class TestCountsOutput:
         assert list(df["gene_id"]) == ["g0", "g0", "g1"]
 
 
-# =====================================================================
-# Detail DataFrame output (long format)
-# =====================================================================
-
-
-class TestDetailOutput:
-    def test_detail_empty(self):
-        index = _make_index()
-        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        df = rc.get_detail_df(index)
-        assert len(df) == 0
-        assert "transcript_id" in df.columns
-        assert "category" in df.columns
-        assert "source" in df.columns
-
-    def test_detail_unambig_only(self):
-        index = _make_index()
-        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        rc.unambig_counts[0, _UNSPLICED_SENSE] = 5.0
-        rc.unambig_counts[2, SpliceStrandCol.SPLICED_ANNOT_SENSE] = 3.0
-
-        df = rc.get_detail_df(index)
-        assert len(df) == 2
-        assert set(df["source"]) == {"unambig"}
-
-    def test_detail_both_sources(self):
-        index = _make_index()
-        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        rc.unambig_counts[0, _UNSPLICED_SENSE] = 5.0
-        rc.em_counts[0, _UNSPLICED_SENSE] = 3.0
-
-        df = rc.get_detail_df(index)
-        assert len(df) == 2
-        assert set(df["source"]) == {"unambig", "em"}
-        assert df["count"].sum() == 8.0
-
-    def test_detail_has_category(self):
-        index = _make_index()
-        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        rc.unambig_counts[0, _UNSPLICED_SENSE] = 1.0
-        rc.unambig_counts[0, SpliceStrandCol.SPLICED_ANNOT_SENSE] = 1.0
-
-        df = rc.get_detail_df(index)
-        assert set(df["category"]) == {"unspliced", "spliced_annot"}
-
-
 class TestPartitionedEffectiveLength:
     """Production partitioned EM must consume per-transcript L̃ values."""
 
