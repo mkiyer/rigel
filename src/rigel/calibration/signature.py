@@ -78,55 +78,8 @@ TS_AMBIG: int = int(RegionStrand.AMBIG)  # 3
 
 
 # ---------------------------------------------------------------------------
-# Pack / validate
-# ---------------------------------------------------------------------------
-
-
-def pack_signature(
-    *,
-    intron_pos: bool = False,
-    intron_neg: bool = False,
-    exon_pos: bool = False,
-    exon_neg: bool = False,
-) -> int:
-    """Pack four annotation flags into the canonical 4-bit signature."""
-    signature = 0
-    if intron_pos:
-        signature |= BIT_INTRON_POS
-    if intron_neg:
-        signature |= BIT_INTRON_NEG
-    if exon_pos:
-        signature |= BIT_EXON_POS
-    if exon_neg:
-        signature |= BIT_EXON_NEG
-    return signature
-
-
-def validate_signature(signature: int) -> int:
-    """Return ``signature`` as int after validating the 4-bit range."""
-    value = int(signature)
-    if value < 0 or value >= N_SIGNATURES:
-        raise ValueError(f"signature must be in [0, 15]; got {signature!r}")
-    return value
-
-
-# ---------------------------------------------------------------------------
 # Coarse derivations
 # ---------------------------------------------------------------------------
-
-
-def coarse_strand_from_signature(signature: int) -> int:
-    """Derive the coarse :class:`RegionStrand` from all active signature bits."""
-    value = validate_signature(signature)
-    has_pos = bool(value & (BIT_INTRON_POS | BIT_EXON_POS))
-    has_neg = bool(value & (BIT_INTRON_NEG | BIT_EXON_NEG))
-    if has_pos and has_neg:
-        return int(RegionStrand.AMBIG)
-    if has_pos:
-        return int(RegionStrand.POS)
-    if has_neg:
-        return int(RegionStrand.NEG)
-    return int(RegionStrand.NONE)
 
 
 def coarse_type_array(signature: np.ndarray) -> np.ndarray:
@@ -148,8 +101,7 @@ def coarse_type_array(signature: np.ndarray) -> np.ndarray:
 def transcript_strand_class(signature: np.ndarray) -> np.ndarray:
     """Map a uint8 signature array to its int8 transcript-strand class.
 
-    Returns one of ``{TS_NONE=0, TS_POS=1, TS_NEG=2, TS_AMBIG=3}`` per region —
-    the vectorised form of :func:`coarse_strand_from_signature` (identical map).
+    Returns one of ``{TS_NONE=0, TS_POS=1, TS_NEG=2, TS_AMBIG=3}`` per region.
     ``TS_NONE`` covers intergenic regions; ``TS_AMBIG`` covers regions with
     transcripts on both strands.
     """
@@ -204,9 +156,6 @@ __all__ = [
     "TS_POS",
     "TS_NEG",
     "TS_AMBIG",
-    "pack_signature",
-    "validate_signature",
-    "coarse_strand_from_signature",
     "coarse_type_array",
     "transcript_strand_class",
     "nrna_active_strands",

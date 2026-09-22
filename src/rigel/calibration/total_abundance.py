@@ -1,25 +1,17 @@
-"""rigel.calibration.total_abundance — the measured total per slot, and the wall mask behind it.
+"""rigel.calibration.total_abundance — the measured REGION count and exposure, and the wall mask behind them.
 
-The one question this module answers: how many fragments per base sit at this object, with no composition
+The one question this module answers: how many fragments per base sit in a region, with no composition
 model anywhere in the answer? It is not a gDNA density and not an RNA density but the pooled total, the
-only density a payload can state before anything is deconvolved. What consumes it is a landscape fitted
-before pass-0, so its inputs must be counts and lengths and nothing that was solved.
+only density a payload can state before anything is deconvolved. Its consumer is the abundance landscape
+fitted before pass-0 (`abundance_landscape`), so its inputs are counts and lengths and nothing solved.
 
 ⛔ It is never ``mass / effective_length``. That divisor is a function of the composition being solved
-for, so the same 100 counts in 500 bp read 0.25 as pure gDNA and 0.33 as pure RNA. Every term below is a
-count over an opportunity that is the same for every component:
-
-* BOUNDARY — the reciprocal-opportunity banks. The crossing opportunity is ``w − 1`` and the deposit
-  ``1/(w − 1)``, so ``E[Σ] = ρ·P(w ≥ 2) = ρ`` for any real library: exact, model-free, at every fragment
-  length. The sj banks complete the face — a spliced fragment crosses its sj, and without that arm a
-  boundary's total is not a total — and the certified spliced population enters as an incidence at its
-  own divisor ``mu_r − 1``. A spliced fragment cannot be gDNA (Axiom 0), so using the RNA pmf there is a
-  certainty, not a composition assumption.
-* REGION — the START/END banks over the region's own length. A fragment's first covered base falls in a
-  region at rate ``ρ·ℓ`` at every fragment length, which is what makes it a total, where the contained
-  bank is only a density shape (``ρ·P(w ≤ ℓ)``, an order of magnitude off at a short exon). The two banks
-  are blind at opposite template ends, so the consumer side-selects: use the side whose wall does not
-  bind, average where both are exact.
+for, so the same 100 counts in 500 bp read 0.25 as pure gDNA and 0.33 as pure RNA. A REGION's total is
+the START/END banks over the region's own length: a fragment's first covered base falls in a region at
+rate ``ρ·ℓ`` at every fragment length, which is what makes it a total, where the contained bank is only a
+density shape (``ρ·P(w ≤ ℓ)``, an order of magnitude off at a short exon). The two banks are blind at
+opposite template ends, so the consumer side-selects: use the side whose wall does not bind, both where
+both are exact.
 
 The wall rule is derived, not tuned: ``A_start(w | d) = min(ℓ, (d + ℓ − w + 1)₊)``, so the start form is
 exact iff the template continues at least ``w_max − 1`` bases past the region's genomic-high bound, and
@@ -28,11 +20,10 @@ the end form mirrors at the genomic-low bound. ``w_max`` is read from the suppor
 is taken at the component minimum over the populations the annotation admits at that slot (Axiom 0's
 ``T(slot)``): gDNA's template is the chromosome, a nascent molecule's is its genomic span (the contiguous
 boundary reach), a mature molecule's is its spliced length
-(:class:`~rigel.calibration.splice_graph.MatureWallDistances`). Where both sides bind, the slot is
-honestly not model-free and says so — the total reads NaN rather than a number no consumer can trust.
+(:class:`~rigel.calibration.splice_graph.MatureWallDistances`). Where both sides bind, the region is
+honestly not model-free and says so.
 
-Nothing here decides anything: it measures, and the landscape fit and the prior are separate rungs with
-separate gates. Its own falsification is ``tests/calibration/test_total_abundance.py``.
+Its own falsification is ``tests/calibration/test_total_abundance.py``.
 """
 
 from __future__ import annotations
@@ -41,17 +32,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .effective_length import UNBOUNDED_REACH, crossing_eff_length
 from .region_arrays import boundary_region_indices
-from .region_chain import BOUNDARY, REGION
 from .signature import mrna_active_strands, nrna_active_strands
 
 
 __all__ = [
     "RegionWallMask",
-    "TotalAbundance",
     "build_region_wall_mask",
-    "build_total_abundance",
     "region_counts_and_exposure",
     "w_max_from_deposited_lengths",
 ]
@@ -100,24 +87,6 @@ class RegionWallMask:
     def double_walled(self) -> np.ndarray:
         """Neither side exact — no deposit rule is model-free at this region."""
         return ~(self.start_exact | self.end_exact)
-
-
-@dataclass(frozen=True, slots=True)
-class TotalAbundance:
-    """The per-slot measured total, counts/bp, on the chain axis.
-
-    ``total`` is NaN exactly where the slot is not model-free (a double-walled REGION); ``model_free``
-    is the mask a fit must select on, and ``start_used``/``end_used`` record which REGION side (or
-    both) the value came from, so a consumer can never mistake an averaged slot for a side-selected
-    one.
-    """
-
-    n_slots: int
-    total: np.ndarray  # float64 (n_slots,)
-    model_free: np.ndarray  # bool (n_slots,)
-    start_used: np.ndarray  # bool (n_slots,)
-    end_used: np.ndarray  # bool (n_slots,)
-    w_max: int
 
 
 def build_region_wall_mask(
@@ -276,72 +245,3 @@ def _check_ledger(s_bank: np.ndarray, e_bank: np.ndarray) -> None:
             f"Σend = {e_bank.sum():.0f}. Each bank takes one increment per deposited fragment, so "
             "this payload is corrupted and its two sides describe different populations."
         )
-
-
-def build_total_abundance(
-    chain,
-    substrate,
-    region_arrays,
-    geometry,
-    wall_mask: RegionWallMask,
-    rna_fl_pmf: np.ndarray,
-) -> TotalAbundance:
-    """Assemble the measured total per slot. No solver, no belief, no composition anywhere.
-
-    Raises through :func:`_check_ledger` when the START/END banks disagree, and again when the RNA
-    fragment-length pmf cannot price a certified-spliced incidence (a non-positive ``mu_r − 1``).
-    """
-    kind = np.asarray(chain.kind)
-    obj = np.asarray(chain.obj_idx, dtype=np.int64)
-    n_slots = int(chain.n_slots)
-    is_region = kind == REGION
-    is_boundary = kind == BOUNDARY
-
-    # One derivation, shared with every pooled consumer: the side selection lives in
-    # `region_counts_and_exposure` and this function only turns its pair into a per-slot rate. A second
-    # copy of the selection is how a consumer and this total would drift apart.
-    counts, exposure, r_free = region_counts_and_exposure(substrate, region_arrays, wall_mask)
-    s_ok_r = np.asarray(wall_mask.start_exact, dtype=bool)
-    e_ok_r = np.asarray(wall_mask.end_exact, dtype=bool)
-
-    total = np.full(n_slots, np.nan, dtype=np.float64)
-    start_used = np.zeros(n_slots, dtype=bool)
-    end_used = np.zeros(n_slots, dtype=bool)
-
-    r_idx = obj[is_region]
-    with np.errstate(invalid="ignore", divide="ignore"):
-        r_rate = np.where(
-            r_free[r_idx],
-            counts[r_idx] / np.where(exposure[r_idx] > 0.0, exposure[r_idx], 1.0),
-            np.nan,
-        )
-    total[is_region] = r_rate
-    start_used[is_region] = s_ok_r[r_idx] & r_free[r_idx]
-    end_used[is_region] = e_ok_r[r_idx] & r_free[r_idx]
-
-    # ── BOUNDARY: the exact crossing banks + the sj faces + certified spliced at mu_r − 1.
-    inv = np.asarray(geometry.inv_abundance, dtype=np.float64)
-    sj_lo = np.asarray(geometry.inv_sj_lo, dtype=np.float64).sum(axis=1)
-    sj_hi = np.asarray(geometry.inv_sj_hi, dtype=np.float64).sum(axis=1)
-    spliced = np.asarray(geometry.spliced_count, dtype=np.float64).sum(axis=1)
-    eff_spliced = float(crossing_eff_length(rna_fl_pmf, UNBOUNDED_REACH, UNBOUNDED_REACH))
-    if not eff_spliced > 0.0:
-        raise ValueError(
-            "the certified-spliced divisor mu_r - 1 is not positive — the RNA fragment-length pmf "
-            "cannot price an incidence."
-        )
-    total[is_boundary] = (
-        inv[is_boundary]
-        + sj_lo[is_boundary]
-        + sj_hi[is_boundary]
-        + spliced[is_boundary] / eff_spliced
-    )
-
-    return TotalAbundance(
-        n_slots=n_slots,
-        total=total,
-        model_free=np.isfinite(total),
-        start_used=start_used,
-        end_used=end_used,
-        w_max=int(wall_mask.w_max),
-    )

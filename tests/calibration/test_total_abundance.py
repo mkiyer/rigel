@@ -1,10 +1,8 @@
-"""Gates for the MEASURED TOTAL — the composition-free per-slot abundance and its wall mask.
+"""Gates for the MEASURED TOTAL — the composition-free region count and exposure, and its wall mask.
 
-The quantity under test: per slot, the TOTAL fragment density (every component pooled), formed with no
-composition model anywhere in it. At a BOUNDARY that is the shipped exact banks plus the certified
-spliced arm at its incidence divisor; at a REGION it is the START/END banks over ``ell``, side-selected
-by the wall rule — a side is exact iff its template distance clears ``w_max - 1``, distances taken at
-the component minimum. Written BEFORE the implementation and verified failing, per the falsification
+The quantity under test: per region, the TOTAL fragment density (every component pooled), formed with no
+composition model anywhere in it — the START/END banks over ``ell``, side-selected by the wall rule — a
+side is exact iff its template distance clears ``w_max - 1``, distances taken at the component minimum. Written BEFORE the implementation and verified failing, per the falsification
 discipline; the brute-force oracles here share no helper with the implementation.
 
 Conventions borrowed from ``test_region_geometry.py``: absolute expected values (rtol=0), every fixture
@@ -21,8 +19,6 @@ import pytest
 
 from rigel.calibration.effective_length import UNBOUNDED_REACH, crossing_eff_length, fl_mean
 from rigel.calibration.region_arrays import RegionArrays
-from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain
-from rigel.calibration.region_geometry import build_region_geometry
 from rigel.calibration.signature import BIT_EXON_POS, BIT_INTRON_POS
 from rigel.calibration.splice_graph import (
     MatureWallDistances,
@@ -32,15 +28,12 @@ from rigel.calibration.substrate import CalibrationSubstrate
 from rigel.calibration.total_abundance import (
     RegionWallMask,
     build_region_wall_mask,
-    build_total_abundance,
+    region_counts_and_exposure,
     w_max_from_deposited_lengths,
 )
 from rigel.types import Strand
 
-from _synthetic import delta_pmf, make_synthetic_payload, make_synthetic_sj
-
-GDNA_PMF = delta_pmf(50, 200)
-RNA_PMF = delta_pmf(80, 200)  # mu_r - 1 == 79, the certified-spliced incidence divisor
+from _synthetic import make_synthetic_payload
 
 
 def regions_from_bounds(bounds, signatures, ref_name="chr1"):
@@ -321,106 +314,50 @@ def test_a_DOUBLE_WALLED_region_has_no_exact_side():
 
 
 # ---------------------------------------------------------------------------
-# The assembly — REGION side selection, BOUNDARY banks, one total per slot
+# The side selection — the (counts, exposure) pair the abundance landscape pools
 # ---------------------------------------------------------------------------
 #
-# The synthetic payload's chain alternates REGION/BOUNDARY over 5 slots (three regions, two
-# boundaries between them). For the REGION gates the END bank
-# is replaced so no region has S == E (the shipped fixture's strand sums tie at 11/12/13 on both banks,
-# which would hide a side swap): S sums (11, 12, 13), E sums (13, 11, 12), both totals still 36 so the
-# ledger holds.
+# The synthetic payload has three regions of ell = 100. The END bank is replaced so no region has S == E
+# (the shipped fixture's strand sums tie at 11/12/13 on both banks, which would hide a side swap):
+# S sums (11, 12, 13), E sums (13, 11, 12), both totals still 36 so the ledger holds.
 
 
 @pytest.fixture
-def assembly_parts():
+def region_parts():
     payload, region_arrays = make_synthetic_payload()
     payload = dataclasses.replace(
         payload,
         region_end_count=np.array([[9, 4], [6, 5], [7, 5]], dtype=np.uint32),
     )
-    substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
-    chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
-    geometry = build_region_geometry(
-        chain, substrate, region_arrays, make_synthetic_sj(), GDNA_PMF, RNA_PMF
-    )
-    return payload, region_arrays, substrate, chain, geometry
+    return payload, region_arrays, CalibrationSubstrate.from_payload(payload, region_arrays)
 
 
-def slot_of(chain, kind, obj):
-    k = np.asarray(chain.kind)
-    o = np.asarray(chain.obj_idx)
-    (idx,) = np.nonzero((k == kind) & (o == obj))
-    assert idx.size == 1
-    return int(idx[0])
-
-
-def test_a_REGION_total_is_the_EXACT_SIDE_over_length_and_the_average_where_both_clear(
-    assembly_parts,
-):
-    """Absolute values, stated by hand: S sums (11, 12, 13), E sums (13, 11, 12), ell = 100.
-    R0 start-only -> 0.11; R1 end-only -> 0.11; R2 both -> (13 + 12) / 200 = 0.125. Distinct S and E
-    per region, so using the wrong side (or ignoring the mask) cannot pass."""
-    payload, ra, substrate, chain, geometry = assembly_parts
+def test_a_REGION_pair_is_the_EXACT_SIDE_and_both_sides_where_both_clear(region_parts):
+    """Absolute values, stated by hand: R0 start-only -> 11 over 100; R1 end-only -> 11 over 100; R2 both
+    -> 13 + 12 over 200. Distinct S and E per region, so using the wrong side (or ignoring the mask)
+    cannot pass."""
+    _payload, ra, substrate = region_parts
     mask = hand_mask(3, start_exact=[True, False, True], end_exact=[False, True, True])
-    t = build_total_abundance(chain, substrate, ra, geometry, mask, RNA_PMF)
-    assert t.total[slot_of(chain, REGION, 0)] == pytest.approx(11 / 100, rel=0, abs=1e-15)
-    assert t.total[slot_of(chain, REGION, 1)] == pytest.approx(11 / 100, rel=0, abs=1e-15)
-    assert t.total[slot_of(chain, REGION, 2)] == pytest.approx(25 / 200, rel=0, abs=1e-15)
-    assert t.start_used[slot_of(chain, REGION, 0)] and not t.end_used[slot_of(chain, REGION, 0)]
-    assert not t.start_used[slot_of(chain, REGION, 1)] and t.end_used[slot_of(chain, REGION, 1)]
-    assert t.start_used[slot_of(chain, REGION, 2)] and t.end_used[slot_of(chain, REGION, 2)]
+    counts, exposure, free = region_counts_and_exposure(substrate, ra, mask)
+    np.testing.assert_array_equal(counts, [11.0, 11.0, 25.0])
+    np.testing.assert_array_equal(exposure, [100.0, 100.0, 200.0])
+    assert free.all()
 
 
-def test_the_START_and_END_banks_are_summed_over_BOTH_strand_columns(assembly_parts):
-    """R0's start bank is [6, 5]: a single-column read gives 0.06 or 0.05, never 0.11."""
-    payload, ra, substrate, chain, geometry = assembly_parts
+def test_the_START_and_END_banks_are_summed_over_BOTH_strand_columns(region_parts):
+    """R0's start bank is [6, 5]: a single-column read gives 6 or 5, never 11."""
+    _payload, ra, substrate = region_parts
     mask = hand_mask(3, start_exact=[True, True, True], end_exact=[False, False, False])
-    t = build_total_abundance(chain, substrate, ra, geometry, mask, RNA_PMF)
-    assert t.total[slot_of(chain, REGION, 0)] == pytest.approx(11 / 100, rel=0, abs=1e-15)
+    counts, _exposure, _free = region_counts_and_exposure(substrate, ra, mask)
+    assert counts[0] == 11.0
 
 
-def test_a_double_walled_REGION_reads_NaN_and_is_NOT_model_free(assembly_parts):
-    payload, ra, substrate, chain, geometry = assembly_parts
+def test_a_double_walled_REGION_contributes_NOTHING_and_is_NOT_model_free(region_parts):
+    _payload, ra, substrate = region_parts
     mask = hand_mask(3, start_exact=[False, True, True], end_exact=[False, True, True])
-    t = build_total_abundance(chain, substrate, ra, geometry, mask, RNA_PMF)
-    s = slot_of(chain, REGION, 0)
-    assert np.isnan(t.total[s])
-    assert not t.model_free[s]
-    assert not t.start_used[s] and not t.end_used[s]
-    assert t.model_free[slot_of(chain, REGION, 1)]
-
-
-def test_a_BOUNDARY_total_is_the_exact_banks_PLUS_certified_spliced_at_its_incidence_divisor(
-    assembly_parts,
-):
-    """Stated by hand off the fixture's distinct banks. Boundary inv_length_sum is 0.20 on both;
-    the sj (POS, region 0 -> region 2) leaves at the first boundary and enters at the second, each
-    with inv_length_sum 1.3; the certified spliced count is 0 at the first and 6 at the second, and
-    its divisor is mu_r - 1 = 79::
-
-        first boundary   0.20 + 1.3 + 0/79 = 1.5
-        second boundary  0.20 + 1.3 + 6/79
-
-    Every term has its own value, so a missing or double-counted arm cannot pass."""
-    payload, ra, substrate, chain, geometry = assembly_parts
-    mask = hand_mask(3, start_exact=[True] * 3, end_exact=[True] * 3)
-    t = build_total_abundance(chain, substrate, ra, geometry, mask, RNA_PMF)
-    lo_b, hi_b = slot_of(chain, BOUNDARY, 0), slot_of(chain, BOUNDARY, 1)
-    assert t.total[lo_b] == pytest.approx(0.20 + 1.3, rel=0, abs=1e-12)
-    assert t.total[hi_b] == pytest.approx(0.20 + 1.3 + 6.0 / 79.0, rel=0, abs=1e-12)
-    assert t.model_free[lo_b] and t.model_free[hi_b]
-
-
-def test_the_certified_spliced_arm_uses_the_COUNT_never_the_mass(assembly_parts):
-    """The fixture's spliced mass at the second boundary is 3.0 where its count is 6: an implementation reading the
-    mass lands at 0.20 + 1.3 + 3/79 and fails the absolute assertion above. Pinned separately so the
-    failure names the defect."""
-    payload, ra, substrate, chain, geometry = assembly_parts
-    mask = hand_mask(3, start_exact=[True] * 3, end_exact=[True] * 3)
-    t = build_total_abundance(chain, substrate, ra, geometry, mask, RNA_PMF)
-    hi_b = slot_of(chain, BOUNDARY, 1)
-    wrong = 0.20 + 1.3 + 3.0 / 79.0
-    assert abs(t.total[hi_b] - wrong) > 1e-6
+    counts, exposure, free = region_counts_and_exposure(substrate, ra, mask)
+    assert not free[0] and counts[0] == 0.0 and exposure[0] == 0.0
+    assert free[1] and free[2]
 
 
 def test_the_spliced_divisor_IS_the_unbounded_crossing_eff_length():
@@ -436,14 +373,14 @@ def test_the_spliced_divisor_IS_the_unbounded_crossing_eff_length():
     assert fl_mean(pmf) - 1.0 == pytest.approx(89.0, rel=0, abs=1e-12)
 
 
-def test_the_builder_REFUSES_a_payload_whose_ledger_does_not_close(assembly_parts):
+def test_the_pair_REFUSES_a_payload_whose_ledger_does_not_close(region_parts):
     """sum(S) == sum(E) is the accumulator's ledger; a payload that violates it is corrupted input
-    and the builder must refuse it rather than average two different populations."""
-    payload, ra, substrate, chain, geometry = assembly_parts
+    and the pair must refuse it rather than average two different populations."""
+    payload, ra, _substrate = region_parts
     bad = dataclasses.replace(
         payload, region_end_count=np.array([[9, 4], [6, 5], [7, 6]], dtype=np.uint32)
     )
     bad_substrate = CalibrationSubstrate.from_payload(bad, ra)
     mask = hand_mask(3, start_exact=[True] * 3, end_exact=[True] * 3)
     with pytest.raises(ValueError):
-        build_total_abundance(chain, bad_substrate, ra, geometry, mask, RNA_PMF)
+        region_counts_and_exposure(bad_substrate, ra, mask)

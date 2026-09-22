@@ -11,9 +11,6 @@ import pysam
 
 from rigel.sim.bam import (
     blocks_to_cigar,
-    premrna_to_genomic_interval,
-    take_from_left,
-    take_from_right,
     transcript_to_genomic_blocks,
 )
 from rigel.sim.genome import MutableGenome
@@ -147,26 +144,6 @@ class TestTranscriptToGenomicBlocks:
         assert blocks == [(40, 50), (100, 150), (200, 220)]
 
 
-class TestPremrnaToGenomicInterval:
-    """Test premrna_to_genomic_interval."""
-
-    def test_pos_strand(self):
-        t = _make_pos_transcript([(100, 200), (300, 400)])
-        # Pre-mRNA spans genomic [100, 400), len=300
-        gstart, gend = premrna_to_genomic_interval(10, 50, t)
-        assert gstart == 110
-        assert gend == 150
-
-    def test_neg_strand(self):
-        t = _make_neg_transcript([(100, 200), (300, 400)])
-        # Pre-mRNA spans [100, 400), len=300
-        # Mirrored: start=300-50=250, end=300-10=290
-        # Genomic: 100+250=350, 100+290=390
-        gstart, gend = premrna_to_genomic_interval(10, 50, t)
-        assert gstart == 350
-        assert gend == 390
-
-
 class TestBlocksToCigar:
     """Test blocks_to_cigar."""
 
@@ -182,35 +159,6 @@ class TestBlocksToCigar:
     def test_three_blocks(self):
         cigar = blocks_to_cigar([(10, 50), (100, 150), (200, 220)])
         assert cigar == [(0, 40), (3, 50), (0, 50), (3, 50), (0, 20)]
-
-
-class TestTakeFromLeftRight:
-    """Test take_from_left and take_from_right."""
-
-    def test_take_left_single_block(self):
-        result = take_from_left([(100, 300)], 50)
-        assert result == [(100, 150)]
-
-    def test_take_left_spanning(self):
-        result = take_from_left([(100, 120), (200, 300)], 50)
-        assert result == [(100, 120), (200, 230)]
-
-    def test_take_right_single_block(self):
-        result = take_from_right([(100, 300)], 50)
-        assert result == [(250, 300)]
-
-    def test_take_right_spanning(self):
-        result = take_from_right([(100, 200), (300, 320)], 50)
-        assert result == [(170, 200), (300, 320)]
-
-    def test_take_left_exact(self):
-        """Take exactly the whole block."""
-        result = take_from_left([(100, 200)], 100)
-        assert result == [(100, 200)]
-
-    def test_take_right_exact(self):
-        result = take_from_right([(100, 200)], 100)
-        assert result == [(100, 200)]
 
 
 class TestWholeGenomeOracleBamOrientation:

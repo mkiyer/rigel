@@ -1020,7 +1020,8 @@ REFUSED twice (2026-08-26 the last, with the measured intron reference as load):
 neither half prices alone (`TRAPS: a-cancelling-defect-pair`), worse on two of three in-scope strata with the
 wins confined to `g00`. The one-sided certified-RNA bound is the only mechanism the zero control endorsed on
 every row (−81.9 %, 8/8) and is panel-negative alone. Revive only with messages on at `g05 ss0.50 capture_on`;
-the confusion matrix is re-derivable from `build_structural_claims` against `slot_truth.npz`.
+the confusion matrix is re-derivable from `build_structural_claims` (deleted unread 2026-09-22; in git)
+against `slot_truth.npz`.
 
 ### parked-capture-pilot-sign
 MOOT 2026-09-14: two capture-ON pilot rows disagreed about the sign of every length correction (2026-08-13);

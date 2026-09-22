@@ -2,10 +2,8 @@
 
 Two groups, with no state between them. The projections map a fragment from a template's own
 coordinates into genomic ones: :func:`transcript_to_genomic_blocks` splits a spliced-transcript
-interval into the exon blocks it covers, and :func:`premrna_to_genomic_interval` shifts an
-unspliced interval; both flip the interval end-for-end on a minus-strand transcript, so callers
-always pass strand-oriented template coordinates. :func:`take_from_left` and
-:func:`take_from_right` cut a read's worth of bases off either end of a block list.
+interval into the exon blocks it covers, flipping it end-for-end on a minus-strand transcript, so
+callers always pass strand-oriented template coordinates.
 
 The BAM group turns blocks into records: :func:`blocks_to_cigar` writes gaps between blocks as
 ``N`` operations, so a fragment spanning a junction reads as spliced, and
@@ -31,9 +29,6 @@ __all__ = [
     "BASE_R2_FLAG",
     "blocks_to_cigar",
     "make_aligned_segment",
-    "premrna_to_genomic_interval",
-    "take_from_left",
-    "take_from_right",
     "transcript_to_genomic_blocks",
 ]
 
@@ -82,18 +77,6 @@ def transcript_to_genomic_blocks(
     return blocks
 
 
-def premrna_to_genomic_interval(
-    frag_start: int,
-    frag_end: int,
-    transcript: Transcript,
-) -> tuple[int, int]:
-    """Map a pre-mRNA-space interval to genomic coordinates."""
-    premrna_len = transcript.end - transcript.start
-    if transcript.strand == Strand.NEG:
-        frag_start, frag_end = premrna_len - frag_end, premrna_len - frag_start
-    return transcript.start + frag_start, transcript.start + frag_end
-
-
 def blocks_to_cigar(blocks: list[tuple[int, int]]) -> list[tuple[int, int]]:
     """Convert genomic blocks to pysam CIGAR tuples."""
     cigar: list[tuple[int, int]] = []
@@ -139,38 +122,3 @@ def make_aligned_segment(
     if tags:
         segment.set_tags(tags)
     return segment
-
-
-def take_from_left(
-    blocks: list[tuple[int, int]],
-    n_bases: int,
-) -> list[tuple[int, int]]:
-    """Take ``n_bases`` from the left side of genomic blocks."""
-    result: list[tuple[int, int]] = []
-    remaining = n_bases
-    for block_start, block_end in blocks:
-        block_len = block_end - block_start
-        if remaining <= 0:
-            break
-        take = min(block_len, remaining)
-        result.append((block_start, block_start + take))
-        remaining -= take
-    return result
-
-
-def take_from_right(
-    blocks: list[tuple[int, int]],
-    n_bases: int,
-) -> list[tuple[int, int]]:
-    """Take ``n_bases`` from the right side of genomic blocks."""
-    result: list[tuple[int, int]] = []
-    remaining = n_bases
-    for block_start, block_end in reversed(blocks):
-        block_len = block_end - block_start
-        if remaining <= 0:
-            break
-        take = min(block_len, remaining)
-        result.append((block_end - take, block_end))
-        remaining -= take
-    result.reverse()
-    return result

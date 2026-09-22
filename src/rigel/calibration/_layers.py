@@ -72,11 +72,9 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         "geometry and the per-slot solve",
         # One slot's own numbers, and psi — the log-density log-odds posterior over (f_pos, f_neg, f_g),
         # which `simplex_logodds` owns and which is the single densest thing in the package.
-        # `total_abundance` is the composition-FREE per-slot total (the START/END banks side-selected
-        # by the wall rule, plus the exact boundary banks) — geometry work, and it reads the geometry.
-        # `structural_claims` is the first pass's substrate — per-slot structural classes derived from
-        # the statics alone (sideways of `region_geometry`, whose statics and `g1_locked` it reads).
-        ("region_geometry", "simplex_logodds", "total_abundance", "structural_claims"),
+        # `total_abundance` is the composition-FREE region count and exposure (the START/END banks
+        # side-selected by the wall rule) — geometry work, and it reads the geometry.
+        ("region_geometry", "simplex_logodds", "total_abundance"),
     ),
     (
         4,

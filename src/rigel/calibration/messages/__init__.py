@@ -162,21 +162,6 @@ class ChainView:
         """The per-slot spliced count over both strands."""
         return self.spliced_count.sum(axis=1)
 
-    def population_size(self) -> np.ndarray:
-        """``|T(slot)|`` — AXIOM 0 made arithmetic.
-
-        ``T(slot) = {gDNA} ∪ {RNA+ if free_pos} ∪ {RNA− if free_neg}``, so the size is
-        ``1 + free_pos + free_neg`` and is ≤ 3 for every slot, always, because it is a function of TWO
-        BITS. That is what makes the three-population rule structural rather than something to remember.
-        ⛔ There is no fourth population: "mature" and "nascent" are not species, and RNA inside an intron
-        is RNA that has not spliced *at that position*.
-        """
-        return (
-            1
-            + np.asarray(self.free_pos, bool).astype(np.int64)
-            + np.asarray(self.free_neg, bool).astype(np.int64)
-        )
-
 
 @runtime_checkable
 class Policy(Protocol):

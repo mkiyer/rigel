@@ -725,7 +725,7 @@ transcripts and materialized as ordinary transcript rows in `index.t_df`, flagge
 `second_pass` `splice` `splice_blacklist` `native` `gtf` `transcript` `annotate` `stats` `types`, plus the
 `report/` and `sim/` subpackages. `calibration/`: `calibrate` (orchestrator) · `splice_graph` (the v8
 index) · `sweep` (the backbone) and `messages/` (the policy: `silent` · `transfer`; the row constructors `native/transfer_rows.h`) ·
-`region_chain` `region_geometry` `region_init` `structural_claims` · `substrate` `region_arrays`
+`region_chain` `region_geometry` `region_init` · `substrate` `region_arrays`
 `signature` · `effective_length` `capture_eff_length` `fl` `sj_opportunity` `gdna_opportunity` ·
 `gdna_strand` `strand_balance` `strand_summary` · `density_deconv`
 `density_model` `landscape` `abundance_landscape` `total_abundance` · `simplex_logodds` `derive` ·

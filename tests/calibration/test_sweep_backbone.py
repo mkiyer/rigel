@@ -261,20 +261,6 @@ def test_a_waiver_is_never_silent():
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
-def test_the_population_set_is_at_most_three_because_it_is_a_function_of_two_bits():
-    """``T(slot) = {gDNA} u {RNA+ if free_pos} u {RNA- if free_neg}``, so ``|T| = 1 + free_pos +
-    free_neg`` and it is in ``{1, 2, 3}`` for every possible input. There are three populations and
-    there is no fourth: "mature" and "nascent" are not species, and RNA inside an intron is RNA that
-    has not spliced at that position. Structural rather than something to remember, which is the
-    point."""
-    for fp in (True, False):
-        for fn in (True, False):
-            ctx = _ctx(free_pos=np.full(N, fp), free_neg=np.full(N, fn))
-            pop = ctx.population_size()
-            assert set(np.unique(pop)) <= {1, 2, 3}
-            assert np.all(pop == 1 + int(fp) + int(fn))
-
-
 def test_PERTURBATION_a_fourth_population_is_REFUSED():
     """Axiom 0's tell, executable: a population set with more than three members. A derivation that
     opens with ``{gDNA, nascent+, nascent-, mature+, mature-}`` produces a wrong table every
