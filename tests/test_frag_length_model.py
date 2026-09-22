@@ -1,9 +1,8 @@
-"""`rigel.frag_length_model.FragmentLengthModel` — the fragment length distribution one library
-component is scored against. The first block gates the model trained by `observe` and `finalize`: its
-construction, the statistics it reports, the likelihood it returns inside and beyond `max_size`, the
-effective length it implies, and its serialization. The second gates the `from_counts` factory, which
-builds the same model from a pre-computed histogram and must agree with the trained one length for
-length.
+"""`rigel.frag_length_model.FragmentLengthModel` in the two shapes production builds: `from_pmf`, the
+scoring and effective-length model built from `calibration.fl`'s pmfs, and the raw-histogram model the
+QC report summarises (`FragmentLengthModel(counts=...)`). Gated: construction, the statistics reported
+(the censored overflow bin excluded where it must be), the effective length implied, the scoring table,
+and the serialization.
 """
 
 import math
@@ -31,43 +30,13 @@ class TestFragmentLengthModelBasic:
         m = FragmentLengthModel(max_size=500)
         assert m.counts.shape == (501,)
 
-    def test_observe_accumulates(self):
-        m = FragmentLengthModel(max_size=100)
-        m.observe(50)
-        m.observe(50)
-        m.observe(75)
-        assert m.n_observations == 3
-        assert m.counts[50] == 2.0
-        assert m.counts[75] == 1.0
-
-    def test_observe_weight(self):
-        m = FragmentLengthModel(max_size=100)
-        m.observe(50, weight=2.5)
-        assert m.n_observations == 2  # int(total_weight) = int(2.5)
-        assert m.counts[50] == 2.5
-        assert m.total_weight == 2.5
-
-    def test_observe_drops_negative(self):
-        m = FragmentLengthModel(max_size=100)
-        m.observe(-10)
-        assert m.total_weight == 0.0
-        assert m.counts[0] == 0.0
-
-    def test_observe_drops_overflow(self):
-        m = FragmentLengthModel(max_size=100)
-        m.observe(999)
-        assert m.total_weight == 0.0
-        assert m.counts[100] == 0.0
-
 
 class TestFragmentLengthModelStatistics:
     @pytest.fixture
     def model_with_data(self):
-        m = FragmentLengthModel(max_size=500)
-        # Add observations at specific sizes
-        for size in [200, 200, 200, 250, 250, 300]:
-            m.observe(size)
-        return m
+        counts = np.zeros(501, dtype=np.float64)
+        counts[200], counts[250], counts[300] = 3.0, 2.0, 1.0  # 200,200,200,250,250,300
+        return FragmentLengthModel(max_size=500, counts=counts)
 
     def test_mean(self, model_with_data):
         # (200*3 + 250*2 + 300*1) / 6 = (600+500+300)/6 = 1400/6 ≈ 233.33
@@ -122,67 +91,6 @@ class TestFragmentLengthModelStatistics:
         assert summ["overflow"]["fraction"] == pytest.approx(0.1)
 
 
-class TestFragmentLengthModelLikelihood:
-    def test_log_likelihood_uniform_when_empty(self):
-        m = FragmentLengthModel(max_size=100)
-        ll = m.log_likelihood(50)
-        assert ll == pytest.approx(-math.log(101))
-
-    def test_log_likelihood_with_data(self):
-        m = FragmentLengthModel(max_size=100)
-        m.observe(50, weight=9.0)
-        # One total pseudo-observation is spread across all bins.
-        expected = math.log((9.0 + 1.0 / 101.0) / 10.0)
-        assert m.log_likelihood(50) == pytest.approx(expected)
-
-    def test_log_likelihood_unseen_size(self):
-        m = FragmentLengthModel(max_size=100)
-        m.observe(50, weight=9.0)
-        expected = math.log((1.0 / 101.0) / 10.0)
-        assert m.log_likelihood(30) == pytest.approx(expected)
-
-    def test_log_likelihood_is_negative(self):
-        m = FragmentLengthModel(max_size=100)
-        m.observe(50)
-        assert m.log_likelihood(50) < 0
-
-    def test_tail_decay_beyond_max_size(self):
-        """Fragments beyond max_size get exponential tail decay."""
-        m = FragmentLengthModel(max_size=100)
-        m.observe(50, weight=9.0)
-        ll_at_max = m.log_likelihood(100)
-        ll_beyond = m.log_likelihood(200)
-        # 100 bp beyond → 100 × log(0.99) ≈ −1.005 extra penalty
-        expected = ll_at_max + 100 * math.log(0.99)
-        assert ll_beyond == pytest.approx(expected)
-
-    def test_tail_decay_monotonically_decreasing(self):
-        """log_likelihood decreases for sizes beyond max_size."""
-        m = FragmentLengthModel(max_size=100)
-        m.observe(50, weight=9.0)
-        ll_101 = m.log_likelihood(101)
-        ll_200 = m.log_likelihood(200)
-        ll_500 = m.log_likelihood(500)
-        assert ll_101 > ll_200 > ll_500
-
-    def test_tail_decay_finalized(self):
-        """Tail decay also works after finalize()."""
-        m = FragmentLengthModel(max_size=100)
-        m.observe(50, weight=9.0)
-        ll_unfin = m.log_likelihood(200)
-        m.finalize()
-        ll_fin = m.log_likelihood(200)
-        assert ll_fin == pytest.approx(ll_unfin)
-
-    def test_tail_decay_empty_model(self):
-        """Tail decay works on empty model (uniform prior)."""
-        m = FragmentLengthModel(max_size=100)
-        ll_at_max = m.log_likelihood(100)
-        ll_beyond = m.log_likelihood(200)
-        expected = ll_at_max + 100 * math.log(0.99)
-        assert ll_beyond == pytest.approx(expected)
-
-
 class TestFragmentLengthModelEffectiveLength:
     @staticmethod
     def _oracle_eff_len(probs, length):
@@ -190,34 +98,10 @@ class TestFragmentLengthModelEffectiveLength:
         usable = (sizes > 0) & (sizes <= length)
         return float(np.sum(probs[usable] * (length - sizes[usable] + 1.0)))
 
-    def test_effective_length_uses_finalized_eb_distribution(self):
-        m = FragmentLengthModel(max_size=10)
-        for _ in range(20):
-            m.observe(2)
-        prior = np.zeros(11, dtype=np.float64)
-        prior[8] = 1000.0
-
-        m.finalize(prior_counts=prior, prior_ess=100.0)
-
-        probs = np.exp(m._log_prob)
-        expected = self._oracle_eff_len(probs, length=8)
-        actual = m.compute_all_transcript_eff_lens(np.array([8]), min_value=0.0)[0]
-        assert actual == pytest.approx(expected)
-
-        raw_probs = (m.counts + 1.0) / (m.total_weight + m.max_size + 1)
-        raw_expected = self._oracle_eff_len(raw_probs, length=8)
-        assert actual != pytest.approx(raw_expected)
-        # mean uses the finalized EB distribution, over the in-range bins
-        # (the >= max_size overflow bin is excluded — see FragmentLengthModel.mean).
-        in_range = probs[: m.max_size]
-        assert m.mean == pytest.approx(
-            float(np.dot(np.arange(m.max_size), in_range) / in_range.sum())
-        )
-
     def test_terminal_bin_is_not_double_counted_for_long_transcripts(self):
-        counts = np.zeros(11, dtype=np.float64)
-        counts[10] = 1000.0
-        m = FragmentLengthModel.from_counts(counts, max_size=10)
+        pmf = np.zeros(11, dtype=np.float64)
+        pmf[10] = 1.0
+        m = FragmentLengthModel.from_pmf(pmf, max_size=10)
 
         probs = np.exp(m._log_prob)
         expected = self._oracle_eff_len(probs, length=20)
@@ -226,36 +110,39 @@ class TestFragmentLengthModelEffectiveLength:
         assert actual == pytest.approx(expected)
 
     def test_from_pmf_preserves_scoring_distribution(self):
+        # mass at length 0 and at the overflow bin, so the zero-length term and the tail base are both
+        # distinguishable from their neighbours
         pmf = np.zeros(11, dtype=np.float64)
-        pmf[2] = 0.25
-        pmf[8] = 0.75
+        pmf[0], pmf[2], pmf[8], pmf[10] = 0.1, 0.2, 0.5, 0.2
 
         m = FragmentLengthModel.from_pmf(pmf, max_size=10)
 
         np.testing.assert_allclose(m.pmf, pmf, rtol=0.0, atol=1e-15)
-        assert m.log_likelihood(2) == pytest.approx(math.log(0.25))
-        assert m.log_likelihood(8) == pytest.approx(math.log(0.75))
+        # the table the scorer reads, and the base its tail decays from
+        assert m._log_prob[2] == pytest.approx(math.log(0.2))
+        assert m._log_prob[8] == pytest.approx(math.log(0.5))
+        assert m._tail_base == pytest.approx(math.log(0.2))
         expected = self._oracle_eff_len(pmf, length=8)
         actual = m.compute_all_transcript_eff_lens(np.array([8]), min_value=0.0)[0]
         assert actual == pytest.approx(expected)
 
 
 class TestFragmentLengthModelSerialization:
+    @staticmethod
+    def _two_fragments():
+        counts = np.zeros(101, dtype=np.float64)
+        counts[50] = counts[60] = 1.0
+        return FragmentLengthModel(max_size=100, counts=counts)
+
     def test_to_dict_structure(self):
-        m = FragmentLengthModel(max_size=100)
-        m.observe(50)
-        m.observe(60)
-        d = m.to_dict()
+        d = self._two_fragments().to_dict()
         assert "summary" in d
         assert "histogram" in d
         assert d["summary"]["n_observations"] == 2
         assert d["summary"]["max_size"] == 100
 
     def test_to_dict_histogram_trimmed(self):
-        m = FragmentLengthModel(max_size=100)
-        m.observe(50)
-        m.observe(60)
-        d = m.to_dict()
+        d = self._two_fragments().to_dict()
         assert d["histogram"]["range"] == [50, 60]
         assert len(d["histogram"]["values"]) == 11  # 50 through 60 inclusive
 
@@ -263,134 +150,6 @@ class TestFragmentLengthModelSerialization:
         m = FragmentLengthModel(max_size=100)
         d = m.to_dict()
         assert d["histogram"]["values"] == []
-
-
-# ── ``FragmentLengthModel.from_counts()`` — the factory for a pre-built histogram ────────────────
-#
-# The library-wide gDNA / RNA fragment length distributions are owned by
-# ``rigel.calibration.fl.FLModels``, which is built from these raw counts; its own tests live in
-# ``tests/calibration/test_fl.py``.
-
-
-# =====================================================================
-# FragmentLengthModel.from_counts() factory
-# =====================================================================
-
-
-class TestFromCounts:
-    """Tests for the from_counts() factory method."""
-
-    def test_basic_creation(self):
-        """Create a model from a simple histogram."""
-        counts = np.zeros(501, dtype=np.float64)
-        counts[200] = 100.0
-        counts[250] = 50.0
-        model = FragmentLengthModel.from_counts(counts)
-
-        assert model._finalized
-        assert model.max_size == 500
-        assert model.total_weight == pytest.approx(150.0)
-        assert model.n_observations == 150
-        assert model._log_prob is not None
-
-    def test_max_size_inferred(self):
-        """max_size is inferred as len(counts) - 1."""
-        counts = np.ones(101)
-        model = FragmentLengthModel.from_counts(counts)
-        assert model.max_size == 100
-
-    def test_explicit_max_size(self):
-        """Explicit max_size with shorter counts array zero-fills."""
-        counts = np.array([0, 0, 10, 20, 10])
-        model = FragmentLengthModel.from_counts(counts, max_size=1000)
-        assert model.max_size == 1000
-        assert model.total_weight == pytest.approx(40.0)
-        assert model.counts[2] == pytest.approx(10.0)
-        assert model.counts[999] == pytest.approx(0.0)
-
-    def test_log_likelihood_matches_trained(self):
-        """from_counts() produces same log_likelihood as observe+finalize."""
-        trained = FragmentLengthModel(max_size=500)
-        for _ in range(100):
-            trained.observe(200)
-        for _ in range(50):
-            trained.observe(300)
-        trained.finalize()
-
-        counts = np.zeros(501, dtype=np.float64)
-        counts[200] = 100.0
-        counts[300] = 50.0
-        factory = FragmentLengthModel.from_counts(counts)
-
-        for length in [0, 100, 200, 250, 300, 500]:
-            assert factory.log_likelihood(length) == pytest.approx(trained.log_likelihood(length))
-
-    def test_tail_decay_works(self):
-        """Queries beyond max_size use exponential tail decay."""
-        counts = np.zeros(501, dtype=np.float64)
-        counts[200] = 100.0
-        model = FragmentLengthModel.from_counts(counts)
-
-        ll_500 = model.log_likelihood(500)
-        ll_600 = model.log_likelihood(600)
-        assert ll_600 < ll_500
-        assert ll_600 == pytest.approx(model._tail_base + (600 - 500) * math.log(0.99))
-
-    def test_empty_counts(self):
-        """Zero-count histogram yields uniform distribution."""
-        counts = np.zeros(101, dtype=np.float64)
-        model = FragmentLengthModel.from_counts(counts)
-        assert model._finalized
-        ll_0 = model.log_likelihood(0)
-        ll_50 = model.log_likelihood(50)
-        assert ll_0 == pytest.approx(ll_50)
-        assert ll_0 == pytest.approx(-np.log(101))
-
-    def test_single_peak(self):
-        """Single-peak histogram: mode has highest likelihood."""
-        counts = np.zeros(501, dtype=np.float64)
-        counts[250] = 1000.0
-        model = FragmentLengthModel.from_counts(counts)
-        assert model.log_likelihood(250) > model.log_likelihood(100)
-        assert model.log_likelihood(250) > model.log_likelihood(400)
-        assert model.mode == 250
-
-    def test_statistics(self):
-        """Finalized statistics use the same posterior predictive PMF as scoring."""
-        counts = np.zeros(501, dtype=np.float64)
-        counts[200] = 100.0
-        counts[300] = 100.0
-        model = FragmentLengthModel.from_counts(counts)
-        # In-range mean of the finalized PMF: symmetric spikes at 200/300 → ~250
-        # (excluding the empty overflow bin's smoothing mass is a <0.01 shift).
-        assert model.mean == pytest.approx(250.0, abs=0.05)
-        probs = np.exp(model._log_prob)
-        expected_median = float(np.searchsorted(np.cumsum(probs), 0.5))
-        assert model.median == pytest.approx(expected_median)
-        assert model.mode in (200, 300)
-
-    def test_from_counts_matches_normal_training(self):
-        """Manually constructed histogram via from_counts matches
-        the same histogram built through observe() calls."""
-        trained = FragmentLengthModel(max_size=500)
-        for _ in range(100):
-            trained.observe(180)
-        for _ in range(200):
-            trained.observe(220)
-        for _ in range(50):
-            trained.observe(260)
-        trained.finalize()
-
-        counts = np.zeros(501, dtype=np.float64)
-        counts[180] = 100
-        counts[220] = 200
-        counts[260] = 50
-        factory = FragmentLengthModel.from_counts(counts)
-
-        for length in range(501):
-            assert factory.log_likelihood(length) == pytest.approx(
-                trained.log_likelihood(length)
-            ), f"Mismatch at length={length}"
 
 
 # The report's fragment-length categories come from `FLModels` rather than from a per-splice-category

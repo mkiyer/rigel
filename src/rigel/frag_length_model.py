@@ -1,38 +1,23 @@
 """
 rigel.frag_length_model — Fragment length distribution model.
 
-Learns the fragment length distribution from fragment-to-transcript
-mappings produced by the BAM-scan stage.  Fragments where all candidate
-transcripts yield the *same* fragment length contribute to training;
-ambiguous fragments are deferred to Bayesian quantification where the
-learned distribution provides a likelihood term.
+Two shapes, and nothing trains it. :meth:`FragmentLengthModel.from_pmf` builds the scoring and
+effective-length model from a pmf that ``calibration.fl.build_fl_models`` derived from the
+accumulator payload; ``FragmentLengthModel(counts=...)`` wraps a raw histogram for the QC report's
+summary statistics.
 
-The distribution is stored as a histogram (float vector) indexed
-by fragment length in bases.  Sizes >= ``max_size`` are clamped into
-a single overflow bin.
+The distribution is stored as a histogram (float vector) indexed by fragment length in bases. Sizes
+>= ``max_size`` are clamped into a single overflow bin.
 
-Typical RNA-seq fragment lengths range from 100–500 bp.  The default
-``max_size=2000`` accommodates the vast majority of libraries.
-
-Fragments whose length exceeds ``max_size`` receive exponential tail
-decay: each additional base-pair beyond the boundary incurs a fixed
-log-probability penalty (``_TAIL_DECAY_LP ≈ log(0.99) ≈ −0.01``
-per bp), so very long fragments are penalised heavily rather than
-assigned the same probability as the overflow bin.
+Fragments whose length exceeds ``max_size`` receive exponential tail decay in the scorer: each
+additional base-pair beyond the boundary incurs a fixed log-probability penalty (the scorer's
+``TAIL_DECAY_LP = log(0.99) ≈ −0.01`` per bp, ``native/constants.h``), so very long fragments are
+penalised heavily rather than assigned the same probability as the overflow bin.
 """
 
-import logging
-import math
 from dataclasses import dataclass, field
 
 import numpy as np
-
-# Per-bp log-probability penalty applied to fragment lengths that exceed
-# max_size.  log(0.99) ≈ −0.01005 per bp, giving:
-#   100 bp over → −1.0 extra log penalty  (≈ 2.7× less likely)
-#   500 bp over → −5.0                    (≈ 150× less likely)
-#  1000 bp over → −10.0                   (≈ 22 000× less likely)
-_TAIL_DECAY_LP: float = math.log(0.99)
 
 #: Default maximum fragment length tracked individually.
 #: Sizes >= this go into a single overflow bin.  Must match
@@ -45,8 +30,6 @@ DEFAULT_MAX_FRAG_SIZE: int = 1000
 # the histogram.
 _UNSEEN_FL_SMOOTHING_ESS: float = 1.0
 
-logger = logging.getLogger(__name__)
-
 
 @dataclass
 class FragmentLengthModel:
@@ -57,18 +40,16 @@ class FragmentLengthModel:
         fragment length exactly *k*.
       - ``counts[max_size]``: overflow bin for fragment lengths >= max_size.
 
-    Training
-    --------
-    Call :meth:`observe` with each unambiguous fragment length.  After
-    training, :meth:`log_likelihood` returns the log-probability
-    of a given fragment length under the learned distribution.
+    :meth:`from_pmf` gives the finalized scoring model (``_log_prob`` and ``_tail_base`` are what
+    the scorer reads); the ``counts=`` constructor gives the raw QC view, whose statistics read the
+    histogram itself.
 
     Attributes
     ----------
     max_size : int
         Maximum fragment length tracked individually (sizes >= this
         go into the overflow bin).  Queries above this receive
-        exponential tail decay (see ``_TAIL_DECAY_LP``).
+        exponential tail decay in the scorer.
     counts : np.ndarray
         Float64 histogram of shape ``(max_size + 1,)``.
     """
@@ -86,8 +67,7 @@ class FragmentLengthModel:
         self._prob: np.ndarray | None = None
         self._stats_use_prob: bool = False
         self._finalized: bool = False
-        # Lazy cache for _build_eff_len_cache(); populated on first call
-        # after finalize() and invalidated when the model is re-finalized.
+        # Lazy cache for _build_eff_len_cache(), populated on the first call on a finalized model.
         self._cdf_cache: np.ndarray | None = None
         self._cmom_cache: np.ndarray | None = None
 
@@ -108,43 +88,6 @@ class FragmentLengthModel:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_counts(
-        cls,
-        counts,
-        max_size: int | None = None,
-    ) -> "FragmentLengthModel":
-        """Create a finalized model from a pre-set histogram.
-
-        Useful for tests and scenarios that need a model with a known
-        distribution without going through the observe/finalize cycle.
-
-        Parameters
-        ----------
-        counts : array-like
-            Histogram of fragment length frequencies.  Index *k*
-            corresponds to fragment length *k*.  The last element is
-            the overflow bin.  If shorter than ``max_size + 1``, the
-            remaining bins are zero-filled.
-        max_size : int or None
-            Maximum fragment length tracked individually.  If *None*,
-            inferred as ``len(counts) - 1``.
-
-        Returns
-        -------
-        FragmentLengthModel
-            A finalized model ready for ``log_likelihood()`` calls.
-        """
-        counts = np.asarray(counts, dtype=np.float64)
-        if max_size is None:
-            max_size = len(counts) - 1
-        model = cls(max_size=max_size)
-        n = min(len(counts), max_size + 1)
-        model.counts[:n] = counts[:n]
-        model._total_weight = float(model.counts.sum())
-        model.finalize()
-        return model
-
-    @classmethod
     def from_pmf(
         cls,
         pmf,
@@ -153,8 +96,8 @@ class FragmentLengthModel:
         """Create a finalized model from an already-normalized PMF.
 
         This is intended for calibrated scoring surfaces whose probabilities
-        have already been regularized and normalized upstream. Unlike
-        :meth:`from_counts`, it does not add an extra unseen-bin reserve.
+        have already been regularized and normalized upstream, so it adds no
+        unseen-bin reserve.
         """
         prob_in = np.asarray(pmf, dtype=np.float64)
         if prob_in.ndim != 1:
@@ -194,25 +137,6 @@ class FragmentLengthModel:
         return model
 
     # ------------------------------------------------------------------
-    # Training
-    # ------------------------------------------------------------------
-
-    def observe(self, frag_length: int, weight: float = 1.0) -> None:
-        """Record one fragment length observation.
-
-        Parameters
-        ----------
-        frag_length : int
-            Fragment fragment length (must be >= 0).
-        weight : float
-            Observation weight (default 1.0).
-        """
-        if frag_length < 0 or frag_length > self.max_size:
-            return
-        self.counts[frag_length] += weight
-        self._total_weight += weight
-
-    # ------------------------------------------------------------------
     # Distribution properties
     # ------------------------------------------------------------------
 
@@ -226,8 +150,8 @@ class FragmentLengthModel:
     def pmf(self) -> np.ndarray:
         """Public probability vector, shape ``(max_size + 1,)``.
 
-        Returns the finalized posterior predictive after :meth:`finalize`,
-        or a pre-finalize smoothed estimate from raw counts. This is the
+        Returns the finalized pmf of a :meth:`from_pmf` model, or a smoothed
+        estimate from the raw counts of a QC view. This is the
         *same* vector used internally by
         :meth:`compute_all_transcript_eff_lens` and the analytical
         moment helpers, so consumers that need the underlying PMF (e.g.
@@ -326,129 +250,6 @@ class FragmentLengthModel:
         return float(self.counts[self.max_size])
 
     # ------------------------------------------------------------------
-    # Finalization (call after training, before scoring)
-    # ------------------------------------------------------------------
-
-    def finalize(
-        self,
-        prior_counts: np.ndarray | None = None,
-        prior_ess: float | None = None,
-    ) -> None:
-        """Pre-compute log-likelihood lookup table for fast scoring.
-
-        Builds ``_log_prob`` array so ``log_likelihood()`` becomes a
-        single array index instead of 2× ``np.log`` per call.
-
-        Also caches the tail-decay base value so that queries beyond
-        ``max_size`` can be answered with a single multiply-add.
-
-        Parameters
-        ----------
-        prior_counts : np.ndarray or None
-            Optional Dirichlet prior pseudocounts (typically the global
-            FL histogram).  When provided, the log-probability table
-            becomes the posterior predictive of a Dirichlet-Multinomial:
-
-                p[k] = (count[k] + prior[k] + α) / (N + N_prior + A)
-
-            where ``A`` is one total pseudo-observation spread uniformly
-            across all bins and ``α = A / K``.
-
-            This shrinks the estimate toward the prior when
-            category-specific data is sparse.  With zero category
-            observations, the model equals the prior — ensuring
-            symmetric FL scoring between RNA and gDNA.
-
-        prior_ess : float or None
-            Effective sample size to normalize ``prior_counts`` to.
-            When provided, the prior histogram is rescaled so its total
-            weight equals ``prior_ess``, controlling how quickly
-            category-specific data overrides the prior.  With
-            ``N_cat`` category observations, the category has
-            ``N_cat / (N_cat + prior_ess)`` influence.
-        """
-        n = self.max_size + 1
-        smoothing_total = _UNSEEN_FL_SMOOTHING_ESS
-        smoothing_per_bin = smoothing_total / n
-        prior_total = 0.0
-        if prior_counts is not None:
-            # Dirichlet-Multinomial posterior predictive.
-            # Align prior to our bin count (handles mismatched max_size).
-            pc = np.zeros(n, dtype=np.float64)
-            m = min(n, len(prior_counts))
-            pc[:m] = prior_counts[:m]
-            # Normalize prior to the requested ESS.
-            # Cap at raw_total so we never amplify beyond the observed data.
-            raw_total = float(pc.sum())
-            if prior_ess is not None and raw_total > 0:
-                ess = min(prior_ess, raw_total)
-                pc *= ess / raw_total
-            prior_total = float(pc.sum())
-            prob = (self.counts + pc + smoothing_per_bin) / (
-                self._total_weight + prior_total + smoothing_total
-            )
-        elif self._total_weight == 0:
-            prob = np.full(n, 1.0 / n, dtype=np.float64)
-        else:
-            prob = (self.counts + smoothing_per_bin) / (self._total_weight + smoothing_total)
-        self._prob = np.asarray(prob, dtype=np.float64)
-        self._log_prob = np.log(self._prob)
-        self._stats_use_prob = self._total_weight > 0.0 or prior_total > 0.0
-        self._tail_base: float = float(self._log_prob[self.max_size])
-        self._finalized = True
-        # Invalidate eff-len cache so it rebuilds against the new _prob.
-        self._cdf_cache = None
-        self._cmom_cache = None
-
-    # ------------------------------------------------------------------
-    # Likelihood for Bayesian quantification
-    # ------------------------------------------------------------------
-
-    def log_likelihood(self, frag_length: int) -> float:
-        """Log-probability of a fragment length under the learned distribution.
-
-        Uses a small symmetric reserve to avoid -inf for unseen sizes.
-        Fragment lengths beyond ``max_size`` receive exponential tail decay:
-        ``log_prob[max_size] + (frag_length − max_size) × _TAIL_DECAY_LP``.
-
-        Parameters
-        ----------
-        frag_length : int
-            Query fragment length.
-
-        Returns
-        -------
-        float
-            Log-probability (natural log).
-        """
-        if frag_length > self.max_size:
-            # Exponential tail decay beyond the histogram
-            if self._finalized:
-                base = self._tail_base
-            else:
-                total = self._total_weight
-                if total == 0:
-                    base = -math.log(self.max_size + 1)
-                else:
-                    smoothing_per_bin = _UNSEEN_FL_SMOOTHING_ESS / (self.max_size + 1)
-                    base = float(
-                        np.log(self.counts[self.max_size] + smoothing_per_bin)
-                        - np.log(total + _UNSEEN_FL_SMOOTHING_ESS)
-                    )
-            return base + (frag_length - self.max_size) * _TAIL_DECAY_LP
-
-        idx = max(frag_length, 0)
-        if self._finalized:
-            return float(self._log_prob[idx])
-        total = self._total_weight
-        if total == 0:
-            return -math.log(self.max_size + 1)
-        smoothing_per_bin = _UNSEEN_FL_SMOOTHING_ESS / (self.max_size + 1)
-        return float(
-            np.log(self.counts[idx] + smoothing_per_bin) - np.log(total + _UNSEEN_FL_SMOOTHING_ESS)
-        )
-
-    # ------------------------------------------------------------------
     # eCDF-based effective length computation
     # ------------------------------------------------------------------
 
@@ -476,10 +277,8 @@ class FragmentLengthModel:
             cdf[k] = sum_{l=0}^{k} P(l)
             cmom[k] = sum_{l=0}^{k} l * P(l)
 
-        After ``finalize()`` the model is immutable; the cumulative
-        arrays are computed once and memoized.  Pre-finalize callers
-        get a fresh recompute on every call (the histogram may still
-        change).
+        A finalized model is immutable, so its cumulative arrays are
+        computed once and memoized; a raw QC view recomputes on every call.
         """
         if self._finalized and self._cdf_cache is not None:
             return self._cdf_cache, self._cmom_cache
