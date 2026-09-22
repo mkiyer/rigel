@@ -45,7 +45,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (
         1,
         "the payload view",
-        # What a fragment tally MEANS. `splice_graph` is the v8 index; `substrate` and `region_arrays` are
+        # What a fragment tally MEANS. `splice_graph` is the index's; `substrate` and `region_arrays` are
         # the accumulator's banks presented as per-object arrays.
         ("splice_graph", "substrate", "region_arrays"),
     ),

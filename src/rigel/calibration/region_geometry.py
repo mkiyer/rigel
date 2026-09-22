@@ -190,8 +190,7 @@ def build_region_geometry(
     BOUNDARY, RNA     ``UNBOUNDED_REACH`` by ruling ⇒ ``mu_r − 1``. An unspliced crossing is a
                       MIXTURE whose RNA half alone is bounded, so reach there is per COMPONENT;
                       the untapered form carries a known genome-wide gDNA over-call of about a
-                      tenth. A per-boundary taper would be an A/B, never run; its switch was
-                      removed (2026-09-13) rather than carried unfed
+                      tenth. A per-boundary taper would be an A/B, never run
     sj, RNA           the real exonic per-strand reach. A sj is used only by a molecule that
                       spliced across it, so its divisor is the spliced one
     ================  ==========================================================================

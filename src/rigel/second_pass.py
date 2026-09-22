@@ -236,9 +236,8 @@ def _resolve_intron_lookups(payload, accumulators) -> tuple[np.ndarray, np.ndarr
     """Every question the scoring loop will ask of the region-bound axis, answered per reference.
 
     The loop asks two things about each hypothesis intron: which annotated sj it is, if any — the
-    kernel's own `Accumulator.sj_edge_ids`, so the rule has ONE home and this file no longer carries a
-    second copy of it — and the local boundary range that separates the genomic path from a path
-    splicing it (:func:`_distinguishing_boundaries`). Asked one intron at a time each was a numpy call,
+    kernel's own `Accumulator.sj_edge_ids`, so the rule has ONE home — and the local boundary range that
+    separates the genomic path from a path splicing it (:func:`_distinguishing_boundaries`). Asked one intron at a time each was a numpy call,
     2.7 M of them on a deep library; asked per reference they are two.
 
     Returns three arrays over the FLAT hypothesis-intron axis (`hypothesis_intron_offsets` indexes it):
@@ -263,7 +262,7 @@ def _resolve_intron_lookups(payload, accumulators) -> tuple[np.ndarray, np.ndarr
         hyp_of
     ]
     # the motif the lookup filters on: the OBSERVED one when the aligner wrote it, else the hypothesis's
-    # own implied strand — the rule `_sj_id` applied per intron
+    # own implied strand
     observed = np.asarray(d.sj_strand, dtype=np.int64)[frag_of]
     implied = np.asarray(d.hypothesis_sj_strand, dtype=np.int64)[hyp_of]
     motif = np.where(observed != int(Strand.NONE), observed, implied).astype(np.int32)

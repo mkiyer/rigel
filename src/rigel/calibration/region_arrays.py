@@ -71,7 +71,7 @@ class RegionArrays:
 
         This and :func:`~rigel.calibration.splice_graph.build_region_partition_arrays` are the two
         halves of one contract — the calibration geometry must address the payload the scanner
-        produced — so they read the same frame (``index.regions_df``, the v8 splice graph) through
+        produced — so they read the same frame (``index.regions_df``, the splice graph) through
         one accessor. Passing a frame by hand is how the two drift apart, and nothing downstream
         detects that except as a shape error far from its cause.
         """

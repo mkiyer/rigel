@@ -75,7 +75,7 @@ _LOCATED_VAR = 1.0
 @dataclass(frozen=True)
 class DensityLandscape:
     """A fitted population gDNA-density hyperprior: ``logP`` over a natural-log rate grid, entering ψ
-    as exact Bayes (a temperature on the term was a tunable nothing ever moved; retired 2026-09-13).
+    as exact Bayes.
 
     ψ reads the curve ITSELF, at the density every cell of every slot implies — ``log ρ_c = log f_g + log M −
     log E`` on the slot's gDNA support — with numpy's interpolation and the ends held constant off the grid
@@ -262,8 +262,8 @@ def _reliability(count: np.ndarray, var: np.ndarray, anchor: np.ndarray) -> np.n
     width performs identically, so that form is a global bandwidth under another name, and it inflates false
     enrichment on zero-gDNA libraries). AT the floor it is admission — a slot whose log-count is uncertain by
     more than one nat² has no location, as a count below one fragment has none, and it is not a training
-    slot (2026-09-14: the four ladder zero controls 500 → 282, 211 → 194, 550 → 265, 231 → 172 with every
-    contaminated stratum unchanged or better).
+    slot (the four ladder zero controls read 500 → 282, 211 → 194, 550 → 265, 231 → 172 under it, with
+    every contaminated stratum unchanged or better).
 
     On unstranded data the weight does not separate enriched from depleted within a region class; it
     separates classes (exons being down-weighted against introns and intergenic), and every enriched

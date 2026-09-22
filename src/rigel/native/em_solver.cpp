@@ -692,7 +692,7 @@ static inline double nonnegative_finite(double x) {
 // Split the locus into gDNA and RNA, add the calibration prior to each, and hand the RNA share out
 // among the RNA components in proportion to the evidence each already carries.
 //
-// ⭐ EVERY RNA COMPONENT RECEIVES ITS SHARE, AND NONE IS SINGLED OUT FOR ZERO (owner, 2026-09-19).
+// ⭐ EVERY RNA COMPONENT RECEIVES ITS SHARE, AND NONE IS SINGLED OUT FOR ZERO.
 // RNA is RNA: whether the annotation happens to assert a given RNA component — a synthetic nascent
 // entity is a shadow span this index manufactured — is not a fact about this locus's composition, so
 // the allocation does not read it. The rule the prior implements is therefore sayable in one line:

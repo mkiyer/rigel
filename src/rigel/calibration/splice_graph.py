@@ -1,4 +1,4 @@
-"""The v8 splice graph: the calibration partition of regions and boundaries.
+"""The splice graph: the calibration partition of regions and boundaries.
 
 This module builds what the accumulator deposits into and what the solver reads, and it validates
 that structure against the annotation it came from. It also owns the CSR array factories the rest
@@ -258,7 +258,7 @@ def build_splice_graph(
     transcripts: list[Transcript],
     ref_lengths: Mapping[str, int],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Build ``(regions_df, edges_df)`` — the v8 splice graph. Fully vectorised; no per-region Python object.
+    """Build ``(regions_df, edges_df)`` — the splice graph. Fully vectorised; no per-region Python object.
 
     Deterministic by construction: ``np.unique`` sorts, region ids are assigned by position,
     boundaries by ``(src, kind, dst)``. No dict iteration order, no hashing and no parallel

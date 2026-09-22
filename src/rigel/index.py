@@ -739,7 +739,7 @@ def build_index_artifacts(
     transcripts: list[Transcript],
     ref_lengths: dict[str, int],
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Build ``intervals.feather`` and the v8 splice graph (``regions`` + ``boundaries``).
+    """Build ``intervals.feather`` and the splice graph (``regions`` + ``boundaries``).
 
     The per-reference layout (intergenic / genic spans) feeds ONLY the cgranges-style annotated
     interval table (:func:`_emit_genomic_intervals`). The calibration partition is built
@@ -785,7 +785,7 @@ class TranscriptIndex:
 
     def __init__(self):
         self.index_dir: str | None = None
-        #: the v8 splice graph's region partition; :meth:`load` requires it (older formats are refused).
+        #: the splice graph's region partition; :meth:`load` requires it (older formats are refused).
         self.regions_df = None
         self.edges_df = None
         self.t_df: pd.DataFrame | None = None
@@ -1040,7 +1040,7 @@ class TranscriptIndex:
         if write_tsv:
             sj_df.to_csv(output_dir / SJ_TSV, sep="\t", index=False)
 
-        # -- Genomic intervals + the v8 splice graph --------------------------
+        # -- Genomic intervals + the splice graph -----------------------------
         logger.info("[START] Building genomic intervals + the splice graph")
         iv_df, regions_df, edges_df = build_index_artifacts(transcripts, ref_lengths)
         logger.info(
@@ -1262,7 +1262,7 @@ class TranscriptIndex:
         for name, path in ((REGIONS_FEATHER, regions_path), (BOUNDARIES_FEATHER, boundaries_path)):
             if not os.path.exists(path):
                 raise RuntimeError(
-                    f"Index at {index_dir} is missing {name} (the v8 splice graph). "
+                    f"Index at {index_dir} is missing {name} (the splice graph). "
                     f"Rebuild the index (rigel index --fasta ... --gtf ... -o {index_dir})."
                 )
         self.regions_df = load_regions(regions_path)

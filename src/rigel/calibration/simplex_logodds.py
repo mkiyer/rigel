@@ -53,8 +53,8 @@ float64, one slot at a time on the slot's own cube. A single-strand region (exac
 ``allow_neg``) has its tilt fixed by its live strand, so it is the one-column case — a 1-D solve over ``λ``
 at the 1-D cost — and AMBIG regions (both set) marginalise the tilt over the windowed θ nodes and the two
 atoms. :func:`_solve_regions_logodds_all` is the dispatcher: the reference defaults, the signal mask, the
-delivered cube rows packed, one native call, both classes on ONE λ lattice (ruled 2026-09-13: a finer
-single-strand grid with a regrid between the two measured worse than one lattice). Structurally RNA-free
+delivered cube rows packed, one native call, both classes on ONE λ lattice (a finer single-strand
+grid with a regrid between the two measured worse than one lattice). Structurally RNA-free
 regions (neither strand live — intergenic / TSS / TES) have no composition dof and never reach the solver:
 ``sweep.solve_chain`` gates them out via ``solvable``, so no reference is applied to a region whose
 composition is known structurally. The gates read ψ through the same code: :func:`psi_cube` (the cube),

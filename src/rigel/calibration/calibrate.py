@@ -8,9 +8,8 @@ composition has three sources: the STRAND LIKELIHOOD (the Beta-Binomial tilt of 
 counts, the only intrinsic signal, entering as its overdispersed Fisher information rather than as a
 raw count); the MESSAGES from its chain neighbours (:mod:`.messages`, each hop priced inside the
 sweep from the two nodes' own counts); and the POPULATION gDNA PRIOR (the intergenic-only background
-pool plus the phase-2 density landscape — both `fit_intron_background` call sites pass
-``include_introns=False``, because an intron-inclusive pool is inflated by nascent RNA worst exactly
-where gDNA is scarce). The solver is the belief-propagation SWEEP over the ``N E N E … N`` chain
+pool plus the phase-2 density landscape — `fit_intron_background` runs with ``include_introns=False``,
+because an intron-inclusive pool is inflated by nascent RNA worst exactly where gDNA is scarce). The solver is the belief-propagation SWEEP over the ``N E N E … N`` chain
 (:mod:`rigel.calibration.sweep`)::
 
     substrate  (five populations on three axes)
@@ -498,8 +497,7 @@ def _abundance_landscape(payload, substrate, region_arrays, inj, mature_walls, b
     (`CalibrationDiagnostics.from_abundance_landscape`) and nothing in the solve reads it. Without the
     wall inputs (``mature_walls``, ``boundary_reach``) it is SKIPPED, LOUDLY, never raised for: many unit
     and toy callers have no wall arrays and want no panel, so the object stays ``None`` and the report
-    omits the panel rather than carrying a quietly different estimate. (An on/off switch on this fit was a
-    tunable nothing ever turned off; retired 2026-09-13.)"""
+    omits the panel rather than carrying a quietly different estimate."""
     if inj is not None and inj.abundance_landscape is not None:
         return inj.abundance_landscape
     if mature_walls is None or boundary_reach is None:
@@ -623,8 +621,7 @@ def _solve(s: _Solve, _debug):
     re-solve with it as ψ's composition arm; ``calib_refit_iters`` times, each refit's landscape the
     E-step's start for the next. Every sweep runs the whole message layer: the messages never read the
     prior, so on one grid a refit's messages equal the previous refit's, and recomputing them costs the
-    kernel about four seconds a sweep on the deep library at eight threads — cheaper than the cache that
-    once shared them (deleted 2026-09-18).
+    kernel about four seconds a sweep on the deep library at eight threads — cheaper than caching them.
 
     Returns ``(belief, belief_pass0, hyperprior)`` — the final belief, the prior-free one, and the last
     fitted landscape (``None`` if no refit ran). With ``_debug`` the last sweep fills
