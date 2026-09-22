@@ -417,7 +417,7 @@ def test_a_run_that_never_reaches_assemble_priors_RAISES(measured, monkeypatch):
     silently-absent capture would read as "a condition with no loci and therefore no error" — the most
     flattering possible failure of the harness.
     """
-    monkeypatch.setattr(PV, "quant_from_buffer", lambda *a, **k: (None, None))
+    monkeypatch.setattr(PV, "quant_from_buffer", lambda *a, **k: None)
     with pytest.raises(RuntimeError, match="never called"):
         PV.capture_priors(None, None, None, None, None, None, None, PipelineConfig())
 

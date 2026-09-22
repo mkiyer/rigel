@@ -7,9 +7,13 @@ The pipeline reads the BAM file **once** via the C++ native BAM scanner
 (``_bam_impl``) and processes fragments in two logical stages:
 
 **BAM Scan** (``scan_and_buffer``): Parse all fragments in C++ via htslib,
-resolve each against the reference index, train strand and fragment-length
-models from unique-mapper fragments, and buffer all resolved fragments into
-a memory-efficient columnar buffer (``FragmentBuffer``).
+resolve each against the reference index, train the strand models from
+unique-mapper fragments, tally the calibration payload, and buffer all
+resolved fragments into a memory-efficient columnar buffer (``FragmentBuffer``).
+
+**The second pass and calibration** (``run_pipeline``): drain the held
+fragments, fit the fragment-length models on the drained payload, and
+calibrate.
 
 **Quantification** (``quant_from_buffer``): score buffered fragments,
 construct MultiLoci, assemble the per-locus gDNA/RNA split prior from the
@@ -88,8 +92,8 @@ class PipelineResult:
     # Per-region genome-wide gDNA track (ref/start/end + gDNA mass/density/frac),
     # built from the calibration result; feeds the report's genome track + bedGraph.
     calibration_track: "object" = None
-    # Report-facing calibration diagnostics (the fitted gDNA-density KDE); None
-    # when the Phase-2 KDE was not fit (e.g. tiny / toy scenarios).
+    # Report-facing calibration diagnostics (the total-density landscape's KDE); None
+    # when the landscape was not fit (no wall inputs).
     calibration_diagnostics: "object" = None
 
 
@@ -249,10 +253,6 @@ def scan_and_buffer(
     # molecule (contiguous, spanning whatever transcripts lie under it) from a real rearrangement.
     resolve_ctx.set_max_fragment_length(int(scan.max_frag_length))
 
-    # nRNA parent-index wiring (set_nrna_parent_index) is performed by
-    # TranscriptIndex.load() at index-load time, so no need to repeat
-    # it here.
-
     # Create the native scanner
     sj_spec = _sj_tag_to_spec(scan.sj_strand_tag)
     scanner = _NativeBamScanner(
@@ -262,16 +262,9 @@ def scan_and_buffer(
         include_multimap=scan.include_multimap,
     )
 
-    # Calibration region wiring: install the per-genome v8 region partition into the scanner so
-    # per-region evidence is collected during the scan.
-    #
-    # A missing partition must RAISE rather than skip. An index that cannot supply one would
-    # otherwise disable calibration with no error anywhere, and the whole pipeline would run as
-    # though the library had no gDNA. The two cases are separated: a MISSING graph is a broken index
-    # and raises; an EMPTY one (every reference of length 0) is a degenerate genome with genuinely
-    # nothing to deposit, and is skipped.
-    # A genome whose references are all zero-length has no regions and nothing to deposit; the loader
-    # guarantees the graph itself is present.
+    # Calibration region wiring: install the splice graph's region partition into the scanner so
+    # per-region evidence is collected during the scan. The loader refuses an index without the graph;
+    # a genome whose references are all zero-length has no regions and nothing to deposit.
     if len(index.regions_df) > 0:
         _wire_calibration_regions(
             scanner,
@@ -334,8 +327,7 @@ def scan_and_buffer(
     )
     strand_models.log_summary()
 
-    # Calibration payload — Phase B: build the AccumulatorPayload from
-    # the C++ scanner's fractional-accumulator results.
+    # The calibration payload: the C++ scanner's accumulator tally, typed.
     from .scan_payload import AccumulatorPayload
 
     # The provenance covers regions AND boundaries. The payload is boundary-keyed by
@@ -459,7 +451,7 @@ def _wire_calibration_regions(
     index: TranscriptIndex,
     max_frag_length: int,
 ) -> None:
-    """Install the index's v8 splice graph into a native BamScanner: the region partition, then the sj.
+    """Install the index's splice graph into a native BamScanner: the region partition, then the sj.
 
     :func:`~rigel.calibration.splice_graph.build_region_partition_arrays` flattens the per-reference
     partition into the ``(region_bounds, ref_region_bound_offsets, n_refs, region_types, max_length)`` ABI, and
@@ -582,10 +574,8 @@ def _score_fragments(
 
 
 def _assign_locus_ids(estimator: AbundanceEstimator, multi_loci: list) -> None:
-    """Stamp ``multi_locus_id`` onto every transcript on the estimator.
-
-    Required by the nRNA-fraction prior cascade in the C++ EM.
-    """
+    """Stamp ``multi_locus_id`` onto every transcript on the estimator — the ``locus_id`` column of the
+    output tables and the annotated BAM's ZL tag."""
     for locus in multi_loci:
         for t_idx in locus.transcript_indices:
             estimator.locus_id_per_transcript[int(t_idx)] = locus.multi_locus_id
@@ -788,14 +778,14 @@ def quant_from_buffer(
     log_every: int = 1_000_000,
     annotations: "AnnotationTable | None" = None,
     emit_locus_stats: bool = False,
-) -> tuple[AbundanceEstimator, "CalibrationResult"]:
-    """Quantify buffered fragments: calibration prior → per-locus EM (PR 6).
+) -> AbundanceEstimator:
+    """Quantify buffered fragments: calibration prior → per-locus EM.
 
     Scores the buffer (RNA/gDNA FL models built from the calibrated pmfs),
     builds connected-component loci, turns the per-region ``CalibrationResult``
     into the per-locus gDNA/RNA split prior (``assemble_priors``), partitions
     the global CSR, and runs the per-locus EM. Returns the populated
-    ``AbundanceEstimator`` and the (unchanged) ``CalibrationResult``.
+    ``AbundanceEstimator``.
     """
     from .calibration.priors import assemble_priors
     from .locus import build_multi_loci
@@ -804,7 +794,7 @@ def quant_from_buffer(
     em_config = em_config or EMConfig()
     scoring_cfg = scoring or FragmentScoringConfig()
 
-    # Scorer FL models from the calibrated pmfs (PR 4c FLModels → scoring LUTs).
+    # Scorer FL models from the calibrated pmfs.
     # The SCORER eats the REALIZED (library-census) law, not the uniform-frame one. The per-fragment
     # length term conditions on "this fragment is IN the library", so capture's selection belongs in
     # its pmf; the opportunity/prior mathematics assumes uniform placement and keeps `gdna_pmf`.
@@ -833,8 +823,8 @@ def quant_from_buffer(
     multi_loci = build_multi_loci(em_data, index)
     _assign_locus_ids(estimator, multi_loci)
 
-    if getattr(em_data, "n_units", 0) == 0 or not multi_loci:
-        return estimator, calibration
+    if em_data.n_units == 0 or not multi_loci:
+        return estimator
 
     priors = assemble_priors(calibration, region_arrays, multi_loci)
     partitions = partition_and_free(em_data, multi_loci)
@@ -851,7 +841,7 @@ def quant_from_buffer(
         emit_locus_stats=emit_locus_stats,
     )
     del partitions
-    return estimator, calibration
+    return estimator
 
 
 # ---------------------------------------------------------------------------
@@ -887,13 +877,8 @@ def run_pipeline(
 
     bam_path = str(bam_path)
 
-    # -- Resolve sj_strand_tag "auto" → concrete tag(s) --
-    # Use the C++ implementation (htslib) instead of the pysam-based
-    # ``detect_sj_strand_tag`` because pysam's Cython tracing hooks
-    # are corrupted when a cProfile profiler has been active during
-    # a prior nanobind C++ extension call in the same process.
-    # The native function returns a spec string ("XS", "ts", "XS,ts",
-    # or "none") which ``_sj_tag_to_spec`` already handles.
+    # -- Resolve sj_strand_tag "auto" → concrete tag(s): a spec string ("XS", "ts", "XS,ts" or
+    # "none") read by htslib, which ``_sj_tag_to_spec`` already handles --
     scan = config.scan
     if scan.sj_strand_tag == "auto":
         detected_spec = _native_detect_sj_tag(bam_path)
@@ -907,11 +892,7 @@ def run_pipeline(
         calibration_payload, index, strand_models, seed=config.second_pass_seed
     )
 
-    # -- Calibration (acyclic) --
-    # Build the region geometry, verify it lines up 1:1 with the accumulator
-    # payload, then hand both (plus the trained strand model and the gDNA FL pmf)
-    # to the calibrator. Single feed-forward pass: deconvolve each region into
-    # gDNA/RNA and derive ρ_0 + per-region exposure.
+    # -- Calibration: deconvolve every region and boundary into gDNA / RNA+ / RNA− --
     from .calibration import calibrate
     from .calibration.region_arrays import RegionArrays
     from .calibration.splice_graph import (
@@ -1007,7 +988,7 @@ def run_pipeline(
         )
 
     try:
-        estimator, calibration = quant_from_buffer(
+        estimator = quant_from_buffer(
             buffer,
             index,
             strand_models,
@@ -1025,7 +1006,7 @@ def run_pipeline(
         buffer.cleanup()
 
     # -- Second BAM pass: write annotated BAM (opt-in) --
-    if config.annotated_bam_path is not None and annotations is not None:
+    if annotations is not None:
         from .annotate import write_annotated_bam
 
         write_annotated_bam(
