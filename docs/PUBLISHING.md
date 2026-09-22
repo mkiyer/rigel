@@ -34,7 +34,7 @@ what a release contains (the changelog and git). Cutting a release is two comman
 
 ### `release.sh X.Y.Z` — stage 1 (fast)
 
-1. Validates version format, clean tree, branch is `main`, tag free.
+1. Validates version format, no uncommitted changes to tracked files, branch is `main`, tag free.
 2. Auto-finishes the CHANGELOG:
    - renames `## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD` (or verifies an
      explicit `## [X.Y.Z]` section already exists);

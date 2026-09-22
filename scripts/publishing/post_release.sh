@@ -18,11 +18,12 @@
 
 set -euo pipefail
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# ANSI-C quoted, so the codes are real escape characters in the closing heredoc as well as in `echo -e`.
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[1;33m'
+BLUE=$'\033[0;34m'
+NC=$'\033[0m'
 
 die()  { echo -e "${RED}Error:${NC} $1" >&2; exit 1; }
 info() { echo -e "${GREEN}✓${NC} $1"; }

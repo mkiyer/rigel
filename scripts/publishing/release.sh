@@ -5,7 +5,7 @@
 #   ./scripts/publishing/release.sh 0.4.0
 #
 # What it does (stage 1 of the release pipeline):
-#   1. Validates the version and repo state (clean tree, on main, tag free).
+#   1. Validates the version and repo state (no uncommitted changes to tracked files, on main, tag free).
 #   2. Auto-updates CHANGELOG.md:
 #        - replaces `## [Unreleased]` with `## [X.Y.Z] - YYYY-MM-DD` (if present)
 #        - verifies a `## [X.Y.Z]` section exists
@@ -71,6 +71,11 @@ cd "$(git rev-parse --show-toplevel)" || die "Not in a git repository"
 
 BRANCH=$(git branch --show-current)
 [[ "$BRANCH" == "main" ]] || die "Must be on 'main' (currently on '$BRANCH')"
+
+# The release commit must be exactly the tagged tree: an uncommitted change to a tracked file would be
+# left out of it. Untracked files (a sandbox note) do not block a release.
+git diff --quiet && git diff --cached --quiet || \
+    die "Tracked files have uncommitted changes. Commit or stash them before releasing."
 
 # PyPI refuses re-uploads, so we never reuse a version that PyPI already has.
 if PYPI_JSON=$(curl -sf "https://pypi.org/pypi/rigel-rnaseq/${VERSION}/json" 2>/dev/null); then
