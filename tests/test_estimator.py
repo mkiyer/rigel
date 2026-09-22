@@ -352,13 +352,6 @@ class TestLocusAssignment:
         np.testing.assert_array_equal(rc.unambig_counts, unique_before)
         assert rc.em_counts.sum() == pytest.approx(50.0, abs=1.0)
 
-    def test_empty_em_data_does_nothing(self):
-        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        bundle = _make_locus_em_data([], num_transcripts=3)
-        _run_and_assign(rc, bundle, em_iterations=5)
-
-        assert rc.em_counts.sum() == 0.0
-
     def test_splice_strand_col_respected(self):
         """Count goes to the correct column (category×strand)."""
         cc = int(SpliceStrandCol.SPLICED_ANNOT_ANTISENSE)

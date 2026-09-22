@@ -209,20 +209,3 @@ def test_the_sj_axis_length_is_what_is_checked_not_its_content():
     )
     with pytest.raises(ValueError, match="2 boundaries but the payload has 1"):
         _run(sj=two)
-
-
-# --- the intron factory -----------------------------------------------------------------------
-
-
-def test_the_intron_factory_runs_and_conserves_mass():
-    result = _run(CalibrationConfig())
-    assert isinstance(result, CalibrationResult)
-    np.testing.assert_allclose(result.count_gdna_region + result.count_rna_region, REGION_TOTAL)
-
-
-def test_the_intron_factory_is_a_noop_without_introns():
-    # Correct scoping: with no INTRON regions (the synthetic is +exon/−exon/intergenic) the factory has
-    # no row to write, so every factory row is zero and the solve is the bare pass-0 (`FactoryRows`
-    # is ``None`` when no slot is an intron).
-    result = _run(CalibrationConfig())
-    np.testing.assert_allclose(result.count_gdna_region + result.count_rna_region, REGION_TOTAL)

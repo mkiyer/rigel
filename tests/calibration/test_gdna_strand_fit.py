@@ -291,15 +291,6 @@ def test_exon_intron_and_gene_edge_boundaries_both_seed():
     np.testing.assert_allclose(total, [100.0, 100.0])
 
 
-def test_an_ambig_flank_cannot_seed():
-    """Annotated sense + antisense at one place has no defined sense: no orientation, no seed."""
-    substrate, ra, rd = _parts(
-        [BIT_INTRON_POS | BIT_INTRON_NEG, BIT_INTRON_POS], boundary_pos=[70.0], boundary_neg=[30.0]
-    )
-    sense, _ = boundary_seeds(substrate, ra, rd.boundary_count_observable)
-    assert sense.shape == (0,)
-
-
 def test_intergenic_regions_are_not_seeds_but_intron_regions_are():
     """An intergenic region has no gene strand to orient by — the lemma cannot protect it — so it is OUT of
     the od fit; an intron region of a gene is IN, with no weight."""
@@ -854,7 +845,7 @@ def test_an_opposite_strand_boundary_is_not_strand_observable():
 
 
 def test_an_AMBIG_flank_cannot_seed():
-    """PERTURBATION: nothing else pins this rule.
+    """PERTURBATION: this test is the rule.
 
     A flank carrying overlapping ± transcripts has no defined transcript sense, so neither genome
     column is "sense" and the boundary cannot seed a strand fit. ``boundary_strand_orientation`` used to carry

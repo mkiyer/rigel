@@ -400,20 +400,14 @@ CASES: list[tuple[str, dict]] = [
 ]
 
 
-def test_every_named_case_is_byte_identical():
-    """The battery, deposited into one accumulator pair in order so the state accumulates."""
-    reference, native = _pair()
-    _assert_parity(reference, native, "empty")
-    for label, kw in CASES:
-        _deposit_both(reference, native, label, **kw)
-
-
-def test_the_battery_reaches_every_arbitration_OUTCOME():
-    """Non-vacuity for the block above. Byte-identity over a bank nothing ever wrote is free: with the
-    hypothesis cases removed the deferred queue stays empty and the gap census stays all-zero, so the
-    whole arbitration half of the deposit would be compared only against zeros.
+def test_the_battery_is_byte_identical_and_reaches_every_arbitration_OUTCOME():
+    """The battery, deposited into one accumulator pair in order so the state accumulates, parity
+    asserted after every case; and its non-vacuity. Byte-identity over a bank nothing ever wrote is
+    free: with the hypothesis cases removed the deferred queue stays empty and the gap census stays
+    all-zero, so the whole arbitration half of the deposit would be compared only against zeros.
     """
     reference, native = _pair()
+    _assert_parity(reference, native, "empty")
     for label, kw in CASES:
         _deposit_both(reference, native, label, **kw)
 
