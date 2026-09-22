@@ -320,5 +320,5 @@ class TestConfigRoundTrip:
         assert cfg.scan.fragments_per_chunk == 1234
 
     def test_scan_buffer_default_is_two_gib(self):
-        """PR06 lowers the default scan buffer cap to 2 GiB."""
+        """The default scan buffer cap is 2 GiB, as the manual and --help state."""
         assert BamScanConfig().buffer_size_bytes == 2 * 1024**3

@@ -898,9 +898,9 @@ class TestResolvedFragment:
     def test_intergenic_returns_none(self, mini_index):
         """Fragment in intergenic region -> resolves with empty t_inds.
 
-        SRD v2: zero-candidate fragments are no longer dropped at the
-        resolver boundary; they flow through with empty ``t_inds`` so
-        SRD calibration can categorize them as INTERGENIC.
+        Zero-candidate fragments are not dropped at the resolver boundary; they
+        flow through with empty ``t_inds`` so calibration can deposit them as
+        INTERGENIC.
         """
         r = _resolve(mini_index, [_exon("chr1", 1500, 1600)])
         assert r is not None

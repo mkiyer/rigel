@@ -1,6 +1,5 @@
 """The toy harness — a mini chromosome a test defines, calibrated in seconds with every object's answer beside
-its truth. A TEST SUBSTRATE, loaded by ``test_toy_harness.py`` (its gates) and ``test_encompassing_locus.py``;
-it was the instrument ``scripts/design/toy_harness.py`` until 2026-09-22, when the shelf was cut.
+its truth. A TEST SUBSTRATE, loaded by ``test_toy_harness.py`` (its gates) and ``test_encompassing_locus.py``.
 
 A toy spec is a handful of genes with exactly the structure under interrogation, simulated, scanned,
 drained by the second pass exactly as production runs it, split by origin, and calibrated, with the
@@ -49,77 +48,8 @@ from rigel.pipeline import (  # noqa: E402
 from rigel.scan_cache import index_derived_inputs  # noqa: E402
 from rigel.sim import CaptureConfig, GDNAConfig, ReadSimConfig, Scenario  # noqa: E402
 
-_EPS = 1.0e-12
-
-DEFAULT_SUITE = Path.home() / "Downloads/rigel_runs/suite/ladder"
-DEFAULT_INDEX = Path.home() / "Downloads/rigel_runs/suite/rigel_index"
-
 #: Coarse region type names, shared with every other instrument (`signature.coarse_type_array`).
 TYPE_NAMES = {0: "intergenic", 1: "intron", 2: "exon"}
-
-
-# ──────────────────────────────────────────────────────────────────────────────────────────────────
-# The message setting is part of the arm, and it is stamped
-# ──────────────────────────────────────────────────────────────────────────────────────────────────
-#
-# An instrument can die the day a policy default flips while the suite stays green, because the test
-# readers install the policy themselves (`TRAPS: a-green-suite-hid-five-dead-instruments`). So an
-# instrument whose question is not the message layer's takes `--messages {off,on}` (`zero_controls.py`),
-# prints `messages_stamp()`, and reads its policy off the config it ran — never off a bank a policy may
-# or may not publish.
-
-#: What the tool ships, re-derived rather than written down — the honest default for an instrument
-#: whose headline question does not involve the message layer at all.
-MESSAGES_SHIPPED: bool = CalibrationConfig().message_policy != "silent"
-
-
-def add_messages_flag(ap, *, default: bool) -> None:
-    """Give an instrument the `--messages {off,on}` flag, with its own honest default.
-
-    `default=MESSAGES_SHIPPED` for an instrument whose measurement is policy-independent — it then
-    runs the configuration the tool ships. `default=True` for one whose measurement is the message
-    layer, stamped as such on every run."""
-    ap.add_argument(
-        "--messages",
-        choices=("off", "on"),
-        default="on" if default else "off",
-        help=f"message propagation across objects. This instrument defaults to "
-        f"{'on' if default else 'off'}; the SHIPPED CalibrationConfig is "
-        f"{'on' if MESSAGES_SHIPPED else 'off'}. Stamped into the output either way.",
-    )
-
-
-def messages_on(args) -> bool:
-    """The parsed flag as a bool."""
-    return args.messages == "on"
-
-
-def with_messages(config: CalibrationConfig, messages: bool) -> CalibrationConfig:
-    """The same config with messages on or off. No monkeypatching: `calibrate` installs the policy
-    `message_policy` names — the shipped one when on, `SilentPolicy` when off."""
-    shipped = CalibrationConfig().message_policy
-    on = config.message_policy if config.message_policy != "silent" else shipped
-    return dataclasses.replace(config, message_policy=on if messages else "silent")
-
-
-def policy_name(config: CalibrationConfig) -> str:
-    """The policy `calibrate` installs for this config, by its name."""
-    return config.message_policy
-
-
-def messages_stamp(messages: bool) -> str:
-    """The line every one of these instruments prints, so a reader can never mistake which
-    configuration produced the numbers below it."""
-    shipped = CalibrationConfig()
-    pol = policy_name(with_messages(shipped, messages))
-    if messages == MESSAGES_SHIPPED:
-        note = "  (the shipped config)"
-    else:
-        note = f"  ⛔ NOT the shipped config (shipped is {'ON' if MESSAGES_SHIPPED else 'OFF'})"
-    line = f"   messages = {'ON ' if messages else 'OFF'}  ·   policy = {pol}{note}"
-    if not messages:
-        line += "\n   ⛔ ψ carries each slot's OWN evidence alone: no message was sent, so nothing was delivered."
-    return line
 
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -885,8 +815,3 @@ SPECS: dict[str, ToySpec] = {
         n_rna_fragments=20_000,
     ),
 }
-
-
-def exon_bp(spec: ToySpec) -> int:
-    """Total exonic bases across the spec's transcripts — the denominator for RNA density."""
-    return int(sum(e - s for g in spec.genes for t in g["transcripts"] for s, e in t["exons"]))

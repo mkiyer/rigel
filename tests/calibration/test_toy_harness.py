@@ -249,9 +249,8 @@ def test_EVERY_object_with_mass_is_reported(donor, spec, tmp_path):
         "ISSUES: two-sided-exon-row — with `transfer` the shipped default (2026-09-09) a channel-free "
         "exon beside a pure-gDNA intron holds two floors and no ceiling (rung 2's plateau above the "
         "face map's ceiling) and sits at the measured intron reference: |Δf_g| 0.848 dry against "
-        "0.098 wet. The wall that closes it is refused on the ladder and the probe panels; the relay "
-        "passed because its reframe carried a two-sided Gaussian. Closed by an enrichment witness, "
-        "never by widening the bound."
+        "0.098 wet. The wall that closes it is refused on the ladder and the probe panels. Closed by "
+        "an enrichment witness, never by widening the bound."
     ),
 )
 def test_the_harness_REPRODUCES_the_intron_composition_dependence(donor, spec, tmp_path):

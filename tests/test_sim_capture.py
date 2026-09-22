@@ -972,9 +972,8 @@ class TestCaptureMovesTheLengthMarginal:
         assert on > off, f"RNA mean length {off:.2f} (off) -> {on:.2f} (on)"
 
     def test_g_s5_the_gdna_to_rna_length_gap_narrows_under_capture(self, arms):
-        """The quantity the solver actually consumes. `mu_g - mu_r` is the ONLY thing that
-        identifies the fragment-length channel: at equal component means it carries exactly zero
-        information about composition at any depth."""
+        """`mu_g - mu_r` is the only thing that would let fragment length identify composition: at
+        equal component means it carries exactly zero information at any depth."""
         gap_off = abs(arms["off"]["gdna"] - arms["off"]["rna"])
         gap_on = abs(arms["on"]["gdna"] - arms["on"]["rna"])
         assert gap_on < gap_off, f"|mu_g - mu_r| {gap_off:.2f} (off) -> {gap_on:.2f} (on)"
