@@ -47,13 +47,10 @@ import numpy as np
 __all__ = [
     "UNBOUNDED_REACH",
     "BaseTaper",
-    "LandedMoments",
     "base_taper",
     "contained_eff_length",
-    "contained_moments",
     "crossing_base_shares",
     "crossing_eff_length",
-    "crossing_moments",
     "fl_mean",
 ]
 
@@ -161,152 +158,6 @@ def crossing_eff_length(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
-#  THE OPPORTUNITY-TILTED LENGTH MOMENTS
-#
-#  A fragment that LANDED at an object is not a draw from the library pmf — it is a draw from the
-#  OPPORTUNITY-TILTED one, ``g(w) = f(w)·A(w) / E_f[A]``, because a length the object had more room for
-#  is over-represented among the fragments it caught. These are that tilted pmf's moments, in the same
-#  two frames :func:`contained_eff_length` and :func:`crossing_eff_length` use, and ``eff`` IS those two
-#  functions' output — which is what lets a consumer assert the two against each other rather than
-#  maintain two implementations of one quantity.
-#
-#  A tilted moment is geometry, not a composition claim, which is why it lives here beside the
-#  opportunities it is a functional of.
-# ═══════════════════════════════════════════════════════════════════════════════════════════════════
-
-
-@dataclass(frozen=True, slots=True)
-class LandedMoments:
-    """The five moments of the opportunity-tilted length distribution ``g_c`` at each object.
-
-    ``m1 = E[u]``, ``m2 = E[w]``, ``q1 = E[u²]``, ``q2 = E[w²]``, ``q12 = E[u·w]`` — everything the
-    conditional mean and covariance of ``(sum u, sum w)`` need, and nothing else. ``eff`` is the
-    tilt's own normaliser ``E_c[A]``, carried so a consumer can assert it against the divisor the
-    solver used: they are the same quantity, and two implementations of one quantity is how they
-    come to differ.
-
-    All arrays are per object, or scalars broadcastable over objects.
-    """
-
-    m1: np.ndarray
-    m2: np.ndarray
-    q1: np.ndarray
-    q2: np.ndarray
-    q12: np.ndarray
-    eff: np.ndarray
-
-
-def _pmf_cumulants(fl_pmf: np.ndarray):
-    """Cumulative sums of ``f(w)·w^k`` for ``k ∈ {−2,−1,0,1,2,3}`` — the whole of the region frame.
-
-    ``w = 0`` contributes 0 to every reciprocal sum: a zero-length fragment does not exist, and the
-    pmf is 0 there in every real model. Guarding it here rather than trusting the input is what
-    keeps a stray ``f(0) > 0`` from producing an infinity three call frames away.
-    """
-    p = np.asarray(fl_pmf, dtype=np.float64)
-    total = float(p.sum())
-    p = p / total if total > 0.0 else p
-    w = np.arange(p.shape[0], dtype=np.float64)
-    inv = np.zeros_like(w)
-    np.divide(1.0, w, out=inv, where=w > 0.0)
-    return (
-        np.cumsum(p),  # F   = Σ f
-        np.cumsum(p * inv),  # C1  = Σ f/w
-        np.cumsum(p * inv * inv),  # C2  = Σ f/w²
-        np.cumsum(p * w),  # S1  = Σ w f
-        np.cumsum(p * w * w),  # S2  = Σ w² f
-        np.cumsum(p * w * w * w),  # S3  = Σ w³ f
-    )
-
-
-def contained_moments(region_len_bp: np.ndarray, fl_pmf: np.ndarray) -> LandedMoments:
-    """Moments of the tilted pmf for the CONTAINED population: ``A(w) = (ell − w + 1)+``, ``u(w) = 1/w``.
-
-    Closed form, O(n_regions). Each raw moment is ``(ell+1)·<cumsum> - <next cumsum>``, exactly the
-    shape :func:`contained_eff_length` uses for the denominator, so no ``n_regions x max_len`` array
-    is ever materialised — which at human scale would be gigabytes.
-
-        E[A]     = (ell+1)·F  − S1        <- IS contained_eff_length
-        E[A·u]   = (ell+1)·C1 − F
-        E[A·w]   = (ell+1)·S1 − S2
-        E[A·u²]  = (ell+1)·C2 − C1
-        E[A·w²]  = (ell+1)·S2 − S3
-        E[A·u·w] = (ell+1)·F  − S1        <- identical to E[A], because u(w)·w = 1 at a region
-
-    That last identity means ``q12`` is exactly 1 at every region, for both components. It is not a
-    shortcut: it says the two channels' cross-moment carries no composition information in the
-    contained frame, and it falls out of the deposit rule rather than being imposed.
-    """
-    F, C1, C2, S1, S2, S3 = _pmf_cumulants(fl_pmf)
-    n = F.shape[0]
-    region = np.asarray(region_len_bp, dtype=np.float64)
-    i = np.clip(np.floor(region).astype(np.int64), 0, n - 1)
-    a = region + 1.0
-
-    eff = np.maximum(a * F[i] - S1[i], 0.0)
-    return _normalise(
-        eff,
-        a * C1[i] - F[i],
-        a * S1[i] - S2[i],
-        a * C2[i] - C1[i],
-        a * S2[i] - S3[i],
-        eff,  # E[A·u·w] == E[A] because u(w)·w == 1
-    )
-
-
-def crossing_moments(fl_pmf: np.ndarray) -> LandedMoments:
-    """Moments for the CROSSING population at UNBOUNDED reach: ``A(w) = (w−1)+``, ``u(w) = 1/(w−1)``.
-
-    Every entry is a scalar: under unbounded reach a boundary's opportunity does not depend on where
-    it is, so every boundary has the same expectation.
-
-        E[A]     = mu − 1                    <- IS crossing_eff_length at UNBOUNDED_REACH
-        E[A·u]   = P(w >= 2)
-        E[A·w]   = E[w²] − mu
-        E[A·u²]  = Σ f(w)/(w−1)
-        E[A·w²]  = E[w³] − E[w²]
-        E[A·u·w] = mu                        (u(w)·w = w/(w−1), so Σ f(w)(w−1)·w/(w−1) = mu)
-
-    Unbounded reach only, matching `build_region_geometry`: at a contiguous boundary every
-    component's divisor is ``mu − 1``. A per-boundary reach would make these moments per-boundary too.
-    """
-    p = np.asarray(fl_pmf, dtype=np.float64)
-    total = float(p.sum())
-    p = p / total if total > 0.0 else p
-    w = np.arange(p.shape[0], dtype=np.float64)
-    ok = w >= 2.0  # a length-0 or length-1 fragment cannot cross a 0-bp boundary
-    inv = np.zeros_like(w)
-    np.divide(1.0, w - 1.0, out=inv, where=ok)
-
-    eff = float((p * np.maximum(w - 1.0, 0.0)).sum())
-    return _normalise(
-        np.asarray(eff),
-        np.asarray(float(p[ok].sum())),
-        np.asarray(float((p * np.maximum(w - 1.0, 0.0) * w).sum())),
-        np.asarray(float((p * inv)[ok].sum())),
-        np.asarray(float((p * np.maximum(w - 1.0, 0.0) * w * w).sum())),
-        np.asarray(float((p * w)[ok].sum())),
-    )
-
-
-def _normalise(eff, e_u, e_w, e_uu, e_ww, e_uw) -> LandedMoments:
-    """Divide the raw ``E[A··]`` moments by ``E[A]`` to get the tilted-pmf moments.
-
-    Zero opportunity gives every moment as 0, never a floored division. A slot with no opportunity
-    for a component contributes nothing, and the caller's ``det > 0`` gate then makes the whole term
-    inert there.
-    """
-    eff = np.asarray(eff, dtype=np.float64)
-    live = eff > 0.0
-
-    def d(x):
-        x = np.broadcast_to(np.asarray(x, dtype=np.float64), eff.shape)
-        return np.divide(x, eff, out=np.zeros(eff.shape, dtype=np.float64), where=live)
-
-    return LandedMoments(m1=d(e_u), m2=d(e_w), q1=d(e_uu), q2=d(e_ww), q12=d(e_uw), eff=eff)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════════════
 #  THE PER-BASE FRAME — the same placement counts, read base by base
 #
 #  A fragment's capture efficiency is the mean per-base efficiency over the bases it covers, so a
@@ -334,7 +185,7 @@ class BaseTaper:
     one cumulative table ``CT(d) = Σ_{d' ≤ d} T(d')``, ``T(d) = Σ_w f(w) min(d, w)/w``, serves every such
     template in O(1) per interval; a shorter template is evaluated base by base. A zero-length fragment
     covers no base and carries no weight: a smoothed length model can put mass at ``w = 0`` (a sparse real
-    library's did), and it is dropped here as `_pmf_cumulants` drops it.
+    library's did), and it is dropped here.
     """
 
     pmf: np.ndarray
