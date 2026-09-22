@@ -1,13 +1,12 @@
 /**
  * resolve.cpp — nanobind C++ extension for fragment resolution.
  *
- * Ports the entire resolve_fragment() logic from resolution.py to C++,
- * including cgranges overlap queries, set merging, chimera detection,
- * and fragment-length computation.  Calls cgranges directly from C++
+ * Fragment resolution: cgranges overlap queries, set merging, chimera
+ * detection and fragment-length computation, calling cgranges directly
  * without round-tripping to Python.
  *
  * The core logic (FragmentResolver, ResolvedFragment, FragmentAccumulator,
- * constants, helper types) now lives in shared headers so that
+ * constants, helper types) lives in shared headers so that
  * bam_scanner.cpp can call _resolve_core() directly:
  *   - native/constants.h
  *   - native/resolve_context.h

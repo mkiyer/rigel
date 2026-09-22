@@ -15,9 +15,8 @@ The five pools, as ``rigel.scan_payload`` orders them:
   boundary. Dominant under capture, because a fragment beside a probe reaches the exon boundary and
   so stops being contained. Mature RNA never crosses an exon/intron boundary, so these are gDNA by
   structure.
-* one RNA pool: an OBSERVED splice across an annotated sj. gDNA cannot splice. Implicit splices are
-  excluded by the accumulator, since a splice that was never sequenced is a product of the model
-  this pool is used to fit.
+* one RNA pool: a splice across an annotated sj on the fragment's one surviving path, sequenced or
+  implied. gDNA cannot splice, so this pool is certified RNA.
 
 No pool is pure, and nothing here may assume one is. Against an origin-split oracle the intronic
 pool is dominated by RNA inside introns and the intergenic pool carries mature RNA too, because
@@ -107,7 +106,7 @@ _GDNA_CROSSING_POOLS = (POOL_DNA_INTRON_EXON, POOL_DNA_INTERGENIC_EXON)
 #: All four, in ``rigel.scan_payload`` pool order so they pair 1:1 with ``GdnaOpportunity.pools``.
 _GDNA_POOLS = _GDNA_CONTAINED_POOLS + _GDNA_CROSSING_POOLS
 
-#: The pure RNA pool: an OBSERVED splice across an annotated sj.
+#: The certified RNA pool: a splice across an annotated sj on the fragment's one surviving path.
 _RNA_POOLS = (POOL_RNA_SPLICED,)
 
 #: Dirichlet pseudo-count for the smooth EB shrink toward the global length law. Not a cliff: a pool
@@ -256,7 +255,8 @@ def gdna_contained_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
 
 
 def rna_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
-    """The pure RNA length histogram: fragments that used an annotated sj, splice OBSERVED."""
+    """The certified RNA length histogram: fragments that used an annotated sj on their one surviving
+    path."""
     return _pool_sum(payload, _RNA_POOLS)
 
 

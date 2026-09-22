@@ -56,10 +56,9 @@ class EMConfig:
     n_threads: int = 0
     """Number of threads for parallel locus EM.
 
-    ``0`` (default) → use all available cores (``omp_get_max_threads()``).
-    ``1`` → sequential (no OpenMP overhead).
-    Any positive value → cap at that many threads.
-    Ignored when the C++ extension was built without OpenMP.
+    ``0`` (default) → use all available cores.
+    ``1`` → sequential.
+    Any positive value → cap at that many threads (the EM's own thread pool).
     """
     warm_start: Literal["coverage", "prior", "uniform"] = "coverage"
     """⭐ What the EM's initial ``theta`` is derived FROM.

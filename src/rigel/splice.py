@@ -1,7 +1,7 @@
 """
 rigel.splice — Splice classification enums for the quantification pipeline.
 
-Internal count arrays use 6 columns: 3 splice types × 2 strands
+Internal count arrays use 10 columns: 5 splice types × 2 strands
 (sense/antisense).  Strand is an internal signal used for gDNA
 estimation and is not exposed in user-facing output.
 
@@ -9,6 +9,8 @@ Fragment splice types are based on splice junction status only:
 - UNSPLICED: no splice junctions detected
 - SPLICED_UNANNOT: splice junctions present but not in the reference
 - SPLICED_ANNOT: splice junctions exactly matching the reference
+- SPLICED_IMPLICIT: the mate gap spans an annotated intron of a candidate
+- SPLICE_ARTIFACT: a CIGAR junction the splice blacklist rejected
 
 Intronic vs exonic overlap is captured separately in the per-candidate
 overlap profile (n_exon_bp, n_intron_bp), not in the splice type.

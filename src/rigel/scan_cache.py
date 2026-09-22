@@ -213,9 +213,8 @@ def deposit_digest() -> str:
     no name at all, such as the sj-boundary rule, is caught by nothing else.
 
     It needs no version number (the project bans them) and no constant to maintain: it is a MEASUREMENT
-    of the current code. Change any deposit rule and it moves; change none and it is stable across runs,
-    processes and worker counts, because every channel is an integer and integer addition is
-    associative.
+    of the current code. Change any deposit rule and it moves; change none and it is stable across runs
+    and processes, because one fixed fragment set goes into one accumulator in one order.
 
     The fixture is deliberately awkward rather than minimal — two annotated sj, a short region whose far
     boundary a fragment may or may not reach, contained / crossing / spliced / sj-only fragments — so

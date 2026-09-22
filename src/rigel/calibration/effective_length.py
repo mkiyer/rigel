@@ -70,7 +70,8 @@ def _as_pmf(fl_pmf: np.ndarray) -> np.ndarray:
 
 
 def fl_mean(fl_pmf: np.ndarray) -> float:
-    """``E_f[w]`` — the mean fragment length. Reported as QC; the crossing limit derives it."""
+    """``E_f[w]`` — the mean fragment length, the limit the unbounded crossing length derives (the
+    gates use it as that oracle)."""
     p = _as_pmf(fl_pmf)
     return float(np.dot(np.arange(p.shape[0], dtype=np.float64), p))
 

@@ -702,17 +702,16 @@ static inline double nonnegative_finite(double x) {
 // ⭐ WHAT THAT BUYS, AND WHAT IT COSTS. Because the weights echo the EM's own current belief the
 // prior carries no information ABOUT THE SPLIT WITHIN RNA — it enters every RNA component as the
 // same factor `(1 + rna_prior/rna_count)`, so it moves only the gDNA:RNA split, which is the one
-// thing it is for. Its predecessor withheld the share from synthetic components, which made the
-// factor un-common and let the prior ALONE redistribute RNA between entities the data cannot tell
-// apart; at a locus of two equally-good explanations that drove the synthetic one to 1e-298. The
-// price of dropping it is that the prior no longer helps a shadow entity decay: the geometric rate
-// falls from `kappa/(1 + rna_prior/rna_count)` to `kappa = w_N/w_T < 1`, which is still strictly
-// less than one for free, since a shadow span is longer than the transcript it shadows.
+// thing it is for. Withholding the share from synthetic components would make the factor un-common and
+// let the prior ALONE redistribute RNA between entities the data cannot tell apart (at a locus of two
+// equally good explanations it drives the synthetic one to 1e-298). The price is that the prior does
+// not help a shadow entity decay: its geometric rate is `kappa = w_N/w_T < 1` rather than
+// `kappa/(1 + rna_prior/rna_count)`, still strictly below one for free, since a shadow span is longer
+// than the transcript it shadows.
 //
 // ⛔ A ZERO-EVIDENCE COMPONENT STILL CANNOT BE REVIVED. `out[i]` is proportional to `raw[i]`, so
-// `out[i] = 0` remains an ABSORBING STATE under these weights — that is the structural guard against
-// a zombie entity, and it survives the restoration untouched because it is a property of the WEIGHTS
-// and not of the eligibility test that was removed. Gate:
+// `out[i] = 0` is an ABSORBING STATE under these weights — the structural guard against a zombie
+// entity, and a property of the WEIGHTS. Gate:
 // `tests/native/test_grouped_prior_update.py::test_a_zero_count_component_CANNOT_be_revived_by_the_prior`.
 //
 // ⛔ THE gDNA:RNA SPLIT IS UNCHANGED, EXACTLY. The RNA components sum to `rna_count + rna_prior`,
@@ -731,7 +730,7 @@ static void apply_grouped_prior_update(
         && gdna_index >= 0 && gdna_index < n_components;
 
     // The whole RNA pool, which is also the whole set of recipients: the prior's arithmetic and the
-    // gDNA:RNA split it sets are now answers to the same sum, and there is no second total.
+    // gDNA:RNA split it sets are answers to the same sum, and there is no second total.
     double rna_count = 0.0, rna_carried = 0.0;
     for (int i = 0; i < n_components; ++i) {
         if (i == gdna_index) continue;
@@ -758,23 +757,22 @@ static void apply_grouped_prior_update(
     // ⭐ The gDNA pseudocount is gated on there BEING a gDNA component — without one there is nowhere
     // to put it, and adding it anywhere else would invent mass.
     double gdna_prior = has_gdna ? nonnegative_finite(aggregate_prior.gdna_prior_fragments) : 0.0;
-    // ⛔⛔ THE RNA PSEUDOCOUNT IS **NOT** GATED ON THE gDNA COMPONENT, AND IT USED TO BE. It lands on
-    // the RNA components, which exist whether or not a gDNA candidate does, so gating it discarded the
-    // whole RNA prior at any locus none of whose units carries one — that is a locus whose fragments
-    // are ALL SPLICED, since a gDNA candidate is appended to every unspliced unit.
+    // ⛔⛔ THE RNA PSEUDOCOUNT IS **NOT** GATED ON THE gDNA COMPONENT. It lands on the RNA components,
+    // which exist whether or not a gDNA candidate does, so gating it would discard the whole RNA prior
+    // at any locus none of whose units carries one — a locus whose fragments are ALL SPLICED, since a
+    // gDNA candidate is appended to every unspliced unit.
     //
-    // ⭐ **Why it was invisible.** Under the evidence-proportional weights the RNA prior enters as a
+    // ⭐ **Why such a gate hides.** Under the evidence-proportional weights the RNA prior enters as a
     // COMMON factor `(1 + rna_prior/rna_count)` over the RNA components, and a common factor cancels
-    // when `theta` is normalised — so at a locus with no gDNA component the prior genuinely cannot
-    // move `theta`, and suppressing it changed nothing observable. ⚠ It is observable when the
-    // allocation is an informative per-component WEIGHT, where the prior says something the evidence
-    // does not and cancels nothing.
+    // when `theta` is normalised — so at a locus with no gDNA component the prior cannot move `theta`,
+    // and suppressing it changes nothing observable. ⚠ It is observable when the allocation is an
+    // informative per-component WEIGHT, where the prior says something the evidence does not.
     double rna_prior  = nonnegative_finite(aggregate_prior.rna_prior_fragments);
-    // ⛔⛔ THE GATE MUST NAME THE DENOMINATOR THE CHOSEN BRANCH ACTUALLY DIVIDES BY. It briefly tested
-    // one total while the branch below divided by another — so a locus with zero RNA count but
-    // nonzero carried alpha kept a live `rna_prior`, multiplied it by `inv = 0` and silently dropped
-    // it: the RNA pool summed to `rna_count` while gDNA still received `gdna_count + gdna_prior`,
-    // MOVING the gDNA:RNA split this function exists to hold fixed. Reachable under VBEM, which is
+    // ⛔⛔ THE GATE MUST NAME THE DENOMINATOR THE CHOSEN BRANCH ACTUALLY DIVIDES BY. A gate testing one
+    // total while the branch below divides by another keeps a live `rna_prior` at a locus with zero RNA
+    // count but nonzero carried alpha, multiplies it by `inv = 0` and silently drops it: the RNA pool
+    // sums to `rna_count` while gDNA still receives `gdna_count + gdna_prior`, MOVING the gDNA:RNA
+    // split this function exists to hold fixed. Reachable under VBEM, which is
     // the shipped default and passes `alpha` as the carried state. Gate:
     // `tests/native/test_grouped_prior_update.py`, specifically
     // `test_a_locus_with_NO_rna_evidence_AT_ALL_drops_the_rna_prior`.

@@ -725,7 +725,7 @@ def _clip_interval(start: int, end: int, length: int) -> ProbeInterval | None:
 
 
 # Interval helpers (merge_intervals / project_genomic_block(s)_to_transcript) live in
-# rigel.sim.intervals — shared with suite.py's capture-probe design.
+# rigel.sim.intervals.
 
 
 def _clip_blocks_to_transcript(

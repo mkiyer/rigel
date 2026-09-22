@@ -79,16 +79,16 @@ N_FRAGMENT_POOLS = 5
 #: `tests/calibration/test_fl.py` pins them against the executable specification's enum itself.
 #:
 #: The two DNA_* contained pools are gDNA-dominated, not pure (`calibration.fl` deconvolves them by a
-#: two-pool contrast); RNA_SPLICED used an ANNOTATED sj with the splice OBSERVED — gDNA cannot be
-#: spliced. The two *_EXON crossing pools hold the gDNA that capture moves out of containment, and enter
-#: the gDNA model through their own opportunity.
+#: two-pool contrast); RNA_SPLICED used an ANNOTATED sj on the fragment's one surviving path, sequenced or
+#: implied — gDNA cannot be spliced. The two *_EXON crossing pools hold the gDNA that capture moves out
+#: of containment, and enter the gDNA model through their own opportunity.
 #: There is deliberately NO pool for an exonic contained fragment or a multi-boundary crossing — those are
 #: gDNA/RNA mixtures by structure.
 POOL_DNA_INTERGENIC = 0  # contained in an intergenic region — gDNA-dominated
 POOL_DNA_INTRONIC = 1  # contained in an intronic region — gDNA-dominated
 POOL_DNA_INTRON_EXON = 2  # crossing one boundary, flanks {intron, exon} — on-target gDNA
 POOL_DNA_INTERGENIC_EXON = 3  # crossing one boundary, {intergenic, exon} — on-target gDNA
-POOL_RNA_SPLICED = 4  # used an annotated sj, splice OBSERVED — pure RNA
+POOL_RNA_SPLICED = 4  # used an annotated sj on its one surviving path — certified RNA
 
 
 @dataclass(frozen=True, slots=True)

@@ -809,14 +809,12 @@ std::int64_t Accumulator::fragment_pool(bool spliced,
                                         std::int64_t contained_region,
                                         std::int64_t sole_boundary) const noexcept
 {
-    // Priority, so that every pool stays pure: an OBSERVED splice is unambiguously RNA; a contained
-    // fragment is typed by its region; a single-boundary crossing is a "splash" read typed by its two flanks.
-    // Anything else -- an exonic contained fragment, a multi-boundary crossing -- is a mixture and enters
-    // nothing.
+    // Priority: a splice on the one surviving path is certified RNA; a contained fragment is typed by its
+    // region; a single-boundary crossing is a "splash" read typed by its two flanks. Anything else -- an
+    // exonic contained fragment, a multi-boundary crossing -- is a mixture and enters nothing.
     //
     // ⭐ DETERMINACY, NOT PROVENANCE: a fragment reaches here only when exactly ONE hypothesis survived,
-    // so its L is not in doubt however it was arrived at. See the declaration for the measurement that
-    // deleted the old `sj_implicit` bar.
+    // so its L is not in doubt however it was arrived at (the declaration carries the measurement).
     if (spliced) return static_cast<std::int64_t>(FragmentPool::kRnaSpliced);
     if (contained_region >= 0) {
         switch (region_types_[static_cast<std::size_t>(contained_region)]) {

@@ -3,8 +3,8 @@
 Tiles probes over the captured transcripts and writes the panel twice, as a transcript-coordinate
 TSV and as a genomic BED12, avoiding probes already placed on the same genomic span. This is the
 design side of hybrid capture; the runtime sampler that consumes a panel is
-:mod:`capture.sampler`, and the panel's parameters are :mod:`capture.config`. The suite-config
-layer that chooses which panels to build lives in ``suite.py``.
+:mod:`capture.sampler`, and the panel's parameters are :mod:`capture.config`. The panel's own probe
+sets are built by ``scripts/sim/design_suite_probes.py``.
 """
 
 from __future__ import annotations

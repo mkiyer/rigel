@@ -81,25 +81,17 @@ inline int strand_column(std::int32_t align_strand) noexcept {
 //: ⭐⭐⭐ A COUNT IS AN INTEGER. A FRACTION IS double. There is no fixed point in the tally and no
 //: scale constant to decode.
 //:
-//: ⛔ The predecessor accumulated every fraction as round(2^32 / placements) in uint64, because integer
-//: addition is associative and therefore bit-identical across worker counts. The argument was sound; the
-//: price it quoted was not. The ~2.6 % it cited was measured on a **float32** accumulator (~3.7e-7 per
-//: cell). double is ~1e-16 -- 3.4e9x finer -- reaching the deliverable at ~1e-11, five orders below
-//: EMConfig.convergence_delta = 1e-6.
-//:
-//: ⭐⭐ And the fixed point was LESS ACCURATE, measured against exact rational arithmetic on the
-//: reciprocal-opportunity theorem (each length contributes exactly one density unit):
+//: A fixed point (round(2^32 / placements) in uint64) would buy bit-identity across worker counts, since
+//: integer addition is associative, and it is LESS ACCURATE, measured against exact rational arithmetic
+//: on the reciprocal-opportunity theorem (each length contributes exactly one density unit):
 //:
 //:      region_len 151    fixed 7.0e-10    double 5.8e-15      120,000x better
 //:      region_len 400    fixed 1.7e-08    double 1.0e-13      170,000x better
 //:      region_len 1000   fixed 2.0e-07    double 2.8e-13      714,000x better
 //:
-//: ⚠ The exactness the old gates asserted was a property of their FIXTURES: 1/2 + 1/3 + 1/6 lands back
-//: on 2^32 because two rounding errors cancel, while 1/3 + 1/3 + 1/3 is one quantum short -- and double
-//: is exact on both.
-//:
-//: What is genuinely given up is bit-identity across worker counts, since float addition is not
-//: associative. One convention, and this is it.
+//: double reaches the deliverable at ~1e-11, five orders below EMConfig.convergence_delta = 1e-6. What
+//: is genuinely given up is bit-identity across worker counts, since float addition is not associative;
+//: the fraction banks agree to a derived tolerance. One convention, and this is it.
 
 // ============================================================================
 // what each object stores
@@ -131,7 +123,7 @@ struct Boundary {
     std::uint32_t spliced_count[kNStrandColumns];
     /// ⭐ ONE value -- strand-agnostic, see `Region`.
     double unspliced_inv_length_sum;
-    /// ⭐⭐ THE CONSERVED MASS, fixed point. A COUNT and a MASS are two different deposits and one
+    /// ⭐⭐ THE CONSERVED MASS, double. A COUNT and a MASS are two different deposits and one
     /// number cannot be both: `unspliced_count` is `+1` on every boundary a fragment crosses, so a fragment
     /// books `max(K, 1)` of them; this sums to ONE per fragment, across all the boundaries it crosses.
     ///
@@ -195,17 +187,17 @@ static_assert(sizeof(SpliceJunction) == 32, "SpliceJunction must be 32 bytes wit
 // the fragment-length pools
 // ============================================================================
 
-//: Five pools, each PURE BY CONSTRUCTION. Purity removes the circularity: a length model is fitted from
-//: a population known to be one component, so nothing is estimated from the fragments it will explain.
+//: Five pools, each defined by STRUCTURE. Only RNA_SPLICED is certified (gDNA cannot splice); the four DNA
+//: pools are gDNA-dominated, not pure, and `calibration.fl` deconvolves them by a two-pool contrast.
 //:
 //: There is deliberately NO pool for an exonic contained fragment or a multi-boundary crossing -- those are
-//: gDNA/RNA mixtures, and an impure pool is worse than a missing one.
+//: gDNA/RNA mixtures by structure.
 enum class FragmentPool : std::uint8_t {
     kDnaIntergenic     = 0,  // contained in an intergenic region
     kDnaIntronic       = 1,  // contained in an intronic region
     kDnaIntronExon     = 2,  // crossing exactly one boundary, flanks {intron, exon} -- a "splash" read
     kDnaIntergenicExon = 3,  // crossing exactly one boundary, flanks {intergenic, exon}
-    kRnaSpliced        = 4,  // using an annotated sj, splice OBSERVED
+    kRnaSpliced        = 4,  // using an annotated sj on its one surviving path, splice sequenced or implied
 };
 inline constexpr std::size_t kNFragmentPools = 5;
 
@@ -484,11 +476,9 @@ public:
 
     /// ⭐ EVERY deposited fragment, binned at its own L, with NO purity condition.
     ///
-    /// The five pure pools above are deliberately CONDITIONED (an impure
-    /// pool is worse than a missing one), so they cannot serve as the unconditional anchor an
-    /// empirical-Bayes shrinkage needs -- which is why that anchor was taken from the SCANNER, which
-    /// measures length by two other rules over another population.
-    /// This row removes that reason: anchor and pools become one measurement of one quantity.
+    /// The five pools above are deliberately CONDITIONED, so they cannot serve as the unconditional anchor
+    /// an empirical-Bayes shrinkage needs; this row is that anchor, measured in the pools' own frame, so
+    /// anchor and pools are one measurement of one quantity.
     ///
     /// It is "unconditional GIVEN DEPOSIT" and the name says so: it excludes what the accumulator
     /// rejects (too long / ambiguous path / strand-undefined / empty), each of which is counted in
@@ -548,13 +538,12 @@ public:
 private:
     /// The one length pool this fragment belongs to, or -1 for none.
     ///
-    /// ⭐ DETERMINACY, NOT PROVENANCE. There used to be an `sj_implicit` argument barring a fragment
-    /// whose splice was inferred rather than sequenced. It is gone: a fragment reaches this boundary only
-    /// when exactly ONE hypothesis survived, so its L is not in doubt however it was arrived at.
-    /// Measured before deleting it -- the pool reads +0.67 % mean / +2.40 % sd against truth under
-    /// determinacy and -9.58 % / -22.46 % under provenance, because barring inferred lengths
-    /// preferentially bars fragments whose mates sit far apart. A purity filter on a length pool is a
-    /// length filter.
+    /// ⭐ DETERMINACY, NOT PROVENANCE. A fragment reaches this boundary only when exactly ONE hypothesis
+    /// survived, so its L is not in doubt however it was arrived at, and an implied splice counts as a
+    /// sequenced one. Barring inferred splices was measured -- the pool reads +0.67 % mean / +2.40 % sd
+    /// against truth under determinacy and -9.58 % / -22.46 % under provenance, because barring inferred
+    /// lengths preferentially bars fragments whose mates sit far apart. A purity filter on a length pool is
+    /// a length filter.
     std::int64_t fragment_pool(bool spliced,
                                std::int64_t contained_region,
                                std::int64_t sole_boundary) const noexcept;

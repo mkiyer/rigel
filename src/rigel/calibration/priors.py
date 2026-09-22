@@ -2,8 +2,8 @@
 
 Turns the calibration's per-object deconvolved mass and geometric length into the two per-locus
 Dirichlet scalars the locus EM consumes — ``rna_prior_count`` and ``gdna_prior_count`` — plus the
-per-locus gDNA-component effective length (the inverse participation ratio of the deconvolved gDNA
-mass over its supports).
+per-locus gDNA-component effective length: the locus's objects at their supports and capture
+efficiencies, the crossing supports converted by the count's own ``q`` (``Σ S_r c_r + Σ q_e S_e c_e``).
 
 The prior's only job is to split each locus's unspliced fragments between gDNA and RNA; it does not
 attribute RNA mass to individual transcripts, which is what the EM is for.
