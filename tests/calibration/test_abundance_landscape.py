@@ -383,12 +383,8 @@ def test_without_the_wall_inputs_the_landscape_is_SKIPPED_LOUDLY_and_nothing_rai
 
     Nothing fits on unmasked totals either way: the choice is between refusing and not fitting, and
     the mask's wall bias is excluded under both. The skip is not a silent fallback — it is logged at
-    WARNING and the object is ``None`` rather than a quietly different estimate.
-
-    `background_abundance` keeps its refusal, and that asymmetry is the point: that pair feeds ψ, so
-    a missing input there would silently change a number the solve consumes, whereas this object is
-    read by the report and the debug bundle and by nothing in the solve. The next gate asserts that
-    refusal is still live, so the two cannot be conflated."""
+    WARNING and the object is ``None`` rather than a quietly different estimate: this object is read by
+    the report and the debug bundle and by nothing in the solve."""
     import logging
 
     from rigel.calibration import calibrate
@@ -412,25 +408,6 @@ def test_without_the_wall_inputs_the_landscape_is_SKIPPED_LOUDLY_and_nothing_rai
         "wall inputs" in r.message % r.args if r.args else "wall inputs" in r.message
         for r in caplog.records
     ), "the skip must be LOUD — no silent no-op"
-
-
-def test_the_background_pair_STILL_REFUSES_without_the_wall_inputs():
-    """The asymmetry, asserted so it cannot rot: `background_abundance="measured_total"` feeds ψ, so a
-    missing wall array there must still RAISE. Only the QC landscape degrades."""
-    from rigel.calibration import calibrate
-    from rigel.config import CalibrationConfig
-
-    payload, ra, sm, pmf, sj = _calibrate_parts()
-    with pytest.raises(ValueError, match="wall inputs"):
-        calibrate(
-            payload=payload,
-            region_arrays=ra,
-            strand_model=sm,
-            gdna_fl_pmf=pmf,
-            rna_fl_pmf=pmf,
-            config=CalibrationConfig(background_abundance="measured_total"),
-            sj=sj,
-        )
 
 
 def test_the_flag_FITS_a_landscape_and_the_default_fits_NOTHING():

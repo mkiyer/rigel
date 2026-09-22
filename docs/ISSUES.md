@@ -633,17 +633,6 @@ the premise fails as a bias under capture (`log a` ≈ 0 off, +0.28 under exon p
 probes), so only a subtracted level — a cross-locale fudge, the owner's call — would correct it. No instrument
 yet.
 
-### background-abundance-pair-unruled
-`priority: later · kind: decision · 2026-09-13`
-`CalibrationConfig.background_abundance` chooses which (counts, exposure) pair the pooled gDNA background
-takes: `"contained"` (the count over the gDNA contained effective length — unbiased, the fragment-length pmf
-in the divisor) or `"measured_total"` (the START/END banks over the region's own length — pmf-free, refuses
-without the wall inputs). The two agree off capture and part under it, where the contained divisor
-under-reads the true gDNA rate several-fold while the pmf-free pair over-reads on pools carrying nascent RNA.
-A design decision, not a tunable: rule which pair ships
-(`calibration_vs_oracle.py --set calibration.background_abundance=measured_total` prices the swap) and the
-field goes with the ruling.
-
 ### the-tilt-census-as-an-instrument
 `priority: later · kind: build · 2026-09-13`
 "Where does the strand tilt matter, and how does the tool do there" is answered by a scratchpad script
@@ -680,16 +669,16 @@ Open, each its own commit: the index's duplicate map as an alias map `dropped_t_
 rebuild, no panel re-scan, checked with `rename_identity.py`; `reach` is covered by no other hash). The
 2026-09-14 review census (91 % of `src/rigel` executed by the suite and every `--self-test`; C++ is
 coverage-blind, so its functions were counted by name) cut what was dead and recorded the rest:
-(a) ROTTEN BUT LIVE, each moving an instrument's or a toy's numbers when repaired: `toy_harness.harvest`
-calibrates its donor undrained and without the two-pool contrast, so every toy inherits both;
-`pass0_vs_oracle`'s C_input arms hand the post-capture truth law to geometry, and its C_info tables price the
-retired length channel; `quant_accuracy`'s oracle arms are undrained (documented there);
-`pipeline._DEFAULT_MEAN_FRAG = 200.0` is a magic fallback for an empty RNA length pool.
+(a) ROTTEN BUT LIVE, each moving a toy's or an instrument's numbers when repaired: the toy harness's `harvest`
+(now the test substrate `tests/calibration/_toy_harness.py`) calibrates its donor undrained and without the
+two-pool contrast, so every toy inherits both; `pass0_vs_oracle`'s C_input arms hand the post-capture truth law
+to geometry, and its C_info tables price the retired length channel; `quant_accuracy`'s oracle arms are
+undrained (documented there). (`pipeline._DEFAULT_MEAN_FRAG` became a refusal 2026-09-22.)
 (b) VACUOUS GATE CLAUSES, never reached by their substrate: `test_transfer_faces.py`'s "nowhere when the flags
 clear" and `_expected_level_rows`' `level_bound_row` branch; `test_transfer_policy.py`'s LEVEL-face invariants
 (no LEVEL face on its toy); `test_transfer_rna_lanes.py`'s terminus clause and `own_level is None` clause.
-(c) DUPLICATES across the kept instruments: the closure checks, `stratum` / `is_zero_gdna`, `_SCOPE`, `PANELS`,
-`TYPE_NAME`, and the ladder's two paths hard-coded in five instruments.
+(c) DUPLICATES across the kept instruments: the closure checks, `_SCOPE`, `PANELS` and `TYPE_NAME` (`stratum` /
+`is_zero_gdna` and the ladder's two paths converged into `_shared.py` 2026-09-21).
 (d) CLAIMS NOT RE-DERIVED on the current tree, left standing: that most in-scope error sits at the simplex
 vertices (`simplex_logodds`, a relay-era measurement); `sweep`'s refused deferral of UNIDENTIFIED slots to the
 prior (priced 2026-07, with no refusal entry here); `region_geometry`'s "no per-region spliced floor" A/B
@@ -736,6 +725,13 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### background-abundance-pair-unruled
+DELETED 2026-09-22 (the cleanup; owner: "I don't know what measured_total is for"). `CalibrationConfig.background_abundance`
+chose which (counts, exposure) pair the pooled gDNA background took — the shipped `"contained"` pair or the START/END banks
+over the region's own length. An alternative nobody ruled on is a tunable, and it went with its refusal path, its
+`counts_exposure` parameter and its three tests; the contained pair is the only one. `rename_identity.py --check`
+bit-identical.
 
 ### the-fixed-gdna-level
 REFUSED 2026-09-21 as the shipped kernel (33 converged arms on the ladder, one EM thread, fractional). Holding the

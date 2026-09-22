@@ -74,7 +74,6 @@ from .effective_length import crossing_base_shares
 from .blocks import SweepCapture
 from .total_abundance import (
     build_region_wall_mask,
-    region_counts_and_exposure,
     w_max_from_deposited_lengths,
 )
 from .gdna_strand import (
@@ -447,9 +446,7 @@ class _IntronFactory:
     REBUILT when the bracket widens: there is no map onto a wider domain the factor was never evaluated
     on."""
 
-    def __init__(
-        self, chain, substrate, region_arrays, region_eff_gdna, config, inj, background_pair
-    ):
+    def __init__(self, chain, substrate, region_arrays, region_eff_gdna, config, inj):
         self._site = (chain, substrate, region_arrays, region_eff_gdna, config)
         if inj is not None and inj.intron_background is not None:
             self.background = inj.intron_background
@@ -459,7 +456,6 @@ class _IntronFactory:
                 region_arrays,
                 region_eff_gdna,
                 include_introns=False,
-                counts_exposure=background_pair,
             )
         self._rows: dict = {}
 
@@ -495,27 +491,6 @@ def _wall_mask(payload, region_arrays, mature_walls, boundary_reach):
     )
 
 
-def _background_pair(payload, substrate, region_arrays, config, mature_walls, boundary_reach):
-    """The MEASURED-TOTAL ``(counts, exposure)`` pair for the pooled gDNA background estimators, built
-    once and handed to each. ``None`` under the shipped default (``"contained"``), and every consumer
-    then takes its own contained pair. ⛔ ``"measured_total"`` REFUSES to run without the wall inputs
-    rather than falling back: a background rate that silently changed estimator because an argument
-    was missing is worse than either estimator."""
-    if config.background_abundance != "measured_total":
-        return None
-    if mature_walls is None or boundary_reach is None:
-        raise ValueError(
-            "CalibrationConfig.background_abundance = 'measured_total' needs the wall inputs: "
-            "pass mature_walls=build_mature_wall_distances(index, region_arrays) and "
-            "boundary_reach=build_contiguous_boundary_reach_arrays(index) (both are in "
-            "scan_cache.index_derived_inputs). Refusing rather than falling back to the contained "
-            "pair, which would change the background rate without saying so."
-        )
-    mask = _wall_mask(payload, region_arrays, mature_walls, boundary_reach)
-    counts, exposure, _ = region_counts_and_exposure(substrate, region_arrays, mask)
-    return (counts, exposure)
-
-
 def _abundance_landscape(payload, substrate, region_arrays, inj, mature_walls, boundary_reach):
     """THE ABUNDANCE LANDSCAPE — the pre-pass-0 TOTAL-density field + mode census, fitted at INIT from
     counts and lengths only (the wall-exact measured totals), so it is circular with nothing solved. A QC
@@ -523,8 +498,7 @@ def _abundance_landscape(payload, substrate, region_arrays, inj, mature_walls, b
     (`CalibrationDiagnostics.from_abundance_landscape`) and nothing in the solve reads it. Without the
     wall inputs (``mature_walls``, ``boundary_reach``) it is SKIPPED, LOUDLY, never raised for: many unit
     and toy callers have no wall arrays and want no panel, so the object stays ``None`` and the report
-    omits the panel rather than carrying a quietly different estimate — deliberately not the policy of
-    ``background_abundance``'s pair, which feeds ψ and REFUSES. (An on/off switch on this fit was a
+    omits the panel rather than carrying a quietly different estimate. (An on/off switch on this fit was a
     tunable nothing ever turned off; retired 2026-09-13.)"""
     if inj is not None and inj.abundance_landscape is not None:
         return inj.abundance_landscape
@@ -856,9 +830,6 @@ def calibrate(
     geometry = build_region_geometry(chain, substrate, region_arrays, sj, gdna_fl_pmf, rna_fl_pmf)
     statics = build_region_statics(chain, region_arrays, boundary_flags)
     region_eff_gdna, boundary_eff_gdna = _project_eff(chain, geometry.eff_gdna, payload)
-    background_pair = _background_pair(
-        payload, substrate, region_arrays, config, mature_walls, boundary_reach
-    )
     abundance_landscape = _abundance_landscape(
         payload, substrate, region_arrays, inj, mature_walls, boundary_reach
     )
@@ -867,9 +838,7 @@ def calibrate(
     region_eff_rna, boundary_eff_rna = _project_eff(chain, geometry.eff_rna, payload)
 
     strand = _fit_strand(substrate, region_arrays, strand_model, inj)
-    factory = _IntronFactory(
-        chain, substrate, region_arrays, region_eff_gdna, config, inj, background_pair
-    )
+    factory = _IntronFactory(chain, substrate, region_arrays, region_eff_gdna, config, inj)
     # ⛔ A TOTAL density over ONE component's opportunity model is not a composition estimate; the
     # per-slot gDNA support below is the basis the landscape prior is fit and read on, and the
     # total-density field this module does use is the abundance landscape above, which reaches the

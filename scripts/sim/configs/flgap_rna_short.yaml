@@ -30,9 +30,9 @@
 # `CalibrationResult` — it runs `calibrate`, never the EM — so it is interpretable on this panel and is
 # the right end-to-end reading for it.
 #
-# ⭐⭐ WHAT IT IS FOR, precisely. `CalibrationConfig.background_abundance` swaps the pooled gDNA
-# background from `count / E_contained(ell, pmf)` to the pmf-free START/END pair. On the equal-length
-# ladder that swap is a TIE off capture, because the two estimators differ by exactly
+# ⭐⭐ WHAT IT IS FOR, precisely. The pooled gDNA background is `count / E_contained(ell, pmf)`; a pmf-free
+# START/END pair (an alternative deleted 2026-09-22) would TIE it off capture on the equal-length ladder,
+# because the two estimators differ by exactly
 #
 #     rho_r * (E_r/E_g - 1)
 #

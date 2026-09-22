@@ -312,25 +312,6 @@ class CalibrationConfig:
     #: memory gain is still larger than the run-to-run noise.
     sweep_block_slots: int | None = 1000
 
-    #: Which (counts, exposure) pair the pooled gDNA background estimators take.
-    #: ``"contained"`` (the default) pools the CONTAINED count over the gDNA contained effective
-    #: length — unbiased, since ``E[count] = rho·E_contained``, but the fragment-length pmf enters the
-    #: DIVISOR. ``"measured_total"`` pools the START/END banks over the region's own LENGTH
-    #: (`calibration.total_abundance.region_counts_and_exposure`) — ``E[S] = rho·ell`` for EVERY
-    #: fragment length, so no pmf enters at all, and double-walled regions are excluded as honestly not
-    #: model-free. Both are pooled as a ratio of SUMS and both feed the SAME conjugate
-    #: ``Gamma(Σcounts + ½, Σexposure)``, so this swaps the pair and not the estimator.
-    #:
-    #: The two agree off capture. Under capture the gDNA pmf is itself capture-distorted, so the
-    #: contained divisor is mis-estimated and that pair under-reads the true gDNA rate several-fold,
-    #: while a pmf-free exposure is immune. The cost of the pmf-free form is on pools that carry
-    #: nascent RNA: both forms over-read there, and the START form takes slightly more of it, because a
-    #: fragment starting in an intron and reaching into an exon books a START there. On a clean pool
-    #: that term is absent.
-    #: ``"measured_total"`` REFUSES to run unless ``calibrate`` is given ``mature_walls`` and
-    #: ``boundary_reach`` — a background rate that silently changed estimator is worse than either.
-    background_abundance: str = "contained"
-
     #: The message policy — what one neighbour tells another, on the two-phase backbone (prepare →
     #: propagate → solve). ``"transfer"`` (:class:`~rigel.calibration.messages.transfer.TransferPolicy`,
     #: the composition transfer) is the shipped default; ``"silent"``
@@ -370,11 +351,6 @@ class CalibrationConfig:
         if self.calib_refit_iters < 0:
             raise ValueError(
                 f"CalibrationConfig.calib_refit_iters must be >= 0; got {self.calib_refit_iters}."
-            )
-        if self.background_abundance not in ("contained", "measured_total"):
-            raise ValueError(
-                "CalibrationConfig.background_abundance must be 'contained' or 'measured_total'; "
-                f"got {self.background_abundance!r}."
             )
         if self.sweep_block_slots is not None and self.sweep_block_slots < 1:
             raise ValueError(

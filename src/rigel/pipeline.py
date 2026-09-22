@@ -918,10 +918,9 @@ def run_pipeline(
     # calibrate(), microseconds later, and two copies of an invariant is one too many.
     region_arrays = RegionArrays.from_index(index)
     boundary_flags = build_boundary_flags_array(index)
-    # The two annotation-only WALL inputs, beside the other index-derived arrays. They are consulted
-    # only when `CalibrationConfig.background_abundance == "measured_total"`, and building them
-    # unconditionally keeps production and `scan_cache.index_derived_inputs` on ONE code path — the
-    # alternative is a flag-shaped branch here that the instruments do not take.
+    # The two annotation-only WALL inputs, beside the other index-derived arrays: the total-density
+    # landscape (the QC report's gDNA-density panel) reads them, and building them here keeps production
+    # and `scan_cache.index_derived_inputs` on ONE code path.
     mature_walls = build_mature_wall_distances(index, region_arrays)
     boundary_reach = build_contiguous_boundary_reach_arrays(index)
     # The sj axis, in the accumulator's own sj slot order: where each sj attaches,

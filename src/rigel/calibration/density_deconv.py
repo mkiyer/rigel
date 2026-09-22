@@ -125,7 +125,6 @@ def fit_intron_background(
     region_eff_g,
     *,
     include_introns: bool = False,
-    counts_exposure: "tuple[np.ndarray, np.ndarray] | None" = None,
 ) -> GdnaBackground:
     """The intron special case of :func:`fit_gdna_background`: the gDNA prior is the intergenic region
     distribution, introns being off-target at the same capture depletion as intergenic.
@@ -136,24 +135,11 @@ def fit_intron_background(
     whole of this function's own job is selecting the pool.
 
     ``region_eff_g`` is the gDNA contained effective length per region
-    (:func:`effective_length.contained_eff_length`) — the support the pooled counts are a rate over.
-
-    ``counts_exposure`` replaces the ``(contained count, contained effective length)`` pair with any other
-    per-region ``(counts, exposure)`` — the measured total's side-selected START/END banks over the
-    region's own length (`total_abundance.region_counts_and_exposure`), selected by
-    ``CalibrationConfig.background_abundance``. It changes the pair, never the estimator: the pool
-    predicate, the Gamma conjugacy and the method-of-moments ``α`` are untouched, and a zero exposure
-    drops a region from the pool exactly as a zero effective length already does, which is how a
-    double-walled region excludes itself without a second predicate. The point of the START/END pair is
-    that it leaves the divisor to geometry — ``E[S] = ρ·ℓ`` holds at every fragment length, where
-    ``E[count] = ρ·E_contained`` needs the length model, which capture distorts severalfold."""
+    (:func:`effective_length.contained_eff_length`) — the support the pooled counts are a rate over."""
     sig = np.asarray(region_arrays.signature)
-    if counts_exposure is None:
-        eff = np.asarray(region_eff_g, dtype=np.float64)
-        # Genome-strand columns, summed: gDNA is strand-symmetric, so the background is a total rate.
-        counts = np.asarray(substrate.region_contained.count, dtype=np.float64).sum(axis=1)
-    else:
-        counts, eff = (np.asarray(a, dtype=np.float64) for a in counts_exposure)
+    eff = np.asarray(region_eff_g, dtype=np.float64)
+    # Genome-strand columns, summed: gDNA is strand-symmetric, so the background is a total rate.
+    counts = np.asarray(substrate.region_contained.count, dtype=np.float64).sum(axis=1)
     ctype = coarse_type_array(sig)  # 0 intergenic / 1 intron / 2 exon
     # the pure-gDNA pool: intergenic only, or non-exonic when ``include_introns``.
     pool = ((ctype != 2) if include_introns else (ctype == 0)) & (eff > _EPS)
