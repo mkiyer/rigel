@@ -65,9 +65,8 @@ the coordinate's own resolution, one grid spacing, never tune it.
 
 **a-docstring-that-misdescribes-the-graph. A claim about the import graph inside a docstring that nothing
 gates rots exactly like a stale doc citation, one layer down.** Fourteen module docstrings named a sibling
-with no import boundary and six were genuinely stale. The graph is in the AST, so the prose can be checked:
-`scripts/design/module_census.py` does, and its count is a worklist rather than a verdict, because a
-data-flow claim is one only a human can judge.
+with no import boundary and six were genuinely stale. The graph is in the AST, so the prose can be checked against it, and the
+count is a worklist rather than a verdict, because a data-flow claim is one only a human can judge.
 
 **a-flat-pile-is-not-a-knot. Before merging modules, ask whether the problem is entanglement or missing
 order; merging a flat pile makes bigger files with the same problem.** The calibration package read as

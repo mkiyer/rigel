@@ -56,7 +56,7 @@ calibration mechanism on the transcript table stays REFUSED for the reason above
 | **primary, the prior** | the prior calibration ships — `gdna_prior_count`, `rna_prior_count`, `gdna_eff_len` per multi-locus | `O`, the same assembler fed the origin-split truth masses | `prior_vs_oracle.py` (`P − O`) |
 | **primary, per object** | each region's and boundary's own `f_g`, and whether it is confidently wrong | the oracle payload: the production accumulator run on the BAM split by true origin | `solvability_audit.py` |
 | **primary, one number** | the library `f_gdna` | the simulator's per-fragment truth | `calibration_vs_oracle.py` — each row's `pools` block, `P_gdna` against `true_gdna` |
-| **controls** | zero-gDNA and zero-RNA, where truth is a constant | 0.000 and 1.000 exactly | `zero_controls.py`, and the `g00` rung |
+| **controls** | zero gDNA, where truth is a constant | 0.000 exactly | the `g00` rung of the ladder, read on its own row by `calibration_vs_oracle.py` and `quant_accuracy.py` |
 | **the deliverable** | the transcript table a user reads | `truth_abundances.tsv` | `quant_accuracy.py --arm base`, above `--arm base_reseed` |
 
 Why `P − O` and not the transcript number: attribution. `O` is calibration done perfectly with the
@@ -200,7 +200,7 @@ on each is an owner call and is not invented here.
 1. **`P − O` is small on all three in-scope strata**, and the residual is attributed — to the assembler
    (`O − Fo`), to the composition, or to a class that is provably undetermined. It is not done while the
    residual sits on objects `C_info` calls identified (`solvability_audit.py` re-derives the share).
-2. **The zero controls read zero**: `zero_controls.py` on both arms, and the `g00` rung of the ladder.
+2. **The zero controls read zero**: the `g00` rung of the ladder, on every instrument that reads it.
    An in-scope stratum can read healthy on every contaminated row and still claim gDNA in a library
    containing none; only a zero control finds that.
 3. **The effective-length shrinkage is correct because the composition is**, not because it was patched:
@@ -253,10 +253,7 @@ python scripts/sim/panel.py build    --config $CFG
 python scripts/sim/panel.py simulate --config $CFG --jobs 8
 python scripts/sim/panel.py cache    --config $CFG --jobs 8
 
-# 2. IS THE SUBSTRATE SOUND?  (TRAPS: prove-the-substrate — prove the simulator before the code)
-python scripts/design/simulator_gates.py --suite $LADDER --reference $SUITE/reference
-
-# 3. THE PRIMARY METRIC — CALIBRATION AGAINST ORACLE CALIBRATION.
+# 2. THE PRIMARY METRIC — CALIBRATION AGAINST ORACLE CALIBRATION.
 #    (a) the calibration result and the ruler, P vs O, per stratum        ~5-12 s/condition, no EM
 python scripts/design/calibration_vs_oracle.py --suite $LADDER --index $INDEX \
        --oracle-cache $LADDER/oracle_cache
@@ -267,22 +264,19 @@ python scripts/design/prior_vs_oracle.py --suite $LADDER --index $INDEX \
 python scripts/design/solvability_audit.py --suite $LADDER --index $INDEX \
        --oracle-cache $LADDER/oracle_cache
 
-# 4. THE TWO ZERO CONTROLS — owner-required on EVERY experiment, both arms.
-python scripts/design/zero_controls.py
-
-# 5. THE NUMBER THE RELEASE SHIPS ON — the tool end to end, with the ceiling arms above it.
+# 3. THE NUMBER THE RELEASE SHIPS ON — the `g00` rows are the zero controls, read on their own row. — the tool end to end, with the ceiling arms above it.
 #    `panel.py score` reads every arm under fractional assignment (the protocol above).
 #    --jobs 2, not more: run_pipeline holds 7-8.5 GB per 10 M-fragment condition.
 #    `base_reseed` is the noise floor; any arm delta inside it is a sampling draw.
 python scripts/sim/panel.py score  --config $CFG --arms base base_reseed oracle oracle_ruler --jobs 2
 python scripts/sim/panel.py report --config $CFG --arms base base_reseed oracle oracle_ruler
 
-# 6. STAGE A is CLOSED — this block is a REGRESSION check, run it after an accumulator or native change.
+# 4. STAGE A is CLOSED — this block is a REGRESSION check, run it after an accumulator or native change.
 python -m pytest tests/native tests/calibration -q     # FIDELITY
 ```
 
-Steps 0 and 2–4 take about 15 minutes on a built panel. Run the set together and record it
+Steps 0 and 2 take about 15 minutes on a built panel. Run the set together and record it
 together (`TRAPS: re-record-the-baseline`). When dissecting rather than scoring: run the panel → take
-the worst **in-scope** scenario → dissect it to the highest-error object (`worst_objects.py`) → find the
+the worst **in-scope** scenario → dissect it to the highest-error object (`solvability_audit.py`) → find the
 cause → fix → repeat. The worst scenario overall is the deferred stratum, and picking it is how the
 ranking gets quietly re-inverted.

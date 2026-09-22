@@ -7,8 +7,7 @@ mean anything; and the declaration matches the tree, so a layer naming a module 
 fails as well. Without the enforcement the package is a flat pile of peers rather than a knot
 (TRAPS: a-flat-pile-is-not-a-knot) — it has no cycles, but neither does it tell you where to add
 anything. A layering written only in prose would rot the way module docstrings naming a sibling they
-never import already do; `scripts/design/module_census.py` prints the same graph for a human, and this
-file is what stops it drifting.
+never import already do, and this file is what stops it drifting.
 """
 
 from __future__ import annotations
@@ -32,8 +31,7 @@ def _runtime_imports(p: pathlib.Path) -> set[str]:
     """Sibling modules imported at RUNTIME.
 
     Imports inside ``if TYPE_CHECKING:`` are excluded deliberately: an annotation cannot form a cycle
-    and does not constrain the layering. They are not ignored either — `module_census.py` reports them,
-    and one of them is how ``capture_eff_length`` annotates a type from layer 7. That is a hint, not a
+    and does not constrain the layering. One of them is how ``capture_eff_length`` annotates a type from layer 7. That is a hint, not a
     violation.
     """
     tree = ast.parse(p.read_text())

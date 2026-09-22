@@ -48,16 +48,13 @@ terms, gated on a `−`-strand sj specifically.
 **`splice-out` / `splice-in` are directional, and that is the whole reason for the pair.** The same
 BOUNDARY is a splice-out for a message travelling one way and a splice-in for a message travelling the
 other. `deconvolve` is a different verb — *"deconvolve the gDNA off, RNA is the residual"* — and a
-global replace of it corrupts that sense (`TRAPS: two-masks-one-name`; `rename_census.py --sense` exists
-to catch it). **The two words name the semantics of a step and not its arithmetic** (2026-08-05): a
+global replace of it corrupts that sense (`TRAPS: two-masks-one-name`). **The two words name the semantics of a step and not its arithmetic** (2026-08-05): a
 BOUNDARY presents one total to its genomic-LOW neighbour and another to its genomic-HIGH one, and a hop
 between adjacent slots always uses the low slot's HIGH-flank total against the high slot's LOW-flank
 total, whichever of them is the source. ⛔ A predicate on the message direction is therefore the wrong
 shape for anything in this family, and one on the SIDE is the right one.
 
-`docs/TESTING.md` §0b carries the counts/density half of this table for readers who arrive there first;
-this section is the canonical one. Re-derive the state of any remaining banned word with
-`scripts/design/rename_census.py`; never quote a stored count.
+This section is the canonical one; never quote a stored count of a banned word — grep the tree.
 
 ---
 
@@ -733,7 +730,7 @@ index) · `sweep` (the backbone) and `messages/` (the policy: `silent` · `trans
 `gdna_strand` `strand_balance` `strand_summary` · `density_deconv`
 `density_model` `landscape` `abundance_landscape` `total_abundance` · `simplex_logodds` `derive` ·
 `priors` `result` `errors` `diagnostics` `track` · `_layers` (the layering the imports already had).
-Re-derive this list rather than trusting it: `scripts/design/module_census.py` reads it off the AST.
+Re-derive this list from `calibration/_layers.py` and the imports rather than trusting it.
 
 **C++** (`src/rigel/native/`, nanobind, C++17, `-O3`, LTO, OpenMP):
 
@@ -1441,7 +1438,7 @@ backbone for one arm, scored beside the shipped policies — cannot exist since 
 an arm that ran the shipped policy under a prototype's name would have been a benchmark that cannot be trusted. A
 message mechanism is prototyped in C++ in a worktree and the two trees are scored with `policy_benchmark.py
 --by-class` on the same conditions (the working rule in CLAUDE.md); the per-gene-type table and the slot-by-slot
-dissect went with the harness — `worst_objects.py` and `calibration_walk.py` dissect a condition.
+dissect went with the harness — `solvability_audit.py` dissects a condition.
 
 **The strand likelihood's executable reference is converged** (2026-09-18; owner: one production path). The
 layer-4 module `strand_likelihood.py` held the two-component gDNA/RNA strand log-likelihood as a readable
@@ -1632,7 +1629,7 @@ stratum and both unstranded zero controls except the row the coin toss had left 
 stranded and an unstranded contaminated row BIT-IDENTICAL (`tau_lam` is only ever thresholded); the
 goldens' gDNA-free toys move ≤ 2e-3 relative on their transcript counts, except `antisense_contained`,
 whose false gDNA falls 78.7 → 5.6 fragments of 1,000 with the channel on. The stranded zero controls read
-405 → 497 and 194 → 224, and that cost is located and is not the gate's: `calibration_walk.py` reads the
+405 → 497 and 194 → 224, and that cost is located and is not the gate's: the stage ladder (init → strand → local → messages → refits) read the
 strand and local rungs identical (ψ's strand term never read the deadband), the messages rung 8 % better
 with the channel live (59,456 → 54,874) and the whole of the cost at the refit rung (375 → 8,696 before the
 messages repair it to 728) — 2,700 more exons, the walled and edge-only ones whose only composition

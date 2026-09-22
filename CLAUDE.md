@@ -69,7 +69,7 @@ Nine permanent docs, none of them a changelog.
 | `docs/TRAPS.md` | Mistakes already made, as rules that change what the next session does. Cite by name: `TRAPS: kebab-name` |
 | `docs/EQUATIONS.md` | The derivations the code depends on, each named from the module that implements it |
 | `docs/DESIGN.md` | What is built and the rulings behind it — settled, not re-litigated. §0 is the binding vocabulary; §0b the 0.8.0 scope and the nascent scope ruling |
-| `docs/TESTING.md` | A manual: how to build each panel and reference, how to run each gate, what the suite can and cannot judge. §0a is the test chromosome, §0b the toy harness |
+| `docs/TESTING.md` | A manual: how to build each panel and reference, how to run each gate, what the suite can and cannot judge. §0a is the test chromosome |
 | `docs/MANUAL.md`, `docs/PUBLISHING.md` | The user's manual and the release procedure |
 
 **The move rule.** When a finding settles, MOVE it to its one home (an open problem or refusal to
@@ -85,8 +85,7 @@ the docs**: a docstring may cite a test or the executable specification
 
 An import may point DOWN a layer or SIDEWAYS within one, never UP. A module reaching for something a
 layer up is telling you the thing belongs lower. `rigel/calibration/_layers.py` is authoritative,
-`tests/calibration/test_layering.py` enforces it, and `python scripts/design/module_census.py` re-derives
-the graph from the AST.
+`tests/calibration/test_layering.py` enforces it.
 
 | if the change is about… | it goes in |
 |---|---|
@@ -164,7 +163,7 @@ both a process rule and a structurally pure-gDNA object).
 - **A falsification test first, verified failing — then break the fixed code and watch each gate fire.**
   The second half is not optional; it has found holes in already-green gates repeatedly.
 - **The debug loop is the default method**: run the panel → take the worst IN-SCOPE scenario → dissect it
-  to the highest-error objects (`worst_objects.py`, `calibration_walk.py`) → find the mechanism → fix →
+  to the highest-error objects (`solvability_audit.py`) → find the mechanism → fix →
   re-run the panel.
 - **A ceiling is sometimes the right instrument** (`quant_accuracy.py`'s injection arms)
   but prices something that may be unreachable, so it is not the default. Every prior-injection arm patches
@@ -181,7 +180,7 @@ both a process rule and a structurally pure-gDNA object).
   tests (`docs/TESTING.md` §6). Read a timing only from back-to-back A/B pairs — untouched stages drift
   25–40 % between runs taken at different times — and prove every speed-up a numeric no-op
   (`rename_identity.py --bam`, `profiling/sweep_replay.py`).
-- **Renames**: run `rename_census.py --sense <token>` before renaming anything and `rename_identity.py
+- **Renames**: grep every sense of a token before renaming anything and run `rename_identity.py
   --check` after each stage. `arm` still carries three senses (an experiment arm, a component arm, and
   `__ARM_NEON` in the scanner) and needs its own `--sense` pass, never a tail-end sweep.
 - **The owner drives commits.** Do not commit unless asked.
@@ -247,11 +246,9 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | `design/calibration_vs_oracle.py` | ⭐⭐⭐ **IS THE CALIBRATION RESULT ITSELF RIGHT, SCORED AGAINST AN ORACLE CALIBRATION? — 0.8.0's metric, and it reaches the effective-length shrinkage, which no prior-injection arm does.** `P = calibrate(...)` against the same payload with only the six deconvolved arrays swapped, per stratum (the ruler's reference is the result's own, so at capture-OFF `O` is the no-enrichment null with no fitting); `--set SECTION.FIELD=VALUE` prices any config value on both arms — `--set calibration.message_policy=silent` is the ship protocol's first item — so a policy or a grid arm is a config value and nothing in `src/` moves to price it. ⛔ Read `ruler_n_moved`, never the aggregate: the total can barely move while nearly every transcript is redistributed. No solver, no EM, no re-scan — ~5–12 s/condition. `--self-test` 43/43 |
 | `design/ruler_vs_truth.py` | ⭐⭐⭐ **IS THE RULER'S FORMULA RIGHT? — the EM's effective length under capture, per transcript, against the simulator's own capture-aware effective length** (`CaptureSampler.partition_array`, the truth the reads were drawn with), anchored on the fully probed transcripts and read per class (the probed fraction of the transcript's bases, off the sampler itself) and kind. Arms: `shipped`; `oracle_gdna` (the certified true gDNA counts through the shipped ruler — the ideal witness, so what remains under it is the ruler's or the panel geometry's); `--module` prototype rulers beside them, the harness every ruler mechanism is developed on before `src/`; `--set` prices a config value on every arm. `--panel-dir` takes the depth ladder (`scenarios_depth_d10` / `_d100` / `_full_lowg`, `docs/TESTING.md` §0c) for the operating curve of the reference. ⛔ Read the classes apart: the probed class is where the formula is exact when its witness is, the unprobed class is where a floor or a reference bites. ⭐⭐⭐ **`--scale`: ARE EVERY HYPOTHESIS CLASS'S OPPORTUNITIES ON ONE SCALE?** — L / Y per class, unanchored, against the simulator's own yield (mRNA space for transcripts and spans, gDNA space for the locus component), the two candidate families' pairwise class-mean ratios judged at the elasticity's 1 %, junction-probed transcripts apart; no EM. `--self-test` 30/30 |
 | `design/calibration_oracle.py` | ⭐⭐⭐ **WHAT IS THE CERTIFIED PER-OBJECT TRUTH? — run this before debugging calibration against anything.** Every REGION and BOUNDARY's count, its realized `n_gdna`/`n_nrna`/`n_mrna` and `true_f_g`, at two certification levels: COMPOSITION (no opportunity model anywhere in it) and FIELD (densities too). ⛔ REFUSED unless its named gates pass — sum-to-full, partition-projects-exactly, gdna-field-uniformity, exact-zeros, nascent-in-annotation, rna-strands-close — because a merely plausible oracle is how a calibration bug and a truth bug survive each other. Writes `slot_truth.npz` beside each oracle cache; `--self-test` 13/13 |
-| `design/calibration_walk.py` | ⭐⭐⭐ **WHICH STAGE OF CALIBRATION INTRODUCES THE ERROR?** The solve as a ladder — init → strand → local → +messages → +refits → shipped — each rung scored per stratum against `calibration_oracle.py`, which it refuses to run without |
 | `design/solvability_audit.py` | ⭐⭐⭐ **WHICH OBJECTS ARE SOLVABLE, WHICH ARE SOLVED WRONG, AND WHICH ARE CONFIDENTLY WRONG? — where pass-0 and 0.8.0 are judged.** ⛔ Honest ignorance is excluded: `f_g ≈ ½` at zero precision with no own evidence is correct. Omit `--condition` to run the panel |
 | `design/prior_vs_oracle.py` | ⭐⭐⭐ **IS `LocusPriors` — the thing the EM actually reads — RIGHT?** Five arms separate calibration's own error from the assembler's, reporting the count, the composition claim and the scale apart, per stratum, in the drained frame |
 | `design/pass0_vs_oracle.py` | **HOW DOES PASS-0 COMPARE WITH THE ORIGIN-SPLIT PAYLOAD AND TWO LEVERED CEILINGS, per object and per class?** ⛔ Its mass-weighted headline is the wrong yardstick for pass-0 — honest ignorance reads as error there |
-| `design/worst_objects.py` | ⭐⭐ **WHICH REGIONS AND BOUNDARIES CARRY ONE CONDITION'S ERROR MASS?** Read the concentration curve first — concentrated means a mechanism exists, diffuse a systematic bias; `fg_loc` vs `pred_fg` separates a bad local solve from bad messages |
 | **⭐⭐⭐ the panel, and the caches that make calibration a seconds-long loop** | |
 | `sim/configs/flgap_rna_long.yaml` · `flgap_rna_short.yaml` | ⭐⭐ **WHAT BREAKS WHEN gDNA AND RNA FRAGMENT LENGTHS DIFFER? — the fl-gap SIDE panel, two arms of opposite sign** at `g50`. ⛔ Never a ladder rung: its transcript-level number is not a calibration result, though everything before the EM is valid ⛔⛔ **NOT REGENERATED on 2026-08-22: both arms still carry the RETIRED UNIFORM nascent model (`mode: fragment_share`), while the ladder carries SPARSE.** Each panel's on-disk data matches its own config, so both are internally accurate and their recorded measurements stand — but a ladder-vs-side-panel comparison now varies TWO things, so no claim may be carried across them. Re-simulating is an open owner decision |
 | `sim/configs/gdna_ladder.yaml` | ⭐ **THE STAGE-B PANEL, AND THE ONLY PANEL THE TOOL IS RANKED ON** — 16 conditions (`g00/g05/g50/g98` × ss `0.50/0.99` × capture off/on), gDNA 0 → 98 % at a fixed 10 M total. ⛔⛔ **EQUAL FRAGMENT LENGTHS, and that is a forcing function**: the EM already reads the fl distribution, so a length gap lets it split the origins on LENGTH ALONE and mask calibration bugs (owner, 2026-08-14). ⛔⛔ **Every row carries SPARSE nascent RNA (2026-08-22): `on_fraction 0.50` of gene SPANS on, level logU(1, 100) INDEPENDENT of the mature level — 20.2 % of RNA fragments, the retired uniform model's total distributed sparsely.** 0.50 is a DEVELOPMENT STRESS level and not real data (`DESIGN.md` §0b, THE NASCENT SCOPE RULING); realistic is 0.10 ⇒ 4.2 %. `docs/TESTING.md` §0 |
@@ -262,13 +259,6 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | `design/quant_accuracy.py` | ⭐⭐⭐ **HOW ACCURATE IS THE TOOL END TO END, AND WHAT IS A PERFECT PRIOR WORTH?** `--arm base` plus the oracle and per-field injection arms, scored count against count. ⭐ Read per stratum, above `--arm base_reseed`, and under `--set em.assignment_mode=fractional` (owner, 2026-09-19): one of 0.8.0's TWO primary numbers beside the calibration metric, never a stand-in for it. ⭐ **`--report FILES… --markdown OUT`: THE PER-SCENARIO RELEASE REPORT** — every condition's three pools (gDNA / SYNTHETIC nascent / annotated) against truth in raw counts and per cent, then transcript and gene error inside the annotated pool alone, then the per-stratum roll-up. It renders arm jsonl and runs nothing |
 | **⭐⭐⭐ where to develop** | |
 | `design/rename_identity.py` | ⭐⭐⭐ **IS THIS RENAME, REFACTOR OR SPEED-UP NUMERICALLY A NO-OP?** `--freeze` captures one reference, `--check` compares after every stage — on array CONTENT and the transcript table, never on names; `--bam` takes a real library instead of a panel condition. ⚠ The reference is frozen, never rolling. `--self-test` 8/8 |
-| `design/rename_census.py` | ⭐⭐⭐ **WHICH NAMES DOES A VOCABULARY RULING TOUCH, AND WHICH CARRY TWO SENSES?** Reports by kind — identifiers, C++, prose — and never renames; `--sense <token>` dumps every site with context. ⛔ Run it before renaming anything |
-| `design/module_census.py` | ⭐⭐⭐ **WHERE DOES A CHANGE GO?** The calibration package re-derived from the AST: the layering with every upward import, each module's importers, docstrings naming a sibling with no import, dead public surface. ⛔ It reports; it does not judge |
-| **⭐⭐ the toy harness** | |
-| `design/zero_controls.py` | ⭐⭐⭐ **DOES THE TOOL HOLD AT ZERO RNA AND AT ZERO gDNA? — the owner requires both on every experiment.** The truth is a constant, so every deviation is a false positive. ⛔ Flags any EMPTY object: a degenerate zero arm tests nothing |
-| `design/toy_harness.py` | ⭐⭐ **HOW DOES A MINI CHROMOSOME YOU DEFINE CALIBRATE — in 0.1–5 s, with every object's answer beside its truth?** (`docs/TESTING.md` §0b) The priors a toy cannot fit are harvested from a real cached condition; `--list` for the ladder |
-| **the substrate — are the panel and the index sound?** | |
-| `design/simulator_gates.py` | **DOES THE SIMULATOR PASS ITS OWN GATES, scored on per-fragment truth?** ⛔ Run it before trusting the panel |
 
 
 ## CLI

@@ -7,8 +7,8 @@ itself belongs higher. A type almost always belongs lower.
 ``LAYERS`` below is that declaration, lowest layer first, and it is authoritative: every module in
 the package must appear in it exactly once. ``tests/calibration/test_layering.py`` enforces both
 halves — the direction rule against the real imports, and the requirement that nothing is unplaced,
-since an unplaced module is a file whose home nobody decided. ``python scripts/design/module_census.py``
-re-derives the graph from the AST and prints the live per-layer contents, so no count belongs here.
+since an unplaced module is a file whose home nobody decided. The graph is re-derived from the imports,
+so no count belongs here.
 
 Where to put a change
 ---------------------

@@ -18,8 +18,7 @@ the absolute; an object with no mass is absent, not ``f_g = 0``; zero-gDNA rows 
 a truth of exactly 0 is saturated. Its mass-weighted headline is the wrong yardstick for pass-0,
 where honest ignorance reads as error; `solvability_audit.py` is that judge.
 
-Also a library: `calibration_vs_oracle.py`, `solvability_audit.py` and `worst_objects.py`
-import `measure_condition`, `score_axis`, `check_same_basis`, `object_fractions`,
+Also a library: `solvability_audit.py` imports `measure_condition`, `score_axis`, `check_same_basis`, `object_fractions`,
 `truth_length_pmf`, `truth_f_gdna`, `library_f_gdna`, the class tuples and the two defaults.
 
 Usage::
@@ -211,7 +210,7 @@ def solver_slot_classes(capture, eps: float = _EPS) -> dict[str, np.ndarray]:
 
     ``eps`` is the solver's own gate (``has_own_composition_evidence`` tests ``tau_lam > 1e-9``), so this
     partition answers "which mechanism did the solver use here", which is what the cross-tab and
-    ``worst_objects.py`` need. It is deliberately not the question "should pass-0 be scored here": a
+    a dissection needs. It is deliberately not the question "should pass-0 be scored here": a
     fitted κ that misses ½ by a rounding step leaves a τ the solver treats as evidence that can
     resolve nothing, and that question is answered by ``solvability_audit``'s resolving-power curve
     over ``SD_LAMBDA_DECADES``. ``eps`` exists so a gate can move it and watch the partition move;
@@ -430,7 +429,7 @@ class ConditionMeasurement:
     info_scores: dict  #: arm -> axis -> info-class -> AxisScore
     info_shares: dict  #: axis -> info-class -> mass share
     #: The two classifications as boolean masks per axis, kept so a downstream instrument reads the
-    #: same partition this one scored rather than recomputing its own. ``worst_objects.py`` consumes these.
+    #: same partition this one scored rather than recomputing its own.
     solver_masks: dict
     info_masks: dict
     cross: dict  #: axis -> (info class, solver class) -> AxisScore, for pass-0

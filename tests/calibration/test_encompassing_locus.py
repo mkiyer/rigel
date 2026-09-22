@@ -22,20 +22,20 @@ import pytest
 from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 
 _HERE = Path(__file__).resolve()
-_DESIGN = _HERE.parents[2] / "scripts" / "design"
+_HELPERS = _HERE.parent
 
 
 def _load(name: str):
     key = f"_encompass_{name}"
     if key not in sys.modules:
-        spec = importlib.util.spec_from_file_location(key, _DESIGN / f"{name}.py")
+        spec = importlib.util.spec_from_file_location(key, _HELPERS / f"{name}.py")
         module = importlib.util.module_from_spec(spec)
         sys.modules[key] = module
         spec.loader.exec_module(module)
     return sys.modules[key]
 
 
-TH = _load("toy_harness")
+TH = _load("_toy_harness")
 
 #: TA+ against TB−, in the simulator's abundance units: TA+ ≫ TB−, TA+ ≪ TB−, TA+ ≈ TB−, both silent
 REGIMES = {

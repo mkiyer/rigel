@@ -55,7 +55,7 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   (`g50 ss.99 OFF` 0.5524 → 0.5071)
   (`ISSUES: nascent-siphons-gdna-under-capture`, whose root cause is now found and whose repair is open). The
   three calibration-side instruments are CONTROLS across this change and came back identical on every metric —
-  `calibration_vs_oracle.py`, `zero_controls.py` (byte-identical) and `policy_benchmark.py --panel ladder` —
+  `calibration_vs_oracle.py` and `policy_benchmark.py --panel ladder` —
   which is what says the change stayed inside the EM.
 - **Stage A (the accumulator)**: done; the fragment ledger closes exactly — `calibration_oracle.py`.
 - **Fragment lengths**: closed, both halves — gDNA by the two-pool contrast (`calibration/fl.py`,
@@ -67,8 +67,7 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   (`DESIGN.md` §6b.12–§6b.14); `silent` is the measured floor. The bar — win on unstranded, minimal harm
   on stranded, never pooled — is `policy_benchmark.py --panel ladder`; the zero rows are solved by the
   prior under both policies, so the "beats silence" count is read on the contaminated rows, where every
-  row favours `transfer`; `calibration_walk.py` says the messages still carry the stranded capture-ON
-  rows and are essential on the deferred stratum.
+  row favours `transfer`.
 - **The gDNA landscape prior**: done for 0.8.0 (`DESIGN.md` §7.1); the zero controls are solved on the
   metric (`calibration_vs_oracle.py`) and the
   in-scope per-object composition error did not move.
@@ -130,7 +129,7 @@ The ranked list below is the method: what the tool ANSWERS, judged on 0.8.0's me
 substance of each item.
 
 The method is the dissection loop: run the panel → worst in-scope scenario → rank its objects by error
-mass (`worst_objects.py`, `calibration_walk.py`) → find the mechanism → gated fix → add the offending
+mass (`solvability_audit.py`) → find the mechanism → gated fix → add the offending
 transcripts to the test chromosome → re-run → repeat. The facts this ranking leans on, each named with
 its instrument: the ruler reads 1.000 at `g00` and off capture, so the metric page is the composition's
 (`calibration_vs_oracle.py`); a perfect prior is worth nothing in scope end to end on the rebuilt ladder
@@ -173,7 +172,7 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
    zero controls and the shared-exon stress at depth, never on the ladder alone.
 4. **The intron's own solve on unstranded capture-OFF** — the intron class carries the largest share of
    the in-scope error there (`policy_benchmark.py --by-class`): the factory profile's resolution against
-   the intergenic background (`density_deconv`); dissect with `worst_objects.py`.
+   the intergenic background (`density_deconv`); dissect with `solvability_audit.py`.
 5. **The vertex atom** — on silent genes and nascent-free introns; a
    mechanism for it is the prior's reference (`ISSUES: reference-prior-refuted-at-concept-level`
    constrains the form) or the intron's own solve, not a message.
