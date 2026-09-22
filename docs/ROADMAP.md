@@ -16,10 +16,10 @@ assignment), and the calibration result against an oracle calibration is what ra
 unstranded × capture-ON is deferred and never ranked on a pooled total (`TRAPS: never-pool-the-strata`). The
 fragment-length composition channel is retired until after 0.8.0.
 
-The work, in order: **the cleanup** (the sandbox's `CLEANUP.md` — a production-ready tree with the shipped
-infrastructure and no new mechanism), then the two problems of the sandbox's `TWO_PROBLEMS.md`, each derived on
-one page and A/B'd against what ships: **the capture-contracted effective length for each transcript**, then
-**a prior for each transcript**.
+The cleanup is closed: the tree is the shipped infrastructure with nothing dead, duplicated or narrated, and what
+it deliberately left is `ISSUES: hygiene-ledger`. The work, in order: the two problems of the sandbox's
+`TWO_PROBLEMS.md`, each derived on one page and A/B'd against what ships: **the capture-contracted effective
+length for each transcript**, then **a prior for each transcript**.
 
 ## Where the tool is — one line per claim; run the named instrument for a current number
 
@@ -60,16 +60,14 @@ one page and A/B'd against what ships: **the capture-contracted effective length
 
 ## Next — the order
 
-1. **The cleanup** — the sandbox's `CLEANUP.md`: its stages in order, each step a deletion or a convergence proven a
-   numeric no-op (`rename_identity.py --check`), the count re-derived from `CLAUDE.md`'s table at every commit.
-2. **The capture-contracted effective length for each transcript** — one rule for every component, judged per
+1. **The capture-contracted effective length for each transcript** — one rule for every component, judged per
    probed class against the simulator's yield with no EM (`ruler_vs_truth.py --scale`), the junction residual
    sized and reported (`ISSUES: the-gdna-component-length-rule-differs-from-the-transcripts`,
    `ISSUES: ruler-witness-geometry-on-transcript-panels`).
-3. **A prior for each transcript** — the redesign of what the EM reads before it starts, through the lane that
+2. **A prior for each transcript** — the redesign of what the EM reads before it starts, through the lane that
    exists (`ISSUES: per-transcript-prior-lane`, `ISSUES: the-pseudocount-prior-is-biased-toward-gdna`), judged
    on the pools per row first and the transcript table second, `g98` and the zero controls beside.
-4. **The release** — `docs/PUBLISHING.md` is the procedure; what gates it is the state: the deliverable
+3. **The release** — `docs/PUBLISHING.md` is the procedure; what gates it is the state: the deliverable
    measured per stratum, the zero rows clean, the suite at its standing count, `preflight.py --full` green, the
    standing risks re-read, and the manual true of what ships.
 

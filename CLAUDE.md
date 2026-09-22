@@ -99,12 +99,12 @@ layer up is telling you the thing belongs lower. `rigel/calibration/_layers.py` 
 
 ## The message layer
 
-`CalibrationConfig.message_policy = "transfer"` ships (the default since 2026-09-09; `"silent"` is the
-floor, and the one field selects — the `message_propagation` switch retired 2026-09-13). Two policies, selected by one config value (an unknown name raises), both on the two-phase
+`CalibrationConfig.message_policy = "transfer"` ships; `"silent"` is the floor. Two policies, selected by one config
+value (an unknown name raises), both on the two-phase
 backbone (`docs/DESIGN.md` §6b.11–§6b.12): every node's own claim → a forward pass and a backward pass in
 which each recipient receives what its neighbour sends, so every node ends with one message from each
 neighbour it has → the solve, which hands ψ two row channels and nothing else. THE SWEEP IS ONE NATIVE CALL
-(`native.solve_blocks`, `native/solve_kernel.cpp`, since 2026-09-18): the chain's locus blocks are solved on a pool
+(`native.solve_blocks`, `native/solve_kernel.cpp`): the chain's locus blocks are solved on a pool
 of threads, one block at a time, end to end — the prior rows, the self-solve, the layer, the final solve, the
 write-back — bit-identical at every thread count; `sweep.solve_chain` cuts the blocks, reduces the library, makes
 the call and judges the assertions' counts.
@@ -199,8 +199,8 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,379 passed / 0 skipped / 2 xfail, 3,381 collected** — re-derived 2026-09-22 on branch
-`calibrated-likelihood` at the end of the cleanup's first day (the count is re-derived from the table below at every commit that
+**The standing baseline: 0 failed / 3,312 passed / 0 skipped / 2 xfail, 3,314 collected** — re-derived 2026-09-22 on branch
+`calibrated-likelihood` at the close of the cleanup's review (the count is re-derived from the table below at every commit that
 measures the suite; the history of how it moved is git, not this file). The 2 xfails are executable records of proven
 defects whose fixes are elsewhere (`ISSUES: two-sided-exon-row`; `ISSUES: the-lower-bound-noise-ratchet`), deferred by
 ruling to their threads — "fix the test" is a category error, and an xfail is closed by repairing the thing or asserting

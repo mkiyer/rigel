@@ -97,29 +97,38 @@ The instrument's default `--reference` path does not exist and it prints ⛔ rat
 7. **The simulator's error model and sharded writers** STAY (a coverage gap, to be worked on eventually).
 8. `_DEFAULT_MEAN_FRAG` → a refusal (done, above).
 
-## Decisions still open
+## Day 2 — the review (2026-09-22), every stage closed
 
-* The `Development Status` classifier in `pyproject.toml` at the release.
+Each unit its own commit on the owner's go; `rename_identity.py --check` BIT-IDENTICAL on all three references after
+every source change (read from the log); the suite re-derived from `CLAUDE.md`'s table at every commit.
 
-## Stages ahead
+| commit | what |
+|---|---|
+| `21cc1837` | the production FL build has one home, `pipeline.library_fl_models` (five copies → one; the two caller gates → one) |
+| `31f59a6e` | `cli.py`: the legacy config-key tables, a doubled sj-tag conversion; the alignable store's help and manual rows made true |
+| `cdaf79df` · `0f09a0d1` · `adb8db28` · `242540bc` · `1d93ba3c` | `estimator.py`, `index.py`, `buffer.py`, `fl.py`, `pipeline.py` read end to end |
+| `78f3cd8d` | dead native code counted by caller: three written-never-read resolver fields, the MAP tail, unread bindings |
+| `62ab3db9` · `e3a7436c` · `fe12dcdf` | the vacuous gate clauses as stated scope; the toy harness's CLI leftovers; comments that described a deleted tree |
+| `f57dde28` | `loci.feather`'s four always-zero columns deleted (owner); `summary.json` schema 3 |
+| `81ea446f` · `c79a077d` | production-dead source with the tests that were its only subject (`structural_claims.py`, `build_total_abundance`, …); `FragmentLengthModel`'s training methods |
+| `d867e45f` · `3431a2c7` | four duplicate gates merged; ~40 test files' descriptions made true |
+| `ea67b17c` | `ISSUES.md` 1,365 → 1,121 lines, `DESIGN.md` 2,012 → 1,690; `TESTING.md` carries the identity procedure |
+| `3feca5e9` · `8f9a1f5d` · `580fb08d` | src comments made true; one splice-blacklist aggregation; two files formatted, one test made to run alone |
 
-1. **`src/` knobs and lanes** — the decisions above, then each deletion alone with the identity check.
-2. **Dead and duplicated code** — from the coverage table: every function the suite never executes is read and
-   either gated or deleted; the ledger's duplicates (`ISSUES: hygiene-ledger` (c)) converged into `_shared.py`.
-3. **Tests** — the vacuous gate clauses named in `ISSUES: hygiene-ledger` (b) are branches inside the message-layer
-   gates that the toy never reaches (`test_transfer_faces.py`'s `_expected_level_rows` bound branch and its
-   terminus-flags-cleared assertion, `test_transfer_policy.py`'s LEVEL-face invariants, `test_transfer_rna_lanes.py`'s
-   terminus and `own_level is None` clauses). Each needs the gate re-read against its toy; deferred behind the
-   release stages — a clause that never fires misleads coverage but moves no number. Tests of deleted code go with it;
-   the count re-derived from the table, never adjusted.
-   Also accepted, not changed: `frag_length_model._normalized_probs`'s uniform pmf for a model with no observation —
-   the maximum-entropy state of an empty histogram, unlike a hard-coded mean; the pipeline refuses upstream.
-4. **Instruments** — decision 5, then `CLAUDE.md`'s table and `preflight.py`'s import sweep follow the disk.
-5. **Docs** — `ROADMAP.md` carries numbers against its own rule; `CLAUDE.md` is 380 lines; `DESIGN.md` 2,015.
-   Each cut by the move rule: a number goes to the instrument that re-derives it, a history to git.
-6. **Release readiness** — DONE 2026-09-22 except the walk-through: `CHANGELOG.md`'s `[Unreleased]` written from the
-   555 commits since 0.7.1 (a rebuilt index is required: format 8); the manual's flag table diffed against `--help`
-   (one flag was missing, `--sweep-block-slots`, added; four removed flags were already gone from it); a wheel builds from
-   the working tree (`pip wheel . -C build-dir=<scratch>`, abi3, 1.3 MB) and `rigel --version` runs; `preflight.py --full`
-   5/5. Left: `PUBLISHING.md`'s two commands walked once without publishing (the owner's), the version bump
-   (`release.sh`'s job), and the `Development Status` classifier, an owner call.
+The suite: 3,381 → 3,314 collected (−1 the merged caller gate, −3 legacy-key tests, −4 `get_detail_df`, −2
+`splash_fl_mass`, −30 the production-dead source and its tests, −22 the model's training tests, −5 duplicates),
+3,312 passed / 2 xfail, matched by the suite. Every test file also passes run alone.
+
+**Release readiness.** `preflight.py --full` 5/5; a wheel builds from the tree (abi3, 1.3 MB) and its CLI, imported
+with the editable install bypassed, runs `quant` → `report` → `export` on a test-chromosome condition, and a
+`config.yaml` rerun reproduces the transcript table exactly. `PUBLISHING.md`'s two commands were walked in a
+throwaway clone with a dead `origin`, answering no at every prompt: `release.sh 0.8.0` bumps the three files and
+aborts cleanly; `post_release.sh 0.7.1` finds the sdist, patches nothing (the sha256 already matched) and skips the
+commit. The walk found `release.sh` claiming a clean-tree check it never made and `post_release.sh` printing raw
+escape codes — both fixed (owner). The classifier is `Development Status :: 4 - Beta` (owner). A release still needs
+this branch on `main` and `release.sh`'s version bump.
+
+**Deferred, recorded in `ISSUES: hygiene-ledger`**: `region_span_count` (owner: with the next re-cache), the tested
+production-dead surface, the gates that check less than their names, the `--no-mappability` flag name.
+
+The cleanup is done. `NEXT_SESSION.md` now carries prompt 2, the capture-contracted effective length.
