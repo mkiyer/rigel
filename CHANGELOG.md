@@ -49,6 +49,7 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 8).
 
 ### Changed
 
+- The package declares `Development Status :: 4 - Beta`.
 - Quantification is reproducible run to run: the second pass draws from one seeded stream and the
   index loader refuses an index it did not build (no manifest, or another format version).
 - Chimera detection checks genomic compatibility before calling a fragment a chimera, and an empty
