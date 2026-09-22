@@ -8,7 +8,7 @@ radius and the least visibility. Re-deriving the expected value through the same
 makes would be a check that cannot fail; what makes this a real gate is that the left-hand side comes
 out of a full ``run_pipeline`` while the right-hand side is rebuilt from the PAYLOAD alone, so a
 pipeline feeding its effective lengths from anything else, or from a differently-built model, cannot
-agree with it (`TRAPS: an-all-zero-factor-is-inert`).
+agree with it.
 """
 
 from __future__ import annotations
@@ -63,9 +63,7 @@ def _config():
 
 
 def test_every_transcript_eff_length_comes_from_the_PAYLOADS_rna_pmf(scenario):
-    """`TRAPS: an-all-zero-factor-is-inert`, verified rather than assumed.
-
-    The pipeline's per-transcript effective lengths must be **exactly** what the payload's RNA pmf
+    """The pipeline's per-transcript effective lengths must be **exactly** what the payload's RNA pmf
     produces. Any other source — a stale model, the scanner's deleted histogram, a default fallback —
     gives a different array.
     """
@@ -135,16 +133,15 @@ def test_the_eff_lengths_MOVE_when_the_rna_pmf_moves(scenario):
 def test_the_n_observations_GUARD_ON_THAT_PATH_CANNOT_FIRE(scenario):
     """A finding, pinned so it is not mistaken for a live safety net.
 
-    ``pipeline`` guards the effective-length computation with ``if rna_fl.n_observations > 0``. On this
-    path ``rna_fl`` always comes from :meth:`FragmentLengthModel.from_pmf`, which sets
-    ``_total_weight = 1.0`` — so ``n_observations`` is **exactly 1, always**, whatever went into the
-    pmf. The guard reads as "fall back to a default mean if there is no RNA data" and it can never
-    take that branch.
+    ``_setup_geometry_and_estimator`` refuses a model with ``rna_fl.n_observations <= 0`` (the gate
+    below). On the production path ``rna_fl`` always comes from
+    :meth:`FragmentLengthModel.from_pmf`, which sets ``_total_weight = 1.0`` — so ``n_observations`` is
+    **exactly 1, always**, whatever went into the pmf, and the refusal cannot fire there.
 
-    That is not a bug to fix here — an empty RNA pool is EB-shrunk all the way to the unconditional
-    anchor by ``build_fl_models``, which is a better answer than a hard-coded 200 bp mean, so the
-    reachable behaviour is the right one. It is recorded because the guard's *appearance* of a
-    fallback is what would let a future empty-pool bug hide behind it.
+    That is not a bug to fix here — an empty RNA pool is EB-shrunk all the way to the anchor by
+    ``build_fl_models``, so the reachable behaviour is the right one. It is recorded because the
+    refusal's *appearance* of an empty-pool check is what would let a future empty-pool bug hide
+    behind it.
     """
     from rigel.calibration.fl import build_fl_models
 

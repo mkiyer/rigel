@@ -1,17 +1,15 @@
-"""Python reference fragment resolution — TEST-ONLY.
+"""Test-only helpers for fragment resolution; NOT part of the shipped ``rigel`` package.
 
-Production fragment resolution runs entirely in C++
-(``rigel._resolve_impl`` via ``FragmentResolver``).  These Python
-functions are the pre-C++ reference implementation, retained solely as
-test fixtures / oracles.  They are imported only by the ``tests/``
-suite and are intentionally NOT part of the shipped ``rigel`` package.
+Production fragment resolution runs entirely in C++ (``rigel._resolve_impl``'s
+``FragmentResolver``, reached as ``index.resolver``). This module provides:
 
-This module contains:
-- ``make_fragment()`` — lightweight fragment constructor for ``resolve_fragment``
-- ``resolve_fragment()`` — core fragment-to-transcript resolution with
-  chimera detection (interchromosomal and intrachromosomal)
-- ``_detect_intrachromosomal_chimera()`` — transcript-set disjointness
-  chimera detector
+- ``make_fragment()`` — a minimal fragment object carrying the three attributes
+  the C++ resolver reads
+- ``resolve_fragment()`` — a thin driver that hands such a fragment to
+  ``index.resolver``; it does no resolution of its own
+- ``_detect_intrachromosomal_chimera()`` — a Python twin of the intrachromosomal
+  chimera rule (transcript-set disjointness, compatibility checked first), gated
+  in ``test_resolution.py`` beside the C++ kernel
 """
 
 # ---------------------------------------------------------------------------
@@ -162,8 +160,6 @@ def make_fragment(exons=(), introns=()):
     and ``.genomic_footprint`` — the three attributes the C++ resolve
     kernel reads via ``frag.attr()``.
 
-    Replaces the former ``Fragment`` dataclass (now removed).
-
     Parameters
     ----------
     exons : iterable of GenomicInterval
@@ -192,12 +188,11 @@ def make_fragment(exons=(), introns=()):
 
 
 def resolve_fragment(frag, index):
-    """Resolve a fragment to its compatible transcript set.
+    """Resolve a fragment to its compatible transcript set with the C++ resolver.
 
-    Uses the C++ native kernel (``rigel._resolve_impl``) via
-    ``FragmentResolver.resolve_fragment()``.  Returns a C++
-    ``ResolvedFragment`` object that exposes attributes for model
-    training and buffering.
+    Calls ``index.resolver.resolve_fragment(frag)`` (``rigel._resolve_impl``'s
+    ``FragmentResolver``) and returns what it returns, a ``ResolvedFragment`` or
+    ``None``; a fragment with no exon blocks is ``None`` without the call.
     """
     if not frag.exons:
         return None

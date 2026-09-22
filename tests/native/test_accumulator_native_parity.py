@@ -7,10 +7,11 @@ deposit, then over ten thousand random fragments across the whole coordinate spa
 after each one so a divergence is located to a single fragment rather than to a summed array. The
 deferred queue is part of it: a fragment whose gap has more than one surviving explanation is held WHOLE
 for the second pass, so the two languages must agree not only on the tally but on which fragments were
-held and with which hypotheses. That bank is the only one whose ORDER is observable — every other is a
-sum of integers, and integer addition is associative — so it is compared through the canonical
-flattening the specification itself defines (:meth:`Tally.deferred_arrays`). The field list is read off
-``dataclasses.fields(Tally)`` rather than written out here, so a new channel joins this gate
+held and with which hypotheses. That bank is the only one that is a list rather than a sum — every
+other is a per-object sum (uint32 counts, float64 fractions and masses) that both languages add in
+the same fragment order, so each must match exactly — so it is compared through the canonical
+flattening the specification itself defines (:meth:`Tally.deferred_arrays`). The field list is read
+off ``dataclasses.fields(Tally)`` rather than written out here, so a new channel joins this gate
 automatically and a binding that has not grown the matching property fails loudly. The comparison is
 driven through the binding rather than through ``AccumulatorPayload`` because the payload is a
 whole-scan object over a multi-reference partition and this compares one deposit rule on one reference;
@@ -203,8 +204,8 @@ BOTH_SJ = GapHypothesis(((100, 200), (201, 900)), sj_strand=Strand.POS, supporti
 #: sj bank, the deferred queue) is followed by one that reads it, and every case names what it is FOR.
 CASES: list[tuple[str, dict]] = [
     ("contained in an exonic region", dict(start=150, end=190)),
-    ("contained, intergenic region (a pure gDNA pool)", dict(start=10, end=90)),
-    ("contained, intronic region (the other pure gDNA pool)", dict(start=210, end=390)),
+    ("contained, intergenic region (a gDNA pool)", dict(start=10, end=90)),
+    ("contained, intronic region (the other contained gDNA pool)", dict(start=210, end=390)),
     ("one boundary crossed, {intergenic, exon} splash", dict(start=50, end=150)),
     ("one boundary crossed, {intron, exon} splash", dict(start=200, end=210)),
     ("four boundaries crossed -> no pool, it is a mixture", dict(start=50, end=500)),

@@ -537,27 +537,26 @@ def _fixture(n=400, seed=3):
     )
 
 
-# ── one home for the evidence predicate ─────────────────────────────────────────────────────────
+# ── the own-evidence predicate ──────────────────────────────────────────────────────────────────
 
 
-def test_D4_the_evidence_predicate_has_ONE_home_and_the_instruments_import_it():
-    """TRAPS: a-test-that-redefines: a gate that re-derives a definition cannot detect drift in it, so the
-    definition must live in ONE place with every consumer importing it. The home is production —
-    the predicate is a production concept and ``scripts/`` is deliberately not importable.
+def test_D4_the_evidence_predicate_agrees_with_the_kernel_liveness_test():
+    """TRAPS: a-test-that-redefines: the one definition of "has own composition evidence" is
+    production's ``region_init.has_own_composition_evidence`` (``tau_lam`` above the kernel's
+    ``OWN_EVIDENCE_EPS``). The instruments do not import it: ``_oracle_arms`` and ``solvability_audit``
+    each restate ``_EPS = 1.0e-9``, and only ``_oracle_arms``'s slot partition is held to the
+    production predicate (in ``test_oracle_arms``).
 
-    An instrument restating ``_EPS = 1.0e-9`` beside a comment saying it must match the solver does
-    not move when the solver does. The instruments import the home
-    (`_oracle_arms` — gated in ``test_oracle_arms``), and
-    on every value the solver publishes — exactly zero where the protocol decision or the AMBIG gate silenced
-    the channel, a Fisher information otherwise — the home agrees with the transfer policy's own
-    liveness test on a node's strand channel, ``tau_lam > 0``."""
+    This gate pins the predicate itself: on the kind of value the solver publishes — exactly zero
+    where the slot has no channel, a Fisher information otherwise — it agrees with the kernel's
+    other liveness test, ``tau_lam > 0``."""
     tau = np.array([0.0, 1e-4, 1.0, 850.0])
     assert np.array_equal(has_own_composition_evidence(tau), tau > 0.0)
 
 
 def test_D4_perturbation_a_DIFFERENT_predicate_stops_matching_the_home():
-    """The falsification: a consumer that picks its own floor disagrees with the home on a τ that
-    spans the guard, so a restated number cannot pass for the imported predicate."""
+    """The falsification: a consumer that picks its own floor disagrees with the production predicate
+    on a τ that spans the guard, so the agreement above is not vacuous."""
     tau = np.array([0.0, 1e-12, 1e-9, 2e-9, 1e-4, 1.0])
     theirs = tau > 1e-6  # a plausible, wrong, home-made floor
     assert not np.array_equal(theirs, has_own_composition_evidence(tau))

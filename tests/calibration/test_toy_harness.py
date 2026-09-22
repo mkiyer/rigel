@@ -43,7 +43,7 @@ def donor(tmp_path_factory):
 
     It must be unstranded (``ss_0.50`` in the name, which is where the harness reads it from) and
     must carry gDNA — with no gDNA there is no intergenic population to measure a density from, and
-    :func:`toy_harness.harvest` would have nothing to match the toy to.
+    `_toy_harness.harvest` would have nothing to match the toy to.
     """
     wd = tmp_path_factory.mktemp("toy_donor")
     sc = Scenario("donor_ss_0.50_capture_off", genome_length=120_000, seed=11, work_dir=wd / "sim")
@@ -246,7 +246,7 @@ def test_EVERY_object_with_mass_is_reported(donor, spec, tmp_path):
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "ISSUES: two-sided-exon-row — with `transfer` the shipped default (2026-09-09) a channel-free "
+        "ISSUES: two-sided-exon-row — with `transfer` the shipped default, a channel-free "
         "exon beside a pure-gDNA intron holds two floors and no ceiling (rung 2's plateau above the "
         "face map's ceiling) and sits at the measured intron reference: |Δf_g| 0.848 dry against "
         "0.098 wet. The wall that closes it is refused on the ladder and the probe panels. Closed by "

@@ -4,7 +4,7 @@ The oracle IS the production accumulator, partitioned by TRUE fragment origin �
 gdna / mrna / nrna by read-name origin (:func:`rigel.sim.read_name.parse_origin`), the same production
 scanner and accumulator run on each partition, and the partitions asserted to sum to the full payload.
 Because the accumulator deposits each fragment independently, that identity proves the partition is the
-production payload split by origin, so there is no reimplementation here to get subtly wrong. Five
+production payload split by origin, so there is no reimplementation here to get subtly wrong. Four
 populations sit on three axes, each an integer count with two GENOME-strand columns: ``region_contained``
 (the whole path lies inside the region); ``boundary_unspliced`` (the mixture being deconvolved) and
 ``boundary_spliced`` (certified RNA) at a contiguous boundary; ``sj_count`` (pure RNA by construction) at
@@ -46,9 +46,9 @@ _BANKS = (
     "region_start_count",
     "region_end_count",
     "region_span_count",
-    # The three CONSERVED MASS banks — exactly what `component_shares` reads, so a bank left out of the
-    # tuple is a bank the origin split is never validated on. Integer fixed point, so sum-to-full is
-    # byte-exact here like every other bank.
+    # The three CONSERVED MASS banks — exactly what `component_shares` reads, so a bank left out of
+    # the tuple is a bank the origin split is never validated on. These three are float64, so
+    # sum-to-full holds to within the representation rather than byte-exact (see `_validate`).
     "boundary_unspliced_mass",
     "boundary_spliced_mass",
     "sj_mass",
@@ -375,8 +375,7 @@ class OracleTruth:
 
         Casting every bank to int64 would be vacuous rather than strict: three banks hold fractions in
         (0, 1], which int64 truncates to zero, so the comparison would be zeros against zeros and
-        would certify any partition at all. The float tolerance is 1e-16-scale, which is why it cannot
-        hide the kind of factor-of-2 error a float32 tolerance once did.
+        would certify any partition at all. The float tolerance is 1e-16-scale.
         """
         eps = float(np.finfo(np.float64).eps)
         for bank in _BANKS:

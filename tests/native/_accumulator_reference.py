@@ -4,9 +4,9 @@ This module is the reference implementation of the per-fragment tally built duri
 scan, and it is the authority: the native accumulator is required to reproduce it byte for byte, and
 where this file and a document about the accumulator disagree, this file wins. It defines the deposit
 rule end to end — the region / boundary / sj axes, the hypothesis arbitration over a fragment's
-unsequenced gaps, the deferred queue and its canonical order, the conserved mass, the five pure length
-pools and the QC ledger — and the drain that replays a held fragment with one chosen hypothesis.
-It is gated by ``test_accumulator_spec.py`` (the deposit rule, case by case),
+unsequenced gaps, the deferred queue and its canonical order, the conserved mass, the five
+structural length pools and the QC ledger — and the drain that replays a held fragment with one
+chosen hypothesis. It is gated by ``test_accumulator_spec.py`` (the deposit rule, case by case),
 ``test_accumulator_native_parity.py`` (the C++ against this file, array by array),
 ``test_gap_hypothesis_arbitration.py`` (the arbitration), ``test_accumulator_drain.py`` (the drain) and
 ``test_conserved_mass.py`` (the mass identity).
@@ -126,10 +126,10 @@ class DepositOutcome(enum.Enum):
     #: genome strand, so there is no column to credit, and strand-undefined fragments are one of the
     #: denominators the accumulator must emit.
     STRAND_UNDEFINED = "dropped_strand_undefined"
-    #: Two or more hypotheses survived, so the path is not determined — and therefore neither is ``L``,
-    #: either quantum, the pool bin, or the set of boundaries the fragment crosses. It deposits on
-    #: nothing and goes to the deferred queue, where the second pass resolves it with the
-    #: fragment-length distribution and the transcript abundances.
+    #: Two or more hypotheses survived, so the path is not determined — and therefore neither is
+    #: ``L``, its ``1/A(w)`` deposit, the pool bin, or the set of boundaries the fragment crosses.
+    #: It deposits on nothing and goes to the deferred queue, where the second pass resolves it with
+    #: the fragment-length distribution and the transcript abundances.
     #:
     #: Not "dropped". The fragment is retained in full and the conservation identity is
     #: ``deposited + deferred + dropped_* == offered``. The qc key says ``deferred`` for that reason: a
@@ -239,20 +239,21 @@ class DeferredFragment:
 
 
 class FragmentPool(enum.IntEnum):
-    """Fragment-length pools, chosen so that each is pure by construction.
+    """Fragment-length pools, each defined by structure.
 
-    Purity is what removes the circularity: the length models are fitted from populations known to be
-    one component, so nothing is ever estimated from the fragments it will later explain.
+    RNA_SPLICED is certified RNA, since gDNA cannot splice. The four DNA_* pools target gDNA but are
+    not pure — RNA inside introns and unannotated transcription reach them too — and
+    ``rigel.calibration.fl`` replaces purity with a two-pool contrast.
 
     There is deliberately no pool for an exonic contained fragment or a multi-boundary crossing — those
-    are gDNA/RNA mixtures, and an impure pool is worse than a missing one.
+    are gDNA/RNA mixtures by structure.
     """
 
     DNA_INTERGENIC = 0  # contained in an intergenic region
     DNA_INTRONIC = 1  # contained in an intronic region
     DNA_INTRON_EXON = 2  # crossing exactly one boundary, flanks {intron, exon}
     DNA_INTERGENIC_EXON = 3  # crossing exactly one boundary, flanks {intergenic, exon}
-    RNA_SPLICED = 4  # using an annotated sj, splice OBSERVED
+    RNA_SPLICED = 4  # using an annotated sj on a determined path, sequenced or implied
 
 
 #: Coarse region types, as ``signature.coarse_type_array`` emits them.
@@ -264,7 +265,7 @@ _SPLASH_POOL = {
     (_TYPE_INTERGENIC, _TYPE_EXON): FragmentPool.DNA_INTERGENIC_EXON,
 }
 
-#: Contained region type -> pure gDNA pool. An exonic region is a mixture and is absent by design.
+#: Contained region type -> its gDNA pool. An exonic region is a mixture and is absent by design.
 _CONTAINED_POOL = {
     _TYPE_INTERGENIC: FragmentPool.DNA_INTERGENIC,
     _TYPE_INTRON: FragmentPool.DNA_INTRONIC,
@@ -520,7 +521,7 @@ class Tally:
     #: nothing deconvolves a certified-RNA crossing, so length moments here would have no consumer and
     #: `pool_lengths`' RNA_SPLICED row already carries that population's lengths.
     boundary_spliced_count: np.ndarray
-    #: uint64[n_boundaries] — the same rule, routed by the same ``spliced`` flag.
+    #: float64[n_boundaries] — the same rule, routed by the same ``spliced`` flag.
     #:
     #: A PARTIAL BY CONSTRUCTION, and not a conservation ledger. A spliced fragment's blocks that
     #: contain no interior boundary deposit nothing here — their accounting is on the sj axis — so
@@ -548,7 +549,7 @@ class Tally:
     #: the same total. Gated by
     #: ``test_the_sj_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION``.
     sj_count: np.ndarray
-    #: uint64[n_sj] — LIVE: ``second_pass.py`` scores a held fragment's sj evidence with it.
+    #: float64[n_sj] — LIVE: ``second_pass.py`` scores a held fragment's sj evidence with it.
     sj_inv_length_sum: np.ndarray
     #: float64[n_sj, 2] — THE CONSERVED MASS'S THIRD AXIS, and it is what makes a library fragment
     #: count computable at all. A spliced fragment's block that contains no interior boundary deposits
@@ -576,10 +577,10 @@ class Tally:
     sj_mass: np.ndarray
     pool_lengths: np.ndarray  # int64[5, max_fragment_length + 1] — binned at L, once per fragment
     #: uint32[max_fragment_length + 1] — EVERY deposited fragment, binned at its own L, with no purity
-    #: condition (TRAPS: a-purity-filter-is-a-length-filter). The five pure pools above are deliberately
-    #: CONDITIONED, an impure pool being worse than a missing one, so they cannot serve as the
-    #: unconditional anchor an empirical-Bayes shrinkage needs; this row is that anchor, measured over
-    #: the same population by the same rule, so anchor and pools are one measurement of one quantity.
+    #: condition (TRAPS: a-purity-filter-is-a-length-filter). The five pools above are deliberately
+    #: CONDITIONED on structure, so they cannot serve as the unconditional anchor an empirical-Bayes
+    #: shrinkage needs; this row is that anchor, measured over the same population by the same rule,
+    #: so anchor and pools are one measurement of one quantity.
     #:
     #: It is "unconditional GIVEN DEPOSIT", and the name says so. It excludes what the accumulator
     #: rejects — over the length limit, ambiguous path, strand-undefined, empty — every one of which is
@@ -669,12 +670,13 @@ class Tally:
         are two offset arrays. Offsets are cumulative and always start at 0, so ``n`` is
         ``len(offsets) - 1`` and an empty deferred queue is ``[0]``, never ``[]``.
 
-        SORTED, and that is what makes it bit-identical at any worker count. Every other bank is a sum
-        of integers, and integer addition is associative, so a per-worker merge is exact whatever order
-        the chunks arrived in. The deferred queue is a LIST, and a list has an order — so concatenating
-        per-worker queues would give a different byte sequence at 1, 2, 4 and 8 workers even though the
-        contents are identical. Sorting on the record's own content is the canonical form: two records
-        that tie on this key are identical records, so their relative order cannot be observed.
+        SORTED, and that is what makes it bit-identical at any worker count. Every other bank is a
+        sum, whose per-worker merge is exact for the uint32 counts and within a derived tolerance
+        for the float64 fractions and masses, whatever order the chunks arrived in. The deferred
+        queue is a LIST, and a list has an order — so concatenating per-worker queues would give a
+        different byte sequence at 1, 2, 4 and 8 workers even though the contents are identical.
+        Sorting on the record's own content is the canonical form: two records that tie on this key
+        are identical records, so their relative order cannot be observed.
         """
         frag_fields = ("ref", "start", "end", "align_strand", "sj_strand")
         out: dict[str, list[int]] = {name: [] for name in frag_fields}
@@ -1042,7 +1044,7 @@ class Accumulator:
 
         There is no second tally path. Each record re-enters :meth:`deposit` with its chosen hypothesis
         ALONE: a set of size one, so the arbitration is degenerate and the fragment either deposits or
-        is rejected by the ordinary rules. Every crossing rule, the quantum, the pools and ``L`` itself
+        is rejected by the ordinary rules. Every crossing rule, the pools and ``L`` itself
         are reached through the same code that ran in pass one, so byte-identity with the native
         accumulator is preserved for free rather than argued.
 
@@ -1201,7 +1203,7 @@ class Accumulator:
             # strand information", not "a strand that matches nothing"; reading it as the latter
             # silently demotes an annotated spliced fragment to an unspliced deposit, credits
             # `unannotated_introns` (poisoning the one metric that measures annotation coverage), and
-            # drops it from the pure RNA pool the length model is fitted from.
+            # drops it from the RNA pool the length model is fitted from.
             #
             # The filter exists only to separate two sj sharing a coordinate pair, and no human sj
             # coordinate pair is annotated on both strands, so it can only ever lose a match and never
@@ -1215,7 +1217,7 @@ class Accumulator:
     def _pool(self, spliced, contained_region, sole_boundary, region_base):
         """The one length pool this fragment belongs to, or ``None``.
 
-        Priority, so that every pool stays pure: a splice is unambiguously RNA; a contained fragment is
+        Priority, by structure: a splice is certified RNA; a contained fragment is
         typed by its region; a single-boundary crossing is a "splash" read typed by its two flank types.
         Anything else — an exonic contained fragment, a multi-boundary crossing — is a mixture and enters
         nothing.

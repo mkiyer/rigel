@@ -93,11 +93,11 @@ def test_scan_read_name_batch_size_boundaries_match(tmp_path):
 
     # The read-name batch size must not change which fragments are processed
     # (asserted below via the fragment/read-name totals). It may, however,
-    # perturb the *order* in which the calibration accumulator deposits its
-    # float32 per-region mass; that last-bit difference propagates through the
-    # calibration EM into the final counts at the ~1e-9 level (relative ~1e-11)
-    # — scientifically negligible. Bit-exactness across batch size would require
-    # order-independent accumulator summation (an accumulator-level concern, not
+    # perturb the *order* in which the calibration accumulator adds into its
+    # float64 fraction and mass banks; float addition is not associative, and
+    # that last-bit difference propagates through calibration and the EM into
+    # the final counts — scientifically negligible. Bit-exactness across batch
+    # size would require order-independent accumulator summation (an accumulator-level concern, not
     # the integration this test guards), so we assert close agreement, not bits.
     pd.testing.assert_frame_equal(
         _sorted_counts(batch_one, index),

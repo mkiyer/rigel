@@ -270,8 +270,9 @@ class TestTheKeyRefusesAMovedIndex:
     def test_the_deposit_digest_is_STABLE_across_calls_and_across_PROCESSES(self):
         """A key that wobbles refuses every cache, which is as useless as one that never moves.
 
-        Across processes as well as calls: every channel is an integer and integer addition is
-        associative, so this is deterministic by construction rather than by luck.
+        Across processes as well as calls: the digest deposits one fixed fragment set in one fixed
+        order into one accumulator, so the uint32 counts are exact and every float64 sum is added in
+        the same order each time — deterministic by construction rather than by luck.
         """
         import subprocess
         import sys

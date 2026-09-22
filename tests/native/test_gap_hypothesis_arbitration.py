@@ -310,8 +310,8 @@ def test_the_deferred_queue_FLATTENS_to_a_CSR_that_round_trips():
 def test_the_FLATTENED_queue_DOES_NOT_DEPEND_ON_DEPOSIT_ORDER():
     """What the sort is FOR, and the reason it is in the reference rather than in the exporter.
 
-    Every other bank is a sum of integers and integer addition is associative, so a per-worker merge is
-    exact whatever order the chunks arrived in. The deferred queue is a LIST — concatenating per-worker
+    Every other bank is a per-object sum — uint32 counts merge exactly and float64 fractions to a derived
+    tolerance, whatever order the chunks arrived in. The deferred queue is a LIST — concatenating per-worker
     queues would give a different byte sequence at 1, 2, 4 and 8 workers with identical contents, and
     `tests/test_scan_order_independence.py` would fail on a difference that means nothing. Sorting on
     the record's own content is the canonical form.

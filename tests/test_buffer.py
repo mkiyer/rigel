@@ -895,7 +895,7 @@ class TestResolvedFragment:
         assert r is not None
         assert r.splice_type == int(SpliceType.SPLICED_ANNOT)
 
-    def test_intergenic_returns_none(self, mini_index):
+    def test_intergenic_resolves_with_no_candidates(self, mini_index):
         """Fragment in intergenic region -> resolves with empty t_inds.
 
         Zero-candidate fragments are not dropped at the resolver boundary; they

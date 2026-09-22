@@ -85,7 +85,9 @@ def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nrna_abundance: float
     scan = dataclasses.replace(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
     _st, sm, _buf, pl = scan_and_buffer(bam, idx, scan)
     ra = RegionArrays.from_frame(idx.regions_df, idx.ref_name_to_id)
-    # The same call production makes; see tests/calibration/_oracle.py.
+    # The length models from the payload alone, with no index inputs: the RNA pool is not de-tilted
+    # and the gDNA pmf is fitted from the contained pair (production's
+    # `rigel.pipeline.library_fl_models` also passes the index's opportunities and partition).
     fl = build_fl_models(pl)
     # The sj axis and the boundary flags are BOTH required against the same index the payload was
     # scanned on: an axis addressing a different graph would place every splice on the wrong boundary, and

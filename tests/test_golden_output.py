@@ -3,10 +3,10 @@
 Each scenario runs from a fixed-seed oracle BAM, so no aligner is needed, and captures every numerical
 column of the transcript-, gene- and locus-level frames plus the scalar aggregates, against a golden
 stored in `tests/golden/` as feather for a lossless float round trip with a TSV mirror for diffing.
-Count columns are compared bit-exactly; derived float quantities are compared to a tolerance, because
-the native EM is compiled with fast maths and its iterative solve amplifies ULP-level platform
-differences — pinning one thread removes reduction-order noise on a single machine but not across
-them. The scenarios cover single- and multi-exon genes, multi-isoform EM, antisense overlap, gDNA
+Every numeric column, counts included, is compared to a relative tolerance with an absolute floor,
+because the native EM is compiled with FMA contraction and a SIMD exp and its iterative solve
+amplifies ULP-level platform differences — pinning one EM thread makes a run reproducible on a
+single machine but not across machines. The scenarios cover single- and multi-exon genes, multi-isoform EM, antisense overlap, gDNA
 contamination, nascent RNA, imperfect strand specificity and many loci, so a change in any of those
 shows up as a diff rather than as a number nobody was watching. `--update-golden` regenerates the
 files, and reading the diff before doing that is the point of having them.
@@ -32,12 +32,12 @@ SEED = 42
 PIPELINE_SEED = 42
 N_FRAGS = 1000  # enough to exercise EM meaningfully
 
-# Tolerance for golden comparison.
-# The native EM / effective-length path is compiled with -ffast-math and
-# -ffp-contract=fast and uses SIMD exp (fast_exp.h). Pinning n_threads=1 (below)
-# removes OpenMP reduction-order noise, so results are deterministic on a *single*
+# Tolerance for golden comparison, applied to every numeric column.
+# The native EM (_em_impl) is compiled with -ffp-contract=fast and uses a SIMD exp
+# (fast_exp.h); the scoring kernels (_scoring_impl) are compiled with -ffast-math.
+# Pinning the EM to one thread (below) makes results deterministic on a *single*
 # machine — but NOT bit-identical across machines: FMA contraction, SIMD lane
-# width, and libm/BLAS versions differ between the machine where the goldens are
+# width, and library versions differ between the machine where the goldens are
 # generated and the CI runners. The iterative solver amplifies those ULP-level
 # input differences to ~1e-8 relative on derived quantities such as
 # em_effective_length, so a bit-exact golden is unachievable. Near-zero quantities
@@ -80,10 +80,10 @@ _SIM_SS65 = ReadSimConfig(
 
 
 def _pipeline_config(seed=PIPELINE_SEED):
-    # n_threads=1: the locus EM's OpenMP reduction order is non-deterministic, which the iterative
-    # solver amplifies to ~1e-8 relative on the largest scenarios — scientifically irrelevant, but it
-    # wanders past the bit-exact golden tolerance. Pin to 1 thread so the regression test is
-    # deterministic (it tests the algorithm's output, not the parallel reduction).
+    # n_threads=1: with more threads the locus EM splits a large locus's E-step into per-thread
+    # partial sums whose boundaries depend on the thread count, and adds the per-thread gDNA totals in
+    # arrival order. One thread makes the run deterministic, so the golden tests the algorithm's
+    # output, not the parallel schedule.
     return PipelineConfig(
         em=EMConfig(seed=seed, assignment_mode="fractional", n_threads=1),
         scan=BamScanConfig(sj_strand_tag="auto"),
@@ -184,7 +184,7 @@ def _golden_exists(scenario_name):
 # Comparison
 # ---------------------------------------------------------------------------
 
-# Columns to compare with bit-exact precision
+# Numeric columns compared against the golden, to RTOL / ATOL
 _TRANSCRIPT_NUMERIC_COLS = [
     "effective_length",
     "em_effective_length",

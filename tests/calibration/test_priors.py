@@ -5,10 +5,11 @@ A region owns the fragments contained in it; a boundary owns the fragments that 
 collects both — its regions by genomic overlap, its boundaries by touching those regions, so a
 locus of ``k`` contiguous regions carries ``k + 1`` boundaries including its two outer ones — and
 no boundary's mass is ever folded into a region's total. The second half of this file gates that
-projection; the first half gates what ``assemble_priors`` builds on it, whose bedrock invariant is
-that under a uniform gDNA field every object's ``min(m/ρ_ref, S)`` returns its own effective
-support ``S``, so ``gdna_eff_len == span == ΣS`` exactly and an unenriched library contracts
-nothing. Dividing by the genomic ``region_size_bp`` instead fabricates a contraction.
+projection; the first half gates what ``assemble_priors`` builds on it. The gDNA length is each
+object's effective support ``S`` at its own capture efficiency, the crossing supports converted by
+``q``, and its bedrock invariant is that with no reference every efficiency is 1, so
+``gdna_eff_len == span == Σ S_r + Σ q·S_e`` exactly and an unenriched library contracts nothing.
+Reading the genomic ``region_size_bp`` instead of ``S`` fabricates a contraction.
 """
 
 from __future__ import annotations
@@ -53,10 +54,8 @@ def _result(
     arrays — but the boundary axis is still the RIGHT LENGTH, because a boundary axis inconsistent with its
     own region axis is a mis-shaped fixture, not a "no boundaries" one.
 
-    The RNA supports default to the gDNA ones, so a test about projection, conservation or
-    re-keying — not about the length tilt — keeps both components on one support and its ``g:r``
-    ratio is unaffected by it. The tilt is exercised where it belongs, in `test_prior_units.py`, by
-    giving the two components genuinely different opportunities.
+    The RNA supports default to the gDNA ones. ``assemble_priors`` reads no RNA support — the RNA
+    prior is a conserved fragment count — so they only fill the result's fields.
 
     ``efficiency`` / ``efficiency_boundary`` are the per-object capture efficiencies (1 everywhere by
     default, as a field with no reference must carry).
@@ -240,8 +239,8 @@ def test_a_boundary_enters_the_length_at_its_crossing_support_CONVERTED_BY_q():
     # boundary's support by the SAME q, so a start is counted once however many boundaries its fragment
     # crosses. Three 40-bp pieces, fragments of ~181 bp, q = ½ on both boundaries: every crossing start spans
     # a piece and is in both supports, so the length is 30 + ½·360 = 210 and the density 4.2/210 = 0.02,
-    # the field's (region 0.2/10, boundary 3.6/180). The unconverted 30 + 360 = 390 read the same locus at
-    # half its density; it was pinned here until 2026-09-20 on a capture-OFF transcript-number measurement.
+    # the field's (region 0.2/10, boundary 3.6/180). The unconverted 30 + 360 = 390 would read the same
+    # locus at roughly half its density.
     region_eff = [10.0, 10.0, 10.0]
     boundary_eff = [180.0, 180.0]
     cal = _result(
@@ -339,8 +338,8 @@ def test_the_length_counts_each_crossing_start_once_as_the_count_counts_each_fra
 
 
 def test_every_OBJECT_has_the_same_density_under_a_uniform_field():
-    """The precondition for the per-object ``min()`` factor-1 identity, asserted on the objects
-    themselves rather than on a folded total.
+    """The precondition for the factor-1 identity (``G / gdna_eff_len`` recovers ρ), asserted on the
+    objects themselves rather than on a folded total.
 
     Summing each boundary's mass into a flank region before dividing would check the fold's density
     and never a boundary's own. Regions and boundaries are peers, so each axis is checked on its own.
@@ -537,19 +536,19 @@ def test_a_locus_keeps_the_outer_boundary_against_its_INTERGENIC_flank():
     assert contended_boundaries(ra, ml, 1).size == 0
 
 
-# --- Laplace shrinkage toward the (effective) span ------------------------------------------------
+# --- an evidence-free locus -----------------------------------------------------------------------
 
 
 def test_evidence_free_region_gives_zero_gdna_prior():
-    # Acyclic: no observed gDNA ⇒ zero gDNA pseudocount. With G=0 the Laplace-smoothed IPR is
-    # (0+1)²/(1/span) = span exactly, so the eff-len is the uniform effective span (single region ⇒
-    # span = region_eff = 100) — never a tiny length.
+    # No observed gDNA ⇒ zero gDNA pseudocount. The length reads supports and efficiencies, never the
+    # mass, so it is still the effective span (one region at efficiency 1 ⇒ span = region_eff = 100) —
+    # never a tiny length.
     cal = _result(region_g=[0.0], region_r=[0.0], region_eff=[100.0])
     ra = _regions([0], [100])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 100)])])
     np.testing.assert_allclose(priors.rna_prior_count, [0.0])
     np.testing.assert_allclose(priors.gdna_prior_count, [0.0])
-    np.testing.assert_allclose(priors.gdna_eff_len, [100.0])  # effective-span fallback
+    np.testing.assert_allclose(priors.gdna_eff_len, [100.0])  # the span: the length reads no mass
 
 
 def _six_region_ra():
@@ -662,8 +661,8 @@ def test_the_length_is_the_counts_objects_at_their_efficiencies():
 def test_a_locus_yield_below_one_base_is_not_floored():
     """A 100-base support at efficiency 0.001 beside a 50-base crossing support at 0.001 is a yield of
     0.15 fragments per unit abundance and reads 0.15; at efficiency 0 it reads 0, which the EM takes as
-    "cannot emit". The 1 bp floor was a geometric guard that under capture clamped every depleted locus
-    shorter than a kilobase to one yield, breaking the E-step's invariance to a common thinning."""
+    "cannot emit". A 1 bp floor would clamp every depleted locus shorter than a kilobase under capture
+    to one yield, breaking the E-step's invariance to a common thinning."""
     ra = _six_region_ra()
     for c, expect in ((0.001, 0.15), (0.0, 0.0)):
         cal = _result(
@@ -777,14 +776,13 @@ def test_an_boundary_takes_the_MAX_share_of_its_two_flanks():
 
 
 def test_the_region_locus_overlap_is_traversed_ONCE_per_assembly(monkeypatch):
-    """`_region_locus_shares` says "computed exactly once" and on the pipeline's path it now is: the
-    assembler needs the region projection itself, so it hands the SAME triples to the boundary
-    projection, which used to traverse for them again. On the deep library that second traversal is
-    1.7 s of every run.
+    """`_region_locus_shares` says "computed exactly once": the assembler needs the region projection
+    itself, so it hands the SAME triples to the boundary projection rather than letting it traverse
+    for them again.
 
-    Counted through a spy rather than asserted about the output, because the output was never wrong —
-    what was wrong was paying for it twice. PERTURBATION: dropping ``region_shares`` at the call site
-    makes this two.
+    Counted through a spy rather than asserted about the output, because a second traversal gives the
+    same output and only costs time. PERTURBATION: dropping ``region_shares`` at the call site makes
+    this two.
     """
     import rigel.calibration.priors as P
 
@@ -808,8 +806,8 @@ def test_the_region_locus_overlap_is_traversed_ONCE_per_assembly(monkeypatch):
 
 
 def test_the_boundary_shares_are_the_same_whether_the_triples_are_handed_in_or_not():
-    """The new argument is a hand-down, not a second rule: the same triples in gives the same projection
-    out, to the bit, as computing them inside."""
+    """The ``region_shares`` argument is a hand-down, not a second rule: the same triples in gives the
+    same projection out, to the bit, as computing them inside."""
     ra = _regions_from_bounds([0, 100, 200])
     ml = [_ml(0, [(0, 0, 150)]), _ml(1, [(0, 150, 200)])]
     inside = _boundary_locus_shares(ra, ml, 2)
@@ -852,10 +850,8 @@ def test_empty_loci_returns_empty():
 
 
 def test_the_region_projection_is_unchanged_by_the_refactor():
-    """``_project_regions_to_loci`` must keep its exact behaviour: the region half does not change
-    when the boundary half does. It is expressed through ``_region_locus_shares``, so this pins that
-    the shared helper introduced no drift — shares normalise across the loci a region touches, and a
-    region touching none is dropped.
+    """``_project_regions_to_loci`` is expressed through ``_region_locus_shares``: shares normalise
+    across the loci a region touches, and a region touching none is dropped.
     """
     from rigel.calibration.priors import _project_regions_to_loci
 

@@ -1,4 +1,4 @@
-"""`rigel.resolution` — turning an aligned pair into a fragment with a candidate transcript set.
+"""Fragment resolution — turning an aligned pair into a fragment with a candidate transcript set.
 
 Intrachromosomal chimera detection by transcript-set disjointness; fragment resolution end to end;
 the overlap profile and the filtering it drives; discrimination on implied fragment length; the

@@ -1,7 +1,7 @@
 """The implicit splice — a fragment whose annotated intron lies inside the unsequenced mate gap, so
 the splice motif was never read. The first block gates the per-intron ``SPLICED_IMPLICIT``
-discriminant, exercising the C++ ``FragmentResolver`` through the standard Python entry point
-``rigel.resolution.resolve_fragment`` and the ``make_fragment`` helper over an acceptance matrix of
+discriminant, exercising the C++ ``FragmentResolver`` through the test driver
+``_resolution_reference.resolve_fragment`` and its ``make_fragment`` helper over an acceptance matrix of
 transcript geometries; one comprehensive GTF fixture built once per session supplies every geometry
 the matrix needs, and each test sets the resolver's ``splicing_anchor_tolerance`` explicitly so the
 cases do not depend on execution order. It also gates that gap introns are searched whatever the
@@ -103,7 +103,7 @@ def _resolve(index, exons, introns=()):
 
 
 class TestImplicitSpliceDiscriminant:
-    """14-case acceptance matrix for the per-intron implicit-splice predicate."""
+    """15-case acceptance matrix for the per-intron implicit-splice predicate."""
 
     # (a) intron strictly inside PE gap, K=0 → SPLICED_IMPLICIT
     def test_a_intron_strictly_in_gap_k0(self, with_tolerance):
@@ -473,7 +473,7 @@ def test_ONE_candidate_transcript_DEPOSITS_with_the_strand_inferred_from_it(scen
         "a single candidate transcript cannot disagree with itself, so nothing here may be deferred"
     )
     assert payload.deferred.n_fragments == 0
-    # It deposited: its sj was credited, and it is barred from the pure-RNA length pool.
+    # It deposited: its sj was credited. Being determined, it also enters the spliced-RNA length pool.
     assert int(payload.sj_count.sum()) > 0
 
 

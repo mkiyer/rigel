@@ -3,8 +3,8 @@ seeds it. The first block runs the estimator over `ScoredFragments` and a mock i
 posterior means, simultaneous resolution, multimappers, the counts and detail tables, partitioned
 effective lengths, the gDNA component and discrete assignment. The second calls
 `run_batch_locus_em_partitioned` directly on the production path, gating structural gDNA eligibility,
-the gDNA effective length and log-odds bias, the aggregate RNA prior, and the rule that withholds that
-prior from synthetic nascent entities. The third gates `EMConfig.warm_start`: what the initial theta is
+the gDNA effective length, the aggregate RNA prior, and the rule that every RNA component receives its
+share of that prior in proportion to its evidence. The third gates `EMConfig.warm_start`: what the initial theta is
 derived from, and that an unknown name is refused.
 """
 
@@ -275,7 +275,7 @@ class TestLocusEM:
 
 
 # =====================================================================
-# Locus assignment — posterior expected-count assignment
+# Locus assignment — the default sampled draw, and fractional where a test sets it
 # =====================================================================
 
 
@@ -309,7 +309,7 @@ class TestLocusAssignment:
         """t_counts = unambig_counts + em_counts."""
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
 
-        # 10 unambig (set directly — deterministic assignment now handled in C++)
+        # 10 unambig, set directly
         rc.unambig_counts[0, _UNSPLICED_SENSE] = 10.0
 
         # 5 ambiguous
@@ -323,7 +323,7 @@ class TestLocusAssignment:
         )
 
     def test_distribution_follows_priors(self):
-        """Over many fragments, expected-count assignments follow unambig priors."""
+        """Over many fragments, sampled assignments follow the unambig priors."""
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
         rc.unambig_counts[0, _UNSPLICED_SENSE] = 90.0
         rc.unambig_counts[1, _UNSPLICED_SENSE] = 10.0
@@ -367,7 +367,7 @@ class TestLocusAssignment:
         assert rc.em_counts.sum() == pytest.approx(1.0, abs=0.1)
 
     def test_deterministic_with_same_seed(self):
-        """Expected-count assignment is deterministic."""
+        """The sampled assignment is deterministic for a fixed seed."""
         results = []
         for _ in range(3):
             rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
@@ -385,7 +385,7 @@ class TestLocusAssignment:
         np.testing.assert_array_equal(results[1], results[2])
 
     def test_different_seeds_same_expected_counts(self):
-        """Different seeds do not affect expected-count assignment."""
+        """Different seeds do not affect fractional (expected-count) assignment."""
         counts = []
         for seed in [1, 2]:
             rc = AbundanceEstimator(3, em_config=EMConfig(seed=seed, assignment_mode="fractional"))
@@ -736,7 +736,7 @@ class TestGDNAInLocusEM:
     """Verify gDNA shadow competes with mRNA in locus EM."""
 
     def test_gdna_absorbs_when_init_high(self):
-        """With large gdna_init and equal likelihoods, gDNA takes share."""
+        """With a gDNA prior count of 5 and equal likelihoods, gDNA takes a share."""
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42, assignment_mode="fractional"))
         bundle = _make_locus_em_data(
             [[0]] * 100,
@@ -771,7 +771,7 @@ class TestGDNAInLocusEM:
         assert gdna_count < 10
 
     def test_total_counts_preserved_with_gdna(self):
-        """em_counts + nrna_em + gdna == n_units."""
+        """em_counts + gdna == n_units."""
         rc = AbundanceEstimator(2, em_config=EMConfig(seed=42))
         bundle = _make_locus_em_data(
             [[0, 1]] * 200,
@@ -1155,15 +1155,15 @@ def test_positive_gdna_prior_produces_finite_outputs():
 # ── EVERY RNA COMPONENT GETS ITS SHARE OF THE RNA PRIOR ──────────────────────────────────────────
 #
 # The RNA pseudocount is distributed over the locus's RNA components in proportion to the evidence
-# each already carries, and NO component is singled out for zero (owner, 2026-09-19;
-# `EQUATIONS.md` §9b). RNA is RNA: whether the annotation happens to assert a given RNA component is
-# not a fact about this locus's composition, so the allocation does not read it.
+# each already carries, and NO component is singled out for zero (`EQUATIONS.md` §9b). RNA is RNA:
+# whether the annotation happens to assert a given RNA component is not a fact about this locus's
+# composition, so the allocation does not read it.
 #
-# Its predecessor withheld the share from SYNTHETIC nascent entities — spans the index manufactured —
-# on the null that they are absent until the data proves otherwise. That made the prior's factor
-# un-common over the pool, so the prior ALONE redistributed RNA between entities the data cannot tell
-# apart. These gates pin the restored rule and the one guard it keeps: a component with no evidence
-# still cannot be revived by prior mass, because the weights are the evidence.
+# Withholding the share from any component — SYNTHETIC nascent entities, say, the spans the index
+# manufactured — would make the prior's factor un-common over the pool, so the prior ALONE would
+# redistribute RNA between entities the data cannot tell apart. These gates pin the rule and the one
+# guard it keeps: a component with no evidence cannot be revived by prior mass, because the weights
+# are the evidence.
 
 
 def _run(est, partition, t_idx, *, rna_prior=0.0, gdna_prior=0.0):
@@ -1210,8 +1210,8 @@ def _yield_estimator(yields, *, mode: str) -> AbundanceEstimator:
 def test_the_split_is_invariant_to_a_common_thinning_of_every_yield(mode):
     """Capture thins the yield of every component in a locus; thinned by ONE factor, no count may move,
     because the E-step reads each component's count against its yield and only the ratios within the
-    locus decide. Written first and verified failing: the 1 bp floor clamped a 300 bp yield thinned a
-    thousandfold to 1 and moved the split of the shared fragments."""
+    locus decide. A floor on the yield breaks it: clamping a 300 bp yield thinned a thousandfold to
+    1 bp moves the split of the shared fragments."""
 
     def counts(scale):
         est = _yield_estimator([300.0 * scale, 3000.0 * scale], mode=mode)
@@ -1226,8 +1226,8 @@ def test_the_split_is_invariant_to_a_common_thinning_of_every_yield(mode):
 @pytest.mark.parametrize("mode", ["map", "vbem"])
 def test_a_transcript_with_no_start_position_cannot_emit(mode):
     """A transcript shorter than every fragment has a yield of exactly 0 and produced nothing: its share
-    of every fragment is 0 — not the share of a 1 bp yield, which made it the densest component in the
-    locus and handed it every shared fragment. The fragments go to the components that can emit; a
+    of every fragment is 0 — not the share of a floored 1 bp yield, which would make it the densest
+    component in the locus and hand it every shared fragment. The fragments go to the components that can emit; a
     fragment no component can emit is left unassigned, and nothing is NaN."""
     est = _yield_estimator([0.0, 1000.0], mode=mode)
     est.run_batch_locus_em_partitioned(
@@ -1283,7 +1283,7 @@ def _counts_against_prior(shape, *, mode, priors=(0.0, 500.0)):
 
 @pytest.mark.parametrize("shape", list(_SHAPES), ids=list(_SHAPES))
 def test_the_RNA_prior_moves_NO_component_s_SHARE_of_the_RNA_pool_under_MAP(shape):
-    """The restored rule's promise, stated where it is EXACTLY true.
+    """The rule's promise, stated where it is EXACTLY true.
 
     The RNA pseudocount reaches every RNA component as the same factor `(1 + rna_prior/rna_count)`,
     and under MAP `theta` is proportional to those counts — so the factor cancels and no prior
@@ -1292,10 +1292,8 @@ def test_the_RNA_prior_moves_NO_component_s_SHARE_of_the_RNA_pool_under_MAP(shap
     one component out and the factor stops being common, so the prior ALONE redistributes RNA between
     entities the data cannot tell apart.
 
-    Written first and verified failing against the rule it replaced. On a tied two-component locus,
-    with one component flagged synthetic, a prior of 500 did not merely tilt the split: it drove that
-    component from 100.0 fragments to 2.79e-298 and handed all 200 to the other, because the withheld
-    factor compounds once per M-step over 200 iterations.
+    An eligibility test does not merely tilt the split: the withheld factor compounds once per M-step,
+    so on a tied two-component locus the held-out component loses essentially all of its mass.
 
     ⛔ The equality is EXACT, not approximate. One common multiply leaves `theta` bit for bit where it
     was; anything that reads a component would not.
@@ -1322,9 +1320,9 @@ def test_under_VBEM_the_prior_moves_the_split_only_by_the_DIGAMMA_CORRECTION(sha
     `c ≥ 1`. So the uniformity of the allocation survives; only the M-step's own nonlinearity moves
     the shares, by an amount that vanishes as the locus deepens.
 
-    ⭐ It still separates the two rules by orders of magnitude, which is what a gate is for. Measured
-    on `skewed3`: this residual moves a share by 1.4e-3 against a bound of 1.5e-2, while the
-    eligibility rule this replaced moved a component by 100 % of its mass.
+    ⭐ It separates this rule from an eligibility test by orders of magnitude, which is what a gate is
+    for: on `skewed3` the residual moves a share by 1.4e-3 against a bound of 1.5e-2, while an
+    eligibility test moves a component by 100 % of its mass.
     """
     none, large = _counts_against_prior(_SHAPES[shape], mode="vbem")
     share_none, share_large = none / none.sum(), large / large.sum()
@@ -1338,11 +1336,10 @@ def test_under_VBEM_the_prior_moves_the_split_only_by_the_DIGAMMA_CORRECTION(sha
 
 @pytest.mark.parametrize("mode", ["map", "vbem"])
 def test_a_SHADOW_SPAN_STILL_LOSES_to_the_transcript_it_shadows(mode):
-    """What now guards against a zombie, and the whole of what the restoration cost.
+    """What guards against a zombie.
 
-    The prior used to help: withholding it from a synthetic component multiplied that component down
-    by `(1 + rna_prior/annotated_count)` every M-step. It no longer does, so the decay rests on the
-    LIKELIHOOD alone — and the likelihood is sufficient for free. A shadow span is longer than the
+    The RNA prior reaches every RNA component as the same factor, so it does nothing to make a shadow
+    decay; the decay rests on the LIKELIHOOD alone, and the likelihood is sufficient. A shadow span is longer than the
     transcript it shadows, so at equal per-fragment likelihood its yield ratio `kappa = w_N/w_T` is
     strictly below 1 and a component with no evidence of its own decays geometrically at that rate
     (`EQUATIONS.md` §9b).
@@ -1386,7 +1383,7 @@ def test_a_component_the_DATA_SUPPORTS_keeps_its_mass(mode):
 
 @pytest.mark.parametrize("mode", ["map", "vbem"])
 def test_a_ZERO_EVIDENCE_component_is_NOT_revived_by_the_prior(mode):
-    """The guard the restoration keeps, and the reason the weights are the evidence rather than a
+    """The guard the rule keeps, and the reason the weights are the evidence rather than a
     flat share (`EQUATIONS.md` §9b.1). `out[i]` is proportional to `raw[i]`, so `out[i] = 0` is an
     ABSORBING STATE that no prior magnitude escapes — and the RNA pseudocount is a FRAGMENT COUNT,
     tens to thousands on an expressed locus, so a flat share would hand every component far more than
@@ -1409,8 +1406,8 @@ def test_a_ZERO_EVIDENCE_component_is_NOT_revived_by_the_prior(mode):
 # test-only binding `_apply_grouped_prior_update_test` reaches it and
 # `tests/native/test_grouped_prior_update.py` holds the identity.
 #
-# ⚠ It is a PER-M-STEP algebraic identity, NOT an end-to-end one, and conflating the two has produced
-# a wrong test three times. End to end the gDNA total legitimately DEPENDS on `rna_prior`: setting the
+# ⚠ It is a PER-M-STEP algebraic identity, NOT an end-to-end one, and conflating the two produces a
+# wrong test. End to end the gDNA total legitimately DEPENDS on `rna_prior`: setting the
 # gDNA:RNA split is the prior's whole purpose (`gdna_total = gdna_count + gdna_prior`,
 # `rna_total = rna_count + rna_prior`), and a larger RNA prior shifts theta, hence the E-step, hence
 # the next iteration's `gdna_count`. A test asserting "the library gDNA fraction is invariant to

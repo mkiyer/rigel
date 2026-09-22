@@ -1,9 +1,9 @@
 """`rigel.types` — the value types every other module is written in terms of.
 
 `Strand`, `Interval`, `GenomicInterval`, `IntervalType`, `AnnotatedInterval` and `MergeOutcome`:
-their construction, comparison, arithmetic and edge cases. The last block checks that the integer
-values of the shared enums are the same in Python and in C++, which nothing else can catch — the two
-sides pass these as plain ints, so a divergence is a silent relabelling rather than an error.
+their construction, comparison, arithmetic and edge cases. The last block checks that the scoring
+constants C++ carries as hand-typed decimals (``LOG_HALF``, ``TAIL_DECAY_LP`` in
+``native/constants.h``) equal Python's ``math.log(0.5)`` and ``math.log(0.99)`` exactly.
 """
 
 import pytest

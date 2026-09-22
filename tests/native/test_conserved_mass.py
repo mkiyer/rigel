@@ -99,7 +99,7 @@ def _enumerate(partition, region_bounds=REGION_BOUNDS, lengths=LENGTHS, perturb=
 
 
 def _exact_fragment_mass(partition, region_bounds, start, end) -> tuple[Fraction, int]:
-    """``(Σ mass, contained)`` for ONE fragment, in EXACT rational arithmetic.
+    """``(Σ mass, contained)`` for ONE fragment, as the float64 bank holds it.
 
     Read out of a FRESH accumulator by differencing nothing — the bank starts at zero, so the sum over
     boundaries after one deposit IS that fragment's deposit.
@@ -232,7 +232,7 @@ def test_the_mass_is_the_PER_BASE_attribution():
         budget = float(count[boundary])
         assert abs(got - want) <= budget, (
             f"boundary {boundary} @ {REGION_BOUNDS[boundary]}: bank {float(got)} vs per-base {float(want)}, "
-            f"quantisation budget {float(budget):.3e}"
+            f"budget {float(budget):.3e}"
         )
 
 

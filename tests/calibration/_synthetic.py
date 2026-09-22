@@ -50,7 +50,7 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
     sj = bank(n_sj, [[9, 4]], np.uint32)
 
     def inv(counts, placements):
-        """The fixed-point sum a bank of ``counts`` fragments at one placement count would deposit.
+        """The float64 reciprocal sum that ``counts`` fragments at one placement count deposit.
 
         ONE column — the two strands are SUMMED, because the length moments carry no strand axis.
         """

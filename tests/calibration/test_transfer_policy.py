@@ -5,7 +5,7 @@ The shape: the backbone protocol; the installer and its refusal of an unknown na
 wired and read without a copy; the two passes against an independent recursive reference (single hops
 of the native pass composed recursively); the no-echo law; the own claims' liveness under the
 strand protocol decision; and the completion contract, that every directed face
-carries a rule or a lane face or leads into structural pure gDNA. The mechanisms: phase 2's
+carries a rule or a lane face or leads into structural pure gDNA. The mechanisms: the solve's
 ceilings, read only from a face that sent no composition, and the gDNA level lane, where a received
 level is a lower bound the hop widens, two bounds intersect rather than multiply, and an empty node
 forwards what it holds. The per-face builders are gated by `test_transfer_faces.py`.
@@ -299,7 +299,7 @@ def test_every_directed_face_is_served_or_faces_structural_pure_gdna(sweep_input
     assert not [f for f in served if intergenic[f[0]] or intergenic[f[1]]]
 
 
-# ── phase 2's ceilings: an RNA level as an upper side on a single-strand node's gDNA share ───────
+# ── the solve's ceilings: an RNA level as an upper side on a single-strand node's gDNA share ─────
 
 
 def test_an_rna_level_reads_as_a_ceiling_on_the_gdna_share_and_round_trips():

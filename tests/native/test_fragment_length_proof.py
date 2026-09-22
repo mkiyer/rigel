@@ -456,8 +456,8 @@ def test_the_region_density_channel_DOES_NOT_MOVE_when_the_length_set_changes():
     density reads exactly ``rho = 1`` per length in both; a length-dependent one does not.
 
     Two things make it bite. The comparator reads the bank as the float64 it is: scaling it by a
-    fixed-point unit and truncating to ``int`` once left a tolerance loose enough to admit the shipped
-    rule, the ``1/L`` rule this gate names, and a nonsense ``1/ell`` rule alike. And it asserts the
+    fixed-point unit and truncating to ``int`` leaves a tolerance loose enough to admit the shipped rule,
+    the ``1/L`` rule this gate names, and a nonsense ``1/ell`` rule alike. And it asserts the
     ABSOLUTE truth per arm rather than only flatness across the two arms — a pure SCALE error
     (``1/(ell+1)`` with predicate ``s < ell+1``) is perfectly flat and perfectly wrong, and a
     perturbation study found the absolute form catches every planted off-by-one where the flatness

@@ -200,7 +200,8 @@ def test_the_two_column_banks_are_reshaped_and_the_one_column_ones_are_not():
 
 
 def test_the_dtypes_are_the_specifications_dtypes():
-    """Counts are uint32 and densities uint64, and the payload must not silently widen either.
+    """Counts are uint32 and every fraction and mass is float64, and the payload must not silently
+    change either.
 
     A count that arrives as int64 compares equal to the specification's uint32 by value, so a value-only
     check would pass while the schema had changed underneath it.

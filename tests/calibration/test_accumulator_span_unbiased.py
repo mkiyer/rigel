@@ -39,7 +39,9 @@ def _crossing_vs_contained_ratio(bam_path, index) -> float:
     _s, sm, _b, pl = scan_and_buffer(str(bam_path), index, BamScanConfig(sj_strand_tag="auto"))
     ra = RegionArrays.from_frame(index.regions_df, index.ref_name_to_id)
     CalibrationSubstrate._check_alignment(pl, ra)
-    # The same call production makes; see tests/calibration/_oracle.py.
+    # The length models from the payload alone, with no index inputs, so the gDNA pmf is fitted from
+    # the contained pair (production's `rigel.pipeline.library_fl_models` also passes the index's
+    # opportunities and partition).
     flm = build_fl_models(pl)
     gpmf = flm.gdna_pmf
     region_eff = contained_eff_length(ra.region_size_bp, gpmf)

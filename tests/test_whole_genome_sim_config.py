@@ -211,7 +211,7 @@ def test_a_log_uniform_range_may_not_touch_zero(tmp_path):
 
 def _sparse_population(n: int, *, seed: int = 3) -> tuple[list[Transcript], list[Transcript]]:
     """``n`` expressed multi-exon transcripts, one entity each, so an entity's ``nrna_abundance`` reads
-    back exactly one draw. Mature abundances span the ladder's own three decades (log-uniform 1 →
+    back exactly one draw. Mature abundances span the ladder's own four decades (log-uniform 1 →
     10,000), which is what lets the independence gate below see a correlation if there is one."""
     rng = np.random.default_rng(seed)
     contributors, entities = [], []
@@ -388,9 +388,9 @@ def test_a_multi_exon_contributor_with_no_ENTITY_raises_in_the_SPARSE_path_too()
 
 
 def test_the_FUNCTION_validates_its_own_range_and_fraction_not_just_the_PARSER():
-    """The parser is not the only door. `suite.py` builds `NRNAConfig` from argv and validates
-    neither the range nor the fraction, so `apply_sparse_nrna`'s own guards are all that stands
-    between `--nrna-abundance-ranges '0,100'` and `log(0) = -inf` inside the draw. PERTURBATION:
+    """The parser is not the only door. `apply_sparse_nrna` is public, and a caller that builds its
+    arguments directly never passes through `parse_yaml_config`, so the function's own guards are all
+    that stands between a range of `(0, 100)` and `log(0) = -inf` inside the draw. PERTURBATION:
     deleting either guard passes every other gate in this file."""
     rows = sum(_sparse_population(4), [])
     for bad, why in [

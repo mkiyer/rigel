@@ -35,7 +35,7 @@ def substrate():
 
 
 # ---------------------------------------------------------------------------
-# the five populations, on their own axes
+# the four populations, on their own axes
 # ---------------------------------------------------------------------------
 
 
@@ -124,12 +124,12 @@ def test_a_FRACTION_arrives_as_float64_with_NO_decode(substrate):
 
 
 def test_a_decoded_sum_recovers_the_reciprocal_placements_it_was_built_from(substrate):
-    """The fixture deposited ``n`` fragments at 50 placements into the contained bank, so the decoded
-    sum must read ``n / 50`` — the round trip, not just a division."""
+    """The fixture deposited ``n`` fragments at 50 placements into the contained bank, so the
+    substrate's sum must read ``n / 50``."""
     sub, payload, _ = substrate
     counts = payload.region_contained_count.astype(np.float64).sum(axis=1)
-    # rtol above the fixed point's own quantisation, which the spec bounds at 6.9e-8 relative over
-    # L in [40, 1000] — asserting tighter would be asserting the rounding, not the decode.
+    # The fixture builds this bank as ``counts / 50`` in float64 and the substrate passes it through
+    # unchanged, so the tolerance only has to exclude a scale factor.
     np.testing.assert_allclose(sub.region_contained.inv_opportunity_sum, counts / 50.0, rtol=1e-7)
 
 

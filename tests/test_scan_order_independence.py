@@ -7,8 +7,9 @@ and units in different equivalence classes have different posteriors. The remedy
 rather than a seed: ``frag_id`` is assigned by the single reader thread in BAM order and is a stable
 identity, so a locus's units are sorted by it once, where ``MultiLocus.unit_indices`` is built, and
 every per-locus array scattered by that index list inherits the canonical order. The second block
-gates the tally, which is order-independent for free because every bank is a sum of integers and
-integer addition is associative, so a per-worker merge is exact whatever order the chunks arrived in.
+gates the tally. Its uint32 count banks merge exactly whatever order the chunks arrived in, because
+integer addition is associative; its float64 fraction and mass banks agree to within a tolerance
+derived from the deposit count, because the per-worker merge re-associates their sums.
 """
 
 from __future__ import annotations
@@ -218,12 +219,11 @@ def test_the_thread_split_is_derived_from_the_budget_and_an_explicit_one_still_w
     assert BamScanConfig(total_threads=2, bgzf_threads=9).resolved_scan_threads() == (1, 1)
 
 
-# ── The TALLY — the same BAM gives the same accumulator payload at any worker count, bit for bit ─
+# ── The TALLY — the same BAM gives the same accumulator payload at any worker count ─────────────
 #
-# This is what every channel being an integer buys. A float accumulator differs between worker counts
-# in the last significant digits of each cell, and that reaches a percent-level difference in the
-# calibration output, so the same BAM gives different answers on different machines. Integer addition
-# is associative, so the per-worker merge is exact. Testing ``Accumulator.merge_from``
+# The count banks are uint32 integers and integer addition is associative, so they merge bit for
+# bit. The fraction and mass banks are float64 and the per-worker merge re-associates their sums,
+# so they agree only to within the float64 representation. Testing ``Accumulator.merge_from``
 # directly — which the parity module does — is not enough, because this exercises the SCANNER's
 # worker path: each worker builds its own ``AccumulatorSet`` from the scanner's members, and the
 # chunk-to-worker split is data-dependent. A worker whose set was constructed differently, with the
@@ -259,7 +259,7 @@ def every_bank_oracle(tmp_path):
       fragments it essentially never happens, and mature RNA can never span the region before a sj at
       all — it has no base past the exon end, it splices there. A 50 bp region is spanned by gDNA.
     * ``gdna_fraction`` puts genomic fragments in the intronic and intergenic regions, which is the
-      unspliced bank and the two pure gDNA length pools.
+      unspliced bank and the two contained gDNA length pools.
 
     Every one of those three was added because the assertion below found the array empty. That is the
     fixture doing its job: each is a population the tally has, and a determinism gate that never sees
@@ -348,11 +348,11 @@ def test_the_tally_is_bit_identical_at_1_2_4_and_8_workers(every_bank_oracle):
         f"only {len(array_keys)} arrays on the payload; the gate is too narrow"
     )
     # The side buffer is the one bank this is not free for, and it is read the same way — off its own
-    # fields, so an array added to it joins this gate too. Every other bank is a sum of integers and
-    # integer addition is associative, so a per-worker merge is exact whatever order the chunks arrived
-    # in. The deferred queue is a LIST: concatenating per-worker queues gives a different byte sequence
-    # at 1, 2, 4 and 8 workers with identical CONTENTS, so the C++ export sorts on the record's own
-    # content — and this is what says it does.
+    # fields, so an array added to it joins this gate too. Every other bank is a sum, compared below
+    # exactly (counts) or within the derived tolerance (float64). The deferred queue is a LIST:
+    # concatenating per-worker queues gives a different byte sequence at 1, 2, 4 and 8 workers with
+    # identical CONTENTS, so the C++ export sorts on the record's own content — and this is what
+    # says it does.
     deferred_keys = [f.name for f in dataclasses.fields(baseline.deferred)]
     assert baseline.deferred.n_fragments > 0, (
         "no fragment was deferred, so the canonical sort is compared only against an empty bank — which "

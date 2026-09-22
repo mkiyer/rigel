@@ -1,12 +1,11 @@
 """Falsification gates for the FIXED-TOTAL depth mode (``simulation.n_total_fragments``).
 
-The panel's gDNA axis is a RATE — ``n_gdna = rate x n_rna`` on top of a fixed RNA depth — which
-cannot reach the high-gDNA end of the real spectrum: a 98 % gDNA library is ``rate = 49``, so 490 M
-fragments at a 10 M RNA depth. Real libraries do not work that way either, since a sequencing run has
-a fixed TOTAL budget and the gDNA fraction decides how it is SPLIT. This mode holds the total and
-varies the split, which is both feasible and the more faithful model; the RNA-side accuracy loss at
-high gDNA is accepted. Each gate below carries its own perturbation, because a gate that has never
-been watched to fire has not been written yet.
+``resolve_depths`` has two modes. With ``n_total_fragments`` unset (the default) the RNA depth is
+fixed and gDNA is added on top at ``n_gdna = rate x n_rna``, which cannot reach the high-gDNA end of
+the spectrum: a 98 % gDNA library is ``rate = 49``, so 490 M fragments at a 10 M RNA depth. With it
+set, the TOTAL is held and ``rate`` decides only the SPLIT, which is what a sequencing run with a fixed
+budget does; the RNA-side accuracy loss at high gDNA is accepted. Each gate below carries its own
+perturbation, because a gate that has never been watched to fire has not been written yet.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ import pytest
 from rigel.sim.orchestrator import resolve_depths
 from rigel.sim.wgs_config import SimulationParams
 
-#: The ladder the panel uses. Rates, not fractions: ``f_gdna = rate / (1 + rate)``.
+#: A rate ladder from zero to 98 % gDNA. Rates, not fractions: ``f_gdna = rate / (1 + rate)``.
 LADDER = [0.0, 0.010101, 0.052632, 0.111111, 0.333333, 1.0, 3.0, 9.0, 49.0]
 TOTAL = 10_000_000
 
@@ -30,8 +29,8 @@ def test_the_total_is_CONSERVED_EXACTLY_at_every_rung():
     rounding drift. A ladder whose rungs have different depths cannot be compared across rungs, which
     is the entire purpose of fixing the total.
 
-    PERTURBATION: the legacy path (``n_total_fragments=None``) must NOT conserve it — otherwise this
-    gate is passing on a property the old code already had and proves nothing about the new mode.
+    PERTURBATION: the additive path (``n_total_fragments=None``) must NOT conserve it — otherwise this
+    gate passes on a property the additive mode already has and proves nothing about the fixed total.
     """
     sim = _params(n_total_fragments=TOTAL)
     for rate in LADDER:
@@ -40,7 +39,7 @@ def test_the_total_is_CONSERVED_EXACTLY_at_every_rung():
 
     legacy = _params(n_total_fragments=None)
     totals = {resolve_depths(legacy, gdna_rate=r).total for r in LADDER}
-    assert len(totals) > 1, "the legacy path already fixes the total; the new mode adds nothing"
+    assert len(totals) > 1, "the additive path already fixes the total; this mode adds nothing"
 
 
 def test_the_realised_gDNA_FRACTION_tracks_the_rung():
@@ -133,11 +132,11 @@ def test_the_nascent_split_is_INSIDE_the_RNA_budget_not_on_top(tmp_path):
 
 
 def test_omitting_the_total_leaves_the_LEGACY_path_byte_identical():
-    """The mode must be opt-in. Every existing config omits ``n_total_fragments``, and those panels
-    must simulate exactly what they simulated before — a depth change would silently invalidate every
-    stored number measured against them.
+    """The mode must be opt-in. A config that omits ``n_total_fragments`` gets the additive depths
+    exactly — ``n_rna`` is the configured RNA depth and ``n_gdna = round(rate x n_rna)`` — so a depth
+    change never reaches a config that did not ask for one.
 
-    PERTURBATION: switching the mode on must move the numbers, or "byte-identical" is vacuous.
+    PERTURBATION: switching the mode on must move the numbers, or the identity is vacuous.
     """
     legacy = _params(n_total_fragments=None)
     for rate in LADDER:

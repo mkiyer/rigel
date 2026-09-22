@@ -279,8 +279,9 @@ _TILINGS = {
 # The tilings where every region exceeds BOTH fragment lengths, so ``min(w−1, flank) == w−1`` on every
 # boundary and ``q_g == q_r == 1``: the pooled share is then each component's own and the split is exact.
 _SHARES_AGREE = ["coarse (1 x 1200)", "medium (3 x 400)"]
-# Not 1e-9: the conserved-mass bank is fixed-point at 2^-32 per fragment, so a 1,001-fragment total
-# carries ~2e-11 of relative rounding. Anything above 1e-10 here would be a real error.
+# The conserved-mass bank is float64, so a total over ~1,000 fragments carries at most ~n·eps
+# (~2e-13) of relative rounding. 1e-8 sits far above that and far below the percent-scale errors
+# these gates exist for.
 _FIXED_POINT_RTOL = 1e-8
 
 

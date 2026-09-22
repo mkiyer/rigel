@@ -1,7 +1,8 @@
 """How the pipeline routes a fragment into EM units, and what it counts on the way.
 
-A spliced multimapper gets no nascent shadow entities while an unspliced one does, because only the
-unspliced fragment could have come from unspliced RNA; a multimapper's gDNA likelihood normalises by
+A multimapper's EM unit carries transcript candidates only, spliced or not — synthetic nascent spans
+are ordinary transcripts, and the gDNA candidate is appended per locus inside the EM — and an unspliced
+one carries a finite per-unit gDNA log-likelihood; a multimapper's gDNA likelihood normalises by
 the full `NH` rather than by the hits that survived filtering; the route counters are exclusive, so
 each unit is counted once and the totals mean something; and the `NM` penalty discriminates between
 a multimapper's hits when enabled and is exactly inert when not.
@@ -241,12 +242,12 @@ def test_multimapper_spliced_annot_skips_shadows():
     assert np.all(em.t_indices < index.num_transcripts)
 
 
-def test_multimapper_unspliced_adds_nrna_shadows():
-    """Unspliced multimappers get transcript candidates in global CSR.
+def test_multimapper_unspliced_has_transcript_candidates_only_and_a_gdna_log_lik():
+    """An unspliced multimapper's unit carries transcript candidates only in the global CSR.
 
-    gDNA candidates are no longer in the global CSR — they are added
-    per-locus during locus EM construction. nRNA shadows no longer exist
-    (synthetic nRNA transcripts are regular transcripts).
+    Synthetic nRNA transcripts are ordinary transcripts, so nothing is appended for them, and the
+    gDNA candidate is appended per locus inside the locus EM. What the unit does carry is a finite
+    per-unit gDNA log-likelihood.
     """
     index = _Index(
         t_to_g=[0, 0],

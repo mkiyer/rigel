@@ -33,8 +33,8 @@ def _make_locus_em_data(
 ):
     """Build (ScoredFragments, [Locus], gdna_prior_count) for batch EM tests.
 
-    Returns a tuple (em_data, loci, gdna_prior_count_arr) suitable for
-    ``run_batch_locus_em()``.
+    Returns a tuple (em_data, loci, gdna_prior_count_arr) that ``_run_and_assign``
+    partitions and hands to ``AbundanceEstimator.run_batch_locus_em_partitioned``.
 
     Parameters
     ----------
@@ -43,11 +43,13 @@ def _make_locus_em_data(
     rc : AbundanceEstimator or None
         If provided, used for unambig_counts.
     include_nrna : bool
-        If True, units are marked as unspliced (``is_spliced=False``)
-        so the batch C++ adds nRNA shadow candidates.
+        If True, units are marked as unspliced (``is_spliced=False``).
+        Nothing is appended for nascent RNA: synthetic nRNA transcripts are
+        ordinary transcripts, listed among a unit's candidates like any other.
     include_gdna : bool
-        If True, ``gdna_prior_count > 0`` and ``gdna_log_liks`` are finite
-        so the batch C++ adds a gDNA component.
+        If True, units are unspliced with finite ``gdna_log_liks``, so the
+        locus EM appends a gDNA candidate to each, and ``gdna_prior_count``
+        is passed through (otherwise the prior count is 0).
     """
     if num_transcripts is None:
         all_t = [t for unit in t_indices_per_unit for t in unit]
@@ -56,7 +58,7 @@ def _make_locus_em_data(
     n_t = num_transcripts
     n_units = len(t_indices_per_unit)
 
-    # Build mRNA-only CSR (no nRNA/gDNA — batch C++ adds those)
+    # Build the transcript-candidate CSR (no gDNA — the locus EM appends that per unit)
     offsets = [0]
     flat_t = []
     flat_lk = []
@@ -79,7 +81,7 @@ def _make_locus_em_data(
             locus_t[u] = t_list[0]
             locus_cc[u] = count_cols_per_unit[u][0] if count_cols_per_unit else _UNSPLICED_SENSE
 
-    # is_spliced: True (spliced) → no nRNA/gDNA shadows.
+    # is_spliced: True (spliced) → no gDNA candidate.
     # For include_nrna or include_gdna, set False (unspliced).
     if include_nrna or include_gdna:
         is_spliced = np.zeros(n_units, dtype=bool)

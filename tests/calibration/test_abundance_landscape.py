@@ -352,7 +352,7 @@ def test_the_anchor_picks_depleted_and_enriched_stays_ABOVE_it_with_three_modes(
 
 
 # ---------------------------------------------------------------------------
-# the calibrate() integration — default byte-identical, the flag fires, the refusal refuses
+# the calibrate() integration — no wall inputs fits nothing, the wall inputs fit, an injection is kept
 # ---------------------------------------------------------------------------
 
 
@@ -377,9 +377,9 @@ def _calibrate_parts():
 
 
 def test_without_the_wall_inputs_the_landscape_is_SKIPPED_LOUDLY_and_nothing_raises(caplog):
-    """With `abundance_landscape` on by default, a caller that supplies no wall arrays gets no panel
-    rather than an exception — the landscape feeds only the QC report's density panel, and a toy or a
-    unit fixture that never wanted one should not have to disable the flag to run.
+    """The landscape is fit whenever the wall inputs (``mature_walls``, ``boundary_reach``) are passed,
+    so a caller that supplies none gets no panel rather than an exception — the landscape feeds only the
+    QC report's density panel, and a toy or a unit fixture that never wanted one runs without it.
 
     Nothing fits on unmasked totals either way: the choice is between refusing and not fitting, and
     the mask's wall bias is excluded under both. The skip is not a silent fallback — it is logged at
@@ -411,6 +411,8 @@ def test_without_the_wall_inputs_the_landscape_is_SKIPPED_LOUDLY_and_nothing_rai
 
 
 def test_the_flag_FITS_a_landscape_and_the_default_fits_NOTHING():
+    """There is no config flag: passing the wall inputs is what fits a landscape, and omitting them
+    fits nothing — both in the debug capture and in the priors bundle."""
     from rigel.calibration import calibrate
     from rigel.calibration.splice_graph import MatureWallDistances
     from rigel.config import CalibrationConfig
@@ -612,7 +614,7 @@ def test_anchors_walls_are_not_members_and_cannot_locate_a_basin():
     """`ISSUES: the-ruler-reference-on-sparse-real-libraries`, the reader's half: a basin above the bulk
     packed with 20,000 anchors' resolution walls around twelve located kernels names no reference — the
     walls are not members, and twelve is below k = √n_located. PERTURBATION: admitting every centre as a
-    member (the shipped rule) reads the walls as a located mode of 20,012 members."""
+    member, walls included, reads the walls as a located mode of 20,012 members."""
     from rigel.calibration.abundance_landscape import located_enriched_mode
 
     ls = _hand_landscape([-7.0, -1.5], [0.4, 0.2], [700, 300], [1000, 12], walls=[(-1.5, 20_000)])

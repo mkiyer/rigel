@@ -1,17 +1,18 @@
-"""gDNA / RNA fragment-length laws: the pure pools, the smooth-EB build, and the two estimands.
+"""gDNA / RNA fragment-length laws: the pools, the smooth-EB build, and the two estimands.
 
-Purity is the whole point of the pools: a length model is fitted only from populations known to be ONE
-component, so nothing is ever estimated from the fragments it will later explain. The partition gates
-hold the pool accessors exhaustive and disjoint, the build gates hold that a sparse pool shrinks
-smoothly toward the global anchor with no threshold anywhere, and the accessor gates hold the raw
-empirical views the QC report reads. Above them sit two estimands of the gDNA law: ``gdna_pmf``, the
-UNIFORM-FRAME law that the chemistry makes and the opportunity and prior mathematics assume, and
-``gdna_realized_pmf``, the LIBRARY-CENSUS law a sequenced gDNA fragment follows with capture selection
-included, which is what the EM's per-fragment scorer conditions on. They coincide off capture and
-split under it, and handing either consumer the other's estimand misassigns transcripts in bulk — so
-the ROUTING is gated as hard as the estimator: geometry stays bit-identical whether or not the
-realized law is computed, the realized law falls back to the uniform one exactly when it cannot be
-estimated, and the on-target correction vanishes identically with no enrichment excess.
+The pools are defined by structure and none is pure: only the RNA pool is certified, since gDNA
+cannot splice, while RNA inside introns and unannotated transcription reach the gDNA pools too. The
+partition gates hold the pool accessors exhaustive and disjoint, the build gates hold that a sparse
+pool shrinks smoothly toward the global anchor with no threshold anywhere, and the accessor gates
+hold the raw empirical views the QC report reads. Above them sit two estimands of the gDNA law:
+``gdna_pmf``, the UNIFORM-FRAME law that the chemistry makes and the opportunity and prior
+mathematics assume, and ``gdna_realized_pmf``, the LIBRARY-CENSUS law a sequenced gDNA fragment
+follows with capture selection included, which is what the EM's per-fragment scorer conditions on.
+They coincide off capture and split under it, and handing either consumer the other's estimand
+misassigns transcripts in bulk — so the ROUTING is gated as hard as the estimator: geometry stays
+bit-identical whether or not the realized law is computed, the realized law falls back to the
+uniform one exactly when it cannot be estimated, and the on-target correction vanishes identically
+with no enrichment excess.
 
 PERTURBATION (`TRAPS: perturb-every-gate`): leaking the realized law into ``gdna_pmf``, breaking the
 fallback, and dropping the excess's ``-1`` each fire two gates. Removing the estimator's early
@@ -113,9 +114,9 @@ def test_gdna_fl_mass_excludes_the_RNA_pool():
 
 
 def test_rna_fl_mass_is_the_ANNOTATED_SJ_pool_alone():
-    """gDNA cannot be spliced, so an observed annotated sj certifies RNA — and only that pool
-    does. ``sj_implicit`` fragments are already excluded by the accumulator, because a splice that was
-    never sequenced is a product of the very model this pool is used to fit."""
+    """gDNA cannot be spliced, so a fragment on an annotated sj certifies RNA — and only that pool
+    does. The accumulator admits a splice whether it was sequenced or implied by the one hypothesis
+    that survived arbitration: pool membership is by determinacy, not provenance."""
     r = rna_fl_mass(SimpleNamespace(pool_lengths=_pools()))
     np.testing.assert_allclose(r, [0.0, 0.0, 0.0, 0.0, 11.0])
 

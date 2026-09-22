@@ -1,9 +1,10 @@
-"""The RNA level lanes (`lanes.rna_lanes`, one `lanes.LevelLane` per strand) and the cube
+"""The RNA level lanes (the kernel's `rna_lane` builder in `native/transfer_kernel.h`, one lane per
+strand, read through `native.transfer_prepare` into `_transfer_harness.LevelLane`) and the cube
 delivery — the machinery the both-stranded locus needs.
 
-Each gate was written against the prototype first and watched firing on its perturbation; the hops
-are single hops of the native pass (`_transfer_harness._hop`) and the row constructors the native ones
-(`native.transfer_rows`). They cover the faces derived from the flag bits per strand, the level coordinate and its round trip, the
+Each gate has been watched firing on its perturbation; the hops are single hops of the native pass
+(`_transfer_harness._hop`) and the row constructors the native ones (`native.transfer_rows`). They
+cover the faces derived from the flag bits per strand, the level coordinate and its round trip, the
 hop priced on the strand's own counts, the flux level, which nodes are sources, the no-echo law,
 the two-sided hop at the pair's price, the split witness that reads a node's estimate of one
 strand's RNA from its column asymmetry, a one-sided profile surviving the map onto the cube, the
@@ -667,11 +668,11 @@ def test_an_empty_exon_piece_beside_a_lit_junction_is_a_flux_source():
 # THE RNA LANES EXIST WHENEVER THEIR OWN COORDINATE EXISTS — not when something else does
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 #
-# Found by the encompassing-transcript audit (2026-09-13): a single-exon TB− over a two-exon TA+ delivered
-# no RNA level anywhere, because three unrelated things each silenced the lanes — the intron factory had
-# no rows (no coarse intron in the chain), the gDNA lane had no coordinate (a gDNA-free library), and the
-# + lane did not exist (TA+'s exons are both AMBIG, so no single-strand + exon anywhere). A whole
-# chromosome never shows any of the three, which is why they shipped.
+# A single-exon TB− over a two-exon TA+ must still deliver its RNA level, and three unrelated conditions
+# could each silence the lanes: the intron factory having no rows (no coarse intron in the chain), the
+# gDNA lane having no coordinate (a gDNA-free library), and the + strand having no coordinate (TA+'s
+# exons are both AMBIG, so no single-strand + exon anywhere). A whole chromosome never shows any of the
+# three, so only a small chain like this one exercises them.
 
 
 def _neg_only_ctx():

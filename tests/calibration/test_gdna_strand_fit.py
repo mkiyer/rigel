@@ -676,7 +676,7 @@ def test_beta_concentration_roundtrip():
     assert m.beta_concentration() == pytest.approx(0.5 * (1.0 - 0.1) / 0.1)
 
 
-# --- the substrate wrapper (Phase 2 extraction + fit) ---------------------------------------
+# --- the substrate wrapper (`fit_gdna_strand_from_substrate`: seed extraction + fit) -----------
 
 
 def _mock_substrate(pos, neg, ts, count_evidence, observable):
