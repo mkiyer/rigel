@@ -117,6 +117,9 @@ The instrument's default `--reference` path does not exist and it prints ⛔ rat
 4. **Instruments** — decision 5, then `CLAUDE.md`'s table and `preflight.py`'s import sweep follow the disk.
 5. **Docs** — `ROADMAP.md` carries numbers against its own rule; `CLAUDE.md` is 380 lines; `DESIGN.md` 2,015.
    Each cut by the move rule: a number goes to the instrument that re-derives it, a history to git.
-6. **Release readiness** — `CHANGELOG.md`'s `[Unreleased]` written from git since 0.7.1; `pyproject.toml`
-   classifiers; `pip wheel` from a clean checkout; the CLI smoke run on the test chromosome; `preflight.py --full`;
-   `PUBLISHING.md`'s procedure walked once without publishing.
+6. **Release readiness** — DONE 2026-09-22 except the walk-through: `CHANGELOG.md`'s `[Unreleased]` written from the
+   555 commits since 0.7.1 (a rebuilt index is required: format 8); the manual's flag table diffed against `--help`
+   (one flag was missing, `--sweep-block-slots`, added; four removed flags were already gone from it); a wheel builds from
+   the working tree (`pip wheel . -C build-dir=<scratch>`, abi3, 1.3 MB) and `rigel --version` runs; `preflight.py --full`
+   5/5. Left: `PUBLISHING.md`'s two commands walked once without publishing (the owner's), the version bump
+   (`release.sh`'s job), and the `Development Status` classifier, an owner call.
