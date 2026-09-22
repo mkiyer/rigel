@@ -36,9 +36,7 @@ agnostic by nature of the detection scheme.  We collapse on
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -57,89 +55,60 @@ BLACKLIST_COLUMNS = (
 )
 
 
-def load_splice_blacklist_from_records(
-    records: Iterable[Mapping[str, Any]],
-    *,
-    min_count: int = 2,
-) -> pd.DataFrame:
-    """Aggregate raw alignable splice-blacklist records into Rigel form.
+def aggregate_splice_blacklist(rows: pd.DataFrame, *, min_count: int = 2) -> pd.DataFrame:
+    """Aggregate raw alignable splice-blacklist rows into Rigel form.
 
     Parameters
     ----------
-    records
-        Iterable of dict-like rows as returned by
-        ``alignable.AlignableStore.splice_blacklist()``.  Each row must
-        provide ``chrom`` (str), ``intron_start`` (int), ``intron_end``
-        (int), ``count`` (int), ``max_anchor_left`` (int), and
-        ``max_anchor_right`` (int).  Other keys are ignored.
+    rows
+        One row per ``(chrom, intron, strand, read_length)`` as the alignable store holds them: the
+        columns ``chrom``, ``intron_start``, ``intron_end``, ``count``, ``max_anchor_left`` and
+        ``max_anchor_right``; any others are ignored.
     min_count
-        Only rows with ``count >= min_count`` enter the blacklist.
-        Default ``2`` matches the historical alignable threshold.
-        Use ``1`` to admit singletons; higher values keep only the
-        most reproducible artifacts.
+        Only rows with ``count >= min_count`` enter the blacklist. Default ``2`` matches the
+        alignable threshold; ``1`` admits singletons, higher values keep only the most reproducible
+        artifacts.
 
     Returns
     -------
     pandas.DataFrame
-        One row per unique ``(ref, start, end)`` sj with columns
-        :data:`BLACKLIST_COLUMNS`.  Anchors are aggregated across
-        surviving read-length rows by ``max``.  Sorted by
+        One row per unique ``(ref, start, end)`` sj with columns :data:`BLACKLIST_COLUMNS`, the
+        anchors aggregated across the surviving read-length rows by ``max``, sorted by
         ``(ref, start, end)``.
     """
     if min_count < 1:
         raise ValueError(f"min_count must be >= 1, got {min_count}")
+    n_raw = len(rows)
+    if n_raw == 0:
+        logger.info("Splice blacklist: the store's blacklist table is empty")
+        return _empty_blacklist_df()
 
-    refs: list[str] = []
-    starts: list[int] = []
-    ends: list[int] = []
-    a_left: list[int] = []
-    a_right: list[int] = []
-    n_raw = 0
-    n_below = 0
-    for row in records:
-        n_raw += 1
-        c = int(row["count"])
-        if c < min_count:
-            n_below += 1
-            continue
-        refs.append(str(row["chrom"]))
-        starts.append(int(row["intron_start"]))
-        ends.append(int(row["intron_end"]))
-        a_left.append(int(row["max_anchor_left"]))
-        a_right.append(int(row["max_anchor_right"]))
-
-    if not refs:
+    keep_mask = rows["count"].to_numpy() >= min_count
+    n_below = int((~keep_mask).sum())
+    kept = rows.loc[keep_mask]
+    if kept.empty:
         logger.info(
             f"Splice blacklist: 0 sj retained ({n_raw:,} raw, {n_below:,} below count={min_count})"
         )
         return _empty_blacklist_df()
 
-    df = pd.DataFrame(
-        {
-            "ref": refs,
-            "start": np.asarray(starts, dtype=np.int32),
-            "end": np.asarray(ends, dtype=np.int32),
-            "max_anchor_left": np.asarray(a_left, dtype=np.int32),
-            "max_anchor_right": np.asarray(a_right, dtype=np.int32),
-        }
-    )
-
+    kept = kept.rename(columns={"chrom": "ref", "intron_start": "start", "intron_end": "end"})
     agg = (
-        df.groupby(["ref", "start", "end"], sort=False, observed=True)
+        kept.groupby(["ref", "start", "end"], sort=False, observed=True)
         .agg(
-            max_anchor_left=("max_anchor_left", "max"),
-            max_anchor_right=("max_anchor_right", "max"),
+            max_anchor_left=("max_anchor_left", "max"), max_anchor_right=("max_anchor_right", "max")
         )
         .reset_index()
     )
     agg = agg.sort_values(["ref", "start", "end"], kind="stable").reset_index(drop=True)
+    agg["ref"] = agg["ref"].astype(object)
     agg["start"] = agg["start"].astype(np.int32)
     agg["end"] = agg["end"].astype(np.int32)
     agg["max_anchor_left"] = agg["max_anchor_left"].astype(np.int32)
     agg["max_anchor_right"] = agg["max_anchor_right"].astype(np.int32)
 
     logger.info(
-        f"Splice blacklist: {n_raw:,} raw rows → {len(df):,} kept "
+        f"Splice blacklist: {n_raw:,} raw rows → {int(keep_mask.sum()):,} kept "
         f"(count>={min_count}, dropped {n_below:,}) → "
         f"{len(agg):,} unique sj"
     )
@@ -165,7 +134,7 @@ def load_splice_blacklist_from_zarr(
     store_path
         Path to an alignable output directory or a ``.zarr.zip`` file.
     min_count
-        See :func:`load_splice_blacklist_from_records`.
+        See :func:`aggregate_splice_blacklist`.
     """
     if min_count < 1:
         raise ValueError(f"min_count must be >= 1, got {min_count}")
@@ -181,49 +150,11 @@ def load_splice_blacklist_from_zarr(
 
     logger.info(f"Loading splice blacklist from alignable store: {store_path}")
     store = alignable.open(str(store_path))
-    table = store.splice_blacklist_table()
-    n_raw = table.num_rows
-
-    if n_raw == 0:
-        logger.info("Splice blacklist: store has empty blacklist table")
-        return _empty_blacklist_df()
-
-    # Arrow → pandas (dict-encoded strings decode automatically).  At
-    # ~35 M rows × 8 cols (int32 / dict-string) this is ~1 GB transient
-    # — acceptable for index builds and ~1000× faster than the
-    # list-of-dicts path.
-    df = table.to_pandas(types_mapper=None)
-    counts = df["count"].to_numpy()
-    keep_mask = counts >= min_count
-    n_below = int((~keep_mask).sum())
-    df = df.loc[keep_mask]
-    if df.empty:
-        logger.info(
-            f"Splice blacklist: 0 sj retained ({n_raw:,} raw, {n_below:,} below count={min_count})"
-        )
-        return _empty_blacklist_df()
-
-    df = df.rename(columns={"chrom": "ref", "intron_start": "start", "intron_end": "end"})
-    agg = (
-        df.groupby(["ref", "start", "end"], sort=False, observed=True)
-        .agg(
-            max_anchor_left=("max_anchor_left", "max"), max_anchor_right=("max_anchor_right", "max")
-        )
-        .reset_index()
+    # Arrow → pandas (dict-encoded strings decode automatically). At ~35 M rows × 8 columns this is
+    # ~1 GB transient, acceptable for an index build.
+    return aggregate_splice_blacklist(
+        store.splice_blacklist_table().to_pandas(types_mapper=None), min_count=min_count
     )
-    agg = agg.sort_values(["ref", "start", "end"], kind="stable").reset_index(drop=True)
-    agg["ref"] = agg["ref"].astype(object)
-    agg["start"] = agg["start"].astype(np.int32)
-    agg["end"] = agg["end"].astype(np.int32)
-    agg["max_anchor_left"] = agg["max_anchor_left"].astype(np.int32)
-    agg["max_anchor_right"] = agg["max_anchor_right"].astype(np.int32)
-
-    logger.info(
-        f"Splice blacklist: {n_raw:,} raw rows → {int(keep_mask.sum()):,} kept "
-        f"(count>={min_count}, dropped {n_below:,}) → "
-        f"{len(agg):,} unique sj"
-    )
-    return agg
 
 
 def _empty_blacklist_df() -> pd.DataFrame:

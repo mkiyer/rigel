@@ -3,9 +3,10 @@
 Rows below ``min_count`` are dropped; the survivors are grouped by ``(chrom, intron_start,
 intron_end)`` and take the ``max`` of the two anchor lengths, so a junction seen at several read
 lengths keeps its longest anchor; strand is not carried through, because the source always reports
-it as unknown. The gates run the records-based aggregator over in-memory dicts, so the suite does
-not require the store to be installed, and then check that a blacklist persisted into an index
-loads back into the resolver and that building without one writes nothing.
+it as unknown. The gates run the shipped aggregation (`aggregate_splice_blacklist`, which the store
+loader calls) over rows built in memory, so the suite does not require the store to be installed,
+and then check that a blacklist persisted into an index loads back into the resolver and that building
+without one writes nothing.
 """
 
 from __future__ import annotations
@@ -16,10 +17,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rigel.splice_blacklist import (
-    BLACKLIST_COLUMNS,
-    load_splice_blacklist_from_records,
-)
+from rigel.splice_blacklist import BLACKLIST_COLUMNS, aggregate_splice_blacklist
 
 
 def _row(chrom: str, s: int, e: int, rl: int, count: int, al: int, ar: int) -> dict:
@@ -35,7 +33,12 @@ def _row(chrom: str, s: int, e: int, rl: int, count: int, al: int, ar: int) -> d
     }
 
 
-class TestLoaderFromRecords:
+def load_splice_blacklist_from_records(records, *, min_count: int = 2) -> pd.DataFrame:
+    """The shipped aggregation over a DataFrame of alignable rows, built here from dicts."""
+    return aggregate_splice_blacklist(pd.DataFrame(list(records)), min_count=min_count)
+
+
+class TestAggregation:
     def test_single_row(self) -> None:
         df = load_splice_blacklist_from_records(
             [_row("chr1", 100, 500, 100, 5, 15, 20)],
