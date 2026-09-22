@@ -225,8 +225,7 @@ def _fragment_length_report(fl_models):
     the five ``pool_*`` rows
         the five pools **unaggregated** (none is pure). ``gdna`` is the fitted uniform-frame gDNA
         histogram and ``rna`` the de-tilted ``pool_rna_spliced``; the two ``*_exon`` crossing rows are
-        the on-target gDNA, shown on their own so the off-target / on-target comparison is an output
-        (``calibration.fl.splash_fl_mass``).
+        the on-target gDNA, shown on their own so the off-target / on-target comparison is an output.
 
     There are no per-SpliceType histograms here, deliberately: they would be the scanner's own,
     measured by rules that are neither each other nor ``L``, over a population gated by a unanimity

@@ -32,7 +32,6 @@ from rigel.calibration.fl import (
     gdna_contained_fl_mass,
     gdna_fl_mass,
     rna_fl_mass,
-    splash_fl_mass,
 )
 from rigel.scan_payload import (
     N_FRAGMENT_POOLS,
@@ -121,22 +120,12 @@ def test_rna_fl_mass_is_the_ANNOTATED_SJ_pool_alone():
     np.testing.assert_allclose(r, [0.0, 0.0, 0.0, 0.0, 11.0])
 
 
-def test_the_splash_pools_are_reachable_SEPARATELY_for_QC():
-    """Named pools, not folded in — so 'is the off-target model mis-centred for the fragments that
-    actually leak?' is answerable rather than assumed."""
-    s = splash_fl_mass(SimpleNamespace(pool_lengths=_pools()))
-    np.testing.assert_allclose(s, [0.0, 0.0, 700.0, 900.0, 0.0])
-
-
 def test_the_two_COMPONENT_accessors_partition_every_pool():
     """Teeth on the partition itself: no pool double-counted, none unreachable.
 
     ``gdna_fl_mass`` and ``rna_fl_mass`` are the two COMPONENT accessors and they must be exhaustive and
     disjoint — a pool no accessor returns is silently discarded evidence, and one two accessors return is
     double-counted. Both are invisible in any single-accessor test.
-
-    ``gdna_contained_fl_mass`` and ``splash_fl_mass`` are named SUBSETS of the gDNA side, not
-    members of the partition; the test below pins that they tile it exactly.
     """
     payload = SimpleNamespace(pool_lengths=_pools())
     total = float(gdna_fl_mass(payload).sum()) + float(rna_fl_mass(payload).sum())
@@ -150,23 +139,6 @@ def test_the_two_COMPONENT_accessors_partition_every_pool():
         assert sorted(reached) == [0.0, 5.0], (
             f"pool {pool} reaches {reached}, expected exactly one component"
         )
-
-
-def test_the_gdna_subsets_TILE_the_gdna_side_exactly():
-    """contained + splash == all four, on every pool individually.
-
-    This is what keeps "the crossing pools are reported separately" and "the crossing pools are fitted"
-    from drifting apart: they are the same rows seen twice, not two different definitions.
-    """
-    payload = SimpleNamespace(pool_lengths=_pools())
-    np.testing.assert_allclose(
-        gdna_contained_fl_mass(payload) + splash_fl_mass(payload), gdna_fl_mass(payload)
-    )
-    for pool in range(N_FRAGMENT_POOLS):
-        one = np.zeros((N_FRAGMENT_POOLS, 5), dtype=np.int64)
-        one[pool, 1] = 5
-        p = SimpleNamespace(pool_lengths=one)
-        np.testing.assert_allclose(gdna_contained_fl_mass(p) + splash_fl_mass(p), gdna_fl_mass(p))
 
 
 def test_build_fl_large_pool_is_empirical():

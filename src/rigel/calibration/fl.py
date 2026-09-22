@@ -94,7 +94,6 @@ __all__ = [
     "gdna_contained_fl_mass",
     "gdna_fl_mass",
     "rna_fl_mass",
-    "splash_fl_mass",
 ]
 
 #: gDNA contained in exactly one intergenic or intronic region. Dominant OFF capture.
@@ -110,10 +109,6 @@ _GDNA_POOLS = _GDNA_CONTAINED_POOLS + _GDNA_CROSSING_POOLS
 
 #: The pure RNA pool: an OBSERVED splice across an annotated sj.
 _RNA_POOLS = (POOL_RNA_SPLICED,)
-
-#: The crossing pair under the name the report uses when it shows on-target gDNA separately. The
-#: same two pools are fitted through ``_GDNA_CROSSING_POOLS``.
-_SPLASH_POOLS = _GDNA_CROSSING_POOLS
 
 #: Dirichlet pseudo-count for the smooth EB shrink toward the global length law. Not a cliff: a pool
 #: total far above it gives the empirical law, far below it the global anchor, and 0 the anchor
@@ -237,10 +232,7 @@ def _pool_sum(payload: "AccumulatorPayload", pools) -> np.ndarray:
     scores as RNA. The accumulator's ``L`` already includes the mate gap and excludes spliced-out
     introns, so it is the molecule length for both components under one rule.
     """
-    pool_lengths = payload.pool_lengths
-    if pool_lengths is None:
-        return np.zeros(0, dtype=np.float64)
-    return np.asarray(pool_lengths, dtype=np.float64)[list(pools)].sum(axis=0)
+    return np.asarray(payload.pool_lengths, dtype=np.float64)[list(pools)].sum(axis=0)
 
 
 def gdna_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
@@ -266,16 +258,6 @@ def gdna_contained_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
 def rna_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
     """The pure RNA length histogram: fragments that used an annotated sj, splice OBSERVED."""
     return _pool_sum(payload, _RNA_POOLS)
-
-
-def splash_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
-    """The ON-TARGET gDNA length histogram — the two crossing pools, reported on their own for QC.
-
-    :func:`gdna_fl_mass` includes them, each divided by its own opportunity. Under capture they carry
-    the long fragments the contained pools lose, and naming them makes the off-target / on-target
-    comparison an output instead of an assumption.
-    """
-    return _pool_sum(payload, _SPLASH_POOLS)
 
 
 def _resolution_weight(signal_sq: float, noise_sq: float) -> float:
@@ -492,7 +474,7 @@ def _realized_gdna_counts(
     region_types: np.ndarray,
     rna_pmf: np.ndarray,
     uniform_counts: np.ndarray,
-) -> "tuple[np.ndarray | None, GdnaRealized]":
+) -> "tuple[np.ndarray | None, np.ndarray | None, GdnaRealized]":
     """The LIBRARY-CENSUS gDNA law: the uniform-frame estimate plus everything capture SELECTED.
 
     Three ingredients, blended by realized gDNA mass so the capture spectrum needs no switch:
@@ -600,11 +582,9 @@ def _realized_gdna_counts(
         eps_sum = np.bincount(exon_region, weights=eps_pair, minlength=n_exons)
         eps_count = np.bincount(exon_region, minlength=n_exons).astype(np.float64)
         weight_sum = np.bincount(exon_region, weights=weighted, minlength=n_exons)
-        num = {2: float(num[0]), 3: float(num[1])}
-        den = {2: float(den[0]), 3: float(den[1])}
-        if den[2] <= 0.0 or den[3] <= 0.0:
+        if den[0] <= 0.0 or den[1] <= 0.0:
             break
-        a2, a3 = num[2] / den[2], num[3] / den[3]
+        a2, a3 = float(num[0]) / float(den[0]), float(num[1]) / float(den[1])
         n2 = float(obs_pools[_GDNA_CROSSING_POOLS[0]].sum())
         n3 = float(obs_pools[_GDNA_CROSSING_POOLS[1]].sum())
         total_opp = np.asarray(gdna_opportunity.total, dtype=np.float64)
@@ -640,8 +620,6 @@ def _realized_gdna_counts(
     m_E = 0.0
     # ⛔ An exon no boundary pair witnessed contributes NOTHING, and that is arithmetic rather than a
     # choice: its weight is `_resolution_weight(signal, inf) = 0`, so its excess is 0 and it is skipped.
-    # The old code still averaged every observed ratio to hand such an exon a default it then multiplied
-    # by that zero — 1.4 M values summed per fit for a number the answer cannot see.
     witnessed = is_ex & (eps_count > 0.0)
     if witnessed.any():
         for e_idx in np.flatnonzero(witnessed):
@@ -677,7 +655,6 @@ def _realized_gdna_counts(
     else:
         uniform, realized, lam = _couple_estimands(g_C, m_C, g_B, m_B)
 
-    # the on-target excess is a capture-only correction, so it rides `lam` too and vanishes with it
     m0 = min(uniform.size, realized.size, h_E.size)
     # the excess rides its OWN resolution weight (applied per exon above), not `lam`
     realized = realized[:m0] + h_E[:m0] / max(m_C + m_B, 1e-30)
@@ -712,7 +689,7 @@ def _smooth_eb(aligned: np.ndarray, global_pmf: np.ndarray, prior_ess: float):
     """Smooth EB pmf: ``(counts + prior_ess·global_pmf) / (total + prior_ess)``.
 
     ``aligned`` is an already ``max_size``-aligned count vector. Continuous in the
-    pool total — no quality threshold (PR04c decision 5). Returns ``(pmf, pool_total)``.
+    pool total — no quality threshold. Returns ``(pmf, pool_total)``.
     """
     total = float(aligned.sum())
     denom = total + prior_ess
@@ -778,8 +755,6 @@ def build_fl_models(
     rna_counts = rna_fl_mass(payload)
     # One de-tilt implementation, shared: it preserves the pool TOTAL (the EB shrinkage reads that as
     # "how much evidence stands behind this shape") and drops bins the opportunity says are impossible.
-    from .sj_opportunity import detilt_pool
-
     if sj_opportunity is not None:
         rna_counts = detilt_pool(rna_counts, sj_opportunity)
 
@@ -803,9 +778,7 @@ def build_fl_models(
                 gdna_opportunity,
                 region_lengths,
                 region_types,
-                detilt_pool(rna_fl_mass(payload), sj_opportunity)
-                if sj_opportunity is not None
-                else rna_fl_mass(payload),
+                rna_counts,
                 gdna_counts,
             )
             # the coupling can move the UNIFORM law too, and that is the point: when the contained
