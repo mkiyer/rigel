@@ -16,8 +16,8 @@ assignment), and the calibration result against an oracle calibration is what ra
 unstranded × capture-ON is deferred and never ranked on a pooled total (`TRAPS: never-pool-the-strata`). The
 fragment-length composition channel is retired until after 0.8.0.
 
-The work, in order: **the cleanup** (`docs/dev/CLEANUP.md` — a production-ready tree with the shipped
-infrastructure and no new mechanism), then the two problems of `docs/dev/TWO_PROBLEMS.md`, each derived on
+The work, in order: **the cleanup** (the sandbox's `CLEANUP.md` — a production-ready tree with the shipped
+infrastructure and no new mechanism), then the two problems of the sandbox's `TWO_PROBLEMS.md`, each derived on
 one page and A/B'd against what ships: **the capture-contracted effective length for each transcript**, then
 **a prior for each transcript**.
 
@@ -60,7 +60,7 @@ one page and A/B'd against what ships: **the capture-contracted effective length
 
 ## Next — the order
 
-1. **The cleanup** — `docs/dev/CLEANUP.md`: its stages in order, each step a deletion or a convergence proven a
+1. **The cleanup** — the sandbox's `CLEANUP.md`: its stages in order, each step a deletion or a convergence proven a
    numeric no-op (`rename_identity.py --check`), the count re-derived from `CLAUDE.md`'s table at every commit.
 2. **The capture-contracted effective length for each transcript** — one rule for every component, judged per
    probed class against the simulator's yield with no EM (`ruler_vs_truth.py --scale`), the junction residual
