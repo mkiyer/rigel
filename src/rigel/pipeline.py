@@ -67,9 +67,6 @@ logger = logging.getLogger(__name__)
 _ANNOTATION_TABLE_PADDING = 1024
 _ANNOTATION_TABLE_MIN_CAPACITY = 4096
 
-#: Fallback mean fragment length when no observations are available.
-_DEFAULT_MEAN_FRAG: float = 200.0
-
 
 # ---------------------------------------------------------------------------
 # Pipeline result
@@ -503,12 +500,12 @@ def _setup_geometry_and_estimator(
     ``effective_lengths`` (bit-identical). See ``calibration/capture_eff_length.py``.
     """
     exonic_lengths = index.t_df["length"].values.astype(np.float64)
-    if rna_fl.n_observations > 0:
-        effective_lengths = rna_fl.compute_all_transcript_eff_lens(
-            exonic_lengths.astype(np.int64),
+    if rna_fl.n_observations <= 0:
+        raise ValueError(
+            "the library carries no RNA fragment-length observation, so no transcript has an "
+            "effective length; nothing can be quantified."
         )
-    else:
-        effective_lengths = np.maximum(exonic_lengths - _DEFAULT_MEAN_FRAG + 1.0, 1.0)
+    effective_lengths = rna_fl.compute_all_transcript_eff_lens(exonic_lengths.astype(np.int64))
 
     from .calibration.capture_eff_length import transcript_capture_eff_lengths
 

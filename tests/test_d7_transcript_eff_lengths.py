@@ -156,3 +156,14 @@ def test_the_n_observations_GUARD_ON_THAT_PATH_CANNOT_FIRE(scenario):
     # …and it is 1 even for a pmf built from a pool with no observations at all.
     flat = np.full(fl_models.max_size + 1, 1.0 / (fl_models.max_size + 1))
     assert FragmentLengthModel.from_pmf(flat, fl_models.max_size).n_observations == 1
+
+
+def test_an_rna_length_model_with_NO_observations_is_REFUSED_not_defaulted(mini_index):
+    """A library with no RNA fragment-length observation has no effective length to compute, and the
+    pipeline must say so rather than substitute a constant: production reaches this function with a
+    pmf-built model that always carries observations, so a fallback here is a magic number nothing
+    can exercise. The refusal names the condition."""
+    from rigel.pipeline import _setup_geometry_and_estimator
+
+    with pytest.raises(ValueError, match="no RNA fragment-length observation"):
+        _setup_geometry_and_estimator(mini_index, FragmentLengthModel(), EMConfig(n_threads=1))
