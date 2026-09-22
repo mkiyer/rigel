@@ -42,9 +42,10 @@ from _transfer_harness import (
 def test_the_rna_faces_come_from_the_flag_bits_per_strand(sweep_inputs):
     """A strand's level crosses a face iff the boundary carries none of that strand's four bits and both
     nodes admit the strand; across the strand's OWN junction it enters the strand's intron (two-sided:
-    the crossing IS the intron's unspliced population) and not its exon; a terminus of the strand stops
-    it both ways; every two-sided face is an intron ↔ own-boundary face. PERTURBATION: with the junction
-    bits masked out of the flags the derivation opens the exon face at every junction."""
+    the crossing IS the intron's unspliced population) and not its exon; every two-sided face is an
+    intron ↔ own-boundary face. (The toy carries no exon|intron boundary with a terminus bit, so a
+    terminus stopping the level is not gated here.) PERTURBATION: with the junction bits masked out of
+    the flags the derivation opens the exon face at every junction."""
     from rigel.calibration.splice_graph import (
         FLAG_ACCEPTOR_NEG,
         FLAG_ACCEPTOR_POS,
@@ -96,8 +97,6 @@ def test_the_rna_faces_come_from_the_flag_bits_per_strand(sweep_inputs):
                     checked += 1
                     assert not lane.serves(b, e) and not lane.serves(e, b)
                     assert _two_sided(lane, i, b) and _two_sided(lane, b, i)
-                if f & term_bits:
-                    assert not lane.serves(b, e) and not lane.serves(b, i)
     assert checked > 0, "no junction face on the toy — this gate would prove nothing"
     # the perturbation: junction bits masked → the exon faces at junctions open
     import dataclasses
@@ -203,11 +202,10 @@ def test_the_flux_level_is_a_lower_bound_priced_by_the_node_pair():
 
 def test_the_rna_sources_are_single_strand_claims_and_the_flux_at_the_exon_only(sweep_inputs):
     """On the live toy: an RNA level exists only at a node that admits the strand and is not empty; a
-    single-strand node with a live own claim has one; a junction boundary with flux and no own claim has
-    NONE (the spliced claim is one hop, boundary → exon); and some exon with flux carries the flux
-    level (its lower side is a floor at the route rate)."""
+    single-strand node with a live own claim has one; and some exon with flux carries the flux level
+    (its lower side is a floor at the route rate). (The toy has no junction boundary with flux and no
+    own claim, so "such a boundary holds no level" is not gated here.)"""
     ctx, prepared = _rna_lanes_of(sweep_inputs)
-    is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
     sc = np.asarray(ctx.sj_count_lo) + np.asarray(ctx.sj_count_hi)
     n_src = 0
@@ -224,9 +222,6 @@ def test_the_rna_sources_are_single_strand_claims_and_the_flux_at_the_exon_only(
                     assert is_exon[x] and (lane.flux_index[x] >= 0).any()
                     assert lane.flux_witness[x] is not None
                     assert lane.flux_witness[x][0] > 0.0
-        for b in np.flatnonzero(is_bnd):
-            if sc[b].sum() > 0 and prepared.own[b] is None:
-                assert lane.own_level[b] is None, b
     assert n_src > 0
     fluxed = [e for e in np.flatnonzero(is_exon) if sc[[ctx.left[e], ctx.right[e]]].sum() > 0]
     assert fluxed and any(

@@ -647,8 +647,9 @@ def _expected_level_rows(si, ctx, strand, lam):
     (the boundary's share times its crossing density, times the inside's opportunity, over the
     inside's total), blurred by both totals' counting plus the pair's discrepancies — the totals'
     disagreement beyond counting and, where both strand channels are live, the two strand modes'
-    disagreement beyond counting. With no own row the crossing total's one-sided upper bound. Keyed by
-    the inside slot; ``(rows, served pairs)``."""
+    disagreement beyond counting. Keyed by the inside slot; ``(rows, served pairs)``. Every served
+    boundary on the toy is live and single-strand with interior strand modes, which is asserted rather
+    than branched on: the no-claim upper bound is the level test's ``own=None`` probe."""
 
     kappa, od_g, od_r = strand
     is_bnd = np.asarray(ctx.is_boundary, bool)
@@ -679,27 +680,27 @@ def _expected_level_rows(si, ctx, strand, lam):
         r = (n_u[i] / A_g[i]) / (T_b / A_g[b])
         v = max(0.0, np.log(r) ** 2 - (1.0 / n_u[i] + 1.0 / T_b))
         if live[b] and live[i]:
-            ok, modes = True, []
+            modes = []
             for y in (b, i):
                 n = cnt[y].sum()
                 p = cnt[y, 0] / n
                 ks = kappa if fp[y] else 1.0 - kappa
                 f = (p - ks) / (0.5 - ks)
-                if not 0.0 < f < 1.0:
-                    ok = False
-                    break
+                assert 0.0 < f < 1.0, (
+                    b,
+                    i,
+                    y,
+                    f,
+                )  # interior on the toy; the edge case is not gated
                 modes.append((f, p * (1 - p) / n / (p - ks) ** 2 / (1 - f) ** 2))
-            if ok:
-                (f_b, v_b), (f_i, v_i) = modes
-                f_pred = min(f_b / r, 1 - 1e-9)
-                dd = np.log(f_i / (1 - f_i)) - np.log(f_pred / (1 - f_pred))
-                v += max(0.0, dd * dd - (v_b + v_i + 1.0 / n_u[i] + 1.0 / T_b))
+            (f_b, v_b), (f_i, v_i) = modes
+            f_pred = min(f_b / r, 1 - 1e-9)
+            dd = np.log(f_i / (1 - f_i)) - np.log(f_pred / (1 - f_pred))
+            v += max(0.0, dd * dd - (v_b + v_i + 1.0 / n_u[i] + 1.0 / T_b))
         v += float(polygamma(1, n_u[b] + 0.5) + polygamma(1, n_u[i] + 0.5))
         m = R.level_map_lambda(lam, d_b, A_g[i], n_u[i])
-        if live[b] and fp[b] != fn[b]:
-            row = R.level_row(_strand_row_of(ctx, strand, lam, b), lam, m, v)
-        else:
-            row = R.level_bound_row(lam, d_b, A_g[i], n_u[i], v)
+        assert live[b] and fp[b] != fn[b], b  # every served boundary is live and single-strand
+        row = R.level_row(_strand_row_of(ctx, strand, lam, b), lam, m, v)
         if np.ptp(row) > 1e-9:
             out.setdefault(int(i), np.zeros(lam.shape[0]))
             out[int(i)] += row
@@ -771,9 +772,9 @@ def test_the_terminus_rules_land_at_the_outside_pair_and_nowhere_when_the_flags_
             for (s, i) in prepared.faces.pairs()
             if (s == b and is_exon[i]) or (i == b and is_exon[s])
         ]
-        if int(b) not in sites:
-            assert not outs, f"boundary {b} carries exon|exon rules without a served terminus"
-            continue
+        # every exon|exon boundary on the toy is a served terminus; the negative half — no rule without a
+        # terminus — is the cleared-flags check below
+        assert int(b) in sites, b
         served += 1
         (o,) = (
             {s if s != b else i for (s, i) in outs} & {int(left[b]), int(right[b])}

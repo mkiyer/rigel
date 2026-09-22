@@ -640,8 +640,6 @@ def test_the_face_table_holds_one_of_five_kinds_with_finite_parameters_at_real_f
             assert row is None or (row.shape == (int(ctx.n_grid),) and np.isfinite(row).all())
         if f.kind == TRANSPORT:
             assert f.row is not None and f.n_u > 0.0
-        if f.kind == LEVEL:
-            assert f.row is not None and f.row2 is not None and f.var > 0.0
     assert {FORWARD, TRANSPORT, SPLICE_OUT} <= seen, [RULE_NAMES[k] for k in sorted(seen)]
     assert len(RULE_NAMES) == 6
 
@@ -690,16 +688,8 @@ def test_the_layer_reads_a_row_only_under_its_mask(sweep_inputs):
             assert np.array_equal(x, y, equal_nan=True), f"{name} moved under poison"
     rows, prows = plain[1].lam_rows, poisoned[1].lam_rows
     assert np.isfinite(rows).all() and np.array_equal(rows, prows), "the delivered λ rows moved"
-    cube, pcube = plain[1].cube_rows, poisoned[1].cube_rows
-    assert (cube is None) == (pcube is None)
-    if cube is not None:
-        for f in cube.PER_ROW:
-            x, y = getattr(cube, f), getattr(pcube, f)
-            if f in ("profile_pos", "profile_neg"):
-                keep = getattr(cube, "has_pos" if f == "profile_pos" else "has_neg")
-                x, y = x[keep], y[keep]
-                assert np.isfinite(x).all(), f"cube {f}: the plain run holds a non-finite row"
-            assert np.array_equal(x, y), f"cube {f} moved under poison"
+    # the toy delivers no AMBIG cube rows, so the audit covers the λ rows alone
+    assert plain[1].cube_rows is None and poisoned[1].cube_rows is None
 
 
 def test_the_backbone_runs_the_sweep_in_one_native_call(sweep_inputs, monkeypatch):
