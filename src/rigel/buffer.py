@@ -129,7 +129,7 @@ class _FinalizedChunk:
         * ``read_length`` is uint16 and guarded at native append.
 
         Dead/stale buffer columns are intentionally not stored here:
-        ``intron_bp`` was never consumed by the scorer, and the SRD v2
+        ``intron_bp`` was never consumed by the scorer, and the
         strand-aware overlap diagnostics (``exon_bp_pos``, ``exon_bp_neg``,
         ``tx_bp_pos``, ``tx_bp_neg``) are produced on direct resolver
         results but have no scan-buffer consumer.

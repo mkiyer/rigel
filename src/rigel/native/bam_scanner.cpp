@@ -1670,7 +1670,7 @@ private:
                 // ⚠ Deliberately narrow: this tests multi-reference, NOT `cr.chimera_type`. That field is
                 // also set for single-reference *cis* chimeras, which the intergenic path deposits today,
                 // and stopping those is a change to WHAT COUNTS AS A FRAGMENT — its own arm with its own
-                // before/after measurement, per the plan's TODO.
+                // before/after measurement.
                 std::int64_t start = 0, end = 0;
                 bool any = false;
                 for (const auto& block : f.exons) {
@@ -1785,7 +1785,7 @@ private:
 
             if (frag.exons.empty()) continue;
 
-            // SRD v2: aggregate per-record blacklist counts into a
+            // aggregate per-record blacklist counts into a
             // per-fragment total so the resolver can promote
             // SPLICE_UNSPLICED -> SPLICE_ARTIFACT.
             int32_t frag_n_sj_blacklisted = 0;
@@ -1800,7 +1800,7 @@ private:
                 frag.exons, frag.introns,
                 frag.genomic_footprint(), cr, scratch);
 
-            // SRD v2: _resolve_core now returns true even when t_inds
+            // _resolve_core returns true even when t_inds
             // is empty (truly intergenic).  Treat empty-t_inds as the
             // legacy "unresolved" path for stats but ALSO append to
             // the buffer (for unique mappers) so calibration can
@@ -1814,7 +1814,7 @@ private:
                     any_unresolved_unspliced = true;
                 }
 
-                // SRD v2: unique-mapper zero-candidate fragments are
+                // unique-mapper zero-candidate fragments are
                 // appended to the buffer so that calibration's
                 // geometric categorization can label them INTERGENIC.
                 //

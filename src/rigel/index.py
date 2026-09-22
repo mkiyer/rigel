@@ -1008,7 +1008,7 @@ class TranscriptIndex:
             ``AlignableStore.splice_blacklist()`` and persisted as
             ``splice_blacklist.feather`` in the index.  When ``None``,
             no blacklist is written.  (Per-region mappability was
-            removed in v0.5.0; SRD calibration does not consume it.)
+            removed in v0.5.0; calibration does not consume it.)
         splice_blacklist_min_count : int
             Minimum per-row count for a (chrom, intron, read_length)
             artifact to enter the blacklist.  Default ``2``.

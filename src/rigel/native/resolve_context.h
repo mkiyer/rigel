@@ -86,7 +86,7 @@ public:
     std::vector<int32_t> exon_bp;
     std::vector<int32_t> intron_bp;
 
-    // SRD v2: strand-aware collapsed overlap counts
+    // strand-aware collapsed overlap counts
     int32_t exon_bp_pos = 0;
     int32_t exon_bp_neg = 0;
     int32_t tx_bp_pos = 0;
@@ -1376,14 +1376,14 @@ public:
 
         } else {
             // No exon and no transcript overlap -> truly intergenic.
-            // SRD v2: do NOT early-exit; let the fragment flow through
+            // do NOT early-exit; let the fragment flow through
             // the buffer with empty t_inds so calibration can categorize
             // it as INTERGENIC.
             cr.splice_type = has_unannotated_sj ? SPLICE_SPLICED_UNANNOT
                                                 : SPLICE_UNSPLICED;
         }
 
-        // SRD v2: SPLICE_ARTIFACT promotion.  When the alignment had
+        // SPLICE_ARTIFACT promotion.  When the alignment had
         // CIGAR splice junctions that were rejected by the artifact
         // blacklist (set by caller in cr.n_sj_blacklisted before this
         // call), promote any non-spliced classification so the

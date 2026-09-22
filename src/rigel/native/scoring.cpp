@@ -502,7 +502,7 @@ private:
         }
 
         // gDNA per-hit contribution. Only truly-unspliced hits enter the
-        // gDNA hypothesis. SRD v2: this gate also excludes SPLICE_IMPLICIT
+        // gDNA hypothesis. This gate also excludes SPLICE_IMPLICIT
         // and SPLICE_ARTIFACT classes (any non-zero splice_type is held out
         // of gDNA). Effective-length normalization is component-level in the
         // EM; the scorer emits log h_G(ell_f) plus non-length score terms.
@@ -769,8 +769,8 @@ private:
             int64_t end    = t_off[i + 1];
             int n_cand     = static_cast<int>(end - start);
 
-            // SRD v2: zero-candidate fragments are present in the
-            // buffer for SRD calibration only (intergenic / dropped
+            // zero-candidate fragments are present in the
+            // buffer for calibration only (intergenic / dropped
             // by merge).  Skip silently — they must not contribute
             // to stat_gated, otherwise accountability double-counts
             // (the legacy n_intergenic_unspliced/_spliced counter

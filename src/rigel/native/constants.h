@@ -32,7 +32,7 @@ static constexpr int8_t ITYPE_TRANSCRIPT      = 1;
 static constexpr int32_t SPLICE_UNSPLICED       = 0;
 static constexpr int32_t SPLICE_SPLICED_UNANNOT = 1;
 static constexpr int32_t SPLICE_SPLICED_ANNOT   = 2;
-// SRD v2 additions:
+// the two derived classes — neither is a CIGAR splice:
 static constexpr int32_t SPLICE_IMPLICIT        = 3;  // PE gap spans an annotated intron
 static constexpr int32_t SPLICE_ARTIFACT        = 4;  // CIGAR sj rejected by blacklist
 // ⚠ Must equal `len(rigel.splice.SpliceType)`. It sizes the scanner's per-fragment splice census,
@@ -197,7 +197,7 @@ struct RawResolveResult {
     std::vector<int32_t> t_exon_bp;
     std::vector<int32_t> t_intron_bp;
 
-    // --- SRD v2: strand-aware collapsed overlap counts ---
+    // --- strand-aware collapsed overlap counts ---
     // bp of fragment overlapping ANY (+/-)-strand transcript's exon / span.
     int32_t exon_bp_pos = 0;
     int32_t exon_bp_neg = 0;

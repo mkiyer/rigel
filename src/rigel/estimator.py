@@ -289,8 +289,8 @@ class AbundanceEstimator:
         gdna_prior_count : np.ndarray
             float64 — additive aggregate gDNA alpha per locus.
         rna_prior_count : np.ndarray, optional
-            float64 — additive aggregate RNA alpha per locus. Defaults to zeros
-            for wrapper-level compatibility.
+            float64 — additive aggregate RNA alpha per locus; the pipeline always
+            passes it, and ``None`` means zeros.
         rna_prior_weight : np.ndarray, optional
             float64[n_transcripts] — how the per-locus RNA prior is SHARED
             OUT among a locus's RNA components. ``None`` (the default and the
@@ -304,8 +304,8 @@ class AbundanceEstimator:
             ``n_transcripts`` or 0.
         gdna_eff_len : np.ndarray, optional
             float64 array of length ``n_loci``: FL-marginal overlap
-            effective length for each locus's gDNA component. When ``None``,
-            defaults to ones for wrapper-level test compatibility.
+            effective length for each locus's gDNA component; the pipeline always
+            passes it, and ``None`` means ones.
         em_iterations, em_convergence_delta
             EM algorithm parameters.
         emit_locus_stats : bool

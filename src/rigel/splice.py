@@ -23,7 +23,7 @@ class SpliceType(IntEnum):
     UNSPLICED = 0
     SPLICED_UNANNOT = 1
     SPLICED_ANNOT = 2
-    # SRD v2 additions:
+    # the two derived classes — neither is a CIGAR splice:
     SPLICED_IMPLICIT = 3  # PE gap spans an annotated intron of any candidate
     SPLICE_ARTIFACT = 4  # CIGAR sj was rejected by the SJ blacklist
 
