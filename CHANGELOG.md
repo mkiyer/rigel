@@ -5,6 +5,61 @@ All notable changes to Rigel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+The calibration stage — how a library's unspliced fragments are separated into genomic DNA and RNA
+before the transcript EM sees them — was rebuilt from its foundations. Indexes built by earlier
+versions must be rebuilt (`rigel index`; the on-disk format is now version 8).
+
+### Added
+
+- **A splice-graph index and a single-pass accumulator.** Every reference is cut into regions at every
+  exon endpoint; the 0-bp cuts between regions are boundaries and the splice junctions are their own
+  axis. The scanner tallies each fragment once on that partition under one specified deposit rule,
+  with an executable specification the native code is held to byte for byte. Nascent RNA is one
+  synthetic single-exon entity per unique genomic span, shared by every transcript with that span.
+- **Calibration on three populations.** Each region's and boundary's unspliced mass is solved into
+  gDNA, sense RNA and antisense RNA on a log-odds grid, against a gDNA-density prior fitted from the
+  library itself and refit (`--calib-refit-iters`, default 3), with the strand channel switched on
+  only where a Bayes factor says the protocol preserves strand and a strand-overdispersion estimator
+  that holds regardless of the annotation. Neighbouring objects inform one another through a
+  message layer (a composition transfer with certified-junction flux and gDNA/RNA level lanes), the
+  only channel an unstranded library or a both-stranded exon has.
+- **A second pass that drains ambiguous fragments.** Fragments whose splice status the scan could
+  not decide are held in a side buffer and assigned by one multinomial draw after the tally exists,
+  so calibration and the EM read one drained frame.
+- **Capture-aware effective lengths.** Under a capture panel a transcript's EM effective length is
+  its bases at their regions' capture efficiencies, each a posterior mean from that region's own gDNA
+  count, against the enriched mode of the fitted gDNA landscape; with no enriched mode nothing
+  contracts. The gDNA component's length follows the same conversion as its count.
+- **The EM's priors from calibration.** Two conserved fragment counts per locus, gDNA and unspliced
+  RNA, enter the locus EM as pseudocounts; the RNA one is shared over every RNA component, nascent
+  entities included, in proportion to the evidence each carries.
+- **One definition of fragment length**, a gDNA fragment-length model fitted by a two-pool
+  contrast, and an RNA model from the de-tilted spliced pool.
+- **The sweep is one native call**, solving the chain a locus block at a time on a pool of threads,
+  bit-identical at every thread count (`--sweep-block-slots` sizes the per-thread arena; `--threads`
+  drives the scan, the sweep and the locus EM). The scan's thread budget is split by a measured
+  ratio, the second pass's lookups run in the kernel, and the fragment-length fits are vectorised.
+- **`rigel sim`**: sparse nascent RNA, capture with a fragment binding through one contiguous part of
+  a probe, R1-sense libraries, FASTQ emission, and every simulated read's true origin in its name.
+- **`rigel index --collapse-duplicate-transcripts`** and provenance in the index manifest.
+- A scan cache keyed by the index, the graph, the boundary reaches and the scan settings (never a
+  thread count), so a stale cache is refused rather than reused.
+
+### Changed
+
+- Quantification is reproducible run to run: the second pass draws from one seeded stream and the
+  index loader refuses an index it did not build (no manifest, or another format version).
+- Chimera detection checks genomic compatibility before calling a fragment a chimera, and an empty
+  hypothesis set no longer dereferences a null pointer in the accumulator.
+
+### Removed
+
+- The fragment-length composition channel and the NPMLE gDNA prior: measured and retired.
+- `--mappability-read-length` (a no-op), `--gdna-prior-mixture-bridge`, `--sweep-n-grid-single-strand`
+  and `--gdna-em-llr-bias` (an underived odds dial), and the `measured_total` background estimator.
+
 ## [0.7.1] - 2026-07-12
 
 ### Added
@@ -810,3 +865,4 @@ Initial development release.
 [0.6.4]: https://github.com/mkiyer/rigel/compare/v0.6.3...v0.6.4
 [0.7.0]: https://github.com/mkiyer/rigel/compare/v0.6.4...v0.7.0
 [0.7.1]: https://github.com/mkiyer/rigel/compare/v0.7.0...v0.7.1
+[Unreleased]: https://github.com/mkiyer/rigel/compare/v0.7.1...HEAD
