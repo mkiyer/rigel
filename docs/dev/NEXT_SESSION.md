@@ -1,54 +1,28 @@
-# NEXT SESSION — the isoform allocation, in three gated steps (2026-09-20, end of day)
+# NEXT SESSION — the cleanup (owner, 2026-09-22)
 
-This file is only how to begin. The ranked view is `docs/ROADMAP.md`, the open problems are `docs/ISSUES.md`,
-the rulings and the record are `docs/DESIGN.md`, what "done" means is `docs/SUCCESS.md`, the lessons are
-`docs/TRAPS.md` cited by name.
+The owner stopped the per-fragment-prior derivation line ("horribly overcomplicated; if we are thinking too hard we
+are off track") and set the frame: `docs/dev/TWO_PROBLEMS.md` restated in two lines — a prior per transcript, and
+the capture-contracted effective length per transcript — and BEFORE either is worked, a wholesale cleanup of the
+code, prototypes, gates and infrastructure to a production-ready tree WITH THE SHIPPED INFRASTRUCTURE and no new
+mechanism, as if 0.8.0 shipped what runs today.
 
-## Where the tool is
+The ledger is `docs/dev/CLEANUP.md`: what is done with its proof, the census, the owner's decisions each blocking
+a deletion, and the stages ahead. Start there. The owner drives commits; the branch `calibrated-likelihood`
+carries the previous campaign's inert refactors and findings plus today's retirements uncommitted — propose the
+commit points, one kind of change each.
 
-`main` is at `c52c9b93`, pushed. The nascent siphon under capture is repaired: the gDNA component's opportunity
-converts its crossing support by the count's own `q` (`EQUATIONS.md` §11), `g50 ss.99 ON` reads a siphon of
-+32,905 where it read +541,216, and the three calibration instruments are identical to before it. The suite is
-**0 failed / 3,452 passed / 0 skipped / 2 xfail, 3,454 collected**. The report at the owner's link renders the
-committed tree (`arms/qa_ladder_base_q.jsonl`; the `*_q` arms are the current ones, the unsuffixed arms the
-2026-09-19 tree's).
+## What the next session does, in order
 
-## Three rulings of 2026-09-20 to carry
+1. `python scripts/design/preflight.py --full`, then the suite; re-derive the count from `CLAUDE.md`'s table
+   (today's retirements and the knob deletion move it; the ledger records the derivation).
+2. Read the coverage table in `CLEANUP.md` and work stage 2: every function the suite never executes is read and
+   either gated or deleted, one commit each, `rename_identity.py --check` after each.
+3. Put the decisions in `CLEANUP.md` to the owner in plain words, one line each, and act on the answers.
+4. Then stages 3–6 in order. The instrument retirements move `CLAUDE.md`'s table and the collected count by the
+   table's rows.
 
-* Rigel stays PANEL-AGNOSTIC and takes no panel input; the junction witness is post-release
-  (`ISSUES: ruler-witness-geometry-on-transcript-panels`, deferred).
-* The pre-EM prior chain is deferred: a perfect prior moves nothing in scope on the committed tree.
-* `g98`'s RNA prior floor is a composition-solve estimator item at the stress rung, not a quick fix
-  (`ISSUES: rna-prior-floor-at-pure-gdna-loci`), post-release.
+## What not to do
 
-## The job: the isoform allocation — `ISSUES: per-transcript-prior-lane`
-
-The ceiling, on the committed tree (`quant_accuracy.py --arm oracle_alloc_seed`, transcript Σ|Δ| as a share of the
-true annotated RNA at `g00` / `g05` / `g50` / `g98`): stranded OFF 2.01 / 1.59 / 2.49 / 15.70 → 0.43 / 0.43 / 0.70 /
-6.38 %; unstranded OFF 1.73 / 1.93 / 2.55 / 18.35 → 0.42 / 0.45 / 0.81 / 8.35 %; stranded ON 6.53 / 3.49 / 5.50 /
-31.03 → 2.91 / 1.08 / 2.07 / 18.00 %. That arm hands over the TRUE support; it is a ceiling, never headroom.
-
-1. **The support probe as an ARM, nothing in `src/`.** An isoform is supported iff its exclusive spliced
-   evidence says so — its exclusive junctions carry reads at a depth where its siblings' do — and every other
-   weight stays the EM's own. Build it beside `oracle_alloc_seed` in `quant_accuracy.py` (the arm machinery
-   already feeds a per-transcript array through `rna_prior_weight`), score it per stratum above the
-   `base_reseed` floor against `base` and the ceiling, keep `g98` apart, never pool. Derive the rule on paper
-   first: what "exclusive", "reads" and "depth where its siblings' do" mean is the whole design, and there are
-   no magic numbers — a threshold is a ratio to a sibling's evidence, never a count.
-2. **Only if ① recovers a meaningful fraction at `g05` and `g50`** (a third of the ceiling would already be the
-   largest in-scope gain available): the producer for `rna_prior_weight` and the kernel's own-count fallback for
-   components whose structure cannot speak (`em_solver.cpp`, `apply_grouped_prior_update`; `EQUATIONS.md` §9b.1
-   says why a flat share is refused and why `raw[i] = 0` must stay absorbing). ⛔ The lane is one static array
-   and filling it wholesale reallocates the WHOLE RNA pseudocount (5.21 → 53.37 % once, 2026-09-19). A
-   falsification test first, verified failing, then the fixed code broken and every gate watched to fire; A/B
-   against `base` on `g50 ss.99 ON` and `OFF` first, then the ladder, then the report with the `ladder-report`
-   skill; snapshots for the owner's go.
-3. **If ① recovers little:** the census of which genes carry the error — the near-tied multi-isoform genes
-   (`quant_accuracy.py` per gene, `worst_objects.py`) — and stop to discuss before designing anything larger.
-
-## Where everything is
-
-* The session's harnesses, traces with true origins, the truth E-steps and the A/Bs of 2026-09-20:
-  `~/Downloads/rigel_runs/prototypes/2026-09-20_siphon_mechanism/`.
-* The 0.10 condition: `~/Downloads/rigel_runs/suite/ladder_nrna_lo/` (one condition, cached, certified).
-* The teaching page: the Artifact "The Twice-Counted Crossing" (the siphon's mechanism and the ruler's).
+No new mechanism, no new instrument, no derivation. Nothing that moves a number: the identity check is the proof
+of every step. Do not touch the pseudocount, the ruler or the gDNA component's length. Keep `docs/dev/` to this
+file, the ledger, `TWO_PROBLEMS.md` and the README.

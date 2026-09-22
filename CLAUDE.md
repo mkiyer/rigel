@@ -200,97 +200,12 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,452 passed / 0 skipped / 2 xfail, 3,454 collected** (re-derived
-2026-09-20, later: +2 in `tests/calibration/test_priors.py`, the brute-force enumeration gate on the gDNA opportunity
-parametrised over two fragment-length laws, so `collected` moved by the case count alone; the gate that pinned the
-unconverted boundary support is rewritten to its inverse in place, ±0. ⚠ Five goldens moved with the assembler's
-crossing support now converted by the count's own `q` — `gdna_light` / `gdna_heavy` / `nrna_moderate_ss90` /
-`combo_moderate` / `combo_extreme`, by 0.2–2.1 % on two- and three-transcript scenarios, the gDNA component
-denser — and the truth-scored instruments were read first (`g50 ss.99 ON` siphon +541,216 → +32,908;
-`calibration_vs_oracle.py`, `zero_controls.py`, `policy_benchmark.py` identical). Before that 3,450 / 3,452 with
-+1 for `docs/dev/NASCENT_SIPHON.md` by the `docs/dev/` row — the siphon's findings and the two
-priced repair candidates, written for the next session. Before that 3,449 / 3,451 after the nascent siphon's
-ROOT CAUSE: +9, all in existing files, so `collected` moved by the case count alone — +6 in `test_estimator.py` pinning the shadow-vs-gDNA threshold against the SHIPPED solver
-(two rows below `L_g/L_n = 1` where a shadow holding nothing must decay to exactly 0, three above it against
-`EQUATIONS.md` §9b's closed form, and the gDNA pseudocount as a bound that does not close the channel), and
-+3 in `test_quant_accuracy.py` on the allocation arm's weights, which read a MATURE-only truth column and so
-handed all 6,919 synthetic entities a weight of zero — an oracle arm that was silently re-running the retired
-`alpha = 0` rule (`TRAPS: an-oracle-column-that-omits-a-population`). ⚠ No golden moved and no `src/` file
-changed: the fix is in `scripts/design/quant_accuracy.py`, so `--arm oracle_alloc_seed` is the only arm whose
-numbers move. Before that 3,440 / 3,442 after `quant_accuracy.py --markdown`, the per-scenario release report: +8 in
-`tests/calibration/test_quant_accuracy.py`, every one a way the RENDERING can lie while the numbers
-underneath are right — the gDNA column scored without its intergenic half, a ratio invented at a truth of
-zero, the two RNA pools folded together, a ragged table, the deferred stratum unmarked, a column that
-CANNOT FIRE reported as a score (`fn_mass` is identically 0 under fractional assignment), and the truth
-table's ROW COUNT passed off as a transcript count (15,669 rows, 8,750 annotated; 9,385 gene rows, 2,466
-real genes). Before that 3,432 / 3,434 after nascent RNA's share of the RNA prior was restored: +5 in `test_estimator.py` — five gates on
-the restored allocation (two parametrised over four locus shapes, three over both EM modes) replacing the four
-that pinned the eligibility test and the one that pinned its flag — and −1 in
-`tests/native/test_grouped_prior_update.py`, where the identity's table loses its all-synthetic row and the
-mask's byte-identity pair becomes one property gate over the space; THREE XFAILS CLOSED by the same landing
-(5 → 2), which moves `passed` and not `collected` — `ISSUES: nascent-gets-no-rna-prior` and both rungs of
-`ISSUES: nested-antisense-leak-under-the-sane-ruler`. ⚠ The goldens moved: 5 of 21 scenarios materially (the
-ones holding a LIVE nascent entity — nascent mass up, `gdna_rate` down, e.g. `combo_moderate` 52.93 → 171.21
-and 0.5672 → 0.3958), the other 16 at the denormal floor only. The calibration columns
-`gdna_prior_count` / `rna_prior_count` also moved by 1e-16 to 1e-12, and that is NOT this change: regenerating
-at HEAD moves them by byte-identical amounts, so the committed goldens carried that staleness already, under
-`rtol=1e-6`. Before that 3,425 / 3,430 after the simulator's capture physics: +2 in `test_sim_capture.py` — gDNA and cDNA bind the same half
-of a split probe alike, and a capture key the loader does not know is refused — and +1 for
-`docs/dev/CAPTURE_WITHOUT_THE_PANEL.md` by the `docs/dev/` row; before that 3,422 / 3,427 after the cache key and
-the ruler arm: +2 in `test_scan_cache.py`, where three gates — a thread count is
-not the key, a tally setting is, the key is derived from the recorded settings — replaced the one that tampered a
-stored digest; +4 in `test_quant_accuracy.py` — the ruler arm reaching the EM with its noop inert, its guard, the
-capture truth's anchor, the refusal of mixed assignment modes; before that 3,416 / 3,421 when the seven SPENT
-sandbox notes were retired — every plan whose work had landed and whose record
-had moved to a permanent doc: −7 by the `docs/dev/` row; before that −1 for the performance plan itself, when
-it was retired into `DESIGN.md` §6b.15 and `ISSUES: performance-memory-bounded-solve`; before that after its
-phase 4: +2 gates in `test_fl.py` — the adjacent-pair table against a
-hand-built three-reference walk, and the two boundary classes told apart on an asymmetric fixture; before that
-after phase 3: +2 gates — the batched sj lookup's parity with the scalar rule in
-`tests/native/test_accumulator_native_parity.py` and the two-reference id-and-motif gate in
-`test_second_pass_scoring.py`; before that after phase 2: +1 the split's arithmetic gate in
-`test_scan_order_independence.py`; before that after phase 1: +4 gates — the bisection's bit-equality against the old fixed
-loop and the log-gamma table's against the direct form in `test_gdna_density.py`, the one-traversal spy and the
-handed-in shares in `test_priors.py`; before that +1 for `docs/dev/PERFORMANCE_PLAN.md` by the `docs/dev/` row;
-before that after `strand_likelihood.py` was converged into the gates' oracle module: −3 by the module row; before that after `policy_prototype.py` was retired: −4 by the `scripts/design/` row; before that after the message cache was deleted: −3 for `message_cache.py` by the module row, −6 gates — the five cache
-gates of `test_sweep_backbone.py` and the served-injection gate of `test_landscape_training_population.py`; before that
-after the block went into one native call: −10 for the four files deleted — `messages/faces.py` and
-`messages/lanes.py` by the module row (−3 each), `native/psi_kernel.cpp` and `native/transfer_kernel.cpp` by the row
-below (−2 each) — +6 for `native/solve_kernel.cpp`, `transfer_kernel.h` and `psi_kernel.h` (+2 each), −1 the `RowTable`
-gate and −1 the no-copy gate (the Python tables they tested are gone), −2 the two backbone gates on those tables (a
-lane reaching the solve in the same table, the block view's slicing), +1 the thread gate on `solve_chain`; before that
-after ψ took its priors apart: +1 the bit-equality gate on the kernel's arm in `test_landscape.py`, +1 for
-`docs/dev/BLOCK_NATIVE_PLAN.md` by the `docs/dev/` row; before that after the cache key moved to the factory's inputs: +2 the digest gates in `test_sweep_backbone.py`; before
-that after ψ went threaded: +2 the thread-exactness and budget gates in `test_sweep.py`; before that after
-the one-path convergence of the pass: −6 for `test_pass_kernel.py` (its four gates and the `tests/` row's 2),
-+3 for the gates that moved or joined (the wiring and no-copy gates in `test_transfer_policy.py`, the trigamma gate in
-`test_zero_count_is_a_measurement.py`), −3 for `messages/transfer_rows.py` by the module row; before that after the
-tables' allocations: +1 the poison gate in `test_transfer_policy.py`, +1 `docs/dev/THREADS_PLAN.md`
-by the `docs/dev/` row; before that after the solve went native and the transfer's two `.cpp` files became one `transfer_kernel.cpp`: −2 by
-the row below; before that after ψ went native: +4 — +2 for `native/psi_kernel.cpp` and +2 for the gates' oracle module
-`tests/calibration/_psi_reference.py` by the rows below, the rewritten ψ gates moving nothing; before that
-after the one-path cleanup deleted the Python builders and their two-kernel gate: −7 — the five gates
-of `test_prepare_kernel.py` and its `tests/` row's 2 — and +1 for `docs/dev/PSI_PORT_PLAN.md` by the `docs/dev/`
-row; before that +11 after the native builders — those five gates
-with the `tests/` row's +2, +2 for `native/transfer_kernel.cpp` and +2 for `native/transfer_rows.h` by the row
-below; before that +2 after the
-builders' layout — the `RowTable` gate in `test_transfer_faces.py` and the
-tables-without-a-copy gate in `test_pass_kernel.py`; before that +7 after the native pass — the three gates of
-`test_pass_kernel.py` with the `tests/` row's +2, and +2
-for `native/pass_kernel.cpp` by the row below; before that +5 when the yield's floors were deleted — the
-common-thinning invariance and the cannot-emit rule in `test_estimator.py`, each over both EM modes, and the
-unfloored locus yield in `test_priors.py`; and +33 from 3,386 with the ruler's repair of 2026-09-16, file by file:
-the members rule +3 — two selector gates in `test_abundance_landscape.py`, the result-schema gate for
-`gdna_reference_members`; the truth instrument +5 — `ruler_vs_truth.py` by the `scripts/design/` row, its self-test
-in `test_instrument_self_tests.py`; the expectation ruler +25 — `capture_efficiency.py` by the module row (+3) with
-its seven gates in `test_capture_efficiency.py` (+2 by the `tests/` row, +7), the taper, crossing-share and
-per-interval-length gates in `test_effective_length.py` (+18), `test_capture_eff_length.py` rewritten 15 → 12,
-`test_priors.py` 29 → 27 with the floor's tests replaced by the object-form length tests; the goldens unchanged to
-the bit). The 2 xfails are executable
-records of proven defects whose fixes are elsewhere
-(`ISSUES: two-sided-exon-row`; `ISSUES: the-lower-bound-noise-ratchet`, the encompassing locus's shallow
-flank under an edge level), deferred by ruling to their threads — "fix the test" is a category error, and an xfail is closed
-by repairing the thing or asserting the invariant structurally, never by widening a bound. **Any failure at all is a regression.** A commit that measures the suite updates this line.
+**The standing baseline: 0 failed / 3,454 passed / 0 skipped / 2 xfail, 3,456 collected** — re-derived 2026-09-22 on branch
+`calibrated-likelihood` after the cleanup began (the count is re-derived from the table below at every commit that
+measures the suite; the history of how it moved is git, not this file). The 2 xfails are executable records of proven
+defects whose fixes are elsewhere (`ISSUES: two-sided-exon-row`; `ISSUES: the-lower-bound-noise-ratchet`), deferred by
+ruling to their threads — "fix the test" is a category error, and an xfail is closed by repairing the thing or asserting
+the invariant structurally, never by widening a bound. **Any failure at all is a regression.**
 
 **Re-derive a count, never adjust one** (`TRAPS: re-record-the-baseline`). Several gates are parametrised
 over the files on disk, so adding or retiring a file moves the total; account for it from this table and
@@ -329,8 +244,8 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | **⭐⭐⭐ THE POLICY BENCHMARK — where a message-policy change is judged** | |
 | `design/policy_benchmark.py` | ⭐⭐⭐ **HOW DOES EACH POLICY SCORE, PER CONDITION, AGAINST CERTIFIED TRUTH?** Whole-library gDNA error in fragments, per axis, one row per condition, for `silent` and `transfer`. ⭐ `--panel test` is the test chromosome (seconds — the development loop); `--panel ladder` is the 16-condition benchmark. ⭐ **`--by-class`: WHERE DOES A POLICY'S REMAINING ERROR SIT, BY NODE CLASS?** — per certified stratum, boundaries split by terminus flag, exons by reach (licensed face / edge only / walled); the instrument that ranks the rebuild's holes. `--set SECTION.FIELD=VALUE` applies a config value on top of every policy, the same spelling as `calibration_vs_oracle.py`. ⛔ NEVER POOLED, and the two halves are judged against DIFFERENT bars: unstranded rows are where a policy must WIN, stranded rows are where it must do minimal HARM against silence |
 | **⭐⭐⭐ 0.8.0'S METRIC — calibration against ORACLE CALIBRATION** | |
-| `design/calibration_vs_oracle.py` | ⭐⭐⭐ **IS THE CALIBRATION RESULT ITSELF RIGHT, SCORED AGAINST AN ORACLE CALIBRATION? — 0.8.0's metric, and it reaches the effective-length shrinkage, which no prior-injection arm does.** `P = calibrate(...)` against the same payload with only the six deconvolved arrays swapped, per stratum (the ruler's reference is the result's own, so at capture-OFF `O` is the no-enrichment null with no fitting); `--set SECTION.FIELD=VALUE` prices any config value on both arms — `--set calibration.message_policy=silent` is the ship protocol's first item — so a policy or a grid arm is a config value and nothing in `src/` moves to price it. ⛔ Read `ruler_n_moved`, never the aggregate: the total can barely move while nearly every transcript is redistributed. No solver, no EM, no re-scan — ~5–12 s/condition. `--self-test` 39/39 |
-| `design/ruler_vs_truth.py` | ⭐⭐⭐ **IS THE RULER'S FORMULA RIGHT? — the EM's effective length under capture, per transcript, against the simulator's own capture-aware effective length** (`CaptureSampler.partition_array`, the truth the reads were drawn with), anchored on the fully probed transcripts and read per class (the probed fraction of the transcript's bases, off the sampler itself) and kind. Arms: `shipped`; `oracle_gdna` (the certified true gDNA counts through the shipped ruler — the ideal witness, so what remains under it is the ruler's or the panel geometry's); `--module` prototype rulers beside them, the harness every ruler mechanism is developed on before `src/`; `--set` prices a config value on every arm. `--panel-dir` takes the depth ladder (`scenarios_depth_d10` / `_d100` / `_full_lowg`, `docs/TESTING.md` §0c) for the operating curve of the reference. ⛔ Read the classes apart: the probed class is where the formula is exact when its witness is, the unprobed class is where a floor or a reference bites. `--self-test` 20/20 |
+| `design/calibration_vs_oracle.py` | ⭐⭐⭐ **IS THE CALIBRATION RESULT ITSELF RIGHT, SCORED AGAINST AN ORACLE CALIBRATION? — 0.8.0's metric, and it reaches the effective-length shrinkage, which no prior-injection arm does.** `P = calibrate(...)` against the same payload with only the six deconvolved arrays swapped, per stratum (the ruler's reference is the result's own, so at capture-OFF `O` is the no-enrichment null with no fitting); `--set SECTION.FIELD=VALUE` prices any config value on both arms — `--set calibration.message_policy=silent` is the ship protocol's first item — so a policy or a grid arm is a config value and nothing in `src/` moves to price it. ⛔ Read `ruler_n_moved`, never the aggregate: the total can barely move while nearly every transcript is redistributed. No solver, no EM, no re-scan — ~5–12 s/condition. `--self-test` 43/43 |
+| `design/ruler_vs_truth.py` | ⭐⭐⭐ **IS THE RULER'S FORMULA RIGHT? — the EM's effective length under capture, per transcript, against the simulator's own capture-aware effective length** (`CaptureSampler.partition_array`, the truth the reads were drawn with), anchored on the fully probed transcripts and read per class (the probed fraction of the transcript's bases, off the sampler itself) and kind. Arms: `shipped`; `oracle_gdna` (the certified true gDNA counts through the shipped ruler — the ideal witness, so what remains under it is the ruler's or the panel geometry's); `--module` prototype rulers beside them, the harness every ruler mechanism is developed on before `src/`; `--set` prices a config value on every arm. `--panel-dir` takes the depth ladder (`scenarios_depth_d10` / `_d100` / `_full_lowg`, `docs/TESTING.md` §0c) for the operating curve of the reference. ⛔ Read the classes apart: the probed class is where the formula is exact when its witness is, the unprobed class is where a floor or a reference bites. ⭐⭐⭐ **`--scale`: ARE EVERY HYPOTHESIS CLASS'S OPPORTUNITIES ON ONE SCALE?** — L / Y per class, unanchored, against the simulator's own yield (mRNA space for transcripts and spans, gDNA space for the locus component), the two candidate families' pairwise class-mean ratios judged at the elasticity's 1 %, junction-probed transcripts apart; no EM. `--self-test` 30/30 |
 | `design/calibration_oracle.py` | ⭐⭐⭐ **WHAT IS THE CERTIFIED PER-OBJECT TRUTH? — run this before debugging calibration against anything.** Every REGION and BOUNDARY's count, its realized `n_gdna`/`n_nrna`/`n_mrna` and `true_f_g`, at two certification levels: COMPOSITION (no opportunity model anywhere in it) and FIELD (densities too). ⛔ REFUSED unless its named gates pass — sum-to-full, partition-projects-exactly, gdna-field-uniformity, exact-zeros, nascent-in-annotation, rna-strands-close — because a merely plausible oracle is how a calibration bug and a truth bug survive each other. Writes `slot_truth.npz` beside each oracle cache; `--self-test` 13/13 |
 | `design/calibration_walk.py` | ⭐⭐⭐ **WHICH STAGE OF CALIBRATION INTRODUCES THE ERROR?** The solve as a ladder — init → strand → local → +messages → +refits → shipped — each rung scored per stratum against `calibration_oracle.py`, which it refuses to run without |
 | `design/solvability_audit.py` | ⭐⭐⭐ **WHICH OBJECTS ARE SOLVABLE, WHICH ARE SOLVED WRONG, AND WHICH ARE CONFIDENTLY WRONG? — where pass-0 and 0.8.0 are judged.** ⛔ Honest ignorance is excluded: `f_g ≈ ½` at zero precision with no own evidence is correct. Omit `--condition` to run the panel |
