@@ -115,9 +115,12 @@ every source change (read from the log); the suite re-derived from `CLAUDE.md`'s
 | `ea67b17c` | `ISSUES.md` 1,365 → 1,121 lines, `DESIGN.md` 2,012 → 1,690; `TESTING.md` carries the identity procedure |
 | `3feca5e9` · `8f9a1f5d` · `580fb08d` | src comments made true; one splice-blacklist aggregation; two files formatted, one test made to run alone |
 
-The suite: 3,381 → 3,314 collected (−1 the merged caller gate, −3 legacy-key tests, −4 `get_detail_df`, −2
-`splash_fl_mass`, −30 the production-dead source and its tests, −22 the model's training tests, −5 duplicates),
-3,312 passed / 2 xfail, matched by the suite. Every test file also passes run alone.
+The suite: 3,380 → 3,313 collected on a clean checkout (−1 the merged caller gate, −3 legacy-key tests, −4
+`get_detail_df`, −2 `splash_fl_mass`, −30 the production-dead source and its tests, −22 the model's training tests, −5
+duplicates), 3,311 passed / 2 xfail. Every test file also passes run alone. Day 1's figures, and the day-2 commit messages
+that quote an absolute count, are one high: day 1 counted the untracked `docs/dev/my_notes.md` into the tree (above), so
+the owner's working tree, which also holds `docs/dev/prompt2.md`, reads 3,315. The deltas are right; a clean `git worktree`
+of `19caa63e` collects 3,313.
 
 **Release readiness.** `preflight.py --full` 5/5; a wheel builds from the tree (abi3, 1.3 MB) and its CLI, imported
 with the editable install bypassed, runs `quant` → `report` → `export` on a test-chromosome condition, and a
