@@ -5,7 +5,7 @@
  * Python scoring loop.  Functions are exposed as ``rigel._scoring_impl``.
  *
  * Contents:
- *   - compute_fragment_weight(frag_start, frag_end, transcript_length)
+ *   - compute_fragment_weight (the coverage weight, used by the kernels below)
  *   - NativeFragmentScorer class (scoring parameters + per-chunk kernels)
  *   - StreamingScorer class (stateful per-chunk scoring for streaming memory)
  *
@@ -79,12 +79,10 @@ static inline void lse_update(
 
 using i32_1d  = nb::ndarray<const int32_t,  nb::ndim<1>, nb::c_contig>;
 using i8_1d   = nb::ndarray<const int8_t,  nb::ndim<1>, nb::c_contig>;
-using f32_1d  = nb::ndarray<const float,   nb::ndim<1>, nb::c_contig>;
 using f64_1d  = nb::ndarray<const double,  nb::ndim<1>, nb::c_contig>;
 using i64_1d  = nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig>;
 using u8_1d   = nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig>;
 using u16_1d  = nb::ndarray<const uint16_t, nb::ndim<1>, nb::c_contig>;
-using f64_mut = nb::ndarray<double, nb::ndim<1>, nb::c_contig>;
 using f64_2d_mut = nb::ndarray<double, nb::ndim<2>, nb::c_contig>;
 
 // ----------------------------------------------------------------
@@ -472,9 +470,6 @@ private:
         const ChunkPtrs& cp, int row,
         FillState& st, double gdna_log_sp) const
     {
-        static constexpr double NEG_INF =
-            -std::numeric_limits<double>::infinity();
-
         int64_t start = cp.t_off[row];
         int64_t end   = cp.t_off[row + 1];
         int n_cand    = static_cast<int>(end - start);
@@ -1207,12 +1202,6 @@ public:
 NB_MODULE(_scoring_impl, m) {
     m.doc() = "C++ hot-path scoring kernels for rigel (nanobind)";
 
-    m.def("compute_fragment_weight", &compute_fragment_weight,
-          nb::arg("frag_start"), nb::arg("frag_end"),
-          nb::arg("transcript_length"),
-          "Inverse coverage-capacity weight for a fragment on a transcript.\n\n"
-          "Uses the trapezoid coverage model.  Plateau → 1.0; boundary → > 1.0.");
-
     nb::class_<NativeFragmentScorer>(m, "NativeFragmentScorer")
         .def(nb::init<
                  double, double, bool, double, double,
@@ -1261,14 +1250,4 @@ NB_MODULE(_scoring_impl, m) {
     // Export scoring constants for Python-side parity tests
     m.attr("LOG_HALF")      = rigel::LOG_HALF;
     m.attr("TAIL_DECAY_LP") = rigel::TAIL_DECAY_LP;
-
-    // Fragment classification constants (mirrors rigel.buffer)
-    m.attr("FRAG_UNAMBIG")           = rigel::FRAG_UNAMBIG;
-    m.attr("FRAG_AMBIG_SAME_STRAND") = rigel::FRAG_AMBIG_SAME_STRAND;
-    m.attr("FRAG_AMBIG_OPP_STRAND")  = rigel::FRAG_AMBIG_OPP_STRAND;
-    m.attr("FRAG_MULTIMAPPER")       = rigel::FRAG_MULTIMAPPER;
-    m.attr("FRAG_CHIMERIC")          = rigel::FRAG_CHIMERIC;
-
-    // Internal tuning constant
-    m.attr("SCORED_STACK_CAPACITY") = SCORED_STACK_CAPACITY;
 }

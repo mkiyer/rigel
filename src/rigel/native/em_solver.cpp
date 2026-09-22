@@ -39,12 +39,10 @@
 namespace nb = nanobind;
 
 // ================================================================
-// Constants — single source of truth, exported to Python via module attrs.
-// Python imports these from rigel._em_impl instead of redefining.
+// Constants
 // ================================================================
 
 static constexpr double EM_LOG_EPSILON = 1e-300;
-static constexpr int    MAX_FRAG_LEN  = 1000000;
 static constexpr int    SQUAREM_BUDGET_DIVISOR = 3;
 
 // Target number of element-operations per E-step parallel task.
@@ -237,7 +235,6 @@ struct EmEquivClass {
     std::vector<int32_t> comp_idx;  // k component indices
     std::vector<double>  ll_flat;   // n*k log-likelihoods (row-major)
     std::vector<double>  wt_flat;   // n*k coverage weights (row-major)
-    mutable std::vector<double> scratch;  // n*k workspace (reused each iteration)
     int n;  // number of units in this class
     int k;  // number of components per unit
 };
@@ -299,8 +296,6 @@ static std::vector<EmEquivClass> build_equiv_classes(
         ec.k = k;
         ec.ll_flat.resize(static_cast<size_t>(n) * k);
         ec.wt_flat.resize(static_cast<size_t>(n) * k);
-        // scratch is no longer used by em_step_kernel_range (uses
-        // stack-local row buffer instead), so skip allocation.
 
         for (int i = 0; i < n; ++i) {
             int u = unit_list[i];
@@ -370,8 +365,8 @@ struct KahanAccumulator {
 // Kahan summation for numerical stability.
 //
 // Thread safety: multiple threads may process non-overlapping row
-// ranges of the same EC concurrently.  Each writes to disjoint
-// regions of ec.scratch (which is mutable).  em_totals must be
+// ranges of the same EC concurrently; the EC is read-only and each
+// row's posteriors live in a stack-local buffer.  em_totals must be
 // thread-private when called from parallel_estep.
 
 static inline void em_step_kernel_range(
@@ -1075,8 +1070,6 @@ static void compute_grouped_warm_start(
 
 struct EMResult {
     std::vector<double> theta;
-    std::vector<double> alpha;
-    std::vector<double> em_totals;
     int squarem_iterations = 0;  // number of SQUAREM iterations completed
     double squarem_step_scale_mean = 0.0;
     double squarem_step_scale_max = 0.0;
@@ -1328,17 +1321,9 @@ static EMResult run_squarem(
 
         // theta = state0 (converged normalized theta)
         std::copy(state0.begin(), state0.end(), theta.begin());
-
-        // alpha_out is diagnostic only for MAP mode; compute final grouped
-        // count-space update from the latest E-step accumulators.
-        std::vector<double> raw_counts(nc, 0.0);
-        for (size_t i = 0; i < nc; ++i) raw_counts[i] = unambig_totals[i] + em_totals[i];
-        apply_grouped_prior_update(
-            raw_counts.data(), theta.data(), aggregate_prior, alpha_out.data(), n_components);
     }
 
-    EMResult out{ std::move(theta), std::move(alpha_out), std::move(em_totals),
-                  completed_iterations };
+    EMResult out{ std::move(theta), completed_iterations };
     out.squarem_step_scale_mean = step_scale_count > 0
         ? step_scale_sum / static_cast<double>(step_scale_count)
         : 0.0;
@@ -1360,10 +1345,6 @@ static EMResult run_squarem(
 //
 // Processes all loci in a single C++ call, eliminating 29K Python→C++
 // round-trips and all numpy/pandas per-locus overhead.
-
-// Numerical-stability floor for prior components (single source — also
-// exported via module attr; see NB_MODULE block at bottom).
-static constexpr double EM_PRIOR_EPSILON = 1e-10;
 
 // Per-locus candidate record (used during sub-problem extraction)
 struct LocalCandidate {
@@ -2244,7 +2225,6 @@ batch_locus_em_partitioned(
             }
 
             // 1. Extract sub-problem from partition
-            auto t1 = hrclock::now();
             extract_locus_sub_problem_from_partition(
                 sub, pv,
                 gel_ptr[li],
@@ -2847,14 +2827,8 @@ NB_MODULE(_em_impl, m) {
           "comp_u_flat) where the CSR pairs (offsets, flat) give sorted\n"
           "transcript indices and unit indices for each component.");
 
-    // ----------------------------------------------------------------
-    // Export constants so Python imports from this single source of truth.
-    // ----------------------------------------------------------------
+    // The log floor, exported for the grouped-prior-update gate.
     m.attr("EM_LOG_EPSILON")         = EM_LOG_EPSILON;
-    m.attr("MAX_FRAG_LEN")          = MAX_FRAG_LEN;
-    m.attr("SQUAREM_BUDGET_DIVISOR") = SQUAREM_BUDGET_DIVISOR;
-    m.attr("EM_PRIOR_EPSILON")       = EM_PRIOR_EPSILON;
-    m.attr("ESTEP_TASK_WORK_TARGET") = ESTEP_TASK_WORK_TARGET;
 
     // ----------------------------------------------------------------
     // Test-only: expose the grouped prior update, so the one identity the

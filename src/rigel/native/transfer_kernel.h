@@ -166,7 +166,6 @@ struct RowStore {  // a store of (K,) rows written in order — the face maps, t
         std::copy(r, r + K, buf->data() + static_cast<size_t>(n_rows) * K);
         return n_rows++;
     }
-    const double* row(int r) const { return buf->data() + static_cast<size_t>(r) * K; }
 };
 
 struct FacesOut {  // the composition rules as typed tables over (destination, side)

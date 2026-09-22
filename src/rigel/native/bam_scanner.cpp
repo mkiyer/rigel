@@ -2891,7 +2891,6 @@ NB_MODULE(_bam_impl, m) {
             .def_prop_ro("n_regions",     [](const Accumulator& a) { return a.n_regions(); })
             .def_prop_ro("n_boundaries",     [](const Accumulator& a) { return a.n_boundaries(); })
             .def_prop_ro("n_sj", [](const Accumulator& a) { return a.n_sj(); })
-            .def_prop_ro("n_region_bounds",      [](const Accumulator& a) { return a.n_region_bounds(); })
             .def_prop_ro("max_length",  [](const Accumulator& a) { return a.max_length(); })
 
             // ── regions ────────────────────────────────────────────────────────────────────────────────

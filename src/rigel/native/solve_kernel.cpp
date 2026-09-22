@@ -95,7 +95,6 @@ nb::ndarray<nb::numpy, bool, nb::ndim<2>> own_bool2(std::vector<uint8_t>&& v, si
     return nb::ndarray<nb::numpy, bool, nb::ndim<2>>(reinterpret_cast<bool*>(p->data()), 2, shape, std::move(owner));
 }
 inline bool* as_bool(std::vector<uint8_t>& v) { return reinterpret_cast<bool*>(v.data()); }
-inline const bool* as_bool(const std::vector<uint8_t>& v) { return reinterpret_cast<const bool*>(v.data()); }
 
 // ═══ THE THREAD POOL — the locus EM's, one for the module, shared by the block pool and ψ's slot pool ═══════════
 // Persistent across the calls of a run and rebuilt only when the budget changes; the calls are serialised on it.

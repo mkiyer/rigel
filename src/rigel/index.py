@@ -1544,32 +1544,21 @@ class TranscriptIndex:
         #    consumed by scoring), and it frees ``_t_exon_intervals`` unless
         #    retain_test_structures.
         exon_offsets, exon_starts_flat, exon_ends_flat, exon_cumsum_flat = self.build_exon_csr()
-        # Per-transcript spliced length = sum of exon lengths, derived from
-        # the same CSR: cumulative segment lengths differenced at the CSR
-        # offsets (int64 accumulation, empty groups → 0).
-        seg_len = (exon_ends_flat - exon_starts_flat).astype(np.int64)
-        seg_cumsum = np.concatenate(([0], np.cumsum(seg_len)))
-        t_lengths = seg_cumsum[exon_offsets[1:]] - seg_cumsum[exon_offsets[:-1]]
         ctx.build_exon_index(
             exon_offsets.tolist(),
             exon_starts_flat.tolist(),
             exon_ends_flat.tolist(),
             exon_cumsum_flat.tolist(),
-            t_lengths.tolist(),
         )
 
-        # 5. Metadata  (t_to_g_arr is already int32 from downcast above)
-        ctx.set_metadata(
-            self.t_to_g_arr.tolist(),
-            len(self.t_to_g_arr),
-        )
+        # 4. The transcript count, which sizes the resolver's scratch buffers.
+        ctx.set_metadata(self.num_transcripts)
 
-        # 6. nRNA mask + parent-index for derive-on-demand resolution.
+        # 5. nRNA parent-index for derive-on-demand resolution.
         #    Synthetic nRNAs are intentionally absent from cgranges
         #    (see _gen_transcript_intervals).  The resolver materialises
         #    each synthetic candidate from real-tx hits via nrna_parent_.
         is_synth = self.t_df["is_synthetic"].to_numpy(dtype=bool)
-        ctx.set_nrna_status(is_synth.astype(np.uint8).tolist())
         nrna_idx = self.t_df["nrna_t_index"].to_numpy(dtype=np.int32)
         parent = np.full(nrna_idx.shape, -1, dtype=np.int32)
         valid = (nrna_idx >= 0) & (nrna_idx < is_synth.size)

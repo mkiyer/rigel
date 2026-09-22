@@ -237,13 +237,6 @@ def scan_and_buffer(
     resolve_ctx = index.resolver
     resolve_ctx.set_transcript_strands(index.t_to_strand_arr.tolist())
 
-    # Provide nRNA status so FL training excludes synthetic nRNA candidates
-    # (whose fragment lengths represent genomic spans, not real fragment sizes).
-    # Only synthetic nRNAs should be excluded; annotated single-exon transcripts
-    # have legitimate fragment lengths and must contribute to FL training.
-    nrna_arr = index.t_df["is_synthetic"].values.astype("uint8")
-    resolve_ctx.set_nrna_status(nrna_arr.tolist())
-
     # Splicing-anchor tolerance K (bp): resolver-only one-sided slack used
     # by the SPLICED_IMPLICIT per-intron whole-containment discriminant.
     # The fractional calibration accumulator records raw compartment mass

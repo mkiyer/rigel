@@ -127,23 +127,6 @@ public:
         return t_inds.empty() ? -1 : t_inds[0];
     }
 
-    bool get_has_frag_lengths() const {
-        for (auto fl : frag_lengths)
-            if (fl > 0) return true;
-        return false;
-    }
-
-    int32_t get_unique_frag_length() const {
-        int32_t val = -1;
-        for (auto fl : frag_lengths) {
-            if (fl > 0) {
-                if (val == -1) val = fl;
-                else if (fl != val) return -1;
-            }
-        }
-        return val;
-    }
-
     // Fragment length has ONE definition: the accumulator's `L`, the total length of the fragment's own
     // path (span minus region_bound introns, mate gap included), binned for every deposited fragment in
     // `deposited_lengths`. There is no transcript-space length accessor.
@@ -512,14 +495,10 @@ public:
 
 
     // --- Transcript metadata ---
-    std::vector<int32_t> t_to_g_arr_;
     int32_t n_transcripts_ = 0;
 
     // --- Transcript strand metadata (direct lookup, no gene indirection) ---
     std::vector<int32_t> t_strand_arr_;
-
-    // --- Per-transcript nRNA status (1 = nRNA synthetic, 0 = annotated) ---
-    std::vector<uint8_t> t_is_nrna_;
 
     // --- Per-transcript nRNA parent index (-1 if none, else index of
     //     the parent nRNA entity for derive-on-demand resolution).
@@ -533,7 +512,6 @@ public:
     std::vector<int32_t> exon_starts_;     // [total_exons] — genomic start coords
     std::vector<int32_t> exon_ends_;       // [total_exons] — genomic end coords
     std::vector<int32_t> exon_cumsum_;     // [total_exons] — cumulative spliced bp before each exon
-    std::vector<int32_t> t_length_;        // [n_transcripts] — spliced transcript lengths
 
     // --- SPLICED_IMPLICIT discriminant tolerance (bp) ---
     int32_t splicing_anchor_tolerance_ = 0;
@@ -668,9 +646,7 @@ public:
         return (it == sj_blacklist_.end()) ? nullptr : &it->second;
     }
 
-    void set_metadata(const std::vector<int32_t>& t_to_g,
-                      int32_t n_transcripts) {
-        t_to_g_arr_ = t_to_g;
+    void set_metadata(int32_t n_transcripts) {
         n_transcripts_ = n_transcripts;
 
         // Initialize internal scratch buffers
@@ -682,13 +658,6 @@ public:
     /// Set per-transcript strand array (direct lookup, no gene indirection).
     void set_transcript_strands(const std::vector<int32_t>& t_strand) {
         t_strand_arr_ = t_strand;
-    }
-
-    /// Set per-transcript nRNA status (uint8, 1 = nRNA synthetic).
-    /// ⚠ On a NON-SYNTHETIC row `is_nrna` means "single-exon, so mature == nascent" — NOT
-    /// "manufactured span", so it is not a realness filter.
-    void set_nrna_status(const std::vector<uint8_t>& t_is_nrna) {
-        t_is_nrna_ = t_is_nrna;
     }
 
     /// Set per-transcript nRNA parent index (int32; -1 = no parent).
@@ -703,14 +672,12 @@ public:
         const std::vector<int32_t>& offsets,
         const std::vector<int32_t>& starts,
         const std::vector<int32_t>& ends,
-        const std::vector<int32_t>& cumsum,
-        const std::vector<int32_t>& lengths)
+        const std::vector<int32_t>& cumsum)
     {
         exon_offsets_ = offsets;
         exon_starts_ = starts;
         exon_ends_ = ends;
         exon_cumsum_ = cumsum;
-        t_length_ = lengths;
     }
 
     bool has_exon_index() const {
@@ -730,10 +697,6 @@ public:
         if (L < 0) throw std::invalid_argument(
             "set_max_fragment_length: must be >= 0, got " + std::to_string(L));
         max_fragment_length_ = L;
-    }
-
-    int32_t max_fragment_length() const {
-        return max_fragment_length_;
     }
 
     void set_splicing_anchor_tolerance(int32_t K) {
@@ -1008,13 +971,6 @@ public:
         }
         // Inside exon ei
         return cumsum[ei] + (genomic_pos - starts[ei]);
-    }
-
-    nb::dict get_ref_to_id() const {
-        nb::dict d;
-        for (const auto& [k, v] : ref_to_id_)
-            d[nb::cast(k)] = nb::cast(v);
-        return d;
     }
 
     // ----------------------------------------------------------------

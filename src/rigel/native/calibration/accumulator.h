@@ -459,7 +459,6 @@ public:
     std::size_t n_regions()    const noexcept { return regions_.size(); }
     std::size_t n_boundaries()    const noexcept { return boundaries_.size(); }
     std::size_t n_sj() const noexcept { return sj_.size(); }
-    std::size_t n_region_bounds()     const noexcept { return region_bounds_.size(); }
 
     Region*               regions_data()      noexcept { return regions_.data(); }
     const Region*         regions_data() const noexcept { return regions_.data(); }

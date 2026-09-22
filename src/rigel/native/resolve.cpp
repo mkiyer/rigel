@@ -39,7 +39,6 @@ NB_MODULE(_resolve_impl, m) {
         .def_ro("sj_strand", &ResolvedFragment::sj_strand)
         .def_ro("ambig_strand", &ResolvedFragment::ambig_strand)
         .def_ro("chimera_type", &ResolvedFragment::chimera_type)
-        .def_ro("chimera_gap", &ResolvedFragment::chimera_gap)
         .def_ro("merge_criteria", &ResolvedFragment::merge_criteria)
         .def_ro("read_length", &ResolvedFragment::read_length)
         .def_ro("genomic_footprint", &ResolvedFragment::genomic_footprint)
@@ -48,18 +47,9 @@ NB_MODULE(_resolve_impl, m) {
         .def_ro("exon_bp_neg", &ResolvedFragment::exon_bp_neg)
         .def_ro("tx_bp_pos", &ResolvedFragment::tx_bp_pos)
         .def_ro("tx_bp_neg", &ResolvedFragment::tx_bp_neg)
-        .def_ro("sj_key_ref", &ResolvedFragment::sj_key_ref)
-        .def_ro("sj_key_start", &ResolvedFragment::sj_key_start)
-        .def_ro("sj_key_end", &ResolvedFragment::sj_key_end)
-        .def_prop_ro("is_chimeric", &ResolvedFragment::get_is_chimeric)
         .def_prop_ro("is_same_strand", &ResolvedFragment::get_is_same_strand)
         .def_prop_ro("is_strand_qualified",
                      &ResolvedFragment::get_is_strand_qualified)
-        .def_prop_ro("first_t_ind", &ResolvedFragment::get_first_t_ind)
-        .def_prop_ro("has_frag_lengths",
-                     &ResolvedFragment::get_has_frag_lengths)
-        .def_prop_ro("unique_frag_length",
-                     &ResolvedFragment::get_unique_frag_length)
         .def_prop_ro("t_inds", &ResolvedFragment::get_t_inds)
         .def_prop_ro("frag_lengths", &ResolvedFragment::get_frag_lengths)
         .def_prop_ro("overlap_bp", &ResolvedFragment::get_overlap_bp)
@@ -108,10 +98,8 @@ NB_MODULE(_resolve_impl, m) {
              "A CIGAR sj is rejected when EITHER its left or right\n"
              "anchor is <= the blacklist maximum for that sj.")
         .def("set_metadata", &FragmentResolver::set_metadata,
-             nb::arg("t_to_g"), nb::arg("n_transcripts"),
-             "Set transcript-to-gene mapping and allocate scratch buffers.")
-        .def("get_ref_to_id", &FragmentResolver::get_ref_to_id,
-             "Return the ref-name → integer-ID mapping as a Python dict.")
+             nb::arg("n_transcripts"),
+             "Set the transcript count and allocate scratch buffers.")
         .def("resolve_fragment", &FragmentResolver::resolve_fragment,
              nb::arg("frag"),
              "Resolve a Fragment object to its compatible transcript set.\n\n"
@@ -119,10 +107,6 @@ NB_MODULE(_resolve_impl, m) {
         .def("set_transcript_strands", &FragmentResolver::set_transcript_strands,
              nb::arg("t_strand"),
              "Set per-transcript strand array (direct lookup, no gene indirection).")
-        .def("set_nrna_status", &FragmentResolver::set_nrna_status,
-             nb::arg("t_is_nrna"),
-             "Set per-transcript nRNA status (uint8, 1 = nRNA synthetic).\n"
-             "Used to exclude nRNA candidates from FL unanimity check.")
         .def("set_nrna_parent_index",
              &FragmentResolver::set_nrna_parent_index,
              nb::arg("nrna_parent"),
@@ -131,7 +115,7 @@ NB_MODULE(_resolve_impl, m) {
              "during _resolve_core; synthetics are not in cgranges.")
         .def("build_exon_index", &FragmentResolver::build_exon_index,
              nb::arg("offsets"), nb::arg("starts"), nb::arg("ends"),
-             nb::arg("cumsum"), nb::arg("lengths"),
+             nb::arg("cumsum"),
              "Build per-transcript exon CSR index for FL computation.")
         .def("set_max_fragment_length",
              &FragmentResolver::set_max_fragment_length,
@@ -145,36 +129,10 @@ NB_MODULE(_resolve_impl, m) {
              "SPLICED_IMPLICIT per-intron whole-containment discriminant.")
         ;
 
-    // --- Expose C++ enum constants as module-level attributes ---
-    // These mirror the Python IntEnum values in rigel.types / rigel.splice.
-    // Single authoritative source: constants.h
-
-    // Strand
-    m.attr("STRAND_NONE")      = rigel::STRAND_NONE;
-    m.attr("STRAND_POS")       = rigel::STRAND_POS;
-    m.attr("STRAND_NEG")       = rigel::STRAND_NEG;
-    m.attr("STRAND_AMBIGUOUS") = rigel::STRAND_AMBIGUOUS;
-
-    // SpliceType
+    // --- The SpliceType constants, mirrored for the parity gate against rigel.splice ---
     m.attr("SPLICE_UNSPLICED")       = rigel::SPLICE_UNSPLICED;
     m.attr("SPLICE_SPLICED_UNANNOT") = rigel::SPLICE_SPLICED_UNANNOT;
     m.attr("SPLICE_SPLICED_ANNOT")   = rigel::SPLICE_SPLICED_ANNOT;
     m.attr("SPLICE_IMPLICIT")        = rigel::SPLICE_IMPLICIT;
     m.attr("SPLICE_ARTIFACT")        = rigel::SPLICE_ARTIFACT;
-
-    // MergeOutcome
-    m.attr("MC_INTERSECTION")          = rigel::MC_INTERSECTION;
-    m.attr("MC_INTERSECTION_NONEMPTY") = rigel::MC_INTERSECTION_NONEMPTY;
-    m.attr("MC_UNION")                 = rigel::MC_UNION;
-    m.attr("MC_EMPTY")                 = rigel::MC_EMPTY;
-
-    // ChimeraType
-    m.attr("CHIMERA_NONE")           = rigel::CHIMERA_NONE;
-    m.attr("CHIMERA_TRANS")          = rigel::CHIMERA_TRANS;
-    m.attr("CHIMERA_CIS_STRAND_SAME") = rigel::CHIMERA_CIS_STRAND_SAME;
-    m.attr("CHIMERA_CIS_STRAND_DIFF") = rigel::CHIMERA_CIS_STRAND_DIFF;
-
-    // IntervalType
-    m.attr("ITYPE_EXON")           = rigel::ITYPE_EXON;
-    m.attr("ITYPE_INTRON")         = static_cast<int8_t>(1);  // TRANSCRIPT slot
 }
