@@ -1864,7 +1864,6 @@ static void extract_locus_sub_problem_from_partition(
     LocusSubProblem& sub,
     const PartitionView& pv,
     double gdna_eff_len,
-    double gdna_em_llr_bias,
     const double*  all_unambig_row_sums,
     const double*  all_t_eff_lens,
     const double*  all_t_rna_prior_weight,
@@ -2022,13 +2021,7 @@ static void extract_locus_sub_problem_from_partition(
     // MultiLocus. The scorer contributes log h_G(ell_f); the EM applies
     // -log L̃_gDNA here, matching the RNA component contract.
     double GLe = gdna_eff_len;
-    // gDNA FP-aversion: a global log-odds bias on the gDNA component. The E-step
-    // weight is log_weight = log(theta) - log_eff_len, so subtracting the bias
-    // from log_eff_len here ADDS it to the gDNA log-weight. A positive bias favors
-    // gDNA at every fragment (fewer gDNA->RNA leaks, more RNA->gDNA siphons);
-    // 0.0 is neutral. It flows through the E-step, M-step, and hard assignment
-    // identically because they all read log_eff_len.
-    sub.log_eff_len[sub.gdna_idx] = (GLe > 0.0 ? std::log(GLe) : kInf) - gdna_em_llr_bias;
+    sub.log_eff_len[sub.gdna_idx] = (GLe > 0.0 ? std::log(GLe) : kInf);
 
     // Clean up local_map scratch for next call
     for (int i = 0; i < n_t; ++i) {
@@ -2086,10 +2079,7 @@ batch_locus_em_partitioned(
     int    n_splice_strand_cols,
     int    n_threads,
     bool   emit_locus_stats,
-    bool   emit_assignments,
-    // Global gDNA FP-aversion: log-odds bias added to the gDNA component's
-    // E-step weight (0.0 = neutral). Positive favors gDNA assignment.
-    double gdna_em_llr_bias = 0.0)
+    bool   emit_assignments)
 {
     int n_loci = static_cast<int>(nb::len(partition_tuples));
     int N_T = n_transcripts_total;
@@ -2258,7 +2248,6 @@ batch_locus_em_partitioned(
             extract_locus_sub_problem_from_partition(
                 sub, pv,
                 gel_ptr[li],
-                gdna_em_llr_bias,
                 unambig_row_sums.data(), tel_ptr, trpw_ptr,
                 local_map_vec.data(), local_map_size);
             auto t2 = hrclock::now();
@@ -2836,7 +2825,6 @@ NB_MODULE(_em_impl, m) {
           nb::arg("n_threads") = 0,
           nb::arg("emit_locus_stats") = false,
           nb::arg("emit_assignments") = false,
-          nb::arg("gdna_em_llr_bias") = 0.0,
           "Run locus EM from per-locus partition data.\n\n"
           "Accepts a list of 9-tuples (one per locus) containing partition\n"
           "arrays, plus per-locus gDNA prior counts and eligibility.\n"

@@ -79,17 +79,6 @@ class EMConfig:
     evidence-proportional rule an all-zero seed leaves the RNA pool at zero and hands the locus to gDNA,
     because ``out[i]`` is proportional to ``raw[i]``."""
 
-    gdna_em_llr_bias: float = 0.0
-    """Global gDNA false-positive-aversion dial — a pure log-odds (LLR) bias added
-    to the gDNA component's per-fragment weight in the locus EM (``0.0`` = neutral,
-    the default). A **positive** value favors gDNA at every unspliced fragment by
-    the odds factor ``exp(gdna_em_llr_bias)``: it trades the FP-deleterious gDNA→RNA
-    *leak* for the FP-safe RNA→gDNA *siphon* (decreased RNA sensitivity). Use it to
-    say "only call a fragment RNA when it is sufficiently more likely RNA than
-    gDNA." This reaches the *EM* assignment directly (distinct from the calibration
-    deconvolution). Units: nats of log-odds (e.g.
-    ``log(9) ≈ 2.20`` requires ~9:1 RNA evidence)."""
-
     def __post_init__(self):
         if self.mode not in ("map", "vbem"):
             raise ValueError(f"Unknown EM mode: {self.mode!r}")
@@ -100,10 +89,6 @@ class EMConfig:
         # and is not.
         if self.warm_start not in ("coverage", "prior", "uniform"):
             raise ValueError(f"Unknown warm start: {self.warm_start!r}")
-        if not math.isfinite(float(self.gdna_em_llr_bias)):
-            raise ValueError(
-                f"EMConfig.gdna_em_llr_bias must be finite; got {self.gdna_em_llr_bias}."
-            )
 
 
 # ======================================================================

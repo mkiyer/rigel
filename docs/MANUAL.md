@@ -199,7 +199,6 @@ Every flag is also documented by `rigel <subcommand> --help`.
 |------|---------|-------------|
 | `--assignment-min-posterior P` | `0.01` | Minimum posterior for a component to be eligible for discrete assignment (map/sample modes) |
 | `--em-convergence-delta D` | `1e-6` | Convergence threshold for EM parameter updates |
-| `--gdna-em-llr-bias B` | `0.0` | gDNA false-positive-aversion: a log-odds (LLR) bias in nats added to the gDNA component in the locus EM. Positive favors gDNA (trades the gDNA→RNA leak for an RNA→gDNA siphon), e.g. `2.2` ≈ require 9:1 RNA evidence before calling a fragment RNA. |
 | `--calib-refit-iters N` | `3` | Number of times calibration re-solves after refitting its population gDNA prior. `0` gives the prior-free first solve only. |
 | `--overhang-alpha A` | `0.1` | Per-base overhang penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
 | `--mismatch-alpha A` | `0.1` | Per-mismatch (`NM` tag) penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
@@ -662,8 +661,7 @@ Advanced; the default suits standard libraries.
 - `--calib-refit-iters N` (default `3`) — how many times calibration re-fits its population
   gDNA-density prior on the current solve and re-solves. `0` gives the prior-free first solve.
 
-`--gdna-em-llr-bias` is not a calibration knob: it biases the gDNA component in the locus EM
-downstream. The remaining `CalibrationConfig` fields (for example `sweep_logodds_step`, the log-odds
+The remaining `CalibrationConfig` fields (for example `sweep_logodds_step`, the log-odds
 lattice's step, which is dimensionless and guarantees every slot's composition to within 1.25 % of its
 mass) are not exposed on the CLI or in the YAML.
 

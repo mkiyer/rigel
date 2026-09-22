@@ -402,7 +402,6 @@ class AbundanceEstimator:
             self.em_config.n_threads,
             emit_locus_stats,
             emit_assignments,
-            gdna_em_llr_bias=float(self.em_config.gdna_em_llr_bias),
         )
 
         if emit_locus_stats:
