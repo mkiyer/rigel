@@ -22,12 +22,21 @@ is the working ledger; when the cleanup is done it is deleted and `NEXT_SESSION.
 |---|---|---|
 | 09-22 | The per-fragment-prior derivation line STOPPED by the owner: `docs/dev/PER_FRAGMENT_GDNA_PRIOR{,_REVIEW}.md`, the four `CALIBRATED_LIKELIHOOD_*.md` notes, `NASCENT_SIPHON.md`, `CAPTURE_WITHOUT_THE_PANEL.md` retired; `scripts/design/gdna_prior_reliability.py` retired with its row and pin; `TWO_PROBLEMS.md` restated in the owner's words | docs and an instrument: no number moves |
 | 09-22 | `CLAUDE.md`'s standing-baseline paragraph — a 60-line history — condensed to the count and the rule | text |
+| 09-22 | `CalibrationConfig.background_abundance` and its `measured_total` pair deleted (config, `calibrate._background_pair`, `density_deconv`'s `counts_exposure`, five tests; the `ISSUES` entry moved to the closed record; the fl-gap configs' comment rewritten) — the owner did not recognise it | suite; identity check on the `g05 ss.99 ON` reference, the other two at the day's end, below |
+| 09-22 | Seven instruments retired from the shelf: `worst_objects`, `toy_harness`, `zero_controls`, `calibration_walk`, `module_census`, `rename_census`, `simulator_gates`, with `test_worst_objects.py` and every current-doc mention (`TESTING.md` §0b and §3 deleted; `SUCCESS.md`'s run order renumbered; `CLAUDE.md`'s table follows the disk). The toy harness survives as a TEST SUBSTRATE, `tests/calibration/_toy_harness.py` (its CLI stripped, 1,120 → 892 lines), because `test_encompassing_locus.py` — which holds the `the-lower-bound-noise-ratchet` xfail — and `test_toy_harness.py` are built on it | the gates of both test files; `test_scripts_index` both ways |
 | 09-22 | `pipeline._DEFAULT_MEAN_FRAG = 200.0`, the magic fallback for an empty RNA length pool (never executed by the suite), replaced by a refusal that names the condition; the falsification test in `tests/test_d7_transcript_eff_lengths.py` was written first and watched fail | suite; no number moves (the branch was unreachable) |
-| 09-22 | `EMConfig.gdna_em_llr_bias` and `--gdna-em-llr-bias` deleted (config, CLI, estimator, `em_solver.cpp`, manual, two tests): an underived odds knob, default 0, used by no arm | suite green; `rename_identity.py --check` BIT-IDENTICAL on both ladder references (log `~/Downloads/rigel_runs/arms/`) |
+| 09-22 | `EMConfig.gdna_em_llr_bias` and `--gdna-em-llr-bias` deleted (config, CLI, estimator, `em_solver.cpp`, manual, two tests): an underived odds knob, default 0, used by no arm | suite green; `rename_identity.py --check` BIT-IDENTICAL on the `g05 ss.99 ON` reference at the time (the default call had no reference and printed so — read a log, never an exit code); the other two references are re-checked at the day's end, below |
 
-The suite after the above: 0 failed / 3,454 passed / 2 xfail, 3,456 collected — derived from the table in `CLAUDE.md`
+The suite after the above: 0 failed / 3,414 passed / 2 xfail, 3,416 collected — derived from the table in `CLAUDE.md`
 (from 3,468: −4 the instrument, −1 its pin, −8 the retired `docs/dev/` notes, −2 the knob's two tests, +1 the refusal's test,
-+1 this ledger, +1 the owner's `docs/dev/my_notes.md`) and matched by `--collect-only`.
++1 this ledger, +1 the owner's `docs/dev/my_notes.md` = 3,456; then −28 the seven retired scripts, −8 `test_worst_objects.py`
+(its two rows and six cases), −5 the swap's tests in `test_total_abundance.py`, −1 in `test_abundance_landscape.py`, +2 the
+toy harness by the `tests/` row = 3,416) and matched by `--collect-only`.
+
+**End of day 1, the whole tree:** `rename_identity.py --check` BIT-IDENTICAL on all three references — `g05 ss.99 ON`,
+`g05 ss.50 OFF` and the LBX0190 library (`--bam`); `preflight.py --full` 5/5 over 12 instruments; the suite as above. ⚠
+The instrument's default `--reference` path does not exist and it prints ⛔ rather than failing: pass
+`--reference ~/Downloads/rigel_runs/arms/review_identity_<condition>.json` per condition, and read the log.
 
 ## The census (2026-09-22)
 
@@ -62,32 +71,25 @@ The suite after the above: 0 failed / 3,454 passed / 2 xfail, 3,456 collected �
   (`/Users/mkiyer/proj/rigel-pin`, the prototype switches `RIGEL_GDNA_OPP` / `RIGEL_PIN_GDNA` / `RIGEL_EFF_FORM`,
   its own build). Prototype harnesses and results under `~/Downloads/rigel_runs/prototypes/`.
 
-## Decisions for the owner (each blocks a deletion)
+## The owner's decisions (2026-09-22) and what followed
 
-1. **The per-transcript prior lane** `rna_prior_weight` (pipeline → estimator → `em_solver.cpp`) and the
-   `EMConfig.warm_start` modes `prior` / `uniform`: plumbed end to end, no producer in `src/`, used only by
-   `quant_accuracy.py`'s `oracle_alloc` / `warm_uniform` arms and five tests. Under "no speculative code" both go;
-   under "problem 1 is a prior per transcript" the lane is the mechanism that work would fill. Delete now and
-   re-add designed, or keep? (Deleting also removes the allocation ceiling arm.)
-2. **`EMConfig.mode = "map"`**: VBEM ships; MAP is an A/B partner with gates (`EQUATIONS.md` §9b.2). Keep as a
-   measured alternative or delete?
-3. **`CalibrationConfig.background_abundance = "measured_total"`**: an unruled alternative pair
-   (`ISSUES: background-abundance-pair-unruled`). Rule it or delete it.
-4. **`CalibrationResult.rna_region_eff_len` / `rna_boundary_eff_len`**: no consumer in `src/`; the result's own
-   docstring argues they stay. Keep or delete?
-5. **The instrument shelf** (19 files after today): the bloat ruling says few. Proposed retirements, each with the
-   reason: `pass0_vs_oracle.py` (its headline is the wrong yardstick by its own row; its `C_input` arms hand the
-   post-capture law to geometry — the ledger's "rotten but live"), `worst_objects.py` (built on it),
-   `toy_harness.py` + `zero_controls.py`'s toy path (the harvest calibrates undrained), `module_census.py`,
-   `rename_census.py` (one-off vocabulary tools), `calibration_walk.py` (a ladder no session has read since the
-   sweep went native), `simulator_gates.py` (run once per panel build). Kept: `preflight`, `policy_benchmark`,
-   `calibration_vs_oracle`, `calibration_oracle`, `ruler_vs_truth`, `quant_accuracy`, `solvability_audit`,
-   `prior_vs_oracle`, `zero_controls` (ladder path), `rename_identity`, `build_scan_cache`, the four `sim/` rows.
-6. **The worktree and the branches**: remove `rigel-pin` (its prototype is refused or superseded) and the ten
-   stale branches? Reversible only through the reflog.
-7. **`pipeline._DEFAULT_MEAN_FRAG = 200.0`**: the magic fallback for an empty RNA length pool. Replace with a
-   refusal (a library with no RNA length observation cannot be quantified) — if coverage shows the branch is
-   never executed by the suite, it is a refusal with no test to move.
+1. **The per-transcript prior lane** `rna_prior_weight` and the `prior` / `uniform` warm starts STAY: the per-transcript
+   prior is the session after the cleanup, redesigned, and the lane must be supported.
+2. **MAP and VBEM** both stay.
+3. **`background_abundance = "measured_total"`** — the owner did not recognise it → DELETED (config field, the
+   refusal path, `density_deconv`'s `counts_exposure`, three tests; `ISSUES` entry moved to the closed record).
+4. **The RNA effective-length fields** on the result STAY: the capture-contracted length per transcript from the
+   calibration result is the second development item.
+5. **The instrument shelf** — RETIRED 2026-09-22: `worst_objects`, `toy_harness`, `zero_controls` (a toy instrument
+   throughout; the zero controls are the ladder's `g00` rows, read on their own row by `calibration_vs_oracle.py` and
+   `quant_accuracy.py`), `calibration_walk`, `module_census`, `rename_census`, `simulator_gates`, with their two
+   test files and every current-doc mention (`TESTING.md` §0b and §3 deleted). Still to retire: `pass0_vs_oracle.py`,
+   which `panel.py cache` and `solvability_audit.py` depend on — its oracle-cache builder moves to
+   `calibration_oracle.py` (the truth's home) and the audit takes `measure_condition` with it, one commit.
+6. **The `rigel-pin` worktree** REMOVED with its branch (no commit of it ever reached `main`; `c52c9b93` was made on
+   `main`). The ten stale branches are still listed for a separate decision.
+7. **The simulator's error model and sharded writers** STAY (a coverage gap, to be worked on eventually).
+8. `_DEFAULT_MEAN_FRAG` → a refusal (done, above).
 
 ## Stages ahead
 

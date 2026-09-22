@@ -199,8 +199,8 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,454 passed / 0 skipped / 2 xfail, 3,456 collected** — re-derived 2026-09-22 on branch
-`calibrated-likelihood` after the cleanup began (the count is re-derived from the table below at every commit that
+**The standing baseline: 0 failed / 3,414 passed / 0 skipped / 2 xfail, 3,416 collected** — re-derived 2026-09-22 on branch
+`calibrated-likelihood` after the cleanup's first day (the count is re-derived from the table below at every commit that
 measures the suite; the history of how it moved is git, not this file). The 2 xfails are executable records of proven
 defects whose fixes are elsewhere (`ISSUES: two-sided-exon-row`; `ISSUES: the-lower-bound-noise-ratchet`), deferred by
 ruling to their threads — "fix the test" is a category error, and an xfail is closed by repairing the thing or asserting
