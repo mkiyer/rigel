@@ -20,12 +20,9 @@ from pathlib import Path
 
 
 def get_version() -> str:
-    try:
-        from . import __version__
+    from . import __version__
 
-        return f"rigel {__version__}"
-    except ImportError:
-        return "rigel (unknown version)"
+    return f"rigel {__version__}"
 
 
 # ---------------------------------------------------------------------------
@@ -100,16 +97,11 @@ def quant_command(args: argparse.Namespace) -> int:
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # -- Resolve seed --
     seed = _resolve_seed(args)
 
-    # -- Normalise sj_strand_tag (YAML may deliver a bare string) --
+    # YAML may deliver a bare string; the CLI always delivers a list
     if isinstance(args.sj_strand_tag, str):
         args.sj_strand_tag = [args.sj_strand_tag]
-    sj_tag_list = args.sj_strand_tag
-    sj_strand_tag = sj_tag_list[0] if len(sj_tag_list) == 1 else tuple(sj_tag_list)
-
-    # -- Persist run config (now part of summary.json, written at end) --
 
     # -- Load reference index --
     logging.info(f"[START] Loading index from {index_dir}")
@@ -120,7 +112,7 @@ def quant_command(args: argparse.Namespace) -> int:
     )
 
     # -- Build pipeline config + run --
-    pipeline_config = _build_pipeline_config(args, seed, sj_strand_tag)
+    pipeline_config = _build_pipeline_config(args, seed)
     result = run_pipeline(bam_path, index, config=pipeline_config)
 
     # -- Write outputs --
@@ -145,11 +137,7 @@ def _resolve_seed(args: argparse.Namespace) -> int:
     return seed
 
 
-def _build_pipeline_config(
-    args: argparse.Namespace,
-    seed: int,
-    sj_strand_tag: str | tuple[str, ...],
-) -> "PipelineConfig":  # noqa: F821
+def _build_pipeline_config(args: argparse.Namespace, seed: int) -> "PipelineConfig":  # noqa: F821
     """Translate resolved CLI args into a ``PipelineConfig``.
 
     Field mapping is driven by ``_PARAM_SPECS`` — see the declarative
@@ -184,10 +172,8 @@ def _build_pipeline_config(
         else:
             top_kw[spec.config_path] = config_val
 
-    # Override with pre-resolved values (seed and sj_strand_tag are
-    # normalised in quant_command before reaching here).
+    # the seed is resolved (timestamp when unset) in quant_command
     em_kw["seed"] = seed
-    scan_kw["sj_strand_tag"] = sj_strand_tag
 
     cfg = PipelineConfig(
         em=EMConfig(**em_kw),
@@ -358,9 +344,6 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "max": round(float(values.max()), 6),
         }
 
-    def _locus_series_summary(column: str) -> dict[str, float]:
-        return _df_series_summary(loci_df, column)
-
     from . import __version__
 
     # Strand model summary (exonic_spliced only)
@@ -391,7 +374,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         return int(getattr(stats, census_field(stype)))
 
     # Blacklist provenance: distinguishes "detection off (no blacklist in the
-    # index)" from "detection on, 0 artifacts found". None on pre-field indexes.
+    # index)" from "detection on, 0 artifacts found".
     _bl_size = getattr(index, "sj_blacklist_size", None)
     splice_counts = {
         "unspliced": _splice_n(SpliceType.UNSPLICED),
@@ -533,8 +516,8 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         },
         "calibration": cal_dict,
         "gdna_eff_len": {
-            "em": _locus_series_summary("gdna_eff_len_em"),
-            "per_bp": _locus_series_summary("gdna_eff_len_per_bp"),
+            "em": _df_series_summary(loci_df, "gdna_eff_len_em"),
+            "per_bp": _df_series_summary(loci_df, "gdna_eff_len_per_bp"),
         },
         "fragment_length": fl_summary,
         "quantification": {
@@ -762,12 +745,9 @@ def export_command(args: argparse.Namespace) -> int:
         if fmt == "tsv":
             out = fpath.with_suffix(".tsv")
             df.to_csv(str(out), sep="\t", index=False)
-        elif fmt == "parquet":
+        else:
             out = fpath.with_suffix(".parquet")
             df.to_parquet(str(out), compression="zstd", index=False)
-        else:
-            logging.error(f"Unknown format: {fmt}")
-            return 1
         logging.info(f"  {fpath.name} -> {out.name}")
 
     logging.info(f"[DONE] Exported {len(feather_files)} file(s) to {fmt}")
@@ -848,34 +828,6 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
 )
 
 
-_REMOVED_QUANT_CONFIG_KEYS: dict[str, str] = {
-    "buffer_size": "scan_buffer_size",
-    "chunk_size": "scan_fragments_per_chunk",
-    "max_memory_bytes": "scan_buffer_size",
-    "max_memory_gib": "scan_buffer_size",
-    "n_decomp_threads": "scan_bgzf_threads",
-    "decomp_threads": "scan_bgzf_threads",
-    "n_scan_threads": "threads",
-    "qname_batch_size": "scan_read_name_batch_size",
-    "scan_decomp_threads": "scan_bgzf_threads",
-    "scan_max_memory_gib": "scan_buffer_size",
-    "scan_qname_batch_size": "scan_read_name_batch_size",
-    "scan_threads": "threads",
-}
-
-_REMOVED_PRIOR_CONFIG_KEYS: frozenset[str] = frozenset(
-    {
-        "rna_confidence",
-        "rna_lower_confidence",
-        "gdna_density_confidence",
-        "aggregate_prior_strength",
-        "aggregate_prior_boundary_count",
-        "aggregate_prior_max_count",
-        "gdna_prior_logit_bias",
-    }
-)
-
-
 def _resolve_config_path(cfg: object, path: str) -> object:
     """Follow a dotted path like ``'em.iterations'`` on a config object."""
     obj = cfg
@@ -908,8 +860,6 @@ def _cli_to_config(val: object, transform: str) -> object:
     if transform == "invert_bool":
         return not val
     if transform == "sj_tag":
-        # Normalised by quant_command before _build_pipeline_config;
-        # the overwritten value is used, but keep this for completeness.
         if isinstance(val, str):
             return val
         return val[0] if len(val) == 1 else tuple(val)
@@ -1000,22 +950,6 @@ def _resolve_quant_args(
                 raise ValueError("quant config block must be a mapping.")
             yaml_config.update({str(k).replace("-", "_"): v for k, v in quant_block.items()})
         yaml_config.update(raw_normalized)
-        removed = sorted(set(yaml_config) & set(_REMOVED_QUANT_CONFIG_KEYS))
-        if removed:
-            replacements = ", ".join(
-                f"{key!r} -> {_REMOVED_QUANT_CONFIG_KEYS[key]!r}" for key in removed
-            )
-            raise ValueError(
-                "Removed quant config key(s); update to the new scan parameter names: "
-                f"{replacements}"
-            )
-        removed_prior = sorted(set(yaml_config) & _REMOVED_PRIOR_CONFIG_KEYS)
-        if removed_prior:
-            names = ", ".join(repr(name) for name in removed_prior)
-            raise ValueError(
-                f"Configuration option(s) {names} were removed in adaptive prior v5. "
-                "The grouped EM prior is now parameter-free. "
-            )
         # I/O keys and extra flags are valid in config YAML
         valid_keys = set(defaults) | {"bam_file", "index_dir", "output_dir", "tsv"}
         unknown = set(yaml_config) - valid_keys
@@ -1150,10 +1084,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Path to an alignable Zarr store built for the same genome+aligner. "
-            "Provides per-base fractional mappability (for gDNA calibration) "
-            "and the splice-junction artifact blacklist (for filtering spurious "
-            "sj at BAM-scan time). Required unless --no-mappability is "
-            "set explicitly."
+            "Provides the splice-junction artifact blacklist (for filtering "
+            "spurious sj at BAM-scan time). Required unless --no-mappability "
+            "is set explicitly."
         ),
     )
     idx.add_argument(
@@ -1162,7 +1095,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help=(
-            "Explicitly opt out of mappability and splice-blacklist ingestion. "
+            "Explicitly opt out of the alignable store and its splice blacklist. "
             "Use this for synthetic genomes, stranded-only benchmarks, or "
             "any setting where running 'alignable' is unnecessary. "
             "Mutually exclusive with --alignable-zarr."

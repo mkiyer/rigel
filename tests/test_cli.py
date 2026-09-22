@@ -10,7 +10,6 @@ config rather than against the parser's namespace.
 
 import textwrap
 
-import pytest
 
 from rigel.cli import build_parser, _resolve_quant_args, _build_quant_defaults
 from rigel.config import BamScanConfig
@@ -237,27 +236,6 @@ class TestResolveQuant:
         _resolve_quant_args(args, _build_quant_defaults())
         assert args.scan_read_name_batch_size == 256
 
-    def test_removed_yaml_scan_keys_error(self, tmp_path):
-        """Legacy scan YAML keys force users onto the renamed parameters."""
-        cfg = tmp_path / "cfg.yaml"
-        cfg.write_text("qname_batch_size: 128\nbuffer_size: 2\n")
-        args = _parse_quant("--config", str(cfg))
-        with pytest.raises(ValueError, match="scan_read_name_batch_size"):
-            _resolve_quant_args(args, _build_quant_defaults())
-
-    def test_removed_yaml_prior_keys_error(self, tmp_path):
-        """Legacy adaptive-prior YAML keys report the v5 migration path."""
-        cfg = tmp_path / "cfg.yaml"
-        cfg.write_text(
-            textwrap.dedent("""\
-            quant:
-              aggregate_prior_strength: 0.0
-        """)
-        )
-        args = _parse_quant("--config", str(cfg))
-        with pytest.raises(ValueError, match="adaptive prior v5"):
-            _resolve_quant_args(args, _build_quant_defaults())
-
 
 # ---------------------------------------------------------------------------
 # Config round-trip: defaults → resolve → build should match PipelineConfig()
@@ -276,7 +254,7 @@ class TestConfigRoundTrip:
         args = _parse_quant()
         _resolve_quant_args(args, _build_quant_defaults())
 
-        result = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
+        result = _build_pipeline_config(args, seed=42)
         ref = PipelineConfig()
 
         # EM fields (except overridden seed)
@@ -286,11 +264,8 @@ class TestConfigRoundTrip:
                 continue
             assert getattr(result.em, f.name) == getattr(ref.em, f.name), f.name
 
-        # Scan fields (except overridden sj_strand_tag)
+        # Scan fields, sj_strand_tag included: it round-trips through its transform
         for f in dataclasses.fields(ref.scan):
-            if f.name == "sj_strand_tag":
-                assert result.scan.sj_strand_tag == "auto"
-                continue
             assert getattr(result.scan, f.name) == getattr(ref.scan, f.name), f.name
 
         # Scoring: log penalties match exactly
@@ -318,7 +293,7 @@ class TestConfigRoundTrip:
 
         args = _parse_quant("--scan-read-name-batch-size", "256")
         _resolve_quant_args(args, _build_quant_defaults())
-        cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
+        cfg = _build_pipeline_config(args, seed=42)
         assert cfg.scan.read_name_batch_size == 256
 
     def test_scan_performance_flags_flow_to_config(self):
@@ -336,7 +311,7 @@ class TestConfigRoundTrip:
             "1234",
         )
         _resolve_quant_args(args, _build_quant_defaults())
-        cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
+        cfg = _build_pipeline_config(args, seed=42)
         assert cfg.em.n_threads == 8
         assert cfg.scan.total_threads == 8
         assert cfg.calibration.n_threads == 8
@@ -347,9 +322,3 @@ class TestConfigRoundTrip:
     def test_scan_buffer_default_is_two_gib(self):
         """PR06 lowers the default scan buffer cap to 2 GiB."""
         assert BamScanConfig().buffer_size_bytes == 2 * 1024**3
-
-    def test_removed_cli_scan_flags_are_not_accepted(self):
-        """Legacy scan CLI flags are not registered as aliases."""
-        parser = build_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args([*_QUANT_REQ, "--qname-batch-size", "256"])
