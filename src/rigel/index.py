@@ -8,10 +8,12 @@ TSV mirrors) in an output directory:
     ref_lengths.feather        — reference names and lengths
     transcripts.feather        — one row per transcript with integer indices
     intervals.feather          — exon/intron/intergenic tiling of the genome
-    regions.feather            — calibration region partition (INTERGENIC/INTRON/EXON)
+    regions.feather            — the splice graph's regions (the calibration partition)
+    edges.feather              — the splice graph's boundaries: contiguous and splice-junction
     sj.feather                 — annotated splice junctions from transcript introns
     splice_blacklist.feather   — (optional) splice-artifact sj derived
                                  from the alignable Zarr store
+    manifest.json              — the format version, the build sources and flags
 
 The ``TranscriptIndex`` class provides both the ``build()`` method for creating
 the index and ``load()`` / query methods for using it during quantification.
@@ -64,47 +66,17 @@ SJ_BLACKLIST_TSV = "splice_blacklist.tsv"
 
 MANIFEST_JSON = "manifest.json"
 
-#: On-disk index format version. Bumped whenever the schema or the
-#: meaning of any persisted column changes. Loaders should refuse
-#: indexes whose ``format_version`` they do not understand.
-#:
-#: Version history:
-#:   2 — (legacy) intervals.feather + sj.feather + transcripts.feather.
-#:   3 — adds regions.feather (calibration partition); ref_lengths.feather
-#:        is now mandatory at load time and used to validate the region
-#:        partition.
-#:   4 — regions.feather stored fine-region signatures plus derived coarse
-#:        bridge columns for calibration consumers.
-#:   5 — calibration-v6: regions.feather is the minimal merged-signature
-#:        partition [region_id, ref_name, start, end, length, signature];
-#:        the derived coarse class is recomputed on load from `signature`.
-#:   6 — three-channel calibration: regions.feather gained per-strand
-#:        `mature_eligible_{pos,neg}` and boundaries.feather carried
-#:        per-boundary annotation flags (is_tss/is_tes/is_splice_sj/
-#:        genomic_sj_strand).
-#:   7 — those v6 precompute columns removed (the message-precision collapse
-#:        retired the mature/nascent overlay that consumed them; the solver
-#:        reads sj strand from the accumulator motif instead).
-#:        regions.feather is again the minimal partition [region_id, ref_name,
-#:        start, end, length, signature]; boundaries.feather is [boundary_id,
-#:        ref_name, position].
-#:   8 — the SPLICE GRAPH replaces the region/boundary partition. regions.feather +
-#:        edges.feather are the only partition artifacts and both are MANDATORY;
-#:        regions.feather / boundaries.feather are gone. The scanner is fed the region
-#:        region_bound array by `calibration.splice_graph.build_region_partition_arrays`.
-#:        Adjacent regions may share a signature — that is the point: the merge it
-#:        replaces deleted the region_bound at 53.4 % of real human transcript termini, so the
-#:        partition could not see them at all.
+#: On-disk index format version, bumped whenever the schema or the meaning of any persisted column
+#: changes; :meth:`TranscriptIndex.load` refuses any other. 8 is the splice graph: ``regions.feather`` +
+#: ``edges.feather``, both mandatory, adjacent regions not merged (a merge deletes the region bound at a
+#: majority of real transcript termini).
 INDEX_FORMAT_VERSION = 8
 
 
 def _rigel_version() -> str:
-    try:
-        from . import __version__  # type: ignore[attr-defined]
+    from . import __version__
 
-        return str(__version__)
-    except Exception:  # pragma: no cover
-        return "unknown"
+    return str(__version__)
 
 
 #: Read size for streaming a content digest. An I/O buffer, not a model parameter — it changes how fast
@@ -165,10 +137,8 @@ def source_record(path: str | Path) -> dict:
 
 
 def load_manifest(index_dir: str | Path) -> dict | None:
-    """Load ``manifest.json`` from an index directory.
-
-    Returns ``None`` for legacy indexes (no manifest file present).
-    """
+    """Load ``manifest.json`` from an index directory; ``None`` when there is none, which
+    :meth:`TranscriptIndex.load` refuses."""
     path = Path(index_dir) / MANIFEST_JSON
     if not path.exists():
         return None
@@ -495,7 +465,7 @@ def create_nrna_transcripts(
         ms, me = t_to_merged_span[t.t_index]
         key = (t.ref, int(t.strand), ms, me)
         if key not in merged_spans:
-            merged_spans[key] = t  # keep first for gene metadata
+            merged_spans[key] = t
         span_contributor_count[key] += 1
         t_to_span_key[t.t_index] = key
 
@@ -621,27 +591,6 @@ def write_bed12(
                 f"{rgb}\t{block_count}\t{block_sizes}\t{block_starts}\n"
             )
     return bed_path
-
-
-def gtf_to_bed12(gtf_path: str | Path, bed_path: str | Path) -> Path:
-    """Convert a GTF file to BED12 for minimap2 ``-j`` annotation.
-
-    Convenience wrapper around ``read_transcripts()`` + ``write_bed12()``.
-
-    Parameters
-    ----------
-    gtf_path : str or Path
-        Input GTF file (may be gzipped).
-    bed_path : str or Path
-        Output BED12 file path.
-
-    Returns
-    -------
-    Path
-        The written BED12 file path.
-    """
-    transcripts = read_transcripts(gtf_path)
-    return write_bed12(transcripts, bed_path)
 
 
 def _gen_transcript_intervals(t: Transcript) -> Iterator[AnnotatedInterval]:
@@ -808,10 +757,8 @@ def build_index_artifacts(
     intervals: list[AnnotatedInterval] = []
 
     for ref, ref_length in ref_lengths.items():
-        layout_for_intervals = list(
-            _iter_reference_layout(ref_length, ref_transcripts.get(ref, []))
-        )
-        intervals.extend(_emit_genomic_intervals(ref, iter(layout_for_intervals)))
+        layout = _iter_reference_layout(ref_length, ref_transcripts.get(ref, []))
+        intervals.extend(_emit_genomic_intervals(ref, layout))
 
     intervals.sort(key=lambda iv: (iv.ref, iv.start, iv.end, iv.strand))
     iv_df = pd.DataFrame(intervals, columns=AnnotatedInterval._fields)
@@ -858,7 +805,7 @@ class TranscriptIndex:
         self.sj_map: dict | None = None
 
         # Splice-artifact blacklist size, set at load():
-        #   None → index predates the field / never loaded
+        #   None → not loaded
         #   0    → no blacklist present (artifact detection is OFF)
         #   >0   → number of blacklisted sj active (detection is ON)
         self.sj_blacklist_size: int | None = None
@@ -867,6 +814,8 @@ class TranscriptIndex:
         # Maps t_index → (n_exons, 2) int32 array of [start, end) intervals
         # sorted by genomic start position.
         self._t_exon_intervals: dict[int, np.ndarray] | None = None
+        # The same exons as flat CSR arrays, built once by build_exon_csr().
+        self._exon_csr_cache: tuple | None = None
 
         # When True, Python-side structures are kept after C++ projection
         # (for unit tests that inspect _iv_t_set, sj_map, _t_exon_intervals).
@@ -1007,8 +956,7 @@ class TranscriptIndex:
             blacklist is derived from
             ``AlignableStore.splice_blacklist()`` and persisted as
             ``splice_blacklist.feather`` in the index.  When ``None``,
-            no blacklist is written.  (Per-region mappability was
-            removed in v0.5.0; calibration does not consume it.)
+            no blacklist is written.
         splice_blacklist_min_count : int
             Minimum per-row count for a (chrom, intron, read_length)
             artifact to enter the blacklist.  Default ``2``.
@@ -1593,12 +1541,8 @@ class TranscriptIndex:
 
         # 3. Per-transcript exon CSR for transcript-space FL computation.
         #    build_exon_csr() is the single owner of this CSR (it is also
-        #    consumed by scoring), so reuse it here rather than duplicating
-        #    the flattening loop — the two paths cannot drift.  NOTE: this
-        #    also triggers build_exon_csr()'s free-after-build of
-        #    ``_t_exon_intervals`` (unless retain_test_structures); the dict
-        #    is no longer needed after this point (get_exon_intervals()
-        #    falls back to the cached CSR arrays).
+        #    consumed by scoring), and it frees ``_t_exon_intervals`` unless
+        #    retain_test_structures.
         exon_offsets, exon_starts_flat, exon_ends_flat, exon_cumsum_flat = self.build_exon_csr()
         # Per-transcript spliced length = sum of exon lengths, derived from
         # the same CSR: cumulative segment lengths differenced at the CSR
@@ -1626,14 +1570,13 @@ class TranscriptIndex:
         #    each synthetic candidate from real-tx hits via nrna_parent_.
         is_synth = self.t_df["is_synthetic"].to_numpy(dtype=bool)
         ctx.set_nrna_status(is_synth.astype(np.uint8).tolist())
-        if "nrna_t_index" in self.t_df.columns:
-            nrna_idx = self.t_df["nrna_t_index"].to_numpy(dtype=np.int32)
-            parent = np.full(nrna_idx.shape, -1, dtype=np.int32)
-            valid = (nrna_idx >= 0) & (nrna_idx < is_synth.size)
-            parent_is_synth = np.zeros_like(nrna_idx, dtype=bool)
-            parent_is_synth[valid] = is_synth[nrna_idx[valid]]
-            parent[parent_is_synth] = nrna_idx[parent_is_synth]
-            ctx.set_nrna_parent_index(parent.tolist())
+        nrna_idx = self.t_df["nrna_t_index"].to_numpy(dtype=np.int32)
+        parent = np.full(nrna_idx.shape, -1, dtype=np.int32)
+        valid = (nrna_idx >= 0) & (nrna_idx < is_synth.size)
+        parent_is_synth = np.zeros_like(nrna_idx, dtype=bool)
+        parent_is_synth[valid] = is_synth[nrna_idx[valid]]
+        parent[parent_is_synth] = nrna_idx[parent_is_synth]
+        ctx.set_nrna_parent_index(parent.tolist())
 
         self.resolver = ctx
         logger.debug("Built native FragmentResolver for C++ resolution")
@@ -1684,12 +1627,8 @@ class TranscriptIndex:
     def get_exon_intervals(self, t_idx: int) -> np.ndarray | None:
         """Return sorted exon ``[start, end)`` intervals for a transcript.
 
-        Order-independent: once :meth:`build_exon_csr` has been called it
-        frees the source ``_t_exon_intervals`` dict (memory optimization,
-        unless ``retain_test_structures``), after which this accessor
-        transparently reconstructs the interval from the cached CSR arrays.
-        It therefore never returns a misleading ``None`` merely because
-        scoring/loading ran first.
+        Needs the per-transcript dict, which :meth:`build_exon_csr` frees at load unless the index was
+        loaded with ``retain_test_structures`` — the same contract as :meth:`query`.
 
         Parameters
         ----------
@@ -1702,20 +1641,12 @@ class TranscriptIndex:
             ``(n_exons, 2)`` int32 array sorted by genomic start, or
             ``None`` if the transcript has no cached exon intervals.
         """
-        if self._t_exon_intervals is not None:
-            return self._t_exon_intervals.get(t_idx)
-        # Dict was freed after build_exon_csr(); rebuild from the cached CSR.
-        cache = getattr(self, "_exon_csr_cache", None)
-        if cache is None:
-            return None
-        offsets, starts, ends, _ = cache
-        if t_idx < 0 or t_idx + 1 >= len(offsets):
-            return None
-        lo = int(offsets[t_idx])
-        hi = int(offsets[t_idx + 1])
-        if lo == hi:
-            return None
-        return np.column_stack((starts[lo:hi], ends[lo:hi])).astype(np.int32)
+        if self._t_exon_intervals is None:
+            raise RuntimeError(
+                "get_exon_intervals() unavailable: the exon intervals were freed after the exon CSR "
+                "was built. Load the index with retain_test_structures=True."
+            )
+        return self._t_exon_intervals.get(t_idx)
 
     def build_exon_csr(
         self,
@@ -1729,9 +1660,6 @@ class TranscriptIndex:
         The result is cached: subsequent calls return the same arrays
         and the source ``_t_exon_intervals`` dict is freed after the
         first call to reclaim memory (unless ``retain_test_structures``).
-        This free-after-build is why :meth:`get_exon_intervals` falls back
-        to reconstructing intervals from the cached CSR — callers must not
-        rely on ``_t_exon_intervals`` still being populated afterwards.
 
         Returns
         -------
@@ -1744,8 +1672,7 @@ class TranscriptIndex:
         cumsum_before : np.ndarray
             int32[total_exons] — cumulative exon length before each exon.
         """
-        # Return cached result if available.
-        if hasattr(self, "_exon_csr_cache") and self._exon_csr_cache is not None:
+        if self._exon_csr_cache is not None:
             return self._exon_csr_cache
 
         n_t = self.num_transcripts

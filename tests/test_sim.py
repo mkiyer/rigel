@@ -317,9 +317,9 @@ class TestGeneBuilder:
                 ],
             )
 
-    def test_gtf_to_bed12(self, tmp_path):
+    def test_write_bed12(self, tmp_path):
         """GTF → BED12 conversion produces valid 12-column BED."""
-        from rigel.index import gtf_to_bed12
+        from rigel.index import read_transcripts, write_bed12
 
         g = MutableGenome(2000, seed=1, name="chr1")
         builder = GeneBuilder(g)
@@ -339,7 +339,7 @@ class TestGeneBuilder:
         )
         gtf_path = builder.write_gtf(tmp_path)
         bed_path = tmp_path / "annotation.bed"
-        result_path = gtf_to_bed12(gtf_path, bed_path)
+        result_path = write_bed12(read_transcripts(gtf_path), bed_path)
         assert result_path.exists()
 
         lines = bed_path.read_text().strip().split("\n")
