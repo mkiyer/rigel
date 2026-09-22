@@ -7,20 +7,13 @@ and gene index sets.  When memory usage exceeds a configurable threshold,
 completed chunks are spilled to disk as Arrow IPC (Feather v2) files
 with LZ4 compression.
 
-Memory efficiency vs. Python objects::
-
-    ResolvedFragment objects:   ~580-640 bytes per fragment
-    Columnar buffer:           ~40-50 bytes per fragment  (15× reduction)
-
 Architecture
 ------------
-- Fragments are appended one at a time during the BAM scan.
-- Accumulated into chunks of configurable size (default 1M fragments).
-- Each chunk is finalized to compact NumPy arrays.
+- The native scanner hands over finalized chunks of compact NumPy arrays
+  (``inject_chunk``); tests build them fragment by fragment (``append``).
 - When total in-memory chunk size exceeds *max_memory_bytes*,
   the oldest chunk is spilled to disk as Arrow IPC with LZ4.
-- Phase 2/3 iterate the buffer, yielding lightweight
-  ``BufferedFragment`` views backed by array slices.
+- Scoring consumes the chunks once, in order (``iter_chunks_consuming``).
 """
 
 import logging
@@ -60,10 +53,7 @@ FRAG_CHIMERIC: int = 4  # chimeric fragment (disjoint transcript sets)
 
 @dataclass(slots=True)
 class BufferedFragment:
-    """Lightweight view into a columnar buffer chunk.
-
-    Provides the same duck-typed interface as ``ResolvedFragment`` so
-    that the C++ scoring functions work without modification.
+    """Lightweight view of one fragment in a columnar buffer chunk.
 
     ``t_inds`` is a NumPy array slice (supports iteration, ``len()``,
     indexing) rather than a frozenset.  Strand mixing is represented
@@ -85,7 +75,6 @@ class BufferedFragment:
     genomic_start: int = -1
     nm: int = 0
     exon_bp: np.ndarray | None = None
-    intron_bp: np.ndarray | None = None
 
     @property
     def is_same_strand(self) -> bool:
@@ -127,12 +116,6 @@ class _FinalizedChunk:
         * Fragment lengths stay int32 because real transcript-space
             fragments can exceed 65535 on long intron-spanning candidates.
         * ``read_length`` is uint16 and guarded at native append.
-
-        Dead/stale buffer columns are intentionally not stored here:
-        ``intron_bp`` was never consumed by the scorer, and the
-        strand-aware overlap diagnostics (``exon_bp_pos``, ``exon_bp_neg``,
-        ``tx_bp_pos``, ``tx_bp_neg``) are produced on direct resolver
-        results but have no scan-buffer consumer.
     """
 
     splice_type: np.ndarray  # uint8[N]
@@ -269,7 +252,6 @@ class _FinalizedChunk:
             t_inds=self.t_indices[start:end],
             frag_lengths=self.frag_lengths[start:end],
             exon_bp=self.exon_bp[start:end],
-            intron_bp=None,
             ambig_strand=int(self.ambig_strand[i]),
             splice_type=int(self.splice_type[i]),
             align_strand=int(self.align_strand[i]),
@@ -362,11 +344,7 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
         frag_id=table.column("frag_id").to_numpy().astype(np.int64),
         read_length=table.column("read_length").to_numpy().copy().astype(np.uint16),
         genomic_footprint=table.column("genomic_footprint").to_numpy().copy(),
-        genomic_start=(
-            table.column("genomic_start").to_numpy().copy()
-            if "genomic_start" in table.column_names
-            else np.full(len(table), -1, dtype=np.int32)
-        ),
+        genomic_start=table.column("genomic_start").to_numpy().copy(),
         nm=table.column("nm").to_numpy().copy().astype(np.uint16),
         size=len(table),
     )
