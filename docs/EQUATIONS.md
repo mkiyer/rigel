@@ -696,16 +696,17 @@ still derived: with `m` fragments whose only RNA candidate is the entity, it gro
 `m·w_N > Total·theta_g·w_g`. Written in densities that is `m/L_n > Total·theta_g/L_g` — the entity's
 footprint against the gDNA component's average — and in a locus whose gDNA is uniform the footprint holds
 its share of it (`m ∝ L_n/L_g` of the total), so the factor is the density ratio and not `L_g/L_n`: a
-whole MultiLocus's one gDNA opportunity does not by itself destabilise a shadow. What makes `theta_n = 0`
-unstable under capture is the gDNA component priced at `ρ q̄` of its density (§11), and it is measured
-with one E-step from the TRUE counts (2026-09-20): off capture the truth is a fixed point (the shadows
-return −1.6 %); on capture it drifts +24 % per step, +47 % without the priors, and +9 % with the gDNA
-opportunity at its oracle value. The toy below is a locus with ALL of its gDNA under one shadow — the
-contest the note of 2026-09-19 solved — and is kept as the record of what the solver does there, not of
-the ladder: off capture `L_g/L_fam` reaches 5 with no leak, on capture families over-claim 3.5× where
-the ratio is 1, and single-twin families leak 4.3× against 3.7× for families of ten
-(`ISSUES: nascent-siphons-gdna-under-capture`). On a pool of `N` fragments that only gDNA and the
-shadow can explain, split evenly by genome strand, the fixed point in `r = b/a` is
+whole MultiLocus's one gDNA opportunity does not by itself destabilise a shadow. What made `theta_n = 0`
+unstable under capture was the gDNA component priced at `ρ q̄` of its density (§11: an incidence-counted
+length); the conserved share prices each start once. It was measured with one E-step from the TRUE counts
+(2026-09-20): off capture the truth was a fixed point (the shadows returned −1.6 %); on capture it drifted
++24 % per step, +47 % without the priors, and +9 % with the gDNA opportunity at its oracle value. The toy
+below is a locus with ALL of its gDNA under one shadow — the contest the note of 2026-09-19 solved — and is
+kept as the record of what the solver does there, not of the ladder: off capture `L_g/L_fam` reaches 5 with
+no leak, on capture families over-claim 3.5× where the ratio is 1, and single-twin families leak 4.3×
+against 3.7× for families of ten (`ISSUES: nascent-siphons-gdna-under-capture`). On a pool of `N`
+fragments that only gDNA and the shadow can explain, split evenly by genome strand, the fixed point in
+`r = b/a` is
 
     r · L_n/L_g = [ ss·r/(ss·r + ½) + (1−ss)·r/((1−ss)·r + ½) ]
                 / [    ½/(ss·r + ½) +        ½/((1−ss)·r + ½) ]
@@ -1011,128 +1012,176 @@ Known approximation: `ρ` enters as a hard multiplicative zero, but zero observa
 `P(0 | λ, E) = e^(−λE)`, not zero. The hard zero is the large-exposure limit of the correct likelihood, so
 it is right where the library is deep and wrong where it is shallow.
 
-## 11. The ruler — a transcript's bases at their pieces' capture efficiencies (`capture_eff_length`, `capture_efficiency`, `priors.assemble_priors`; the reference, `abundance_landscape.located_enriched_mode`)
+## 11. The conserved frame — every component's shares of its objects at their capture efficiencies (`effective_length.conserved_cut_shares`, `capture_eff_length`, `capture_efficiency`, `priors.assemble_priors`, `calibrate._gdna_boundary_conserved_len`; the reference, `abundance_landscape.located_enriched_mode`)
 
-Under hybrid capture the EM divides a transcript by its effective length under capture: its
-FL-marginal length times the mean capture efficiency of its bases,
+Under hybrid capture the EM divides every component by its capture-contracted length, and one rule gives it
+for all three — the locus gDNA component, every synthetic nascent span, every annotated transcript: the sum,
+over every object the component's fragments deposit on, of the component's CONSERVED SHARE of that object
+times the object's capture efficiency,
 
-    eff_em_t = fl_t · factor_t,    factor_t = Σ_p ℓ_p^τ · c̃_p / Σ_p ℓ_p^τ,
+    L_T  =  Σ_pieces S_T(p) · c_p  +  Σ_cuts M_T(k) · c_k.
 
-over the pieces `p` (regions of the partition) the transcript's exons overlap, with `c̃_p` the piece's
-capture efficiency — its gDNA density against the fully captured level `ρ_ref`, clipped at 1 — and
-`ℓ_p^τ` the taper-weighted count of the transcript's bases in the piece. `factor_t ∈ (0, 1]`, and it is
-exactly 1 when no piece is depleted relative to the reference. The locus gDNA component takes the same
-sum over the locus's pieces, introns included, since gDNA's template is the genome.
+A component's PIECES are the regions its template covers — a transcript's exons cut at region boundaries, a
+synthetic span's genomic interval, the gDNA component's locus regions — and between two consecutive pieces
+is a CUT: the boundary between them or, in a spliced template's own coordinates, a junction. The shares are
+geometry on the component's own pmf and the efficiencies are gDNA's; nothing else enters. Objects and not
+bases, because the deposit rule gives a crossing fragment's unit to the boundaries and junctions it
+crosses: those objects own the crossing mass, a piece shorter than a fragment is seen only through its cuts,
+and the length must be conserved as the mass is (`DESIGN.md` §7.2). `ruler_vs_truth.py --scale` reads every
+class's length against the simulator's own yield.
 
-**The length is a sum over bases (role one).** A transcript's effective length under capture is the
-sum over its start positions of the efficiency of the fragment starting there, and a fragment's
-efficiency is the mean per-base efficiency over the bases it covers, so
+**The shares (`effective_length`).** `S_T(p) = E_f[(ℓ_p − w + 1)⁺]` is the contained share (§1.3). `M_T(k)`
+is the deposit rule (§3b; `tests/native/_accumulator_reference.py`, `Accumulator.deposit`) summed over the
+template's placements: a crossing placement's path is cut into slices at the boundaries and junctions it
+crosses, and each slice's share of the fragment — its bases over `w` — is shared equally by the objects
+bounding it. Put the cut at 0 between a left piece of length `a` and a right piece of length `b`, with
+`near` and `far` bases of template left and right of it (the REACH, `near ≥ a`, `far ≥ b`). A length-`w`
+placement with `x` bases left of the cut is admissible iff
 
-    eff_t = Σ_x c̃(x) · τ(x),      τ(x) = E_f[ (starts whose fragment covers base x) / w ],
+    max(1, w − far)  ≤  x  ≤  min(w − 1, near),        w ≤ near + far,
 
-over the transcript's own bases `x` in transcript coordinates. A fragment of length `w` starting at
-`s` covers `x` iff `s ≤ x < s + w` with `0 ≤ s ≤ L − w`, which is `min(x + 1, w, L − x, L − w + 1)⁺`
-starts, each spreading its unit over `w` bases; so `Σ_x τ(x) = Σ_w f(w)(L − w + 1)⁺ = fl_t` exactly —
-the per-base frame partitions the start count, it does not re-derive it — and away from both ends
-`τ = 1`, only the bases within a fragment of an end being tapered (`effective_length.BaseTaper`; for
-`L ≥ 2 w_max − 1` the four-way min is `min(d, w)` with `d = min(x + 1, L − x)` and one cumulative
-table serves every template). With `c̃` constant on a piece the sum is the factor above. No boundary
-object, no junction object and no contained support enters the length: a junction-spanning start is
-counted through the bases it covers, a piece shorter than a fragment carries its bases' weight, and
-`span = fl` holds for every structure by construction — the property the junction objects were built
-to secure, which they secured by imputing forty junctions from pieces that had no support on the
-ladder's dense annotation.
+and gives the cut `[L_a(x) + L_b(w − x)] / w`, where
 
-**The locus gDNA length counts what the count counts.** The EM's gDNA component for a locus carries
-a COUNT, the calibration's gDNA mass on the locus's regions and boundaries (one crossing converted by
-`q`, the conserved mass per crossing), and the length it divides that count by is those same objects'
-starts at their own efficiencies, each start counted ONCE:
+    L_a(x) = x       x ≤ a     it starts inside the left piece: an end slice, bounded by this cut alone
+           = a/2     x > a     it runs through the piece: bounded by this cut and the piece's other cut
 
-    eff_g = Σ_r S_r · c̃_r + Σ_e q_e · S_e · c̃_e,
+(`x > a` needs `near > a`: an end piece has no other cut). So
+`M_T(k) = Σ_w f(w)/w · Σ_x [L_a(x) + L_b(w − x)]`, its LEFT and RIGHT parts the shares the two pieces' bases
+carry.
 
-the contained support of every region at its efficiency and the crossing support of every boundary at
-the boundary's own efficiency `c̃_e = E[min(ρ_e/ρ_ref, 1) | k_e, S_e]`, converted by that boundary's `q_e`.
-The conversion is the deposit rule's own: a crossing fragment deposits a count of +1 at EVERY boundary it
-crosses and a mass summing to 1 across them, so a boundary's crossing support `E_f[w − 1]` (§2; gDNA's
-reach is unbounded) counts INCIDENCES, and a start whose fragment spans a piece shorter than itself sits
-in the support of both of that piece's boundaries. Under a uniform field of ρ fragments per start every
-object reads its own density (`k_e = ρ S_e`, `m_r = ρ S_r`), the count is `ρ (Σ S_r + Σ q_e S_e) = ρ N_starts`,
-and the UNconverted length `Σ S_r + Σ S_e` is `N_incidences`, so a component read against it has density
-`ρ · N_starts / N_incidences = ρ q̄` — the field's only where no fragment crosses two boundaries. Enumerated
-(`tests/calibration/test_priors.py`: three 40-bp pieces inside a long reference, four boundaries counting the
-locus's outer two, fragments of 60), 179 distinct starts overlap the locus against 236 incidences,
-`q = 49.5/59` at the outer boundaries and `40/59` at the inner ones, and `Σ q_e S_e = 179` exactly. At
-`q = 1` — flanks longer than every fragment — the two forms coincide, so the factor-one identity holds as
-before and a capture-OFF prior moves only at loci whose fragments span short pieces.
+**The closed form at any reach (`_side_share`).** For the left part, the inner sum with no far side,
+`Σ_{x=1}^{min(w−1, near)} L_a(x)`, is
 
-**What the unconverted support cost (shipped 2026-09-16 → 2026-09-20).** It had been refused by a
-measurement on the test chromosome's capture-OFF transcript number, before nascent RNA's share of the RNA
-prior was restored — 1–2 % worse, a contaminated toy's injection gate insensitive — which ranked a
-calibration input on the thermometer and read the unmasking of a cancelling error as harm. Under capture
-the introns contribute no opportunity and the probed exons are shorter than a fragment, so the crossing
-support is 64 % of the locus length over the ladder's `g50 ss.99 ON` loci and 84 % in the loci that leak
-(15 % off capture), and the boundary term reads `1/q̄` times the once-counted crossing gDNA it holds
-(correlation 0.988 over 722 loci). A gDNA component priced at `ρ q̄` hands its sense fragments at the
-probed exons to the RNA hypotheses, and the synthetic nascent entities, pinned by nothing, take them
-(`ISSUES: nascent-siphons-gdna-under-capture`). Converting the support takes that row's siphon from
-+541,216 to +32,908 fragments and its gDNA pool from −626,550 to −56,319, with `calibration_vs_oracle.py`,
-`zero_controls.py` and `policy_benchmark.py` identical on every metric.
+    (w − 1)·w/2           w ≤ a + 1
+    a·w/2                 a + 1 < w ≤ near + 1
+    a·(near + 1)/2        near + 1 < w
 
-One other form stays refused by measurement: the transcript's per-base form over the locus's bases drops
-the boundary objects whose masses the count keeps, and where the calibration's crossing masses sit above
-their geometry the gDNA component then reads denser than its objects, over-claims the exonic unspliced
-fragments and every probed gene under-calls — the test chromosome's `g50 ss.99 ON` row through the
-thermometer, gene-level Σ|Δ| 25,633 → 38,174 against 23,967 with the object form, and the gDNA pool +5.5 %
-against −0.1 %.
+and the far side removes the `x < w − far`, `Σ_{x=1}^{w−far−1} L_a(x)`:
 
-**The evidence is every unspliced gDNA object over the piece (role two).** gDNA is one template at a
-uniform rate before capture, so its density after capture on a piece is that piece's efficiency up to
-the one unit `ρ_ref`; and the accumulator counts a fragment at every boundary it crosses, so a piece
-too short to contain a fragment is witnessed at its edges. Two kinds of count: the piece's own
-CONTAINED count `k_p` on its support `S_p = E_f[(ℓ_p − w + 1)⁺]`, `E[k_p] = ρ_p S_p`; and the CROSSING
-count `k_e` at every boundary within a fragment's reach, whose fragments' bases lie in the pieces they
-cover in proportions the geometry fixes,
+    0                             w ≤ far + 1
+    (w − far − 1)(w − far)/2      far + 1 < w ≤ far + 1 + a
+    a·(w − far)/2                 far + 1 + a < w
 
-    E[k_e] = Σ_q A_eq · ρ_q,      A_eq = Σ_w f(w) Σ_{a=1}^{w−1} (bases of the placement in q) / w,
+— the removed `x` never exceed `near − 1`, since `w ≤ near + far`, so the two tables subtract term by term.
+Divided by `w` and summed against `f` up to `w = near + far`, the kept segments are `½Σ f·(w − 1)`, `½a Σ f`
+and `½a(near + 1) Σ f/w` over their ranges and the removed ones `½Σ f·(w − (2 far + 1) + far(far + 1)/w)` and
+`½a Σ f·(1 − far/w)`: three cumulative sums over the pmf — of `f`, `w·f` and `f/w` — read at the segment ends,
+so `conserved_cut_shares` is O(objects) with no per-width loop. The right part is the mirror (`b`, `far`,
+`near`). A reach that excludes its own piece (`reach_lo < a` or `reach_hi < b`) is refused. Where neither
+reach binds the sums close to
 
-with `A_eq = G(c_j) − G(c_{j−1})` for the piece at cumulative distance `(c_{j−1}, c_j]` on a side,
-`G(c) = Σ_w f(w) Σ_{a=1}^{w−1} min(a, c)/w`, and `Σ_q A_eq = E_f[w − 1]` exactly, the crossing
-opportunity partitioned over the bases it counts (`effective_length.crossing_base_shares`, gated
-against enumeration). A crossing at an interior boundary of a long exon has its bases in two pieces of
-equal efficiency and reads that efficiency directly; a crossing at the edge of a 40 bp exon has a share
-`≈ 35 / 216` of its base-starts in the exon and the rest in the intron, whose efficiency is pinned by
-its own long contained count, so the exon's efficiency is identified from the edge counts against the
-intron's known level.
+    M  =  ½E_f[min(a, w − 1)]  +  ½E_f[min(b, w − 1)],
 
-**The efficiency is a posterior mean, not a plug-in.** Under the fitted gDNA landscape `P(log ρ)` — the
-same `DensityLandscape` ψ's composition arm reads on the refits, the population's own statement of
-where gDNA densities sit — and the Poisson counting rule as the likelihood,
+§3b's `A_mass` in expectation, and beside two pieces longer than every fragment to the crossing support
+`E_f[w − 1]` (§1.2) exactly: no fragment crosses a second cut.
 
-    c̃_p = E[ min(ρ_p / ρ_ref, 1) | k_p, S_p, {z_ep, A_ep}_e ],
+**Conservation.** A placement that crosses no cut gives its unit to the one piece it lies in; one that
+crosses cuts gives its whole unit to cuts, since every slice touches a crossed cut (an end slice one, an
+interior slice two) and the slices' shares sum to 1 (§3b). So every placement is counted once:
 
-on the landscape's grid, with the crossings APPORTIONED: a crossing count is a Poisson sum over the
-pieces within reach, and the E-step of a Poisson sum attributes it,
-`z_eq = k_e · A_eq ρ̄_q / Σ_q' A_eq' ρ̄_q'` with `ρ̄` the pieces' own-count posterior means, each piece
-then reading its share as a count on its own exposure `A_eq` (the terms of one piece pool exactly into
-one Poisson term). The neighbours are held at what their own counts say — one pass. At high depth the
-posterior is the plug-in `min(k/S/ρ_ref, 1)`; at low depth it is the population's mixture weighted by
-the piece's own likelihood; a piece with no evidence reads the population's clipped mean; no constant
-enters, and no floor: the multimapper floor `w = C/(C+1)` this replaces was a +3.4 to +3.7 nat bias on
-every unprobed transcript at every gDNA level, protecting against a plug-in's exact zero that a
-posterior mean never produces. `k_p` and `k_e` are deconvolved masses, so the Poisson enters through
-the gamma function as a continuation, and `k_p` already carries the landscape through the solve, so the
-prior enters twice in a small way — measured against the solve's own posterior (the belief's `f_g` and
-`Var(log f_g)` as a log-normal, closed form), which loses badly where a slot is not solved
-(+1.25 to +4.96 nat on the unprobed class), and against the clip taken outside the expectation,
-`min(E[ρ]/ρ_ref, 1)`, which is indistinguishable on every row measured. Iterating the apportionment
-with the updated means is EM on the joint and converges (13 passes on the test chromosome, 59 on the
-ladder, at the grid step), changing nothing the truth instrument can see — identical on every test
-chromosome row, +0.44 against +0.46 nat on the ladder's `g05 ss.99 ON` unprobed class — so the one pass
-ships; a joint update of neighbours instead (each conditioning on the other's mean with the whole count)
-never settles, 64–66 pieces of the test chromosome and ~2,000 of the ladder flipping by 8 nat every pass.
+    Σ_p S_T(p)  +  Σ_k M_T(k)  =  Σ_w f(w)·(L_T − w + 1)⁺,
+
+the fl-marginal length, exactly, however many cuts one fragment crosses; over the ladder's 15,556 templates
+and 353,769 cuts (45,609 junctions) it held to 8e-15. At unbounded reach it holds region by region: a
+region's contained share plus its parts of the boundaries on its two sides is `(ℓ − w + 1) + (w − 1)` where a
+fragment fits and `0 + ℓ` where it does not, so every region carries exactly its own `ℓ`. ⛔ A total never
+gates the rule — a `1/K` split of a crossing unit over the `K` cuts it crosses conserves the same sum
+(`TRAPS: conservation-misses-mis-attribution`) — so the gates are per object against the reference
+accumulator, on a spliced template with 1–3 bp pieces and junctions and on gDNA's chromosome
+(`tests/calibration/test_effective_length.py`), and on the index path (`test_capture_eff_length.py`).
+
+**The gDNA component (`priors.assemble_priors`, `calibrate._gdna_boundary_conserved_len`).** Its template is
+the chromosome, so its reach is `UNBOUNDED_REACH` and a boundary's share `M_e` is the closure above on the two
+flanking regions, published as `CalibrationResult.gdna_boundary_conserved_len`. The length is the locus's
+regions and every boundary touching them, at the count's own overlap weights `ω` (`share` in the code: a
+region's overlap with the locus, a boundary's the larger of its two flanks'):
+
+    gdna_eff_len  =  Σ_r ω_r·S_r·c_r  +  Σ_e ω_e·M_e·c_e.
+
+For a locus that owns its regions whole, at every efficiency 1, the region identity gives
+
+    Σ_r S_r + Σ_e M_e  =  L + ½E_f[min(a_L, w − 1)] + ½E_f[min(a_R, w − 1)],
+
+`L` the locus's bases and `a_L`, `a_R` the regions just outside it; where both exceed every fragment it is
+`Σ_w f(w)(L + w − 1)`, the starts whose fragments overlap the locus — what the count holds under a uniform
+gDNA field, each fragment once. Enumerated (`tests/calibration/test_priors.py`: three 40-bp pieces inside a
+long reference, fragments of 60): no piece contains a fragment, the outer boundaries' shares are 49.5 and the
+inner ones 40, and `Σ M_e = 179`, the distinct starts overlapping the locus, against 236 incidences in the
+crossing supports. That is why the crossing support is not the length: it counts a start at every boundary its
+fragment crosses, so under a uniform field `ρ` a component read against it has density
+`ρ · N_starts / N_incidences = ρ q̄`, `q̄` the locus's starts per incidence — the field's only where no
+fragment crosses two boundaries. And the share is gDNA's own: `M_e = share_g · E_f[w − 1]` in §3b's notation,
+while the count converts a boundary's gDNA crossing count by the MIXTURE's share
+`q = boundary_mass_per_crossing` (§3b's pooling theorem), RNA's where RNA holds most of the boundary's
+crossings — so the length reads gDNA's geometry and never `q`.
+
+**Transcripts and synthetic spans (`capture_eff_length`).** `transcript_objects` builds every template's
+pieces and cuts from the annotation and the RNA pmf alone — an annotated transcript's exons, or a synthetic
+span's interval, cut at the region boundaries; the reach at each cut the template's own bases either side;
+a cut a junction where its two pieces belong to different exons with a region between them, so a synthetic
+span has none. `transcript_capture_eff_lengths` applies the rule as a factor on the pipeline's fl-marginal
+length,
+
+    eff_em_t  =  fl_t · (Σ_p S_p c_p + Σ_k M_k c_k) / (Σ_p S_p + Σ_k M_k),
+
+which conservation makes the sum itself wherever `fl_t` is unfloored; the factor form keeps `fl_eff_lengths`'
+floor of 1 for a transcript shorter than every fragment, and a transcript with no share keeps `fl_t`. A piece
+prices at its region's efficiency and a contiguous cut at its boundary's: there the component's fragments are
+genomically contiguous, as gDNA's are.
+
+**The junction, by conservation of bases (`capture_eff_length._cut_efficiencies`).** gDNA never deposits on a
+junction, so no count prices one, and capture is local, so its price comes from the objects within one
+fragment of it (owner, 2026-09-23; `DESIGN.md` §7.2). In genomic order, let the junction join the exon piece
+below it to the exon piece above it, with `c_lo` and `c_hi` the junction's low and high boundaries — the end
+of the exon piece below, the start of the exon piece above — and `c_intron,lo`, `c_intron,hi` the intron
+pieces beside them, and suppose capture adds over a fragment's bases, each piece's efficiency the capture of
+a fragment made wholly of its bases. A fragment across the junction with `x` bases below it holds `x` bases
+of the exon piece below and `w − x` of the exon piece above. A gDNA fragment across the junction's low
+boundary with the same `x` holds the same low-exon bases and `w − x` intron bases; one across its high
+boundary with `w − x` above it holds `x` intron bases and the same high-exon bases. The two gDNA crossings
+together hold the junction fragment's bases plus `(w − x)/w` of a fragment of the low intron piece and `x/w`
+of the high one, and averaged over the crossing positions each is a half:
+
+    c_junction  =  c_lo + c_hi − ½(c_intron,lo + c_intron,hi).
+
+Where each of the junction's boundaries reads its two flanks' mean — `c_lo = ½(c_exon,lo + c_intron,lo)`,
+`c_hi = ½(c_intron,hi + c_exon,hi)` — it is `½(c_exon,lo + c_exon,hi)`, the junction fragment's half a
+fragment of each exon. The junction ADDS its two sides' exon capture: where the introns are uncaptured it is
+`c_lo + c_hi`, twice the two boundaries' mean (`ISSUES: the-junction-price-at-its-neighbours-mean`). An
+intron piece too short to contain a gDNA fragment (`gdna_region_eff_len == 0`) has no count of its own — its
+efficiency is the population's, which is not local — and reads the boundary on its far side instead, so an
+intron that is one such region prices its junction at `½(c_lo + c_hi)`. The price is never below 0 and is
+not clipped at 1: each boundary is clipped as a whole fragment's efficiency, but in the sum it stands for
+half a fragment of exon, so two well-captured sides can exceed 1 and `eff_em` can exceed `fl` where such
+junctions carry a transcript (`ISSUES: a-junction-price-clipped-at-one`). Two limits of the derivation:
+capture that binds a fragment through its best single probe part adds less than the sum where both exons
+carry separate probes; and the price is a sum and difference of four posteriors, so its variance is theirs
+added and every junction's error is its own — isoforms that differ by one junction differ by that noise
+(`ISSUES: the-junction-price-is-noisy-within-a-gene`; pooling junctions is refused,
+`ISSUES: pooling-junctions`).
+
+**The efficiency is the object's own posterior mean (`capture_efficiency.capture_efficiencies`).** gDNA is one
+template at a uniform rate before capture, so its density after capture at an object is the object's
+efficiency up to the one unit `ρ_ref`. Each object reads the fragments the deposit rule gives it — a region
+its gDNA contained count `k_r` on its contained support `S_r`, a boundary its gDNA crossing count `k_e` on its
+crossing support `S_e = E_f[w − 1]` — and with the fitted gDNA landscape `P(log ρ)` as the prior (the
+population's own statement of where gDNA densities sit) and the Poisson counting rule as the likelihood,
+
+    c_o  =  E[ min(ρ_o / ρ_ref, 1) | k_o, S_o ]
+
+on the landscape's grid. At high depth it is the plug-in `min(k/S/ρ_ref, 1)`; at low depth the population's
+mixture weighted by the object's own likelihood; with no support the population's clipped mean. No constant
+enters and no floor (`ISSUES: ruler-multimapper-floor-caps-the-correction`). `k` is a deconvolved mass, so the
+Poisson enters through the gamma function as a continuation, and it already carries the landscape through the
+solve, so the prior enters twice in a small way. A boundary's crossing count and its conserved share see the
+same crossing fragments — the count takes each whole, the share its deposit-rule part — and read one density
+wherever the field is flat across them, so the efficiency read from the count prices the share. Every crossing
+is read once, by the boundary that holds it: a piece too short to contain a fragment has no contained share
+and its efficiency multiplies nothing, and no crossing is apportioned onto the pieces beside its boundary
+(`ISSUES: the-crossing-apportionment`).
 
 **`ρ_ref` is a population quantity.** It is the enriched mode of the population density `P(log ρ_g)`,
-and the tool fits exactly that density: `landscape.DensityLandscape`, ψ's composition arm on the refits,
+and the tool fits exactly that density: `landscape.DensityLandscape`, the landscape ψ reads on the refits,
 trained on the located compositions and the zero-count anchors (DESIGN §7.1). Its census
 (`abundance_landscape._census`) partitions the grid into basins at the minima between interior maxima;
 the depleted basin is the largest by rendered mass (for gDNA the unprobed objects outnumber the probed
@@ -1166,20 +1215,22 @@ k = 33 and 123, and read `None`.
 
 **No enriched mode ⇒ no contraction, exactly.** `CalibrationResult.gdna_reference_density` is `None`,
 every efficiency is exactly 1 on both axes (`gdna_capture_efficiency_region`, `_boundary`, which the
-result refuses otherwise), the ruler returns `fl` verbatim and `assemble_priors` reads the locus's
-uncontracted span. This is the capture-OFF field (unimodal, Poisson noise around
+result refuses otherwise), `transcript_capture_eff_lengths` returns `fl` verbatim and `assemble_priors`
+reads the locus's uncontracted `Σ S_r + Σ M_e`. This is the capture-OFF field (unimodal, Poisson noise around
 one level) and the gDNA-free field (the anchors' wall, with any false-positive basin above it a lone
 kernel). The plug-in `min(ρ_n/ρ_ref, 1)` on a noisy uniform field is biased below 1 (Jensen plus the
 clip), which is why a per-object reference read from the field itself contracted the oracle's own
 counts by 8 % at capture-OFF; a modal decision has no per-object noise to clip.
 
-**What the witness cannot see.** A probe is captured in genomic coordinates on gDNA and in transcript
-coordinates on cDNA, and the two differ within a fragment of every junction a probe spans and at every
-exon shorter than a fragment: on the ladder's transcript-designed panel gDNA at a split probe is captured
-at a fifth of the cDNA's weight, and on the test chromosome's tiny-exon block a probe centred on a 40 bp
-exon binds a gDNA fragment over 125 bp while the simulator's non-stacking rule binds a spliced fragment
-over one exon's 40. The efficiency reads the gDNA and the transcript's factor inherits the difference
-(`ISSUES: ruler-witness-geometry-on-transcript-panels`), declared and not repaired.
+**Where the rule is exact, and what gDNA cannot see.** For the gDNA component the rule's form is exact under
+any capture physics: its objects hold its own fragments. For any other component it is exact on the objects
+where its fragments are gDNA's — its contained pieces, and its cuts away from junctions, exon edges and
+template ends. Across a junction the price is the derivation above. Within a fragment of an exon edge or a
+template end a component's fragments splice or stop where gDNA's run on, so the boundary there prices them at
+gDNA's capture of other bases; and a probe is captured in genomic coordinates on gDNA and in transcript
+coordinates on cDNA, so a junction-spanning probe is read only through the gDNA crossings at the junction's
+low and high boundaries, under the additive model above
+(`ISSUES: ruler-witness-geometry-on-transcript-panels`).
 
 ## 12. The flux price's witness — the column count on the protocol's share of the opportunity (`transfer_kernel.h`'s `rna_lane`)
 

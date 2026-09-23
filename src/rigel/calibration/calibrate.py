@@ -69,7 +69,7 @@ from .density_deconv import (
 )
 from .abundance_landscape import AbundanceLandscape, fit_abundance_landscape, located_enriched_mode
 from .capture_efficiency import capture_efficiencies
-from .effective_length import crossing_base_shares
+from .effective_length import UNBOUNDED_REACH, conserved_cut_shares
 from .blocks import SweepCapture
 from .total_abundance import (
     build_region_wall_mask,
@@ -81,6 +81,7 @@ from .gdna_strand import (
     fit_gdna_strand_from_substrate,
     fit_rna_strand_from_sj_table,
 )
+from .region_arrays import boundary_region_indices
 from .region_chain import build_region_chain
 from .result import CalibrationResult
 from .landscape import _LOCATED_VAR, DensityLandscape, fit_landscape
@@ -667,6 +668,7 @@ def _result(
     gdna_reference_members: int,
     efficiency: np.ndarray,
     efficiency_boundary: np.ndarray,
+    boundary_conserved_gdna: np.ndarray,
 ) -> CalibrationResult:
     """The solved chain projected onto the two payload axes and published as the
     :class:`CalibrationResult`, with the library-average gDNA density QC scalar.
@@ -695,6 +697,7 @@ def _result(
         sj_mass_per_crossing=substrate.sj.mass_per_crossing,
         gdna_region_eff_len=region_eff_gdna,
         gdna_boundary_eff_len=boundary_eff_gdna,
+        gdna_boundary_conserved_len=boundary_conserved_gdna,
         rna_region_eff_len=region_eff_rna,
         rna_boundary_eff_len=boundary_eff_rna,
         # the simplex ψ solved, published per object; the masses above are the same answer with the
@@ -720,6 +723,19 @@ def _result(
         n_sj=int(substrate.n_sj),
         config=config,
     )
+
+
+def _gdna_boundary_conserved_len(region_arrays, gdna_fl_pmf: np.ndarray) -> np.ndarray:
+    """gDNA's conserved share at every boundary (`effective_length.conserved_cut_shares`): the boundary's
+    two flanking regions are the pieces beside the cut, and gDNA's template does not end."""
+    lo, hi = boundary_region_indices(np.asarray(region_arrays.ref_id))
+    length = np.asarray(region_arrays.end, dtype=np.float64) - np.asarray(
+        region_arrays.start, dtype=np.float64
+    )
+    left, right = conserved_cut_shares(
+        gdna_fl_pmf, length[lo], length[hi], UNBOUNDED_REACH, UNBOUNDED_REACH
+    )
+    return left + right
 
 
 def _log_summary(result: CalibrationResult, strand: _Strand, substrate, sj) -> None:
@@ -860,10 +876,10 @@ def calibrate(
     enriched = located_enriched_mode(gdna_hyperprior) if gdna_hyperprior is not None else None
     gdna_reference_density = float(np.exp(enriched.mode.log_rho)) if enriched is not None else None
     gdna_reference_members = enriched.n_members if enriched is not None else 0
-    # THE CAPTURE EFFICIENCIES: every piece's clipped gDNA density against the reference, the posterior
-    # mean under the landscape from its own contained count and the crossings within a fragment's
-    # reach, and every boundary's from its own crossing count (`capture_efficiency`); published on the
-    # result for the ruler and the locus prior. No reference ⇒ every efficiency is exactly 1.
+    # THE CAPTURE EFFICIENCIES: every object's clipped gDNA density against the reference, the posterior
+    # mean under the landscape from its own count — a region's contained, a boundary's crossing
+    # (`capture_efficiency`); published on the result for the ruler and the locus prior. No reference ⇒
+    # every efficiency is exactly 1.
     regions = chain_region_deconv(chain, belief, substrate)
     boundaries = chain_boundary_deconv(chain, belief, substrate)
     if gdna_reference_density is None:
@@ -877,7 +893,6 @@ def calibrate(
             region_eff_gdna,
             boundaries.gdna_mass,
             boundary_eff_gdna,
-            crossing_base_shares(region_arrays, gdna_fl_pmf),
         )
     result = _result(
         substrate,
@@ -891,6 +906,7 @@ def calibrate(
         gdna_reference_members,
         efficiency,
         efficiency_boundary,
+        _gdna_boundary_conserved_len(region_arrays, gdna_fl_pmf),
     )
 
     if _debug is not None:  # inert diagnostic hook — the solved chain internals

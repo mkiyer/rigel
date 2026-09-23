@@ -494,11 +494,12 @@ def _setup_geometry_and_estimator(
     """Compute the transcripts' effective lengths and create the AbundanceEstimator.
 
     When ``calibration`` + ``region_arrays`` are given, the EM effective lengths
-    (``effective_lengths_em``) are capture-contracted by the per-region gDNA enrichment over each
-    transcript's region set (exon regions for mRNA, full span for nRNA) — so mRNA/nRNA compete with the
-    gDNA component on equal (contracted) footing under capture. The output ``effective_lengths`` (used for
-    TPM) stay the full FL-marginal length. Uniform enrichment (capture-off) ⇒ ``effective_lengths_em`` ==
-    ``effective_lengths`` (bit-identical). See ``calibration/capture_eff_length.py``.
+    (``effective_lengths_em``) are capture-contracted by the rule the gDNA component's length takes too —
+    each transcript's conserved share of every region, boundary and junction its fragments deposit on, at
+    that object's capture efficiency — so every component competes on one contracted footing under
+    capture. The output ``effective_lengths`` (used for TPM) stay the full FL-marginal length. No
+    reference (capture off, or no gDNA) ⇒ ``effective_lengths_em`` == ``effective_lengths`` (bit-identical).
+    See ``calibration/capture_eff_length.py``.
     """
     exonic_lengths = index.t_df["length"].values.astype(np.float64)
     if rna_fl.n_observations <= 0:

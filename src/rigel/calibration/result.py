@@ -153,6 +153,13 @@ class CalibrationResult:
     #: so it takes ``UNBOUNDED_REACH`` on both sides at every boundary and the divisor collapses to
     #: ``mu_g − 1``. It stays a per-boundary array because that is the axis its consumers index it on.
     gdna_boundary_eff_len: np.ndarray
+    #: float64[n_boundaries] — gDNA's CONSERVED SHARE at each boundary: of the starts whose fragments
+    #: cross it, the part of each placement's unit the deposit rule gives this boundary
+    #: (`effective_length.conserved_cut_shares` on the gDNA pmf at ``UNBOUNDED_REACH``). With
+    #: ``gdna_region_eff_len`` it partitions gDNA's starts over the objects exactly — a start counts once,
+    #: however many boundaries its fragment crosses — so a locus's gDNA component length is its regions'
+    #: and boundaries' shares at their efficiencies (`priors`). Geometry: identical under any split.
+    gdna_boundary_conserved_len: np.ndarray
 
     # --- the RNA geometric supports: the SAME two frames, on the RNA pmf ---
     #: float64[n_regions] / float64[n_boundaries] — ``contained_eff_length`` and ``crossing_eff_length`` on the
@@ -202,17 +209,16 @@ class CalibrationResult:
     #: the enriched mode rests on — the located population's own resolution is ``√n``, so this is the
     #: number a reader compares against; ``0`` exactly when the reference is ``None``.
     gdna_reference_members: int
-    #: float64[n_regions] — each piece's capture efficiency ``E[min(ρ/ρ_ref, 1)]``, the posterior mean
+    #: float64[n_regions] — each region's capture efficiency ``E[min(ρ/ρ_ref, 1)]``, the posterior mean
     #: of its clipped gDNA density against the reference under the fitted landscape, from its own
-    #: contained count and the crossings at every boundary within a fragment's reach
-    #: (`capture_efficiency.capture_efficiencies`); exactly 1 everywhere when the reference is ``None``.
-    #: The ruler and the locus prior read this and re-derive nothing (`capture_eff_length`, `priors`).
+    #: contained count on its contained support (`capture_efficiency.capture_efficiencies`); exactly 1
+    #: everywhere when the reference is ``None``. The ruler and the locus prior price every contained
+    #: share at it and re-derive nothing (`capture_eff_length`, `priors`).
     gdna_capture_efficiency_region: np.ndarray
-    #: float64[n_boundaries] — each boundary's own capture efficiency, the posterior mean of its clipped
-    #: gDNA density from its crossing count on its crossing support; exactly 1 everywhere when the
-    #: reference is ``None``. The locus prior reads it beside its count (`priors`): the count is the
-    #: calibration's masses on regions and boundaries, and the length is those objects at their
-    #: efficiencies. The transcript ruler never reads it — no boundary object enters a length over bases.
+    #: float64[n_boundaries] — each boundary's own capture efficiency, from its crossing count on its
+    #: crossing support; exactly 1 everywhere when the reference is ``None``. The ruler and the locus
+    #: prior price every conserved share at a boundary at it, and the ruler prices a junction from the
+    #: efficiencies beside it (`capture_eff_length`).
     gdna_capture_efficiency_boundary: np.ndarray
     rna_sense_frac: float  # in [0, 1], RNA sense fraction used by the strand clue
     gdna_strand_overdispersion: float  # in [0, 1), fitted gDNA strand Beta-Binomial dispersion
@@ -248,6 +254,7 @@ class CalibrationResult:
             "boundary_mass_per_crossing",
             "boundary_spliced_mass_per_crossing",
             "gdna_boundary_eff_len",
+            "gdna_boundary_conserved_len",
             "rna_boundary_eff_len",
             "gdna_frac_boundary",
             "rna_pos_frac_boundary",

@@ -144,6 +144,7 @@ def test_the_oracle_result_is_a_VALID_CalibrationResult(oracle_scenario, tmp_pat
         sj_mass_per_crossing=np.ones(j),
         gdna_region_eff_len=np.ones(n),
         gdna_boundary_eff_len=np.ones(e),
+        gdna_boundary_conserved_len=np.ones(e),
         rna_region_eff_len=np.ones(n),
         rna_boundary_eff_len=np.ones(e),
         gdna_frac_region=np.zeros(n),

@@ -23,6 +23,7 @@ import pytest
 
 from rigel.calibration.effective_length import (
     UNBOUNDED_REACH,
+    conserved_cut_shares,
     contained_eff_length,
     crossing_eff_length,
 )
@@ -166,6 +167,9 @@ def _uniform_library(region_len, rho_g, rho_r, pmf_g, pmf_r) -> CalibrationResul
         sj_mass_per_crossing=np.ones(0, dtype=np.float64),
         gdna_region_eff_len=a_g_region,
         gdna_boundary_eff_len=a_g_boundary,
+        gdna_boundary_conserved_len=np.add(
+            *conserved_cut_shares(pmf_g, region_len[:-1], region_len[1:], _UNB, _UNB)
+        ),
         rna_region_eff_len=a_r_region,
         rna_boundary_eff_len=a_r_boundary,
         gdna_frac_region=np.zeros_like(cont_g),

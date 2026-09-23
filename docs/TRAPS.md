@@ -49,7 +49,12 @@ redundant backstop was silently doing the guard's job. ⛔ AND A PERTURBATION TH
 MISSING GATE, not a wrong perturbation: three did in one session, and each one was a fixture that could not
 see the rule — a single-reference fixture cannot see a per-reference id base, a fixture whose fragments
 carry no observed motif cannot see which strand a lookup filters on, and a symmetric fixture cannot tell two
-classes apart because swapping their labels swaps two equal sums. Fix the fixture, then perturb again.
+classes apart because swapping their labels swaps two equal sums. Fix the fixture, then perturb again. The
+capture-contracted length's port (2026-09-23) met two more: a perturbation of one side of the gDNA component's
+`min(eff_len, span)` fired nothing, because the clamp handed back the side it had not touched — perturb both
+sides of what a clamp compares (`TRAPS: a-clip-hides-a-scale-error`); and a fixture whose pieces are all longer
+than every fragment cannot tell the conserved share from the crossing support, because there the two are equal
+exactly — give the gate pieces shorter than a fragment.
 
 **a-field-driven-gate-is-atomic. A gate that enumerates the specification's fields fuses spec,
 implementation and schema into one commit, so plan the change that way or the tree is red in between.**
@@ -426,7 +431,13 @@ independent across isoforms and do not. The within-gene spread of the log error 
 order of its end-to-end error (0.036 / 0.072 / 0.098 nat, 2026-09-19). Score anything the EM divides by — a
 ruler, an effective length — by the within-gene spread of its error, and price it end to end with
 `quant_accuracy.py --arm oracle_ruler`, never by its per-transcript accuracy alone
-(`ISSUES: ruler-witness-geometry-on-transcript-panels`).
+(`ISSUES: ruler-witness-geometry-on-transcript-panels`). ⛔ A REPAIR OF THE CLASS SCALE IS JUDGED BY IT TOO. One
+that brought the classes onto one scale (the one shared capture-contracted length, 2026-09-23) improved the pools,
+priced beside a corrected pseudocount, while the transcript error rose and the gene error held, because the
+junction price that bought the scale widened the within-gene spread; the tell is the transcript error moving while
+the gene error holds (`ISSUES: the-junction-price-is-noisy-within-a-gene`). The class scale decides the
+gDNA-versus-RNA split and the within-gene spread the isoform split, and `ruler_vs_truth.py --scale` prints both:
+read both.
 
 **a-per-base-truth-is-not-a-probed-fraction. Under the simulator's capture rule — a placement binds its best
 single probe part, never the sum — a region's yield is not its probed fraction, and three "truths" gave three
@@ -655,7 +666,7 @@ destination held RNA fragments where the source held none.
 **a-cancelling-defect-pair. Fixing one of two errors that cancel is worse than fixing neither.** Correcting
 one hop alone more than doubled a toy's evidence-free exon error while the rung it targeted improved.
 Price such a fix in the arm that also removes the other defect; a cancelling pair is one experiment, not
-two. The calibrated-likelihood campaign's pair (2026-09-21): the pseudocount prior's 1.29 bias toward gDNA and the gDNA component's length rule 14–16 % off the transcripts' — removing either alone made the tool worse, measured both ways.
+two. The calibrated-likelihood campaign's pair (2026-09-21): the pseudocount prior's 1.29 bias toward gDNA and the gDNA component's length rule 14–16 % off the transcripts' — removing either alone made the tool worse, measured both ways. The length half is repaired by the one shared rule (2026-09-23), so the pseudocount's bias now stands uncancelled on capture (`ISSUES: the-pseudocount-prior-is-biased-toward-gdna`).
 
 **zero-the-precision-with-the-value. A refused claim must lose its precision in the same statement that
 zeroes its value.** A value zeroed at one line and a precision handed back at a later one is the confident

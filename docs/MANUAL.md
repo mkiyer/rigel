@@ -387,7 +387,7 @@ transcripts are included; synthetic nRNA spans appear in `nrna_quant`.
 | `start`, `end` | Genomic coordinates (0-based, half-open) |
 | `length` | Spliced exonic length (bp) |
 | `effective_length` | Length after fragment-length correction; the length `tpm` is normalised by, never contracted by capture |
-| `em_effective_length` | The yield the EM reads: `effective_length` contracted by the capture efficiency of the transcript's own bases (fragments per unit abundance; equal to `effective_length` when the library carries no enriched gDNA mode). `count / em_effective_length` is the capture-corrected abundance, and a zero-count transcript's abundance is below about `3 / em_effective_length` |
+| `em_effective_length` | The yield the EM reads: `effective_length` scaled by the capture efficiency of every stretch the transcript's fragments land on (its exon pieces, the boundaries between them and its splice junctions), each read from the genomic DNA captured there or, for a junction, beside it (fragments per unit abundance; equal to `effective_length` when the library carries no enriched gDNA mode). It is usually below `effective_length`, and a transcript carried by well-captured junctions can read above it. `count / em_effective_length` is the capture-corrected abundance, and a zero-count transcript's abundance is below about `3 / em_effective_length` |
 | `locus_id` | Locus ID; `-1` if not placed in an EM locus |
 | `nrna_id` | ID of the parent nRNA entity (`"."` if none or if the row is itself an nRNA entity) |
 | `is_basic` | `1` if the transcript has the GENCODE `basic` tag |

@@ -1,31 +1,25 @@
-"""``capture_efficiency``: a piece's capture efficiency is the posterior mean of its clipped gDNA
-density against the reference, under the fitted landscape, from its own contained count and the
-crossings within a fragment's reach — no floor, no constant.
+"""``capture_efficiency``: an object's capture efficiency is the posterior mean of its clipped gDNA density
+against the reference, under the fitted landscape, from its OWN count — a region's contained count on its
+contained support, a boundary's crossing count on its crossing support — no floor, no constant, and nothing
+apportioned between them.
 
-The two falsification tests were written first and verified failing on the shipped ruler through its
-own fixture (`ISSUES: ruler-multimapper-floor-caps-the-correction`): an unprobed exon holding no gDNA
-fragment read the multimapper floor ``1/(C+1)``, 0.024 on 40 RNA fragments against a depleted level of
-0.001 (+3.19 nat); a transcript of exons shorter than a fragment read 0 on its nil contained supports and
-then the floor. Here the posterior reads the depleted level from the population and the tiny exon from
-its edge crossings. The rest pins the mechanism's parts: the plug-in limit at high depth, the
-apportionment of a crossing to the pieces within reach, a boundary's own efficiency, and calibrate's
-wiring (efficiencies exactly 1 with no reference).
+The falsification test was written first and verified failing on the shipped ruler through its own fixture
+(`ISSUES: ruler-multimapper-floor-caps-the-correction`): an unprobed exon holding no gDNA fragment read the
+multimapper floor ``1/(C+1)``, 0.024 on 40 RNA fragments against a depleted level of 0.001 (+3.19 nat). Here
+the posterior reads the depleted level from the population. The rest pins the mechanism's parts: the plug-in
+limit at high depth, a boundary's own efficiency, each object reading only its own count, and calibrate's
+wiring (efficiencies exactly 1 with no reference). A piece too short to contain a fragment is read through
+its boundaries by the length, not here (``tests/calibration/test_capture_eff_length.py``).
 """
 
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 import pytest
 
 from rigel.calibration.capture_efficiency import capture_efficiencies
-from rigel.calibration.effective_length import (
-    UNBOUNDED_REACH,
-    crossing_base_shares,
-    crossing_eff_length,
-)
+from rigel.calibration.effective_length import UNBOUNDED_REACH, crossing_eff_length
 from rigel.calibration.landscape import fit_landscape
-from rigel.calibration.region_arrays import RegionArrays
 
 RHO_REF, RHO_DEP = 1.0, 1e-3
 
@@ -39,22 +33,6 @@ def _pmf(mean=200.0, sd=50.0, lo=100, hi=300) -> np.ndarray:
 
 PMF = _pmf()
 S_E = float(crossing_eff_length(PMF, np.array([UNBOUNDED_REACH]), np.array([UNBOUNDED_REACH]))[0])
-
-
-def _regions(lengths) -> RegionArrays:
-    lengths = np.asarray(lengths, dtype=np.int64)
-    b = np.concatenate([[0], np.cumsum(lengths)])
-    frame = pd.DataFrame(
-        {
-            "region_id": np.arange(lengths.size, dtype=np.int64),
-            "ref_name": pd.array(["chr1"] * lengths.size, dtype="string"),
-            "start": b[:-1],
-            "end": b[1:],
-            "length": lengths,
-            "signature": np.zeros(lengths.size, np.uint8),
-        }
-    )
-    return RegionArrays.from_frame(frame, {"chr1": 0})
 
 
 def _support(lengths, pmf=PMF) -> np.ndarray:
@@ -83,62 +61,26 @@ def landscape():
     return ls
 
 
-def _field(lengths, density, pmf=PMF, crossing_density=None):
-    """A deposition-faithful field: contained counts ``ρ_p S_p`` and crossing counts
-    ``Σ_q A_eq ρ_q`` (the crossing fragments' bases at their pieces' densities), or an explicit crossing
-    density per boundary."""
-    ra = _regions(lengths)
-    density = np.asarray(density, dtype=np.float64)
-    S = _support(lengths, pmf)
-    k_reg = density * S
-    shares = crossing_base_shares(ra, pmf)
-    E, Q, A = shares
-    k_bnd = np.zeros(len(lengths) - 1)
-    if crossing_density is None:
-        np.add.at(k_bnd, E, A * density[Q])
-    else:
-        k_bnd[:] = np.asarray(crossing_density, dtype=np.float64) * S_E
-    return ra, k_reg, S, k_bnd, shares
+def _field(lengths, density, crossing_density):
+    """Contained counts ``ρ_r S_r`` per region and crossing counts ``ρ_e S_E`` per boundary — each object's
+    own count at its own density, which is all an efficiency reads."""
+    S = _support(lengths)
+    k_reg = np.asarray(density, dtype=np.float64) * S
+    k_bnd = np.asarray(crossing_density, dtype=np.float64) * S_E
+    return k_reg, S, k_bnd, np.full(k_bnd.shape[0], S_E)
 
 
-# --- the two falsification tests ---------------------------------------------------------------------
+# --- the falsification test ---------------------------------------------------------------------------
 
 
 def test_an_unprobed_exon_with_no_gdna_fragment_reads_the_depleted_level_not_a_floor(landscape):
     """A 1 kb exon holding no gDNA at all among depleted neighbours: its posterior sits at the
     depleted level, within a factor of two of 0.001 and nowhere near the floor's 0.024 or 1."""
-    lengths = [5000, 1000, 5000]
-    ra, k_reg, S, k_bnd, shares = _field(lengths, [RHO_DEP, RHO_DEP, RHO_DEP])
+    k_reg, S, k_bnd, S_b = _field([5000, 1000, 5000], [RHO_DEP] * 3, [RHO_DEP] * 2)
     k_reg[1] = 0.0
-    c, _reach = capture_efficiencies(
-        landscape, RHO_REF, k_reg, S, k_bnd, np.full(k_bnd.shape[0], S_E), shares
-    )
+    c, _ = capture_efficiencies(landscape, RHO_REF, k_reg, S, k_bnd, S_b)
     assert abs(np.log(c[1] / RHO_DEP)) < np.log(2.0), c[1]
     assert c[1] < 0.005
-
-
-def test_a_tiny_exon_reads_its_edge_crossings(landscape):
-    """40 bp exons between 1 kb introns hold no contained fragment (their support is 0). With captured
-    crossings at their edges — the fragments there carry the exon's bases at the reference and the
-    intron's at the depleted level — each exon reads within a factor of two of fully captured; with
-    depleted crossings it reads depleted. PERTURBATION: with the crossing terms dropped every tiny exon
-    reads the population's clipped mean, the same number either way."""
-    lengths = [5000, 1000, 40, 1000, 40, 1000, 40, 1000, 5000]
-    exon = np.array([2, 4, 6])
-    density = np.full(len(lengths), RHO_DEP)
-    density[exon] = RHO_REF
-    ra, k_reg, S, k_bnd, shares = _field(lengths, density)
-    assert np.all(S[exon] == 0.0), "the fixture's exons must hold no contained fragment"
-    c, _ = capture_efficiencies(
-        landscape, RHO_REF, k_reg, S, k_bnd, np.full(k_bnd.shape[0], S_E), shares
-    )
-    assert np.all(c[exon] > 0.5), c[exon]
-    ra, k_reg, S, k_bnd, shares = _field(lengths, np.full(len(lengths), RHO_DEP))
-    c_dep, _ = capture_efficiencies(
-        landscape, RHO_REF, k_reg, S, k_bnd, np.full(k_bnd.shape[0], S_E), shares
-    )
-    assert np.all(c_dep[exon] < 0.02), c_dep[exon]
-    assert np.all(c[exon] > 20.0 * c_dep[exon])
 
 
 # --- the parts ----------------------------------------------------------------------------------------
@@ -148,12 +90,9 @@ def test_a_well_measured_piece_reads_its_plug_in(landscape):
     """At high depth the posterior is the plug-in: 50 kb pieces (fifty depleted fragments, thousands of
     captured ones) at the reference read 1, at the depleted level 0.001, and at a third of the reference
     a third."""
-    lengths = [50000, 50000, 50000, 50000]
     density = [RHO_REF, RHO_DEP, RHO_REF / 3.0, RHO_REF]
-    ra, k_reg, S, k_bnd, shares = _field(lengths, density)
-    c, _ = capture_efficiencies(
-        landscape, RHO_REF, k_reg, S, k_bnd, np.full(k_bnd.shape[0], S_E), shares
-    )
+    k_reg, S, k_bnd, S_b = _field([50000] * 4, density, [RHO_REF] * 3)
+    c, _ = capture_efficiencies(landscape, RHO_REF, k_reg, S, k_bnd, S_b)
     assert c[0] > 0.95 and c[3] > 0.95
     assert abs(np.log(c[1] / RHO_DEP)) < 0.2
     assert abs(np.log(c[2] * 3.0)) < 0.2
@@ -161,45 +100,62 @@ def test_a_well_measured_piece_reads_its_plug_in(landscape):
 
 def test_every_efficiency_lies_in_the_unit_interval(landscape):
     lengths = [5000, 40, 1000, 7, 9, 300, 5000]
-    ra, k_reg, S, k_bnd, shares = _field(lengths, np.full(7, RHO_REF))
-    c, cb = capture_efficiencies(landscape, RHO_REF, k_reg, S, k_bnd, np.full(6, S_E), shares)
+    k_reg, S, k_bnd, S_b = _field(lengths, np.full(7, RHO_REF), np.full(6, 2.0 * RHO_REF))
+    c, cb = capture_efficiencies(landscape, RHO_REF, k_reg, S, k_bnd, S_b)
     assert np.all(c >= 0.0) and np.all(c <= 1.0)
     assert cb.shape == (6,) and np.all(cb >= 0.0) and np.all(cb <= 1.0)
 
 
 def test_a_boundarys_efficiency_is_its_own_crossing_counts_posterior(landscape):
-    """A boundary reads its own crossing count on its crossing support: at the reference on both sides
-    it reads 1; between two depleted pieces it reads the depleted level; at a probed exon's edge
-    beside a depleted intron it reads the crossing fragments' mean — about half. The locus prior reads
-    this beside the count the same crossing mass sits in."""
-    lengths = [5000, 5000, 5000]
-    ra, k_reg, S, k_bnd, shares = _field(lengths, [RHO_REF, RHO_REF, RHO_REF])
-    _, cb = capture_efficiencies(landscape, RHO_REF, k_reg, S, k_bnd, np.full(2, S_E), shares)
-    assert np.all(cb > 0.9)
-    ra, k_reg, S, k_bnd, shares = _field(lengths, [RHO_DEP, RHO_DEP, RHO_REF])
-    _, cb = capture_efficiencies(landscape, RHO_REF, k_reg, S, k_bnd, np.full(2, S_E), shares)
-    assert cb[0] < 0.02
-    assert 0.3 < cb[1] < 0.7, cb
+    """A boundary reads its own crossing count on its crossing support: crossings at the reference read
+    1, at the depleted level the depleted level, at half the reference — the crossing fragments at a
+    probed exon's edge beside a depleted intron — about half."""
+    k_reg, S, k_bnd, S_b = _field([5000] * 4, [RHO_REF] * 4, [RHO_REF, RHO_DEP, 0.5 * RHO_REF])
+    _, cb = capture_efficiencies(landscape, RHO_REF, k_reg, S, k_bnd, S_b)
+    assert cb[0] > 0.9
+    assert cb[1] < 0.02
+    assert 0.3 < cb[2] < 0.7, cb
 
 
-def test_the_crossing_is_apportioned_to_the_pieces_that_can_explain_it(landscape):
-    """Two tiny exons share nothing, but a tiny exon and its long depleted intron share every crossing
-    at their edge: the intron's own count pins it depleted, so the captured crossing is the exon's.
-    PERTURBATION: attributing the whole count to every piece within reach (no apportionment) lifts the
-    depleted intron beside a captured tiny exon well above its own level."""
+def test_each_object_reads_only_its_own_count(landscape):
+    """A region's efficiency is its contained count's and a boundary's its crossing count's: a depleted
+    intron beside captured crossings stays depleted, and changing every boundary's count leaves every
+    region's efficiency bit-identical (and the reverse) — the crossings are priced once, at the boundary
+    that holds them. PERTURBATION: apportioning the crossings onto the pieces within reach lifts the
+    intron and moves the regions with the boundaries."""
     lengths = [5000, 1000, 40, 1000, 5000]
-    density = np.array([RHO_DEP, RHO_DEP, RHO_REF, RHO_DEP, RHO_DEP])
-    ra, k_reg, S, k_bnd, shares = _field(lengths, density)
-    c, _ = capture_efficiencies(
-        landscape, RHO_REF, k_reg, S, k_bnd, np.full(k_bnd.shape[0], S_E), shares
+    density = [RHO_DEP, RHO_DEP, RHO_REF, RHO_DEP, RHO_DEP]
+    k_reg, S, k_bnd, S_b = _field(
+        lengths, density, [RHO_DEP, 0.5 * RHO_REF, 0.5 * RHO_REF, RHO_DEP]
     )
-    assert c[2] > 0.5
+    c, cb = capture_efficiencies(landscape, RHO_REF, k_reg, S, k_bnd, S_b)
     assert c[1] < 0.01 and c[3] < 0.01, (c[1], c[3])
+    c2, cb2 = capture_efficiencies(landscape, RHO_REF, k_reg, S, np.full(4, RHO_REF) * S_E, S_b)
+    np.testing.assert_array_equal(c2, c)
+    assert not np.array_equal(cb2, cb)
+    c3, cb3 = capture_efficiencies(landscape, RHO_REF, np.full(5, RHO_REF) * S, S, k_bnd, S_b)
+    np.testing.assert_array_equal(cb3, cb)
+    assert not np.array_equal(c3, c)
+
+
+def test_an_object_with_no_support_reads_the_population(landscape):
+    """A piece shorter than every fragment has no contained support and no count: it reads the
+    population's clipped mean, whatever its neighbours hold — no length multiplies it."""
+    lengths = [5000, 40, 5000]
+    k1, S, kb, S_b = _field(lengths, [RHO_REF, RHO_REF, RHO_REF], [RHO_REF, RHO_REF])
+    k2, _, kb2, _ = _field(lengths, [RHO_DEP, RHO_DEP, RHO_DEP], [RHO_DEP, RHO_DEP])
+    assert S[1] == 0.0
+    c1, _ = capture_efficiencies(landscape, RHO_REF, k1, S, kb, S_b)
+    c2, _ = capture_efficiencies(landscape, RHO_REF, k2, S, kb2, S_b)
+    assert c1[1] == c2[1]
+    assert c1[0] > 0.9 and c2[0] < 0.01
 
 
 def test_calibrate_publishes_the_efficiencies_and_exactly_one_without_a_reference():
     """The wiring: a solve with no refit has no landscape and no reference, and the result's
-    efficiencies are exactly 1 on both axes."""
+    efficiencies are exactly 1 on both axes; and the result carries gDNA's conserved share at every
+    boundary — its two flanking regions' shares on the gDNA pmf, at the unbounded reach of a template that
+    does not end (`effective_length.conserved_cut_shares`)."""
     import sys
 
     sys.path.insert(0, "tests/calibration")
@@ -214,16 +170,30 @@ def test_calibrate_publishes_the_efficiencies_and_exactly_one_without_a_referenc
     from rigel.config import CalibrationConfig
 
     payload, ra = make_synthetic_payload()
-    pmf = make_gdna_fl_pmf()
+    # gDNA fragments longer than the fixture's 100 bp regions, so one crosses both boundaries and its
+    # conserved share differs from the crossing support
+    pmf = np.zeros(251)
+    pmf[150:251] = 1.0 / 101.0
     res = calibrate(
         payload=payload,
         region_arrays=ra,
         strand_model=make_strand_models(0.95, 40),
         gdna_fl_pmf=pmf,
-        rna_fl_pmf=pmf,
+        rna_fl_pmf=make_gdna_fl_pmf(),
         config=CalibrationConfig(calib_refit_iters=0),
         sj=make_synthetic_sj(),
     )
     assert res.gdna_reference_density is None
     np.testing.assert_array_equal(res.gdna_capture_efficiency_region, 1.0)
     np.testing.assert_array_equal(res.gdna_capture_efficiency_boundary, 1.0)
+    from rigel.calibration.effective_length import conserved_cut_shares
+    from rigel.calibration.region_arrays import boundary_region_indices
+
+    lo, hi = boundary_region_indices(np.asarray(ra.ref_id))
+    length = np.asarray(ra.end, dtype=np.float64) - np.asarray(ra.start, dtype=np.float64)
+    left, right = conserved_cut_shares(
+        pmf, length[lo], length[hi], UNBOUNDED_REACH, UNBOUNDED_REACH
+    )
+    assert lo.size > 0
+    np.testing.assert_array_equal(res.gdna_boundary_conserved_len, left + right)
+    assert np.all(res.gdna_boundary_conserved_len < res.gdna_boundary_eff_len - 1.0)

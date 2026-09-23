@@ -3,12 +3,13 @@
 **Purpose.** This document records the design of Rigel as it is built and the rulings that fixed it:
 what was decided, the one measurement that decided it, and the date. Everything here is settled and is
 not re-litigated. §0 is the binding vocabulary; §0b carries the 0.8.0 scope, the equal-fragment-lengths
-ruling and the nascent scope ruling; §0c settles that calibration is message passing; §3–§6 describe the
-accumulator, the two-pass structure and the solver as shipped; §6b–§6c the message layer and ψ; §7 where
-the error sits. What does not belong here: derivations (`EQUATIONS.md`), lessons from mistakes
-(`TRAPS.md`, cited by name), open problems and refusals with their numbers (`ISSUES.md`), the ranked
-next steps (`ROADMAP.md`), how the panels are built (`TESTING.md`), and history (git). Section numbers
-are anchors the other docs cite; a gap in the numbering is a deleted section.
+ruling, the nascent scope ruling and the robustness ruling; §0c settles that calibration is message
+passing; §3–§6 describe the accumulator, the two-pass structure and the solver as shipped; §6b–§6c the
+message layer and ψ; §7 where the error sits and the capture-contracted length. What does not belong
+here: derivations (`EQUATIONS.md`), lessons from mistakes (`TRAPS.md`, cited by name), open problems and
+refusals with their numbers (`ISSUES.md`), the ranked next steps (`ROADMAP.md`), how the panels are built
+(`TESTING.md`), and history (git). Section numbers are anchors the other docs cite; a gap in the numbering
+is a deleted section.
 
 ---
 
@@ -197,6 +198,14 @@ is a real case the tool must survive — the nascent:mature ratio is a stability
 expression one. The fragment share is emergent and the length geometry dominates it (a 23.8× factor):
 level ~ logU(1, 100) gives 4.2 % at `on_fraction = 0.10` and 20.2 % at 0.50, the ladder's development
 stress level. Price the share from the parameters before simulating.
+
+### Robustness over accuracy on a synthetic panel (owner, 2026-09-23)
+
+> "Robustness is valued over accuracy on a synthetic simulated dataset, because real data has far more
+> complexity."
+
+It is the ruling behind two decisions about the capture-contracted length (§7.2): junctions are never pooled,
+and the one shared rule is kept though the ladder's transcript table regresses under it.
 
 ---
 
@@ -1560,18 +1569,19 @@ witness), the likelihood-kernel estimator, the all-kernel E-step and six refits.
 
 ### 7.2 The ruler reads the landscape's located enriched mode (2026-09-14; `ISSUES: g00-shrinkage-upstream-repair` CLOSED)
 
-The EM's effective length under capture (`capture_eff_length`, `EQUATIONS.md` §11) contracts a transcript
-by the enriched-footprint fraction of its gDNA density against a reference `ρ_ref`, the fully-captured
-level. THE RULING: `ρ_ref` is the located enriched mode of the fitted gDNA landscape — the same
-`DensityLandscape` ψ's composition arm reads on the refits — published on the result as
-`CalibrationResult.gdna_reference_density` (`None` when no refit fit a landscape or no located mode lies
-above the depleted one), and read by both consumers, the transcript ruler and `assemble_priors`' locus
-gDNA effective length; the private mass-weighted kernel density with its bandwidth and prominence
-constants, which accepted a mode from any five slots with positive mass, is deleted. Depleted is the
-largest-mass basin, enriched the largest-mass basin above it (`abundance_landscape.split_basins`), and a
-mode is located iff the median rendered width of its member kernels is at most one nat
-(`landscape._LOCATED_VAR`, §7.1 rule 4 read at the population's own resolution, `knn_widths`; the
-within-basin spread is not the statement — a basin cut by the grid's edge is narrow whatever its kernels). Why this and not a repair of the composition: the composition had been
+The EM's effective length under capture (`capture_eff_length`, `priors.assemble_priors`, `EQUATIONS.md` §11)
+contracts every component by the capture efficiencies of the objects its fragments deposit on, each an
+object's gDNA density against a reference `ρ_ref`, the fully-captured level. THE RULING: `ρ_ref` is the
+located enriched mode of the fitted gDNA landscape — the same `DensityLandscape` ψ reads on the refits —
+published on the result as `CalibrationResult.gdna_reference_density` (`None` when no refit fit a landscape
+or no located mode lies above the depleted one, and then every efficiency is exactly 1), and read through
+those efficiencies by every component's length, the transcripts', the synthetic spans' and the locus gDNA
+component's; the private mass-weighted kernel density with its bandwidth and prominence constants, which
+accepted a mode from any five slots with positive mass, is deleted. Depleted is the largest-mass basin,
+enriched the largest-mass basin above it (`abundance_landscape.split_basins`), and a mode is located iff the
+median rendered width of its member kernels is at most one nat (`landscape._LOCATED_VAR`, §7.1 rule 4 read at
+the population's own resolution, `knn_widths`; the within-basin spread is not the statement — a basin cut by
+the grid's edge is narrow whatever its kernels). Why this and not a repair of the composition: the composition had been
 fixed first and the factor did not follow — the ladder's zero rows carry 178–189 false fragments on
 35,135 regions (one slot at or above one fragment) and still read 0.51 / 0.12 / 0.62, because a detector
 that always returns a mode reads specks as a mode; and the oracle's own counts contracted 8 % at
@@ -1608,58 +1618,80 @@ kernel among walls read `None`. The choice rule cannot be discriminated by numbe
 mass, the most located members, the largest located weight and the highest located basin agree on every row
 measured once the members are located — so the most-located-members rule ships by derivation.
 
-**The expectation ruler on the per-base length (2026-09-16; `ISSUES: ruler-multimapper-floor-caps-the-correction`
-CLOSED; `EQUATIONS.md` §11).** THE RULING: a transcript's effective length under capture is its own bases at
-their pieces' capture efficiencies, weighted by the fragment-length end taper — `factor_t = Σ_p ℓ_p^τ c̃_p /
-Σ_p ℓ_p^τ` over the pieces its exons overlap, no boundary object, no junction object and no contained support
-in the length — and a piece's efficiency `c̃_p = E[min(ρ_p/ρ_ref, 1) | evidence]` is the posterior mean of its
-clipped gDNA density under the fitted landscape, from its own contained count and from the crossing counts at
-every boundary within a fragment's reach, each crossing apportioned to the pieces its fragments cover in
-proportion to their geometry times their own-count densities, one pass. `calibrate` computes the efficiencies
-and publishes them per region and per boundary (`CalibrationResult.gdna_capture_efficiency_region`,
-`_boundary`, a boundary's being the posterior of its own crossing count); `capture_eff_length` is
-geometry — the pieces' taper-weighted base counts (`effective_length.BaseTaper`) and the sum — and
-`assemble_priors` reads the count's own objects at their supports and efficiencies, the crossing support
-converted by the count's own `q`: `Σ S_r c̃_r + Σ q_e S_e c̃_e` (2026-09-20, `EQUATIONS.md` §11; landed as
-`c52c9b93`) — NOT the locus's bases: the base form dropped the boundary objects the count keeps and
-the gDNA component over-claimed (the test chromosome's `g50 ss.99 ON` row, gene-level Σ|Δ| 25,633 → 38,174
-against 23,967 with the object form). The UNconverted support shipped from 2026-09-16 on a capture-OFF
-thermometer measurement (1–2 % worse, an injection gate insensitive on a contaminated toy) and priced the
-gDNA component at `q̄` of its density wherever fragments span short pieces — under capture, most of a
-probed locus's opportunity — which was the nascent siphon's driver: `g50 ss.99 ON` +541,216 → +32,908
-(`ISSUES: nascent-siphons-gdna-under-capture`).
-The multimapper floor `w = C/(C+1)` is deleted from both, the splice-junction objects and the flank
-imputation with it. Why: the floor was a +3.4 to +3.7 nat bias on every unprobed transcript at every gDNA level (a factor of
-30–40, the unprobed class's whole error), a piece shorter than a fragment has no contained support and read 0
-then the floor, and forty junction objects imputed from unsupported flanks swamped four hundred bases of
-measurement on the ladder's dense annotation; the accumulator counts a fragment at every boundary it crosses,
-so a tiny exon's evidence is its edge crossings against the intron's own level, and its length its bases.
-Measured (`ruler_vs_truth.py`, the class median log error and the probed class's share within ±0.1 nat; the
-test chromosome's `g05 ss.99 ON` row, then `g25`, `g50 ss.50`, `g50 ss.99`): the unprobed class +3.41 / +3.32 /
-+3.74 / +3.76 nat under the shipped ruler → +0.19 / −0.03 / −0.15 / −0.04 under the expectation ruler on the
-per-base length, the probed class 97–98 % → 99 %; the tiny-exon block's probed `capmixed` transcripts −0.63 →
-+0.07, its unprobed `mixed` +5.9 → +0.2; the depth ladder's probed class at a tenth of the depth 75 / 93 / 97 %
-→ 86 / 99 / 99 % at 5 / 25 / 50 % gDNA and at a hundredth 63 / 62 % → 91 / 91 % at 25 / 50 %; the ladder's
-`g05 ss.99 ON` row's unprobed class +4.40 → +0.45 with its probed class at 35 % under every gDNA ruler, the
-certified true counts included — the junction-designed panel's witness geometry. REFUSED with numbers (every
-open question tried each way, the owner's ruling of 2026-09-16): the solve's own posterior (the belief's `f_g`
-and `Var(log f_g)` as a log-normal, closed form) — +1.25 nat on the test chromosome's unprobed class and +4.96 on
-the ladder's, since a slot the solve does not locate has no posterior of its own; the clip outside the
-expectation, `min(E[ρ]/ρ_ref, 1)` — indistinguishable from the clip inside on every row (±0.01 nat), so the
-derivation's form ships; the evidence from the piece's own count alone — the unprobed class at +4.5 nat on the
-ladder and the tiny exons at the prior's mean, since a piece without support has no own count; the plug-in in
-place of the posterior — +3.36 on the ladder's unprobed class from the pieces with no support; iterating the
-apportionment to convergence (EM on the joint, 13 passes on the test chromosome and 59 on the ladder at the grid
-step) — identical on every test chromosome row and +0.44 against +0.46 nat on the ladder's unprobed class, so
-the one pass ships; a joint update of neighbours in place of the apportionment — never converges, 64–66
-pieces of the test chromosome and ~2,000 of the ladder flipping by 8 nat every pass. What no gDNA ruler can
-see is declared (`ISSUES: ruler-witness-geometry-on-transcript-panels`): only a transcript holding the junction
-a probe spans binds that probe whole, so the extra capture of junction-spanning fragments is isoform-specific and
-gDNA cannot witness it (the simulator's half-match rule was symmetric from 2026-09-19: before then it also bound a
-gDNA half-match at a fifth of the identical cDNA one, which is what most of the ladder's stranded capture-ON error
-turned out to be). And a probe centred on a 40 bp exon binds gDNA over 125 bp while the simulator's non-stacking
-rule binds a spliced fragment over 40, so the probed tiny-exon transcripts read +1.03 nat against the sampler's
-truth with the mechanism reading their edges exactly.
+**The one shared rule: conserved shares over regions and boundaries (owner rulings 2026-09-22 and 2026-09-23;
+`ISSUES: the-gdna-component-length-rule-differs-from-the-transcripts` CLOSED; `EQUATIONS.md` §11).** THE RULING:
+every EM component — the locus gDNA component, every synthetic nascent span, every annotated transcript — takes
+its capture-contracted length by one rule, the sum over every object its fragments deposit on of its CONSERVED
+SHARE there times that object's CAPTURE EFFICIENCY, `L_T = Σ_pieces S_T(p)·c_p + Σ_cuts M_T(k)·c_k`. A component's
+pieces are the regions its template covers; between two consecutive pieces is a cut, the boundary between them
+or, where a transcript splices, a junction. `S_T(p)` is its contained share of a piece and `M_T(k)` its share at a
+cut by the deposit rule itself (§3.1's `mass`: a crossing fragment's unit is cut into slices at the boundaries and
+junctions it crosses, and each slice is shared equally by the objects bounding it), summed over the component's
+placements, so the shares total the fl-marginal length exactly however many cuts one fragment crosses
+(`effective_length.conserved_cut_shares`, a closed form at any reach). Transcripts and spans:
+`capture_eff_length.transcript_capture_eff_lengths` scales the pipeline's fl-marginal length by
+`Σ share·c / Σ share` over the transcript's pieces and cuts (`transcript_objects`). The gDNA component:
+`priors.assemble_priors` sums the locus's regions and every boundary touching them with the count's own weights,
+a boundary at gDNA's conserved share (`CalibrationResult.gdna_boundary_conserved_len`, computed by
+`calibrate` at a reach that never ends, since gDNA's template is the chromosome); at efficiency 1, beside outside
+neighbours longer than a fragment, those objects hold exactly the locus's overlapping starts. The length reads
+neither the count's pooled `q` (`ISSUES: the-pooled-q-in-the-gdna-length`) nor the crossing support; the count
+side still converts a boundary's mass by `q` (§3.1c). With no reference every efficiency is exactly 1 and every
+length is its uncontracted span bit-identically. The measurement that put the gDNA component, the synthetic
+spans and the annotated transcripts on one scale (`ruler_vs_truth.py --scale`, no EM) is recorded in
+`ISSUES: the-gdna-component-length-rule-differs-from-the-transcripts`.
+
+**The efficiencies: each object reads its own count.** `capture_efficiency.capture_efficiencies`, computed by
+`calibrate` and published as `CalibrationResult.gdna_capture_efficiency_region` / `_boundary`, gives a region the
+posterior mean `E[min(ρ/ρ_ref, 1)]` of its clipped gDNA density under the fitted landscape from its gDNA contained
+count on its contained support, and a boundary the same from its gDNA crossing count on its crossing support. No
+constant and no floor enter; the multimapper floor `C/(C+1)` stays deleted
+(`ISSUES: ruler-multimapper-floor-caps-the-correction`). The length prices every crossing at the boundary that
+holds it, so no region borrows the crossings around it (`ISSUES: the-crossing-apportionment`), and a piece too
+short to contain a fragment has no share to price: its efficiency is the population's and multiplies nothing.
+That is why the own count alone, refused on 2026-09-16 under the per-base length, ships under this one. A piece
+prices at its region's efficiency and a contiguous cut at its boundary's; where the rule is exact and where it is
+not is derived in `EQUATIONS.md` §11.
+
+**A junction is priced by conservation of bases, from its neighbours.** gDNA never deposits on a junction, so no
+object gDNA measures prices one directly. THE RULING: `c_junction = c_lo + c_hi − ½(c_intron,lo + c_intron,hi)`,
+the efficiencies at the sj's low and high boundaries (§0) less the intron pieces just inside them, derived in
+`EQUATIONS.md` §11. An intron piece too short to contain a gDNA fragment has no count of its own and reads the
+boundary on its far side. The price is never below 0 and is not clipped at 1
+(`ISSUES: a-junction-price-clipped-at-one`). Only the objects within one fragment of the junction enter (ruling 2
+below), and no panel input: a junction-spanning probe is read from gDNA through the crossings at the sj's two
+boundaries (`ISSUES: ruler-witness-geometry-on-transcript-panels`). Per junction the price is a difference of
+noisy boundary posteriors, and that is the open problem (`ISSUES: the-junction-price-is-noisy-within-a-gene`).
+
+The rulings behind it (owner):
+
+1. **Boundaries own fragment mass, so the length is conserved** (2026-09-22). Omitting boundaries is wrong: any
+   fragment that crosses a boundary is deposited into the boundary (§3.1b), and a tiny piece is seen only
+   through its boundaries. The length must be conserved like the deposit rule's mass, with no double counting
+   where one fragment crosses many close boundaries. It needs no accumulator change and no new stored
+   information: it is a formula. The per-base rule for every component omits the boundaries and is refused
+   (`ISSUES: the-per-base-rule-for-every-component`).
+2. **Capture is local** (2026-09-23). A junction's capture efficiency may be imputed only from its neighbouring
+   regions and boundaries, within one fragment length of the junction; the exon regions and the `exon|exon`
+   boundaries hold unspliced fragments compatible with the transcript. A transcript-level anchor does not help
+   predict one junction. Refused with their numbers: the transcripts' own spliced reads as the local price
+   (`ISSUES: the-spliced-read-junction-price`) and the mean of the junction's neighbours as its scale
+   (`ISSUES: the-junction-price-at-its-neighbours-mean`).
+3. **Junctions are never pooled** (2026-09-23), in the owner's words:
+
+   > "Some junctions are probed (probe spanning the junction itself) and some junctions are not probed. For
+   > this reason, you cannot pool junctions. It would be completely theoretically invalid and if it improves
+   > the results it would be purely by chance. A different type of probe panel could look much worse."
+
+   (`ISSUES: pooling-junctions`; the general form is §0b's robustness ruling.)
+4. **Capture efficiency stays outside the EM** (2026-09-23). A length that is no longer static, re-priced inside
+   the EM, is a separate branch and DEFERRED: the owner's concern is that it would make the EM unstable.
+5. **The one shared rule ships** (2026-09-23): "the new implementation is a step forward in the right direction.
+   It is now 'one shared rule' for gDNA, synthetic nascent RNA, and annotated RNA." It is kept though the
+   ladder's transcript table regresses at `g05` and `g50` stranded × capture ON. The regression is isoform
+   allocation under the junction price's within-gene noise, the next target
+   (`ISSUES: the-junction-price-is-noisy-within-a-gene`), and with this length alone the pseudocount's gDNA bias
+   is no longer cancelled on capture (`ISSUES: the-pseudocount-prior-is-biased-toward-gdna`).
 
 **The yield's two consumers, and its endpoint** (owner rulings 2026-09-17). The capture-contracted length is a
 YIELD — fragments per unit of abundance — and it enters two places only: the E-step, where every component's
@@ -1674,17 +1706,18 @@ emit is left unassigned, never NaN (gate `test_a_transcript_with_no_start_positi
 positive yield enters as it is. The 1 bp floors the EM and the assembler carried were geometric guards that
 capture had turned into efficiency clamps: on LBX0588 every transcript shorter than a kilobase sat on them,
 and the floor was the mechanism deciding the isoform split of 319 of 725 multi-isoform genes (the lever
-census, 2026-09-17). What the census then showed is a property of the model and not of the floor: on VCaP
-4,677 of 12,039 multi-isoform genes with ≥ 20 fragments change dominant isoform between the contracted and the
-plain yield, the median winner with no unique fragment, and 97 % of them are near-ties — contracted yields within
-1.5× where the plain yields differed 2× or more — because capture removes the length differences between a gene's
-isoforms (the differing bases are the unprobed ones, which contribute no opportunity), so the split of the shared
-fragments is decided by the per-fragment terms that remain. That decision is STABLE under the yield's posterior:
-with every piece efficiency drawn from its posterior on the landscape grid (eight draws, the EM's seed fixed) the
-dominant isoform under the mean of the draws equals the point estimate's in 98.5 % of genes and is the same in
-every draw for 90.6 % (84.7 % of the flipped ones), and the winners' shares do not soften (0.69 → 0.68). What the
-draws measure is the error bar the point estimate lacks: the yield's uncertainty is a CV of 6 % at the median and
-32 % at the 90th percentile of transcripts with ≥ 20 fragments, above the Poisson CV for 36 % of them — so the
-abundance's variance is Poisson plus the yield's, and the yield's is published beside the count rather than
-propagated through the EM (`ISSUES: yield-variance-beside-the-count`). What no library in hand can test is the
-premise that off-target cDNA is depleted as off-target gDNA is (`ISSUES: capture-premise-untested-on-cdna`).
+census, 2026-09-17). What the census then showed is a property of the model and not of the floor, measured on
+VCaP on the per-base length, as were the draws below: 4,677 of 12,039 multi-isoform genes with ≥ 20 fragments
+change dominant isoform between the contracted and the plain yield, the median winner with no unique fragment,
+and 97 % of them are near-ties — contracted yields within 1.5× where the plain yields differed 2× or more —
+because capture removes the length differences between a gene's isoforms (the differing bases are the unprobed
+ones, which contribute no opportunity), so the split of the shared fragments is decided by the per-fragment
+terms that remain. That decision is STABLE under the yield's posterior: with every piece efficiency drawn from
+its posterior on the landscape grid (eight draws, the EM's seed fixed) the dominant isoform under the mean of
+the draws equals the point estimate's in 98.5 % of genes and is the same in every draw for 90.6 % (84.7 % of the
+flipped ones), and the winners' shares do not soften (0.69 → 0.68). What the draws measure is the error bar the
+point estimate lacks: the yield's uncertainty is a CV of 6 % at the median and 32 % at the 90th percentile of
+transcripts with ≥ 20 fragments, above the Poisson CV for 36 % of them — so the abundance's variance is Poisson
+plus the yield's, and the yield's is published beside the count rather than propagated through the EM
+(`ISSUES: yield-variance-beside-the-count`). What no library in hand can test is the premise that off-target
+cDNA is depleted as off-target gDNA is (`ISSUES: capture-premise-untested-on-cdna`).

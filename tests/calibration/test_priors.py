@@ -5,10 +5,10 @@ A region owns the fragments contained in it; a boundary owns the fragments that 
 collects both — its regions by genomic overlap, its boundaries by touching those regions, so a
 locus of ``k`` contiguous regions carries ``k + 1`` boundaries including its two outer ones — and
 no boundary's mass is ever folded into a region's total. The second half of this file gates that
-projection; the first half gates what ``assemble_priors`` builds on it. The gDNA length is each
-object's effective support ``S`` at its own capture efficiency, the crossing supports converted by
-``q``, and its bedrock invariant is that with no reference every efficiency is 1, so
-``gdna_eff_len == span == Σ S_r + Σ q·S_e`` exactly and an unenriched library contracts nothing.
+projection; the first half gates what ``assemble_priors`` builds on it. The gDNA length is gDNA's
+share of each object — a region's contained support ``S_r``, a boundary's conserved share ``M_e`` — at the
+object's own capture efficiency, and its bedrock invariant is that with no reference every efficiency is
+1, so ``gdna_eff_len == span == Σ S_r + Σ M_e`` exactly and an unenriched library contracts nothing.
 Reading the genomic ``region_size_bp`` instead of ``S`` fabricates a contraction.
 """
 
@@ -38,6 +38,7 @@ def _result(
     boundary_g=None,
     boundary_r=None,
     boundary_eff=None,
+    boundary_share=None,
     boundary_spliced=None,
     mass_per_crossing=None,
     gdna_density_global=0.01,
@@ -58,7 +59,9 @@ def _result(
     prior is a conserved fragment count — so they only fill the result's fields.
 
     ``efficiency`` / ``efficiency_boundary`` are the per-object capture efficiencies (1 everywhere by
-    default, as a field with no reference must carry).
+    default, as a field with no reference must carry). ``boundary_share`` is gDNA's conserved share at each
+    boundary; it defaults to the crossing support, which it equals where both flanks exceed every fragment
+    length — a crossing start then crosses one boundary, as ``q`` at its identity 1 says.
     """
     ng = np.asarray(region_g, dtype=np.float64)
     n = ng.shape[0]
@@ -94,6 +97,11 @@ def _result(
         sj_mass_per_crossing=np.ones(0, dtype=np.float64),
         gdna_region_eff_len=region_eff_arr,
         gdna_boundary_eff_len=boundary_eff_arr,
+        gdna_boundary_conserved_len=(
+            boundary_eff_arr
+            if boundary_share is None
+            else np.asarray(boundary_share, dtype=np.float64)
+        ),
         rna_region_eff_len=(
             region_eff_arr
             if rna_region_eff is None
@@ -185,7 +193,7 @@ def _ml(locus_id, blocks) -> MultiLocus:
 def test_factor_one_under_uniform_gdna():
     # THE correctness criterion. A uniform (unenriched) gDNA field carries no reference, every efficiency
     # is 1, and gdna_eff_len = span = Σ S EXACTLY: region_eff=[120,200,80] (region 1 is SHORT),
-    # boundary_eff=[120,120] at q = 1, ρ=0.02 over 3 same-ref regions ⇒ span = 400 + 240 = 640; and the
+    # boundary shares [120,120] (q = 1), ρ=0.02 over 3 same-ref regions ⇒ span = 400 + 240 = 640; and the
     # gDNA per-position rate G/eff_len recovers the true ρ.
     region_eff = [120.0, 200.0, 80.0]
     boundary_eff = [120.0, 120.0]
@@ -234,28 +242,36 @@ def test_eff_len_uses_effective_support_not_genomic_size():
     assert not np.isclose(priors.gdna_eff_len[0], 300.0 + sum(boundary_eff))
 
 
-def test_a_boundary_enters_the_length_at_its_crossing_support_CONVERTED_BY_q():
-    # The count converts a boundary's mass by q, the conserved mass per crossing; the length converts the
-    # boundary's support by the SAME q, so a start is counted once however many boundaries its fragment
-    # crosses. Three 40-bp pieces, fragments of ~181 bp, q = ½ on both boundaries: every crossing start spans
-    # a piece and is in both supports, so the length is 30 + ½·360 = 210 and the density 4.2/210 = 0.02,
-    # the field's (region 0.2/10, boundary 3.6/180). The unconverted 30 + 360 = 390 would read the same
-    # locus at roughly half its density.
-    region_eff = [10.0, 10.0, 10.0]
-    boundary_eff = [180.0, 180.0]
+def test_a_boundary_enters_the_length_at_gdnas_conserved_share_never_the_counts_q():
+    """The count converts a boundary's mass by ``q``, the accumulator's mass per crossing, pooled over gDNA
+    and RNA; the length reads gDNA's own conserved share at the boundary, the geometry of gDNA's starts
+    split as the deposit rule splits them. Three 40-bp pieces with fragments longer than a piece: each
+    boundary's share is ``½·40 + ½·40 = 40``, so the length is 30 + 80 = 110 — and it stays 110 when the
+    count's ``q`` moves (RNA crossing the same boundaries moves the pooled ``q``, never gDNA's geometry),
+    while the count follows ``q``. PERTURBATION: the crossing support converted by ``q`` reads
+    ``30 + q·360`` and moves with it."""
     cal = _result(
         region_g=[0.2, 0.2, 0.2],
         region_r=[0.0, 0.0, 0.0],
-        region_eff=region_eff,
+        region_eff=[10.0, 10.0, 10.0],
         boundary_g=[3.6, 3.6],
-        boundary_eff=boundary_eff,
+        boundary_eff=[180.0, 180.0],
+        boundary_share=[40.0, 40.0],
         mass_per_crossing=[0.5, 0.5],
     )
     ra = _regions([0, 40, 80], [40, 80, 120])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 120)])])
-    np.testing.assert_allclose(priors.gdna_eff_len, [30.0 + 0.5 * 360.0], rtol=1e-9)
-    np.testing.assert_allclose(priors.gdna_prior_count / priors.gdna_eff_len, [0.02], rtol=1e-9)
-    assert not np.isclose(priors.gdna_eff_len[0], 30.0 + 360.0)
+    np.testing.assert_allclose(priors.gdna_eff_len, [110.0], rtol=1e-12)
+    import dataclasses
+
+    skewed = assemble_priors(
+        dataclasses.replace(cal, boundary_mass_per_crossing=np.array([0.8, 0.8])),
+        ra,
+        [_ml(0, [(0, 0, 120)])],
+    )
+    np.testing.assert_allclose(skewed.gdna_eff_len, [110.0], rtol=1e-12)
+    assert skewed.gdna_prior_count[0] > priors.gdna_prior_count[0] + 1.0
+    assert not np.isclose(priors.gdna_eff_len[0], 30.0 + 0.5 * 360.0)
 
 
 @pytest.mark.parametrize(
@@ -269,16 +285,18 @@ def test_the_length_counts_each_crossing_start_once_as_the_count_counts_each_fra
     deposits a count of +1 at EVERY boundary it crosses and a mass summing to 1 across them).
 
     The pseudocount converts a boundary's incidence count to fragments by ``q = mass / count``. The
-    length must convert the boundary's incidence SUPPORT by the same ``q``, so that a start position is
-    counted once however many boundaries its fragment crosses. Three 40-bp pieces inside a long reference
-    with fragments longer than a piece: every crossing start that spans a piece would otherwise be
-    counted at both of its boundaries, and the locus's gDNA would read at HALF the field's density.
+    length reads each boundary's conserved share (`effective_length.conserved_cut_shares`), which splits a
+    crossing start's unit over the boundaries its fragment crosses, so a start position is counted once
+    however many boundaries it crosses. Three 40-bp pieces inside a long reference with fragments longer
+    than a piece: every crossing start that spans a piece would otherwise be counted at both of its
+    boundaries, and the locus's gDNA would read at HALF the field's density.
 
     Under a uniform field of one fragment per start position the pseudocount is the number of distinct
     starts overlapping the locus, and so must the length be: their ratio is the field's density, 1.
     """
     from rigel.calibration.effective_length import (
         UNBOUNDED_REACH,
+        conserved_cut_shares,
         contained_eff_length,
         crossing_eff_length,
     )
@@ -316,6 +334,10 @@ def test_the_length_counts_each_crossing_start_once_as_the_count_counts_each_fra
     np.testing.assert_allclose(count_r, S_r, rtol=1e-12)
     np.testing.assert_allclose(count_e, S_e, rtol=1e-12)
     q = mass_e / count_e
+    length = (ends - starts).astype(np.float64)
+    M_e = np.add(
+        *conserved_cut_shares(pmf, length[lo], length[hi], UNBOUNDED_REACH, UNBOUNDED_REACH)
+    )
 
     cal = _result(
         region_g=count_r,
@@ -323,6 +345,7 @@ def test_the_length_counts_each_crossing_start_once_as_the_count_counts_each_fra
         region_eff=S_r,
         boundary_g=count_e,
         boundary_eff=S_e,
+        boundary_share=M_e,
         mass_per_crossing=q,
     )
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 400, 520)])])

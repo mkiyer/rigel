@@ -345,13 +345,14 @@ def share_priors(oracle: OracleTruth, calibration, region_arrays, multi_loci):
 
 
 def eff_len_inflation(calibration, region_arrays, multi_loci) -> dict:
-    """Is ``gdna_eff_len`` clamped by an INCIDENCE-support sum rather than the genomic span?
+    """Is ``gdna_eff_len``'s span the locus's genomic extent, each start counted once?
 
-    ``assemble_priors`` clamps ``gdna_eff_len`` to ``span = Σ share·(S_region + S_boundary)``. ``S_boundary`` is
-    ``E_g[w − 1] ≈ mu_g − 1`` PER BOUNDARY, so every interior boundary adds most of a fragment length to a
-    locus whose regions may be a few hundred bases — an incidence-like sum, not a genomic extent. The EM
-    divides the gDNA component's abundance by this array, so an inflation here is a direct scale error
-    on one of the three numbers calibration ships.
+    ``assemble_priors`` clamps ``gdna_eff_len`` to ``span = Σ share·(S_region + M_boundary)``, ``M`` gDNA's
+    conserved share at each boundary (``gdna_boundary_conserved_len``): a crossing start's unit split over the
+    boundaries its fragment crosses, so the span over a locus of pieces shorter than a fragment is still its
+    extent plus the fragments straddling its two ends, never a fragment length per interior boundary. The EM
+    divides the gDNA component's abundance by this array, so an inflation here is a direct scale error on one
+    of the three numbers calibration ships.
 
     Reports the ratio to the locus's GENOMIC span, mass-weighted by the gDNA prior, so the number is
     what the consumer feels rather than what an unweighted locus average would say
@@ -362,7 +363,7 @@ def eff_len_inflation(calibration, region_arrays, multi_loci) -> dict:
     # builds (`TRAPS: a-test-that-redefines`).
     n_loci = len(multi_loci)
     region_support = np.maximum(np.asarray(calibration.gdna_region_eff_len, np.float64), 0.0)
-    boundary_support = np.maximum(np.asarray(calibration.gdna_boundary_eff_len, np.float64), 0.0)
+    boundary_support = np.maximum(np.asarray(calibration.gdna_boundary_conserved_len, np.float64), 0.0)
     proj = PRIORS._project_regions_to_loci(
         region_arrays, multi_loci, n_loci,
         {

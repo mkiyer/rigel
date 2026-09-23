@@ -2,8 +2,8 @@
 
 Turns the calibration's per-object deconvolved mass and geometric length into the two per-locus
 Dirichlet scalars the locus EM consumes — ``rna_prior_count`` and ``gdna_prior_count`` — plus the
-per-locus gDNA-component effective length: the locus's objects at their supports and capture
-efficiencies, the crossing supports converted by the count's own ``q`` (``Σ S_r c_r + Σ q_e S_e c_e``).
+per-locus gDNA-component effective length: gDNA's conserved shares of the locus's objects at their
+capture efficiencies (``Σ S_r c_r + Σ M_e c_e``).
 
 The prior's only job is to split each locus's unspliced fragments between gDNA and RNA; it does not
 attribute RNA mass to individual transcripts, which is what the EM is for.
@@ -271,11 +271,12 @@ def assemble_priors(
         {gdna,rna}_prior_count = Σ_regions share(r,L)·mass_c_region[r]
                                + Σ_boundaries share(e,L)·mass_c_boundary[e]·q[e]
 
-        gdna_eff_len = Σ_regions share·S_r·c̃_r  +  Σ_boundaries share·q[e]·S_e·c̃_e
+        gdna_eff_len = Σ_regions share·S_r·c̃_r  +  Σ_boundaries share·M_e·c̃_e
 
     ``c̃`` is each object's capture efficiency, the calibration's own
-    (`CalibrationResult.gdna_capture_efficiency_region` / ``_boundary``; `capture_efficiency`) and ``S``
-    its support.
+    (`CalibrationResult.gdna_capture_efficiency_region` / ``_boundary``; `capture_efficiency`), ``S_r`` a
+    region's contained support and ``M_e`` gDNA's conserved share at a boundary
+    (``gdna_boundary_conserved_len``).
 
     THE PRIOR IS A CONSERVED FRAGMENT COUNT. The EM adds these scalars straight to its own soft
     counts (``G = n_gdna + a_g``, ``em_solver.cpp:apply_grouped_prior_update``), where ``n_gdna`` counts
@@ -293,27 +294,26 @@ def assemble_priors(
 
     THE gDNA EFFECTIVE LENGTH COUNTS WHAT THE COUNT COUNTS. The prior's count is the calibration's
     gDNA mass on the locus's regions and on its boundaries, so the length the EM divides that count by is
-    those same objects' supports at their own efficiencies: every region's contained support ``S_r`` at
-    ``c̃_r`` and every boundary's crossing support ``S_e`` at ``c̃_e`` — the crossing support CONVERTED BY
-    THE SAME ``q`` THE COUNT IS CONVERTED BY. The deposit rule counts a crossing fragment at every boundary
-    it crosses, so a boundary's crossing support ``E_f[w − 1]`` is a count of INCIDENCES: a start whose
-    fragment spans a piece shorter than itself is in the support of both of that piece's boundaries. The
-    count side undoes that inflation with ``q`` (each fragment once); the length side must undo it the
-    same way (each start once), or a locus of pieces shorter than a fragment reads its gDNA at a fraction
-    ``q̄`` of the field's density — under capture, where the introns contribute no opportunity and the
-    crossing support is most of the length, at half of it (gate:
+    gDNA's share of those same objects at their own efficiencies: every region's contained support ``S_r``
+    at ``c̃_r`` and every boundary's CONSERVED SHARE ``M_e`` at ``c̃_e``. The deposit rule counts a crossing
+    fragment at every boundary it crosses and splits its unit over them, and ``M_e`` is gDNA's starts split
+    the same way (`effective_length.conserved_cut_shares`), so the locus's objects hold each start once — as
+    the count holds each fragment once — however many boundaries its fragment crosses. The crossing support
+    ``E_f[w − 1]`` counts a start at every boundary its fragment crosses instead, and over a locus of pieces
+    shorter than a fragment it reads the gDNA at a fraction of the field's density (gate:
     ``test_the_length_counts_each_crossing_start_once_as_the_count_counts_each_fragment_once``, a
-    brute-force enumeration of the deposit rule on three 40-bp pieces). ⛔ One other form is refused by
-    measurement. A length over the locus's BASES at the regions' efficiencies alone — the transcript
-    ruler's form, right for a template's capture — drops the boundary objects whose masses the count
-    keeps, and where the calibration's crossing masses sit above their geometry the gDNA component reads
-    denser than its objects, over-claims the exonic unspliced fragments and every probed gene under-calls
-    (the test chromosome's `g50 ss.99 ON` row: gene-level Σ|Δ| 25,633 → 38,174 against 23,967 here).
+    brute-force enumeration of the deposit rule on three 40-bp pieces). The share is gDNA's own geometry,
+    never the count's pooled ``q``, which is RNA's where RNA holds most of a boundary's crossings. ⛔ One
+    other form is refused by measurement: a length over the locus's BASES at the regions' efficiencies
+    alone drops the boundary objects whose masses the count keeps, and where the calibration's crossing
+    masses sit above their geometry the gDNA component reads denser than its objects, over-claims the
+    exonic unspliced fragments and every probed gene under-calls (the test chromosome's `g50 ss.99 ON` row:
+    gene-level Σ|Δ| 25,633 → 38,174 against 23,967 here).
 
     The bedrock invariant — factor 1 under uniform gDNA. With no reference every efficiency is exactly
-    1 and ``gdna_eff_len == span == Σ S_r + Σ q·S_e`` bit-identically: an unenriched library contracts NOTHING and
-    reads what it read before the efficiencies existed. Under capture a depleted object contributes its
-    support at its efficiency and the length contracts toward the probed footprint.
+    1 and ``gdna_eff_len == span == Σ S_r + Σ M_e`` bit-identically: an unenriched library contracts
+    NOTHING. Under capture a depleted object contributes its share at its efficiency and the length
+    contracts toward the probed footprint.
 
     The RNA prior is the UNSPLICED RNA mass only. A spliced fragment has no gDNA candidate in the
     EM (gDNA does not splice), so it is assigned directly and counting it here would inflate the RNA side
@@ -360,14 +360,15 @@ def assemble_priors(
     )
     rna_locus = np.maximum(by_region(calibration.count_rna_region) + by_boundary(rna_boundary), 0.0)
 
-    # THE gDNA EFFECTIVE LENGTH: the count's own objects at their own supports and efficiencies.
+    # THE gDNA EFFECTIVE LENGTH: gDNA's conserved shares of the count's own objects at their efficiencies.
     region_s = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 0.0)
-    boundary_s = np.maximum(np.asarray(calibration.gdna_boundary_eff_len, dtype=np.float64), 0.0)
+    boundary_m = np.maximum(
+        np.asarray(calibration.gdna_boundary_conserved_len, dtype=np.float64), 0.0
+    )
     c_region = np.asarray(calibration.gdna_capture_efficiency_region, dtype=np.float64)
     c_boundary = np.asarray(calibration.gdna_capture_efficiency_boundary, dtype=np.float64)
-    # the crossing support converted by the count's own q: a start position once, not once per boundary crossed
-    span = by_region(region_s) + by_boundary(boundary_s * q)
-    eff_len = by_region(region_s * c_region) + by_boundary(boundary_s * q * c_boundary)
+    span = by_region(region_s) + by_boundary(boundary_m)
+    eff_len = by_region(region_s * c_region) + by_boundary(boundary_m * c_boundary)
 
     return LocusPriors(
         gdna_prior_count=gdna_locus,

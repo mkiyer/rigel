@@ -39,9 +39,11 @@ em.assignment_mode=fractional`, which removes the draw from the comparison; each
 report refuses to set two modes side by side. `base_reseed` is still re-derived in the same session, and any
 delta below it is noise, not a result. The arms decompose it: `oracle` is what a perfect prior is worth end to
 end, so what remains under it belongs to the EM and the assignment rather than to calibration; every prior arm
-wraps `assemble_priors`, so none reaches the lengths the EM divides by. `oracle_ruler` does: it hands the EM the
-simulator's own capture-aware length in place of the shipped ruler's, so under capture it prices the ruler end
-to end (`ISSUES: ruler-witness-geometry-on-transcript-panels`).
+wraps `assemble_priors`, so none reaches a transcript's length. `oracle_ruler` does: it hands the EM the
+simulator's own capture-aware length for every transcript and synthetic span, anchored on the fully probed
+transcripts, in place of the shipped one, and leaves the locus gDNA component on the shipped rule — so under
+capture it prices end to end what the transcripts' lengths do to the isoform split, and not their scale beside
+the gDNA component, which its anchor sets (`ISSUES: ruler-witness-geometry-on-transcript-panels`).
 
 ---
 
@@ -70,24 +72,33 @@ work downstream of calibration — the assembler, the ruler, the EM. Its noise f
 `quant_accuracy.py --arm base_reseed` prints it beside the effect and must be re-run in the same session
 (`TRAPS: re-record-the-baseline`).
 
-### The ruler — the effective-length shrinkage sits outside every ceiling's patch point
+### The ruler — the capture-contracted length, and why a transcript's sits outside every prior arm's patch point
 
 `effective_lengths_em` is built inside `_setup_geometry_and_estimator` before `pipeline.py` calls
 `assemble_priors`, and an arm that patches `assemble_priors` leaves the shipped shrinkage installed —
-so a ceiling measured that way has never priced the ruler. The ruler's truth is `ruler_vs_truth.py`: the
-simulator's own capture-aware effective length per transcript, the one instrument that scores the ruler
-against what generated the reads (`docs/TESTING.md` §0c). `calibration_vs_oracle.py`'s `O` arm swaps the
-six deconvolved arrays only, and the efficiencies the ruler reads are the solve's own output published on
-the result, so its ruler column reads `P` — the factor the EM divided by — and `P/O` is 1 by construction.
+so a ceiling measured that way has never priced the ruler. The length's truth is `ruler_vs_truth.py`: the
+simulator's own capture-aware yield, the one instrument that scores a length against what generated the reads
+(`docs/TESTING.md` §0c). Its `--scale` read-out is how the length is judged, with no EM: L / Y on the shipped
+lengths for every component — the locus gDNA component, the synthetic spans, and the annotated transcripts by
+probed class with the junction-probed ones apart — and the within-gene spread of the annotated transcripts'
+log(L / Y). Read both: the class means must sit on one scale, because the gDNA-versus-RNA split reads the
+ratio of the gDNA component's length to the RNA's, and the within-gene spread must not grow, because the
+isoform split reads the ratios inside a gene and a repair of the scale can cost it
+(`TRAPS: judge-a-ruler-by-its-within-gene-spread`); then price the change on the transcript table, per stratum.
+`calibration_vs_oracle.py`'s `O` arm swaps the six deconvolved arrays only, and the efficiencies the length
+reads are the solve's own output published on the result, so its ruler column reads `P` — the factor the EM
+divided by — and `P/O` is 1 by construction.
 ⛔ Say which call your arm patches, and check it sits downstream of everything you mean to price.
 
-The ruler is the transcript's own bases at their pieces' capture efficiencies, each efficiency the
-posterior mean of the piece's clipped gDNA density against the located enriched mode of the fitted gDNA
-landscape (`DESIGN.md` §7.2, `EQUATIONS.md` §11): with no enriched mode — capture-OFF, or no gDNA, or a
-library too sparse to locate its probed level — nothing contracts, exactly, and the zero controls and
-both capture-OFF strata read 1.000 with nothing moved. A second lane is built and
-not wired: the per-transcript RNA prior (`rna_prior_weight`) is never passed in production
-(`ISSUES: per-transcript-prior-lane`).
+Every EM component's length is one shared rule: the component's conserved share of each region and boundary
+its fragments deposit on (a junction, in a spliced transcript's own coordinates) times that object's capture
+efficiency (`DESIGN.md` §7.2, `EQUATIONS.md` §11). An object's efficiency is the posterior mean of its own gDNA
+density, its count on its support, clipped at the located enriched mode of the fitted gDNA landscape; a
+junction, where gDNA never deposits, is priced from the objects within one fragment of it. With no enriched
+mode — capture-OFF, or no gDNA, or a library too sparse to locate its probed level — every efficiency is exactly
+1 and nothing contracts, and the zero controls and both capture-OFF strata read 1.000 with nothing moved. A
+second lane is built and not wired: the per-transcript RNA prior (`rna_prior_weight`) is never passed in
+production (`ISSUES: per-transcript-prior-lane`).
 
 ---
 
@@ -247,6 +258,11 @@ python scripts/design/prior_vs_oracle.py --suite $LADDER --index $INDEX \
 #    (c) per OBJECT: solvable, solved wrong, and CONFIDENTLY wrong.  Read `weak%` before `mwae`.
 python scripts/design/solvability_audit.py --suite $LADDER --index $INDEX \
        --oracle-cache $LADDER/oracle_cache
+#    (d) the CAPTURE-CONTRACTED LENGTH the EM divides by, against the simulator's own yield, no EM: every
+#        component's class mean on one scale AND the within-gene spread — read both.
+for C in gdna_g05_ss_0.99_nrna_mid_capture_on gdna_g50_ss_0.99_nrna_mid_capture_on; do
+  python scripts/design/ruler_vs_truth.py --panel ladder --condition $C --scale
+done
 
 # 3. THE NUMBER THE RELEASE SHIPS ON — the `g00` rows are the zero controls, read on their own row. — the tool end to end, with the ceiling arms above it.
 #    `panel.py score` reads every arm under fractional assignment (the protocol above).
@@ -259,7 +275,7 @@ python scripts/sim/panel.py report --config $CFG --arms base base_reseed oracle 
 python -m pytest tests/native tests/calibration -q     # FIDELITY
 ```
 
-Steps 0 and 2 take about 15 minutes on a built panel. Run the set together and record it
+Steps 0 and 2(a)–(c) take about 15 minutes on a built panel. Run the set together and record it
 together (`TRAPS: re-record-the-baseline`). When dissecting rather than scoring: run the panel → take
 the worst **in-scope** scenario → dissect it to the highest-error object (`solvability_audit.py`) → find the
 cause → fix → repeat. The worst scenario overall is the deferred stratum, and picking it is how the

@@ -12,6 +12,11 @@ Two frames, one family. With ``w`` the molecule length and ``f`` its pmf::
     contained   E_f[ (region_len - w + 1)+ ]                              fits wholly inside a region
     crossing    E_f[ max(0, min(w-1, R_lo, R_hi, R_lo + R_hi - w + 1)) ]  spans a 0-bp boundary
 
+The CONSERVED SHARE (:func:`conserved_cut_shares`) is the third reading of the same placements: not how
+many starts reach an object but how much of each placement's unit the deposit rule gives it, so that a
+template's objects share its fl-marginal length with nothing counted twice — the frame the
+capture-contracted length is priced in.
+
 The crossing formula covers both boundary kinds and both components, with ``R_lo`` / ``R_hi`` the
 molecule's own remaining template either side of the boundary. Mean fragment length is its
 large-reach limit, not a separate case: gDNA's template is the chromosome, so its reaches are
@@ -39,17 +44,13 @@ floored division turns "no data" into a confident wrong answer.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import numpy as np
 
 
 __all__ = [
     "UNBOUNDED_REACH",
-    "BaseTaper",
-    "base_taper",
+    "conserved_cut_shares",
     "contained_eff_length",
-    "crossing_base_shares",
     "crossing_eff_length",
     "fl_mean",
 ]
@@ -159,161 +160,88 @@ def crossing_eff_length(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
-#  THE PER-BASE FRAME — the same placement counts, read base by base
+#  THE CONSERVED FRAME — where a template's placements put their unit
 #
-#  A fragment's capture efficiency is the mean per-base efficiency over the bases it covers, so a
-#  template's effective length under capture is a sum over its BASES, each weighted by how many starts
-#  cover it (`capture_eff_length`, `priors`; EQUATIONS.md §11). Two functionals of the pmf serve that:
-#  the end taper τ(x) on a template's own bases, and the share of a crossing fragment's bases that lie
-#  in each piece beside a boundary. Both are geometry against the pmf and nothing else, which is why they
-#  live here beside the divisors they are built from.
+#  The accumulator splits a crossing fragment's unit over the objects it crosses: its path is cut into
+#  slices by the boundaries it crosses (and, spliced, by the junctions at its blocks' ends), and each
+#  slice's share of the fragment — its bases over the fragment's length — is shared equally by the objects
+#  bounding it (`tests/native/_accumulator_reference.py`, ``Accumulator.deposit``). Summed over a template's
+#  placements that gives each object the template's CONSERVED SHARE of it: a piece's contained share
+#  (:func:`contained_eff_length`) and a cut's share (:func:`conserved_cut_shares`), which add up to the
+#  template's fl-marginal length exactly, however many cuts one fragment crosses. The capture-contracted
+#  length prices each share at its object's capture efficiency (`capture_eff_length`, `priors`).
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 
-@dataclass(frozen=True, slots=True)
-class BaseTaper:
-    """``τ(x) = E_f[ (starts whose fragment covers base x) / w ]`` on a template of length ``L``, and its
-    interval sums — the weight a base carries in the template's effective length.
+def _side_share(p: np.ndarray, a: np.ndarray, near: np.ndarray, far: np.ndarray) -> np.ndarray:
+    """``Σ_w f(w)/w · Σ_x L_a(x)`` — the share a cut takes from the bases of the piece of length ``a`` on
+    one side of it, with ``near`` bases of template on that side (``near ≥ a``) and ``far`` on the other.
 
-    A fragment of length ``w`` starting at ``s`` covers ``x`` iff ``s ≤ x < s + w`` with ``0 ≤ s ≤ L − w``,
-    which is ``min(x + 1, w, L − x, L − w + 1)⁺`` starts; each of those starts spreads its unit over its
-    ``w`` bases, so the base carries ``1/w`` of it. Summed over the template's bases, ``Σ_x τ(x)`` is the
-    fl-marginal length ``Σ_w f(w)(L − w + 1)⁺`` exactly — the per-base frame partitions the start count,
-    it does not re-derive it — and away from both ends ``τ = 1``: only the bases within a fragment of an
-    end are tapered.
-
-    For ``L ≥ 2·w_max − 1`` the four-way min collapses to ``min(d, w)`` with ``d = min(x + 1, L − x)``, so
-    one cumulative table ``CT(d) = Σ_{d' ≤ d} T(d')``, ``T(d) = Σ_w f(w) min(d, w)/w``, serves every such
-    template in O(1) per interval; a shorter template is evaluated base by base. A zero-length fragment
-    covers no base and carries no weight: a smoothed length model can put mass at ``w = 0`` (a sparse real
-    library's did), and it is dropped here.
+    ``x`` is the number of the placement's bases on this side, ``max(1, w − far) ≤ x ≤ min(w − 1, near)``;
+    ``L_a(x) = x`` while the placement starts inside the piece (the slice is bounded by this cut alone)
+    and ``a/2`` once it runs through it (the slice is bounded by this cut and the piece's other cut). With
+    no far side the inner sum is ``(w − 1)w/2`` up to ``w = a + 1``, ``a·w/2`` up to ``w = near + 1`` and
+    ``a(near + 1)/2`` beyond; the far side removes the ``x < w − far``: ``(w − far − 1)(w − far)/2`` up to
+    ``w = far + 1 + a`` and ``a(w − far)/2`` beyond; and no placement is longer than the template
+    (``w ≤ near + far``). Each segment is a difference of three cumulative sums over the pmf — ``f``,
+    ``w·f`` and ``f/w`` — so the whole is ``O(objects)`` with no per-length loop.
     """
+    n = p.shape[0]
+    w = np.arange(n, dtype=np.float64)
+    live = np.where(w >= 2.0, p, 0.0)  # a crossing places a base on each side
+    cum0 = np.concatenate([[0.0], np.cumsum(live)])
+    cum1 = np.concatenate([[0.0], np.cumsum(live * w)])
+    cumr = np.concatenate([[0.0], np.cumsum(live / np.maximum(w, 1.0))])
 
-    pmf: np.ndarray
-    cum: np.ndarray
-    wmax: int
-    #: the pmf's mass at positive lengths — the interior base's weight, 1 for a pmf with no mass at zero
-    mass: float
+    def over(cum, lo, hi):
+        """``Σ`` of the table's summand over the integer lengths ``lo < w ≤ hi``."""
+        i0 = np.clip(np.floor(lo).astype(np.int64) + 1, 0, n)
+        i1 = np.clip(np.floor(hi).astype(np.int64) + 1, 0, n)
+        return np.where(i1 > i0, cum[np.maximum(i1, i0)] - cum[i0], 0.0)
 
-    def _cum_long(self, d: np.ndarray) -> np.ndarray:
-        d = np.asarray(d, dtype=np.int64)
-        return np.where(
-            d <= self.wmax,
-            self.cum[np.minimum(d, self.wmax)],
-            self.cum[self.wmax] + (d - self.wmax) * self.mass,
-        )
-
-    def _cum_short(self, L: int) -> np.ndarray:
-        x = np.arange(L, dtype=np.float64)
-        d = np.minimum(x + 1.0, L - x)
-        w_all = np.arange(self.pmf.shape[0], dtype=np.float64)
-        live = (self.pmf > 0.0) & (w_all >= 1.0)
-        w = w_all[live]
-        starts = np.maximum(
-            np.minimum(np.minimum(d[:, None], w[None, :]), L - w[None, :] + 1.0), 0.0
-        )
-        tau = (self.pmf[live][None, :] * starts / w[None, :]).sum(1)
-        return np.concatenate([[0.0], np.cumsum(tau)])
-
-    def interval_sums(self, x0: np.ndarray, x1: np.ndarray, L: np.ndarray | int) -> np.ndarray:
-        """``Σ_{x ∈ [x0, x1)} τ(x)`` for arrays of intervals, each on a template of length ``L`` (one
-        length, or one per interval): the long templates in one vectorised pass, the short ones grouped
-        by length so each table is built once."""
-        x0 = np.asarray(x0, dtype=np.int64)
-        x1 = np.asarray(x1, dtype=np.int64)
-        L = np.broadcast_to(np.asarray(L, dtype=np.int64), x0.shape)
-        out = np.empty(x0.shape, dtype=np.float64)
-        is_long = L >= 2 * self.wmax - 1
-        if is_long.any():
-            Ll, a, b = L[is_long], x0[is_long], x1[is_long]
-            half = Ll // 2
-            total = self._cum_long(half) + self._cum_long(Ll - half)
-
-            def F(x):  # Σ_{x' < x} τ(x'): the left taper up to the middle, the right one mirrored
-                return np.where(x <= half, self._cum_long(x), total - self._cum_long(Ll - x))
-
-            out[is_long] = F(b) - F(a)
-        short = np.flatnonzero(~is_long)
-        short = short[np.argsort(L[short], kind="stable")]
-        lengths, first = np.unique(L[short], return_index=True)
-        for Ls, s0, s1 in zip(lengths, first, np.r_[first[1:], short.size]):
-            sel = short[s0:s1]
-            c = self._cum_short(int(Ls))
-            out[sel] = c[x1[sel]] - c[x0[sel]]
-        return out
-
-
-def base_taper(fl_pmf: np.ndarray) -> BaseTaper:
-    """The :class:`BaseTaper` of a pmf: its table ``CT(d)`` for ``d ≤ w_max``."""
-    p = _as_pmf(fl_pmf)
-    w_all = np.arange(p.shape[0], dtype=np.float64)
-    live = (p > 0.0) & (w_all >= 1.0)
-    if not live.any():
-        raise ValueError("fl_pmf has no mass at a positive length.")
-    wmax = int(np.flatnonzero(live).max())
-    w = w_all[live]
-    d = np.arange(1, wmax + 1, dtype=np.float64)
-    T = (p[live][None, :] * np.minimum(d[:, None], w[None, :]) / w[None, :]).sum(1)
-    return BaseTaper(
-        pmf=p, cum=np.concatenate([[0.0], np.cumsum(T)]), wmax=wmax, mass=float(p[live].sum())
+    top = near + far
+    starts_inside = np.minimum(a + 1.0, top)
+    runs_through = np.minimum(near + 1.0, top)
+    kept = (
+        0.5 * (over(cum1, -1.0, starts_inside) - over(cum0, -1.0, starts_inside))
+        + 0.5 * a * over(cum0, starts_inside, runs_through)
+        + 0.5 * a * (near + 1.0) * over(cumr, runs_through, top)
     )
+    lo, hi = far + 1.0, np.minimum(far + 1.0 + a, top)
+    removed = 0.5 * (
+        over(cum1, lo, hi)
+        - (2.0 * far + 1.0) * over(cum0, lo, hi)
+        + far * (far + 1.0) * over(cumr, lo, hi)
+    ) + 0.5 * a * (over(cum0, hi, top) - far * over(cumr, hi, top))
+    return np.maximum(kept - removed, 0.0)
 
 
-def crossing_base_shares(
-    region_arrays, fl_pmf: np.ndarray
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """``(boundary, region, share)`` — the expected number of base-starts a crossing fragment places in
-    each piece within its reach of a contiguous boundary, at UNBOUNDED reach (gDNA's template).
+def conserved_cut_shares(
+    fl_pmf: np.ndarray,
+    a: np.ndarray,
+    b: np.ndarray,
+    reach_lo: np.ndarray,
+    reach_hi: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(left, right)`` — a template's conserved share at each cut between two of its consecutive pieces,
+    split into the part its left piece's bases carry and the part its right piece's carry.
 
-    A molecule of length ``w`` crossing the boundary lies ``a`` bases to its left and ``w − a`` to its
-    right, ``1 ≤ a ≤ w − 1``, one start each; spreading each start over its ``w`` bases, the piece at
-    cumulative distance ``(c_{j−1}, c_j]`` on a side receives ``G(c_j) − G(c_{j−1})`` base-starts with
-
-        G(c) = Σ_w f(w) Σ_{a=1}^{w−1} min(a, c) / w,
-
-    and the two sides are symmetric. The shares of one boundary sum to its crossing opportunity
-    ``E_f[w − 1]`` exactly (:func:`crossing_eff_length` at ``UNBOUNDED_REACH``) as long as the pieces on
-    each side reach a fragment's length; a chromosome's end within reach loses the part that has no
-    template. A boundary's crossing count is therefore ``Σ_q share_q · ρ_q`` in expectation over the
-    pieces ``q`` its fragments cover, which is what lets a piece too short to contain a fragment be read
-    from its edges (`capture_efficiency`).
+    A length-``w`` placement with ``x`` bases left of the cut gives the cut ``L_a(x)/w`` from its left slice
+    and ``L_b(w − x)/w`` from its right, ``a`` and ``b`` the two pieces' lengths (:func:`_side_share`); the
+    reaches are the template's bases left and right of the cut (``reach_lo ≥ a``, ``reach_hi ≥ b``;
+    :data:`UNBOUNDED_REACH` for gDNA, whose template does not end). A junction is a cut like any other in a
+    spliced template's own coordinates. Where neither reach binds the sums close to
+    ``left = ½ E_f[min(a, w − 1)]`` and ``right = ½ E_f[min(b, w − 1)]``. With the pieces' contained shares
+    a template's shares total its fl-marginal length ``E_f[(L − w + 1)⁺]`` exactly, and each object's share
+    is what the deposit rule gives it (gate: ``tests/calibration/test_effective_length.py``, per object
+    against the reference accumulator).
     """
-    from .region_arrays import boundary_region_indices
-
     p = _as_pmf(fl_pmf)
-    w = np.arange(p.shape[0], dtype=np.float64)
-    live = (p > 0.0) & (w >= 2.0)
-    wmax = int(np.flatnonzero(p > 0.0).max())
-    c = np.arange(0, wmax + 1, dtype=np.float64)[:, None]
-    wl = w[live][None, :]
-    # Σ_{a=1}^{w−1} min(a, c): every a for c ≥ w − 1, else the ramp to c and c thereafter
-    ramp = c * (c + 1.0) / 2.0 + c * (wl - 1.0 - c)
-    G = (p[live][None, :] * np.where(c >= wl - 1.0, wl * (wl - 1.0) / 2.0, ramp) / wl).sum(1)
-
-    starts = np.asarray(region_arrays.start, dtype=np.int64)
-    ends = np.asarray(region_arrays.end, dtype=np.int64)
-    ref_id = np.asarray(region_arrays.ref_id)
-    length = ends - starts
-    lo, hi = boundary_region_indices(ref_id)
-    out_e: list[np.ndarray] = []
-    out_q: list[np.ndarray] = []
-    out_a: list[np.ndarray] = []
-    # walk outward from each boundary on each side, one step per iteration for every boundary at once
-    for first, step in ((lo, -1), (hi, 1)):
-        e = np.arange(lo.size, dtype=np.int64)
-        r = first.copy()
-        cum = np.zeros(lo.size, dtype=np.int64)
-        while e.size:
-            nxt = np.minimum(cum + length[r], wmax)
-            out_e.append(e)
-            out_q.append(r)
-            out_a.append(G[nxt] - G[cum])
-            cum = nxt
-            r = r + step
-            keep = (cum < wmax) & (r >= 0) & (r < length.size)
-            keep &= ref_id[np.clip(r, 0, length.size - 1)] == ref_id[first[e]]
-            e, r, cum = e[keep], r[keep], cum[keep]
-    if not out_e:
-        z = np.zeros(0, dtype=np.int64)
-        return z, z, np.zeros(0, dtype=np.float64)
-    return np.concatenate(out_e), np.concatenate(out_q), np.concatenate(out_a)
+    a = np.asarray(a, dtype=np.float64)
+    b = np.asarray(b, dtype=np.float64)
+    lo = np.asarray(reach_lo, dtype=np.float64)
+    hi = np.asarray(reach_hi, dtype=np.float64)
+    a, b, lo, hi = np.broadcast_arrays(a, b, lo, hi)
+    if np.any(lo < a) or np.any(hi < b):
+        raise ValueError("a cut's reach on each side must include the piece beside it.")
+    return _side_share(p, a, lo, hi), _side_share(p, b, hi, lo)

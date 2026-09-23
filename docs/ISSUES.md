@@ -16,38 +16,109 @@ the changelog is git.
 Ordered by priority. An entry says what is open and the number a ranking turns on; what was done is git,
 what was ruled is `DESIGN.md`.
 
+### the-junction-price-is-noisy-within-a-gene
+`priority: NOW — the next session's target (owner, 2026-09-23: improve the capture efficiency of splice junctions within multi-exonic transcripts) · kind: defect · 2026-09-23`
+How should a junction be priced, given that the accurate price is noisy and the precise one is biased? The one
+shared length rule (`DESIGN.md` §7.2, `EQUATIONS.md` §11) prices a junction by conservation of bases,
+`c_junction = c_lo + c_hi − ½(c_intron,lo + c_intron,hi)` (`capture_eff_length._cut_efficiencies`).
+It is right on average — it is what puts the transcripts on the gDNA component's scale, and it reads 0.959 of the
+simulator's own junction capture (`ISSUES: ruler-witness-geometry-on-transcript-panels`) — but it is a difference of
+noisy boundary posteriors and each junction's error is its own, so isoforms that differ by a junction differ by
+independent noise and the EM splits them by it. The within-gene sd of log(L / Y) about each gene's mean (annotated
+multi-exon transcripts with ≥ 20 fragments, no EM) beside the class mean L / Y ×10⁻³, `g05` / `g50 ss.99 ON`:
+
+| the junction priced by | within-gene sd | class mean |
+|---|---|---|
+| the per-base rule, before the port (`ISSUES: the-per-base-rule-for-every-component`) | 0.052 / 0.040 | 0.944 / 0.957 |
+| its adjacent pieces (`ISSUES: the-junction-price-at-its-neighbours-mean`) | 0.057 / 0.041 | 0.936 / 0.965 |
+| the sum, SHIPPED | 0.072 / 0.057 | 1.076 / 1.112 |
+| the sum, the true gDNA on every object | 0.064 / 0.046 | 1.109 / 1.160 |
+
+On the shipped tree (`ruler_vs_truth.py --scale`, width step 1) the gDNA component and the synthetic spans read
+1.108 / 1.118 at `g05` and 1.131 / 1.141 at `g50`, 3.9 % / 2.6 % from one scale with the isoforms. The
+junction-probed transcripts widen as the class does (0.039 under the per-base rule against 0.062 under the sum
+at `g05`). Even the true per-object gDNA counts leave the sum noisier than the per-base rule, so part of the
+spread is the rule's (realized Poisson counts and its structural residual) and part calibration's; the exon-edge
+cuts are not the blocker. Giving back the scale is not free: the synthetic pool's elasticity to its own length
+is −21 at `g50 ON` (2026-09-21).
+THROUGH THE EM (`panel.py score` on the shipped tree, 16 ladder conditions, fractional assignment, stranded ×
+capture ON): transcript and gene Σ|Δ| as a % of the true annotated RNA, and the pools as estimate − truth — gDNA
+(intergenic included) / synthetic spans est/true / annotated. The floor is |base − base_reseed|; the third column
+adds the population-corrected RNA pseudocount of `ISSUES: the-pseudocount-prior-is-biased-toward-gdna` (not
+shipped; the prototype's run of 2026-09-23, which the shipped column reproduces within 0.03 points without it):
+
+| | before the port | the shipped rule | + the corrected pseudocount |
+|---|---|---|---|
+| `g05` transcripts (floor 0.009) | 3.46 | 5.59 | 5.55 |
+| `g50` transcripts (floor 0.003) | 5.50 | 6.18 | 6.20 |
+| `g98` transcripts (floor 0.008) | 31.05 | 26.24 | 28.00 |
+| `g05` / `g50` / `g98` genes | 0.44 / 1.91 / 16.87 | 0.64 / 2.12 / 14.96 | 0.62 / 1.45 / 18.54 |
+| `g05` pools | +22,538 / 0.97 / −15,185 | +76,880 / 0.76 / −8,503 | +3,187 / 0.96 / +7,001 |
+| `g50` pools | +35,572 / 1.22 / −68,501 | +172,932 / 0.28 / −64,052 | −25,216 / 0.98 / +28,209 |
+| `g98` pools | −122,373 / 22.41 / −5,839 | −54,229 / 8.64 / +8,481 | −117,852 / 15.97 / +28,218 |
+
+At `g05` the transcript error rises 2.13 points against 0.20 for the genes on the shipped rule (2.09 / 0.18 with
+the corrected pseudocount): it is isoform allocation. Capture OFF the transcripts and genes move within ±0.03
+points except at `g98` (unstranded 18.36 → 18.23, stranded 15.70 → 15.53); the deferred stratum's `g98`
+transcripts read 90.63 → 115.07 (116.50 with the corrected pseudocount). The pools improve under the corrected
+pseudocount while the isoforms regress either way (`TRAPS: judge-a-ruler-by-its-within-gene-spread`). The ceiling
+it is priced against: the simulator's own lengths for every hypothesis with the corrected pseudocount read 1.89 %
+and the synthetic pool 0.96× at `g50 ss.99 ON` (2026-09-21).
+
+WHERE THE NEXT SESSION STARTS (2026-09-23, `g05 ss.99 ON` unless stated; recorded by the port's review, not fixed):
+* THE UNPROBED CLASS AT LOW gDNA: the unprobed multi-exon transcripts read L / Y 2.84 (sd of log 0.69, 706
+  transcripts) against the synthetic spans' 1.148 and the gDNA footprints' 1.135 in the same class — 1.56 against
+  1.005 / 1.013 before the port; at `g50` the class is unmoved (1.214 against 1.104 / 1.096; before 1.171 against
+  1.057 / 1.070). An unmeasured hypothesis, stated as one: an object with almost no gDNA (a depleted boundary's
+  support holds ~0.03 expected fragments at `g05`) reads a posterior mean above its near-zero truth, and the
+  junction sum adds two such means; a piece with no contained support reads the population's clipped mean (0.239
+  at every such region).
+* THE SHORT-INTRON FALLBACK keys on `S > 0` exactly (`S = gdna_region_eff_len`, the intron piece's gDNA contained
+  support), so a piece with 0 < S < 1 (less than one expected start) holds essentially no information yet reads its
+  own posterior (≈ the population's mean, 0.244, sd 0.058). Beside junctions 3,057 / 2,724 intron pieces (low /
+  high side) have S = 0 and 2,759 / 2,819 have 0 < S < 1; treating S < 1 as no count moves 4,007 of 45,609
+  junction prices (1,284 by more than 0.2, at most 0.79). A real library's shorter fragment tail shrinks the S = 0
+  set (7,275 → 4,075 regions with a tail to 20 bp). No threshold is proposed: a threshold is a constant.
+* THE CLIP AT 0: 137 transcripts carry more than half their share on junctions priced exactly 0; their contraction
+  factor has median 0.0033 (minimum 0.00069), 30–130× below the adjacent-piece price's.
+* ABOVE fl AND ABOVE THE PARENT: 2,593 of 8,750 annotated transcripts have `eff_em > fl` (at most 1.80×), and 23 of
+  the 7,709 with a parent synthetic span read longer than it (median 1.010, at most 1.150) — possible with junction
+  probes, no longer excluded by construction.
+* gDNA'S REACH AT A REFERENCE END: gDNA's conserved share takes `UNBOUNDED_REACH` at every boundary, including one
+  within a fragment of a reference end, where the accumulator clips (a boundary 10 bp from a reference start: true
+  share 10.0, shipped 129.5) — gDNA's reach ruling (`region_geometry`: gDNA takes no reach argument), consequential
+  only on short contigs.
+
+THE CONSTRAINTS: the owner's rulings in `DESIGN.md` §7.2 (capture is local; junctions never pooled,
+`ISSUES: pooling-junctions`; capture stays outside the EM) and §0b (robustness); no panel input (2026-09-20).
+Refused on the way: `ISSUES: the-spliced-read-junction-price`, `ISSUES: a-junction-price-clipped-at-one`. A
+candidate is read on both columns of the first table at once — the within-gene sd toward the adjacent pieces', the
+class mean on the gDNA component's — and only then through the EM. `ruler_vs_truth.py --scale` (its within-gene sd
+line and the junction-probed rows); `quant_accuracy.py` per stratum above `--arm base_reseed` under
+`--set em.assignment_mode=fractional`.
+
 ### the-pseudocount-prior-is-biased-toward-gdna
-`priority: HIGH — the tool's whole capture-OFF error, and one half of a cancelling pair on capture; instruments: quant_accuracy.py (the pools per row), ruler_vs_truth.py --scale`
+`priority: HIGH, taken after the junction price — the tool's whole capture-OFF error, and uncancelled on capture since the one shared length rule (2026-09-23); instruments: quant_accuracy.py (the pools per row), ruler_vs_truth.py --scale`
 The EM adds two pseudocounts per locus, `P_g` to the gDNA component and `P_R` to the RNA pool, both calibration's
 counts of UNSPLICED fragments; but `P_R` is spread over the whole RNA pool including the spliced fragments, so at
 the truth the odds the EM starts from carry the factor `(1 + P_g/G) / (1 + P_R/R)`, which is 1.289 at `g50 ss.99
 ON` (1.04–1.61 per locus) and 1.16 off capture — a second reading of the same fragments, tilted toward gDNA.
+(`P_g`'s boundary term also still converts by the pooled `q`, `ISSUES: the-pooled-q-in-the-gdna-length`.)
 MEASURED 2026-09-21 on the ladder (one EM thread, fractional, VBEM): off capture this is the error — gDNA
 over-called by +4.7 / +2.5 / +4.4 / +10.8 % of the true gDNA at `g05` / `g50` stranded and `g50` / `g05`
 unstranded, the synthetic pool at 0.79–0.99× — and either repair removes it (`g50` stranded +125,883 → −8,864
 fragments under a fixed gDNA level, → −14,956 under a population-corrected pseudocount `P_R := P_r + the locus's
-spliced units + its deterministic RNA counts`). On capture NEITHER repair lands alone: the bias was cancelling the
-gDNA component's length rule (`ISSUES: the-gdna-component-length-rule-differs-from-the-transcripts`), and removing
-it with the old length gives the full siphon (`g50 ss.99 ON` gDNA −328k, the synthetic pool 3.3×). A
+spliced units + its deterministic RNA counts`). On capture the bias cancelled the gDNA component's old length rule
+(`ISSUES: the-gdna-component-length-rule-differs-from-the-transcripts`, CLOSED), and removing it with the old
+length gave the full siphon (`g50 ss.99 ON` gDNA −328k, the synthetic pool 3.3×). MEASURED 2026-09-23 on the one
+shared length rule as shipped: the pair is UNCANCELLED — the bias alone over-calls gDNA and starves the synthetic
+pool (`g50 ss.99 ON` +172,932 fragments of gDNA with the spans at 0.28× their truth, `g05 ss.99 ON` +76,880 and
+0.76×), and the population-corrected pseudocount repairs the pools (`g50` −25,216, 0.98×) but not the transcript
+table, which is the junction price's (the full table: `ISSUES: the-junction-price-is-noisy-within-a-gene`). Off
+capture the over-call is the pseudocount's own on either length (`g05` unstranded +53.9k → +59.2k). A
 per-fragment gDNA prior derived to replace both pseudocounts was stopped by the owner as overcomplicated
-(2026-09-22); the repair is taken with the per-transcript prior (`ISSUES: per-transcript-prior-lane`), after the
-capture-contracted length, and the two are judged together.
-
-### the-gdna-component-length-rule-differs-from-the-transcripts
-`priority: HIGH — the other half of the cancelling pair; instrument: ruler_vs_truth.py --scale (L / Y per hypothesis class against the simulator's own yield, read within each probed class)`
-Transcripts and synthetic spans take the ruler — a sum over their own bases of capture efficiency times the
-fragment-end taper — while the locus gDNA component takes a sum over region and boundary OBJECTS at their own
-efficiencies with the crossing supports converted by `q` (`priors.assemble_priors`). Against the simulator's yield
-the two rules disagree by 14–16 % on capture: the object family (gDNA object form, spans on the object rule,
-isoforms on the ruler) sits 18.7 / 21.5 / 17.7 % from one scale at `g50 ss.99 ON` / `g05 ss.99 ON` / `g50 ON` at
-nascent 0.10, the per-base family (the ruler's rule for every hypothesis, the locus gDNA with its taper on the
-OUTSIDE of the footprint, `mass − T(d)`) 3.0 / 2.0 / 0.7 %, and the two coincide off capture. The E-step reads only
-ratios of these lengths within a locus, and the synthetic pool's elasticity to its own length is −21 at `g50 ON`,
-so 3 % is 60 % of that pool once the pseudocount's bias no longer cancels it: the per-base rule with the
-corrected pseudocount reads 5.49 → 5.14 % transcript error at `g50 ss.99 ON` with the synthetic pool 1.22× →
-1.65×, against 1.89 % and 0.96× with the simulator's own lengths for every hypothesis. WITHIN a probed class the
-residual is 3–5 % (`ISSUES: ruler-witness-geometry-on-transcript-panels`, its dated paragraph) and no
-region-constant efficiency closes it.
+(2026-09-22); the corrected pseudocount is the candidate, taken after the junction price, with the per-transcript
+prior (`ISSUES: per-transcript-prior-lane`), and the two are judged together.
 
 ### strand-plug-in-bias-on-sparse-libraries
 `priority: MEDIUM — first-order on real cfRNA, invisible on the ladder; no instrument in the tree (a scratch census of live objects over unspliced incidence, 2026-09-21)`
@@ -70,34 +141,38 @@ gDNA by the multimapper share one for one; the ladder has neither case (0 of 1,2
 prices each multimapper placement at its own objects, which is the cleaner rule.
 
 ### ruler-witness-geometry-on-transcript-panels
-`priority: DEFERRED post-0.8.0 by owner ruling 2026-09-20 — Rigel stays panel-agnostic and takes no panel input · kind: defect · 2026-09-15`
+`priority: DEFERRED post-0.8.0 by owner ruling 2026-09-20 — Rigel stays panel-agnostic and takes no panel input; the junction price's precision is split out as NOW (2026-09-23) · kind: defect · 2026-09-15`
 Only a transcript holding the junction a probe spans binds that probe whole, so the extra capture of
 junction-spanning fragments is ISOFORM-SPECIFIC, and the EM splits a gene's shared fragments by the ratio of its
-isoforms' capture-aware lengths. Nothing Rigel reads sees it: gDNA holds the probe's parts apart and binds the
-better one, and at zero gDNA there is no witness at all. MEASURED on the rebuilt ladder (the simulator binds every
+isoforms' capture-aware lengths. gDNA holds the probe's parts apart and binds the better one, and at zero gDNA
+there is no witness at all; the shipped junction price reads it from gDNA at the junction's low and high
+boundaries by conservation of bases, with no panel input — 0.959 of the simulator's own junction capture over 395
+junctions of 60 probed transcripts in aggregate, but per junction too noisily
+(`ISSUES: the-junction-price-is-noisy-within-a-gene`). MEASURED on the rebuilt ladder (the simulator binds every
 fragment through one contiguous part of a probe since 2026-09-19; earlier numbers measured an asymmetric
 half-match the owner ruled unphysical), stranded × capture-ON transcript Σ|Δ| as a share of the true RNA at
-`g00` / `g05` / `g50` / `g98`, fractional: shipped 6.53 / 3.49 / 5.50 / 31.03 %, the simulator's own lengths
-(`quant_accuracy.py --arm oracle_ruler`) 1.34 / 1.71 / 2.90 / 24.66 %. The error sits in highly expressed
+`g00` / `g05` / `g50` / `g98`, fractional: the per-base rule 6.53 / 3.49 / 5.50 / 31.03 %, the simulator's own
+lengths (`quant_accuracy.py --arm oracle_ruler`) 1.34 / 1.71 / 2.90 / 24.66 %. The error sits in highly expressed
 multi-isoform genes whose TOTALS are right, and a ruler is judged by the WITHIN-GENE spread of its error
 (`TRAPS: judge-a-ruler-by-its-within-gene-spread`). The junction-probed test-chromosome twin predates the physics
 change and is stale.
-RE-MEASURED 2026-09-21 as the residual of one rule for every hypothesis (`ruler_vs_truth.py --scale` at `g50 ss.99
-ON`): with every hypothesis on the ruler's rule the spans read 0.950 / 0.949 / 0.964 of the isoforms in the
-`partial ≤ ½` / `partial > ½` / `probed ≥ 0.9` classes and the locus footprints 0.978 / 0.917 / 0.521, and no
-region-constant per-piece efficiency closes it (the sampler's own covering truth 1.271 / 1.155 / 1.124, its
-contained truth 1.150 / 1.007 / 1.059, the probed fraction 1.122 / 1.022 / 0.979; the shipped clipped estimator is
-the closest). A spliced template's fragments span junctions and bind one part of a split probe; a contiguous
-template's straddle exon edges into introns; the same per-piece efficiencies price both no better than this.
-THE DECISION IT WAITS ON: the one observable that sees isoform-specific capture is the probe design, and Rigel
-reads no panel (`DESIGN.md` §7.2). Real panels often span junctions and the design file is usually unavailable
-(owner, 2026-09-19), so the candidates are data-derived: a capture field fitted from the coverage shape around
-each probe, the spliced reads at each junction and the gDNA footprint; a per-kit capture profile learned across a
-cohort; and a sparsity prior on isoform support as the safety net. `quant_accuracy.py --arm oracle_ruler`,
-`ruler_vs_truth.py`.
+THE ONE SHARED RULE'S RESIDUAL (2026-09-23, 60 probed transcripts against the simulator): exact (1.000) on the
+objects where a transcript's fragments are gDNA's — contained pieces and cuts away from junctions, exon edges and
+ends, 41 % of a probed transcript's yield — and its junction cuts, 40 % of a probed transcript's yield, are what the
+junction price covers. Its cuts within a fragment of an exon edge are captured 1.10× more than gDNA prices them
+(19 % of the yield), and the simulator binds a fragment through its best single probe part, which captures a
+little less than the sum when both exons carry separate probes: that is the ~2 % the classes stay apart with the
+true gDNA on every object (`ISSUES: the-gdna-component-length-rule-differs-from-the-transcripts`).
+THE DECISION IT WAITS ON: the probe design is the one observable that sees isoform-specific capture directly, and
+Rigel reads no panel (`DESIGN.md` §7.2). Real panels often span junctions and the design file is usually
+unavailable (owner, 2026-09-19), so the candidates are data-derived: the junction price from gDNA (shipped, its
+precision open); a capture field fitted from the coverage shape around each probe and the gDNA footprint; a
+per-kit capture profile learned across a cohort; and a sparsity prior on isoform support as the safety net. The
+spliced reads at each junction are refused (`ISSUES: the-spliced-read-junction-price`). `quant_accuracy.py --arm
+oracle_ruler`, `ruler_vs_truth.py`.
 
 ### per-transcript-prior-lane
-`priority: HIGH — the per-transcript prior, the owner's problem after the capture-contracted length (2026-09-22) · kind: build · 2026-08-31`
+`priority: HIGH — the per-transcript prior, the owner's problem after the capture-contracted length's junction price (2026-09-22, 2026-09-23) · kind: build · 2026-08-31`
 `rna_prior_weight` is PLUMBED end to end — `pipeline.py` → `estimator.py` → `em_solver.cpp` — and ⛔ NOTHING IN
 `src/` FILLS IT, so the solver takes the fallback `w_i = raw[i]`, which echoes the EM's own belief and cannot
 contradict it. ⚠ The lane is ONE static array, so filling it reallocates the WHOLE RNA pseudocount (2,793,710
@@ -114,9 +189,11 @@ WHERE ITS GAIN SITS (2026-09-20, the four `g05`/`g50` `ss.99` rows): not in supp
 rule recovers ~0 % of it (`ISSUES: exclusive-evidence-support-rule`, refused) and the TRUE support only 3–28 % —
 but in the PROPORTIONS among expressed isoforms that share every object: 49–61 % of the gain is on isoforms with no
 exclusive sj, region or boundary (94 % of them mosaics), 65–76 % in genes with 11+ isoforms. Two weightings are
-refused (`ISSUES: refused-transcript-weights`, `ISSUES: refused-soft-min-path-weighting`). The next candidate
-moves proportions among mosaic isoforms or is a sparsity argument on silent mosaics. The siphon's residual
-(+32,905 at `g50 ss.99 ON`) rides here (`ISSUES: nascent-siphons-gdna-under-capture`).
+refused (`ISSUES: refused-transcript-weights`, `ISSUES: refused-soft-min-path-weighting`). The next candidate moves
+proportions among mosaic isoforms or is a sparsity argument on silent mosaics. On the one shared length rule the
+synthetic pool's error at `g50 ss.99 ON` is the pseudocount's
+(`ISSUES: the-pseudocount-prior-is-biased-toward-gdna`), not a siphon's residual
+(`ISSUES: nascent-siphons-gdna-under-capture`).
 `quant_accuracy.py`, per stratum above `--arm base_reseed`.
 
 ### overlapping-synthetic-shadows
@@ -171,10 +248,10 @@ work outside calibration are done (`DESIGN.md` §6b.15). THE BASELINE (VCaP, 18,
 interleaved pairs, 2026-09-19): 125 s — calibrate 39.5 (four sweeps 24.0, landscape fits 4.1, its Python 10.3),
 quant 33.7 (locus EM 14.4, capture effective lengths 5.2, scoring 5.7), the scan 28.4, the second pass 13.0, a
 second fragment-length fit 2.8, the index load 6.4; peak RSS 10.3 GB, in quant.
-OPEN, ranked (a cProfile share ranks, `TRAPS: a-profile-share-is-a-ranking`): ① the short-template taper table
-(`effective_length._cum_short`, 1,982 builds in quant's 5.2 s) — the table depends on position only through the
-distance to the nearer end, so halving it is bit-identical (4.37 → 2.05 s), and a two-prefix-sum form is
-4.37 → 0.04 s at a 2.4e-15 relative move (a priced commit against the three references); ② the second pass's
+OPEN, ranked (a cProfile share ranks, `TRAPS: a-profile-share-is-a-ranking`): ① the capture effective lengths
+(quant's 5.2 s) — the short-template taper table that held most of it is deleted with the per-base rule, and the
+one shared rule (`capture_eff_length.transcript_objects`, a closed form per object) is re-timed on the deep library
+before it is ranked; ② the second pass's
 factor combiner, 355,180 calls on 2–4-element arrays, hoistable to segment operations over the hypothesis CSR
 (exactness to check); ③ the landscape fits, ~5 s, unexamined; ④ the sweeps' 24.0 s, where the blur's loop
 interchange is priced at −1.5 s for a summation-order change and is the owner's call; ⑤ past 100 M fragments.
@@ -193,60 +270,61 @@ excluding κ-dead exons (`g50 ss.50 ON` 2,691 → 56,422), AMBIG in the final fi
 other readings of the floor (`DESIGN.md` §7.1 rule 4). Its instrument, `landscape_training_census.py`, was retired 2026-09-14 (in git).
 
 ### multimapper-blind-support
-`priority: later — the first ruler question on real libraries · kind: defect · 2026-09-16`
-The accumulator drops every fragment with `NH > 1`, so a piece whose gDNA fragments are multimappers holds no
-count the calibration can see, and the expectation ruler — which reads a piece's efficiency from its own count and
-its crossings against the fully captured level — reads it at the DEPLETED level: the transcript is contracted as if
-unprobed. Measured read-only on the two captured real libraries after the ruler's repair (the session's
-`multimapper_check.py`: per transcript with ≥ 20 fragments over its pieces, the share of multimapping reads among
-them from the BAM's `NH` tag, then the ruler factor's quantiles per share bin): LBX0588 (reference 2.977e-01/bp, 11,579
-kernels) median factor 0.076 / 0.003 / 0.013 / 0.001 at a share below 1 % / 1–10 % / 10–50 % / ≥ 50 % (n 36,446 /
-6,161 / 1,429 / 928), the share below 1/10 rising 55 → 90 %; VCaP (8.593e-02/bp, 24,496 kernels) 0.231 / 0.149 / 0.028
-/ 0.002 (n 280,227 / 35,494 / 2,237 / 1,103), the share below 1/10 36 → 95 %. A hundredfold gap between the
-unique-mapping and the repeat-rich transcripts, monotone in the share, on both libraries; the two libraries without
-a reference read every transcript at 1 and are uninformative. The confound is real and unmeasured here — a repeat-rich
-transcript may also be unprobed by design — so the number is an upper bound on the blindness, not its size; the
-floor `C/(C+1)` the repair deleted had hidden it behind a +3.4 nat bias on every unprobed transcript
-(`ISSUES: ruler-multimapper-floor-caps-the-correction`, CLOSED). The repair is in the OPPORTUNITY, not the posterior:
-a piece's contained and crossing supports should count only the starts a fragment could be uniquely placed at — a
-mappability of the support from the index, so that a wholly repeated piece has `S = 0`, no evidence, and reads the
-population's clipped mean rather than the depleted level. Instrument: `ruler_vs_truth.py` cannot see it (the
-simulator's reads are unique); the truth on a real library is the multimapper share against the factor as above,
-and the repair's gate is that the four bins read alike.
+`priority: later — the first capture-efficiency question on real libraries · kind: defect · 2026-09-16`
+The accumulator drops every fragment with `NH > 1`, so an object whose gDNA fragments are multimappers holds no
+count the calibration can see, and its capture efficiency — read from its own gDNA count against the fully captured
+level — reads it at the DEPLETED level: the transcript is contracted as if unprobed. Measured read-only on the two
+captured real libraries on the per-base rule (the session's `multimapper_check.py`: per transcript with ≥ 20
+fragments over its pieces, the share of multimapping reads among them from the BAM's `NH` tag, then the length
+factor's quantiles per share bin): LBX0588 (reference 2.977e-01/bp, 11,579 kernels) median factor 0.076 / 0.003 /
+0.013 / 0.001 at a share below 1 % / 1–10 % / 10–50 % / ≥ 50 % (n 36,446 / 6,161 / 1,429 / 928), the share below
+1/10 rising 55 → 90 %; VCaP (8.593e-02/bp, 24,496 kernels) 0.231 / 0.149 / 0.028 / 0.002 (n 280,227 / 35,494 /
+2,237 / 1,103), the share below 1/10 36 → 95 %. A hundredfold gap between the unique-mapping and the repeat-rich
+transcripts, monotone in the share, on both libraries; the two libraries without a reference read every transcript
+at 1 and are uninformative. The confound is real and unmeasured here — a repeat-rich transcript may also be
+unprobed by design — so the number is an upper bound on the blindness, not its size; the floor `C/(C+1)` the repair
+deleted had hidden it behind a +3.4 nat bias on every unprobed transcript
+(`ISSUES: ruler-multimapper-floor-caps-the-correction`, CLOSED). The repair is in the support, not the posterior:
+an object's support (a region's contained, a boundary's crossing) should count only the starts a fragment could be
+uniquely placed at — a mappability of the support from the index, so that a wholly repeated object has no support,
+no evidence, and reads the population's clipped mean rather than the depleted level. Instrument:
+`ruler_vs_truth.py` cannot see it (the simulator's reads are unique); the truth on a real library is the
+multimapper share against the factor as above, and the repair's gate is that the four bins read alike.
 
 ### yield-variance-beside-the-count
 `priority: later, with the per-transcript prior lane (owner, 2026-09-17: the release ships the contraction as it stands; performance next) · kind: build · 2026-09-17`
 The capture-contracted yield is a posterior mean and carries no variance, so a count on a small yield reads as a
-large abundance with the same error bar as any other. Measured on VCaP by drawing every piece efficiency from its
-posterior on the landscape grid and re-running the EM (eight draws, the EM's seed fixed; the session's
-`yield_draws.py`, scored by `draws_census.py`): the counts themselves are stable — the dominant isoform under the
-draws' mean equals the point estimate's in 98.5 % of multi-isoform genes with ≥ 20 fragments and is identical in
-every draw for 90.6 % — while the yield's uncertainty is a CV of 0.006 / 0.061 / 0.317 at the 10th / 50th / 90th
-percentile of transcripts with ≥ 20 fragments, above the Poisson CV (median 0.100) for 36.4 % of them. So the
-variance need not be propagated through the EM; it is a per-transcript number to publish beside the count: the
-yield's posterior sd from the pieces' posterior variances, `Var[eff_t] = Σ_p (ℓ_p^τ)² Var[c̃_p]` under the
-landscape (the pieces' posteriors are what `capture_efficiency` already computes; the second moment is one more
-`w @ clipped²`), so that a user's abundance carries `CV² = 1/k + Var[eff_t]/eff_t²`. Derive → gate against the
-draws' spread on VCaP → `src/`: a result field per object and an `em_effective_length_sd` column. Its consumer is
-the allocation of the pooled RNA prior across a locus's transcripts (`ISSUES: per-transcript-prior-lane`): today
-the transcripts duel for the ambiguous fragments with no per-transcript prior, and a variance per transcript is
-what an allocation better than equal shares would read (owner, 2026-09-17). Instrument: the
-draws' spread is the truth the analytic form is gated against.
+large abundance with the same error bar as any other. Measured on VCaP on the per-base rule by drawing every piece
+efficiency from its posterior on the landscape grid and re-running the EM (eight draws, the EM's seed fixed; the
+session's `yield_draws.py`, scored by `draws_census.py`): the counts themselves are stable — the dominant isoform
+under the draws' mean equals the point estimate's in 98.5 % of multi-isoform genes with ≥ 20 fragments and is
+identical in every draw for 90.6 % — while the yield's uncertainty is a CV of 0.006 / 0.061 / 0.317 at the 10th /
+50th / 90th percentile of transcripts with ≥ 20 fragments, above the Poisson CV (median 0.100) for 36.4 % of them.
+So the variance need not be propagated through the EM; it is a per-transcript number to publish beside the count:
+the yield's posterior sd from its objects' posterior variances under the landscape, so that a user's abundance
+carries `CV² = 1/k + Var[eff_t]/eff_t²`. On the one shared rule the form runs over the objects — a piece at its
+contained share, a cut at its conserved share, a junction's price a signed sum of four objects' posteriors
+(`EQUATIONS.md` §11); the objects' posteriors are what `capture_efficiency` already computes, and the second moment
+is one more `w @ clipped²`. Derive → gate against the draws' spread on VCaP → `src/`: a result field per object and
+an `em_effective_length_sd` column. Its consumer is the allocation of the pooled RNA prior across a locus's
+transcripts (`ISSUES: per-transcript-prior-lane`): today the transcripts duel for the ambiguous fragments with no
+per-transcript prior, and a variance per transcript is what an allocation better than equal shares would read
+(owner, 2026-09-17). Instrument: the draws' spread is the truth the analytic form is gated against.
 
 ### capture-premise-untested-on-cdna
 `priority: watch (no library in hand can test it) · kind: risk · 2026-09-17`
-The ruler reads the panel from gDNA and applies the same efficiency to cDNA: the premise that off-target cDNA is
-depleted as off-target gDNA is, which the simulator satisfies by construction and which cross-hybridisation of
-cDNA to paralog probes or nonspecific binding could make milder by an order of magnitude. Its exposure is not the
-scale (TPM is on the plain length by ruling and counts see only ratios within a locus) but the isoform split:
-on VCaP 4,677 of 12,039 multi-isoform genes with ≥ 20 fragments change dominant isoform between the contracted and
-the plain yield (`DESIGN.md` §7.2, the yield's two consumers), two thirds of the isoform-level fragment mass with
-them, stable under the yield's posterior — so the flips are the model's answer, right if the premise holds. The
-one experiment that settles it: a sample sequenced both ways, panel and whole transcriptome — the count ratio on
-unprobed transcripts is the cDNA depletion directly, and the ruler gives the gDNA depletion on the same pieces. The
-lab has no such pair (owner, 2026-09-17); the session's `lever_census.py` is the read-only smoke test to re-run on
-any new captured library, and `count_unambig` beside `count` is what tells a user which isoform assignments rest on
-shared fragments alone.
+The contracted length reads the panel from gDNA and applies the same efficiencies to cDNA: the premise that
+off-target cDNA is depleted as off-target gDNA is, which the simulator satisfies by construction and which
+cross-hybridisation of cDNA to paralog probes or nonspecific binding could make milder by an order of magnitude.
+Its exposure is not the scale (TPM is on the plain length by ruling and counts see only ratios within a locus) but
+the isoform split: on VCaP 4,677 of 12,039 multi-isoform genes with ≥ 20 fragments change dominant isoform between
+the contracted and the plain yield on the per-base rule (`DESIGN.md` §7.2, the yield's two consumers), two thirds
+of the isoform-level fragment mass with them, stable under the yield's posterior — so the flips are the model's
+answer, right if the premise holds. The one experiment that settles it: a sample sequenced both ways, panel and
+whole transcriptome — the count ratio on unprobed transcripts is the cDNA depletion directly, and the capture
+efficiencies give the gDNA depletion on the same objects. The lab has no such pair (owner, 2026-09-17); the
+session's `lever_census.py` is the read-only smoke test to re-run on any new captured library, and `count_unambig`
+beside `count` is what tells a user which isoform assignments rest on shared fragments alone.
 
 ### message-layer-open-cases
 `priority: next · kind: question · 2026-09-09`
@@ -261,12 +339,13 @@ every upper side refused (`ISSUES: the-edge-upper-side`); (d) substrate `nest` (
 ### capture-blind-gdna-divisor
 `priority: the pre-EM prior chain, after the EM's residual · kind: defect · 2026-08-31`
 `gdna_opportunity_from_index` is computed from the index alone, so under capture it removes ~6 bp of a ~30 bp
-length selection — the gDNA control moved +6.0 % on all six capture-ON rows (gDNA has no introns to miss),
-and with `ISSUES: eb-shrinkage-magic-ess` it owns the −5.90 % capture-ON length ceiling. `capture_eff_length`
-already models the panel; it also blocks `ISSUES: crossing-pool-contrast`. ⛔ NOT PRICED ON THE DELIVERABLE: the reading once quoted here (`quant_accuracy.py --arm oracle_efflen`,
-2026-09-19, −50 / +22 / −1,104 fragments) is WITHDRAWN (2026-09-21) — that arm cannot fire. The oracle overrides only
-the six count arrays (`prior_vs_oracle.OVERRIDE_FIELDS`, `OracleTruth.override_masses`) while the locus gDNA length
-reads supports, efficiencies and `q` and never a count, so `oracle_efflen` is `base` under another name and its
+length selection — the gDNA control moved +6.0 % on all six capture-ON rows (gDNA has no introns to miss), and with
+`ISSUES: eb-shrinkage-magic-ess` it owns the −5.90 % capture-ON length ceiling. `capture_eff_length` already models
+the panel; it also blocks `ISSUES: crossing-pool-contrast`. ⛔ NOT PRICED ON THE DELIVERABLE: the reading once
+quoted here (`quant_accuracy.py --arm oracle_efflen`, 2026-09-19, −50 / +22 / −1,104 fragments) is WITHDRAWN
+(2026-09-21) — that arm cannot fire. The oracle overrides only the six count arrays
+(`prior_vs_oracle.OVERRIDE_FIELDS`, `OracleTruth.override_masses`) while the locus gDNA length reads its conserved
+shares and the published efficiencies and never a count, so `oracle_efflen` is `base` under another name and its
 deltas were run-to-run noise (`TRAPS: could-the-arm-have-fired`). The arm is retired or given the simulator's
 per-locus gDNA opportunity as a real truth before any number is quoted for it again.
 
@@ -452,6 +531,101 @@ the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
 
+### the-gdna-component-length-rule-differs-from-the-transcripts
+RESOLVED 2026-09-23 by the one shared rule (`DESIGN.md` §7.2, `EQUATIONS.md` §11): every EM component — the locus
+gDNA component, every synthetic span, every annotated transcript — has as its capture-contracted length its
+conserved share of every object its fragments deposit on times that object's capture efficiency. The defect:
+transcripts and spans took the per-base rule (their own bases at their pieces' efficiencies with the fragment-end
+taper) while the gDNA component took region and boundary objects with the crossing supports converted by the
+pooled `q`, and the two rules disagreed by 14–16 % on capture. Killing numbers (`ruler_vs_truth.py --scale`, L / Y
+×10⁻³ against the simulator's exact yields, gDNA component / spans / isoforms, and the largest gap): `g50 ss.99 ON`
+1.108 / 0.933 / 0.957 — 18.7 % → 1.126 / 1.136 / 1.111 — 2.3 %; `g05 ss.99 ON` 1.107 / 0.932 / 0.944 — 18.7 % →
+1.087 / 1.105 / 1.075 — 2.8 %, in the prototype (calibration's counts on the count frame as clipped plug-ins). The
+shipped tree, with the published posterior efficiencies (width step 1), reads 1.131 / 1.141 / 1.112 — 2.6 % and
+1.108 / 1.118 / 1.076 — 3.9 % at the two rows. Within each locus, at the two rows, in the prototype:
+gDNA/isoforms 1.149 / 1.153 → 0.983 / 0.986, gDNA/spans 1.202 / 1.208 → 0.984 / 0.981, spans/isoforms 0.978 /
+0.977 → 1.014 / 1.014. The true gDNA on every object reads the same ~2 %, the rule's own residual
+(`ISSUES: ruler-witness-geometry-on-transcript-panels`). The port reproduces the prototype A/B'd to 9e-15 on
+transcripts except the 113 at the fl floor (shorter than every fragment), and on the gDNA component except the loci
+sharing a region with another locus (34 of 1,216 at `g50 ON`, 3.7 % of the gDNA prior; `P_g`-weighted totals
+0.999998), where the length now takes the count's own overlap weights. What it cost through the EM is two open
+entries: the pseudocount's bias no longer cancelled (`ISSUES: the-pseudocount-prior-is-biased-toward-gdna`) and
+the isoforms split by the junction price's noise (`ISSUES: the-junction-price-is-noisy-within-a-gene`). Refused on
+the way: `ISSUES: synthetic-spans-on-the-object-rule`, `ISSUES: the-per-base-rule-for-every-component`,
+`ISSUES: the-pooled-q-in-the-gdna-length`.
+
+### pooling-junctions
+REFUSED 2026-09-23 by the owner, before it was built: a posterior pulling each junction's price toward its
+neighbours' price times a ratio learned across all junctions, proposed to cut the sum's noise
+(`ISSUES: the-junction-price-is-noisy-within-a-gene`). Some junctions are probed across the junction itself and
+some are not, so a ratio pooled over junctions is theoretically invalid: a gain on the ladder would be chance, and
+another probe design could read much worse (`DESIGN.md` §7.2). Do not re-propose a junction price that pools
+across junctions.
+
+### a-junction-price-clipped-at-one
+REFUSED 2026-09-23. The sum by conservation of bases is floored at 0 and not clipped at 1 — each boundary is an
+unclipped half-exon level — and at `g50 ss.99 ON` 18,308 of 45,609 junctions price above 1 (max 1.999) and 4,440
+below 0 (`g05 ss.99 ON`: 17,167 above, 7,409 below). A clip at 1 shortened 25 % of transcripts by a median 13 %
+(Σ 0.965 of the validated rule): a second clip on pieces already clipped inside their own posteriors.
+
+### the-spliced-read-junction-price
+REFUSED 2026-09-23: the owner's proposal to impute a junction's capture from the transcripts' own reads left and
+right of it (derived with the correction ÷ `f_spliced`, not ×) — exact in principle, and starved. The pieces
+beside junctions have a median length of 107 bp; 58 % of single-isoform junctions hold no unspliced read within a
+fragment; and "exonic on the strand" neighbourhoods reach retained-intron-only regions and inflate the price
+(per-transcript L up to ×60).
+
+### the-crossing-apportionment
+DELETED 2026-09-23 with the one shared rule (`capture_efficiency.capture_efficiencies`, no `shares` argument):
+a region's efficiency had read its own contained count plus the crossings at every boundary within a fragment's
+reach, apportioned to the pieces its fragments cover (`ISSUES: ruler-multimapper-floor-caps-the-correction`). Each
+object now reads only its own count — a region its gDNA contained count on its contained support, a boundary its
+gDNA crossing count on its crossing support — and the length prices every crossing at the boundary that holds it,
+so a region never borrows the crossings around it. The apportionment had read a tiny piece's efficiency off its
+edge crossings, which the rule now prices at those boundaries directly; a piece too short to contain a fragment
+has no share, and its efficiency (the population's) multiplies nothing. A deletion by structure, not by a number.
+
+### the-pooled-q-in-the-gdna-length
+REPLACED 2026-09-22/23 by gDNA's own conserved share at each boundary (`CalibrationResult.gdna_boundary_conserved_len`,
+`EQUATIONS.md` §11). The gDNA component's length had converted a boundary's crossing support by
+`q = boundary_mass_per_crossing`, a mass per crossing pooled over gDNA and RNA and so RNA's where RNA dominates a
+boundary: against the oracle's gDNA-only payload it overstated gDNA's mass by 1.4 % overall at `g50 ss.99 ON`,
+3.4 % at exon|exon boundaries, 8.4 % where RNA is 50–90 % of the crossings, 5 % at `g05 ss.99 ON`, and it read
+transcripts 9 % high off capture. Storing the unspliced boundary mass per strand column would give gDNA's own mass
+exactly on stranded data (a 2×2 solve per boundary; unstranded data cannot split it) — not built: the length
+needs neither. The two pseudocounts still convert a boundary's mass by `q`.
+
+### the-junction-price-at-its-neighbours-mean
+REFUSED 2026-09-22 as the scale. Against the simulator's own junction capture (60 probed transcripts, 395
+junctions) the junction's two boundaries' mean prices it at 1/1.68, the adjacent pieces 1/1.73, the nearest
+measured object along the transcript 1/1.74 and the transcript's own measured mean 1/1.24 (a transcript-level
+anchor, barred by the owner's locality ruling, `DESIGN.md` §7.2), where the sum by conservation of bases reads
+0.959. On the class scale, with the junction at its two boundaries or its adjacent pieces the gDNA component and
+the spans agree to 1 % (0.991 / 0.993 with the true gDNA, 1.137 / 1.147 with calibration's) while the transcripts
+sit 10–20 % below (0.910 / 0.970 with calibration's efficiencies). KEPT AS DATA: priced at its adjacent pieces a
+junction is as precise within a gene as the per-base rule (within-gene sd 0.057 / 0.041 at `g05` / `g50 ss.99
+ON`) and brings the class gap back (`ISSUES: the-junction-price-is-noisy-within-a-gene`).
+
+### the-per-base-rule-for-every-component
+REFUSED 2026-09-22 by the owner's ruling (`DESIGN.md` §7.2): a length over each component's own bases at its
+pieces' capture efficiencies with the fragment-end taper omits the boundaries that own the crossing mass — any
+fragment that crosses a boundary is deposited into it, and a piece shorter than a fragment is seen only through its
+boundaries. Its no-EM reading was one scale for gDNA and isoforms (0.956 / 0.957 ×10⁻³ at `g50 ss.99 ON`) with
+the spans 2.5 % low (0.933), and only because its clipped per-piece efficiency under-priced gDNA's short probed
+pieces by about as much as it under-priced the transcripts' junctions (with the locus gDNA's taper on the outside
+of its footprint, 3.0 / 2.0 / 0.7 % from one scale at `g50 ss.99 ON` / `g05 ss.99 ON` / `g50 ON` at `on_fraction`
+0.10, 2026-09-21). Within a probed class its spans read 0.950 / 0.949 / 0.964 of the isoforms (`partial ≤ ½` /
+`partial > ½` / `probed ≥ 0.9`) and the locus footprints 0.978 / 0.917 / 0.521, and no region-constant per-piece
+efficiency closed it (the sampler's own covering truth 1.271 / 1.155 / 1.124, its contained truth 1.150 / 1.007 /
+1.059, the probed fraction 1.122 / 1.022 / 0.979; the clipped estimator was the closest; 2026-09-21).
+Through the EM with the corrected pseudocount it read 5.49 → 5.14 % transcript error at `g50 ss.99 ON` with the
+synthetic pool 1.22× → 1.65×. Re-measured 2026-09-23 beside the one shared rule (fractional, stranded × capture
+ON, with the corrected pseudocount on both): transcripts `g05` / `g50` / `g98` 3.47 / 5.15 / 30.43 % against 5.55 /
+6.20 / 28.00 % — refused by structure (owner's ruling), not by this number (`DESIGN.md` §0b). Its form for the gDNA
+component alone — the locus's bases at the regions' efficiencies — was refused 2026-09-20: it drops the boundary
+objects the count keeps; test chromosome `g50 ss.99 ON` gene-level Σ|Δ| 25,633 → 38,174 against 23,967 with the
+object form, the gDNA pool +5.5 % against −0.1 %. The taper and the per-base frame are deleted.
+
 ### background-abundance-pair-unruled
 DELETED 2026-09-22 (the cleanup; owner: "I don't know what measured_total is for"). `CalibrationConfig.background_abundance`
 chose which (counts, exposure) pair the pooled gDNA background took — the shipped `"contained"` pair or the START/END banks
@@ -477,6 +651,9 @@ the reference keep their ratios — moves the per-base family from 3.0 % to 13.2
 (1.21), because against the sampler's covering truth the unclipped estimator over-separates the exon classes
 (fully probed 1.45, `½ < p < 0.9` 1.31, `p ≤ ½` 1.28) where the clip under-separates them (1.01 / 1.12 / 1.22). The
 clip stays.
+NOTE 2026-09-23: measured on the per-base rule, since refused (`ISSUES: the-per-base-rule-for-every-component`);
+the one shared rule keeps the clip per object, and the unclipped form is re-priced on it before this is quoted
+against it.
 
 ### nascent-siphons-gdna-under-capture
 REPAIRED 2026-09-20 (`c52c9b93`). THE MECHANISM (per fragment against the read names' truth): the locus gDNA
@@ -497,6 +674,8 @@ prior (structurally a gDNA:RNA lever, `--arm oracle` 541,216 → 541,762); nasce
 `on_fraction` 0.10). A length knob on the shadows (doubling `L_n` removes 97 % and destroys the true nascent
 signal) is a falsification probe, never a repair; the per-gene gDNA opportunity is refused
 (`ISSUES: per-gene-gdna-opportunity`). The residual rides with `ISSUES: per-transcript-prior-lane`.
+NOTE 2026-09-23: the length's `q` conversion is replaced by gDNA's own conserved share, which holds each start once
+as this repair required (`ISSUES: the-pooled-q-in-the-gdna-length`).
 
 ### exclusive-evidence-support-rule
 REFUSED 2026-09-20: an isoform supported iff its EXCLUSIVE spliced evidence carries reads (the per-transcript
@@ -524,6 +703,8 @@ that contest, and has not been measured.
 REFUSED 2026-09-20. Pricing the synthetic spans by the gDNA component's object rule while the isoforms keep the
 ruler puts the spans 18.7 % above the isoforms against the simulator's yield (`g50 ss.99 ON`) and the converged EM
 collapses their pool to 0.55× its truth; a mixed state is the knife edge, never a repair.
+NOTE 2026-09-23: the spans now share one rule over regions and boundaries with the isoforms and the gDNA
+component (`ISSUES: the-gdna-component-length-rule-differs-from-the-transcripts`); what stays refused is a mixed state.
 
 ### per-gene-gdna-opportunity
 REFUSED 2026-09-20, before it was built, on the measurement its premise fails. The candidate (2026-09-19)
@@ -675,13 +856,18 @@ the ladder. Killing numbers (`ruler_vs_truth.py`, the unprobed class's median lo
 +0.07 and `mixed` +5.9 → +0.2 (the unprobed `tiny` +7.0 → +0.7 / +1.9 at 5 % gDNA, where its edges hold 0.04
 expected fragments and the posterior is the prior's valley); the depth ladder's probed class 75 / 93 / 97 % →
 86 / 99 / 99 % at a tenth of the depth and 63 / 62 % → 91 / 91 % at a hundredth; the ladder's `g05 ss.99 ON`
-unprobed class +4.40 → +0.45. Refused with numbers, each open question tried each way (`DESIGN.md` §7.2): the
-solve's own posterior (+1.25 / +4.96 nat unprobed), the clip outside the expectation (indistinguishable), the
-own count alone (+4.5), the plug-in (+3.36), the apportionment iterated to convergence (identical on the test
+unprobed class +4.40 → +0.45. Refused with numbers, each open question tried each way: the solve's own
+posterior (+1.25 / +4.96 nat unprobed), the clip outside the expectation (indistinguishable), the own count
+alone (+4.5), the plug-in (+3.36), the apportionment iterated to convergence (identical on the test
 chromosome, +0.44 against +0.46 on the ladder), a joint update of neighbours (never converges). The
 falsification tests were verified failing on the shipped ruler through its own fixture: an unprobed exon with
 no gDNA fragment read the floor at +3.19 nat over the depleted level, a transcript of 40 bp exons read 0 and
 then the floor. The multimapper blindness the floor stood for is `ISSUES: multimapper-blind-support`.
+NOTE 2026-09-23: the per-base length and the crossing apportionment this landing built on are replaced
+(`ISSUES: the-per-base-rule-for-every-component`, `ISSUES: the-crossing-apportionment`); the floor's deletion and
+the posterior-mean efficiency stand. The own count alone, refused here at +4.5 nat because a piece shorter than a
+fragment had bases to price and no count, now ships: under the one shared rule such a piece has no share, so its
+efficiency multiplies nothing (`ISSUES: the-crossing-apportionment`).
 
 ### the-ruler-reference-on-sparse-real-libraries
 CLOSED by landing 2026-09-16 (`DESIGN.md` §7.2, `EQUATIONS.md` §11): a basin's members are the kernels with a

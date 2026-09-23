@@ -6,7 +6,7 @@ the append-only CLOSED / REFUSED record); the changelog is git, so this file rec
 figure lives here — a claim names the instrument that re-derives it (owner, 2026-08-22). How performance
 is judged is `SUCCESS.md`; rulings are `DESIGN.md`; lessons are `TRAPS.md`, cited by name.
 
-## The frame (owner, 2026-09-22)
+## The frame (owner, 2026-09-22 and 2026-09-23)
 
 The version on disk is `pyproject.toml`'s; the target is 0.8.0, A RELEASE OF THE TOOL (`DESIGN.md` §0b).
 Two numbers are primary and answer different questions: the transcript table against per-transcript truth is
@@ -17,20 +17,24 @@ unstranded × capture-ON is deferred and never ranked on a pooled total (`TRAPS:
 fragment-length composition channel is retired until after 0.8.0.
 
 The cleanup is closed: the tree is the shipped infrastructure with nothing dead, duplicated or narrated, and what
-it deliberately left is `ISSUES: hygiene-ledger`. The work, in order: the two problems of the sandbox's
-`TWO_PROBLEMS.md`, each derived on one page and A/B'd against what ships: **the capture-contracted effective
-length for each transcript**, then **a prior for each transcript**.
+it deliberately left is `ISSUES: hygiene-ledger`. The capture-contracted length of the locus gDNA component,
+the synthetic spans and the annotated transcripts is kept as the one shared rule (owner, 2026-09-23,
+`DESIGN.md` §7.2); robustness over synthetic accuracy is `DESIGN.md` §0b. The work, in order, each step derived
+on one page and A/B'd against what ships: **the junction price's precision within a gene**, then **the
+pseudocount**, now uncancelled on capture.
 
 ## Where the tool is — one line per claim; run the named instrument for a current number
 
 - **Stage A (the accumulator)**: done; the fragment ledger closes exactly — `calibration_oracle.py`.
 - **Library gDNA fraction**: calibration's is accurate on the three in-scope strata and structurally blind on
-  the deferred one — `solvability_audit.py`, `policy_benchmark.py --by-class`; the transcript table keeps it
-  off capture and loses part of it on capture to the synthetic spans — `quant_accuracy.py` (the pools per row),
-  `ISSUES: the-pseudocount-prior-is-biased-toward-gdna`, `ISSUES: nascent-siphons-gdna-under-capture`.
-- **The deliverable, end to end**: measured per stratum on the rebuilt ladder, every condition improved by the
-  RNA prior's restoration; what remains in scope is the capture ruler where no gDNA witnesses it and the EM's
-  gDNA split under capture — `quant_accuracy.py --arm base` above `--arm base_reseed`, `--arm oracle_ruler`.
+  the deferred one — `solvability_audit.py`, `policy_benchmark.py --by-class`; the transcript table biases it
+  toward gDNA off capture through the pseudocount, and on capture that bias no longer has the gDNA component's
+  length to cancel it — `quant_accuracy.py` (the pools per row),
+  `ISSUES: the-pseudocount-prior-is-biased-toward-gdna`.
+- **The deliverable, end to end**: measured per stratum on the rebuilt ladder under the shared length; what
+  remains in scope is the isoform split under capture, where the junction price is noisy within a gene, and the
+  gDNA split the pseudocount biases — `quant_accuracy.py --arm base` above `--arm base_reseed`,
+  `--arm oracle_ruler`, `ISSUES: the-junction-price-is-noisy-within-a-gene`.
 - **Fragment lengths**: closed, both halves — `calibration/fl.py`, `gdna_density.py`; watch
   `ISSUES: capture-degeneracy-standing-risk`.
 - **gDNA strand overdispersion**: robust to the annotation (`EQUATIONS.md` §6a–§6c); on real data read
@@ -44,10 +48,12 @@ length for each transcript**, then **a prior for each transcript**.
 - **The prior assembler**: with perfect masses its own error is negligible — `prior_vs_oracle.py`; a perfect
   `LocusPriors` is worth little in scope — `quant_accuracy.py --arm oracle`; the per-transcript lane the EM never
   receives is worth far more — `quant_accuracy.py --arm oracle_alloc_seed`, `ISSUES: per-transcript-prior-lane`.
-- **The ruler**: the transcript's bases at their pieces' capture efficiencies against the landscape's located
-  enriched mode (`DESIGN.md` §7.2, `EQUATIONS.md` §11) — `ruler_vs_truth.py`, and `--scale` for whether every
-  hypothesis class sits on one scale; what the gDNA witness cannot see of a transcript-designed panel is declared
-  — `ISSUES: ruler-witness-geometry-on-transcript-panels`.
+- **The capture-contracted length**: one shared rule for every EM component — each object's conserved share at
+  that object's own capture efficiency, read against the landscape's located enriched mode, a junction priced
+  from its neighbours by conservation of bases (`DESIGN.md` §7.2, `EQUATIONS.md` §11); the classes sit near one
+  scale and the junction price is noisy within a gene — `ruler_vs_truth.py --scale` (the class means and the
+  within-gene spread), `ISSUES: the-junction-price-is-noisy-within-a-gene`; what the gDNA witness cannot see of a
+  transcript-designed panel is declared — `ISSUES: ruler-witness-geometry-on-transcript-panels`.
 - **Performance**: the sweep is one native call, bit-identical at every thread count; the thread is PARKED —
   `ISSUES: performance-memory-bounded-solve`, `profiling/profiler.py`, `profiling/sweep_replay.py`.
 - **Panels**: the 16-condition ladder is rebuilt under the corrected capture physics, cached and certified; the
@@ -60,13 +66,16 @@ length for each transcript**, then **a prior for each transcript**.
 
 ## Next — the order
 
-1. **The capture-contracted effective length for each transcript** — one rule for every component, judged per
-   probed class against the simulator's yield with no EM (`ruler_vs_truth.py --scale`), the junction residual
-   sized and reported (`ISSUES: the-gdna-component-length-rule-differs-from-the-transcripts`,
-   `ISSUES: ruler-witness-geometry-on-transcript-panels`).
-2. **A prior for each transcript** — the redesign of what the EM reads before it starts, through the lane that
-   exists (`ISSUES: per-transcript-prior-lane`, `ISSUES: the-pseudocount-prior-is-biased-toward-gdna`), judged
-   on the pools per row first and the transcript table second, `g98` and the zero controls beside.
+1. **The junction price's precision within a gene** — the capture efficiency of a splice junction inside a
+   multi-exonic transcript, imputed only from the regions and boundaries within one fragment of it and never
+   pooled across junctions, because some junctions are probed and some are not (owner, 2026-09-23;
+   `ISSUES: pooling-junctions`); judged with no EM by the within-gene spread beside the class scale
+   (`ruler_vs_truth.py --scale`, `TRAPS: judge-a-ruler-by-its-within-gene-spread`), then on the transcript table
+   per stratum (`ISSUES: the-junction-price-is-noisy-within-a-gene`).
+2. **The pseudocount** — now uncancelled on capture; its repair is taken with the per-transcript prior, through
+   the lane that exists (`ISSUES: the-pseudocount-prior-is-biased-toward-gdna`,
+   `ISSUES: per-transcript-prior-lane`), judged on the pools per row first and the transcript table second, `g98`
+   and the zero controls beside.
 3. **The release** — `docs/PUBLISHING.md` is the procedure; what gates it is the state: the deliverable
    measured per stratum, the zero rows clean, the suite at its standing count, `preflight.py --full` green, the
    standing risks re-read, and the manual true of what ships.
@@ -81,6 +90,7 @@ solve on unstranded capture-OFF · the message policy's open cases (`ISSUES: two
 
 ## Deliberately not next
 
-The length composition channel (retired until after 0.8.0) · anything whose only target is the deferred
-stratum · every mechanism in `ISSUES.md`'s CLOSED / REFUSED section — read it before proposing anything,
-because each entry is a build that was measured and turned down, with the number that killed it.
+The length composition channel (retired until after 0.8.0) · a capture efficiency the EM re-reads as it runs
+(deferred by the owner, `DESIGN.md` §7.2) · anything whose only target is the deferred stratum · every mechanism
+in `ISSUES.md`'s CLOSED / REFUSED section — read it before proposing anything, because each entry is a build that
+was measured and turned down, with the number that killed it.

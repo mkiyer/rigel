@@ -206,7 +206,7 @@ block; this table says only what each one stresses.
 | shared-exon | two spliced genes sharing one exact 10 kb last exon (the W12 deep stress; the tail-to-tail class of SMARCB1 × DERL3): a level on each strand into one walled AMBIG exon whose faces each pair a junction with a terminus | `shared` `capshared` |
 | in-intron | a 600 bp single-exon gene centred in the opposite strand's first intron (mirrored from the ladder's 203 intronic pseudogenes and lncRNAs): the majority AMBIG class, walled, its only message source its own termini | `inintron` `capinintron` |
 | head-to-head | `conv` with the strands swapped and nothing else: two 5' ends overlap in a 2 kb exon∩exon piece (mirrored from TRMT2A ⟷ RANBP1), a TSS and a donor of different strands on one boundary | `div` `capdiv` |
-| tiny-exon | exons shorter than a fragment — ten 40 bp exons at 1,040 bp pitch, and the same run between two 1 kb exons: no piece holds a contained fragment, so a piece's evidence is its edge crossings and its length its bases (the ruler's substrate, `EQUATIONS.md` §11) | `tiny` `captiny` `mixed` `capmixed` |
+| tiny-exon | exons shorter than a fragment — ten 40 bp exons at 1,040 bp pitch, and the same run between two 1 kb exons: no piece holds a contained fragment, so a piece is seen only through its boundaries: the crossing counts at its edges price the conserved shares of the cuts around it (`EQUATIONS.md` §11) | `tiny` `captiny` `mixed` `capmixed` |
 
 273 genes on a 7.930 Mb chromosome (`genome_length` in the YAML). Every gene carries an explicit strand
 and the chromosome keeps equal + / − representation — a sign error is invisible on one strand, and the
@@ -236,7 +236,8 @@ over each multi-exon transcript, fed from the contributor's `nrna_abundance` col
 ## 0c. The ruler's truth instrument and the gDNA-depth ladder
 
 `scripts/design/ruler_vs_truth.py` scores the EM's effective length under capture — the ruler,
-`capture_eff_length.transcript_capture_eff_lengths` — against the simulator's own capture-aware effective
+`capture_eff_length.transcript_capture_eff_lengths`, each object a transcript's fragments deposit on at its
+capture efficiency (`EQUATIONS.md` §11) — against the simulator's own capture-aware effective
 length, per transcript: `CaptureSampler.partition_array` is what drew the reads, so the truth is
 `Σ_w f_pre(w) · partition_t(w)` over the pre-capture fragment-length pmf and the plain length is
 `Σ_w f_pre(w) · off_target_weight · (L_t − w + 1)+`; their ratio is the truth factor, an arm's factor is
@@ -252,6 +253,7 @@ python scripts/design/ruler_vs_truth.py --panel test --condition gdna_g05_ss_0.9
 python scripts/design/ruler_vs_truth.py --panel ladder                       # one line per capture-ON row
 python scripts/design/ruler_vs_truth.py --panel test --condition C --module proto.py --out table.tsv
 python scripts/design/ruler_vs_truth.py --panel test --panel-dir ~/Downloads/rigel_runs/test_reference/scenarios_depth_d10
+python scripts/design/ruler_vs_truth.py --panel ladder --condition gdna_g50_ss_0.99_nrna_mid_capture_on --scale
 ```
 
 The arms: `shipped` is the ruler in `src/` on the shipped calibration; `oracle_gdna` feeds the same ruler
@@ -265,9 +267,14 @@ one on the same calibration
 — DERIVE → PROTOTYPE happens there, and nothing in `src/` moves to price an arm; `--set SECTION.FIELD=VALUE`
 prices a config value on every arm. Read the classes apart: the probed class is where the formula is exact
 when its witness is; the unprobed class is where a floor or the reference bites; the partial classes are
-where the junction rule lives. What no gDNA ruler can see is declared, not repaired: a probe spanning a
-junction or centred on an exon shorter than a fragment is captured on gDNA at a fraction of the cDNA's
-overlap (`ISSUES: ruler-witness-geometry-on-transcript-panels`).
+where the junction price lives. A probe spanning a junction or centred on an exon shorter than a fragment
+is captured on gDNA at a fraction of the cDNA's overlap. The junction price reads that extra capture from
+the gDNA objects beside the junction by conservation of bases — close on average, too noisy per junction to
+split isoforms (`ISSUES: the-junction-price-is-noisy-within-a-gene`) — and what no gDNA object sees is
+declared, not repaired (`ISSUES: ruler-witness-geometry-on-transcript-panels`). `--scale` reads the
+shipped lengths: every hypothesis class's L / Y unanchored and the within-gene spread of the
+multi-exon transcripts, so a prototype length is scored on it from a worktree, and a class-scale repair is
+judged by the spread as well as the means (`TRAPS: judge-a-ruler-by-its-within-gene-spread`).
 
 **The gDNA-depth ladder** is three side configs of the test chromosome, everything but the fragment
 budget and the gDNA rungs identical to `test_reference.yaml`, stranded only, built the same way (§0a's
@@ -422,6 +429,21 @@ and two runs of the identical pipeline on the identical BAM return different tra
 (`TRAPS: the-deliverable-is-not-reproducible-by-default`). Regenerate the goldens twice and diff, and pin
 `EMConfig.seed` in any instrument that compares two end-to-end runs (`quant_accuracy.py` does, and prints
 a `base_reseed` noise floor beside the effect).
+
+**The capture-contracted length is gated per object against the deposit rule.** Three gates run every
+placement of every fragment width through the reference accumulator (`tests/native/_accumulator_reference.py`)
+and hold each piece's contained share and each boundary's and junction's conserved share to 1e-12:
+`tests/calibration/test_effective_length.py::test_each_share_is_what_the_deposit_rule_gives_the_object` (a
+spliced template cut into 1–3 bp pieces, one fragment crossing up to six cuts),
+`::test_the_gdna_shares_are_what_the_deposit_rule_gives_each_boundary` (gDNA, every start on the chromosome)
+and `tests/calibration/test_capture_eff_length.py::test_each_share_is_what_the_deposit_rule_gives_the_object`
+(the index's own partition). Per object, never on the total (`TRAPS: conservation-misses-mis-attribution`),
+and on pieces shorter than a fragment (`TRAPS: perturb-every-gate`). Two more stand beside them:
+`test_capture_eff_length.py::test_a_junction_reads_the_objects_beside_it_on_a_multi_region_intron` puts
+every region and boundary at its own efficiency and finds the junction's objects by coordinate, never by the
+module's index arithmetic, and `::test_a_zero_length_fragment_places_nowhere` holds a length model's mass at
+`w = 0` out of every share. `test_priors.py` holds the gDNA component's length to gDNA's own conserved share
+and never the count's `q`; `test_capture_efficiency.py` holds each region and boundary to its own count.
 
 ---
 

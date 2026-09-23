@@ -45,6 +45,7 @@ def _valid_kwargs() -> dict:
         sj_mass_per_crossing=np.array([0.5, 0.25]),
         gdna_region_eff_len=region.copy(),
         gdna_boundary_eff_len=boundary.copy(),
+        gdna_boundary_conserved_len=boundary.copy(),
         rna_region_eff_len=region.copy(),
         rna_boundary_eff_len=boundary.copy(),
         # The three-way composition ψ solves, per object. Not renormalised — it fails to close on a
@@ -110,6 +111,7 @@ def test_a_library_with_no_sj_constructs():
         ("count_rna_boundary", N_BOUNDARIES),
         ("count_rna_spliced_boundary", N_BOUNDARIES),
         ("gdna_boundary_eff_len", N_BOUNDARIES),
+        ("gdna_boundary_conserved_len", N_BOUNDARIES),
         ("rna_boundary_eff_len", N_BOUNDARIES),
         ("count_rna_sj", N_SJ),
     ],
@@ -146,6 +148,7 @@ def test_the_error_names_the_axis_it_expected():
         "gdna_region_eff_len",
         "count_gdna_boundary",
         "gdna_boundary_eff_len",
+        "gdna_boundary_conserved_len",
         "rna_region_eff_len",
         "rna_boundary_eff_len",
     ],

@@ -21,6 +21,7 @@ from scipy.stats import norm
 
 from rigel.calibration import effective_length as el
 from rigel.calibration.effective_length import (
+    conserved_cut_shares,
     contained_eff_length,
     crossing_eff_length,
     fl_mean,
@@ -240,152 +241,160 @@ def test_the_THREE_OLD_DIVISORS_ARE_GONE():
 # ---------------------------------------------------------------------------
 
 
-def _enumerate_tau(L: int, pmf: np.ndarray) -> np.ndarray:
-    """τ(x) by brute force: every start of every length, each start spread over its w bases."""
-    p = np.asarray(pmf, np.float64) / np.sum(pmf)
-    tau = np.zeros(L)
-    for w in range(1, p.shape[0]):
-        if p[w] == 0.0:
-            continue
-        for s in range(0, L - w + 1):
-            tau[s : s + w] += p[w] / w
-    return tau
+def _small_pmf() -> np.ndarray:
+    """Uneven mass on widths 2..40: a fragment crosses several of the fixtures' 1–3 bp pieces at once, and the enumeration stays
+    small enough to run every placement through the reference accumulator."""
+    w = np.arange(41, dtype=np.float64)
+    p = np.where(w >= 2.0, 1.0 + 0.5 * np.sin(w), 0.0)
+    return p / p.sum()
 
 
-@pytest.mark.parametrize("L", [1, 30, 99, 100, 250, 600, 998, 999, 1000, 1500])
-def test_the_taper_interval_sums_are_the_enumerated_per_base_weights(L):
-    """Long templates through the table, short ones base by base — both against the brute force. 600 and
-    998 sit between one and two fragment lengths, where the table's collapse of the four-way min is
-    invalid: a threshold at one fragment length passed every other length here."""
-    from rigel.calibration.effective_length import base_taper
+def _deposit_every_placement(bounds, blocks, pmf, chromosome=False):
+    """THE DEPOSIT RULE, per object: every placement of every width through the reference accumulator
+    (`tests/native/_accumulator_reference.py`), weighted by the pmf. A template is its ``blocks`` on one
+    reference cut at ``bounds``, the introns between blocks annotated; ``chromosome`` places every start on
+    the reference instead (gDNA's template). Returns the partition and the per-region contained units,
+    per-boundary mass and per-sj mass — nothing of the slice rule is restated here."""
+    from native._accumulator_reference import Accumulator, DepositOutcome, Partition
 
-    pmf = _normal_pmf(200.0, 60.0, n=501)
-    tap = base_taper(pmf)
-    tau = _enumerate_tau(L, pmf)
-    cum = np.concatenate([[0.0], np.cumsum(tau)])
-    x0 = np.array([0, 0, L // 3, max(L - 7, 0)])
-    x1 = np.array([L, min(5, L), min(L // 3 + 40, L), L])
-    np.testing.assert_allclose(
-        tap.interval_sums(x0, x1, L), cum[x1] - cum[x0], rtol=1e-10, atol=1e-12
-    )
+    from rigel.types import Strand
+
+    sj = [(0, blocks[k][1], blocks[k + 1][0], int(Strand.POS)) for k in range(len(blocks) - 1)]
+    part = Partition.from_region_bounds([bounds], sj=sj)
+    offs = np.cumsum([0] + [e - s for s, e in blocks])
+    L = int(bounds[-1] - bounds[0]) if chromosome else int(offs[-1])
+    region = np.zeros(part.n_regions)
+    boundary = np.zeros(part.n_boundaries)
+    junction = np.zeros(part.n_sj)
+    for w in np.flatnonzero(pmf):
+        acc = Accumulator(part, max_fragment_length=pmf.shape[0] + 10)
+        for s in range(0, L - int(w) + 1):
+            if chromosome:
+                g0, g1, introns = bounds[0] + s, bounds[0] + s + int(w), ()
+            else:
+                k0 = int(np.searchsorted(offs, s, side="right")) - 1
+                k1 = int(np.searchsorted(offs, s + w - 1, side="right")) - 1
+                g0 = blocks[k0][0] + s - int(offs[k0])
+                g1 = blocks[k1][0] + s + int(w) - int(offs[k1])
+                introns = tuple((blocks[k][1], blocks[k + 1][0]) for k in range(k0, k1))
+            out = acc.deposit(
+                0,
+                g0,
+                g1,
+                observed_introns=introns,
+                align_strand=Strand.POS,
+                sj_strand=Strand.POS if introns else Strand.NONE,
+            )
+            assert out is DepositOutcome.DEPOSITED, (w, s, out)
+        t = acc.tally
+        region += pmf[w] * t.region_contained_count.sum(1)
+        boundary += pmf[w] * (t.boundary_unspliced_mass + t.boundary_spliced_mass)
+        junction += pmf[w] * t.sj_mass.sum(1)
+    return part, region, boundary, junction
 
 
-def test_the_taper_interval_sums_take_one_template_length_per_interval():
-    """One call over intervals on many templates — long and short, in any order — is bit-identical to
-    the per-template calls: the vectorised path is the same arithmetic grouped, and it is what makes a
-    real library's 457,000 transcripts one pass rather than one loop."""
-    from rigel.calibration.effective_length import base_taper
+def _template_objects(bounds, blocks):
+    """The template's pieces (its blocks cut at ``bounds``) in its own coordinates: per piece its region
+    and length, per cut between consecutive pieces the genomic position of each side and the bases of
+    template left and right of it."""
+    B = np.asarray(bounds)
+    region, length = [], []
+    for gs, ge in blocks:
+        inner = [int(x) for x in B[(B > gs) & (B < ge)]]
+        edges = [gs, *inner, ge]
+        for a, b in zip(edges[:-1], edges[1:]):
+            region.append(int(np.searchsorted(B, a, side="right")) - 1)
+            length.append(b - a)
+    length = np.asarray(length, dtype=np.float64)
+    through = np.cumsum(length)
+    return np.asarray(region), length, through[:-1], through[-1] - through[:-1]
 
-    tap = base_taper(_normal_pmf(200.0, 60.0, n=501))
-    rng = np.random.default_rng(7)
-    L = rng.choice([1, 30, 99, 250, 999, 1000, 1500, 20000], size=200)
-    x0 = (rng.random(200) * L).astype(np.int64)
-    x1 = x0 + (rng.random(200) * (L - x0)).astype(np.int64)
-    expect = np.array([tap.interval_sums([a], [b], int(n))[0] for a, b, n in zip(x0, x1, L)])
-    np.testing.assert_array_equal(tap.interval_sums(x0, x1, L), expect)
+
+# 1-, 2- and 3-bp pieces beside long ones, and two junctions whose exons are cut into pieces as well
+_BOUNDS = [0, 10, 11, 13, 16, 40, 100, 101, 108, 150, 180, 181, 230, 260]
+_BLOCKS = [(10, 40), (100, 150), (180, 230)]
 
 
-@pytest.mark.parametrize("L", [1, 60, 500, 3000])
-def test_the_taper_partitions_the_fl_marginal_length_exactly(L):
-    """Σ_x τ(x) over the whole template is Σ_w f(w)(L − w + 1)⁺ — the per-base frame is a partition of
-    the start count, never a second definition of it."""
-    from rigel.calibration.effective_length import base_taper
-
-    pmf = _normal_pmf(200.0, 60.0, n=501)
+def test_each_share_is_what_the_deposit_rule_gives_the_object():
+    """THE GATE, per object. Every placement of a spliced template goes through the reference accumulator;
+    each piece's contained units must be its contained share, and each cut's mass — at a boundary or at a
+    junction — its conserved share (:func:`conserved_cut_shares` at the template's reach), to 1e-12. Per
+    object, because a ``1/K`` split over the cuts a fragment crosses also conserves the total. Every other
+    object holds nothing, and the whole is the fl-marginal length."""
+    pmf = _small_pmf()
+    part, region, boundary, junction = _deposit_every_placement(_BOUNDS, _BLOCKS, pmf)
+    reg, length, lo, hi = _template_objects(_BOUNDS, _BLOCKS)
+    np.testing.assert_allclose(region[reg], contained_eff_length(length, pmf), rtol=0, atol=1e-12)
+    left, right = conserved_cut_shares(pmf, length[:-1], length[1:], lo, hi)
+    share = left + right
+    is_boundary = reg[1:] == reg[:-1] + 1  # a boundary's id is its left region's
+    got = np.where(is_boundary, boundary[reg[:-1]], 0.0)
+    got[~is_boundary] = junction  # the sj ids run in genomic order, as the junctions do here
+    assert part.n_sj == int((~is_boundary).sum())
+    np.testing.assert_allclose(got, share, rtol=0, atol=1e-12)
+    others = np.setdiff1d(np.arange(region.size), reg)
+    assert np.all(region[others] == 0.0)
+    assert np.all(np.delete(boundary, reg[:-1][is_boundary]) == 0.0)
+    L = length.sum()
     w = np.arange(pmf.shape[0], dtype=np.float64)
     fl = float((pmf * np.maximum(L - w + 1.0, 0.0)).sum())
-    assert base_taper(pmf).interval_sums(np.array([0]), np.array([L]), L)[0] == pytest.approx(fl)
+    assert region.sum() + boundary.sum() + junction.sum() == pytest.approx(fl, rel=1e-12)
 
 
-def _regions(lengths):
-    import pandas as pd
-
-    from rigel.calibration.region_arrays import RegionArrays
-
-    lengths = np.asarray(lengths, dtype=np.int64)
-    b = np.concatenate([[0], np.cumsum(lengths)])
-    frame = pd.DataFrame(
-        {
-            "region_id": np.arange(lengths.size, dtype=np.int64),
-            "ref_name": pd.array(["chr1"] * lengths.size, dtype="string"),
-            "start": b[:-1],
-            "end": b[1:],
-            "length": lengths,
-            "signature": np.zeros(lengths.size, np.uint8),
-        }
-    )
-    return RegionArrays.from_frame(frame, {"chr1": 0})
-
-
-def _enumerate_base_shares(lengths, e, pmf):
-    """Base-starts per piece by brute force: every crossing placement (w, a) at boundary e, each base of
-    the fragment attributed to the piece it lies in."""
-    p = np.asarray(pmf, np.float64) / np.sum(pmf)
-    b = np.concatenate([[0], np.cumsum(lengths)])
-    B = b[e + 1]
-    shares = np.zeros(len(lengths))
-    for w in range(2, p.shape[0]):
-        if p[w] == 0.0:
-            continue
-        for a in range(1, w):
-            for x in range(B - a, B - a + w):
-                q = int(np.searchsorted(b, x, side="right") - 1)
-                if 0 <= q < len(lengths):
-                    shares[q] += p[w] / w
-    return shares
+def test_the_gdna_shares_are_what_the_deposit_rule_gives_each_boundary():
+    """gDNA's template is the chromosome: every start on it, through the reference accumulator. Away from
+    the chromosome's ends each boundary's mass is :func:`conserved_cut_shares` of its two flanking regions
+    at ``UNBOUNDED_REACH`` — ``½E_f[min(a, w − 1)] + ½E_f[min(b, w − 1)]`` — and each region's contained
+    units its contained share, beside pieces of 1–3 bp where one fragment crosses up to seven boundaries.
+    PERTURBATION: the crossing support ``E_f[w − 1]``, a start once per boundary its fragment crosses,
+    overstates every boundary beside a piece shorter than a fragment."""
+    pmf = _small_pmf()
+    bounds = [0, 200, 201, 203, 206, 207, 230, 231, 260, 460]
+    part, region, boundary, _ = _deposit_every_placement(bounds, [(200, 260)], pmf, chromosome=True)
+    length = np.diff(np.asarray(bounds, dtype=np.float64))
+    left, right = conserved_cut_shares(pmf, length[:-1], length[1:], UNBOUNDED, UNBOUNDED)
+    np.testing.assert_allclose(boundary, left + right, rtol=0, atol=1e-12)
+    np.testing.assert_allclose(region, contained_eff_length(length, pmf), rtol=0, atol=1e-12)
+    incidence = float(crossing_eff_length(pmf, np.array([UNBOUNDED]), np.array([UNBOUNDED]))[0])
+    short = (length[:-1] < 40) | (length[1:] < 40)
+    assert short.sum() >= 6
+    assert np.all(boundary[short] < incidence - 1e-9)
 
 
-def test_the_crossing_base_shares_are_the_enumerated_placements():
-    """Tiny pieces beside long ones: the enumeration attributes every base of every placement to the
-    piece it lies in, and the closed form must match piece by piece."""
-    from rigel.calibration.effective_length import crossing_base_shares
+def test_the_conserved_share_at_unbounded_reach_closes():
+    """Where neither reach binds the share is ``½E_f[min(a, w − 1)] + ½E_f[min(b, w − 1)]``, computed here
+    by summing over the pmf, and beside two pieces longer than every fragment it is the crossing support
+    ``E_f[w − 1]`` exactly — no fragment crosses a second cut, so the conserved frame and the incidence
+    frame agree."""
+    pmf = _normal_pmf(200.0, 60.0, n=501)
+    w = np.arange(pmf.shape[0], dtype=np.float64)
+    a = np.array([1.0, 7.0, 150.0, 499.0, 5000.0])
+    b = np.array([3000.0, 2.0, 80.0, 500.0, 5000.0])
+    left, right = conserved_cut_shares(pmf, a, b, UNBOUNDED, UNBOUNDED)
+    half_min = lambda x: 0.5 * float((pmf * np.minimum(x, np.maximum(w - 1.0, 0.0))).sum())  # noqa: E731
+    np.testing.assert_allclose(left, [half_min(x) for x in a], rtol=1e-12)
+    np.testing.assert_allclose(right, [half_min(x) for x in b], rtol=1e-12)
+    S_e = float(crossing_eff_length(pmf, np.array([UNBOUNDED]), np.array([UNBOUNDED]))[0])
+    assert left[-1] + right[-1] == pytest.approx(S_e, rel=1e-12)
 
-    pmf = _normal_pmf(60.0, 15.0, n=121)
-    lengths = [500, 25, 300, 7, 9, 400]
-    E, Q, A = crossing_base_shares(_regions(lengths), pmf)
-    for e in range(len(lengths) - 1):
-        got = np.zeros(len(lengths))
-        np.add.at(got, Q[E == e], A[E == e])
-        np.testing.assert_allclose(
-            got, _enumerate_base_shares(lengths, e, pmf), rtol=1e-9, atol=1e-12
+
+def test_a_reach_that_excludes_its_own_piece_is_refused():
+    with pytest.raises(ValueError, match="reach"):
+        conserved_cut_shares(
+            _small_pmf(), np.array([5.0]), np.array([5.0]), np.array([4.0]), np.array([9.0])
         )
 
 
-def test_the_crossing_base_shares_sum_to_the_crossing_opportunity():
-    """Σ_q share_eq = E_f[w − 1] at every boundary whose pieces reach a fragment on both sides — the
-    crossing divisor, partitioned over the bases it counts."""
-    from rigel.calibration.effective_length import UNBOUNDED_REACH, crossing_base_shares
-
-    pmf = _normal_pmf(200.0, 60.0, n=501)
-    ra = _regions([5000, 40, 1000, 40, 300, 30, 8000])
-    E, Q, A = crossing_base_shares(ra, pmf)
-    S_e = float(
-        crossing_eff_length(pmf, np.array([UNBOUNDED_REACH]), np.array([UNBOUNDED_REACH]))[0]
-    )
-    total = np.zeros(6)
-    np.add.at(total, E, A)
-    np.testing.assert_allclose(total, S_e, rtol=1e-10)
-    # and the left side alone is half of it: the two sides are symmetric
-    left = np.zeros(6)
-    np.add.at(left, E[Q < E + 1], A[Q < E + 1])
-    np.testing.assert_allclose(left, S_e / 2.0, rtol=1e-10)
-
-
-def test_a_length_model_with_mass_at_zero_length_tapers_without_a_nan():
-    """A smoothed real-library model put mass at ``w = 0`` and the human library's factors went NaN
-    (found on LBX0588 the day the taper landed): a zero-length fragment covers no base and is dropped,
-    so the taper equals the taper of the same pmf with that mass removed, on long and short templates."""
-    from rigel.calibration.effective_length import base_taper
-
+def test_a_length_model_with_mass_at_zero_length_shares_without_a_nan():
+    """A smoothed real-library model put mass at ``w = 0`` (LBX0588): a zero-length fragment crosses no
+    cut, so the shares are finite and equal those of the same pmf with that mass removed, rescaled by the
+    normalisation."""
     pmf = _normal_pmf(200.0, 60.0, n=501)
     with_zero = pmf.copy()
     with_zero[0] = 0.05
-    clean = base_taper(pmf)
-    dirty = base_taper(with_zero)
-    for L in (30, 1500):
-        x0, x1 = np.array([0, L // 3]), np.array([L, L // 3 + 20])
-        got = dirty.interval_sums(x0, x1, L)
-        assert np.all(np.isfinite(got))
-        # the pmf is normalised over all its mass and the zero-length part then dropped, so the positive
-        # lengths carry their weights scaled by the total, 1/1.05 — a ratio of tapers is unmoved
-        np.testing.assert_allclose(got, clean.interval_sums(x0, x1, L) / 1.05, rtol=1e-12)
+    a, b = np.array([30.0, 1500.0]), np.array([7.0, 300.0])
+    lo, hi = np.array([30.0, 4000.0]), np.array([900.0, 300.0])
+    clean = np.add(*conserved_cut_shares(pmf, a, b, lo, hi))
+    dirty = np.add(*conserved_cut_shares(with_zero, a, b, lo, hi))
+    assert np.all(np.isfinite(dirty))
+    np.testing.assert_allclose(dirty, clean / 1.05, rtol=1e-12)

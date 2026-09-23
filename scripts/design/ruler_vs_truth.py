@@ -24,9 +24,10 @@ shipped one on the same calibration — the harness every ruler mechanism
 is developed on before ``src/``; ``--set SECTION.FIELD=VALUE`` prices a config value on every arm.
 
 ⛔ Read the classes apart: the probed class is where the formula is exact when its witness is, the
-unprobed class is where the floor and the reference bite, and the partial classes are where the
-junction rule lives. The gDNA witness under-reads a probe that spans a junction or a tiny exon by the
-panel's own geometry, declared and not repaired.
+unprobed class is where the reference bites, and the partial classes are where the junction price lives.
+The junction price reads a junction's capture from the gDNA objects beside it, by conservation of bases,
+right on average and noisy per junction (`ISSUES: the-junction-price-is-noisy-within-a-gene`); what no gDNA
+object sees is declared, not repaired (`ISSUES: ruler-witness-geometry-on-transcript-panels`).
 
 Usage::
 
@@ -48,12 +49,11 @@ fragment only if their opportunities are the same multiple of the yield the simu
 the quantity that decides the gDNA-versus-RNA split under capture is L / Y per hypothesis class, UNANCHORED: L the
 length the EM divides by, Y the simulator's own expected captured yield per unit abundance — in mRNA space for a
 transcript or a synthetic span (``partition_array``), in gDNA space for the locus gDNA component (the same weight
-over the locus's footprint, ``_extra_landscape``). The read-out prints L / Y for the locus gDNA on the shipped
-object form and on the per-base form, for the synthetic spans on the ruler and on the object rule, and for the
-annotated transcripts on the ruler by probed class with the JUNCTION-PROBED transcripts apart, then the pairwise
-class-mean ratios of the two candidate families. ⛔ The tolerance is the converged elasticity's: class means must
-agree to about 1 % (the synthetic pool moves ~20 % per 1 % of its own opportunity at ``g50 ss.99 ON``). The pipeline
-is run to the prior assembly and stopped there — no EM.
+over the locus's footprint, ``_extra_landscape``). The read-out prints L / Y for the locus gDNA component
+(``LocusPriors.gdna_eff_len``), the synthetic spans and the annotated transcripts on the shipped lengths, by probed
+class with the JUNCTION-PROBED transcripts apart, then the pairwise class-mean ratios. ⛔ The tolerance is the
+converged elasticity's: class means must agree to about 1 % (the synthetic pool moves ~20 % per 1 % of its own
+opportunity at ``g50 ss.99 ON``). The pipeline is run to the prior assembly and stopped there — no EM.
 """
 
 from __future__ import annotations
@@ -81,7 +81,6 @@ from rigel.calibration.abundance_landscape import located_enriched_mode  # noqa:
 from rigel.calibration.calibrate import calibrate  # noqa: E402
 from rigel.calibration.capture_eff_length import transcript_capture_eff_lengths  # noqa: E402
 from rigel.calibration.capture_efficiency import capture_efficiencies  # noqa: E402
-from rigel.calibration.effective_length import crossing_base_shares  # noqa: E402
 from rigel.calibration.landscape import fit_landscape  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.region_chain import BOUNDARY, REGION  # noqa: E402
@@ -93,8 +92,6 @@ from rigel.calibration.splice_graph import (  # noqa: E402
 from rigel.config import PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
-from rigel.calibration.effective_length import base_taper  # noqa: E402
-from rigel.calibration.region_arrays import region_right_boundary  # noqa: E402
 from rigel.sim.capture import CaptureConfig, CaptureSampler  # noqa: E402
 from rigel.sim.whole_genome import fl_pmf, load_transcripts_from_index  # noqa: E402
 
@@ -290,7 +287,6 @@ def oracle_gdna_result(cal, region_arrays, panel_dir: Path, condition: str, gdna
             S,
             m_bnd,
             np.asarray(cal.gdna_boundary_eff_len, float),
-            crossing_base_shares(region_arrays, gdna_fl_pmf),
         )
     return dataclasses.replace(
         cal,
@@ -467,7 +463,7 @@ def main() -> int:
     )
     ap.add_argument("--out", type=Path, default=None, help="the per-transcript table (one condition)")
     ap.add_argument("--scale", action="store_true", help="THE ONE-SCALE READ-OUT: L / Y per hypothesis class (one condition)")
-    ap.add_argument("--width-step", type=int, default=4, help="--scale: thin the gDNA-space yield's width grid by this step")
+    ap.add_argument("--width-step", type=int, default=1, help="--scale: thin the gDNA-space yield's width grid by this step")
     ap.add_argument("--self-test", action="store_true", help="perturb every comparator; no panel")
     args = ap.parse_args()
     if args.self_test:
@@ -643,85 +639,44 @@ def gdna_space_yield(sim: Sim, blocks: np.ndarray, n_loci: int, id2name: dict, w
     return Y
 
 
-def object_rule_lengths(cal, region_arrays, index: TranscriptIndex, mask: np.ndarray) -> np.ndarray:
-    """The object rule on every transcript in ``mask`` over its genomic footprint: contained supports at their
-    efficiencies plus INTERIOR crossing supports converted by the accumulator's ``q`` at theirs — the shipped
-    locus gDNA rule with the footprint's own two ends excluded (the prototype's synthetic-span rule). NaN where a
-    transcript has no region."""
-    t = index.t_df
-    starts = np.asarray(region_arrays.start, dtype=np.int64)
-    off = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
-    rb = region_right_boundary(np.asarray(region_arrays.ref_id))
-    S_r = np.asarray(cal.gdna_region_eff_len, dtype=np.float64)
-    S_b = np.asarray(cal.gdna_boundary_eff_len, dtype=np.float64)
-    c_r = np.asarray(cal.gdna_capture_efficiency_region, dtype=np.float64)
-    c_b = np.asarray(cal.gdna_capture_efficiency_boundary, dtype=np.float64)
-    q = np.asarray(cal.boundary_mass_per_crossing, dtype=np.float64)
-    t_start = t["start"].to_numpy(np.int64)
-    t_end = t["end"].to_numpy(np.int64)
-    t_ref = pd.Series(t["ref"].astype(str)).map(index.ref_name_to_id).fillna(-1).to_numpy(np.int64)
-    out = np.full(len(t), np.nan)
-    for i in np.flatnonzero(mask):
-        r = int(t_ref[i])
-        if r < 0:
-            continue
-        lo, hi = int(off[r]), int(off[r + 1])
-        a = lo + int(np.searchsorted(starts[lo:hi], t_start[i], side="left"))
-        b = lo + int(np.searchsorted(starts[lo:hi], t_end[i], side="left"))
-        if b <= a:
-            continue
-        regs = np.arange(a, b)
-        bnd = rb[regs[:-1]] if regs.size > 1 else np.zeros(0, dtype=np.int64)
-        bnd = bnd[bnd >= 0]
-        out[i] = float((S_r[regs] * c_r[regs]).sum() + (S_b[bnd] * q[bnd] * c_b[bnd]).sum())
-    return out
+def footprint_gdna_length(region_arrays, block: tuple, gdna_fl_pmf) -> float:
+    """The shipped gDNA component's length at efficiency 1 over one footprint ``(ref_id, start, end)``:
+    ``priors.assemble_priors`` itself, on a result carrying calibration's own geometry for this partition
+    (the contained supports and ``calibrate._gdna_boundary_conserved_len``) and no reference."""
+    from rigel.calibration.calibrate import _gdna_boundary_conserved_len
+    from rigel.calibration.effective_length import contained_eff_length
+    from rigel.calibration.priors import assemble_priors
+    from rigel.calibration.region_arrays import boundary_region_indices
+    from rigel.calibration.result import CalibrationResult
+    from rigel.config import CalibrationConfig
+    from rigel.locus import Locus, MultiLocus
 
-
-def perbase_lengths(cal, region_arrays, blocks: np.ndarray, n: int, fl_pmf) -> np.ndarray:
-    """The per-base family's length for a gDNA-geometry footprint — every start whose fragment OVERLAPS the
-    footprint, each at the mean efficiency of the bases it covers: ``Σ_x c̃(x) · τ_out(x)`` with ``τ_out = 1`` on
-    the footprint's own bases (every start covering an inside base overlaps the footprint) and, for a base ``d``
-    bases beyond an edge, ``τ_out(d) = Σ_w f(w) (w − d)⁺ / w = mass − T(d)`` — the mirror of the transcript
-    taper, on the OUTSIDE, because gDNA's template is the chromosome and a fragment crossing the footprint's edge
-    is one of its starts. ``blocks`` is ``int64[n, 4]`` of ``(key, ref_id, start, end)``; with every efficiency 1
-    a block returns ``Σ_w f(w)(L + w − 1)`` exactly, the same count the gDNA-space yield takes."""
-    taper = base_taper(fl_pmf)
-    starts = np.asarray(region_arrays.start, dtype=np.int64)
-    ends = np.asarray(region_arrays.end, dtype=np.int64)
-    off = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
-    c = np.asarray(cal.gdna_capture_efficiency_region, dtype=np.float64)
-    # the outside weight at distance d = 1 .. wmax beyond an edge, cumulative so a run of bases sums in O(1)
-    d = np.arange(1, taper.wmax + 1, dtype=np.int64)
-    w_out = taper.mass - (taper.cum[d] - taper.cum[d - 1])  # mass − T(d), T(d) = Σ_w f(w) min(d, w)/w
-    cum_out = np.concatenate([[0.0], np.cumsum(w_out)])  # Σ_{d' ≤ d} w_out(d')
-    out = np.zeros(n, dtype=np.float64)
-    for key, rid, s0, e0 in blocks.tolist():
-        Lb = int(e0 - s0)
-        if Lb <= 0:
-            continue
-        lo, hi = int(off[rid]), int(off[rid + 1])
-        # inside: every base at weight 1, at its region's efficiency
-        a = lo + int(np.searchsorted(ends[lo:hi], s0, side="right"))
-        b = lo + int(np.searchsorted(starts[lo:hi], e0, side="left"))
-        if b > a:
-            regs = np.arange(a, b)
-            out[key] += float(((np.minimum(ends[regs], e0) - np.maximum(starts[regs], s0)) * c[regs]).sum())
-        # outside: the wmax bases beyond each edge at the outside taper, walking the regions outward
-        for edge, step in ((s0, -1), (e0, +1)):
-            r = lo + int(np.searchsorted(ends[lo:hi], edge, side="right")) if step > 0 else lo + int(np.searchsorted(ends[lo:hi], edge - 1, side="right"))
-            dist = 0
-            while 0 <= r - lo < hi - lo and dist < taper.wmax:
-                seg = int(ends[r] - starts[r]) if step > 0 else int(ends[r] - starts[r])
-                if step > 0 and r == lo + int(np.searchsorted(ends[lo:hi], edge, side="right")):
-                    seg = int(ends[r] - edge)
-                if step < 0 and dist == 0:
-                    seg = int(edge - starts[r])
-                take = min(seg, taper.wmax - dist)
-                if take > 0:
-                    out[key] += float(c[r] * (cum_out[dist + take] - cum_out[dist]))
-                dist += take
-                r += step
-    return out
+    rid, s0, e0 = (int(v) for v in block)
+    n = int(region_arrays.n_regions)
+    ne = int(boundary_region_indices(np.asarray(region_arrays.ref_id))[0].shape[0])
+    length = np.asarray(region_arrays.end, dtype=np.float64) - np.asarray(region_arrays.start, dtype=np.float64)
+    z, ez = np.zeros(n), np.zeros(ne)
+    cal = CalibrationResult(
+        count_gdna_region=z, count_rna_region=z, count_gdna_boundary=ez, count_rna_boundary=ez,
+        count_rna_spliced_boundary=ez, boundary_mass_per_crossing=np.ones(ne), count_rna_sj=np.zeros(0),
+        boundary_spliced_mass_per_crossing=np.ones(ne), sj_mass_per_crossing=np.zeros(0),
+        gdna_region_eff_len=contained_eff_length(length, gdna_fl_pmf), gdna_boundary_eff_len=ez,
+        gdna_boundary_conserved_len=_gdna_boundary_conserved_len(region_arrays, gdna_fl_pmf),
+        rna_region_eff_len=z, rna_boundary_eff_len=ez, gdna_frac_region=z, rna_pos_frac_region=z,
+        rna_neg_frac_region=z, gdna_frac_boundary=ez, rna_pos_frac_boundary=ez, rna_neg_frac_boundary=ez,
+        gdna_density_global=0.0, gdna_reference_density=None, gdna_reference_members=0,
+        gdna_capture_efficiency_region=np.ones(n), gdna_capture_efficiency_boundary=np.ones(ne),
+        rna_sense_frac=0.5, gdna_strand_overdispersion=0.0, rna_strand_overdispersion=0.0,
+        n_regions=n, n_boundaries=ne, n_sj=0, config=CalibrationConfig(),
+    )
+    ml = MultiLocus(
+        multi_locus_id=0,
+        transcript_indices=np.array([], dtype=np.int32),
+        unit_indices=np.array([], dtype=np.int32),
+        gdna_span=e0 - s0,
+        loci=(Locus(ref=str(rid), ref_id=rid, start=s0, end=e0),),
+    )
+    return float(assemble_priors(cal, region_arrays, [ml]).gdna_eff_len[0])
 
 
 def footprint_probed_fraction(sim: Sim, blocks: np.ndarray, n_loci: int, id2name: dict) -> np.ndarray:
@@ -753,21 +708,6 @@ def footprint_probed_fraction(sim: Sim, blocks: np.ndarray, n_loci: int, id2name
             if hi > lo:
                 covered[key] += float(np.maximum(0, np.minimum(me[lo:hi], e0) - np.maximum(ms[lo:hi], s0)).sum())
     return np.where(length > 0, covered / np.maximum(length, 1.0), 0.0)
-
-
-def gdna_law_lengths(cap: dict, cal, region_arrays, index: TranscriptIndex, blocks: np.ndarray, n_loci: int) -> tuple:
-    """The per-base family with every taper on the PRE-capture law (the fitted ``gdna_pmf``) instead of the fitted
-    RNA law: ``(ruler_g, L_g_pb_g)`` — the ruler re-run on the gDNA law's fl-marginal lengths and pmf, and the
-    locus per-base form on the same pmf. The pairing arm of the plan's step 5."""
-    import rigel.calibration.capture_eff_length as CEL
-    from rigel.frag_length_model import FragmentLengthModel
-
-    gdna_pmf = np.asarray(cap["fl_models"].gdna_pmf, dtype=np.float64)
-    exonic = index.t_df["length"].to_numpy().astype(np.int64)
-    fl_g = FragmentLengthModel.from_pmf(gdna_pmf).compute_all_transcript_eff_lens(exonic)
-    ruler_g = np.asarray(CEL.transcript_capture_eff_lengths(cal, region_arrays, index, fl_g, gdna_pmf), dtype=np.float64)
-    L_g_pb_g = perbase_lengths(cal, region_arrays, blocks, n_loci, gdna_pmf)
-    return ruler_g, L_g_pb_g
 
 
 def junction_probed_flags(sim: Sim, index: TranscriptIndex) -> np.ndarray:
@@ -826,7 +766,7 @@ def scale_stats(L: np.ndarray, Y: np.ndarray, weight: np.ndarray) -> dict:
 
 
 def scale_verdict(means: dict) -> tuple[float, str]:
-    """The largest pairwise disagreement among a family's class means, as a fraction, and its pair."""
+    """The largest pairwise disagreement among the class means, as a fraction, and its pair."""
     names = [k for k, v in means.items() if np.isfinite(v) and v > 0]
     worst, pair = 0.0, ""
     for i, a in enumerate(names):
@@ -838,20 +778,21 @@ def scale_verdict(means: dict) -> tuple[float, str]:
 
 
 def scale_readout(index, region_arrays, index_dir, panel_dir, condition, config, min_frags: int, width_step: int):
-    """The one-scale read-out for one condition: every hypothesis class's L / Y, the two candidate families' pairwise
-    class-mean ratios and their verdicts, and the within-gene spread of the annotated transcripts."""
+    """The one-scale read-out for one condition: every hypothesis class's L / Y on the shipped lengths, the pairwise
+    class-mean ratios and their verdict, the same by probed class, and the within-gene spread of the annotated
+    transcripts."""
     t0 = time.time()
     truth = load_truth(index, index_dir, panel_dir, condition)
     sim = load_sim(index, index_dir, panel_dir, condition)
     Y_t = np.where(np.isfinite(truth.factor), truth.L_plain * truth.factor, np.nan)
     cap = em_loci(index, panel_dir, condition, config)
-    cal, ra, loci, pri = cap["calibration"], cap["region_arrays"], cap["multi_loci"], cap["priors"]
+    loci, pri = cap["multi_loci"], cap["priors"]
     t = index.t_df
     syn = t["is_synthetic"].to_numpy(dtype=bool)
     single = (~syn) & t["is_nrna"].to_numpy(dtype=bool)
     multi = (~syn) & ~single
     frags = truth.frags
-    # the locus gDNA component: object form (shipped) and per-base form, against the gDNA-space yield
+    # the locus gDNA component against the gDNA-space yield
     id2name = {v: k for k, v in index.ref_name_to_id.items()}
     n_loci = max((int(ml.multi_locus_id) for ml in loci), default=-1) + 1
     blocks = np.array(
@@ -859,25 +800,17 @@ def scale_readout(index, region_arrays, index_dir, panel_dir, condition, config,
         dtype=np.int64,
     ).reshape(-1, 4)
     Y_g = gdna_space_yield(sim, blocks, n_loci, id2name, width_step)
-    L_g_obj = np.asarray(pri.gdna_eff_len, dtype=np.float64)
-    L_g_pb = perbase_lengths(cal, ra, blocks, n_loci, cap["rna_pmf"])  # the RNA law, as the ruler's own per-base form uses
+    L_g = np.asarray(pri.gdna_eff_len, dtype=np.float64)
     P_g = np.asarray(pri.gdna_prior_count, dtype=np.float64)
     ruler = cap["ruler"]
-    L_span_obj = object_rule_lengths(cal, ra, index, syn)
     jp = junction_probed_flags(sim, index)
     pf = truth.probed_frac
     pf_loc = footprint_probed_fraction(sim, blocks, n_loci, id2name)
-    ruler_g, L_g_pb_g = gdna_law_lengths(cap, cal, ra, index, blocks, n_loci)
     rows: list[tuple[str, dict]] = [
-        ("locus gDNA · object form (shipped)", scale_stats(L_g_obj, Y_g, P_g)),
-        ("locus gDNA · per-base form", scale_stats(L_g_pb, Y_g, P_g)),
-        ("synthetic span · ruler", scale_stats(ruler[syn], Y_t[syn], frags[syn])),
-        ("synthetic span · object rule", scale_stats(L_span_obj[syn], Y_t[syn], frags[syn])),
-        ("annotated single-exon · ruler", scale_stats(ruler[single], Y_t[single], frags[single])),
-        ("annotated multi-exon · ruler", scale_stats(ruler[multi], Y_t[multi], frags[multi])),
-        ("locus gDNA · per-base form, gDNA law", scale_stats(L_g_pb_g, Y_g, P_g)),
-        ("synthetic span · ruler, gDNA law", scale_stats(ruler_g[syn], Y_t[syn], frags[syn])),
-        ("annotated multi-exon · ruler, gDNA law", scale_stats(ruler_g[multi], Y_t[multi], frags[multi])),
+        ("locus gDNA component", scale_stats(L_g, Y_g, P_g)),
+        ("synthetic span", scale_stats(ruler[syn], Y_t[syn], frags[syn])),
+        ("annotated single-exon", scale_stats(ruler[single], Y_t[single], frags[single])),
+        ("annotated multi-exon", scale_stats(ruler[multi], Y_t[multi], frags[multi])),
     ]
     by_class: dict[str, dict] = {}
     for cname, lo, hi in CLASSES:
@@ -886,33 +819,18 @@ def scale_readout(index, region_arrays, index_dir, panel_dir, condition, config,
         ml = (pf_loc >= lo) & (pf_loc < hi)
         rows.append((f"  multi-exon {cname}, no junction probe", scale_stats(ruler[m & ~jp], Y_t[m & ~jp], frags[m & ~jp])))
         rows.append((f"  multi-exon {cname}, JUNCTION-PROBED", scale_stats(ruler[m & jp], Y_t[m & jp], frags[m & jp])))
-        rows.append((f"  synthetic span {cname} · ruler", scale_stats(ruler[ms], Y_t[ms], frags[ms])))
-        rows.append((f"  locus gDNA footprint {cname} · per-base form", scale_stats(L_g_pb[ml], Y_g[ml], P_g[ml])))
+        rows.append((f"  synthetic span {cname}", scale_stats(ruler[ms], Y_t[ms], frags[ms])))
+        rows.append((f"  locus gDNA footprint {cname}", scale_stats(L_g[ml], Y_g[ml], P_g[ml])))
         by_class[cname] = {
             "isoforms": scale_stats(ruler[m], Y_t[m], frags[m]),
             "spans": rows[-2][1],
             "gDNA": rows[-1][1],
-            "isoforms, gDNA law": scale_stats(ruler_g[m], Y_t[m], frags[m]),
-            "spans, gDNA law": scale_stats(ruler_g[ms], Y_t[ms], frags[ms]),
-            "gDNA, gDNA law": scale_stats(L_g_pb_g[ml], Y_g[ml], P_g[ml]),
         }
     stats = dict(rows)
-    families = {
-        "object family (gDNA object form · spans object rule · isoforms ruler)": {
-            "gDNA": stats["locus gDNA · object form (shipped)"]["geomean"],
-            "spans": stats["synthetic span · object rule"]["geomean"],
-            "isoforms": stats["annotated multi-exon · ruler"]["geomean"],
-        },
-        "per-base family (gDNA per-base · spans ruler · isoforms ruler)": {
-            "gDNA": stats["locus gDNA · per-base form"]["geomean"],
-            "spans": stats["synthetic span · ruler"]["geomean"],
-            "isoforms": stats["annotated multi-exon · ruler"]["geomean"],
-        },
-        "per-base family on the gDNA law (every taper on the fitted gdna_pmf)": {
-            "gDNA": stats["locus gDNA · per-base form, gDNA law"]["geomean"],
-            "spans": stats["synthetic span · ruler, gDNA law"]["geomean"],
-            "isoforms": stats["annotated multi-exon · ruler, gDNA law"]["geomean"],
-        },
+    means = {
+        "gDNA": stats["locus gDNA component"]["geomean"],
+        "spans": stats["synthetic span"]["geomean"],
+        "isoforms": stats["annotated multi-exon"]["geomean"],
     }
     # within-gene spread of the annotated multi-exon transcripts: the sd of log(L / Y) about the gene mean
     live = multi & np.isfinite(Y_t) & (Y_t > 0) & (ruler > 0) & (frags >= min_frags)
@@ -923,13 +841,20 @@ def scale_readout(index, region_arrays, index_dir, panel_dir, condition, config,
         d["x"] -= d.groupby("g")["x"].transform("mean")
         within = float(np.sqrt(np.average(d["x"] ** 2, weights=d["w"])))
     elapsed = time.time() - t0
-    return dict(condition=condition, stats=stats, families=families, by_class=by_class, within_gene_sd=within,
+    return dict(condition=condition, stats=stats, means=means, by_class=by_class, within_gene_sd=within,
                 n_junction_probed=int(jp[multi].sum()),
                 n_multi=int(multi.sum()), n_loci=int(n_loci), elapsed=elapsed,
                 per_transcript=dict(t_id=t["t_id"].to_numpy(), kind=truth.kind, probed_frac=pf, junction_probed=jp, frags=frags,
-                                    Y=Y_t, L_ruler=ruler, L_object=L_span_obj, L_ruler_gdna_law=ruler_g),
-                per_locus=dict(locus=np.arange(n_loci), Y=Y_g, L_object=L_g_obj, L_perbase=L_g_pb, L_perbase_gdna_law=L_g_pb_g,
-                               P_g=P_g, probed_frac=pf_loc))
+                                    Y=Y_t, L=ruler),
+                per_locus=dict(locus=np.arange(n_loci), Y=Y_g, L=L_g, P_g=P_g, probed_frac=pf_loc))
+
+
+def _ratios(means: dict) -> str:
+    return "  ".join(
+        f"{a}/{b} {means[a] / means[b]:.3f}"
+        for a, b in (("spans", "isoforms"), ("gDNA", "isoforms"), ("gDNA", "spans"))
+        if np.isfinite(means[a]) and np.isfinite(means[b]) and means[b] > 0
+    )
 
 
 def print_scale(r: dict) -> None:
@@ -947,24 +872,20 @@ def print_scale(r: dict) -> None:
             f"   {name:<52}{s['n']:>7} {s['geomean'] * 1e3:>9.4f} {s['sd_log']:>7.3f} {s['med'] * 1e3:>9.4f} "
             f"{s['q10'] * 1e3:>9.4f} {s['q90'] * 1e3:>9.4f}"
         )
-    for fam, means in r["families"].items():
-        worst, pair = scale_verdict(means)
-        ratios = "  ".join(f"{a}/{b} {means[a] / means[b]:.3f}" for a, b in (("spans", "isoforms"), ("gDNA", "isoforms"), ("gDNA", "spans")) if np.isfinite(means[a]) and np.isfinite(means[b]) and means[b] > 0)
-        verdict = "ONE SCALE" if worst <= ONE_SCALE_TOL else f"NOT one scale ({worst:.1%} between {pair})"
-        print(f"   {fam}: {ratios}  →  {verdict}")
+    worst, pair = scale_verdict(r["means"])
+    verdict = "ONE SCALE" if worst <= ONE_SCALE_TOL else f"NOT one scale ({worst:.1%} between {pair})"
+    print(f"   class means: {_ratios(r['means'])}  →  {verdict}")
     print(f"   within-gene sd of log(L / Y), annotated multi-exon: {r['within_gene_sd']:.3f}   (tolerance {ONE_SCALE_TOL:.0%} on class means)")
-    if r.get("by_class"):
-        print("   per-base family WITHIN each probed class (the residual's attribution): class-mean L / Y ×10⁻³ and the pairwise ratios")
-        print(f"   {'probed class':<16}{'law':<10}{'n iso/span/loci':>17} {'isoforms':>9} {'spans':>9} {'gDNA':>9}  {'spans/iso':>9} {'gDNA/iso':>9} {'gDNA/spans':>10}")
-        for cname, d in r["by_class"].items():
-            for law, keys in (("RNA", ("isoforms", "spans", "gDNA")), ("gDNA", ("isoforms, gDNA law", "spans, gDNA law", "gDNA, gDNA law"))):
-                iso, sp, g = (d[k] for k in keys)
-                m = [x["geomean"] if x["n"] else float("nan") for x in (iso, sp, g)]
+    print("   WITHIN each probed class: class-mean L / Y ×10⁻³ and the pairwise ratios")
+    print(f"   {'probed class':<16}{'n iso/span/loci':>17} {'isoforms':>9} {'spans':>9} {'gDNA':>9}  {'spans/iso':>9} {'gDNA/iso':>9} {'gDNA/spans':>10}")
+    for cname, d in r["by_class"].items():
+        iso, sp, g = (d[k] for k in ("isoforms", "spans", "gDNA"))
+        m = [x["geomean"] if x["n"] else float("nan") for x in (iso, sp, g)]
 
-                def rat(a, b):
-                    return f"{a / b:9.3f}" if np.isfinite(a) and np.isfinite(b) and b > 0 else f"{'…':>9}"
+        def rat(a, b):
+            return f"{a / b:9.3f}" if np.isfinite(a) and np.isfinite(b) and b > 0 else f"{'…':>9}"
 
-                print(f"   {cname:<16}{law:<10}{iso['n']:>5}/{sp['n']:>5}/{g['n']:>5} {m[0] * 1e3:>9.4f} {m[1] * 1e3:>9.4f} {m[2] * 1e3:>9.4f}  {rat(m[1], m[0])} {rat(m[2], m[0])} {rat(m[2], m[1]):>10}")
+        print(f"   {cname:<16}{iso['n']:>5}/{sp['n']:>5}/{g['n']:>5} {m[0] * 1e3:>9.4f} {m[1] * 1e3:>9.4f} {m[2] * 1e3:>9.4f}  {rat(m[1], m[0])} {rat(m[2], m[0])} {rat(m[2], m[1]):>10}")
 
 
 # ── the self-test ────────────────────────────────────────────────────────────────────────────────
@@ -1127,16 +1048,17 @@ def self_test() -> int:
         plain = float(sum(pw * off * (2600 + int(wv) - 1) for wv, pw in zip(widths, pmf, strict=True)))
         check("an unprobed footprint's gDNA-space yield is its off-target plain length", abs(Yg[0] / plain - 1.0) < 1e-9)
         check("...and a probed footprint's yield exceeds it", Yg[1] > Yg[0] * 2.0)
-        # ⑫ the per-base family's locus length at efficiencies of 1 counts the SAME overlapping starts as the yield:
-        #    Σ_w f(w)(L + w − 1) on a block whose neighbours are long enough to hold every outside base
+        # ⑫ the shipped gDNA component's length (`assemble_priors`) at efficiency 1 counts the SAME overlapping
+        #    starts as the yield, Σ_w f(w)(L + w − 1), on a footprint whose outside neighbours hold every outside
+        #    base: each crossing fragment then starts in a neighbour, so its whole unit lands on the footprint's
+        #    objects
         from rigel.calibration.region_arrays import RegionArrays
         ra_t = RegionArrays.from_frame(index.regions_df, index.ref_name_to_id)
-        stub = type("Cal", (), {"gdna_capture_efficiency_region": np.ones(int(ra_t.n_regions))})()
-        # the taper indexes a pmf BY WIDTH (calibration's convention); the simulator's pair is positional
+        # the geometry indexes a pmf BY WIDTH (calibration's convention); the simulator's pair is positional
         by_width = np.zeros(int(max(widths)) + 1)
         by_width[np.asarray(widths, dtype=np.int64)] = np.asarray(pmf, dtype=np.float64)
-        Lpb = perbase_lengths(stub, ra_t, np.array([(0, 0, 11000, 13600)], dtype=np.int64), 1, by_width)
-        check("the per-base locus length at efficiency 1 is the yield's overlapping-start count", abs(Lpb[0] / (plain / off) - 1.0) < 1e-9)
+        Lfp = footprint_gdna_length(ra_t, (0, 11000, 13600), by_width)
+        check("the gDNA component's length at efficiency 1 is the yield's overlapping-start count", abs(Lfp / (plain / off) - 1.0) < 1e-9)
         # ⑬ the footprint's probed fraction is read off the sampler's own gDNA-space probe map: the unprobed gene's
         #    block reads 0, a block exactly on one probe part reads 1, a block half on it reads ½
         parts = sim.sampler._get_intervals("gdna", "chr1")

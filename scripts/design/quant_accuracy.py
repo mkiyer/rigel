@@ -87,9 +87,10 @@ DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 #:
 #: ``oracle_ruler`` hands the EM ``fl × factor``, the factor being the SIMULATOR's own capture factor per
 #: transcript (``ruler_vs_truth.load_truth``: the sampler's partition, the truth the reads were drawn with),
-#: anchored so the fully probed class reads 1 as the shipped ruler's does (``anchor_capture_factor``), and
-#: never clipped — the anchor is a median, so the fully probed class straddles 1. It varies one thing against
-#: ``base``: the priors stay as shipped. Under capture a panel's probes can make capture ISOFORM-specific (a
+#: anchored so the fully probed class reads 1 — the fully captured level the shipped efficiencies are read
+#: against (``anchor_capture_factor``) — and never clipped: the anchor is a median, so the fully probed class
+#: straddles 1. It varies one thing against ``base``: the priors, and the locus gDNA component's length with
+#: them, stay as shipped, so the anchor also sets the transcripts' scale beside that component. Under capture a panel's probes can make capture ISOFORM-specific (a
 #: probe across a junction captures only the isoforms holding it), and the split between isoforms is decided
 #: by the ratio of their lengths, so this arm prices the ruler end to end; capture-OFF, the truth is the plain
 #: length and the arm is the identity. It replaced an arm that swapped calibration's count arrays, which the
@@ -439,8 +440,8 @@ def truth_weights(truth: pd.DataFrame, index) -> np.ndarray:
 
 
 def anchor_capture_factor(factor, probed_frac, plain_length) -> np.ndarray:
-    """The simulator's capture factor in the shipped ruler's convention: divided by the median over the
-    fully probed class (probed fraction ≥ 0.9), every transcript when no such class exists (capture-OFF),
+    """The simulator's capture factor on the reference's scale — a fully captured object reads 1: divided by
+    the median over the fully probed class (probed fraction ≥ 0.9), every transcript when no such class exists (capture-OFF),
     and the identity where the factor is undefined (a transcript with no plain length). The anchor is the
     one ``ruler_vs_truth.score`` reads its errors against."""
     f = np.asarray(factor, dtype=np.float64)
