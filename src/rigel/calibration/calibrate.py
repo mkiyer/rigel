@@ -675,8 +675,8 @@ def _result(
 
     ``count_rna_spliced_boundary`` is the certified-RNA crossings per BOUNDARY — molecules that crossed
     contiguously having spliced elsewhere; `chain_boundary_deconv` adds the whole of it to ``rna_mass``
-    (``rna = (1−g)·unspliced + spliced``), and `assemble_priors` withholds it from the RNA prior count,
-    since a spliced fragment is guaranteed-RNA in the EM. There is no REGION twin, structurally: a
+    (``rna = (1−g)·unspliced + spliced``); the EM's prior reads only the gDNA mass
+    (`priors.assemble_priors`). There is no REGION twin, structurally: a
     region's contained population cannot hold a spliced molecule. ``count_rna_sj`` is the JUMPING
     population, exported verbatim — pure RNA by construction, nothing to deconvolve. The three
     ``mass_per_crossing`` are each their own population's incidence→fragment conversion, never applied

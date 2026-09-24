@@ -51,10 +51,12 @@ class ScoredFragments:
     locus_count_cols : np.ndarray
         uint8[n_units] — count column for the locus transcript.
     is_spliced : np.ndarray
-        bool[n_units] — True if this unit is a spliced fragment.
+        bool[n_units] — True if gDNA cannot explain this unit: certified RNA (the scorer's
+        ``gdna_can_explain``). An artifact or an implicit splice within the maximum fragment length is
+        False; a sequenced junction, or an implicit splice beyond that length, is True.
     gdna_log_liks : np.ndarray
         float32[n_units] — pre-computed gDNA log-likelihood per unit.
-        -inf for spliced units.
+        -inf where ``is_spliced``.
     frag_ids : np.ndarray
         int64[n_units] — buffer frag_id for each EM unit.
     frag_class : np.ndarray

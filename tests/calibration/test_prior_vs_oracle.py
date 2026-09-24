@@ -135,43 +135,43 @@ def test_the_noop_arm_is_byte_identical_and_the_lever_resolves_a_PICOFRAGMENT(me
     assert _moved(_nudged_prior(measured, "count_gdna_region", inside, 1e-12), base), (
         "1e-12 fragments at an in-locus region changed no prior — the lever cannot resolve an override"
     )
-    # The intergenic direction is asserted on the COUNT fields only: the locus projection dropping
-    #   intergenic regions from the counts is what this gate protects. ``gdna_eff_len`` is the
+    # The intergenic direction is asserted on the COUNT field only: the locus projection dropping
+    #   intergenic regions from the count is what this gate protects. ``gdna_eff_len`` is the
     #   contraction's business — it reads the result's reference density and the locus's own objects —
     #   and has its own gates in ``test_priors.py``; asserting all of ``PRIOR_FIELDS`` here conflated
     #   the two.
     nudged_out = _nudged_prior(measured, "count_gdna_region", outside, 1.0)
-    count_moved = any(
-        not np.array_equal(getattr(nudged_out, f), getattr(base, f))
-        for f in ("gdna_prior_count", "rna_prior_count")
-    )
+    count_moved = not np.array_equal(nudged_out.gdna_count, base.gdna_count)
     assert not count_moved, (
         "a whole fragment at an INTERGENIC region changed a locus COUNT prior — the locus "
         "projection is no longer dropping regions that overlap no locus"
     )
 
 
-def test_the_prior_reads_five_of_the_six_override_fields_and_provably_NOT_the_sj(measured):
-    """TRAPS: an-ablation-that-never-ran, applied to the override itself. Five of the six arrays ``override_masses``
-    writes must reach the prior — an override landing on a field nothing reads is an override that
-    never ran, and it would read as "calibration is already correct on that channel".
+def test_the_prior_reads_exactly_the_two_gDNA_mass_fields_and_provably_NONE_of_the_RNA_ones(
+    measured,
+):
+    """TRAPS: an-ablation-that-never-ran, applied to the override itself. The two gDNA arrays
+    ``override_masses`` writes must reach the prior — an override landing on a field nothing reads is an
+    override that never ran, and it would read as "calibration is already correct on that channel".
 
-    And the sixth must provably NOT reach it. ``count_rna_sj`` is certified RNA: it is exported for
-    QC and the prior deliberately does not read it, because the prior arbitrates only the unspliced
-    fragments and a locus whose RNA is fully spliced should have a near-zero ``rna_prior_count``.
-    That rule otherwise lives only in a docstring; this is what keeps it true.
+    And the four RNA arrays must provably NOT reach it. Calibration's RNA count does not enter the EM:
+    ``pipeline.em_pseudocounts`` reads the gDNA count against the EM's own count of the locus's
+    fragments, so the two stages never have to agree on which fragments are spliced. An RNA field that
+    moved the prior would be that count leaking back in. The rule otherwise lives only in a docstring;
+    this is what keeps it true. Each field is nudged at its largest IN-LOCUS site, so a field that does
+    not move the prior is not read, never merely nudged where the projection drops it.
     """
     base = measured.priors["P"]
     reads = {}
     for field in PV.OVERRIDE_FIELDS:
         site = _biggest_in_locus_site(measured, field)
         reads[field] = _moved(_nudged_prior(measured, field, site, 1.0), base)
-    assert reads["count_rna_sj"] is False, (
-        "the sj flux now reaches the prior — that is the owner ruling reversed, not a test "
-        "failure to widen"
+    assert {f for f, m in reads.items() if m} == {"count_gdna_region", "count_gdna_boundary"}, (
+        f"the override fields the prior reads are {sorted(f for f, m in reads.items() if m)} — an RNA "
+        "field reaching the prior is calibration's RNA count back in the EM, and a gDNA field missing "
+        "is an override that never ran"
     )
-    silent = [f for f, m in reads.items() if not m and f != "count_rna_sj"]
-    assert not silent, f"override fields the prior never reads: {silent}"
 
 
 def test_an_override_that_stops_writing_a_field_ABORTS_rather_than_scoring(measured, monkeypatch):
@@ -203,9 +203,9 @@ def test_the_oracle_lever_actually_MOVES_the_prior(measured):
     proves the lever reaches the whole array.
     """
     p, o = measured.priors["P"], measured.priors["O"]
-    differ = ~np.isclose(p.gdna_prior_count, o.gdna_prior_count, rtol=1e-9, atol=1e-9)
+    differ = ~np.isclose(p.gdna_count, o.gdna_count, rtol=1e-9, atol=1e-9)
     assert differ.sum() >= 2, f"the oracle lever moved {differ.sum()} loci — it barely fired"
-    assert o.gdna_prior_count.sum() > 0.0, "the oracle prior claims no gDNA on a contaminated toy"
+    assert o.gdna_count.sum() > 0.0, "the oracle prior claims no gDNA on a contaminated toy"
 
 
 # ── GATE 3: the two arms cannot be scored against a different locus partition ────────────────────
@@ -217,74 +217,14 @@ def test_scoring_against_a_DIFFERENT_locus_partition_raises(measured):
     numbers of loci. Index-aligning two such arrays would silently compare locus 7 of one run with
     locus 7 of another, which is not a small error.
     """
-    p = measured.priors["P"].gdna_prior_count
-    o = measured.priors["O"].gdna_prior_count
+    p = measured.priors["P"].gdna_count
+    o = measured.priors["O"].gdna_count
     PV.score_arm(p, o)  # the honest call
     with pytest.raises(ValueError, match="different locus partitions"):
         PV.score_arm(p, o[:-1])
 
 
-# ── GATE 4: an empty prior makes NO claim, and that is NaN and not zero ──────────────────────────
-
-
-def test_a_locus_with_no_prior_is_ABSENT_from_the_composition_not_a_confident_zero():
-    """A ``(0, 0)`` prior is "this locus says nothing", not "this locus is pure RNA". Flooring it to
-    ``phi = 0`` inflates the scored denominator with loci that have no answer to get wrong, and its
-    mirror (``phi = 1`` from a ``0/0`` guarded the other way) reads as a confident all-gDNA claim —
-    the exact shape that once seeded false gDNA into neighbouring exons.
-
-    The perturbation replaces the NaN with 0 and shows the scored COUNT moves, because that is the
-    place the damage is visible: the mass-weighted mean is blind to it (a zero-scale locus carries
-    zero weight), so a gate written on ``mwae_phi`` alone would pass with the bug in.
-    """
-    gdna = np.array([10.0, 0.0, 4.0])
-    rna = np.array([30.0, 0.0, 0.0])
-    phi, scale = PV.composition(gdna, rna)
-    assert np.isnan(phi[1]) and scale[1] == 0.0
-    assert phi[0] == pytest.approx(0.25) and phi[2] == pytest.approx(1.0)
-
-    arm = _fake_priors(gdna, rna)
-    ref = _fake_priors(np.array([12.0, 0.0, 3.0]), np.array([28.0, 0.0, 1.0]))
-    honest = PV.score_composition(arm, ref)
-    floored = PV.score_composition(
-        _fake_priors(gdna, np.where((gdna + rna) == 0, 1.0, rna)),
-        _fake_priors(
-            ref.gdna_prior_count,
-            np.where((ref.gdna_prior_count + ref.rna_prior_count) == 0, 1.0, ref.rna_prior_count),
-        ),
-    )
-    assert honest["n_scored"] == 2
-    assert floored["n_scored"] == 3, "flooring an empty prior must be visible in the scored COUNT"
-
-
-# ── GATE 5: phi and scale are SEPARATE axes, and the weight is the REFERENCE's ───────────────────
-
-
-def test_rescaling_the_arm_moves_the_SCALE_and_leaves_phi_UNTOUCHED():
-    """A prior can be right about the RATIO and wrong about the STRENGTH, or the reverse, and one
-    number cannot say which. This gate proves the two reported axes are actually independent:
-    multiplying both of the arm's counts by ``k`` leaves ``phi`` exactly where it was and must move
-    ``scale_log10_ratio`` by exactly ``log10(k)``.
-
-    It also pins the WEIGHT to the reference. TRAPS: honesty-metrics-reward-ignorance: if ``mwae_phi`` were weighted by
-    the ARM's own scale, a mechanism could improve it by shrinking its prior to nothing exactly at the
-    loci it gets wrong — an accuracy metric that rewards saying less. Here ``k = 1e-6`` is that
-    shrinkage taken to its limit, and ``mwae_phi`` must not move at all.
-    """
-    gdna = np.array([10.0, 1.0, 40.0])
-    rna = np.array([30.0, 99.0, 10.0])
-    ref = _fake_priors(np.array([20.0, 5.0, 10.0]), np.array([20.0, 95.0, 40.0]))
-    base = PV.score_composition(_fake_priors(gdna, rna), ref)
-    for k in (1e-6, 1e3):
-        scaled = PV.score_composition(_fake_priors(gdna * k, rna * k), ref)
-        assert scaled["mwae_phi"] == pytest.approx(base["mwae_phi"], rel=1e-12)
-        assert scaled["weight"] == pytest.approx(base["weight"], rel=1e-12)
-        assert scaled["scale_log10_ratio"] == pytest.approx(
-            base["scale_log10_ratio"] + np.log10(k), abs=1e-12
-        )
-
-
-# ── GATE 6: gdna_eff_len is weighted like its consumer ───────────────────────────────────────────
+# ── GATE 4: gdna_eff_len is weighted like its consumer ───────────────────────────────────────────
 
 
 def test_eff_len_error_ignores_loci_with_no_gDNA_and_notices_loci_with_some():
@@ -295,66 +235,49 @@ def test_eff_len_error_ignores_loci_with_no_gDNA_and_notices_loci_with_some():
     The perturbation is two-sided, which is the point: corrupting the eff-len where the reference puts
     no gDNA must change nothing, and corrupting it where the reference puts a lot must change it.
     """
-    ref = _fake_priors(
-        np.array([0.0, 1000.0]), np.array([50.0, 50.0]), eff_len=np.array([500.0, 500.0])
-    )
-    base = PV.score_eff_len(
-        _fake_priors(np.zeros(2), np.zeros(2), eff_len=np.array([500.0, 500.0])), ref
-    )
-    inert = PV.score_eff_len(
-        _fake_priors(np.zeros(2), np.zeros(2), eff_len=np.array([5.0, 500.0])), ref
-    )
-    live = PV.score_eff_len(
-        _fake_priors(np.zeros(2), np.zeros(2), eff_len=np.array([500.0, 5.0])), ref
-    )
+    ref = _fake_priors(np.array([0.0, 1000.0]), eff_len=np.array([500.0, 500.0]))
+    base = PV.score_eff_len(_fake_priors(np.zeros(2), eff_len=np.array([500.0, 500.0])), ref)
+    inert = PV.score_eff_len(_fake_priors(np.zeros(2), eff_len=np.array([5.0, 500.0])), ref)
+    live = PV.score_eff_len(_fake_priors(np.zeros(2), eff_len=np.array([500.0, 5.0])), ref)
     assert base["w_rel_err"] == pytest.approx(0.0)
     assert inert["w_rel_err"] == pytest.approx(0.0), "a zero-gDNA locus must carry zero weight"
     assert live["w_rel_err"] > 0.9, "a locus carrying all the gDNA must dominate the weighted error"
 
 
-# ── GATE 7: F conserves every fragment, and the residue is named ─────────────────────────────────
+# ── GATE 5: F conserves every fragment, and the residue is named ─────────────────────────────────
 
 
 def test_the_fragment_truth_projection_LOSES_NOTHING_it_does_not_report(measured):
     """``_project_regions_to_loci`` DROPS every region overlapping no locus — that is correct (an
     intergenic fragment belongs to no prior) and it is also the one place F could quietly lose mass
     and read as a smaller assembler error. So the identity ``Σ F + dropped == Σ region_start_count``
-    must hold EXACTLY, per origin, and ``dropped`` must be reported rather than absorbed.
+    must hold EXACTLY on the gDNA partition, and ``dropped`` must be reported rather than absorbed.
 
     The perturbation removes one locus from the projection and watches the residue absorb exactly
     that locus's count — proving the identity is measuring the projection and not just restating a sum.
     """
-    for origin, arm, drop in (
-        ("gdna", measured.f_gdna, measured.f_dropped["gdna"]),
-        ("rna", measured.f_rna_upper, measured.f_dropped["rna"]),
-    ):
-        if origin == "gdna":
-            total = float(np.asarray(measured.oracle.parts["gdna"].region_start_count).sum())
-        else:
-            total = float(
-                np.asarray(measured.oracle.parts["mrna"].region_start_count).sum()
-                + np.asarray(measured.oracle.parts["nrna"].region_start_count).sum()
-            )
-        assert arm.sum() + drop == pytest.approx(total, rel=1e-9), origin
-        assert drop >= 0.0, f"{origin}: a NEGATIVE residue means the projection invented fragments"
+    total = float(np.asarray(measured.oracle.parts["gdna"].region_start_count).sum())
+    drop = measured.f_dropped
+    assert measured.f_gdna.sum() + drop == pytest.approx(total, rel=1e-9), "gdna"
+    assert drop >= 0.0, "gdna: a NEGATIVE residue means the projection invented fragments"
 
     short = measured.multi_loci[:-1]
-    g2, r2, drop2 = PV.fragment_truth(measured.oracle, measured.region_arrays, short)
+    g2, drop2 = PV.fragment_truth(measured.oracle, measured.region_arrays, short)
     assert g2.shape[0] == len(short)
-    assert drop2["gdna"] >= measured.f_dropped["gdna"], (
+    assert drop2 >= measured.f_dropped, (
         "removing a locus did not increase the dropped residue — the identity is not measuring the "
         "projection"
     )
 
 
 def test_the_gdna_partition_carries_NO_spliced_deposit_so_F_gdna_needs_no_subtraction(measured):
-    """This is why F is EXACT on the gDNA arm and only a bound on the RNA arm, and it is physics
-    rather than a convention: gDNA does not splice, so there is no spliced sub-population inside
-    ``region_start_count`` for the gdna partition to withhold.
+    """This is why F is EXACT on gDNA, and it is physics rather than a convention: gDNA does not
+    splice, so there is no spliced sub-population inside ``region_start_count`` for the gdna
+    partition to withhold.
 
     The perturbation writes a single spliced deposit into the gdna partition and asserts
     ``OracleTruth`` refuses the whole oracle — because if it did not, F_gdna would silently become a
-    bound too and the instrument's strongest claim would be false.
+    bound and the instrument's strongest claim would be false.
     """
     from _oracle import OracleTruth
 
@@ -369,14 +292,14 @@ def test_the_gdna_partition_carries_NO_spliced_deposit_so_F_gdna_needs_no_subtra
         OracleTruth.from_parts(measured.oracle.full, {**measured.oracle.parts, "gdna": fake})
 
 
-# ── GATE 8: the ZERO-gDNA control ────────────────────────────────────────────────────────────────
+# ── GATE 6: the ZERO-gDNA control ────────────────────────────────────────────────────────────────
 
 
 def test_at_zero_gDNA_the_ORACLE_prior_is_identically_zero_and_the_shipped_one_is_scored_against_it(
     measured_zero,
 ):
     """THE OWNER-REQUIRED ZERO CONTROL. With no gDNA in the library the oracle's gDNA mass is
-    exactly 0 at every object, so ``O.gdna_prior_count`` must be exactly 0 at every locus — not small,
+    exactly 0 at every object, so ``O.gdna_count`` must be exactly 0 at every locus — not small,
     not floored, zero. Anything the SHIPPED prior puts there is a false positive with nothing to
     cancel it, which is the only reading of that arm that is unambiguous.
 
@@ -385,11 +308,11 @@ def test_at_zero_gDNA_the_ORACLE_prior_is_identically_zero_and_the_shipped_one_i
     only ever sees zeros cannot tell "correct" from "the array is not wired".
     """
     o = measured_zero.priors["O"]
-    assert float(np.asarray(o.gdna_prior_count).sum()) == 0.0, (
-        "the oracle prior claims gDNA in a library that has none"
+    assert measured_zero.n_loci > 0, (
+        "the zero-gDNA toy has no loci — the zero below is a sum over nothing"
     )
-    assert float(np.asarray(o.rna_prior_count).sum()) > 0.0, (
-        "the oracle prior claims no RNA either — this arm is not wired, not correct"
+    assert float(np.asarray(o.gdna_count).sum()) == 0.0, (
+        "the oracle prior claims gDNA in a library that has none"
     )
 
     cal = _rebuild_calibration(measured_zero)
@@ -403,13 +326,13 @@ def test_at_zero_gDNA_the_ORACLE_prior_is_identically_zero_and_the_shipped_one_i
         measured_zero.region_arrays,
         measured_zero.multi_loci,
     )
-    assert float(np.asarray(with_one.gdna_prior_count).sum()) > 0.0, (
+    assert float(np.asarray(with_one.gdna_count).sum()) > 0.0, (
         "one fabricated gDNA fragment produced a prior of exactly zero — the zero above is the "
         "array being dead, not the library being clean"
     )
 
 
-# ── GATE 9: a capture that never happened is an error, not a zero ────────────────────────────────
+# ── GATE 7: a capture that never happened is an error, not a zero ────────────────────────────────
 
 
 def test_a_run_that_never_reaches_assemble_priors_RAISES(measured, monkeypatch):
@@ -422,7 +345,7 @@ def test_a_run_that_never_reaches_assemble_priors_RAISES(measured, monkeypatch):
         PV.capture_priors(None, None, None, None, None, None, None, PipelineConfig())
 
 
-# ── GATE 10: the aggregate re-derives its rates, never averages them ─────────────────────────────
+# ── GATE 8: the aggregate re-derives its rates, never averages them ──────────────────────────────
 
 
 def test_the_stratum_aggregate_is_a_RATIO_OF_SUMS_not_a_mean_of_ratios():
@@ -461,7 +384,7 @@ def test_the_stratum_aggregate_is_a_RATIO_OF_SUMS_not_a_mean_of_ratios():
     assert agg.over_call == pytest.approx(100_000.0) and agg.under_call == pytest.approx(900.0)
 
 
-# ── GATE 11: the directional split is reported and reconciles ────────────────────────────────────
+# ── GATE 9: the directional split is reported and reconciles ─────────────────────────────────────
 
 
 def test_over_and_under_call_are_reported_separately_and_reconcile(measured):
@@ -471,14 +394,13 @@ def test_over_and_under_call_are_reported_separately_and_reconcile(measured):
 
         over − under == net        over + under == abs
     """
-    for arm in ("gdna_prior_count", "rna_prior_count"):
-        s = PV.score_arm(getattr(measured.priors["P"], arm), getattr(measured.priors["O"], arm))
-        assert s.over_call - s.under_call == pytest.approx(s.net_err, rel=1e-9, abs=1e-6)
-        assert s.over_call + s.under_call == pytest.approx(s.abs_err, rel=1e-9, abs=1e-6)
-        assert s.over_call >= 0.0 and s.under_call >= 0.0
+    s = PV.score_arm(measured.priors["P"].gdna_count, measured.priors["O"].gdna_count)
+    assert s.over_call - s.under_call == pytest.approx(s.net_err, rel=1e-9, abs=1e-6)
+    assert s.over_call + s.under_call == pytest.approx(s.abs_err, rel=1e-9, abs=1e-6)
+    assert s.over_call >= 0.0 and s.under_call >= 0.0
 
 
-# ── GATE 12: the frag_id join ALIGNS, and a one-fragment slip is loud ────────────────────────────
+# ── GATE 10: the frag_id join ALIGNS, and a one-fragment slip is loud ────────────────────────────
 
 
 def test_the_frag_id_join_is_gated_by_a_COUNT_IDENTITY_and_it_REFUSES_a_walk_that_slipped(toy):
@@ -557,7 +479,7 @@ def test_the_SPLICED_gDNA_diagnostic_fires_on_a_BLOCK_SIZED_slip_and_is_blind_to
     )
 
 
-# ── GATE 13: a filtered record does NOT advance frag_id, and the config decides which ─────────────
+# ── GATE 11: a filtered record does NOT advance frag_id, and the config decides which ─────────────
 
 
 def _rewrite_bam(src: Path, dst: Path, *, insert_after: int, flag: int):
@@ -650,7 +572,7 @@ def test_an_UNPAIRED_record_makes_the_walk_REFUSE_rather_than_count_it(toy, tmp_
         frag_id_origins(str(single), PipelineConfig().scan)
 
 
-# ── GATE 14: every unit is counted ONCE and the residue is named ──────────────────────────────────
+# ── GATE 12: every unit is counted ONCE and the residue is named ──────────────────────────────────
 
 
 def test_Fo_counts_every_unit_ONCE_and_the_non_candidate_residue_RECONCILES(measured):
@@ -692,40 +614,41 @@ def test_Fo_counts_every_unit_ONCE_and_the_non_candidate_residue_RECONCILES(meas
     assert (short.gdna.sum() + short.rna_all.sum()) == total - lost
 
 
-# ── GATE 15: the RNA arm's two populations are the SPLICE BIT and nothing else ────────────────────
+# ── GATE 13: the splice bit reaches the join's DIAGNOSTIC and never Fo ───────────────────────────
 
 
-def test_the_RNA_arm_splits_on_is_spliced_and_the_two_populations_RECONCILE(measured):
-    """``rna_prior_count`` withholds spliced mass, so ``Fo`` reports two RNA arrays: the assembler's
-    target (unspliced units) and the EM's own RNA evidence (all units). They must differ by exactly
-    the spliced RNA units and by nothing else.
+def test_the_splice_bit_moves_the_join_DIAGNOSTIC_and_never_Fo(measured):
+    """``gdna_count``'s target needs no splice bit: a spliced unit cannot be gDNA and gDNA cannot
+    splice, so ``Fo.gdna`` withholds nothing, and ``rna_all`` is every RNA unit by definition. The
+    bit's one consumer is the join's secondary diagnostic (``spliced_gdna_units``). An Fo that read it
+    would be withholding units from the target — the retired unspliced-RNA target's rule, surviving
+    where it has no business.
 
-    The perturbation replaces ``is_spliced`` with all-False and then all-True: the first must collapse
-    the two arrays onto each other element-wise, the second must empty the unspliced one. A split driven
-    by anything other than that bit survives one of the two.
+    The perturbation replaces ``is_spliced`` with all-False and then all-True: both Fo arrays must come
+    back byte-identical each time, and the diagnostic must move both ways — to zero, and to every
+    unit of each origin — so the bit is shown to be READ by the diagnostic and not merely a dead
+    argument that Fo ignores.
     """
     o = measured.overlap
-    assert np.all(o.rna_unspliced <= o.rna_all)
-    assert o.rna_all.sum() - o.rna_unspliced.sum() == pytest.approx(
-        o.diag["spliced_rna_units"] - 0.0, rel=1e-12
-    ), "the two RNA populations do not differ by the spliced unit count"
-
-    args = (
-        measured.multi_loci,
-        PV.unit_origins(measured.units["frag_ids"], measured.frag_origin),
-    )
+    origin = PV.unit_origins(measured.units["frag_ids"], measured.frag_origin)
     n = measured.units["n_units"]
-    none_spliced = PV.overlap_truth(*args, np.zeros(n, bool), n, o.diag["walk"])
-    assert np.array_equal(none_spliced.rna_unspliced, none_spliced.rna_all)
-    assert none_spliced.diag["spliced_rna_units"] == 0
-    all_spliced = PV.overlap_truth(*args, np.ones(n, bool), n, o.diag["walk"])
-    assert all_spliced.rna_unspliced.sum() == 0.0
-    assert np.array_equal(all_spliced.rna_all, o.rna_all), (
-        "the splice bit moved the ALL-RNA array — it must only split it"
+    none_spliced = PV.overlap_truth(
+        measured.multi_loci, origin, np.zeros(n, bool), n, o.diag["walk"]
     )
+    all_spliced = PV.overlap_truth(measured.multi_loci, origin, np.ones(n, bool), n, o.diag["walk"])
+    for got in (none_spliced, all_spliced):
+        assert np.array_equal(got.gdna, o.gdna), "the splice bit moved Fo's gDNA target"
+        assert np.array_equal(got.rna_all, o.rna_all), (
+            "the splice bit moved the ALL-RNA array — it must not touch it"
+        )
+    assert none_spliced.diag["spliced_rna_units"] == 0
+    assert none_spliced.diag["spliced_gdna_units"] == 0
+    is_gdna = origin == PV.ORIGIN_CODE["gdna"]
+    assert all_spliced.diag["spliced_gdna_units"] == int(is_gdna.sum()) > 0
+    assert all_spliced.diag["spliced_rna_units"] == int((~is_gdna).sum()) > 0
 
 
-# ── GATE 16: the join ABORTS on a frag_id the walk never issued ──────────────────────────────────
+# ── GATE 14: the join ABORTS on a frag_id the walk never issued ──────────────────────────────────
 
 
 def test_a_unit_frag_id_the_WALK_NEVER_ISSUED_aborts_instead_of_indexing(measured):
@@ -746,7 +669,7 @@ def test_a_unit_frag_id_the_WALK_NEVER_ISSUED_aborts_instead_of_indexing(measure
     PV.unit_origins(measured.units["frag_ids"], measured.frag_origin)
 
 
-# ── GATE 17: Fo follows the SHIPPED unit→locus map, and the prior does NOT ───────────────────────
+# ── GATE 15: Fo follows the SHIPPED unit→locus map, and the prior does NOT ───────────────────────
 
 
 def test_Fo_is_keyed_by_the_SHIPPED_unit_indices_and_a_SWAP_moves_the_counts(measured):
@@ -779,7 +702,7 @@ def test_assemble_priors_is_BLIND_to_unit_indices_so_Fo_is_not_circular(measured
     ``assemble_priors``. If that function read a unit count, "the assembler reproduces the EM's own
     count" would be a tautology rather than a result.
 
-    Behavioural, not a source grep: every locus's ``unit_indices`` is emptied and the three prior
+    Behavioural, not a source grep: every locus's ``unit_indices`` is emptied and the two prior
     arrays must come back byte-identical. And the same perturbation is shown to move ``Fo`` to
     nothing, so the invariance is the assembler's and not the perturbation's failure to bite.
     """
@@ -845,14 +768,13 @@ def _biggest_in_locus_site(measured, field):
     return site
 
 
-def _fake_priors(gdna, rna, eff_len=None):
+def _fake_priors(gdna, eff_len=None):
     """A ``LocusPriors`` with hand-chosen arrays — the scoring functions take the real type."""
     from rigel.calibration.priors import LocusPriors
 
     g = np.asarray(gdna, np.float64)
     return LocusPriors(
-        gdna_prior_count=g,
-        rna_prior_count=np.asarray(rna, np.float64),
+        gdna_count=g,
         gdna_eff_len=np.ones_like(g) if eff_len is None else np.asarray(eff_len, np.float64),
     )
 

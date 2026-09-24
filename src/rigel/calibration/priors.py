@@ -1,12 +1,15 @@
 """assemble_priors — the bridge from CalibrationResult to the per-locus EM prior.
 
-Turns the calibration's per-object deconvolved mass and geometric length into the two per-locus
-Dirichlet scalars the locus EM consumes — ``rna_prior_count`` and ``gdna_prior_count`` — plus the
-per-locus gDNA-component effective length: gDNA's conserved shares of the locus's objects at their
-capture efficiencies (``Σ S_r c_r + Σ M_e c_e``).
+Turns the calibration's per-object deconvolved mass and geometric length into the two per-locus numbers
+the locus EM takes from calibration: ``gdna_count``, calibration's count of the locus's gDNA fragments,
+and the gDNA component's effective length, gDNA's conserved shares of the locus's objects at their capture
+efficiencies (``Σ S_r c_r + Σ M_e c_e``).
 
-The prior's only job is to split each locus's unspliced fragments between gDNA and RNA; it does not
-attribute RNA mass to individual transcripts, which is what the EM is for.
+The EM's two pseudocounts are built from ``gdna_count`` and the EM's OWN counts of the locus's fragments
+(``pipeline.em_pseudocounts``): calibration says how much of the locus is gDNA, the EM says how many
+fragments the locus holds. Calibration's RNA count does not enter, so the two stages never have to agree
+on which fragments are spliced. The prior does not attribute RNA mass to individual transcripts, which is
+what the EM is for.
 
 Layer: LAYER 7. It reads a finished `CalibrationResult` and never re-solves anything.
 """
@@ -37,10 +40,9 @@ _RNA_SIGNATURE_BITS = BIT_EXON_POS | BIT_EXON_NEG | BIT_INTRON_POS | BIT_INTRON_
 
 @dataclass(frozen=True, slots=True)
 class LocusPriors:
-    """Per-locus EM prior scalars (float64[n_loci], indexed by ``multi_locus_id``)."""
+    """Per-locus EM prior inputs (float64[n_loci], indexed by ``multi_locus_id``)."""
 
-    gdna_prior_count: np.ndarray  # gDNA-component Dirichlet pseudocount
-    rna_prior_count: np.ndarray  # RNA-group Dirichlet pseudocount (the EM splits it by evidence)
+    gdna_count: np.ndarray  # calibration's count of the locus's gDNA fragments
     gdna_eff_len: np.ndarray  # capture-contracted effective length of the gDNA component
 
 
@@ -261,15 +263,14 @@ def assemble_priors(
     region_arrays: "RegionArrays",
     multi_loci: "list[MultiLocus]",
 ) -> LocusPriors:
-    """Build the per-locus EM prior from the calibration result.
+    """Build the per-locus EM prior inputs from the calibration result.
 
     A REGION OWNS THE FRAGMENTS CONTAINED IN IT; A BOUNDARY OWNS THE FRAGMENTS THAT CROSS IT; NOTHING
     IS RE-ATTRIBUTED. A locus collects both kinds of object — its regions by genomic
     overlap (:func:`_region_locus_shares`) and its boundaries by touching those regions
     (:func:`_boundary_locus_shares`)::
 
-        {gdna,rna}_prior_count = Σ_regions share(r,L)·mass_c_region[r]
-                               + Σ_boundaries share(e,L)·mass_c_boundary[e]·q[e]
+        gdna_count = Σ_regions share(r,L)·gdna_mass_region[r] + Σ_boundaries share(e,L)·gdna_mass_boundary[e]·q[e]
 
         gdna_eff_len = Σ_regions share·S_r·c̃_r  +  Σ_boundaries share·M_e·c̃_e
 
@@ -278,10 +279,9 @@ def assemble_priors(
     region's contained support and ``M_e`` gDNA's conserved share at a boundary
     (``gdna_boundary_conserved_len``).
 
-    THE PRIOR IS A CONSERVED FRAGMENT COUNT. The EM adds these scalars straight to its own soft
-    counts (``G = n_gdna + a_g``, ``em_solver.cpp:apply_grouped_prior_update``), where ``n_gdna`` counts
-    the gDNA fragments that are candidates in this multi-locus — each ONCE, since a multi-locus is a
-    connected component of transcripts linked by shared fragments. The region term is already such a count
+    THE COUNT IS A CONSERVED FRAGMENT COUNT. The EM compares it with its own count of the locus's fragments
+    (``pipeline.em_pseudocounts``), which holds each fragment ONCE, since a multi-locus is a connected
+    component of transcripts linked by shared fragments. The region term is already such a count
     (a contained fragment deposits on exactly one region). Only the CROSSING term is converted, by one
     multiply against ``q = boundary_mass_per_crossing`` — the accumulator's own ``mass / count`` at that
     boundary, which undoes the ``+1``-per-crossed-boundary inflation. ``q`` is a geometry,
@@ -292,7 +292,7 @@ def assemble_priors(
     that a *first-base* count of the locus's fragments is NOT this quantity — it drops exactly the
     straddlers — so an oracle built that way reads a one-way excess here that is semantics, not error.
 
-    THE gDNA EFFECTIVE LENGTH COUNTS WHAT THE COUNT COUNTS. The prior's count is the calibration's
+    THE gDNA EFFECTIVE LENGTH COUNTS WHAT THE COUNT COUNTS. The count is the calibration's
     gDNA mass on the locus's regions and on its boundaries, so the length the EM divides that count by is
     gDNA's share of those same objects at their own efficiencies: every region's contained support ``S_r``
     at ``c̃_r`` and every boundary's CONSERVED SHARE ``M_e`` at ``c̃_e``. The deposit rule counts a crossing
@@ -315,11 +315,12 @@ def assemble_priors(
     NOTHING. Under capture a depleted object contributes its share at its efficiency and the length
     contracts toward the probed footprint.
 
-    The RNA prior is the UNSPLICED RNA mass only. A spliced fragment has no gDNA candidate in the
-    EM (gDNA does not splice), so it is assigned directly and counting it here would inflate the RNA side
-    of a split that arbitrates only unspliced fragments. ``count_rna_boundary`` is spliced-inclusive, so
-    ``count_rna_spliced_boundary`` is subtracted. ⛔ The SJ flux is deliberately NOT added, for the same
-    reason — a locus whose RNA is fully spliced SHOULD get a near-zero ``rna_prior_count``.
+    ⛔ NO RNA COUNT. The EM's gDNA share is gDNA's share of EVERY fragment in the locus, spliced ones
+    included: the deterministic spliced fragments skip the E-step but are added to every M-step, and a
+    transcript's length counts its spliced start positions. Calibration's RNA count is its UNSPLICED
+    RNA, which states the unspliced fragments' split as the whole locus's and leans the EM toward gDNA in
+    proportion to the spliced share (``tests/test_em_pseudocounts.py``). The RNA side is therefore the EM's
+    own count less this one, formed where the EM's count exists.
 
     No floor and no shrinkage: the efficiencies are posterior means under the population landscape, so a
     locus with little evidence reads the population's own level, never a fabricated 0 and never the
@@ -343,22 +344,13 @@ def assemble_priors(
     def by_boundary(values):
         return _sum_by_locus(e_idx, e_lid, e_w, values, n_loci)
 
-    # THE TWO PSEUDOCOUNTS. The region term is already a fragment count; only the crossing term is
-    # converted, by the accumulator's own conserved mass-per-crossing at that boundary.
+    # THE gDNA COUNT. The region term is already a fragment count; only the crossing term is converted, by the
+    # accumulator's own conserved mass-per-crossing at that boundary.
     q = np.asarray(calibration.boundary_mass_per_crossing, dtype=np.float64)
     gdna_boundary = np.asarray(calibration.count_gdna_boundary, dtype=np.float64) * q
-    rna_boundary = (
-        np.maximum(
-            np.asarray(calibration.count_rna_boundary, dtype=np.float64)
-            - np.asarray(calibration.count_rna_spliced_boundary, dtype=np.float64),
-            0.0,
-        )
-        * q
-    )
     gdna_locus = np.maximum(
         by_region(calibration.count_gdna_region) + by_boundary(gdna_boundary), 0.0
     )
-    rna_locus = np.maximum(by_region(calibration.count_rna_region) + by_boundary(rna_boundary), 0.0)
 
     # THE gDNA EFFECTIVE LENGTH: gDNA's conserved shares of the count's own objects at their efficiencies.
     region_s = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 0.0)
@@ -371,8 +363,7 @@ def assemble_priors(
     eff_len = by_region(region_s * c_region) + by_boundary(boundary_m * c_boundary)
 
     return LocusPriors(
-        gdna_prior_count=gdna_locus,
-        rna_prior_count=rna_locus,
+        gdna_count=gdna_locus,
         # ≤ span by construction (every efficiency ≤ 1); the minimum absorbs an ulp. No floor: a locus
         # with no start position has a yield of 0, and the EM reads a zero yield as "cannot emit".
         gdna_eff_len=np.minimum(eff_len, span),

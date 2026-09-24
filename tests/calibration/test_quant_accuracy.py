@@ -103,8 +103,8 @@ def toy_oracle(toy, tmp_path_factory):
     )
 
 
-def _quant(toy, arm, oracle, seed=QA.DEFAULT_EM_SEED):
-    """One full ``run_pipeline`` under one arm; returns ``(counts_df, fired)``.
+def _run(toy, arm, oracle, seed=QA.DEFAULT_EM_SEED):
+    """One full ``run_pipeline`` under one arm; returns ``(PipelineResult, fired)``.
 
     The seed is pinned, and that is not tidiness. ``EMConfig.seed`` ships as ``None`` with
     ``assignment_mode="sample"``, so the EM's hard assignment is an unseeded categorical draw and
@@ -121,6 +121,12 @@ def _quant(toy, arm, oracle, seed=QA.DEFAULT_EM_SEED):
         result = run_pipeline(str(toy.bam_path), toy.index, cfg)
     finally:
         restore()
+    return result, fired
+
+
+def _quant(toy, arm, oracle, seed=QA.DEFAULT_EM_SEED):
+    """:func:`_run`'s transcript table; returns ``(counts_df, fired)``."""
+    result, fired = _run(toy, arm, oracle, seed)
     return result.estimator.get_counts_df(toy.index), fired
 
 
@@ -135,12 +141,14 @@ def test_the_noop_arm_reproduces_BASE_byte_identically_through_the_whole_pipelin
 
     ``noop`` is not an early return: it builds O in full and discards it, so this gate covers the
     whole wrapper path and not an ``if`` (TRAPS: could-the-arm-have-fired). The perturbation makes
-    it take one field and asserts the result stops matching, proving the comparison could have
-    failed.
+    it take one field and asserts the EM's gDNA count moves and the result stops matching, proving
+    the comparison could have failed.
     """
-    base, base_fired = _quant(toy, "base", None)
-    noop, noop_fired = _quant(toy, "noop", toy_oracle)
+    base_result, base_fired = _run(toy, "base", None)
+    noop_result, noop_fired = _run(toy, "noop", toy_oracle)
     assert base_fired["n"] >= 1 and noop_fired["n"] >= 1
+    base = base_result.estimator.get_counts_df(toy.index)
+    noop = noop_result.estimator.get_counts_df(toy.index)
 
     # Two standards, and they are the numeric convention. Every count column is integer-derived and
     # must match exactly, because integer addition is associative. `posterior_mean` is float-derived
@@ -149,25 +157,41 @@ def test_the_noop_arm_reproduces_BASE_byte_identically_through_the_whole_pipelin
     #
     # The tolerance is derived and gated, not chosen: it sits ~6 orders above that spread (headroom
     # for a library far deeper than this toy, since re-association scales with the number of
-    # additions) and ~9 orders below the injection it must catch — and the perturbation arm below
-    # proves it is still tight enough, because taking one oracle field must break the comparison.
+    # additions) and ~6 orders below the injection it must catch (taking the oracle's gDNA count
+    # moves `posterior_mean` by ~1e-3 relative here) — and the perturbation arm below proves it is
+    # still tight enough, because taking one oracle field must break the comparison.
     # The tool is not bit-reproducible, so tests validate within a tolerance rather than on bits.
     exact = [c for c in base.columns if c != "posterior_mean"]
-    pd.testing.assert_frame_equal(base[exact], noop[exact], check_exact=True)
+
+    def compare(other):
+        pd.testing.assert_frame_equal(base[exact], other[exact], check_exact=True)
+        pd.testing.assert_series_equal(
+            base["posterior_mean"], other["posterior_mean"], check_exact=False, rtol=1e-9, atol=0.0
+        )
+
+    compare(noop)
+    # The EM's gDNA count per locus, the component the injected field names: integer-derived, so exact.
+    base_gdna = base_result.estimator.get_loci_df(toy.index)["gdna"]
     pd.testing.assert_series_equal(
-        base["posterior_mean"], noop["posterior_mean"], check_exact=False, rtol=1e-9, atol=0.0
+        base_gdna, noop_result.estimator.get_loci_df(toy.index)["gdna"], check_exact=True
     )
 
     saved = QA._ARM_FIELDS["noop"]
     try:
-        QA._ARM_FIELDS["noop"] = ("gdna_prior_count",)
-        perturbed, _ = _quant(toy, "noop", toy_oracle)
+        QA._ARM_FIELDS["noop"] = ("gdna_count",)
+        perturbed_result, _ = _run(toy, "noop", toy_oracle)
     finally:
         QA._ARM_FIELDS["noop"] = saved
-    assert not perturbed["count"].equals(base["count"]), (
-        "taking the oracle's gDNA prior changed no transcript count on a contaminated toy — the "
+    # The witness is the EM's gDNA count, not the transcript `count` column. On this toy the mass the
+    # oracle's gDNA count moves lands between gDNA and nascent RNA (the loci table's `gdna` moves by 7
+    # and 9 fragments on two of the three loci); the annotated transcripts move by under one fragment
+    # (fractional: t1 +0.95), which one seeded draw over five transcripts need not flip.
+    assert not perturbed_result.estimator.get_loci_df(toy.index)["gdna"].equals(base_gdna), (
+        "taking the oracle's gDNA count changed no locus's gDNA count on a contaminated toy — the "
         "injection does not reach the EM and every ceiling this script reports would be zero"
     )
+    with pytest.raises(AssertionError):
+        compare(perturbed_result.estimator.get_counts_df(toy.index))
 
 
 def test_the_UNSEEDED_shipped_config_is_not_reproducible_and_that_is_why_the_seed_is_pinned(toy):
@@ -226,20 +250,21 @@ def test_an_injection_that_never_fires_RAISES_rather_than_reporting_no_effect(
 # ── GATE 2: each single-array arm replaces exactly its own field ─────────────────────────────────
 
 
-def test_each_oracle_arm_replaces_ITS_field_and_leaves_the_other_two_shipped(toy, toy_oracle):
-    """The three single-array arms exist to say which of the prior's three numbers carries the
+def test_each_oracle_arm_replaces_ITS_field_and_leaves_the_other_shipped(toy, toy_oracle):
+    """The two single-array arms exist to say which of the prior's two numbers carries the
     value, and that only works if each one is surgical. This drives the wrapper directly with two
     recognisably different priors and checks, field by field, that exactly the named ones moved.
 
     The perturbation is the whole point of the loop: every arm is checked against every field, so
-    an arm that quietly replaced all three (or none) fails on the fields it should not have touched.
+    an arm that quietly replaced both (or neither) fails on the field it should not have touched.
+    The fields are read off ``LocusPriors`` itself, so a field added there is checked here too.
     """
     import rigel.calibration.priors as PRIORS
     from rigel.calibration.region_arrays import RegionArrays
 
     ra = RegionArrays.from_index(toy.index)
-    shipped = LocusPriors(np.array([1.0, 2.0]), np.array([3.0, 4.0]), np.array([5.0, 6.0]))
-    oracle_p = LocusPriors(np.array([10.0, 20.0]), np.array([30.0, 40.0]), np.array([50.0, 60.0]))
+    shipped = LocusPriors(np.array([1.0, 2.0]), np.array([5.0, 6.0]))
+    oracle_p = LocusPriors(np.array([10.0, 20.0]), np.array([50.0, 60.0]))
     calls = {"n": 0}
 
     def fake_assemble(cal, ra, ml):
@@ -259,7 +284,7 @@ def test_each_oracle_arm_replaces_ITS_field_and_leaves_the_other_two_shipped(toy
             finally:
                 restore()
             assert fired["n"] == 1
-            for f in ("gdna_prior_count", "rna_prior_count", "gdna_eff_len"):
+            for f in (fld.name for fld in dataclasses.fields(LocusPriors)):
                 want = oracle_p if f in fields else shipped
                 assert np.array_equal(getattr(out, f), getattr(want, f)), (
                     f"arm {arm!r}: field {f} came from the wrong prior"

@@ -1,24 +1,28 @@
 #!/usr/bin/env python
-"""Is ``LocusPriors`` -- the thing the EM actually reads -- right?
+"""Is ``LocusPriors`` -- what the EM takes from calibration -- right?
 
-Calibration does not ship a number; it ships a prior: three float64 arrays indexed by
-``multi_locus_id`` (``gdna_prior_count``, ``rna_prior_count``, ``gdna_eff_len``), the first two of
-which are fragment counts that ``em_solver.cpp`` adds straight to its own soft counts. This
-instrument scores that prior, per condition and per stratum, against the origin-split oracle. Five
-arms separate calibration's own error from the assembler's: ``P`` is the shipped prior, ``O`` is the
-same assembler fed the true per-object masses (``OracleTruth.override_masses``, the one lever that
-exists -- O is never an estimator), ``S`` is O with each component rescaled by its own true share,
-``Fo`` is the EM's own candidate count labelled by the simulator's read-name origin (the reference
-every arm is scored against), and ``F`` is the per-locus first-base count (the projection-only arm,
-kept and priced on its own table; ``Fo - F`` is the straddling population). ``P - O`` is
-calibration's error, ``O - Fo`` the assembler's, and ``O - S`` the pooled-share part of that.
-The error is reported in two units that are both needed: fragments (``sum |dA|``, additive) and the
-composition claim ``phi = a_g / (a_g + a_r)`` with its scale, because a prior can carry the right
-ratio at the wrong scale or the reverse. The RNA arm is scored against the unspliced RNA units,
-never all RNA units: a spliced unit never receives a gDNA candidate, so it is outside the population
-the prior arbitrates. Every arm runs in the drained frame; the drain's spliced-gDNA leak is reported
-beside the numbers as ``gdna_spliced_leak`` and the lift's attribution error as ``n_ambiguous``.
-No per-locus EM runs -- the pipeline is stopped after its scoring stage.
+Calibration does not ship a number; it ships two float64 arrays indexed by ``multi_locus_id``:
+``gdna_count``, its conserved count of the locus's gDNA fragments, and ``gdna_eff_len``, the gDNA
+component's effective length. The EM reads ``gdna_count`` against its OWN count of the locus's fragments
+(``pipeline.em_pseudocounts``: the odds are ``G : N - G``, with ``N`` the locus's units plus its
+deterministic fragments), so the composition the EM is handed is ``gdna_count / N`` over a denominator
+calibration does not supply: its error IS the count's error, divided by a number every arm shares, and
+there is no separate composition or scale to score. Calibration's RNA count does not reach the EM at all,
+so there is no RNA arm. This instrument scores the gDNA count, per condition and per stratum, against the
+origin-split oracle. Five arms separate calibration's own error from the assembler's: ``P`` is the
+shipped prior, ``O`` is the same assembler fed the true per-object masses
+(``OracleTruth.override_masses``, the one lever that exists -- O is never an estimator), ``S`` is O with
+the crossing term converted by gDNA's own true share instead of the pooled one, ``Fo`` is the EM's own
+candidate count labelled by the simulator's read-name origin (the reference every arm is scored
+against), and ``F`` is the per-locus first-base count (the projection-only arm, kept and priced on its
+own table; ``Fo - F`` is the straddling population). ``P - O`` is calibration's error, ``O - Fo`` the
+assembler's, and ``O - S`` the pooled-share part of that. The count's error is reported in fragments
+(``sum |dA|``, additive), and ``gdna_eff_len`` beside it, weighted by the gDNA count it divides -- but
+none of the six override fields is among the length's inputs, so O carries P's length, P against O
+scores it 0 by construction, and the length's truth is ``ruler_vs_truth.py``'s. Every
+arm runs in the drained frame; the drain's spliced-gDNA leak is reported beside the numbers as
+``gdna_spliced_leak`` and the lift's attribution error as ``n_ambiguous``. No per-locus EM runs -- the
+pipeline is stopped after its scoring stage.
 
 The panel's default paths, the six override fields and the stratum readers this and the other oracle
 instruments share live in ``_shared`` (``DEFAULT_SUITE``, ``DEFAULT_INDEX``, ``OVERRIDE_FIELDS``, ``stratum``,
@@ -77,40 +81,24 @@ from rigel.pipeline import (  # noqa: E402
 )
 from rigel.scan_cache import ScanCacheKeyError, read_scan_cache, write_scan_cache  # noqa: E402
 
-#: The three ``LocusPriors`` fields, in the order every table prints them.
-PRIOR_FIELDS = ("gdna_prior_count", "rna_prior_count", "gdna_eff_len")
+#: The two ``LocusPriors`` fields, in the order every table prints them.
+PRIOR_FIELDS = ("gdna_count", "gdna_eff_len")
 
 
 
 # ── the scoring ──────────────────────────────────────────────────────────────────────────────────
 
 
-def composition(gdna: np.ndarray, rna: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """``(phi, scale)`` per locus — ``phi = a_g/(a_g+a_r)`` is NaN where the prior is empty.
-
-    NaN, never 0, and for the same reason ``_oracle_arms.object_fractions`` gives: a locus whose
-    prior is ``(0, 0)`` makes no composition claim at all, and a floored 0 reads as the confident claim
-    "no gDNA here". The mass-weighted mean is blind to the difference — a zero-scale locus carries zero
-    weight — so it shows up only in the COUNT of loci scored, which is exactly where an inflated
-    denominator is invisible.
-    """
-    g = np.asarray(gdna, np.float64)
-    scale = g + np.asarray(rna, np.float64)
-    phi = np.full(scale.shape, np.nan, dtype=np.float64)
-    np.divide(g, scale, out=phi, where=scale > 0.0)
-    return phi, scale
-
-
 @dataclass(frozen=True, slots=True)
 class ArmScore:
-    """One arm scored against one reference, on ONE prior arm (gDNA or RNA), over one locus selection.
+    """One arm's per-locus gDNA count scored against one reference's, over one locus selection.
 
-    Every field is a fragment total except ``rel`` and ``mwae_phi`` — so the totals ADD across a
-    partition of the loci and the two rates do not.
+    Every field is a fragment total or a locus count, and the two rates ``rel`` and ``cancellation`` are
+    derived from them — so the totals ADD across a partition of the loci and the two rates do not.
     """
 
     n_loci: int  #: loci in the selection. never the panel's locus count
-    n_claiming: int  #: loci where EITHER arm or reference puts a nonzero count on this arm
+    n_claiming: int  #: loci where EITHER arm or reference puts a nonzero gDNA count
     total_arm: float  #: Σ a, the arm's own fragment total
     total_ref: float  #: Σ a*, the reference's
     net_err: float  #: Σ (a − a*). What a library-level figure would see
@@ -131,7 +119,7 @@ class ArmScore:
 
 
 def score_arm(arm: np.ndarray, ref: np.ndarray, select: np.ndarray | None = None) -> ArmScore:
-    """Score one prior arm (a per-locus fragment count) against a reference arm."""
+    """Score one arm's per-locus gDNA count (a fragment count) against a reference's."""
     a = np.asarray(arm, np.float64)
     r = np.asarray(ref, np.float64)
     if a.shape != r.shape:
@@ -154,47 +142,17 @@ def score_arm(arm: np.ndarray, ref: np.ndarray, select: np.ndarray | None = None
     )
 
 
-def score_composition(arm, ref, select=None) -> dict:
-    """The ``phi`` / ``scale`` view of one arm-vs-reference pair — what the EM actually feels.
-
-    Weighted by the REFERENCE's own scale, never by the arm's. Weighting by the arm lets a
-    mechanism improve the number by shrinking its own prior to nothing at the loci it gets wrong, which
-    is TRAPS: honesty-metrics-reward-ignorance with the weight in place of the denominator. The reference's scale is a
-    property of the condition, so it is fixed across every arm compared here.
-    """
-    phi_a, sc_a = composition(arm.gdna_prior_count, arm.rna_prior_count)
-    phi_r, sc_r = composition(ref.gdna_prior_count, ref.rna_prior_count)
-    live = np.isfinite(phi_a) & np.isfinite(phi_r)
-    if select is not None:
-        live = live & select
-    w = sc_r[live]
-    d_phi = np.abs(phi_a[live] - phi_r[live])
-    tot_w = float(w.sum())
-    # scale: a RATIO of totals, reported in log10 so a 10x under-prior and a 10x over-prior are
-    # symmetric. Only over the loci both arms make a claim at, matching mwae_phi's population.
-    sa, sr = float(sc_a[live].sum()), float(sc_r[live].sum())
-    return {
-        "n_scored": int(live.sum()),
-        "weight": tot_w,
-        "mwae_phi": float((w * d_phi).sum() / tot_w) if tot_w > 0 else float("nan"),
-        "median_phi_err": float(np.median(d_phi)) if d_phi.size else float("nan"),
-        "scale_arm": sa,
-        "scale_ref": sr,
-        "scale_log10_ratio": float(np.log10(sa / sr)) if sa > 0 and sr > 0 else float("nan"),
-    }
-
-
 def score_eff_len(arm, ref, select=None) -> dict:
-    """``gdna_eff_len``, weighted by the reference's gDNA prior count.
+    """``gdna_eff_len``, weighted by the reference's gDNA count.
 
-    Weighted by the gDNA count and not by the total: ``gdna_eff_len`` divides the gDNA
+    Weighted by the gDNA count and not by the locus's fragments: ``gdna_eff_len`` divides the gDNA
     component's abundance alone, so a locus with no gDNA is a locus where this array does nothing, and
     including it at full weight would report the error of a number nothing reads
     (TRAPS: weight-it-like-the-consumer).
     """
     a = np.asarray(arm.gdna_eff_len, np.float64)
     r = np.asarray(ref.gdna_eff_len, np.float64)
-    w = np.asarray(ref.gdna_prior_count, np.float64)
+    w = np.asarray(ref.gdna_count, np.float64)
     live = np.isfinite(a) & np.isfinite(r) & (r > 0.0)
     if select is not None:
         live = live & select
@@ -227,9 +185,9 @@ def capture_priors(buffer, index, strand_models, fl, region_arrays, stats, calib
 
     ``units`` comes from the same run, through the same trick. ``build_multi_loci`` is the one
     call that sees the scored CSR, so wrapping it yields the two per-unit arrays :func:`overlap_truth`
-    needs — ``frag_ids`` (the identity that joins to origin truth) and ``is_spliced`` (the bit that
-    separates the assembler's RNA target from the EM's RNA population). Re-scoring the buffer a
-    second time to obtain them would be a different scoring stage than the one that built the loci.
+    needs — ``frag_ids`` (the identity that joins to origin truth) and ``is_spliced`` (the bit the
+    join's secondary diagnostic reads: gDNA cannot splice). Re-scoring the buffer a second time to
+    obtain them would be a different scoring stage than the one that built the loci.
 
     The sentinel exception is what makes this affordable: the per-locus EM is the single most
     expensive stage and this instrument does not read its output. An experiment that injects the
@@ -308,39 +266,31 @@ def oracle_priors(oracle: OracleTruth, calibration, region_arrays, multi_loci):
 
 
 def share_priors(oracle: OracleTruth, calibration, region_arrays, multi_loci):
-    """S — the O arm, plus each component rescaled by its OWN true per-boundary share.
+    """S — the O arm, with the gDNA count's crossing term converted by gDNA's OWN true per-boundary share.
 
-    WHY THIS ARM EXISTS. ``assemble_priors`` rescales BOTH components at a boundary by ONE pooled
-    share, ``mass / count`` off the mixture. That is exact when the two components share a length
-    distribution and biased when they do not — by exactly ``share_r / share_g``, independent of the true
-    mixing ratio. The bias is purely compositional: the locus total is conserved to the last
-    fragment, so no conservation gate can see it. Only a per-component comparison can.
+    WHY THIS ARM EXISTS. ``assemble_priors`` converts the gDNA count's crossing term by ONE pooled
+    share, ``q = mass / count`` off the mixture — RNA's where RNA dominates a boundary (the length moved to
+    gDNA's own conserved share and the count did not, ``ISSUES: the-pooled-q-in-the-gdna-length``). Where
+    the two components' shares differ, the gDNA count is off by ``q / share_g`` at that boundary, and
+    whatever the pooled share moves off gDNA it moves onto RNA, so no gate on the locus total can see it.
+    Only a per-component comparison can.
 
-    ``O − S`` is therefore the pooled share's own contribution, isolated, and ``S − F`` is everything
-    else the assembler does wrong. Until this arm existed the two were summed inside ``O − F`` and there
+    ``O − S`` is therefore the pooled share's own contribution, isolated, and ``S − Fo`` is everything
+    else the assembler does wrong. Until this arm existed the two were summed inside ``O − Fo`` and there
     was no way to tell which was which.
 
-    The assembler takes ONE share, so the arm is built by calling it TWICE — once with the gDNA
-    truth share (keeping its gDNA arm) and once with the RNA truth share (keeping its RNA arm). That is
-    not a re-implementation: it is the shipped function, run twice with one input varied.
+    It is the shipped function, run once with one input varied — ``boundary_mass_per_crossing`` set to
+    gDNA's true share — never a re-implementation. gDNA's share is the only one the arm needs:
+    calibration's RNA count does not reach the EM, so the pooled share's RNA half has no consumer.
 
     The shares are MEASURED off the origin split (``OracleTruth.component_shares``), never derived
     from a pmf — see that method for why an analytic share would make this a model arm.
     """
     shares = oracle.component_shares()
     truth_cal = dataclasses.replace(calibration, **oracle.override_masses(region_arrays))
-    gdna = PRIORS.assemble_priors(
+    return PRIORS.assemble_priors(
         dataclasses.replace(truth_cal, boundary_mass_per_crossing=shares["gdna"]),
         region_arrays, multi_loci,
-    )
-    rna = PRIORS.assemble_priors(
-        dataclasses.replace(truth_cal, boundary_mass_per_crossing=shares["rna"]),
-        region_arrays, multi_loci,
-    )
-    return PRIORS.LocusPriors(
-        gdna_prior_count=gdna.gdna_prior_count,
-        rna_prior_count=rna.rna_prior_count,
-        gdna_eff_len=gdna.gdna_eff_len,
     ), shares
 
 
@@ -352,9 +302,9 @@ def eff_len_inflation(calibration, region_arrays, multi_loci) -> dict:
     boundaries its fragment crosses, so the span over a locus of pieces shorter than a fragment is still its
     extent plus the fragments straddling its two ends, never a fragment length per interior boundary. The EM
     divides the gDNA component's abundance by this array, so an inflation here is a direct scale error on one
-    of the three numbers calibration ships.
+    of the two numbers calibration ships.
 
-    Reports the ratio to the locus's GENOMIC span, mass-weighted by the gDNA prior, so the number is
+    Reports the ratio to the locus's GENOMIC span, mass-weighted by the gDNA count, so the number is
     what the consumer feels rather than what an unweighted locus average would say
     (``TRAPS: weight-it-like-the-consumer``).
     """
@@ -391,9 +341,8 @@ def eff_len_inflation(calibration, region_arrays, multi_loci) -> dict:
 class OverlapTruth:
     """Fo — the EM's OWN per-locus candidate count, by TRUE origin. See :func:`overlap_truth`."""
 
-    gdna: np.ndarray  #: float64[n_loci] — the target of ``gdna_prior_count``
-    rna_unspliced: np.ndarray  #: float64[n_loci] — the target of ``rna_prior_count``
-    rna_all: np.ndarray  #: float64[n_loci] — every RNA unit, the EM's own RNA evidence
+    gdna: np.ndarray  #: float64[n_loci] — the target of ``gdna_count``
+    rna_all: np.ndarray  #: float64[n_loci] — every RNA unit, the rest of the EM's unit axis
     diag: dict  #: the accounting a caller must report — see :func:`overlap_truth`
 
 
@@ -420,10 +369,11 @@ def overlap_truth(multi_loci, unit_origin: np.ndarray, unit_is_spliced: np.ndarr
                   n_units: int, walk: dict) -> OverlapTruth:
     """Fo — how many of a multi-locus's EM CANDIDATES were truly gDNA, and truly RNA.
 
-    This is the quantity the EM's prior is added to, and it is a count of UNITS, not of
-    genomic overlaps and not of start positions: ``em_solver.cpp:apply_grouped_prior_update`` forms
-    ``G = n_gdna + a_g`` where ``n_gdna`` is the soft gDNA count over the units
-    ``locus_partition`` handed that locus — i.e. over ``MultiLocus.unit_indices`` exactly.
+    This is the ``G`` the EM reads ``gdna_count`` as, and it is a count of UNITS, not of genomic
+    overlaps and not of start positions: ``pipeline.em_pseudocounts`` sets the odds
+    ``gdna_count : N − gdna_count`` against the EM's own ``N`` — the units ``locus_partition`` handed
+    that locus, i.e. ``MultiLocus.unit_indices`` exactly, plus the deterministic fragments, which are
+    spliced and so are never gDNA. The gDNA among ``N`` is therefore the gDNA among the units.
 
     Every input is somebody else's output. ``unit_indices`` is ``build_multi_loci``'s,
     ``unit_is_spliced`` is the scoring stage's, and ``unit_origin`` is the simulator's read name joined
@@ -434,12 +384,15 @@ def overlap_truth(multi_loci, unit_origin: np.ndarray, unit_is_spliced: np.ndarr
     store one int8 per unit instead of an int64 ``frag_id`` per unit plus the whole per-fragment walk.
     The join's own gate lives in :func:`unit_origins`, where its inputs are.
 
-    Three arrays because there are three populations and they are not interchangeable.
+    Two arrays, one per origin, and only the first is a target.
 
-    * ``gdna`` — the target of ``gdna_prior_count``. Exact: a spliced unit cannot be gDNA (its
+    * ``gdna`` — the target of ``gdna_count``. Exact: a spliced unit cannot be gDNA (its
       ``gdna_log_lik`` is ``-inf``) and gDNA cannot splice, so nothing has to be withheld.
-    * ``rna_unspliced`` — the target of ``rna_prior_count``, which withholds spliced mass.
-    * ``rna_all`` — every RNA unit, which is what the EM's ``n_rna`` sees from the unit axis.
+    * ``rna_all`` — every RNA unit, which is what the EM's ``n_rna`` sees from the unit axis. No
+      calibration count targets it (calibration's RNA count does not reach the EM); it is kept because
+      the unit accounting ``Σ gdna + Σ rna_all + orphan_units == n_units`` needs both halves.
+
+    ``is_spliced`` moves neither array — it feeds the diagnostic only.
 
     ``diag`` carries the accounting, and a caller must report it: ``spliced_gdna_units`` is the
     join's SECONDARY diagnostic (gDNA cannot splice; the hard gate is ``_oracle.check_walk_alignment``
@@ -472,7 +425,6 @@ def overlap_truth(multi_loci, unit_origin: np.ndarray, unit_is_spliced: np.ndarr
     is_rna = ~is_gdna
     gdna = per_locus(is_gdna)
     rna_all = per_locus(is_rna)
-    rna_unspliced = per_locus(is_rna & ~spliced)
 
     counted = {"gdna": float(gdna.sum()), "rna": float(rna_all.sum())}
     diag = {
@@ -487,11 +439,11 @@ def overlap_truth(multi_loci, unit_origin: np.ndarray, unit_is_spliced: np.ndarr
         },
         "walk": walk,
     }
-    return OverlapTruth(gdna=gdna, rna_unspliced=rna_unspliced, rna_all=rna_all, diag=diag)
+    return OverlapTruth(gdna=gdna, rna_all=rna_all, diag=diag)
 
 
 def fragment_truth(oracle: OracleTruth, region_arrays, multi_loci):
-    """F — the per-locus true count of fragments whose FIRST BASE lands in the locus.
+    """F — the per-locus true count of gDNA fragments whose FIRST BASE lands in the locus.
 
     This is not the prior's target — :func:`overlap_truth` is. ``region_start_count`` deposits at
     the region holding a fragment's first base, so a fragment that starts in the intergenic flank and
@@ -507,26 +459,15 @@ def fragment_truth(oracle: OracleTruth, region_arrays, multi_loci):
     implementation here would drift from the one under test and the difference would read as
     assembler error (TRAPS: a-test-that-redefines).
 
-    The RNA arm is spliced-INCLUSIVE and is a BOUND. ``rna_prior_count`` withholds spliced mass;
-    ``region_start_count`` has no splice bit. ``overlap_truth`` does have one, so the bound is no
-    longer the best available RNA target — this one is kept only as ``F``'s own RNA companion. Returns
-    ``(f_gdna, f_rna_upper, dropped)`` where ``dropped`` is the per-origin fragment count whose start
-    region overlaps no locus — intergenic, correctly outside every prior, and reported so that
-    ``Σ F + dropped == the library total`` is checkable rather than assumed.
+    gDNA only, and exact: gDNA does not splice, so the gdna partition's ``region_start_count`` holds no
+    spliced sub-population to withhold. Returns ``(f_gdna, dropped)`` where ``dropped`` is the gDNA
+    fragment count whose start region overlaps no locus — intergenic, correctly outside every prior, and
+    reported so that ``Σ F + dropped == the library's gDNA total`` is checkable rather than assumed.
     """
     # strand-summed: the bank is per genome strand and the locus projection is a strand-agnostic total.
-    parts = {k: np.asarray(oracle.parts[k].region_start_count, np.float64).sum(axis=1)
-             for k in ORIGINS}
-    g = parts["gdna"]
-    r = parts["mrna"] + parts["nrna"]
-    proj = PRIORS._project_regions_to_loci(
-        region_arrays, multi_loci, len(multi_loci), {"gdna": g, "rna": r}
-    )
-    dropped = {
-        "gdna": float(g.sum() - proj["gdna"].sum()),
-        "rna": float(r.sum() - proj["rna"].sum()),
-    }
-    return proj["gdna"], proj["rna"], dropped
+    g = np.asarray(oracle.parts["gdna"].region_start_count, np.float64).sum(axis=1)
+    proj = PRIORS._project_regions_to_loci(region_arrays, multi_loci, len(multi_loci), {"gdna": g})
+    return proj["gdna"], float(g.sum() - proj["gdna"].sum())
 
 
 # ── one condition ────────────────────────────────────────────────────────────────────────────────
@@ -540,8 +481,7 @@ class ConditionResult:
     n_loci: int
     priors: dict  #: arm name -> LocusPriors
     f_gdna: np.ndarray
-    f_rna_upper: np.ndarray
-    f_dropped: dict
+    f_dropped: float  #: gDNA fragments whose start region overlaps no locus
     #: Fo — the EM's own candidate count by true origin. THE reference for every arm.
     overlap: OverlapTruth
     noop_identical: dict  #: field -> bool
@@ -641,7 +581,7 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
     )
     o_arm, noop = oracle_priors(oracle, cal, ra, multi_loci)
     s_arm, _shares = share_priors(oracle, cal, ra, multi_loci)
-    f_gdna, f_rna_upper, f_dropped = fragment_truth(oracle, ra, multi_loci)
+    f_gdna, f_dropped = fragment_truth(oracle, ra, multi_loci)
     overlap = overlap_truth(
         multi_loci, unit_origins(units["frag_ids"], frag_origin),
         units["is_spliced"], units["n_units"], walk,
@@ -674,7 +614,6 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
         n_loci=len(multi_loci),
         priors={"P": p_arm, "O": o_arm, "S": s_arm},
         f_gdna=f_gdna,
-        f_rna_upper=f_rna_upper,
         f_dropped=f_dropped,
         overlap=overlap,
         noop_identical=noop_identical,
@@ -799,7 +738,7 @@ def report(rows: list[dict]) -> None:
     print(f"     ⚠ {trans:,} origin transitions in BAM order across the panel — the secondary "
           "diagnostic is only sensitive to a slip larger than a population block.")
 
-    def arm_table(title: str, key: str, arm: str, note: str = "") -> None:
+    def arm_table(title: str, key: str, note: str = "") -> None:
         print()
         print(f"  {title}")
         if note:
@@ -811,7 +750,7 @@ def report(rows: list[dict]) -> None:
             if label is None:
                 print("    " + "-" * 102)
                 continue
-            s = _agg([ArmScore(**r[key][arm]) for r in rows if sel(r["condition"])])
+            s = _agg([ArmScore(**r[key]) for r in rows if sel(r["condition"])])
             if s is None:
                 print(f"    {label:<26} {'(empty)':>14}")
                 continue
@@ -819,34 +758,27 @@ def report(rows: list[dict]) -> None:
                   f"{s.abs_err:>14,.0f} {_rel(s.rel)} {s.net_err:>+14,.0f} "
                   f"{s.cancellation:>7.1f}")
 
-    _RNA_TARGET = ("⭐ The reference is the UNSPLICED RNA units — the population rna_prior_count "
-                   "actually targets. Fo carries the splice bit per unit, so this arm is no longer a "
-                   "bound (the F_rna column was, and table ⑫ prices the difference).")
-
-    arm_table("① P vs O — CALIBRATION'S OWN ERROR (a perfect deconvolution, same assembler) · gDNA arm",
-              "P_vs_O", "gdna")
-    arm_table("   … RNA arm", "P_vs_O", "rna")
-    arm_table("④ O vs Fo — THE ASSEMBLER'S OWN ERROR (truth masses in) · gDNA arm",
-              "O_vs_FO", "gdna",
+    arm_table("① P vs O — CALIBRATION'S OWN ERROR (a perfect deconvolution, same assembler) · gdna_count",
+              "P_vs_O")
+    arm_table("④ O vs Fo — THE ASSEMBLER'S OWN ERROR (truth masses in) · gdna_count",
+              "O_vs_FO",
               "⭐ Fo is the EM's own candidate count — every unit of the locus, labelled by true "
               "origin. This prices the mass→fragment-count conversion, the projection and the pooled "
               "share, alone.")
-    arm_table("   … RNA arm", "O_vs_FO", "rna", _RNA_TARGET)
-    arm_table("⑤ P vs Fo — THE TOTAL PRIOR ERROR (what the EM is handed, vs the true counts) · gDNA arm",
-              "P_vs_FO", "gdna")
-    arm_table("   … RNA arm", "P_vs_FO", "rna", _RNA_TARGET)
+    arm_table("⑤ P vs Fo — THE TOTAL PRIOR ERROR (what the EM is handed, vs the true counts) · gdna_count",
+              "P_vs_FO",
+              "⭐ The EM reads gdna_count against its own fragment count N, so its composition error is "
+              "this count error over an N every arm shares — there is no second axis to score.")
 
     # ── ⑧ the two halves of ④, separated ──
-    arm_table("⑧ S vs Fo — THE ASSEMBLER WITH PERFECT PER-COMPONENT SHARES · gDNA arm",
-              "S_vs_FO", "gdna",
-              "⭐ Everything ④ measures EXCEPT the pooled share. The gap between ④ and ⑧ is what one "
-              "share for two components costs.")
-    arm_table("   … RNA arm", "S_vs_FO", "rna", _RNA_TARGET)
-    arm_table("⑨ O vs S — THE POOLED SHARE'S OWN CONTRIBUTION, ISOLATED · gDNA arm",
-              "O_vs_S", "gdna",
-              "⛔ The locus TOTAL is conserved here to the fragment, so this error is purely "
-              "compositional and no conservation gate can see it. Equal component lengths ⇒ identically "
-              "zero, which is why the ladder is structurally blind to it.")
+    arm_table("⑧ S vs Fo — THE ASSEMBLER WITH gDNA's OWN TRUE SHARE · gdna_count",
+              "S_vs_FO",
+              "⭐ Everything ④ measures EXCEPT the pooled share. The gap between ④ and ⑧ is what "
+              "converting gDNA's crossings at the mixture's share costs.")
+    arm_table("⑨ O vs S — THE POOLED SHARE'S OWN CONTRIBUTION, ISOLATED · gdna_count",
+              "O_vs_S",
+              "⛔ What the pooled share moves off gDNA it moves onto RNA, so no gate on the locus total "
+              "can see it (ISSUES: the-pooled-q-in-the-gdna-length).")
 
     # ── ⑪ what the yardstick correction is worth ──
     print()
@@ -863,48 +795,14 @@ def report(rows: list[dict]) -> None:
         sub = [r for r in rows if sel(r["condition"])]
         if not sub:
             continue
-        y = _agg([ArmScore(**r["FO_vs_F"]["gdna"]) for r in sub])
+        y = _agg([ArmScore(**r["FO_vs_F"]) for r in sub])
         cells = {
-            k: _agg([ArmScore(**r[k]["gdna"]) for r in sub])
+            k: _agg([ArmScore(**r[k]) for r in sub])
             for k in ("O_vs_F", "O_vs_FO", "S_vs_F", "S_vs_FO")
         }
         print(f"    {label:<26} {y.total_arm:>13,.0f} {y.total_ref:>13,.0f} {y.abs_err:>11,.0f} "
               f"{_rel(y.rel)} {_rel(cells['O_vs_F'].rel)} {_rel(cells['O_vs_FO'].rel)} "
               f"{_rel(cells['S_vs_F'].rel)} {_rel(cells['S_vs_FO'].rel)}")
-
-    # ── ⑫ the prior's POPULATION, and its STRENGTH ──
-    print()
-    print("  ⑫ ⭐ THE PRIOR DESCRIBES THE UNSPLICED POOL — is its claim right, and how strong is it?")
-    print("  A spliced unit never gets a gDNA candidate (`em_solver.cpp`: has_gdna = !is_spliced && …),")
-    print("  so the population `a_g : a_r` describes is gDNA units + UNSPLICED RNA units. ⛔ Scoring it")
-    print("  against ALL RNA units reads a phantom +0.07…+0.10 tilt that is the denominator, not the")
-    print("  prior (`TRAPS: score-the-consumers-own-count`).")
-    print(f"    {'stratum':<26} {'pool gDNA':>13} {'pool RNA':>13} {'phi true':>9} {'phi S':>8} "
-          f"{'Δ':>8} {'strength':>9} {'spliced RNA':>13}")
-    print("    " + "-" * 116)
-    for label, sel in _SELECTIONS:
-        if label is None:
-            print("    " + "-" * 116)
-            continue
-        sub = [r["overlap"] for r in rows if sel(r["condition"])]
-        srows = [r for r in rows if sel(r["condition"])]
-        if not sub:
-            continue
-        rg = sum(x["unit_totals"]["gdna"] for x in sub)
-        rus = sum(x["rna_unspliced_total"] for x in sub)
-        spliced = sum(x["unit_totals"]["rna"] for x in sub) - rus
-        s_g = sum(ArmScore(**r["S_vs_FO"]["gdna"]).total_arm for r in srows)
-        s_r = sum(ArmScore(**r["S_vs_FO"]["rna"]).total_arm for r in srows)
-        pool = rg + rus
-        phi_true = rg / pool if pool > 0 else float("nan")
-        phi_s = s_g / (s_g + s_r) if (s_g + s_r) > 0 else float("nan")
-        strength = (s_g + s_r) / pool if pool > 0 else float("nan")
-        print(f"    {label:<26} {rg:>13,.0f} {rus:>13,.0f} {phi_true:>9.4f} "
-              f"{phi_s:>8.4f} {phi_s - phi_true:>+8.4f} {strength:>9.3f} {spliced:>13,.0f}")
-    print("    ⭐ `strength` is Σ(a_g+a_r) / the unspliced pool — pseudo-fragments per real fragment.")
-    print("    It is ~1.000 BY CONSTRUCTION (the conserved count is that pool), so the posterior is a")
-    print("    50/50 blend of calibration and the EM's own evidence and there is no knob. Not a defect;")
-    print("    a design fact nothing had priced.")
 
     # ── ⑩ is gdna_eff_len clamped by an incidence sum? ──
     print()
@@ -929,31 +827,12 @@ def report(rows: list[dict]) -> None:
     print("    The EM divides the gDNA component's abundance by gdna_eff_len, so this is a direct "
           "scale error on a shipped number.")
 
-    # ── ② the composition claim, which is what the EM feels ──
+    # ── ③ the second array ──
     print()
-    print("  ② THE COMPOSITION CLAIM  phi = a_g/(a_g+a_r)  — P against O")
-    print(f"    {'stratum':<26} {'n loci':>8} {'mwae_phi':>10} {'median':>10} "
-          f"{'scale P':>14} {'scale O':>14} {'log10 P/O':>10}")
-    print("    " + "-" * 96)
-    for label, sel in _SELECTIONS:
-        if label is None:
-            print("    " + "-" * 96)
-            continue
-        sub = [r["composition_P_vs_O"] for r in rows if sel(r["condition"])]
-        if not sub:
-            continue
-        w = np.array([x["weight"] for x in sub])
-        tot = float(w.sum())
-        mwae = float((w * np.array([x["mwae_phi"] for x in sub])).sum() / tot) if tot else np.nan
-        med = float(np.median([x["median_phi_err"] for x in sub]))
-        sp, so = sum(x["scale_arm"] for x in sub), sum(x["scale_ref"] for x in sub)
-        lr = np.log10(sp / so) if sp > 0 and so > 0 else float("nan")
-        print(f"    {label:<26} {sum(x['n_scored'] for x in sub):>8,} {mwae:>10.4f} {med:>10.4f} "
-              f"{sp:>14,.0f} {so:>14,.0f} {lr:>+10.3f}")
-
-    # ── ③ the third array ──
-    print()
-    print("  ③ gdna_eff_len — P against O, weighted by O's own gDNA prior count")
+    print("  ③ gdna_eff_len — P against O, weighted by O's own gDNA count")
+    print("  ⚠ None of the six override fields is among the length's inputs, so O carries P's length and "
+          "this reads 0 by construction:")
+    print("    a wiring check, not a measurement. The length's truth is ruler_vs_truth.py's.")
     print(f"    {'stratum':<26} {'n loci':>8} {'w rel err':>11} {'median rel':>11}")
     print("    " + "-" * 60)
     for label, sel in _SELECTIONS:
@@ -982,16 +861,15 @@ def report(rows: list[dict]) -> None:
 
     # ── ⑦ the per-condition ladder, because a stratum total hides the shape ──
     print()
-    print("  ⑦ PER CONDITION — the gDNA arm, P and O as fragment totals")
+    print("  ⑦ PER CONDITION — gdna_count, P and O as fragment totals")
     print(f"    {'condition':<44} {'true f_g':>9} {'O_g':>13} {'P_g':>13} {'P/O':>8} "
-          f"{'Σ|Δ|':>13} {'mwae_phi':>9}")
+          f"{'Σ|Δ|':>13} {'rel':>8}")
     print("    " + "-" * 116)
     for r in rows:
-        g = ArmScore(**r["P_vs_O"]["gdna"])
+        g = ArmScore(**r["P_vs_O"])
         ratio = g.total_arm / g.total_ref if g.total_ref > 0 else float("nan")
         print(f"    {r['condition']:<44} {r['library']['true_f_gdna']:>9.4f} {g.total_ref:>13,.0f} "
-              f"{g.total_arm:>13,.0f} {ratio:>8.3f} {g.abs_err:>13,.0f} "
-              f"{r['composition_P_vs_O']['mwae_phi']:>9.4f}")
+              f"{g.total_arm:>13,.0f} {ratio:>8.3f} {g.abs_err:>13,.0f} {_rel(g.rel)}")
 
     print()
     print(f"  total wall clock {sum(r['seconds'] for r in rows):,.0f} s over {len(rows)} conditions")
@@ -1009,36 +887,27 @@ def to_json(results: list[ConditionResult]) -> list[dict]:
             "eff_len": r.eff_len,
             "library": r.library,
             "f_dropped": r.f_dropped,
-            "overlap": {
-                **r.overlap.diag,
-                "rna_unspliced_total": float(r.overlap.rna_unspliced.sum()),
-            },
+            "overlap": r.overlap.diag,
             "seconds": r.seconds,
         }
         p, o = r.priors["P"], r.priors["O"]
         sa = r.priors["S"]
-        fo_g, fo_r = r.overlap.gdna, r.overlap.rna_unspliced
-        for ref_name, gref, rref, arm in (
-            ("P_vs_O", o.gdna_prior_count, o.rna_prior_count, p),
+        fo = r.overlap.gdna
+        for ref_name, ref, arm in (
+            ("P_vs_O", o.gdna_count, p.gdna_count),
             # Fo is the reference every assembler arm is scored against — the EM's own candidate
             # count. F is kept beside it on the same arms so table ⑪ can price the correction.
-            ("O_vs_FO", fo_g, fo_r, o),
-            ("P_vs_FO", fo_g, fo_r, p),
-            ("S_vs_FO", fo_g, fo_r, sa),
-            ("O_vs_F", r.f_gdna, r.f_rna_upper, o),
-            ("P_vs_F", r.f_gdna, r.f_rna_upper, p),
-            ("S_vs_F", r.f_gdna, r.f_rna_upper, sa),
-            ("O_vs_S", sa.gdna_prior_count, sa.rna_prior_count, o),
+            ("O_vs_FO", fo, o.gdna_count),
+            ("P_vs_FO", fo, p.gdna_count),
+            ("S_vs_FO", fo, sa.gdna_count),
+            ("O_vs_F", r.f_gdna, o.gdna_count),
+            ("P_vs_F", r.f_gdna, p.gdna_count),
+            ("S_vs_F", r.f_gdna, sa.gdna_count),
+            ("O_vs_S", sa.gdna_count, o.gdna_count),
             # the yardstick itself, as an arm: Fo scored against F
-            ("FO_vs_F", r.f_gdna, r.f_rna_upper,
-             PRIORS.LocusPriors(gdna_prior_count=fo_g, rna_prior_count=fo_r,
-                                gdna_eff_len=np.zeros_like(fo_g))),
+            ("FO_vs_F", r.f_gdna, fo),
         ):
-            row[ref_name] = {
-                "gdna": dataclasses.asdict(score_arm(arm.gdna_prior_count, gref)),
-                "rna": dataclasses.asdict(score_arm(arm.rna_prior_count, rref)),
-            }
-        row["composition_P_vs_O"] = score_composition(p, o)
+            row[ref_name] = dataclasses.asdict(score_arm(arm, ref))
         row["eff_len_P_vs_O"] = score_eff_len(p, o)
         out.append(row)
     return out

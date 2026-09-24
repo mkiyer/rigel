@@ -666,7 +666,7 @@ destination held RNA fragments where the source held none.
 **a-cancelling-defect-pair. Fixing one of two errors that cancel is worse than fixing neither.** Correcting
 one hop alone more than doubled a toy's evidence-free exon error while the rung it targeted improved.
 Price such a fix in the arm that also removes the other defect; a cancelling pair is one experiment, not
-two. The calibrated-likelihood campaign's pair (2026-09-21): the pseudocount prior's 1.29 bias toward gDNA and the gDNA component's length rule 14–16 % off the transcripts' — removing either alone made the tool worse, measured both ways. The length half is repaired by the one shared rule (2026-09-23), so the pseudocount's bias now stands uncancelled on capture (`ISSUES: the-pseudocount-prior-is-biased-toward-gdna`).
+two. The calibrated-likelihood campaign's pair (2026-09-21): the pseudocount prior's 1.29 bias toward gDNA and the gDNA component's length rule 14–16 % off the transcripts' — removing either alone made the tool worse, measured both ways. The length half is repaired by the one shared rule (2026-09-23); the pseudocount's half by the count form (2026-09-24, `ISSUES: the-pseudocount-prior-is-biased-toward-gdna`), which in turn unmasked the two errors the old lean had been offsetting at `g98`.
 
 **zero-the-precision-with-the-value. A refused claim must lose its precision in the same statement that
 zeroes its value.** A value zeroed at one line and a precision handed back at a later one is the confident

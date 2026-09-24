@@ -369,7 +369,7 @@ inflation is `rho_j`'s: `rho_R(exon) ≥ rho_u(B) + rho_j(B)` is a correct lower
 `accumulator.cpp`'s mass bank (`boundary_unspliced_mass`), gated by `tests/native/test_conserved_mass.py`;
 `tests/calibration/test_prior_units.py` gates the locus-scale consequence. The accumulator deposits `+1`
 on every boundary a fragment crosses, so a sum over objects is an object-incidence count while the EM
-adds a fragment count. The mass bank closes that gap: it sums to one per fragment.
+reads a fragment count. The mass bank closes that gap: it sums to one per fragment.
 
 **The deposit.** A fragment of length `w` is cut by the crossed boundaries into slices; a slice of length
 `s` bounded by `n_cross ∈ {1,2}` boundaries deposits `s/(w·n_cross)` at each. Every slice of a
@@ -404,7 +404,9 @@ fl-gap side panel (`TESTING.md`) exercises it. The cancellation is exact per bou
 contained mass never passes through the share (a contained fragment deposits on exactly one region,
 already a fragment count) and summing over boundaries with different flanks re-introduces a weak
 dependence. So `share_r/share_g` is the right mechanism and the wrong magnitude for a locus-level
-correction; a repair belongs per boundary, before the contained term is added.
+correction; a repair belongs per boundary, before the contained term is added. The EM's prior reads the
+gDNA count alone (§9b.3), so what reaches it is the gDNA half, `â_g / a_g = share_pooled / share_g` at a
+boundary, with no conserved total beside it (`ISSUES: the-pooled-q-in-the-gdna-length`).
 
 ---
 
@@ -650,8 +652,8 @@ by a measurement that places it, and none ships.
 
 ## 9b. The EM's RNA prior goes to every RNA component, in proportion to its evidence
 
-`calibration/priors.assemble_priors` hands the EM two per-locus pseudocounts;
-`native/em_solver.cpp:apply_grouped_prior_update` applies them. The gDNA one lands additively on the
+`pipeline.em_pseudocounts` hands the EM two per-locus pseudocounts, built from calibration's gDNA count
+(§9b.3); `native/em_solver.cpp:apply_grouped_prior_update` applies them. The gDNA one lands additively on the
 single gDNA component; the RNA one is shared among the RNA components in proportion to the evidence
 each already carries:
 
@@ -738,8 +740,8 @@ magnitude revives a component with no warm-start evidence, since `alpha` floors 
 and `digamma` of that is `−1e300`. A weight vector that lifts every component off zero removes it, and
 the threshold to clear is the VBEM fixed point `alpha = Σ_u resp(alpha)`, at which a component
 actually activates (~0.16–0.47 alpha units on the shipped EM), not the exponential cutoff (0.0014).
-`P` is a conserved FRAGMENT COUNT — calibration's unspliced RNA mass on the locus
-(`priors.assemble_priors`), tens to thousands on an expressed locus — so a flat `P/n` would clear that
+`P` is a FRAGMENT COUNT — the locus's gDNA-eligible units less the gDNA pseudocount (§9b.3), tens to
+thousands on an expressed locus — so a flat `P/n` would clear that
 threshold by one to two orders of magnitude at every component, reviving any shadow entity outright
 and flattening the within-RNA split toward uniform, an assertion nothing measured licenses. Admitting
 every RNA component at `w_i = raw[i]` restores fairness and keeps the absorbing state, because the
@@ -763,6 +765,50 @@ gate must separate: on a three-component locus the residual moves a share by 1.4
 of 1.5e-2, while the eligibility rule §9b replaced moved a component by 100 % of its mass. ⛔ Do not
 read a small VBEM drift here as a defect in the allocation, and do not widen the MAP gate to
 accommodate it — they are different statements about different M-steps.
+
+### 9b.3 The pseudocounts' odds are calibration's gDNA share of the locus
+
+`pipeline.em_pseudocounts`, formed in `pipeline._run_locus_em_partitioned`; gated in
+`tests/test_em_pseudocounts.py`.
+
+**What θ counts.** The E-step splits the locus's units. The deterministic fragments — one candidate transcript
+and an annotated junction (`scoring.cpp`) — skip it, but `map_em_step` and `vbem_step` add them to every
+M-step's `raw`, and the warm start copies them. So θ_g is gDNA's share of all `N` = units + deterministic
+fragments. It has to be: a transcript's contracted length counts its spliced start positions, so an unspliced
+fragment's weight `θ_t / L_t` is right only if `θ_t` counts the spliced fragments too.
+
+**What the prior is.** §9b's grouped update gives gDNA `raw_g + P_g` and the RNA pool `R + P_R`, which is
+exact EM for
+
+    log L(θ) + P_g · log θ_g + P_R · log(1 − θ_g),
+
+a Beta prior on gDNA's share of the whole pool, silent within RNA. The objective is concave in θ_g, so the
+prior leaves the EM's own fixed point in place iff its centre is that point's gDNA share:
+
+    P_g : P_R = G : (N − G).
+
+**The count form.** Calibration contributes `G_c`, its conserved count of the locus's gDNA fragments
+(`priors.assemble_priors`, §11). It counts from a sample of the locus — the `N_c` fragments it deposits, which
+excludes multimappers and fragments whose every junction the blacklist rejected — so its gDNA share is
+`G_c / N_c`, read over that sample and applied to the whole locus. The EM contributes `N_c` and `U`, its units
+with a gDNA candidate:
+
+    P_g = U · min(G_c / N_c, 1),        P_R = U − P_g.
+
+It is neutral iff calibration's share is the locus's, `G_c / N_c = G / N`, whatever either stage calls spliced:
+calibration's RNA count, and with it calibration's definition of a spliced fragment, never enters. Reading `G_c`
+against `N` instead would call every fragment calibration never saw RNA; at an identical-paralog locus of
+multimappers it cut the prior's gDNA share from 1 to 0.14 (`tests/scenarios_aligned/test_multimap_counting.py`).
+On a library with no multimapper and no blacklist `N_c = N`. The rule it replaced read calibration's unspliced
+split `G : U_R`, which states the unspliced fragments' split as the whole pool's. Its centre `G / (G + U_R)`
+exceeds `G / N` by the spliced share, and on the gate's exact locus it over-calls gDNA by 70–944 of 900 as the
+spliced share runs 11–60 %.
+
+**The strength is not derived.** `P_g + P_R = U`, one pseudo-fragment per gDNA-eligible unit, is the total
+the replaced rule carried: its sum was calibration's unspliced count, which is about `U`. Under MAP the strength
+cancels at the neutral point. Under VBEM it cancels only to `O(1/α)` (§9b.2), and it moves small components.
+A strength that counts the locus's fragments once needs calibration's precision from outside the locus, which
+has no capture-on form (`ISSUES: a-count-once-density-prior-for-the-strength`).
 
 ## 9c. ψ's composition reference is a Beta, and its mean would be a third term
 
@@ -1156,7 +1202,7 @@ half a fragment of exon, so two well-captured sides can exceed 1 and `eff_em` ca
 junctions carry a transcript (`ISSUES: a-junction-price-clipped-at-one`). Two limits of the derivation:
 capture that binds a fragment through its best single probe part adds less than the sum where both exons
 carry separate probes; and the price is a sum and difference of four posteriors, so its variance is theirs
-added and every junction's error is its own — isoforms that differ by one junction differ by that noise
+added. Measured, the within-gene spread the price leaves is mostly the first limit's, not the posteriors' noise
 (`ISSUES: the-junction-price-is-noisy-within-a-gene`; pooling junctions is refused,
 `ISSUES: pooling-junctions`).
 

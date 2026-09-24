@@ -801,13 +801,13 @@ def scale_readout(index, region_arrays, index_dir, panel_dir, condition, config,
     ).reshape(-1, 4)
     Y_g = gdna_space_yield(sim, blocks, n_loci, id2name, width_step)
     L_g = np.asarray(pri.gdna_eff_len, dtype=np.float64)
-    P_g = np.asarray(pri.gdna_prior_count, dtype=np.float64)
+    gdna_count = np.asarray(pri.gdna_count, dtype=np.float64)  # calibration's gDNA fragments: the component's weight
     ruler = cap["ruler"]
     jp = junction_probed_flags(sim, index)
     pf = truth.probed_frac
     pf_loc = footprint_probed_fraction(sim, blocks, n_loci, id2name)
     rows: list[tuple[str, dict]] = [
-        ("locus gDNA component", scale_stats(L_g, Y_g, P_g)),
+        ("locus gDNA component", scale_stats(L_g, Y_g, gdna_count)),
         ("synthetic span", scale_stats(ruler[syn], Y_t[syn], frags[syn])),
         ("annotated single-exon", scale_stats(ruler[single], Y_t[single], frags[single])),
         ("annotated multi-exon", scale_stats(ruler[multi], Y_t[multi], frags[multi])),
@@ -820,7 +820,7 @@ def scale_readout(index, region_arrays, index_dir, panel_dir, condition, config,
         rows.append((f"  multi-exon {cname}, no junction probe", scale_stats(ruler[m & ~jp], Y_t[m & ~jp], frags[m & ~jp])))
         rows.append((f"  multi-exon {cname}, JUNCTION-PROBED", scale_stats(ruler[m & jp], Y_t[m & jp], frags[m & jp])))
         rows.append((f"  synthetic span {cname}", scale_stats(ruler[ms], Y_t[ms], frags[ms])))
-        rows.append((f"  locus gDNA footprint {cname}", scale_stats(L_g[ml], Y_g[ml], P_g[ml])))
+        rows.append((f"  locus gDNA footprint {cname}", scale_stats(L_g[ml], Y_g[ml], gdna_count[ml])))
         by_class[cname] = {
             "isoforms": scale_stats(ruler[m], Y_t[m], frags[m]),
             "spans": rows[-2][1],
@@ -846,7 +846,7 @@ def scale_readout(index, region_arrays, index_dir, panel_dir, condition, config,
                 n_multi=int(multi.sum()), n_loci=int(n_loci), elapsed=elapsed,
                 per_transcript=dict(t_id=t["t_id"].to_numpy(), kind=truth.kind, probed_frac=pf, junction_probed=jp, frags=frags,
                                     Y=Y_t, L=ruler),
-                per_locus=dict(locus=np.arange(n_loci), Y=Y_g, L=L_g, P_g=P_g, probed_frac=pf_loc))
+                per_locus=dict(locus=np.arange(n_loci), Y=Y_g, L=L_g, gdna_count=gdna_count, probed_frac=pf_loc))
 
 
 def _ratios(means: dict) -> str:

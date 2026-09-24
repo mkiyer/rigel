@@ -20,21 +20,23 @@ The cleanup is closed: the tree is the shipped infrastructure with nothing dead,
 it deliberately left is `ISSUES: hygiene-ledger`. The capture-contracted length of the locus gDNA component,
 the synthetic spans and the annotated transcripts is kept as the one shared rule (owner, 2026-09-23,
 `DESIGN.md` §7.2); robustness over synthetic accuracy is `DESIGN.md` §0b. The work, in order, each step derived
-on one page and A/B'd against what ships: **the junction price's precision within a gene**, then **the
-pseudocount**, now uncancelled on capture.
+on one page and A/B'd against what ships, one issue closed at a time: **the residual errors end to end**, the
+owner's first priority (2026-09-24). The junction price is accepted for now, the pseudocount's odds are fixed
+(`DESIGN.md` §3.1c), and which alignments gDNA may explain is ruled (`DESIGN.md` §3.1d); splicing artifacts and
+multimappers are deferred features.
 
 ## Where the tool is — one line per claim; run the named instrument for a current number
 
 - **Stage A (the accumulator)**: done; the fragment ledger closes exactly — `calibration_oracle.py`.
 - **Library gDNA fraction**: calibration's is accurate on the three in-scope strata and structurally blind on
-  the deferred one — `solvability_audit.py`, `policy_benchmark.py --by-class`; the transcript table biases it
-  toward gDNA off capture through the pseudocount, and on capture that bias no longer has the gDNA component's
-  length to cancel it — `quant_accuracy.py` (the pools per row),
-  `ISSUES: the-pseudocount-prior-is-biased-toward-gdna`.
+  the deferred one — `solvability_audit.py`, `policy_benchmark.py --by-class`; the EM's pseudocounts are
+  neutral in their odds, and at `g98` the transcript table leans toward RNA through calibration's RNA floor and
+  the capture likelihood — `quant_accuracy.py` (the pools per row), `ISSUES: rna-prior-floor-at-pure-gdna-loci`.
 - **The deliverable, end to end**: measured per stratum on the rebuilt ladder under the shared length; what
-  remains in scope is the isoform split under capture, where the junction price is noisy within a gene, and the
-  gDNA split the pseudocount biases — `quant_accuracy.py --arm base` above `--arm base_reseed`,
-  `--arm oracle_ruler`, `ISSUES: the-junction-price-is-noisy-within-a-gene`.
+  remains in scope is the capture likelihood's lean toward RNA (the synthetic spans over-called at `g98`), the
+  isoform split under capture, where the junction price is noisy within a gene, and calibration's RNA floor at
+  `g98` — `quant_accuracy.py --arm base` above `--arm base_reseed`, `--arm oracle_ruler`,
+  `ISSUES: the-junction-price-is-noisy-within-a-gene`.
 - **Fragment lengths**: closed, both halves — `calibration/fl.py`, `gdna_density.py`; watch
   `ISSUES: capture-degeneracy-standing-risk`.
 - **gDNA strand overdispersion**: robust to the annotation (`EQUATIONS.md` §6a–§6c); on real data read
@@ -66,21 +68,17 @@ pseudocount**, now uncancelled on capture.
 
 ## Next — the order
 
-1. **The junction price's precision within a gene** — the capture efficiency of a splice junction inside a
-   multi-exonic transcript, imputed only from the regions and boundaries within one fragment of it and never
-   pooled across junctions, because some junctions are probed and some are not (owner, 2026-09-23;
-   `ISSUES: pooling-junctions`); judged with no EM by the within-gene spread beside the class scale
-   (`ruler_vs_truth.py --scale`, `TRAPS: judge-a-ruler-by-its-within-gene-spread`), then on the transcript table
-   per stratum (`ISSUES: the-junction-price-is-noisy-within-a-gene`).
-2. **The pseudocount** — now uncancelled on capture; its repair is taken with the per-transcript prior, through
-   the lane that exists (`ISSUES: the-pseudocount-prior-is-biased-toward-gdna`,
-   `ISSUES: per-transcript-prior-lane`), judged on the pools per row first and the transcript table second, `g98`
-   and the zero controls beside.
-3. **The release** — `docs/PUBLISHING.md` is the procedure; what gates it is the state: the deliverable
+1. **The residuals, one issue at a time** (owner, 2026-09-24): the capture likelihood's lean toward RNA, then
+   calibration's RNA floor at pure-gDNA loci (`ISSUES: rna-prior-floor-at-pure-gdna-loci`) and the pseudocount's
+   strength (`ISSUES: the-pseudocount-strength-is-not-derived`), each judged on the pools per row first and the
+   transcript table second, the zero controls beside. Then the deferred features: splicing artifacts
+   (`ISSUES: splicing-artifacts`) and multimappers (`ISSUES: multimapper-intergenic-alignments`,
+   `ISSUES: multimapper-blind-support`), on the aligned ladder.
+2. **The release** — `docs/PUBLISHING.md` is the procedure; what gates it is the state: the deliverable
    measured per stratum, the zero rows clean, the suite at its standing count, `preflight.py --full` green, the
    standing risks re-read, and the manual true of what ships.
 
-**Parked, each with its entry**: the AMBIG slots' remaining defects (`ISSUES: gdna-landscape-trains-on-false-positives`,
+**Parked, each with its entry**: the junction price's precision within a gene, the sum accepted for now (owner, 2026-09-23; `ISSUES: the-junction-price-is-noisy-within-a-gene`) · the AMBIG slots' remaining defects (`ISSUES: gdna-landscape-trains-on-false-positives`,
 `ISSUES: the-tilt-census-as-an-instrument`, `ISSUES: the-atom-at-an-unwitnessed-both-strand-slot`) · the intron's own
 solve on unstranded capture-OFF · the message policy's open cases (`ISSUES: two-sided-exon-row`,
 `ISSUES: flux-floor-dispersion`, `ISSUES: message-layer-open-cases`, `ISSUES: refit-vs-message-arbitration`) ·

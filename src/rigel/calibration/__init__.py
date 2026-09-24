@@ -3,7 +3,7 @@
 This package recovers the library-wide gDNA contamination model and the
 per-region deconvolved mass from the accumulator payload. ``rigel quant``
 calls :func:`calibrate`; the result feeds :func:`assemble_priors`, which
-produces the per-locus EM priors.
+produces the per-locus gDNA count and length the EM's prior is built from.
 
 This module is pure re-exports; implementations live in the submodules.
 """

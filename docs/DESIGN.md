@@ -560,27 +560,62 @@ FRAGMENT LENGTH — outermost start to outermost end — never `min_gap` (`test_
 distinction). What it cost while wrong: 4,087 gDNA fragments per condition, every one a crosser
 (`TRAPS: a-transcript-predicate-must-not-silently-drop-a-molecule`).
 
-### 3.1c The prior arbitrates the unspliced pool, and its strength has no knob (owner, 2026-08-09/10)
+### 3.1c The prior's odds are calibration's gDNA share of the locus, and its strength has no knob (owner, 2026-08-09/10; the odds AMENDED 2026-09-24)
 
-> **A spliced fragment is pure RNA and never receives a gDNA candidate** (`em_solver.cpp`:
-> `has_gdna = !is_spliced && isfinite(gdna_ll)`), so it must not enter the pool-level prior. An unspliced
-> intergenic fragment has no transcript candidate and never becomes an EM unit. What the prior arbitrates
-> is exactly the unspliced fragments inside transcript bounds.
+> **The EM's gDNA share is gDNA's share of every fragment in the locus** (owner, 2026-09-24). The
+> deterministic spliced fragments skip the E-step but enter every M-step, and a transcript's length counts its
+> spliced start positions, so the prior is neutral iff `P_g : P_R = G : (N − G)` over the units plus the
+> deterministic fragments (`EQUATIONS.md` §9b.3). The EM builds both pseudocounts from calibration's gDNA count
+> and its own counts, `P_g = U·min(G_c/N_c, 1)` and `P_R = U − P_g`, the share taken over the `N_c` fragments
+> calibration counts from (`pipeline.em_pseudocounts`). Calibration's RNA count does not enter, so the two
+> stages never have to agree on which fragments are spliced.
 
-Putting spliced RNA into `a_r` would penalise gDNA with fragments it could never have won; measured
-against the population it describes, the shipped claim `phi = a_g/(a_g+a_r)` is exact to ≤ 5e-4. The
-injection is population-matched by algebra: `R = n_rna + a_r = S_r + (U_r + a_r)` puts the pseudo-count
-on the unspliced RNA, and `out[i] = raw[i]·(1 + a_r/n_rna)` is a uniform scale that changes no
-transcript's share of RNA. The crossing→fragment conversion `q = mass/count` is population-blind (gDNA
-crosses boundaries in long intergenic regions where `q → 1`); it dilutes to `Δphi` ≤ +0.006 on the total
-prior — recorded, not fixed (`TRAPS: a-pooled-conversion-applied-per-component`).
+What this replaced: `a_g : a_r` were calibration's gDNA and UNSPLICED RNA counts, on the argument that a
+spliced fragment, which never receives a gDNA candidate, "could never have been won" by gDNA. That confused the
+E-step with θ. Stating the unspliced split as the whole pool's leaned toward gDNA in proportion to the spliced
+share. On the 16-condition ladder (fractional, 2026-09-24) the old rule over-called gDNA at `g05` / `g50` in
+every in-scope stratum, by +24.6k to +225.7k fragments; at `g50 ss.99 ON` the synthetic spans read 0.28× their
+truth. With the count form those rows read −1.2k to −29.4k, the spans read 1.01×, and gene error at `g50`
+falls 18.3k → 14.4k, 13.6k → 11.4k and 102.6k → 70.2k. The transcript table moves by under 2 %.
 
-> **The prior's strength is exactly one pseudo-fragment per real unspliced fragment, by construction, and
-> there is deliberately no knob** (owner, 2026-08-10).
+`g98` gets worse in every stratum: −18.7k → −62.8k, −3.1k → −37.8k and −54.2k → −118.3k. The old lean was
+offsetting two other errors: `ISSUES: rna-prior-floor-at-pure-gdna-loci`, and the capture likelihood's own lean
+toward RNA. The owner accepted the count form and ruled to work on those residuals afterwards (2026-09-24).
 
-It follows from the conservation identity — `a_g + a_r` IS the locus's conserved unspliced count — and is
-measured at `Σa/Σpool = 0.999–1.000`. The MAP posterior is a 50/50 blend of calibration and the EM's own
-evidence; where calibration is wrong by half a unit, half the answer is too.
+> **The prior's strength is one pseudo-fragment per gDNA-eligible unit, and there is deliberately no knob**
+> (owner, 2026-08-10; restated 2026-09-24).
+
+`P_g + P_R = U` is the total the replaced rule carried: its sum was calibration's unspliced count, measured at
+0.999–1.000 of the pool. It is not derived. A strength that counts the locus's fragments once would need
+calibration's precision from outside the locus, which has no capture-on form
+(`ISSUES: a-count-once-density-prior-for-the-strength`; `ISSUES: the-pseudocount-strength-is-not-derived`).
+
+### 3.1d Which alignments gDNA may explain, and when it competes (owner, 2026-09-24)
+
+> **gDNA can explain an alignment it can produce: unspliced, implicit (an unspliced pair whose mate gap could
+> hold an annotated intron) and artifact (every junction rejected by the blacklist, so unspliced). A
+> multimapper can be gDNA if any of its alignments can. A sequenced junction that survived the blacklist
+> cannot. gDNA then COMPETES exactly as an RNA candidate does: it is pruned when its likelihood falls more than
+> `-log(pruning_min_posterior)` below the unit's best RNA candidate.** (`scoring.cpp`'s `gdna_can_explain`
+> and `gdna_competes`, one rule for a single fragment and for every hit of a multimapper.)
+
+gDNA's term is the unspliced term at the footprint whatever the label: the label decides only whether gDNA may
+explain the alignment, and the likelihood decides whether it competes and how much it gets. Excluding a
+candidate asserts its likelihood is zero, so the owner ruled against a yes/no cut on a continuous variable: an
+earlier form limited implicit splices to the maximum fragment length, and the same parameter that prunes RNA
+candidates replaces it — a footprint the gDNA length law cannot produce is pruned at any label. It also keeps
+the prior's strength honest, since the strength counts units that have a gDNA candidate (§3.1c). A multimapper's
+gDNA term is the mean over the alignments gDNA can explain. What this replaced: every label but "unspliced" was
+denied gDNA, and one spliced hit removed gDNA from a multimapper's every hit; the implicit fragments that were
+truly gDNA went to the synthetic spans and the transcripts, and on a one-gene toy that put +6 % to +62 % on an
+annotated transcript at short introns, under every prior (`ISSUES: calibration-and-the-em-disagree-on-what-can-be-gdna`).
+
+A multimapper whose alignments all lie outside genes is intergenic and counted as gDNA. One with an alignment in a
+gene is solved by the EM, and it is compatible with gDNA if any alignment is unspliced — including an intergenic
+one (an unannotated pseudogene), which the scanner does not yet buffer (`ISSUES: multimapper-intergenic-alignments`).
+Calibration still holds artifact fragments and multimappers out of its SAMPLE, never in the other class, and the
+prior's share is read over that sample (§3.1c); bringing multimappers into calibration is
+`ISSUES: multimapper-blind-support`, and editing an artifact's alignment is `ISSUES: splicing-artifacts`.
 
 ### 3.2 One strand convention
 
@@ -1660,8 +1695,9 @@ the efficiencies at the sj's low and high boundaries (§0) less the intron piece
 boundary on its far side. The price is never below 0 and is not clipped at 1
 (`ISSUES: a-junction-price-clipped-at-one`). Only the objects within one fragment of the junction enter (ruling 2
 below), and no panel input: a junction-spanning probe is read from gDNA through the crossings at the sj's two
-boundaries (`ISSUES: ruler-witness-geometry-on-transcript-panels`). Per junction the price is a difference of
-noisy boundary posteriors, and that is the open problem (`ISSUES: the-junction-price-is-noisy-within-a-gene`).
+boundaries (`ISSUES: ruler-witness-geometry-on-transcript-panels`). The within-gene spread the price leaves is
+mostly that capture physics, which no gDNA object sees, and not its posteriors' noise; the owner accepts the sum
+for now (2026-09-23; `ISSUES: the-junction-price-is-noisy-within-a-gene`).
 
 The rulings behind it (owner):
 
@@ -1689,9 +1725,9 @@ The rulings behind it (owner):
 5. **The one shared rule ships** (2026-09-23): "the new implementation is a step forward in the right direction.
    It is now 'one shared rule' for gDNA, synthetic nascent RNA, and annotated RNA." It is kept though the
    ladder's transcript table regresses at `g05` and `g50` stranded × capture ON. The regression is isoform
-   allocation under the junction price's within-gene noise, the next target
-   (`ISSUES: the-junction-price-is-noisy-within-a-gene`), and with this length alone the pseudocount's gDNA bias
-   is no longer cancelled on capture (`ISSUES: the-pseudocount-prior-is-biased-toward-gdna`).
+   allocation under the junction price's within-gene spread, accepted for now (2026-09-23;
+   `ISSUES: the-junction-price-is-noisy-within-a-gene`), and with this length alone the pseudocount's gDNA bias
+   was no longer cancelled on capture; the count form repaired it (2026-09-24, §3.1c).
 
 **The yield's two consumers, and its endpoint** (owner rulings 2026-09-17). The capture-contracted length is a
 YIELD — fragments per unit of abundance — and it enters two places only: the E-step, where every component's

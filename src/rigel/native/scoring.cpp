@@ -35,6 +35,8 @@ using rigel::STRAND_NEG;
 using rigel::SPLICE_UNSPLICED;
 using rigel::SPLICE_SPLICED_UNANNOT;
 using rigel::SPLICE_SPLICED_ANNOT;
+using rigel::SPLICE_IMPLICIT;
+using rigel::SPLICE_ARTIFACT;
 using rigel::vec_to_ndarray;
 using rigel::FRAG_UNAMBIG;
 using rigel::FRAG_AMBIG_SAME_STRAND;
@@ -207,6 +209,29 @@ class NativeFragmentScorer {
         if (flen <= gdna_fl_max_size_)
             return gdna_fl_log_prob_[static_cast<size_t>(flen)];
         return gdna_fl_tail_base_ + (flen - gdna_fl_max_size_) * TAIL_DECAY_LP;
+    }
+
+    /// Can gDNA have produced this alignment? The ONE rule, for a single fragment and for every hit of a
+    /// multimapper alike, before any likelihood is read.
+    ///   UNSPLICED  yes.
+    ///   ARTIFACT   yes: every junction it carried was rejected by the blacklist, so it is unspliced.
+    ///   IMPLICIT   yes: its mate gap is unobserved, so gDNA reads it unbroken at the footprint and a
+    ///              transcript at its own length, and the fragment length tells them apart.
+    ///   SPLICED_ANNOT / SPLICED_UNANNOT  no: a sequenced junction that survived the blacklist.
+    /// Whether gDNA then COMPETES is the likelihood's: its term is the unspliced term at the genomic
+    /// footprint whatever the label, and it is pruned exactly as an RNA candidate is (`gdna_competes`).
+    inline bool gdna_can_explain(int stype) const {
+        return stype == SPLICE_UNSPLICED || stype == SPLICE_ARTIFACT || stype == SPLICE_IMPLICIT;
+    }
+
+    /// The gDNA candidate is kept when its likelihood is within the pruning bound of the unit's best RNA
+    /// candidate — `max_ll_delta_ = -log(pruning_min_posterior)`, the bound every RNA candidate meets within
+    /// its pool — and is otherwise no candidate at all. A footprint the gDNA length law cannot produce is
+    /// pruned by this, with no length rule of its own.
+    /// ⛔ The callers carry the outcome as a bool, never as an infinity tested later: this target is built
+    /// with -ffast-math (CMakeLists.txt), under which `std::isfinite(-inf)` may return true.
+    inline bool gdna_competes(double gdna_ll, double best_rna_ll) const {
+        return best_rna_ll - gdna_ll <= max_ll_delta_;
     }
 
     inline int32_t genomic_to_tx_pos(int32_t genomic_pos,
@@ -409,7 +434,6 @@ private:
         int64_t mm_fid;
         int     mm_n_members;
         std::unordered_map<int32_t, MergedMrna> mm_merged;
-        bool    mm_is_any_spliced;
         int     mm_best_stype;
 
         // Online logsumexp of per-hit gDNA log-liks. The emitted
@@ -435,7 +459,6 @@ private:
               ua_counts(nullptr), ua_ncols(0), t_str(nullptr),
               cand_cur(0), unit_cur(0), det_cur(0),
               mm_fid(-1), mm_n_members(0),
-              mm_is_any_spliced(false),
               mm_best_stype(SPLICE_UNSPLICED),
               mm_gdna_lse_max(0.0),
               mm_gdna_lse_sum(0.0),
@@ -447,7 +470,6 @@ private:
             mm_merged.clear();  // reuses hash bucket allocation
             mm_fid = -1;
             mm_n_members = 0;
-            mm_is_any_spliced = false;
             mm_best_stype = SPLICE_UNSPLICED;
             mm_gdna_lse_max = 0.0;
             mm_gdna_lse_sum = 0.0;
@@ -484,11 +506,7 @@ private:
         int genomic_start_val = cp.g_sta[row];
         bool has_genomic = (genomic_start_val >= 0);
 
-        // Update per-group metadata accumulators
-        if (stype == SPLICE_SPLICED_ANNOT ||
-            stype == SPLICE_SPLICED_UNANNOT) {
-            st.mm_is_any_spliced = true;
-        }
+        // Update per-group metadata accumulators (the reported splice type only)
         if (stype == SPLICE_SPLICED_ANNOT) {
             st.mm_best_stype = SPLICE_SPLICED_ANNOT;
         } else if (stype == SPLICE_SPLICED_UNANNOT &&
@@ -496,17 +514,15 @@ private:
             st.mm_best_stype = SPLICE_SPLICED_UNANNOT;
         }
 
-        // gDNA per-hit contribution. Only truly-unspliced hits enter the
-        // gDNA hypothesis. This gate also excludes SPLICE_IMPLICIT
-        // and SPLICE_ARTIFACT classes (any non-zero splice_type is held out
-        // of gDNA). Effective-length normalization is component-level in the
-        // EM; the scorer emits log h_G(ell_f) plus non-length score terms.
-        // At flush time:
+        // gDNA per-hit contribution, from every hit gDNA can explain (`gdna_can_explain`). A spliced hit
+        // no longer removes gDNA from the group: its other hits are places gDNA could have come from.
+        // Effective-length normalization is component-level in the EM; the scorer emits log h_G(ell_f)
+        // plus non-length score terms. At flush time:
         //    gdna_log_lik = lse_max + log(lse_sum) - log(nh_gdna)
-        // which equals  log((1/NH) * sum_h exp(log p_h^gDNA)).
-        if (stype == SPLICE_UNSPLICED && n_cand > 0)
+        // the mean over the hits gDNA can explain (nh_gdna of them), not over NH.
+        int32_t gfp_val = cp.g_fp[row];
+        if (gdna_can_explain(stype) && n_cand > 0)
         {
-            int32_t gfp_val  = cp.g_fp[row];
             double gdna_fl    = gdna_frag_len_log_lik(gfp_val);
             double hit_log_ll = gdna_fl + gdna_log_sp + LOG_HALF + log_nm;
             lse_update(st.mm_gdna_lse_max,
@@ -667,18 +683,22 @@ private:
 
             st.v_stype->push_back(
                 static_cast<uint8_t>(st.mm_best_stype));
-            st.v_is_spliced->push_back(
-                st.mm_is_any_spliced ? 1 : 0);
 
-            // Emit one per-unit gDNA log-lik over the full MM group.
-            // The EM applies the per-locus gDNA effective length.
-            if (!st.mm_is_any_spliced &&
-                st.mm_nh_gdna > 0 &&
+            // One per-unit gDNA log-lik over the group's gDNA-explainable hits, kept when it competes
+            // with the group's best RNA candidate. The EM applies the per-locus gDNA effective length.
+            double final_gdna_ll = 0.0;
+            bool has_gdna = false;
+            if (st.mm_nh_gdna > 0 &&
                 st.mm_gdna_lse_has &&
                 st.mm_gdna_lse_sum > 0.0) {
-                double final_gdna_ll = st.mm_gdna_lse_max
-                                     + std::log(st.mm_gdna_lse_sum)
-                                     - std::log((double)st.mm_nh_gdna);
+                final_gdna_ll = st.mm_gdna_lse_max
+                              + std::log(st.mm_gdna_lse_sum)
+                              - std::log((double)st.mm_nh_gdna);
+                has_gdna = gdna_competes(final_gdna_ll, best_ll);
+            }
+            // "spliced" = gDNA is no candidate: the group is certified RNA.
+            st.v_is_spliced->push_back(has_gdna ? 0 : 1);
+            if (has_gdna) {
                 st.v_gdna_ll->push_back(static_cast<float>(final_gdna_ll));
                 st.v_gmid->push_back(st.mm_gmid_first);
             } else {
@@ -939,17 +959,20 @@ private:
                 st.v_stype->push_back(
                     static_cast<uint8_t>(stype));
 
-                bool is_spl =
-                    (stype != SPLICE_UNSPLICED);
-                st.v_is_spliced->push_back(
-                    is_spl ? 1 : 0);
-
                 // Non-MM path (NH=1 or ambig-same-strand): single-term gDNA
-                // expression. EM applies per-locus gDNA effective length.
-                if (!is_spl && best_t >= 0) {
-                    double gdna_fl =
-                        gdna_frag_len_log_lik(genomic_footprint);
-                    double gdna_ll = gdna_fl + gdna_log_sp + LOG_HALF + log_nm;
+                // expression, kept when it competes with the unit's best RNA
+                // candidate. EM applies per-locus gDNA effective length.
+                double gdna_ll = 0.0;
+                bool has_gdna = false;
+                if (gdna_can_explain(stype) && best_t >= 0) {
+                    gdna_ll = gdna_frag_len_log_lik(genomic_footprint) + gdna_log_sp + LOG_HALF + log_nm;
+                    has_gdna = gdna_competes(gdna_ll, best_ll);
+                }
+                // "spliced" = gDNA is no candidate: certified RNA.
+                st.v_is_spliced->push_back(
+                    has_gdna ? 0 : 1);
+
+                if (has_gdna) {
                     st.v_gdna_ll->push_back(static_cast<float>(gdna_ll));
                     if (has_genomic) {
                         st.v_gmid->push_back(

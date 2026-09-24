@@ -55,7 +55,7 @@ calibration mechanism on the transcript table stays REFUSED for the reason above
 | | what is scored | against | instrument |
 |---|---|---|---|
 | **primary** | the `CalibrationResult` itself: the six deconvolved arrays and the effective-length ruler derived from them | `O`, the same result with only the deconvolved arrays replaced by the origin-split truth (at capture-OFF it carries no enriched mode and is the no-enrichment null) | `calibration_vs_oracle.py` — read `ruler_n_moved`, never the aggregate |
-| **primary, the prior** | the prior calibration ships — `gdna_prior_count`, `rna_prior_count`, `gdna_eff_len` per multi-locus | `O`, the same assembler fed the origin-split truth masses | `prior_vs_oracle.py` (`P − O`) |
+| **primary, the prior** | what calibration hands the EM's prior — `gdna_count`, `gdna_eff_len` per multi-locus (the EM forms the pseudocounts from `gdna_count` and its own fragment count) | `O`, the same assembler fed the origin-split truth masses | `prior_vs_oracle.py` (`P − O`) |
 | **primary, per object** | each region's and boundary's own `f_g`, and whether it is confidently wrong | the oracle payload: the production accumulator run on the BAM split by true origin | `solvability_audit.py` |
 | **primary, one number** | the library `f_gdna` | the simulator's per-fragment truth | `calibration_vs_oracle.py` — each row's `pools` block, `P_gdna` against `true_gdna` |
 | **controls** | zero gDNA, where truth is a constant | 0.000 exactly | the `g00` rung of the ladder, read on its own row by `calibration_vs_oracle.py` and `quant_accuracy.py` |

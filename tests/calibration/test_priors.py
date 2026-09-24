@@ -55,8 +55,8 @@ def _result(
     arrays — but the boundary axis is still the RIGHT LENGTH, because a boundary axis inconsistent with its
     own region axis is a mis-shaped fixture, not a "no boundaries" one.
 
-    The RNA supports default to the gDNA ones. ``assemble_priors`` reads no RNA support — the RNA
-    prior is a conserved fragment count — so they only fill the result's fields.
+    The RNA supports default to the gDNA ones. ``assemble_priors`` reads no RNA count and no RNA support —
+    calibration's RNA count does not enter the EM — so they only fill the result's fields.
 
     ``efficiency`` / ``efficiency_boundary`` are the per-object capture efficiencies (1 everywhere by
     default, as a field with no reference must carry). ``boundary_share`` is gDNA's conserved share at each
@@ -203,16 +203,16 @@ def test_factor_one_under_uniform_gdna():
     ra = _regions([0, 120, 320], [120, 320, 400])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 400)])])
     np.testing.assert_allclose(priors.gdna_eff_len, [span], rtol=1e-9)
-    # The prior is a CONSERVED FRAGMENT COUNT read out of the bank: the contained mass ρ·Σregion_eff
+    # The count is a CONSERVED FRAGMENT COUNT read out of the bank: the contained mass ρ·Σregion_eff
     # (8.0) plus the crossing mass ρ·Σboundary_eff (4.8) rescaled by q, which this fixture sets to the
     # identity 1.0 — flanks exceeding every fragment length, where one crossing IS one fragment.
     # The wrong answer it must not equal is `ρ · span_bp` = 8.0, a density rule that reaches fragment
     # units by dividing the mass by its own opportunity and re-integrating: it drops the 4.8 of
     # crossing fragments entirely, because a 0-bp boundary contributes no genomic span to integrate.
     np.testing.assert_allclose(
-        priors.gdna_prior_count, [rho * (sum(region_eff) + sum(boundary_eff))], rtol=1e-9
+        priors.gdna_count, [rho * (sum(region_eff) + sum(boundary_eff))], rtol=1e-9
     )
-    assert not np.isclose(priors.gdna_prior_count[0], rho * 400.0)  # not the ρ·span_bp density rule
+    assert not np.isclose(priors.gdna_count[0], rho * 400.0)  # not the ρ·span_bp density rule
 
 
 def test_factor_one_holds_for_any_density():
@@ -270,7 +270,7 @@ def test_a_boundary_enters_the_length_at_gdnas_conserved_share_never_the_counts_
         [_ml(0, [(0, 0, 120)])],
     )
     np.testing.assert_allclose(skewed.gdna_eff_len, [110.0], rtol=1e-12)
-    assert skewed.gdna_prior_count[0] > priors.gdna_prior_count[0] + 1.0
+    assert skewed.gdna_count[0] > priors.gdna_count[0] + 1.0
     assert not np.isclose(priors.gdna_eff_len[0], 30.0 + 0.5 * 360.0)
 
 
@@ -284,14 +284,14 @@ def test_the_length_counts_each_crossing_start_once_as_the_count_counts_each_fra
     (the executable specification is ``tests/native/_accumulator_reference.py``: a crossing fragment
     deposits a count of +1 at EVERY boundary it crosses and a mass summing to 1 across them).
 
-    The pseudocount converts a boundary's incidence count to fragments by ``q = mass / count``. The
+    The count converts a boundary's incidence count to fragments by ``q = mass / count``. The
     length reads each boundary's conserved share (`effective_length.conserved_cut_shares`), which splits a
     crossing start's unit over the boundaries its fragment crosses, so a start position is counted once
     however many boundaries it crosses. Three 40-bp pieces inside a long reference with fragments longer
     than a piece: every crossing start that spans a piece would otherwise be counted at both of its
     boundaries, and the locus's gDNA would read at HALF the field's density.
 
-    Under a uniform field of one fragment per start position the pseudocount is the number of distinct
+    Under a uniform field of one fragment per start position the count is the number of distinct
     starts overlapping the locus, and so must the length be: their ratio is the field's density, 1.
     """
     from rigel.calibration.effective_length import (
@@ -349,11 +349,11 @@ def test_the_length_counts_each_crossing_start_once_as_the_count_counts_each_fra
         mass_per_crossing=q,
     )
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 400, 520)])])
-    # the pseudocount already counts each fragment once
-    np.testing.assert_allclose(priors.gdna_prior_count, [distinct_starts_in_locus], rtol=1e-12)
+    # the count already counts each fragment once
+    np.testing.assert_allclose(priors.gdna_count, [distinct_starts_in_locus], rtol=1e-12)
     # ...and so must the length: the density under a uniform field is the field's, 1
     np.testing.assert_allclose(priors.gdna_eff_len, [distinct_starts_in_locus], rtol=1e-12)
-    np.testing.assert_allclose(priors.gdna_prior_count / priors.gdna_eff_len, [1.0], rtol=1e-12)
+    np.testing.assert_allclose(priors.gdna_count / priors.gdna_eff_len, [1.0], rtol=1e-12)
     # PERTURBATION: the incidence total counts a spanning start at both of its boundaries
     incidences = float(S_r[1:4].sum() + S_e.sum())
     assert incidences > distinct_starts_in_locus * 1.2
@@ -378,13 +378,10 @@ def test_every_OBJECT_has_the_same_density_under_a_uniform_field():
 # --- mass / projection (independent of the support choice) ----------------------------------------
 
 
-def test_single_locus_projects_both_components():
-    # The priors are CONSERVED FRAGMENT COUNTS. No crossing mass here, so both are the contained
-    # mass alone — one deposit per contained fragment, nothing to convert:
-    #   gDNA: Σm = 4.5      (a ρ·span density rule would give 4.5/750 · 450 = 2.7)
-    #   RNA : Σm = 12.0     (and 7.2)
-    # The g:r RATIO is 0.375 either way, because a common divisor cancels from a ratio. That is
-    # exactly why the ratio is NOT what discriminates the two rules — the totals are.
+def test_single_locus_projects_the_gdna_count():
+    # The count is a CONSERVED FRAGMENT COUNT. No crossing mass here, so it is the contained mass
+    # alone — one deposit per contained fragment, nothing to convert: Σm = 4.5, where a ρ·span density
+    # rule would give 4.5/750 · 450 = 2.7. The RNA mass beside it (Σm = 12.0) is not read.
     cal = _result(
         region_g=[1.0, 2.0, 1.5],
         region_r=[3.0, 4.0, 5.0],
@@ -393,11 +390,7 @@ def test_single_locus_projects_both_components():
     )
     ra = _regions([0, 100, 300], [100, 300, 450])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 450)])])
-    np.testing.assert_allclose(priors.rna_prior_count, [12.0])
-    np.testing.assert_allclose(priors.gdna_prior_count, [4.5])
-    np.testing.assert_allclose(
-        priors.gdna_prior_count[0] / priors.rna_prior_count[0], 4.5 / 12.0, rtol=1e-9
-    )
+    np.testing.assert_allclose(priors.gdna_count, [4.5])
     span = (100.0 + 200.0 + 150.0) + 2 * 150.0
     assert 0.0 < priors.gdna_eff_len[0] <= span + 1e-9
 
@@ -417,17 +410,17 @@ def test_gdna_mass_conservation_regions_plus_boundaries():
     ra = _regions([0, 100, 200], [100, 200, 300])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])])
     # OBJECT conservation is what this test is named for: the locus covers every region, so it collects
-    # every region AND every boundary, and the prior is their total — nothing dropped, nothing double-counted.
-    # And here the prior equals the raw sum, 11.0, which is NOT evidence that it *is* a raw sum.
+    # every region AND every boundary, and the count is their total — nothing dropped, nothing double-counted.
+    # And here the count equals the raw sum, 11.0, which is NOT evidence that it *is* a raw sum.
     # This fixture's q is the identity 1.0, so incidence and fragment coincide by construction and this
     # test CANNOT tell the two rules apart. The discrimination lives in the q ≠ 1 test below and in
     # `test_prior_units.py`; asserting 11.0 here would otherwise read as a ruling that it is a raw sum.
-    np.testing.assert_allclose(priors.gdna_prior_count, [11.0])
+    np.testing.assert_allclose(priors.gdna_count, [11.0])
     np.testing.assert_allclose(
         cal.boundary_mass_per_crossing, 1.0
     )  # ...the reason it coincides, pinned
     np.testing.assert_allclose(
-        priors.gdna_prior_count.sum(), cal.count_gdna_region.sum() + cal.count_gdna_boundary.sum()
+        priors.gdna_count.sum(), cal.count_gdna_region.sum() + cal.count_gdna_boundary.sum()
     )
     assert contended_boundaries(ra, [_ml(0, [(0, 0, 300)])], 1).size == 0  # nothing double-claimed
 
@@ -440,7 +433,6 @@ def test_the_crossing_mass_is_rescaled_by_the_conserved_share():
     ``[0.5, 0.25]``: a fragment crossing boundary 0 deposited on 2 objects on average, boundary 1 on 4.
 
         gDNA = 3 (contained, one deposit each) + 4·0.5 + 8·0.25 = 7.0     raw sum would be 15.0
-        RNA  = 6                               + 4·0.5 + 4·0.25 = 9.0     raw sum would be 14.0
 
     The CONTAINED term must not be rescaled — a contained fragment touches exactly one region and is
     already a count. Rescaling it too would give 3·? and is the other wrong answer this pins out.
@@ -456,19 +448,15 @@ def test_the_crossing_mass_is_rescaled_by_the_conserved_share():
     )
     ra = _regions([0, 100, 200], [100, 200, 300])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])])
-    np.testing.assert_allclose(priors.gdna_prior_count, [7.0])
-    np.testing.assert_allclose(priors.rna_prior_count, [9.0])
-    assert not np.isclose(priors.gdna_prior_count[0], 15.0)  # not the raw incidence sum
-    assert not np.isclose(priors.rna_prior_count[0], 14.0)
+    np.testing.assert_allclose(priors.gdna_count, [7.0])
+    assert not np.isclose(priors.gdna_count[0], 15.0)  # not the raw incidence sum
 
 
-def test_spliced_mass_withheld_from_rna_prior():
-    # A spliced fragment has no gDNA candidate in the EM (gDNA does not splice) → it is guaranteed-RNA
-    # and assigned directly, so it must NOT load rna_prior_count. Region RNA [3,4,5] (Σ=12) plus boundary RNA
-    # [4,4] of which [1,3] is spliced ⇒ RNA mass = 12 + (4−1) + (4−3) = 16 (NOT 20).
-    # q is the identity here, so the conserved fragment count is that 16 unchanged; gDNA is its
-    # contained 4.5 (no crossing mass). The WITHHOLDING is what this test pins: without it the RNA
-    # mass would be 20 and the prior 20.0.
+def test_the_rna_mass_spliced_or_not_never_enters_the_gdna_count():
+    # Calibration's RNA count does not reach the EM at all — the EM's RNA side is its own count of the
+    # locus's fragments less this one (`tests/test_em_pseudocounts.py`) — so none of the RNA mass here,
+    # region RNA [3,4,5] beside boundary RNA [4,4] of which [1,3] is spliced, may load the gDNA count.
+    # q is the identity here and there is no gDNA crossing mass, so the count is gDNA's contained 4.5.
     cal = _result(
         region_g=[1.0, 2.0, 1.5],
         region_r=[3.0, 4.0, 5.0],
@@ -479,16 +467,12 @@ def test_spliced_mass_withheld_from_rna_prior():
     )
     ra = _regions([0, 100, 200], [100, 200, 300])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])])
-    np.testing.assert_allclose(priors.rna_prior_count, [16.0])
-    np.testing.assert_allclose(priors.gdna_prior_count, [4.5])
-    assert priors.rna_prior_count[0] < 20.0  # the spliced mass really is withheld
+    np.testing.assert_allclose(priors.gdna_count, [4.5])
 
 
-def test_the_sj_flux_does_NOT_enter_the_rna_prior():
-    """A sj fragment is certified RNA in exactly the sense a spliced crossing is withheld for — it
-    has no gDNA candidate in the EM — so counting it would load the RNA side of a split that
-    arbitrates only unspliced fragments. A locus whose RNA is fully spliced should get a near-zero
-    ``rna_prior_count``: its unspliced fragments really are gDNA or nascent.
+def test_the_sj_flux_does_NOT_enter_the_gdna_count():
+    """A sj fragment is certified RNA — it has no gDNA candidate in the EM — so it has no place in
+    calibration's count of the locus's gDNA fragments.
 
     The result carries the flux for QC (`test_calibrate`); ``assemble_priors`` must ignore it, and
     that is a deliberate asymmetry rather than an oversight.
@@ -508,8 +492,7 @@ def test_the_sj_flux_does_NOT_enter_the_rna_prior():
     ml = [_ml(0, [(0, 0, 200)])]
     quiet_priors = assemble_priors(base, ra, ml)
     loud_priors = assemble_priors(loud, ra, ml)
-    np.testing.assert_array_equal(quiet_priors.rna_prior_count, loud_priors.rna_prior_count)
-    np.testing.assert_array_equal(quiet_priors.gdna_prior_count, loud_priors.gdna_prior_count)
+    np.testing.assert_array_equal(quiet_priors.gdna_count, loud_priors.gdna_count)
 
 
 def test_region_split_between_two_loci():
@@ -518,8 +501,7 @@ def test_region_split_between_two_loci():
     cal = _result(region_g=[5.0], region_r=[10.0], region_eff=[100.0])
     ra = _regions([0], [100])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 50)]), _ml(1, [(0, 50, 100)])])
-    np.testing.assert_allclose(priors.rna_prior_count, [5.0, 5.0])
-    np.testing.assert_allclose(priors.gdna_prior_count, [2.5, 2.5])
+    np.testing.assert_allclose(priors.gdna_count, [2.5, 2.5])
     np.testing.assert_allclose(priors.gdna_eff_len, [50.0, 50.0])
 
 
@@ -528,8 +510,7 @@ def test_intergenic_region_dropped():
     cal = _result(region_g=[1.0, 50.0], region_r=[5.0, 99.0], region_eff=[100.0, 100.0])
     ra = _regions([0, 200], [100, 300])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 100)])])
-    np.testing.assert_allclose(priors.rna_prior_count, [5.0])  # the intergenic 99 is gone
-    np.testing.assert_allclose(priors.gdna_prior_count, [1.0])
+    np.testing.assert_allclose(priors.gdna_count, [1.0])  # the intergenic 50 is gone
     assert priors.gdna_eff_len[0] > 0.0
 
 
@@ -537,7 +518,7 @@ def test_a_locus_keeps_the_outer_boundary_against_its_INTERGENIC_flank():
     """A locus's far-left outer boundary has an intergenic left flank — a region the projection drops.
 
     A fragment crossing that boundary overlaps the locus, so it is one of its EM candidates and its
-    mass must load the locus's prior. Folding a boundary's mass into one flank region loses this
+    mass must load the locus's count. Folding a boundary's mass into one flank region loses this
     boundary into the dropped intergenic flank, and then needs an explicit intergenic re-key to get
     it back; there is nothing to re-key when the boundary is its own object touching region 1.
 
@@ -555,22 +536,21 @@ def test_a_locus_keeps_the_outer_boundary_against_its_INTERGENIC_flank():
     ra = _regions([0, 100, 200], [100, 200, 300], signature=[0, BIT_EXON_POS, BIT_EXON_POS])
     ml = [_ml(0, [(0, 100, 300)])]  # the locus is regions 1-2 only
     priors = assemble_priors(cal, ra, ml)
-    np.testing.assert_allclose(priors.gdna_prior_count, [10.0])  # 7 + 3, nothing lost
+    np.testing.assert_allclose(priors.gdna_count, [10.0])  # 7 + 3, nothing lost
     assert contended_boundaries(ra, ml, 1).size == 0
 
 
 # --- an evidence-free locus -----------------------------------------------------------------------
 
 
-def test_evidence_free_region_gives_zero_gdna_prior():
-    # No observed gDNA ⇒ zero gDNA pseudocount. The length reads supports and efficiencies, never the
+def test_evidence_free_region_gives_zero_gdna_count():
+    # No observed gDNA ⇒ zero gDNA count. The length reads supports and efficiencies, never the
     # mass, so it is still the effective span (one region at efficiency 1 ⇒ span = region_eff = 100) —
     # never a tiny length.
     cal = _result(region_g=[0.0], region_r=[0.0], region_eff=[100.0])
     ra = _regions([0], [100])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 100)])])
-    np.testing.assert_allclose(priors.rna_prior_count, [0.0])
-    np.testing.assert_allclose(priors.gdna_prior_count, [0.0])
+    np.testing.assert_allclose(priors.gdna_count, [0.0])
     np.testing.assert_allclose(priors.gdna_eff_len, [100.0])  # the span: the length reads no mass
 
 
@@ -596,8 +576,9 @@ def _stray_on_a_dead_boundary_cal(stray: float) -> CalibrationResult:
 
 def test_stray_mass_on_a_zero_opportunity_boundary_never_reaches_the_eff_len():
     """The length reads the efficiencies and the reach, never a boundary's mass: stray mass on a
-    zero-opportunity boundary moves the length not at all, while the prior still counts it — its other
-    half is `test_prior_units.test_mass_on_a_zero_opportunity_object_STILL_COUNTS_because_a_count_has_no_divisor`.
+    zero-opportunity boundary moves the length not at all, while the count still counts it, because a count
+    has no divisor — the mass is fragments the accumulator really deposited. Both halves are asserted here:
+    alone, either one reads as a rule about the whole assembly.
     ``mass > 0`` with ``support == 0`` is an ordinary configuration: ``contained_eff_length`` is exactly
     0 wherever an object is shorter than that component's shortest fragment, a fifth of the regions on a
     real chromosome, and the solver can still put mass there because ``f_g`` is an inference."""
@@ -611,9 +592,9 @@ def test_stray_mass_on_a_zero_opportunity_boundary_never_reaches_the_eff_len():
         np.testing.assert_allclose(loud.gdna_eff_len, [quiet], rtol=1e-12)
         # non-vacuity: the locus is genuinely contracted (region 1 at efficiency 0.2)
         assert quiet < 6 * 100.0 + 5 * 50.0
-        # ...and the stray mass is NOT silently discarded everywhere — the prior still counts it.
-        assert loud.gdna_prior_count[0] == pytest.approx(
-            assemble_priors(_stray_on_a_dead_boundary_cal(0.0), ra, ml).gdna_prior_count[0] + stray
+        # ...and the stray mass is NOT silently discarded everywhere — the count still counts it.
+        assert loud.gdna_count[0] == pytest.approx(
+            assemble_priors(_stray_on_a_dead_boundary_cal(0.0), ra, ml).gdna_count[0] + stray
         )
 
 
@@ -621,8 +602,7 @@ def test_empty_multiloci_returns_empty():
     cal = _result(region_g=[1.0], region_r=[1.0], region_eff=[100.0])
     ra = _regions([0], [100])
     priors = assemble_priors(cal, ra, [])
-    assert priors.rna_prior_count.shape == (0,)
-    assert priors.gdna_prior_count.shape == (0,)
+    assert priors.gdna_count.shape == (0,)
     assert priors.gdna_eff_len.shape == (0,)
 
 

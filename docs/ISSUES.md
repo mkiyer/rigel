@@ -17,30 +17,52 @@ Ordered by priority. An entry says what is open and the number a ranking turns o
 what was ruled is `DESIGN.md`.
 
 ### the-junction-price-is-noisy-within-a-gene
-`priority: NOW — the next session's target (owner, 2026-09-23: improve the capture efficiency of splice junctions within multi-exonic transcripts) · kind: defect · 2026-09-23`
-How should a junction be priced, given that the accurate price is noisy and the precise one is biased? The one
-shared length rule (`DESIGN.md` §7.2, `EQUATIONS.md` §11) prices a junction by conservation of bases,
-`c_junction = c_lo + c_hi − ½(c_intron,lo + c_intron,hi)` (`capture_eff_length._cut_efficiencies`).
-It is right on average — it is what puts the transcripts on the gDNA component's scale, and it reads 0.959 of the
-simulator's own junction capture (`ISSUES: ruler-witness-geometry-on-transcript-panels`) — but it is a difference of
-noisy boundary posteriors and each junction's error is its own, so isoforms that differ by a junction differ by
-independent noise and the EM splits them by it. The within-gene sd of log(L / Y) about each gene's mean (annotated
-multi-exon transcripts with ≥ 20 fragments, no EM) beside the class mean L / Y ×10⁻³, `g05` / `g50 ss.99 ON`:
+`priority: PARKED — the sum is accepted for now (owner, 2026-09-23); the pseudocount's odds are fixed since (2026-09-24, ISSUES: the-pseudocount-prior-is-biased-toward-gdna, CLOSED) · kind: defect · 2026-09-23`
+The one shared length rule (`DESIGN.md` §7.2, `EQUATIONS.md` §11) prices a junction by conservation of bases,
+`c_junction = c_lo + c_hi − ½(c_intron,lo + c_intron,hi)` (`capture_eff_length._cut_efficiencies`). It is right on
+average — it is what puts the transcripts on the gDNA component's scale — but it widens the within-gene spread of
+the transcripts' lengths, and the EM splits isoforms by that spread. The within-gene sd of log(L / Y) about each
+gene's mean (annotated multi-exon transcripts with ≥ 20 fragments, no EM) beside the class mean L / Y ×10⁻³,
+`g05` / `g50 ss.99 ON`:
 
 | the junction priced by | within-gene sd | class mean |
 |---|---|---|
 | the per-base rule, before the port (`ISSUES: the-per-base-rule-for-every-component`) | 0.052 / 0.040 | 0.944 / 0.957 |
 | its adjacent pieces (`ISSUES: the-junction-price-at-its-neighbours-mean`) | 0.057 / 0.041 | 0.936 / 0.965 |
 | the sum, SHIPPED | 0.072 / 0.057 | 1.076 / 1.112 |
-| the sum, the true gDNA on every object | 0.064 / 0.046 | 1.109 / 1.160 |
 
 On the shipped tree (`ruler_vs_truth.py --scale`, width step 1) the gDNA component and the synthetic spans read
-1.108 / 1.118 at `g05` and 1.131 / 1.141 at `g50`, 3.9 % / 2.6 % from one scale with the isoforms. The
-junction-probed transcripts widen as the class does (0.039 under the per-base rule against 0.062 under the sum
-at `g05`). Even the true per-object gDNA counts leave the sum noisier than the per-base rule, so part of the
-spread is the rule's (realized Poisson counts and its structural residual) and part calibration's; the exon-edge
-cuts are not the blocker. Giving back the scale is not free: the synthetic pool's elasticity to its own length
-is −21 at `g50 ON` (2026-09-21).
+1.108 / 1.118 at `g05` and 1.131 / 1.141 at `g50`, 3.9 % / 2.6 % from one scale with the isoforms. Giving back the
+scale is not free: the synthetic pool's elasticity to its own length is −21 at `g50 ON` (2026-09-21).
+MEASURED 2026-09-23 — THE SPREAD IS THE RULE'S, NOT THE COUNTS'. The same rule fed four count sources, within-gene
+sd (the shipped row is `--scale`'s, reproduced exactly):
+
+| every region's and boundary's gDNA count | `g05` | `g50` |
+|---|---|---|
+| the simulator's expected count, as a plug-in — no noise, no prior | 0.049 | 0.053 |
+| the same counts through the posterior | 0.054 | 0.053 |
+| the true realized counts (`slot_truth.npz`) | 0.059 | 0.054 |
+| calibration's, SHIPPED | 0.072 | 0.057 |
+
+Swapping one term at a time (on the transcripts' own routed shares, where the shipped rule reads 0.074 / 0.058): the
+junction at the transcript's own truth 0.048 / 0.030; all four junction terms noise-free 0.065 / 0.056 — the ceiling
+of any price that only removes noise; the intron terms alone noise-free 0.075 / 0.060, no gain. Per junction the
+noise-free rule is 0.27 / 0.31 rms from the truth on prices near 1, and the noise adds 0.23 / 0.13 in quadrature.
+The rule's own error is the capture physics, which no gDNA object sees: the simulator binds a fragment through its best
+single probe part, so a junction a probe spans (one part in the transcript, two in gDNA) is priced exactly by the
+sum, while a junction with separate probes on its two sides binds one of them and the sum prices both — and the two
+read the same to every region and boundary (`ISSUES: ruler-witness-geometry-on-transcript-panels`). Where both sides
+carry capture the sum over-prices by 18 % (truth / sum 0.847); where one side dominates it under-prices by 25 % (each
+boundary is clipped at 1, a junction reaches 1.3); the per-junction median error is 19 % whatever the exon lengths.
+Second, the geometry: exons beside junctions are short (median 128 bp, 93 % below the longest fragment), so a
+fragment across a junction holds bases of up to four exons where the gDNA crossings at its boundaries hold exon ends
+and intron; under additive capture the rule is exact where both exons exceed every fragment (median error 3.6 %)
+and 15 % off elsewhere. The count noise is Poisson on ~37 / ~340 expected crossings at a fully captured boundary,
+plus calibration's bias at mid-density boundaries (+0.10 in the 0.3–0.7 band at `g05`); the posterior neither adds
+nor removes it (posterior and plug-in on the same counts agree to 0.005 rms in every band). The unprobed class's
+inflation at `g05` is not the junction's (`ISSUES: the-efficiency-posterior-floor-on-empty-pieces`). Refused on the
+way: `ISSUES: a-junction-price-read-from-a-fitted-capture-map`, `ISSUES: the-junction-sum-on-unclipped-posteriors`.
+The census, the attribution and the derivation: `~/Downloads/rigel_runs/prototypes/2026-09-23_junction_price/`.
 THROUGH THE EM (`panel.py score` on the shipped tree, 16 ladder conditions, fractional assignment, stranded ×
 capture ON): transcript and gene Σ|Δ| as a % of the true annotated RNA, and the pools as estimate − truth — gDNA
 (intergenic included) / synthetic spans est/true / annotated. The floor is |base − base_reseed|; the third column
@@ -65,20 +87,16 @@ pseudocount while the isoforms regress either way (`TRAPS: judge-a-ruler-by-its-
 it is priced against: the simulator's own lengths for every hypothesis with the corrected pseudocount read 1.89 %
 and the synthetic pool 0.96× at `g50 ss.99 ON` (2026-09-21).
 
-WHERE THE NEXT SESSION STARTS (2026-09-23, `g05 ss.99 ON` unless stated; recorded by the port's review, not fixed):
-* THE UNPROBED CLASS AT LOW gDNA: the unprobed multi-exon transcripts read L / Y 2.84 (sd of log 0.69, 706
-  transcripts) against the synthetic spans' 1.148 and the gDNA footprints' 1.135 in the same class — 1.56 against
-  1.005 / 1.013 before the port; at `g50` the class is unmoved (1.214 against 1.104 / 1.096; before 1.171 against
-  1.057 / 1.070). An unmeasured hypothesis, stated as one: an object with almost no gDNA (a depleted boundary's
-  support holds ~0.03 expected fragments at `g05`) reads a posterior mean above its near-zero truth, and the
-  junction sum adds two such means; a piece with no contained support reads the population's clipped mean (0.239
-  at every such region).
+STILL OPEN FROM THE PORT'S REVIEW (2026-09-23, `g05 ss.99 ON` unless stated; recorded, not fixed):
 * THE SHORT-INTRON FALLBACK keys on `S > 0` exactly (`S = gdna_region_eff_len`, the intron piece's gDNA contained
   support), so a piece with 0 < S < 1 (less than one expected start) holds essentially no information yet reads its
   own posterior (≈ the population's mean, 0.244, sd 0.058). Beside junctions 3,057 / 2,724 intron pieces (low /
   high side) have S = 0 and 2,759 / 2,819 have 0 < S < 1; treating S < 1 as no count moves 4,007 of 45,609
   junction prices (1,284 by more than 0.2, at most 0.79). A real library's shorter fragment tail shrinks the S = 0
-  set (7,275 → 4,075 regions with a tail to 20 bp). No threshold is proposed: a threshold is a constant.
+  set (7,275 → 4,075 regions with a tail to 20 bp). No threshold is proposed: a threshold is a constant. MEASURED
+  2026-09-23: beside 15–20 % of scored junctions the intron piece holds under 10 expected starts and the posterior
+  moves the price 0.07–0.13 from its noise-free value, yet the intron terms made exactly noise-free leave the
+  within-gene sd where it was (above) — a per-junction defect with no isoform cost on the ladder.
 * THE CLIP AT 0: 137 transcripts carry more than half their share on junctions priced exactly 0; their contraction
   factor has median 0.0033 (minimum 0.00069), 30–130× below the adjacent-piece price's.
 * ABOVE fl AND ABOVE THE PARENT: 2,593 of 8,750 annotated transcripts have `eff_em > fl` (at most 1.80×), and 23 of
@@ -91,34 +109,84 @@ WHERE THE NEXT SESSION STARTS (2026-09-23, `g05 ss.99 ON` unless stated; recorde
 
 THE CONSTRAINTS: the owner's rulings in `DESIGN.md` §7.2 (capture is local; junctions never pooled,
 `ISSUES: pooling-junctions`; capture stays outside the EM) and §0b (robustness); no panel input (2026-09-20).
-Refused on the way: `ISSUES: the-spliced-read-junction-price`, `ISSUES: a-junction-price-clipped-at-one`. A
+Refused on the way: `ISSUES: the-spliced-read-junction-price`, `ISSUES: a-junction-price-clipped-at-one`,
+`ISSUES: a-junction-price-read-from-a-fitted-capture-map`, `ISSUES: the-junction-sum-on-unclipped-posteriors`. A
 candidate is read on both columns of the first table at once — the within-gene sd toward the adjacent pieces', the
-class mean on the gDNA component's — and only then through the EM. `ruler_vs_truth.py --scale` (its within-gene sd
-line and the junction-probed rows); `quant_accuracy.py` per stratum above `--arm base_reseed` under
+class mean on the gDNA component's — and only then through the EM; a candidate that only removes noise cannot pass
+0.065 / 0.056. What would move it is an observable of the probe physics. `ruler_vs_truth.py --scale` (its
+within-gene sd line and the junction-probed rows); `quant_accuracy.py` per stratum above `--arm base_reseed` under
 `--set em.assignment_mode=fractional`.
 
-### the-pseudocount-prior-is-biased-toward-gdna
-`priority: HIGH, taken after the junction price — the tool's whole capture-OFF error, and uncancelled on capture since the one shared length rule (2026-09-23); instruments: quant_accuracy.py (the pools per row), ruler_vs_truth.py --scale`
-The EM adds two pseudocounts per locus, `P_g` to the gDNA component and `P_R` to the RNA pool, both calibration's
-counts of UNSPLICED fragments; but `P_R` is spread over the whole RNA pool including the spliced fragments, so at
-the truth the odds the EM starts from carry the factor `(1 + P_g/G) / (1 + P_R/R)`, which is 1.289 at `g50 ss.99
-ON` (1.04–1.61 per locus) and 1.16 off capture — a second reading of the same fragments, tilted toward gDNA.
-(`P_g`'s boundary term also still converts by the pooled `q`, `ISSUES: the-pooled-q-in-the-gdna-length`.)
-MEASURED 2026-09-21 on the ladder (one EM thread, fractional, VBEM): off capture this is the error — gDNA
-over-called by +4.7 / +2.5 / +4.4 / +10.8 % of the true gDNA at `g05` / `g50` stranded and `g50` / `g05`
-unstranded, the synthetic pool at 0.79–0.99× — and either repair removes it (`g50` stranded +125,883 → −8,864
-fragments under a fixed gDNA level, → −14,956 under a population-corrected pseudocount `P_R := P_r + the locus's
-spliced units + its deterministic RNA counts`). On capture the bias cancelled the gDNA component's old length rule
-(`ISSUES: the-gdna-component-length-rule-differs-from-the-transcripts`, CLOSED), and removing it with the old
-length gave the full siphon (`g50 ss.99 ON` gDNA −328k, the synthetic pool 3.3×). MEASURED 2026-09-23 on the one
-shared length rule as shipped: the pair is UNCANCELLED — the bias alone over-calls gDNA and starves the synthetic
-pool (`g50 ss.99 ON` +172,932 fragments of gDNA with the spans at 0.28× their truth, `g05 ss.99 ON` +76,880 and
-0.76×), and the population-corrected pseudocount repairs the pools (`g50` −25,216, 0.98×) but not the transcript
-table, which is the junction price's (the full table: `ISSUES: the-junction-price-is-noisy-within-a-gene`). Off
-capture the over-call is the pseudocount's own on either length (`g05` unstranded +53.9k → +59.2k). A
-per-fragment gDNA prior derived to replace both pseudocounts was stopped by the owner as overcomplicated
-(2026-09-22); the corrected pseudocount is the candidate, taken after the junction price, with the per-transcript
-prior (`ISSUES: per-transcript-prior-lane`), and the two are judged together.
+### splicing-artifacts
+`priority: after the end-to-end work (owner, 2026-09-24): "splicing artifacts are a bigger problem than previously thought" · kind: defect · 2026-09-24`
+A gDNA read that the aligner splices across an annotated junction reads as certified RNA unless the index's
+blacklist — junctions the same aligner wrote on simulated genomic reads, kept at two or more, with the longest
+anchor seen — rejects it. Today a fully rejected fragment is labelled artifact: the EM treats it as unspliced
+(`DESIGN.md` §3.1d) but its blocks stay split at the rejected junction, so its footprint still spans the intron
+and over-states gDNA's length when the short anchor is the outer block; calibration holds it out entirely. The
+owner's first repair to consider: edit the alignment — delete the rejected junction and keep only the largest
+aligned block — so the fragment is unspliced in both stages at its true length. Beyond that: the blacklist is a
+yes/no cut (count ≥ 2, anchor ≤ the longest seen) on a continuous quantity, the aligner's rate of writing that
+junction on genomic sequence at that anchor length. Measurable only on aligned data: the aligned ladder is drafted
+for the cluster (`~/Downloads/rigel_runs/aligned_ladder/`), and on the production store 23.3 % of the ladder's
+annotated junctions are blacklisted. Also here, from
+`ISSUES: calibration-and-the-em-disagree-on-what-can-be-gdna` (closed): three fragment types calibration still puts on
+its unspliced bank, gDNA-eligible, that the EM treats as RNA only — an unannotated sequenced junction; two annotated
+junctions on opposite motif strands; mates disagreeing on an acceptor, which calibration merges into an unannotated
+intron and the resolver calls annotated — and one length rule the stages apply differently: calibration drops an
+unspliced or artifact reading past the maximum fragment length, the EM keeps gDNA while its likelihood competes.
+
+### multimapper-intergenic-alignments
+`priority: a separate feature, after the end-to-end work (owner, 2026-09-24) · kind: defect · 2026-09-24`
+A multimapper whose alignments all lie outside genes is intergenic and counted as gDNA — correct. One with an
+alignment in a gene is solved by the EM, and the owner's rule is that it is compatible with gDNA if ANY alignment
+is unspliced. The scanner never buffers a multimapper's alignment that overlaps no transcript
+(`bam_scanner.cpp:1808-1845`: only unique mappers are appended), so a gDNA read from an unannotated processed
+pseudogene whose other alignment splices across the parent gene reaches the EM with its spliced alignment alone
+and is certified RNA on the parent. The owner expects multimappers to matter most. The repair buffers those
+alignments, lets the scorer take a gDNA term from an alignment with no transcript candidate
+(`scoring.cpp`'s `n_cand > 0`) while an all-intergenic group still drops silently, keeps the fragment ledger
+exact, and decides which locus's gDNA component owns a gDNA reading at an intergenic position, outside that
+locus's gDNA length. Unmeasurable on the ladder (`NH` 1); the aligned ladder
+(`~/Downloads/rigel_runs/aligned_ladder/`) and `tests/scenarios_aligned/test_multimap_counting.py` are where it is
+seen. Taken with `ISSUES: multimapper-blind-support`. Also open for multimappers: the group's gDNA term is the MEAN
+over its eligible alignments (`scoring.cpp`, pinned by `tests/test_pipeline_routing.py`), where uniform gDNA
+placement derives the sum.
+
+### the-pseudocount-strength-is-not-derived
+`priority: next — after the implicit-splice gate; the odds are fixed (DESIGN.md §3.1c) · kind: open question · 2026-09-24`
+The EM's two pseudocounts carry `P_g + P_R = U`, one pseudo-fragment per unit with a gDNA candidate — the total
+the replaced rule carried, kept so the count form changed only the odds. Nothing derives it. The rule that
+counts each fragment once is refused as buildable (`ISSUES: a-count-once-density-prior-for-the-strength`): under
+capture calibration holds no estimate from outside the locus. Under MAP the strength cancels at the neutral
+point; under the shipped VBEM it does not, and the grouped update lets it move the split WITHIN RNA — a
+6-fragment isoform reads 4.0 / 5.0 / 5.8 at `P_R` = 0 / S / 10S. The exact VB update for the same prior holds it
+at 4.0 at every strength and needs no constant; it is its own A/B
+(`~/Downloads/rigel_runs/prototypes/2026-09-24_spliced_rule/toy_vb_nested.py`). Why a prior is needed at all:
+with none the EM's gDNA error is −12.1k / −119.7k / −731.8k at `g05` / `g50` / `g98 ss.99 ON` and −0.4k off
+capture, and −47.3k remains at `g98 ss.99 ON` under an exact calibration — a lean of the capture likelihood
+toward RNA that no strength may be chosen to cover. The owner's framing (2026-09-24): calibration gives the
+locus's gDNA FRACTION, and a multiplier converts it to pseudocounts; that multiplier depends on the number of gDNA
+candidates and their likelihoods. Today it is the count of units whose gDNA candidate survives pruning (`U`), and
+the pruning (`DESIGN.md` §3.1d) is what stops a unit with a vanishing gDNA reading from counting.
+
+### the-efficiency-posterior-floor-on-empty-pieces
+`priority: MEDIUM — the unprobed class's scale at low gDNA; its EM cost unmeasured · kind: defect · 2026-09-23`
+An object's capture efficiency is the posterior mean of its clipped gDNA density under the landscape, from its own
+count (`capture_efficiency`). On an object whose support holds far less than one expected gDNA fragment the count
+cannot tell a depleted object from a partly captured one, so the posterior reads above the truth. It is what lifts
+the unprobed multi-exon transcripts at `g05 ss.99 ON` to L / Y 2.84 (sd of log 0.69, 706 transcripts) against the
+synthetic spans' 1.148 and the gDNA footprints' 1.135 in the same probed class (1.56 against 1.005 / 1.013 before
+the one shared rule; at `g50` 1.214 against 1.104 / 1.096). MEASURED 2026-09-23: it is the transcripts' PIECES, not
+the junction sum — with the pieces at the truth the class reads 1.05, with the junctions at the truth it is
+unchanged. The unprobed transcripts' exon pieces are short (median contained support 4.2 starts, ~0.001 expected
+gDNA fragments each at `g05`) and read 2.57× their truth from the simulator's noise-free counts and 4.87× from
+calibration's (support-weighted), where the spans' long pieces (support ~97) read 1.07× / 1.05×; at `g50` the same
+exon pieces read 1.16× / 1.18×. The short-intron fallback of `ISSUES: the-junction-price-is-noisy-within-a-gene` is
+the same posterior on the same kind of object. What it costs through the EM is unmeasured: the class competes with
+the gDNA component in unprobed genes, where every fragment is off target. A floor or a threshold on support is a
+constant; the open question is what an object holding under one expected fragment should read. `ruler_vs_truth.py
+--scale` (the unprobed rows); the census in `~/Downloads/rigel_runs/prototypes/2026-09-23_junction_price/`.
 
 ### strand-plug-in-bias-on-sparse-libraries
 `priority: MEDIUM — first-order on real cfRNA, invisible on the ladder; no instrument in the tree (a scratch census of live objects over unspliced incidence, 2026-09-21)`
@@ -270,7 +338,7 @@ excluding κ-dead exons (`g50 ss.50 ON` 2,691 → 56,422), AMBIG in the final fi
 other readings of the floor (`DESIGN.md` §7.1 rule 4). Its instrument, `landscape_training_census.py`, was retired 2026-09-14 (in git).
 
 ### multimapper-blind-support
-`priority: later — the first capture-efficiency question on real libraries · kind: defect · 2026-09-16`
+`priority: a deferred session (owner, 2026-09-24: "add multimapping deposit to the accumulator and let calibration include multimapping fragments, which is correct behavior and something we have intended to add") · kind: defect · 2026-09-16`
 The accumulator drops every fragment with `NH > 1`, so an object whose gDNA fragments are multimappers holds no
 count the calibration can see, and its capture efficiency — read from its own gDNA count against the fully captured
 level — reads it at the DEPLETED level: the transcript is contracted as if unprobed. Measured read-only on the two
@@ -530,6 +598,81 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### calibration-and-the-em-disagree-on-what-can-be-gdna
+FIXED 2026-09-24 in the EM (`DESIGN.md` §3.1d; `scoring.cpp`'s `gdna_can_explain` and `gdna_competes`; gates in
+`tests/test_pipeline_routing.py`); the leftovers moved to `ISSUES: splicing-artifacts` and
+`ISSUES: multimapper-intergenic-alignments`. Calibration and the EM decided by different rules whether a fragment
+can be gDNA: calibration offered every fragment its unbroken reading and drew among the survivors, while the EM
+denied gDNA to every label but "unspliced" and removed it from a multimapper's every hit when one hit was spliced.
+Now an unspliced, implicit or artifact alignment may be gDNA, a multimapper may if any alignment may, and gDNA is
+pruned exactly as an RNA candidate is. The implicit splice needs no new likelihood: gDNA's term is the unspliced term
+at the footprint and the fragment length decides (derived three ways; `DERIVATION.md` in
+`~/Downloads/rigel_runs/prototypes/2026-09-24_spliced_rule/`). MEASURED on a one-gene toy on the shipped solver:
+denying implicit fragments gDNA put the error on the synthetic span and the annotated transcripts under every
+prior — +6 % at a 60-bp intron and gDNA 50 %, +39–62 % at 90 %, +13 % at 150 bp and 90 %. On the ladder, all 16
+conditions (fractional, VBEM, on the count form; `~/Downloads/rigel_runs/prototypes/2026-09-24_implicit_gate/ab/`):
+gDNA error at stranded ON `g50` −28.0k → −14.1k, `g98` −112.8k → −100.5k, `g05` +1.3k → +2.6k, off capture within
+±1.0k; transcript error `g98 ss.99 ON` 54.2k → 50.3k, elsewhere within ±1.7k; gene error lower in 12 of 16 rows.
+The gDNA gained at `g50 ON` came from the synthetic spans (1.00× → 0.91×), not the annotated excess (+28.3k →
++27.6k). A first form that limited implicit splices to the maximum fragment length admitted 18k–55k units per
+condition whose gDNA reading is about −708 nats, each counting in the prior's strength, and raised `g00 ss.99
+OFF`'s false gDNA to +7.0k against +4.4k under the pruning.
+
+### the-pseudocount-prior-is-biased-toward-gdna
+FIXED 2026-09-24 by the count form (`DESIGN.md` §3.1c, `EQUATIONS.md` §9b.3, `pipeline.em_pseudocounts`; gate
+`tests/test_em_pseudocounts.py`). The EM's two pseudocounts were calibration's gDNA and UNSPLICED RNA counts, but
+θ is each component's share of every fragment in the locus — the deterministic spliced fragments enter every
+M-step — so the unspliced split stated as the whole pool's leaned toward gDNA in proportion to the spliced
+share: its centre read 63.9 % against 50.0 % at `g50 ss.99 ON`, and it over-called an exact toy by 70–944 of 900
+as the spliced share ran 11–60 %. Now `P_g = U·min(G_c/N_c, 1)`, `P_R = U − P_g`, the share taken over the
+`N_c` fragments calibration counts from (on the ladder `N_c = N`). MEASURED on all 16 conditions
+(fractional, VBEM with a MAP pair, the odds changed and the strength held): gDNA error at `g05` / `g50`
+unstranded OFF +59.2k → −3.1k and +225.7k → −9.7k, stranded OFF +24.6k → −1.2k and +128.5k → −8.7k, stranded ON
++76.9k → +1.3k and +172.9k → −29.4k (the spans 0.28× → 1.01×); gene error at `g50` 18.3k → 14.4k, 13.6k →
+11.4k, 102.6k → 70.2k; the transcript table within 2 %; `g00` unmoved. `g98` worse in every stratum (−18.7k →
+−62.8k, −3.1k → −37.8k, −54.2k → −118.3k; genes ON 29.0k → 36.2k): the lean was offsetting
+`ISSUES: rna-prior-floor-at-pure-gdna-loci` and the capture likelihood's lean toward RNA, the owner's next
+targets. The deferred unstranded × capture-ON stratum moves the other way (`g50` −125.6k → −589.5k). MAP moves
+the same way as VBEM, 2–8k further toward RNA. The per-locus A/B, census and tables:
+`~/Downloads/rigel_runs/prototypes/2026-09-23_pseudocount/` (`DERIVATION.md`, `ab16/table16.py`).
+
+### a-count-once-density-prior-for-the-strength
+REFUSED 2026-09-24 as a buildable rule for the pseudocount's strength; the principle stands. A prior restating
+calibration's full answer counts the locus's fragments twice, because the E-step reads them again; the rule that
+counts them once puts a Gamma prior on the locus's gDNA density at calibration's estimate from OUTSIDE the locus,
+and its exact M-step is `out_g = (raw_g + a − 1) / (1 + a/μ)` with RNA untouched (matched on the shipped MAP solver
+to 0.01 fragment). Killing numbers: under capture, where the prior carries the answer, no outside estimate exists —
+each object's capture efficiency is read from its own count, so the "outside" centre equals calibration's own gDNA
+count to 0.1–1.3 % on the test chromosome, and the locus's flanks are off target, 75–440× below its gDNA. Off
+capture it carries three choices that move it at first order: how over-dispersion correlates within a locus (the
+test chromosome's `g50 ss.99 OFF` per-locus error 2,375 or 3,349 against the shipped strength's 2,461), the
+moment estimate's `α = ∞` boundary (three of four ladder conditions), and MAP against mean against VB (30 % apart
+at `a` = 3.3 on the unstranded ridge). At the ladder's own reading it is worse than the shipped strength on all
+three capture-OFF test conditions (3,349 / 4,754 / 1,542 against 2,461 / 4,262 / 1,189), and on the shipped
+grouped VBEM it erases the split within RNA (a 6-fragment isoform 4.75 → 7.37). Scripts: `toy_gamma_form.py`,
+`refute_kappa_*.py` in `~/Downloads/rigel_runs/prototypes/2026-09-24_spliced_rule/`.
+
+### a-junction-price-read-from-a-fitted-capture-map
+REFUSED 2026-09-23 at the no-EM gate. The general form of conservation of bases: capture additive over bases, every
+region a flat per-base capture read from gDNA's own objects (non-negative least squares over every region's
+contained and every boundary's crossing efficiency, each row weighted by its support, per reference), and each
+junction priced by routing the transcript's own placements through that map — the shipped sum is its limit where
+the pieces beside a junction exceed every fragment. Within-gene sd at `g05` / `g50 ss.99 ON`, on the transcripts'
+own routed shares where the sum reads 0.050 / 0.054 on the simulator's noise-free counts and 0.074 / 0.058 on
+calibration's: the map 0.060 / 0.064 and 0.089 / 0.073, the unprobed class inflated further (1.52 / 1.50
+noise-free against 1.00 / 1.01). With the TRUE per-region probe coverage under additive capture it fixes the
+geometry (junction rms 0.58 → 0.19, 1.013 on average); against the simulator's capture it prices junctions 2.1×
+high, because probes designed on different isoforms overlap, and overlapping probes add under additive capture but
+not where a fragment binds its best single part (`ISSUES: the-junction-price-is-noisy-within-a-gene`).
+
+### the-junction-sum-on-unclipped-posteriors
+REFUSED 2026-09-23 (`ruler_vs_truth.py --module`, the prototype's `junction_rulers.py`). The sum by conservation of
+bases is linear in density, so it was taken on each of its four terms' unclipped posterior `E[ρ / ρ_ref]` in place
+of the published `E[min(ρ / ρ_ref, 1)]`, every other object unchanged. The class medians move toward 0 (partial
+mRNA +0.035 → +0.024 at `g05`, +0.019 → −0.020 at `g50`) and the within-gene sd widens, 0.074 → 0.080 / 0.060 →
+0.066 (on the simulator's noise-free counts 0.050 → 0.052 / 0.054 → 0.060). The junction keeps the published
+clipped efficiencies.
 
 ### the-gdna-component-length-rule-differs-from-the-transcripts
 RESOLVED 2026-09-23 by the one shared rule (`DESIGN.md` §7.2, `EQUATIONS.md` §11): every EM component — the locus

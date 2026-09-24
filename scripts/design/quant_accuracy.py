@@ -4,7 +4,7 @@
 ``--arm base`` runs the shipped pipeline on a simulated condition and scores its transcript table
 against the simulator's own per-transcript truth. Every other arm runs the identical pipeline with
 one thing substituted -- the oracle ``LocusPriors`` built from the origin-split truth (``oracle``, or
-one of its three arrays alone: ``oracle_gdna``, ``oracle_rna``, ``oracle_efflen``), the ruler the EM
+one of its two arrays alone: ``oracle_gdna``, ``oracle_efflen``), the ruler the EM
 divides by (``oracle_ruler``: the SIMULATOR's capture-aware effective length in place of the shipped
 ruler's, the only arm that reaches the lengths the EM divides by), the EM's seed (``warm_uniform``), or
 the per-transcript
@@ -98,7 +98,7 @@ DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 #:
 _RULER_ARMS = {"oracle_ruler": True, "oracle_ruler_noop": False}
 
-ARMS = ("base", "base_reseed", "noop", "oracle", "oracle_gdna", "oracle_rna", "oracle_efflen",
+ARMS = ("base", "base_reseed", "noop", "oracle", "oracle_gdna", "oracle_efflen",
         "warm_uniform", "oracle_alloc", "oracle_alloc_seed", "oracle_alloc_flip") + tuple(_RULER_ARMS)
 
 #: The EM seed every arm pins. ``EMConfig.seed`` defaults to ``None`` and ``assignment_mode`` to
@@ -109,14 +109,16 @@ ARMS = ("base", "base_reseed", "noop", "oracle", "oracle_gdna", "oracle_rna", "o
 DEFAULT_EM_SEED = 20260807
 
 #: arm -> which ``LocusPriors`` fields come from O. ``noop`` takes NONE of them and still builds O,
-#: which is what makes it a test of the wrapper rather than of an ``if``.
+#: which is what makes it a test of the wrapper rather than of an ``if``. There is no RNA arm:
+#: calibration's RNA count does not reach the EM (``pipeline.em_pseudocounts`` reads the gDNA count
+#: against the EM's own count of the locus), so an arm injecting it could not fire
+#: (TRAPS: an-ablation-that-never-ran).
 _ARM_FIELDS = {
     "base": (),
     "base_reseed": (),
     "noop": (),
-    "oracle": ("gdna_prior_count", "rna_prior_count", "gdna_eff_len"),
-    "oracle_gdna": ("gdna_prior_count",),
-    "oracle_rna": ("rna_prior_count",),
+    "oracle": ("gdna_count", "gdna_eff_len"),
+    "oracle_gdna": ("gdna_count",),
     "oracle_efflen": ("gdna_eff_len",),
 }
 

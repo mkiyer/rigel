@@ -39,7 +39,7 @@ from .annotate import (
     AF_UNRESOLVED,
     winner_flags,
 )
-from .buffer import FragmentBuffer, _FinalizedChunk
+from .buffer import FRAG_MULTIMAPPER, FragmentBuffer, _FinalizedChunk
 from .config import (
     EMConfig,
     PipelineConfig,
@@ -638,13 +638,42 @@ def _populate_em_annotations(
     )
 
 
+def em_pseudocounts(
+    gdna_count: np.ndarray, n_calibrated: np.ndarray, n_gdna_eligible: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """The locus EM's two pseudocounts, ``(gdna_prior_count, rna_prior_count)``, per locus.
+
+    THE ODDS ARE CALIBRATION'S gDNA SHARE OF THE LOCUS. The EM's theta is each component's share of every
+    fragment in the locus — the E-step's units and the deterministic spliced fragments, which skip the
+    E-step but enter every M-step — and the grouped prior update is exact EM for
+    ``P_g log theta_g + P_R log(1 − theta_g)``. It leaves the EM's own answer in place iff
+    ``P_g : P_R = G : (N − G)``. Calibration counts ``gdna_count`` from its own sample of the locus, the
+    ``n_calibrated`` fragments it deposits (no multimapper, no fragment whose every junction the blacklist
+    rejected), so the share is read over that sample and applied to the whole locus: which fragments either
+    stage calls spliced never enters, and a fragment calibration never saw carries the locus's share, not RNA.
+
+    THE STRENGTH is one pseudocount per unit that has a gDNA candidate, the shipped total before the odds
+    were corrected; it is not derived (``tests/test_em_pseudocounts.py``). A share above one is a share of
+    one, and a locus with no gDNA candidate, or none of whose fragments calibration counted, gets no prior.
+    """
+    gdna_count = np.asarray(gdna_count, dtype=np.float64)
+    n_calibrated = np.asarray(n_calibrated, dtype=np.float64)
+    n_gdna_eligible = np.asarray(n_gdna_eligible, dtype=np.float64)
+    seen = n_calibrated > 0
+    share = np.clip(
+        np.divide(gdna_count, n_calibrated, out=np.zeros_like(gdna_count), where=seen), 0.0, 1.0
+    )
+    strength = np.where(seen, n_gdna_eligible, 0.0)
+    gdna_prior = strength * share
+    return gdna_prior, strength - gdna_prior
+
+
 def _run_locus_em_partitioned(
     estimator: AbundanceEstimator,
     partitions: dict,
     multi_loci: list,
     index: TranscriptIndex,
-    gdna_prior_count: np.ndarray,
-    rna_prior_count: np.ndarray,
+    gdna_count: np.ndarray,
     gdna_eff_len: np.ndarray,
     *,
     em_config: EMConfig,
@@ -657,9 +686,11 @@ def _run_locus_em_partitioned(
     Packs each ``LocusPartition`` into the C++ 9-tuple, runs the whole batch in
     one ``run_batch_locus_em_partitioned`` call (the solver is OpenMP-parallel
     internally), and appends a per-locus dict to ``estimator.locus_results`` for
-    ``get_loci_df``. The calibration prior enters as the two per-locus alpha
-    scalars; the loci table's ``enable_gdna`` reports the structural eligibility (any
-    unspliced unit carrying a finite gDNA log-lik — the rule the C++ extractor applies).
+    ``get_loci_df``. Calibration enters as its per-locus gDNA count, which :func:`em_pseudocounts` reads
+    against the part of the locus calibration counts from: its non-multimapper units that the blacklist did
+    not reject, plus the deterministic fragments of its transcripts. The
+    loci table's ``enable_gdna`` reports the structural eligibility (any unspliced unit carrying a finite
+    gDNA log-lik — the rule the C++ extractor applies).
 
     ``rna_prior_weight`` is the one PER-TRANSCRIPT array here and it is passed FLAT, while every
     other prior array is subscripted by ``ids`` into per-locus order. That asymmetry is the point: the
@@ -687,17 +718,30 @@ def _run_locus_em_partitioned(
     ]
     locus_t_lists = [loc.transcript_indices for loc in multi_loci]
     ids = [loc.multi_locus_id for loc in multi_loci]
-    gdna_prior = np.ascontiguousarray(gdna_prior_count[ids], dtype=np.float64)
-    rna_prior = np.ascontiguousarray(rna_prior_count[ids], dtype=np.float64)
     g_eff = np.ascontiguousarray(gdna_eff_len[ids], dtype=np.float64)
-    enable_gdna = np.array(
-        [
-            bool(p.is_spliced.size)
-            and bool(np.any((p.is_spliced == 0) & np.isfinite(p.gdna_log_liks)))
-            for p in parts
-        ],
-        dtype=np.uint8,
+    n_gdna_eligible = np.array(
+        [np.count_nonzero((p.is_spliced == 0) & np.isfinite(p.gdna_log_liks)) for p in parts],
+        dtype=np.float64,
     )
+    # Calibration's sample: the deterministic fragments (unique by construction) and every unit it deposits —
+    # not a multimapper, not a fragment whose every junction the blacklist rejected.
+    deterministic = estimator.unambig_counts.sum(axis=1)
+    n_calibrated = np.array(
+        [
+            np.count_nonzero(
+                (p.frag_class != FRAG_MULTIMAPPER) & (p.splice_type != SpliceType.SPLICE_ARTIFACT)
+            )
+            + deterministic[np.asarray(loc.transcript_indices, np.int64)].sum()
+            for p, loc in zip(parts, multi_loci)
+        ],
+        dtype=np.float64,
+    )
+    gdna_prior, rna_prior = em_pseudocounts(
+        np.asarray(gdna_count, dtype=np.float64)[ids], n_calibrated, n_gdna_eligible
+    )
+    gdna_prior = np.ascontiguousarray(gdna_prior)
+    rna_prior = np.ascontiguousarray(rna_prior)
+    enable_gdna = (n_gdna_eligible > 0).astype(np.uint8)
 
     em_result = estimator.run_batch_locus_em_partitioned(
         partition_tuples,
@@ -741,8 +785,8 @@ def _run_locus_em_partitioned(
                 "n_em_fragments": len(loc.unit_indices),
                 "rna_total": float(rna_arr[i]),
                 "gdna": float(gdna_arr[i]),
-                "gdna_prior_count": float(gdna_prior_count[lid]),
-                "rna_prior_count": float(rna_prior_count[lid]),
+                "gdna_prior_count": float(gdna_prior[i]),
+                "rna_prior_count": float(rna_prior[i]),
                 "enable_gdna": int(enable_gdna[i]),
                 "gdna_eff_len_em": float(gdna_eff_len[lid]),
             }
@@ -777,8 +821,9 @@ def quant_from_buffer(
 
     Scores the buffer (RNA/gDNA FL models built from the calibrated pmfs),
     builds connected-component loci, turns the per-region ``CalibrationResult``
-    into the per-locus gDNA/RNA split prior (``assemble_priors``), partitions
-    the global CSR, and runs the per-locus EM. Returns the populated
+    into each locus's gDNA count and gDNA length (``assemble_priors``), partitions
+    the global CSR, and runs the per-locus EM, whose pseudocounts read that count
+    against the locus's own fragments (``em_pseudocounts``). Returns the populated
     ``AbundanceEstimator``.
     """
     from .calibration.priors import assemble_priors
@@ -827,8 +872,7 @@ def quant_from_buffer(
         partitions,
         multi_loci,
         index,
-        priors.gdna_prior_count,
-        priors.rna_prior_count,
+        priors.gdna_count,
         priors.gdna_eff_len,
         em_config=em_config,
         annotations=annotations,

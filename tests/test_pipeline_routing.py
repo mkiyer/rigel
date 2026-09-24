@@ -2,12 +2,13 @@
 
 A multimapper's EM unit carries transcript candidates only, spliced or not — synthetic nascent spans
 are ordinary transcripts, and the gDNA candidate is appended per locus inside the EM — and an unspliced
-one carries a finite per-unit gDNA log-likelihood; a multimapper's gDNA likelihood normalises by
-the full `NH` rather than by the hits that survived filtering; the route counters are exclusive, so
+one carries a finite per-unit gDNA log-likelihood; a multimapper's gDNA likelihood is the mean over
+the hits gDNA can explain, not a sum and not over `NH`; the route counters are exclusive, so
 each unit is counted once and the totals mean something; and the `NM` penalty discriminates between
 a multimapper's hits when enabled and is exactly inert when not.
 """
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -166,12 +167,13 @@ def _scan_em_data(
     overhang_log_penalty=None,
     mismatch_log_penalty=None,
     annotations=None,
+    fl=None,
 ):
     """Build EM data from a buffer using FragmentScorer + FragmentRouter."""
     # Routing tests don't exercise FL scoring: pass unfinalized (empty) FL models
     # so the scorer's FL LUT is inert (_log_prob is None), matching the prior use
-    # of the container's empty rna/gdna models.
-    empty_fl = FragmentLengthModel(max_size=max_frag_size)
+    # of the container's empty rna/gdna models. A test that must see the length term passes ``fl``.
+    empty_fl = fl if fl is not None else FragmentLengthModel(max_size=max_frag_size)
     ctx = FragmentScorer.from_models(
         strand_models,
         empty_fl,
@@ -302,11 +304,11 @@ def test_multimapper_unspliced_has_transcript_candidates_only_and_a_gdna_log_lik
     assert em.gdna_log_liks[0] > -np.inf
 
 
-def test_multimapper_gdna_likelihood_normalizes_by_full_nh():
+def test_multimapper_gdna_likelihood_is_the_mean_over_its_gdna_explainable_hits():
     """Identical gDNA-eligible MM hits should collapse to one scalar.
 
-    The scorer emits ``logsumexp(hit_scores) - log(nh_gdna)`` for the full
-    multimapping group. If two hits have identical gDNA scores, the emitted
+    The scorer emits ``logsumexp(hit_scores) - log(nh_gdna)`` over the hits gDNA
+    can explain. If two hits have identical gDNA scores, the emitted
     scalar must match the one-hit case rather than gaining ``log(2)`` mass.
     """
     index = _Index(
@@ -610,3 +612,208 @@ def test_nm_penalty_zero_when_disabled():
 
     # Log-liks should be identical since penalty is 0
     assert em_a.log_liks[0] == pytest.approx(em_b.log_liks[0])
+
+
+# ── which fragments may be gDNA: one rule, by alignment ───────────────────────────────────────────
+#
+# gDNA can explain an alignment it can produce: an unspliced one; an IMPLICIT one — an unspliced pair whose
+# mate gap could hold an annotated intron, where the gap is unobserved and only the fragment length tells the
+# readings apart; and an ARTIFACT one, whose every junction the blacklist rejected, which is unspliced. A
+# multimapper can be gDNA if ANY of its alignments can, and its gDNA term is the mean over those alignments.
+# gDNA's term is the unspliced term at the footprint whatever the label, and gDNA then COMPETES exactly as an
+# RNA candidate does: it is pruned when its likelihood falls more than -log(pruning_min_posterior) below the
+# unit's best RNA candidate. No length rule of its own: a footprint the length law cannot produce is pruned.
+
+
+def _one_unit(bfs, fragment_classes, frag_ids, fl=None):
+    index = _Index(
+        t_to_g=[0, 0, 0],
+        t_to_strand=[int(Strand.POS)] * 3,
+        g_to_strand=[int(Strand.POS)],
+    )
+    strand_models, max_frag_size, estimator, stats = _make_env(index)
+    em = _scan_em_data(
+        _Buffer([_Chunk(bfs=bfs, fragment_classes=fragment_classes, frag_ids=frag_ids)]),
+        index,
+        strand_models,
+        max_frag_size,
+        estimator,
+        stats,
+        fl=fl,
+    )
+    assert em.n_units == 1
+    return em, max_frag_size
+
+
+def _hit(splice_type, footprint, t=0, nm=0):
+    return _BF(
+        t_inds=np.array([t], dtype=np.int32),
+        splice_type=int(splice_type),
+        align_strand=int(Strand.POS),
+        frag_lengths=np.array([200], dtype=np.int32),
+        exon_bp=np.array([100], dtype=np.int16),
+        intron_bp=np.array([0], dtype=np.int16),
+        read_length=100,
+        nm=nm,
+        genomic_footprint=footprint,
+    )
+
+
+def _unspliced_term(footprint, nm=0, fl=None):
+    em, _ = _one_unit([_hit(SpliceType.UNSPLICED, footprint, nm=nm)], [FRAG_UNAMBIG], [1], fl=fl)
+    return float(em.gdna_log_liks[0])
+
+
+def _live_fl():
+    """A length law that varies with length on [50, 500] and has no mass beyond, as the ladder's does."""
+    pmf = np.zeros(1001)
+    pmf[50:501] = np.linspace(1.0, 2.0, 451)
+    return FragmentLengthModel.from_pmf(pmf, 1000)
+
+
+@pytest.mark.parametrize("footprint", [300, 5000])
+def test_an_ARTIFACT_splice_is_unspliced_and_a_gdna_candidate_whatever_its_footprint(footprint):
+    em, _ = _one_unit([_hit(SpliceType.SPLICE_ARTIFACT, footprint)], [FRAG_UNAMBIG], [1])
+    assert not em.is_spliced[0]
+    assert float(em.gdna_log_liks[0]) == _unspliced_term(footprint)
+
+
+@pytest.mark.parametrize("splice_type", [SpliceType.SPLICED_ANNOT, SpliceType.SPLICED_UNANNOT])
+def test_a_sequenced_junction_that_survived_the_blacklist_is_RNA_only(splice_type):
+    em, _ = _one_unit([_hit(splice_type, 300)], [FRAG_AMBIG_SAME_STRAND], [1])
+    assert em.is_spliced[0]
+    assert em.gdna_log_liks[0] == -np.inf
+
+
+@pytest.mark.parametrize("spliced", [SpliceType.SPLICED_ANNOT, SpliceType.SPLICED_UNANNOT])
+def test_a_multimapper_with_ONE_unspliced_alignment_is_a_gdna_candidate(spliced):
+    """One spliced alignment no longer removes gDNA from the group: the unspliced alignment is a place
+    gDNA could have come from, and the gDNA term is taken over the eligible alignments alone."""
+    em, _ = _one_unit(
+        [_hit(spliced, 300, t=0), _hit(SpliceType.UNSPLICED, 250, t=1)],
+        [FRAG_MULTIMAPPER] * 2,
+        [7, 7],
+    )
+    assert not em.is_spliced[0]
+    assert float(em.gdna_log_liks[0]) == _unspliced_term(250)
+
+
+def test_a_multimapper_of_IMPLICIT_and_ARTIFACT_alignments_is_a_gdna_candidate():
+    em, _ = _one_unit(
+        [_hit(SpliceType.SPLICED_IMPLICIT, 400, t=0), _hit(SpliceType.SPLICE_ARTIFACT, 400, t=1)],
+        [FRAG_MULTIMAPPER] * 2,
+        [8, 8],
+    )
+    assert not em.is_spliced[0]
+    assert float(em.gdna_log_liks[0]) == _unspliced_term(400)
+
+
+@pytest.mark.parametrize(
+    "splice_type", [SpliceType.UNSPLICED, SpliceType.SPLICED_IMPLICIT, SpliceType.SPLICE_ARTIFACT]
+)
+def test_the_gdna_term_is_the_unspliced_term_AT_THE_FOOTPRINT_whatever_the_label(splice_type):
+    fl = _live_fl()
+    assert _unspliced_term(250, fl=fl) != _unspliced_term(300, fl=fl)  # the law is live
+    em, _ = _one_unit([_hit(splice_type, 300)], [FRAG_UNAMBIG], [1], fl=fl)
+    assert float(em.gdna_log_liks[0]) == pytest.approx(fl._log_prob[300] + math.log(0.5), abs=1e-5)
+
+
+def test_a_multimapper_s_gdna_term_excludes_its_spliced_hit_and_keeps_its_reported_type():
+    fl = _live_fl()
+    em, _ = _one_unit(
+        [_hit(SpliceType.SPLICED_ANNOT, 400, t=0), _hit(SpliceType.UNSPLICED, 250, t=1, nm=2)],
+        [FRAG_MULTIMAPPER] * 2,
+        [7, 7],
+        fl=fl,
+    )
+    assert float(em.gdna_log_liks[0]) == pytest.approx(_unspliced_term(250, nm=2, fl=fl), abs=1e-5)
+    assert em.splice_type[0] == SpliceType.SPLICED_ANNOT
+
+
+def test_a_multimapper_s_gdna_term_is_the_MEAN_of_its_eligible_hits_terms():
+    fl = _live_fl()
+    a = _unspliced_term(300, nm=0, fl=fl)
+    b = _unspliced_term(300, nm=2, fl=fl)
+    em, _ = _one_unit(
+        [
+            _hit(SpliceType.SPLICED_IMPLICIT, 300, t=0),
+            _hit(SpliceType.SPLICE_ARTIFACT, 300, t=1, nm=2),
+        ],
+        [FRAG_MULTIMAPPER] * 2,
+        [8, 8],
+        fl=fl,
+    )
+    assert float(em.gdna_log_liks[0]) == pytest.approx(np.logaddexp(a, b) - math.log(2), abs=1e-5)
+
+
+def _geometric_fl():
+    """A law whose mass falls geometrically with length, so a footprint moves gDNA's term by whole nats."""
+    pmf = np.zeros(1001)
+    lengths = np.arange(50, 1001)
+    pmf[50:] = np.exp(-lengths / 20.0)
+    return FragmentLengthModel.from_pmf(pmf, 1000)
+
+
+@pytest.mark.parametrize(
+    "splice_type", [SpliceType.UNSPLICED, SpliceType.SPLICED_IMPLICIT, SpliceType.SPLICE_ARTIFACT]
+)
+def test_gdna_is_PRUNED_exactly_as_an_RNA_candidate_is(splice_type):
+    """The unit's RNA candidate reads its own length (200); gDNA reads the footprint. gDNA stays a candidate
+    iff its term is within -log(1e-4) of the best RNA candidate's, and that bound — not a length — decides:
+    both outcomes occur across the footprints, and each matches the bound computed from the two terms."""
+    fl = _geometric_fl()
+    delta = -math.log(1e-4)
+    kept, pruned = 0, 0
+    for footprint in range(200, 700, 7):
+        em, _ = _one_unit([_hit(splice_type, footprint)], [FRAG_UNAMBIG], [1], fl=fl)
+        best_rna = float(np.max(em.log_liks))
+        gdna_term = fl._log_prob[footprint] + math.log(0.5)
+        competes = best_rna - gdna_term <= delta
+        assert bool(em.is_spliced[0]) == (not competes), footprint
+        if competes:
+            kept += 1
+            assert float(em.gdna_log_liks[0]) == pytest.approx(gdna_term, abs=1e-5)
+        else:
+            pruned += 1
+            assert em.gdna_log_liks[0] == -np.inf
+    assert kept and pruned
+
+
+def test_an_ARTIFACT_whose_footprint_the_law_cannot_produce_is_pruned():
+    """Its footprint still spans the rejected intron (the splicing-artifact work edits that); at 5,000 bp the
+    law has no mass, so gDNA does not compete."""
+    em, _ = _one_unit([_hit(SpliceType.SPLICE_ARTIFACT, 5000)], [FRAG_UNAMBIG], [1], fl=_live_fl())
+    assert em.is_spliced[0]
+    assert em.gdna_log_liks[0] == -np.inf
+
+
+def test_a_multimapper_s_gdna_mean_takes_every_eligible_hit_even_one_the_law_cannot_produce():
+    fl = _live_fl()
+    a = fl._log_prob[1000] + math.log(0.5)  # an IMPLICIT hit at 1,000 bp: the floor
+    b = _unspliced_term(250, nm=2, fl=fl)
+    em, _ = _one_unit(
+        [_hit(SpliceType.SPLICED_IMPLICIT, 1000, t=0), _hit(SpliceType.UNSPLICED, 250, t=1, nm=2)],
+        [FRAG_MULTIMAPPER] * 2,
+        [7, 7],
+        fl=fl,
+    )
+    assert float(em.gdna_log_liks[0]) == pytest.approx(np.logaddexp(a, b) - math.log(2), abs=1e-5)
+
+
+def test_a_multimapper_is_RNA_only_when_no_alignment_can_be_gdna_or_its_gdna_is_pruned():
+    fl = _live_fl()
+    certified, _ = _one_unit(
+        [_hit(SpliceType.SPLICED_ANNOT, 300, t=0), _hit(SpliceType.SPLICED_UNANNOT, 300, t=1)],
+        [FRAG_MULTIMAPPER] * 2,
+        [9, 9],
+        fl=fl,
+    )
+    pruned, _ = _one_unit(
+        [_hit(SpliceType.SPLICED_ANNOT, 300, t=0), _hit(SpliceType.SPLICED_IMPLICIT, 1500, t=1)],
+        [FRAG_MULTIMAPPER] * 2,
+        [9, 9],
+        fl=fl,
+    )
+    for em in (certified, pruned):
+        assert em.is_spliced[0]
+        assert em.gdna_log_liks[0] == -np.inf

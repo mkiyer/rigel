@@ -86,11 +86,10 @@ class CalibrationResult:
     count_rna_boundary: np.ndarray
 
     #: float64[n_boundaries] — the ``boundary_spliced`` part of ``count_rna_boundary``: molecules that crossed this
-    #: boundary CONTIGUOUSLY having spliced somewhere else. Carried so ``assemble_priors`` can **withhold**
-    #: it from ``rna_prior_count``: a spliced fragment has no gDNA candidate in the EM (gDNA does not
-    #: splice), so it is guaranteed-RNA and assigned directly — counting it in the prior would double
-    #: it and inflate the RNA side of the gDNA-vs-RNA *unspliced* split, which is the only thing the
-    #: prior arbitrates. ``count_rna_boundary`` itself stays spliced-inclusive so conservation is preserved.
+    #: boundary CONTIGUOUSLY having spliced somewhere else, carried apart so a consumer can separate the
+    #: certified part of ``count_rna_boundary`` from its deconvolved part. ``count_rna_boundary`` itself stays
+    #: spliced-inclusive so conservation is preserved. The EM's prior reads no RNA count at all
+    #: (``assemble_priors`` reads the gDNA mass; the EM forms the RNA side from its own fragment count).
     count_rna_spliced_boundary: np.ndarray
 
     #: float64[n_boundaries] — THE INCIDENCE→FRAGMENT CONVERSION, per boundary. ``mass / count`` off the
@@ -102,9 +101,9 @@ class CalibrationResult:
     #: is why it is NOT in ``prior_vs_oracle.OVERRIDE_FIELDS``: an oracle that overrode it would be
     #: answering a different question.
     #:
-    #: ``assemble_priors`` multiplies each component's per-boundary mass by it, because the accumulator
+    #: ``assemble_priors`` multiplies the gDNA per-boundary mass by it, because the accumulator
     #: deposits ``+1`` on EVERY boundary a fragment crosses — ``max(K, 1)`` of them — so a sum over boundaries is
-    #: an object-incidence count and the EM adds a FRAGMENT count. It is 1.0 where both flanking regions
+    #: an object-incidence count and the EM reads a FRAGMENT count. It is 1.0 where both flanking regions
     #: exceed every fragment length, and falls toward the region spacing where they do not.
     boundary_mass_per_crossing: np.ndarray
 
@@ -121,10 +120,8 @@ class CalibrationResult:
     #: ``count_rna_spliced_boundary`` at the same place: at a donor boundary the sj flux is the gene's
     #: whole spliced output while the spliced crossing is the handful of molecules that read through
     #: without splicing.
-    #: ``assemble_priors`` does NOT consume it, and that is deliberate: sj fragments are certified RNA
-    #: in exactly the sense ``count_rna_spliced_boundary`` is withheld for, so feeding them to
-    #: ``rna_prior_count`` would load the RNA side of a split that arbitrates only unspliced fragments.
-    #: It is exported for QC and reporting — the calibration's output should not be silent about the
+    #: ``assemble_priors`` does NOT consume it: the EM's prior reads calibration's gDNA count only, and
+    #: counts the locus's spliced fragments itself. It is exported for QC and reporting — the calibration's output should not be silent about the
     #: population that dominates a donor boundary.
     count_rna_sj: np.ndarray
 
