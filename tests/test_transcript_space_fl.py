@@ -1,17 +1,20 @@
-"""``compute_frag_lengths`` projects a fragment's genomic endpoints into transcript space, and the
-implied length is the distance between them.
+"""``compute_frag_lengths`` gives a fragment's length on each candidate transcript: its genomic span less
+every intron of the transcript it JUMPS, i.e. lying strictly inside the span.
 
 Spliced and unspliced fragments; overhang past either end of the transcript and into an internal
-intron, where an endpoint in an intron is a different case from a fragment merely spanning one;
-both ends overhanging at once; a large unsequenced mate gap spanning one, two or three introns, so
-the correction has to remove every intron in the gap rather than the first; nascent single-exon
-candidates, whose length is the genomic span; negative-strand transcripts, where the projection is
-reversed; and several candidates of different exon structure, which imply DIFFERENT lengths for the
-same fragment. That last point is why the length is per candidate and not per fragment.
+intron, where an endpoint in an intron is a different case from a fragment merely spanning one: the
+intron holding an endpoint is not jumped, and the read's bases in it count; both ends overhanging at
+once; a large unsequenced mate gap spanning one, two or three introns, so the correction has to remove
+every intron in the gap rather than the first; nascent single-exon candidates, whose length is the
+genomic span; negative-strand transcripts, where the length is strand-agnostic; and several candidates of
+different exon structure, which imply DIFFERENT lengths for the same fragment. That last point is why the
+length is per candidate and not per fragment. ``TestLengthRuleByEnumeration`` holds every candidate of
+every fragment with its ends at or beside an exon boundary to a base-by-base count.
 """
 
 import textwrap
 
+import numpy as np
 import pytest
 
 from rigel.types import Strand, GenomicInterval
@@ -322,10 +325,10 @@ class TestIntronicOverhang:
 
         t_basic exons: (999, 2000), (4999, 6000), intron (2000, 4999)
         Fragment: blocks (2003, 2100) + (5200, 5400)
-        gstart = 2003, gend = 5400
-        tx_pos(2003) = 1001 + 3 = 1004 (3bp past exon1 end into intron)
-        tx_pos(5400) = 1001 + 401 = 1402 (inside exon2)
-        FL = 1402 - 1004 = 398
+        gstart = 2003 is 3 bp into the intron, so the first read lies wholly in it and the fragment
+        jumps no intron: under t_basic the molecule is 4999 - 2003 = 2996 bp of overhang before exon2's
+        start plus 401 exonic bases, FL = 3397 = 5400 - 2003, its genomic span. Measured forward from
+        exon1's END instead, the start lands one intron length downstream and reads |3397 - 2999| = 398.
         """
         frag = make_fragment(
             exons=(
@@ -337,7 +340,7 @@ class TestIntronicOverhang:
         result = resolve_fragment(frag, basic_index)
         assert result is not None
         fl = _get_fl(result, basic_index, "t_basic")
-        assert fl == 398
+        assert fl == 3397
 
 
 # =====================================================================
@@ -668,12 +671,12 @@ class TestCombinedOverhangGap:
     def test_end_overhang_plus_intron_endpoint(self, three_exon_index):
         """Fragment gend extends past last exon AND gstart in intron.
 
-        t_three exons: (999,2000), (4999,6000), (8999,10000)
+        t_three exons: (999,2000), (4999,6000), (8999,10000); introns (2000,4999), (6000,8999)
         Fragment: blocks (2003, 2100) + (9950, 10007)
-        gstart = 2003, gend = 10007
-        tx_pos(2003) = 1001 + 3 = 1004 (3bp into intron after exon1)
-        tx_pos(10007) = 1001 + 1001 + 1001 + 7 = 3010 (7bp past last exon)
-        FL = 3010 - 1004 = 2006
+        gstart = 2003 is in the first intron, which the fragment does not jump; the second lies wholly
+        inside the span and is jumped.
+        FL = (10007 - 2003) - 2999 = 5005: 2996 bp of start overhang + 1001 + 1001 exonic + 7 bp past
+        the last exon.
         """
         frag = make_fragment(
             exons=(
@@ -685,7 +688,7 @@ class TestCombinedOverhangGap:
         result = resolve_fragment(frag, three_exon_index)
         assert result is not None
         fl = _get_fl(result, three_exon_index, "t_three")
-        assert fl == 2006
+        assert fl == 5005
 
 
 # =====================================================================
@@ -784,3 +787,96 @@ class TestEdgeCases:
         assert result is not None
         fl = _get_fl(result, basic_index, "t_basic")
         assert fl == 101
+
+
+# =====================================================================
+# The rule, against a base-by-base count
+# =====================================================================
+
+# A mate's aligned length: far shorter than every intron of these indexes, so no read covers a whole
+# intron. A read-through is a case the endpoint rule does not model (it jumps any intron strictly inside
+# the span), and the base count below would disagree with it there by design.
+_MATE = 20
+
+
+def _molecule_length(gstart, gend, exons):
+    """The fragment's length if it came from a transcript with these ``[start, end)`` exons, counted base
+    by base.
+
+    Every exonic base of ``[gstart, gend)`` counts, and so does every non-exonic base before the first
+    exonic one or after the last: the read's own bases hanging off the transcript (overhang). A
+    non-exonic base BETWEEN two exonic ones lies in an intron the fragment jumped and does not count. A
+    fragment touching no exonic base is its genomic span.
+    """
+    pos = np.arange(gstart, gend)
+    exonic = np.zeros(pos.size, dtype=bool)
+    for s, e in exons:
+        exonic |= (pos >= s) & (pos < e)
+    hit = np.flatnonzero(exonic)
+    if hit.size == 0:
+        return gend - gstart
+    return int(hit[0] + hit.size + (pos.size - 1 - hit[-1]))
+
+
+def _endpoints(exons):
+    """Every position within 3 bp of an exon boundary, plus each exon's midpoint."""
+    points = set()
+    for s, e in exons:
+        for b in (int(s), int(e)):
+            points.update(range(b - 3, b + 4))
+        points.add((int(s) + int(e)) // 2)
+    return sorted(points)
+
+
+class TestLengthRuleByEnumeration:
+    """Every candidate's length, for every two-mate fragment with its ends at or beside an exon boundary,
+    equals the base-by-base count of ``_molecule_length``.
+
+    The enumeration puts each end in every intron — on its first base, its last base, and beside them —
+    and past both ends of the transcript. A START in an intron is where the endpoint projection went
+    wrong: measured forward from the PREVIOUS exon's end, it landed one intron length downstream, the
+    length read |true - intron|, and a length of exactly 0 was stored as missing, which the scorer reads
+    as the best possible fit. An END whose last base is an intron's last base read as ending at the next
+    exon's start, dropping the whole intron.
+    """
+
+    @pytest.mark.parametrize("fixture", ["three_exon_index", "isoform_index"])
+    def test_every_candidate_length_is_the_base_count(self, fixture, request):
+        index = request.getfixturevalue(fixture)
+        exons = {
+            int(t): np.asarray(index.get_exon_intervals(int(t))) for t in index.t_df["t_index"]
+        }
+        points = _endpoints(np.concatenate(list(exons.values())))
+        n_checked = n_start_in_intron = n_end_on_intron_last_base = 0
+        wrong = []
+        for gstart in points:
+            for gend in points:
+                if gend - gstart < 2 * _MATE + 1:
+                    continue
+                frag = make_fragment(
+                    exons=(
+                        _exon("chr1", gstart, gstart + _MATE),
+                        _exon("chr1", gend - _MATE, gend),
+                    ),
+                    introns=(),
+                )
+                result = resolve_fragment(frag, index)
+                if result is None:
+                    continue
+                lengths = result.frag_lengths
+                for t in result.t_inds:
+                    ex = exons[int(t)]
+                    introns = list(zip(ex[:-1, 1], ex[1:, 0]))
+                    n_checked += 1
+                    n_start_in_intron += any(a <= gstart < b for a, b in introns)
+                    n_end_on_intron_last_base += any(gend == b for _, b in introns)
+                    want = _molecule_length(gstart, gend, ex)
+                    got = lengths.get(int(t))  # a missing length (-1) is absent from the dict
+                    if got != want:
+                        wrong.append((gstart, gend, int(t), got, want))
+        # ⚠ The enumeration must reach both cases it exists for, or a pass means nothing.
+        assert n_start_in_intron > 50, n_start_in_intron
+        assert n_end_on_intron_last_base > 5, n_end_on_intron_last_base
+        assert not wrong, (
+            f"{len(wrong)} of {n_checked} lengths wrong (gstart, gend, t, got, want): {wrong[:6]}"
+        )

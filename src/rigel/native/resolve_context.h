@@ -934,51 +934,45 @@ private:
 
 public:
 
-    /// Map a genomic position to transcript-space offset for FL computation.
+    /// The fragment's length on transcript ``t_idx``: its genomic span ``[gstart, gend)`` less every
+    /// intron of the transcript it JUMPS, one lying strictly inside the span (``gstart < intron start``
+    /// and ``intron end < gend``). An intron holding an endpoint is not jumped: the read's bases in it are
+    /// the molecule's own (overhang) and count, so a start in an intron is measured back from the NEXT
+    /// exon's start and an end forward from the PREVIOUS exon's end. This is the accumulator's L for the
+    /// path the transcript implies — the span with the path's introns cut out.
     ///
-    /// Designed for projecting fragment ENDPOINTS (gstart, gend) only.
-    /// When a position falls outside an exon, the overhang distance is added
-    /// rather than snapped/clipped, because fragment endpoints represent the
-    /// physical extent of the molecule and those bases must be counted in FL.
+    /// Strand-agnostic, and at least 1 whenever ``gend > gstart``: a jumped intron has a base of the
+    /// fragment on each side. Held to a base-by-base count in ``tests/test_transcript_space_fl.py``.
     ///
-    /// - Strand-agnostic (no strand flip): always returns forward-strand
-    ///   spliced coordinate.
-    /// - NOT clamped: returns negative values (before first exon), values
-    ///   > t_len (past last exon), or tx-position + intronic-overhang
-    ///   (endpoint in internal intron).
-    inline int32_t genomic_to_tx_pos(int32_t genomic_pos, int32_t t_idx) const {
-        int32_t begin   = exon_offsets_[t_idx];
-        int32_t end     = exon_offsets_[t_idx + 1];
-        int32_t n_exons = end - begin;
-        if (n_exons <= 0) return 0;
+    /// ⚠ An intron strictly inside the span is jumped whether or not a read covered it: only the two
+    /// endpoints are read, so a read-through of a whole intron is not modelled.
+    inline int32_t tx_frag_length(int32_t gstart, int32_t gend, int32_t t_idx) const {
+        const int32_t begin   = exon_offsets_[t_idx];
+        const int32_t n_exons = exon_offsets_[t_idx + 1] - begin;
+        const int32_t span    = gend - gstart;
+        if (n_exons < 2) return span;
 
         const int32_t* starts = exon_starts_.data() + begin;
         const int32_t* ends   = exon_ends_.data()   + begin;
         const int32_t* cumsum = exon_cumsum_.data()  + begin;
 
-        // bisect_right(starts, genomic_pos) - 1
-        int ei = static_cast<int>(
-            std::upper_bound(starts, starts + n_exons, genomic_pos) - starts) - 1;
-
-        if (ei < 0) {
-            // Before first exon: negative offset
-            return genomic_pos - starts[0];
-        }
-        if (genomic_pos >= ends[ei]) {
-            // Past end of exon[ei] — either in intron or past last exon.
-            // Always add the overhang: endpoint bases must be counted in FL.
-            return cumsum[ei] + (ends[ei] - starts[ei]) + (genomic_pos - ends[ei]);
-        }
-        // Inside exon ei
-        return cumsum[ei] + (genomic_pos - starts[ei]);
+        // Intron k is [ends[k], starts[k+1]); it is jumped iff ends[k] > gstart and starts[k+1] < gend,
+        // so the jumped introns are one contiguous run k = lo .. hi.
+        const int lo = static_cast<int>(std::upper_bound(ends, ends + n_exons, gstart) - ends);
+        const int hi = static_cast<int>(std::lower_bound(starts, starts + n_exons, gend) - starts) - 2;
+        if (lo > hi) return span;
+        // Their total: the genomic distance from exon lo's start to exon hi+1's start, less the exonic
+        // bases between those two starts.
+        const int32_t jumped = (starts[hi + 1] - starts[lo]) - (cumsum[hi + 1] - cumsum[lo]);
+        return span - jumped;
     }
 
     // ----------------------------------------------------------------
-    // Fragment-length computation via transcript-space projection
+    // Fragment-length computation
     // ----------------------------------------------------------------
 
-    /// Thread-safe fragment-length projection.  Results are aligned to
-    /// t_inds: frag_lengths[i] is the length for t_inds[i], or -1.
+    /// Thread-safe: the fragment's length on each candidate (``tx_frag_length``). Results are aligned
+    /// to t_inds: frag_lengths[i] is the length for t_inds[i], or -1.
     void compute_frag_lengths(
         const std::vector<ExonBlock>& exons,
         const std::vector<int32_t>& t_inds,
@@ -1003,10 +997,7 @@ public:
         }
 
         for (size_t i = 0; i < t_inds.size(); i++) {
-            int32_t t = t_inds[i];
-            int32_t tx_s = genomic_to_tx_pos(gstart, t);
-            int32_t tx_e = genomic_to_tx_pos(gend, t);
-            int32_t fl = std::abs(tx_e - tx_s);
+            int32_t fl = tx_frag_length(gstart, gend, t_inds[i]);
             if (fl > 0) frag_lengths[i] = fl;
         }
     }

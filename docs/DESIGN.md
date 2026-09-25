@@ -657,7 +657,9 @@ genomic seeds, the reconciliation lands on the oracle value exactly.
 transcript-space definition are deleted, and every histogram `build_fl_models` reads comes from the
 payload, so a mixed-frame call is unrepresentable. A gap intron is cut on every fragment, not only
 unspliced ones, with the gaps the CIGAR already explained excluded by exact `(start, end)` equality.
-`FragmentLengthModel` singular is the scorer and stays.
+`FragmentLengthModel` singular is the scorer and stays. The EM's per-candidate length is the same definition with
+the candidate's own introns: the span less every intron of the transcript lying strictly inside it
+(`resolve_context.h`'s `tx_frag_length`). An intron holding an end is not cut, so a read's bases in it count.
 
 ### 3.5 The five length pools
 

@@ -599,6 +599,27 @@ the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
 
+### a-start-in-an-intron-was-measured-from-the-wrong-exon
+FIXED 2026-09-25 in the resolver (`resolve_context.h`'s `tx_frag_length`, the one length definition of `DESIGN.md`
+§3.4; gate `tests/test_transcript_space_fl.py`'s `TestLengthRuleByEnumeration`, a base-by-base count over every
+two-mate fragment with its ends at or beside an exon boundary). The EM's per-candidate fragment length projected both
+ends into transcript space and measured an end lying in an intron forward from the PREVIOUS exon's end — right for the
+fragment's end, wrong for its start, which landed one intron length downstream: the length read |true − intron| (a
+200-bp fragment starting 1 bp before a 2.8-kb intron's end read 2,610), and a length of exactly 0 was stored as
+missing (−1), which the scorer reads as log-likelihood 0, the best fit there is. An end whose last base was an
+intron's last base read as ending at the next exon's start and dropped the whole intron. Two hand-written tests
+asserted the defective values (398 and 2,006; now 3,397 and 5,005), and neither boundary error is caught by any
+hand-written test: perturbing either one fails only the enumeration. Before the fix
+(`~/Downloads/rigel_runs/prototypes/2026-09-24_cut_inventory/`), 1.35–10.7 % of multi-block candidate entries per
+condition had a wrong length, median error 1–1.2 kb, and 1.9–2.6k candidates read −1. MEASURED on all 16 conditions
+(fractional, the worktree build against the shipped `base` arm;
+`~/Downloads/rigel_runs/prototypes/2026-09-25_start_endpoint/ab_table.txt`): transcript Σ|Δ| summed per in-scope
+stratum −560 (stranded OFF), −4,277 (stranded ON), −887 (unstranded OFF); the largest row `g50 ss.99 ON` 301.5k →
+298.0k; two rows worse beyond the run-to-run spread (`TRAPS: the-deliverable-is-not-reproducible-by-default`),
+`g05 ss.99 OFF` +496 (+0.41 %) and `g00 ss.50 OFF` +168; genes within ±1.2 %; the gDNA pool within ±1k everywhere.
+The inventory's estimate that the defect pushed ~1.1k gDNA fragments per `g98` capture-ON condition toward RNA did
+not survive: the pool moved by 22 there.
+
 ### calibration-and-the-em-disagree-on-what-can-be-gdna
 FIXED 2026-09-24 in the EM (`DESIGN.md` §3.1d; `scoring.cpp`'s `gdna_can_explain` and `gdna_competes`; gates in
 `tests/test_pipeline_routing.py`); the leftovers moved to `ISSUES: splicing-artifacts` and
