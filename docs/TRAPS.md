@@ -123,7 +123,8 @@ to run at ANY scan thread count above one — `em.n_threads=1` pins neither. MEA
 arrays repeat bit for bit with calibration and the EM on every core; with it on all of them, the six fraction banks
 differ at ~1e-15, which reaches 64 loci's gDNA prior at ~3e-16 and, through the EM's forks, moves 317 transcripts by
 up to 0.88 fragments and nascent parent counts by up to 42 (four runs spanned 145 fragments of transcript Σ|Δ|).
-`ISSUES: the-scan-fraction-banks-are-not-reproducible` holds the repair. Under fractional assignment the seed
+`ISSUES: the-scan-fraction-banks-are-not-reproducible` holds the repair. (The EM's reported gDNA total was a third,
+smaller source, summed as its workers finished; it is summed in locus order now.) Under fractional assignment the seed
 reaches no number, so `quant_accuracy.py`'s `base_reseed` measures this spread, not a seed. Until it lands, pin
 `scan.total_threads=1` wherever two runs must agree bit for bit (`rename_identity.py` does).
 

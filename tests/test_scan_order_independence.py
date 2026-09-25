@@ -149,6 +149,58 @@ def test_an_unset_seed_is_refused():
         EMConfig(seed=None)
 
 
+@pytest.fixture(scope="module")
+def many_loci(tmp_path_factory):
+    """Twelve genes, each its own locus, under gDNA: enough per-locus gDNA totals, none of them round,
+    that adding them in two different orders rounds differently."""
+    work = tmp_path_factory.mktemp("many_loci")
+    scenario = Scenario("many_loci", genome_length=40000, seed=SEED, work_dir=work / "sim")
+    for i in range(12):
+        base = 1000 + i * 3000
+        exons = [(base, base + 400), (base + 900, base + 1300)] if i % 2 else [(base, base + 700)]
+        scenario.add_gene(
+            f"g{i}",
+            "+" if i % 3 else "-",
+            [{"t_id": f"t{i}", "exons": exons, "abundance": 20 + 7 * i}],
+        )
+    result = scenario.build_oracle(
+        n_fragments=6000,
+        gdna_fraction=0.4,
+        sim_config=ReadSimConfig(
+            frag_mean=220,
+            frag_std=50,
+            frag_min=80,
+            frag_max=450,
+            read_length=100,
+            strand_specificity=0.99,
+            seed=SEED,
+        ),
+    )
+    yield result
+    scenario.cleanup()
+
+
+@pytest.mark.parametrize("em_threads", [1, 8])
+def test_the_reported_gdna_total_is_the_loci_summed_in_LOCUS_ORDER(many_loci, em_threads):
+    """The summary's gDNA count is one number. It was an atomic sum taken as the EM's workers finished, so
+    it re-associated from run to run (and at one thread ran in the solver's work order); it is the
+    per-locus totals added in locus order once the solve is done, at every thread count."""
+    config = PipelineConfig(
+        em=EMConfig(n_threads=em_threads, assignment_mode="fractional"),
+        scan=BamScanConfig(sj_strand_tag="auto", total_threads=1),
+    )
+    estimator = run_pipeline(many_loci.bam_path, many_loci.index, config=config).estimator
+    per_locus = [float(r["gdna"]) for r in estimator.locus_results]
+    assert sum(g > 0 for g in per_locus) >= 6, "too few loci carry gDNA for the order to matter"
+    in_locus_order = 0.0
+    for g in per_locus:
+        in_locus_order += g
+    assert estimator.gdna_em_count == in_locus_order, (
+        f"{em_threads} EM thread(s): the reported total {estimator.gdna_em_count!r} is not the per-locus "
+        f"totals summed in locus order ({in_locus_order!r})"
+    )
+
+
 def test_THE_FIXTURE_REALLY_DOES_REORDER_THE_BUFFER(oracle):
     """Non-vacuity, and it is not optional here.
 

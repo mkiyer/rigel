@@ -2218,8 +2218,6 @@ batch_locus_em_partitioned(
     std::vector<LocusProfile> locus_profiles(
         emit_locus_stats ? static_cast<size_t>(n_loci) : 0);
 
-    std::atomic<double> total_gdna_em{0.0};
-
     int actual_threads = n_threads;
     if (actual_threads <= 0) {
         int hw = static_cast<int>(std::thread::hardware_concurrency());
@@ -2261,7 +2259,7 @@ batch_locus_em_partitioned(
                                  LocusSubProblem& sub,
                                  std::vector<int32_t>& local_map_vec,
                                  bool mega,
-                                 rigel::EStepThreadPool* pool = nullptr) -> double {
+                                 rigel::EStepThreadPool* pool = nullptr) {
             auto locus_t0 = hrclock::now();
             const auto& pv = views[li];
             int n_t = pv.n_transcripts;
@@ -2270,7 +2268,7 @@ batch_locus_em_partitioned(
             if (n_u == 0) {
                 locus_rna_data[li] = 0.0;
                 locus_gdna_data[li] = 0.0;
-                return 0.0;
+                return;
             }
 
             // 1. Extract sub-problem from partition
@@ -2293,7 +2291,7 @@ batch_locus_em_partitioned(
             if (n_local_units == 0 || n_candidates == 0) {
                 locus_rna_data[li] = 0.0;
                 locus_gdna_data[li] = 0.0;
-                return 0.0;
+                return;
             }
 
             // 4. log effective length per component (RNA L̃_t plus gDNA L̃_M).
@@ -2406,8 +2404,6 @@ batch_locus_em_partitioned(
                 prof.assign_us = us(t6, t7);
                 prof.total_us = us(locus_t0, t7);
             }
-
-            return locus_gdna;
         }; // end process_locus
 
         // ---- Phase 1: mega-loci ----
@@ -2422,12 +2418,7 @@ batch_locus_em_partitioned(
 
             for (int i = 0; i < mega_end; ++i) {
                 int li = locus_order[i];
-                double gdna = process_locus(li, actual_threads, sub, local_map_vec,
-                                            true, pool.get());
-                double prev = total_gdna_em.load(std::memory_order_relaxed);
-                while (!total_gdna_em.compare_exchange_weak(
-                    prev, prev + gdna,
-                    std::memory_order_relaxed, std::memory_order_relaxed)) {}
+                process_locus(li, actual_threads, sub, local_map_vec, true, pool.get());
             }
         }
 
@@ -2440,7 +2431,6 @@ batch_locus_em_partitioned(
             auto worker_fn = [&]() {
                 LocusSubProblem sub;
                 std::vector<int32_t> local_map_vec(local_map_size, -1);
-                double local_gdna = 0.0;
 
                 for (;;) {
                     int chunk_start = next_idx.fetch_add(CHUNK_SIZE,
@@ -2449,15 +2439,9 @@ batch_locus_em_partitioned(
                     int chunk_end = std::min(chunk_start + CHUNK_SIZE, n_phase2);
                     for (int idx = chunk_start; idx < chunk_end; ++idx) {
                         int li = locus_order[mega_end + idx];
-                        local_gdna += process_locus(li, 1, sub, local_map_vec,
-                                                    false);
+                        process_locus(li, 1, sub, local_map_vec, false);
                     }
                 }
-
-                double prev = total_gdna_em.load(std::memory_order_relaxed);
-                while (!total_gdna_em.compare_exchange_weak(
-                    prev, prev + local_gdna,
-                    std::memory_order_relaxed, std::memory_order_relaxed)) {}
             };
 
             if (actual_threads <= 1) {
@@ -2473,7 +2457,10 @@ batch_locus_em_partitioned(
         }
     } // end gil_scoped_release
 
-    double total_gdna_em_val = total_gdna_em.load(std::memory_order_relaxed);
+    // Summed in locus order once the solve is done, never as the workers finish: an arrival-order sum
+    // re-associates from run to run, so the reported total would not be one number.
+    double total_gdna_em_val = 0.0;
+    for (int li = 0; li < n_loci; ++li) total_gdna_em_val += locus_gdna_data[li];
 
     size_t shape[1] = {static_cast<size_t>(n_loci)};
     auto* rna_copy = new double[n_loci];
