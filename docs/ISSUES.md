@@ -18,6 +18,10 @@ what was ruled is `DESIGN.md`.
 
 ### the-junction-price-is-noisy-within-a-gene
 `priority: PARKED — the sum is accepted for now (owner, 2026-09-23); the pseudocount's odds are fixed since (2026-09-24, ISSUES: the-pseudocount-prior-is-biased-toward-gdna, CLOSED) · kind: defect · 2026-09-23`
+SIZED 2026-09-24 (the g98 dissection's g50 contrast, `~/Downloads/rigel_runs/prototypes/2026-09-24_g98_dissection/`): with every length on its
+yield at its locus's gDNA scale, the within-gene transcript error at `g50 ss.99 ON` falls 231.6k → 64.0k
+(transcripts 6.14 → 1.74 %), and 161k of the 168k sits in genes with a junction-probed isoform; at `g98 ss.99 ON`
+it is about 3.5k. Still parked: nothing derivable moves the noise-free ceiling.
 The one shared length rule (`DESIGN.md` §7.2, `EQUATIONS.md` §11) prices a junction by conservation of bases,
 `c_junction = c_lo + c_hi − ½(c_intron,lo + c_intron,hi)` (`capture_eff_length._cut_efficiencies`). It is right on
 average — it is what puts the transcripts on the gDNA component's scale — but it widens the within-gene spread of
@@ -153,6 +157,63 @@ seen. Taken with `ISSUES: multimapper-blind-support`. Also open for multimappers
 over its eligible alignments (`scoring.cpp`, pinned by `tests/test_pipeline_routing.py`), where uniform gDNA
 placement derives the sum.
 
+### the-em-answer-depends-on-where-it-starts
+`priority: NEXT — found 2026-09-25; it holds the minus-strand coverage-weight fix · kind: defect · 2026-09-25`
+The EM's warm start (`warm_start="coverage"`, `em_solver.cpp`) seeds each unit's share by the scorer's trapezoid
+coverage weight, and that weight was placed one fragment length off on minus-strand transcripts: the interval was read
+from the flipped start in the wrong direction, so the transcript's ends weighed like its middle. Fixed and gated in
+the worktree `~/proj/rigel-covwt` (`scoring.cpp`'s `coverage_weight`; 20 tests in its `tests/test_pipeline_routing.py`,
+16 failing on the shipped build). Correcting only the start moved the ladder (all 16 conditions, fractional) ±1–2 %:
+transcript Σ|Δ| stranded OFF −1.2k, stranded ON +8.6k (`g00 ss.99 ON` +7.2k), unstranded OFF ≈ 0 with `g50 ss.50 OFF`
+genes +12.7 %. It is not unconverged loci: at `em.iterations=10000`, `em.convergence_delta=1e-9` the two trees still
+differ by −1.8k to +5.8k transcript fragments and −1.4k to +2.1k gene fragments on the four conditions tried, and the
+gDNA pool at `g00 ss.99 ON` by +988 at both convergences. The converged answer depends on the start, so the warm start
+is a hidden prior. Candidate mechanisms, unmeasured: the absorbing exact zero (a component under about 1.4e-3 gets zero
+responsibility through the E-step's exp underflow and cannot return) and flat directions between near-identical
+components. The coverage fix is held by `TRAPS: a-cancelling-defect-pair`: price it in the arm that also removes the
+start-dependence. Tight convergence alone costs 5–7× the EM's runtime and moves the shipped answer −2.5 to +0.7 %.
+Instrument: `quant_accuracy.py`, two trees or two `em.warm_start` values at the tight convergence. Data:
+`~/Downloads/rigel_runs/prototypes/2026-09-25_coverage_weight/` (`ab_table.txt`, `tight/`).
+
+### the-gdna-length-law-falls-back-at-identical-purities
+`priority: NEXT — a defect found by the g98 dissection (2026-09-24) · kind: defect · 2026-09-24`
+`calibration/fl.py`'s `build_fl_models` estimates gDNA's fragment-length law by contrasting two pools of different
+gDNA purity; when the separation is EXACTLY 0.0 ("purities identical", as at `g98 ss.99 ON`, both pools at gDNA
+share 1.0) it declines and falls back to the capture-selected four-pool census: `gdna_pmf` reads 245.1 bp against a
+true 216.7. Where the contrast is applied the estimator is right (216.7–217.0 at `g50 ss.99 ON` and `g98 ss.50 ON`,
+separations 0.021 and −0.0018). A yes/no fallback on a continuous quantity. At `g98 ss.99 ON` this one root owns the
+scorer's gDNA law reading +13 bp long (254.3 against 240.9), the gDNA component's offset from the RNA lengths'
+scale (gDNA/spans 1.014, gDNA/isoforms 1.041, which fall to g50's levels with the true law), and 13.6k of
+calibration's count deficit. Fixed alone: gDNA −100.5k → −67.7k, spans 80.0k → 54.1k, the oracle arm −35.5k →
+−21.7k; but transcripts do not improve (25.95 → 26.46 %): correcting the law the contracted lengths use exposes an
+opposite error in the length rule, so the repair is judged with its effect on the lengths. Class-mean L/Y moving
+toward one scale is NOT a valid gate for it: that moved toward one scale while the EM got worse (−4.8k to −5.9k
+gDNA, +6.2k to +9.8k transcripts). Scripts: `analysis/refute-mechanism/fl_root.py`, `scale_arm.py` in `~/Downloads/rigel_runs/prototypes/2026-09-24_g98_dissection/`.
+
+### the-scorer-reads-a-census-length-law
+`priority: next, after the two above · kind: defect · 2026-09-24`
+The E-step scores an unspliced fragment's length with gDNA's library census (`gdna_realized_pmf`,
+`pipeline.py`) against RNA's spliced census. Under capture the length selection depends on where a fragment sits,
+and every hypothesis at one footprint shares that footprint's capture — so the ratio wants the two origins' laws in
+ONE frame, and two censuses that average capture over different positions tilt short exon-contained gDNA fragments
+toward RNA even when both are estimated exactly. Confirmed free of the count and length confounds (g50 ss.99 ON, exact
+count, one-scale lengths): the same law for both origins gives annotated −2.7k, spans 156.1k (truth 150.4k),
+transcripts 1.70 %; the true census gives +12.7k, 139.2k, 1.79 %; shipped +5.2k, 158.6k, 1.75 %. At `g98 ss.99 ON`
+(oracle arm) the scorer's law is worth 22.2k gDNA and 9.8k transcripts, 18.4k / 4.6k of it the estimator
+(`ISSUES: the-gdna-length-law-falls-back-at-identical-purities`). Nil off capture. The same law for both is a
+diagnostic, not a candidate: real libraries with different gDNA and RNA chemistry need the channel. The repair is a
+derivation of the per-fragment length term at a shared footprint.
+
+### the-pooled-q-in-the-gdna-count
+`priority: later, with the capture repairs · kind: defect · 2026-09-24`
+Calibration's per-locus gDNA count (`priors.assemble_priors`) converts each boundary's gDNA mass to fragments by
+`boundary_mass_per_crossing`, pooled over gDNA and RNA, so where RNA dominates a boundary gDNA is over-stated even
+under a perfect calibration (`prior_vs_oracle.py` O − S: +33.7k at `g50 ss.99 ON`, +2.9k at g98 ON, +1.9k off
+capture). The EM passes a g50 count change through at only 0.37–0.50, so its size in the result is about 12k: with
+gDNA's own share the g50 gDNA pool moves −18.2k → −30.4k, spans 142.0k → 152.1k (truth 150.4k), transcripts
+unchanged. It cancels part of the capture likelihood's lean toward RNA today, so it lands with those repairs. The
+gDNA LENGTH already uses gDNA's own share (`ISSUES: the-pooled-q-in-the-gdna-length`, replaced for the length only).
+
 ### the-pseudocount-strength-is-not-derived
 `priority: next — after the implicit-splice gate; the odds are fixed (DESIGN.md §3.1c) · kind: open question · 2026-09-24`
 The EM's two pseudocounts carry `P_g + P_R = U`, one pseudo-fragment per unit with a gDNA candidate — the total
@@ -164,7 +225,7 @@ point; under the shipped VBEM it does not, and the grouped update lets it move t
 at 4.0 at every strength and needs no constant; it is its own A/B
 (`~/Downloads/rigel_runs/prototypes/2026-09-24_spliced_rule/toy_vb_nested.py`). Why a prior is needed at all:
 with none the EM's gDNA error is −12.1k / −119.7k / −731.8k at `g05` / `g50` / `g98 ss.99 ON` and −0.4k off
-capture, and −47.3k remains at `g98 ss.99 ON` under an exact calibration — a lean of the capture likelihood
+capture, and −35.5k remains at `g98 ss.99 ON` under an exact calibration — a lean of the capture likelihood
 toward RNA that no strength may be chosen to cover. The owner's framing (2026-09-24): calibration gives the
 locus's gDNA FRACTION, and a multiplier converts it to pseudocounts; that multiplier depends on the number of gDNA
 candidates and their likelihoods. Today it is the count of units whose gDNA candidate survives pruning (`U`), and
@@ -280,7 +341,22 @@ per-entity diagnostics do. The decision is whether the index should merge them
 `~/Downloads/rigel_runs/prototypes/2026-09-20_siphon_mechanism/`.
 
 ### rna-prior-floor-at-pure-gdna-loci
-`priority: g98's own residual; the pre-EM prior chain · kind: defect · 2026-09-20`
+`priority: NEXT — the owner's residual pass (2026-09-24): the largest owner of g98's gDNA error · kind: defect · 2026-09-20`
+DISSECTED AGAIN 2026-09-24 on the count form, against per-fragment truth (four lenses, a synthesis and two refuters;
+`~/Downloads/rigel_runs/prototypes/2026-09-24_g98_dissection/`). The read-out is the posterior MEDIAN of λ (`simplex_logodds.posterior_median_fg`,
+`psi_kernel.h`, `DESIGN.md` §6c), not a mean: under the Jeffreys reference with no atom at zero RNA, an object whose
+true RNA is below its resolution `1/√(n·I)` reads about 0.42·√(n/I) fragments of RNA, always toward RNA (measured
+0.21–0.28·√n stranded, 0.32–0.37·√n unstranded; the stranded/unstranded ratio 0.721 against the Fisher-information
+ratio 0.714). It is per OBJECT, and 78–85 % of calibration's count error sits on objects with no RNA, mostly INSIDE
+expressed loci; pure-gDNA loci hold only −3.9k / −5.5k / −9.7k. The EM passes the count through at g98 (per-locus
+slope 0.90–1.00), and off capture it lands in synthetic spans at introns. Size (the truth restored on no-RNA objects
+alone): gDNA −36.7k → −4.7k at `g98 ss.99 OFF`, −61.6k → −12.3k at `g98 ss.50 OFF`; about 47k at `g98 ss.99 ON` once
+`ISSUES: the-gdna-length-law-falls-back-at-identical-purities` is separated out. Its transcript cost is small (1.3k
+of 1.8k at ss.99 OFF, none at ss.50 OFF). The repair: an atom at zero RNA whose weight is the population's own
+no-RNA share, fitted by marginal likelihood across objects (no constant), and a CONTINUOUS read-out — a median of a
+posterior carrying an atom is a yes/no cut — which amends the §6c median ruling: the owner's decision. A test bar
+must be stated per `n`: at an atom weight of 0.75 the floor falls about 74 % at n = 10 and 89 % at n = 1,000.
+The history below measured the pre-count-form RNA pseudocount; its "posterior MEAN" is corrected above.
 `rna_prior_count` over-states by +64.5 % at `g98 ss.99 ON` (180,806 against 109,915) and +32.4 % at
 `g98 ss.99 OFF`, and it is a diffuse positive floor, not a few loci: 1,089 of 1,149 loci read high and 55k
 of the 73k excess sits in loci that are over 99 % gDNA where the true RNA is 544 fragments over 867 loci.
@@ -560,6 +636,10 @@ the index's duplicate map as an alias map `dropped_t_id → kept_t_id` (an index
 Kept as coverage GAPS, not dead code: the five CLI command bodies, the silent policy through `calibrate`, the
 simulator's sharded writers and its whole-genome grid, and the zarr splice blacklist.
 
+FOUND 2026-09-24: `scripts/design/solvability_audit.py`'s `main()` calls `_oracle_arms.truth_f_gdna`, deleted in
+34145493, and raises `AttributeError`; `preflight.py`'s import check cannot see it (the g98 dissection ran it
+through a shim).
+
 ### drain-contaminates-certified-rna
 `priority: later (parked by the owner, 2026-09-01) · kind: defect · 2026-08-31`
 The second pass deposits some true-gDNA fragments into the certified-RNA banks: 233 records at
@@ -819,6 +899,10 @@ NOTE 2026-09-23: measured on the per-base rule, since refused (`ISSUES: the-per-
 the one shared rule keeps the clip per object, and the unclipped form is re-priced on it before this is quoted
 against it.
 
+RE-EXAMINED 2026-09-24 and not re-opened: a reading that captured entities' contracted lengths follow only part
+of the true capture range ("elasticity" 0.64 multi-exon at g50) came from weighting transcripts by the EM's own
+gDNA exchange, which depends on the length ratio itself; with weights from outside the EM it reads 0.91–1.06
+(`analysis/refute-mechanism/elasticity_exog.py` in `~/Downloads/rigel_runs/prototypes/2026-09-24_g98_dissection/`).
 ### nascent-siphons-gdna-under-capture
 REPAIRED 2026-09-20 (`c52c9b93`). THE MECHANISM (per fragment against the read names' truth): the locus gDNA
 component's opportunity counted a crossing start at EVERY boundary its fragment crossed, while its pseudocount
