@@ -238,6 +238,25 @@ locus's gDNA FRACTION, and a multiplier converts it to pseudocounts; that multip
 candidates and their likelihoods. Today it is the count of units whose gDNA candidate survives pruning (`U`), and
 the pruning (`DESIGN.md` §3.1d) is what stops a unit with a vanishing gDNA reading from counting.
 
+### whole-counts-by-rounding-then-assigning
+`priority: HIGH — after the tool's other accuracy fixes land (owner, 2026-09-25) · kind: design · 2026-09-25`
+Whole-count mode (`assignment_mode="sample"`) gives each fragment to one transcript, drawn from its posterior after
+every candidate under 1 % (`assignment_min_posterior`) is zeroed, to keep noise isoforms from collecting whole
+counts. On one fragment a real minority and noise look the same — a small share — so the floor takes a minor
+isoform, a gene's unspliced RNA or low gDNA off every fragment it shares with a dominant candidate: off capture the
+synthetic pool loses 16–29k fragments, transcript error rises 15–23 % and gene error 2.0–2.7× (fractional mode is
+untouched; `~/Downloads/rigel_runs/prototypes/2026-09-24_cut_inventory/`). A cutoff relative to the best candidate
+(the owner's first idea) spares a fragment with many near-equal candidates but not this. The design (owner: "I like
+it in theory"): COUNT FIRST — each component's EM expected count, rounded within its locus so the locus total is
+exact (a transcript expecting 0.3 fragments gets 0, one expecting 300 gets 300) — THEN ASSIGN each transcript that
+many fragments, the ones it most plausibly produced (a transport problem over the unit posteriors, per locus). Every
+fragment still goes to exactly one transcript, with no seed. The rounding half is measured
+(`~/Downloads/rigel_runs/prototypes/2026-09-25_floor_study/`): transcripts reported for zero-truth isoforms 4,186 →
+196 at `g05 ss.99 OFF` and 4,704 → 403 at `g50 ss.99 ON`, with transcript and gene error unchanged. The assignment
+half needs a design and a C++ prototype, then an A/B against today's floor and a relative cutoff. False-positive
+MASS (90–96 % of it in a few dozen to a few hundred transcripts that each take a small share of many fragments) is
+the EM's own and no assignment rule separates it from a real minority.
+
 ### the-efficiency-posterior-floor-on-empty-pieces
 `priority: MEDIUM — the unprobed class's scale at low gDNA; its EM cost unmeasured · kind: defect · 2026-09-23`
 An object's capture efficiency is the posterior mean of its clipped gDNA density under the landscape, from its own
