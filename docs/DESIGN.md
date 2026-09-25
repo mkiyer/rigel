@@ -617,6 +617,18 @@ Calibration still holds artifact fragments and multimappers out of its SAMPLE, n
 prior's share is read over that sample (§3.1c); bringing multimappers into calibration is
 `ISSUES: multimapper-blind-support`, and editing an artifact's alignment is `ISSUES: splicing-artifacts`.
 
+### 3.1e The accelerator never decides the answer (owner, 2026-09-25)
+
+> **Only the EM's own step takes a component to the floor. A SQUAREM jump that would carry a component the plain
+> double step keeps alive below the floor is shortened toward that plain step, never clamped.**
+> (`em_solver.cpp`'s `backtracked_squarem_step`, both VBEM and MAP; gate `tests/test_em_start_independence.py`.)
+
+A component at the floor takes no responsibility and no share of the evidence-proportional prior (`EQUATIONS.md`
+§9b.1), so a clamp is permanent, and it fell on whichever of the components sharing fragments was shrinking when
+the jump overshot — a matter of the warm start. The clamp made the EM's converged answer depend on its start
+(41,343 fragments at `g00 ss.99 ON` under VBEM, 22,447 under MAP); backtracking removes it for MAP (204, in
+unconverged loci), and what VBEM keeps is its own (`ISSUES: the-em-answer-depends-on-where-it-starts`).
+
 ### 3.2 One strand convention
 
 Everything is stored by **genome** strand (`CHANNEL_PLUS` / `CHANNEL_MINUS`). *Sense* / *antisense* is

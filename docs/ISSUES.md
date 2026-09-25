@@ -158,40 +158,29 @@ over its eligible alignments (`scoring.cpp`, pinned by `tests/test_pipeline_rout
 placement derives the sum.
 
 ### the-em-answer-depends-on-where-it-starts
-`priority: NEXT — the mechanism is found and its repair A/B'd (2026-09-25); the repair awaits the owner's go to land · kind: defect · 2026-09-25`
-FOUND 2026-09-25: SQUAREM's extrapolation overshoots a shrinking component below zero and CLAMPS it to the floor (0
-under MAP, 1e-300 under VBEM), and nothing can revive it — the E-step gives it zero responsibility and the
-evidence-proportional prior (`EQUATIONS.md` §9b.1) gives it nothing, so only a component with deterministic fragments of
-its own comes back (`MANUAL.md`'s FAQ says every component with genuine read support recovers: wrong for any candidate
-whose fragments are all shared). Which components are shrinking early depends on the start, so candidates sharing
-fragments — overlapping synthetic spans, minor isoforms, the gDNA component — fork winner-take-all. MEASURED on
-`g00 ss.99 ON` (9.17M EM units; every setting re-solved from one pre-EM state in one process, which repeats itself to
-0.0 fragments; `~/Downloads/rigel_runs/prototypes/2026-09-25_em_start/`, `em_start_lab.py`, `analyze.py`): the
-fragments that change with the start (coverage vs uniform, 10,000 iterations, δ 1e-9) are 41,343 under the shipped
-VBEM (243 loci, 239 of them forks, every one with a clamp, none a flat valley) and 22,447 under MAP; with the clamp
-replaced by BACKTRACKING — shrink the step toward the plain double step until no component the plain step keeps alive
-is pushed below the floor — MAP falls to 204 (5 loci, all at the iteration cap, ΔLL ≤ 0.01 nats) and from one start
-its answer beats the clamp's likelihood in 116 of 120 loci. VBEM with backtracking keeps 8,096: its own ψ penalty,
-with no per-component prior, is winner-take-all, a property of the model rather than the solver. False gDNA there
-(truth 0): VBEM 4,287 → 177, MAP 1,187 → 158. LADDER (all 16, fractional; the prototype `~/proj/rigel-em`,
-`RIGEL_PROTO_SQUAREM`, against the committed code; `ladder/ab_table.txt`): VBEM with backtracking, in-scope transcript
-Σ|Δ| −4.3 / −0.4 / −3.4 % (stranded OFF / stranded ON / unstranded OFF), genes −6.0 / −0.3 / −7.5 %, gDNA pool Σ|error|
-51.7k → 50.5k, 121.5k → 114.4k, 78.8k → 77.0k, and every `g00` row's false gDNA ~4.5k → ~150. MAP, with or without
-the clamp, is worse on the gDNA pool (`g50 ss.99 OFF` −15.2k against −9.5k) and on stranded ON. What follows is the
-entry as first recorded.
-The EM's warm start (`warm_start="coverage"`, `em_solver.cpp`) seeds each unit's share by the scorer's trapezoid
-coverage weight, and that weight was placed one fragment length off on minus-strand transcripts: the interval was read
-from the flipped start in the wrong direction, so the transcript's ends weighed like its middle. Fixed and gated in
-the worktree `~/proj/rigel-covwt` (`scoring.cpp`'s `coverage_weight`; 20 tests in its `tests/test_pipeline_routing.py`,
-16 failing on the shipped build). Correcting only the start moved the ladder (all 16 conditions, fractional) ±1–2 %:
-transcript Σ|Δ| stranded OFF −1.2k, stranded ON +8.6k (`g00 ss.99 ON` +7.2k), unstranded OFF ≈ 0 with `g50 ss.50 OFF`
-genes +12.7 %. It is not unconverged loci: at `em.iterations=10000`, `em.convergence_delta=1e-9` the two trees still
-differ by −1.8k to +5.8k transcript fragments and −1.4k to +2.1k gene fragments on the four conditions tried, and the
-gDNA pool at `g00 ss.99 ON` by +988 at both convergences. The converged answer depends on the start, so the warm start
-is a hidden prior (the mechanism is the clamp above; flat directions account for 3 of 142 moved MAP loci). The
-coverage fix is held by `TRAPS: a-cancelling-defect-pair`: price it in the arm that also removes the start-dependence. Tight convergence alone costs 5–7× the EM's runtime and moves the shipped answer −2.5 to +0.7 %.
-Instrument: `quant_accuracy.py`, two trees or two `em.warm_start` values at the tight convergence. Data:
-`~/Downloads/rigel_runs/prototypes/2026-09-25_coverage_weight/` (`ab_table.txt`, `tight/`).
+`priority: NEXT — the owner's investigation (2026-09-25); it holds the minus-strand coverage-weight fix · kind: defect · 2026-09-25`
+What is left after the SQUAREM repair (`ISSUES: the-squarem-clamp-decided-which-components-live`, CLOSED): VBEM's
+own start-dependence. With the clamp gone MAP reaches one answer from any start (204 fragments apart at
+`g00 ss.99 ON`, all in loci still at the iteration cap), while VBEM still ends 8,096 fragments apart there (136
+loci, 132 of them winner forks — a candidate dead in one answer and holding fragments in the other). Its E-step
+weight ψ(α), with no per-component prior, penalises a small component by about −1/α, so components sharing fragments
+race and the start picks the winner; the two answers' likelihoods differ (the uniform start's is higher in 121 of 136
+loci), so it is not a flat valley. Candidate repairs, unmeasured: a warm start that is itself start-free (the MAP
+optimum, which is unique), or a per-component prior. Instrument: `em_start_lab.py` in
+`~/Downloads/rigel_runs/prototypes/2026-09-25_em_start/` (every EM setting re-solved from one pre-EM state in one
+process, which repeats itself to 0.0 fragments; `analyze.py` classifies each moved locus). The minus-strand
+coverage-weight fix — the warm start's trapezoid coverage weight was read from the flipped start in the wrong
+direction, one fragment length off, on minus-strand transcripts (`~/proj/rigel-covwt`, `scoring.cpp`'s
+`coverage_weight`, 20 tests) stays held (`TRAPS: a-cancelling-defect-pair`): on the old solver it moved the ladder ±1–2 %
+(`g00 ss.99 ON` +7.2k transcript fragments, `g50 ss.50 OFF` genes +12.7 %); RE-PRICED on the repaired solver
+(2026-09-25, `~/Downloads/rigel_runs/prototypes/2026-09-25_coverage_on_squarem/ab_table.txt`) it moves in-scope
+transcript Σ|Δ| +3.3k (+0.8 %, stranded OFF), −0.8k (−0.05 %, stranded ON), +2.3k (+0.6 %, unstranded OFF), genes and the
+gDNA pool within ±0.4 % bar `g05 ss.50 OFF` genes +1.3 % — still the residual start-dependence speaking, since the weight
+only seeds the start. It lands with the start-free repair, where the seed cannot move the answer.
+MEASURED 2026-09-25 on `g00 ss.99 ON` (the landed solver's prototype): the 136 loci VBEM's two starts disagree on carry
+EQUAL truth error — 385,299 (coverage start) against 385,088 (uniform), MAP's single answer 385,376; the coverage start
+is closer in 50 loci, the uniform in 64, 22 tie — so what is left is reproducibility, not accuracy: the forks pick
+among near-equivalent explanations of genuinely ambiguous fragments.
 
 ### the-gdna-length-law-falls-back-at-identical-purities
 `priority: NEXT — a defect found by the g98 dissection (2026-09-24) · kind: defect · 2026-09-24`
@@ -696,6 +685,30 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### the-squarem-clamp-decided-which-components-live
+FIXED 2026-09-25 (`DESIGN.md` §3.1e; `em_solver.cpp`'s `backtracked_squarem_step`, VBEM and MAP; gate
+`tests/test_em_start_independence.py`: three real loci the clamp forked by 7–72 fragments between the coverage and the
+uniform start, every case failing on the old solver, and each mode's cases alone failing when its backtrack is
+removed). SQUAREM's extrapolation overshot a shrinking component below the floor and CLAMPED it there, and a component
+at the floor takes no responsibility and no share of the evidence-proportional prior, so it never came back: which of
+the components sharing fragments survived depended on the warm start. `MANUAL.md`'s FAQ said a component with genuine
+read support recovers — true only for one holding deterministic fragments of its own. It surfaced through the
+minus-strand coverage-weight fix, which changes only the warm start yet moved the ladder ±1–2 %, and at
+`em.iterations=10000`, `em.convergence_delta=1e-9` the two trees still differed by −1.8k to +5.8k transcript
+fragments. Now the step is halved toward the plain double step until no component that step keeps alive is carried
+below the floor. MEASURED on `g00 ss.99 ON`, every setting re-solved from one pre-EM state in one process
+(`~/Downloads/rigel_runs/prototypes/2026-09-25_em_start/`): the start moved 41,343 fragments under VBEM and 22,447
+under MAP, every moved locus clamped and none a flat valley; with backtracking MAP moves 204 (loci at the iteration
+cap only) and VBEM 8,096 (its own, `ISSUES: the-em-answer-depends-on-where-it-starts`); from one start the repaired
+MAP beats the clamp's likelihood in 116 of 120 loci; false gDNA there (truth 0) VBEM 4,287 → 177, MAP 1,187 → 158.
+LADDER, the landed build against the code it replaces (all 16, fractional; `landed/landed_vs_committed.txt`):
+in-scope transcript Σ|Δ| 407.7k → 390.0k (−4.3 %, stranded OFF), 1,496.1k → 1,489.8k (−0.4 %, stranded ON),
+409.6k → 395.5k (−3.4 %, unstranded OFF); genes −6.1 / −0.3 / −7.6 %; the gDNA pool's Σ|error| −2.3 / −5.8 / −2.3 %,
+and every `g00` row's false gDNA ~4.5k → ~150. It unmasks an under-call at `g05`, which the clamp's false gDNA had
+partly offset: stranded OFF −1.3k → −4.1k, unstranded OFF −4.0k → −6.6k. MAP, with or without the repair, is worse
+than VBEM on the gDNA pool (`g50 ss.99 OFF` −15.2k against −9.5k), so VBEM stays. Goldens moved by at most 3.3e-8
+relative (the plain step is now copied at step 1, not recomputed).
 
 ### a-start-in-an-intron-was-measured-from-the-wrong-exon
 FIXED 2026-09-25 in the resolver (`resolve_context.h`'s `tx_frag_length`, the one length definition of `DESIGN.md`

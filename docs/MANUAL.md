@@ -849,10 +849,10 @@ Single-end reads are handled but less thoroughly tested than paired-end.
 Fragment-length estimation uses alignment length rather than insert size.
 
 **Can a transcript's EM component die and never recover?**
-In VBEM mode Rigel uses SQUAREM acceleration, which can overshoot and push a component's
-Dirichlet alpha to zero. `VBEM_SQUAREM_PRIOR_FLOOR` (a compile-time constant in
-`src/rigel/native/em_solver.cpp`, equal to `EM_LOG_EPSILON` ≈ 1e-300) is the minimum alpha after
-each SQUAREM step. It is deliberately deep: `digamma` of it is so negative that the component
-receives zero responsibility in the E-step and stays dead, while a component with genuine read
-support recovers because the M-step adds real observations to its prior. It has no effect in
-MAP-EM mode.
+Yes, and only the EM's own step may do it. A component at the floor (`EM_LOG_EPSILON` ≈ 1e-300 in
+`src/rigel/native/em_solver.cpp`) receives zero responsibility in the E-step and no share of the prior,
+so it stays dead unless it holds fragments no other component can explain. Rigel accelerates the EM
+with SQUAREM, which jumps ahead along the EM's path; a jump that would carry a still-live component
+below the floor is shortened toward the plain EM step instead of being cut off there, in VBEM and
+MAP-EM alike. Before 2026-09-25 such components were clamped to the floor, and which of several
+transcripts sharing the same fragments survived then depended on where the EM started.

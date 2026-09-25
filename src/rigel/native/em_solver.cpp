@@ -50,12 +50,11 @@ static constexpr int    SQUAREM_BUDGET_DIVISOR = 3;
 // sized to ~ESTEP_TASK_WORK_TARGET / k rows for load-balanced threading.
 static constexpr int    ESTEP_TASK_WORK_TARGET = 4096;
 
-// VBEM SQUAREM prior floor: minimum alpha value after SQUAREM extrapolation
-// or stabilization.  Uses EM_LOG_EPSILON (≈1e-300) which is deep enough
-// that digamma returns ≈ −1e300.  After max-subtraction in the E-step
-// kernel, exp(−1e300) = 0.0 (IEEE underflow), so the component receives
-// zero responsibility and stays dead.  A component with genuine read
-// support can recover since the M-step adds real observations to the prior.
+// VBEM floor: the minimum alpha a component keeps, EM_LOG_EPSILON (≈1e-300), deep enough that digamma
+// returns ≈ −1e300. After max-subtraction in the E-step kernel exp(−1e300) = 0.0 (IEEE underflow), so a
+// component at the floor receives zero responsibility, and the evidence-proportional prior gives it
+// nothing: it stays dead unless it holds deterministic fragments of its own. ⛔ So only the EM's own step
+// may put a component there — never SQUAREM's extrapolation (`backtracked_squarem_step`).
 static constexpr double VBEM_SQUAREM_PRIOR_FLOOR = EM_LOG_EPSILON;
 
 // Assignment mode constants (must match Python _ASSIGNMENT_MODE_MAP)
@@ -85,6 +84,7 @@ struct LocusProfile {
     double squarem_step_scale_mean = 0.0;
     double squarem_step_scale_max = 0.0;
     int squarem_extrapolation_clamp_count = 0;
+    int squarem_backtrack_count = 0;
     int squarem_nonfinite_count = 0;
     bool squarem_grouped_fallback_used = false;
     int squarem_grouped_stabilization_fail_count = 0;
@@ -1063,6 +1063,47 @@ static void compute_grouped_warm_start(
 }
 
 // ================================================================
+// SQUAREM step length: backtracked, never clamped
+// ================================================================
+//
+// SQUAREM jumps to `state0 + 2·step·r + step²·v` along the EM's own path, and for a shrinking component
+// the jump can land below the floor. It used to be CLAMPED there — and a component at the floor takes no
+// responsibility and no share of the evidence-proportional prior, so it never came back: the ACCELERATOR
+// decided which of the components sharing fragments lived, and the EM's answer depended on its warm start
+// (`tests/test_em_start_independence.py` replays three real loci the clamp forked). Instead the step is
+// shrunk toward 1 — halving its excess over the plain double step `state2`, which the EM produced itself —
+// until no component that `state2` keeps above the floor is carried below it. A component `state2` itself
+// takes below the floor is the EM's own verdict and does not hold the step back. `backtracks` counts the
+// halvings.
+static double backtracked_squarem_step(
+    double step,
+    const std::vector<double>& state0,
+    const std::vector<double>& r_vec,
+    const std::vector<double>& v_vec,
+    const std::vector<double>& state2,
+    double floor,
+    int& backtracks)
+{
+    const size_t nc = state0.size();
+    while (step > 1.0) {
+        bool feasible = true;
+        for (size_t i = 0; i < nc; ++i) {
+            if (!(state2[i] > floor)) continue;
+            const double e = state0[i] + 2.0 * step * r_vec[i] + step * step * v_vec[i];
+            if (!(e >= floor)) {
+                feasible = false;
+                break;
+            }
+        }
+        if (feasible) return step;
+        ++backtracks;
+        const double shorter = 1.0 + 0.5 * (step - 1.0);
+        step = (shorter < step) ? shorter : 1.0;  // exactly 1 once the excess no longer halves
+    }
+    return 1.0;
+}
+
+// ================================================================
 // SQUAREM acceleration wrapper
 // ================================================================
 
@@ -1072,6 +1113,7 @@ struct EMResult {
     double squarem_step_scale_mean = 0.0;
     double squarem_step_scale_max = 0.0;
     int squarem_extrapolation_clamp_count = 0;
+    int squarem_backtrack_count = 0;       // halvings of an extrapolation step (backtracked_squarem_step)
     int squarem_nonfinite_count = 0;
     bool squarem_grouped_fallback_used = false;
     int squarem_grouped_stabilization_fail_count = 0;
@@ -1111,6 +1153,7 @@ static EMResult run_squarem(
     double step_scale_max = 0.0;
     int step_scale_count = 0;
     int clamp_count = 0;
+    int backtrack_count = 0;
     int nonfinite_count = 0;
     int stabilization_fail_count = 0;
 
@@ -1148,14 +1191,18 @@ static EMResult run_squarem(
                     step = 1.0;
                     ++nonfinite_count;
                 }
+                step = backtracked_squarem_step(step, state0, r_vec, v_vec, state2,
+                                                VBEM_SQUAREM_PRIOR_FLOOR, backtrack_count);
                 step_scale_sum += step;
                 step_scale_max = std::max(step_scale_max, step);
                 ++step_scale_count;
                 for (size_t i = 0; i < nc; ++i) {
-                    state_extrap[i] = state0[i] + 2.0 * step * r_vec[i]
-                                    + step * step * v_vec[i];
-                    // Clamp to numerical floor: prevents SQUAREM extrapolation
-                    // from creating negative or near-zero alpha values.
+                    // At step 1 the jump IS the plain double step: copied, because recomputing it rounds
+                    // on the scale of state0 and could carry a small live component below the floor.
+                    state_extrap[i] = (step == 1.0)
+                        ? state2[i]
+                        : state0[i] + 2.0 * step * r_vec[i] + step * step * v_vec[i];
+                    // Only a component the plain step itself carried to the floor can land below it here.
                     double floor_i = VBEM_SQUAREM_PRIOR_FLOOR;
                     if (!std::isfinite(state_extrap[i])) {
                         state_extrap[i] = floor_i;
@@ -1262,13 +1309,16 @@ static EMResult run_squarem(
                     alpha_step = 1.0;
                     ++nonfinite_count;
                 }
+                alpha_step = backtracked_squarem_step(alpha_step, state0, r_vec, v_vec, state2,
+                                                      0.0, backtrack_count);
                 step_scale_sum += alpha_step;
                 step_scale_max = std::max(step_scale_max, alpha_step);
                 ++step_scale_count;
                 for (size_t i = 0; i < nc; ++i) {
-                    state_extrap[i] = state0[i]
-                        + 2.0 * alpha_step * r_vec[i]
-                        + alpha_step * alpha_step * v_vec[i];
+                    state_extrap[i] = (alpha_step == 1.0)
+                        ? state2[i]
+                        : state0[i] + 2.0 * alpha_step * r_vec[i]
+                          + alpha_step * alpha_step * v_vec[i];
                     if (!std::isfinite(state_extrap[i])) {
                         state_extrap[i] = 0.0;
                         ++nonfinite_count;
@@ -1327,6 +1377,7 @@ static EMResult run_squarem(
         : 0.0;
     out.squarem_step_scale_max = step_scale_max;
     out.squarem_extrapolation_clamp_count = clamp_count;
+    out.squarem_backtrack_count = backtrack_count;
     out.squarem_nonfinite_count = nonfinite_count;
     out.squarem_grouped_fallback_used = false;
     out.squarem_grouped_stabilization_fail_count = stabilization_fail_count;
@@ -2319,6 +2370,7 @@ batch_locus_em_partitioned(
                 prof.squarem_step_scale_mean = result.squarem_step_scale_mean;
                 prof.squarem_step_scale_max = result.squarem_step_scale_max;
                 prof.squarem_extrapolation_clamp_count = result.squarem_extrapolation_clamp_count;
+                prof.squarem_backtrack_count = result.squarem_backtrack_count;
                 prof.squarem_nonfinite_count = result.squarem_nonfinite_count;
                 prof.squarem_grouped_fallback_used = result.squarem_grouped_fallback_used;
                 prof.squarem_grouped_stabilization_fail_count =
@@ -2461,6 +2513,7 @@ batch_locus_em_partitioned(
             d["squarem_step_scale_mean"] = p.squarem_step_scale_mean;
             d["squarem_step_scale_max"] = p.squarem_step_scale_max;
             d["squarem_extrapolation_clamp_count"] = p.squarem_extrapolation_clamp_count;
+            d["squarem_backtrack_count"] = p.squarem_backtrack_count;
             d["squarem_nonfinite_count"] = p.squarem_nonfinite_count;
             d["squarem_grouped_fallback_used"] = p.squarem_grouped_fallback_used;
             d["squarem_grouped_stabilization_fail_count"] =
