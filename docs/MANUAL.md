@@ -177,7 +177,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--seed N` | timestamp | Random seed for reproducibility |
+| `--seed N` | `0` | Seed of the `sample` assignment's draw; another seed is another draw from the same posterior. |
 | `--em-iterations N` | `1000` | Maximum EM iterations. Set `0` for unambiguous-only quantification (skip EM). |
 | `--em-mode {vbem,map}` | `vbem` | EM variant. `vbem` = Variational Bayes EM (digamma soft updates); `map` = MAP-EM with hard `max(0, n+a-1)` updates. |
 | `--assignment-mode {sample,fractional,map}` | `sample` | Post-EM fragment assignment. `sample` draws from the posterior; `fractional` preserves posterior weights; `map` takes the argmax component. |
@@ -764,13 +764,15 @@ rigel quant \
 ### Fully reproducible run, with TSV tables
 
 ```bash
-rigel quant --bam sample.bam --index index/ -o results/ --seed 42 --threads 1 --tsv
+rigel quant --bam sample.bam --index index/ -o results/ --threads 1 --tsv
 rigel quant --config results/config.yaml      # rerun later from the emitted config
 rigel export results/ --format tsv            # or convert existing Feather outputs afterward
 ```
 
-`--seed` makes the post-EM assignment sampling deterministic; `--threads 1` makes the output
-bit-reproducible.
+The assignment's draw is seeded with a fixed default (`--seed` picks another draw), and `--threads 1`
+makes the output bit-reproducible: with more threads the BAM scan's workers take batches in whatever
+order they finish, its fraction sums are added in that order, and the difference in the last bits can
+move a few fragments between isoforms that share them.
 
 ### Inspect read assignments
 

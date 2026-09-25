@@ -23,7 +23,7 @@ import pandas as pd
 import pytest
 
 from rigel.calibration.priors import LocusPriors
-from rigel.config import PipelineConfig
+from rigel.config import EMConfig, PipelineConfig
 from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 
 _MODULES: dict = {}
@@ -106,11 +106,9 @@ def toy_oracle(toy, tmp_path_factory):
 def _run(toy, arm, oracle, seed=QA.DEFAULT_EM_SEED):
     """One full ``run_pipeline`` under one arm; returns ``(PipelineResult, fired)``.
 
-    The seed is pinned, and that is not tidiness. ``EMConfig.seed`` ships as ``None`` with
-    ``assignment_mode="sample"``, so the EM's hard assignment is an unseeded categorical draw and
-    two back-to-back runs of the identical pipeline return different transcript counts. Without the
-    pin the byte-identity gate below could never pass, and its failure would say nothing about the
-    injection.
+    The seed is the instrument's, which is the shipped one, set explicitly so an arm's ``seed + 1``
+    reseed goes through the same path. With the default ``assignment_mode="sample"`` the hard
+    assignment is a draw, and without one seed the byte-identity gate below could never pass.
     """
     from rigel.pipeline import run_pipeline
 
@@ -194,34 +192,20 @@ def test_the_noop_arm_reproduces_BASE_byte_identically_through_the_whole_pipelin
         compare(perturbed_result.estimator.get_counts_df(toy.index))
 
 
-def test_the_UNSEEDED_shipped_config_is_not_reproducible_and_that_is_why_the_seed_is_pinned(toy):
-    """A property of the shipped tool, pinned here because every A/B above depends on it.
-    ``EMConfig.seed`` defaults to ``None`` and ``assignment_mode`` to ``"sample"``, so two runs of
-    the identical pipeline on the identical BAM return different transcript counts. Any end-to-end
-    arm comparison run on the default config therefore reports sampling noise on top of its effect,
-    and a byte-identity ``noop`` is impossible.
+def test_base_IS_the_shipped_config_and_a_pinned_arm_reproduces_itself(toy):
+    """A property every A/B above depends on. ``base`` must be the configuration that ships, so the
+    instrument's seed is the shipped one, and two runs of one arm must return one answer, or no arm
+    comparison here is attributable.
 
-    This asserts both halves: unseeded runs differ, and the same runs with a pinned seed do not. If
-    the default ever becomes deterministic the first half fails — which is a result to record, not
-    a test to widen (TRAPS: waive-with-a-measurement).
+    Re-recorded 2026-09-25: this used to assert that the SHIPPED config did not reproduce itself —
+    ``EMConfig.seed`` defaulted to ``None`` — and it fired, as it said it would, the day the default
+    became fixed (``tests/test_scan_order_independence.py`` now gates the shipped defaults).
     """
-    from rigel.pipeline import run_pipeline
-
-    unseeded = [
-        run_pipeline(str(toy.bam_path), toy.index, PipelineConfig())
-        .estimator.get_counts_df(toy.index)["count"]
-        .to_numpy()
-        for _ in range(2)
-    ]
-    assert not np.array_equal(unseeded[0], unseeded[1]), (
-        "the unseeded pipeline reproduced itself exactly — if EMConfig.seed no longer defaults to "
-        "None this gate has become a measurement of the new default and must be re-recorded"
-    )
+    assert QA.DEFAULT_EM_SEED == EMConfig().seed, "`base` would not be the configuration that ships"
     a, _ = _quant(toy, "base", None)
     b, _ = _quant(toy, "base", None)
     assert np.array_equal(a["count"].to_numpy(), b["count"].to_numpy()), (
-        "pinning the seed did not make the pipeline reproducible — no arm comparison here is "
-        "attributable"
+        "two runs of one arm disagree — no arm comparison here is attributable"
     )
 
 

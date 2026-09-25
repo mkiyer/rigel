@@ -118,6 +118,37 @@ def test_the_answer_IS_THE_SAME_AT_EVERY_SCAN_THREAD_COUNT(oracle, mode):
         )
 
 
+def test_the_SHIPPED_DEFAULTS_give_one_answer_run_after_run(oracle):
+    """No seed given and the shipped sampled assignment: three runs of one BAM, one answer.
+
+    The gate above pins its own seed, so it could not see the default. That default was ``None``, and the
+    CLI's a timestamp, so every run drew from fresh entropy and two runs of one input differed by whole
+    fragments (`TRAPS: the-deliverable-is-not-reproducible-by-default`).
+    """
+    config = PipelineConfig(scan=BamScanConfig(sj_strand_tag="auto"))
+    assert config.em.assignment_mode == "sample", "the gate is on the shipped SAMPLED assignment"
+    runs = [
+        np.asarray(
+            run_pipeline(oracle.bam_path, oracle.index, config=config).estimator.t_counts,
+            np.float64,
+        )
+        for _ in range(3)
+    ]
+    assert runs[0].sum() > 0, "nothing was assigned; a draw that assigns nothing cannot differ"
+    for i, other in enumerate(runs[1:], start=1):
+        assert np.array_equal(runs[0], other), (
+            f"run {i} disagrees with the first by up to {np.abs(runs[0] - other).max()} under the shipped "
+            f"defaults: the default seed is not fixed"
+        )
+
+
+def test_an_unset_seed_is_refused():
+    """``None`` would seed the draw from the OS's entropy, the old default, so it is refused rather than
+    quietly honoured."""
+    with pytest.raises(TypeError, match="seed must be an integer"):
+        EMConfig(seed=None)
+
+
 def test_THE_FIXTURE_REALLY_DOES_REORDER_THE_BUFFER(oracle):
     """Non-vacuity, and it is not optional here.
 

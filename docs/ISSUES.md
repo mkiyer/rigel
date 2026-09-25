@@ -16,6 +16,32 @@ the changelog is git.
 Ordered by priority. An entry says what is open and the number a ranking turns on; what was done is git,
 what was ruled is `DESIGN.md`.
 
+### the-scan-fraction-banks-are-not-reproducible
+`priority: YOUR CALL — it reverses the 2026-08-11 one-numeric-convention sign-off (DESIGN.md), whose premise it
+falsifies · kind: defect · 2026-09-25`
+The BAM scan's workers pull batches from one queue in whatever order they finish, each sums its own float64 fraction
+banks (`contained_inv_opportunity_sum`, `unspliced_inv_length_sum`, `unspliced_mass`, `spliced_mass`, the sj
+`inv_length_sum` and `mass`), and the merge adds the workers' sums — so the tally's last bits change from run to run
+at ANY scan thread count above one, not only across counts as the sign-off records. Its premise was that this wander
+reaches the deliverable at ~1e-11; the EM's forks carry it into whole fragments. MEASURED at `g50 ss.99 OFF`
+(`~/Downloads/rigel_runs/prototypes/2026-09-26_repro/FINDINGS.md`, two runs, EM on one thread, fractional): the six
+banks differ at ~1e-15 (up to 17,589 of 35,041 cells), 64 loci's gDNA prior at ~3e-16, then 317 transcripts by up to
+0.88 fragments and nascent parent counts by up to 42 (Σ 95); with the scan on one thread all 214 stage arrays repeat
+bit for bit with calibration and the EM on every core, so nothing else varies from run to run. A PROTOTYPE
+(`~/proj/rigel-exact`, 3 files) keeps each fraction cell as an EXACT sum: every nonzero deposit is a double in
+[2^-33, 1], so a whole number of 2^-94 units, held in an unsigned 128-bit integer (34 integer bits hold the 2^33
+deposits two uint32 count columns can feed one cell) and rounded once on export — more accurate than the float sum,
+where the fixed point refused then (a 2^-32 grid in uint64) was less. On it the fraction banks are bit-identical under
+sharding and shuffling and at 1/2/4/8 scan workers (both gates fail on the shipped build), and the whole pipeline at
+the DEFAULT thread budget repeats 213 of 214 arrays, the one left being the scan buffer's row order, which is
+canonicalised before use. Landing it moves the answer once by about one run-to-run spread (transcripts Σ 1.5
+fragments, nascent parents Σ 62 at that condition) and then holds it. Costs: memory +16 B per region and +24–32 B per
+boundary and sj (~50 MB per accumulator at human scale, one per scan worker); scan time unmeasured (the machine was
+loaded); the specification `_accumulator_reference.py` must sum exactly too (`fractions.Fraction`, correctly rounded),
+or the two native parity gates fail in the last bit, as they do on the prototype. Until then, pin
+`scan.total_threads=1` wherever two runs must agree bit for bit (`TRAPS:
+the-deliverable-is-not-reproducible-by-default`).
+
 ### the-junction-price-is-noisy-within-a-gene
 `priority: PARKED — the sum is accepted for now (owner, 2026-09-23); the pseudocount's odds are fixed since (2026-09-24, ISSUES: the-pseudocount-prior-is-biased-toward-gdna, CLOSED) · kind: defect · 2026-09-23`
 SIZED 2026-09-24 (the g98 dissection's g50 contrast, `~/Downloads/rigel_runs/prototypes/2026-09-24_g98_dissection/`): with every length on its

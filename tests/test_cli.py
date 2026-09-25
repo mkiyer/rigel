@@ -254,14 +254,11 @@ class TestConfigRoundTrip:
         args = _parse_quant()
         _resolve_quant_args(args, _build_quant_defaults())
 
-        result = _build_pipeline_config(args, seed=42)
+        result = _build_pipeline_config(args)
         ref = PipelineConfig()
 
-        # EM fields (except overridden seed)
+        # EM fields, the seed included: an unset --seed is the config's fixed seed, never a timestamp
         for f in dataclasses.fields(ref.em):
-            if f.name == "seed":
-                assert result.em.seed == 42
-                continue
             assert getattr(result.em, f.name) == getattr(ref.em, f.name), f.name
 
         # Scan fields, sj_strand_tag included: it round-trips through its transform
@@ -293,7 +290,7 @@ class TestConfigRoundTrip:
 
         args = _parse_quant("--scan-read-name-batch-size", "256")
         _resolve_quant_args(args, _build_quant_defaults())
-        cfg = _build_pipeline_config(args, seed=42)
+        cfg = _build_pipeline_config(args)
         assert cfg.scan.read_name_batch_size == 256
 
     def test_scan_performance_flags_flow_to_config(self):
@@ -311,7 +308,7 @@ class TestConfigRoundTrip:
             "1234",
         )
         _resolve_quant_args(args, _build_quant_defaults())
-        cfg = _build_pipeline_config(args, seed=42)
+        cfg = _build_pipeline_config(args)
         assert cfg.em.n_threads == 8
         assert cfg.scan.total_threads == 8
         assert cfg.calibration.n_threads == 8

@@ -56,7 +56,7 @@ from _shared import set_field  # noqa: E402
 
 
 import rigel.calibration.priors as PRIORS  # noqa: E402
-from rigel.config import PipelineConfig  # noqa: E402
+from rigel.config import EMConfig, PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.pipeline import _native_detect_sj_tag, run_pipeline  # noqa: E402
 from rigel.scan_cache import ScanCacheKeyError, read_scan_cache  # noqa: E402
@@ -101,12 +101,11 @@ _RULER_ARMS = {"oracle_ruler": True, "oracle_ruler_noop": False}
 ARMS = ("base", "base_reseed", "noop", "oracle", "oracle_gdna", "oracle_efflen",
         "warm_uniform", "oracle_alloc", "oracle_alloc_seed", "oracle_alloc_flip") + tuple(_RULER_ARMS)
 
-#: The EM seed every arm pins. ``EMConfig.seed`` defaults to ``None`` and ``assignment_mode`` to
-#: ``"sample"``, so the EM's final hard assignment is an unseeded categorical draw and a byte-identical
-#: ``noop`` is impossible on the default config; this instrument sets a seed rather than reporting a
-#: difference it cannot attribute. ``base_reseed`` re-runs ``base`` at ``seed + 1`` and is the noise
-#: floor: any arm delta smaller than it is sampling.
-DEFAULT_EM_SEED = 20260807
+#: The EM seed every arm pins: the shipped one, so ``base`` is the configuration that ships.
+#: ``base_reseed`` re-runs ``base`` at ``seed + 1`` and is the noise floor. The seed reaches only the
+#: ``sample`` assignment's draw, so under ``--set em.assignment_mode=fractional`` — how every arm is
+#: benchmarked — the two differ by nothing but what varies from one run to the next.
+DEFAULT_EM_SEED = EMConfig().seed
 
 #: arm -> which ``LocusPriors`` fields come from O. ``noop`` takes NONE of them and still builds O,
 #: which is what makes it a test of the wrapper rather than of an ``if``. There is no RNA arm:
@@ -760,12 +759,12 @@ def markdown_report(paths: list[Path], out: Path) -> None:
       "DEFERRED — reported on every benchmark, never a development target — and it carries most of "
       "the error, so a pooled total would be its total.")
     w("- **Nothing below the attribution floor is attributable.** The floor is the same arm re-run "
-      "under a different EM seed; it is printed beside every transcript row. ⚠ Re-running the "
-      "IDENTICAL command moves these figures by the same order — four runs of `g50 ss.99 OFF` spanned "
-      "145 fragments against a floor of ±144 — and it is not the seed: it persists with the seed "
-      "pinned, and shrinks to 12.5 fragments only at `em.n_threads=1` under `OMP_NUM_THREADS=1` "
-      "(`TRAPS: the-deliverable-is-not-reproducible-by-default`). Treat every figure here as carrying "
-      "that much noise.")
+      "under the next EM seed; it is printed beside every transcript row. Under the fractional "
+      "assignment every arm runs, the seed reaches no number, so the floor is the run-to-run spread "
+      "itself: the BAM scan's workers sum the tally's fractions in whatever batches each took, and the "
+      "EM carries that last-bit difference into whole fragments — four runs of `g50 ss.99 OFF` spanned "
+      "145 fragments (`TRAPS: the-deliverable-is-not-reproducible-by-default`). Treat every figure here "
+      "as carrying that much noise.")
     w("- **`expressed` and `detected` are the scored sets, and the truth table is larger than "
       "either.** It carries one row per SYNTHETIC nascent entity as well, and those rows are zero on "
       "both sides — zero truth and zero estimate, since the transcript table drops them — so they "
@@ -1163,8 +1162,8 @@ def main() -> int:
                     help="defaults to <suite>/oracle_cache when that directory exists")
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--em-seed", type=int, default=DEFAULT_EM_SEED,
-                    help="⛔ pinned, because the shipped default is None and the EM's hard "
-                         "assignment is an unseeded categorical draw — see DEFAULT_EM_SEED")
+                    help="the shipped seed by default; it reaches only the sampled assignment's draw "
+                         "— see DEFAULT_EM_SEED")
     ap.add_argument("--jobs", type=int, default=1)
     ap.add_argument("--set", dest="settings", action="append", default=[], metavar="SECTION.FIELD=VALUE",
                     help="a config value applied to every arm, repeatable (e.g. --set "

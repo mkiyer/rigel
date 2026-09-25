@@ -199,9 +199,9 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,436 passed / 0 skipped / 2 xfail, 3,438 collected** — re-derived 2026-09-25 on `main`
-with the minus-strand coverage-weight fix (3,350 + 86: `tests/test_pipeline_routing.py`'s coverage section, 24 → 110
-cases), measured with two `docs/dev/`
+**The standing baseline: 0 failed / 3,438 passed / 0 skipped / 2 xfail, 3,440 collected** — re-derived 2026-09-25 on `main`
+with the fixed default seed (3,436 + 2 in `tests/test_scan_order_independence.py`: the shipped defaults run three times,
+and an unset seed refused), measured with two `docs/dev/`
 notes present and those two cases subtracted: an untracked file under `docs/dev/` is a
 jargon case too, so a working tree holding notes reads higher (the count is re-derived from the table below at every commit
 that measures the suite; the history of how it moved is git, not this file). The 2 xfails are executable records of proven

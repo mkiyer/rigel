@@ -112,18 +112,20 @@ comparison can detect a wrong marginal; only a check on the marginal fails.** Th
 read as broken.** Require equal row-key sets, and re-record the baseline from the current tree in the same
 session; if HEAD-vs-baseline is not 100 %, the baseline is what is broken.
 
-**the-deliverable-is-not-reproducible-by-default. The shipped EM seed defaults to none with sampled hard
-assignment, so an end-to-end A/B on the default config measures its effect plus a sampling draw.** Two
-identical runs differed by up to 43 fragments on the gate toy. Pin the seed (or use fractional assignment)
-on every measurement arm and print a reseeded noise floor beside the effect; whether the default should
-change is an owner call. A pinned seed is not enough on the panel at the default thread budget: two runs of
-one ladder condition at one seed differed by 67 fragments and `quant_accuracy.py`'s `noop` matched `base` to
-≤ 9, not to the byte (2026-09-19; the source is not located — `rename_identity.py` pins both thread counts to
-1 for exactly this reason). NARROWED 2026-09-19: at the default budget four runs of `g50 ss.99 OFF` spanned
-145 fragments of transcript `Σ|Δ|` (99,319–99,463); with `--set em.n_threads=1` under `OMP_NUM_THREADS=1`
-two runs still differed, by 12.5. So the thread budget is MOST of it and something smaller survives at one
-thread — the EM's own pool is not the whole source, and the next search starts upstream of it. The byte-identity gate holds on its own toy fixture only; on the panel, read `noop`
-against the floor.
+**the-deliverable-is-not-reproducible-by-default. Two runs of one BAM under one config returned different
+counts, from two sources, and pinning "one thread" pinned the wrong one.** The EM's seed defaulted to none (the
+CLI's to the clock) with the sampled assignment shipped, so each run drew afresh (43 fragments apart on the gate
+toy); it is fixed now (`EMConfig.seed = 0`, and `tests/test_scan_order_independence.py` runs the shipped defaults
+three times). The rest is the BAM SCAN: its workers pull batches from one queue in whatever order they finish, each
+sums its own float64 fraction banks, and the merge adds the workers' sums, so the tally's last bits change from run
+to run at ANY scan thread count above one — `em.n_threads=1` pins neither. MEASURED 2026-09-25 at `g50 ss.99 OFF`
+(`~/Downloads/rigel_runs/prototypes/2026-09-26_repro/FINDINGS.md`): with the scan on one thread, 214 of 214 stage
+arrays repeat bit for bit with calibration and the EM on every core; with it on all of them, the six fraction banks
+differ at ~1e-15, which reaches 64 loci's gDNA prior at ~3e-16 and, through the EM's forks, moves 317 transcripts by
+up to 0.88 fragments and nascent parent counts by up to 42 (four runs spanned 145 fragments of transcript Σ|Δ|).
+`ISSUES: the-scan-fraction-banks-are-not-reproducible` holds the repair. Under fractional assignment the seed
+reaches no number, so `quant_accuracy.py`'s `base_reseed` measures this spread, not a seed. Until it lands, pin
+`scan.total_threads=1` wherever two runs must agree bit for bit (`rename_identity.py` does).
 
 **a-clip-hides-a-scale-error. A clip hides errors on both sides of it.** A `min()` clip hid an exact
 factor of 2 for months because the fixtures cancelled it, and a two-endpoint clip with reversed or equal

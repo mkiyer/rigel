@@ -8,6 +8,7 @@ ensure immutability after construction.  Compose the sub-configs into
 from __future__ import annotations
 
 import math
+import operator
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,8 +29,9 @@ class EMConfig:
 
     Parameters
     ----------
-    seed : int or None
-        Random seed for reproducibility.
+    seed : int
+        Seed of the ``sample`` assignment's draw (default 0); another seed is another draw from the same
+        posterior. Fixed, never a clock, so the draw repeats from run to run.
     mode : {"vbem", "map"}
         Algorithm variant (default ``"vbem"``).
     iterations : int
@@ -47,7 +49,7 @@ class EMConfig:
         this threshold are zeroed before assignment.  Default 0.01.
     """
 
-    seed: int | None = None
+    seed: int = 0
     mode: Literal["vbem", "map"] = "vbem"
     iterations: int = 1000
     convergence_delta: float = 1e-6
@@ -88,6 +90,11 @@ class EMConfig:
         # and is not.
         if self.warm_start not in ("coverage", "prior", "uniform"):
             raise ValueError(f"Unknown warm start: {self.warm_start!r}")
+        # `None` would seed the draw from the OS's entropy, and one input would stop returning one answer.
+        try:
+            operator.index(self.seed)
+        except TypeError:
+            raise TypeError(f"EMConfig.seed must be an integer; got {self.seed!r}.") from None
 
 
 # ======================================================================

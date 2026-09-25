@@ -424,11 +424,12 @@ it, because several gates are parametrised over the files on disk. Any failure i
 is a real EM unidentifiability (`TRAPS: identical-paralogs-are-bimodal`); if it fails again, do not fix
 it by moving a seed.
 
-The goldens run under the default sampling mode (`EMConfig.seed = None`, `assignment_mode = "sample"`),
-and two runs of the identical pipeline on the identical BAM return different transcript counts
-(`TRAPS: the-deliverable-is-not-reproducible-by-default`). Regenerate the goldens twice and diff, and pin
-`EMConfig.seed` in any instrument that compares two end-to-end runs (`quant_accuracy.py` does, and prints
-a `base_reseed` noise floor beside the effect).
+The goldens run fractional with the EM on one thread and a pinned seed (`tests/test_golden_output.py`), but the
+scan runs at its default thread budget, and its fraction sums vary in the last bits from run to run
+(`TRAPS: the-deliverable-is-not-reproducible-by-default`): regenerate the goldens twice and diff before trusting a
+change, and in any instrument that must compare two end-to-end runs bit for bit pin `scan.total_threads=1`
+(`rename_identity.py` does). `quant_accuracy.py` prints a `base_reseed` floor beside every effect instead, and under
+its fractional assignment that floor is exactly this run-to-run spread.
 
 **The capture-contracted length is gated per object against the deposit rule.** Three gates run every
 placement of every fragment width through the reference accumulator (`tests/native/_accumulator_reference.py`)

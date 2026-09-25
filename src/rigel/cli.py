@@ -97,8 +97,6 @@ def quant_command(args: argparse.Namespace) -> int:
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    seed = _resolve_seed(args)
-
     # YAML may deliver a bare string; the CLI always delivers a list
     if isinstance(args.sj_strand_tag, str):
         args.sj_strand_tag = [args.sj_strand_tag]
@@ -112,7 +110,7 @@ def quant_command(args: argparse.Namespace) -> int:
     )
 
     # -- Build pipeline config + run --
-    pipeline_config = _build_pipeline_config(args, seed)
+    pipeline_config = _build_pipeline_config(args)
     result = run_pipeline(bam_path, index, config=pipeline_config)
 
     # -- Write outputs --
@@ -126,18 +124,7 @@ def quant_command(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_seed(args: argparse.Namespace) -> int:
-    """Return an explicit seed or generate one from the current timestamp."""
-    if args.seed is None:
-        seed = int(time.time())
-        logging.info(f"No seed provided, using timestamp: {seed}")
-    else:
-        seed = args.seed
-        logging.info(f"Using provided seed: {seed}")
-    return seed
-
-
-def _build_pipeline_config(args: argparse.Namespace, seed: int) -> "PipelineConfig":  # noqa: F821
+def _build_pipeline_config(args: argparse.Namespace) -> "PipelineConfig":  # noqa: F821
     """Translate resolved CLI args into a ``PipelineConfig``.
 
     Field mapping is driven by ``_PARAM_SPECS`` — see the declarative
@@ -171,9 +158,6 @@ def _build_pipeline_config(args: argparse.Namespace, seed: int) -> "PipelineConf
             _section[section][field_name] = config_val
         else:
             top_kw[spec.config_path] = config_val
-
-    # the seed is resolved (timestamp when unset) in quant_command
-    em_kw["seed"] = seed
 
     cfg = PipelineConfig(
         em=EMConfig(**em_kw),
@@ -1203,7 +1187,8 @@ def build_parser() -> argparse.ArgumentParser:
         dest="seed",
         type=int,
         default=None,
-        help="Random seed for reproducibility (default: use current timestamp).",
+        help="Seed of the sampled assignment's draw (default: 0); another seed is another draw from "
+        "the same posterior.",
     )
     model_grp.add_argument(
         "--em-iterations",

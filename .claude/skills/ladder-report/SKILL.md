@@ -85,9 +85,9 @@ transcripts contribute ~300 fragments to nascent truth while their tool-side cou
 ## How the report is read
 
 - **Per stratum, never pooled.** Three strata are in scope; unstranded × capture-ON is deferred.
-- **Above the floor.** Re-running the identical command moves these figures by about the reseed
-  floor's own size, and it is not the seed (`TRAPS: the-deliverable-is-not-reproducible-by-default`).
-  Never act on a smaller difference.
+- **Above the floor.** Under the fractional assignment the seed reaches no number, so the reseed floor
+  IS the run-to-run spread: the multi-threaded scan's fraction sums, carried by the EM into whole
+  fragments (`TRAPS: the-deliverable-is-not-reproducible-by-default`). Never act on a smaller difference.
 - **The capture-OFF magnitudes are a stress reading.** The panel runs 20.2 % nascent fragments against
   a realistic ~4.2 % (`DESIGN.md` §0b's nascent scope ruling), so quote the share with the number.
 

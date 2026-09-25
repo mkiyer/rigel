@@ -183,11 +183,11 @@ footer code{background:none;padding:0}
       <li><b>Read per stratum, never pooled.</b> Three strata are in scope. <b>Unstranded × capture ON is
         deferred</b> — reported everywhere, never a development target — and it carries most of the
         error, so a pooled total would mostly be its total.</li>
-      <li><b>Nothing below the seed floor is attributable.</b> It is printed beside every transcript
-        row. ⚠ Re-running the <em>identical</em> command moves these figures by the same order — four
-        runs of <code>g50 ss.99 OFF</code> spanned 145 fragments against a floor of ±144 — and it is
-        not the seed: it persists with the seed pinned and shrinks to 12.5 fragments only at
-        <code>em.n_threads=1</code> under <code>OMP_NUM_THREADS=1</code>. Treat every figure here as
+      <li><b>Nothing below the floor is attributable.</b> It is printed beside every transcript row: the
+        same arm re-run under the next EM seed. Under the fractional assignment the seed reaches no
+        number, so the floor is the run-to-run spread itself — the BAM scan's workers sum the tally's
+        fractions in whatever batches each took, and the EM carries that last-bit difference into whole
+        fragments (four runs of <code>g50 ss.99 OFF</code> spanned 145). Treat every figure here as
         carrying that much noise, and never act on a smaller difference.</li>
       <li><b><code>expressed</code> and <code>detected</code> are the scored sets.</b> The truth table
         is larger than either: it carries a row per synthetic nascent entity too (6,919 of 15,669),

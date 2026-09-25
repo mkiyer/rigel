@@ -1075,10 +1075,9 @@ class TestParalogMultimapping:
                 # the split becomes identifiable, which is what strictness was for.
                 #
                 # The TOTAL is deliberately NOT pinned. It is a draw from `assignment_mode="sample"`
-                # under an unpinned `EMConfig.seed` and it moves across seeds
-                # (TRAPS: the-deliverable-is-not-reproducible-by-default), so pinning it would bake
-                # that irreproducibility into a gate. Nor is it correct: the total runs well above
-                # the expectation here, which is a SECOND defect at this scenario, tracked separately.
+                # and it moves with the seed, so pinning it would pin one draw rather than a property.
+                # Nor is it correct: the total runs well above the expectation here, which is a SECOND
+                # defect at this scenario, tracked separately.
                 assert min(t1.observed, t2.observed) == 0.0, (
                     f"the identical-paralog split is no longer collapsed ({t1.observed} / "
                     f"{t2.observed}). If the tie is now broken, DELETE this branch and let the even-split "
