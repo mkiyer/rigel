@@ -790,7 +790,12 @@ in-scope transcript Σ|Δ| 407.7k → 390.0k (−4.3 %, stranded OFF), 1,496.1k 
 and every `g00` row's false gDNA ~4.5k → ~150. It unmasks an under-call at `g05`, which the clamp's false gDNA had
 partly offset: stranded OFF −1.3k → −4.1k, unstranded OFF −4.0k → −6.6k. MAP, with or without the repair, is worse
 than VBEM on the gDNA pool (`g50 ss.99 OFF` −15.2k against −9.5k), so VBEM stays. Goldens moved by at most 3.3e-8
-relative (the plain step is now copied at step 1, not recomputed).
+relative (the plain step is now copied at step 1, not recomputed). COST, MEASURED 2026-09-25 on VCaP at 8 threads
+(`~/Downloads/rigel_runs/prototypes/2026-09-26_squarem_timing/`): counted, so independent of machine load, +8.8 % SQUAREM
+iterations and +13.7 % E-step work, loci at the 333-cycle cap 103 → 123 (the largest locus, 12,890 components, now
+among them: 299 → 333); the halvings themselves are ~1e8 component checks, negligible. Three interleaved wall-clock
+pairs, taken beside another workload, put the locus-EM stage at +12 % on average (−3 to +27 % per pair, ~+3 s of
+~23 s) and the whole run unchanged within ±7 %.
 
 ### a-start-in-an-intron-was-measured-from-the-wrong-exon
 FIXED 2026-09-25 in the resolver (`resolve_context.h`'s `tx_frag_length`, the one length definition of `DESIGN.md`
