@@ -158,7 +158,27 @@ over its eligible alignments (`scoring.cpp`, pinned by `tests/test_pipeline_rout
 placement derives the sum.
 
 ### the-em-answer-depends-on-where-it-starts
-`priority: NEXT — found 2026-09-25; it holds the minus-strand coverage-weight fix · kind: defect · 2026-09-25`
+`priority: NEXT — the mechanism is found and its repair A/B'd (2026-09-25); the repair awaits the owner's go to land · kind: defect · 2026-09-25`
+FOUND 2026-09-25: SQUAREM's extrapolation overshoots a shrinking component below zero and CLAMPS it to the floor (0
+under MAP, 1e-300 under VBEM), and nothing can revive it — the E-step gives it zero responsibility and the
+evidence-proportional prior (`EQUATIONS.md` §9b.1) gives it nothing, so only a component with deterministic fragments of
+its own comes back (`MANUAL.md`'s FAQ says every component with genuine read support recovers: wrong for any candidate
+whose fragments are all shared). Which components are shrinking early depends on the start, so candidates sharing
+fragments — overlapping synthetic spans, minor isoforms, the gDNA component — fork winner-take-all. MEASURED on
+`g00 ss.99 ON` (9.17M EM units; every setting re-solved from one pre-EM state in one process, which repeats itself to
+0.0 fragments; `~/Downloads/rigel_runs/prototypes/2026-09-25_em_start/`, `em_start_lab.py`, `analyze.py`): the
+fragments that change with the start (coverage vs uniform, 10,000 iterations, δ 1e-9) are 41,343 under the shipped
+VBEM (243 loci, 239 of them forks, every one with a clamp, none a flat valley) and 22,447 under MAP; with the clamp
+replaced by BACKTRACKING — shrink the step toward the plain double step until no component the plain step keeps alive
+is pushed below the floor — MAP falls to 204 (5 loci, all at the iteration cap, ΔLL ≤ 0.01 nats) and from one start
+its answer beats the clamp's likelihood in 116 of 120 loci. VBEM with backtracking keeps 8,096: its own ψ penalty,
+with no per-component prior, is winner-take-all, a property of the model rather than the solver. False gDNA there
+(truth 0): VBEM 4,287 → 177, MAP 1,187 → 158. LADDER (all 16, fractional; the prototype `~/proj/rigel-em`,
+`RIGEL_PROTO_SQUAREM`, against the committed code; `ladder/ab_table.txt`): VBEM with backtracking, in-scope transcript
+Σ|Δ| −4.3 / −0.4 / −3.4 % (stranded OFF / stranded ON / unstranded OFF), genes −6.0 / −0.3 / −7.5 %, gDNA pool Σ|error|
+51.7k → 50.5k, 121.5k → 114.4k, 78.8k → 77.0k, and every `g00` row's false gDNA ~4.5k → ~150. MAP, with or without
+the clamp, is worse on the gDNA pool (`g50 ss.99 OFF` −15.2k against −9.5k) and on stranded ON. What follows is the
+entry as first recorded.
 The EM's warm start (`warm_start="coverage"`, `em_solver.cpp`) seeds each unit's share by the scorer's trapezoid
 coverage weight, and that weight was placed one fragment length off on minus-strand transcripts: the interval was read
 from the flipped start in the wrong direction, so the transcript's ends weighed like its middle. Fixed and gated in
@@ -168,10 +188,8 @@ transcript Σ|Δ| stranded OFF −1.2k, stranded ON +8.6k (`g00 ss.99 ON` +7.2k)
 genes +12.7 %. It is not unconverged loci: at `em.iterations=10000`, `em.convergence_delta=1e-9` the two trees still
 differ by −1.8k to +5.8k transcript fragments and −1.4k to +2.1k gene fragments on the four conditions tried, and the
 gDNA pool at `g00 ss.99 ON` by +988 at both convergences. The converged answer depends on the start, so the warm start
-is a hidden prior. Candidate mechanisms, unmeasured: the absorbing exact zero (a component under about 1.4e-3 gets zero
-responsibility through the E-step's exp underflow and cannot return) and flat directions between near-identical
-components. The coverage fix is held by `TRAPS: a-cancelling-defect-pair`: price it in the arm that also removes the
-start-dependence. Tight convergence alone costs 5–7× the EM's runtime and moves the shipped answer −2.5 to +0.7 %.
+is a hidden prior (the mechanism is the clamp above; flat directions account for 3 of 142 moved MAP loci). The
+coverage fix is held by `TRAPS: a-cancelling-defect-pair`: price it in the arm that also removes the start-dependence. Tight convergence alone costs 5–7× the EM's runtime and moves the shipped answer −2.5 to +0.7 %.
 Instrument: `quant_accuracy.py`, two trees or two `em.warm_start` values at the tight convergence. Data:
 `~/Downloads/rigel_runs/prototypes/2026-09-25_coverage_weight/` (`ab_table.txt`, `tight/`).
 
