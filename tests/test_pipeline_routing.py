@@ -817,3 +817,178 @@ def test_a_multimapper_is_RNA_only_when_no_alignment_can_be_gdna_or_its_gdna_is_
     for em in (certified, pruned):
         assert em.is_spliced[0]
         assert em.gdna_log_liks[0] == -np.inf
+
+
+# ---------------------------------------------------------------------------
+# The coverage weight is read along the transcript, 5'→3'
+# ---------------------------------------------------------------------------
+
+_TX_START, _TX_LEN, _FLEN = 1000, 1000, 200
+_ONE_EXON = [(_TX_START, _TX_START + _TX_LEN)]
+
+
+class _ExonIndex(_Index):
+    """Transcript 0 on the minus strand and transcript 1 on the plus strand, both with the same ``exons``
+    (``[start, end)`` in genomic order), present in the exon CSR the scorer reads."""
+
+    def __init__(self, exons):
+        strands = [int(Strand.NEG), int(Strand.POS)]
+        super().__init__(t_to_g=[0, 1], t_to_strand=strands, g_to_strand=strands)
+        self.exons = [tuple(e) for e in exons]
+        self.t_df["start"] = self.exons[0][0]
+        self.t_df["end"] = self.exons[-1][1]
+        self.t_df["length"] = sum(e - s for s, e in self.exons)
+
+    def build_exon_csr(self):
+        k = len(self.exons)
+        starts = np.array([s for s, _ in self.exons] * 2, dtype=np.int32)
+        ends = np.array([e for _, e in self.exons] * 2, dtype=np.int32)
+        before = np.concatenate([[0], np.cumsum(ends[:k] - starts[:k])[:-1]]).astype(np.int32)
+        return (
+            np.array([0, k, 2 * k], dtype=np.int32),
+            starts,
+            ends,
+            np.concatenate([before, before]),
+        )
+
+
+def _fragment(t, genomic_start, flen=_FLEN):
+    """A ``flen``-bp fragment on transcript ``t`` (sense) whose genomic start is ``genomic_start``."""
+    return _BF(
+        t_inds=np.array([t], dtype=np.int32),
+        splice_type=int(SpliceType.UNSPLICED),
+        align_strand=int(Strand.NEG) if t == 0 else int(Strand.POS),
+        frag_lengths=np.array([flen], dtype=np.int32),
+        exon_bp=np.array([100], dtype=np.int16),
+        intron_bp=np.array([0], dtype=np.int16),
+        read_length=100,
+        genomic_footprint=flen,
+        genomic_start=genomic_start,
+    )
+
+
+def _weights(exons, bfs, fragment_classes, frag_ids):
+    index = _ExonIndex(exons)
+    strand_models, max_frag_size, estimator, stats = _make_env(index)
+    em = _scan_em_data(
+        _Buffer([_Chunk(bfs=bfs, fragment_classes=fragment_classes, frag_ids=frag_ids)]),
+        index,
+        strand_models,
+        max_frag_size,
+        estimator,
+        stats,
+    )
+    return {
+        (u, int(em.t_indices[j])): float(em.coverage_weights[j])
+        for u in range(em.n_units)
+        for j in range(int(em.offsets[u]), int(em.offsets[u + 1]))
+    }
+
+
+def _trapezoid_weight(lo, hi, length):
+    """The coverage model the scorer documents, integrated exactly: under uniform fragmentation the coverage
+    at transcript position x is min(x, w, L − x) with w = min(f, L/2), and a fragment on [lo, hi) weighs w over
+    its mean coverage, floored at 1. The coverage is piecewise linear, so a trapezoid rule over its kinks is
+    exact."""
+    f = hi - lo
+    if f <= 0:
+        return 1.0
+    w = min(f, length / 2)
+
+    def cov(x):
+        return min(x, w, length - x)
+
+    points = sorted({lo, hi, *[k for k in (w, length - w) if lo < k < hi]})
+    area = sum((b - a) * (cov(a) + cov(b)) / 2 for a, b in zip(points, points[1:]))
+    return w / max(area / f, 1.0)
+
+
+def _forward_start(genomic_start, exons):
+    """The fragment's start in the transcript's forward coordinates, measured as the resolver measures a
+    fragment's length (``resolve_context.h``'s ``tx_frag_length``): inside an exon it is the exon's offset; in an
+    intron or before the first exon it sits the overhang's length before the next exon's start; past the last
+    exon it sits that far past the transcript's end."""
+    before = 0
+    for s, e in exons:
+        if genomic_start < s:
+            return before - (s - genomic_start)
+        if genomic_start < e:
+            return before + (genomic_start - s)
+        before += e - s
+    return before + (genomic_start - exons[-1][1])
+
+
+def _expected_weight(exons, genomic_start, flen, strand):
+    """The coverage model on the interval the fragment occupies in the transcript's own 5'→3' coordinates, cut to
+    the transcript: ``[a, a + f)`` forward from its start ``a``, the mirror ``[L − a − f, L − a)`` on the minus
+    strand, whose 5'→3' runs against the genome."""
+    length = sum(e - s for s, e in exons)
+    a = _forward_start(genomic_start, exons)
+    lo, hi = (a, a + flen) if strand == "plus" else (length - a - flen, length - a)
+    return _trapezoid_weight(max(lo, 0), min(hi, length), length)
+
+
+# Offsets of the fragment's genomic start into a 1,000-bp exon: both ramps (the first and last _FLEN bases), their
+# edges, the plateau between, and fragments overhanging either end of the transcript.
+_OFFSETS = [-150, -1, 0, 1, 50, 199, 200, 400, 600, 601, 750, 800, 801, 950]
+
+
+@pytest.mark.parametrize("offset", _OFFSETS)
+def test_a_minus_strand_fragment_weighs_what_its_plus_strand_mirror_weighs(offset):
+    """The trapezoid coverage is read along the transcript 5'→3', and on the minus strand that runs against
+    the genome: a fragment whose genomic start sits ``offset`` bp into the exon covers transcript positions
+    ``[L − offset − f, L − offset)``, exactly the interval a plus-strand fragment at ``L − offset − f`` covers,
+    so the genome's mirror image of a fragment weighs what the fragment weighs. Anchored on the flipped START
+    instead, the interval ran off the transcript's 3' end: at an end of the minus-strand transcript the weight
+    read 1 (the plateau's) instead of 2."""
+    mirror = _TX_LEN - offset - _FLEN
+    w = _weights(
+        _ONE_EXON,
+        [_fragment(0, _TX_START + offset), _fragment(1, _TX_START + mirror)],
+        [FRAG_UNAMBIG, FRAG_UNAMBIG],
+        [1, 2],
+    )
+    assert w[(0, 0)] == pytest.approx(w[(1, 1)], rel=1e-12)
+    # At either end the fragment fills one ramp: coverage averages f/2 against the plateau's f, weight 2.
+    if offset in (0, _TX_LEN - _FLEN):
+        assert w[(0, 0)] == pytest.approx(2.0, rel=1e-12)
+
+
+@pytest.mark.parametrize("offset", _OFFSETS)
+def test_a_multimapper_s_hits_are_weighed_along_their_own_transcripts(offset):
+    """The multimapper path weighs each hit on its own transcript by the same rule as a single fragment."""
+    mirror = _TX_LEN - offset - _FLEN
+    w = _weights(
+        _ONE_EXON,
+        [_fragment(0, _TX_START + offset), _fragment(1, _TX_START + mirror)],
+        [FRAG_MULTIMAPPER] * 2,
+        [3, 3],
+    )
+    assert w[(0, 0)] == pytest.approx(w[(0, 1)], rel=1e-12)
+    if offset in (0, _TX_LEN - _FLEN):
+        assert w[(0, 0)] == pytest.approx(2.0, rel=1e-12)
+
+
+# (exons, genomic start, fragment length): every offset above; a transcript shorter than two fragments, where a
+# fragment overhanging an end weighs differently cut (its part on the transcript) than shifted wholly onto it; and
+# two exons, with starts before the first exon, inside each, in the intron — where the start is measured back from
+# the next exon's start, as the resolver measures the fragment's length — and past the end.
+_SHORT = [(1000, 1300)]
+_TWO_EXONS = [(1000, 1300), (2000, 2150)]
+_CASES = (
+    [(_ONE_EXON, _TX_START + o, _FLEN) for o in _OFFSETS]
+    + [(_SHORT, g, 200) for g in (850, 900, 1000, 1050, 1100, 1250)]
+    + [(_TWO_EXONS, g, 110) for g in (950, 1000, 1200, 1250, 1300, 1990, 2000, 2040, 2100)]
+)
+
+
+@pytest.mark.parametrize("exons,genomic_start,flen", _CASES)
+@pytest.mark.parametrize("strand", ["minus", "plus"])
+def test_every_fragment_weighs_what_the_coverage_model_says(exons, genomic_start, flen, strand):
+    """Against an independent evaluation of the coverage model on the interval the fragment occupies. The weight
+    is stored as a float32, so the bound is float32's."""
+    t = 0 if strand == "minus" else 1
+    w = _weights(exons, [_fragment(t, genomic_start, flen)], [FRAG_UNAMBIG], [1])
+    assert w[(0, t)] == pytest.approx(
+        _expected_weight(exons, genomic_start, flen, strand), rel=1e-6
+    )

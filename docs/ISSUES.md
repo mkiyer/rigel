@@ -158,29 +158,44 @@ over its eligible alignments (`scoring.cpp`, pinned by `tests/test_pipeline_rout
 placement derives the sum.
 
 ### the-em-answer-depends-on-where-it-starts
-`priority: NEXT — the owner's investigation (2026-09-25); it holds the minus-strand coverage-weight fix · kind: defect · 2026-09-25`
+`priority: NEXT — the owner's investigation (2026-09-25) · kind: defect · 2026-09-25`
 What is left after the SQUAREM repair (`ISSUES: the-squarem-clamp-decided-which-components-live`, CLOSED): VBEM's
 own start-dependence. With the clamp gone MAP reaches one answer from any start (204 fragments apart at
 `g00 ss.99 ON`, all in loci still at the iteration cap), while VBEM still ends 8,096 fragments apart there (136
 loci, 132 of them winner forks — a candidate dead in one answer and holding fragments in the other). Its E-step
 weight ψ(α), with no per-component prior, penalises a small component by about −1/α, so components sharing fragments
 race and the start picks the winner; the two answers' likelihoods differ (the uniform start's is higher in 121 of 136
-loci), so it is not a flat valley. Candidate repairs, unmeasured: a warm start that is itself start-free (the MAP
-optimum, which is unique), or a per-component prior. Instrument: `em_start_lab.py` in
+loci), so it is not a flat valley. Candidate repairs, each measured or excluded below: a warm start that is itself
+start-free (the MAP optimum, which is unique), or a per-component prior. Instrument: `em_start_lab.py` in
 `~/Downloads/rigel_runs/prototypes/2026-09-25_em_start/` (every EM setting re-solved from one pre-EM state in one
 process, which repeats itself to 0.0 fragments; `analyze.py` classifies each moved locus). The minus-strand
-coverage-weight fix — the warm start's trapezoid coverage weight was read from the flipped start in the wrong
-direction, one fragment length off, on minus-strand transcripts (`~/proj/rigel-covwt`, `scoring.cpp`'s
-`coverage_weight`, 20 tests) stays held (`TRAPS: a-cancelling-defect-pair`): on the old solver it moved the ladder ±1–2 %
-(`g00 ss.99 ON` +7.2k transcript fragments, `g50 ss.50 OFF` genes +12.7 %); RE-PRICED on the repaired solver
-(2026-09-25, `~/Downloads/rigel_runs/prototypes/2026-09-25_coverage_on_squarem/ab_table.txt`) it moves in-scope
-transcript Σ|Δ| +3.3k (+0.8 %, stranded OFF), −0.8k (−0.05 %, stranded ON), +2.3k (+0.6 %, unstranded OFF), genes and the
-gDNA pool within ±0.4 % bar `g05 ss.50 OFF` genes +1.3 % — still the residual start-dependence speaking, since the weight
-only seeds the start. It lands with the start-free repair, where the seed cannot move the answer.
+coverage-weight fix, which seeds only the start, landed on its own (`ISSUES:
+the-minus-strand-coverage-weight-sat-one-fragment-length-off`, CLOSED); what it moved is this entry speaking.
 MEASURED 2026-09-25 on `g00 ss.99 ON` (the landed solver's prototype): the 136 loci VBEM's two starts disagree on carry
 EQUAL truth error — 385,299 (coverage start) against 385,088 (uniform), MAP's single answer 385,376; the coverage start
 is closer in 50 loci, the uniform in 64, 22 tie — so what is left is reproducibility, not accuracy: the forks pick
 among near-equivalent explanations of genuinely ambiguous fragments.
+TWO START-FREE ARMS MEASURED 2026-09-25 (`~/Downloads/rigel_runs/prototypes/2026-09-25_vbem_start/`; the ladder
+against the landed build, all 16, fractional, `ladder/compare_vbem.txt`): (1) VBEM STARTED FROM THE MAP OPTIMUM
+(prototype `~/proj/rigel-em`, `RIGEL_PROTO_VBEM_START=map`: MAP first, then VBEM from the counts one E-step at θ_MAP
+implies) — nearly start-free (the two starts 294 fragments apart at `g00 ss.99 ON` against 8,096; truth error there
+936.6k–936.9k against 937.8k–938.0k), in-scope transcript Σ|Δ| −4.7 / +0.2 / −3.8 % (stranded OFF / stranded ON /
+unstranded OFF), but genes +0.6 / +1.0 / +4.0 % and the gDNA pool's Σ|error| +3.3 / +2.1 / +3.2 %: it inherits MAP's
+signature, more mass on annotated transcripts and less on the synthetic spans and on gDNA (`g50 ss.99 ON` −13.4k →
+−15.5k), and it costs 30–50 % more pipeline time on the heavy conditions (measured beside the uniform arm under the
+same load). (2) VBEM FROM THE UNIFORM START (a config value, `em.warm_start=uniform`): worse everywhere, transcripts
++2.0 / +0.1 / +0.5 %, genes +1.6 / +0.4 / +1.8 %. So which basin VBEM starts in is not neutral — the coverage start's
+favour genes and gDNA, the MAP optimum's favour the transcripts off capture — and neither arm is a clean win. SIZED on an
+unstranded row (`g05 ss.50 OFF`, the same lab): the landed VBEM's two starts end 115,159 fragments apart (134 loci, 58
+by more than 100), and there the coverage start is the better one — truth error 1,371.7k against 1,376.9k — though the
+uniform start is closer in more of the forked loci (76 against 44). There VBEM from the MAP optimum is neither
+start-free nor better: its two starts end 19,404 fragments apart, and its truth error is 1,413.8k / 1,410.6k against
+the landed 1,371.7k (+3 %) — it moves mass off the synthetic spans and gDNA onto the annotated transcripts, which is
+why the transcript table alone read better. The coverage start has been the most accurate start measured on every
+condition. Not
+tried: choosing among VBEM's optima by VBEM's own objective (the evidence lower bound), which needs its derivation
+under the grouped prior. A per-component reference prior is excluded by `EQUATIONS.md` §9b.1 (any lift above the
+~0.16–0.47 activation threshold revives every shadow entity; the equal share was refused 2026-09-19).
 
 ### the-gdna-length-law-falls-back-at-identical-purities
 `priority: NEXT — a defect found by the g98 dissection (2026-09-24) · kind: defect · 2026-09-24`
@@ -704,6 +719,25 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### the-minus-strand-coverage-weight-sat-one-fragment-length-off
+FIXED 2026-09-25 (`scoring.cpp`'s `coverage_weight`; gate `tests/test_pipeline_routing.py`: every fragment's weight
+against the trapezoid coverage model integrated exactly — 29 placements on one exon, a short transcript and a spliced
+one, both strands — beside a strand-mirror test and a multimapper test over 14 offsets each). The EM's warm start
+weights each candidate by where the fragment sits on the transcript: the trapezoid `min(x, w, L − x)`,
+`w = min(f, L/2)`, over the fragment's bases. On a minus-strand transcript the old rule flipped the genomic start
+into transcript space and read the fragment forward from it, but there the genomic start is the fragment's 3′ end,
+so the window sat one fragment length off: `[L − s, L − s + f)` in place of `[L − s − f, L − s)`. The rule now
+measures the start as the resolver does (a start in an intron back from the next exon, `ISSUES:
+a-start-in-an-intron-was-measured-from-the-wrong-exon`), reverses the window on the minus strand, and cuts it at both
+transcript ends, so an overhang weighs nothing. Each perturbation fails the gate: the old flip 50 cases, an intron
+start snapped to the previous exon 4, the overhang shifted 6, no cut 20; the flip alone, without the other two, 8.
+It seeds only the start, so it reaches the answer only through VBEM's start-dependence (`ISSUES:
+the-em-answer-depends-on-where-it-starts`). LADDER against the SQUAREM-landed arm (all 16, fractional;
+`~/Downloads/rigel_runs/prototypes/2026-09-26_coverage_landed/ab_table.txt`): in-scope transcript Σ|Δ| 390.0k →
+391.6k (+0.41 %, stranded OFF), 1,489.8k → 1,487.8k (−0.13 %, stranded ON), 395.5k → 396.1k (+0.16 %, unstranded
+OFF); genes +0.32 / −0.02 / +0.27 %; the gDNA pool's Σ|error| within 142 fragments; every row inside its
+`base_reseed` floor. Goldens moved by at most 2.3e-8 relative.
 
 ### the-squarem-clamp-decided-which-components-live
 FIXED 2026-09-25 (`DESIGN.md` §3.1e; `em_solver.cpp`'s `backtracked_squarem_step`, VBEM and MAP; gate

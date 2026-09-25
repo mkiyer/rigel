@@ -234,41 +234,45 @@ class NativeFragmentScorer {
         return best_rna_ll - gdna_ll <= max_ll_delta_;
     }
 
-    inline int32_t genomic_to_tx_pos(int32_t genomic_pos,
-                                     int32_t t_idx) const {
-        int32_t begin   = exon_offsets_[t_idx];
-        int32_t end     = exon_offsets_[t_idx + 1];
-        int32_t n_exons = end - begin;
-        if (n_exons <= 0) return 0;
+    /// The fragment's coverage weight on transcript ``t_idx`` (``compute_fragment_weight``), read on the interval it
+    /// occupies in the transcript's OWN 5'->3' coordinates, cut to the transcript. Its start is measured as the
+    /// resolver measures the fragment's length (``tx_frag_length``): inside an exon at the exon's offset; in an
+    /// intron, or before the first exon, the overhang's length before the next exon's start; past the last exon
+    /// that far past the end. So it occupies ``[fwd, fwd + flen)`` forward, and on a minus-strand transcript, whose
+    /// 5'->3' runs against the genome, the mirror ``[t_len - fwd - flen, t_len - fwd)``. A fragment and its mirror
+    /// image on the other strand weigh the same. Held to an independent evaluation of the coverage model on both
+    /// strands in ``tests/test_pipeline_routing.py``.
+    inline double coverage_weight(int32_t genomic_start, int32_t flen, int32_t t_idx) const {
+        const int32_t begin   = exon_offsets_[t_idx];
+        const int32_t n_exons = exon_offsets_[t_idx + 1] - begin;
+        const int32_t t_len   = t_length_[t_idx];
+        if (n_exons <= 0 || t_len <= 0) return 1.0;
 
         const int32_t* starts = exon_starts_.data() + begin;
         const int32_t* ends   = exon_ends_.data()   + begin;
         const int32_t* cumsum = exon_cumsum_.data()  + begin;
 
-        // bisect_right(starts, genomic_pos) - 1
-        int ei = static_cast<int>(
-            std::upper_bound(starts, starts + n_exons, genomic_pos)
-            - starts
-        ) - 1;
-
-        int32_t offset;
-        if (ei < 0) {
-            offset = 0;
-        } else if (genomic_pos >= ends[ei]) {
-            // In intron after exon ei (or past last exon)
-            offset = cumsum[ei] + (ends[ei] - starts[ei]);
+        // the last exon starting at or before the fragment's start (-1: before the first exon)
+        const int ei = static_cast<int>(
+            std::upper_bound(starts, starts + n_exons, genomic_start) - starts) - 1;
+        int32_t fwd;
+        if (ei >= 0 && genomic_start < ends[ei]) {
+            fwd = cumsum[ei] + (genomic_start - starts[ei]);
+        } else if (ei + 1 < n_exons) {
+            fwd = cumsum[ei + 1] - (starts[ei + 1] - genomic_start);
         } else {
-            // Inside exon ei
-            offset = cumsum[ei] + (genomic_pos - starts[ei]);
+            fwd = t_len + (genomic_start - ends[ei]);
         }
 
-        int32_t t_len = t_length_[t_idx];
-        if (offset < 0) offset = 0;
-        else if (offset > t_len) offset = t_len;
-
-        if (t_strand_[t_idx] == STRAND_NEG)
-            offset = t_len - offset;
-        return offset;
+        int32_t lo, hi;
+        if (t_strand_[t_idx] == STRAND_NEG) {
+            hi = t_len - fwd;
+            lo = hi - flen;
+        } else {
+            lo = fwd;
+            hi = fwd + flen;
+        }
+        return compute_fragment_weight(std::max<int32_t>(lo, 0), std::min(hi, t_len), t_len);
     }
 
 public:
@@ -577,29 +581,8 @@ private:
                            + oh * oh_log_pen_ + log_nm;
             int32_t ct = stype * 2 + (is_anti ? 1 : 0);
 
-            // Coverage weight + transcript position
-            int32_t t_len = t_length_[t_idx];
-            int32_t tx_s = 0;
-            int32_t tx_e = flen > 0 ? flen : t_len;
-            double cov_wt = 1.0;
-
-            if (has_genomic && flen > 0) {
-                int32_t n_exons =
-                    exon_offsets_[t_idx + 1]
-                    - exon_offsets_[t_idx];
-                if (n_exons > 0 && t_len > 0) {
-                    tx_s = genomic_to_tx_pos(
-                        genomic_start_val, t_idx);
-                    tx_e = tx_s + flen;
-                    int32_t cov_end =
-                        tx_e < t_len ? tx_e : t_len;
-                    cov_wt = compute_fragment_weight(
-                        tx_s, cov_end, t_len);
-                } else {
-                    tx_s = 0;
-                    tx_e = flen;
-                }
-            }
+            double cov_wt = (has_genomic && flen > 0)
+                ? coverage_weight(genomic_start_val, flen, t_idx) : 1.0;
 
             auto it = st.mm_merged.find(t_idx);
             if (it == st.mm_merged.end()) {
@@ -888,28 +871,8 @@ private:
                                    + oh * oh_log_pen_ + log_nm;
                     int32_t ct = stype * 2 + (is_anti ? 1 : 0);
 
-                    int32_t t_len = t_length_[t_idx];
-                    int32_t tx_s = 0;
-                    int32_t tx_e = flen > 0 ? flen : t_len;
-                    double cov_wt = 1.0;
-
-                    if (has_genomic && flen > 0) {
-                        int32_t n_exons =
-                            exon_offsets_[t_idx + 1]
-                            - exon_offsets_[t_idx];
-                        if (n_exons > 0 && t_len > 0) {
-                            tx_s = genomic_to_tx_pos(
-                                genomic_start, t_idx);
-                            tx_e = tx_s + flen;
-                            int32_t cov_end =
-                                tx_e < t_len ? tx_e : t_len;
-                            cov_wt = compute_fragment_weight(
-                                tx_s, cov_end, t_len);
-                        } else {
-                            tx_s = 0;
-                            tx_e = flen;
-                        }
-                    }
+                    double cov_wt = (has_genomic && flen > 0)
+                        ? coverage_weight(genomic_start, flen, t_idx) : 1.0;
 
                     m_scored[m_n++] = {t_idx, oh, ct, log_lik, cov_wt};
                 }
