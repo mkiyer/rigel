@@ -762,8 +762,11 @@ It seeds only the start, so it reaches the answer only through VBEM's start-depe
 the-em-answer-depends-on-where-it-starts`). LADDER against the SQUAREM-landed arm (all 16, fractional;
 `~/Downloads/rigel_runs/prototypes/2026-09-26_coverage_landed/ab_table.txt`): in-scope transcript Σ|Δ| 390.0k →
 391.6k (+0.41 %, stranded OFF), 1,489.8k → 1,487.8k (−0.13 %, stranded ON), 395.5k → 396.1k (+0.16 %, unstranded
-OFF); genes +0.32 / −0.02 / +0.27 %; the gDNA pool's Σ|error| within 142 fragments; every row inside its
-`base_reseed` floor. Goldens moved by at most 2.3e-8 relative.
+OFF); genes +0.32 / −0.02 / +0.27 %; the gDNA pool's Σ|error| within 142 fragments. Rows move by −730 to +1,159
+transcript fragments (`g50 ss.99 OFF` +1.24 %), above the run-to-run spread (same-build reseed pairs differ by 0–345,
+median 7), so the moves are real: the fix changes only the start, and VBEM's answer depends on its start. (Corrected
+2026-09-25: first recorded as inside the floor, read against a reseed arm from an older build — a cross-build
+difference, not a floor.) Goldens moved by at most 2.3e-8 relative.
 
 ### the-squarem-clamp-decided-which-components-live
 FIXED 2026-09-25 (`DESIGN.md` §3.1e; `em_solver.cpp`'s `backtracked_squarem_step`, VBEM and MAP; gate
