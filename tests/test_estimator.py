@@ -802,91 +802,217 @@ class TestGDNAInLocusEM:
 
 
 # =====================================================================
-# Discrete assignment modes (map / sample)
+# Whole counts: count first, then draw to the counts
 # =====================================================================
 
 
-class TestDiscreteAssignment:
-    """Test post-EM discrete fragment assignment modes."""
+def _one_locus(units, *, mode, seed=0, unambig=(), n_t=3, include_gdna=False, log_liks=None):
+    """One locus through the native EM. Returns each transcript's EM count, the gDNA count, the locus's
+    stats and every unit's winner (a global t_index, or -2 for gDNA)."""
+    from rigel.locus_partition import partition_and_free
 
-    def test_map_mode_produces_integer_counts(self):
-        """MAP assignment assigns each fragment to exactly one component."""
-        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42, assignment_mode="map"))
-        rc.unambig_counts[0, _UNSPLICED_SENSE] = 50.0
-        rc.unambig_counts[1, _UNSPLICED_SENSE] = 30.0
-        bundle = _make_locus_em_data(
-            [[0, 1]] * 200,
-            num_transcripts=3,
-            rc=rc,
+    rc = AbundanceEstimator(n_t, em_config=EMConfig(seed=seed, assignment_mode=mode, n_threads=1))
+    for t, n in unambig:
+        rc.unambig_counts[t, _UNSPLICED_SENSE] = n
+    em_data, loci, gdna_prior = _make_locus_em_data(
+        units, log_liks_per_unit=log_liks, num_transcripts=n_t, rc=rc, include_gdna=include_gdna
+    )
+    part = partition_and_free(em_data, loci)[0]
+    tuples = [
+        (
+            part.offsets,
+            part.t_indices,
+            part.log_liks,
+            part.coverage_weights,
+            part.count_cols,
+            part.is_spliced,
+            part.gdna_log_liks,
+            part.locus_t_indices,
+            part.locus_count_cols,
         )
-        _run_and_assign(rc, bundle, em_iterations=10)
-        # All EM counts should be integers
-        frac = rc.em_counts - np.floor(rc.em_counts)
-        assert not np.any(frac > 0.0), "MAP mode should produce only integer counts"
-        assert rc.em_counts.sum() == pytest.approx(200.0, abs=1.0)
+    ]
+    out = rc.run_batch_locus_em_partitioned(
+        tuples,
+        [loci[0].transcript_indices],
+        gdna_prior,
+        em_iterations=200,
+        emit_locus_stats=True,
+        emit_assignments=True,
+    )
+    return rc.em_counts.sum(axis=1), float(out[0]), rc.locus_stats[0], np.asarray(out[3])
 
-    def test_sample_mode_produces_integer_counts(self):
-        """Sample assignment assigns each fragment to exactly one component."""
-        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42, assignment_mode="sample"))
-        rc.unambig_counts[0, _UNSPLICED_SENSE] = 50.0
-        rc.unambig_counts[1, _UNSPLICED_SENSE] = 30.0
-        bundle = _make_locus_em_data(
-            [[0, 1]] * 200,
-            num_transcripts=3,
-            rc=rc,
+
+def _rounded_within_the_locus(values):
+    """The rule's reference: floors, then the units still owed to the largest remainders (a tie to the
+    larger value, then the lower index), so the integers sum exactly to the values' own total."""
+    v = np.asarray(values, dtype=np.float64)
+    out = np.floor(v)
+    short = int(round(v.sum() - out.sum()))
+    for i in sorted(range(len(v)), key=lambda i: (-(v[i] - out[i]), -v[i], i))[:short]:
+        out[i] += 1
+    return out
+
+
+def _mosaic_locus(n_units, n_t, seed):
+    """Units over random subsets of `n_t` transcripts, each candidate with its own log-likelihood, so the
+    posteriors differ from unit to unit."""
+    rng = np.random.default_rng(seed)
+    units, liks = [], []
+    for _ in range(n_units):
+        k = int(rng.integers(1, n_t + 1))
+        ts = sorted(rng.choice(n_t, size=k, replace=False).tolist())
+        units.append(ts)
+        liks.append(rng.normal(0.0, 1.0, size=k).tolist())
+    return units, liks
+
+
+#: Every unit's shared candidates come FIRST and the units that can go only one way come last, so the
+#: draw's re-weighting is weakest where it matters: the order that strands units and makes the repair work.
+_ORDERED_AGAINST_THE_DRAW = [[0, 1]] * 2000 + [[1, 2]] * 40 + [[0, 2]] * 7
+
+_WHOLE_COUNT_FIXTURES = {
+    "ordered_against_the_draw": dict(
+        units=_ORDERED_AGAINST_THE_DRAW, unambig=((0, 995.0), (1, 5.0))
+    ),
+    "with_gdna": dict(
+        units=[[0, 1]] * 300 + [[1]] * 50 + [[0, 1, 2]] * 100,
+        unambig=((0, 200.0), (1, 40.0), (2, 3.0)),
+        include_gdna=True,
+    ),
+    "mosaic": dict(
+        units=_mosaic_locus(800, 6, seed=3)[0],
+        log_liks=_mosaic_locus(800, 6, seed=3)[1],
+        n_t=6,
+        unambig=((0, 90.0), (1, 30.0), (2, 12.0), (4, 2.0)),
+    ),
+    # Every remainder is under a half, so rounding each count on its own gives the locus one whole count
+    # fewer than it has fragments: only rounding WITHIN the locus keeps the total exact.
+    "remainders_all_under_half": dict(
+        units=[[0, 1, 2]] * 10, unambig=((0, 34.0), (1, 33.0), (2, 33.0))
+    ),
+}
+
+
+class TestWholeCounts:
+    """``assignment_mode="sample"``: every fragment to ONE component, count first.
+
+    Each component's fractional count — every transcript and the locus's gDNA — is rounded within the locus,
+    then each fragment is drawn from its own posterior, re-weighted toward the components still short of
+    their count, and a fragment left with every candidate full is repaired onto the counts. So the whole
+    counts ARE the fractional counts rounded, whatever the seed; only which fragment goes where is drawn.
+    """
+
+    @pytest.mark.parametrize("fixture", sorted(_WHOLE_COUNT_FIXTURES))
+    def test_whole_counts_ARE_the_fractional_counts_rounded_within_the_locus(self, fixture):
+        kw = _WHOLE_COUNT_FIXTURES[fixture]
+        frac_t, frac_g, _, _ = _one_locus(mode="fractional", **kw)
+        frac = np.append(frac_t, frac_g)
+        want = _rounded_within_the_locus(frac)
+        assert np.all(np.abs(want - frac) < 1.0) and want.sum() == round(frac.sum()), (
+            "the reference is no rounding"
         )
-        _run_and_assign(rc, bundle, em_iterations=10)
-        frac = rc.em_counts - np.floor(rc.em_counts)
-        assert not np.any(frac > 0.0), "Sample mode should produce only integer counts"
-        assert rc.em_counts.sum() == pytest.approx(200.0, abs=1.0)
+        stranded = 0
+        for seed in range(4):
+            t, g, stats, _ = _one_locus(mode="sample", seed=seed, **kw)
+            got = np.append(t, g)
+            assert stats["assignment_unrepaired"] == 0
+            stranded += stats["assignment_stranded"]
+            np.testing.assert_array_equal(got, want, err_msg=f"{fixture}, seed {seed}")
+        if fixture == "ordered_against_the_draw":
+            assert stranded > 0, "the draw stranded nothing, so the repair was never exercised here"
+
+    def test_every_count_stays_within_one_of_its_fractional_count_when_the_rounding_is_unreachable(
+        self,
+    ):
+        """Largest remainder can round a set of components past the fragments that can reach it: here a fragment
+        split half and half between two components, both rounded up. The exact counts are then impossible, but a
+        count within one of every fractional count never is (the posterior is itself such an assignment, and flow
+        integrality makes an integral one), and the repair's fallback must find it. Found by search: the
+        exact-target repair alone gave the 1.87 component three fragments."""
+        units = [[0, 1], [2, 3, 4, 5], [2], [2, 7, 8], [5], [4, 6]]
+        unambig = ((7, 1.0), (8, 1.0), (9, 1.0), (10, 2.0))
+        frac, _, _, _ = _one_locus(units, mode="fractional", n_t=11, unambig=unambig)
+        lo, hi = np.floor(frac), np.ceil(frac)
+        unreachable = 0
+        for seed in range(6):
+            whole, g, stats, _ = _one_locus(
+                units, mode="sample", seed=seed, n_t=11, unambig=unambig
+            )
+            unreachable += stats["assignment_unrepaired"]
+            assert np.all((whole >= lo) & (whole <= hi)), (
+                f"seed {seed}: {whole} outside [{lo}, {hi}]"
+            )
+            assert whole.sum() + g == len(units)
+        assert unreachable > 0, (
+            "the exact targets were reachable here, so the fallback was never exercised"
+        )
+
+    def test_a_minority_under_one_percent_on_every_fragment_keeps_its_count(self):
+        """What the retired 1 % floor got wrong: a share that is small on every fragment is not small in
+        total, and only the total says whether a transcript is real."""
+        units, unambig = [[0, 1]] * 2000, ((0, 995.0), (1, 5.0))
+        frac, _, _, _ = _one_locus(units, mode="fractional", unambig=unambig)
+        assert frac[1] / 2000 < 0.01, "the minority's posterior on each fragment must be under 1 %"
+        assert frac[1] >= 5.0, "and its fractional count large enough that zero is plainly wrong"
+        whole, _, _, _ = _one_locus(units, mode="sample", unambig=unambig)
+        assert whole[1] == _rounded_within_the_locus(frac)[1] > 0
+
+    def test_a_transcript_expecting_under_half_a_fragment_gets_none(self):
+        units, unambig = [[0, 1]] * 100 + [[0, 2]], ((0, 500.0), (1, 50.0))
+        frac, _, _, _ = _one_locus(units, mode="fractional", unambig=unambig)
+        assert 0.0 < frac[2] < 0.5
+        whole, _, _, _ = _one_locus(units, mode="sample", unambig=unambig)
+        assert whole[2] == 0.0
+
+    def test_the_counts_do_not_depend_on_the_seed_only_which_fragment_goes_where(self):
+        kw = _WHOLE_COUNT_FIXTURES["mosaic"]
+        runs = [_one_locus(mode="sample", seed=seed, **kw) for seed in range(5)]
+        for t, g, _, _ in runs[1:]:
+            np.testing.assert_array_equal(t, runs[0][0])
+            assert g == runs[0][1]
+        winners = [w for _, _, _, w in runs]
+        assert any(not np.array_equal(winners[0], w) for w in winners[1:]), (
+            "five seeds drew the same fragment for every transcript: nothing here is being drawn"
+        )
+
+    def test_the_first_fragment_and_the_last_are_drawn_with_the_same_odds(self):
+        """For identical fragments the re-weighted draw IS an urn: every transcript's rounded count in balls,
+        drawn without replacement, so every fragment — the first or the last — goes to a transcript with
+        probability count / fragments. A draw that ignored what each transcript is still owed would give the
+        early fragments the posterior's odds and leave the last ones whatever is left."""
+        units, unambig = [[0, 1]] * 20, ((0, 30.0), (1, 70.0))
+        frac, _, _, _ = _one_locus(units, mode="fractional", unambig=unambig)
+        odds = _rounded_within_the_locus(frac)[0] / len(units)
+        assert 0.2 < odds < 0.8, "the fixture needs a genuinely shared split"
+        n = 400
+        first = last = 0
+        for seed in range(n):
+            _, _, _, winners = _one_locus(units, mode="sample", seed=seed, unambig=unambig)
+            first += winners[0] == 0
+            last += winners[-1] == 0
+        tol = 4.0 * np.sqrt(
+            odds * (1.0 - odds) / n
+        )  # four standard errors of a binomial proportion
+        assert abs(first / n - odds) < tol, (first / n, odds)
+        assert abs(last / n - odds) < tol, (last / n, odds)
+
+    def test_every_fragment_goes_to_exactly_one_of_its_own_candidates(self):
+        kw = _WHOLE_COUNT_FIXTURES["with_gdna"]
+        t, g, _, winners = _one_locus(mode="sample", seed=7, **kw)
+        units = kw["units"]
+        assert len(winners) == len(units)
+        for u, w in zip(units, winners):
+            assert w in set(u) | {-2}, f"a unit over {u} went to {w}"
+        assert np.all(t == np.floor(t)) and g == np.floor(g)
+        assert t.sum() + g == len(units)
 
     def test_sample_mode_deterministic_with_same_seed(self):
-        """Same seed → same sample assignment results."""
-        results = []
-        for _ in range(2):
-            rc = AbundanceEstimator(3, em_config=EMConfig(seed=42, assignment_mode="sample"))
-            rc.unambig_counts[0, _UNSPLICED_SENSE] = 50.0
-            rc.unambig_counts[1, _UNSPLICED_SENSE] = 30.0
-            bundle = _make_locus_em_data(
-                [[0, 1]] * 200,
-                num_transcripts=3,
-                rc=rc,
-            )
-            _run_and_assign(rc, bundle, em_iterations=10)
-            results.append(rc.em_counts.copy())
-        np.testing.assert_array_equal(results[0], results[1])
-
-    def test_sample_mode_different_seeds_differ(self):
-        """Different seeds → different sample assignment results."""
-        results = []
-        for seed in [42, 99]:
-            rc = AbundanceEstimator(3, em_config=EMConfig(seed=seed, assignment_mode="sample"))
-            rc.unambig_counts[0, _UNSPLICED_SENSE] = 50.0
-            rc.unambig_counts[1, _UNSPLICED_SENSE] = 30.0
-            bundle = _make_locus_em_data(
-                [[0, 1]] * 200,
-                num_transcripts=3,
-                rc=rc,
-            )
-            _run_and_assign(rc, bundle, em_iterations=10)
-            results.append(rc.em_counts.copy())
-        # With different seeds, counts should differ (probabilistic but overwhelming)
-        assert not np.array_equal(results[0], results[1])
-
-    def test_map_mode_winner_matches_highest_posterior(self):
-        """MAP assigns all ambiguous fragments to the component with higher prior."""
-        rc = AbundanceEstimator(3, em_config=EMConfig(seed=42, assignment_mode="map"))
-        # Transcript 0 has much more unambiguous support
-        rc.unambig_counts[0, _UNSPLICED_SENSE] = 500.0
-        rc.unambig_counts[1, _UNSPLICED_SENSE] = 10.0
-        bundle = _make_locus_em_data(
-            [[0, 1]] * 100,
-            num_transcripts=3,
-            rc=rc,
-        )
-        _run_and_assign(rc, bundle, em_iterations=10)
-        # In MAP mode, the stronger transcript should win all or most
-        assert rc.em_counts[0].sum() >= 90, "MAP should favor the transcript with higher posterior"
+        """Same seed → the same fragment for every transcript, not only the same counts."""
+        kw = _WHOLE_COUNT_FIXTURES["mosaic"]
+        a = _one_locus(mode="sample", seed=42, **kw)
+        b = _one_locus(mode="sample", seed=42, **kw)
+        np.testing.assert_array_equal(a[3], b[3])
+        np.testing.assert_array_equal(a[0], b[0])
 
     def test_fractional_mode_preserves_posteriors(self):
         """Fractional mode produces non-integer counts (original behavior)."""
@@ -902,9 +1028,8 @@ class TestDiscreteAssignment:
         frac = rc.em_counts - np.floor(rc.em_counts)
         assert np.any(frac > 0.0), "Fractional mode should produce non-integer counts"
 
-    def test_total_counts_preserved_all_modes(self):
-        """All three modes preserve total fragment count."""
-        for mode in ["fractional", "map", "sample"]:
+    def test_total_counts_preserved_in_both_modes(self):
+        for mode in ["fractional", "sample"]:
             rc = AbundanceEstimator(3, em_config=EMConfig(seed=42, assignment_mode=mode))
             rc.unambig_counts[0, _UNSPLICED_SENSE] = 50.0
             bundle = _make_locus_em_data(
@@ -914,24 +1039,11 @@ class TestDiscreteAssignment:
             )
             _run_and_assign(rc, bundle, em_iterations=10)
             total = rc.em_counts.sum()
-            assert total == pytest.approx(300.0, abs=1.0), f"mode={mode} lost fragments"
+            assert total == pytest.approx(300.0, abs=1e-9), f"mode={mode} lost fragments"
 
-    def test_min_posterior_threshold(self):
-        """Components below min_posterior threshold are excluded from assignment."""
-        # With a high min_posterior, only the dominant component should win
-        rc = AbundanceEstimator(
-            4, em_config=EMConfig(seed=42, assignment_mode="map", assignment_min_posterior=0.3)
-        )
-        # Strongly favor transcript 0
-        rc.unambig_counts[0, _UNSPLICED_SENSE] = 500.0
-        bundle = _make_locus_em_data(
-            [[0, 1, 2, 3]] * 200,
-            num_transcripts=4,
-            rc=rc,
-        )
-        _run_and_assign(rc, bundle, em_iterations=10)
-        # Transcript 0 should get all 200 (others below threshold)
-        assert rc.em_counts[0].sum() >= 190
+    def test_the_argmax_assignment_is_gone(self):
+        with pytest.raises(ValueError, match="assignment mode"):
+            EMConfig(assignment_mode="map")
 
 
 # ── The native batch locus EM wrapper, on the production path ────────────────────────────────────

@@ -54,10 +54,9 @@ def scenario(tmp_path_factory):
 
 
 def _config():
-    # `map` — the DETERMINISTIC assignment mode. The EM samples the posterior by default, and an
-    # equality assertion under `sample` would be measuring the sampler.
+    # `fractional` — no draw at all, so an equality assertion here measures the lengths and nothing else.
     return PipelineConfig(
-        em=EMConfig(seed=SEED, assignment_mode="map", n_threads=1),
+        em=EMConfig(seed=SEED, assignment_mode="fractional", n_threads=1),
         scan=BamScanConfig(sj_strand_tag="auto"),
     )
 

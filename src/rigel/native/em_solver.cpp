@@ -59,8 +59,7 @@ static constexpr double VBEM_SQUAREM_PRIOR_FLOOR = EM_LOG_EPSILON;
 
 // Assignment mode constants (must match Python _ASSIGNMENT_MODE_MAP)
 static constexpr int ASSIGN_FRACTIONAL = 0;
-static constexpr int ASSIGN_MAP        = 1;
-static constexpr int ASSIGN_SAMPLE     = 2;
+static constexpr int ASSIGN_SAMPLE     = 1;
 
 // ================================================================
 // Profiling instrumentation — per-locus and aggregate statistics
@@ -88,6 +87,8 @@ struct LocusProfile {
     int squarem_nonfinite_count = 0;
     bool squarem_grouped_fallback_used = false;
     int squarem_grouped_stabilization_fail_count = 0;
+    int assignment_stranded = 0;    // SAMPLE: units the draw left with every candidate full (assign_posteriors)
+    int assignment_unrepaired = 0;  // SAMPLE: of those, the ones no repair path could place
     double gdna_eff_len = 1.0;
     double gdna_log_eff_len = 0.0;
 
@@ -1434,21 +1435,34 @@ struct LocusSubProblem {
     std::vector<int32_t>  local_to_global_t; // [n_t]
 };
 
-// Assign posteriors after EM convergence.
-// Reimplements Python assign_locus_ambiguous() entirely in C++.
-// Scatters results into the provided accumulator arrays.
+// Assign each unit's posterior after EM convergence and scatter it into the accumulators.
 //
-// assignment_mode: ASSIGN_FRACTIONAL (0), ASSIGN_MAP (1), ASSIGN_SAMPLE (2)
-// min_posterior: components with posterior < min_posterior are zeroed before
-//   discrete (MAP/sample) assignment.  Ignored for fractional mode.
-// rng: thread-local SplitMix64 instance (only used for sample mode).
+// FRACTIONAL scatters every unit's posterior as it stands.
+//
+// SAMPLE gives each unit to ONE component, COUNT FIRST. Each component's fractional count in the locus — every
+// transcript and the gDNA component alike — is rounded within the locus by largest remainder, so the locus total
+// is exact and a component expecting under about half a fragment rounds to zero. Then one pass over the units in
+// order draws each unit from its own posterior re-weighted, per candidate, by (count still owed / posterior mass
+// still to come), so a component short of its count is favoured exactly as far as it is behind. A unit whose
+// candidates are all full keeps its most probable one and is counted as STRANDED; the repair then moves chains of
+// units, each to another of its own candidates, until every count is back on its target (augmenting paths: each
+// fixes one fragment of excess, so it cannot cycle), and where the exact targets are unreachable it settles every
+// count within one of its fractional count, which is always reachable. Whether a transcript is real shows in its
+// total, never in one fragment's share of it, so no candidate is dropped per fragment.
+// ⚠ This is a FEASIBLE assignment, not an optimal one: it trades optimality for one pass and a small repair. The
+// assignment putting the most fragments on their true origin under the same counts is a transportation problem
+// this function does not solve; the draw instead gives each component a representative sample of the fragments it
+// could have produced, and the repair moves fragments without regard to their posteriors.
+// Held by tests/test_estimator.py (TestWholeCounts).
+// rng: this locus's SplitMix64 stream (SAMPLE only).
 static void assign_posteriors(
     const LocusSubProblem& sub,
     const double* theta,
     const double* log_eff_len,
     int assignment_mode,
-    double min_posterior,
     SplitMix64& rng,
+    int& stranded,     // SAMPLE: units the draw left with every candidate full
+    int& unrepaired,   // SAMPLE: of those, the ones no repair path could place (0 whenever the counts are reachable)
     // Output accumulators (accumulated across loci)
     double* em_counts_2d,          // [N_T, n_cols], row-major
     double* gdna_locus_counts_2d,  // [N_T, n_cols]
@@ -1480,6 +1494,8 @@ static void assign_posteriors(
     int gdna = sub.gdna_idx;
     int n_units = sub.n_local_units;
     const int32_t* local_to_global = sub.local_to_global_t.data();
+    stranded = 0;
+    unrepaired = 0;
 
     // log_weights[c] = log(theta[c] + eps) - log L̃_c
     // Subtracting log L̃_c rescales the posterior to depend on the
@@ -1491,111 +1507,278 @@ static void assign_posteriors(
         log_weights[c] = std::log(theta[c] + EM_LOG_EPSILON) - log_eff_len[c];
     }
 
+    // Every unit's posterior, candidate-aligned with sub.t_indices. A unit whose log-sum-exp is not finite keeps
+    // all zeros and is assigned nothing, in either mode.
+    const size_t n_cand = static_cast<size_t>(sub.offsets[n_units]);
+    std::vector<double> post(n_cand, 0.0);
+    for (int ui = 0; ui < n_units; ++ui) {
+        auto s = sub.offsets[ui];
+        auto e = sub.offsets[ui + 1];
+        if (e == s) continue;
+        double max_val = -1e300;
+        for (auto k = s; k < e; ++k) {
+            double lp = sub.log_liks[k] + log_weights[sub.t_indices[k]];
+            if (lp > max_val) max_val = lp;
+        }
+        double sum_exp = 0.0;
+        for (auto k = s; k < e; ++k) {
+            post[k] = std::exp(sub.log_liks[k] + log_weights[sub.t_indices[k]] - max_val);
+            sum_exp += post[k];
+        }
+        if (sum_exp > 0.0 && std::isfinite(sum_exp)) {
+            double inv = 1.0 / sum_exp;
+            for (auto k = s; k < e; ++k) post[k] *= inv;
+        } else {
+            for (auto k = s; k < e; ++k) post[k] = 0.0;
+        }
+    }
+
+    // SAMPLE's decision: one candidate position per unit (-1: the unit has no posterior and gets nothing).
+    std::vector<int> choice;
+    if (assignment_mode == ASSIGN_SAMPLE) {
+        // COUNT FIRST: each component's fractional count, rounded within the locus by largest remainder.
+        std::vector<double> to_come(nc, 0.0);  // each component's posterior mass among the units not yet drawn
+        for (size_t k = 0; k < n_cand; ++k) to_come[sub.t_indices[k]] += post[k];
+        const std::vector<double> n_frac(to_come);   // the fractional counts themselves
+        std::vector<int64_t> quota(nc, 0);
+        double total = 0.0;
+        int64_t floors = 0;
+        for (int c = 0; c < nc; ++c) {
+            total += to_come[c];
+            quota[c] = static_cast<int64_t>(std::floor(to_come[c]));
+            floors += quota[c];
+        }
+        // The fractional counts sum to the number of units with a posterior: an integer, up to rounding.
+        int64_t short_by = std::llround(total) - floors;
+        if (short_by > 0) {
+            std::vector<int> order(nc);
+            std::iota(order.begin(), order.end(), 0);
+            std::sort(order.begin(), order.end(), [&](int a, int b) {
+                double ra = to_come[a] - std::floor(to_come[a]);
+                double rb = to_come[b] - std::floor(to_come[b]);
+                if (ra != rb) return ra > rb;                                    // the largest remainder first
+                if (to_come[a] != to_come[b]) return to_come[a] > to_come[b];    // a tie to the larger count
+                return a < b;
+            });
+            for (int64_t i = 0; i < short_by && i < nc; ++i) quota[order[i]] += 1;
+        }
+
+        // THE DRAW: units in order, each from its own posterior re-weighted by (count owed / mass to come).
+        std::vector<int64_t> owed(quota);
+        choice.assign(n_units, -1);
+        for (int ui = 0; ui < n_units; ++ui) {
+            auto s = sub.offsets[ui];
+            auto e = sub.offsets[ui + 1];
+            bool has_posterior = false;
+            double drawable = 0.0;
+            for (auto k = s; k < e; ++k) {
+                if (post[k] > 0.0) has_posterior = true;
+                int32_t c = sub.t_indices[k];
+                if (owed[c] > 0 && post[k] > 0.0) {
+                    drawable += post[k] * (static_cast<double>(owed[c]) / std::max(to_come[c], 1e-300));
+                }
+            }
+            if (!has_posterior) continue;
+            int pick = -1;
+            if (drawable > 0.0) {
+                double target = rng.uniform() * drawable, acc = 0.0;
+                for (auto k = s; k < e; ++k) {
+                    int32_t c = sub.t_indices[k];
+                    if (owed[c] > 0 && post[k] > 0.0) {
+                        acc += post[k] * (static_cast<double>(owed[c]) / std::max(to_come[c], 1e-300));
+                        pick = static_cast<int>(k - s);   // the last drawable one, if rounding leaves target >= acc
+                        if (target < acc) break;
+                    }
+                }
+            } else {
+                // Every candidate already holds its count: the unit keeps its most probable one, for now.
+                double best = -1.0;
+                for (auto k = s; k < e; ++k) {
+                    if (post[k] > best) { best = post[k]; pick = static_cast<int>(k - s); }
+                }
+                ++stranded;
+            }
+            choice[ui] = pick;
+            owed[sub.t_indices[s + pick]] -= 1;
+            for (auto k = s; k < e; ++k) to_come[sub.t_indices[k]] -= post[k];
+        }
+
+        // THE REPAIR: a stranded unit left its component one over its count and another one under. A breadth-first
+        // search over components links each over-full component to an under-full one through units that can move
+        // — every unit moves only to another of its own candidates, with a posterior above zero — and moving the
+        // chain puts both back on their counts. A path exists whenever the rounded counts are reachable at all.
+        if (stranded > 0) {
+            std::vector<std::vector<int>> members(nc);
+            std::vector<int> slot(n_units, -1);
+            for (int ui = 0; ui < n_units; ++ui) {
+                if (choice[ui] < 0) continue;
+                int c = sub.t_indices[sub.offsets[ui] + choice[ui]];
+                slot[ui] = static_cast<int>(members[c].size());
+                members[c].push_back(ui);
+            }
+            auto move = [&](int ui, int to_pos) {
+                int from = sub.t_indices[sub.offsets[ui] + choice[ui]];
+                int to = sub.t_indices[sub.offsets[ui] + to_pos];
+                int last = members[from].back();
+                members[from][slot[ui]] = last;
+                slot[last] = slot[ui];
+                members[from].pop_back();
+                slot[ui] = static_cast<int>(members[to].size());
+                members[to].push_back(ui);
+                choice[ui] = to_pos;
+            };
+            std::vector<int64_t> over(nc);
+            for (int c = 0; c < nc; ++c) over[c] = static_cast<int64_t>(members[c].size()) - quota[c];
+            std::vector<int> seen(nc, -1), via_unit(nc, -1), via_pos(nc, -1), from_comp(nc, -1);
+            std::vector<int> queue;
+            int search = 0;
+            for (int c0 = 0; c0 < nc; ++c0) {
+                while (over[c0] > 0) {
+                    ++search;
+                    queue.assign(1, c0);
+                    seen[c0] = search;
+                    int found = -1;
+                    for (size_t qi = 0; qi < queue.size() && found < 0; ++qi) {
+                        int x = queue[qi];
+                        for (int v : members[x]) {
+                            auto s = sub.offsets[v];
+                            auto e = sub.offsets[v + 1];
+                            for (auto k = s; k < e; ++k) {
+                                int y = sub.t_indices[k];
+                                if (post[k] <= 0.0 || seen[y] == search) continue;
+                                seen[y] = search;
+                                from_comp[y] = x;
+                                via_unit[y] = v;
+                                via_pos[y] = static_cast<int>(k - s);
+                                if (over[y] < 0) { found = y; break; }
+                                queue.push_back(y);
+                            }
+                            if (found >= 0) break;
+                        }
+                    }
+                    if (found < 0) break;          // no component under its count is reachable from c0
+                    over[found] += 1;
+                    over[c0] -= 1;
+                    for (int y = found; y != c0; ) {
+                        int x = from_comp[y];
+                        move(via_unit[y], via_pos[y]);
+                        y = x;
+                    }
+                }
+            }
+            unrepaired = 0;
+            for (int c = 0; c < nc; ++c) if (over[c] > 0) unrepaired += static_cast<int>(over[c]);
+
+            // THE FALLBACK. The exact targets were unreachable: some set of components was rounded up past the
+            // fragments that can reach it. A count within one of every fractional count is still always reachable
+            // — the posterior itself is a fractional assignment inside [floor(n_c), ceil(n_c)], so an integral one
+            // exists (flow integrality) — and the same augmenting paths find it: every count above its ceiling
+            // sheds along a path to a component below its ceiling, then every count below its floor draws along a
+            // path from a component above its floor. Each path fixes one unit of violation and none creates one.
+            if (unrepaired > 0) {
+                std::vector<int64_t> lo(nc), hi(nc);
+                for (int c = 0; c < nc; ++c) {
+                    lo[c] = static_cast<int64_t>(std::floor(n_frac[c]));
+                    hi[c] = static_cast<int64_t>(std::ceil(n_frac[c]));
+                }
+                auto count = [&](int c) { return static_cast<int64_t>(members[c].size()); };
+                // shed: forward from a component above its ceiling to one below its ceiling
+                for (int c0 = 0; c0 < nc; ++c0) {
+                    while (count(c0) > hi[c0]) {
+                        ++search;
+                        queue.assign(1, c0);
+                        seen[c0] = search;
+                        int found = -1;
+                        for (size_t qi = 0; qi < queue.size() && found < 0; ++qi) {
+                            int x = queue[qi];
+                            for (int v : members[x]) {
+                                auto s = sub.offsets[v];
+                                auto e = sub.offsets[v + 1];
+                                for (auto k = s; k < e; ++k) {
+                                    int y = sub.t_indices[k];
+                                    if (post[k] <= 0.0 || seen[y] == search) continue;
+                                    seen[y] = search;
+                                    from_comp[y] = x;
+                                    via_unit[y] = v;
+                                    via_pos[y] = static_cast<int>(k - s);
+                                    if (count(y) < hi[y]) { found = y; break; }
+                                    queue.push_back(y);
+                                }
+                                if (found >= 0) break;
+                            }
+                        }
+                        if (found < 0) break;
+                        for (int y = found; y != c0; ) {
+                            int x = from_comp[y];
+                            move(via_unit[y], via_pos[y]);
+                            y = x;
+                        }
+                    }
+                }
+                // fill: backward from a component below its floor, through the units that could move into it
+                std::vector<std::vector<std::pair<int, int>>> into(nc);   // component -> (unit, candidate position)
+                for (int ui = 0; ui < n_units; ++ui) {
+                    auto s = sub.offsets[ui];
+                    for (auto k = s; k < sub.offsets[ui + 1]; ++k) {
+                        if (post[k] > 0.0) into[sub.t_indices[k]].emplace_back(ui, static_cast<int>(k - s));
+                    }
+                }
+                for (int c0 = 0; c0 < nc; ++c0) {
+                    while (count(c0) < lo[c0]) {
+                        ++search;
+                        queue.assign(1, c0);
+                        seen[c0] = search;
+                        int found = -1;
+                        for (size_t qi = 0; qi < queue.size() && found < 0; ++qi) {
+                            int y = queue[qi];
+                            for (const auto& [v, pos] : into[y]) {
+                                if (choice[v] < 0) continue;
+                                int x = sub.t_indices[sub.offsets[v] + choice[v]];
+                                if (seen[x] == search) continue;
+                                seen[x] = search;
+                                from_comp[x] = y;        // v moves x -> y
+                                via_unit[x] = v;
+                                via_pos[x] = pos;
+                                if (count(x) > lo[x]) { found = x; break; }
+                                queue.push_back(x);
+                            }
+                        }
+                        if (found < 0) break;
+                        for (int x = found; x != c0; ) {
+                            int y = from_comp[x];
+                            move(via_unit[x], via_pos[x]);
+                            x = y;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     rna_total = 0.0;
     gdna_total = 0.0;
+    std::vector<double> weights;
 
-    // Process each unit
     for (int ui = 0; ui < n_units; ++ui) {
         auto s = sub.offsets[ui];
         auto e = sub.offsets[ui + 1];
         int seg_len = static_cast<int>(e - s);
         if (seg_len == 0) continue;
-
-        // Compute log posteriors
-        // log_posterior[j] = log_lik[j] + log_weights[t_indices[j]]
-        double max_val = -1e300;
-        for (int j = 0; j < seg_len; ++j) {
-            int32_t comp = sub.t_indices[s + j];
-            double lp = sub.log_liks[s + j] + log_weights[comp];
-            if (lp > max_val) max_val = lp;
-        }
-
-        // Log-sum-exp normalization
-        double sum_exp = 0.0;
-        std::vector<double> posteriors(seg_len);
-        for (int j = 0; j < seg_len; ++j) {
-            int32_t comp = sub.t_indices[s + j];
-            double lp = sub.log_liks[s + j] + log_weights[comp];
-            posteriors[j] = std::exp(lp - max_val);
-            sum_exp += posteriors[j];
-        }
-        if (sum_exp > 0.0 && std::isfinite(sum_exp)) {
-            double inv = 1.0 / sum_exp;
-            for (int j = 0; j < seg_len; ++j) posteriors[j] *= inv;
-        } else {
-            for (int j = 0; j < seg_len; ++j) posteriors[j] = 0.0;
-        }
-
-        // ---- Discrete assignment dispatch ----
-        // For MAP/sample modes: threshold, renormalize, then select winner.
-        // For fractional mode: use raw posteriors as-is.
-        // The "weights" vector holds the final assignment weights (sum to 1).
-        // In discrete modes, exactly one entry is 1.0 and the rest are 0.0.
-        std::vector<double> weights(seg_len);
-
-        int winner = -1;  // MAP/sample winner index (used by annotation output)
-
+        const double* posteriors = post.data() + s;
+        weights.assign(seg_len, 0.0);
+        int winner = -1;  // SAMPLE's component index within the unit (also the annotation output)
         if (assignment_mode == ASSIGN_FRACTIONAL) {
-            // Traditional EM: scatter fractional posteriors
             for (int j = 0; j < seg_len; ++j) weights[j] = posteriors[j];
-        } else {
-            // MAP or sample: threshold then renormalize
-            double renorm_sum = 0.0;
-            for (int j = 0; j < seg_len; ++j) {
-                if (posteriors[j] >= min_posterior) {
-                    weights[j] = posteriors[j];
-                    renorm_sum += posteriors[j];
-                } else {
-                    weights[j] = 0.0;
-                }
-            }
-            if (renorm_sum > 0.0) {
-                double inv = 1.0 / renorm_sum;
-                for (int j = 0; j < seg_len; ++j) weights[j] *= inv;
-            }
-
-            // Find winner index
-            winner = -1;
-            if (assignment_mode == ASSIGN_MAP) {
-                // Maximum a posteriori: pick the highest posterior
-                double best = -1.0;
-                for (int j = 0; j < seg_len; ++j) {
-                    if (weights[j] > best) {
-                        best = weights[j];
-                        winner = j;
-                    }
-                }
-            } else {
-                // Sample: categorical draw from renormalized posteriors
-                double u = rng.uniform();
-                double cumulative = 0.0;
-                for (int j = 0; j < seg_len; ++j) {
-                    cumulative += weights[j];
-                    if (u < cumulative) {
-                        winner = j;
-                        break;
-                    }
-                }
-                // Boundary case: rounding — assign to last non-zero
-                if (winner < 0) {
-                    for (int j = seg_len - 1; j >= 0; --j) {
-                        if (weights[j] > 0.0) { winner = j; break; }
-                    }
-                }
-            }
-
-            // Zero everything, set winner to 1.0
-            for (int j = 0; j < seg_len; ++j) weights[j] = 0.0;
-            if (winner >= 0) weights[winner] = 1.0;
+        } else if (choice[ui] >= 0) {
+            winner = choice[ui];
+            weights[winner] = 1.0;
         }
-
-        // Track max mRNA posterior (for diagnostics)
 
         // --- Per-unit annotation output ---
         if (out_winner_tid != nullptr) {
-            int ann_winner = -1;
+            int ann_winner = winner;
             if (assignment_mode == ASSIGN_FRACTIONAL) {
-                // Fractional mode: find MAP winner for annotation display
+                // Fractional mode: the most probable component, for annotation display
                 double best_post = -1.0;
                 for (int j = 0; j < seg_len; ++j) {
                     if (posteriors[j] > best_post) {
@@ -1603,8 +1786,6 @@ static void assign_posteriors(
                         ann_winner = j;
                     }
                 }
-            } else {
-                ann_winner = winner;
             }
 
             int write_idx = out_offset + ui;
@@ -2103,7 +2284,6 @@ batch_locus_em_partitioned(
     double convergence_delta,
     bool   use_vbem,
     int    assignment_mode,
-    double assignment_min_posterior,
     uint64_t rng_seed,
     int    n_transcripts_total,
     int    n_splice_strand_cols,
@@ -2337,10 +2517,11 @@ batch_locus_em_partitioned(
             // 8. Assign posteriors
             SplitMix64 locus_rng(rng_seed ^ (static_cast<uint64_t>(li) * 0x9e3779b97f4a7c15ULL));
             double locus_rna = 0.0, locus_gdna = 0.0;
+            int stranded = 0, unrepaired = 0;
             assign_posteriors(
                 sub, result.theta.data(),
                 log_eff_len_ptr,
-                assignment_mode, assignment_min_posterior, locus_rng,
+                assignment_mode, locus_rng, stranded, unrepaired,
                 em_out, gdna_out,
                 psum_out, nass_out,
                 locus_rna, locus_gdna,
@@ -2373,6 +2554,8 @@ batch_locus_em_partitioned(
                 prof.squarem_grouped_fallback_used = result.squarem_grouped_fallback_used;
                 prof.squarem_grouped_stabilization_fail_count =
                     result.squarem_grouped_stabilization_fail_count;
+                prof.assignment_stranded = stranded;
+                prof.assignment_unrepaired = unrepaired;
                 prof.gdna_eff_len = gel_ptr[li];
                 prof.gdna_log_eff_len = gel_ptr[li] > 0.0
                     ? std::log(gel_ptr[li]) : -std::numeric_limits<double>::infinity();
@@ -2505,6 +2688,8 @@ batch_locus_em_partitioned(
             d["squarem_grouped_fallback_used"] = p.squarem_grouped_fallback_used;
             d["squarem_grouped_stabilization_fail_count"] =
                 p.squarem_grouped_stabilization_fail_count;
+            d["assignment_stranded"] = p.assignment_stranded;
+            d["assignment_unrepaired"] = p.assignment_unrepaired;
             d["gdna_eff_len"] = p.gdna_eff_len;
             d["gdna_log_eff_len"] = p.gdna_log_eff_len;
             d["final_data_loglik"] = p.final_data_loglik;
@@ -2836,7 +3021,6 @@ NB_MODULE(_em_impl, m) {
           nb::arg("convergence_delta"),
           nb::arg("use_vbem"),
           nb::arg("assignment_mode"),
-          nb::arg("assignment_min_posterior"),
           nb::arg("rng_seed"),
           nb::arg("n_transcripts_total"),
           nb::arg("n_splice_strand_cols"),

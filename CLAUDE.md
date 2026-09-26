@@ -199,9 +199,9 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,440 passed / 0 skipped / 2 xfail, 3,442 collected** — re-derived 2026-09-25 on `main`
-with the EM's gDNA total summed in locus order (3,438 + 2: `tests/test_scan_order_independence.py`'s gate at one and
-eight EM threads), measured with two `docs/dev/`
+**The standing baseline: 0 failed / 3,445 passed / 0 skipped / 2 xfail, 3,447 collected** — re-derived 2026-09-26 on `main`
+with count-first whole counts (3,440 + 6 − 1: `tests/test_estimator.py`'s `TestWholeCounts` has 14 cases where the
+discrete-assignment class had 8, and `tests/test_scan_order_independence.py` lost its `map` mode), measured with two `docs/dev/`
 notes present and those two cases subtracted: an untracked file under `docs/dev/` is a
 jargon case too, so a working tree holding notes reads higher (the count is re-derived from the table below at every commit
 that measures the suite; the history of how it moved is git, not this file). The 2 xfails are executable records of proven

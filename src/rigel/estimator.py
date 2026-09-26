@@ -357,7 +357,7 @@ class AbundanceEstimator:
             self._em_posterior_sum = np.zeros(n_transcripts, dtype=np.float64)
             self._em_n_assigned = np.zeros(n_transcripts, dtype=np.float64)
 
-        _ASSIGNMENT_MODE_MAP = {"fractional": 0, "map": 1, "sample": 2}
+        _ASSIGNMENT_MODE_MAP = {"fractional": 0, "sample": 1}
         assignment_mode_int = _ASSIGNMENT_MODE_MAP[self.em_config.assignment_mode]
         rng_seed = int(self._rng.integers(0, 2**63))
 
@@ -387,7 +387,6 @@ class AbundanceEstimator:
             em_convergence_delta,
             self.em_config.mode == "vbem",
             assignment_mode_int,
-            self.em_config.assignment_min_posterior,
             rng_seed,
             n_transcripts,
             NUM_SPLICE_STRAND_COLS,

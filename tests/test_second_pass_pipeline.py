@@ -79,7 +79,7 @@ def scenario():
 
 def _config(**overrides) -> PipelineConfig:
     base = dict(
-        em=EMConfig(seed=SEED, assignment_mode="map", n_threads=1),
+        em=EMConfig(seed=SEED, assignment_mode="fractional", n_threads=1),
         scan=BamScanConfig(sj_strand_tag="auto"),
     )
     base.update(overrides)

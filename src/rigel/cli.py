@@ -779,7 +779,6 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("em_iterations", "em.iterations"),
     _ParamSpec("em_convergence_delta", "em.convergence_delta"),
     _ParamSpec("assignment_mode", "em.assignment_mode"),
-    _ParamSpec("assignment_min_posterior", "em.assignment_min_posterior"),
     _ParamSpec("em_mode", "em.mode"),
     # -- BamScanConfig: direct --
     _ParamSpec("include_multimap", "scan.include_multimap"),
@@ -1209,12 +1208,12 @@ def build_parser() -> argparse.ArgumentParser:
     model_grp.add_argument(
         "--assignment-mode",
         dest="assignment_mode",
-        choices=["sample", "fractional", "map"],
+        choices=["sample", "fractional"],
         default=None,
-        help="Post-EM fragment assignment mode (default: sample). "
-        "'sample' draws from the posterior distribution. "
-        "'fractional' preserves EM posterior weights (traditional). "
-        "'map' assigns each fragment to its highest-posterior component.",
+        help="Post-EM fragment assignment (default: sample). 'sample' gives every fragment to one "
+        "transcript: each transcript's fractional count is rounded within its locus, then each fragment "
+        "is drawn from its own posterior toward the transcripts still short of their count. "
+        "'fractional' keeps each fragment's posterior weights.",
     )
 
     # -- Performance ----------------------------------------------------------
@@ -1274,14 +1273,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     # -- Advanced scoring / convergence ---------------------------------------
     adv = quant_parser.add_argument_group("advanced options")
-    adv.add_argument(
-        "--assignment-min-posterior",
-        dest="assignment_min_posterior",
-        type=float,
-        default=None,
-        help="Minimum posterior for a component to be eligible for "
-        "discrete assignment (map/sample modes). Default: 0.01.",
-    )
     adv.add_argument(
         "--em-convergence-delta",
         dest="em_convergence_delta",

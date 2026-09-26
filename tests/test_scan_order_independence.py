@@ -95,16 +95,16 @@ def _counts(oracle, threads: int, mode: str = "sample") -> np.ndarray:
 REPEATS = 2
 
 
-@pytest.mark.parametrize("mode", ["sample", "map", "fractional"])
+@pytest.mark.parametrize("mode", ["sample", "fractional"])
 def test_the_answer_IS_THE_SAME_AT_EVERY_SCAN_THREAD_COUNT(oracle, mode):
-    """The contract, for all three assignment modes: one BAM and one seed give one answer.
+    """The contract, for both assignment modes: one BAM and one seed give one answer.
 
     Byte-identical across thread counts AND across repeats, which is strictly stronger than
     "reproducible at the default" and the only version that survives someone changing the default.
 
-    All three modes, because each fails a different way. ``sample`` moves by whole counts, since a
-    permutation changes which fragment draws which sample. ``map`` and ``fractional`` are immune to
-    that — they read each unit's posterior alone — but ``fractional`` scatters float posteriors into
+    Both modes, because each fails a different way. ``sample`` draws the units in order, so a
+    permutation changes which fragment draws which transcript — and, through the re-weighting toward
+    the counts, which fragments the counts are met with. ``fractional`` scatters float posteriors into
     shared accumulators, so a permutation reorders the summation and the answer drifts by ULPs. One
     ordering fixes both; asserting only the first leaves the second to be rediscovered as "flaky".
     """

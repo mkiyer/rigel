@@ -38,15 +38,12 @@ class EMConfig:
         Maximum EM iterations (default 1000).
     convergence_delta : float
         Convergence threshold for theta updates (default 1e-6).
-    assignment_mode : str
-        Post-EM fragment assignment mode: ``"fractional"`` (traditional
-        EM posterior weights), ``"map"`` (assign to highest-posterior
-        component), or ``"sample"`` (draw from posterior distribution).
-        Default ``"sample"``.
-    assignment_min_posterior : float
-        Minimum posterior for a component to be eligible for discrete
-        assignment (``map``/``sample`` modes only).  Components below
-        this threshold are zeroed before assignment.  Default 0.01.
+    assignment_mode : {"sample", "fractional"}
+        Post-EM fragment assignment (default ``"sample"``). ``"sample"`` gives every fragment to ONE
+        component, count first: each component's fractional count is rounded within its EM locus, then
+        each fragment is drawn from its own posterior, re-weighted toward the components still short of
+        their rounded count, so whole counts land on the rounded fractional counts. ``"fractional"``
+        keeps each fragment's posterior weights.
     """
 
     seed: int = 0
@@ -54,7 +51,6 @@ class EMConfig:
     iterations: int = 1000
     convergence_delta: float = 1e-6
     assignment_mode: str = "sample"
-    assignment_min_posterior: float = 0.01
     n_threads: int = 0
     """Number of threads for parallel locus EM.
 
@@ -83,7 +79,7 @@ class EMConfig:
     def __post_init__(self):
         if self.mode not in ("map", "vbem"):
             raise ValueError(f"Unknown EM mode: {self.mode!r}")
-        if self.assignment_mode not in ("fractional", "map", "sample"):
+        if self.assignment_mode not in ("fractional", "sample"):
             raise ValueError(f"Unknown assignment mode: {self.assignment_mode!r}")
         # `Literal` is a type-checker annotation and not a runtime constraint, so an unrecognised
         # value would otherwise fall through to the shipped path — a config field that reads as applied
