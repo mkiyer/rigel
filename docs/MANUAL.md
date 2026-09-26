@@ -867,4 +867,9 @@ so it stays dead unless it holds fragments no other component can explain. Rigel
 with SQUAREM, which jumps ahead along the EM's path; a jump that would carry a still-live component
 below the floor is shortened toward the plain EM step instead of being cut off there, in VBEM and
 MAP-EM alike. Before 2026-09-25 such components were clamped to the floor, and which of several
-transcripts sharing the same fragments survived then depended on where the EM started.
+transcripts sharing the same fragments survived then depended on where the EM started. VBEM keeps a
+milder dependence of its own, accepted as a known limit: where fragments are genuinely ambiguous, which
+of several near-equivalent explanations it settles on can depend on its starting point. Rigel always
+starts from the same coverage-weighted point, so one input and one version give one answer, and the
+alternatives measured no more accurate against simulated truth; a change that moves only the starting
+point, as a new version may, can move such fragments between isoforms, unspliced RNA and gDNA.

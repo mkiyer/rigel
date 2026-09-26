@@ -16,6 +16,30 @@ the changelog is git.
 Ordered by priority. An entry says what is open and the number a ranking turns on; what was done is git,
 what was ruled is `DESIGN.md`.
 
+### the-capture-length-owns-stranded-capture-on
+`priority: NEXT — a fresh campaign (owner, 2026-09-26): every closed, refused or parked entry on the ruler may be
+revisited with a new argument and a measurement · kind: defect · 2026-09-26`
+Stranded × capture-ON is the worst in-scope stratum: transcript Σ|Δ| 6.21 % of truth against 1.99 % stranded OFF
+and 2.01 % unstranded OFF (the ladder, fractional, arms of 2026-09-25). Handing the EM the simulator's own
+capture-aware lengths for every transcript and synthetic span (`quant_accuracy.py --arm oracle_ruler`; the gDNA
+component's length and the priors stay as shipped) takes it to 2.02 %, while a perfect calibration prior
+(`--arm oracle`) leaves it at 6.16 %: the length the EM divides each component's reads by under capture
+(`DESIGN.md` §7.2, `EQUATIONS.md` §11) owns about two-thirds of the stratum's transcript error. Per condition,
+transcripts (genes) as a share of truth, shipped → true lengths: `g00` 6.47 → 1.42 % (2.36 → 0.19 %), `g05`
+5.56 → 1.72 % (0.59 → 0.52 %), `g50` 6.13 → 2.84 % (1.43 → 1.37 %), `g98` 26.18 → 25.90 % (17.60 → 18.65 %). At
+`g05` and `g50` the length decides the isoform split inside genes; at `g00`, with no gDNA to witness capture, it is
+nearly the whole error and moves the split between annotated transcripts and synthetic spans as well; at `g98` it
+is not the owner. The capture-OFF rows do not move, as they must not, and the deferred stratum moves the same way
+(`g05 ss.50 ON` 11.03 → 1.46 %). A capability proof, never headroom: it hands over the true lengths.
+Where it sits, as far as measured: at `g50 ss.99 ON`, 161k of the 168k within-gene error that lengths on their
+yield remove sits in genes with a junction-probed isoform (`ISSUES: the-junction-price-is-noisy-within-a-gene`,
+parked); the short exon pieces of unprobed transcripts read above their capture truth
+(`ISSUES: the-efficiency-posterior-floor-on-empty-pieces`); the reference needs gDNA (`DESIGN.md` §7.2). Not
+measured: the transcript cost of each class's length error alone. The per-class length error against the truth is
+`ruler_vs_truth.py --scale`; the truth is the simulator's `CaptureSampler.partition_array`; the deliverable is
+`quant_accuracy.py --arm base` beside `--arm oracle_ruler`, per stratum above `--arm base_reseed`, under
+`--set em.assignment_mode=fractional`.
+
 ### the-junction-price-is-noisy-within-a-gene
 `priority: PARKED — the sum is accepted for now (owner, 2026-09-23); the pseudocount's odds are fixed since (2026-09-24, ISSUES: the-pseudocount-prior-is-biased-toward-gdna, CLOSED) · kind: defect · 2026-09-23`
 SIZED 2026-09-24 (the g98 dissection's g50 contrast, `~/Downloads/rigel_runs/prototypes/2026-09-24_g98_dissection/`): with every length on its
@@ -156,46 +180,6 @@ locus's gDNA length. Unmeasurable on the ladder (`NH` 1); the aligned ladder
 seen. Taken with `ISSUES: multimapper-blind-support`. Also open for multimappers: the group's gDNA term is the MEAN
 over its eligible alignments (`scoring.cpp`, pinned by `tests/test_pipeline_routing.py`), where uniform gDNA
 placement derives the sum.
-
-### the-em-answer-depends-on-where-it-starts
-`priority: NEXT — the owner's investigation (2026-09-25) · kind: defect · 2026-09-25`
-What is left after the SQUAREM repair (`ISSUES: the-squarem-clamp-decided-which-components-live`, CLOSED): VBEM's
-own start-dependence. With the clamp gone MAP reaches one answer from any start (204 fragments apart at
-`g00 ss.99 ON`, all in loci still at the iteration cap), while VBEM still ends 8,096 fragments apart there (136
-loci, 132 of them winner forks — a candidate dead in one answer and holding fragments in the other). Its E-step
-weight ψ(α), with no per-component prior, penalises a small component by about −1/α, so components sharing fragments
-race and the start picks the winner; the two answers' likelihoods differ (the uniform start's is higher in 121 of 136
-loci), so it is not a flat valley. Candidate repairs, each measured or excluded below: a warm start that is itself
-start-free (the MAP optimum, which is unique), or a per-component prior. Instrument: `em_start_lab.py` in
-`~/Downloads/rigel_runs/prototypes/2026-09-25_em_start/` (every EM setting re-solved from one pre-EM state in one
-process, which repeats itself to 0.0 fragments; `analyze.py` classifies each moved locus). The minus-strand
-coverage-weight fix, which seeds only the start, landed on its own (`ISSUES:
-the-minus-strand-coverage-weight-sat-one-fragment-length-off`, CLOSED); what it moved is this entry speaking.
-MEASURED 2026-09-25 on `g00 ss.99 ON` (the landed solver's prototype): the 136 loci VBEM's two starts disagree on carry
-EQUAL truth error — 385,299 (coverage start) against 385,088 (uniform), MAP's single answer 385,376; the coverage start
-is closer in 50 loci, the uniform in 64, 22 tie — so what is left is reproducibility, not accuracy: the forks pick
-among near-equivalent explanations of genuinely ambiguous fragments.
-TWO START-FREE ARMS MEASURED 2026-09-25 (`~/Downloads/rigel_runs/prototypes/2026-09-25_vbem_start/`; the ladder
-against the landed build, all 16, fractional, `ladder/compare_vbem.txt`): (1) VBEM STARTED FROM THE MAP OPTIMUM
-(prototype `~/proj/rigel-em`, `RIGEL_PROTO_VBEM_START=map`: MAP first, then VBEM from the counts one E-step at θ_MAP
-implies) — nearly start-free (the two starts 294 fragments apart at `g00 ss.99 ON` against 8,096; truth error there
-936.6k–936.9k against 937.8k–938.0k), in-scope transcript Σ|Δ| −4.7 / +0.2 / −3.8 % (stranded OFF / stranded ON /
-unstranded OFF), but genes +0.6 / +1.0 / +4.0 % and the gDNA pool's Σ|error| +3.3 / +2.1 / +3.2 %: it inherits MAP's
-signature, more mass on annotated transcripts and less on the synthetic spans and on gDNA (`g50 ss.99 ON` −13.4k →
-−15.5k), and it costs 30–50 % more pipeline time on the heavy conditions (measured beside the uniform arm under the
-same load). (2) VBEM FROM THE UNIFORM START (a config value, `em.warm_start=uniform`): worse everywhere, transcripts
-+2.0 / +0.1 / +0.5 %, genes +1.6 / +0.4 / +1.8 %. So which basin VBEM starts in is not neutral — the coverage start's
-favour genes and gDNA, the MAP optimum's favour the transcripts off capture — and neither arm is a clean win. SIZED on an
-unstranded row (`g05 ss.50 OFF`, the same lab): the landed VBEM's two starts end 115,159 fragments apart (134 loci, 58
-by more than 100), and there the coverage start is the better one — truth error 1,371.7k against 1,376.9k — though the
-uniform start is closer in more of the forked loci (76 against 44). There VBEM from the MAP optimum is neither
-start-free nor better: its two starts end 19,404 fragments apart, and its truth error is 1,413.8k / 1,410.6k against
-the landed 1,371.7k (+3 %) — it moves mass off the synthetic spans and gDNA onto the annotated transcripts, which is
-why the transcript table alone read better. The coverage start has been the most accurate start measured on every
-condition. Not
-tried: choosing among VBEM's optima by VBEM's own objective (the evidence lower bound), which needs its derivation
-under the grouped prior. A per-component reference prior is excluded by `EQUATIONS.md` §9b.1 (any lift above the
-~0.16–0.47 activation threshold revives every shadow entity; the equal share was refused 2026-09-19).
 
 ### the-gdna-length-law-falls-back-at-identical-purities
 `priority: NEXT — a defect found by the g98 dissection (2026-09-24) · kind: defect · 2026-09-24`
@@ -700,6 +684,47 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### the-em-answer-depends-on-where-it-starts
+RULED 2026-09-26 (owner): accepted as a known limit and documented (`DESIGN.md` §3.1e; `MANUAL.md`, the FAQ on a
+component that dies). The shipped start stays the coverage-weighted one, the most accurate measured.
+What is left after the SQUAREM repair (`ISSUES: the-squarem-clamp-decided-which-components-live`, CLOSED): VBEM's
+own start-dependence. With the clamp gone MAP reaches one answer from any start (204 fragments apart at
+`g00 ss.99 ON`, all in loci still at the iteration cap), while VBEM still ends 8,096 fragments apart there (136
+loci, 132 of them winner forks — a candidate dead in one answer and holding fragments in the other). Its E-step
+weight ψ(α), with no per-component prior, penalises a small component by about −1/α, so components sharing fragments
+race and the start picks the winner; the two answers' likelihoods differ (the uniform start's is higher in 121 of 136
+loci), so it is not a flat valley. Candidate repairs, each measured or excluded below: a warm start that is itself
+start-free (the MAP optimum, which is unique), or a per-component prior. Instrument: `em_start_lab.py` in
+`~/Downloads/rigel_runs/prototypes/2026-09-25_em_start/` (every EM setting re-solved from one pre-EM state in one
+process, which repeats itself to 0.0 fragments; `analyze.py` classifies each moved locus). The minus-strand
+coverage-weight fix, which seeds only the start, landed on its own (`ISSUES:
+the-minus-strand-coverage-weight-sat-one-fragment-length-off`, CLOSED); what it moved is this entry speaking.
+MEASURED 2026-09-25 on `g00 ss.99 ON` (the landed solver's prototype): the 136 loci VBEM's two starts disagree on carry
+EQUAL truth error — 385,299 (coverage start) against 385,088 (uniform), MAP's single answer 385,376; the coverage start
+is closer in 50 loci, the uniform in 64, 22 tie — so what is left is reproducibility, not accuracy: the forks pick
+among near-equivalent explanations of genuinely ambiguous fragments.
+TWO START-FREE ARMS MEASURED 2026-09-25 (`~/Downloads/rigel_runs/prototypes/2026-09-25_vbem_start/`; the ladder
+against the landed build, all 16, fractional, `ladder/compare_vbem.txt`): (1) VBEM STARTED FROM THE MAP OPTIMUM
+(prototype `~/proj/rigel-em`, `RIGEL_PROTO_VBEM_START=map`: MAP first, then VBEM from the counts one E-step at θ_MAP
+implies) — nearly start-free (the two starts 294 fragments apart at `g00 ss.99 ON` against 8,096; truth error there
+936.6k–936.9k against 937.8k–938.0k), in-scope transcript Σ|Δ| −4.7 / +0.2 / −3.8 % (stranded OFF / stranded ON /
+unstranded OFF), but genes +0.6 / +1.0 / +4.0 % and the gDNA pool's Σ|error| +3.3 / +2.1 / +3.2 %: it inherits MAP's
+signature, more mass on annotated transcripts and less on the synthetic spans and on gDNA (`g50 ss.99 ON` −13.4k →
+−15.5k), and it costs 30–50 % more pipeline time on the heavy conditions (measured beside the uniform arm under the
+same load). (2) VBEM FROM THE UNIFORM START (a config value, `em.warm_start=uniform`): worse everywhere, transcripts
++2.0 / +0.1 / +0.5 %, genes +1.6 / +0.4 / +1.8 %. So which basin VBEM starts in is not neutral — the coverage start's
+favour genes and gDNA, the MAP optimum's favour the transcripts off capture — and neither arm is a clean win. SIZED on an
+unstranded row (`g05 ss.50 OFF`, the same lab): the landed VBEM's two starts end 115,159 fragments apart (134 loci, 58
+by more than 100), and there the coverage start is the better one — truth error 1,371.7k against 1,376.9k — though the
+uniform start is closer in more of the forked loci (76 against 44). There VBEM from the MAP optimum is neither
+start-free nor better: its two starts end 19,404 fragments apart, and its truth error is 1,413.8k / 1,410.6k against
+the landed 1,371.7k (+3 %) — it moves mass off the synthetic spans and gDNA onto the annotated transcripts, which is
+why the transcript table alone read better. The coverage start has been the most accurate start measured on every
+condition. Not
+tried: choosing among VBEM's optima by VBEM's own objective (the evidence lower bound), which needs its derivation
+under the grouped prior. A per-component reference prior is excluded by `EQUATIONS.md` §9b.1 (any lift above the
+~0.16–0.47 activation threshold revives every shadow entity; the equal share was refused 2026-09-19).
 
 ### whole-counts-optimised-assignment
 REFUSED 2026-09-26 (owner): the draw is kept. An assignment chosen for the most reads on their true origin under the

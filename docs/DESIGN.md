@@ -631,6 +631,19 @@ the jump overshot — a matter of the warm start. The clamp made the EM's conver
 (41,343 fragments at `g00 ss.99 ON` under VBEM, 22,447 under MAP); backtracking removes it for MAP (204, in
 unconverged loci), and what VBEM keeps is its own (`ISSUES: the-em-answer-depends-on-where-it-starts`).
 
+> **VBEM's own start-dependence is ACCEPTED as a known limit (owner, 2026-09-26).** Where fragments are genuinely
+> ambiguous, VBEM can settle on different near-equivalent explanations depending on where it starts: its E-step
+> weight, the digamma of a component's Dirichlet count, penalises a small component by about the reciprocal of that
+> count, so components sharing fragments race and the start picks the winner. The start stays the coverage-weighted
+> one, so one input and one version give one answer, and a change that moves only the start moves those fragments.
+
+Why accepted rather than repaired: nothing measured beats the shipped start. The 136 loci its two starts split at
+`g00 ss.99 ON` (8,096 fragments) carry equal truth error (385.3k against 385.1k); at `g05 ss.50 OFF` the starts end
+115,159 fragments apart and the shipped one is the better (1,371.7k against 1,376.9k); a start that is itself
+start-free (VBEM from the MAP optimum) and the uniform start both lose on genes and the gDNA pool. The one untried
+repair — choosing among VBEM's answers by its own evidence lower bound — needs that bound derived under the grouped
+prior first.
+
 ### 3.1f Whole counts: count first, then draw to the counts (owner, 2026-09-25)
 
 > **Whole counts are the default and fractional counts an option; there is no argmax mode and no cutoff on one
