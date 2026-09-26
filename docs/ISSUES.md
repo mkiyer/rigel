@@ -52,21 +52,6 @@ seen. Taken with `ISSUES: multimapper-blind-support`. Also open for multimappers
 over its eligible alignments (`scoring.cpp`, pinned by `tests/test_pipeline_routing.py`), where uniform gDNA
 placement derives the sum.
 
-### the-gdna-length-law-falls-back-at-identical-purities
-`priority: NEXT — a defect found by the g98 dissection (2026-09-24) · kind: defect · 2026-09-24`
-`calibration/fl.py`'s `build_fl_models` estimates gDNA's fragment-length law by contrasting two pools of different
-gDNA purity; when the separation is EXACTLY 0.0 ("purities identical", as at `g98 ss.99 ON`, both pools at gDNA
-share 1.0) it declines and falls back to the capture-selected four-pool census: `gdna_pmf` reads 245.1 bp against a
-true 216.7. Where the contrast is applied the estimator is right (216.7–217.0 at `g50 ss.99 ON` and `g98 ss.50 ON`,
-separations 0.021 and −0.0018). A yes/no fallback on a continuous quantity. At `g98 ss.99 ON` this one root owns the
-scorer's gDNA law reading +13 bp long (254.3 against 240.9), the gDNA component's offset from the RNA lengths'
-scale (gDNA/spans 1.014, gDNA/isoforms 1.041, which fall to g50's levels with the true law), and 13.6k of
-calibration's count deficit. Fixed alone: gDNA −100.5k → −67.7k, spans 80.0k → 54.1k, the oracle arm −35.5k →
-−21.7k; but transcripts do not improve (25.95 → 26.46 %): correcting the law the contracted lengths use exposes an
-opposite error in the length rule, so the repair is judged with its effect on the lengths. Class-mean L/Y moving
-toward one scale is NOT a valid gate for it: that moved toward one scale while the EM got worse (−4.8k to −5.9k
-gDNA, +6.2k to +9.8k transcripts). Scripts: `analysis/refute-mechanism/fl_root.py`, `scale_arm.py` in `~/Downloads/rigel_runs/prototypes/2026-09-24_g98_dissection/`.
-
 ### the-scorer-reads-a-census-length-law
 `priority: next, after the two above · kind: defect · 2026-09-24`
 The E-step scores an unspliced fragment's length with gDNA's library census (`gdna_realized_pmf`,
@@ -79,7 +64,9 @@ transcripts 1.70 %; the true census gives +12.7k, 139.2k, 1.79 %; shipped +5.2k,
 (oracle arm) the scorer's law is worth 22.2k gDNA and 9.8k transcripts, 18.4k / 4.6k of it the estimator
 (`ISSUES: the-gdna-length-law-falls-back-at-identical-purities`). Nil off capture. The same law for both is a
 diagnostic, not a candidate: real libraries with different gDNA and RNA chemistry need the channel. The repair is a
-derivation of the per-fragment length term at a shared footprint.
+derivation of the per-fragment length term at a shared footprint. 2026-09-26: the estimator's half is closed
+(`ISSUES: the-gdna-length-law-falls-back-at-identical-purities`); at `g98 ss.99 ON` the realized law now reads
+234.9 against a true 240.9, the same offset as every other capture-ON row.
 
 ### the-pooled-q-in-the-gdna-count
 `priority: later, with the capture repairs · kind: defect · 2026-09-24`
@@ -555,6 +542,38 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### the-gdna-length-law-falls-back-at-identical-purities
+CLOSED 2026-09-26 by the fix, in the working tree for the owner's commit (`calibration/fl.py`,
+`_deconvolved_gdna_counts`): at a purity separation of exactly 0 the contained pair answers with its own de-tilted
+mixture — the limit its resolution-weighted fade approaches, and what the boundary pair already returned at its own
+tie — instead of declining to the capture-selected four-pool census. MEASURED 2026-09-26 (no EM,
+`~/Downloads/rigel_runs/prototypes/2026-09-26_gdna_law_tie/`): only `g98 ss.99 ON` ties on the ladder (both purities
+1.000); there the uniform-frame law reads 245.1 → 217.2 bp (truth 216.7) and the realized law 254.3 → 234.9 (truth
+240.9, where every other capture-ON row reads 234.5–236.5 against ~241: the census's own offset,
+`ISSUES: the-scorer-reads-a-census-length-law`); the other 15 rows' laws are bit-identical, so nothing else moves.
+Through the EM (fractional, `g98 ss.99 ON`), transcripts / genes / gDNA est − true / synthetic spans est (truth 6.0k)
+/ annotated est − true: 26.18 → 25.26 % / 17.60 → 15.03 % / −281.0k → −246.5k / 79.7k → 53.7k / +26.9k → +18.2k; under
+the oracle prior 21.34 → 20.04 % / 12.69 → 9.42 %; `--arm base_reseed` equals `base`. The landed pipeline reproduces
+the prototype to 0.24 of 49,013 transcript fragments. The 2026-09-24 reading that transcripts worsened (25.95 →
+26.46 %) does not reproduce on this tree. Gates (`tests/calibration/test_fl.py`), verified failing on the shipped
+code: the tie at purity 1, the uniform law continuous through the tie end to end, and a tie below purity 1;
+restoring the decline fires all three, deleting the tie branch fires the two `errstate` guards (bin `L = 0` is
+empty in both pools, so `0/0` makes the inverted law's sum NaN and the old arithmetic reached the mixture by
+accident). Left as it was: the contained pair still declines on an empty pool — the `g00` rows, which then read the
+four-pool census (243–244 bp under capture) — the same kind of cut, a separate mechanism. The entry as it was opened:
+`calibration/fl.py`'s `build_fl_models` estimates gDNA's fragment-length law by contrasting two pools of different
+gDNA purity; when the separation is EXACTLY 0.0 ("purities identical", as at `g98 ss.99 ON`, both pools at gDNA
+share 1.0) it declines and falls back to the capture-selected four-pool census: `gdna_pmf` reads 245.1 bp against a
+true 216.7. Where the contrast is applied the estimator is right (216.7–217.0 at `g50 ss.99 ON` and `g98 ss.50 ON`,
+separations 0.021 and −0.0018). A yes/no fallback on a continuous quantity. At `g98 ss.99 ON` this one root owns the
+scorer's gDNA law reading +13 bp long (254.3 against 240.9), the gDNA component's offset from the RNA lengths'
+scale (gDNA/spans 1.014, gDNA/isoforms 1.041, which fall to g50's levels with the true law), and 13.6k of
+calibration's count deficit. Fixed alone: gDNA −100.5k → −67.7k, spans 80.0k → 54.1k, the oracle arm −35.5k →
+−21.7k; but transcripts do not improve (25.95 → 26.46 %): correcting the law the contracted lengths use exposes an
+opposite error in the length rule, so the repair is judged with its effect on the lengths. Class-mean L/Y moving
+toward one scale is NOT a valid gate for it: that moved toward one scale while the EM got worse (−4.8k to −5.9k
+gDNA, +6.2k to +9.8k transcripts). Scripts: `analysis/refute-mechanism/fl_root.py`, `scale_arm.py` in `~/Downloads/rigel_runs/prototypes/2026-09-24_g98_dissection/`.
 
 ### the-capture-length-owns-stranded-capture-on
 CLOSED 2026-09-26 (owner), for now: the tool is at diminishing returns, a change must be simple and improve it, and

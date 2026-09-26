@@ -340,13 +340,18 @@ def _deconvolved_gdna_counts(
     * *no density* — the one-sided rate found no support, which is what a zero-gDNA library looks like.
       There is no gDNA length distribution to estimate and inventing one is the failure mode to avoid.
     * *an empty pool* — a pool with no fragments at all.
-    * *purities identical* — the contrast divides by ``a_0 - a_1``. Short of zero separation there is
-      no threshold: the inversion is blended toward the pools' own mixture by the resolution weight
-      ``sep^2 / (sep^2 + SE^2)``, where with ``a_p = rho*E_p/n_p`` and ``Var(n_p) ~ n_p`` the delta
-      method gives ``SE^2 ~ a_0^2/n_0 + a_1^2/n_1`` — the shared ``rho`` term is common-mode and
-      cancels out of the difference. So the estimator fades out by itself at a near-pure library,
-      where nothing needs correcting.
     * *empty after the contrast* — nothing survives the projection back onto the cone.
+
+    Identical purities are NOT a decline. The contrast divides by ``a_0 - a_1``, and there is no
+    threshold short of zero separation: the inversion is blended toward the pools' own mixture by the
+    resolution weight ``sep^2 / (sep^2 + SE^2)``, where with ``a_p = rho*E_p/n_p`` and ``Var(n_p) ~ n_p``
+    the delta method gives ``SE^2 ~ a_0^2/n_0 + a_1^2/n_1`` — the shared ``rho`` term is common-mode and
+    cancels out of the difference. So the estimator fades out by itself at a near-pure library, where
+    nothing needs correcting, and at a separation of exactly zero the weight is exactly zero and the
+    answer is the mixture itself: the limit the fade approaches, and what the boundary pair returns at
+    its own tie. Both purities clip at 1 in a near-pure captured library (``g98 ss.99 ON``), and a
+    decline there handed the uniform-frame law to the capture-selected four-pool census, 245 bp against
+    a true 217 (``tests/calibration/test_fl.py::test_the_uniform_law_is_continuous_through_a_purity_tie``).
 
     Under hybrid capture the contrast degenerates to the intergenic pool alone, and that is why it
     is safe there. The premise is that both pools' contaminants share a length distribution, and
@@ -408,10 +413,6 @@ def _deconvolved_gdna_counts(
     # nothing and a pair that says a little changes a little. `lam = 1` accepts the inversion whole
     # and `lam = 0` declines it, joined continuously rather than switched between.
     lam_sep = _resolution_weight(sep * sep, se * se)
-    if sep == 0.0:
-        return None, GdnaContrast(
-            False, "purities identical", fit.rate, fit.rate_over_pooled, a0, a1, sep
-        )
 
     # each contained pool takes its OWN opportunity, never the combined divisor of the four-pool sum
     total = np.asarray(gdna_opportunity.total, dtype=np.float64)
@@ -423,12 +424,16 @@ def _deconvolved_gdna_counts(
         np.divide(opp, total, out=prob, where=total > 0.0)
         f.append(_normalized(detilt_pool(raw[pool], prob)))
     mixture = _normalized(totals[0] * f[0] + totals[1] * f[1])
-    g = ((1.0 - a1) * f[0] - (1.0 - a0) * f[1]) / sep
-    # The negative excursions are sampling noise on a quantity that is a density; clipping is the
-    # cheapest projection back onto the cone, and measures no worse than a least-squares one.
-    g = np.clip(g, 0.0, None)
-    s = g.sum()
-    g = mixture + lam_sep * (_normalized(g) - mixture) if s > 0.0 else mixture
+    if sep == 0.0:
+        # the fade's own limit: at zero separation the resolution weight is zero
+        g = mixture
+    else:
+        g = ((1.0 - a1) * f[0] - (1.0 - a0) * f[1]) / sep
+        # The negative excursions are sampling noise on a quantity that is a density; clipping is the
+        # cheapest projection back onto the cone, and measures no worse than a least-squares one.
+        g = np.clip(g, 0.0, None)
+        s = g.sum()
+        g = mixture + lam_sep * (_normalized(g) - mixture) if s > 0.0 else mixture
     g = np.clip(g, 0.0, None)
     if not g.sum() > 0.0:
         return None, GdnaContrast(

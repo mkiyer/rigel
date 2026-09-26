@@ -440,6 +440,141 @@ def test_an_unresolved_enrichment_weight_collapses_with_its_precision():
     assert max(abs(b - a) for a, b in zip(ws, ws[1:])) < 0.05
 
 
+def _tie_fixture(rna_in_introns: float, rna_in_intergenic: float = 0.0):
+    """Four intergenic and four intronic 20-kb regions of pure gDNA at the uniform expectation, and four
+    probed exons: the contained pools carry the uniform-frame law ``g`` (mean 150), the two crossing pools
+    a capture-selected law (mean 200) at ten times their mass. Every off-target region holds exactly its
+    expected count, so the one-sided rate lands just above it and BOTH purities clip at 1 — the exact
+    tie of a near-pure captured library (``g98 ss.99 ON``). ``rna_in_introns`` adds RNA (mean 120) to
+    the introns per unit of opportunity; enough of it pulls the intronic purity below 1 and resolves the
+    tie; the same amount in both pools (``rna_in_intergenic``, its own RNA law, mean 100) keeps the
+    purities tied at a value below 1 with the two pools' shapes apart.
+    Returns ``(payload, opportunity, region_lengths, region_types, L)``."""
+    from rigel.calibration.gdna_density import contained_opportunity
+
+    n = 400
+    L = np.arange(n + 1, dtype=np.float64)
+
+    def law(mu):
+        p = np.exp(-0.5 * ((L - mu) / 30.0) ** 2)
+        p[0] = 0.0
+        return p / p.sum()
+
+    g, g_captured, r, r_ig = law(150.0), law(200.0), law(120.0), law(100.0)
+    lengths = np.full(12, 20_000.0)
+    lengths[8:] = 300.0
+    types = np.array([0] * 4 + [1] * 4 + [2] * 4, dtype=np.uint8)  # intergenic / intron / exon
+    e = contained_opportunity(g, lengths)
+    counts = np.zeros((12, 2))
+    counts[:8, 0] = 0.05 * e[:8]
+    # the RNA sits in two regions of a pool at twice the pool rate, so the one-sided rate still reads
+    # the gDNA level off the other two and the pool's purity falls below 1
+    counts[4:6, 0] += 2.0 * rna_in_introns * e[4:6]
+    counts[0:2, 0] += 2.0 * rna_in_intergenic * e[0:2]
+    counts[8:, 0] = 1e4
+    a_ig = np.clip(lengths[:4].sum() - L + 1.0, 0.0, None)
+    a_in = np.clip(lengths[4:8].sum() - L + 1.0, 0.0, None)
+    a_x = 8.0 * np.clip(L - 1.0, 0.0, None)
+    total = a_ig + a_in + 2.0 * a_x
+    rna = 2.0 * rna_in_introns * float(e[4:6].sum())
+    rna_ig = 2.0 * rna_in_intergenic * float(e[0:2].sum())
+    pools = np.zeros((N_FRAGMENT_POOLS, n + 1))
+    pools[POOL_DNA_INTERGENIC] = g * a_ig / (g * a_ig).sum() * (counts[:4].sum() - rna_ig)
+    if rna_ig > 0.0:
+        pools[POOL_DNA_INTERGENIC] += r_ig * a_ig / (r_ig * a_ig).sum() * rna_ig
+    pools[POOL_DNA_INTRONIC] = g * a_in / (g * a_in).sum() * (counts[4:8].sum() - rna)
+    if rna > 0.0:
+        pools[POOL_DNA_INTRONIC] += r * a_in / (r * a_in).sum() * rna
+    pools[POOL_DNA_INTRON_EXON] = pools[POOL_DNA_INTERGENIC_EXON] = (
+        g_captured * a_x / (g_captured * a_x).sum() * 5e5
+    )
+    pools[POOL_RNA_SPLICED] = r * 1e5
+    payload = SimpleNamespace(
+        pool_lengths=pools,
+        region_contained_count=counts,
+        boundary_unspliced_count=np.zeros((0, 2)),
+        ref_region_offsets=np.array([0, 12]),
+        ref_boundary_offsets=np.array([0, 0]),
+        max_length=n,
+        deposited_lengths=pools.sum(axis=0),
+    )
+    opportunity = SimpleNamespace(
+        pools=(a_ig, a_in, a_x, a_x),
+        total=total,
+        combined_probability=lambda: (a_ig + a_in + 2.0 * a_x) / total,
+    )
+    return payload, opportunity, lengths, types, L
+
+
+def _mean_length(p, L) -> float:
+    p = np.asarray(p, dtype=np.float64)
+    return float((L[: p.size] * p).sum() / p.sum())
+
+
+def test_a_purity_tie_returns_the_contained_pairs_own_mixture():
+    """At an exact purity tie (``a_0 = a_1``) the contrast's resolution weight is 0, so its answer is the
+    contained pair's own de-tilted mixture — the limit its fade approaches, and what the boundary pair
+    already returns at its own tie. It is NOT a decline: declining handed the uniform-frame law to the
+    capture-selected four-pool census, 245 bp against a true 217 at ``g98 ss.99 ON``
+    (`ISSUES: the-gdna-length-law-falls-back-at-identical-purities`)."""
+    from rigel.calibration.fl import _deconvolved_gdna_counts
+
+    payload, opp, lengths, types, L = _tie_fixture(0.0)
+    with np.errstate(divide="raise", invalid="raise"):  # a tie never divides by its zero separation
+        counts, contrast = _deconvolved_gdna_counts(payload, opp, lengths, types)
+    assert contrast.intergenic_gdna_share == contrast.intronic_gdna_share == 1.0
+    assert contrast.separation == 0.0
+    assert counts is not None and contrast.applied
+    assert _mean_length(counts, L) == pytest.approx(150.0, abs=0.5)
+
+
+def test_the_uniform_law_is_continuous_through_a_purity_tie():
+    """The anti-cliff gate at the purity axis, end to end through ``build_fl_models``: the uniform-frame
+    law just past the tie (the intronic purity pulled below 1) and at the tie must agree, and both must
+    read the uniform-frame law, not the capture-selected census 50 bp longer."""
+    from rigel.calibration.fl import _deconvolved_gdna_counts, build_fl_models
+
+    means, seps = [], []
+    for rna in (0.0005, 0.001):
+        payload, opp, lengths, types, L = _tie_fixture(rna)
+        seps.append(_deconvolved_gdna_counts(payload, opp, lengths, types)[1].separation)
+        m = build_fl_models(
+            payload, gdna_opportunity=opp, region_lengths=lengths, region_types=types
+        )
+        means.append(_mean_length(m.gdna_pmf, L))
+    assert seps[0] == 0.0 < seps[1]  # the fixture straddles the tie
+    assert abs(means[0] - means[1]) < 0.5, (
+        f"{means[0]:.1f} at the tie against {means[1]:.1f} just past it"
+    )
+    assert means[0] == pytest.approx(150.0, abs=1.0)
+
+
+def test_a_tie_below_full_purity_is_still_the_pairs_mixture():
+    """Two pools of EQUAL purity carry no contrast whatever that purity is, so a tie below 1 answers with
+    the pair's own de-tilted mixture too — contaminant and all, since nothing separates it there.
+
+    PERTURBATION: deleting the tie branch so the inversion runs at ``sep = 0`` changes no ANSWER — bin
+    ``L = 0`` is empty in both pools, so ``0/0`` makes the inverted law's sum NaN and the code falls
+    through to the mixture by accident — and is caught only by the ``errstate`` guards here and above,
+    which hold that a tie never divides by its zero separation. Restoring the decline fires all three."""
+    from rigel.calibration.fl import _deconvolved_gdna_counts
+    from rigel.calibration.sj_opportunity import detilt_pool
+
+    payload, opp, lengths, types, L = _tie_fixture(0.005, 0.005)
+    with np.errstate(divide="raise", invalid="raise"):
+        counts, contrast = _deconvolved_gdna_counts(payload, opp, lengths, types)
+    assert contrast.separation == 0.0 and contrast.intergenic_gdna_share < 1.0
+    assert counts is not None and contrast.applied and np.isfinite(counts).all()
+    pools = np.asarray(payload.pool_lengths)
+    f = [
+        detilt_pool(pools[p], np.asarray(opp.pools[i]) / opp.total)
+        for i, p in enumerate((POOL_DNA_INTERGENIC, POOL_DNA_INTRONIC))
+    ]
+    n = [float(payload.region_contained_count[m].sum()) for m in (slice(0, 4), slice(4, 8))]
+    mixture = n[0] * f[0] / f[0].sum() + n[1] * f[1] / f[1].sum()
+    np.testing.assert_allclose(counts / counts.sum(), mixture / mixture.sum(), atol=1e-12)
+
+
 def test_zero_gdna_declines_rather_than_fabricating_a_law():
     from rigel.calibration.fl import _realized_gdna_counts
 
