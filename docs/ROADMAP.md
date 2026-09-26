@@ -33,8 +33,8 @@ multimappers are deferred features.
   neutral in their odds, and at `g98` the transcript table leans toward RNA through calibration's RNA floor and
   the capture likelihood — `quant_accuracy.py` (the pools per row), `ISSUES: rna-prior-floor-at-pure-gdna-loci`.
 - **The deliverable, end to end**: measured per stratum on the rebuilt ladder under the shared length; stranded ×
-  capture-ON is the worst in-scope stratum and its capture-aware lengths own most of it (the simulator's own lengths
-  close most of the gap, a perfect calibration prior none), then the capture likelihood's lean toward RNA (the
+  capture-ON is the worst in-scope stratum and its capture-aware lengths own most of it — the junction price's
+  structure, closed for now at diminishing returns (owner, 2026-09-26) — then the capture likelihood's lean toward RNA (the
   synthetic spans over-called at `g98`) and calibration's RNA floor at `g98` — `quant_accuracy.py --arm base` above
   `--arm base_reseed`, beside `--arm oracle_ruler` and `--arm oracle`,
   `ISSUES: the-capture-length-owns-stranded-capture-on`.
@@ -54,8 +54,9 @@ multimappers are deferred features.
 - **The capture-contracted length**: one shared rule for every EM component — each object's conserved share at
   that object's own capture efficiency, read against the landscape's located enriched mode, a junction priced
   from its neighbours by conservation of bases (`DESIGN.md` §7.2, `EQUATIONS.md` §11); the classes sit near one
-  scale and the junction price is noisy within a gene — `ruler_vs_truth.py --scale` (the class means and the
-  within-gene spread), `ISSUES: the-junction-price-is-noisy-within-a-gene`; what the gDNA witness cannot see of a
+  scale and the junction price's within-gene error is its structure, which no neighbouring gDNA object sees — closed
+  for now (owner, 2026-09-26), `ruler_vs_truth.py --scale` (the class means and the within-gene spread),
+  `ISSUES: the-junction-price-is-noisy-within-a-gene`; what the gDNA witness cannot see of a
   transcript-designed panel is declared — `ISSUES: ruler-witness-geometry-on-transcript-panels`.
 - **Performance**: the sweep is one native call, bit-identical at every thread count; the thread is PARKED —
   `ISSUES: performance-memory-bounded-solve`, `profiling/profiler.py`, `profiling/sweep_replay.py`.
@@ -69,21 +70,17 @@ multimappers are deferred features.
 
 ## Next — the order
 
-1. **The capture-aware length on stranded × capture-ON** (owner, 2026-09-26): a fresh campaign on the worst in-scope
-   stratum, judged on its transcript table against `--arm oracle_ruler`'s ceiling, capture-OFF untouched and the
-   zero controls beside (`ISSUES: the-capture-length-owns-stranded-capture-on`). Every closed, refused or parked
-   entry on the ruler may be revisited with a new argument and a measurement.
-2. **The residuals, one issue at a time** (owner, 2026-09-24): the capture likelihood's lean toward RNA, then
+1. **The residuals, one issue at a time** (owner, 2026-09-24): the capture likelihood's lean toward RNA, then
    calibration's RNA floor at pure-gDNA loci (`ISSUES: rna-prior-floor-at-pure-gdna-loci`) and the pseudocount's
    strength (`ISSUES: the-pseudocount-strength-is-not-derived`), each judged on the pools per row first and the
    transcript table second, the zero controls beside. Then the deferred features: splicing artifacts
    (`ISSUES: splicing-artifacts`) and multimappers (`ISSUES: multimapper-intergenic-alignments`,
    `ISSUES: multimapper-blind-support`), on the aligned ladder.
-3. **The release** — `docs/PUBLISHING.md` is the procedure; what gates it is the state: the deliverable
+2. **The release** — `docs/PUBLISHING.md` is the procedure; what gates it is the state: the deliverable
    measured per stratum, the zero rows clean, the suite at its standing count, `preflight.py --full` green, the
    standing risks re-read, and the manual true of what ships.
 
-**Parked, each with its entry**: the junction price's precision within a gene, the sum accepted for now (owner, 2026-09-23; `ISSUES: the-junction-price-is-noisy-within-a-gene`) · the AMBIG slots' remaining defects (`ISSUES: gdna-landscape-trains-on-false-positives`,
+**Parked, each with its entry**: the AMBIG slots' remaining defects (`ISSUES: gdna-landscape-trains-on-false-positives`,
 `ISSUES: the-tilt-census-as-an-instrument`, `ISSUES: the-atom-at-an-unwitnessed-both-strand-slot`) · the intron's own
 solve on unstranded capture-OFF · the message policy's open cases (`ISSUES: two-sided-exon-row`,
 `ISSUES: flux-floor-dispersion`, `ISSUES: message-layer-open-cases`, `ISSUES: refit-vs-message-arbitration`) ·
@@ -96,6 +93,4 @@ solve on unstranded capture-OFF · the message policy's open cases (`ISSUES: two
 The length composition channel (retired until after 0.8.0) · a capture efficiency the EM re-reads as it runs
 (deferred by the owner, `DESIGN.md` §7.2) · anything whose only target is the deferred stratum · every mechanism
 in `ISSUES.md`'s CLOSED / REFUSED section — read it before proposing anything, because each entry is a build that
-was measured and turned down, with the number that killed it. The one exception is the capture-length campaign
-(owner, 2026-09-26): there a closed, refused or parked entry may be revisited, with a new argument and a
-measurement that answers its killing number.
+was measured and turned down, with the number that killed it.
