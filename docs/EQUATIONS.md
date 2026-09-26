@@ -1316,3 +1316,116 @@ exons); and the strand's own count from the column split, `R̂_s = (c_s − c_o)
 Poisson-equivalent precision `(c_s − c_o)²/(c_s + c_o)`, loosens the golden's ceiling to 0.323 at κ = 0.65
 (the asymmetry's precision is low and the price widens the level away) — the failure
 `ISSUES: flux-witness-in-strand-units` recorded.
+
+## 13. Whole counts are a transportation problem (`em_solver.cpp`'s `assign_posteriors`)
+
+`em_solver.cpp`, gated in `tests/test_estimator.py`'s `TestWholeCounts`. Within one EM locus, fragment `u` has
+candidates `C_u` — its transcripts and the locus's gDNA — with posteriors `p_uc > 0` that sum to one. The
+fractional count of component `c` is `n_c = Σ_u p_uc`, and `Σ_c n_c = m`, the locus's fragments. A whole-count
+ASSIGNMENT `z` sends every fragment to one of its candidates, and `N_c = |{u : z(u) = c}|` is its count of `c`. Two
+things are asked of it: that the counts be a ROUNDING of the fractional counts, and that each fragment's candidate be
+a plausible one. `n` below is the locus's number of candidate pairs.
+
+### 13.1 A rounding is always reachable
+
+Build the network source → fragment (exactly 1) → candidate (0 to 1) → component → sink, where component `c`
+carries between `⌊n_c⌋` and `⌈n_c⌉`. The posterior matrix is a feasible flow in it, and every bound is an integer, so
+an integral feasible flow exists (Hoffman's circulation theorem: a network matrix is totally unimodular). An integral
+flow is an assignment with every `N_c ∈ {⌊n_c⌋, ⌈n_c⌉}` — every count within one fragment of its expectation, the
+locus total exact.
+
+### 13.2 One particular rounding need not be
+
+For fixed targets `q_c` with `Σ q_c = m` (the largest-remainder rounding), an assignment with `N = q` exists iff
+
+    Σ_{c ∈ S} q_c  ≤  |U(S)|     for every set S of components,   U(S) = {u : C_u ∩ S ≠ ∅}
+
+— Hall's condition, each component copied `q_c` times. The fractional counts always satisfy it (a fragment adds at
+most 1 to `Σ_{c∈S} n_c`), but rounding several members of a small set up can break it: one fragment split ½ : ½
+between `B` and `C`, beside four components at ¼ each, hands `B` and `C` the locus's two largest remainders,
+`q_B = q_C = 1`, and one fragment has to serve both. This is not hypothetical: a search over small loci found the
+exact targets unreachable routinely around such a core, and the exact-target repair alone then left a count two away
+from its expectation (`test_every_count_stays_within_one_of_its_fractional_count_when_the_rounding_is_unreachable`).
+
+### 13.3 The repair is augmenting paths, and it cannot cycle
+
+From any assignment — the draw's — let `e_c = N_c − q_c`. An AUGMENTING PATH `c_0 → u_1 → c_1 → … → u_r → c_r` runs
+from a component over its target (`e_{c_0} > 0`) to one under it (`e_{c_r} < 0`), every `u_i` currently on `c_{i−1}`
+and holding `c_i` as a candidate. Moving every `u_i` one step lowers `e_{c_0}` by one, raises `e_{c_r}` by one and
+changes no other count. Three properties follow, and together they are the repair's specification:
+
+1. **It terminates.** Each path lowers the total excess `Σ_c max(e_c, 0)` by exactly one and no step raises it, so
+   there are at most as many paths as fragments the draw stranded. It cannot swap forever.
+2. **It succeeds exactly when the targets are reachable.** If from an over-target `c_0` no under-target component is
+   reachable, let `R` be the components that are. Every fragment on a component of `R` has all its candidates in `R`
+   (a candidate outside it would be reachable), so in ANY assignment those fragments need `Σ_R q_c ≥ Σ_R N_c`, and
+   here `Σ_R N_c > Σ_R q_c`: 13.2's condition fails. Conversely, if the targets are reachable, max-flow/min-cut
+   guarantees a path.
+3. **It is linear per path.** A breadth-first search visits each fragment and candidate pair of the locus at most
+   once, so the repair costs `O(s · n)` for `s` stranded fragments — measured at 0.01–0.03 % of fragments on the
+   ladder, so in practice a small multiple of the draw's own `O(n)`. The worst case is not linear; one max-flow over
+   all excesses at once (shortest augmenting paths in phases) would bound it at `O(n √m)`.
+
+### 13.4 The fallback reaches 13.1's rounding
+
+When 13.3.2 reports unreachable targets, every component relaxes to `[⌊n_c⌋, ⌈n_c⌉]`: each count above its ceiling
+sheds along a path to a component below its ceiling, then each count below its floor draws along a backward path from
+a component above its floor. Each path fixes one unit of violation and creates none, and a path always exists: were
+every component `R` reachable from an over-ceiling `c_0` at or above its ceiling, the fragments on `R` — whose
+candidates all lie in `R` — would number `Σ_R N_c > Σ_R ⌈n_c⌉ ≥ Σ_R n_c ≥ |{u : C_u ⊆ R}|`, at least their own
+number, a contradiction; the fill step is the same argument with `⌊n_c⌋ ≤ n_c`. So the whole counts always end within
+one fragment of every fractional count with the locus total exact; they ARE the largest-remainder rounding whenever it
+is reachable, which does not depend on the seed, and otherwise a rounding the draw chose.
+
+### 13.5 The optimum per read, how to reach it, and why the draw is kept
+
+Among assignments with the same counts, the one with the most fragments expected on their true origin maximises
+`Σ_u p_{u,z(u)}` subject to `N = q` — a transportation problem. Its dual has one PRICE per component,
+
+    OPT(q) = min_π D(π),     D(π) = Σ_u max_{c ∈ C_u} (p_uc − π_c) + Σ_c q_c π_c ,
+
+and two facts carry everything below.
+
+1. **Any prices give an optimum, for the counts they produce.** Let every fragment take a candidate maximising its
+   REDUCED value `p_uc − π_c`, with counts `N'`. For any `z'` with the same counts,
+   `Σ_u p_{u,z'(u)} = Σ_u (p_{u,z'(u)} − π_{z'(u)}) + Σ_c π_c N'_c`, and no term of the first sum exceeds the
+   fragment's best reduced value, so no `z'` beats it.
+2. **Any prices bound the optimum.** For every feasible `z` and every `π`, `Σ_u p_{u,z(u)} ≤ OPT(q) ≤ D(π)`, and the
+   bound closes at the optimal prices (the matrix is totally unimodular, 13.1). A method can certify how far from the
+   optimum it stopped.
+
+**The exact method is 13.3's repair with costs, started from prices instead of a draw.** Give every fragment its best
+reduced value — optimal for its own counts by fact 1, off the targets by the excess `F = Σ_c max(N'_c − q_c, 0)` —
+then run successive shortest paths: from a component over its target, Dijkstra over the locus's components finds the
+chain of single moves `u : x → y` of least total reduced loss `(p_ux − π_x) − (p_uy − π_y)`, every loss non-negative
+because every fragment holds its best. When the search reaches a component under its target at distance `d_t`, every
+component it settled at distance `d_v` has its price raised by `d_t − d_v`; the triangle inequality keeps every loss
+non-negative and leaves the moved fragments on zero-loss moves, so every fragment still holds a best reduced value and
+fact 1 still applies. Each chain lowers the excess by exactly one, so the method ends after exactly `F` chains, fails
+only on 13.2's condition (13.3.2's closed-set argument, unchanged), and ends with primal equal to dual — its own
+certificate. Gauss–Seidel price sweeps before it (each component's price set so exactly `q_c` fragments prefer it, an
+exact coordinate step down `D`) shrink `F` and change nothing else. It costs `O(S · n)` for `S` sweeps, `O(n log n)`
+for one heap per ordered component pair (keyed by the price-free loss `p_ux − p_uy`), and `F` searches over the
+locus's components. A drawn start cannot seed it: a sample is optimal for no prices, and improving one is cycle
+cancelling, with no useful bound on the number of cycles.
+
+**An optimum is a vertex, and that is why the draw is kept.** At the optimal prices every fragment not tied between
+candidates goes wholly to its best one, so fragments that look alike are handed to one component as a group instead of
+shared out. That is the optimum's gain — it wins the reads a sampler loses to chance — and its cost: each component
+receives its most characteristic fragments, not a representative sample of the ones it produced. With `log p` for `p`
+the two ends lie on one path: the weights `p_uc^{1/τ} e^{−π_c/τ}`, priced so their expected counts are the targets,
+are the posterior itself at `τ = 1` (prices near zero, the targets being its own rounded counts) and the most probable
+assignment with those counts as `τ → 0`. The draw is the `τ = 1` point with the counts held: it keeps the uncertainty
+the model has instead of resolving it. MEASURED on two full libraries (`ISSUES: whole-counts-optimised-assignment`):
+the optimum places 1.55–1.63 points more reads on their true origin and misplaces about three to four times as many by
+region; the draw sits within 0.15–0.32 points of the fractional posterior's own floor on that measure. The retired
+`map` mode was `π = 0` — fact 1 at the wrong counts.
+
+### 13.6 For identical fragments the draw is an urn
+
+For fragments sharing one candidate set and one posterior `p`, `to_come_c = (fragments left) · p_c`, so the draw's
+weight `p_c · owed_c / to_come_c = owed_c / (fragments left)`: it takes a component with probability equal to its share
+of the counts still owed — drawing without replacement from an urn holding each component's count. Every fragment,
+the first or the last, goes to `c` with probability `q_c / m`, and none strands. Stranding comes only from fragments
+with DIFFERENT candidate sets, where the mass of a fragment still to come is counted for a component that the
+fragments drawn before it may already have filled (`test_the_first_fragment_and_the_last_are_drawn_with_the_same_odds`).

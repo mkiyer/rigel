@@ -180,7 +180,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 | `--seed N` | `0` | Seed of the `sample` assignment's draw; another seed is another draw from the same posterior. |
 | `--em-iterations N` | `1000` | Maximum EM iterations. Set `0` for unambiguous-only quantification (skip EM). |
 | `--em-mode {vbem,map}` | `vbem` | EM variant. `vbem` = Variational Bayes EM (digamma soft updates); `map` = MAP-EM with hard `max(0, n+a-1)` updates. |
-| `--assignment-mode {sample,fractional,map}` | `sample` | Post-EM fragment assignment. `sample` draws from the posterior; `fractional` preserves posterior weights; `map` takes the argmax component. |
+| `--assignment-mode {sample,fractional}` | `sample` | Post-EM fragment assignment. `sample` gives every fragment to one transcript (or gDNA), count first: each transcript's fractional count is rounded within its EM locus, then each fragment is drawn from its own posterior toward the transcripts still short of their count, so whole counts equal the rounded fractional counts. `fractional` keeps each fragment's posterior weights. |
 
 **Performance**
 
@@ -197,7 +197,6 @@ Every flag is also documented by `rigel <subcommand> --help`.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--assignment-min-posterior P` | `0.01` | Minimum posterior for a component to be eligible for discrete assignment (map/sample modes) |
 | `--em-convergence-delta D` | `1e-6` | Convergence threshold for EM parameter updates |
 | `--calib-refit-iters N` | `3` | Number of times calibration re-solves after refitting its population gDNA prior. `0` gives the prior-free first solve only. |
 | `--sweep-block-slots N` | `1000` | Calibration's working set: the chain is solved one locus block at a time, the pieces between intergenic regions merged up to this many slots per block. Performance only — the answer is the same for every value; smaller blocks use less memory per sweep. |
@@ -327,7 +326,7 @@ sj_strand_tag: [auto]       # [XS] for STAR, [ts] for minimap2, [XS, ts] to try 
 # EM algorithm (defaults are suitable for most libraries)
 em_iterations: 1000
 em_mode: vbem               # vbem | map
-assignment_mode: sample     # sample | fractional | map
+assignment_mode: sample     # sample | fractional
 
 # Performance
 threads: 16
@@ -849,6 +848,17 @@ second BAM pass and adds runtime overhead.
 **Does Rigel support single-end reads?**
 Single-end reads are handled but less thoroughly tested than paired-end.
 Fragment-length estimation uses alignment length rather than insert size.
+
+**How are whole counts made, and why no per-fragment cutoff?**
+In `sample` mode every fragment goes to exactly one transcript (or to gDNA), and the counts come first.
+Each EM locus rounds its transcripts' fractional counts (the expected number of fragments each one
+produced) so that they still sum to the locus's fragments; a transcript expecting under about half a
+fragment gets none. Then each fragment is drawn from its own posterior, favouring the transcripts still
+short of their count, and a fragment left with every candidate full is moved along a short chain of
+swaps onto the counts. The whole counts therefore equal the fractional counts rounded, whatever the seed;
+the seed decides only which fragment goes where, and `--annotated-bam` records that choice read by read.
+There is deliberately no cutoff on one fragment's posterior: a minor isoform can hold 0.5 % of every
+fragment it shares and still have produced dozens of them, and only its total says it is real.
 
 **Can a transcript's EM component die and never recover?**
 Yes, and only the EM's own step may do it. A component at the floor (`EM_LOG_EPSILON` ≈ 1e-300 in

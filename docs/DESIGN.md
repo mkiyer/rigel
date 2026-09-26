@@ -475,9 +475,11 @@ boundary, so `PopulationView.mass` stays strand-agnostic
 point, no scale constant, nothing decodes a bank (measured against exact rational arithmetic, float64 is
 1e5–7e5× closer than the fixed point it replaced). Memory is flat (~85 MB at human scale); the
 `static_assert`s beside the structs are the only place worth reading the struct sizes from. **The tally
-is not bit-reproducible across worker counts, and the owner has signed that off** (2026-08-11): every
-COUNT bank reproduces exactly; the FRACTION banks are re-associated by the per-worker merge and wander by
-~1e-15, reaching the deliverable at ~1e-11, five orders below `EMConfig.convergence_delta`. Tests
+is not bit-reproducible, across worker counts or from run to run, and the owner has signed that off** (2026-08-11;
+re-affirmed 2026-09-25 knowing the full effect): every COUNT bank reproduces exactly; the FRACTION banks are
+re-associated by the per-worker merge — which worker summed which batch changes from run to run — and wander by
+~1e-15, which the EM's forks carry into whole fragments (`ISSUES: the-scan-fraction-banks-are-not-reproducible`,
+REFUSED: bit-identity is not a goal). Tests
 validate the float banks within a derived tolerance, bracketed from both sides
 (`TRAPS: integer-channels-reproduce`).
 
@@ -628,6 +630,36 @@ A component at the floor takes no responsibility and no share of the evidence-pr
 the jump overshot — a matter of the warm start. The clamp made the EM's converged answer depend on its start
 (41,343 fragments at `g00 ss.99 ON` under VBEM, 22,447 under MAP); backtracking removes it for MAP (204, in
 unconverged loci), and what VBEM keeps is its own (`ISSUES: the-em-answer-depends-on-where-it-starts`).
+
+### 3.1f Whole counts: count first, then draw to the counts (owner, 2026-09-25)
+
+> **Whole counts are the default and fractional counts an option; there is no argmax mode and no cutoff on one
+> fragment's posterior. `sample` rounds every component's fractional count within its EM locus — the transcripts
+> and the locus's gDNA, largest remainder, so the locus total is exact — then draws each fragment from its own
+> posterior re-weighted by (count still owed ÷ posterior mass still to come), and repairs a fragment the draw left
+> with every candidate full by moving a chain of fragments, each to another of its own candidates, onto the
+> counts; where those exact counts are unreachable, onto a count within one of every fractional count, which always
+> is.** (`em_solver.cpp`'s `assign_posteriors`; gates `tests/test_estimator.py`'s `TestWholeCounts`; the derivation,
+> with the repair's termination, success condition and cost, is `EQUATIONS.md` §13.)
+>
+> **It is a feasible assignment, not an optimal one, and knowingly so (owner, 2026-09-25) — and it is KEPT over the
+> exact optimum (owner, 2026-09-26), because an optimum per read gives up calibration.** The assignment that puts the
+> most fragments on their true origin under the same counts is a transportation problem, solved exactly in
+> `EQUATIONS.md` §13.5; the draw gives each component a representative sample of the fragments it could have produced
+> instead, and the repair restores the counts without regard to the posteriors. MEASURED against the exact optimum on
+> two full libraries: the optimum places 1.55–1.63 points more reads on their true origin and misplaces about three to
+> four times as many by region, where the draw sits within 0.32 points of the fractional posterior's own floor
+> (`ISSUES: whole-counts-optimised-assignment`, refused); the count table is the same.
+
+The owner's reasons: sequencing samples discrete molecules, so one fragment belongs to one transcript, and a
+whole-count assignment can be shown read by read in the annotated BAM, which a fractional count cannot. Whether a
+transcript is real shows only in its total — a minor isoform holding 0.5 % of every fragment it shares still
+produced dozens of them — so the decision belongs to the count, never to one fragment's share; the retired 1 %
+floor erased exactly those minorities (off capture +24 to +35 % transcript and 2.3–3.4× gene error against
+fractional). The counts are the rounded fractional counts whatever the seed; the seed decides only which fragment
+goes where, and for identical fragments the re-weighted draw is an urn, so the first fragment and the last are
+drawn with the same odds. An assignment optimised for reads assigned correctly was derived, prototyped, priced and
+refused (`ISSUES: whole-counts-optimised-assignment`).
 
 ### 3.2 One strand convention
 

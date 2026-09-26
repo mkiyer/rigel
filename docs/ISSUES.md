@@ -16,32 +16,6 @@ the changelog is git.
 Ordered by priority. An entry says what is open and the number a ranking turns on; what was done is git,
 what was ruled is `DESIGN.md`.
 
-### the-scan-fraction-banks-are-not-reproducible
-`priority: YOUR CALL — it reverses the 2026-08-11 one-numeric-convention sign-off (DESIGN.md), whose premise it
-falsifies · kind: defect · 2026-09-25`
-The BAM scan's workers pull batches from one queue in whatever order they finish, each sums its own float64 fraction
-banks (`contained_inv_opportunity_sum`, `unspliced_inv_length_sum`, `unspliced_mass`, `spliced_mass`, the sj
-`inv_length_sum` and `mass`), and the merge adds the workers' sums — so the tally's last bits change from run to run
-at ANY scan thread count above one, not only across counts as the sign-off records. Its premise was that this wander
-reaches the deliverable at ~1e-11; the EM's forks carry it into whole fragments. MEASURED at `g50 ss.99 OFF`
-(`~/Downloads/rigel_runs/prototypes/2026-09-26_repro/FINDINGS.md`, two runs, EM on one thread, fractional): the six
-banks differ at ~1e-15 (up to 17,589 of 35,041 cells), 64 loci's gDNA prior at ~3e-16, then 317 transcripts by up to
-0.88 fragments and nascent parent counts by up to 42 (Σ 95); with the scan on one thread all 214 stage arrays repeat
-bit for bit with calibration and the EM on every core, so nothing else varies from run to run. A PROTOTYPE
-(`~/proj/rigel-exact`, 3 files) keeps each fraction cell as an EXACT sum: every nonzero deposit is a double in
-[2^-33, 1], so a whole number of 2^-94 units, held in an unsigned 128-bit integer (34 integer bits hold the 2^33
-deposits two uint32 count columns can feed one cell) and rounded once on export — more accurate than the float sum,
-where the fixed point refused then (a 2^-32 grid in uint64) was less. On it the fraction banks are bit-identical under
-sharding and shuffling and at 1/2/4/8 scan workers (both gates fail on the shipped build), and the whole pipeline at
-the DEFAULT thread budget repeats 213 of 214 arrays, the one left being the scan buffer's row order, which is
-canonicalised before use. Landing it moves the answer once by about one run-to-run spread (transcripts Σ 1.5
-fragments, nascent parents Σ 62 at that condition) and then holds it. Costs: memory +16 B per region and +24–32 B per
-boundary and sj (~50 MB per accumulator at human scale, one per scan worker); scan time unmeasured (the machine was
-loaded); the specification `_accumulator_reference.py` must sum exactly too (`fractions.Fraction`, correctly rounded),
-or the two native parity gates fail in the last bit, as they do on the prototype. Until then, pin
-`scan.total_threads=1` wherever two runs must agree bit for bit (`TRAPS:
-the-deliverable-is-not-reproducible-by-default`).
-
 ### the-junction-price-is-noisy-within-a-gene
 `priority: PARKED — the sum is accepted for now (owner, 2026-09-23); the pseudocount's odds are fixed since (2026-09-24, ISSUES: the-pseudocount-prior-is-biased-toward-gdna, CLOSED) · kind: defect · 2026-09-23`
 SIZED 2026-09-24 (the g98 dissection's g50 contrast, `~/Downloads/rigel_runs/prototypes/2026-09-24_g98_dissection/`): with every length on its
@@ -278,25 +252,6 @@ toward RNA that no strength may be chosen to cover. The owner's framing (2026-09
 locus's gDNA FRACTION, and a multiplier converts it to pseudocounts; that multiplier depends on the number of gDNA
 candidates and their likelihoods. Today it is the count of units whose gDNA candidate survives pruning (`U`), and
 the pruning (`DESIGN.md` §3.1d) is what stops a unit with a vanishing gDNA reading from counting.
-
-### whole-counts-by-rounding-then-assigning
-`priority: HIGH — after the tool's other accuracy fixes land (owner, 2026-09-25) · kind: design · 2026-09-25`
-Whole-count mode (`assignment_mode="sample"`) gives each fragment to one transcript, drawn from its posterior after
-every candidate under 1 % (`assignment_min_posterior`) is zeroed, to keep noise isoforms from collecting whole
-counts. On one fragment a real minority and noise look the same — a small share — so the floor takes a minor
-isoform, a gene's unspliced RNA or low gDNA off every fragment it shares with a dominant candidate: off capture the
-synthetic pool loses 16–29k fragments, transcript error rises 15–23 % and gene error 2.0–2.7× (fractional mode is
-untouched; `~/Downloads/rigel_runs/prototypes/2026-09-24_cut_inventory/`). A cutoff relative to the best candidate
-(the owner's first idea) spares a fragment with many near-equal candidates but not this. The design (owner: "I like
-it in theory"): COUNT FIRST — each component's EM expected count, rounded within its locus so the locus total is
-exact (a transcript expecting 0.3 fragments gets 0, one expecting 300 gets 300) — THEN ASSIGN each transcript that
-many fragments, the ones it most plausibly produced (a transport problem over the unit posteriors, per locus). Every
-fragment still goes to exactly one transcript, with no seed. The rounding half is measured
-(`~/Downloads/rigel_runs/prototypes/2026-09-25_floor_study/`): transcripts reported for zero-truth isoforms 4,186 →
-196 at `g05 ss.99 OFF` and 4,704 → 403 at `g50 ss.99 ON`, with transcript and gene error unchanged. The assignment
-half needs a design and a C++ prototype, then an A/B against today's floor and a relative cutoff. False-positive
-MASS (90–96 % of it in a few dozen to a few hundred transcripts that each take a small share of many fragments) is
-the EM's own and no assignment rule separates it from a real minority.
 
 ### the-efficiency-posterior-floor-on-empty-pieces
 `priority: MEDIUM — the unprobed class's scale at low gDNA; its EM cost unmeasured · kind: defect · 2026-09-23`
@@ -745,6 +700,115 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### whole-counts-optimised-assignment
+REFUSED 2026-09-26 (owner): the draw is kept. An assignment chosen for the most reads on their true origin under the
+same counts wins reads and loses where they came from. The owner's framing had been: the draw a WARM START, the
+repair a FEASIBILITY step (count error zero, `EQUATIONS.md` 13.3–13.4), and what is left an OPTIMISATION over
+feasible assignments, wanted with a proof of what it reaches and a stated cost. The exact optimum was derived, built
+and priced (`EQUATIONS.md` §13.5: prices, then shortest augmenting paths; exact by construction, certified by its own
+dual). Prototype in
+`~/Downloads/rigel_runs/prototypes/2026-09-26_whole_counts/` (`opt.c`, `exact.py`, `fidelity.py`): 9,000 random
+loci equal brute-force enumeration, and dropping or corrupting the price update, or moving the wrong fragment, fails
+that gate. MEASURED on two full libraries, the counts identical under every method (`g05 ss.99`, capture OFF / ON,
+9.2 M fragments each):
+
+| | reads on their true origin | reads misplaced by class | time |
+|---|---|---|---|
+| the fractional posterior (the model's own floor) | 66.53 / 72.41 % (expected) | 8.13 / 4.86 % | — |
+| the draw (ships) | 66.53 / 72.43 % | 8.45 / 5.01 % | 0.4 / 0.2 s |
+| the optimum, most reads expected correct (`Σ p`) | 68.09 / 74.07 % | 24.20 / 18.38 % | 130 / 7 s |
+| the optimum, most probable (`Σ log p`) | 67.44 / 73.14 % | 16.09 / 11.29 % | 106 / 5 s |
+
+"Misplaced by class" is `½ Σ |assigned − true|` over (candidate set, component) cells: whether each component's reads
+come from where its reads really came from. An optimum is a vertex of the transportation polytope, so it hands groups
+of look-alike fragments to one component instead of sharing them out — its gain and its cost are the same act. The
+draw is the posterior sampled with the counts held, within 0.15–0.32 points of the model's own floor. The 130 s is
+one locus (737 k fragments over 521 components, a median 47 effective candidates each: ten Gauss–Seidel sweeps still
+left 334 k excess, then 110 s of shortest paths); a two-scale solve (the candidate-set classes first, then the
+fragments) is designed and not built. REFUSED on the way: the auction algorithm with ε-scaling, which re-bid all
+9.2 M fragments at each of six ε stages while near-identical fragments raised prices by ε per bid; it was stopped
+after 25 minutes without finishing its first library. Greedy shortcuts do not substitute either: a greedy quota fill
+strands 52–95 k fragments per library, and taking the largest re-weighted candidate instead of drawing strands
+23–28 k. The draw's shortfall per read is the price of calibration, and an annotated BAM is read for where each
+transcript's reads are.
+
+### whole-counts-by-rounding-then-assigning
+FIXED 2026-09-25 (`DESIGN.md` §3.1f; `em_solver.cpp`'s `assign_posteriors`; gates `tests/test_estimator.py`'s
+`TestWholeCounts`, 14 cases). Whole-count mode gave each fragment to one transcript, drawn from its posterior after every
+candidate under 1 % of THAT fragment was zeroed, to keep noise isoforms from collecting whole counts — but on one
+fragment a real minority and noise look alike, so the floor took a minor isoform, a gene's unspliced RNA or low gDNA off
+every fragment it shared (off capture +24 to +35 % transcript and 2.3–3.4× gene error against fractional). Now COUNT
+FIRST: every component's fractional count, the locus's gDNA included, is rounded within its EM locus by largest
+remainder; each fragment is drawn from its own posterior re-weighted by (count still owed ÷ posterior mass still to
+come); a fragment the draw leaves with every candidate full is repaired onto the counts by a breadth-first chain of
+moves, each fragment only to another of its own candidates. The whole counts ARE the rounded fractional counts,
+whatever the seed, whenever that rounding is reachable; where it is not (Hall's condition fails — two components one
+fragment can reach, both rounded up), a fallback of the same augmenting paths settles every count within one of its
+fractional count, which is always reachable. The derivation — termination, the success condition, the cost, and the
+optimality it gives up — is `EQUATIONS.md` §13. The fallback was added after a search found the exact-target repair
+alone leaving a count two from its expectation; on 30,000 draws over 6,000 small loci built around an unreachable
+core (exact targets unreachable in 9,310), no count left its floor or ceiling and no locus total moved.
+`assignment_mode="map"` and `assignment_min_posterior` are deleted (owner). The gates hold the counts
+to an independent largest-remainder reference on four loci (one ordered so the draw strands and the repair must work;
+one where every remainder is under a half, so rounding each count alone would lose a fragment), a minority under 1 % on
+every fragment keeping its count, a transcript expecting under half a fragment getting none, seed-independent counts
+with seed-dependent fragments, every fragment on one of its own candidates, and — for identical fragments — the first
+and the last drawn with the same odds (the draw is an urn). Each of six perturbations fires its own gates: the old
+floor, no repair, rounding each count alone, no re-weighting, no randomness, and a lost per-read output. LADDER, the
+shipped whole counts against fractional (all 16, `~/Downloads/rigel_runs/prototypes/2026-09-26_whole_counts/ladder/`):
+transcript Σ|Δ| −0.02 / +0.04 / −0.01 % (stranded OFF / stranded ON / unstranded OFF), genes −0.04 / −0.00 / −0.13 %,
+every condition within ±0.07 % on transcripts and ±0.32 % on genes, the gDNA pool within 51 fragments; transcripts
+reported for zero-truth isoforms 3,707–5,849 → 123–537. Fractional output is bit-identical (the goldens regenerate
+unchanged). The design was measured first (`~/Downloads/rigel_runs/prototypes/2026-09-26_whole_counts/`, every EM fragment's posterior dumped
+and joined to its true origin): the draw alone — before the repair — landed transcripts within 0.3 % of fractional;
+a greedy quota fill stranded 52–95k fragments per library, and the exact optimum, priced in
+`ISSUES: whole-counts-optimised-assignment`, trades region fidelity for reads assigned correctly.
+The earlier record: Whole-count mode (`assignment_mode="sample"`) gives each fragment to one transcript, drawn from
+its posterior after every candidate under 1 % (`assignment_min_posterior`) is zeroed, to keep noise isoforms from
+collecting whole counts. On one fragment a real minority and noise look the same — a small share — so the floor takes
+a minor isoform, a gene's unspliced RNA or low gDNA off every fragment it shares with a dominant candidate: off
+capture the synthetic pool loses 16–29k fragments, transcript error rises 15–23 % and gene error 2.0–2.7× (fractional
+mode is untouched; `~/Downloads/rigel_runs/prototypes/2026-09-24_cut_inventory/`). A cutoff relative to the best
+candidate (the owner's first idea) spares a fragment with many near-equal candidates but not this. The design (owner:
+"I like it in theory"): COUNT FIRST — each component's EM expected count, rounded within its locus so the locus total
+is exact (a transcript expecting 0.3 fragments gets 0, one expecting 300 gets 300) — THEN ASSIGN each transcript that
+many fragments, the ones it most plausibly produced (a transport problem over the unit posteriors, per locus). Every
+fragment still goes to exactly one transcript, with no seed. The rounding half is measured
+(`~/Downloads/rigel_runs/prototypes/2026-09-25_floor_study/`): transcripts reported for zero-truth isoforms 4,186 →
+196 at `g05 ss.99 OFF` and 4,704 → 403 at `g50 ss.99 ON`, with transcript and gene error unchanged. The assignment
+half needs a design and a C++ prototype, then an A/B against today's floor and a relative cutoff. False-positive MASS
+(90–96 % of it in a few dozen to a few hundred transcripts that each take a small share of many fragments) is the EM's
+own and no assignment rule separates it from a real minority. THE ASSIGNMENT HALF, PROTOTYPED 2026-09-25
+(`~/Downloads/rigel_runs/prototypes/2026-09-26_whole_counts/`, `summary.txt`): every EM fragment's posterior row
+dumped from the solver (it re-sums to `count_em` to 7e-8) and joined to its true origin by read name, on `g05` and
+`g50` of the three in-scope strata. Quotas are each component's fractional count (transcripts and the locus's gDNA)
+rounded within the locus. The COUNT-EXACT DRAW — one pass, each fragment drawn from its posterior re-weighted by
+(quota left ÷ posterior mass left) per candidate, a fragment whose candidates are all full keeping its best — lands
+transcripts within +0.19 to +0.26 % of fractional off capture and −0.03 to 0.00 % on it, genes +2.0 to +4.1 % off
+capture and −0.3 % on it (the 916–2,634 fragments per library it could not place), reports 190–400 zero-truth
+transcripts against fractional's 4,186–4,704, gives each read a draw from its own posterior (reads correct = the
+posterior's own expectation, 65.2–78.4 %), and runs in 0.3–0.5 s per library; visiting each locus's fragments in a
+random order changes nothing (the simulator's BAM is grouped by origin). Against it: today's floor +24.5 to +35.5 %
+transcripts and 2.3–3.4× genes off capture (+1.6 to +3.2 % / +6 to +45 % on); the relative cutoff +16 to +23 % /
+1.9–2.9×; a plain draw, with or without dust removed, +5.6 to +7.6 % / +13 to +16 %; a greedy quota fill strands
+52–95k fragments per library (their candidates already full) and costs +40 to +53 %; taking the largest re-weighted
+candidate instead of drawing strands 23–28k and costs +7.6 to +13.9 %; the argmax assigns 72–85 % of reads correctly
+but multiplies transcript error 5–20×. The optimum under the same counts is priced in
+`ISSUES: whole-counts-optimised-assignment`.
+
+### the-scan-fraction-banks-are-not-reproducible
+REFUSED 2026-09-25 (owner): bit-identical results are not a goal for now; the tally keeps its float sums and the
+scan's thread noise is accepted. The facts it was refused with: the scan's workers take batches from one queue as
+they finish and each sums its own float64 fraction banks, so the last bits change from run to run at any scan thread
+count above one; at `g50 ss.99 OFF` (two runs, EM on one thread, fractional) the six banks differ at ~1e-15, 64 loci's
+gDNA prior at ~3e-16, and the EM's forks carry that to 317 transcripts by up to 0.88 fragments and nascent parents by
+up to 42; with the scan on one thread all 214 stage arrays repeat bit for bit
+(`~/Downloads/rigel_runs/prototypes/2026-09-26_repro/FINDINGS.md`). The repair priced: exact sums (every deposit a
+whole number of 2^-94 units in an unsigned 128-bit integer, rounded once on export) made the whole pipeline repeat at
+the default thread budget (213 of 214 arrays; the last is the buffer's row order), moved the answer once by about one
+run-to-run spread, and cost ~50 MB per scan worker at human scale plus an exact-summing specification
+(`exact_sum.patch` beside the findings). `--threads 1` gives bit-identical output (`MANUAL.md`).
 
 ### the-minus-strand-coverage-weight-sat-one-fragment-length-off
 FIXED 2026-09-25 (`scoring.cpp`'s `coverage_weight`; gate `tests/test_pipeline_routing.py`: every fragment's weight
