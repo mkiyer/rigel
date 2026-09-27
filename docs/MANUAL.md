@@ -171,7 +171,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 |------|---------|-------------|
 | `--include-multimap` / `--no-include-multimap` | on | Include multimapping reads |
 | `--keep-duplicates` / `--no-keep-duplicates` | off | Keep reads marked PCR/optical duplicates |
-| `--sj-strand-tag TAG [...]` | `auto` | Splice-junction strand tag. `auto` detects from the first 10,000 reads; use `XS` (STAR/HISAT2), `ts` (minimap2), or list several to try in order (e.g. `XS ts`). |
+| `--sj-strand-tag TAG [...]` | `auto` | Splice-junction strand tag. `auto` detects from the first 1,000 spliced reads; use `XS` (STAR/HISAT2), `ts` (minimap2), or list several to try in order (e.g. `XS ts`). |
 
 **Model parameters**
 
@@ -203,7 +203,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 | `--overhang-alpha A` | `0.1` | Per-base overhang penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
 | `--mismatch-alpha A` | `0.1` | Per-mismatch (`NM` tag) penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
 | `--pruning-min-posterior P` | `1e-4` | Minimum posterior for candidate pruning. Lower keeps more candidates; `0` disables pruning. |
-| `--splicing-anchor-tolerance K` | `3` | Resolver-side splicing-anchor tolerance (bp) around annotated introns. The fractional calibration accumulator does not interpret this value. |
+| `--splicing-anchor-tolerance K` | `3` | Resolver-side splicing-anchor tolerance (bp) around annotated introns. The fractional calibration accumulator does not interpret this value, and it is not the splice blacklist's anchor test, which it never changes. |
 | `--emit-locus-stats` | off | Write per-locus EM convergence profiling (iteration counts, timing, equivalence-class stats) to `locus_stats.feather` |
 
 ### rigel sim
@@ -571,7 +571,7 @@ skipped duplicates) are written through unchanged without annotation tags.
 | `ZC` | string | Input-ambiguity class: `unambig`, `ambig_same_strand`, `ambig_opp_strand`, `multimapper`; `.` for records not scored by the EM |
 | `ZH` | int | Primary-hit flag: `1` for the winning alignment, `0` otherwise (reflects rigel's EM assignment, which may differ from the aligner's primary FLAG) |
 | `ZN` | int | Number of competing candidate components |
-| `ZS` | string | Splice type: `spliced_annot`, `spliced_unannot`, `unspliced`, or `unknown` |
+| `ZS` | string | Splice type: `spliced_annot`, `spliced_unannot`, `spliced_implicit`, `splice_artifact`, `unspliced`, or `unknown` |
 | `ZL` | int | Locus ID (`-1` if no locus) |
 | `ZB` | int | Number of SJs in **this record's CIGAR** matched to the splice-artifact blacklist and treated as unspliced during scoring. Record-local. Always `0` when no blacklist is loaded. Summed over the BAM it equals the Pass-1 stat `n_sj_blacklisted`. |
 

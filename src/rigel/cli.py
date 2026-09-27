@@ -1174,7 +1174,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         default=None,
         help="BAM tag(s) for splice-junction strand (default: auto). "
-        "'auto' detects the tag from the first 10,000 reads. "
+        "'auto' detects the tag from the first 1,000 spliced reads. "
         "Use 'XS' for STAR, 'ts' for minimap2, or list multiple "
         "tags to check in order (e.g. XS ts).",
     )

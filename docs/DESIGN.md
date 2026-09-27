@@ -729,7 +729,7 @@ population known to be one component, so nothing is estimated from the fragments
 | `DNA_INTRONIC` | contained in exactly one intronic region | gDNA |
 | `DNA_INTRON_EXON` | crosses exactly one boundary, flanks {intron, exon} | gDNA |
 | `DNA_INTERGENIC_EXON` | crosses exactly one boundary, flanks {intergenic, exon} | gDNA |
-| `RNA_SPLICED` | used an annotated sj, splice observed | RNA |
+| `RNA_SPLICED` | used an annotated sj on its one surviving path, sequenced or implied | RNA |
 
 There is deliberately no pool for an exonic contained fragment or a multi-boundary crossing — those are
 mixtures. The pool is keyed on DETERMINACY, not provenance: a fragment enters when exactly one hypothesis
