@@ -204,41 +204,6 @@ per-entity diagnostics do. The decision is whether the index should merge them
 (one span per gene per strand) or the scoring should. `quant_accuracy.py`, the per-family scoring in
 `~/Downloads/rigel_runs/prototypes/2026-09-20_siphon_mechanism/`.
 
-### rna-prior-floor-at-pure-gdna-loci
-`priority: NEXT — the owner's residual pass (2026-09-24): the largest owner of g98's gDNA error · kind: defect · 2026-09-20`
-DISSECTED AGAIN 2026-09-24 on the count form, against per-fragment truth (four lenses, a synthesis and two refuters;
-`~/Downloads/rigel_runs/prototypes/2026-09-24_g98_dissection/`). The read-out is the posterior MEDIAN of λ (`simplex_logodds.posterior_median_fg`,
-`psi_kernel.h`, `DESIGN.md` §6c), not a mean: under the Jeffreys reference with no atom at zero RNA, an object whose
-true RNA is below its resolution `1/√(n·I)` reads about 0.42·√(n/I) fragments of RNA, always toward RNA (measured
-0.21–0.28·√n stranded, 0.32–0.37·√n unstranded; the stranded/unstranded ratio 0.721 against the Fisher-information
-ratio 0.714). It is per OBJECT, and 78–85 % of calibration's count error sits on objects with no RNA, mostly INSIDE
-expressed loci; pure-gDNA loci hold only −3.9k / −5.5k / −9.7k. The EM passes the count through at g98 (per-locus
-slope 0.90–1.00), and off capture it lands in synthetic spans at introns. Size (the truth restored on no-RNA objects
-alone): gDNA −36.7k → −4.7k at `g98 ss.99 OFF`, −61.6k → −12.3k at `g98 ss.50 OFF`; about 47k at `g98 ss.99 ON` once
-`ISSUES: the-gdna-length-law-falls-back-at-identical-purities` is separated out. Its transcript cost is small (1.3k
-of 1.8k at ss.99 OFF, none at ss.50 OFF). The repair: an atom at zero RNA whose weight is the population's own
-no-RNA share, fitted by marginal likelihood across objects (no constant), and a CONTINUOUS read-out — a median of a
-posterior carrying an atom is a yes/no cut — which amends the §6c median ruling: the owner's decision. A test bar
-must be stated per `n`: at an atom weight of 0.75 the floor falls about 74 % at n = 10 and 89 % at n = 1,000.
-The history below measured the pre-count-form RNA pseudocount; its "posterior MEAN" is corrected above.
-`rna_prior_count` over-states by +64.5 % at `g98 ss.99 ON` (180,806 against 109,915) and +32.4 % at
-`g98 ss.99 OFF`, and it is a diffuse positive floor, not a few loci: 1,089 of 1,149 loci read high and 55k
-of the 73k excess sits in loci that are over 99 % gDNA where the true RNA is 544 fragments over 867 loci.
-DISSECTED per object (2026-09-20, `g98 ss.99 ON`): on the 14,280 regions holding gDNA and NO RNA the
-calibration places 19,538 RNA fragments, on 97 % of them, and the floor is per OBJECT and grows roughly as
-the square root of the object's gDNA — a median 0.14 fragments on regions of 1–10 gDNA (11.6 % of their
-gDNA), 1.8 at 100–1,000 (1.2 %), 26 at 10,000+ (0.19 %) — the signature of a posterior MEAN of a composition
-whose likelihood sits at the boundary `f_r = 0` with a width `~1/√n` (`TRAPS: zero-target-guards-are-one-sided`).
-Most of the mass is on BOUNDARIES: 231,410 RNA incidences against 63,972 true, +85,112 on boundaries with
-no RNA at all (1.6 % of their gDNA incidences) and +82,326 on mixed ones; regions carry +24,291. ⛔ NOT a
-constant fraction and NOT a cheap fix: it is the composition solve's estimator at a pure-gDNA object — a
-posterior mean cannot read zero — so the repair is an atom at `f_r = 0` in ψ's hypothesis space (the tilt
-already carries {pure +, pure −, mixed}; the composition does not) or a different estimand there, a solver
-design item, and it lives at the stress rung (at `g50` the same floor is +4,309 on 519 near-pure loci,
-0.15 % of the RNA, invisible in the pool). `prior_vs_oracle.py`, `calibration_vs_oracle.py`,
-`solvability_audit.py` (the confidently-wrong class). It is why the per-transcript allocation made `g98`
-capture-ON worse before the gDNA opportunity was corrected (`ISSUES: per-transcript-prior-lane`).
-
 ### nascent-stress-sensitivity
 `priority: next — it sizes `ISSUES: em-overturns-the-calibrated-gdna-split` · kind: question · 2026-08-22`
 Does any in-scope verdict depend on the nascent stress level? The ladder runs `on_fraction 0.50`; realistic is
@@ -542,6 +507,109 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### rna-prior-floor-at-pure-gdna-loci
+CLOSED 2026-09-26 (owner) for 0.8.0, to be reopened only with a fundamentally different algorithm. The prize is real —
+a perfect calibration prior takes `g98 ss.99 ON` from 25.26 to 19.99 % of the transcripts' true count — but neither
+mechanism built for it improves an in-scope stratum without costing another: a no-RNA state read out beside the solve
+(`ISSUES: a-no-rna-state-read-beside-the-solve`, refused as a design) and end states inside the solve
+(`ISSUES: no-rna-and-no-gdna-end-states-in-psi`, refused at the A/B). What a new approach has to answer, from both:
+the weight of "no RNA" at an object must come from evidence whose precision grows with depth, and on unstranded data
+an object's strand term carries none (`DESIGN.md` §6b.1); it must not pull objects holding 1–50 % RNA to "no RNA",
+where both overshot; and what it changes reaches every contracted length through the capture efficiencies, so it is
+judged on the capture-ON rows as well as the pools. The entry as it stood
+(`priority: NEXT — the owner's residual pass (2026-09-24): the largest owner of g98's gDNA error · kind: defect · 2026-09-20`):
+DISSECTED AGAIN 2026-09-24 on the count form, against per-fragment truth (four lenses, a synthesis and two refuters;
+`~/Downloads/rigel_runs/prototypes/2026-09-24_g98_dissection/`). The read-out is the posterior MEDIAN of λ (`simplex_logodds.posterior_median_fg`,
+`psi_kernel.h`, `DESIGN.md` §6c), not a mean: under the Jeffreys reference with no atom at zero RNA, an object whose
+true RNA is below its resolution `1/√(n·I)` reads about 0.42·√(n/I) fragments of RNA, always toward RNA (measured
+0.21–0.28·√n stranded, 0.32–0.37·√n unstranded; the stranded/unstranded ratio 0.721 against the Fisher-information
+ratio 0.714). It is per OBJECT, and 78–85 % of calibration's count error sits on objects with no RNA, mostly INSIDE
+expressed loci; pure-gDNA loci hold only −3.9k / −5.5k / −9.7k. The EM passes the count through at g98 (per-locus
+slope 0.90–1.00), and off capture it lands in synthetic spans at introns. Size (the truth restored on no-RNA objects
+alone): gDNA −36.7k → −4.7k at `g98 ss.99 OFF`, −61.6k → −12.3k at `g98 ss.50 OFF`; about 47k at `g98 ss.99 ON` once
+`ISSUES: the-gdna-length-law-falls-back-at-identical-purities` is separated out. Its transcript cost is small (1.3k
+of 1.8k at ss.99 OFF, none at ss.50 OFF). The repair: an atom at zero RNA whose weight is the population's own
+no-RNA share, fitted by marginal likelihood across objects (no constant), and a CONTINUOUS read-out — a median of a
+posterior carrying an atom is a yes/no cut — which amends the §6c median ruling: the owner's decision. A test bar
+must be stated per `n`: at an atom weight of 0.75 the floor falls about 74 % at n = 10 and 89 % at n = 1,000.
+The history below measured the pre-count-form RNA pseudocount; its "posterior MEAN" is corrected above.
+`rna_prior_count` over-states by +64.5 % at `g98 ss.99 ON` (180,806 against 109,915) and +32.4 % at
+`g98 ss.99 OFF`, and it is a diffuse positive floor, not a few loci: 1,089 of 1,149 loci read high and 55k
+of the 73k excess sits in loci that are over 99 % gDNA where the true RNA is 544 fragments over 867 loci.
+DISSECTED per object (2026-09-20, `g98 ss.99 ON`): on the 14,280 regions holding gDNA and NO RNA the
+calibration places 19,538 RNA fragments, on 97 % of them, and the floor is per OBJECT and grows roughly as
+the square root of the object's gDNA — a median 0.14 fragments on regions of 1–10 gDNA (11.6 % of their
+gDNA), 1.8 at 100–1,000 (1.2 %), 26 at 10,000+ (0.19 %) — the signature of a posterior MEAN of a composition
+whose likelihood sits at the boundary `f_r = 0` with a width `~1/√n` (`TRAPS: zero-target-guards-are-one-sided`).
+Most of the mass is on BOUNDARIES: 231,410 RNA incidences against 63,972 true, +85,112 on boundaries with
+no RNA at all (1.6 % of their gDNA incidences) and +82,326 on mixed ones; regions carry +24,291. ⛔ NOT a
+constant fraction and NOT a cheap fix: it is the composition solve's estimator at a pure-gDNA object — a
+posterior mean cannot read zero — so the repair is an atom at `f_r = 0` in ψ's hypothesis space (the tilt
+already carries {pure +, pure −, mixed}; the composition does not) or a different estimand there, a solver
+design item, and it lives at the stress rung (at `g50` the same floor is +4,309 on 519 near-pure loci,
+0.15 % of the RNA, invisible in the pool). `prior_vs_oracle.py`, `calibration_vs_oracle.py`,
+`solvability_audit.py` (the confidently-wrong class). It is why the per-transcript allocation made `g98`
+capture-ON worse before the gDNA opportunity was corrected (`ISSUES: per-transcript-prior-lane`).
+
+### a-no-rna-state-read-beside-the-solve
+REFUSED 2026-09-26 by the owner, as a design: a second solver on top of the first. The fix belongs in the solve, which
+should be able to say "no RNA" itself, and it must leave the tool simpler. Kept as the measurement of the prize of
+`ISSUES: rna-prior-floor-at-pure-gdna-loci` (closed). The mechanism
+(`~/Downloads/rigel_runs/prototypes/2026-09-24_zero_rna_atom/`, measured through the EM in
+`~/Downloads/rigel_runs/prototypes/2026-09-26_zero_atom_em/`): a no-RNA state per object, its weight fitted per
+annotation class by marginal likelihood, read as `P0 + (1 − P0)·median`, computed on the pipeline's own final sweep
+and handed ONLY to the EM's prior gDNA count; calibration, its landscape and training, and every length as shipped.
+All 16 rows, fractional, each against a fresh shipped run and a replicate that gives the row's own floor (0–59
+transcript fragments). Transcripts % shipped → with it (perfect calibration prior): stranded OFF 1.988 → 1.979
+(1.970), stranded ON 6.203 → 6.150 (6.149), unstranded OFF 2.010 → 2.017 (1.987); genes 0.207 → 0.202, 1.594 → 1.547,
+0.238 → 0.249; the deferred stratum 10.28 → 9.80 (9.26). Per row: `g98 ss.99 ON` 25.26 → 20.14 % (19.99), genes
+15.03 → 11.06; `g98 ss.99 OFF` 15.14 → 14.72 (14.25); `g50 ss.99 ON` 6.13 → 6.06 (6.07); `g50 ss.99 OFF` −1,262
+fragments; every `g00` row's prior unchanged (the fitted weight is 0 there) and its table within 52 transcript
+fragments, run-to-run noise that one replicate under-reads; `g05 ss.99 ON` +760 transcript fragments (genes −172);
+`g98 ss.50 OFF` WORSE, 16.88 → 17.62 %, genes 5.66 → 6.95 %. The price: it only ever raises gDNA and it overshoots on
+objects holding 1–50 % RNA (in fragments, `g50 ss.99 ON` 1–10 % band |error| 40.7k → 50.6k, 10–50 % 38.9k → 44.5k;
+`g98 ss.99 ON` signed +4.5k → +26.1k and +1.1k → +3.8k), which lands on the synthetic spans (est ÷ true
+`g98 ss.99 OFF` 1.88 → 0.36, `g98 ss.50 OFF` 2.52 → 0.27, `g50 ss.99 ON` 0.91 → 0.77). On unstranded data the strand
+term cancels and the weight is read from the density terms alone, which is where it loses (capture OFF; the deferred
+unstranded capture-ON stratum gains). Unmeasured: realistic nascent (on_fraction 0.10) at `g98`.
+
+### no-rna-and-no-gdna-end-states-in-psi
+REFUSED 2026-09-26 at the A/B; the owner closed the thread for 0.8.0. The owner's fix at the source: ψ's gDNA-fraction
+axis given its two end states — "no RNA" (`f_g = 1`) and "no gDNA" (`f_g = 0`) — beside its continuum, each at the
+continuum's reference mass, as the strand axis carries "all RNA on +" and "all RNA on −" (`DESIGN.md` §6b.15.13); in
+the final solve of every sweep only; read out as each state's answer weighted by its posterior, the §6c median inside
+the continuum. A C++ prototype in a worktree, switched off bit-identical to shipped on all 30 calibration arrays
+through three refits at `g05 ss.50 OFF` and `g98 ss.99 ON`
+(`~/Downloads/rigel_runs/prototypes/2026-09-26_presence_states/`: `DERIVATION.md`, `README.md`, and
+`presence_states.patch`, the diff against `062bc9ea`).
+Calibration against the oracle (region + boundary |gDNA error|, `g05`–`g98`): stranded OFF −14.8 %, stranded ON
+−10.1 %, unstranded OFF −12.1 %, but `g05 ss.99 ON` +6.3 % (80.7k → 85.8k), `g50 ss.99 ON` +1.4 % and `g50 ss.50 OFF`
++1.2 % (the deferred `g05 ss.50 ON` +94.7 %); the `g00` controls stranded 353 → 80 (OFF) and 329 → 44 (ON), unstranded
+366 → 552 (OFF) and 266 → 299 (the deferred ON); the "no RNA" state alone takes those two unstranded `g00` rows to
+74,442 and 70,536.
+Through the EM (fractional; transcripts / genes as a % of truth per stratum, shipped → this, the perfect calibration
+prior in brackets): stranded OFF 1.988 → 1.975 (1.970) / 0.207 → 0.202; stranded ON 6.203 → 7.026 (6.149) / 1.594 →
+1.778; unstranded OFF 2.010 → 2.013 (1.987) / 0.238 → 0.245; the deferred stratum 10.28 → 18.88. Per row:
+`g98 ss.99 ON` 25.26 → 21.73 % (19.99), genes 15.03 → 11.53; `g05 ss.99 ON` 5.56 → 7.78 %, genes 0.59 → 1.16 (+204k
+transcript fragments against a replicate floor of 25); the deferred `g05 ss.50 ON` 11.03 → 34.19 %.
+Why it fails. (1) The transcript table's harm runs through the capture efficiencies, and so through every contracted
+length: with the efficiencies and the capture reference held at the switched-off values, `g05 ss.99 ON`'s +204k
+transcript fragments fall to −13 (floor 25), the deferred `g05 ss.50 ON`'s +2.13M to −230, and `g98 ss.99 ON` reads
+21.42 %; the pools do not all return — at the deferred `g05 ss.50 ON` the counts alone move gDNA into the synthetic
+spans (gDNA 391k → 251k, truth 500k; spans 380k → 520k, truth 285k). At `g05 ss.99 ON` 1,635 objects' efficiencies
+move by more than 0.05 (up to 0.75), and objects holding 10–50 % RNA (median count 33) take P(no RNA) > ½ 31 % of the
+time. (2) Three states at equal weight give each end even prior odds against the whole continuum, above the no-RNA
+share the record fitted by marginal likelihood (`ISSUES: a-no-rna-state-read-beside-the-solve`) on every class at
+`g00` and `g05` and at `g50` OFF, and on all but the intron classes at `g50 ss.99 ON`: 0 at `g00`, ≤ 0.024 at `g05`
+OFF, 0–0.497 at `g05 ss.99 ON`, ≤ 0.43 at `g50` OFF. (3) On unstranded data the strand term is ½ in every state, so
+the states are decided by terms whose precision does not grow with depth — the landscape's density and one-sided level
+rows — and the fixed weight is the answer at every depth, the pattern `DESIGN.md` §6b.1 refuses. (4) A one-sided row
+read at its held end favours the end state it does not bound, and the "no gDNA" state reads the landscape's density at
+its floor cell as the mass of a point (`TRAPS: a-ratio-cannot-carry-zero`). (5) The published `f_g` mixes the states
+while its `Var(log f_g)` stays the continuum's, so the landscape trains on a pair that no longer matches. Not built:
+the weight learned per class in the refit loop — the fitted shares are near 0 where the states help least and reach
+~0.5 on the intron boundaries at `g05 ss.99 ON`, where the harm is.
 
 ### the-gdna-length-law-falls-back-at-identical-purities
 CLOSED 2026-09-26 by the fix, in the working tree for the owner's commit (`calibration/fl.py`,

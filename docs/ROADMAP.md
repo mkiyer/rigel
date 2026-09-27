@@ -31,7 +31,8 @@ multimappers are deferred features.
 - **Library gDNA fraction**: calibration's is accurate on the three in-scope strata and structurally blind on
   the deferred one — `solvability_audit.py`, `policy_benchmark.py --by-class`; the EM's pseudocounts are
   neutral in their odds, and at `g98` the transcript table leans toward RNA through calibration's RNA floor and
-  the capture likelihood — `quant_accuracy.py` (the pools per row), `ISSUES: rna-prior-floor-at-pure-gdna-loci`.
+  the capture likelihood — `quant_accuracy.py` (the pools per row); the RNA floor is closed for 0.8.0 until a
+  fundamentally different algorithm (owner, 2026-09-26), `ISSUES: rna-prior-floor-at-pure-gdna-loci`.
 - **The deliverable, end to end**: measured per stratum on the rebuilt ladder under the shared length; stranded ×
   capture-ON is the worst in-scope stratum and its capture-aware lengths own most of it — the junction price's
   structure, closed for now at diminishing returns (owner, 2026-09-26) — then the capture likelihood's lean toward RNA (the
@@ -70,10 +71,9 @@ multimappers are deferred features.
 
 ## Next — the order
 
-1. **The residuals, one issue at a time** (owner, 2026-09-24): the capture likelihood's lean toward RNA, then
-   calibration's RNA floor at pure-gDNA loci (`ISSUES: rna-prior-floor-at-pure-gdna-loci`) and the pseudocount's
-   strength (`ISSUES: the-pseudocount-strength-is-not-derived`), each judged on the pools per row first and the
-   transcript table second, the zero controls beside. Then the deferred features: splicing artifacts
+1. **The residuals, one issue at a time** (owner, 2026-09-24): the capture likelihood's lean toward RNA, then the
+   pseudocount's strength (`ISSUES: the-pseudocount-strength-is-not-derived`), each judged on the pools per row
+   first and the transcript table second, the zero controls beside. Then the deferred features: splicing artifacts
    (`ISSUES: splicing-artifacts`) and multimappers (`ISSUES: multimapper-intergenic-alignments`,
    `ISSUES: multimapper-blind-support`), on the aligned ladder.
 2. **The release** — `docs/PUBLISHING.md` is the procedure; what gates it is the state: the deliverable
