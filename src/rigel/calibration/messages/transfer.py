@@ -90,13 +90,13 @@ stays a no-claim — a flat profile or an absent factory row is no claim on that
 zero-filled one; a message is built from the source's claim and the recipient's constants
 and observations, never the recipient's belief.
 
-THE LIBRARY (`TransferPolicy.library`, once per sweep over the whole chain, `_Library`): the three
-level lanes' coordinates — the library's structurally pure gDNA density, and each strand's unspliced
-density over its single-strand exons — and whether the strand split is a live RNA witness anywhere.
-They are ratios of sums over structurally selected slots and one boolean, read from observations and
-geometry only, and they are the ONLY things a message knows about slots outside its own block. The
-gates hold the kernel's tables to independent recomputes through `native.transfer_prepare`,
-`transfer_pass` and `transfer_solve` (`tests/calibration/_transfer_harness.py`).
+THE LIBRARY (`TransferPolicy.library`, once per sweep over the whole chain, `_Library`): the level
+lanes' two coordinates — the library's structurally pure gDNA density, and one RNA density both strands'
+lanes share — and whether the strand split is a live RNA witness anywhere. They are ratios of sums
+over structurally selected slots and one boolean, read from observations and geometry only, and they
+are the ONLY things a message knows about slots outside its own block. The gates hold the kernel's
+tables to independent recomputes through `native.transfer_prepare`, `transfer_pass` and
+`transfer_solve` (`tests/calibration/_transfer_harness.py`).
 """
 
 from __future__ import annotations
@@ -138,7 +138,7 @@ class TransferPolicy:
     def __init__(self, strand: tuple[float, float, float] | None = None):
         self.strand = None if strand is None else tuple(float(x) for x in strand)
 
-    # ── the library: the three lanes' coordinates and the strand witness's liveness, once ───────────
+    # ── the library: the lanes' coordinates and the strand witness's liveness, once ─────────────────
     def library(self, view: ChainView) -> _Library:
         is_bnd = np.asarray(view.is_boundary, bool)
         is_exon = np.asarray(view.is_exon_region, bool)
@@ -151,8 +151,7 @@ class TransferPolicy:
         # the gDNA lane's coordinate: the library's structurally pure gDNA density. It is a REFERENCE
         # for a log axis, so any positive density serves; when the intergenic count is zero (a
         # zero-gDNA library with no intergenic reads) the library-wide density stands in. ⛔ Without
-        # that fallback the coordinate is zero, and the gDNA lane plus every RNA lane hanging off it
-        # is never built at all — a gDNA-free library then gets no level messages anywhere.
+        # that fallback the coordinate is zero and the gDNA lane is never built.
         pure = is_intergenic & (a_g > 0.0)
         rho = float(n_u[pure].sum() / a_g[pure].sum()) if a_g[pure].sum() > 0.0 else 0.0
         if not rho > 0.0:

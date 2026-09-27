@@ -219,7 +219,9 @@ def test_THE_FIXTURE_REALLY_DOES_REORDER_THE_BUFFER(oracle):
             oracle.index,
             BamScanConfig(sj_strand_tag="auto", total_threads=threads),
         )
-        return [int(i) for chunk in buffer.iter_chunks() for i in chunk.frag_id]
+        order = [int(i) for chunk in buffer.iter_chunks_consuming() for i in chunk.frag_id]
+        buffer.cleanup()
+        return order
 
     serial = frag_id_order(THREAD_COUNTS[0])
     parallel_orders = [frag_id_order(THREAD_COUNTS[-1]) for _ in range(3)]

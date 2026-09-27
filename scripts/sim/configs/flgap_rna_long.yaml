@@ -112,7 +112,6 @@ gtf: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genes.gtf
 # here is still uniform. See the header block.
 index: /Users/mkiyer/Downloads/rigel_runs/suite/rigel_index
 outdir: /Users/mkiyer/Downloads/rigel_runs/suite/flgap_rna_long
-transcript_filter: all
 
 # ── Read simulation — the RNA arm: LONG ─────────────────────────────────────────────────────────
 simulation:

@@ -1,12 +1,13 @@
-"""Vega-Lite spec builders for the fragment-length distribution charts.
+"""Vega-Lite spec builders for the report's charts: the fragment-length distributions, the
+per-reference gDNA-density track and the capture-enrichment KDE.
 
 Charts are emitted as plain Vega-Lite JSON specs (no colours baked in — the
 front-end driver injects the theme palette + axis colours at embed time and
 re-embeds on theme change). Densities are pre-computed here so the same numbers
 back the chart, its tooltip, and the summary table.
 
-Only the fragment-length section uses Vega-Lite; the composition, pool and strand components
-are native HTML/SVG, and any chart added here reuses this same spec-plus-driver pipeline.
+The composition, pool and strand components are native HTML/SVG; every chart is built here and
+embedded by the same driver.
 """
 
 from __future__ import annotations
@@ -59,7 +60,7 @@ def fl_overlay_spec(fl_df: pd.DataFrame) -> dict | None:
         "data": {"values": rows},
         "mark": {
             "type": "area",
-            "boundary": {"strokeWidth": 2},
+            "line": {"strokeWidth": 2},
             "opacity": 0.22,
             "interpolate": "monotone",
         },
@@ -217,7 +218,7 @@ def genome_track_spec(track: pd.DataFrame | None, top_n: int = 24) -> dict | Non
             "width": "container",
             "height": 58,
             "mark": {
-                "type": "boundary",
+                "type": "line",
                 "strokeWidth": 1.5,
                 "interpolate": "monotone",
                 "point": {"size": 6, "filled": True},
@@ -267,7 +268,7 @@ def capture_kde_spec(capture: dict | None) -> dict | None:
             "data": {"values": values},
             "mark": {
                 "type": "area",
-                "boundary": {"strokeWidth": 2},
+                "line": {"strokeWidth": 2},
                 "opacity": 0.16,
                 "interpolate": "monotone",
             },

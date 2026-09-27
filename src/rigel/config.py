@@ -102,24 +102,20 @@ class EMConfig:
 class FragmentScoringConfig:
     """Configuration for fragment scoring penalties.
 
-    All penalties are in log-space.  ``None`` for ``gdna_splice_penalties``
-    means use the module defaults from ``scoring.py``.
+    All penalties are in log-space.
 
     Parameters
     ----------
     overhang_log_penalty : float
         Log-penalty per base of overhang.  Default ``log(0.1) ≈ −2.303``
-        (i.e. each overhang base region_bounds probability by 10×).
+        (i.e. each overhang base cuts probability by 10×).
     mismatch_log_penalty : float
         Log-penalty per NM mismatch.  Default ``log(0.1) ≈ −2.303``
-        (i.e. each mismatch region_bounds probability by 10×).
-    gdna_splice_penalties : dict or None
-        Per-SpliceType gDNA penalties (int keys → float values).
+        (i.e. each mismatch cuts probability by 10×).
     """
 
     overhang_log_penalty: float = math.log(0.1)
     mismatch_log_penalty: float = math.log(0.1)
-    gdna_splice_penalties: dict[int, float] | None = None
     pruning_min_posterior: float = 1e-4
 
 
@@ -149,7 +145,8 @@ class BamScanConfig:
     sj_strand_tag : str or tuple of str
         BAM tag(s) for splice-junction strand (default ``"auto"``).
     log_every : int
-        Log progress every N read-name groups (default 1M).
+        Log scoring progress (debug level) every N buffered fragments,
+        checked once per buffer chunk (default 1M).
     total_threads : int
         Total thread budget available to the scan stage (default 0 = all cores).
         Rigel reserves decompression threads from this budget and uses the
@@ -228,7 +225,7 @@ class BamScanConfig:
         """Return ``(scan_worker_threads, bgzf_threads)`` within the budget.
 
         The split is DERIVED from the budget, because the two sides do not scale alike: one
-        decompression thread keeps about eight scan workers fed on a coordinate-sorted BAM, so every
+        decompression thread keeps about eight scan workers fed on a name-sorted BAM, so every
         thread given to decompression beyond that ratio is a worker taken away. Measured on the
         18.6M-fragment library, scan seconds by budget and decompression threads — 4: (0) 32.0, (1)
         41.2; 8: (1) 25.8, (2) 26.2, (0) 28.3, (4) 34.5; 16: (2) 17.6, (1) 19.6, (4) 20.1 — so

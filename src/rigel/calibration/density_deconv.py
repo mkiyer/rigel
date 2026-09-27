@@ -48,7 +48,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .gdna_density import pooled_log_rate
-from .signature import coarse_type_array
+from .signature import RegionType, coarse_type_array
 
 __all__ = [
     "GdnaBackground",
@@ -73,7 +73,6 @@ class GdnaBackground:
     log_mu_bg: float
     alpha: float
     size: float
-    n_regions: int
     informative: bool
 
 
@@ -114,25 +113,17 @@ def fit_gdna_background(g_counts, eff_g) -> GdnaBackground:
         log_mu_bg=log_mu_bg,
         alpha=float(alpha),
         size=sg + _JEFFREYS_SHAPE,
-        n_regions=int(g.shape[0]),
         informative=informative,
     )
 
 
-def fit_intron_background(
-    substrate,
-    region_arrays,
-    region_eff_g,
-    *,
-    include_introns: bool = False,
-) -> GdnaBackground:
+def fit_intron_background(substrate, region_arrays, region_eff_g) -> GdnaBackground:
     """The intron special case of :func:`fit_gdna_background`: the gDNA prior is the intergenic region
     distribution, introns being off-target at the same capture depletion as intergenic.
 
-    ``include_introns=False`` (default) pools intergenic only — the clean, non-circular reference, since
-    introns are what is being deconvolved. The real-data path may add RNA-free introns, buying resolution
-    at the price of a little circularity. The fit itself is delegated to :func:`fit_gdna_background`; the
-    whole of this function's own job is selecting the pool.
+    The pool is intergenic only — the clean, non-circular reference, since introns are what is being
+    deconvolved. The fit itself is delegated to :func:`fit_gdna_background`; the whole of this
+    function's own job is selecting the pool.
 
     ``region_eff_g`` is the gDNA contained effective length per region
     (:func:`effective_length.contained_eff_length`) — the support the pooled counts are a rate over."""
@@ -140,7 +131,6 @@ def fit_intron_background(
     eff = np.asarray(region_eff_g, dtype=np.float64)
     # Genome-strand columns, summed: gDNA is strand-symmetric, so the background is a total rate.
     counts = np.asarray(substrate.region_contained.count, dtype=np.float64).sum(axis=1)
-    ctype = coarse_type_array(sig)  # 0 intergenic / 1 intron / 2 exon
-    # the pure-gDNA pool: intergenic only, or non-exonic when ``include_introns``.
-    pool = ((ctype != 2) if include_introns else (ctype == 0)) & (eff > _EPS)
+    ctype = coarse_type_array(sig)
+    pool = (ctype == RegionType.INTERGENIC) & (eff > _EPS)
     return fit_gdna_background(counts[pool], eff[pool])

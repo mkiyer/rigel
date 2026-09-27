@@ -4,31 +4,23 @@ Gate: ``tests/calibration/test_substrate.py``.
 
 The substrate is the only object that knows the payload's encoding. It widens the integer banks,
 folds the strand axis where the contract says one column, and hands the calibrator four populations
-on three axes. Nothing downstream reads the payload.
+on three axes.
 
 The four populations sit on axes that are off by one from each other per reference, and they do NOT
 all carry the same channels, because a channel is stored only where a named consumer reads it::
 
-    regions                contained   count  inv_opportunity_sum        the 1/(ell-w+1) rule
-    contiguous boundaries  unspliced   count  inv_length_sum      mass   the mixture being deconvolved
-                           spliced     count                      mass   certified RNA: gDNA cannot splice
-    sj boundaries          (one)       count  inv_length_sum      mass   pure RNA by construction
-
-The two reciprocal banks carry two deposit rules with two targets, so they carry two names
-(one attribute for both is how the REGION truncation stayed invisible):
-``inv_length_sum`` is the boundary/sj crossing rule ``1/(w-1)``, expectation ``rho * P(w>=2) = rho``
-on any real library; ``inv_opportunity_sum`` is the region contained rule ``1/(ell-w+1)``,
-expectation ``rho * P(w<=ell)``, which is truncated by a per-component pmf functional.
+    regions                contained   count
+    contiguous boundaries  unspliced   count  mass   the mixture being deconvolved
+                           spliced     count  mass   certified RNA: gDNA cannot splice
+    sj boundaries          (one)       count  mass   pure RNA by construction
 
 The columns are GENOME strand without exception. Sense/antisense is transcript-relative, is derived
 by a consumer from an sj's own strand, and is never stored — storing some banks by genome strand and
 others by sense puts spliced and unspliced deposits at the same boundary in opposite columns.
 
-The counts carry both columns; the length moments carry one. Which strand a read aligned to says
-nothing about whether the molecule was gDNA or RNA, so the moments are strand-agnostic. The counts
-keep both columns because the strand model is a Beta-Binomial over them, per strand. The sj mass
-arrives per strand and is folded here, since :attr:`PopulationView.mass` is strand-agnostic by
-contract; the per-strand values stay in the payload for the artifact filter that reads them.
+The counts carry both columns; the mass carries one. The counts keep both columns because the
+strand model is a Beta-Binomial over them, per strand. The sj mass arrives per strand and is folded
+here, since :attr:`PopulationView.mass` is strand-agnostic by contract.
 """
 
 from __future__ import annotations
@@ -51,16 +43,7 @@ PARTITION_MISMATCH_HINT = (
 
 @dataclass(frozen=True, slots=True)
 class PopulationView:
-    """One population's sums. ``count`` is per genome strand; the length moments are not.
-
-    They answer different questions and are never interchangeable: ``count`` carries the statistical
-    power (a Beta-Binomial needs an integer, per strand) and the reciprocal bank carries the level —
-    under two different deposit rules with two different targets, so under two names:
-    :attr:`inv_length_sum` is the boundary/sj crossing rule ``1/(w-1)``
-    (``E[sum] = rho * P(w>=2) = rho``, an exact model-free density), :attr:`inv_opportunity_sum` the
-    region contained rule ``1/(ell-w+1)`` (``E[sum] = rho * P(w<=ell)``, a density SHAPE truncated by
-    a per-component pmf functional). A population
-    carries exactly one of them.
+    """One population's sums. ``count`` is per genome strand; ``mass`` is not.
 
     A population carries only the channels a named consumer reads; the absent ones are ``None``
     rather than zeros — see :meth:`_require`.
@@ -70,15 +53,9 @@ class PopulationView:
     #: which population it is turns "no mass here" into a traceback nobody can place.
     name: str
     count: np.ndarray  # int64[n, 2] — genome strand: POS then NEG
-    #: float64[n] — the boundary/sj crossing-rule bank ``1/(w-1)``; ``None`` where the population does
-    #: not carry it. One column, while ``count`` has two: the length moments are strand-agnostic.
-    inv_length_sum: np.ndarray | None = None
-    #: float64[n] — the region contained-rule bank ``1/(ell-w+1)``
-    #: (payload ``region_contained_inv_opportunity_sum``); ``None`` on every boundary/sj population.
-    inv_opportunity_sum: np.ndarray | None = None
     #: float64[n] — the conserved mass, strand-agnostic. It sums to ONE per fragment across the objects
-    #: that fragment touched, where ``count`` is ``+1`` on each of them. ``None`` on the two region
-    #: populations, which need no such channel: ``region_contained_count`` is already 1 per contained
+    #: that fragment touched, where ``count`` is ``+1`` on each of them. ``None`` on the region
+    #: population, which needs no such channel: ``region_contained_count`` is already 1 per contained
     #: fragment, i.e. already the conserved region mass.
     mass: np.ndarray | None = None
 
@@ -88,7 +65,7 @@ class PopulationView:
         return self.count.sum(axis=1)
 
     def _require(self, channel: str) -> np.ndarray:
-        """The channel, or an error that names the population and says why it is absent.
+        """The channel, or an error that names the population.
 
         A missing channel is None, never an array of zeros. Zeros would be a lie in the type: a
         consumer cannot tell "this population does not measure that" from "it measured it and got
@@ -97,11 +74,7 @@ class PopulationView:
         """
         value = getattr(self, channel)
         if value is None:
-            raise CalibrationSubstrateError(
-                f"population {self.name!r} does not carry {channel!r}. It is stored only where a named "
-                f"consumer reads it: the certified-RNA banks carry no length moments, because nothing "
-                f"deconvolves a fragment already known to be RNA."
-            )
+            raise CalibrationSubstrateError(f"population {self.name!r} does not carry {channel!r}.")
         return value
 
     @property
@@ -134,7 +107,6 @@ class CalibrationSubstrate:
     n_boundaries: int
     n_sj: int
 
-    strand_class: np.ndarray  # int8[n_regions] — the region's transcript-strand class
     #: int64[n_regions, 2] — the path's FIRST covered base, by genome strand; the column sum equals
     #: qc.deposited, which makes it a ledger. Its opportunity is the region length for every fragment
     #: length, so it is the REGION half of the composition-free total; it is wall-blind only at the
@@ -151,10 +123,10 @@ class CalibrationSubstrate:
     #: Four populations, and they do NOT carry the same channels. A channel is stored where a named
     #: consumer reads it and nowhere else::
     #:
-    #:     region_contained     count  inv_opportunity_sum         the 1/(ell-w+1) rule
-    #:     boundary_unspliced   count  inv_length_sum       mass   the 1/(w-1) rule
-    #:     boundary_spliced     count                       mass   certified RNA, not deconvolved
-    #:     sj                   count  inv_length_sum              live in second_pass
+    #:     region_contained     count
+    #:     boundary_unspliced   count  mass   the mixture being deconvolved
+    #:     boundary_spliced     count  mass   certified RNA, not deconvolved
+    #:     sj                   count  mass   certified RNA
     #:
     #: No spliced fragment touches the region axis at all: a spliced fragment can never be *contained*,
     #: because both endpoints of an annotated intron are region bounds.
@@ -169,12 +141,10 @@ class CalibrationSubstrate:
     ) -> "CalibrationSubstrate":
         cls._check_alignment(payload, region_arrays)
 
-        def view(name, count, inv=None, mass=None, inv_opp=None) -> PopulationView:
+        def view(name, count, mass=None) -> PopulationView:
             # `mass` arrives one-column on two axes and two-column on the sj axis, and is folded to one
             # here. `PopulationView.mass` is strand-agnostic by contract: the mass exists to turn an
-            # object-incidence total into a fragment count, a question with no strand in it. The
-            # per-strand values are NOT re-exported, because their consumer is artifact filtering, which
-            # reads the payload — and a channel with no consumer does not belong in this view.
+            # object-incidence total into a fragment count, a question with no strand in it.
             m = None
             if mass is not None:
                 m = np.asarray(mass, dtype=np.float64)
@@ -183,10 +153,6 @@ class CalibrationSubstrate:
             return PopulationView(
                 name=name,
                 count=np.asarray(count, dtype=np.int64),
-                inv_length_sum=None if inv is None else np.asarray(inv, dtype=np.float64),
-                inv_opportunity_sum=(
-                    None if inv_opp is None else np.asarray(inv_opp, dtype=np.float64)
-                ),
                 # No decode: the accumulator deposits fractions as float64 directly, so there is one
                 # numeric convention end to end and nothing here to convert.
                 mass=m,
@@ -196,19 +162,13 @@ class CalibrationSubstrate:
             n_regions=payload.n_regions,
             n_boundaries=payload.n_boundaries,
             n_sj=payload.n_sj,
-            strand_class=np.ascontiguousarray(region_arrays.strand_class, dtype=np.int8),
             region_start_count=np.asarray(payload.region_start_count, dtype=np.int64),
             region_end_count=np.asarray(payload.region_end_count, dtype=np.int64),
             region_span_count=np.asarray(payload.region_span_count, dtype=np.int64),
-            region_contained=view(
-                "region_contained",
-                payload.region_contained_count,
-                inv_opp=payload.region_contained_inv_opportunity_sum,
-            ),
+            region_contained=view("region_contained", payload.region_contained_count),
             boundary_unspliced=view(
                 "boundary_unspliced",
                 payload.boundary_unspliced_count,
-                payload.boundary_unspliced_inv_length_sum,
                 mass=payload.boundary_unspliced_mass,
             ),
             boundary_spliced=view(
@@ -216,7 +176,7 @@ class CalibrationSubstrate:
                 payload.boundary_spliced_count,
                 mass=payload.boundary_spliced_mass,
             ),
-            sj=view("sj", payload.sj_count, payload.sj_inv_length_sum, mass=payload.sj_mass),
+            sj=view("sj", payload.sj_count, mass=payload.sj_mass),
         )
 
     @staticmethod

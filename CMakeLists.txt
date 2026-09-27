@@ -106,7 +106,7 @@ install(TARGETS _resolve_impl LIBRARY DESTINATION rigel)
 
 # --- Build the _bam_impl extension --------------------------------------------
 
-# C++ BAM scanner using htslib — replaces the Python BAM parsing hot path.
+# C++ BAM scanner using htslib.
 # Reads BAM → resolves fragments → buffers results in one C++ call.
 
 # Find htslib (pkg-config or cmake find)
@@ -174,9 +174,7 @@ install(TARGETS _bam_impl LIBRARY DESTINATION rigel)
 
 # --- Build the _em_impl extension ---------------------------------------------
 
-# C++ EM solver — replaces the Python EM hot path (_em_step, _vbem_step,
-# _build_equiv_classes, SQUAREM loop) with a single native call.
-# Pure C++17 + nanobind + numpy, no external dependencies.
+# C++ EM solver. Pure C++17 + nanobind + numpy, no external dependencies.
 nanobind_add_module(
   _em_impl
   NOMINSIZE
@@ -204,41 +202,9 @@ target_compile_options(_solve_impl PRIVATE -g)
 
 install(TARGETS _solve_impl LIBRARY DESTINATION rigel)
 
-# --- SIMD / Architecture Detection -------------------------------------------
-#
-# Detect CPU architecture and report available SIMD instruction sets.
-# The C++ header simd_detect.h uses standard compiler-defined macros
-# (__ARM_NEON, __AVX2__, etc.) for compile-time detection, plus CPUID
-# for runtime dispatch on x86.  With -march=native the compiler sets
-# these macros automatically; for portable builds the C++ code uses
-# function-level __attribute__((target(...))) for multi-versioned SIMD.
-#
-# This block just reports what's available and sets RIGEL_ARCH for
-# any downstream CMake logic.
-
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
-    set(RIGEL_ARCH "ARM64")
-    message(STATUS "SIMD: ARM64 — NEON is baseline (always available)")
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
-    set(RIGEL_ARCH "X86_64")
-    include(CheckCXXCompilerFlag)
-    check_cxx_compiler_flag("-mavx2 -mfma" _rigel_has_avx2_fma)
-    check_cxx_compiler_flag("-mavx512f" _rigel_has_avx512f)
-    if(_rigel_has_avx512f)
-        message(STATUS "SIMD: x86_64 — SSE2 + AVX2/FMA + AVX-512F available")
-    elseif(_rigel_has_avx2_fma)
-        message(STATUS "SIMD: x86_64 — SSE2 + AVX2/FMA available")
-    else()
-        message(STATUS "SIMD: x86_64 — SSE2 only")
-    endif()
-else()
-    set(RIGEL_ARCH "UNKNOWN")
-    message(STATUS "SIMD: ${CMAKE_SYSTEM_PROCESSOR} — no explicit SIMD detection")
-endif()
-
 # --- Compiler optimizations ---------------------------------------------------
 #
-# Phase 2 performance flags: -O3, -march=native, FMA contraction, and LTO.
+# Performance flags: -O3, -march=native, FMA contraction, and LTO.
 # Applied per-target to control fast-math scope.
 #
 # _em_impl gets -ffp-contract=fast (enables FMA) but NOT full -ffast-math,
@@ -269,19 +235,15 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(_scoring_impl PRIVATE ${RIGEL_OPT_FLAGS} -ffast-math)
     target_compile_options(_resolve_impl PRIVATE ${RIGEL_OPT_FLAGS})
     target_compile_options(_cgranges_impl PRIVATE ${RIGEL_OPT_FLAGS})
-    if(TARGET _bam_impl)
-        target_compile_options(_bam_impl PRIVATE ${RIGEL_OPT_FLAGS})
-    endif()
+    target_compile_options(_bam_impl PRIVATE ${RIGEL_OPT_FLAGS})
 
     if(RIGEL_PROFILE_NATIVE)
       foreach(_rigel_native_target
           _em_impl _scoring_impl _resolve_impl _cgranges_impl _bam_impl)
-        if(TARGET ${_rigel_native_target})
-          target_compile_options(
-            ${_rigel_native_target}
-            PRIVATE -g -fno-omit-frame-pointer
-          )
-        endif()
+        target_compile_options(
+          ${_rigel_native_target}
+          PRIVATE -g -fno-omit-frame-pointer
+        )
       endforeach()
     endif()
 endif()
@@ -295,9 +257,7 @@ if(ipo_supported AND NOT RIGEL_PROFILE_NATIVE)
     set_property(TARGET _scoring_impl PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
     set_property(TARGET _resolve_impl PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
     set_property(TARGET _cgranges_impl PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-    if(TARGET _bam_impl)
-        set_property(TARGET _bam_impl PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-    endif()
+    set_property(TARGET _bam_impl PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 elseif(RIGEL_PROFILE_NATIVE)
   message(STATUS "Native profiling build: debug symbols/frame pointers enabled; LTO disabled")
 endif()

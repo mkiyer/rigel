@@ -2,14 +2,14 @@
 
 Loads the substrate a ``rigel quant`` run left in its output directory
 (:mod:`rigel.report.substrate`), derives the capture-enrichment curves
-(:mod:`rigel.report.capture`), builds the render-ready view model
+(:func:`rigel.calibration.track.capture_summary`), builds the render-ready view model
 (:mod:`rigel.report.model`) and the chart specs (:mod:`rigel.report.specs`), and writes one
 self-contained HTML file (:mod:`rigel.report.html`). It computes nothing itself; each stage owns
 its own step.
 
 Only ``summary.json`` is required — substrate warnings are logged rather than raised, and a
 missing optional table degrades the corresponding section instead of failing the report. When
-``vl-convert-python`` is absent the chart section is omitted with a warning naming the extra to
+``vl-convert-python`` is absent every chart is omitted, with a warning naming the extra to
 install.
 """
 
@@ -18,8 +18,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from .capture import capture_kde_from_track
-from .html import render_html
+from ..calibration.track import capture_summary
+from .html import render_html, vega_bundle
 from .model import build_view_model
 from .specs import build_charts
 from .substrate import load_substrate
@@ -52,7 +52,7 @@ def build_report(
     for w in sub.warnings:
         logger.warning("[report] %s", w)
 
-    capture = capture_kde_from_track(sub.calibration_track)
+    capture = capture_summary(sub.calibration_track, with_curve=True)
     model = build_view_model(sub, capture=capture)
     charts = build_charts(sub, capture=capture)
 
@@ -60,12 +60,10 @@ def build_report(
         title = f"Rigel QC · {model['meta']['sample']}"
     out_path = Path(out_path) if out_path is not None else Path(output_dir) / "report.html"
 
-    try:
-        import vl_convert  # noqa: F401
-    except ImportError:
+    if vega_bundle() is None:
         logger.warning(
-            "[report] vl-convert-python is not installed — the fragment-length "
-            "charts will be omitted. Install with: pip install 'rigel-rnaseq[report]'"
+            "[report] vl-convert-python is not installed — every chart will be "
+            "omitted. Install with: pip install 'rigel-rnaseq[report]'"
         )
 
     html = render_html(model, charts, title)

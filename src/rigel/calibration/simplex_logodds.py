@@ -44,7 +44,7 @@ Three facts that determine this file's shape:
    ``tests/calibration/test_vertex_reference.py``; the cost at an unwitnessed both-strand slot is the
    atom's and is recorded where it was measured.
 
-There is NO spliced term: ``mass_spliced`` is consumed only by the returned ``rna_mass``, never by ψ. That
+There is NO spliced term: ``mass_spliced`` enters only the signal mask, never ψ. That
 is correct — at a sj mature RNA *splices*, so the unspliced crossing mass is gDNA plus RNA that has not
 spliced there, a channel genuinely disjoint from the (directly observed, already-pure-RNA) spliced mass.
 
@@ -81,8 +81,6 @@ __all__ = [
     "posterior_median_fg",
     "psi_cube",
 ]
-
-_EPS = 1.0e-9
 
 # The reference exponent for an UNFITTED component group, as a density in LOG-rate.
 #
@@ -195,27 +193,11 @@ class CubeRows:
     def __len__(self) -> int:
         return int(self.slot.shape[0])
 
-    def select(self, keep) -> CubeRows:
-        """The rows ``keep`` (a mask or index array) as a table on the same grid."""
-        return CubeRows(**{f: getattr(self, f)[keep] for f in self.PER_ROW}, u=self.u)
-
-    def shifted(self, offset: int) -> CubeRows:
-        """The same rows with their slots re-keyed by ``offset`` — a block's table as the chain's."""
-        return CubeRows(
-            **{f: getattr(self, f) for f in self.PER_ROW if f != "slot"},
-            slot=self.slot + int(offset),
-            u=self.u,
-        )
-
     @classmethod
     def concat(cls, parts: list) -> CubeRows:
         return cls(
             **{f: np.concatenate([getattr(q, f) for q in parts]) for f in cls.PER_ROW}, u=parts[0].u
         )
-
-    @property
-    def nbytes(self) -> int:
-        return sum(getattr(self, f).nbytes for f in self.PER_ROW) + self.u.nbytes
 
     def kernel_args(self) -> dict:
         """The table as ψ's kernel takes it, by argument name."""
@@ -398,7 +380,7 @@ def posterior_median_fg(post, lam):
     """Per-slot point estimate of ``f_g``: the posterior's ½-QUANTILE, read off the CDF on the uniform λ
     lattice — a continuous quantile (the grid mass as a histogram with edges at the midpoints, the crossing
     bin interpolated ON λ, then mapped through σ: median equivariance, which is why ``f_g`` is a median
-    and not a mean; `DESIGN.md` §6c). ``post``: ``(m, K)``; ``lam``: ``(K,)``. Returns ``(m,)``."""
+    and not a mean). ``post``: ``(m, K)``; ``lam``: ``(K,)``. Returns ``(m,)``."""
     post = np.ascontiguousarray(post, np.float64)
     out = np.zeros(post.shape[0])
     psi_posterior_median(post, np.ascontiguousarray(lam, np.float64), out)

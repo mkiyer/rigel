@@ -1,8 +1,6 @@
-"""The one condition-grid loop, shared by both simulator frontends.
+"""The condition-grid loop of ``whole_genome.run_simulation``.
 
-``suite.main`` (synthetic mini-genome suites) and ``whole_genome.run_simulation`` (simulate from an
-existing reference) sweep the same grid — nascent x gDNA rate x gDNA strand overdispersion x strand
-specificity x capture — so it is implemented once here and a new axis is wired once.
+The grid is nascent x gDNA rate x gDNA strand overdispersion x strand specificity x capture.
 
 Per condition, :func:`run_condition_grid` deep-copies the transcripts back to the base abundances,
 applies the nascent mode, resolves the RNA/gDNA fragment split (:func:`resolve_depths`), runs a
@@ -12,7 +10,7 @@ for the caller to write. Conditions are resumable: a condition whose existence k
 disk is skipped, the key being the oracle BAM whenever one is requested, since that is the artifact
 the instruments read.
 
-Every condition draws a distinct seed through :func:`capture_paired_condition_seed`, which keys on
+Every condition draws its seed through :func:`capture_paired_condition_seed`, which keys on
 ``(gdna, strand specificity)`` only, so the capture, overdispersion and nascent variants of one base
 condition are paired for controlled comparison while the main axes are decorrelated.
 """
@@ -29,8 +27,8 @@ from pathlib import Path
 from .manifest import condition_dir_name
 from .truth import write_post_capture_truth
 from .capture import CaptureSampler
+from .wgs_engine import WholeGenomeSimulator
 from .whole_genome import (
-    WholeGenomeSimulator,
     apply_nrna_fragment_share,
     apply_nrna_ratio,
     apply_sparse_nrna,
@@ -123,8 +121,7 @@ def capture_paired_condition_seed(
     The nascent label is deliberately not an argument, so the variants of one base condition start
     from the same stream. Nascent rows are drawn in the same multinomial as the mature rows,
     so a nascent-on cell and its nascent-off twin share the seed but not a bit-identical mature
-    stream: turning nascent on re-allocates the RNA budget, as it physically must. The gDNA stream
-    is unaffected.
+    stream: turning nascent on re-allocates the RNA budget, as it physically must.
     """
     seed_name = condition_dir_name(gdna_label, strand_specificity, "_paired")
     return stable_seed(base_seed, seed_name)
@@ -148,10 +145,7 @@ def run_condition_grid(
     include_capture_in_names: bool,
     base_seed: int,
     oracle_bam: bool = True,
-    skip_existing: bool = True,
     emit_fastq: bool = True,
-    selected_conditions: set[str] | None = None,
-    capture_meta_by_label: dict[str, dict] | None = None,
 ) -> list[dict]:
     """Run the full condition grid and return the per-condition manifest entries.
 
@@ -163,10 +157,8 @@ def run_condition_grid(
     most entities get exactly zero and the rest are independent of the mature level). ``file`` leaves
     the loaded abundances alone. Every mode then shares one thing: the RNA budget is one multinomial
     over mature and nascent rows, so the fragment split is realised rather than allocated.
-    ``capture_meta_by_label`` supplies the suite's probe-provenance fields per
-    capture label (empty for the reference-driven path). The caller writes the manifest.
+    The caller writes the manifest.
     """
-    capture_meta_by_label = capture_meta_by_label or {}
     # One CaptureSampler per capture scenario, built once and reused by every condition that shares
     # it. The probe layout and the per-width partition depend only on the panel and the templates —
     # not on abundance, gDNA rate, strand or nascent — so rebuilding per condition would recompute
@@ -232,8 +224,6 @@ def run_condition_grid(
                         capture_label,
                         gdna_strand_overdispersion=gdna_od,
                     )
-                    if selected_conditions and cond_name not in selected_conditions:
-                        continue
                     cond_num += 1
 
                     depths = resolve_depths(sim, gdna_rate=gdna_rate)
@@ -246,7 +236,6 @@ def run_condition_grid(
                     truth_abundances_name = f"{cond_name}/truth_abundances.tsv"
                     truth_fl_name = f"{cond_name}/truth_fragment_lengths.tsv"
                     truth_summary_name = f"{cond_name}/truth_summary.json"
-                    probe_meta = capture_meta_by_label.get(capture_scenario.label, {})
 
                     print(
                         f"\n  [{cond_num}/{total}] {cond_name}: RNA={n_rna:,} gDNA={n_gdna:,} "
@@ -270,10 +259,6 @@ def run_condition_grid(
                         "capture_label": capture_scenario.label,
                         "capture_enabled": bool(capture_scenario.config.probes),
                         "capture_config": capture_scenario.config,
-                        "capture_probe_source": probe_meta.get("source"),
-                        "capture_probe_panel": probe_meta.get("panel"),
-                        "capture_probe_tsv": probe_meta.get("tsv"),
-                        "capture_probe_bed": probe_meta.get("bed"),
                         "n_rna": n_rna,
                         "n_gdna": n_gdna,
                         "n_total": n_rna + n_gdna,
@@ -291,14 +276,11 @@ def run_condition_grid(
                     }
 
                     # The existence key is the oracle BAM whenever one is requested, because the BAM
-                    # is the artifact the instruments read. Keying on ``sim_R1.fq.gz`` instead makes
-                    # a panel whose FASTQs were dropped — by ``--no-fastq``, or by hand to reclaim
-                    # disk — silently re-simulate every condition and rewrite the oracle.
-                    # The trade, stated: on a panel whose BAM exists but whose FASTQs are gone, a run
-                    # that wants FASTQs will skip instead of regenerating them. Delete the BAM, or
-                    # pass ``--no-skip-existing``, to force it.
+                    # is the artifact the instruments read. On a panel whose BAM exists but whose
+                    # FASTQs are gone, a run that wants FASTQs skips instead of regenerating them;
+                    # delete the BAM to force it.
                     _exists_key = cond_dir / ("sim_oracle.bam" if oracle_bam else "sim_R1.fq.gz")
-                    if skip_existing and _exists_key.exists():
+                    if _exists_key.exists():
                         print("    Output exists, skipping", flush=True)
                         cond_entry["oracle_bam"] = (
                             f"{cond_name}/sim_oracle.bam" if oracle_bam else None
@@ -343,12 +325,8 @@ def run_condition_grid(
                         molecular_truth=molecular_truth_name,
                         gdna_strand_overdispersion=gdna_od,
                     )
-                    # The FASTQs are dropped only after the truth is written, never before, so an
-                    # interrupted run cannot lose the origin counts. No calibration instrument reads
-                    # one — nothing under ``scripts/design/`` or ``src/rigel/calibration/`` opens a
-                    # FASTQ — and ``write_post_capture_truth`` prefers the oracle BAM and returns
-                    # before touching the FASTQ path (``sim.truth._iter_origins_from_source``), so
-                    # dropping them cannot change a truth file. They are roughly half a suite's
+                    # The FASTQs are dropped only after the truth is written, which reads the oracle
+                    # BAM when one exists (``sim.truth._iter_origins_from_source``).
                     if not emit_fastq:
                         for _fq in (cond_dir / "sim_R1.fq.gz", cond_dir / "sim_R2.fq.gz"):
                             if _fq.exists():

@@ -50,6 +50,8 @@ public:
 
     /// Execute fn(tid) for tid 0..n_threads()-1.  The caller runs tid=0.
     /// Blocks until all workers have finished.
+    /// fn must not throw: an exception from fn(0) leaves run_parallel without
+    /// waiting for the workers, and one from a worker calls std::terminate.
     template<typename Fn>
     void run_parallel(Fn&& fn) {
         {

@@ -26,8 +26,7 @@ using namespace rigel;
 // ================================================================
 
 NB_MODULE(_resolve_impl, m) {
-    m.doc() = "C++ fragment resolution kernel for rigel (nanobind).\n\n"
-              "Ports resolve_fragment() to C++ with direct cgranges queries.";
+    m.doc() = "C++ fragment resolution kernel for rigel (nanobind).";
 
     // --- ResolvedFragment ---
     nb::class_<ResolvedFragment>(m, "ResolvedFragment")
@@ -42,10 +41,6 @@ NB_MODULE(_resolve_impl, m) {
         .def_ro("read_length", &ResolvedFragment::read_length)
         .def_ro("genomic_footprint", &ResolvedFragment::genomic_footprint)
         .def_ro("genomic_start", &ResolvedFragment::genomic_start)
-        .def_ro("exon_bp_pos", &ResolvedFragment::exon_bp_pos)
-        .def_ro("exon_bp_neg", &ResolvedFragment::exon_bp_neg)
-        .def_ro("tx_bp_pos", &ResolvedFragment::tx_bp_pos)
-        .def_ro("tx_bp_neg", &ResolvedFragment::tx_bp_neg)
         .def_prop_ro("is_same_strand", &ResolvedFragment::get_is_same_strand)
         .def_prop_ro("is_strand_qualified",
                      &ResolvedFragment::get_is_strand_qualified)
@@ -93,7 +88,7 @@ NB_MODULE(_resolve_impl, m) {
              nb::arg("refs"), nb::arg("starts"), nb::arg("ends"),
              nb::arg("max_anchor_left"), nb::arg("max_anchor_right"),
              "Build the splice-junction artifact blacklist map.\n\n"
-             "SpliceJunctions are keyed by (ref, start, end) without strand.\n"
+             "Entries are keyed by (ref, start, end) without strand.\n"
              "A CIGAR sj is rejected when EITHER its left or right\n"
              "anchor is <= the blacklist maximum for that sj.")
         .def("set_metadata", &FragmentResolver::set_metadata,
@@ -102,7 +97,7 @@ NB_MODULE(_resolve_impl, m) {
         .def("resolve_fragment", &FragmentResolver::resolve_fragment,
              nb::arg("frag"),
              "Resolve a Fragment object to its compatible transcript set.\n\n"
-             "Returns a ResolvedFragment or None for intergenic fragments.")
+             "Returns a ResolvedFragment, or None when the fragment has no exon blocks.")
         .def("set_transcript_strands", &FragmentResolver::set_transcript_strands,
              nb::arg("t_strand"),
              "Set per-transcript strand array (direct lookup, no gene indirection).")

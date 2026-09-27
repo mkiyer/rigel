@@ -2,13 +2,11 @@
 //
 // Exploits three properties of the call site in em_step_kernel_range():
 //   1. Input x is always <= 0  (log-sum-exp normalization subtracts max_val)
-//   2. Most inputs are deeply negative (x < -708 underflows to 0.0)
+//   2. Inputs below EXP_CUTOFF return 0.0 (std::exp there is below 3.3e-308)
 //   3. Moderate accuracy suffices (posteriors are normalized; ~25 ULP is fine)
 //
-// Three-layer optimization:
-//   Layer 1 — Early-zero skip:  (Handled by caller) skip full blocks if x < -708.0
-//   Layer 2 — Inline function:  eliminates DYLD stub + enables interleaving
-//   Layer 3 — NEON 2-wide:      processes two doubles per vector iteration
+// Variants: scalar, NEON (2-wide), AVX2+FMA (4-wide) and AVX-512 (8-wide). The E-step kernel skips a
+// whole vector block when every lane is below EXP_CUTOFF.
 //
 // Algorithm: Cody-Waite range reduction + degree-11 Horner polynomial (FMA)
 //   x = n*ln2 + r,  |r| <= ln2/2
@@ -51,8 +49,8 @@ inline constexpr double EXP_LOG2E  =  1.4426950408889634074;   // 1/ln2
 inline constexpr double EXP_LN2_HI =  6.93147180369123816490e-01;
 inline constexpr double EXP_LN2_LO =  1.90821492927058500170e-10;
 
-// Early-zero cutoff: exp(x) underflows to IEEE 754 +0.0 for x < -708.39
-// Use -708.0 as a conservative cutoff (bit-compatible with std::exp)
+// Early-zero cutoff: inputs below it return 0.0, where std::exp is below exp(-708) ≈ 3.3e-308. The
+// exponent-bit scaling cannot produce a subnormal, and exp(x) is subnormal (or zero) below x ≈ -708.4.
 inline constexpr double EXP_CUTOFF = -708.0;
 
 // Horner polynomial coefficients: c_k = 1/k! for k = 2..11

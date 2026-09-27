@@ -10,7 +10,7 @@ with LZ4 compression.
 Architecture
 ------------
 - The native scanner hands over finalized chunks of compact NumPy arrays
-  (``inject_chunk``); tests build them fragment by fragment (``append``).
+  (``inject_chunk``).
 - When total in-memory chunk size exceeds *max_memory_bytes*,
   the oldest chunk is spilled to disk as Arrow IPC with LZ4.
 - Scoring consumes the chunks once, in order (``iter_chunks_consuming``).
@@ -21,7 +21,6 @@ import queue
 import shutil
 import tempfile
 import threading
-import time
 import weakref
 from collections import deque
 from dataclasses import dataclass
@@ -30,13 +29,9 @@ from typing import Iterator
 
 import numpy as np
 
-from .native import FragmentAccumulator
-from .splice import SpliceType
-from .types import ChimeraType, Strand
-
 logger = logging.getLogger(__name__)
 
-__all__ = ["FragmentBuffer", "BufferedFragment"]
+__all__ = ["FragmentBuffer"]
 
 # Fragment classification constants used by fragment_classes property
 FRAG_UNAMBIG: int = 0  # same-strand, 1 transcript, NH=1
@@ -44,50 +39,6 @@ FRAG_AMBIG_SAME_STRAND: int = 1  # same-strand, >1 transcript, NH=1
 FRAG_AMBIG_OPP_STRAND: int = 2  # ambig-strand transcripts, NH=1
 FRAG_MULTIMAPPER: int = 3  # NH > 1 (multimapped molecule)
 FRAG_CHIMERIC: int = 4  # chimeric fragment (disjoint transcript sets)
-
-
-# ---------------------------------------------------------------------------
-# BufferedFragment — lightweight view into a finalized chunk
-# ---------------------------------------------------------------------------
-
-
-@dataclass(slots=True)
-class BufferedFragment:
-    """Lightweight view of one fragment in a columnar buffer chunk.
-
-    ``t_inds`` is a NumPy array slice (supports iteration, ``len()``,
-    indexing) rather than a frozenset.  Strand mixing is represented
-    by ``ambig_strand`` emitted by the native resolver.
-    """
-
-    t_inds: np.ndarray
-    ambig_strand: int
-    splice_type: int
-    align_strand: int
-    sj_strand: int
-    frag_lengths: np.ndarray
-    num_hits: int
-    merge_criteria: int
-    chimera_type: int = ChimeraType.NONE
-    frag_id: int = 0
-    read_length: int = 0
-    genomic_footprint: int = -1
-    genomic_start: int = -1
-    nm: int = 0
-    exon_bp: np.ndarray | None = None
-
-    @property
-    def is_same_strand(self) -> bool:
-        return not self.ambig_strand
-
-    @property
-    def is_strand_qualified(self) -> bool:
-        return (
-            self.splice_type == SpliceType.SPLICED_ANNOT
-            and self.is_same_strand
-            and self.align_strand in (Strand.POS, Strand.NEG)
-            and self.sj_strand in (Strand.POS, Strand.NEG)
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -120,9 +71,7 @@ class _FinalizedChunk:
 
     splice_type: np.ndarray  # uint8[N]
     align_strand: np.ndarray  # uint8[N]
-    sj_strand: np.ndarray  # uint8[N]
     num_hits: np.ndarray  # uint16[N]
-    merge_criteria: np.ndarray  # uint8[N]
     chimera_type: np.ndarray  # uint8[N]
     t_offsets: np.ndarray  # int32[N+1]
     t_indices: np.ndarray  # int32[M_t]
@@ -145,9 +94,7 @@ class _FinalizedChunk:
         return cls(
             splice_type=raw["splice_type"],
             align_strand=raw["align_strand"],
-            sj_strand=raw["sj_strand"],
             num_hits=raw["num_hits"],
-            merge_criteria=raw["merge_criteria"],
             chimera_type=raw["chimera_type"],
             t_offsets=raw["t_offsets"],
             t_indices=raw["t_indices"],
@@ -170,9 +117,7 @@ class _FinalizedChunk:
             for a in (
                 self.splice_type,
                 self.align_strand,
-                self.sj_strand,
                 self.num_hits,
-                self.merge_criteria,
                 self.chimera_type,
                 self.t_offsets,
                 self.t_indices,
@@ -241,31 +186,6 @@ class _FinalizedChunk:
             self.nm,
         )
 
-    def __len__(self) -> int:
-        return self.size
-
-    def __getitem__(self, i: int) -> BufferedFragment:
-        """Return a lightweight view for fragment *i*."""
-        start = self.t_offsets[i]
-        end = self.t_offsets[i + 1]
-        return BufferedFragment(
-            t_inds=self.t_indices[start:end],
-            frag_lengths=self.frag_lengths[start:end],
-            exon_bp=self.exon_bp[start:end],
-            ambig_strand=int(self.ambig_strand[i]),
-            splice_type=int(self.splice_type[i]),
-            align_strand=int(self.align_strand[i]),
-            sj_strand=int(self.sj_strand[i]),
-            num_hits=int(self.num_hits[i]),
-            merge_criteria=int(self.merge_criteria[i]),
-            chimera_type=int(self.chimera_type[i]),
-            frag_id=int(self.frag_id[i]),
-            read_length=int(self.read_length[i]),
-            genomic_footprint=int(self.genomic_footprint[i]),
-            genomic_start=int(self.genomic_start[i]),
-            nm=int(self.nm[i]),
-        )
-
 
 # ---------------------------------------------------------------------------
 # Arrow IPC (Feather v2) spill / load
@@ -293,9 +213,7 @@ def _spill_chunk(chunk: _FinalizedChunk, path: Path) -> None:
         {
             "splice_type": chunk.splice_type,
             "align_strand": chunk.align_strand,
-            "sj_strand": chunk.sj_strand,
             "num_hits": chunk.num_hits,
-            "merge_criteria": chunk.merge_criteria,
             "chimera_type": chunk.chimera_type,
             "t_inds": t_list,
             "frag_lengths": frag_lengths_list,
@@ -332,9 +250,7 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
     return _FinalizedChunk(
         splice_type=table.column("splice_type").to_numpy().copy(),
         align_strand=table.column("align_strand").to_numpy().copy(),
-        sj_strand=table.column("sj_strand").to_numpy().copy(),
         num_hits=table.column("num_hits").to_numpy().copy(),
-        merge_criteria=table.column("merge_criteria").to_numpy().copy(),
         chimera_type=table.column("chimera_type").to_numpy().copy(),
         t_offsets=t_offsets,
         t_indices=t_indices,
@@ -362,12 +278,21 @@ class _PendingSpill:
 
 
 class _SpillWriter:
-    """Single-threaded bounded writer for temporary spill files."""
+    """One background thread that writes spilled chunks, in submission order, into a temporary
+    directory it creates and removes. At most ``capacity`` submitted chunks are unwritten at a time.
+
+    The buffer's finalizer holds this object and not the buffer, so it does not keep the buffer alive.
+    """
 
     _STOP = object()
 
-    def __init__(self, capacity: int = 2):
-        self._queue: queue.Queue[object] = queue.Queue(maxsize=capacity)
+    def __init__(self, spill_dir: Path | None, capacity: int = 2):
+        if spill_dir is not None:
+            spill_dir.mkdir(parents=True, exist_ok=True)
+        self.temp_dir = Path(tempfile.mkdtemp(dir=spill_dir, prefix="rigel_buf_"))
+        # SimpleQueue.put is reentrant, so a finalizer that interrupts the writer thread inside get()
+        # can still queue the stop.
+        self._queue: queue.SimpleQueue[object] = queue.SimpleQueue()
         self._slots = threading.BoundedSemaphore(capacity)
         self._closed = False
         self._thread = threading.Thread(
@@ -388,37 +313,39 @@ class _SpillWriter:
             raise
 
     def stop(self) -> None:
+        """Queue the stop; the thread writes what was submitted before it, removes the directory and
+        exits. Joins the thread, except on the thread itself, where garbage collection can run the
+        buffer's finalizer."""
         if self._closed:
             return
         self._closed = True
         self._queue.put(self._STOP)
-        self._thread.join()
+        if threading.current_thread() is not self._thread:
+            self._thread.join()
 
     def _run(self) -> None:
         while True:
             item = self._queue.get()
-            try:
-                if item is self._STOP:
-                    return
+            if item is self._STOP:
+                shutil.rmtree(self.temp_dir, ignore_errors=True)
+                return
 
-                chunk, pending = item
-                try:
-                    logger.info(
-                        "Writing spilled chunk (%s fragments, %.1f MB) -> %s",
-                        f"{pending.size:,}",
-                        pending.memory_bytes / 1024**2,
-                        pending.path,
-                    )
-                    _spill_chunk(chunk, pending.path)
-                    logger.info("Finished spilled chunk -> %s", pending.path)
-                except BaseException as exc:
-                    pending.error = exc
-                    logger.exception("Failed to write spilled chunk -> %s", pending.path)
-                finally:
-                    pending.done.set()
-                    self._slots.release()
+            chunk, pending = item
+            try:
+                logger.info(
+                    "Writing spilled chunk (%s fragments, %.1f MB) -> %s",
+                    f"{pending.size:,}",
+                    pending.memory_bytes / 1024**2,
+                    pending.path,
+                )
+                _spill_chunk(chunk, pending.path)
+                logger.info("Finished spilled chunk -> %s", pending.path)
+            except BaseException as exc:
+                pending.error = exc
+                logger.exception("Failed to write spilled chunk -> %s", pending.path)
             finally:
-                self._queue.task_done()
+                pending.done.set()
+                self._slots.release()
 
 
 # ---------------------------------------------------------------------------
@@ -429,73 +356,44 @@ class _SpillWriter:
 class FragmentBuffer:
     """Columnar buffer for resolved fragments with disk-spill support.
 
-    Accumulates ``ResolvedFragment`` data during the BAM scan into
-    compact NumPy chunks.  When total in-memory size exceeds
-    *max_memory_bytes*, the oldest chunk is spilled to disk as an
-    Arrow IPC (Feather v2) file with LZ4 compression.
-
-    After all fragments are appended, call :meth:`finalize` to flush
-    any remaining data.  Then iterate with :meth:`__iter__` (yields
-    ``BufferedFragment``) or :meth:`iter_chunks` (yields
-    ``_FinalizedChunk``).
+    Holds the chunks the native scanner hands over (:meth:`inject_chunk`).
+    When total in-memory size exceeds *max_memory_bytes*, the oldest chunk
+    is spilled to disk as an Arrow IPC (Feather v2) file with LZ4
+    compression. :meth:`iter_chunks_consuming` yields the chunks in order.
 
     After quantification is complete, call :meth:`cleanup` (or use the
     context-manager protocol) to remove spilled files.
 
     Parameters
     ----------
-    chunk_size : int
-        Number of fragments per chunk (default 1,000,000).
     max_memory_bytes : int
         Maximum memory for in-memory chunks before spilling to disk.
         Default 2 GiB.  Set to 0 to disable spilling.
     spill_dir : Path or None
         Directory for spilled chunk files.  Default: system temp dir.
-
-    Examples
-    --------
-    >>> buf = FragmentBuffer(chunk_size=500_000)
-    >>> for frag_id, resolved in enumerate(resolved_fragments):
-    ...     buf.append(resolved, frag_id)
-    >>> buf.finalize()
-    >>> for frag in buf:
-    ...     print(frag.splice_type, len(frag.t_inds))
-    >>> buf.cleanup()
     """
 
     def __init__(
         self,
-        chunk_size: int = 1_000_000,
         max_memory_bytes: int = 2 * 1024**3,
         spill_dir: Path | None = None,
     ):
-        self.chunk_size = chunk_size
         self.max_memory_bytes = max_memory_bytes
         self._spill_dir = spill_dir
-        self._temp_dir: str | None = None
 
-        self._native_acc = FragmentAccumulator()
-        self._chunks: deque[_FinalizedChunk | Path | _PendingSpill] = deque()
+        self._chunks: deque[_FinalizedChunk | _PendingSpill] = deque()
         self._total_size = 0
         self._memory_bytes = 0
-        self._memory_bytes_peak = 0
         self._n_spilled = 0
-        self._chunks_finalized = 0
-        self._chunks_pending_spill_peak = 0
-        self._spill_submit_wall_sec = 0.0
         self._spill_writer: _SpillWriter | None = None
-
-        # Safety net: ensure spill directory is cleaned up even if
-        # cleanup() is never called.  weakref.finalize is reliable
-        # unlike __del__ (guaranteed ordering, runs during GC).
-        self._ensure_cleanup = weakref.finalize(self, FragmentBuffer._weak_cleanup, self)
+        self._spill_finalizer: weakref.finalize | None = None
 
     # -- Properties -----------------------------------------------------------
 
     @property
     def total_fragments(self) -> int:
-        """Total buffered fragments (finalized + pending)."""
-        return self._total_size + self._native_acc.size
+        """Total fragments handed to the buffer."""
+        return self._total_size
 
     @property
     def memory_bytes(self) -> int:
@@ -512,50 +410,13 @@ class FragmentBuffer:
         """Number of chunks spilled to disk."""
         return self._n_spilled
 
-    # -- Append ---------------------------------------------------------------
+    # -- Accepting chunks -----------------------------------------------------
 
-    def append(self, resolved, frag_id: int = 0) -> None:
-        """Append a resolved fragment to the buffer.
-
-        Parameters
-        ----------
-        resolved : ResolvedFragment
-            The resolved fragment to buffer (C++ native result).
-        frag_id : int
-            Fragment identifier for grouping multimapper alignments.
-            All alignments of the same molecule should share a frag_id.
-        """
-        self._native_acc.append(resolved, frag_id)
-        if self._native_acc.size >= self.chunk_size:
-            self._finalize_native()
-
-    # -- Finalization ---------------------------------------------------------
-
-    def finalize(self) -> None:
-        """Finalize any remaining accumulated data.
-
-        Must be called after all fragments have been appended and
-        before iterating.
-        """
-        self._finalize_native()
-
-    def _finalize_native(self) -> None:
-        """Finalize the C++ native accumulator into a chunk."""
-        if self._native_acc.size == 0:
-            return
-
-        chunk = _FinalizedChunk.from_raw(self._native_acc.finalize())
-
-        self._accept_chunk(chunk)
-        self._native_acc = FragmentAccumulator()
-
-    def _accept_chunk(self, chunk: _FinalizedChunk) -> None:
+    def inject_chunk(self, chunk: _FinalizedChunk) -> None:
         """Append a finalized chunk and spill if over memory budget."""
         self._raise_completed_spill_errors()
         self._total_size += chunk.size
         self._memory_bytes += chunk.memory_bytes
-        self._memory_bytes_peak = max(self._memory_bytes_peak, self._memory_bytes)
-        self._chunks_finalized += 1
         self._chunks.append(chunk)
 
         # Spill if over memory budget
@@ -564,21 +425,12 @@ class FragmentBuffer:
                 if not self._spill_oldest():
                     break
 
-    def inject_chunk(self, chunk: _FinalizedChunk) -> None:
-        """Inject an externally-built chunk into the buffer."""
-        self._accept_chunk(chunk)
-
-    def release(self) -> None:
-        """Release all in-memory chunks and spilled files."""
-        self.cleanup()
-        self._chunks.clear()
-        self._memory_bytes = 0
-
     def _spill_oldest(self) -> bool:
         """Spill the oldest in-memory chunk to disk.  Return True if spilled."""
         for i, chunk in enumerate(self._chunks):
             if isinstance(chunk, _FinalizedChunk):
-                path = self._get_spill_path()
+                writer = self._ensure_spill_writer()
+                path = writer.temp_dir / f"chunk_{self._n_spilled:04d}.arrow"
                 freed = chunk.memory_bytes
                 pending = _PendingSpill(
                     path=path,
@@ -586,16 +438,10 @@ class FragmentBuffer:
                     memory_bytes=freed,
                     size=chunk.size,
                 )
-                t_submit = time.perf_counter()
-                self._ensure_spill_writer().submit(chunk, pending)
-                self._spill_submit_wall_sec += time.perf_counter() - t_submit
+                writer.submit(chunk, pending)
                 self._chunks[i] = pending
                 self._memory_bytes -= freed
                 self._n_spilled += 1
-                self._chunks_pending_spill_peak = max(
-                    self._chunks_pending_spill_peak,
-                    self._count_pending_spill_chunks(),
-                )
                 logger.info(
                     "Queued spill for chunk %d (%s fragments, %.1f MB) -> %s",
                     i,
@@ -606,21 +452,17 @@ class FragmentBuffer:
                 return True
         return False
 
-    def _count_pending_spill_chunks(self) -> int:
-        return sum(
-            1
-            for chunk_ref in self._chunks
-            if isinstance(chunk_ref, _PendingSpill) and not chunk_ref.done.is_set()
-        )
-
     def _ensure_spill_writer(self) -> _SpillWriter:
         if self._spill_writer is None:
-            self._spill_writer = _SpillWriter(capacity=2)
+            self._spill_writer = _SpillWriter(self._spill_dir, capacity=2)
+            # Stops the writer and removes its directory if cleanup() is never called.
+            self._spill_finalizer = weakref.finalize(self, self._spill_writer.stop)
         return self._spill_writer
 
     def _stop_spill_writer(self) -> None:
-        if self._spill_writer is not None:
-            self._spill_writer.stop()
+        if self._spill_finalizer is not None:
+            self._spill_finalizer()  # runs writer.stop() now; a finalizer runs at most once
+            self._spill_finalizer = None
             self._spill_writer = None
 
     def _spill_error(self, pending: _PendingSpill) -> RuntimeError:
@@ -651,66 +493,17 @@ class FragmentBuffer:
             ):
                 raise self._spill_error(chunk_ref) from chunk_ref.error
 
-    def _get_spill_path(self) -> Path:
-        """Return a unique path for a spilled chunk file."""
-        if self._temp_dir is None:
-            if self._spill_dir is not None:
-                self._spill_dir.mkdir(parents=True, exist_ok=True)
-                self._temp_dir = tempfile.mkdtemp(dir=self._spill_dir, prefix="rigel_buf_")
-            else:
-                self._temp_dir = tempfile.mkdtemp(prefix="rigel_buf_")
-        idx = self._n_spilled
-        return Path(self._temp_dir) / f"chunk_{idx:04d}.arrow"
-
     # -- Iteration ------------------------------------------------------------
-
-    def __len__(self) -> int:
-        return self.total_fragments
-
-    def __iter__(self) -> Iterator[BufferedFragment]:
-        """Iterate over all buffered fragments.
-
-        Yields lightweight ``BufferedFragment`` views.  Spilled chunks
-        are loaded from disk one at a time so only one extra chunk is
-        in memory at any moment.
-        """
-        for chunk in self.iter_chunks():
-            for i in range(chunk.size):
-                yield chunk[i]
-
-    def iter_chunks(self) -> Iterator[_FinalizedChunk]:
-        """Iterate over finalized chunks.
-
-        In-memory chunks are yielded directly.  Spilled chunks are
-        loaded from disk on demand.
-        """
-        for idx in range(len(self._chunks)):
-            chunk_ref = self._chunks[idx]
-            if isinstance(chunk_ref, Path):
-                yield _load_chunk(chunk_ref)
-            elif isinstance(chunk_ref, _PendingSpill):
-                path = self._wait_pending_spill(chunk_ref)
-                self._chunks[idx] = path
-                yield _load_chunk(path)
-            else:
-                yield chunk_ref
 
     def iter_chunks_consuming(self) -> Iterator[_FinalizedChunk]:
         """Yield chunks one at a time, releasing each after the caller advances.
 
         After this method returns, the buffer is empty.  Spilled chunk
         files are deleted as they are consumed.
-
-        This is the streaming counterpart to :meth:`iter_chunks`.  Use
-        it when chunks will not be revisited — the typical case during
-        scoring, where each chunk is scored exactly once.
         """
         while self._chunks:
             chunk_ref = self._chunks.popleft()
-            if isinstance(chunk_ref, Path):
-                chunk = _load_chunk(chunk_ref)
-                chunk_ref.unlink(missing_ok=True)
-            elif isinstance(chunk_ref, _PendingSpill):
+            if isinstance(chunk_ref, _PendingSpill):
                 path = self._wait_pending_spill(chunk_ref)
                 chunk = _load_chunk(path)
                 path.unlink(missing_ok=True)
@@ -730,9 +523,6 @@ class FragmentBuffer:
             error = exc
         finally:
             self._stop_spill_writer()
-            if self._temp_dir is not None:
-                shutil.rmtree(self._temp_dir, ignore_errors=True)
-                self._temp_dir = None
         if error is not None:
             raise error
 
@@ -741,53 +531,3 @@ class FragmentBuffer:
 
     def __exit__(self, *exc):
         self.cleanup()
-
-    @staticmethod
-    def _weak_cleanup(buf: "FragmentBuffer") -> None:
-        """Release callback for weakref.finalize."""
-        try:
-            buf._wait_all_pending_spills()
-        except BaseException:
-            pass
-        try:
-            buf._stop_spill_writer()
-        except BaseException:
-            pass
-        if buf._temp_dir is not None:
-            shutil.rmtree(buf._temp_dir, ignore_errors=True)
-            buf._temp_dir = None
-
-    # -- Diagnostics ----------------------------------------------------------
-
-    def summary(self) -> dict:
-        """Return a JSON-serializable summary of buffer state."""
-        n_mem = sum(1 for c in self._chunks if isinstance(c, _FinalizedChunk))
-        n_pending = 0
-        n_failed = 0
-        n_disk = 0
-        for c in self._chunks:
-            if isinstance(c, Path):
-                n_disk += 1
-            elif isinstance(c, _PendingSpill):
-                if not c.done.is_set():
-                    n_pending += 1
-                elif c.error is not None:
-                    n_failed += 1
-                else:
-                    n_disk += 1
-        return {
-            "total_fragments": self.total_fragments,
-            "n_chunks": len(self._chunks),
-            "chunks_finalized": self._chunks_finalized,
-            "chunks_spilled": self._n_spilled,
-            "in_memory_chunks": n_mem,
-            "on_disk_chunks": n_disk,
-            "pending_spill_chunks": n_pending,
-            "chunks_pending_spill_peak": self._chunks_pending_spill_peak,
-            "failed_spill_chunks": n_failed,
-            "memory_bytes": self._memory_bytes,
-            "memory_bytes_peak": self._memory_bytes_peak,
-            "max_memory_bytes": self.max_memory_bytes,
-            "memory_mb": round(self._memory_bytes / 1024**2, 1),
-            "spill_submit_wall_sec": self._spill_submit_wall_sec,
-        }

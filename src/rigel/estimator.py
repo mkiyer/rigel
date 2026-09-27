@@ -4,9 +4,6 @@
 count accumulation combined with Bayesian abundance estimation via
 locus-level EM.
 
-For unambiguously-mapping fragments, assignment is deterministic.
-For ambiguous fragments, transcript abundances are estimated via
-per-locus EM, then counts are accumulated from the converged posterior.
 The EM starts from the warm start ``EMConfig.warm_start`` names and adds a
 pool-level gDNA-vs-RNA prior per locus (additive ``a_g`` on gDNA; ``a_r`` on
 the RNA pool, shared among the RNA components in proportion to their current
@@ -14,9 +11,9 @@ EM count unless ``rna_prior_weight`` names the shares — em_solver.cpp
 ``apply_grouped_prior_update``). Nothing in production fills that lane yet, so
 the transcript distribution within the RNA pool is the data's.
 
-Data containers (``ScoredFragments``, ``Locus``, ``LocusPartition``)
-live in ``rigel.scored_fragments``; the per-locus prior is assembled in
-``rigel.calibration.priors``.
+The data containers ``ScoredFragments`` and ``LocusPartition`` live in
+``rigel.scored_fragments`` and ``MultiLocus`` in ``rigel.locus``; the
+per-locus prior is assembled in ``rigel.calibration.priors``.
 """
 
 import logging
@@ -139,20 +136,13 @@ class AbundanceEstimator:
 
     Accumulates per-transcript and per-gene fragment counts from both
     deterministic (unambig) and probabilistic (EM) assignment paths.
-    Estimates transcript-level mRNA and gDNA abundances.
+    Estimates transcript abundances and each locus's gDNA count.
 
     Locus-level EM architecture::
 
         Per locus:
-        [0, n_t)       - transcript components (mRNA + synthetic nRNA)
-        [n_t]          - gDNA: ONE shadow per locus
-
-    Fragment routing:
-
-    - SPLICED_ANNOT + unambig -> deterministic mRNA (no EM)
-    - All other -> enter locus EM
-      - Spliced fragments: transcript candidates only
-      - Unspliced fragments: transcript + gDNA candidates
+        [0, n_t)       - transcript components (annotated transcripts + synthetic nRNA spans)
+        [n_t]          - gDNA: ONE component per locus
 
     Parameters
     ----------
@@ -217,11 +207,6 @@ class AbundanceEstimator:
         # Per-transcript locus_id assignment (-1 = no locus).
         self.locus_id_per_transcript = np.full(num_transcripts, -1, dtype=np.int32)
 
-        # Per-transcript gDNA locus attribution (for reporting).
-        self.gdna_locus_counts = np.zeros(
-            (num_transcripts, NUM_SPLICE_STRAND_COLS), dtype=np.float64
-        )
-
         # Per-transcript confidence tracking:
         self._em_posterior_sum: np.ndarray | None = None
         self._em_n_assigned: np.ndarray | None = None
@@ -249,7 +234,7 @@ class AbundanceEstimator:
 
     @property
     def t_counts(self) -> np.ndarray:
-        """Total transcript counts (unambig + EM), shape (N_t, 8)."""
+        """Total transcript counts (unambig + EM), shape (N_t, NUM_SPLICE_STRAND_COLS) = (N_t, 10)."""
         return self.unambig_counts + self.em_counts
 
     # ------------------------------------------------------------------
@@ -275,7 +260,7 @@ class AbundanceEstimator:
         Parameters
         ----------
         partition_tuples : list[tuple]
-            List of 9-tuples, one per locus, containing partition arrays.
+            List of 7-tuples, one per locus, containing partition arrays.
         locus_transcript_indices : list[np.ndarray]
             List of int32 transcript index arrays, one per locus.
         gdna_prior_count : np.ndarray
@@ -295,9 +280,10 @@ class AbundanceEstimator:
             plumbing error this axis invites, so the C++ refuses any length but
             ``n_transcripts`` or 0.
         gdna_eff_len : np.ndarray, optional
-            float64 array of length ``n_loci``: FL-marginal overlap
-            effective length for each locus's gDNA component; the pipeline always
-            passes it, and ``None`` means ones.
+            float64 array of length ``n_loci``: the capture-contracted effective
+            length of each locus's gDNA component (``LocusPriors.gdna_eff_len``,
+            uncontracted off capture); the pipeline always passes it, and ``None``
+            means ones.
         em_iterations, em_convergence_delta
             EM algorithm parameters.
         emit_locus_stats : bool
@@ -308,13 +294,14 @@ class AbundanceEstimator:
         Returns
         -------
         tuple
-            (total_gdna_em, locus_mrna, locus_gdna[, winner_tid, winner_post, n_candidates])
+            (total_gdna_em, locus_rna, locus_gdna[, winner_tid, winner_post, n_candidates]):
+            the EM's total gDNA count, then per locus its RNA count (annotated transcripts
+            plus synthetic nRNA spans) and its gDNA count.
         """
         n_transcripts = self.num_transcripts
-        # Pass per-transcript FL-marginal effective length L̃_t to the
-        # C++ EM.  The EM uses log L̃_t per component inside the E-step
-        # (and inside assign_posteriors) instead of any per-fragment
-        # length correction.
+        # The EM's per-transcript effective lengths. The C++ EM subtracts log L_t
+        # per component in the E-step and in assign_posteriors, in place of any
+        # per-fragment length correction.
         t_eff_lens = np.ascontiguousarray(self._t_eff_len_em, dtype=np.float64)
         n_loci = len(partition_tuples)
 
@@ -363,7 +350,7 @@ class AbundanceEstimator:
 
         (
             total_gdna_em,
-            locus_mrna,
+            locus_rna,
             locus_gdna,
             locus_stats_raw,
             out_winner_tid,
@@ -380,7 +367,6 @@ class AbundanceEstimator:
             t_rna_prior_weight,
             {"coverage": 0, "prior": 1, "uniform": 2}[self.em_config.warm_start],
             self.em_counts,
-            self.gdna_locus_counts,
             self._em_posterior_sum,
             self._em_n_assigned,
             em_iterations,
@@ -403,7 +389,7 @@ class AbundanceEstimator:
         if emit_assignments:
             return (
                 total_gdna_em,
-                np.asarray(locus_mrna),
+                np.asarray(locus_rna),
                 np.asarray(locus_gdna),
                 np.asarray(out_winner_tid),
                 np.asarray(out_winner_post),
@@ -411,7 +397,7 @@ class AbundanceEstimator:
             )
         return (
             total_gdna_em,
-            np.asarray(locus_mrna),
+            np.asarray(locus_rna),
             np.asarray(locus_gdna),
         )
 
@@ -444,8 +430,8 @@ class AbundanceEstimator:
         -------
         transcript_id, gene_id, gene_name, gene_type : identifiers + biotype
         ref, strand, start, end, length : genomic locus + spliced length
-        effective_length : bias-corrected effective length
-        em_effective_length : FL-marginal effective length used by the EM
+        effective_length : FL-marginal effective length floored at 1 (TPM's length)
+        em_effective_length : the EM's effective length
         locus_id : int32, EM locus (-1 if no locus)
         nrna_id : str, parent nRNA entity transcript ID ("." if none or is_nrna)
         is_basic, is_mane, is_nrna : flags
@@ -682,8 +668,8 @@ class AbundanceEstimator:
         Columns
         -------
         nrna_id : str, transcript ID for the nRNA entity
-        effective_length : bias-corrected effective length
-        em_effective_length : FL-marginal effective length used by the EM
+        effective_length : FL-marginal effective length floored at 1 (TPM's length)
+        em_effective_length : the EM's effective length
         locus_id : int32, EM locus
         is_synthetic : bool, True for RIGEL-generated synthetics
         n_contributing_transcripts : int, annotated transcripts merged

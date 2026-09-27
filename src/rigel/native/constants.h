@@ -1,9 +1,7 @@
 /**
  * constants.h — Shared constants and helper types for rigel C++ extensions.
  *
- * Must match the Python IntEnum values exactly (rigel.types,
- * rigel.categories).  Included by resolve.cpp, bam_scanner.cpp, and
- * any future native modules.
+ * The enum-mirror constants must match the Python values each block names.
  */
 
 #pragma once
@@ -11,7 +9,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
-#include <limits>
 #include <numeric>
 #include <set>
 #include <string>
@@ -67,8 +64,7 @@ static constexpr int32_t FRAG_CHIMERIC          = 4;
 
 // Assignment flags bitfield (written to BAM as ZF:i tag).
 // ZF is the unified per-fragment outcome bitfield.  See
-// src/rigel/annotate.py for the full schema + invariants.  C++ stamp
-// sites reference only the composed values below.
+// src/rigel/annotate.py for the full schema + invariants.
 //
 // Primitive bits
 static constexpr int32_t AF_RESOLVED_BIT         = 0x01;
@@ -80,15 +76,9 @@ static constexpr int32_t AF_INTERGENIC_BIT       = 0x20;
 static constexpr int32_t AF_CHIMERIC_BIT         = 0x40;
 static constexpr int32_t AF_MULTIMAPPER_DROP_BIT = 0x80;
 
-// Canonical composed values (the only legitimate ZF outputs).
-static constexpr int32_t AF_UNRESOLVED        = 0x00;
-static constexpr int32_t AF_MRNA              = AF_RESOLVED_BIT | AF_MRNA_BIT;               // 0x03
-static constexpr int32_t AF_NRNA              = AF_RESOLVED_BIT | AF_NRNA_BIT;               // 0x09
-static constexpr int32_t AF_NRNA_SYNTH        = AF_NRNA | AF_SYNTHETIC_BIT;                  // 0x19
-static constexpr int32_t AF_GDNA_EM           = AF_RESOLVED_BIT | AF_GDNA_BIT;               // 0x05
-static constexpr int32_t AF_GDNA_INTERGENIC   = AF_GDNA_EM | AF_INTERGENIC_BIT;              // 0x25
-static constexpr int32_t AF_CHIMERIC          = AF_CHIMERIC_BIT;                             // 0x40
-static constexpr int32_t AF_MULTIMAPPER_DROP  = AF_MULTIMAPPER_DROP_BIT;                     // 0x80
+// The composed values the C++ stamp sites write.
+static constexpr int32_t AF_GDNA_INTERGENIC   = AF_RESOLVED_BIT | AF_GDNA_BIT | AF_INTERGENIC_BIT;  // 0x25
+static constexpr int32_t AF_MULTIMAPPER_DROP  = AF_MULTIMAPPER_DROP_BIT;                            // 0x80
 
 // ================================================================
 // Scoring constants (shared by scoring.cpp and Python side)
@@ -119,12 +109,6 @@ struct MergeResult {
     std::vector<int32_t> t_inds;
     int32_t criteria;
     bool is_empty() const { return t_inds.empty(); }
-};
-
-// Chimera detection result
-struct ChimeraResult {
-    int32_t type;
-    int32_t gap;
 };
 
 // SJ exact-match map key
@@ -191,25 +175,18 @@ struct RawResolveResult {
     int32_t merge_criteria = MC_EMPTY;
     int32_t read_length = 0;
     int32_t chimera_type = CHIMERA_NONE;
-    int32_t chimera_gap = -1;
     // Parallel arrays to t_inds
     std::vector<int32_t> frag_lengths;
     std::vector<int32_t> t_exon_bp;
     std::vector<int32_t> t_intron_bp;
 
-    // --- strand-aware collapsed overlap counts ---
-    // bp of fragment overlapping ANY (+/-)-strand transcript's exon / span.
-    int32_t exon_bp_pos = 0;
-    int32_t exon_bp_neg = 0;
-    int32_t tx_bp_pos = 0;
-    int32_t tx_bp_neg = 0;
     // Per-fragment count of CIGAR splice junctions rejected by the
     // alignment-time blacklist.  Caller sets this BEFORE calling
     // _resolve_core so the resolver can promote SPLICE_UNSPLICED
     // to SPLICE_ARTIFACT.
     int32_t n_sj_blacklisted = 0;
 
-    // The per-sj SJ strand table's key ---
+    // The per-sj strand table's key ---
     // Coordinates of the LEFTMOST ANNOTATED CIGAR-N sj this fragment
     // crosses; -1 when it crosses none.  `sj_strand` above is the fragment's
     // motif strand (one XS/ts tag per fragment), which completes the key.
@@ -301,7 +278,7 @@ inline std::vector<int32_t> vec_intersect(const std::vector<int32_t>& a,
     return out;
 }
 
-// Progressive set merging identical to Python merge_sets_with_criteria().
+// Progressive set merging.
 inline MergeResult merge_sets(const std::vector<std::vector<int32_t>>& sets) {
     if (sets.empty()) return {{}, MC_EMPTY};
 
@@ -364,7 +341,7 @@ inline MergeResult merge_sets(const std::vector<std::vector<int32_t>>& sets) {
 // ⚠ Measured cost of the old predicate: 4,087 gDNA fragments dropped per ladder condition -- 0.04 % of
 // fragments carrying 2.4 % of every boundary crossing, because it fires exactly where transcripts are
 // short and dense, which is exactly where a fragment crosses many boundaries.
-inline ChimeraResult detect_chimera(
+inline int32_t detect_chimera(
     const std::vector<ExonBlock>& exons,
     const std::vector<std::vector<int32_t>>& exon_t_sets,
     int32_t max_fragment_length)
@@ -375,7 +352,7 @@ inline ChimeraResult detect_chimera(
         if (!exon_t_sets[i].empty()) item_idx.push_back(static_cast<int>(i));
 
     int n = static_cast<int>(item_idx.size());
-    if (n <= 1) return {CHIMERA_NONE, -1};
+    if (n <= 1) return CHIMERA_NONE;
 
     // Union-find
     std::vector<int> parent(n);
@@ -406,7 +383,7 @@ inline ChimeraResult detect_chimera(
     std::sort(unique_roots.begin(), unique_roots.end());
     unique_roots.erase(std::unique(unique_roots.begin(), unique_roots.end()),
                        unique_roots.end());
-    if (unique_roots.size() <= 1) return {CHIMERA_NONE, -1};
+    if (unique_roots.size() <= 1) return CHIMERA_NONE;
 
     std::vector<std::vector<int>> components(unique_roots.size());
     for (int i = 0; i < n; i++) {
@@ -431,8 +408,8 @@ inline ChimeraResult detect_chimera(
     // inward-facing pair carry the same strand and an outward-facing pair does not. What remains is
     // whether a molecule of the implied length could exist in this library.
     // ⚠ The span is the implied FRAGMENT LENGTH -- outermost start to outermost end -- and NOT
-    // `min_gap` below: the two differ by the blocks' own lengths, and the gap would admit a molecule
-    // longer than the library can contain.
+    // the gap between the blocks: the two differ by the blocks' own lengths, and the gap would admit a
+    // molecule longer than the library can contain.
     if (chimera_type == CHIMERA_CIS_STRAND_SAME) {
         int32_t lo = exons[item_idx[0]].start;
         int32_t hi = exons[item_idx[0]].end;
@@ -440,27 +417,9 @@ inline ChimeraResult detect_chimera(
             lo = std::min(lo, exons[item_idx[i]].start);
             hi = std::max(hi, exons[item_idx[i]].end);
         }
-        if (hi - lo <= max_fragment_length) return {CHIMERA_NONE, -1};
+        if (hi - lo <= max_fragment_length) return CHIMERA_NONE;
     }
-
-    // Minimum gap between components
-    int32_t min_gap = std::numeric_limits<int32_t>::max();
-    for (size_t ci = 0; ci < components.size(); ci++) {
-        for (size_t cj = ci + 1; cj < components.size(); cj++) {
-            for (int bi : components[ci]) {
-                for (int bj : components[cj]) {
-                    const auto& blki = exons[item_idx[bi]];
-                    const auto& blkj = exons[item_idx[bj]];
-                    int32_t gap;
-                    if (blki.end <= blkj.start) gap = blkj.start - blki.end;
-                    else if (blkj.end <= blki.start) gap = blki.start - blkj.end;
-                    else gap = 0;
-                    min_gap = std::min(min_gap, gap);
-                }
-            }
-        }
-    }
-    return {chimera_type, min_gap};
+    return chimera_type;
 }
 
 }  // namespace rigel

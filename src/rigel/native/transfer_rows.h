@@ -3,24 +3,18 @@
 // Every function here is a pure function of one face's or one node's numbers over the solve grid `lam`
 // (`f_g = sigma(lam)`, K points), writing a max-normalised log-row. The gates are the transfer gates
 // (`tests/calibration/test_transfer_*.py`), which recompute with these very functions.
-//
-// Numerics: every operation is the Python one term for term (max-normalisation, the edge-padded Gaussian
-// blur at half-width ceil(4 sqrt(v) / dlam), linear interpolation with numpy's end rules, trigamma for the
-// counting variance, the products in the Python's order). Summation orders differ from numpy's, so a port
-// is held to the replay's derived budget, not to bits.
 #pragma once
 
 #include <algorithm>
 #include <cmath>
-#include <cstdint>
 #include <limits>
 #include <vector>
 
 namespace transfer_rows {
 
-constexpr double EPS = 1.0e-9;  // transfer_rows.EPS
+constexpr double EPS = 1.0e-9;
 constexpr double TINY = 1.0e-300;
-//: the five kinds of composition rule a directed face can carry (faces.py)
+//: the five kinds of composition rule a directed face can carry
 constexpr int NONE = 0, FORWARD = 1, TRANSPORT = 2, SPLICE_OUT = 3, EDGE = 4, LEVEL = 5;
 
 // ---- scalar pieces ---------------------------------------------------------------------------------
@@ -211,7 +205,7 @@ inline void splice_out_row(const double* row_e, const double* lam, int K, double
     // its node-independent half hoisted: the gDNA arm's log and the RNA arm's unspliced density are the
     // same at every node (only the node's spliced density s joins the RNA arm), so they are computed once
     // per face — the same operations in the same order per cell, so the same bits, at half the node loop's
-    // transcendentals (the census: this marginal was 65 % of the deep library's pass, DESIGN.md §6b.15.5)
+    // transcendentals
     double* g_log = S.g.data();
     double* r_unspl = S.h.data();
     for (int j = 0; j < K; ++j) {
@@ -252,7 +246,7 @@ inline void level_row(const double* row_b, const double* lam, int K, const doubl
 inline void level_map_lambda(const double* lam, int K, double density_b, double opportunity_i, double total_i,
                              double* out) {
     for (int j = 0; j < K; ++j) {
-        const double f = std::clamp(sigmoid(lam[j]) * density_b * opportunity_i / total_i, 1e-9, 1.0 - 1e-9);
+        const double f = std::clamp(sigmoid(lam[j]) * density_b * opportunity_i / total_i, EPS, 1.0 - EPS);
         out[j] = std::log(f / (1.0 - f));
     }
 }
@@ -359,9 +353,8 @@ inline bool flux_level(const double* u, int K, double count, double rate, double
     return true;
 }
 
-// strand_row_logodds(lam, u_pos, u_neg, live_pos, kappa, od_g, od_r, f_ref), max-normalised: one
-// single-strand node's own strand log-likelihood over the grid, the variance frozen at f_ref
-// (`simplex_logodds._mixture_strand_loglik` with the dead strand's share zero).
+// strand_row(lam, u_pos, u_neg, live_pos, kappa, od_g, od_r, f_ref), max-normalised: one single-strand
+// node's own strand log-likelihood over the grid, the variance frozen at f_ref.
 inline void strand_row(const double* lam, int K, double u_pos, double u_neg, bool live_pos, double kappa,
                        double od_g, double od_r, double f_ref, double* out) {
     const double n = u_pos + u_neg;

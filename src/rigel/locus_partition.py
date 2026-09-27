@@ -14,38 +14,13 @@ import numpy as np
 from .native import (
     build_partition_offsets,
     scatter_candidates_f32,
-    scatter_candidates_f64,
     scatter_candidates_i32,
     scatter_candidates_u8,
     scatter_units_f32,
-    scatter_units_f64,
-    scatter_units_i32,
     scatter_units_i64,
     scatter_units_u8,
 )
 from .scored_fragments import LocusPartition, ScoredFragments
-
-
-def _float_candidate_scatter(arr: np.ndarray):
-    if arr.dtype == np.float32:
-        return scatter_candidates_f32
-    if arr.dtype == np.float64:
-        return scatter_candidates_f64
-    raise TypeError(f"Expected float32 or float64 candidate payload, got {arr.dtype}")
-
-
-def _float_unit_scatter(arr: np.ndarray):
-    if arr.dtype == np.float32:
-        return scatter_units_f32
-    if arr.dtype == np.float64:
-        return scatter_units_f64
-    raise TypeError(f"Expected float32 or float64 unit payload, got {arr.dtype}")
-
-
-# Dtype-driven selectors: a table entry whose scatter_fn is one of these is
-# resolved to its concrete scatter by calling it with the global array (no
-# by-name special-casing — a new float array routes correctly automatically).
-_FLOAT_SELECTORS = (_float_candidate_scatter, _float_unit_scatter)
 
 
 def partition_and_free(
@@ -76,16 +51,14 @@ def partition_and_free(
     # ---- Scatter per-candidate arrays (largest first) ----
     # g_offsets must stay alive during this phase.
     CAND_ARRAYS = [
-        ("log_liks", _float_candidate_scatter),
-        ("coverage_weights", _float_candidate_scatter),
+        ("log_liks", scatter_candidates_f32),
+        ("coverage_weights", scatter_candidates_f32),
         ("t_indices", scatter_candidates_i32),
         ("count_cols", scatter_candidates_u8),
     ]
     cand_results = {}
     for attr, scatter_fn in CAND_ARRAYS:
         global_arr = getattr(em_data, attr)
-        if scatter_fn in _FLOAT_SELECTORS:
-            scatter_fn = scatter_fn(global_arr)
         cand_results[attr] = scatter_fn(
             global_arr, em_data.offsets, locus_units, offsets_list, n_loci
         )
@@ -97,9 +70,7 @@ def partition_and_free(
 
     # ---- Scatter per-unit arrays ----
     UNIT_ARRAYS = [
-        ("gdna_log_liks", _float_unit_scatter),
-        ("locus_t_indices", scatter_units_i32),
-        ("locus_count_cols", scatter_units_u8),
+        ("gdna_log_liks", scatter_units_f32),
         ("is_spliced", scatter_units_u8),
         ("frag_ids", scatter_units_i64),
         ("frag_class", scatter_units_u8),
@@ -112,8 +83,6 @@ def partition_and_free(
             global_arr = global_arr.view(np.uint8)
         elif global_arr.dtype == np.int8:
             global_arr = global_arr.view(np.uint8)
-        elif scatter_fn in _FLOAT_SELECTORS:
-            scatter_fn = scatter_fn(global_arr)
         unit_results[attr] = scatter_fn(global_arr, locus_units, n_loci)
         setattr(em_data, attr, None)
         del global_arr
@@ -132,8 +101,6 @@ def partition_and_free(
             coverage_weights=cand_results["coverage_weights"][li],
             is_spliced=unit_results["is_spliced"][li],
             gdna_log_liks=unit_results["gdna_log_liks"][li],
-            locus_t_indices=unit_results["locus_t_indices"][li],
-            locus_count_cols=unit_results["locus_count_cols"][li],
             frag_ids=unit_results["frag_ids"][li],
             frag_class=unit_results["frag_class"][li],
             splice_type=unit_results["splice_type"][li],

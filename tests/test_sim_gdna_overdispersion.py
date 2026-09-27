@@ -47,7 +47,7 @@ def test_scenario_gdna_config_both_knobs_reach_the_engine():
 @pytest.mark.parametrize("od", [0.05, 0.2])
 def test_whole_genome_gdna_strand_regions_overdispersion(od):
     """WholeGenomeSimulator (the suite simulator) builds per-ref strand regions at target od."""
-    from rigel.sim.whole_genome import WholeGenomeSimulator
+    from rigel.sim.wgs_engine import WholeGenomeSimulator
     from rigel.transcript import Transcript
     from rigel.types import Interval, Strand
 
@@ -75,6 +75,6 @@ def test_whole_genome_gdna_strand_regions_overdispersion(od):
 
 def test_whole_genome_gdna_config_default_no_overdispersion():
     """Default GDNASimConfig has overdispersion 0 (no strand regions ⇒ uniform 50/50)."""
-    from rigel.sim.whole_genome import GDNASimConfig
+    from rigel.sim.wgs_config import GDNASimConfig
 
     assert GDNASimConfig().strand_overdispersion == 0.0

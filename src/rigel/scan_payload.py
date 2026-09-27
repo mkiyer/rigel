@@ -18,7 +18,7 @@ THE AXES — three of them, off by one from each other per reference::
     boundaries            boundary 1    boundary 2               c - 2 = 2 contiguous boundaries
 
 A reference contributing ``c`` region_bounds owns ``c − 1`` regions and ``c − 2`` interior boundaries; one contributing
-none owns neither, which is legal. SpliceJunction boundaries are their own axis, sliced by ``ref_sj_offsets``; the
+none owns neither, which is legal. Splice-junction (sj) boundaries are their own axis, sliced by ``ref_sj_offsets``; the
 flat slot order is the per-reference banks concatenated in reference order, which is what lets a
 sj-boundary id simply BE its slot.
 
@@ -93,11 +93,10 @@ POOL_RNA_SPLICED = 4  # used an annotated sj on its one surviving path — certi
 
 @dataclass(frozen=True, slots=True)
 class ScanQC:
-    """The denominators the accumulator is required to emit.
+    """The accumulator's QC counters.
 
-    Not optional and not derivable afterwards: every conservation statement downstream must be able to
-    name what it excluded. Typed rather than a dict so that a misspelled denominator fails at this
-    boundary instead of silently reading as zero somewhere far away.
+    Typed rather than a dict so that a misspelled key fails at this boundary instead of silently
+    reading as zero somewhere far away.
 
     The field names are the specification's own ``Tally.qc`` keys.
     """
@@ -118,10 +117,7 @@ class ScanQC:
         expected = {field.name for field in dataclasses.fields(cls)}
         missing = expected - set(qc)
         if missing:
-            raise ValueError(
-                f"the scan's qc block is missing {sorted(missing)}. Every one of these is a reported "
-                f"denominator, so a missing key is a statement that cannot name what it excluded."
-            )
+            raise ValueError(f"the scan's qc block is missing {sorted(missing)}.")
         return cls(**{name: int(qc[name]) for name in expected})
 
 
@@ -276,13 +272,14 @@ SINGLE_COLUMN_AXES: tuple[tuple[str, str, Any], ...] = (
     ("boundary_spliced_mass", "boundary", np.float64),
 )
 
-#: EVERY additive array channel, with the axis it is indexed on — the two-column banks plus the
-#: three that are not banks. ``"library"`` means the axis is library-wide rather than per reference.
+#: EVERY additive array channel, with the axis it is indexed on: the two-column banks, the
+#: single-column banks and the two length histograms. ``"library"`` means the axis is library-wide
+#: rather than per reference.
 #:
-#: Derived from `BANK_AXES` rather than restated, because the drain must add every additive channel and
-#: miss none. `region_start_count` and `deposited_lengths` are the two externally-checkable invariants (each
-#: sums to `qc.deposited`), so a drain that skipped either would be caught — but `pool_lengths` would just
-#: go quietly short, and nothing downstream would look wrong.
+#: Derived from the two tables above rather than restated, because the drain must add every additive
+#: channel and miss none. `region_start_count` and `deposited_lengths` are the two externally-checkable
+#: invariants (each sums to `qc.deposited`), so a drain that skipped either would be caught — but
+#: `pool_lengths` would just go quietly short, and nothing downstream would look wrong.
 ADDITIVE_AXES: tuple[tuple[str, str], ...] = (
     *((name, axis) for name, axis, _dtype in BANK_AXES),
     *((name, axis) for name, axis, _dtype in SINGLE_COLUMN_AXES),
@@ -450,7 +447,7 @@ class DeferredFragments:
         return cls(**arrays)
 
     def observed_introns_of(self, i: int) -> np.ndarray:
-        """Fragment ``i``'s observed introns as an ``[k, 2]`` view. RegionBound under **every** hypothesis."""
+        """Fragment ``i``'s observed introns as an ``[k, 2]`` view. Spliced under **every** hypothesis."""
         lo, hi = int(self.observed_intron_offsets[i]), int(self.observed_intron_offsets[i + 1])
         return self.observed_introns[2 * lo : 2 * hi].reshape(hi - lo, 2)
 
@@ -724,7 +721,7 @@ class AccumulatorPayload:
             ("ref_boundary_offsets", np.maximum(per_ref_region_bounds - 2, 0)),
         ):
             expected = np.zeros(n_refs + 1, np.int64)
-            np.cumsum(np.where(per_ref_region_bounds > 0, per_ref, 0), out=expected[1:])
+            np.cumsum(per_ref, out=expected[1:])
             if not np.array_equal(offsets[name], expected):
                 bad = int(np.argmax(offsets[name] != expected))
                 raise ValueError(

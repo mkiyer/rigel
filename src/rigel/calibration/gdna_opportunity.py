@@ -78,6 +78,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .signature import RegionType
+
 if TYPE_CHECKING:
     from ..index import TranscriptIndex
 
@@ -88,9 +90,6 @@ __all__ = [
     "gdna_opportunity_from_index",
     "total_opportunity",
 ]
-
-#: Coarse region types, as :func:`rigel.calibration.signature.coarse_type_array` emits them.
-_TYPE_INTERGENIC, _TYPE_INTRON, _TYPE_EXON = 0, 1, 2
 
 
 def _ramp(values: np.ndarray, max_width: int) -> np.ndarray:
@@ -245,21 +244,18 @@ def gdna_opportunity_from_index(index: "TranscriptIndex", max_width: int) -> Gdn
         return GdnaOpportunity(zero, zero.copy(), zero.copy(), zero.copy(), zero.copy())
 
     lengths = np.concatenate(region_lengths)
-    types_by_region = types[: len(lengths)]
     left = np.concatenate(boundary_left) if boundary_left else np.zeros(0, np.int64)
     right = np.concatenate(boundary_right) if boundary_right else np.zeros(0, np.int64)
     pairs = np.concatenate(boundary_pairs, axis=1) if boundary_pairs else np.zeros((2, 0), np.int64)
 
-    intron_exon = (pairs[0] == _TYPE_INTRON) & (pairs[1] == _TYPE_EXON)
-    intergenic_exon = (pairs[0] == _TYPE_INTERGENIC) & (pairs[1] == _TYPE_EXON)
+    intron_exon = (pairs[0] == RegionType.INTRON) & (pairs[1] == RegionType.EXON)
+    intergenic_exon = (pairs[0] == RegionType.INTERGENIC) & (pairs[1] == RegionType.EXON)
 
     return GdnaOpportunity(
         intergenic_contained=contained_opportunity(
-            lengths[types_by_region == _TYPE_INTERGENIC], max_width
+            lengths[types == RegionType.INTERGENIC], max_width
         ),
-        intronic_contained=contained_opportunity(
-            lengths[types_by_region == _TYPE_INTRON], max_width
-        ),
+        intronic_contained=contained_opportunity(lengths[types == RegionType.INTRON], max_width),
         intron_exon_crossing=crossing_opportunity(left[intron_exon], right[intron_exon], max_width),
         intergenic_exon_crossing=crossing_opportunity(
             left[intergenic_exon], right[intergenic_exon], max_width

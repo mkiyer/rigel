@@ -1,8 +1,6 @@
 """The oracle arms — one condition scanned, split by true origin, calibrated at pass-0 and in full, and scored
 per object against T. A helper (no row on the shelf), shared by `solvability_audit.py`, `calibration_vs_oracle.py`
-and `calibration_oracle.py --build`, and gated by `tests/calibration/test_oracle_arms.py`. It was the instrument
-`pass0_vs_oracle.py` until 2026-09-22; its own report — the C_input ceiling and the C_info classification, both
-pricing the retired length channel — went with it.
+and `calibration_oracle.py --build`, and gated by `tests/calibration/test_oracle_arms.py`.
 
 T is the production accumulator run on the BAM split by origin and asserted to sum to the full payload, in the
 DRAINED frame (the partitions are lifted by replaying the whole's choices, `lift_drain_parts`). The arms are

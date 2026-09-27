@@ -38,12 +38,8 @@ namespace nb = nanobind;
 
 namespace rigel {
 
-static inline uint16_t checked_u16_buffer_value(
-    int32_t value,
-    const char* column,
-    bool zero_if_missing = false)
+static inline uint16_t checked_u16_buffer_value(int32_t value, const char* column)
 {
-    if (value < 0 && zero_if_missing) return 0;
     if (value < 0 || value > static_cast<int32_t>(std::numeric_limits<uint16_t>::max())) {
         throw std::runtime_error(
             std::string("Fragment buffer column '") + column
@@ -69,12 +65,11 @@ public:
     int32_t merge_criteria = MC_EMPTY;
     int32_t read_length = 0;
     int32_t chimera_type = CHIMERA_NONE;
-    int32_t chimera_gap = -1;
     int32_t num_hits = 1;
     int32_t nm = 0;
 
     // Leftmost ANNOTATED sj (ref, start, end); -1 when the fragment
-    // crosses none.  With `sj_strand` this is the per-sj SJ strand
+    // crosses none.  With `sj_strand` this is the per-sj strand
     // table's key — see RawResolveResult in constants.h for why it is the
     // first ANNOTATED sj and why only one sj is credited.
     int32_t sj_key_ref = -1;
@@ -85,12 +80,6 @@ public:
     std::vector<int32_t> frag_lengths;      // -1 if missing
     std::vector<int32_t> exon_bp;
     std::vector<int32_t> intron_bp;
-
-    // strand-aware collapsed overlap counts
-    int32_t exon_bp_pos = 0;
-    int32_t exon_bp_neg = 0;
-    int32_t tx_bp_pos = 0;
-    int32_t tx_bp_neg = 0;
 
     // The annotated introns found inside this fragment's UNSEQUENCED gaps, and whether the candidate
     // transcripts disagreed about them. Carried out of `RawResolveResult` unchanged.
@@ -127,10 +116,7 @@ public:
         return t_inds.empty() ? -1 : t_inds[0];
     }
 
-    // Fragment length has ONE definition: the accumulator's `L`, the total length of the fragment's own
-    // path (span minus region_bound introns, mate gap included), binned for every deposited fragment in
-    // `deposited_lengths`. There is no transcript-space length accessor.
-    // Return t_inds as a Python frozenset for compatibility
+    // Return t_inds as a Python frozenset
     nb::object get_t_inds() const {
         nb::set s;
         for (int32_t t : t_inds) s.add(nb::cast(t));
@@ -186,13 +172,8 @@ public:
         r.merge_criteria = cr.merge_criteria;
         r.read_length = cr.read_length;
         r.chimera_type = cr.chimera_type;
-        r.chimera_gap = cr.chimera_gap;
         r.exon_bp = std::move(cr.t_exon_bp);
         r.intron_bp = std::move(cr.t_intron_bp);
-        r.exon_bp_pos = cr.exon_bp_pos;
-        r.exon_bp_neg = cr.exon_bp_neg;
-        r.tx_bp_pos = cr.tx_bp_pos;
-        r.tx_bp_neg = cr.tx_bp_neg;
         r.sj_key_ref = cr.sj_key_ref;
         r.sj_key_start = cr.sj_key_start;
         r.sj_key_end = cr.sj_key_end;
@@ -213,7 +194,7 @@ public:
 };
 
 // ================================================================
-// FragmentAccumulator — C++ columnar buffer replacing _AccumulatorChunk
+// FragmentAccumulator — C++ columnar buffer
 // ================================================================
 
 class FragmentAccumulator {
@@ -359,8 +340,6 @@ struct ResolverScratch {
     std::vector<std::vector<int32_t>> transcript_t_sets;
     std::vector<std::vector<int32_t>> sj_t_sets;
     std::vector<int32_t> tmp_a;
-    std::vector<int32_t> tmp_b;
-    std::vector<int32_t> tmp_out;
     std::vector<int32_t> tmp_union;
     std::vector<int32_t> all_overlap_t;
     std::vector<int32_t> nrna_t;
@@ -396,8 +375,6 @@ struct ResolverScratch {
           transcript_t_sets(std::move(o.transcript_t_sets)),
           sj_t_sets(std::move(o.sj_t_sets)),
           tmp_a(std::move(o.tmp_a)),
-          tmp_b(std::move(o.tmp_b)),
-          tmp_out(std::move(o.tmp_out)),
           tmp_union(std::move(o.tmp_union)),
           all_overlap_t(std::move(o.all_overlap_t)),
           nrna_t(std::move(o.nrna_t))
@@ -418,8 +395,6 @@ struct ResolverScratch {
             transcript_t_sets = std::move(o.transcript_t_sets);
             sj_t_sets = std::move(o.sj_t_sets);
             tmp_a = std::move(o.tmp_a);
-            tmp_b = std::move(o.tmp_b);
-            tmp_out = std::move(o.tmp_out);
             tmp_union = std::move(o.tmp_union);
             all_overlap_t = std::move(o.all_overlap_t);
             nrna_t = std::move(o.nrna_t);
@@ -457,8 +432,6 @@ struct ResolverScratch {
         for (auto& v : transcript_t_sets) v.clear();
         sj_t_sets.clear();
         tmp_a.clear();
-        tmp_b.clear();
-        tmp_out.clear();
         tmp_union.clear();
         all_overlap_t.clear();
         nrna_t.clear();
@@ -653,8 +626,6 @@ public:
         scratch_ = ResolverScratch(n_transcripts_);
     }
 
-    /// Set gene strand mapping (for BAM scanner model training)
-
     /// Set per-transcript strand array (direct lookup, no gene indirection).
     void set_transcript_strands(const std::vector<int32_t>& t_strand) {
         t_strand_arr_ = t_strand;
@@ -688,9 +659,6 @@ public:
     // SPLICED_IMPLICIT detection
     // ----------------------------------------------------------------
 
-    /// Set the splicing-anchor tolerance K (bp) used for one-sided slack
-    /// in the SPLICED_IMPLICIT per-intron whole-containment discriminant.
-    /// K must be >= 0; default 0 (strict containment).
     /// The library's fragment-length limit (`BamScanConfig.max_frag_length`), used by
     /// `detect_chimera` to tell an ordinary genomic molecule from a rearrangement.
     void set_max_fragment_length(int32_t L) {
@@ -699,6 +667,9 @@ public:
         max_fragment_length_ = L;
     }
 
+    /// Set the splicing-anchor tolerance K (bp) used for one-sided slack
+    /// in the SPLICED_IMPLICIT per-intron whole-containment discriminant.
+    /// Negative K is clamped to 0; default 0 (strict containment).
     void set_splicing_anchor_tolerance(int32_t K) {
         if (K < 0) K = 0;
         splicing_anchor_tolerance_ = K;
@@ -850,10 +821,8 @@ public:
 private:
     /// Append every intron of ``t`` lying inside ``gap`` (±K), in genomic order.
     ///
-    /// ⛔ EVERY one, not the first. Returning the first and stopping is what made a mate gap spanning two
-    /// annotated introns keep only one region_bound -- measured at 98.5 % of the fragment-length tail that survived
-    /// the earlier single-region_bound form -- and it also broke the ambiguity test, because two transcripts differing only in their
-    /// SECOND intron read as agreeing.
+    /// ⛔ EVERY one, not the first. Stopping at the first would cut only one of two annotated introns a mate
+    /// gap spans, and two transcripts differing only in their SECOND intron would read as agreeing.
     inline void collect_transcript_introns_in_gap(int32_t t,
                                                   const GapBlock& gap,
                                                   int32_t K,
@@ -922,7 +891,7 @@ private:
         cr.gap_supporting_offsets.push_back(static_cast<int32_t>(cr.gap_supporting.size()));
     }
 
-    /// The empty path: region_bound nothing. ⚠ Idempotent, because two routes can both call for it.
+    /// The empty path: cut nothing. ⚠ Idempotent, because two routes can both call for it.
     static void emit_unspliced_hypothesis(RawResolveResult& cr) {
         for (int32_t h = 0; h < cr.n_gap_hypotheses(); ++h) {
             if (cr.gap_intron_offsets[h] == cr.gap_intron_offsets[h + 1]) return;
@@ -1046,8 +1015,8 @@ public:
     // _resolve_core — shared resolution logic behind resolve_fragment()
     // ================================================================
 
-    /// Thread-safe overload: uses caller-supplied scratch buffers.
-    bool _resolve_core(
+    /// Thread-safe overload: uses caller-supplied scratch buffers. ``exons`` must be non-empty.
+    void _resolve_core(
         const std::vector<ExonBlock>& exons,
         const std::vector<IntronBlock>& introns,
         int32_t genomic_footprint,
@@ -1055,14 +1024,12 @@ public:
         ResolverScratch& scratch)
     {
         int n_exons = static_cast<int>(exons.size());
-        if (n_exons == 0) return false;
         scratch.reset_per_fragment();
 
         cr.genomic_footprint = genomic_footprint;
 
         // --- Interchromosomal chimera detection ---
         cr.chimera_type = CHIMERA_NONE;
-        cr.chimera_gap = -1;
         scratch.tmp_a.clear();
         scratch.tmp_a.reserve(static_cast<size_t>(n_exons));
         for (const auto& e : exons) scratch.tmp_a.push_back(e.ref_id);
@@ -1114,43 +1081,25 @@ public:
                     int32_t clo = std::max(bstart, h_start);
                     int32_t chi = std::min(bend, h_end);
                     int32_t bp = (chi > clo) ? (chi - clo) : 0;
-                    bool any_pos = false, any_neg = false;
                     for (int32_t k = 0; k < cnt; k++) {
                         int32_t ti = t_set_data_[off + k];
                         block_exon_t.push_back(ti);
                         if (bp > 0) {
                             scratch.mark_dirty(ti);
                             scratch.t_exon_bp[ti] += bp;
-                            int32_t s = (ti >= 0 && ti < static_cast<int32_t>(t_strand_arr_.size()))
-                                        ? t_strand_arr_[ti] : STRAND_NONE;
-                            if (s == STRAND_POS) any_pos = true;
-                            else if (s == STRAND_NEG) any_neg = true;
                         }
-                    }
-                    if (bp > 0) {
-                        if (any_pos) cr.exon_bp_pos += bp;
-                        if (any_neg) cr.exon_bp_neg += bp;
                     }
                 } else if (itype == ITYPE_TRANSCRIPT) {
                     int32_t clo = std::max(bstart, h_start);
                     int32_t chi = std::min(bend, h_end);
                     int32_t bp = (chi > clo) ? (chi - clo) : 0;
-                    bool any_pos = false, any_neg = false;
                     for (int32_t k = 0; k < cnt; k++) {
                         int32_t ti = t_set_data_[off + k];
                         block_transcript_t.push_back(ti);
                         if (bp > 0) {
                             scratch.mark_dirty(ti);
                             scratch.t_transcript_bp[ti] += bp;
-                            int32_t s = (ti >= 0 && ti < static_cast<int32_t>(t_strand_arr_.size()))
-                                        ? t_strand_arr_[ti] : STRAND_NONE;
-                            if (s == STRAND_POS) any_pos = true;
-                            else if (s == STRAND_NEG) any_neg = true;
                         }
-                    }
-                    if (bp > 0) {
-                        if (any_pos) cr.tx_bp_pos += bp;
-                        if (any_neg) cr.tx_bp_neg += bp;
                     }
                 }
             }
@@ -1161,11 +1110,7 @@ public:
 
         // --- Intrachromosomal chimera detection ---
         if (!is_interchromosomal) {
-            auto cr_res = detect_chimera(exons, exon_t_sets, max_fragment_length_);
-            if (cr_res.type != CHIMERA_NONE) {
-                cr.chimera_type = cr_res.type;
-                cr.chimera_gap = cr_res.gap;
-            }
+            cr.chimera_type = detect_chimera(exons, exon_t_sets, max_fragment_length_);
         }
 
         // --- Derive nRNA candidates from real-tx hits ---------------
@@ -1177,9 +1122,7 @@ public:
         // and inject them into every per-block exon_t_set so that
         // merge_sets() naturally picks them up.  Run AFTER chimera
         // detection (nRNAs would otherwise mask cis-chimeras since
-        // they cover both blocks by construction) and AFTER the
-        // strand-aware exon_bp_pos/_neg accumulation (nRNAs must not
-        // pollute the calibration overlap counts).
+        // they cover both blocks by construction).
         if (!nrna_parent_.empty()) {
             auto add_nrna = [&](int32_t ti) {
                 if (ti < 0 ||
@@ -1430,17 +1373,16 @@ public:
             cr.genomic_start = std::min(cr.genomic_start, e.start);
 
         scratch.clean();
-        return true;
     }
 
     /// The single-threaded path, on the resolver's own scratch.
-    bool _resolve_core(
+    void _resolve_core(
         const std::vector<ExonBlock>& exons,
         const std::vector<IntronBlock>& introns,
         int32_t genomic_footprint,
         RawResolveResult& cr)
     {
-        return _resolve_core(exons, introns, genomic_footprint, cr, scratch_);
+        _resolve_core(exons, introns, genomic_footprint, cr, scratch_);
     }
 
     // ================================================================
@@ -1484,9 +1426,7 @@ public:
             frag.attr("genomic_footprint"));
 
         RawResolveResult cr;
-        if (!_resolve_core(exons, introns, genomic_footprint, cr))
-            return nb::none();
-
+        _resolve_core(exons, introns, genomic_footprint, cr);
         return nb::cast(ResolvedFragment::from_core(cr));
     }
 };

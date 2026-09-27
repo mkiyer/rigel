@@ -31,7 +31,6 @@ from rigel.calibration.effective_length import (
 from rigel.calibration.priors import assemble_priors
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.result import CalibrationResult
-from rigel.config import CalibrationConfig
 from rigel.locus import Locus, MultiLocus
 
 _UNB = np.full(1, UNBOUNDED_REACH)
@@ -148,9 +147,7 @@ def _uniform_library(region_len, rho_g, rho_r, pmf_g, pmf_r) -> CalibrationResul
     # the OPPORTUNITY arrays stay analytic — they are the divisors `gdna_eff_len` contracts against,
     # and they are not a population statement
     a_g_region = contained_eff_length(region_len, pmf_g)
-    a_r_region = contained_eff_length(region_len, pmf_r)
     a_g_boundary = np.full(ne, float(crossing_eff_length(pmf_g, _UNB, _UNB)[0]))
-    a_r_boundary = np.full(ne, float(crossing_eff_length(pmf_r, _UNB, _UNB)[0]))
     # ...and every MASS is what the specification actually deposits on this tiling
     _n_g, cont_g, cross_g, _m_g = _enumerate(region_len, int(np.argmax(pmf_g)))
     _n_r, cont_r, cross_r, _m_r = _enumerate(region_len, int(np.argmax(pmf_r)))
@@ -171,8 +168,6 @@ def _uniform_library(region_len, rho_g, rho_r, pmf_g, pmf_r) -> CalibrationResul
         gdna_boundary_conserved_len=np.add(
             *conserved_cut_shares(pmf_g, region_len[:-1], region_len[1:], _UNB, _UNB)
         ),
-        rna_region_eff_len=a_r_region,
-        rna_boundary_eff_len=a_r_boundary,
         gdna_frac_region=np.zeros_like(cont_g),
         rna_pos_frac_region=np.zeros_like(cont_g),
         rna_neg_frac_region=np.zeros_like(cont_g),
@@ -190,7 +185,6 @@ def _uniform_library(region_len, rho_g, rho_r, pmf_g, pmf_r) -> CalibrationResul
         n_regions=n,
         n_boundaries=ne,
         n_sj=0,
-        config=CalibrationConfig(),
     )
 
 
@@ -400,9 +394,9 @@ def test_the_gdna_count_IS_exact_where_the_two_components_share_a_length():
 
 
 def test_zero_rna_opportunity_leaves_the_gdna_count_exact():
-    """Every region here is shorter than one RNA fragment and the RNA crossing opportunity is zeroed, so
-    the RNA support is identically 0 — and with ``rho_r = 0`` the library is one component, so the
-    pooled share IS gDNA's own and there is nothing to bias the count: it is EXACT, not merely finite.
+    """Every region here is shorter than one RNA fragment and the RNA crossing count is zeroed — and
+    with ``rho_r = 0`` the library is one component, so the pooled share IS gDNA's own and there is
+    nothing to bias the count: it is EXACT, not merely finite.
     """
     pmf_g, pmf_r = _point_pmf(20), _point_pmf(400)
     tiling = [50] * 4  # every region < 400 bp ⇒ contained_eff_length(RNA) == 0
@@ -452,9 +446,5 @@ def test_gdna_mass_on_a_zero_opportunity_region_STILL_COUNTS_because_a_count_has
 
 
 def _zero_rna_opportunity(cal: CalibrationResult) -> CalibrationResult:
-    """Remove every RNA crossing opportunity, so the RNA support is identically 0 on all objects."""
-    return dataclasses.replace(
-        cal,
-        rna_boundary_eff_len=np.zeros_like(cal.rna_boundary_eff_len),
-        count_rna_boundary=np.zeros_like(cal.count_rna_boundary),
-    )
+    """Remove every RNA crossing count."""
+    return dataclasses.replace(cal, count_rna_boundary=np.zeros_like(cal.count_rna_boundary))

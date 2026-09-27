@@ -17,7 +17,6 @@ import numpy as np
 import pytest
 
 from rigel.calibration.result import CalibrationResult
-from rigel.config import CalibrationConfig
 
 N_REGIONS, N_BOUNDARIES, N_SJ = 4, 3, 2
 
@@ -46,8 +45,6 @@ def _valid_kwargs() -> dict:
         gdna_region_eff_len=region.copy(),
         gdna_boundary_eff_len=boundary.copy(),
         gdna_boundary_conserved_len=boundary.copy(),
-        rna_region_eff_len=region.copy(),
-        rna_boundary_eff_len=boundary.copy(),
         # The three-way composition ψ solves, per object. Not renormalised — it fails to close on a
         # substantial minority of both axes on real data, so a fixture that pretends otherwise would
         # be asserting something the shipped solver does not produce.
@@ -68,7 +65,6 @@ def _valid_kwargs() -> dict:
         n_regions=N_REGIONS,
         n_boundaries=N_BOUNDARIES,
         n_sj=N_SJ,
-        config=CalibrationConfig(),
     )
 
 
@@ -106,13 +102,11 @@ def test_a_library_with_no_sj_constructs():
         ("count_gdna_region", N_REGIONS),
         ("count_rna_region", N_REGIONS),
         ("gdna_region_eff_len", N_REGIONS),
-        ("rna_region_eff_len", N_REGIONS),
         ("count_gdna_boundary", N_BOUNDARIES),
         ("count_rna_boundary", N_BOUNDARIES),
         ("count_rna_spliced_boundary", N_BOUNDARIES),
         ("gdna_boundary_eff_len", N_BOUNDARIES),
         ("gdna_boundary_conserved_len", N_BOUNDARIES),
-        ("rna_boundary_eff_len", N_BOUNDARIES),
         ("count_rna_sj", N_SJ),
     ],
 )
@@ -149,8 +143,6 @@ def test_the_error_names_the_axis_it_expected():
         "count_gdna_boundary",
         "gdna_boundary_eff_len",
         "gdna_boundary_conserved_len",
-        "rna_region_eff_len",
-        "rna_boundary_eff_len",
     ],
 )
 def test_rejects_negative(field):

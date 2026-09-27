@@ -141,13 +141,10 @@ def _alignment(summary: dict) -> dict:
     # Read-NAME-group level (one per read/pair) — the "read fate" denominator.
     unique = a.get("unique_reads", 0)
     multi = a.get("multimapping_reads", 0)
-    # read_groups may be absent on pre-fix summaries; fall back to unique+multi
-    # (mapped groups only) rather than mixing in record-level unmapped counts.
-    groups = a.get("read_groups", unique + multi)
+    groups = a.get("read_groups", 0)
     unmapped_grp = max(0, groups - unique - multi)
 
-    # Fate over read groups — every segment shares the read-group denominator,
-    # so it composes correctly (the earlier bug mixed records with groups).
+    # Fate over read groups: every segment shares the read-group denominator.
     fate = [
         {"label": "Uniquely mapped", "value": unique, "cls": _C[1]},
         {"label": "Multi-mapping", "value": multi, "cls": _C[3]},
@@ -220,9 +217,8 @@ def _fragments(summary: dict) -> dict:
         {"l": "Spliced", "v": spliced, "fmt": "count"},
     ]
     # Blacklist provenance so a 0-artifact bar can be read correctly:
-    #   size is None    → index predates the field (unknown)
-    #   loaded is False  → no blacklist in the index; detection is OFF
-    #   loaded is True   → detection ON; `size` sj active
+    #   loaded is False → no blacklist in the index; detection is OFF
+    #   loaded is True  → detection ON; `size` junctions active
     bl_size = sp.get("sj_blacklist_size")
     bl_loaded = sp.get("sj_blacklist_loaded")
     return {
@@ -242,11 +238,8 @@ def _strand(summary: dict) -> dict:
     eps = (ci[1] - ci[0]) / 2 if len(ci) == 2 else 0.0
     return {
         "spec": s.get("strand_specificity", 0.5),
-        "p_r1_sense": s.get("p_r1_sense", 0.5),
         "read1_sense": bool(s.get("read1_sense", True)),
         "protocol": s.get("protocol", "?"),
-        "n": s.get("n_training_fragments", 0),
-        "ci": ci,
         "exonic_all_spec": d.get("exonic_all_specificity"),
         "contamination_gap": d.get("contamination_gap"),
         "kpis": [
@@ -264,23 +257,10 @@ def _strand(summary: dict) -> dict:
     }
 
 
-def _fragment_length(sub: ReportSubstrate) -> dict:
-    fl = sub.summary.get("fragment_length", {})
-    # summary table (one row per category)
-    order = [
-        "global",
-        "gdna",
-        "rna",
-        "unspliced",
-        "spliced_annot",
-        "spliced_unannot",
-        "spliced_implicit",
-        "splice_artifact",
-    ]
-    present = [c for c in order if c in fl] + [c for c in fl if c not in order]
+def _fragment_length(summary: dict) -> dict:
+    """The summary table, one row per category in the order ``rigel quant`` wrote them."""
     table = []
-    for cat in present:
-        d = fl[cat]
+    for cat, d in summary.get("fragment_length", {}).items():
         table.append(
             [
                 cat,
@@ -292,7 +272,7 @@ def _fragment_length(sub: ReportSubstrate) -> dict:
                 round(d.get("overflow_fraction", 0.0) * 100, 2),
             ]
         )
-    return {"table": table, "categories": present, "has_hist": sub.fragment_lengths is not None}
+    return {"table": table}
 
 
 def _quant(summary: dict) -> dict:
@@ -417,10 +397,8 @@ def _calibration(sub: ReportSubstrate, capture: dict | None = None) -> dict:
     return {
         "enrichment_kpis": enrichment_kpis,
         "density_kpis": density_kpis,
-        "has_track": has_track,
         "capture": capture,
         "ref_table": ref_table,
-        "n_refs": len(ref_table),
     }
 
 
@@ -491,7 +469,6 @@ def build_view_model(sub: ReportSubstrate, capture: dict | None = None) -> dict:
     return {
         "meta": {
             "sample": sub.sample_name,
-            "bam": s.get("input", {}).get("bam_file"),
             "index": s.get("input", {}).get("index_dir"),
             "created": s.get("timestamp"),
             "version": s.get("rigel_version"),
@@ -502,7 +479,7 @@ def build_view_model(sub: ReportSubstrate, capture: dict | None = None) -> dict:
         "alignment": _alignment(s),
         "fragments": _fragments(s),
         "strand": _strand(s),
-        "fl": _fragment_length(sub),
+        "fl": _fragment_length(s),
         "quant": _quant(s),
         "calibration": _calibration(sub, capture),
         "genes": _genes(sub),

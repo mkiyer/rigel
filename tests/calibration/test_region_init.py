@@ -12,6 +12,7 @@ four boundary types.
 from __future__ import annotations
 
 import inspect
+import logging
 from types import SimpleNamespace
 
 import numpy as np
@@ -33,8 +34,11 @@ from rigel.calibration.signature import (
     transcript_strand_class,
 )
 from rigel.calibration.simplex_logodds import _logodds_grid
+from rigel.calibration.strand_balance import fit_strand_balance
 from rigel.calibration.sweep import solve_chain
 from rigel.native import transfer_rows as R
+from rigel.pipeline import _warn_if_calibration_strand_unidentifiable
+from rigel.strand_model import StrandModel, StrandModels
 
 from _synthetic import make_chain_parts
 
@@ -207,6 +211,34 @@ def test_no_spliced_observations_is_no_protocol_decision():
     assert strand_discriminability(0.5, 0.0) == 0.0
 
 
+def test_the_pipeline_warns_exactly_when_calibration_reads_the_library_unstranded(caplog):
+    """The pipeline's warning is calibration's own strand decision — `strand_discriminability` on
+    `fit_strand_balance`'s fit and its spliced count — and not a second test: at N = 10⁵ a balanced
+    spliced 2×2 warns, a sense fraction of 0.99 or 0.52 is silent, and a 3σ excursion, which a 99 %
+    normal-approximation band reads as stranded, warns because the Bayes factor reads it unstranded.
+    No spliced observation is silent (`calibrate` raises there)."""
+
+    def warns(n_same, n_opp):
+        models = StrandModels(exonic_spliced=StrandModel(pos_pos=n_same, pos_neg=n_opp))
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="rigel.pipeline"):
+            _warn_if_calibration_strand_unidentifiable(models)
+        return "reads the library as unstranded" in caplog.text
+
+    n = 100_000
+    assert warns(n // 2, n // 2)
+    assert not warns(99_000, 1_000)
+    assert not warns(52_000, 48_000)
+    n_same = 50_474  # posterior-mean sense fraction 0.504740, 3.0σ above ½
+    band = fit_strand_balance(
+        StrandModels(exonic_spliced=StrandModel(pos_pos=n_same, pos_neg=n - n_same))
+    )
+    assert 2.9 < (band.rna_sense_frac - 0.5) / np.sqrt(0.25 / n) < 3.1
+    assert strand_discriminability(band.rna_sense_frac, band.n_observations) == 0.0
+    assert warns(n_same, n - n_same)
+    assert not warns(0, 0)
+
+
 def test_a_single_strand_slot_solves_and_is_precise():
     """A single-strand exon self-solves f_g from the tilt: it carries a live gDNA + sense-RNA own
     belief with own evidence, and no antisense, because the − axis is structurally dead. The strand
@@ -305,7 +337,6 @@ def test_density_factor_precision_tracks_curvature_and_count():
         log_mu_bg=float(np.log(0.01)),
         alpha=np.inf,
         size=1.0e5 + 0.5,  # the Gamma-posterior shape: Σg + ½
-        n_regions=500,
         informative=True,
     )
     eff = np.array([1.0e3, 1.0e5])

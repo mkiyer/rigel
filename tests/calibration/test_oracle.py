@@ -119,7 +119,6 @@ def test_the_oracle_result_is_a_VALID_CalibrationResult(oracle_scenario, tmp_pat
 
     from rigel.calibration.region_arrays import RegionArrays
     from rigel.calibration.result import CalibrationResult
-    from rigel.config import CalibrationConfig
 
     orc = OracleTruth.from_bam(
         str(oracle_scenario.bam_path), oracle_scenario.index, PipelineConfig(), tmp_path, "orc3"
@@ -145,8 +144,6 @@ def test_the_oracle_result_is_a_VALID_CalibrationResult(oracle_scenario, tmp_pat
         gdna_region_eff_len=np.ones(n),
         gdna_boundary_eff_len=np.ones(e),
         gdna_boundary_conserved_len=np.ones(e),
-        rna_region_eff_len=np.ones(n),
-        rna_boundary_eff_len=np.ones(e),
         gdna_frac_region=np.zeros(n),
         rna_pos_frac_region=np.zeros(n),
         rna_neg_frac_region=np.zeros(n),
@@ -164,7 +161,6 @@ def test_the_oracle_result_is_a_VALID_CalibrationResult(oracle_scenario, tmp_pat
         n_regions=n,
         n_boundaries=e,
         n_sj=j,
-        config=CalibrationConfig(),
     )
     truth = dataclasses.replace(blank, **ov)  # __post_init__ re-validates every axis
     assert truth.count_rna_sj.sum() > 0

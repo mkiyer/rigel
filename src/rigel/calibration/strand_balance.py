@@ -1,7 +1,7 @@
 """RNA strand-balance model: the library RNA sense mean ``rna_sense_frac`` (κ).
 
 Fitted from the posterior-predictive of the library sense rate over annotated spliced unique mappers —
-the 2×2 contingency in the live ``StrandModel``, itself the marginal of the per-sj SJ strand table. The
+the 2×2 contingency in the live ``StrandModel``, itself the marginal of the per-sj strand table. The
 sense-rate posterior is ``Beta(n_same + 1, n_opp + 1)`` and ``rna_sense_frac`` is its mean,
 ``(n_same + 1) / (n_obs + 2)``. It strand-cleans the count density and parameterises the per-region
 strand likelihood.

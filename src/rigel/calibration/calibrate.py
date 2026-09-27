@@ -8,9 +8,8 @@ composition has three sources: the STRAND LIKELIHOOD (the Beta-Binomial tilt of 
 counts, the only intrinsic signal, entering as its overdispersed Fisher information rather than as a
 raw count); the MESSAGES from its chain neighbours (:mod:`.messages`, each hop priced inside the
 sweep from the two nodes' own counts); and the POPULATION gDNA PRIOR (the intergenic-only background
-pool plus the phase-2 density landscape — `fit_intron_background` runs with ``include_introns=False``,
-because an intron-inclusive pool is inflated by nascent RNA worst exactly where gDNA is scarce). The solver is the belief-propagation SWEEP over the ``N E N E … N`` chain
-(:mod:`rigel.calibration.sweep`)::
+pool plus the phase-2 density landscape). The solver is the belief-propagation SWEEP over the
+``N E N E … N`` chain (:mod:`rigel.calibration.sweep`)::
 
     substrate  (five populations on three axes)
       -> build chain + geometry + statics      (the geometry owns EVERY divisor)
@@ -38,14 +37,14 @@ gDNA mass ``0``) is a valid, graceful output.
 
 Known bias: the RNA half of an unspliced crossing takes
 ``UNBOUNDED_REACH`` rather than its transcript's real remaining length, which over-calls gDNA
-genome-wide and worst in the last region before a polyA site. SpliceJunction boundaries DO take their
+genome-wide and worst in the last region before a polyA site. SJ boundaries DO take their
 real exonic reach.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -86,7 +85,6 @@ from .region_chain import build_region_chain
 from .result import CalibrationResult
 from .landscape import _LOCATED_VAR, DensityLandscape, fit_landscape
 from .signature import RegionType, coarse_type_array
-from .simplex_logodds import _logodds_grid
 from .strand_balance import fit_strand_balance
 from .substrate import CalibrationSubstrate
 from ..types import Strand
@@ -152,11 +150,6 @@ def _project_eff(chain, eff_slots, payload) -> tuple[np.ndarray, np.ndarray]:
     those again here would put two implementations of one quantity in the tree, and two
     implementations of one divisor are how a factor of ½ survives unnoticed. Whatever the solver
     divided by is what the result reports.
-
-    It takes the ARRAY, not the geometry, so ONE function serves both populations rather than a
-    second copy that drifts. Only the gDNA projection has a live consumer — the prior divides by
-    nothing on the mass path — and the RNA one is retained deliberately (`result.py` carries the
-    reasoning).
     """
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, dtype=np.int64)
@@ -171,7 +164,7 @@ def _project_eff(chain, eff_slots, payload) -> tuple[np.ndarray, np.ndarray]:
 
 class FactoryRows:
     """The gDNA intron factory's λ-factor rows as their INPUTS: the background, the intron mask, each
-    intron's count and opportunity, the grid — the solve's kernel builds the rows per block from these
+    intron's count and opportunity — the solve's kernel builds the rows per block from these
     (`native/solve_kernel.cpp`, ``factory_row``), so no ``(n_slots, K)`` array ever exists.
 
     For each INTRON REGION slot the row is ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` over the σ(λ) solve
@@ -182,14 +175,14 @@ class FactoryRows:
     class. ``kernel()`` is the tuple the sweep hands the kernel.
     """
 
-    def __init__(
-        self, background: GdnaBackground, chain, substrate, region_arrays, region_eff_len, config
-    ):
+    def __init__(self, background: GdnaBackground, chain, substrate, region_arrays, region_eff_len):
         self.background = background
         kind = np.asarray(chain.kind)
         idx = np.asarray(chain.obj_idx, dtype=np.int64)
         rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
-        self.is_intron = (kind == REGION) & (rtype[np.clip(idx, 0, rtype.shape[0] - 1)] == 1)
+        self.is_intron = (kind == REGION) & (
+            rtype[np.clip(idx, 0, rtype.shape[0] - 1)] == RegionType.INTRON
+        )
         ridx = idx[self.is_intron]
         n = kind.shape[0]
         # GENOME-strand columns summed: gDNA is strand-symmetric, so the deconvolution is against a total
@@ -199,11 +192,6 @@ class FactoryRows:
         ).sum(axis=1)[ridx]
         self.eff = np.zeros(n)
         self.eff[self.is_intron] = np.asarray(region_eff_len, dtype=np.float64)[ridx]
-        _, self.fg = _logodds_grid(
-            lattice_points(config.sweep_logodds_window, config.sweep_logodds_step),
-            float(config.sweep_logodds_window),
-        )
-        self.shape = (n, int(self.fg.shape[0]))
 
     def kernel(self) -> tuple:
         """The factory as the kernel takes it: its inputs — the intron mask, every slot's contained count and
@@ -250,8 +238,7 @@ def _fit_gdna_hyperprior(
       (`landscape._LOCATED_VAR`, the count rule's one-fragment wall through ``Var(log c) = 1/c``) has no
       location, whatever produced its solve: a strand term at a pure-RNA vertex, a factory row on an empty
       intron, a one-sided delivered row. Its median is where the reference measure sits under its bound,
-      and training on it re-seeds the landscape at that resolution — on a gDNA-free stranded library 3,771
-      false fragments at the first refit from 744 such exons, a false mode two decades above the anchors.
+      and training on it re-seeds the landscape at that resolution.
     * geometry → BOUNDARIES ARE EXCLUDED. They cross rather than contain, are about as numerous as
       regions but far less often truly enriched, and their two-flank mixture fills the valley between
       the two true modes.
@@ -272,7 +259,7 @@ def _fit_gdna_hyperprior(
     anchor = (
         isr & (eff_global > 1.0e-9) & (mass_global <= 1.0e-12) & (rtype[ridx] != RegionType.EXON)
     )
-    sel = expressed & ((fp ^ fn) | (~fp & ~fn))
+    sel = expressed & ~(fp & fn)
     # ⛔ A SLOT WHOSE ONLY EVIDENCE IS A BOUND, OR WHICH HAS NONE, DOES NOT TRAIN THE PRIOR
     # (`RegionBelief.has_composition`). Its value is where the prior put it — outright, or inside the
     # half-line a level or ceiling admits — so re-fitting on it re-seeds the landscape's tail at the
@@ -436,49 +423,20 @@ def _fit_strand(substrate, region_arrays, strand_models, inj) -> _Strand:
 
 
 class _IntronFactory:
-    """The gDNA INTRON FACTORY: the intergenic background — fitted here with ``include_introns=False``
-    (an intron-inclusive pool is inflated by nascent RNA worst exactly where gDNA is scarce), or
-    injected — and its λ-factor rows on a solve grid (:class:`FactoryRows`: the inputs the kernel builds
-    each block's rows from). ``background`` is ``None`` when the factory is off, and ``rows`` is then
-    ``None`` too, which leaves every sweep byte-identical to the pre-factory path.
+    """The gDNA INTRON FACTORY: the intergenic background — fitted here, or injected — and its λ-factor
+    rows as a :class:`FactoryRows` (the inputs the kernel builds each block's rows from). ``rows`` is
+    ``None`` when there is nothing to factor: the background uninformative, or no intron region."""
 
-    ⛔ The rows are evaluated ON the solve grid, so they are a function of ``(n_grid, L)`` and are
-    REBUILT when the bracket widens: there is no map onto a wider domain the factor was never evaluated
-    on."""
-
-    def __init__(self, chain, substrate, region_arrays, region_eff_gdna, config, inj):
-        self._site = (chain, substrate, region_arrays, region_eff_gdna, config)
+    def __init__(self, chain, substrate, region_arrays, region_eff_gdna, inj):
         if inj is not None and inj.intron_background is not None:
             self.background = inj.intron_background
         else:
-            self.background = fit_intron_background(
-                substrate,
-                region_arrays,
-                region_eff_gdna,
-                include_introns=False,
-            )
-        self._rows: dict = {}
-
-    def rows(self, n_grid: int, window: float):
-        """The λ-factor rows on the grid ``(n_grid, window)`` as a :class:`FactoryRows` — the inputs the
-        kernel builds each block's rows from — or ``None`` when there is nothing to factor (the background uninformative, no
-        intron regions), which leaves every sweep byte-identical to the pre-factory
-        path."""
-        if self.background is None or not self.background.informative:
-            return None
-        key = (int(n_grid), float(window))
-        if key not in self._rows:
-            chain, substrate, region_arrays, region_eff_gdna, config = self._site
-            rows = FactoryRows(
-                self.background,
-                chain,
-                substrate,
-                region_arrays,
-                region_eff_gdna,
-                replace(config, sweep_logodds_window=float(window)),
-            )
-            self._rows[key] = rows if bool(rows.is_intron.any()) else None
-        return self._rows[key]
+            self.background = fit_intron_background(substrate, region_arrays, region_eff_gdna)
+        self.rows = None
+        if self.background.informative:
+            rows = FactoryRows(self.background, chain, substrate, region_arrays, region_eff_gdna)
+            if rows.is_intron.any():
+                self.rows = rows
 
 
 def _wall_mask(payload, region_arrays, mature_walls, boundary_reach):
@@ -494,18 +452,18 @@ def _wall_mask(payload, region_arrays, mature_walls, boundary_reach):
 def _abundance_landscape(payload, substrate, region_arrays, inj, mature_walls, boundary_reach):
     """THE ABUNDANCE LANDSCAPE — the pre-pass-0 TOTAL-density field + mode census, fitted at INIT from
     counts and lengths only (the wall-exact measured totals), so it is circular with nothing solved. A QC
-    and injection surface: it is the sole source of the QC report's gDNA-density panel
+    and injection surface: it is the sole source of `CalibrationDiagnostics`
     (`CalibrationDiagnostics.from_abundance_landscape`) and nothing in the solve reads it. Without the
     wall inputs (``mature_walls``, ``boundary_reach``) it is SKIPPED, LOUDLY, never raised for: many unit
-    and toy callers have no wall arrays and want no panel, so the object stays ``None`` and the report
-    omits the panel rather than carrying a quietly different estimate."""
+    and toy callers have no wall arrays, so the object stays ``None`` and there are no diagnostics
+    rather than a quietly different estimate."""
     if inj is not None and inj.abundance_landscape is not None:
         return inj.abundance_landscape
     if mature_walls is None or boundary_reach is None:
         logger.warning(
             "calibration: the wall inputs are missing (mature_walls / boundary_reach, both in "
             "scan_cache.index_derived_inputs) — skipping "
-            "the total-density landscape, so the QC density panel will be omitted. Nothing in the "
+            "the total-density landscape, so there are no density diagnostics. Nothing in the "
             "solve reads it, so no solved number changes."
         )
         return None
@@ -603,7 +561,7 @@ def _sweep(s: _Solve, belief, prior, capture=None):
         n_grid=n_grid,
         logodds_window=window,
         gdna_prior=prior,
-        intron_prior=s.factory.rows(n_grid, window),
+        intron_prior=s.factory.rows,
         policy=s.policy,
         block_slots=cfg.sweep_block_slots,
         n_threads=int(cfg.n_threads),
@@ -621,8 +579,7 @@ def _solve(s: _Solve, _debug):
     fitted landscape, so an over-confident region cannot refuse to budge when the prior lands — and
     re-solve with it as ψ's composition arm; ``calib_refit_iters`` times, each refit's landscape the
     E-step's start for the next. Every sweep runs the whole message layer: the messages never read the
-    prior, so on one grid a refit's messages equal the previous refit's, and recomputing them costs the
-    kernel about four seconds a sweep on the deep library at eight threads — cheaper than caching them.
+    prior, so on one grid a refit's messages equal the previous refit's.
 
     Returns ``(belief, belief_pass0, hyperprior)`` — the final belief, the prior-free one, and the last
     fitted landscape (``None`` if no refit ran). With ``_debug`` the last sweep fills
@@ -661,9 +618,8 @@ def _result(
     regions,
     boundaries,
     strand: _Strand,
-    region_eff,
-    boundary_eff,
-    config,
+    region_eff_gdna,
+    boundary_eff_gdna,
     gdna_reference_density: float | None,
     gdna_reference_members: int,
     efficiency: np.ndarray,
@@ -681,8 +637,6 @@ def _result(
     population, exported verbatim — pure RNA by construction, nothing to deconvolve. The three
     ``mass_per_crossing`` are each their own population's incidence→fragment conversion, never applied
     to another population."""
-    region_eff_gdna, region_eff_rna = region_eff
-    boundary_eff_gdna, boundary_eff_rna = boundary_eff
     return CalibrationResult(
         count_gdna_region=regions.gdna_mass,
         count_rna_region=regions.rna_mass,
@@ -698,8 +652,6 @@ def _result(
         gdna_region_eff_len=region_eff_gdna,
         gdna_boundary_eff_len=boundary_eff_gdna,
         gdna_boundary_conserved_len=boundary_conserved_gdna,
-        rna_region_eff_len=region_eff_rna,
-        rna_boundary_eff_len=boundary_eff_rna,
         # the simplex ψ solved, published per object; the masses above are the same answer with the
         # two RNA strands added together
         gdna_frac_region=regions.gdna_frac,
@@ -721,7 +673,6 @@ def _result(
         n_regions=int(substrate.n_regions),
         n_boundaries=int(substrate.n_boundaries),
         n_sj=int(substrate.n_sj),
-        config=config,
     )
 
 
@@ -846,16 +797,13 @@ def calibrate(
     abundance_landscape = _abundance_landscape(
         payload, substrate, region_arrays, inj, mature_walls, boundary_reach
     )
-    # the RNA twin: no consumer in the solve (the prior is a conserved FRAGMENT COUNT and divides by
-    # nothing on the mass path), kept because it is byte-identically the opportunity the solver used
-    region_eff_rna, boundary_eff_rna = _project_eff(chain, geometry.eff_rna, payload)
 
     strand = _fit_strand(substrate, region_arrays, strand_model, inj)
-    factory = _IntronFactory(chain, substrate, region_arrays, region_eff_gdna, config, inj)
+    factory = _IntronFactory(chain, substrate, region_arrays, region_eff_gdna, inj)
     # ⛔ A TOTAL density over ONE component's opportunity model is not a composition estimate; the
     # per-slot gDNA support below is the basis the landscape prior is fit and read on, and the
     # total-density field this module does use is the abundance landscape above, which reaches the
-    # report and never the solve.
+    # diagnostics and never the solve.
     mass_global, eff_global = region_gdna_geometry(geometry)
     solve = _Solve(
         chain,
@@ -872,7 +820,7 @@ def calibrate(
     belief, belief_pass0, gdna_hyperprior = _solve(solve, _debug)
     # THE RULER'S REFERENCE: the fully-captured gDNA level is the located enriched mode of the fitted
     # landscape, or nothing — capture-OFF and gDNA-free libraries carry no enriched mode and contract
-    # nothing (DESIGN.md §7.2). One definition, read by `capture_eff_length` and `priors`.
+    # nothing. One definition, read by `capture_eff_length` and `priors`.
     enriched = located_enriched_mode(gdna_hyperprior) if gdna_hyperprior is not None else None
     gdna_reference_density = float(np.exp(enriched.mode.log_rho)) if enriched is not None else None
     gdna_reference_members = enriched.n_members if enriched is not None else 0
@@ -899,9 +847,8 @@ def calibrate(
         regions,
         boundaries,
         strand,
-        (region_eff_gdna, region_eff_rna),
-        (boundary_eff_gdna, boundary_eff_rna),
-        config,
+        region_eff_gdna,
+        boundary_eff_gdna,
         gdna_reference_density,
         gdna_reference_members,
         efficiency,
@@ -934,8 +881,8 @@ def calibrate(
             abundance_landscape=abundance_landscape,
         )
     if diagnostics_out is not None and abundance_landscape is not None:
-        # the QC density panel comes from the total-density landscape's census; the report omits it
-        # when the landscape was not fit
+        # the density diagnostics come from the total-density landscape; there are none when it was
+        # not fit
         from .diagnostics import CalibrationDiagnostics
 
         diagnostics_out["calibration"] = CalibrationDiagnostics.from_abundance_landscape(

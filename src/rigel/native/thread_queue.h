@@ -1,9 +1,9 @@
 /**
- * thread_queue.h — Bounded SPMC work queue for parallel BAM scanning.
+ * thread_queue.h — Bounded work queue for parallel BAM scanning.
  *
- * Provides BoundedQueue<T>: a single-producer multiple-consumer queue
- * with backpressure.  The BAM scanner work-unit types are defined in
- * bam_scanner.cpp alongside the other BAM-specific structures.
+ * Provides BoundedQueue<T>: a mutex-guarded queue with backpressure.
+ * The BAM scanner work-unit types are defined in bam_scanner.cpp
+ * alongside the other BAM-specific structures.
  */
 
 #pragma once
@@ -16,7 +16,7 @@
 namespace rigel {
 
 // ================================================================
-// BoundedQueue — bounded SPMC queue with backpressure + abort
+// BoundedQueue — bounded queue with backpressure + abort
 // ================================================================
 
 template <typename T>

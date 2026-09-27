@@ -46,11 +46,7 @@ class _BF:
 
 
 class _Chunk:
-    """Columnar mock chunk compatible with the C++ native scan path.
-
-    Has ``t_offsets`` and other columnar arrays so ``_scan_native``
-    fires.  Also supports ``__getitem__`` for multimapper handling.
-    """
+    """Columnar mock chunk: the ``size`` and ``to_scoring_arrays`` that ``FragmentRouter.scan`` reads."""
 
     def __init__(self, bfs, fragment_classes, frag_ids):
         self._bfs = bfs
@@ -163,7 +159,6 @@ def _scan_em_data(
     stats,
     log_every=1_000_000,
     *,
-    gdna_splice_penalties=None,
     overhang_log_penalty=None,
     mismatch_log_penalty=None,
     annotations=None,
@@ -181,7 +176,6 @@ def _scan_em_data(
         index,
         overhang_log_penalty=overhang_log_penalty,
         mismatch_log_penalty=mismatch_log_penalty,
-        gdna_splice_penalties=gdna_splice_penalties,
     )
     builder = FragmentRouter(
         ctx,

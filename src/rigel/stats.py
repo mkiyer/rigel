@@ -12,14 +12,14 @@ from dataclasses import dataclass, asdict
 class PipelineStats:
     """Structured counters for the rigel pipeline.
 
-    BAM-level stats are populated by ``parse_bam_file()``.
-    Resolution and model-training stats are populated by the pipeline
-    phases.
+    The scan counters are copied from the native scanner's stats by
+    ``pipeline._apply_scan_stats``; the routing and gating counters are
+    added by ``FragmentRouter.scan``.
 
     Use ``to_dict()`` for JSON serialization.
     """
 
-    # --- BAM-level (populated by parse_bam_file) ---
+    # --- BAM-level ---
     total: int = 0
     qc_fail: int = 0
     unmapped: int = 0
@@ -80,7 +80,7 @@ class PipelineStats:
     # The field names are derived, not chosen — ``rigel.splice.census_field`` builds each one from
     # its :class:`~rigel.splice.SpliceType` member name, and the C++ builds the same key from
     # ``splice_type_label``. Renaming one of these by hand breaks that correspondence silently,
-    # because the copy below uses ``dict.get(key, 0)``.
+    # because ``pipeline._apply_scan_stats`` copies them with ``dict.get(key, 0)``.
     n_census_unspliced: int = 0
     n_census_spliced_unannot: int = 0
     n_census_spliced_annot: int = 0
@@ -101,19 +101,12 @@ class PipelineStats:
         """Total intergenic fragments (unspliced + spliced)."""
         return self.n_intergenic_unspliced + self.n_intergenic_spliced
 
-    @property
-    def n_gdna_unambig(self) -> int:
-        """Intergenic fragments assigned deterministically to gDNA."""
-        return self.n_intergenic
-
     def to_dict(self) -> dict:
         """Convert to a JSON-serializable dictionary.
 
-        Includes computed properties (``n_intergenic``, ``n_gdna_unambig``)
-        for convenience alongside the raw dataclass fields.
+        Includes the computed ``n_intergenic`` alongside the raw dataclass
+        fields.
         """
         d = asdict(self)
-        # Add computed properties
         d["n_intergenic"] = self.n_intergenic
-        d["n_gdna_unambig"] = self.n_gdna_unambig
         return d

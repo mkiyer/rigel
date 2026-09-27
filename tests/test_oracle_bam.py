@@ -14,7 +14,8 @@ from rigel.sim.bam import (
     transcript_to_genomic_blocks,
 )
 from rigel.sim.genome import MutableGenome
-from rigel.sim.whole_genome import GDNASimConfig, SimulationParams, WholeGenomeSimulator
+from rigel.sim.wgs_config import GDNASimConfig, SimulationParams
+from rigel.sim.wgs_engine import WholeGenomeSimulator
 from rigel.transcript import Transcript
 from rigel.types import Interval, Strand
 

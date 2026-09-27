@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
+from html import escape
 from importlib.resources import files
 
 _ASSETS = files("rigel.report") / "assets"
@@ -24,7 +25,7 @@ def _asset(name: str) -> str:
 
 
 @lru_cache(maxsize=1)
-def _vega_bundle() -> str | None:
+def vega_bundle() -> str | None:
     """Return the inlinable Vega runtime, or ``None`` if vl-convert is absent.
 
     The bundle is identical for every report, so it is built once per process and
@@ -218,7 +219,7 @@ def render_html(model: dict, charts: dict, title: str) -> str:
     """Render the full self-contained HTML document string."""
     css = _asset("report.css")
     js = _asset("report.js")
-    bundle = _vega_bundle()
+    bundle = vega_bundle()
     meta = model.get("meta", {})
 
     payload = _json_for_script({"model": model, "charts": charts})
@@ -235,7 +236,7 @@ def render_html(model: dict, charts: dict, title: str) -> str:
         '<html lang="en"><head>\n'
         '<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-        f"<title>{title}</title>\n"
+        f"<title>{escape(title)}</title>\n"
         f"<style>{css}</style>\n"
         "</head><body>\n"
         f"{sections}\n"

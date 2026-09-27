@@ -5,9 +5,10 @@ Entry point: ``rigel`` (registered in pyproject.toml).
 
 Subcommands:
     rigel index   — Build reference index from FASTA + GTF
-    rigel quant   — Single-pass Bayesian fragment abundance estimation
+    rigel quant   — Single-pass BAM scan and Bayesian transcript abundance estimation
     rigel sim     — Generate synthetic test scenarios
     rigel export  — Convert feather outputs to TSV or Parquet
+    rigel report  — Build a self-contained HTML QC report from a quant output directory
 """
 
 import argparse
@@ -68,8 +69,9 @@ def index_command(args: argparse.Namespace) -> int:
 def quant_command(args: argparse.Namespace) -> int:
     """Run the ``rigel quant`` subcommand.
 
-    Single-pass pipeline: scan BAM, resolve fragments, train
-    strand/insert models, then quantify via unified EM.
+    Resolves the arguments (CLI flags over the ``--config`` YAML over the config defaults), loads
+    the index, runs :func:`rigel.pipeline.run_pipeline` — one BAM scan, calibration, then the
+    per-locus EM — and writes the output tables, ``summary.json`` and ``config.yaml``.
     """
     from .index import TranscriptIndex
     from .pipeline import run_pipeline
@@ -127,8 +129,7 @@ def quant_command(args: argparse.Namespace) -> int:
 def _build_pipeline_config(args: argparse.Namespace) -> "PipelineConfig":  # noqa: F821
     """Translate resolved CLI args into a ``PipelineConfig``.
 
-    Field mapping is driven by ``_PARAM_SPECS`` — see the declarative
-    registry below ``sim_command``.
+    Field mapping is driven by the declarative ``_PARAM_SPECS`` registry.
     """
     from .config import (
         EMConfig,
@@ -357,8 +358,9 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         return int(getattr(stats, census_field(stype)))
 
     # Blacklist provenance: distinguishes "detection off (no blacklist in the
-    # index)" from "detection on, 0 artifacts found".
-    _bl_size = getattr(index, "sj_blacklist_size", None)
+    # index)" from "detection on, 0 artifacts found". TranscriptIndex.load always
+    # sets the size (0 when the index has no blacklist).
+    bl_size = int(index.sj_blacklist_size)
     splice_counts = {
         "unspliced": _splice_n(SpliceType.UNSPLICED),
         "spliced_annotated": _splice_n(SpliceType.SPLICED_ANNOT),
@@ -366,8 +368,8 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         "spliced_implicit": _splice_n(SpliceType.SPLICED_IMPLICIT),
         "splice_artifact": _splice_n(SpliceType.SPLICE_ARTIFACT),
         "sj_blacklisted": int(stats.n_sj_blacklisted),
-        "sj_blacklist_size": None if _bl_size is None else int(_bl_size),
-        "sj_blacklist_loaded": bool(_bl_size) if _bl_size is not None else None,
+        "sj_blacklist_size": bl_size,
+        "sj_blacklist_loaded": bool(bl_size),
     }
 
     # Calibration section — library scalars only, never a per-region dict.
@@ -478,7 +480,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "n_training_fragments": sm.n_observations,
             "posterior_variance": round(sm_primary.posterior_variance(), 8),
             "ci_95": [round(ci_lo, 6), round(ci_hi, 6)],
-            # The per-sj SJ strand table this 2×2 is the marginal of. "How many
+            # The per-sj strand table this 2×2 is the marginal of. "How many
             # sj are deep enough to measure the strand dispersion" is a
             # first-class question about a library: at κ ≈ 0.002 a sj needs
             # hundreds of reads before one disagreeing read is even expected, and the
@@ -1146,9 +1148,9 @@ def build_parser() -> argparse.ArgumentParser:
     io_grp.add_argument(
         "--tsv",
         dest="tsv",
-        action="store_true",
-        default=False,
-        help="Also write TSV (.tsv) mirrors of quant tables.",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Also write TSV (.tsv) mirrors of quant tables (default: no).",
     )
 
     # -- Alignment options ----------------------------------------------------
@@ -1194,7 +1196,9 @@ def build_parser() -> argparse.ArgumentParser:
         dest="em_iterations",
         type=int,
         default=None,
-        help="Maximum EM iterations (default: 1000). Set to 0 for unambiguous-only quantification.",
+        help="EM iteration budget (default: 1000). The EM runs accelerated (SQUAREM) steps of "
+        "three EM updates each, up to a third of this budget, until it converges. At least one "
+        "step always runs, so 0 does not skip the EM: every fragment is still assigned.",
     )
     model_grp.add_argument(
         "--em-mode",
@@ -1339,10 +1343,10 @@ def build_parser() -> argparse.ArgumentParser:
     adv.add_argument(
         "--emit-locus-stats",
         dest="emit_locus_stats",
-        action="store_true",
-        default=False,
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="Write per-locus EM convergence profiling data to "
-        "locus_stats.feather in the output directory. Includes "
+        "locus_stats.feather in the output directory (default: no). Includes "
         "iteration counts, timing, and equivalence class statistics "
         "for every locus. Useful for debugging convergence.",
     )

@@ -11,7 +11,7 @@ Each artifact is keyed by ``(ref, intron_start, intron_end)`` and
 characterised by the maximum *left* and *right* anchor (in
 reference-advancing CIGAR bases) observed across all false-positive
 alignments at each read length.  At BAM-scan time, a fragment's splice
-sj is rejected as artifactual when **either** anchor in its CIGAR
+junction is rejected as artifactual when **either** anchor in its CIGAR
 is ≤ the blacklist maximum — the sj sits inside the
 "plausible-from-gDNA" envelope.
 

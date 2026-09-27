@@ -78,10 +78,7 @@ class TestDetectIntrachromosomalChimera:
         )
         t_sets = [frozenset({0, 1}), frozenset({2, 3})]
         result = _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=500)
-        assert result is not None
-        chimera_type, chimera_gap = result
-        assert chimera_type == ChimeraType.CIS_STRAND_SAME
-        assert chimera_gap == 800  # 1000 - 200
+        assert result == ChimeraType.CIS_STRAND_SAME
 
     def test_disjoint_diff_strand_chimera(self):
         """Two blocks with disjoint sets, different strands → CIS_STRAND_DIFF."""
@@ -91,10 +88,7 @@ class TestDetectIntrachromosomalChimera:
         )
         t_sets = [frozenset({0}), frozenset({5})]
         result = _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=1000)
-        assert result is not None
-        chimera_type, chimera_gap = result
-        assert chimera_type == ChimeraType.CIS_STRAND_DIFF
-        assert chimera_gap == 300  # 500 - 200
+        assert result == ChimeraType.CIS_STRAND_DIFF
 
     def test_overlapping_disjoint_blocks(self):
         """Disjoint transcript sets with overlapping genomic coordinates."""
@@ -104,10 +98,7 @@ class TestDetectIntrachromosomalChimera:
         )
         t_sets = [frozenset({0}), frozenset({1})]
         result = _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=1000)
-        assert result is not None
-        chimera_type, chimera_gap = result
-        assert chimera_type == ChimeraType.CIS_STRAND_DIFF
-        assert chimera_gap == 0  # overlapping
+        assert result == ChimeraType.CIS_STRAND_DIFF
 
     def test_three_blocks_two_components(self):
         """Three blocks: two connected (shared tx), one disjoint."""
@@ -120,11 +111,7 @@ class TestDetectIntrachromosomalChimera:
         # Block 2 is disjoint from both → chimeric
         t_sets = [frozenset({0, 1}), frozenset({1, 2}), frozenset({5})]
         result = _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=1000)
-        assert result is not None
-        chimera_type, chimera_gap = result
-        assert chimera_type == ChimeraType.CIS_STRAND_DIFF
-        # Gap: min(2000-200, 2000-400) = 1600
-        assert chimera_gap == 1600
+        assert result == ChimeraType.CIS_STRAND_DIFF
 
     def test_three_disjoint_blocks(self):
         """Three blocks, all pairwise disjoint → three components → chimeric."""
@@ -135,11 +122,7 @@ class TestDetectIntrachromosomalChimera:
         )
         t_sets = [frozenset({0}), frozenset({1}), frozenset({2})]
         result = _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=500)
-        assert result is not None
-        chimera_type, chimera_gap = result
-        assert chimera_type == ChimeraType.CIS_STRAND_SAME
-        # Gap: min(500-200, 1000-200, 1000-600) = 300
-        assert chimera_gap == 300
+        assert result == ChimeraType.CIS_STRAND_SAME
 
     def test_connected_via_transitive_overlap(self):
         """A-B overlap, B-C overlap, but A-C are disjoint → all connected."""
@@ -160,10 +143,7 @@ class TestDetectIntrachromosomalChimera:
         )
         t_sets = [frozenset({0}), frozenset({1})]
         result = _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=100)
-        assert result is not None
-        chimera_type, chimera_gap = result
-        assert chimera_type == ChimeraType.CIS_STRAND_SAME
-        assert chimera_gap == 0  # adjacent, no gap
+        assert result == ChimeraType.CIS_STRAND_SAME
 
     def test_mixed_annotated_intergenic_blocks(self):
         """Annotated blocks are disjoint, intergenic block between them."""
@@ -175,10 +155,7 @@ class TestDetectIntrachromosomalChimera:
         # Block 1 is intergenic (empty set), blocks 0 and 2 are disjoint
         t_sets = [frozenset({0}), frozenset(), frozenset({5})]
         result = _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=1000)
-        assert result is not None
-        chimera_type, chimera_gap = result
-        assert chimera_type == ChimeraType.CIS_STRAND_DIFF
-        assert chimera_gap == 800  # 1000 - 200
+        assert result == ChimeraType.CIS_STRAND_DIFF
 
 
 # =====================================================================
@@ -691,11 +668,11 @@ class TestGenomicCompatibilityIsCheckedBeforeChimera:
         """The length half of the rule: beyond ``max_frag_length`` no molecule explains the pair."""
         result = _detect_intrachromosomal_chimera(self.BLOCKS, self.T_SETS, max_fragment_length=500)
         assert result is not None, "a 1,000 bp span passed a 500 bp limit"
-        assert result[0] == ChimeraType.CIS_STRAND_SAME
+        assert result == ChimeraType.CIS_STRAND_SAME
 
     def test_the_span_is_the_OUTER_extent_not_the_gap(self):
         """The quantity is the implied FRAGMENT LENGTH — outermost start to outermost end — not the
-        ``chimera_gap`` between the blocks. The two differ by the blocks' own lengths (here 1000 vs 800),
+        gap between the blocks. The two differ by the blocks' own lengths (here 1000 vs 800),
         and using the gap would admit a fragment 200 bp longer than the library can contain."""
         assert (
             _detect_intrachromosomal_chimera(self.BLOCKS, self.T_SETS, max_fragment_length=900)
@@ -711,7 +688,7 @@ class TestGenomicCompatibilityIsCheckedBeforeChimera:
         )
         result = _detect_intrachromosomal_chimera(blocks, self.T_SETS, max_fragment_length=100_000)
         assert result is not None, "an outward-facing pair was rescued by the length check"
-        assert result[0] == ChimeraType.CIS_STRAND_DIFF
+        assert result == ChimeraType.CIS_STRAND_DIFF
 
     def test_the_NATIVE_resolver_agrees(self, tmp_path_factory):
         """The C++ kernel, not the reference — this is the path the scanner actually runs.
@@ -739,7 +716,7 @@ class TestGenomicCompatibilityIsCheckedBeforeChimera:
     def test_the_NATIVE_resolver_measures_the_SPAN_not_the_gap(self, tmp_path_factory):
         """The native twin of ``test_the_span_is_the_OUTER_extent_not_the_gap``.
 
-        PERTURBATION: changing the C++ to use ``min_gap`` fires no other native gate.
+        PERTURBATION: changing the C++ to measure the gap between the blocks fires no other native gate.
 
         Blocks (100,200) and (1000,1100): implied fragment length **1000**, gap between them **800**. At a
         limit of 900 the fragment is impossible and the gap is not — so a gap-based rule rescues a molecule

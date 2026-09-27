@@ -33,7 +33,7 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
-    transcripts = load_transcripts(args.gtf, transcript_filter="all")
+    transcripts = load_transcripts(args.gtf)
     result = write_random_capture_probes(
         transcripts,
         args.out,

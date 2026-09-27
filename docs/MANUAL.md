@@ -40,8 +40,8 @@ conda activate rigel
 pip install --no-build-isolation -e .
 ```
 
-`rigel report` needs the optional `[report]` extra (`pip install 'rigel-rnaseq[report]'`, or
-`conda install -c conda-forge vl-convert-python`); everything else works without it.
+The charts in `rigel report` need the optional `[report]` extra (`pip install 'rigel-rnaseq[report]'`,
+or `conda install -c conda-forge vl-convert-python`); everything else works without it.
 
 Verify the install, and note the two global flags that go before the subcommand:
 
@@ -163,7 +163,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 | `-o`, `--output-dir DIR` | — | Output directory for results |
 | `--config FILE` | — | YAML config (same keys as CLI options, underscored). CLI flags override it. See [YAML configuration](#yaml-configuration). |
 | `--annotated-bam PATH` | — | Write an annotated BAM with per-fragment assignment tags (requires a second BAM pass) |
-| `--tsv` | off | Also write `.tsv` mirrors of the quant tables |
+| `--tsv` / `--no-tsv` | off | Also write `.tsv` mirrors of the quant tables |
 
 **Alignment options**
 
@@ -178,7 +178,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--seed N` | `0` | Seed of the `sample` assignment's draw; another seed is another draw from the same posterior. |
-| `--em-iterations N` | `1000` | Maximum EM iterations. Set `0` for unambiguous-only quantification (skip EM). |
+| `--em-iterations N` | `1000` | EM iteration budget. The EM runs accelerated (SQUAREM) steps of three EM updates each, up to a third of this budget, until it converges. At least one step always runs, so `0` does not skip the EM: every fragment is still assigned. |
 | `--em-mode {vbem,map}` | `vbem` | EM variant. `vbem` = Variational Bayes EM (digamma soft updates); `map` = MAP-EM with hard `max(0, n+a-1)` updates. |
 | `--assignment-mode {sample,fractional}` | `sample` | Post-EM fragment assignment. `sample` gives every fragment to one transcript (or gDNA), count first: each transcript's fractional count is rounded within its EM locus, then each fragment is drawn from its own posterior toward the transcripts still short of their count, so whole counts equal the rounded fractional counts. `fractional` keeps each fragment's posterior weights. |
 
@@ -204,7 +204,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 | `--mismatch-alpha A` | `0.1` | Per-mismatch (`NM` tag) penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
 | `--pruning-min-posterior P` | `1e-4` | Minimum posterior for candidate pruning. Lower keeps more candidates; `0` disables pruning. |
 | `--splicing-anchor-tolerance K` | `3` | Resolver-side splicing-anchor tolerance (bp) around annotated introns. The fractional calibration accumulator does not interpret this value, and it is not the splice blacklist's anchor test, which it never changes. |
-| `--emit-locus-stats` | off | Write per-locus EM convergence profiling (iteration counts, timing, equivalence-class stats) to `locus_stats.feather` |
+| `--emit-locus-stats` / `--no-emit-locus-stats` | off | Write per-locus EM convergence profiling (iteration counts, timing, equivalence-class stats) to `locus_stats.feather` |
 
 ### rigel sim
 
@@ -283,8 +283,8 @@ blacklist status), the strand model, per-category fragment-length distributions,
 mRNA / nRNA / gDNA split, capture on-target enrichment, a genome-wide gDNA-density track, and
 a searchable gene-expression table, in one offline file.
 
-Without the `[report]` extra (see Installation) the report still builds, with the
-fragment-length charts omitted.
+Without the `[report]` extra (see Installation) the report still builds, with every chart
+omitted.
 
 ---
 
@@ -785,11 +785,10 @@ samtools view -F 256 results/annotated.bam \
     | awk '{ for(i=12;i<=NF;i++) if($i=="ZF:i:5") count++ } END { print count }'
 ```
 
-### Exclude multimappers, skip the EM, profile the EM
+### Exclude multimappers, profile the EM
 
 ```bash
 rigel quant --bam sample.bam --index index/ -o results/ --no-include-multimap
-rigel quant --bam sample.bam --index index/ -o results/ --em-iterations 0   # unambiguous counts only
 rigel quant --bam sample.bam --index index/ -o results/ --emit-locus-stats  # -> locus_stats.feather
 ```
 

@@ -1,17 +1,16 @@
 """rigel.scored_fragments — Data containers for the EM solver.
 
-Pure dataclasses with no logic.  These are shared between scan.py
-(producer), locus.py (consumer/builder), and estimator.py (EM driver).
+Pure dataclasses with no logic.
 
 - ``ScoredFragments`` — global CSR arrays linking fragment units to
-  candidate transcripts with log-likelihoods.
-- ``Locus`` — connected component of transcripts linked by shared
-  fragments.
+  candidate transcripts with log-likelihoods, built by ``scan.py``.
 - ``LocusPartition`` — per-locus CSR subset for the partitioned native
-  EM path.
+  EM path, scattered from it by ``locus_partition.partition_and_free``.
+
+The locus containers live in :mod:`rigel.locus`.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -43,13 +42,9 @@ class ScoredFragments:
     log_liks : np.ndarray
         float32[n_candidates] — log(P_strand × P_insert) per candidate.
     count_cols : np.ndarray
-        uint8[n_candidates] — internal column index per candidate (0–7).
+        uint8[n_candidates] — ``SpliceStrandCol`` index per candidate (0–9).
     coverage_weights : np.ndarray
         float32[n_candidates] — coverage weight per candidate.
-    locus_t_indices : np.ndarray
-        int32[n_units] — best transcript index per unit.
-    locus_count_cols : np.ndarray
-        uint8[n_units] — count column for the locus transcript.
     is_spliced : np.ndarray
         bool[n_units] — True if gDNA cannot explain this unit: certified RNA (the scorer's
         ``gdna_can_explain``). An artifact or an implicit splice within the maximum fragment length is
@@ -63,11 +58,6 @@ class ScoredFragments:
         int8[n_units] — fragment class code per unit.
     splice_type : np.ndarray
         uint8[n_units] — SpliceType enum value per unit.
-    genomic_midpoint : np.ndarray
-        int64[n_units] — genomic midpoint of the unit's gDNA-bearing
-        alignment, or ``INT64_MIN`` when undefined (spliced, no genomic
-        hit, or no gDNA hypothesis). Used by regional gDNA exposure
-        weighting.
     n_units : int
         Number of ambiguous units.
     n_candidates : int
@@ -79,22 +69,13 @@ class ScoredFragments:
     log_liks: np.ndarray
     count_cols: np.ndarray
     coverage_weights: np.ndarray
-    locus_t_indices: np.ndarray
-    locus_count_cols: np.ndarray
     is_spliced: np.ndarray
     gdna_log_liks: np.ndarray
     frag_ids: np.ndarray
     frag_class: np.ndarray
     splice_type: np.ndarray
-    genomic_midpoint: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.int64))
     n_units: int = 0
     n_candidates: int = 0
-
-
-# Note: the locus / multi-locus types have been moved to :mod:`rigel.locus`
-# (the module that also builds them).  ``LocusPartition`` (a per-locus CSR
-# view used by the EM batch entry point) stays here because it is the EM
-# data layout, not a locus container.
 
 
 # ======================================================================
@@ -112,8 +93,8 @@ class LocusPartition:
     ``n_units`` rows and ``n_candidates`` total candidate entries.
 
     Transcript indices (``t_indices``) remain in **global** transcript
-    space.  Remapping to local indices is deferred to the C++ extraction
-    function, consistent with the existing ``extract_locus_sub_problem``.
+    space; the C++ ``extract_locus_sub_problem_from_partition`` remaps them
+    to local indices.
     """
 
     locus_id: int
@@ -132,8 +113,6 @@ class LocusPartition:
     # Per-unit arrays
     is_spliced: np.ndarray  # uint8 (bool viewed as uint8 for C++)
     gdna_log_liks: np.ndarray  # float32
-    locus_t_indices: np.ndarray  # int32
-    locus_count_cols: np.ndarray  # uint8
 
     # Per-unit annotation metadata (not passed to C++ EM)
     frag_ids: np.ndarray  # int64[n_units] — buffer frag_id per unit

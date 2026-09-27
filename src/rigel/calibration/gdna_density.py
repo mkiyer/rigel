@@ -73,7 +73,6 @@ class GdnaDensityFit:
     rate: float
     pooled_rate: float
     n_objects: int
-    total_counts: float
     total_exposure: float
     bracket_ok: bool
 
@@ -178,7 +177,7 @@ def one_sided_rate(counts, exposure) -> GdnaDensityFit:
     if not (total_e > 0.0 and total_n > 0.0):
         # No support, or no fragments at all: there is no density to estimate and saying so is the
         # answer. A zero-gDNA library reaches this and must NOT be handed a fabricated rate.
-        return GdnaDensityFit(0.0, pooled, int(n.size), total_n, total_e, bracket_ok=False)
+        return GdnaDensityFit(0.0, pooled, int(n.size), total_e, bracket_ok=False)
 
     def f(rho: float) -> float:
         lam = rho * e
@@ -186,7 +185,7 @@ def one_sided_rate(counts, exposure) -> GdnaDensityFit:
 
     lo, hi = 0.0, _BRACKET_HEADROOM * pooled
     if not (f(lo) <= 0.0 <= f(hi)):
-        return GdnaDensityFit(pooled, pooled, int(n.size), total_n, total_e, bracket_ok=False)
+        return GdnaDensityFit(pooled, pooled, int(n.size), total_e, bracket_ok=False)
     while True:
         mid = 0.5 * (lo + hi)
         if mid <= lo or mid >= hi:  # the bracket is closed to the last float
@@ -195,7 +194,7 @@ def one_sided_rate(counts, exposure) -> GdnaDensityFit:
             hi = mid
         else:
             lo = mid
-    return GdnaDensityFit(0.5 * (lo + hi), pooled, int(n.size), total_n, total_e, bracket_ok=True)
+    return GdnaDensityFit(0.5 * (lo + hi), pooled, int(n.size), total_e, bracket_ok=True)
 
 
 def contained_opportunity(pmf, lengths) -> np.ndarray:

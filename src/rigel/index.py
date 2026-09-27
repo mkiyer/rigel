@@ -533,8 +533,8 @@ def create_nrna_transcripts(
 def build_splice_sj(transcripts: list[Transcript]) -> pd.DataFrame:
     """Extract splice junctions (introns) from all transcripts.
 
-    Each intron boundary within a transcript produces one SpliceJunction
-    record. The resulting DataFrame is sorted by (ref, start, end, strand).
+    Each intron of each transcript produces one ``IntervalType.SJ`` row.
+    The resulting DataFrame is sorted by (ref, start, end, strand).
     """
     rows = [
         AnnotatedInterval(t.ref, start, end, t.strand, IntervalType.SJ, t.t_index)
@@ -551,7 +551,7 @@ def write_bed12(
 ) -> Path:
     """Write transcripts as BED12 for minimap2 ``-j`` annotation.
 
-    Each transcript becomes one BED12 boundary with exon blocks.
+    Each transcript with exons becomes one BED12 line, one block per exon.
     Coordinates are already 0-based half-open (BED convention).
 
     Parameters
@@ -599,21 +599,18 @@ def _gen_transcript_intervals(t: Transcript) -> Iterator[AnnotatedInterval]:
     Each exon produces an EXON interval.  One TRANSCRIPT interval spans
     the full transcript ``[first_exon.start, last_exon.end)``.
 
-    Synthetic nRNA transcripts are *not* indexed in cgranges -- their
-    candidates are derived on-the-fly inside the C++ resolver from each
-    contributor mRNA's ``nrna_t_index`` link.  Skipping them removes
-    ~17% of the human cgranges interval count, eliminates the
-    structural source of the INTRONIC-masking bug, and accelerates
-    every overlap query.  Annotated nascent-equiv single-exon
-    transcripts (``is_nrna=True, is_synthetic=False``) remain in
-    cgranges as normal annotation.
+    Synthetic nRNA transcripts yield nothing: the C++ resolver derives
+    their candidates from the transcripts a fragment hits, through each
+    one's ``nrna_t_index``.  Annotated nascent-equiv single-exon
+    transcripts (``is_nrna=True, is_synthetic=False``) yield intervals
+    like any other transcript.
     """
     if t.is_synthetic:
         return
     # Exons
     for e in t.exons:
         yield AnnotatedInterval(t.ref, e.start, e.end, t.strand, IntervalType.EXON, t.t_index)
-    # One transcript span (replaces per-gap INTRON intervals)
+    # One transcript span
     if t.exons:
         yield AnnotatedInterval(
             t.ref, t.exons[0].start, t.exons[-1].end, t.strand, IntervalType.TRANSCRIPT, t.t_index
@@ -792,7 +789,6 @@ class TranscriptIndex:
         self.g_df: pd.DataFrame | None = None
         self.t_to_g_arr: np.ndarray | None = None
         self.t_to_strand_arr: np.ndarray | None = None
-        self.t_to_ref_arr: np.ndarray | None = None
         self.g_to_strand_arr: np.ndarray | None = None
 
         # Unified cgranges index (collapsed EXON + TRANSCRIPT + INTERGENIC)
@@ -817,8 +813,8 @@ class TranscriptIndex:
         # The same exons as flat CSR arrays, built once by build_exon_csr().
         self._exon_csr_cache: tuple | None = None
 
-        # When True, Python-side structures are kept after C++ projection
-        # (for unit tests that inspect _iv_t_set, sj_map, _t_exon_intervals).
+        # When True, load() keeps the Python-side lookup structures
+        # (cr, _iv_type, _iv_t_set, sj_map, _t_exon_intervals).
         self._retain_test_structures: bool = False
 
     # -- properties -----------------------------------------------------------
@@ -946,15 +942,15 @@ class TranscriptIndex:
             If True, write human-readable TSV mirrors alongside Feather files.
         gtf_parse_mode : {"strict", "warn-skip"}
             GTF parsing behavior. ``"strict"`` (default) fails fast on
-            malformed boundaries; ``"warn-skip"`` logs warnings and skips.
+            malformed lines; ``"warn-skip"`` logs warnings and skips.
         nrna_tolerance : int
             Max distance (bp) for clustering transcript start/end sites
             when building synthetic nascent RNA transcripts.
         alignable_zarr_path : path, optional
             Path to an alignable Zarr store built for the same genome+
             aligner.  When provided, the splice-junction artifact
-            blacklist is derived from
-            ``AlignableStore.splice_blacklist()`` and persisted as
+            blacklist is derived by
+            :func:`rigel.splice_blacklist.load_splice_blacklist_from_zarr` and persisted as
             ``splice_blacklist.feather`` in the index.  When ``None``,
             no blacklist is written.
         splice_blacklist_min_count : int
@@ -1145,15 +1141,12 @@ class TranscriptIndex:
     ) -> "TranscriptIndex":
         """Load an index from the Feather files in *index_dir*.
 
-        Builds cgranges interval trees and splice-junction lookup maps
-        for fast overlap queries during quantification.
-
         Parameters
         ----------
         retain_test_structures : bool
-            If True, keep Python-side structures (``_iv_t_set``,
-            ``sj_map``) that are normally freed after C++ projection.
-            Intended for unit tests that inspect these structures directly.
+            If True, keep the Python-side lookup structures (``cr``,
+            ``_iv_type``, ``_iv_t_set``, ``sj_map``, ``_t_exon_intervals``);
+            :meth:`query` and :meth:`get_exon_intervals` raise without them.
         """
         index_dir = str(index_dir)
         self = cls()
@@ -1204,8 +1197,7 @@ class TranscriptIndex:
         # -- compact in-memory representation ---------------------------------
         # String columns → categorical (integer codes + small dictionary).
         for col in ("ref", "t_id", "g_id", "g_name", "g_type"):
-            if col in self.t_df.columns:
-                self.t_df[col] = self.t_df[col].astype("category")
+            self.t_df[col] = self.t_df[col].astype("category")
         # Integer columns → narrowest safe dtype.
         _INT_DOWNCAST = {
             "strand": np.int8,
@@ -1217,13 +1209,10 @@ class TranscriptIndex:
             "length": np.int32,
         }
         for col, dtype in _INT_DOWNCAST.items():
-            if col in self.t_df.columns:
-                self.t_df[col] = self.t_df[col].astype(dtype)
+            self.t_df[col] = self.t_df[col].astype(dtype)
 
         # -- gene table (derived) ---------------------------------------------
         self.g_df = cls._build_gene_table(self.t_df)
-        if "g_index" not in self.g_df.columns:
-            raise ValueError(f"Invalid derived gene table in {index_dir}: missing 'g_index' column")
         if not (self.g_df.index == self.g_df["g_index"]).all():
             raise ValueError(
                 f"Invalid index in {index_dir}: derived gene table row index "
@@ -1234,19 +1223,6 @@ class TranscriptIndex:
         self.t_to_g_arr = self.t_df["g_index"].values
         self.t_to_strand_arr = self.t_df["strand"].values
         self.g_to_strand_arr = self.g_df["strand"].values
-
-        # Per-transcript canonical reference id (matches index.ref_name_to_id
-        # / BAM tid space, not pandas categorical codes).  Used by the
-        # regional-exposure per-unit weight applier and any other code path
-        # that needs ref ids without re-mapping categorical codes.
-        _ref_cat = self.t_df["ref"].cat
-        _cat_to_canonical_ref = np.array(
-            [self.ref_name_to_id[str(name)] for name in _ref_cat.categories],
-            dtype=np.int32,
-        )
-        self.t_to_ref_arr = _cat_to_canonical_ref[
-            _ref_cat.codes.values.astype(np.int64, copy=False)
-        ]
 
         # -- the splice graph: THE calibration partition ----------------------
         # The load-time validation is the GRAPH-INTERNAL half only. The checks that need the
@@ -1275,9 +1251,10 @@ class TranscriptIndex:
 
         # -- collapsed interval index -----------------------------------------
         # Group rows by (ref, start, end, interval_type) and merge
-        # transcript indices into frozensets.  Each unique boundary is
-        # stored once in cgranges, with a label indexing into _iv_type
-        # and _iv_t_set lookup lists.
+        # transcript indices into frozensets, one collapsed interval per
+        # unique key.  With retain_test_structures, the Python cgranges
+        # index ``cr`` holds each collapsed interval, labelled by its
+        # position in _iv_type and _iv_t_set.
         #
         # Vectorised: encode refs as integers, sort, detect boundaries via
         # diff, then build frozensets in a single pass.
@@ -1325,7 +1302,6 @@ class TranscriptIndex:
         _gs_list = _group_starts.tolist()
         _ge_list = _group_ends.tolist()
 
-        cr = _cgranges_cls()
         iv_type: list[int] = []
         iv_t_set: list[frozenset[int]] = []
         _collapse_keys: list[tuple] = []  # keep for FragmentResolver later
@@ -1337,14 +1313,17 @@ class TranscriptIndex:
             end = _ee_list[s]
             itype = _it_list[s]
             tset = frozenset(t for t in _ti_list[s:e] if t >= 0)
-            cr.add(ref, start, end, label)
             iv_type.append(itype)
             iv_t_set.append(tset)
             _collapse_keys.append((ref, start, end, itype))
-        cr.index()
-        self.cr = cr
-        self._iv_type = iv_type
-        self._iv_t_set = iv_t_set
+        if retain_test_structures:
+            cr = _cgranges_cls()
+            for label, (ref, start, end, _itype) in enumerate(_collapse_keys):
+                cr.add(ref, start, end, label)
+            cr.index()
+            self.cr = cr
+            self._iv_type = iv_type
+            self._iv_t_set = iv_t_set
         logger.debug(f"Interval index: {len(iv_df)} rows → {len(iv_type)} collapsed")
 
         # -- per-transcript exon intervals for coverage-weight model ----------
@@ -1491,9 +1470,6 @@ class TranscriptIndex:
             tset_flat,
             tset_offsets,
         )
-        # C++ resolver owns the overlap data now; free the Python frozensets.
-        if not retain_test_structures:
-            self._iv_t_set = None
 
         # 2. SJ exact-match map
         sj_refs_l: list[str] = []
@@ -1597,9 +1573,8 @@ class TranscriptIndex:
         """
         if self._iv_t_set is None:
             raise RuntimeError(
-                "query() unavailable: interval sets were freed after C++ "
-                "resolver construction. Use the C++ resolver for production "
-                "overlap queries."
+                "query() unavailable: load the index with retain_test_structures=True. "
+                "Use the C++ resolver for production overlap queries."
             )
         hits: list[tuple[int, int, int, frozenset[int]]] = []
         for h_start, h_end, label in self.cr.overlap(exon.ref, exon.start, exon.end):

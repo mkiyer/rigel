@@ -10,18 +10,20 @@ WHAT IS STORED, AND WHAT DELIBERATELY IS NOT
 --------------------------------------------
 `calibrate()`'s inputs come from three places, and only one of them is expensive:
 
-===========================  ==========================================  ==========
-input                        origin                                      cached?
-===========================  ==========================================  ==========
-``payload``                  the scan                                    yes
-``strand_model``             the scan                                    yes
-``region_arrays``            ``RegionArrays.from_index``                 no
-``boundary_flags``           ``build_boundary_flags_array``              no
-``sj``                       ``build_sj_geometry_arrays``                no
-``gdna_fl_pmf``/``rna_fl_pmf``  ``pipeline.library_fl_models``             no — derived
-``config``                   the thing you are varying                   no
-``injected_priors``          fitted BY ``calibrate``                     no
-===========================  ==========================================  ==========
+==============================  ============================================  ============
+input                           origin                                        cached?
+==============================  ============================================  ============
+``payload``                     the scan                                      yes
+``strand_model``                the scan                                      yes
+``region_arrays``               ``RegionArrays.from_index``                   no
+``boundary_flags``              ``build_boundary_flags_array``                no
+``mature_walls``                ``build_mature_wall_distances``               no
+``boundary_reach``              ``build_contiguous_boundary_reach_arrays``    no
+``sj``                          ``build_sj_geometry_arrays``                  no
+``gdna_fl_pmf``/``rna_fl_pmf``  ``pipeline.library_fl_models``                no — derived
+``config``                      the thing you are varying                     no
+``injected_priors``             fitted BY ``calibrate``                       no
+==============================  ============================================  ============
 
 Anything derivable from the index is rebuilt on load, never stored: it is a fraction of a second
 against an index load that happens anyway, and a stored copy is how a cache goes stale against the
@@ -226,7 +228,7 @@ def deposit_digest() -> str:
     ``tests/native/test_accumulator_native_parity.py``, and a test asserts this digest agrees across
     both — so a drift between them fails loudly rather than certifying the wrong artifact.
     """
-    from rigel._bam_impl import Accumulator  # noqa: PLC0415
+    from .native import Accumulator  # noqa: PLC0415
 
     #: Region-bound indices, not coordinates: the sj CSR is keyed by the LEFT BOUNDARY. 260 is bound 3
     #: and 1000 is bound 4; 1120 is bound 6 and 2000 is bound 7.
@@ -311,8 +313,7 @@ class ScanCache:
 
     # No fragment-length row is stored here. Every fragment-length histogram comes off `payload` — the
     # five length pools and the unconditional anchor they are EB-shrunk toward — so caching the payload
-    # caches them in one frame. `fl.npz` is neither written nor read;
-    # a cache that still has one on disk loads fine, since an extra file is not a key.
+    # caches them in one frame.
 
 
 # ── strand model round-trip ──────────────────────────────────────────────────────────────────────
@@ -444,8 +445,6 @@ def read_scan_cache(cache_dir: str | Path, index: "TranscriptIndex", scan_config
             f"with both of those byte-identical. Re-scan against this index."
         )
 
-    # Self-consistency: the manifest records the scan config AND its digest, so a tampered or
-    # truncated manifest is caught here rather than surfacing as a mysteriously different tally.
     expected_schema = payload_schema_digest()
     if manifest.get("payload_schema_digest") != expected_schema:
         raise ScanCacheKeyError(

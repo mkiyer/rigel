@@ -73,14 +73,6 @@ def _make_locus_em_data(
 
     n_candidates = len(flat_t)
 
-    # Per-unit locus tracking
-    locus_t = np.full(n_units, -1, dtype=np.int32)
-    locus_cc = np.zeros(n_units, dtype=np.uint8)
-    for u, t_list in enumerate(t_indices_per_unit):
-        if t_list:
-            locus_t[u] = t_list[0]
-            locus_cc[u] = count_cols_per_unit[u][0] if count_cols_per_unit else _UNSPLICED_SENSE
-
     # is_spliced: True (spliced) → no gDNA candidate.
     # For include_nrna or include_gdna, set False (unspliced).
     if include_nrna or include_gdna:
@@ -90,18 +82,16 @@ def _make_locus_em_data(
 
     # gDNA log-likelihoods per unit
     if include_gdna:
-        gdna_log_liks = np.full(n_units, gdna_log_lik, dtype=np.float64)
+        gdna_log_liks = np.full(n_units, gdna_log_lik, dtype=np.float32)
     else:
-        gdna_log_liks = np.full(n_units, -np.inf, dtype=np.float64)
+        gdna_log_liks = np.full(n_units, -np.inf, dtype=np.float32)
 
     em_data = ScoredFragments(
         offsets=np.array(offsets, dtype=np.int64),
         t_indices=np.array(flat_t, dtype=np.int32),
-        log_liks=np.array(flat_lk, dtype=np.float64),
+        log_liks=np.array(flat_lk, dtype=np.float32),
         count_cols=np.array(flat_cc, dtype=np.uint8),
-        coverage_weights=np.ones(n_candidates, dtype=np.float64),
-        locus_t_indices=locus_t,
-        locus_count_cols=locus_cc,
+        coverage_weights=np.ones(n_candidates, dtype=np.float32),
         is_spliced=is_spliced,
         gdna_log_liks=gdna_log_liks,
         frag_ids=np.arange(n_units, dtype=np.int64),
@@ -140,7 +130,7 @@ def _run_and_assign(rc, em_data, loci=None, gdna_prior_count=None, *, em_iterati
     # Partition ScoredFragments into per-locus LocusPartition objects
     partitions = partition_and_free(em_data, loci)
 
-    # Build the 9-tuples and transcript index lists expected by C++
+    # Build the 7-tuples and transcript index lists expected by C++
     partition_tuples = [
         (
             p.offsets,
@@ -150,8 +140,6 @@ def _run_and_assign(rc, em_data, loci=None, gdna_prior_count=None, *, em_iterati
             p.count_cols,
             p.is_spliced,
             p.gdna_log_liks,
-            p.locus_t_indices,
-            p.locus_count_cols,
         )
         for p in [partitions[i] for i in range(len(loci))]
     ]

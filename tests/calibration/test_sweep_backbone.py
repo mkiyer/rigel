@@ -1,8 +1,7 @@
-"""The backbone's four assertions, and the contract that keeps the shipped policy the shipped policy.
+"""The backbone's two assertions, and the contract that keeps the shipped policy the shipped policy.
 
-The four: every node ends the two passes holding one message from each neighbour it has; every
-delivered row is one row per slot on the solve grid and finite; a slot's population set has at most
-three members; and the write-back touches only solvable slots. The kernel counts them per block
+The two: every node ends the two passes holding one message from each neighbour it has; and every
+delivered row is one row per slot on the solve grid and finite. The kernel counts them per block
 (`native/solve_kernel.cpp`) and the backbone judges (`sweep.AssertionCounts`). TRAPS: perturb-every-gate
 is the shape of the whole file — each assertion has a matching perturbation test that hands the backbone
 exactly that defect and asserts it refuses, because a gate with no firing perturbation has not been
@@ -214,13 +213,7 @@ def test_a_policy_that_sends_nothing_leaves_silence_at_every_node_with_a_neighbo
 # kernel's rows are the grid's), counted per block by the kernel and judged by the backbone.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
-_NAMES = (
-    "population_at_most_three",
-    "population_reaches_three",
-    "lam_rows_finite",
-    "cube_rows_finite",
-    "writeback_only_solvable",
-)
+_NAMES = ("lam_rows_finite", "cube_rows_finite")
 
 
 def _counts(per_block, rows_delivered, cube_delivered, n_owned):
@@ -254,45 +247,6 @@ def test_a_waiver_is_never_silent():
     exemption. An empty reason would be a widened predicate wearing a waiver's clothes."""
     for name, why in SW._KNOWN_VIOLATIONS.items():
         assert len(why) > 80, f"{name}'s waiver does not say what the defect is"
-
-
-# ══════════════════════════════════════════════════════════════════════════════════════════════════════
-# ASSERTION 3 — |T| <= 3.  AXIOM 0, made executable.
-# ══════════════════════════════════════════════════════════════════════════════════════════════════════
-
-
-def test_PERTURBATION_a_fourth_population_is_REFUSED():
-    """Axiom 0's tell, executable: a population set with more than three members. A derivation that
-    opens with ``{gDNA, nascent+, nascent-, mature+, mature-}`` produces a wrong table every
-    time."""
-    counts = SW.AssertionCounts()
-    with pytest.raises(AssertionError, match="population_at_most_three"):
-        counts.note("population_at_most_three", 3, 3)
-
-
-# ══════════════════════════════════════════════════════════════════════════════════════════════════════
-# ASSERTION 4 — the write-back touches only `solvable` slots.
-# ══════════════════════════════════════════════════════════════════════════════════════════════════════
-
-
-def test_PERTURBATION_a_writeback_outside_solvable_is_REFUSED():
-    """Getting this wrong reads as a byte-identity failure of ``max|delta| = 1.0``
-    (TRAPS: byte-identity-gate): a replay compares the solve's raw output against the shipped
-    belief, and the two differ by exactly this mask. Reproducing a pipeline stage means reproducing
-    its write-back.
-
-    A locked slot — one with no admissible RNA strand — is never solved and keeps its
-    signature-binary init, because RNA cannot cross a gene boundary so its unspliced mass is purely
-    gDNA."""
-    counts = SW.AssertionCounts()
-    with pytest.raises(AssertionError, match="writeback_only_solvable"):
-        counts.note("writeback_only_solvable", 1, 2)
-
-
-def test_a_writeback_confined_to_solvable_is_accepted():
-    counts = SW.AssertionCounts()
-    counts.note("writeback_only_solvable", 0, 2)
-    assert counts["writeback_only_solvable"] == {"violations": 0, "eligible": 2}
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -341,7 +295,7 @@ def test_solve_chains_parameter_default_is_silent_and_sends_nothing(sweep_inputs
 
 def test_the_backbone_does_not_know_what_a_message_is_about():
     """The structural claim of the split, as a test. The backbone owns the shape of the solve and
-    the four assertions; every message-composition choice is a policy. If one of these concepts
+    the two assertions; every message-composition choice is a policy. If one of these concepts
     reappears in ``sweep.py``, an operator has leaked back into the backbone and the next reader can
     no longer hold the working system in their head.
 
@@ -567,16 +521,9 @@ def test_the_block_solve_is_thread_exact_so_the_thread_count_moves_no_number(swe
 def test_the_checks_count_only_the_owned_slots():
     """The λ-row check's ELIGIBLE set reads as the chain's: where any block delivered rows, a block that
     delivered none holds zero rows — finite rows that were checked — so the published count does not
-    depend on how the chain was cut; and the kernel counts each block's OWNED slots only (its read-ahead
-    terminal is another block's)."""
-    two = _counts(
-        {"lam_rows_finite": [(0, 5), (0, 0)], "population_at_most_three": [(0, 5), (0, 3)]},
-        [True, False],
-        [False, False],
-        [5, 3],
-    )
+    depend on how the chain was cut."""
+    two = _counts({"lam_rows_finite": [(0, 5), (0, 0)]}, [True, False], [False, False], [5, 3])
     assert two["lam_rows_finite"] == {"violations": 0, "eligible": 8}
-    assert two["population_at_most_three"] == {"violations": 0, "eligible": 8}
     merged = SW.AssertionCounts()
     merged.note("lam_rows_finite", 0, 7)
     merged.note("lam_rows_finite", 0, 7)

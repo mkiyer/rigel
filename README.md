@@ -71,7 +71,7 @@ PyPI. The import name and CLI stay `rigel`.
 
 The `[report]` extra pulls in `vl-convert-python` (on conda:
 `conda install -c conda-forge vl-convert-python`); without it `rigel report` still builds a
-report, minus the fragment-length charts.
+report, with every chart omitted.
 
 ### From source
 
@@ -153,7 +153,7 @@ rigel report results/ -o results/report.html
 ```
 
 Produces a single self-contained HTML QC file from the files `rigel quant` already wrote, so
-reports can be built later and in bulk. Requires the `[report]` extra (see
+reports can be built later and in bulk. Its charts need the `[report]` extra (see
 [Installation](#pypi)).
 
 The five subcommands are `index`, `quant`, `sim` (a small synthetic scenario from a YAML

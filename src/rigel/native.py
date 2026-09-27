@@ -40,12 +40,9 @@ from ._em_impl import batch_locus_em_partitioned
 from ._em_impl import connected_components
 from ._em_impl import build_partition_offsets
 from ._em_impl import scatter_candidates_f32
-from ._em_impl import scatter_candidates_f64
 from ._em_impl import scatter_candidates_i32
 from ._em_impl import scatter_candidates_u8
 from ._em_impl import scatter_units_f32
-from ._em_impl import scatter_units_f64
-from ._em_impl import scatter_units_i32
 from ._em_impl import scatter_units_i64
 from ._em_impl import scatter_units_u8
 
@@ -57,11 +54,12 @@ from ._solve_impl import posterior_median as psi_posterior_median
 from ._solve_impl import compose as psi_compose
 from ._solve_impl import gdna_arm as psi_gdna_arm
 
-# the transfer's three kernels on tables the call allocates, the row constructors, the flag predicates and the
-# constructions the block pipeline absorbed — bound for the gates (nothing in src/ reads them)
+# the transfer's three kernels on tables the call allocates, bound for the gates
 from ._solve_impl import transfer_prepare
 from ._solve_impl import transfer_pass
 from ._solve_impl import transfer_solve
+
+# the row constructors, the flag predicates and the constructions the block pipeline absorbed
 from ._solve_impl import rows as transfer_rows
 
 # -- Interval overlap -------------------------------------------------------
@@ -86,12 +84,9 @@ __all__ = [
     "connected_components",
     "build_partition_offsets",
     "scatter_candidates_f32",
-    "scatter_candidates_f64",
     "scatter_candidates_i32",
     "scatter_candidates_u8",
     "scatter_units_f32",
-    "scatter_units_f64",
-    "scatter_units_i32",
     "scatter_units_i64",
     "scatter_units_u8",
     # The solve

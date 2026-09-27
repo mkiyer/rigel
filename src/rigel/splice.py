@@ -53,7 +53,6 @@ def census_field(stype: SpliceType) -> str:
 
 #: Pre-computed int constants for hot-path comparisons (avoid enum overhead).
 SPLICE_UNSPLICED: int = int(SpliceType.UNSPLICED)  # 0
-SPLICE_UNANNOT: int = int(SpliceType.SPLICED_UNANNOT)  # 1
 SPLICE_ANNOT: int = int(SpliceType.SPLICED_ANNOT)  # 2
 SPLICE_IMPLICIT: int = int(SpliceType.SPLICED_IMPLICIT)  # 3
 SPLICE_ARTIFACT: int = int(SpliceType.SPLICE_ARTIFACT)  # 4

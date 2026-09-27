@@ -62,24 +62,10 @@ try:
 except ImportError:
     yaml = None  # type: ignore[assignment]
 
-try:
-    import pgzip
-except ImportError:
-    pgzip = None  # type: ignore[assignment]
-
 from rigel.transcript import Transcript
 from rigel.types import Interval, Strand
 
-# Config dataclasses live in wgs_config (data layer); re-exported so existing
-# `from rigel.sim.whole_genome import SimulationParams` call sites keep working.
-from .wgs_config import (  # noqa: F401
-    AbundanceConfig,
-    GDNASimConfig,
-    NRNAConfig,
-    SimulationParams,
-    WholeGenomeSimConfig,
-)
-from .wgs_engine import GenomeCache, WholeGenomeSimulator  # noqa: F401  re-export
+from .wgs_config import AbundanceConfig, SimulationParams, WholeGenomeSimConfig
 from rigel.sim.capture import CaptureConfig, CaptureScenario
 from rigel.sim.manifest import (
     gdna_label_for_rate,
@@ -203,7 +189,11 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     cfg.shadow_gtf = raw.get("shadow_gtf", None)
     cfg.index = raw.get("index", None)
     cfg.outdir = raw.get("outdir", "sim_output")
-    cfg.transcript_filter = raw.get("transcript_filter", "all")
+    if raw.get("transcript_filter", "all") != "all":
+        raise ValueError(
+            "transcript_filter is not applicable when the transcriptome comes from a rigel index: the "
+            "index IS the transcript set. Build the index from a filtered GTF instead."
+        )
 
     # Simulation params
     sim_raw = raw.get("simulation", {})
@@ -348,35 +338,22 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
 # ═══════════════════════════════════════════════════════════════════
 
 
-def load_transcripts(
-    gtf_path: str | Path,
-    *,
-    transcript_filter: str = "all",
-) -> list[Transcript]:
-    """Load transcripts from a GTF file with optional filtering.
+def load_transcripts(gtf_path: str | Path) -> list[Transcript]:
+    """Load transcripts from a GTF file.
 
     Parameters
     ----------
     gtf_path : path
         GTF annotation file (may be gzipped).
-    transcript_filter : str
-        One of ``"all"``, ``"basic"``, ``"mane"``, ``"ccds"``.
 
     Returns
     -------
     list[Transcript]
         With ``t_index`` assigned sequentially.
     """
-    logger.info("Loading transcripts from %s (filter=%s)", gtf_path, transcript_filter)
+    logger.info("Loading transcripts from %s", gtf_path)
     transcripts = Transcript.read_gtf(str(gtf_path), parse_mode="warn-skip")
     logger.info("Read %d transcripts from GTF", len(transcripts))
-
-    if transcript_filter == "basic":
-        transcripts = [t for t in transcripts if t.is_basic]
-    elif transcript_filter == "mane":
-        transcripts = [t for t in transcripts if t.is_mane]
-    elif transcript_filter == "ccds":
-        transcripts = [t for t in transcripts if t.is_ccds]
 
     for i, t in enumerate(transcripts):
         t.t_index = i
@@ -400,7 +377,7 @@ def merge_shadow_transcripts(
     fragments are named like any RNA fragment (``{t_id}:…``), so the oracle split files them as
     ``mrna`` and the certified per-slot truth shows RNA exactly where the annotation says there is
     none. Gate: ``tests/test_sim_shadow_transcripts.py``."""
-    shadows = load_transcripts(shadow_gtf, transcript_filter="all")
+    shadows = load_transcripts(shadow_gtf)
     known = {t.t_id for t in transcripts}
     clash = sorted(t.t_id for t in shadows if t.t_id in known)
     if clash:
@@ -1069,11 +1046,6 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
 
     # 1. Load transcripts from the rigel index, so the simulated transcriptome (annotated transcripts
     #    plus the synthetic nascent entities) is exactly the one `rigel quant` reads.
-    if cfg.transcript_filter != "all":
-        raise ValueError(
-            "transcript_filter is not applicable when the transcriptome comes from a rigel index: the "
-            "index IS the transcript set. Build the index from a filtered GTF instead."
-        )
     index_dir = ensure_index(cfg)
     transcripts = load_transcripts_from_index(index_dir)
     if not transcripts:
@@ -1167,8 +1139,7 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
         include_capture_in_names=include_capture_in_names,
         base_seed=sim.sim_seed,
         oracle_bam=cfg.oracle_bam,
-        skip_existing=True,
-        emit_fastq=getattr(cfg, "emit_fastq", True),
+        emit_fastq=cfg.emit_fastq,
     )
 
     # 4. Write manifest
@@ -1267,7 +1238,6 @@ def main() -> int:
             "nrna_abundance",
             flush=True,
         )
-    print(f"  Transcript filter:{cfg.transcript_filter}", flush=True)
     print(f"  Oracle BAM:       {cfg.oracle_bam}", flush=True)
 
     t0 = time.monotonic()

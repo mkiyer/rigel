@@ -62,16 +62,15 @@ class SweepCapture:
     slot's own composition evidence: the strand term's precision at ``fg_loc`` plus the factory row's
     curvature, ``tau_fac``, which is published apart so an instrument can split the two sources); the
     STRAND-ONLY solve's ``fg_strand`` (no prior, no messages, to split the local error into the strand
-    likelihood against the prior's contribution); the FINAL solve's ``f_g`` and ``var_g``; the incoming
-    belief's ``fg_init``; ``solvable``; the observations ``count`` ``(n, 2)``, ``spliced``, ``mature``,
-    ``free_pos``, ``free_neg``, ``eff_gdna``, ``eff_rna``, and the gDNA support ``mass_global``,
-    ``eff_global``. The message layer's delivery: ``lam_rows`` ``(n, K)`` (zero rows where a block
-    delivered nothing, ``None`` when no block did), ``cube_rows`` (a `CubeRows` table keyed to the chain),
-    and the two received tables ``from_left`` / ``from_right`` — each a dict of the kernel's arrays over
-    the chain (``has_neighbour``, ``has_composition``, ``composition``, and per level lane ``present``,
-    ``profile``, ``count``, ``opportunity``, ``has_witness``, ``rna_count``, ``rna_count_var``). The chain:
-    its adjacency ``left`` / ``right``, the backbone's assertion counts, the name of the policy that RAN
-    (the witness an instrument's "the arm ran" assertion needs), and the solve grid ``f_g = σ(λ)``."""
+    likelihood against the prior's contribution); the FINAL solve's ``f_g`` and ``var_g``; ``solvable``;
+    the observations ``count`` ``(n, 2)``, ``spliced``, ``mature``, ``free_pos``, ``free_neg``,
+    ``eff_gdna``, and the gDNA support's ``mass_global``. The message layer's delivery: ``lam_rows``
+    ``(n, K)`` (zero rows where a block delivered nothing, ``None`` when no block did), ``cube_rows`` (a
+    `CubeRows` table keyed to the chain), and the two received tables ``from_left`` / ``from_right`` —
+    each a dict of the kernel's arrays over the chain (``has_neighbour``, ``has_composition``,
+    ``composition``, and per level lane ``present``, ``profile``, ``count``, ``opportunity``,
+    ``has_witness``, ``rna_count``, ``rna_count_var``). Then the backbone's assertion counts and the name
+    of the policy that RAN."""
 
     fg_loc: np.ndarray | None = None
     fg_strand: np.ndarray | None = None
@@ -79,7 +78,6 @@ class SweepCapture:
     var_g: np.ndarray | None = None
     tau_lam: np.ndarray | None = None
     tau_fac: np.ndarray | None = None
-    fg_init: np.ndarray | None = None
     solvable: np.ndarray | None = None
     count: np.ndarray | None = None
     spliced: np.ndarray | None = None
@@ -87,18 +85,13 @@ class SweepCapture:
     free_pos: np.ndarray | None = None
     free_neg: np.ndarray | None = None
     eff_gdna: np.ndarray | None = None
-    eff_rna: np.ndarray | None = None
     mass_global: np.ndarray | None = None
-    eff_global: np.ndarray | None = None
     lam_rows: np.ndarray | None = None
     cube_rows: CubeRows | None = None
     from_left: dict | None = None
     from_right: dict | None = None
-    left: np.ndarray | None = None
-    right: np.ndarray | None = None
     backbone_assertions: object = None
     policy_name: str | None = None
-    solve_grid: np.ndarray | None = None
 
     @staticmethod
     def concat_received(parts: list) -> dict:

@@ -1,9 +1,7 @@
 /**
  * bam_scanner.cpp — C++ BAM scanner using htslib for rigel.
  *
- * Replaces the Python BAM parsing hot path (bam.py parse_bam_file +
- * fragment.py Fragment.from_reads + resolution.py resolve_fragment +
- * buffer.append) with a single C++ scan that:
+ * A single C++ scan that:
  *
  *   1. Reads BAM records via htslib (no pysam overhead)
  *   2. Groups records by query name (name-sorted BAM)
@@ -22,13 +20,12 @@
  */
 
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <functional>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -36,15 +33,11 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
-#include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
-#include <nanobind/stl/tuple.h>
 #include <nanobind/stl/vector.h>
 
 #include <htslib/hts.h>
 #include <htslib/sam.h>
-
-#include <sys/stat.h>
 
 #include "resolve_context.h"
 #include "thread_queue.h"
@@ -59,7 +52,6 @@ using namespace rigel;
 // ================================================================
 
 static constexpr int CIG_MATCH    = BAM_CMATCH;     // 0 M
-static constexpr int CIG_INS      = BAM_CINS;       // 1 I
 static constexpr int CIG_DEL      = BAM_CDEL;       // 2 D
 static constexpr int CIG_REF_SKIP = BAM_CREF_SKIP;  // 3 N
 static constexpr int CIG_EQUAL    = BAM_CEQUAL;     // 7 =
@@ -112,21 +104,6 @@ static const char* frag_class_label(int code) {
     }
 }
 
-// ================================================================
-// ZF assignment-flag constants are defined in constants.h.  This file
-// references them through the unqualified names via the using-decls
-// below so the stamp sites read cleanly.
-// ================================================================
-
-using rigel::AF_UNRESOLVED;
-using rigel::AF_MRNA;
-using rigel::AF_NRNA;
-using rigel::AF_NRNA_SYNTH;
-using rigel::AF_GDNA_EM;
-using rigel::AF_GDNA_INTERGENIC;
-using rigel::AF_CHIMERIC;
-using rigel::AF_MULTIMAPPER_DROP;
-
 static const char* splice_type_label(int code) {
     switch (code) {
         case SPLICE_UNSPLICED:       return "unspliced";
@@ -178,8 +155,6 @@ struct SJCigarEntry {
 struct ParsedAlignment {
     int32_t ref_id;         // tid
     int32_t ref_start;      // pos
-    int32_t mate_ref_id;    // mtid
-    int32_t mate_ref_start; // mpos
     uint16_t flag;
     // Per-record count of CIGAR sj dropped by the splice-artifact
     // blacklist.  Populated by filter_blacklisted_sjs in Pass 1 (for
@@ -240,7 +215,7 @@ struct StrandObservations {
     std::vector<int8_t> exonic_obs;
     std::vector<int8_t> exonic_truth;
 
-    // ⭐ The per-sj SJ strand table.
+    // ⭐ The per-sj strand table.
     // A sj is uniquely specified by (ref, start, end, motif strand); each
     // strand-qualified fragment credits its leftmost ANNOTATED sj with one
     // sense (align_strand == sj_strand) or antisense observation.
@@ -415,8 +390,7 @@ struct WorkerState {
     // ⛔ That restriction is mandatory, not tidiness. `Accumulator::deposit` normalises introns by
     // coordinate alone — it never looks at `IntronBlock::ref_id` — so an intron from another reference
     // would be cut out of this reference's path. Multi-reference fragments DO arrive here: the intergenic call
-    // site is not chimera-gated, and `detect_chimera` returns CHIMERA_NONE when the blocks carry empty
-    // transcript sets.
+    // site is not chimera-gated.
     rigel::accumulator::DepositScratch deposit_scratch;
     std::vector<IntronBlock>           deposit_introns;
     std::vector<rigel::accumulator::GapHypothesis> gap_hypotheses;
@@ -440,7 +414,7 @@ static void merge_strand_obs(StrandObservations& dst, StrandObservations& src) {
 }
 
 // ================================================================
-// CIGAR parsing — ports parse_read() from bam.py
+// CIGAR parsing
 // ================================================================
 //
 // In addition to emitting exon blocks and splice junctions, we compute
@@ -455,7 +429,6 @@ static void merge_strand_obs(StrandObservations& dst, StrandObservations& src) {
 
 static void parse_cigar(
     const bam1_t* b,
-    int32_t sj_strand,
     std::vector<std::pair<int32_t, int32_t>>& exons,
     std::vector<SJCigarEntry>& sjs)
 {
@@ -472,7 +445,6 @@ static void parse_cigar(
 
     // First pass: build exons, record each sj's left anchor and
     // its CIGAR intron length so the right anchor can be back-filled.
-    const size_t sj_base = sjs.size();
     for (int32_t i = 0; i < n_cigar; i++) {
         int op = bam_cigar_op(cigar[i]);
         int len = bam_cigar_oplen(cigar[i]);
@@ -482,7 +454,7 @@ static void parse_cigar(
             SJCigarEntry sj{};
             sj.start = pos;
             sj.end = pos + len;
-            sj.strand = sj_strand;
+            sj.strand = STRAND_NONE;
             sj.anchor_left = ref_advanced;
             sj.anchor_right = 0;  // patched below
             sjs.push_back(sj);
@@ -499,8 +471,8 @@ static void parse_cigar(
 
     // Back-fill right anchors: right = total - left.  ``ref_advanced`` is
     // the grand total of ref-advancing bases across the whole CIGAR.
-    for (size_t k = sj_base; k < sjs.size(); k++) {
-        sjs[k].anchor_right = ref_advanced - sjs[k].anchor_left;
+    for (auto& sj : sjs) {
+        sj.anchor_right = ref_advanced - sj.anchor_left;
     }
 }
 
@@ -593,8 +565,7 @@ static int32_t read_sj_strand(const bam1_t* b, SJTagMode mode) {
 // ================================================================
 // Extracts all fields the pipeline needs (scalars, tags, CIGAR-derived
 // exon blocks and splice junctions) so that downstream code never
-// touches bam1_t directly.  Used by both single-threaded scan() and
-// the producer thread in scan().
+// touches bam1_t directly.
 
 static ParsedAlignment parse_bam_record(
     const bam1_t* b,
@@ -608,8 +579,6 @@ static ParsedAlignment parse_bam_record(
     rec.flag = b->core.flag;
     rec.ref_id = b->core.tid;
     rec.ref_start = b->core.pos;
-    rec.mate_ref_id = b->core.mtid;
-    rec.mate_ref_start = b->core.mpos;
 
     // BAM aux tags
     rec.nm = 0;
@@ -628,7 +597,7 @@ static ParsedAlignment parse_bam_record(
     int32_t mapped_ref_id = (rec.ref_id >= 0 &&
         rec.ref_id < static_cast<int32_t>(tid_to_ref_id.size()))
         ? tid_to_ref_id[rec.ref_id] : -1;
-    parse_cigar(b, STRAND_NONE, rec.exons, rec.sjs);
+    parse_cigar(b, rec.exons, rec.sjs);
     rec.sj_strand = STRAND_NONE;
     if (!rec.sjs.empty()) {
         rec.sj_strand = read_sj_strand(b, sj_tag_mode);
@@ -749,7 +718,7 @@ static AssembledFragment build_fragment(
 }
 
 // ================================================================
-// Hit grouping — ports _group_records_by_hit from bam.py
+// Hit grouping
 // ================================================================
 
 struct AlignmentGroup {
@@ -854,7 +823,7 @@ static AlignmentGroup group_records_by_hit(
 }
 
 // ================================================================
-// Multimapper pairing — ports pair_multimapper_reads from resolution.py
+// Multimapper pairing
 // ================================================================
 // Thread-safe: uses caller-supplied ResolverScratch for all resolve calls.
 
@@ -889,10 +858,9 @@ pair_multimapper_reads(
         std::vector<int32_t> t_inds;
         if (!frag.exons.empty()) {
             RawResolveResult cr;
-            if (ctx._resolve_core(frag.exons, frag.introns,
-                                   frag.genomic_footprint(), cr, scratch)) {
-                t_inds = std::move(cr.t_inds);
-            }
+            ctx._resolve_core(frag.exons, frag.introns,
+                              frag.genomic_footprint(), cr, scratch);
+            t_inds = std::move(cr.t_inds);
         }
         return t_inds;
     };
@@ -1329,37 +1297,52 @@ public:
 
         // ---- Launch worker threads ----
         // Workers pop from input_queue, process groups, accumulate, and
-        // push full chunks to output_queue.
+        // push full chunks to output_queue. A worker that throws keeps the
+        // first worker exception and aborts both queues.
+        std::exception_ptr worker_exception;
+        std::mutex worker_exception_mutex;
         std::vector<std::thread> workers;
         workers.reserve(n_workers);
         for (int i = 0; i < n_workers; i++) {
             workers.emplace_back([&input_queue, &output_queue,
-                                  &worker_states, ctx, i,
+                                  &worker_states, &worker_exception,
+                                  &worker_exception_mutex, ctx, i,
                                   include_multimap, chunk_size]()
             {
-                WorkerState& ws = *worker_states[i];
-                QnameBatch batch;
-                bool output_aborted = false;
-                while (input_queue.pop(batch)) {
-                    for (auto& group : batch.groups) {
-                        process_qname_group_threaded(
-                            group, *ctx, ws, include_multimap);
-                        // Emit a chunk when accumulator reaches threshold
-                        if (ws.accumulator.get_size() >= chunk_size) {
-                            if (!output_queue.push(std::move(ws.accumulator))) {
-                                output_aborted = true;
-                                break;  // aborted
+                try {
+                    WorkerState& ws = *worker_states[i];
+                    QnameBatch batch;
+                    bool output_aborted = false;
+                    while (input_queue.pop(batch)) {
+                        for (auto& group : batch.groups) {
+                            process_qname_group_threaded(
+                                group, *ctx, ws, include_multimap);
+                            // Emit a chunk when accumulator reaches threshold
+                            if (ws.accumulator.get_size() >= chunk_size) {
+                                if (!output_queue.push(std::move(ws.accumulator))) {
+                                    output_aborted = true;
+                                    break;  // aborted
+                                }
+                                ws.accumulator = FragmentAccumulator();
+                                ws.accumulator.reserve(chunk_size, chunk_size * 3 / 2);
                             }
-                            ws.accumulator = FragmentAccumulator();
-                            ws.accumulator.reserve(chunk_size, chunk_size * 3 / 2);
+                        }
+                        batch.groups.clear();
+                        if (output_aborted) break;
+                    }
+                    // Flush remaining fragments
+                    if (!output_aborted && ws.accumulator.get_size() > 0) {
+                        output_queue.push(std::move(ws.accumulator));
+                    }
+                } catch (...) {
+                    {
+                        std::lock_guard<std::mutex> lock(worker_exception_mutex);
+                        if (!worker_exception) {
+                            worker_exception = std::current_exception();
                         }
                     }
-                    batch.groups.clear();
-                    if (output_aborted) break;
-                }
-                // Flush remaining fragments
-                if (!output_aborted && ws.accumulator.get_size() > 0) {
-                    output_queue.push(std::move(ws.accumulator));
+                    input_queue.abort();
+                    output_queue.abort();
                 }
             });
         }
@@ -1523,9 +1506,12 @@ public:
         // Wait for reader thread to finish
         reader_thread.join();
 
-        // Propagate exceptions: prefer reader exception (root cause)
+        // Propagate exceptions: reader, then worker, then main thread
         if (reader_exception) {
             std::rethrow_exception(reader_exception);
+        }
+        if (worker_exception) {
+            std::rethrow_exception(worker_exception);
         }
         if (main_exception) {
             std::rethrow_exception(main_exception);
@@ -1563,28 +1549,21 @@ private:
         // accumulator owns the whole deposit rule; this function's only job is to say what the fragment IS
         // — its extent on one reference, the introns cut out of it, and the two independent strands.
         //
-        // ⭐ THE TWO STRANDS ARE INDEPENDENT, and collapsing them is the bug this rewrite deletes.
+        // ⭐ THE TWO STRANDS ARE INDEPENDENT.
         //   align_strand  where the read ALIGNED. Every read has one. It selects the array column.
         //   sj_strand     the splice junction's strand. Spliced reads only. It resolves an intron against
         //                 the annotation, and nothing else.
-        // The shipped code compared them into a third concept, a bool named `primary`, and used it to pick
-        // a channel labelled *sense* — which is how a dUTP first-strand library ended up with 0.6 % of its
-        // spliced fragments in that column. `primary` is deleted, not renamed, and nothing replaces it:
-        // sense/antisense is DERIVED by a consumer from the fragment strand and the sj's own strand.
+        // Sense/antisense is DERIVED by a consumer from the fragment strand and the sj's own strand.
         //
-        // ⚠ No strand gate here either. The deposit rejects an undefined `align_strand` itself and COUNTS
-        // it, which is the point — the old `align_ok`/`motif_ok` gate returned early, so the loss vanished.
+        // ⚠ No strand gate here. The deposit rejects an undefined `align_strand` itself and COUNTS it.
         const auto deposit_to_accumulator =
             [&ws](const AssembledFragment& f, const RawResolveResult& cr) {
                 const int32_t st = cr.splice_type;
 
                 // ── the splice census ─────────────────────────────────────────────────────────────
                 //
-                // ⭐ FIRST, and before any gate, because this is the count of what the scanner SAW.
-                // One observation per fragment reaching this adapter — unique mapper, resolved,
-                // non-chimeric — which is exactly the population the accumulator is offered, so the
-                // report's splice breakdown and its fragment-length histograms describe the same
-                // fragments. That was never true of the category models this replaces.
+                // ⭐ FIRST, and before any gate, because this is the count of what the scanner SAW:
+                // one observation per fragment reaching this adapter.
                 //
                 // ⚠ It is deliberately NOT gated on `ws.acc_set`: what the scanner classified does
                 // not depend on whether an accumulator happened to be installed.
@@ -1662,15 +1641,7 @@ private:
                 //
                 // ⛔ A fragment with blocks on MORE THAN ONE REFERENCE deposits nothing. It is not one
                 // molecule, and an `OfferedFragment` cannot express it — it carries one
-                // extent on one region_bound axis. The shipped code had no such check on the intergenic path: it
-                // computed a span per reference and deposited ALL of them onto `exons.front().ref_id`, so
-                // chr7 coordinates landed on chr1's region_bound axis. `ws.span_ref` recorded which reference each
-                // span belonged to and **nothing ever read it**, which is how that survived.
-                //
-                // ⚠ Deliberately narrow: this tests multi-reference, NOT `cr.chimera_type`. That field is
-                // also set for single-reference *cis* chimeras, which the intergenic path deposits today,
-                // and stopping those is a change to WHAT COUNTS AS A FRAGMENT — its own arm with its own
-                // before/after measurement.
+                // extent on one region_bound axis.
                 std::int64_t start = 0, end = 0;
                 bool any = false;
                 for (const auto& block : f.exons) {
@@ -1796,16 +1767,12 @@ private:
 
             RawResolveResult cr;
             cr.n_sj_blacklisted = frag_n_sj_blacklisted;
-            bool resolved = ctx._resolve_core(
+            ctx._resolve_core(
                 frag.exons, frag.introns,
                 frag.genomic_footprint(), cr, scratch);
 
-            // _resolve_core returns true even when t_inds
-            // is empty (truly intergenic).  Treat empty-t_inds as the
-            // legacy "unresolved" path for stats but ALSO append to
-            // the buffer (for unique mappers) so calibration can
-            // categorize the fragment as INTERGENIC.
-            if (!resolved || cr.t_inds.empty()) {
+            // Empty t_inds: an intergenic fragment.
+            if (cr.t_inds.empty()) {
                 // Defer intergenic counting until after all hits
                 // are processed to avoid multi-counting.
                 if (frag.has_introns()) {
@@ -1825,18 +1792,13 @@ private:
                 // consistent.  The C++ scorer skips empty-t_inds
                 // fragments silently (n_cand <= 0 early skip) so they
                 // don't increment stat_gated either.
-                if (resolved && is_unique_mapper) {
+                if (is_unique_mapper) {
                     ResolvedFragment ig_result = ResolvedFragment::from_core(cr);
                     ig_result.num_hits = num_hits;
                     ig_result.nm = frag.nm;
                     accumulator.append(ig_result, frag_id);
 
-                    // Phase 0: deposit the intergenic fragment's genomic-DNA
-                    // mass into the calibration accumulator. Without this, an
-                    // intergenic region's contained mass is identically zero
-                    // and the count-clue density loses its baseline signal.
-                    // (Intergenic ⇒ no candidate transcripts ⇒ no implicit
-                    // introns; cr drives the channel/spans uniformly.)
+                    // Deposit the intergenic fragment into the calibration accumulator.
                     deposit_to_accumulator(frag, cr);
                 }
 
@@ -1924,14 +1886,6 @@ private:
                 // non-chimeric). See deposit_to_accumulator above.
                 deposit_to_accumulator(frag, cr);
             }
-
-            // Region accumulation for resolved (non-chimeric) fragments.
-            // Every resolved hit of a multimapper accumulates with
-            // 1/num_hits weight; summed across all hits of a single
-            // molecule the total is 1.0, matching the 1/NH crediting
-            // convention of the E_i (mappable_effective_length)
-            // denominator.  No count_stats gate: that would bias the
-            // numerator high by a factor of NH relative to E_i.
 
             accumulator.append(result, frag_id);
 
@@ -2028,7 +1982,7 @@ private:
         strand_dict["exonic_obs"]           = vec_to_ndarray(std::move(strand_obs_.exonic_obs));
         strand_dict["exonic_truth"]         = vec_to_ndarray(std::move(strand_obs_.exonic_truth));
 
-        // The per-sj SJ strand table, as six parallel arrays.  Sorted by
+        // The per-sj strand table, as six parallel arrays.  Sorted by
         // (ref, start, end, motif strand) because the source is an unordered_map
         // merged across workers, and every downstream number must not depend on
         // thread scheduling or hash order.
@@ -2389,7 +2343,6 @@ public:
         int64_t n_read_groups = 0;
         int64_t n_annotated = 0;
         int64_t n_intergenic = 0;
-        int64_t n_chimeric = 0;
         int64_t n_records_written = 0;
         int64_t n_filtered_passthrough = 0;
 
@@ -2533,14 +2486,13 @@ public:
                             r1_reads, r2_reads);
                         if (!frag.exons.empty()) {
                             RawResolveResult cr;
-                            if (ctx_->_resolve_core(
-                                    frag.exons, frag.introns,
-                                    frag.genomic_footprint(), cr, scratch)) {
-                                for (int32_t ti : cr.t_inds) {
-                                    if (ti == best_tid_val) {
-                                        is_primary = true;
-                                        break;
-                                    }
+                            ctx_->_resolve_core(
+                                frag.exons, frag.introns,
+                                frag.genomic_footprint(), cr, scratch);
+                            for (int32_t ti : cr.t_inds) {
+                                if (ti == best_tid_val) {
+                                    is_primary = true;
+                                    break;
                                 }
                             }
                         }
@@ -2649,8 +2601,6 @@ public:
             ParsedAlignment rec;
             rec.ref_id = b->core.tid;
             rec.ref_start = b->core.pos;
-            rec.mate_ref_id = b->core.mtid;
-            rec.mate_ref_start = b->core.mpos;
             rec.flag = flag;
 
             rec.nm = 0;
@@ -2668,7 +2618,7 @@ public:
             int32_t mapped_ref_id = (rec.ref_id >= 0 &&
                 rec.ref_id < static_cast<int32_t>(tid_to_ref_id_.size()))
                 ? tid_to_ref_id_[rec.ref_id] : -1;
-            parse_cigar(b, STRAND_NONE, rec.exons, rec.sjs);
+            parse_cigar(b, rec.exons, rec.sjs);
             rec.sj_strand = STRAND_NONE;
             if (!rec.sjs.empty()) {
                 rec.sj_strand = read_sj_strand(b, sj_tag_mode_);
@@ -2706,7 +2656,6 @@ public:
         summary["n_read_groups"] = n_read_groups;
         summary["n_annotated"] = n_annotated;
         summary["n_intergenic"] = n_intergenic;
-        summary["n_chimeric"] = n_chimeric;
         summary["n_records_written"] = n_records_written;
         summary["n_filtered_passthrough"] = n_filtered_passthrough;
         return summary;
@@ -2758,7 +2707,7 @@ private:
 };
 
 // ================================================================
-// SJ strand tag auto-detection (ports detect_sj_strand_tag)
+// SJ strand tag auto-detection
 // ================================================================
 
 static std::string detect_sj_strand_tag_native(
@@ -2847,8 +2796,8 @@ NB_MODULE(_bam_impl, m) {
         using rigel::accumulator::kNFragmentPools;
         using rigel::accumulator::kNStrandColumns;
 
-        // One scratch per bound instance. The class is single-threaded from Python and the scan path uses
-        // its own per-worker scratch, so this is only here to keep the signature allocation-free.
+        // One scratch per thread, shared by every bound `Accumulator`. The scan path uses
+        // `WorkerState::deposit_scratch` instead.
         static thread_local DepositScratch binding_scratch;
 
         nb::class_<Accumulator>(m, "Accumulator")
@@ -2974,7 +2923,7 @@ NB_MODULE(_bam_impl, m) {
                     &a.sj_data()[0].inv_length_sum, {a.n_sj()}, h, {row}).cast();
             })
             // ⭐ ndim<2>, unlike every other mass here — the sj mass carries a strand, and its
-            // columns are `sj_count`'s columns. See `SpliceJunction::mass` for the premise that changed.
+            // columns are `sj_count`'s columns. See `SpliceJunction::mass`.
             .def_prop_ro("sj_mass", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
                 constexpr int64_t row = sizeof(SpliceJunction) / sizeof(double);

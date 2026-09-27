@@ -441,11 +441,10 @@ toy inherits both; `quant_accuracy`'s oracle arms are undrained (documented ther
 (b) DEAD, DEFERRED: `region_span_count`, tallied per fragment by the accumulator and carried through the payload,
 the substrate and the caches, read by nothing (the retired length channel's) — deleting it changes the payload
 schema and re-caches both panels, so it goes with the next change that re-caches anyway (owner, 2026-09-22).
-(c) PRODUCTION-DEAD, KEPT AS TEST SURFACE: `FragmentBuffer.append` / `finalize` / `__iter__` and
-`BufferedFragment` (the scanner hands chunks over; only `test_buffer.py` appends); the resolver's `intron_bp`, the
-tested half of its overlap profile; `rigel.sim.benchmark` and `Scenario.build_oracle`, test tooling inside the
-package; `priors.contended_boundaries`, `region_init.has_own_composition_evidence`, `effective_length.fl_mean`
-and `Strand.from_is_reverse` / `opposite`, which tests use as checks or oracles.
+(c) PRODUCTION-DEAD, KEPT AS TEST SURFACE: the resolver's `intron_bp`, the tested half of its overlap profile;
+`rigel.sim.benchmark` and `Scenario.build_oracle`, test tooling inside the package; `priors.contended_boundaries`,
+`region_init.has_own_composition_evidence`, `effective_length.fl_mean` and `Strand.from_is_reverse` / `opposite`,
+which tests use as checks or oracles.
 (d) CLAIMS NOT RE-DERIVED on the current tree, left standing: that most in-scope error sits at the simplex
 vertices (`simplex_logodds`, a relay-era measurement); `sweep`'s refused deferral of UNIDENTIFIED slots to the
 prior (priced 2026-07, with no refusal entry here); `region_geometry`'s "no per-region spliced floor" A/B
@@ -1812,6 +1811,7 @@ pass-0 exon solve (no-evidence mass coverage 45.8 % → 66.1 % at `g98 ss0.99 ON
 — four zero controls 2.18×, deferred 1.84×, stranded × ON 1.20×, the only win 0.843× on stranded × OFF; under
 the shipped bank 58.6 % of live exon hops carry a REGION bank of exactly 0, an accidental mute. Survives: the
 truncation algebra (`EQUATIONS.md` §2) and the fill gate; the implementation is one commit before `a2b81b34`.
+2026-09-27: the fill gate was deleted with the field it filled, `RegionGeometry.inv_abundance`.
 
 ### the-message-policy-campaign
 Six mechanisms built, measured and refuted; closed 2026-08-27, the code deleted the same day. The bar it

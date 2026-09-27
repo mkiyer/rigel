@@ -26,14 +26,6 @@ def reverse_complement(seq: str) -> str:
     return seq.translate(_DNA_COMPLEMENT)[::-1]
 
 
-# ── Shared genome-building mechanics ────────────────────────────────────────
-# The single implementations behind BOTH synthetic-reference paths — the class path
-# (``MutableGenome`` + ``GeneBuilder``, used by ``Scenario``) and the function path
-# (``synthetic_genome``, used by the whole-genome suite + reference-gen scripts). The two
-# paths keep distinct OUTPUT contracts (filenames + GTF format) for two ecosystems, but
-# share these low-level mechanics so a fix reaches both.
-
-
 def random_dna_array(length: int, rng: np.random.Generator) -> np.ndarray:
     """Random DNA as a numpy array of single-char strings (``ACGT``), drawn from *rng*."""
     return _DNA_BASES[rng.integers(0, 4, size=length)]
@@ -49,9 +41,7 @@ def write_fasta_file(seq: str, ref_name: str, fasta_path: Path) -> Path:
     ref_name : str
         FASTA header / reference name.
     fasta_path : Path
-        Destination ``.fa`` path (parent dir created if needed). The two paths differ only in
-        the filename they choose (the suite writes ``genome.fa``; a ``MutableGenome`` writes
-        ``{name}.fa``), so the caller passes the full path.
+        Destination ``.fa`` path (parent dir created if needed).
     """
     fasta_path = Path(fasta_path)
     fasta_path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,7 +75,6 @@ class MutableGenome:
     def __init__(self, length: int, *, seed: int = 42, name: str = "chr1"):
         self.name = name
         self._rng = np.random.default_rng(seed)
-        # Generate random DNA as a mutable list (shared generator — see random_dna_array).
         self._seq: list[str] = list(random_dna_array(length, self._rng))
 
     # -- Properties -----------------------------------------------------------

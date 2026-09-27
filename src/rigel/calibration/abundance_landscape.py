@@ -1,12 +1,10 @@
 """rigel.calibration.abundance_landscape — the pre-pass-0 total-density field, and its mode census.
 
 The one question this module answers: what does the library's total fragment density look like over the
-genome, before anything is solved, and which regions sit on which mode? Under hybrid capture the field
-is bimodal by construction — a depleted off-target level and an enriched on-target one, a couple of
-decades apart — and off capture it is unimodal. The census reads that structure off a fitted density:
-`rho_0`, the depleted mode, which the pooled intergenic anchors also measure independently; the span
-`R`, the ratio between the two modes, read off the field and never from in-gene anchors, which
-under-read the enriched level; and per region a responsibility `w_i` for the enriched basin.
+genome, before anything is solved? Under hybrid capture the field is bimodal by construction — a
+depleted off-target level and an enriched on-target one, a couple of decades apart — and off capture it
+is unimodal. The census reads that structure off a fitted density: every mode with its basin, and the
+depleted and enriched modes among them (`split_basins`).
 
 The estimator is `landscape.fit_landscape`, reused as it stands. It is deliberately component-agnostic
 and every decision in it transfers: zero-native Poisson kernels (a wall-exact region that sequenced
@@ -23,12 +21,8 @@ support. What is particular to this module is the inputs and the census:
   solve; this data did not.
 
 ⛔ No significance threshold exists in the census, anywhere. Every interior local maximum is a mode, the
-grid is partitioned into basins at the minima between them, and masses carry every verdict continuously.
-A phantom wiggle above the bulk owns near-zero basin mass and so yields `w ≈ 0`, which is harmless, and
-the capture-OFF unimodality gate measures that rather than a constant asserting it. The depleted mode is
-picked by an independent measurement — the basin containing the pooled intergenic anchor rate — and the
-anchor-consistency verdict's tolerance is the depleted mode's own fitted width, the density's statement
-of its own resolution, never a chosen number.
+grid is partitioned into basins at the minima between them, and the depleted mode is picked by an
+independent measurement — the basin containing the pooled intergenic anchor rate.
 
 The field conflates enrichment with expression, and that is stated up front: a hot unprobed exon and a
 probed cold one can land in the same basin, so the failure direction of any consumer is permissive (an
@@ -53,7 +47,6 @@ from .landscape import (
     _KNN_SCALE,
     _LOCATED_VAR,
     DensityLandscape,
-    _poisson_kernels,
     fit_landscape,
     knn_widths,
 )
@@ -96,16 +89,6 @@ class AbundanceMode:
 class AbundanceLandscape:
     """The fitted total-density field plus its census. See the module docstring for every rule.
 
-    ``w_slot`` is per-REGION (the accumulator's region axis, not the chain): the region's own Poisson
-    kernel times the fitted density, normalised, integrated over the ENRICHED basin — an honest
-    posterior responsibility. ``0`` everywhere when the field is unimodal; ``NaN`` where the region is
-    not model-free (a double-walled region has no trustworthy total and therefore no reading).
-
-    ``anchor_log_rho`` is the independent depleted-level estimator — the pooled rate over intergenic
-    model-free regions (the same composition-free pool ``fit_intron_background`` uses) — and
-    ``anchor_consistent`` says whether it falls within the depleted mode's own width. ``NaN`` (and a
-    ``False``-free fallback to the largest basin) when no intergenic region exists, which is a toy.
-
     ``train_log_rho`` / ``train_class`` are the population this landscape was fitted on: one entry per
     selected region, the kernel centre ``log(max(count,1)) − log(exposure)`` in natural log, and its
     coarse class (``0`` intergenic / ``1`` intron / ``2`` exon — the report's own rug codes, where ``3``
@@ -118,12 +101,6 @@ class AbundanceLandscape:
     modes: tuple[AbundanceMode, ...]
     depleted: AbundanceMode
     enriched: AbundanceMode | None
-    rho_0: float
-    span_R: float
-    anchor_log_rho: float
-    anchor_gap_nats: float
-    anchor_consistent: bool
-    w_slot: np.ndarray
     n_train: int
     train_log_rho: np.ndarray
     train_class: np.ndarray
@@ -205,9 +182,7 @@ def located_enriched_mode(landscape: DensityLandscape) -> LocatedMode | None:
     regions always outnumber the probed ones, and the zero-count anchors are that population's own
     statement). Above it the candidate is the basin holding the most LOCATED kernels — a kernel with a
     location, ``landscape.located``, is one that counted at least a fragment; an anchor's or a
-    sub-fragment kernel's centre is its resolution wall ``1/E`` and is no member of anything. A human
-    index trains a quarter of a million anchors whose walls span every decade, and a basin above the
-    bulk can be packed with them around ten measured kernels (`ISSUES: the-ruler-reference-on-sparse-real-libraries`).
+    sub-fragment kernel's centre is its resolution wall ``1/E`` and is no member of anything.
 
     The candidate is a MODE only if its members resolve it at the located population's own
     resolution: with ``k = √n_located`` (:func:`~.landscape.knn_widths`' population ``k``), each
@@ -218,9 +193,7 @@ def located_enriched_mode(landscape: DensityLandscape) -> LocatedMode | None:
     rendered density's cut made it; the within-basin spread is NOT the statement, since a basin cut by
     the grid's edge is narrow whatever its kernels. ``None`` is "no enriched mode" — the capture-OFF
     field, the gDNA-free field, and a library whose gDNA is too sparse to locate its probed level —
-    and the consumer then contracts nothing (`capture_eff_length`, `priors`). The verdict and the peak
-    are stable across an 8× range of the render resolution
-    (`TRAPS: a-mode-count-is-not-a-well-posed-quantity`).
+    and the consumer then contracts nothing (`capture_eff_length`, `priors`).
     """
     modes = _census(landscape)
     depleted, _enriched = split_basins(modes, float("nan"))
@@ -257,7 +230,6 @@ def fit_abundance_landscape(
     """
     counts, exposure, model_free = region_counts_and_exposure(substrate, region_arrays, wall_mask)
     sel = np.asarray(model_free, dtype=bool) & (exposure > 0.0)
-    n_regions = counts.shape[0]
     if int(sel.sum()) < 2:
         return None
 
@@ -286,25 +258,6 @@ def fit_abundance_landscape(
     # ── depleted/enriched: one rule with one home — `split_basins`
     depleted, enriched = split_basins(modes, anchor_log_rho)
 
-    span_R = float(np.exp(enriched.log_rho - depleted.log_rho)) if enriched is not None else 1.0
-    gap = abs(depleted.log_rho - anchor_log_rho) if np.isfinite(anchor_log_rho) else float("nan")
-    # the tolerance is the depleted mode's own fitted width — the density's statement of its
-    # resolution — floored at one grid step, below which nothing is representable at all.
-    step = float(landscape.log_rho[1] - landscape.log_rho[0])
-    consistent = bool(np.isfinite(gap) and gap <= max(depleted.width, step))
-
-    # ── per-region enriched-basin responsibility, on the REGION axis
-    w_slot = np.full(n_regions, np.nan, dtype=np.float64)
-    if enriched is not None:
-        grid10 = landscape.log_rho / np.log(10.0)  # _poisson_kernels takes a log10 grid
-        kern = _poisson_kernels(c, e, grid10)
-        post = kern * np.exp(landscape.logP)[None, :]
-        post /= np.maximum(post.sum(axis=1, keepdims=True), _EPS)
-        in_basin = (landscape.log_rho >= enriched.lo) & (landscape.log_rho <= enriched.hi)
-        w_slot[sel] = post[:, in_basin].sum(axis=1)
-    else:
-        w_slot[sel] = 0.0
-
     # ── the training population, published: the kernel centres this fit was built from, in natural
     # log, with each region's coarse class. The centre expression is `fit_landscape`'s own
     # (`log10(max(count,1)) − log10(eff)`, then to nats) — the same floor, because a zero-count region
@@ -321,12 +274,6 @@ def fit_abundance_landscape(
         modes=modes,
         depleted=depleted,
         enriched=enriched,
-        rho_0=float(np.exp(depleted.log_rho)),
-        span_R=span_R,
-        anchor_log_rho=anchor_log_rho,
-        anchor_gap_nats=float(gap) if np.isfinite(gap) else float("nan"),
-        anchor_consistent=consistent,
-        w_slot=w_slot,
         n_train=int(landscape.n_train),
         train_log_rho=train_log_rho,
         train_class=train_class,

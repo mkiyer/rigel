@@ -82,10 +82,6 @@ class CaptureSampler:
             [int(t.length or t.compute_length()) for t in transcripts],
             dtype=np.int64,
         )
-        self._premrna_lengths = np.array(
-            [int(t.end - t.start) for t in transcripts],
-            dtype=np.int64,
-        )
         self._tx_id_to_index = {
             str(t.t_id): idx for idx, t in enumerate(transcripts) if t.t_id is not None
         }
@@ -93,20 +89,15 @@ class CaptureSampler:
         for idx, t in enumerate(transcripts):
             if t.ref is not None:
                 self._tx_by_ref[str(t.ref)].append(idx)
-        #: Per reference, transcripts sorted by start with the running maximum end beside them, so a
-        #: probe finds the transcripts it overlaps by two bisects instead of scanning the reference.
-        #: Required rather than nice to have: a probe maps to every overlapping transcript, so the
-        #: naive scan is O(probes x transcripts) and costs minutes per condition on a real panel.
-        self._tx_index: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = {}
+        #: Per reference, the transcripts' starts, ends and indices, sorted by start.
+        self._tx_index: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
         for ref, idxs in self._tx_by_ref.items():
             starts = np.array([transcripts[i].start for i in idxs], dtype=np.int64)
             ends = np.array([transcripts[i].end for i in idxs], dtype=np.int64)
             order = np.argsort(starts, kind="mergesort")
             starts, ends = starts[order], ends[order]
             arr = np.array(idxs, dtype=np.int64)[order]
-            # suffix maximum of END: transcripts at or after position j whose end exceeds a query
-            suffix_max_end = np.maximum.accumulate(ends[::-1])[::-1]
-            self._tx_index[ref] = (starts, ends, arr, suffix_max_end)
+            self._tx_index[ref] = (starts, ends, arr)
 
         #: One transcript space: a probe is mapped to every transcript whose exons its genomic blocks
         #: overlap — any gene, any isoform, any strand — and to gDNA by the same overlap. The nascent
@@ -137,7 +128,7 @@ class CaptureSampler:
         idx = self._tx_index.get(ref)
         if idx is None:
             return np.empty(0, dtype=np.int64)
-        starts, ends, arr, _suffix = idx
+        starts, ends, arr = idx
         # candidates start before `hi`; among those keep the ones ending after `lo`
         j = int(np.searchsorted(starts, hi, side="left"))
         if j == 0:

@@ -72,8 +72,8 @@ BAM Tag Schema
      - Number of EM candidate components
    * - ZS
      - Z
-     - Splice type (``spliced_annot``, ``spliced_unannot``,
-       ``unspliced``, ``unknown``)
+     - Splice type (``unspliced``, ``spliced_unannot``, ``spliced_annot``,
+       ``spliced_implicit``, ``splice_artifact``, or ``unknown``)
    * - ZL
      - i
      - Locus ID (``-1`` if no locus)
@@ -108,7 +108,7 @@ logger = logging.getLogger(__name__)
 #   bit 4 (0x10)  is_synthetic            nRNA subtype: rigel-generated span
 #   bit 5 (0x20)  is_intergenic           gDNA subtype: deterministic fast-path
 #   bit 6 (0x40)  is_chimeric             unresolved reason: chimeric
-#   bit 7 (0x80)  is_multimapper_dropped  unresolved reason: --no-multimap drop
+#   bit 7 (0x80)  is_multimapper_dropped  unresolved reason: --no-include-multimap drop
 #
 # Invariants (enforced by tests):
 #   1. is_resolved XOR (is_chimeric | is_multimapper_dropped)
@@ -173,24 +173,11 @@ def winner_flags(
     return flags
 
 
-# Fragment-class labels for the ZC tag.  ZC is the *input-ambiguity* axis,
-# orthogonal to ZF.  Fragments that never entered EM (intergenic, chimeric,
-# multimapper-dropped) are stamped with ZC="." by the writer directly and
-# do not appear in this map.
-_FRAG_CLASS_LABELS = {
-    0: "unambig",
-    1: "ambig_same_strand",
-    2: "ambig_opp_strand",
-    3: "multimapper",
-}
-
-
 @dataclass(slots=True)
 class AnnotationTable:
     """Lightweight per-fragment annotation table.
 
     Backed by parallel numpy arrays, one entry per annotated fragment.
-    Fragments are looked up by ``frag_id`` via :pyattr:`frag_id_to_row`.
 
     Attributes
     ----------
@@ -212,10 +199,10 @@ class AnnotationTable:
         int16 — number of EM candidate components.
     splice_type : np.ndarray
         uint8 — SpliceType enum value.
+    locus_id : np.ndarray
+        int32 — locus id of the EM subproblem (-1 = none, or not yet filled).
     _size : int
         Number of rows currently written.
-    frag_id_to_row : dict[int, int]
-        Maps frag_id → row index for O(1) lookup.
     """
 
     capacity: int
@@ -229,7 +216,6 @@ class AnnotationTable:
     splice_type: np.ndarray = field(repr=False)
     locus_id: np.ndarray = field(repr=False)
     _size: int = 0
-    frag_id_to_row: dict = field(default_factory=dict, repr=False)
 
     @classmethod
     def create(cls, capacity: int) -> "AnnotationTable":
@@ -270,7 +256,6 @@ class AnnotationTable:
         self.frag_class[idx] = frag_class
         self.n_candidates[idx] = n_candidates
         self.splice_type[idx] = splice_type
-        self.frag_id_to_row[frag_id] = idx
         self._size += 1
 
     def add_batch(
@@ -313,8 +298,6 @@ class AnnotationTable:
         if locus_ids is not None:
             self.locus_id[start:end] = locus_ids
 
-        self.frag_id_to_row.update(zip(frag_ids.tolist(), range(start, end)))
-
         self._size = end
 
     def _grow_to(self, new_cap: int) -> None:
@@ -346,41 +329,9 @@ class AnnotationTable:
         """Double capacity when full."""
         self._grow_to(max(self.capacity * 2, 1024))
 
-    def get(self, frag_id: int):
-        """Return annotation dict for a frag_id, or None if absent.
-
-        Debug/test accessor — used only by tests, not on the production path.
-        """
-        row = self.frag_id_to_row.get(frag_id)
-        if row is None:
-            return None
-        return {
-            "best_tid": int(self.best_tid[row]),
-            "best_gid": int(self.best_gid[row]),
-            "tx_flags": int(self.tx_flags[row]),
-            "posterior": float(self.posterior[row]),
-            "frag_class": int(self.frag_class[row]),
-            "n_candidates": int(self.n_candidates[row]),
-            "splice_type": int(self.splice_type[row]),
-        }
-
     @property
     def size(self) -> int:
         return self._size
-
-
-def _splice_type_label(code: int) -> str:
-    """Convert SpliceType int to lowercase label for the ZS tag.
-
-    TEST-ONLY reference oracle: production stamps the ZS tag in C++
-    (``BamAnnotationWriter``); this helper is referenced only by tests.
-    """
-    from .splice import SpliceType
-
-    try:
-        return SpliceType(code).name.lower()
-    except (ValueError, KeyError):
-        return "unknown"
 
 
 def write_annotated_bam(

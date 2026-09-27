@@ -29,8 +29,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..config import CalibrationConfig
-
 
 def _check_axis_array(arr: np.ndarray, name: str, n: int) -> None:
     """Validate one per-object array: shape against ITS OWN axis, dtype, finite, non-negative.
@@ -158,25 +156,6 @@ class CalibrationResult:
     #: and boundaries' shares at their efficiencies (`priors`). Geometry: identical under any split.
     gdna_boundary_conserved_len: np.ndarray
 
-    # --- the RNA geometric supports: the SAME two frames, on the RNA pmf ---
-    #: float64[n_regions] / float64[n_boundaries] — ``contained_eff_length`` and ``crossing_eff_length`` on the
-    #: RNA pmf: the RNA population's OWN opportunity at each object.
-    #:
-    #: ⛔ NO CONSUMER IN ``src/`` TODAY. The prior is a conserved FRAGMENT COUNT and divides by nothing
-    #: on the mass path (``tests/calibration/test_prior_units.py``), so nothing reads an RNA density
-    #: divisor.
-    #:
-    #: They are ORPHANED, not dead, and deleting them would be the wrong repair. Their gDNA twins are
-    #: load-bearing in four modules (``capture_eff_length``, ``track``, ``derive``, ``priors``); the
-    #: RNA pair is the same quantity for the other population, and any prior that reasons about RNA
-    #: DENSITY — per transcript or per object — needs exactly this divisor.
-    #:
-    #: Like their gDNA twins they are PROJECTED off ``RegionGeometry.eff_rna`` by ``_project_eff``,
-    #: never recomputed, so they are byte-identically the opportunity the SOLVER used. That is the
-    #: property that makes them safe to reason with.
-    rna_region_eff_len: np.ndarray
-    rna_boundary_eff_len: np.ndarray
-
     # --- THE THREE-WAY COMPOSITION — the simplex ψ actually solves, per object ---
     #: float64[n_regions] / float64[n_boundaries] — the solved ``(f_g, f_pos, f_neg)`` at each object: the
     #: gDNA share and the two RNA STRAND shares of that object's unspliced population.
@@ -225,7 +204,6 @@ class CalibrationResult:
     n_regions: int
     n_boundaries: int
     n_sj: int
-    config: CalibrationConfig
 
     def __post_init__(self) -> None:
         for axis in ("n_regions", "n_boundaries", "n_sj"):
@@ -238,7 +216,6 @@ class CalibrationResult:
             "count_gdna_region",
             "count_rna_region",
             "gdna_region_eff_len",
-            "rna_region_eff_len",
             "gdna_frac_region",
             "rna_pos_frac_region",
             "rna_neg_frac_region",
@@ -252,7 +229,6 @@ class CalibrationResult:
             "boundary_spliced_mass_per_crossing",
             "gdna_boundary_eff_len",
             "gdna_boundary_conserved_len",
-            "rna_boundary_eff_len",
             "gdna_frac_boundary",
             "rna_pos_frac_boundary",
             "rna_neg_frac_boundary",

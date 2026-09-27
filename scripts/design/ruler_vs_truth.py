@@ -648,7 +648,6 @@ def footprint_gdna_length(region_arrays, block: tuple, gdna_fl_pmf) -> float:
     from rigel.calibration.priors import assemble_priors
     from rigel.calibration.region_arrays import boundary_region_indices
     from rigel.calibration.result import CalibrationResult
-    from rigel.config import CalibrationConfig
     from rigel.locus import Locus, MultiLocus
 
     rid, s0, e0 = (int(v) for v in block)
@@ -662,12 +661,12 @@ def footprint_gdna_length(region_arrays, block: tuple, gdna_fl_pmf) -> float:
         boundary_spliced_mass_per_crossing=np.ones(ne), sj_mass_per_crossing=np.zeros(0),
         gdna_region_eff_len=contained_eff_length(length, gdna_fl_pmf), gdna_boundary_eff_len=ez,
         gdna_boundary_conserved_len=_gdna_boundary_conserved_len(region_arrays, gdna_fl_pmf),
-        rna_region_eff_len=z, rna_boundary_eff_len=ez, gdna_frac_region=z, rna_pos_frac_region=z,
+        gdna_frac_region=z, rna_pos_frac_region=z,
         rna_neg_frac_region=z, gdna_frac_boundary=ez, rna_pos_frac_boundary=ez, rna_neg_frac_boundary=ez,
         gdna_density_global=0.0, gdna_reference_density=None, gdna_reference_members=0,
         gdna_capture_efficiency_region=np.ones(n), gdna_capture_efficiency_boundary=np.ones(ne),
         rna_sense_frac=0.5, gdna_strand_overdispersion=0.0, rna_strand_overdispersion=0.0,
-        n_regions=n, n_boundaries=ne, n_sj=0, config=CalibrationConfig(),
+        n_regions=n, n_boundaries=ne, n_sj=0,
     )
     ml = MultiLocus(
         multi_locus_id=0,

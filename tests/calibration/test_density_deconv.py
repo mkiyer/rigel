@@ -25,7 +25,6 @@ def _bg(log_mu_bg, alpha=np.inf, size=1.0e6, informative=True):
         log_mu_bg=float(np.log(log_mu_bg)) if log_mu_bg > 0 else -np.inf,
         alpha=float(alpha),
         size=float(size),
-        n_regions=100,
         informative=informative,
     )
 

@@ -1,13 +1,11 @@
 """The `rigel report` HTML builder, from a synthesized substrate rather than a pipeline run.
 
-A minimal but realistic substrate — a v2 ``summary.json`` and its companion feathers — is written
+A minimal but realistic substrate — a v3 ``summary.json`` and its companion feathers — is written
 to a temp directory, and the loader, the view model, the chart specifications and the full HTML
 build run against it. The report must be self-contained, inlining its runtime, and must honour a
-custom output path. The capture diagnostics are checked against an `AbundanceLandscape` fixture
-with two modes and against a unimodal one, since a panel that only ever reads the two tallest peaks
-of a curve would look right on the first and invent structure on the second. Vega-specific
-assertions are conditional on ``vl-convert-python``, so the suite passes with the ``[dev]`` extra
-alone.
+custom output path. The exported density diagnostics are checked against an `AbundanceLandscape`
+fixture. Every chart the page embeds must compile and read every mark property it sets. Vega-specific assertions are conditional
+on ``vl-convert-python``, so the suite passes with the ``[dev]`` extra alone.
 """
 
 import importlib.util
@@ -22,8 +20,8 @@ import pytest
 import numpy as np
 
 from rigel.calibration.diagnostics import CalibrationDiagnostics
+from rigel.calibration.track import capture_summary
 from rigel.report.build import build_report
-from rigel.report.capture import capture_kde_from_track
 from rigel.report.model import _reference_table, build_view_model
 from rigel.report.specs import build_charts, build_fl_specs, capture_kde_spec, genome_track_spec
 from rigel.report.substrate import SubstrateError, load_substrate
@@ -47,6 +45,7 @@ def _write_substrate(d: Path) -> Path:
             "proper_pairs": 900,
             "duplicate_reads": 60,
             "qc_fail_reads": 5,
+            "read_groups": 980,
         },
         "fragment_stats": {
             "total": 700,
@@ -153,6 +152,52 @@ def _write_substrate(d: Path) -> Path:
     return d
 
 
+def _enriched_track() -> pd.DataFrame:
+    """A capture-like gDNA track: many low-density off-target regions carrying little gDNA mass, and a
+    few high-density on-target regions carrying most of it."""
+    rng = np.random.default_rng(0)
+    low_d = np.exp(rng.normal(-9.0, 0.4, 4000))
+    high_d = np.exp(rng.normal(0.0, 0.4, 120))
+    dens = np.concatenate([low_d, high_d])
+    gmass = np.concatenate([np.full(4000, 0.01), np.full(120, 50.0)])
+    return pd.DataFrame(
+        {
+            "ref": pd.Categorical(["chr1"] * len(dens)),
+            "start": np.arange(len(dens)) * 100,
+            "end": np.arange(len(dens)) * 100 + 50,
+            "gdna_mass": gmass,
+            "rna_mass": np.ones(len(dens)),
+            "gdna_density": dens,
+            "gdna_frac": np.clip(dens, 0, 1),
+        }
+    )
+
+
+def _payload(html: str) -> dict:
+    """The view model and chart specs a built report embeds."""
+    m = re.search(r'<script id="rigel-data" type="application/json">(.*?)</script>', html, re.S)
+    return json.loads(m.group(1).replace("<\\/", "</"))
+
+
+def _mark_paths(node, path=()):
+    """The path of every mark definition given as an object in a Vega-Lite spec."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "mark" and isinstance(value, dict):
+                yield (*path, key)
+            elif key != "data":
+                yield from _mark_paths(value, (*path, key))
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            yield from _mark_paths(value, (*path, i))
+
+
+def _at(node, path):
+    for key in path:
+        node = node[key]
+    return node
+
+
 def test_load_substrate_missing(tmp_path):
     with pytest.raises(SubstrateError):
         load_substrate(tmp_path / "does_not_exist")
@@ -182,6 +227,8 @@ def test_view_model_shape(tmp_path):
     assert {"Implicit", "Artifact"} <= labels
     # strand contamination gap surfaced
     assert vm["strand"]["contamination_gap"] == 0.05
+    # the fragment-length table keeps the categories in the order summary.json lists them
+    assert [row[0] for row in vm["fl"]["table"]] == list(sub.summary["fragment_length"])
     # gene table populated and sorted by tpm desc
     assert vm["genes"]["rows"][0][0] == "GAPDH"
     assert vm["genes"]["total"] == 5
@@ -239,11 +286,9 @@ def test_genome_track_spec_bins_per_ref():
     assert build_charts(empty) == {}
 
 
-def test_capture_diagnostics_from_abundance_landscape_labels_modes():
-    """The QC panel is built from the `AbundanceLandscape`'s CENSUS, not from the top two maxima of a
-    curve. On the bimodal fixture the depleted mode must be the one the pooled intergenic ANCHOR falls
-    in — an independent measurement — and the separation must be the census's own mode ratio, so a
-    panel re-derived from the curve rather than read off the census disagrees here."""
+def test_capture_diagnostics_from_abundance_landscape_exports_the_curve_and_the_rug():
+    """The exported diagnostics are the landscape's own curve and training population, read off the
+    fit rather than re-derived."""
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parent / "calibration"))
@@ -251,72 +296,24 @@ def test_capture_diagnostics_from_abundance_landscape_labels_modes():
 
     from rigel.calibration.abundance_landscape import fit_abundance_landscape
 
-    counts, lengths, sig, rho_lo, rho_hi = bimodal_parts()
+    counts, lengths, sig, _rho_lo, _rho_hi = bimodal_parts()
     sub, ra, mask = parts(counts, lengths, sig)
     al = fit_abundance_landscape(sub, ra, mask)
-    assert al is not None and al.enriched is not None
+    assert al is not None
 
     diag = CalibrationDiagnostics.from_abundance_landscape(al)
-    assert diag.depleted_mode < diag.enriched_mode
-    # the census's own numbers, not a re-derivation
-    assert diag.depleted_mode == pytest.approx(al.depleted.log_rho, rel=0, abs=0)
-    assert diag.enriched_mode == pytest.approx(al.enriched.log_rho, rel=0, abs=0)
-    assert diag.separation_nats == pytest.approx(np.log(al.span_R), rel=1e-12)
-    assert diag.enrichment_factor == pytest.approx(al.span_R, rel=1e-12)
-    assert diag.n_modes == len(al.modes)
-    # the true separation of the fixture's two populations, recovered
-    assert diag.separation_nats == pytest.approx(np.log(rho_hi / rho_lo), rel=0.25)
+    np.testing.assert_array_equal(diag.kde_x, al.landscape.log_rho)
+    np.testing.assert_array_equal(diag.kde_logp, al.landscape.logP)
     # a real rug: the training points themselves, not a summary of them
     assert diag.rug_log_rho.size > 0
     assert diag.rug_log_rho.size == diag.rug_kind.size
-    assert set(np.unique(diag.rug_kind)) <= {0, 1, 2, 3}
+    assert set(np.unique(diag.rug_kind)) <= {0, 1, 2}
     assert {0, 2} <= set(np.unique(diag.rug_kind))  # the fixture has intergenic and exon regions
-    # n_eff is the training count, and the bandwidth is the smoothing ACTUALLY in force (the grid step)
-    assert diag.n_eff == float(al.n_train)
-    step = float(al.landscape.log_rho[1] - al.landscape.log_rho[0]) / np.log(10.0)
-    assert diag.bandwidth == pytest.approx(step, rel=1e-12)
 
 
-def test_capture_diagnostics_is_unimodal_safe():
-    """A unimodal field has no enriched mode: the separation is 0 and the factor exactly 1, never
-    None and never a crash — the report renders the panel with one labelled mode."""
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).resolve().parent / "calibration"))
-    from test_abundance_landscape import parts, unimodal_parts
-
-    from rigel.calibration.abundance_landscape import fit_abundance_landscape
-
-    c, ln, sg = unimodal_parts()
-    al = fit_abundance_landscape(*parts(c, ln, sg))
-    assert al.enriched is None
-    diag = CalibrationDiagnostics.from_abundance_landscape(al)
-    assert diag.separation_nats == 0.0
-    assert diag.enrichment_factor == 1.0
-    assert diag.depleted_mode == diag.enriched_mode == al.depleted.log_rho
-
-
-def test_capture_kde_from_track_mass_weighting_recovers_enrichment():
-    # Many low-density (off-target) regions with tiny gDNA mass + a few
-    # high-density (on-target) regions carrying large gDNA mass. Equal weight is
-    # dominated by the low mode; mass weighting must surface the high mode.
-    rng = np.random.default_rng(0)
-    low_d = np.exp(rng.normal(-9.0, 0.4, 4000))
-    high_d = np.exp(rng.normal(0.0, 0.4, 120))
-    dens = np.concatenate([low_d, high_d])
-    gmass = np.concatenate([np.full(4000, 0.01), np.full(120, 50.0)])
-    track = pd.DataFrame(
-        {
-            "ref": pd.Categorical(["chr1"] * len(dens)),
-            "start": np.arange(len(dens)) * 100,
-            "end": np.arange(len(dens)) * 100 + 50,
-            "gdna_mass": gmass,
-            "rna_mass": np.ones(len(dens)),
-            "gdna_density": dens,
-            "gdna_frac": np.clip(dens, 0, 1),
-        }
-    )
-    cap = capture_kde_from_track(track)
+def test_capture_summary_mass_weighting_recovers_enrichment():
+    # Equal weight is dominated by the low mode; mass weighting must surface the high mode.
+    cap = capture_summary(_enriched_track(), with_curve=True)
     assert cap is not None
     assert cap["enriched"] is True
     assert cap["enriched_mode_log_rho"] > cap["count_median_log_rho"]
@@ -329,7 +326,7 @@ def test_capture_kde_from_track_mass_weighting_recovers_enrichment():
     assert capture_kde_spec(None) is None
 
 
-def test_capture_kde_from_track_unimodal_when_no_enrichment():
+def test_capture_summary_unimodal_when_no_enrichment():
     rng = np.random.default_rng(1)
     dens = np.exp(rng.normal(-9.0, 0.5, 3000))
     track = pd.DataFrame(
@@ -343,7 +340,7 @@ def test_capture_kde_from_track_unimodal_when_no_enrichment():
             "gdna_frac": np.clip(dens, 0, 1),
         }
     )
-    cap = capture_kde_from_track(track)
+    cap = capture_summary(track, with_curve=True)
     assert cap is not None and cap["enriched"] is False
 
 
@@ -360,8 +357,7 @@ def test_build_report_self_contained(tmp_path):
 
     # valid document + embedded payload that round-trips through JSON
     assert html.lstrip().startswith("<!doctype html>")
-    m = re.search(r'<script id="rigel-data" type="application/json">(.*?)</script>', html, re.S)
-    payload = json.loads(m.group(1).replace("<\\/", "</"))
+    payload = _payload(html)
     assert payload["model"]["meta"]["sample"] == "SampleX"
     assert set(payload["charts"]) == {"overlay", "small_multiples"}  # no track in this substrate
 
@@ -373,9 +369,44 @@ def test_build_report_inlines_vega_runtime(tmp_path):
     assert "window.vegaEmbed" in html  # runtime bundled inline, offline-ready
 
 
+@pytest.mark.skipif(not _HAS_VEGA, reason="vl-convert-python not installed")
+def test_every_chart_the_report_builds_compiles_and_reads_every_mark_property(tmp_path):
+    """Vega-Lite refuses a mark type it does not know but silently drops a mark property it does not
+    know, so compiling is half the gate: removing any property of any mark definition must also change
+    the compiled Vega. The charts are the ones the built page embeds, and every chart container on the
+    page must carry one, so a chart added to the report is gated too."""
+    import copy
+
+    import vl_convert as vlc
+
+    d = _write_substrate(tmp_path / "run")
+    _enriched_track().to_feather(d / "calibration_track.feather")
+    html = build_report(d).read_text()
+    charts = _payload(html)["charts"]
+    assert set(charts) == set(re.findall(r'id="vega-(\w+)"', html))
+
+    for key, spec in charts.items():
+        compiled = vlc.vegalite_to_vega(spec)
+        for path in _mark_paths(spec):
+            for prop in _at(spec, path):
+                if prop == "type":
+                    continue
+                pruned = copy.deepcopy(spec)
+                del _at(pruned, path)[prop]
+                read = vlc.vegalite_to_vega(pruned) != compiled
+                assert read, (
+                    f"chart {key!r}: Vega-Lite ignores the mark property {prop!r} at {path}"
+                )
+
+
 def test_build_report_custom_output_path(tmp_path):
     d = _write_substrate(tmp_path / "run")
     dest = tmp_path / "reports" / "sample_x.html"
     out = build_report(d, out_path=dest, title="My QC")
     assert out == dest and dest.exists()
     assert "<title>My QC</title>" in dest.read_text()
+    # the title is text, never markup
+    build_report(d, out_path=dest, title="A & B </title><script>x</script>")
+    assert (
+        "<title>A &amp; B &lt;/title&gt;&lt;script&gt;x&lt;/script&gt;</title>" in dest.read_text()
+    )

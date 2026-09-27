@@ -170,7 +170,6 @@ def test_ONE_SET_OF_NUMBERS_PER_SLOT(geometry, parts):
     assert geometry.eff_gdna.shape == (n,)
     assert geometry.eff_rna.shape == (n,)
     assert geometry.sj_count.shape == (n, 2)
-    assert geometry.eff_sj.shape == (n, 2)
 
 
 def test_the_chain_is_N_E_N_E_N_and_the_geometry_is_addressed_by_SLOT(parts, geometry):
@@ -275,18 +274,18 @@ def test_the_SJ_divisor_uses_its_REAL_EXONIC_REACH__the_other_half_of_A7(parts):
     across it, so what remains either side is exonic and the reach is real. Leaving the sj divisor
     unbounded ships a divisor wrong by up to 4x at a first exon.
 
-    Here the reach binds: 30 bases of exon either side of an 80 bp molecule.
+    Here the reach binds: 50 bases of exon either side of an 80 bp molecule.
     """
     payload, region_arrays, substrate, chain, _ = parts
     tight = SpliceJunctionGeometry(
         src_region=np.array([0], dtype=np.int64),
         dst_region=np.array([2], dtype=np.int64),
         strand=np.array([Strand.POS], dtype=np.int8),
-        reach_lo=np.array([30.0]),
-        reach_hi=np.array([30.0]),
+        reach_lo=np.array([50.0]),
+        reach_hi=np.array([50.0]),
     )
     g = build_region_geometry(chain, substrate, region_arrays, tight, GDNA_PMF, RNA_PMF)
-    expected = brute_crossing(RNA_PMF, 30.0, 30.0)
+    expected = brute_crossing(RNA_PMF, 50.0, 50.0)
     mu_r_minus_1 = float(np.dot(np.arange(RNA_PMF.size), RNA_PMF)) - 1.0
     assert expected < mu_r_minus_1, (
         "the fixture must make the reach BIND, or the test proves nothing"
@@ -294,8 +293,10 @@ def test_the_SJ_divisor_uses_its_REAL_EXONIC_REACH__the_other_half_of_A7(parts):
     boundary_slots = np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)
     live = [s for s in boundary_slots if g.sj_count[s].sum() > 0]
     assert live, "the sj must reach some boundary slot"
+    flux = float(np.asarray(substrate.sj.count).sum())
     for slot in live:
-        assert g.eff_sj[slot, 0] == pytest.approx(expected)
+        rate = g.route_rate_lo[slot, 0] + g.route_rate_hi[slot, 0]
+        assert rate == pytest.approx(flux / expected)
 
 
 def test_a_reach_of_ZERO_gives_ZERO_opportunity_and_is_not_a_sentinel(parts):
@@ -311,7 +312,9 @@ def test_a_reach_of_ZERO_gives_ZERO_opportunity_and_is_not_a_sentinel(parts):
     )
     g = build_region_geometry(chain, substrate, region_arrays, dead, GDNA_PMF, RNA_PMF)
     boundary_slots = np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)
-    assert np.all(g.eff_sj[boundary_slots, 0] == 0.0)
+    assert g.sj_count[boundary_slots, 0].sum() > 0, "the fixture must carry sj flux"
+    assert np.all(g.route_rate_lo[boundary_slots, 0] == 0.0)
+    assert np.all(g.route_rate_hi[boundary_slots, 0] == 0.0)
 
 
 def test_a_divisor_of_ZERO_is_NOT_FLOORED(parts):
@@ -336,41 +339,6 @@ def test_the_divisors_differ_between_the_two_COMPONENTS(geometry, parts):
     _, _, _, chain, _ = parts
     region_slots = np.flatnonzero(np.asarray(chain.kind) == REGION)
     assert not np.allclose(geometry.eff_gdna[region_slots], geometry.eff_rna[region_slots])
-
-
-def test_inv_abundance_is_FILLED_from_the_substrate_banks_and_the_values_are_ABSOLUTE(parts):
-    """The fill gate. Every other occurrence of ``inv_abundance`` in the suite constructs it
-    synthetically, so the one line that fills it from the substrate needs its own gate. The
-    fixture's banks are distinct per object (region contained ``[0.24, 0.42, 0.30]``, boundary
-    unspliced ``[0.20, 0.20]``), so a fill that reads the wrong bank or the wrong axis cannot pass.
-
-    Absolute values, hard-coded, never flatness or a reconstruction: an accuracy assertion catches
-    every planted off-by-one where a flatness assertion misses the pure scale errors.
-
-    A REGION slot carries the CONTAINED bank, whose expectation is ``rho·P(w<=ell)`` — a truncated
-    density shape (TRAPS: a-cancellation-is-conditional-on-its-support). A truncation-free "start"
-    bank was A/B'd through this fill and refused on the panel
-    (ISSUES: the-truncation-free-region-bank).
-    """
-    payload, region_arrays, substrate, chain, sj = parts
-    kind = np.asarray(chain.kind)
-    obj = np.asarray(chain.obj_idx, np.int64)
-    r = kind == REGION
-
-    g = build_region_geometry(chain, substrate, region_arrays, sj, GDNA_PMF, RNA_PMF)
-    np.testing.assert_allclose(
-        g.inv_abundance[r],
-        np.array([0.24, 0.42, 0.30])[obj[r]],
-        rtol=0,
-        atol=0,
-    )
-    b = kind == BOUNDARY
-    np.testing.assert_allclose(
-        g.inv_abundance[b],
-        np.array([0.20, 0.20])[np.clip(obj[b], 0, 1)],
-        rtol=0,
-        atol=0,
-    )
 
 
 def test_a_MIXED_pmf_is_not_collapsed_to_its_mean(parts):
@@ -435,18 +403,16 @@ def test_the_mature_flux_is_keyed_by_the_SJ_OWN_STRAND_not_the_align_column(part
         assert g.sj_count[slot, 0] == 0.0
 
 
-def test_several_sj_on_one_boundary_POOL_their_counts_AND_their_divisors(parts):
-    """Two sj sharing a donor boundary are two estimates of one rate, so the pooled statement is
-    ``sum(count) / sum(E)`` — the ratio of sums, never the mean of ratios.
-    ``rho_bg = sum(g)/sum(E)``). Averaging the divisors instead would mis-weight the deeper sj.
-    """
+def test_several_sj_on_one_boundary_POOL_their_counts_and_SUM_their_route_rates(parts):
+    """Two sj sharing a donor boundary: ``sj_count`` pools their counts, and ``route_rate_lo`` sums
+    their per-route rates ``flux_J / A_J``."""
     payload, region_arrays, substrate, chain, _ = parts
     two = SpliceJunctionGeometry(
         src_region=np.array([0, 0], dtype=np.int64),
         dst_region=np.array([2, 2], dtype=np.int64),
         strand=np.array([Strand.POS, Strand.POS], dtype=np.int8),
-        reach_lo=np.array([1000.0, 30.0]),
-        reach_hi=np.array([1000.0, 30.0]),
+        reach_lo=np.array([1000.0, 50.0]),
+        reach_hi=np.array([1000.0, 50.0]),
     )
     # the fixture payload has one sj row; give the second its own
     import dataclasses
@@ -471,8 +437,9 @@ def test_several_sj_on_one_boundary_POOL_their_counts_AND_their_divisors(parts):
     )
     slot = int(np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)[0])
     assert g.sj_count[slot, 0] == pytest.approx(9 + 4 + 5 + 1)
-    assert g.eff_sj[slot, 0] == pytest.approx(
-        brute_crossing(RNA_PMF, 1e12, 1e12) + brute_crossing(RNA_PMF, 30.0, 30.0)
+    assert g.route_rate_lo[slot, 0] == pytest.approx(
+        (9 + 4) / brute_crossing(RNA_PMF, 1e12, 1e12)
+        + (5 + 1) / brute_crossing(RNA_PMF, 50.0, 50.0)
     )
 
 
@@ -667,19 +634,6 @@ def test_route_rates_are_the_sum_of_per_route_rates(geometry, parts):
             want_hi[acceptor[j], col[j]] += flux[j] / eff[j]
     np.testing.assert_allclose(np.asarray(geometry.route_rate_lo), want_lo, rtol=1e-12)
     np.testing.assert_allclose(np.asarray(geometry.route_rate_hi), want_hi, rtol=1e-12)
-
-
-def test_route_rate_dominates_the_pooled_ratio(geometry):
-    """The sum of per-route rates is ≥ the pooled
-    ratio-of-sums at every face (equality iff every route agrees), so the pooled form's k-route
-    under-read cannot survive. Vacuity-guarded: the fixture must expose live faces."""
-    rr = np.asarray(geometry.route_rate_lo) + np.asarray(geometry.route_rate_hi)
-    jc = np.asarray(geometry.sj_count_lo) + np.asarray(geometry.sj_count_hi)
-    ej = np.asarray(geometry.eff_sj_lo) + np.asarray(geometry.eff_sj_hi)
-    live = ej > 0
-    assert live.any(), "the fixture must carry sj flux"
-    pooled = np.where(live, jc / np.where(live, ej, 1.0), 0.0)
-    assert np.all(rr[live] >= pooled[live] - 1e-12)
 
 
 # ── RegionArrays' own geometry, and the region ↔ contiguous-boundary index mapping ─────────────

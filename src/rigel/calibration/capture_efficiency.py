@@ -10,10 +10,7 @@ object's capture efficiency up to the one unit ``ρ_ref`` — the located enrich
 the expectation under the landscape ``P(log ρ)`` as the prior (the population's own statement of where
 gDNA densities sit) and the Poisson counting rule as the likelihood. At high depth it is the plug-in
 ``min(k/S/ρ_ref, 1)``; at low depth the population's mixture weighted by the object's own likelihood; an
-object with no evidence reads the population's clipped mean. No constant enters and no floor: the
-multimapper floor ``C/(C+1)`` this replaced was a 30–40× bias on every unprobed transcript
-(`ISSUES: ruler-multimapper-floor-caps-the-correction`), protecting against a plug-in's exact zero that a
-posterior mean never produces.
+object with no evidence reads the population's clipped mean. No constant enters and no floor.
 
 EACH OBJECT READS ITS OWN EVIDENCE — the fragments the deposit rule gives it. A region holds the fragments
 contained in it: its gDNA count ``k_r`` on its contained support ``S_r``. A boundary holds the fragments
@@ -45,8 +42,8 @@ def _posterior(
     landscape: DensityLandscape, rho_ref: float, k: np.ndarray, S: np.ndarray
 ) -> np.ndarray:
     """``E[min(ρ/ρ_ref, 1)]`` per object on the landscape's grid: the prior times the Poisson likelihood of
-    the object's count ``k`` on its support ``S`` (``S = 0``: no likelihood, the prior alone). Row tiles, as
-    ψ tiles (`simplex_logodds._block_rows`): a million objects never exist against the grid at once."""
+    the object's count ``k`` on its support ``S`` (``S = 0``: no likelihood, the prior alone). Row tiles
+    (`simplex_logodds._block_rows`): a million objects never exist against the grid at once."""
     rho = np.exp(np.asarray(landscape.log_rho, dtype=np.float64))
     lp = np.asarray(landscape.logP, dtype=np.float64)
     clipped = np.minimum(rho / rho_ref, 1.0)

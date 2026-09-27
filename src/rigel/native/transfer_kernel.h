@@ -17,7 +17,6 @@
 #pragma once
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -284,7 +283,7 @@ inline void terminus_rules(const Chain& c, FacesOut& F, Scratch& S) {
         if (c.has_strand && c.has_own[b] && c.has_own[i]) {
             double f_b, v_b, f_i, v_i;
             if (c.strand_mode(b, f_b, v_b) && c.strand_mode(i, f_i, v_i)) {
-                const double f_pred = std::min(f_b / r_mode, 1.0 - 1e-9);
+                const double f_pred = std::min(f_b / r_mode, 1.0 - EPS);
                 const double d = std::log(f_i / (1.0 - f_i)) - std::log(f_pred / (1.0 - f_pred));
                 v_pair += std::max(0.0, d * d - (v_b + v_i + 1.0 / c.n_u[i] + 1.0 / total_b));
             }
@@ -690,12 +689,12 @@ struct Intersection {
     void finish() { norm_inplace(acc, K); }
 };
 
-// the two received tables into ψ's channels: the fused λ rows (written in place, zero where nothing fused; `written`
-// marks the rows that were) and the cube delivery. Returns (live, the number of cube rows delivered).
+// the two received tables into ψ's channels: the fused λ rows (written in place, zero where nothing fused) and the
+// cube delivery. Returns (live, the number of cube rows delivered).
 inline std::pair<bool, int> solve_block(const double* lam, int K, int n, const ReceivedView sides[2], const SolveLane& G,
                                         const SolveLane rna[2], const bool* free_pos, const bool* free_neg,
-                                        double* out_rows, bool* written, CubeOut& cube, Scratch& S,
-                                        std::vector<double>& bound, std::vector<double>& row) {
+                                        double* out_rows, CubeOut& cube, Scratch& S, std::vector<double>& bound,
+                                        std::vector<double>& row) {
     const double* u = lam;  // a level's coordinate is the solve grid
     const bool* free_of[2] = {free_pos, free_neg};
     bound.resize(K); row.resize(K);
@@ -752,7 +751,6 @@ inline std::pair<bool, int> solve_block(const double* lam, int K, int n, const R
                 live = true;
             }
         }
-        written[i] = fused || ptp(r, K) > EPS;
         // THE CUBE at an AMBIG node: per strand, the held levels and the own level's lower side intersected
         if (ambig && rna[0].built && rna[1].built && !rna[0].empty[i]) {
             if (d >= cube.capacity) throw std::runtime_error("transfer_solve: the cube table is full");
@@ -779,8 +777,6 @@ inline std::pair<bool, int> solve_block(const double* lam, int K, int n, const R
                 cube.opportunity[d] = rna[0].a[i];
                 cube.rho[d] = rna[0].rho_ref;
                 ++d;
-            } else {
-                cube.has_pos[d] = false; cube.has_neg[d] = false;
             }
         }
     }

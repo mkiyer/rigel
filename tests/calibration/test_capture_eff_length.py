@@ -28,7 +28,6 @@ from rigel.calibration.capture_eff_length import (
 from rigel.calibration.effective_length import contained_eff_length
 from rigel.calibration.region_arrays import RegionArrays, boundary_region_indices
 from rigel.calibration.result import CalibrationResult
-from rigel.config import CalibrationConfig
 
 
 def _pmf(mean=200.0, sd=50.0, lo=100, hi=300) -> np.ndarray:
@@ -83,8 +82,6 @@ def _cal(ra: RegionArrays, efficiency, reference: float | None, boundary=None) -
         ),
         gdna_boundary_eff_len=np.full(ne, MU - 1.0),
         gdna_boundary_conserved_len=np.full(ne, MU - 1.0),
-        rna_region_eff_len=np.asarray(ra.region_size_bp, dtype=np.float64),
-        rna_boundary_eff_len=np.full(ne, MU - 1.0),
         gdna_frac_region=z.copy(),
         rna_pos_frac_region=z.copy(),
         rna_neg_frac_region=z.copy(),
@@ -104,7 +101,6 @@ def _cal(ra: RegionArrays, efficiency, reference: float | None, boundary=None) -
         n_regions=n,
         n_boundaries=ne,
         n_sj=0,
-        config=CalibrationConfig(),
     )
 
 

@@ -26,7 +26,6 @@ from rigel.calibration.priors import (
 from rigel.calibration.region_arrays import RegionArrays, boundary_region_indices
 from rigel.calibration.result import CalibrationResult
 from rigel.calibration.signature import BIT_EXON_POS
-from rigel.config import CalibrationConfig
 from rigel.locus import Locus, MultiLocus
 
 
@@ -44,8 +43,6 @@ def _result(
     gdna_density_global=0.01,
     gdna_reference_density=None,
     gdna_reference_members=0,
-    rna_region_eff=None,
-    rna_boundary_eff=None,
     efficiency=None,
     efficiency_boundary=None,
 ) -> CalibrationResult:
@@ -54,9 +51,6 @@ def _result(
     ``boundary_*`` default to zeros, so a caller that cares only about contained mass writes only the region
     arrays — but the boundary axis is still the RIGHT LENGTH, because a boundary axis inconsistent with its
     own region axis is a mis-shaped fixture, not a "no boundaries" one.
-
-    The RNA supports default to the gDNA ones. ``assemble_priors`` reads no RNA count and no RNA support —
-    calibration's RNA count does not enter the EM — so they only fill the result's fields.
 
     ``efficiency`` / ``efficiency_boundary`` are the per-object capture efficiencies (1 everywhere by
     default, as a field with no reference must carry). ``boundary_share`` is gDNA's conserved share at each
@@ -102,16 +96,6 @@ def _result(
             if boundary_share is None
             else np.asarray(boundary_share, dtype=np.float64)
         ),
-        rna_region_eff_len=(
-            region_eff_arr
-            if rna_region_eff is None
-            else np.asarray(rna_region_eff, dtype=np.float64)
-        ),
-        rna_boundary_eff_len=(
-            boundary_eff_arr
-            if rna_boundary_eff is None
-            else np.asarray(rna_boundary_eff, dtype=np.float64)
-        ),
         gdna_frac_region=np.zeros_like(ng),
         rna_pos_frac_region=np.zeros_like(ng),
         rna_neg_frac_region=np.zeros_like(ng),
@@ -135,7 +119,6 @@ def _result(
         n_regions=n,
         n_boundaries=ne,
         n_sj=0,
-        config=CalibrationConfig(),
     )
 
 

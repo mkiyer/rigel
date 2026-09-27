@@ -13,8 +13,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .splice import SPLICE_UNSPLICED
-
 # ---------------------------------------------------------------------------
 # Constants (single source of truth for all scoring/penalty values)
 # ---------------------------------------------------------------------------
@@ -22,23 +20,12 @@ from .splice import SPLICE_UNSPLICED
 #: Floor value for log-safe clamping to avoid log(0).
 LOG_SAFE_FLOOR = 1e-10
 
-#: Pre-computed log(0.5) — used for uninformative strand log-probabilities.
-LOG_HALF = math.log(0.5)
-
 #: Default overhang alpha: each base of overhang reduces probability by 10×.
 DEFAULT_OVERHANG_ALPHA = 0.1
 
 #: Default mismatch alpha: each edit-distance mismatch (NM tag) reduces
 #: probability by 10×.
 DEFAULT_MISMATCH_ALPHA = 0.1
-
-
-#: Default gDNA splice penalties per SpliceType (int keys for fast lookup). Only the unspliced entry is
-#: consumed — spliced fragments are structurally incompatible with the (genomic) gDNA component, so they
-#: never reach a gDNA splice penalty.
-GDNA_SPLICE_PENALTIES = {
-    SPLICE_UNSPLICED: 1.0,
-}
 
 
 def overhang_alpha_to_log_penalty(alpha: float) -> float:
@@ -93,7 +80,6 @@ class FragmentScorer:
     # Penalty parameters
     overhang_log_penalty: float
     mismatch_log_penalty: float
-    gdna_splice_penalties: dict  # int-keyed
 
     # Fragment-length LUT — RNA model (pre-finalized)
     fl_log_prob: np.ndarray | None  # numpy array or None
@@ -121,7 +107,6 @@ class FragmentScorer:
         *,
         overhang_log_penalty: float | None = None,
         mismatch_log_penalty: float | None = None,
-        gdna_splice_penalties: dict | None = None,
         pruning_min_posterior: float = 1e-4,
     ) -> "FragmentScorer":
         """Build a FragmentScorer from trained models and index.
@@ -136,7 +121,6 @@ class FragmentScorer:
         index : TranscriptIndex
         overhang_log_penalty : float or None
         mismatch_log_penalty : float or None
-        gdna_splice_penalties : dict or None
         pruning_min_posterior : float
             Minimum posterior threshold for candidate pruning.
             Lower values are more conservative (keep more candidates).
@@ -174,7 +158,6 @@ class FragmentScorer:
                 if mismatch_log_penalty is not None
                 else DEFAULT_MISMATCH_LOG_PENALTY
             ),
-            gdna_splice_penalties=(gdna_splice_penalties or GDNA_SPLICE_PENALTIES),
             fl_log_prob=fl_log_prob,
             fl_max_size=fl_max_size,
             fl_tail_base=fl_tail_base,

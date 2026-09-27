@@ -74,7 +74,6 @@ def hand_mask(n_regions, start_exact, end_exact, w_max=201):
         d_high=np.where(se, big, 0.0),
         start_exact=se,
         end_exact=ee,
-        w_max=w_max,
     )
 
 

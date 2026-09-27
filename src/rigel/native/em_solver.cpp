@@ -85,7 +85,6 @@ struct LocusProfile {
     int squarem_extrapolation_clamp_count = 0;
     int squarem_backtrack_count = 0;
     int squarem_nonfinite_count = 0;
-    bool squarem_grouped_fallback_used = false;
     int squarem_grouped_stabilization_fail_count = 0;
     int assignment_stranded = 0;    // SAMPLE: units the draw left with every candidate full (assign_posteriors)
     int assignment_unrepaired = 0;  // SAMPLE: of those, the ones no repair path could place
@@ -97,7 +96,6 @@ struct LocusProfile {
 
     // Sub-phase wall times in microseconds
     double extract_us = 0.0;
-    double bias_us = 0.0;
     double build_ec_us = 0.0;
     double warm_start_us = 0.0;
     double squarem_us = 0.0;
@@ -145,56 +143,6 @@ using u8_1d  = nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig>;
 using f64_1d_mut = nb::ndarray<double, nb::ndim<1>, nb::c_contig>;
 using f64_2d_mut = nb::ndarray<double, nb::ndim<2>, nb::c_contig>;
 using f64_2d     = nb::ndarray<const double, nb::ndim<2>, nb::c_contig>;
-
-enum class FloatPayloadDType : uint8_t {
-    F32,
-    F64,
-};
-
-static inline double read_float_payload(
-    const void* ptr,
-    FloatPayloadDType dtype,
-    int64_t index)
-{
-    if (dtype == FloatPayloadDType::F32) {
-        return static_cast<double>(static_cast<const float*>(ptr)[index]);
-    }
-    return static_cast<const double*>(ptr)[index];
-}
-
-static inline void set_float_payload(
-    nb::handle obj,
-    const void*& ptr,
-    FloatPayloadDType& dtype,
-    const char* name)
-{
-    nb::object arr_obj = nb::borrow<nb::object>(obj);
-    nb::object dtype_obj = arr_obj.attr("dtype");
-    std::string kind = nb::cast<std::string>(dtype_obj.attr("kind"));
-    int itemsize = nb::cast<int>(dtype_obj.attr("itemsize"));
-
-    if (kind != "f") {
-        throw std::runtime_error(
-            std::string("Expected floating-point array for ") + name);
-    }
-
-    if (itemsize == 4) {
-        auto arr = nb::cast<f32_1d>(obj);
-        ptr = static_cast<const void*>(arr.data());
-        dtype = FloatPayloadDType::F32;
-        return;
-    }
-
-    if (itemsize == 8) {
-        auto arr = nb::cast<f64_1d>(obj);
-        ptr = static_cast<const void*>(arr.data());
-        dtype = FloatPayloadDType::F64;
-        return;
-    }
-
-    throw std::runtime_error(
-        std::string("Expected float32 or float64 array for ") + name);
-}
 
 // ================================================================
 // digamma — self-contained asymptotic series implementation
@@ -244,9 +192,8 @@ struct EmEquivClass {
 // Equivalence class builder
 // ================================================================
 //
-// Replaces Python _build_equiv_classes(). Groups CSR units by their
-// candidate component set (the ordered tuple of t_indices per unit)
-// into dense matrices for efficient batch processing.
+// Groups CSR units by their candidate component set (the ordered tuple of
+// t_indices per unit) into dense matrices for batch processing.
 
 // Hash for vector<int32_t> keys
 struct VecHash {
@@ -318,15 +265,10 @@ static std::vector<EmEquivClass> build_equiv_classes(
     // addition is non-associative, so an unstable order produces ULP differences that SQUAREM amplifies
     // across iterations into large cascading output differences.  Sorting by comp_idx pins it.
     //
-    // ⚠ THE ROWS WITHIN A CLASS NEED NO SORT, and there used to be one (~45 boundaries, keyed on a
-    // log-likelihood fingerprint).  It existed because the multi-threaded BAM scan filled the fragment
-    // buffer in worker-COMPLETION order, so a locus's units arrived permuted.  That is fixed at the
-    // source now: `build_multi_loci` orders each locus's units by `frag_id`, the reader's BAM-order
-    // identity, so `unit_list` below is already canonical and re-sorting it here could only agree.
-    // `tests/test_scan_order_independence.py` is what says so — it requires byte-identical output across
-    // scan thread counts in all three assignment modes, and the fingerprint sort could never deliver
-    // that anyway: it made the ROWS stable while leaving WHICH FRAGMENT sat in each row up to the race,
-    // which is exactly what broke `assignment_mode="sample"`.
+    // The rows within a class need no sort: `build_multi_loci` orders each locus's units by `frag_id`,
+    // the reader's BAM-order identity, so `unit_list` is already canonical.
+    // `tests/test_scan_order_independence.py` requires byte-identical output across scan thread counts
+    // in both assignment modes.
 
     // Sort equiv classes by comp_idx (lexicographic)
     std::sort(result.begin(), result.end(),
@@ -381,11 +323,7 @@ static inline void em_step_kernel_range(
     const double* ll = ec.ll_flat.data();
     const int32_t* cidx = ec.comp_idx.data();
 
-    // Stack-local row buffer: avoids writing to the heap-allocated
-    // ec.scratch buffer entirely.  ec.scratch is never read after
-    // the E-step (assign_posteriors recomputes from theta + CSR),
-    // so eliminating the writes reduces memory traffic.
-    // For k <= 512 (covers all practical ECs), use stack allocation.
+    // Row buffer: on the stack for k <= MAX_K_STACK, on the heap above it.
     constexpr int MAX_K_STACK = 512;
     double stack_row[MAX_K_STACK];
     std::vector<double> heap_row;
@@ -397,11 +335,7 @@ static inline void em_step_kernel_range(
         row = heap_row.data();
     }
 
-    // Per-column Kahan accumulators for fused column-sum accumulation.
-    // Fusing the column sums into the row-processing loop eliminates a
-    // separate column-stride pass over scratch, improving cache locality.
-    // Each column's accumulator sees values in the same order as before
-    // (row_start to row_end), so results are bit-for-bit identical.
+    // One Kahan accumulator per column, fed in row order (row_start to row_end).
     std::vector<KahanAccumulator> col_acc(k);
 
     for (int i = row_start; i < row_end; ++i) {
@@ -826,9 +760,6 @@ static void apply_grouped_prior_update(
 
     // Each RNA component takes its evidence scaled up to absorb its share of the prior. Summed over
     // the pool: `rna_total · (rna_count/rna_count) = rna_count + rna_prior`.
-    // ⭐ Written in exactly the operation order its predecessor used on a locus holding no synthetic
-    // component (`annotated_count == rna_count`, so `annotated_total == rna_total`), which makes
-    // every such locus — the overwhelming majority — BIT-IDENTICAL across the restoration.
     if (rna_count > EM_LOG_EPSILON) {
         const double inv = 1.0 / rna_count;
         for (int i = 0; i < n_components; ++i) {
@@ -1116,7 +1047,6 @@ struct EMResult {
     int squarem_extrapolation_clamp_count = 0;
     int squarem_backtrack_count = 0;       // halvings of an extrapolation step (backtracked_squarem_step)
     int squarem_nonfinite_count = 0;
-    bool squarem_grouped_fallback_used = false;
     int squarem_grouped_stabilization_fail_count = 0;
 };
 
@@ -1380,7 +1310,6 @@ static EMResult run_squarem(
     out.squarem_extrapolation_clamp_count = clamp_count;
     out.squarem_backtrack_count = backtrack_count;
     out.squarem_nonfinite_count = nonfinite_count;
-    out.squarem_grouped_fallback_used = false;
     out.squarem_grouped_stabilization_fail_count = stabilization_fail_count;
     return out;
 }
@@ -1388,13 +1317,6 @@ static EMResult run_squarem(
 // ================================================================
 // Batch locus EM — single C++ call for all loci
 // ================================================================
-//
-// Replaces the Python per-locus for-loop:
-//   for locus in loci:
-//       build_locus_em_data → run_locus_em → assign_locus_ambiguous
-//
-// Processes all loci in a single C++ call, eliminating 29K Python→C++
-// round-trips and all numpy/pandas per-locus overhead.
 
 // Per-locus candidate record (used during sub-problem extraction)
 struct LocalCandidate {
@@ -1418,10 +1340,6 @@ struct LocusSubProblem {
     std::vector<double>   log_liks;
     std::vector<double>   coverage_wts;
     std::vector<uint8_t>  count_cols;
-
-    // Per-unit metadata
-    std::vector<int32_t>  locus_t_arr;   // best transcript (global) per unit
-    std::vector<uint8_t>  locus_ct_arr;  // count col for best transcript
 
     // Per-component
     std::vector<double>   unambig_totals;   // [n_components]
@@ -1465,7 +1383,6 @@ static void assign_posteriors(
     int& unrepaired,   // SAMPLE: of those, the ones no repair path could place (0 whenever the counts are reachable)
     // Output accumulators (accumulated across loci)
     double* em_counts_2d,          // [N_T, n_cols], row-major
-    double* gdna_locus_counts_2d,  // [N_T, n_cols]
     double* posterior_sum,         // [N_T]
     double* n_assigned,            // [N_T]
     // Per-locus accumulation.
@@ -1491,17 +1408,12 @@ static void assign_posteriors(
 {
     int n_t = sub.n_t;
     int nc  = sub.n_components;
-    int gdna = sub.gdna_idx;
     int n_units = sub.n_local_units;
     const int32_t* local_to_global = sub.local_to_global_t.data();
     stranded = 0;
     unrepaired = 0;
 
-    // log_weights[c] = log(theta[c] + eps) - log L̃_c
-    // Subtracting log L̃_c rescales the posterior to depend on the
-    // effective concentration θ/L̃ rather than raw θ, mirroring the
-    // E-step weights used inside SQUAREM.  Must stay in sync with the
-    // E-step formulation in run_squarem(); see invariant I2.
+    // log(theta[c] + eps) - log L̃_c: the MAP E-step's weights, at the converged theta whichever EM ran.
     std::vector<double> log_weights(nc);
     for (int c = 0; c < nc; ++c) {
         log_weights[c] = std::log(theta[c] + EM_LOG_EPSILON) - log_eff_len[c];
@@ -1832,22 +1744,6 @@ static void assign_posteriors(
                 gdna_total += p;
             }
         }
-
-        // gDNA locus attribution
-        double gdna_unit_sum = 0.0;
-        for (int j = 0; j < seg_len; ++j) {
-            int32_t c = sub.t_indices[s + j];
-            if (c == gdna) {
-                gdna_unit_sum += weights[j];
-            }
-        }
-        if (gdna_unit_sum > 0.0) {
-            int32_t lt = sub.locus_t_arr[ui];
-            uint8_t lct = sub.locus_ct_arr[ui];
-            if (lt >= 0 && lt < N_T_TOTAL && lct < n_cols) {
-                gdna_locus_counts_2d[lt * n_cols + lct] += gdna_unit_sum;
-            }
-        }
     }
 }
 
@@ -2036,16 +1932,11 @@ struct PartitionView {
     // Per-locus CSR data (contiguous, 0-indexed)
     const int64_t* offsets;
     const int32_t* t_indices;
-    const void*    log_liks;
-    FloatPayloadDType log_liks_dtype;
-    const void*    coverage_wts;
-    FloatPayloadDType coverage_wts_dtype;
+    const float*   log_liks;
+    const float*   coverage_wts;
     const uint8_t* count_cols;
     const uint8_t* is_spliced;
-    const void*    gdna_log_liks;
-    FloatPayloadDType gdna_log_liks_dtype;
-    const int32_t* locus_t_indices;
-    const uint8_t* locus_count_cols;
+    const float*   gdna_log_liks;
     int     n_units;
     int64_t n_candidates;
 
@@ -2118,9 +2009,6 @@ static void extract_locus_sub_problem_from_partition(
     sub.offsets.resize(n_u + 1);
     sub.offsets[0] = 0;
 
-    sub.locus_t_arr.resize(n_u);
-    sub.locus_ct_arr.resize(n_u);
-
     // Reusable sort buffer — persists across units, only grows.
     std::vector<LocalCandidate> sort_buf;
 
@@ -2131,13 +2019,9 @@ static void extract_locus_sub_problem_from_partition(
         auto p_end   = pv.offsets[ui + 1];
         int width_in = static_cast<int>(p_end - p_start);
 
-        sub.locus_t_arr[ui] = pv.locus_t_indices[ui];
-        sub.locus_ct_arr[ui] = pv.locus_count_cols[ui];
-
         // Determine if this unit gets a gDNA candidate
         bool is_spliced = (pv.is_spliced[ui] != 0);
-        double gdna_ll = read_float_payload(
-            pv.gdna_log_liks, pv.gdna_log_liks_dtype, ui);
+        double gdna_ll = static_cast<double>(pv.gdna_log_liks[ui]);
         bool has_gdna = (!is_spliced && std::isfinite(gdna_ll));
         int width_out = width_in + (has_gdna ? 1 : 0);
 
@@ -2151,10 +2035,8 @@ static void extract_locus_sub_problem_from_partition(
             int32_t local = local_map[global_t];
             if (local < 0 || local >= nc) continue;
 
-            double log_lik = read_float_payload(
-                pv.log_liks, pv.log_liks_dtype, j);
-            double coverage_wt = read_float_payload(
-                pv.coverage_wts, pv.coverage_wts_dtype, j);
+            double log_lik = static_cast<double>(pv.log_liks[j]);
+            double coverage_wt = static_cast<double>(pv.coverage_wts[j]);
             sort_buf[k++] = {local, log_lik, coverage_wt, pv.count_cols[j]};
         }
 
@@ -2255,7 +2137,7 @@ static std::tuple<
     nb::object   // out_n_candidates (ndarray or None)
 >
 batch_locus_em_partitioned(
-    // Per-locus partition data (list of 9-tuples)
+    // Per-locus partition data (list of 7-tuples)
     nb::list partition_tuples,
     // Per-locus transcript membership (list of int32[])
     nb::list locus_transcript_indices,
@@ -2276,7 +2158,6 @@ batch_locus_em_partitioned(
     int      warm_start_mode,
     // Mutable output accumulators
     f64_2d_mut em_counts_out,
-    f64_2d_mut gdna_locus_counts_out,
     f64_1d_mut posterior_sum_out,
     f64_1d_mut n_assigned_out,
     // EM config
@@ -2303,15 +2184,13 @@ batch_locus_em_partitioned(
         auto off_arr = nb::cast<i64_1d>(tup[0]);
         v.offsets          = off_arr.data();
         v.t_indices        = nb::cast<i32_1d>(tup[1]).data();
-        set_float_payload(tup[2], v.log_liks, v.log_liks_dtype, "log_liks");
-        set_float_payload(
-            tup[3], v.coverage_wts, v.coverage_wts_dtype, "coverage_weights");
+        // The float payloads are cast without conversion, so a float64 array
+        // raises instead of being copied into a temporary.
+        v.log_liks         = nb::cast<f32_1d>(tup[2], false).data();
+        v.coverage_wts     = nb::cast<f32_1d>(tup[3], false).data();
         v.count_cols       = nb::cast<u8_1d>(tup[4]).data();
         v.is_spliced       = nb::cast<u8_1d>(tup[5]).data();
-        set_float_payload(
-            tup[6], v.gdna_log_liks, v.gdna_log_liks_dtype, "gdna_log_liks");
-        v.locus_t_indices  = nb::cast<i32_1d>(tup[7]).data();
-        v.locus_count_cols = nb::cast<u8_1d>(tup[8]).data();
+        v.gdna_log_liks    = nb::cast<f32_1d>(tup[6], false).data();
         v.n_units = static_cast<int>(off_arr.shape(0)) - 1;
         v.n_candidates = v.offsets[v.n_units];
 
@@ -2351,7 +2230,6 @@ batch_locus_em_partitioned(
         ? nullptr : t_rna_prior_weight_arr.data();
 
     double* em_out    = em_counts_out.data();
-    double* gdna_out  = gdna_locus_counts_out.data();
     double* psum_out  = posterior_sum_out.data();
     double* nass_out  = n_assigned_out.data();
 
@@ -2463,21 +2341,17 @@ batch_locus_em_partitioned(
             size_t n_candidates = sub.t_indices.size();
             int n_local_units = sub.n_local_units;
 
-            // 2. (No per-fragment bias correction.)  The EM uses
-            // per-component log L̃_t inside the E-step instead.
-            auto t3 = hrclock::now();
-
-            // 3. Handle empty sub-problem
+            // 2. Handle empty sub-problem
             if (n_local_units == 0 || n_candidates == 0) {
                 locus_rna_data[li] = 0.0;
                 locus_gdna_data[li] = 0.0;
                 return;
             }
 
-            // 4. log effective length per component (RNA L̃_t plus gDNA L̃_M).
+            // 3. log effective length per component (RNA L̃_t plus gDNA L̃_M).
             const double* log_eff_len_ptr = sub.log_eff_len.data();
 
-            // 5. Build equivalence classes
+            // 4. Build equivalence classes
             auto ec_data = build_equiv_classes(
                 sub.offsets.data(),
                 sub.t_indices.data(),
@@ -2486,7 +2360,7 @@ batch_locus_em_partitioned(
                 n_local_units);
             auto t4 = hrclock::now();
 
-            // 6. Grouped aggregate prior + coverage-weighted warm start.
+            // 5. Grouped aggregate prior + coverage-weighted warm start.
             AggregatePrior aggregate_prior{
                 nonnegative_finite(gp_ptr[li]),
                 nonnegative_finite(rp_ptr[li]),
@@ -2503,7 +2377,7 @@ batch_locus_em_partitioned(
                 init_counts.data(), nc, warm_start_mode);
             auto t5 = hrclock::now();
 
-            // 7. SQUAREM
+            // 6. SQUAREM
             EMResult result = run_squarem(
                 ec_data, log_eff_len_ptr,
                 sub.unambig_totals.data(),
@@ -2514,7 +2388,7 @@ batch_locus_em_partitioned(
                 estep_thr, pool);
             auto t6 = hrclock::now();
 
-            // 8. Assign posteriors
+            // 7. Assign posteriors
             SplitMix64 locus_rng(rng_seed ^ (static_cast<uint64_t>(li) * 0x9e3779b97f4a7c15ULL));
             double locus_rna = 0.0, locus_gdna = 0.0;
             int stranded = 0, unrepaired = 0;
@@ -2522,7 +2396,7 @@ batch_locus_em_partitioned(
                 sub, result.theta.data(),
                 log_eff_len_ptr,
                 assignment_mode, locus_rng, stranded, unrepaired,
-                em_out, gdna_out,
+                em_out,
                 psum_out, nass_out,
                 locus_rna, locus_gdna,
                 N_T, N_COLS,
@@ -2551,7 +2425,6 @@ batch_locus_em_partitioned(
                 prof.squarem_extrapolation_clamp_count = result.squarem_extrapolation_clamp_count;
                 prof.squarem_backtrack_count = result.squarem_backtrack_count;
                 prof.squarem_nonfinite_count = result.squarem_nonfinite_count;
-                prof.squarem_grouped_fallback_used = result.squarem_grouped_fallback_used;
                 prof.squarem_grouped_stabilization_fail_count =
                     result.squarem_grouped_stabilization_fail_count;
                 prof.assignment_stranded = stranded;
@@ -2580,8 +2453,7 @@ batch_locus_em_partitioned(
                 prof.max_ec_depth = max_n;
                 prof.digamma_calls_per_estep = use_vbem ? nc : 0;
                 prof.extract_us = us(locus_t0, t2);
-                prof.bias_us = us(t2, t3);
-                prof.build_ec_us = us(t3, t4);
+                prof.build_ec_us = us(t2, t4);
                 prof.warm_start_us = us(t4, t5);
                 prof.squarem_us = us(t5, t6);
                 prof.assign_us = us(t6, t7);
@@ -2685,7 +2557,6 @@ batch_locus_em_partitioned(
             d["squarem_extrapolation_clamp_count"] = p.squarem_extrapolation_clamp_count;
             d["squarem_backtrack_count"] = p.squarem_backtrack_count;
             d["squarem_nonfinite_count"] = p.squarem_nonfinite_count;
-            d["squarem_grouped_fallback_used"] = p.squarem_grouped_fallback_used;
             d["squarem_grouped_stabilization_fail_count"] =
                 p.squarem_grouped_stabilization_fail_count;
             d["assignment_stranded"] = p.assignment_stranded;
@@ -2695,7 +2566,6 @@ batch_locus_em_partitioned(
             d["final_data_loglik"] = p.final_data_loglik;
             d["digamma_calls_per_estep"] = p.digamma_calls_per_estep;
             d["extract_us"] = p.extract_us;
-            d["bias_us"] = p.bias_us;
             d["build_ec_us"] = p.build_ec_us;
             d["warm_start_us"] = p.warm_start_us;
             d["squarem_us"] = p.squarem_us;
@@ -2739,10 +2609,9 @@ batch_locus_em_partitioned(
     );
 }
 // ================================================================
-// Phase 3 — C++ Union-Find Connected Components
+// Union-Find connected components
 // ================================================================
 //
-// Replaces scipy.sparse.csgraph.connected_components for locus building.
 // Uses disjoint-set (union-find) with path compression and union by rank.
 // Time: O(N_candidates * α(N_transcripts)) ≈ O(N_candidates).
 //
@@ -2956,12 +2825,6 @@ NB_MODULE(_em_impl, m) {
           nb::arg("n_loci"),
           "Build per-locus CSR offsets from global offsets and locus unit lists.");
 
-    m.def("scatter_candidates_f64",
-          &scatter_candidates_impl<double>,
-          nb::arg("global_arr"), nb::arg("g_offsets"),
-          nb::arg("locus_units"), nb::arg("partition_offsets"),
-          nb::arg("n_loci"),
-          "Scatter per-candidate float64 array into per-locus arrays.");
     m.def("scatter_candidates_f32",
           &scatter_candidates_impl<float>,
           nb::arg("global_arr"), nb::arg("g_offsets"),
@@ -2981,18 +2844,10 @@ NB_MODULE(_em_impl, m) {
           nb::arg("n_loci"),
           "Scatter per-candidate uint8 array into per-locus arrays.");
 
-    m.def("scatter_units_f64",
-          &scatter_units_impl<double>,
+    m.def("scatter_units_f32",
+          &scatter_units_impl<float>,
           nb::arg("global_arr"), nb::arg("locus_units"), nb::arg("n_loci"),
-          "Scatter per-unit float64 array into per-locus arrays.");
-        m.def("scatter_units_f32",
-            &scatter_units_impl<float>,
-            nb::arg("global_arr"), nb::arg("locus_units"), nb::arg("n_loci"),
-            "Scatter per-unit float32 array into per-locus arrays.");
-    m.def("scatter_units_i32",
-          &scatter_units_impl<int32_t>,
-          nb::arg("global_arr"), nb::arg("locus_units"), nb::arg("n_loci"),
-          "Scatter per-unit int32 array into per-locus arrays.");
+          "Scatter per-unit float32 array into per-locus arrays.");
     m.def("scatter_units_u8",
           &scatter_units_impl<uint8_t>,
           nb::arg("global_arr"), nb::arg("locus_units"), nb::arg("n_loci"),
@@ -3014,7 +2869,6 @@ NB_MODULE(_em_impl, m) {
           nb::arg("t_rna_prior_weight"),
           nb::arg("warm_start_mode"),
           nb::arg("em_counts_out"),
-          nb::arg("gdna_locus_counts_out"),
           nb::arg("posterior_sum_out"),
           nb::arg("n_assigned_out"),
           nb::arg("max_iterations"),
@@ -3028,8 +2882,7 @@ NB_MODULE(_em_impl, m) {
           nb::arg("emit_locus_stats") = false,
           nb::arg("emit_assignments") = false,
           "Run locus EM from per-locus partition data.\n\n"
-          "Accepts a list of 9-tuples (one per locus) containing partition\n"
-          "arrays, plus per-locus gDNA prior counts and eligibility.\n"
+          "Accepts a list of 7-tuples (one per locus) of partition arrays.\n"
           "Returns (total_gdna_em, locus_rna_total, locus_gdna, locus_stats,\n"
           " out_winner_tid, out_winner_post, out_n_candidates).\n"
           "\n"

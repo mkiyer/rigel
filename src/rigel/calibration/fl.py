@@ -185,9 +185,6 @@ class FLModels:
     #: carried separately so the report can show each pool on its own, which is what makes the
     #: off-target / on-target length comparison an output rather than an assumption.
     pool_counts: np.ndarray = None
-    #: What the two-pool contrast did. ``None`` when it was never offered the per-region inputs (the
-    #: second pass and most tests), which is a different state from having declined.
-    gdna_contrast: "GdnaContrast | None" = None
     #: The second estimand — the LIBRARY-CENSUS law: what a sequenced gDNA fragment looks like,
     #: capture selection included. ``gdna_pmf`` above is the UNIFORM-FRAME law the opportunity and
     #: prior mathematics assumes; this one is what the EM's per-fragment scorer conditions on. Off
@@ -195,7 +192,6 @@ class FLModels:
     #: the scorer reads it unconditionally. Feeding this law to GEOMETRY is a large regression, and
     #: one name over the two quantities is how that happens.
     gdna_realized_pmf: np.ndarray = None
-    gdna_realized: "GdnaRealized | None" = None
 
     def _empirical(self, counts: np.ndarray) -> "FragmentLengthModel":
         """Wrap a raw count vector as an unfinalized ``FragmentLengthModel``.
@@ -748,12 +744,6 @@ def build_fl_models(
     :func:`~rigel.calibration.splice_graph.build_region_partition_arrays`, the same partition the
     scanner deposits into, so they cannot disagree with the banks they index.
 
-    Omitting them is a supported state, not a degraded one — the second pass and most tests do —
-    and ``None`` then means no annotation was offered. The fallback is the honest one rather than
-    the convenient one: the RNA pool stays tilted and the gDNA pool falls back to the CONTAINED pair
-    alone (:func:`gdna_contained_fl_mass`). It does not fall back to the four pools pooled raw,
-    which is worse than either.
-
     For the EB kernel over three free histograms — the shape a unit test needs and production never
     has — see :func:`_fl_models_from_histograms`.
     """
@@ -763,14 +753,13 @@ def build_fl_models(
     if sj_opportunity is not None:
         rna_counts = detilt_pool(rna_counts, sj_opportunity)
 
-    contrast = None
-    realized_counts, realized = None, None
+    realized_counts = None
     if gdna_opportunity is None:
         gdna_counts = gdna_contained_fl_mass(payload)
     else:
         gdna_counts = detilt_pool(gdna_fl_mass(payload), gdna_opportunity.combined_probability())
         if region_lengths is not None and region_types is not None:
-            deconvolved, contrast = _deconvolved_gdna_counts(
+            deconvolved, _contrast = _deconvolved_gdna_counts(
                 payload, gdna_opportunity, region_lengths, region_types
             )
             if deconvolved is not None:
@@ -778,7 +767,7 @@ def build_fl_models(
             # the SECOND estimand: the library-census law for the scorer. It reads the uniform-frame
             # result and the same banks; on decline the two estimands coincide, which is the honest
             # off-capture answer rather than a degraded one.
-            realized_counts, coupled_uniform, realized = _realized_gdna_counts(
+            realized_counts, coupled_uniform, _realized = _realized_gdna_counts(
                 payload,
                 gdna_opportunity,
                 region_lengths,
@@ -798,9 +787,7 @@ def build_fl_models(
         max_size=int(payload.max_length),
         prior_ess=prior_ess,
         pool_counts=payload.pool_lengths,
-        gdna_contrast=contrast,
         gdna_realized_counts=realized_counts,
-        gdna_realized=realized,
     )
 
 
@@ -812,9 +799,7 @@ def _fl_models_from_histograms(
     max_size: int,
     prior_ess: float = POOL_EB_PRIOR_ESS,
     pool_counts: np.ndarray | None = None,
-    gdna_contrast: "GdnaContrast | None" = None,
     gdna_realized_counts: np.ndarray | None = None,
-    gdna_realized: "GdnaRealized | None" = None,
 ) -> FLModels:
     """The smooth-EB kernel: three histograms in, three pmfs out.
 
@@ -853,7 +838,5 @@ def _fl_models_from_histograms(
         n_rna=n_rna,
         n_gdna=n_gdna,
         max_size=int(max_size),
-        gdna_contrast=gdna_contrast,
         gdna_realized_pmf=gdna_realized_pmf,
-        gdna_realized=gdna_realized,
     )

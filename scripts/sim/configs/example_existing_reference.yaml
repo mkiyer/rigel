@@ -20,8 +20,6 @@
 genome: /path/to/genome.fa                 # indexed FASTA (run `samtools faidx` first)
 gtf: /path/to/annotation.gtf               # may be gzipped
 outdir: /scratch/$USER/rigel_sim/example
-transcript_filter: all                     # all | basic | mane | ccds
-                                           #   basic ≈ ~100k transcripts (faster, realistic)
 
 # ── Read simulation ─────────────────────────────────────────────────────────
 simulation:

@@ -287,10 +287,6 @@ Accumulator::Accumulator(std::vector<std::int64_t> region_bounds,
         region_types_ = std::move(region_types);
     }
     pool_lengths_.assign(kNFragmentPools * (static_cast<std::size_t>(max_length_) + 1), 0);
-    // ⭐ The unconditional length histogram is allocated ALWAYS, unlike pool_lengths_ which is empty when a reference has no region types.
-    // The unconditional histogram does not depend on region typing -- a fragment has a length whether or
-    // not its region can be classified -- and an anchor that silently vanished on an untyped reference
-    // would be exactly the kind of conditioning this row exists to remove.
     deposited_lengths_.assign(static_cast<std::size_t>(max_length_) + 1, 0u);
 }
 
@@ -504,7 +500,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     // exceeds the limit must be RNA": that hypothesis's L IS the span. There is no second rule.
     // ⚠ Unless the filter would empty the set, in which case the survivors stand and the ordinary
     // kTooLong rejection counts them, as it did before any of this.
-    // ⛔⛔ EVERY FRAGMENT HAS AT LEAST ONE HYPOTHESIS -- "region_bound nothing beyond what was sequenced" -- and
+    // ⛔⛔ EVERY FRAGMENT HAS AT LEAST ONE HYPOTHESIS -- "cut nothing beyond what was sequenced" -- and
     // the executable specification makes that its DEFAULT (`UNSPLICED_ONLY`), not an option:
     // "the degenerate case is the general case, not a branch". A caller offering an EMPTY set is
     // asking the same question, so answer it the same way rather than crashing.
@@ -768,12 +764,10 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
         region.contained_inv_opportunity_sum += 1.0 / static_cast<double>(region_len - length + 1);
     }
 
-    if (!pool_lengths_.empty()) {
-        const std::int64_t pool = fragment_pool(spliced, contained_region, sole_boundary);
-        if (pool >= 0) {
-            pool_lengths_[static_cast<std::size_t>(pool) * (static_cast<std::size_t>(max_length_) + 1) +
-                          static_cast<std::size_t>(length)] += 1;
-        }
+    const std::int64_t pool = fragment_pool(spliced, contained_region, sole_boundary);
+    if (pool >= 0) {
+        pool_lengths_[static_cast<std::size_t>(pool) * (static_cast<std::size_t>(max_length_) + 1) +
+                      static_cast<std::size_t>(length)] += 1;
     }
     return DepositOutcome::kDeposited;
 }
@@ -888,7 +882,6 @@ void Accumulator::merge_from(const Accumulator& other) {
     gap_census_.merge_from(other.gap_census_);
     deferred_.merge_from(other.deferred_);
 
-    // Integer addition is associative, so the result is identical at any worker count, on any machine.
     for (std::size_t i = 0; i < regions_.size(); ++i) {
         for (std::size_t c = 0; c < kNStrandColumns; ++c) {
             regions_[i].contained_count[c]   += other.regions_[i].contained_count[c];
@@ -919,7 +912,7 @@ void Accumulator::merge_from(const Accumulator& other) {
         for (std::size_t c = 0; c < kNStrandColumns; ++c) {
             sj_[i].count[c]   += other.sj_[i].count[c];
             // ⭐ INSIDE the column loop, unlike every other mass in this file: the sj mass is the
-            // one that carries a strand. See `SpliceJunction::mass` for the premise that changed.
+            // one that carries a strand. See `SpliceJunction::mass`.
             sj_[i].mass[c]    += other.sj_[i].mass[c];
         }
         sj_[i].inv_length_sum += other.sj_[i].inv_length_sum;

@@ -99,6 +99,14 @@ class TestQuantDefaults:
         args = _parse_quant()
         assert args.scan_buffer_size is None
 
+    def test_tsv_default_none(self):
+        args = _parse_quant()
+        assert args.tsv is None
+
+    def test_emit_locus_stats_default_none(self):
+        args = _parse_quant()
+        assert args.emit_locus_stats is None
+
 
 # ---------------------------------------------------------------------------
 # Boolean optional action
@@ -236,6 +244,37 @@ class TestResolveQuant:
         _resolve_quant_args(args, _build_quant_defaults())
         assert args.scan_read_name_batch_size == 256
 
+    def test_yaml_tsv_and_emit_locus_stats_apply_when_the_flags_are_absent(self, tmp_path):
+        """A boolean set in the YAML reaches the run unless the command line names the flag."""
+        from rigel.cli import _build_pipeline_config
+
+        cfg = tmp_path / "cfg.yaml"
+        cfg.write_text("tsv: true\nemit_locus_stats: true\n")
+        args = _parse_quant("--config", str(cfg))
+        _resolve_quant_args(args, _build_quant_defaults())
+        assert args.tsv is True
+        assert args.emit_locus_stats is True
+        assert _build_pipeline_config(args).emit_locus_stats is True
+
+        args = _parse_quant("--config", str(cfg), "--no-tsv", "--no-emit-locus-stats")
+        _resolve_quant_args(args, _build_quant_defaults())
+        assert args.tsv is False
+        assert args.emit_locus_stats is False
+
+    def test_config_yaml_rerun_keeps_tsv_and_emit_locus_stats(self, tmp_path):
+        """The config.yaml a run writes reproduces its --tsv and --emit-locus-stats."""
+        from rigel.cli import _write_config_yaml
+
+        args = _parse_quant("--tsv", "--emit-locus-stats")
+        _resolve_quant_args(args, _build_quant_defaults())
+        written = tmp_path / "config.yaml"
+        _write_config_yaml(written, args)
+
+        rerun = build_parser().parse_args(["quant", "--config", str(written)])
+        _resolve_quant_args(rerun, _build_quant_defaults())
+        assert rerun.tsv is True
+        assert rerun.emit_locus_stats is True
+
 
 # ---------------------------------------------------------------------------
 # Config round-trip: defaults → resolve → build should match PipelineConfig()
@@ -268,9 +307,6 @@ class TestConfigRoundTrip:
         # Scoring: log penalties match exactly
         assert result.scoring.overhang_log_penalty == ref.scoring.overhang_log_penalty
         assert result.scoring.mismatch_log_penalty == ref.scoring.mismatch_log_penalty
-        # gdna_splice_penalties: no CLI knob, so it stays at the config default (None → the scorer
-        # applies GDNA_SPLICE_PENALTIES at construction).
-        assert result.scoring.gdna_splice_penalties == ref.scoring.gdna_splice_penalties
 
     def test_param_specs_cover_all_defaults(self):
         """Every key in _build_quant_defaults matches a _ParamSpec or is CLI-only."""

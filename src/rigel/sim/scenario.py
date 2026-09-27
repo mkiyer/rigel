@@ -37,13 +37,9 @@ from .annotation import GeneBuilder
 from .capture import CaptureConfig
 from .genome import MutableGenome
 from .reads import GDNAConfig, ReadSimConfig
-from .whole_genome import (
-    GDNASimConfig,
-    SimulationParams,
-    WholeGenomeSimulator,
-    assign_nrna_to_entities,
-    load_transcripts_from_index,
-)
+from .wgs_config import GDNASimConfig, SimulationParams
+from .wgs_engine import WholeGenomeSimulator
+from .whole_genome import assign_nrna_to_entities, load_transcripts_from_index
 from .truth import (
     count_mrna_by_transcript_from_bam,
     count_mrna_by_transcript_from_fastq,
@@ -152,21 +148,6 @@ class ScenarioResult:
     gdna_config: GDNAConfig | None = None
     is_oracle: bool = False
 
-    def ground_truth_counts(self) -> dict[str, int]:
-        """Parse BAM read names to extract ground-truth fragment counts.
-
-        The read simulator encodes the source transcript in each read
-        name as ``{t_id}:{frag_start}-{frag_end}:{strand}:{idx}/1``.
-        gDNA reads use ``gdna:...`` prefix and are excluded.
-
-        Returns
-        -------
-        dict[str, int]
-            Mapping of ``t_id → count`` for each transcript that
-            contributed at least one simulated fragment.
-        """
-        return self.ground_truth_from_bam()
-
     def ground_truth_gdna_count(self) -> int:
         """Count gDNA fragments from FASTQ read names.
 
@@ -190,7 +171,7 @@ class ScenarioResult:
     def ground_truth_from_fastq(self) -> dict[str, int]:
         """Parse FASTQ read names to get ground-truth fragment counts.
 
-        Unlike :meth:`ground_truth_counts`, this counts *all* simulated
+        Unlike :meth:`ground_truth_from_bam`, this counts *all* simulated
         fragments regardless of alignment success, providing the true
         number of fragments the simulator produced per transcript.
         gDNA reads (``gdna:`` prefix) are excluded.
@@ -459,7 +440,7 @@ class Scenario:
         """Execute the simulation pipeline using oracle (perfect) alignments.
 
         Bypasses FASTQ generation and external alignment (minimap2/samtools):
-        :class:`whole_genome.WholeGenomeSimulator` writes the name-sorted oracle
+        :class:`wgs_engine.WholeGenomeSimulator` writes the name-sorted oracle
         BAM directly (CIGAR strings derived from known transcript structure).
 
         Pipeline:

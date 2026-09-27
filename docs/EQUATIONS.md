@@ -83,8 +83,8 @@ there is no graph traversal anywhere.
 
 ## 2. Reciprocal opportunity, and where it is model-free
 
-Implemented by `accumulator.cpp` (the `1/A(w)` deposits), `calibration/substrate.py` (the banks) and
-`calibration/total_abundance.py` (the start/end pair of §2.3b). The executable statement of the support
+Implemented by `accumulator.cpp` (the `1/A(w)` deposits) and `calibration/total_abundance.py` (the
+start/end pair of §2.3b). The executable statement of the support
 factor is gated in `tests/native/test_conserved_mass.py`.
 
 **The general rule: deposit `1/A(w)` where `A(w)` is that population's own opportunity** — the number of
@@ -153,7 +153,7 @@ truth pools additively (`f_g = ΣG/(ΣG+ΣR)`).
 
 ## 3. The two-component deconvolution
 
-**3.1 The 2×2 at one object.** Stored by `calibration/substrate.py` (the `inv_length_sum` banks); no
+**3.1 The 2×2 at one object.** Stored by the accumulator (the `inv_length_sum` banks); no
 calibration module solves it, because fragment length as a composition channel is deferred past 0.8.0
 (`DESIGN.md` §0b). Kept because `SUCCESS.md`'s information census is defined on it.
 

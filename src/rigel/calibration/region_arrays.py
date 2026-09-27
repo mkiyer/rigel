@@ -132,10 +132,6 @@ class RegionArrays:
         )
 
 
-# The index schema carries no per-boundary annotation flags: the solver reads an sj's strand from the
-# accumulator's splice motif instead.
-
-
 # ---------------------------------------------------------------------------
 # Region ↔ contiguous-boundary index mapping
 # ---------------------------------------------------------------------------

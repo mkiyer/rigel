@@ -370,7 +370,7 @@ python scripts/sim/build_suite_reference.py \
 * ⛔ **`--force` does not reach the `simulate` stage.** `cmd_cache` passes it to `build_scan_cache.py`
   and `cmd_build` honours it for the index and probes, but `cmd_simulate` shells out to
   `simulate_reads.py` with no such flag, and the simulator skips a condition whose oracle BAM already
-  exists (`skip_existing`). So editing a config and re-running `panel.py simulate --force` reports
+  exists. So editing a config and re-running `panel.py simulate --force` reports
   success and reproduces the old reads. Delete the condition directories first.
 * `calibration_oracle.py --build` builds every row's oracle cache alike — the zero-gDNA rows too, there is no
   hold-out — and `status` counts an oracle condition complete only when `gdna`, `mrna`, `nrna`, the two strand

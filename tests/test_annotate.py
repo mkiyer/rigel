@@ -1,8 +1,8 @@
 """`rigel.annotate` — writing the scanner's per-fragment decisions back out as BAM tags.
 
-The annotation table itself: what it stores per fragment, how it grows, and the canonical tag values
-for the fragment class and splice type. Then the writer, through a real `run_pipeline`: the
-annotated BAM must be valid, its per-class counts must agree with the run's own, and it must
+The annotation table itself: what it stores per fragment, how it grows, and the canonical ZF
+values. Then the writer, through a real `run_pipeline`: the annotated BAM must be valid, its tag
+values must lie in their domains, its per-class counts must agree with the run's own, and it must
 preserve every input record and its collation, multimappers included, because an annotated BAM that
 silently drops records is not the same library the numbers describe. The blacklist tag is gated for
 presence, for the blacklisted case and for its absence on a filtered passthrough.
@@ -31,8 +31,6 @@ from rigel.annotate import (
     AF_RESOLVED,
     AF_SYNTHETIC_BIT,
     AF_UNRESOLVED,
-    _FRAG_CLASS_LABELS,
-    _splice_type_label,
 )
 
 
@@ -101,7 +99,7 @@ class TestAnnotationTable:
         assert tbl.size == 0
         assert tbl.capacity == 100
 
-    def test_add_and_get(self):
+    def test_add(self):
         tbl = AnnotationTable.create(10)
         tbl.add(
             frag_id=42,
@@ -114,19 +112,14 @@ class TestAnnotationTable:
             splice_type=1,
         )
         assert tbl.size == 1
-        ann = tbl.get(42)
-        assert ann is not None
-        assert ann["best_tid"] == 5
-        assert ann["best_gid"] == 2
-        assert ann["tx_flags"] == AF_MRNA
-        assert abs(ann["posterior"] - 0.95) < 0.01
-        assert ann["frag_class"] == 0
-        assert ann["n_candidates"] == 3
-        assert ann["splice_type"] == 1
-
-    def test_get_missing(self):
-        tbl = AnnotationTable.create(10)
-        assert tbl.get(999) is None
+        assert tbl.frag_ids[0] == 42
+        assert tbl.best_tid[0] == 5
+        assert tbl.best_gid[0] == 2
+        assert tbl.tx_flags[0] == AF_MRNA
+        assert abs(tbl.posterior[0] - 0.95) < 0.01
+        assert tbl.frag_class[0] == 0
+        assert tbl.n_candidates[0] == 3
+        assert tbl.splice_type[0] == 1
 
     def test_grow(self):
         tbl = AnnotationTable.create(2)
@@ -142,10 +135,8 @@ class TestAnnotationTable:
             )
         assert tbl.size == 10
         assert tbl.capacity >= 10
-        for i in range(10):
-            ann = tbl.get(i)
-            assert ann is not None
-            assert ann["best_tid"] == i
+        np.testing.assert_array_equal(tbl.frag_ids[: tbl.size], np.arange(10))
+        np.testing.assert_array_equal(tbl.best_tid[: tbl.size], np.arange(10))
 
     def test_zf_canonical_values(self):
         """All canonical ZF values satisfy the redesign invariants."""
@@ -169,27 +160,6 @@ class TestAnnotationTable:
         assert AF_GDNA_INTERGENIC & AF_RESOLVED
         assert not (AF_CHIMERIC & AF_RESOLVED)
         assert not (AF_MULTIMAPPER_DROP & AF_RESOLVED)
-
-    def test_frag_class_labels(self):
-        """Known fragment class codes have labels.
-
-        Chimeric / intergenic codes are NOT in _FRAG_CLASS_LABELS under
-        the ZF/ZC redesign — those outcomes are encoded in ZF, and the
-        BAM writer stamps ``ZC="."`` for them directly.
-        """
-        assert _FRAG_CLASS_LABELS[0] == "unambig"
-        assert _FRAG_CLASS_LABELS[1] == "ambig_same_strand"
-        assert _FRAG_CLASS_LABELS[3] == "multimapper"
-        assert -1 not in _FRAG_CLASS_LABELS
-        assert 4 not in _FRAG_CLASS_LABELS  # FRAG_CHIMERIC
-
-    def test_splice_type_label(self):
-        """SpliceType codes convert to lowercase labels."""
-        from rigel.splice import SpliceType
-
-        for st in SpliceType:
-            label = _splice_type_label(int(st))
-            assert label == st.name.lower()
 
 
 # =====================================================================
@@ -310,6 +280,14 @@ class TestAnnotatedBamIntegration:
         for rec in records:
             zc = rec.get_tag("ZC")
             assert zc in valid_zc, f"Unexpected ZC value: {zc!r}"
+
+        # ZS values: every SpliceType, lower-cased, or "unknown".
+        from rigel.splice import SpliceType
+
+        valid_zs = {st.name.lower() for st in SpliceType} | {"unknown"}
+        for rec in records:
+            zs = rec.get_tag("ZS")
+            assert zs in valid_zs, f"Unexpected ZS value: {zs!r}"
 
         # ZH should be 0 or 1
         for rec in records:
@@ -889,7 +867,7 @@ class TestAnnotatedBamIntegration:
             assert rec.get_tag("ZC") == "."
 
     def test_zf_multimapper_dropped_without_include_multimap(self, scenario, tmp_path):
-        """When --no-multimap drops a multimapper, ZF is
+        """When --no-include-multimap drops a multimapper, ZF is
         AF_MULTIMAPPER_DROP and ZC is '.'.
         """
         import pysam

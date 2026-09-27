@@ -1,7 +1,7 @@
 "use strict";
-/* Rigel QC report front-end. Consumes window.__RIGEL__ = {model, fl_specs}.
+/* Rigel QC report front-end. Consumes window.__RIGEL__ = {model, charts}.
    Native HTML/SVG for tiles, bars, gauge, tables; Vega-Lite (window.vegaEmbed,
-   inlined at build time) for the fragment-length distribution charts. */
+   inlined at build time) for every chart in `charts`. */
 (function () {
   const R = window.__RIGEL__ || {};
   const M = R.model || {};
@@ -448,14 +448,12 @@
     if ($("sj-note")) {
       const bl = M.fragments.blacklist || {}, art = (M.fragments.splice.find(s => s.label === "Artifact") || {}).value || 0;
       let msg;
-      if (bl.loaded === true)
+      if (bl.loaded)
         msg = `<b>Splice-artifact detection: on</b> — <span class="num">${fmtValue(bl.size, "count")}</span> blacklisted junctions active. ` +
               `<span class="num">${fmtValue(art, "count")}</span> fragments flagged as artifacts and held out of quantification.`;
-      else if (bl.loaded === false)
+      else
         msg = `<b>Splice-artifact detection: off</b> — no artifact blacklist in this index, so the <span class="num">Artifact</span> class reads 0 by construction, not by measurement. ` +
               `Rebuild the index with <span class="num">--alignable-zarr</span> to enable detection.`;
-      else
-        msg = `<b>Splice-artifact detection: unknown</b> — this run predates blacklist provenance tracking.`;
       $("sj-note").innerHTML = msg;
     }
     gauge($("gauge"), M.strand.spec); kpis($("strand-kpis"), M.strand.kpis); orient($("orient"), M.strand.read1_sense);

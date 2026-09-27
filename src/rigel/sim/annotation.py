@@ -173,10 +173,9 @@ class GeneBuilder:
             genome[intron_start:intron_start+2] = 'CT'
             genome[intron_end-2:intron_end]     = 'AC'
 
-        Delegates the placement to the shared :func:`place_intron_motif`; raises on an
-        intron < 4 bp (the builder contract — a construction error).
+        Delegates the placement to :func:`place_intron_motif`, which raises on an intron < 4 bp.
         """
-        place_intron_motif(self.genome.edit, intron_start, intron_end, strand, on_short="raise")
+        place_intron_motif(self.genome.edit, intron_start, intron_end, strand)
 
     # -- Output ---------------------------------------------------------------
 

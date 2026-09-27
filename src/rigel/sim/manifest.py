@@ -89,7 +89,7 @@ def write_manifest(
         "truth_abundances": truth_abundances,
         "conditions": _jsonable(conditions),
     }
-    for key in ("genome", "gtf", "shadow_gtf", "transcript_filter", "strand_specificities"):
+    for key in ("genome", "gtf", "shadow_gtf", "strand_specificities"):
         if hasattr(config, key):
             value = getattr(config, key)
             if key in {"genome", "gtf", "shadow_gtf"} and value:

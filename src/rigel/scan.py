@@ -8,7 +8,6 @@ the locus-level EM.
 """
 
 import logging
-import math
 
 import numpy as np
 
@@ -17,14 +16,11 @@ from .estimator import AbundanceEstimator
 from .scored_fragments import ScoredFragments
 from .index import TranscriptIndex
 from .scoring import FragmentScorer
-from .splice import SPLICE_UNSPLICED, SPLICE_ANNOT
+from .splice import SPLICE_ANNOT
 from .stats import PipelineStats
 from .annotate import AF_CHIMERIC, winner_flag
 
 logger = logging.getLogger(__name__)
-
-# Default splice penalty for splice types not found in the penalty map.
-_DEFAULT_SPLICE_PENALTY = 1.0
 
 
 class FragmentRouter:
@@ -65,9 +61,6 @@ class FragmentRouter:
         self.index = index
         self.annotations = annotations
 
-        # Native scoring context (set by FragmentScorer.from_models)
-        self._native_ctx = getattr(ctx, "_native_ctx", None)
-
     # ------------------------------------------------------------------
     # Main scan driver
     # ------------------------------------------------------------------
@@ -80,43 +73,17 @@ class FragmentRouter:
         exonic fragments build EM units.  Chimeric fragments are
         recorded in the annotation table (if active) and skipped.
 
-        Chunks are streamed from the buffer one at a time so that only
-        one spilled chunk is loaded from disk at any moment during
-        conversion to contiguous numpy arrays.
+        Chunks are consumed from the buffer in order and scored by the
+        native ``StreamingScorer``.
         """
-        native_scorer = self._native_ctx
-        if native_scorer is None:
-            raise RuntimeError("NativeFragmentScorer not available; cannot scan")
-        return self._scan_native(buffer, log_every)
-
-    def _scan_native(
-        self,
-        buffer: FragmentBuffer,
-        log_every: int,
-    ) -> ScoredFragments:
-        """Streaming C++ scan path.
-
-        Processes chunks one at a time via StreamingScorer, freeing
-        each chunk's arrays immediately after scoring.  Multimapper
-        groups are scored eagerly — no cross-chunk data references.
-        Peak memory is bounded to one chunk (~200 MB) plus the
-        growing CSR output.
-        """
-        native_scorer = self._native_ctx
+        native_scorer = self.ctx._native_ctx
         estimator = self.estimator
         stats = self.stats
         index = self.index
         t_to_g = self.ctx.t_to_g
         annotations = self.annotations
 
-        from .scoring import LOG_SAFE_FLOOR
         from .native import StreamingScorer
-
-        gdna_unspliced_penalty = self.ctx.gdna_splice_penalties.get(
-            SPLICE_UNSPLICED,
-            _DEFAULT_SPLICE_PENALTY,
-        )
-        gdna_log_penalty = math.log(max(gdna_unspliced_penalty, LOG_SAFE_FLOOR))
 
         t_strand_arr = np.ascontiguousarray(index.t_to_strand_arr, dtype=np.int8)
 
@@ -125,7 +92,6 @@ class FragmentRouter:
             native_scorer,
             t_strand_arr,
             estimator.unambig_counts,
-            gdna_log_penalty,
         )
 
         n_processed = 0
@@ -136,7 +102,7 @@ class FragmentRouter:
             n_processed += chunk.size
             if n_processed % log_every < chunk.size:
                 logger.debug(f"  Scan: {n_processed:,} / {n_total:,}")
-            del arrays, chunk  # free immediately
+            del arrays, chunk
 
         result = scorer.finish()
 
@@ -146,8 +112,6 @@ class FragmentRouter:
             log_liks,
             count_cols,
             coverage_weights,
-            locus_t_indices,
-            locus_count_cols,
             is_spliced_raw,
             gdna_log_liks,
             frag_ids,
@@ -162,9 +126,8 @@ class FragmentRouter:
             n_em_as,
             n_em_ao,
             n_gated,
-            n_chim,
+            _,
             n_mm,
-            genomic_midpoint,
         ) = result
 
         stats.deterministic_unambig_units += int(n_det)
@@ -213,14 +176,11 @@ class FragmentRouter:
             log_liks=log_liks,
             count_cols=count_cols,
             coverage_weights=coverage_weights,
-            locus_t_indices=locus_t_indices,
-            locus_count_cols=locus_count_cols,
             is_spliced=np.asarray(is_spliced_raw, dtype=np.int8).astype(bool),
             gdna_log_liks=gdna_log_liks,
             frag_ids=frag_ids,
             frag_class=frag_classes,
             splice_type=splice_types,
-            genomic_midpoint=genomic_midpoint,
             n_units=int(len(offsets) - 1),
             n_candidates=int(len(t_indices)),
         )

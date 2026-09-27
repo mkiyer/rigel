@@ -19,7 +19,7 @@ sides cannot carry different divisors. What that dissolves:
 Contents:
 
 * `RegionGeometry` / `build_region_geometry` — the per-slot static geometry: the unspliced count being
-  deconvolved, its two per-component divisors, and the mature (sj) flux with its own.
+  deconvolved, its two per-component divisors, and the sj flux with its per-face route rates.
 * `RegionBelief` — the per-slot pie ``(f_pos, f_neg, f_g)``; the per-component message densities
   ``rho = f·M/E`` are computed inline in ``sweep.solve_chain``.
 * `RegionStatics` / `build_region_statics` — the static per-slot solver inputs (per-strand counts, masks).
@@ -60,8 +60,6 @@ __all__ = [
     "g1_locked",
 ]
 
-_EPS = 1.0e-9
-
 
 @dataclass(frozen=True, slots=True)
 class RegionGeometry:
@@ -85,7 +83,7 @@ class RegionGeometry:
 
     Two strand axes, and they are not the same axis. ``unspliced_count`` and ``spliced_count`` are keyed
     by GENOME strand — where the read aligned, the accumulator's one storage convention.
-    ``sj_count``/``eff_sj`` are keyed by TRANSCRIPT strand, derived from each sj's own annotated strand.
+    ``sj_count`` is keyed by TRANSCRIPT strand, derived from each sj's own annotated strand.
     That derivation is why the accumulator stores no sense/antisense column, and putting the two axes in
     one array under one name would be two conventions in one schema.
     """
@@ -115,10 +113,6 @@ class RegionGeometry:
     #: by TRANSCRIPT strand. The flux that changes template here: what the SPLICE IN hands an exon, and
     #: what the SPLICE OUT measures the continuing share against.
     sj_count: np.ndarray
-    #: float64[n_slots, 2] — the SUMMED sj divisor, same keying. Several sj on one boundary are
-    #: several estimates of one rate, so the pooled statement is ``Σcount / ΣE`` — the ratio of sums, never
-    # the mean of ratios (``ρ_bg = Σg/ΣE``).
-    eff_sj: np.ndarray
     #: float64[n_slots, 2] — the SAME flux, split by which genomic END of its sj this BOUNDARY is.
     #: ``_lo`` is the flux of sj whose genomic-LOW end is here; ``_hi`` the genomic-HIGH end's.
     #: The two halves belong to DIFFERENT FLANKS of the same BOUNDARY: a molecule that splices at
@@ -130,42 +124,11 @@ class RegionGeometry:
     #: Written in GENOMIC terms, never donor/acceptor: the index's ``FLAG_DONOR_s`` bit marks the
     #: genomic-LOW end of an ``s``-strand intron on BOTH strands, so on ``−`` it sits at the transcript's
     #: biological ACCEPTOR. Naming these ``_lo``/``_hi`` is what stops that being a sign error.
-    #: The reciprocal-opportunity total, counts/bp — model-free at a BOUNDARY, truncated at a REGION.
-    #: The accumulator deposits ``1/A(w)`` per fragment, so ``E[sum] = rho * P(A > 0)``
-    #: (`tests/native/_accumulator_reference.py`): at a BOUNDARY ``A = w−1`` and ``P(w ≥ 2) = 1`` on any
-    #: real library, so the boundary slots ARE the density, exactly, for any length distribution; at a
-    #: REGION ``A = (ell−w+1)₊`` and the slot reads ``rho * P(w ≤ ell)``, a per-component pmf functional
-    #: (an order of magnitude at a short exon, exactly 0 below ``frag_min``) — a density SHAPE, not a
-    #: level.
-    #: ⛔ A total abundance must still never be formed as ``mass / effective_length``: that divisor
-    #: depends on which component the fragments came from — 100 counts in a 500 bp region reads 0.25 as
-    #: pure gDNA and 0.33 as pure RNA at mean lengths 100/200 — which is circular. The boundary-form bank
-    #: reads the same number either way; the REGION form moves the same circularity into its SUPPORT
-    #: rather than removing it. A truly untruncated REGION total is
-    #: `total_abundance.region_counts_and_exposure`'s START/END pair, not this bank.
-    inv_abundance: np.ndarray
-    #: The sj flux's own model-free abundance ``[n, 2]`` BY TRANSCRIPT STRAND, split by which
-    #: genomic END of its sj this BOUNDARY is — the same reciprocal-opportunity deposit
-    #: (`sj_inv_length_sum`), so it is in the SAME units as :attr:`inv_abundance`: sum the strands and
-    #: add for a FACE's total, or read one column for that strand's CERTIFIED-RNA measurement (a
-    #: spliced fragment cannot be gDNA, so this arm needs no deconvolution).
-    #: Without it a face's total is not a total, and the consequence is not subtle: mature RNA cannot
-    #: cross an exon|intron boundary contiguously, so an exon and its boundary hold genuinely different
-    #: fragment populations and their unspliced totals differ by the whole sj flux, with no enrichment
-    #: involved. A transport that reads that difference as enrichment scales gDNA by it, which costs more
-    #: than an order of magnitude even on a condition with no probes at all.
-    inv_sj_lo: np.ndarray
-    inv_sj_hi: np.ndarray
     sj_count_lo: np.ndarray
     sj_count_hi: np.ndarray
-    #: float64[n_slots, 2] — the matching divisors, split the same way.
-    eff_sj_lo: np.ndarray
-    eff_sj_hi: np.ndarray
     #: float64[n_slots, 2] — the ROUTE-SUMMED certified rate per face, ``Σ_J flux_J / A_J`` over the
     #: face's junctions, by transcript strand. The junctions at one face are DISJOINT ROUTES (each
-    #: molecule crosses exactly one), so their rates SUM; the pooled ``sj_count/eff_sj`` ratio is the
-    #: opportunity-weighted MEAN instead and under-reads a k-route face about k-fold. Summing here, at
-    #: the source, is what makes every consumer inherit the right form. A raw observation with no
+    #: molecule crosses exactly one), so their rates SUM. A raw observation with no
     #: pseudocount: a zero-flux face reads exactly 0.
     route_rate_lo: np.ndarray
     route_rate_hi: np.ndarray
@@ -246,38 +209,13 @@ def build_region_geometry(
     eff_gdna = divisor(gdna_fl_pmf)
     eff_rna = divisor(rna_fl_pmf)
 
-    # ── the reciprocal-opportunity totals, straight off the banks ─────────────────────────────────
-    # No divisor is applied here. A BOUNDARY slot carries ``boundary_unspliced``'s inv-length sum,
-    # whose expectation IS the density (``rho * P(w >= 2) = rho``). A REGION slot carries
-    # ``region_contained``'s inv-opportunity sum, whose expectation is ``rho * P(w <= ell)`` — a
-    # per-component truncation, not a level, so
-    # every REGION<->BOUNDARY ratio downstream carries that factor. Record the bias; do NOT divide it
-    # out here — the pooled ``P_hat(w <= ell)`` resurrects none of the zero banks and re-imports the
-    # per-component pmf the channel exists to avoid. Swapping in a truncation-free start bank
-    # (`region_start_count / ell`) here was priced and refused: it helps pass-0 exons and regresses the
-    # deliverable, the zero controls worst of all.
-    inv_abundance = np.zeros(n, dtype=np.float64)
-    _r_inv = getattr(substrate.region_contained, "inv_opportunity_sum", None)
-    _b_inv = getattr(substrate.boundary_unspliced, "inv_length_sum", None)
-    if _r_inv is not None and n_regions:
-        inv_abundance[is_region] = np.asarray(_r_inv, np.float64)[obj[is_region]]
-    if _b_inv is not None and is_boundary.any():
-        _bi = np.asarray(_b_inv, np.float64)
-        inv_abundance[is_boundary] = _bi[np.clip(obj[is_boundary], 0, _bi.shape[0] - 1)]
-
     # ── the JUMPING population: a sj boundary is a FACTOR on the boundaries it leaves and enters ───
     sj_count = np.zeros((n, 2), dtype=np.float64)
-    eff_sj = np.zeros((n, 2), dtype=np.float64)
     #: the same flux kept apart by which genomic END of its sj the boundary is — see the dataclass.
     jc_lo = np.zeros((n, 2), dtype=np.float64)
     jc_hi = np.zeros((n, 2), dtype=np.float64)
-    #: the flux's MODEL-FREE abundance per face — summed over the sj attached at that end, no divisor
-    inv_sj_lo = np.zeros((n, 2), dtype=np.float64)
-    inv_sj_hi = np.zeros((n, 2), dtype=np.float64)
     route_rate_lo = np.zeros((n, 2), dtype=np.float64)
     route_rate_hi = np.zeros((n, 2), dtype=np.float64)
-    ej_lo = np.zeros((n, 2), dtype=np.float64)
-    ej_hi = np.zeros((n, 2), dtype=np.float64)
     if sj.n_sj:
         slot_of_region = np.zeros(int(chain.n_regions_total), dtype=np.int64)
         slot_of_region[obj[is_region]] = np.flatnonzero(is_region)
@@ -298,15 +236,6 @@ def build_region_geometry(
         # ``donor`` is the boundary at the sj's genomic-LOW end and ``acceptor`` the genomic-HIGH one,
         # for BOTH strands, because ``chain.right``/``chain.left`` are genomic and a sj runs
         # ``src < dst`` (`splice_graph`). The names are the index's; the meaning is genomic.
-        _sj_inv = getattr(substrate.sj, "inv_length_sum", None)
-        _sj_inv = None if _sj_inv is None else np.asarray(_sj_inv, np.float64)
-        # One column per sj — the executable specification's shape. Asserted rather than reshaped:
-        # a 2-column array here would broadcast into the face totals and silently double them.
-        if _sj_inv is not None and _sj_inv.shape != (int(sj.n_sj),):
-            raise ValueError(
-                f"sj inv_length_sum has shape {_sj_inv.shape}, expected ({int(sj.n_sj)},) — one "
-                "reciprocal-opportunity column per sj (tests/native/_accumulator_reference.py)"
-            )
         live_route = eff > 0.0
         for boundary, rr in ((donor, route_rate_lo), (acceptor, route_rate_hi)):
             np.add.at(
@@ -314,34 +243,19 @@ def build_region_geometry(
                 (boundary[live_route], column[live_route]),
                 flux[live_route] / eff[live_route],
             )
-        for boundary, jc, ej, inv_face in (
-            (donor, jc_lo, ej_lo, inv_sj_lo),
-            (acceptor, jc_hi, ej_hi, inv_sj_hi),
-        ):
+        for boundary, jc in ((donor, jc_lo), (acceptor, jc_hi)):
             np.add.at(sj_count, (boundary, column), flux)
-            np.add.at(eff_sj, (boundary, column), eff)
             np.add.at(jc, (boundary, column), flux)
-            np.add.at(ej, (boundary, column), eff)
-            if _sj_inv is not None:
-                # filed under the sj's TRANSCRIPT strand, exactly as its count is — the flux is
-                # certified RNA of that strand, so a policy can read it as a per-component measurement.
-                np.add.at(inv_face, (boundary, column), _sj_inv)
 
     return RegionGeometry(
         n_slots=int(n),
         unspliced_count=unspliced_count,
-        inv_abundance=inv_abundance,
-        inv_sj_lo=inv_sj_lo,
-        inv_sj_hi=inv_sj_hi,
         eff_gdna=eff_gdna,
         eff_rna=eff_rna,
         spliced_count=spliced_count,
         sj_count=sj_count,
-        eff_sj=eff_sj,
         sj_count_lo=jc_lo,
         sj_count_hi=jc_hi,
-        eff_sj_lo=ej_lo,
-        eff_sj_hi=ej_hi,
         route_rate_lo=route_rate_lo,
         route_rate_hi=route_rate_hi,
     )
@@ -403,12 +317,6 @@ class RegionBelief:
 # ---------------------------------------------------------------------------
 # Initialization — the signature-binary G1/G2/G3 belief on the chain.
 # ---------------------------------------------------------------------------
-#
-# A strand axis is hard-LOCKED (a forbidden strand, an intergenic sink) by the per-region ``allow_pos`` /
-# ``allow_neg`` forbid mask in the solve. The init ALSO sets the per-component precision state ``var(f_c)``
-# ``0`` = locked/certain (a forbidden strand, an intergenic gDNA sink), ``inf`` =
-# no information (an admissible-but-unsolved axis — it will listen to messages, and emits none until solved).
-# A solved single-strand (G2) region takes the strand-solve posterior variance.
 
 
 def g1_locked(free_pos, free_neg) -> np.ndarray:
@@ -447,14 +355,12 @@ def _type_belief(free_pos, free_neg, deconv, mass_unspl):
 
     Returns the four per-region arrays ``(f_pos, f_neg, f_g, var_gdna)`` — the
     composition plus the precision state: ``var=0`` locked, ``inf`` no information, else the strand-solve
-    posterior variance. The variances are ``Var(log f_c)``, log-space and unbounded above, never
-    ``Var(f_c)``.
+    posterior variance.
     """
     n = free_pos.shape[0]
     f_pos = np.zeros(n)
     f_neg = np.zeros(n)
     f_g = np.ones(n)  # the signature-binary all-gDNA default; the count plays no role in it
-    # precision state: gDNA unsolved (inf); a strand axis is locked (0) iff forbidden, else unsolved (inf).
     var_g = np.full(n, np.inf)
 
     g1 = g1_locked(free_pos, free_neg)
@@ -486,7 +392,7 @@ class RegionStatics:
     ``free_pos``/``free_neg`` are the axes on which RNA may be present at all (a region's own
     ±transcript bits; a boundary's ±continuity — the RNA-crossing gate);
     ``mrna_active_pos``/``mrna_active_neg`` are the tighter mature-RNA axes (a region's ±exon bits; a
-    boundary's ±contiguous exon) that select the per-region solver prior.
+    boundary's ±contiguous exon).
 
     ``boundary_flags`` carries the splice graph's 8 structural bits (``TSS_s``/``TES_s``/``DONOR_s``/
     ``ACCEPTOR_s``) at each BOUNDARY slot and ``0`` on REGION slots, including when no graph was
@@ -502,9 +408,7 @@ class RegionStatics:
     n_slots: int
     free_pos: np.ndarray  # bool — nascent-RNA-active (transcript continuity); the RNA-crossing gate
     free_neg: np.ndarray  # bool
-    mrna_active_pos: (
-        np.ndarray
-    )  # bool — mature-RNA-active (contiguous exon); selects the region prior
+    mrna_active_pos: np.ndarray  # bool — mature-RNA-active (contiguous exon)
     mrna_active_neg: np.ndarray  # bool
     boundary_flags: np.ndarray  # uint16 — graph structural bits; 0 on REGION slots
 
@@ -583,8 +487,7 @@ def build_region_statics(
 def _check_boundary_flags(boundary_flags, n_boundaries: int) -> np.ndarray:
     """Validate the per-contiguous-boundary flags against the chain, BEFORE anything else is computed.
 
-    A mis-sized array would shift every flag by one boundary — a defect invisible in aggregate and
-    undetectable by a bit-identity gate while nothing reads the flags. Refuse it at the door.
+    A mis-sized array would shift every flag by one boundary. Refuse it at the door.
     """
     if boundary_flags is None:
         return np.zeros(max(n_boundaries, 1), dtype=np.uint16)

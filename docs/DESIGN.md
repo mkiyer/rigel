@@ -518,19 +518,20 @@ accident (`TRAPS: state-the-population-rule-do-not-inherit-it-from-a-table`).
 
 #### 3.1a-iii Which of the landscape's outputs a consumer may read (2026-08-21, from the grid sweep)
 
-`abundance_landscape.AbundanceLandscape` publishes `rho_0`, `span_R`, `w_slot`, the mode list and an
-anchor verdict, and they are not equally trustworthy (measured with a grid sweep of the landscape's bandwidth, 16
-conditions, `_N_GRID` swept over a 16× range): (1) `rho_0` and the anchor verdict are consumable —
-`rho_0` moves 8–25 % across the whole range and the anchor-consistency verdict holds 12/12 on every
-contaminated row at every grid; (2) `span_R` is NOT consumable as it stands — on `g50 ss0.99` capture-OFF
-it reads 58 → 77 → 95.6 → 94.7 → 1.9 as the grid refines, because `split_basins` selects the enriched
+On 2026-08-21 `abundance_landscape.AbundanceLandscape` published `rho_0`, `span_R`, `w_slot`, the mode
+list and an anchor verdict, and they were not equally trustworthy (measured with a grid sweep of the
+landscape's bandwidth, 16 conditions, `_N_GRID` swept over a 16× range): (1) `rho_0` and the anchor
+verdict were consumable — `rho_0` moved 8–25 % across the whole range and the anchor-consistency verdict
+held 12/12 on every contaminated row at every grid; (2) `span_R` was NOT consumable — on `g50 ss0.99`
+capture-OFF it read 58 → 77 → 95.6 → 94.7 → 1.9 as the grid refined, because `split_basins` selects the enriched
 mode by basin mass and over-resolution fragments the bulk into sub-bumps; the mode COUNT may not be read
 at all (`TRAPS: a-mode-count-is-not-a-well-posed-quantity`); (3) the estimand is what makes this
 landscape right, not the estimator — a fit on `mass / eff_gdna`, a total over one component's
 opportunity model, carries the divisor's per-region spread (offset IQR 0.12 nats off capture, 1.66 under
 it, removable by no bandwidth), while the landscape's divisor is a geometry. This module is not the
 refused drop-in of `ISSUES: the-truncation-free-region-bank`; that refusal's bar still stands for any
-consumer swap.
+consumer swap. Nothing outside the tests read `rho_0`, `span_R`, `w_slot` or the anchor verdict, and they
+were removed.
 
 ### 3.1b Who owns a fragment — and nothing is ever re-attributed (owner, 2026-08-08)
 
@@ -558,9 +559,9 @@ A fragment is a chimera **only if its mates are genomically incompatible**:
 and routinely spans two transcripts that share nothing. The orientation test needed no new predicate:
 `build_fragment` keys blocks by `(ref_id, ref_strand)` with R2's orientation flipped, so
 `unique_strands.size() == 1` (`CHIMERA_CIS_STRAND_SAME`) *is* "facing inward". The length is the implied
-FRAGMENT LENGTH — outermost start to outermost end — never `min_gap` (`test_resolution.py` gates the
-distinction). What it cost while wrong: 4,087 gDNA fragments per condition, every one a crosser
-(`TRAPS: a-transcript-predicate-must-not-silently-drop-a-molecule`).
+FRAGMENT LENGTH — outermost start to outermost end — never the gap between the blocks
+(`test_resolution.py` gates the distinction). What it cost while wrong: 4,087 gDNA fragments per
+condition, every one a crosser (`TRAPS: a-transcript-predicate-must-not-silently-drop-a-molecule`).
 
 ### 3.1c The prior's odds are calibration's gDNA share of the locus, and its strength has no knob (owner, 2026-08-09/10; the odds AMENDED 2026-09-24)
 
@@ -830,7 +831,7 @@ transcripts and materialized as ordinary transcript rows in `index.t_df`, flagge
 index's graph) · `sweep` (the backbone) and `messages/` (the policy: `silent` · `transfer`; the row constructors `native/transfer_rows.h`) ·
 `region_chain` `region_geometry` `region_init` · `substrate` `region_arrays`
 `signature` · `effective_length` `capture_eff_length` `fl` `sj_opportunity` `gdna_opportunity` ·
-`gdna_strand` `strand_balance` `strand_summary` · `density_deconv`
+`gdna_strand` `strand_balance` · `density_deconv`
 `density_model` `landscape` `abundance_landscape` `total_abundance` · `simplex_logodds` `derive` ·
 `priors` `result` `errors` `diagnostics` `track` · `_layers` (the layering the imports already had).
 Re-derive this list from `calibration/_layers.py` and the imports rather than trusting it.
@@ -884,8 +885,6 @@ full.
 |---|---|
 | the kernel sees only the two NEIGHBOUR states | `TRAPS: a-message-from-the-destinations-belief` — nine recurrences in nine costumes (structural: inexpressible, not checked) |
 | every delivered row is one row per slot on the solve grid, finite | a row array off the grid, or a NaN reaching ψ |
-| `\|T\| ≤ 3` | AXIOM 0, made executable (on the ladder's `g50 ss0.50 capture_on`: 0 / 70,176, and 9,912 slots reach 3 so it is not vacuous) |
-| the write-back touches only `solvable` slots | the basis mismatch that made a byte-identity gate read `max\|Δ\| = 1.0` |
 
 The transfer policy delivers max-normalised profiles on ψ's own grid (the λ rows and the AMBIG cube rows),
 which cannot be off-grid and claim no share. ⛔ An assertion the shipped policy violates is
@@ -1281,7 +1280,7 @@ background, mask, counts and opportunities) and the thread budget, and runs ever
 of threads pulling blocks one at a time, each on its own arena: the factory rows and the arm's shift, the
 self-solve ψ, the own-evidence precision, the layer (the builders into the arena's tables, the two passes, the
 solve) unless the policy is silent, the final ψ with the factory row and the delivered row added per cell, the
-write-back on the owned slots, ``has_composition`` and the four assertions as integer counts. Nothing is reduced
+write-back on the owned slots, ``has_composition`` and the assertions as integer counts. Nothing is reduced
 across blocks but those counts, so the answer is BIT-IDENTICAL at every thread count and block size; ψ's slot pool
 is threaded the same way (one slot at a time), so `CalibrationConfig.n_threads` is a resource, never a tunable of
 the answer. No ``(n, K)`` prior crosses to Python. The kernel's constants are scipy's digits, never typed by hand,

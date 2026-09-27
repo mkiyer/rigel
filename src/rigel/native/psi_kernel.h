@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <stdexcept>
 #include <vector>
 
 #include "transfer_rows.h"
@@ -77,7 +78,7 @@ struct Arm {
 };
 
 // ---- the θ window for one (slot, λ) --------------------------------------------------------------------
-// EQUATIONS.md §9e: at fixed λ the strand term is a Gaussian in τ with centre τ̂ = d/a and width σ_τ = σ_p/|a|
+// At fixed λ the strand term is a Gaussian in τ with centre τ̂ = d/a and width σ_τ = σ_p/|a|
 // (a = (1 − f_g)(κ − ½), d = u₊/n − ½); the window is where the term lies within T of its maximum ON the
 // domain — [τ̂ − ρ, τ̂ + ρ] ∩ [−1, 1] with ρ = √((clip(τ̂) − τ̂)² + 2σ_τ²T) — and the whole domain where the
 // slot has no strand information.
@@ -227,9 +228,8 @@ inline void slot_cube(const Grid& g, const SlotInputs& s, bool ambig, double* ps
 
 // ---- the read-out ---------------------------------------------------------------------------------------
 
-// the continuous ½-quantile of a λ posterior, read on λ's midpoint edges and mapped through σ
-// (simplex_logodds._posterior_median_fg; DESIGN.md §6c): the grid mass as a histogram, the crossing bin
-// interpolated; a posterior with no mass reads the bin the empty CDF leaves it in
+// the continuous ½-quantile of a λ posterior, read on λ's midpoint edges and mapped through σ: the grid mass
+// as a histogram, the crossing bin interpolated; a posterior with no mass reads the bin the empty CDF leaves it in
 inline double posterior_median(const double* post, const double* lam, int K, std::vector<double>& cdf) {
     double tot = 0.0;
     for (int k = 0; k < K; ++k) tot += post[k];
@@ -255,8 +255,8 @@ inline double posterior_median(const double* post, const double* lam, int K, std
     return sigmoid(e0 + t * (e1 - e0));
 }
 
-// the composition as the image of ψ's two parameters (simplex_logodds._compose; DESIGN.md §6c): the RNA
-// total is 1 − f_g exactly, the share w_+ is clamped and restricted to the admissible strands
+// the composition as the image of ψ's two parameters: the RNA total is 1 − f_g exactly, the share w_+ is
+// clamped and restricted to the admissible strands
 inline void compose(double f_g, double w_pos, bool ap, bool an, double& f_pos, double& f_neg) {
     const double fr = 1.0 - f_g;
     double w = std::clamp(w_pos, 0.0, 1.0);

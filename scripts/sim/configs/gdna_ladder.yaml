@@ -122,7 +122,6 @@ gtf: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genes.gtf
 # creates it; without this key one is built into `<outdir>/rigel_index`.
 index: /Users/mkiyer/Downloads/rigel_runs/suite/rigel_index
 outdir: /Users/mkiyer/Downloads/rigel_runs/suite/ladder
-transcript_filter: all
 
 # ── Read simulation ─────────────────────────────────────────────────────────────────────────────
 # ⚠ `n_total_fragments` is what governs; `n_rna_fragments` is ignored in this mode and is left at

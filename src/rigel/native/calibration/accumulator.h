@@ -5,7 +5,7 @@
  *             Where the two disagree, the Python file wins.
  *
  * THE MODEL
- *   The genome is a graph. One Accumulator holds ONE reference, described by its sorted REGION_BOUND positions.
+ *   The genome is a graph. One Accumulator holds ONE reference, described by its sorted region_bound positions.
  *   A reference contributing `c` region_bounds owns `c - 1` REGIONS and `c - 2` interior BOUNDARIES, and a boundary is a
  *   0-bp CONTIGUOUS BOUNDARY between two adjacent regions:
  *
@@ -127,12 +127,8 @@ struct Boundary {
     /// number cannot be both: `unspliced_count` is `+1` on every boundary a fragment crosses, so a fragment
     /// books `max(K, 1)` of them; this sums to ONE per fragment, across all the boundaries it crosses.
     ///
-    /// One value, not two. The ruling is reversed on the sj axis below; the premise that changed
-    /// there is specific to sj and does not reach this bank.
-    /// the strand fit reads the counts per column; nothing reads a BOUNDARY's mass per strand, because at a
-    /// boundary the mass exists to turn an object-incidence total into a fragment count and that question
-    /// has no strand in it. ⚠ `one-thing-varied`: widening this too would have been a second change with
-    /// no named consumer. See `SpliceJunction::mass`.
+    /// One value, not two: at a boundary the mass exists to turn an object-incidence total into a
+    /// fragment count, and that question has no strand in it. `SpliceJunction::mass` keeps two.
     double unspliced_mass;
     /// ⭐ The same rule, routed by the same `spliced` flag — so `mass` is not the one channel that
     /// ignores the split. ⛔ A PARTIAL, never a conservation ledger: a spliced fragment's blocks with no
@@ -245,7 +241,7 @@ inline const char* outcome_key(DepositOutcome outcome) noexcept {
 /// span. That is why the accumulator needs no separate "could this be gDNA?" flag, and why the nascent
 /// shadow transcript is not a candidate: it IS this hypothesis.
 ///
-/// ⚠ `introns` are the IMPLIED ones only. Introns the CIGAR actually stated are region_bound under EVERY
+/// ⚠ `introns` are the IMPLIED ones only. Introns the CIGAR actually stated are cut under EVERY
 /// hypothesis and live on `OfferedFragment` instead, because they are not in doubt.
 struct GapHypothesis {
     const IntronBlock*  introns;        // implied; empty => the unspliced (genomic) hypothesis
@@ -275,7 +271,7 @@ struct GapHypothesis {
 struct OfferedFragment {
     std::int64_t         start;
     std::int64_t         end;
-    const IntronBlock*   observed_introns;   // CIGAR-N: region_bound under EVERY hypothesis
+    const IntronBlock*   observed_introns;   // CIGAR-N: cut under EVERY hypothesis
     std::size_t          n_observed_introns;
     std::int32_t         align_strand;
     std::int32_t         sj_strand;
@@ -287,7 +283,7 @@ struct OfferedFragment {
 /// one non-unspliced hypothesis, partitioned by how the gap was RESOLVED. Exhaustive and mutually
 /// exclusive, so `sum(GapCensus) == the umbrella` and the three deferred_* == `deferred_undetermined_gap`.
 ///
-/// ⛔ Its own axis, NOT a `splice_type`. The umbrella region_bounds ACROSS the splice census: a certified-RNA
+/// ⛔ Its own axis, NOT a `splice_type`. The umbrella cuts ACROSS the splice census: a certified-RNA
 /// SPLICED_ANNOT fragment with an intron in its mate gap needs resolving exactly as much as an UNSPLICED
 /// one does, so putting these on `splice_type` would need two labels per fragment.
 ///
@@ -295,13 +291,13 @@ struct OfferedFragment {
 /// afterwards as TOO_LONG, which is a different question with its own counter.
 ///
 /// ⛔ THERE IS NO `resolved_unspliced`, AND IT IS NOT AN OMISSION. The field existed and no fragment could
-/// enter it: a spliced hypothesis REGION_BOUNDS bases the unspliced one keeps, so L_spliced <= L_unspliced always,
+/// enter it: a spliced hypothesis CUTS bases the unspliced one keeps, so L_spliced <= L_unspliced always,
 /// and the one filter is `L <= max_length`. If the unspliced path survives the filter then every spliced
 /// path survives it too, so the survivor set can never be exactly {unspliced} while a spliced path was
 /// offered -- which is the condition for being in this census at all. The ORDERING is pinned directly by
 /// `test_gap_hypothesis_arbitration.test_the_GENOMIC_hypothesis_is_ALWAYS_the_LONGEST`.
 struct GapCensus {
-    std::int64_t resolved_spliced        = 0;  // one survivor, and it necessarily region_bounds something
+    std::int64_t resolved_spliced        = 0;  // one survivor, and it necessarily cuts something
     std::int64_t deferred_rna_or_gdna    = 0;  // unspliced vs ONE spliced path: was anything spliced?
     std::int64_t deferred_which_introns  = 0;  // >= 2 spliced paths, none unspliced: certified RNA
     std::int64_t deferred_both           = 0;  // both questions at once
@@ -309,8 +305,7 @@ struct GapCensus {
     void merge_from(const GapCensus& other) noexcept;
 };
 
-/// ⭐ Fragments whose gap has more than one surviving explanation, held WHOLE for the second pass
-/// ( calls this the side buffer).
+/// ⭐ Fragments whose gap has more than one surviving explanation, held WHOLE for the second pass.
 ///
 /// The FRAGMENT is stored, never its consequences. Object ids are large, derived, and would have to be
 /// kept consistent with the partition; the fragment is small and replays exactly. The drain re-enters
@@ -320,10 +315,8 @@ struct GapCensus {
 /// Two nested variable-length levels -- fragments hold hypotheses, hypotheses hold introns -- so there
 /// are two offset arrays. Offsets are cumulative and start at 0, so an empty queue is `{0}`, never `{}`.
 ///
-/// ⛔ ORDER IS OBSERVABLE HERE AND NOWHERE ELSE. Every other bank is a sum of integers and integer
-/// addition is associative, so a per-worker merge is exact whatever order the chunks arrived in. This is
-/// a LIST. Concatenating per-worker queues gives a different byte sequence at 1, 2, 4 and 8 workers with
-/// identical contents -- so the EXPORT sorts on the record's own content, exactly as
+/// ⛔ This is a LIST. Concatenating per-worker queues gives a different byte sequence at 1, 2, 4 and 8
+/// workers with identical contents -- so the EXPORT sorts on the record's own content, exactly as
 /// `Tally.deferred_arrays()` does in the specification. Two records that tie are identical records.
 ///
 /// ⚠ EVERY ARRAY IS int64, INCLUDING THE TWO STRAND COLUMNS. They are int32 everywhere else in the
@@ -435,7 +428,7 @@ public:
                          int max_length,
                          std::int32_t ref_id);
 
-    /// Install this reference's sj boundaries as a CSR keyed by DONOR REGION_BOUND INDEX -- the index the
+    /// Install this reference's sj boundaries as a CSR keyed by the DONOR region_bound index -- the index the
     /// deposit already computes while locating the boundaries its path crosses.
     ///
     /// ⚠ The sj-boundary id IS the slot: `sj_boundary_right[k]` and the bank entry `k` are the same k.
@@ -445,7 +438,7 @@ public:
     /// ⚠ Slot ORDER is part of the contract, because the id is the rank: the caller must sort on
     /// (donor region_bound, acceptor region_bound, sj_strand), matching `Partition.from_region_bounds` in the Python spec.
     void set_sj(std::vector<std::int32_t> offsets,       // size n_region_bounds + 1
-                       std::vector<std::int32_t> boundary_right,  // acceptor REGION_BOUND INDEX, not a coordinate
+                       std::vector<std::int32_t> boundary_right,  // acceptor region_bound index, not a coordinate
                        std::vector<std::int8_t>  sj_strand);    // the sj's ANNOTATED strand
 
     std::size_t n_regions()    const noexcept { return regions_.size(); }
@@ -470,7 +463,7 @@ public:
     const std::uint32_t* region_span_count_data() const noexcept { return region_span_count_.data(); }
 
     /// Length histograms, pool-major: pool p occupies [p*(max_length+1), (p+1)*(max_length+1)), binned
-    /// at L. Empty when this reference has no region types.
+    /// at L.
     const std::int64_t* pool_lengths_data() const noexcept { return pool_lengths_.data(); }
     std::size_t         pool_lengths_size() const noexcept { return pool_lengths_.size(); }
 
@@ -588,10 +581,10 @@ private:
     std::vector<std::int32_t>  sj_boundary_right_;   // n_sj
     std::vector<std::int8_t>   sj_strand_;         // n_sj, the ANNOTATED strand
 
-    std::vector<std::uint8_t>  region_types_;        // n_regions, or empty (no pools)
+    std::vector<std::uint8_t>  region_types_;        // n_regions
     std::int32_t               ref_id_ = 0;        // stamped into every deferred record
     int                        max_length_ = 0;
-    std::vector<std::int64_t>  pool_lengths_;      // kNFragmentPools * (max_length + 1), or empty
+    std::vector<std::int64_t>  pool_lengths_;      // kNFragmentPools * (max_length + 1)
     std::vector<std::uint32_t> deposited_lengths_; // max_length + 1 -- unconditional given deposit
     DepositCounters            counters_;
     GapCensus                  gap_census_;

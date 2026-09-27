@@ -61,16 +61,6 @@ class RegionStrand(IntFlag):
 # arithmetic), so a value in the Strand convention — e.g. the accumulator's
 # per-boundary splice-junction strand (Strand POS=1 / NEG=2) — routes directly
 # against TS_POS / TS_NEG with no conversion.
-#
-# NONE and AMBIG both lack a single transcript strand but are NOT
-# interchangeable for the strand channel:
-#   * TS_NONE  — no transcript (intergenic). gDNA is unstranded, so an arbitrary
-#                sense assignment is safe (neutral). Stays in the strand model.
-#   * TS_AMBIG — transcripts on BOTH strands (overlapping opposite-strand
-#                annotations). Every read is sense for one and antisense for the
-#                other, so there is no valid sense split. AMBIG regions are
-#                excluded from strand deconvolution and recovered by density,
-#                boundary-sweep imputation and the global fallback.
 TS_NONE: int = int(RegionStrand.NONE)  # 0
 TS_POS: int = int(RegionStrand.POS)  # 1
 TS_NEG: int = int(RegionStrand.NEG)  # 2
@@ -136,9 +126,7 @@ def mrna_active_strands(signature: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     Mature RNA lives only in exons, so ``mrna_active`` on strand ``s`` is that strand's exon bit,
     hence ``mrna_active_s`` implies ``nrna_active_s``. A region's ``mrna_active`` is its own exon
     bits; a boundary's is the AND of its two flanks, because an unspliced fragment crosses as mature
-    only over contiguous exon — otherwise it would be spliced. This selects the region's solver
-    prior: ``nrna_active`` without ``mrna_active`` means the annotation admits RNA here only inside
-    an intron, which takes the near-zero nascent prior.
+    only over contiguous exon — otherwise it would be spliced.
     """
     sig = np.asarray(signature)
     return (sig & BIT_EXON_POS) != 0, (sig & BIT_EXON_NEG) != 0

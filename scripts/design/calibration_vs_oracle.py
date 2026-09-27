@@ -11,8 +11,7 @@ divides by, while substituting at the ``calibrate`` boundary reaches both consum
 and on the derived effective lengths (the gate runs before any table). The ruler's reference is the
 result's own (`CalibrationResult.gdna_reference_density`, the located enriched mode of the fitted gDNA
 landscape), so every arm contracts against the one reference the solve found: at capture-OFF there is
-none and the factor is exactly 1.000 for ``P`` and ``O`` alike, with no fitting — the no-enrichment
-null a separate uniform-density arm used to stand for (retired 2026-09-14). No solver, no EM, no BAM
+none and the factor is exactly 1.000 for ``P`` and ``O`` alike, with no fitting. No solver, no EM, no BAM
 re-scan, and the prior is not re-scored here (`prior_vs_oracle.py` owns `LocusPriors`). Read
 ``ruler_n_moved`` rather than the aggregate factor: the total can barely move while nearly every
 transcript is redistributed. `--set SECTION.FIELD=VALUE` (any config field, typed from the field,
@@ -640,10 +639,9 @@ def report(rows: list[dict]) -> None:
 def _toy_calibration(n_regions: int = 24, n_boundaries: int = 20, n_sj: int = 4, seed: int = 7):
     """A minimal well-formed ``CalibrationResult`` for the self-test. No index, no payload, no I/O."""
     from rigel.calibration.result import CalibrationResult
-    from rigel.config import CalibrationConfig
 
     rng = np.random.default_rng(seed)
-    ones_r, ones_b = np.ones(n_regions), np.ones(n_boundaries)
+    ones_b = np.ones(n_boundaries)
     gr = rng.uniform(1.0, 9.0, n_regions)
     gb = rng.uniform(1.0, 9.0, n_boundaries)
     return CalibrationResult(
@@ -659,8 +657,6 @@ def _toy_calibration(n_regions: int = 24, n_boundaries: int = 20, n_sj: int = 4,
         gdna_region_eff_len=rng.uniform(50.0, 500.0, n_regions),
         gdna_boundary_eff_len=np.full(n_boundaries, 120.0),
         gdna_boundary_conserved_len=np.full(n_boundaries, 120.0),
-        rna_region_eff_len=ones_r.copy(),
-        rna_boundary_eff_len=ones_b.copy(),
         gdna_frac_region=np.full(n_regions, 0.5),
         rna_pos_frac_region=np.full(n_regions, 0.25),
         rna_neg_frac_region=np.full(n_regions, 0.25),
@@ -678,7 +674,6 @@ def _toy_calibration(n_regions: int = 24, n_boundaries: int = 20, n_sj: int = 4,
         n_regions=n_regions,
         n_boundaries=n_boundaries,
         n_sj=n_sj,
-        config=CalibrationConfig(),
     )
 
 

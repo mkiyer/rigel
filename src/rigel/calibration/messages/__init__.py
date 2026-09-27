@@ -3,7 +3,7 @@
        Gate: ``tests/calibration/test_sweep_backbone.py``
 
 The backbone (:mod:`rigel.calibration.sweep`) owns the SHAPE of the solve — the self-solve, two
-directional passes over the ``N E N E … N`` chain, one ψ solve, one write-back, and four assertions —
+directional passes over the ``N E N E … N`` chain, one ψ solve, one write-back, and two assertions —
 and runs it in ONE native call per sweep (`native.solve_blocks`, `native/solve_kernel.cpp`). Everything
 about *what a message says* is a policy, and the policy's arithmetic — its builders, its passes, its
 solve — is the kernel's (`native/transfer_kernel.h`). What lives here is what the kernel is TOLD: which
@@ -40,7 +40,7 @@ The chain is solved a LOCUS BLOCK at a time (`sweep.solve_chain`, `region_chain.
 ``library`` is the one scope a policy sees in Python: a :class:`ChainView` of the whole chain —
 observations and geometry, NO beliefs, which is what makes a cross-block reduction over beliefs
 unwritable — from which it returns whatever library-wide facts its messages need (the transfer
-policy's: three reference densities and whether the strand split is live). The kernel then sees one
+policy's: two reference densities and whether the strand split is live). The kernel then sees one
 block at a time: the same arrays, the incoming belief, and the library.
 
 ⛔ THE CONTRACT:
@@ -95,8 +95,6 @@ class ChainView:
     ⛔ The headings are load-bearing. ``observations`` and ``geometry`` may be indexed at either end of
     a hop; a belief may be read at the SOURCE only, and the kernel reads the incoming belief once, at a
     node's OWN strand claim, before any hop.
-
-    Every field here has a reader in the transfer policy, the kernel or the backbone.
     """
 
     # ── OBSERVATIONS — readable at either end of a hop ────────────────────────────────────────────────
@@ -108,8 +106,7 @@ class ChainView:
     sj_count_lo: np.ndarray
     sj_count_hi: np.ndarray
     #: [n, 2] the ROUTE-SUMMED certified rate per face by transcript strand (Σ flux_J/A_J over
-    #: the face's disjoint routes) — the pooled sj_count/eff_sj ratio under-reads k-route faces
-    #: ~k×, so consumers of a face's RATE read these, never the ratio
+    #: the face's disjoint routes)
     route_rate_lo: np.ndarray
     route_rate_hi: np.ndarray
     unspliced_count: (

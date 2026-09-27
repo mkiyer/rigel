@@ -24,12 +24,9 @@ from rigel.sim.capture.sampler import ProbeInterval
 from rigel.sim.genome import MutableGenome, random_dna_array
 from rigel.sim.manifest import condition_dir_name
 from rigel.sim.orchestrator import capture_paired_condition_seed
-from rigel.sim.whole_genome import (
-    GDNASimConfig,
-    SimulationParams,
-    WholeGenomeSimulator,
-    parse_yaml_config,
-)
+from rigel.sim.wgs_config import GDNASimConfig, SimulationParams
+from rigel.sim.wgs_engine import WholeGenomeSimulator
+from rigel.sim.whole_genome import parse_yaml_config
 from rigel.transcript import Transcript
 from rigel.types import Interval, Strand
 

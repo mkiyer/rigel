@@ -20,8 +20,9 @@ construct MultiLoci, assemble the per-locus gDNA/RNA split prior from the
 calibration result (``calibration.priors.assemble_priors``), partition the
 CSR data, and run locus-level native EM.
 
-Scoring functions live in ``scoring.py``.  Locus construction and EM
-initialization live in ``locus.py``.  The CSR builder lives in
+``scoring.py`` assembles the native scorer's parameters.  Locus
+construction lives in ``locus.py``; the EM's warm start is computed inside
+the native solver (``em_solver.cpp``).  The CSR builder lives in
 ``scan.py``.  This module is a thin orchestrator.
 """
 
@@ -161,35 +162,24 @@ def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
 
 
 def _warn_if_calibration_strand_unidentifiable(strand_models: StrandModels) -> None:
-    """Warn when calibration cannot identify strand from spliced RNA evidence."""
-    from .calibration.strand_summary import StrandSummary
+    """Warn when calibration's strand decision (`region_init.strand_discriminability`, on the spliced
+    sense fraction `strand_balance.fit_strand_balance` fits) reads the library as unstranded. With no
+    spliced observation calibration raises instead."""
+    from .calibration.region_init import strand_discriminability
+    from .calibration.strand_balance import fit_strand_balance
 
-    primary = StrandSummary.from_model(strand_models.exonic_spliced)
-    if primary.is_identifiable():
+    balance = fit_strand_balance(strand_models)
+    if balance.fallback_used:
         return
-
+    if strand_discriminability(balance.rna_sense_frac, balance.n_observations) > 0.0:
+        return
     logger.warning(
-        "[CAL] Spliced strand model is not identifiable at 99%% confidence "
-        "(n_spliced_obs=%d, p_r1_sense=%.6f, signed_contrast=%.6f, margin_99=%.6f). "
-        "Calibration will use the unstranded count/exposure estimator for channels "
-        "without identifiable strand correction. If this was expected to be a stranded "
-        "RNA-seq library, inspect splice evidence and contamination/nascent-RNA levels.",
-        primary.n_observations,
-        primary.p_r1_sense,
-        primary.signed_strand_contrast,
-        primary.signed_strand_contrast_margin(confidence=0.99),
+        "[CAL] Calibration reads the library as unstranded (n_spliced_obs=%d, "
+        "rna_sense_frac=%.6f), so its strand channel is off. If this library was expected to be "
+        "stranded, inspect its splice evidence.",
+        balance.n_observations,
+        balance.rna_sense_frac,
     )
-
-    diagnostic = StrandSummary.from_model(strand_models.exonic)
-    if diagnostic.is_identifiable():
-        logger.warning(
-            "[CAL] Exonic diagnostic strand signal is identifiable "
-            "(n_exonic_obs=%d, p_r1_sense=%.6f), but it is not used for calibration. "
-            "Unspliced exonic fragments can include gDNA or nascent RNA and are not an "
-            "RNA-pure strand-training source.",
-            diagnostic.n_observations,
-            diagnostic.p_r1_sense,
-        )
 
 
 def scan_and_buffer(
@@ -227,7 +217,6 @@ def scan_and_buffer(
     """
     stats = PipelineStats()
     buffer = FragmentBuffer(
-        chunk_size=scan.fragments_per_chunk,
         max_memory_bytes=scan.buffer_size_bytes,
         spill_dir=scan.spill_dir,
     )
@@ -239,8 +228,8 @@ def scan_and_buffer(
 
     # Splicing-anchor tolerance K (bp): resolver-only one-sided slack used
     # by the SPLICED_IMPLICIT per-intron whole-containment discriminant.
-    # The fractional calibration accumulator records raw compartment mass
-    # directly and does not consume this tolerance.
+    # The calibration accumulator tallies each fragment's path against the
+    # regions and boundaries and does not consume this tolerance.
     resolve_ctx.set_splicing_anchor_tolerance(int(scan.splicing_anchor_tolerance))
     # `detect_chimera` needs the library's fragment-length limit to tell an ordinary genomic
     # molecule (contiguous, spanning whatever transcripts lie under it) from a real rearrangement.
@@ -293,7 +282,7 @@ def scan_and_buffer(
     _apply_scan_stats(stats, result["stats"])
 
     # Build the strand models from the scanner's observations. Immutable and built
-    # once — the spliced 2×2 is the marginal of its per-sj SJ strand table.
+    # once — the spliced 2×2 is the marginal of its per-sj strand table.
     strand_models = StrandModels.from_scan(result["strand_observations"])
     # ONE strand-qualified fragment credits ONE sj. That is what makes the 2×2
     # exactly the table's marginal, so both halves of the RNA strand Beta-Binomial are
@@ -427,7 +416,7 @@ def _drain_side_buffer(
     report = drained.drain
     logger.info(
         "[SP2] drained %d held fragments in %.1f s: %d deposited, %d dropped "
-        "(%d chose the genomic path, %d a spliced one); %d were undecided and drawn uniformly",
+        "(%d chose the genomic path, %d a spliced one); %d had candidates tied for the lead",
         report.offered,
         time.perf_counter() - start,
         report.deposited,
@@ -550,7 +539,6 @@ def _score_fragments(
         index,
         overhang_log_penalty=scoring.overhang_log_penalty,
         mismatch_log_penalty=scoring.mismatch_log_penalty,
-        gdna_splice_penalties=scoring.gdna_splice_penalties,
         pruning_min_posterior=scoring.pruning_min_posterior,
     )
     builder = FragmentRouter(
@@ -683,9 +671,9 @@ def _run_locus_em_partitioned(
 ) -> None:
     """Run the per-locus batch EM and record lean per-locus results.
 
-    Packs each ``LocusPartition`` into the C++ 9-tuple, runs the whole batch in
-    one ``run_batch_locus_em_partitioned`` call (the solver is OpenMP-parallel
-    internally), and appends a per-locus dict to ``estimator.locus_results`` for
+    Packs each ``LocusPartition`` into the C++ 7-tuple, runs the whole batch in
+    one ``run_batch_locus_em_partitioned`` call (the solver runs its own
+    ``std::thread`` workers), and appends a per-locus dict to ``estimator.locus_results`` for
     ``get_loci_df``. Calibration enters as its per-locus gDNA count, which :func:`em_pseudocounts` reads
     against the part of the locus calibration counts from: its non-multimapper units that the blacklist did
     not reject, plus the deterministic fragments of its transcripts. The
@@ -711,8 +699,6 @@ def _run_locus_em_partitioned(
             p.count_cols,
             p.is_spliced,
             p.gdna_log_liks,
-            p.locus_t_indices,
-            p.locus_count_cols,
         )
         for p in parts
     ]
@@ -954,8 +940,8 @@ def run_pipeline(
     region_arrays = RegionArrays.from_index(index)
     boundary_flags = build_boundary_flags_array(index)
     # The two annotation-only WALL inputs, beside the other index-derived arrays: the total-density
-    # landscape (the QC report's gDNA-density panel) reads them, and building them here keeps production
-    # and `scan_cache.index_derived_inputs` on ONE code path.
+    # landscape reads them, and building them here keeps production and
+    # `scan_cache.index_derived_inputs` on ONE code path.
     mature_walls = build_mature_wall_distances(index, region_arrays)
     boundary_reach = build_contiguous_boundary_reach_arrays(index)
     # The sj axis, in the accumulator's own sj slot order: where each sj attaches,

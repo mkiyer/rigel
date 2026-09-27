@@ -1,12 +1,11 @@
-"""rigel.locus — Locus graph construction.
+"""rigel.locus — the EM's loci: connected components of transcripts linked by shared fragments.
 
-* :class:`Locus` — one contiguous genomic interval (the calibration
-  estimation unit; introduced in the-reframe-scale-variance).
-* :class:`MultiLocus` — one connected component of transcripts linked
-  by shared fragments (the unit the EM is run on; was named ``Locus``
-  prior to the-reframe-scale-variance).
-* :func:`build_multi_loci` — connected-component partitioning of
-  transcripts producing per-component :class:`MultiLocus` records.
+* :class:`MultiLocus` — one connected component; the unit the EM is run on.
+* :class:`Locus` — one contiguous interval of a multi-locus's merged transcript footprint.
+  ``rigel.calibration.priors`` overlaps these intervals with the calibration regions to project
+  calibration's per-region numbers onto the EM loci.
+* :func:`build_multi_loci` — the connected-component partition, one :class:`MultiLocus` per
+  component.
 
 Per-locus EM Dirichlet priors are assembled by ``rigel.calibration.priors``.
 """
@@ -30,11 +29,10 @@ from .index import TranscriptIndex
 
 @dataclass(frozen=True, slots=True)
 class Locus:
-    """One contiguous genomic interval — the calibration-estimation unit.
+    """One contiguous interval of a :class:`MultiLocus`'s merged transcript footprint.
 
-    A :class:`MultiLocus` is composed of one or more :class:`Locus`
-    intervals; most ``MultiLocus``es have exactly one, but paralog
-    clusters spanning multiple references carry several.
+    Most multi-loci have exactly one. A component whose transcripts do not overlap (linked
+    through multimapping fragments, say, or spanning several references) carries several.
     """
 
     ref: str
@@ -51,8 +49,8 @@ class Locus:
 class MultiLocus:
     """A connected component of transcripts linked by shared fragments.
 
-    The unit the EM is run on.  Composed of one or more :class:`Locus`
-    intervals (the calibration-estimation unit).
+    The unit the EM is run on. Its merged transcript footprint is one or more
+    :class:`Locus` intervals.
 
     Attributes
     ----------
@@ -64,9 +62,8 @@ class MultiLocus:
         int32 — EM unit indices (rows in global CSR) belonging to
         this multi-locus.
     gdna_span : int
-        Total merged genomic footprint (bp).  Equal to
-        ``sum(l.span for l in loci)`` (precomputed cache for the EM
-        hot path).
+        Total merged genomic footprint (bp): ``sum(l.span for l in loci)``,
+        floored at 1. Reported as the loci table's ``locus_span_bp``.
     loci : tuple[Locus, ...]
         The contiguous intervals composing this multi-locus, sorted
         ascending by ``(ref_id, start)``.
@@ -167,7 +164,7 @@ def build_multi_loci(
     # order via ``index.ref_name_to_id``).  We store both: ``_ref_codes``
     # is used only for fast intra-loop sorting/comparison; ``Locus.ref_id``
     # must carry the canonical id so downstream consumers
-    # (``calibration.priors._project_regions_to_loci``, which bins locus
+    # (``calibration.priors._region_locus_shares``, which bins locus
     # blocks by ref_id against RegionArrays) match the correct contig.
     ref_cat = index.t_df["ref"].cat
     _ref_names = ref_cat.categories.values

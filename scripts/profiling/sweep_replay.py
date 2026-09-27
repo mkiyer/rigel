@@ -245,6 +245,11 @@ def replay(
 
     with open(directory / f"sweep_{call}.in.pkl", "rb") as fh:
         args, kwargs = pickle.load(fh)
+    stale = sorted(set(kwargs) - set(inspect.signature(sweep.solve_chain).parameters))
+    if stale:
+        print(f"  sweep {call}: the capture carries {stale}, which solve_chain does not take; re-capture",
+              file=sys.stderr)
+        return 2
     if block_slots is not None:
         kwargs = dict(kwargs, block_slots=None if block_slots.lower() == "none" else int(block_slots))
     if threads is not None:
@@ -255,20 +260,7 @@ def replay(
     t0 = time.perf_counter()
     if profiler is not None:
         profiler.enable()
-    # a capture outlives the signature it was taken under: a keyword `solve_chain` no longer takes
-    # is dropped and named, so an old capture still replays (the tolerance report says what moved)
-    accepted = set(inspect.signature(sweep.solve_chain).parameters)
-    dropped = sorted(k for k in kwargs if k not in accepted)
-    if dropped:
-        print(f"     replay: the capture carries {dropped}, which solve_chain no longer takes; dropped")
-    # a captured POLICY outlives its class too: it is rebuilt through the current constructor from the strand
-    # model it carried, whatever attribute the class of its day kept it under
-    pol = kwargs.get("policy")
-    if pol is not None:
-        state = getattr(pol, "__dict__", {})
-        strand = state.get("strand", state.get("_strand"))
-        kwargs["policy"] = type(pol)(strand) if strand is not None or "strand" in state or "_strand" in state else type(pol)()
-    result = sweep.solve_chain(*args, **{k: v for k, v in kwargs.items() if k in accepted})
+    result = sweep.solve_chain(*args, **kwargs)
     if profiler is not None:
         profiler.disable()
         profiler.dump_stats(cprofile_path)

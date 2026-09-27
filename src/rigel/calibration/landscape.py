@@ -79,7 +79,7 @@ class DensityLandscape:
 
     ψ reads the curve ITSELF, at the density every cell of every slot implies — ``log ρ_c = log f_g + log M −
     log E`` on the slot's gDNA support — with numpy's interpolation and the ends held constant off the grid
-    (`native/psi_kernel.h`, ``Arm``; `sweep._gdna_arm` hands the kernel the curve and the per-slot support).
+    (`native/psi_kernel.h`, ``Arm``).
     Bare: no reference prior, no measure term, no Jacobian — ``logP`` is a density in log-rate, so its
     conversion to a linear-rate density cancels the ``log σ'(λ)`` change of variable exactly, per component,
     and ψ's arm adds the reference itself. The grid already spans the data's own support (:func:`_grid`), so
@@ -359,8 +359,8 @@ def fit_landscape(
     the chain.
 
     ``domain`` is the ``(mass, eff)`` of the population the prior will be read at, when that is wider than
-    the population it is fitted on. :func:`_grid` spans the data's own support and :meth:`logprior` clamps
-    flat beyond it, which is right only while the two populations coincide; where the training population
+    the population it is fitted on. :func:`_grid` spans the data's own support and the curve is held
+    constant beyond it, which is right only while the two populations coincide; where the training population
     is a subset — a slot with no composition does not train — a consumer above the training set's top
     density would read a flat prior and fall back to ψ's reference. On a gDNA-free library whose exons are
     all blind, that collapses the grid to a decade at the floor and invents gDNA. With ``domain`` the grid

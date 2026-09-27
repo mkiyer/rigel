@@ -138,7 +138,6 @@ class WholeGenomeSimConfig:
     #: about.
     shadow_gtf: str | None = None
     outdir: str = "sim_output"
-    transcript_filter: str = "all"  # "all", "basic", "mane", "ccds"
 
     simulation: SimulationParams = field(default_factory=SimulationParams)
     abundance: AbundanceConfig = field(default_factory=AbundanceConfig)
@@ -149,4 +148,5 @@ class WholeGenomeSimConfig:
     strand_specificities: list[float] = field(default_factory=lambda: [1.0])
 
     oracle_bam: bool = True
+    emit_fastq: bool = True
     verbose: bool = True

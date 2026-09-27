@@ -129,24 +129,14 @@ def _make_em_data(t_indices_per_unit):
     n_units = len(t_indices_per_unit)
     n_candidates = len(flat_t)
 
-    # Build locus tracking arrays: each unit's first candidate
-    locus_t = np.full(n_units, -1, dtype=np.int32)
-    locus_cc = np.zeros(n_units, dtype=np.uint8)
-    for u, t_list in enumerate(t_indices_per_unit):
-        if t_list:
-            locus_t[u] = t_list[0]
-            locus_cc[u] = _UNSPLICED_SENSE
-
     return ScoredFragments(
         offsets=np.array(offsets, dtype=np.int64),
         t_indices=np.array(flat_t, dtype=np.int32),
-        log_liks=np.zeros(n_candidates, dtype=np.float64),
+        log_liks=np.zeros(n_candidates, dtype=np.float32),
         count_cols=np.full(n_candidates, _UNSPLICED_SENSE, dtype=np.uint8),
-        coverage_weights=np.ones(n_candidates, dtype=np.float64),
-        locus_t_indices=locus_t,
-        locus_count_cols=locus_cc,
+        coverage_weights=np.ones(n_candidates, dtype=np.float32),
         is_spliced=np.zeros(n_units, dtype=bool),
-        gdna_log_liks=np.full(n_units, -np.inf, dtype=np.float64),
+        gdna_log_liks=np.full(n_units, -np.inf, dtype=np.float32),
         frag_ids=np.arange(n_units, dtype=np.int64),
         frag_class=np.zeros(n_units, dtype=np.int8),
         splice_type=np.zeros(n_units, dtype=np.uint8),
@@ -827,8 +817,6 @@ def _one_locus(units, *, mode, seed=0, unambig=(), n_t=3, include_gdna=False, lo
             part.count_cols,
             part.is_spliced,
             part.gdna_log_liks,
-            part.locus_t_indices,
-            part.locus_count_cols,
         )
     ]
     out = rc.run_batch_locus_em_partitioned(
@@ -1061,13 +1049,11 @@ def _partition(
     return (
         offsets,
         np.tile(np.arange(n_t, dtype=np.int32), n_units),
-        np.tile(np.asarray(log_liks, dtype=np.float64), n_units),
-        np.ones(n_units * n_t, dtype=np.float64),
+        np.tile(np.asarray(log_liks, dtype=np.float32), n_units),
+        np.ones(n_units * n_t, dtype=np.float32),
         np.zeros(n_units * n_t, dtype=np.uint8),
         np.full(n_units, 1 if is_spliced else 0, dtype=np.uint8),
-        np.full(n_units, gdna_log_lik, dtype=np.float64),
-        np.zeros(n_units, dtype=np.int32),
-        np.zeros(n_units, dtype=np.uint8),
+        np.full(n_units, gdna_log_lik, dtype=np.float32),
     )
 
 
@@ -1298,13 +1284,11 @@ def _mixed_partition(unique: tuple[int, ...], shared: int, gdna_log_lik: float =
     return (
         offsets,
         flat,
-        np.zeros(n_cand, dtype=np.float64),
-        np.ones(n_cand, dtype=np.float64),
+        np.zeros(n_cand, dtype=np.float32),
+        np.ones(n_cand, dtype=np.float32),
         np.zeros(n_cand, dtype=np.uint8),
         np.zeros(n_units, dtype=np.uint8),
-        np.full(n_units, gdna_log_lik, dtype=np.float64),
-        np.zeros(n_units, dtype=np.int32),
-        np.zeros(n_units, dtype=np.uint8),
+        np.full(n_units, gdna_log_lik, dtype=np.float32),
     )
 
 
@@ -1552,13 +1536,11 @@ def _warm_start_partition(
     return (
         offsets,
         np.tile(np.arange(n_t, dtype=np.int32), n_units),
-        np.tile(np.asarray(log_liks, dtype=np.float64), n_units),
-        np.ones(n_units * n_t, dtype=np.float64),
+        np.tile(np.asarray(log_liks, dtype=np.float32), n_units),
+        np.ones(n_units * n_t, dtype=np.float32),
         np.zeros(n_units * n_t, dtype=np.uint8),
         np.zeros(n_units, dtype=np.uint8),
-        np.full(n_units, gdna_log_lik, dtype=np.float64),
-        np.zeros(n_units, dtype=np.int32),
-        np.zeros(n_units, dtype=np.uint8),
+        np.full(n_units, gdna_log_lik, dtype=np.float32),
     )
 
 
@@ -1737,13 +1719,11 @@ def _shadow_locus(n_sense: int, n_anti: int, ss: float = 0.99):
     return (
         np.arange(n_units + 1, dtype=np.int64) * 2,
         np.asarray(ti, dtype=np.int32),
-        np.asarray(ll, dtype=np.float64),
-        np.ones(n_units * 2, dtype=np.float64),
+        np.asarray(ll, dtype=np.float32),
+        np.ones(n_units * 2, dtype=np.float32),
         np.zeros(n_units * 2, dtype=np.uint8),
         np.zeros(n_units, dtype=np.uint8),
-        np.asarray(gll, dtype=np.float64),
-        np.zeros(n_units, dtype=np.int32),
-        np.zeros(n_units, dtype=np.uint8),
+        np.asarray(gll, dtype=np.float32),
     )
 
 

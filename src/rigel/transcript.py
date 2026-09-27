@@ -47,8 +47,8 @@ class Transcript:
     For multi-exon transcripts: points to the nRNA transcript
     (synthetic or annotated single-exon) that covers this transcript's
     merged TSS/TES span.
-    For single-exon (nRNA) transcripts: points to itself if it is a
-    nascent-equiv covering a multi-exon span, else -1.
+    For single-exon transcripts: points to itself if it is the
+    nascent-equiv covering a merged multi-exon span, else -1.
     For synthetics: -1.
     """
     nrna_n_contributors: int = 0
@@ -147,7 +147,7 @@ class Transcript:
         """Read GTF and construct list of Transcript objects."""
         transcripts: dict[str, Transcript] = {}
         logging.debug("[Transcript] Reading GTF file: %s", gtf_file)
-        num_boundaries = 0
+        n_exon_features = 0
         for f in GTFRecord.parse_file(gtf_file, parse_mode=parse_mode):
             if f.feature != "exon":
                 continue
@@ -158,10 +158,10 @@ class Transcript:
             else:
                 t = transcripts[t_id]
             t.exons.append(Interval(f.start, f.end))
-            num_boundaries += 1
-            if num_boundaries % _GTF_LOG_INTERVAL == 0:
-                logging.debug("[Transcript] Read %d GTF features", num_boundaries)
-        logging.debug("[Transcript] Done reading GTF: %d features", num_boundaries)
+            n_exon_features += 1
+            if n_exon_features % _GTF_LOG_INTERVAL == 0:
+                logging.debug("[Transcript] Read %d GTF exon features", n_exon_features)
+        logging.debug("[Transcript] Done reading GTF: %d exon features", n_exon_features)
 
         logging.debug("[Transcript] Processing transcripts")
         for t in transcripts.values():

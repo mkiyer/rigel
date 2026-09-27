@@ -16,17 +16,15 @@
 //   transfer_prepare, transfer_pass, transfer_solve — the policy's three kernels on tables the call allocates and
 //                    returns, for the transfer gates (`tests/calibration/_transfer_harness.py`).
 //   rows             the row constructors of `transfer_rows.h`, the builders' flag predicates, and the constructions the
-//                    block pipeline absorbed — the factory rows, the factor precision, the strand evidence, the
-//                    log-gamma — bound for the gates. Nothing in `src/` reads them.
+//                    block pipeline absorbed — the factory rows, the factor precision, the strand evidence — bound
+//                    for the gates.
 //
 // One implementation of every arithmetic, in one module: the gates and the production path cannot drift apart.
 
 #include <algorithm>
-#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <exception>
 #include <limits>
 #include <memory>
@@ -39,7 +37,6 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
-#include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
 
 #include "psi_kernel.h"
@@ -117,8 +114,6 @@ int resolve_threads(int n_threads, int64_t n_tasks) {
 }
 
 // ═══ THE CONSTRUCTIONS THE BLOCK PIPELINE ABSORBED ═════════════════════════════════════════════════════════════
-// Each is the Python it replaces term for term and in its operation order — the factory rows and the factor precision
-// of `density_deconv`, the strand evidence of `region_init` — so the block is bit-identical to the loop it replaces.
 
 // numpy's pairwise summation of a contiguous float64 row (`pairwise_sum` in its loops: eight accumulators over blocks
 // of at most 128, halves above), the summation order `np.sum(axis=1)` uses — the one reduction the factor precision
@@ -160,11 +155,8 @@ struct Background {
     }
 };
 
-// The intron factory's λ-factor for one slot: log NegBinom(f_g·C; ρ_bg·E, α_eff) over the σ(λ) grid, the
-// row offset so its max is 0 (an f_g-independent constant is irrelevant to ψ) — via `_log_negbinom`, the mean/size
-// parameterisation, r → ∞ the exact Poisson limit
-// density_deconv._log_negbinom: log NegBinom(g; mean μ, size r) for continuous g ≥ 0 in the mean/size
-// parameterisation, Γln(g+r) − Γln(r) − Γln(g+1) + r·log(r/(r+μ)) + g·log(μ/(r+μ)); r → ∞ is the exact Poisson
+// log NegBinom(g; mean μ, size r) for continuous g ≥ 0 in the mean/size parameterisation,
+// Γln(g+r) − Γln(r) − Γln(g+1) + r·log(r/(r+μ)) + g·log(μ/(r+μ)); r → ∞ is the exact Poisson
 // limit g·log μ − μ − Γln(g+1) (taken directly: no Γln(∞))
 // ⛔ every product is a named temporary: numpy rounds each operation, and a product left inside the sum lets the
 // compiler fuse it into a multiply-add — one rounding fewer, and a row a bit off numpy's
@@ -182,6 +174,8 @@ double log_negbinom(double g, double mu, double size) {
     return std::lgamma(g + r) - std::lgamma(r) - lg_g1 + t_r + t_g;
 }
 
+// The intron factory's λ-factor for one slot: log NegBinom(f_g·C; ρ_bg·E, α_eff) over the σ(λ) grid, the
+// row offset so its max is 0 (an f_g-independent constant is irrelevant to ψ)
 void factory_row(const Background& bg, double count, double eff, const double* fg, int K, double* out) {
     if (!bg.informative) { std::fill(out, out + K, 0.0); return; }
     const double Eg = std::max(eff, DENSITY_EPS);
@@ -214,8 +208,8 @@ double factor_precision_row(const double* row, const double* lam, const double* 
     return var > DENSITY_EPS ? 1.0 / std::max(var, DENSITY_EPS) : 0.0;
 }
 
-// region_init.strand_evidence for one slot: the reference-free strand composition evidence I_strand at the
-// message-free fg_loc — N_eff·disc·[f_g(1−f_g)]² / (4 p(1−p)), p = κ + f_g(½ − κ), the count overdispersed
+// one slot's reference-free strand composition evidence I_strand at the message-free fg_loc —
+// N_eff·disc·[f_g(1−f_g)]² / (4 p(1−p)), p = κ + f_g(½ − κ), the count overdispersed
 double strand_evidence(double u_pos, double u_neg, double fg_loc, double kappa, double od_r, double disc) {
     const double n_raw = u_pos + u_neg;
     const double n_str = n_raw / (1.0 + std::max(n_raw - 1.0, 0.0) * od_r);
@@ -380,12 +374,10 @@ void compose_rows(Vec f_g, Vec w_pos, BoolVec allow_pos, BoolVec allow_neg, Vec 
 enum Policy { SILENT = 0, TRANSFER = 1 };
 
 // the backbone's assertions, counted per block on the owned slots as (violations, eligible); the backbone raises
-enum Assertion { POP_AT_MOST_THREE, POP_REACHES_THREE, LAM_ROWS_FINITE, CUBE_ROWS_FINITE, WRITEBACK_ONLY_SOLVABLE, N_ASSERT };
-const char* const ASSERTION_NAMES[N_ASSERT] = {"population_at_most_three", "population_reaches_three", "lam_rows_finite",
-                                               "cube_rows_finite", "writeback_only_solvable"};
+enum Assertion { LAM_ROWS_FINITE, CUBE_ROWS_FINITE, N_ASSERT };
+const char* const ASSERTION_NAMES[N_ASSERT] = {"lam_rows_finite", "cube_rows_finite"};
 
 struct ChainArrays {  // the whole chain, read-only
-    int64_t n;
     const bool *is_bnd, *is_exon, *fp, *fn, *exon_pos, *exon_neg, *terminal;
     const int64_t *left, *right;
     const uint16_t* flags;
@@ -395,10 +387,10 @@ struct ChainArrays {  // the whole chain, read-only
 };
 
 struct Params {
-    double kappa, od_g, od_r, disc;  // ψ's strand model; the protocol's discriminability (0: the channel is dead)
+    double kappa, od_r, disc;  // ψ's strand model; the protocol's discriminability (0: the channel is dead)
     const double* lam; int K; int n_tilt;
-    // the policy: its kind, and the strand model ITS own claims read (a policy's, not the sweep's — the cache gates
-    // hold the two apart), the library's coordinates and strand witness
+    // the policy: its kind, and the strand model ITS own claims read (a policy's, not the sweep's), the library's
+    // coordinates and strand witness
     int policy; bool has_strand; double pol_kappa, pol_od_g, pol_od_r; double rho_gdna, rho_rna; bool split_live;
 };
 
@@ -435,15 +427,14 @@ struct Arena {
     int n = 0, K = 0;
     std::vector<double> n_u, n_s, flux, cnt_col[2], factory, own_rows, lane_own[3], comp[2], prof[2][3], rows, cube_pos,
         cube_neg, cube_total, cube_opp, cube_rho, f_par[6], lane_wit[3], face_store, flux_store[3], recv_count[2][3],
-        recv_opp[2][3], recv_rna[2][3], recv_rnav[2][3], fg_loc, fp_loc, fn_loc, tau_lam, tau_fac, out, bound, row, w,
-        lam2;
+        recv_opp[2][3], recv_rna[2][3], recv_rnav[2][3], fg_loc, tau_lam, tau_fac, out, bound, row, w, lam2;
     std::vector<char> is_intron, is_intergenic;
     std::vector<int64_t> left, right, seq_f, seq_b, cube_slot;
     std::vector<int8_t> f_kind;
     std::vector<int32_t> f_row, f_row2, flux_index[3];
     std::vector<uint8_t> own_mask, lane_face[3], lane_two[3], lane_own_mask[3], lane_wit_mask[3], empty_g, empty_r,
-        has_nbr[2], has_comp[2], present[2][3], has_wit[2][3], written, cube_has_pos, cube_has_neg, held, solvable,
-        has_own, own_ev;
+        has_nbr[2], has_comp[2], present[2][3], has_wit[2][3], cube_has_pos, cube_has_neg, held, solvable, has_own,
+        own_ev;
     std::vector<const double*> factory_ptr, row_ptr;
     std::unique_ptr<Scratch> S;  // transfer_rows' scratch, built for K
     P::Scratch psi;
@@ -453,8 +444,8 @@ struct Arena {
         n = n_; K = K_;
         const size_t nk = static_cast<size_t>(n) * K;
         auto grow = [](auto& v, size_t m) { if (v.size() < m) v.resize(m); };
-        for (auto* v : {&n_u, &n_s, &flux, &cnt_col[0], &cnt_col[1], &fg_loc, &fp_loc, &fn_loc, &tau_lam, &tau_fac,
-                        &cube_total, &cube_opp, &cube_rho})
+        for (auto* v : {&n_u, &n_s, &flux, &cnt_col[0], &cnt_col[1], &fg_loc, &tau_lam, &tau_fac, &cube_total,
+                        &cube_opp, &cube_rho})
             grow(*v, n);
         for (auto* v : {&factory, &own_rows, &lane_own[0], &lane_own[1], &lane_own[2], &comp[0], &comp[1], &rows,
                         &cube_pos, &cube_neg})
@@ -473,7 +464,7 @@ struct Arena {
         grow(f_kind, 2 * n); grow(f_row, 2 * n); grow(f_row2, 2 * n);
         grow(is_intron, n); grow(is_intergenic, n);
         grow(left, n); grow(right, n); grow(seq_f, n); grow(seq_b, n); grow(cube_slot, n);
-        for (auto* v : {&own_mask, &empty_g, &empty_r, &has_nbr[0], &has_nbr[1], &has_comp[0], &has_comp[1], &written,
+        for (auto* v : {&own_mask, &empty_g, &empty_r, &has_nbr[0], &has_nbr[1], &has_comp[0], &has_comp[1],
                         &cube_has_pos, &cube_has_neg, &held, &solvable, &has_own, &own_ev})
             grow(*v, n);
         grow(factory_ptr, n); grow(row_ptr, n);
@@ -628,8 +619,7 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
         SolveLane G, rna[2];
         if (gdna_built) {
             G.built = true; G.field = 0; G.empty = as_bool(A.empty_g); G.total = A.n_u.data(); G.a = a_g;
-            G.rho_ref = p.rho_gdna; G.own_rows = A.lane_own[0].data(); G.own_mask = as_bool(A.lane_own_mask[0]);
-            G.flux_store = A.flux_store[0].data(); G.flux_index = A.flux_index[0].data();
+            G.rho_ref = p.rho_gdna;
         }
         for (int s = 0; s < 2; ++s) {
             rna[s].built = true; rna[s].field = 1 + s; rna[s].empty = as_bool(A.empty_r); rna[s].total = A.n_u.data();
@@ -640,8 +630,7 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
         std::fill_n(A.rows.data(), static_cast<size_t>(n) * K, 0.0);
         CubeOut cube{A.cube_slot.data(), A.cube_pos.data(), as_bool(A.cube_has_pos), A.cube_neg.data(),
                      as_bool(A.cube_has_neg), A.cube_total.data(), A.cube_opp.data(), A.cube_rho.data(), n};
-        const auto [live, n_cube] = solve_block(p.lam, K, n, R, G, rna, fp, fn, A.rows.data(), as_bool(A.written), cube,
-                                                S, A.bound, A.row);
+        const auto [live, n_cube] = solve_block(p.lam, K, n, R, G, rna, fp, fn, A.rows.data(), cube, S, A.bound, A.row);
         has_rows = live; d = n_cube;
         for (int i = 0; i < n; ++i) as_bool(A.held)[i] = R[0].has_composition[i] || R[1].has_composition[i];
         if (d)
@@ -677,12 +666,6 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
     }
     for (int i = 0; i < n; ++i) A.row_ptr[i] = has_rows ? A.rows.data() + static_cast<size_t>(i) * K : nullptr;
     // THE CHECKS on what was delivered, over the owned slots
-    for (int i = 0; i < n_owned; ++i) {
-        const int pop = 1 + (fp[i] ? 1 : 0) + (fn[i] ? 1 : 0);
-        res.counts[POP_AT_MOST_THREE][0] += pop > 3;
-        res.counts[POP_AT_MOST_THREE][1] += 1;
-        res.counts[POP_REACHES_THREE][1] += pop >= 3;
-    }
     res.rows_delivered = has_rows;
     if (has_rows) {
         for (int i = 0; i < n_owned; ++i) {
@@ -711,7 +694,6 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
     // THE FINAL SOLVE: the arm, the factory row and the delivered row per cell, the cube rows at the AMBIG slots
     for (int i = 0; i < n_owned; ++i) {
         const bool solvable = as_bool(A.solvable)[i];
-        res.counts[WRITEBACK_ONLY_SOLVABLE][1] += !solvable;
         if (want_capture) {
             out.fg_loc[start + i] = A.fg_loc[i]; out.tau_lam[start + i] = A.tau_lam[i]; out.tau_fac[start + i] = A.tau_fac[i];
             out.fg_strand[start + i] = 0.0;
@@ -770,10 +752,10 @@ nb::dict lane_capture(Lane3&& ln, int n_owned, int K) {
 // THE SWEEP'S CALL. `blocks` is (B, 3) int64: start, stop, end per block. `gdna` is None or (log_rho, logP); `factory`
 // None, ("inputs", is_intron, count, eff, log_mu_bg, alpha, size, informative) or ("rows", rows). The belief arrays are
 // written in place on the owned slots (they arrive as copies of the incoming belief); `diagnostics` is None or a dict of
-// the capture's arrays to fill. Returns a dict: `counts` (B, 5, 2) int64 per assertion (violations, eligible),
-// `rows_delivered` / `cube_delivered` (B,) bool, and under a capture `cubes` — a list per block: None, or the cube rows the
-// solve delivered as (slot, pos, has_pos, neg, has_neg, total, opportunity, rho) in the block's local slots — and
-// `received`, a list per block (None, or the two received tables as dicts).
+// the capture's arrays to fill. Returns a dict: `counts` (B, 2, 2) int64 per assertion (violations, eligible),
+// `assertions` their names, `rows_delivered` / `cube_delivered` (B,) bool, and under a capture `cubes` — a list per
+// block: None, or the cube rows the solve delivered as (slot, pos, has_pos, neg, has_neg, total, opportunity, rho) in the
+// block's local slots — and `received`, a list per block (None, or the two received tables as dicts).
 nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, BoolVec free_neg, BoolVec exon_pos, BoolVec exon_neg,
                       BoolVec terminal, IdxVec left, IdxVec right, FlagVec flags, Mat cnt, Mat spliced, Mat sj_count,
                       Mat sj_count_lo, Mat sj_count_hi, Mat route_rate_lo, Mat route_rate_hi, Vec eff_gdna, Vec eff_rna,
@@ -789,11 +771,11 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
     if (static_cast<int>(cnt.shape(1)) != 2 || static_cast<int64_t>(cnt.shape(0)) != n)
         throw std::invalid_argument("solve_blocks: the counts are (n, 2)");
     std::vector<nb::object> keep;  // the optional arrays, alive for the call
-    ChainArrays C{n, is_boundary.data(), is_exon.data(), free_pos.data(), free_neg.data(), exon_pos.data(), exon_neg.data(),
+    ChainArrays C{is_boundary.data(), is_exon.data(), free_pos.data(), free_neg.data(), exon_pos.data(), exon_neg.data(),
                   terminal.data(), left.data(), right.data(), flags.data(), cnt.data(), spliced.data(), sj_count.data(),
                   sj_count_lo.data(), sj_count_hi.data(), route_rate_lo.data(), route_rate_hi.data(), eff_gdna.data(),
                   eff_rna.data(), belief_fpos.data(), belief_fneg.data(), belief_fg.data()};
-    Params p{kappa, od_g, od_r, disc, lam.data(), K, n_tilt, policy, has_strand, policy_kappa, policy_od_g, policy_od_r,
+    Params p{kappa, od_r, disc, lam.data(), K, n_tilt, policy, has_strand, policy_kappa, policy_od_g, policy_od_r,
              rho_gdna, rho_rna, split_live};
     Landscape L;
     if (!gdna.is_none()) {
@@ -1132,13 +1114,13 @@ nb::tuple transfer_solve(nb::dict tables, nb::dict from_left, nb::dict from_righ
     const SolveLane G = T.solve_lane(0), rna[2] = {T.solve_lane(1), T.solve_lane(2)};
     std::vector<double> rows(static_cast<size_t>(n) * K, 0.0), cpos(static_cast<size_t>(n) * K), cneg(static_cast<size_t>(n) * K),
         ctotal(n), copp(n), crho(n), bound, row;
-    std::vector<uint8_t> written(n), chas_pos(n), chas_neg(n);
+    std::vector<uint8_t> chas_pos(n), chas_neg(n);
     std::vector<int64_t> cslot(n);
     CubeOut cube{cslot.data(), cpos.data(), as_bool(chas_pos), cneg.data(), as_bool(chas_neg), ctotal.data(), copp.data(),
                  crho.data(), n};
     Scratch S(K);
     const auto [live, d] = solve_block(T.lam.data(), K, n, sides, G, rna, free_pos.data(), free_neg.data(), rows.data(),
-                                       as_bool(written), cube, S, bound, row);
+                                       cube, S, bound, row);
     nb::object cube_out = nb::none();
     if (d) {
         cslot.resize(d); cpos.resize(static_cast<size_t>(d) * K); cneg.resize(static_cast<size_t>(d) * K);
@@ -1161,7 +1143,7 @@ nb::tuple transfer_solve(nb::dict tables, nb::dict from_left, nb::dict from_righ
 // ═══ THE ROW CONSTRUCTORS, THE FLAG PREDICATES AND THE ABSORBED CONSTRUCTIONS, BOUND FOR THE GATES ═════════════
 // The one implementation of every row constructor (`transfer_rows.h`), flag predicate (`transfer_kernel.h`) and
 // absorbed construction (above) is read by the gates through these bindings — as ψ's is through `psi_cube` — each a
-// fresh array from its own arguments, on a scratch of its own. Nothing in `src/` reads them.
+// fresh array from its own arguments, on a scratch of its own.
 
 using Row = nb::ndarray<nb::numpy, double, nb::ndim<1>>;
 
@@ -1178,13 +1160,6 @@ void bind_rows(nb::module_& m) {
     r.attr("EPS") = EPS;
     r.attr("MARGINAL_NODES") = own1(std::vector<double>(MARGINAL_NODES, MARGINAL_NODES + N_MARGINAL_NODES));
     r.def("trigamma", &trigamma, nb::arg("x"), "zeta(2, x), the counting variance's one home.");
-    r.def("lgamma", [](Vec x) {
-        const int n = K_of(x);
-        std::vector<double> out(n);
-        for (int i = 0; i < n; ++i) out[i] = std::lgamma(x.data()[i]);
-        return make_row(std::move(out));
-    }, nb::arg("x"), "log Γ(x) per element — libm's, the kernel's own log-gamma: the factory rows' one arithmetic "
-       "wherever they are built (scipy's gammaln, cephes, differs in the last bits).");
     r.def("count_logvar", &count_logvar, nb::arg("n"));
     r.def("hop_price", &hop_price, nb::arg("n_s"), nb::arg("a_s"), nb::arg("n_x"), nb::arg("a_x"));
     r.def("blur_row", [](Vec row, Vec lam, double v) {
@@ -1347,8 +1322,6 @@ void bind_rows(nb::module_& m) {
     }, nb::arg("u_pos"), nb::arg("u_neg"), nb::arg("fg_loc"), nb::arg("kappa"), nb::arg("od_r"), nb::arg("disc"),
        "The reference-free strand composition evidence I_strand at fg_loc, the count overdispersed, `disc` the protocol's "
        "discriminability (0: the channel is dead).");
-    r.def("pairwise_sum", [](Vec a) { return pairwise_sum(a.data(), K_of(a)); }, nb::arg("a"),
-          "numpy's pairwise summation of a contiguous float64 row — the order `np.sum(axis=1)` uses.");
     r.attr("OWN_EVIDENCE_EPS") = OWN_EPS;
 }
 

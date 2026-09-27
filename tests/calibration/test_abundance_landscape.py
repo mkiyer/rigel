@@ -2,14 +2,11 @@
 
 `fit_abundance_landscape` fits the population estimator (`landscape.fit_landscape`) on the wall-exact
 measured totals from `total_abundance` and then reports every local maximum with its basin, the
-depleted mode (the basin containing the pooled intergenic anchor rate), the enriched mode (the
-largest-mass basin strictly above it), the span `R`, and a per-region enriched-basin responsibility
-`w_i`. The fixtures are synthetic Poisson populations whose truth is stated by hand, so every
-assertion here is absolute rather than a recorded output. What the gates mostly hold is that no
-significance threshold exists anywhere in the census: basins must PARTITION the density
-(Σ basin_mass = 1), a unimodal fit must report NO enriched mode with `span_R` exactly 1 and `w ≡ 0`,
-and the anchor-consistency verdict must use the depleted mode's own fitted width as its tolerance —
-the density's own statement of its resolution, never a chosen number.
+depleted mode (the basin containing the pooled intergenic anchor rate) and the enriched mode (the
+largest-mass basin strictly above it). The fixtures are synthetic Poisson populations whose truth is
+stated by hand, so every assertion here is absolute rather than a recorded output. What the gates
+mostly hold is that no significance threshold exists anywhere in the census: basins must PARTITION
+the density (Σ basin_mass = 1), and a unimodal fit must report NO enriched mode.
 """
 
 from __future__ import annotations
@@ -75,7 +72,6 @@ def parts(
         d_high=np.where(se, big, 0.0),
         start_exact=se,
         end_exact=ee,
-        w_max=500,
     )
     return _Sub(), ra, mask
 
@@ -118,7 +114,6 @@ def test_a_bimodal_field_yields_TWO_modes_at_the_right_places():
     # located within the fit's own resolution: the mode's fitted width, not a chosen tolerance
     assert abs(al.depleted.log_rho - np.log(rho_lo)) <= max(al.depleted.width, 0.1)
     assert abs(al.enriched.log_rho - np.log(rho_hi)) <= max(al.enriched.width, 0.1)
-    assert al.span_R == pytest.approx(rho_hi / rho_lo, rel=0.5)
 
 
 def test_the_basins_PARTITION_the_density():
@@ -129,49 +124,6 @@ def test_the_basins_PARTITION_the_density():
     # basins tile the grid: each starts where the previous ended
     for a, b in zip(al.modes, al.modes[1:], strict=False):
         assert a.hi == pytest.approx(b.lo, rel=0, abs=1e-12)
-
-
-def test_w_separates_the_two_populations():
-    counts, lengths, sig, *_ = bimodal_parts()
-    sub, ra, mask = parts(counts, lengths, sig)
-    al = fit_abundance_landscape(sub, ra, mask)
-    n_lo = 600
-    w = al.w_slot
-    assert np.nanmax(w[:n_lo]) < 0.5, "a depleted region reads enriched"
-    assert np.nanmin(w[n_lo:]) > 0.5, "an enriched region reads depleted"
-
-
-def test_the_anchor_agrees_with_the_depleted_mode_and_the_flag_can_FAIL():
-    """Getting this fixture right depends on the census's own robustness: any COHERENT anchor pool,
-    large or tiny, drags a local maximum along with it through its own kernels, and "the basin
-    containing the anchor" then follows it — so a coherent shift can NEVER flip the flag. What the
-    flag guards is an INCOHERENT anchor population: anchors whose pooled rate is unrepresentative of
-    any of them, landing in a basin whose peak is far away. That is also the honest real-data failure
-    — an intergenic pool contaminated in both directions — so the fixture states it directly."""
-    counts, lengths, sig, *_ = bimodal_parts()
-    sub, ra, mask = parts(counts, lengths, sig)
-    al = fit_abundance_landscape(sub, ra, mask)
-    assert al.anchor_consistent
-    assert al.anchor_gap_nats <= max(al.depleted.width, 0.1)
-
-    # heterogeneous anchors: 3 at rho 0.001 and 3 at rho 0.5 against an 800-region bulk at 0.02.
-    # The POOLED anchor rate (~0.25, log -1.38) sits where no peak is: gap 2.52 nats vs a depleted
-    # width of 0.24 — the flag must flip, and the gap must be reported.
-    rng = np.random.default_rng(3)
-    n_bulk = 800
-    lengths2 = np.full(n_bulk + 6, 5_000)
-    counts2 = np.concatenate(
-        [
-            rng.poisson(0.001 * 5_000, 3),
-            rng.poisson(0.5 * 5_000, 3),
-            rng.poisson(0.02 * 5_000, n_bulk),
-        ]
-    )
-    sig2 = np.concatenate([np.zeros(6, np.uint8), np.full(n_bulk, BIT_INTRON_POS, np.uint8)])
-    sub2, ra2, mask2 = parts(counts2, lengths2, sig2)
-    al2 = fit_abundance_landscape(sub2, ra2, mask2)
-    assert not al2.anchor_consistent
-    assert al2.anchor_gap_nats > al2.depleted.width
 
 
 # ---------------------------------------------------------------------------
@@ -188,15 +140,11 @@ def unimodal_parts():
     return counts, lengths, sig
 
 
-def test_a_uniform_field_is_UNIMODAL_with_span_exactly_one_and_w_zero():
+def test_a_uniform_field_is_UNIMODAL():
     counts, lengths, sig = unimodal_parts()
     sub, ra, mask = parts(counts, lengths, sig)
     al = fit_abundance_landscape(sub, ra, mask)
     assert al.enriched is None
-    assert al.span_R == 1.0
-    live = ~np.isnan(al.w_slot)
-    assert live.any()
-    assert np.all(al.w_slot[live] == 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -204,9 +152,9 @@ def test_a_uniform_field_is_UNIMODAL_with_span_exactly_one_and_w_zero():
 # ---------------------------------------------------------------------------
 
 
-def test_a_NOT_model_free_region_contributes_NOTHING_and_reads_NaN():
-    """A double-walled region must neither train the fit nor receive a responsibility. The perturbing
-    half: hand the excluded region an enormous count — if it leaks into the fit, the census moves."""
+def test_a_NOT_model_free_region_contributes_NOTHING():
+    """A double-walled region must not train the fit. The perturbing half: hand the excluded region an
+    enormous count — if it leaks into the fit, the census moves."""
     counts, lengths, sig = unimodal_parts()
     sub, ra, mask = parts(counts, lengths, sig)
     base = fit_abundance_landscape(sub, ra, mask)
@@ -217,7 +165,6 @@ def test_a_NOT_model_free_region_contributes_NOTHING_and_reads_NaN():
     excl[0] = False
     sub2, ra2, mask2 = parts(counts2, lengths, sig, start_exact=excl, end_exact=excl)
     al = fit_abundance_landscape(sub2, ra2, mask2)
-    assert np.isnan(al.w_slot[0])
     assert al.enriched is None, "an excluded region's count leaked into the fit"
     assert al.n_train == base.n_train - 1
 
@@ -228,7 +175,6 @@ def test_the_fit_is_DETERMINISTIC():
     a = fit_abundance_landscape(sub, ra, mask)
     b = fit_abundance_landscape(sub, ra, mask)
     np.testing.assert_array_equal(a.landscape.logP, b.landscape.logP)
-    np.testing.assert_array_equal(a.w_slot, b.w_slot)
 
 
 def test_too_few_training_regions_returns_None():
@@ -238,13 +184,12 @@ def test_too_few_training_regions_returns_None():
 
 def test_a_toy_with_NO_anchor_pool_falls_back_to_the_largest_basin():
     """All-exon annotation (a toy): no intergenic region exists, so the anchor rate is undefined and
-    the depleted mode falls back to the largest-mass basin — reported, not asserted consistent."""
+    the depleted mode falls back to the largest-mass basin."""
     counts, lengths, sig = unimodal_parts()
     sig = np.full_like(sig, BIT_EXON_POS)
     sub, ra, mask = parts(counts, lengths, sig)
     al = fit_abundance_landscape(sub, ra, mask)
     assert al is not None
-    assert np.isnan(al.anchor_log_rho)
     assert al.depleted.basin_mass == max(m.basin_mass for m in al.modes)
 
 
@@ -286,38 +231,6 @@ def test_the_fit_is_EXACTLY_fit_landscape_on_the_selected_pair_with_var_zero():
     np.testing.assert_array_equal(al.landscape.log_rho, ref.log_rho)
 
 
-def test_w_matches_an_INDEPENDENT_posterior_recomputation():
-    """The documented formula, re-implemented with scipy's own Poisson pmf (no shared helper): the
-    region's kernel TIMES the fitted density, normalised on the grid, integrated over the enriched
-    basin — asserted TIGHT, so any formula drift fires.
-
-    PERTURBATION: dropping the landscape factor and using the kernel alone cannot be made to fail
-    this oracle, and that is a property of the census rather than a hole. For every TRAINED region
-    the two agree to floating point on every fixture that can be built, valley straddlers included,
-    because the census partitions at density MINIMA and a training region's own kernel raises the
-    density at its centre — so the cuts avoid it and its kernel mass stays inside one basin, and even
-    two isolated wide-kernel regions form their own micro-basin rather than straddle. The landscape
-    factor in `w` is therefore a formula commitment that matters for a FUTURE non-training query, not
-    a behavioural difference on the training population."""
-    from scipy.stats import poisson
-
-    from rigel.calibration.total_abundance import region_counts_and_exposure
-
-    counts, lengths, sig, *_ = bimodal_parts()
-    sub, ra, mask = parts(counts, lengths, sig)
-    al = fit_abundance_landscape(sub, ra, mask)
-    c, e, free = region_counts_and_exposure(sub, ra, mask)
-    sel = free & (e > 0)
-    lam = np.exp(al.landscape.log_rho)[None, :] * e[sel][:, None]
-    kern = poisson.pmf(np.round(c[sel])[:, None], lam)
-    kern /= np.maximum(kern.sum(axis=1, keepdims=True), 1e-300)
-    post = kern * np.exp(al.landscape.logP)[None, :]
-    post /= np.maximum(post.sum(axis=1, keepdims=True), 1e-300)
-    basin = (al.landscape.log_rho >= al.enriched.lo) & (al.landscape.log_rho <= al.enriched.hi)
-    w_ref = post[:, basin].sum(axis=1)
-    np.testing.assert_allclose(al.w_slot[sel], w_ref, rtol=0, atol=1e-9)
-
-
 def test_the_anchor_picks_depleted_and_enriched_stays_ABOVE_it_with_three_modes():
     """THREE modes, anchors at the MIDDLE one, the LARGEST basin at the bottom: a depleted-by-mass
     rule picks the bottom (wrong), and an enriched-anywhere rule picks the bottom too (span < 1).
@@ -343,12 +256,10 @@ def test_the_anchor_picks_depleted_and_enriched_stays_ABOVE_it_with_three_modes(
     )
     sub, ra, mask = parts(counts, lengths, sig)
     al = fit_abundance_landscape(sub, ra, mask)
-    assert al.anchor_consistent
     assert abs(al.depleted.log_rho - np.log(0.02)) <= max(al.depleted.width, 0.1)
     assert al.enriched is not None
     assert al.enriched.log_rho > al.depleted.log_rho
-    assert al.span_R > 1.0
-    assert al.span_R == pytest.approx(3.0 / 0.02, rel=0.5)
+    assert np.exp(al.enriched.log_rho - al.depleted.log_rho) == pytest.approx(3.0 / 0.02, rel=0.5)
 
 
 # ---------------------------------------------------------------------------
@@ -378,13 +289,12 @@ def _calibrate_parts():
 
 def test_without_the_wall_inputs_the_landscape_is_SKIPPED_LOUDLY_and_nothing_raises(caplog):
     """The landscape is fit whenever the wall inputs (``mature_walls``, ``boundary_reach``) are passed,
-    so a caller that supplies none gets no panel rather than an exception — the landscape feeds only the
-    QC report's density panel, and a toy or a unit fixture that never wanted one runs without it.
+    so a caller that supplies none gets ``None`` rather than an exception, and a toy or a unit fixture
+    that never wanted one runs without it.
 
     Nothing fits on unmasked totals either way: the choice is between refusing and not fitting, and
     the mask's wall bias is excluded under both. The skip is not a silent fallback — it is logged at
-    WARNING and the object is ``None`` rather than a quietly different estimate: this object is read by
-    the report and the debug bundle and by nothing in the solve."""
+    WARNING and the object is ``None`` rather than a quietly different estimate."""
     import logging
 
     from rigel.calibration import calibrate
@@ -513,11 +423,15 @@ def test_split_basins_is_the_shipped_rule_importable_on_its_own():
     instrument scoring ANOTHER estimator's curve can apply the identical rule instead of restating
     it."""
     from rigel.calibration.abundance_landscape import AbundanceMode, split_basins
+    from rigel.calibration.total_abundance import region_counts_and_exposure
 
     counts, lengths, sig, *_ = bimodal_parts()
     sub, ra, mask = parts(counts, lengths, sig)
     al = fit_abundance_landscape(sub, ra, mask)
-    dep, enr = split_basins(al.modes, al.anchor_log_rho)
+    # the pooled intergenic anchor rate, recomputed: the fixture's intergenic regions carry signature 0
+    c, e, free = region_counts_and_exposure(sub, ra, mask)
+    anchors = free & (e > 0) & (sig == 0)
+    dep, enr = split_basins(al.modes, float(np.log(c[anchors].sum()) - np.log(e[anchors].sum())))
     assert dep is al.depleted and enr is al.enriched
 
     lo = AbundanceMode(log_rho=-4.0, basin_mass=0.6, width=0.3, lo=-6.0, hi=-2.0)

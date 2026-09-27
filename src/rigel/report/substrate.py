@@ -1,16 +1,14 @@
 """Load the ``rigel quant`` report substrate into a structured bundle.
 
-The substrate is everything ``rigel quant`` writes to its output directory:
+The substrate is what the report reads from a ``rigel quant`` output directory:
 
-* ``summary.json`` — the lean run manifest (schema v2), read eagerly.
-* companion feather tables (``fragment_lengths``, ``gene_quant``,
-  ``calibration_track``, …) — read lazily on first access, so a report only
-  pays I/O and memory for the tables it actually uses. The big per-transcript
-  and nascent tables (``quant``, ``nrna_quant``) are reachable the same way and
-  are never read unless something asks for them.
+* ``summary.json`` — the lean run manifest (schema v3), read eagerly.
+* the companion feather tables the report draws (``fragment_lengths``,
+  ``gene_quant``, ``calibration_track``) — read lazily on first access, so a
+  report only pays I/O and memory for the tables it actually uses.
 
-Only ``summary.json`` is required; every companion table is optional so the
-report degrades gracefully on partial or older outputs.
+Only ``summary.json`` is required; a missing companion table omits the panels
+drawn from it.
 """
 
 from __future__ import annotations
@@ -106,12 +104,7 @@ def load_substrate(output_dir: str | Path) -> ReportSubstrate:
 
     warnings: list[str] = []
     sv = summary.get("schema_version")
-    if sv is None:
-        warnings.append(
-            "summary.json has no schema_version (pre-v2 run); fragment-length "
-            "distributions may be unavailable."
-        )
-    elif sv != EXPECTED_SCHEMA_VERSION:
+    if sv != EXPECTED_SCHEMA_VERSION:
         warnings.append(
             f"summary.json schema_version is {sv}; this builder targets "
             f"v{EXPECTED_SCHEMA_VERSION}. Some panels may be incomplete."

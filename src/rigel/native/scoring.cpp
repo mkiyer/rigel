@@ -40,7 +40,6 @@ using rigel::SPLICE_ARTIFACT;
 using rigel::vec_to_ndarray;
 using rigel::FRAG_UNAMBIG;
 using rigel::FRAG_AMBIG_SAME_STRAND;
-using rigel::FRAG_AMBIG_OPP_STRAND;
 using rigel::FRAG_MULTIMAPPER;
 using rigel::FRAG_CHIMERIC;
 
@@ -409,11 +408,8 @@ private:
         // CSR offsets (growing; starts with {0})
         std::vector<int64_t>*  v_offsets;
         // Per-unit metadata (growing)
-        std::vector<int32_t>*  v_locus_t;
-        std::vector<uint8_t>*  v_locus_ct;
         std::vector<int8_t>*   v_is_spliced;
         std::vector<float>*    v_gdna_ll;
-        std::vector<int64_t>*  v_gmid;  // genomic midpoint per unit; INT64_MIN sentinel
         std::vector<int64_t>*  v_fid;
         std::vector<int8_t>*   v_fclass;
         std::vector<uint8_t>*  v_stype;
@@ -427,10 +423,8 @@ private:
         double* ua_counts;
         int ua_ncols;
         const int8_t* t_str;
-        // Cursors
+        // Candidate write cursor
         int64_t cand_cur;
-        int64_t unit_cur;
-        int64_t det_cur;
 
         // Eager MM group accumulators (persists across chunks).
         // Candidates are scored and merged eagerly as alignments
@@ -447,28 +441,23 @@ private:
         double  mm_gdna_lse_sum;
         bool    mm_gdna_lse_has;
         int32_t mm_nh_gdna;
-        // First valid unspliced (genomic-midpoint, gDNA-bearing) hit
-        // observed in the current MM group. INT64_MIN means none.
-        int64_t mm_gmid_first;
 
         FillState()
             : v_ti(nullptr), v_ll(nullptr), v_ct(nullptr),
                             v_cw(nullptr),
-              v_offsets(nullptr), v_locus_t(nullptr),
-              v_locus_ct(nullptr), v_is_spliced(nullptr),
-              v_gdna_ll(nullptr), v_gmid(nullptr), v_fid(nullptr),
+              v_offsets(nullptr), v_is_spliced(nullptr),
+              v_gdna_ll(nullptr), v_fid(nullptr),
               v_fclass(nullptr), v_stype(nullptr),
               v_det_ti(nullptr), v_det_fid(nullptr),
               v_chim_fid(nullptr), v_chim_stype(nullptr),
               ua_counts(nullptr), ua_ncols(0), t_str(nullptr),
-              cand_cur(0), unit_cur(0), det_cur(0),
+              cand_cur(0),
               mm_fid(-1), mm_n_members(0),
               mm_best_stype(SPLICE_UNSPLICED),
               mm_gdna_lse_max(0.0),
               mm_gdna_lse_sum(0.0),
               mm_gdna_lse_has(false),
-              mm_nh_gdna(0),
-              mm_gmid_first(std::numeric_limits<int64_t>::min()) {}
+              mm_nh_gdna(0) {}
 
         void reset_mm_group() {
             mm_merged.clear();  // reuses hash bucket allocation
@@ -479,7 +468,6 @@ private:
             mm_gdna_lse_sum = 0.0;
             mm_gdna_lse_has = false;
             mm_nh_gdna = 0;
-            mm_gmid_first = std::numeric_limits<int64_t>::min();
         }
     };
 
@@ -490,11 +478,11 @@ private:
     // Called during score_chunk_impl() for each MM alignment.
     // Reads from the current chunk's live arrays and merges scored
     // candidates into st.mm_merged.  Also updates the per-group
-    // metadata accumulators (splice status, gDNA, footprint).
+    // splice type and gDNA accumulators.
 
     void score_mm_alignment(
         const ChunkPtrs& cp, int row,
-        FillState& st, double gdna_log_sp) const
+        FillState& st) const
     {
         int64_t start = cp.t_off[row];
         int64_t end   = cp.t_off[row + 1];
@@ -518,32 +506,20 @@ private:
             st.mm_best_stype = SPLICE_SPLICED_UNANNOT;
         }
 
-        // gDNA per-hit contribution, from every hit gDNA can explain (`gdna_can_explain`). A spliced hit
-        // no longer removes gDNA from the group: its other hits are places gDNA could have come from.
-        // Effective-length normalization is component-level in the EM; the scorer emits log h_G(ell_f)
-        // plus non-length score terms. At flush time:
+        // gDNA per-hit term, from every hit gDNA can explain (`gdna_can_explain`); a spliced hit does not
+        // remove gDNA from the group. The EM applies the gDNA effective length. At flush time
         //    gdna_log_lik = lse_max + log(lse_sum) - log(nh_gdna)
         // the mean over the hits gDNA can explain (nh_gdna of them), not over NH.
         int32_t gfp_val = cp.g_fp[row];
         if (gdna_can_explain(stype) && n_cand > 0)
         {
             double gdna_fl    = gdna_frag_len_log_lik(gfp_val);
-            double hit_log_ll = gdna_fl + gdna_log_sp + LOG_HALF + log_nm;
+            double hit_log_ll = gdna_fl + LOG_HALF + log_nm;
             lse_update(st.mm_gdna_lse_max,
                        st.mm_gdna_lse_sum,
                        st.mm_gdna_lse_has,
                        hit_log_ll);
             ++st.mm_nh_gdna;
-
-            // Track the first valid (has_genomic + has gDNA hypothesis)
-            // midpoint observed in this MM group for regional weighting.
-            if (has_genomic &&
-                st.mm_gmid_first ==
-                    std::numeric_limits<int64_t>::min()) {
-                st.mm_gmid_first =
-                    static_cast<int64_t>(genomic_start_val)
-                    + static_cast<int64_t>(gfp_val) / 2;
-            }
         }
 
         // Track member count for NH bookkeeping
@@ -611,7 +587,6 @@ private:
 
     void flush_mm_group(
         FillState& st,
-        double gdna_log_sp,
         int64_t& stat_mm,
         int64_t& stat_gated) const
     {
@@ -632,8 +607,6 @@ private:
 
         int64_t emit_start = st.cand_cur;
         double best_ll = NEG_INF;
-        int32_t best_t = -1;
-        int32_t best_ct = 0;
 
         for (auto& [t_idx, mc] : st.mm_merged) {
             double pool_best = t_is_nrna_[t_idx]
@@ -645,11 +618,7 @@ private:
                     static_cast<uint8_t>(mc.count_col));
                 st.v_cw->push_back(static_cast<float>(mc.coverage_wt));
                 ++st.cand_cur;
-                if (mc.log_lik > best_ll) {
-                    best_ll = mc.log_lik;
-                    best_t  = t_idx;
-                    best_ct = mc.count_col;
-                }
+                if (mc.log_lik > best_ll) best_ll = mc.log_lik;
             }
         }
 
@@ -657,9 +626,6 @@ private:
         int64_t new_cands = st.cand_cur - emit_start;
         if (new_cands > 0) {
             st.v_offsets->push_back(st.cand_cur);
-            st.v_locus_t->push_back(best_t);
-            st.v_locus_ct->push_back(
-                static_cast<uint8_t>(best_ct));
             st.v_fid->push_back(st.mm_fid);
             st.v_fclass->push_back(
                 static_cast<int8_t>(FRAG_MULTIMAPPER));
@@ -683,14 +649,10 @@ private:
             st.v_is_spliced->push_back(has_gdna ? 0 : 1);
             if (has_gdna) {
                 st.v_gdna_ll->push_back(static_cast<float>(final_gdna_ll));
-                st.v_gmid->push_back(st.mm_gmid_first);
             } else {
                 st.v_gdna_ll->push_back(static_cast<float>(NEG_INF));
-                st.v_gmid->push_back(
-                    std::numeric_limits<int64_t>::min());
             }
 
-            ++st.unit_cur;
             ++stat_mm;
         } else {
             ++stat_gated;
@@ -701,10 +663,9 @@ private:
 
     // Single-pass inner loop — scores fragments and pushes results
     // to growing output vectors.  Also accumulates ua_counts for
-    // det-unambig fragments (merged from the former count pass).
+    // det-unambig fragments.
     void score_chunk_impl(
         const ChunkPtrs& cp,
-        double gdna_log_sp,
         FillState& st,
         int64_t& stat_det, int64_t& stat_em_u,
         int64_t& stat_em_as, int64_t& stat_em_ao,
@@ -745,19 +706,19 @@ private:
                 if (fid_val != st.mm_fid) {
                     if (st.mm_n_members > 0) {
                         flush_mm_group(
-                            st, gdna_log_sp,
+                            st,
                             stat_mm, stat_gated);
                     }
                     st.mm_fid = fid_val;
                 }
-                score_mm_alignment(cp, i, st, gdna_log_sp);
+                score_mm_alignment(cp, i, st);
                 continue;
             }
 
             // Non-MM fragment: flush any pending MM group
             if (st.mm_n_members > 0) {
                 flush_mm_group(
-                    st, gdna_log_sp,
+                    st,
                     stat_mm, stat_gated);
             }
 
@@ -767,50 +728,40 @@ private:
             int64_t end    = t_off[i + 1];
             int n_cand     = static_cast<int>(end - start);
 
-            // zero-candidate fragments are present in the
-            // buffer for calibration only (intergenic / dropped
-            // by merge).  Skip silently — they must not contribute
-            // to stat_gated, otherwise accountability double-counts
-            // (the legacy n_intergenic_unspliced/_spliced counter
-            // already represents these fragments).
+            // A fragment with no candidate is skipped and not counted in stat_gated.
             if (n_cand <= 0) continue;
 
             // ---- Det-unambig: both ua_counts + det arrays ----
-            if (fclass == FRAG_UNAMBIG ||
-                fclass == FRAG_AMBIG_SAME_STRAND)
-            {
-                if (fclass == FRAG_UNAMBIG &&
-                    stype == SPLICE_SPLICED_ANNOT) {
-                    int32_t t_idx = t_ind[start];
+            if (fclass == FRAG_UNAMBIG &&
+                stype == SPLICE_SPLICED_ANNOT) {
+                int32_t t_idx = t_ind[start];
 
-                    // ua_counts accumulation
-                    {
-                        int t_sv =
-                            static_cast<int>(st.t_str[t_idx]);
-                        bool anti;
-                        if (exon_str == 1 || exon_str == 2) {
-                            bool same = (exon_str == t_sv);
-                            double lp = same ? log_p_sense_
-                                            : log_p_antisense_;
-                            anti = std::exp(lp) < 0.5;
-                        } else {
-                            anti = false;
-                        }
-                        int col =
-                            stype * 2 + (anti ? 1 : 0);
-                        if (col < st.ua_ncols)
-                            st.ua_counts[
-                                t_idx * st.ua_ncols + col]
-                                += 1.0;
+                // ua_counts accumulation
+                {
+                    int t_sv =
+                        static_cast<int>(st.t_str[t_idx]);
+                    bool anti;
+                    if (exon_str == 1 || exon_str == 2) {
+                        bool same = (exon_str == t_sv);
+                        double lp = same ? log_p_sense_
+                                        : log_p_antisense_;
+                        anti = std::exp(lp) < 0.5;
+                    } else {
+                        anti = false;
                     }
-
-                    // Det-unambig output arrays
-                    st.v_det_ti->push_back(t_idx);
-                    st.v_det_fid->push_back(f_id[i]);
-                    ++st.det_cur;
-                    ++stat_det;
-                    continue;
+                    int col =
+                        stype * 2 + (anti ? 1 : 0);
+                    if (col < st.ua_ncols)
+                        st.ua_counts[
+                            t_idx * st.ua_ncols + col]
+                            += 1.0;
                 }
+
+                // Det-unambig output arrays
+                st.v_det_ti->push_back(t_idx);
+                st.v_det_fid->push_back(f_id[i]);
+                ++stat_det;
+                continue;
             }
 
             // ---- EM-routed scoring ----
@@ -824,88 +775,80 @@ private:
 
             int64_t emit_start = st.cand_cur;
             double best_ll = NEG_INF;
-            int32_t best_t = -1;
-            int32_t best_ct = 0;
 
-            if (n_cand > 0) {
-                // ===== mRNA scoring =====
-                struct MrnaScored {
-                    int32_t t_idx, oh, ct;
-                    double  log_lik, cov_wt;
-                };
-                MrnaScored m_stack[SCORED_STACK_CAPACITY];
-                std::vector<MrnaScored> m_heap;
-                MrnaScored* m_scored = m_stack;
-                if (n_cand > SCORED_STACK_CAPACITY) {
-                    m_heap.resize(n_cand);
-                    m_scored = m_heap.data();
-                }
-                int m_n = 0;
+            // ===== mRNA scoring =====
+            struct MrnaScored {
+                int32_t t_idx, oh, ct;
+                double  log_lik, cov_wt;
+            };
+            MrnaScored m_stack[SCORED_STACK_CAPACITY];
+            std::vector<MrnaScored> m_heap;
+            MrnaScored* m_scored = m_stack;
+            if (n_cand > SCORED_STACK_CAPACITY) {
+                m_heap.resize(n_cand);
+                m_scored = m_heap.data();
+            }
+            int m_n = 0;
 
-                for (int64_t k = start; k < end; ++k) {
-                    int32_t t_idx = t_ind[k];
-                    int32_t ebp   = e_bp[k];
-                    if (ebp <= 0) continue;
+            for (int64_t k = start; k < end; ++k) {
+                int32_t t_idx = t_ind[k];
+                int32_t ebp   = e_bp[k];
+                if (ebp <= 0) continue;
 
-                    int32_t oh = rl - ebp;
-                    if (oh < 0) oh = 0;
+                int32_t oh = rl - ebp;
+                if (oh < 0) oh = 0;
 
-                    int32_t flen = f_len[k];
-                    double log_fl = frag_len_log_lik(flen);
+                int32_t flen = f_len[k];
+                double log_fl = frag_len_log_lik(flen);
 
-                    double log_strand;
-                    bool is_anti;
-                    if (has_strand) {
-                        bool same = (exon_str ==
-                            static_cast<int>(t_strand_[t_idx]));
-                        log_strand = same ? log_p_sense_
-                                         : log_p_antisense_;
-                        is_anti = same ? r1_antisense_
-                                      : !r1_antisense_;
-                    } else {
-                        log_strand = LOG_HALF;
-                        is_anti = false;
-                    }
-
-                    double log_lik = log_strand + log_fl
-                                   + oh * oh_log_pen_ + log_nm;
-                    int32_t ct = stype * 2 + (is_anti ? 1 : 0);
-
-                    double cov_wt = (has_genomic && flen > 0)
-                        ? coverage_weight(genomic_start, flen, t_idx) : 1.0;
-
-                    m_scored[m_n++] = {t_idx, oh, ct, log_lik, cov_wt};
+                double log_strand;
+                bool is_anti;
+                if (has_strand) {
+                    bool same = (exon_str ==
+                        static_cast<int>(t_strand_[t_idx]));
+                    log_strand = same ? log_p_sense_
+                                     : log_p_antisense_;
+                    is_anti = same ? r1_antisense_
+                                  : !r1_antisense_;
+                } else {
+                    log_strand = LOG_HALF;
+                    is_anti = false;
                 }
 
-                // Pool-separated likelihood pruning
-                double mrna_best = NEG_INF;
-                double nrna_best = NEG_INF;
-                for (int j = 0; j < m_n; ++j) {
-                    if (t_is_nrna_[m_scored[j].t_idx])
-                        nrna_best = std::max(nrna_best,
-                                             m_scored[j].log_lik);
-                    else
-                        mrna_best = std::max(mrna_best,
-                                             m_scored[j].log_lik);
-                }
+                double log_lik = log_strand + log_fl
+                               + oh * oh_log_pen_ + log_nm;
+                int32_t ct = stype * 2 + (is_anti ? 1 : 0);
 
-                for (int j = 0; j < m_n; ++j) {
-                    auto& s = m_scored[j];
-                    double pool_best = t_is_nrna_[s.t_idx]
-                                     ? nrna_best : mrna_best;
-                    if (pool_best - s.log_lik <= max_ll_delta_) {
-                        st.v_ti->push_back(s.t_idx);
-                        st.v_ll->push_back(static_cast<float>(s.log_lik));
-                        st.v_ct->push_back(
-                            static_cast<uint8_t>(s.ct));
-                        st.v_cw->push_back(static_cast<float>(s.cov_wt));
-                        ++st.cand_cur;
-                        if (s.log_lik > best_ll) {
-                            best_ll = s.log_lik;
-                            best_t  = s.t_idx;
-                            best_ct = s.ct;
-                        }
-                    }
+                double cov_wt = (has_genomic && flen > 0)
+                    ? coverage_weight(genomic_start, flen, t_idx) : 1.0;
+
+                m_scored[m_n++] = {t_idx, oh, ct, log_lik, cov_wt};
+            }
+
+            // Pool-separated likelihood pruning
+            double mrna_best = NEG_INF;
+            double nrna_best = NEG_INF;
+            for (int j = 0; j < m_n; ++j) {
+                if (t_is_nrna_[m_scored[j].t_idx])
+                    nrna_best = std::max(nrna_best,
+                                         m_scored[j].log_lik);
+                else
+                    mrna_best = std::max(mrna_best,
+                                         m_scored[j].log_lik);
+            }
+
+            for (int j = 0; j < m_n; ++j) {
+                auto& s = m_scored[j];
+                double pool_best = t_is_nrna_[s.t_idx]
+                                 ? nrna_best : mrna_best;
+                if (pool_best - s.log_lik <= max_ll_delta_) {
+                    st.v_ti->push_back(s.t_idx);
+                    st.v_ll->push_back(static_cast<float>(s.log_lik));
+                    st.v_ct->push_back(
+                        static_cast<uint8_t>(s.ct));
+                    st.v_cw->push_back(static_cast<float>(s.cov_wt));
+                    ++st.cand_cur;
+                    if (s.log_lik > best_ll) best_ll = s.log_lik;
                 }
             }
 
@@ -913,9 +856,6 @@ private:
             int64_t new_cands = st.cand_cur - emit_start;
             if (new_cands > 0) {
                 st.v_offsets->push_back(st.cand_cur);
-                st.v_locus_t->push_back(best_t);
-                st.v_locus_ct->push_back(
-                    static_cast<uint8_t>(best_ct));
                 st.v_fid->push_back(f_id[i]);
                 st.v_fclass->push_back(
                     static_cast<int8_t>(fclass));
@@ -927,8 +867,8 @@ private:
                 // candidate. EM applies per-locus gDNA effective length.
                 double gdna_ll = 0.0;
                 bool has_gdna = false;
-                if (gdna_can_explain(stype) && best_t >= 0) {
-                    gdna_ll = gdna_frag_len_log_lik(genomic_footprint) + gdna_log_sp + LOG_HALF + log_nm;
+                if (gdna_can_explain(stype)) {
+                    gdna_ll = gdna_frag_len_log_lik(genomic_footprint) + LOG_HALF + log_nm;
                     has_gdna = gdna_competes(gdna_ll, best_ll);
                 }
                 // "spliced" = gDNA is no candidate: certified RNA.
@@ -937,21 +877,9 @@ private:
 
                 if (has_gdna) {
                     st.v_gdna_ll->push_back(static_cast<float>(gdna_ll));
-                    if (has_genomic) {
-                        st.v_gmid->push_back(
-                            static_cast<int64_t>(genomic_start)
-                            + static_cast<int64_t>(genomic_footprint) / 2);
-                    } else {
-                        st.v_gmid->push_back(
-                            std::numeric_limits<int64_t>::min());
-                    }
                 } else {
                     st.v_gdna_ll->push_back(static_cast<float>(NEG_INF));
-                    st.v_gmid->push_back(
-                        std::numeric_limits<int64_t>::min());
                 }
-
-                ++st.unit_cur;
 
                 if (fclass == FRAG_UNAMBIG)
                     ++stat_em_u;
@@ -964,8 +892,6 @@ private:
             }
         }
     }
-
-    // (fused_score_buffer removed — use StreamingScorer instead)
 };
 
 // ================================================================
@@ -987,11 +913,8 @@ class StreamingScorer {
     std::vector<float>*    v_ll_;
     std::vector<uint8_t>*  v_ct_;
     std::vector<float>*    v_cw_;
-    std::vector<int32_t>*  v_lt_;
-    std::vector<uint8_t>*  v_lct_;
     std::vector<int8_t>*   v_isp_;
     std::vector<float>*    v_gll_;
-    std::vector<int64_t>*  v_gmid_;
     std::vector<int64_t>*  v_fid_;
     std::vector<int8_t>*   v_fc_;
     std::vector<uint8_t>*  v_st_;
@@ -1001,7 +924,6 @@ class StreamingScorer {
     std::vector<uint8_t>*  v_chim_stype_;
 
     NativeFragmentScorer::FillState st_;
-    double gdna_log_sp_;
 
     // Statistics
     int64_t stat_det_, stat_em_u_, stat_em_as_, stat_em_ao_;
@@ -1013,10 +935,8 @@ public:
     StreamingScorer(
         NativeFragmentScorer& scorer,
         i8_1d   t_to_strand_arr,
-        f64_2d_mut unambig_counts,
-        double  gdna_log_splice_pen_unspliced)
+        f64_2d_mut unambig_counts)
       : scorer_(scorer),
-        gdna_log_sp_(gdna_log_splice_pen_unspliced),
         stat_det_(0), stat_em_u_(0), stat_em_as_(0),
         stat_em_ao_(0), stat_gated_(0), stat_chim_(0),
         stat_mm_(0), finished_(false)
@@ -1029,11 +949,8 @@ public:
         v_ll_  = new std::vector<float>();
         v_ct_  = new std::vector<uint8_t>();
         v_cw_  = new std::vector<float>();
-        v_lt_  = new std::vector<int32_t>();
-        v_lct_ = new std::vector<uint8_t>();
         v_isp_ = new std::vector<int8_t>();
         v_gll_ = new std::vector<float>();
-        v_gmid_ = new std::vector<int64_t>();
         v_fid_ = new std::vector<int64_t>();
         v_fc_  = new std::vector<int8_t>();
         v_st_  = new std::vector<uint8_t>();
@@ -1049,11 +966,8 @@ public:
         st_.v_ll         = v_ll_;
         st_.v_ct         = v_ct_;
         st_.v_cw         = v_cw_;
-        st_.v_locus_t    = v_lt_;
-        st_.v_locus_ct   = v_lct_;
         st_.v_is_spliced = v_isp_;
         st_.v_gdna_ll    = v_gll_;
-        st_.v_gmid       = v_gmid_;
         st_.v_fid        = v_fid_;
         st_.v_fclass     = v_fc_;
         st_.v_stype      = v_st_;
@@ -1075,11 +989,8 @@ public:
         delete v_ll_;
         delete v_ct_;
         delete v_cw_;
-        delete v_lt_;
-        delete v_lct_;
         delete v_isp_;
         delete v_gll_;
-        delete v_gmid_;
         delete v_fid_;
         delete v_fc_;
         delete v_st_;
@@ -1115,7 +1026,7 @@ public:
             nb::cast<u8_1d>(chunk_arrays[4]).shape(0));
 
         scorer_.score_chunk_impl(
-            cp, gdna_log_sp_, st_,
+            cp, st_,
             stat_det_, stat_em_u_, stat_em_as_,
             stat_em_ao_, stat_gated_, stat_chim_,
             stat_mm_);
@@ -1130,7 +1041,7 @@ public:
         // Flush final pending MM group
         if (st_.mm_n_members > 0) {
             scorer_.flush_mm_group(
-                st_, gdna_log_sp_,
+                st_,
                 stat_mm_, stat_gated_);
         }
 
@@ -1143,8 +1054,6 @@ public:
             vec_to_ndarray(v_ll_),
             vec_to_ndarray(v_ct_),
             vec_to_ndarray(v_cw_),
-            vec_to_ndarray(v_lt_),
-            vec_to_ndarray(v_lct_),
             vec_to_ndarray(v_isp_),
             vec_to_ndarray(v_gll_),
             vec_to_ndarray(v_fid_),
@@ -1160,17 +1069,14 @@ public:
             stat_em_ao_,
             stat_gated_,
             stat_chim_,
-            stat_mm_,
-            vec_to_ndarray(v_gmid_)
+            stat_mm_
         );
 
         // Null out pointers — capsules now own the memory
         v_offsets_ = nullptr;
         v_ti_ = nullptr;  v_ll_ = nullptr;
         v_ct_ = nullptr;  v_cw_ = nullptr;
-        v_lt_ = nullptr;  v_lct_ = nullptr;
         v_isp_ = nullptr; v_gll_ = nullptr;
-        v_gmid_ = nullptr;
         v_fid_ = nullptr;
         v_fc_ = nullptr;  v_st_ = nullptr;
         v_dti_ = nullptr; v_dfid_ = nullptr;
@@ -1221,12 +1127,10 @@ NB_MODULE(_scoring_impl, m) {
         .def(nb::init<
                  NativeFragmentScorer&,
                  i8_1d,
-                 f64_2d_mut,
-                 double>(),
+                 f64_2d_mut>(),
              nb::arg("scorer"),
              nb::arg("t_to_strand_arr"),
-             nb::arg("unambig_counts"),
-             nb::arg("gdna_log_splice_pen_unspliced"))
+             nb::arg("unambig_counts"))
         .def("score_chunk",
              &StreamingScorer::score_chunk,
              nb::arg("chunk_arrays"))

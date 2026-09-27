@@ -1,7 +1,6 @@
 """CalibrationSubstrate: one type, the payload's own axes, and what those axes conserve.
 
 This file gates the substrate the solver is handed — the populations each on its own axis, the
-numeric convention that a count is an integer and a fraction is a float64 arriving undecoded, the
 derived per-crossing quantities, and the alignment guard that refuses a geometry whose object count
 or per-reference offsets have drifted from the payload's. A population read against the wrong axis
 drops nearly every fragment inside ``deposit()`` while every golden test stays green, so the shapes
@@ -49,28 +48,23 @@ def test_every_population_is_present_on_the_RIGHT_axis(substrate):
     # The populations do NOT all carry the same channels — a channel is stored where a named
     # consumer reads it. ``None`` means "this population does not measure that", which is a different
     # statement from "it measured it and got zero", and the view keeps them distinguishable.
-    for view, n, channels in (
-        # the REGION bank is the contained rule and carries its OWN name — two deposit rules under
-        # one attribute is TRAPS: two-masks-one-name.
-        (sub.region_contained, payload.n_regions, ("inv_opportunity_sum",)),
-        (sub.boundary_unspliced, payload.n_boundaries, ("inv_length_sum", "mass")),
-        (sub.boundary_spliced, payload.n_boundaries, ("mass",)),
-        (sub.sj, payload.n_sj, ("inv_length_sum", "mass")),
+    for view, n, has_mass in (
+        (sub.region_contained, payload.n_regions, False),
+        (sub.boundary_unspliced, payload.n_boundaries, True),
+        (sub.boundary_spliced, payload.n_boundaries, True),
+        (sub.sj, payload.n_sj, True),
     ):
         assert view.count.shape == (n, 2)
-        for channel in ("inv_length_sum", "mass"):
-            value = getattr(view, channel)
-            if channel in channels:
-                # ONE column, on BOTH channels: the length moments carry no strand axis and neither
-                # does a mass, while ``count`` keeps two. ``sj_mass`` arrives from the payload with
-                # two columns and is FOLDED at this boundary, so this shape assertion is what pins
-                # the fold for the sj row.
-                assert value is not None and value.shape == (n,)
-            else:
-                assert value is None, (
-                    f"{view.name}.{channel} must be None, not zeros — a zero array cannot be told "
-                    f"apart from a real measurement of nothing"
-                )
+        if has_mass:
+            # ONE column: a mass carries no strand axis, while ``count`` keeps two. ``sj_mass``
+            # arrives from the payload with two columns and is FOLDED at this boundary, so this
+            # shape assertion is what pins the fold for the sj row.
+            assert view.mass is not None and view.mass.shape == (n,)
+        else:
+            assert view.mass is None, (
+                f"{view.name}.mass must be None, not zeros — a zero array cannot be told "
+                f"apart from a real measurement of nothing"
+            )
     assert payload.n_regions != payload.n_boundaries, "the fixture must not let an axis mix-up pass"
 
 
@@ -92,45 +86,6 @@ def test_no_population_is_a_VIEW_OF_ANOTHER(substrate):
     banks = [sub.region_contained, sub.boundary_unspliced, sub.boundary_spliced]
     totals = [int(b.count.sum()) for b in banks]
     assert len(set(totals)) == len(totals), "the fixture gives every bank a distinct total"
-
-
-# ---------------------------------------------------------------------------
-# the numeric convention
-# ---------------------------------------------------------------------------
-
-
-def test_a_FRACTION_arrives_as_float64_with_NO_decode(substrate):
-    """One numeric convention: a count is an integer, a fraction is float64.
-
-    There is nothing to decode at this boundary — the accumulator deposits ``1/placements``
-    directly — so the assertion is that the value arrives unchanged. A fixed-point decode
-    reintroduced here would divide by 2^32 and show up immediately.
-
-    ``atol=0, rtol=0`` — exact. This is a passthrough, not an arithmetic result, so a tolerance here
-    would only hide a scale factor.
-    """
-    sub, payload, _ = substrate
-    np.testing.assert_allclose(
-        sub.region_contained.inv_opportunity_sum,
-        payload.region_contained_inv_opportunity_sum,
-        rtol=0,
-        atol=0,
-    )
-    assert sub.region_contained.inv_opportunity_sum.dtype == np.float64
-    # TRAPS: two-masks-one-name — the REGION view must NOT also expose its bank under the
-    # boundary-rule name: the two deposits have different targets (rho*P(w<=ell) vs rho*P(w>=2)).
-    assert sub.region_contained.inv_length_sum is None
-    assert sub.boundary_unspliced.inv_opportunity_sum is None
-
-
-def test_a_decoded_sum_recovers_the_reciprocal_placements_it_was_built_from(substrate):
-    """The fixture deposited ``n`` fragments at 50 placements into the contained bank, so the
-    substrate's sum must read ``n / 50``."""
-    sub, payload, _ = substrate
-    counts = payload.region_contained_count.astype(np.float64).sum(axis=1)
-    # The fixture builds this bank as ``counts / 50`` in float64 and the substrate passes it through
-    # unchanged, so the tolerance only has to exclude a scale factor.
-    np.testing.assert_allclose(sub.region_contained.inv_opportunity_sum, counts / 50.0, rtol=1e-7)
 
 
 # ---------------------------------------------------------------------------

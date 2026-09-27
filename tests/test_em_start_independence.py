@@ -34,8 +34,6 @@ PARTITION_KEYS = (
     "count_cols",
     "is_spliced",
     "gdna_log_liks",
-    "locus_t_indices",
-    "locus_count_cols",
 )
 # The clamp forked these pairs between the coverage and the uniform start (7 to 72 fragments apart).
 FORKED = [

@@ -1,4 +1,4 @@
-"""THE BACKBONE — the self-solve, two directional passes, one ψ solve, one write-back, four assertions.
+"""THE BACKBONE — the self-solve, two directional passes, one ψ solve, one write-back, two assertions.
 
        Gate: ``tests/calibration/test_sweep_backbone.py``
 
@@ -9,10 +9,9 @@ neighbour sends, and ONE solve per node from its own evidence, the two held mess
 chain is a forest of linear paths, so that is exact belief propagation, not an iteration.
 
 THE SWEEP IS ONE NATIVE CALL (`native.solve_blocks`, `native/solve_kernel.cpp`). This file cuts the chain
-into locus blocks, reduces the policy's library over the whole chain,
-it can serve, hands the kernel the chain's arrays, the blocks, the priors' INPUTS (the landscape's curve;
-the intron factory's background, mask, counts and opportunities) and the served deliveries, and reads
-back the belief, ``has_composition``, the assertions' counts and — for the cache — each block's delivery.
+into locus blocks, reduces the policy's library over the whole chain, hands the kernel the chain's arrays,
+the blocks and the priors' INPUTS (the landscape's curve; the intron factory's background, mask, counts
+and opportunities), and reads back the belief, ``has_composition`` and the assertions' counts.
 Inside the call a pool of threads pulls the blocks one at a time; each block runs the whole pipeline on
 its own thread and arena — the prior rows, the self-solve ψ, the own-evidence precision, the policy's
 builders, the two passes, the solve, the final ψ, the write-back, the counts — and nothing is reduced
@@ -20,7 +19,7 @@ across blocks but integer counts, so the answer is BIT-IDENTICAL at every thread
 
 This file knows nothing about capture, splice in, levels, lanes or enrichment — those words do not appear
 in it, and that is the design rather than tidiness. Everything about *what a message says* is a
-:mod:`~.messages` policy, built in the kernel. What is left here is the shape of the solve and the four
+:mod:`~.messages` policy, built in the kernel. What is left here is the shape of the solve and the two
 invariants no policy may break, counted in the kernel on every block's owned slots and judged here:
 
 ===================================================  ====================================================
@@ -28,8 +27,6 @@ the backbone asserts                                 it would have caught
 ===================================================  ====================================================
 every delivered row is one row per slot, finite      a NaN reaching ψ (a row off the solve grid cannot be
                                                      built: the kernel's rows are the grid's)
-``|T| <= 3``                                         AXIOM 0, made executable
-the write-back touches only ``solvable`` slots       a replay that read the untouched mask as a difference
 the kernel sees only the two NEIGHBOUR states        a message built from the destination's own belief —
                                                      enforced by construction: the pass builds each
                                                      destination's row from the source's claim and what
@@ -79,7 +76,7 @@ from .region_geometry import (
     region_gdna_geometry,
 )
 from .region_init import strand_discriminability
-from .signature import BIT_EXON_NEG, BIT_EXON_POS, coarse_type_array
+from .signature import BIT_EXON_NEG, BIT_EXON_POS, RegionType, coarse_type_array
 from .simplex_logodds import _TILT_NODES, CubeRows, _logodds_grid
 from .region_chain import BOUNDARY, REGION, RegionChain, RegionDeconv, locus_blocks
 
@@ -270,14 +267,9 @@ def solve_chain(
     delivered = {k: np.asarray(res[k], bool) for k in ("rows_delivered", "cube_delivered")}
     counts = AssertionCounts.of_blocks(res["assertions"], res["counts"], delivered, n_owned)
     if _capture is not None:  # inert diagnostic hook
-        _capture.fill(
-            _gather_diagnostics(chain, view, belief, out, diag, res, blocks, geometry, lam)
-        )
+        _capture.fill(_gather_diagnostics(view, out, diag, res, blocks, geometry, lam))
         _capture.backbone_assertions = counts
-        # which policy ran, read off the artifact — the witness an instrument's "the arm ran"
-        # assertion needs, never a config flag it did not thread
         _capture.policy_name = str(policy.name)
-        _capture.solve_grid = _logodds_grid(int(n_grid), float(logodds_window))[1]
     return RegionBelief(**out, has_composition=has_composition)
 
 
@@ -336,7 +328,7 @@ def _structure(chain, statics, region_arrays) -> _Structure:
     sig = np.asarray(region_arrays.signature).astype(np.int64)[ri]
     fp, fn = np.asarray(statics.free_pos, bool), np.asarray(statics.free_neg, bool)
     return _Structure(
-        is_exon_region=is_region & (rtype[ri] == 2),
+        is_exon_region=is_region & (rtype[ri] == RegionType.EXON),
         exon_pos=is_region & ((sig & BIT_EXON_POS) > 0),
         exon_neg=is_region & ((sig & BIT_EXON_NEG) > 0),
         terminal=is_region & g1_locked(fp, fn),
@@ -365,13 +357,13 @@ def _factory_of(intron_prior):
     return intron_prior if hasattr(intron_prior, "kernel") else _RowsOfArray(intron_prior)
 
 
-def _gather_diagnostics(chain, view, belief, out, diag, res, blocks, geometry, lam) -> SweepCapture:
+def _gather_diagnostics(view, out, diag, res, blocks, geometry, lam) -> SweepCapture:
     """The diagnostic capture of one sweep — the instruments' view (:class:`~.blocks.SweepCapture`),
     assembled from the kernel's per-slot arrays and its per-block cube rows and received tables. One extra
     solve lives in the kernel's capture mode and nowhere in production: the strand-ONLY belief (no prior, no
     messages), to split the local error into the strand likelihood against the prior's contribution."""
     fp, fn = np.asarray(view.free_pos, bool), np.asarray(view.free_neg, bool)
-    mass_global, eff_global = region_gdna_geometry(geometry)
+    mass_global, _ = region_gdna_geometry(geometry)
     cubes = []
     for b, cube in zip(blocks, res["cubes"]):
         if cube is None:
@@ -402,7 +394,6 @@ def _gather_diagnostics(chain, view, belief, out, diag, res, blocks, geometry, l
         var_g=out["var_gdna"].copy(),
         tau_lam=diag["tau_lam"],
         tau_fac=diag["tau_fac"],
-        fg_init=np.asarray(belief.f_g, np.float64),
         solvable=(fp | fn) & (view.n_slot > 0.0),
         count=np.asarray(view.unspliced_count, np.float64),
         spliced=view.spliced_slot,
@@ -410,15 +401,11 @@ def _gather_diagnostics(chain, view, belief, out, diag, res, blocks, geometry, l
         free_pos=fp,
         free_neg=fn,
         eff_gdna=np.asarray(view.eff_gdna, np.float64),
-        eff_rna=np.asarray(view.eff_rna, np.float64),
         mass_global=mass_global,
-        eff_global=eff_global,
         lam_rows=diag["lam_rows"] if delivered_rows else None,
         cube_rows=CubeRows.concat(cubes) if cubes else None,
         from_left=SweepCapture.concat_received([r[0] for r in received]) if received else None,
         from_right=SweepCapture.concat_received([r[1] for r in received]) if received else None,
-        left=np.asarray(chain.left, np.int64),
-        right=np.asarray(chain.right, np.int64),
     )
 
 

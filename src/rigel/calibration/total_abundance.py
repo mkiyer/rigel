@@ -81,7 +81,6 @@ class RegionWallMask:
     d_high: np.ndarray  # float64 (n_regions,)
     start_exact: np.ndarray  # bool (n_regions,)
     end_exact: np.ndarray  # bool (n_regions,)
-    w_max: int
 
     @property
     def double_walled(self) -> np.ndarray:
@@ -171,7 +170,6 @@ def build_region_wall_mask(
         d_high=d_high,
         start_exact=d_high >= bar,
         end_exact=d_low >= bar,
-        w_max=int(w_max),
     )
 
 

@@ -92,7 +92,7 @@ layer up is telling you the thing belongs lower. `rigel/calibration/_layers.py` 
 | what a fragment tally MEANS | **1 · the payload view** — `splice_graph` `substrate` `region_arrays` |
 | how many places a fragment COULD have sat | **2 · opportunity** — `effective_length` `capture_eff_length` `sj_opportunity` `gdna_opportunity` `fl` |
 | one slot's own numbers, ψ, and its total | **3 · geometry + the per-slot solve** — `region_geometry` `simplex_logodds` `total_abundance` |
-| which strand a fragment came from | **4 · strand** — `gdna_strand` `strand_balance` `strand_summary` |
+| which strand a fragment came from | **4 · strand** — `gdna_strand` `strand_balance` |
 | how dense a component is, and the priors | **5 · density and prior** — `density_model` `density_deconv` `landscape` `abundance_landscape` |
 | what one neighbour tells another | **6 · the solve** — `sweep` (the backbone) + `blocks` (the chain view's fields and the diagnostic capture) + `messages/` (the policy) + `region_init` |
 | turning the solve into a result | **7 · assemble** — `calibrate` `priors` `result` `derive` `diagnostics` `track` |
@@ -199,9 +199,10 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,451 passed / 0 skipped / 2 xfail, 3,453 collected** — re-derived 2026-09-26 on `main`
-on a clean checkout (3,450 − 1 + 4: the finished cleanup ledger retired from `docs/dev/`, the owner's four
-splicing-artifact notes added there). An untracked file under `docs/dev/` is a
+**The standing baseline: 0 failed / 3,418 passed / 0 skipped / 2 xfail, 3,420 collected** — re-derived 2026-09-27
+on a clean checkout (3,453 − 34 + 1: the code review's behaviour-preserving cleanup deleted two `src/` modules and one
+test file and added one, and removed 54 cases with the dead code they tested while adding 20; the review's working note
+added to `docs/dev/`). An untracked file under `docs/dev/` is a
 jargon case too, so a working tree holding notes reads higher (the count is re-derived from the table below at every commit
 that measures the suite; the history of how it moved is git, not this file). The 2 xfails are executable records of proven
 defects whose fixes are elsewhere (`ISSUES: two-sided-exon-row`; `ISSUES: the-lower-bound-noise-ratchet`), deferred by

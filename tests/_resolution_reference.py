@@ -33,7 +33,7 @@ def _detect_intrachromosomal_chimera(
     exon_blocks: tuple,
     exon_t_sets: list[frozenset[int]],
     max_fragment_length: int,
-) -> tuple[ChimeraType, int] | None:
+) -> ChimeraType | None:
     """Detect intrachromosomal chimeras via transcript-set disjointness.
 
     Two exon blocks are "connected" if their transcript sets share at
@@ -63,10 +63,8 @@ def _detect_intrachromosomal_chimera(
 
     Returns
     -------
-    tuple[ChimeraType, int] or None
-        ``(chimera_type, chimera_gap)`` if chimeric, ``None`` otherwise.
-        ``chimera_gap`` is the minimum genomic distance (bp) between
-        exon blocks in different connected components.
+    ChimeraType or None
+        The chimera type if chimeric, ``None`` otherwise.
     """
     # Filter to blocks with non-empty transcript sets
     items = [(block, tset) for block, tset in zip(exon_blocks, exon_t_sets) if tset]
@@ -128,24 +126,7 @@ def _detect_intrachromosomal_chimera(
         if span <= max_fragment_length:
             return None
 
-    # --- Compute minimum gap between components ---
-    comp_list = list(components.values())
-    min_gap = float("inf")
-    for ci in range(len(comp_list)):
-        for cj in range(ci + 1, len(comp_list)):
-            for bi in comp_list[ci]:
-                for bj in comp_list[cj]:
-                    blk_i = items[bi][0]
-                    blk_j = items[bj][0]
-                    if blk_i.end <= blk_j.start:
-                        gap = blk_j.start - blk_i.end
-                    elif blk_j.end <= blk_i.start:
-                        gap = blk_i.start - blk_j.end
-                    else:
-                        gap = 0  # overlapping
-                    min_gap = min(min_gap, gap)
-
-    return chimera_type, int(min_gap)
+    return chimera_type
 
 
 # ---------------------------------------------------------------------------

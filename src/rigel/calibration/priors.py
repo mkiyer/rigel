@@ -324,8 +324,7 @@ def assemble_priors(
 
     No floor and no shrinkage: the efficiencies are posterior means under the population landscape, so a
     locus with little evidence reads the population's own level, never a fabricated 0 and never the
-    uncontracted span (the multimapper floor ``C/(C+1)`` this replaces cost the unprobed class 30×;
-    `ISSUES: ruler-multimapper-floor-caps-the-correction`).
+    uncontracted span.
     """
     if calibration.n_regions != region_arrays.n_regions:
         raise ValueError(

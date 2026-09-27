@@ -38,7 +38,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ._bam_impl import Accumulator as NativeAccumulator
+from .native import Accumulator as NativeAccumulator
 from .scan_payload import (
     _DEFERRED_RECORD_FIELDS,
     ADDITIVE_AXES,
@@ -84,14 +84,8 @@ class HeldScores:
 
     score: np.ndarray  # float64, flat, sums to 1 within each record's run
     terms: HypothesisTerms
-    #: Records whose hypotheses all scored zero. Their score run is left UNIFORM rather than NaN —
-    #: a fragment the evidence cannot separate is a fragment to pick from at random, not one to drop.
-    #: The count is the honest denominator for "how much did the evidence actually decide?".
+    #: Records with more than one candidate tied for the lead (:func:`combine_factors`).
     n_undecided: int
-
-    @property
-    def n_hypotheses(self) -> int:
-        return int(self.score.shape[0])
 
 
 def _distinguishing_boundaries(
@@ -169,8 +163,8 @@ def combine_factors(
 ) -> tuple[np.ndarray, bool]:
     """Combine one fragment's three factors into a normalised posterior over its candidates.
 
-    Returns ``(scores, undecided)``. The scores sum to 1 across the candidate set; ``undecided`` says the
-    evidence separated nothing, so the run was left uniform.
+    Returns ``(scores, undecided)``. The scores sum to 1 across the candidate set; ``undecided`` is true
+    when more than one candidate is tied for the lead.
 
         score(h)  =  rho(h)  x  f(L_h)  x  s(h),   normalised over the candidate set
 
@@ -374,9 +368,9 @@ def score_held_fragments(
     payload
         Pass 1's tally **and** its side buffer.
     fl_models
-        ``build_fl_models(payload)``. ``rna_pmf`` scores a spliced hypothesis, which is certified RNA;
-        ``global_pmf`` — the unconditional anchor — scores the genomic one, whose component is unknown and
-        must therefore be marginalised over the library's own composition.
+        ``pipeline.library_fl_models(payload, index)``. ``rna_pmf`` scores a spliced hypothesis, which
+        is certified RNA; ``global_pmf`` — the unconditional anchor — scores the genomic one, whose
+        component is unknown and must therefore be marginalised over the library's own composition.
     rna_sense_frac
         ``P(align_strand == the transcript's strand | RNA)`` — ``StrandModels.exonic_spliced``, which is
         certified RNA because an annotated splice proves it. On an R1-antisense (dUTP) library it is

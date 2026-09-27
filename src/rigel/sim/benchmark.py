@@ -9,7 +9,7 @@ and statistical accuracy benchmarking.
 Usage
 -----
 >>> result = scenario.build(n_fragments=100)
->>> pipeline_result = run_pipeline(result.bam_path, result.index, sj_strand_tag="ts")
+>>> pipeline_result = run_pipeline(result.bam_path, result.index)
 >>> bench = run_benchmark(result, pipeline_result)
 >>> assert bench.all_exact, bench.summary()
 """
@@ -38,7 +38,7 @@ class TranscriptAccuracy:
     expected : int
         Ground-truth fragment count (from simulation read names).
     observed : float
-        Pipeline-assigned count (summed across all 8 count types).
+        Pipeline-assigned count (summed across all count columns).
     exact_match : bool
         True if ``observed == expected``.
     abs_diff : float
@@ -73,11 +73,6 @@ class BenchmarkResult:
         Name of the scenario.
     n_simulated : int
         Total fragments passed to the read simulator.
-    n_simulated_per_transcript : dict[str, int]
-        Ground truth from FASTQ — fragments simulated per transcript.
-    n_aligned_per_transcript : dict[str, int]
-        Ground truth from BAM — fragments that appear in the BAM
-        (aligned or present as read names, regardless of mapping).
     n_fragments : int
         Fragments seen by the pipeline (from stats.n_fragments).
     n_intergenic : int
@@ -96,8 +91,6 @@ class BenchmarkResult:
 
     scenario_name: str
     n_simulated: int
-    n_simulated_per_transcript: dict[str, int]
-    n_aligned_per_transcript: dict[str, int]
     n_fragments: int
     n_intergenic: int
     n_chimeric: int
@@ -225,9 +218,6 @@ def run_benchmark(
     # Ground truth: actual simulated fragments per transcript
     simulated_counts = scenario_result.ground_truth_auto()
 
-    # Ground truth: fragments present in BAM
-    aligned_counts = scenario_result.ground_truth_counts()
-
     # Ground truth: gDNA fragment count
     n_gdna_expected = scenario_result.ground_truth_gdna_auto()
 
@@ -235,16 +225,13 @@ def run_benchmark(
     n_nrna_expected = scenario_result.ground_truth_nrna_auto()
 
     # Observed: per-transcript total counts from the pipeline
-    t_counts = pipeline_result.estimator.t_counts  # (N_t, 8) array
+    t_counts = pipeline_result.estimator.t_counts
     observed_per_t = t_counts.sum(axis=1)  # total per transcript
 
     # Stats
     stats = pipeline_result.stats
 
     # Pipeline gDNA count: intergenic (deterministic) + EM-assigned genic gDNA.
-    # We use gdna_em_count (actual fragment assignments) rather than
-    # gdna_total (which also includes shadow_init prior, a Bayesian
-    # regularization term that is not a real fragment count).
     n_gdna_pipeline = float(stats.n_intergenic + pipeline_result.estimator.gdna_em_count)
 
     # Pipeline nRNA count: EM-assigned nascent RNA fragments.
@@ -283,8 +270,6 @@ def run_benchmark(
     return BenchmarkResult(
         scenario_name=scenario_name or "unnamed",
         n_simulated=scenario_result.n_simulated,
-        n_simulated_per_transcript=simulated_counts,
-        n_aligned_per_transcript=aligned_counts,
         n_fragments=stats.n_fragments,
         n_intergenic=stats.n_intergenic,
         n_chimeric=stats.n_chimeric,

@@ -98,8 +98,6 @@ class SJStrandTable:
         fragments, so ``int64`` cannot overflow before the fragment count itself does, and
         ``uint64`` silently promotes to float in mixed numpy arithmetic downstream.
         """
-        if "sj_n_sense" not in d:
-            return cls.empty()
         return cls(
             ref_id=np.asarray(d["sj_ref_id"], dtype=np.int32),
             start=np.asarray(d["sj_start"], dtype=np.int64),
@@ -142,7 +140,7 @@ class SJStrandTable:
         )
 
     def depth_quantiles(self, qs: tuple[float, ...] = (0.5, 0.9, 0.99)) -> list[int]:
-        """SpliceJunction-depth quantiles — "how deep are the sj that carry the fit"."""
+        """Per-sj depth quantiles — "how deep are the sj that carry the fit"."""
         if self.n_sj == 0:
             return [0] * len(qs)
         return [int(v) for v in np.quantile(self.depth, qs)]
@@ -179,11 +177,7 @@ class StrandModel:
     it.  The all-exonic diagnostic model has no sj and therefore no table.
 
     Qualification (applied in C++ by ``get_is_strand_qualified()``, not here): annotated splice
-    sj, unique mapper, unambiguous exon strand, unambiguous SJ strand, non-chimeric.
-
-    Deliberately NOT ``slots=True``: development caches under ``_selfsolve_cache`` /
-    ``_calib_cache`` hold pickled instances, and a slotted class cannot restore a
-    ``__dict__``-based pickle state.  The field names are load-bearing for the same reason.
+    junction, unique mapper, unambiguous exon strand, unambiguous SJ strand, non-chimeric.
     """
 
     # --- 2×2 raw counts ---
@@ -326,21 +320,13 @@ class StrandModel:
         return (lo, hi)
 
     def strand_specificity_ci_epsilon(self, confidence: float = 0.99) -> float:
-        """Measurement-uncertainty floor on (1 − strand_specificity).
+        """Upper credible limit on the minor-orientation rate ``1 − strand_specificity``.
 
-        Returns ``ε_CI = 1 − UCL(ss)`` where ``UCL`` is the one-sided
-        upper credible limit on ``strand_specificity = max(p, 1-p)``
-        under a Beta(k + 1, (n − k) + 1) posterior on the minor-orientation
-        rate (Jeffreys-ish / Laplace prior).
+        The ``confidence`` quantile of the Beta(n_minor + 1, n − n_minor + 1) posterior, clamped
+        to [0, 0.5]; 0.5 when there are no observations.
 
         QC only. Its one consumer is the ``[CAL] Strand trainer`` log line in
-        :func:`rigel.pipeline.run_pipeline`. Kept because "how well is the protocol pinned" is a
-        fair thing to report, but it does not feed the deconvolution.
-
-        - ``n = 0``: returns 0.5 (maximally uncertain → caps LLR completely).
-        - ``n_minor = 0`` (degenerate): closed-form exact upper limit
-          ``UCL = 1 − (1−conf)^(1/(n+1))`` from Beta(1, n+1).
-        - general case: scipy ``betaincinv`` evaluation.
+        :func:`rigel.pipeline.run_pipeline`.
         """
         from scipy.special import betaincinv
 
@@ -354,7 +340,7 @@ class StrandModel:
         beta = (n - self.n_minor) + 1.0
         # UCL on minor-orientation rate r = 1 − ss at the given confidence.
         r_ucl = float(betaincinv(alpha, beta, confidence))
-        # Clamp to (0, 0.5): ss = max(p, 1-p) ≥ 0.5 so ε_CI ≤ 0.5.
+        # Clamp to [0, 0.5]: ss = max(p, 1-p) ≥ 0.5 so ε_CI ≤ 0.5.
         return max(0.0, min(0.5, r_ucl))
 
 
@@ -387,8 +373,6 @@ class StrandModels:
 
     gDNA is scored with a fixed strand probability of one half (no strand bias), never learned
     from intergenic data.
-
-    Not ``slots=True`` — see the note on :class:`StrandModel`.
     """
 
     exonic_spliced: StrandModel = field(default_factory=StrandModel)
@@ -406,9 +390,7 @@ class StrandModels:
         """
         models = cls(
             exonic_spliced=StrandModel.from_sj_table(SJStrandTable.from_arrays(strand_dict)),
-            exonic=StrandModel.from_labels(
-                strand_dict.get("exonic_obs", []), strand_dict.get("exonic_truth", [])
-            ),
+            exonic=StrandModel.from_labels(strand_dict["exonic_obs"], strand_dict["exonic_truth"]),
         )
         models._warn_if_underpowered()
         return models

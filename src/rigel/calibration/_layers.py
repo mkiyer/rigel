@@ -53,7 +53,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         2,
         "opportunity — how many places a fragment COULD have sat",
         # The deposit weight is 1/opportunity, so every divisor in the tool is derived here and nowhere
-        # else. `fl` is the entry point the scanner and the second pass call.
+        # else.
         # `gdna_density` is the gDNA background RATE — a count divided by an opportunity, which is this
         # layer's job. It owns BOTH estimators of that one quantity (the naive pooled rate and the
         # contamination-robust one-sided rate), so layer 5's `density_deconv` calls DOWN to it rather
@@ -79,9 +79,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (
         4,
         "strand — which strand a fragment came from",
-        # `strand_summary` is the dependency-light QC view the pipeline reads without importing
-        # calibration; the other two are production.
-        ("strand_balance", "strand_summary", "gdna_strand"),
+        ("strand_balance", "gdna_strand"),
     ),
     (
         5,
