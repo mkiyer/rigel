@@ -6,7 +6,7 @@ the append-only CLOSED / REFUSED record); the changelog is git, so this file rec
 figure lives here — a claim names the instrument that re-derives it (owner, 2026-08-22). How performance
 is judged is `SUCCESS.md`; rulings are `DESIGN.md`; lessons are `TRAPS.md`, cited by name.
 
-## The frame (owner, 2026-09-22 and 2026-09-23)
+## The frame (owner, 2026-09-22, 2026-09-23 and 2026-09-26)
 
 The version on disk is `pyproject.toml`'s; the target is 0.8.0, A RELEASE OF THE TOOL (`DESIGN.md` §0b).
 Two numbers are primary and answer different questions: the transcript table against per-transcript truth is
@@ -19,11 +19,13 @@ fragment-length composition channel is retired until after 0.8.0.
 The cleanup is closed: the tree is the shipped infrastructure with nothing dead, duplicated or narrated, and what
 it deliberately left is `ISSUES: hygiene-ledger`. The capture-contracted length of the locus gDNA component,
 the synthetic spans and the annotated transcripts is kept as the one shared rule (owner, 2026-09-23,
-`DESIGN.md` §7.2); robustness over synthetic accuracy is `DESIGN.md` §0b. The work, in order, each step derived
-on one page and A/B'd against what ships, one issue closed at a time: **the residual errors end to end**, the
-owner's first priority (2026-09-24). The junction price is accepted for now, the pseudocount's odds are fixed
-(`DESIGN.md` §3.1c), and which alignments gDNA may explain is ruled (`DESIGN.md` §3.1d); splicing artifacts and
-multimappers are deferred features.
+`DESIGN.md` §7.2); robustness over synthetic accuracy is `DESIGN.md` §0b. The in-scope accuracy work is at
+diminishing returns: the junction price is accepted for now, the RNA floor at pure-gDNA objects is closed for
+0.8.0, the pseudocount's odds are fixed (`DESIGN.md` §3.1c), and which alignments gDNA may explain is ruled
+(`DESIGN.md` §3.1d). The work, in order, each step derived on one page and A/B'd against what ships, one issue
+closed at a time: **splicing artifacts on real data**, the owner's highest priority (2026-09-26) — a real-data
+problem the simulated panels cannot show, handled across the aligner, the blacklist's builder and Rigel, with
+Rigel's own defence the most important.
 
 ## Where the tool is — one line per claim; run the named instrument for a current number
 
@@ -71,14 +73,20 @@ multimappers are deferred features.
 
 ## Next — the order
 
-1. **The residuals, one issue at a time** (owner, 2026-09-24): the capture likelihood's lean toward RNA, then the
-   pseudocount's strength (`ISSUES: the-pseudocount-strength-is-not-derived`), each judged on the pools per row
-   first and the transcript table second, the zero controls beside. Then the deferred features: splicing artifacts
-   (`ISSUES: splicing-artifacts`) and multimappers (`ISSUES: multimapper-intergenic-alignments`,
-   `ISSUES: multimapper-blind-support`), on the aligned ladder.
-2. **The release** — `docs/PUBLISHING.md` is the procedure; what gates it is the state: the deliverable
-   measured per stratum, the zero rows clean, the suite at its standing count, `preflight.py --full` green, the
-   standing risks re-read, and the manual true of what ships.
+1. **Splicing artifacts on real data** (owner, 2026-09-26; `ISSUES: splicing-artifacts`): genomic fragments the
+   aligner splices and the blacklist lets through are certified RNA, and they reach the spliced counts and the
+   strand and RNA fragment-length laws trained on spliced fragments. Judged on real libraries — an artifact-rich
+   one beside clean controls, the artifacts caught and the genuine junctions lost read together — because the
+   ladder's oracle BAM holds none.
+2. **Multimappers** (`ISSUES: multimapper-intergenic-alignments`, `ISSUES: multimapper-blind-support`). The
+   aligned ladder is regenerated, and a larger simulation battery built for the cluster, later (owner,
+   2026-09-26). The two residuals at `g98` — the capture likelihood's lean toward RNA and the pseudocount's
+   strength (`ISSUES: the-pseudocount-strength-is-not-derived`) — are small against the in-scope strata and are
+   not held for the release.
+3. **The release** — `docs/PUBLISHING.md` is the procedure; what gates it is the state: the deliverable
+   measured per stratum, the zero rows clean, the suite at its standing count, `preflight.py --full` green, CI
+   run once by hand, a real-data smoke run, the standing risks re-read, and the manual and the changelog true of
+   what ships.
 
 **Parked, each with its entry**: the AMBIG slots' remaining defects (`ISSUES: gdna-landscape-trains-on-false-positives`,
 `ISSUES: the-tilt-census-as-an-instrument`, `ISSUES: the-atom-at-an-unwitnessed-both-strand-slot`) · the intron's own

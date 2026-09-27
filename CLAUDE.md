@@ -199,9 +199,9 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,448 passed / 0 skipped / 2 xfail, 3,450 collected** — re-derived 2026-09-26 on `main`
-with the gDNA length law's purity-tie gates (3,447 + 3: `tests/calibration/test_fl.py`'s three tie cases), measured with two
-untracked `docs/dev/` notes present and those two cases subtracted: an untracked file under `docs/dev/` is a
+**The standing baseline: 0 failed / 3,451 passed / 0 skipped / 2 xfail, 3,453 collected** — re-derived 2026-09-26 on `main`
+on a clean checkout (3,450 − 1 + 4: the finished cleanup ledger retired from `docs/dev/`, the owner's four
+splicing-artifact notes added there). An untracked file under `docs/dev/` is a
 jargon case too, so a working tree holding notes reads higher (the count is re-derived from the table below at every commit
 that measures the suite; the history of how it moved is git, not this file). The 2 xfails are executable records of proven
 defects whose fixes are elsewhere (`ISSUES: two-sided-exon-row`; `ISSUES: the-lower-bound-noise-ratchet`), deferred by

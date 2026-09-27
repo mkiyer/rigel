@@ -17,7 +17,7 @@ Ordered by priority. An entry says what is open and the number a ranking turns o
 what was ruled is `DESIGN.md`.
 
 ### splicing-artifacts
-`priority: after the end-to-end work (owner, 2026-09-24): "splicing artifacts are a bigger problem than previously thought" · kind: defect · 2026-09-24`
+`priority: NOW — the owner's highest priority (2026-09-26), a real-data problem handled across the aligner, the blacklist's builder and Rigel; "splicing artifacts are a bigger problem than previously thought" (owner, 2026-09-24) · kind: defect · 2026-09-24`
 A gDNA read that the aligner splices across an annotated junction reads as certified RNA unless the index's
 blacklist — junctions the same aligner wrote on simulated genomic reads, kept at two or more, with the longest
 anchor seen — rejects it. Today a fully rejected fragment is labelled artifact: the EM treats it as unspliced
