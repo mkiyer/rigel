@@ -3,7 +3,7 @@
 > **Status 2026-09-26.** Problem 2 is closed for now (`ISSUES: the-capture-length-owns-stranded-capture-on`), and
 > the three defects listed below are fixed, closed or deferred. Problem 1 stays open
 > (`ISSUES: per-transcript-prior-lane`) and is not next: splicing artifacts on real data come first (owner,
-> 2026-09-26; `NEXT_SESSION.md`).
+> 2026-09-26; `GDNA_SPLICE_ARTIFACTS_PLAN.md`, worked on the cluster).
 
 The work on the tool, after the cleanup, is two problems. Stated plainly:
 
