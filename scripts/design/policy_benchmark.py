@@ -61,7 +61,7 @@ from _shared import set_field, strandedness  # noqa: E402
 
 RUNS = Path.home() / "Downloads" / "rigel_runs"
 
-#: the two substrates, each: (index dir, the dir holding `oracle_cache/<condition>/`)
+#: the substrates, each: (index dir, the panel dir holding `scan_cache/` and `oracle_cache/`)
 PANELS = {
     "test": (RUNS / "test_reference" / "idx", RUNS / "test_reference" / "scenarios"),
     # the same chromosome under the two other probe designs (junction-only and sparse probes)
@@ -77,9 +77,9 @@ POLICIES = {
 }
 
 
-def _truth_gdna(cache_dir: Path) -> dict:
+def _truth_gdna(truth_dir: Path) -> dict:
     """The certified per-object gDNA fragment counts, by axis, from `slot_truth.npz`."""
-    truth = dict(np.load(cache_dir / "slot_truth.npz"))
+    truth = dict(np.load(truth_dir / "slot_truth.npz"))
     out = {}
     for kind, axis in ((REGION, "region"), (BOUNDARY, "boundary")):
         is_k = np.asarray(truth["kind"]) == kind
@@ -119,13 +119,14 @@ def _slot_classes(truth: dict, payload, boundary_flags) -> np.ndarray:
 
 
 def score_condition(
-    index, region_arrays, sj, boundary_flags, cache_dir, policies, by_class=False, settings=()
+    index, region_arrays, sj, boundary_flags, panel_dir, condition, policies, by_class=False, settings=()
 ):
     """One condition, every policy: `sum |estimate - truth|` per axis, in fragments — and, with
     ``by_class``, the same error summed per node class (``rows[name]["classes"]``, each value
     ``(slots, mass, error)``). ``settings`` are ``--set`` specs applied on top of every policy's
     fields."""
-    cache = read_scan_cache(cache_dir / "_main", index)
+    truth_dir = panel_dir / "oracle_cache" / condition
+    cache = read_scan_cache(panel_dir / "scan_cache" / condition, index)
     # the drained frame: `calibration_inputs` drains at the production seed and builds the
     # production fl models — the frame `slot_truth.npz` is certified in, so estimate and truth
     # speak one tally.
@@ -139,9 +140,9 @@ def score_condition(
         sj=sj,
         boundary_flags=boundary_flags,
     )
-    truth = _truth_gdna(cache_dir)
+    truth = _truth_gdna(truth_dir)
     if by_class:
-        slots = dict(np.load(cache_dir / "slot_truth.npz", allow_pickle=True))
+        slots = dict(np.load(truth_dir / "slot_truth.npz", allow_pickle=True))
         classes = _slot_classes(slots, payload, boundary_flags)
         kind_s = np.asarray(slots["kind"])
         obj_s = np.asarray(slots["obj"], np.int64)
@@ -237,7 +238,8 @@ def main() -> int:
             region_arrays,
             sj,
             boundary_flags,
-            oracle / condition,
+            panel_dir,
+            condition,
             args.policies,
             by_class=args.by_class,
             settings=tuple(args.settings),

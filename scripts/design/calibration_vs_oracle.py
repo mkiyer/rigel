@@ -167,11 +167,9 @@ def check_override_field_set(override: dict) -> None:
 def load_oracle(oracle_cache: Path, condition: str, index, drained_payload, lift):
     """The origin-split truth for one condition, in the drained frame.
 
-    The full side is the very payload ``P`` calibrated: ``_main`` is byte-identical to the plain scan
-    cache (both store pass one), so re-reading it would be a second copy of the same quantity, and
-    the zero-gDNA rows, which have no ``_main``, need no fallback. The cached parts are drained by
-    replaying the whole's already-drawn choices (`from_cached_parts`), and sum-to-full then validates
-    the lift end to end on the drained frame. The oracle may carry a nonzero ``gdna_spliced_leak``
+    The full side is the very payload ``P`` calibrated, read from the scan cache. The cached parts are
+    drained by replaying the whole's already-drawn choices (`from_cached_parts`), and sum-to-full then
+    validates the lift end to end on the drained frame. The oracle may carry a nonzero ``gdna_spliced_leak``
     (production's own drain behaviour, `ISSUES: drain-contaminates-certified-rna`) and ``n_ambiguous``
     bounds the lift's origin attribution; both are reported on the row, never swallowed.
     """

@@ -18,9 +18,9 @@ expectation is not certified here; the RNA truth is realized. No solver runs. Wr
 beside each oracle cache, which every slot-scored instrument reads.
 
 ``--build`` first BUILDS the origin-split caches every truth instrument reads — the oracle BAM split by
-read-name origin, each partition scanned by the production scanner, the two transcript-strand
-partitions beside them, and the whole scan copied in as ``_main`` — keyed by the shipped scan-cache
-loader so a stale cache is refused rather than reused, in parallel over conditions with ``--jobs``
+read-name origin, each partition scanned by the production scanner, and the two transcript-strand
+partitions beside them — keyed by the shipped scan-cache loader and checked sum-to-full against the
+scan cache, so a stale cache is refused rather than reused, in parallel over conditions with ``--jobs``
 (one condition saturates one core at ~2 GB), then certifies. ``panel.py cache`` runs it.
 
 Usage::
@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
 import sys
 from pathlib import Path
 
@@ -456,11 +455,10 @@ def self_test() -> int:
 def build_one(index, suite: Path, condition: str, work_dir: Path) -> None:
     """One condition's oracle cache under ``<suite>/oracle_cache/<condition>``: the three origin
     partitions and the two transcript-strand ones (`_oracle_arms.load_or_build_oracle`, which
-    re-runs sum-to-full on a cache hit and rebuilds on a miss), and ``_main`` — the whole scan — copied
-    from the scan cache on every build, so a rebuilt scan never leaves a stale copy. The drained frame:
-    the partitions are lifted by replaying the whole's drain, exactly as `derive` reads them."""
+    re-runs sum-to-full against the scan cache on a hit and rebuilds on a miss). The whole is never
+    copied: every reader takes it from ``<suite>/scan_cache/<condition>``. The drained frame: the
+    partitions are lifted by replaying the whole's drain, exactly as `derive` reads them."""
     OA = sibling("_oracle_arms.py")
-    root = Path(suite) / "oracle_cache" / condition
     scan_dir = Path(suite) / "scan_cache" / condition
     if not (scan_dir / "payload.npz").is_file():
         raise FileNotFoundError(f"no scan cache at {scan_dir} — run build_scan_cache.py first")
@@ -472,7 +470,6 @@ def build_one(index, suite: Path, condition: str, work_dir: Path) -> None:
         bam, index, PipelineConfig(), Path(work_dir) / f"w_{condition}", condition, kw["payload"],
         Path(suite) / "oracle_cache", lift,
     )
-    shutil.copytree(scan_dir, root / "_main", dirs_exist_ok=True)
 
 
 def build(index, suite: Path, conds: list[str], jobs: int, work_dir: Path, args_index: Path) -> None:

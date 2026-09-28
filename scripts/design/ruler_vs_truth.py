@@ -235,7 +235,7 @@ def calibrate_condition(index, region_arrays, panel_dir: Path, condition: str, c
     prior an expectation arm reads; the chain and the belief; and the two fragment-length pmfs."""
     sj = build_sj_geometry_arrays(index)
     bflags = build_boundary_flags_array(index)
-    cache = read_scan_cache(panel_dir / "oracle_cache" / condition / "_main", index)
+    cache = read_scan_cache(panel_dir / "scan_cache" / condition, index)
     kw = calibration_inputs(cache, index)
     debug: dict = {}
     cal = calibrate(
@@ -517,11 +517,11 @@ def main() -> int:
 
     conds = sorted(
         p.name
-        for p in (panel_dir / "oracle_cache").iterdir()
-        if (p / "_main" / "payload.npz").is_file() and p.name.endswith("_capture_on")
+        for p in (panel_dir / "scan_cache").iterdir()
+        if (p / "payload.npz").is_file() and p.name.endswith("_capture_on")
     )
     if not conds:
-        raise SystemExit(f"⛔ no cached capture-ON condition under {panel_dir / 'oracle_cache'}")
+        raise SystemExit(f"⛔ no cached capture-ON condition under {panel_dir / 'scan_cache'}")
     names = None
     for c in conds:
         t0 = time.time()

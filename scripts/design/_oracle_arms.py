@@ -323,10 +323,9 @@ def measure_condition(
     per solver class."""
     start = time.perf_counter()
     scan = dataclasses.replace(pipeline_config.scan, sj_strand_tag=_native_detect_sj_tag(bam))
-    # the main payload is read from ``_main``, a copy of the scan cache that only
-    # ``calibration_oracle.py --build`` writes. Keyed by the shipped loader: a refusal falls through
-    # to an in-memory rescan, never a write.
-    _sc_dir = None if oracle_cache is None else Path(oracle_cache) / tag / "_main"
+    # the main payload is the scan cache beside the oracle cache, ``<suite>/scan_cache/<tag>``. Keyed
+    # by the shipped loader: a refusal falls through to an in-memory rescan, never a write.
+    _sc_dir = None if oracle_cache is None else Path(oracle_cache).parent / "scan_cache" / tag
     payload = strand_model = None
     if _sc_dir is not None:
         try:

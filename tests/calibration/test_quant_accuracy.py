@@ -468,9 +468,41 @@ def test_a_missing_or_stale_oracle_cache_ABORTS(toy, tmp_path):
     """The oracle arms exist to inject truth. Falling back to anything else — a rescan under a
     different scan config, an empty payload — would inject something else under the name ``oracle``.
     ``read_scan_cache`` already refuses a payload whose ``reach_digest`` does not describe this index;
-    this asserts the refusal is propagated rather than swallowed."""
-    with pytest.raises(SystemExit, match="no valid oracle cache"):
-        QA.load_oracle(str(toy.bam_path), toy.index, PipelineConfig(), tmp_path, "absent")
+    this asserts the refusal is propagated rather than swallowed. Stale: sum-to-full is checked against
+    the condition's live scan cache, so partitions of another scan are refused.
+
+    PERTURBATION: read the full payload from anywhere but ``<suite>/scan_cache/<tag>``.
+    """
+    import _oracle_arms
+
+    from rigel.pipeline import _native_detect_sj_tag, scan_and_buffer
+    from rigel.scan_cache import write_scan_cache
+
+    bam, cfg = str(toy.bam_path), PipelineConfig()
+    with pytest.raises(SystemExit, match="no valid scan or oracle cache"):
+        QA.load_oracle(bam, toy.index, cfg, tmp_path, tmp_path, "absent")
+
+    scan = dataclasses.replace(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
+    _stats, strand_model, _buf, payload = scan_and_buffer(bam, toy.index, scan)
+    orc = tmp_path / "oracle_cache"
+    _oracle_arms.load_or_build_oracle(bam, toy.index, cfg, tmp_path / "w", "t", payload, orc)
+
+    def cache_scan():
+        write_scan_cache(
+            tmp_path / "scan_cache" / "t",
+            payload=payload,
+            strand_model=strand_model,
+            index=toy.index,
+            bam=bam,
+            scan_config=scan,
+        )
+
+    cache_scan()
+    QA.load_oracle(bam, toy.index, cfg, tmp_path, orc, "t")  # the live scan's partitions load
+    payload.region_contained_count[0, 0] += 1
+    cache_scan()
+    with pytest.raises(AssertionError, match="oracle INVALID"):
+        QA.load_oracle(bam, toy.index, cfg, tmp_path, orc, "t")
 
 
 # ── GATE 7: the ruler arm hands the EM the lengths it names, and its noop is inert ──────────────────

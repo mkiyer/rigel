@@ -170,10 +170,9 @@ def test_a_failing_stage_STOPS_the_workflow():
 
 
 def test_an_oracle_condition_needs_every_part(tmp_path, capsys):
-    """`status` counts a condition cached only when the three origin partitions, the per-strand RNA
-    pair the certifier requires, and the undrained `_main` payload are all present. Counting
-    directories would call a half-written condition done, and the next stage would fail deep inside an
-    instrument instead of here."""
+    """`status` counts a condition cached only when the three origin partitions and the per-strand RNA
+    pair the certifier requires are all present. Counting directories would call a half-written
+    condition done, and the next stage would fail deep inside an instrument instead of here."""
     p = PANEL.Panel(_config(tmp_path))
     (p.dir / "c1").mkdir(parents=True)
     (p.dir / "c1" / "sim_oracle.bam").touch()
@@ -182,7 +181,7 @@ def test_an_oracle_condition_needs_every_part(tmp_path, capsys):
         (p.oracle_cache / "c1" / part).mkdir(parents=True)
         (p.oracle_cache / "c1" / part / "payload.npz").touch()
 
-    for part in ("gdna", "mrna", "nrna", "_main"):  # no strand pair — deliberately incomplete
+    for part in ("gdna", "mrna", "nrna"):  # no strand pair — deliberately incomplete
         write(part)
     PANEL.cmd_status(p, None)
     assert "oracle cache 0/1" in capsys.readouterr().out

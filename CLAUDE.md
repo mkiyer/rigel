@@ -200,8 +200,8 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 2,800 passed / 0 skipped / 2 xfail, 2,802 collected** — re-derived 2026-09-28
-(2,803 − 1: the gate on `quant_accuracy.py`'s two retired single-array arms went with them). The 2 xfails are
+**The standing baseline: 0 failed / 2,799 passed / 0 skipped / 2 xfail, 2,801 collected** — re-derived 2026-09-28
+(2,802 − 1: the gate that refreshed the oracle cache's copy of the scan went with the copy). The 2 xfails are
 executable records of proven defects whose fixes are elsewhere (`ISSUES: two-sided-exon-row`;
 `ISSUES: the-lower-bound-noise-ratchet`), deferred by ruling to their threads — "fix the test" is a category error,
 and an xfail is closed by repairing the thing or asserting the invariant structurally, never by widening a bound.

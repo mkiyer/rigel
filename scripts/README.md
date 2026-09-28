@@ -29,8 +29,8 @@ python scripts/sim/panel.py report   --config scripts/sim/configs/gdna_ladder.ya
 ```
 
 `score` needs both caches and `cache` builds both: the scan cache makes calibration re-runnable without
-rescanning, and the oracle cache is the origin-split truth (`gdna` / `mrna` / `nrna` partitions plus the
-undrained `_main` payload) that every truth-scoring instrument reads.
+rescanning, and the oracle cache is the origin-split truth (`gdna` / `mrna` / `nrna` partitions, checked
+sum-to-full against the scan cache) that every truth-scoring instrument reads.
 
 ## Lint
 

@@ -114,25 +114,24 @@ _ARM_FIELDS = {
 # ── the injection ────────────────────────────────────────────────────────────────────────────────
 
 
-def load_oracle(bam: str, index, pipeline_config, cache_root: Path, tag: str) -> OracleTruth:
-    """The origin-split truth for one condition, entirely from the shipped scan cache.
+def load_oracle(bam: str, index, pipeline_config, suite: Path, cache_root: Path, tag: str) -> OracleTruth:
+    """The origin-split truth for one condition, entirely from the shipped scan caches.
 
-    ``_main`` (the UNDRAINED full payload) is what sum-to-full is asserted against, and it must come
-    from the same cache as the three partitions or the identity is checking two different scans
-    against each other. ``read_scan_cache`` refuses a payload whose ``graph_hash`` / ``reach_digest``
-    / ``payload_schema_digest`` / scan config does not describe this index — ``reach`` is covered by no
-    other hash — so a stale cache is a loud refusal rather than a silent wrong truth.
+    The condition's scan cache (the UNDRAINED full payload) is what sum-to-full is asserted against, so
+    a partition built from another scan is refused. ``read_scan_cache`` refuses a payload whose
+    ``graph_hash`` / ``reach_digest`` / ``payload_schema_digest`` / scan config does not describe this
+    index — ``reach`` is covered by no other hash — so a stale cache is a loud refusal rather than a
+    silent wrong truth.
     """
     scan = dataclasses.replace(pipeline_config.scan, sj_strand_tag=_native_detect_sj_tag(bam))
     root = Path(cache_root) / tag
     try:
-        full = read_scan_cache(root / "_main", index, scan).payload
+        full = read_scan_cache(Path(suite) / "scan_cache" / tag, index, scan).payload
         parts = {k: read_scan_cache(root / k, index, scan).payload for k in ORIGINS}
     except (FileNotFoundError, KeyError, ScanCacheKeyError) as exc:
         raise SystemExit(
-            f"⛔ {tag}: no valid oracle cache under {root} ({exc}). Build it first with "
-            "calibration_oracle.py --build (panel.py cache runs it); this script "
-            "refuses to invent a truth."
+            f"⛔ {tag}: no valid scan or oracle cache ({exc}). Build both first with "
+            "panel.py cache; this script refuses to invent a truth."
         ) from exc
     return OracleTruth.from_parts(full, parts)
 
@@ -583,7 +582,7 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
     if not (arm == "base" or arm.startswith("oracle_alloc") or arm in _RULER_ARMS):
         if oracle_cache is None:
             raise SystemExit(f"⛔ arm {arm!r} needs --oracle-cache")
-        oracle = load_oracle(bam, index, pipeline_config, oracle_cache, condition)
+        oracle = load_oracle(bam, index, pipeline_config, suite, oracle_cache, condition)
 
     if arm == "oracle_alloc_flip":
         w = truth_weights(truth, index)

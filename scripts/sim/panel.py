@@ -44,9 +44,8 @@ REPO = Path(__file__).resolve().parents[2]
 DESIGN = REPO / "scripts" / "design"
 SIM = REPO / "scripts" / "sim"
 
-#: the three origin partitions the oracle cache holds, the per-strand RNA pair the certifier requires,
-#: and the undrained full payload.
-ORACLE_PARTS = ("gdna", "mrna", "nrna", "rna_pos", "rna_neg", "_main")
+#: the three origin partitions the oracle cache holds and the per-strand RNA pair the certifier requires.
+ORACLE_PARTS = ("gdna", "mrna", "nrna", "rna_pos", "rna_neg")
 
 
 class Panel:
@@ -213,9 +212,10 @@ def cmd_cache(p: Panel, args) -> int:
     """⛔ BOTH caches, and the oracle one is the reason this stage exists as a named step.
 
     The scan cache makes calibration re-runnable without rescanning. The ORACLE cache is the
-    origin-split truth — `gdna` / `mrna` / `nrna` and the two transcript-strand partitions plus the
-    `_main` payload — and every truth-scoring instrument refuses to run without it; `calibration_oracle.py
-    --build` builds it, every row alike, and certifies `slot_truth.npz` in the same run."""
+    origin-split truth — `gdna` / `mrna` / `nrna` and the two transcript-strand partitions, checked
+    sum-to-full against the scan cache — and every truth-scoring instrument refuses to run without it;
+    `calibration_oracle.py --build` builds it, every row alike, and certifies `slot_truth.npz` in the
+    same run."""
     need(bool(p.conditions), f"simulated conditions in {p.dir}", "panel.py simulate")
     conds = args.conditions or p.conditions
     # ⛔ `--force` MUST reach the scan cache, and this used to be the one stage it did not. A scan cache
