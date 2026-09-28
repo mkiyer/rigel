@@ -360,8 +360,8 @@ Pass `--tsv` to also write `.tsv` mirrors, or convert afterward with
 | `fragment_lengths.feather` | Raw fragment-length histograms, tidy `(category, length, count)` |
 | `calibration_track.feather` | Per-region gDNA solution: `(ref, start, end, gdna_mass, rna_mass, gdna_density, gdna_frac)` |
 | `calibration_track.bedgraph` | Per-region gDNA density as a genome-browser track (IGV / UCSC) |
-| `gdna_density_kde.feather` | The fitted gDNA-density curve `(log_rho, log_density, density)` — the landscape prior, a capture diagnostic |
-| `gdna_density_regions.feather` | The training-region rug for that curve `(log_rho, kind)` (downsampled) |
+| `gdna_density_kde.feather` | The fitted curve of per-region fragment density, gDNA and RNA together `(log_rho, log_density, density)`; a capture diagnostic |
+| `gdna_density_regions.feather` | Every region that curve was fitted on `(log_rho, kind)`; `kind` is 0 intergenic, 1 intron, 2 exon |
 | `locus_stats.feather` | Per-locus EM convergence profiling — only with `--emit-locus-stats` |
 | `config.yaml` | Resolved run configuration (reproducibility) |
 
@@ -498,11 +498,11 @@ categories are the scanner's raw per-fragment histograms.
 Run-level QC manifest. It is a small, human-readable index — the bulky raw
 fragment-length histograms live in the `fragment_lengths.feather` companion
 (see above), not in the JSON. `schema_version` (integer) identifies the layout;
-the current version is **2**. Top-level keys:
+the current version is **3**. Top-level keys:
 
 | Key | Contents |
 |-----|----------|
-| `schema_version` | Manifest schema version (currently `2`) |
+| `schema_version` | Manifest schema version (currently `3`) |
 | `rigel_version`, `timestamp` | Version and run time |
 | `command` | Subcommand, resolved arguments, config-file path |
 | `configuration` | All resolved pipeline parameters |
@@ -521,32 +521,26 @@ scalars (it is `null` if calibration did not run):
 ```jsonc
 {
   "calibration": {
-    "gdna_density_global":        <float>,  // library-average gDNA density (QC scalar)
-    "rna_sense_frac":             <float>,  // kappa: sense-strand RNA fraction
-    "gdna_strand_overdispersion": <float>,  // gDNA strand Beta-Binomial overdispersion
-    "rna_strand_overdispersion":  <float>,  // RNA strand Beta-Binomial overdispersion
-    "n_regions":                  <int>,    // number of calibration regions
-    "capture": {                            // present when the gDNA track is informative
-      "n_regions":               <int>,     // regions with positive gDNA density and mass (the KDEs' input)
-      "enriched":                <bool>,    // a distinct on-target mode was found
-      "count_median_log_rho":    <float>,   // median log gDNA density over those regions
-      "background_mode_log_rho": <float>,   // dominant density peak by region COUNT (typical region)
-      "enriched_mode_log_rho":   <float>,   // high-density peak by gDNA MASS; count_median_log_rho if not enriched
-      "fold_peak_to_peak":       <float>,   // exp(separation_peak_nats)
-      "fold_vs_median":          <float>,   // exp(separation_median_nats)
-      "separation_peak_nats":    <float>,   // enriched mode - background mode
-      "separation_median_nats":  <float>,   // enriched mode - count median
-      "mass_frac_ontarget":      <float>,   // fraction of gDNA mass at or above the median-to-enriched midpoint; 0 if not enriched
-      "kde_bandwidth_factor":    <float>    // bandwidth factor of the by-count KDE
-    }
+    "gdna_density_global":        <float>,       // library-average gDNA density (QC scalar)
+    "gdna_reference_density":     <float|null>,  // the captured gDNA level, gDNA fragments/bp; null = no enriched mode
+    "gdna_reference_members":     <int>,         // located regions that level rests on; 0 when it is null
+    "rna_sense_frac":             <float>,       // kappa: sense-strand RNA fraction
+    "gdna_strand_overdispersion": <float>,       // gDNA strand Beta-Binomial overdispersion
+    "rna_strand_overdispersion":  <float>,       // RNA strand Beta-Binomial overdispersion
+    "n_regions":                  <int>,         // number of calibration regions
+    "n_boundaries":               <int>,         // number of contiguous boundaries between adjacent regions
+    "n_sj":                       <int>          // number of splice junctions
   }
 }
 ```
 
-The `capture` block is descriptive only (no pass/fail verdict) and mass-weighted: under hybrid
-capture the on-target regions are few but carry the captured gDNA mass, so weighting by mass
-surfaces the on-target mode. `fold_vs_median` and `fold_peak_to_peak` say how enriched;
-`mass_frac_ontarget` says how much of the gDNA is actually on-target.
+`gdna_reference_density` is calibration's capture answer: the density at the enriched mode of the
+gDNA-density landscape it fits, the fully captured gDNA level. Each region's capture efficiency is
+its gDNA density against that level, and `em_effective_length` is scaled by those efficiencies. It
+is `null` for a library without capture, or one whose gDNA is too sparse to locate its captured
+level, and then every `em_effective_length` equals `effective_length`. `gdna_reference_members`
+counts the located regions (those holding at least one gDNA fragment) in the mode. The report shows
+both, descriptively: no pass/fail verdict.
 
 The RNA and gDNA fragment-length models used by scoring/calibration are
 reported under the top-level **`fragment_length`** key (as
@@ -640,8 +634,7 @@ theory is in `docs/EQUATIONS.md` and the design in `docs/DESIGN.md`.
 
 - **Library scalars**, in `summary.json` → `calibration`: `gdna_density_global`,
   `rna_sense_frac` (the sense fraction κ), the gDNA and RNA strand overdispersions, and the
-  `capture` block when the gDNA track is informative (`enriched` says whether an on-target mode
-  was found).
+  captured gDNA level `gdna_reference_density` (`null` when no enriched gDNA mode was located).
 - **A per-locus Dirichlet prior** — `gdna_prior_count` and `rna_prior_count` in `loci.feather`
   — which sets the gDNA-vs-RNA split each locus's EM starts from, plus the gDNA component's
   effective length. RNA is distributed among transcripts by the EM, not by calibration.

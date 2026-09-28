@@ -22,9 +22,23 @@ def _pct(numer: float, denom: float) -> float:
     return (numer / denom) if denom else 0.0
 
 
-def _verdicts(summary: dict, capture: dict | None = None) -> list[dict]:
-    """Headline QC tiles: mapping, strandedness, gDNA, usable fragments, + capture
-    enrichment (descriptive, mass-weighted) when a gDNA track is present."""
+def _capture(summary: dict) -> dict | None:
+    """Calibration's capture answer: the located enriched mode of its gDNA landscape — the fully
+    captured gDNA level, in fragments per bp, that the effective lengths are contracted against — and
+    the located regions it rests on. ``reference_density`` is ``None`` when no enriched mode was
+    located; the answer is ``None`` when the summary carries none."""
+    cal = summary.get("calibration") or {}
+    if "gdna_reference_density" not in cal:
+        return None
+    return {
+        "reference_density": cal["gdna_reference_density"],
+        "n_members": cal["gdna_reference_members"],
+    }
+
+
+def _verdicts(summary: dict) -> list[dict]:
+    """Headline QC tiles: mapping, strandedness, gDNA, usable fragments, + calibration's capture
+    answer when the summary carries one."""
     out: list[dict] = []
     aln = summary.get("alignment_stats", {})
     frag = summary.get("fragment_stats", {})
@@ -94,31 +108,30 @@ def _verdicts(summary: dict, capture: dict | None = None) -> list[dict]:
         }
     )
 
-    # Capture enrichment — descriptive only. Variable capture performance is
-    # expected and we do not interpret an enriched mode as good/bad; the tile
-    # leads with the robust enriched-vs-median fold, the Calibration panel has the
-    # full metric set. Styled neutral ("info").
-    if capture:
-        if capture.get("enriched"):
+    # Capture — descriptive only: variable capture performance is expected, so a located mode is
+    # neither good nor bad. Styled neutral ("info").
+    capture = _capture(summary)
+    if capture is not None:
+        if capture["reference_density"] is not None:
             out.append(
                 {
-                    "k": "Capture enrichment",
+                    "k": "Capture",
                     "icon": "target",
-                    "v": capture.get("fold_vs_median", 1.0),
-                    "fmt": "fold",
+                    "v": capture["reference_density"],
+                    "fmt": "g4",
                     "s": "info",
-                    "n": f"on-target mode vs median; {capture.get('mass_frac_ontarget', 0) * 100:.0f}% of gDNA mass on-target",
+                    "n": f"gDNA fragments/bp at the enriched mode · {capture['n_members']:,} located regions",
                 }
             )
         else:
             out.append(
                 {
-                    "k": "Capture enrichment",
+                    "k": "Capture",
                     "icon": "target",
                     "v": "None",
                     "fmt": "text",
                     "s": "info",
-                    "n": "no on-target gDNA density mode above the median",
+                    "n": "no enriched gDNA mode located",
                 }
             )
     return out
@@ -367,26 +380,29 @@ def _genes(sub: ReportSubstrate, max_rows: int = 20000) -> dict:
     return {"rows": rows, "total": total, "shown": len(rows), "truncated": truncated}
 
 
-def _calibration(sub: ReportSubstrate, capture: dict | None = None) -> dict:
-    """Two panels' worth of data: 'enrichment' (the capture KDE + its KPIs) and
+def _calibration(sub: ReportSubstrate) -> dict:
+    """Two panels' worth of data: 'enrichment' (calibration's capture answer + its KPIs) and
     'density' (the genome track + per-reference table + its KPIs)."""
     cal = sub.summary.get("calibration") or {}
     track = sub.calibration_track
     has_track = track is not None and len(track) > 0
 
     # Enrichment panel KPIs (capture).
-    enrichment_kpis = [{"l": "RNA sense", "v": cal.get("rna_sense_frac", 0), "fmt": "float3"}]
-    if capture and capture.get("enriched"):
+    capture = _capture(sub.summary)
+    enrichment_kpis = []
+    if capture is not None and capture["reference_density"] is not None:
         enrichment_kpis = [
-            {"l": "Enr. vs median", "v": capture.get("fold_vs_median", 1.0), "fmt": "fold"},
-            {"l": "Peak-to-peak", "v": capture.get("fold_peak_to_peak", 1.0), "fmt": "fold"},
-            {"l": "On-target mass", "v": capture.get("mass_frac_ontarget", 0), "fmt": "pct"},
+            {"l": "ρg reference", "v": capture["reference_density"], "fmt": "g4"},
+            {"l": "Located regions", "v": capture["n_members"], "fmt": "count"},
         ]
+    elif capture is not None:
+        enrichment_kpis = [{"l": "ρg reference", "v": "None", "fmt": "text"}]
 
-    # gDNA-density panel KPIs.
+    # gDNA-density panel KPIs: calibration's library scalars, then the track's.
     density_kpis = [
         {"l": "Regions", "v": cal.get("n_regions", 0), "fmt": "count"},
         {"l": "ρg global", "v": cal.get("gdna_density_global", 0), "fmt": "g4"},
+        {"l": "RNA sense", "v": cal.get("rna_sense_frac", 0), "fmt": "float3"},
     ]
     if has_track:
         gf = track["gdna_frac"].to_numpy(dtype="float64")
@@ -463,7 +479,7 @@ def _fmt_val(v) -> str:
     return str(v)
 
 
-def build_view_model(sub: ReportSubstrate, capture: dict | None = None) -> dict:
+def build_view_model(sub: ReportSubstrate) -> dict:
     """Assemble the complete JSON-serializable view model for the report."""
     s = sub.summary
     return {
@@ -475,13 +491,13 @@ def build_view_model(sub: ReportSubstrate, capture: dict | None = None) -> dict:
             "schema_version": s.get("schema_version"),
             "warnings": sub.warnings,
         },
-        "verdicts": _verdicts(s, capture),
+        "verdicts": _verdicts(s),
         "alignment": _alignment(s),
         "fragments": _fragments(s),
         "strand": _strand(s),
         "fl": _fragment_length(s),
         "quant": _quant(s),
-        "calibration": _calibration(sub, capture),
+        "calibration": _calibration(sub),
         "genes": _genes(sub),
         "config": _config(s),
     }

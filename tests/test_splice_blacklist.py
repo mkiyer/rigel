@@ -4,19 +4,24 @@ Rows below ``min_count`` are dropped; the survivors are grouped by ``(chrom, int
 intron_end)`` and take the ``max`` of the two anchor lengths, so a junction seen at several read
 lengths keeps its longest anchor; strand is not carried through, because the source always reports
 it as unknown. The gates run the shipped aggregation (`aggregate_splice_blacklist`, which the store
-loader calls) over rows built in memory, so the suite does not require the store to be installed,
-and then check that a blacklist persisted into an index loads back into the resolver and that building
-without one writes nothing.
+loader calls) over rows built in memory, so the suite does not require the store to be installed.
+The index gates then check that an index uses a blacklist only when its manifest records the store
+it came from: a build from a store loads it into the resolver, a build or rebuild without one leaves
+none on disk, `load` ignores one dropped into an index built without a store or whose manifest has no
+`sources`, and an index whose recorded blacklist was removed loads with detection off.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from _index_builder import rebuild_with_splice_blacklist
+from rigel.index import MANIFEST_JSON, SJ_BLACKLIST_FEATHER, SJ_BLACKLIST_TSV, TranscriptIndex
 from rigel.splice_blacklist import BLACKLIST_COLUMNS, aggregate_splice_blacklist
 
 
@@ -140,66 +145,104 @@ class TestAggregation:
 
 
 # ----------------------------------------------------------------------
-# Index round-trip via in-memory blacklist injection.
-#
-# We exercise the on-disk feather schema by writing a hand-crafted
-# blacklist directly to ``splice_blacklist.feather`` (bypassing the
-# alignable Zarr opener) and verifying that ``TranscriptIndex.load``
-# wires it through to the C++ resolver.
+# The blacklist in an index: used exactly when the manifest records its store.
 # ----------------------------------------------------------------------
+
+_BLACKLIST = pd.DataFrame(
+    {
+        "ref": ["chr1", "chr1"],
+        "start": np.asarray([100, 300], dtype=np.int32),
+        "end": np.asarray([200, 400], dtype=np.int32),
+        "max_anchor_left": np.asarray([10, 12], dtype=np.int32),
+        "max_anchor_right": np.asarray([15, 9], dtype=np.int32),
+    }
+)
 
 
 class TestIndexRoundTrip:
-    def test_persisted_feather_loads_into_resolver(
-        self,
-        tmp_path: Path,
-        mini_index_inputs,
+    def test_a_blacklist_built_from_a_store_loads_into_the_resolver(
+        self, tmp_path: Path, mini_index_inputs
     ) -> None:
-        from rigel.index import TranscriptIndex, SJ_BLACKLIST_FEATHER
-
         fasta, gtf = mini_index_inputs
         out_dir = tmp_path / "idx"
-        TranscriptIndex.build(
-            fasta_file=str(fasta),
-            gtf_file=str(gtf),
-            output_dir=str(out_dir),
-        )
-
-        # Hand-write a blacklist feather with the canonical schema.
-        bl = pd.DataFrame(
-            {
-                "ref": ["chr1"],
-                "start": np.asarray([100], dtype=np.int32),
-                "end": np.asarray([200], dtype=np.int32),
-                "max_anchor_left": np.asarray([10], dtype=np.int32),
-                "max_anchor_right": np.asarray([15], dtype=np.int32),
-            }
-        )
-        bl.to_feather(out_dir / SJ_BLACKLIST_FEATHER)
+        TranscriptIndex.build(fasta, gtf, out_dir)
+        rebuild_with_splice_blacklist(out_dir, _BLACKLIST)
 
         on_disk = pd.read_feather(out_dir / SJ_BLACKLIST_FEATHER)
         assert list(on_disk.columns) == list(BLACKLIST_COLUMNS)
+        assert TranscriptIndex.load(out_dir).sj_blacklist_size == len(_BLACKLIST)
 
-        idx = TranscriptIndex.load(str(out_dir))
-        assert idx is not None
-
-    def test_build_without_zarr_writes_no_blacklist(
-        self,
-        tmp_path: Path,
-        mini_index_inputs,
+    def test_build_without_a_store_writes_no_blacklist(
+        self, tmp_path: Path, mini_index_inputs
     ) -> None:
-        from rigel.index import TranscriptIndex, SJ_BLACKLIST_FEATHER
-
         fasta, gtf = mini_index_inputs
         out_dir = tmp_path / "idx"
-        TranscriptIndex.build(
-            fasta_file=str(fasta),
-            gtf_file=str(gtf),
-            output_dir=str(out_dir),
-        )
+        TranscriptIndex.build(fasta, gtf, out_dir)
+
         assert not (out_dir / SJ_BLACKLIST_FEATHER).exists()
-        idx = TranscriptIndex.load(str(out_dir))
-        assert idx is not None
+        assert TranscriptIndex.load(out_dir).sj_blacklist_size == 0
+
+    def test_a_rebuild_without_a_store_applies_no_blacklist(
+        self, tmp_path: Path, mini_index_inputs
+    ) -> None:
+        """Built with a blacklist, then rebuilt in place without a store: the old one is not applied."""
+        fasta, gtf = mini_index_inputs
+        out_dir = tmp_path / "idx"
+        TranscriptIndex.build(fasta, gtf, out_dir)
+        rebuild_with_splice_blacklist(out_dir, _BLACKLIST)
+        TranscriptIndex.build(fasta, gtf, out_dir)
+
+        assert TranscriptIndex.load(out_dir).sj_blacklist_size == 0
+
+    def test_a_rebuild_without_a_store_removes_the_old_blacklist(
+        self, tmp_path: Path, mini_index_inputs
+    ) -> None:
+        fasta, gtf = mini_index_inputs
+        out_dir = tmp_path / "idx"
+        TranscriptIndex.build(fasta, gtf, out_dir)
+        rebuild_with_splice_blacklist(out_dir, _BLACKLIST)
+        assert (out_dir / SJ_BLACKLIST_FEATHER).exists()
+        assert (out_dir / SJ_BLACKLIST_TSV).exists()
+
+        TranscriptIndex.build(fasta, gtf, out_dir)
+        assert not (out_dir / SJ_BLACKLIST_FEATHER).exists()
+        assert not (out_dir / SJ_BLACKLIST_TSV).exists()
+
+    def test_load_ignores_a_blacklist_in_an_index_built_without_a_store(
+        self, tmp_path: Path, mini_index_inputs
+    ) -> None:
+        fasta, gtf = mini_index_inputs
+        out_dir = tmp_path / "idx"
+        TranscriptIndex.build(fasta, gtf, out_dir)
+        _BLACKLIST.to_feather(out_dir / SJ_BLACKLIST_FEATHER)
+
+        assert TranscriptIndex.load(out_dir).sj_blacklist_size == 0
+
+    def test_a_recorded_blacklist_removed_loads_with_detection_off(
+        self, tmp_path: Path, mini_index_inputs
+    ) -> None:
+        """Removing the feather from a store-built index gives its blacklist-free twin."""
+        fasta, gtf = mini_index_inputs
+        out_dir = tmp_path / "idx"
+        TranscriptIndex.build(fasta, gtf, out_dir)
+        rebuild_with_splice_blacklist(out_dir, _BLACKLIST)
+        (out_dir / SJ_BLACKLIST_FEATHER).unlink()
+
+        assert TranscriptIndex.load(out_dir).sj_blacklist_size == 0
+
+    def test_a_manifest_without_sources_loads_with_no_blacklist(
+        self, tmp_path: Path, mini_index_inputs
+    ) -> None:
+        """A manifest written before `sources` existed records no store, so its feather is not applied."""
+        fasta, gtf = mini_index_inputs
+        out_dir = tmp_path / "idx"
+        TranscriptIndex.build(fasta, gtf, out_dir)
+        rebuild_with_splice_blacklist(out_dir, _BLACKLIST)
+        manifest = json.loads((out_dir / MANIFEST_JSON).read_text())
+        del manifest["sources"]
+        (out_dir / MANIFEST_JSON).write_text(json.dumps(manifest))
+
+        assert TranscriptIndex.load(out_dir).sj_blacklist_size == 0
 
 
 # ----------------------------------------------------------------------

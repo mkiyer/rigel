@@ -24,9 +24,10 @@ and the band constants.
 
 Usage::
 
-    python scripts/design/solvability_audit.py --condition <name> --oracle-cache <dir>   # one condition, in full
-    python scripts/design/solvability_audit.py --oracle-cache <dir>                      # the whole panel, one row each
+    python scripts/design/solvability_audit.py --condition <name>       # one condition, in full
+    python scripts/design/solvability_audit.py                          # the whole panel, one row each
     python scripts/design/solvability_audit.py --condition <name> --axis both
+    python scripts/design/solvability_audit.py --suite <dir> --index <dir> --oracle-cache <dir>
 """
 
 from __future__ import annotations
@@ -41,7 +42,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 
-from _shared import DEFAULT_INDEX, DEFAULT_SUITE, sibling  # noqa: E402
+from _shared import DEFAULT_INDEX, DEFAULT_SUITE, pool_ledger, sibling  # noqa: E402
 
 
 OA = sibling("_oracle_arms.py")
@@ -662,15 +663,19 @@ def panel_report(rows: list[tuple[str, float, dict]]) -> None:
     print(f"   ⭐ the declared precision is NOT earned (ratio > 1) on {len(over)}/{len(scored)}")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--condition", default=None, help="one condition; omit for the whole panel")
     ap.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
     ap.add_argument("--index", type=Path, default=DEFAULT_INDEX)
     ap.add_argument("--axis", default="region", choices=("region", "boundary", "both"))
     ap.add_argument("--work-dir", type=Path, default=Path(os.environ.get("RIGEL_SCRATCH", "/tmp")))
-    ap.add_argument("--oracle-cache", type=Path, default=None)
-    args = ap.parse_args()
+    ap.add_argument("--oracle-cache", type=Path, default=None,
+                    help="defaults to <suite>/oracle_cache when that directory exists; without one "
+                    "the truth is rebuilt from the BAM")
+    args = ap.parse_args(argv)
+    if args.oracle_cache is None and (args.suite / "oracle_cache").is_dir():
+        args.oracle_cache = args.suite / "oracle_cache"
 
     index = TranscriptIndex.load(str(args.index))
     config = CalibrationConfig()
@@ -685,11 +690,13 @@ def main() -> int:
 
     panel: list[tuple[str, float, dict]] = []
     for name in names:
-        cond = args.suite / name
-        truth = OA.truth_f_gdna(cond) or 0.0
+        # the library's true gDNA fraction, from the simulator's own ledger; a condition without one
+        # raises rather than reading as a zero-gDNA row, which every aggregate would silently drop
+        ledger = pool_ledger(args.suite / name)
+        truth = ledger["gdna"] / sum(ledger.values())
         print(f"  {name} …", flush=True)
         m = OA.measure_condition(
-            bam=str(cond / "sim_oracle.bam"),
+            bam=str(args.suite / name / "sim_oracle.bam"),
             index=index,
             pipeline_config=PipelineConfig(),
             calibration_config=config,

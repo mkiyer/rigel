@@ -11,7 +11,6 @@
   const grp = (n) => Math.round(n).toLocaleString("en-US");
   const si = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(Math.round(n));
   const pc = (x) => (x * 100).toFixed(1) + "%";
-  const fold = (x) => x >= 1000 ? Number(x).toExponential(1).replace("e+", "e") + "×" : Math.round(x) + "×";
   const g4 = (x) => String(parseFloat(Number(x).toPrecision(4)));
   // Single place that formats a data value by its tag — Python emits raw numbers,
   // all presentation happens here (see model.py). Non-numbers pass through as-is.
@@ -21,7 +20,6 @@
       case "pct": return pc(v);       // fraction 0..1 -> "58.8%"
       case "count": return si(v);     // 1.2M / 1.2k
       case "int": return grp(v);
-      case "fold": return fold(v);
       case "float3": return v.toFixed(3);
       case "g4": return g4(v);         // 4 significant figures
       default: return String(v);
@@ -389,23 +387,20 @@
     });
   }
 
-  /* ---------- capture note (descriptive; mass-weighted) ---------- */
+  /* ---------- capture note: calibration's own answer ---------- */
   function captureNote() {
     const n = $("capture-note"); if (!n) return;
     const c = M.calibration && M.calibration.capture;
-    if (!c) { n.innerHTML = "No gDNA track for this run — capture diagnostic unavailable."; return; }
-    const nodes = `<span style="color:var(--muted)">${grp(c.n_nodes)} nodes with gDNA signal · KDE bandwidth factor ${(c.kde_bandwidth_factor ?? 0).toFixed(2)}.</span>`;
-    if (c.enriched) {
-      n.innerHTML = `Weighting each region by its gDNA <i>mass</i> (not by region count) surfaces a high-density ` +
-        `<b>on-target mode</b> the by-count curve cannot see. Enrichment of the on-target mode vs the ` +
-        `median region: <span class="num">${fold(c.fold_vs_median ?? 1)}</span>; peak-to-peak (vs the ` +
-        `depleted mode, which GC/mappability can depress): <span class="num">${fold(c.fold_peak_to_peak ?? 1)}</span>. ` +
-        `<span class="num">${((c.mass_frac_ontarget ?? 0) * 100).toFixed(1)}%</span> of the gDNA mass lies on-target ` +
-        `(mass above the median→mode midpoint). Descriptive only — enrichment magnitude is not yet interpreted as ` +
-        `pass/fail, and small panels + bandwidth can raise small modes. ${nodes}`;
+    if (!c) { n.innerHTML = "This summary carries no calibration, so there is no capture answer."; return; }
+    if (c.reference_density != null) {
+      n.innerHTML = `<b>An enriched gDNA mode was located</b> at <span class="num">${fmtValue(c.reference_density, "g4")}</span> ` +
+        `gDNA fragments/bp, resting on <span class="num">${grp(c.n_members)}</span> located regions. Calibration reads it as the fully ` +
+        `captured level: each region's capture efficiency is its gDNA density against it, and every ` +
+        `<span class="num">em_effective_length</span> the EM reads is scaled by those efficiencies.`;
     } else {
-      n.innerHTML = `<b>No on-target mode above the median.</b> Even mass-weighted, the gDNA density shows no ` +
-        `high-density mode — consistent with a non-capture library or weak/failed enrichment. ${nodes}`;
+      n.innerHTML = `<b>No enriched gDNA mode was located</b> — a library without capture, or one whose gDNA is too ` +
+        `sparse to locate its captured level — so every <span class="num">em_effective_length</span> equals ` +
+        `<span class="num">effective_length</span>.`;
     }
   }
 

@@ -3,9 +3,9 @@ duplicate-transcript guard the reader applies, and the layout iterator underneat
 region tables. The first block verifies every structure `load()` builds: the transcript and gene
 tables and their derived arrays, collapsed and exon intervals, splice junctions, the fragment
 resolver, and the build/load round trip on a larger index and on edge cases. The second gates what
-`build()` and `load()` refuse: a reordered transcript table, a GTF with no transcripts, and an index
-whose rebuild stopped part-way. The third gates the duplicate-exon-structure guard in
-`read_transcripts` and its collapse flag. The fourth gates
+`build()` and `load()` refuse: a reordered transcript table, a GTF with no transcripts (refused
+before an existing index is touched), and an index whose rebuild stopped part-way. The third gates
+the duplicate-exon-structure guard in `read_transcripts` and its collapse flag. The fourth gates
 `_iter_reference_layout`, which both `intervals.feather` and `regions.feather` are derived from.
 """
 
@@ -27,6 +27,20 @@ from rigel.index import (
 )
 from rigel.transcript import Transcript
 from rigel.types import GenomicInterval, Interval, IntervalType, Strand
+
+
+def _mini_sources(base: Path) -> tuple[Path, Path]:
+    """Write ``MINI_GTF`` and an indexed all-N 2,000-bp chr1 into *base*; return (FASTA, GTF)."""
+    import pysam
+    from _index_builder import MINI_GTF
+
+    fasta = base / "genome.fa"
+    fasta.write_text(">chr1\n" + "N" * 2000 + "\n")
+    pysam.faidx(str(fasta))
+    gtf = base / "test.gtf"
+    gtf.write_text(MINI_GTF)
+    return fasta, gtf
+
 
 # The first block drives `conftest.py`'s shared `mini_index` fixture, whose geometry the numbers
 # below are read off:
@@ -351,39 +365,14 @@ class TestBuildLoadRoundTrip:
     @pytest.fixture
     def round_trip_index(self, tmp_path):
         """Build and load an index from GENCODE-style GTF."""
-        import pysam
-        from _index_builder import MINI_GTF
-
-        gtf_path = tmp_path / "test.gtf"
-        gtf_path.write_text(MINI_GTF)
-
-        fasta_path = tmp_path / "genome.fa"
-        with open(fasta_path, "w") as f:
-            f.write(">chr1\n")
-            seq = "N" * 2000
-            for i in range(0, len(seq), 80):
-                f.write(seq[i : i + 80] + "\n")
-        pysam.faidx(str(fasta_path))
-
+        fasta_path, gtf_path = _mini_sources(tmp_path)
         idx_dir = tmp_path / "idx"
         TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
         return TranscriptIndex.load(idx_dir, retain_test_structures=True)
 
     def test_two_loads_produce_same_data(self, tmp_path):
         """Loading twice from the same dir should yield identical structures."""
-        import pysam
-        from _index_builder import MINI_GTF
-
-        gtf_path = tmp_path / "test.gtf"
-        gtf_path.write_text(MINI_GTF)
-        fasta_path = tmp_path / "genome.fa"
-        with open(fasta_path, "w") as f:
-            f.write(">chr1\n")
-            seq = "N" * 2000
-            for i in range(0, len(seq), 80):
-                f.write(seq[i : i + 80] + "\n")
-        pysam.faidx(str(fasta_path))
-
+        fasta_path, gtf_path = _mini_sources(tmp_path)
         idx_dir = tmp_path / "idx"
         TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
 
@@ -636,19 +625,6 @@ class TestEdgeCases:
 # ── What ``TranscriptIndex`` REFUSES — a reordered table, an empty GTF, a half-rebuilt index ─────
 
 
-def _mini_sources(base: Path) -> tuple[Path, Path]:
-    """Write ``MINI_GTF`` and an indexed all-N 2,000-bp chr1 into *base*; return (FASTA, GTF)."""
-    import pysam
-    from _index_builder import MINI_GTF
-
-    fasta = base / "genome.fa"
-    fasta.write_text(">chr1\n" + "N" * 2000 + "\n")
-    pysam.faidx(str(fasta))
-    gtf = base / "test.gtf"
-    gtf.write_text(MINI_GTF)
-    return fasta, gtf
-
-
 def test_load_refuses_a_reordered_transcript_table(tmp_path: Path):
     """Every per-transcript array is keyed by row position, so reordered rows would mis-map them."""
     fasta, gtf = _mini_sources(tmp_path)
@@ -669,6 +645,39 @@ def test_build_refuses_a_gtf_without_transcripts_before_writing(tmp_path: Path):
     with pytest.raises(ValueError, match="no transcripts"):
         TranscriptIndex.build(fasta, gtf, idx_dir, write_tsv=False)
     assert list(idx_dir.iterdir()) == []
+
+
+def test_an_empty_gtf_rebuild_leaves_the_existing_index_loadable(tmp_path: Path):
+    """The refusal comes before any old file is deleted, the manifest and the splice blacklist among
+    them, so a rebuild refused for an empty GTF leaves the index it would have replaced untouched and
+    loadable."""
+    from _index_builder import rebuild_with_splice_blacklist
+
+    fasta, gtf = _mini_sources(tmp_path)
+    idx_dir = tmp_path / "idx"
+    TranscriptIndex.build(fasta, gtf, idx_dir, write_tsv=False)
+    blacklist = pd.DataFrame(
+        {
+            "ref": ["chr1"],
+            "start": np.asarray([200], dtype=np.int32),
+            "end": np.asarray([299], dtype=np.int32),
+            "max_anchor_left": np.asarray([10], dtype=np.int32),
+            "max_anchor_right": np.asarray([10], dtype=np.int32),
+        }
+    )
+    rebuild_with_splice_blacklist(idx_dir, blacklist)
+    files_before = {p.name: p.read_bytes() for p in idx_dir.iterdir()}
+    n_transcripts = TranscriptIndex.load(idx_dir).num_transcripts
+
+    empty = tmp_path / "empty.gtf"
+    empty.write_text("")
+    with pytest.raises(ValueError, match="no transcripts"):
+        TranscriptIndex.build(fasta, empty, idx_dir, write_tsv=False)
+
+    assert {p.name: p.read_bytes() for p in idx_dir.iterdir()} == files_before
+    reloaded = TranscriptIndex.load(idx_dir)
+    assert reloaded.num_transcripts == n_transcripts
+    assert reloaded.sj_blacklist_size == len(blacklist)
 
 
 def test_an_interrupted_rebuild_leaves_no_manifest(tmp_path: Path, monkeypatch):

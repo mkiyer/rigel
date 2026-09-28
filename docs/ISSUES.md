@@ -65,6 +65,34 @@ Instrument: the harness, the substrates and the report in
 `~/Downloads/rigel_runs/prototypes/2026-09-27_strand_od/`. The 2026-08-30 design (DESIGN §3.3a) is superseded when
 this lands.
 
+### a-pure-gdna-library-reads-as-nascent-rna
+`priority: open challenge (owner, 2026-09-28) · kind: defect · 2026-09-28`
+Rigel reads a library of pure genomic DNA as 93 % RNA. The case is the exome-DNA half of the VCaP mix, 4,671,916
+fragments, separated by read name. It is unstranded (strand specificity 0.5008) and capture-enriched (calibration's
+gDNA reference density is 180× its genome-wide density).
+
+Where its fragments went:
+- synthetic nascent RNA, over 53,962 spans: 3,781,970 (81 %);
+- annotated multi-exon mRNA: 452,338 (9.7 %), only 4,213 of which come from spliced fragments;
+- annotated single-exon transcripts: 109,003 (2.3 %);
+- gDNA: 313,624 (6.7 %).
+
+The library has 3,225 fragments spliced at an annotated junction (0.07 %), about what alignment artifacts alone
+would give.
+
+This is the deferred unstranded × capture-ON stratum at its extreme. The gDNA fraction cancels from the strand mean,
+and capture depletes the intergenic space that would otherwise measure the gDNA density, so a gene span's unspliced
+coverage fits nascent RNA as well as gDNA.
+
+What could still tell them apart is the SPLICED FRACTION. Mature RNA at a multi-exon transcript produces
+junction-crossing fragments at a rate its geometry and the fragment-length law set (layer 2's `sj_opportunity`).
+Here the multi-exon mRNA assignment carries under 1 % spliced support where real RNA carries tens of per cent. And by
+the nascent scope ruling, nascent RNA is sparse beside mature RNA, which it cannot outweigh 7:1 as it does here.
+Whether either becomes a likelihood term, and how a pure-gDNA library should be recognised, is open.
+
+Measured with the strand-overdispersion harness, `rigel quant` under every arm (the arms change nothing here):
+`~/Downloads/rigel_runs/prototypes/2026-09-27_strand_od/results/robust_no-rna/`.
+
 ### multimapper-intergenic-alignments
 `priority: a separate feature, after the end-to-end work (owner, 2026-09-24) · kind: defect · 2026-09-24`
 A multimapper whose alignments all lie outside genes is intergenic and counted as gDNA — correct. One with an
@@ -492,10 +520,6 @@ the splice blacklist); `_solve_impl` builds without the other native modules' `-
 the index's duplicate map as an alias map `dropped_t_id → kept_t_id` (an index rebuild, no panel re-scan).
 Kept as coverage GAPS, not dead code: the five CLI command bodies, the silent policy through `calibrate`, the
 simulator's sharded writers and its whole-genome grid, and the zarr splice blacklist.
-
-FOUND 2026-09-24: `scripts/design/solvability_audit.py`'s `main()` calls `_oracle_arms.truth_f_gdna`, deleted in
-34145493, and raises `AttributeError`; `preflight.py`'s import check cannot see it (the g98 dissection ran it
-through a shim).
 
 ### drain-contaminates-certified-rna
 `priority: later (parked by the owner, 2026-09-01) · kind: defect · 2026-08-31`

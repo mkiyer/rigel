@@ -14,6 +14,7 @@ headline field moves. Each gate carries its own perturbation.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from rigel.calibration.region_chain import REGION
 from rigel.calibration.region_init import has_own_composition_evidence
 from rigel.config import CalibrationConfig, PipelineConfig
 from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
+from rigel.sim.truth import count_origins_from_bam
 
 
 def _sibling(name: str):
@@ -46,7 +48,7 @@ P0 = _sibling("_oracle_arms.py")
 
 
 @pytest.fixture(scope="module")
-def audited(tmp_path_factory):
+def unstranded_toy(tmp_path_factory):
     wd = tmp_path_factory.mktemp("sa_sim")
     sc = Scenario("sa", genome_length=9000, seed=29, work_dir=wd / "sim")
     sc.add_gene(
@@ -77,10 +79,15 @@ def audited(tmp_path_factory):
         ),
         gdna_config=GDNAConfig(abundance=0.0, frag_mean=240, frag_std=45),
     )
+    return res
+
+
+@pytest.fixture(scope="module")
+def audited(unstranded_toy, tmp_path_factory):
     cfg = CalibrationConfig()
     m = P0.measure_condition(
-        bam=str(res.bam_path),
-        index=res.index,
+        bam=str(unstranded_toy.bam_path),
+        index=unstranded_toy.index,
         pipeline_config=PipelineConfig(),
         calibration_config=cfg,
         work_dir=tmp_path_factory.mktemp("sa_split"),
@@ -622,3 +629,61 @@ def test_D2_the_new_columns_are_BIT_IDENTICAL_when_the_solvable_set_SHRINKS():
         k for k in ("solvable_mass_share", "solvable_mwae", "conf_wrong_objects") if a[k] != b[k]
     ]
     assert len(moved) == 3, (moved, a, b)
+
+
+# ── main(), the path a panel run takes ───────────────────────────────────────────────────────────
+
+
+def _toy_suite(root: Path, res, ledgers: dict[str, dict]) -> None:
+    """A suite whose conditions share the toy's BAM, each beside its own origin ledger."""
+    for name, ledger in ledgers.items():
+        d = root / name
+        d.mkdir(parents=True)
+        (d / "sim_oracle.bam").symlink_to(res.bam_path)
+        (d / "truth_summary.json").write_text(json.dumps({"origin_counts": ledger}))
+
+
+def test_MAIN_runs_end_to_end_and_reads_the_truth_from_the_simulators_ledger(
+    unstranded_toy, tmp_path, capsys
+):
+    """Every gate above calls the library functions; ``main()`` is the path a panel run takes, and it
+    once called a deleted helper and raised on every run while every gate here stayed green. So run it
+    both ways it can go: one condition in full, and a panel of two with its table.
+
+    The panel's truth column must be each condition's ledger, ``gdna / (gdna + mrna + nrna)``. The
+    first carries the simulator's own counts (exactly ½ on this toy); the second's ledger names no
+    gDNA pool, so it must read 0 and be set apart as a false-positive check. The audit never
+    cross-checks a ledger against its BAM, which is what lets one BAM serve both. A condition with no
+    ledger at all must be REFUSED: reading it as 0 would file it as a zero-gDNA control, which every
+    aggregate drops without a word.
+
+    PERTURBATION: the deleted helper's call raises ``AttributeError`` on the first ``main``; a
+    constant or name-derived truth misreads the second row; a ``0.0`` fallback for a missing ledger
+    fails the last assertion.
+    """
+    counts = count_origins_from_bam(unstranded_toy.bam_path)
+    real = {k: int(counts.get(k, 0)) for k in ("mrna", "nrna", "gdna")}
+    assert real["gdna"] > 0 and real["mrna"] > 0, real
+    suite = tmp_path / "suite"
+    _toy_suite(suite, unstranded_toy, {"toy_a": real, "toy_b": {"mrna": real["mrna"]}})
+    common = [
+        "--suite", str(suite),
+        "--index", str(unstranded_toy.index_dir),
+        "--work-dir", str(tmp_path / "wd"),
+    ]  # fmt: skip
+
+    assert SA.main([*common, "--condition", "toy_a", "--axis", "both"]) == 0
+    single = capsys.readouterr().out
+    assert "SOLVABILITY AUDIT — toy_a" in single and "THE DEBUG CHAIN" in single, single
+
+    assert SA.main(common) == 0
+    panel = capsys.readouterr().out
+    rows = [ln.split() for ln in panel.splitlines() if ln.strip().startswith(("toy_a", "toy_b"))]
+    rows = {r[0]: float(r[1]) for r in rows if len(r) > 2}  # the table, not the progress lines
+    assert rows == {"toy_a": pytest.approx(real["gdna"] / sum(real.values()), abs=5e-5),
+                    "toy_b": 0.0}, panel  # fmt: skip
+    assert "1 zero-gDNA row(s)" in panel, panel
+
+    (suite / "toy_a" / "truth_summary.json").unlink()
+    with pytest.raises(FileNotFoundError):
+        SA.main(common)

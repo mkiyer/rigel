@@ -52,7 +52,7 @@ sys.path.insert(0, str(_REPO / "tests" / "calibration"))
 sys.path.insert(0, str(_REPO / "scripts" / "design"))
 
 from _oracle import ORIGINS, OracleTruth  # noqa: E402
-from _shared import set_field  # noqa: E402
+from _shared import is_zero_gdna, set_field, strata, stratum  # noqa: E402
 
 
 import rigel.calibration.priors as PRIORS  # noqa: E402
@@ -663,33 +663,16 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
 # ── reporting ────────────────────────────────────────────────────────────────────────────────────
 
 
-def stratum(cond: str) -> tuple[str, str]:
-    return ("stranded" if "ss_0.99" in cond else "unstranded",
-            "capture ON" if "capture_on" in cond else "capture OFF")
-
-
-def is_zero_gdna(cond: str) -> bool:
-    return "_g00_" in cond
-
-
-_STRATA = (("stranded", "capture OFF"), ("stranded", "capture ON"),
-           ("unstranded", "capture OFF"), ("unstranded", "capture ON"))
-
-
 def _load(path: Path) -> dict:
     rows = [json.loads(x) for x in Path(path).read_text().splitlines() if x.strip()]
     return {(r["condition"], r["axis"]): r for r in rows}
 
 
-_GDNA_LEVEL = {"g00": "0 %", "g05": "5 %", "g50": "50 %", "g98": "98 %"}
-
-
-def _level(cond: str) -> str:
-    """The condition's designed gDNA level, from its name."""
-    for k in _GDNA_LEVEL:
-        if f"_{k}_" in cond:
-            return k
-    return "?"
+def _gdna_level(library_row: dict) -> str:
+    """The condition's gDNA level, read off its own truth (``gdna_frac_true``, the simulator's origin
+    counts) rather than mapped from the name's rung token, so no rung a panel carries can be missing."""
+    f = float(library_row["gdna_frac_true"])
+    return f"{100.0 * f:.3g} %" if np.isfinite(f) else "n/a"
 
 
 def _pct(est: float, true: float) -> str:
@@ -803,7 +786,7 @@ def markdown_report(paths: list[Path], out: Path) -> None:
         w("")
         w("| scenario | gDNA level | estimated | truth | Δ | % error |")
         w("|---|---|---:|---:|---:|---:|")
-        for st in _STRATA:
+        for st in strata(conds):
             rows = [c for c in conds if stratum(c) == st]
             if not rows:
                 continue
@@ -813,7 +796,7 @@ def markdown_report(paths: list[Path], out: Path) -> None:
                 r = primary[(c, "library")]
                 est = (r["gdna_est"] + r["n_intergenic"]) if est_f is None else r[est_f]
                 true = r[true_f]
-                w(f"| `{c}` | {_GDNA_LEVEL[_level(c)]} | {est:,.0f} | {true:,.0f} | "
+                w(f"| `{c}` | {_gdna_level(r)} | {est:,.0f} | {true:,.0f} | "
                   f"{_signed(est - true)} | {_pct(est, true)} |")
         w("")
 
@@ -824,7 +807,7 @@ def markdown_report(paths: list[Path], out: Path) -> None:
     w("")
     w("| scenario | estimated | truth | Δ |")
     w("|---|---:|---:|---:|")
-    for st in _STRATA:
+    for st in strata(conds):
         rows = [c for c in conds if stratum(c) == st]
         if not rows:
             continue
@@ -867,7 +850,7 @@ def markdown_report(paths: list[Path], out: Path) -> None:
         ncols = head.replace("\\|", "").count("|") - 1
         w(head)
         w("|---" + "|---:" * (ncols - 1) + "|")
-        for st in _STRATA:
+        for st in strata(conds):
             rows = [c for c in conds if stratum(c) == st]
             if not rows:
                 continue
@@ -891,14 +874,14 @@ def markdown_report(paths: list[Path], out: Path) -> None:
         w("")
 
     # ── rollup ───────────────────────────────────────────────────────────────────────────────────
-    w("## 4. Per stratum, summed over its four gDNA levels")
+    w("## 4. Per stratum, summed over its gDNA levels")
     w("")
-    w("⛔ Summed WITHIN a stratum only. The four strata are never added together.")
+    w("⛔ Summed WITHIN a stratum only. The strata are never added together.")
     w("")
     w("| stratum | annotated truth | transcript Σ\\|Δ\\| | % | gene Σ\\|Δ\\| | % | nascent est | "
       "nascent truth | gDNA est | gDNA truth |")
     w("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
-    for st in _STRATA:
+    for st in strata(conds):
         rows = [c for c in conds if stratum(c) == st]
         if not rows:
             continue
@@ -979,7 +962,7 @@ def report(paths: list[Path]) -> None:
             print(row)
 
         line("ALL (g00 excluded)", lambda c: not is_zero_gdna(c))
-        for st in _STRATA:
+        for st in strata(conds):
             line(" x ".join(st), lambda c, st=st: stratum(c) == st and not is_zero_gdna(c))
         print("    " + "-" * (26 + 17 * len(arms) + 11))
         line("⛔ g00 ZERO-gDNA control", is_zero_gdna)
@@ -1014,7 +997,7 @@ def report(paths: list[Path]) -> None:
         print(row)
 
     rank_line("ALL (g00 excluded)", lambda c: not is_zero_gdna(c))
-    for st in _STRATA:
+    for st in strata(conds):
         rank_line(" x ".join(st), lambda c, st=st: stratum(c) == st and not is_zero_gdna(c))
     print("    " + "-" * (26 + 34 * len(arms)))
     rank_line("⛔ g00 ZERO-gDNA control", is_zero_gdna)
@@ -1079,7 +1062,7 @@ def report(paths: list[Path]) -> None:
                 first = False
 
         pool_rows("ALL (g00 excluded)", lambda c: not is_zero_gdna(c))
-        for st in _STRATA:
+        for st in strata(conds):
             pool_rows(" x ".join(st),
                       lambda c, st=st: stratum(c) == st and not is_zero_gdna(c))
         print("    " + "-" * 102)

@@ -814,6 +814,81 @@ def test_the_report_does_NOT_call_the_truth_table_s_ROW_COUNT_a_transcript_count
     assert "expressed" in body and "detected" in body
 
 
+def _arm_file(tmp_path, gdna_frac_true: dict) -> Path:
+    """``_arm_rows``'s three rows once per condition, each library row carrying its own true share."""
+    base = [json.loads(x) for x in _arm_rows(tmp_path)[0].read_text().splitlines()]
+    rows = [
+        {**r, "condition": cond, **({"gdna_frac_true": f} if r["axis"] == "library" else {})}
+        for cond, f in gdna_frac_true.items()
+        for r in base
+    ]
+    path = tmp_path / "multi.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    return path
+
+
+def _gdna_pool_blocks(md: str) -> dict:
+    """The gDNA pool table's stratum headings, each with the conditions filed under it."""
+    table = md.split("### gDNA (EM + intergenic)\n\n")[1].split("\n\n")[0]
+    blocks, head = {}, None
+    for line in table.splitlines():
+        if line.startswith("| **"):
+            head = line.split("**")[1]
+            blocks[head] = []
+        elif line.startswith("| `"):
+            blocks[head].append(line.split("`")[1])
+    return blocks
+
+
+def test_every_gDNA_RUNG_is_labelled_from_its_truth_not_from_a_map_of_known_rungs(tmp_path):
+    """The level column came from a hand map of the ladder's four rung tokens, so a panel with any
+    other rung (the test chromosome's ``g25``, the depth panels' ``g001`` and ``g01``) raised and no
+    report was written. It is read off the row's own truth, ``gdna_frac_true``.
+
+    Perturbation: the hand map raises ``KeyError`` on ``g25``; a label read from the name's digits
+    prints ``g001`` as 1 %.
+    """
+    rungs = {"g00": (0.0, "0 %"), "g001": (0.001, "0.1 %"), "g05": (0.0500004, "5 %"),
+             "g25": (0.25, "25 %"), "g98": (0.98, "98 %")}  # fmt: skip
+    conds = {f"gdna_{k}_ss_0.99_nrna_mid_capture_off": f for k, (f, _label) in rungs.items()}
+    out = tmp_path / "rungs.md"
+    QA.markdown_report([_arm_file(tmp_path, conds)], out)
+    md = out.read_text()
+    for (k, (_f, label)), cond in zip(rungs.items(), conds):
+        assert f"| `{cond}` | {label} |" in md, f"rung {k} is not labelled {label}"
+
+
+def test_a_strand_specificity_in_NEITHER_half_is_reported_APART_never_pooled(tmp_path):
+    """ss 0.50 is the unstranded half and ss 0.99 the stranded half, and they are judged against
+    different bars (TRAPS: never-pool-the-strata). The test panel's ss 0.70 is neither, and it was
+    filed as unstranded, so its rows moved the half a policy must win on. One definition
+    (`_shared.strandedness`) serves every instrument; a name that spells no specificity raises
+    rather than landing in a half.
+
+    Perturbation: ``"stranded" if "ss_0.99" in cond else "unstranded"`` files the 0.70 row under
+    ``unstranded × capture OFF`` and prints no stratum of its own.
+    """
+    shared = importlib.import_module("_shared")
+    assert shared.strandedness("gdna_g50_ss_0.50_nrna_mid_capture_on") == "unstranded"
+    assert shared.strandedness("gdna_g50_ss_0.99_nrna_mid_capture_on") == "stranded"
+    assert shared.strandedness("gdna_g50_ss_0.70_nrna_file_capture_on") == "ss 0.70"
+    with pytest.raises(ValueError):
+        shared.strandedness("gdna_g50_nrna_mid_capture_on")
+
+    c50, c70 = "gdna_g50_ss_0.50_nrna_file_capture_off", "gdna_g50_ss_0.70_nrna_file_capture_off"
+    assert shared.strata([c50, c70]) == [*shared.STRATA, ("ss 0.70", "capture OFF")]
+    out = tmp_path / "apart.md"
+    QA.markdown_report([_arm_file(tmp_path, {c50: 0.5, c70: 0.5})], out)
+    md = out.read_text()
+    assert _gdna_pool_blocks(md) == {
+        "unstranded × capture OFF": [c50],
+        "ss 0.70 × capture OFF": [c70],
+    }
+    assert "| ss 0.70 × capture OFF |" in md.split("## 4.")[1], (
+        "the roll-up dropped the apart stratum"
+    )
+
+
 # ── GATE 16: the allocation arm's weights must reach every transcript the simulator gave RNA ──────
 
 

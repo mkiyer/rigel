@@ -45,8 +45,7 @@ python .claude/skills/ladder-report/build_report.py \
 
 The markdown comes from `quant_accuracy.py --markdown`, which the suite gates
 (`tests/calibration/test_quant_accuracy.py`); the page is the same payload through
-`report_template.html`. The builder imports the instrument rather than re-implementing its label
-rules, so the two cannot disagree about what a field means.
+`report_template.html`.
 
 ## 3. Publish the page — to the SAME artifact
 

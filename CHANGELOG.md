@@ -60,6 +60,10 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 8).
 - Four `loci.feather` columns no code ever filled (`n_regions_touched`, `multi_locus_region_mass`,
   `partial_coverage_region_mass`, `gdna_eff_len_per_bp`, always 0), and `summary.json`'s
   `gdna_eff_len.per_bp`, which summarised them; `summary.json` is schema 3.
+- `summary.json`'s `calibration.capture` block and the report's by-count / by-mass density chart, a
+  second density census of the gDNA track with its own thresholds. The report's capture tile and panel
+  show calibration's own answer instead: `calibration.gdna_reference_density`, the captured gDNA level
+  (`null` when no enriched gDNA mode is located), and `gdna_reference_members`.
 - The fragment-length composition channel and the NPMLE gDNA prior: measured and retired.
 - `--mappability-read-length` (a no-op), `--gdna-prior-mixture-bridge`, `--sweep-n-grid-single-strand`
   and `--gdna-em-llr-bias` (an underived odds dial), and the `measured_total` background estimator.

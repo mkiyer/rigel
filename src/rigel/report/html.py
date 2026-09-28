@@ -162,13 +162,7 @@ _SECTIONS = """
       <div class="ph"><span class="eyebrow">06</span><h2>Calibration · Enrichment</h2><span class="desc">Capture on-target enrichment</span></div>
       <div class="pb">
         <div class="kpis" id="enrich-kpis"></div>
-        <div class="grid2 wide-left">
-          <div>
-            <p class="cap">gDNA density — by region count vs by gDNA mass</p>
-            <div class="vega-chart" id="vega-capture_kde"></div>
-          </div>
-          <div><div class="note" id="capture-note"></div></div>
-        </div>
+        <div class="note" id="capture-note"></div>
       </div>
     </section>
 

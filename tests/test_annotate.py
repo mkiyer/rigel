@@ -610,7 +610,8 @@ class TestAnnotatedBamIntegration:
         import pandas as pd
         import pysam
         from rigel.sim import ReadSimConfig
-        from rigel.index import TranscriptIndex, SJ_BLACKLIST_FEATHER
+        from _index_builder import rebuild_with_splice_blacklist
+        from rigel.index import TranscriptIndex
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
         from rigel.pipeline import run_pipeline
 
@@ -638,7 +639,7 @@ class TestAnnotatedBamIntegration:
                 "max_anchor_right": pd.array([1000], dtype="int32"),
             }
         )
-        bl_df.to_feather(result.index_dir / SJ_BLACKLIST_FEATHER)
+        rebuild_with_splice_blacklist(result.index_dir, bl_df)
 
         # Reload so the C++ resolver picks up the new blacklist
         reloaded_index = TranscriptIndex.load(result.index_dir)

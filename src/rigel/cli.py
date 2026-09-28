@@ -381,9 +381,9 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         if cal is None
         else {
             "gdna_density_global": round(float(cal.gdna_density_global), 8),
-            # the ruler's regime: the fully-captured gDNA level the effective lengths were contracted
-            # against (None = no located enriched mode, nothing contracted) and the located kernels it
-            # rests on
+            # calibration's capture answer, which the ruler reads: the fully-captured gDNA level the
+            # effective lengths were contracted against (None = no located enriched mode, nothing
+            # contracted) and the located regions it rests on
             "gdna_reference_density": (
                 None if cal.gdna_reference_density is None else float(cal.gdna_reference_density)
             ),
@@ -396,12 +396,6 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "n_sj": int(cal.n_sj),
         }
     )
-    if cal_dict is not None:
-        from .calibration.track import capture_summary
-
-        cap = capture_summary(getattr(result, "calibration_track", None))
-        if cap is not None:
-            cal_dict["capture"] = cap
     diag = getattr(result, "calibration_diagnostics", None)
 
     # Command section — record CLI arguments

@@ -1,11 +1,9 @@
 """The report pipeline in one function: :func:`build_report`.
 
 Loads the substrate a ``rigel quant`` run left in its output directory
-(:mod:`rigel.report.substrate`), derives the capture-enrichment curves
-(:func:`rigel.calibration.track.capture_summary`), builds the render-ready view model
-(:mod:`rigel.report.model`) and the chart specs (:mod:`rigel.report.specs`), and writes one
-self-contained HTML file (:mod:`rigel.report.html`). It computes nothing itself; each stage owns
-its own step.
+(:mod:`rigel.report.substrate`), builds the render-ready view model (:mod:`rigel.report.model`)
+and the chart specs (:mod:`rigel.report.specs`), and writes one self-contained HTML file
+(:mod:`rigel.report.html`). It computes nothing itself; each stage owns its own step.
 
 Only ``summary.json`` is required — substrate warnings are logged rather than raised, and a
 missing optional table degrades the corresponding section instead of failing the report. When
@@ -18,7 +16,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from ..calibration.track import capture_summary
 from .html import render_html, vega_bundle
 from .model import build_view_model
 from .specs import build_charts
@@ -52,9 +49,8 @@ def build_report(
     for w in sub.warnings:
         logger.warning("[report] %s", w)
 
-    capture = capture_summary(sub.calibration_track, with_curve=True)
-    model = build_view_model(sub, capture=capture)
-    charts = build_charts(sub, capture=capture)
+    model = build_view_model(sub)
+    charts = build_charts(sub)
 
     if title is None:
         title = f"Rigel QC · {model['meta']['sample']}"

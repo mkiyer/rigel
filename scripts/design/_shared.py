@@ -7,7 +7,7 @@ resolves its own module through ``sys.modules`` at class-creation time), and ret
 every later call, so two instruments loading the same sibling share one copy of it. This is a helper, not
 an instrument: it answers no question and has no row in the instrument table. It also holds
 ``set_field``, the one ``SECTION.FIELD=VALUE`` parser behind every instrument's ``--set``, and the panel's
-default paths, the six override fields and the two stratum readers the oracle instruments share.
+default paths, the six override fields, the stratum readers and the pool ledger the instruments share.
 
 Usage::
 
@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import dataclasses
 import importlib.util
+import json
+import re
 import sys
 import typing
 from pathlib import Path
@@ -44,12 +46,38 @@ OVERRIDE_FIELDS = (
 )
 
 
+#: The strand axis's two halves, keyed by the strand specificity a condition name spells (``_ss_0.50_``). A
+#: library between them is in neither half: the test panel's ss 0.70 rows are a stratum of their own, never
+#: pooled into a half whose bar they would move.
+STRAND_HALVES = {"0.50": "unstranded", "0.99": "stranded"}
+
+#: The four strata of the two halves, in report order. ``strata`` appends any other a panel carries.
+STRATA = (
+    ("stranded", "capture OFF"),
+    ("stranded", "capture ON"),
+    ("unstranded", "capture OFF"),
+    ("unstranded", "capture ON"),
+)
+
+
+def strandedness(cond: str) -> str:
+    """``unstranded`` (ss 0.50), ``stranded`` (ss 0.99), or ``ss <value>`` for any other specificity,
+    which is reported apart. A name that spells no specificity raises rather than landing in a half."""
+    token = re.search(r"_ss_(\d+\.\d+)(?:_|$)", cond)
+    if token is None:
+        raise ValueError(f"{cond!r} names no strand specificity (`_ss_<value>_`)")
+    return STRAND_HALVES.get(token.group(1), f"ss {token.group(1)}")
+
+
 def stratum(cond: str) -> tuple[str, str]:
-    """The panel's two binary axes."""
-    return (
-        "stranded" if "ss_0.99" in cond else "unstranded",
-        "capture ON" if "capture_on" in cond else "capture OFF",
-    )
+    """The panel's two axes: the strand half (or the specificity it is apart at) and capture."""
+    return (strandedness(cond), "capture ON" if "capture_on" in cond else "capture OFF")
+
+
+def strata(conds) -> list[tuple[str, str]]:
+    """:data:`STRATA`, then every other stratum among ``conds``, sorted: the list a per-stratum report
+    iterates, so a condition apart from both halves is printed on its own row rather than dropped."""
+    return [*STRATA, *sorted({stratum(c) for c in conds} - set(STRATA))]
 
 
 def is_zero_gdna(cond: str) -> bool:
@@ -57,6 +85,20 @@ def is_zero_gdna(cond: str) -> bool:
     the prior there is a false positive with nothing to cancel it, and a relative change is unbounded.
     Reported on its own row, never inside ALL."""
     return "_g00_" in cond
+
+
+def pool_ledger(condition_dir: Path) -> dict:
+    """The simulator's own starting fragment count per origin pool, the outer reference.
+
+    Three pools on the truth side and two on the answer side, structurally: ``calibrate`` deconvolves
+    an object into ``(gDNA, RNA+, RNA−)`` and cannot split mature from nascent, which is the EM's job
+    and is scored in ``quant_accuracy.py``'s pool table. ``nrna`` is reported to keep the accounting
+    complete and calibration's RNA answer is scored against ``mrna + nrna``. Read from
+    ``truth_summary.json``, never from the condition name; a missing pool reads 0, a missing file raises.
+    """
+    summary = json.loads((Path(condition_dir) / "truth_summary.json").read_text())
+    counts = summary["origin_counts"]
+    return {k: float(counts.get(k, 0.0)) for k in ("gdna", "mrna", "nrna")}
 
 
 def sibling(name: str):

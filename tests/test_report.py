@@ -4,8 +4,9 @@ A minimal but realistic substrate — a v3 ``summary.json`` and its companion fe
 to a temp directory, and the loader, the view model, the chart specifications and the full HTML
 build run against it. The report must be self-contained, inlining its runtime, and must honour a
 custom output path. The exported density diagnostics are checked against an `AbundanceLandscape`
-fixture. Every chart the page embeds must compile and read every mark property it sets. Vega-specific assertions are conditional
-on ``vl-convert-python``.
+fixture. The capture panel shows calibration's own answer, and the front end reads only the keys and
+format tags the view model writes. Every chart the page embeds must compile and read every mark property
+it sets. Vega-specific assertions are conditional on ``vl-convert-python``.
 """
 
 import importlib.util
@@ -20,10 +21,10 @@ import pytest
 import numpy as np
 
 from rigel.calibration.diagnostics import CalibrationDiagnostics
-from rigel.calibration.track import capture_summary
 from rigel.report.build import build_report
+from rigel.report.html import _asset
 from rigel.report.model import _reference_table, build_view_model
-from rigel.report.specs import build_charts, build_fl_specs, capture_kde_spec, genome_track_spec
+from rigel.report.specs import build_charts, build_fl_specs, genome_track_spec
 from rigel.report.substrate import SubstrateError, load_substrate
 
 _HAS_VEGA = importlib.util.find_spec("vl_convert") is not None
@@ -311,44 +312,113 @@ def test_capture_diagnostics_from_abundance_landscape_exports_the_curve_and_the_
     assert {0, 2} <= set(np.unique(diag.rug_kind))  # the fixture has intergenic and exon regions
 
 
-def test_capture_summary_mass_weighting_recovers_enrichment():
-    # Equal weight is dominated by the low mode; mass weighting must surface the high mode.
-    cap = capture_summary(_enriched_track(), with_curve=True)
-    assert cap is not None
-    assert cap["enriched"] is True
-    assert cap["enriched_mode_log_rho"] > cap["count_median_log_rho"]
-    assert cap["separation_median_nats"] > 3.0
-    assert cap["fold_vs_median"] > 3.0
-    assert 0.0 < cap["mass_frac_ontarget"] <= 1.0
-    # spec renders as an overlay (curve + mode rule + mode text)
-    spec = capture_kde_spec(cap)
-    assert spec is not None and len(spec["layer"]) == 3
-    assert capture_kde_spec(None) is None
+def _with_calibration(d: Path, **keys) -> Path:
+    """Give the substrate's ``summary.json`` a calibration block carrying ``keys``."""
+    path = d / "summary.json"
+    summary = json.loads(path.read_text())
+    summary["calibration"] = {"gdna_density_global": 0.03, "n_regions": 1760, **keys}
+    path.write_text(json.dumps(summary))
+    return d
 
 
-def test_capture_summary_unimodal_when_no_enrichment():
-    rng = np.random.default_rng(1)
-    dens = np.exp(rng.normal(-9.0, 0.5, 3000))
-    track = pd.DataFrame(
-        {
-            "ref": pd.Categorical(["chr1"] * len(dens)),
-            "start": np.arange(len(dens)),
-            "end": np.arange(len(dens)) + 50,
-            "gdna_mass": np.full(len(dens), 0.02),
-            "rna_mass": np.ones(len(dens)),
-            "gdna_density": dens,
-            "gdna_frac": np.clip(dens, 0, 1),
-        }
+def _js_function(name: str) -> str:
+    """The body of one top-level function of the report's front end."""
+    js = _asset("report.js")
+    m = re.search(rf"\n  function {name}\(.*?\) \{{\n(.*?)\n  \}}\n", js, re.S)
+    assert m, f"report.js has no function {name}"
+    return m.group(1)
+
+
+def test_the_capture_answer_is_calibrations_located_enriched_mode(tmp_path):
+    """The capture tile, KPIs and note read calibration's reference and nothing else: a located mode
+    shows its density and members, no mode says so, and a summary without calibration shows no tile."""
+    located = build_view_model(
+        load_substrate(
+            _with_calibration(
+                _write_substrate(tmp_path / "on"),
+                gdna_reference_density=0.83,
+                gdna_reference_members=352,
+            )
+        )
     )
-    cap = capture_summary(track, with_curve=True)
-    assert cap is not None and cap["enriched"] is False
+    assert located["calibration"]["capture"] == {"reference_density": 0.83, "n_members": 352}
+    tile = next(v for v in located["verdicts"] if v["k"] == "Capture")
+    assert (tile["v"], tile["fmt"]) == (0.83, "g4")
+    assert "352" in tile["n"]
+    assert [k["v"] for k in located["calibration"]["enrichment_kpis"]] == [0.83, 352]
+
+    none = build_view_model(
+        load_substrate(
+            _with_calibration(
+                _write_substrate(tmp_path / "off"),
+                gdna_reference_density=None,
+                gdna_reference_members=0,
+            )
+        )
+    )
+    assert none["calibration"]["capture"] == {"reference_density": None, "n_members": 0}
+    tile = next(v for v in none["verdicts"] if v["k"] == "Capture")
+    assert (tile["v"], tile["fmt"]) == ("None", "text")
+    assert [k["v"] for k in none["calibration"]["enrichment_kpis"]] == ["None"]
+
+    absent = build_view_model(load_substrate(_write_substrate(tmp_path / "absent")))
+    assert absent["calibration"]["capture"] is None
+    assert not any(v["k"] == "Capture" for v in absent["verdicts"])
+    assert absent["calibration"]["enrichment_kpis"] == []
 
 
-def test_capture_summary_raises_on_a_non_finite_density():
-    track = _enriched_track()
-    track.loc[0, "gdna_density"] = np.inf
-    with np.errstate(invalid="ignore"), pytest.raises(ValueError):
-        capture_summary(track)
+def test_the_capture_note_reads_only_keys_the_view_model_writes(tmp_path):
+    """A key the front end reads but the model never writes renders as ``NaN`` or ``undefined``, and
+    nothing fails, so every key the note reads off the capture answer must be one the model writes."""
+    d = _with_calibration(
+        _write_substrate(tmp_path / "run"), gdna_reference_density=0.83, gdna_reference_members=352
+    )
+    written = set(build_view_model(load_substrate(d))["calibration"]["capture"])
+    read = set(re.findall(r"\bc\.(\w+)", _js_function("captureNote")))
+    assert read, "the capture note reads no key of the capture answer"
+    assert read <= written, (
+        f"report.js reads {sorted(read - written)}, which the model never writes"
+    )
+
+
+@pytest.mark.parametrize("reference_density", [0.83, None])
+def test_the_report_shows_calibrations_rna_sense_fraction_whatever_the_capture_answer(
+    tmp_path, reference_density
+):
+    """The sense fraction is a library scalar, not a capture number, so it is shown with or without
+    a located enriched mode."""
+    d = _with_calibration(
+        _write_substrate(tmp_path / "run"),
+        rna_sense_frac=0.973,
+        gdna_reference_density=reference_density,
+        gdna_reference_members=0 if reference_density is None else 352,
+    )
+    kpis = build_view_model(load_substrate(d))["calibration"]["density_kpis"]
+    assert {"l": "RNA sense", "v": 0.973, "fmt": "float3"} in kpis
+
+
+def test_every_format_tag_the_view_model_emits_is_one_the_front_end_formats(tmp_path):
+    """``fmtValue`` falls through to the raw value on a tag it does not know, so a tag the model emits
+    must be one of its cases (``text`` values are strings, which it passes through)."""
+    d = _with_calibration(
+        _write_substrate(tmp_path / "run"), gdna_reference_density=0.83, gdna_reference_members=352
+    )
+    _enriched_track().to_feather(d / "calibration_track.feather")
+    vm = build_view_model(load_substrate(d))
+
+    def tags(node):
+        if isinstance(node, dict):
+            if "fmt" in node:
+                yield node["fmt"]
+            for value in node.values():
+                yield from tags(value)
+        elif isinstance(node, list):
+            for value in node:
+                yield from tags(value)
+
+    formatted = set(re.findall(r'case "(\w+)":', _js_function("fmtValue"))) | {"text"}
+    emitted = set(tags(vm))
+    assert emitted and emitted <= formatted, f"unformatted tags: {sorted(emitted - formatted)}"
 
 
 def test_build_report_self_contained(tmp_path):

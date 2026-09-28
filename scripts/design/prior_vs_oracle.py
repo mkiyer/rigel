@@ -56,7 +56,7 @@ _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "tests" / "calibration"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _shared import DEFAULT_INDEX, DEFAULT_SUITE, OVERRIDE_FIELDS, is_zero_gdna, stratum  # noqa: E402,F401
+from _shared import DEFAULT_INDEX, DEFAULT_SUITE, OVERRIDE_FIELDS, is_zero_gdna, strata, stratum  # noqa: E402,F401
 
 from _oracle import (  # noqa: E402
     ORIGIN_CODE,
@@ -656,23 +656,17 @@ def _agg(scores):
     )
 
 
-_STRATA = (
-    ("stranded", "capture OFF"),
-    ("stranded", "capture ON"),
-    ("unstranded", "capture OFF"),
-    ("unstranded", "capture ON"),
-)
-
-#: Every selection every table prints, in order. One list, so a stratum added here appears on every
-#: table at once and cannot appear on some of them (which is how two tables come to disagree about
-#: what "ALL" means).
-_SELECTIONS = (
-    ("ALL (g00 excluded)", lambda c: not is_zero_gdna(c)),
-    *((" x ".join(st), (lambda c, st=st: stratum(c) == st and not is_zero_gdna(c)))
-      for st in _STRATA),
-    (None, None),  # a rule boundary
-    ("⛔ g00 ZERO-gDNA control", is_zero_gdna),
-)
+def _selections(conds) -> tuple:
+    """Every selection every table prints, in order. One list, so a stratum appears on every table
+    at once and cannot appear on some of them (which is how two tables come to disagree about what
+    "ALL" means); a stratum apart from both strand halves gets its own row (`_shared.strata`)."""
+    return (
+        ("ALL (g00 excluded)", lambda c: not is_zero_gdna(c)),
+        *((" x ".join(st), (lambda c, st=st: stratum(c) == st and not is_zero_gdna(c)))
+          for st in strata(conds)),
+        (None, None),  # a rule boundary
+        ("⛔ g00 ZERO-gDNA control", is_zero_gdna),
+    )
 
 
 def _rel(x: float) -> str:
@@ -692,6 +686,7 @@ def report(rows: list[dict]) -> None:
     special case and nothing is produced by two code paths (`TRAPS: a-test-that-redefines`).
     """
     rows = sorted(rows, key=lambda r: r["condition"])
+    selections = _selections(r["condition"] for r in rows)
     print()
     print("=" * 104)
     print("  ⭐⭐⭐ CALIBRATION'S ENDPOINT vs THE ORACLE — LocusPriors, in FRAGMENTS")
@@ -746,7 +741,7 @@ def report(rows: list[dict]) -> None:
         print(f"    {'stratum':<26} {'ref total':>14} {'arm total':>14} {'Σ|Δ|':>14} "
               f"{'rel':>8} {'net':>14} {'canc':>7}")
         print("    " + "-" * 102)
-        for label, sel in _SELECTIONS:
+        for label, sel in selections:
             if label is None:
                 print("    " + "-" * 102)
                 continue
@@ -788,7 +783,7 @@ def report(rows: list[dict]) -> None:
     print(f"    {'stratum':<26} {'Σ Fo':>13} {'Σ F':>13} {'Σ|Fo−F|':>11} {'rel':>8} "
           f"{'O−F rel':>8} {'O−Fo rel':>8} {'S−F rel':>8} {'S−Fo rel':>8}")
     print("    " + "-" * 112)
-    for label, sel in _SELECTIONS:
+    for label, sel in selections:
         if label is None:
             print("    " + "-" * 112)
             continue
@@ -810,7 +805,7 @@ def report(rows: list[dict]) -> None:
     print(f"    {'stratum':<26} {'support/genomic':>16} {'regions only':>12} {'Σ support':>16} "
           f"{'Σ genomic':>16}")
     print("    " + "-" * 92)
-    for label, sel in _SELECTIONS:
+    for label, sel in selections:
         if label is None:
             print("    " + "-" * 92)
             continue
@@ -835,7 +830,7 @@ def report(rows: list[dict]) -> None:
     print("    a wiring check, not a measurement. The length's truth is ruler_vs_truth.py's.")
     print(f"    {'stratum':<26} {'n loci':>8} {'w rel err':>11} {'median rel':>11}")
     print("    " + "-" * 60)
-    for label, sel in _SELECTIONS:
+    for label, sel in selections:
         if label is None:
             print("    " + "-" * 60)
             continue

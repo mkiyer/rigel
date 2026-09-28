@@ -8,7 +8,8 @@ each condition is read from its cached scan in the drained frame the truth is ce
 Read the two halves separately and never pool them: unstranded rows (`ss 0.50`) are where a
 policy must win against `silent`, the measured floor; stranded rows (`ss 0.99`) are where it
 must do minimal harm, so a ratio near 1.00x is a pass; a panel total hides a sign flip between
-them. `--panel test` is the development loop (seconds); `--panel ladder` is the shipping judgement,
+them. A row at any other specificity (the test panel's `ss 0.70`) is counted apart, against neither
+bar. `--panel test` is the development loop (seconds); `--panel ladder` is the shipping judgement,
 and a toy and the panel have inverted a ranking before, so a claim names its substrate.
 `--by-class` sums the same error per node class (certified stratum, boundaries split
 by terminus flag, exons by reach: licensed intron face / edge only / walled) to rank where a
@@ -31,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import importlib.util
 import sys
 import time
 from pathlib import Path
@@ -38,7 +40,9 @@ from pathlib import Path
 import numpy as np
 
 REPO = Path(__file__).resolve().parents[2]
-if str(REPO / "src") not in sys.path:
+# the checkout's source only when no rigel is installed: a source tree carries no native extension, so
+# it must never shadow a build (a worktree's own, or the editable install)
+if importlib.util.find_spec("rigel") is None:
     sys.path.insert(0, str(REPO / "src"))
 
 from rigel.calibration.calibrate import calibrate  # noqa: E402
@@ -53,7 +57,7 @@ from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 
-from _shared import set_field  # noqa: E402
+from _shared import set_field, strandedness  # noqa: E402
 
 RUNS = Path.home() / "Downloads" / "rigel_runs"
 
@@ -171,11 +175,6 @@ def score_condition(
     return rows
 
 
-def _stranded(condition: str) -> bool:
-    """`ss 0.99` conditions are strand-specific; `ss 0.50` are unstranded."""
-    return "_ss_0.99_" in condition
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--panel", choices=sorted(PANELS), default="test")
@@ -281,8 +280,11 @@ def main() -> int:
 
     if "silent" in args.policies and len(args.policies) > 1:
         print("\nthe two bars, counted separately (never pooled):")
-        for half, want in (("unstranded", "WIN"), ("stranded", "minimal harm")):
-            rows = [c for c in table if _stranded(c) == (half == "stranded")]
+        # a library in neither strand half (the test panel's ss 0.70) meets neither bar: counted apart
+        apart = sorted({strandedness(c) for c in table} - {"unstranded", "stranded"})
+        for half, want in (("unstranded", "WIN"), ("stranded", "minimal harm"),
+                           *((a, "no bar: apart") for a in apart)):
+            rows = [c for c in table if strandedness(c) == half]
             if not rows:
                 continue
             for p in args.policies:

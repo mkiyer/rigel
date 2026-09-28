@@ -141,8 +141,10 @@ treat them as pointers.
     read lengths. A junction seen once at each of several read lengths therefore never enters.
   - The shipped feather holds only `ref, start, end, max_anchor_left, max_anchor_right`: no count, no site
     structure.
-  - The index loads `splice_blacklist.feather` from the index directory at quant time (`index.py`), so a feather
-    dropped beside an index's files switches the blacklist on without a rebuild.
+  - The index applies `splice_blacklist.feather` at quant time only when its `manifest.json` records the store
+    (`sources.alignable_zarr`, written by `rigel index --alignable-zarr`; `index.py`). A feather dropped into an
+    index built without a store is ignored (`sj_blacklist_loaded: false` in `summary.json`); in one built with a
+    store, replacing the feather takes effect without a rebuild and removing it turns detection off.
 - **Classification** (`resolve_context.h`): a surviving junction wins over ARTIFACT, which wins over IMPLICIT.
   IMPLICIT means more than one gap hypothesis survived.
 - **An artifact fragment** (every junction rejected):
@@ -183,7 +185,8 @@ treat them as pointers.
   - `evidence/`: `spliced_only.bam`, the per-junction parquets, the four bug tables, `validation_targets.json`
     and the analysis scripts.
 - **The production Rigel index,** `hulkrna/refs/human/rigel_index/`: its `splice_blacklist.feather` (5,833,092
-  rows) and `manifest.json`.
+  rows) and `manifest.json`. Before the next quant there, check the manifest's `sources.alignable_zarr` is
+  present and not null: otherwise the current tree ignores the feather and detection is off.
 - **alignable:**
   - `hulkrna/refs/human/alignable.zarr.zip` (26 GB). Inside, the per-read-length table has 34.9 M rows with
     `count`.

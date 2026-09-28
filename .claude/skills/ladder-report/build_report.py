@@ -1,10 +1,9 @@
 #!/usr/bin/env python
 """Build the Rigel ladder accuracy report — the markdown and the Artifact page — from arm jsonl.
 
-ONE SET OF LABEL RULES, TWO RENDERINGS. The markdown is written by
-``scripts/design/quant_accuracy.py --markdown``, which is gated by
+The markdown is written by ``scripts/design/quant_accuracy.py --markdown``, which is gated by
 ``tests/calibration/test_quant_accuracy.py``; this script imports that same module and reuses its
-``_load`` / ``stratum`` / ``_STRATA`` so the page cannot disagree with it about what a field means.
+``_load`` / ``stratum``.
 Neither renderer runs the pipeline: both read the arm files ``quant_accuracy`` already wrote, so the
 report is a rendering of a measurement and never a second measurement.
 
@@ -34,7 +33,7 @@ AXIS_FIELDS = ("n_expressed", "n_detected", "count_true", "count_abs_err", "coun
 
 
 def load_instrument():
-    """Import ``quant_accuracy.py`` by path so its label rules are shared, not re-implemented."""
+    """Import ``quant_accuracy.py`` by path."""
     path = REPO / "scripts" / "design" / "quant_accuracy.py"
     spec = importlib.util.spec_from_file_location("quant_accuracy", path)
     mod = importlib.util.module_from_spec(spec)

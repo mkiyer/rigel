@@ -66,7 +66,8 @@ def blacklisted_oracle(tmp_path):
     import pandas as pd
     import pysam
 
-    from rigel.index import SJ_BLACKLIST_FEATHER, TranscriptIndex
+    from _index_builder import rebuild_with_splice_blacklist
+    from rigel.index import TranscriptIndex
 
     sc = Scenario("bl_int", genome_length=5000, seed=SEED, work_dir=tmp_path / "bl_int")
     sc.add_gene(
@@ -108,15 +109,18 @@ def blacklisted_oracle(tmp_path):
     rows = sorted(introns)
     # Anchors far larger than the 100 bp reads, so every crossing read is blacklisted and the
     # promotion is not a function of where the fragment happened to start.
-    pd.DataFrame(
-        {
-            "ref": [r[0] for r in rows],
-            "start": np.asarray([r[1] for r in rows], dtype=np.int32),
-            "end": np.asarray([r[2] for r in rows], dtype=np.int32),
-            "max_anchor_left": np.full(len(rows), 500, dtype=np.int32),
-            "max_anchor_right": np.full(len(rows), 500, dtype=np.int32),
-        }
-    ).to_feather(result.index_dir / SJ_BLACKLIST_FEATHER)
+    rebuild_with_splice_blacklist(
+        result.index_dir,
+        pd.DataFrame(
+            {
+                "ref": [r[0] for r in rows],
+                "start": np.asarray([r[1] for r in rows], dtype=np.int32),
+                "end": np.asarray([r[2] for r in rows], dtype=np.int32),
+                "max_anchor_left": np.full(len(rows), 500, dtype=np.int32),
+                "max_anchor_right": np.full(len(rows), 500, dtype=np.int32),
+            }
+        ),
+    )
 
     yield result, TranscriptIndex.load(result.index_dir)
     sc.cleanup()

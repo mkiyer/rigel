@@ -802,7 +802,7 @@ class TranscriptIndex:
 
         # Splice-artifact blacklist size, set at load():
         #   None → not loaded
-        #   0    → no blacklist present (artifact detection is OFF)
+        #   0    → no blacklisted sj active (artifact detection is OFF)
         #   >0   → number of blacklisted sj active (detection is ON)
         self.sj_blacklist_size: int | None = None
 
@@ -954,7 +954,8 @@ class TranscriptIndex:
             blacklist is derived by
             :func:`rigel.splice_blacklist.load_splice_blacklist_from_zarr` and persisted as
             ``splice_blacklist.feather`` in the index.  When ``None``,
-            no blacklist is written.
+            no blacklist is written and one left by an earlier build is removed.
+            :meth:`load` applies the blacklist only when the manifest records the store.
         splice_blacklist_min_count : int
             Minimum per-row count for a (chrom, intron, read_length)
             artifact to enter the blacklist.  Default ``2``.
@@ -1063,6 +1064,9 @@ class TranscriptIndex:
             edges_df.to_csv(output_dir / BOUNDARIES_TSV, sep="\t", index=False)
 
         # -- Splice-junction artifact blacklist (from alignable Zarr) -------
+        # Removed first, so a rebuild without a store leaves none behind from an earlier build.
+        (output_dir / SJ_BLACKLIST_FEATHER).unlink(missing_ok=True)
+        (output_dir / SJ_BLACKLIST_TSV).unlink(missing_ok=True)
         if alignable_zarr_path is not None:
             from .splice_blacklist import load_splice_blacklist_from_zarr
 
@@ -1502,9 +1506,11 @@ class TranscriptIndex:
         if not retain_test_structures:
             self.sj_map = None
 
-        # 2b. Splice-junction artifact blacklist (optional)
+        # 2b. Splice-junction artifact blacklist: used only when the manifest records the store it
+        # was built from.
         blacklist_path = os.path.join(index_dir, SJ_BLACKLIST_FEATHER)
-        if os.path.exists(blacklist_path):
+        store = manifest.get("sources", {}).get("alignable_zarr")
+        if store is not None and os.path.exists(blacklist_path):
             logger.debug("Loading splice-artifact blacklist")
             bl_df = pd.read_feather(blacklist_path)
             ctx.build_sj_blacklist_map(
@@ -1517,7 +1523,7 @@ class TranscriptIndex:
             self.sj_blacklist_size = int(len(bl_df))
             logger.info(f"Splice artifact blacklist: {len(bl_df):,} sj active")
         else:
-            # No blacklist file → artifact detection is off for this index.
+            # No store recorded, or its blacklist file removed → artifact detection is off.
             self.sj_blacklist_size = 0
 
         # 3. Per-transcript exon CSR for transcript-space FL computation.

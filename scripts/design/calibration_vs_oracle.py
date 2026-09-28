@@ -37,6 +37,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,7 +47,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 
-from _shared import DEFAULT_INDEX, DEFAULT_SUITE, OVERRIDE_FIELDS, is_zero_gdna, set_field, sibling, stratum  # noqa: E402
+from _shared import DEFAULT_INDEX, DEFAULT_SUITE, OVERRIDE_FIELDS, is_zero_gdna, pool_ledger, set_field, sibling, strata, stratum  # noqa: E402
 
 
 OA = sibling("_oracle_arms.py")
@@ -193,20 +194,6 @@ def vertex_profile(p_arm, o_arm, axis: str) -> list[dict]:
             }
         )
     return out
-
-
-def pool_ledger(condition_dir: Path) -> dict:
-    """The simulator's own starting fragment count per origin pool, the outer reference.
-
-    Three pools on the truth side and two on the answer side, structurally: ``calibrate`` deconvolves
-    an object into ``(gDNA, RNA+, RNA−)`` and cannot split mature from nascent, which is the EM's job
-    and is scored in ``quant_accuracy.py``'s pool table. ``nrna`` is reported to keep the accounting
-    complete and calibration's RNA answer is scored against ``mrna + nrna``. Read from
-    ``truth_summary.json``, never from the condition name; a missing pool reads 0.
-    """
-    summary = json.loads((Path(condition_dir) / "truth_summary.json").read_text())
-    counts = summary["origin_counts"]
-    return {k: float(counts.get(k, 0.0)) for k in ("gdna", "mrna", "nrna")}
 
 
 # ── the gates, which run before any number is printed ────────────────────────────────────────────
@@ -360,7 +347,7 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
 
 #: The 0.8.0 scope, stamped on the row rather than left to the reader: the deferred stratum carries
 #: most of the error, so a reader who forgets which cell is the target inverts the ranking. Deferred
-#: is reported, never dropped.
+#: is reported, never dropped. A stratum in neither strand half is in no scope and reads ``APART``.
 _SCOPE = {
     ("stranded", "capture OFF"): "IN SCOPE",
     ("stranded", "capture ON"): "IN SCOPE",
@@ -368,17 +355,23 @@ _SCOPE = {
     ("unstranded", "capture ON"): "DEFERRED",
 }
 
-#: Every selection every table prints, in order: one list, so a stratum cannot appear on some tables
-#: and not others. ``None`` is a rule boundary.
-_SELECTIONS = (
-    *(
-        (f"{' x '.join(st)}  [{_SCOPE[st]}]", (lambda c, st=st: stratum(c) == tuple(st)
-                                               and not is_zero_gdna(c)))
-        for st in _SCOPE
-    ),
-    (None, None),
-    ("⛔ g00 ZERO-gDNA control (all strata)", is_zero_gdna),
-)
+
+def _scope(st) -> str:
+    return _SCOPE.get(tuple(st), "APART")
+
+
+def _selections(rows: list[dict]) -> tuple:
+    """Every selection every table prints, in order: one list, so a stratum cannot appear on some
+    tables and not others. ``None`` is a rule boundary."""
+    return (
+        *(
+            (f"{' x '.join(st)}  [{_scope(st)}]", (lambda c, st=st: stratum(c) == tuple(st)
+                                                   and not is_zero_gdna(c)))
+            for st in strata(r["condition"] for r in rows)
+        ),
+        (None, None),
+        ("⛔ g00 ZERO-gDNA control (all strata)", is_zero_gdna),
+    )
 
 
 def _agg_axis(scores: list[dict]) -> dict | None:
@@ -423,6 +416,8 @@ def report(rows: list[dict]) -> None:
     print("  ✅ GATE  override_masses writes exactly the override field set")
     print("  ✅ GATE  P and O are on the payload's own per-object totals, both axes (check_same_basis)")
 
+    selections = _selections(rows)
+
     def sel_rows(pred):
         return [r for r in rows if pred(r["condition"])]
 
@@ -439,7 +434,7 @@ def report(rows: list[dict]) -> None:
     print(f"    {'condition / stratum':<44} {'true gDNA':>12} {'true mRNA':>12} {'true nRNA':>10} "
           f"{'P gDNA':>13} {'P RNA':>13} {'ΔgDNA vs O':>13} {'P/O gDNA':>9}")
     print("    " + "-" * 142)
-    for title, pred in _SELECTIONS:
+    for title, pred in selections:
         if title is None:
             print("    " + "-" * 142)
             continue
@@ -466,7 +461,7 @@ def report(rows: list[dict]) -> None:
         print(f"    {'stratum':<38} {'objects':>9} {'mass':>14} {'Σ|Δ gDNA|':>14} "
               f"{'mwae':>8} {'net':>14} {'over':>13} {'under':>13}")
         print("    " + "-" * 130)
-        for title, pred in _SELECTIONS:
+        for title, pred in selections:
             if title is None:
                 print("    " + "-" * 130)
                 continue
@@ -482,7 +477,7 @@ def report(rows: list[dict]) -> None:
     print("  ② THE LIBRARY gDNA FRACTION — the one-number thermometer, per stratum")
     print(f"    {'stratum':<38} {'f_gdna P':>10} {'f_gdna O':>10} {'|Δ|':>10}")
     print("    " + "-" * 72)
-    for title, pred in _SELECTIONS:
+    for title, pred in selections:
         if title is None:
             print("    " + "-" * 72)
             continue
@@ -505,7 +500,7 @@ def report(rows: list[dict]) -> None:
     print(f"    {'stratum':<38} {'factor P':>9} {'factor O':>9} "
           f"{'P/O':>8} {'Σ|Δ len|':>15} {'moved':>9}")
     print("    " + "-" * 120)
-    for title, pred in _SELECTIONS:
+    for title, pred in selections:
         if title is None:
             print("    " + "-" * 120)
             continue
@@ -531,7 +526,7 @@ def report(rows: list[dict]) -> None:
         labels = [b["label"] for b in rows[0]["axes"][axis]["hist"]["buckets"]]
         print(f"    {'stratum':<38} " + " ".join(f"{lab:>13}" for lab in labels))
         print("    " + "-" * (38 + 14 * len(labels)))
-        for title, pred in _SELECTIONS:
+        for title, pred in selections:
             if title is None:
                 print("    " + "-" * (38 + 14 * len(labels)))
                 continue
@@ -545,7 +540,7 @@ def report(rows: list[dict]) -> None:
         print(f"    {'stratum':<38} {'under':>13} {'EXACT':>13} {'over':>13} {'objects':>13} "
               f"{'Σ|Δ| frags':>15}")
         print("    " + "-" * 110)
-        for title, pred in _SELECTIONS:
+        for title, pred in selections:
             if title is None:
                 print("    " + "-" * 110)
                 continue
@@ -568,7 +563,7 @@ def report(rows: list[dict]) -> None:
         print(f"    {'stratum':<38} {'true f_g':<15} {'objects':>9} {'mass':>13} "
               f"{'shortfall':>10} {'Σ|Δ| frags':>12} {'of Σ|Δ|':>8} {'closure':>8}")
         print("    " + "-" * 128)
-        for title, pred in _SELECTIONS:
+        for title, pred in selections:
             if title is None:
                 print("    " + "-" * 128)
                 continue
@@ -604,12 +599,12 @@ def report(rows: list[dict]) -> None:
     )
     for i, r in enumerate(ranked, 1):
         reg, bnd = r["axes"]["region"], r["axes"]["boundary"]
-        scope = _SCOPE[tuple(r["stratum"])]
+        scope = _scope(r["stratum"])
         print(f"    {i:>3} {r['condition']:<44} {scope:<9} {reg['abs_err']:>13,.0f} "
               f"{bnd['abs_err']:>13,.0f} {reg['abs_err'] + bnd['abs_err']:>13,.0f} "
               f"{reg['over_call'] + bnd['over_call']:>12,.0f} "
               f"{reg['under_call'] + bnd['under_call']:>12,.0f}")
-    in_scope = [r for r in ranked if _SCOPE[tuple(r["stratum"])] == "IN SCOPE"]
+    in_scope = [r for r in ranked if _scope(r["stratum"]) == "IN SCOPE"]
     if in_scope:
         w = in_scope[0]
         print(f"    ⭐ WORST IN-SCOPE: {w['condition']}  "
@@ -784,7 +779,6 @@ def self_test() -> int:
 
     # ⑧ the pool ledger reads the file, and a pool it cannot find reads 0.
     import json as _json
-    import tempfile
 
     with tempfile.TemporaryDirectory() as td:
         (Path(td) / "truth_summary.json").write_text(
@@ -925,28 +919,29 @@ def main() -> int:
     if cache is None:
         raise SystemExit("⛔ --oracle-cache is required; this script refuses to invent a truth")
 
-    if args.jobs > 1 and args.json is None:
-        # shard by subprocess, as prior_vs_oracle.py does, then merge and print through the same
-        # report path, so a sharded run and a serial one cannot print different numbers.
+    if args.jobs > 1:
+        # shard by subprocess, as prior_vs_oracle.py does, then merge in ``names`` order and write or
+        # print through the same path as a serial run. Each run shards into its own directory, so two
+        # concurrent runs sharing a work dir never read each other's shards.
         shards = [s for s in (names[i:: args.jobs] for i in range(args.jobs)) if s]
-        tmp = args.work_dir / "_shards"
-        tmp.mkdir(parents=True, exist_ok=True)
-        procs = []
-        for i, sh in enumerate(shards):
-            out = tmp / f"shard{i}.json"
-            cmd = [sys.executable, str(Path(__file__).resolve()),
-                   "--suite", str(args.suite), "--index", str(args.index),
-                   "--oracle-cache", str(cache), "--json", str(out), "--conditions", *sh]
-            for spec in args.settings:
-                cmd += ["--set", spec]
-            procs.append((subprocess.Popen(cmd), out))
-        merged: list[dict] = []
-        for proc, out in procs:
-            if proc.wait() != 0:
+        args.work_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=args.work_dir, prefix="shards_") as td:
+            procs = []
+            for i, sh in enumerate(shards):
+                out = Path(td) / f"shard{i}.json"
+                cmd = [sys.executable, str(Path(__file__).resolve()),
+                       "--suite", str(args.suite), "--index", str(args.index),
+                       "--oracle-cache", str(cache), "--json", str(out), "--conditions", *sh]
+                for spec in args.settings:
+                    cmd += ["--set", spec]
+                procs.append((subprocess.Popen(cmd), out))
+            codes = [proc.wait() for proc, _out in procs]  # every shard ends before its dir goes
+            if any(codes):
                 raise SystemExit("⛔ a shard failed; refusing to report a partial panel")
-            merged += json.loads(out.read_text())
-        report(merged)
-        return 0
+            merged = [row for _proc, out in procs for row in json.loads(out.read_text())]
+        order = {name: i for i, name in enumerate(names)}
+        merged.sort(key=lambda r: order[r["condition"]])
+        return _emit(merged, args.json)
 
     t0 = time.perf_counter()
     index = TranscriptIndex.load(str(args.index))
@@ -970,9 +965,14 @@ def main() -> int:
         if args.json is None:
             print(f"  scored {name}  ({rows[-1]['seconds']:.1f} s)", flush=True)
 
-    if args.json is not None:
-        args.json.parent.mkdir(parents=True, exist_ok=True)
-        args.json.write_text(json.dumps(rows))
+    return _emit(rows, args.json)
+
+
+def _emit(rows: list[dict], json_path: Path | None) -> int:
+    """The per-condition rows, written to ``json_path`` when one is given, else reported."""
+    if json_path is not None:
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(json.dumps(rows))
         return 0
     report(rows)
     return 0

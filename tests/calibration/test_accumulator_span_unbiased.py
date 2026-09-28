@@ -189,7 +189,8 @@ def test_artifact_splice_held_out_and_mass_conserved(tmp_path):
     import pandas as pd
     import pysam
 
-    from rigel.index import SJ_BLACKLIST_FEATHER, TranscriptIndex
+    from _index_builder import rebuild_with_splice_blacklist
+    from rigel.index import TranscriptIndex
 
     fasta = tmp_path / "g.fa"
     fasta.write_text(">chr1\n" + "ACGT" * 1000 + "\n")
@@ -236,15 +237,18 @@ def test_artifact_splice_held_out_and_mass_conserved(tmp_path):
     assert total_mass(pl0) > 65.0  # 20 contained + ~50 spliced crossing mass
 
     # Blacklist the annotated sj → the 50 become SPLICE_ARTIFACT → held out.
-    pd.DataFrame(
-        {
-            "ref": ["chr1"],
-            "start": np.array([200], np.int32),
-            "end": np.array([300], np.int32),
-            "max_anchor_left": np.array([10000], np.int32),
-            "max_anchor_right": np.array([10000], np.int32),
-        }
-    ).to_feather(idx_dir / SJ_BLACKLIST_FEATHER)
+    rebuild_with_splice_blacklist(
+        idx_dir,
+        pd.DataFrame(
+            {
+                "ref": ["chr1"],
+                "start": np.array([200], np.int32),
+                "end": np.array([300], np.int32),
+                "max_anchor_left": np.array([10000], np.int32),
+                "max_anchor_right": np.array([10000], np.int32),
+            }
+        ),
+    )
     idx2 = TranscriptIndex.load(str(idx_dir))
     s1, _, _, pl1 = scan_and_buffer(str(bam), idx2, cfg)
     assert s1.n_sj_blacklisted == 50, "blacklist did not flag the sj"

@@ -10,6 +10,7 @@ shows two truths. The splice-type breakdown and the strand-contamination diagnos
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -259,23 +260,27 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     assert bg[0].startswith("track type=bedGraph")
     assert len(bg) == len(track) + 1  # header + one line per region
 
-    # Mass-weighted capture-enrichment summary — present when the track has
-    # enough informative regions (capture_summary returns non-None).
-    if "capture" in summary["calibration"]:
-        cap = summary["calibration"]["capture"]
-        assert {
-            "n_regions",
-            "enriched",
-            "count_median_log_rho",
-            "background_mode_log_rho",
-            "enriched_mode_log_rho",
-            "fold_peak_to_peak",
-            "fold_vs_median",
-            "mass_frac_ontarget",
-            "kde_bandwidth_factor",
-        } <= set(cap)
+    # The calibration block is the library scalars and nothing else: calibration's capture answer is its
+    # reference (null when no enriched gDNA mode is located), with no second census beside it. The
+    # MANUAL's listing of the block is the same set, so the two cannot drift apart.
+    written = set(summary["calibration"])
+    assert written == {
+        "gdna_density_global",
+        "gdna_reference_density",
+        "gdna_reference_members",
+        "rna_sense_frac",
+        "gdna_strand_overdispersion",
+        "rna_strand_overdispersion",
+        "n_regions",
+        "n_boundaries",
+        "n_sj",
+    }
+    manual = (Path(__file__).resolve().parents[1] / "docs" / "MANUAL.md").read_text()
+    listed = re.search(r'"calibration": \{\n(.*?)\n  \}', manual, re.S)
+    assert listed, "docs/MANUAL.md lists no summary.json calibration block"
+    assert set(re.findall(r'^\s+"(\w+)":', listed.group(1), re.M)) == written
 
-    # The prior's own equal-weight KDE is still persisted for provenance.
+    # The total-density landscape calibration fitted is persisted beside it.
     if pr.calibration_diagnostics is not None:
         kde = pd.read_feather(out / "gdna_density_kde.feather")
         assert {"log_rho", "log_density", "density"} <= set(kde.columns)

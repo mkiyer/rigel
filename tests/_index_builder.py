@@ -1,7 +1,8 @@
 """The synthetic index builder every structural test starts from.
 
 `build_test_index` turns a GTF string into a loaded `TranscriptIndex`, writing an all-N FASTA of the
-requested references beside it. It lives in its own module rather than in `conftest.py` because it is a
+requested references beside it; `rebuild_with_splice_blacklist` gives an existing index a splice blacklist
+the way a real build does. It lives in its own module rather than in `conftest.py` because it is a
 plain builder, not a fixture: a test that needs a bespoke index imports and calls it, and importing a
 conftest by module name is ambiguous as soon as a sub-directory has one of its own.
 """
@@ -9,8 +10,11 @@ conftest by module name is ambiguous as soon as a sub-directory has one of its o
 from __future__ import annotations
 
 import textwrap
+from pathlib import Path
 
-from rigel.index import TranscriptIndex
+import pandas as pd
+
+from rigel.index import TranscriptIndex, load_manifest
 
 
 # ---------------------------------------------------------------------------
@@ -81,3 +85,35 @@ def build_test_index(tmp_path_factory, gtf_text, genome_size=2000, name="idx", r
     idx_dir = base / "index"
     TranscriptIndex.build(fasta_path, gtf_path, idx_dir, write_tsv=False)
     return TranscriptIndex.load(idx_dir, retain_test_structures=True)
+
+
+def rebuild_with_splice_blacklist(index_dir: str | Path, blacklist: pd.DataFrame) -> None:
+    """Rebuild the index in *index_dir* from the sources and flags its manifest records, now with
+    *blacklist* as its splice blacklist.
+
+    The blacklist goes through `build`'s own alignable-store path, so the manifest records its source
+    as a real build's does. The store loader is patched to return *blacklist* (the persisted columns:
+    ``ref``, ``start``, ``end``, ``max_anchor_left``, ``max_anchor_right``) and the store is an empty
+    stand-in directory beside the index, so the suite needs neither the ``alignable`` package nor a store.
+    """
+    import pytest
+
+    import rigel.splice_blacklist
+
+    index_dir = Path(index_dir)
+    manifest = load_manifest(index_dir)
+    store = index_dir.parent / f"{index_dir.name}_alignable_stand_in"
+    store.mkdir(exist_ok=True)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            rigel.splice_blacklist,
+            "load_splice_blacklist_from_zarr",
+            lambda store_path, *, min_count: blacklist,
+        )
+        TranscriptIndex.build(
+            manifest["sources"]["fasta"]["path"],
+            manifest["sources"]["gtf"]["path"],
+            index_dir,
+            alignable_zarr_path=store,
+            **manifest["build_flags"],
+        )

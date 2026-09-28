@@ -73,7 +73,10 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 _REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(_REPO / "src"))
+# the checkout's source only when no rigel is installed: a source tree carries no native extension, so
+# it must never shadow a build (a worktree's own, or the editable install)
+if importlib.util.find_spec("rigel") is None:
+    sys.path.insert(0, str(_REPO / "src"))
 sys.path.insert(0, str(_REPO / "scripts" / "design"))
 
 from _shared import set_field, sibling  # noqa: E402

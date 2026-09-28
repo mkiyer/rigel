@@ -324,11 +324,22 @@ Outcomes that are not self-evident from git:
 - **Item 26.** Confirmed by the owner.
 - **Item 17** waits for the strand-overdispersion work.
 
-## 9. Step 1c — what step 1b left, with the owner's rulings (2026-09-28)
+## 9. Step 1c — what step 1b left, with the owner's rulings (2026-09-28) — 9a–9d DONE 2026-09-28
 
 Each is its own change, verified like steps 1 and 1b unless it is marked as moving numbers.
 
-### 9a. Instruments (first: the strand-overdispersion A/Bs need them)
+### 9a. Instruments (first: the strand-overdispersion A/Bs need them) — DONE
+
+Outcome: all five fixed, each with a gate verified failing and then fired by a deliberate break.
+- `solvability_audit.py` reads the truth from the simulator's ledger (`_shared.pool_ledger`) and raises when it is
+  missing. `--oracle-cache` defaults to `<suite>/oracle_cache`.
+- `quant_accuracy.py` labels a rung from its own `gdna_frac_true`, not from a map of known rungs.
+- `_shared.strandedness` is the one rule, and it raises on a name with no `_ss_` token. Any strand specificity other
+  than 0.50 or 0.99 is reported APART, never pooled.
+- `ruler_vs_truth.py` and `policy_benchmark.py` put `src` on `sys.path` only when no rigel is importable.
+- Left: `scripts/sim/build_test_reference.py` has the same unconditional insertion. `solvability_audit.py` has no
+  `--self-test`; its gate is a suite test.
+
 
 1. `solvability_audit.py` is broken on the current tree: it calls the deleted `_oracle_arms.truth_f_gdna`
    (recorded in ISSUES since 2026-09-24). Repair it.
@@ -338,7 +349,15 @@ Each is its own change, verified like steps 1 and 1b unless it is marked as movi
    (`policy_benchmark.py` guards the same insertion).
 5. `policy_benchmark.py`, `_shared.py` and `quant_accuracy.py` fold ss 0.70 into "unstranded" (§1a bug 5).
 
-### 9b. The report
+### 9b. The report — DONE
+
+Outcome:
+- `summary.json`'s `calibration.capture` block, its census and the density chart are deleted. The report's capture
+  tile reads `gdna_reference_density` and `gdna_reference_members`.
+- MANUAL lists exactly the nine keys written, and the CHANGELOG records the removal.
+- Open (owner): a fold (on-target over off-target gDNA density) would need `split_basins`' depleted mode as a new
+  `CalibrationResult` field.
+
 
 6. Delete `track.capture_summary`'s separate KDE census (owner). `summary.json`'s capture block and the report read
    calibration's own answer (`located_enriched_mode`, `split_basins`). That removes its five unexplained constants.
@@ -347,7 +366,16 @@ Each is its own change, verified like steps 1 and 1b unless it is marked as movi
    "NaN nodes". MANUAL's `summary.json` capture section is stale: it documents `n_nodes`, `separation_nats` and
    `enrichment_factor`, and omits the keys actually written. Fixed together with item 6.
 
-### 9c. The index
+### 9c. The index — DONE
+
+Outcome:
+- `build()` removes an earlier blacklist.
+- `load()` applies the blacklist only when the manifest records `sources.alignable_zarr`. A recorded blacklist
+  whose file is missing loads with detection off (`sj_blacklist_loaded: false`), with no refusal.
+- Three tests that placed a blacklist file by hand now rebuild through `tests/_index_builder.py`'s
+  `rebuild_with_splice_blacklist`.
+- The cluster's production index must record its store before its next quant (GDNA_SPLICE_ARTIFACTS_PLAN.md).
+
 
 8. A stale `splice_blacklist.feather` survives a completed rebuild without the alignable store, and `load()`
    applies it whatever the manifest records (owner: an index rebuild must address the blacklist). The blacklist
@@ -357,7 +385,15 @@ Each is its own change, verified like steps 1 and 1b unless it is marked as movi
    - a test that an empty-GTF rebuild into an existing index leaves that index loadable;
    - `_mini_sources` reused by the two inlined fixtures in `test_index_integrity.py`.
 
-### 9d. The EM and the length laws
+### 9d. The EM and the length laws — item 10 DONE (already at 3bb35bdd); item 11 analysed
+
+Outcome:
+- Item 10 had already landed at 3bb35bdd. That commit removed three `locus_stats` columns, not the two its message
+  names.
+- Item 11 is derived in `~/Downloads/rigel_runs/prototypes/2026-09-28_od_design/06_fl.md`. The guards that never bind
+  go first, bit-identical. The realized-law fix, the empty pools and a single refresh follow, each after its own A/B
+  and the owner's rulings.
+
 
 10. Delete `squarem_extrapolation_clamp_count` (owner). Since the SQUAREM backtracking fix it counts only
     components the EM's own step had already floored.
@@ -375,6 +411,14 @@ Each is its own change, verified like steps 1 and 1b unless it is marked as movi
     dependence it documents, and passed on three reruns.
 
 ### 9f. Real-data findings from the strand-overdispersion measurement, the same under every arm (for ISSUES)
+
+Outcome (investigated 2026-09-28; pages in `~/Downloads/rigel_runs/prototypes/2026-09-28_depth_lowg/pages/`):
+- 13 is `ISSUES: a-pure-gdna-library-reads-as-nascent-rna`.
+- 14 is the gDNA landscape collapsing at low depth: the refits own 69–86 % of the drift.
+- 15 is not a defect. It is the `test_blank` control's unannotated transcription, locked to gDNA by structure.
+  Beside it, the intergenic background's dispersion is fitted on a pool that transcription contaminates.
+- Whether 14 and that dispersion fit become ISSUES entries is the owner's call.
+
 
 13. The pure-DNA VCaP exome half is read as about 93 % RNA (the deferred unstranded × capture-ON stratum).
 14. LBX0588's gDNA share per deposited fragment moves with depth: 0.11 → 0.45 → 0.83 at 1 % / 10 % / full.
