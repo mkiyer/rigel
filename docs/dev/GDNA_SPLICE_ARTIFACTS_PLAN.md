@@ -184,6 +184,8 @@ treat them as pointers.
   - `runs/human/…/bam/star.srt.rmdup.collate.bam`;
   - `evidence/`: `spliced_only.bam`, the per-junction parquets, the four bug tables, `validation_targets.json`
     and the analysis scripts.
+  - **GONE (owner, 2026-09-28):** this splice evidence did not survive `/scratch`. It must be regenerated from
+    scratch by a new run, a separate task; nothing here can be copied off.
 - **The production Rigel index,** `hulkrna/refs/human/rigel_index/`: its `splice_blacklist.feather` (5,833,092
   rows) and `manifest.json`. Before the next quant there, check the manifest's `sources.alignable_zarr` is
   present and not null: otherwise the current tree ignores the feather and detection is off.
@@ -207,9 +209,10 @@ per A/B.
 
 ### Phase 0 — the substrate on the cluster
 
-1. **Copy the `/scratch` evidence** to durable storage.
+1. **Regenerate the index case's evidence** with a new run (a separate task): the `/scratch` copy is gone.
 2. **Build the working index** with today's `rigel index`, from the production GTF, FASTA and
-   `alignable.zarr.zip`.
+   `alignable.zarr.zip`, after the index format bump lands (`ISSUES: the-format-changes-to-batch-before-release`
+   (b)), so the cluster rebuilds once.
    - Confirm the checksums against the production index's `manifest.json`.
    - Keep a blacklist-free twin as the "no blacklist" arm.
 3. **alignable:** find out whether `splice/` survives.

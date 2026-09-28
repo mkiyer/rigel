@@ -114,8 +114,8 @@ to the original run: `spliced_annotated` 10,643, `spliced_unannotated` 2,126,
 | `extract_spliced.py`, `analyze.py`, `discriminate.py`, `sitesets.py`, `make_targets.py` | reproducible analysis scripts |
 | `rigel_summary_{original,rerun}.json` | reproducibility comparison |
 
-> **Note:** this lives on `/scratch`, which is subject to purge policy. Copy the
-> bundle somewhere durable before relying on it long-term.
+> **Note:** this bundle lived on `/scratch` and is gone (owner, 2026-09-28). It must be
+> regenerated from scratch by a new run, a separate task.
 
 ### 3.3 Validation of the analysis itself
 

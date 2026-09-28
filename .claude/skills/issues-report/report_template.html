@@ -1,0 +1,318 @@
+<title>Rigel Open Issues</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+:root{
+  color-scheme: light;
+  --page:#f9f9f7; --surface:#fcfcfb; --surface-2:#f2f2ee;
+  --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --rule:#c3c2b7; --ring:rgba(11,11,11,.10);
+  --now:#d03b3b; --next:#d08a06; --later:#2a78d6; --parked:#a3a19a; --closed:#c3c2b7;
+  --link:#1f63b8; --flash:rgba(42,120,214,.10);
+  --shadow:0 1px 2px rgba(11,11,11,.05);
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  color-scheme: dark;
+  --page:#0d0d0d; --surface:#1a1a19; --surface-2:#232321;
+  --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --rule:#383835; --ring:rgba(255,255,255,.10);
+  --now:#e5584f; --next:#f0a830; --later:#3f8de8; --parked:#6f6d68; --closed:#4a4a46;
+  --link:#7eb3f2; --flash:rgba(63,141,232,.16);
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+}}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --page:#0d0d0d; --surface:#1a1a19; --surface-2:#232321;
+  --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --rule:#383835; --ring:rgba(255,255,255,.10);
+  --now:#e5584f; --next:#f0a830; --later:#3f8de8; --parked:#6f6d68; --closed:#4a4a46;
+  --link:#7eb3f2; --flash:rgba(63,141,232,.16);
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+body{background:var(--page);color:var(--ink);font-family:var(--sans);
+  font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1040px;margin:0 auto;padding-inline:16px;padding-block:0 56px}
+h1,h2,h3,h4{text-wrap:balance;margin:0}
+h1{font-size:clamp(22px,3.4vw,30px);font-weight:700;letter-spacing:-.02em}
+h2{font-size:17px;font-weight:600;letter-spacing:-.01em}
+p{margin:0}
+.num{font-variant-numeric:tabular-nums}
+:focus-visible{outline:2px solid var(--link);outline-offset:2px;border-radius:3px}
+[data-tier="now"]{--tier:var(--now)} [data-tier="next"]{--tier:var(--next)}
+[data-tier="later"]{--tier:var(--later)} [data-tier="parked"]{--tier:var(--parked)}
+[data-tier="closed"]{--tier:var(--closed)}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--tier,var(--rule));flex:none;display:inline-block}
+
+/* ── header ──────────────────────────────────────────────── */
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;
+  background:color-mix(in srgb,var(--page) 90%,transparent);
+  backdrop-filter:blur(8px);border-bottom:1px solid var(--grid)}
+.top-in{max-width:1040px;margin:0 auto;padding:10px 16px;
+  display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
+.eyebrow{font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--muted);white-space:nowrap}
+.tools{display:flex;gap:6px;align-items:center;margin-left:auto;flex:1 1 320px;justify-content:flex-end;min-width:0}
+.search{flex:1 1 auto;max-width:360px;min-width:0;font:inherit;font-size:13px;color:var(--ink);
+  background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:6px 10px}
+.search::placeholder{color:var(--muted)}
+.btn{font:inherit;font-size:12px;color:var(--ink-2);background:var(--surface);
+  border:1px solid var(--ring);border-radius:6px;padding:6px 9px;cursor:pointer;white-space:nowrap}
+.btn:hover{color:var(--ink);border-color:var(--rule)}
+.status{font-family:var(--mono);font-size:11px;color:var(--muted);width:100%;text-align:right;min-height:0}
+.status:empty{display:none}
+
+/* ── lede ───────────────────────────────────────────────── */
+.lede{margin-block:26px 18px;display:flex;flex-direction:column;gap:10px}
+.lede p{max-width:70ch;color:var(--ink-2);font-size:14.5px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-family:var(--mono);font-size:11px;color:var(--ink-2);background:var(--surface-2);
+  border:1px solid var(--ring);border-radius:4px;padding:1px 6px;white-space:nowrap;text-decoration:none}
+a.chip:hover{color:var(--ink);border-color:var(--rule)}
+.chips .chip{white-space:normal;overflow-wrap:anywhere;max-width:100%}
+code{font-family:var(--mono);font-size:.86em;background:var(--surface-2);
+  padding:1px 4px;border-radius:3px;color:var(--ink-2);overflow-wrap:anywhere}
+
+/* ── tier counts ────────────────────────────────────────── */
+.tiles{display:grid;gap:8px;grid-template-columns:repeat(5,minmax(0,1fr));margin-bottom:8px}
+.tile{display:flex;flex-direction:column;gap:6px;padding:11px 13px;text-decoration:none;color:var(--ink);
+  background:var(--surface);border:1px solid var(--ring);border-radius:8px;box-shadow:var(--shadow)}
+.tile:hover{border-color:var(--rule)}
+.tile-l{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:500;color:var(--ink-2)}
+.tile-v{font-size:26px;font-weight:600;letter-spacing:-.02em;line-height:1}
+.tile.muted .tile-v{color:var(--muted)}
+
+/* ── sections ───────────────────────────────────────────── */
+section{margin-top:34px;scroll-margin-top:110px}
+.sec-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding-bottom:8px;border-bottom:1px solid var(--rule)}
+.sec-h .dot{width:11px;height:11px}
+.count{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.sec-note{font-size:12.5px;color:var(--muted);margin-left:auto}
+
+/* ── the order ──────────────────────────────────────────── */
+.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.steps li{display:grid;grid-template-columns:28px minmax(0,1fr);gap:10px;padding:11px 0;border-bottom:1px solid var(--grid)}
+.step-n{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--muted);padding-top:1px}
+.step-b{display:flex;flex-direction:column;gap:7px;min-width:0}
+.step-t{font-weight:600;font-size:14px}
+.step-t:empty{display:none}
+.step-group{font-size:12.5px;font-weight:600;color:var(--muted);letter-spacing:.02em;margin:16px 0 0}
+.step-group:first-of-type{margin-top:6px}
+.step-c{display:flex;flex-wrap:wrap;gap:5px}
+.step-c:empty{display:none}
+.xchip{display:inline-block;font-family:var(--mono);font-size:11.5px;line-height:1.45;
+  color:var(--ink-2);text-decoration:none;background:var(--surface);border:1px solid var(--ring);
+  border-radius:4px;padding:2px 7px;max-width:100%;overflow-wrap:anywhere}
+.xchip .dot{width:7px;height:7px;margin-right:6px;vertical-align:1px}
+.xchip:hover{color:var(--ink);border-color:var(--rule)}
+.fulltext{margin-top:10px}
+.fulltext>summary{cursor:pointer;font-size:12.5px;color:var(--muted);padding:4px 0;width:max-content;max-width:100%}
+.fulltext>summary:hover{color:var(--ink-2)}
+.fulltext>.md{padding:8px 0 4px}
+
+/* ── entries ────────────────────────────────────────────── */
+.issues{display:flex;flex-direction:column}
+.issue{border-bottom:1px solid var(--grid);scroll-margin-top:110px}
+.issue>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:14px minmax(0,1fr) auto;
+  gap:4px 10px;align-items:start;padding:11px 4px 11px 0}
+.issue>summary::-webkit-details-marker,.closed-wrap>summary::-webkit-details-marker{display:none}
+.chev{width:14px;height:20px;position:relative;flex:none}
+.chev::before{content:"";position:absolute;left:3px;top:6px;width:6px;height:6px;
+  border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);
+  transform:rotate(-45deg);transition:transform .15s}
+details[open]>summary .chev::before{transform:rotate(45deg);top:4px}
+.s-main{display:flex;flex-direction:column;gap:3px;min-width:0}
+.s-name{font-family:var(--mono);font-size:13.5px;font-weight:600;color:var(--ink);overflow-wrap:anywhere}
+.issue>summary:hover .s-name{color:var(--link)}
+.s-why{font-size:13px;color:var(--ink-2);max-width:88ch}
+.s-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end;padding-top:1px}
+.s-date{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap}
+.chip.step{color:var(--link);border-color:color-mix(in srgb,var(--link) 35%,transparent)}
+.entry{padding:2px 0 16px 24px;display:flex;flex-direction:column;gap:14px}
+.entry-foot{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;font-size:12px;color:var(--muted)}
+.entry-foot .cite{font-size:11.5px}
+.entry-foot .btn{padding:3px 8px;font-size:11.5px}
+.dated{max-width:60ch}
+.src{font-family:var(--mono);font-size:11px;margin-left:auto}
+.flash{background:var(--flash);transition:background 1.2s}
+
+/* ── rendered markdown ──────────────────────────────────── */
+.md{display:flex;flex-direction:column;gap:10px;max-width:86ch;font-size:14px;line-height:1.6;
+  color:var(--ink);overflow-wrap:break-word;min-width:0}
+.md ul,.md ol{margin:0;padding-left:1.35em;display:flex;flex-direction:column;gap:6px}
+.md li>*+*{margin-top:6px}
+.md li::marker{color:var(--muted)}
+.md strong{font-weight:600}
+.md hr{border:0;border-top:1px solid var(--grid);margin:4px 0;width:100%}
+.md .md-h{font-size:13px;font-weight:600;margin-top:4px}
+.md p.instrument{font-size:13px;color:var(--ink-2)}
+.md p.label{font-size:12px;font-weight:600;letter-spacing:.04em;color:var(--ink-2);margin-top:2px}
+.md .lbl{font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--muted);margin-right:4px}
+.md pre{margin:0;background:var(--surface-2);border-radius:6px;padding:10px 12px;font-size:12.5px}
+.md pre code{background:none;padding:0}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
+.md table{border-collapse:collapse;font-size:12.5px}
+.md th{text-align:left;font-weight:500;color:var(--muted);font-size:11px;letter-spacing:.04em;
+  text-transform:uppercase;padding:0 12px 5px 0;vertical-align:bottom}
+.md td{padding:5px 12px 5px 0;border-top:1px solid var(--grid);vertical-align:top;min-width:9ch}
+a.xref{color:var(--link);text-decoration:underline dotted;text-underline-offset:2px}
+a.xref code{color:var(--link)}
+a.xref.closed,a.xref.closed code{color:var(--ink-2)}
+a.xref:hover{text-decoration-style:solid}
+.dangling{text-decoration:underline wavy var(--now);text-underline-offset:3px}
+
+/* ── closed ─────────────────────────────────────────────── */
+.closed-wrap>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding-bottom:8px;border-bottom:1px solid var(--rule)}
+.closed-wrap>summary h2{color:var(--ink-2)}
+.closed-items{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.closed{padding:9px 0 9px 24px;border-bottom:1px solid var(--grid);display:flex;flex-direction:column;
+  gap:3px;scroll-margin-top:110px}
+.c-head{display:flex;flex-wrap:wrap;gap:6px 9px;align-items:center}
+.c-name{font-family:var(--mono);font-size:12.5px;font-weight:500;color:var(--ink-2);overflow-wrap:anywhere}
+.c-why{font-size:12.5px;color:var(--muted);max-width:92ch}
+.c-why code{font-size:.9em}
+
+.empty{margin-top:26px;color:var(--ink-2);font-size:14px}
+footer{margin-top:44px;padding-top:16px;border-top:1px solid var(--grid);
+  color:var(--muted);font-size:12px;display:flex;flex-direction:column;gap:5px}
+footer code{background:none;padding:0}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
+@media (max-width:720px){
+  .tiles{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .tile-v{font-size:22px}
+}
+@media (max-width:560px){
+  .tools{flex-basis:100%;margin-left:0}
+  .search{max-width:none}
+  .issue>summary{grid-template-columns:14px minmax(0,1fr)}
+  .s-meta{grid-column:2;justify-content:flex-start}
+  .entry{padding-left:0}
+  .closed{padding-left:0}
+  .sec-note{margin-left:0;width:100%}
+  .src{margin-left:0}
+}
+</style>
+
+<header class="top"><div class="top-in">
+  <span class="eyebrow">Rigel · the issue log</span>
+  <div class="tools">
+    <input id="q" class="search" type="search" placeholder="Filter by name, kind or text  ( / )"
+      aria-label="Filter entries" autocomplete="off" spellcheck="false">
+    <button type="button" class="btn" id="expand">Expand all</button>
+    <button type="button" class="btn" id="collapse">Collapse all</button>
+  </div>
+  <div class="status num" id="status" role="status" aria-live="polite"></div>
+</div></header>
+
+<div class="wrap">
+  <div class="lede">
+    <h1>Open issues</h1>
+    <p>Every open problem, question, decision and risk in Rigel&rsquo;s issue log, grouped by priority and
+      in the log&rsquo;s own order. Open an entry for its question, the numbers a ranking turns on, and the
+      instrument that re-derives them. This page is generated from <code>docs/ISSUES.md</code>; change the
+      log, never the page.</p>
+    <div class="chips">__CHIPS__</div>
+  </div>
+
+  __MAIN__
+
+  <footer>
+    <span>__STAMP__</span>
+    <span>Cite an entry as <code>ISSUES: name</code>. A wavy underline marks a citation to a name the log
+      does not hold.</span>
+  </footer>
+</div>
+
+<script>
+(() => {
+  const q = document.getElementById("q");
+  const status = document.getElementById("status");
+  const empty = document.getElementById("empty");
+  const issues = [...document.querySelectorAll("details.issue")];
+  const closed = [...document.querySelectorAll("li.closed")];
+  const closedWrap = document.querySelector("details.closed-wrap");
+  const hay = new Map([...issues, ...closed].map(el => [el, el.textContent.toLowerCase()]));
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function apply(){
+    const toks = q.value.toLowerCase().split(/\s+/).filter(Boolean);
+    const hit = el => toks.every(t => hay.get(el).includes(t));
+    let shown = 0;
+    for (const sec of document.querySelectorAll("section.tier")){
+      const items = sec.querySelectorAll("details.issue");
+      let k = 0;
+      for (const d of items){ const v = hit(d); d.hidden = !v; if (v) k++; }
+      sec.hidden = k === 0;
+      sec.querySelector(".count").textContent = toks.length ? `${k} of ${items.length}` : items.length;
+      shown += k;
+    }
+    let c = 0;
+    for (const li of closed){ const v = hit(li); li.hidden = !v; if (v) c++; }
+    if (closedWrap){
+      closedWrap.querySelector(".count").textContent = toks.length ? `${c} of ${closed.length}` : closed.length;
+      closedWrap.parentElement.hidden = toks.length > 0 && c === 0;
+    }
+    empty.hidden = !(toks.length && shown === 0 && c === 0);
+    status.textContent = toks.length ? `${shown} open and ${c} closed match` : "";
+  }
+  q.addEventListener("input", apply);
+  q.addEventListener("keydown", e => { if (e.key === "Escape"){ q.value = ""; apply(); } });
+  document.addEventListener("keydown", e => {
+    if (e.key === "/" && document.activeElement !== q && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)){
+      e.preventDefault(); q.focus();
+    }
+  });
+  document.getElementById("expand").addEventListener("click", () => issues.forEach(d => { if (!d.hidden) d.open = true; }));
+  document.getElementById("collapse").addEventListener("click", () => issues.forEach(d => { d.open = false; }));
+
+  function reveal(id){
+    const t = id && document.getElementById(id);
+    if (!t) return null;
+    if (t.hidden || (t.closest("section") && t.closest("section").hidden)){ q.value = ""; apply(); }
+    for (let p = t; p; p = p.parentElement) if (p.tagName === "DETAILS") p.open = true;
+    return t;
+  }
+  function go(id, smooth){
+    const t = reveal(id);
+    if (!t) return false;
+    if (t.id === "closed") t.querySelector("details.closed-wrap").open = true;
+    t.scrollIntoView({block: "start", behavior: smooth && !reduced ? "smooth" : "auto"});
+    t.classList.add("flash");
+    setTimeout(() => t.classList.remove("flash"), 1400);
+    return true;
+  }
+  document.addEventListener("click", e => {
+    const a = e.target.closest('a[href^="#"]');
+    if (!a) return;
+    const id = decodeURIComponent(a.getAttribute("href").slice(1));
+    if (go(id, true)){
+      e.preventDefault();
+      try { history.replaceState(null, "", "#" + id); } catch (_) {}
+    }
+  });
+  window.addEventListener("hashchange", () => go(location.hash.slice(1), false));
+  if (location.hash) go(decodeURIComponent(location.hash.slice(1)), false);
+
+  document.addEventListener("click", e => {
+    const b = e.target.closest("button.copy");
+    if (!b) return;
+    const text = b.dataset.cite;
+    const say = msg => { b.textContent = msg; setTimeout(() => { b.textContent = "Copy citation"; }, 1600); };
+    const select = () => {
+      const code = b.parentElement.querySelector(".cite");
+      const r = document.createRange(); r.selectNodeContents(code);
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+      say("Selected: press copy");
+    };
+    try {
+      navigator.clipboard.writeText(text).then(() => say("Copied"), select);
+    } catch (_) { select(); }
+  });
+})();
+</script>
