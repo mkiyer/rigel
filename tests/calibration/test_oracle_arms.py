@@ -1,18 +1,17 @@
-"""Falsification gates for the oracle arms, ``scripts/design/_oracle_arms.py`` — the helper the truth instruments share.
+"""Falsification gates for ``scripts/design/_oracle_arms.py`` — the oracle cache and the per-object scorer
+``calibration_vs_oracle.py`` reads.
 
-The instrument answers: does calibration's PRIOR-FREE first solve find what the payload actually
-contains, and where it does not, was the information destroyed by the accumulator or missed by the
-solver? Every number it prints is a difference between two per-object arrays, so every way of getting
+Every number the scorer prints is a difference between two per-object arrays, so every way of getting
 that wrong is a way of getting a *plausible* answer. These gates are the ways.
 
 EACH GATE HERE CARRIES ITS OWN PERTURBATION, in the same test, because a gate that has never been
 watched to fire has not been written yet (TRAPS: perturb-every-gate). Reading a gate is not evidence;
 each test below breaks the thing it guards and asserts the guard notices.
 
-The scenario is a single-reference toy. That is enough for the SCORING logic these gates cover — it
-is arithmetic over two per-object arrays — and it is deliberately NOT enough to judge the deposit
-path, since a single-reference index hides ref-id-space mismatches. The deposit path has its own
-gates in ``tests/native/`` and its truth-scored instruments run on the panel.
+The toy serves the cache and sum-to-full gates; the scoring gates run on synthetic arrays. A
+single-reference toy is deliberately NOT enough to judge the deposit path, since a single-reference
+index hides ref-id-space mismatches. The deposit path has its own gates in ``tests/native/`` and its
+truth-scored instruments run on the panel.
 """
 
 from __future__ import annotations
@@ -20,14 +19,14 @@ from __future__ import annotations
 import dataclasses
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from rigel.calibration.region_init import has_own_composition_evidence
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.substrate import CalibrationSubstrate
-from rigel.config import CalibrationConfig, PipelineConfig
+from rigel.config import PipelineConfig
 from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 
 
@@ -69,17 +68,12 @@ P0 = _load_sibling("_oracle_arms.py")
 
 @pytest.fixture(scope="module")
 def toy(tmp_path_factory):
-    """gDNA + mature + nascent, with spliced reads (``calibrate`` refuses a library without them).
+    """gDNA + mature + nascent, with spliced reads.
 
-    Two structures here are load-bearing, and without them two gates below are vacuous:
-
-    * staggered isoform boundaries. ``boundary_spliced`` — a molecule that crossed a contiguous
-      boundary having spliced *elsewhere* — can only be deposited where a region bound falls INSIDE
-      another transcript's exon. A single-isoform gene has no such bound, so its spliced-boundary
-      bank is identically zero and GATE 2's perturbation removes nothing.
-    * a region shorter than the minimum fragment length. ``region_contained`` requires the fragment
-      to fit, so a 40 bp region can never hold one. That is what gives the toy genuinely EMPTY
-      objects — everything else here is covered deeply — and GATE 6 is about exactly those.
+    The staggered isoform boundary is load-bearing: ``boundary_spliced`` — a molecule that crossed a
+    contiguous boundary having spliced *elsewhere* — can only be deposited where a region bound falls
+    INSIDE another transcript's exon. A single-isoform gene has no such bound, so its spliced-boundary
+    bank is identically zero and GATE 1's perturbation removes nothing.
     """
     wd = tmp_path_factory.mktemp("p0_orc")
     sc = Scenario("p0", genome_length=9000, seed=17, work_dir=wd / "sim")
@@ -116,19 +110,6 @@ def toy(tmp_path_factory):
             seed=17,
         ),
         gdna_config=GDNAConfig(abundance=0.0, frag_mean=240, frag_std=45),
-    )
-
-
-@pytest.fixture(scope="module")
-def measured(toy, tmp_path_factory):
-    """One full run of the oracle arms on the toy — the object every gate below interrogates."""
-    return P0.measure_condition(
-        bam=str(toy.bam_path),
-        index=toy.index,
-        pipeline_config=PipelineConfig(),
-        calibration_config=CalibrationConfig(),
-        work_dir=tmp_path_factory.mktemp("p0_split"),
-        tag="toy",
     )
 
 
@@ -225,44 +206,10 @@ def test_a_cache_that_does_not_describe_this_SCAN_is_rebuilt_not_reused(toy, tmp
     assert calls["n"] == 1, "the rebuilt cache did not hit on the next call"
 
 
-# ── GATE 1: the oracle's sum-to-full identity actually runs on the condition under test ───────────
+# ── GATE 1: T's per-axis totals are the FULL payload's totals ─────────────────────────────────────
 
 
-def test_a_corrupted_partition_ABORTS_the_measurement(toy, tmp_path, monkeypatch):
-    """The oracle's trustworthiness rests entirely on sum-to-full. This asserts the instrument is
-    behind that gate rather than beside it — that a broken partition stops the measurement instead of
-    producing a plausible table.
-
-    PERTURBATION: add one deposit to one partition's payload, so the parts no longer sum to the full.
-    """
-    import _oracle
-
-    real = _oracle._scan_payload
-    calls = {"n": 0}
-
-    def corrupting(bam, index, cfg):
-        payload = real(bam, index, cfg)
-        calls["n"] += 1
-        if calls["n"] == 1:  # the first partition scanned
-            payload.region_contained_count[0, 0] += 1
-        return payload
-
-    monkeypatch.setattr(_oracle, "_scan_payload", corrupting)
-    with pytest.raises(AssertionError, match="oracle INVALID"):
-        P0.measure_condition(
-            bam=str(toy.bam_path),
-            index=toy.index,
-            pipeline_config=PipelineConfig(),
-            calibration_config=CalibrationConfig(),
-            work_dir=tmp_path,
-            tag="corrupt",
-        )
-
-
-# ── GATE 2: T's per-axis totals are the FULL payload's totals ─────────────────────────────────────
-
-
-def test_T_totals_equal_the_full_payload_PER_AXIS(measured, toy):
+def test_T_totals_equal_the_full_payload_PER_AXIS(toy, tmp_path):
     """``check_same_basis`` must hold between T and the payload it claims to partition, **per axis**.
 
     Per axis, never pooled: ``n_regions`` and ``n_boundaries`` differ by only ``n_refs``, so an error on
@@ -272,97 +219,52 @@ def test_T_totals_equal_the_full_payload_PER_AXIS(measured, toy):
     ``override_masses`` exists to avoid — ``chain_boundary_deconv`` builds ``rna = (1−f_g)·unspliced +
     spliced``, so a T without the spliced term is on a different basis from every P.
     """
+    from _oracle import OracleTruth
+
+    oracle = OracleTruth.from_bam(str(toy.bam_path), toy.index, PipelineConfig(), tmp_path, "t")
     ra = RegionArrays.from_frame(toy.index.regions_df, toy.index.ref_name_to_id)
-    full = CalibrationSubstrate.from_payload(measured.oracle.full, ra)
-    P0.check_same_basis("T", measured.truth, full)  # holds
+    full = CalibrationSubstrate.from_payload(oracle.full, ra)
+    truth = oracle.override_masses(ra)
+    P0.check_same_basis("T", SimpleNamespace(**truth), full)  # holds
 
     spliced = np.asarray(full.boundary_spliced.count, np.float64).sum(axis=1)
     assert spliced.sum() > 0, "the toy must EXERCISE the spliced bank or this perturbation is inert"
-    broken = dataclasses.replace(
-        measured.truth, count_rna_boundary=measured.truth.count_rna_boundary - spliced
-    )
+    broken = {**truth, "count_rna_boundary": truth["count_rna_boundary"] - spliced}
     with pytest.raises(ValueError, match="boundary"):
-        P0.check_same_basis("T", broken, full)
+        P0.check_same_basis("T", SimpleNamespace(**broken), full)
 
 
-# ── GATE 3: P and T are on the same basis, per object ─────────────────────────────────────────────
+# ── GATE 2: an arm and its truth are on the same basis, per object ────────────────────────────────
 
 
-def test_P_and_T_are_on_the_SAME_BASIS_per_object(measured, toy):
-    """Every arm's per-object total must equal T's per-object total on each axis. This is what makes
-    ``f_g`` comparable at all: two arrays of fractions over different denominators subtract to a
-    number that means nothing.
+def test_an_arm_on_a_DIFFERENT_BASIS_is_refused():
+    """Every arm's per-object total must equal T's per-object total. This is what makes ``f_g``
+    comparable at all: two arrays of fractions over different denominators subtract to a number that
+    means nothing.
 
-    PERTURBATION (a): score the region axis against the boundary axis' truth.
-    PERTURBATION (b): scale one arm's masses, i.e. put P on a different denominator.
+    PERTURBATION (a): score against another axis' truth (a different object count).
+    PERTURBATION (b): scale the arm's masses, i.e. put it on a different denominator.
     """
-    ra = RegionArrays.from_frame(toy.index.regions_df, toy.index.ref_name_to_id)
-    full = CalibrationSubstrate.from_payload(measured.oracle.full, ra)
-    for name, arm in measured.arms.items():
-        P0.check_same_basis(name, arm, full)  # holds for every arm
-
-    p = measured.arms["pass0"]
-    with pytest.raises(ValueError):
-        P0.score_axis(
-            p.count_gdna_region,
-            p.count_rna_region,
-            measured.truth.count_gdna_boundary,
-            measured.truth.count_rna_boundary,
-        )
-    with pytest.raises(ValueError):
-        P0.score_axis(
-            p.count_gdna_region * 2.0,
-            p.count_rna_region * 2.0,
-            measured.truth.count_gdna_region,
-            measured.truth.count_rna_region,
-        )
+    g, r = np.array([4.0, 1.0, 3.0]), np.array([6.0, 2.0, 0.0])
+    tg, tr = np.array([5.0, 0.0, 3.0]), np.array([5.0, 3.0, 0.0])
+    P0.score_axis(g, r, tg, tr)  # the same per-object totals: holds
+    with pytest.raises(ValueError, match="different axes"):
+        P0.score_axis(g, r, tg[:-1], tr[:-1])
+    with pytest.raises(ValueError, match="DIFFERENT BASES"):
+        P0.score_axis(g * 2.0, r * 2.0, tg, tr)
 
 
-# ── GATE 4: calib_refit_iters=0 IS pass-0 ─────────────────────────────────────────────────────────
+# ── GATE 3: no data is ABSENT, never f_g = 0 ──────────────────────────────────────────────────────
 
 
-def test_refit_iters_zero_reproduces_debug_belief_pass0(measured, toy):
-    """The config lever the instrument relies on must be the same quantity ``_debug`` exposes —
-    checked ONCE, here, so the instrument can use the lever and nothing has to spelunk. Two ways of
-    obtaining one quantity is how two modules come to disagree about it.
-
-    PERTURBATION: ask for ONE refit iteration. A single iteration must move the answer; if it does
-    not, the lever is inert and this test is vacuous.
-    """
-    from rigel.calibration.sweep import chain_region_deconv
-
-    ra = RegionArrays.from_frame(toy.index.regions_df, toy.index.ref_name_to_id)
-    substrate = CalibrationSubstrate.from_payload(measured.payload, ra)
-    debug = measured.debug_final
-    from_debug = chain_region_deconv(debug["chain"], debug["belief_pass0"], substrate).gdna_mass
-
-    np.testing.assert_array_equal(measured.arms["pass0"].count_gdna_region, from_debug)
-
-    one = P0.calibrate_arm(
-        measured.payload,
-        measured.calibrate_kwargs,
-        dataclasses.replace(CalibrationConfig(), calib_refit_iters=1),
-    )
-    assert not np.array_equal(one.count_gdna_region, from_debug), (
-        "one refit iteration left the answer byte-identical: the lever this instrument depends on "
-        "does nothing, so the pass-0/final distinction it reports is fictional."
-    )
-
-
-# ── GATE 5: the undetermined class exists, is reported, and responds to the length gap ────────────
-
-
-# ── GATE 6: no data is ABSENT, never f_g = 0 ──────────────────────────────────────────────────────
-
-
-def test_an_object_with_no_mass_is_ABSENT_not_a_confident_zero(measured):
+def test_an_object_with_no_mass_is_ABSENT_not_a_confident_zero():
     """No data must be inert: never "100 % gDNA", and never its mirror "0 % gDNA" either. Most regions
     in any real index carry no fragments at all, so a scorer that turns 0/0 into a number reports a
     beautiful answer for the majority of the genome.
 
     PERTURBATION: the mass-weighted mean is *blind* to this by construction (a zero-mass object gets
-    zero weight), so the gate is on the COUNT of scored objects and on the class shares — which is
-    exactly where a floored 0 would hide.
+    zero weight), so the gate is on the COUNT of scored objects — which is exactly where a floored 0
+    would hide.
     """
     g = np.array([4.0, 0.0, 0.0, 1.0])
     r = np.array([6.0, 0.0, 0.0, 0.0])
@@ -376,106 +278,11 @@ def test_an_object_with_no_mass_is_ABSENT_not_a_confident_zero(measured):
     np.testing.assert_allclose(score.abs_err, 2.0)
     np.testing.assert_allclose(score.mwae, 2.0 / 11.0)
 
-    # ...and on the real toy: exactly the objects with mass are scored, and there is at least one
-    # without, or the check above proves nothing about the path the instrument actually runs.
-    region = measured.scores["pass0"]["region"]["ALL"]
-    live = (
-        np.asarray(measured.truth.count_gdna_region) + np.asarray(measured.truth.count_rna_region)
-    ) > 0
-    assert region.n_scored == int(live.sum())
-    assert (~live).sum() > 0, "the toy has no empty region; the gate would be vacuous"
+
+# ── GATE 4: the directional split is reported and does not cancel ─────────────────────────────────
 
 
-# ── GATE 7: the solver classes are the SOLVER's, not a second opinion ─────────────────────────────
-
-
-def test_the_solver_classes_are_the_solvers_own_predicate(measured, toy):
-    """The instrument's slot classes (own-evidence / no-evidence / structurally-locked) must be
-    ``region_init``'s own definitions, evaluated by calling its predicate, or the project acquires two
-    definitions of one class and they drift (TRAPS: a-test-that-redefines).
-
-    PERTURBATION: shift the evidence threshold off ``region_init``'s and watch the partition move.
-    """
-    cap = measured.debug_pass0["capture"]
-    chain = measured.debug_pass0["chain"]
-
-    tau = np.asarray(cap.tau_lam, np.float64)
-    is_region = np.asarray(chain.kind) == P0.REGION
-    # A structurally pure-gDNA object exists on BOTH axes — `_type_belief` locks the class without
-    # consulting the axis. A `(~solvable) & is_region` filter files every structurally-locked BOUNDARY
-    # as `message_only`, i.e. as an object whose answer came from its neighbours, when nothing was
-    # ever asked of it.
-    census_lock = ~np.asarray(cap.free_pos, bool) & ~np.asarray(cap.free_neg, bool)
-    # the SOLVER's own predicate — imported, not restated
-    census_no_ev = ~has_own_composition_evidence(tau) & (~census_lock)
-
-    slot = P0.solver_slot_classes(cap)
-    np.testing.assert_array_equal(slot["struct_lock"], census_lock)
-    np.testing.assert_array_equal(slot["message_only"], census_no_ev)
-    np.testing.assert_array_equal(slot["own_evidence"], ~(census_lock | census_no_ev))
-
-    # PERTURBATION 1: a threshold above every finite tau collapses own-evidence into message-only.
-    moved = P0.solver_slot_classes(cap, eps=float(np.max(tau)) + 1.0)
-    assert moved["own_evidence"].sum() == 0
-    assert slot["own_evidence"].sum() > 0, "no slot has own evidence; the gate would be vacuous"
-
-    # PERTURBATION 2: the region-only lock must be a DIFFERENT partition on this fixture, or the
-    # correction above is untested and could silently revert.
-    region_only_lock = (~np.asarray(cap.solvable, bool)) & is_region
-    assert not np.array_equal(region_only_lock, census_lock), (
-        "the region-only and both-axes locks agree on this fixture, so it cannot demonstrate the "
-        "defect — the scenario needs a G1 BOUNDARY carrying mass (an intergenic<->exon boundary)"
-    )
-
-    # AND this partition must stay the SOLVER's gate, not a judgement about scoreability. The audit
-    # answers the second question with a CURVE over sd(λ) = 1/√τ and no cut at all, because τ is
-    # continuous. If a threshold ever appears here, the two questions have been collapsed into one.
-    sa = _load_sibling("solvability_audit.py")
-    assert not hasattr(sa, "own_evidence_tau_floor"), (
-        "a resolving-power THRESHOLD is back in the audit; it was refuted because tau is continuous "
-        "across the region on 4 of 5 ladder conditions, so any floor is a tuned constant"
-    )
-    assert sa.SD_LAMBDA_DECADES[-1] == np.inf, (
-        "the sd(lambda) curve must have an unbounded top band"
-    )
-
-
-# ── GATE 8: the classes partition the axis, and the error decomposes over them ────────────────────
-
-
-def test_the_classes_PARTITION_the_mass_and_the_error(measured):
-    """Per-class scoring is worthless if the classes overlap or leak: a class that double-counts an
-    object reports its error twice, and a gap between classes hides error entirely. Both are silent.
-
-    PERTURBATION: drop the LARGEST class from the sum and watch the identity break — dropping an
-    arbitrary one is not a perturbation at all, because a class that happens to be empty on this
-    scenario (``struct_lock`` is, on a toy with no intergenic pure-gDNA region) can be removed with
-    no effect whatsoever, and the gate would then "pass" while testing nothing.
-    """
-    for table in (measured.scores,):
-        names = P0.SOLVER_CLASSES
-        for arm in table:
-            for axis in ("region", "boundary"):
-                per_class = table[arm][axis]
-                whole = per_class["ALL"]
-                classes = [per_class[c] for c in names]
-                np.testing.assert_allclose(sum(c.mass for c in classes), whole.mass, rtol=1e-9)
-                np.testing.assert_allclose(
-                    sum(c.abs_err for c in classes), whole.abs_err, rtol=1e-9
-                )
-                np.testing.assert_allclose(
-                    sum(c.net_err for c in classes), whole.net_err, atol=1e-6
-                )
-                assert sum(c.n_scored for c in classes) == whole.n_scored
-                biggest = max(c.mass for c in classes)
-                assert biggest > 0.0
-                assert whole.mass - biggest != pytest.approx(whole.mass, rel=1e-9)
-
-
-# ── GATE 9: the directional split is reported and does not cancel ─────────────────────────────────
-
-
-def test_the_directional_split_is_reported_and_the_net_is_their_DIFFERENCE(measured):
+def test_the_directional_split_is_reported_and_the_net_is_their_DIFFERENCE():
     """The library-level number looks far better than the per-object answer
     because a large under-call sits next to a large over-call. Reporting only the net is what makes
     that invisible, so the two directions are separate fields and their relationship is an identity.
@@ -483,11 +290,15 @@ def test_the_directional_split_is_reported_and_the_net_is_their_DIFFERENCE(measu
     PERTURBATION: an arm whose errors all point one way must have one direction exactly zero — if
     both are always populated the split is measuring noise, not direction.
     """
-    for arm in measured.scores:
-        for axis in ("region", "boundary"):
-            s = measured.scores[arm][axis]["ALL"]
-            np.testing.assert_allclose(s.over_call - s.under_call, s.net_err, atol=1e-6)
-            np.testing.assert_allclose(s.over_call + s.under_call, s.abs_err, rtol=1e-9)
+    s = P0.score_axis(
+        np.array([4.0, 1.0, 3.0]),
+        np.array([6.0, 2.0, 0.0]),
+        np.array([5.0, 0.0, 3.0]),
+        np.array([5.0, 3.0, 0.0]),
+    )
+    assert s.over_call > 0.0 and s.under_call > 0.0, "the fixture must err both ways"
+    np.testing.assert_allclose(s.over_call - s.under_call, s.net_err, atol=1e-12)
+    np.testing.assert_allclose(s.over_call + s.under_call, s.abs_err, rtol=1e-12)
 
     one_way = P0.score_axis(
         np.array([5.0, 6.0]),

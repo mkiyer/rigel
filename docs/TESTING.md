@@ -332,7 +332,6 @@ molecules exist first; and the post-capture fl distribution and abundances are t
 | counts are Poisson by construction | nothing dispersion-dependent validates here |
 | the panel is all R1-antisense | the engine can emit either (`ReadSimConfig.r1_sense`, gated in `test_strand_sense_convention.py`) but `orchestrator.run_condition_grid` does not expose it. Real cfRNA is dUTP, so this is not urgent |
 | the tool's gDNA reach assumption (`taper_g = 1`) is untested | latent: gDNA is not simulated on the spike-ins |
-| each population is written as one contiguous block of read names | a per-fragment truth join checked by "does an impossible label appear?" is nearly blind. ⛔ Gate such a join on a count identity against the scanner's own `stats.total` / `stats.n_read_names` (`_oracle.check_walk_alignment`); `tests/calibration/test_prior_vs_oracle.py` pins both halves |
 
 ---
 
@@ -393,7 +392,7 @@ instruments:
 
 | question | instrument |
 |---|---|
-| how wrong is calibration, against oracle calibration? — the 0.8.0 metric | `calibration_vs_oracle.py` · `prior_vs_oracle.py` (the `LocusPriors` the EM reads) · `solvability_audit.py` (pass-0, per object) |
+| how wrong is calibration, against oracle calibration? — the 0.8.0 metric | `calibration_vs_oracle.py` · `prior_vs_oracle.py` (the `LocusPriors` the EM reads) |
 | how wrong is the end-to-end answer? — per transcript, per pool, against per-fragment truth | `panel.py score` / `report`, i.e. `quant_accuracy.py` — the only end-to-end scorer, a thermometer rather than the target |
 
 ⛔ A ceiling only prices what its arm can reach: the effective-length shrinkage is built before

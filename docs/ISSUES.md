@@ -581,6 +581,7 @@ capture). The EM passes a g50 count change through at only 0.37–0.50, so its s
 gDNA's own share the g50 gDNA pool moves −18.2k → −30.4k, spans 142.0k → 152.1k (truth 150.4k), transcripts
 unchanged. It cancels part of the capture likelihood's lean toward RNA today, so it lands with those repairs. The
 gDNA LENGTH already uses gDNA's own share (`ISSUES: the-pooled-q-in-the-gdna-length`, replaced for the length only).
+`prior_vs_oracle.py` (P, O, S) is its one instrument and retires when it lands (owner, 2026-09-28).
 
 ### the-fl-boundary-inversion-reads-missing-evidence-as-a-value
 `priority: later — Tier 2, the fl second wave, after the realized-law fix · kind: defect · 2026-09-28`
@@ -1076,16 +1077,14 @@ every capture taken before 1747b282 must be retaken.
 in-tree stage.
 (e) The ladder-report skill hard-codes the four ladder rungs (StopIteration on g25 or g001).
 (f) `panel.py --index` reaches the cache and oracle stages but not `simulate`.
-(g) `solvability_audit.py` audits pass 0 only; it has no `--self-test`, so `preflight.py --full` skips it; its panel
-table prints error mass, not object count; its oracle-arm path skips the wall inputs.
-(h) `calibration_vs_oracle.py` has no arm that carries the true capture efficiencies, so no calibration A/B sees the
+(g) `calibration_vs_oracle.py` has no arm that carries the true capture efficiencies, so no calibration A/B sees the
 capture-contracted length move; `quant_accuracy.py --arm oracle_ruler` is the model.
 
 ### debug-capture-memory-is-unbounded
 `priority: later — Tier 4: the fix is in src; the one-real-genome-job rule stands meanwhile · kind: instrument · 2026-09-28`
 `calibrate(_debug=…)` builds a `SweepCapture` for every sweep with no size or region bound; on the whole human genome
 it reached 25 GB in 20 s and nearly crashed the machine (2026-09-28). `ruler_vs_truth.py` always passes `_debug` and
-`_oracle_arms` passes it on request; neither refuses a real index, and no capture is region-restricted or streaming.
+does not refuse a real index, and no capture is region-restricted or streaming.
 The per-session memory guards miss Python from other environments, processes under 1 GB and growth between 3-s polls.
 For scale: a normal quant peaks at about 3 GB, and `rename_identity.py --check` on one ladder condition holds 8.9–10.7
 GB. RULED (owner, 2026-09-28): `_debug` refuses an index whose manifest does not mark a panel, and the capture is
@@ -1411,7 +1410,7 @@ effect is judged by its size, with genes and pools read beside the transcript ta
 CLOSED 2026-09-28: the output that read 0 by construction is deleted — `calibration_vs_oracle.py`'s ruler section and
 `prior_vs_oracle.py`'s `gdna_eff_len` score, since the `O` arm keeps `P`'s efficiencies, reference density and gDNA
 region lengths, everything the length reads. The length's truth is `ruler_vs_truth.py`; the true-efficiency `O` arm is
-`ISSUES: instrument-ledger` (h).
+`ISSUES: instrument-ledger` (g).
 
 ### rna-prior-floor-at-pure-gdna-loci
 CLOSED 2026-09-26 (owner) for 0.8.0, to be reopened only with a fundamentally different algorithm. The prize is real —
@@ -1453,8 +1452,8 @@ constant fraction and NOT a cheap fix: it is the composition solve's estimator a
 posterior mean cannot read zero — so the repair is an atom at `f_r = 0` in ψ's hypothesis space (the tilt
 already carries {pure +, pure −, mixed}; the composition does not) or a different estimand there, a solver
 design item, and it lives at the stress rung (at `g50` the same floor is +4,309 on 519 near-pure loci,
-0.15 % of the RNA, invisible in the pool). `prior_vs_oracle.py`, `calibration_vs_oracle.py`,
-`solvability_audit.py` (the confidently-wrong class). It is why the per-transcript allocation made `g98`
+0.15 % of the RNA, invisible in the pool). `prior_vs_oracle.py`, `calibration_vs_oracle.py`; the confidently-wrong
+class's z-band table retired with `solvability_audit.py` (2026-09-28). It is why the per-transcript allocation made `g98`
 capture-ON worse before the gDNA opportunity was corrected (`ISSUES: per-transcript-prior-lane`).
 
 ### a-no-rna-state-read-beside-the-solve

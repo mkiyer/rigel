@@ -1,12 +1,11 @@
-"""The oracle arms — one condition scanned, split by true origin, calibrated at pass-0 and in full, and scored
-per object against T. A helper (no row on the shelf), shared by `solvability_audit.py`, `calibration_vs_oracle.py`
-and `calibration_oracle.py --build`, and gated by `tests/calibration/test_oracle_arms.py`.
+"""The oracle cache and the per-object scorer. A helper (no row on the shelf), shared by
+`calibration_vs_oracle.py` (the scorer) and `calibration_oracle.py --build` (the cache), and gated by
+`tests/calibration/test_oracle_arms.py`.
 
 T is the production accumulator run on the BAM split by origin and asserted to sum to the full payload, in the
-DRAINED frame (the partitions are lifted by replaying the whole's choices, `lift_drain_parts`). The arms are
-`pass0` (refits 0) and `final` (the shipped solve). `load_or_build_oracle` is the one place the per-origin caches
-are built — keyed by the shipped `read_scan_cache`, so a stale cache is refused rather than reused, and the
-sum-to-full identity is re-run on every load.
+DRAINED frame (the partitions are lifted by replaying the whole's choices, `lift_drain_parts`).
+`load_or_build_oracle` is the one place the per-origin caches are built — keyed by the shipped `read_scan_cache`,
+so a stale cache is refused rather than reused, and the sum-to-full identity is re-run on every load.
 """
 
 from __future__ import annotations
@@ -14,8 +13,7 @@ from __future__ import annotations
 import dataclasses
 import os
 import sys
-import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -31,27 +29,12 @@ from _oracle import (  # noqa: E402
     _split_bam,
     split_rna_by_transcript_strand,
 )
-from rigel.calibration.calibrate import calibrate  # noqa: E402
-from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
-from rigel.calibration.region_chain import BOUNDARY, REGION  # noqa: E402
-from rigel.calibration.region_geometry import g1_locked  # noqa: E402
-from rigel.calibration.substrate import CalibrationSubstrate  # noqa: E402
-from rigel.pipeline import _drain_side_buffer, _native_detect_sj_tag, scan_and_buffer  # noqa: E402
+from rigel.pipeline import _native_detect_sj_tag, scan_and_buffer  # noqa: E402
 from rigel.scan_cache import ScanCacheKeyError, read_scan_cache, write_scan_cache  # noqa: E402
-
-#: The solver's own "has own composition evidence" gate lives in production
-#: (:func:`~rigel.calibration.region_init.has_own_composition_evidence`); this value exists only
-#: because ``solver_slot_classes`` takes it as a movable argument so a gate can perturb the partition.
-_EPS = 1.0e-9
 
 #: The two axes ``CalibrationResult`` deconvolves. The sj axis is pure RNA by construction, so
 #: nothing is deconvolved there and there is nothing to score.
 AXES = ("region", "boundary")
-
-#: Where did the answer come from? The solver's own three-way partition of a slot, reproducing
-#: ``region_init``'s definitions. Mutually exclusive and exhaustive; a gate asserts the mass and the
-#: error both decompose over them exactly.
-SOLVER_CLASSES = ("own_evidence", "message_only", "struct_lock")
 
 
 def object_fractions(gdna_mass, rna_mass) -> tuple[np.ndarray, np.ndarray]:
@@ -59,8 +42,8 @@ def object_fractions(gdna_mass, rna_mass) -> tuple[np.ndarray, np.ndarray]:
 
     NaN, never 0: "no data" must be inert, and a floored 0 reads as a confident "no gDNA here". The
     mass-weighted mean is blind to the difference (a zero-mass object carries zero weight), so the
-    place it shows up is the count of objects scored and the class shares, which is exactly where an
-    inflated denominator is invisible.
+    place it shows up is the count of objects scored, which is exactly where an inflated denominator is
+    invisible.
     """
     g = np.asarray(gdna_mass, np.float64)
     total = g + np.asarray(rna_mass, np.float64)
@@ -71,7 +54,7 @@ def object_fractions(gdna_mass, rna_mass) -> tuple[np.ndarray, np.ndarray]:
 
 @dataclass(frozen=True, slots=True)
 class AxisScore:
-    """One arm's error over one selection of one axis. Every field is a mass, not a rate, except
+    """One arm's error over one axis. Every field is a mass, not a rate, except
     ``mwae``, so the fields add across a partition of the objects and the rate does not."""
 
     n_scored: int  #: objects with mass, never the object count of the axis
@@ -82,15 +65,9 @@ class AxisScore:
     under_call: float  #: Σ (gDNA_true − gDNA_arm)+, gDNA missed
     mwae: float  #: mass-weighted mean |Δf_g| ≡ abs_err / mass. 0 = per-object perfect
 
-    @property
-    def cancellation(self) -> float:
-        """``Σ|err| / |net|``: how much better the library-level number looks than the per-object
-        answer, i.e. how much of an under-call is sitting next to an over-call."""
-        return self.abs_err / abs(self.net_err) if self.net_err != 0.0 else float("inf")
 
-
-def score_axis(arm_gdna, arm_rna, true_gdna, true_rna, select=None) -> AxisScore:
-    """Score one arm against T on one axis, optionally restricted to ``select``.
+def score_axis(arm_gdna, arm_rna, true_gdna, true_rna) -> AxisScore:
+    """Score one arm against T on one axis.
 
     Refuses arms and truths on different bases: ``Σ w·|Δf_g| ≡ Σ|Δ gDNA mass|`` holds only when the
     two per-object totals agree, and without that identity the mass-weighted mean is a weighted
@@ -112,8 +89,6 @@ def score_axis(arm_gdna, arm_rna, true_gdna, true_rna, select=None) -> AxisScore
         )
 
     live = np.isfinite(arm_f) & np.isfinite(true_f)
-    if select is not None:
-        live &= np.asarray(select, bool)
     d = (np.asarray(arm_gdna, np.float64) - np.asarray(true_gdna, np.float64))[live]
     mass = float(true_total[live].sum())
     abs_err = float(np.abs(d).sum())
@@ -154,69 +129,6 @@ def check_same_basis(name: str, arm, full_substrate) -> None:
             )
 
 
-def solver_slot_classes(capture, eps: float = _EPS) -> dict[str, np.ndarray]:
-    """Partition the chain's slots three ways, using ``region_init``'s own definitions.
-
-    * ``struct_lock``: composition certain, on both axes
-      (:func:`~rigel.calibration.region_geometry.g1_locked`). Neither RNA strand is admissible, so
-      there is nothing to decide and ``f_g = 1`` is the pinned init. Locked is not the same as
-      uninformed, and lumping the two reports a pure-gDNA intergenic region as a solver failure.
-    * ``message_only``: no own composition evidence at all (``tau_lam`` at zero and not locked). Its
-      gDNA/RNA split is decided entirely by neighbour messages and the population prior.
-    * ``own_evidence``: everything else, where the strand Beta-Binomial or the intron factory's
-      density deconvolution had something to say.
-
-    ``eps`` is the solver's own gate (``has_own_composition_evidence`` tests ``tau_lam > 1e-9``), so this
-    partition answers "which mechanism did the solver use here", which is what the cross-tab and
-    a dissection needs. It is deliberately not the question "should pass-0 be scored here": a
-    fitted κ that misses ½ by a rounding step leaves a τ the solver treats as evidence that can
-    resolve nothing, and that question is answered by ``solvability_audit``'s resolving-power curve
-    over ``SD_LAMBDA_DECADES``. ``eps`` exists so a gate can move it and watch the partition move;
-    production callers must not pass it.
-    """
-    tau = np.asarray(capture.tau_lam, np.float64)
-    struct_lock = g1_locked(capture.free_pos, capture.free_neg)
-    message_only = (tau <= eps) & (~struct_lock)
-    return {
-        "own_evidence": ~(struct_lock | message_only),
-        "message_only": message_only,
-        "struct_lock": struct_lock,
-    }
-
-
-def _project(slot_mask, chain, n_regions: int, n_boundaries: int) -> dict[str, np.ndarray]:
-    """Scatter a per-slot boolean onto the region and boundary axes. The chain alternates
-    REGION/BOUNDARY per reference, so every region and every contiguous boundary is exactly one slot
-    and the map is a bijection; there is nothing to pool and nothing to drop."""
-    kind = np.asarray(chain.kind)
-    obj = np.asarray(chain.obj_idx, dtype=np.int64)
-    mask = np.asarray(slot_mask, bool)
-    out = {"region": np.zeros(n_regions, bool), "boundary": np.zeros(n_boundaries, bool)}
-    out["region"][obj[kind == REGION]] = mask[kind == REGION]
-    out["boundary"][obj[kind == BOUNDARY]] = mask[kind == BOUNDARY]
-    return out
-
-
-def solver_class_masks(capture, chain, n_regions: int, n_boundaries: int) -> dict[str, dict]:
-    """:func:`solver_slot_classes`, projected onto the two scored axes."""
-    slots = solver_slot_classes(capture)
-    return {
-        axis: {name: _project(m, chain, n_regions, n_boundaries)[axis] for name, m in slots.items()}
-        for axis in AXES
-    }
-
-
-def calibrate_arm(payload, kwargs, config, *, gdna_pmf=None, rna_pmf=None, debug=None):
-    """One ``calibrate`` run. ``gdna_pmf`` / ``rna_pmf`` override the fitted length models; that, and
-    the solve depth in ``config``, are the only two things any arm varies."""
-    call = dict(kwargs)
-    if gdna_pmf is not None:
-        call["gdna_fl_pmf"] = gdna_pmf
-    if rna_pmf is not None:
-        call["rna_fl_pmf"] = rna_pmf
-    return calibrate(payload=payload, config=config, _debug=debug, **call)
-
-
 def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payload, cache_root,
                          lift=None):
     """T, from a per-origin cache when one is valid, otherwise split, scan, and populate it.
@@ -234,12 +146,6 @@ def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payloa
     # partitions are drained by replaying the whole's choices. An empty ``lift`` (no held fragments)
     # keeps the pass-one identity unchanged.
     lift = lift or {}
-    if cache_root is None:
-        return OracleTruth.from_bam(
-            bam, index, pipeline_config, Path(work_dir), tag, full_payload=full_payload,
-            drain_with=((lift["undrained"], lift["choices"], lift["region_types"], lift["sj"])
-                        if lift else None),
-        )
     scan = dataclasses.replace(pipeline_config.scan, sj_strand_tag=_native_detect_sj_tag(bam))
     dirs = {k: Path(cache_root) / tag / k for k in ORIGINS}
     try:
@@ -273,8 +179,6 @@ def ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root) -> bool
     the same reads as ``mrna`` + ``nrna``, so ``calibration_oracle.py`` gates them against each other.
     Skips the work when both caches already load. Returns True if it built them.
     """
-    if cache_root is None:
-        return False
     dirs = {k: Path(cache_root) / tag / k for k in RNA_STRAND_ORIGINS}
     try:
         for k in RNA_STRAND_ORIGINS:
@@ -288,129 +192,6 @@ def ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root) -> bool
         write_scan_cache(dirs[key], payload=payload, strand_model=strand_model, index=index,
                          bam=paths[key], scan_config=scan)
     return True
-
-
-@dataclass
-class ConditionMeasurement:
-    """Everything one condition produced, with the intermediates the gates interrogate."""
-
-    condition: str
-    payload: object
-    oracle: OracleTruth
-    truth: object  #: T, as a CalibrationResult
-    arms: dict  #: "pass0" / "final" -> CalibrationResult
-    calibrate_kwargs: dict
-    debug_pass0: dict
-    debug_final: dict
-    scores: dict  #: arm -> axis -> solver class or "ALL" -> AxisScore
-    #: The solver's classification as boolean masks per axis, kept so a downstream instrument reads
-    #: the same partition this one scored rather than recomputing its own.
-    solver_masks: dict
-    seconds: float
-
-
-def measure_condition(
-    bam: str,
-    index,
-    pipeline_config,
-    calibration_config,
-    work_dir: Path,
-    tag: str,
-    *,
-    oracle_cache=None,
-) -> ConditionMeasurement:
-    """Scan once (or read the cached scan), build T, run the two arms, and score them per object and
-    per solver class."""
-    start = time.perf_counter()
-    scan = dataclasses.replace(pipeline_config.scan, sj_strand_tag=_native_detect_sj_tag(bam))
-    # the main payload is the scan cache beside the oracle cache, ``<suite>/scan_cache/<tag>``. Keyed
-    # by the shipped loader: a refusal falls through to an in-memory rescan, never a write.
-    _sc_dir = None if oracle_cache is None else Path(oracle_cache).parent / "scan_cache" / tag
-    payload = strand_model = None
-    if _sc_dir is not None:
-        try:
-            _sc = read_scan_cache(_sc_dir, index, scan)
-            payload, strand_model = _sc.payload, _sc.strand_model
-        except (FileNotFoundError, KeyError, ScanCacheKeyError):
-            payload = strand_model = None
-    if payload is None:
-        _stats, strand_model, _buffer, payload = scan_and_buffer(bam, index, scan)
-
-    # the drained frame: every arm below and T itself describe the tally production calibrates. The
-    # drain replays at the production seed; the cache stays pass one.
-    lift: dict = {}
-    payload = _drain_side_buffer(
-        payload, index, strand_model, seed=pipeline_config.second_pass_seed, _lift=lift
-    )
-
-    # T. Sum-to-full is validated on every bank exactly and raises if it does not hold, on the cached
-    # path as well as the scanned one, so nothing below can run on an oracle that is not the
-    # production payload split by origin. In the drained frame it is also the lift's identity gate.
-    oracle = load_or_build_oracle(
-        bam, index, pipeline_config, work_dir, tag, payload, oracle_cache, lift
-    )
-
-    ra = RegionArrays.from_frame(index.regions_df, index.ref_name_to_id)
-    substrate = CalibrationSubstrate.from_payload(payload, ra)
-    from rigel.calibration.splice_graph import build_boundary_flags_array, build_sj_geometry_arrays
-    from rigel.pipeline import library_fl_models
-
-    fl = library_fl_models(payload, index)
-    kwargs = dict(
-        region_arrays=ra,
-        strand_model=strand_model,
-        gdna_fl_pmf=fl.gdna_pmf,
-        rna_fl_pmf=fl.rna_pmf,
-        sj=build_sj_geometry_arrays(index),
-        boundary_flags=build_boundary_flags_array(index),
-    )
-
-    pass0_config = replace(calibration_config, calib_refit_iters=0)
-    debug_pass0: dict = {}
-    debug_final: dict = {}
-    arms = {
-        "pass0": calibrate_arm(payload, kwargs, pass0_config, debug=debug_pass0),
-        "final": calibrate_arm(payload, kwargs, calibration_config, debug=debug_final),
-    }
-    truth = dataclasses.replace(arms["pass0"], **oracle.override_masses(ra))
-    check_same_basis("T", truth, substrate)
-    for name, arm in arms.items():
-        check_same_basis(name, arm, substrate)
-
-    # the classes come from pass-0's own run and are held fixed across every arm. ``tau_lam``
-    # depends weakly on the incoming belief, so the final solve partitions slots slightly
-    # differently, but "what evidence does this object have" is a property of the object, and a
-    # class that moves between arms cannot be used to compare them.
-    chain = debug_pass0["chain"]
-    n_regions, n_boundaries = int(payload.n_regions), int(payload.n_boundaries)
-    solver_masks = solver_class_masks(debug_pass0["capture"], chain, n_regions, n_boundaries)
-
-    def score_all(arm):
-        out = {}
-        for axis in AXES:
-            g = getattr(arm, f"count_gdna_{axis}")
-            r = getattr(arm, f"count_rna_{axis}")
-            tg = getattr(truth, f"count_gdna_{axis}")
-            tr = getattr(truth, f"count_rna_{axis}")
-            per = {"ALL": score_axis(g, r, tg, tr)}
-            for name in SOLVER_CLASSES:
-                per[name] = score_axis(g, r, tg, tr, select=solver_masks[axis][name])
-            out[axis] = per
-        return out
-
-    return ConditionMeasurement(
-        condition=tag,
-        payload=payload,
-        oracle=oracle,
-        truth=truth,
-        arms=arms,
-        calibrate_kwargs=kwargs,
-        debug_pass0=debug_pass0,
-        debug_final=debug_final,
-        scores={n: score_all(a) for n, a in arms.items()},
-        solver_masks=solver_masks,
-        seconds=time.perf_counter() - start,
-    )
 
 
 def library_f_gdna(result) -> float:

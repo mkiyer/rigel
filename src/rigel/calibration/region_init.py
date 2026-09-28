@@ -13,7 +13,7 @@ solve (`native/solve_kernel.cpp`: ``strand_evidence``, ``factor_precision_row``;
 `native.transfer_rows.strand_evidence` / `factor_precision`), and the sweep's diagnostics capture
 publishes ``tau_lam`` and the factory's part ``tau_fac`` per slot (`blocks.SweepCapture`).
 
-What lives here is what the kernel is told and what the instruments read: the protocol decision — the
+What lives here is what the kernel is told and what the gates read: the protocol decision — the
 library's one verdict on whether its strand split is a witness at all — and the ONE predicate on
 ``tau_lam``, `has_own_composition_evidence`. Structural certainty is not recorded here: the one predicate
 for a pure-gDNA object is `region_geometry.g1_locked`, which the instruments import.
@@ -52,8 +52,7 @@ def has_own_composition_evidence(tau_lam) -> np.ndarray:
     is exactly zero — not by a floor on ``τ`` but because :func:`strand_discriminability` decides the
     PROTOCOL on the spliced 2×2 and reads κ = ½ exactly there (a sampling excursion of κ̂ is not a
     protocol). The consumer's defence against a weak live channel is a FIXED-DENOMINATOR score, not a
-    tighter bound here (``solvability_audit.summarise``'s ``all_mwae`` / ``abs_err``, gated in
-    ``test_solvability_audit.py``).
+    tighter bound here (``calibration_vs_oracle.py`` scores every object with mass).
 
     The home is production, rather than each instrument restating the constant beside a comment saying
     it must match the solver, because the predicate is a production concept and ``scripts/`` is

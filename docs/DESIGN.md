@@ -108,7 +108,7 @@ carried 64.5 % of transcript error and 90 % of gene-level error, and that cell i
 can descend — the tool emits a near-zero gDNA fraction there regardless of truth (exon `f_g` 0.0016 at
 `g50` against a truth of 0.518), so it looks acceptable at low gDNA by coincidence. The algebra behind the
 blindness: the gDNA fraction cancels from the strand mean at κ = ½, so an unstranded AMBIG slot has no
-channel at all (`solvability_audit.py`).
+channel at all (`EQUATIONS.md` §5).
 
 ### The length channel is deferred until after 0.8.0
 
@@ -124,12 +124,12 @@ it cannot price a length composition channel (`TRAPS: equal-lengths-carry-no-com
 
 The metric is the calibration result scored against ORACLE calibration — not the end-to-end transcript
 number, which stays a thermometer (`SUCCESS.md` says why). The oracle is the origin-split truth, and the
-instruments that own the comparison are `calibration_vs_oracle.py`, `solvability_audit.py` and
-`prior_vs_oracle.py`. Scenarios are cached so calibration re-runs in seconds off a scan that took minutes
-(`scripts/design/build_scan_cache.py`; `scripts/sim/panel.py cache` builds the oracle cache beside the
-scan one). The pattern any future cache copies is the KEY: the scan manifest plus a content hash of every
-source file that PRODUCES what is stored, with the module under test left out — sound only while nothing
-that module produces is stored (`TRAPS: a-hash-that-misses-its-artifact`).
+instruments that own the comparison are `calibration_vs_oracle.py` and `prior_vs_oracle.py`. Scenarios are
+cached so calibration re-runs in seconds off a scan that took minutes (`scripts/design/build_scan_cache.py`;
+`scripts/sim/panel.py cache` builds the oracle cache beside the scan one). The pattern any future cache copies
+is the KEY: the scan manifest plus a content hash of every source file that PRODUCES what is stored, with the
+module under test left out — sound only while nothing that module produces is stored
+(`TRAPS: a-hash-that-misses-its-artifact`).
 
 ### Why the ladder gives gDNA and RNA equal fragment lengths
 
@@ -1583,8 +1583,9 @@ library the density model carries the entire own-evidence budget: at κ = ½ the
 (`EQUATIONS.md` §5), and the intron factory is what makes such a library solvable at all. Pass-0 scores
 honest ignorance as error, which is the wrong question: an object with no own evidence reporting
 `f_g ≈ ½` at zero precision is stating a true fact, and the measurement that matters is solvable → right /
-wrong → confidently wrong (`solvability_audit.py`). The deferred stratum is blind because the gDNA fraction
-cancels from the strand mean, so an unstranded AMBIG slot has no channel.
+wrong → confidently wrong (its z-band table retired with `solvability_audit.py`, 2026-09-28). The deferred
+stratum is blind because the gDNA fraction cancels from the strand mean, so an unstranded AMBIG slot has no
+channel.
 
 Where the error sits, and the standing numbers a mechanism is judged against, are re-derived by the instruments
 and never kept here — per stratum, never pooled: `policy_benchmark.py --by-class` (by node class; the ranking is

@@ -21,7 +21,6 @@ import numpy as np
 import pytest
 
 from rigel.config import PipelineConfig
-from rigel.pipeline import _native_detect_sj_tag, scan_and_buffer
 from _prior_toy import build_toy, build_toy_zero_gdna
 
 _MODULES: dict = {}
@@ -276,55 +275,7 @@ def test_two_sharded_runs_never_share_a_shard_directory_and_every_shard_gets_the
     assert len(dirs[0]) == len(dirs[1]) == 1 and dirs[0] != dirs[1]
 
 
-# ── GATE 5: F conserves every fragment, and the residue is named ─────────────────────────────────
-
-
-def test_the_fragment_truth_projection_LOSES_NOTHING_it_does_not_report(measured):
-    """``_project_regions_to_loci`` DROPS every region overlapping no locus — that is correct (an
-    intergenic fragment belongs to no prior) and it is also the one place F could quietly lose mass
-    and read as a smaller assembler error. So the identity ``Σ F + dropped == Σ region_start_count``
-    must hold EXACTLY on the gDNA partition, and ``dropped`` must be reported rather than absorbed.
-
-    The perturbation removes one locus from the projection and watches the residue absorb exactly
-    that locus's count — proving the identity is measuring the projection and not just restating a sum.
-    """
-    total = float(np.asarray(measured.oracle.parts["gdna"].region_start_count).sum())
-    drop = measured.f_dropped
-    assert measured.f_gdna.sum() + drop == pytest.approx(total, rel=1e-9), "gdna"
-    assert drop >= 0.0, "gdna: a NEGATIVE residue means the projection invented fragments"
-
-    short = measured.multi_loci[:-1]
-    g2, drop2 = PV.fragment_truth(measured.oracle, measured.region_arrays, short)
-    assert g2.shape[0] == len(short)
-    assert drop2 >= measured.f_dropped, (
-        "removing a locus did not increase the dropped residue — the identity is not measuring the "
-        "projection"
-    )
-
-
-def test_the_gdna_partition_carries_NO_spliced_deposit_so_F_gdna_needs_no_subtraction(measured):
-    """This is why F is EXACT on gDNA, and it is physics rather than a convention: gDNA does not
-    splice, so there is no spliced sub-population inside ``region_start_count`` for the gdna
-    partition to withhold.
-
-    The perturbation writes a single spliced deposit into the gdna partition and asserts
-    ``OracleTruth`` refuses the whole oracle — because if it did not, F_gdna would silently become a
-    bound and the instrument's strongest claim would be false.
-    """
-    from _oracle import OracleTruth
-
-    g = measured.oracle.parts["gdna"]
-    assert int(np.asarray(g.boundary_spliced_count).sum()) == 0
-    assert int(np.asarray(g.sj_count).sum()) == 0
-
-    poisoned = np.array(g.boundary_spliced_count, copy=True)
-    poisoned[0, 0] += 1
-    fake = dataclasses.replace(g, boundary_spliced_count=poisoned)
-    with pytest.raises(AssertionError, match="boundary_spliced_count"):
-        OracleTruth.from_parts(measured.oracle.full, {**measured.oracle.parts, "gdna": fake})
-
-
-# ── GATE 6: the ZERO-gDNA control ────────────────────────────────────────────────────────────────
+# ── GATE 5: the ZERO-gDNA control ────────────────────────────────────────────────────────────────
 
 
 def test_at_zero_gDNA_the_ORACLE_prior_is_identically_zero_and_the_shipped_one_is_scored_against_it(
@@ -364,7 +315,7 @@ def test_at_zero_gDNA_the_ORACLE_prior_is_identically_zero_and_the_shipped_one_i
     )
 
 
-# ── GATE 7: a capture that never happened is an error, not a zero ────────────────────────────────
+# ── GATE 6: a capture that never happened is an error, not a zero ────────────────────────────────
 
 
 def test_a_run_that_never_reaches_assemble_priors_RAISES(measured, monkeypatch):
@@ -377,7 +328,7 @@ def test_a_run_that_never_reaches_assemble_priors_RAISES(measured, monkeypatch):
         PV.capture_priors(None, None, None, None, None, None, None, PipelineConfig())
 
 
-# ── GATE 8: the aggregate re-derives its rates, never averages them ──────────────────────────────
+# ── GATE 7: the aggregate re-derives its rates, never averages them ──────────────────────────────
 
 
 def test_the_stratum_aggregate_is_a_RATIO_OF_SUMS_not_a_mean_of_ratios():
@@ -416,7 +367,7 @@ def test_the_stratum_aggregate_is_a_RATIO_OF_SUMS_not_a_mean_of_ratios():
     assert agg.over_call == pytest.approx(100_000.0) and agg.under_call == pytest.approx(900.0)
 
 
-# ── GATE 9: the directional split is reported and reconciles ─────────────────────────────────────
+# ── GATE 8: the directional split is reported and reconciles ─────────────────────────────────────
 
 
 def test_over_and_under_call_are_reported_separately_and_reconcile(measured):
@@ -430,337 +381,6 @@ def test_over_and_under_call_are_reported_separately_and_reconcile(measured):
     assert s.over_call - s.under_call == pytest.approx(s.net_err, rel=1e-9, abs=1e-6)
     assert s.over_call + s.under_call == pytest.approx(s.abs_err, rel=1e-9, abs=1e-6)
     assert s.over_call >= 0.0 and s.under_call >= 0.0
-
-
-# ── GATE 10: the frag_id join ALIGNS, and a one-fragment slip is loud ────────────────────────────
-
-
-def test_the_frag_id_join_is_gated_by_a_COUNT_IDENTITY_and_it_REFUSES_a_walk_that_slipped(toy):
-    """The Fo arm's one silent failure mode, and why the gate is arithmetic. ``frag_origin`` is
-    indexed by the scanner's ``frag_id``; the walk re-derives that counter from the BAM. Slip by a
-    single fragment and every unit still gets a *plausible* origin label, every total still looks like
-    a count, and nothing is out of range to raise on.
-
-    The gate is therefore an identity against the scanner's own counters, not a smell test:
-    ``stats.total`` is every record it read and ``stats.n_read_names`` is incremented once per qname
-    group inside its worker, so it IS the number of ``frag_id``\\ s issued. Two monotone counters over
-    one file that agree on both totals cannot have disagreed in the middle.
-
-    Perturbed in three directions — one record too many, one group too many, one group too few — and
-    the un-perturbed identity is asserted too, so a guard that refused everything would not pass.
-    """
-    from _oracle import check_walk_alignment, frag_id_origins
-
-    cfg = PipelineConfig()
-    stats, _sm, _buf, _payload = scan_and_buffer(
-        str(toy.bam_path),
-        toy.index,
-        dataclasses.replace(cfg.scan, sj_strand_tag=_native_detect_sj_tag(str(toy.bam_path))),
-    )
-    walk, diag = frag_id_origins(str(toy.bam_path), cfg.scan)
-    check_walk_alignment(diag, stats)
-    assert diag["n_groups"] == int(stats.n_read_names) > 0
-    assert walk.shape[0] == diag["n_groups"]
-
-    for field, delta in (("n_records", 1), ("n_groups", 1), ("n_groups", -1)):
-        with pytest.raises(RuntimeError, match="does NOT reproduce"):
-            check_walk_alignment({**diag, field: diag[field] + delta}, stats)
-
-
-def test_the_SPLICED_gDNA_diagnostic_fires_on_a_BLOCK_SIZED_slip_and_is_blind_to_a_SMALL_one(
-    measured,
-):
-    """The join's secondary diagnostic: gDNA does not splice, so a spliced unit labelled ``gdna`` is
-    impossible physics and its count reads out a gross misalignment.
-
-    Its sensitivity is measured here rather than assumed. The simulator writes each population as a
-    contiguous block, so BAM order has only a handful of origin transitions and a one-fragment roll
-    mislabels only the fragments sitting on those few boundaries — none of them necessarily spliced.
-    So this test pins both halves: a roll of one is invisible, a roll across a block is loud. That
-    is why the hard gate is the count identity and not this.
-    """
-    d = measured.overlap.diag
-    assert d["spliced_gdna_units"] == 0, (
-        "a spliced unit is labelled gdna on an UNPERTURBED run — the join is already misaligned"
-    )
-    assert d["spliced_rna_units"] > 0, (
-        "no spliced units at all: the detector has nothing to detect with and this gate is inert"
-    )
-    assert d["walk"]["n_transitions"] < d["walk"]["n_groups"] // 100, (
-        "the origins are INTERLEAVED on this substrate, not blocked — then a one-fragment roll would "
-        "be visible and the reasoning below no longer describes the panel"
-    )
-
-    def rolled(shift):
-        return PV.overlap_truth(
-            measured.multi_loci,
-            PV.unit_origins(measured.units["frag_ids"], np.roll(measured.frag_origin, shift)),
-            measured.units["is_spliced"],
-            measured.units["n_units"],
-            d["walk"],
-        ).diag["spliced_gdna_units"]
-
-    assert rolled(1) == 0, (
-        "a one-fragment roll DID show up — good news for the diagnostic, but then the blocked-origin "
-        "reasoning in this docstring is wrong and must be rewritten, not widened"
-    )
-    half = d["walk"]["n_groups"] // 2
-    assert rolled(half) > 0, (
-        "rolling every origin label across a population block did not put gDNA on a single spliced "
-        "unit — the diagnostic cannot see even a gross slip and is worth nothing"
-    )
-
-
-# ── GATE 11: a filtered record does NOT advance frag_id, and the config decides which ─────────────
-
-
-def _rewrite_bam(src: Path, dst: Path, *, insert_after: int, flag: int):
-    """``src`` with ONE synthetic record inserted after group ``insert_after``, carrying ``flag``.
-
-    A fresh, PARSEABLE qname, so the only difference between counting it and skipping it is the
-    off-by-one — not a crash in ``parse_origin`` that would pass the test for the wrong reason.
-    """
-    import pysam
-
-    with pysam.AlignmentFile(str(src), "rb") as fin:
-        recs = list(fin)
-        header = fin.header
-    groups, seen = [], None
-    for r in recs:
-        if r.query_name != seen:
-            seen = r.query_name
-            groups.append([])
-        groups[-1].append(r)
-    ghost = recs[0].__copy__()
-    ghost.query_name = "gdna:ref0:1000-1100:+:987654"
-    ghost.flag = recs[0].flag | flag
-    out = []
-    for i, g in enumerate(groups):
-        out += g
-        if i == insert_after:
-            out.append(ghost)
-    with pysam.AlignmentFile(str(dst), "wb", header=header) as fo:
-        for r in out:
-            fo.write(r)
-    return len(groups)
-
-
-def test_a_FILTERED_record_does_not_advance_frag_id_and_skip_duplicates_decides_which_are(
-    toy, tmp_path
-):
-    """The scanner rejects QC-fail / unmapped / duplicate records in pass 1 before it stamps a
-    ``frag_id``, so a walk that counted them would shift every later fragment's label. And *which*
-    records are rejected is a CONFIG question — ``skip_duplicates`` — which is why
-    ``frag_id_origins`` takes the scan config rather than assuming.
-
-    Three arms over the same poisoned BAM: a QC-fail ghost (always filtered, mapping unchanged), the
-    same ghost as a duplicate under ``skip_duplicates=True`` (filtered, unchanged), and under
-    ``skip_duplicates=False`` (counted, and every later label shifts). The third arm is the
-    perturbation: it proves the config argument is load-bearing and not decoration.
-    """
-    from _oracle import frag_id_origins
-
-    scan = PipelineConfig().scan
-    base, _ = frag_id_origins(str(toy.bam_path), scan)
-
-    qcfail = tmp_path / "qcfail.bam"
-    _rewrite_bam(Path(toy.bam_path), qcfail, insert_after=3, flag=0x200)
-    got, diag = frag_id_origins(str(qcfail), scan)
-    assert np.array_equal(got, base), "a QC-fail record advanced frag_id"
-    assert diag["n_filtered"] == 1 and diag["n_groups"] == base.shape[0]
-
-    dup = tmp_path / "dup.bam"
-    _rewrite_bam(Path(toy.bam_path), dup, insert_after=3, flag=0x400)
-    kept, _ = frag_id_origins(str(dup), dataclasses.replace(scan, skip_duplicates=True))
-    assert np.array_equal(kept, base), "a duplicate advanced frag_id under skip_duplicates=True"
-
-    counted, diag_c = frag_id_origins(str(dup), dataclasses.replace(scan, skip_duplicates=False))
-    assert diag_c["n_filtered"] == 0
-    assert counted.shape[0] == base.shape[0] + 1, (
-        "skip_duplicates=False did not count the duplicate — the config argument is inert, and a walk "
-        "that ignores it can disagree with the scan it is joined to"
-    )
-    assert not np.array_equal(counted[:5], base[:5]) or not np.array_equal(
-        counted[4:], base[3:-1]
-    ), "the extra group did not shift any label, so this BAM cannot detect a miscount"
-
-
-def test_an_UNPAIRED_record_makes_the_walk_REFUSE_rather_than_count_it(toy, tmp_path):
-    """The production scanner throws on an unpaired read, so a walk that tolerated one would be
-    counting groups no scan ever made. The perturbation clears the PAIRED bit on one record."""
-    from _oracle import frag_id_origins
-
-    single = tmp_path / "single.bam"
-    _rewrite_bam(Path(toy.bam_path), single, insert_after=3, flag=0)
-    import pysam
-
-    with pysam.AlignmentFile(str(single), "rb") as fin:
-        recs, header = list(fin), fin.header
-    recs[0].flag = recs[0].flag & ~0x1
-    with pysam.AlignmentFile(str(single), "wb", header=header) as fo:
-        for r in recs:
-            fo.write(r)
-    with pytest.raises(AssertionError, match="unpaired"):
-        frag_id_origins(str(single), PipelineConfig().scan)
-
-
-# ── GATE 12: every unit is counted ONCE and the residue is named ──────────────────────────────────
-
-
-def test_Fo_counts_every_unit_ONCE_and_the_non_candidate_residue_RECONCILES(measured):
-    """``Fo`` is a per-locus fragment COUNT, so the two ways to get it wrong are to count a unit
-    twice (a unit claimed by two loci) and to lose one silently (a unit claimed by none). Both are
-    checkable against totals the arm does not compute:
-
-        Σ Fo[gdna] + Σ Fo[rna] + orphan_units == n_units          nothing double-counted, nothing lost
-        Σ Fo[origin] + nonunit_fragments[origin] == the library's own total for that origin
-
-    The perturbation drops one locus and watches BOTH residues absorb exactly its units — an
-    identity that merely restated a sum could not do that.
-    """
-    d = measured.overlap.diag
-    total = measured.overlap.gdna.sum() + measured.overlap.rna_all.sum()
-    assert total + d["orphan_units"] == d["n_units"]
-    for origin, arm in (("gdna", measured.overlap.gdna), ("rna", measured.overlap.rna_all)):
-        lib = (
-            d["walk"]["totals"]["gdna"]
-            if origin == "gdna"
-            else d["walk"]["totals"]["mrna"] + d["walk"]["totals"]["nrna"]
-        )
-        assert arm.sum() + d["nonunit_fragments"][origin] == pytest.approx(lib, rel=1e-12)
-        assert d["nonunit_fragments"][origin] >= 0.0, (
-            f"{origin}: more units than fragments — a unit is being counted twice"
-        )
-
-    dropped = measured.multi_loci[-1]
-    short = PV.overlap_truth(
-        measured.multi_loci[:-1],
-        PV.unit_origins(measured.units["frag_ids"], measured.frag_origin),
-        measured.units["is_spliced"],
-        measured.units["n_units"],
-        d["walk"],
-    )
-    lost = len(dropped.unit_indices)
-    assert lost > 0, "the dropped locus had no units, so this perturbation tests nothing"
-    assert short.diag["orphan_units"] == d["orphan_units"] + lost
-    assert (short.gdna.sum() + short.rna_all.sum()) == total - lost
-
-
-# ── GATE 13: the splice bit reaches the join's DIAGNOSTIC and never Fo ───────────────────────────
-
-
-def test_the_splice_bit_moves_the_join_DIAGNOSTIC_and_never_Fo(measured):
-    """``gdna_count``'s target needs no splice bit: a spliced unit cannot be gDNA and gDNA cannot
-    splice, so ``Fo.gdna`` withholds nothing, and ``rna_all`` is every RNA unit by definition. The
-    bit's one consumer is the join's secondary diagnostic (``spliced_gdna_units``). An Fo that read it
-    would be withholding units from the target — the retired unspliced-RNA target's rule, surviving
-    where it has no business.
-
-    The perturbation replaces ``is_spliced`` with all-False and then all-True: both Fo arrays must come
-    back byte-identical each time, and the diagnostic must move both ways — to zero, and to every
-    unit of each origin — so the bit is shown to be READ by the diagnostic and not merely a dead
-    argument that Fo ignores.
-    """
-    o = measured.overlap
-    origin = PV.unit_origins(measured.units["frag_ids"], measured.frag_origin)
-    n = measured.units["n_units"]
-    none_spliced = PV.overlap_truth(
-        measured.multi_loci, origin, np.zeros(n, bool), n, o.diag["walk"]
-    )
-    all_spliced = PV.overlap_truth(measured.multi_loci, origin, np.ones(n, bool), n, o.diag["walk"])
-    for got in (none_spliced, all_spliced):
-        assert np.array_equal(got.gdna, o.gdna), "the splice bit moved Fo's gDNA target"
-        assert np.array_equal(got.rna_all, o.rna_all), (
-            "the splice bit moved the ALL-RNA array — it must not touch it"
-        )
-    assert none_spliced.diag["spliced_rna_units"] == 0
-    assert none_spliced.diag["spliced_gdna_units"] == 0
-    is_gdna = origin == PV.ORIGIN_CODE["gdna"]
-    assert all_spliced.diag["spliced_gdna_units"] == int(is_gdna.sum()) > 0
-    assert all_spliced.diag["spliced_rna_units"] == int((~is_gdna).sum()) > 0
-
-
-# ── GATE 14: the join ABORTS on a frag_id the walk never issued ──────────────────────────────────
-
-
-def test_a_unit_frag_id_the_WALK_NEVER_ISSUED_aborts_instead_of_indexing(measured):
-    """``frag_origin`` is indexed by ``frag_id``. A walk of the wrong BAM, or one that grouped
-    differently, yields an array of the wrong length — and numpy would wrap a negative index silently
-    and raise a bare ``IndexError`` for a large one, neither of which says "the join is broken".
-
-    Falsified in both directions, and the in-range case is asserted too: a guard that rejected
-    everything would also pass the two raises.
-    """
-    origins = np.asarray([2, 0, 1], np.int8)
-    assert PV.unit_origins(np.asarray([0, 2]), origins).tolist() == [2, 1]
-    with pytest.raises(RuntimeError, match="frag_id"):
-        PV.unit_origins(np.asarray([0, 3]), origins)
-    with pytest.raises(RuntimeError, match="frag_id"):
-        PV.unit_origins(np.asarray([-1, 0]), origins)
-    # and the real arrays are in range, so the guard is not the reason the arm looks healthy
-    PV.unit_origins(measured.units["frag_ids"], measured.frag_origin)
-
-
-# ── GATE 15: Fo follows the SHIPPED unit→locus map, and the prior does NOT ───────────────────────
-
-
-def test_Fo_is_keyed_by_the_SHIPPED_unit_indices_and_a_SWAP_moves_the_counts(measured):
-    """``MultiLocus.unit_indices`` is the array ``locus_partition`` scatters by, so it — and not any
-    genomic-overlap rule invented here — decides which locus's prior a fragment's evidence lands in.
-    The perturbation swaps two loci's unit sets and demands the counts swap with them. A tally
-    driven by geometry instead would not move.
-    """
-    ml = measured.multi_loci
-    order = np.argsort([-len(m.unit_indices) for m in ml])
-    a, b = int(order[0]), int(order[1])
-    assert len(ml[a].unit_indices) and len(ml[b].unit_indices)
-    swapped = list(ml)
-    swapped[a] = dataclasses.replace(ml[a], unit_indices=ml[b].unit_indices)
-    swapped[b] = dataclasses.replace(ml[b], unit_indices=ml[a].unit_indices)
-    got = PV.overlap_truth(
-        swapped,
-        PV.unit_origins(measured.units["frag_ids"], measured.frag_origin),
-        measured.units["is_spliced"],
-        measured.units["n_units"],
-        measured.overlap.diag["walk"],
-    )
-    assert got.gdna[a] == measured.overlap.gdna[b]
-    assert got.gdna[b] == measured.overlap.gdna[a]
-    assert got.gdna[a] != got.gdna[b], "the two loci carry equal counts, so a swap proves nothing"
-
-
-def test_assemble_priors_is_BLIND_to_unit_indices_so_Fo_is_not_circular(measured):
-    """``Fo`` is built from ``unit_indices`` and scored against a prior built by
-    ``assemble_priors``. If that function read a unit count, "the assembler reproduces the EM's own
-    count" would be a tautology rather than a result.
-
-    Behavioural, not a source grep: every locus's ``unit_indices`` is emptied and the two prior
-    arrays must come back byte-identical. And the same perturbation is shown to move ``Fo`` to
-    nothing, so the invariance is the assembler's and not the perturbation's failure to bite.
-    """
-    from rigel.calibration.priors import assemble_priors
-
-    blinded = [
-        dataclasses.replace(m, unit_indices=np.zeros(0, dtype=m.unit_indices.dtype))
-        for m in measured.multi_loci
-    ]
-    ref = assemble_priors(measured.calibration, measured.region_arrays, measured.multi_loci)
-    got = assemble_priors(measured.calibration, measured.region_arrays, blinded)
-    for field in PV.PRIOR_FIELDS:
-        assert np.array_equal(getattr(got, field), getattr(ref, field)), (
-            f"{field} moved when unit_indices was emptied — assemble_priors READS the unit count and "
-            "the Fo comparison is circular"
-        )
-    empty = PV.overlap_truth(
-        blinded,
-        PV.unit_origins(measured.units["frag_ids"], measured.frag_origin),
-        measured.units["is_spliced"],
-        measured.units["n_units"],
-        measured.overlap.diag["walk"],
-    )
-    assert empty.gdna.sum() == 0.0 and empty.diag["orphan_units"] == measured.units["n_units"], (
-        "emptying unit_indices did not move Fo either — the perturbation does not bite"
-    )
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────────────────────────

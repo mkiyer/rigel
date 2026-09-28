@@ -57,7 +57,6 @@ calibration mechanism on the transcript table stays REFUSED for the reason above
 |---|---|---|---|
 | **primary** | the `CalibrationResult` itself: the six deconvolved arrays | `O`, the same result with only the deconvolved arrays replaced by the origin-split truth (at capture-OFF it carries no enriched mode and is the no-enrichment null) | `calibration_vs_oracle.py`. `O` keeps `P`'s efficiencies, so it cannot see the capture-contracted length: read `ruler_vs_truth.py` beside every capture-ON arm |
 | **primary, the prior** | what calibration hands the EM's prior — `gdna_count`, `gdna_eff_len` per multi-locus (the EM forms the pseudocounts from `gdna_count` and its own fragment count) | `O`, the same assembler fed the origin-split truth masses | `prior_vs_oracle.py` (`P − O`, the count; `gdna_eff_len`'s truth is `ruler_vs_truth.py`) |
-| **primary, per object** | each region's and boundary's own `f_g`, and whether it is confidently wrong | the oracle payload: the production accumulator run on the BAM split by true origin | `solvability_audit.py` |
 | **primary, one number** | the library `f_gdna` | the simulator's per-fragment truth | `calibration_vs_oracle.py` — each row's `pools` block, `P_gdna` against `true_gdna` |
 | **controls** | zero gDNA, where truth is a constant | 0.000 exactly | the `g00` rung of the ladder, read per condition by `calibration_vs_oracle.py` and `quant_accuracy.py` |
 | **the deliverable** | the transcript table a user reads | `truth_abundances.tsv` | `quant_accuracy.py --arm base` |
@@ -65,7 +64,7 @@ calibration mechanism on the transcript table stays REFUSED for the reason above
 Why `P − O` and not the transcript number: attribution. `O` is calibration done perfectly with the
 shipped assembler, so `P − O` is calibration's own error and nothing else; the transcript number adds
 the assembler, the effective-length model, the EM's ambiguity and the annotation. `prior_vs_oracle.py`
-reports `O − Fo` (the assembler's error) beside it, because they are different repairs in different files.
+reports `O − S` (the assembler's pooled crossing share) beside it, because they are different repairs in different files.
 Steer a CALIBRATION change by `P − O`, not by the transcript table: most of the stranded × capture-OFF
 misassignment is ordinary isoform ambiguity, and a calibration change that improves `P − O` and leaves the
 transcript table flat has done its job. The transcript table is what the RELEASE ships on, and it steers the
@@ -139,47 +138,18 @@ and the differences between them are the whole diagnostic:
 |---|---|---|
 | **T** | the truth: each object's real gDNA/RNA split | — |
 | **C** | a ceiling: the best answer reachable under stated conditions | `T − C` is information the accumulator destroyed → Stage A work |
-| **P** | what pass-0 actually produces | `C − P` is the solver gap → the 0.8.0 work |
+| **P** | what calibration actually produces (`calibration_vs_oracle.py`'s `P`) | `C − P` is the solver gap → the 0.8.0 work |
 
 The decomposition is a measurement, not a build — the per-object form of the ceiling discipline
 (`TRAPS: measure-the-ceiling-first`) — and it is subject to the ruler caveat above.
 
-### How pass-0 is scored
-
-Pass-0's job is not accuracy but to produce a substrate the gDNA hyperprior can be fitted against. An
-object with no own evidence reporting `f_g ≈ ½` at zero precision is correct, so scoring every object
-that carries mass counts honest ignorance as error. The measurement is a partition
-(`scripts/design/solvability_audit.py`):
-
-1. **Undetermined** — no own evidence; excluded from the error denominator. Its only failure mode is
-   claiming a precision it has not earned, and that check must exist or the exclusion hides the largest
-   error in the library (`TRAPS: excluding-a-population-hides-it`): `undetermined_overreach_rows`
-   buckets the class by `|f_pred − ½|`; the correct answer for the class is ½ at `sd = ∞`.
-2. **Solvable and right.**
-3. **Solvable and wrong**, split by confidence. Confidently wrong is the defect — a wrong value with a
-   tight variance outvotes correct neighbours and anchors the prior, so it propagates. The comparison is
-   in log space (`var_gdna` is `Var(log f_g)`, `TRAPS: log-variance-is-not-linear`), and the headline is
-   a calibration curve, which needs no threshold.
-
-"No own evidence" is not a binary: the strand arm's information `I(f_g) ∝ (2κ−1)²` is exactly zero only
-at κ = ½ while κ is fitted, so a threshold on `tau_lam` promotes objects to "solvable" whose own
-statement has an `sd(λ)` of thousands of nats (`TRAPS: a-threshold-on-a-fitted-residue`). Strength is
-therefore reported as a curve over `sd(λ) = 1/√τ` decades, and the panel table carries `weak%`, the
-share of scored error above 10 nats; a better threshold was refuted, τ being continuous across the
-region. Read `weak%` before `mwae`: a row near 100 is reporting the messages and the reference, not a
-solve. `locked` is the structurally pure-gDNA class on both axes (`region_geometry.g1_locked`), never
-`~solvable & is_region` (`TRAPS: two-masks-one-name`).
-
 ### The oracle arms — `scripts/design/_oracle_arms.py`
 
-One condition scanned, split by true origin into T, calibrated at pass-0 and in full, and scored per object
-and per solver class (`own_evidence` / `message_only` / `struct_lock`, from
-`region_init.has_own_composition_evidence` and `region_geometry.g1_locked`, exhaustive and gated). A helper,
-not an instrument: `solvability_audit.py` and `calibration_vs_oracle.py` read it, and
-`calibration_oracle.py --build` uses its cache builder, which is why `panel.py cache` runs that. Every arm, T
-included, is in the DRAINED frame: draining three origin partitions separately is not the same operation as
-draining the whole, so the partitions are lifted by replaying the whole's choices (`lift_drain_parts`) and
-the sum-to-full identity is asserted on the drained frame (gates: `tests/calibration/test_oracle_arms.py`).
+A helper, not an instrument: the oracle cache builder `calibration_oracle.py --build` uses (which is why
+`panel.py cache` runs that) and the per-object scorer `calibration_vs_oracle.py` reads. T is in the DRAINED
+frame: draining three origin partitions separately is not the same operation as draining the whole, so the
+partitions are lifted by replaying the whole's choices (`lift_drain_parts`) and the sum-to-full identity is
+asserted on the drained frame (gates: `tests/calibration/test_oracle_arms.py`).
 
 ---
 
@@ -189,8 +159,7 @@ Each row names the quantity that is the bar, on which strata, against what truth
 on each is an owner call and is not invented here.
 
 1. **`P − O` is small on all three in-scope strata**, and the residual is attributed — to the assembler
-   (`O − Fo`), to the composition, or to a class with no evidence of its own. It is not done while the
-   residual sits on objects with own evidence (`solvability_audit.py` re-derives the share).
+   (`prior_vs_oracle.py`'s `O − S`), to the composition, or to a node class (`policy_benchmark.py --by-class`).
 2. **The zero controls read zero**: the `g00` rung of the ladder, on every instrument that reads it.
    An in-scope stratum can read healthy on every contaminated row and still claim gDNA in a library
    containing none; only a zero control finds that.
@@ -218,7 +187,7 @@ their trajectory is visible, and neither is the steering wheel: the library figu
 solver and unidentifiability into one number, and the transcript figure adds the EM and the annotation.
 Score the contaminated conditions — zero-gDNA rows are saturated at truth = 0, so anything that lowers
 the estimate "improves" them (`TRAPS: zero-target-guards-are-one-sided`); they are controls, never
-targets. Quote the shipped column, not pass-0, and never a pooled total
+targets. Quote the shipped result, and never a pooled total
 (`TRAPS: the-intermediate-is-not-the-deliverable`).
 
 ---
@@ -247,16 +216,13 @@ python scripts/sim/panel.py cache    --config $CFG --jobs 8
 
 # 2. THE PRIMARY METRIC — CALIBRATION AGAINST ORACLE CALIBRATION.
 #    (a) the calibration result, P vs O, per stratum        ~5-12 s/condition, no EM
-#        It cannot see the capture-contracted length: read (d) beside every capture-ON arm.
+#        It cannot see the capture-contracted length: read (c) beside every capture-ON arm.
 python scripts/design/calibration_vs_oracle.py --suite $LADDER --index $INDEX \
        --oracle-cache $LADDER/oracle_cache
-#    (b) the PRIOR the EM actually reads, P vs O, per stratum   ~50 s/condition with the cache warm
+#    (b) the PRIOR the EM actually reads, P vs O, per stratum   ~40 s/condition with the cache warm
 python scripts/design/prior_vs_oracle.py --suite $LADDER --index $INDEX \
        --oracle-cache $LADDER/oracle_cache --jobs 6
-#    (c) per OBJECT: solvable, solved wrong, and CONFIDENTLY wrong.  Read `weak%` before `mwae`.
-python scripts/design/solvability_audit.py --suite $LADDER --index $INDEX \
-       --oracle-cache $LADDER/oracle_cache
-#    (d) the CAPTURE-CONTRACTED LENGTH the EM divides by, against the simulator's own yield, no EM: every
+#    (c) the CAPTURE-CONTRACTED LENGTH the EM divides by, against the simulator's own yield, no EM: every
 #        component's class mean on one scale AND the within-gene spread — read both.
 for C in gdna_g05_ss_0.99_nrna_mid_capture_on gdna_g50_ss_0.99_nrna_mid_capture_on; do
   python scripts/design/ruler_vs_truth.py --panel ladder --condition $C --scale
@@ -275,6 +241,6 @@ python -m pytest tests/native tests/calibration -q     # FIDELITY
 
 Steps 0 and 2(a)–(c) take about 15 minutes on a built panel. Run the set together and record it
 together (`TRAPS: re-record-the-baseline`). When dissecting rather than scoring: run the panel → take
-the worst **in-scope** scenario → dissect it to the highest-error object (`solvability_audit.py`) → find the
+the worst **in-scope** scenario → dissect it to the highest-error node class (`policy_benchmark.py --by-class`) → find the
 cause → fix → repeat. The worst scenario overall is the deferred stratum, and picking it is how the
 ranking gets quietly re-inverted.

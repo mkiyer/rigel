@@ -581,12 +581,11 @@ def _solve(s: _Solve, _debug):
     E-step's start for the next. Every sweep runs the whole message layer: the messages never read the
     prior, so on one grid a refit's messages equal the previous refit's.
 
-    Returns ``(belief, belief_pass0, hyperprior)`` — the final belief, the prior-free one, and the last
-    fitted landscape (``None`` if no refit ran). With ``_debug`` the last sweep fills
-    ``_debug["capture"]`` (a :class:`~.blocks.SweepCapture`)."""
+    Returns ``(belief, hyperprior)`` — the final belief and the last fitted landscape (``None`` if no
+    refit ran). With ``_debug`` the last sweep fills ``_debug["capture"]`` (a
+    :class:`~.blocks.SweepCapture`)."""
     capture = SweepCapture() if _debug is not None else None
     belief = _sweep(s, _init_belief(s), None, capture=capture)
-    belief_pass0 = belief
     hyperprior: DensityLandscape | None = None
     for it in range(int(s.config.calib_refit_iters)):
         hyperprior = _fit_gdna_hyperprior(
@@ -610,7 +609,7 @@ def _solve(s: _Solve, _debug):
         )
     if _debug is not None:
         _debug["capture"] = capture
-    return belief, belief_pass0, hyperprior
+    return belief, hyperprior
 
 
 def _result(
@@ -817,7 +816,7 @@ def calibrate(
         mass_global,
         eff_global,
     )
-    belief, belief_pass0, gdna_hyperprior = _solve(solve, _debug)
+    belief, gdna_hyperprior = _solve(solve, _debug)
     # THE RULER'S REFERENCE: the fully-captured gDNA level is the located enriched mode of the fitted
     # landscape, or nothing — capture-OFF and gDNA-free libraries carry no enriched mode and contract
     # nothing. One definition, read by `capture_eff_length` and `priors`.
@@ -860,7 +859,6 @@ def calibrate(
         _debug.update(
             chain=chain,
             belief=belief,  # the FINAL belief (refit if calib_refit_iters>0, else the initial solve)
-            belief_pass0=belief_pass0,  # the prior-free solve (the refit before/after frame)
             geometry=geometry,
             statics=statics,
             substrate=substrate,

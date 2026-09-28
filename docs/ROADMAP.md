@@ -11,7 +11,7 @@ is judged is `SUCCESS.md`; rulings are `DESIGN.md`; lessons are `TRAPS.md`, cite
 The version on disk is `pyproject.toml`'s; the target is 0.8.0, A RELEASE OF THE TOOL (`DESIGN.md` §0b). Two numbers
 are primary and answer different questions: the transcript table against per-transcript truth is what the release
 ships on (`quant_accuracy.py`, per stratum, under fractional assignment), and the calibration result against an
-oracle calibration is what ranks a calibration mechanism (`calibration_vs_oracle.py`, `solvability_audit.py`,
+oracle calibration is what ranks a calibration mechanism (`calibration_vs_oracle.py`,
 `prior_vs_oracle.py`, with `ruler_vs_truth.py` beside every capture-ON arm, since the oracle calibration cannot see the
 capture-contracted length move). An A/B pair runs with the scan pinned (`--set scan.total_threads=1`), so it is exactly
 reproducible, and an effect is judged by its size, with genes and pools read beside the transcript table
@@ -37,7 +37,7 @@ sparse libraries lose their gDNA.
 - **Stage A (the accumulator)**: done; the fragment ledger closes exactly — `calibration_oracle.py`; one open deposit
   defect, the leading intron (`ISSUES: latent-defects`).
 - **Library gDNA fraction**: calibration's is accurate on the ladder's three in-scope strata at full depth and
-  structurally blind on the deferred one — `solvability_audit.py`, `policy_benchmark.py --by-class`; it falls with
+  structurally blind on the deferred one — `policy_benchmark.py --by-class`; it falls with
   depth on sparse libraries (the landscape line below) and over-calls at low gDNA under capture
   (`ISSUES: capture-on-overcalls-gdna-at-low-gdna`); the EM's pseudocounts are neutral in their odds, and at `g98`
   the transcript table leans toward RNA through calibration's RNA floor and the capture likelihood —
@@ -72,9 +72,10 @@ sparse libraries lose their gDNA.
   integrated on derived nodes (`EQUATIONS.md` §9e–§9f); the λ bracket follows the landscape prior's demand; where the
   protocol calls the strand channel dead ψ still reads κ̂ — `policy_benchmark.py --by-class` (unstranded rows),
   `ISSUES: psi-reads-kappa-where-the-strand-channel-is-dead`.
-- **The prior assembler**: with perfect masses its own error is negligible — `prior_vs_oracle.py`; a perfect
-  `LocusPriors` is worth little in scope — `quant_accuracy.py --arm oracle`; the per-transcript lane the EM never
-  receives is worth far more — `quant_accuracy.py --arm oracle_alloc_seed`, `ISSUES: per-transcript-prior-lane`.
+- **The prior assembler**: with perfect masses its one measured error is the pooled crossing share — `prior_vs_oracle.py`
+  (`O − S`, `ISSUES: the-pooled-q-in-the-gdna-count`); a perfect `LocusPriors` is worth little in scope —
+  `quant_accuracy.py --arm oracle`; the per-transcript lane the EM never receives is worth far more —
+  `quant_accuracy.py --arm oracle_alloc_seed`, `ISSUES: per-transcript-prior-lane`.
 - **The capture-contracted length**: one shared rule for every EM component — each object's conserved share at
   that object's own capture efficiency, read against the landscape's located enriched mode, a junction priced
   from its neighbours by conservation of bases (`DESIGN.md` §7.2, `EQUATIONS.md` §11); the classes sit near one
@@ -95,8 +96,8 @@ sparse libraries lose their gDNA.
   not built (`ISSUES: strand-overdispersion-one-shared-value`); the fl-gap side panels are to be re-simulated and the
   junction-probed twin retired — `panel.py status`, `ISSUES: flgap-panels-stale-nascent-model`,
   `ISSUES: expand-the-gdna-spectrum`.
-- **Reading rules**: rank per stratum, never pooled (`TRAPS: never-pool-the-strata`); quote `mwae_all` / Σ|err| and
-  the shipped column, never pass-0 (`TRAPS: the-intermediate-is-not-the-deliverable`).
+- **Reading rules**: rank per stratum, never pooled (`TRAPS: never-pool-the-strata`); quote `mwae` / Σ|err| over every
+  object with mass (`calibration_vs_oracle.py`), never an intermediate (`TRAPS: the-intermediate-is-not-the-deliverable`).
 
 ## Next — the order
 

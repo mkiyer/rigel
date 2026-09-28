@@ -13,8 +13,7 @@ def _scenario(name: str, seed: int, work_dir) -> Scenario:
 
     The stagger is load-bearing for the ``boundary_spliced`` bank (a contiguous crossing by a molecule
     that spliced elsewhere can only land where a region_bound falls inside another transcript's exon), and the
-    short region is what gives the toy genuinely EMPTY objects — the population the NaN-not-zero gate is
-    about. Both are the same structures ``test_oracle_arms`` relies on, for the same reasons.
+    short region gives the toy genuinely EMPTY objects.
     """
     sc = Scenario(name, genome_length=9000, seed=seed, work_dir=work_dir)
     sc.add_gene(

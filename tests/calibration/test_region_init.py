@@ -23,6 +23,7 @@ from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain
 from rigel.calibration.region_geometry import build_region_statics, g1_locked, init_beliefs
 from rigel.calibration.region_init import (
+    has_own_composition_evidence,
     strand_discriminability,
 )
 from rigel.calibration.signature import (
@@ -310,6 +311,26 @@ def test_the_self_solve_is_all_finite():
         assert np.all(np.isfinite(ni.tau_lam)) and np.all(ni.tau_lam >= 0.0)
         for arr in (ni.f_g, ni.f_pos, ni.f_neg):
             assert np.all(np.isfinite(arr)) and np.all(arr >= 0.0) and np.all(arr <= 1.0)
+
+
+# ── the own-evidence predicate ───────────────────────────────────────────────────────────────────────
+
+
+def test_the_evidence_predicate_agrees_with_the_kernel_liveness_test():
+    """TRAPS: a-test-that-redefines: the one definition of "has own composition evidence" is
+    ``region_init.has_own_composition_evidence`` (``tau_lam`` above the kernel's ``OWN_EVIDENCE_EPS``).
+    On the kind of value the solver publishes — exactly zero where the slot has no channel, a Fisher
+    information otherwise — it agrees with the kernel's other liveness test, ``tau_lam > 0``."""
+    tau = np.array([0.0, 1e-4, 1.0, 850.0])
+    assert np.array_equal(has_own_composition_evidence(tau), tau > 0.0)
+
+
+def test_perturbation_a_DIFFERENT_predicate_stops_matching_the_home():
+    """The falsification: a consumer that picks its own floor disagrees with the production predicate
+    on a τ that spans the guard, so the agreement above is not vacuous."""
+    tau = np.array([0.0, 1e-12, 1e-9, 2e-9, 1e-4, 1.0])
+    theirs = tau > 1e-6  # a plausible, wrong, home-made floor
+    assert not np.array_equal(theirs, has_own_composition_evidence(tau))
 
 
 # ── source 2: density-deconvolution factor precision (I_density) ──────────────────────────────────────────────────────────
