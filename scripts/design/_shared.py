@@ -83,7 +83,7 @@ def strata(conds) -> list[tuple[str, str]]:
 def is_zero_gdna(cond: str) -> bool:
     """``g00`` — the owner-required ZERO-gDNA control. Truth is exactly 0, so every gDNA fragment in
     the prior there is a false positive with nothing to cancel it, and a relative change is unbounded.
-    Reported on its own row, never inside ALL."""
+    Read per condition."""
     return "_g00_" in cond
 
 

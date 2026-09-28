@@ -64,6 +64,8 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 8).
   second density census of the gDNA track with its own thresholds. The report's capture tile and panel
   show calibration's own answer instead: `calibration.gdna_reference_density`, the captured gDNA level
   (`null` when no enriched gDNA mode is located), and `gdna_reference_members`.
+- Three `locus_stats.feather` columns (`--emit-locus-stats`): `gdna_log_eff_len`, `digamma_calls_per_estep`
+  and `squarem_extrapolation_clamp_count`.
 - The fragment-length composition channel and the NPMLE gDNA prior: measured and retired.
 - `--mappability-read-length` (a no-op), `--gdna-prior-mixture-bridge`, `--sweep-n-grid-single-strand`
   and `--gdna-em-llr-bias` (an underived odds dial), and the `measured_total` background estimator.

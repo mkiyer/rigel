@@ -225,6 +225,33 @@ def test_a_cache_that_does_not_describe_this_SCAN_is_rebuilt_not_reused(toy, tmp
     assert calls["n"] == 1, "the rebuilt cache did not hit on the next call"
 
 
+def test_build_replaces_a_stale_main_copy_of_the_scan(tmp_path, monkeypatch):
+    """``_main`` is a copy of the scan cache. ``calibration_oracle.py --build`` once copied it only when
+    it was missing, so a rebuilt scan left every panel's ``_main`` stale, and the instruments that read it
+    refused it or rescanned. The oracle half is stubbed: this checks the copy only.
+
+    Perturbation: copying only when ``_main`` is missing leaves the stale files in place.
+    """
+    import types
+
+    co = _load_sibling("calibration_oracle.py")
+    files = ("manifest.json", "payload.npz", "strand.npz")
+    scan, main = tmp_path / "scan_cache" / "c", tmp_path / "oracle_cache" / "c" / "_main"
+    for d, text in ((scan, "fresh"), (main, "stale")):
+        d.mkdir(parents=True)
+        for f in files:
+            (d / f).write_text(text)
+    monkeypatch.setattr(co, "read_scan_cache", lambda *a, **k: None)
+    monkeypatch.setattr(co, "calibration_inputs", lambda *a, **k: {"payload": None})
+    monkeypatch.setattr(
+        co,
+        "sibling",
+        lambda _name: types.SimpleNamespace(load_or_build_oracle=lambda *a, **k: None),
+    )
+    co.build_one(None, tmp_path, "c", tmp_path / "work")
+    assert [(main / f).read_text() for f in files] == ["fresh"] * len(files)
+
+
 # ── GATE 1: the oracle's sum-to-full identity actually runs on the condition under test ───────────
 
 

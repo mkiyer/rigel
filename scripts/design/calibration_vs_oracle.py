@@ -3,20 +3,13 @@
 The 0.8.0 metric. ``P = calibrate(...)`` off the cached scan is compared with ``O``, the same
 ``CalibrationResult`` with only its six deconvolved arrays replaced by the origin-split truth
 (`OracleTruth` in the drained frame, sum-to-full gated), per stratum and never pooled; the 0.8.0
-scope is stamped on every row and the deferred stratum is reported, never dropped. It reaches the
-effective-length shrinkage, which no prior-injection arm does: `transcript_capture_eff_lengths` is built
-before `assemble_priors` runs, so an arm that patches the prior assembler never sees the ruler the EM
-divides by, while substituting at the ``calibrate`` boundary reaches both consumers. One more arm:
-``noop`` replaces the six arrays with themselves and must be byte-identical to ``P`` on the arrays
-and on the derived effective lengths (the gate runs before any table). The ruler's reference is the
-result's own (`CalibrationResult.gdna_reference_density`, the located enriched mode of the fitted gDNA
-landscape), so every arm contracts against the one reference the solve found: at capture-OFF there is
-none and the factor is exactly 1.000 for ``P`` and ``O`` alike, with no fitting. No solver, no EM, no BAM
-re-scan, and the prior is not re-scored here (`prior_vs_oracle.py` owns `LocusPriors`). Read
-``ruler_n_moved`` rather than the aggregate factor: the total can barely move while nearly every
-transcript is redistributed. `--set SECTION.FIELD=VALUE` (any config field, typed from the field,
-repeatable) applies to both arms, so a run prices an estimator swap on this metric rather than comparing
-two tools — a policy or a grid arm is a config value and nothing in the source moves to price it.
+scope is stamped on every row and the deferred stratum is reported, never dropped. It does not reach the
+capture-contracted length: ``O`` keeps ``P``'s efficiencies, reference density and gDNA region lengths,
+everything `transcript_capture_eff_lengths` reads, so the length's truth is `ruler_vs_truth.py`'s. No
+solver, no EM, no BAM re-scan, and the prior is not re-scored here (`prior_vs_oracle.py` owns
+`LocusPriors`). `--set SECTION.FIELD=VALUE` (any config field, typed from the field, repeatable) applies
+to both arms, so a run prices an estimator swap on this metric rather than comparing two tools — a policy
+or a grid arm is a config value and nothing in the source moves to price it.
 
 Usage::
 
@@ -39,7 +32,6 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass
 from pathlib import Path
 
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -53,59 +45,17 @@ from _shared import DEFAULT_INDEX, DEFAULT_SUITE, OVERRIDE_FIELDS, is_zero_gdna,
 OA = sibling("_oracle_arms.py")
 
 from rigel.calibration import calibrate  # noqa: E402
-from rigel.calibration.capture_eff_length import transcript_capture_eff_lengths  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.substrate import CalibrationSubstrate  # noqa: E402
 from rigel.config import PipelineConfig  # noqa: E402
-from rigel.frag_length_model import FragmentLengthModel  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
 from calibration._oracle import ORIGINS, OracleTruth  # noqa: E402
 
-#: The six deconvolved fields an oracle may substitute are ``prior_vs_oracle``'s list, not a second
-#: copy: a set that drifted between two instruments would make their noop gates test different things
-#: while both printed the word "identical".
-
-
 #: The two axes ``CalibrationResult`` deconvolves; the sj axis is certified RNA and is never split.
 AXES = OA.AXES
-
-
-# ── the ruler: what the EM divides a transcript by ───────────────────────────────────────────────
-
-
-@dataclass(frozen=True, slots=True)
-class RulerScore:
-    """One arm's transcript effective-length ruler: the EM's total opportunity and the uncontracted
-    length it was contracted from. The report reads their ratio of sums, not a mean of ratios, so the
-    aggregate is what the EM's total opportunity actually moved by
-    (TRAPS: a-mean-of-ratios-inherits-the-partition)."""
-
-    rho_ref: float | None  #: the result's reference density; ``None`` = no enriched gDNA mode
-    total_len: float  #: Σ eff_em over transcripts, the denominator the EM sums
-    total_fl: float  #: Σ fl, the uncontracted FL-marginal length
-    n_transcripts: int
-
-
-def ruler(calibration, region_arrays, index, fl_eff, rna_fl_pmf) -> tuple[RulerScore, np.ndarray]:
-    """The shipped shrinkage, run on one arm. Returns its score and the per-transcript lengths.
-
-    ``transcript_capture_eff_lengths`` is called unmodified: the question is what a wrong input does
-    to the shipped function, so re-deriving the contraction here would answer a different question and
-    could be wrong in the same direction as the thing under test.
-    """
-    eff = transcript_capture_eff_lengths(calibration, region_arrays, index, fl_eff, rna_fl_pmf)
-    return (
-        RulerScore(
-            rho_ref=calibration.gdna_reference_density,
-            total_len=float(np.asarray(eff, np.float64).sum()),
-            total_fl=float(np.asarray(fl_eff, np.float64).sum()),
-            n_transcripts=int(np.asarray(eff).size),
-        ),
-        np.asarray(eff, np.float64),
-    )
 
 
 #: Signed per-object error buckets, in fragments. Symmetric about an exact-zero bucket of its own,
@@ -200,38 +150,15 @@ def vertex_profile(p_arm, o_arm, axis: str) -> list[dict]:
 
 
 def check_override_field_set(override: dict) -> None:
-    """``override_masses`` must still write exactly :data:`OVERRIDE_FIELDS`.
-
-    Without this the ``noop`` arm would silently test a different set than the ``O`` arm, replacing
-    six fields with themselves while ``O`` replaced seven, and "byte-identical" would be a statement
-    about the wrong six.
-    """
+    """``override_masses`` must still write exactly :data:`OVERRIDE_FIELDS`: a seventh field would make
+    ``O`` differ from ``P`` in something other than the deconvolution."""
     missing = set(OVERRIDE_FIELDS) - set(override)
     extra = set(override) - set(OVERRIDE_FIELDS)
     if missing or extra:
         raise SystemExit(
             f"⛔ override_masses no longer writes OVERRIDE_FIELDS: missing={sorted(missing)} "
-            f"extra={sorted(extra)}. The noop gate would be testing a different set than the arm."
+            f"extra={sorted(extra)}."
         )
-
-
-def noop_differences(shipped, noop, eff_shipped, eff_noop) -> list[str]:
-    """Every place the ``noop`` arm is not byte-identical to ``P``. Empty is the only pass.
-
-    The effective lengths are compared too: comparing only the six arrays would prove
-    ``dataclasses.replace`` copies arrays. The claim under test is that the whole path from a
-    substituted ``CalibrationResult`` down to the EM's ruler is inert when the substitution takes
-    nothing, so the derived quantity is what must match. Byte-identity is reachable here (no EM, no
-    seed, no threaded scan) where it is not for a ``quant_accuracy`` arm.
-    """
-    bad = [
-        f for f in OVERRIDE_FIELDS
-        if not np.array_equal(np.asarray(getattr(shipped, f)), np.asarray(getattr(noop, f)))
-    ]
-    if not np.array_equal(eff_shipped, eff_noop):
-        worst = float(np.abs(eff_shipped - eff_noop).max())
-        bad.append(f"effective_lengths_em (max|delta|={worst:.3e})")
-    return bad
 
 
 # ── one condition ────────────────────────────────────────────────────────────────────────────────
@@ -255,7 +182,7 @@ def load_oracle(oracle_cache: Path, condition: str, index, drained_payload, lift
 
 def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle_cache: Path,
                       condition: str) -> dict:
-    """calibrate once, build P / O / noop / U, gate them, and score. One JSON-able row."""
+    """calibrate once, build P and O, gate them, and score. One JSON-able row."""
     start = time.perf_counter()
     cache = read_scan_cache(Path(suite) / "scan_cache" / condition, index)
     lift: dict = {}
@@ -269,7 +196,6 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
     override = oracle.override_masses(region_arrays)
     check_override_field_set(override)
     o_arm = dataclasses.replace(p_arm, **override)
-    noop_arm = dataclasses.replace(p_arm, **{f: getattr(p_arm, f) for f in OVERRIDE_FIELDS})
 
     # both arms must be on the payload's own per-object totals, per axis; without that identity a
     # mass-weighted mean of fractions is an average over different denominators.
@@ -277,31 +203,16 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
     OA.check_same_basis("P", p_arm, substrate)
     OA.check_same_basis("O", o_arm, substrate)
 
-    # -- the ruler, on the FL-marginal lengths the pipeline builds it from --
-    rna_fl = FragmentLengthModel.from_pmf(kw["rna_fl_pmf"], int(payload.max_length))
-    fl_eff = rna_fl.compute_all_transcript_eff_lens(
-        index.t_df["length"].values.astype(np.int64)
-    )
-    rulers, lengths = {}, {}
-    for name, arm in (("P", p_arm), ("O", o_arm), ("noop", noop_arm)):
-        rulers[name], lengths[name] = ruler(arm, region_arrays, index, fl_eff, kw["rna_fl_pmf"])
-
-    bad = noop_differences(p_arm, noop_arm, lengths["P"], lengths["noop"])
 
     row = {
         "condition": condition,
         "stratum": list(stratum(condition)),
         "gdna_spliced_leak": oracle.gdna_spliced_leak,
         "lift_n_ambiguous": oracle.n_ambiguous,
-        "noop_differences": bad,
         "seconds": time.perf_counter() - start,
         "library_f_gdna_P": OA.library_f_gdna(p_arm),
         "library_f_gdna_O": OA.library_f_gdna(o_arm),
         "axes": {},
-        "ruler": {k: dataclasses.asdict(v) for k, v in rulers.items()},
-        # Σ|Δ| over the ruler itself, in base pairs of opportunity, the quantity the EM divides by.
-        "ruler_abs_err": float(np.abs(lengths["P"] - lengths["O"]).sum()),
-        "ruler_n_moved": int(np.sum(lengths["P"] != lengths["O"])),
     }
     for axis in AXES:
         s = OA.score_axis(
@@ -361,16 +272,12 @@ def _scope(st) -> str:
 
 
 def _selections(rows: list[dict]) -> tuple:
-    """Every selection every table prints, in order: one list, so a stratum cannot appear on some
-    tables and not others. ``None`` is a rule boundary."""
-    return (
-        *(
-            (f"{' x '.join(st)}  [{_scope(st)}]", (lambda c, st=st: stratum(c) == tuple(st)
-                                                   and not is_zero_gdna(c)))
-            for st in strata(r["condition"] for r in rows)
-        ),
-        (None, None),
-        ("⛔ g00 ZERO-gDNA control (all strata)", is_zero_gdna),
+    """Every selection every table prints, one per stratum, g00 excluded (it is read per condition),
+    so a stratum cannot appear on some tables and not others."""
+    return tuple(
+        (f"{' x '.join(st)}  [{_scope(st)}]", (lambda c, st=st: stratum(c) == tuple(st)
+                                               and not is_zero_gdna(c)))
+        for st in strata(r["condition"] for r in rows)
     )
 
 
@@ -392,27 +299,16 @@ def _agg_axis(scores: list[dict]) -> dict | None:
     return out
 
 
-def _fmt_rho(x) -> str:
-    return f"{'None':>10}" if x is None else f"{x:>10.4g}"
-
-
 def report(rows: list[dict]) -> None:
     """The whole report from the per-condition JSON, the only report path there is, so ``--jobs 1``
     and ``--jobs 4`` print numbers produced by one code path."""
     # ── the gates first: a table read before its gate is a table nobody checked ──
     print()
     print("=" * 118)
-    print("  ⭐⭐⭐ CALIBRATION vs ORACLE CALIBRATION — the 0.8.0 metric, and the EM's RULER above it")
+    print("  ⭐⭐⭐ CALIBRATION vs ORACLE CALIBRATION — the 0.8.0 metric")
     print(f"  {len(rows)} conditions   no solver, no EM, no BAM re-scan")
     print("=" * 118)
     print()
-    failed = [r for r in rows if r["noop_differences"]]
-    if failed:
-        for r in failed:
-            print(f"  ⛔ {r['condition']}: noop is NOT byte-identical to P -> {r['noop_differences']}")
-        raise SystemExit(2)
-    print(f"  ✅ GATE  noop is byte-identical to P on all {len(OVERRIDE_FIELDS)} override fields AND on")
-    print(f"           the effective lengths derived from them, on {len(rows)}/{len(rows)} conditions")
     print("  ✅ GATE  override_masses writes exactly the override field set")
     print("  ✅ GATE  P and O are on the payload's own per-object totals, both axes (check_same_basis)")
 
@@ -435,9 +331,6 @@ def report(rows: list[dict]) -> None:
           f"{'P gDNA':>13} {'P RNA':>13} {'ΔgDNA vs O':>13} {'P/O gDNA':>9}")
     print("    " + "-" * 142)
     for title, pred in selections:
-        if title is None:
-            print("    " + "-" * 142)
-            continue
         sub = sel_rows(pred)
         if not sub:
             continue
@@ -462,9 +355,6 @@ def report(rows: list[dict]) -> None:
               f"{'mwae':>8} {'net':>14} {'over':>13} {'under':>13}")
         print("    " + "-" * 130)
         for title, pred in selections:
-            if title is None:
-                print("    " + "-" * 130)
-                continue
             a = _agg_axis([r["axes"][axis] for r in sel_rows(pred)])
             if a is None:
                 continue
@@ -478,9 +368,6 @@ def report(rows: list[dict]) -> None:
     print(f"    {'stratum':<38} {'f_gdna P':>10} {'f_gdna O':>10} {'|Δ|':>10}")
     print("    " + "-" * 72)
     for title, pred in selections:
-        if title is None:
-            print("    " + "-" * 72)
-            continue
         sub = sel_rows(pred)
         if not sub:
             continue
@@ -490,32 +377,6 @@ def report(rows: list[dict]) -> None:
         w = sum(r["axes"]["region"]["mass"] for r in sub)
         p, o = (p / w, o / w) if w > 0 else (float("nan"), float("nan"))
         print(f"    {title:<38} {p:>10.4f} {o:>10.4f} {abs(p - o):>10.4f}")
-
-    # ── ③ the ruler ──
-    print()
-    print("  ③ ⭐⭐⭐ THE RULER — `effective_lengths_em`, the transcript length the EM DIVIDES BY.")
-    print("     No other instrument reaches this: it is built BEFORE `assemble_priors`, which is what")
-    print("     every other arm patches. `factor` is Σ eff_em / Σ fl; 1.000 means no contraction.")
-    print("     ⛔ At capture-OFF the contract says the factor is EXACTLY 1.000 — there are no probes.")
-    print(f"    {'stratum':<38} {'factor P':>9} {'factor O':>9} "
-          f"{'P/O':>8} {'Σ|Δ len|':>15} {'moved':>9}")
-    print("    " + "-" * 120)
-    for title, pred in selections:
-        if title is None:
-            print("    " + "-" * 120)
-            continue
-        sub = sel_rows(pred)
-        if not sub:
-            continue
-        fac = {}
-        for arm in ("P", "O"):
-            tl = sum(r["ruler"][arm]["total_len"] for r in sub)
-            tf = sum(r["ruler"][arm]["total_fl"] for r in sub)
-            fac[arm] = tl / tf if tf > 0 else float("nan")
-        print(f"    {title:<38} {fac['P']:>9.4f} {fac['O']:>9.4f} "
-              f"{fac['P'] / fac['O'] if fac['O'] else float('nan'):>8.3f} "
-              f"{sum(r['ruler_abs_err'] for r in sub):>15,.0f} "
-              f"{sum(r['ruler_n_moved'] for r in sub):>9,}")
 
     # ── ⑤ the full signed distribution ──
     for axis in AXES:
@@ -527,9 +388,6 @@ def report(rows: list[dict]) -> None:
         print(f"    {'stratum':<38} " + " ".join(f"{lab:>13}" for lab in labels))
         print("    " + "-" * (38 + 14 * len(labels)))
         for title, pred in selections:
-            if title is None:
-                print("    " + "-" * (38 + 14 * len(labels)))
-                continue
             sub = sel_rows(pred)
             if not sub:
                 continue
@@ -541,9 +399,6 @@ def report(rows: list[dict]) -> None:
               f"{'Σ|Δ| frags':>15}")
         print("    " + "-" * 110)
         for title, pred in selections:
-            if title is None:
-                print("    " + "-" * 110)
-                continue
             sub = sel_rows(pred)
             if not sub:
                 continue
@@ -564,9 +419,6 @@ def report(rows: list[dict]) -> None:
               f"{'shortfall':>10} {'Σ|Δ| frags':>12} {'of Σ|Δ|':>8} {'closure':>8}")
         print("    " + "-" * 128)
         for title, pred in selections:
-            if title is None:
-                print("    " + "-" * 128)
-                continue
             sub = sel_rows(pred)
             if not sub:
                 continue
@@ -613,17 +465,12 @@ def report(rows: list[dict]) -> None:
     # ── ④ per condition ──
     print()
     print("  ④ PER CONDITION — rank within a stratum, never across one")
-    print(f"    {'condition':<44} {'mwae reg':>9} {'mwae bnd':>9} {'lib P':>8} {'lib O':>8} "
-          f"{'rho_ref P':>10} {'rho_ref O':>10} {'fac P':>7} {'fac O':>7} {'s':>6}")
-    print("    " + "-" * 139)
+    print(f"    {'condition':<44} {'mwae reg':>9} {'mwae bnd':>9} {'lib P':>8} {'lib O':>8} {'s':>6}")
+    print("    " + "-" * 89)
     for r in sorted(rows, key=lambda x: (tuple(x["stratum"]), x["condition"])):
-        rl = r["ruler"]
         print(f"    {r['condition']:<44} {r['axes']['region']['mwae']:>9.4f} "
               f"{r['axes']['boundary']['mwae']:>9.4f} {r['library_f_gdna_P']:>8.4f} "
-              f"{r['library_f_gdna_O']:>8.4f} {_fmt_rho(rl['P']['rho_ref'])} "
-              f"{_fmt_rho(rl['O']['rho_ref'])} "
-              f"{rl['P']['total_len'] / rl['P']['total_fl']:>7.4f} "
-              f"{rl['O']['total_len'] / rl['O']['total_fl']:>7.4f} {r['seconds']:>6.1f}")
+              f"{r['library_f_gdna_O']:>8.4f} {r['seconds']:>6.1f}")
     print()
     print(f"  total wall clock {sum(r['seconds'] for r in rows):.1f} s over {len(rows)} conditions")
 
@@ -695,18 +542,6 @@ def self_test() -> int:
     s1 = OA.score_axis(nudged, rna_n, cal.count_gdna_region, cal.count_rna_region)
     check("score_axis resolves a ONE-ULP nudge", s1.abs_err > 0.0)
 
-    # ② the noop comparator fires on a one-ULP nudge to an override array, and on the lengths alone.
-    eff = np.linspace(100.0, 900.0, 16)
-    check("noop comparator is clean on identical input",
-          noop_differences(cal, cal, eff, eff) == [])
-    bad_cal = dataclasses.replace(cal, count_gdna_region=nudged)
-    check("noop comparator resolves a ONE-ULP array nudge",
-          noop_differences(cal, bad_cal, eff, eff) == ["count_gdna_region"])
-    eff2 = np.array(eff, copy=True)
-    eff2[5] = np.nextafter(eff2[5], np.inf)
-    check("noop comparator resolves a ONE-ULP LENGTH nudge, arrays identical",
-          len(noop_differences(cal, cal, eff, eff2)) == 1)
-
     # ③ the override field-set gate refuses a dropped field and an extra one.
     full = {f: getattr(cal, f) for f in OVERRIDE_FIELDS}
     try:
@@ -723,29 +558,6 @@ def self_test() -> int:
         except SystemExit:
             fired = True
         check(f"field-set gate refuses {label}", fired)
-
-    # ④ the ruler reads the result's efficiencies and nothing else: with no reference every efficiency
-    #    is exactly 1 (the result refuses anything else), with one an efficiency below 1 is admitted.
-    check("the synthetic result carries no reference", cal.gdna_reference_density is None)
-    check("...and its efficiencies are exactly 1", bool(np.all(cal.gdna_capture_efficiency_region == 1.0)))
-    cal_ref = dataclasses.replace(cal, gdna_reference_density=float(np.max(
-        np.asarray(cal.count_gdna_region) / np.asarray(cal.gdna_region_eff_len))), gdna_reference_members=1,
-        gdna_capture_efficiency_region=np.full(cal.n_regions, 0.5),
-        gdna_capture_efficiency_boundary=np.full(cal.n_boundaries, 0.5))
-    check("a positive finite reference admits efficiencies below 1", cal_ref.gdna_reference_density > 0.0)
-    try:
-        dataclasses.replace(cal, gdna_capture_efficiency_region=np.full(cal.n_regions, 0.5))
-        fired = False
-    except ValueError:
-        fired = True
-    check("an efficiency below 1 with no reference is refused by the result", fired)
-    for bad in (0.0, -1.0, float("nan")):
-        try:
-            dataclasses.replace(cal_ref, gdna_reference_density=bad)
-            fired = False
-        except ValueError:
-            fired = True
-        check(f"a reference of {bad} is refused by the result", fired)
 
     # ⑥ the aggregate is a ratio of sums, not a mean of ratios. Two scores of very different mass
     #    make the two answers differ, which is what makes this a test rather than a tautology.

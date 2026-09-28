@@ -31,16 +31,14 @@ cannot say which of the two moved — and a calibration figure cannot say whethe
 | the question | the number | the instrument | how it is read |
 |---|---|---|---|
 | **is CALIBRATION right?** — the number that ranks a calibration mechanism | the `CalibrationResult` against an oracle calibration | `calibration_vs_oracle.py` | per stratum, never pooled |
-| **is THE TOOL right?** — the number the release ships on | the transcript table against per-transcript truth | `quant_accuracy.py --arm base --set em.assignment_mode=fractional` | per stratum, and only above the noise floor (`ISSUES: benchmark-noise-floors-unmeasured`) |
+| **is THE TOOL right?** — the number the release ships on | the transcript table against per-transcript truth | `quant_accuracy.py --arm base --set em.assignment_mode=fractional` | per stratum, by size, in a pinned A/B pair |
 
-⛔ THE END-TO-END NUMBER IS READ UNDER FRACTIONAL ASSIGNMENT, ABOVE A FLOOR, WITH A DECOMPOSITION (owner,
-2026-09-19). The shipped EM assigns by a sampled draw, so every arm runs with `--set
+⛔ THE END-TO-END NUMBER IS READ UNDER FRACTIONAL ASSIGNMENT, IN A PINNED PAIR, WITH A DECOMPOSITION (owner,
+2026-09-19 and 2026-09-28). The shipped EM assigns by a sampled draw, so every arm runs with `--set
 em.assignment_mode=fractional`, which removes the draw from the comparison; each row records its mode and the
-report refuses to set two modes side by side. `--arm base_reseed` changes only the EM seed, which fractional
-assignment never reads, so it is no seed floor: unpinned (the default, and `panel.py score`) it is one draw of the
-scan's run-to-run spread, and with `--set scan.total_threads=1` it is bit-identical to `base` and reads exactly 0
-(`OMP_NUM_THREADS=1` does not pin the scan). The floor is the one `ISSUES: benchmark-noise-floors-unmeasured`
-defines, and any delta below it is noise, not a result. The arms decompose it: `oracle` is what a perfect prior is worth end to
+report refuses to set two modes side by side. An A/B pair runs with the scan pinned (`--set scan.total_threads=1`;
+`OMP_NUM_THREADS=1` does not pin it), so it is exactly reproducible, and an effect is judged by its size, with genes
+and pools read beside the transcript table. The arms decompose it: `oracle` is what a perfect prior is worth end to
 end, so what remains under it belongs to the EM and the assignment rather than to calibration; every prior arm
 wraps `assemble_priors`, so none reaches a transcript's length. `oracle_ruler` does: it hands the EM the
 simulator's own capture-aware length for every transcript and synthetic span, anchored on the fully probed
@@ -57,12 +55,12 @@ calibration mechanism on the transcript table stays REFUSED for the reason above
 
 | | what is scored | against | instrument |
 |---|---|---|---|
-| **primary** | the `CalibrationResult` itself: the six deconvolved arrays | `O`, the same result with only the deconvolved arrays replaced by the origin-split truth (at capture-OFF it carries no enriched mode and is the no-enrichment null) | `calibration_vs_oracle.py`. It cannot see the effective-length ruler: `O` keeps `P`'s efficiencies, reference density and gDNA region lengths (every result field the ruler reads), so `ruler_n_moved` is 0 by construction — read `ruler_vs_truth.py` beside every capture-ON arm (`ISSUES: calibration-vs-oracle-cannot-see-a-ruler-move`) |
-| **primary, the prior** | what calibration hands the EM's prior — `gdna_count`, `gdna_eff_len` per multi-locus (the EM forms the pseudocounts from `gdna_count` and its own fragment count) | `O`, the same assembler fed the origin-split truth masses | `prior_vs_oracle.py` (`P − O`). `gdna_eff_len` reads no count, so its `P − O` is 0 by construction; its truth is `ruler_vs_truth.py` (`ISSUES: calibration-vs-oracle-cannot-see-a-ruler-move`) |
+| **primary** | the `CalibrationResult` itself: the six deconvolved arrays | `O`, the same result with only the deconvolved arrays replaced by the origin-split truth (at capture-OFF it carries no enriched mode and is the no-enrichment null) | `calibration_vs_oracle.py`. `O` keeps `P`'s efficiencies, so it cannot see the capture-contracted length: read `ruler_vs_truth.py` beside every capture-ON arm |
+| **primary, the prior** | what calibration hands the EM's prior — `gdna_count`, `gdna_eff_len` per multi-locus (the EM forms the pseudocounts from `gdna_count` and its own fragment count) | `O`, the same assembler fed the origin-split truth masses | `prior_vs_oracle.py` (`P − O`, the count; `gdna_eff_len`'s truth is `ruler_vs_truth.py`) |
 | **primary, per object** | each region's and boundary's own `f_g`, and whether it is confidently wrong | the oracle payload: the production accumulator run on the BAM split by true origin | `solvability_audit.py` |
 | **primary, one number** | the library `f_gdna` | the simulator's per-fragment truth | `calibration_vs_oracle.py` — each row's `pools` block, `P_gdna` against `true_gdna` |
-| **controls** | zero gDNA, where truth is a constant | 0.000 exactly | the `g00` rung of the ladder, read on its own row by `calibration_vs_oracle.py` and `quant_accuracy.py` |
-| **the deliverable** | the transcript table a user reads | `truth_abundances.tsv` | `quant_accuracy.py --arm base`, above the noise floor (`ISSUES: benchmark-noise-floors-unmeasured`) |
+| **controls** | zero gDNA, where truth is a constant | 0.000 exactly | the `g00` rung of the ladder, read per condition by `calibration_vs_oracle.py` and `quant_accuracy.py` |
+| **the deliverable** | the transcript table a user reads | `truth_abundances.tsv` | `quant_accuracy.py --arm base` |
 
 Why `P − O` and not the transcript number: attribution. `O` is calibration done perfectly with the
 shipped assembler, so `P − O` is calibration's own error and nothing else; the transcript number adds
@@ -71,9 +69,7 @@ reports `O − Fo` (the assembler's error) beside it, because they are different
 Steer a CALIBRATION change by `P − O`, not by the transcript table: most of the stranded × capture-OFF
 misassignment is ordinary isoform ambiguity, and a calibration change that improves `P − O` and leaves the
 transcript table flat has done its job. The transcript table is what the RELEASE ships on, and it steers the
-work downstream of calibration — the assembler, the ruler, the EM. Its noise floor is measured, not assumed, and
-`--arm base_reseed` alone is not it (above): the floor is `ISSUES: benchmark-noise-floors-unmeasured`'s, re-derived
-in the same session (`TRAPS: re-record-the-baseline`).
+work downstream of calibration — the assembler, the ruler, the EM.
 
 ### The ruler — the capture-contracted length, and why a transcript's sits outside every prior arm's patch point
 
@@ -88,9 +84,6 @@ log(L / Y). Read both: the class means must sit on one scale, because the gDNA-v
 ratio of the gDNA component's length to the RNA's, and the within-gene spread must not grow, because the
 isoform split reads the ratios inside a gene and a repair of the scale can cost it
 (`TRAPS: judge-a-ruler-by-its-within-gene-spread`); then price the change on the transcript table, per stratum.
-`calibration_vs_oracle.py`'s `O` arm swaps the six deconvolved arrays only, and the efficiencies the length
-reads are the solve's own output published on the result, so its ruler column reads `P` — the factor the EM
-divided by — and `P/O` is 1 by construction.
 ⛔ Say which call your arm patches, and check it sits downstream of everything you mean to price.
 
 Every EM component's length is one shared rule: the component's conserved share of each region and boundary
@@ -203,12 +196,12 @@ on each is an owner call and is not invented here.
    containing none; only a zero control finds that.
 3. **The effective-length shrinkage is correct because the composition is**, not because it was patched:
    at `g00` the factor reads 1.000, and elsewhere it tracks the simulator's truth, read with `ruler_vs_truth.py` —
-   the oracle calibration keeps `P`'s efficiencies and cannot see it
-   (`ISSUES: calibration-vs-oracle-cannot-see-a-ruler-move`). A separate shrinkage correction is a defect, not a fix.
+   the oracle calibration keeps `P`'s efficiencies and cannot see it. A separate shrinkage correction is a defect,
+   not a fix.
 4. **Pass-0 is monotone**: adding real evidence to an object never moves its answer away from truth.
 5. **Pass-0 depends on no quantity a later iteration produces** — no feedback in the first solve.
-6. **The three in-scope strata improve, or at worst hold, on the DELIVERABLE** — the transcript table above
-   its noise floor, decomposed by the arms so that what moved is attributable — and the deferred stratum is
+6. **The three in-scope strata improve, or at worst hold, on the DELIVERABLE** — the transcript table in a
+   pinned A/B pair, decomposed by the arms so that what moved is attributable — and the deferred stratum is
    reported on every table.
 
 The gate that held this work back, kept because it will apply again: a solve tuned against a wrong
@@ -254,7 +247,7 @@ python scripts/sim/panel.py cache    --config $CFG --jobs 8
 
 # 2. THE PRIMARY METRIC — CALIBRATION AGAINST ORACLE CALIBRATION.
 #    (a) the calibration result, P vs O, per stratum        ~5-12 s/condition, no EM
-#        Its ruler column is P's by construction: read the ruler with (d), beside every capture-ON arm.
+#        It cannot see the capture-contracted length: read (d) beside every capture-ON arm.
 python scripts/design/calibration_vs_oracle.py --suite $LADDER --index $INDEX \
        --oracle-cache $LADDER/oracle_cache
 #    (b) the PRIOR the EM actually reads, P vs O, per stratum   ~50 s/condition with the cache warm
@@ -269,11 +262,11 @@ for C in gdna_g05_ss_0.99_nrna_mid_capture_on gdna_g50_ss_0.99_nrna_mid_capture_
   python scripts/design/ruler_vs_truth.py --panel ladder --condition $C --scale
 done
 
-# 3. THE NUMBER THE RELEASE SHIPS ON — the `g00` rows are the zero controls, read on their own row. — the tool end to end, with the ceiling arms above it.
-#    `panel.py score` reads every arm under fractional assignment (the protocol above).
+# 3. THE NUMBER THE RELEASE SHIPS ON — the tool end to end, with the ceiling arms above it; the `g00` rows are the
+#    zero controls, read per condition.
+#    `panel.py score` reads every arm under fractional assignment (the protocol above) with the scan pinned,
+#    so `base_reseed` reads exactly 0.
 #    --jobs 2, not more: run_pipeline holds 7-8.5 GB per 10 M-fragment condition.
-#    `base_reseed` is no seed floor: run as here (scan unpinned) it is one draw of the scan's run-to-run spread;
-#    with --set scan.total_threads=1 it reads exactly 0 (`ISSUES: benchmark-noise-floors-unmeasured` defines the floor).
 python scripts/sim/panel.py score  --config $CFG --arms base base_reseed oracle oracle_ruler --jobs 2
 python scripts/sim/panel.py report --config $CFG --arms base base_reseed oracle oracle_ruler
 

@@ -31,9 +31,9 @@ python scripts/sim/panel.py score --config scripts/sim/configs/gdna_ladder.yaml 
     --arms base base_reseed oracle oracle_ruler
 ```
 
-⚠ `panel.py score` passes `--set em.assignment_mode=fractional` itself. Preserve the previous arms
-first (`cp -r arms arms_<what-it-was>_<date>`) — a before-and-after is what makes the next delta
-attributable, and the report prints the seed floor from `base_reseed`.
+⚠ `panel.py score` passes `--set em.assignment_mode=fractional` and `--set scan.total_threads=1`
+itself. Preserve the previous arms first (`cp -r arms arms_<what-it-was>_<date>`) — a before-and-after
+is what makes the next delta attributable, and the report prints `base_reseed` beside it as the rerun Δ.
 
 ## 2. Build both renderings
 
@@ -84,9 +84,9 @@ transcripts contribute ~300 fragments to nascent truth while their tool-side cou
 ## How the report is read
 
 - **Per stratum, never pooled.** Three strata are in scope; unstranded × capture-ON is deferred.
-- **Above the floor.** Under the fractional assignment the seed reaches no number, so the reseed floor
-  IS the run-to-run spread: the multi-threaded scan's fraction sums, carried by the EM into whole
-  fragments (`TRAPS: the-deliverable-is-not-reproducible-by-default`). Never act on a smaller difference.
+- **By size.** An A/B pair runs with the scan pinned (`--set scan.total_threads=1`) and is exactly
+  reproducible; judge an effect by its size, genes and pools beside the transcript table. The rerun Δ
+  reads exactly 0 when pinned (`TRAPS: the-deliverable-is-not-reproducible-by-default`).
 - **The capture-OFF magnitudes are a stress reading.** The panel runs 20.2 % nascent fragments against
   a realistic ~4.2 % (`DESIGN.md` §0b's nascent scope ruling), so quote the share with the number.
 

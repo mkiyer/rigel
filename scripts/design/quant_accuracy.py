@@ -15,8 +15,9 @@ each condition's realised observed fragment count, never the pre-capture molar a
 length model enters the comparison; the TPM rows share the tool's own effective length on both sides
 and so measure assignment only. This is a thermometer above the 0.8.0 metric, never the target.
 Reading rules: ``noop`` and ``oracle_ruler_noop`` must be byte-identical to ``base``
-(gated in ``tests/calibration/test_quant_accuracy.py``); ``base_reseed`` is the sampling noise floor and any smaller delta
-is noise; the oracle masses are undrained while the shipped pipeline drains, a small conservative
+(gated in ``tests/calibration/test_quant_accuracy.py``); an A/B pair runs with the scan pinned (``--set
+scan.total_threads=1``), so it is exactly reproducible, and an effect is judged by its size, genes and pools
+read beside the transcript table; the oracle masses are undrained while the shipped pipeline drains, a small conservative
 bias that cannot explain a large surviving error or hide a large removed one. The library-level
 gDNA fraction counts intergenic fragments as gDNA, as ``cli.py`` does.
 
@@ -102,9 +103,9 @@ ARMS = ("base", "base_reseed", "noop", "oracle", "oracle_gdna", "oracle_efflen",
         "warm_uniform", "oracle_alloc", "oracle_alloc_seed", "oracle_alloc_flip") + tuple(_RULER_ARMS)
 
 #: The EM seed every arm pins: the shipped one, so ``base`` is the configuration that ships.
-#: ``base_reseed`` re-runs ``base`` at ``seed + 1`` and is the noise floor. The seed reaches only the
-#: ``sample`` assignment's draw, so under ``--set em.assignment_mode=fractional`` — how every arm is
-#: benchmarked — the two differ by nothing but what varies from one run to the next.
+#: ``base_reseed`` re-runs ``base`` at ``seed + 1``. The seed reaches only the ``sample`` assignment's draw,
+#: so under ``--set em.assignment_mode=fractional`` — how every arm is benchmarked — the two differ only by
+#: the scan's run-to-run spread, and not at all with the scan pinned.
 DEFAULT_EM_SEED = EMConfig().seed
 
 #: arm -> which ``LocusPriors`` fields come from O. ``noop`` takes NONE of them and still builds O,
@@ -374,10 +375,8 @@ def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
 
 
 def seeded(pipeline_config, arm: str, em_seed: int):
-    """The arm's pipeline config. ``base_reseed`` differs from ``base`` in the SEED ALONE, so the
-    gap between them is the sampling noise of the EM's own hard assignment and nothing else.
-
-    """
+    """The arm's pipeline config. ``base_reseed`` differs from ``base`` in the SEED ALONE, which only
+    the sampled assignment reads."""
     seed = em_seed + 1 if arm == "base_reseed" else em_seed
     warm = pipeline_config.em.warm_start
     if arm == "warm_uniform":
@@ -703,9 +702,8 @@ def markdown_report(paths: list[Path], out: Path) -> None:
     never enter the EM, but they ARE gDNA and the truth counts them — comparing the EM's number alone
     against that truth would understate the estimate by more than half at capture-OFF.
 
-    The first path is the arm reported; an arm whose stem contains ``reseed`` is used as the
-    ATTRIBUTION FLOOR and printed beside every transcript row, because no delta below it is
-    attributable (`TRAPS: the-deliverable-is-not-reproducible-by-default`).
+    The first path is the arm reported; an arm whose stem contains ``reseed`` is printed beside every
+    transcript row as ``rerun Δ`` (`TRAPS: the-deliverable-is-not-reproducible-by-default`).
     """
     arms = [(_load(p), Path(p).stem) for p in paths]
     primary, pname = arms[0]
@@ -741,13 +739,11 @@ def markdown_report(paths: list[Path], out: Path) -> None:
     w("- **Read per stratum, never pooled.** Three strata are in scope. `unstranded × capture ON` is "
       "DEFERRED — reported on every benchmark, never a development target — and it carries most of "
       "the error, so a pooled total would be its total.")
-    w("- **Nothing below the attribution floor is attributable.** The floor is the same arm re-run "
-      "under the next EM seed; it is printed beside every transcript row. Under the fractional "
-      "assignment every arm runs, the seed reaches no number, so the floor is the run-to-run spread "
-      "itself: the BAM scan's workers sum the tally's fractions in whatever batches each took, and the "
-      "EM carries that last-bit difference into whole fragments — four runs of `g50 ss.99 OFF` spanned "
-      "145 fragments (`TRAPS: the-deliverable-is-not-reproducible-by-default`). Treat every figure here "
-      "as carrying that much noise.")
+    w("- **An effect is judged by its size, with genes and pools read beside the transcript table.** "
+      "An A/B pair runs with the scan pinned (`--set scan.total_threads=1`) and is exactly "
+      "reproducible. `rerun Δ` is this arm against the `reseed` arm: under the fractional assignment "
+      "the seed reaches no number, so it reads 0 when pinned and one draw of the scan's run-to-run "
+      "spread when not (`TRAPS: the-deliverable-is-not-reproducible-by-default`).")
     w("- **`expressed` and `detected` are the scored sets, and the truth table is larger than "
       "either.** It carries one row per SYNTHETIC nascent entity as well, and those rows are zero on "
       "both sides — zero truth and zero estimate, since the transcript table drops them — so they "
@@ -843,7 +839,7 @@ def markdown_report(paths: list[Path], out: Path) -> None:
         if axis == "transcript":
             head = head.replace("| MARD |", "| median rel. err | MARD |")
         if floor is not None and axis == "transcript":
-            head = head.replace("| net Δ |", "| net Δ | seed floor |")
+            head = head.replace("| net Δ |", "| net Δ | rerun Δ |")
         # ⛔ Count columns with the ESCAPED pipes removed. `Σ\|Δ\|` carries two literal `|`
         # characters that are cell CONTENT, not delimiters, and counting them put three phantom
         # columns in every separator row.
@@ -899,7 +895,7 @@ def markdown_report(paths: list[Path], out: Path) -> None:
     w("---")
     w("")
     w(f"Generated by `scripts/design/quant_accuracy.py --markdown` from `{pname}.jsonl`"
-      + (" with the seed floor from the `reseed` arm." if floor is not None else "."))
+      + (" with the rerun Δ from the `reseed` arm." if floor is not None else "."))
     w("")
 
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -961,11 +957,8 @@ def report(paths: list[Path]) -> None:
                 row += f" {vals[-1] / vals[0]:>10.3f}" if vals[0] else f" {'—':>10}"
             print(row)
 
-        line("ALL (g00 excluded)", lambda c: not is_zero_gdna(c))
         for st in strata(conds):
             line(" x ".join(st), lambda c, st=st: stratum(c) == st and not is_zero_gdna(c))
-        print("    " + "-" * (26 + 17 * len(arms) + 11))
-        line("⛔ g00 ZERO-gDNA control", is_zero_gdna)
 
     block("① TOTAL MISASSIGNED FRAGMENTS  Σ|count_est − count_true|  ·  TRANSCRIPT level",
           "count_abs_err")
@@ -996,11 +989,8 @@ def report(paths: list[Path]) -> None:
             row += f" {sp:>16.4f} {md:>16.4f}"
         print(row)
 
-    rank_line("ALL (g00 excluded)", lambda c: not is_zero_gdna(c))
     for st in strata(conds):
         rank_line(" x ".join(st), lambda c, st=st: stratum(c) == st and not is_zero_gdna(c))
-    print("    " + "-" * (26 + 34 * len(arms)))
-    rank_line("⛔ g00 ZERO-gDNA control", is_zero_gdna)
 
     # ── ⑥ THE POOL LEVEL ─────────────────────────────────────────────────────────────────────────
     #
@@ -1061,12 +1051,9 @@ def report(paths: list[Path]) -> None:
                           f"{tru:>15,.0f} {d:>+15,.0f} {pct:>8}")
                 first = False
 
-        pool_rows("ALL (g00 excluded)", lambda c: not is_zero_gdna(c))
         for st in strata(conds):
             pool_rows(" x ".join(st),
                       lambda c, st=st: stratum(c) == st and not is_zero_gdna(c))
-        print("    " + "-" * 102)
-        pool_rows("⛔ g00 ZERO-gDNA control", is_zero_gdna)
 
     # ── ⑦ THE POOL LEVEL, PER CONDITION ──────────────────────────────────────────────────────────
     #
@@ -1087,14 +1074,6 @@ def report(paths: list[Path]) -> None:
             print(f"    {c:<44} {r['gdna_est'] + r['n_intergenic']:>13,.0f} {r['gdna_true']:>13,.0f} "
                   f"{r['nrna_est']:>11,.0f} {r['nrna_true']:>10,.0f} "
                   f"{r['mrna_est']:>13,.0f} {r['mrna_true']:>13,.0f}")
-        tg = sum(a[(c, "library")]["gdna_est"] + a[(c, "library")]["n_intergenic"] for c in conds)
-        print("    " + "-" * 122)
-        print(f"    {'TOTAL (all ' + str(len(conds)) + ' conditions)':<44} {tg:>13,.0f} "
-              f"{sum(a[(c, 'library')]['gdna_true'] for c in conds):>13,.0f} "
-              f"{sum(a[(c, 'library')]['nrna_est'] for c in conds):>11,.0f} "
-              f"{sum(a[(c, 'library')]['nrna_true'] for c in conds):>10,.0f} "
-              f"{sum(a[(c, 'library')]['mrna_est'] for c in conds):>13,.0f} "
-              f"{sum(a[(c, 'library')]['mrna_true'] for c in conds):>13,.0f}")
 
     # the library thermometer
     print()
@@ -1136,7 +1115,7 @@ def main() -> int:
     ap.add_argument("--markdown", type=Path, default=None,
                     help="with --report: also write the full per-scenario report as markdown. The "
                          "first --report file is the arm reported; an arm whose name contains "
-                         "'reseed' becomes the attribution floor printed beside it")
+                         "'reseed' is printed beside it as the rerun Δ")
     ap.add_argument("--arm", choices=ARMS, default=None)
     ap.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
     ap.add_argument("--index", type=Path, default=DEFAULT_INDEX)

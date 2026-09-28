@@ -323,10 +323,9 @@ def measure_condition(
     per solver class."""
     start = time.perf_counter()
     scan = dataclasses.replace(pipeline_config.scan, sj_strand_tag=_native_detect_sj_tag(bam))
-    # the main payload is cached too, by the same argument as the oracle cache: the scan depends only
-    # on the BAM, the index and the scan config, never on calibration, so one cache serves every arm
-    # of a campaign. Keyed by the shipped loader, never a home-made key: a refusal here is loud and
-    # falls through to a rescan, where a home-made key would load a stale tally silently.
+    # the main payload is read from ``_main``, a copy of the scan cache that only
+    # ``calibration_oracle.py --build`` writes. Keyed by the shipped loader: a refusal falls through
+    # to an in-memory rescan, never a write.
     _sc_dir = None if oracle_cache is None else Path(oracle_cache) / tag / "_main"
     payload = strand_model = None
     if _sc_dir is not None:
@@ -337,9 +336,6 @@ def measure_condition(
             payload = strand_model = None
     if payload is None:
         _stats, strand_model, _buffer, payload = scan_and_buffer(bam, index, scan)
-        if _sc_dir is not None:
-            write_scan_cache(_sc_dir, payload=payload, strand_model=strand_model, index=index,
-                             bam=bam, scan_config=scan)
 
     # the drained frame: every arm below and T itself describe the tally production calibrates. The
     # drain replays at the production seed; the cache stays pass one.

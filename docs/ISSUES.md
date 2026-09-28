@@ -94,81 +94,6 @@ manifest or rebuild with `--alignable-zarr`. The one-line warning for a feather 
 `ISSUES: latent-defects`.
 Instrument: the manifest; `summary.json`'s `sj_blacklist_loaded`.
 
-### benchmark-noise-floors-unmeasured
-`priority: now — Tier 0 prep: strand-overdispersion step 1's hold rule reads this floor · kind: instrument · 2026-09-28`
-`DESIGN.md` §0b reads the release number "above `--arm base_reseed`", but `base_reseed` changes only the EM seed,
-which fractional assignment never reads, so it is no seed floor: with `--set scan.total_threads=1` it is
-bit-identical to `base` on all 90 odg05 rows and all 16 ladder rows, and unpinned (the default, and `panel.py score`)
-it is one draw of the scan's run-to-run spread; `OMP_NUM_THREADS=1` does not pin the scan. The real sensitivity is
-larger, because last-bit changes fork the transcript table
-(`ISSUES: the-em-answer-depends-on-where-it-starts`): the unpinned-scan floor on the ladder is 33 / 12 / 1,877 per
-in-scope stratum; an od difference of 3e-5 moves 12,668 on g00 ss.99 ON; a 4-thread last-bit rerun
-moves 7,968 on g25 ss.50 ON; genes and the gDNA pool stay within 15 and 113. No simulation-draw replicate exists — one
-realization per ladder, test and depth condition, one VCaP draw — and the depth family's thin rungs make it worse:
-g001 at d100 / d10 holds 12 / 86 true gDNA fragments, and the chain's terms swing ±60 points.
-RULED (owner, 2026-09-28): read the unpinned-scan floor now; once built, take the contaminated-seed panel's g00 × od05
-rows — independent RNA realizations of their od00 twins — as the realization floor; correct the texts that call
-`base_reseed` a noise floor — left: `DESIGN.md` §0b's amendment (its table row and the ⛔ paragraph),
-`quant_accuracy.py`'s module docstring and `seeded`'s ("the sampling noise floor"), and the ladder-report skill's
-"seed floor".
-Not yet run: a 4-thread ladder floor and a two-thread scan floor on odg05.
-Instrument: `quant_accuracy.py`; the od harness's floor runs in `~/Downloads/rigel_runs/prototypes/2026-09-27_strand_od/`.
-
-### calibration-vs-oracle-cannot-see-a-ruler-move
-`priority: now — Tier 0 prep: the docstring, before any capture-ON calibration A/B; the true-efficiency O arm batched in Tier 4 · kind: instrument · 2026-09-28`
-`calibration_vs_oracle.py`'s ruler section reads 0 moved in EVERY row by construction: the ruler reads calibration's
-stored efficiencies, reference density and gDNA region lengths (`capture_eff_length`) and the O arm swaps only the six
-count arrays, so P and O share P's ruler and the instrument cannot see a calibration change that moves the reference.
-`prior_vs_oracle.py` shares the blind spot (`gdna_eff_len` reads no count, so its P − O is 0 by construction), and it
-hides the cost of a missing reference at low depth
-(`ISSUES: the-gdna-landscape-collapses-at-low-depth`). The od work
-moves it: at odg05 g05 ss.99 ON the total effective length reads 1,092,732 shipped, 1,135,562 under the joint fit and
-1,159,568 under the oracle, with ρ_ref 0.1648 → 0.1762; the 0.2 value moves the ladder's ruler factor 0.074805 →
-0.076909 (g98 ss.99 ON). The reading rule — `ruler_vs_truth.py` beside every capture-ON arm — is in force (CLAUDE.md,
-SUCCESS.md). Open: the script's docstring, which still says it reaches the effective-length shrinkage and tells the
-reader to read `ruler_n_moved` (Tier 0 prep); an O arm carrying the true efficiencies, a real truth as
-`quant_accuracy.py --arm oracle_ruler` is (Tier 4, with the rest of `ISSUES: instrument-ledger`).
-Instrument: `calibration_vs_oracle.py`, `ruler_vs_truth.py`.
-
-### instrument-ledger
-`priority: now — Tier 0 prep for (a)–(d), before the od landing; the rest batched in Tier 4 · kind: instrument · 2026-09-28`
-What the instruments do wrong or leave out; each fix is its own commit, with its `--self-test` or a gate.
-NOW, before the od A/B:
-(a) Stale `_main` copies. `calibration_oracle.py --build` copies the scan into `<oracle_cache>/<tag>/_main` only when
-`payload.npz` is missing, so on odg05 and the three depth panels `_main` carries payload digest 0c5833247c5a3f9a
-(Sep 16) while `scan_cache` holds eb7f83118e78bb7e (rebuilt 2026-09-28). `preflight.py` counts them present;
-`_oracle_arms` rescans and rewrites a stale `_main` on read, and `solvability_audit.py` now defaults to those caches.
-(b) `prior_vs_oracle.py`: a fixed `_shards` directory, so concurrent A/B runs read each other's shards; no `--set`, so
-it cannot pin threads, and three bare runs differ in 1–7 fields.
-(c) `solvability_audit.py`: `CalibrationConfig()` means every core; pin it.
-(d) Pooled rows: `calibration_vs_oracle.py`'s one g00 row pools all strata, and `quant_accuracy.py`'s "ALL (g00
-excluded)" includes the deferred stratum. Read neither (`TRAPS: never-pool-the-strata`).
-BATCHED:
-(e) `slot_truth.npz` counts boundary gDNA per crossing, in incidence units, so under capture its sums exceed the
-library's true gDNA (slot-frame O 1,281 / 12,485 at g001 / g01 ON against 1,170 / 11,700 fragments; P/O 1.015 in the
-slot frame against 1.055 in fragments), while `policy_benchmark.py` calls its Σ|Δ| "in fragments". Document the frame.
-(f) No instrument output records the code revision, the `--set` overrides or the prototype arm
-(`TRAPS: an-ablation-that-never-ran`).
-(g) `sweep_replay.py` pickles slots dataclasses; on Python 3.12 an old capture loads by position, shifted silently, so
-every capture taken before 1747b282 must be retaken.
-(h) `build_test_reference.py` puts `src` first on `sys.path` unconditionally; fix it before the contaminated panel's
-in-tree stage.
-(i) The ladder-report skill hard-codes the four ladder rungs (StopIteration on g25 or g001).
-(j) `panel.py --index` reaches the cache and oracle stages but not `simulate`.
-(k) `solvability_audit.py` audits pass 0 only; it has no `--self-test`, so `preflight.py --full` skips it; its panel
-table prints error mass, not object count; its oracle-arm path skips the wall inputs.
-
-### debug-capture-memory-is-unbounded
-`priority: now — Tier 0 prep, safety: the od A/B runs real subsamples · kind: instrument · 2026-09-28`
-`calibrate(_debug=…)` builds a `SweepCapture` for every sweep with no size or region bound; on the whole human genome
-it reached 25 GB in 20 s and nearly crashed the machine (2026-09-28). `ruler_vs_truth.py` always passes `_debug` and
-`_oracle_arms` passes it on request; neither refuses a real index, and no capture is region-restricted or streaming.
-The per-session memory guards miss Python from other environments, processes under 1 GB and growth between 3-s polls.
-For scale: a normal quant peaks at about 3 GB, and `rename_identity.py --check` on one ladder condition holds 8.9–10.7
-GB. RULED (owner, 2026-09-28): `_debug` refuses an index whose manifest does not mark a panel, and the capture is
-bounded to named regions. The one-real-genome-job rule stands meanwhile.
-Instrument: none in the tree; the session's guards (`mem_guard_env.sh`, `mem_guard_fp.sh`).
-
 ### strand-overdispersion-one-shared-value
 `priority: now — Tier 0, the owner's first (2026-09-28): steps 0–3, then the fl.py fix (ISSUES: the-realized-gdna-length-law-reads-rna-counts), then the field collapse; steps 4–6 are research · kind: design · 2026-09-27`
 Calibration's strand overdispersion (od, `EQUATIONS.md` §6) reaches the solve through `reconcile_overdispersions`, fed
@@ -220,9 +145,8 @@ are wrong:
   move odg05's joint root 0.0406 → 0.0278, while the gDNA side alone moves 0.0446 → 0.0429.
 
 THE LANDING. Every step re-records the baseline on the current tree; reads `calibration_vs_oracle.py` per stratum,
-beside `ruler_vs_truth.py` on capture-ON arms (`ISSUES: calibration-vs-oracle-cannot-see-a-ruler-move`), and
-`quant_accuracy.py --set em.assignment_mode=fractional`; verifies each gate failing, then breaks the fix and watches it
-fire; reads the golden diff's size before regenerating.
+beside `ruler_vs_truth.py` on capture-ON arms, and `quant_accuracy.py --set em.assignment_mode=fractional`; verifies
+each gate failing, then breaks the fix and watches it fire; reads the golden diff's size before regenerating.
 
 STEP 0, THE INSTRUMENT (designed on paper; no file yet). The contaminated-seed panel condition: 15 hosts (gB2 / gB3 /
 gB4 × 5, 9 of them probed), each with one opposite-strand single-exon shadow; 90 of 1,782 count-observable seeds
@@ -250,7 +174,7 @@ libraries the gDNA seeds are mostly opposite-strand RNA (raw moments 0.4–0.86;
 seeds, moment 0.47), so the joint fit
 equals the 0.2 value on 13 of 14 real runs with identical `rigel quant` output (Σ|Δ| 2,280.8 in both); against
 shipped it moves calibration gDNA −15.4 % (VCaP RNA) and −5.1 % (MO_3021). HOLD if, on the panel's contaminated od00
-rows, the joint fit costs more than shipped beyond the floor (`ISSUES: benchmark-noise-floors-unmeasured`).
+rows, the joint fit costs more than shipped in a pinned A/B pair, judged by size.
 - With it: key the log's "own-evidence od" labels and CLAMPED on the shipped value, not the raw moment (MO_3021: raw
   0.675, fitted 0.1327); key `clamped_at_ceiling` and `effective_seeds` (set from the discarded fit, read nowhere) the
   same way, then drop ROADMAP's "read neither until step 1" caveat; rewrite the ~15 docstrings in `gdna_strand.py` and
@@ -364,9 +288,9 @@ RUNS THE LANDING A/B STILL NEEDS: `policy_benchmark.py --by-class`, `ruler_vs_tr
 the arms; AMBIG slots scored apart (at n = 1,000, u = 380 the tilt peak moves 0.73 → 0.70 → 0.85 as od goes 0 → 0.05 →
 0.2); the `strand_evidence` consumer priced apart from the row width; a like-for-like fixed-0.05 arm on the ladder
 (LBX0588 at 10 % reads 0.47 at ρ = 0 against 0.14 at 0.2); one harness run to give the two-witness refusal a measured
-number (its chord prediction: a cv of 2.2 % against a 0.78–1.28 % band); the floor runs of
-`ISSUES: benchmark-noise-floors-unmeasured`. Falsifiers beyond each step's: a forced-fallback injection puts 0 beyond
-the oracle's od-nil floor in an in-scope stratum; an fl landing moves an od value.
+number (its chord prediction: a cv of 2.2 % against a 0.78–1.28 % band). Falsifiers beyond each step's: a
+forced-fallback injection puts 0 beyond the oracle's od-nil floor in an in-scope stratum; an fl landing moves an od
+value.
 
 Instrument: the harness, substrates and report in `~/Downloads/rigel_runs/prototypes/2026-09-27_strand_od/`; one
 derivation page per ruling in `~/Downloads/rigel_runs/prototypes/2026-09-28_od_design/` (`00_synthesis.md` the landing
@@ -441,9 +365,8 @@ How much each part owns:
   fall to 0 at 1 % for VCaP, LBX0588 and MO_3021 (0 at every depth for MO_3021), which sets every efficiency to 1. On
   the test chromosome at capture ON the members are g001 0 / 0 / 57, g01 0 / 73 / 329, g05 20 / 313 / 352 (d100 /
   d10 / full), and a reference that does form at low depth reads above proportional (×1.97 at g05 d100, ×1.48 at g01
-  d10). What that costs the EM is unmeasured, and `calibration_vs_oracle.py` cannot see it
-  (`ISSUES: calibration-vs-oracle-cannot-see-a-ruler-move`). The reference is a yes/no switch; its continuous form,
-  an efficiency whose uncertainty grows as members fall, is a direction to price.
+  d10). What that costs the EM is unmeasured, and `calibration_vs_oracle.py` cannot see it. The reference is a yes/no
+  switch; its continuous form, an efficiency whose uncertainty grows as members fall, is a direction to price.
 - MO_3021 barely drifts (0.82 of full at 1 %): 65–80 % of its gDNA sits on intergenic regions and gene edges, which
   read their count at any depth.
 - The level survives in aggregate. VCaP's intergenic regions at 1 % hold 0.0097 of full depth's true gDNA.
@@ -795,7 +718,7 @@ synthetic pool's error at `g50 ss.99 ON` is the pseudocount's
 (`ISSUES: nascent-siphons-gdna-under-capture`).
 RULED (owner, 2026-09-28): the lane is kept, and with it `warm_start='prior'`, plumbed alongside it, whose only
 producer is `quant_accuracy.py`'s oracle-allocation arm; neither is dead code for a sweep to delete.
-Instrument: `quant_accuracy.py`, per stratum above the noise floor (`ISSUES: benchmark-noise-floors-unmeasured`).
+Instrument: `quant_accuracy.py`, per stratum.
 
 ### message-layer-open-cases
 `priority: later — Tier 2, the message layer on unstranded capture OFF · kind: question · 2026-09-09`
@@ -1127,9 +1050,7 @@ simulator's sharded writers and its whole-genome grid, and the zarr splice black
   read-name truth labels the RNA library's own gDNA as RNA; calibration can be scored only as slot-mass overlap).
 - RELEASE-GATING: the MANUAL, README, report and cli texts still describe the deleted capture census or the old
   density-file semantics ("Capture on-target enrichment"; MANUAL's density row contradicting its correct neighbour);
-  the MANUAL does not say that `sj_blacklisted` counts junction × record while the splice census counts fragments;
-  CHANGELOG's Unreleased omits the three `locus_stats` columns 3bb35bdd removed (its message names two):
-  `gdna_log_eff_len`, `digamma_calls_per_estep` and `squarem_extrapolation_clamp_count` (now, with Tier 0 prep).
+  the MANUAL does not say that `sj_blacklisted` counts junction × record while the splice census counts fragments.
 (h) SIMPLIFICATIONS, each proven a numeric no-op:
 - `solve_one_block` and `transfer_prepare` each wire the chain, so the gates exercise the copy: one shared builder.
 - Scoring is written twice, for multimappers and singles; unifying it also removes the p = ½ antisense disagreement
@@ -1144,6 +1065,36 @@ simulator's sharded writers and its whole-genome grid, and the zarr splice black
 - The simulator's truth is spread over nine `ground_truth_*` methods and three file passes.
 - Five instruments import `tests/calibration/_oracle.py` through `sys.path` (moving it moves the collected count
   +4 − 2); four scripts redefine `_shared.RUNS`.
+
+### instrument-ledger
+`priority: later — Tier 4, batched between A/B windows · kind: instrument · 2026-09-28`
+What the instruments do wrong or leave out; each fix is its own commit, with its `--self-test` or a gate.
+(a) `slot_truth.npz` counts boundary gDNA per crossing, in incidence units, so under capture its sums exceed the
+library's true gDNA (slot-frame O 1,281 / 12,485 at g001 / g01 ON against 1,170 / 11,700 fragments; P/O 1.015 in the
+slot frame against 1.055 in fragments), while `policy_benchmark.py` calls its Σ|Δ| "in fragments". Document the frame.
+(b) No instrument output records the code revision, the `--set` overrides or the prototype arm
+(`TRAPS: an-ablation-that-never-ran`).
+(c) `sweep_replay.py` pickles slots dataclasses; on Python 3.12 an old capture loads by position, shifted silently, so
+every capture taken before 1747b282 must be retaken.
+(d) `build_test_reference.py` puts `src` first on `sys.path` unconditionally; fix it before the contaminated panel's
+in-tree stage.
+(e) The ladder-report skill hard-codes the four ladder rungs (StopIteration on g25 or g001).
+(f) `panel.py --index` reaches the cache and oracle stages but not `simulate`.
+(g) `solvability_audit.py` audits pass 0 only; it has no `--self-test`, so `preflight.py --full` skips it; its panel
+table prints error mass, not object count; its oracle-arm path skips the wall inputs.
+(h) `calibration_vs_oracle.py` has no arm that carries the true capture efficiencies, so no calibration A/B sees the
+capture-contracted length move; `quant_accuracy.py --arm oracle_ruler` is the model.
+
+### debug-capture-memory-is-unbounded
+`priority: later — Tier 4: the fix is in src; the one-real-genome-job rule stands meanwhile · kind: instrument · 2026-09-28`
+`calibrate(_debug=…)` builds a `SweepCapture` for every sweep with no size or region bound; on the whole human genome
+it reached 25 GB in 20 s and nearly crashed the machine (2026-09-28). `ruler_vs_truth.py` always passes `_debug` and
+`_oracle_arms` passes it on request; neither refuses a real index, and no capture is region-restricted or streaming.
+The per-session memory guards miss Python from other environments, processes under 1 GB and growth between 3-s polls.
+For scale: a normal quant peaks at about 3 GB, and `rename_identity.py --check` on one ladder condition holds 8.9–10.7
+GB. RULED (owner, 2026-09-28): `_debug` refuses an index whose manifest does not mark a panel, and the capture is
+bounded to named regions. The one-real-genome-job rule stands meanwhile.
+Instrument: none in the tree; the session's guards (`mem_guard_env.sh`, `mem_guard_fp.sh`).
 
 ### the-format-changes-to-batch-before-release
 `priority: later — Tier 4, before 0.8.0 while summary.json schema 3 is unreleased; the index bump before the cluster's working-index build (owner, 2026-09-28) · kind: decision · 2026-09-28`
@@ -1184,8 +1135,7 @@ transition and crosses a reduced set of the other axes until an interaction is s
 two caches and a certification (`sim/panel.py`). The junction-probed test-chromosome twin predates the capture-physics
 change and is stale; RULED (owner, 2026-09-28): retire it, since the capture-length campaign that needed it is closed
 for now. See `ISSUES: flgap-panels-stale-nascent-model`; the depth family's unstranded rows are ruled in
-`ISSUES: the-gdna-landscape-collapses-at-low-depth`, and a realization replicate in
-`ISSUES: benchmark-noise-floors-unmeasured`.
+`ISSUES: the-gdna-landscape-collapses-at-low-depth`.
 
 ### a-pure-gdna-library-reads-as-nascent-rna
 `priority: parked — Tier 5, the deferred stratum; kept as an open challenge (owner, 2026-09-28) · kind: defect · 2026-09-28`
@@ -1454,6 +1404,19 @@ the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
 
+### benchmark-noise-floors-unmeasured
+CLOSED 2026-09-28 (owner): not a project. A last-bit change moves the genes by at most 15 fragments and the gDNA pool
+by 113, while the per-transcript Σ|Δ| amplifies it through the EM's start-dependent isoform split (thousands of
+fragments: 7,968 on a 4-thread rerun at `g25 ss.50 ON`; `ISSUES: the-em-answer-depends-on-where-it-starts`).
+THE RULE: an A/B pair runs with the scan pinned (`--set scan.total_threads=1`), so it is exactly reproducible, and an
+effect is judged by its size, with genes and pools read beside the transcript table.
+
+### calibration-vs-oracle-cannot-see-a-ruler-move
+CLOSED 2026-09-28: the output that read 0 by construction is deleted — `calibration_vs_oracle.py`'s ruler section and
+`prior_vs_oracle.py`'s `gdna_eff_len` score, since the `O` arm keeps `P`'s efficiencies, reference density and gDNA
+region lengths, everything the length reads. The length's truth is `ruler_vs_truth.py`; the true-efficiency `O` arm is
+`ISSUES: instrument-ledger` (h).
+
 ### rna-prior-floor-at-pure-gdna-loci
 CLOSED 2026-09-26 (owner) for 0.8.0, to be reopened only with a fundamentally different algorithm. The prize is real —
 a perfect calibration prior takes `g98 ss.99 ON` from 25.26 to 19.99 % of the transcripts' true count — but neither
@@ -1611,7 +1574,7 @@ parked); the short exon pieces of unprobed transcripts read above their capture 
 (`ISSUES: the-efficiency-posterior-floor-on-empty-pieces`); the reference needs gDNA (`DESIGN.md` §7.2). Not
 measured: the transcript cost of each class's length error alone. The per-class length error against the truth is
 `ruler_vs_truth.py --scale`; the truth is the simulator's `CaptureSampler.partition_array`; the deliverable is
-`quant_accuracy.py --arm base` beside `--arm oracle_ruler`, per stratum above `--arm base_reseed`, under
+`quant_accuracy.py --arm base` beside `--arm oracle_ruler`, per stratum, under
 `--set em.assignment_mode=fractional`.
 WHAT THE CAMPAIGN MEASURED (2026-09-26, `~/Downloads/rigel_runs/prototypes/2026-09-26_capture_length/README.md`;
 fractional, stranded × capture ON, transcripts / genes as a % of the true annotated RNA at `g00` / `g05` / `g50`):
@@ -1746,7 +1709,7 @@ Refused on the way: `ISSUES: the-spliced-read-junction-price`, `ISSUES: a-juncti
 candidate is read on both columns of the first table at once — the within-gene sd toward the adjacent pieces', the
 class mean on the gDNA component's — and only then through the EM; a candidate that only removes noise cannot pass
 0.065 / 0.056. What would move it is an observable of the probe physics. `ruler_vs_truth.py --scale` (its
-within-gene sd line and the junction-probed rows); `quant_accuracy.py` per stratum above `--arm base_reseed` under
+within-gene sd line and the junction-probed rows); `quant_accuracy.py` per stratum under
 `--set em.assignment_mode=fractional`.
 
 ### a-junction-price-from-its-genes-own-rna

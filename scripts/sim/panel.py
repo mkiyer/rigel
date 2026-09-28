@@ -288,9 +288,12 @@ def cmd_score(p: Panel, args) -> int:
                 "--out",
                 p.arms / f"qa_{p.dir.name}_{arm}.jsonl",
                 # the benchmark protocol (owner, 2026-09-19): the shipped assignment is a sampled draw,
-                # so every arm is read under fractional assignment
+                # so every arm is read under fractional assignment, with the scan pinned so an A/B pair
+                # is exactly reproducible
                 "--set",
                 "em.assignment_mode=fractional",
+                "--set",
+                "scan.total_threads=1",
                 *(["--conditions", *args.conditions] if args.conditions else []),
             ],
             what=f"score --arm {arm}",

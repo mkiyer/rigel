@@ -457,8 +457,8 @@ def build_one(index, suite: Path, condition: str, work_dir: Path) -> None:
     """One condition's oracle cache under ``<suite>/oracle_cache/<condition>``: the three origin
     partitions and the two transcript-strand ones (`_oracle_arms.load_or_build_oracle`, which
     re-runs sum-to-full on a cache hit and rebuilds on a miss), and ``_main`` — the whole scan — copied
-    from the scan cache when absent. The drained frame: the partitions are lifted by replaying the
-    whole's drain, exactly as `derive` reads them."""
+    from the scan cache on every build, so a rebuilt scan never leaves a stale copy. The drained frame:
+    the partitions are lifted by replaying the whole's drain, exactly as `derive` reads them."""
     OA = sibling("_oracle_arms.py")
     root = Path(suite) / "oracle_cache" / condition
     scan_dir = Path(suite) / "scan_cache" / condition
@@ -472,8 +472,7 @@ def build_one(index, suite: Path, condition: str, work_dir: Path) -> None:
         bam, index, PipelineConfig(), Path(work_dir) / f"w_{condition}", condition, kw["payload"],
         Path(suite) / "oracle_cache", lift,
     )
-    if not (root / "_main" / "payload.npz").is_file():
-        shutil.copytree(scan_dir, root / "_main", dirs_exist_ok=True)
+    shutil.copytree(scan_dir, root / "_main", dirs_exist_ok=True)
 
 
 def build(index, suite: Path, conds: list[str], jobs: int, work_dir: Path, args_index: Path) -> None:

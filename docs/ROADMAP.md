@@ -10,13 +10,12 @@ is judged is `SUCCESS.md`; rulings are `DESIGN.md`; lessons are `TRAPS.md`, cite
 
 The version on disk is `pyproject.toml`'s; the target is 0.8.0, A RELEASE OF THE TOOL (`DESIGN.md` §0b). Two numbers
 are primary and answer different questions: the transcript table against per-transcript truth is what the release
-ships on (`quant_accuracy.py`, per stratum, under fractional assignment, above the noise floor
-`ISSUES: benchmark-noise-floors-unmeasured` defines — `--arm base_reseed` is no seed floor: unpinned it is one draw of
-the scan's run-to-run spread, and with `--set scan.total_threads=1` it reads exactly 0), and the calibration result
-against an oracle calibration is what ranks a calibration mechanism (`calibration_vs_oracle.py`,
-`solvability_audit.py`, `prior_vs_oracle.py`, with `ruler_vs_truth.py` beside every capture-ON arm, because the oracle
-calibration keeps every result field the ruler reads and cannot see the ruler move —
-`ISSUES: calibration-vs-oracle-cannot-see-a-ruler-move`). Three strata are in scope; unstranded × capture-ON is
+ships on (`quant_accuracy.py`, per stratum, under fractional assignment), and the calibration result against an
+oracle calibration is what ranks a calibration mechanism (`calibration_vs_oracle.py`, `solvability_audit.py`,
+`prior_vs_oracle.py`, with `ruler_vs_truth.py` beside every capture-ON arm, since the oracle calibration cannot see the
+capture-contracted length move). An A/B pair runs with the scan pinned (`--set scan.total_threads=1`), so it is exactly
+reproducible, and an effect is judged by its size, with genes and pools read beside the transcript table
+(`TRAPS: the-deliverable-is-not-reproducible-by-default`). Three strata are in scope; unstranded × capture-ON is
 deferred and never ranked on a pooled total (`TRAPS: never-pool-the-strata`). The fragment-length composition channel
 is retired until after 0.8.0.
 
@@ -47,9 +46,8 @@ sparse libraries lose their gDNA.
 - **The deliverable, end to end**: measured per stratum on the rebuilt ladder under the shared length; stranded ×
   capture-ON is the worst in-scope stratum and its capture-aware lengths own most of it — the junction price's
   structure, closed for now at diminishing returns (owner, 2026-09-26) — then the capture likelihood's lean toward RNA (the
-  synthetic spans over-called at `g98`) and calibration's RNA floor at `g98` — `quant_accuracy.py --arm base` above
-  the noise floor (`ISSUES: benchmark-noise-floors-unmeasured`), beside `--arm oracle_ruler` and `--arm oracle`,
-  `ISSUES: the-capture-length-owns-stranded-capture-on`.
+  synthetic spans over-called at `g98`) and calibration's RNA floor at `g98` — `quant_accuracy.py --arm base` beside
+  `--arm oracle_ruler` and `--arm oracle`, `ISSUES: the-capture-length-owns-stranded-capture-on`.
 - **Fragment lengths**: the realized gDNA law is fed the spliced RNA census unnormalised, so every exon-flanking
   boundary reads as pure gDNA — Tier 0, `ISSUES: the-realized-gdna-length-law-reads-rna-counts`, the boundary
   inversion's second wave after it; the RNA law trains on spliced fragments that carry splice artifacts
@@ -93,21 +91,12 @@ sparse libraries lose their gDNA.
   `ISSUES: performance-memory-bounded-solve`, `profiling/profiler.py`, `profiling/sweep_replay.py`; a `_debug`
   capture has no memory bound, so one real-genome job runs at a time (`ISSUES: debug-capture-memory-is-unbounded`).
 - **Panels**: the 16-condition ladder is rebuilt under the corrected capture physics, cached and certified, one
-  realization per condition; the test chromosome is cached and certified; `odg05` and the depth family carry stale
-  `_main` copies (`ISSUES: instrument-ledger`); the contaminated-seed panel is designed, not built
-  (`ISSUES: strand-overdispersion-one-shared-value`); the fl-gap side panels are to be re-simulated and the
+  realization per condition; the test chromosome is cached and certified; the contaminated-seed panel is designed,
+  not built (`ISSUES: strand-overdispersion-one-shared-value`); the fl-gap side panels are to be re-simulated and the
   junction-probed twin retired — `panel.py status`, `ISSUES: flgap-panels-stale-nascent-model`,
   `ISSUES: expand-the-gdna-spectrum`.
-- **Attribution floor**: the shipped assignment is a sampled draw, so every `quant_accuracy` arm runs fractional;
-  fractional reads no seed, so `--arm base_reseed` is no seed floor — unpinned (the default, and `panel.py score`) it is
-  one draw of the scan's run-to-run spread, and with `--set scan.total_threads=1` it reads exactly 0
-  (`OMP_NUM_THREADS=1` does not pin the scan); a last-bit change still forks the transcript table, so the floor is the
-  unpinned-scan floor until the contaminated-seed panel's twin rows give a realization floor
-  (`ISSUES: benchmark-noise-floors-unmeasured`, `TRAPS: the-deliverable-is-not-reproducible-by-default`).
-- **Reading rules**: rank per stratum; quote `mwae_all` / Σ|err| and the shipped column, never pass-0
-  (`TRAPS: the-intermediate-is-not-the-deliverable`); never read `calibration_vs_oracle.py`'s pooled `g00` row or
-  `quant_accuracy.py`'s "ALL" row, which holds the deferred stratum (`ISSUES: instrument-ledger`,
-  `TRAPS: never-pool-the-strata`).
+- **Reading rules**: rank per stratum, never pooled (`TRAPS: never-pool-the-strata`); quote `mwae_all` / Σ|err| and
+  the shipped column, never pass-0 (`TRAPS: the-intermediate-is-not-the-deliverable`).
 
 ## Next — the order
 
@@ -126,11 +115,7 @@ any two windows. The cluster track does not compete for local windows.
   (`ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`).
 
 **The local track.**
-1. **Tier 0 prep — now**, about one session, because step 1's hold rule and every Tier 0 verdict read these
-   instruments: `ISSUES: benchmark-noise-floors-unmeasured` · `ISSUES: calibration-vs-oracle-cannot-see-a-ruler-move`,
-   its docstring · `ISSUES: instrument-ledger` (a)–(d) · `ISSUES: debug-capture-memory-is-unbounded`. With it, the
-   CHANGELOG line for the three removed `locus_stats` columns (`ISSUES: hygiene-ledger` (g)).
-2. **Tier 0, the owner's work — now**: `ISSUES: strand-overdispersion-one-shared-value` (steps 0–3, then the field
+1. **Tier 0, the owner's work — now**: `ISSUES: strand-overdispersion-one-shared-value` (steps 0–3, then the field
    collapse) and `ISSUES: the-realized-gdna-length-law-reads-rna-counts` (steps 1–4), one step per window: fl step 1,
    a numeric no-op, first; overdispersion step 0 — the contaminated-seed panel and the simulator's matched RNA
    overdispersion, outside the tree; step 1 under its hold rule; steps 2 and 3; fl steps 2, 3 and 4, step 2 never in
@@ -138,14 +123,14 @@ any two windows. The cluster track does not compete for local windows.
    `ISSUES: the-gdna-landscape-collapses-at-low-depth` and `ISSUES: strand-likelihood-over-confident-beyond-od`, and
    refresh the ladder report, the issue-list page and the full_lowg explanation page, which lacks the od-arm line of
    `ISSUES: the-background-dispersion-assumes-a-pure-intergenic-pool`.
-3. **Tier 1, the low-depth defects — next**: in scope and the largest real-data effect found; after Tier 0 and A/B'd
+2. **Tier 1, the low-depth defects — next**: in scope and the largest real-data effect found; after Tier 0 and A/B'd
    apart from it. In order: the failed refit alone (`ISSUES: the-gdna-landscape-collapses-at-low-depth`); the
    gDNA-only object row in `calibration_vs_oracle.py`
    (`ISSUES: the-background-dispersion-assumes-a-pure-intergenic-pool`); the unrun real-data arm; the landscape fit,
    derived and scored by class, without regressing its zero controls
    (`ISSUES: gdna-landscape-trains-on-false-positives`); the background dispersion, its own A/B; then read
    `ISSUES: capture-on-overcalls-gdna-at-low-gdna` and take up `ISSUES: strand-plug-in-bias-on-sparse-libraries`.
-4. **Tier 2, the other in-scope mechanisms that move a primary number — later**, each its own derivation and A/B:
+3. **Tier 2, the other in-scope mechanisms that move a primary number — later**, each its own derivation and A/B:
    `ISSUES: nascent-stress-sensitivity`, a cheap re-measure of Tier 0's verdicts at the realistic nascent level ·
    `ISSUES: psi-reads-kappa-where-the-strand-channel-is-dead` · `ISSUES: the-scorer-reads-a-census-length-law` with
    `ISSUES: the-pooled-q-in-the-gdna-count` · the fl second wave
@@ -170,16 +155,16 @@ any two windows. The cluster track does not compete for local windows.
 - **Tier 4, batched between A/B windows**; anything that moves a number takes a window of its own:
   `ISSUES: latent-defects`, one commit each with a falsification test · `ISSUES: performance-memory-bounded-solve`,
   the numeric no-ops proven with `rename_identity.py --bam` · `ISSUES: hygiene-ledger`, the comment and doc sweep and
-  the test gaps, the flaky reorder fixture first · the rest of `ISSUES: instrument-ledger`, and the true-efficiency O
-  arm of `ISSUES: calibration-vs-oracle-cannot-see-a-ruler-move` ·
+  the test gaps, the flaky reorder fixture first · `ISSUES: instrument-ledger` ·
+  `ISSUES: debug-capture-memory-is-unbounded`, a src change ·
   `ISSUES: the-format-changes-to-batch-before-release`, before 0.8.0 while `summary.json` schema 3 is unreleased ·
   the panels (`ISSUES: flgap-panels-stale-nascent-model`, `ISSUES: expand-the-gdna-spectrum` with the junction-probed
   twin's retirement) · the release docs (`ISSUES: hygiene-ledger`).
 - **The release** — `docs/PUBLISHING.md` is the procedure; what gates it is the state: the deliverable measured per
-  stratum above its noise floor, the zero rows clean, the suite at its standing count, `preflight.py --full` green, CI
-  run once by hand, a real-data smoke run, the standing risks re-read, and the manual and the changelog true of what
-  ships. The two residuals at `g98` — the capture likelihood's lean toward RNA and the pseudocount's strength — are
-  small against the in-scope strata and are not held for the release.
+  stratum, the zero rows clean, the suite at its standing count, `preflight.py --full` green, CI run once by hand, a
+  real-data smoke run, the standing risks re-read, and the manual and the changelog true of what ships. The two
+  residuals at `g98` — the capture likelihood's lean toward RNA and the pseudocount's strength — are small against
+  the in-scope strata and are not held for the release.
 
 **Parked and deferred — Tier 5, each with its entry.** Deferred past 0.8.0: the deferred stratum, with
 `ISSUES: a-pure-gdna-library-reads-as-nascent-rna` kept as an open challenge ·

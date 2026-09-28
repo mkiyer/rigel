@@ -17,11 +17,10 @@ candidate count labelled by the simulator's read-name origin (the reference ever
 against), and ``F`` is the per-locus first-base count (the projection-only arm, kept and priced on its
 own table; ``Fo - F`` is the straddling population). ``P - O`` is calibration's error, ``O - Fo`` the
 assembler's, and ``O - S`` the pooled-share part of that. The count's error is reported in fragments
-(``sum |dA|``, additive), and ``gdna_eff_len`` beside it, weighted by the gDNA count it divides -- but
-none of the six override fields is among the length's inputs, so O carries P's length, P against O
-scores it 0 by construction, and the length's truth is ``ruler_vs_truth.py``'s. Every
-arm runs in the drained frame; the drain's spliced-gDNA leak is reported beside the numbers as
-``gdna_spliced_leak`` and the lift's attribution error as ``n_ambiguous``. No per-locus EM runs -- the
+(``sum |dA|``, additive). ``gdna_eff_len`` reads none of the six override fields, so O carries P's length
+and it is not scored here; its truth is ``ruler_vs_truth.py``'s. Every arm runs in the drained frame; the
+drain's spliced-gDNA leak is reported beside the numbers as ``gdna_spliced_leak`` and the lift's attribution
+error as ``n_ambiguous``. No per-locus EM runs -- the
 pipeline is stopped after its scoring stage.
 
 The panel's default paths, the six override fields and the stratum readers this and the other oracle
@@ -34,6 +33,7 @@ Usage::
     python scripts/design/prior_vs_oracle.py --suite DIR --oracle-cache DIR/oracle_cache --jobs 6
     python scripts/design/prior_vs_oracle.py --conditions gdna_g50_ss_0.50_nrna_mid_capture_on
     python scripts/design/prior_vs_oracle.py --index INDEX --work-dir SCRATCH
+    python scripts/design/prior_vs_oracle.py --set scan.total_threads=1   # a pinned, reproducible run
 """
 
 from __future__ import annotations
@@ -44,6 +44,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,7 +57,7 @@ _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "tests" / "calibration"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _shared import DEFAULT_INDEX, DEFAULT_SUITE, OVERRIDE_FIELDS, is_zero_gdna, strata, stratum  # noqa: E402,F401
+from _shared import DEFAULT_INDEX, DEFAULT_SUITE, OVERRIDE_FIELDS, is_zero_gdna, set_field, strata, stratum  # noqa: E402,F401
 
 from _oracle import (  # noqa: E402
     ORIGIN_CODE,
@@ -140,33 +141,6 @@ def score_arm(arm: np.ndarray, ref: np.ndarray, select: np.ndarray | None = None
         over_call=float(np.maximum(d, 0.0).sum()),
         under_call=float(np.maximum(-d, 0.0).sum()),
     )
-
-
-def score_eff_len(arm, ref, select=None) -> dict:
-    """``gdna_eff_len``, weighted by the reference's gDNA count.
-
-    Weighted by the gDNA count and not by the locus's fragments: ``gdna_eff_len`` divides the gDNA
-    component's abundance alone, so a locus with no gDNA is a locus where this array does nothing, and
-    including it at full weight would report the error of a number nothing reads
-    (TRAPS: weight-it-like-the-consumer).
-    """
-    a = np.asarray(arm.gdna_eff_len, np.float64)
-    r = np.asarray(ref.gdna_eff_len, np.float64)
-    w = np.asarray(ref.gdna_count, np.float64)
-    live = np.isfinite(a) & np.isfinite(r) & (r > 0.0)
-    if select is not None:
-        live = live & select
-    w = np.where(live, w, 0.0)
-    tot = float(w.sum())
-    rel = np.zeros_like(a)
-    np.divide(np.abs(a - r), r, out=rel, where=live)
-    return {
-        "n_scored": int(live.sum()),
-        "w_rel_err": float((w * rel).sum() / tot) if tot > 0 else float("nan"),
-        "median_rel_err": float(np.median(rel[live])) if live.any() else float("nan"),
-        "total_arm": float(a[live].sum()),
-        "total_ref": float(r[live].sum()),
-    }
 
 
 # ── the arms ─────────────────────────────────────────────────────────────────────────────────────
@@ -657,15 +631,12 @@ def _agg(scores):
 
 
 def _selections(conds) -> tuple:
-    """Every selection every table prints, in order. One list, so a stratum appears on every table
-    at once and cannot appear on some of them (which is how two tables come to disagree about what
-    "ALL" means); a stratum apart from both strand halves gets its own row (`_shared.strata`)."""
-    return (
-        ("ALL (g00 excluded)", lambda c: not is_zero_gdna(c)),
-        *((" x ".join(st), (lambda c, st=st: stratum(c) == st and not is_zero_gdna(c)))
-          for st in strata(conds)),
-        (None, None),  # a rule boundary
-        ("⛔ g00 ZERO-gDNA control", is_zero_gdna),
+    """Every selection every table prints: one per stratum, never pooled, g00 excluded (it is read per
+    condition). One list, so a stratum appears on every table at once; a stratum apart from both strand
+    halves gets its own row (`_shared.strata`)."""
+    return tuple(
+        (" x ".join(st), (lambda c, st=st: stratum(c) == st and not is_zero_gdna(c)))
+        for st in strata(conds)
     )
 
 
@@ -678,7 +649,7 @@ def _rel(x: float) -> str:
     return f"{x:>8.1e}" if 0.0 < abs(x) < 1e-3 else f"{x:>8.4f}"
 
 
-def report(rows: list[dict]) -> None:
+def report(rows: list[dict], settings=()) -> None:
     """The whole report, from the per-condition JSON — the only report path there is.
 
     It reads JSON in the serial case too, and that is the point: a `--jobs 1` run and a `--jobs 6`
@@ -690,10 +661,9 @@ def report(rows: list[dict]) -> None:
     print()
     print("=" * 104)
     print("  ⭐⭐⭐ CALIBRATION'S ENDPOINT vs THE ORACLE — LocusPriors, in FRAGMENTS")
-    from rigel.config import CalibrationConfig as _CC
-
-    print(f"  {len(rows)} conditions   calibration: the shipped defaults (message_policy="
-          f"{_CC().message_policy!r})   the drained frame (the drain's leak is reported below)")
+    config = " ".join(f"--set {spec}" for spec in settings) or "the shipped defaults"
+    print(f"  {len(rows)} conditions   config: {config}   the drained frame (the drain's leak is "
+          "reported below)")
     print("=" * 104)
 
     # ── the gate first. A table read before its gate is a table nobody checked. ──
@@ -742,9 +712,6 @@ def report(rows: list[dict]) -> None:
               f"{'rel':>8} {'net':>14} {'canc':>7}")
         print("    " + "-" * 102)
         for label, sel in selections:
-            if label is None:
-                print("    " + "-" * 102)
-                continue
             s = _agg([ArmScore(**r[key]) for r in rows if sel(r["condition"])])
             if s is None:
                 print(f"    {label:<26} {'(empty)':>14}")
@@ -784,9 +751,6 @@ def report(rows: list[dict]) -> None:
           f"{'O−F rel':>8} {'O−Fo rel':>8} {'S−F rel':>8} {'S−Fo rel':>8}")
     print("    " + "-" * 112)
     for label, sel in selections:
-        if label is None:
-            print("    " + "-" * 112)
-            continue
         sub = [r for r in rows if sel(r["condition"])]
         if not sub:
             continue
@@ -806,9 +770,6 @@ def report(rows: list[dict]) -> None:
           f"{'Σ genomic':>16}")
     print("    " + "-" * 92)
     for label, sel in selections:
-        if label is None:
-            print("    " + "-" * 92)
-            continue
         sub_rows = [r["eff_len"] for r in rows if sel(r["condition"]) and r.get("eff_len")]
         if not sub_rows:
             continue
@@ -821,25 +782,6 @@ def report(rows: list[dict]) -> None:
           "locus's clamp.")
     print("    The EM divides the gDNA component's abundance by gdna_eff_len, so this is a direct "
           "scale error on a shipped number.")
-
-    # ── ③ the second array ──
-    print()
-    print("  ③ gdna_eff_len — P against O, weighted by O's own gDNA count")
-    print("  ⚠ None of the six override fields is among the length's inputs, so O carries P's length and "
-          "this reads 0 by construction:")
-    print("    a wiring check, not a measurement. The length's truth is ruler_vs_truth.py's.")
-    print(f"    {'stratum':<26} {'n loci':>8} {'w rel err':>11} {'median rel':>11}")
-    print("    " + "-" * 60)
-    for label, sel in selections:
-        if label is None:
-            print("    " + "-" * 60)
-            continue
-        sub = [r["eff_len_P_vs_O"] for r in rows if sel(r["condition"])]
-        if not sub:
-            continue
-        print(f"    {label:<26} {sum(x['n_scored'] for x in sub):>8,} "
-              f"{float(np.mean([x['w_rel_err'] for x in sub])):>11.4f} "
-              f"{float(np.median([x['median_rel_err'] for x in sub])):>11.4f}")
 
     # ── ⑥ the drained-frame report ──
     print()
@@ -903,7 +845,6 @@ def to_json(results: list[ConditionResult]) -> list[dict]:
             ("FO_vs_F", r.f_gdna, fo),
         ):
             row[ref_name] = dataclasses.asdict(score_arm(arm, ref))
-        row["eff_len_P_vs_O"] = score_eff_len(p, o)
         out.append(row)
     return out
 
@@ -924,6 +865,9 @@ def main() -> int:
     ap.add_argument("--jobs", type=int, default=1,
                     help="run this many conditions CONCURRENTLY by re-invoking on shards. The "
                          "conditions are independent, so this changes no number.")
+    ap.add_argument("--set", dest="settings", action="append", default=[], metavar="SECTION.FIELD=VALUE",
+                    help="override one PipelineConfig field, typed from the field; repeatable "
+                         "(e.g. --set scan.total_threads=1 for a reproducible run)")
     args = ap.parse_args()
 
     names = args.conditions or sorted(
@@ -938,43 +882,46 @@ def main() -> int:
     if args.jobs > 1 and len(names) > 1:
         # Shards, not threads: conditions share nothing but a read-only index and cache, and
         # re-invoking the single-process path keeps the measured code byte-for-byte the serial one.
-        # OMP_NUM_THREADS=1 is forced at import so the workers do not fight.
+        # OMP_NUM_THREADS=1 is forced at import so the workers do not fight. Each run shards into its
+        # own directory, so two concurrent runs sharing a work dir never read each other's shards.
         shards = [s for s in (names[i:: args.jobs] for i in range(args.jobs)) if s]
-        tmp = args.work_dir / "_shards"
-        tmp.mkdir(parents=True, exist_ok=True)
-        procs, outs = [], []
-        for i, sh in enumerate(shards):
-            o = tmp / f"{i}.json"
-            outs.append(o)
-            cmd = [sys.executable, str(Path(__file__).resolve()),
-                   "--suite", str(args.suite), "--index", str(args.index),
-                   "--work-dir", str(args.work_dir / f"shard{i}"), "--json", str(o),
-                   "--conditions", *sh]
-            if cache is not None:
-                cmd += ["--oracle-cache", str(cache)]
-            procs.append(subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                          stderr=subprocess.STDOUT, text=True))
-        rc = 0
-        for i, pr in enumerate(procs):
-            out, _ = pr.communicate()
-            if pr.returncode != 0:
-                rc = pr.returncode
-                print(f"  ⛔ shard {i} FAILED (rc={pr.returncode}):\n{out}", flush=True)
-            else:
-                print(f"  shard {i}: {len(shards[i])} conditions ok", flush=True)
-        if rc:
-            # TRAPS: an-ablation-that-never-ran's shape — a short output file reads as a complete panel.
-            raise SystemExit("a shard failed; refusing to report a partial panel")
-        merged: list[dict] = []
-        for o in outs:
-            merged += json.loads(o.read_text())
+        args.work_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=args.work_dir, prefix="shards_") as td:
+            procs, outs = [], []
+            for i, sh in enumerate(shards):
+                o = Path(td) / f"{i}.json"
+                outs.append(o)
+                cmd = [sys.executable, str(Path(__file__).resolve()),
+                       "--suite", str(args.suite), "--index", str(args.index),
+                       "--work-dir", str(Path(td) / f"shard{i}"), "--json", str(o),
+                       "--conditions", *sh]
+                if cache is not None:
+                    cmd += ["--oracle-cache", str(cache)]
+                for spec in args.settings:
+                    cmd += ["--set", spec]
+                procs.append(subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                              stderr=subprocess.STDOUT, text=True))
+            rc = 0
+            for i, pr in enumerate(procs):
+                out, _ = pr.communicate()
+                if pr.returncode != 0:
+                    rc = pr.returncode
+                    print(f"  ⛔ shard {i} FAILED (rc={pr.returncode}):\n{out}", flush=True)
+                else:
+                    print(f"  shard {i}: {len(shards[i])} conditions ok", flush=True)
+            if rc:
+                # TRAPS: an-ablation-that-never-ran's shape — a short output file reads as a complete panel.
+                raise SystemExit("a shard failed; refusing to report a partial panel")
+            merged = [row for o in outs for row in json.loads(o.read_text())]
         if args.json is not None:
             args.json.write_text(json.dumps(merged, indent=1))
-        report(merged)
+        report(merged, args.settings)
         return 0
 
     index = TranscriptIndex.load(str(args.index))
     pipeline_config = PipelineConfig()
+    for spec in args.settings:
+        pipeline_config = set_field(pipeline_config, spec)
     args.work_dir.mkdir(parents=True, exist_ok=True)
     results = []
     for name in names:
@@ -987,7 +934,7 @@ def main() -> int:
     payload = to_json(results)
     if args.json is not None:
         args.json.write_text(json.dumps(payload, indent=1))
-    report(payload)
+    report(payload, args.settings)
     return 0
 
 

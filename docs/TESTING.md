@@ -428,8 +428,7 @@ The goldens run fractional with the EM on one thread and a pinned seed (`tests/t
 scan runs at its default thread budget, and its fraction sums vary in the last bits from run to run
 (`TRAPS: the-deliverable-is-not-reproducible-by-default`): regenerate the goldens twice and diff before trusting a
 change, and in any instrument that must compare two end-to-end runs bit for bit pin `scan.total_threads=1`
-(`rename_identity.py` does). `quant_accuracy.py` prints a `base_reseed` floor beside every effect instead, and under
-its fractional assignment that floor is exactly this run-to-run spread.
+(`rename_identity.py` does, and so does every A/B pair).
 
 **The capture-contracted length is gated per object against the deposit rule.** Three gates run every
 placement of every fragment width through the reference accumulator (`tests/native/_accumulator_reference.py`)

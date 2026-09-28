@@ -69,7 +69,7 @@ The shipped version is `0.7.1` (`pyproject.toml`); the target is 0.8.0. `ROADMAP
 Calibration was the release's subject while it was the thing in the way. It no longer is: it is measured
 against an oracle per stratum, it is fast, and two campaigns of machine work moved no number. So the owner
 moved the frame from the component to the DELIVERABLE — the transcript table a user reads — and with it the
-order of the remaining work: FIRST an end-to-end baseline with its attribution floor, THEN the pre-EM setup
+order of the remaining work: FIRST an end-to-end baseline, THEN the pre-EM setup
 that carries calibration's answer into the EM, then whatever that baseline says owns the residual.
 
 What this amendment does NOT do is demote the calibration metric. Ranking a CALIBRATION mechanism on the
@@ -81,12 +81,12 @@ two numbers answer two different questions and both are now primary:
 | the question | the number | the instrument |
 |---|---|---|
 | is CALIBRATION right? — ranks a calibration mechanism | the `CalibrationResult` against an oracle calibration, per stratum | `calibration_vs_oracle.py` |
-| is THE TOOL right? — what the release ships on | the transcript table against per-transcript truth, per stratum, above the reseed floor | `quant_accuracy.py` |
+| is THE TOOL right? — what the release ships on | the transcript table against per-transcript truth, per stratum | `quant_accuracy.py` |
 
-⛔ The end-to-end number is only attributable above its own floor: the deliverable is not reproducible by
-default, so `--arm base_reseed` is re-derived in the same session and any delta below it is noise. And the
-decomposition is the point of the arms, not a nicety — `oracle` says what a perfect prior is worth end to
-end, so what remains under it is the EM's and the assignment's, not calibration's.
+⛔ The deliverable is not reproducible by default, so an A/B pair runs with the scan pinned (`--set
+scan.total_threads=1`) and an effect is judged by its size, with genes and pools read beside the transcript table
+(owner, 2026-09-28). And the decomposition is the point of the arms, not a nicety — `oracle` says what a perfect
+prior is worth end to end, so what remains under it is the EM's and the assignment's, not calibration's.
 
 ### Three strata are the optimisation target, and the fourth is deferred
 
@@ -1588,7 +1588,7 @@ cancels from the strand mean, so an unstranded AMBIG slot has no channel.
 
 Where the error sits, and the standing numbers a mechanism is judged against, are re-derived by the instruments
 and never kept here — per stratum, never pooled: `policy_benchmark.py --by-class` (by node class; the ranking is
-`ROADMAP.md`'s), `calibration_vs_oracle.py` (P/O, the region Σ|Δ|, the ruler's factor), `ruler_vs_truth.py` (the
+`ROADMAP.md`'s), `calibration_vs_oracle.py` (P/O, the region Σ|Δ|), `ruler_vs_truth.py` (the
 ruler against the simulator's own capture-aware length, per probed class). The ruler reads exactly 1 at `g00`
 and on both capture-OFF strata with nothing moved (§7.2); the test chromosome's capture-OFF zero rows carry the
 unannotated transcription on `test_blank`, pinned gDNA by structure (`TESTING.md` §0a).

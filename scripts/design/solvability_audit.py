@@ -678,7 +678,7 @@ def main(argv: list[str] | None = None) -> int:
         args.oracle_cache = args.suite / "oracle_cache"
 
     index = TranscriptIndex.load(str(args.index))
-    config = CalibrationConfig()
+    config = CalibrationConfig(n_threads=1)  # one core: the sweep is bit-identical at any count
     names = (
         [args.condition]
         if args.condition

@@ -224,24 +224,56 @@ def test_scoring_against_a_DIFFERENT_locus_partition_raises(measured):
         PV.score_arm(p, o[:-1])
 
 
-# ── GATE 4: gdna_eff_len is weighted like its consumer ───────────────────────────────────────────
+# ── GATE 4: every sharded run writes its shards to a directory of its own ───────────────────────
 
 
-def test_eff_len_error_ignores_loci_with_no_gDNA_and_notices_loci_with_some():
-    """TRAPS: weight-it-like-the-consumer. ``gdna_eff_len`` divides the gDNA component's abundance and nothing else,
-    so at a locus with no gDNA it is a number nothing reads. Weighting it by the locus TOTAL would
-    report the error of an inert array — and on this panel most loci are that.
+def test_two_sharded_runs_never_share_a_shard_directory_and_every_shard_gets_the_set(
+    tmp_path, monkeypatch
+):
+    """Two A/B runs sharing a work dir once wrote their shards to one fixed ``_shards``, so each could
+    merge the other's rows. The shards are faked (each writes an empty row list), so this checks the
+    plumbing only: two runs, two directories, and every shard command carries the run's ``--set``.
 
-    The perturbation is two-sided, which is the point: corrupting the eff-len where the reference puts
-    no gDNA must change nothing, and corrupting it where the reference puts a lot must change it.
+    Perturbation: a fixed shard directory makes the two runs' directories equal.
     """
-    ref = _fake_priors(np.array([0.0, 1000.0]), eff_len=np.array([500.0, 500.0]))
-    base = PV.score_eff_len(_fake_priors(np.zeros(2), eff_len=np.array([500.0, 500.0])), ref)
-    inert = PV.score_eff_len(_fake_priors(np.zeros(2), eff_len=np.array([5.0, 500.0])), ref)
-    live = PV.score_eff_len(_fake_priors(np.zeros(2), eff_len=np.array([500.0, 5.0])), ref)
-    assert base["w_rel_err"] == pytest.approx(0.0)
-    assert inert["w_rel_err"] == pytest.approx(0.0), "a zero-gDNA locus must carry zero weight"
-    assert live["w_rel_err"] > 0.9, "a locus carrying all the gDNA must dominate the weighted error"
+    import subprocess
+    import sys
+
+    seen: list[list[str]] = []
+
+    class _Shard:
+        returncode = 0
+
+        def __init__(self, cmd, **_kw):
+            seen.append(cmd)
+            Path(cmd[cmd.index("--json") + 1]).write_text("[]")
+
+        def communicate(self):
+            return "", None
+
+    monkeypatch.setattr(subprocess, "Popen", _Shard)
+    argv = [
+        "prior_vs_oracle.py",
+        "--suite",
+        str(tmp_path / "suite"),
+        "--work-dir",
+        str(tmp_path),
+        "--jobs",
+        "2",
+        "--set",
+        "scan.total_threads=1",
+        "--conditions",
+        "a",
+        "b",
+    ]
+    dirs = []
+    for _run in range(2):
+        seen.clear()
+        monkeypatch.setattr(sys, "argv", argv)
+        assert PV.main() == 0
+        assert len(seen) == 2 and all("scan.total_threads=1" in cmd for cmd in seen)
+        dirs.append({Path(cmd[cmd.index("--json") + 1]).parent for cmd in seen})
+    assert len(dirs[0]) == len(dirs[1]) == 1 and dirs[0] != dirs[1]
 
 
 # ── GATE 5: F conserves every fragment, and the residue is named ─────────────────────────────────
@@ -766,17 +798,6 @@ def _biggest_in_locus_site(measured, field):
         ranked = arr
     site = np.unravel_index(int(np.argmax(ranked)), arr.shape)
     return site
-
-
-def _fake_priors(gdna, eff_len=None):
-    """A ``LocusPriors`` with hand-chosen arrays — the scoring functions take the real type."""
-    from rigel.calibration.priors import LocusPriors
-
-    g = np.asarray(gdna, np.float64)
-    return LocusPriors(
-        gdna_count=g,
-        gdna_eff_len=np.ones_like(g) if eff_len is None else np.asarray(eff_len, np.float64),
-    )
 
 
 def _rebuild_calibration(m):

@@ -371,7 +371,8 @@ def test_the_conserved_mass_survives_the_oracle_arms_dataclass_replace():
 
 def test_the_reference_density_is_None_or_positive_and_finite():
     """`gdna_reference_density` is the fully-captured gDNA level or ``None`` (no enriched mode): a zero,
-    a negative or a non-finite reference is refused, since the ruler divides by it."""
+    a negative or a non-finite reference is refused, since the ruler divides by it. With no reference every
+    capture efficiency must be exactly 1."""
     kw = _valid_kwargs()
     assert CalibrationResult(**kw).gdna_reference_density is None
     kw["gdna_reference_density"] = 0.37
@@ -381,6 +382,10 @@ def test_the_reference_density_is_None_or_positive_and_finite():
         kw["gdna_reference_density"] = bad
         with pytest.raises(ValueError):
             CalibrationResult(**kw)
+    kw = _valid_kwargs()
+    kw["gdna_capture_efficiency_region"] = np.full(N_REGIONS, 0.5)
+    with pytest.raises(ValueError, match="no reference"):
+        CalibrationResult(**kw)
 
 
 def test_the_reference_members_count_the_kernels_behind_a_reference_and_are_ZERO_without_one():
