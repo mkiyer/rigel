@@ -65,6 +65,79 @@ Instrument: the harness, the substrates and the report in
 `~/Downloads/rigel_runs/prototypes/2026-09-27_strand_od/`. The 2026-08-30 design (DESIGN §3.3a) is superseded when
 this lands.
 
+### the-gdna-landscape-collapses-at-low-depth
+`priority: next, after the strand overdispersion and fl.py (proposed 2026-09-28) · kind: defect · 2026-09-28`
+Calibration's gDNA estimate falls with sequencing depth. LBX0588 (stranded, capture ON) reads 0.11 / 0.45 / 0.83 gDNA
+per deposited fragment at 1 % / 10 % / full depth. The EM follows it (gDNA fraction 0.16 / 0.62 / 0.91), so at 1 %
+the RNA pool is about 9× too large. The VCaP mix, which has truth by read name, reads P/O 0.125 / 0.52 / 0.92.
+
+The mechanism is the refits' gDNA landscape.
+- A slot trains as located only when Var(log f_g) ≤ 1 nat², which in practice means it holds a gDNA fragment.
+- At 1 % depth an object at VCaP's bulk density needs about 1.26 Mb to expect one fragment. So 0.23 % of the ~323k
+  kernels locate, and those few are selected above the bulk.
+- The rest are zero-count anchors, flat down to the grid floor. The refit loop converges to one mode at the floor
+  (log ρ ≈ −17) in all three real libraries.
+- Under that prior, sparse unspliced fragments go to RNA.
+
+How much each part owns:
+- The refits own 80 % / 69 % of LBX0588's drift (ln P_full/P_d, from 1 % / 10 %) and 86 % / 63 % of VCaP's.
+- Pass 0 drifts less. It nets an under-call on no-RNA objects against an over-call on no-gDNA objects.
+- The capture reference owns none of it, because it is computed after the solve. It does vanish at 1 % (0 members),
+  which sets every efficiency to 1; what that costs the EM is unmeasured.
+- MO_3021 barely drifts (0.82 of full at 1 %): 65–80 % of its gDNA sits on intergenic regions and gene edges, which
+  read their count at any depth.
+- The level survives in aggregate. VCaP's intergenic regions at 1 % hold 0.0097 of full depth's true gDNA.
+
+On the test chromosome's stranded depth family:
+- Under a depth-invariant true landscape, the landscape owns 69–94 % of the capture-ON low-gDNA drift at d100 and
+  d10.
+- The capture-OFF drift is per-object.
+- Injecting the full-depth landscape, shifted by log f, cures g01 and g05 at d100 capture ON (−81.1 → −0.8 and
+  −52.6 → −8.3 points of O). It only halves g001, does nothing at capture OFF, and worsens g25 and g50 at d100.
+- True values on every structural region at depth d still fail at g01 and g001 d100. So fitting count/E kernels on
+  sparse counts is itself part of the defect.
+
+Direction: at its maximum, the exact Poisson mixture keeps the prior's implied total equal to the pooled count
+(Σ E_i·E[ρ | c_i] = Σ c_i). The shipped fit loses that, and a fit at depth f should equal the full-depth fit shifted by
+log f wherever the data resolve it.
+- The location floor and the anchor E-step that brought the zero controls down
+  (`ISSUES: gdna-landscape-trains-on-false-positives`) are what collapse here.
+- `estep_all` and `row_kernel` stay refused (`ISSUES: the-landscape-training-population-arms`).
+
+Not this entry: VCaP's 7.8 % full-depth deficit. It is already present in pass 0.
+
+Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-28_depth_lowg/`.
+- `pages/explanation_depth.md`.
+- The real-library tables: `v2/scripts/tab_v2.py`.
+- The test-chromosome tables and arms: `rerun/scripts/tables.py`.
+- The substrates: `test_reference/scenarios_depth_d100`, `_d10` and full depth.
+
+### the-background-dispersion-assumes-a-pure-intergenic-pool
+`priority: next, with the landscape (proposed 2026-09-28) · kind: defect · 2026-09-28`
+`fit_intron_background` (`density_deconv.py`) fits the gDNA background's mean and its dispersion α by moments on the
+intergenic regions. It assumes they hold only gDNA, and its own comment says unannotated transcription breaks that
+(`TRAPS: purity-is-a-property-of-the-annotation`).
+
+On the test chromosome's `full_lowg` (stranded, capture OFF):
+- The unannotated transcription on `test_blank` raises the fitted mean 12.7×. It drops α from ∞ (no extra spread) to
+  0.142 at g001 and 0.405 at g01.
+- The lower α widens the prior on intron gDNA. Changed alone, it moves the annotated chromosome's gDNA by −197 / −687
+  fragments; the shipped figures are −189 / −643.
+- It owns 27 % / 38 % of the annotated chromosome's gDNA under-call (51 of 192 and 235 of 624 fragments).
+
+Real intergenic regions hold strand-coherent RNA too, about 10–11 % on VCaP, so the route is live on real data. Its
+size there is unmeasured.
+
+Read this with the gDNA-only objects apart. On `full_lowg`, `test_blank` itself carries 8,844 of the 9,194 Σ|Δ| at
+g001 capture OFF. That is the designed control, locked to gDNA by structure, not a defect. `calibration_vs_oracle.py`
+does not yet report those objects on their own row.
+
+A repair should read the half of the statistic the contaminant cannot reach. Whether it needs a new constant is for
+the derivation.
+
+Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-28_depth_lowg/review_alt/bg_split.py`. It fits the background
+on the gDNA fragments alone, beside the shipped fit. See also `pages/explanation_lowg.md`.
+
 ### a-pure-gdna-library-reads-as-nascent-rna
 `priority: open challenge (owner, 2026-09-28) · kind: defect · 2026-09-28`
 Rigel reads a library of pure genomic DNA as 93 % RNA. The case is the exome-DNA half of the VCaP mix, 4,671,916
