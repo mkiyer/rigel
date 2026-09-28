@@ -418,8 +418,8 @@ python -m pytest tests/ -q
 python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
 ```
 
-`CLAUDE.md` is the home of the standing pass count and accounts every delta: re-derive it, never adjust
-it, because several gates are parametrised over the files on disk. Any failure is a regression.
+`CLAUDE.md` is the home of the standing pass count: re-derive it, never adjust it. Any failure is a
+regression.
 `tests/scenarios_aligned/test_multimap_counting.py::TestParalogMultimapping::test_gdna_sweep[gdna_100]`
 is a real EM unidentifiability (`TRAPS: identical-paralogs-are-bimodal`); if it fails again, do not fix
 it by moving a seed.

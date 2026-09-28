@@ -7,7 +7,7 @@ was wrong with it, and what to do instead; it is not a measurement, and a number
 `ISSUES.md`, rulings in `DESIGN.md`, derivations in `EQUATIONS.md`.
 
 Cite a rule by its name, e.g. `TRAPS: panel-before-src`. The name is the identifier, so a citation says
-what it means without a lookup and is one greppable string with one home. `tests/test_no_jargon_labels.py`
+what it means without a lookup and is one greppable string with one home. `tests/test_docs_boundary.py`
 enforces it and refuses the numbered labels (`A16`, `D4j`, `C0b`) these rules used to carry.
 
 The shape is load-bearing: a rule starts at column 0 as `**name.` followed by one paragraph, and nothing

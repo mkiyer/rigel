@@ -15,8 +15,6 @@ from __future__ import annotations
 import ast
 import pathlib
 
-import pytest
-
 from rigel.calibration._layers import LAYERS, layer_of
 
 PKG = pathlib.Path(__file__).resolve().parents[2] / "src" / "rigel" / "calibration"
@@ -83,8 +81,7 @@ def test_the_layers_are_numbered_in_order():
     assert nums == sorted(nums) == list(range(len(nums)))
 
 
-@pytest.mark.parametrize("path", ALL_FILES, ids=_name)
-def test_no_import_points_UP_a_layer(path):
+def test_no_import_points_UP_a_layer():
     """⛔ The rule: an import may point DOWN a layer or SIDEWAYS within one, never UP.
 
     An upward import is almost always a TYPE defined too high — ``RegionDeconv``, one slot's
@@ -92,18 +89,22 @@ def test_no_import_points_UP_a_layer(path):
     strand family that first defined it. The repair a layering violation asks for is the same every
     time: the type belongs at the bottom, not with the code that happened to define it first.
     """
-    me = _name(path)
-    mine = layer_of(me)
-    if mine is None:
-        pytest.skip("unplaced — test_every_module_has_a_declared_home owns that failure")
-    up = sorted(
-        f"{SHORT[i]} (layer {layer_of(SHORT[i])})"
-        for i in _runtime_imports(path)
-        if i in SHORT and SHORT[i] != me and (layer_of(SHORT[i]) or 0) > mine
-    )
-    assert not up, (
-        f"{me} is layer {mine} and imports UP into {up}. Either the thing it needs belongs lower — a TYPE "
-        f"almost always does — or {me} belongs higher. See rigel.calibration._layers."
+    bad = {}
+    for path in ALL_FILES:
+        me = _name(path)
+        mine = layer_of(me)
+        if mine is None:
+            continue  # test_every_module_has_a_declared_home owns that failure
+        up = sorted(
+            f"{SHORT[i]} (layer {layer_of(SHORT[i])})"
+            for i in _runtime_imports(path)
+            if i in SHORT and SHORT[i] != me and (layer_of(SHORT[i]) or 0) > mine
+        )
+        if up:
+            bad[f"{me} (layer {mine})"] = up
+    assert not bad, (
+        f"upward imports: {bad}. Either the thing needed belongs lower — a TYPE almost always does — or "
+        f"the importer belongs higher. See rigel.calibration._layers."
     )
 
 

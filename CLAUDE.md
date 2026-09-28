@@ -147,7 +147,7 @@ ladder.
 ## Cite a rule by its name
 
 Cite a trap as `TRAPS: off-grid-message-mode`, an issue as `ISSUES: two-sided-exon-row`, never by a
-number. `tests/test_no_jargon_labels.py` enforces it: the old numbered labels were ambiguous (`G1` meant
+number. `tests/test_docs_boundary.py` enforces it: the old numbered labels were ambiguous (`G1` meant
 both a process rule and a structurally pure-gDNA object).
 
 ## Working rules
@@ -200,30 +200,16 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,422 passed / 0 skipped / 2 xfail, 3,424 collected** — re-derived 2026-09-28
-(3,423 + 1: the gate that `calibration_oracle.py --build` refreshes a stale `_main`; the `prior_vs_oracle.py` shard gate
-replaced the deleted `gdna_eff_len` score's). An untracked file under `docs/dev/` is a
-jargon case too, so a working tree holding notes reads higher (the count is re-derived from the table below at every commit
-that measures the suite; the history of how it moved is git, not this file). The 2 xfails are executable records of proven
+**The standing baseline: 0 failed / 2,801 passed / 0 skipped / 2 xfail, 2,803 collected** — re-derived 2026-09-28
+(3,424 − 624 + 5 − 2: the five gates parametrised over the files on disk are one case each, and two redundant cases went
+with them). The 2 xfails are executable records of proven
 defects whose fixes are elsewhere (`ISSUES: two-sided-exon-row`; `ISSUES: the-lower-bound-noise-ratchet`), deferred by
 ruling to their threads — "fix the test" is a category error, and an xfail is closed by repairing the thing or asserting
 the invariant structurally, never by widening a bound. **Any failure at all is a regression.**
 
-**Re-derive a count, never adjust one** (`TRAPS: re-record-the-baseline`). Several gates are parametrised
-over the files on disk, so adding or retiring a file moves the total; account for it from this table and
-confirm with `pytest --collect-only -q | grep <stem>`:
-
-| adding one… | moves collected by | which cases |
-|---|---|---|
-| `src/rigel/calibration/` module | **+3** | jargon, docs-boundary, and layering *if declared in `_layers.py`* |
-| `tests/` file (any directory) | **+2** | jargon, docs-boundary |
-| `src/rigel/` file outside `calibration/` (a `.py`, or a `native/*.cpp` or `*.h`) | **+2** | jargon, docs-boundary |
-| `scripts/design/` (or `sim/`, `profiling/`) file | **+4** | imports, says-what-it-is-for, jargon, docs-boundary |
-| `docs/dev/` file | **+1** | jargon only |
-| top-level `docs/` .md (an owner decision — the permanent-set gate pins the list) | **+2** | jargon, docs-boundary |
-
-A content-only sweep moves the collected total by zero, and that is the check. Derive the failure set,
-never eyeball the tail (`TRAPS: read-the-whole-failure-list`):
+**Re-derive a count, never adjust one** (`TRAPS: re-record-the-baseline`). Every gate that scans the files on
+disk is one case, so only adding or removing a test moves the collected total. Derive the failure set, never
+eyeball the tail (`TRAPS: read-the-whole-failure-list`):
 
     python -m pytest tests/ -q 2>&1 | grep '^FAILED' | sed 's/::.*//' | sort | uniq -c
 

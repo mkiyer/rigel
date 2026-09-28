@@ -6,7 +6,7 @@ of what was measured and turned down. An OPEN entry is a `### kebab-name` headin
 instrument that re-derives them. The OPEN section runs now, then next, later and parked, and within a tier it
 follows `ROADMAP.md`'s order. A CLOSED / REFUSED entry keeps its name, its verdict, the killing number and
 the date, so a refused mechanism is not rebuilt. Cite an entry as `ISSUES: <name>`; names are the only
-identifiers (`tests/test_no_jargon_labels.py`). What does not belong here: the ranked view (`ROADMAP.md`),
+identifiers (`tests/test_docs_boundary.py`). What does not belong here: the ranked view (`ROADMAP.md`),
 rulings and derivations (`DESIGN.md`, `EQUATIONS.md`), lessons (`TRAPS.md`), and any record of what was done —
 the changelog is git.
 
@@ -1063,8 +1063,7 @@ simulator's sharded writers and its whole-genome grid, and the zarr splice black
 - `FragmentScorer` copies 13 fields into native: return the native scorer and store alphas.
 - `_apply_scan_stats` reads 33 hand-listed keys with `.get(key, 0)`: iterate the dataclass and index strictly.
 - The simulator's truth is spread over nine `ground_truth_*` methods and three file passes.
-- Five instruments import `tests/calibration/_oracle.py` through `sys.path` (moving it moves the collected count
-  +4 − 2); four scripts redefine `_shared.RUNS`.
+- Five instruments import `tests/calibration/_oracle.py` through `sys.path`; four scripts redefine `_shared.RUNS`.
 
 ### instrument-ledger
 `priority: later — Tier 4, batched between A/B windows · kind: instrument · 2026-09-28`
