@@ -73,20 +73,18 @@ def capture_summary(track: pd.DataFrame | None, *, with_curve: bool = False) -> 
       typical region);
     * ``enriched_mode`` — the highest-density peak of the mass-weighted KDE (the
       on-target shoulder); their gap is the **peak-to-peak** fold-change;
-    * ``mass_frac_ontarget`` — the fraction of gDNA **mass** sitting between the
-      two peaks' midpoint and above (how much material is actually on-target).
+    * ``mass_frac_ontarget`` — the fraction of gDNA **mass** at or above the
+      midpoint between the count median and the enriched mode, zero when no
+      enriched mode is found (how much material is actually on-target).
 
     The peak-to-peak fold and the on-target mass fraction answer different
     questions (how enriched vs how much) — both are surfaced; no pass/fail
-    verdict. Returns ``None`` if the track is empty / uninformative / SciPy is
-    unavailable. Set ``with_curve`` to also return the plottable KDE curves.
+    verdict. Returns ``None`` if the track is empty or uninformative. Set
+    ``with_curve`` to also return the plottable KDE curves.
     """
     if track is None or len(track) == 0:
         return None
-    try:
-        from scipy.stats import gaussian_kde
-    except ImportError:  # pragma: no cover
-        return None
+    from scipy.stats import gaussian_kde
 
     dens = np.asarray(track["gdna_density"], dtype=np.float64)
     gmass = np.asarray(track["gdna_mass"], dtype=np.float64)
@@ -99,12 +97,9 @@ def capture_summary(track: pd.DataFrame | None, *, with_curve: bool = False) -> 
         return None
 
     grid = np.linspace(float(log_rho.min()), float(log_rho.max()), _KDE_N_GRID)
-    try:
-        kde_count = gaussian_kde(log_rho)
-        y_count = kde_count(grid)
-        y_mass = gaussian_kde(log_rho, weights=w)(grid)
-    except Exception:  # pragma: no cover
-        return None
+    kde_count = gaussian_kde(log_rho)
+    y_count = kde_count(grid)
+    y_mass = gaussian_kde(log_rho, weights=w)(grid)
 
     background_mode = float(grid[int(np.argmax(y_count))])
     count_median = float(np.median(log_rho))

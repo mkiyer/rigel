@@ -23,7 +23,7 @@ class CalibrationDiagnostics:
     kde_logp: np.ndarray  # log P̂ on the grid (the plottable curve)
     #: per-region training log-densities — EVERY training region, not a sample
     rug_log_rho: np.ndarray
-    rug_kind: np.ndarray  # int region-kind codes (0=intergenic,1=intron,2=exon)
+    rug_kind: np.ndarray  # signature.RegionType codes
 
     @classmethod
     def from_abundance_landscape(cls, al) -> "CalibrationDiagnostics":

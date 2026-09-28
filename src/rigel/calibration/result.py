@@ -305,8 +305,7 @@ class CalibrationResult:
 
     @property
     def sj_conserved_mass(self) -> np.ndarray:
-        """float64[n_sj] — the CONSERVED fragment mass at each sj. Sums to one per spliced fragment
-        across the sj it used, where :attr:`count_rna_sj` is ``+1`` on each of them.
+        """float64[n_sj] — the CONSERVED fragment mass at each sj.
 
         This is the accumulator's ``sj_mass`` bank recovered exactly: ``sj_mass_per_crossing`` is
         ``sj_mass / sj_count`` and ``count_rna_sj`` is ``sj_count``, so the product is ``sj_mass``
@@ -353,10 +352,8 @@ class CalibrationResult:
         implies is biased wherever the two components' inflations differ — which they do, because gDNA
         cannot splice. These conserved counts reproduce the true origin split exactly.
 
-        The spliced crossings and the sj flux are the SAME fragments split across two banks by
-        the deposit rule — ``boundary_spliced_mass`` holds the share of a spliced fragment's bases in blocks
-        that crossed a boundary and ``sj_mass`` the share in blocks that crossed none — and the two sum to
-        exactly one per fragment. Adding both is conservation, not double counting.
+        Adding the spliced crossings and the sj flux is conservation, not double counting: the deposit
+        rule splits a spliced fragment's bases between ``boundary_spliced_mass`` and ``sj_mass``.
 
         A PROPERTY, never a stored field. ``prior_vs_oracle`` swaps the deconvolved arrays for truth with
         ``dataclasses.replace``; a cached scalar would survive that swap and silently describe the old

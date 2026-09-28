@@ -92,6 +92,70 @@ _CAPTURE_KEYS = frozenset(
 )
 
 
+#: Every top-level key :func:`parse_yaml_config` reads.
+_TOP_KEYS = frozenset(
+    {
+        "genome",
+        "gtf",
+        "shadow_gtf",
+        "index",
+        "outdir",
+        "transcript_filter",
+        "simulation",
+        "abundance",
+        "nrna",
+        "gdna",
+        "capture",
+        "strand_specificities",
+        "oracle_bam",
+        "emit_fastq",
+        "verbose",
+    }
+)
+#: Every key :func:`parse_yaml_config` reads in each plain section (``capture`` checks its own).
+_SECTION_KEYS = {
+    "simulation": frozenset(
+        {
+            "n_rna_fragments",
+            "n_total_fragments",
+            "sim_seed",
+            "frag_mean",
+            "frag_std",
+            "frag_min",
+            "frag_max",
+            "read_length",
+            "error_rate",
+            "n_workers",
+        }
+    ),
+    "abundance": frozenset({"mode", "seed", "min", "max", "frac_expressed", "file"}),
+    "nrna": frozenset(
+        {"mode", "shares", "ratios", "abundance_ranges", "ratio_labels", "on_fraction", "seed"}
+    ),
+    "gdna": frozenset(
+        {
+            "rates",
+            "rate_labels",
+            "genomic_refs",
+            "frag_mean",
+            "frag_std",
+            "frag_min",
+            "frag_max",
+            "strand_overdispersion",
+            "strand_overdispersions",
+            "strand_overdispersion_labels",
+        }
+    ),
+}
+
+
+def _refuse_unknown_keys(raw: dict, known: frozenset[str], where: str) -> None:
+    """Raise on a key the parser does not read: ignored, a misspelt key would run on its default."""
+    unknown = sorted(set(raw) - known)
+    if unknown:
+        raise ValueError(f"{where}: unknown key(s) {unknown}; known: {sorted(known)}")
+
+
 def _capture_config_from_mapping(
     raw: dict,
     defaults: dict | None = None,
@@ -182,6 +246,9 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
 
     with open(path) as f:
         raw = yaml.safe_load(f)
+    _refuse_unknown_keys(raw, _TOP_KEYS, "sim config")
+    for section, known in _SECTION_KEYS.items():
+        _refuse_unknown_keys(raw.get(section, {}), known, section)
 
     cfg = WholeGenomeSimConfig()
     cfg.genome = raw.get("genome", "")
@@ -233,8 +300,6 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
         nrna.shares = [float(x) for x in raw_shares]
     if nrna.mode == "fragment_share" and nrna.shares is None:
         raise ValueError("nrna.shares is required for mode='fragment_share'")
-    if "fracs" in nrna_raw or "frac_labels" in nrna_raw:
-        raise ValueError("nrna.fracs is no longer supported; use nrna.ratios")
     raw_ratios = nrna_raw.get("ratios", None)
     if raw_ratios is not None:
         nrna.ratios = [float(r) for r in raw_ratios]

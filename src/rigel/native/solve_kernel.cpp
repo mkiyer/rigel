@@ -12,7 +12,7 @@
 //                    nothing is reduced across blocks but integer counts (`sweep.solve_chain`).
 //   psi_solve        ψ over a slot list, the slots pulled one at a time by the same pool — the pre-sweep solve
 //                    (`region_geometry.init_beliefs`) and the gates (`simplex_logodds._solve_regions_logodds_all`).
-//   psi_cube, posterior_median, compose, gdna_arm — ψ's pieces for the gates (`simplex_logodds`).
+//   psi_cube, posterior_median, compose, gdna_arm — ψ's pieces for the gates (`tests/calibration/_psi_reference.py`).
 //   transfer_prepare, transfer_pass, transfer_solve — the policy's three kernels on tables the call allocates and
 //                    returns, for the transfer gates (`tests/calibration/_transfer_harness.py`).
 //   rows             the row constructors of `transfer_rows.h`, the builders' flag predicates, and the constructions the
@@ -93,13 +93,13 @@ nb::ndarray<nb::numpy, bool, nb::ndim<2>> own_bool2(std::vector<uint8_t>&& v, si
 }
 inline bool* as_bool(std::vector<uint8_t>& v) { return reinterpret_cast<bool*>(v.data()); }
 
-// ═══ THE THREAD POOL — the locus EM's, one for the module, shared by the block pool and ψ's slot pool ═══════════
+// ═══ THE THREAD POOL — one for the module, shared by the block pool and ψ's slot pool ═══════════════════════════
 // Persistent across the calls of a run and rebuilt only when the budget changes; the calls are serialised on it.
 // `n_threads` is the budget: 0 is every core, as the locus EM reads it.
 
-rigel::EStepThreadPool& pool_of(int n_threads) {
-    static std::unique_ptr<rigel::EStepThreadPool> pool;
-    if (!pool || pool->n_threads() != n_threads) pool = std::make_unique<rigel::EStepThreadPool>(n_threads);
+rigel::ThreadPool& pool_of(int n_threads) {
+    static std::unique_ptr<rigel::ThreadPool> pool;
+    if (!pool || pool->n_threads() != n_threads) pool = std::make_unique<rigel::ThreadPool>(n_threads);
     return *pool;
 }
 std::mutex& pool_mutex() {

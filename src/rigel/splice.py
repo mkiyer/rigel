@@ -30,9 +30,6 @@ class SpliceType(IntEnum):
     SPLICE_ARTIFACT = 4  # CIGAR sj was rejected by the SJ blacklist
 
 
-NUM_SPLICE_TYPES = len(SpliceType)
-
-
 def census_field(stype: SpliceType) -> str:
     """The :class:`~rigel.stats.PipelineStats` field holding the scanner's count of ``stype``.
 
@@ -51,11 +48,8 @@ def census_field(stype: SpliceType) -> str:
     return f"n_census_{stype.name.lower()}"
 
 
-#: Pre-computed int constants for hot-path comparisons (avoid enum overhead).
-SPLICE_UNSPLICED: int = int(SpliceType.UNSPLICED)  # 0
+#: ``SpliceType.SPLICED_ANNOT`` as a plain int.
 SPLICE_ANNOT: int = int(SpliceType.SPLICED_ANNOT)  # 2
-SPLICE_IMPLICIT: int = int(SpliceType.SPLICED_IMPLICIT)  # 3
-SPLICE_ARTIFACT: int = int(SpliceType.SPLICE_ARTIFACT)  # 4
 
 
 class SpliceStrandCol(IntEnum):
@@ -84,15 +78,6 @@ class SpliceStrandCol(IntEnum):
     SPLICE_ARTIFACT_SENSE = 8
     SPLICE_ARTIFACT_ANTISENSE = 9
 
-    @classmethod
-    def from_category(cls, category: int, is_antisense: bool) -> "SpliceStrandCol":
-        """Look up column from category and strand."""
-        return cls(int(category) * 2 + int(is_antisense))
-
-    @property
-    def is_antisense(self) -> bool:
-        return bool(self.value % 2)
-
     @property
     def category(self) -> SpliceType:
         return SpliceType(self.value // 2)
@@ -100,8 +85,7 @@ class SpliceStrandCol(IntEnum):
 
 NUM_SPLICE_STRAND_COLS = len(SpliceStrandCol)
 
-# Pre-computed column subsets (tuples for immutability and indexing).
-ANTISENSE_COLS = tuple(c.value for c in SpliceStrandCol if c.is_antisense)
+# Pre-computed column subset (a tuple for immutability and indexing).
 SPLICED_COLS = tuple(
     c.value
     for c in SpliceStrandCol

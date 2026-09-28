@@ -4,8 +4,7 @@
 #
 # Simulate RNA-seq reads from a reference you already have (FASTA + GTF), sweeping
 # a grid of conditions (gDNA rate × gDNA strand-overdispersion × nRNA × strand ×
-# capture). Use this when you have a real genome/annotation; for a *generated*
-# random mini-genome instead, see `example_suite.yaml`.
+# capture).
 #
 # Run:
 #   python scripts/sim/simulate_reads.py --config scripts/sim/configs/example_existing_reference.yaml

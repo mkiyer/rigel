@@ -83,9 +83,8 @@ there is no graph traversal anywhere.
 
 ## 2. Reciprocal opportunity, and where it is model-free
 
-Implemented by `accumulator.cpp` (the `1/A(w)` deposits) and `calibration/total_abundance.py` (the
-start/end pair of §2.3b). The executable statement of the support
-factor is gated in `tests/native/test_conserved_mass.py`.
+Implemented by `accumulator.cpp` (the boundary and sj `1/(w−1)` deposits) and
+`calibration/total_abundance.py` (the start/end pair of §2.3b).
 
 **The general rule: deposit `1/A(w)` where `A(w)` is that population's own opportunity** — the number of
 admissible start positions for a length-`w` fragment at that object. Then, by linearity alone,
@@ -104,16 +103,14 @@ the factor `P(A > 0)` survives — a functional of exactly the pmf the channel c
 so the support factor is exactly 1 for any library whose fragments are at least 2 bp — unconditionally
 robust across a mixture with different component lengths. The sj bank takes the identical deposit.
 
-**2.2 At a region it is model-free only within its support — a density shape, not a total.** The
-contained opportunity is `A(w) = (ell − w + 1)₊`, the shipped deposit `1/(ell − w + 1)`
-(`region_contained_inv_opportunity_sum`), and
+**2.2 At a region it would be model-free only within its support — a density shape, not a total.** The
+contained opportunity is `A(w) = (ell − w + 1)₊`, and a deposit of `1/(ell − w + 1)` would read
 
     E[Σ 1/A]  =  ρ · P(w ≤ ell)          ← NOT ρ
 
 `P(w ≤ ell)` is a pmf functional and differs per component, so at region scale the gDNA-vs-RNA circularity
-this channel exists to remove moves out of the divisor and into the support (exactly zero below
-`ell < frag_min`). ⛔ Do not read the region bank as a model-free total; within a fixed `ell` band it is a
-valid density shape.
+moves out of the divisor and into the support (exactly zero below `ell < frag_min`). No bank deposits it;
+a region's total is its start/end pair (§2.3b).
 
 **2.3 And it fails at a terminus, exactly.** `E[Σ1/L] = ρ · E_f[placements(w)/w]`, which equals `ρ` only
 where placements ∝ `w`. At a point 50 bases from an end, placements = 50 for every `w > 51`, independent
@@ -125,10 +122,10 @@ fragment's first covered base falls in region `r` iff its start lies in `r`, so 
 the same number for every fragment length, which is exactly what the contained relation is not:
 
     E[S_r]  =  ρ · ℓ            for every w        ⟸ no pmf functional, no support factor
-    E[C_r^inv]  =  ρ · P(w ≤ ℓ)                    ⟸ §2.2, truncated per component
+    E[Σ_r 1/(ℓ−w+1)]  =  ρ · P(w ≤ ℓ)              ⟸ §2.2, truncated per component
 
-so `S_r/ℓ` is a total where the contained bank is a shape. The one exception is the template wall: within
-`d` of the template's genomic-high end, only starts that still admit a length-`w` molecule count, so
+so `S_r/ℓ` is a total where the contained reciprocal is a shape. The one exception is the template wall:
+within `d` of the template's genomic-high end, only starts that still admit a length-`w` molecule count, so
 
     A_start(w | d)  =  min( ℓ , (d + ℓ − w + 1)₊ )              ← w-dependent again
     A_start(w | d)  =  ℓ    for every w    ⟺    d ≥ w_max − 1   ← the exactness condition
@@ -256,10 +253,10 @@ reciprocal-opportunity deposit (§2) cancels the opportunity on its own support:
     E[ Σ 1/(w−1) ]      =  rho · P(w ≥ 2)   =  rho   at a BOUNDARY (frag_min ≥ 2, any pmf, any composition)
     E[ Σ 1/(ℓ−w+1) ]    =  rho · P(w ≤ ℓ)            in a REGION of length ℓ — NOT rho
 
-So the boundary form is a model-free total and the region form only a density shape (§2.2), and every
-REGION↔BOUNDARY ratio still carries a pmf functional — the chain alternates the two, so that is every
-hop. A face's total adds the sj flux whose bodies lie on that side, in the same units, from the sj bank's
-own reciprocal-opportunity column (`TRAPS: a-face-total-is-not-a-total-without-its-flux`). The
+So the boundary form is a model-free total and the region form only a density shape (§2.2); a region's
+total is its start/end pair (§2.3b). A face's total adds the sj flux whose bodies lie on that side, in the
+same units, from the sj bank's own reciprocal-opportunity column
+(`TRAPS: a-face-total-is-not-a-total-without-its-flux`). The
 per-component divisors `E_g`, `E_r` stay length models; what this buys is that a boundary's total, and
 any enrichment ratio between boundaries, uses none.
 

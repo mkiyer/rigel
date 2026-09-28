@@ -295,7 +295,7 @@ def test_the_sj_ids_the_scorer_reads_are_the_PAYLOAD_axis_on_every_reference():
     """
     from types import SimpleNamespace
 
-    from rigel._bam_impl import Accumulator as NativeAccumulator
+    from rigel.native import Accumulator as NativeAccumulator
     from rigel.second_pass import _resolve_intron_lookups
     from rigel.types import Strand
 

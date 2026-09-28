@@ -2,7 +2,7 @@
 rigel.types — Foundational data types used across the rigel pipeline.
 
 This module defines the core types for genomic coordinates, strand
-orientation, interval representation, and set-merging primitives.
+orientation and interval representation.
 
 Coordinate convention: all coordinates are 0-based, half-open (BED style).
 """
@@ -53,22 +53,6 @@ class Strand(IntEnum):
         """Return the single-character string representation."""
         return (".", "+", "-", "?")[self.value]
 
-    # -- pysam helpers --------------------------------------------------------
-
-    @classmethod
-    def from_is_reverse(cls, is_reverse: bool) -> "Strand":
-        """Convert a pysam ``is_reverse`` flag to a Strand."""
-        return cls.NEG if is_reverse else cls.POS
-
-    # -- arithmetic -----------------------------------------------------------
-    def opposite(self) -> "Strand":
-        """
-        Return the opposite strand (POS <-> NEG).
-        NONE and AMBIGUOUS are returned unchanged.
-        """
-        # Swap bit 0 and bit 1
-        return Strand(((self & 1) << 1) | (self >> 1))
-
 
 # ---------------------------------------------------------------------------
 # Interval
@@ -112,21 +96,19 @@ class GenomicInterval(NamedTuple):
 class IntervalType(IntEnum):
     """Classification of a genomic interval relative to gene annotations.
 
-    ``EXON`` marks an individual exon boundary.  ``TRANSCRIPT`` marks the
+    ``EXON`` is one exon of one transcript.  ``TRANSCRIPT`` marks the
     full transcript span ``[start, end)`` — intron overlap is derived as
-    ``transcript_bp - exon_bp``.  ``INTERGENIC`` fills gaps between genes.
+    ``transcript_bp - exon_bp``.  ``INTERGENIC`` covers the reference outside
+    every transcript.
 
     ``SJ`` is an annotated splice junction that exactly matches a known
-    intron in the transcript reference.  ``SJ_UNANNOT`` is a splice
-    junction observed in the CIGAR (N-operation) but not matching any
-    annotated intron — these are recorded with ``t_index = -1``.
+    intron in the transcript reference.
     """
 
     EXON = 0
     TRANSCRIPT = 1
     INTERGENIC = 2
     SJ = 3
-    SJ_UNANNOT = 4
 
 
 # ---------------------------------------------------------------------------
@@ -149,61 +131,3 @@ class AnnotatedInterval(NamedTuple):
     strand: int = Strand.NONE
     interval_type: int = IntervalType.INTERGENIC
     t_index: int = -1
-
-
-# ---------------------------------------------------------------------------
-# Merge criteria and result types
-# ---------------------------------------------------------------------------
-
-
-class MergeOutcome(IntEnum):
-    """Which relaxation level succeeded in progressive set merging.
-
-    During fragment resolution, transcript/gene index sets from
-    individual exon blocks or splice junctions are merged via
-    progressive relaxation:
-
-    0. INTERSECTION — intersection of *all* sets (most specific)
-    1. INTERSECTION_NONEMPTY — intersection of non-empty sets only
-    2. UNION — union of all sets (most sensitive)
-    3. EMPTY — no sets to merge (no hits of this type)
-    """
-
-    INTERSECTION = 0
-    INTERSECTION_NONEMPTY = 1
-    UNION = 2
-    EMPTY = 3
-
-
-# ---------------------------------------------------------------------------
-# Chimera classification
-# ---------------------------------------------------------------------------
-
-
-class ChimeraType(IntEnum):
-    """Classification of chimeric fragments.
-
-    A chimeric fragment has exon blocks that map to disjoint transcript
-    sets, indicating fusion or read-through events.
-
-    Values
-    ------
-    NONE : int
-        All exon blocks map to a connected set of transcripts.
-    TRANS : int
-        Exon blocks span multiple reference sequences (interchromosomal).
-        Suggestive of trans-splicing or gene fusions.
-    CIS_STRAND_SAME : int
-        Intrachromosomal chimera where both disjoint exon-block
-        clusters align to the same strand.  Suggestive of
-        transcriptional read-through between adjacent genes.
-    CIS_STRAND_DIFF : int
-        Intrachromosomal chimera where the disjoint exon-block
-        clusters align to different strands.  Suggestive of genomic
-        rearrangement or trans-splicing.
-    """
-
-    NONE = 0
-    TRANS = 1
-    CIS_STRAND_SAME = 2
-    CIS_STRAND_DIFF = 3

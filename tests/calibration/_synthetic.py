@@ -73,7 +73,6 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         ref_boundary_offsets=np.array([0, n_boundaries], dtype=np.int64),
         ref_sj_offsets=np.array([0, n_sj], dtype=np.int64),
         region_contained_count=contained,
-        region_contained_inv_opportunity_sum=inv(contained, 50),
         # per genome strand; every value distinct from every other bank's so a consumer reading the
         # wrong one cannot pass by coincidence. Ledger: ΣS == ΣE (== deposited in a real scan; this
         # fixture's qc uses its own totals).
@@ -157,7 +156,7 @@ def make_gdna_fl_pmf(mean: int = 50, max_size: int = 200) -> np.ndarray:
 def make_strand_models(p_r1_sense: float, n_observations: int, n_sj: int = 1):
     """A real :class:`StrandModels` with a chosen κ and observation count.
 
-    The calibrator reads BOTH halves of the RNA strand Beta-Binomial from the per-sj SJ strand
+    The calibrator reads BOTH halves of the RNA strand Beta-Binomial from the per-sj strand
     table — κ as its marginal, the overdispersion as its spread — so a unit fixture must
     supply a real table rather than duck-type two scalars. Observations are spread evenly over
     ``n_sj`` motif-POS sj, sense/antisense split to give exactly ``p_r1_sense``.

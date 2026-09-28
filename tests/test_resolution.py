@@ -13,9 +13,11 @@ import textwrap
 import pytest
 from _index_builder import build_test_index
 
-from rigel.types import ChimeraType, MergeOutcome, Strand, GenomicInterval
+from rigel.types import Strand, GenomicInterval
 from rigel.splice import SpliceType
 from _resolution_reference import (
+    ChimeraType,
+    MergeOutcome,
     _detect_intrachromosomal_chimera,
     make_fragment,
     resolve_fragment,

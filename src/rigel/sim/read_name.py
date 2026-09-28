@@ -1,7 +1,7 @@
 """Simulator read-name encoding: the ground-truth origin parser.
 
 The simulator encodes each fragment's ground truth in its read name
-(``{t_id}:{start}-{end}:{strand}:{index}`` for RNA, ``gdna:[ref:]{start}-{end}:{strand}:{index}``
+(``{t_id}:{start}-{end}:{strand}:{index}`` for RNA, ``gdna:{ref}:{start}-{end}:{strand}:{index}``
 for gDNA). This module owns the *parsing* side — a small, dependency-free decoder consumed by the
 benchmark/analysis tooling. Truth-table *writing* (and the counting helpers that aggregate parsed
 origins) live in :mod:`truth`, which imports :func:`parse_origin` from here.
@@ -53,23 +53,23 @@ def _parse_index(text: str) -> int | None:
 
 
 def parse_origin(qname: str) -> Origin:
-    """Parse a simulator FASTQ/BAM read name into a structured origin."""
+    """Parse a simulator FASTQ/BAM read name into a structured origin.
+
+    The interval, strand and index fields never contain ``:``, so the name is split from the right
+    and the leading field — a transcript id, or ``gdna:{ref}`` — may itself contain ``:``.
+    """
     qname = _normalize_qname(qname)
-    parts = qname.split(":")
+    parts = qname.rsplit(":", 3)
+    if len(parts) != 4 or not parts[0]:
+        raise ValueError(f"invalid simulator read name: {qname!r}")
+    name, interval_text, strand, index_text = parts
+    start, end = _parse_interval(interval_text)
+    index = _parse_index(index_text)
 
-    if not parts or not parts[0]:
-        raise ValueError("empty simulator read name")
-
-    if parts[0] == "gdna":
-        if len(parts) == 4:
-            ref = None
-            interval_text, strand, index_text = parts[1:]
-        elif len(parts) == 5:
-            ref = parts[1]
-            interval_text, strand, index_text = parts[2:]
-        else:
-            raise ValueError(f"invalid gDNA read name: {qname!r}")
-        start, end = _parse_interval(interval_text)
+    prefix, _, ref = name.partition(":")
+    if prefix == "gdna":
+        if not ref:
+            raise ValueError(f"gDNA read name without a reference: {qname!r}")
         return Origin(
             kind="gdna",
             transcript_id=None,
@@ -77,14 +77,8 @@ def parse_origin(qname: str) -> Origin:
             start=start,
             end=end,
             strand=strand,
-            index=_parse_index(index_text),
+            index=index,
         )
-
-    if len(parts) != 4:
-        raise ValueError(f"invalid RNA read name: {qname!r}")
-
-    name, interval_text, strand, index_text = parts
-    start, end = _parse_interval(interval_text)
     if name.startswith("nrna_"):
         return Origin(
             kind="nrna",
@@ -93,7 +87,7 @@ def parse_origin(qname: str) -> Origin:
             start=start,
             end=end,
             strand=strand,
-            index=_parse_index(index_text),
+            index=index,
         )
     return Origin(
         kind="mrna",
@@ -102,5 +96,5 @@ def parse_origin(qname: str) -> Origin:
         start=start,
         end=end,
         strand=strand,
-        index=_parse_index(index_text),
+        index=index,
     )

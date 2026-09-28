@@ -265,7 +265,7 @@ def test_a_CONTIGUOUS_BOUNDARY_divisor_is_the_UNBOUNDED_crossing_count__the_A7_R
     for slot in boundary_slots:
         assert geometry.eff_gdna[slot] == pytest.approx(mu_g - 1.0)
         assert geometry.eff_rna[slot] == pytest.approx(mu_r - 1.0)
-        # and against the enumerator, so this is not just restating `fl_mean - 1`
+        # and against the enumerator, so this is not just restating `mu - 1`
         assert geometry.eff_gdna[slot] == pytest.approx(brute_crossing(GDNA_PMF, 1e12, 1e12))
 
 
@@ -467,9 +467,6 @@ def two_reference_parts(payload):
         n_refs=2,
         region_contained_count=np.vstack(
             [payload.region_contained_count, np.array([[1, 1], [2, 2]], np.uint32)]
-        ),
-        region_contained_inv_opportunity_sum=np.concatenate(
-            [payload.region_contained_inv_opportunity_sum, np.zeros(2, np.uint64)]
         ),
         region_start_count=np.concatenate(
             [payload.region_start_count, np.zeros((2, 2), np.uint32)]

@@ -35,6 +35,36 @@ junctions on opposite motif strands; mates disagreeing on an acceptor, which cal
 intron and the resolver calls annotated — and one length rule the stages apply differently: calibration drops an
 unspliced or artifact reading past the maximum fragment length, the EM keeps gDNA while its likelihood competes.
 
+### strand-overdispersion-one-shared-value
+`priority: next, after the step-1c instruments (owner, 2026-09-28) · kind: design · 2026-09-27`
+Calibration's strand overdispersion reaches the solve through `reconcile_overdispersions`, fed two mismatched
+value/precision pairs:
+- gDNA: the ρ = 0 pair-count moment beside the fitted estimate's precision; the influence-weighted fit is computed
+  and then discarded.
+- RNA: an unweighted moment beside its null information, which credits it with about 700,000× too much evidence on
+  a real library.
+
+The rule keeps the two components apart unless one is far better measured. That is not what the owner intended.
+OWNER RULINGS (2026-09-28):
+1. gDNA and RNA share ONE overdispersion.
+2. First prototype the gDNA-evidence fix on top of the shared estimator, with a new panel condition that plants
+   gDNA alongside RNA on the opposite strand of its seeds; then land the two in sequence, each A/B'd alone.
+3. The no-evidence fallback becomes 0 (binomial), once it is justified theoretically and, ideally, empirically.
+4. The shared estimating equation can have two roots at low gDNA; it needs a clear, simple rule.
+5. No hard-coded upper limit, but no estimate may be able to sabotage the tool.
+
+MEASURED (prototype, 2026-09-27): one joint influence-weighted fit over the gDNA seeds and the RNA junctions.
+- On `odg05` (planted gDNA 0.05, RNA 0): calibration error −10 % / −19 % and transcript error −3 % / −7 % in
+  stranded capture OFF / ON.
+- On the ladder and the test panel: within noise.
+- On real low-gDNA stranded libraries (the VCaP transcriptome, MO_3021 subsampled) the gDNA seeds are mostly
+  opposite-strand RNA (raw moments 0.4–0.86), so every precision-honest estimator reaches the 0.2 ceiling. 0.2 is
+  the most harmful value measured: +200 % calibration error on ladder stranded capture-ON, where the truth is 0.
+
+Instrument: the harness, the substrates and the report in
+`~/Downloads/rigel_runs/prototypes/2026-09-27_strand_od/`. The 2026-08-30 design (DESIGN §3.3a) is superseded when
+this lands.
+
 ### multimapper-intergenic-alignments
 `priority: a separate feature, after the end-to-end work (owner, 2026-09-24) · kind: defect · 2026-09-24`
 A multimapper whose alignments all lie outside genes is intergenic and counted as gDNA — correct. One with an
@@ -442,9 +472,8 @@ toy inherits both; `quant_accuracy`'s oracle arms are undrained (documented ther
 the substrate and the caches, read by nothing (the retired length channel's) — deleting it changes the payload
 schema and re-caches both panels, so it goes with the next change that re-caches anyway (owner, 2026-09-22).
 (c) PRODUCTION-DEAD, KEPT AS TEST SURFACE: the resolver's `intron_bp`, the tested half of its overlap profile;
-`rigel.sim.benchmark` and `Scenario.build_oracle`, test tooling inside the package; `priors.contended_boundaries`,
-`region_init.has_own_composition_evidence`, `effective_length.fl_mean` and `Strand.from_is_reverse` / `opposite`,
-which tests use as checks or oracles.
+`rigel.sim.benchmark` and `Scenario.build_oracle`, test tooling inside the package;
+`region_init.has_own_composition_evidence`, which tests use as a check.
 (d) CLAIMS NOT RE-DERIVED on the current tree, left standing: that most in-scope error sits at the simplex
 vertices (`simplex_logodds`, a relay-era measurement); `sweep`'s refused deferral of UNIDENTIFIED slots to the
 prior (priced 2026-07, with no refusal entry here); `region_geometry`'s "no per-region spliced floor" A/B
@@ -519,8 +548,8 @@ where both overshot; and what it changes reaches every contracted length through
 judged on the capture-ON rows as well as the pools. The entry as it stood
 (`priority: NEXT — the owner's residual pass (2026-09-24): the largest owner of g98's gDNA error · kind: defect · 2026-09-20`):
 DISSECTED AGAIN 2026-09-24 on the count form, against per-fragment truth (four lenses, a synthesis and two refuters;
-`~/Downloads/rigel_runs/prototypes/2026-09-24_g98_dissection/`). The read-out is the posterior MEDIAN of λ (`simplex_logodds.posterior_median_fg`,
-`psi_kernel.h`, `DESIGN.md` §6c), not a mean: under the Jeffreys reference with no atom at zero RNA, an object whose
+`~/Downloads/rigel_runs/prototypes/2026-09-24_g98_dissection/`). The read-out is the posterior MEDIAN of λ
+(`psi_kernel.h`, `DESIGN.md` §6c), not a mean: under the Jeffreys reference with no atom at zero RNA, an object whose
 true RNA is below its resolution `1/√(n·I)` reads about 0.42·√(n/I) fragments of RNA, always toward RNA (measured
 0.21–0.28·√n stranded, 0.32–0.37·√n unstranded; the stranded/unstranded ratio 0.721 against the Fisher-information
 ratio 0.714). It is per OBJECT, and 78–85 % of calibration's count error sits on objects with no RNA, mostly INSIDE

@@ -76,20 +76,6 @@ def _boundary(ref, boundary):
     return (0 if ref == 0 else len(CHR1_REGION_BOUNDS) - 2) + boundary - 1
 
 
-def _contained_quantum(ref, local, length):
-    """The deposit a CONTAINED length-``length`` fragment makes on region ``(ref, local)``.
-
-    The deposit is ``1/OPPORTUNITY``, not ``1/length`` — a length-`w` fragment inside a region of
-    length `ell` had `ell − w + 1` admissible start positions, so `1/(ell − w + 1)` cancels the
-    opportunity on its own support and the channel is a DENSITY for any length distribution
-    (`test_fragment_length_proof.test_the_region_deposit_is_the_RECIPROCAL_OPPORTUNITY_...`). Derived
-    from the fixture's own region bounds rather than written as a number, so an assertion states the
-    RULE.
-    """
-    region_bounds = CHR1_REGION_BOUNDS if ref == 0 else CHR2_REGION_BOUNDS
-    return 1.0 / (region_bounds[local + 1] - region_bounds[local] - length + 1)
-
-
 def _region(ref, local):
     return (0 if ref == 0 else len(CHR1_REGION_BOUNDS) - 1) + local
 
@@ -120,11 +106,6 @@ def test_a_contained_fragment_touches_ONE_region_and_no_boundary():
     assert acc.deposit(0, 220, 380) is DepositOutcome.DEPOSITED
     t = acc.tally
     assert int(t.region_contained_count[_region(0, 3), 0]) == 1
-    assert close(
-        float(t.region_contained_inv_opportunity_sum[_region(0, 3)]),
-        _contained_quantum(0, 3, 160),
-        1,
-    )
     assert t.region_contained_count.sum() == 1
     assert t.boundary_unspliced_count.sum() == 0
 
@@ -275,11 +256,7 @@ def test_an_unannotated_intron_inside_one_region_is_a_contained_unspliced_fragme
     acc.deposit(0, 210, 390, observed_introns=[(300, 340)])
     t = acc.tally
     assert int(t.region_contained_count[_region(0, 3), 0]) == 1
-    assert close(
-        float(t.region_contained_inv_opportunity_sum[_region(0, 3)]),
-        _contained_quantum(0, 3, 180 - 40),
-        1,
-    )
+    assert int(t.deposited_lengths[180 - 40]) == 1
     assert t.qc["unannotated_introns"] == 1
 
 
@@ -494,11 +471,7 @@ def test_a_fragment_is_clipped_to_its_reference_and_L_is_the_clipped_length():
     acc.deposit(0, 950, 1200)  # chr1 ends at 1000
     t = acc.tally
     assert int(t.region_contained_count[_region(0, 5), 0]) == 1
-    assert close(
-        float(t.region_contained_inv_opportunity_sum[_region(0, 5)]),
-        _contained_quantum(0, 5, 50),
-        1,
-    )
+    assert int(t.deposited_lengths[50]) == 1
 
 
 def test_a_single_region_reference_has_no_boundaries_and_still_accepts_a_fragment():
@@ -663,7 +636,6 @@ def test_the_deposit_is_independent_of_the_ORDER_fragments_arrive_in():
     a, b = run(range(len(starts))), run(order)
     for field in (
         "region_contained_count",
-        "region_contained_inv_opportunity_sum",
         "region_start_count",
         "boundary_unspliced_count",
         "boundary_unspliced_inv_length_sum",
@@ -733,11 +705,7 @@ def test_the_path_STARTS_where_its_first_covered_base_is_not_where_the_extent_be
     assert int(t.region_start_count[_region(0, 4)].sum()) == 1, "n4, where the path actually starts"
     assert int(t.region_start_count[_region(0, 1)].sum()) == 0, "not n1, where the extent begins"
     assert int(t.region_contained_count[_region(0, 4), 0]) == 1
-    assert close(
-        float(t.region_contained_inv_opportunity_sum[_region(0, 4)]),
-        _contained_quantum(0, 4, 20),
-        1,
-    )
+    assert int(t.deposited_lengths[20]) == 1
 
 
 def test_a_duplicated_intron_credits_its_sj_ONCE():
@@ -1097,11 +1065,8 @@ def test_BOTH_genome_strands_land_in_the_ONE_length_moment_slot():
     # the count still separates them, one per column
     assert int(t.region_contained_count[region, STRAND_COLUMNS[Strand.POS]]) == 1
     assert int(t.region_contained_count[region, STRAND_COLUMNS[Strand.NEG]]) == 1
-    # ...and the moments pool them into the single slot
-    assert close(
-        float(t.region_contained_inv_opportunity_sum[region]), 2 * _contained_quantum(0, 3, 160), 2
-    )
 
+    # ...and the moments pool them into the single slot
     boundary_acc = _acc()
     boundary_acc.deposit(0, 120, 320, align_strand=Strand.POS)
     boundary_acc.deposit(0, 120, 320, align_strand=Strand.NEG)
@@ -1112,16 +1077,10 @@ def test_BOTH_genome_strands_land_in_the_ONE_length_moment_slot():
 
 
 def test_the_density_FIELD_NAME_is_gone_everywhere():
-    """No consumer may reach a half-migrated schema.
-
-    ``inv_length_sum`` is an exact density at a boundary and is NOT one at a region, so a single name
-    covering both rules would put one word on two concepts and hide the truncation
-    (TRAPS: two-masks-one-name).
-    """
+    """No consumer may reach a half-migrated schema."""
     t = _acc().tally
     stale = [name for name in t.__slots__ if name.endswith("_density")]
     assert stale == []
-    assert {"region_contained_inv_opportunity_sum"} <= set(t.__slots__)
 
 
 # ---------------------------------------------------------------------------

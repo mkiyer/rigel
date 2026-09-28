@@ -14,7 +14,7 @@ from pathlib import Path
 import pysam
 import pytest
 
-from rigel._bam_impl import detect_sj_strand_tag
+from rigel.native import detect_sj_strand_tag
 
 
 # =====================================================================

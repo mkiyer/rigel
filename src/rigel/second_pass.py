@@ -116,9 +116,7 @@ def _distinguishing_boundaries(
 
 
 #: P(alignment orientation | gDNA) — biologically fixed, not estimated. Double-stranded DNA has no
-#: sense direction, so either orientation is equally likely. Not a tunable and not a fitted marginal: it
-#: is the same value `StrandModels` records for gDNA everywhere else — gDNA is scored with a fixed
-#: strand probability of one half, never learned from intergenic data.
+#: sense direction, so either orientation is equally likely. Not a tunable and not a fitted marginal.
 P_ORIENTATION_GIVEN_GDNA = 0.5
 
 

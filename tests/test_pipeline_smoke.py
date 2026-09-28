@@ -3,7 +3,7 @@
 ``run_pipeline`` end to end on a minimal oracle scenario: the transcript, gene and locus frames have
 the expected schema and are non-empty, mature RNA counts are positive, the fragment count agrees
 with the scan, and TPM sums to a million. Also that the scan's read-name batch size does not change
-the answer at its boundaries. None of this is a precision claim — it is the gate that catches
+the answer at its boundaries, and that the scan spills into a ``spill_dir`` given as a ``str``. None of this is a precision claim — it is the gate that catches
 import and interface breakage between components that each pass their own unit tests.
 """
 
@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
-from rigel.pipeline import run_pipeline
+from rigel.pipeline import run_pipeline, scan_and_buffer
 from rigel.sim import Scenario, ReadSimConfig
 
 SEED = 42
@@ -107,6 +107,26 @@ def test_scan_read_name_batch_size_boundaries_match(tmp_path):
     )
     assert batch_one.stats.n_read_names == batch_huge.stats.n_read_names
     assert batch_one.stats.n_fragments == batch_huge.stats.n_fragments
+
+
+def test_scan_spills_into_a_str_spill_dir(tmp_path):
+    """``BamScanConfig.spill_dir`` accepts a ``str``; the scan creates it and spills into it."""
+    sc, result = _make_scenario(tmp_path, n_fragments=120)
+    spill_dir = tmp_path / "spill" / "nested"
+    scan = BamScanConfig(
+        sj_strand_tag="auto",
+        fragments_per_chunk=10,
+        buffer_size_bytes=1,
+        spill_dir=str(spill_dir),
+    )
+    try:
+        _stats, _sm, buffer, _payload = scan_and_buffer(str(result.bam_path), result.index, scan)
+        with buffer:
+            assert buffer.n_spilled > 0
+            assert [p.name.startswith("rigel_buf_") for p in spill_dir.iterdir()] == [True]
+        assert list(spill_dir.iterdir()) == []
+    finally:
+        sc.cleanup()
 
 
 class TestPipelineSmoke:

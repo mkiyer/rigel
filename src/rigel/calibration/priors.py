@@ -160,8 +160,7 @@ def _boundary_locus_shares(
     Shares can sum above 1 only for a CONTENDED boundary — adjacent regions in different multi-loci —
     and that boundary carries no mass: any fragment crossing it overlaps transcripts in both loci, so it is
     a candidate in both and the union-find has already merged them into one multi-locus. The
-    configuration is therefore unreachable for a boundary with mass, and it is *reported* by
-    :func:`contended_boundaries` rather than silently renormalised.
+    configuration is therefore unreachable for a boundary with mass, and its shares are not renormalised.
 
     ``region_shares`` is :func:`_region_locus_shares`'s triples when the caller already holds them, which is
     what makes that function's "computed exactly once" true on the pipeline's path: `assemble_priors` needs
@@ -209,24 +208,6 @@ def _boundary_locus_shares(
     out = np.zeros(uniq.size, dtype=np.float64)
     np.maximum.at(out, inv, shares)
     return (uniq // np.int64(n_loci), uniq % np.int64(n_loci), out)
-
-
-def contended_boundaries(
-    region_arrays: "RegionArrays", multi_loci: "list[MultiLocus]", n_loci: int
-) -> np.ndarray:
-    """``int64[]`` — boundaries whose locus shares sum above 1, i.e. reached by two multi-loci at once.
-
-    ⛔ **Reported, never renormalised.** The rule in :func:`_boundary_locus_shares` says such a boundary cannot
-    carry mass; a caller that wants to *prove* that on real data needs the list, and silently rescaling
-    the shares would destroy the evidence. Expected to be empty or mass-free.
-    """
-    e, _lid, w = _boundary_locus_shares(region_arrays, multi_loci, n_loci)
-    if e.size == 0:
-        return np.zeros(0, np.int64)
-    n_boundaries = int(e.max()) + 1
-    total = np.zeros(n_boundaries, dtype=np.float64)
-    np.add.at(total, e, w)
-    return np.flatnonzero(total > 1.0 + 1e-9).astype(np.int64)
 
 
 def _project_regions_to_loci(
@@ -369,4 +350,4 @@ def assemble_priors(
     )
 
 
-__all__ = ["LocusPriors", "assemble_priors", "contended_boundaries"]
+__all__ = ["LocusPriors", "assemble_priors"]

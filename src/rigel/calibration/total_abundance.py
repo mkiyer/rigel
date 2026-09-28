@@ -8,8 +8,7 @@ fitted before pass-0 (`abundance_landscape`), so its inputs are counts and lengt
 ⛔ It is never ``mass / effective_length``. That divisor is a function of the composition being solved
 for, so the same 100 counts in 500 bp read 0.25 as pure gDNA and 0.33 as pure RNA. A REGION's total is
 the START/END banks over the region's own length: a fragment's first covered base falls in a region at
-rate ``ρ·ℓ`` at every fragment length, which is what makes it a total, where the contained bank is only a
-density shape (``ρ·P(w ≤ ℓ)``, an order of magnitude off at a short exon). The two banks are blind at
+rate ``ρ·ℓ`` at every fragment length, which is what makes it a total. The two banks are blind at
 opposite template ends, so the consumer side-selects: use the side whose wall does not bind, both where
 both are exact.
 

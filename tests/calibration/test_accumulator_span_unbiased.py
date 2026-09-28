@@ -148,9 +148,7 @@ def test_implicit_splice_routes_to_spliced_channel(tmp_path):
             if e >= 0:
                 bounding[e] = True
     intron_unspliced = float(contained[intron].sum() + crossing[bounding].sum())
-    assert intron_unspliced == 0.0, (
-        f"intron carries unspliced mass {intron_unspliced} (not region_bound)"
-    )
+    assert intron_unspliced == 0.0, f"intron carries unspliced mass {intron_unspliced} (not cut)"
 
 
 def _write_pair(out, qn, *, r1_pos, r1_cigar, r2_pos, r2_cigar, xs):

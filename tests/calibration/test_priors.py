@@ -21,12 +21,21 @@ from rigel.calibration.priors import (
     _boundary_locus_shares,
     _region_locus_shares,
     assemble_priors,
-    contended_boundaries,
 )
 from rigel.calibration.region_arrays import RegionArrays, boundary_region_indices
 from rigel.calibration.result import CalibrationResult
 from rigel.calibration.signature import BIT_EXON_POS
 from rigel.locus import Locus, MultiLocus
+
+
+def contended_boundaries(region_arrays, multi_loci, n_loci) -> np.ndarray:
+    """``int64[]`` — boundaries whose locus shares sum above 1, i.e. reached by two multi-loci at once."""
+    e, _lid, w = _boundary_locus_shares(region_arrays, multi_loci, n_loci)
+    if e.size == 0:
+        return np.zeros(0, np.int64)
+    total = np.zeros(int(e.max()) + 1, dtype=np.float64)
+    np.add.at(total, e, w)
+    return np.flatnonzero(total > 1.0 + 1e-9).astype(np.int64)
 
 
 def _result(

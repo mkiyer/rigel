@@ -211,7 +211,7 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     assert splice["sj_blacklist_loaded"] is False
     assert splice["sj_blacklist_size"] == 0
 
-    # per-sj SJ strand table QC: "how many sj are deep enough to
+    # per-sj strand table QC: "how many sj are deep enough to
     # measure the strand dispersion" is a first-class question about a library.
     junc = summary["strand_model"]["sj"]
     assert {

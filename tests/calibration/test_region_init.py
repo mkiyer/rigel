@@ -3,10 +3,9 @@
 One test per information source — MEASURED (the structural lock), INTRON FACTORY, STRAND DECONVOLUTION,
 UNSOLVED default (100 % gDNA, ZERO evidence) — on the three things the self-solve publishes: the
 composition mode ``f_*`` and the own evidence ``tau_lam``. These pin the self-solve that seeds the
-sweep. The last block gates the ``mrna_active_*`` classification ``build_region_statics`` carries onto
-the chain alongside the ``free_*`` (nascent-active / RNA-crossing) masks; that classification is
-signature-only, so the counts are irrelevant to it, and it is asserted across every region type and all
-four boundary types.
+sweep. The last block gates the ``free_*`` (RNA-crossing) masks ``build_region_statics`` carries onto
+the chain; that classification is signature-only, so the counts are irrelevant to it, and it is asserted
+across every region type and all four boundary types.
 """
 
 from __future__ import annotations
@@ -108,6 +107,7 @@ def _scenario(kappa=0.9):
         gdna_strand_overdispersion=0.2,
         rna_strand_overdispersion=0.1,
         n_grid=60,
+        logodds_window=10.0,
     )
     return parts.chain, parts.statics, parts.geometry, belief, parts.region_arrays
 
@@ -359,7 +359,7 @@ def test_density_factor_precision_flows_into_the_own_evidence():
     assert ni_on.tau_lam[4] > 0.0  # factory ⇒ the region can now speak
 
 
-# ── the signature-only classification the chain carries: free_* beside mrna_active_* ─────────
+# ── the signature-only classification the chain carries: free_* ───────────────────────────────
 
 
 def _build_statics(region_sigs):
@@ -396,11 +396,9 @@ def test_classifier_covers_region_and_boundary_types():
     ]
     chain, st = _build_statics(sigs)
 
-    # masks are bool and full-length; the whole-chain invariant mrna_active ⇒ free (nascent) holds.
-    for m in (st.free_pos, st.free_neg, st.mrna_active_pos, st.mrna_active_neg):
+    # masks are bool and full-length
+    for m in (st.free_pos, st.free_neg):
         assert m.dtype == bool and m.shape[0] == st.n_slots
-    assert np.all(~st.mrna_active_pos | st.free_pos)  # mature ⇒ nascent-active (+)
-    assert np.all(~st.mrna_active_neg | st.free_neg)  # (−)
 
     kind, ref = np.asarray(chain.kind), np.asarray(chain.obj_idx)
     reg = np.where(kind == REGION)[0]  # N0..N5 (genomic order)
@@ -409,28 +407,18 @@ def test_classifier_covers_region_and_boundary_types():
     np.testing.assert_array_equal(ref[bnd], np.arange(5))
 
     def state(i):
-        return (
-            bool(st.free_pos[i]),
-            bool(st.free_neg[i]),
-            bool(st.mrna_active_pos[i]),
-            bool(st.mrna_active_neg[i]),
-        )
+        return (bool(st.free_pos[i]), bool(st.free_neg[i]))
 
-    # --- regions (free_pos, free_neg, mrna_pos, mrna_neg) ---
-    assert state(reg[0]) == (True, False, True, False)  # exon+  : mature-capable +
-    assert state(reg[2]) == (
-        True,
-        False,
-        False,
-        False,
-    )  # intron+: NASCENT-ONLY + (free but not mature)
-    assert state(reg[3]) == (False, False, False, False)  # intergenic: gDNA sink
-    assert state(reg[4]) == (True, True, True, True)  # ambig-exon: mature-capable both strands
+    # --- regions (free_pos, free_neg) ---
+    assert state(reg[0]) == (True, False)  # exon+
+    assert state(reg[2]) == (True, False)  # intron+
+    assert state(reg[3]) == (False, False)  # intergenic: gDNA sink
+    assert state(reg[4]) == (True, True)  # ambig-exon: both strands
 
     # --- boundaries: the four types. There is no reference-start terminal slot, so E0 is the first
     # real boundary, N0|N1.
-    assert state(bnd[0]) == (True, False, True, False)  # exon↔exon+   : MATURE-CAPABLE
-    assert state(bnd[1]) == (True, False, False, False)  # exon↔intron+ : NASCENT-ONLY
-    assert state(bnd[2]) == (False, False, False, False)  # intron↔intergenic: SINK (no + crossing)
-    assert state(bnd[3]) == (False, False, False, False)  # intergenic↔ambig-exon : SINK
-    assert state(bnd[4]) == (True, True, True, True)  # ambig↔ambig  : AMBIG, mature both strands
+    assert state(bnd[0]) == (True, False)  # exon↔exon+
+    assert state(bnd[1]) == (True, False)  # exon↔intron+
+    assert state(bnd[2]) == (False, False)  # intron↔intergenic: SINK (no + crossing)
+    assert state(bnd[3]) == (False, False)  # intergenic↔ambig-exon : SINK
+    assert state(bnd[4]) == (True, True)  # ambig↔ambig  : AMBIG

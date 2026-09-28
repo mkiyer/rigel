@@ -8,6 +8,8 @@ non-trivial fractional mass into at least one region or boundary.
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import pytest
 
@@ -120,21 +122,8 @@ def blacklisted_oracle(tmp_path):
     sc.cleanup()
 
 
-@pytest.fixture
-def multi_reference_bam(tmp_path):
-    """A two-contig index and a BAM holding one fragment whose mates sit on DIFFERENT references.
-
-    This exists to make ``n_deposit_not_offered`` non-zero. Such a fragment is not one molecule and a
-    ``FragmentPath`` cannot express it — it carries one extent on one region-bound axis — so the
-    deposit adapter refuses it. Computing a span per reference and depositing all of them onto the
-    first block's ``ref_id`` instead lands one contig's coordinates on another's axis. The refusal is
-    right; being silent about it is not, which is what the counter is for.
-
-    It reaches the adapter by the INTERGENIC path: both mates resolve to no candidate transcript, so
-    the fragment is never classified chimeric and is never filtered upstream.
-
-    Returns ``(bam_path, index)``.
-    """
+def _two_contig_index(tmp_path):
+    """chr1 and chr2, 3,000 bp each; one two-exon transcript on chr1 at 101-300 and 501-700."""
     import pysam
 
     from rigel.index import TranscriptIndex
@@ -148,43 +137,69 @@ def multi_reference_bam(tmp_path):
     )
     index_dir = tmp_path / "idx"
     TranscriptIndex.build(str(fasta), str(gtf), str(index_dir), write_tsv=False)
-    index = TranscriptIndex.load(str(index_dir))
+    return TranscriptIndex.load(str(index_dir))
+
+
+def _two_contig_read(qname, ref_id, pos, mate_ref_id, mate_pos, is_r1, cigar="100M"):
+    import pysam
+
+    a = pysam.AlignedSegment()
+    a.query_name = qname
+    a.reference_id = ref_id
+    a.reference_start = pos
+    a.mapping_quality = 60
+    a.flag = 0x1 | (0x40 if is_r1 else 0x80) | (0x20 if is_r1 else 0x10)
+    a.cigarstring = cigar
+    n = a.infer_query_length()
+    a.query_sequence = "A" * n
+    a.query_qualities = pysam.qualitystring_to_array("I" * n)
+    a.next_reference_id = mate_ref_id
+    a.next_reference_start = mate_pos
+    a.set_tags([("NH", 1, "i")])
+    return a
+
+
+def _two_contig_bam(bam_path, reads) -> str:
+    import pysam
 
     header = {
         "HD": {"VN": "1.6", "SO": "queryname"},
         "SQ": [{"SN": "chr1", "LN": 3000}, {"SN": "chr2", "LN": 3000}],
     }
-
-    def _read(qname, ref_id, pos, mate_ref_id, mate_pos, is_r1):
-        a = pysam.AlignedSegment()
-        a.query_name = qname
-        a.reference_id = ref_id
-        a.reference_start = pos
-        a.mapping_quality = 60
-        a.flag = 0x1 | (0x40 if is_r1 else 0x80) | (0x20 if is_r1 else 0x10)
-        a.cigar = [(0, 100)]
-        a.query_sequence = "A" * 100
-        a.query_qualities = pysam.qualitystring_to_array("I" * 100)
-        a.next_reference_id = mate_ref_id
-        a.next_reference_start = mate_pos
-        a.set_tags([("NH", 1, "i")])
-        return a
-
-    reads = [
-        # The trans pair: mates on chr1 and chr2, both well clear of the annotation.
-        _read("trans", 0, 1500, 1, 1500, True),
-        _read("trans", 1, 1500, 0, 1500, False),
-        # And one ordinary intergenic pair, so a census that counted NOTHING would not pass by
-        # making both sides of the identity zero.
-        _read("cis", 0, 2000, 0, 2300, True),
-        _read("cis", 0, 2300, 0, 2000, False),
-    ]
-    bam_path = str(tmp_path / "multi_ref.bam")
+    bam_path = str(bam_path)
     with pysam.AlignmentFile(bam_path, "wb", header=header) as out:
         for r in reads:
             out.write(r)
     pysam.sort("-n", "-o", bam_path, bam_path)
-    return bam_path, index
+    return bam_path
+
+
+@pytest.fixture
+def multi_reference_bam(tmp_path):
+    """A two-contig index and a BAM holding one fragment whose mates sit on DIFFERENT references.
+
+    This exists to make ``n_deposit_not_offered`` non-zero. Such a fragment is not one molecule and an
+    ``OfferedFragment`` cannot express it — it carries one extent on one region-bound axis — so the
+    deposit adapter refuses it. Computing a span per reference and depositing all of them onto the
+    first block's ``ref_id`` instead lands one contig's coordinates on another's axis. The refusal is
+    right; being silent about it is not, which is what the counter is for.
+
+    It reaches the adapter by the INTERGENIC path: both mates resolve to no candidate transcript, so
+    the fragment is never classified chimeric and is never filtered upstream.
+
+    Returns ``(bam_path, index)``.
+    """
+    index = _two_contig_index(tmp_path)
+    reads = [
+        # The trans pair: mates on chr1 and chr2, both well clear of the annotation.
+        _two_contig_read("trans", 0, 1500, 1, 1500, True),
+        _two_contig_read("trans", 1, 1500, 0, 1500, False),
+        # And one ordinary intergenic pair, so a census that counted NOTHING would not pass by
+        # making both sides of the identity zero.
+        _two_contig_read("cis", 0, 2000, 0, 2300, True),
+        _two_contig_read("cis", 0, 2300, 0, 2000, False),
+    ]
+    return _two_contig_bam(tmp_path / "multi_ref.bam", reads), index
 
 
 def _scan_full(result, index=None):
@@ -529,3 +544,35 @@ class TestSpliceCensus:
     # it exists, but there is no separate observation counter left to compare it against. The
     # population statement that survives is the identity above: every censused fragment either
     # deposits, is a named rejection, or is a named hold-out.
+
+
+def test_an_intron_on_another_reference_is_not_cut(tmp_path):
+    """The deposit adapter keeps only the introns on the reference it deposits onto.
+
+    A record whose CIGAR has an N and no M, D, = or X op adds an intron and no exon block, so a pair
+    whose exon blocks all sit on chr1 can carry an intron on chr2. The deposit reads an intron's
+    coordinates and never its reference, so kept, that intron would be cut out of the chr1 extent.
+    """
+    index = _two_contig_index(tmp_path)
+
+    def deposit(name, mate_ref_id, mate_cigar):
+        reads = [
+            _two_contig_read("p", 0, 1500, mate_ref_id, 1520, True),
+            _two_contig_read("p", mate_ref_id, 1520, 0, 1500, False, cigar=mate_cigar),
+        ]
+        bam_path = _two_contig_bam(tmp_path / f"{name}.bam", reads)
+        _stats, _sm, _buf, payload = scan_and_buffer(bam_path, index, BamScanConfig())
+        return payload
+
+    no_intron = deposit("no_intron", 1, "10S")
+    other_ref = deposit("other_ref", 1, "5S40N5S")
+    same_ref = deposit("same_ref", 0, "5S40N5S")
+
+    assert int(no_intron.qc.deposited) == 1
+    assert not np.array_equal(same_ref.deposited_lengths, no_intron.deposited_lengths), (
+        "the intron is not cut even on its own reference, so this test proves nothing"
+    )
+    for field in dataclasses.fields(no_intron):
+        value = getattr(no_intron, field.name)
+        if isinstance(value, np.ndarray):
+            np.testing.assert_array_equal(getattr(other_ref, field.name), value, err_msg=field.name)

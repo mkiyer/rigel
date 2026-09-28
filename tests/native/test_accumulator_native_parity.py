@@ -26,7 +26,7 @@ import dataclasses
 
 import numpy as np
 
-from rigel._bam_impl import Accumulator as NativeAccumulator
+from rigel.native import Accumulator as NativeAccumulator
 from rigel.types import Strand
 
 from ._accumulator_reference import (
@@ -330,7 +330,7 @@ CASES: list[tuple[str, dict]] = [
     # These are what the arbitration is. Everything above carries the unspliced hypothesis alone, so
     # every one of them is the degenerate case — which is the general case, not a branch.
     (
-        "ONE implied path -> deposits, and its intron is region_bound from L",
+        "ONE implied path -> deposits, and its intron is cut from L",
         dict(start=150, end=950, hypotheses=(LONG_SJ,)),
     ),
     (
@@ -342,11 +342,11 @@ CASES: list[tuple[str, dict]] = [
         dict(start=350, end=950, sj_strand=Strand.NEG, hypotheses=(LONG_SJ,)),
     ),
     (
-        "observed AND implied introns are both region_bound, and both sj credited",
+        "observed AND implied introns are both cut, and both sj credited",
         dict(start=50, end=950, observed_introns=[(100, 200)], hypotheses=(LONG_SJ,)),
     ),
     (
-        "an implied intron DUPLICATING an observed one is absorbed, not region_bound twice",
+        "an implied intron DUPLICATING an observed one is absorbed, not cut twice",
         dict(start=50, end=950, observed_introns=[(201, 900)], hypotheses=(LONG_SJ,)),
     ),
     (
@@ -497,7 +497,7 @@ def test_a_reference_with_no_sj_table_agrees():
         ),
         ("no table: a plain crossing", dict(start=50, end=500)),
         (
-            "no table: an implied path still region_bounds its intron",
+            "no table: an implied path still cuts its intron",
             dict(start=150, end=950, hypotheses=(LONG_SJ,)),
         ),
         (

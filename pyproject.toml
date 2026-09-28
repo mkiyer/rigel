@@ -33,6 +33,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
+    "rigel-rnaseq[report]",
 ]
 # QC report builder (`rigel report`). vl-convert-python ships the Vega / Vega-Lite
 # / Vega-Embed JavaScript runtime inside its wheel, so reports are fully

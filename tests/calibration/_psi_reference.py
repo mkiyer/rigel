@@ -1,8 +1,9 @@
 """The readable statements of ψ's pieces that the gates recompute with — the oracles, not a second solver.
 
-ψ is native (`native/psi_kernel.h`, read through `simplex_logodds.psi_cube`); the gates that hold it to its
-derivations need the derivations written down once, in numpy, small enough to read against `EQUATIONS.md`:
-the three-component strand term with the variance frozen at a reference composition and its two-component
+ψ is native (`native/psi_kernel.h`); the four readers at the end of this file (`psi_cube`, `gdna_arm`,
+`posterior_median_fg`, `compose`) call its gate bindings. The gates that hold it to its derivations need
+the derivations written down once, in numpy, small enough to read against `EQUATIONS.md`: the
+three-component strand term with the variance frozen at a reference composition and its two-component
 special case (the collapse `test_strand_likelihood_reference.py` gates), the two Jeffreys arms,
 the delivered row's map onto the cube, a log-sum-exp, and the delivery table stated by hand. Nothing here
 asserts and nothing in `src/` reads it.
@@ -13,7 +14,15 @@ from __future__ import annotations
 import numpy as np
 from scipy.special import log_expit, logsumexp
 
-from rigel.calibration.simplex_logodds import CubeRows
+from rigel.calibration.simplex_logodds import (
+    _TILT_NODES,
+    CubeRows,
+    _arm,
+    _cube_args,
+    _prior,
+    _reference_composition,
+)
+from rigel.native import psi_compose, psi_cube_native, psi_gdna_arm, psi_posterior_median
 
 
 def strand_loglik_mixture(
@@ -163,3 +172,113 @@ class Row:
 def row_record(profile_pos, profile_neg, u, total, opportunity, rho_ref) -> Row:
     """One delivered row stated by hand, for `row_at`."""
     return Row(cube_rows_of({0: (profile_pos, profile_neg, total, opportunity, rho_ref)}, u), 0)
+
+
+# ── the kernel's own ψ pieces, read through its gate bindings (`native/solve_kernel.cpp`) ───────────────
+
+
+def gdna_arm(log_rho, logP, lam, mass, eff):
+    """The fitted gDNA arm as an ``(m, K)`` matrix — the kernel's own construction, for the gates: the curve
+    ``(log_rho, logP)`` read at ``log σ(λ) + log M − log E`` for every slot and cell (`native.psi_gdna_arm`)."""
+    lam = np.ascontiguousarray(lam, np.float64)
+    mass = np.ascontiguousarray(mass, np.float64)
+    out = np.zeros((mass.shape[0], lam.shape[0]))
+    psi_gdna_arm(
+        np.ascontiguousarray(log_rho, np.float64),
+        np.ascontiguousarray(logP, np.float64),
+        lam,
+        mass,
+        np.ascontiguousarray(eff, np.float64),
+        out,
+    )
+    return out
+
+
+def psi_cube(
+    u_pos,
+    u_neg,
+    allow_pos,
+    allow_neg,
+    fg_ref,
+    fpos_ref,
+    fneg_ref,
+    *,
+    kappa,
+    od_g,
+    od_r,
+    lam,
+    ambig: bool,
+    gdna_prior=None,
+    gdna_support=None,
+    lam_logprior=None,
+    row_logprior=None,
+    cube_rows=None,
+    n_tilt: int | None = None,
+):
+    """ψ ITSELF over the ``(λ, θ)`` cube for ``m`` slots of one class — the strand term + the two Jeffreys
+    arms (``_JEFFREYS_REF``) + the fitted gDNA arm (the curve ``gdna_prior`` read on ``gdna_support`` at each
+    cell's density) + the λ-factor rows and the delivered rows, added per cell (+ the delivered cube rows) + the
+    θ quadrature's log-weights — as ``(m, K, C)`` in float64, with the two strand-fraction grids it was
+    evaluated on, ``(f_pos, f_neg)``, and the tilt ``tau`` they were built from. A single-strand call
+    (``ambig=False``) has one column, the tilt of each slot's live strand (``τ = ±1``) and no weight. An
+    AMBIG call places the θ nodes across each slot's strand term (``n_tilt`` of them, ``_TILT_NODES`` by
+    derivation) for the MIXED hypothesis and appends the two PURE hypotheses as the columns ``τ = +1, −1``
+    (the tilt atom: the three at equal reference weight, a delivered level on a strand ruling the other
+    strand's atom out). The same code the solve runs (`native.psi_cube_native`); the gates read it here."""
+    lam = np.ascontiguousarray(lam, np.float64)
+    K = lam.shape[0]
+    u_pos = np.ascontiguousarray(u_pos, np.float64)
+    u_neg = np.ascontiguousarray(u_neg, np.float64)
+    ap, an = np.ascontiguousarray(allow_pos, bool), np.ascontiguousarray(allow_neg, bool)
+    fg_ref, fpos_ref, fneg_ref = _reference_composition(ap, an, fg_ref, fpos_ref, fneg_ref)
+    n_tilt = int(_TILT_NODES if n_tilt is None else n_tilt)
+    m, C = u_pos.shape[0], (n_tilt + 2 if ambig else 1)
+    psi, f_pos, f_neg, tau = (np.zeros((m, K, C)) for _ in range(4))
+    psi_cube_native(
+        u_pos=u_pos,
+        u_neg=u_neg,
+        allow_pos=ap,
+        allow_neg=an,
+        fg_ref=fg_ref,
+        fpos_ref=fpos_ref,
+        fneg_ref=fneg_ref,
+        kappa=float(kappa),
+        od_g=float(od_g),
+        od_r=float(od_r),
+        lam=lam,
+        gdna=_arm(gdna_prior, gdna_support, m),
+        lam_logprior=_prior(lam_logprior, K),
+        row_logprior=_prior(row_logprior, K),
+        **_cube_args(cube_rows, lam),
+        n_tilt=n_tilt,
+        ambig=bool(ambig),
+        out_psi=psi,
+        out_fpos=f_pos,
+        out_fneg=f_neg,
+        out_tau=tau,
+    )
+    return psi, f_pos, f_neg, tau
+
+
+def posterior_median_fg(post, lam):
+    """Per-slot point estimate of ``f_g``: the posterior's ½-QUANTILE, read off the CDF on the uniform λ
+    lattice — a continuous quantile (the grid mass as a histogram with edges at the midpoints, the crossing
+    bin interpolated ON λ, then mapped through σ: median equivariance, which is why ``f_g`` is a median
+    and not a mean). ``post``: ``(m, K)``; ``lam``: ``(K,)``. Returns ``(m,)``."""
+    post = np.ascontiguousarray(post, np.float64)
+    out = np.zeros(post.shape[0])
+    psi_posterior_median(post, np.ascontiguousarray(lam, np.float64), out)
+    return out
+
+
+def compose(f_g, w_pos, allow_pos, allow_neg):
+    """ψ's composition as the MAP from its two parameters — ``f_g`` (the level, a median) and ``w_pos``
+    (the + strand's share of the RNA) — onto the simplex: ``f_pos = (1 − f_g)·w``, ``f_neg = (1 − f_g)·(1 −
+    w)``, so closure is structural; the share is clamped to ``[0, 1]`` and restricted to the admissible
+    strands (a single-strand slot's whole RNA sits on its live strand whatever the share says; a slot with
+    neither strand has no RNA to place). Returns ``(f_pos, f_neg)``."""
+    f_g = np.ascontiguousarray(f_g, np.float64)
+    ap, an = np.ascontiguousarray(allow_pos, bool), np.ascontiguousarray(allow_neg, bool)
+    f_pos, f_neg = np.zeros(f_g.shape[0]), np.zeros(f_g.shape[0])
+    psi_compose(f_g, np.ascontiguousarray(w_pos, np.float64), ap, an, f_pos, f_neg)
+    return f_pos, f_neg

@@ -26,9 +26,7 @@ WHAT THE NUMBERS MEAN — one numeric convention: a count is an integer, a fract
 no fixed point and no scale constant, so nothing anywhere decodes a bank::
 
     count           Sum 1                    integer   — exact, and reproduces across worker counts
-    inv_*_sum       Sum 1/A(w)               float64   A = ell−w+1 contained in a region (the
-                                                       `inv_opportunity_sum` rule), w−1 crossing a
-                                                       0-bp boundary or sj (`inv_length_sum`)
+    inv_length_sum  Sum 1/A(w)               float64   A = w−1 crossing a 0-bp boundary or sj
     mass            Sum slice_len/(L·bounds) float64   — the conserved fragment count
 
 float64 is the accurate choice and not a concession: against exact rational arithmetic on the
@@ -37,11 +35,8 @@ replaced. What it costs is bit-identity across worker counts, since float additi
 the integer banks reproduce exactly, the float ones agree to ~1e-15, and the tests validate a float bank
 within a DERIVED tolerance.
 
-The reciprocal banks are not called ``density``, and the two rules carry two names. At a boundary the
-opportunity ``w−1`` and the deposit ``1/(w−1)`` cancel with support factor ``P(w ≥ 2) = 1`` — an exact,
-model-free density (``inv_length_sum``). At a region the deposit ``1/(ell−w+1)`` cancels its opportunity
-only ON its support, so ``E[Σ] = ρ·P(w ≤ ell)`` — a per-component truncation, a density SHAPE and not a
-level (``inv_opportunity_sum``). One word for two rules is the defect this naming avoids.
+At a boundary the opportunity ``w−1`` and the deposit ``1/(w−1)`` cancel with support factor
+``P(w ≥ 2) = 1`` — an exact, model-free density (``inv_length_sum``).
 
 The trailing ``2`` on every bank is the genome strand — ``Strand.POS`` then ``Strand.NEG``, without
 exception. Sense/antisense is transcript-relative, derived by the consumer from the sj's own strand, and
@@ -265,7 +260,6 @@ BANK_AXES: tuple[tuple[str, str, Any], ...] = (
 SINGLE_COLUMN_AXES: tuple[tuple[str, str, Any], ...] = (
     # One numeric convention: a count is an integer, a fraction is float64. Every row here is a
     # fraction, so every row is float64; there is no fixed point and no scale constant to decode.
-    ("region_contained_inv_opportunity_sum", "region", np.float64),
     ("boundary_unspliced_inv_length_sum", "boundary", np.float64),
     ("sj_inv_length_sum", "sj", np.float64),
     ("boundary_unspliced_mass", "boundary", np.float64),
@@ -479,10 +473,6 @@ class AccumulatorPayload:
     region_contained_count: (
         np.ndarray
     )  # uint32[n_regions, 2] — the whole path lies inside the region
-    #: float64[n_regions] — ONE column. The length moments are strand-AGNOSTIC: which strand a read
-    #: aligned to says nothing about whether the molecule was gDNA or RNA, and every consumer sums
-    #: the two columns. The COUNTS keep both — the strand model is a Beta-Binomial over them.
-    region_contained_inv_opportunity_sum: np.ndarray
     #: uint32[n_regions, 2] — the path's FIRST covered base, by align strand. THE ledger invariant:
     #: Σ over both columns == qc.deposited. Opportunity ℓ for every fragment length; wall-blind only
     #: at the template's DOWNSTREAM end (side-select against region_end_count).
@@ -512,9 +502,8 @@ class AccumulatorPayload:
     #: deconvolves a certified-RNA crossing, so its two length moments have no consumer and are not kept.
     boundary_spliced_count: np.ndarray
     #: float64[n_boundaries] — the same rule, routed by the same ``spliced`` flag, so ``mass`` is not the
-    #: one channel that ignores the split. A PARTIAL, never a conservation ledger: it sums to
-    #: ``crossed_block_len / L`` per fragment. A per-BOUNDARY certified-RNA term, commensurate with the
-    #: unspliced mass at the same boundary — NOT "the number of spliced fragments here".
+    #: one channel that ignores the split. A PARTIAL, never a conservation ledger. A per-BOUNDARY
+    #: certified-RNA term — NOT "the number of spliced fragments here".
     boundary_spliced_mass: np.ndarray
 
     # -- sj boundaries: one exact donor->acceptor jump. Pure RNA by construction --
@@ -542,9 +531,8 @@ class AccumulatorPayload:
     #: on a contaminated library leaves the RNA side's conserved count short by roughly a quarter while
     #: the gDNA side, which cannot splice, is already exact.
     #:
-    #: It ADDS a boundary class rather than re-apportioning one: a block that crossed a boundary is
-    #: untouched, so ``boundary_unspliced_mass`` and ``boundary_spliced_mass`` are unchanged by it.
-    #: Gated by ``tests/native/test_conserved_mass.py``.
+    #: A sj bounds a block exactly as a contiguous boundary does, so a slice bounded by both shares its
+    #: bases between them. Gated by ``tests/native/test_conserved_mass.py``.
     sj_mass: np.ndarray
 
     # -- the fragment-length pools, binned at L, once per fragment --

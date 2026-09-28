@@ -5,7 +5,7 @@ to a temp directory, and the loader, the view model, the chart specifications an
 build run against it. The report must be self-contained, inlining its runtime, and must honour a
 custom output path. The exported density diagnostics are checked against an `AbundanceLandscape`
 fixture. Every chart the page embeds must compile and read every mark property it sets. Vega-specific assertions are conditional
-on ``vl-convert-python``, so the suite passes with the ``[dev]`` extra alone.
+on ``vl-convert-python``.
 """
 
 import importlib.util
@@ -342,6 +342,13 @@ def test_capture_summary_unimodal_when_no_enrichment():
     )
     cap = capture_summary(track, with_curve=True)
     assert cap is not None and cap["enriched"] is False
+
+
+def test_capture_summary_raises_on_a_non_finite_density():
+    track = _enriched_track()
+    track.loc[0, "gdna_density"] = np.inf
+    with np.errstate(invalid="ignore"), pytest.raises(ValueError):
+        capture_summary(track)
 
 
 def test_build_report_self_contained(tmp_path):

@@ -46,10 +46,13 @@ def side_of(s: int, i: int) -> int:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class BlockContext(ChainView):
     """One block of the chain as the kernel's builders read it: the :class:`ChainView` plus the two
-    source-side inputs — every node's own-evidence bit and the incoming belief — and the factory's rows."""
+    source-side inputs — every node's own-evidence bit and the incoming belief — the factory's rows, and
+    the λ grid (``n_grid`` points on ``[−logodds_window, logodds_window]``)."""
 
     has_own_composition: np.ndarray
     belief_fg: np.ndarray
+    n_grid: int
+    logodds_window: float
     factory_rows: np.ndarray | None = None
 
 
@@ -726,7 +729,7 @@ def _native_passes(prepared: Prepared, ctx):
     tables = []
     for nbr, seq, backward in ((ctx.left, order, False), (ctx.right, order[::-1], True)):
         nbr = np.asarray(nbr, np.int64)
-        received = Received.empty(order.size, int(ctx.n_grid))
+        received = Received.empty(order.size, prepared.faces.lam.shape[0])
         received.has_neighbour[seq] = nbr[seq] >= 0
         prepared.run_pass(received, seq, nbr, np.zeros(order.size, bool), backward=backward)
         tables.append(received)
@@ -760,7 +763,7 @@ def _drive(prepared: Prepared, ctx):
     from_left, from_right = _native_passes(prepared, ctx)
     msg = prepared.solve(from_left, from_right)
     rows = (
-        np.zeros((int(ctx.n_slots), int(ctx.n_grid)))
+        np.zeros((int(ctx.n_slots), prepared.faces.lam.shape[0]))
         if msg.lam_rows is None
         else np.asarray(msg.lam_rows)
     )

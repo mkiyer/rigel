@@ -24,7 +24,6 @@ from rigel.calibration.effective_length import (
     conserved_cut_shares,
     contained_eff_length,
     crossing_eff_length,
-    fl_mean,
 )
 
 UNBOUNDED = el.UNBOUNDED_REACH
@@ -40,6 +39,11 @@ def _normal_pmf(mean: float, sd: float, n: int = 1301) -> np.ndarray:
     p = np.diff(norm.cdf(np.arange(0, n + 1), mean, sd))
     p[0] = 0.0
     return p / p.sum()
+
+
+def _mean_length(pmf: np.ndarray) -> float:
+    """``E_f[w]`` of a normalised pmf indexed by length."""
+    return float(np.dot(np.arange(pmf.shape[0], dtype=np.float64), pmf))
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +91,7 @@ def test_contained_at_a_region_exactly_one_fragment_long_is_ONE_not_zero():
 def test_contained_beyond_the_pmf_support_is_region_plus_one_minus_mean():
     pmf = _normal_pmf(200.0, 50.0)
     got = contained_eff_length(np.array([5000.0]), pmf)[0]
-    assert got == pytest.approx(5000.0 + 1.0 - fl_mean(pmf), rel=1e-9)
+    assert got == pytest.approx(5000.0 + 1.0 - _mean_length(pmf), rel=1e-9)
 
 
 def test_contained_is_never_negative():
@@ -152,7 +156,7 @@ def test_crossing_at_UNBOUNDED_reach_is_the_mean_length_minus_one():
     """
     pmf = _normal_pmf(200.0, 50.0)
     got = crossing_eff_length(pmf, np.array([UNBOUNDED]), np.array([UNBOUNDED]))[0]
-    assert got == pytest.approx(fl_mean(pmf) - 1.0, rel=1e-9)
+    assert got == pytest.approx(_mean_length(pmf) - 1.0, rel=1e-9)
 
 
 def test_crossing_is_SYMMETRIC_in_the_two_reaches():

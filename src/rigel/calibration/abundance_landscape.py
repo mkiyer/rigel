@@ -50,7 +50,13 @@ from .landscape import (
     fit_landscape,
     knn_widths,
 )
-from .signature import BIT_EXON_NEG, BIT_EXON_POS, BIT_INTRON_NEG, BIT_INTRON_POS
+from .signature import (
+    BIT_EXON_NEG,
+    BIT_EXON_POS,
+    BIT_INTRON_NEG,
+    BIT_INTRON_POS,
+    coarse_type_array,
+)
 from .total_abundance import RegionWallMask, region_counts_and_exposure
 
 _EPS = 1e-12
@@ -91,8 +97,7 @@ class AbundanceLandscape:
 
     ``train_log_rho`` / ``train_class`` are the population this landscape was fitted on: one entry per
     selected region, the kernel centre ``log(max(count,1)) − log(exposure)`` in natural log, and its
-    coarse class (``0`` intergenic / ``1`` intron / ``2`` exon — the report's own rug codes, where ``3``
-    is a boundary and this substrate has none, being REGIONs only). They are published because a
+    coarse class (a :class:`~.signature.RegionType` code). They are published because a
     consumer that plots the fit needs to plot what it was fitted on, and re-deriving the centres
     elsewhere would be a second copy of the selection rule.
     """
@@ -263,11 +268,7 @@ def fit_abundance_landscape(
     # (`log10(max(count,1)) − log10(eff)`, then to nats) — the same floor, because a zero-count region
     # sits at its resolution wall rather than at −inf.
     train_log_rho = np.log(np.maximum(c, 1.0)) - np.log(e)
-    exon = (sig[sel] & (BIT_EXON_POS | BIT_EXON_NEG)) != 0
-    intron = (sig[sel] & (BIT_INTRON_POS | BIT_INTRON_NEG)) != 0
-    # exon wins over intron, matching `signature.coarse_type_array`'s rule (imported semantics, not a
-    # second table): 0 intergenic, 1 intron, 2 exon.
-    train_class = np.where(exon, 2, np.where(intron, 1, 0)).astype(np.int64)
+    train_class = coarse_type_array(sig[sel]).astype(np.int64)
 
     return AbundanceLandscape(
         landscape=landscape,

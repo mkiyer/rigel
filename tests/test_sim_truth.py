@@ -1,9 +1,9 @@
 """Per-fragment truth is carried in the read name, and these are the helpers that write and read it.
 
-Parsing an origin back out of a FASTQ or BAM read name for each of mature, nascent and gDNA, with
-and without a reference; counting origins over a whole FASTQ; writing post-capture truth from the
-origins actually observed rather than from what was requested; the condition directory naming; and
-the manifest round trip. Every truth-scoring instrument in the project reads through these, so a
+Parsing an origin back out of a FASTQ or BAM read name for each of mature, nascent and gDNA,
+including ids that contain ":"; counting origins over a whole FASTQ; writing post-capture truth from
+the origins actually observed rather than from what was requested; the condition directory naming;
+and the manifest round trip. Every truth-scoring instrument in the project reads through these, so a
 silent parse failure would make the oracle agree with anything.
 """
 
@@ -11,14 +11,9 @@ import json
 from dataclasses import dataclass
 
 import pandas as pd
+import pytest
 
-from rigel.sim.manifest import (
-    condition_dir_name,
-    condition_manifest_map,
-    gdna_label_for_rate,
-    load_manifest,
-    write_manifest,
-)
+from rigel.sim.manifest import condition_dir_name, gdna_label_for_rate, write_manifest
 from rigel.sim.truth import count_origins_from_fastq, parse_origin, write_post_capture_truth
 from rigel.transcript import Transcript
 from rigel.types import Interval, Strand
@@ -64,27 +59,39 @@ def test_parse_nrna_bam_origin():
     assert origin.index == 11
 
 
-def test_parse_gdna_origin_without_ref():
-    origin = parse_origin("gdna:100-390:f:3/2")
+def test_parse_gdna_origin():
+    origin = parse_origin("gdna:chrSynthetic:100-390:r:3/2")
 
     assert origin.kind == "gdna"
     assert origin.transcript_id is None
-    assert origin.ref is None
-    assert origin.start == 100
-    assert origin.end == 390
-    assert origin.strand == "f"
-    assert origin.index == 3
-
-
-def test_parse_gdna_origin_with_ref():
-    origin = parse_origin("gdna:chrSynthetic:100-390:r:3")
-
-    assert origin.kind == "gdna"
     assert origin.ref == "chrSynthetic"
     assert origin.start == 100
     assert origin.end == 390
     assert origin.strand == "r"
     assert origin.index == 3
+
+
+def test_parse_gdna_origin_requires_a_reference():
+    with pytest.raises(ValueError, match="without a reference"):
+        parse_origin("gdna:100-390:f:3")
+
+
+def test_parse_origin_keeps_a_colon_inside_a_contig_or_transcript_id():
+    gdna = parse_origin("gdna:HLA-A*01:01:01:01:100-390:f:3")
+    assert (gdna.kind, gdna.ref, gdna.start, gdna.end, gdna.strand, gdna.index) == (
+        "gdna",
+        "HLA-A*01:01:01:01",
+        100,
+        390,
+        "f",
+        3,
+    )
+
+    mrna = parse_origin("tx:1:10-250:r:7")
+    assert (mrna.kind, mrna.transcript_id, mrna.start, mrna.end) == ("mrna", "tx:1", 10, 250)
+
+    nrna = parse_origin("nrna_tx:1:4-300:f:11")
+    assert (nrna.kind, nrna.transcript_id, nrna.start, nrna.end) == ("nrna", "tx:1", 4, 300)
 
 
 def test_count_origins_from_fastq(tmp_path):
@@ -179,9 +186,8 @@ def test_manifest_round_trip(tmp_path):
     conditions = [{"name": "gdna_none_ss_1.00_nrna_none", "n_rna": 10}]
 
     path = write_manifest(tmp_path, Config(), conditions)
-    loaded = load_manifest(tmp_path)
+    loaded = json.loads(path.read_text())
 
     assert path == tmp_path / "manifest.json"
-    assert json.loads(path.read_text()) == loaded
     assert loaded["simulation"]["frag_mean"] == 250
-    assert condition_manifest_map(loaded) == {conditions[0]["name"]: conditions[0]}
+    assert loaded["conditions"] == conditions

@@ -379,7 +379,7 @@ def test_a_spliced_fragment_crossing_NO_BOUNDARY_still_deposits_a_WHOLE_FRAGMENT
     each.
 
     The fragment is not ``contained`` — its path spans a sj, so it is not inside ONE region — and it
-    crosses no boundary, so the slice loop never runs. Without a sj mass it deposits nothing anywhere
+    crosses no boundary. Without a sj mass it deposits nothing anywhere
     while ``sj_count`` credits it, which is a fragment that exists on the incidence axis and on no
     conserved one.
 

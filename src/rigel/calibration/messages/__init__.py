@@ -86,11 +86,11 @@ __all__ = [
 @dataclass(frozen=True, slots=True)
 class ChainView:
     """The chain as a policy may read it WITHOUT beliefs: the observations and the geometry, under the two
-    headings that make that contract legible, plus the solve's own scalars. `Policy.library` receives the
-    WHOLE chain in this form, so the only cross-block information a policy can build is a reduction over
-    observations and geometry — a reduction over beliefs has no field to read. These are also the arrays
-    the backbone hands the kernel (`sweep.solve_chain`), which reads them a block at a time beside the
-    incoming belief.
+    headings that make that contract legible, plus the library's strand verdict. `Policy.library`
+    receives the WHOLE chain in this form, so the only cross-block information a policy can build is a
+    reduction over observations and geometry — a reduction over beliefs has no field to read. These are
+    also the arrays the backbone hands the kernel (`sweep.solve_chain`), which reads them a block at a
+    time beside the incoming belief.
 
     ⛔ The headings are load-bearing. ``observations`` and ``geometry`` may be indexed at either end of
     a hop; a belief may be read at the SOURCE only, and the kernel reads the incoming belief once, at a
@@ -135,9 +135,7 @@ class ChainView:
     #: `native/transfer_kernel.h`)
     boundary_flags: np.ndarray
 
-    # ── the solve's own scalars (neither observation nor belief) ──────────────────────────────────────
-    n_grid: int
-    logodds_window: float
+    # ── the library's strand verdict (neither observation nor belief) ─────────────────────────────────
     #: the strand protocol decision for the LIBRARY: does the spliced 2×2 read the protocol as
     #: strand-preserving (`region_init.strand_discriminability` > 0)? An unstranded verdict makes every
     #: single-strand exon's strand precision exactly zero, and a policy reading the split as an RNA

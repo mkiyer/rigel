@@ -5,8 +5,7 @@ Learns the strand distribution of a paired-end RNA-seq library by observing how 
 alignment strands relate to annotated splice junction (SJ) strands.  A spliced fragment's
 genomic GT/AG motif gives its true strand *independently of library prep* (STAR reports it in
 the ``XS``/``ts`` tag), so comparing motif strand to aligner orientation over **annotated**
-spliced fragments measures library-prep strand efficiency with no gDNA contamination — the
-qualification is enforced in C++ by ``ResolvedFragment::get_is_strand_qualified()``.
+spliced fragments measures library-prep strand efficiency with no gDNA contamination.
 
 After the R2 strand flip in the BAM scanner, the exon alignment strand effectively represents
 read 1's genomic orientation, so the model's estimand is
@@ -176,7 +175,7 @@ class StrandModel:
     marginal (:meth:`from_sj_table`) — the four counters are never maintained independently of
     it.  The all-exonic diagnostic model has no sj and therefore no table.
 
-    Qualification (applied in C++ by ``get_is_strand_qualified()``, not here): annotated splice
+    The spliced model's qualification (applied in the C++ scanner, not here): annotated splice
     junction, unique mapper, unambiguous exon strand, unambiguous SJ strand, non-chimeric.
     """
 
@@ -309,12 +308,14 @@ class StrandModel:
         """95% confidence interval for p_r1_sense (Wald interval)."""
         import math
 
+        from scipy.special import ndtri
+
         n = self.n_observations
         if n == 0:
             return (0.0, 1.0)
         p = self.n_same / n
         se = math.sqrt(p * (1.0 - p) / n)
-        z = 1.959964
+        z = float(ndtri(0.975))  # the two-sided 95 % normal quantile
         lo = max(0.0, p - z * se)
         hi = min(1.0, p + z * se)
         return (lo, hi)
@@ -345,17 +346,17 @@ class StrandModel:
 
 
 # ======================================================================
-# StrandModels — single-model container with diagnostic sub-models
+# StrandModels — single-model container with one diagnostic sub-model
 # ======================================================================
 
 
 @dataclass(frozen=True)
 class StrandModels:
-    """Container for the single RNA strand model plus diagnostic sub-models.
+    """Container for the single RNA strand model plus one diagnostic sub-model.
 
-    The primary strand model (``exonic_spliced``) is trained from
-    SPLICED_ANNOT fragments with unique gene assignment and unambiguous
-    exon/SJ strands.  Annotated splice junctions prove RNA origin,
+    The primary strand model (``exonic_spliced``) is trained from uniquely mapped, non-chimeric
+    SPLICED_ANNOT fragments whose candidate transcripts share one strand and whose alignment and
+    SJ strands are each a single strand.  Annotated splice junctions prove RNA origin,
     making this an uncontaminated measure of library strand specificity.
     Probabilities are pure MLE from observed counts, and its 2×2 is the marginal of the
     per-sj :class:`SJStrandTable` it carries.
@@ -366,18 +367,17 @@ class StrandModels:
     * **exonic** — trained from every unique-mapper, non-chimeric, unambiguous-strand fragment
       that RESOLVES TO A TRANSCRIPT, spliced or not. Comparing its specificity to
       ``exonic_spliced`` reveals gDNA contamination (``contamination_gap`` in the CLI summary):
-      unspliced genic fragments include gDNA and nascent RNA, which are unstranded relative to
-      the transcript, so the mixed estimate is dragged toward ½.
+      unspliced genic fragments include gDNA, which is unstranded, so the mixed estimate is
+      dragged toward ½.
       It is not "all exonic fragments" — intergenic fragments have no transcript and never enter
       it, so the gap it measures is GENIC contamination only.
 
-    gDNA is scored with a fixed strand probability of one half (no strand bias), never learned
-    from intergenic data.
+    A fragment's gDNA likelihood uses a fixed strand probability of one half, not this container.
     """
 
     exonic_spliced: StrandModel = field(default_factory=StrandModel)
 
-    # Diagnostic sub-models (not used for scoring)
+    # Diagnostic sub-model (not used for scoring)
     exonic: StrandModel = field(default_factory=StrandModel)
 
     @classmethod

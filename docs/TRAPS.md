@@ -457,8 +457,9 @@ explained to 0.995 and the isoforms to 0.858 by the same numbers.
 **a-cancellation-is-conditional-on-its-support. A reciprocal-opportunity deposit cancels its opportunity
 only where that opportunity is non-zero.** Where `A(w) = 0` the fragment deposits nothing, so
 `E[Σ 1/A] = ρ · P(A > 0)`, a functional of exactly the length distribution the channel claims independence
-from; on the shipped REGION bank the omission was an 11.6× under-read at the median exon. Write the
-expectation with its support factor and gate it with fragments placed outside the support; `EQUATIONS.md` §2.
+from; on the REGION contained reciprocal bank the omission was an 11.6× under-read at the median exon.
+Write the expectation with its support factor and gate it with fragments placed outside the support;
+`EQUATIONS.md` §2.
 
 **a-better-estimator-inside-a-weak-consumer-moves-nothing. A severalfold repair to an estimator can be
 worth ~1 % end to end, and the consumer's strength is why.** Swapping the pooled gDNA background for a

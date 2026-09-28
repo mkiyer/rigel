@@ -46,7 +46,7 @@ from rigel.calibration.signature import (
 #: These gates exercise the SWEEP's shape and the per-slot init under the measured floor, named
 #: explicitly. The message policies have their own gates (`test_sweep_backbone.py`,
 #: `test_transfer_policy.py`).
-region_sweep = functools.partial(solve_chain, policy=SilentPolicy())
+region_sweep = functools.partial(solve_chain, policy=SilentPolicy(), logodds_window=10.0)
 
 
 def _delta_pmf(length):
@@ -64,7 +64,9 @@ def test_init_zero_gdna_introns_via_strand():
         region_pos=[50.0, 95.0, 50.0],
         region_neg=[50.0, 5.0, 50.0],
     )
-    b = init_beliefs(parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60)
+    b = init_beliefs(
+        parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60, logodds_window=10.0
+    )
 
     # the chain is N E N E N, so the regions are at 0, 2, 4 — there are no terminal slots.
     rid = [0, 2, 4]
@@ -94,7 +96,9 @@ def test_init_boundary_continuity_gate():
         boundary_neg=[5.0],
         boundary_spliced=[50.0],
     )
-    b = init_beliefs(parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60)
+    b = init_beliefs(
+        parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60, logodds_window=10.0
+    )
     # slots: N0=0, E0=1, N1=2.
     # E0 (ex+→in+): +strand continuous (G2+) ⇒ the strand tilt resolves f_g → 0.
     assert b.f_g[1] < 0.15
@@ -112,7 +116,9 @@ def test_init_tss_boundary_is_black_hole():
         boundary_pos=[90.0],
         boundary_neg=[5.0],
     )
-    b = init_beliefs(parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60)
+    b = init_beliefs(
+        parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60, logodds_window=10.0
+    )
     # slot 1 is the TSS boundary: a locked gDNA sink despite the sense tilt (all precision locked at 0).
     assert b.f_g[1] == 1.0 and b.var_gdna[1] == 0.0
 
@@ -145,6 +151,7 @@ def test_precision_state_count_resolution():
         od_g=0.2,
         od_r=0.1,
         n_grid=60,
+        L=10.0,
     )
     assert d.gdna_frac_var is not None
     # p̂=0.5 at κ=0.99 ⇒ the fragments look unstranded ⇒ the mean channel points at the gDNA mode f_g=1.
@@ -168,6 +175,7 @@ def test_precision_state_count_resolution():
         od_g=0.2,
         od_r=0.1,
         n_grid=60,
+        L=10.0,
     )
     assert d0.gdna_frac_var[0] == 0.0
 
@@ -197,7 +205,9 @@ def _factor1_uniform_rho():
         gdna_fl=gdna_fl,
         rna_fl=rna_fl,
     )
-    belief = init_beliefs(parts.geometry, parts.statics, rna_sense_frac=0.7, n_grid=40)
+    belief = init_beliefs(
+        parts.geometry, parts.statics, rna_sense_frac=0.7, n_grid=40, logodds_window=10.0
+    )
     final = region_sweep(
         parts.chain,
         parts.statics,
@@ -262,7 +272,7 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
         parts.geometry,
         parts.region_arrays,
     )
-    belief = init_beliefs(geom, st, rna_sense_frac=0.95, n_grid=40)
+    belief = init_beliefs(geom, st, rna_sense_frac=0.95, n_grid=40, logodds_window=10.0)
     assert belief.f_g[2] == 1.0  # AMBIG starts all-gDNA
     final = region_sweep(
         chain,
@@ -315,6 +325,7 @@ def test_a_delivered_row_pulls_two_sided_and_not_to_the_vertex():
         od_g=0.0,
         od_r=0.0,
         n_grid=80,
+        L=10.0,
         lam_logprior=_gdna_share_row(80, 0.2, 200.0),
     )
     fg = float(d.gdna_frac[0])
@@ -339,6 +350,7 @@ def test_a_weak_row_defers_to_a_decisive_strand():
         od_g=0.0,
         od_r=0.0,
         n_grid=80,
+        L=10.0,
         lam_logprior=_gdna_share_row(80, 0.9, 3.0),
     )
     fg = float(d.gdna_frac[0])
@@ -406,7 +418,9 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
         gdna_fl=gdna_fl,
         rna_fl=rna_fl,
     )
-    belief = init_beliefs(parts.geometry, parts.statics, rna_sense_frac=kappa, n_grid=60)
+    belief = init_beliefs(
+        parts.geometry, parts.statics, rna_sense_frac=kappa, n_grid=60, logodds_window=10.0
+    )
     return parts.chain, parts.statics, parts.geometry, belief, parts.region_arrays
 
 
@@ -525,6 +539,7 @@ def test_pure_gdna_region_confident_at_near_binomial_od():
                 od_g=od,
                 od_r=od,
                 n_grid=80,
+                L=10.0,
             ).gdna_frac[0]
         )
 
@@ -549,7 +564,7 @@ def test_pure_gdna_region_confident_at_near_binomial_od():
 # The per-strand presence masks
 #
 # `nrna_active_strands` is `free_s`, the strands the annotation admits RNA on (exon or intron bit);
-# `mrna_active_strands` is the tighter exon-bit-only mask. `build_region_statics` carries both, and
+# `mrna_active_strands` is the tighter exon-bit-only mask. `build_region_statics` carries the first, and
 # `total_abundance` asserts the exon mask as the licence beside the mature wall distances.
 # ---------------------------------------------------------------------------
 

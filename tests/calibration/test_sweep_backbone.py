@@ -38,7 +38,7 @@ N = 8
 K = 60
 
 
-def _ctx(*, free_pos=None, free_neg=None, n_grid=K) -> ChainView:
+def _ctx(*, free_pos=None, free_neg=None) -> ChainView:
     """A minimal chain view: a chain of N slots, ``N E N E …``, every side linked. Only the fields the
     assertions and the passes read need to be real."""
     ones = np.ones(N)
@@ -63,8 +63,6 @@ def _ctx(*, free_pos=None, free_neg=None, n_grid=K) -> ChainView:
         exon_pos=np.zeros(N, bool),
         exon_neg=np.zeros(N, bool),
         boundary_flags=np.zeros(N, np.uint16),
-        n_grid=n_grid,
-        logodds_window=10.0,
     )
 
 
@@ -101,14 +99,14 @@ def _echo_lane(u):
 def _echo(ctx, terminal=None):
     """The two passes of the echo lane on the chain view's links; ``terminal`` marks the nodes that receive
     nothing. Returns ``(from_left, from_right)``."""
-    u = np.linspace(-10.0, 10.0, int(ctx.n_grid))
+    u = np.linspace(-10.0, 10.0, K)
     prepared = _lane_prepared(_echo_lane(u), ctx.left, ctx.right)
     order = np.arange(N, dtype=np.int64)
     term = np.zeros(N, bool) if terminal is None else np.asarray(terminal, bool)
     tables = []
     for nbr, seq, backward in ((ctx.left, order, False), (ctx.right, order[::-1], True)):
         nbr = np.asarray(nbr, np.int64)
-        received = Received.empty(N, int(ctx.n_grid))
+        received = Received.empty(N, K)
         received.has_neighbour[seq] = nbr[seq] >= 0
         prepared.run_pass(received, seq, nbr, term, backward=backward)
         tables.append(received)

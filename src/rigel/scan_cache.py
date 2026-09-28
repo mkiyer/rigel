@@ -228,6 +228,7 @@ def deposit_digest() -> str:
     ``tests/native/test_accumulator_native_parity.py``, and a test asserts this digest agrees across
     both — so a drift between them fails loudly rather than certifying the wrong artifact.
     """
+    from .calibration.signature import RegionType  # noqa: PLC0415
     from .native import Accumulator  # noqa: PLC0415
 
     #: Region-bound indices, not coordinates: the sj CSR is keyed by the LEFT BOUNDARY. 260 is bound 3
@@ -235,7 +236,19 @@ def deposit_digest() -> str:
     region_bounds = np.array([0, 60, 200, 260, 1000, 1060, 1120, 2000, 2400], dtype=np.int64)
     accumulator = Accumulator(
         region_bounds=region_bounds,
-        region_types=np.array([0, 2, 2, 1, 2, 2, 1, 2], dtype=np.uint8),
+        region_types=np.array(
+            [
+                RegionType.INTERGENIC,
+                RegionType.EXON,
+                RegionType.EXON,
+                RegionType.INTRON,
+                RegionType.EXON,
+                RegionType.EXON,
+                RegionType.INTRON,
+                RegionType.EXON,
+            ],
+            dtype=np.uint8,
+        ),
         max_length=1000,
         ref=0,
     )

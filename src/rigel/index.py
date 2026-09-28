@@ -927,9 +927,11 @@ class TranscriptIndex:
         fasta_file : path
             Genome FASTA (must be indexed with ``samtools faidx``).
         gtf_file : path
-            Gene annotation in GTF format (GENCODE recommended).
+            Gene annotation in GTF format (GENCODE recommended). One that yields no transcripts
+            raises ``ValueError`` before any file is written.
         output_dir : path
-            Directory to write index files into (created if needed).
+            Directory to write index files into (created if needed). An existing
+            ``manifest.json`` in it is deleted before the first write.
         collapse_duplicate_transcripts : bool
             When ``False`` (default), transcripts with identical exon
             coordinates raise ``ValueError`` (they are unidentifiable in
@@ -966,11 +968,6 @@ class TranscriptIndex:
         ref_lengths = load_reference_lengths(fasta_file)
         logger.info(f"[DONE] Read {len(ref_lengths)} references")
 
-        df = pd.DataFrame(list(ref_lengths.items()), columns=["ref", "length"])
-        df.to_feather(output_dir / REF_LENGTHS_FEATHER, **feather_kwargs)
-        if write_tsv:
-            df.to_csv(output_dir / REF_LENGTHS_TSV, sep="\t", index=False)
-
         # -- Transcripts ------------------------------------------------------
         logger.info(f"[START] Reading transcripts from {gtf_file}")
         transcripts = read_transcripts(
@@ -978,7 +975,19 @@ class TranscriptIndex:
             gtf_parse_mode=gtf_parse_mode,
             collapse_duplicate_transcripts=collapse_duplicate_transcripts,
         )
+        if not transcripts:
+            raise ValueError(f"GTF {gtf_file} yields no transcripts; an index needs at least one")
         logger.info(f"[DONE] Read {len(transcripts)} transcripts")
+
+        # The manifest is written last, so removing an old one before the first write leaves an
+        # interrupted rebuild with none, which `load` refuses, rather than an old manifest over a
+        # mix of old and new files.
+        (output_dir / MANIFEST_JSON).unlink(missing_ok=True)
+
+        df = pd.DataFrame(list(ref_lengths.items()), columns=["ref", "length"])
+        df.to_feather(output_dir / REF_LENGTHS_FEATHER, **feather_kwargs)
+        if write_tsv:
+            df.to_csv(output_dir / REF_LENGTHS_TSV, sep="\t", index=False)
 
         # -- Synthetic nRNA transcripts ---------------------------------------
         logger.info("[START] Creating synthetic nRNA transcripts")
@@ -1184,10 +1193,6 @@ class TranscriptIndex:
 
         # -- transcripts ------------------------------------------------------
         self.t_df = pd.read_feather(os.path.join(index_dir, TRANSCRIPTS_FEATHER))
-        if "t_index" not in self.t_df.columns:
-            raise ValueError(
-                f"Invalid index in {index_dir}: missing 't_index' column in {TRANSCRIPTS_FEATHER}"
-            )
         if not (self.t_df.index == self.t_df["t_index"]).all():
             raise ValueError(
                 f"Invalid index in {index_dir}: row index does not match "

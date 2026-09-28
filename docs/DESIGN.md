@@ -440,7 +440,7 @@ byte-identity to it; where it and a document disagree, the reference wins.
 **A channel is stored where a named consumer reads it, and nowhere else** (owner, 2026-08-08). The
 populations therefore do not all carry the same channels, and that asymmetry is the design:
 
-    region_contained    count  inv_opportunity_sum
+    region_contained    count
     region (per path)   start_count[2]  end_count[2]  span_count[2]
     boundary_unspliced  count  inv_length_sum       mass
     boundary_spliced    count                       mass      certified RNA — nothing deconvolves it
@@ -449,7 +449,7 @@ populations therefore do not all carry the same channels, and that asymmetry is 
 | channel | | |
 |---|---|---|
 | `count` | `Σ 1` | statistical power — a count is a count |
-| `inv_length_sum` / `inv_opportunity_sum` | `Σ 1/A(w)` (float64) | two deposit rules under two names, each cancelling its own opportunity on its own support (`E[Σ] = ρ·P(A>0)`, `EQUATIONS.md` §2): the BOUNDARY/sj form `1/(w−1)` has `P(w≥2) = 1` on any real library — an exact model-free density — while the REGION form `1/(ℓ−w+1)` reads `ρ·P(w≤ℓ)`, a density truncated by a per-component pmf functional (`TRAPS: a-cancellation-is-conditional-on-its-support`) |
+| `inv_length_sum` | `Σ 1/A(w)` (float64) | the deposit cancels its opportunity on its own support (`E[Σ] = ρ·P(A>0)`, `EQUATIONS.md` §2): the BOUNDARY/sj form `1/(w−1)` has `P(w≥2) = 1` on any real library — an exact model-free density |
 | `mass` | `Σ (slice/L)/n_bounds` (float64) | the conserved fragment count — sums to one per fragment, where `count` is `+1` on each of `max(K,1)` objects. A SJ BOUNDARY is a boundary exactly like a contiguous one, so a spliced fragment shares its one unit across every object it crosses, sj included (`EQUATIONS.md` §3b) |
 
 **The start/end/span region banks** (owner's taxonomy, 2026-08-21). Every accepted path books its first
@@ -489,7 +489,7 @@ A census of 240 sites found the tree forms a density four ways, and only two of 
 
 | form | expectation | verdict |
 |---|---|---|
-| the REGION contained reciprocal bank, `Σ 1/(ℓ−w+1)` | `ρ·P(w ≤ ℓ)` — TRUNCATED | model-free but biased; 11.6× at a 98 bp exon |
+| the REGION contained reciprocal, `Σ 1/(ℓ−w+1)` | `ρ·P(w ≤ ℓ)` — TRUNCATED | model-free but biased; 11.6× at a 98 bp exon; no bank deposits it |
 | `count / E_contained(ℓ, pmf)` | `ρ` — unbiased | correct, but the fragment-length pmf enters the divisor, so a distorted pmf distorts the level |
 | the BOUNDARY/sj reciprocal banks, `Σ 1/(w−1)` | `ρ` exactly, every library | already model-free and unbiased — leave them alone |
 | `mass / E_c` with numerator and divisor COMPONENT-MATCHED | `ρ_c` | not an abundance site at all: a deconvolved gDNA mass over the gDNA opportunity is correct |
@@ -541,8 +541,8 @@ were removed.
 A locus therefore collects both kinds of object: its REGIONs by genomic overlap, and its BOUNDARIES are
 the boundaries that TOUCH its regions — a locus of `k` contiguous regions carries `k + 1` boundaries, its
 two outer ones included, because a fragment crossing a locus's boundary overlaps the locus and is one of
-its EM candidates. Contention for a boundary is rare rather than impossible (~0.01 % of the mass), so
-`priors.contended_boundaries` reports it. What this replaced: `assemble_priors` folded each boundary's
+its EM candidates. Contention for a boundary is rare rather than impossible (~0.01 % of the mass).
+What this replaced: `assemble_priors` folded each boundary's
 mass into one flank region because `_project_regions_to_loci` cannot see a 0-bp object, and the fold then
 needed an intergenic re-key (`TRAPS: a-fold-grows-a-heuristic`). The prior's target, stated once:
 `n_gdna` in `em_solver.cpp:apply_grouped_prior_update` is a soft count of the gDNA fragments that are
@@ -751,8 +751,8 @@ second pass's scorer reads the same de-tilted pools calibration reads.
 ### 3.7 The deposit weight is 1/opportunity
 
 Not `1/length`. `EQUATIONS.md` §2 has the derivation, including the support factor `P(A > 0)` that bounds
-where each form is model-free: the BOUNDARY/sj forms unconditionally (`P(w ≥ 2) = 1`), the REGION form
-only within `w ≤ ℓ` (`TRAPS: a-cancellation-is-conditional-on-its-support`).
+where each form is model-free: the BOUNDARY/sj forms unconditionally (`P(w ≥ 2) = 1`), a REGION form only
+within `w ≤ ℓ` (`TRAPS: a-cancellation-is-conditional-on-its-support`). No region bank takes this deposit.
 
 ---
 

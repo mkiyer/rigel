@@ -52,7 +52,6 @@ __all__ = [
     "conserved_cut_shares",
     "contained_eff_length",
     "crossing_eff_length",
-    "fl_mean",
 ]
 
 #: The reach of a molecule whose template does not end — gDNA, always; and RNA wherever the taper is
@@ -68,13 +67,6 @@ def _as_pmf(fl_pmf: np.ndarray) -> np.ndarray:
         raise ValueError("fl_pmf must be a non-empty 1-D array indexed by fragment length.")
     total = float(p.sum())
     return p / total if total > 0.0 else p
-
-
-def fl_mean(fl_pmf: np.ndarray) -> float:
-    """``E_f[w]`` — the mean fragment length, the limit the unbounded crossing length derives (the
-    gates use it as that oracle)."""
-    p = _as_pmf(fl_pmf)
-    return float(np.dot(np.arange(p.shape[0], dtype=np.float64), p))
 
 
 def contained_eff_length(region_len_bp: np.ndarray, fl_pmf: np.ndarray) -> np.ndarray:

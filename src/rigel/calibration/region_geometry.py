@@ -44,7 +44,6 @@ from .signature import (
     TS_AMBIG,
     TS_NEG,
     TS_POS,
-    mrna_active_strands,
     nrna_active_strands,
 )
 from .simplex_logodds import _solve_regions_logodds_all
@@ -390,9 +389,7 @@ class RegionStatics:
     quantity, one place.
 
     ``free_pos``/``free_neg`` are the axes on which RNA may be present at all (a region's own
-    ±transcript bits; a boundary's ±continuity — the RNA-crossing gate);
-    ``mrna_active_pos``/``mrna_active_neg`` are the tighter mature-RNA axes (a region's ±exon bits; a
-    boundary's ±contiguous exon).
+    ±transcript bits; a boundary's ±continuity — the RNA-crossing gate).
 
     ``boundary_flags`` carries the splice graph's 8 structural bits (``TSS_s``/``TES_s``/``DONOR_s``/
     ``ACCEPTOR_s``) at each BOUNDARY slot and ``0`` on REGION slots, including when no graph was
@@ -408,8 +405,6 @@ class RegionStatics:
     n_slots: int
     free_pos: np.ndarray  # bool — nascent-RNA-active (transcript continuity); the RNA-crossing gate
     free_neg: np.ndarray  # bool
-    mrna_active_pos: np.ndarray  # bool — mature-RNA-active (contiguous exon)
-    mrna_active_neg: np.ndarray  # bool
     boundary_flags: np.ndarray  # uint16 — graph structural bits; 0 on REGION slots
 
 
@@ -432,7 +427,6 @@ def build_region_statics(
     The allow mask is the transcript-structure CONTINUITY gate: a strand-``s`` unspliced crossing can be
     RNA only where strand ``s`` is present on BOTH flanks. That blocks RNA at a TSS/TES (intergenic|exon
     leaves neither strand continuous, so the slot is a gDNA sink) and at a mixed exon|AMBIG boundary.
-    ``mrna_active_s`` is the tighter mature-crossing gate: contiguous exon on both flanks.
 
     ``boundary_flags`` is the per-contiguous-boundary ``uint16[E]`` from
     :func:`~rigel.calibration.splice_graph.build_boundary_flags_array`; ``None`` leaves the field zero,
@@ -461,9 +455,6 @@ def build_region_statics(
     )
     nrp_l, nrn_l = nrna_active_strands(sig_l)
     nrp_r, nrn_r = nrna_active_strands(sig_r)
-    mrp_l, mrn_l = mrna_active_strands(sig_l)
-    mrp_r, mrn_r = mrna_active_strands(sig_r)
-    mr_self_p, mr_self_n = mrna_active_strands(slot_sig)
 
     free_pos = np.where(is_region, (ts == TS_POS) | (ts == TS_AMBIG), nrp_l & nrp_r)
     free_neg = np.where(is_region, (ts == TS_NEG) | (ts == TS_AMBIG), nrn_l & nrn_r)
@@ -476,8 +467,6 @@ def build_region_statics(
         # κ × capture × ±gDNA regime.
         free_pos=free_pos,
         free_neg=free_neg,
-        mrna_active_pos=np.where(is_region, mr_self_p, mrp_l & mrp_r),
-        mrna_active_neg=np.where(is_region, mr_self_n, mrn_l & mrn_r),
         boundary_flags=np.where(
             is_boundary, flags[np.clip(obj, 0, max(flags.shape[0] - 1, 0))], 0
         ).astype(np.uint16),
@@ -510,7 +499,7 @@ def init_beliefs(
     gdna_strand_overdispersion: float = 0.0,
     rna_strand_overdispersion: float = 0.0,
     n_grid: int,
-    logodds_window: float = 10.0,
+    logodds_window: float,
     n_threads: int = 1,
 ) -> RegionBelief:
     """The signature-binary G1/G2/G3 initial :class:`RegionBelief` on the unified chain.

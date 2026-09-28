@@ -18,17 +18,21 @@ import itertools
 import numpy as np
 import pytest
 
-from _psi_reference import Row, cube_rows_of, jeffreys_arms, lse, row_at, strand_loglik_mixture
+from _psi_reference import (
+    Row,
+    compose,
+    cube_rows_of,
+    jeffreys_arms,
+    lse,
+    posterior_median_fg,
+    psi_cube,
+    row_at,
+    strand_loglik_mixture,
+)
 from scipy.special import expit, log_expit
 
 from rigel.calibration import simplex_logodds as SL
-from rigel.calibration.simplex_logodds import (
-    _logodds_grid,
-    _solve_regions_logodds_all,
-    compose,
-    posterior_median_fg,
-    psi_cube,
-)
+from rigel.calibration.simplex_logodds import _logodds_grid, _solve_regions_logodds_all
 
 #: κ = ½ EXACTLY, no overdispersion, no fitted priors. On that substrate the strand term is bit-flat, so
 #: the only things speaking about λ are the message under test and ψ's reference — which isolates the

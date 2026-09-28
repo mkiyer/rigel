@@ -37,13 +37,13 @@ static constexpr int32_t SPLICE_ARTIFACT        = 4;  // CIGAR sj rejected by bl
 // rather than reading zero through the stats dict's `.get(key, 0)`.
 static constexpr size_t NUM_SPLICE_TYPES        = 5;
 
-// MergeOutcome (rigel.types.MergeOutcome)
+// MergeOutcome (named for the gates in tests/_resolution_reference.py)
 static constexpr int32_t MC_INTERSECTION          = 0;
 static constexpr int32_t MC_INTERSECTION_NONEMPTY = 1;
 static constexpr int32_t MC_UNION                 = 2;
 static constexpr int32_t MC_EMPTY                 = 3;
 
-// ChimeraType (rigel.types.ChimeraType)
+// ChimeraType (named for the gates in tests/_resolution_reference.py)
 static constexpr int32_t CHIMERA_NONE           = 0;
 static constexpr int32_t CHIMERA_TRANS           = 1;
 static constexpr int32_t CHIMERA_CIS_STRAND_SAME = 2;
@@ -203,7 +203,7 @@ struct RawResolveResult {
     //       0.35x at K=2, 0.14x at K=3, 0 at K>=4), so crediting all K shifts
     //       kappa by 21-34% — and the fit feeds kappa in as the MoM region mean.
     // ⛔ NOT because credit-all "inflates" the dispersion: measured null bias is
-    // -7.3e-5 +/- 3.0e-4 on LBX0190, i.e. none. That reasoning was refuted.
+    // -7.3e-5 +/- 3.0e-4 on LBX0190, i.e. none.
     // ⛔ A 1/K split is provably BIASED (4-12 sigma): Var(sum w_i X_i) = pq*sum w^2
     // but the estimator subtracts pq*sum w. Do not use it.
     //
@@ -337,10 +337,6 @@ inline MergeResult merge_sets(const std::vector<std::vector<int32_t>>& sets) {
 // chimera FROM. A candidate is a chimera only if the mates are genomically INCOMPATIBLE: a different
 // reference (the caller gates on `is_interchromosomal`), an orientation that is not facing inward, or
 // an implied fragment length beyond the library's `max_fragment_length`.
-//
-// ⚠ Measured cost of the old predicate: 4,087 gDNA fragments dropped per ladder condition -- 0.04 % of
-// fragments carrying 2.4 % of every boundary crossing, because it fires exactly where transcripts are
-// short and dense, which is exactly where a fragment crosses many boundaries.
 inline int32_t detect_chimera(
     const std::vector<ExonBlock>& exons,
     const std::vector<std::vector<int32_t>>& exon_t_sets,

@@ -228,7 +228,8 @@ rigel sim --config scenario.yaml -o sim_out/
 The YAML schema is what `sim_command` in `src/rigel/cli.py` reads: optional
 top-level `name`, `ref_name` (default `chr1`), `genome_length`, `seed`,
 `n_fragments`, the read-model keys `frag_mean`, `frag_std`, `frag_min`,
-`frag_max`, `read_length`, `error_rate`, and a `genes` list. Each gene has
+`frag_max`, `read_length`, `error_rate`, and a `genes` list; any other top-level
+key is an error. Each gene has
 `gene_id`, `strand`, optional `gene_name` / `gene_type`, and a `transcripts`
 list whose entries carry `t_id`, `exons` (0-based half-open `[start, end]`
 pairs), and optional `abundance` (default 100) and `nrna_abundance` (nascent
@@ -311,7 +312,7 @@ blacklist; it is ignored under `--no-mappability`.
 Any `rigel quant` flag can be set in a YAML file via `--config`. Keys are the
 flag names with underscores (hyphens are also accepted), plus `bam_file`,
 `index_dir`, `output_dir` and `tsv` for the I/O arguments; a key that is not a
-`quant` flag is ignored with a warning. Explicit CLI flags always override the
+`quant` flag is an error. Explicit CLI flags always override the
 YAML. A resolved `config.yaml` is written to the output directory after each
 run for reproducibility.
 
@@ -526,13 +527,17 @@ scalars (it is `null` if calibration did not run):
     "rna_strand_overdispersion":  <float>,  // RNA strand Beta-Binomial overdispersion
     "n_regions":                  <int>,    // number of calibration regions
     "capture": {                            // present when the gDNA track is informative
-      "n_nodes":                 <int>,     // regions with gDNA signal used
+      "n_regions":               <int>,     // regions with positive gDNA density and mass (the KDEs' input)
+      "enriched":                <bool>,    // a distinct on-target mode was found
+      "count_median_log_rho":    <float>,   // median log gDNA density over those regions
       "background_mode_log_rho": <float>,   // dominant density peak by region COUNT (typical region)
-      "enriched_mode_log_rho":   <float>,   // high-density peak by gDNA MASS (on-target shoulder)
-      "separation_nats":         <float>,   // enriched - background (log peak-to-peak fold)
-      "enrichment_factor":       <float>,   // exp(separation_nats) — peak-to-peak fold
-      "mass_frac_ontarget":      <float>,   // fraction of gDNA mass in the on-target mode
-      "enriched":                <bool>     // a distinct on-target mode was found
+      "enriched_mode_log_rho":   <float>,   // high-density peak by gDNA MASS; count_median_log_rho if not enriched
+      "fold_peak_to_peak":       <float>,   // exp(separation_peak_nats)
+      "fold_vs_median":          <float>,   // exp(separation_median_nats)
+      "separation_peak_nats":    <float>,   // enriched mode - background mode
+      "separation_median_nats":  <float>,   // enriched mode - count median
+      "mass_frac_ontarget":      <float>,   // fraction of gDNA mass at or above the median-to-enriched midpoint; 0 if not enriched
+      "kde_bandwidth_factor":    <float>    // bandwidth factor of the by-count KDE
     }
   }
 }
@@ -540,8 +545,8 @@ scalars (it is `null` if calibration did not run):
 
 The `capture` block is descriptive only (no pass/fail verdict) and mass-weighted: under hybrid
 capture the on-target regions are few but carry the captured gDNA mass, so weighting by mass
-surfaces the on-target mode. `enrichment_factor` says how enriched; `mass_frac_ontarget` says how
-much of the gDNA is actually on-target.
+surfaces the on-target mode. `fold_vs_median` and `fold_peak_to_peak` say how enriched;
+`mass_frac_ontarget` says how much of the gDNA is actually on-target.
 
 The RNA and gDNA fragment-length models used by scoring/calibration are
 reported under the top-level **`fragment_length`** key (as
@@ -635,7 +640,8 @@ theory is in `docs/EQUATIONS.md` and the design in `docs/DESIGN.md`.
 
 - **Library scalars**, in `summary.json` → `calibration`: `gdna_density_global`,
   `rna_sense_frac` (the sense fraction κ), the gDNA and RNA strand overdispersions, and the
-  `capture` block when a distinct on-target gDNA-density mode is found.
+  `capture` block when the gDNA track is informative (`enriched` says whether an on-target mode
+  was found).
 - **A per-locus Dirichlet prior** — `gdna_prior_count` and `rna_prior_count` in `loci.feather`
   — which sets the gDNA-vs-RNA split each locus's EM starts from, plus the gDNA component's
   effective length. RNA is distributed among transcripts by the EM, not by calibration.

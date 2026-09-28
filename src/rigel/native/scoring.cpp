@@ -54,8 +54,6 @@ static constexpr int SCORED_STACK_CAPACITY = 64;
 //
 // Maintains running (max_v, sum_v) such that the logsumexp of the
 // stream of inputs x_1,..,x_n equals  max_v + log(sum_v).
-// Uses an explicit has_v flag instead of an infinity sentinel because
-// this extension is compiled with fast-math.
 static inline void lse_update(
     double& max_v,
     double& sum_v,
@@ -227,8 +225,6 @@ class NativeFragmentScorer {
     /// candidate — `max_ll_delta_ = -log(pruning_min_posterior)`, the bound every RNA candidate meets within
     /// its pool — and is otherwise no candidate at all. A footprint the gDNA length law cannot produce is
     /// pruned by this, with no length rule of its own.
-    /// ⛔ The callers carry the outcome as a bool, never as an infinity tested later: this target is built
-    /// with -ffast-math (CMakeLists.txt), under which `std::isfinite(-inf)` may return true.
     inline bool gdna_competes(double gdna_ll, double best_rna_ll) const {
         return best_rna_ll - gdna_ll <= max_ll_delta_;
     }

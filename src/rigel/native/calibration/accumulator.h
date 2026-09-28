@@ -18,29 +18,23 @@
  *
  *   Regions count fragments CONTAINED (the whole path fits inside one region); boundaries count fragments
  *   CROSSING. Each population stores only the channels something READS, and they differ: count (integer),
- *   the reciprocal-opportunity sum (float64), and -- on the contiguous boundaries -- the conserved mass
- *   (float64). There is no fixed point anywhere and no `length_sum`.
+ *   the reciprocal-opportunity sum (float64), and -- on the contiguous and sj boundaries -- the conserved
+ *   mass (float64). There is no fixed point anywhere.
  *
  * WHY MORE THAN ONE SUM
- *   With `A(w)` the number of admissible start positions -- (ell - w + 1)+ contained in a region,
- *   w - 1 crossing a 0-bp boundary -- and the deposit 1/A(w):
+ *   With `A(w)` the number of admissible start positions -- w - 1 crossing a 0-bp boundary -- and the
+ *   deposit 1/A(w):
  *
  *       E[count]      = rho * E_f[A(w)]
  *       E[sum 1/A]    = rho * P(A > 0)     <- the cancellation is conditional on its own support
  *                     = rho                 at a BOUNDARY (P(w >= 2) = 1 for any real library)
- *                     = rho * P(w <= ell)   at a REGION -- a per-component pmf functional, NOT rho
- *
- * The two rules carry two names -- `unspliced_inv_length_sum` / `sj.inv_length_sum` for the boundary
- * form, `contained_inv_opportunity_sum` for the region form -- and neither is called `density`: the
- * boundary form IS one, exactly; the region form is a density SHAPE truncated by its support.
  *
  * TWO STRANDS, AND THEY ARE INDEPENDENT
  *   align_strand   the genomic strand the read ALIGNED to. Every read has one. Selects the column.
  *   sj_strand      a splice junction's strand, from its genomic MOTIF (GT..AG is +, its reverse
  *                  complement CT..AC is -). Spliced reads only. Resolves an intron against the
  *                  annotation, and nothing else.
- *   Comparing them yields sense vs antisense, which is DERIVED and never stored. The old 4-channel axis
- *   collapsed that comparison into one bool named `primary`; that concept is gone.
+ *   Comparing them yields sense vs antisense, which is DERIVED and never stored.
  */
 #pragma once
 
@@ -99,21 +93,11 @@ inline int strand_column(std::int32_t align_strand) noexcept {
 
 /// A region: an interval. ONE population — the fragments contained inside it — in two strand columns.
 ///
-/// ⚠ A `spanning` population (one segment covering the region whole) was removed on evidence: it reached
-/// no evidence-starved region the region's own bounding BOUNDARIES did not already reach off capture, and 141
-/// regions / 822 fragments (0.008 %) under it. Its mass is not lost — a spanning fragment crosses both of
-/// the region's boundaries and is deposited there.
-/// ⛔ Consequence, and it is structural: no spliced fragment touches the region axis at all, because a
-/// spliced fragment can never be `contained` (both endpoints of an annotated intron are region_bounds).
+/// ⛔ No spliced fragment is ever `contained`: both endpoints of an annotated intron are region_bounds.
 struct Region {
     std::uint32_t contained_count[kNStrandColumns];
-    /// ⭐ ONE value, while `contained_count` keeps two. The length moments are strand-AGNOSTIC -- which
-    /// strand a read aligned to says nothing about whether the molecule was gDNA or RNA -- and every
-    /// consumer summed the two columns before using them. The COUNTS keep both because the strand model
-    /// is a Beta-Binomial over them, per strand.
-    double contained_inv_opportunity_sum;
 };
-static_assert(sizeof(Region) == 16, "Region must be 16 bytes with no padding");
+static_assert(sizeof(Region) == 8, "Region must be 8 bytes with no padding");
 
 /// A contiguous boundary: the 0-bp boundary between two adjacent regions. `spliced` means the FRAGMENT used an
 /// annotated sj somewhere -- not that this boundary is one. gDNA cannot be spliced, so a spliced
@@ -121,7 +105,9 @@ static_assert(sizeof(Region) == 16, "Region must be 16 bytes with no padding");
 struct Boundary {
     std::uint32_t unspliced_count[kNStrandColumns];
     std::uint32_t spliced_count[kNStrandColumns];
-    /// ⭐ ONE value -- strand-agnostic, see `Region`.
+    /// ⭐ ONE value, while `unspliced_count` keeps two: which strand a read aligned to says nothing about
+    /// whether the molecule was gDNA or RNA. The COUNTS keep both because the strand model is a
+    /// Beta-Binomial over them, per strand.
     double unspliced_inv_length_sum;
     /// ⭐⭐ THE CONSERVED MASS, double. A COUNT and a MASS are two different deposits and one
     /// number cannot be both: `unspliced_count` is `+1` on every boundary a fragment crosses, so a fragment
@@ -131,10 +117,8 @@ struct Boundary {
     /// fragment count, and that question has no strand in it. `SpliceJunction::mass` keeps two.
     double unspliced_mass;
     /// ⭐ The same rule, routed by the same `spliced` flag — so `mass` is not the one channel that
-    /// ignores the split. ⛔ A PARTIAL, never a conservation ledger: a spliced fragment's blocks with no
-    /// interior boundary deposit nothing (their accounting is on the sj axis), so this sums to
-    /// `crossed_block_len / L`. It is a per-BOUNDARY certified-RNA term, commensurate with the unspliced
-    /// mass at the same boundary, and is NOT "the number of spliced fragments here".
+    /// ignores the split. ⛔ A PARTIAL, never a conservation ledger. It is a per-BOUNDARY certified-RNA
+    /// term, NOT "the number of spliced fragments here".
     double spliced_mass;
 };
 static_assert(sizeof(Boundary) == 40, "Boundary must be 40 bytes with no padding");
@@ -143,38 +127,20 @@ static_assert(sizeof(Boundary) == 40, "Boundary must be 40 bytes with no padding
 /// population; and it is not a genomic position, so it carries no structural flags.
 struct SpliceJunction {
     std::uint32_t count[kNStrandColumns];
-    /// ⭐ LIVE: `second_pass` scores a held fragment's sj evidence with it. `length_sum` was
-    /// removed — nothing read it, and `pool_lengths`' RNA_SPLICED row already carries that
-    /// population's length distribution.
+    /// ⭐ LIVE: `second_pass` scores a held fragment's sj evidence with it.
     double inv_length_sum;
-    /// ⭐⭐⭐ THE CONSERVED MASS'S THIRD AXIS. A spliced fragment's block that contains no interior
-    /// boundary deposits on neither boundary bank, and is not `contained` either -- its path spans a sj,
-    /// so it lies in no single region. Such a fragment existed on the incidence axis and on no conserved
-    /// one, which is why a library fragment count was not computable. Measured on the origin-split
-    /// oracle at ladder g50 capture_off: 1,222,375 of 4,830,713 RNA fragments (25.3 %) are in that
-    /// population, against 0 of 4,997,761 gDNA fragments, because gDNA cannot splice.
+    /// ⭐⭐⭐ THE CONSERVED MASS'S THIRD AXIS. A block's two ends are sj boundaries wherever the intron
+    /// there resolved to an annotated sj, and each slice of a block shares its `slice_len / L` equally
+    /// among every boundary and sj bounding it (`Accumulator::deposit`). Spec:
+    /// `_accumulator_reference.py`; gates: `tests/native/test_conserved_mass.py`.
     ///
-    /// ⛔ The rule ADDS a boundary class; it does not re-apportion an existing one. A block that
-    /// crossed a boundary is untouched, so `unspliced_mass` and `spliced_mass` are byte-identical to what
-    /// they were. Spec: `_accumulator_reference.py`; gates: `tests/native/test_conserved_mass.py`.
-    ///
-    /// Two values, reversing `Boundary::unspliced_mass`'s one-value rule on this axis only. The
-    /// reversal is admissible because the premise changed, and the premise is recorded here so it is
-    /// not re-litigated in either direction.
-    /// The ruling was *"nothing reads a mass per strand"*. That is now false for sj and only for
-    /// sj: an ARTIFACTUAL splice junction accumulates SYMMETRICALLY on both strands, exactly as
-    /// gDNA does, so the strand model the tool already has can detect one — but only if it is given a
-    /// per-strand observable, and the COUNT is not enough because a count cannot separate a sj
-    /// used by many short fragments from one used by few long ones.
-    /// ⚠ The second reason is structural: without this bank, artifact filtering needs TWO passes over
-    /// the BAM (tally, filter, re-accumulate the mass), which is the one thing the single-pass
-    /// architecture exists to avoid.
+    /// Two values, where `Boundary::unspliced_mass` keeps one: an ARTIFACTUAL splice junction
+    /// accumulates SYMMETRICALLY on both strands, as gDNA does, so the strand model can detect one only
+    /// from a per-strand observable, and the COUNT cannot separate a sj used by many short fragments
+    /// from one used by few long ones.
     ///
     /// ⛔ **The column is `col` — the SAME genome-strand column `count` is deposited at**, so
     /// `mass[c] / count[c]` is a per-strand mean and not a ratio of two different populations.
-    /// ⚠ Summed over columns this is byte-comparable to the single accumulator it replaces, but NOT
-    /// bit-identical: float addition is not associative and the deposit order per column differs.
-    /// Agreement is ~1e-15 relative, which is the convention this file already documents.
     double mass[kNStrandColumns];
 };
 static_assert(sizeof(SpliceJunction) == 32, "SpliceJunction must be 32 bytes with no padding");
@@ -290,8 +256,8 @@ struct OfferedFragment {
 /// ⚠ These classify the ARBITRATION, not the deposit: a resolved_* fragment can still be rejected
 /// afterwards as TOO_LONG, which is a different question with its own counter.
 ///
-/// ⛔ THERE IS NO `resolved_unspliced`, AND IT IS NOT AN OMISSION. The field existed and no fragment could
-/// enter it: a spliced hypothesis CUTS bases the unspliced one keeps, so L_spliced <= L_unspliced always,
+/// ⛔ THERE IS NO `resolved_unspliced`, AND IT IS NOT AN OMISSION. No fragment could enter it: a spliced
+/// hypothesis CUTS bases the unspliced one keeps, so L_spliced <= L_unspliced always,
 /// and the one filter is `L <= max_length`. If the unspliced path survives the filter then every spliced
 /// path survives it too, so the survivor set can never be exactly {unspliced} while a spliced path was
 /// offered -- which is the condition for being in this census at all. The ORDERING is pinned directly by
@@ -364,17 +330,14 @@ struct DeferredFragments {
     void canonicalise();
 };
 
-/// Reusable scratch so `deposit` allocates nothing on the per-fragment path.
-///
-/// ⭐ Measured on the shipped accumulator: the one per-fragment `std::vector` cost 22.8 ns, 18 % of the
-/// deposit -- and it is invisible to any profiler that samples by function, because the time is
-/// attributed to `malloc`. One instance per worker; the vectors keep their capacity across fragments.
 struct ScoredHypothesis {
     std::size_t  index;     // into OfferedFragment::hypotheses
     std::int64_t length;    // L under this hypothesis
     std::int64_t absorbed;  // introns normalise merged away while computing it
 };
 
+/// Reusable scratch so `deposit` allocates nothing on the per-fragment path. One instance per worker;
+/// the vectors keep their capacity across fragments.
 struct DepositScratch {
     std::vector<std::pair<std::int64_t, std::int64_t>> introns;   // normalised: sorted, disjoint, clipped
     std::vector<std::pair<std::int64_t, std::int64_t>> segments;  // the path, introns cut out
@@ -432,8 +395,7 @@ public:
     /// deposit already computes while locating the boundaries its path crosses.
     ///
     /// ⚠ The sj-boundary id IS the slot: `sj_boundary_right[k]` and the bank entry `k` are the same k.
-    /// There is no indirection to a row in `edges.feather`; using that row as a bank index writes past
-    /// the end of a 404,168-entry array, because the highest such row is 1,447,755.
+    /// There is no indirection to a row in `edges.feather`, and that row is not a bank index.
     ///
     /// ⚠ Slot ORDER is part of the contract, because the id is the rank: the caller must sort on
     /// (donor region_bound, acceptor region_bound, sj_strand), matching `Partition.from_region_bounds` in the Python spec.
@@ -454,10 +416,8 @@ public:
 
     /// One uint32 per region counting fragments whose FIRST COVERED BASE lies in it.
     ///
-    /// ⭐ The accumulator's ledger invariant, now TWICE over: `sum(region_start_count) == sum(region_end_count) == deposited` (both strand columns), checkable
-    /// against a number the scanner knows independently. The three "conservation identities" it replaced
-    /// were tautologies -- each right-hand side could only be evaluated by re-running the deposit, so a
-    /// deliberately broken replay satisfied all three while 91 % of the crossings were junk.
+    /// ⭐ The accumulator's ledger invariant: `sum(region_start_count) == sum(region_end_count) ==
+    /// deposited` (both strand columns), checkable against a number the scanner knows independently.
     const std::uint32_t* region_start_count_data() const noexcept { return region_start_count_.data(); }
     const std::uint32_t* region_end_count_data() const noexcept { return region_end_count_.data(); }
     const std::uint32_t* region_span_count_data() const noexcept { return region_span_count_.data(); }
@@ -505,10 +465,9 @@ public:
 
     /// ⭐ `L` under ONE hypothesis, without depositing anything — what the SECOND PASS scores against.
     ///
-    /// ⛔ Exposed rather than reimplemented. The tool has ONE
-    /// definition of fragment length, and the scorer needs a length per *counterfactual* hypothesis. A
-    /// Python reimplementation would be a second definition of exactly the quantity that audit existed to
-    /// unify — and it would be the one the drain then disagreed with.
+    /// ⛔ Exposed rather than reimplemented. The tool has ONE definition of fragment length, and the
+    /// scorer needs a length per *counterfactual* hypothesis. A Python reimplementation would be a second
+    /// definition of that length, and the drain could disagree with it.
     ///
     /// Returns the clipped `L`, or 0 when the fragment clips away entirely.
     std::int64_t length_under(const OfferedFragment& fragment,
@@ -531,12 +490,10 @@ public:
 private:
     /// The one length pool this fragment belongs to, or -1 for none.
     ///
-    /// ⭐ DETERMINACY, NOT PROVENANCE. A fragment reaches this boundary only when exactly ONE hypothesis
+    /// ⭐ DETERMINACY, NOT PROVENANCE. A fragment reaches this function only when exactly ONE hypothesis
     /// survived, so its L is not in doubt however it was arrived at, and an implied splice counts as a
-    /// sequenced one. Barring inferred splices was measured -- the pool reads +0.67 % mean / +2.40 % sd
-    /// against truth under determinacy and -9.58 % / -22.46 % under provenance, because barring inferred
-    /// lengths preferentially bars fragments whose mates sit far apart. A purity filter on a length pool is
-    /// a length filter.
+    /// sequenced one. Barring inferred lengths would preferentially bar fragments whose mates sit far
+    /// apart: a purity filter on a length pool is a length filter.
     std::int64_t fragment_pool(bool spliced,
                                std::int64_t contained_region,
                                std::int64_t sole_boundary) const noexcept;
@@ -569,7 +526,7 @@ private:
     std::vector<Boundary> boundaries_;            // n_region_bounds - 2, the interior boundaries
     std::vector<SpliceJunction>  sj_;         // one per annotated sj on this reference
     // The START/END/SPAN region banks — flat [n_regions * kNStrandColumns], their own
-    // arrays so Region keeps its static_assert'd 16 B. START/END: the path's first/last COVERED base,
+    // arrays so Region keeps its static_assert'd 8 B. START/END: the path's first/last COVERED base,
     // by align strand — opportunity ℓ for every fragment length, wall-blind only at the template's
     // downstream/upstream end respectively. SPAN: regions STRICTLY covered by one segment, neither
     // path endpoint inside — opportunity (w−ℓ−1)₊, a pmf functional per component BY DESIGN.

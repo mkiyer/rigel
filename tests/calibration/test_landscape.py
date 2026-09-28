@@ -149,8 +149,8 @@ def test_knn_width_widens_as_the_sample_thins():
 
 def _arm(ls, fg, mass, eff):
     """ψ's fitted gDNA arm on a fraction grid, read through the kernel's own construction
-    (`simplex_logodds.gdna_arm`): the curve at ``log f_g + log M − log E`` per slot and cell."""
-    from rigel.calibration.simplex_logodds import gdna_arm
+    (`_psi_reference.gdna_arm`): the curve at ``log f_g + log M − log E`` per slot and cell."""
+    from _psi_reference import gdna_arm
 
     fg = np.asarray(fg, np.float64)
     return gdna_arm(ls.log_rho, ls.logP, np.log(fg / (1.0 - fg)), mass, eff)
@@ -179,7 +179,9 @@ def test_the_kernels_arm_is_numpys_interpolation_of_the_curve_to_the_bit():
     a-test-that-redefines). PERTURBATION: an arm that extrapolated past the grid, or skipped a clip, fails here."""
     from scipy.special import expit
 
-    from rigel.calibration.simplex_logodds import _logodds_grid, gdna_arm
+    from _psi_reference import gdna_arm
+
+    from rigel.calibration.simplex_logodds import _logodds_grid
 
     count, mass, eff, var = _two_mode()
     ls = fit_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))

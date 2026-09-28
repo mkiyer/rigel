@@ -167,7 +167,7 @@ def tolerance_report(expected, result, args, kwargs) -> list[str]:
         geometry.spliced_count, np.float64
     ).sum(axis=1)
     kappa = float(kwargs["rna_sense_frac"])
-    window = float(kwargs.get("logodds_window", 10.0))
+    window = float(kwargs["logodds_window"])
     n_grid = int(kwargs["n_grid"])
     b_frac, b_var = budget(float(counts.max()) if counts.size else 0.0, kappa, window, EPS64, n_grid)
     lines = [

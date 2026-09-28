@@ -77,9 +77,9 @@ Nine permanent docs, none of them a changelog.
 `EQUATIONS.md`) and delete it where it was, in the same edit. Never copy: two homes diverge.
 
 **`docs/dev/` is the sandbox** — working notes, half-finished arguments, handoffs. Nothing there is
-authoritative and nothing may cite into it (`tests/test_docs_boundary.py`). **The source does not cite
-the docs**: a docstring may cite a test or the executable specification
-(`tests/native/_accumulator_reference.py`), never a doc.
+authoritative and nothing may cite into it. **The source does not cite the docs**: a docstring may cite a
+test or the executable specification (`tests/native/_accumulator_reference.py`), never a doc.
+`tests/test_docs_boundary.py` gates both.
 
 ## Where does a change go? — the calibration layering
 
@@ -199,10 +199,9 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,418 passed / 0 skipped / 2 xfail, 3,420 collected** — re-derived 2026-09-27
-on a clean checkout (3,453 − 34 + 1: the code review's behaviour-preserving cleanup deleted two `src/` modules and one
-test file and added one, and removed 54 cases with the dead code they tested while adding 20; the review's working note
-added to `docs/dev/`). An untracked file under `docs/dev/` is a
+**The standing baseline: 0 failed / 3,411 passed / 0 skipped / 2 xfail, 3,413 collected** — re-derived 2026-09-28
+on a clean checkout (3,420 − 7: the code review's step-1 follow-ups removed 23 cases with the dead code they tested
+and added 16, among them the gate that the source cites no doc). An untracked file under `docs/dev/` is a
 jargon case too, so a working tree holding notes reads higher (the count is re-derived from the table below at every commit
 that measures the suite; the history of how it moved is git, not this file). The 2 xfails are executable records of proven
 defects whose fixes are elsewhere (`ISSUES: two-sided-exon-row`; `ISSUES: the-lower-bound-noise-ratchet`), deferred by

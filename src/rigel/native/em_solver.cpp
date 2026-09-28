@@ -82,14 +82,12 @@ struct LocusProfile {
     bool is_mega_locus = false;
     double squarem_step_scale_mean = 0.0;
     double squarem_step_scale_max = 0.0;
-    int squarem_extrapolation_clamp_count = 0;
     int squarem_backtrack_count = 0;
     int squarem_nonfinite_count = 0;
     int squarem_grouped_stabilization_fail_count = 0;
     int assignment_stranded = 0;    // SAMPLE: units the draw left with every candidate full (assign_posteriors)
     int assignment_unrepaired = 0;  // SAMPLE: of those, the ones no repair path could place
     double gdna_eff_len = 1.0;
-    double gdna_log_eff_len = 0.0;
 
     // Final marginal data log-likelihood at the converged theta (diagnostic; only when emit_locus_stats).
     double final_data_loglik = 0.0;
@@ -101,9 +99,6 @@ struct LocusProfile {
     double squarem_us = 0.0;
     double assign_us = 0.0;
     double total_us = 0.0;
-
-    // VBEM-specific: digamma calls per E-step
-    int64_t digamma_calls_per_estep = 0;
 };
 
 // ================================================================
@@ -502,7 +497,7 @@ static void parallel_estep(
     double*        em_totals,      // [n_components], zeroed by caller
     int            n_components,
     int            n_threads,
-    rigel::EStepThreadPool* pool = nullptr)
+    rigel::ThreadPool* pool = nullptr)
 {
     // 1. Break ECs into granular tasks for load balance
     std::vector<EStepTask> tasks;
@@ -798,7 +793,7 @@ static void map_em_step(
     double*       theta_new,    // output: normalized
     int           n_components,
     int           estep_threads = 1,
-    rigel::EStepThreadPool* pool = nullptr)
+    rigel::ThreadPool* pool = nullptr)
 {
     // Compute log_weights = log(theta + epsilon) - log_eff_len
     std::vector<double> log_weights(static_cast<size_t>(n_components));
@@ -853,7 +848,7 @@ static void vbem_step(
     double*       alpha_new,
     int           n_components,
     int           estep_threads = 1,
-    rigel::EStepThreadPool* pool = nullptr)
+    rigel::ThreadPool* pool = nullptr)
 {
     // Compute alpha_sum
     double alpha_sum = 0.0;
@@ -1044,7 +1039,6 @@ struct EMResult {
     int squarem_iterations = 0;  // number of SQUAREM iterations completed
     double squarem_step_scale_mean = 0.0;
     double squarem_step_scale_max = 0.0;
-    int squarem_extrapolation_clamp_count = 0;
     int squarem_backtrack_count = 0;       // halvings of an extrapolation step (backtracked_squarem_step)
     int squarem_nonfinite_count = 0;
     int squarem_grouped_stabilization_fail_count = 0;
@@ -1061,7 +1055,7 @@ static EMResult run_squarem(
     double        convergence_delta,
     bool          use_vbem,
     int           estep_threads = 1,
-    rigel::EStepThreadPool* pool = nullptr)
+    rigel::ThreadPool* pool = nullptr)
 {
     int max_sq_iters = std::max(max_iterations / SQUAREM_BUDGET_DIVISOR, 1);
     size_t nc = static_cast<size_t>(n_components);
@@ -1083,7 +1077,6 @@ static EMResult run_squarem(
     double step_scale_sum = 0.0;
     double step_scale_max = 0.0;
     int step_scale_count = 0;
-    int clamp_count = 0;
     int backtrack_count = 0;
     int nonfinite_count = 0;
     int stabilization_fail_count = 0;
@@ -1140,7 +1133,6 @@ static EMResult run_squarem(
                         ++nonfinite_count;
                     } else if (state_extrap[i] < floor_i) {
                         state_extrap[i] = floor_i;
-                        ++clamp_count;
                     }
                 }
             }
@@ -1161,7 +1153,6 @@ static EMResult run_squarem(
                     ++stabilization_fail_count;
                 } else if (state_new[i] < floor_i) {
                     state_new[i] = floor_i;
-                    ++clamp_count;
                 }
                 sum_old += state0[i];
                 sum_new += state_new[i];
@@ -1255,7 +1246,6 @@ static EMResult run_squarem(
                         ++nonfinite_count;
                     } else if (state_extrap[i] < 0.0) {
                         state_extrap[i] = 0.0;
-                        ++clamp_count;
                     }
                 }
                 double s = 0.0;
@@ -1307,7 +1297,6 @@ static EMResult run_squarem(
         ? step_scale_sum / static_cast<double>(step_scale_count)
         : 0.0;
     out.squarem_step_scale_max = step_scale_max;
-    out.squarem_extrapolation_clamp_count = clamp_count;
     out.squarem_backtrack_count = backtrack_count;
     out.squarem_nonfinite_count = nonfinite_count;
     out.squarem_grouped_stabilization_fail_count = stabilization_fail_count;
@@ -2317,7 +2306,7 @@ batch_locus_em_partitioned(
                                  LocusSubProblem& sub,
                                  std::vector<int32_t>& local_map_vec,
                                  bool mega,
-                                 rigel::EStepThreadPool* pool = nullptr) {
+                                 rigel::ThreadPool* pool = nullptr) {
             auto locus_t0 = hrclock::now();
             const auto& pv = views[li];
             int n_t = pv.n_transcripts;
@@ -2422,7 +2411,6 @@ batch_locus_em_partitioned(
                 prof.is_mega_locus = mega;
                 prof.squarem_step_scale_mean = result.squarem_step_scale_mean;
                 prof.squarem_step_scale_max = result.squarem_step_scale_max;
-                prof.squarem_extrapolation_clamp_count = result.squarem_extrapolation_clamp_count;
                 prof.squarem_backtrack_count = result.squarem_backtrack_count;
                 prof.squarem_nonfinite_count = result.squarem_nonfinite_count;
                 prof.squarem_grouped_stabilization_fail_count =
@@ -2430,8 +2418,6 @@ batch_locus_em_partitioned(
                 prof.assignment_stranded = stranded;
                 prof.assignment_unrepaired = unrepaired;
                 prof.gdna_eff_len = gel_ptr[li];
-                prof.gdna_log_eff_len = gel_ptr[li] > 0.0
-                    ? std::log(gel_ptr[li]) : -std::numeric_limits<double>::infinity();
                 {
                     // Marginal data log-lik at the converged theta (which fixed point is the MLE).
                     std::vector<double> lw(static_cast<size_t>(nc));
@@ -2451,7 +2437,6 @@ batch_locus_em_partitioned(
                 prof.ec_total_elements = total_elems;
                 prof.max_ec_width = max_k;
                 prof.max_ec_depth = max_n;
-                prof.digamma_calls_per_estep = use_vbem ? nc : 0;
                 prof.extract_us = us(locus_t0, t2);
                 prof.build_ec_us = us(t2, t4);
                 prof.warm_start_us = us(t4, t5);
@@ -2466,9 +2451,9 @@ batch_locus_em_partitioned(
             LocusSubProblem sub;
             std::vector<int32_t> local_map_vec(local_map_size, -1);
 
-            std::unique_ptr<rigel::EStepThreadPool> pool;
+            std::unique_ptr<rigel::ThreadPool> pool;
             if (actual_threads > 1 && mega_end > 0) {
-                pool = std::make_unique<rigel::EStepThreadPool>(actual_threads);
+                pool = std::make_unique<rigel::ThreadPool>(actual_threads);
             }
 
             for (int i = 0; i < mega_end; ++i) {
@@ -2554,7 +2539,6 @@ batch_locus_em_partitioned(
             d["is_mega_locus"] = p.is_mega_locus;
             d["squarem_step_scale_mean"] = p.squarem_step_scale_mean;
             d["squarem_step_scale_max"] = p.squarem_step_scale_max;
-            d["squarem_extrapolation_clamp_count"] = p.squarem_extrapolation_clamp_count;
             d["squarem_backtrack_count"] = p.squarem_backtrack_count;
             d["squarem_nonfinite_count"] = p.squarem_nonfinite_count;
             d["squarem_grouped_stabilization_fail_count"] =
@@ -2562,9 +2546,7 @@ batch_locus_em_partitioned(
             d["assignment_stranded"] = p.assignment_stranded;
             d["assignment_unrepaired"] = p.assignment_unrepaired;
             d["gdna_eff_len"] = p.gdna_eff_len;
-            d["gdna_log_eff_len"] = p.gdna_log_eff_len;
             d["final_data_loglik"] = p.final_data_loglik;
-            d["digamma_calls_per_estep"] = p.digamma_calls_per_estep;
             d["extract_us"] = p.extract_us;
             d["build_ec_us"] = p.build_ec_us;
             d["warm_start_us"] = p.warm_start_us;

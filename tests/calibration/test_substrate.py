@@ -281,7 +281,7 @@ def test_one_region_start_per_ACCEPTED_fragment(scanned):
     """The invariant. ``region_start_count`` is incremented once, at the region holding the fragment's
     first base, for every fragment the accumulator accepts — so its total IS the accepted count.
 
-    Checked against the payload's own QC tally, which is written on the SAME boundary of the deposit but
+    Checked against the payload's own QC tally, which is written at the SAME point in the deposit but
     is a separate counter: they can only agree if every accepted fragment reached both.
     """
     payload, ra, _buffer, _index = scanned

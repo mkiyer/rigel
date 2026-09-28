@@ -1028,7 +1028,6 @@ def _intron_betabinom_payload(n_regions, depth, overdispersion, seed):
 
     contained = np.stack([pos, neg], axis=1).astype(np.uint32)
     n_boundaries = n_regions - 1
-    quantum = 1.0 / _FRAG_LEN
 
     def region_zeros(dtype):
         return np.zeros((n_regions, 2), dtype=dtype)
@@ -1047,10 +1046,6 @@ def _intron_betabinom_payload(n_regions, depth, overdispersion, seed):
         ref_boundary_offsets=np.array([0, n_boundaries], dtype=np.int64),
         ref_sj_offsets=np.array([0, 0], dtype=np.int64),
         region_contained_count=contained,
-        # ONE column: the length moments carry no strand axis, so the two are summed.
-        region_contained_inv_opportunity_sum=(
-            contained.sum(axis=1).astype(np.uint64) * np.uint64(quantum)
-        ),
         region_start_count=contained.astype(np.uint32),
         region_end_count=contained.astype(np.uint32),
         region_span_count=region_zeros(np.uint32),

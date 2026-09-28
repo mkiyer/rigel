@@ -1,7 +1,7 @@
 """The two-component strand likelihood is an executable REFERENCE, and this is its gate.
 
 ψ's strand term is the production form: three components, native (`native/transfer_rows.h`, read through
-`simplex_logodds.psi_cube`), hard to read by hand. `_psi_reference.strand_loglik` is the two-component special
+`_psi_reference.psi_cube`), hard to read by hand. `_psi_reference.strand_loglik` is the two-component special
 case it must collapse to — a second, readable statement of one predicate that lives with the gates' oracles and
 never in `src/` (one production path), and this file is what stops the two drifting apart
 (TRAPS: a-test-that-redefines). The pattern is the one `tests/native/_accumulator_reference.py`
@@ -12,9 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from _psi_reference import jeffreys_arms, strand_loglik, strand_loglik_mixture
-
-from rigel.calibration.simplex_logodds import psi_cube
+from _psi_reference import jeffreys_arms, psi_cube, strand_loglik, strand_loglik_mixture
 
 #: the candidate gDNA fractions both forms are evaluated on
 GRID = np.linspace(0.02, 0.98, 25)

@@ -31,6 +31,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, replace as _replace
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -218,7 +219,7 @@ def scan_and_buffer(
     stats = PipelineStats()
     buffer = FragmentBuffer(
         max_memory_bytes=scan.buffer_size_bytes,
-        spill_dir=scan.spill_dir,
+        spill_dir=None if scan.spill_dir is None else Path(scan.spill_dir),
     )
     logger.info("[START] Native C++ BAM scan → resolve + train + buffer")
 

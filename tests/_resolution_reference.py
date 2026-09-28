@@ -10,18 +10,71 @@ Production fragment resolution runs entirely in C++ (``rigel._resolve_impl``'s
 - ``_detect_intrachromosomal_chimera()`` — a Python twin of the intrachromosomal
   chimera rule (transcript-set disjointness, compatibility checked first), gated
   in ``test_resolution.py`` beside the C++ kernel
+- ``MergeOutcome`` / ``ChimeraType`` — the resolver's merge-level and chimera codes
+  (``native/constants.h``), named for the gates
 """
 
 # ---------------------------------------------------------------------------
 # Imports
 # ---------------------------------------------------------------------------
 
+from enum import IntEnum
 from types import SimpleNamespace
 
-from rigel.types import (
-    ChimeraType,
-    Strand,
-)
+from rigel.types import Strand
+
+
+# ---------------------------------------------------------------------------
+# The resolver's merge-level and chimera codes (`native/constants.h`)
+# ---------------------------------------------------------------------------
+
+
+class MergeOutcome(IntEnum):
+    """Which relaxation level succeeded in progressive set merging.
+
+    During fragment resolution, transcript/gene index sets from
+    individual exon blocks or splice junctions are merged via
+    progressive relaxation:
+
+    0. INTERSECTION — intersection of *all* sets (most specific)
+    1. INTERSECTION_NONEMPTY — intersection of non-empty sets only
+    2. UNION — union of all sets (most sensitive)
+    3. EMPTY — no sets to merge (no hits of this type)
+    """
+
+    INTERSECTION = 0
+    INTERSECTION_NONEMPTY = 1
+    UNION = 2
+    EMPTY = 3
+
+
+class ChimeraType(IntEnum):
+    """Classification of chimeric fragments.
+
+    A chimeric fragment has exon blocks that map to disjoint transcript
+    sets, indicating fusion or read-through events.
+
+    Values
+    ------
+    NONE : int
+        All exon blocks map to a connected set of transcripts.
+    TRANS : int
+        Exon blocks span multiple reference sequences (interchromosomal).
+        Suggestive of trans-splicing or gene fusions.
+    CIS_STRAND_SAME : int
+        Intrachromosomal chimera where both disjoint exon-block
+        clusters align to the same strand.  Suggestive of
+        transcriptional read-through between adjacent genes.
+    CIS_STRAND_DIFF : int
+        Intrachromosomal chimera where the disjoint exon-block
+        clusters align to different strands.  Suggestive of genomic
+        rearrangement or trans-splicing.
+    """
+
+    NONE = 0
+    TRANS = 1
+    CIS_STRAND_SAME = 2
+    CIS_STRAND_DIFF = 3
 
 
 # ---------------------------------------------------------------------------

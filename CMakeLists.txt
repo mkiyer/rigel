@@ -190,7 +190,7 @@ install(TARGETS _em_impl LIBRARY DESTINATION rigel)
 
 # The calibration solve's kernels, one module: the block pipeline of the sweep in one call per sweep with a pool of
 # threads over the locus blocks (native/solve_kernel.cpp), on ψ's kernel (psi_kernel.h) and the composition transfer's
-# builders, pass and solve (transfer_kernel.h), the row constructors (transfer_rows.h) and the locus EM's thread pool
+# builders, pass and solve (transfer_kernel.h), the row constructors (transfer_rows.h) and the thread pool
 # (thread_pool.h); the same code bound for the gates. Pure C++17 + nanobind + numpy.
 nanobind_add_module(
   _solve_impl
@@ -212,7 +212,8 @@ install(TARGETS _solve_impl LIBRARY DESTINATION rigel)
 # additions, which would break the Kahan compensated summation used in
 # the E-step kernel for numerical stability.
 #
-# _scoring_impl gets full -ffast-math (no compensated summation there).
+# _scoring_impl gets full -ffast-math (no compensated summation there) with
+# -fno-finite-math-only, because scoring.cpp uses -inf sentinels.
 # All other targets get -O3 -march=native without fast-math.
 
 # RIGEL_PORTABLE: when ON, omit -march=native so wheels run on any machine
@@ -232,14 +233,14 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     endif()
 
     target_compile_options(_em_impl      PRIVATE ${RIGEL_OPT_FLAGS} -ffp-contract=fast)
-    target_compile_options(_scoring_impl PRIVATE ${RIGEL_OPT_FLAGS} -ffast-math)
+    target_compile_options(_scoring_impl PRIVATE ${RIGEL_OPT_FLAGS} -ffast-math -fno-finite-math-only)
     target_compile_options(_resolve_impl PRIVATE ${RIGEL_OPT_FLAGS})
     target_compile_options(_cgranges_impl PRIVATE ${RIGEL_OPT_FLAGS})
     target_compile_options(_bam_impl PRIVATE ${RIGEL_OPT_FLAGS})
 
     if(RIGEL_PROFILE_NATIVE)
       foreach(_rigel_native_target
-          _em_impl _scoring_impl _resolve_impl _cgranges_impl _bam_impl)
+          _em_impl _scoring_impl _resolve_impl _cgranges_impl _bam_impl _solve_impl)
         target_compile_options(
           ${_rigel_native_target}
           PRIVATE -g -fno-omit-frame-pointer

@@ -396,12 +396,6 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "n_sj": int(cal.n_sj),
         }
     )
-    # Capture-enrichment diagnostics — mass-weighted (count-median vs gDNA-mass-
-    # median density → fold-change). On capture RNA-seq the on-target regions are
-    # a small minority of regions but carry the gDNA mass, so an equal-weight view is
-    # blind to them; the mass shift is the signal. Descriptive only — no verdict.
-    # (The prior's own equal-weight KDE is kept for provenance in the companion
-    # gdna_density_kde.feather below.)
     if cal_dict is not None:
         from .calibration.track import capture_summary
 
@@ -650,6 +644,14 @@ def _write_config_yaml(config_yaml_path: Path, args: argparse.Namespace) -> None
     logging.info(f"[DONE] Config written to {config_yaml_path}")
 
 
+#: The read-model keys a ``rigel sim`` scenario passes to ``ReadSimConfig``.
+_SIM_READ_KEYS = ("frag_mean", "frag_std", "frag_min", "frag_max", "read_length", "error_rate")
+#: Every top-level key ``sim_command`` reads.
+_SIM_KEYS = frozenset(
+    {"name", "ref_name", "genome_length", "seed", "n_fragments", "genes", *_SIM_READ_KEYS}
+)
+
+
 def sim_command(args: argparse.Namespace) -> int:
     """Run the ``rigel sim`` subcommand."""
     import yaml
@@ -661,26 +663,15 @@ def sim_command(args: argparse.Namespace) -> int:
     # Load scenario config from YAML
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
+    unknown = sorted(set(cfg) - _SIM_KEYS)
+    if unknown:
+        raise ValueError(f"unknown scenario key(s): {unknown}; known: {sorted(_SIM_KEYS)}")
 
     genome_length = cfg.get("genome_length", args.genome_length)
     seed = cfg.get("seed", args.seed)
     ref_name = cfg.get("ref_name", "chr1")
 
-    sim_config = ReadSimConfig(
-        **{
-            k: cfg[k]
-            for k in (
-                "frag_mean",
-                "frag_std",
-                "frag_min",
-                "frag_max",
-                "read_length",
-                "error_rate",
-            )
-            if k in cfg
-        },
-        seed=seed,
-    )
+    sim_config = ReadSimConfig(**{k: cfg[k] for k in _SIM_READ_KEYS if k in cfg}, seed=seed)
 
     sc = Scenario(
         name=cfg.get("name", "scenario"),
@@ -937,10 +928,7 @@ def _resolve_quant_args(
         valid_keys = set(defaults) | {"bam_file", "index_dir", "output_dir", "tsv"}
         unknown = set(yaml_config) - valid_keys
         if unknown:
-            logging.warning(
-                "Unknown config keys ignored: %s",
-                sorted(unknown),
-            )
+            raise ValueError(f"unknown config key(s): {sorted(unknown)}")
 
     # Populate I/O args and extra flags from YAML when not set on CLI
     for io_key in ("bam_file", "index_dir", "output_dir", "tsv"):

@@ -675,22 +675,18 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
         // `slice_len / length` is shared EQUALLY between the objects that bound it, so every bounded
         // slice disposes of exactly its own bases:  Sum over the fragment = Sum slice_len / length = 1.
         //
-        // ⭐⭐ A SJ IS A BOUNDARY EXACTLY LIKE A BOUNDARY, and that is the whole rule. A block's
-        // interior boundaries are the boundaries it crosses; its two ENDS are boundaries too whenever the
-        // intron there resolved to an annotated sj. So a fragment's 1.0 is shared across every
-        // object it crosses -- boundaries and sj together -- rather than boundaries first and sj
+        // ⭐⭐ A SJ BOUNDS A BLOCK EXACTLY AS A CONTIGUOUS BOUNDARY DOES, and that is the whole rule. A
+        // block's interior boundaries are the boundaries it crosses; its two ENDS are boundaries too
+        // whenever the intron there resolved to an annotated sj. So a fragment's 1.0 is shared across
+        // every object it crosses -- boundaries and sj together -- rather than boundaries first and sj
         // only with whatever is left over.
-        //
-        // ⛔ The predecessor gave a boundary-crossing block's bases entirely to boundaries, so a sj whose
-        // two flanking blocks both crossed a boundary received NOTHING while `sj_count` credited it. That
-        // still conserved -- the total was 1.0 -- but it is not a sharing.
         //
         // ⭐ Coverage-weighted, NOT `1/K`. Both conserve; only this one says WHERE the fragment sat, and
         // only this one is expressible per base -- which is how the two are told apart at all.
-        // ⚠ An UNSPLICED path has no sj boundaries, so this reduces to the previous rule exactly
-        // and `unspliced_mass` is byte-identical. A single block with no boundary and no annotated sj
-        // is bounded by nothing and deposits nothing: for a one-block path that is the CONTAINED case,
-        // already whole in `contained_count`; for a multi-block one it is an unannotated intron's block.
+        // ⚠ An UNSPLICED path has no sj boundaries, so its bases go to boundaries alone. A single block
+        // with no boundary and no annotated sj is bounded by nothing and deposits nothing: for a
+        // one-block path that is the CONTAINED case, already whole in `contained_count`; for a
+        // multi-block one it is an unannotated intron's block.
         {
             const std::int32_t left_sj =
                 block > 0 ? sj_id_at_gap[block - 1] : -1;
@@ -710,7 +706,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
                                             + (left_jid  >= 0 ? 1 : 0) + (right_jid  >= 0 ? 1 : 0);
                 if (n_bounds == 0) continue;
                 // ⭐ float64, deposited directly: the share is a coverage fraction in (0, 1] and needs
-                // no fixed point. Conservation is 2.1e6x tighter than the 2^-32 grid it replaced.
+                // no fixed point.
                 const double share = static_cast<double>(hi - lo)
                                    / (static_cast<double>(length) * static_cast<double>(n_bounds));
                 for (const std::int64_t boundary_idx : {left_boundary, right_boundary}) {
@@ -745,23 +741,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     std::int64_t contained_region = -1;
     if (sj_ids.empty() && first_region == last_region) {
         contained_region = first_region;
-        Region& region = regions_[static_cast<std::size_t>(contained_region)];
-        // ⭐⭐ THE RECIPROCAL-OPPORTUNITY DEPOSIT. A length-`w` fragment contained in a region of
-        // length `ell` had `ell - w + 1` admissible start positions, so `1/(ell - w + 1)` cancels the
-        // opportunity ON ITS OWN SUPPORT: E[SUM] = rho * P(w <= ell), NOT rho -- a fragment with
-        // w > ell deposits NOTHING here, and P(w <= ell) is a per-component pmf functional.
-        // `1/L` does not cancel it at all:
-        // measured, that channel read 25.67 density units for short fragments and 1.60 for long ones
-        // at the same true density. ⛔ The BOUNDARY rule `1/(L-1)` is NOT this rule's `ell -> 0` limit
-        // (that limit is 0 for every w >= 2); it is a DIFFERENT relation -- crossing a designated
-        // point, A = w - 1 at every ell -- whose support factor P(w >= 2) is 1 for any real library.
-        // ⚠ `A >= 1` here is the support restated: the fragment IS contained, so `w <= ell` -- which is
-        // exactly why E[SUM] = rho * P(w <= ell) and not rho.
-        const std::int64_t region_len =
-            region_bounds_[static_cast<std::size_t>(contained_region) + 1] -
-            region_bounds_[static_cast<std::size_t>(contained_region)];
-        region.contained_count[col] += 1u;
-        region.contained_inv_opportunity_sum += 1.0 / static_cast<double>(region_len - length + 1);
+        regions_[static_cast<std::size_t>(contained_region)].contained_count[col] += 1u;
     }
 
     const std::int64_t pool = fragment_pool(spliced, contained_region, sole_boundary);
@@ -808,7 +788,7 @@ std::int64_t Accumulator::fragment_pool(bool spliced,
     // exonic contained fragment, a multi-boundary crossing -- is a mixture and enters nothing.
     //
     // ⭐ DETERMINACY, NOT PROVENANCE: a fragment reaches here only when exactly ONE hypothesis survived,
-    // so its L is not in doubt however it was arrived at (the declaration carries the measurement).
+    // so its L is not in doubt however it was arrived at.
     if (spliced) return static_cast<std::int64_t>(FragmentPool::kRnaSpliced);
     if (contained_region >= 0) {
         switch (region_types_[static_cast<std::size_t>(contained_region)]) {
@@ -886,9 +866,6 @@ void Accumulator::merge_from(const Accumulator& other) {
         for (std::size_t c = 0; c < kNStrandColumns; ++c) {
             regions_[i].contained_count[c]   += other.regions_[i].contained_count[c];
         }
-        // ⚠ Outside the column loop — these have ONE value per region, not one per strand.
-        regions_[i].contained_inv_opportunity_sum += other.regions_[i].contained_inv_opportunity_sum;
-
     }
     for (std::size_t i = 0; i < region_start_count_.size(); ++i) {
         region_start_count_[i] += other.region_start_count_[i];

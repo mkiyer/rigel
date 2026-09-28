@@ -64,6 +64,22 @@ static inline bool cigar_advances_ref(int op) {
 }
 
 // ================================================================
+// Streaming-scan capacities: bounds on memory and hand-off, not model parameters
+// ================================================================
+
+// Input-queue capacity per worker: the read-name batches the reader may hold queued before it blocks.
+static constexpr int INPUT_BATCHES_PER_WORKER = 4;
+// Output-queue capacity per worker: the finished chunks the workers may hold queued before they block on
+// the main thread.
+static constexpr int OUTPUT_CHUNKS_PER_WORKER = 2;
+
+// Pre-size a worker's chunk: chunk_size fragment rows and 3/2 candidate-transcript rows per fragment. A
+// capacity hint only; the columns grow past it.
+static inline void reserve_chunk(FragmentAccumulator& acc, int64_t chunk_size) {
+    acc.reserve(chunk_size, chunk_size * 3 / 2);
+}
+
+// ================================================================
 // SJ strand tag configuration
 // ================================================================
 
@@ -211,7 +227,8 @@ struct SJStrandCounts {
 };
 
 struct StrandObservations {
-    // exonic: (align_strand, transcript_strand) for unique-gene unambiguous strand
+    // exonic: (align_strand, transcript_strand) for unique-mapper, non-chimeric fragments whose
+    // candidate transcripts share one strand
     std::vector<int8_t> exonic_obs;
     std::vector<int8_t> exonic_truth;
 
@@ -385,12 +402,13 @@ struct WorkerState {
     // Two buffers, because they belong to two different owners. `deposit_scratch` is the accumulator's
     // (normalised introns, path segments, sj ids) and is opaque here. `deposit_introns` is the
     // ADAPTER's: the fragment's introns restricted to the reference being deposited and de-duplicated,
-    // which is what `FragmentPath::introns` points at.
+    // which is what `OfferedFragment::observed_introns` points at.
     //
     // ⛔ That restriction is mandatory, not tidiness. `Accumulator::deposit` normalises introns by
     // coordinate alone — it never looks at `IntronBlock::ref_id` — so an intron from another reference
-    // would be cut out of this reference's path. Multi-reference fragments DO arrive here: the intergenic call
-    // site is not chimera-gated.
+    // would be cut out of this reference's path. The adapter refuses a fragment whose exon blocks span
+    // references, but that check cannot see a record whose CIGAR has an N and no M, D, = or X op: it adds
+    // an intron and no exon block.
     rigel::accumulator::DepositScratch deposit_scratch;
     std::vector<IntronBlock>           deposit_introns;
     std::vector<rigel::accumulator::GapHypothesis> gap_hypotheses;
@@ -1271,9 +1289,9 @@ public:
 
         // Two queues: input (SPMC) and output (MPSC)
         BoundedQueue<QnameBatch> input_queue(
-            static_cast<size_t>(n_workers * 4));
+            static_cast<size_t>(n_workers * INPUT_BATCHES_PER_WORKER));
         BoundedQueue<FragmentAccumulator> output_queue(
-            static_cast<size_t>(n_workers * 2));
+            static_cast<size_t>(n_workers * OUTPUT_CHUNKS_PER_WORKER));
 
         // Per-worker state (local to scan — not a class member)
         std::vector<std::unique_ptr<WorkerState>> worker_states;
@@ -1281,8 +1299,7 @@ public:
         for (int i = 0; i < n_workers; i++) {
             int32_t n_transcripts = ctx_->n_transcripts_;
             auto ws = std::make_unique<WorkerState>(n_transcripts);
-            // Pre-allocate accumulator for chunk_size
-            ws->accumulator.reserve(chunk_size, chunk_size * 3 / 2);
+            reserve_chunk(ws->accumulator, chunk_size);
             // Per-worker accumulator: the same partition and the same sj CSR as the shared
             // template, locally writable so workers don't contend.
             if (acc_set_) {
@@ -1324,7 +1341,7 @@ public:
                                     break;  // aborted
                                 }
                                 ws.accumulator = FragmentAccumulator();
-                                ws.accumulator.reserve(chunk_size, chunk_size * 3 / 2);
+                                reserve_chunk(ws.accumulator, chunk_size);
                             }
                         }
                         batch.groups.clear();
@@ -1545,7 +1562,7 @@ private:
 
         // ── the deposit adapter ───────────────────────────────────────────────────────────────────────
         //
-        // Turn one assembled fragment into the accumulator's `FragmentPath` and deposit it. The
+        // Turn one assembled fragment into the accumulator's `OfferedFragment` and deposit it. The
         // accumulator owns the whole deposit rule; this function's only job is to say what the fragment IS
         // — its extent on one reference, the introns cut out of it, and the two independent strands.
         //
@@ -2061,7 +2078,6 @@ private:
             const auto n_sj    = static_cast<std::size_t>(ref_sj_offsets.back());
 
             std::vector<uint32_t> region_contained_count(n_regions * kNStrandColumns, 0u);
-            std::vector<double> region_contained_inv_opportunity_sum(n_regions, 0.0);
             std::vector<uint32_t> region_start_count(n_regions * kNStrandColumns, 0u);
             std::vector<uint32_t> region_end_count(n_regions * kNStrandColumns, 0u);
             std::vector<uint32_t> region_span_count(n_regions * kNStrandColumns, 0u);
@@ -2114,8 +2130,6 @@ private:
                         const std::size_t o = (region_base + i) * kNStrandColumns + c;
                         region_contained_count[o]   = regions[i].contained_count[c];
                     }
-                    // ⚠ Outside the column loop: ONE value per region, keyed without kNStrandColumns.
-                    region_contained_inv_opportunity_sum[region_base + i] = regions[i].contained_inv_opportunity_sum;
                 }
                 for (std::size_t i = 0; i < a.n_boundaries(); ++i) {
                     for (std::size_t c = 0; c < kNStrandColumns; ++c) {
@@ -2173,7 +2187,6 @@ private:
             cal["ref_sj_offsets"]   = vec_to_ndarray(std::move(ref_sj_offsets));
 
             cal["region_contained_count"]   = vec_to_ndarray(std::move(region_contained_count));
-            cal["region_contained_inv_opportunity_sum"] = vec_to_ndarray(std::move(region_contained_inv_opportunity_sum));
             cal["region_start_count"]       = vec_to_ndarray(std::move(region_start_count));
             cal["region_end_count"]         = vec_to_ndarray(std::move(region_end_count));
             cal["region_span_count"]        = vec_to_ndarray(std::move(region_span_count));
@@ -2849,12 +2862,6 @@ NB_MODULE(_bam_impl, m) {
                 return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<2>>(
                     &a.regions_data()[0].contained_count[0], {a.n_regions(), kNStrandColumns}, h,
                     {row, int64_t{1}}).cast();
-            })
-            .def_prop_ro("region_contained_inv_opportunity_sum", [](nb::handle h) {
-                auto& a = nb::cast<Accumulator&>(h);
-                constexpr int64_t row = sizeof(Region) / sizeof(double);
-                return nb::ndarray<nb::numpy, const double, nb::ndim<1>>(
-                    &a.regions_data()[0].contained_inv_opportunity_sum, {a.n_regions()}, h, {row}).cast();
             })
             .def_prop_ro("region_start_count", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);

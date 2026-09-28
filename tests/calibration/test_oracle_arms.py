@@ -377,7 +377,7 @@ def test_an_object_with_no_mass_is_ABSENT_not_a_confident_zero(measured):
     np.testing.assert_allclose(score.mwae, 2.0 / 11.0)
 
     # ...and on the real toy: exactly the objects with mass are scored, and there is at least one
-    # without, or the boundary above proves nothing about the path the instrument actually runs.
+    # without, or the check above proves nothing about the path the instrument actually runs.
     region = measured.scores["pass0"]["region"]["ALL"]
     live = (
         np.asarray(measured.truth.count_gdna_region) + np.asarray(measured.truth.count_rna_region)

@@ -93,7 +93,7 @@ class RegionDeconv:
         np.ndarray
     )  # float64[K] — the region's gDNA composition (face-invariant; mass = frac·M_face)
     # per-strand RNA fractions of the UNSPLICED mass (the image of `(f_g, w_pos)` under
-    # `simplex_logodds.compose`, so f_pos+f_neg+gdna_frac = 1).
+    # ψ's `compose` in `native/psi_kernel.h`, so f_pos+f_neg+gdna_frac = 1).
     rna_pos_frac: "np.ndarray | None" = None  # float64[K] — f_pos
     rna_neg_frac: "np.ndarray | None" = None  # float64[K] — f_neg
     # the PROJECTION's consumed output (calibrate/derive read ONLY these); None on the per-region solve.

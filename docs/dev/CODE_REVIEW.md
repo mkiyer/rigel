@@ -277,7 +277,7 @@ Smaller ones:
 
 ## 6. Decisions for the owner
 
-1. The strand-overdispersion estimator (bug 2): fitted or raw moment into `reconcile_overdispersions`.
+1. The strand-overdispersion estimator (bug 2): fitted or raw moment into `reconcile_overdispersions`. **Decided 2026-09-28: one shared value** (`ISSUES: strand-overdispersion-one-shared-value`).
 2. `cli.py:522-534`: `gdna_fraction` in `summary.json` counts SPLICED intergenic fragments as gDNA, against Axiom 0.
 3. The per-transcript `rna_prior_weight` lane and `warm_start="prior"`: production plumbing whose only producer is
    `quant_accuracy.py`'s oracle-allocation arm. Keep as an instrument hook, or delete.
@@ -301,87 +301,81 @@ One case at a time, each verified before the next (`CLAUDE.md`'s working rules):
 4. **The fixtures** (16), whose expectations will move.
 5. **The larger simplifications** in §4, one per change.
 
-## 8. Step 1 follow-ups — left alone during step 1, to be addressed
+## 8. Step 1 follow-ups — DONE 2026-09-28 (step 1b)
 
-Found while implementing step 1 and left out of its packages, because each was outside a package's list, needs a
-decision, or would change a schema. Each is its own change, verified like step 1 unless marked.
+All but item 17 landed in eleven packages, each proven bit-identical on the three frozen references, the
+transcript table unchanged. The only arrays gone are the dead ones deleted:
+- step 1's two `CalibrationResult` arrays;
+- step 1b's `region_contained_inv_opportunity_sum` (a payload-schema change, so every scan and oracle cache was
+  rebuilt).
 
-### 8a. Dead code
+Outcomes that are not self-evident from git:
+- **Item 5 (test-only code).** `split_basins`, `lattice_points` and `_project_regions_to_loci` turned out to be
+  live, so they stay. `InjectedCalibrationPriors` stays by the owner's ruling: it is the seam the toy harness
+  injects priors through.
+- **Item 13.** The scanner's per-reference intron filter is not redundant (a CIGAR with only an `N` reaches the
+  deposit); the comment now says so.
+- **Items 20 and 21.** `-fno-finite-math-only` and `_solve_impl`'s optimisation flags both proved bit-identical and
+  stayed.
+- **Item 25 (owner, 2026-09-28).** The `t_index` presence check is gone. The row-alignment check stays and is now
+  tested, because a reordered transcript table would silently mis-map every per-transcript array. `rigel index`
+  refuses a GTF with no transcripts. A build deletes the old manifest before its first write, so an interrupted
+  rebuild is refused.
+- **Item 26.** Confirmed by the owner.
+- **Item 17** waits for the strand-overdispersion work.
 
-1. `ChainView.n_grid` / `logodds_window` (`calibration/messages/__init__.py`): no reader outside the test harness.
-2. `RegionGeometry.mrna_active_pos/neg` (`calibration/region_geometry.py`): no production reader;
-   `scripts/design/calibration_oracle.py` and tests read them and could call `mrna_active_strands` directly.
-3. `AssertionCounts.of_blocks`'s `flag is None` path (`calibration/sweep.py`): after the three dead sweep assertions
-   went, only a name outside `_DELIVERED` reaches it.
-4. `region_contained_inv_opportunity_sum`: produced by the accumulator and exported in the payload, read by nothing
-   in `src/` since `RegionGeometry.inv_abundance` went. Deleting it changes the payload schema, so every scan cache
-   rebuilds once; no number moves.
-5. Test-only code living in `src/`: `InjectedCalibrationPriors`, `_project_regions_to_loci`, `contended_boundaries`,
-   `psi_cube`, `gdna_arm`, `posterior_median_fg`, `compose`, `fl_mean`, `split_basins`, `lattice_points`,
-   `load_manifest`, and the `types.py` / `splice.py` members only tests use. Move each into `tests/` or delete it
-   with its tests.
-6. `locus_stats.feather` diagnostics: `gdna_log_eff_len` and `digamma_calls_per_estep` are derivable from other
-   columns, and `squarem_extrapolation_clamp_count` also counts stabilisation clamps (every dead component on every
-   iteration), so it does not measure what its name says.
-7. `track.capture_summary`: a third capture census beside the landscape and the diagnostics, with five unexplained
-   constants, a dead `except ImportError` and an `except Exception: return None` that swallows errors.
-8. `sim/read_name.py`'s 4-part `gdna:` name without a reference: only one test writes it; the engine always writes
-   the reference. A contig or entity id containing ":" also makes `parse_origin` raise.
-9. `scripts/sim/configs/example_suite.yaml`: an orphan naming the deleted `simulate_suite.py`;
-   `example_existing_reference.yaml:8` still points readers to it.
-10. `StrandModels`' diagnostic exonic model: since `strand_summary` went, it is only logged (`log_summary`'s
-    `p_r1_sense`). Keep it as a log line or delete it.
+## 9. Step 1c — what step 1b left, with the owner's rulings (2026-09-28)
 
-### 8b. Latent bugs (behaviour unchanged for valid input)
+Each is its own change, verified like steps 1 and 1b unless it is marked as moving numbers.
 
-11. `BamScanConfig.spill_dir` accepts a `str`, but the buffer calls `spill_dir.mkdir()`, which fails on a `str` (the
-    CLI converts to `Path`, so only library callers hit it).
-12. An unknown key in a `rigel quant` YAML only warns (`cli.py:936-941`), and `rigel sim` and the simulator's YAML
-    parser silently ignore unknown top-level keys, so a typo runs on the default.
-13. `WorkerState`'s "⛔ That restriction is mandatory" (`bam_scanner.cpp` ~390): the deposit adapter already returns
-    before depositing a fragment whose blocks span more than one reference, so the per-reference intron filter may
-    be redundant. Verify, then fix the comment or delete the filter.
+### 9a. Instruments (first: the strand-overdispersion A/Bs need them)
 
-### 8c. Comments and docstrings to verify and fix
+1. `solvability_audit.py` is broken on the current tree: it calls the deleted `_oracle_arms.truth_f_gdna`
+   (recorded in ISSUES since 2026-09-24). Repair it.
+2. `quant_accuracy.py --markdown` crashes on panels with a g25 rung (`_GDNA_LEVEL` has no g25 entry).
+3. `calibration_vs_oracle.py` ignores `--jobs` when given `--json`.
+4. `ruler_vs_truth.py` puts `<repo>/src` first on `sys.path` unconditionally, so it breaks in a worktree
+   (`policy_benchmark.py` guards the same insertion).
+5. `policy_benchmark.py`, `_shared.py` and `quant_accuracy.py` fold ss 0.70 into "unstranded" (§1a bug 5).
 
-14. `accumulator.h`'s `SpliceJunction::mass` block (~150-176) narrates how the rule changed and pins a stale ladder
-    measurement (1,222,375 of 4,830,713 RNA fragments at `g50`); `accumulator.h:437` pins another (1,447,755).
-    State the current rule only. The other native headers' remaining history narration goes the same way.
-15. Rename casualties in `tests/` strings and comments: `tests/native/test_accumulator_native_parity.py:500` ("an
-    implied path still region_bounds its intron" → cuts), `tests/calibration/_synthetic.py:160` ("per-sj SJ strand
-    table"); sweep `tests/` for the patterns step 1 swept in `src/`.
-16. Unverified claims: `StrandModels`' "gDNA is scored with a fixed strand probability of one half";
-    `IntervalType`'s "EXON marks an individual exon boundary"; `IntervalType.SJ_UNANNOT` "recorded with
-    t_index = -1" (nothing records them; the member is test-only).
-17. `calibration/gdna_strand.py`'s stale docstrings (the investigation's list: :10-12, :17, :34, :46-48, :59,
-    :111-115, :142, :148, :352, :447-448, :478-482, :524) and the "per-sj SJ" stutter at :16 and :578 — rewritten
-    WITH the strand-overdispersion decision, since they describe the code that decision changes.
+### 9b. The report
 
-### 8d. Build, CI and gates
+6. Delete `track.capture_summary`'s separate KDE census (owner). `summary.json`'s capture block and the report read
+   calibration's own answer (`located_enriched_mode`, `split_basins`). That removes its five unexplained constants.
+   The report's capture numbers change; quantification does not.
+7. `report.js` reads `c.n_nodes`, which the rename made `n_regions`, so every report with a capture block shows
+   "NaN nodes". MANUAL's `summary.json` capture section is stale: it documents `n_nodes`, `separation_nats` and
+   `enrichment_factor`, and omits the keys actually written. Fixed together with item 6.
 
-18. `vl-convert-python` is only in the `[report]` extra and CI installs `.[dev]`, so the new chart-compile gate (like
-    `test_build_report_inlines_vega_runtime`) skips on GitHub. Add it to `[dev]`.
-19. No gate enforces "the source does not cite the docs": `test_docs_boundary.py` polices only citations into
-    `docs/dev/`, and a bare trap name (`one-thing-varied`) slipped past the step-1 sweep. A gate over `src/`.
-20. `-ffast-math` implies `-ffinite-math-only`, yet `scoring.cpp` relies on `−inf` sentinels (and already warns that
-    `isfinite` is unreliable there): add `-fno-finite-math-only`, proven a numeric no-op.
-21. `_solve_impl` is missing from the optimisation-flag, profiling and IPO blocks of `CMakeLists.txt`.
-22. `thread_pool.h`: `EStepThreadPool` also runs the solve kernel's block and ψ pools, so the name is wrong; `auto fn
-    = task_` copies the `std::function` per worker per call.
-23. Three test files import `rigel._bam_impl` directly (`test_second_pass_scoring.py`,
-    `test_accumulator_native_parity.py`, `test_bam_tag_parsing.py`) instead of through `rigel.native`.
+### 9c. The index
 
-### 8e. Unexplained constants
+8. A stale `splice_blacklist.feather` survives a completed rebuild without the alignable store, and `load()`
+   applies it whatever the manifest records (owner: an index rebuild must address the blacklist). The blacklist
+   should be used only when the manifest records its source. Test: build with a blacklist, rebuild without one,
+   load, and expect no blacklist.
+9. Hardening from the index-integrity package's review:
+   - a test that an empty-GTF rebuild into an existing index leaves that index loadable;
+   - `_mini_sources` reused by the two inlined fixtures in `test_index_integrity.py`.
 
-24. The scanner's queue sizes and reserves (`n_workers*4`, `*2`, `chunk_size*3/2`, `reserve(512)`);
-    `transfer_rows.h`'s `1e-12`; `strand_model.py`'s hand-typed `z = 1.959964`; `simplex_logodds._DEFAULT_L = 10.0`,
-    which duplicates `CalibrationConfig.sweep_logodds_window`; `fl.py`'s tolerances (0.25 bp, 1e-9, 1e-30); any
-    remaining hand-typed `RegionType` codes. Derive each, name it, or put it to the owner.
+### 9d. The EM and the length laws
 
-### 8f. For the owner to confirm
+10. Delete `squarem_extrapolation_clamp_count` (owner). Since the SQUAREM backtracking fix it counts only
+    components the EM's own step had already floored.
+11. A focused analysis of `fl.py`'s constants (owner), taken with the realized-law bug (§1a bug 1), which lives in
+    the same function (`_realized_gdna_counts`):
+    - four zero-guards never bind on a reachable input (`max(·, 1e-30)` three times, `max(μ − 1, 1e-9)` twice). They
+      can go, or become explicit branches, with identical output.
+    - the 0.25 bp refresh test in the boundary-stratum loop is a genuine tunable with no derivation, and it moves
+      numbers.
+    - `transfer_rows.h`'s `1e-12` never binds on a reachable input.
 
-25. The index's `t_index` column guard was kept: it has a dedicated test and turns a hand-edited index into a clear
-    `ValueError`, while step 1 removed the other column guards on the pinned format. Keep it, or drop it with its test.
-26. Step 1 (P10) moved the pipeline's "strand not identifiable" warning onto calibration's own Bayes-factor decision
-    (`strand_discriminability`), replacing `strand_summary`'s 99 % z-test and dropping its exonic-model note. Log
-    output changed; no number did.
+### 9e. Watch
+
+12. `test_scan_order_independence::test_THE_FIXTURE_REALLY_DOES_REORDER_THE_BUFFER` failed once on thread timing, a
+    dependence it documents, and passed on three reruns.
+
+### 9f. Real-data findings from the strand-overdispersion measurement, the same under every arm (for ISSUES)
+
+13. The pure-DNA VCaP exome half is read as about 93 % RNA (the deferred unstranded × capture-ON stratum).
+14. LBX0588's gDNA share per deposited fragment moves with depth: 0.11 → 0.45 → 0.83 at 1 % / 10 % / full.
+15. `full_lowg` stranded × capture-OFF over-calls gDNA 2.3×.

@@ -2,15 +2,15 @@
 duplicate-transcript guard the reader applies, and the layout iterator underneath the interval and
 region tables. The first block verifies every structure `load()` builds: the transcript and gene
 tables and their derived arrays, collapsed and exon intervals, splice junctions, the fragment
-resolver, and the build/load round trip on a larger index and on edge cases. The second gates the
-validation `load()` performs on a hand-written index directory. The third gates the duplicate-exon-
-structure guard in `read_transcripts` and its collapse flag. The fourth gates
+resolver, and the build/load round trip on a larger index and on edge cases. The second gates what
+`build()` and `load()` refuse: a reordered transcript table, a GTF with no transcripts, and an index
+whose rebuild stopped part-way. The third gates the duplicate-exon-structure guard in
+`read_transcripts` and its collapse flag. The fourth gates
 `_iter_reference_layout`, which both `intervals.feather` and `regions.feather` are derived from.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import numpy as np
@@ -18,19 +18,11 @@ import pandas as pd
 import pytest
 
 from rigel.index import (
-    BOUNDARIES_FEATHER,
-    INDEX_FORMAT_VERSION,
-    INTERVALS_FEATHER,
-    MANIFEST_JSON,
-    REF_LENGTHS_FEATHER,
-    REGIONS_FEATHER,
-    SJ_FEATHER,
     TRANSCRIPTS_FEATHER,
     TranscriptIndex,
     _GenicSpan,
     _IntergenicSpan,
     _iter_reference_layout,
-    build_index_artifacts,
     read_transcripts,
 )
 from rigel.transcript import Transcript
@@ -641,109 +633,61 @@ class TestEdgeCases:
         assert single_exon_index.resolver is not None
 
 
-# ── What ``TranscriptIndex.load()`` REFUSES — validation on a hand-written index directory ───────
+# ── What ``TranscriptIndex`` REFUSES — a reordered table, an empty GTF, a half-rebuilt index ─────
 
 
-def _write_minimal_index(tmp_path: Path, t_df: pd.DataFrame) -> Path:
+def _mini_sources(base: Path) -> tuple[Path, Path]:
+    """Write ``MINI_GTF`` and an indexed all-N 2,000-bp chr1 into *base*; return (FASTA, GTF)."""
+    import pysam
+    from _index_builder import MINI_GTF
+
+    fasta = base / "genome.fa"
+    fasta.write_text(">chr1\n" + "N" * 2000 + "\n")
+    pysam.faidx(str(fasta))
+    gtf = base / "test.gtf"
+    gtf.write_text(MINI_GTF)
+    return fasta, gtf
+
+
+def test_load_refuses_a_reordered_transcript_table(tmp_path: Path):
+    """Every per-transcript array is keyed by row position, so reordered rows would mis-map them."""
+    fasta, gtf = _mini_sources(tmp_path)
     idx_dir = tmp_path / "idx"
-    idx_dir.mkdir(parents=True, exist_ok=True)
+    TranscriptIndex.build(fasta, gtf, idx_dir, write_tsv=False)
+    t_df = pd.read_feather(idx_dir / TRANSCRIPTS_FEATHER)
+    t_df.iloc[::-1].reset_index(drop=True).to_feather(idx_dir / TRANSCRIPTS_FEATHER)
 
-    t_df.to_feather(idx_dir / TRANSCRIPTS_FEATHER)
-
-    # Manifest with current format_version (load() refuses anything else).
-    (idx_dir / MANIFEST_JSON).write_text(
-        json.dumps(
-            {
-                "format_version": INDEX_FORMAT_VERSION,
-                "rigel_version": "test",
-            }
-        )
-    )
-
-    # ref_lengths.feather: a single 1000-bp chr1.
-    pd.DataFrame({"ref": ["chr1"], "length": [1000]}).to_feather(idx_dir / REF_LENGTHS_FEATHER)
-
-    # The splice graph: one INTERGENIC region tiling chr1, zero boundaries. Required at load, so the
-    # fixture must supply it — the point of this fixture is to isolate the transcript-table
-    # validation that each test below exercises, not to also fail on a missing partition.
-    _, regions, boundaries = build_index_artifacts([], {"chr1": 1000})
-    regions.to_feather(idx_dir / REGIONS_FEATHER)
-    boundaries.to_feather(idx_dir / BOUNDARIES_FEATHER)
-
-    iv_df = pd.DataFrame(
-        {
-            "ref": ["chr1"],
-            "start": [0],
-            "end": [1000],
-            "strand": [0],
-            "interval_type": [2],
-            "t_index": [-1],
-        }
-    )
-    iv_df.to_feather(idx_dir / INTERVALS_FEATHER)
-
-    sj_df = pd.DataFrame(
-        columns=[
-            "ref",
-            "start",
-            "end",
-            "strand",
-            "interval_type",
-            "t_index",
-        ]
-    )
-    sj_df.to_feather(idx_dir / SJ_FEATHER)
-    return idx_dir
-
-
-def test_load_raises_on_t_index_mismatch(tmp_path: Path):
-    t_df = pd.DataFrame(
-        {
-            "ref": ["chr1", "chr1"],
-            "start": [100, 200],
-            "end": [150, 260],
-            "strand": [1, 1],
-            "length": [50, 60],
-            "t_id": ["t1", "t2"],
-            "g_id": ["g1", "g1"],
-            "t_index": [0, 2],
-            "g_index": [0, 0],
-            "g_name": ["G1", "G1"],
-            "g_type": ["pc", "pc"],
-            "is_basic": [True, True],
-            "is_mane": [False, False],
-            "is_ccds": [False, False],
-            "abundance": [None, None],
-        }
-    )
-    idx_dir = _write_minimal_index(tmp_path, t_df)
-
-    with pytest.raises(ValueError, match="t_index"):
+    with pytest.raises(ValueError, match="row index does not match 't_index'"):
         TranscriptIndex.load(idx_dir)
 
 
-def test_load_raises_when_t_index_missing(tmp_path: Path):
-    t_df = pd.DataFrame(
-        {
-            "ref": ["chr1"],
-            "start": [100],
-            "end": [150],
-            "strand": [1],
-            "length": [50],
-            "t_id": ["t1"],
-            "g_id": ["g1"],
-            "g_index": [0],
-            "g_name": ["G1"],
-            "g_type": ["pc"],
-            "is_basic": [True],
-            "is_mane": [False],
-            "is_ccds": [False],
-            "abundance": [None],
-        }
-    )
-    idx_dir = _write_minimal_index(tmp_path, t_df)
+def test_build_refuses_a_gtf_without_transcripts_before_writing(tmp_path: Path):
+    fasta, gtf = _mini_sources(tmp_path)
+    gtf.write_text("")
+    idx_dir = tmp_path / "idx"
 
-    with pytest.raises(ValueError, match="missing 't_index'"):
+    with pytest.raises(ValueError, match="no transcripts"):
+        TranscriptIndex.build(fasta, gtf, idx_dir, write_tsv=False)
+    assert list(idx_dir.iterdir()) == []
+
+
+def test_an_interrupted_rebuild_leaves_no_manifest(tmp_path: Path, monkeypatch):
+    """The manifest is written last, so a rebuild that stops part-way must not leave the old one
+    vouching for a mix of old and new files. The failure is injected at the first write, so an old
+    manifest removed only after an index file is written fails here too."""
+    fasta, gtf = _mini_sources(tmp_path)
+    idx_dir = tmp_path / "idx"
+    TranscriptIndex.build(fasta, gtf, idx_dir, write_tsv=False)
+
+    def interrupted(*args, **kwargs):
+        raise RuntimeError("interrupted")
+
+    monkeypatch.setattr(pd.DataFrame, "to_feather", interrupted)
+    with pytest.raises(RuntimeError, match="interrupted"):
+        TranscriptIndex.build(fasta, gtf, idx_dir, write_tsv=False)
+
+    assert (idx_dir / TRANSCRIPTS_FEATHER).exists()
+    with pytest.raises(RuntimeError, match="no manifest.json"):
         TranscriptIndex.load(idx_dir)
 
 

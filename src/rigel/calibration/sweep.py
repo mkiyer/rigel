@@ -129,7 +129,7 @@ class AssertionCounts(dict):
     @classmethod
     def of_blocks(cls, names, counts, delivered: dict, n_owned) -> "AssertionCounts":
         """The kernel's per-block ``(violations, eligible)`` summed to the chain's, each assertion noted
-        once (so a violation raises). An assertion that runs only where a channel was delivered is
+        once (so a violation raises). Each assertion runs only where its channel was delivered and is
         absent from the report when no block delivered it; the λ-row check's ELIGIBLE set reads as the
         chain's — where any block delivered rows, a block that delivered none holds zero rows, which are
         finite rows that were checked — so the published count does not depend on how the chain was
@@ -138,8 +138,8 @@ class AssertionCounts(dict):
         counts = np.asarray(counts, np.int64)
         n_owned = np.asarray(n_owned, np.int64)
         for a, name in enumerate(names):
-            flag = _DELIVERED.get(name)
-            if flag is not None and not delivered[flag].any():
+            flag = _DELIVERED[name]
+            if not delivered[flag].any():
                 continue
             v, e = int(counts[:, a, 0].sum()), int(counts[:, a, 1].sum())
             if name == "lam_rows_finite":
@@ -160,7 +160,7 @@ def solve_chain(
     rna_strand_overdispersion: float = 0.0,
     n_rna_obs: float = 0.0,
     n_grid: int,
-    logodds_window: float = 10.0,
+    logodds_window: float,
     gdna_prior=None,
     intron_prior=None,
     policy=None,
@@ -210,8 +210,6 @@ def solve_chain(
     # alone: the only information a message may carry across a locus boundary
     view = ChainView(
         **view_fields(chain, statics, geometry, structure),
-        n_grid=int(n_grid),
-        logodds_window=float(logodds_window),
         strand_live=disc > 0.0,
     )
     library = policy.library(view)

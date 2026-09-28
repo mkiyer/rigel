@@ -1,7 +1,7 @@
 """`rigel.types` — the value types every other module is written in terms of.
 
-`Strand`, `Interval`, `GenomicInterval`, `IntervalType`, `AnnotatedInterval` and `MergeOutcome`:
-their construction, comparison, arithmetic and edge cases. The last block checks that the scoring
+`Strand`, `Interval`, `GenomicInterval`, `IntervalType` and `AnnotatedInterval`: their construction,
+comparison, arithmetic and edge cases. The last block checks that the scoring
 constants C++ carries as hand-typed decimals (``LOG_HALF``, ``TAIL_DECAY_LP`` in
 ``native/constants.h``) equal Python's ``math.log(0.5)`` and ``math.log(0.99)`` exactly.
 """
@@ -12,7 +12,6 @@ from rigel.types import (
     GenomicInterval,
     Interval,
     IntervalType,
-    MergeOutcome,
     AnnotatedInterval,
     Strand,
 )
@@ -69,32 +68,6 @@ class TestStrand:
     def test_from_str_to_str_roundtrip(self):
         for ch in (".", "+", "-", "?"):
             assert Strand.from_str(ch).to_str() == ch
-
-    # -- from_is_reverse ---------------------------------------------------
-
-    def test_from_is_reverse_false_gives_pos(self):
-        assert Strand.from_is_reverse(False) == Strand.POS
-
-    def test_from_is_reverse_true_gives_neg(self):
-        assert Strand.from_is_reverse(True) == Strand.NEG
-
-    # -- opposite ----------------------------------------------------------
-
-    def test_opposite_pos(self):
-        assert Strand.POS.opposite() == Strand.NEG
-
-    def test_opposite_neg(self):
-        assert Strand.NEG.opposite() == Strand.POS
-
-    def test_opposite_none_unchanged(self):
-        assert Strand.NONE.opposite() == Strand.NONE
-
-    def test_opposite_ambiguous_unchanged(self):
-        assert Strand.AMBIGUOUS.opposite() == Strand.AMBIGUOUS
-
-    def test_opposite_double_reversal(self):
-        assert Strand.POS.opposite().opposite() == Strand.POS
-        assert Strand.NEG.opposite().opposite() == Strand.NEG
 
 
 # =====================================================================
@@ -155,7 +128,6 @@ class TestIntervalType:
         assert int(IntervalType.TRANSCRIPT) == 1
         assert int(IntervalType.INTERGENIC) == 2
         assert int(IntervalType.SJ) == 3
-        assert int(IntervalType.SJ_UNANNOT) == 4
 
 
 # =====================================================================
@@ -185,19 +157,6 @@ class TestAnnotatedInterval:
         assert ri.strand == Strand.POS
         assert ri.interval_type == IntervalType.EXON
         assert ri.t_index == 3
-
-
-# =====================================================================
-# MergeOutcome
-# =====================================================================
-
-
-class TestMergeOutcome:
-    def test_values(self):
-        assert int(MergeOutcome.INTERSECTION) == 0
-        assert int(MergeOutcome.INTERSECTION_NONEMPTY) == 1
-        assert int(MergeOutcome.UNION) == 2
-        assert int(MergeOutcome.EMPTY) == 3
 
 
 class TestCppConstantParity:

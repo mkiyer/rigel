@@ -165,9 +165,6 @@ STRATA = (
     "B gene edge",
 )
 
-#: The gDNA anchor that sits inside genes, and therefore on-target under hybrid capture.
-ONTARGET_GDNA_STRATUM = "B exon|intron"
-
 
 def stratum_labels(chain, statics, region_arrays) -> np.ndarray:
     """Per-slot stratum label, from the annotation alone, asserted to partition the chain.
@@ -188,9 +185,9 @@ def stratum_labels(chain, statics, region_arrays) -> np.ndarray:
                        class, structurally pure gDNA on both strands
     ================  =================================================================================
 
-    ``R intergenic`` is cross-checked against ``g1_locked``, the predicate the solver pins on, and
-    ``B exon|intron`` against the solver's own ``mrna_active``; if either pair separates, the labels
-    describe a different population than the one the solver reasons over, and this raises.
+    ``R intergenic`` is cross-checked against ``g1_locked``, the predicate the solver pins on; if the
+    pair separates, the labels describe a different population than the one the solver reasons over,
+    and this raises.
     """
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
@@ -233,19 +230,6 @@ def stratum_labels(chain, statics, region_arrays) -> np.ndarray:
             f"({int(np.sum(is_region & locked)):,}) have SEPARATED on this index. They are the same "
             "population by construction — no transcript covers an intergenic region, so neither RNA "
             "strand is admissible."
-        )
-    # `mrna_active_s` is the solver's own "contiguous exon on both flanks" gate, i.e. "mature RNA of
-    # strand s may cross here". At an `exon|intron` boundary one flank carries no exon bit at all, so
-    # it must be False on both strands.
-    mature_can_cross = np.asarray(statics.mrna_active_pos, bool) | np.asarray(
-        statics.mrna_active_neg, bool
-    )
-    bad = (label == ONTARGET_GDNA_STRATUM) & mature_can_cross
-    if bad.any():
-        raise AssertionError(
-            f"{int(bad.sum()):,} `{ONTARGET_GDNA_STRATUM}` boundaries report `mrna_active`, i.e. the "
-            "solver thinks mature RNA may cross them contiguously. The anchor's whole claim is that it "
-            "cannot, so this classification and the solver's disagree."
         )
     return label
 

@@ -25,29 +25,20 @@ THE MODEL
 
     Regions count fragments contained (they fit inside); boundaries count fragments crossing. Each
     population stores only the channels something reads, and they differ: the two banks the
-    deconvolution consumes carry ``count`` = Sum 1 (integer) and a reciprocal-opportunity sum
-    ``Sum 1/A(w)`` (float64 — there is no fixed point anywhere); the certified-RNA banks carry fewer,
+    deconvolution consumes carry ``count`` = Sum 1 (integer), and the boundary one a reciprocal-opportunity
+    sum ``Sum 1/A(w)`` (float64 — there is no fixed point anywhere); the certified-RNA banks carry fewer,
     because nothing deconvolves a fragment that is already known to be RNA. No spliced fragment touches
     the region axis at all, since a spliced fragment can never be contained — both endpoints of an
     annotated intron are region bounds.
 
 WHAT EACH OBJECT'S NUMBERS MEAN
-    With ``A(w)`` the number of admissible start positions — ``(ell − w + 1)₊`` contained in a region,
-    ``w − 1`` crossing a 0-bp boundary — and a component of start-density ``rho`` and length
-    distribution ``f``, the deposit is ``1/A(w)`` and::
+    With ``A(w)`` the number of admissible start positions — ``w − 1`` crossing a 0-bp boundary — and a
+    component of start-density ``rho`` and length distribution ``f``, the deposit is ``1/A(w)`` and::
 
         E[count]      =  rho * E_f[A(w)]
         E[sum 1/A]    =  rho * P_f(A > 0)          <- the cancellation is CONDITIONAL on its support
                       =  rho                        at a BOUNDARY: P(w >= 2) = 1 for any real library
-                      =  rho * P_f(w <= ell)        at a REGION — NOT rho: a fragment with w > ell
-                                                    deposits NOTHING, and P(w <= ell) is a
-                                                    per-component pmf functional
                                                     (TRAPS: a-cancellation-is-conditional-on-its-support)
-
-    This is why the two rules carry two names and neither is called ``density``. ``inv_length_sum``
-    (boundary/sj) IS a density, exactly; ``inv_opportunity_sum`` (region) is a density SHAPE truncated
-    by its support. One name for the two rules is how the truncation stayed invisible
-    (TRAPS: two-masks-one-name).
 
 NO PARTITIONING
     Every crossed boundary receives the FULL weight. The chance that a length-``L`` fragment crosses a
@@ -462,17 +453,14 @@ class Tally:
     """The accumulator's output — per-object sums over the fragments that landed on each object.
 
     ``count`` = ``Sum 1`` carries the statistical power (a Beta-Binomial needs an integer); the
-    reciprocal-opportunity sums carry the level under TWO rules with TWO names —
-    ``inv_length_sum`` = ``Sum 1/(w−1)`` (boundary/sj: an exact model-free density,
-    ``E = rho·P(w≥2) = rho``) and ``inv_opportunity_sum`` = ``Sum 1/(ell−w+1)`` (region:
-    ``E = rho·P(w≤ell)``, truncated by its own support —
-    TRAPS: a-cancellation-is-conditional-on-its-support); ``mass`` is the conserved fragment count, and
+    reciprocal-opportunity sum ``inv_length_sum`` = ``Sum 1/(w−1)`` carries the level (boundary/sj: an
+    exact model-free density, ``E = rho·P(w≥2) = rho``); ``mass`` is the conserved fragment count, and
     sums to ONE per fragment.
 
     The populations do not all carry the same channels, and that is the design. A channel is stored
     where something reads it and nowhere else::
 
-        region_contained    count  inv_opportunity_sum          the mixture, on the region axis
+        region_contained    count                                the mixture, on the region axis
         boundary_unspliced    count  inv_length_sum        mass   the mixture, on the boundary axis
         boundary_spliced      count                        mass   certified RNA — nothing deconvolves it
         sj          count  inv_length_sum               inv_length_sum is LIVE in second_pass
@@ -486,9 +474,6 @@ class Tally:
     """
 
     region_contained_count: np.ndarray  # uint32[n_regions, 2]
-    #: float64[n_regions] — ONE column. The length moments are strand-AGNOSTIC, and every consumer
-    #: sums the two columns before using them.
-    region_contained_inv_opportunity_sum: np.ndarray
     #: uint32[n_regions, 2] — the path's FIRST covered base, by align strand; one per accepted
     #: fragment, so ``Σ (both columns) == qc.deposited`` — THE ledger invariant. Opportunity ``ℓ``
     #: for every fragment length; wall-blind only at the template's DOWNSTREAM end (the consumer
@@ -523,12 +508,8 @@ class Tally:
     boundary_spliced_count: np.ndarray
     #: float64[n_boundaries] — the same rule, routed by the same ``spliced`` flag.
     #:
-    #: A PARTIAL BY CONSTRUCTION, and not a conservation ledger. A spliced fragment's blocks that
-    #: contain no interior boundary deposit nothing here — their accounting is on the sj axis — so
-    #: this sums to ``crossed_block_len / L`` per fragment, never to 1. That is correct: it is a
-    #: per-BOUNDARY certified-RNA term, exactly commensurate with the unspliced mass at the same boundary
-    #: (both are "the share of this fragment's bases adjacent to this boundary"), which is what makes the
-    #: two safe to compare there. It is NOT "the number of spliced fragments at this boundary".
+    #: A PARTIAL BY CONSTRUCTION, and not a conservation ledger. It is a per-BOUNDARY certified-RNA
+    #: term, NOT "the number of spliced fragments at this boundary".
     #:
     #: It exists so that ``mass`` is not the ONE channel that ignores the spliced/unspliced split.
     #: Every boundary channel is selected by one tuple at deposit time; a spliced fragment's mass landing
@@ -559,12 +540,8 @@ class Tally:
     #: contaminated library that population is a quarter of the RNA side and none of the gDNA side,
     #: because gDNA cannot splice.
     #:
-    #: The rule ADDS a boundary class; it does not re-apportion an existing one. A block that crosses at
-    #: least one boundary is unchanged — its bases go to boundaries exactly as before — so the
-    #: commensurability ``boundary_spliced_mass`` documents ("the share of this fragment's bases adjacent
-    #: to this boundary", directly comparable with the unspliced mass at the same boundary) survives.
-    #: Only the blocks that would otherwise dispose of nothing are affected, and they give their whole
-    #: ``block_len / L`` to the annotated sj bounding them, shared equally.
+    #: A sj bounds a block exactly as a contiguous boundary does (:meth:`Accumulator.deposit`), so a slice
+    #: bounded by both shares its bases between them.
     #:
     #: A boundary counts only where the intron RESOLVED to an annotated sj. A block bounded solely by
     #: unannotated introns still has nowhere conserved to send its bases — the same residual the
@@ -611,7 +588,6 @@ class Tally:
 
         return cls(
             region_contained_count=counts(n_regions),
-            region_contained_inv_opportunity_sum=fraction(n_regions),
             region_start_count=counts(n_regions),
             region_end_count=counts(n_regions),
             region_span_count=counts(n_regions),
@@ -844,11 +820,11 @@ class Accumulator:
             )
             return self._reject(DepositOutcome.DEFERRED)
 
-        # `region_bound_introns` and not `introns`: the introns actually removed from the molecule —
+        # `cut_introns` and not `introns`: the introns actually removed from the molecule —
         # the observed ones UNIONED with the surviving hypothesis's implied ones, normalised and clipped.
         # Naming them apart from `observed_introns` is what stops the two being confused downstream.
-        hypothesis, length, region_bound_introns, absorbed = survivors[0]
-        segments = _segments(start, end, region_bound_introns)
+        hypothesis, length, cut_introns, absorbed = survivors[0]
+        segments = _segments(start, end, cut_introns)
         if length <= 0:
             return self._reject(DepositOutcome.EMPTY)
         if length > self.max_fragment_length:
@@ -871,12 +847,12 @@ class Accumulator:
         # filtered list cannot answer that — dropping the unannotated entries destroys the alignment
         # between intron `i` and the gap between blocks `i` and `i+1`.
         if sj_strand == Strand.AMBIGUOUS:
-            sj_id_at_gap: list[int] = [-1] * len(region_bound_introns)
+            sj_id_at_gap: list[int] = [-1] * len(cut_introns)
             self.tally.qc["contradictory_sj_strand"] += 1
         else:
             sj_id_at_gap = [
                 self._sj_edge_id(ref, intron_start, intron_end, sj_strand)
-                for intron_start, intron_end in region_bound_introns
+                for intron_start, intron_end in cut_introns
             ]
             self.tally.qc["unannotated_introns"] += sum(1 for jid in sj_id_at_gap if jid < 0)
         sj_ids = [jid for jid in sj_id_at_gap if jid >= 0]
@@ -1010,23 +986,7 @@ class Accumulator:
         contained_region = -1
         if not sj_ids and first_region == self._local_region(region_bounds, last_base):
             contained_region = region_base + first_region
-            # THE RECIPROCAL-OPPORTUNITY DEPOSIT. A length-`w` fragment contained in a region of length
-            # `ell` had `ell − w + 1` admissible start positions, so `1/(ell − w + 1)` cancels the
-            # opportunity ON ITS OWN SUPPORT: `E[SUM] = rho * P(w <= ell)`, NOT `rho` — a fragment with
-            # `w > ell` deposits NOTHING here, and `P(w <= ell)` is a per-component pmf functional
-            # (TRAPS: a-cancellation-is-conditional-on-its-support). A `1/L` deposit does not cancel
-            # `(ell − w + 1)` at all, so that channel reads an order of magnitude apart for short and
-            # long fragments at the same true density.
-            # The BOUNDARY rule `1/(L−1)` is NOT this rule's `ell -> 0` limit (that limit is 0 for every
-            # `w >= 2`); it is a DIFFERENT relation — crossing a designated point, `A = w − 1` at every
-            # `ell` — whose support factor `P(w >= 2)` is 1 for any real library.
-            # `A >= 1` here is the support restated: the fragment IS contained, so `w <= ell` — which is
-            # exactly why `E[SUM] = rho * P(w <= ell)` and not `rho`.
-            region_len = int(region_bounds[first_region + 1]) - int(region_bounds[first_region])
             t.region_contained_count[contained_region, column] += 1
-            t.region_contained_inv_opportunity_sum[contained_region] += 1.0 / (
-                region_len - length + 1
-            )
 
         pool = self._pool(spliced, contained_region, sole_boundary, region_base)
         if pool is not None:

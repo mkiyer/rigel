@@ -9,12 +9,16 @@ that band comes from, and several exist because a perturbation to the mechanism 
 gate in the file.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 from rigel.sim.whole_genome import apply_sparse_nrna, parse_yaml_config
 from rigel.transcript import Transcript
 from rigel.types import Interval, Strand
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _transcript(
@@ -207,6 +211,29 @@ def test_a_log_uniform_range_may_not_touch_zero(tmp_path):
     )
     with pytest.raises(ValueError, match="0 < min"):
         parse_yaml_config(config_path)
+
+
+def test_an_unknown_key_is_refused_at_the_top_level_and_in_each_section(tmp_path):
+    """A misspelt key must not run on the default of the key it meant."""
+    config_path = tmp_path / "sim.yaml"
+    for body, key in [
+        ("strand_specificity: [0.5]\n", "strand_specificity"),
+        ("simulation:\n  n_total_fragment: 1000\n", "n_total_fragment"),
+        ("abundance:\n  frac_expresed: 0.5\n", "frac_expresed"),
+        ("nrna:\n  ratio: [0.1]\n", "ratio"),
+        ("gdna:\n  rate: [0.5]\n", "rate"),
+    ]:
+        config_path.write_text("genome: /tmp/genome.fa\ngtf: /tmp/genes.gtf\n" + body)
+        with pytest.raises(ValueError, match=rf"unknown key\(s\) \['{key}'\]"):
+            parse_yaml_config(config_path)
+
+
+def test_every_in_repo_sim_config_parses():
+    """A key the parser refuses would stop a panel from being re-simulated."""
+    configs = sorted((ROOT / "scripts" / "sim" / "configs").glob("*.yaml"))
+    assert configs, "no sim configs found — this test would pass vacuously"
+    for path in configs:
+        parse_yaml_config(path)
 
 
 def _sparse_population(n: int, *, seed: int = 3) -> tuple[list[Transcript], list[Transcript]]:

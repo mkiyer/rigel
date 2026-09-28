@@ -31,12 +31,7 @@ from .annotation import GeneBuilder
 from .benchmark import BenchmarkResult, TranscriptAccuracy, run_benchmark
 from .capture import CaptureConfig, CaptureSampler, ProbeInterval
 from .genome import MutableGenome, reverse_complement
-from .manifest import (
-    condition_dir_name,
-    condition_manifest_map,
-    load_manifest,
-    write_manifest,
-)
+from .manifest import condition_dir_name, write_manifest
 from .reads import GDNAConfig, ReadSimConfig
 from .scenario import Scenario, ScenarioResult
 from .read_name import Origin, parse_origin
@@ -55,8 +50,6 @@ __all__ = [
     "TranscriptAccuracy",
     "ProbeInterval",
     "condition_dir_name",
-    "condition_manifest_map",
-    "load_manifest",
     "parse_origin",
     "reverse_complement",
     "run_benchmark",

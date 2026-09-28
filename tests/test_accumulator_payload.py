@@ -107,7 +107,6 @@ def _calibration_dict(**overrides) -> dict:
         "ref_boundary_offsets": ref_boundary_offsets,
         "ref_sj_offsets": ref_sj_offsets,
         "region_contained_count": np.arange(n_regions * 2, dtype=np.uint32),
-        "region_contained_inv_opportunity_sum": np.arange(n_regions, dtype=np.float64) * 7,
         "region_start_count": np.arange(n_regions * 2, dtype=np.uint32),
         "region_end_count": np.arange(n_regions * 2, dtype=np.uint32) * 3,
         "region_span_count": np.arange(n_regions * 2, dtype=np.uint32) * 5,
@@ -186,7 +185,6 @@ def test_the_two_column_banks_are_reshaped_and_the_one_column_ones_are_not():
     # The length moments and the conserved masses carry ONE column: which strand a read aligned to
     # says nothing about whether the molecule was gDNA or RNA, and every consumer summed the two.
     for name, rows in (
-        ("region_contained_inv_opportunity_sum", n_regions),
         ("boundary_unspliced_inv_length_sum", n_boundaries),
         ("boundary_unspliced_mass", n_boundaries),
         ("boundary_spliced_mass", n_boundaries),

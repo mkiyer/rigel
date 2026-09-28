@@ -3,13 +3,15 @@ names.
 
 `rigel index`'s GTF parse mode defaults to strict and can be switched to warn-and-skip; `rigel
 quant`'s defaults, its boolean flags and the resolution of its arguments into a `PipelineConfig` are
-gated flag by flag, and the config survives a write/read round trip unchanged. A flag parsed into a
-field nothing reads is invisible at runtime, which is why these are checked against the resolved
-config rather than against the parser's namespace.
+gated flag by flag, and the config survives a write/read round trip unchanged; an unknown YAML key
+is refused by `rigel quant` and `rigel sim`. A flag parsed into a field nothing reads is invisible
+at runtime, which is why these are checked against the resolved config rather than against the
+parser's namespace.
 """
 
 import textwrap
 
+import pytest
 
 from rigel.cli import build_parser, _resolve_quant_args, _build_quant_defaults
 from rigel.config import BamScanConfig
@@ -65,6 +67,44 @@ def test_index_gtf_parse_mode_warn_skip():
         ]
     )
     assert args.gtf_parse_mode == "warn-skip"
+
+
+def test_sim_unknown_scenario_key_is_refused(tmp_path):
+    """``n_fragment`` for ``n_fragments`` must not simulate the default fragment count."""
+    cfg = tmp_path / "scenario.yaml"
+    cfg.write_text("genome_length: 5000\nn_fragment: 10\n")
+    args = build_parser().parse_args(["sim", "--config", str(cfg), "-o", str(tmp_path / "out")])
+    with pytest.raises(ValueError, match=r"\['n_fragment'\]"):
+        args.func(args)
+
+
+def test_sim_accepts_every_documented_scenario_key(tmp_path):
+    """Every top-level key docs/MANUAL.md lists for a ``rigel sim`` scenario is accepted."""
+    cfg = tmp_path / "scenario.yaml"
+    cfg.write_text(
+        textwrap.dedent(
+            """\
+            name: documented
+            ref_name: chr1
+            genome_length: 5000
+            seed: 7
+            n_fragments: 50
+            frag_mean: 250
+            frag_std: 50
+            frag_min: 50
+            frag_max: 1000
+            read_length: 150
+            error_rate: 0.0
+            genes:
+              - gene_id: g1
+                strand: "+"
+                transcripts:
+                  - {t_id: t1, exons: [[100, 300], [500, 700]], abundance: 100}
+            """
+        )
+    )
+    args = build_parser().parse_args(["sim", "--config", str(cfg), "-o", str(tmp_path / "out")])
+    assert args.func(args) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -201,16 +241,15 @@ class TestResolveQuant:
         _resolve_quant_args(args, _build_quant_defaults())
         assert args.em_iterations == 500
 
-    def test_yaml_unknown_keys_logged(self, tmp_path, caplog):
-        """Unknown YAML keys are logged as warnings, not raised."""
-        cfg = tmp_path / "cfg.yaml"
-        cfg.write_text("bogus_key: 99\n")
-        args = _parse_quant("--config", str(cfg))
-        import logging
-
-        with caplog.at_level(logging.WARNING):
-            _resolve_quant_args(args, _build_quant_defaults())
-        assert "bogus_key" in caplog.text
+    def test_yaml_unknown_key_is_refused(self, tmp_path):
+        """A misspelt key must not run on the default of the key it meant, at the top level or in
+        the ``quant`` block."""
+        for body in ("em_iteration: 500\n", "quant:\n  em_iteration: 500\n"):
+            cfg = tmp_path / "cfg.yaml"
+            cfg.write_text(body)
+            args = _parse_quant("--config", str(cfg))
+            with pytest.raises(ValueError, match=r"\['em_iteration'\]"):
+                _resolve_quant_args(args, _build_quant_defaults())
 
     def test_yaml_sj_strand_tag_string(self, tmp_path):
         """YAML with scalar sj_strand_tag works."""

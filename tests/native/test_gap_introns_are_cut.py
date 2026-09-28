@@ -216,7 +216,7 @@ def test_U1_L_excludes_BOTH_the_observed_intron_and_the_one_in_the_mate_gap(payl
     """
     assert _lengths(payload) == {L_PURE: 1, L_MIXED: 1}, (
         "the deposited fragment lengths are not the molecules this BAM determines. 700 bp for `mixed` "
-        "means the mate-gap intron was never region_bound (the old SPLICE_UNSPLICED gate) — "
+        "means the mate-gap intron was never cut (the old SPLICE_UNSPLICED gate) — "
     )
     assert payload.qc.deposited == 2
     # Conservation: nothing is discarded. Four fragments in, two deposited and two held.

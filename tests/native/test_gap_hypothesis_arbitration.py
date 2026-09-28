@@ -486,11 +486,11 @@ def test_an_OBSERVED_sj_PINS_the_gap_hypotheses_to_its_own_strand(scanned):
     """
     lengths = _lengths(scanned)
     assert lengths.get(L_PINNED_P) == 1, (
-        f"expected a fragment at L={L_PINNED_P} (tP's 400 bp gap intron region_bound, pinned by the + motif); "
+        f"expected a fragment at L={L_PINNED_P} (tP's 400 bp gap intron cut, pinned by the + motif); "
         f"deposited lengths are {lengths}"
     )
     assert lengths.get(L_PINNED_M) == 1, (
-        f"expected a fragment at L={L_PINNED_M} (tM's 200 bp gap intron region_bound, pinned by the - motif); "
+        f"expected a fragment at L={L_PINNED_M} (tM's 200 bp gap intron cut, pinned by the - motif); "
         f"deposited lengths are {lengths}"
     )
     # Both pinned fragments RESOLVED; only `open` and `same_path` are held.
@@ -552,7 +552,7 @@ def test_ONE_PATH_claimed_by_BOTH_STRANDS_is_marked_AMBIGUOUS(scanned):
     assert path == [(3200, 3600)]
     assert strand == int(Strand.AMBIGUOUS), (
         f"the merged hypothesis reports strand {strand}, but its two supporters disagree. Taking the "
-        f"first supporter's strand makes the answer depend on GTF boundary order."
+        f"first supporter's strand makes the answer depend on GTF line order."
     )
     assert (
         len(

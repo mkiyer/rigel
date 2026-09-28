@@ -324,6 +324,9 @@ struct ResolverScratch {
     std::vector<int32_t> t_transcript_bp;
     std::vector<uint8_t> t_dirty;
     std::vector<int32_t> dirty_indices;
+    // dirty_indices' initial capacity, in transcripts one fragment touches. A capacity hint only; it grows
+    // past it.
+    static constexpr size_t DIRTY_INDICES_RESERVE = 512;
 
     // cgranges query buffers (reusable per-call)
     int64_t* buf = nullptr;
@@ -351,7 +354,7 @@ struct ResolverScratch {
           t_transcript_bp(n_transcripts, 0),
           t_dirty(n_transcripts, 0)
     {
-        dirty_indices.reserve(512);
+        dirty_indices.reserve(DIRTY_INDICES_RESERVE);
     }
 
     ~ResolverScratch() {
@@ -874,9 +877,9 @@ private:
             // contradictory evidence, not missing evidence), and `deposit` already refuses to credit a
             // sj on it. ⚠ Idempotent: once AMBIGUOUS, any further disagreement keeps it there.
             //
-            // ⚠ Unreachable on human data -- 0 of 404,168 sj coordinates are annotated on both
-            // strands, and the index warns that it is biologically impossible. Fixed because the
-            // alternative is a silent answer that flips when two GTF boundaries are swapped.
+            // ⚠ An sj annotated on both strands is biologically impossible, and the index warns about
+            // one. Handled because the alternative is a silent answer that flips when two GTF
+            // lines are swapped.
             if (cr.gap_sj_strand[h] != strand) cr.gap_sj_strand[h] = STRAND_AMBIGUOUS;
             // ⚠ Inserted in place so the supporting lists stay contiguous per hypothesis.
             cr.gap_supporting.insert(cr.gap_supporting.begin() + cr.gap_supporting_offsets[h + 1], t);
@@ -1335,12 +1338,8 @@ public:
 
         // --- gap-hypothesis enumeration ---
         //
-        // ⭐ EVERY fragment, whatever its splice type. It used to run only on fragments already
-        // classified SPLICE_UNSPLICED, so one carrying an observed CIGAR-N splice never had its mate gap
-        // examined and kept that intron inside L. ⚠ UNSPLICED never meant "one aligned block": an
-        // unspliced paired-end fragment already has two blocks and a mate gap, and that case always
-        // worked. The missed population is SPLICED fragments that ALSO have a gap intron -- long by
-        // construction, and so exactly the tail the measurement found.
+        // ⭐ EVERY fragment, whatever its splice type: a SPLICED fragment can also carry an intron in its
+        // mate gap.
         //
         // ⛔ THE ACCUMULATOR ARBITRATES. This only enumerates; whether the fragment deposits or is held
         // for the second pass is decided where the outcome is reported.
@@ -1358,7 +1357,7 @@ public:
             cr.gap_supporting_offsets.assign(2, 0);
         }
 
-        // ⛔ THE SPLICE_IMPLICIT PROMOTION STAYS UNSPLICED-ONLY, and it is now purely DESCRIPTIVE.
+        // ⛔ THE SPLICE_IMPLICIT PROMOTION IS UNSPLICED-ONLY.
         // `splice_type` is the scanner's census of what it SAW; it feeds scoring, the buffer, the strand
         // training and `rigel report`. Re-labelling an observed SPLICED_ANNOT fragment would silently move
         // mass between reported categories. ⚠ The fragment may still be DEFERRED -- the two axes are

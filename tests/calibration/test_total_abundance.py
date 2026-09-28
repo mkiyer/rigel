@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rigel.calibration.effective_length import UNBOUNDED_REACH, crossing_eff_length, fl_mean
+from rigel.calibration.effective_length import UNBOUNDED_REACH, crossing_eff_length
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.signature import BIT_EXON_POS, BIT_INTRON_POS
 from rigel.calibration.splice_graph import (
@@ -366,10 +366,11 @@ def test_the_spliced_divisor_IS_the_unbounded_crossing_eff_length():
     pmf = np.zeros(201)
     pmf[60] = 0.25
     pmf[100] = 0.75
+    mu_r = float(np.dot(np.arange(pmf.shape[0], dtype=np.float64), pmf))
     assert crossing_eff_length(pmf, UNBOUNDED_REACH, UNBOUNDED_REACH) == pytest.approx(
-        fl_mean(pmf) - 1.0, rel=0, abs=1e-9
+        mu_r - 1.0, rel=0, abs=1e-9
     )
-    assert fl_mean(pmf) - 1.0 == pytest.approx(89.0, rel=0, abs=1e-12)
+    assert mu_r - 1.0 == pytest.approx(89.0, rel=0, abs=1e-12)
 
 
 def test_the_pair_REFUSES_a_payload_whose_ledger_does_not_close(region_parts):

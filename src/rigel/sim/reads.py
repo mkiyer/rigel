@@ -9,7 +9,7 @@ The read names the engine emits encode each fragment's ground-truth origin, and
 :mod:`read_name` parses them back:
 
     RNA:   {t_id}:{frag_start}-{frag_end}:{strand_char}:{index}/1
-    gDNA:  gdna:{genomic_start}-{genomic_end}:{strand_char}:{index}/1
+    gDNA:  gdna:{ref}:{genomic_start}-{genomic_end}:{strand_char}:{index}/1
 """
 
 from dataclasses import dataclass
