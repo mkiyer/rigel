@@ -632,13 +632,10 @@ Instrument: `06_fl.md` under `~/Downloads/rigel_runs/prototypes/2026-09-28_od_de
 `gdna_opportunity_from_index` is computed from the index alone, so under capture it removes ~6 bp of a ~30 bp
 length selection — the gDNA control moved +6.0 % on all six capture-ON rows (gDNA has no introns to miss), and with
 `ISSUES: eb-shrinkage-magic-ess` it owns the −5.90 % capture-ON length ceiling. `capture_eff_length` already models
-the panel; it also blocks `ISSUES: crossing-pool-contrast`. ⛔ NOT PRICED ON THE DELIVERABLE: the reading once
-quoted here (`quant_accuracy.py --arm oracle_efflen`, 2026-09-19, −50 / +22 / −1,104 fragments) is WITHDRAWN
-(2026-09-21) — that arm cannot fire. The oracle overrides only the six count arrays
-(`prior_vs_oracle.OVERRIDE_FIELDS`, `OracleTruth.override_masses`) while the locus gDNA length reads its conserved
-shares and the published efficiencies and never a count, so `oracle_efflen` is `base` under another name and its
-deltas were run-to-run noise (`TRAPS: could-the-arm-have-fired`). The arm is retired or given the simulator's
-per-locus gDNA opportunity as a real truth before any number is quoted for it again.
+the panel; it also blocks `ISSUES: crossing-pool-contrast`. ⛔ Not priced on the deliverable: no `quant_accuracy`
+arm reaches the locus gDNA length (the oracle overrides only calibration's count arrays; the `oracle_efflen` reading
+is withdrawn in `ISSUES: end-to-end-error-unattributed`). A price needs the simulator's per-locus gDNA opportunity
+as the truth.
 
 ### eb-shrinkage-magic-ess
 `priority: later — Tier 2, the fl second wave: replaced on the re-simulated fl-gap panels · kind: defect · 2026-08-31`

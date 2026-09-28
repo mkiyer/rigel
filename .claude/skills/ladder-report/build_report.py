@@ -63,11 +63,9 @@ def index_composition(suite: Path, condition: str) -> dict:
     }
 
 
-def build(arms: Path, arm: str, reseed_arm: str, suite: Path | None) -> dict:
+def build(arms: Path, arm: str, suite: Path | None) -> dict:
     qa = load_instrument()
     primary = qa._load(arms / f"{arm}.jsonl")
-    reseed_path = arms / f"{reseed_arm}.jsonl"
-    reseed = qa._load(reseed_path) if reseed_path.is_file() else {}
     conds = sorted({c for c, _ax in primary})
 
     scenarios = []
@@ -75,7 +73,6 @@ def build(arms: Path, arm: str, reseed_arm: str, suite: Path | None) -> dict:
         lib, tx, gn = primary[(c, "library")], primary[(c, "transcript")], primary[(c, "gene")]
         strand, capture = qa.stratum(c)
         cap = "ON" if capture.endswith("ON") else "OFF"
-        f = reseed.get((c, "transcript"))
         scenarios.append({
             "id": c,
             "level": next(k for k in ("g00", "g05", "g50", "g98") if f"_{k}_" in c),
@@ -92,7 +89,6 @@ def build(arms: Path, arm: str, reseed_arm: str, suite: Path | None) -> dict:
             "gdna_frac": {"est": lib["gdna_frac_est"], "true": lib["gdna_frac_true"]},
             "tx": {**{k: tx[k] for k in AXIS_FIELDS}, "median_rel_err": tx["median_rel_err"]},
             "gene": {k: gn[k] for k in AXIS_FIELDS},
-            "rerun": abs(tx["count_abs_err"] - f["count_abs_err"]) if f else 0.0,
         })
 
     modes = sorted({str(r.get("assignment_mode")) for r in primary.values()})
@@ -115,7 +111,6 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--arms", type=Path, default=DEFAULT_ARMS, help="directory of arm jsonl files")
     ap.add_argument("--arm", default="qa_ladder_base")
-    ap.add_argument("--reseed-arm", default="qa_ladder_base_reseed")
     ap.add_argument("--suite", type=Path, default=Path.home() / "Downloads/rigel_runs/suite/ladder",
                     help="panel directory, read ONLY to derive the truth table's composition")
     ap.add_argument("--html", type=Path, required=True)
@@ -123,8 +118,7 @@ def main() -> int:
                     help="also write the markdown via quant_accuracy.py --markdown")
     args = ap.parse_args()
 
-    payload = build(args.arms, args.arm, args.reseed_arm,
-                    args.suite if args.suite and args.suite.is_dir() else None)
+    payload = build(args.arms, args.arm, args.suite if args.suite and args.suite.is_dir() else None)
     tpl = (SKILL / "report_template.html").read_text()
     if "__DATA__" not in tpl:
         raise SystemExit("⛔ report_template.html has no __DATA__ placeholder")
@@ -134,12 +128,7 @@ def main() -> int:
           f"{payload['meta']['n']} conditions)")
 
     if args.markdown:
-        qa = load_instrument()
-        paths = [args.arms / f"{args.arm}.jsonl"]
-        fp = args.arms / f"{args.reseed_arm}.jsonl"
-        if fp.is_file():
-            paths.append(fp)
-        qa.markdown_report(paths, args.markdown)
+        load_instrument().markdown_report(args.arms / f"{args.arm}.jsonl", args.markdown)
     return 0
 
 

@@ -22,7 +22,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rigel.calibration.priors import LocusPriors
 from rigel.config import EMConfig, PipelineConfig
 from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 
@@ -106,9 +105,8 @@ def toy_oracle(toy, tmp_path_factory):
 def _run(toy, arm, oracle, seed=QA.DEFAULT_EM_SEED):
     """One full ``run_pipeline`` under one arm; returns ``(PipelineResult, fired)``.
 
-    The seed is the instrument's, which is the shipped one, set explicitly so an arm's ``seed + 1``
-    reseed goes through the same path. With the default ``assignment_mode="sample"`` the hard
-    assignment is a draw, and without one seed the byte-identity gate below could never pass.
+    The seed is the instrument's, which is the shipped one. With the default ``assignment_mode="sample"``
+    the hard assignment is a draw, and without one seed the byte-identity gate below could never pass.
     """
     from rigel.pipeline import run_pipeline
 
@@ -138,8 +136,8 @@ def test_the_noop_arm_reproduces_BASE_byte_identically_through_the_whole_pipelin
     effect.
 
     ``noop`` is not an early return: it builds O in full and discards it, so this gate covers the
-    whole wrapper path and not an ``if`` (TRAPS: could-the-arm-have-fired). The perturbation makes
-    it take one field and asserts the EM's gDNA count moves and the result stops matching, proving
+    whole wrapper path and not an ``if`` (TRAPS: could-the-arm-have-fired). The perturbation runs the
+    real ``oracle`` arm and asserts the EM's gDNA count moves and the result stops matching, proving
     the comparison could have failed.
     """
     base_result, base_fired = _run(toy, "base", None)
@@ -157,7 +155,7 @@ def test_the_noop_arm_reproduces_BASE_byte_identically_through_the_whole_pipelin
     # for a library far deeper than this toy, since re-association scales with the number of
     # additions) and ~6 orders below the injection it must catch (taking the oracle's gDNA count
     # moves `posterior_mean` by ~1e-3 relative here) — and the perturbation arm below proves it is
-    # still tight enough, because taking one oracle field must break the comparison.
+    # still tight enough, because the oracle arm must break the comparison.
     # The tool is not bit-reproducible, so tests validate within a tolerance rather than on bits.
     exact = [c for c in base.columns if c != "posterior_mean"]
 
@@ -174,12 +172,7 @@ def test_the_noop_arm_reproduces_BASE_byte_identically_through_the_whole_pipelin
         base_gdna, noop_result.estimator.get_loci_df(toy.index)["gdna"], check_exact=True
     )
 
-    saved = QA._ARM_FIELDS["noop"]
-    try:
-        QA._ARM_FIELDS["noop"] = ("gdna_count",)
-        perturbed_result, _ = _run(toy, "noop", toy_oracle)
-    finally:
-        QA._ARM_FIELDS["noop"] = saved
+    perturbed_result, _ = _run(toy, "oracle", toy_oracle)
     # The witness is the EM's gDNA count, not the transcript `count` column. On this toy the mass the
     # oracle's gDNA count moves lands between gDNA and nascent RNA (the loci table's `gdna` moves by 7
     # and 9 fragments on two of the three loci); the annotated transcripts move by under one fragment
@@ -229,64 +222,6 @@ def test_an_injection_that_never_fires_RAISES_rather_than_reporting_no_effect(
     monkeypatch.setattr(QA, "load_oracle", lambda *a, **k: object())
     with pytest.raises(RuntimeError, match="never wrapped-and-called"):
         QA.run_condition("oracle", tmp_path, None, "c1", PipelineConfig(), tmp_path)
-
-
-# ── GATE 2: each single-array arm replaces exactly its own field ─────────────────────────────────
-
-
-def test_each_oracle_arm_replaces_ITS_field_and_leaves_the_other_shipped(toy, toy_oracle):
-    """The two single-array arms exist to say which of the prior's two numbers carries the
-    value, and that only works if each one is surgical. This drives the wrapper directly with two
-    recognisably different priors and checks, field by field, that exactly the named ones moved.
-
-    The perturbation is the whole point of the loop: every arm is checked against every field, so
-    an arm that quietly replaced both (or neither) fails on the field it should not have touched.
-    The fields are read off ``LocusPriors`` itself, so a field added there is checked here too.
-    """
-    import rigel.calibration.priors as PRIORS
-    from rigel.calibration.region_arrays import RegionArrays
-
-    ra = RegionArrays.from_index(toy.index)
-    shipped = LocusPriors(np.array([1.0, 2.0]), np.array([5.0, 6.0]))
-    oracle_p = LocusPriors(np.array([10.0, 20.0]), np.array([50.0, 60.0]))
-    calls = {"n": 0}
-
-    def fake_assemble(cal, ra, ml):
-        calls["n"] += 1
-        return oracle_p if calls["n"] % 2 == 0 else shipped
-
-    original = PRIORS.assemble_priors
-    PRIORS.assemble_priors = fake_assemble
-    try:
-        for arm, fields in QA._ARM_FIELDS.items():
-            if arm == "base":
-                continue
-            calls["n"] = 0
-            restore, fired = QA.install_arm(arm, toy_oracle)
-            try:
-                out = PRIORS.assemble_priors(_FakeCal(), ra, [])
-            finally:
-                restore()
-            assert fired["n"] == 1
-            for f in (fld.name for fld in dataclasses.fields(LocusPriors)):
-                want = oracle_p if f in fields else shipped
-                assert np.array_equal(getattr(out, f), getattr(want, f)), (
-                    f"arm {arm!r}: field {f} came from the wrong prior"
-                )
-    finally:
-        PRIORS.assemble_priors = original
-
-
-@dataclasses.dataclass
-class _FakeCal:
-    """Enough of a ``CalibrationResult`` for ``dataclasses.replace`` inside the wrapper."""
-
-    count_gdna_region: object = None
-    count_rna_region: object = None
-    count_gdna_boundary: object = None
-    count_rna_boundary: object = None
-    count_rna_spliced_boundary: object = None
-    count_rna_sj: object = None
 
 
 # ── GATE 3: the truth column is the REALISED fragment count, not the molar abundance ─────────────
@@ -699,7 +634,7 @@ def _render(tmp_path, **over):
     qa = _load_sibling("quant_accuracy.py")
     src, _cond = _arm_rows(tmp_path, **over)
     out = tmp_path / "report.md"
-    qa.markdown_report([src], out)
+    qa.markdown_report(src, out)
     return out.read_text()
 
 
@@ -779,7 +714,7 @@ def test_the_DEFERRED_stratum_is_MARKED_wherever_it_appears(tmp_path):
     src = tmp_path / "def.jsonl"
     src.write_text("\n".join(json.dumps(r) for r in (lib, tx, gene)) + "\n")
     out = tmp_path / "d.md"
-    qa.markdown_report([src], out)
+    qa.markdown_report(src, out)
     md = out.read_text()
     assert md.count("DEFERRED") >= 4, "the deferred stratum is unmarked in at least one section"
 
@@ -852,7 +787,7 @@ def test_every_gDNA_RUNG_is_labelled_from_its_truth_not_from_a_map_of_known_rung
              "g25": (0.25, "25 %"), "g98": (0.98, "98 %")}  # fmt: skip
     conds = {f"gdna_{k}_ss_0.99_nrna_mid_capture_off": f for k, (f, _label) in rungs.items()}
     out = tmp_path / "rungs.md"
-    QA.markdown_report([_arm_file(tmp_path, conds)], out)
+    QA.markdown_report(_arm_file(tmp_path, conds), out)
     md = out.read_text()
     for (k, (_f, label)), cond in zip(rungs.items(), conds):
         assert f"| `{cond}` | {label} |" in md, f"rung {k} is not labelled {label}"
@@ -878,7 +813,7 @@ def test_a_strand_specificity_in_NEITHER_half_is_reported_APART_never_pooled(tmp
     c50, c70 = "gdna_g50_ss_0.50_nrna_file_capture_off", "gdna_g50_ss_0.70_nrna_file_capture_off"
     assert shared.strata([c50, c70]) == [*shared.STRATA, ("ss 0.70", "capture OFF")]
     out = tmp_path / "apart.md"
-    QA.markdown_report([_arm_file(tmp_path, {c50: 0.5, c70: 0.5})], out)
+    QA.markdown_report(_arm_file(tmp_path, {c50: 0.5, c70: 0.5}), out)
     md = out.read_text()
     assert _gdna_pool_blocks(md) == {
         "unstranded × capture OFF": [c50],

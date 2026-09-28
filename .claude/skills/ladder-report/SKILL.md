@@ -22,18 +22,17 @@ ls -la ~/Downloads/rigel_runs/suite/ladder/arms/*.jsonl
 git log -1 --format='%h %ad %s' --date=iso
 ```
 
-If the tool has moved, re-score — ~25 minutes for four arms, and it rebuilds nothing:
+If the tool has moved, re-score the base arm, the only one the report renders; it rebuilds nothing:
 
 ```bash
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 export OMP_NUM_THREADS=1
-python scripts/sim/panel.py score --config scripts/sim/configs/gdna_ladder.yaml --jobs 8 \
-    --arms base base_reseed oracle oracle_ruler
+python scripts/sim/panel.py score --config scripts/sim/configs/gdna_ladder.yaml --jobs 8 --arms base
 ```
 
 ⚠ `panel.py score` passes `--set em.assignment_mode=fractional` and `--set scan.total_threads=1`
 itself. Preserve the previous arms first (`cp -r arms arms_<what-it-was>_<date>`) — a before-and-after
-is what makes the next delta attributable, and the report prints `base_reseed` beside it as the rerun Δ.
+is what makes the next delta attributable.
 
 ## 2. Build both renderings
 
@@ -85,8 +84,7 @@ transcripts contribute ~300 fragments to nascent truth while their tool-side cou
 
 - **Per stratum, never pooled.** Three strata are in scope; unstranded × capture-ON is deferred.
 - **By size.** An A/B pair runs with the scan pinned (`--set scan.total_threads=1`) and is exactly
-  reproducible; judge an effect by its size, genes and pools beside the transcript table. The rerun Δ
-  reads exactly 0 when pinned (`TRAPS: the-deliverable-is-not-reproducible-by-default`).
+  reproducible; judge an effect by its size, genes and pools beside the transcript table.
 - **The capture-OFF magnitudes are a stress reading.** The panel runs 20.2 % nascent fragments against
   a realistic ~4.2 % (`DESIGN.md` §0b's nascent scope ruling), so quote the share with the number.
 

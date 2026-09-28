@@ -3,11 +3,9 @@
 
 ``--arm base`` runs the shipped pipeline on a simulated condition and scores its transcript table
 against the simulator's own per-transcript truth. Every other arm runs the identical pipeline with
-one thing substituted -- the oracle ``LocusPriors`` built from the origin-split truth (``oracle``, or
-one of its two arrays alone: ``oracle_gdna``, ``oracle_efflen``), the ruler the EM
-divides by (``oracle_ruler``: the SIMULATOR's capture-aware effective length in place of the shipped
-ruler's, the only arm that reaches the lengths the EM divides by), the EM's seed (``warm_uniform``), or
-the per-transcript
+one thing substituted -- the oracle ``LocusPriors`` built from the origin-split truth (``oracle``), the
+ruler the EM divides by (``oracle_ruler``: the SIMULATOR's capture-aware effective length in place of the
+shipped ruler's, the only arm that reaches the lengths the EM divides by), or the per-transcript
 allocation weights (the ``oracle_alloc*`` arms, a capability proof and never a headroom claim) -- and
 the difference from ``base`` is what that one thing is worth. One scorer serves every arm, so the
 ceiling and the baseline cannot drift apart. The primary score is count against count: the truth is
@@ -66,10 +64,6 @@ _RUNS = Path.home() / "Downloads" / "rigel_runs"
 DEFAULT_SUITE = _RUNS / "suite" / "ladder"
 DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
-#: ``warm_uniform`` seeds every component equally instead of by coverage-weighted share. It varies
-#: one thing against ``base`` — where the EM is put down — so a difference is the seed's basin and
-#: nothing else.
-#:
 #: ``oracle_alloc`` is a capability proof rather than a ceiling. It hands the EM the true relative
 #: transcript abundances as the per-transcript allocation weights and zeroes the coverage seed, so
 #: `theta` starts from the prior alone. The question is binary: given correct weights, does the
@@ -99,13 +93,10 @@ DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 #:
 _RULER_ARMS = {"oracle_ruler": True, "oracle_ruler_noop": False}
 
-ARMS = ("base", "base_reseed", "noop", "oracle", "oracle_gdna", "oracle_efflen",
-        "warm_uniform", "oracle_alloc", "oracle_alloc_seed", "oracle_alloc_flip") + tuple(_RULER_ARMS)
+ARMS = ("base", "noop", "oracle", "oracle_alloc", "oracle_alloc_seed",
+        "oracle_alloc_flip") + tuple(_RULER_ARMS)
 
 #: The EM seed every arm pins: the shipped one, so ``base`` is the configuration that ships.
-#: ``base_reseed`` re-runs ``base`` at ``seed + 1``. The seed reaches only the ``sample`` assignment's draw,
-#: so under ``--set em.assignment_mode=fractional`` — how every arm is benchmarked — the two differ only by
-#: the scan's run-to-run spread, and not at all with the scan pinned.
 DEFAULT_EM_SEED = EMConfig().seed
 
 #: arm -> which ``LocusPriors`` fields come from O. ``noop`` takes NONE of them and still builds O,
@@ -115,11 +106,8 @@ DEFAULT_EM_SEED = EMConfig().seed
 #: (TRAPS: an-ablation-that-never-ran).
 _ARM_FIELDS = {
     "base": (),
-    "base_reseed": (),
     "noop": (),
     "oracle": ("gdna_count", "gdna_eff_len"),
-    "oracle_gdna": ("gdna_count",),
-    "oracle_efflen": ("gdna_eff_len",),
 }
 
 
@@ -167,7 +155,7 @@ def install_arm(arm: str, oracle: OracleTruth | None):
     """
     original = PRIORS.assemble_priors
 
-    if arm in ("base", "base_reseed", "warm_uniform"):
+    if arm == "base":
         # Counted as fired: ``base`` installs nothing by design, so the "did the override run?"
         # check must not fail on the one arm that has no override. The thing it guards — an
         # injection that silently did not happen — cannot occur here.
@@ -375,21 +363,16 @@ def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
 
 
 def seeded(pipeline_config, arm: str, em_seed: int):
-    """The arm's pipeline config. ``base_reseed`` differs from ``base`` in the SEED ALONE, which only
-    the sampled assignment reads."""
-    seed = em_seed + 1 if arm == "base_reseed" else em_seed
+    """The arm's pipeline config: the pinned EM seed, and ``oracle_alloc``'s zeroed coverage seed."""
     warm = pipeline_config.em.warm_start
-    if arm == "warm_uniform":
-        warm = "uniform"
-    elif arm == "oracle_alloc":
+    if arm == "oracle_alloc":
         # the seed is zeroed so `theta` starts proportional to the prior alone — otherwise a
         # coverage-weighted seed is multiplied by an allocation from a different method and the result
         # is neither method's answer.
         warm = "prior"
-    out = dataclasses.replace(
-        pipeline_config, em=dataclasses.replace(pipeline_config.em, seed=seed, warm_start=warm)
+    return dataclasses.replace(
+        pipeline_config, em=dataclasses.replace(pipeline_config.em, seed=em_seed, warm_start=warm)
     )
-    return out
 
 
 #: The truth table's RNA fragment columns, most realised first. Each entry is the MATURE and the
@@ -597,8 +580,7 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
     pipeline_config = seeded(pipeline_config, arm, em_seed)
 
     oracle = None
-    if not (arm in ("base", "base_reseed", "warm_uniform") or arm.startswith("oracle_alloc")
-            or arm in _RULER_ARMS):
+    if not (arm == "base" or arm.startswith("oracle_alloc") or arm in _RULER_ARMS):
         if oracle_cache is None:
             raise SystemExit(f"⛔ arm {arm!r} needs --oracle-cache")
         oracle = load_oracle(bam, index, pipeline_config, oracle_cache, condition)
@@ -687,7 +669,7 @@ def _signed(x: float) -> str:
     return f"{x:+,.0f}"
 
 
-def markdown_report(paths: list[Path], out: Path) -> None:
+def markdown_report(path: Path, out: Path) -> None:
     """The full per-scenario accuracy report, as markdown — what a release is judged on.
 
     THREE POOLS AND THEY ARE NOT THE SAME QUESTION. Every fragment in the library is gDNA, SYNTHETIC
@@ -701,17 +683,12 @@ def markdown_report(paths: list[Path], out: Path) -> None:
     ⛔ The gDNA estimate is ``gdna_em + n_intergenic``. Intergenic fragments reach no locus, so they
     never enter the EM, but they ARE gDNA and the truth counts them — comparing the EM's number alone
     against that truth would understate the estimate by more than half at capture-OFF.
-
-    The first path is the arm reported; an arm whose stem contains ``reseed`` is printed beside every
-    transcript row as ``rerun Δ`` (`TRAPS: the-deliverable-is-not-reproducible-by-default`).
     """
-    arms = [(_load(p), Path(p).stem) for p in paths]
-    primary, pname = arms[0]
-    floor = next((a for a, n in arms if "reseed" in n), None)
+    primary, pname = _load(path), Path(path).stem
 
     modes = {r.get("assignment_mode") for r in primary.values()}
     conds = sorted({c for c, _ax in primary})
-    stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(Path(paths[0]).stat().st_mtime))
+    stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(Path(path).stat().st_mtime))
     from rigel.config import CalibrationConfig as _CC
 
     L = []
@@ -741,9 +718,7 @@ def markdown_report(paths: list[Path], out: Path) -> None:
       "the error, so a pooled total would be its total.")
     w("- **An effect is judged by its size, with genes and pools read beside the transcript table.** "
       "An A/B pair runs with the scan pinned (`--set scan.total_threads=1`) and is exactly "
-      "reproducible. `rerun Δ` is this arm against the `reseed` arm: under the fractional assignment "
-      "the seed reaches no number, so it reads 0 when pinned and one draw of the scan's run-to-run "
-      "spread when not (`TRAPS: the-deliverable-is-not-reproducible-by-default`).")
+      "reproducible.")
     w("- **`expressed` and `detected` are the scored sets, and the truth table is larger than "
       "either.** It carries one row per SYNTHETIC nascent entity as well, and those rows are zero on "
       "both sides — zero truth and zero estimate, since the transcript table drops them — so they "
@@ -838,8 +813,6 @@ def markdown_report(paths: list[Path], out: Path) -> None:
                 "over-assigned | under-assigned | false-positive mass | on n | MARD | Spearman |")
         if axis == "transcript":
             head = head.replace("| MARD |", "| median rel. err | MARD |")
-        if floor is not None and axis == "transcript":
-            head = head.replace("| net Δ |", "| net Δ | rerun Δ |")
         # ⛔ Count columns with the ESCAPED pipes removed. `Σ\|Δ\|` carries two literal `|`
         # characters that are cell CONTENT, not delimiters, and counting them put three phantom
         # columns in every separator row.
@@ -857,10 +830,6 @@ def markdown_report(paths: list[Path], out: Path) -> None:
                 share = 100.0 * r["count_abs_err"] / r["count_true"] if r["count_true"] > 0 else float("nan")
                 cells = [f"`{c}`", f"{r['n_expressed']:,}", f"{r['n_detected']:,}",
                          f"{r['count_abs_err']:,.0f}", f"{share:.2f} %", _signed(r["count_net_err"])]
-                if floor is not None and axis == "transcript":
-                    f_r = floor.get((c, axis))
-                    cells.append(f"±{abs(r['count_abs_err'] - f_r['count_abs_err']):,.0f}"
-                                 if f_r else "—")
                 cells += [f"{r['count_over']:,.0f}", f"{r['count_under']:,.0f}",
                           f"{r['fp_mass']:,.0f}", f"{r['fp_n']:,}"]
                 if axis == "transcript":
@@ -894,8 +863,7 @@ def markdown_report(paths: list[Path], out: Path) -> None:
     w("")
     w("---")
     w("")
-    w(f"Generated by `scripts/design/quant_accuracy.py --markdown` from `{pname}.jsonl`"
-      + (" with the rerun Δ from the `reseed` arm." if floor is not None else "."))
+    w(f"Generated by `scripts/design/quant_accuracy.py --markdown` from `{pname}.jsonl`.")
     w("")
 
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -1113,9 +1081,8 @@ def main() -> int:
     ap.add_argument("--report", nargs="+", type=Path, default=None,
                     help="print the per-stratum tables from arm jsonl files and exit")
     ap.add_argument("--markdown", type=Path, default=None,
-                    help="with --report: also write the full per-scenario report as markdown. The "
-                         "first --report file is the arm reported; an arm whose name contains "
-                         "'reseed' is printed beside it as the rerun Δ")
+                    help="with --report: also write the full per-scenario report as markdown, of the "
+                         "first --report file")
     ap.add_argument("--arm", choices=ARMS, default=None)
     ap.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
     ap.add_argument("--index", type=Path, default=DEFAULT_INDEX)
@@ -1124,8 +1091,7 @@ def main() -> int:
                     help="defaults to <suite>/oracle_cache when that directory exists")
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--em-seed", type=int, default=DEFAULT_EM_SEED,
-                    help="the shipped seed by default; it reaches only the sampled assignment's draw "
-                         "— see DEFAULT_EM_SEED")
+                    help="the shipped seed by default; it reaches only the sampled assignment's draw")
     ap.add_argument("--jobs", type=int, default=1)
     ap.add_argument("--set", dest="settings", action="append", default=[], metavar="SECTION.FIELD=VALUE",
                     help="a config value applied to every arm, repeatable (e.g. --set "
@@ -1135,7 +1101,7 @@ def main() -> int:
     if args.report:
         report(args.report)
         if args.markdown:
-            markdown_report(args.report, args.markdown)
+            markdown_report(args.report[0], args.markdown)
         return 0
     if args.markdown:
         raise SystemExit("--markdown needs --report FILES... (it renders arm jsonl, it runs nothing)")

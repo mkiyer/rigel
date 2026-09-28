@@ -126,7 +126,7 @@ up to 0.88 fragments and nascent parent counts by up to 42 (four runs spanned 14
 An exact-sum repair was priced and REFUSED (owner, 2026-09-25): bit-identity is not a goal, so this spread is
 accepted (`ISSUES: the-scan-fraction-banks-are-not-reproducible`). (The EM's reported gDNA total was a third,
 smaller source, summed as its workers finished; it is summed in locus order now.) Under fractional assignment the seed
-reaches no number, so `quant_accuracy.py`'s `base_reseed` measures this spread, not a seed. Pin
+reaches no number, so two runs differ by this spread alone. Pin
 `scan.total_threads=1` wherever two runs must agree bit for bit (`rename_identity.py` does).
 
 **a-clip-hides-a-scale-error. A clip hides errors on both sides of it.** A `min()` clip hid an exact

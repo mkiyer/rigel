@@ -264,11 +264,10 @@ done
 
 # 3. THE NUMBER THE RELEASE SHIPS ON — the tool end to end, with the ceiling arms above it; the `g00` rows are the
 #    zero controls, read per condition.
-#    `panel.py score` reads every arm under fractional assignment (the protocol above) with the scan pinned,
-#    so `base_reseed` reads exactly 0.
+#    `panel.py score` reads every arm under fractional assignment (the protocol above) with the scan pinned.
 #    --jobs 2, not more: run_pipeline holds 7-8.5 GB per 10 M-fragment condition.
-python scripts/sim/panel.py score  --config $CFG --arms base base_reseed oracle oracle_ruler --jobs 2
-python scripts/sim/panel.py report --config $CFG --arms base base_reseed oracle oracle_ruler
+python scripts/sim/panel.py score  --config $CFG --arms base oracle oracle_ruler --jobs 2
+python scripts/sim/panel.py report --config $CFG --arms base oracle oracle_ruler
 
 # 4. STAGE A is CLOSED — this block is a REGRESSION check, run it after an accumulator or native change.
 python -m pytest tests/native tests/calibration -q     # FIDELITY

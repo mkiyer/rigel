@@ -328,7 +328,7 @@ def main() -> int:
         "--arms",
         nargs="+",
         default=["base"],
-        help="quant_accuracy arms: base, oracle, noop, base_reseed, oracle_gdna, …",
+        help="quant_accuracy arms: base, noop, oracle, oracle_ruler, oracle_alloc_seed, …",
     )
     ap.add_argument("--force", action="store_true", help="rebuild a stage that already exists")
     args = ap.parse_args()

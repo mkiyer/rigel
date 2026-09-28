@@ -200,12 +200,12 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 2,801 passed / 0 skipped / 2 xfail, 2,803 collected** — re-derived 2026-09-28
-(3,424 − 624 + 5 − 2: the five gates parametrised over the files on disk are one case each, and two redundant cases went
-with them). The 2 xfails are executable records of proven
-defects whose fixes are elsewhere (`ISSUES: two-sided-exon-row`; `ISSUES: the-lower-bound-noise-ratchet`), deferred by
-ruling to their threads — "fix the test" is a category error, and an xfail is closed by repairing the thing or asserting
-the invariant structurally, never by widening a bound. **Any failure at all is a regression.**
+**The standing baseline: 0 failed / 2,800 passed / 0 skipped / 2 xfail, 2,802 collected** — re-derived 2026-09-28
+(2,803 − 1: the gate on `quant_accuracy.py`'s two retired single-array arms went with them). The 2 xfails are
+executable records of proven defects whose fixes are elsewhere (`ISSUES: two-sided-exon-row`;
+`ISSUES: the-lower-bound-noise-ratchet`), deferred by ruling to their threads — "fix the test" is a category error,
+and an xfail is closed by repairing the thing or asserting the invariant structurally, never by widening a bound.
+**Any failure at all is a regression.**
 
 **Re-derive a count, never adjust one** (`TRAPS: re-record-the-baseline`). Every gate that scans the files on
 disk is one case, so only adding or removing a test moves the collected total. Derive the failure set, never
@@ -245,7 +245,7 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | `design/build_scan_cache.py` | **SCAN ONCE, CALIBRATE MANY TIMES.** ⛔ The cache key hashes `accumulator.cpp`'s deposit rule and not `resolve.cpp`'s fragment construction, so for a change to which fragments are OFFERED use `--force` or delete the caches by hand |
 | `sim/build_suite_reference.py` · `design_suite_probes.py` · `simulate_reads.py` | **HOW IS THE PANEL'S SUBSTRATE BUILT?** ⚠ `panel.py build` drives the last two; the reference carve needs the source genome/GTF, which a panel config does not name, so it stays manual |
 | **⭐⭐⭐ the prior assembler, and THE NUMBER THE RELEASE SHIPS ON** | |
-| `design/quant_accuracy.py` | ⭐⭐⭐ **HOW ACCURATE IS THE TOOL END TO END, AND WHAT IS A PERFECT PRIOR WORTH?** `--arm base` plus the oracle and per-field injection arms, scored count against count. ⭐ Read per stratum, by size, in a pinned A/B pair (`--set scan.total_threads=1`), and under `--set em.assignment_mode=fractional` (owner, 2026-09-19): one of 0.8.0's TWO primary numbers beside the calibration metric, never a stand-in for it. ⭐ **`--report FILES… --markdown OUT`: THE PER-SCENARIO RELEASE REPORT** — every condition's three pools (gDNA / SYNTHETIC nascent / annotated) against truth in raw counts and per cent, then transcript and gene error inside the annotated pool alone, then the per-stratum roll-up. It renders arm jsonl and runs nothing |
+| `design/quant_accuracy.py` | ⭐⭐⭐ **HOW ACCURATE IS THE TOOL END TO END, AND WHAT IS A PERFECT PRIOR WORTH?** `--arm base` plus the oracle, ruler and allocation injection arms, scored count against count. ⭐ Read per stratum, by size, in a pinned A/B pair (`--set scan.total_threads=1`), and under `--set em.assignment_mode=fractional` (owner, 2026-09-19): one of 0.8.0's TWO primary numbers beside the calibration metric, never a stand-in for it. ⭐ **`--report FILES… --markdown OUT`: THE PER-SCENARIO RELEASE REPORT** — every condition's three pools (gDNA / SYNTHETIC nascent / annotated) against truth in raw counts and per cent, then transcript and gene error inside the annotated pool alone, then the per-stratum roll-up. It renders arm jsonl and runs nothing |
 | **⭐⭐⭐ where to develop** | |
 | `design/rename_identity.py` | ⭐⭐⭐ **IS THIS RENAME, REFACTOR OR SPEED-UP NUMERICALLY A NO-OP?** `--freeze` captures one reference, `--check` compares after every stage — on array CONTENT and the transcript table, never on names; `--bam` takes a real library instead of a panel condition. ⚠ The reference is frozen, never rolling. `--self-test` 8/8 |
 
