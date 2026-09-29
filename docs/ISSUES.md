@@ -633,8 +633,8 @@ Instrument: `06_fl.md` under `~/Downloads/rigel_runs/prototypes/2026-09-28_od_de
 length selection — the gDNA control moved +6.0 % on all six capture-ON rows (gDNA has no introns to miss), and with
 `ISSUES: eb-shrinkage-magic-ess` it owns the −5.90 % capture-ON length ceiling. `capture_eff_length` already models
 the panel; it also blocks `ISSUES: crossing-pool-contrast`. ⛔ Not priced on the deliverable: no `quant_accuracy`
-arm reaches the locus gDNA length (the oracle overrides only calibration's count arrays; the `oracle_efflen` reading
-is withdrawn in `ISSUES: end-to-end-error-unattributed`). A price needs the simulator's per-locus gDNA opportunity
+arm reaches the locus gDNA length (the oracle overrides only calibration's count arrays;
+`ISSUES: end-to-end-error-unattributed` records why no length arm prices it). A price needs the simulator's per-locus gDNA opportunity
 as the truth.
 
 ### eb-shrinkage-magic-ess
@@ -989,8 +989,6 @@ exon|intron boundary, while RNA that has not spliced there does.
   containing `/docs/` fails with no remedy; the TRAPS heading regex is written three times.
 - The log-odds window's single source is ungated: restoring a default stays green, and about 23 literal 10.0s sit in
   the tests.
-- `test_a_toy_with_NO_anchor_pool_falls_back_to_the_largest_basin` holds by construction on its unimodal fixture; a
-  bimodal one (0.731 / 0.269) would bite.
 - The deleted float64 pass-through gate was never retargeted at the live boundary masses; `test_substrate.py` still
   says `sj_mass` arrives per strand "for artifact detection".
 - `test_a_blacklist_built_from_a_store_loads_into_the_resolver` asserts a size that Python sets, and stays green with
@@ -1304,8 +1302,8 @@ fewer fragments overall, so lower-only stays. The gDNA lane's EDGE level does it
 of the encompassing locus): a shallow single-strand flank (404 fragments, truth 0.530, local solve 0.546)
 reads 0.596 under the intergenic neighbour's Poisson level — a lower bound at that neighbour's sampled
 density, 0.298/bp against the flank's realised 0.27, a 1.6σ excursion the hop's price blurs but does not
-move. The cure is the enrichment witness `ISSUES: two-sided-exon-row` waits for. The ladder's `g00` rows
-(`calibration_vs_oracle.py`).
+move. The cure is the enrichment witness `ISSUES: two-sided-exon-row` waits for. Instrument: the
+ladder's `g00` rows (`calibration_vs_oracle.py`).
 
 ### flux-floor-dispersion
 `priority: parked — Tier 5, with the transport-dispersion decomposition · kind: question · 2026-09-08`

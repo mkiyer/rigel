@@ -90,9 +90,7 @@ __all__ = [
 
 # ⛔ ASSERTIONS A SHIPPED POLICY IS KNOWN TO VIOLATE, each entered with the measurement that proved it.
 # An entry is COUNTED and PUBLISHED rather than raised, because widening an assertion to fit a defect is
-# how a gate becomes vacuous; an entry also
-# carries a STRICT xfail in the gate file, this project's convention for a PROVEN defect whose fix is
-# panel-negative on its own. The dict is EMPTY, so anything violated raises.
+# how a gate becomes vacuous. The dict is EMPTY, so anything violated raises.
 #: ``name -> why it is not fatal yet``.
 _KNOWN_VIOLATIONS: dict[str, str] = {}
 
