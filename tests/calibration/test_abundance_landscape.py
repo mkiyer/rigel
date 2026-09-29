@@ -322,7 +322,7 @@ def test_without_the_wall_inputs_the_landscape_is_SKIPPED_LOUDLY_and_nothing_rai
 
 def test_the_flag_FITS_a_landscape_and_the_default_fits_NOTHING():
     """There is no config flag: passing the wall inputs is what fits a landscape, and omitting them
-    fits nothing — both in the debug capture and in the priors bundle."""
+    fits nothing."""
     from rigel.calibration import calibrate
     from rigel.calibration.splice_graph import MatureWallDistances
     from rigel.config import CalibrationConfig
@@ -345,7 +345,6 @@ def test_the_flag_FITS_a_landscape_and_the_default_fits_NOTHING():
         _debug=d_off,
     )
     assert "abundance_landscape" not in d_off or d_off.get("abundance_landscape") is None
-    assert d_off["calibration_priors"].abundance_landscape is None
 
     d_on: dict = {}
     calibrate(
@@ -363,36 +362,6 @@ def test_the_flag_FITS_a_landscape_and_the_default_fits_NOTHING():
     al = d_on["abundance_landscape"]
     assert al is not None
     assert al.n_train >= 2
-    assert d_on["calibration_priors"].abundance_landscape is al
-
-
-def test_an_INJECTED_landscape_is_taken_verbatim_and_nothing_is_refit():
-    """The toy path: a population-fitted landscape rides the priors bundle into a toy calibrate. The
-    injected object must come back IDENTICALLY (`is`), and no wall inputs are needed because nothing
-    is fit."""
-    from rigel.calibration import calibrate
-    from rigel.calibration.calibrate import InjectedCalibrationPriors
-    from rigel.config import CalibrationConfig
-
-    payload, ra, sm, pmf, sj = _calibrate_parts()
-    counts, lengths, sig, *_ = bimodal_parts()
-    sub2, ra2, mask2 = parts(counts, lengths, sig)
-    donor = fit_abundance_landscape(sub2, ra2, mask2)
-    assert donor is not None
-
-    d: dict = {}
-    calibrate(
-        payload=payload,
-        region_arrays=ra,
-        strand_model=sm,
-        gdna_fl_pmf=pmf,
-        rna_fl_pmf=pmf,
-        config=CalibrationConfig(),
-        sj=sj,
-        injected_priors=InjectedCalibrationPriors(abundance_landscape=donor),
-        _debug=d,
-    )
-    assert d["abundance_landscape"] is donor
 
 
 # ---------------------------------------------------------------------------

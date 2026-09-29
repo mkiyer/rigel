@@ -10,8 +10,7 @@
 # at every declared intron); the suite gate `tests/test_test_reference_renders.py` refuses a render
 # that drifted from the YAML. ⛔ Edit THIS file, then re-run the builder; never a render.
 #
-# THE SCHEMA is the `rigel sim` scenario schema (docs/MANUAL.md `rigel sim`; the toy harness's
-# ToySpec uses the same `genes` shape), plus two keys it lacks:
+# THE SCHEMA is the `rigel sim` scenario schema (docs/MANUAL.md `rigel sim`), plus two keys it lacks:
 #
 #   genes:                         one entry per transcript GROUP (a gene)
 #     - gene_id: gB1_clean
@@ -171,8 +170,8 @@ ref_name: test_chr
 # A long SINGLE-EXON antisense whose one exon ENCOMPASSES the whole of a spliced host on the other strand:
 # every one of the host's slots admits RNA on both strands (its exons are exon∩exon, its introns are the
 # antisense's exon), every boundary carries only the host's bits, and the antisense's level is measured
-# nowhere but in its two single-strand FLANKS — the owner's encompassing locus (`tests/calibration/
-# test_encompassing_locus.py`, a single-exon TB− over a two-exon TA+, 2026-09-13), whose remaining miss is
+# nowhere but in its two single-strand FLANKS — the owner's encompassing locus (a single-exon TB− over a
+# two-exon TA+, 2026-09-13), whose remaining miss is
 # the shallow flank under the intergenic gDNA edge level (`ISSUES: the-lower-bound-noise-ratchet`). On the
 # ladder: 6 gene pairs — ENSG00000280007 (−, a 20.4 kb exon) over TUBA8's four-exon isoform, ENSG00000279080
 # (+, 20.4 kb) over PLA2G6's three-exon isoform, ENSG00000279159 (−, 49 kb) over MTMR3's — all of the

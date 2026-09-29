@@ -1,12 +1,12 @@
 # TESTING — the panels, the gates, and what the suite can judge
 
 **What this file is.** The manual for Rigel's test substrates: the simulated panels and what each can
-judge (§0), how the test chromosome is built, swept and read (§0a), the toy harness (§0b), the
-simulator's backbone and its gaps (§1), the build commands (§2), the simulator's gates (§3), how results
-are evaluated (§4), the test suite (§5) and the profiling substrate (§6). Not here: the 0.8.0 scope, the equal-fragment-length ruling and the nascent scope ruling
-(`DESIGN.md` §0b); how performance is judged and the instruments' run order (`SUCCESS.md`); the suite's
-standing pass count (`CLAUDE.md`); lessons (`TRAPS.md`, cited by name); open problems and refusals
-(`ISSUES.md`). The panels' history is git.
+judge (§0), how the test chromosome is built, swept and read (§0a), the simulator's backbone and its
+gaps (§1), the build commands (§2), the simulator's gates (§3), how results are evaluated (§4), the test
+suite (§5) and the profiling substrate (§6). Not here: the 0.8.0 scope, the equal-fragment-length ruling
+and the nascent scope ruling (`DESIGN.md` §0b); how performance is judged and the instruments' run order
+(`SUCCESS.md`); the suite's standing pass count (`CLAUDE.md`); lessons (`TRAPS.md`, cited by name); open
+problems and refusals (`ISSUES.md`). The panels' history is git.
 
 Two rules govern the whole file (`TRAPS: prove-the-substrate`, `TRAPS: can-the-benchmark-resolve-it`):
 
@@ -16,11 +16,11 @@ Two rules govern the whole file (`TRAPS: prove-the-substrate`, `TRAPS: can-the-b
 
 ---
 
-## 0. The panels — one ladder, two fl-gap side panels, and a toy harness
+## 0. The panels — one ladder and two fl-gap side panels
 
 Everything simulated lives under `~/Downloads/rigel_runs/suite/` (the ladder, the two side panels, the
 carved reference and the index) and `~/Downloads/rigel_runs/test_reference/` (the test chromosome, §0a).
-The panel says how much error there is and where; a toy (§0b) says why.
+The panel says how much error there is and where.
 
 **The ladder** (`scripts/sim/configs/gdna_ladder.yaml`, `ladder/`) is the only panel the tool is ranked on.
 
@@ -103,9 +103,7 @@ in it may re-scan a BAM. Two caches carry it and `panel.py cache` builds both:
 
 Neither is invalidated by a calibration change. A scenario without both caches is not usable for
 development: `panel.py status` names what is missing, and an instrument fed a stale cache refuses it
-(the oracle cache is keyed by the scan cache's own key). The toy harness's donor bundle is the deliberate
-exception (§0b): it is a function of the calibration code that fit it, so caching it would serve a stale
-answer.
+(the oracle cache is keyed by the scan cache's own key).
 
 ---
 

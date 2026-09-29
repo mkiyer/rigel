@@ -595,19 +595,6 @@ class TestNothingDerivableFromTheIndexIsStored:
         )
 
 
-def test_population_priors_can_be_extracted_from_a_cached_scan(scanned, tmp_path):
-    """A cached scan is enough to run `calibrate()` and reach the population-prior seed path, which is
-    the end the cache exists to serve: if the priors cannot be extracted from a cache, the cached
-    substrate does not actually shorten the loop it was built for."""
-    from rigel.calibration.calibrate import calibrate
-    from rigel.config import CalibrationConfig
-
-    _cache_dir, cache = round_trip(scanned, tmp_path)
-    debug: dict = {}
-    calibrate(**calibration_inputs(cache, scanned[0]), config=CalibrationConfig(), _debug=debug)
-    assert debug["calibration_priors"] is not None
-
-
 # ══ the drain and the cache ═════════════════════════════════════════════════════════════════════════
 
 

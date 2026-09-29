@@ -169,8 +169,8 @@ nascent RNA's place in the design.
   at all. Neither background pool is "clean" on real data, and both are safe for the same reason.
 
 What this ruling is not: a licence to break AXIOM 0 (unspliced RNA at an intron is still RNA), or a
-deletion of robustness — the synthetic nascent entity, the `--nrna` harness arms and the zero controls
-all stay. It re-ranks concerns; it does not remove the model.
+deletion of robustness — the synthetic nascent entity and the zero controls both stay. It re-ranks
+concerns; it does not remove the model.
 
 **Where the "absent until proven" default does and does not live (owner, 2026-09-19).** It is the
 LIKELIHOOD's, never the prior's. The EM's RNA pseudocount used to be withheld from synthetic nascent
@@ -1448,7 +1448,7 @@ strand fit read — the Bayes factor of a free κ under the fit's own Beta(1, 1)
 form, `ln BF₁₀ = N·ln 2 + ln B(κ̂(N+2), (1−κ̂)(N+2))`, live iff positive; its large-N form `½·[z² −
 ln(2N/π)]` is the free parameter's Occam penalty, so no multiple of σ is chosen — and `disc = 4(κ̂−½)²`
 where it is live. gDNA enters nowhere: its strand mean is ½ by symmetry, and `n_gdna_obs` is gone from the
-strand model, the sweep, the injected priors and the toy harness (`region_init.strand_discriminability`
+strand model and the sweep (`region_init.strand_discriminability`
 takes κ̂ and the spliced count, nothing else). Judged: the ladder identical to 0.1 fragment on every
 stratum and both unstranded zero controls except the row the coin toss had left live (`g98 ss.50 OFF`
 123,657 → 122,981, −0.55 %; unstranded OFF −0.22 %); the test chromosome identical on all 30 rows; a
@@ -1466,7 +1466,7 @@ the estimator's vertex-resolution bias, filed under `ISSUES: gdna-landscape-trai
 the owner's ruling stands over it: on a gDNA-free library every read is RNA and RNA levels are what must
 flow. On a `g00` donor the shared-exon stress reads the exon never worse and 139 → 109 / 93 → 64 false
 fragments at 50k (20 % / 50 % minor), and the encompassing locus's exon∩exon slots 0.054 / 0.046 → 0.002 /
-0.005 against 0; `test_encompassing_locus.py` runs every expressed regime on a gDNA-free donor as well.
+0.005 against 0.
 **An RNA level read from a slot's belief is REFUSED** (the issue's second candidate): a belief at a slot
 with no strand information is the prior's answer, and a lane carrying it is the deleted relay (`TRAPS:
 one-hop-lifted-out-is-still-the-relay`). The stranded gDNA-free case is fixed by the gate alone; on an
@@ -1503,11 +1503,11 @@ delivered says otherwise. The stresses: the spliced shared exon (a level on each
 every both-strand row and reads the strand-pure rows' tilt exactly (tilt error 290 → 7 at 500k) for ≤ 44
 false fragments in 415k; the mono shared exon, which has no junction and so no witness, shows the cost bare
 — false gDNA roughly doubles on its 2–20 %-minor rows (`g00` 50k at 20 %: 10,323 → 19,671 of 50k) on an
-exon the volume factor already read 27–99 % gDNA. The encompassing locus (`test_encompassing_locus.py`):
+exon the volume factor already read 27–99 % gDNA. The encompassing locus (a toy, retired 2026-09-28):
 the region between TA+'s exons, strand-pure and mostly gDNA when TB− is low, read 0.366 against 0.544 and
-reads 0.511; the exon∩exon slots and that region now solve within 0.05 in every regime on both donors, the
-gate un-xfailed; the one remaining miss there is TB−'s shallow single-strand flank under the intergenic
-neighbour's gDNA edge level (`ISSUES: the-lower-bound-noise-ratchet`, its own xfail). Two goldens moved:
+reads 0.511; the exon∩exon slots and that region now solve within 0.05 in every regime on both donors; the
+one remaining miss there is TB−'s shallow single-strand flank under the intergenic neighbour's gDNA edge
+level (`ISSUES: the-lower-bound-noise-ratchet`). Two goldens moved:
 `antisense_overlap` by ≤ 5e-4 relative on transcript counts, and `antisense_contained` — a single-exon
 antisense gene wholly inside a sense exon, so no junction and no single-strand piece exist to witness the −
 strand, on a 1,000-fragment toy that fits no landscape — by the atom's bare cost: its antisense transcript

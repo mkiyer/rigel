@@ -10,7 +10,7 @@ everything already there.
 
 **THE ONE HAND-EDITED FILE (owner ruling, 2026-09-02): `test_chr.yaml`.** It is the `rigel sim`
 scenario schema — ``genes → {gene_id, strand, transcripts: [{t_id, exons, abundance, nrna_abundance}]}``,
-the same ``genes`` shape the toy harness's ``ToySpec`` uses, exons 0-based half-open — plus two keys the
+exons 0-based half-open — plus two keys the
 scenario schema lacks: ``probed`` per gene (the capture panels are DESIGNED from it) and ``shadow_genes``
 (unannotated transcription on the BLANK contig, simulator-only). ⛔ **Every other file in
 `test_reference/` is RENDERED from it by this script and must never be hand-edited**:

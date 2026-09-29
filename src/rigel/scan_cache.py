@@ -22,7 +22,6 @@ input                           origin                                        ca
 ``sj``                          ``build_sj_geometry_arrays``                  no
 ``gdna_fl_pmf``/``rna_fl_pmf``  ``pipeline.library_fl_models``                no — derived
 ``config``                      the thing you are varying                     no
-``injected_priors``             fitted BY ``calibrate``                       no
 ==============================  ============================================  ============
 
 Anything derivable from the index is rebuilt on load, never stored: it is a fraction of a second
@@ -49,10 +48,6 @@ THE KEY NEEDS FOUR PARTS
 
 Not pickle. A pickle of numpy-holding dataclasses is fragile exactly across the schema changes this
 cache has to survive; arrays go to ``.npz``, scalars and provenance to JSON.
-
-Seeding a toy from a genome-scale scan needs ``InjectedCalibrationPriors``, which `calibrate` fits and
-stashes in ``_debug["calibration_priors"]``, so that path requires `calibrate` to have run;
-``test_population_priors_can_be_extracted_from_a_cached_scan`` covers it.
 """
 
 from __future__ import annotations
@@ -331,8 +326,7 @@ class ScanCache:
 
 # ── strand model round-trip ──────────────────────────────────────────────────────────────────────
 # The 2x2 is the MARGINAL of the per-sj table, and the strand OVERDISPERSION is fitted from the
-# table, not the marginal. A cache that kept only the 2x2 would silently disable the dispersion estimate
-# — which is one of the population priors the toy seed exists to carry.
+# table, not the marginal. A cache that kept only the 2x2 would silently disable the dispersion estimate.
 _SJ_COLUMNS = ("ref_id", "start", "end", "motif_strand", "n_sense", "n_antisense")
 _STRAND_SUBMODELS = ("exonic_spliced", "exonic")
 _COUNT_FIELDS = ("pos_pos", "pos_neg", "neg_pos", "neg_neg")

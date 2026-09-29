@@ -172,8 +172,8 @@ any two windows. The cluster track does not compete for local windows.
 `ISSUES: unannotated-transcription-is-booked-as-gdna`, a `DESIGN.md` ruling after 0.8.0 ·
 `ISSUES: ruler-witness-geometry-on-transcript-panels` · `ISSUES: overlapping-synthetic-shadows`, an owner decision on
 the index. Parked: `ISSUES: yield-variance-beside-the-count` · `ISSUES: capture-premise-untested-on-cdna` ·
-`ISSUES: the-atom-at-an-unwitnessed-both-strand-slot` · the message layer's xfails (`ISSUES: two-sided-exon-row`,
-`ISSUES: the-lower-bound-noise-ratchet`) · `ISSUES: flux-floor-dispersion` ·
+`ISSUES: the-atom-at-an-unwitnessed-both-strand-slot` · `ISSUES: two-sided-exon-row` ·
+`ISSUES: the-lower-bound-noise-ratchet` · `ISSUES: flux-floor-dispersion` ·
 `ISSUES: splice-out-premise-bias-uncorrected` · `ISSUES: the-tilt-census-as-an-instrument` ·
 `ISSUES: transfer-variance-premise` · `ISSUES: drain-contaminates-certified-rna` · `ISSUES: crossing-pool-contrast` ·
 `ISSUES: capture-degeneracy-standing-risk` · `ISSUES: pure-rna-mirror-asymmetry` ·

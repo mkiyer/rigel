@@ -30,7 +30,7 @@ T(slot) = {gDNA}                                  # always — gDNA is genomical
 so `|T| ∈ {1,2,3}`. The tell that you have violated this: a population set with more than three members,
 or the words "mature", "nascent" or "a third component" in a solver or composition question. Re-ask it as
 "what is this channel's OPPORTUNITY for RNA at this object?" — the answer is a geometry, derivable from
-the index. The words survive only as simulator inputs (`nrna_abundance`, the toy harness's `--nrna`).
+the index. The words survive only as simulator inputs (`nrna_abundance`).
 How much weight a nascent concern carries is the nascent scope ruling's question (`docs/DESIGN.md` §0b):
 nascent RNA is sparse in real data and is modelled for robustness, so a number measured at the panel's
 nascent share is a stress reading, never a design driver.
@@ -200,12 +200,9 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 2,770 passed / 0 skipped / 2 xfail, 2,772 collected** — re-derived 2026-09-28
-(2,801 − 29: `solvability_audit.py`'s 16 gates less the 2 own-evidence predicate gates moved to `test_region_init.py`,
-the oracle arms' net 4 (5 deleted, the basis gate rewritten on synthetic arrays), and `prior_vs_oracle.py`'s 11 `Fo` / `F` / read-name-walk gates). The 2 xfails are
-executable records of proven defects whose fixes are elsewhere (`ISSUES: two-sided-exon-row`;
-`ISSUES: the-lower-bound-noise-ratchet`), deferred by ruling to their threads — "fix the test" is a category error,
-and an xfail is closed by repairing the thing or asserting the invariant structurally, never by widening a bound.
+**The standing baseline: 0 failed / 2,754 passed / 0 skipped / 0 xfail, 2,754 collected** — re-derived 2026-09-28
+(2,772 − 18: the toy harness's 7 gates and `test_encompassing_locus.py`'s 9 cases, one strict xfail in each; the
+injected-landscape test; the scan cache's priors-extraction test).
 **Any failure at all is a regression.**
 
 **Re-derive a count, never adjust one** (`TRAPS: re-record-the-baseline`). Every gate that scans the files on

@@ -218,8 +218,7 @@ A/B on odg05 g05 ss.99 and the panel's capture-ON g05 od00 rows (two roots in 30
 target).
 
 THEN, BIT-IDENTICALLY, ONE FIELD. Collapse the gDNA and RNA fields in the `_Strand` triple, `CalibrationResult`, the
-cli summary, `sweep`'s od_g / od_r and `policy_od_*`, the native Grid's `pol_od_*` and the toy harness's
-re-injection; injecting one field today lets the other's own clipped fit through. After it: re-read the strand-input
+cli summary, `sweep`'s od_g / od_r and `policy_od_*`, and the native Grid's `pol_od_*`. After it: re-read the strand-input
 drift in `ISSUES: the-gdna-landscape-collapses-at-low-depth` and `ISSUES: strand-likelihood-over-confident-beyond-od`,
 and refresh the ladder report.
 
@@ -945,9 +944,8 @@ Instrument: `profiling/profiler.py`, `profiling/sweep_replay.py`.
 ### hygiene-ledger
 `priority: later — Tier 4, batched between A/B windows; a numeric no-op lands between any two · kind: hygiene · 2026-08-31; the review of 2026-09-22`
 What the reviews left, each its own commit; content-only changes keep the collected count unchanged.
-(a) ROTTEN BUT LIVE, each moving a toy's or an instrument's numbers when repaired: the toy harness's `harvest`
-(`tests/calibration/_toy_harness.py`) calibrates its donor undrained and without the two-pool contrast, so every
-toy inherits both; `quant_accuracy`'s oracle arms are undrained (documented there).
+(a) ROTTEN BUT LIVE, moving an instrument's numbers when repaired: `quant_accuracy`'s oracle arms are undrained
+(documented there).
 (b) DEAD, DEFERRED: `region_span_count`, tallied per fragment by the accumulator and carried through the payload,
 the substrate and the caches, read by nothing (the retired length channel's). Deleting it changes the payload schema
 and re-caches both panels; step 1b re-cached every panel without taking it, so it now rides the leading-intron fix's
@@ -1284,12 +1282,12 @@ atom is inert
 nested single-exon antisense gene on a shallow stranded run.
 
 ### two-sided-exon-row
-`priority: parked — Tier 5, an xfail deferred by the owner (2026-09-13), with the enrichment witness · kind: problem · 2026-09-04`
+`priority: parked — Tier 5, deferred by the owner (2026-09-13), with the enrichment witness · kind: problem · 2026-09-04`
 On unstranded data an exon's held row is the intron's composition through the face map, whose upper side is
 the map's plateau above its ceiling — a lower bound on gDNA — so at pass zero an unstranded licensed exon
-reads ~9× its true gDNA (+2,000 % at `g25 ss.50 OFF`) and forwarding it compounds the bias. The toy harness
-gate reads a factor of 88 (exon |Δf_g| 0.762 beside a pure-gDNA intron, 0.0086 beside a nascent-bearing one)
-and is a strict xfail citing this entry; on the ladder the class is 4–6 % of the unstranded error with
+reads ~9× its true gDNA (+2,000 % at `g25 ss.50 OFF`) and forwarding it compounds the bias. A toy gate
+(retired 2026-09-28 with its harness) read a factor of 88 (exon |Δf_g| 0.762 beside a pure-gDNA intron, 0.0086
+beside a nascent-bearing one); on the ladder the class is 4–6 % of the unstranded error with
 `transfer` at parity there, on the test chromosome 20–32 % and transfer worse (2,647 → 4,056 at
 `g50 ss.50 OFF`). Every cap, two-sided row or wall is refused where junction probes enrich the flux more than
 the crossing (`ISSUES: the-certified-flux-row-as-a-level`, `ISSUES: two-sided-exon-row-forms`,
@@ -1300,16 +1298,16 @@ landscape prior's job. The first step when taken up is that witness's derivation
 (licensed)` and the walled classes, halves apart. `policy_benchmark.py --by-class`.
 
 ### the-lower-bound-noise-ratchet
-`priority: parked — Tier 5, an xfail, with the enrichment witness · kind: defect · 2026-09-05`
+`priority: parked — Tier 5, with the enrichment witness · kind: defect · 2026-09-05`
 A level from an RNA-rich node's own strand profile has a mode that is noise around zero; its lower side bounds
 its neighbours and the tightest noisy neighbour wins (ladder `g05 ss.99 OFF` 44,714 → 45,076; test chromosome
 `g00 ss.99 ON` 64 → 216, 187 of it at `capcluster_ab`'s inner termini). A two-sided own-profile level keeps
-fewer fragments overall, so lower-only stays. The gDNA lane's EDGE level does it too (2026-09-14,
-`test_encompassing_locus.py`, its xfail): a shallow single-strand flank (404 fragments, truth 0.530, local
-solve 0.546) reads 0.596 under the intergenic neighbour's Poisson level — a lower bound at that neighbour's
-sampled density, 0.298/bp against the flank's realised 0.27, a 1.6σ excursion the hop's price blurs but does
-not move. The cure is the enrichment witness `ISSUES: two-sided-exon-row` waits for. The ladder's `g00` rows
-(`calibration_vs_oracle.py`) and the `test_encompassing_locus.py` xfail.
+fewer fragments overall, so lower-only stays. The gDNA lane's EDGE level does it too (2026-09-14, on a toy
+of the encompassing locus): a shallow single-strand flank (404 fragments, truth 0.530, local solve 0.546)
+reads 0.596 under the intergenic neighbour's Poisson level — a lower bound at that neighbour's sampled
+density, 0.298/bp against the flank's realised 0.27, a 1.6σ excursion the hop's price blurs but does not
+move. The cure is the enrichment witness `ISSUES: two-sided-exon-row` waits for. The ladder's `g00` rows
+(`calibration_vs_oracle.py`).
 
 ### flux-floor-dispersion
 `priority: parked — Tier 5, with the transport-dispersion decomposition · kind: question · 2026-09-08`
@@ -2439,7 +2437,7 @@ controls 405 → 497 / 194 → 224, located at the refit rung (the landscape's v
 0.054 / 0.046 → 0.002 / 0.005; 17 goldens regenerated (≤ 2e-3 relative, `antisense_contained`'s false gDNA
 78.7 → 5.6). REFUSED with it: an RNA level read from a slot's belief — the prior's answer re-emitted as data,
 the relay (`TRAPS: one-hop-lifted-out-is-still-the-relay`). Gates in `test_region_init` (five perturbations
-fired) and `test_encompassing_locus` on a gDNA-free donor.
+fired) and `test_encompassing_locus` on a gDNA-free donor (retired 2026-09-28).
 
 ### measured-prior-rung-4
 SUPERSEDED 2026-09-14: ψ's composition reference fitted from composition-free observables (`rho_0`, the
@@ -2629,7 +2627,7 @@ REFUSED 2026-09-09: a wall above the face map's ceiling priced by the junction�
 harness gate (|Δf_g| 0.123/0.126 against 0.848) and wins the ladder's target rows at pass zero
 (`g05 ss.50 OFF` 0.921×, `g50 ss.50 OFF` 0.847×), and through the pipeline loses the stranded half 0/6
 (`g50 ss.99 ON` 1.142×), the deferred rows 1.15–1.43×, the junction and sparse panels' capture-ON stranded
-rows 1.4–2.5×. The gate stays a strict xfail.
+rows 1.4–2.5×.
 
 ### the-pooled-hop-step
 REFUSED by the owner 2026-09-03: a per-hop-kind pooled disagreement premise. The per-pair rule alone stands
@@ -2686,7 +2684,7 @@ geometry; the length-channel retirement is of a calibration composition channel.
 | **a LEVEL transfer from the intron** | toy + panel | ⛔ **REFUTED**, +0.207 on capture-ON × unstranded — capture inverts which side is well-counted (TRAPS: capture-inverts-the-counted-side) |
 | **the RNA fragment-length model** | a per-pmf ceiling arm (`length_ceiling.py`, retired 2026-09-10) | ⛔ **−0.02 %** at pass-0, **+0.21 % (worse)** over all objects. Root cause exact (`pi(w)` scores sj *crossing*, the pool requires the splice to be *seen*). ⭐ Its value is the BOUND: the whole fragment-length-model cluster costs ≤0.43 % of the shipped solve. TRAPS: price-the-halves-separately |
 | **TRAPS: pure-and-length-censored's κ residue, as an ACCURACY fix** | κ injected at exactly ½, all 36 conditions | ⛔ **−0.2 %** unstranded, worse on the shipped solve. ⭐ But the *general* defect — a boolean licence flipped by a small residue — is **the-capture-level-residual**, and the destruction control taught TRAPS: honesty-metrics-reward-ignorance |
-| **a nascent-bearing ladder condition** | toy, 36 conditions × 7 rungs | ⚠ **−5 %**, and the wrong way on one stratum. Keep it as a harness arm (`--nrna 60`); it no longer justifies re-simulating the panel |
+| **a nascent-bearing ladder condition** | toy, 36 conditions × 7 rungs | ⚠ **−5 %**, and the wrong way on one stratum. It was a toy harness arm (`--nrna 60`, retired 2026-09-28); it no longer justifies re-simulating the panel |
 | **the gDNA prior's BIMODAL CAPACITY, and "give the prior more signal"** | a read of `gdna_landscape.py` + the production refit on real conditions | ⛔ **BOTH BRANCHES CLOSED.** The prior already renders the landscape correctly — **2.98 decades** of mode separation at `g75 ss0.99 capture_ON`, 30× more enriched mass ON than OFF, a single pile at the wall at `g00`. And a prior fitted from ORACLE truth is the same prior (0.04 dec). Not capacity, not signal, not location. ⭐ Why an evidence-free object cannot reach the vertex at all — and why that is the value of missing information rather than headroom — is `EQUATIONS.md` §9a |
 | **the Jeffreys MEAN density location** | `--arm eta`, the `g00` zero control | ⛔ **REFUTED at +96,299 %.** It cannot say ZERO (`region_init.rho_g` is an exact 0 at 60,544/70,176 slots — the statement earning the −98 % at `g00`), and the TRAPS: a-ratio-cannot-carry-zero benefit it was credited with belongs to that fix, not to this arm. ⭐ If revisited the derived form is the Gamma **MODE** `max(a−½,0)/E`, which is exactly 0 at a zero count |
 | **a threshold anywhere in the licence family** | TRAPS: a-threshold-on-a-fitted-residue implemented and refuted one | ⛔ τ is continuous across the region, so any floor is a tuned constant (TRAPS: a-threshold-on-a-fitted-residue, TRAPS: a-licence-with-no-floor, TRAPS: a-multiplication-gated-by-a-trace — refused three times) |

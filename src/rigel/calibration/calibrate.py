@@ -66,7 +66,7 @@ from .density_deconv import (
     GdnaBackground,
     fit_intron_background,
 )
-from .abundance_landscape import AbundanceLandscape, fit_abundance_landscape, located_enriched_mode
+from .abundance_landscape import fit_abundance_landscape, located_enriched_mode
 from .capture_efficiency import capture_efficiencies
 from .effective_length import UNBOUNDED_REACH, conserved_cut_shares
 from .blocks import SweepCapture
@@ -97,30 +97,6 @@ if TYPE_CHECKING:
     from .splice_graph import SpliceJunctionGeometry
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class InjectedCalibrationPriors:
-    """Population-scale calibration priors — the objects that require genome-scale (or many-gene) data to fit and
-    are physically **directly observable** (no deconvolution / no solving): the RNA strand balance and the
-    spliced sample size it was fit from, the strand Beta-Binomial overdispersions, the intergenic
-    intron-factory background, and the pre-solve TOTAL-density landscape.
-
-    A tiny (single-transcript) toy CANNOT fit these — so :func:`calibrate` accepts them pre-fit from a
-    population scenario and injects them, letting the toy provide only the controlled per-region GEOMETRY. Every
-    field is optional; ``None`` ⇒ fit that prior internally (the default, byte-identical). ``calibrate`` also
-    stashes the fitted-or-injected bundle in ``_debug["calibration_priors"]`` so a population scenario's fitted
-    priors can be extracted and re-injected into a toy."""
-
-    rna_sense_frac: float | None = None
-    n_rna_obs: float | None = None
-    gdna_strand_overdispersion: float | None = None
-    rna_strand_overdispersion: float | None = None
-    intron_background: GdnaBackground | None = None
-    #: the pre-pass-0 TOTAL-density field + mode census — QC-only and population-scale (a toy cannot
-    #: fit a landscape from a handful of regions). ``None`` ⇒ fit internally when the wall inputs are
-    #: given, else absent.
-    abundance_landscape: AbundanceLandscape | None = None
 
 
 def _empty_sj_geometry() -> "SpliceJunctionGeometry":
@@ -315,25 +291,19 @@ def lattice_points(window: float, step: float) -> int:
     return int(round(2.0 * float(window) / float(step))) + 1
 
 
-#: the QC seeds of an INJECTED strand value: no fit ran, so no seed regions, no fragments
-_NO_GDNA_SEED = (-1, -1, False, float("nan"), float("nan"))
-_NO_RNA_SEED = (-1, -1, False, float("nan"))
-
-
 @dataclass(frozen=True, slots=True)
 class _Strand:
-    """The library's strand model as the solve reads it, fitted or injected: the RNA sense fraction
+    """The library's strand model as the solve reads it: the RNA sense fraction
     ``κ``, ``N_rna`` — the spliced count κ was fit from, the sample the strand channel's protocol
     decision reads (`region_init.strand_discriminability`) — and the two Beta-Binomial overdispersions.
-    The two seeds are QC for the log only — ``(n_seed_regions, n_seed_fragments, fallback, …)``,
-    ``-1`` where the value was injected."""
+    The two seeds are QC for the log only — ``(n_seed_regions, n_seed_fragments, fallback, …)``."""
 
     rna_sense_frac: float
     n_rna_obs: float
     gdna_strand_overdispersion: float
     rna_strand_overdispersion: float
-    gdna_seed: tuple = _NO_GDNA_SEED
-    rna_seed: tuple = _NO_RNA_SEED
+    gdna_seed: tuple
+    rna_seed: tuple
 
     @property
     def model(self) -> tuple[float, float, float]:
@@ -345,7 +315,7 @@ class _Strand:
         )
 
 
-def _fit_strand(substrate, region_arrays, strand_models, inj) -> _Strand:
+def _fit_strand(substrate, region_arrays, strand_models) -> _Strand:
     """The strand model, in the order the fits lean on each other.
 
     ``κ`` first — the posterior-mean spliced sense fraction (`fit_strand_balance`) and the spliced count
@@ -358,80 +328,57 @@ def _fit_strand(substrate, region_arrays, strand_models, inj) -> _Strand:
     and strand-observable object — unbiased under any RNA content of the seeds (`gdna_strand`'s
     lemma), so no seed is weighted and no class asserted pure; intergenic and AMBIG objects cannot be
     oriented and are out. The two are RECONCILED with no conjured target: the weaker-measured
-    dispersion shrinks toward the better-measured one by their own null informations — ⛔ only when
-    neither is injected, since an injected value is an arm's whole point."""
-    if inj is not None and inj.rna_sense_frac is not None:
-        rna_sense_frac = float(inj.rna_sense_frac)
-        n_rna_obs = float(inj.n_rna_obs) if inj.n_rna_obs is not None else 0.0
-    else:
-        balance = fit_strand_balance(strand_models)
-        if balance.fallback_used:
-            raise CalibrationStrandError(
-                "the library has zero spliced unique-mapper observations; this does not look like an "
-                "RNA-seq library. A real RNA-seq library always carries spliced reads."
-            )
-        rna_sense_frac = float(balance.rna_sense_frac)
-        n_rna_obs = float(balance.n_observations)
+    dispersion shrinks toward the better-measured one by their own null informations."""
+    balance = fit_strand_balance(strand_models)
+    if balance.fallback_used:
+        raise CalibrationStrandError(
+            "the library has zero spliced unique-mapper observations; this does not look like an "
+            "RNA-seq library. A real RNA-seq library always carries spliced reads."
+        )
+    rna_sense_frac = float(balance.rna_sense_frac)
+    n_rna_obs = float(balance.n_observations)
 
-    gdna_seed, rna_seed = _NO_GDNA_SEED, _NO_RNA_SEED
-    if inj is not None and inj.rna_strand_overdispersion is not None:
-        rna_od = float(inj.rna_strand_overdispersion)
-    else:
-        rna_strand = fit_rna_strand_from_sj_table(
-            strand_models.sj_table, rna_sense_frac=rna_sense_frac
-        )
-        rna_od = rna_strand.rna_strand_overdispersion
-        rna_seed = (
-            rna_strand.n_seed_regions,
-            rna_strand.n_seed_fragments,
-            rna_strand.fallback_used,
-            rna_strand.raw_overdispersion,
-        )
-    if inj is not None and inj.gdna_strand_overdispersion is not None:
-        gdna_od = float(inj.gdna_strand_overdispersion)
-    else:
-        # the seed selector is count-observability, straight off the signature
-        region_obs, boundary_obs = count_observable_masks(
-            np.asarray(region_arrays.signature), np.asarray(region_arrays.ref_id)
-        )
-        gdna_strand = fit_gdna_strand_from_substrate(
-            substrate,
-            region_arrays,
-            region_count_observable=region_obs,
-            boundary_count_observable=boundary_obs,
-            rna_sense_frac=rna_sense_frac,
-        )
-        gdna_od = gdna_strand.gdna_strand_overdispersion
-        gdna_seed = (
-            gdna_strand.n_seed_regions,
-            gdna_strand.n_seed_fragments,
-            gdna_strand.fallback_used,
-            gdna_strand.effective_seeds,
-            gdna_strand.raw_overdispersion,
-        )
-    if inj is None or (
-        inj.rna_strand_overdispersion is None and inj.gdna_strand_overdispersion is None
-    ):
-        rna_od, gdna_od = reconcile_overdispersions(
-            rna_strand.raw_overdispersion,
-            rna_strand.information,
-            gdna_strand.raw_overdispersion,
-            gdna_strand.information,
-        )
-
+    rna_strand = fit_rna_strand_from_sj_table(strand_models.sj_table, rna_sense_frac=rna_sense_frac)
+    rna_seed = (
+        rna_strand.n_seed_regions,
+        rna_strand.n_seed_fragments,
+        rna_strand.fallback_used,
+        rna_strand.raw_overdispersion,
+    )
+    # the seed selector is count-observability, straight off the signature
+    region_obs, boundary_obs = count_observable_masks(
+        np.asarray(region_arrays.signature), np.asarray(region_arrays.ref_id)
+    )
+    gdna_strand = fit_gdna_strand_from_substrate(
+        substrate,
+        region_arrays,
+        region_count_observable=region_obs,
+        boundary_count_observable=boundary_obs,
+        rna_sense_frac=rna_sense_frac,
+    )
+    gdna_seed = (
+        gdna_strand.n_seed_regions,
+        gdna_strand.n_seed_fragments,
+        gdna_strand.fallback_used,
+        gdna_strand.effective_seeds,
+        gdna_strand.raw_overdispersion,
+    )
+    rna_od, gdna_od = reconcile_overdispersions(
+        rna_strand.raw_overdispersion,
+        rna_strand.information,
+        gdna_strand.raw_overdispersion,
+        gdna_strand.information,
+    )
     return _Strand(rna_sense_frac, n_rna_obs, gdna_od, rna_od, gdna_seed, rna_seed)
 
 
 class _IntronFactory:
-    """The gDNA INTRON FACTORY: the intergenic background — fitted here, or injected — and its λ-factor
+    """The gDNA INTRON FACTORY: the intergenic background fitted here, and its λ-factor
     rows as a :class:`FactoryRows` (the inputs the kernel builds each block's rows from). ``rows`` is
     ``None`` when there is nothing to factor: the background uninformative, or no intron region."""
 
-    def __init__(self, chain, substrate, region_arrays, region_eff_gdna, inj):
-        if inj is not None and inj.intron_background is not None:
-            self.background = inj.intron_background
-        else:
-            self.background = fit_intron_background(substrate, region_arrays, region_eff_gdna)
+    def __init__(self, chain, substrate, region_arrays, region_eff_gdna):
+        self.background = fit_intron_background(substrate, region_arrays, region_eff_gdna)
         self.rows = None
         if self.background.informative:
             rows = FactoryRows(self.background, chain, substrate, region_arrays, region_eff_gdna)
@@ -449,16 +396,14 @@ def _wall_mask(payload, region_arrays, mature_walls, boundary_reach):
     )
 
 
-def _abundance_landscape(payload, substrate, region_arrays, inj, mature_walls, boundary_reach):
+def _abundance_landscape(payload, substrate, region_arrays, mature_walls, boundary_reach):
     """THE ABUNDANCE LANDSCAPE — the pre-pass-0 TOTAL-density field + mode census, fitted at INIT from
     counts and lengths only (the wall-exact measured totals), so it is circular with nothing solved. A QC
-    and injection surface: it is the sole source of `CalibrationDiagnostics`
+    surface: it is the sole source of `CalibrationDiagnostics`
     (`CalibrationDiagnostics.from_abundance_landscape`) and nothing in the solve reads it. Without the
     wall inputs (``mature_walls``, ``boundary_reach``) it is SKIPPED, LOUDLY, never raised for: many unit
-    and toy callers have no wall arrays, so the object stays ``None`` and there are no diagnostics
+    callers have no wall arrays, so the object stays ``None`` and there are no diagnostics
     rather than a quietly different estimate."""
-    if inj is not None and inj.abundance_landscape is not None:
-        return inj.abundance_landscape
     if mature_walls is None or boundary_reach is None:
         logger.warning(
             "calibration: the wall inputs are missing (mature_walls / boundary_reach, both in "
@@ -726,7 +671,7 @@ def _log_summary(result: CalibrationResult, strand: _Strand, substrate, sj) -> N
         gd[0],
         gd[1],
         gd[3],
-        ", FALLBACK" if gd[2] else ("" if gd[0] >= 0 else ", INJECTED"),
+        ", FALLBACK" if gd[2] else "",
         (
             f", CLAMPED at the ceiling from a raw {gd[4]:.3f} - NOT a measurement"
             if (not gd[2]) and gd[4] > _MAX_OVERDISPERSION
@@ -735,7 +680,7 @@ def _log_summary(result: CalibrationResult, strand: _Strand, substrate, sj) -> N
         strand.rna_strand_overdispersion,
         rn[0],
         rn[1],
-        ", FALLBACK" if rn[2] else ("" if rn[0] >= 0 else ", INJECTED"),
+        ", FALLBACK" if rn[2] else "",
         rn[3],
         gd[4],
         sj_sense_frac,
@@ -753,7 +698,6 @@ def calibrate(
     sj: "SpliceJunctionGeometry | None" = None,
     _debug: dict | None = None,
     diagnostics_out: dict | None = None,
-    injected_priors: "InjectedCalibrationPriors | None" = None,
     boundary_flags: "np.ndarray | None" = None,
     mature_walls=None,
     boundary_reach=None,
@@ -769,11 +713,9 @@ def calibrate(
     (a single-exon-only reference) and is NOT the same as "no sj flux". ``boundary_flags`` is the graph's
     per-contiguous-boundary structural bits, carried onto the chain as ``RegionStatics.boundary_flags``.
     ``mature_walls`` / ``boundary_reach`` are the two annotation-only WALL inputs the measured-total
-    exposure and the abundance landscape need. ``injected_priors`` are population-scale priors a tiny toy
-    cannot fit, injected in place of the internal fits (:class:`InjectedCalibrationPriors`).
+    exposure and the abundance landscape need.
     """
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
-    inj = injected_priors
     sj = _empty_sj_geometry() if sj is None else sj
     if int(sj.n_sj) != int(substrate.n_sj):
         raise ValueError(
@@ -794,11 +736,11 @@ def calibrate(
     statics = build_region_statics(chain, region_arrays, boundary_flags)
     region_eff_gdna, boundary_eff_gdna = _project_eff(chain, geometry.eff_gdna, payload)
     abundance_landscape = _abundance_landscape(
-        payload, substrate, region_arrays, inj, mature_walls, boundary_reach
+        payload, substrate, region_arrays, mature_walls, boundary_reach
     )
 
-    strand = _fit_strand(substrate, region_arrays, strand_model, inj)
-    factory = _IntronFactory(chain, substrate, region_arrays, region_eff_gdna, inj)
+    strand = _fit_strand(substrate, region_arrays, strand_model)
+    factory = _IntronFactory(chain, substrate, region_arrays, region_eff_gdna)
     # ⛔ A TOTAL density over ONE component's opportunity model is not a composition estimate; the
     # per-slot gDNA support below is the basis the landscape prior is fit and read on, and the
     # total-density field this module does use is the abundance landscape above, which reaches the
@@ -866,16 +808,6 @@ def calibrate(
             region_arrays=region_arrays,
             gdna_hyperprior=gdna_hyperprior,  # the DECONVOLVED-gDNA hyperprior (None if no refit)
             rna_sense_frac=strand.rna_sense_frac,
-            # the fitted-or-injected population priors — extract from a population scenario, inject
-            # into a toy
-            calibration_priors=InjectedCalibrationPriors(
-                rna_sense_frac=strand.rna_sense_frac,
-                n_rna_obs=strand.n_rna_obs,
-                gdna_strand_overdispersion=strand.gdna_strand_overdispersion,
-                rna_strand_overdispersion=strand.rna_strand_overdispersion,
-                intron_background=factory.background,
-                abundance_landscape=abundance_landscape,
-            ),
             abundance_landscape=abundance_landscape,
         )
     if diagnostics_out is not None and abundance_landscape is not None:
