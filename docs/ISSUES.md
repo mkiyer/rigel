@@ -297,7 +297,7 @@ order; `01_fallback`, `02_roots`, `03_bound`, `04_evidence`, `05_panel` the ruli
 `ISSUES: the-overdispersion-design-refusals`.
 
 ### the-realized-gdna-length-law-reads-rna-counts
-`priority: now — Tier 0: step 1, a numeric no-op, can land first; step 2 after strand-overdispersion step 3, never in its A/B window (owner, 2026-09-28) · kind: defect · 2026-09-28`
+`priority: now — Tier 0: step 2 after strand-overdispersion step 3, never in its A/B window (owner, 2026-09-28) · kind: defect · 2026-09-28`
 `_realized_gdna_counts` (`fl.py`) normalises the gDNA law but not its RNA input: the caller passes the de-tilted
 spliced census (`rna_fl_mass`) as `rna_pmf`, and `contained_opportunity` is linear, so every boundary's RNA rate is
 divided by the spliced count N_s, R_b → 0, and every exon-flanking boundary reads as pure gDNA. It reaches the realized
@@ -311,14 +311,11 @@ cancelling the unmeasurable-region over-pricing, which remains
 (`ISSUES: the-fl-boundary-inversion-reads-missing-evidence-as-a-value`). The uniform law at g05 ON stays 3.6 bp high
 after the fix (221.76 → 220.46 against 216.90; g50 and g98 close within 0.35 bp): one realization, unattributed —
 re-measure after step 2 before giving it a home.
-THE LANDING, four steps, each alone (owner, 2026-09-28: the EB pmf, one refresh, step 2 in its own A/B window):
-1. Delete the seven guards that never bind, bit-identical (`rename_identity.py --check`): the four `max(·, 1e-30)`
-   and `max(μ_g − 1, 1e-9)` floors in the boundary odds, `not np.isfinite(mu_next)`, and the two
-   `max(m_C + m_B, 1e-30)` after the early return (a fitted ρ_off ≥ min(Σ_{n>0} E/ΣE², 1/E_max) > 0).
-   `max(μ_r − 1, 1e-9)` binds at N_s = 0 and goes with step 2. Add unit fixtures at zero gDNA and at N_s = 0, which no
-   frozen reference reaches.
+THE LANDING, steps 2–4, each alone (owner, 2026-09-28: the EB pmf, one refresh, step 2 in its own A/B window):
 2. The fix: normalise inside the function; pass `FLModels`' EB pmf, built once (today it is built after this
-   function, in `_fl_models_from_histograms`); write E_b = ρ_off(μ_g − 1) + ρ_adj(μ_r − 1). The EB pmf carries
+   function, in `_fl_models_from_histograms`); write E_b = ρ_off(μ_g − 1) + ρ_adj(μ_r − 1), which retires the two
+   guards that bind at N_s = 0, `max(μ_r − 1, 1e-9)` and `max(rna.sum(), 1e-30)`; `test_fl.py`'s N_s = 0 fixture
+   pins today's reading there (every boundary pure gDNA) and must be re-derived, not adjusted. The EB pmf carries
    `POOL_EB_PRIOR_ESS` into the boundary odds, and plain normalisation invents a law at N_s = 0
    (`ISSUES: eb-shrinkage-magic-ess`). Gates, each failing today: the output is invariant to c·rna; on an
    off-capture expected-count fixture the on-target share is 0 and the realized law equals the uniform; the array

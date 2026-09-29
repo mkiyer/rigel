@@ -117,10 +117,10 @@ any two windows. The cluster track does not compete for local windows.
 
 **The local track.**
 1. **Tier 0, the owner's work — now**: `ISSUES: strand-overdispersion-one-shared-value` (steps 0–3, then the field
-   collapse) and `ISSUES: the-realized-gdna-length-law-reads-rna-counts` (steps 1–4), one step per window: fl step 1,
-   a numeric no-op, first; overdispersion step 0 — the contaminated-seed panel and the simulator's matched RNA
-   overdispersion, outside the tree; step 1 under its hold rule; steps 2 and 3; fl steps 2, 3 and 4, step 2 never in
-   an overdispersion window; the field collapse. After it: re-read the strand-input drift in
+   collapse) and `ISSUES: the-realized-gdna-length-law-reads-rna-counts` (steps 2–4), one step per window:
+   overdispersion step 0 — the contaminated-seed panel and the simulator's matched RNA overdispersion, outside the
+   tree; step 1 under its hold rule; steps 2 and 3; fl steps 2, 3 and 4, step 2 never in an overdispersion window;
+   the field collapse. After it: re-read the strand-input drift in
    `ISSUES: the-gdna-landscape-collapses-at-low-depth` and `ISSUES: strand-likelihood-over-confident-beyond-od`, and
    refresh the ladder report, the issue-list page and the full_lowg explanation page, which lacks the od-arm line of
    `ISSUES: the-background-dispersion-assumes-a-pure-intergenic-pool`.

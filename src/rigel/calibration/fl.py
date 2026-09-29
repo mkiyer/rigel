@@ -570,7 +570,7 @@ def _realized_gdna_counts(
     eps_count = np.zeros(n_exons)
     weight_sum = np.zeros(n_exons)
     for _ in range(2):  # one refresh of mu_g from the boundary law; measured stable
-        r_b = (rho_adj / max(rho_off, 1e-30)) * max(mu_r - 1.0, 1e-9) / max(mu_g - 1.0, 1e-9)
+        r_b = (rho_adj / rho_off) * max(mu_r - 1.0, 1e-9) / (mu_g - 1.0)
         a_b = 1.0 / (1.0 + r_b)
         weighted = a_b * nb_pair
         num = np.bincount(cls, weights=weighted, minlength=2)
@@ -579,7 +579,7 @@ def _realized_gdna_counts(
         # cancels instead of accumulating one-sidedly. An exon has at most two flanking boundaries, so
         # the per-exon mean below is a sum of at most two terms — the same arithmetic as the list it
         # replaces, in the same order.
-        eps_pair = weighted / max(rho_off * max(mu_g - 1.0, 1e-9), 1e-30)
+        eps_pair = weighted / (rho_off * (mu_g - 1.0))
         eps_sum = np.bincount(exon_region, weights=eps_pair, minlength=n_exons)
         eps_count = np.bincount(exon_region, minlength=n_exons).astype(np.float64)
         weight_sum = np.bincount(exon_region, weights=weighted, minlength=n_exons)
@@ -610,7 +610,7 @@ def _realized_gdna_counts(
             inverted = _normalized(np.clip(f_mix - (1.0 - a_mix) * r_hat, 0.0, None))
             g_B = _normalized(np.clip(f_mix + lam_b * (inverted - f_mix), 0.0, None))
         mu_next = float((g_B * L_axis[: g_B.size]).sum())
-        if not np.isfinite(mu_next) or abs(mu_next - mu_g) < 0.25:
+        if abs(mu_next - mu_g) < 0.25:
             break
         mu_g = mu_next
     m_B = 0.0 if g_B is None else a2 * n2 + a3 * n3
@@ -658,7 +658,7 @@ def _realized_gdna_counts(
 
     m0 = min(uniform.size, realized.size, h_E.size)
     # the excess rides its OWN resolution weight (applied per exon above), not `lam`
-    realized = realized[:m0] + h_E[:m0] / max(m_C + m_B, 1e-30)
+    realized = realized[:m0] + h_E[:m0] / (m_C + m_B)
     if not realized.sum() > 0.0 or not uniform[:m0].sum() > 0.0:
         return None, None, GdnaRealized(False, "empty census", 0.0, 0.0, a2, a3)
     scale = float(obs_pools[list(_GDNA_POOLS)].sum())
@@ -666,7 +666,7 @@ def _realized_gdna_counts(
     return (
         _normalized(realized) * scale,
         _normalized(uniform[:m0]) * scale,
-        GdnaRealized(True, "", m_B / max(m_C + m_B, 1e-30), m_E / total_mass, a2, a3),
+        GdnaRealized(True, "", m_B / (m_C + m_B), m_E / total_mass, a2, a3),
     )
 
 

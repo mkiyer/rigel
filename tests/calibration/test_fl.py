@@ -589,6 +589,53 @@ def test_zero_gdna_declines_rather_than_fabricating_a_law():
     assert counts is None and not diag.applied
 
 
+def test_at_zero_gdna_an_uncrossed_boundary_class_drops_the_boundary_stratum():
+    """The zero-gDNA library: RNA alone in the contained regions, so the rate reads a small positive floor,
+    and nothing crosses an exon|intergenic edge. The boundary stratum is dropped and the uniform law comes
+    back as handed in. No frozen identity reference reaches this path.
+
+    PERTURBATION: deleting the empty-class break divides 0 by 0."""
+    import dataclasses
+
+    from rigel.calibration.fl import _realized_gdna_counts
+
+    payload, opp, rl, rt, rna_pmf, uniform = _payload_fixture(boundary_excess=1.0)
+    counts = np.array(payload.region_contained_count, dtype=np.float64, copy=True)
+    counts[[0, 4]] = 0.0  # no gDNA and no RNA in intergenic space
+    counts[2] *= 40.0  # the intron holds nascent RNA alone
+    bnd = np.array(payload.boundary_unspliced_count, dtype=np.float64, copy=True)
+    bnd[[0, 3]] = 0.0  # RNA never crosses an exon|intergenic edge
+    pools = np.array(payload.pool_lengths, dtype=np.float64, copy=True)
+    pools[[POOL_DNA_INTERGENIC, POOL_DNA_INTERGENIC_EXON]] = 0.0
+    pools[POOL_DNA_INTRONIC] *= 40.0
+    payload = dataclasses.replace(
+        payload, region_contained_count=counts, boundary_unspliced_count=bnd, pool_lengths=pools
+    )
+    with np.errstate(divide="raise", invalid="raise"):
+        realized, uniform_out, diag = _realized_gdna_counts(payload, opp, rl, rt, rna_pmf, uniform)
+    assert diag.applied and diag.boundary_share == 0.0
+    assert np.isfinite(realized).all()
+    np.testing.assert_allclose(uniform_out / uniform_out.sum(), uniform / uniform.sum(), rtol=1e-12)
+
+
+def test_with_no_spliced_fragments_the_boundary_odds_stay_finite():
+    """``N_s = 0``: no RNA length law, so no RNA odds, and both boundary classes read as pure gDNA. The 1.0
+    is today's reading, not the truth: the RNA-law fix re-derives it. No frozen identity reference reaches
+    this path.
+
+    PERTURBATION: deleting the floor on the RNA law's total divides 0 by 0."""
+    from rigel.calibration.fl import _realized_gdna_counts
+
+    payload, opp, rl, rt, rna_pmf, uniform = _payload_fixture(boundary_excess=50.0)
+    with np.errstate(divide="raise", invalid="raise"):
+        realized, uniform_out, diag = _realized_gdna_counts(
+            payload, opp, rl, rt, np.zeros_like(rna_pmf), uniform
+        )
+    assert diag.applied
+    assert diag.intron_exon_share == diag.intergenic_exon_share == 1.0
+    assert np.isfinite(realized).all() and np.isfinite(uniform_out).all()
+
+
 # ── the CONVERGENCE law: no cliffs, and the two estimands merge when the split is unresolvable ───
 
 
