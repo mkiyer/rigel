@@ -100,8 +100,8 @@ prior is worth end to end, so what remains under it is the EM's and the assignme
 **Deferred is not dropped, and that distinction carries the ruling.** The deferred stratum stays in every
 benchmark and every measurement and must keep being reported: a panel that cannot see the cell the tool
 is worst at cannot tell a real win from a re-labelling. If it improves as a side effect of work on the
-other three, that is a free win; it is never the justification for a change. Every score is read per
-stratum and never pooled.
+other three, that is a free win; it is never the justification for a change. It becomes a target only
+once the other three are optimised (owner, 2026-08-14). Every score is read per stratum and never pooled.
 
 **Why this shape.** Measured 2026-08-13/14 on the rebuilt 16-condition ladder: unstranded × capture-ON
 carried 64.5 % of transcript error and 90 % of gene-level error, and that cell is not a gradient anyone
