@@ -167,9 +167,7 @@ on each is an owner call and is not invented here.
    at `g00` the factor reads 1.000, and elsewhere it tracks the simulator's truth, read with `ruler_vs_truth.py` —
    the oracle calibration keeps `P`'s efficiencies and cannot see it. A separate shrinkage correction is a defect,
    not a fix.
-4. **Pass-0 is monotone**: adding real evidence to an object never moves its answer away from truth.
-5. **Pass-0 depends on no quantity a later iteration produces** — no feedback in the first solve.
-6. **The three in-scope strata improve, or at worst hold, on the DELIVERABLE** — the transcript table in a
+4. **The three in-scope strata improve, or at worst hold, on the DELIVERABLE** — the transcript table in a
    pinned A/B pair, decomposed by the arms so that what moved is attributable — and the deferred stratum is
    reported on every table.
 
