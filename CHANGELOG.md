@@ -69,6 +69,8 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 8).
 - The fragment-length composition channel and the NPMLE gDNA prior: measured and retired.
 - `--mappability-read-length` (a no-op), `--gdna-prior-mixture-bridge`, `--sweep-n-grid-single-strand`
   and `--gdna-em-llr-bias` (an underived odds dial), and the `measured_total` background estimator.
+- `gdna_density_kde.feather` and `gdna_density_regions.feather` (`gdna_density_nodes.feather` in 0.7.1): a
+  fitted curve of the total fragment density, gDNA and RNA together, that no calibration number read.
 
 ## [0.7.1] - 2026-07-12
 

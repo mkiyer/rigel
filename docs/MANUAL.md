@@ -360,14 +360,11 @@ Pass `--tsv` to also write `.tsv` mirrors, or convert afterward with
 | `fragment_lengths.feather` | Raw fragment-length histograms, tidy `(category, length, count)` |
 | `calibration_track.feather` | Per-region gDNA solution: `(ref, start, end, gdna_mass, rna_mass, gdna_density, gdna_frac)` |
 | `calibration_track.bedgraph` | Per-region gDNA density as a genome-browser track (IGV / UCSC) |
-| `gdna_density_kde.feather` | The fitted curve of per-region fragment density, gDNA and RNA together `(log_rho, log_density, density)`; a capture diagnostic |
-| `gdna_density_regions.feather` | Every region that curve was fitted on `(log_rho, kind)`; `kind` is 0 intergenic, 1 intron, 2 exon |
 | `locus_stats.feather` | Per-locus EM convergence profiling — only with `--emit-locus-stats` |
 | `config.yaml` | Resolved run configuration (reproducibility) |
 
-The `calibration_*` and `gdna_density_*` files are written only when calibration
-runs and, for the density curve, only when the gDNA-density prior was fit (enough
-training regions). Build the HTML report from all of the above with `rigel report`.
+The `calibration_*` files are written only when calibration runs. Build the HTML
+report from all of the above with `rigel report`.
 A `config.yaml` is always written, recording all resolved parameters and I/O
 paths; rerun the exact analysis with `rigel quant --config results/config.yaml`.
 
@@ -639,7 +636,7 @@ theory is in `docs/EQUATIONS.md` and the design in `docs/DESIGN.md`.
   — which sets the gDNA-vs-RNA split each locus's EM starts from, plus the gDNA component's
   effective length. RNA is distributed among transcripts by the EM, not by calibration.
 - **A genome-browser track** of the solved gDNA density, `calibration_track.feather` /
-  `.bedgraph`, and the fitted density curve in `gdna_density_kde.feather`.
+  `.bedgraph`.
 
 The per-locus priors are priors: a decisive per-locus likelihood overrides them, so a locus that
 disagrees with calibration generally wins.

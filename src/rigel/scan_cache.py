@@ -17,8 +17,6 @@ input                           origin                                        ca
 ``strand_model``                the scan                                      yes
 ``region_arrays``               ``RegionArrays.from_index``                   no
 ``boundary_flags``              ``build_boundary_flags_array``                no
-``mature_walls``                ``build_mature_wall_distances``               no
-``boundary_reach``              ``build_contiguous_boundary_reach_arrays``    no
 ``sj``                          ``build_sj_geometry_arrays``                  no
 ``gdna_fl_pmf``/``rna_fl_pmf``  ``pipeline.library_fl_models``                no — derived
 ``config``                      the thing you are varying                     no
@@ -42,8 +40,8 @@ THE KEY NEEDS FOUR PARTS
   fails deep inside the loader with a bare ``KeyError``.
 * a REACH digest. ``reach`` is consumed by calibration and covered by neither ``partition_hash`` nor
   ``graph_hash`` — correctly, since neither the scan nor the accumulator reads it — so a reach-blind
-  key would verify clean against an index rebuild that moved a large share of contiguous reaches while
-  both existing hashes stayed byte-identical.
+  key would verify clean against an index rebuild that moved the splice-junction reaches while both
+  existing hashes stayed byte-identical.
 * the scan config, because two scans of one BAM under different settings are different tallies.
 
 Not pickle. A pickle of numpy-holding dataclasses is fragile exactly across the schema changes this
@@ -448,7 +446,7 @@ def read_scan_cache(cache_dir: str | Path, index: "TranscriptIndex", scan_config
         raise ScanCacheKeyError(
             f"cache reach digest {manifest['reach_digest']} != index reach digest {expected_reach}. "
             f"The boundary reaches moved. Neither partition_hash nor graph_hash covers reach, so this is "
-            f"the only check that notices: a rebuild can move a large share of contiguous reaches "
+            f"the only check that notices: a rebuild can move the splice-junction reaches "
             f"with both of those byte-identical. Re-scan against this index."
         )
 
@@ -546,23 +544,11 @@ def index_derived_inputs(index: "TranscriptIndex") -> dict:
     anyway, and a stored copy is how a cache goes stale against the thing it describes.
     """
     from .calibration.region_arrays import RegionArrays
-    from .calibration.splice_graph import (
-        build_boundary_flags_array,
-        build_contiguous_boundary_reach_arrays,
-        build_mature_wall_distances,
-        build_sj_geometry_arrays,
-    )
+    from .calibration.splice_graph import build_boundary_flags_array, build_sj_geometry_arrays
 
-    region_arrays = RegionArrays.from_index(index)
     return {
-        "region_arrays": region_arrays,
+        "region_arrays": RegionArrays.from_index(index),
         "boundary_flags": build_boundary_flags_array(index),
-        # The two WALL inputs the measured-total exposure needs: how far a MATURE template continues
-        # past each region bound (spliced bases, MAX over covering isoforms) and the NASCENT genomic
-        # reach at each contiguous boundary. Both are annotation-only and sample-independent.
-        # `build_mature_wall_distances` dominates this function's cost.
-        "mature_walls": build_mature_wall_distances(index, region_arrays),
-        "boundary_reach": build_contiguous_boundary_reach_arrays(index),
         # The SJ axis is index-derived too, and it is not optional: `calibrate` refuses an axis
         # whose length disagrees with the payload's `n_sj`, because one addressing a different graph
         # would place every splice on the wrong boundary.

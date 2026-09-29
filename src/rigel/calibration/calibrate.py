@@ -66,14 +66,9 @@ from .density_deconv import (
     GdnaBackground,
     fit_intron_background,
 )
-from .abundance_landscape import fit_abundance_landscape, located_enriched_mode
 from .capture_efficiency import capture_efficiencies
 from .effective_length import UNBOUNDED_REACH, conserved_cut_shares
 from .blocks import SweepCapture
-from .total_abundance import (
-    build_region_wall_mask,
-    w_max_from_deposited_lengths,
-)
 from .gdna_strand import (
     _MAX_OVERDISPERSION,
     reconcile_overdispersions,
@@ -83,7 +78,7 @@ from .gdna_strand import (
 from .region_arrays import boundary_region_indices
 from .region_chain import build_region_chain
 from .result import CalibrationResult
-from .landscape import _LOCATED_VAR, DensityLandscape, fit_landscape
+from .landscape import _LOCATED_VAR, DensityLandscape, fit_landscape, located_enriched_mode
 from .signature import RegionType, coarse_type_array
 from .strand_balance import fit_strand_balance
 from .substrate import CalibrationSubstrate
@@ -386,36 +381,6 @@ class _IntronFactory:
                 self.rows = rows
 
 
-def _wall_mask(payload, region_arrays, mature_walls, boundary_reach):
-    return build_region_wall_mask(
-        region_arrays,
-        mature_walls,
-        boundary_reach[0],
-        boundary_reach[1],
-        w_max=w_max_from_deposited_lengths(payload.deposited_lengths),
-    )
-
-
-def _abundance_landscape(payload, substrate, region_arrays, mature_walls, boundary_reach):
-    """THE ABUNDANCE LANDSCAPE — the pre-pass-0 TOTAL-density field + mode census, fitted at INIT from
-    counts and lengths only (the wall-exact measured totals), so it is circular with nothing solved. A QC
-    surface: it is the sole source of `CalibrationDiagnostics`
-    (`CalibrationDiagnostics.from_abundance_landscape`) and nothing in the solve reads it. Without the
-    wall inputs (``mature_walls``, ``boundary_reach``) it is SKIPPED, LOUDLY, never raised for: many unit
-    callers have no wall arrays, so the object stays ``None`` and there are no diagnostics
-    rather than a quietly different estimate."""
-    if mature_walls is None or boundary_reach is None:
-        logger.warning(
-            "calibration: the wall inputs are missing (mature_walls / boundary_reach, both in "
-            "scan_cache.index_derived_inputs) — skipping "
-            "the total-density landscape, so there are no density diagnostics. Nothing in the "
-            "solve reads it, so no solved number changes."
-        )
-        return None
-    mask = _wall_mask(payload, region_arrays, mature_walls, boundary_reach)
-    return fit_abundance_landscape(substrate, region_arrays, mask)
-
-
 def _policy(config, strand: _Strand):
     """The message-composition policy the config names. ⛔ THE NAME MUST SELECT THE POLICY — an arm that
     silently runs a different policy than it names is a benchmark that cannot be trusted, so an unknown
@@ -697,10 +662,7 @@ def calibrate(
     config: "CalibrationConfig",
     sj: "SpliceJunctionGeometry | None" = None,
     _debug: dict | None = None,
-    diagnostics_out: dict | None = None,
     boundary_flags: "np.ndarray | None" = None,
-    mature_walls=None,
-    boundary_reach=None,
 ) -> CalibrationResult:
     """Deconvolve the library into gDNA / RNA per object, then derive gdna_density_global — the
     stages in the module docstring's order, each a function above with one job.
@@ -712,8 +674,6 @@ def calibrate(
     in the accumulator's own sj slot order; ``None`` means the graph has no sj boundaries, which is legal
     (a single-exon-only reference) and is NOT the same as "no sj flux". ``boundary_flags`` is the graph's
     per-contiguous-boundary structural bits, carried onto the chain as ``RegionStatics.boundary_flags``.
-    ``mature_walls`` / ``boundary_reach`` are the two annotation-only WALL inputs the measured-total
-    exposure and the abundance landscape need.
     """
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
     sj = _empty_sj_geometry() if sj is None else sj
@@ -735,16 +695,11 @@ def calibrate(
     geometry = build_region_geometry(chain, substrate, region_arrays, sj, gdna_fl_pmf, rna_fl_pmf)
     statics = build_region_statics(chain, region_arrays, boundary_flags)
     region_eff_gdna, boundary_eff_gdna = _project_eff(chain, geometry.eff_gdna, payload)
-    abundance_landscape = _abundance_landscape(
-        payload, substrate, region_arrays, mature_walls, boundary_reach
-    )
 
     strand = _fit_strand(substrate, region_arrays, strand_model)
     factory = _IntronFactory(chain, substrate, region_arrays, region_eff_gdna)
     # ⛔ A TOTAL density over ONE component's opportunity model is not a composition estimate; the
-    # per-slot gDNA support below is the basis the landscape prior is fit and read on, and the
-    # total-density field this module does use is the abundance landscape above, which reaches the
-    # diagnostics and never the solve.
+    # per-slot gDNA support below is the basis the landscape prior is fit and read on.
     mass_global, eff_global = region_gdna_geometry(geometry)
     solve = _Solve(
         chain,
@@ -808,15 +763,6 @@ def calibrate(
             region_arrays=region_arrays,
             gdna_hyperprior=gdna_hyperprior,  # the DECONVOLVED-gDNA hyperprior (None if no refit)
             rna_sense_frac=strand.rna_sense_frac,
-            abundance_landscape=abundance_landscape,
-        )
-    if diagnostics_out is not None and abundance_landscape is not None:
-        # the density diagnostics come from the total-density landscape; there are none when it was
-        # not fit
-        from .diagnostics import CalibrationDiagnostics
-
-        diagnostics_out["calibration"] = CalibrationDiagnostics.from_abundance_landscape(
-            abundance_landscape
         )
     _log_summary(result, strand, substrate, sj)
     return result

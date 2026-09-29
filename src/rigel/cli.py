@@ -396,7 +396,6 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "n_sj": int(cal.n_sj),
         }
     )
-    diag = getattr(result, "calibration_diagnostics", None)
 
     # Command section — record CLI arguments
     cmd_params: dict = {
@@ -548,29 +547,6 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         logging.info(
             f"[DONE] Wrote {calibration_track_path} + {calibration_bedgraph_path.name} "
             f"({len(track)} regions)"
-        )
-
-    # gDNA-density KDE (capture diagnostic): the curve + the training-region rug.
-    if diag is not None:
-        import numpy as _np
-        import pandas as _pd
-
-        _pd.DataFrame(
-            {
-                "log_rho": _np.asarray(diag.kde_x, dtype="float64"),
-                "log_density": _np.asarray(diag.kde_logp, dtype="float64"),
-                "density": _np.exp(_np.asarray(diag.kde_logp, dtype="float64")),
-            }
-        ).to_feather(str(output_dir / "gdna_density_kde.feather"), **feather_kw)
-        _pd.DataFrame(
-            {
-                "log_rho": _np.asarray(diag.rug_log_rho, dtype="float64"),
-                "kind": _np.asarray(diag.rug_kind, dtype="int32"),
-            }
-        ).to_feather(str(output_dir / "gdna_density_regions.feather"), **feather_kw)
-        logging.info(
-            f"[DONE] Wrote gdna_density_kde.feather ({len(diag.kde_x)} pts) + "
-            f"gdna_density_regions.feather ({diag.rug_log_rho.size} regions)"
         )
 
     # Write config.yaml — reproducible run configuration

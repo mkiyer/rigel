@@ -5,7 +5,7 @@ turns a multi-condition sweep from minutes into seconds. The cache is only worth
 is refused, and the key needs four parts to manage it: ``graph_hash`` for the regions and the sj CSR,
 which the payload already carries so the tally self-keys; a REACH digest, because ``reach`` is consumed
 by calibration and covered by neither ``partition_hash`` nor ``graph_hash`` — an index rebuild can move
-a large fraction of contiguous reaches with both of those byte-identical; the scan config, because two
+the splice-junction reaches with both of those byte-identical; the scan config, because two
 scans of one BAM under different settings are different tallies; and a payload-schema digest that folds
 in the DEPOSIT RULE, since a rule change moves no field name at all. Anything derivable from the index
 is rebuilt on load and never stored, because storing it is how a cache goes stale against the thing it
@@ -219,8 +219,8 @@ class TestTheKeyRefusesAMovedIndex:
             read_scan_cache(cache_dir, scanned[0])
 
     def test_a_changed_REACH_is_refused(self, scanned, tmp_path):
-        """The one neither existing hash covers: an index rebuild can move a large fraction of
-        contiguous reaches with `partition_hash` AND `graph_hash` byte-identical, and this notices."""
+        """The one neither existing hash covers: an index rebuild can move the splice-junction
+        reaches with `partition_hash` AND `graph_hash` byte-identical, and this notices."""
         cache_dir, _cache = round_trip(scanned, tmp_path)
         manifest = json.loads((cache_dir / "manifest.json").read_text())
         manifest["reach_digest"] = "0" * 16

@@ -72,9 +72,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         "geometry and the per-slot solve",
         # One slot's own numbers, and psi — the log-density log-odds posterior over (f_pos, f_neg, f_g),
         # which `simplex_logodds` owns and which is the single densest thing in the package.
-        # `total_abundance` is the composition-FREE region count and exposure (the START/END banks
-        # side-selected by the wall rule) — geometry work, and it reads the geometry.
-        ("region_geometry", "simplex_logodds", "total_abundance"),
+        ("region_geometry", "simplex_logodds"),
     ),
     (
         4,
@@ -93,9 +91,6 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             # landscape prior from the object's own deconvolved gDNA count, read by the ruler and the locus
             # prior through the result.
             "capture_efficiency",
-            # `abundance_landscape` is the pre-pass-0 TOTAL-density field + mode census — it reuses
-            # `landscape`'s estimator sideways and reads `total_abundance` (layer 3) down.
-            "abundance_landscape",
         ),
     ),
     (
@@ -125,7 +120,6 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "derive",
             "priors",
             "result",
-            "diagnostics",
             "track",
             "calibrate",
             "<pkg>",

@@ -120,18 +120,6 @@ def nrna_active_strands(signature: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     ) != 0
 
 
-def mrna_active_strands(signature: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Per-strand mature-RNA-active masks from a signature array — ``(pos, neg)``.
-
-    Mature RNA lives only in exons, so ``mrna_active`` on strand ``s`` is that strand's exon bit,
-    hence ``mrna_active_s`` implies ``nrna_active_s``. A region's ``mrna_active`` is its own exon
-    bits; a boundary's is the AND of its two flanks, because an unspliced fragment crosses as mature
-    only over contiguous exon — otherwise it would be spliced.
-    """
-    sig = np.asarray(signature)
-    return (sig & BIT_EXON_POS) != 0, (sig & BIT_EXON_NEG) != 0
-
-
 __all__ = [
     "BIT_INTRON_POS",
     "BIT_INTRON_NEG",
@@ -147,5 +135,4 @@ __all__ = [
     "coarse_type_array",
     "transcript_strand_class",
     "nrna_active_strands",
-    "mrna_active_strands",
 ]

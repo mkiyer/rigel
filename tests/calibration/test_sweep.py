@@ -37,9 +37,6 @@ from rigel.calibration.signature import (
     BIT_EXON_POS,
     BIT_INTRON_NEG,
     BIT_INTRON_POS,
-    N_SIGNATURES,
-    mrna_active_strands,
-    nrna_active_strands,
 )
 
 
@@ -560,58 +557,11 @@ def test_pure_gdna_region_confident_at_near_binomial_od():
     assert rna_infl > rna_near, (rna_infl, rna_near)
 
 
-# ---------------------------------------------------------------------------
-# The per-strand presence masks
-#
-# `nrna_active_strands` is `free_s`, the strands the annotation admits RNA on (exon or intron bit);
-# `mrna_active_strands` is the tighter exon-bit-only mask. `build_region_statics` carries the first, and
-# `total_abundance` asserts the exon mask as the licence beside the mature wall distances.
-# ---------------------------------------------------------------------------
-
 # Slot ids on the `_mature_exon_chain` chain (``N E N E N E N E N``, regions at the even slots, see
 # `MX_EXON`). No gate reads these three, and their names do not describe the slots they hold:
 _R1_EXON = 3  # slot 3: the boundary between intron n1 (slot 2) and the exon under test (slot 4)
 _B1 = 2  # slot 2: intron n1, the exon's left flank
 _B2 = 4  # slot 4: the exon under test
-
-
-def test_mrna_active_matches_same_strand_exon_rule():
-    """The `mrna_active_strands` mature-presence mask is exactly the rule: mature is present on strand s
-    across a boundary iff the SAME-STRANDED exon bit is set on BOTH flanks. Intron bits never qualify;
-    `EX+EX- | EX+EX-` passes on BOTH strands. Enumerate all 16×16 signature pairs (a boundary's two
-    flanks) and check `mrna_active_strands` against that predicate, plus the subsumption `mrna_active_s ⇒
-    nrna_active_s` (mature ⇒ nascent). Pure, no sweep."""
-    sigs = np.arange(N_SIGNATURES, dtype=np.int64)
-    for sl in sigs:
-        for sr in sigs:
-            mrp_l, mrn_l = mrna_active_strands(np.array([sl]))
-            mrp_r, mrn_r = mrna_active_strands(np.array([sr]))
-            # a boundary's per-strand mature-crossing = AND of the two flanks' own exon bits
-            mrp = bool(mrp_l[0] and mrp_r[0])
-            mrn = bool(mrn_l[0] and mrn_r[0])
-            exp_pos = bool((sl & BIT_EXON_POS) and (sr & BIT_EXON_POS))
-            exp_neg = bool((sl & BIT_EXON_NEG) and (sr & BIT_EXON_NEG))
-            assert mrp == exp_pos, (sl, sr, mrp, exp_pos)
-            assert mrn == exp_neg, (sl, sr, mrn, exp_neg)
-            # subsumption: mature-active ⇒ nascent-active (an exon carries nascent too), per strand
-            nrp_l, nrn_l = nrna_active_strands(np.array([sl]))
-            nrp_r, nrn_r = nrna_active_strands(np.array([sr]))
-            nrp = bool(nrp_l[0] and nrp_r[0])
-            nrn = bool(nrn_l[0] and nrn_r[0])
-            assert not mrp or nrp, (sl, sr)  # mrp ⇒ nrp
-            assert not mrn or nrn, (sl, sr)
-
-    # the headline case: overlapping opposite-strand exons on both flanks ⇒ mature passes on BOTH strands
-    both = BIT_EXON_POS | BIT_EXON_NEG
-    mrp, mrn = mrna_active_strands(np.array([both]))
-    mrp2, mrn2 = mrna_active_strands(np.array([both]))
-    assert bool(mrp[0] and mrp2[0]) and bool(mrn[0] and mrn2[0])
-    # and an exon+intron mixed flank does NOT block the exon's own strand (+ passes; − is intron→intron ⇒ no)
-    mixed = BIT_EXON_POS | BIT_INTRON_NEG  # exon on +, intron on −
-    mp_l, mn_l = mrna_active_strands(np.array([mixed]))
-    mp_r, mn_r = mrna_active_strands(np.array([mixed]))
-    assert bool(mp_l[0] and mp_r[0])  # + strand: exon|exon ⇒ mature passes
-    assert not bool(mn_l[0] and mn_r[0])  # − strand: intron|intron ⇒ no mature
 
 
 def test_sweep_finite_over_extreme_configs():

@@ -3,10 +3,9 @@
 A minimal but realistic substrate — a v3 ``summary.json`` and its companion feathers — is written
 to a temp directory, and the loader, the view model, the chart specifications and the full HTML
 build run against it. The report must be self-contained, inlining its runtime, and must honour a
-custom output path. The exported density diagnostics are checked against an `AbundanceLandscape`
-fixture. The capture panel shows calibration's own answer, and the front end reads only the keys and
-format tags the view model writes. Every chart the page embeds must compile and read every mark property
-it sets. Vega-specific assertions are conditional on ``vl-convert-python``.
+custom output path. The capture panel shows calibration's own answer, and the front end reads only the
+keys and format tags the view model writes. Every chart the page embeds must compile and read every mark
+property it sets. Vega-specific assertions are conditional on ``vl-convert-python``.
 """
 
 import importlib.util
@@ -20,7 +19,6 @@ import pytest
 
 import numpy as np
 
-from rigel.calibration.diagnostics import CalibrationDiagnostics
 from rigel.report.build import build_report
 from rigel.report.html import _asset
 from rigel.report.model import _reference_table, build_view_model
@@ -272,44 +270,15 @@ def test_genome_track_spec_bins_per_ref():
     stub = SimpleNamespace(
         fragment_lengths=None,
         calibration_track=track,
-        gdna_density_kde=None,
-        gdna_density_regions=None,
         summary={},
     )
     assert set(build_charts(stub)) == {"genome"}
     empty = SimpleNamespace(
         fragment_lengths=None,
         calibration_track=None,
-        gdna_density_kde=None,
-        gdna_density_regions=None,
         summary={},
     )
     assert build_charts(empty) == {}
-
-
-def test_capture_diagnostics_from_abundance_landscape_exports_the_curve_and_the_rug():
-    """The exported diagnostics are the landscape's own curve and training population, read off the
-    fit rather than re-derived."""
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).resolve().parent / "calibration"))
-    from test_abundance_landscape import bimodal_parts, parts
-
-    from rigel.calibration.abundance_landscape import fit_abundance_landscape
-
-    counts, lengths, sig, _rho_lo, _rho_hi = bimodal_parts()
-    sub, ra, mask = parts(counts, lengths, sig)
-    al = fit_abundance_landscape(sub, ra, mask)
-    assert al is not None
-
-    diag = CalibrationDiagnostics.from_abundance_landscape(al)
-    np.testing.assert_array_equal(diag.kde_x, al.landscape.log_rho)
-    np.testing.assert_array_equal(diag.kde_logp, al.landscape.logP)
-    # a real rug: the training points themselves, not a summary of them
-    assert diag.rug_log_rho.size > 0
-    assert diag.rug_log_rho.size == diag.rug_kind.size
-    assert set(np.unique(diag.rug_kind)) <= {0, 1, 2}
-    assert {0, 2} <= set(np.unique(diag.rug_kind))  # the fixture has intergenic and exon regions
 
 
 def _with_calibration(d: Path, **keys) -> Path:

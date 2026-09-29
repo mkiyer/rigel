@@ -3,7 +3,7 @@ density against the fully captured level, under the fitted gDNA landscape, from 
 
 gDNA is one template at a uniform rate before capture, so its density after capture at an object is that
 object's capture efficiency up to the one unit ``ρ_ref`` — the located enriched mode of the landscape
-(`abundance_landscape.located_enriched_mode`), the fully captured level. An object's efficiency is
+(`landscape.located_enriched_mode`), the fully captured level. An object's efficiency is
 
     c̃_o = E[ min(ρ_o / ρ_ref, 1) | k_o, S_o ],
 

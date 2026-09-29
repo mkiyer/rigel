@@ -92,11 +92,11 @@ layer up is telling you the thing belongs lower. `rigel/calibration/_layers.py` 
 |---|---|
 | what a fragment tally MEANS | **1 · the payload view** — `splice_graph` `substrate` `region_arrays` |
 | how many places a fragment COULD have sat | **2 · opportunity** — `effective_length` `capture_eff_length` `sj_opportunity` `gdna_opportunity` `fl` |
-| one slot's own numbers, ψ, and its total | **3 · geometry + the per-slot solve** — `region_geometry` `simplex_logodds` `total_abundance` |
+| one slot's own numbers and ψ | **3 · geometry + the per-slot solve** — `region_geometry` `simplex_logodds` |
 | which strand a fragment came from | **4 · strand** — `gdna_strand` `strand_balance` |
-| how dense a component is, and the priors | **5 · density and prior** — `density_model` `density_deconv` `landscape` `abundance_landscape` |
+| how dense a component is, and the priors | **5 · density and prior** — `density_model` `density_deconv` `landscape` |
 | what one neighbour tells another | **6 · the solve** — `sweep` (the backbone) + `blocks` (the chain view's fields and the diagnostic capture) + `messages/` (the policy) + `region_init` |
-| turning the solve into a result | **7 · assemble** — `calibrate` `priors` `result` `derive` `diagnostics` `track` |
+| turning the solve into a result | **7 · assemble** — `calibrate` `priors` `result` `derive` `track` |
 
 ## The message layer
 
@@ -200,9 +200,10 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 2,754 passed / 0 skipped / 0 xfail, 2,754 collected** — re-derived 2026-09-28
-(2,772 − 18: the toy harness's 7 gates and `test_encompassing_locus.py`'s 9 cases, one strict xfail in each; the
-injected-landscape test; the scan cache's priors-extraction test).
+**The standing baseline: 0 failed / 2,710 passed / 0 skipped / 0 xfail, 2,710 collected** — re-derived 2026-09-28
+(2,754 − 44, the total-density landscape's retirement: `test_total_abundance.py`'s 21 and `test_boundary_reach.py`'s
+6; `test_abundance_landscape.py`'s 20 less the 7 census gates moved to `test_landscape.py`; `test_report.py`'s
+diagnostics-export test; the 3 `mrna_active_strands` tests).
 **Any failure at all is a regression.**
 
 **Re-derive a count, never adjust one** (`TRAPS: re-record-the-baseline`). Every gate that scans the files on

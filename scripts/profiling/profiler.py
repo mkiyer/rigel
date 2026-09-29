@@ -64,8 +64,6 @@ PROBES: tuple[tuple[str, str, str], ...] = (
     ("drain held fragments", "rigel.second_pass", "drain"),
     ("region arrays", "rigel.calibration.region_arrays", "RegionArrays.from_index"),
     ("boundary flags", "rigel.calibration.splice_graph", "build_boundary_flags_array"),
-    ("mature wall distances", "rigel.calibration.splice_graph", "build_mature_wall_distances"),
-    ("contiguous reach", "rigel.calibration.splice_graph", "build_contiguous_boundary_reach_arrays"),
     ("sj geometry", "rigel.calibration.splice_graph", "build_sj_geometry_arrays"),
     ("region partition", "rigel.calibration.splice_graph", "build_region_partition_arrays"),
     ("sj opportunity", "rigel.calibration.sj_opportunity", "crossing_probability_from_index"),

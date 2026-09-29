@@ -1084,11 +1084,11 @@ def test_the_density_FIELD_NAME_is_gone_everywhere():
 
 
 # ---------------------------------------------------------------------------
-# the START / END / SPAN region banks — the total-abundance carriers
+# the START / END / SPAN region banks — the ledger
 # ---------------------------------------------------------------------------
-# S and E have opportunity ℓ for EVERY fragment length (the walls are at template ends and are the
-# CONSUMER's problem, side-selected there); V is a pmf functional per component BY DESIGN. A
-# contained fragment is START ∧ END in one region and never SPAN. The ledger now closes twice over.
+# S and E have opportunity ℓ for EVERY fragment length (the walls are at template ends); V is a pmf
+# functional per component BY DESIGN. A contained fragment is START ∧ END in one region and never
+# SPAN. The ledger closes twice over.
 
 
 def test_every_deposited_fragment_has_exactly_one_START_and_one_END():

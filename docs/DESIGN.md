@@ -455,9 +455,10 @@ populations therefore do not all carry the same channels, and that asymmetry is 
 **The start/end/span region banks** (owner's taxonomy, 2026-08-21). Every accepted path books its first
 covered base (`region_start_count`), its last (`region_end_count`), and every region it strictly spans
 (`region_span_count`), each by genome strand. START and END have opportunity `ℓ` for every fragment
-length — the composition-free TOTAL at a REGION — and are wall-blind only at one end each, so a consumer
-side-selects; SPAN's opportunity is `(w−ℓ−1)₊`, a per-component pmf functional, consumer-gated. The
-ledger closes twice over: `ΣS = ΣE = qc.deposited`; per region `contained ≤ min(S, E)`.
+length — the composition-free TOTAL at a REGION — and are wall-blind only at one end each
+(`EQUATIONS.md` §2.3b); SPAN's opportunity is `(w−ℓ−1)₊`, a per-component pmf functional. START is the
+ledger; END and SPAN are read by nothing (`ISSUES: hygiene-ledger` (b)). The ledger closes twice over:
+`ΣS = ΣE = qc.deposited`; per region `contained ≤ min(S, E)`.
 
 **What the banks do not carry, and why.** No spliced fragment touches the region axis: both endpoints of
 an annotated intron are region bounds, so a spliced fragment can never be *contained*. No length-sum
@@ -483,7 +484,7 @@ REFUSED: bit-identity is not a goal). Tests
 validate the float banks within a derived tolerance, bracketed from both sides
 (`TRAPS: integer-channels-reproduce`).
 
-#### 3.1a-i The four forms an abundance can take — the classification rule (2026-08-21)
+#### 3.1a The four forms an abundance can take — the classification rule (2026-08-21)
 
 A census of 240 sites found the tree forms a density four ways, and only two of them are defects:
 
@@ -495,43 +496,12 @@ A census of 240 sites found the tree forms a density four ways, and only two of 
 | `mass / E_c` with numerator and divisor COMPONENT-MATCHED | `ρ_c` | not an abundance site at all: a deconvolved gDNA mass over the gDNA opportunity is correct |
 
 **The scope rule that follows (owner, 2026-08-21): a TOTAL abundance is a PRE-solve instrument.** It is
-needed in exactly three places — the density model, the total-abundance LANDSCAPE, and ENRICHMENT RATIOS.
+needed in the density model and in ENRICHMENT RATIOS (a third place, the total-abundance landscape, was
+retired 2026-09-28: `ISSUES: the-total-density-landscape`).
 Everything post-calibration is out of scope by construction: once beliefs exist, each component has its
 own fragment-length distribution and its own opportunity, so a per-component estimate is the right
 instrument. `capture_eff_length` and `priors` consume a solved `CalibrationResult`, so their `mass/E_g` is
 component-matched and a total does not belong there.
-
-#### 3.1a-ii The wall rule and the side selection — the consumer half (2026-08-21)
-
-`rigel/calibration/total_abundance.py` turns those banks into a per-slot TOTAL. Four things are settled:
-(1) a side is exact iff its template distance clears `w_max − 1`, and `w_max` is READ from the support
-end of `deposited_lengths` — never a quantile — the exact start opportunity being
-`A_start(w | d) = min(ℓ, (d + ℓ − w + 1)₊)`, which equals `ℓ` for every `w` iff the template continues
-`w_max − 1` bases past the region's genomic-HIGH bound (the END bank mirrors at the LOW bound); (2) the
-distance is the component minimum over the populations AXIOM 0 admits at that slot — gDNA's template is
-the contig, RNA on strand `s` only where `free_s`, taking the SPLICED distance where an exon covers the
-region; (3) a double-walled slot is honestly not model-free and reads NaN — measured coverage
-(`1 − double-walled`, START-mass weighted, the ladder) 94.7 % at capture-OFF, 84.3 % under capture;
-(4) the population for the mature distances excludes synthetic spans, and the filter is written — on
-every shipped index the exon rows happen to contain no synthetic transcript, so this was once true by
-accident (`TRAPS: state-the-population-rule-do-not-inherit-it-from-a-table`).
-
-#### 3.1a-iii Which of the landscape's outputs a consumer may read (2026-08-21, from the grid sweep)
-
-On 2026-08-21 `abundance_landscape.AbundanceLandscape` published `rho_0`, `span_R`, `w_slot`, the mode
-list and an anchor verdict, and they were not equally trustworthy (measured with a grid sweep of the
-landscape's bandwidth, 16 conditions, `_N_GRID` swept over a 16× range): (1) `rho_0` and the anchor
-verdict were consumable — `rho_0` moved 8–25 % across the whole range and the anchor-consistency verdict
-held 12/12 on every contaminated row at every grid; (2) `span_R` was NOT consumable — on `g50 ss0.99`
-capture-OFF it read 58 → 77 → 95.6 → 94.7 → 1.9 as the grid refined, because `split_basins` selects the enriched
-mode by basin mass and over-resolution fragments the bulk into sub-bumps; the mode COUNT may not be read
-at all (`TRAPS: a-mode-count-is-not-a-well-posed-quantity`); (3) the estimand is what makes this
-landscape right, not the estimator — a fit on `mass / eff_gdna`, a total over one component's
-opportunity model, carries the divisor's per-region spread (offset IQR 0.12 nats off capture, 1.66 under
-it, removable by no bandwidth), while the landscape's divisor is a geometry. This module is not the
-refused drop-in of `ISSUES: the-truncation-free-region-bank`; that refusal's bar still stands for any
-consumer swap. Nothing outside the tests read `rho_0`, `span_R`, `w_slot` or the anchor verdict, and they
-were removed.
 
 ### 3.1b Who owns a fragment — and nothing is ever re-attributed (owner, 2026-08-08)
 
@@ -832,8 +802,8 @@ index's graph) · `sweep` (the backbone) and `messages/` (the policy: `silent` �
 `region_chain` `region_geometry` `region_init` · `substrate` `region_arrays`
 `signature` · `effective_length` `capture_eff_length` `fl` `sj_opportunity` `gdna_opportunity` ·
 `gdna_strand` `strand_balance` · `density_deconv`
-`density_model` `landscape` `abundance_landscape` `total_abundance` · `simplex_logodds` `derive` ·
-`priors` `result` `errors` `diagnostics` `track` · `_layers` (the layering the imports already had).
+`density_model` `landscape` · `simplex_logodds` `derive` ·
+`priors` `result` `errors` `track` · `_layers` (the layering the imports already had).
 Re-derive this list from `calibration/_layers.py` and the imports rather than trusting it.
 
 **C++** (`src/rigel/native/`, nanobind, C++17, `-O3`, LTO; threads from its own pool, `thread_pool.h`):
@@ -1671,11 +1641,11 @@ published on the result as `CalibrationResult.gdna_reference_density` (`None` wh
 or no located mode lies above the depleted one, and then every efficiency is exactly 1), and read through
 those efficiencies by every component's length, the transcripts', the synthetic spans' and the locus gDNA
 component's; the private mass-weighted kernel density with its bandwidth and prominence constants, which
-accepted a mode from any five slots with positive mass, is deleted. Depleted is the largest-mass basin,
-enriched the largest-mass basin above it (`abundance_landscape.split_basins`), and a mode is located iff the
-median rendered width of its member kernels is at most one nat (`landscape._LOCATED_VAR`, §7.1 rule 4 read at
-the population's own resolution, `knn_widths`; the within-basin spread is not the statement — a basin cut by
-the grid's edge is narrow whatever its kernels). Why this and not a repair of the composition: the composition had been
+accepted a mode from any five slots with positive mass, is deleted. Depleted is the largest-mass basin
+(`landscape.split_basins`), the enriched candidate the basin above it holding the most located kernels, and
+a mode is located iff the median rendered width of its member kernels is at most one nat
+(`landscape._LOCATED_VAR`, §7.1 rule 4 read at the population's own resolution, `knn_widths`; the within-basin
+spread is not the statement — a basin cut by the grid's edge is narrow whatever its kernels). Why this and not a repair of the composition: the composition had been
 fixed first and the factor did not follow — the ladder's zero rows carry 178–189 false fragments on
 35,135 regions (one slot at or above one fragment) and still read 0.51 / 0.12 / 0.62, because a detector
 that always returns a mode reads specks as a mode; and the oracle's own counts contracted 8 % at

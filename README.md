@@ -174,7 +174,6 @@ file), `export` (Feather to TSV or Parquet) and `report`. `rigel --version` prin
 | `summary.json` | Library protocol, strand specificity, per-category fragment-length summary statistics, the calibration scalars, alignment counts, and global quantification totals |
 | `fragment_lengths.feather` | Raw per-bin fragment-length histograms, tidy `(category, length, count)` |
 | `calibration_track.feather` / `.bedgraph` | Per-region gDNA solution; the bedGraph is a genome-browser track (IGV / UCSC) |
-| `gdna_density_kde.feather` / `gdna_density_regions.feather` | The fitted gDNA-density curve and its training-region rug (written when the density prior is fit) |
 | `config.yaml` | Resolved run configuration (parameters, I/O paths). Rerun with `rigel quant --config config.yaml` |
 | `report.html` | Optional self-contained QC report, built by `rigel report` (see step 4) |
 | `locus_stats.feather` | Optional per-locus statistics, emitted only with `--emit-locus-stats` |

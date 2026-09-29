@@ -887,7 +887,6 @@ LATENT (no current path reaches it):
 - Simulator config: a capture entry without `enabled:` and without probes yields an empty `CaptureConfig`; gene and
   transcript keys are unchecked (a typo runs on the default of 100); an empty section fails with a TypeError;
   `sim_command` creates the output directory before validating.
-- `total_abundance`: IndexError when the last reference owns no regions.
 - `splice_graph._ref_slices`: unsorted input drops exons silently.
 - The transfer RNA coordinate's fallback keys on opportunity, not count, so all-zero-count single-strand exons build no
   RNA lane.
@@ -946,21 +945,20 @@ Instrument: `profiling/profiler.py`, `profiling/sweep_replay.py`.
 What the reviews left, each its own commit; content-only changes keep the collected count unchanged.
 (a) ROTTEN BUT LIVE, moving an instrument's numbers when repaired: `quant_accuracy`'s oracle arms are undrained
 (documented there).
-(b) DEAD, DEFERRED: `region_span_count`, tallied per fragment by the accumulator and carried through the payload,
-the substrate and the caches, read by nothing (the retired length channel's). Deleting it changes the payload schema
-and re-caches both panels; step 1b re-cached every panel without taking it, so it now rides the leading-intron fix's
-re-cache (`ISSUES: latent-defects`; owner, 2026-09-28). Until then `accumulator.h`'s "each population stores only the
-channels something READS" is false. The native `FragmentAccumulator` also still reserves, fills and exports
-`sj_strand` and `merge_criteria` per fragment, which the buffer drops at `from_raw`.
+(b) DEAD, DEFERRED: `region_span_count` (the retired length channel's) and `region_end_count` (the retired
+total-density landscape's), tallied per fragment by the accumulator and carried through the payload and the caches,
+read by nothing. Deleting them changes the payload schema and re-caches both panels; step 1b re-cached every panel
+without taking them, so they ride the leading-intron fix's re-cache (`ISSUES: latent-defects`; owner, 2026-09-28).
+Until then `accumulator.h`'s "each population stores only the channels something READS" is false. The native
+`FragmentAccumulator` also still reserves, fills and exports `sj_strand` and `merge_criteria` per fragment, which the
+buffer drops at `from_raw`.
 (c) PRODUCTION-DEAD, KEPT AS TEST OR INSTRUMENT SURFACE: the resolver's `intron_bp`, the tested half of its overlap
 profile; `rigel.sim.benchmark` and `Scenario.build_oracle`, test tooling inside the package;
 `region_init.has_own_composition_evidence`, which tests use as a check; `priors._project_regions_to_loci`, kept for
 `prior_vs_oracle.py` (`assemble_priors` calls `_region_locus_shares` directly); `fl`'s `GdnaContrast` and
 `GdnaRealized`, computed and discarded (decided at `ISSUES: the-realized-gdna-length-law-reads-rna-counts` step 2);
-`AbundanceLandscape`'s census fields (`modes`, `depleted`, `enriched`, `n_train`, `AbundanceMode.width`), read only by
-tests until the format batch gives `depleted` a reader; the vendored `_cgranges_impl` extension, still compiled,
-optimised, LTO'd and shipped for a test-only `query()`, while `index.py`'s docstrings present it as a quantification
-facility.
+the vendored `_cgranges_impl` extension, still compiled, optimised, LTO'd and shipped for a test-only `query()`, while
+`index.py`'s docstrings present it as a quantification facility.
 (d) CLAIMS NOT RE-DERIVED on the current tree, left standing: that most in-scope error sits at the simplex
 vertices (`simplex_logodds`, a relay-era measurement); `sweep`'s refused deferral of UNIDENTIFIED slots to the
 prior (priced 2026-07, with no refusal entry here); `region_geometry`'s "no per-region spliced floor" A/B
@@ -1092,7 +1090,8 @@ Instrument: none in the tree; the session's guards (`mem_guard_env.sh`, `mem_gua
 ### the-format-changes-to-batch-before-release
 `priority: later — Tier 4, before 0.8.0 while summary.json schema 3 is unreleased; the index bump before the cluster's working-index build (owner, 2026-09-28) · kind: decision · 2026-09-28`
 Changes to an output or on-disk format, batched so each format changes once. RULED (owner, 2026-09-28): the whole
-batch, before 0.8.0.
+batch, before 0.8.0; AMENDED the same day: the two density feathers are removed with the total-density landscape, not
+renamed (`ISSUES: the-total-density-landscape`).
 (a) `summary.json` (schema 3, unreleased):
 - one od field instead of two, with its information and an evidence label, so a no-evidence 0 reads apart from a
   measured 0 (`ISSUES: strand-overdispersion-one-shared-value`);
@@ -1100,11 +1099,10 @@ batch, before 0.8.0.
   and a spliced fragment is certified RNA (Axiom 0). The count is so far inferred (27 at g001 OFF, 29 at g01 OFF, from
   the three-exon shadows), not read from `n_intergenic_spliced`; `quant_accuracy.py` copies it into the release
   report's gDNA pool;
-- the depleted gDNA density, the mode `split_basins` computes inside `located_enriched_mode` and discards: it restores
-  the report's on-target / off-target fold (dividing by `gdna_density_global` instead is biased, 25× against about
-  1,000× from the modes) and gives `AbundanceLandscape`'s `depleted` census a reader; it touches about six test
-  construction sites and two instruments;
-- `gdna_density_kde.feather` and `gdna_density_regions.feather` renamed: they hold the TOTAL-density landscape;
+- the depleted gDNA density, read off the gDNA landscape by `landscape.split_basins`, which `located_enriched_mode`
+  calls and discards: it restores the report's on-target / off-target fold (dividing by `gdna_density_global` instead
+  is biased, 25× against about 1,000× from the modes); it touches about six test construction sites and two
+  instruments;
 - the report's capture note, which says "no calibration" for a 0.7.1 or schema-2 summary that has a calibration block.
 (b) The index (`INDEX_FORMAT_VERSION` 8): drop the written-never-read columns (`transcripts.feather`'s `abundance`,
 `nrna_abundance` and `n_exons`; `sj.feather`'s `interval_type`), and add the duplicate map as an alias map
@@ -1396,6 +1394,26 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### the-total-density-landscape
+CLOSED 2026-09-28 (owner): retired as QC-only, with `total_abundance.py`, `diagnostics.py`, its two wall inputs
+(`build_mature_wall_distances`, `build_contiguous_boundary_reach_arrays`), the two feathers it wrote
+(`gdna_density_kde.feather`, `gdna_density_regions.feather`) and what only it read (`signature.mrna_active_strands`, the
+substrate's start/end/span copies, `fit_landscape`'s `knn_scale`, `split_basins`' anchor rate). No solve, report or
+instrument read it: all 29 `CalibrationResult` fields were bit-identical with and without its wall inputs on six
+test-chromosome conditions, and `rename_identity.py --check` read bit-identical on the three references frozen at
+509248f3. Its mode census (`split_basins`, `located_enriched_mode`, the ruler's reference) moved to `landscape.py`; the
+START bank's model-free identity and its exactness condition stay in `EQUATIONS.md` §2.3b. Its rulings as they stood
+(2026-08-21):
+- THE WALL RULE: a START (END) side is exact iff the template continues `w_max − 1` bases past the region's
+  genomic-high (low) bound, with `w_max` read from the support end of `deposited_lengths`, never a quantile; the
+  distance is the component minimum over `T(slot)`; a double-walled region is not model-free. Coverage, START-mass
+  weighted on the ladder: 94.7 % at capture-OFF, 84.3 % under capture.
+- WHAT A CONSUMER COULD READ (a grid sweep over 16 conditions, `_N_GRID` over a 16× range): `rho_0` (it moved
+  8–25 %) and the anchor verdict (12/12 contaminated rows) were consumable; `span_R` was not (58 → 77 → 95.6 → 94.7
+  → 1.9 on `g50 ss0.99` OFF as the grid refined); the mode count never
+  (`TRAPS: a-mode-count-is-not-a-well-posed-quantity`). A fit on `mass / eff_gdna` carries the divisor's per-region
+  spread (offset IQR 0.12 nats off capture, 1.66 under it), which no bandwidth removes.
 
 ### benchmark-noise-floors-unmeasured
 CLOSED 2026-09-28 (owner): not a project. A last-bit change moves the genes by at most 15 fragments and the gDNA pool
@@ -2444,9 +2462,9 @@ SUPERSEDED 2026-09-14: ψ's composition reference fitted from composition-free o
 enrichment responsibility, the detector as a boolean) was the measured-prior thread's fourth rung
 (2026-08-26). The gDNA landscape hyperprior (`DESIGN.md` §7.1, trained on the previous solve's deconvolved
 gDNA, the zero controls at a few hundred fragments) is the population prior ψ carries, and ψ has no reference
-location (`DESIGN.md` §6b.1); the total-density landscape it would have consumed is QC-only. The requirements
-it listed (span both lattice ends, exact at `g00`, one pseudo-fragment) are met or moot. Re-open only with a
-measured gap the landscape prior cannot close.
+location (`DESIGN.md` §6b.1); the total-density landscape it would have consumed was QC-only, and is retired
+(`ISSUES: the-total-density-landscape`). The requirements it listed (span both lattice ends, exact at `g00`, one
+pseudo-fragment) are met or moot. Re-open only with a measured gap the landscape prior cannot close.
 
 ### reference-prior-refuted-at-concept-level
 RECORD (2026-08-24; the ruling is `DESIGN.md` §6b.1): ψ's reference tilt was refuted at the concept level — on

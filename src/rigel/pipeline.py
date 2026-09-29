@@ -94,9 +94,6 @@ class PipelineResult:
     # Per-region genome-wide gDNA track (ref/start/end + gDNA mass/density/frac),
     # built from the calibration result; feeds the report's genome track + bedGraph.
     calibration_track: "object" = None
-    # Report-facing calibration diagnostics (the total-density landscape's KDE); None
-    # when the landscape was not fit (no wall inputs).
-    calibration_diagnostics: "object" = None
 
 
 def _sj_tag_to_spec(sj_strand_tag) -> str:
@@ -920,12 +917,7 @@ def run_pipeline(
     # -- Calibration: deconvolve every region and boundary into gDNA / RNA+ / RNA− --
     from .calibration import calibrate
     from .calibration.region_arrays import RegionArrays
-    from .calibration.splice_graph import (
-        build_boundary_flags_array,
-        build_contiguous_boundary_reach_arrays,
-        build_mature_wall_distances,
-        build_sj_geometry_arrays,
-    )
+    from .calibration.splice_graph import build_boundary_flags_array, build_sj_geometry_arrays
 
     _warn_if_calibration_strand_unidentifiable(strand_models)
     strand_ci_eps = strand_models.strand_specificity_ci_epsilon(confidence=0.99)
@@ -940,11 +932,6 @@ def run_pipeline(
     # calibrate(), microseconds later, and two copies of an invariant is one too many.
     region_arrays = RegionArrays.from_index(index)
     boundary_flags = build_boundary_flags_array(index)
-    # The two annotation-only WALL inputs, beside the other index-derived arrays: the total-density
-    # landscape reads them, and building them here keeps production and
-    # `scan_cache.index_derived_inputs` on ONE code path.
-    mature_walls = build_mature_wall_distances(index, region_arrays)
-    boundary_reach = build_contiguous_boundary_reach_arrays(index)
     # The sj axis, in the accumulator's own sj slot order: where each sj attaches,
     # its TRANSCRIPT strand, and its exonic reach either side. The calibrator places it as a FACTOR on
     # its two endpoint regions — never as a message channel, since every sj closes an undirected
@@ -965,7 +952,6 @@ def run_pipeline(
     )
 
     # NOTE: the buffer is NOT freed here — quant_from_buffer scans it below.
-    _calib_diag: dict = {}
     calibration = calibrate(
         payload=calibration_payload,
         region_arrays=region_arrays,
@@ -974,12 +960,8 @@ def run_pipeline(
         rna_fl_pmf=fl_models.rna_pmf,
         config=config.calibration,
         sj=sj,
-        diagnostics_out=_calib_diag,
         boundary_flags=boundary_flags,
-        mature_walls=mature_walls,
-        boundary_reach=boundary_reach,
     )
-    calibration_diagnostics = _calib_diag.get("calibration")
 
     # FRAGMENTS, not object incidences. The sum still runs over all three axes — gDNA is contained
     # in a region or crosses a boundary, RNA also jumps, and at a donor boundary the sj flux IS the
@@ -1059,5 +1041,4 @@ def run_pipeline(
         calibration=calibration,
         fl_models=fl_models,
         calibration_track=calibration_track,
-        calibration_diagnostics=calibration_diagnostics,
     )

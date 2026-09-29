@@ -284,9 +284,8 @@ def test_one_region_start_per_ACCEPTED_fragment(scanned):
     Checked against the payload's own QC tally, which is written at the SAME point in the deposit but
     is a separate counter: they can only agree if every accepted fragment reached both.
     """
-    payload, ra, _buffer, _index = scanned
-    sub = CalibrationSubstrate.from_payload(payload, ra)
-    assert int(np.asarray(sub.region_start_count).sum()) == int(payload.qc.deposited)
+    payload, _ra, _buffer, _index = scanned
+    assert int(np.asarray(payload.region_start_count).sum()) == int(payload.qc.deposited)
     assert int(payload.qc.deposited) > 0, "a scan that deposited nothing proves nothing"
 
 
@@ -322,7 +321,7 @@ def test_contained_deposits_never_exceed_the_accepted_fragments(scanned):
     payload, ra, _buffer, _index = scanned
     sub = CalibrationSubstrate.from_payload(payload, ra)
     contained = int(np.asarray(sub.region_contained.count).sum())
-    assert 0 < contained <= int(np.asarray(sub.region_start_count).sum())
+    assert 0 < contained <= int(np.asarray(payload.region_start_count).sum())
 
 
 def test_no_boundary_STRADDLES_a_reference(scanned):

@@ -476,8 +476,7 @@ class Tally:
     region_contained_count: np.ndarray  # uint32[n_regions, 2]
     #: uint32[n_regions, 2] — the path's FIRST covered base, by align strand; one per accepted
     #: fragment, so ``Σ (both columns) == qc.deposited`` — THE ledger invariant. Opportunity ``ℓ``
-    #: for every fragment length; wall-blind only at the template's DOWNSTREAM end (the consumer
-    #: side-selects against ``region_end_count``, whose wall is the opposite one).
+    #: for every fragment length; wall-blind only at the template's DOWNSTREAM end.
     region_start_count: np.ndarray
     #: uint32[n_regions, 2] — the MIRROR: the path's LAST covered base, by align strand. Its own
     #: ledger: ``Σ == qc.deposited``. Wall-blind only at the template's UPSTREAM end.

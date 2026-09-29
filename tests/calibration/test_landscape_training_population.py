@@ -118,7 +118,7 @@ def _training_counts(monkeypatch, belief, parts):
     chain, _, statics, region_arrays, mass, eff = parts
     seen = {}
 
-    def spy(count, mass_, eff_, var, *, anchor, knn_scale=0.5, domain=None, prev=None):
+    def spy(count, mass_, eff_, var, *, anchor, domain=None, prev=None):
         seen["count"] = np.asarray(count, np.float64)
         seen["anchor"] = np.asarray(anchor, bool)
         seen["domain_mass"] = None if domain is None else np.asarray(domain[0], np.float64)
@@ -325,7 +325,7 @@ def test_the_result_publishes_the_last_landscapes_located_enriched_mode(sweep_in
     """The reference the ruler and the prior assembler read is the located enriched mode of the LAST
     refit's landscape, published on the result; with no refit there is no landscape and no reference.
     PERTURBATION: with the located-mode reader forced to answer, the result carries exactly that answer."""
-    from rigel.calibration.abundance_landscape import AbundanceMode, LocatedMode
+    from rigel.calibration.landscape import LandscapeMode, LocatedMode
     from rigel.config import CalibrationConfig
 
     res0 = CAL.calibrate(
@@ -360,7 +360,7 @@ def test_the_result_publishes_the_last_landscapes_located_enriched_mode(sweep_in
         assert np.any(res.gdna_capture_efficiency_region < 1.0)
 
     forced = LocatedMode(
-        mode=AbundanceMode(log_rho=-2.0, basin_mass=0.3, width=0.1, lo=-3.0, hi=-1.0), n_members=7
+        mode=LandscapeMode(log_rho=-2.0, basin_mass=0.3, lo=-3.0, hi=-1.0), n_members=7
     )
     monkeypatch.setattr(CAL, "located_enriched_mode", lambda ls: forced)
     res2 = CAL.calibrate(

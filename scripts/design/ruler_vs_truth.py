@@ -80,11 +80,10 @@ if importlib.util.find_spec("rigel") is None:
 sys.path.insert(0, str(_REPO / "scripts" / "design"))
 
 from _shared import set_field, sibling  # noqa: E402
-from rigel.calibration.abundance_landscape import located_enriched_mode  # noqa: E402
 from rigel.calibration.calibrate import calibrate  # noqa: E402
 from rigel.calibration.capture_eff_length import transcript_capture_eff_lengths  # noqa: E402
 from rigel.calibration.capture_efficiency import capture_efficiencies  # noqa: E402
-from rigel.calibration.landscape import fit_landscape  # noqa: E402
+from rigel.calibration.landscape import fit_landscape, located_enriched_mode  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.region_chain import BOUNDARY, REGION  # noqa: E402
 from rigel.calibration.signature import RegionType, coarse_type_array  # noqa: E402

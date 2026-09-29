@@ -280,10 +280,4 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     assert listed, "docs/MANUAL.md lists no summary.json calibration block"
     assert set(re.findall(r'^\s+"(\w+)":', listed.group(1), re.M)) == written
 
-    # The total-density landscape calibration fitted is persisted beside it.
-    if pr.calibration_diagnostics is not None:
-        kde = pd.read_feather(out / "gdna_density_kde.feather")
-        assert {"log_rho", "log_density", "density"} <= set(kde.columns)
-        assert (out / "gdna_density_regions.feather").exists()
-
     sc.cleanup()

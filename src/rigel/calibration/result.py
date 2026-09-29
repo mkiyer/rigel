@@ -177,7 +177,7 @@ class CalibrationResult:
     # --- library scalars ---
     gdna_density_global: float  # >= 0, global gDNA density (mass/bp); 0 in a zero-gDNA library
     #: The fully-captured gDNA density the ruler and the locus gDNA effective length contract against:
-    #: the located enriched mode of the last refit's fitted landscape (`abundance_landscape.located_enriched_mode`),
+    #: the located enriched mode of the last refit's fitted landscape (`landscape.located_enriched_mode`),
     #: or ``None`` — no enriched gDNA mode, which is every capture-OFF and every gDNA-free library, and
     #: then nothing contracts. A positive finite density when present.
     gdna_reference_density: float | None

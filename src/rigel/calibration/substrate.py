@@ -107,19 +107,6 @@ class CalibrationSubstrate:
     n_boundaries: int
     n_sj: int
 
-    #: int64[n_regions, 2] — the path's FIRST covered base, by genome strand; the column sum equals
-    #: qc.deposited, which makes it a ledger. Its opportunity is the region length for every fragment
-    #: length, so it is the REGION half of the composition-free total; it is wall-blind only at the
-    #: template's DOWNSTREAM end, which the mirror below is side-selected against.
-    region_start_count: np.ndarray
-    #: int64[n_regions, 2] — the mirror: the path's LAST covered base, summing to qc.deposited too.
-    #: Wall-blind only at the template's UPSTREAM end.
-    region_end_count: np.ndarray
-    #: int64[n_regions, 2] — regions STRICTLY spanned, opportunity ``(w-ell-1)+``, a per-component pmf
-    #: functional by design. Its consumers are the ledger invariants: contained <= min(start, end),
-    #: and span is identically 0 wherever the region length reaches ``w_max - 1``.
-    region_span_count: np.ndarray
-
     #: Four populations, and they do NOT carry the same channels. A channel is stored where a named
     #: consumer reads it and nowhere else::
     #:
@@ -162,9 +149,6 @@ class CalibrationSubstrate:
             n_regions=payload.n_regions,
             n_boundaries=payload.n_boundaries,
             n_sj=payload.n_sj,
-            region_start_count=np.asarray(payload.region_start_count, dtype=np.int64),
-            region_end_count=np.asarray(payload.region_end_count, dtype=np.int64),
-            region_span_count=np.asarray(payload.region_span_count, dtype=np.int64),
             region_contained=view("region_contained", payload.region_contained_count),
             boundary_unspliced=view(
                 "boundary_unspliced",

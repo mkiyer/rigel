@@ -270,8 +270,7 @@ def region_gdna_geometry(geometry: RegionGeometry):
     not have to open a second file to find out which component this divisor belongs to.
 
     No total density may be formed from this pair as ``mass / eff_gdna``: that is a total over one
-    component's opportunity model, and :mod:`.abundance_landscape`'s measured totals are what a density
-    field is fitted on instead.
+    component's opportunity model.
 
     There is nothing to sum at a boundary. One set of numbers per slot means no ``mass_l + mass_r`` over
     ``E_l + E_r``, and therefore no half cancelling against a half missing from a per-face length.

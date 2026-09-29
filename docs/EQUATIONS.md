@@ -83,8 +83,8 @@ there is no graph traversal anywhere.
 
 ## 2. Reciprocal opportunity, and where it is model-free
 
-Implemented by `accumulator.cpp` (the boundary and sj `1/(w−1)` deposits) and
-`calibration/total_abundance.py` (the start/end pair of §2.3b).
+Implemented by `accumulator.cpp` (the boundary and sj `1/(w−1)` deposits, and the start/end banks of
+§2.3b, which no calibration stage reads).
 
 **The general rule: deposit `1/A(w)` where `A(w)` is that population's own opportunity** — the number of
 admissible start positions for a length-`w` fragment at that object. Then, by linearity alone,
@@ -131,16 +131,7 @@ within `d` of the template's genomic-high end, only starts that still admit a le
     A_start(w | d)  =  ℓ    for every w    ⟺    d ≥ w_max − 1   ← the exactness condition
 
 and at `d = 0` this is `(ℓ − w + 1)₊`, the contained opportunity, still deposited as the flat `1/ℓ`.
-`E_r` is the mirror, exact iff `d_low ≥ w_max − 1`. The two fail at opposite ends, which closes the pair:
-use the side whose wall does not bind, average where both are exact (two counts of one rate at one
-opportunity, so the pooled rate is the precision-weighted combination), refuse where both bind. The wall
-is component-differential — gDNA's template is the chromosome and never binds, a nascent molecule's is
-its genomic span, a mature molecule's its spliced length — so the distance is taken at the component
-minimum over the populations `T(slot)` admits. The pair also gives a field-free test: `S_r/ℓ` and `E_r/ℓ`
-share their opportunity and read the same field, so their ratio has expectation exactly 1 wherever both
-are exact, and a binding wall moves it in a known direction. ⛔ A
-comparison against the contained bank is not field-free: the two weight a region's positions differently
-(`TRAPS: two-estimators-of-one-rate-weight-the-field-differently`).
+`E_r` is the mirror, exact iff `d_low ≥ w_max − 1`.
 
 **2.4 Superadditivity.** Contained effective lengths are superadditive — `Σ E(children) < E(whole)` for
 any split — so densities, effective lengths and variances cannot be pooled across two partitions; only
@@ -244,7 +235,7 @@ what the policy carries.
   still a terminus: `sj+term` is ruled with `term`, never with `sj`.
 
 **3.5g A total abundance must not be `mass / effective_length` — the accumulator already deposits the
-composition-free quantity** (`calibration/total_abundance.py`; ruling 2026-08-20). An effective length is
+composition-free quantity** (ruling 2026-08-20). An effective length is
 a function of the fragment-length distribution, and gDNA and RNA have different ones, so `mass / E` is a
 function of the composition being solved for and any enrichment ratio built from it is circular (100
 counts in a 500 bp region read 0.25 as pure gDNA and 0.33 as pure RNA at means 100 and 200). The
@@ -1055,7 +1046,7 @@ Known approximation: `ρ` enters as a hard multiplicative zero, but zero observa
 `P(0 | λ, E) = e^(−λE)`, not zero. The hard zero is the large-exposure limit of the correct likelihood, so
 it is right where the library is deep and wrong where it is shallow.
 
-## 11. The conserved frame — every component's shares of its objects at their capture efficiencies (`effective_length.conserved_cut_shares`, `capture_eff_length`, `capture_efficiency`, `priors.assemble_priors`, `calibrate._gdna_boundary_conserved_len`; the reference, `abundance_landscape.located_enriched_mode`)
+## 11. The conserved frame — every component's shares of its objects at their capture efficiencies (`effective_length.conserved_cut_shares`, `capture_eff_length`, `capture_efficiency`, `priors.assemble_priors`, `calibrate._gdna_boundary_conserved_len`; the reference, `landscape.located_enriched_mode`)
 
 Under hybrid capture the EM divides every component by its capture-contracted length, and one rule gives it
 for all three — the locus gDNA component, every synthetic nascent span, every annotated transcript: the sum,
@@ -1226,7 +1217,7 @@ and its efficiency multiplies nothing, and no crossing is apportioned onto the p
 **`ρ_ref` is a population quantity.** It is the enriched mode of the population density `P(log ρ_g)`,
 and the tool fits exactly that density: `landscape.DensityLandscape`, the landscape ψ reads on the refits,
 trained on the located compositions and the zero-count anchors (DESIGN §7.1). Its census
-(`abundance_landscape._census`) partitions the grid into basins at the minima between interior maxima;
+(`landscape._census`) partitions the grid into basins at the minima between interior maxima;
 the depleted basin is the largest by rendered mass (for gDNA the unprobed objects outnumber the probed
 ones — 0.70–1.00 of the mass on every row of both panels), and the enriched candidate is the basin
 above it holding the most located kernels, `None` when nothing lies above.

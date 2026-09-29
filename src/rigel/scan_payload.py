@@ -475,7 +475,7 @@ class AccumulatorPayload:
     )  # uint32[n_regions, 2] — the whole path lies inside the region
     #: uint32[n_regions, 2] — the path's FIRST covered base, by align strand. THE ledger invariant:
     #: Σ over both columns == qc.deposited. Opportunity ℓ for every fragment length; wall-blind only
-    #: at the template's DOWNSTREAM end (side-select against region_end_count).
+    #: at the template's DOWNSTREAM end.
     region_start_count: np.ndarray
     #: uint32[n_regions, 2] — the MIRROR: the path's LAST covered base. Σ == qc.deposited; wall-blind
     #: only at the template's UPSTREAM end.
