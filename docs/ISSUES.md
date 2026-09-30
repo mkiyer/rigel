@@ -1428,6 +1428,26 @@ shipped `gdna_pmf` read by the scorer, geometry unchanged): ladder stranded × O
 +15.3k transcripts at g05 ss.99 ON (predicted +16.2k). Not a candidate until RNA's scorer table is in the same frame
 (`ISSUES: the-scorer-reads-a-census-length-law`).
 
+### the-gdna-length-log-ratio-table
+REFUSED 2026-09-29 at stage 0, a prototype outside the tree: six of nine pre-registered falsifiers fired. The design:
+the EM's gDNA table as its RNA table times the gDNA–RNA length log-ratio δ, measured inside single-strand objects by
+distinct-pair strand unmixing and a two-pool contrast, combined by inverse variance, faded, and held as a Gaussian
+log-ratio outside RNA's range. What held: the strand source read the labelled within-object laws to about 2 bp, and
+where δ = 0 the design is the no-length arm, worth −13.6k transcripts and −8.6k genes on the ladder's stranded × ON
+rows. What killed it:
+- THE TABLE. `rna_pmf·e^δ` places gDNA mass beyond RNA's support only through the RNA law's EB floor, which the held
+  edge value multiplies. On the test chromosome's gDNA-long panel (gDNA 250 ± 150 against RNA 100 ± 50) stranded × OFF
+  genes read shipped 27.5k, no length 32.2k, design 46.1k; the table's mean 433 bp against a true 261, with 64 % of its
+  mass beyond 436 bp (true 7 %). Oracle moments still read perr .215 against shipped's .012, and the labelled per-length
+  ratio with no family .177: the construction fails, not the estimator.
+- POOLING. Pooling normalised laws across objects before dividing bends a real ratio's shape: an exact two-object
+  example reads 0.532 nats wrong (an external review, reproduced). No equal-law gate can see it.
+- THE CONTRAST AS A δ SOURCE. On equal laws it reads small systematic gaps that its covariance calls significant (the
+  test chromosome's base panel: −1.6 to −27 bp on 14 of the 15 rows with λ > 0; unstranded × ON g50 +7,766 genes
+  against no length), and under capture it is biased toward zero (−107 against −162 bp on fl-gap long ON).
+- THE FAMILY. Two moments per law cost 1.5–3.5× perr against the labelled per-length ratio.
+Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-29_fl_tilt_stage0/` (`report.md`, `REPORT_FOR_REVIEW.md`).
+
 ### the-total-density-landscape
 CLOSED 2026-09-28 (owner): retired as QC-only, with `total_abundance.py`, `diagnostics.py`, its two wall inputs
 (`build_mature_wall_distances`, `build_contiguous_boundary_reach_arrays`), the two feathers it wrote
