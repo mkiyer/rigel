@@ -49,11 +49,12 @@ sparse libraries lose their gDNA.
   synthetic spans over-called at `g98`) and calibration's RNA floor at `g98` — `quant_accuracy.py --arm base` beside
   `--arm oracle_ruler` and `--arm oracle`, `ISSUES: the-capture-length-owns-stranded-capture-on`.
 - **Fragment lengths**: the scorer's two length tables are censuses that average capture over different placements,
-  and since the RNA-counts fix (2026-09-30) that frame gap owns stranded × capture ON's +1.75 % transcripts and
-  +4.2 % genes — `ISSUES: the-scorer-reads-a-census-length-law`, then the boundary inversion's second wave; the RNA law
-  trains on spliced fragments that carry splice artifacts
-  (`ISSUES: splicing-artifacts`) — `calibration/fl.py`, `gdna_density.py`, `calibration_vs_oracle.py`; watch
-  `ISSUES: capture-degeneracy-standing-risk`.
+  and the capture ruler counts capture a second time on RNA's; one uncaptured frame is the largest lever measured on
+  stranded × capture ON, but it loses on real length gaps until the ruler prices RNA's capture from gDNA's
+  length-resolved mass, which Rigel does not collect — parked past 0.8.0 (owner, 2026-09-30),
+  `ISSUES: the-scorer-reads-a-census-length-law`; the boundary inversion's second wave stays open; the RNA law trains on
+  spliced fragments that carry splice artifacts (`ISSUES: splicing-artifacts`) — `calibration/fl.py`,
+  `gdna_density.py`, `calibration_vs_oracle.py`; watch `ISSUES: capture-degeneracy-standing-risk`.
 - **gDNA strand overdispersion**: the reconcile keeps gDNA's and RNA's values apart where the owner rules one shared
   value, and on a planted panel the shipped gDNA value sits near zero; `EQUATIONS.md` §6b–§6c and `DESIGN.md` §3.3a
   describe a fit that never shipped, §6a's no-bias claim is false, and `clamped_at_ceiling` and `effective_seeds` come
@@ -102,73 +103,81 @@ sparse libraries lose their gDNA.
 
 ## Next — the order
 
-Two tracks run side by side, and `ISSUES.md`'s OPEN section follows this order within each priority. The local
-track takes one A/B window per mechanism; a numeric no-op, proven with `rename_identity.py --check`, lands between
-any two windows. The cluster track does not compete for local windows.
+Ranked for the release, most critical first (owner, 2026-09-30): the strand overdispersion is finished before
+anything else, the cluster track included; then what can ship wrong on real data, or cannot change once released,
+comes before the in-scope accuracy work, which is at diminishing returns on the ladder. `ISSUES.md`'s
+OPEN section follows this order within each priority. The cluster track does not compete for local A/B windows; the
+local track takes one A/B window per mechanism, and a numeric no-op, proven with `rename_identity.py --check`, lands
+between any two windows.
 
-**The cluster track — now.**
-- **Splicing artifacts, in phases** (`ISSUES: splicing-artifacts`): the substrate — the local-only VCaP mix and cfRNA
-  copies confirmed on the cluster and uploaded where missing, a working index built after the index format bump
-  (`ISSUES: the-format-changes-to-batch-before-release`, so the cluster rebuilds once), truth mixes, and the splice
-  evidence regenerated from scratch by a new run, a separate task; both errors measured on today's tree; the mechanism
-  census; the h-weighted reading; training sets weighted by each fragment's probability of being genuine, which
-  unblocks strand-overdispersion step 4; aligner robustness and the catalogue rebuild.
-- **The production index's manifest**, checked before any cluster quant
-  (`ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`).
-
-**The local track.**
-1. **Tier 0, the owner's work — now**: `ISSUES: strand-overdispersion-one-shared-value` (steps 0–3, then the field
-   collapse), one step per window (the fl.py fix landed 2026-09-30; its steps 3–4 joined the second wave):
-   overdispersion step 0 — the contaminated-seed panel and the simulator's matched RNA overdispersion, outside the
-   tree; step 1 under its hold rule; steps 2 and 3; the field collapse. After it: re-read the strand-input drift in
-   `ISSUES: the-gdna-landscape-collapses-at-low-depth` and `ISSUES: strand-likelihood-over-confident-beyond-od`, and
-   refresh the ladder report, the issue-list page and the full_lowg explanation page, which lacks the od-arm line of
+**Release-critical — before 0.8.0.**
+1. **Tier 0, strand overdispersion — first, before anything else (owner, 2026-09-30)**
+   (`ISSUES: strand-overdispersion-one-shared-value`), one step per window: step 0 — the contaminated-seed panel and the
+   simulator's matched RNA overdispersion, outside the tree; step 1 under its hold rule; steps 2 and 3; the field
+   collapse. After it: re-read the strand-input drift in `ISSUES: the-gdna-landscape-collapses-at-low-depth` and
+   `ISSUES: strand-likelihood-over-confident-beyond-od`, and refresh the ladder report, the issue-list page and the
+   full_lowg explanation page, which lacks the od-arm line of
    `ISSUES: the-background-dispersion-assumes-a-pure-intergenic-pool`.
-2. **Tier 1, the low-depth defects — next**: in scope and the largest real-data effect found; after Tier 0 and A/B'd
-   apart from it. In order: the failed refit alone (`ISSUES: the-gdna-landscape-collapses-at-low-depth`); the
-   gDNA-only object row in `calibration_vs_oracle.py`
-   (`ISSUES: the-background-dispersion-assumes-a-pure-intergenic-pool`); the unrun real-data arm; the landscape fit,
-   derived and scored by class, without regressing its zero controls
+2. **Splicing artifacts on real data** — the cluster track, after the strand overdispersion
+   (`ISSUES: splicing-artifacts`), in phases: the substrate — the local-only VCaP mix and cfRNA copies confirmed on the
+   cluster and uploaded where missing, a working index built after the index format bump, truth mixes, and the splice
+   evidence regenerated from scratch by a new run, a separate task; both errors measured on today's tree; the mechanism
+   census; the h-weighted reading; training sets weighted by each fragment's probability of being genuine, which
+   unblocks strand-overdispersion step 4; aligner robustness and the catalogue rebuild. Locally, independent of the
+   phases: the reject-rule falsification tests and the three-fragment-types A/B.
+3. **The index format bump, before the cluster's working-index build** — so the cluster rebuilds once
+   (`ISSUES: the-format-changes-to-batch-before-release` (b)); its `summary.json` half lands with step 1 of the
+   strand overdispersion, whose one od field it carries.
+4. **A dropped blacklist is never silent** — the production index's manifest checked before any cluster quant, and the
+   one-line warning (`ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`).
+5. **Tier 1, the low-depth defects** — the largest real-data effect found, after Tier 0 and A/B'd apart from it. In
+   order: the failed refit alone (`ISSUES: the-gdna-landscape-collapses-at-low-depth`); the gDNA-only object row in
+   `calibration_vs_oracle.py` (`ISSUES: the-background-dispersion-assumes-a-pure-intergenic-pool`); the unrun real-data
+   arm; the landscape fit, derived and scored by class, without regressing its zero controls
    (`ISSUES: gdna-landscape-trains-on-false-positives`); the background dispersion, its own A/B; then read
    `ISSUES: capture-on-overcalls-gdna-at-low-gdna` and take up `ISSUES: strand-plug-in-bias-on-sparse-libraries`.
-3. **Tier 2, the other in-scope mechanisms that move a primary number — later**, each its own derivation and A/B:
-   `ISSUES: nascent-stress-sensitivity`, a cheap re-measure of Tier 0's verdicts at the realistic nascent level ·
-   `ISSUES: psi-reads-kappa-where-the-strand-channel-is-dead` · `ISSUES: the-scorer-reads-a-census-length-law` with
-   `ISSUES: the-pooled-q-in-the-gdna-count` · the fl second wave
-   (`ISSUES: the-fl-boundary-inversion-reads-missing-evidence-as-a-value`,
-   `ISSUES: the-fl-boundary-inversion-has-underived-pieces`, `ISSUES: capture-blind-gdna-divisor`,
-   `ISSUES: eb-shrinkage-magic-ess`) · overdispersion steps 4–6, research, with or after the splice training sets
-   (`ISSUES: intron-seeds-near-probes-are-capture-enriched`, `ISSUES: strand-likelihood-over-confident-beyond-od`) ·
-   `ISSUES: the-pseudocount-strength-is-not-derived` · `ISSUES: per-transcript-prior-lane`, research with no candidate
-   mechanism yet · the message layer on unstranded capture-OFF (`ISSUES: message-layer-open-cases`,
-   `ISSUES: refit-vs-message-arbitration`, `ISSUES: the-intron-own-solve-on-unstranded-capture-off`) ·
-   `ISSUES: the-efficiency-posterior-floor-on-empty-pieces`.
+6. **User-facing correctness**, one commit each with a falsification test verified failing: the paths a user reaches in
+   `ISSUES: latent-defects` first (the input parsers, the zero alphas, the finalizer deadlock), then its number-moving
+   defects, each in its own window · `ISSUES: sj-strand-tag-chosen-from-the-first-reads` · a first read of
+   `ISSUES: calibration-detects-capture-on-a-capture-off-library` on every capture-OFF panel, since a false reference
+   contracts every transcript's length.
+7. **The release gates**: the release-gating docs and the flaky reorder gate of `ISSUES: hygiene-ledger` · the two
+   unparked numeric no-ops of `ISSUES: performance-memory-bounded-solve` · then the release — `docs/PUBLISHING.md` is
+   the procedure; what gates it is the state: the deliverable measured per stratum, the zero rows clean, the suite at
+   its standing count, `preflight.py --full` green, CI run once by hand, a real-data smoke run, the standing risks
+   re-read, and the manual and the changelog true of what ships. The two residuals at `g98` — the capture likelihood's
+   lean toward RNA and the pseudocount's strength — are small against the in-scope strata and are not held for the
+   release.
+
+**After the release-critical work — Tier 2, the in-scope mechanisms that move a primary number**, each its own
+derivation and A/B: `ISSUES: nascent-stress-sensitivity`, a cheap re-measure of Tier 0's verdicts at the realistic
+nascent level · `ISSUES: psi-reads-kappa-where-the-strand-channel-is-dead` · the fl second wave
+(`ISSUES: the-fl-boundary-inversion-reads-missing-evidence-as-a-value`,
+`ISSUES: the-fl-boundary-inversion-has-underived-pieces`, `ISSUES: capture-blind-gdna-divisor`,
+`ISSUES: eb-shrinkage-magic-ess`) · `ISSUES: the-capture-reference-is-read-at-a-grid-point`, which does not land alone
+· overdispersion steps 4–6, research, with or after the splice training sets
+(`ISSUES: intron-seeds-near-probes-are-capture-enriched`, `ISSUES: strand-likelihood-over-confident-beyond-od`) ·
+`ISSUES: the-pseudocount-strength-is-not-derived` · `ISSUES: per-transcript-prior-lane`, research with no candidate
+mechanism yet · the message layer on unstranded capture-OFF (`ISSUES: message-layer-open-cases`,
+`ISSUES: refit-vs-message-arbitration`, `ISSUES: the-intron-own-solve-on-unstranded-capture-off`) ·
+`ISSUES: the-efficiency-posterior-floor-on-empty-pieces`.
 
 **Later.**
 - **Tier 3, real data only**, one real-genome job at a time. On the cluster after the splice phases:
   `ISSUES: scoring-penalties-are-underived-constants` with the h-weighted reading; the multimapper pair
   (`ISSUES: multimapper-intergenic-alignments`, `ISSUES: multimapper-blind-support`) and
   `ISSUES: unwitnessed-loci-and-multimappers-at-the-em` on the aligned ladder, regenerated with a larger simulation
-  battery built for the cluster (owner, 2026-09-26). Locally, independent of the phases: the reject-rule falsification
-  tests and the three-fragment-types A/B in `ISSUES: splicing-artifacts` ·
-  `ISSUES: sj-strand-tag-chosen-from-the-first-reads` · `ISSUES: vcap-dna-only-objects-lose-gdna-at-full-depth` ·
-  `ISSUES: em-gdna-exceeds-calibration-on-the-vcap-transcriptome-half`.
-- **Tier 4, batched between A/B windows**; anything that moves a number takes a window of its own:
-  `ISSUES: latent-defects`, one commit each with a falsification test · `ISSUES: performance-memory-bounded-solve`,
-  the numeric no-ops proven with `rename_identity.py --bam` · `ISSUES: hygiene-ledger`, the comment and doc sweep and
-  the test gaps, the flaky reorder fixture first · `ISSUES: instrument-ledger` ·
-  `ISSUES: debug-capture-memory-is-unbounded`, a src change ·
-  `ISSUES: the-format-changes-to-batch-before-release`, before 0.8.0 while `summary.json` schema 3 is unreleased ·
-  the panels (`ISSUES: flgap-panels-stale-nascent-model`, `ISSUES: expand-the-gdna-spectrum` with the junction-probed
-  twin's retirement) · the release docs (`ISSUES: hygiene-ledger`).
-- **The release** — `docs/PUBLISHING.md` is the procedure; what gates it is the state: the deliverable measured per
-  stratum, the zero rows clean, the suite at its standing count, `preflight.py --full` green, CI run once by hand, a
-  real-data smoke run, the standing risks re-read, and the manual and the changelog true of what ships. The two
-  residuals at `g98` — the capture likelihood's lean toward RNA and the pseudocount's strength — are small against
-  the in-scope strata and are not held for the release.
+  battery built for the cluster (owner, 2026-09-26). Locally: `ISSUES: vcap-dna-only-objects-lose-gdna-at-full-depth`
+  · `ISSUES: em-gdna-exceeds-calibration-on-the-vcap-transcriptome-half`.
+- **Tier 4, batched between A/B windows**; anything that moves a number takes a window of its own: the rest of
+  `ISSUES: performance-memory-bounded-solve`, proven with `rename_identity.py --bam` · the rest of
+  `ISSUES: hygiene-ledger`, the comment and doc sweep and the test gaps · `ISSUES: instrument-ledger` ·
+  `ISSUES: debug-capture-memory-is-unbounded`, a src change · the panels (`ISSUES: flgap-panels-stale-nascent-model`,
+  `ISSUES: expand-the-gdna-spectrum` with the junction-probed twin's retirement).
 
 **Parked and deferred — Tier 5, each with its entry.** Deferred past 0.8.0: the deferred stratum, with
 `ISSUES: a-pure-gdna-library-reads-as-nascent-rna` kept as an open challenge ·
+`ISSUES: the-scorer-reads-a-census-length-law` with `ISSUES: the-pooled-q-in-the-gdna-count` (owner, 2026-09-30) ·
 `ISSUES: unannotated-transcription-is-booked-as-gdna`, a `DESIGN.md` ruling after 0.8.0 ·
 `ISSUES: ruler-witness-geometry-on-transcript-panels` · `ISSUES: overlapping-synthetic-shadows`, an owner decision on
 the index. Parked: `ISSUES: yield-variance-beside-the-count` · `ISSUES: capture-premise-untested-on-cdna` ·
@@ -181,7 +190,7 @@ the index. Parked: `ISSUES: yield-variance-beside-the-count` · `ISSUES: capture
 
 ## Deliberately not next
 
-The length composition channel (retired until after 0.8.0) · a capture efficiency the EM re-reads as it runs
-(deferred by the owner, `DESIGN.md` §7.2) · anything whose only target is the deferred stratum · every mechanism
-in `ISSUES.md`'s CLOSED / REFUSED section — read it before proposing anything, because each entry is a build that
-was measured and turned down, with the number that killed it.
+The length composition channel (retired until after 0.8.0) · one uncaptured frame for the length tables (parked with its
+entry) · a capture efficiency the EM re-reads as it runs (deferred by the owner, `DESIGN.md` §7.2) · anything whose only
+target is the deferred stratum · every mechanism in `ISSUES.md`'s CLOSED / REFUSED section — read it before proposing
+anything, because each entry is a build that was measured and turned down, with the number that killed it.
