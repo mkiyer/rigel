@@ -95,7 +95,7 @@ manifest or rebuild with `--alignable-zarr`. The one-line warning for a feather 
 Instrument: the manifest; `summary.json`'s `sj_blacklist_loaded`.
 
 ### strand-overdispersion-one-shared-value
-`priority: now — Tier 0, the owner's first (2026-09-28): steps 0–3, then the fl.py fix (ISSUES: the-realized-gdna-length-law-reads-rna-counts), then the field collapse; steps 4–6 are research · kind: design · 2026-09-27`
+`priority: now — Tier 0, the owner's first (2026-09-28): steps 0–3, then the fl.py fix (landed 2026-09-30; `ISSUES: the-realized-gdna-length-law-reads-rna-counts`, closed), then the field collapse; steps 4–6 are research · kind: design · 2026-09-27`
 Calibration's strand overdispersion (od, `EQUATIONS.md` §6) reaches the solve through `reconcile_overdispersions`, fed
 two mismatched value/precision pairs: gDNA's ρ = 0 pair-count moment beside the fitted estimate's precision (the
 influence-weighted fit is computed, then discarded), and RNA's unweighted moment beside its null information, which
@@ -295,50 +295,6 @@ Instrument: the harness, substrates and report in `~/Downloads/rigel_runs/protot
 derivation page per ruling in `~/Downloads/rigel_runs/prototypes/2026-09-28_od_design/` (`00_synthesis.md` the landing
 order; `01_fallback`, `02_roots`, `03_bound`, `04_evidence`, `05_panel` the rulings' pages). Refused designs:
 `ISSUES: the-overdispersion-design-refusals`.
-
-### the-realized-gdna-length-law-reads-rna-counts
-`priority: now — Tier 0: step 2 after strand-overdispersion step 3, never in its A/B window (owner, 2026-09-28) · kind: defect · 2026-09-28`
-`_realized_gdna_counts` (`fl.py`) normalises the gDNA law but not its RNA input: the caller passes the de-tilted
-spliced census (`rna_fl_mass`) as `rna_pmf`, and `contained_opportunity` is linear, so every boundary's RNA rate is
-divided by the spliced count N_s, R_b → 0, and every exon-flanking boundary reads as pure gDNA. It reaches the realized
-law, the uniform law (through `_couple_estimands`) and the E-step, which scores with the realized law
-(`ISSUES: the-scorer-reads-a-census-length-law`). The tests pass a normalised pmf and cannot see it; a fixture reads
-a2 = 0.026 / 0.55 / 0.963 / 1.000 at an input scale of 1 / 30 / 10³ / 10⁶.
-MEASURED on the ladder's no-EM census, realized mean in bp, shipped → fixed (truth): g05 OFF 219.95 → 216.99 (216.90;
-on-target share 0.171 → 0.018); g50 OFF 216.93 → 216.74 (216.67); g05 ON 236.22 → 244.97 (240.97); g50 ON 234.52 →
-239.11 (240.84); g98 ON 234.87 → 238.58 (240.87). At g05 ON the error flips −4.7 → +4.0 bp: the bug was partly
-cancelling the unmeasurable-region over-pricing, which remains
-(`ISSUES: the-fl-boundary-inversion-reads-missing-evidence-as-a-value`). The uniform law at g05 ON stays 3.6 bp high
-after the fix (221.76 → 220.46 against 216.90; g50 and g98 close within 0.35 bp): one realization, unattributed —
-re-measure after step 2 before giving it a home.
-THE LANDING, steps 2–4, each alone (owner, 2026-09-28: the EB pmf, one refresh, step 2 in its own A/B window):
-2. The fix: normalise inside the function; pass `FLModels`' EB pmf, built once (today it is built after this
-   function, in `_fl_models_from_histograms`); write E_b = ρ_off(μ_g − 1) + ρ_adj(μ_r − 1), which retires the two
-   guards that bind at N_s = 0, `max(μ_r − 1, 1e-9)` and `max(rna.sum(), 1e-30)`; `test_fl.py`'s N_s = 0 fixture
-   pins today's reading there (every boundary pure gDNA) and must be re-derived, not adjusted. The EB pmf carries
-   `POOL_EB_PRIOR_ESS` into the boundary odds, and plain normalisation invents a law at N_s = 0
-   (`ISSUES: eb-shrinkage-magic-ess`). Gates, each failing today: the output is invariant to c·rna; on an
-   off-capture expected-count fixture the on-target share is 0 and the realized law equals the uniform; the array
-   passed is `FLModels.rna_pmf`. Re-take the census in the same session (the 2026-09-26 one predates the purity-tie
-   fix); judge the off-capture closure, then the capture-ON rows against truth, then `calibration_vs_oracle.py`, then
-   `quant_accuracy.py` fractional. Falsifiers: g05 OFF realized − uniform outside +0.3 to +0.6 bp; g50 OFF above its
-   +0.04 to +0.05 bp rectification floor by more than the replicate spread; g50 and g98 ON not rising about 4 bp.
-   Settle `GdnaContrast` and `GdnaRealized` here — computed and discarded, read only by `test_fl.py`, their docstring
-   still calling them a surfaced record: surface them in the diagnostics or call them test surface
-   (`ISSUES: hygiene-ledger` (c)).
-3. An empty crossing pool is structural. `den` counts every crossing but n2 and n3 only single crossers, so den > 0
-   with an empty pool is reachable (n3 = 0 at g00), and `_normalized`'s uniform 0–1000 law then enters r̂ (n2 = 0) or
-   becomes g_B and pushes μ_g toward 500 (n2 = n3 = 0). No pool means no boundary stratum; one empty pool skips the
-   inversion. Gates, both failing today: den > 0 and n2 = 0 gives g_B = the normalised f3; n2 = n3 = 0 leaves μ_g
-   unmoved and m_B = 0. It moves numbers: on the capture-ON ×30 toy the on-target share goes 0.042 → 0.029.
-4. One unconditional refresh replaces the 0.25 bp stopping test, as straight-line code with f2, f3, n2, n3 and den out
-   of the loop. The test fires 98 / 95 / 75 % of the time at 260 / 2.6k / 26k crossings; the secant gives q ≈ 0.03, so
-   one refresh lands within 0.011 bp of the fixed point (g05 ss.99 ON: 244.569 / 244.965 / 244.954 at zero refreshes /
-   one / the fixed point), 30× below the 0.32 bp replicate spread. Unpriced: off capture the refresh swaps the
-   contained pool's mean for the noisier crossing pool's.
-It shares no code with the od work and never shares its A/B window: both move `calibration_vs_oracle.py`.
-Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-28_od_design/06_fl.md` and its `scratch/` (census, toys);
-`calibration_vs_oracle.py`, `quant_accuracy.py --set em.assignment_mode=fractional`.
 
 ### the-gdna-landscape-collapses-at-low-depth
 `priority: next — Tier 1, after the strand-overdispersion and fl.py landings, A/B'd apart from them · kind: defect · 2026-09-28`
@@ -551,7 +507,7 @@ Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-28_od_design/01_fallback.
 `policy_benchmark.py --by-class`, unstranded rows.
 
 ### the-scorer-reads-a-census-length-law
-`priority: later — Tier 2, re-measured after fl step 2 (ISSUES: the-realized-gdna-length-law-reads-rna-counts) · kind: defect · 2026-09-24`
+`priority: later — Tier 2, re-measured 2026-09-30: it owns the realized-law fix's stranded × capture-ON cost · kind: defect · 2026-09-24`
 The E-step scores an unspliced fragment's length with gDNA's library census (`gdna_realized_pmf`,
 `pipeline.py`) against RNA's spliced census. Under capture the length selection depends on where a fragment sits,
 and every hypothesis at one footprint shares that footprint's capture — so the ratio wants the two origins' laws in
@@ -564,9 +520,19 @@ transcripts 1.70 %; the true census gives +12.7k, 139.2k, 1.79 %; shipped +5.2k,
 diagnostic, not a candidate: real libraries with different gDNA and RNA chemistry need the channel. The repair is a
 derivation of the per-fragment length term at a shared footprint. 2026-09-26: the estimator's half is closed
 (`ISSUES: the-gdna-length-law-falls-back-at-identical-purities`); at `g98 ss.99 ON` the realized law now reads
-234.9 against a true 240.9, the same offset as every other capture-ON row. The realized law it reads is itself fed
-RNA counts (`ISSUES: the-realized-gdna-length-law-reads-rna-counts`): re-measure after that fix, and land
+234.9 against a true 240.9, the same offset as every other capture-ON row. Land
 `ISSUES: the-pooled-q-in-the-gdna-count` with the repair.
+RE-MEASURED 2026-09-30, after the RNA-counts fix (`ISSUES: the-realized-gdna-length-law-reads-rna-counts`, closed),
+on the ladder's no-EM census under capture, in bp: each census is its uncaptured law lengthened by capture, gDNA 216.7 →
+240.9 true (+24) and RNA 212 → 228.7 (+15), so exact censuses carry a +13 bp false gap on equal chemistry. The bug's
+contaminated census (234.5–236.5) sat near RNA's lengthening by accident; the fixed one (238.3–245.0) does not, which is
+the fix's +1.75 % transcripts and +4.2 % genes on stranded × capture ON. The scorer reading the uncaptured gDNA law
+tips the other way (`ISSUES: the-scorer-reads-the-uniform-gdna-law`, refused). Within today's interface (one length
+table per component, scalar effective lengths that carry capture) a consistent length term needs both tables in one
+frame. The uncaptured frame counts capture once, in the effective lengths, and would also stop the RNA ruler counting
+it twice: gDNA's half exists (`gdna_pmf`), RNA's uncaptured law is not estimated. The alternative is a per-context
+likelihood whose tables carry their own normalisers (an external review's proposal, 2026-09-30).
+Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-30_fl_fix/` (`laws.py`, `compare.md`).
 
 ### the-pooled-q-in-the-gdna-count
 `priority: later — Tier 2, lands with ISSUES: the-scorer-reads-a-census-length-law · kind: defect · 2026-09-24`
@@ -581,8 +547,8 @@ gDNA LENGTH already uses gDNA's own share (`ISSUES: the-pooled-q-in-the-gdna-len
 
 ### the-fl-boundary-inversion-reads-missing-evidence-as-a-value
 `priority: later — Tier 2, the fl second wave, after the realized-law fix · kind: defect · 2026-09-28`
-Missing evidence must drop out, never be replaced by an invented value; after
-`ISSUES: the-realized-gdna-length-law-reads-rna-counts`, four places in `fl.py` still break this.
+Missing evidence must drop out, never be replaced by an invented value; after the RNA-counts fix
+(`ISSUES: the-realized-gdna-length-law-reads-rna-counts`, closed 2026-09-30), five places in `fl.py` still break this.
 (a) UNMEASURABLE INTRON REGIONS. A region too short to hold a fragment has e_r ≈ 0, so its RNA density reads 0 rather
 than unknown, a_b → 1, and nascent exon–intron–exon fragments are priced as capture. At g05 OFF after the fix the
 signed w(ε − 1) reads +0.66 against a rectified +0.70 (bias); at g50 −0.006 against +0.072 (rectification only).
@@ -605,11 +571,16 @@ toy fixed point 202 bp against 217 (a3 0.63 against a true 0.37); noise-free off
 ig_rna 0.5 / 2. The fl counterpart of `ISSUES: the-background-dispersion-assumes-a-pure-intergenic-pool`, in another
 estimator (`ISSUES: capture-degeneracy-standing-risk`). Ladder RNA never reaches intergenic space, so its real-data
 size is unmeasured.
+(e) AN EMPTY CROSSING POOL is structural. `den` counts every crossing but n2 and n3 only single crossers, so den > 0
+with an empty pool is reachable (n3 = 0 at g00), and `_normalized`'s uniform 0–1000 law then enters r̂ (n2 = 0) or
+becomes g_B and pushes μ_g toward 500 (n2 = n3 = 0). No pool means no boundary stratum; one empty pool skips the
+inversion. Gates, both failing today: den > 0 and n2 = 0 gives g_B = the normalised f3; n2 = n3 = 0 leaves μ_g
+unmoved and m_B = 0. It moves numbers: on the capture-ON ×30 toy the on-target share goes 0.042 → 0.029.
 Instrument: `06_fl.md` and `scratch/fl_loop2.py` under `~/Downloads/rigel_runs/prototypes/2026-09-28_od_design/`.
 
 ### the-fl-boundary-inversion-has-underived-pieces
 `priority: later — Tier 2, the fl second wave, with the missing-evidence entry · kind: derivation · 2026-09-28`
-Four pieces of `fl.py`'s boundary inversion are borrowed, not derived.
+Five pieces of `fl.py`'s boundary inversion are borrowed, not derived.
 (a) The one-sided excess clip (cnt − ρ_off·e_g)₊ makes a pure-gDNA region's expected share read below 1 at every
 finite depth: E[a_b] = 0.914 / 0.779 / 0.853 / 0.910 / 0.965 at λ = 0.1 / 0.5 / 1 / 10 / 100; real introns average
 0.910 (LBX0588), 0.940 (MO_3021), 0.978 (LBX0588 at 10 %). a2, a3 and m_B carry the bias, and the flatness premise
@@ -622,6 +593,11 @@ prefers some lengths E_g[s]/E_r[s] need not cancel. Unmeasured, and distinct fro
 `ISSUES: the-scorer-reads-a-census-length-law`.
 (d) UNCONFIRMED: the inversion mixes by incidence shares (n2, n3) while the de-tilted pools mix by start density. A
 first draft read the fixed point's |Φ′| falling 0.026 → 0.005 on switching, and no results file exists. Measure first.
+(e) THE REFRESH'S 0.25 bp STOPPING TEST. One unconditional refresh replaces it, as straight-line code with f2, f3, n2,
+n3 and den out of the loop. The test fires 98 / 95 / 75 % of the time at 260 / 2.6k / 26k crossings; the secant gives
+q ≈ 0.03, so one refresh lands within 0.011 bp of the fixed point (g05 ss.99 ON: 244.569 / 244.965 / 244.954 at zero
+refreshes / one / the fixed point), 30× below the 0.32 bp replicate spread. Unpriced: off capture the refresh swaps
+the contained pool's mean for the noisier crossing pool's.
 Instrument: `06_fl.md` under `~/Downloads/rigel_runs/prototypes/2026-09-28_od_design/`.
 
 ### capture-blind-gdna-divisor
@@ -981,7 +957,7 @@ buffer drops at `from_raw`.
 profile; `rigel.sim.benchmark` and `Scenario.build_oracle`, test tooling inside the package;
 `region_init.has_own_composition_evidence`, which tests use as a check; `priors._project_regions_to_loci`, kept for
 `prior_vs_oracle.py` (`assemble_priors` calls `_region_locus_shares` directly); `fl`'s `GdnaContrast` and
-`GdnaRealized`, computed and discarded (decided at `ISSUES: the-realized-gdna-length-law-reads-rna-counts` step 2);
+`GdnaRealized`, computed and discarded, settled 2026-09-30 as test surface and taken out of `__all__`;
 the vendored `_cgranges_impl` extension, still compiled, optimised, LTO'd and shipped for a test-only `query()`, while
 `index.py`'s docstrings present it as a quantification facility.
 (d) CLAIMS NOT RE-DERIVED on the current tree, left standing: that most in-scope error sits at the simplex
@@ -1417,6 +1393,40 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### the-realized-gdna-length-law-reads-rna-counts
+CLOSED 2026-09-30 by the fix, in the working tree for the owner's commit (`calibration/fl.py`). `_realized_gdna_counts`
+normalises the RNA law it is handed, and `build_fl_models` hands it `FLModels.rna_pmf`, the EB law the scorer reads;
+the boundary's expected count E_b = ρ_off(μ_g − 1) + ρ_adj(μ_r − 1) retires the `max(μ_r − 1, 1e-9)` and
+`max(rna.sum(), 1e-30)` guards. Gates in `test_fl.py`, each failing before: the census is the same at any scale of the
+RNA law; off capture, RNA crossing a boundary is not captured gDNA (on-target share 0, the realized law equal to the
+uniform); the census reads `FLModels.rna_pmf`. The N_s = 0 fixture was re-derived.
+MEASURED on the ladder's no-EM census, realized mean in bp, before → after (truth): g05 ss.99 OFF 219.95 → 216.99
+(216.90), realized − uniform +0.40 (ss.50: +0.52); g50 OFF +0.04 / +0.05, its rectification floor; g05 / g50 / g98
+ss.99 ON 236.22 → 244.96 / 234.52 → 239.11 / 234.87 → 238.58 (240.97 / 240.84 / 240.87). The entry's three
+falsifiers hold. `calibration_vs_oracle.py` moves region Σ|Δ| by +10 / −15 / −2 on the in-scope strata (2026-09-28's
+table, whose prototype the landed tree reproduces bit for bit).
+THE COST, end to end (`quant_accuracy.py`, pinned and fractional, 198 libraries; the landed tree reproduces the A/B'd
+arm on 96 of 96 rows checked): ladder stranded × OFF transcripts −701, genes −93; unstranded × OFF −593 / +42;
+stranded × ON +15,085 (+1.75 %) / +6,427 (+4.20 %), pools gDNA +5.6k, nascent +4.6k, annotated +11.3k. The
+test chromosome's stranded capture-ON rows about +2 % genes (base panel +2,068, the 200 bp control +2,154); the fl-gap
+panels keep their length channel. Goldens moved in two scenarios: `combo_extreme` gDNA 209.5 → 192.6, nascent 259.9 →
+277.1; `combo_moderate` −8.1 / +8.5; four others by ≤ 0.004. The bug was cancelling part of the census-vs-census frame
+gap, which now owns the stranded × ON cost (`ISSUES: the-scorer-reads-a-census-length-law`). Its steps 3 and 4 moved
+to `ISSUES: the-fl-boundary-inversion-reads-missing-evidence-as-a-value` (e) and
+`ISSUES: the-fl-boundary-inversion-has-underived-pieces` (e).
+
+### the-scorer-reads-the-uniform-gdna-law
+REFUSED 2026-09-30 at the A/B (pinned, fractional, 198 libraries). The arm: the realized law deleted with its
+coupling, so the scorer and geometry read one gDNA law, the contrast's. It gives gDNA one law in its table and its
+normaliser and deletes about 300 lines, but the scorer's RNA table is a captured census, so the uncaptured gDNA law
+tips long unspliced gDNA into nascent RNA: ladder stranded × ON transcripts +22,790 (+2.7 %), genes −678, gDNA pool
++81.5k, nascent +69.8k (g50 ss.99 ON nascent +55.8k on a true 150k, +37 %); the test chromosome's stranded capture-ON
+rows about +10 % genes (+9,988, +9,645, +9,864); fl-gap long ON genes +3,699 (+8 %). The scorer's half alone (the
+shipped `gdna_pmf` read by the scorer, geometry unchanged): ladder stranded × ON −2,535 / −5,363, gDNA +63.7k, nascent
++53.1k. The geometry's half is a second cancelling pair, the coupling's pull on `gdna_pmf` against the capture ruler:
++15.3k transcripts at g05 ss.99 ON (predicted +16.2k). Not a candidate until RNA's scorer table is in the same frame
+(`ISSUES: the-scorer-reads-a-census-length-law`).
 
 ### the-total-density-landscape
 CLOSED 2026-09-28 (owner): retired as QC-only, with `total_abundance.py`, `diagnostics.py`, its two wall inputs

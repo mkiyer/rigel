@@ -48,9 +48,10 @@ sparse libraries lose their gDNA.
   structure, closed for now at diminishing returns (owner, 2026-09-26) — then the capture likelihood's lean toward RNA (the
   synthetic spans over-called at `g98`) and calibration's RNA floor at `g98` — `quant_accuracy.py --arm base` beside
   `--arm oracle_ruler` and `--arm oracle`, `ISSUES: the-capture-length-owns-stranded-capture-on`.
-- **Fragment lengths**: the realized gDNA law is fed the spliced RNA census unnormalised, so every exon-flanking
-  boundary reads as pure gDNA — Tier 0, `ISSUES: the-realized-gdna-length-law-reads-rna-counts`, the boundary
-  inversion's second wave after it; the RNA law trains on spliced fragments that carry splice artifacts
+- **Fragment lengths**: the scorer's two length tables are censuses that average capture over different placements,
+  and since the RNA-counts fix (2026-09-30) that frame gap owns stranded × capture ON's +1.75 % transcripts and
+  +4.2 % genes — `ISSUES: the-scorer-reads-a-census-length-law`, then the boundary inversion's second wave; the RNA law
+  trains on spliced fragments that carry splice artifacts
   (`ISSUES: splicing-artifacts`) — `calibration/fl.py`, `gdna_density.py`, `calibration_vs_oracle.py`; watch
   `ISSUES: capture-degeneracy-standing-risk`.
 - **gDNA strand overdispersion**: the reconcile keeps gDNA's and RNA's values apart where the owner rules one shared
@@ -117,10 +118,9 @@ any two windows. The cluster track does not compete for local windows.
 
 **The local track.**
 1. **Tier 0, the owner's work — now**: `ISSUES: strand-overdispersion-one-shared-value` (steps 0–3, then the field
-   collapse) and `ISSUES: the-realized-gdna-length-law-reads-rna-counts` (steps 2–4), one step per window:
+   collapse), one step per window (the fl.py fix landed 2026-09-30; its steps 3–4 joined the second wave):
    overdispersion step 0 — the contaminated-seed panel and the simulator's matched RNA overdispersion, outside the
-   tree; step 1 under its hold rule; steps 2 and 3; fl steps 2, 3 and 4, step 2 never in an overdispersion window;
-   the field collapse. After it: re-read the strand-input drift in
+   tree; step 1 under its hold rule; steps 2 and 3; the field collapse. After it: re-read the strand-input drift in
    `ISSUES: the-gdna-landscape-collapses-at-low-depth` and `ISSUES: strand-likelihood-over-confident-beyond-od`, and
    refresh the ladder report, the issue-list page and the full_lowg explanation page, which lacks the od-arm line of
    `ISSUES: the-background-dispersion-assumes-a-pure-intergenic-pool`.

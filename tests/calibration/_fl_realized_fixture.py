@@ -2,7 +2,9 @@
 
 The knob is ``boundary_excess`` — how many times the uniform-field expectation each exon-flanking
 boundary's unspliced count carries. 1.0 says "no capture" (the on-target correction must then vanish
-identically); large values say "strong capture".
+identically); large values say "strong capture". ``rna_rate`` adds RNA to the intron and to the two
+boundaries it flanks, at the expected counts: ``rna_rate`` per unit of the intron's contained opportunity,
+and ``rna_rate·(mu - 1)`` crossing each boundary, the same crossing count the estimator's odds assume.
 
 Deliberately NOT a real ``AccumulatorPayload``: the realized-law machinery consumes six payload
 fields, and building the full scanner object here would couple this fixture to the scan schema for no
@@ -31,6 +33,7 @@ class _PayloadLike:
     ref_region_offsets: np.ndarray
     ref_boundary_offsets: np.ndarray
     max_length: int
+    deposited_lengths: np.ndarray
 
 
 def _pmf() -> np.ndarray:
@@ -40,7 +43,7 @@ def _pmf() -> np.ndarray:
     return p / p.sum()
 
 
-def build_fixture(boundary_excess: float):
+def build_fixture(boundary_excess: float, rna_rate: float = 0.0):
     """(payload_like, opp_like, region_lengths, region_types, rna_pmf, uniform_counts)."""
     pmf = _pmf()
     mu = float((pmf * np.arange(pmf.size)).sum())
@@ -54,10 +57,16 @@ def build_fixture(boundary_excess: float):
     for i in (0, 2, 4):  # the off-target regions carry exactly the uniform expectation
         counts[i] = RHO * e_contained[i] / 2.0
     counts[1] = counts[3] = 500.0  # exon counts are RNA-dominated and unread by the machinery
+    # the RNA law is the gDNA law here, so the intron has one contained opportunity for both
+    rna_in_intron = rna_rate * e_contained[2]
+    counts[2] += rna_in_intron / 2.0
 
     # boundaries: ig|exon, exon|intron, intron|exon, exon|ig — each at `boundary_excess` x uniform
     per_boundary = boundary_excess * RHO * (mu - 1.0)
     boundary_counts = np.full((4, 2), per_boundary / 2.0, dtype=np.float64)
+    rna_crossing = rna_rate * (mu - 1.0)
+    # exon|intron and intron|exon: the intron's RNA crosses the two boundaries it flanks
+    boundary_counts[[1, 2]] += rna_crossing / 2.0
 
     L = np.arange(MAX_SIZE + 1, dtype=np.float64)
     crossing_tilt = pmf * np.clip(L - 1.0, 0.0, None)
@@ -65,7 +74,8 @@ def build_fixture(boundary_excess: float):
     pool_lengths[0] = pmf * float(counts[0].sum() + counts[4].sum())  # intergenic contained
     pool_lengths[1] = pmf * float(counts[2].sum())  # intronic contained
     n_cross = 2.0 * per_boundary
-    pool_lengths[2] = crossing_tilt / crossing_tilt.sum() * n_cross  # intron|exon
+    # intron|exon, its gDNA and the intron's RNA crossings
+    pool_lengths[2] = crossing_tilt / crossing_tilt.sum() * (n_cross + 2.0 * rna_crossing)
     pool_lengths[3] = crossing_tilt / crossing_tilt.sum() * n_cross  # intergenic|exon
     pool_lengths[4] = pmf * 1000.0  # spliced RNA, unread here
 
@@ -76,13 +86,15 @@ def build_fixture(boundary_excess: float):
         ref_region_offsets=np.array([0, 5], dtype=np.int64),
         ref_boundary_offsets=np.array([0, 4], dtype=np.int64),
         max_length=MAX_SIZE,
+        deposited_lengths=pool_lengths.sum(axis=0),
     )
 
     # the opportunity object: per-pool A(L) and the total T(L), toy-scaled
     total = np.full(MAX_SIZE + 1, 28_400.0)
     a_contained = np.clip(region_lengths[[0, 2, 4]].sum() - L + 1.0, 0.0, None)
     a_cross = np.full(MAX_SIZE + 1, 2.0) * np.clip(L - 1.0, 0.0, None)
-    opp = SimpleNamespace(pools=(a_contained, a_contained * 0.4, a_cross, a_cross), total=total)
+    pools = (a_contained, a_contained * 0.4, a_cross, a_cross)
+    opp = SimpleNamespace(pools=pools, total=total, combined_probability=lambda: sum(pools) / total)
 
     uniform_counts = pmf * float(pool_lengths[:4].sum())
     return payload, opp, region_lengths, region_types, pmf.copy(), uniform_counts

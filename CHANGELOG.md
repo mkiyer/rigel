@@ -72,6 +72,12 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 8).
 - `gdna_density_kde.feather` and `gdna_density_regions.feather` (`gdna_density_nodes.feather` in 0.7.1): a
   fitted curve of the total fragment density, gDNA and RNA together, that no calibration number read.
 
+### Fixed
+
+- The gDNA fragment-length law the EM scores with read the spliced RNA fragment counts as if they were a
+  probability law, so every exon-flanking boundary read as pure gDNA. It now reads the smoothed RNA
+  length law. Output moves under hybrid capture and wherever nascent RNA crosses an exon boundary.
+
 ## [0.7.1] - 2026-07-12
 
 ### Added

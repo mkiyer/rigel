@@ -387,6 +387,81 @@ def test_no_enrichment_excess_means_no_on_target_correction():
     assert diag.ontarget_share == pytest.approx(0.0, abs=1e-9)
 
 
+# ── the RNA law the census reads: a law, whatever its scale, and the one FLModels carries ───────────
+
+
+def test_the_census_reads_the_rna_law_whatever_its_scale():
+    """The boundary odds are linear in the RNA law, so a histogram handed in as a law divides every
+    boundary's RNA odds by its total and each exon-flanking boundary reads as pure gDNA
+    (`ISSUES: the-realized-gdna-length-law-reads-rna-counts`). The estimator normalises the law it is
+    handed: the census is the same at any scale, from a pmf to a 10⁶-fragment spliced census.
+
+    PERTURBATION: dropping the normalisation fires this gate alone. The off-capture gate below cannot see
+    that break: without the normalisation the RNA mean length scales up exactly as the RNA rate scales
+    down, and the two cancel in the boundary's expected count."""
+    from rigel.calibration.fl import _realized_gdna_counts
+    from _fl_realized_fixture import RHO, build_fixture
+
+    payload, opp, rl, rt, rna_pmf, uniform = build_fixture(boundary_excess=5.0, rna_rate=RHO)
+    ref_realized, ref_uniform, ref_diag = _realized_gdna_counts(
+        payload, opp, rl, rt, rna_pmf, uniform
+    )
+    assert ref_diag.intron_exon_share < 1.0  # not vacuous: the intron's RNA dilutes its boundaries
+    for scale in (30.0, 1e3, 1e6):
+        realized, uniform_out, diag = _realized_gdna_counts(
+            payload, opp, rl, rt, scale * rna_pmf, uniform
+        )
+        np.testing.assert_allclose(realized, ref_realized, rtol=1e-12)
+        np.testing.assert_allclose(uniform_out, ref_uniform, rtol=1e-12)
+        assert diag.intron_exon_share == pytest.approx(ref_diag.intron_exon_share, rel=1e-12)
+
+
+def test_off_capture_rna_crossing_a_boundary_is_not_captured_gdna():
+    """The closure property with RNA present. Off capture, an intron's RNA crosses the two boundaries it
+    flanks at exactly the count the odds assume, so every boundary holds its expected gDNA and RNA and
+    nothing more: no enrichment, an on-target share of 0, and a realized law equal to the uniform one.
+    Handed the spliced census at its own scale, as `build_fl_models` once did, the crossing RNA reads as
+    captured gDNA and an on-target excess appears where there is no capture.
+
+    PERTURBATION: the original defect (the law's mean length normalised, its opportunity not) fires this."""
+    from rigel.calibration.fl import _realized_gdna_counts
+    from _fl_realized_fixture import RHO, build_fixture
+
+    payload, opp, rl, rt, rna_pmf, uniform = build_fixture(boundary_excess=1.0, rna_rate=RHO / 2.0)
+    realized, uniform_out, diag = _realized_gdna_counts(
+        payload, opp, rl, rt, 1e5 * rna_pmf, uniform
+    )
+    assert diag.applied
+    assert diag.intron_exon_share < 1.0  # the intron's RNA is priced at its boundaries
+    assert diag.ontarget_share == 0.0
+    np.testing.assert_allclose(
+        realized / realized.sum(), uniform_out / uniform_out.sum(), atol=1e-12
+    )
+
+
+def test_the_census_reads_the_rna_law_FLModels_carries(monkeypatch):
+    """One RNA law in the tool: `build_fl_models` hands the census exactly `FLModels.rna_pmf`, the
+    EB-smoothed law the scorer reads, never the raw spliced histogram. With no spliced fragment that law
+    is the global anchor, so the census never invents a law of its own.
+
+    PERTURBATION: handing the census the spliced counts again fires this."""
+    import rigel.calibration.fl as fl
+    from _fl_realized_fixture import RHO, build_fixture
+
+    payload, opp, rl, rt, _rna_pmf, _uniform = build_fixture(boundary_excess=5.0, rna_rate=RHO)
+    seen = []
+    original = fl._realized_gdna_counts
+
+    def spy(payload_, opportunity, lengths, types, rna_law, uniform_counts):
+        seen.append(np.array(rna_law, copy=True))
+        return original(payload_, opportunity, lengths, types, rna_law, uniform_counts)
+
+    monkeypatch.setattr(fl, "_realized_gdna_counts", spy)
+    models = fl.build_fl_models(payload, gdna_opportunity=opp, region_lengths=rl, region_types=rt)
+    assert len(seen) == 1
+    np.testing.assert_array_equal(seen[0], models.rna_pmf)
+
+
 def test_enriched_boundaries_raise_the_on_target_share():
     """At 50x enrichment the fixture's own arithmetic puts the excess classes near
     ``rho·49·E_contained(200)·2`` of a ~2.6k total — about 0.27. Gate the ORDER, derived, not a guess:
@@ -619,11 +694,13 @@ def test_at_zero_gdna_an_uncrossed_boundary_class_drops_the_boundary_stratum():
 
 
 def test_with_no_spliced_fragments_the_boundary_odds_stay_finite():
-    """``N_s = 0``: no RNA length law, so no RNA odds, and both boundary classes read as pure gDNA. The 1.0
-    is today's reading, not the truth: the RNA-law fix re-derives it. No frozen identity reference reaches
-    this path.
+    """``N_s = 0`` handed straight to the estimator: an empty RNA law. In production the census reads the
+    EB law, which at ``N_s = 0`` is the global anchor (`test_the_census_reads_the_rna_law_FLModels_carries`);
+    handed an empty law directly, the estimator normalises it like any other and the odds stay finite. No
+    region beside a boundary here holds RNA above the uniform field, so both boundary classes are pure gDNA
+    whatever the RNA law: the 1.0 is the fixture's truth. No frozen identity reference reaches this path.
 
-    PERTURBATION: deleting the floor on the RNA law's total divides 0 by 0."""
+    PERTURBATION: normalising by a plain division divides 0 by 0."""
     from rigel.calibration.fl import _realized_gdna_counts
 
     payload, opp, rl, rt, rna_pmf, uniform = _payload_fixture(boundary_excess=50.0)

@@ -86,8 +86,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "FLModels",
-    "GdnaContrast",
-    "GdnaRealized",
     "POOL_EB_PRIOR_ESS",
     "build_fl_models",
     "gdna_contained_fl_mass",
@@ -117,7 +115,7 @@ POOL_EB_PRIOR_ESS: float = 1000.0
 
 @dataclass(frozen=True, slots=True)
 class GdnaContrast:
-    """What the two-pool contrast did, or why it declined — QC, never an input to anything.
+    """What the two-pool contrast did, or why it declined — test surface: nothing downstream reads it.
 
     ``rate_over_pooled`` is the number to read: how much contamination the density fit found. A
     value near 1 says the pools were already clean, which is a measurement and not an inaction.
@@ -134,7 +132,8 @@ class GdnaContrast:
 
 @dataclass(frozen=True, slots=True)
 class GdnaRealized:
-    """What the LIBRARY-CENSUS (realized) gDNA law's estimator did, or why it declined — QC only.
+    """What the LIBRARY-CENSUS (realized) gDNA law's estimator did, or why it declined — test surface:
+    nothing downstream reads it.
 
     ``ontarget_share`` is the number to read: the fraction of the realized law's mass carried by the
     EXCESS-enrichment exon classes — the capture-only part, identically 0 when the boundaries carry no
@@ -502,6 +501,10 @@ def _realized_gdna_counts(
 
     Declining is still a real answer at literally zero gDNA — there is no census to take — and the
     caller then keeps the uniform-frame law for both estimands.
+
+    ``rna_pmf`` is the RNA length law, normalised here: the boundary odds are linear in it, so a
+    histogram's total would divide every boundary's RNA odds (``build_fl_models`` hands it
+    ``FLModels.rna_pmf``, the one RNA law the tool reads).
     """
     obs_pools = np.asarray(payload.pool_lengths, dtype=np.float64)
     ty = np.asarray(region_types).ravel()
@@ -528,8 +531,8 @@ def _realized_gdna_counts(
             m_C += min(rho_off * float(e_g[mask].sum()) / n_p, 1.0) * n_p
 
     # ── the boundary stratum: per-boundary composition, regions calibrating boundaries
-    rna = np.asarray(rna_pmf, dtype=np.float64)
-    mu_r = float((rna * np.arange(rna.size)).sum() / max(rna.sum(), 1e-30))
+    rna = _normalized(np.asarray(rna_pmf, dtype=np.float64))
+    mu_r = float((rna * np.arange(rna.size)).sum())
     e_r = contained_opportunity(rna[: g_C.size], ell)
     excess = np.clip(cnt - rho_off * e_g, 0.0, None)
     rho_r = np.zeros_like(excess)
@@ -570,8 +573,10 @@ def _realized_gdna_counts(
     eps_count = np.zeros(n_exons)
     weight_sum = np.zeros(n_exons)
     for _ in range(2):  # one refresh of mu_g from the boundary law; measured stable
-        r_b = (rho_adj / rho_off) * max(mu_r - 1.0, 1e-9) / (mu_g - 1.0)
-        a_b = 1.0 / (1.0 + r_b)
+        # a boundary's expected unspliced count: its gDNA, plus the adjacent region's RNA, each crossing at
+        # (mean length - 1) starts
+        e_b = rho_off * (mu_g - 1.0) + rho_adj * (mu_r - 1.0)
+        a_b = rho_off * (mu_g - 1.0) / e_b
         weighted = a_b * nb_pair
         num = np.bincount(cls, weights=weighted, minlength=2)
         den = np.bincount(cls, weights=nb_pair, minlength=2)
@@ -579,7 +584,7 @@ def _realized_gdna_counts(
         # cancels instead of accumulating one-sidedly. An exon has at most two flanking boundaries, so
         # the per-exon mean below is a sum of at most two terms — the same arithmetic as the list it
         # replaces, in the same order.
-        eps_pair = weighted / (rho_off * (mu_g - 1.0))
+        eps_pair = nb_pair / e_b
         eps_sum = np.bincount(exon_region, weights=eps_pair, minlength=n_exons)
         eps_count = np.bincount(exon_region, minlength=n_exons).astype(np.float64)
         weight_sum = np.bincount(exon_region, weights=weighted, minlength=n_exons)
@@ -765,14 +770,18 @@ def build_fl_models(
             if deconvolved is not None:
                 gdna_counts = deconvolved
             # the SECOND estimand: the library-census law for the scorer. It reads the uniform-frame
-            # result and the same banks; on decline the two estimands coincide, which is the honest
-            # off-capture answer rather than a degraded one.
+            # result, the same banks and the RNA law — the EB pmf FLModels carries, built exactly as the
+            # kernel below builds it, so the tool reads one RNA law; on decline the two estimands
+            # coincide, which is the honest off-capture answer rather than a degraded one.
+            max_size = int(payload.max_length)
+            global_pmf = _normalized(_aligned(payload.deposited_lengths, max_size))
+            rna_pmf, _ = _smooth_eb(_aligned(rna_counts, max_size), global_pmf, prior_ess)
             realized_counts, coupled_uniform, _realized = _realized_gdna_counts(
                 payload,
                 gdna_opportunity,
                 region_lengths,
                 region_types,
-                rna_counts,
+                rna_pmf,
                 gdna_counts,
             )
             # the coupling can move the UNIFORM law too, and that is the point: when the contained

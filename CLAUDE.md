@@ -149,8 +149,8 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument's --self-test
 ```
 
-**The standing baseline: 0 failed / 2,712 passed / 0 skipped / 0 xfail, 2,712 collected** — re-derived
-2026-09-28 after fl step 1 (2,710 + 2: `test_fl.py`'s zero-gDNA and N_s = 0 fixtures). **Any failure at all is a
+**The standing baseline: 0 failed / 2,715 passed / 0 skipped / 0 xfail, 2,715 collected** — re-derived
+2026-09-30 after fl step 2 (2,712 + 3: `test_fl.py`'s three RNA-law gates). **Any failure at all is a
 regression.** Re-derive a count, never adjust one (`TRAPS: re-record-the-baseline`): every gate that scans
 the files on disk is one case, so only adding or removing a test moves the total. Derive the failure set,
 never eyeball the tail (`TRAPS: read-the-whole-failure-list`). A golden update is where a regression gets
