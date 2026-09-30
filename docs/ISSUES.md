@@ -739,6 +739,34 @@ under every policy; that predates the location floor, the E-step and the one sha
 ranking. Related: `ISSUES: refit-vs-message-arbitration`, `ISSUES: two-sided-exon-row`.
 Instrument: `policy_benchmark.py --panel ladder --by-class`, the unstranded capture-OFF rows, intron class.
 
+### the-capture-reference-is-read-at-a-grid-point
+`priority: later — Tier 2; its fix does not land alone · kind: defect · 2026-09-29`
+`located_enriched_mode` reads the capture reference at a landscape grid point whose step is 8.4–8.9 %, so a 0.15 bp
+change in the length law can move the reference by up to 7.7 %.
+
+Reading it at the peak's parabolic vertex on log P needs no constant. It cuts the jitter to 0.13–0.80 % and leaves
+capture OFF byte-identical. Alone, though, it fails stranded × capture ON: transcripts −567, genes +758 (+0.5 %), and
+2 of 3 rows are worse.
+
+In 12 of 12 one-variable swaps a higher reference gave fewer transcript errors. So the ruler downstream prefers a
+reference above the density's peak, and that compensating error must be found first. The named candidate is the
+junction price (`ISSUES: the-junction-price-is-noisy-within-a-gene`).
+
+Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-29_precapture_rna/C_report.md` and its `C/` harness.
+
+### calibration-detects-capture-on-a-capture-off-library
+`priority: later — Tier 2, a false capture detection · kind: defect · 2026-09-29`
+The library is the fl-gap RNA-short panel at g50, stranded 0.99, capture OFF. Calibration finds an enriched gDNA mode
+anyway: reference density 9.69 per bp against a genome-wide 0.050, with 370 members. So 35,134 of 35,135 regions get a
+capture efficiency below 1 (0.005–0.019), in a library with no capture.
+
+The ladder's capture-OFF rows read no reference. The side panel carries retired simulator physics
+(`ISSUES: flgap-panels-stale-nascent-model`), and its distinguishing feature is 250 bp gDNA against 79 bp RNA. The
+cause may therefore be the panel's; it is unmeasured.
+
+Instrument: the collector's calibration scalars per condition,
+`~/Downloads/rigel_runs/prototypes/2026-09-29_fl_per_object/data/manifest.json`.
+
 ### the-efficiency-posterior-floor-on-empty-pieces
 `priority: later — Tier 2: the unprobed class's scale at low gDNA, its EM cost unmeasured · kind: defect · 2026-09-23`
 An object's capture efficiency is the posterior mean of its clipped gDNA density under the landscape, from its own
