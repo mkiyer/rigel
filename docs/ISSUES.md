@@ -439,6 +439,34 @@ cause may therefore be the panel's; it is unmeasured.
 Instrument: the collector's calibration scalars per condition,
 `~/Downloads/rigel_runs/prototypes/2026-09-29_fl_per_object/data/manifest.json`.
 
+### the-short-rna-arm-fails-stranded
+`priority: next — for the owner to rank: real cfRNA is a short-RNA library · kind: defect · 2026-10-01`
+On the genome-scale fl-gap arm whose RNA is shorter than its reads (`flgap_rna_short`: RNA 75 ± 20 bp against
+gDNA 250 ± 60 bp, 100 bp reads, `g50`), a stranded library loses its isoforms and an unstranded one does not. The
+pinned A/B's errors, calibration as Σ|err| over the oracle's mass and the rest against per-transcript truth:
+
+| stratum | calibration | transcripts | genes | mRNA | nascent |
+|---|---|---|---|---|---|
+| stranded × OFF | 1.9 % | 42.1 % | 4.2 % | −2.6 % | +9.5 % |
+| stranded × ON | 5.8 % | 28.5 % | 2.0 % | +0.3 % | −23.6 % |
+| unstranded × OFF | 2.1 % | 3.8 % | 0.3 % | −0.0 % | −0.5 % |
+| unstranded × ON (deferred) | 13.8 % | 28.6 % | 2.8 % | +0.1 % | −2.7 % |
+
+The RNA-long arm (`flgap_rna_long`) reads 2.2 / 5.0 / 2.1 % transcripts on the three in-scope strata, and the test
+chromosome's three fl arms (gDNA/RNA 100/250 and 250/100, and the 200/200 control) stay within 0.9 points of their control on every in-scope stratum, in calibration
+and in transcripts.
+- Not the 2026-10-01 strand landings: the tree before od = 0 and κ (35e254ef) gives the stranded × OFF row to the
+  fragment (transcripts 1,682,936 off, mRNA −102,416, nascent +95,350), and κ is 0.0099 under either.
+- Not calibration on capture OFF (1.9 %): the error is the EM's, and it needs the strand term — unstranded, the same
+  fragments allocate within 3.8 %.
+- The arm's distinguishing feature is a fragment shorter than its reads, so its mates overlap completely; the first
+  suspect is how such a pair's orientation reaches the strand term. Unmeasured.
+- The arm carries the retired nascent model (`ISSUES: flgap-panels-stale-nascent-model`), so its nascent column is
+  not comparable to the ladder's; the transcript and mRNA columns stand.
+
+Instrument: `~/Downloads/rigel_runs/prototypes/2026-10-01_fl_check/` — `queue.sh` scores the five fl panels,
+`analyze.py` reads them per stratum, and `run_snapshot.sh REV CONDITION` re-runs one condition on a frozen tree.
+
 ### hygiene-ledger
 `priority: next — release-critical for its release-gating docs (g) and the flaky reorder gate (e); the rest Tier 4, batched between A/B windows, a numeric no-op landing between any two · kind: hygiene · 2026-08-31; the review of 2026-09-22`
 What the reviews left, each its own commit; content-only changes keep the collected count unchanged.
