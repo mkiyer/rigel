@@ -18,7 +18,7 @@ Ordered by priority. An entry says what is open and the number a ranking turns o
 what was ruled is `DESIGN.md`.
 
 ### strand-overdispersion-one-shared-value
-`priority: now — first (owner, 2026-09-30): od = 0 LANDED 2026-10-01; next κ from the three-class junction fit, then the summary.json diagnostics, then the pruning design · kind: design · 2026-09-27`
+`priority: now — first (owner, 2026-09-30): od = 0 and κ LANDED 2026-10-01; next the summary.json diagnostics, then the pruning design · kind: design · 2026-09-27`
 The strand model's two inputs, κ and the od, were both contaminated on real libraries:
 - splice artifacts (misaligned gDNA, ½ in a stranded library) inflate κ and the RNA-side spread;
 - antisense RNA inflates the gDNA side.
@@ -39,8 +39,9 @@ What the replaced mechanisms measured is in CLOSED: `ISSUES: the-strand-overdisp
 OWNER RULINGS (2026-09-30):
 - **κ** comes from a three-class binomial fit over the per-junction strand table: genuine (κ), splice artifact (½),
   reversed (1−κ).
-  - The class weights are concave for fixed κ. κ is the posterior mean under the shipped Beta(1,1) prior, so it
-    reduces to the shipped `(n_same + 1)/(n_obs + 2)` wherever no junction needs another class.
+  - The class weights are concave for fixed κ. κ is the shipped Beta(1,1) posterior mean over the reads the
+    mixture's maximum credits to RNA, so it IS the shipped `(n_same + 1)/(n_obs + 2)` wherever the maximum puts every
+    junction in the genuine class (owner, 2026-10-01).
   - The strand-live gate stays on the pooled counts. Removing artifacts only moves κ away from ½, so the fit cannot
     switch a live channel off.
 - **An empty spliced census** is unstranded (κ = ½, od = 0), not an error.
@@ -51,21 +52,15 @@ OWNER RULINGS (2026-09-30):
   `TRAPS: real-data-is-a-test-input`, scoped to the od, because the simulator plants no RNA od and no splice
   artifacts).
 
-THE REMAINING LANDING, one A/B window each, prototyped outside the tree:
-1. **κ.** Prototype measured on the censuses:
-   - LBX0588 0.064 → 0.0031, with 22 % of its junctions in the artifact class;
-   - LBX0588 at 10 % / 1 %: 0.005–0.009 / 0.03–0.06 (pooled 0.060–0.070 / 0.072–0.092);
-   - every ladder row identical to 7 digits;
-   - two junction-poor `odg05` ss 0.70 rows move ≤ 1 % (0.303 → 0.300), the class weights trading at κ ≈ 0.3.
+κ from the genuine junctions LANDED 2026-10-01, after od = 0 (the retired RNA od fit read κ, and at the clean κ LBX0588's
+moment went 0.07 → 0.37). Its A/B is in `DESIGN.md` §3.3b and its fit in `EQUATIONS.md` §5.4.
 
-   It must land after od = 0: the retired RNA od fit read κ, and at the clean κ LBX0588's moment went 0.07 → 0.37.
-   Judge it on a gDNA-heavy blend of the VCaP halves, all of the DNA half plus a 1 % draw of the RNA half (97 % DNA),
-   whose truth is its two halves.
-2. **The `summary.json` diagnostics** (`ISSUES: the-format-changes-to-batch-before-release` (a)):
+THE REMAINING LANDING, one window each:
+1. **The `summary.json` diagnostics** (`ISSUES: the-format-changes-to-batch-before-release` (a)):
    - pooled and clean κ;
    - artifact share by junction and by fragment (LBX0588: 22 % against 12 %);
    - reversed share, strand-live, and the od's label.
-3. **The pruning design** with `ISSUES: splicing-artifacts`: junction ids in the fragment buffer (it carries none
+2. **The pruning design** with `ISSUES: splicing-artifacts`: junction ids in the fragment buffer (it carries none
    today), deposits deferred until the junction decision, and the weight derived on one page. Strand catches only
    artifacts with a wrong-strand read (an n-read artifact shows none with probability 2⁻ⁿ), and sees nothing on
    unstranded libraries.
@@ -131,8 +126,8 @@ Those three fragment types are a local A/B, independent of the cluster work.
   whose sense fraction is ½ (the VCaP exome-DNA half: 3,223 spliced observations on 2,255 junctions, κ 0.5008, feeding
   the RNA od with information 5,701), and κ pools per-junction rates that vary with depth
   (`ISSUES: strand-overdispersion-one-shared-value`), so on real libraries the RNA strand MEAN is itself off:
-  LBX0588's pooled κ is 0.064 against 0.0029 from its genuine junctions (measured 2026-09-30; κ's fix is that entry's
-  next step). The repair trains the strand model and
+  LBX0588's pooled κ is 0.064 against 0.0030 from its genuine junctions; κ now comes from the genuine junctions
+  (2026-10-01, `DESIGN.md` §3.3b), and the per-junction artifact posterior it fits is this entry's input. The repair trains the strand model and
   the RNA length law weighted by each fragment's probability of being genuine.
 - THE COUNTERS ARE IN THREE UNITS: `sj_blacklisted` counts junction × record over every record, multimappers
   included; the `splice.*` census counts uniquely mapped fragments; 0.7.1's `summary.json` splice counts are the

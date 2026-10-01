@@ -116,7 +116,10 @@ class TestSJStrandTable:
         np.testing.assert_array_equal(t.depth, [10, 100])
         assert t.n_observations == 110
         assert t.n_sj == 2
-        assert StrandModel.from_sj_table(t).p_r1_sense == pytest.approx(103 / 110)
+        m = StrandModel.from_sj_table(t)
+        assert m.n_same / m.n_observations == pytest.approx(
+            103 / 110
+        )  # the marginal; κ is TestGenuineKappa's
 
     def test_to_dict_reports_deep_sj(self):
         t = _table([(Strand.POS, 1, 1), (Strand.POS, 60, 60), (Strand.NEG, 900, 200)])
@@ -228,3 +231,156 @@ class TestStrandModelsContainer:
 
     def test_default_container_has_an_empty_table(self):
         assert StrandModels().sj_table.n_sj == 0
+
+
+class TestGenuineKappa:
+    """κ from the genuine junctions only (owner, 2026-09-30).
+
+    In a stranded library a junction is genuine RNA (wrong-strand rate κ), a splice artifact —
+    misaligned gDNA, wrong-strand rate ½ — or reversed (1 − κ). κ is the genuine class's rate, the
+    posterior mean under the shipped Beta(1, 1) prior with the three-class likelihood, so it reduces to
+    ``(n_same + 1)/(n_obs + 2)`` wherever no junction needs another class. The strand-live gate reads
+    the pooled counts, and an unstranded library keeps its pooled rate.
+    """
+
+    @staticmethod
+    def _contaminated():
+        genuine = [(Strand.POS, 1, 99)] * 200  # 200 deep junctions at a wrong-strand rate of 0.01
+        artifacts = (
+            [(Strand.POS, 1, 1)] * 300 + [(Strand.POS, 2, 1)] * 50 + [(Strand.POS, 1, 2)] * 50
+        )
+        reversed_ = [(Strand.POS, 20, 0)] * 10  # every read on the motif-opposite side
+        return _table(genuine + artifacts + reversed_)
+
+    def test_kappa_excludes_splice_artifacts_and_reversed_junctions(self):
+        from rigel.calibration.strand_balance import fit_strand_balance
+
+        table = self._contaminated()
+        model = StrandModel.from_sj_table(table)
+        pooled = model.n_same / model.n_observations
+        kappa = fit_strand_balance(StrandModels(exonic_spliced=model)).rna_sense_frac
+        assert pooled > 0.03  # the artifacts and reversed junctions inflate the pooled rate
+        assert kappa == pytest.approx(0.01, abs=0.0015)
+        assert model.p_r1_sense == pytest.approx(kappa, rel=0.01)  # the EM reads the same κ
+        assert model.contingency_matches_table()  # the 2x2 stays the observed record
+
+    def test_without_contamination_kappa_is_the_shipped_posterior_mean(self):
+        from rigel.calibration.strand_balance import fit_strand_balance
+
+        model = StrandModel.from_sj_table(
+            _table([(Strand.POS, 3, 297)] * 40 + [(Strand.NEG, 2, 198)] * 30)
+        )
+        expect = (model.n_same + 1.0) / (model.n_observations + 2.0)
+        kappa = fit_strand_balance(StrandModels(exonic_spliced=model)).rna_sense_frac
+        assert kappa == pytest.approx(expect, rel=1e-6)
+
+    def test_a_deep_clean_library_resolves_its_narrow_posterior(self):
+        """A million spliced reads, every junction genuine: κ is finite and is the shipped posterior mean."""
+        model = StrandModel.from_sj_table(_table([(Strand.POS, 10, 990)] * 1000))
+        expect = (model.n_same + 1.0) / (model.n_observations + 2.0)
+        assert np.isfinite(model.p_r1_sense)
+        assert (model.genuine_n_same + 1.0) / (model.n_observations + 2.0) == pytest.approx(
+            expect, rel=1e-6
+        )
+
+    @staticmethod
+    def _independent_maximum(table):
+        """The three-class mixture's maximum by a route the fit does not share: a grid over κ and the class shares, then
+        a Nelder-Mead polish from its best points. Returns ``(the fit's log-likelihood, the search's, the tolerance)``;
+        the tolerance adds what the fit's κ floor can cost, ``floor × reads``."""
+        from scipy.optimize import minimize
+        from scipy.special import logsumexp
+
+        from rigel.strand_model import _KAPPA_FLOOR, _genuine_mixture
+
+        kn, cnt = np.unique(
+            np.stack([table.n_sense, table.depth], axis=1).astype(float), axis=0, return_counts=True
+        )
+        k, n, c = kn[:, 0], kn[:, 1], cnt.astype(float)
+        if c @ k > 0.5 * (c @ n):
+            k = n - k
+        fit_loglik = _genuine_mixture(k, n, c)[4]
+
+        def classes(kappa):
+            return np.stack(
+                [
+                    k * np.log(kappa) + (n - k) * np.log1p(-kappa),
+                    n * np.log(0.5),
+                    k * np.log1p(-kappa) + (n - k) * np.log(kappa),
+                ]
+            )
+
+        def loglik(kappa, w):
+            return float(
+                c @ logsumexp(classes(kappa) + np.log(np.maximum(w, 1e-300))[:, None], axis=0)
+            )
+
+        g = np.linspace(0.0, 1.0, 51)
+        simplex = np.array([(a, b, 1.0 - a - b) for a in g for b in g if a + b <= 1.0 + 1e-12])
+        log_w = np.log(np.maximum(simplex, 1e-300))[:, :, None]
+        grid = sorted(
+            (
+                (float(v), kap, w)
+                for kap in np.geomspace(1e-12, 0.499, 80)
+                for v, w in zip(logsumexp(log_w + classes(kap)[None], axis=1) @ c, simplex)
+            ),
+            key=lambda r: r[0],
+        )
+        best = grid[-1][0]
+        for _, kap, w in grid[-3:]:
+            x0 = np.r_[np.log(kap / (1.0 - kap)), np.log(np.maximum(w, 1e-12))]
+
+            def neg(x):
+                kp = 1.0 / (1.0 + np.exp(-x[0]))
+                return -loglik(min(kp, 0.5), np.exp(x[1:] - logsumexp(x[1:])))
+
+            fit = minimize(
+                neg,
+                x0,
+                method="Nelder-Mead",
+                options={"xatol": 1e-12, "fatol": 1e-13, "maxiter": 3000},
+            )
+            best = max(best, -fit.fun)
+        return fit_loglik, best, 1e-8 + _KAPPA_FLOOR * float(c @ n)
+
+    def test_the_fit_reaches_the_mixture_maximum(self):
+        """The fit is the three-class mixture's maximum likelihood, by an independent search."""
+        fit, best, tol = self._independent_maximum(self._contaminated())
+        assert fit >= best - tol
+
+    def test_a_maximum_at_the_kappa_boundary_is_found(self):
+        """A near-perfectly stranded library whose only wrong-strand reads are five single-read junctions (a real 1 %
+        VCaP draw's shape): the maximum calls them reversed, at κ → 0. EM stalled at a saddle 1.1 units short of it."""
+        fit, best, tol = self._independent_maximum(
+            _table(
+                [(Strand.POS, 0, 1)] * 20000
+                + [(Strand.POS, 0, 3)] * 10000
+                + [(Strand.POS, 1, 0)] * 5
+            )
+        )
+        assert fit >= best - tol
+
+    def test_a_weakly_stranded_library_is_fit_exactly(self):
+        """κ near ½ merges the classes and EM crawled for seconds; the profile fit is exact and bounded there."""
+        rows = (
+            [(Strand.POS, 9, 11)] * 150
+            + [(Strand.POS, 4, 6)] * 150
+            + [(Strand.POS, 2, 3)] * 150
+            + [(Strand.POS, 1, 1)] * 60
+        )
+        fit, best, tol = self._independent_maximum(_table(rows))
+        assert fit >= best - tol
+
+    def test_an_unstranded_library_keeps_its_pooled_rate(self):
+        """The strand-live gate reads the pooled counts. On this unstranded table the three-class fit, applied anyway,
+        would read its one-sided junctions as genuine and reversed RNA and put κ near 0."""
+        model = StrandModel.from_sj_table(
+            _table(
+                [(Strand.POS, 3, 0)] * 40
+                + [(Strand.POS, 0, 3)] * 40
+                + [(Strand.POS, 1, 1)] * 100
+                + [(Strand.POS, 1, 0)] * 200
+                + [(Strand.POS, 0, 1)] * 200
+            )
+        )
+        assert model.p_r1_sense == model.n_same / model.n_observations == 0.5

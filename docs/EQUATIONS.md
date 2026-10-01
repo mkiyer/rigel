@@ -500,6 +500,32 @@ averages the per-sj spread over the number of sj, not once.
 implemented and refuted: any constant for the unstranded case cancels out of the orientation
 discrimination `(1−p)/p`, so a global genic average destroys most of the signal.
 
+
+**5.4 κ, the genuine junctions' rate** (`strand_model.genuine_sense_fraction`). Junction j has `k_j` of `n_j` reads on
+the minority side, oriented so the genuine rate κ is below ½:
+
+    ℓ(κ, w) = Σ_j log[ w_g·Bin(k_j; n_j, κ) + w_a·Bin(k_j; n_j, ½) + w_r·Bin(k_j; n_j, 1−κ) ]
+    (κ̂, ŵ)  = argmax ℓ
+    κ       = (m + 1)/(R + 2),   m = Σ_j [r_gj·k_j + r_rj·(n_j − k_j)],   R = Σ_j (r_gj + r_rj)·n_j
+
+`r_gj` and `r_rj` are junction j's genuine and reversed responsibilities at the maximum, so κ is the shipped Beta(1,1)
+posterior mean over the reads the maximum credits to RNA.
+
+- **The weights.** For fixed κ the objective is concave in `w` on the simplex, so the KKT conditions are necessary and
+  sufficient: `Σ_j f_kj/(w·f)_j` equals J for every weight in use and is at most J for every weight at 0. A vertex,
+  then an edge, that meets them is the maximum; only an interior maximum needs a log-barrier ascent, and the barrier
+  keeps a weight the optimum needs at 10⁻⁶.
+- **κ̂.** The profile `L(κ) = max_w ℓ` is scanned uniformly in `u = log(κ/(½ − κ))`, 129 nodes from κ = 10⁻¹² to
+  ½ − 10⁻¹², and Brent's method searches the best node's two cells. Wherever no class beats the artifact class, L is
+  flat at the all-artifact value, and a weakly stranded library's maximum rises out of that plateau just below ½; a
+  scan on log κ stepped over it (`tests/test_strand_model.py`'s `test_a_weakly_stranded_library_is_fit_exactly`).
+- **Why not EM.** EM's fixed point is this maximum, but it crawls without end as κ nears ½ (the classes merge), and a
+  weight that reaches 0 cannot return, so it can stop at a saddle. The profile's work is bounded: a median 9 ms and at
+  most 183 ms on 86 real and simulated census tables, each within 7×10⁻⁸ nat of a 4,001-node scan and an EM polish.
+- **The reduction.** Where the maximum puts every junction in the genuine class, `m = n_minority` and `R = n_obs`, so κ
+  is exactly the shipped `(n_same + 1)/(n_obs + 2)`.
+- **What the consumers see:** a 2×2 with `n_same' = κ·(n_obs + 2) − 1` sense reads of `n_obs`.
+
 ---
 
 ## 6. Overdispersion — 0 by policy, and why strand counts cannot measure it

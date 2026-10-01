@@ -812,9 +812,11 @@ transcripts that map to the same span. Isoforms with identical start and end
 coordinates share one nRNA component.
 
 **Why is `strand_specificity` near 0.5?**
-Rigel trains the strand model from annotated spliced fragments only.
-Unstranded libraries, or libraries with few informative splice reads, stay
-near 0.5.
+Rigel trains the strand model from annotated spliced fragments only. On a
+stranded library it leaves out the junctions that are not genuine RNA: a
+splice artifact (genomic DNA the aligner wrote as spliced) reads near 50/50,
+and a reversed junction reads the opposite way. Unstranded libraries, or
+libraries with few informative splice reads, stay near 0.5.
 
 **How does calibration use strand information?**
 The per-strand counts are calibration's own composition signal: gDNA is unstranded, RNA is not, so

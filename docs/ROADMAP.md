@@ -55,9 +55,9 @@ sparse libraries lose their gDNA.
   `ISSUES: the-scorer-reads-a-census-length-law`; the boundary inversion's second wave stays open; the RNA law trains on
   spliced fragments that carry splice artifacts (`ISSUES: splicing-artifacts`) — `calibration/fl.py`,
   `gdna_density.py`, `calibration_vs_oracle.py`; watch `ISSUES: capture-degeneracy-standing-risk`.
-- **Strand model**: od = 0 by policy, landed 2026-10-01 after its VCaP-mix A/B (`DESIGN.md` §3.3a). κ still pools
-  splice artifacts: LBX0588's 0.064 against 0.0029 from its genuine junctions. The three-class junction fit is next —
-  Tier 0, `ISSUES: strand-overdispersion-one-shared-value`; the prototype harness and the VCaP truth scorer are in
+- **Strand model**: od = 0 by policy (`DESIGN.md` §3.3a) and κ from the genuine junctions (§3.3b), both landed
+  2026-10-01 after their VCaP A/Bs (LBX0588's κ 0.064 → 0.0030). The `summary.json` diagnostics and the pruning design
+  are next — Tier 0, `ISSUES: strand-overdispersion-one-shared-value`; the prototype harness and the VCaP truth scorer are in
   `~/Downloads/rigel_runs/prototypes/2026-09-30_robust_od/`.
 - **The message layer**: `transfer` ships on the two-phase backbone (`DESIGN.md` §6b.12–§6b.14); `silent` is the
   floor; the bar — win on unstranded, minimal harm on stranded, never pooled — is `policy_benchmark.py --panel
@@ -110,9 +110,8 @@ between any two windows.
 
 **Release-critical — before 0.8.0.**
 1. **Tier 0, strand overdispersion — first, before anything else (owner, 2026-09-30)**
-   (`ISSUES: strand-overdispersion-one-shared-value`, the 2026-09-30 rulings), one step per window: od = 0 (landed
-   2026-10-01); κ from the three-class junction fit, judged on the gDNA-heavy VCaP blend; the `summary.json`
-   diagnostics; the pruning design.
+   (`ISSUES: strand-overdispersion-one-shared-value`, the 2026-09-30 rulings), one step per window: od = 0 and κ from the
+   genuine junctions (both landed 2026-10-01); the `summary.json` diagnostics; the pruning design.
    After it: re-read the strand-input drift in `ISSUES: the-gdna-landscape-collapses-at-low-depth` and
    `ISSUES: strand-likelihood-over-confident-beyond-od`, and refresh the ladder report, the issue-list page and the
    full_lowg explanation page, which lacks the od-arm line of

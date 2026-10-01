@@ -691,6 +691,52 @@ What this replaced:
 The native strand term keeps its od arguments and is passed 0, so an od can return without a native change. An
 empty spliced census is an unstranded library — κ = ½, od = 0, a dead strand channel — not an error.
 
+### 3.3b κ is the genuine junctions' rate (owner, 2026-09-30)
+
+> **κ comes from the per-junction strand table with the junctions that are not genuine RNA taken out.** In a stranded
+> library a junction is one of:
+> - genuine RNA (wrong-strand rate κ);
+> - a splice artifact, i.e. misaligned gDNA (½);
+> - reversed (1 − κ).
+>
+> κ is the genuine class's rate: the three-class likelihood is maximised over κ and the class weights together, and κ
+> is the shipped `Beta(1, 1)` posterior mean over the reads that maximum credits to RNA, `(minority + 1)/(reads + 2)`
+> (owner, 2026-10-01, over a posterior mean with the weights profiled). The strand-live gate stays on the pooled
+> counts.
+> (`strand_model.genuine_sense_fraction`, `StrandModel.genuine_n_same`; gates `tests/test_strand_model.py`'s
+> `TestGenuineKappa`.)
+
+**Why.** Splice artifacts sit at ½ in a stranded library, and on a gDNA-heavy library they are a large share of the
+shallow junctions:
+- LBX0588's pooled κ is 0.064 against 0.0030 from its genuine junctions, with 22 % of its junctions in the artifact
+  class.
+- A κ too high credits real gDNA's wrong-strand reads to RNA.
+
+**Measured, against what shipped, both at od = 0:**
+- **The gDNA-heavy VCaP blend** (the DNA half plus 1 % of the RNA half, 97 % gDNA, read-name truth): κ 0.0169 → 0.0030;
+  gDNA pool error −9.57 → −9.23 %; transcripts −0.7 %; genes −1.7 %. The remaining error, about 430k gDNA fragments
+  called RNA under either κ, is the exome-captured DNA half reading as RNA, not κ's.
+- **The VCaP mix:** gDNA pool error −6.11 → −6.09 %; transcripts and genes flat.
+- **LBX0588's gDNA share:** 0.45 → 0.53 at 10 % depth. Subsampling cannot change it; full depth reads 0.84.
+  - At 1 % every draw rises, 0.10–0.11 → 0.11–0.12.
+  - The spread across draws widens, 4.9 → 7.8 %. At 150 spliced reads, κ is 0.059 on one draw and 0.006 on two.
+- **Without artifacts, bit-identical:** every ladder row, and 35 of 40 stranded test and `odg05` rows. The other five move
+  transcripts by ±1.5–3.5k, with genes within ±12.
+
+**Every κ consumer reads one count** — calibration, its gate, the EM and the second pass — and the 2×2 stays the
+observed record. Where the maximum puts every junction in the genuine class, κ IS the shipped
+`(n_same + 1)/(n_obs + 2)`: on all eight ladder rows and 18 of `odg05`'s 20 stranded rows. Its two ss 0.70 rows move by
+5×10⁻⁴ and 9×10⁻³ of κ, the second toward its truth (0.3032 → 0.3005 against 0.30) (`EQUATIONS.md` §5.4).
+
+**Why the MLE (owner, 2026-10-01).** It reads the RNA classes' reads directly and is exact where every junction is
+genuine. On LBX0588's draws it tracks full depth (0.0030) more closely than the profiled posterior mean: 0.0031–0.0071
+against 0.0052–0.0093 at 10 % depth.
+
+**Limits.** This is strand evidence only.
+- An unstranded library keeps its pooled rate.
+- An n-read artifact junction shows no wrong-strand read with probability 2⁻ⁿ.
+- The per-junction artifact posterior is the input to pruning (`ISSUES: splicing-artifacts`).
+
 ### 3.4 Fragment length — one definition
 
 `L` = genomic span minus cut introns. The scanner's rival histogram, `FragmentLengthModels` and the

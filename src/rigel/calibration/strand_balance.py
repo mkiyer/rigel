@@ -1,10 +1,10 @@
 """RNA strand-balance model: the library RNA sense mean ``rna_sense_frac`` (κ).
 
-Fitted from the posterior-predictive of the library sense rate over annotated spliced unique mappers —
-the 2×2 contingency in the live ``StrandModel``, itself the marginal of the per-sj strand table. The
-sense-rate posterior is ``Beta(n_same + 1, n_opp + 1)`` and ``rna_sense_frac`` is its mean,
-``(n_same + 1) / (n_obs + 2)``. It strand-cleans the count density and parameterises the per-region
-strand likelihood.
+The genuine junctions' sense rate over annotated spliced unique mappers: the ``StrandModel``'s
+:attr:`~rigel.strand_model.StrandModel.p_r1_sense` reads its genuine sense count, the per-sj table with the splice
+artifacts and reversed junctions taken out (:func:`rigel.strand_model.genuine_sense_fraction`), scaled so that
+``rna_sense_frac = (n_same + 1) / (n_obs + 2)`` here is that fit's κ. It strand-cleans the count density
+and parameterises the per-region strand likelihood.
 
 Zero spliced reads give ``Beta(1, 1)`` and hence κ = 0.5, which ``fallback_used`` announces;
 calibration reads such a library as unstranded — its strand channel is dead
