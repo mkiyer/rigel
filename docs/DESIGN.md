@@ -703,7 +703,7 @@ empty spliced census is an unstranded library — κ = ½, od = 0, a dead strand
 > is the shipped `Beta(1, 1)` posterior mean over the reads that maximum credits to RNA, `(minority + 1)/(reads + 2)`
 > (owner, 2026-10-01, over a posterior mean with the weights profiled). The strand-live gate stays on the pooled
 > counts.
-> (`strand_model.genuine_sense_fraction`, `StrandModel.genuine_n_same`; gates `tests/test_strand_model.py`'s
+> (`junction_fit.genuine_sense_fraction`, `StrandModel.genuine_n_same`; gates `tests/test_strand_model.py`'s
 > `TestGenuineKappa`.)
 
 **Why.** Splice artifacts sit at ½ in a stranded library, and on a gDNA-heavy library they are a large share of the
@@ -853,7 +853,7 @@ transcripts and materialized as ordinary transcript rows in `index.t_df`, flagge
 ## 6. Code layout
 
 **Python.** Top level: `cli` `pipeline` `config` `index` `scan` `scoring` `buffer` `scan_payload`
-`scan_cache` `locus` `locus_partition` `scored_fragments` `estimator` `strand_model` `frag_length_model`
+`scan_cache` `locus` `locus_partition` `scored_fragments` `estimator` `strand_model` `junction_fit` `frag_length_model`
 `second_pass` `splice` `splice_blacklist` `native` `gtf` `transcript` `annotate` `stats` `types`, plus the
 `report/` and `sim/` subpackages. `calibration/`: `calibrate` (orchestrator) · `splice_graph` (the
 index's graph) · `sweep` (the backbone) and `messages/` (the policy: `silent` · `transfer`; the row constructors `native/transfer_rows.h`) ·
@@ -863,6 +863,16 @@ index's graph) · `sweep` (the backbone) and `messages/` (the policy: `silent` �
 `density_model` `landscape` · `simplex_logodds` `derive` ·
 `priors` `result` `errors` `track` · `_layers` (the layering the imports already had).
 Re-derive this list from `calibration/_layers.py` and the imports rather than trusting it.
+
+**Where a number lives (2026-10-01).** `config` holds two frozen, validated trees: what a run may set
+(`PipelineConfig`, and `IndexConfig` for `rigel index`, whose CLI defaults and help text read them) and what the
+code fixes (`CONSTANTS`: the numerical methods, the QC thresholds and the resource budgets, by component, each
+field documented with why it has its value). Code reads a constant by name and never restates one; an experiment
+varies one on a copy (`Constants.replaced`). Three kinds stay out of `config`, each in its one home:
+identifiers and formats (codes, flags, schema versions) with the format they define; named mathematical
+definitions where they are used; and the values the native kernels share with Python, defined in C++ and
+exported (`native.transfer_rows.DENSITY_EPS`, `ARM_EPS`, `JEFFREYS_REF`, `OWN_EVIDENCE_EPS`), never restated.
+`tests/test_constants.py` gates it: a bare numeric module constant outside those homes fails.
 
 **C++** (`src/rigel/native/`, nanobind, C++17, `-O3`, LTO; threads from its own pool, `thread_pool.h`):
 
@@ -1267,7 +1277,7 @@ row callback.
 The shipped single-strand read-out was not: a fancy index on the last axis in `_regrid_global` returned an
 F-ordered ψ whose row reductions summed in a row-count-dependent order, and the BLAS matrix–vector moments
 dispatched a different kernel at one row — splitting any real 255-row tile moved ~70 % of its rows by ≤
-1e-15, and halving `_SOLVE_BLOCK_BYTES` already moved slots on the shipped path. The repair (a contiguous
+1e-15, and halving `CONSTANTS.resources.solve_block_bytes` already moved slots on the shipped path. The repair (a contiguous
 ψ, per-row moment sums) moves the answer by ≤ 3.1e-15 per slot per sweep, does not amplify through four
 sweeps and three refits (the final belief ≤ 3.1e-15, `has_composition` never flips), leaves TPM and
 effective lengths bit-identical on a real library and every aggregate of `calibration_vs_oracle.py` at the
@@ -1501,7 +1511,7 @@ one-hop-lifted-out-is-still-the-relay`). The stranded gDNA-free case is fixed by
 unstranded gDNA-free library the exons' composition is the landscape's to say, which it does through ψ's
 composition arm without a lane (the ladder's `g00 ss.50` rows read 499 and 211 false fragments of 8M that
 way), and the two-gene toy that reads ½ there cannot fit a landscape at all (two anchors against
-`_MIN_TRAIN`) — the toy's limit, not a defect.
+`CONSTANTS.calibration.min_training_regions`) — the toy's limit, not a defect.
 
 #### 6b.15.13 The AMBIG tilt's hypothesis space is {pure +, pure −, mixed} — the tilt atom (2026-09-14; L5 of the lanes worklist; `EQUATIONS.md` §9f; `ISSUES: capture-on-strand-pure-ambig-undercall` CLOSED)
 
@@ -1636,7 +1646,7 @@ their numbers `ISSUES: the-landscape-training-population-arms`):
    λ-row" is NOT the predicate: `PsiMessage.lam_rows` fuses compositions and bounds (1,476 own-flux
    ceilings at the unstranded zero control; 137k against 111k).
 2. **The grid spans every region and boundary the prior is read at** (`fit_landscape(domain=…)`), so the
-   training cut changes which kernels are summed and never the axis; the `_MIN_TRAIN` guard measures the
+   training cut changes which kernels are summed and never the axis; the `min_training_regions` guard measures the
    annotation-admitted population. Found on the gDNA-free golden toys, where the cut left the anchors
    alone: the grid collapsed to the floor (14 → 95 invented fragments of 1,000) and the guard refused the
    refit (52 → 201). Free on the ladder (byte-identical on 14 rows; the full domain widens the step ≤ 10 %).
@@ -1651,7 +1661,7 @@ their numbers `ISSUES: the-landscape-training-population-arms`):
 4. **The location floor — a slot trains only where its solve LOCATES it** (owner's direction and ruling, 2026-09-14): a
    composition is necessary and not sufficient. The estimator's resolution wall is one fragment (rule 3's
    `count < 1`), and a Poisson count has `Var(log c) = 1/c`, so the wall in the variable every solve reports
-   is `Var(log f_g) ≤ 1 nat²` (`landscape._LOCATED_VAR`, the identity's value, not a constant chosen). A
+   is `Var(log f_g) ≤ 1 nat²` (`CONSTANTS.landscape.located_var`, the identity's value, not a constant chosen). A
    slot wider than that has no location whatever produced its solve — a strand term at a pure-RNA vertex
    (its median sits above zero by the term's width), an empty intron's factory row, a one-sided delivered
    row — and its median is the reference measure's under its bound; training on it re-seeds the landscape
@@ -1702,7 +1712,7 @@ component's; the private mass-weighted kernel density with its bandwidth and pro
 accepted a mode from any five slots with positive mass, is deleted. Depleted is the largest-mass basin
 (`landscape.split_basins`), the enriched candidate the basin above it holding the most located kernels, and
 a mode is located iff the median rendered width of its member kernels is at most one nat
-(`landscape._LOCATED_VAR`, §7.1 rule 4 read at the population's own resolution, `knn_widths`; the within-basin
+(`CONSTANTS.landscape.located_var`, §7.1 rule 4 read at the population's own resolution, `knn_widths`; the within-basin
 spread is not the statement — a basin cut by the grid's edge is narrow whatever its kernels). Why this and not a repair of the composition: the composition had been
 fixed first and the factor did not follow — the ladder's zero rows carry 178–189 false fragments on
 35,135 regions (one slot at or above one fragment) and still read 0.51 / 0.12 / 0.62, because a detector
@@ -1721,7 +1731,7 @@ reference are stable across an 8× range of the landscape's render resolution
 
 **The members have a location (2026-09-16; `ISSUES: the-ruler-reference-on-sparse-real-libraries`
 CLOSED).** A basin's members are the kernels with a location — a count of at least one fragment, the wall
-`_LOCATED_VAR` is read at, published by the fit as `DensityLandscape.located`; a zero-count anchor's or a
+`located_var` is read at, published by the fit as `DensityLandscape.located`; a zero-count anchor's or a
 sub-fragment kernel's centre is its resolution wall `1/E`, which says where the kernel could not see and is
 no member of anything. The enriched candidate is the basin above the depleted one holding the most located
 kernels, and it is a mode iff its members resolve it at the located population's own resolution: with

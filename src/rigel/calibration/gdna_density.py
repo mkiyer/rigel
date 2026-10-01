@@ -46,6 +46,8 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.special import gammaln
 
+from ..config import CONSTANTS
+
 __all__ = [
     "GdnaDensityFit",
     "contained_opportunity",
@@ -54,11 +56,6 @@ __all__ = [
     "pooled_log_rate",
     "region_lengths_from_partition",
 ]
-
-#: The bracket's upper end as a multiple of the pooled rate. The one-sided root is always BELOW the
-#: pooled rate (contamination only inflates it), so any multiple above 1 brackets it; the value is a
-#: headroom guard, and ``bracket_ok`` reports if it ever failed to.
-_BRACKET_HEADROOM = 10.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,7 +180,7 @@ def one_sided_rate(counts, exposure) -> GdnaDensityFit:
         lam = rho * e
         return float(np.clip(lam - n, 0.0, None).sum() - poisson_lower_mean(lam).sum())
 
-    lo, hi = 0.0, _BRACKET_HEADROOM * pooled
+    lo, hi = 0.0, CONSTANTS.calibration.bracket_headroom * pooled
     if not (f(lo) <= 0.0 <= f(hi)):
         return GdnaDensityFit(pooled, pooled, int(n.size), total_e, bracket_ok=False)
     while True:

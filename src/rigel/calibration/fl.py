@@ -67,6 +67,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from ..config import CONSTANTS
 from .gdna_density import contained_opportunity, one_sided_rate
 from .signature import RegionType
 from .sj_opportunity import detilt_pool
@@ -86,7 +87,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "FLModels",
-    "POOL_EB_PRIOR_ESS",
     "build_fl_models",
     "gdna_contained_fl_mass",
     "gdna_fl_mass",
@@ -106,11 +106,6 @@ _GDNA_POOLS = _GDNA_CONTAINED_POOLS + _GDNA_CROSSING_POOLS
 
 #: The certified RNA pool: a splice across an annotated sj on the fragment's one surviving path.
 _RNA_POOLS = (POOL_RNA_SPLICED,)
-
-#: Dirichlet pseudo-count for the smooth EB shrink toward the global length law. Not a cliff: a pool
-#: total far above it gives the empirical law, far below it the global anchor, and 0 the anchor
-#: exactly.
-POOL_EB_PRIOR_ESS: float = 1000.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -572,7 +567,7 @@ def _realized_gdna_counts(
     eps_sum = np.zeros(n_exons)
     eps_count = np.zeros(n_exons)
     weight_sum = np.zeros(n_exons)
-    for _ in range(2):  # one refresh of mu_g from the boundary law; measured stable
+    for _ in range(CONSTANTS.fragment_length.gdna_mean_passes):
         # a boundary's expected unspliced count: its gDNA, plus the adjacent region's RNA, each crossing at
         # (mean length - 1) starts
         e_b = rho_off * (mu_g - 1.0) + rho_adj * (mu_r - 1.0)
@@ -615,7 +610,7 @@ def _realized_gdna_counts(
             inverted = _normalized(np.clip(f_mix - (1.0 - a_mix) * r_hat, 0.0, None))
             g_B = _normalized(np.clip(f_mix + lam_b * (inverted - f_mix), 0.0, None))
         mu_next = float((g_B * L_axis[: g_B.size]).sum())
-        if abs(mu_next - mu_g) < 0.25:
+        if abs(mu_next - mu_g) < CONSTANTS.fragment_length.gdna_mean_tolerance_bp:
             break
         mu_g = mu_next
     m_B = 0.0 if g_B is None else a2 * n2 + a3 * n3
@@ -710,7 +705,7 @@ def build_fl_models(
     gdna_opportunity: "GdnaOpportunity | None" = None,
     region_lengths: np.ndarray | None = None,
     region_types: np.ndarray | None = None,
-    prior_ess: float = POOL_EB_PRIOR_ESS,
+    prior_ess: float = CONSTANTS.fragment_length.pool_prior_ess,
 ) -> FLModels:
     """Build the global / RNA / gDNA FL pmfs from ONE payload, in ONE frame.
 
@@ -806,7 +801,7 @@ def _fl_models_from_histograms(
     rna_counts: np.ndarray,
     gdna_counts: np.ndarray,
     max_size: int,
-    prior_ess: float = POOL_EB_PRIOR_ESS,
+    prior_ess: float = CONSTANTS.fragment_length.pool_prior_ess,
     pool_counts: np.ndarray | None = None,
     gdna_realized_counts: np.ndarray | None = None,
 ) -> FLModels:

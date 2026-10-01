@@ -32,7 +32,9 @@ using transfer_rows::sigmoid;
 using transfer_rows::strand_term;
 using transfer_rows::strand_variance;
 
-constexpr double JEFFREYS_REF = 0.5;  // simplex_logodds._JEFFREYS_REF: the reference exponent of both arms
+// The reference exponent of both arms (Jeffreys' ½), exported as `rows.JEFFREYS_REF` and read there by
+// `simplex_logodds`.
+constexpr double JEFFREYS_REF = 0.5;
 constexpr double PI = 3.14159265358979323846;
 const double LOG_PI = std::log(PI), LOG_2 = std::log(2.0);
 const double NEG_INF = -std::numeric_limits<double>::infinity();
@@ -56,7 +58,9 @@ struct Delivered {
 // constant off the grid ("no more information out here", never a linear extension of the last slope). Bare — no
 // reference, no measure term, no Jacobian: the curve is a density in log-rate, so its conversion to a linear-rate
 // density cancels the change of variable exactly, per component.
-constexpr double ARM_EPS = 1.0e-12;  // landscape._EPS: the clips on the fraction, the mass and the opportunity
+// The clips on the fraction, the mass and the opportunity, exported as `rows.ARM_EPS` and read there by
+// `landscape`, whose fitted prior this arm evaluates.
+constexpr double ARM_EPS = 1.0e-12;
 
 inline double arm_abscissa(double fg) { return std::log(std::clamp(fg, ARM_EPS, 1.0 - ARM_EPS)); }
 

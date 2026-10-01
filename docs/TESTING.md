@@ -308,7 +308,7 @@ never against `frag_mean` (`TRAPS: capture-selects-for-length`).
 `rigel sim` builds (or is given, config key `index:`) a rigel index and simulates its transcript list, so
 what is simulated is exactly what `rigel quant` reads: annotated transcripts plus the synthetic nascent
 entities `index.create_nrna_transcripts` makes (one single-exon transcript over each multi-exon span,
-TSS/TES clustered within `NRNA_MERGE_TOLERANCE`, an annotated single-exon transcript adopted where one
+TSS/TES clustered within `IndexConfig.nrna_merge_tolerance`, an annotated single-exon transcript adopted where one
 covers the span). `transcript_filter` is refused — filter the GTF before building the index.
 
 | | |

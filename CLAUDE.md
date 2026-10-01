@@ -113,7 +113,9 @@ the halves are never pooled. `docs/TESTING.md` §0a has the recipe and the bars,
   (`policy_benchmark.py --by-class`, `calibration_vs_oracle.py`); what is still Python is prototyped in
   Python the same way. One mechanism at a time: a change that cannot be A/B'd alone cannot be judged alone.
 - **No magic numbers.** Stop and discuss before adding any constant, heuristic or tunable. Every divisor is
-  derived from the deposit rule and unit-tested against brute-force enumeration.
+  derived from the deposit rule and unit-tested against brute-force enumeration. A fixed number lives in
+  `config.CONSTANTS`, documented with why it has its value (a run setting in `PipelineConfig` or `IndexConfig`);
+  `tests/test_constants.py` refuses a bare module constant.
 - **A falsification test first, verified failing — then break the fixed code and watch each gate fire.**
   The second half is not optional; it has found holes in already-green gates repeatedly.
 - **The debug loop is the default method**: run the panel → take the worst IN-SCOPE scenario → dissect it
@@ -149,8 +151,8 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument's --self-test
 ```
 
-**The standing baseline: 0 failed / 2,639 passed / 0 skipped / 0 xfail, 2,639 collected** — re-derived
-2026-10-01 after κ landed (2,632 + 7: `test_strand_model.py`'s genuine-κ gates). **Any failure at all is a
+**The standing baseline: 0 failed / 2,652 passed / 0 skipped / 0 xfail, 2,652 collected** — re-derived
+2026-10-01 after the fixed numbers moved into `config.CONSTANTS` (2,640 − 1 + 13: `test_constants.py`). **Any failure at all is a
 regression.** Re-derive a count, never adjust one (`TRAPS: re-record-the-baseline`): every gate that scans
 the files on disk is one case, so only adding or removing a test moves the total. Derive the failure set,
 never eyeball the tail (`TRAPS: read-the-whole-failure-list`). A golden update is where a regression gets

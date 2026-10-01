@@ -1,8 +1,17 @@
-"""rigel.config — Pipeline configuration dataclasses.
+"""rigel.config — every setting and every fixed number Rigel's code reads, in one place.
 
-Single source of truth for all tunable parameters.  Frozen dataclasses
-ensure immutability after construction.  Compose the sub-configs into
-``PipelineConfig`` for clean function signatures.
+Two trees, both frozen dataclasses, validated on construction:
+
+* :class:`PipelineConfig` — what a run may set (the CLI, a YAML file, an instrument's ``--set``): ``em``,
+  ``scan``, ``scoring`` and ``calibration``. :class:`IndexConfig` is the same for ``rigel index``.
+* :data:`CONSTANTS` — what the code fixes: the numerical methods, the quality-control thresholds and the resource
+  budgets, by component. Not user-configurable; each value is documented with why it has that value, and the code
+  reads it by name and never restates it.
+
+What is deliberately NOT here: identifiers and formats (enum codes, bit flags, schema versions, file names), which
+live with the format they define; mathematical definitions (gDNA's strand probability ½, Jeffreys' ½), named where
+they are used; and the constants the native kernels share with Python, defined once in C++ and exported by
+:mod:`rigel.native`.
 """
 
 from __future__ import annotations
@@ -10,9 +19,9 @@ from __future__ import annotations
 import math
 import operator
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 if TYPE_CHECKING:
     import numpy as np
@@ -114,20 +123,20 @@ class FragmentScoringConfig:
         (i.e. each mismatch cuts probability by 10×).
     """
 
-    overhang_log_penalty: float = math.log(0.1)
-    mismatch_log_penalty: float = math.log(0.1)
+    #: The CLI's ``--overhang-alpha`` and ``--mismatch-alpha`` default: the probability kept per base of overhang,
+    #: and per NM mismatch. The log-penalties below are their logs; the CLI keeps the alpha itself so its default
+    #: prints without a log/exp round trip.
+    overhang_alpha: ClassVar[float] = 0.1
+    mismatch_alpha: ClassVar[float] = 0.1
+
+    overhang_log_penalty: float = math.log(overhang_alpha)
+    mismatch_log_penalty: float = math.log(mismatch_alpha)
     pruning_min_posterior: float = 1e-4
 
 
 # ======================================================================
 # BAM scanning and buffering configuration
 # ======================================================================
-
-
-#: Scan workers one BGZF decompression thread keeps fed, measured on the deep library
-#: (`BamScanConfig.resolved_scan_threads` carries the table): the budget is split by this ratio, so a
-#: 4-thread run spends none on decompression and a 16-thread run spends two.
-_SCAN_WORKERS_PER_BGZF_THREAD = 8
 
 
 @dataclass(frozen=True)
@@ -234,7 +243,7 @@ class BamScanConfig:
         """
         total = self.resolved_total_threads()
         want = (
-            total // _SCAN_WORKERS_PER_BGZF_THREAD
+            total // CONSTANTS.resources.scan_workers_per_bgzf_thread
             if self.bgzf_threads is None
             else self.bgzf_threads
         )
@@ -244,7 +253,7 @@ class BamScanConfig:
 
 
 # ======================================================================
-# Top-level pipeline configuration
+# Calibration configuration
 # ======================================================================
 
 
@@ -363,6 +372,60 @@ class CalibrationConfig:
             )
 
 
+# ======================================================================
+# Index configuration (``rigel index``)
+# ======================================================================
+
+
+@dataclass(frozen=True)
+class IndexConfig:
+    """What ``rigel index`` may set; the CLI's defaults and :meth:`rigel.index.TranscriptIndex.build`'s are these.
+
+    The index is built once and read by every run, so these are fixed for every quantification against it.
+    """
+
+    #: Compression of the index's Feather tables: ``"lz4"``, ``"zstd"`` or ``"uncompressed"``.
+    feather_compression: Literal["lz4", "zstd", "uncompressed"] = "lz4"
+
+    #: Write a human-readable TSV beside every Feather table.
+    write_tsv: bool = True
+
+    #: ``"strict"`` fails on a malformed GTF record; ``"warn-skip"`` logs it and skips it.
+    gtf_parse_mode: Literal["strict", "warn-skip"] = "strict"
+
+    #: Transcripts with identical exon coordinates are unidentifiable in quantification. ``False`` fails with a
+    #: report of each group; ``True`` keeps the lexicographically smallest transcript ID per group, loss-free.
+    collapse_duplicate_transcripts: bool = False
+
+    #: Transcript start and end sites within this many bp cluster into one synthetic nascent-RNA span
+    #: (``index.create_nrna_transcripts``).
+    nrna_merge_tolerance: int = 20
+
+    #: Fewest unique fragments per (chromosome, intron, read length) for a junction to enter the
+    #: splice-artifact blacklist from the alignable store. 2 matches the alignable tool's own threshold; 1 admits
+    #: singleton artifacts, higher keeps only the most reproducible.
+    splice_blacklist_min_count: int = 2
+
+    def __post_init__(self) -> None:
+        if self.feather_compression not in ("lz4", "zstd", "uncompressed"):
+            raise ValueError(f"Unknown Feather compression: {self.feather_compression!r}")
+        if self.gtf_parse_mode not in ("strict", "warn-skip"):
+            raise ValueError(f"Unknown GTF parse mode: {self.gtf_parse_mode!r}")
+        if self.nrna_merge_tolerance < 0:
+            raise ValueError(
+                f"IndexConfig.nrna_merge_tolerance must be >= 0; got {self.nrna_merge_tolerance}."
+            )
+        if self.splice_blacklist_min_count < 1:
+            raise ValueError(
+                f"IndexConfig.splice_blacklist_min_count must be >= 1; got {self.splice_blacklist_min_count}."
+            )
+
+
+# ======================================================================
+# Top-level pipeline configuration
+# ======================================================================
+
+
 @dataclass(frozen=True)
 class PipelineConfig:
     """Top-level pipeline configuration composing all sub-configs.
@@ -397,6 +460,364 @@ class PipelineConfig:
         if d.get("scan", {}).get("spill_dir") is not None:
             d["scan"]["spill_dir"] = str(d["scan"]["spill_dir"])
         return d
+
+
+# ======================================================================
+# CONSTANTS — what the code fixes (not user-configurable)
+# ======================================================================
+#
+# Every number an algorithm, a quality check or a resource budget depends on, each documented once with why it has
+# its value. The code reads them by name (``CONSTANTS.landscape.grid_points``) and never restates one. They are not
+# run settings: a change to any of them is a change to the method, so it re-runs the component's gates and is priced
+# on the instruments before it lands. An experiment varies one on a copy (:meth:`Constants.replaced`), never by
+# editing a module.
+
+
+@dataclass(frozen=True)
+class JunctionFitConstants:
+    """How the genuine-junction strand fit finds its maximum (:func:`rigel.junction_fit.genuine_sense_fraction`).
+
+    The fit is an exact maximum-likelihood problem: the genuine junctions' wrong-strand rate κ, and three class
+    shares (genuine, splice artifact, reversed), over the per-junction strand table. Nothing here is a model
+    choice: every field sets how the maximum is FOUND, and at these values the fit reaches it on every table
+    checked against an independent search (``tests/test_strand_model.py``'s ``TestGenuineKappa``).
+    """
+
+    # --- The search over κ: a scan locates the maximum, Brent's method refines it ---
+
+    #: κ is searched on ``(floor, ½ − floor)``. Within the floor of 0 or of ½, κ × (the RNA reads) moves by less
+    #: than one read for any library under 10¹² spliced reads, so the answer cannot change.
+    kappa_floor: float = 1e-12
+
+    #: The scan's points, uniform in ``u = log(κ/(½ − κ))`` across that range, so the scan is as fine near ½ as
+    #: near 0: at 129 points u steps by 0.42 (κ/(½ − κ) by ×1.5). A weakly stranded library's maximum rises out
+    #: of a flat all-artifact plateau just below ½, and a coarser scan can step over it — 65 points spaced on
+    #: log κ did (``test_a_weakly_stranded_library_is_fit_exactly``). Each point costs one share solve.
+    kappa_scan_points: int = 129
+
+    #: Brent's method stops once u is known to this absolute tolerance.
+    kappa_tolerance: float = 1e-12
+
+    # --- The class shares at one κ: a concave maximisation on the 3-simplex ---
+
+    #: A share at 0 is optimal when its KKT multiplier is at most the junction count. This is the relative
+    #: rounding allowed in that comparison, for float64 sums over many junction groups.
+    kkt_slack: float = 1e-12
+
+    #: On an edge of the simplex (one share at 0), the maximum is root-found on ``t ∈ [margin, 1 − margin]``,
+    #: where the slope is finite, to this tolerance.
+    edge_margin: float = 1e-15
+
+    #: An interior maximum is found by a log-barrier ascent. The barrier's weight starts at this share of the
+    #: junction count, ...
+    barrier_start: float = 1e-2
+
+    #: ... is multiplied by this between stages, ...
+    barrier_shrink: float = 0.1
+
+    #: ... and ends at this absolute weight, where the barrier's own optimality gap (3 × the weight, for three
+    #: shares) is below the log-likelihood's rounding.
+    barrier_floor: float = 1e-11
+
+    #: Newton's method within a stage takes at most this many steps (a termination bound) ...
+    newton_steps: int = 100
+
+    #: ... and stops when a step's predicted gain falls below this share of the objective.
+    newton_tolerance: float = 1e-13
+
+    #: A Newton step goes at most this fraction of the way to the simplex's boundary, so every share stays
+    #: positive for the barrier (the fraction-to-boundary rule).
+    boundary_fraction: float = 0.99
+
+    #: A step that lowers the barrier objective is shortened by this factor ...
+    line_search_shrink: float = 0.5
+
+    #: ... until it is shorter than this, which ends the stage.
+    line_search_floor: float = 1e-16
+
+    def __post_init__(self) -> None:
+        _check_ranges(
+            self,
+            kappa_floor=0.0 < self.kappa_floor < 0.25,
+            kappa_scan_points=self.kappa_scan_points >= 3,
+            kappa_tolerance=self.kappa_tolerance > 0.0,
+            kkt_slack=0.0 <= self.kkt_slack < 1.0,
+            edge_margin=0.0 < self.edge_margin < 0.5,
+            barrier_floor=self.barrier_floor > 0.0,
+            barrier_start=self.barrier_start >= self.barrier_floor,
+            barrier_shrink=0.0 < self.barrier_shrink < 1.0,
+            newton_steps=self.newton_steps >= 1,
+            newton_tolerance=self.newton_tolerance > 0.0,
+            boundary_fraction=0.0 < self.boundary_fraction < 1.0,
+            line_search_shrink=0.0 < self.line_search_shrink < 1.0,
+            line_search_floor=0.0 < self.line_search_floor < 1.0,
+        )
+
+
+@dataclass(frozen=True)
+class LandscapeConstants:
+    """The population gDNA-density landscape (:mod:`rigel.calibration.landscape`): its grid and kernel grouping, and
+    the modelling constants its fit was selected with.
+
+    ⚠ ``knn_scale`` and ``reliability_sd_decades`` were selected against gDNA-shaped data. They are not
+    component-specific by construction, but they have only ever been validated on one component; a second caller
+    inherits them and must say so in its results rather than discover it later.
+    """
+
+    # --- Computational budgets: discretization, not modelling (finer is slower and more exact) ---
+
+    #: Points on the log-rate grid. Same role as the solver's λ lattice: finer is strictly more faithful and
+    #: strictly slower.
+    grid_points: int = 260
+
+    #: Kernels are grouped into this many equal-count width bins and each bin convolved once, instead of one
+    #: convolution per region. Pure speed: the cost goes from O(n·K²) to O(bins·K²), which is what makes the fit
+    #: affordable at genome scale.
+    width_bins: int = 12
+
+    # --- Modelling constants ---
+
+    #: Population-resolution scale for ``landscape.knn_widths``, selected by shape against a reference that is
+    #: itself validated against ground truth: at 0.5 the fit renders the enriched mode at the width the truth has;
+    #: below it the landscape combs, above it the two modes merge and the enriched mass collapses. EMD does not
+    #: discriminate here — it is monotone in smoothing at every reference — so do not re-select on it.
+    knn_scale: float = 0.5
+
+    #: The reliability weight's reference spread, in decades of rate (its variance is ``(this · ln 10)²``).
+    #: ⚠ A tuning constant in disguise. It reads as "the kernel resolution floor", but the actual rendering
+    #: resolution is the grid step (~0.025 decades), and substituting that makes the weight more aggressive and
+    #: the census worse. What it really does is cap how far a confident region can be down-weighted. Changing it
+    #: is its own measured experiment; it must not ride along with anything else.
+    reliability_sd_decades: float = 0.15
+
+    #: THE LOCATION FLOOR, in the variable every solve reports. The estimator's resolution wall is one fragment
+    #: (``max(count, 1)`` centres a kernel; ``count < 1`` is location-free and E-step placed), and a Poisson count
+    #: ``c`` has ``Var(log c) = 1/c``, so "below one fragment" is "the log-count is uncertain by more than one
+    #: nat²". ``RegionBelief.var_gdna`` is ``Var(log f_g)`` — at fixed mass, ``Var(log count)`` — whatever produced
+    #: the solve, so a slot wider than this has no location by the same floor the count rule applies, and does
+    #: not train the prior. Not a tuned constant: the identity's value at the wall
+    #: (``tests/calibration/test_landscape_training_population.py``).
+    located_var: float = 1.0
+
+    def __post_init__(self) -> None:
+        _check_ranges(
+            self,
+            grid_points=self.grid_points >= 2,
+            width_bins=self.width_bins >= 1,
+            knn_scale=self.knn_scale > 0.0,
+            reliability_sd_decades=self.reliability_sd_decades > 0.0,
+            located_var=self.located_var > 0.0,
+        )
+
+
+@dataclass(frozen=True)
+class CalibrationConstants:
+    """The calibration stage's remaining fixed numbers (:mod:`rigel.calibration`): one population rule, one
+    bracket, and the floors below which a quantity is read as zero."""
+
+    #: Fewest training regions the gDNA-density landscape is fitted from; below it the population is not a
+    #: population, and the refit is skipped (``calibrate._fit_gdna_hyperprior``).
+    min_training_regions: int = 5
+
+    #: The pooled gDNA rate's root bracket, as a multiple of the pooled rate (``gdna_density``). The one-sided
+    #: root is always BELOW the pooled rate (contamination only inflates it), so any multiple above 1 brackets
+    #: it; this is headroom, and the fit's ``bracket_ok`` reports if it ever failed.
+    bracket_headroom: float = 10.0
+
+    #: A slot whose effective length exceeds this has opportunity: it can be expressed, anchor the landscape,
+    #: and belong to the landscape's grid domain (``calibrate._fit_gdna_hyperprior``).
+    opportunity_floor: float = 1e-9
+
+    #: A slot whose unspliced mass exceeds this sequenced something; at or below it, an intergenic or intronic
+    #: region with opportunity is the landscape's zero-count anchor.
+    mass_floor: float = 1e-12
+
+    #: Rounding a stored fraction or capture efficiency may carry above 1 before ``CalibrationResult`` refuses it.
+    fraction_tolerance: float = 1e-9
+
+    #: The gDNA track (``calibration.track``) reports 0 density, or 0 fraction, where its divisor — an effective
+    #: length, or a total — is at or below this.
+    track_floor: float = 1e-9
+
+    #: The capture efficiency's Poisson log-likelihood reads ``log(max(λ, this))``, so an empty expectation scores
+    #: a finite floor rather than −∞ (``capture_efficiency``).
+    rate_log_floor: float = 1e-300
+
+    def __post_init__(self) -> None:
+        _check_ranges(
+            self,
+            min_training_regions=self.min_training_regions >= 1,
+            bracket_headroom=self.bracket_headroom > 1.0,
+            opportunity_floor=self.opportunity_floor >= 0.0,
+            mass_floor=self.mass_floor >= 0.0,
+            fraction_tolerance=0.0 <= self.fraction_tolerance < 1.0,
+            track_floor=self.track_floor > 0.0,
+            rate_log_floor=self.rate_log_floor > 0.0,
+        )
+
+
+@dataclass(frozen=True)
+class FragmentLengthConstants:
+    """The fragment-length laws (``calibration.fl``, ``frag_length_model``)."""
+
+    #: Dirichlet pseudo-count of the smooth empirical-Bayes shrink of each pool's length law toward the global
+    #: law. Not a cliff: a pool total far above it gives the empirical law, far below it the global anchor, and
+    #: 0 the anchor exactly. ⚠ Not derived; weighting the pools by their own precision would replace it.
+    pool_prior_ess: float = 1000.0
+
+    #: The boundary gDNA law and its mean are refined jointly: at most this many passes (one refresh of the mean
+    #: from the boundary law, measured stable) ...
+    gdna_mean_passes: int = 2
+
+    #: ... stopping early once the mean moves by less than this many bp.
+    gdna_mean_tolerance_bp: float = 0.25
+
+    #: One pseudo-observation spread across the whole length support keeps an unseen length finite without
+    #: pulling a short library toward the middle of the histogram (``FragmentLengthModel``).
+    unseen_smoothing_ess: float = 1.0
+
+    def __post_init__(self) -> None:
+        _check_ranges(
+            self,
+            pool_prior_ess=self.pool_prior_ess >= 0.0,
+            gdna_mean_passes=self.gdna_mean_passes >= 1,
+            gdna_mean_tolerance_bp=self.gdna_mean_tolerance_bp > 0.0,
+            unseen_smoothing_ess=self.unseen_smoothing_ess > 0.0,
+        )
+
+
+@dataclass(frozen=True)
+class ScoringConstants:
+    """Fragment scoring's numerical floors (``rigel.scoring``)."""
+
+    #: The strand probabilities are floored here before their log, so a perfectly stranded library scores a
+    #: wrong-strand fragment at log(1e-10) ≈ −23, finite, rather than −∞.
+    strand_probability_floor: float = 1e-10
+
+    #: The pruning threshold is floored here before ``−log``, so a threshold of 0 keeps every candidate within a
+    #: finite margin (690 nats) rather than reading ``−log 0``.
+    pruning_floor: float = 1e-300
+
+    def __post_init__(self) -> None:
+        _check_ranges(
+            self,
+            strand_probability_floor=0.0 < self.strand_probability_floor < 0.5,
+            pruning_floor=0.0 < self.pruning_floor < 1.0,
+        )
+
+
+@dataclass(frozen=True)
+class QcConstants:
+    """Quality-control thresholds: what is warned about, and what the QC summary reports."""
+
+    #: Fewer spliced strand observations than this draws a warning that the strand estimate may be noisy
+    #: (``StrandModels``); zero draws a stronger one.
+    strand_min_observations: int = 20
+
+    #: Confidence of the upper credible limit on the wrong-strand rate the strand trainer's log line reports.
+    strand_ci_confidence: float = 0.99
+
+    #: An error or warning that lists offending items (duplicate transcript groups, …) shows at most this many.
+    report_examples: int = 5
+
+    def __post_init__(self) -> None:
+        _check_ranges(
+            self,
+            strand_min_observations=self.strand_min_observations >= 0,
+            strand_ci_confidence=0.0 < self.strand_ci_confidence < 1.0,
+            report_examples=self.report_examples >= 1,
+        )
+
+
+@dataclass(frozen=True)
+class SimulatorConstants:
+    """The simulator's fixed numbers (``rigel.sim``). They change what is drawn, so a change re-simulates."""
+
+    #: Truncated fragment lengths are drawn by rejection: each pass draws ``ceil(needed × ratio) + extra``
+    #: candidates so the truncation usually fills the request in one pass.
+    oversample_ratio: float = 1.5
+    oversample_extra: int = 10
+
+    #: The capture-probe designer's default bait length in bp (``sim.capture.design``) — a standard
+    #: hybrid-capture bait.
+    probe_length_bp: int = 120
+
+    def __post_init__(self) -> None:
+        _check_ranges(
+            self,
+            oversample_ratio=self.oversample_ratio >= 1.0,
+            oversample_extra=self.oversample_extra >= 1,
+            probe_length_bp=self.probe_length_bp >= 1,
+        )
+
+
+@dataclass(frozen=True)
+class ResourceConstants:
+    """Memory, I/O and logging budgets. None reaches the arithmetic: every value gives the same answer, and only
+    speed, memory or log volume changes."""
+
+    #: Scan workers one BGZF decompression thread keeps fed, measured on the deep library
+    #: (``BamScanConfig.resolved_scan_threads`` carries the table): the budget is split by this ratio, so a
+    #: 4-thread run spends none on decompression and a 16-thread run spends two.
+    scan_workers_per_bgzf_thread: int = 8
+
+    #: Cache-tiling target for the row-tiled fits (the landscape's kernels, the capture efficiency), as a
+    #: working-set size; ``simplex_logodds._block_rows`` turns it into rows. Every reduction those fits make is
+    #: within a row, so the block size cannot reach the arithmetic.
+    solve_block_bytes: int = 1 << 20
+
+    #: Read size when the index digests its input files.
+    digest_chunk_bytes: int = 1 << 20
+
+    #: The per-fragment annotation table is sized to the buffered fragment count plus this padding, and never
+    #: below the minimum capacity; it doubles when full, by at least the minimum growth.
+    annotation_table_padding: int = 1024
+    annotation_table_min_capacity: int = 4096
+    annotation_table_min_growth: int = 1024
+
+    #: GTF parsing logs progress every this many exon features.
+    gtf_log_interval: int = 100_000
+
+    #: The simulator's FASTQ writer buffers this many records before a write.
+    fastq_buffer_records: int = 100_000
+
+    #: Chunk size when the simulator concatenates gzip streams.
+    file_copy_bytes: int = 4 * 1024 * 1024
+
+    def __post_init__(self) -> None:
+        _check_ranges(self, **{f.name: getattr(self, f.name) >= 1 for f in fields(self)})
+
+
+@dataclass(frozen=True)
+class Constants:
+    """Every fixed number Rigel's code reads, by component. The one instance is :data:`CONSTANTS`."""
+
+    junction_fit: JunctionFitConstants = field(default_factory=JunctionFitConstants)
+    landscape: LandscapeConstants = field(default_factory=LandscapeConstants)
+    calibration: CalibrationConstants = field(default_factory=CalibrationConstants)
+    fragment_length: FragmentLengthConstants = field(default_factory=FragmentLengthConstants)
+    scoring: ScoringConstants = field(default_factory=ScoringConstants)
+    qc: QcConstants = field(default_factory=QcConstants)
+    simulator: SimulatorConstants = field(default_factory=SimulatorConstants)
+    resources: ResourceConstants = field(default_factory=ResourceConstants)
+
+    def replaced(self, dotted: str, value) -> "Constants":
+        """A copy with one value changed, named ``"section.field"`` — how an experiment or a test varies one
+        constant without editing a module. The section re-validates."""
+        section_name, _, field_name = dotted.partition(".")
+        section = getattr(self, section_name)
+        return replace(self, **{section_name: replace(section, **{field_name: value})})
+
+
+def _check_ranges(section, **ok: bool) -> None:
+    """Refuse a section whose values are out of range, naming every offending field."""
+    bad = [name for name, valid in ok.items() if not valid]
+    if bad:
+        raise ValueError(f"{type(section).__name__}: out of range: {', '.join(bad)}")
+
+
+#: The constants the code reads.
+CONSTANTS = Constants()
 
 
 # ======================================================================

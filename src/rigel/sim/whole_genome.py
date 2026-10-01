@@ -184,10 +184,12 @@ def _capture_config_from_mapping(
 
     return CaptureConfig(
         probes=str(probes),
-        probe_format=str(merged.get("probe_format", merged.get("format", "auto"))),
-        off_target_weight=float(merged.get("off_target_weight", 1.0)),
-        binding_per_base=float(merged.get("binding_per_base", 10.0)),
-        min_overlap=int(merged.get("min_overlap", 1)),
+        probe_format=str(
+            merged.get("probe_format", merged.get("format", CaptureConfig.probe_format))
+        ),
+        off_target_weight=float(merged.get("off_target_weight", CaptureConfig.off_target_weight)),
+        binding_per_base=float(merged.get("binding_per_base", CaptureConfig.binding_per_base)),
+        min_overlap=int(merged.get("min_overlap", CaptureConfig.min_overlap)),
     )
 
 
@@ -251,11 +253,11 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
         _refuse_unknown_keys(raw.get(section, {}), known, section)
 
     cfg = WholeGenomeSimConfig()
-    cfg.genome = raw.get("genome", "")
-    cfg.gtf = raw.get("gtf", "")
-    cfg.shadow_gtf = raw.get("shadow_gtf", None)
-    cfg.index = raw.get("index", None)
-    cfg.outdir = raw.get("outdir", "sim_output")
+    cfg.genome = raw.get("genome", cfg.genome)
+    cfg.gtf = raw.get("gtf", cfg.gtf)
+    cfg.shadow_gtf = raw.get("shadow_gtf", cfg.shadow_gtf)
+    cfg.index = raw.get("index", cfg.index)
+    cfg.outdir = raw.get("outdir", cfg.outdir)
     if raw.get("transcript_filter", "all") != "all":
         raise ValueError(
             "transcript_filter is not applicable when the transcriptome comes from a rigel index: the "
@@ -265,34 +267,34 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     # Simulation params
     sim_raw = raw.get("simulation", {})
     sim = cfg.simulation
-    sim.n_rna_fragments = int(sim_raw.get("n_rna_fragments", 1_000_000))
+    sim.n_rna_fragments = int(sim_raw.get("n_rna_fragments", sim.n_rna_fragments))
     # Optional fixed-total budget: when present, `gdna.rates` decides only the RNA/gDNA split
     # instead of adding gDNA on top of the RNA budget (`orchestrator.resolve_depths`).
     _total = sim_raw.get("n_total_fragments")
     sim.n_total_fragments = None if _total is None else int(_total)
-    sim.sim_seed = int(sim_raw.get("sim_seed", 42))
-    sim.frag_mean = float(sim_raw.get("frag_mean", 250.0))
-    sim.frag_std = float(sim_raw.get("frag_std", 50.0))
-    sim.frag_min = int(sim_raw.get("frag_min", 50))
-    sim.frag_max = int(sim_raw.get("frag_max", 1000))
-    sim.read_length = int(sim_raw.get("read_length", 150))
-    sim.error_rate = float(sim_raw.get("error_rate", 0.0))
-    sim.n_workers = int(sim_raw.get("n_workers", 1))
+    sim.sim_seed = int(sim_raw.get("sim_seed", sim.sim_seed))
+    sim.frag_mean = float(sim_raw.get("frag_mean", sim.frag_mean))
+    sim.frag_std = float(sim_raw.get("frag_std", sim.frag_std))
+    sim.frag_min = int(sim_raw.get("frag_min", sim.frag_min))
+    sim.frag_max = int(sim_raw.get("frag_max", sim.frag_max))
+    sim.read_length = int(sim_raw.get("read_length", sim.read_length))
+    sim.error_rate = float(sim_raw.get("error_rate", sim.error_rate))
+    sim.n_workers = int(sim_raw.get("n_workers", sim.n_workers))
 
     # Abundance
     ab_raw = raw.get("abundance", {})
     ab = cfg.abundance
-    ab.mode = ab_raw.get("mode", "random")
-    ab.seed = int(ab_raw.get("seed", 42))
-    ab.min = float(ab_raw.get("min", 0.1))
-    ab.max = float(ab_raw.get("max", 10000.0))
-    ab.frac_expressed = float(ab_raw.get("frac_expressed", 0.6))
-    ab.file = ab_raw.get("file", None)
+    ab.mode = ab_raw.get("mode", ab.mode)
+    ab.seed = int(ab_raw.get("seed", ab.seed))
+    ab.min = float(ab_raw.get("min", ab.min))
+    ab.max = float(ab_raw.get("max", ab.max))
+    ab.frac_expressed = float(ab_raw.get("frac_expressed", ab.frac_expressed))
+    ab.file = ab_raw.get("file", ab.file)
 
     # nRNA spike-in sweep — top-level "nrna:" section is canonical
     nrna_raw = raw.get("nrna", {})
     nrna = cfg.nrna
-    nrna.mode = str(nrna_raw.get("mode", "additive_ratio"))
+    nrna.mode = str(nrna_raw.get("mode", nrna.mode))
     if nrna.mode not in {"additive_ratio", "sparse", "fragment_share"}:
         raise ValueError("nrna.mode must be 'additive_ratio', 'fragment_share' or 'sparse'")
     raw_shares = nrna_raw.get("shares", None)
@@ -313,9 +315,9 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
                     f"nrna.abundance_ranges entries must be [lo, hi] pairs; got {pair!r}"
                 )
         nrna.abundance_ranges = [(float(pair[0]), float(pair[1])) for pair in raw_abundance_ranges]
-    nrna.ratio_labels = nrna_raw.get("ratio_labels", None)
-    nrna.on_fraction = float(nrna_raw.get("on_fraction", 1.0))
-    nrna.seed = int(nrna_raw.get("seed", 42))
+    nrna.ratio_labels = nrna_raw.get("ratio_labels", nrna.ratio_labels)
+    nrna.on_fraction = float(nrna_raw.get("on_fraction", nrna.on_fraction))
+    nrna.seed = int(nrna_raw.get("seed", nrna.seed))
     if nrna.mode == "sparse" and nrna.abundance_ranges is None:
         raise ValueError("nrna.abundance_ranges is required for mode='sparse'")
     # A field the selected mode cannot read is a config the author did not write, so it is refused
@@ -360,18 +362,20 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     # gDNA
     gd_raw = raw.get("gdna", {})
     gd = cfg.gdna
-    gd.rates = [float(r) for r in gd_raw.get("rates", [0.0])]
-    gd.rate_labels = gd_raw.get("rate_labels", None)
+    gd.rates = [float(r) for r in gd_raw.get("rates", gd.rates)]
+    gd.rate_labels = gd_raw.get("rate_labels", gd.rate_labels)
     _genomic_refs = gd_raw.get("genomic_refs", None)
     gd.genomic_refs = [str(ref) for ref in _genomic_refs] if _genomic_refs is not None else None
-    gd.frag_mean = float(gd_raw.get("frag_mean", 350.0))
-    gd.frag_std = float(gd_raw.get("frag_std", 100.0))
-    gd.frag_min = int(gd_raw.get("frag_min", 100))
-    gd.frag_max = int(gd_raw.get("frag_max", 1000))
-    gd.strand_overdispersion = float(gd_raw.get("strand_overdispersion", 0.0))
+    gd.frag_mean = float(gd_raw.get("frag_mean", gd.frag_mean))
+    gd.frag_std = float(gd_raw.get("frag_std", gd.frag_std))
+    gd.frag_min = int(gd_raw.get("frag_min", gd.frag_min))
+    gd.frag_max = int(gd_raw.get("frag_max", gd.frag_max))
+    gd.strand_overdispersion = float(gd_raw.get("strand_overdispersion", gd.strand_overdispersion))
     _ods = gd_raw.get("strand_overdispersions", None)
     gd.strand_overdispersions = [float(o) for o in _ods] if _ods is not None else None
-    gd.strand_overdispersion_labels = gd_raw.get("strand_overdispersion_labels", None)
+    gd.strand_overdispersion_labels = gd_raw.get(
+        "strand_overdispersion_labels", gd.strand_overdispersion_labels
+    )
 
     # Hybrid capture
     cap_raw = raw.get("capture", {}) or {}

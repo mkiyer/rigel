@@ -175,6 +175,9 @@ def _build_pipeline_config(args: argparse.Namespace) -> "PipelineConfig":  # noq
 #: strand-contamination diagnostics; ``gdna_eff_len`` summarises the loci table's one gDNA length column.
 SUMMARY_SCHEMA_VERSION = 3
 
+#: summary.json's floats (fractions, strand rates, quantiles) are rounded to this many decimals.
+SUMMARY_DECIMALS = 6
+
 
 #: ``fragment_lengths.feather``'s pure-pool categories, in ``FragmentPool`` order. Named here rather
 #: than derived from the enum because these are an OUTPUT CONTRACT — a rename in the enum must not
@@ -322,10 +325,10 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             return {"min": 0.0, "median": 0.0, "p95": 0.0, "max": 0.0}
         values = df[column]
         return {
-            "min": round(float(values.min()), 6),
-            "median": round(float(values.median()), 6),
-            "p95": round(float(values.quantile(0.95)), 6),
-            "max": round(float(values.max()), 6),
+            "min": round(float(values.min()), SUMMARY_DECIMALS),
+            "median": round(float(values.median()), SUMMARY_DECIMALS),
+            "p95": round(float(values.quantile(0.95)), SUMMARY_DECIMALS),
+            "max": round(float(values.max()), SUMMARY_DECIMALS),
         }
 
     from . import __version__
@@ -388,9 +391,13 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
                 None if cal.gdna_reference_density is None else float(cal.gdna_reference_density)
             ),
             "gdna_reference_members": int(cal.gdna_reference_members),
-            "rna_sense_frac": round(float(cal.rna_sense_frac), 6),
-            "gdna_strand_overdispersion": round(float(cal.gdna_strand_overdispersion), 6),
-            "rna_strand_overdispersion": round(float(cal.rna_strand_overdispersion), 6),
+            "rna_sense_frac": round(float(cal.rna_sense_frac), SUMMARY_DECIMALS),
+            "gdna_strand_overdispersion": round(
+                float(cal.gdna_strand_overdispersion), SUMMARY_DECIMALS
+            ),
+            "rna_strand_overdispersion": round(
+                float(cal.rna_strand_overdispersion), SUMMARY_DECIMALS
+            ),
             "n_regions": int(cal.n_regions),
             "n_boundaries": int(cal.n_boundaries),
             "n_sj": int(cal.n_sj),
@@ -461,12 +468,12 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         },
         "strand_model": {
             "protocol": "R1-sense" if sm.read1_sense else "R1-antisense",
-            "strand_specificity": round(sm.strand_specificity, 6),
-            "p_r1_sense": round(sm.p_r1_sense, 6),
+            "strand_specificity": round(sm.strand_specificity, SUMMARY_DECIMALS),
+            "p_r1_sense": round(sm.p_r1_sense, SUMMARY_DECIMALS),
             "read1_sense": bool(sm.read1_sense),
             "n_training_fragments": sm.n_observations,
             "posterior_variance": round(sm_primary.posterior_variance(), 8),
-            "ci_95": [round(ci_lo, 6), round(ci_hi, 6)],
+            "ci_95": [round(ci_lo, SUMMARY_DECIMALS), round(ci_hi, SUMMARY_DECIMALS)],
             # The per-sj strand table this 2×2 is the marginal of. "How many
             # sj are deep enough to measure the strand dispersion" is a
             # first-class question about a library: at κ ≈ 0.002 a sj needs
@@ -478,11 +485,12 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             # the mixed all-exonic estimate toward 0.5 relative to the clean
             # spliced-only model — a gDNA-contamination fingerprint.
             "diagnostics": {
-                "exonic_all_specificity": round(sm.exonic.strand_specificity, 6),
-                "exonic_all_p_r1_sense": round(sm.exonic.p_r1_sense, 6),
+                "exonic_all_specificity": round(sm.exonic.strand_specificity, SUMMARY_DECIMALS),
+                "exonic_all_p_r1_sense": round(sm.exonic.p_r1_sense, SUMMARY_DECIMALS),
                 "exonic_all_n_fragments": sm.exonic.n_observations,
                 "contamination_gap": round(
-                    sm.exonic_spliced.strand_specificity - sm.exonic.strand_specificity, 6
+                    sm.exonic_spliced.strand_specificity - sm.exonic.strand_specificity,
+                    SUMMARY_DECIMALS,
                 ),
             },
         },
@@ -506,19 +514,25 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "nrna_total": round(total_nrna, 2),
             "gdna_total": round(total_gdna, 2),
             "intergenic_total": stats.n_intergenic,
-            "mrna_fraction": round(total_mrna / total_all, 6) if total_all > 0 else 0.0,
-            "nrna_fraction": round(total_nrna / total_all, 6) if total_all > 0 else 0.0,
+            "mrna_fraction": round(total_mrna / total_all, SUMMARY_DECIMALS)
+            if total_all > 0
+            else 0.0,
+            "nrna_fraction": round(total_nrna / total_all, SUMMARY_DECIMALS)
+            if total_all > 0
+            else 0.0,
             # gDNA contamination = EM-assigned genic gDNA + intergenic.
             # Intergenic fragments are gDNA by construction (no transcript
             # overlap), so excluding them here would visually halve the
             # observed contamination on libraries with substantial gDNA.
             # ``gdna_em_fraction`` exposes the EM-only portion separately
             # for users who want to disambiguate the two pools.
-            "gdna_fraction": round((total_gdna + stats.n_intergenic) / total_all, 6)
+            "gdna_fraction": round((total_gdna + stats.n_intergenic) / total_all, SUMMARY_DECIMALS)
             if total_all > 0
             else 0.0,
-            "gdna_em_fraction": round(total_gdna / total_all, 6) if total_all > 0 else 0.0,
-            "intergenic_fraction": round(stats.n_intergenic / total_all, 6)
+            "gdna_em_fraction": round(total_gdna / total_all, SUMMARY_DECIMALS)
+            if total_all > 0
+            else 0.0,
+            "intergenic_fraction": round(stats.n_intergenic / total_all, SUMMARY_DECIMALS)
             if total_all > 0
             else 0.0,
         },
@@ -829,15 +843,10 @@ def _build_quant_defaults() -> dict:
     Single source of truth: all default values derived from the frozen
     dataclasses in ``config.py`` via the ``_PARAM_SPECS`` registry.
 
-    Scoring fields (overhang_alpha, mismatch_alpha) use exact CLI-space
-    constants from ``scoring.py`` to avoid float noise from log/exp
-    round-tripping.
+    Scoring fields (overhang_alpha, mismatch_alpha) use the exact CLI-space alphas
+    ``FragmentScoringConfig`` keeps, to avoid float noise from log/exp round-tripping.
     """
-    from .config import PipelineConfig
-    from .scoring import (
-        DEFAULT_OVERHANG_ALPHA,
-        DEFAULT_MISMATCH_ALPHA,
-    )
+    from .config import FragmentScoringConfig, PipelineConfig
 
     cfg = PipelineConfig()
 
@@ -845,8 +854,8 @@ def _build_quant_defaults() -> dict:
     # config (log-penalty).  Use exact constants to avoid float
     # noise from math.exp(math.log(alpha)).
     _scoring_defaults = {
-        "overhang_alpha": DEFAULT_OVERHANG_ALPHA,
-        "mismatch_alpha": DEFAULT_MISMATCH_ALPHA,
+        "overhang_alpha": FragmentScoringConfig.overhang_alpha,
+        "mismatch_alpha": FragmentScoringConfig.mismatch_alpha,
     }
 
     defaults: dict = {}
@@ -927,6 +936,14 @@ def _resolve_quant_args(
 
 def build_parser() -> argparse.ArgumentParser:
     """Construct the top-level argument parser with all subcommands."""
+    from .config import CONSTANTS, IndexConfig
+
+    # Every default a help string names is read from the config, never restated here.
+    qd = _build_quant_defaults()
+
+    def yes_no(flag: bool) -> str:
+        return "yes" if flag else "no"
+
     parser = argparse.ArgumentParser(
         prog="rigel",
         description="rigel: Bayesian RNA-seq fragment abundance estimation",
@@ -973,32 +990,32 @@ def build_parser() -> argparse.ArgumentParser:
     idx.add_argument(
         "--feather-compression",
         dest="feather_compression",
-        default="lz4",
+        default=IndexConfig.feather_compression,
         choices=["lz4", "zstd", "uncompressed"],
-        help="Compression for Feather files (default: lz4)",
+        help="Compression for Feather files (default: %(default)s)",
     )
     idx.add_argument(
         "--no-tsv",
         dest="no_tsv",
         action="store_true",
-        default=False,
+        default=not IndexConfig.write_tsv,
         help="Skip writing human-readable TSV mirror files",
     )
     idx.add_argument(
         "--gtf-parse-mode",
         dest="gtf_parse_mode",
-        default="strict",
+        default=IndexConfig.gtf_parse_mode,
         choices=["strict", "warn-skip"],
         help=(
-            "GTF parse mode: 'strict' (default) fails on malformed boundaries; "
-            "'warn-skip' logs warnings and skips malformed boundaries"
+            "GTF parse mode: 'strict' fails on malformed boundaries; "
+            "'warn-skip' logs warnings and skips malformed boundaries (default: %(default)s)"
         ),
     )
     idx.add_argument(
         "--collapse-duplicate-transcripts",
         dest="collapse_duplicate_transcripts",
         action="store_true",
-        default=False,
+        default=IndexConfig.collapse_duplicate_transcripts,
         help=(
             "Collapse transcripts sharing identical exon coordinates (same ref, "
             "strand, and every exon start/end) instead of failing. Keeps the "
@@ -1013,10 +1030,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--nrna-tolerance",
         dest="nrna_tolerance",
         type=int,
-        default=20,
+        default=IndexConfig.nrna_merge_tolerance,
         help=(
             "Max distance (bp) for clustering transcript start/end sites "
-            "when building synthetic nascent RNA transcripts (default: 20)"
+            "when building synthetic nascent RNA transcripts (default: %(default)s)"
         ),
     )
     idx.add_argument(
@@ -1046,11 +1063,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--splice-blacklist-min-count",
         dest="splice_blacklist_min_count",
         type=int,
-        default=2,
+        default=IndexConfig.splice_blacklist_min_count,
         help=(
             "(Advanced) Minimum unique-fragment count per (chrom, intron, "
-            "read_length) for a sj to enter the splice-artifact blacklist. "
-            "Default 2 matches the historical alignable threshold. Lower values "
+            "read_length) for a sj to enter the splice-artifact blacklist "
+            "(default: %(default)s, the alignable tool's own threshold). Lower values "
             "(e.g. 1) admit more singleton artifacts; higher values keep only "
             "the most reproducible. Ignored when --no-mappability is set."
         ),
@@ -1118,7 +1135,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="include_multimap",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Include multimapping reads (default: yes). "
+        help=f"Include multimapping reads (default: {yes_no(qd['include_multimap'])}). "
         "Detected via NH tag or secondary BAM flag.",
     )
     aln_grp.add_argument(
@@ -1126,14 +1143,14 @@ def build_parser() -> argparse.ArgumentParser:
         dest="keep_duplicates",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Keep reads marked as PCR/optical duplicates (default: no).",
+        help=f"Keep reads marked as PCR/optical duplicates (default: {yes_no(qd['keep_duplicates'])}).",
     )
     aln_grp.add_argument(
         "--sj-strand-tag",
         dest="sj_strand_tag",
         nargs="+",
         default=None,
-        help="BAM tag(s) for splice-junction strand (default: auto). "
+        help=f"BAM tag(s) for splice-junction strand (default: {' '.join(qd['sj_strand_tag'])}). "
         "'auto' detects the tag from the first 1,000 spliced reads. "
         "Use 'XS' for STAR, 'ts' for minimap2, or list multiple "
         "tags to check in order (e.g. XS ts).",
@@ -1146,7 +1163,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="seed",
         type=int,
         default=None,
-        help="Seed of the sampled assignment's draw (default: 0); another seed is another draw from "
+        help=f"Seed of the sampled assignment's draw (default: {qd['seed']}); another seed is another draw from "
         "the same posterior.",
     )
     model_grp.add_argument(
@@ -1154,7 +1171,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="em_iterations",
         type=int,
         default=None,
-        help="EM iteration budget (default: 1000). The EM runs accelerated (SQUAREM) steps of "
+        help=f"EM iteration budget (default: {qd['em_iterations']}). The EM runs accelerated (SQUAREM) steps of "
         "three EM updates each, up to a third of this budget, until it converges. At least one "
         "step always runs, so 0 does not skip the EM: every fragment is still assigned.",
     )
@@ -1163,7 +1180,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="em_mode",
         choices=["vbem", "map"],
         default=None,
-        help="EM algorithm variant (default: vbem). "
+        help=f"EM algorithm variant (default: {qd['em_mode']}). "
         "'vbem' uses Variational Bayes EM with digamma-based soft "
         "updates. 'map' uses MAP-EM with hard max(0, n+a-1) updates.",
     )
@@ -1172,7 +1189,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="assignment_mode",
         choices=["sample", "fractional"],
         default=None,
-        help="Post-EM fragment assignment (default: sample). 'sample' gives every fragment to one "
+        help=f"Post-EM fragment assignment (default: {qd['assignment_mode']}). 'sample' gives every fragment to one "
         "transcript: each transcript's fractional count is rounded within its locus, then each fragment "
         "is drawn from its own posterior toward the transcripts still short of their count. "
         "'fractional' keeps each fragment's posterior weights.",
@@ -1185,7 +1202,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="threads",
         type=int,
         default=None,
-        help="Total thread budget for Rigel (default: 0 = all available "
+        help=f"Total thread budget for Rigel (default: {qd['threads']} = all available "
         "cores). During BAM scan, this budget is split between scan "
         "workers and --scan-bgzf-threads; locus EM uses the same budget "
         "because the stages run serially.",
@@ -1196,7 +1213,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="BGZF decompression threads reserved from --threads during "
-        "BAM scan (default: derived from the budget, one per eight threads). "
+        "BAM scan (default: derived from the budget, one per "
+        f"{CONSTANTS.resources.scan_workers_per_bgzf_thread} threads). "
         "Set to 0 to disable htslib threaded decompression.",
     )
     perf_grp.add_argument(
@@ -1205,7 +1223,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Maximum scan buffer size in GiB before chunks are spilled "
-        "to disk (default: 2). Increase if you have ample RAM to reduce "
+        f"to disk (default: {qd['scan_buffer_size']:g}). Increase if you have ample RAM to reduce "
         "spill I/O.",
     )
     perf_grp.add_argument(
@@ -1220,7 +1238,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Buffered fragments per scan chunk before the native scanner "
-        "hands data to the Python fragment buffer (default: 1000000).",
+        f"hands data to the Python fragment buffer (default: {qd['scan_fragments_per_chunk']}).",
     )
     perf_grp.add_argument(
         "--scan-read-name-batch-size",
@@ -1228,7 +1246,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Advanced: read-name groups per native scanner input queue "
-        "item (default: 512). Lower values are useful for queue-boundary "
+        f"item (default: {qd['scan_read_name_batch_size']}). Lower values are useful for queue-boundary "
         "debugging; larger values may reduce queue overhead at the cost "
         "of slightly more in-flight memory.",
     )
@@ -1240,14 +1258,14 @@ def build_parser() -> argparse.ArgumentParser:
         dest="em_convergence_delta",
         type=float,
         default=None,
-        help="Convergence threshold for EM parameter updates (default: 1e-6).",
+        help=f"Convergence threshold for EM parameter updates (default: {qd['em_convergence_delta']:g}).",
     )
     adv.add_argument(
         "--calib-refit-iters",
         dest="calib_refit_iters",
         type=int,
         default=None,
-        help="Calibration prior-bootstrap iterations (default 3). Each one re-fits the population gDNA "
+        help=f"Calibration prior-bootstrap iterations (default {qd['calib_refit_iters']}). Each one re-fits the population gDNA "
         "landscape on the current solve, resets the belief, and re-solves. The bootstrap converges "
         "geometrically and iteration 3 captures ~96%% of the available gain; cost is linear (one extra "
         "full sweep each). 0 = the prior-free pass-0 alone. Advanced calibration knob.",
@@ -1258,7 +1276,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Calibration working set: the chain is solved one locus block at a time, the pieces between "
-        "intergenic regions merged up to this many slots per block (default 1000; 'none' is not accepted here — the whole chain is a config choice). "
+        f"intergenic regions merged up to this many slots per block (default {qd['sweep_block_slots']}; 'none' is not "
+        "accepted here — the whole chain is a config choice). "
         "Performance only — the answer is the same for every value; it sizes the solver's per-thread "
         "arena, so smaller blocks use less memory per sweep at no measured cost in time. Advanced "
         "calibration knob.",
@@ -1268,7 +1287,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="overhang_alpha",
         type=float,
         default=None,
-        help="Per-base overhang penalty alpha in [0,1] (default: 0.1). "
+        help=f"Per-base overhang penalty alpha in [0,1] (default: {qd['overhang_alpha']:g}). "
         "0 = hard gate, 1 = no penalty.",
     )
     adv.add_argument(
@@ -1276,7 +1295,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="mismatch_alpha",
         type=float,
         default=None,
-        help="Per-mismatch (NM tag) penalty alpha in [0,1] (default: 0.1). "
+        help=f"Per-mismatch (NM tag) penalty alpha in [0,1] (default: {qd['mismatch_alpha']:g}). "
         "0 = hard gate, 1 = no penalty.",
     )
     adv.add_argument(
@@ -1285,7 +1304,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Minimum posterior threshold for candidate pruning "
-        "(default: 1e-4). Lower values keep more candidates "
+        f"(default: {qd['pruning_min_posterior']:g}). Lower values keep more candidates "
         "(conservative). Set to 0 to disable pruning entirely.",
     )
     adv.add_argument(
@@ -1296,7 +1315,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Resolver-side splicing-anchor tolerance K (bp). Used only "
         "for implicit-splice resolution slack around annotated introns; "
         "the fractional calibration accumulator does not interpret this "
-        "value. Default: 3.",
+        f"value. Default: {qd['splicing_anchor_tolerance']}.",
     )
     adv.add_argument(
         "--emit-locus-stats",
@@ -1304,7 +1323,7 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=None,
         help="Write per-locus EM convergence profiling data to "
-        "locus_stats.feather in the output directory (default: no). Includes "
+        f"locus_stats.feather in the output directory (default: {yes_no(qd['emit_locus_stats'])}). Includes "
         "iteration counts, timing, and equivalence class statistics "
         "for every locus. Useful for debugging convergence.",
     )

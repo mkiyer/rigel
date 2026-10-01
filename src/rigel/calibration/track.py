@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-_EPS = 1e-9
+from ..config import CONSTANTS
 
 
 def build_gdna_track(calibration, region_arrays, ref_names) -> pd.DataFrame:
@@ -34,9 +34,10 @@ def build_gdna_track(calibration, region_arrays, ref_names) -> pd.DataFrame:
     rna = np.asarray(calibration.count_rna_region, dtype=np.float64)
     efflen = np.asarray(calibration.gdna_region_eff_len, dtype=np.float64)
 
-    density = np.where(efflen > _EPS, gdna / np.maximum(efflen, _EPS), 0.0)
+    floor = CONSTANTS.calibration.track_floor
+    density = np.where(efflen > floor, gdna / np.maximum(efflen, floor), 0.0)
     total = gdna + rna
-    frac = np.where(total > _EPS, gdna / np.maximum(total, _EPS), 0.0)
+    frac = np.where(total > floor, gdna / np.maximum(total, floor), 0.0)
 
     categories = [str(x) for x in ref_names]
     ref = pd.Categorical.from_codes(np.asarray(region_arrays.ref_id, dtype=np.int64), categories)

@@ -9,10 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-# Rejection-sampling oversample factors: draw ceil(needed * RATIO) + EXTRA candidates per pass so
-# the truncation to [frag_min, frag_max] usually fills the request in one iteration.
-_OVERSAMPLE_RATIO = 1.5
-_OVERSAMPLE_EXTRA = 10
+from ..config import CONSTANTS
 
 
 def truncated_normal_frag_lengths(
@@ -29,7 +26,10 @@ def truncated_normal_frag_lengths(
     filled = 0
     while filled < n:
         needed = n - filled
-        size = int(needed * _OVERSAMPLE_RATIO) + _OVERSAMPLE_EXTRA
+        size = (
+            int(needed * CONSTANTS.simulator.oversample_ratio)
+            + CONSTANTS.simulator.oversample_extra
+        )
         raw = rng.normal(mean, std, size).astype(int)
         valid = raw[(raw >= frag_min) & (raw <= frag_max)]
         nkeep = min(len(valid), needed)

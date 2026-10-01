@@ -44,6 +44,7 @@ try:
 except ImportError:
     pgzip = None  # type: ignore[assignment]
 
+from rigel.config import CONSTANTS
 from rigel.transcript import Transcript
 from rigel.types import Strand
 from rigel.sim.bam import (
@@ -67,8 +68,6 @@ logger = logging.getLogger(__name__)
 _BYTE_COMPLEMENT = np.zeros(256, dtype=np.uint8)
 for _c, _rc in zip(b"ACGTNacgtn", b"TGCANtgcan"):
     _BYTE_COMPLEMENT[_c] = _rc
-
-_FASTQ_BUFFER_SIZE = 100_000
 
 
 def _seq_to_bytes(seq: str) -> np.ndarray:
@@ -141,7 +140,7 @@ class _FastqBuffer:
 
     __slots__ = ("_fh", "_parts", "_size", "_count")
 
-    def __init__(self, fh, buf_size: int = _FASTQ_BUFFER_SIZE):
+    def __init__(self, fh, buf_size: int = CONSTANTS.resources.fastq_buffer_records):
         self._fh = fh
         self._parts: list[str] = []
         self._size = buf_size
@@ -1341,4 +1340,4 @@ def _concat_files_binary(srcs: list[Path], dst: Path) -> None:
     with open(dst, "wb") as out:
         for s in srcs:
             with open(s, "rb") as f:
-                shutil.copyfileobj(f, out, length=4 * 1024 * 1024)
+                shutil.copyfileobj(f, out, length=CONSTANTS.resources.file_copy_bytes)

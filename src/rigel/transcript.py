@@ -10,11 +10,9 @@ import logging
 from dataclasses import dataclass, field
 from typing import Literal
 
+from .config import CONSTANTS
 from .types import Interval, Strand
 from .gtf import GTFRecord
-
-#: Interval for progress logging during GTF parsing.
-_GTF_LOG_INTERVAL: int = 100_000
 
 
 def _first_attr(val):
@@ -159,7 +157,7 @@ class Transcript:
                 t = transcripts[t_id]
             t.exons.append(Interval(f.start, f.end))
             n_exon_features += 1
-            if n_exon_features % _GTF_LOG_INTERVAL == 0:
+            if n_exon_features % CONSTANTS.resources.gtf_log_interval == 0:
                 logging.debug("[Transcript] Read %d GTF exon features", n_exon_features)
         logging.debug("[Transcript] Done reading GTF: %d exon features", n_exon_features)
 

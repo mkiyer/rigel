@@ -30,12 +30,11 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..config import CONSTANTS
 from .landscape import DensityLandscape
 from .simplex_logodds import _block_rows
 
 __all__ = ["capture_efficiencies"]
-
-_EPS = 1e-300
 
 
 def _posterior(
@@ -53,7 +52,11 @@ def _posterior(
     for r0 in range(0, n, rows):
         sl = slice(r0, min(r0 + rows, n))
         lam = rho[None, :] * S[sl, None]
-        ll = np.where(S[sl, None] > 0.0, k[sl, None] * np.log(np.maximum(lam, _EPS)) - lam, 0.0)
+        ll = np.where(
+            S[sl, None] > 0.0,
+            k[sl, None] * np.log(np.maximum(lam, CONSTANTS.calibration.rate_log_floor)) - lam,
+            0.0,
+        )
         lw = ll + lp[None, :]
         lw -= lw.max(1, keepdims=True)
         w = np.exp(lw)

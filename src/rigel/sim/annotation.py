@@ -110,8 +110,8 @@ class GeneBuilder:
         for tdef in transcripts:
             t_id = tdef["t_id"]
             raw_exons = tdef["exons"]
-            abundance = tdef.get("abundance", 100.0)
-            nrna_abundance = tdef.get("nrna_abundance", 0.0)
+            abundance = tdef.get("abundance", _TranscriptSpec.abundance)
+            nrna_abundance = tdef.get("nrna_abundance", _TranscriptSpec.nrna_abundance)
 
             # Build sorted Interval list
             exons = sorted(Interval(s, e) for s, e in raw_exons)

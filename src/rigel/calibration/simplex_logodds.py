@@ -67,7 +67,9 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.special import expit
 
+from ..config import CONSTANTS
 from ..native import psi_solve
+from ..native import transfer_rows as _rows
 from .region_chain import RegionDeconv
 
 # Public surface consumed by sweep / messages / region_geometry.
@@ -92,17 +94,15 @@ __all__ = [
 # `∝ n(½−κ)²`, exactly 0 on an unstranded library, where the strand term is bit-flat and the posterior
 # simply IS this reference. Its known cost is that it forbids the simplex vertices, where some truth
 # genuinely lives.
-_JEFFREYS_REF = 0.5
-
-# Cache-tiling target for the row-tiled fits (the landscape's kernels, the capture efficiency), as a
-# working-set size rather than a row count; `_block_rows` turns it into rows. NOT a model parameter: every
-# reduction those fits make is within a row, so the block size cannot reach the arithmetic. It is purely a
-# memory knob.
-_SOLVE_BLOCK_BYTES = 1 << 20
+_JEFFREYS_REF = float(
+    _rows.JEFFREYS_REF
+)  # the kernel's (``psi_kernel.h``), so the two homes are one
 
 
 def _block_rows(cells_per_row: int, itemsize: int) -> int:
-    return max(1, _SOLVE_BLOCK_BYTES // max(1, int(cells_per_row) * int(itemsize)))
+    return max(
+        1, CONSTANTS.resources.solve_block_bytes // max(1, int(cells_per_row) * int(itemsize))
+    )
 
 
 # The window L: f_g ∈ [σ(−L), σ(L)], [4.5e-5, 1−4.5e-5] at L = 10. A pure STATE-SPACE bracket: the widest

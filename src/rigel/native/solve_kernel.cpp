@@ -140,7 +140,9 @@ double pairwise_sum(const double* a, int n) {
     return pairwise_sum(a, n2) + pairwise_sum(a + n2, n - n2);
 }
 
-constexpr double DENSITY_EPS = 1.0e-12;  // density_deconv._EPS
+// The density deconvolution's numerical floor, exported as `rows.DENSITY_EPS` and read there by
+// `density_deconv`, so the Python reference and this kernel share one value.
+constexpr double DENSITY_EPS = 1.0e-12;
 constexpr double OWN_EPS = 1.0e-9;       // region_init._EPS: the own-evidence predicate's guard, and the clips
 
 // the fitted gDNA background the factory scores each intron against (density_deconv.GdnaBackground)
@@ -1323,6 +1325,10 @@ void bind_rows(nb::module_& m) {
        "The reference-free strand composition evidence I_strand at fg_loc, the count overdispersed, `disc` the protocol's "
        "discriminability (0: the channel is dead).");
     r.attr("OWN_EVIDENCE_EPS") = OWN_EPS;
+    // the constants ψ and the deconvolution share with their Python readers: one home each, here
+    r.attr("DENSITY_EPS") = DENSITY_EPS;
+    r.attr("ARM_EPS") = P::ARM_EPS;
+    r.attr("JEFFREYS_REF") = P::JEFFREYS_REF;
 }
 
 }  // namespace

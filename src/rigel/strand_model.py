@@ -7,7 +7,7 @@ genomic GT/AG motif gives its true strand *independently of library prep* (STAR 
 the ``XS``/``ts`` tag), so comparing motif strand to aligner orientation over **annotated**
 spliced fragments measures library-prep strand efficiency — once the junctions that are not genuine
 RNA are separated out: a splice artifact (misaligned gDNA) reads ½ in a stranded library and a
-reversed junction reads the opposite side (:func:`genuine_sense_fraction`).
+reversed junction reads the opposite side (:func:`rigel.junction_fit.genuine_sense_fraction`).
 
 After the R2 strand flip in the BAM scanner, the exon alignment strand effectively represents
 read 1's genomic orientation, so the model's estimand is
@@ -39,164 +39,11 @@ from functools import cached_property
 
 import numpy as np
 
+from .config import CONSTANTS
+from .junction_fit import genuine_sense_fraction
 from .types import Strand
 
 logger = logging.getLogger(__name__)
-
-
-def _class_shares(f: np.ndarray, c: np.ndarray) -> tuple[float, np.ndarray]:
-    """``max_w Σ_g c_g·log(Σ_k w_k f_kg)`` over the 3-simplex, and the maximising shares. The objective is concave in
-    ``w``, so the KKT conditions are necessary and sufficient: at the maximum ``Σ_g c_g f_kg/(w·f)_g`` equals ``Σc`` for
-    every share in use and is at most ``Σc`` for every share at 0. A vertex, then an edge, that meets them is the
-    maximum; only an interior maximum needs the log-barrier ascent, whose barrier keeps a share the maximum needs at 10⁻⁶.
-    ``f`` is (3, G), each column scaled by its own constant (which only shifts the objective). A candidate on which some
-    junction has no probability scores −∞, so the arithmetic warnings it raises are silenced, never acted on."""
-    with np.errstate(divide="ignore", invalid="ignore", over="ignore", under="ignore"):
-        return _class_shares_unguarded(f, c)
-
-
-#: The log-barrier's weight starts at this share of the junction count and falls tenfold per stage to an absolute
-#: floor, where the barrier's own gap (3·μ for three shares) is below the log-likelihood's rounding — numeric.
-_BARRIER_START, _BARRIER_FLOOR = 1e-2, 1e-11
-
-
-def _class_shares_unguarded(f: np.ndarray, c: np.ndarray) -> tuple[float, np.ndarray]:
-    from scipy.optimize import brentq
-
-    def value(w):
-        return float(c @ np.log(w @ f))
-
-    total = float(c.sum())
-    slack = 1e-12 * total  # rounding in the multipliers' sums, numeric only
-
-    def satisfies(w, unused):
-        mult = f @ (c / (w @ f))
-        return bool(np.all(np.isfinite(mult[unused])) and np.all(mult[unused] <= total + slack))
-
-    candidates = []
-    for k in range(3):
-        vertex = np.eye(3)[k]
-        if satisfies(vertex, [j for j in range(3) if j != k]):
-            return value(vertex), vertex
-        candidates.append(vertex)
-    for a_, b_, third in ((0, 1, 2), (0, 2, 1), (1, 2, 0)):  # an edge t·e_a + (1 − t)·e_b
-        dd = f[a_] - f[b_]
-
-        def edge_slope(t, dd=dd, a_=a_, b_=b_):
-            return float(c @ (dd / (t * f[a_] + (1.0 - t) * f[b_])))
-
-        if edge_slope(1e-15) > 0.0 > edge_slope(1.0 - 1e-15):
-            t = brentq(edge_slope, 1e-15, 1.0 - 1e-15, xtol=1e-15)
-            e = np.zeros(3)
-            e[a_], e[b_] = t, 1.0 - t
-            if satisfies(e, [third]):
-                return value(e), e
-            candidates.append(e)
-    d = f[:2] - f[2]  # the interior: free coordinates (w0, w1), w2 = 1 − w0 − w1
-    w = np.full(3, 1.0 / 3.0)
-    mu = _BARRIER_START * total
-    while True:
-
-        def phi(v, mu=mu):
-            return value(v) + mu * float(np.log(v).sum())
-
-        for _ in range(100):  # Newton on the barrier objective, kept strictly inside; numeric bound
-            m = w @ f
-            q = d / m
-            g = q @ c + mu * (1.0 / w[:2] - 1.0 / w[2])
-            h = -(q * c) @ q.T - mu * (np.diag(1.0 / w[:2] ** 2) + 1.0 / w[2] ** 2)
-            step = -np.linalg.solve(h, g)
-            dw = np.array([step[0], step[1], -step[0] - step[1]])
-            shrink = dw < 0.0
-            t = min(1.0, 0.99 * float(np.min(-w[shrink] / dw[shrink]))) if shrink.any() else 1.0
-            now = phi(w)
-            while t > 1e-16 and phi(w + t * dw) < now:
-                t *= 0.5
-            if t <= 1e-16:
-                break
-            w = w + t * dw
-            if abs(float(g @ step)) * t < 1e-13 * max(1.0, abs(now)):
-                break
-        if mu <= _BARRIER_FLOOR:
-            break
-        mu = max(mu * 0.1, _BARRIER_FLOOR)
-    candidates.append(w)
-    best = max(candidates, key=value)
-    return value(best), best
-
-
-#: κ's search range, (0, ½) less the floor at each end: within it of 0 or of ½, κ̂ × (any library's RNA reads) moves
-#: the fit by ≪ 1 read — numeric. The scan is uniform in log(κ/(½ − κ)), so it resolves the profile near ½ as finely as
-#: near 0; it locates the basin before Brent's search — numeric.
-_KAPPA_FLOOR, _SCAN_NODES = 1e-12, 129
-
-
-def _genuine_mixture(
-    k: np.ndarray, n: np.ndarray, c: np.ndarray
-) -> tuple[float, np.ndarray, float, float, float]:
-    """The three-class binomial mixture's maximum likelihood. Junction group g (``c_g`` junctions with ``k_g`` of ``n_g``
-    reads on the minority side) is genuine RNA (rate κ), a splice artifact — misaligned gDNA (½) — or reversed (1 − κ).
-    The class shares are solved exactly at each κ (:func:`_class_shares`); κ maximises that profile, by a scan over log(κ/(½ − κ))
-    and Brent's method in its best cell — bounded work, where EM crawls without end as κ nears ½ (the classes merge) and
-    can stop at a saddle. Returns ``(κ, shares, minority, reads, log-likelihood)``, ``minority`` and ``reads`` being
-    the RNA classes' expected counts at the maximum."""
-    from scipy.optimize import minimize_scalar
-
-    half = n * np.log(0.5)
-
-    def profile(u):
-        kappa = 0.5 / (1.0 + float(np.exp(-u)))  # u = log(κ/(½ − κ))
-        lp = np.stack(
-            [
-                k * np.log(kappa) + (n - k) * np.log1p(-kappa),
-                half,
-                k * np.log1p(-kappa) + (n - k) * np.log(kappa),
-            ]
-        )
-        top = lp.max(axis=0)
-        f = np.exp(lp - top)
-        value, shares = _class_shares(f, c)
-        return value + float(c @ top), shares, f
-
-    end = float(np.log((0.5 - _KAPPA_FLOOR) / _KAPPA_FLOOR))
-    grid = np.linspace(-end, end, _SCAN_NODES)
-    scanned = [profile(u)[0] for u in grid]
-    i = int(np.argmax(scanned))
-    found = minimize_scalar(
-        lambda u: -profile(u)[0],
-        bounds=(grid[max(i - 1, 0)], grid[min(i + 1, grid.size - 1)]),
-        method="bounded",
-        options={"xatol": 1e-12},
-    )
-    u = float(found.x) if -found.fun >= scanned[i] else float(grid[i])
-    loglik, shares, f = profile(u)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        resp = shares[:, None] * f / (shares @ f)
-    minority = float(c @ (resp[0] * k + resp[2] * (n - k)))
-    reads = float(c @ ((resp[0] + resp[2]) * n))
-    return 0.5 / (1.0 + float(np.exp(-u))), shares, minority, reads, loglik
-
-
-def genuine_sense_fraction(n_sense, n_total) -> float:
-    """The genuine junctions' sense fraction κ: the shipped ``Beta(1, 1)`` posterior mean, ``(minority + 1)/(reads +
-    2)``, over the reads the three-class mixture credits to RNA at its maximum (:func:`_genuine_mixture`). Where every
-    junction is genuine that is exactly ``(n_same + 1)/(n_obs + 2)``; it is never 0. The table is oriented so the
-    genuine class's minority rate lies below ½. Gates: ``tests/test_strand_model.py``'s ``TestGenuineKappa``."""
-    s = np.asarray(n_sense, dtype=np.float64)
-    n = np.asarray(n_total, dtype=np.float64)
-    keep = n > 0
-    s, n = s[keep], n[keep]
-    flip = s.sum() > 0.5 * n.sum()
-    k = n - s if flip else s
-    kn, cnt = np.unique(np.stack([k, n], axis=1), axis=0, return_counts=True)
-    _, _, minority, reads, _ = _genuine_mixture(kn[:, 0], kn[:, 1], cnt.astype(np.float64))
-    kappa = (minority + 1.0) / (reads + 2.0)
-    return 1.0 - kappa if flip else kappa
-
-
-#: Minimum spliced observations to consider the strand model well-supported.
-#: Below this threshold a warning is emitted at construction.
-_MIN_STRAND_OBS_WARNING: int = 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -488,7 +335,9 @@ class StrandModel:
         hi = min(1.0, p + z * se)
         return (lo, hi)
 
-    def strand_specificity_ci_epsilon(self, confidence: float = 0.99) -> float:
+    def strand_specificity_ci_epsilon(
+        self, confidence: float = CONSTANTS.qc.strand_ci_confidence
+    ) -> float:
         """Upper credible limit on the minor-orientation rate ``1 − strand_specificity``.
 
         The ``confidence`` quantile of the Beta(n_minor + 1, n − n_minor + 1) posterior, clamped
@@ -572,12 +421,12 @@ class StrandModels:
                 "prior-only (p_r1_sense=0.5, no strand information). Is this "
                 "stranded RNA-seq data?"
             )
-        elif n_obs < _MIN_STRAND_OBS_WARNING:
+        elif n_obs < CONSTANTS.qc.strand_min_observations:
             logger.warning(
                 "Only %d spliced strand observations (< %d); "
                 "strand estimates may be noisy (SS=%.4f)",
                 n_obs,
-                _MIN_STRAND_OBS_WARNING,
+                CONSTANTS.qc.strand_min_observations,
                 self.exonic_spliced.strand_specificity,
             )
 
@@ -610,7 +459,9 @@ class StrandModels:
         """RNA model's observation count."""
         return self.exonic_spliced.n_observations
 
-    def strand_specificity_ci_epsilon(self, confidence: float = 0.99) -> float:
+    def strand_specificity_ci_epsilon(
+        self, confidence: float = CONSTANTS.qc.strand_ci_confidence
+    ) -> float:
         """Delegate: ε_CI from the primary (exonic_spliced) strand model."""
         return self.exonic_spliced.strand_specificity_ci_epsilon(confidence)
 

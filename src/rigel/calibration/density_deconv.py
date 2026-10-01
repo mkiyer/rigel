@@ -47,6 +47,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from ..native import transfer_rows as _rows
 from .gdna_density import pooled_log_rate
 from .signature import RegionType, coarse_type_array
 
@@ -56,7 +57,8 @@ __all__ = [
     "fit_intron_background",
 ]
 
-_EPS = 1.0e-12
+#: the density deconvolution's numerical floor — the kernel's (``solve_kernel.cpp``), so the two homes are one
+_EPS = float(_rows.DENSITY_EPS)
 
 
 @dataclass(frozen=True, slots=True)

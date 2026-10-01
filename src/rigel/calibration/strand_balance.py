@@ -2,7 +2,7 @@
 
 The genuine junctions' sense rate over annotated spliced unique mappers: the ``StrandModel``'s
 :attr:`~rigel.strand_model.StrandModel.p_r1_sense` reads its genuine sense count, the per-sj table with the splice
-artifacts and reversed junctions taken out (:func:`rigel.strand_model.genuine_sense_fraction`), scaled so that
+artifacts and reversed junctions taken out (:func:`rigel.junction_fit.genuine_sense_fraction`), scaled so that
 ``rna_sense_frac = (n_same + 1) / (n_obs + 2)`` here is that fit's κ. It strand-cleans the count density
 and parameterises the per-region strand likelihood.
 

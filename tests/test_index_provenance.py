@@ -24,6 +24,7 @@ import pysam
 import pytest
 
 from rigel import index as index_module
+from rigel.config import CONSTANTS
 from rigel.index import MANIFEST_JSON, INDEX_FORMAT_VERSION, TranscriptIndex, source_record
 
 #: `build()` parameters that name a source file rather than tune the build. They are recorded under
@@ -121,15 +122,15 @@ class TestTheDigestItself:
 
     def test_the_digest_covers_a_file_larger_than_one_read_chunk(self, tmp_path: Path) -> None:
         """Two files with an IDENTICAL first chunk must still get different digests."""
-        head = b"A" * (index_module._DIGEST_CHUNK_BYTES + 100)
+        head = b"A" * (CONSTANTS.resources.digest_chunk_bytes + 100)
         first = tmp_path / "first.bin"
         second = tmp_path / "second.bin"
         first.write_bytes(head)
         second.write_bytes(head[:-1] + b"B")
 
         assert (
-            first.read_bytes()[: index_module._DIGEST_CHUNK_BYTES]
-            == (second.read_bytes()[: index_module._DIGEST_CHUNK_BYTES])
+            first.read_bytes()[: CONSTANTS.resources.digest_chunk_bytes]
+            == (second.read_bytes()[: CONSTANTS.resources.digest_chunk_bytes])
         )
         assert source_record(first)["sha256"] != source_record(second)["sha256"]
         assert source_record(first)["sha256"] == sha256_of(first)
@@ -142,7 +143,9 @@ class TestTheDigestItself:
         payload.write_bytes(bytes(range(256)) * 5000)
         at_default = source_record(payload)["sha256"]
 
-        monkeypatch.setattr(index_module, "_DIGEST_CHUNK_BYTES", 7)
+        monkeypatch.setattr(
+            index_module, "CONSTANTS", CONSTANTS.replaced("resources.digest_chunk_bytes", 7)
+        )
         assert source_record(payload)["sha256"] == at_default == sha256_of(payload)
 
     def test_a_relative_source_path_is_recorded_as_an_absolute_one(

@@ -291,7 +291,8 @@ class TestGenuineKappa:
         from scipy.optimize import minimize
         from scipy.special import logsumexp
 
-        from rigel.strand_model import _KAPPA_FLOOR, _genuine_mixture
+        from rigel.config import CONSTANTS
+        from rigel.junction_fit import _genuine_mixture
 
         kn, cnt = np.unique(
             np.stack([table.n_sense, table.depth], axis=1).astype(float), axis=0, return_counts=True
@@ -341,7 +342,7 @@ class TestGenuineKappa:
                 options={"xatol": 1e-12, "fatol": 1e-13, "maxiter": 3000},
             )
             best = max(best, -fit.fun)
-        return fit_loglik, best, 1e-8 + _KAPPA_FLOOR * float(c @ n)
+        return fit_loglik, best, 1e-8 + CONSTANTS.junction_fit.kappa_floor * float(c @ n)
 
     def test_the_fit_reaches_the_mixture_maximum(self):
         """The fit is the three-class mixture's maximum likelihood, by an independent search."""

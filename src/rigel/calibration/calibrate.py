@@ -70,10 +70,11 @@ from .blocks import SweepCapture
 from .region_arrays import boundary_region_indices
 from .region_chain import build_region_chain
 from .result import CalibrationResult
-from .landscape import _LOCATED_VAR, DensityLandscape, fit_landscape, located_enriched_mode
+from .landscape import DensityLandscape, fit_landscape, located_enriched_mode
 from .signature import RegionType, coarse_type_array
 from .strand_balance import fit_strand_balance
 from .substrate import CalibrationSubstrate
+from ..config import CONSTANTS
 from ..types import Strand
 
 if TYPE_CHECKING:
@@ -172,10 +173,6 @@ class FactoryRows:
         )
 
 
-#: Minimum training regions for a hyperprior fit — below this the population is not a population.
-_MIN_TRAIN = 5
-
-
 def _fit_gdna_hyperprior(
     chain, belief, statics, region_arrays, mass_global, eff_global, *, prev=None
 ):
@@ -198,7 +195,7 @@ def _fit_gdna_hyperprior(
       measured loss, worst on zero-gDNA libraries.
     * location → ADMISSION AT THE FLOOR, precision above it → a continuous WEIGHT
       (`landscape._reliability`). A slot whose solve is wider than one nat² in ``log f_g``
-      (`landscape._LOCATED_VAR`, the count rule's one-fragment wall through ``Var(log c) = 1/c``) has no
+      (``CONSTANTS.landscape.located_var``, the count rule's one-fragment wall through ``Var(log c) = 1/c``) has no
       location, whatever produced its solve: a strand term at a pure-RNA vertex, a factory row on an empty
       intron, a one-sided delivered row. Its median is where the reference measure sits under its bound,
       and training on it re-seeds the landscape at that resolution.
@@ -217,10 +214,16 @@ def _fit_gdna_hyperprior(
     fn = np.asarray(statics.free_neg, dtype=bool)
     rtype = coarse_type_array(np.asarray(region_arrays.signature))
     ridx = np.clip(np.asarray(chain.obj_idx, dtype=np.int64), 0, rtype.shape[0] - 1)
-    expressed = isr & (eff_global > 1.0e-9) & (mass_global > 1.0e-12)
+    constants = CONSTANTS.calibration
+    expressed = (
+        isr & (eff_global > constants.opportunity_floor) & (mass_global > constants.mass_floor)
+    )
     # the zero-count structural anchor: an intergenic or intronic region that sequenced no unspliced mass
     anchor = (
-        isr & (eff_global > 1.0e-9) & (mass_global <= 1.0e-12) & (rtype[ridx] != RegionType.EXON)
+        isr
+        & (eff_global > constants.opportunity_floor)
+        & (mass_global <= constants.mass_floor)
+        & (rtype[ridx] != RegionType.EXON)
     )
     sel = expressed & ~(fp & fn)
     # ⛔ A SLOT WHOSE ONLY EVIDENCE IS A BOUND, OR WHICH HAS NONE, DOES NOT TRAIN THE PRIOR
@@ -234,19 +237,19 @@ def _fit_gdna_hyperprior(
     # alike — so the composition cut above changes which kernels are summed and never the axis
     # (`fit_landscape`'s ``domain``). ⛔ Without that, a gDNA-free library whose exons are all blind
     # trains on its anchors alone, the grid collapses to the floor, and every exon reads a flat prior.
-    domain_sel = np.asarray(eff_global, dtype=np.float64) > 1.0e-9
+    domain_sel = np.asarray(eff_global, dtype=np.float64) > constants.opportunity_floor
     # ⛔ The substrate guard measures the population the ANNOTATION admits, not the population left
     # after the composition cut: "is there enough of a population to fit a prior for" is not the
     # training set's question. Guarding the cut population instead refuses the refit on a gDNA-free
     # library whose only survivors are a handful of anchors, which then leaves its AMBIG regions at
     # their prior-free share. `fit_landscape` still refuses a training set under two.
-    if int((sel | anchor).sum()) < _MIN_TRAIN:
+    if int((sel | anchor).sum()) < constants.min_training_regions:
         return None
     if belief.has_composition is not None:
         # a composition, AND a solve that locates it: both come from a sweep, so an initial belief
         # (no predicate, no solve) reads the annotation alone
         sel &= np.asarray(belief.has_composition, dtype=bool)
-        sel &= np.asarray(belief.var_gdna, dtype=np.float64) <= _LOCATED_VAR
+        sel &= np.asarray(belief.var_gdna, dtype=np.float64) <= CONSTANTS.landscape.located_var
     sel |= anchor
     mass = np.asarray(mass_global, dtype=np.float64)[sel]
     return fit_landscape(

@@ -21,7 +21,7 @@ from rigel.buffer import (
     FRAG_UNAMBIG,
 )
 from rigel.splice import SpliceType
-from rigel.config import EMConfig
+from rigel.config import EMConfig, FragmentScoringConfig
 from rigel.estimator import AbundanceEstimator
 from rigel.frag_length_model import FragmentLengthModel
 from rigel.scoring import FragmentScorer
@@ -159,8 +159,8 @@ def _scan_em_data(
     stats,
     log_every=1_000_000,
     *,
-    overhang_log_penalty=None,
-    mismatch_log_penalty=None,
+    overhang_log_penalty=FragmentScoringConfig.overhang_log_penalty,
+    mismatch_log_penalty=FragmentScoringConfig.mismatch_log_penalty,
     annotations=None,
     fl=None,
 ):

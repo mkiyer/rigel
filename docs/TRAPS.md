@@ -809,7 +809,7 @@ step. The tell: a sweep returns the same score at several adjacent settings, a d
 than a flat optimum. Measure the share of kernels at the floor before reading any bandwidth sweep.
 
 **a-mode-count-is-not-a-well-posed-quantity. How many modes a fitted density has is a property of the
-render resolution, not of the field, so no consumer may depend on it.** Across a 16× range of `_N_GRID`
+render resolution, not of the field, so no consumer may depend on it.** Across a 16× range of `CONSTANTS.landscape.grid_points`
 the `AbundanceLandscape`'s mode count tracks 1/step and never converges, buys nothing in held-out
 likelihood, and reproduces worse across split halves as it grows. Sweep the resolution before a consumer
 reads any shape statistic off a fitted density: `rho_0` and the containment verdict survive, a ratio of

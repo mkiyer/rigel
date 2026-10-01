@@ -13,19 +13,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Constants (single source of truth for all scoring/penalty values)
-# ---------------------------------------------------------------------------
-
-#: Floor value for log-safe clamping to avoid log(0).
-LOG_SAFE_FLOOR = 1e-10
-
-#: Default overhang alpha: each base of overhang reduces probability by 10×.
-DEFAULT_OVERHANG_ALPHA = 0.1
-
-#: Default mismatch alpha: each edit-distance mismatch (NM tag) reduces
-#: probability by 10×.
-DEFAULT_MISMATCH_ALPHA = 0.1
+from .config import CONSTANTS, FragmentScoringConfig
 
 
 def overhang_alpha_to_log_penalty(alpha: float) -> float:
@@ -48,13 +36,6 @@ def overhang_alpha_to_log_penalty(alpha: float) -> float:
     if alpha <= 0.0:
         return -np.inf
     return np.log(alpha)
-
-
-#: Default overhang log-penalty.
-DEFAULT_OVERHANG_LOG_PENALTY = overhang_alpha_to_log_penalty(DEFAULT_OVERHANG_ALPHA)
-
-#: Default mismatch log-penalty.
-DEFAULT_MISMATCH_LOG_PENALTY = overhang_alpha_to_log_penalty(DEFAULT_MISMATCH_ALPHA)
 
 
 # ---------------------------------------------------------------------------
@@ -105,9 +86,9 @@ class FragmentScorer:
         gdna_fl,
         index,
         *,
-        overhang_log_penalty: float | None = None,
-        mismatch_log_penalty: float | None = None,
-        pruning_min_posterior: float = 1e-4,
+        overhang_log_penalty: float = FragmentScoringConfig.overhang_log_penalty,
+        mismatch_log_penalty: float = FragmentScoringConfig.mismatch_log_penalty,
+        pruning_min_posterior: float = FragmentScoringConfig.pruning_min_posterior,
     ) -> "FragmentScorer":
         """Build a FragmentScorer from trained models and index.
 
@@ -119,8 +100,8 @@ class FragmentScorer:
         gdna_fl : FragmentLengthModel
             Finalised gDNA fragment-length scoring model.
         index : TranscriptIndex
-        overhang_log_penalty : float or None
-        mismatch_log_penalty : float or None
+        overhang_log_penalty, mismatch_log_penalty : float
+            Log-penalty per base of overhang and per NM mismatch (``FragmentScoringConfig``'s defaults).
         pruning_min_posterior : float
             Minimum posterior threshold for candidate pruning.
             Lower values are more conservative (keep more candidates).
@@ -145,19 +126,11 @@ class FragmentScorer:
         exon_offsets, exon_starts, exon_ends, exon_cumsum = index.build_exon_csr()
 
         ctx = FragmentScorer(
-            log_p_sense=math.log(max(p_sense, LOG_SAFE_FLOOR)),
-            log_p_antisense=math.log(max(p_antisense, LOG_SAFE_FLOOR)),
+            log_p_sense=math.log(max(p_sense, CONSTANTS.scoring.strand_probability_floor)),
+            log_p_antisense=math.log(max(p_antisense, CONSTANTS.scoring.strand_probability_floor)),
             r1_antisense=p_sense < 0.5,
-            overhang_log_penalty=(
-                overhang_log_penalty
-                if overhang_log_penalty is not None
-                else DEFAULT_OVERHANG_LOG_PENALTY
-            ),
-            mismatch_log_penalty=(
-                mismatch_log_penalty
-                if mismatch_log_penalty is not None
-                else DEFAULT_MISMATCH_LOG_PENALTY
-            ),
+            overhang_log_penalty=overhang_log_penalty,
+            mismatch_log_penalty=mismatch_log_penalty,
             fl_log_prob=fl_log_prob,
             fl_max_size=fl_max_size,
             fl_tail_base=fl_tail_base,
@@ -175,7 +148,7 @@ class FragmentScorer:
         from .native import NativeFragmentScorer
 
         # Pool-separated likelihood pruning: compute Δ = -log(ε)
-        _eps = max(pruning_min_posterior, 1e-300)
+        _eps = max(pruning_min_posterior, CONSTANTS.scoring.pruning_floor)
         max_ll_delta = -math.log(_eps) if _eps < 1.0 else 0.0
 
         # Build is_nrna array for pool separation.

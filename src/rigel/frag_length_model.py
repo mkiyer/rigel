@@ -19,16 +19,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-#: Default maximum fragment length tracked individually.
-#: Sizes >= this go into a single overflow bin.  Must match
-#: ``BamScanConfig.max_frag_length`` (config.py) for consistency
-#: between standalone and production usage.
-DEFAULT_MAX_FRAG_SIZE: int = 1000
-
-# One pseudo-observation spread across the full FL support is enough to keep
-# unseen lengths finite without pulling short libraries toward the midpoint of
-# the histogram.
-_UNSEEN_FL_SMOOTHING_ESS: float = 1.0
+from .config import CONSTANTS, BamScanConfig
 
 
 @dataclass
@@ -54,7 +45,7 @@ class FragmentLengthModel:
         Float64 histogram of shape ``(max_size + 1,)``.
     """
 
-    max_size: int = DEFAULT_MAX_FRAG_SIZE
+    max_size: int = BamScanConfig.max_frag_length
     counts: np.ndarray = field(default=None, repr=False)
 
     def __post_init__(self):
@@ -262,8 +253,8 @@ class FragmentLengthModel:
             n = self.max_size + 1
             return np.full(n, 1.0 / n, dtype=np.float64)
         n = self.max_size + 1
-        smoothing_per_bin = _UNSEEN_FL_SMOOTHING_ESS / n
-        return (self.counts + smoothing_per_bin) / (total + _UNSEEN_FL_SMOOTHING_ESS)
+        ess = CONSTANTS.fragment_length.unseen_smoothing_ess
+        return (self.counts + ess / n) / (total + ess)
 
     # ------------------------------------------------------------------
     # Analytical transcript effective length (salmon-style eCDF)

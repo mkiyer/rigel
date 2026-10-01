@@ -43,6 +43,7 @@ from .annotate import (
 )
 from .buffer import FRAG_MULTIMAPPER, FragmentBuffer, _FinalizedChunk
 from .config import (
+    CONSTANTS,
     EMConfig,
     PipelineConfig,
     BamScanConfig,
@@ -68,10 +69,6 @@ if TYPE_CHECKING:
     from .scored_fragments import ScoredFragments
 
 logger = logging.getLogger(__name__)
-
-# Padding and minimum capacity for the annotation table.
-_ANNOTATION_TABLE_PADDING = 1024
-_ANNOTATION_TABLE_MIN_CAPACITY = 4096
 
 
 # ---------------------------------------------------------------------------
@@ -797,7 +794,7 @@ def quant_from_buffer(
     *,
     em_config: EMConfig | None = None,
     scoring: FragmentScoringConfig | None = None,
-    log_every: int = 1_000_000,
+    log_every: int = BamScanConfig.log_every,
     annotations: "AnnotationTable | None" = None,
     emit_locus_stats: bool = False,
 ) -> AbundanceEstimator:
@@ -920,11 +917,13 @@ def run_pipeline(
     from .calibration.splice_graph import build_boundary_flags_array, build_sj_geometry_arrays
 
     _warn_if_calibration_strand_unidentifiable(strand_models)
-    strand_ci_eps = strand_models.strand_specificity_ci_epsilon(confidence=0.99)
+    confidence = CONSTANTS.qc.strand_ci_confidence
+    strand_ci_eps = strand_models.strand_specificity_ci_epsilon(confidence=confidence)
     logger.info(
-        "[CAL] Strand trainer: n_spliced_obs=%d  ss_est=%.6f  ε_CI(99%%)=%.4g",
+        "[CAL] Strand trainer: n_spliced_obs=%d  ss_est=%.6f  ε_CI(%g%%)=%.4g",
         strand_models.n_observations,
         strand_models.strand_specificity,
+        100.0 * confidence,
         strand_ci_eps,
     )
 
@@ -989,8 +988,8 @@ def run_pipeline(
 
         annotations = AnnotationTable.create(
             capacity=max(
-                buffer.total_fragments + _ANNOTATION_TABLE_PADDING,
-                _ANNOTATION_TABLE_MIN_CAPACITY,
+                buffer.total_fragments + CONSTANTS.resources.annotation_table_padding,
+                CONSTANTS.resources.annotation_table_min_capacity,
             )
         )
 

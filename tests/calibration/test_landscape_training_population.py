@@ -7,7 +7,7 @@ admitted half-line is the prior's own, so training the prior on it is training t
 (`ISSUES: gdna-landscape-trains-on-false-positives`). `sweep.solve_chain` publishes the predicate as
 `RegionBelief.has_composition`, read off the held messages, and `calibrate._fit_gdna_hyperprior` selects on
 it AND on whether the solve LOCATES the slot: a posterior wider than one nat² in ``log f_g``
-(`landscape._LOCATED_VAR`, the estimator's one-fragment wall through ``Var(log c) = 1/c``) has no
+(``CONSTANTS.landscape.located_var``, the estimator's one-fragment wall through ``Var(log c) = 1/c``) has no
 location whatever its evidence — a strand term at a pure-RNA vertex, an empty intron's factory row, a
 one-sided delivered row — and its median is the reference's under its bound. The zero-count anchor
 trains regardless, being a structural statement rather than a solve. "Any non-flat λ-row" is NOT the
@@ -28,6 +28,7 @@ import numpy as np
 import pytest
 
 import rigel.calibration.sweep as SW
+from rigel.config import CONSTANTS
 from rigel.calibration.blocks import SweepCapture
 from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.region_chain import REGION
@@ -125,7 +126,7 @@ def _training_counts(monkeypatch, belief, parts):
         return None
 
     monkeypatch.setattr(CAL, "fit_landscape", spy)
-    monkeypatch.setattr(CAL, "_MIN_TRAIN", 1)
+    monkeypatch.setattr(CAL, "CONSTANTS", CONSTANTS.replaced("calibration.min_training_regions", 1))
     CAL._fit_gdna_hyperprior(chain, belief, statics, region_arrays, mass, eff)
     return seen
 
@@ -191,9 +192,8 @@ def test_the_substrate_guard_measures_the_domain_not_the_cut(monkeypatch):
     substrate — otherwise a gDNA-free toy loses its refit and invents gDNA in its place."""
     parts = _synthetic_population()
     _, belief, *_ = parts
-    monkeypatch.setattr(
-        CAL, "_MIN_TRAIN", 4
-    )  # the domain (4) passes, the cut population (1) would not
+    # the domain (4) passes, the cut population (1) would not
+    monkeypatch.setattr(CAL, "CONSTANTS", CONSTANTS.replaced("calibration.min_training_regions", 4))
     none = SimpleNamespace(
         f_g=belief.f_g, var_gdna=belief.var_gdna, has_composition=np.zeros(7, bool)
     )

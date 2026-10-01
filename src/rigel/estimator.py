@@ -250,8 +250,8 @@ class AbundanceEstimator:
         rna_prior_count: np.ndarray | None = None,
         rna_prior_weight: np.ndarray | None = None,
         gdna_eff_len: np.ndarray | None = None,
-        em_iterations: int = 1000,
-        em_convergence_delta: float = 1e-6,
+        em_iterations: int = EMConfig.iterations,
+        em_convergence_delta: float = EMConfig.convergence_delta,
         emit_locus_stats: bool = False,
         emit_assignments: bool = False,
     ) -> tuple[float, np.ndarray, np.ndarray, ...]:

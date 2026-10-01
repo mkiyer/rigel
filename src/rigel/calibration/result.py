@@ -29,6 +29,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from ..config import CONSTANTS
+
 
 def _check_axis_array(arr: np.ndarray, name: str, n: int) -> None:
     """Validate one per-object array: shape against ITS OWN axis, dtype, finite, non-negative.
@@ -206,6 +208,9 @@ class CalibrationResult:
     n_sj: int
 
     def __post_init__(self) -> None:
+        ceiling = (
+            1.0 + CONSTANTS.calibration.fraction_tolerance
+        )  # a fraction's upper bound, with rounding
         for axis in ("n_regions", "n_boundaries", "n_sj"):
             if int(getattr(self, axis)) < 0:
                 raise ValueError(
@@ -246,8 +251,8 @@ class CalibrationResult:
             "rna_neg_frac_boundary",
         ):
             arr = np.asarray(getattr(self, name), dtype=np.float64)
-            if np.any(arr > 1.0 + 1e-9):
-                i = int(np.flatnonzero(arr > 1.0 + 1e-9)[0])
+            if np.any(arr > ceiling):
+                i = int(np.flatnonzero(arr > ceiling)[0])
                 raise ValueError(
                     f"CalibrationResult.{name} is a fraction and must not exceed 1; index {i} is "
                     f"{float(arr[i])!r}."
@@ -258,7 +263,7 @@ class CalibrationResult:
             self.gdna_capture_efficiency_region, "gdna_capture_efficiency_region", self.n_regions
         )
         c = np.asarray(self.gdna_capture_efficiency_region, dtype=np.float64)
-        if np.any(c < 0.0) or np.any(c > 1.0 + 1e-9):
+        if np.any(c < 0.0) or np.any(c > ceiling):
             raise ValueError("CalibrationResult.gdna_capture_efficiency_region must lie in [0, 1].")
         _check_axis_array(
             self.gdna_capture_efficiency_boundary,
@@ -266,7 +271,7 @@ class CalibrationResult:
             self.n_boundaries,
         )
         cb = np.asarray(self.gdna_capture_efficiency_boundary, dtype=np.float64)
-        if np.any(cb < 0.0) or np.any(cb > 1.0 + 1e-9):
+        if np.any(cb < 0.0) or np.any(cb > ceiling):
             raise ValueError(
                 "CalibrationResult.gdna_capture_efficiency_boundary must lie in [0, 1]."
             )

@@ -18,14 +18,13 @@ covered regions a couple of decades above it; for RNA, a silent majority against
 Two components, one sharp and one broad, several decades apart, so the estimator must resolve a spike
 and a wide bump on the same axis. That requirement fixes the two rules the design rests on:
 
-1. Above the location floor (:data:`_LOCATED_VAR`) precision is a continuous weight, never a tuned
+1. Above the location floor (``CONSTANTS.landscape.located_var``) precision is a continuous weight, never a tuned
    admission threshold: a tuned cutoff scores worse than ignoring precision. See :func:`_reliability`.
 2. Resolution is a population quantity, not a measurement one. See :func:`knn_widths`, worth reading
    before touching the kernel.
 
-⚠ The two modelling constants below (``_KNN_SCALE``, ``_S0``) were selected against gDNA-shaped data.
-They are not component-specific by construction, but they have only ever been validated on one
-component; a second caller inherits them and must say so in its results rather than discover it later.
+Its grid, kernel grouping and modelling constants are ``rigel.config.CONSTANTS.landscape``, documented there,
+including which of them were selected against gDNA-shaped data only.
 """
 
 from __future__ import annotations
@@ -35,42 +34,13 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.special import gammaln
 
+from ..config import CONSTANTS
+from ..native import transfer_rows as _rows
 from .simplex_logodds import _block_rows
 
-_EPS = 1e-12
+#: the arm's clips — the kernel's (``psi_kernel.h``), whose arm evaluates this prior, so the two homes are one
+_EPS = float(_rows.ARM_EPS)
 _LN10 = np.log(10.0)
-
-# ── Computational budgets (discretization, not modelling — they trade cost for exactness) ────────────────
-#: Points on the log-rate grid. Same role as the solver's λ lattice: finer is strictly more
-#: faithful and strictly slower.
-_N_GRID = 260
-#: Kernels are grouped into this many equal-count width bins and each bin convolved once, instead of one
-#: convolution per region. Pure speed: the cost goes from O(n·K²) to O(bins·K²), which is what makes this
-#: affordable at genome scale.
-_WIDTH_BINS = 12
-
-# ── Modelling constants ──────────────────────────────────────────────────────────────────────────────────
-#: Population-resolution scale for :func:`knn_widths`, selected by shape against a reference that is
-#: itself validated against ground truth: at 0.5 the fit renders the enriched mode at the width the truth
-#: has; below it the landscape combs, above it the two modes merge and the enriched mass collapses.
-#: EMD does not discriminate here — it is monotone in smoothing at every reference — so do not
-#: re-select on it.
-_KNN_SCALE = 0.5
-#: Reference variance scale in the reliability weight, as a log-rate variance (0.15 decades).
-#: ⚠ It is a tuning constant in disguise. It reads as "the kernel resolution floor", but the actual
-#: rendering resolution is the grid step (~0.025 dec), and substituting that makes the weight more
-#: aggressive and the census worse. What it really does is cap how far a confident region can be
-#: down-weighted. Changing it is its own measured experiment; it must not ride along with anything else.
-_S0 = (0.15 * _LN10) ** 2
-
-#: THE LOCATION FLOOR, in the variable every solve reports. The estimator's resolution wall is one fragment
-#: (``max(count, 1)`` centres a kernel; ``count < 1`` is location-free and E-step placed), and a Poisson count
-#: ``c`` has ``Var(log c) = 1/c``, so "below one fragment" is "the log-count is uncertain by more than one nat²".
-#: `RegionBelief.var_gdna` is ``Var(log f_g)`` — at fixed mass, ``Var(log count)`` — whatever produced the
-#: solve (the strand term, the factory, a delivered row), so a slot wider than this has no location by the
-#: same floor the count rule applies, and does not train (`calibrate._fit_gdna_hyperprior`). Not a tuned
-#: constant: the identity's value at the wall. Gate: `test_landscape_training_population.py`.
-_LOCATED_VAR = 1.0
 
 
 @dataclass(frozen=True)
@@ -92,7 +62,7 @@ class DensityLandscape:
     n_train: int
     #: The kernels this density was rendered from, one per training region: the centre
     #: ``log(max(count, 1) / E)`` in nats, and whether it is a LOCATION — a count of at least one
-    #: fragment, the same wall :data:`_LOCATED_VAR` is read at. A zero-count anchor or a sub-fragment
+    #: fragment, the same wall ``CONSTANTS.landscape.located_var`` is read at. A zero-count anchor or a sub-fragment
     #: kernel is centred at its resolution wall ``1/E``, which says where the kernel could not see, not
     #: where a density is; a consumer reading a mode off the density (:func:`located_enriched_mode`)
     #: counts members among the located kernels only, and never re-derives either array.
@@ -162,7 +132,7 @@ def _grid(mass: np.ndarray, eff: np.ndarray) -> np.ndarray:
     hi = float(np.max(np.log10(np.maximum(mass, _EPS)) - np.log10(np.maximum(eff, _EPS))))
     if not np.isfinite(lo) or not np.isfinite(hi) or hi - lo < _EPS:
         lo, hi = lo - 0.5, lo + 0.5
-    return np.linspace(lo, hi, _N_GRID)
+    return np.linspace(lo, hi, CONSTANTS.landscape.grid_points)
 
 
 def _poisson_kernels(count: np.ndarray, eff: np.ndarray, grid: np.ndarray) -> np.ndarray:
@@ -180,7 +150,10 @@ def _poisson_kernels(count: np.ndarray, eff: np.ndarray, grid: np.ndarray) -> np
 
 
 def knn_widths(
-    centres: np.ndarray, grid_step: float, scale: float = _KNN_SCALE, k: int | None = None
+    centres: np.ndarray,
+    grid_step: float,
+    scale: float = CONSTANTS.landscape.knn_scale,
+    k: int | None = None,
 ) -> np.ndarray:
     """The population resolution: ``h_i = scale · dist(a_i, k-th nearest neighbour)``, ``k = √n``.
 
@@ -251,14 +224,15 @@ def _reliability(count: np.ndarray, var: np.ndarray, anchor: np.ndarray) -> np.n
     """Per-region mass ``w = ref/(v + ref)`` — the irreducible share of the log-rate variance against the
     deconvolution ambiguity ``v = Var(log f_g)``.
 
-    ``ref`` sums the region's own Poisson counting floor ``1/max(count,1)`` and the reference scale
-    :data:`_S0`. A confident region keeps mass so a real enriched mode survives; a give-up region
-    (``v ≫ ref``) collapses toward zero. The zero-count structural anchor is the trusted "no gDNA here"
-    statement and carries ``w = 1``: its density is ``0`` for every ``f_g``, so its composition ambiguity
-    is irrelevant.
+    ``ref`` sums the region's own Poisson counting floor ``1/max(count,1)`` and the reference variance
+    (``CONSTANTS.landscape.reliability_sd_decades``). A confident region keeps mass so a real enriched mode
+    survives; a give-up region (``v ≫ ref``) collapses toward zero. The zero-count structural anchor is the
+    trusted "no gDNA here" statement and carries ``w = 1``: its density is ``0`` for every ``f_g``, so its
+    composition ambiguity is irrelevant.
 
-    Precision enters twice, and the two roles are distinct. ABOVE the location floor (:data:`_LOCATED_VAR`)
-    it is this continuous weight and nothing else: a tuned admission threshold on it was measured worse than
+    Precision enters twice, and the two roles are distinct. ABOVE the location floor
+    (``CONSTANTS.landscape.located_var``) it is this continuous weight and nothing else: a tuned admission
+    threshold on it was measured worse than
     ignoring precision, and moving it into the kernel width is refuted by its own control (a single constant
     width performs identically, so that form is a global bandwidth under another name, and it inflates false
     enrichment on zero-gDNA libraries). AT the floor it is admission — a slot whose log-count is uncertain by
@@ -268,10 +242,11 @@ def _reliability(count: np.ndarray, var: np.ndarray, anchor: np.ndarray) -> np.n
 
     On unstranded data the weight does not separate enriched from depleted within a region class; it
     separates classes (exons being down-weighted against introns and intergenic), and every enriched
-    region is an exon. It is therefore informative but coarse, and how coarse is set by :data:`_S0`.
+    region is an exon. It is therefore informative but coarse, and how coarse is set by the reference variance.
     """
     v = np.maximum(np.nan_to_num(var, nan=np.inf, posinf=np.inf), 0.0)
-    ref = 1.0 / np.maximum(count, 1.0) + _S0
+    reference_var = (CONSTANTS.landscape.reliability_sd_decades * _LN10) ** 2
+    ref = 1.0 / np.maximum(count, 1.0) + reference_var
     return np.where(anchor, 1.0, ref / (v + ref))
 
 
@@ -309,16 +284,17 @@ def _render(count, eff, grid, prev, weights, widths) -> np.ndarray:
     """Sum the weighted kernels, each widened to the population resolution → an unnormalised density.
 
     Convolution is linear, so widening every kernel and then summing equals summing and then convolving
-    — which is why kernels are grouped by width and each group convolved once (:data:`_WIDTH_BINS`). The
-    kernels are built and summed a row tile at a time (`simplex_logodds._block_rows`, the same
-    working-set rule ψ tiles by): a training set of a million regions never exists as an ``(n, K)``
-    matrix, only its ``_WIDTH_BINS`` weighted sums do.
+    — which is why kernels are grouped by width and each group convolved once
+    (``CONSTANTS.landscape.width_bins`` groups). The kernels are built and summed a row tile at a time
+    (`simplex_logodds._block_rows`, the same working-set rule ψ tiles by): a training set of a million
+    regions never exists as an ``(n, K)`` matrix, only its per-group weighted sums do.
     """
+    n_bins = CONSTANTS.landscape.width_bins
     step = float(grid[1] - grid[0])
-    boundaries = np.quantile(widths, np.linspace(0.0, 1.0, _WIDTH_BINS + 1))
+    boundaries = np.quantile(widths, np.linspace(0.0, 1.0, n_bins + 1))
     # the bin of each width: the last bin includes its upper boundary, every other bin excludes it
-    bin_of = np.clip(np.searchsorted(boundaries, widths, side="right") - 1, 0, _WIDTH_BINS - 1)
-    sums = np.zeros((_WIDTH_BINS, grid.size))
+    bin_of = np.clip(np.searchsorted(boundaries, widths, side="right") - 1, 0, n_bins - 1)
+    sums = np.zeros((n_bins, grid.size))
     rows = _block_rows(grid.size, 8)
     for r0 in range(0, count.size, rows):
         sl = slice(r0, r0 + rows)
@@ -327,7 +303,7 @@ def _render(count, eff, grid, prev, weights, widths) -> np.ndarray:
             m = bin_of[sl] == b
             sums[b] += (weights[sl][m][:, None] * kernels[m]).sum(0)
     out = np.zeros_like(grid)
-    for b in range(_WIDTH_BINS):
+    for b in range(n_bins):
         m = bin_of == b
         if not m.any():
             continue
@@ -491,8 +467,8 @@ def located_enriched_mode(landscape: DensityLandscape) -> LocatedMode | None:
     The candidate is a MODE only if its members resolve it at the located population's own
     resolution: with ``k = √n_located`` (:func:`knn_widths`' population ``k``), each member's width is
     half the distance to its ``k``-th nearest MEMBER, and the median of those satisfies
-    ``width² ≤`` :data:`_LOCATED_VAR`, the one-fragment floor in the population's own variable. A basin
-    with ``k`` members or fewer has no ``k``-th neighbour inside itself — the cluster smaller than ``√n``
+    ``width² ≤ CONSTANTS.landscape.located_var``, the one-fragment floor in the population's own variable.
+    A basin with ``k`` members or fewer has no ``k``-th neighbour inside itself — the cluster smaller than ``√n``
     that reaches outside itself — and is no mode, however narrow the rendered density's cut made it; the
     within-basin spread is NOT the statement, since a basin cut by the grid's edge is narrow whatever its
     kernels. ``None`` is "no enriched mode" — the capture-OFF field, the gDNA-free field, and a library
@@ -517,6 +493,6 @@ def located_enriched_mode(landscape: DensityLandscape) -> LocatedMode | None:
         return None
     step = float(landscape.log_rho[1] - landscape.log_rho[0])
     width = knn_widths(centre[mem], step, k=k)
-    if float(np.median(width)) ** 2 > _LOCATED_VAR:
+    if float(np.median(width)) ** 2 > CONSTANTS.landscape.located_var:
         return None
     return LocatedMode(mode=enriched, n_members=n_members)

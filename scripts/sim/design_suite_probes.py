@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from rigel.config import CONSTANTS
 from rigel.sim.capture.design import write_random_capture_probes
 from rigel.sim.whole_genome import load_transcripts
 
@@ -28,7 +29,7 @@ def main() -> None:
     ap.add_argument("--gtf", type=Path, required=True)
     ap.add_argument("-o", "--out", type=Path, required=True)
     ap.add_argument("--capture-fraction", type=float, required=True, help="share of GENE GROUPS on panel")
-    ap.add_argument("--probe-length", type=int, default=120)
+    ap.add_argument("--probe-length", type=int, default=CONSTANTS.simulator.probe_length_bp)
     ap.add_argument("--probe-density", type=float, default=0.5)
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()

@@ -14,6 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ...config import CONSTANTS
 from ...transcript import Transcript
 from ...types import Strand
 from ..bam import transcript_to_genomic_blocks
@@ -53,7 +54,7 @@ class DesignedGenomicProbe:
 
 def design_capture_probe_intervals(
     transcript_length: int,
-    probe_length: int = 120,
+    probe_length: int = CONSTANTS.simulator.probe_length_bp,
     probe_density: float = 1.0,
 ) -> list[tuple[int, int]]:
     """Return non-overlapping, centered probe intervals on transcript coordinates."""
@@ -208,7 +209,7 @@ def write_random_capture_probes(
     path: Path,
     *,
     capture_fraction: float,
-    probe_length: int = 120,
+    probe_length: int = CONSTANTS.simulator.probe_length_bp,
     probe_density: float = 1.0,
     seed: int = 42,
     bed_path: Path | None = None,

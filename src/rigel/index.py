@@ -32,6 +32,7 @@ import numpy as np
 import pandas as pd
 import pysam
 
+from .config import CONSTANTS, IndexConfig
 from .types import GenomicInterval, IntervalType, AnnotatedInterval
 from .transcript import Transcript
 
@@ -79,17 +80,12 @@ def _rigel_version() -> str:
     return str(__version__)
 
 
-#: Read size for streaming a content digest. An I/O buffer, not a model parameter — it changes how fast
-#: a digest is computed and never what the digest is.
-_DIGEST_CHUNK_BYTES = 1 << 20
-
-
 def _sha256_of_file(path: Path) -> str:
     import hashlib
 
     h = hashlib.sha256()
     with open(path, "rb") as fh:
-        while chunk := fh.read(_DIGEST_CHUNK_BYTES):
+        while chunk := fh.read(CONSTANTS.resources.digest_chunk_bytes):
             h.update(chunk)
     return h.hexdigest()
 
@@ -214,7 +210,7 @@ def _check_no_duplicate_transcripts(transcripts: list[Transcript]) -> None:
         return
 
     examples = []
-    for (ref, strand, _exons), idxs in list(duplicates.items())[:5]:
+    for (ref, strand, _exons), idxs in list(duplicates.items())[: CONSTANTS.qc.report_examples]:
         tids = [transcripts[i].t_id or f"<t_index={transcripts[i].t_index}>" for i in idxs]
         examples.append(f"  ({ref}, strand={strand}): {tids}")
     n_groups = len(duplicates)
@@ -226,7 +222,8 @@ def _check_no_duplicate_transcripts(transcripts: list[Transcript]) -> None:
         f"Pass --collapse-duplicate-transcripts to have rigel drop them "
         f"automatically (keeping the lexicographically-smallest transcript ID per "
         f"group), or collapse them in the GTF upstream.\n"
-        f"First {min(5, n_groups)} duplicate group(s):\n" + "\n".join(examples)
+        f"First {min(CONSTANTS.qc.report_examples, n_groups)} duplicate group(s):\n"
+        + "\n".join(examples)
     )
 
 
@@ -250,7 +247,7 @@ def _collapse_duplicate_transcripts(transcripts: list[Transcript]) -> list[Trans
         keep = min(idxs, key=lambda i: transcripts[i].t_id or "")
         dropped = [i for i in idxs if i != keep]
         drop_idx.update(dropped)
-        if len(examples) < 5:
+        if len(examples) < CONSTANTS.qc.report_examples:
             examples.append(
                 f"  ({ref}, strand={strand}): kept {transcripts[keep].t_id!r}, "
                 f"dropped {[transcripts[i].t_id for i in dropped]}"
@@ -262,7 +259,7 @@ def _collapse_duplicate_transcripts(transcripts: list[Transcript]) -> list[Trans
         "First %d group(s):\n%s",
         len(drop_idx),
         len(duplicates),
-        min(5, len(duplicates)),
+        min(CONSTANTS.qc.report_examples, len(duplicates)),
         "\n".join(examples),
     )
     return [t for i, t in enumerate(transcripts) if i not in drop_idx]
@@ -327,9 +324,6 @@ def transcripts_to_dataframe(transcripts: list[Transcript]) -> pd.DataFrame:
 
 # -- Tolerance-based nRNA merging (unified architecture) ----------------------
 
-#: Default merge tolerance (bp) for TSS/TES clustering.
-NRNA_MERGE_TOLERANCE: int = 20
-
 
 def _cluster_coordinates(coords: np.ndarray, tolerance: int) -> np.ndarray:
     """Assign sorted coordinates to clusters within *tolerance* bp.
@@ -353,7 +347,7 @@ def _cluster_coordinates(coords: np.ndarray, tolerance: int) -> np.ndarray:
 
 def create_nrna_transcripts(
     transcripts: list[Transcript],
-    tolerance: int = NRNA_MERGE_TOLERANCE,
+    tolerance: int = IndexConfig.nrna_merge_tolerance,
 ) -> tuple[list[Transcript], dict[int, tuple], dict[tuple, int], dict[tuple, "Transcript"]]:
     """Create synthetic nRNA transcripts, detect annotated equivalents.
 
@@ -912,13 +906,13 @@ class TranscriptIndex:
         gtf_file: str | Path,
         output_dir: str | Path,
         *,
-        feather_compression: str = "lz4",
-        write_tsv: bool = True,
-        gtf_parse_mode: Literal["strict", "warn-skip"] = "strict",
-        collapse_duplicate_transcripts: bool = False,
-        nrna_tolerance: int = NRNA_MERGE_TOLERANCE,
+        feather_compression: str = IndexConfig.feather_compression,
+        write_tsv: bool = IndexConfig.write_tsv,
+        gtf_parse_mode: Literal["strict", "warn-skip"] = IndexConfig.gtf_parse_mode,
+        collapse_duplicate_transcripts: bool = IndexConfig.collapse_duplicate_transcripts,
+        nrna_tolerance: int = IndexConfig.nrna_merge_tolerance,
         alignable_zarr_path: str | Path | None = None,
-        splice_blacklist_min_count: int = 2,
+        splice_blacklist_min_count: int = IndexConfig.splice_blacklist_min_count,
     ) -> None:
         """Build the rigel reference index and write to disk.
 

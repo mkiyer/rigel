@@ -501,7 +501,7 @@ implemented and refuted: any constant for the unstranded case cancels out of the
 discrimination `(1−p)/p`, so a global genic average destroys most of the signal.
 
 
-**5.4 κ, the genuine junctions' rate** (`strand_model.genuine_sense_fraction`). Junction j has `k_j` of `n_j` reads on
+**5.4 κ, the genuine junctions' rate** (`junction_fit.genuine_sense_fraction`). Junction j has `k_j` of `n_j` reads on
 the minority side, oriented so the genuine rate κ is below ½:
 
     ℓ(κ, w) = Σ_j log[ w_g·Bin(k_j; n_j, κ) + w_a·Bin(k_j; n_j, ½) + w_r·Bin(k_j; n_j, 1−κ) ]
@@ -515,8 +515,9 @@ posterior mean over the reads the maximum credits to RNA.
   sufficient: `Σ_j f_kj/(w·f)_j` equals J for every weight in use and is at most J for every weight at 0. A vertex,
   then an edge, that meets them is the maximum; only an interior maximum needs a log-barrier ascent, and the barrier
   keeps a weight the optimum needs at 10⁻⁶.
-- **κ̂.** The profile `L(κ) = max_w ℓ` is scanned uniformly in `u = log(κ/(½ − κ))`, 129 nodes from κ = 10⁻¹² to
-  ½ − 10⁻¹², and Brent's method searches the best node's two cells. Wherever no class beats the artifact class, L is
+- **κ̂.** The profile `L(κ) = max_w ℓ` is scanned uniformly in `u = log(κ/(½ − κ))`, 129 points from κ = 10⁻¹² to
+  ½ − 10⁻¹², and Brent's method searches the best point's two cells. Every numerical setting of the fit, these and the
+  share solver's, is `config.CONSTANTS.junction_fit`, documented field by field. Wherever no class beats the artifact class, L is
   flat at the all-artifact value, and a weakly stranded library's maximum rises out of that plateau just below ½; a
   scan on log κ stepped over it (`tests/test_strand_model.py`'s `test_a_weakly_stranded_library_is_fit_exactly`).
 - **Why not EM.** EM's fixed point is this maximum, but it crawls without end as κ nears ½ (the classes merge), and a
@@ -1210,7 +1211,7 @@ basin above the bulk can be packed with them around ten measured kernels
 resolve it at the located population's own resolution, `k = √n_located` (`landscape.knn_widths`' k):
 each member's width is half the distance to its k-th nearest MEMBER, and
 
-    n_members > k   and   median(width_k)² ≤ _LOCATED_VAR = 1 nat²,
+    n_members > k   and   median(width_k)² ≤ located_var = 1 nat²,
 
 the floor DESIGN §7.1 rule 4 applies to a slot, in the same variable — not a constant chosen but the
 identity's value at the one-fragment wall (`Var(log c) = 1/c`), read at the population's own resolution. A

@@ -91,6 +91,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from .config import CONSTANTS
+
 logger = logging.getLogger(__name__)
 
 
@@ -327,7 +329,7 @@ class AnnotationTable:
 
     def _grow(self) -> None:
         """Double capacity when full."""
-        self._grow_to(max(self.capacity * 2, 1024))
+        self._grow_to(max(self.capacity * 2, CONSTANTS.resources.annotation_table_min_growth))
 
     @property
     def size(self) -> int:

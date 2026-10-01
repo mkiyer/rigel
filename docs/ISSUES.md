@@ -554,6 +554,14 @@ simulator's sharded writers and its whole-genome grid, and the zarr splice black
 - `_apply_scan_stats` reads 33 hand-listed keys with `.get(key, 0)`: iterate the dataclass and index strictly.
 - The simulator's truth is spread over nine `ground_truth_*` methods and three file passes.
 - Five instruments import `tests/calibration/_oracle.py` through `sys.path`; four scripts redefine `_shared.RUNS`.
+(i) CONSTANTS — what the move into `config.CONSTANTS` left (2026-10-01; the layout is `DESIGN.md` §6):
+- The native kernels' own constants are named and commented in their translation units (`em_solver.cpp`'s
+  `SQUAREM_BUDGET_DIVISOR`, `transfer_rows.h`'s `EPS` and `TINY`, `solve_kernel.cpp`'s `PW_BLOCKSIZE`, the scanner's
+  batch sizes), not gathered in `native/constants.h`, and the C++ inline literals are unaudited. Only the values Python
+  shares are single-sourced (exported, never restated).
+- `rigel sim`'s CLI restates `Scenario`'s defaults (genome length 5000, seed 42, 1000 fragments); reading them from
+  the signature would import the simulator on every CLI start.
+- `FragmentLengthModel.to_dict` rounds inline (2 and 6 decimals), beside the CLI's `SUMMARY_DECIMALS`.
 
 ### performance-memory-bounded-solve
 `priority: next — a release gate for the two unparked numeric no-ops (owner, 2026-09-28); the rest Tier 4, the thread parked (owner, 2026-09-19: the method is the focus) · kind: build · 2026-08-17`
@@ -677,7 +685,7 @@ as the truth.
 
 ### eb-shrinkage-magic-ess
 `priority: later — Tier 2, the fl second wave: replaced on the re-simulated fl-gap panels · kind: defect · 2026-08-31`
-`POOL_EB_PRIOR_ESS = 1000.0` shrinks the gDNA pmf toward `global_pmf` (mostly RNA whenever gDNA is a minority) at a
+`CONSTANTS.fragment_length.pool_prior_ess` (1000) shrinks the gDNA pmf toward `global_pmf` (mostly RNA whenever gDNA is a minority) at a
 magic ESS: inert on the ladder (0.01 bp), dominant on the fl-gap arm at `g05` capture-ON (`ship−pool` −23.7 of −31.7
 bp). Replacement: weight the pools by their own precision, which is not yet derived (the strand od's precision reconcile was
 refused for mismatched inputs, `ISSUES: the-strand-overdispersion-reconcile`). Its instrument, `fl_pool_purity.py`,
@@ -1349,7 +1357,7 @@ START bank's model-free identity and its exactness condition stay in `EQUATIONS.
   genomic-high (low) bound, with `w_max` read from the support end of `deposited_lengths`, never a quantile; the
   distance is the component minimum over `T(slot)`; a double-walled region is not model-free. Coverage, START-mass
   weighted on the ladder: 94.7 % at capture-OFF, 84.3 % under capture.
-- WHAT A CONSUMER COULD READ (a grid sweep over 16 conditions, `_N_GRID` over a 16× range): `rho_0` (it moved
+- WHAT A CONSUMER COULD READ (a grid sweep over 16 conditions, `CONSTANTS.landscape.grid_points` over a 16× range): `rho_0` (it moved
   8–25 %) and the anchor verdict (12/12 contaminated rows) were consumable; `span_R` was not (58 → 77 → 95.6 → 94.7
   → 1.9 on `g50 ss0.99` OFF as the grid refined); the mode count never
   (`TRAPS: a-mode-count-is-not-a-well-posed-quantity`). A fit on `mass / eff_gdna` carries the divisor's per-region

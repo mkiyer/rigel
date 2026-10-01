@@ -126,7 +126,7 @@ class WholeGenomeSimConfig:
     gtf: str = ""
     #: The rigel index the simulation's transcriptome comes from. The simulator takes the index's
     #: transcript list — annotated transcripts plus the synthetic nascent-RNA entities `rigel index`
-    #: creates (`index.create_nrna_transcripts`, TSS/TES clustered within `NRNA_MERGE_TOLERANCE`) —
+    #: creates (`index.create_nrna_transcripts`, TSS/TES clustered within `IndexConfig.nrna_merge_tolerance`) —
     #: so what it simulates is exactly what `rigel quant` sees. ``None`` ⇒ an index is built from
     #: ``genome`` + ``gtf`` into ``<outdir>/rigel_index`` on first use.
     index: str | None = None

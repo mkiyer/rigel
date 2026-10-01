@@ -29,6 +29,8 @@ from typing import Iterator
 
 import numpy as np
 
+from .config import BamScanConfig
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["FragmentBuffer"]
@@ -375,7 +377,7 @@ class FragmentBuffer:
 
     def __init__(
         self,
-        max_memory_bytes: int = 2 * 1024**3,
+        max_memory_bytes: int = BamScanConfig.buffer_size_bytes,
         spill_dir: Path | None = None,
     ):
         self.max_memory_bytes = max_memory_bytes

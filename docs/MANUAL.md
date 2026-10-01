@@ -652,6 +652,10 @@ The remaining `CalibrationConfig` fields (for example `sweep_logodds_step`, the 
 lattice's step, which is dimensionless and guarantees every slot's composition to within 1.25 % of its
 mass) are not exposed on the CLI or in the YAML.
 
+Every fixed number the code reads — the numerical methods' settings, the QC thresholds and the resource
+budgets — is in `rigel.config.CONSTANTS`, by component, each documented with why it has its value. They are
+not user-configurable.
+
 ### When to suspect calibration is misfiring
 
 - A high `gdna_fraction` in `summary.json` → `quantification` on a presumed-clean library, or an
@@ -816,7 +820,9 @@ Rigel trains the strand model from annotated spliced fragments only. On a
 stranded library it leaves out the junctions that are not genuine RNA: a
 splice artifact (genomic DNA the aligner wrote as spliced) reads near 50/50,
 and a reversed junction reads the opposite way. Unstranded libraries, or
-libraries with few informative splice reads, stay near 0.5.
+libraries with few informative splice reads, stay near 0.5. The fit's
+numerical settings are `rigel.config.CONSTANTS.junction_fit`, each documented there;
+they are not exposed on the CLI.
 
 **How does calibration use strand information?**
 The per-strand counts are calibration's own composition signal: gDNA is unstranded, RNA is not, so
