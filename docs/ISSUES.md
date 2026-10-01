@@ -459,8 +459,10 @@ and in transcripts.
   fragment (transcripts 1,682,936 off, mRNA −102,416, nascent +95,350), and κ is 0.0099 under either.
 - Not calibration on capture OFF (1.9 %): the error is the EM's, and it needs the strand term — unstranded, the same
   fragments allocate within 3.8 %.
-- The arm's distinguishing feature is a fragment shorter than its reads, so its mates overlap completely; the first
-  suspect is how such a pair's orientation reaches the strand term. Unmeasured.
+- The arm's distinguishing feature is a fragment shorter than its reads. The simulator truncates each read to the
+  fragment, so the mates cover the same bases and start at the same position (flags 83/163, TLEN ±length). The
+  unstranded library aligns the same way and allocates fine, so the overlap alone is not the cause; the first
+  suspect is how such a pair reaches the strand term or the transcript-space length. Unmeasured.
 - The arm carries the retired nascent model (`ISSUES: flgap-panels-stale-nascent-model`), so its nascent column is
   not comparable to the ladder's; the transcript and mRNA columns stand.
 
