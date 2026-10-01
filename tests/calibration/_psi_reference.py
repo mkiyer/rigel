@@ -80,9 +80,8 @@ def strand_loglik(
     ``κ(1−κ)`` equals the gDNA ¼, so with
     ``od_gdna = od_rna`` the variance is flat in ``gdna_frac`` (the means coincide and only the
     ``g² + (1−g)²`` scaling depends on ``gdna_frac``) — an unstranded region is uninformative. Each
-    component's excess variance uses its own mean ``μ_c(1−μ_c)``, consistent with the moment fit in
-    :mod:`gdna_strand`; the normal-moment vs exact-mixture discrepancy is small and ~constant in
-    ``N``.
+    component's excess variance uses its own mean ``μ_c(1−μ_c)``; the normal-moment vs exact-mixture
+    discrepancy is small and ~constant in ``N``.
     """
     # Fully elementwise in (sense, antisense, gdna_frac), so it broadcasts: scalar (sense, antisense)
     # with a 1-D grid returns one region's curve; column (sense, antisense) of shape (K, 1) with a row

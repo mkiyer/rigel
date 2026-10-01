@@ -20,10 +20,9 @@ Two nested views of ONE population, with one source of truth.
   For the spliced model it is **exactly the table's marginal** and is built from it
   (:meth:`StrandModel.from_sj_table`), never accumulated separately.
 
-The per-sj refinement exists because a dispersion ACROSS sj cannot be recovered from the 2×2:
-the RNA strand Beta-Binomial's mean (κ) and its overdispersion must be estimated from the same
-population, and the accumulator's boundary spliced channels are not that population — they also
-pool unannotated and implicit splices.
+The per-sj refinement keeps what the 2×2 loses: how the sense split varies ACROSS sj. The
+accumulator's boundary spliced channels are not that population — they also pool unannotated and
+implicit splices.
 
 Models are immutable: built once from the scanner's arrays, then read.  There is no
 observe/finalize lifecycle and therefore no way to score against a half-trained model.
@@ -65,9 +64,7 @@ class SJStrandTable:
     Consumers
     ---------
     * the **mean** κ — via the derived 2×2's ``n_same / n_observations``
-      (:attr:`StrandModel.p_r1_sense`, then ``calibration.strand_balance.fit_strand_balance``);
-    * the **dispersion** — the Beta-Binomial spread of ``(n_sense_j | depth_j)`` across
-      sj at mean κ (``calibration.gdna_strand.fit_rna_strand_from_sj_table``).
+      (:attr:`StrandModel.p_r1_sense`, then ``calibration.strand_balance.fit_strand_balance``).
     """
 
     ref_id: np.ndarray  # int32[n_sj]

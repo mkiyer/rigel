@@ -14,7 +14,7 @@ pool plus the phase-2 density landscape). The solver is the belief-propagation S
     substrate  (five populations on three axes)
       -> build chain + geometry + statics      (the geometry owns EVERY divisor)
       -> strand balance: rna_sense_frac (κ)
-      -> count_observable_masks -> fit gDNA / RNA strand Beta-Binomial overdispersions (seed)
+      -> strand overdispersion: 0 for both components (binomial, by policy)
       -> signature-binary init (G1/G2/G3)
       -> PASS 1 solve_chain (no fitted prior): ONE forward + ONE backward pass — each object integrates
            its strand likelihood, the intron factory and its neighbours' messages
@@ -59,9 +59,7 @@ from .region_geometry import (
     region_gdna_geometry,
 )
 from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
-from .density_model import count_observable_masks
 from .derive import gdna_density_global
-from .errors import CalibrationStrandError
 from .density_deconv import (
     GdnaBackground,
     fit_intron_background,
@@ -69,12 +67,6 @@ from .density_deconv import (
 from .capture_efficiency import capture_efficiencies
 from .effective_length import UNBOUNDED_REACH, conserved_cut_shares
 from .blocks import SweepCapture
-from .gdna_strand import (
-    _MAX_OVERDISPERSION,
-    reconcile_overdispersions,
-    fit_gdna_strand_from_substrate,
-    fit_rna_strand_from_sj_table,
-)
 from .region_arrays import boundary_region_indices
 from .region_chain import build_region_chain
 from .result import CalibrationResult
@@ -288,17 +280,14 @@ def lattice_points(window: float, step: float) -> int:
 
 @dataclass(frozen=True, slots=True)
 class _Strand:
-    """The library's strand model as the solve reads it: the RNA sense fraction
-    ``κ``, ``N_rna`` — the spliced count κ was fit from, the sample the strand channel's protocol
-    decision reads (`region_init.strand_discriminability`) — and the two Beta-Binomial overdispersions.
-    The two seeds are QC for the log only — ``(n_seed_regions, n_seed_fragments, fallback, …)``."""
+    """The library's strand model as the solve reads it: the RNA sense fraction ``κ``, ``N_rna`` — the spliced count
+    κ was fit from, the sample the strand channel's protocol decision reads (`region_init.strand_discriminability`)
+    — and the two Beta-Binomial overdispersions, both 0 (binomial) by policy."""
 
     rna_sense_frac: float
     n_rna_obs: float
     gdna_strand_overdispersion: float
     rna_strand_overdispersion: float
-    gdna_seed: tuple
-    rna_seed: tuple
 
     @property
     def model(self) -> tuple[float, float, float]:
@@ -310,61 +299,19 @@ class _Strand:
         )
 
 
-def _fit_strand(substrate, region_arrays, strand_models) -> _Strand:
-    """The strand model, in the order the fits lean on each other.
+def _fit_strand(strand_models) -> _Strand:
+    """The strand model: ``κ``, the posterior-mean spliced sense fraction (`fit_strand_balance`), and the
+    spliced count behind it; the strand channel's discriminability is ``(2κ−1)²`` where the protocol preserves
+    strand and 0 where it does not (`region_init.strand_discriminability`, a decision on that same 2×2).
 
-    ``κ`` first — the posterior-mean spliced sense fraction (`fit_strand_balance`) and the spliced count
-    behind it; the strand channel's discriminability is ``(2κ−1)²`` where the protocol preserves strand
-    and 0 where it does not (`region_init.strand_discriminability`, a decision on that same 2×2, so an
-    unstranded library's count governs at any depth). A library with no spliced reads is not an RNA-seq
-    library and raises. Then the RNA overdispersion
-    (mean κ, from the per-sj strand table, certified pure RNA), which is the gDNA fit's fallback; then
-    the gDNA overdispersion (mean ½ by dsDNA symmetry) by the AWAY-HALF moment over every genic count-
-    and strand-observable object — unbiased under any RNA content of the seeds (`gdna_strand`'s
-    lemma), so no seed is weighted and no class asserted pure; intergenic and AMBIG objects cannot be
-    oriented and are out. The two are RECONCILED with no conjured target: the weaker-measured
-    dispersion shrinks toward the better-measured one by their own null informations."""
+    Both overdispersions are 0 — the strand channel's width is binomial — by policy: no population measures an od
+    cleanly on real data (antisense RNA reaches the gDNA seeds, splice artifacts the junctions, and at n ≤ 3 a
+    seed's spread is composition as much as dispersion), and an od set too high mutes the channel. A library with
+    no spliced read is unstranded: κ = ½ and a dead channel, never an error. Gates:
+    `tests/calibration/test_calibrate.py`'s ``test_the_strand_overdispersion_is_binomial_by_policy`` and
+    ``test_an_empty_spliced_census_calibrates_as_unstranded``."""
     balance = fit_strand_balance(strand_models)
-    if balance.fallback_used:
-        raise CalibrationStrandError(
-            "the library has zero spliced unique-mapper observations; this does not look like an "
-            "RNA-seq library. A real RNA-seq library always carries spliced reads."
-        )
-    rna_sense_frac = float(balance.rna_sense_frac)
-    n_rna_obs = float(balance.n_observations)
-
-    rna_strand = fit_rna_strand_from_sj_table(strand_models.sj_table, rna_sense_frac=rna_sense_frac)
-    rna_seed = (
-        rna_strand.n_seed_regions,
-        rna_strand.n_seed_fragments,
-        rna_strand.fallback_used,
-        rna_strand.raw_overdispersion,
-    )
-    # the seed selector is count-observability, straight off the signature
-    region_obs, boundary_obs = count_observable_masks(
-        np.asarray(region_arrays.signature), np.asarray(region_arrays.ref_id)
-    )
-    gdna_strand = fit_gdna_strand_from_substrate(
-        substrate,
-        region_arrays,
-        region_count_observable=region_obs,
-        boundary_count_observable=boundary_obs,
-        rna_sense_frac=rna_sense_frac,
-    )
-    gdna_seed = (
-        gdna_strand.n_seed_regions,
-        gdna_strand.n_seed_fragments,
-        gdna_strand.fallback_used,
-        gdna_strand.effective_seeds,
-        gdna_strand.raw_overdispersion,
-    )
-    rna_od, gdna_od = reconcile_overdispersions(
-        rna_strand.raw_overdispersion,
-        rna_strand.information,
-        gdna_strand.raw_overdispersion,
-        gdna_strand.information,
-    )
-    return _Strand(rna_sense_frac, n_rna_obs, gdna_od, rna_od, gdna_seed, rna_seed)
+    return _Strand(float(balance.rna_sense_frac), float(balance.n_observations), 0.0, 0.0)
 
 
 class _IntronFactory:
@@ -599,7 +546,7 @@ def _gdna_boundary_conserved_len(region_arrays, gdna_fl_pmf: np.ndarray) -> np.n
 
 
 def _log_summary(result: CalibrationResult, strand: _Strand, substrate, sj) -> None:
-    """The debug line: the sizes, the density scalar, the strand model with its seeds and clamps, and
+    """The debug line: the sizes, the density scalar, the strand model, and
     the sj sense fraction against κ — a large gap flags a strand-model / accumulator mismatch (κ stays
     the StrandModel posterior; this is QC only). Sense is derived, never stored: the accumulator's
     columns are GENOME strand, and which is sense is read off each sj's annotated transcript strand."""
@@ -608,7 +555,6 @@ def _log_summary(result: CalibrationResult, strand: _Strand, substrate, sj) -> N
     spl_sense = float(np.where(is_pos, flux[:, 0], flux[:, 1]).sum())
     spl_total = float(flux.sum())
     sj_sense_frac = spl_sense / spl_total if spl_total > 0.0 else float("nan")
-    gd, rn = strand.gdna_seed, strand.rna_seed
     if result.gdna_reference_density is None:
         logger.info(
             "calibration: no located enriched gDNA mode — effective lengths are not corrected for "
@@ -623,31 +569,12 @@ def _log_summary(result: CalibrationResult, strand: _Strand, substrate, sj) -> N
         )
     logger.debug(
         "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
-        "gdna_strand_overdispersion=%.4g (%d seed regions, %d frags, %.1f effective%s%s) "
-        "rna_strand_overdispersion=%.4g (%d sj, %d frags%s) "
-        "[own-evidence od: rna=%.4g gdna=%.4g] "
-        "[sj sense_frac=%.3f vs κ=%.3f]",
+        "strand overdispersion 0 (binomial, by policy) [sj sense_frac=%.3f vs κ=%.3f]",
         result.n_regions,
         result.n_boundaries,
         result.n_sj,
         result.gdna_density_global,
         strand.rna_sense_frac,
-        strand.gdna_strand_overdispersion,
-        gd[0],
-        gd[1],
-        gd[3],
-        ", FALLBACK" if gd[2] else "",
-        (
-            f", CLAMPED at the ceiling from a raw {gd[4]:.3f} - NOT a measurement"
-            if (not gd[2]) and gd[4] > _MAX_OVERDISPERSION
-            else ""
-        ),
-        strand.rna_strand_overdispersion,
-        rn[0],
-        rn[1],
-        ", FALLBACK" if rn[2] else "",
-        rn[3],
-        gd[4],
         sj_sense_frac,
         strand.rna_sense_frac,
     )
@@ -696,7 +623,7 @@ def calibrate(
     statics = build_region_statics(chain, region_arrays, boundary_flags)
     region_eff_gdna, boundary_eff_gdna = _project_eff(chain, geometry.eff_gdna, payload)
 
-    strand = _fit_strand(substrate, region_arrays, strand_model)
+    strand = _fit_strand(strand_model)
     factory = _IntronFactory(chain, substrate, region_arrays, region_eff_gdna)
     # ⛔ A TOTAL density over ONE component's opportunity model is not a composition estimate; the
     # per-slot gDNA support below is the basis the landscape prior is fit and read on.

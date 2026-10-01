@@ -91,7 +91,7 @@ enforces it.
 | what a fragment tally MEANS | **1 · the payload view** — `splice_graph` `substrate` `region_arrays` |
 | how many places a fragment COULD have sat | **2 · opportunity** — `effective_length` `capture_eff_length` `sj_opportunity` `gdna_opportunity` `gdna_density` `fl` |
 | one slot's own numbers and ψ | **3 · geometry + the per-slot solve** — `region_geometry` `simplex_logodds` |
-| which strand a fragment came from | **4 · strand** — `gdna_strand` `strand_balance` |
+| which strand a fragment came from | **4 · strand** — `strand_balance` |
 | how dense a component is, and the priors | **5 · density and prior** — `density_model` `density_deconv` `landscape` `capture_efficiency` |
 | what one neighbour tells another | **6 · the solve** — `sweep` (the backbone) + `blocks` + `messages/` (the policy) + `region_init` |
 | turning the solve into a result | **7 · assemble** — `calibrate` `priors` `result` `derive` `track` |
@@ -149,8 +149,8 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument's --self-test
 ```
 
-**The standing baseline: 0 failed / 2,715 passed / 0 skipped / 0 xfail, 2,715 collected** — re-derived
-2026-09-30 after fl step 2 (2,712 + 3: `test_fl.py`'s three RNA-law gates). **Any failure at all is a
+**The standing baseline: 0 failed / 2,632 passed / 0 skipped / 0 xfail, 2,632 collected** — re-derived
+2026-10-01 after od = 0 landed (2,715 − 83: the od estimators' tests, deleted with them). **Any failure at all is a
 regression.** Re-derive a count, never adjust one (`TRAPS: re-record-the-baseline`): every gate that scans
 the files on disk is one case, so only adding or removing a test moves the total. Derive the failure set,
 never eyeball the tail (`TRAPS: read-the-whole-failure-list`). A golden update is where a regression gets

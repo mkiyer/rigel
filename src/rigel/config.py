@@ -258,11 +258,7 @@ class CalibrationConfig:
     per-region log-odds lattice. See :func:`rigel.calibration.calibrate.calibrate`.
     """
 
-    #: The strand-overdispersion CEILING is not config: it lives as the single asserted constant
-    #: ``_CEIL_ALPHA_BETA`` in :mod:`rigel.calibration.gdna_strand`, next to the estimator it
-    #: parameterises. Nor is a shrinkage target — neither component shrinks toward a constant, they
-    #: shrink toward EACH OTHER by their own measured informations
-    #: (``gdna_strand.reconcile_overdispersions``).
+    #: The strand overdispersion is not config: it is 0 for both components, binomial by policy.
 
     #: The λ lattice's STEP, in nats of log-odds. ψ's grid is ``λ ∈ [−L, L]`` at this spacing, ``K =
     #: round(2L/step) + 1`` points at whatever bracket ``L`` a pass solves on (the floor below, or the

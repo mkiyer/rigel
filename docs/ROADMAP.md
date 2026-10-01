@@ -55,11 +55,10 @@ sparse libraries lose their gDNA.
   `ISSUES: the-scorer-reads-a-census-length-law`; the boundary inversion's second wave stays open; the RNA law trains on
   spliced fragments that carry splice artifacts (`ISSUES: splicing-artifacts`) — `calibration/fl.py`,
   `gdna_density.py`, `calibration_vs_oracle.py`; watch `ISSUES: capture-degeneracy-standing-risk`.
-- **gDNA strand overdispersion**: the reconcile keeps gDNA's and RNA's values apart where the owner rules one shared
-  value, and on a planted panel the shipped gDNA value sits near zero; `EQUATIONS.md` §6b–§6c and `DESIGN.md` §3.3a
-  describe a fit that never shipped, §6a's no-bias claim is false, and `clamped_at_ceiling` and `effective_seeds` come
-  from the discarded fit, so read neither until step 1 keys them on the shipped value — Tier 0,
-  `ISSUES: strand-overdispersion-one-shared-value`, `calibration_vs_oracle.py` on the `odg05` panel.
+- **Strand model**: od = 0 by policy, landed 2026-10-01 after its VCaP-mix A/B (`DESIGN.md` §3.3a). κ still pools
+  splice artifacts: LBX0588's 0.064 against 0.0029 from its genuine junctions. The three-class junction fit is next —
+  Tier 0, `ISSUES: strand-overdispersion-one-shared-value`; the prototype harness and the VCaP truth scorer are in
+  `~/Downloads/rigel_runs/prototypes/2026-09-30_robust_od/`.
 - **The message layer**: `transfer` ships on the two-phase backbone (`DESIGN.md` §6b.12–§6b.14); `silent` is the
   floor; the bar — win on unstranded, minimal harm on stranded, never pooled — is `policy_benchmark.py --panel
   ladder`.
@@ -94,8 +93,7 @@ sparse libraries lose their gDNA.
   `ISSUES: performance-memory-bounded-solve`, `profiling/profiler.py`, `profiling/sweep_replay.py`; a `_debug`
   capture has no memory bound, so one real-genome job runs at a time (`ISSUES: debug-capture-memory-is-unbounded`).
 - **Panels**: the 16-condition ladder is rebuilt under the corrected capture physics, cached and certified, one
-  realization per condition; the test chromosome is cached and certified; the contaminated-seed panel is designed,
-  not built (`ISSUES: strand-overdispersion-one-shared-value`); the fl-gap side panels are to be re-simulated and the
+  realization per condition; the test chromosome is cached and certified; the fl-gap side panels are to be re-simulated and the
   junction-probed twin retired — `panel.py status`, `ISSUES: flgap-panels-stale-nascent-model`,
   `ISSUES: expand-the-gdna-spectrum`.
 - **Reading rules**: rank per stratum, never pooled (`TRAPS: never-pool-the-strata`); quote `mwae` / Σ|err| over every
@@ -112,9 +110,10 @@ between any two windows.
 
 **Release-critical — before 0.8.0.**
 1. **Tier 0, strand overdispersion — first, before anything else (owner, 2026-09-30)**
-   (`ISSUES: strand-overdispersion-one-shared-value`), one step per window: step 0 — the contaminated-seed panel and the
-   simulator's matched RNA overdispersion, outside the tree; step 1 under its hold rule; steps 2 and 3; the field
-   collapse. After it: re-read the strand-input drift in `ISSUES: the-gdna-landscape-collapses-at-low-depth` and
+   (`ISSUES: strand-overdispersion-one-shared-value`, the 2026-09-30 rulings), one step per window: od = 0 (landed
+   2026-10-01); κ from the three-class junction fit, judged on the gDNA-heavy VCaP blend; the `summary.json`
+   diagnostics; the pruning design.
+   After it: re-read the strand-input drift in `ISSUES: the-gdna-landscape-collapses-at-low-depth` and
    `ISSUES: strand-likelihood-over-confident-beyond-od`, and refresh the ladder report, the issue-list page and the
    full_lowg explanation page, which lacks the od-arm line of
    `ISSUES: the-background-dispersion-assumes-a-pure-intergenic-pool`.

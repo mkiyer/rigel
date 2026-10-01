@@ -330,8 +330,8 @@ class TestSingleGene:
     def test_single_exon_clean(self, tmp_path, update_golden):
         # A single-exon transcript (t1) decoded against a realistic library: the
         # neighbouring gene is multi-exon so the strand model trains on its spliced
-        # reads (calibration requires spliced reads — a pure single-exon library is a
-        # toy and raises CalibrationStrandError).
+        # reads (a pure single-exon library has no spliced read, so it calibrates as
+        # unstranded and the strand channel this golden pins would be dead).
         sc = Scenario("golden_1e", genome_length=5000, seed=SEED, work_dir=tmp_path / "golden_1e")
         sc.add_gene(
             "g1",
@@ -479,7 +479,7 @@ class TestAntisense:
 
         Both overlap transcripts are single-exon; a separate multi-exon gene
         (g_train) supplies the spliced reads the strand model needs to train (a
-        pure single-exon library raises CalibrationStrandError).
+        pure single-exon library calibrates as unstranded, its strand channel dead).
         """
         sc = Scenario(
             "golden_as_cont", genome_length=8000, seed=SEED, work_dir=tmp_path / "golden_as_cont"

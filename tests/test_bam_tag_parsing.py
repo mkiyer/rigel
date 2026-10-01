@@ -494,9 +494,8 @@ class TestMissingAndInvalidTags:
     def test_no_strand_tags_zero_spliced_observations(self, tmp_path):
         """No XS/ts tags → zero exonic_spliced observations (scanner level).
 
-        Asserts the scanner behaviour directly via ``scan_and_buffer``: the full
-        pipeline would now raise ``CalibrationStrandError`` on this library (no
-        spliced strand anchor) — see ``test_calibration_requires_spliced_reads``.
+        Asserts the scanner behaviour directly via ``scan_and_buffer``; what the full pipeline
+        makes of such a library is ``test_a_library_without_spliced_reads_calibrates_as_unstranded``.
         """
         from rigel.config import BamScanConfig
         from rigel.pipeline import scan_and_buffer
@@ -509,21 +508,23 @@ class TestMissingAndInvalidTags:
             "Without strand tags, exonic_spliced should have 0 observations"
         )
 
-    def test_calibration_requires_spliced_reads(self, tmp_path):
-        """Zero spliced strand observations → CalibrationStrandError (new contract).
+    def test_a_library_without_spliced_reads_calibrates_as_unstranded(self, tmp_path):
+        """Zero spliced strand observations → κ = ½, od = 0, a dead strand channel, and the run completes.
 
-        gDNA cannot splice, so spliced reads are the only unambiguous-RNA anchor for
-        the strand orientation; without them the deconvolution cannot separate sense
-        RNA from gDNA and must fail loudly rather than silently mis-split.
+        With no spliced read there is no strand anchor, so the strand channel carries nothing and the
+        deconvolution reads density alone; the fallback must work with no RNA (owner, 2026-09-30), so it
+        is a valid library, never an error.
         """
-        from rigel.calibration.errors import CalibrationStrandError
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
         from rigel.pipeline import run_pipeline
 
         bam_path, index = self._build_scenario_without_xs(tmp_path)
         config = PipelineConfig(em=EMConfig(seed=42), scan=BamScanConfig(sj_strand_tag="XS"))
-        with pytest.raises(CalibrationStrandError):
-            run_pipeline(bam_path, index, config=config)
+        result = run_pipeline(bam_path, index, config=config)
+        cal = result.calibration
+        assert cal.rna_sense_frac == 0.5
+        assert cal.gdna_strand_overdispersion == 0.0
+        assert cal.rna_strand_overdispersion == 0.0
 
     def test_sj_mode_none_ignores_tags(self, tmp_path):
         """sj_strand_tag='none' → ignore all strand tags (scanner level)."""

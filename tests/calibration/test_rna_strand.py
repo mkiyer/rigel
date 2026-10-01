@@ -1,38 +1,23 @@
-"""The RNA strand Beta-Binomial overdispersion: the estimator, and the symmetry it buys.
+"""The strand likelihood's symmetry between the two components' overdispersions.
 
-Two properties are gated. The estimator recovers an overdispersion drawn at a known level per
-splice junction, which turns on the excess-variance scale being κ(1−κ) rather than ¼ — the RNA
-component's mean is κ, not ½, so a ¼ scale biases the estimate by 4κ(1−κ). And the deconvolution is
-symmetric: with the RNA strand modelled as Beta-Binomial too, an unstranded region (κ = ½) is
-uninformative and a balanced region grows more gDNA-like as the library becomes more stranded.
-Modelling only the gDNA strand as Beta-Binomial breaks that — it pulls balanced unstranded regions
-toward RNA, which is a composition claim manufactured out of a nuisance parameter.
+Both overdispersions are 0 in production (binomial by policy), but the strand term keeps its od arguments so an od can
+return, and these gate what it must then do: with both components Beta-Binomial at one od, an unstranded region
+(κ = ½) is uninformative and a balanced region grows more gDNA-like as the library becomes more stranded. An od on
+the gDNA side alone breaks that — it pulls balanced unstranded regions toward RNA, a composition claim manufactured
+out of a nuisance parameter — which is why the two components share one value.
 """
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import numpy as np
 import pytest
 
-from rigel.calibration.gdna_strand import (
-    _MAX_OVERDISPERSION,
-    RnaStrandModel,
-    fit_rna_strand_from_sj_table,
-    fit_rna_strand_overdispersion,
-    overdispersion_for_beta,
-)
 from _psi_reference import strand_loglik
 
 
-def _beta_binom_regions(rng, n_regions, depth, overdispersion, mean):
-    """Per-region (sense, total) ~ BetaBinom(depth, mean, overdispersion); symmetric Beta on `mean`."""
-    conc = (1.0 - overdispersion) / overdispersion  # a + b
-    p = rng.beta(mean * conc, (1.0 - mean) * conc, size=n_regions)
-    total = np.full(n_regions, depth, dtype=np.float64)
-    sense = rng.binomial(depth, p).astype(np.float64)
-    return sense, total
+def _od_for_beta(a: float) -> float:
+    """The intra-class correlation of a symmetric ``Beta(a, a)``: ``1/(2a + 1)``."""
+    return 1.0 / (2.0 * a + 1.0)
 
 
 def _decoded_gdna_frac(sense, antisense, kappa, *, gdna_od, rna_od, n_grid=4000):
@@ -55,119 +40,12 @@ def _decoded_gdna_frac(sense, antisense, kappa, *, gdna_od, rna_od, n_grid=4000)
     return float(np.interp(0.5, np.cumsum(w), grid))
 
 
-# --------------------------------------------------------------------------- estimator
-
-
-@pytest.mark.parametrize("true_od", [0.02, 0.05, 0.10, 0.20])
-@pytest.mark.parametrize("kappa", [0.7, 0.9, 0.99])
-def test_recovers_rna_overdispersion(true_od, kappa):
-    """RNA overdispersion at a known level is recovered for a stranded library (mean κ ≠ ½).
-
-    Guards the κ(1−κ) excess-variance scale: a ¼ scale would bias the estimate by 4κ(1−κ).
-    """
-    rng = np.random.default_rng(2024)
-    sense, total = _beta_binom_regions(
-        rng, n_regions=6000, depth=150, overdispersion=true_od, mean=kappa
-    )
-    model = fit_rna_strand_overdispersion(sense, total, kappa)
-    assert not model.fallback_used
-    assert model.n_seed_regions == 6000
-    assert model.rna_strand_overdispersion == pytest.approx(true_od, rel=0.20, abs=0.01)
-
-
-def test_binomial_limit_recovers_near_zero():
-    """A clean stranded library (no overdispersion, shared rate exactly κ) → od ≈ 0, not spurious."""
-    rng = np.random.default_rng(11)
-    kappa = 0.95
-    total = np.full(4000, 150.0)
-    sense = rng.binomial(150, kappa, size=4000).astype(np.float64)
-    model = fit_rna_strand_overdispersion(sense, total, kappa)
-    assert model.rna_strand_overdispersion < 0.01
-
-
-def test_fit_clamped_to_ceiling():
-    """Extreme overdispersion is clamped to the Beta(2,2) ceiling (od ≤ 0.2)."""
-    rng = np.random.default_rng(3)
-    sense, total = _beta_binom_regions(
-        rng, n_regions=4000, depth=150, overdispersion=0.45, mean=0.85
-    )
-    model = fit_rna_strand_overdispersion(sense, total, 0.85)
-    assert model.rna_strand_overdispersion <= _MAX_OVERDISPERSION + 1e-12
-
-
-def test_no_spliced_data_falls_back_to_THE_CEILING_not_a_constant():
-    """With no spliced pair the RNA fit has measured nothing, and the least-committal answer is the
-    ceiling — the widest strand likelihood the model admits, so the channel says nothing rather than
-    something confident. A shrinkage target would say something confident. `calibrate` then
-    reconciles it against the gDNA fit, which usually has measured something
-    (`gdna_strand.reconcile_overdispersions`)."""
-    model = fit_rna_strand_overdispersion(np.zeros(50), np.zeros(50), 0.9)
-    assert model.fallback_used
-    assert model.rna_strand_overdispersion == pytest.approx(_MAX_OVERDISPERSION)
-    assert np.isnan(model.raw_overdispersion)
-    assert model.information == 0.0
-    assert model.n_seed_regions == 0
-
-
-def test_a_SPARSE_fit_is_the_raw_moment_and_says_how_little_it_knows():
-    """No shrinkage: one thin seed returns its own (noisy) moment inside the physical support, and
-    reports the information that lets `calibrate` weigh it against the gDNA fit instead of hiding
-    how little it knows behind a plausible number."""
-    model = fit_rna_strand_overdispersion(np.array([7.0]), np.array([10.0]), 0.9)
-    assert not model.fallback_used
-    assert 0.0 <= model.rna_strand_overdispersion <= _MAX_OVERDISPERSION
-    assert 0.0 < model.information < 50.0  # a single 10-fragment sj is worth very little
-
-    deep = fit_rna_strand_overdispersion(
-        *_beta_binom_regions(
-            np.random.default_rng(9), n_regions=4000, depth=120, overdispersion=0.05, mean=0.9
-        )[::-1][::-1],
-        0.9,
-    )
-    assert deep.information > 1000.0 * model.information
-
-
-# ---------------------------------------------------------------- fit-from-SJ-table wrapper
-
-
-def _sj_table(sense, antisense):
-    """Minimal duck-typed SJStrandTable exposing the two count arrays the fit reads."""
-    return SimpleNamespace(
-        n_sense=np.asarray(sense, dtype=np.int64),
-        n_antisense=np.asarray(antisense, dtype=np.int64),
-    )
-
-
-def test_fit_from_sj_table_uses_every_sj():
-    """The wrapper fits one seed per sj; sj with no fragments drop out."""
-    rng = np.random.default_rng(5)
-    kappa = 0.9
-    sense, total = _beta_binom_regions(rng, 6000, 120, 0.10, kappa)
-    model = fit_rna_strand_from_sj_table(_sj_table(sense, total - sense), rna_sense_frac=kappa)
-    assert model.n_seed_regions == 6000
-    assert model.rna_strand_overdispersion == pytest.approx(0.10, rel=0.25, abs=0.01)
-
-
-def test_fit_from_sj_table_empty_is_fallback():
-    """No sj carrying fragments → the ceiling fallback (a library with no spliced reads)."""
-    model = fit_rna_strand_from_sj_table(_sj_table([0, 0], [0, 0]), rna_sense_frac=0.9)
-    assert model.fallback_used
-    assert model.rna_strand_overdispersion == pytest.approx(_MAX_OVERDISPERSION)
-
-
-def test_fit_from_sj_table_matches_the_real_table_type():
-    """The production ``SJStrandTable`` satisfies the wrapper's contract (no duck typing)."""
-    from rigel.strand_model import SJStrandTable
-
-    assert fit_rna_strand_from_sj_table(SJStrandTable.empty(), rna_sense_frac=0.9).fallback_used
-
-
 # --------------------------------------------------------------------------- deconv symmetry
 
 
 def test_unstranded_is_uninformative_with_symmetric_overdispersion():
     """κ = ½, equal gDNA/RNA overdispersion ⇒ a balanced region deconvolves to gdna_frac ≈ ½ (flat)."""
-    od = overdispersion_for_beta(3.0)
+    od = _od_for_beta(3.0)
     frac = _decoded_gdna_frac(50, 50, 0.5, gdna_od=od, rna_od=od)
     assert frac == pytest.approx(0.5, abs=0.02)
 
@@ -176,7 +54,7 @@ def test_asymmetric_overdispersion_biases_unstranded_toward_rna():
     """An asymmetric pair (gDNA Beta-Binomial, RNA Binomial) spuriously pulls a balanced unstranded
     region toward RNA. Symmetric overdispersion removes the pull, which is why the RNA side is
     modelled at all."""
-    od = overdispersion_for_beta(3.0)
+    od = _od_for_beta(3.0)
     asym = _decoded_gdna_frac(50, 50, 0.5, gdna_od=od, rna_od=0.0)
     symm = _decoded_gdna_frac(50, 50, 0.5, gdna_od=od, rna_od=od)
     assert asym < 0.4  # materially pulled toward RNA
@@ -190,7 +68,7 @@ def test_graded_information_balanced_region_more_gdna_as_library_stranded():
     looks increasingly like the symmetric gDNA component, so gdna_frac rises monotonically — the
     'unstranded → weakly → strongly stranded' information gradient.
     """
-    od = overdispersion_for_beta(3.0)
+    od = _od_for_beta(3.0)
     kappas = [0.5, 0.6, 0.7, 0.8, 0.9, 0.99]
     fracs = [_decoded_gdna_frac(50, 50, k, gdna_od=od, rna_od=od) for k in kappas]
     assert fracs[0] == pytest.approx(0.5, abs=0.02)
@@ -206,25 +84,3 @@ def test_rna_overdispersion_zero_recovers_binomial_decode():
         grid, 30, 10, 0.9, gdna_strand_overdispersion=0.1, rna_strand_overdispersion=0.0
     )
     np.testing.assert_array_equal(base, with_rna0)
-
-
-def test_rna_model_beta_concentration_roundtrip():
-    """RnaStrandModel.beta_concentration inverts overdispersion_for_beta."""
-    m = RnaStrandModel(
-        rna_strand_overdispersion=overdispersion_for_beta(3.0),
-        raw_overdispersion=float("nan"),
-        information=0.0,
-        n_seed_regions=1,
-        n_seed_fragments=1,
-        fallback_used=False,
-    )
-    assert m.beta_concentration() == pytest.approx(3.0)
-    m0 = RnaStrandModel(
-        rna_strand_overdispersion=0.0,
-        raw_overdispersion=float("nan"),
-        information=0.0,
-        n_seed_regions=0,
-        n_seed_fragments=0,
-        fallback_used=True,
-    )
-    assert m0.beta_concentration() == float("inf")

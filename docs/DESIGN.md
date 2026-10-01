@@ -655,29 +655,41 @@ the transcript-relative notion and is derived, never stored. Two strands exist a
 
 **gDNA and RNA.** "RNA is RNA" — no mature/nascent split in the accumulator. Owner ruling.
 
-### 3.3a No object class is asserted pure gDNA (owner, 2026-08-29)
+### 3.3a The strand overdispersion is 0 — binomial — by policy (owner, 2026-09-30)
 
-"Pure" is a property of the annotation and the sample, not of the genome: pervasive transcription is
-real, the intergenic space is whatever the user's GTF leaves over, and most genes are OFF in any one
-sample but nobody knows which. So the gDNA strand-overdispersion fit trusts no class: it is the away-half
-moment (`EQUATIONS.md` §6) over every genic count- and strand-observable object — intron regions,
-`exon|intron` and gene-edge boundaries — with intergenic and AMBIG objects out because they cannot be
-oriented. Every purity-based fit was moved by unannotated transcription on real cfRNA and on the
-blank-chromosome control; the away-half was not. The simulator carries a supplemental `shadow_gtf` the
-index never sees, so this stays testable.
+> **Both components' strand overdispersion is 0: the strand channel's width is binomial. An od returns only
+> when it is proven needed, and then the owner's first choice is an RNA-only value from the most deeply
+> sequenced junctions, applied to both components and developed on real data across several libraries.**
+> (`calibrate._fit_strand`; gates `tests/calibration/test_calibrate.py`'s
+> `test_the_strand_overdispersion_is_binomial_by_policy` and `test_an_empty_spliced_census_calibrates_as_unstranded`.)
 
-Three further rulings (owner, 2026-08-30). **No seed is worth its pair count**: second-moment pooling
-weights a seed by `n(n−1)/2`, and on real data one seed carried 77.8 % of a library's numerator, so the
-fit uses inverse-variance weights `w_s = 1/(½ + c_s·V∞(ρ))`; trimming or Winsorizing is refused (it
-biases the upper tail of the distribution whose mean is the estimand) and the concentration is reported
-instead (`GdnaStrandModel.effective_seeds`). **The `Beta(2,2)` ceiling stays**, and a value at it is a
-clamp, not a fit (`clamped_at_ceiling`, `raw_overdispersion`): a genuine intra-class correlation is
-depth-invariant, and on every real library the moment rises monotonically with seed depth, so above the
-ceiling the Beta-Binomial is absorbing a process it has no parameter for — the one asserted constant
-left in the strand module. **No component shrinks toward a constant — they shrink toward each other**:
-each component reports the precision of its own fitted estimate and the weaker borrows its deficit from
-the better measured one (`EQUATIONS.md` §6); on the capture-ON rows, where hybrid capture depletes the
-genomic seeds, the reconciliation lands on the oracle value exactly.
+Three reasons, each measured.
+1. **No population measures it cleanly.**
+   - On the gDNA side no object class is pure: pervasive transcription is real, the intergenic space is whatever the
+     GTF leaves over, and antisense RNA pushes a genic seed onto the side the away-half moment kept. The VCaP
+     RNA-only library's 118,622 away-half seeds read 0.47; MO_3021's gDNA fit read 0.133 against its junctions' 0.02.
+   - A strand count alone cannot tell a noisy gDNA rate from gDNA plus a little RNA. At n ≤ 3 the two are the same
+     law exactly (`EQUATIONS.md` §6a), and 73 % of LBX0588's seeds (95 % at 10 % depth) have n ≤ 3.
+   - On the RNA side, splice artifacts sit at ½ in a stranded library, and one junction can decide the value: one
+     LBX0588 junction (7 wrong-strand reads of 95) carries 12.5 of the 16.3 log-likelihood units for od > 0.
+2. **The costs are lopsided.**
+   - 0.2 where the truth is 0 costs +200 % calibration error on the ladder's stranded × capture-ON rows.
+   - 0 where gDNA's truth is 0.05 costs +17 % on `odg05`'s stranded × capture-OFF calibration, all of it on the
+     98 %-gDNA row. An RNA-only od would not recover that row either: it has almost no junctions.
+3. **Binomial wins where it can be scored.**
+   - On the VCaP mix, against read-name truth, the gDNA pool error falls from −6.40 % to −6.11 %, transcripts by
+     0.15 % and genes by 1.1 %.
+   - LBX0588's gDNA total varies across 10 % subsamples by 0.74 % instead of 3.45 %.
+   - The ladder is flat, and the test panel's stranded × capture-OFF transcripts improve by 3.8 %.
+
+What this replaced:
+- the away-half moment and its influence weights;
+- the `Beta(2,2)` ceiling and the 0.2 no-evidence fallback;
+- the reconcile between the two components (`ISSUES: the-strand-overdispersion-reconcile`,
+  `ISSUES: the-away-half-gdna-overdispersion`).
+
+The native strand term keeps its od arguments and is passed 0, so an od can return without a native change. An
+empty spliced census is an unstranded library — κ = ½, od = 0, a dead strand channel — not an error.
 
 ### 3.4 Fragment length — one definition
 
@@ -801,7 +813,7 @@ transcripts and materialized as ordinary transcript rows in `index.t_df`, flagge
 index's graph) · `sweep` (the backbone) and `messages/` (the policy: `silent` · `transfer`; the row constructors `native/transfer_rows.h`) ·
 `region_chain` `region_geometry` `region_init` · `substrate` `region_arrays`
 `signature` · `effective_length` `capture_eff_length` `fl` `sj_opportunity` `gdna_opportunity` ·
-`gdna_strand` `strand_balance` · `density_deconv`
+`strand_balance` · `density_deconv`
 `density_model` `landscape` · `simplex_logodds` `derive` ·
 `priors` `result` `errors` `track` · `_layers` (the layering the imports already had).
 Re-derive this list from `calibration/_layers.py` and the imports rather than trusting it.

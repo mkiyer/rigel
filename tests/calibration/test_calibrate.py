@@ -35,12 +35,12 @@ SJ_FLUX = np.array([13.0])  # sj_count [9, 4]
 _UNSET = object()
 
 
-def _run(config=None, sj=_UNSET):
+def _run(config=None, sj=_UNSET, strand=None):
     payload, ra = make_synthetic_payload()
     return calibrate(
         payload=payload,
         region_arrays=ra,
-        strand_model=make_strand_models(0.95, 40),
+        strand_model=make_strand_models(0.95, 40) if strand is None else strand,
         gdna_fl_pmf=make_gdna_fl_pmf(),
         rna_fl_pmf=make_gdna_fl_pmf(),  # a valid pmf; these tests pin mechanics, not the splice fraction
         config=config or CalibrationConfig(),
@@ -159,13 +159,43 @@ def test_gdna_density_global_is_a_ratio_of_SUMS_over_both_axes():
 # --- library scalars --------------------------------------------------------------------------
 
 
-def test_gdna_strand_overdispersion_populated():
-    assert 0.0 <= _run().gdna_strand_overdispersion < 1.0
+def _strand_models_from(n_sense, n_antisense):
+    """A real :class:`StrandModels` from a hand-built per-sj table, every sj on the + motif strand."""
+    from rigel.strand_model import SJStrandTable, StrandModel, StrandModels
+    from rigel.types import Strand
+
+    n = len(n_sense)
+    table = SJStrandTable(
+        ref_id=np.zeros(n, dtype=np.int32),
+        start=np.arange(n, dtype=np.int64) * 1000,
+        end=np.arange(n, dtype=np.int64) * 1000 + 100,
+        motif_strand=np.full(n, int(Strand.POS), dtype=np.int8),
+        n_sense=np.asarray(n_sense, dtype=np.int64),
+        n_antisense=np.asarray(n_antisense, dtype=np.int64),
+    )
+    return StrandModels(exonic_spliced=StrandModel.from_sj_table(table))
 
 
-def test_rna_strand_overdispersion_populated():
-    # clamped to the Beta(2,2) ceiling (0.2)
-    assert 0.0 <= _run().rna_strand_overdispersion <= 0.2
+def test_the_strand_overdispersion_is_binomial_by_policy():
+    """Both overdispersions are exactly 0 whatever the junction and seed spreads (owner, 2026-09-30).
+
+    This table's sj splits are far wider than binomial about their κ — the estimator it replaced
+    returned the 0.2 ceiling for both components on it — and the result still carries 0."""
+    result = _run(strand=_strand_models_from([40, 40, 20, 36], [0, 0, 20, 4]))
+    assert result.gdna_strand_overdispersion == 0.0
+    assert result.rna_strand_overdispersion == 0.0
+
+
+def test_an_empty_spliced_census_calibrates_as_unstranded():
+    """No spliced read gives κ = ½, od = 0 and a dead strand channel — never an exception: the fallback
+    must work with no RNA (owner, 2026-09-30)."""
+    from rigel.calibration.region_init import strand_discriminability
+
+    result = _run(strand=_strand_models_from([], []))
+    assert result.rna_sense_frac == 0.5
+    assert result.gdna_strand_overdispersion == 0.0
+    assert result.rna_strand_overdispersion == 0.0
+    assert strand_discriminability(result.rna_sense_frac, 0) == 0.0
 
 
 def test_kappa_matches_strand_balance():

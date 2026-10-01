@@ -125,7 +125,7 @@ class TestUnsplicedLowStrand:
             ],
         )
         # Multi-exon gene so the strand model trains: the calibration requires spliced
-        # reads (a pure single-exon library raises CalibrationStrandError), and the
+        # reads (a pure single-exon library calibrates as unstranded), and the
         # trained κ_rna is what lets the unspliced gene's reads deconvolve as RNA.
         sc.add_gene(
             "g_train",

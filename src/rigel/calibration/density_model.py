@@ -6,8 +6,7 @@ two flanks share no exon bit — a shared exon-strand means one exon continues a
 unspliced mature RNA crosses it and the crossing count is not a gDNA count.
 
 Both masks are pure functions of the signature array and the reference ids: no count, no density and no
-solve enters here. They are the seed selector for the gDNA strand-overdispersion fit
-(:mod:`rigel.calibration.gdna_strand`), which needs seeds whose strand split is gDNA's own.
+solve enters here.
 """
 
 from __future__ import annotations

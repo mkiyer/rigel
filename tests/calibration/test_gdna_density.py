@@ -2,8 +2,8 @@
 
 The rate blocks gate the closed form `poisson_lower_mean`, the pooled rate, the contamination-robust
 one-sided root, the contained opportunity and the per-reference region lengths. The last block gates
-`density_model.count_observable_masks`, the selector deciding which counts are gDNA counts at all and
-seeding the gDNA strand-overdispersion fit; its rule is signature arithmetic and nothing else. A
+`density_model.count_observable_masks`, the selector deciding which counts are gDNA counts at all; its
+rule is signature arithmetic and nothing else. A
 REGION is count-observable iff it carries no exon bit, because an exon's contained count holds
 unspliced mature RNA; a contiguous BOUNDARY is count-observable iff its two flanks SHARE no exon bit,
 because one exon strand continuing across the boundary is what lets unspliced mature RNA cross it,

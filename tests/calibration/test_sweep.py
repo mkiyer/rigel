@@ -470,48 +470,6 @@ def test_tau_gag_fix_deconvolution_prediction_stays_gated():
     assert 0.2 < float(fin_no.f_g[ex]) < 0.8, fin_no.f_g[ex]
 
 
-def test_the_overdispersion_CEILING_is_the_only_asserted_constant_left():
-    """There is no shrinkage target and no derived weight. The gDNA fit is the away-half moment with
-    no location prior at all, the RNA fit is its own raw moment, and the weaker of the two shrinks
-    toward the better-measured one — so the reference is a measurement of the same library rather
-    than a conjured number. What remains asserted is the ceiling alone."""
-    from rigel.calibration import gdna_strand
-    from rigel.calibration.gdna_strand import (
-        _CEIL_ALPHA_BETA,
-        _MAX_OVERDISPERSION,
-        overdispersion_for_beta,
-    )
-
-    assert _CEIL_ALPHA_BETA == 2.0
-    assert _MAX_OVERDISPERSION == pytest.approx(0.2)
-    assert overdispersion_for_beta(2.0) == pytest.approx(_MAX_OVERDISPERSION)
-    # ⛔ the deleted constants must not come back under any spelling
-    for gone in (
-        "_PRIOR_ALPHA_BETA",
-        "_PRIOR_OVERDISPERSION",
-        "_PRIOR_INFORMATION",
-        "_prior_information",
-    ):
-        assert not hasattr(gdna_strand, gone), gone
-
-
-def test_null_information_reduces_to_pair_count_at_symmetric_mean():
-    """``I = 1/Var(od_mom)|₀`` must equal the pair count ``Σ n(n−1)/2`` exactly at μ = ½ (the gDNA
-    case), and must not be substituted by the pair count away from it, where the pair count
-    overstates the information by roughly an order of magnitude."""
-    import numpy as np
-
-    from rigel.calibration.gdna_strand import _null_information
-
-    n = np.array([1.0, 2.0, 2.0, 10.0, 100.0])
-    pairs = float((n * (n - 1.0) / 2.0).sum())
-    assert _null_information(n, 0.25) == pytest.approx(pairs, rel=1e-12)
-    # a singleton contributes nothing, so dropping it changes nothing
-    assert _null_information(n[1:], 0.25) == pytest.approx(pairs, rel=1e-12)
-    # away from ½ the information is strictly LESS than the pair count
-    assert _null_information(n, 0.01 * 0.99) < pairs
-
-
 def test_pure_gdna_region_confident_at_near_binomial_od():
     """A pure-gDNA single-strand region has exact 50/50 per-strand counts, which the strand mixture
     (gDNA mean ½, RNA mean κ≠½) must read as gDNA — f_g≈1. At the near-binomial overdispersion it
@@ -710,7 +668,6 @@ def test_the_psi_solve_is_thread_exact_so_the_thread_count_moves_no_number():
 def test_the_thread_budget_is_a_non_negative_count_and_the_cli_fans_it_out():
     """`CalibrationConfig.n_threads`: 0 is every core (the locus EM's reading), a negative count is
     refused; the default is 0."""
-    import pytest
 
     from rigel.config import CalibrationConfig
 

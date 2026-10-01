@@ -77,7 +77,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (
         4,
         "strand — which strand a fragment came from",
-        ("strand_balance", "gdna_strand"),
+        ("strand_balance",),
     ),
     (
         5,

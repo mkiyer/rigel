@@ -18,206 +18,66 @@ Ordered by priority. An entry says what is open and the number a ranking turns o
 what was ruled is `DESIGN.md`.
 
 ### strand-overdispersion-one-shared-value
-`priority: now — first, before anything else, the cluster track included (owner, 2026-09-30): steps 0–3, then the field collapse (the fl.py fix between them landed 2026-09-30, `ISSUES: the-realized-gdna-length-law-reads-rna-counts`); steps 4–6 are research · kind: design · 2026-09-27`
-Calibration's strand overdispersion (od, `EQUATIONS.md` §6) reaches the solve through `reconcile_overdispersions`, fed
-two mismatched value/precision pairs: gDNA's ρ = 0 pair-count moment beside the fitted estimate's precision (the
-influence-weighted fit is computed, then discarded), and RNA's unweighted moment beside its null information, which
-credits it about 700,000× too much evidence on a real library (MO_3021 looks calm only because RNA is credited 1.0e7).
-The rule keeps the two apart unless one is far better measured — the weaker is pulled 16 / 50 / 159 of its own SEs at
-S = 2k / 20k / 200k — which is not what the owner intended. On `odg05` (planted gDNA 0.05, RNA 0) the shipped gDNA
-value is ≤ 0.0007 on all 12 g05–g50 rows against 0.038–0.058 for the gDNA fit alone; at g98 the RNA value reaches
-0.049 against a truth of 0; within one 1 % draw the pair sits up to 0.19 apart.
+`priority: now — first (owner, 2026-09-30): od = 0 LANDED 2026-10-01; next κ from the three-class junction fit, then the summary.json diagnostics, then the pruning design · kind: design · 2026-09-27`
+The strand model's two inputs, κ and the od, were both contaminated on real libraries:
+- splice artifacts (misaligned gDNA, ½ in a stranded library) inflate κ and the RNA-side spread;
+- antisense RNA inflates the gDNA side.
 
-OWNER RULINGS (2026-09-28):
-1. gDNA and RNA share ONE overdispersion.
-2. First prototype the gDNA-evidence fix on top of the shared estimator, with a new panel condition that plants
-   gDNA alongside RNA on the opposite strand of its seeds; then land the two in sequence, each A/B'd alone.
-3. The no-evidence fallback becomes 0 (binomial), once it is justified theoretically and, ideally, empirically.
-4. The shared estimating equation can have two roots at low gDNA; it needs a clear, simple rule.
-5. No hard-coded upper limit, but no estimate may be able to sabotage the tool.
+od = 0 by policy landed 2026-10-01 (`DESIGN.md` §3.3a, `EQUATIONS.md` §6). Its A/B against what shipped, with every
+step proven to run its arm:
+- **VCaP mix, against read-name truth:** gDNA pool −6.40 → −6.11 %, transcripts −0.15 %, genes −1.1 %.
+- **Zero gDNA (VCaP RNA-only):** calibration false gDNA +6.1 %, EM +0.5 %.
+- **Zero RNA (VCaP DNA-only):** unchanged.
+- **LBX0588's gDNA total across subsamples:** 3.45 → 0.74 % at 10 %, 4.84 → 2.09 % at 1 %.
+- **Ladder:** flat.
+- **Test panel:** stranded × OFF transcripts −3.8 %.
+- **odg05's g98 rows (planted gDNA od 0.05):** genes +1.1k / +3.1k and gDNA pool −10k, the one cost.
 
-Accepted with the triage (owner, 2026-09-28):
-6. Now: steps 0–3, the fl fix and the field collapse. Steps 4–6 are research, after the splice training sets or with
-   them.
-7. Ruling 1 stands at its measured price (below), reopened only if the RNA-od arm shows harm.
-8. Step 1 lands before any evidence fix, under the hold rule.
-9. Ruling 3's 0 rests on theory, with forced-fallback injections as its empirical half; `summary.json` gains an
-   information and evidence label.
-10. Ruling 4's rule is the least root, with no cap on its passes; the pass count and each seed set's own root are
-    logged as diagnostics.
-11. The 0.2 clip stays, labelled as a clamp, until steps 4–6.
-12. Step 1 skips the fit where the strand channel is dead and reports the od as not measured.
-13. The simulator plants a matched RNA od (a per-transcript Beta sense rate) before step 1. At ρ_r = 0 it draws
-    nothing, so every existing panel stays bit-identical.
-14. The panel: an exon-edge shadow class placed so that no seed spans two rates; capture ON priced at g25 only
-    (λ ≈ 3.5, +3.1 % RNA); one contaminated fraction for step 1 and a second before step 5; ss 0.70 kept; gene-edge
-    seeds clean; the panel stays outside the tree until step 1's verdict.
-15. The robustness rule reads the gDNA-total spread across seeds at 10 % depth. The vetoes are
-    `calibration_vs_oracle.py` and `quant_accuracy.py` per in-scope stratum; the od spread is a diagnostic.
+What the replaced mechanisms measured is in CLOSED: `ISSUES: the-strand-overdispersion-reconcile`,
+`ISSUES: the-away-half-gdna-overdispersion`, `ISSUES: the-joint-strand-overdispersion-fit`.
 
-THE RECORD IS FALSE TODAY. DESIGN §3.3a and EQUATIONS §6b–§6c describe a weighted RNA fit and fitted-precision pairs
-that never shipped, and DESIGN's "lands on the oracle value exactly" was measured on mixed code. Three stated reasons
-are wrong:
-- The −½·log var contrast given for the reconcile and the 0.2 fallback is vacuous since the strand variance is frozen
-  at the reference composition: od sets a width only. This is ruling 3's theoretical half.
-- EQUATIONS §6a says both "unbiased under any distribution of RNA content" and "so it biases down, never up". Seeds
-  mixing gDNA with sense RNA do bias the away-half moment LOW, because away-half selection makes the cross pairs
-  negative: a planted 0.03 reads 0.0264 ± 0.0021 against 0.0303 on truly pure seeds, weighting by the true pair
-  fraction still leaves −5 to −8 %, and mixed seeds are unobservable, so no estimator repair exists.
-- "A wrong weight costs efficiency, never correctness" (`gdna_strand.py`) is false under contamination: the weights
-  move odg05's joint root 0.0406 → 0.0278, while the gDNA side alone moves 0.0446 → 0.0429.
+OWNER RULINGS (2026-09-30):
+- **κ** comes from a three-class binomial fit over the per-junction strand table: genuine (κ), splice artifact (½),
+  reversed (1−κ).
+  - The class weights are concave for fixed κ. κ is the posterior mean under the shipped Beta(1,1) prior, so it
+    reduces to the shipped `(n_same + 1)/(n_obs + 2)` wherever no junction needs another class.
+  - The strand-live gate stays on the pooled counts. Removing artifacts only moves κ away from ½, so the fit cannot
+    switch a live channel off.
+- **An empty spliced census** is unstranded (κ = ½, od = 0), not an error.
+- **Splice-artifact pruning** weighs a fragment's unspliced-gDNA reading against its spliced one by the artifact
+  posterior, never a cut.
+- **If an od is ever needed**, the owner's first choice is an RNA-only value from the most deeply sequenced junctions,
+  applied as the shared value. It is developed on REAL data across several libraries, never one (an exception to
+  `TRAPS: real-data-is-a-test-input`, scoped to the od, because the simulator plants no RNA od and no splice
+  artifacts).
 
-THE LANDING. Every step re-records the baseline on the current tree; reads `calibration_vs_oracle.py` per stratum,
-beside `ruler_vs_truth.py` on capture-ON arms, and `quant_accuracy.py --set em.assignment_mode=fractional`; verifies
-each gate failing, then breaks the fix and watches it fire; reads the golden diff's size before regenerating.
+THE REMAINING LANDING, one A/B window each, prototyped outside the tree:
+1. **κ.** Prototype measured on the censuses:
+   - LBX0588 0.064 → 0.0031, with 22 % of its junctions in the artifact class;
+   - LBX0588 at 10 % / 1 %: 0.005–0.009 / 0.03–0.06 (pooled 0.060–0.070 / 0.072–0.092);
+   - every ladder row identical to 7 digits;
+   - two junction-poor `odg05` ss 0.70 rows move ≤ 1 % (0.303 → 0.300), the class weights trading at κ ≈ 0.3.
 
-STEP 0, THE INSTRUMENT (designed on paper; no file yet). The contaminated-seed panel condition: 15 hosts (gB2 / gB3 /
-gB4 × 5, 9 of them probed), each with one opposite-strand single-exon shadow; 90 of 1,782 count-observable seeds
-contaminated (5.1 %), shadows at 1.23 % of RNA; 40 conditions at 1.17 M fragments on their own `RIGEL_SCRATCH`.
-- Sizing, 100 replicates at capture OFF: od00, the joint fit reads 0.118 against 0 at g05 (z 17), 0.036 at g25 (z 12),
-  0.0099 at g50 (z 15); od05, G reads 0.164 against 0.049 at g05 (z 16). Capture ON resolves only at g05 (z 15; g25
-  z 4.0; g50 null).
-- Gates: each of the five shadow refusals broken on purpose; `calibration_oracle.py` accepts every row; each host's π
-  within binomial noise (per host under capture); the od05 capture-OFF target G in 0.048–0.051; ss 0.50 must not
-  rise; FASTA, index and cache keys unchanged. Contaminated slots are scored apart.
-- Its first reading tests ruling 2's premise — seeds with more than ¾ of their fragments away carry 49–79 % of the
-  pair weight on the real libraries, against 97 / 34 / 1.8 % at the panel's g05 / g25 / g50 — and whether the lower
-  root is the target on the capture-ON g05 rows. The numpy-only MO_3021 check (step 5) can run here.
-- The RNA-od arm (ruling 13): today every panel scores the shared value at an RNA od of 0, so odg05 has no single
-  right answer.
-- The planted gDNA od is drawn per simulator region, so a seed straddling regions has a lower ICC than planted and
-  the oracle arm is not an ideal seed-level target: the fits read 0.0446 ± 0.0059 at g05 ss.99 ON and 0.0516 ± 0.0047
-  at g25 ss.99 OFF against 0.05. Size unmeasured; fix it with the RNA arm if the first reading needs it.
+   It must land after od = 0: the retired RNA od fit read κ, and at the clean κ LBX0588's moment went 0.07 → 0.37.
+   Judge it on a gDNA-heavy blend of the VCaP halves, all of the DNA half plus a 1 % draw of the RNA half (97 % DNA),
+   whose truth is its two halves.
+2. **The `summary.json` diagnostics** (`ISSUES: the-format-changes-to-batch-before-release` (a)):
+   - pooled and clean κ;
+   - artifact share by junction and by fragment (LBX0588: 22 % against 12 %);
+   - reversed share, strand-live, and the od's label.
+3. **The pruning design** with `ISSUES: splicing-artifacts`: junction ids in the fragment buffer (it carries none
+   today), deposits deferred until the junction decision, and the weight derived on one page. Strand catches only
+   artifacts with a wrong-strand read (an n-read artifact shows none with probability 2⁻ⁿ), and sees nothing on
+   unstranded libraries.
 
-STEP 1, THE JOINT FIT UNDER THE CLIP — NOT a numeric no-op. One influence-weighted fit over the gDNA seeds and the RNA
-junctions replaces the reconcile, still clipped at 0.2, with CLAMPED keyed on the fitted value. MEASURED (prototype,
-2026-09-27): odg05 calibration −10.1 % / −18.7 % and transcripts −6,370 / −28,829, −3 % / −7 % (stranded OFF / ON);
-ladder and test panel within noise (a fitted feed moves 3 of 16 ladder rows by about 1e-6). On real low-gDNA stranded
-libraries the gDNA seeds are mostly opposite-strand RNA (raw moments 0.4–0.86; VCaP transcriptome: 118,622 away-half
-seeds, moment 0.47), so the joint fit
-equals the 0.2 value on 13 of 14 real runs with identical `rigel quant` output (Σ|Δ| 2,280.8 in both); against
-shipped it moves calibration gDNA −15.4 % (VCaP RNA) and −5.1 % (MO_3021). HOLD if, on the panel's contaminated od00
-rows, the joint fit costs more than shipped in a pinned A/B pair, judged by size.
-- With it: key the log's "own-evidence od" labels and CLAMPED on the shipped value, not the raw moment (MO_3021: raw
-  0.675, fitted 0.1327); key `clamped_at_ceiling` and `effective_seeds` (set from the discarded fit, read nowhere) the
-  same way, then drop ROADMAP's "read neither until step 1" caveat; rewrite the ~15 docstrings in `gdna_strand.py` and
-  `calibrate._fit_strand` that describe no weighting, a null information, prior shrinkage and a closed form, and the
-  "per-sj SJ strand table" stutter, also in a runtime error message; correct EQUATIONS §6a–§6c and DESIGN §3.3a (the
-  reconcile ruling is superseded, the ceiling ruling is not) and the owner's auto-memory note on the
-  strand-overdispersion estimator, which describes the influence-weighted design that never shipped; append the
-  reconcile's refusal to CLOSED with the numbers above; check the pipeline's "reads as unstranded" warning, which
-  re-derives κ instead of reading calibration's decision; log the chosen root, the pass count and each seed set's own
-  root as diagnostics only.
-- Gates: the prototype's 26 reduction cases; two disagreeing sides return one value; zero gDNA; zero RNA; unequal
-  depth (the raw feed gives 0.1667, the fitted 0.0139); the harness's exact-variance check (Var(e) against
-  enumeration, 2.6e-12), the gDNA-only reduction (bit-exact 26/26), the RNA-only fit against brentq (2.8e-17), the tie
-  term and the between-seed quadrature; a pin on `GdnaStrandModel.information` when seeds exist. Today's recovery test
-  builds equal od in both components, so the reconcile is a no-op in it; restate or retire the HANDFUL gate
-  (`ISSUES: hygiene-ledger` (e)).
-- The dead-channel skip (ruling 12): at κ = ½ the strand term is flat and `strand_evidence` is multiplied by disc = 0;
-  on the ladder's unstranded OFF rows the 0.2 value moves 0.014 fragments, and on odg05 g05 unstranded the joint fit
-  reads 0.0003 against a gDNA fit of 0.042.
+DEFERRED PAST 0.8.0:
+- an adaptive od whose evidence no single object can swing;
+- the native strand variance's `(n·f)²`, which should be `n(n−1)·f²` (`transfer_rows.h` `strand_variance`; it matters
+  only at od > 0).
 
-STEP 2, THE EMPTY-EVIDENCE PREDICATE — a numeric no-op. The empty case moves inside the shipped predicate (den > 0 and
-clip(num/den) − ρ > 0), so an empty seed set returns exactly 0.0 and every fit with evidence stays bit-identical (437
-of 437 seed sets). The theory, on the minimal ψ relative to the true od: 0 is at most ×1.07 worse (best in 32 of 48
-cells), ρ_eff at R = 0.2 ×2.56, 0.2 ×10. A wrong value costs: 0.2 where the truth is 0, +255 % (test panel ON),
-+199.8 % (ladder ON, 436,286 → 1,307,989), +18.1 % (stranded OFF); 0 where the truth is 0.05, up to +19.8 % (odg05
-stranded OFF), and at g98 an under-call of 9.6k / 10.3k. The branch has never fired: 1,834 fits over 136 substrates
-(125 both sides, 10 RNA only, 1 gDNA only, 0 neither). Unrun: odg05 at d10 and d100 with od injected at {0, 0.05,
-0.2}; the per-slot condition β = J₀b² ≥ nρ; the bridge "fallback firing implies no gDNA-dense slot", which holds only
-for today's away-half rule (a mostly-gDNA seed lands on the RNA side with probability 0.84 at f = 0.8, n = 200) and is
-re-derived after step 5; a junction-poor deep library, which does not exist (birthday thresholds m from 10 to 183).
-The information and evidence label are in `ISSUES: the-format-changes-to-batch-before-release`.
-
-STEP 3, THE LEAST ROOT on [0, ρ_max]: the shipped bisection plus a certificate, no constant. At low gDNA the joint
-equation has two stable roots and the bisection's search path takes the upper one (≈0.0002 and 0.036 at odg05 g05
-ss.99 capture OFF; 0 and 0.040 ON). 59 of 61 seed files match bit for bit; on the two two-root rows the upper root
-moves transcripts −1,697 (within the floors) and −8,622 (unresolved: summed floor 2,398, worst single row 12,668), and
-genes +1,525 against floors ≤ 15. The search takes a median 119 passes (max 314, about 0.03 s) against the bisection's
-1,072 at root 0, growing as ε^−½ near a fold — about 10⁵ passes (about 20 s) at 1e-6 from an edge, P(passes > N) ∝ N⁻²
-— accepted uncapped (ruling 10). Gates: the band-edge cases, the one-root reduction cases, the clamp at the upper end.
-A/B on odg05 g05 ss.99 and the panel's capture-ON g05 od00 rows (two roots in 30 of 30 replicates, the lower the
-target).
-
-THEN, BIT-IDENTICALLY, ONE FIELD. Collapse the gDNA and RNA fields in the `_Strand` triple, `CalibrationResult`, the
-cli summary, `sweep`'s od_g / od_r and `policy_od_*`, and the native Grid's `pol_od_*`. After it: re-read the strand-input
-drift in `ISSUES: the-gdna-landscape-collapses-at-low-depth` and `ISSUES: strand-likelihood-over-confident-beyond-od`,
-and refresh the ladder report.
-
-STEP 4, THE JUNCTION WITNESS — NOT DERIVED. A junction's antisense rate depends on its depth (VCaP 22κ at 2–3
-fragments, about κ/4 at ≥ 128; LBX0588 0.14 at 2–3, 0–0.01 at ≥ 16, against κ 0.064), so a single-rate fit reads a
-wrong mean as dispersion: the misfit alone gives M_r(1) = 1.27–2.17 against ≤ 0.17 for a single rate, and deep VCaP
-junctions (≥ 128) read −0.0038 ± 0.00027, about −1/(n−1). Alone, the junction set has the two roots {0, 1} (VCaP RNA at
-10 %, all three seeds; MO_3021 at 1 %), chosen by the sign of a near-zero moment (M_r(0) −0.005 to +0.002 against a
-bootstrap SD of 0.0014–0.0044): a hidden yes/no gate. It swings with depth (VCaP RNA 0.0 / 0.2 / 0.2 at 1 % / 10 % /
-full; resampled at full depth, 0.55 on 76–80 % of draws) and reads above a planted 0 (d100 g00 OFF: 0.065). Model the
-misfit, never threshold it. The junction seeds and κ carry splice artifacts, which the training-sets work of
-`ISSUES: splicing-artifacts` retrains. Gate: a bootstrap distribution on every real substrate. Falsifier: M_r(1) > 1
-on VCaP after the repair.
-
-STEP 5, A gDNA PURITY WEIGHT (after steps 3–4 and ruling 5): weight each seed by h_s = E[p_s² | counts]. Five arms —
-the joint fit, the posterior E[p²], the true pair fraction, truly-pure seeds only, shipped — ranked on the panel's G
-readout, never on "the clip stops binding": the Jeffreys E[p²] ≈ 0.38·√μ_a acts as a depth gate (LBX0588's gDNA weight
-cut 14× at full depth, 40× at 10 %), and taking weight off the gDNA side hands the fit to the unstable junction witness.
-- Failing today: the own count against λ_off under capture (truly pure intron seeds at odg05 g05 ON read π̂² 0.10
-  against 0.98, `ISSUES: intron-seeds-near-probes-are-capture-enriched`); transport from a neighbour (77 % / 82 % of
-  antisense exon-flank boundaries have an empty neighbour, VCaP RNA 10 % / LBX0190).
-- Open, with its numbers in `04_evidence.md`: where the weight gets capture information (a refit after the solve from
-  the located enriched mode, unweighted seeds, or fl's transport without the ½); weight or coefficient; a
-  κ-continuous weight (p² + (1−p)² is not derived); where λ_off lives (fl's one-sided rate is QC-only and would break
-  `fit_gdna_strand_from_substrate`'s no-density contract). The per-object efficiencies may not be used: the solve
-  would certify the contaminated seeds as pure.
-- The premise first: LBX0588's moment rises with seed depth even among seeds ≥ 90 % gDNA (0.006 / 0.012 / 0.020 at n
-  in [2,5) / [5,20) / [20,100), median away fraction 0.50), and only 26 % of its excess comes from seeds with an away
-  fraction ≥ 0.9, against 87–100 % on MO_3021, VCaP RNA and LBX0190. Stratifying MO_3021's census by λ_off·E (95.5 %
-  of its excess at an away fraction ≥ 0.9) is a numpy-only test of whether antisense explains it. Unpriced: real gDNA
-  together with contaminated seeds. Gates: the evidence page's four, and a rerun of the blank-chromosome shadow
-  control.
-
-STEP 6, REPLACE THE CLIP, then delete `_MAX_OVERDISPERSION` and `_CEIL_ALPHA_BETA`. On [0, 1] the joint fit reads
-0.512 (VCaP RNA full), 0.53–0.86 (VCaP at 10 % / 1 %), 0.23–0.75 (MO_3021) and 0.820 (LBX0190); one pair hits the
-ceiling with probability ⅓ at ρ = 0 given an away-side pair; the clip binds on 14 of 61 surveyed rows, and the other 47
-are bit-identical under it. Candidates: an agreement rule on the repaired witnesses, or a two-width strand mixture (a
-native change and a learned weight).
-- Checks: the bootstrap spread inside the fixed-value floor; a Monte Carlo of the measured misfits; the harness on the
-  ladder, odg05 and the new panel; exact Godambe weights, since §6b's per-seed variance drops a sampling term and two
-  between-seed terms and is validated only for ρ ≤ 0.1 (the sizes: the harness's `DERIVATION.md`, `02_roots.md`).
-- Its risk is the low-information regime, where one or a few pairs make the od a two-point law: LBX0588 at 1 %
-  (150–160 spliced reads) reads 0–0.098 shipped and 0–0.069 joint, a gDNA-total cv of 5.2 % shipped and 4.3 % joint
-  against a 0.8–2.3 % fixed-value floor, and the od spread predicts 3.3 % of the observed 4.9 %. Run the fallback
-  page's §7.3 (withhold all but m ∈ {1, 2, 5} pairs).
-- Deleting the clip supersedes DESIGN §3.3a's ceiling ruling, the `test_sweep.py` pin, `config.py`'s constant and the
-  CLAMPED flag. Falsifier: with ρ ≤ 0.1 planted and clean seeds, the fit on [0, 1] exceeds 0.2.
-
-RULING 1'S PRICE, watched at every step:
-- MO_3021 rejects a common value: at full depth gDNA reads 0.133 (information 19,436) against RNA's 0.008 (honest
-  information 14,106), z ≈ 11, and the joint 0.121 comes 87 % from the gDNA seeds. LBX0588 is consistent (z ≈ −0.6).
-- Where the truths differ, one od is a weight-dependent compromise: an agreement rule reads ≈ 0 on odg05, giving up
-  step 1's gain.
-- The gDNA–RNA pair mean is 0 only under independence; a shared local bias would make it positive. Unverified.
-- Sharing widens RNA's strand term: first-pass Σ|err| on odg05 stranded OFF 75,873 → 94,819 (+25 %, the oracle +3 %),
-  stranded ON +7 % (oracle +4 %), ss 0.70 +71 %; N_eff = N/(1 + (N−1)·od_r) falls 111 → 34 at N = 1,000 as od_r goes
-  0.008 → 0.0287. Each landing reports the first-pass cost, the boundary axis (+14.8 %), the gene level at capture ON
-  (+473) and the gDNA pool.
-
-THE ROBUSTNESS RULE'S FOUR READINGS (ruling 15 takes the third): the od spread across seeds at one depth (every
-estimator fails at 1 %); the od across depth; the gDNA-total spread across seeds (the joint fit passes at 10 %: 1.3 %
-against a 0.7–1.5 % floor); the gDNA total across depth (calibration's own drift, unusable). Read literally, "swings"
-fails even the planted truth (odg05: gene stranded ON +145, gDNA pool +2,606).
-
-RUNS THE LANDING A/B STILL NEEDS: `policy_benchmark.py --by-class`, `ruler_vs_truth.py` and `prior_vs_oracle.py` under
-the arms; AMBIG slots scored apart (at n = 1,000, u = 380 the tilt peak moves 0.73 → 0.70 → 0.85 as od goes 0 → 0.05 →
-0.2); the `strand_evidence` consumer priced apart from the row width; a like-for-like fixed-0.05 arm on the ladder
-(LBX0588 at 10 % reads 0.47 at ρ = 0 against 0.14 at 0.2); one harness run to give the two-witness refusal a measured
-number (its chord prediction: a cv of 2.2 % against a 0.78–1.28 % band). Falsifiers beyond each step's: a
-forced-fallback injection puts 0 beyond the oracle's od-nil floor in an in-scope stratum; an fl landing moves an od
-value.
-
-Instrument: the harness, substrates and report in `~/Downloads/rigel_runs/prototypes/2026-09-27_strand_od/`; one
-derivation page per ruling in `~/Downloads/rigel_runs/prototypes/2026-09-28_od_design/` (`00_synthesis.md` the landing
-order; `01_fallback`, `02_roots`, `03_bound`, `04_evidence`, `05_panel` the rulings' pages). Refused designs:
-`ISSUES: the-overdispersion-design-refusals`.
+Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-30_robust_od/` — the harnesses (`harness/` od, `harness_w2/` κ),
+the per-object censuses, `runs/w1/VERDICT.md`, and the VCaP truth scorer `score_vcap.py`. The reviewer brief is the
+sandbox's strand-model review note.
 
 ### splicing-artifacts
 `priority: now — the cluster track, after the strand overdispersion (owner, 2026-09-30); the owner's highest real-data priority (2026-09-26), a bigger problem than previously thought (owner, 2026-09-24) · kind: defect · 2026-09-24`
@@ -270,8 +130,9 @@ Those three fragment types are a local A/B, independent of the cluster work.
 - THE TRAINING SETS. The spliced strand table that sets κ and supplies the od's RNA junction seeds holds artifacts
   whose sense fraction is ½ (the VCaP exome-DNA half: 3,223 spliced observations on 2,255 junctions, κ 0.5008, feeding
   the RNA od with information 5,701), and κ pools per-junction rates that vary with depth
-  (`ISSUES: strand-overdispersion-one-shared-value`, step 4), so on real libraries the RNA strand MEAN is itself off:
-  LBX0588's 0.9365 against MO_3021's 0.998 is plausibly artifacts (unmeasured). The repair trains the strand model and
+  (`ISSUES: strand-overdispersion-one-shared-value`), so on real libraries the RNA strand MEAN is itself off:
+  LBX0588's pooled κ is 0.064 against 0.0029 from its genuine junctions (measured 2026-09-30; κ's fix is that entry's
+  next step). The repair trains the strand model and
   the RNA length law weighted by each fragment's probability of being genuine.
 - THE COUNTERS ARE IN THREE UNITS: `sj_blacklisted` counts junction × record over every record, multimappers
   included; the `splice.*` census counts uniquely mapped fragments; 0.7.1's `summary.json` splice counts are the
@@ -291,8 +152,8 @@ Changes to an output or on-disk format, batched so each format changes once. RUL
 batch, before 0.8.0; AMENDED the same day: the two density feathers are removed with the total-density landscape, not
 renamed (`ISSUES: the-total-density-landscape`).
 (a) `summary.json` (schema 3, unreleased):
-- one od field instead of two, with its information and an evidence label, so a no-evidence 0 reads apart from a
-  measured 0 (`ISSUES: strand-overdispersion-one-shared-value`);
+- one od field instead of two, labelled binomial by policy (od = 0 since 2026-10-01), beside the clean κ and the
+  artifact shares (`ISSUES: strand-overdispersion-one-shared-value`, the diagnostics step);
 - `gdna_fraction` without the spliced intergenic fragments: `cli.py` adds `stats.n_intergenic`, which includes them,
   and a spliced fragment is certified RNA (Axiom 0). The count is so far inferred (27 at g001 OFF, 29 at g01 OFF, from
   the three-exon shadows), not read from `n_intergenic_spliced`; `quant_accuracy.py` copies it into the release
@@ -355,8 +216,8 @@ How much each part owns:
   0.171 ± 0.042 at 1 % against 0.0084 at full depth; LBX0588's strand specificity rests on about 150 spliced reads
   (0.913 / 0.919 / 0.934 at 1 % against 0.937), and its pass 0 follows the same order (0.5465 / 0.5555 / 0.5641).
   MO_3021's pass 0 rises as depth falls (0.199 / 0.164 / 0.139), the opposite of the others. On the test chromosome,
-  planting the true strand model moves the error by at most 6.3 points. Check once
-  `ISSUES: strand-overdispersion-one-shared-value` step 1 lands.
+  planting the true strand model moves the error by at most 6.3 points. Re-check now that od = 0 has landed and once
+  κ's fix lands (`ISSUES: strand-overdispersion-one-shared-value`).
 - The EM does not always follow calibration. On VCaP it recovers much of what calibration loses (EM recall 0.614 /
   0.747 / 0.853 against calibration P/O 0.125 / 0.518 / 0.922); LBX0588's EM follows calibration down (0.164 / 0.620 /
   0.906). Why is untested: the libraries differ on three axes at once — strand specificity 0.9998 against 0.91–0.94,
@@ -615,12 +476,11 @@ exon|intron boundary, while RNA that has not spliced there does.
   monotonicity; the mature-exon chain's tests give the same `f_g` with the junction spliced or not, so none of them
   exercises the junction reads.
 - `test_conserved_mass.py::test_the_mass_is_the_PER_BASE_attribution` allows `count` whole fragments where its
-  docstring claims `count` half-ulps; `test_gdna_strand_fit.py` and `test_region_geometry.py` still build float64
-  banks as uint64 fixed point in their fixtures.
-- The HANDFUL gate (`test_gdna_strand_fit.py`) calls the ρ = 0 pair-count moment "biased LOW" and asserts mean(raw) <
-  0.17 on 8 fixed seeds; in a 300-draw Monte Carlo of its own fixture the raw mean is 0.2007 (sd 0.117) against a
-  fitted sd of 0.0044, and only 19 % of random 8-seed batches pass. Restate it as a variance claim, or retire it with
-  the raw field at `ISSUES: strand-overdispersion-one-shared-value` step 1.
+  docstring claims `count` half-ulps; `test_region_geometry.py` still builds float64 banks as uint64 fixed point in
+  its fixtures.
+- `density_model.count_observable_masks` has had no production consumer since od = 0 landed (2026-10-01): it selected
+  the retired gDNA od fit's seeds. Delete it as a numeric no-op, rewriting `test_gdna_density.py`'s mask block and the
+  selector in `test_accumulator_span_unbiased.py`.
 - The report test's synthesized v3 summary omits `sj_blacklist_size` and `sj_blacklist_loaded`, so it renders
   "detection off", a shape no real run produces; no test asserts the splice-artifact note.
 - The buffer's finalizer test asserts nothing about "still writes what it holds", and its writer-error test calls
@@ -752,7 +612,7 @@ gives the strand term a slope n(½ − κ̂), so real overdispersion reads as co
 n/m for m spliced reads (SD(κ̂) ≈ 0.08 at about 40 spliced reads). On odg05 ss 0.50 g98 (true od 0.05, κ̂ = 0.515),
 assuming od 0 costs +1,178 in scope at capture OFF and +29,106 on the deferred capture-ON row, and nothing against a
 true 0 (test panel, κ̂ 0.485). Not dissected. The candidate — ψ reads κ = ½ where the channel is dead — is its own
-A/B, beside the od step-1 skip of the fit there (`ISSUES: strand-overdispersion-one-shared-value`).
+A/B; od itself is 0 since 2026-10-01 (`ISSUES: strand-overdispersion-one-shared-value`).
 Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-28_od_design/01_fallback.md` (its last open question);
 `policy_benchmark.py --by-class`, unstranded rows.
 
@@ -765,8 +625,7 @@ than unknown, a_b → 1, and nascent exon–intron–exon fragments are priced a
 signed w(ε − 1) reads +0.66 against a rectified +0.70 (bias); at g50 −0.006 against +0.072 (rectification only).
 Exon|intron pairs with ρ_adj = 0 hold 10 % of boundary counts at a count-weighted ε ≈ 20–21.6; pairs with ε > 5 border
 introns of median 94 bp (31–185). The likely cause of the +4 bp g05 ON overshoot. OWNER: carry the variance (the
-weight goes to 0) or borrow from the gene's measurable introns? One derivation could also serve the purity weight's
-empty-neighbour failure (`ISSUES: strand-overdispersion-one-shared-value`, step 5) and
+weight goes to 0) or borrow from the gene's measurable introns? One derivation could also serve
 `ISSUES: the-efficiency-posterior-floor-on-empty-pieces`.
 (b) ZERO gDNA. The one-sided rate declines only at total_n = 0, so at g00 ρ_off is a geometric floor (2.1e-6, against
 5.3e-3 at g05): ε reads about 2,300·n_b wherever ρ_adj = 0, and the realized law turns 99 % "capture excess" (+28.9 bp
@@ -825,7 +684,8 @@ as the truth.
 `priority: later — Tier 2, the fl second wave: replaced on the re-simulated fl-gap panels · kind: defect · 2026-08-31`
 `POOL_EB_PRIOR_ESS = 1000.0` shrinks the gDNA pmf toward `global_pmf` (mostly RNA whenever gDNA is a minority) at a
 magic ESS: inert on the ladder (0.01 bp), dominant on the fl-gap arm at `g05` capture-ON (`ship−pool` −23.7 of −31.7
-bp). Replacement: reconcile the pools by their precision (`EQUATIONS.md` §6c). Its instrument, `fl_pool_purity.py`,
+bp). Replacement: weight the pools by their own precision, which is not yet derived (the strand od's precision reconcile was
+refused for mismatched inputs, `ISSUES: the-strand-overdispersion-reconcile`). Its instrument, `fl_pool_purity.py`,
 was retired 2026-09-14 (in git). The ladder's deliverable cannot see it; only the fl-gap arm can. The realized-law fix
 (`ISSUES: the-realized-gdna-length-law-reads-rna-counts`) passes the EB-smoothed RNA pmf (owner, 2026-09-28), so the
 ESS also reaches the boundary composition, shifting μ_r at small N_s by ess/(N_s + ess)·(μ_anchor − μ_RNA). Plain
@@ -854,9 +714,8 @@ Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-29_precapture_rna/C_repor
 Probes overhang exon edges and bind the bases there, so the intron regions next to probes are capture-enriched and
 "every region seed is off target under capture" is false. On odg05 g05 capture ON truly pure intron seeds read
 n/(λ_off·E) at a median 1.89, 90th percentile 8.2, 99th 44 (1.00 / 1.23 / 1.84 at capture OFF): a pooled 1.9× λ_off.
-Three places treat introns as off target: `density_deconv`'s background (introns at the intergenic depletion); fl's
-one-sided rate (intergenic and intron regions together); the proposed purity weight
-(`ISSUES: strand-overdispersion-one-shared-value`, step 5). Proposal: measure enrichment against distance to the
+Two places treat introns as off target: `density_deconv`'s background (introns at the intergenic depletion); fl's
+one-sided rate (intergenic and intron regions together). Proposal: measure enrichment against distance to the
 nearest probe, then treat near-probe introns as enriched or price the loss.
 Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-28_od_design/04_evidence.md`.
 
@@ -1391,7 +1250,7 @@ yet.
 ### binary-cuts-on-continuous-quantities
 `priority: parked — Tier 5, tracking only (owner, 2026-09-28: one entry; the inventory stays outside the tree) · kind: tracking · 2026-09-28`
 The owner's rule is no yes/no gates on continuous quantities; the 2026-09-24 inventory ranks 55 such cuts by harm.
-Homed elsewhere: whole counts and the fixed seed; the closed ranks; the od ceiling
+Homed elsewhere: whole counts and the fixed seed; the closed ranks; the od ceiling, deleted with the od fits
 (`ISSUES: strand-overdispersion-one-shared-value`); the splice and multimapper cuts. Untracked, with measured harm:
 - the reference ρ_ref is the landscape's argmax cell: one cell moves 91–100 % of transcripts' EM length by more than
   1 %;
@@ -2923,6 +2782,38 @@ unspliced count (right unstranded, wrong at a both-stranded exon on stranded dat
 `g00 ss.99 ON` 233 → 435 on two AMBIG exons), the total as a one-sided bound (stranded capture-ON −8–10 %),
 and the split's strand count at its own precision (the golden's ceiling 0.323, the refused
 `flux-witness-in-strand-units` again).
+
+### the-strand-overdispersion-reconcile
+REPLACED 2026-10-01 by od = 0 (`DESIGN.md` §3.3a). `reconcile_overdispersions` blended a gDNA and an RNA od by
+"information", and each input paired a value from one estimator with a precision from another:
+- gDNA's precision came from a weighted fit that was computed, then discarded;
+- RNA's was its null information, which credited it up to ~700,000× too much evidence (7.5×10⁷ against ~10²).
+
+So RNA's value won: on `odg05` the shipped gDNA od was ≤ 0.0007 against a planted 0.05, and within one 1 % MO_3021 draw
+the two values sat 0.19 apart. Against it, od = 0:
+- LBX0588's gDNA total across 10 % subsamples, 3.45 % → 0.74 %;
+- on the VCaP mix against read-name truth: gDNA pool −6.40 → −6.11 %, transcripts −0.15 %, genes −1.1 %.
+
+### the-away-half-gdna-overdispersion
+REFUSED 2026-10-01, with its influence weights, the `Beta(2,2)` 0.2 clip and the 0.2 no-evidence fallback. The pooled
+moment over the genic seeds on the far side of ½ from their gene's RNA:
+- **Antisense RNA reaches that side on every real library:** VCaP RNA-only 0.47 over 118,622 seeds, against no gDNA;
+  MO_3021 0.133 against its junctions' 0.02.
+- **"Unbiased under any RNA content" was false:** seeds mixing gDNA with sense RNA bias it low (planted 0.03 reads
+  0.0264 ± 0.0021 against 0.0303 on pure seeds).
+- **Its seeds cannot separate an od from composition at all:** at n ≤ 3 the two are one law (`EQUATIONS.md` §6a), and
+  that is 73 % of LBX0588's seeds.
+
+### the-joint-strand-overdispersion-fit
+SUPERSEDED 2026-10-01, never landed. One influence-weighted estimating equation over the gDNA seeds and the junctions.
+- **For it, on `odg05`:** calibration −10 % / −19 % and transcripts −3 % / −7 % (stranded OFF / ON).
+- **Against it:**
+  - it sat at the 0.2 clip on 13 of 14 real low-gDNA runs, whose gDNA seeds were antisense RNA;
+  - it had two roots at low gDNA, with no rule between them;
+  - its junction side carries splice artifacts (LBX0588's RNA moment is 0.07 at the pooled κ and 0.37 at the clean one).
+- **Not built for it:** the contaminated-seed panel and the simulator's RNA-od arm.
+- **Its designs and refusals:** `~/Downloads/rigel_runs/prototypes/2026-09-28_od_design/` and
+  `ISSUES: the-overdispersion-design-refusals`.
 
 ### the-overdispersion-design-refusals
 REFUSED 2026-09-28, in the derivations for `ISSUES: strand-overdispersion-one-shared-value`. Do not rebuild any of

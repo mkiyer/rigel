@@ -449,6 +449,8 @@ its two-component form is the gates' readable reference, `tests/calibration/_psi
     var  =  N·p(1−p)  +  (N·f_g)²·¼·od_g  +  (N(1−f_g))²·κ(1−κ)·od_r
     loglik = −½·(sense − N·p)²/var − ½·log(var)
 
+`od_g` and `od_r` are both 0 (§6, `DESIGN.md` §3.3a), so `var` is the binomial `N·p(1−p)`.
+
 **5.2 What it can and cannot say.** With RNA tilt `d = f₊ − f₋`, `p = ½ + (κ−½)·d` — the gDNA fraction
 cancels identically. Strand measures the tilt; it reaches gDNA only through the triangle bound
 `f_g ≤ 1 − |d|`.
@@ -500,90 +502,40 @@ discrimination `(1−p)/p`, so a global genic average destroys most of the signa
 
 ---
 
-## 6. Overdispersion and second-moment evidence
+## 6. Overdispersion — 0 by policy, and why strand counts cannot measure it
 
-`gdna_strand.overdispersion_for_beta` and `_null_information`. Symmetric `Beta(a,a)` gives
-`od = 1/(2a+1)` (a=2 → 0.200, a=14 → 0.0345). Effective count `n_eff = n/[1 + (n−1)·od]` — at od 0.2 a
-1,523-fragment seed is worth five coin flips. Pooled moments:
+The strand term (§5.1) carries one Beta-Binomial overdispersion per component. An object's latent strand rate varies
+about its component mean μ with intra-class correlation od, so `Var(k) = n·μ(1−μ)·[1 + (n−1)·od]` and the channel holds
+`n_eff = n/[1 + (n−1)·od]` effective fragments: at od 0.2 a 1,523-fragment object is worth five coin flips. A symmetric
+`Beta(a, a)` has `od = 1/(2a + 1)`. Both components' od is 0 (`DESIGN.md` §3.3a). The native term keeps the arguments,
+which are passed 0.
 
-    od = Σ_s[(k_s − n_s μ_s)² − n_s μ_s(1−μ_s)] / Σ_s n_s(n_s−1) μ_s(1−μ_s)
+### 6a. Composition and overdispersion are one law at small n
 
-Its exact null information `I = (Σ n(n−1)pq)² / Σ[2n²p²q² + npq − 6np²q²]` collapses to the pair count
-`Σn(n−1)/2` only at mean ½. Second-moment evidence is counted in pairs of fragments inside one object — a
-singleton carries exactly zero.
+At gDNA's mean ½, exactly, for n ≤ 3:
 
-### 6a. The away-half moment — gDNA overdispersion with no pure seed
+    BB(n, ½, ρ)  =  (1 − ρ)·Bin(n, ½)  +  (ρ/2)·δ₀  +  (ρ/2)·δₙ
 
-`gdna_strand.away_half_moment` and `fit_gdna_strand_overdispersion` (2026-08-29). The gDNA fit needs
-seeds whose RNA does not read as strand spread, and no structural class can be asserted pure (pervasive
-transcription; the intergenic space is whatever the GTF leaves over). Orient each genic seed so that RNA
-of its own gene pulls the residual down, `d = (k − n/2)·sign(½ − κ)`; under pure gDNA `d` is symmetric
-about 0 and the moment excess `d² − n/4` is even in `d`, so the pooled moment restricted to the away half
-has the null expectation of the full one:
+- At n = 2: `P(k=1) = ½(1−ρ)` and `P(k=0) = P(k=2) = (1+ρ)/4` on both sides.
+- At n = 3: `P(k=0) = (1+3ρ)/8` and `P(k=1) = 3(1−ρ)/8` on both sides.
+- The point masses `δ₀` and `δₙ` are what an object of pure RNA on either strand reads as κ → 0.
 
-    od = Σ_s a_s·(d_s² − n_s/4) / Σ_s a_s·n_s(n_s−1)/4        a_s = 1[d_s > 0] + ½·1[d_s = 0]
+So a set of small objects that is binomial gDNA with a fraction ρ of them pure sense or antisense RNA has the same
+likelihood as pure gDNA at od ρ, and no estimator on strand counts alone can separate the two.
 
-Unbiased for `ρ_g` under any distribution of RNA content across the seeds; a contaminated seed reaches the
-away side only by noise, with small `d`, so it biases down, never up. At `κ = ½` exactly — reachable,
-since `κ = (n_same+1)/(n_obs+2)` is exactly ½ whenever `2·n_same = n_obs`, the modal outcome on an
-unstranded library — the orientation is degenerate and the full two-sided moment is used instead: RNA at
-the same mean ½ is symmetric, so it contributes only `n_g(n_g−1)/[N(N−1)] ≤ 1` of the excess and the
-one-sided guarantee survives. Without that branch every residual collapses to 0 and the fit returns a
-hard `od = 0`, the most confident strand likelihood assertable. The tie weight ½ is exact: at `n = 2`
-under `BetaBinom(2, ½, ρ)`, `P(k=1) = ½(1−ρ)` and `P(k=0) = P(k=2) = (1+ρ)/4`, and the away half returns
-exactly `ρ` while full tie weight returns `(3ρ−1)/(3−ρ)`. Half the pairs enter, so the information is
-half §6's pair count — `I = P/2` for the total `P`, since `Var(e_s)|₀ = n(n−1)/8` and `E[a_s] = ½` give
-`Var(num) = P/8`, `E[den] = P/4`, `Var(od_mom) = 2/P`. ⛔ Not half the away half's own pair count: that
-halves twice and overstates the standard error by √2. ⛔ Requires a gene strand to orient by — intergenic
-and AMBIG objects cannot enter — and unannotated antisense RNA pushes toward the away side, the one
-recorded way to inflate it.
+At n = 4 the identity breaks (by at most 0.016 at ρ = 0.05). The mechanism holds at any depth: an RNA share that varies
+across objects spreads the strand rate about ½ just as a Beta does, so composition heterogeneity reads as od unless the
+composition is known from elsewhere. Whole-object contamination (an object entirely of one population) sits at another
+mean and is identifiable at depth. Partial mixing is not.
 
-### 6b. Influence weighting — why a deep seed is not worth its pair count
+### 6b. At an extreme mean the od is undetermined
 
-`gdna_strand.between_seed_variance` and `influence_weights`; the root is found by bisection in
-`fit_gdna_strand_overdispersion` (2026-08-30). Pooling `od̂_s = (d_s² − n_s/4)/(n_s(n_s−1)/4)` by pair
-count is minimum-variance only at `ρ = 0`. Given the seed's latent rate `p` (`u = p − ½`),
-`E[od̂_s | p] = 4u²` exactly (since `E[d² − n/4 | p] = n(n−1)u²`), so by the law of total variance
-
-    Var(od̂_s | ρ) = V∞(ρ) + E_p[Var(od̂_s | p)] ≈ 2ρ²(1−ρ)/(1+2ρ) + 2/(n(n−1))
-
-with the between-seed term exact from the symmetric Beta's moments (`E[u²] = ρ/4`,
-`E[u⁴] = 3ρ²/(16(1+2ρ))`; Monte-Carlo-verified). `V∞` does not depend on `n` — a seed's information about
-ρ saturates with depth — so the inverse-variance (Gauss–Markov) weights are
-
-    w_s = 1/(½ + c_s·V∞(ρ))          c_s = n(n−1)/4
-
-a constant at ρ = 0 (the pair-count estimator is this one with ρ pinned at 0) and equal-per-seed once
-`c_s·V∞ ≫ ½`. No constant is introduced, and the one approximation — the sampling term at `p = ½` rather
-than integrated over `p` — cannot bias the fit, because the weights depend only on `n_s` and ρ and never
-on a seed's own data, so the ratio has expectation ρ for any weight function. ρ enters its own weights,
-and the root of `g(ρ) = clip(moment(ρ)) − ρ` is bracketed by construction (`g(0) ≥ 0`,
-`g(ceiling) ≤ 0`), so bisection terminates with no iteration limit.
-
-The mean matters, and the two components do not share it. In general
-
-    V∞(ρ, μ) = 3ρ²·[2ρ + μ(1−μ)(1 − 7ρ)] / [μ(1−μ)(1+ρ)(1+2ρ)] − ρ²
-    b_s      = c_s·Var(od̂_s | ρ=0) = (2·n·pq + 1 − 6·pq)/(n − 1)      w_s = 1/(b_s + c_s·V∞(ρ, μ))
-
-which reduces algebraically to `2ρ²(1−ρ)/(1+2ρ)` and `b_s = ½` at μ = ½. ⛔ At a real library's
-κ = 0.0023 the same ρ = 0.05 gives V∞ = 0.285 against gDNA's 0.0043 — a seed at an extreme mean carries
-far less information about ρ than its pair count suggests, so the two components may never be compared
-on pair counts.
-
-### 6c. The two components reconcile against each other
-
-`gdna_strand.reconcile_overdispersions` (2026-08-30). A weighted estimator's precision is
-`Σ 1/V_s = Σ w_s·c_s` — its own weighted denominator — so each component reports the precision of the
-estimate it actually made, at its own ρ and its own μ. The weaker then borrows its deficit from the
-better-measured one:
-
-    od_w' = (I_w·od_w + (I_s − I_w)·od_s) / I_s          borrow weight (I_s − I_w)/I_s
-
-0 when the two are equally informed (neither moves), 1 when the weak one measured nothing (it takes the
-other's value outright). ⛔ Not `(I_w·od_w + I_s·od_s)/(I_w + I_s)`, which drags an equally well-measured
-component to the midpoint while the other stays put; and not a symmetric pooling, which would erase a
-real difference. With neither measured both take the ceiling: any common value leaves the strand channel
-uninformative, since the composition term reads only the difference of the two dispersions.
+With μ = κ ≈ 10⁻⁴, `Beta(μ, ρ)` at ρ → 1 is a two-point law: an object reads all-sense or all-antisense. That is the
+same likelihood as "a few objects of the other strand".
+- On VCaP at 1 % depth, the junction likelihood is flat to within 0.005 log-units from od 0 to od 0.999, set by 2
+  reversed junctions out of 44,241.
+- The RNA width that od would set, `κ(1−κ)·od·n²`, still matters: at n = 1,000 it admits ±10 wrong-strand reads at
+  od 1, against ±0.3 at od 0.
 
 ---
 

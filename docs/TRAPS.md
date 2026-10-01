@@ -595,13 +595,15 @@ and an A/B of a stratifying gate must stratify the same way.
 user's GTF leaves over, pervasive transcription is real, and most genes are off in any one sample but
 nobody knows which, so an estimator that asserts a structural class clean is calibrated to the annotation,
 not the genome; on a chromosome fed unannotated transcripts every purity-based fit moved and the away-half
-moment did not. Where a contaminant can only push a statistic one way, use the half it cannot reach.
+moment did not. Where a contaminant can only push a statistic one way, use the half it cannot reach — and check
+that no second contaminant pushes the other way: antisense RNA reached the away half on every real library, which
+retired that estimator (`DESIGN.md` §3.3a).
 
 **pair-count-weighting-lets-one-seed-decide. Pooling a second moment weights each object by its pair
 count, proportional to n², which is minimum-variance only when the parameter is zero.** Once it is not,
 an object's information saturates with depth, so a handful of deep objects carry the estimate: on real
-cfRNA one seed carried 78 % of a library's numerator. The fix is inverse-variance weighting
-(`EQUATIONS.md` §6b), never trimming; and no simulated panel can expose this, because at a true zero no
+cfRNA one seed carried 78 % of a library's numerator, and one junction 12.5 of 16.3 log-likelihood units of a
+library's evidence for an od. The fix is inverse-variance weighting, never trimming; and no simulated panel can expose this, because at a true zero no
 seed can dominate.
 
 **we-keep-re-deriving-message-passing. Several sessions have independently re-derived message passing

@@ -522,8 +522,8 @@ scalars (it is `null` if calibration did not run):
     "gdna_reference_density":     <float|null>,  // the captured gDNA level, gDNA fragments/bp; null = no enriched mode
     "gdna_reference_members":     <int>,         // located regions that level rests on; 0 when it is null
     "rna_sense_frac":             <float>,       // kappa: sense-strand RNA fraction
-    "gdna_strand_overdispersion": <float>,       // gDNA strand Beta-Binomial overdispersion
-    "rna_strand_overdispersion":  <float>,       // RNA strand Beta-Binomial overdispersion
+    "gdna_strand_overdispersion": <float>,       // gDNA strand overdispersion: 0 (binomial) in this release
+    "rna_strand_overdispersion":  <float>,       // RNA strand overdispersion: 0 (binomial) in this release
     "n_regions":                  <int>,         // number of calibration regions
     "n_boundaries":               <int>,         // number of contiguous boundaries between adjacent regions
     "n_sj":                       <int>          // number of splice junctions

@@ -6,13 +6,12 @@ sense-rate posterior is ``Beta(n_same + 1, n_opp + 1)`` and ``rna_sense_frac`` i
 ``(n_same + 1) / (n_obs + 2)``. It strand-cleans the count density and parameterises the per-region
 strand likelihood.
 
-Zero spliced reads give ``Beta(1, 1)`` and hence κ = 0.5, which ``fallback_used`` announces and
-``calibrate`` turns into ``CalibrationStrandError``: a real RNA-seq library always has spliced reads, so
-an exactly uninformative κ means the input is wrong, not the fit.
+Zero spliced reads give ``Beta(1, 1)`` and hence κ = 0.5, which ``fallback_used`` announces;
+calibration reads such a library as unstranded — its strand channel is dead
+(``region_init.strand_discriminability``) — never as an error.
 
-⛔ κ's own posterior width (:meth:`StrandModel.posterior_variance`) is not the RNA strand
-overdispersion, which is the spread of individual sj about κ — a different axis, fitted in
-:func:`gdna_strand.fit_rna_strand_from_sj_table`.
+⛔ κ's own posterior width (:meth:`StrandModel.posterior_variance`) is not a strand overdispersion — the
+spread of individual sj about κ, a different axis, which is 0 by policy.
 """
 
 from __future__ import annotations
