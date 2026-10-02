@@ -14,8 +14,8 @@ worked example, never current behaviour), and lessons (`TRAPS.md`).
 
 The version on disk is `pyproject.toml`'s; the target is 0.8.0, a calibration release. Three strata are
 the target (unstranded × capture-OFF, stranded × capture-OFF, stranded × capture-ON) and unstranded ×
-capture-ON is deferred — reported on every table, never a development target — with the fragment-length
-composition channel retired until after 0.8.0. The ruling, its reasons and the equal-fragment-length
+capture-ON is deferred — reported on every table, never a development target — and fragment length is in
+scope (owner, 2026-10-02). The rulings, their reasons and the equal-fragment-length
 forcing function are `DESIGN.md` §0b; every table in this file is read per stratum, never pooled
 (`TRAPS: never-pool-the-strata`), because the deferred stratum carries most of the pooled error.
 

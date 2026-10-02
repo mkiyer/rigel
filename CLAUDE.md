@@ -52,10 +52,11 @@ other three are optimised. It holds most of the error (the gDNA fraction cancels
 unstranded AMBIG slot has no channel), so the debug loop takes the worst IN-SCOPE scenario, never the
 deferred one. Every score is read per stratum, never pooled.
 
-The fragment-length COMPOSITION channel is retired until after 0.8.0 and may not be proposed; it does not
-exist in `src/`. Unaffected: layer 2's `fl` / `effective_length` / `capture_eff_length`, `length_likelihood`
-in `second_pass.py`, and the fl PMFs (`calibration.fl.FLModels`). The ladder gives gDNA and RNA EQUAL
-fragment lengths on purpose: a gap would let the EM split origins on length alone and mask calibration bugs.
+Fragment length is back in scope for 0.8.0 (owner, 2026-10-02): the composition channel, the capture-length
+frame and every other length item that waited for the release (`docs/DESIGN.md` §0b;
+`ISSUES: calibration-detects-capture-on-a-capture-off-library`, `ISSUES: the-scorer-reads-a-census-length-law`). The ladder still gives gDNA and RNA EQUAL fragment lengths on purpose:
+a gap would let the EM split origins on length alone and mask calibration bugs. So a length mechanism is
+judged on the gap panels beside it, in both directions, against the equal-length control.
 
 ## The docs
 

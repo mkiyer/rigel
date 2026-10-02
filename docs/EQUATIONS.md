@@ -9,9 +9,9 @@ two modules cannot come to disagree about one quantity (`TRAPS: two-docstrings-o
 that appears is a property of the formula (a limit, a degenerate case, a worked value), and the
 instrument that verified it is named in one sentence. Rulings and their measured prices live in
 `DESIGN.md`, open problems and refusals in `ISSUES.md`, lessons in `TRAPS.md`, the panels in
-`TESTING.md`. Derivations for mechanisms not in the tree do not live here either: the fragment-length
-composition channel is deferred past 0.8.0 (`DESIGN.md` §0b); the length model as an opportunity and a
-divisor (§1, §3.6b, §4) is a different, live thing. Section numbers are anchors cited from the code and
+`TESTING.md`. Derivations for mechanisms not in the tree do not live here either: a fragment-length
+composition channel (in scope again, `DESIGN.md` §0b) is derived here when one is built; the length model as
+an opportunity and a divisor (§1, §3.6b, §4) is a different, live thing. Section numbers are anchors cited from the code and
 the other docs, so a deleted section leaves a gap.
 
 ---
@@ -142,8 +142,8 @@ truth pools additively (`f_g = ΣG/(ΣG+ΣR)`).
 ## 3. The two-component deconvolution
 
 **3.1 The 2×2 at one object.** Stored by the accumulator (the `inv_length_sum` banks); no
-calibration module solves it, because fragment length as a composition channel is deferred past 0.8.0
-(`DESIGN.md` §0b). Kept because `SUCCESS.md`'s information census is defined on it.
+calibration module solves it yet: no fragment-length composition channel is built (`DESIGN.md` §0b). Kept
+because `SUCCESS.md`'s information census is defined on it.
 
     N       =  ρ_g·E_g[w]  +  ρ_r·E_r[w]
     Σ 1/L   =  ρ_g         +  ρ_r
@@ -1009,8 +1009,7 @@ is a limit of the information and is accepted as such (`ISSUES: the-atom-at-an-u
 ## 10. The second pass's score
 
 `src/rigel/second_pass.py` (`combine_factors`, `choose_hypotheses`). `f(L)` here is the second pass's
-per-fragment length term (its `length_likelihood` array); the deferral of the length composition channel
-does not touch it — this one ranks one fragment's already-enumerated candidates against each other and
+per-fragment length term (its `length_likelihood` array); it is not a length composition channel — this one ranks one fragment's already-enumerated candidates against each other and
 never claims a composition.
 
     score  =  ρ × f(L) × s

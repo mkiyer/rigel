@@ -56,9 +56,11 @@ sparse libraries lose their gDNA.
   spliced fragments that carry splice artifacts (`ISSUES: splicing-artifacts`) — `calibration/fl.py`,
   `gdna_density.py`, `calibration_vs_oracle.py`; watch `ISSUES: capture-degeneracy-standing-risk`.
 - **Fragment-length gaps** (2026-10-01): the test chromosome's two fl arms stay within 0.9 points of their equal-length
-  control on every in-scope stratum and the genome-scale RNA-long arm within 2–5 % transcripts in scope, but the RNA-short arm (RNA shorter than
-  its reads) loses 28–42 % of its transcripts on stranded libraries, a pre-existing EM defect —
-  `calibration_vs_oracle.py` and `quant_accuracy.py` on the five fl panels, `ISSUES: the-short-rna-arm-fails-stranded`.
+  control on every in-scope stratum and the genome-scale RNA-long arm within 2–5 % transcripts. The RNA-short arm (RNA
+  shorter than gDNA) reads as captured on a stranded capture-OFF library — a false capture reference from short exons
+  with no gDNA opportunity — and loses 42 % of its transcripts; a training rule fixes it (42 → 3.5 %) and awaits the
+  owner (`ISSUES: calibration-detects-capture-on-a-capture-off-library`). Its capture-ON rows (28.5 %) are the parked
+  `ISSUES: the-scorer-reads-a-census-length-law`.
 - **Strand model**: od = 0 by policy (`DESIGN.md` §3.3a) and κ from the genuine junctions (§3.3b), both landed
   2026-10-01 after their VCaP A/Bs (LBX0588's κ 0.064 → 0.0030). The `summary.json` diagnostics and the pruning design
   are next — Tier 0, `ISSUES: strand-overdispersion-one-shared-value`; the prototype harness and the VCaP truth scorer are in

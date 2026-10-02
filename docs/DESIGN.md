@@ -110,15 +110,25 @@ can descend — the tool emits a near-zero gDNA fraction there regardless of tru
 blindness: the gDNA fraction cancels from the strand mean at κ = ½, so an unstranded AMBIG slot has no
 channel at all (`EQUATIONS.md` §5).
 
-### The length channel is deferred until after 0.8.0
+### Fragment length is in scope for 0.8.0 (owner, 2026-10-02)
 
-⛔ The fragment-length likelihood as a CALIBRATION COMPOSITION channel is future work. 0.8.0 ships without
-it: do not propose it, list it or rank it. It does not exist in `src/` (A/B'd once, 2026-08-10, never
-shipped), so this is a scope ruling, not a code removal. Three other things called "length" are not
-affected: layer 2's `fl` / `effective_length` / `capture_eff_length` (the OPPORTUNITY model);
-`length_likelihood` in `src/rigel/second_pass.py` (the per-fragment assignment factor of §4); and the fl
-PMFs themselves (`calibration.fl.FLModels`). The panel gives both origins the same length distribution (below), so
-it cannot price a length composition channel (`TRAPS: equal-lengths-carry-no-composition`).
+> **The deferrals are released.** The fragment-length COMPOSITION channel (deferred 2026-08-10) and the
+> capture-length frame (parked 2026-09-30, `ISSUES: the-scorer-reads-a-census-length-law`) are back in scope
+> for 0.8.0, as is every other fragment-length item that waited for the release.
+
+Why: calibration assumes equal gDNA and RNA lengths in several places, and the ladder's equal lengths hid all
+of them. On a stranded capture-OFF library whose RNA is shorter than its gDNA, that reads as capture and
+loses 42 % of the transcripts (`ISSUES: calibration-detects-capture-on-a-capture-off-library`). Real
+libraries carry gaps in both directions; the VCaP halves differ by 63 bp.
+
+The bar a length mechanism must clear is the 2026-08-10 verdict on the old channel: a Gaussian moment row
+whose answer was not a function of the length gap. It read 54–57 % gDNA at `g00`, and its precision switched
+on at any nonzero gap. Its record is in git (`f470a570`). A new mechanism must carry information that
+vanishes smoothly as the gap closes, and it must pass the `g00` controls.
+
+The ladder keeps equal lengths (below): it stays the panel that prices calibration without length. Every
+length-dependent mechanism is judged on the gap panels beside it, in both directions, with the equal-length
+control.
 
 ### Calibration is the focus, and the metric is calibration against oracle calibration
 

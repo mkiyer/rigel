@@ -33,7 +33,7 @@ The panel says how much error there is and where.
 | nascent RNA | sparse on every row: `mode: sparse`, `on_fraction 0.50` of gene spans on, level logU(1, 100) independent of the mature level. 0.50 is a development stress level, not real data (`DESIGN.md` §0b) |
 
 The 0.8.0 scope — three strata in scope, unstranded × capture-ON deferred but reported on every table,
-the length composition channel retired, and why the ladder gives gDNA and RNA equal fragment lengths —
+fragment length back in scope, and why the ladder still gives gDNA and RNA equal fragment lengths —
 is ruled in `DESIGN.md` §0b. Report per stratum, never pooled (`TRAPS: never-pool-the-strata`); the
 `g00` rung is the false-positive check on every stratum, and a control is never tuned on.
 
