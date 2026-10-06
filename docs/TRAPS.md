@@ -914,7 +914,10 @@ needs the second bit. *Sibling:* `TRAPS: two-masks-one-name`.
 that only adds an unused field and a loop still moves fused-multiply-add contraction elsewhere in the file, and
 the EM's fixed-point iteration amplifies the ulps to 0.04 transcript points; the E-step's task partition also
 depends on the thread count. Compare arms on ONE binary at ONE thread count, take the same binary's own shipped
-arm as the baseline, and read a cross-tree difference below 0.05 points as build noise.** A worktree rebuilt with
+arm as the baseline, and read a cross-tree difference below 0.05 points as build noise.** The thread count alone can
+move far more: `em.n_threads` 1 against all cores moved the test chromosome's `g50 ss.99 ON` transcripts 16.81 →
+17.27 % (2026-10-05, near-degenerate isoform clusters). The CLI's `--threads 1` pins all three thread counts;
+`--set scan.total_threads=1` pins only the scan, so an in-process arm read against a CLI run pins all three. A worktree rebuilt with
 main's own build backend still differed from main on 26 fields at `g05 ss.99 ON`; the same-tree reseed spread under
 fractional assignment is 0.000–0.007 points. *Sibling:* `TRAPS: worktrees-run-the-wrong-code`.
 

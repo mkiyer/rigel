@@ -32,10 +32,13 @@ crossing positions each carries half a fragment of intron. Where capture adds ov
     c_junction = c_lo + c_hi − ½ (c_intron,lo + c_intron,hi),
 
 the junction's two boundaries less the intron pieces beside them — a piece too short to contain a fragment
-has no contained count, and reads the boundary on its far side instead. The sum is never below 0, and it may
-exceed 1: the two sides' exon capture is added, not averaged, and each is a boundary's unclipped half-exon
-level. A field with no reference — every efficiency 1 — returns ``fl_eff_lengths``
-bit-identically; only the captured case contracts.
+has no contained count, and reads the boundary on its far side instead. The sum is never below 0 and never
+above 1. CAPTURE SATURATES: a fragment binds its best single probe part, so a fragment across a junction is
+captured no more than one wholly inside a fully captured piece. Where probes tile the exons to their edges a
+gDNA fragment crossing an exon's boundary still binds most of a probe, so each boundary reads most of the
+exon's level, not half of it, and the uncapped sum would count the junction's exon capture about twice (gate:
+``test_a_junction_is_captured_no_more_than_a_fully_captured_piece``). A field with no reference — every
+efficiency 1 — returns ``fl_eff_lengths`` bit-identically; only the captured case contracts.
 """
 
 from __future__ import annotations
@@ -164,8 +167,9 @@ def _cut_efficiencies(
     gdna_contained: np.ndarray,
 ) -> np.ndarray:
     """Every cut's efficiency: a contiguous cut's boundary's; a junction's by conservation of bases,
-    ``c_lo + c_hi − ½(c_intron,lo + c_intron,hi)``, never below 0 — ``A`` the piece below the junction and
-    ``B`` the piece above it, in genomic order."""
+    ``c_lo + c_hi − ½(c_intron,lo + c_intron,hi)``, within ``[0, 1]`` since capture saturates at a fully
+    captured piece's level — ``A`` the piece below the junction and ``B`` the piece above it, in genomic
+    order."""
     right_of = region_right_boundary(np.asarray(region_arrays.ref_id))
     A = objects.piece[objects.cut_row]
     B = objects.piece[objects.cut_row + 1]
@@ -184,9 +188,10 @@ def _cut_efficiencies(
             c_boundary[right_of[intron_hi - 1]],
         )
         out = out.copy()
-        out[j] = np.maximum(
+        out[j] = np.clip(
             c_boundary[junction_lo] + c_boundary[junction_hi] - 0.5 * (c_intron_lo + c_intron_hi),
             0.0,
+            1.0,
         )
     return out
 
@@ -204,8 +209,7 @@ def transcript_capture_eff_lengths(
     The efficiencies are the result's: a piece's region's, a contiguous cut's boundary's, a junction's from
     the objects beside it. With no reference (capture off, or no gDNA) every efficiency is 1 and ``fl`` is
     returned verbatim; a transcript with no share on any object (shorter than every fragment) keeps ``fl``.
-    A piece's and a boundary's efficiency lie in ``[0, 1]``; a junction's adds its two sides' exon capture
-    and can exceed 1, so ``eff_em`` can exceed ``fl`` where well-captured junctions carry the transcript.
+    Every efficiency, a junction's included, lies in ``[0, 1]``, so ``eff_em`` never exceeds ``fl``.
     """
     fl = np.asarray(fl_eff_lengths, dtype=np.float64)
     if calibration.gdna_reference_density is None:

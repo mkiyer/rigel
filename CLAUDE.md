@@ -152,8 +152,8 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument's --self-test
 ```
 
-**The standing baseline: 0 failed / 2,652 passed / 0 skipped / 0 xfail, 2,652 collected** — re-derived
-2026-10-01 after the fixed numbers moved into `config.CONSTANTS` (2,640 − 1 + 13: `test_constants.py`). **Any failure at all is a
+**The standing baseline: 0 failed / 2,651 passed / 0 skipped / 0 xfail, 2,651 collected** — re-derived
+2026-10-05 after the junction cap's falsification test was added (2,650 + 1). **Any failure at all is a
 regression.** Re-derive a count, never adjust one (`TRAPS: re-record-the-baseline`): every gate that scans
 the files on disk is one case, so only adding or removing a test moves the total. Derive the failure set,
 never eyeball the tail (`TRAPS: read-the-whole-failure-list`). A golden update is where a regression gets
@@ -182,7 +182,7 @@ order. `tests/test_scripts_index.py` holds the `design/` rows against the disk i
 | `sim/build_test_reference.py` | Renders the test chromosome from its one hand-edited YAML, `test_chr.yaml` (`docs/TESTING.md` §0a) |
 | `sim/build_suite_reference.py` · `design_suite_probes.py` · `simulate_reads.py` | The panel's substrate; `panel.py build` drives the last two, and the reference carve is manual |
 | `sim/configs/gdna_ladder.yaml` | The 16-condition panel the tool is ranked on (`docs/TESTING.md` §0) |
-| `sim/configs/flgap_rna_long.yaml` · `flgap_rna_short.yaml` | The fl-gap side panel. ⛔ Never a ladder rung, and it carries the retired nascent model (`ISSUES: flgap-panels-stale-nascent-model`) |
+| `sim/configs/flgap_rna_long.yaml` · `flgap_rna_short.yaml` | The fl-gap side panel, re-simulated 2026-10-03 with the ladder's nascent block, so the length gap is its only difference from the ladder. ⛔ Never a ladder rung; read both arms, per stratum, beside the ladder |
 
 ## CLI
 

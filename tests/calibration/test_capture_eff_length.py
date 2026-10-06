@@ -415,6 +415,31 @@ def test_a_junction_adds_its_two_sides_it_does_not_average_them(multiexon_index)
     assert eff[m] == pytest.approx(fl[m], rel=1e-12)
 
 
+def test_a_junction_is_captured_no_more_than_a_fully_captured_piece(multiexon_index):
+    """THE FALSIFICATION TEST for the junction's cap. Capture saturates: a fragment binds its best single
+    probe part, so a fragment across a junction between two captured exons is captured no more than one
+    wholly inside either. Where probes tile the exons to their edges, a gDNA fragment crossing an exon's
+    boundary still binds most of a probe, so the boundary reads most of the exon's level (0.835 on the test
+    chromosome's panel) and not half of it, and the sum ``c_lo + c_hi − ½(c_intron,lo + c_intron,hi)``
+    prices the junction near 1.67 (`ISSUES: the-junction-sum-over-prices-separately-probed-exons`). Every
+    exon at 1, every intron at 0.001, every boundary at 0.835: the mRNA's junctions price at 1, it reads its
+    full fl-marginal length, and no transcript reads longer than its own. PERTURBATION: the uncapped sum
+    reads the mRNA about 24 % long; a cap at the boundaries' own level (0.835) reads it short."""
+    idx = multiexon_index
+    ra = RegionArrays.from_index(idx)
+    c = np.full(ra.n_regions, 0.001)
+    for s in range(1000, 6500, 1000):
+        c[_exon_mask(ra, s, s + 500)] = 1.0
+    ne = int(boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0])
+    m = _tidx(idx, "mrna")
+    fl = _fl(idx.t_df["length"].to_numpy())
+    eff = transcript_capture_eff_lengths(
+        _cal(ra, c, 1.0, boundary=np.full(ne, 0.835)), ra, idx, fl, PMF
+    )
+    assert eff[m] == pytest.approx(fl[m], rel=1e-12)
+    assert np.all(eff <= fl * (1.0 + 1e-12))
+
+
 def test_an_intron_piece_too_short_to_contain_a_fragment_reads_its_far_boundary(short_intron_index):
     """A 50 bp intron holds no gDNA fragment against a 100–300 bp pmf, so its own efficiency is the
     population's and says nothing about it: the junction reads the boundary on the intron's far side

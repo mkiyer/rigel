@@ -55,12 +55,13 @@ sparse libraries lose their gDNA.
   `ISSUES: the-scorer-reads-a-census-length-law`; the boundary inversion's second wave stays open; the RNA law trains on
   spliced fragments that carry splice artifacts (`ISSUES: splicing-artifacts`) — `calibration/fl.py`,
   `gdna_density.py`, `calibration_vs_oracle.py`; watch `ISSUES: capture-degeneracy-standing-risk`.
-- **Fragment-length gaps** (2026-10-01): the test chromosome's two fl arms stay within 0.9 points of their equal-length
-  control on every in-scope stratum and the genome-scale RNA-long arm within 2–5 % transcripts. The RNA-short arm (RNA
+- **Fragment-length gaps** (re-recorded 2026-10-03 on the re-simulated suite arms, pinned and fractional): the test
+  chromosome's two fl arms stay within 0.9 points of their equal-length control on every in-scope stratum (2026-10-01);
+  the genome-scale RNA-long arm reads transcripts 2.1–2.3 % off capture and 6.2 % stranded × ON. The RNA-short arm (RNA
   shorter than gDNA) reads as captured on a stranded capture-OFF library — a false capture reference from short exons
-  with no gDNA opportunity — and loses 42 % of its transcripts; a training rule fixes it (42 → 3.5 %) and awaits the
-  owner (`ISSUES: calibration-detects-capture-on-a-capture-off-library`). Its capture-ON rows (28.5 %) are the parked
-  `ISSUES: the-scorer-reads-a-census-length-law`.
+  with no gDNA opportunity — and loses 42.3 % of its transcripts against 3.8 % unstranded; the fix is the fragment-length
+  campaign's (`ISSUES: calibration-detects-capture-on-a-capture-off-library`). Its capture-ON rows (19.8 % stranded,
+  18.8 % unstranded) are `ISSUES: the-scorer-reads-a-census-length-law`, back in scope.
 - **Strand model**: od = 0 by policy (`DESIGN.md` §3.3a) and κ from the genuine junctions (§3.3b), both landed
   2026-10-01 after their VCaP A/Bs (LBX0588's κ 0.064 → 0.0030). The `summary.json` diagnostics and the pruning design
   are next — Tier 0, `ISSUES: strand-overdispersion-one-shared-value`; the prototype harness and the VCaP truth scorer are in
@@ -85,7 +86,8 @@ sparse libraries lose their gDNA.
   `quant_accuracy.py --arm oracle_alloc_seed`, `ISSUES: per-transcript-prior-lane`.
 - **The capture-contracted length**: one shared rule for every EM component — each object's conserved share at
   that object's own capture efficiency, read against the landscape's located enriched mode, a junction priced
-  from its neighbours by conservation of bases (`DESIGN.md` §7.2, `EQUATIONS.md` §11); the classes sit near one
+  from its neighbours by conservation of bases and capped at 1, since capture saturates (owner, 2026-10-05;
+  `DESIGN.md` §7.2, `EQUATIONS.md` §11); the classes sit near one
   scale and the junction price's within-gene error is its structure, which no neighbouring gDNA object sees — closed
   for now (owner, 2026-09-26), `ruler_vs_truth.py --scale` (the class means and the within-gene spread),
   `ISSUES: the-junction-price-is-noisy-within-a-gene`; what the gDNA witness cannot see of a
@@ -99,9 +101,9 @@ sparse libraries lose their gDNA.
   `ISSUES: performance-memory-bounded-solve`, `profiling/profiler.py`, `profiling/sweep_replay.py`; a `_debug`
   capture has no memory bound, so one real-genome job runs at a time (`ISSUES: debug-capture-memory-is-unbounded`).
 - **Panels**: the 16-condition ladder is rebuilt under the corrected capture physics, cached and certified, one
-  realization per condition; the test chromosome is cached and certified; the fl-gap side panels are to be re-simulated and the
-  junction-probed twin retired — `panel.py status`, `ISSUES: flgap-panels-stale-nascent-model`,
-  `ISSUES: expand-the-gdna-spectrum`.
+  realization per condition; the test chromosome is cached and certified; the fl-gap side panels and the junction-probed
+  twin were re-simulated on the current simulator, cached and certified on 2026-10-03, with the ladder's nascent block
+  and no FASTQs — `panel.py status`, `docs/TESTING.md`, `ISSUES: expand-the-gdna-spectrum`.
 - **Reading rules**: rank per stratum, never pooled (`TRAPS: never-pool-the-strata`); quote `mwae` / Σ|err| over every
   object with mass (`calibration_vs_oracle.py`), never an intermediate (`TRAPS: the-intermediate-is-not-the-deliverable`).
 
@@ -176,8 +178,7 @@ mechanism yet · the message layer on unstranded capture-OFF (`ISSUES: message-l
 - **Tier 4, batched between A/B windows**; anything that moves a number takes a window of its own: the rest of
   `ISSUES: performance-memory-bounded-solve`, proven with `rename_identity.py --bam` · the rest of
   `ISSUES: hygiene-ledger`, the comment and doc sweep and the test gaps · `ISSUES: instrument-ledger` ·
-  `ISSUES: debug-capture-memory-is-unbounded`, a src change · the panels (`ISSUES: flgap-panels-stale-nascent-model`,
-  `ISSUES: expand-the-gdna-spectrum` with the junction-probed twin's retirement).
+  `ISSUES: debug-capture-memory-is-unbounded`, a src change · the panels (`ISSUES: expand-the-gdna-spectrum`).
 
 **Parked and deferred — Tier 5, each with its entry.** Deferred past 0.8.0: the deferred stratum, with
 `ISSUES: a-pure-gdna-library-reads-as-nascent-rna` kept as an open challenge ·

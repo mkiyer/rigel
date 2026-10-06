@@ -1162,15 +1162,22 @@ fragment of each exon. The junction ADDS its two sides' exon capture: where the 
 `c_lo + c_hi`, twice the two boundaries' mean (`ISSUES: the-junction-price-at-its-neighbours-mean`). An
 intron piece too short to contain a gDNA fragment (`gdna_region_eff_len == 0`) has no count of its own — its
 efficiency is the population's, which is not local — and reads the boundary on its far side instead, so an
-intron that is one such region prices its junction at `½(c_lo + c_hi)`. The price is never below 0 and is
-not clipped at 1: each boundary is clipped as a whole fragment's efficiency, but in the sum it stands for
-half a fragment of exon, so two well-captured sides can exceed 1 and `eff_em` can exceed `fl` where such
-junctions carry a transcript (`ISSUES: a-junction-price-clipped-at-one`). Two limits of the derivation:
-capture that binds a fragment through its best single probe part adds less than the sum where both exons
-carry separate probes; and the price is a sum and difference of four posteriors, so its variance is theirs
-added. Measured, the within-gene spread the price leaves is mostly the first limit's, not the posteriors' noise
-(`ISSUES: the-junction-price-is-noisy-within-a-gene`; pooling junctions is refused,
-`ISSUES: pooling-junctions`).
+intron that is one such region prices its junction at `½(c_lo + c_hi)`. The derivation assumes capture adds
+over a fragment's bases, and capture saturates instead: a fragment binds its best single probe part, so a
+junction fragment is captured no more than one wholly inside a fully captured piece, and the price is held to
+
+    c_junction  =  min( max( c_lo + c_hi − ½(c_intron,lo + c_intron,hi), 0 ), 1 ).
+
+Where probes tile both exons to their edges, a gDNA fragment crossing either boundary still binds most of a
+probe, so `c_lo` and `c_hi` each read most of their exon's level (0.835 on the test chromosome's panel, against
+the ½ the additive field gives) and the uncapped sum reads about 1.67: twice the junction's exon capture
+(`ISSUES: the-junction-sum-over-prices-separately-probed-exons`). Under one probe part spanning the junction the
+sum is exact and may exceed 1 (a junction fragment overlaps more probe than a contained one), and the cap
+under-prices it; gDNA cannot tell the two layouts apart where both sides are captured, and the price does not
+try (owner, 2026-10-05; `DESIGN.md` §7.2). The price is also a sum and difference of four posteriors, so its
+variance is theirs added; measured, the within-gene spread it leaves is mostly capture physics no gDNA object
+sees, not the posteriors' noise (`ISSUES: the-junction-price-is-noisy-within-a-gene`; pooling junctions is
+refused, `ISSUES: pooling-junctions`).
 
 **The efficiency is the object's own posterior mean (`capture_efficiency.capture_efficiencies`).** gDNA is one
 template at a uniform rate before capture, so its density after capture at an object is the object's

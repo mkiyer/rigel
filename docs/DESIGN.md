@@ -1711,6 +1711,14 @@ witness), the likelihood-kernel estimator, the all-kernel E-step and six refits.
 
 ### 7.2 The ruler reads the landscape's located enriched mode (2026-09-14; `ISSUES: g00-shrinkage-upstream-repair` CLOSED)
 
+**Capture is a spectrum (owner, 2026-10-05).** There is never a binary capture-ON versus capture-OFF: a plasma panel
+enriches scarce transcripts that stay a tiny fraction of the library, so any library-level statistic reads the
+uncaptured background. No capture detector, library-level test or on/off status is to be built; every capture weight
+is per object or per placement and continuous, and "no enrichment" is the limit where the estimated weights are 1.
+The reader below, whose `None` switches every correction off, is such a decision and is a defect to replace, not a
+design: it quantifies the two sparse plasma libraries (LBX0190, MO_3021) as uncaptured where 0.7.1 contracts them
+(2026-10-05).
+
 The EM's effective length under capture (`capture_eff_length`, `priors.assemble_priors`, `EQUATIONS.md` §11)
 contracts every component by the capture efficiencies of the objects its fragments deposit on, each an
 object's gDNA density against a reference `ρ_ref`, the fully-captured level. THE RULING: `ρ_ref` is the
@@ -1799,12 +1807,18 @@ not is derived in `EQUATIONS.md` §11.
 object gDNA measures prices one directly. THE RULING: `c_junction = c_lo + c_hi − ½(c_intron,lo + c_intron,hi)`,
 the efficiencies at the sj's low and high boundaries (§0) less the intron pieces just inside them, derived in
 `EQUATIONS.md` §11. An intron piece too short to contain a gDNA fragment has no count of its own and reads the
-boundary on its far side. The price is never below 0 and is not clipped at 1
-(`ISSUES: a-junction-price-clipped-at-one`). Only the objects within one fragment of the junction enter (ruling 2
-below), and no panel input: a junction-spanning probe is read from gDNA through the crossings at the sj's two
-boundaries (`ISSUES: ruler-witness-geometry-on-transcript-panels`). The within-gene spread the price leaves is
-mostly that capture physics, which no gDNA object sees, and not its posteriors' noise; the owner accepts the sum
-for now (2026-09-23; `ISSUES: the-junction-price-is-noisy-within-a-gene`).
+boundary on its far side. The price is never below 0 and NEVER ABOVE 1 (owner, 2026-10-05, reversing the
+2026-09-23 refusal): capture saturates — a fragment binds its best single probe part, so a fragment across a
+junction is captured no more than one wholly inside a fully captured piece. Where probes tile the exons to their
+edges each boundary reads most of the exon's level, not half of it, and the uncapped sum counted the junction's
+exon capture about twice: the test chromosome's stranded × capture-ON transcripts read 13.89 % against 0.7.1's 8.58 %,
+and 7.19 % with the cap (`ISSUES: the-junction-sum-over-prices-separately-probed-exons`). Where both sides of a
+junction are captured, gDNA cannot tell two probes from one probe spanning the junction, and the price does not
+try: in real panels the two capture almost the same fragments (owner, 2026-10-05). Only the objects within one
+fragment of the junction enter (ruling 2 below), and no panel input: a junction-spanning probe is read from gDNA
+through the crossings at the sj's two boundaries (`ISSUES: ruler-witness-geometry-on-transcript-panels`). The
+within-gene spread the price leaves is mostly that capture physics, which no gDNA object sees, and not its
+posteriors' noise (2026-09-23; `ISSUES: the-junction-price-is-noisy-within-a-gene`).
 
 The rulings behind it (owner):
 
