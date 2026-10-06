@@ -70,7 +70,7 @@ strand_specificities: [0.99, 0.50]
 # Adds nRNA on top of mature RNA. Single-exon transcripts always get nRNA = 0.
 # Ignored when the abundance file already supplies nrna_abundance.
 nrna:
-  mode: additive_ratio       # additive_ratio | fragment_share | sparse
+  mode: additive_ratio       # additive_ratio | sparse
   # additive_ratio — every expressed multi-exon transcript: nRNA = mRNA × ratio.
   ratios: [0.0]              # one condition per ratio (0.0 = no nascent RNA)
   ratio_labels: [none]

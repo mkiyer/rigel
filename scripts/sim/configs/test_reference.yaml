@@ -11,10 +11,9 @@
 # abundance TSV and the probe panels from it, and the FASTA, the index and this sweep are derived.
 # `docs/TESTING.md` §0a.
 #
-# ⚠ THE `nrna:` BLOCK BELOW IS DEAD BY DESIGN under `abundance.mode: file`: the TSV's
-# `nrna_abundance` column is the ONE source of nascent weight, pooled onto the index's nascent
-# entities, so the sweep is skipped and every condition is labelled `nrna_file`. It is INERT — editing
-# its numbers changes nothing, and it is retained only so the file reads like the other panel configs.
+# ⚠ NO `nrna:` BLOCK, BY DESIGN: under `abundance.mode: file` the TSV's `nrna_abundance` column is
+# the ONE source of nascent weight, pooled onto the index's nascent entities, so the nascent sweep is
+# skipped and every condition is labelled `nrna_file`.
 #
 # ⭐⭐⭐ TWO AXES ARE CARRIED BY THE SUBSTRATE, not by this file (owner, 2026-08-27):
 #
@@ -78,12 +77,6 @@ gdna:
 # that says whether a policy degrades gracefully across the transition.
 strand_specificities: [0.50, 0.70, 0.99]
 
-# ⛔ INERT under `abundance.mode: file` — the nascent weights come from `test_abundances.tsv`, rendered from
-# the YAML's `nrna_abundance` (the header). Do not "fix" nascent RNA by editing this block.
-nrna:
-  mode: fragment_share
-  shares:       [0.0]
-  ratio_labels: [none]
 
 capture:
   probe_format: bed12

@@ -29,7 +29,6 @@ from .truth import write_post_capture_truth
 from .capture import CaptureSampler
 from .wgs_engine import WholeGenomeSimulator
 from .whole_genome import (
-    apply_nrna_fragment_share,
     apply_nrna_ratio,
     apply_sparse_nrna,
     write_truth_abundances,
@@ -151,7 +150,7 @@ def run_condition_grid(
 
     ``nrna_pairs`` entries are ``(label, mode, value, index)`` (see ``whole_genome._build_nrna_pairs``).
     The modes reach the entities by two different routes and the difference is the point:
-    ``additive_ratio`` and ``fragment_share`` pool each entity's molecules from its contributors
+    ``additive_ratio`` pools each entity's molecules from its contributors
     (`whole_genome.assign_nrna_to_entities`, so nascent tracks mature and cannot exceed it), while
     ``sparse`` writes each entity's absolute abundance directly (`whole_genome.apply_sparse_nrna`, so
     most entities get exactly zero and the rest are independent of the mature level). ``file`` leaves
@@ -188,15 +187,9 @@ def run_condition_grid(
 
         nrna_ratio: float | None = None
         nrna_abundance_range: tuple[float, float] | None = None
-        nrna_share: float | None = None
         if nrna_mode == "additive_ratio":
             nrna_ratio = float(nrna_value or 0.0)
             apply_nrna_ratio(cond_transcripts, nrna_ratio)
-        elif nrna_mode == "fragment_share":
-            # the config states the nascent share of RNA fragments; the molecular ratio is solved
-            # from the annotation (`whole_genome.apply_nrna_fragment_share`) and recorded per condition
-            nrna_share = float(nrna_value or 0.0)
-            nrna_ratio = apply_nrna_fragment_share(cond_transcripts, nrna_share, sim)
         elif nrna_mode == "sparse":
             # nascent is absent from most gene spans and independent of the mature level where it
             # is present; the fragment share is emergent and recorded below
@@ -253,7 +246,6 @@ def run_condition_grid(
                         "nrna_label": nrna_label,
                         "nrna_mode": nrna_mode,
                         "nrna_ratio": nrna_ratio,
-                        "nrna_fragment_share": nrna_share,
                         "nrna_abundance_range": nrna_abundance_range,
                         "nrna_on_fraction": (nrna.on_fraction if nrna_mode == "sparse" else None),
                         "capture_label": capture_scenario.label,

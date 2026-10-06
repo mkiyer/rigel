@@ -64,19 +64,21 @@ arms, so a real repair must move them in opposite directions.
 |---|---|---|
 | config | `scripts/sim/configs/flgap_rna_long.yaml` | `scripts/sim/configs/flgap_rna_short.yaml` |
 | gDNA / RNA fl configured | 75 ± 20 / 250 ± 60 | 250 ± 60 / 75 ± 20 |
-| gDNA / RNA fl measured | 78.58 / 247.62 (gap +169 bp) | 249.59 / 78.43 (gap −171 bp) |
+| gDNA / RNA fl measured, capture OFF | 78.58 / 247.63 (gap +169.1 bp) | 249.59 / 78.43 (gap −171.2 bp) |
+| gDNA / RNA fl measured, capture ON | 81.69 / 252.69 (gap +171.0 bp) | 258.82 / 81.54 (gap −177.3 bp) |
 | conditions | `g50` × ss {0.50, 0.99} × capture {off, on} | the same 4 |
-| nascent RNA | `mode: fragment_share`, `shares: [0.20]` | the same |
+| nascent RNA | the ladder's `sparse` block, verbatim | the same |
 
-The configured lengths are a configuration and the gap is a measurement (the sampler is a rejection draw
-truncated to `[frag_min, frag_max]`): read it off the payload's deposit histograms. What may be read off these arms is everything that stops
-before the EM (`calibration_vs_oracle.py`) and the library gDNA fraction; the
-transcript-level number is not a calibration result here, because a length gap hands the EM the answer.
-
-⛔ **Both side panels carry a different nascent model from the ladder** — `fragment_share` at a flat
-0.20 on every expressed multi-exon span against the ladder's `sparse`. Each panel's data matches its own
-config, so every measurement taken on either arm stands, but a ladder-vs-side-panel comparison varies
-two things and no claim may be carried across them (`ISSUES: flgap-panels-stale-nascent-model`).
+Re-simulated 2026-10-03 on the current simulator — the one-contiguous-part capture physics and the
+ladder's sparse nascent model, no FASTQs — so the fragment-length gap is the ONLY difference from the
+ladder and a claim may be carried across them. The panels simulated before that date carried the retired
+uniform nascent model and the old capture physics; they were deleted and every number measured on them is
+void. The configured lengths are a configuration and the gap is a measurement (the sampler is a rejection
+draw truncated to `[frag_min, frag_max]`): the table reads it count-weighted off each condition's
+`truth_fragment_lengths.tsv`. A calibration mechanism is RANKED here only by what stops before the EM
+(`calibration_vs_oracle.py`) and the library gDNA fraction: a length gap hands the EM part of the answer,
+so the transcript table never ranks calibration. It is still read, per stratum, as the tool's end-to-end
+accuracy on a library with this gap, and a length mechanism is judged on BOTH arms beside the ladder.
 
 ### The third fl panel — on the test chromosome, on the current nascent model
 
@@ -87,8 +89,7 @@ two things and no claim may be carried across them (`ISSUES: flgap-panels-stale-
 | conditions | the full 30 of §0a | the same 30 | the same 30 |
 
 These carry the current nascent model structurally: the test reference is `abundance.mode: file`, so
-each config's `nrna:` block is dead by design and nascent comes from `test_abundances.tsv`. The suite
-arms' stale nascent model therefore does not block work on the fl gap. The equal-200 arm is the control:
+nascent comes from `test_abundances.tsv`. The equal-200 arm is the control:
 an fl-gap result that also moves on the equal-length arm is an artefact.
 
 ### Every scenario must be cached — a requirement of the 0.8.0 loop
@@ -313,7 +314,7 @@ covers the span). `transcript_filter` is refused — filter the GTF before build
 
 | | |
 |---|---|
-| nascent RNA is a transcript, not a parallel space | its molecules are `entity.nrna_abundance`, sampled on its own template, its reads keep the `nrna_` origin tag. Under `sparse` the level is drawn per entity — off with probability `1 − on_fraction`, else log-uniform over `abundance_ranges`, independent of the mature level; under `additive_ratio` and `fragment_share` it is `Σ abundance × nrna_ratio` over contributors |
+| nascent RNA is a transcript, not a parallel space | its molecules are `entity.nrna_abundance`, sampled on its own template, its reads keep the `nrna_` origin tag. Under `sparse` the level is drawn per entity — off with probability `1 − on_fraction`, else log-uniform over `abundance_ranges`, independent of the mature level; under `additive_ratio` it is `Σ abundance × nrna_ratio` over contributors |
 | one multinomial over every RNA row | mature and entity rows together, `prob ∝ abundance × capture-aware effective length`; the mature/nascent split follows from molecules and lengths, so a nascent-on condition and its nascent-off twin do not share a bit-identical mature stream |
 | capture binds by genomic overlap | every probe → genomic blocks → gDNA, projected onto every transcript whose exons it touches, either strand (ds-cDNA at capture). A fragment binds through ONE contiguous part of a probe: a transcript holding the junction a probe spans holds it whole, while gDNA, a nascent span and an isoform without the junction hold its parts apart and bind the better one — never the sum, and with no other penalty, since the part a molecule holds binds alike whatever the molecule (owner, 2026-09-19; it replaced a `gdna_split_penalty` of 0.2 that bound a gDNA half-match at a fifth of the identical cDNA one). gDNA and nascent are enriched at the same rate under one probe, which is the physics |
 

@@ -92,58 +92,6 @@ def test_a_multi_exon_contributor_with_no_entity_is_a_defect_not_a_skip():
         apply_nrna_ratio([orphan], 0.25)
 
 
-def test_fragment_share_solves_the_molecular_ratio_from_the_annotation():
-    """A panel states the nascent FRAGMENT share, and the molecular ratio is derived from it. A
-    nascent ENTITY spans a whole gene while a mature transcript is spliced, so the two are NOT
-    interchangeable: at a 10x length ratio a molecular ratio of 0.25 is nowhere near a 25 % fragment
-    share, and the panel's meaning would move silently.
-
-    PERTURBATIONS: (a) the solved share must be REACHED — feeding the solved ratio back through the
-    weights reproduces the target; (b) the naive reading (ratio = share) must NOT reach it, or the
-    solve is doing nothing; (c) share 0 leaves no nascent at all.
-    """
-    from rigel.sim.whole_genome import (
-        apply_nrna_fragment_share,
-        apply_nrna_ratio,
-        expected_rna_weights,
-    )
-    from rigel.sim.wgs_config import SimulationParams
-
-    sim = SimulationParams(frag_mean=200, frag_std=40, frag_min=100, frag_max=400)
-    # one mature transcript of 2,000 spliced bp; its entity spans 20,000 bp — the 10x that matters
-    mature = _transcript("T", 100.0, [(0, 1000), (19000, 20000)])
-    mature.t_index = 0
-    mature.nrna_t_index = 1
-    entity = _entity("N", 0, 20000, 1)
-    rows = [mature, entity]
-
-    ratio = apply_nrna_fragment_share(rows, 0.20, sim)
-    w_m, w_n = expected_rna_weights(rows, sim)
-    assert w_n / (w_m + w_n) == pytest.approx(0.20, abs=1e-9), (
-        "(a) the target share must be reached"
-    )
-    assert ratio == pytest.approx(0.0227, abs=5e-4), "the derived ratio is ~10x below the share"
-
-    apply_nrna_ratio(rows, 0.20)  # (b) the naive reading
-    w_m2, w_n2 = expected_rna_weights(rows, sim)
-    assert w_n2 / (w_m2 + w_n2) > 0.65, "(b) a molecular ratio of 0.20 gives a MUCH larger share"
-
-    assert apply_nrna_fragment_share(rows, 0.0, sim) == 0.0  # (c)
-    assert entity.nrna_abundance == 0.0
-
-
-def test_fragment_share_refuses_an_unreachable_target():
-    """With no expressed multi-exon transcript there is no nascent opportunity, and a nonzero share
-    is unreachable — that must raise, not silently produce a nascent-free library."""
-    from rigel.sim.whole_genome import apply_nrna_fragment_share
-    from rigel.sim.wgs_config import SimulationParams
-
-    single = _transcript("S", 100.0, [(0, 2000)])
-    single.t_index = 0
-    with pytest.raises(ValueError, match="unreachable"):
-        apply_nrna_fragment_share([single], 0.2, SimulationParams())
-
-
 def test_the_fl_pmf_is_the_one_the_engine_draws_from():
     """The share solve integrates over the fragment-length pmf. If that pmf were not the engine's,
     the solved ratio would be right about a distribution nothing samples.

@@ -88,17 +88,10 @@ class NRNAConfig:
       readable on its own.
     - ``additive_ratio`` (via ``ratios``): each entry adds nascent RNA at a fixed ratio of mature
       RNA, ``nrna_abundance = mrna_abundance * ratio``.
-    - ``fragment_share`` (via ``shares``): each entry states the nascent share of RNA *fragments*
-      in the uncaptured library, and the simulator solves for the common molecular scale that
-      produces it. It exists because the two quantities are far apart: a nascent entity spans a
-      whole gene while a mature transcript is spliced, so even a small molecular ratio puts most
-      RNA fragments in nascent RNA. The scale is solved on uncaptured effective lengths, so it
-      fixes the library's molecular composition and the realised fragment share then differs under
-      capture, which is the physics — capture acts after the molecules exist.
 
-    Both ratio modes put nascent RNA on every expressed multi-exon span at one level: nascent mass
+    The ratio mode puts nascent RNA on every expressed multi-exon span at one level: nascent mass
     tracks mature abundance and can never exceed it, and no intron is ever exactly nascent-free. A
-    tool developed only against them is designed around nascent RNA rather than robust to it, which
+    tool developed only against it is designed around nascent RNA rather than robust to it, which
     is what ``sparse`` exists to exercise.
 
     When abundances come from a file that already contains explicit nRNA data, the configured sweep
@@ -109,8 +102,6 @@ class NRNAConfig:
     ratios: list[float] = field(default_factory=lambda: [0.0])
     #: per-condition (lo, hi) for the log-uniform absolute nascent abundance, for ``mode="sparse"``
     abundance_ranges: list[tuple[float, float]] | None = None
-    #: nascent share of RNA fragments in the uncaptured library, for ``mode="fragment_share"``
-    shares: list[float] | None = None
     #: labels the condition whatever the quantity swept (ratios, shares or abundance ranges)
     ratio_labels: list[str] | None = None
     #: fraction of eligible gene spans that carry nascent RNA at all, for ``mode="sparse"``

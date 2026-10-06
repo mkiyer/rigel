@@ -17,18 +17,16 @@ Nascent RNA
 -----------
 Nascent abundance lives on the nascent entities: every multi-exon transcript links through
 ``nrna_t_index`` to one entity spanning its TSS/TES cluster, and annotated multi-exon transcripts
-always end with ``nrna_abundance = 0``. Three modes set the entity levels. ``sparse``
+always end with ``nrna_abundance = 0``. Two modes set the entity levels. ``sparse``
 (``abundance_ranges`` + ``on_fraction``) switches each entity on with probability ``on_fraction``
 and draws its level log-uniformly over ``(lo, hi)``; that level is absolute and independent of the
 mature level, so ``nascent > mature`` occurs and the nascent fragment share is emergent rather
-than solved — priceable with :func:`expected_rna_weights`. ``additive_ratio`` (``ratios``) and
-``fragment_share`` (``shares``) are the ratio modes: an entity's molecules are the sum over its
-contributors of ``contributor.abundance x nrna_ratio``, so nascent mass tracks mature abundance
-and cannot exceed it. ``additive_ratio`` states the ratio directly; ``fragment_share`` states the
-nascent share of RNA fragments in the uncaptured library and solves for the ratio that produces it
-(:func:`apply_nrna_fragment_share`). Under every mode, sampling is one multinomial over all RNA
-rows, mature and entity alike, with probability proportional to abundance x effective length, so
-the fragment share follows from the molecules and their lengths and is never imposed.
+than solved — priceable with :func:`expected_rna_weights`. ``additive_ratio`` (``ratios``) is the
+ratio mode: an entity's molecules are the sum over its contributors of
+``contributor.abundance x nrna_ratio``, so nascent mass tracks mature abundance and cannot exceed
+it. Under either mode, sampling is one multinomial over all RNA rows, mature and entity alike, with
+probability proportional to abundance x effective length, so the fragment share follows from the
+molecules and their lengths and is never imposed.
 
 Budget and grid
 ---------------
@@ -295,13 +293,8 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     nrna_raw = raw.get("nrna", {})
     nrna = cfg.nrna
     nrna.mode = str(nrna_raw.get("mode", nrna.mode))
-    if nrna.mode not in {"additive_ratio", "sparse", "fragment_share"}:
-        raise ValueError("nrna.mode must be 'additive_ratio', 'fragment_share' or 'sparse'")
-    raw_shares = nrna_raw.get("shares", None)
-    if raw_shares is not None:
-        nrna.shares = [float(x) for x in raw_shares]
-    if nrna.mode == "fragment_share" and nrna.shares is None:
-        raise ValueError("nrna.shares is required for mode='fragment_share'")
+    if nrna.mode not in {"additive_ratio", "sparse"}:
+        raise ValueError("nrna.mode must be 'additive_ratio' or 'sparse'")
     raw_ratios = nrna_raw.get("ratios", None)
     if raw_ratios is not None:
         nrna.ratios = [float(r) for r in raw_ratios]
@@ -326,7 +319,6 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     # still named for the nascent label, which looks like the configured scenario and is another one.
     _MODE_FIELDS = {
         "additive_ratio": ("ratios",),
-        "fragment_share": ("shares",),
         "sparse": ("abundance_ranges", "on_fraction"),
     }
     _ignored = sorted(
@@ -345,11 +337,6 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
         raise ValueError("nrna.on_fraction must be between 0 and 1")
     if nrna.mode == "additive_ratio":
         expected_len = len(nrna.ratios)
-    elif nrna.mode == "fragment_share":
-        for share in nrna.shares or []:
-            if not 0.0 <= share < 1.0:
-                raise ValueError("nrna.shares entries must satisfy 0 <= share < 1")
-        expected_len = len(nrna.shares or [])
     else:
         for lo, hi in nrna.abundance_ranges or []:
             # a log-uniform draw has no zero end: express "no nascent" with on_fraction = 0
@@ -782,52 +769,6 @@ def expected_rna_weights(
     return float((am * eff).sum()), float((an * eff).sum())
 
 
-def apply_nrna_fragment_share(
-    transcripts: list[Transcript], share: float, sim: "SimulationParams"
-) -> float:
-    """Set nascent molecules so that nascent takes ``share`` of the RNA *fragments* in the uncaptured
-    library, and return the molecular ratio that achieves it.
-
-    A config states the fragment share rather than the molecular ratio because the two are far apart
-    and the map between them is a property of the annotation, not a number to hand-write:
-    a nascent entity spans a whole gene while a mature transcript is
-    spliced, so a modest molecular ratio already puts most RNA fragments in nascent RNA.
-
-    Each expressed multi-exon transcript contributes ``ratio × abundance`` nascent molecules to its
-    entity, so ``W_nascent`` is linear in the ratio and the solve is exact::
-
-        share = c·W_n1 / (W_m + c·W_n1)   ⇒   c = (share / (1 − share)) · W_m / W_n1
-
-    with ``W_n1`` the nascent weight at ratio 1. The solve runs on uncaptured lengths: it fixes the
-    library's molecular composition, and the realised share then moves under capture, which is
-    physically right because capture acts on molecules that already exist. Requires
-    ``0 <= share < 1``, and raises when no expressed multi-exon transcript has a nascent entity, so
-    the requested share is unreachable.
-    """
-    if not 0.0 <= share < 1.0:
-        raise ValueError(f"nrna share must be in [0, 1); got {share}")
-    if share == 0.0:
-        assign_nrna_to_entities(transcripts, np.zeros(len(transcripts)))
-        return 0.0
-    apply_nrna_ratio(transcripts, 1.0)
-    w_mature, w_nascent_unit = expected_rna_weights(transcripts, sim)
-    if w_nascent_unit <= 0.0:
-        raise ValueError(
-            "no nascent opportunity: no expressed multi-exon transcript has an nRNA entity, so a "
-            f"nascent fragment share of {share} is unreachable"
-        )
-    ratio = (share / (1.0 - share)) * w_mature / w_nascent_unit
-    apply_nrna_ratio(transcripts, ratio)
-    logger.info(
-        "nRNA fragment share %.4g ⇒ molecular ratio %.6g (W_mature=%.4g, W_nascent@1=%.4g)",
-        share,
-        ratio,
-        w_mature,
-        w_nascent_unit,
-    )
-    return ratio
-
-
 def apply_sparse_nrna(
     transcripts: list[Transcript],
     abundance_range: tuple[float, float],
@@ -1038,8 +979,8 @@ def _build_nrna_pairs(
     When the abundance file supplied explicit nRNA data, returns the single entry
     ``("file", "file", None, 0)``: the TSV is the one source of nascent weight and the sweep
     is skipped entirely. Otherwise one entry per configured value of whichever key the mode
-    reads — ``ratios`` for ``additive_ratio``, ``shares`` for ``fragment_share``, and an
-    ``(lo, hi)`` pair from ``abundance_ranges`` for ``sparse``. ``index`` is the entry's
+    reads — ``ratios`` for ``additive_ratio``, and an ``(lo, hi)`` pair from ``abundance_ranges``
+    for ``sparse``. ``index`` is the entry's
     position, which ``sparse`` also folds into its per-condition seed.
     """
     if has_file_nrna:
@@ -1051,13 +992,6 @@ def _build_nrna_pairs(
         for i, ratio in enumerate(cfg.nrna.ratios):
             label = nrna_label_for_ratio(ratio, cfg.nrna.ratio_labels, i)
             pairs.append((label, mode, ratio, i))
-        return pairs
-    if mode == "fragment_share":
-        if cfg.nrna.shares is None:
-            raise ValueError("nrna.shares is required for mode='fragment_share'")
-        for i, share in enumerate(cfg.nrna.shares):
-            label = nrna_label_for_ratio(share, cfg.nrna.ratio_labels, i)
-            pairs.append((label, mode, share, i))
         return pairs
     if mode == "sparse":
         if cfg.nrna.abundance_ranges is None:
@@ -1292,10 +1226,6 @@ def main() -> int:
     # `nrna_abundance` column, which is why the file case prints a conditional line of its own.
     if cfg.nrna.mode == "additive_ratio":
         print(f"  nRNA ratios:      {cfg.nrna.ratios}", flush=True)
-    elif cfg.nrna.mode == "fragment_share":
-        print(
-            f"  nRNA frag shares: {cfg.nrna.shares} (molecular ratio SOLVED per share)", flush=True
-        )
     elif cfg.nrna.mode == "sparse":
         print(
             f"  nRNA ranges:      {cfg.nrna.abundance_ranges} (LOG-uniform, absolute)", flush=True

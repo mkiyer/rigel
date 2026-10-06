@@ -194,7 +194,7 @@ strand_specificities: [0.50, 0.99]
 # prices at a 4.2 % fragment share.
 #
 # ⭐ THE FRAGMENT SHARE IS EMERGENT, and it was PRICED on this index before the panel was rebuilt
-# (`expected_rna_weights`, the same function `fragment_share` inverts): on_fraction 0.50 × logU(1, 100)
+# (`expected_rna_weights`): on_fraction 0.50 × logU(1, 100)
 # ⇒ 1,916/3,662 spans on, molar ratio 0.00895, **20.2 % of RNA fragments**. ⭐⭐ That is the same total
 # nascent burden as the retired uniform 20 % model, distributed SPARSELY — so a behaviour change
 # between the two panels is attributable to the DISTRIBUTION and not to the amount.
