@@ -176,16 +176,17 @@ manifest or rebuild with `--alignable-zarr`. The one-line warning for a feather 
 Instrument: the manifest; `summary.json`'s `sj_blacklist_loaded`.
 
 ### calibration-detects-capture-on-a-capture-off-library
-`priority: now — release-critical: a stranded library whose RNA is shorter than gDNA reads as captured and loses its isoforms; the fix is calibration's per-object counts in the density frame (2026-10-05) · kind: defect · 2026-09-29; mechanism 2026-10-01`
+`priority: now — release-critical: the uncommitted count repair is under review for law-frame and uncertainty defects; a detector-free ruler still fails its small-panel gate (2026-10-06) · kind: defect · 2026-09-29; mechanism 2026-10-01`
 THE SYMPTOM (re-recorded 2026-10-03 on the re-simulated panel, pinned and fractional; the first record, 2026-10-01, was
 on the deleted old-physics panel and read 42.1 / 3.8 %, genes 4.2 / 0.3 %, 102k). On the genome-scale fl-gap arm
 `flgap_rna_short` (realised RNA 78 bp, gDNA 250 bp, 100 bp reads, `g50`), the stranded × capture-OFF library reads
 transcripts 42.3 % against 3.8 % unstranded, genes 3.3 % against 0.3 %, and 80k true mRNA fragments land on nascent RNA
 (false-positive mass 350k against 23k unstranded), while its calibration metric is unremarkable (region mwae 0.011,
-library gDNA 5.01 M against a truth of 5.00 M): the defect sits downstream of the composition, in the reference the
-ruler reads.
+library gDNA 5.01 M against a truth of 5.00 M). That aggregate metric hid the per-object count errors
+established below; the reference magnifies their effect in the EM.
 
-THE MECHANISM (each step measured, `~/Downloads/rigel_runs/prototypes/2026-10-01_shortrna/VERDICT.md`):
+THE OBSERVED FAILURE PATH (2026-10-01; its upstream cause is corrected by the 2026-10-05 map experiments below,
+`~/Downloads/rigel_runs/prototypes/2026-10-01_shortrna/VERDICT.md`):
 1. In a stranded library, calibration's strand deconvolution credits a short exon (about 100 bp) with a fraction of a
    gDNA fragment: its RNA's few wrong-strand reads.
 2. That exon has almost no gDNA opportunity. A 250 bp fragment can rarely be contained in it: the slots that make the
@@ -239,11 +240,12 @@ THE GUARD IS A BAND-AID (owner, 2026-10-02). gDNA's length is a distribution, so
 admitted while its density is still strand noise over a small opportunity. With the guard on, calibration still
 over-attributes gDNA 7× below one position and 3× at one to three; truth 244 against 1,118.
 
-The cause is wider than training: calibration reasons in each object's count frame, and its composition coordinate,
-reference measure and location test equal the density frame only when `E_g = E_r`. On the ladder the mean `|log(E_g/E_r)|`
-is 0.004; on the gap arms it reaches 6 nats. The fix is open, with this entry's capture × length half in
-`ISSUES: the-scorer-reads-a-census-length-law`. The design under review is to give every object the
-opportunity-aware background likelihood introns already have, in §0c.3's spike-and-slab shape.
+The cause is wider than training, but changing the coordinate alone is not a fix: for fixed total and opportunity,
+`Var(log rho_g) = Var(log f_g)`. The measured defect is transporting COUNT odds as if the component opportunities
+were equal. On the ladder the mean `|log(E_g/E_r)|` is 0.004; on the gap arms it reaches 6 nats. The component
+opportunities must enter each message map, as the experiments below establish. The separate capture × length
+half remains in `ISSUES: the-scorer-reads-a-census-length-law`; these results do not establish a new training rule
+or a spike-and-slab background likelihood as necessary.
 
 The guard's one cost, g98 ss0.70 ON, is not the length mechanism. The guard drops one slot. Three both-stranded objects
 whose composition is the median of a multimodal, prior-decided posterior flip modes on that one kernel: 0.30 → 0.035 per
@@ -279,6 +281,329 @@ in cannot hold gDNA and one RNA cannot sit in cannot hide it, with this table as
 Instrument: `~/Downloads/rigel_runs/prototypes/2026-10-05_spectrum_ruler/` (`dump.py` + `analyze_rs.py` read any
 condition's per-object counts against `slot_truth.npz` in seconds; `harness.py`, `arms.py` arm `pwfx_own_med`; README).
 
+INDEPENDENT CENSUS AND CHANNEL REPLAY (2026-10-05, `a7b03103`; fresh calibrations of validated cached scans,
+default calibration threads, 3.4–22.5 s per row). Every calibration/oracle per-object total agrees within
+`7.3e-12`. The reporting predicate is explicit: `abs(k-g) > 5 sqrt(max(g,1))`, and
+`k/max(g,1) > 3` or `< 1/3`. This is a diagnostic cutoff, not a calibrated uncertainty test for deconvolution.
+
+| capture-OFF row | regions over: objects / excess | regions under: objects / deficit | boundaries over: objects / excess |
+|---|---|---|---|
+| RNA-short · stranded | 173 / 2,351 | 156 / 16,115 | 1 / 714 |
+| RNA-short · unstranded | 34 / 941 | 205 / 23,010 | 12 / 120 |
+| RNA-long · stranded | 17 / 433 | 0 / 0 | 664 / 7,750 |
+| RNA-long · unstranded | 136 / 30,594 | 0 / 0 | 1,431 / 55,105 |
+
+The original census reproduces exactly. Its "short-exon" label is not a complete classification: the
+173 flagged regions have median opportunity 1.387, but include larger and both-strand objects; one region
+alone contributes 911 of the 2,351 excess fragments. Inspect signatures/opportunities and zero-truth
+objects separately rather than requiring this entire mixed set to disappear through one mechanism.
+
+Holding the final landscape, strand model, opportunities and lattice FIXED, a local solve without messages
+restores the two principal groups:
+
+| original flagged group | oracle gDNA | full solve | local evidence + same factory/landscape |
+|---|---:|---:|---:|
+| RNA-short stranded · 156 under-called regions | 16,878 | 763 | 16,575 |
+| RNA-long unstranded · 136 over-called regions | 3,146 | 33,740 | 4,821 |
+| RNA-long unstranded · 1,431 over-called boundaries | 3,897 | 59,002 | 6,108 |
+
+Six representative RNA-short introns and seven RNA-long regions/boundaries were replayed in complete
+locus blocks with the global reductions retained. Block outputs reproduce production bit-identically;
+reconstructing the final solve from the captured received tables agrees within `1e-14` in fraction.
+Removing the responsible **composition** row restores the local answer; removing either RNA level lane
+or the gDNA level lane changes none of these examples. RNA-short slot 9604: truth 407, full 0.282,
+without left composition 394.104, without right composition 394.458. RNA-long slot 5071: truth 8, full
+1,625.601, without left composition 4.217. RNA-long slot 33731 has harmful composition on BOTH sides:
+one-sided removals alone retain a large over-call, so an ablation must include joint removal.
+
+This refutes the RNA-level-lane explanation for the inspected introns and does not implicate the
+duplicated prior as the necessary cause of these groups. Four independent counterexamples then establish
+the composition maps' opportunity defects, under **Density is the frame-invariant currency; a fraction
+is not** (`EQUATIONS.md`). Each uses analytic contained/crossing opportunities for a known density mixture,
+both length-gap directions and an equal-length control, with and without certified splice flux:
+
+1. The reverse licensed splice map substituted gDNA opportunity for RNA's and `S/Eg` for the actual
+   route rate, although the forward map already used the correct quantities. Correcting the reverse
+   map removes all 156 RNA-short stranded under-calls, but exposes 105 under-calls on RNA-long stranded.
+2. The intron–boundary face forwarded count odds unchanged. Shared densities instead require
+   `lambda_dst-lambda_src = log(Eg_dst/Eg_src)-log(Er_dst/Er_src)`. Correcting both directions reduces
+   RNA-long unstranded boundary over-calls from 1,155 to 591, but is insufficient alone.
+3. Both alternative-splice-site flank maps also substituted gDNA opportunity for RNA's. Their
+   disagreement-width center compared count odds instead of the map's prediction. Correcting these
+   removes the remaining RNA-short under-calls AND the false enriched landscape mode, with no training
+   change. RNA-long unstranded region excess falls from 33,619 to 1,444 fragments.
+4. The outside flank at an exon–exon terminus made the same substitution. Correcting it removes
+   the remaining 26 RNA-long stranded under-calls and reduces RNA-long unstranded boundary excess
+   from 10,142 to 117 fragments. The inside level rule is unchanged.
+
+Each cumulative arm was freshly calibrated on all four OFF rows before proceeding; no transcript A/B
+was spent on the intermediate arms that still failed the count screen. Final prototype census:
+
+| capture-OFF row | regions over: objects / excess | regions under: objects / deficit | boundaries over: objects / excess |
+|---|---|---|---|
+| RNA-short · stranded | 20 / 198 | 0 / 0 | 0 / 0 |
+| RNA-short · unstranded | 34 / 942 | 0 / 0 | 13 / 141 |
+| RNA-long · stranded | 17 / 196 | 0 / 0 | 3 / 28 |
+| RNA-long · unstranded | 42 / 1,444 | 0 / 0 | 10 / 117 |
+
+There are no flagged boundary under-calls. Residual zero-truth synthetic objects remain; this is not
+a claim that every inferred count is exact. The capture-ON screen improves absolute gDNA-count error
+in every object class of both stranded rows; the deferred unstranded RNA-long row is mixed. The
+four map families' falsification gates fail before each edit (4, 4, 18 and 8 cases respectively),
+and all 48 pass afterward. Restoring the wrong opportunity, rate or identity in the prepared native
+tables makes the corresponding gates fail again. No landscape weight, prior, capture detector,
+training guard or new tunable was added. After the full panel gate, these four map repairs were
+copied from the isolated native worktree into the working tree on 2026-10-06, with their derivation
+and tests; the owner still drives the commit. The ruler is unchanged.
+
+The first pinned/fractional transcript A/B changes those maps **and the alternative-splice discrepancy
+center**, with calibration and EM threads at their defaults and four condition shards. The latter also
+changes widths at equal component opportunities and was not A/B'd separately. The test chromosome beats 0.7.1 in all twelve strata
+(the three strand specificities × capture labels, with zero-gDNA controls separate); it still loses
+against the current tree on several stranded rows. The worst per-condition change there is g98
+ss0.70 ON: transcripts 46.92 → 69.50 %, genes 19.51 → 42.44 %, against release 55.98 / 39.60 %.
+That condition must not disappear behind its stratum average. The complete RNA-short A/B is:
+
+| transcripts / genes (%) | 0.7.1 | current `a7b03103` | component-opportunity maps |
+|---|---:|---:|---:|
+| stranded × OFF | 6.31 / 0.44 | 42.30 / 3.28 | 3.53 / 0.23 |
+| stranded × ON | 20.33 / 3.52 | 19.97 / 1.53 | 13.33 / 1.40 |
+| unstranded × OFF | 6.00 / 0.61 | 3.78 / 0.27 | 3.79 / 0.27 |
+| unstranded × ON | 29.76 / 6.19 | 19.41 / 2.34 | 17.57 / 2.23 |
+
+The captured stranded improvement weakens the supposed ~20 % capture-by-length floor: this map-only
+repair already reaches 13.33 %. The opposite gap passes too:
+
+| RNA-long: transcripts / genes (%) | 0.7.1 | current `a7b03103` | component-opportunity maps |
+|---|---:|---:|---:|
+| stranded × OFF | 5.23 / 0.46 | 2.26 / 0.19 | 2.27 / 0.19 |
+| stranded × ON | 7.38 / 1.62 | 4.48 / 0.68 | 4.23 / 0.66 |
+| unstranded × OFF | 5.29 / 0.59 | 2.13 / 0.22 | 2.16 / 0.22 |
+| unstranded × ON | 28.99 / 5.84 | 6.86 / 0.95 | 6.55 / 0.94 |
+
+The g98 ss0.70 ON test-chromosome regression is a refitted-landscape effect, not an erroneous final
+map at those objects. On slots 2962 / 3010 / 2986, oracle gDNA is 3,137 / 2,904 / 3,034; estimates
+move 2,949 / 2,438 / 2,989 → 341 / 319 / 2,241. Crossing the two frozen final-sweep inputs and
+their two landscapes, under BOTH native implementations, reproduces those numbers exactly according
+to the landscape alone. The reference is unchanged at 3.196705. The earlier claim that these exons
+lack local evidence is withdrawn: the archived strand-only replay gives 3,106 / 2,822 at the first
+two slots, near truth 3,137 / 2,904; strand plus landscape gives about 30 / 30. The landscape's mass
+in the bands below 0.01, 0.01–0.3 and above 0.3/bp agrees to three decimals (0.696 / 0.027 / 0.277),
+but its relative log density at 0.3/bp deepens from −8.59 to −9.92. Local evidence exists and is
+overridden. ψ uses an interpolated histogram median: low density between modes can make it highly
+sensitive, but is not by itself proof of a mathematical discontinuity. No perturbation sweep has
+yet established the size of this sensitivity for this repair. This residual remains visible,
+rather than being called a uniform count improvement. The completed ladder and alternative probe layouts are below. Every
+transcript stratum beats 0.7.1. One secondary release deficit already present on the current tree
+remains: the ladder's deferred unstranded capture-ON zero control has gene error 3.218 % against
+0.7.1's 3.183 %. The map repair does not cure it. These are Phase 2 measurements, not a completed
+detector-free release A/B.
+
+**Review of the count-map repair, 2026-10-06.** The algebra is conditional on the opportunities it
+receives. `pipeline.run_pipeline` passes the uniform-frame gDNA law and the capture-selected spliced RNA
+law into calibration; the common geometric operator does not make those laws commensurate. The
+frozen equal-chemistry g98 ss0.70 ON input has boundary `log(Eg/Er) = −0.04425` and a maximum region
+value of `1.19842`, identical in both builds. Calibration already used these inputs in other lanes;
+the repair makes additional composition faces read them. All six contaminated ladder ON rows move
+gDNA downward and the nRNA pool upward; all six OFF rows move oppositely. The signed association is
+verified, but the law mismatch's causal share is not isolated. A calibration-only law override also
+changes RNA level lanes and junction rates, so its result alone cannot locate the cause in the maps.
+The length-frame problem's home is `ISSUES: the-scorer-reads-a-census-length-law`.
+
+The alternative-splice discrepancy-center correction is a second mechanism: even at equal
+opportunities `f_b=1/2, U=S=100` predicts odds `1/3`, against `1/2` from the old center. It requires
+its own A/B. The retained width terms also need review. For independent Poisson junction counts,
+the delta-method route-rate log variance is `Σ J/A² / (Σ J/A)²`, not generally `1/Σ J`; it omits
+covariances when junction observations share fragments. At zero certified rate, TRANSPORT still
+blurs with `trigamma(1/2)` while SPLICE_OUT's rate marginal does not. These are not validated as
+one common uncertain factor. Required gates include unequal junction opportunities, mirrored
+route-side builders, shallow-count uncertainty, and the zero-opportunity switch from composition
+to the gDNA level lane. Existing prepared-table perturbations do not cover those builder decisions.
+
+Small transcript-only OFF differences remain measured differences, with attribution unresolved.
+At test g00 ss0.99 OFF, transcripts move 6.99834 → 7.70772%, genes stay 0.83498352%, and the RNA pool
+changes by less than 0.01 fragment. This is consistent with isoform-allocation amplification
+(`ISSUES: benchmark-noise-floors-unmeasured`), but unchanged totals do not prove that a particular
+isoform loss is noise. Neither dismiss the loss nor rank the calibration mechanism on it alone.
+
+Equal-length ladder: transcripts / genes (%), zero-gDNA controls (`g00`) read separately.
+
+| Stratum | 0.7.1 | current `a7b03103` | component-opportunity maps |
+|---|---:|---:|---:|
+| stranded × OFF | 3.95 / 0.44 | 2.02 / 0.25 | 2.02 / 0.25 |
+| stranded × OFF · g00 | 3.70 / 0.47 | 1.93 / 0.13 | 1.93 / 0.14 |
+| stranded × ON | 9.91 / 2.52 | 3.85 / 1.38 | 3.88 / 1.38 |
+| stranded × ON · g00 | 20.22 / 3.47 | 6.46 / 2.36 | 6.47 / 2.36 |
+| unstranded × OFF | 10.29 / 1.49 | 2.29 / 0.31 | 2.29 / 0.31 |
+| unstranded × OFF · g00 | 20.09 / 2.53 | 1.60 / 0.14 | 1.60 / 0.14 |
+| unstranded × ON | 33.21 / 14.25 | 10.42 / 4.33 | 12.40 / 4.47 |
+| unstranded × ON · g00 | 10.22 / 3.18 | 7.27 / 3.22 | 7.27 / 3.22 |
+
+Test chromosome, standard probes: transcripts / genes (%), zero-gDNA controls (`g00`) read separately.
+
+| Stratum | 0.7.1 | current `a7b03103` | component-opportunity maps |
+|---|---:|---:|---:|
+| ss 0.70 × OFF | 9.44 / 1.54 | 8.61 / 1.25 | 8.62 / 1.25 |
+| ss 0.70 × OFF · g00 | 10.06 / 1.47 | 6.61 / 0.90 | 6.59 / 0.90 |
+| ss 0.70 × ON | 10.28 / 3.32 | 6.91 / 1.51 | 7.69 / 1.69 |
+| ss 0.70 × ON · g00 | 13.51 / 6.20 | 8.27 / 2.16 | 8.27 / 2.16 |
+| stranded × OFF | 8.20 / 1.20 | 7.39 / 1.08 | 7.67 / 1.08 |
+| stranded × OFF · g00 | 11.35 / 1.26 | 7.00 / 0.83 | 7.71 / 0.83 |
+| stranded × ON | 8.58 / 2.45 | 7.19 / 0.96 | 7.58 / 0.96 |
+| stranded × ON · g00 | 14.22 / 5.83 | 7.31 / 0.67 | 7.35 / 0.67 |
+| unstranded × OFF | 9.25 / 1.76 | 8.78 / 1.33 | 8.66 / 1.33 |
+| unstranded × OFF · g00 | 9.38 / 1.49 | 5.71 / 1.01 | 5.71 / 1.01 |
+| unstranded × ON | 18.94 / 10.31 | 16.07 / 5.22 | 15.97 / 5.21 |
+| unstranded × ON · g00 | 17.93 / 7.39 | 9.48 / 2.44 | 9.23 / 2.44 |
+
+Test chromosome, junction-spanning probes: transcripts / genes (%), zero-gDNA controls (`g00`) read separately.
+
+| Stratum | 0.7.1 | current `a7b03103` | component-opportunity maps |
+|---|---:|---:|---:|
+| ss 0.70 × OFF | 9.44 / 1.54 | 8.61 / 1.25 | 8.62 / 1.25 |
+| ss 0.70 × OFF · g00 | 10.06 / 1.47 | 6.61 / 0.90 | 6.59 / 0.90 |
+| ss 0.70 × ON | 40.88 / 1.70 | 32.41 / 1.59 | 32.44 / 1.59 |
+| ss 0.70 × ON · g00 | 39.17 / 0.77 | 39.02 / 0.40 | 39.05 / 0.40 |
+| stranded × OFF | 8.20 / 1.20 | 7.39 / 1.08 | 7.67 / 1.08 |
+| stranded × OFF · g00 | 11.35 / 1.26 | 7.00 / 0.83 | 7.71 / 0.83 |
+| stranded × ON | 40.01 / 1.46 | 32.16 / 1.15 | 32.06 / 1.14 |
+| stranded × ON · g00 | 38.99 / 0.41 | 38.75 / 0.09 | 38.75 / 0.09 |
+| unstranded × OFF | 9.25 / 1.76 | 8.78 / 1.33 | 8.66 / 1.33 |
+| unstranded × OFF · g00 | 9.38 / 1.49 | 5.71 / 1.01 | 5.71 / 1.01 |
+| unstranded × ON | 42.33 / 3.28 | 30.26 / 2.23 | 29.20 / 2.23 |
+| unstranded × ON · g00 | 40.58 / 1.35 | 40.40 / 0.96 | 40.40 / 0.96 |
+
+Test chromosome, sparse probes: transcripts / genes (%), zero-gDNA controls (`g00`) read separately.
+
+| Stratum | 0.7.1 | current `a7b03103` | component-opportunity maps |
+|---|---:|---:|---:|
+| ss 0.70 × OFF | 9.44 / 1.54 | 8.61 / 1.25 | 8.62 / 1.25 |
+| ss 0.70 × OFF · g00 | 10.06 / 1.47 | 6.61 / 0.90 | 6.59 / 0.90 |
+| ss 0.70 × ON | 55.26 / 29.42 | 27.47 / 4.95 | 28.17 / 4.94 |
+| ss 0.70 × ON · g00 | 75.66 / 64.73 | 36.58 / 2.37 | 36.70 / 2.37 |
+| stranded × OFF | 8.20 / 1.20 | 7.39 / 1.08 | 7.67 / 1.08 |
+| stranded × OFF · g00 | 11.35 / 1.26 | 7.00 / 0.83 | 7.71 / 0.83 |
+| stranded × ON | 74.76 / 63.06 | 24.37 / 3.15 | 24.44 / 3.14 |
+| stranded × ON · g00 | 45.39 / 24.44 | 35.37 / 0.72 | 35.37 / 0.72 |
+| unstranded × OFF | 9.25 / 1.76 | 8.78 / 1.33 | 8.66 / 1.33 |
+| unstranded × OFF · g00 | 9.38 / 1.49 | 5.71 / 1.01 | 5.71 / 1.01 |
+| unstranded × ON | 95.00 / 66.90 | 40.11 / 13.50 | 39.91 / 13.32 |
+| unstranded × ON · g00 | 76.62 / 64.96 | 37.72 / 2.65 | 37.72 / 2.65 |
+
+Goldens were inspected before their isolated-worktree update: six scenarios change,
+maximum transcript-count change 0.175 fragments; the extreme mixed toy's BAM-certified locus gDNA is
+227 and the estimate moves 192.631 → 204.506 (closer), while the moderate toy's truth is 189 and the
+estimate moves 189.138 → 192.609 (farther). This is an accuracy change, not a numerical no-op.
+The re-derived suite is 2,699 passed, zero skipped (2,651 baseline + 48 new cases); ruff and
+`preflight.py --full` pass. An earlier suite run lacking the conda tools on PATH was discarded;
+the final run uses the complete environment and arms every child with the isolated native build.
+The landed source was then rebuilt in the conda environment and independently passed all 2,699
+tests (zero skipped), ruff and full preflight on 2026-10-06. Its one quadrature warning is unchanged.
+
+The broader claim that no detector-free ruler can tolerate coherent count errors remains a hypothesis;
+these measurements justify correcting the counts first, not an impossibility theorem about all rulers.
+
+RULER SCREEN AFTER THE MAP REPAIR (2026-10-06; prototypes only). The earlier posterior-median
+readout fails the spectrum ruling: on two population atoms at density 1 and 100 with equal posterior
+mass, perturbing one count by ±1e-3, ±1e-6 or ±1e-9 changes the selected density 100-fold.
+The geometric posterior mean is continuous through those ties. Its three continuity gates pass,
+and deliberately restoring the median fails all three again. This is continuity of the readout
+conditional on the population, not a proof about the entire fitted pipeline.
+
+Both readouts were tested on the repaired counts, retaining the previous prototype's population
+fit, off-target floor, spatial treatment and junction rule. They fail the unstranded capture-OFF
+test-chromosome stratum. A third arm changes ONLY the ruler's working count likelihood: an inferred
+count `k` with deconvolution log-fraction variance `V` has delta-method variance `d=k²V`, so the
+working variance `mu+d` gives quasi-score `(k-mu)/(mu+d)`. This is a moment approximation, not an
+independent evidence likelihood. It restores OFF but fails ON:
+
+| test-chromosome stratum; transcripts / genes (%) | 0.7.1 | current `a7b03103` | map repair | median ruler | geometric ruler | geometric + count uncertainty |
+|---|---:|---:|---:|---:|---:|---:|
+| unstranded × OFF | 9.25 / 1.76 | 8.78 / 1.33 | 8.66 / 1.33 | 9.41 / 1.41 | 9.41 / 1.40 | 8.81 / 1.33 |
+| ss 0.70 × ON | 10.28 / 3.32 | 6.91 / 1.51 | 7.69 / 1.69 | 9.34 / 2.19 | 8.13 / 2.15 | 18.73 / 3.91 |
+| stranded × ON | 8.58 / 2.45 | 7.19 / 0.96 | 7.58 / 0.96 | 7.08 / 1.16 | 7.11 / 1.10 | 8.18 / 1.95 |
+| unstranded × ON (deferred) | 18.94 / 10.31 | 16.07 / 5.22 | 15.97 / 5.21 | 15.78 / 5.48 | 15.87 / 5.52 | 37.04 / 8.29 |
+
+Each arm ran all 30 test conditions, including every zero control. Failed arms were stopped before
+the gap arms, ladder or real libraries. The uncertainty arm's quasi-score identity tests fail in
+three cases under Poisson, pass all five cases with the new formula, and fail the same three when
+the uncertainty term is deliberately removed. Those algebraic checks do not validate the moment
+approximation: the captured-row A/B falsifies its adequacy here.
+
+The OFF failure is not explained solely by the intergenic floor. On g25 / g50 unstranded OFF,
+substitute oracle counts ONLY into the ruler, keeping calibration and the EM priors fixed:
+
+| counts read by the geometric ruler; transcripts / genes (%) | g25 | g50 |
+|---|---:|---:|
+| native inferred counts | 9.26 / 1.16 | 11.29 / 1.83 |
+| oracle intergenic / gene-edge counts only | 9.13 / 1.16 | 10.72 / 1.84 |
+| oracle counts at the other objects only | 8.11 / 1.16 | 9.86 / 1.51 |
+| oracle counts at every object | 8.08 / 1.16 | 9.77 / 1.53 |
+
+At g50, the `gB4_capcluster_ba` exon (slot 2074) has truth 55 gDNA fragments and estimate 95.803;
+its reported `Var(log f_g)=0.341` implies a deconvolution sd about 56, but a Poisson read of that
+estimate uses sd about 10. The ruler prices it 1.878× background and magnifies isoform error.
+Slot 3006 has truth 96, estimate 179.464 and variance 0.140; it is priced 1.613× background.
+Removing all messages with the final landscape fixed gives 50.085 / 113.531. These residuals
+are not a new proved opportunity-map error. Nor does their posterior variance constitute a
+prior-free likelihood: the fitted landscape and neighbouring messages helped produce it.
+
+The count-map repair therefore does not complete the proposed count-as-Poisson ruler. The next
+design decision concerns the evidence interface and a single use of the density prior, under
+`ISSUES: the-gdna-prior-enters-psi-twice`; no new partner or ruler has been landed. A continuous
+per-object evidence model remains to be derived and approved, without an unconditional class split,
+a capture detector or a strand-only reference. Real-library release validation waits for a passing
+candidate. The capture reference / clip / `None` mechanism is still present in the working tree.
+Instrument: `~/Downloads/rigel_runs/prototypes/2026-10-06_rna_short_counts/` (`census.py`, `replay.py`, `messages.py`,
+fresh NPZ/JSON outputs and serialized native inputs). No full-genome debug capture was needed.
+
+EVIDENCE CHECKPOINT (2026-10-07; no production change). Five fresh cached calibrations of the
+count-repair tree reproduce the three earlier test-chromosome count/opportunity/belief arrays
+bit-for-bit. Object totals equal the certified oracle on all five conditions. The two gap
+calibrations take 2.48 / 7.63 seconds; test calibrations take 0.27–0.30 seconds, excluding imports.
+The calibration binary is `_solve_impl`, SHA256
+`d78ef4c95f7ba1dcd3d48ad7ffd41532233aa7718a3bb7238370de9fc8a508f0`.
+Earlier receipts hashing `_em_impl` alone do not identify the calibration binary.
+
+A full count × opportunity substitution holds the background, object count, library ceiling
+and CI readout fixed. Counts are certified realized origins; opportunities are simulator
+pre-capture geometry, independently checked by enumerating fragment placements. These are
+diagnostic reader weights, not a new end-to-end candidate:
+
+| condition | maximum weight, inferred counts / fitted opportunity | true counts / fitted opportunity | inferred counts / true opportunity | true counts / true opportunity |
+|---|---:|---:|---:|---:|
+| test g00 ss0.99 ON | 23,831.03 | 1.0000 | 22,903.37 | 1.0000 |
+| RNA-short g50 stranded OFF | 1.3347 | 1.0177 | 1.3348 | 1.0170 |
+| RNA-long g50 unstranded OFF | 6.6908 | 1.0131 | 6.6616 | 1.0124 |
+
+At test g25 ss0.70 ON, the 206 no-RNA boundaries with expected enrichment above 20 have exact
+counts in every count arm. Their median log-weight error is −0.05038 with fitted opportunity,
+−0.02212 with true opportunity, independently of the count substitution. Counts explain the
+large zero-control/OFF outliers; opportunity error explains part of this ON bias. Neither
+result justifies a universal exon correction. Full tables include every eligible object by
+class and admitted strand, with no selection on the inferred count. Region and boundary
+incidences are not pooled into a conserved fragment total.
+
+For the worst zero-DNA boundary, the actual strand columns are 52 / 4,878, with fitted
+positive-column RNA probability 0.0095571. Marginalizing the unknown RNA amount with the
+existing RNA reference leaves zero DNA possible: expected DNA 18.5657 versus zero changes
+log evidence by only +0.08448. The CI reader's Poisson likelihood on the inferred 18.5657
+fragments assigns zero DNA exactly zero support. A falsification test fails on that reader
+and passes on the exact observation-model reference. This establishes lost uncertainty,
+not that a positive count posterior median is itself a bug. The boundary is probe-enriched
+in the simulator; all-zero oracle DNA counts cannot recover its capture from DNA observations
+alone. Do not interpret the neutral oracle-count arm as perfect expected-yield recovery.
+
+The reference covers pure DNA, either RNA strand and both strands with the existing
+total-RNA/tilt measure. Its 113 tests pass against independent integration; six deliberate
+defects each fail their intended gates. It is an own-observation primitive only, not a
+strand-only release reader or a certified local-message likelihood.
+Instrument: `.cache/rigel_runs/2026-10-07_density_checkpoint/` (`freeze_inputs.py`,
+`frozen_receipt.json`, `factorial.py/json`, `false_boundary_evidence.json`,
+`density_evidence.py`, `test_density_evidence.py`, `mutations.json`, `test_oracle_geometry.py`).
+The first gap comparison was stopped when a scratch-loop repeatedly decompressed its NPZ
+arrays; materializing them once completed the two full comparisons in 49 / 44 seconds.
+
 ### the-gdna-prior-enters-psi-twice
 `priority: next — the fragment-length campaign's ψ half: a correct fix measured, unlandable alone; its partner is an open ruling (owner) · kind: defect · 2026-10-02`
 ψ holds one place for the gDNA rate prior — the reference's gDNA half `½·log f` without a fitted landscape, the landscape
@@ -296,11 +621,2149 @@ about 0 % of the others), so removing it alone drops them to the depleted mode. 
 landscape fitted per class (exon / non-exon) for ψ — is `ISSUES: an-unconditional-class-conditional-landscape`
 (refused); paired with Part 1 it cancels both failures (g00 stranded × OFF false gDNA +15,043 → +16; stranded × ON
 8.98 → 6.34 %) and ends flat-to-slightly-worse in scope against shipped (6.14 → 6.34 %; test chromosome stranded × OFF
-7.39 → 7.70 %), better only on the deferred stratum (12.2 → 11.5 %). OPEN: a partner that gives probed exons their
-enriched prior without splitting the population where the classes share one density (a split conditional on evidence
-that they differ, or a fit on the exon class's witnesses only where capture is detected) — a new rule, the owner's.
+7.39 → 7.70 %), better only on the deferred stratum (12.2 → 11.5 %). OPEN: a continuous per-object partner
+that preserves locally supported enrichment while the density prior enters once. The owner's 2026-10-05
+spectrum ruling supersedes the earlier suggestion of a library-level conditional split or capture-dependent
+witness selection. No partner is chosen; an unconditional class split remains refused. The corrected count-map
+experiment and failed point-count ruler screens are recorded at
+`ISSUES: calibration-detects-capture-on-a-capture-off-library`.
 Instrument: `~/Downloads/rigel_runs/prototypes/2026-10-03_fl_arms/` (`harness/sitecustomize.py`, `RIGEL_BUILD=part1`,
 `RIGEL_ARM=classwise`; `VERDICT.md`); `2026-10-02_part1/gates.py`, `classdiag.py`.
+
+COUNT FOUNDATION INTEGRATED (2026-10-09). The factory-free count implementation and
+observed conditional-binomial message claims now reside in main's working tree. The
+owner accepts conservative DNA allocation in ambiguous cases and the eight reviewed
+golden changes; bounds admission is deferred. This removes the separate intron prior,
+not the fitted-landscape/reference duplication described above. The count solver's
+Gaussian approximation, population admission and existing capture reader remain.
+The implementation contract is in DESIGN; **Observed strand evidence** in EQUATIONS
+owns the observation law. No new prior, detector, cutoff or tuned constant is added.
+
+The final cleanup deletes the unused background fitter, old Gaussian message helper,
+redundant source-class condition, duplicate composition-row input and native protocol
+argument, and fixed-zero assembly dispersion state. Low-level dispersion inputs retain
+actual nonzero solver-test consumers. Across 15 source files this is 138 additions and
+643 deletions relative to the owner's tree before integration. Seven fresh cached pairs
+preserve every calibration field and both belief arrays. Full test-chromosome and
+LBX0190 pipelines preserve all payload/calibration arrays and the quantification digest
+against the original validated candidate, through every cleanup and the actual main build.
+The real identity reference has 254,319 transcript rows; no whole-genome debug dump is used.
+
+The full-sweep belief-invariance gate includes endpoint beliefs and delivered level/composition
+rows and masks; a compiled Gaussian restoration fails it. Five compiled likelihood defects
+cover the 34 numerical own-claim cases; three actual binding restorations trip all three
+interface cases. Both factory-removal gates fail on the original implementation. The
+integrated suite re-derives **2,752 passed, zero failed/skipped/xfail**, with the eight
+accepted goldens regenerated from main and exactly matching the reviewed candidate's
+tables/scalars. No tolerance changes. Ruff and full preflight pass. Fresh g50 test-chromosome
+runs in all four strata reproduce every candidate metric and pool exactly. The inherited
+in-scope and deferred costs below are preserved, not erased by the golden updates.
+
+Instrument: `.cache/rigel_runs/2026-10-09_foundation_landing/` (source manifest, owner snapshot,
+integration patch, mutation/JUnit receipts, seven cached pairs, full pipeline identities,
+golden review, normal-import stratum runs). The incomplete-environment first main-suite
+invocation is retained separately; the complete conda-environment run has no skips. Main
+source and goldens are integrated but uncommitted. The detector-free reader and its
+uncertainty/opportunity validation remain release work; no broader reader scope is selected
+by this engineering landing. All available real libraries remain strongly stranded.
+
+LOCAL CLAIM AUDIT (2026-10-07). A native-builder replay of a real intron/boundary/exon triple
+on test g50 ss0.99 ON separates the prior-derived and observational claims. With the strand
+channel disabled, the factory contributes a 7.96-nat-range composition row to the boundary,
+and 7.95 nats after transport into the exon. Removing only the factory removes that claim;
+one certified RNA flux row remains. The observation counts, geometry, strand policy and
+library coordinate origins are identical across this ablation. The claim is the intergenic
+background's predictive prior, not a new independent observation of the intron's DNA.
+
+The own exon/boundary strand rows also depend on the incoming belief through the frozen
+variance. Consequently, subtracting the landscape from a final posterior cannot yield a
+prior-free observation likelihood. The current factory rows must be kept distinct from raw
+evidence when developing profile-based landscape training and a single-prior assembly.
+No replacement assembly has been landed; deleting the factory blindly would remove an
+existing source of unstranded composition information.
+
+Changing the RNA coordinate origin affects sampled level-row representations. Boundary and
+intron relative-height differences decrease with grid refinement in this triple; the sharp
+exon row is not monotonically resolved. Large log differences in negligible tails are not
+evidence of a large count error. The `split_live` bit changes the lane's other-column inputs,
+but does not change the delivered composition in this particular triple. These limited checks
+do not establish global locality or an end-to-end regression from either dependency.
+Instrument: `.cache/rigel_runs/2026-10-07_density_checkpoint/`
+(`audit_messages.py`, `message_audit.json`, `message_local_inputs.npz`).
+
+FACTORY-REMOVAL SCREEN (2026-10-07; owner-authorized prototype). The Python factory input is
+removed from every sweep, retaining the measured background. Two separate native worktree
+contrasts then enable a single-strand intron's own observed strand row when its factory is
+absent, and replace the message builder's belief-frozen Gaussian with the conditional
+binomial observation likelihood. The final psi Gaussian, point-count landscape, additional
+DNA reference tilt and capture reader remain unchanged: this is not the finished single-prior
+model. The wiring-only build's factory-enabled control reproduces all 30 current count arrays
+bit-for-bit. Full and pass-zero screens are recorded separately.
+
+All 30 test-chromosome conditions were scored against certified slot truth, by object class
+and admitted RNA strand. The table shows g50 conditions individually. Cells are **region /
+boundary absolute DNA-count error (%)**, each divided by that axis's observed incidences;
+these are not transcript/gene errors, and the two axes are not a conserved pooled count.
+
+| test condition | current count-repair tree | factory removed | add intron strand messages | exact observed strand messages |
+|---|---:|---:|---:|---:|
+| ss0.50 OFF | 1.297 / 2.416 | 1.379 / 3.860 | 1.379 / 3.860 | 1.379 / 3.860 |
+| ss0.50 ON | 4.950 / 9.956 | 3.688 / 2.543 | 3.688 / 2.543 | 3.688 / 2.543 |
+| ss0.70 OFF | 1.221 / 2.045 | 1.304 / 3.118 | 1.326 / 2.528 | 1.323 / 2.521 |
+| ss0.70 ON | 2.233 / 4.654 | 2.116 / 1.813 | 2.119 / 1.830 | 2.109 / 1.825 |
+| ss0.99 OFF | 1.042 / 1.873 | 1.111 / 2.788 | 1.114 / 1.934 | 1.097 / 1.904 |
+| ss0.99 ON | 1.370 / 1.660 | 1.352 / 1.153 | 1.342 / 1.151 | 1.337 / 1.134 |
+
+Removal improves boundary counts on every contaminated capture-ON test condition. OFF
+losses are primarily additional intron/boundary under-calling; exon estimates often improve.
+The separate intron-strand wiring contrast recovers much of the stranded boundary loss.
+The six zero-DNA controls are reported separately; these changes do not repair the old
+reader's treatment of an uncertain positive count estimate as observed DNA.
+
+Holding the original fitted landscape fixed leaves most of the OFF loss: g50 ss0.50
+boundary error is 3.782% with the frozen landscape versus 3.860% when refitted, against
+2.416% with the factory. At ss0.99 the corresponding values are 2.744 / 2.788 / 1.873%.
+Factory-enabled fixed-landscape controls reproduce their original counts bit-for-bit.
+Thus the lost local constraint, not merely changed landscape training, needs accounting
+for in the single-prior replacement. No claim is made that profile training alone will
+recover it, or that the intron background assumption is generally false.
+
+The native checks pass 37 cases; an independent intron–boundary density reference passes
+18 against a closed-form polynomial integral. Rebuilt binomial strand claims no longer
+depend on the incoming belief. The local source factor stays inside RNA nuisance integration
+and becomes composition-constant without strand information. This certifies one licensed
+face, not the remaining splice/level messages or graph-wide observation independence.
+Eight deliberate reversions/mutations fail the intended gates. No main-tree source, existing
+tests, goldens or installed native binary changed, and no release accuracy claim is made.
+Instrument: `.cache/rigel_runs/2026-10-07_factory_removal/` (`factory_ablation.py`, separate
+native patches and wheel sites, `screen.py`, `test*_screen.json`, `calibration_tables.md`,
+`prior_feedback.json`, `local_face.py`, mutation logs and `verification.json`). Native
+worktree: `/private/tmp/rigel-density-20261007`.
+
+COUNT-CANDIDATE READINESS (2026-10-08). A fresh run of the unchanged production suite
+re-derives **2,733 passed**, no failures or skips. The frozen three-change count candidate
+passes 2,721 and fails 12: four transfer-face references still encode the belief-frozen
+Gaussian, and eight golden scenarios change. Scratch copies of the face references use
+SciPy's conditional-binomial law without changing their maps, widths or assertions: all
+15 face gates pass with the candidate, and the current implementation fails the four
+changed gates. Full preflight passes for both builds, including all five instrument
+self-tests; source/test/script lint passes. These results are a compatibility audit, not
+a passing production landing: no test or golden was changed.
+
+PORTABLE COUNT GATES (2026-10-08 follow-up). The three frozen count changes now have
+38 portable specifications prepared under `tests/calibration/` in the isolated worktree:
+35 source/wiring checks in `test_observed_strand_claims.py` and three whole-calibration
+checks in `test_intron_prior_removal.py`. The former builds an exon/boundary/intron chain
+directly; the latter uses the repository's small prior toy. Neither test file reads a
+saved scan or the external prototype directory. The original implementation fails
+**28/38**; the frozen count candidate passes **38/38**. Two inherited invariance checks
+now explicitly require claims to be present, so an empty result cannot pass them.
+
+Five compiled mutations of the actual frozen claim-builder header exercise all 35
+native gates: restore the belief-frozen Gaussian, omit intron observations, lose all
+claims, invent unlicensed claims, and ignore the RNA strand. The unchanged compiled
+copy matches the frozen native's own-claim tables bit-for-bit. Three Python construction
+mutations exercise all three removal gates: restore the factory, restore it only after
+the initial solve, and omit the measured background. Failure coverage is **38/38** with
+no collection errors or skipped cases. The factory candidate is still selected through
+a scoped constructor replacement; this verifies portable specifications, not a direct
+production integration. Instrument: `.cache/rigel_runs/2026-10-08_portable_count_gates/`,
+JUnit receipts, compiled-header mutations, `run_factory.py`, and `verification.json`.
+Main source/tests/goldens and the installed native remain unchanged. No new panel,
+count-accuracy or performance result is claimed; the production suite's earlier twelve
+candidate failures and the weak-strand concern below remain open.
+
+DIRECT COUNT ASSEMBLY (2026-10-08). The isolated Python implementation now deletes
+`FactoryRows`, `_IntronFactory`, `_Solve.factory` and their assembly use instead of
+replacing a constructor at runtime. Auditing consumers showed that the old prototype's
+retained background fit had no reader after its prior rows were removed. An earlier
+portable gate unnecessarily required that unused computation. It is corrected: count
+inference must not evaluate it, while an explicitly requested background measurement
+must still depend only on intergenic observations. The measurement function and its
+arithmetic remain available and unchanged.
+
+Before this deletion the revised specifications fail **1/3** on the scoped-removal
+prototype; direct assembly passes all **38** count gates. Restoring the count prior,
+restoring only the unused fit, and changing the explicit estimator's pool each fail the
+relevant gate, covering all three revised Python tests. The earlier 35 native gates
+and compiled mutation receipts are unchanged. Seven fresh cached-condition pairs
+compare **all 29 CalibrationResult fields plus two belief arrays**: every value is
+bit-identical to the validated frozen count candidate. The native binary is the same
+`b096f74e…`; this is a simplification, not a new accuracy or speed claim. Lower-level
+factory-input plumbing and production reference/golden migration remain unfinished.
+Instrument: `.cache/rigel_runs/2026-10-08_direct_counts/`, package and replay manifests,
+JUnit reports and `mutations.json`. Full preflight passes all five instrument self-tests
+with the direct package verified in the parent and all five children. Changed source and
+portable tests pass Ruff; the documentation gate passes 11/11. This does not replace
+the pending full-suite/reference migration on the eventual integration. Main
+source/tests/goldens and the installed native are preserved.
+
+COUNT-PLUMBING CLEANUP (2026-10-08). A separate count-only worktree now removes the
+remaining intron-specific Python/native argument, factory row construction and storage,
+factor-precision and negative-binomial helpers, and the unused `tau_fac` diagnostic.
+The generic composition-factor kernel interface and explicit intergenic background
+estimator remain. Observed intron claims enter directly; the exon-edge approximation,
+landscape fit, count readout and existing capture reader are unchanged. No newer
+density-message experiment is bundled into this package.
+
+Seventeen tests solely exercising the retired factory are removed. Four old Gaussian
+face references are migrated to the independent binomial reference; the intron-face
+fixture isolates intron-originating claims so unrelated boundary claims do not change
+that test's subject. No assertion tolerance is widened. The full isolated suite
+re-derives **2,754 collected: 2,746 passed, eight failed, zero skipped**. The eight
+failures are exactly the previously reviewed golden case set; no golden is updated.
+The production tree retains its standing 2,733-test baseline and all owner changes.
+
+Seven fresh paired cached calibrations again reproduce all 29 result fields and two
+belief arrays bit-for-bit. The 35 portable native claim gates pass on the cleaned
+binary; five actual compiled defects cover every gate, with an unchanged compiled
+control reproducing the binary's claim tables exactly. Ruff passes across source,
+tests and scripts. Full preflight passes all five instrument self-tests, with package
+identity checked in the parent and all five children. This completes the mechanical
+count cleanup and reference migration in the worktree; the golden disposition,
+weak-strand stress concern and population/capture work still prevent a release-ready
+claim. There is no new accuracy or runtime improvement to report from this no-op.
+Instrument: `.cache/rigel_runs/2026-10-08_count_cleanup/` (`cleanup.patch`, complete
+package manifest, retired-test list, full JUnit report, paired replay arrays,
+`claim_mutations.json`, preflight import receipts and `verification.json`).
+
+OBSERVATION-ONLY INTERFACE CLEANUP (2026-10-08). The isolated count candidate's
+message builders no longer accept the unused incoming DNA belief or the two unused
+strand dispersions. The Python policy carries only its fitted RNA sense fraction;
+the tuple adapter, native policy-dispersion arguments and obsolete fixture fields
+are removed. The count solver retains its separate beliefs and dispersion inputs.
+There is no likelihood, opportunity, propagation, admission or readout change.
+
+The three interface specifications first fail on the old binding. The new native
+passes all 37 observed-claim cases; five compiled likelihood defects exercise the
+34 numerical/wiring cases, and three actual native-binding restorations each trip
+their corresponding interface case. The full suite re-derives **2,756 collected:
+2,748 passed, the same eight golden failures, zero skipped**. Two additional cases
+come from replacing the single belief-invariance check with three rejected-input
+checks. No numerical assertion, tolerance or golden expectation is relaxed.
+
+Seven fresh cached pairs preserve all 29 result fields and both belief arrays;
+the maintained identity instrument also preserves the complete test-chromosome
+transcript digest and every payload/calibration array, with fractional assignment.
+Ruff and full preflight pass. This is a maintenance improvement, not a new accuracy
+or speed result. The weak-strand/golden holds below remain unresolved, and the new
+capture reader remains separate. Main source/tests/goldens and installed native are
+preserved. Instrument: `.cache/rigel_runs/2026-10-08_release_foundation/` (before/after
+sources, patch, package manifest, failed-first and mutation receipts, full suite,
+paired replays, identity receipt and verification).
+
+WEAK-STRAND FLOOR DIAGNOSIS (2026-10-09). A fresh array-only check of the frozen
+`combo_extreme_removed_fit0.npz` confirms that all 18 nonflat delivered composition
+rows are maximal at the all-DNA endpoint. Their DNA fractions span 0.4845–0.8354
+and their posterior log-fraction variances 0.0670–0.4234, below the existing
+one-nat-squared location limit. Slot 4 reads 0.79694 DNA share, against 5/38 true
+DNA fragments. The structurally pure background is 0.05743 per opportunity, while
+the fitted population mode is 0.30140. These are inputs to the first fit, not a
+new fit or pipeline run. A symmetric Beta(1/2,1/2) reference truncated below 0.17
+has median 0.70616: the illustration explains why a lower bound can acquire a
+high posterior location without measuring that location. The soft delivered rows
+are not claimed to be identical to this hard-truncation example.
+
+Together with the recorded frozen-landscape and edge-source contrasts, this
+supports the mechanism: under a dead strand channel, one-sided local evidence
+leaves location to the reference, and posterior-based training can then propagate
+that location through the population. It is a real model limitation under the
+retained rules, not a map-arithmetic defect. The exact same causal attribution
+has not been established on the ladder or an unstranded real library. The four
+validated real libraries have fitted RNA sense fractions 0.00013–0.00300; all are
+strongly antisense-stranded. Their successful runs provide no real-data coverage
+of the unstranded failure mode. The cleanups also still need a real-library
+identity comparison across the complete cleanup chain.
+
+The integration recommendation is to accept this measured tradeoff without a
+new solver change, while retaining both combined-stress fixtures and the separate
+deferred-stratum reports. The owner accepted this tradeoff and authorized the reviewed
+golden updates on 2026-10-09; see DESIGN's **Conservative allocation under uncertainty**.
+The bound-only admission experiment is deferred until foundation integration is complete.
+The refusal in `ISSUES: the-landscape-training-population-arms` remains in force;
+an endpoint maximum alone would not establish a mathematical bound independently
+of numerical support. Instrument: frozen stress inputs and
+`.cache/rigel_runs/2026-10-08_release_foundation/review_assimilation.json` (input hash,
+array-only check and illustrative reference calculation); real protocol values
+are in the existing `2026-10-07_release_followup/real/*_candidate.json` receipts.
+
+Every changed golden column was saved and read before any update. The largest absolute
+change in an individual transcript is 1.447 fragments (`combo_moderate`); its total
+transcript/gene absolute redistribution is 2.319/1.505% of the current counts. These are
+output changes, not errors. `combo_extreme` has a much larger hidden pool movement:
+gDNA including intergenic rises from 677.506 to 765.228, against read-name truth 700;
+unspliced RNA falls from 265.106 to 176.688, against truth 246. Its transcript/gene
+truth error changes only from 12.115/7.988% to 12.444/8.343%. The 1,000-fragment,
+capture-OFF test has 36 spliced observations, fitted strand fraction 0.44737 and zero
+strand discriminability. It is a weak-strand count check within the release's OFF scope,
+not the deferred captured stratum and not a claim about whole-library RNA accuracy.
+
+A separate current/observational-native × factory-kept/removed contrast establishes
+that **factory removal causes this stress-case change**: the native builds produce
+bit-identical count arrays at either factory setting because the strand channel is
+inactive. The origin partitions reconstruct the production tally with no ambiguous
+origin assignments. Keeping each original fitted landscape while removing the factory
+separates the population feedback from the lost local constraint:
+
+| `combo_extreme`, capture-OFF | Current | Candidate | Factory removed, original landscapes fixed |
+|---|---:|---:|---:|
+| gDNA fragments, including intergenic; truth 700 | 677.506 | 765.228 | 714.666 |
+| Intron gDNA-count error (%) | 10.209 | 61.382 | 27.749 |
+| Exon gDNA-count error (%) | 11.075 | 45.549 | 16.967 |
+| Boundary gDNA-count error (%) | 12.752 | 16.283 | 5.588 |
+
+Class errors divide by each class's observed unspliced incidences. Introns contain
+8 true gDNA incidences out of 55; the current/candidate calls are 13.615/41.760.
+Region and boundary incidences are not pooled as fragments. The fixed-landscape
+intervention is diagnostic and uses a population the factory helped train; it is
+not a proposed release method. Both local information loss and population feedback
+remain relevant. This extends the known OFF limitation to a weak-evidence stress
+case; it does not establish that the intron constraint is generally valid or license
+a detector, a class correction, or a new strand threshold. Preserve this case in the
+population/prior partner's in-scope validation. Do not erase the concern by updating
+its golden or by reading only transcript changes. The previously accepted small
+test-chromosome OFF tradeoff and deferred-ON scope remain as ruled.
+
+Instrument: `.cache/rigel_runs/2026-10-08_count_readiness/` (`current.json`,
+`candidate.json` and complete JUnit failure lists; isolated `face_tests/`; both
+preflight receipts; `golden_outputs/`, `golden_review.json`; `stress_counts.py`,
+the per-native JSONs and per-object NPZs). Production source/tests/goldens and the
+installed native binary are unchanged. Reader integration is still outstanding.
+
+GOLDEN DISPOSITION AUDIT (2026-10-08 follow-up). A read-only check of all 21 saved
+current/candidate scenarios verifies identical table schemas, dtypes, object identities,
+text fields and scan accounting. Independent arithmetic reproduces every saved
+transcript/gene truth score and DNA/RNA pool total. The eight failing cases have these
+absolute output movements, which are not accuracy improvements or acceptance bars:
+
+| Fixture | Maximum transcript movement (fragments) | DNA pool movement (fragments) |
+|---|---:|---:|
+| `antisense_contained_ss90` | 0.728056 | +0.989977 |
+| `antisense_overlap_ss90` | 0.000172 | −0.000305 |
+| `combo_extreme` | 0.321837 | +87.722080 |
+| `combo_moderate` | 1.447309 | +4.940199 |
+| `gdna_heavy` | 0.312752 | +0.407343 |
+| `gdna_light` | 0.016933 | +0.027814 |
+| `nrna_heavy_ss90` | 0.003195 | +0.298159 |
+| `nrna_moderate_ss90` | 0.011188 | +0.752400 |
+
+The comparison uses saved fresh current outputs, rather than rounded or tolerance-matched
+expected tables. Six cases move the DNA pool by less than one fragment; this does not
+erase their pre-existing errors. In particular, contained antisense has no true DNA but
+already reads 102.455 DNA fragments in the current output, versus 103.445 in the candidate.
+The two combined stress cases remain separate count/reader concerns. No golden is updated,
+no tolerance is widened and no case is declared accepted by this audit. The 0.7.1 release
+was not rerun on these fixtures; the paired release-panel comparisons remain distinct.
+Instrument: `.cache/rigel_runs/2026-10-08_count_readiness/golden_disposition.py` and
+`golden_disposition.json` (input hashes, reconstructed scores and explicit hold dispositions).
+This adds no calibration, EM or simulation run and confirms unchanged main source/tests.
+
+WEAK-STRAND INPUT TRACE (2026-10-08). A read-only extension of the stress instrument
+captures all three landscape refits for factory-kept and factory-removed controls in
+`combo_extreme` and `combo_moderate`. Scan threads are one, EM is fractional with seed
+zero, and calibration/EM thread counts retain defaults. The six final control count
+arrays, including fixed-original-landscape controls, reproduce the earlier isolated
+source-blur receipts bit-for-bit. Typed extraction also reconstructs the existing
+delivered composition rows bit-for-bit. No training or message rule changes.
+
+Admission does not explain either fixture's loss. All 13 regions of the extreme case
+(3 intergenic, 4 intronic, 6 exonic) and all 11 of the moderate case already train at
+every refit, with or without the factory. Removing only the variance cutoff therefore
+adds no object in any of these 12 snapshots. In the extreme case the large error is
+already present before the first population fit:
+
+| Factory-removed extreme case, input to refit | Intronic DNA estimate; truth 8 | Exonic DNA estimate; truth 7 | Fitted population's modal density |
+|---|---:|---:|---:|
+| First, from the prior-free solve | 43.516 | 43.003 | 0.30140 |
+| Second | 42.939 | 40.406 | 0.30140 |
+| Third | 42.297 | 39.111 | 0.29171 |
+
+The measured intergenic background is 0.057431. Keeping the factory instead gives a
+modal density of 0.058894 at all three fits. This is consistent with the previously
+measured population feedback; it is not evidence that later refits created the initial
+local error. The moderate case retains a modal density near its intergenic background
+under either factory setting and remains a separate control.
+
+The existing native density evaluator was then read on frozen inputs, without fitting
+a new population or changing counts. At each selected mixed region it compares the
+point estimate's density with the measured background. For extreme-case chain slot 4
+(region 2, an intron) before the third refit: observed incidences 38, true DNA 5,
+inferred DNA 30.0549, `Var(log f_g)=0.15274`, retained reliability weight 0.49972.
+The corresponding density is 0.32141. Its log-support advantage over background is:
+
+| Input read at those same two densities | Log-support advantage (nats) |
+|---|---:|
+| Inferred DNA count treated as a Poisson observation | 27.0739 |
+| Own observed strand columns, RNA amount profiled out | 0.4231 |
+| Own observed strand columns, RNA amount integrated out | 1.2271 |
+| Same observation integral with the existing delivered factors | 3.2375 |
+
+The first row is the raw point-count likelihood before population smoothing or any
+previous-prior weighting; it is not the full old landscape kernel. The other rows use
+the already-declared RNA reference and measured strand probability. This comparison
+demonstrates lost allocation uncertainty, but does not certify the inherited factors
+as an independent joint observation likelihood. Their preference for excess DNA
+persists. None of this establishes that profile training alone repairs the count loss,
+and the background is a measured comparison point rather than exact object-rate truth.
+
+The estimator/input comparison below retains these fixed objects, weights and grids.
+Admission and the subsequently authorized reliability-weight contrast are separate;
+do not restore an intron assumption or introduce a strand threshold to fit this case.
+Instrument: `.cache/rigel_runs/2026-10-08_stress_evidence/` (`freeze.py`, `freeze.json`,
+per-refit arrays, paired count arrays, `analyze.py`, `analysis.json`). The evidence
+evaluation took 11.75 seconds, with no new population fit or count solve. These are
+diagnostics, not new transcript/gene accuracy measurements.
+
+FACTOR ATTRIBUTION (2026-10-08 follow-up). Across 64 nonempty single-RNA-strand
+object/refit records from the two stress fixtures, the separate DNA/RNA level factors
+are absent: their delivered support is in the composition channel. This does not mean
+that it contains no DNA measurements; the EDGE builder projects boundary DNA evidence
+into that channel. The own-read profile was checked against an independent maximization
+of the two-Poisson likelihood. All 320 reference checks pass, including the exactly
+unstranded plateau. Profiling versus integration changes the treatment of unknown RNA;
+the difference is not an identified code defect or authorization to change its reference.
+
+Two small control calibrations reproduce all six archived pre-refit count, opportunity
+and message tables, and both final count arrays, exactly. They stop before EM. With face
+roles, parameters, own observations and noncomposition factors fixed, one-at-a-time
+EDGE-source withdrawals trace the extreme fixture's composition pressure to the two
+ends of the same gene. For its slot 4 before the third refit, log support is 3.2375 with
+both sources, 2.5544 without the left source, 2.0763 without the right source and 1.2271
+without either. These are separate contrasts, not additive contributions. Removing
+sources in the other gene leaves this object's curve identical. In the moderate fixture,
+removing every EDGE source leaves most intronic support intact; slot 16 changes only
+from 1.1969 to 1.1723. Its observed strand sources remain available.
+
+Thus useful local message propagation and overstated population-training certainty are
+distinct issues. The trace does not justify own-observation-only training or blanket
+edge withdrawal; the latter's measured information loss is recorded under
+`ISSUES: the-edge-density-floor-under-capture`. Preserve neighbour evidence and its
+uncertainty. No population replacement, new capture prior or release accuracy result
+follows from this attribution. The background remains a measured comparison point,
+not exact per-object density truth. Instrument:
+`.cache/rigel_runs/2026-10-08_evidence_attribution/` (`attribute.py`, `attribution.json`,
+`trace.py`, `trace.json`, six frozen message contexts and `verification.json`).
+
+FROZEN STRESS-INPUT COMPARISON (2026-10-08). The next authorized estimator/input
+sequence is complete on both stress cases. It changes only the final landscape; the
+first two landscapes, training objects, weights, density grid and uniform pseudo-region
+strength are held fixed. Re-rendering the original individual curves recovers the mean
+landscape within 1.4e-17 maximum probability difference. The pipeline control and a
+direct calibration replay both reproduce the frozen count candidate bit-for-bit.
+Every incoming refit belief and opportunity array is also identical. A fresh origin
+partition validates the observed and true counts against the saved arrays.
+
+The three successive changes are: replace averaging by the already-tested likelihood
+estimator on the same old curves; replace only structurally known-DNA/empty input
+curves; then replace only the remaining mixed-object curves with the typed observation
+readout. The same reliability weights and smoothing strength apply throughout. All
+six numerical fits have a global objective-gap certificate below 1e-6; the largest
+measured gap is 2.91e-7. No equal-weight experiment or message-range change is included.
+
+Cells are **DNA incidence-count error (%)**, divided by each row's observed incidences.
+The first column is the factory-free count candidate, not the current production tree.
+
+| Stress case · class | Frozen count candidate | Estimator only | + known-DNA inputs | + mixed evidence |
+|---|---:|---:|---:|---:|
+| Extreme · regions | 10.9194 | 9.6365 | 11.4826 | 9.1890 |
+| Extreme · introns | 61.3818 | 55.5842 | 56.8745 | 37.6064 |
+| Extreme · exons | 45.5492 | 39.0704 | 54.0145 | 49.5285 |
+| Extreme · boundaries | 16.2825 | 7.8281 | 10.5412 | 7.9161 |
+| Moderate · regions | 4.6833 | 5.1633 | 5.1633 | 3.9723 |
+| Moderate · introns | 29.2016 | 38.2647 | 38.2647 | 20.4325 |
+| Moderate · exons | 14.1795 | 13.6094 | 13.6094 | 13.4717 |
+| Moderate · boundaries | 4.6917 | 4.2946 | 4.2946 | 5.9787 |
+
+Intergenic counts remain exact in every arm. Mixed evidence improves introns in both
+fixtures relative to both controls, but the extreme exons and moderate boundaries
+worsen against the frozen candidate. This is not a sufficient population partner:
+do not advance it to release benchmarks or claim that preserving uncertainty alone
+repairs local count inference. It is a frozen final-refit diagnosis, not a self-consistent
+calibration or a prior-once test. No candidate EM or new transcript/gene benchmark ran.
+The two fixtures are stress checks, not sources of class weights, cutoffs or biological
+assumptions; their nascent share is not a design driver.
+
+Instrument: `.cache/rigel_runs/2026-10-08_stress_evidence/` (`fit_stress.py`,
+`*_input_curves.npz`, `*_fits.json`, fitted arrays, `replay_stress.py`, `*_replay.json`
+and per-arm count arrays). Each numerical fit took under one second; all evidence curves
+for a case took about two seconds. These are execution receipts, not a tool speed-up.
+The unresolved inherited-factor, population/prior and representation questions remain.
+
+FULL-PANEL CONTINUATION (2026-10-07). After the owner accepted the modest test-chromosome
+OFF tradeoff, the frozen candidate (factory absent, intron strand sources restored,
+observational strand messages) was scored on all 16 ladder and both four-condition gap
+panels against a fresh current-tree baseline. The same truth-array order and observed
+totals are checked for every condition; object classes and admitted strands remain separate.
+Stranded count errors remain close to the current tree in both gap directions. Unstranded
+losses grow on the larger substrate, and have two distinguishable mechanisms.
+
+Cells below are region / boundary **DNA-count errors (%)**, not transcript/gene errors.
+The fixed-landscape diagnostic keeps the factory-enabled candidate binary's final landscape
+unchanged. Its factory-enabled controls reproduce the unfrozen counts bit-for-bit; on both
+these unstranded conditions those counts also equal the current-tree results.
+
+| condition | current | candidate | candidate, original landscape held fixed |
+|---|---:|---:|---:|
+| RNA-long g50 ss0.50 ON | 10.009 / 9.582 | 41.676 / 32.913 | 11.665 / 12.353 |
+| ladder g98 ss0.50 OFF | 0.788 / 5.711 | 2.465 / 9.124 | 2.173 / 8.714 |
+
+On RNA-long ON, changed population fitting accounts for most of the additional error.
+At the first refit, admitted exonic training regions fall from 3,292 to 289, out of 8,384
+structurally eligible regions; the number with a composition channel falls from 5,339 to
+2,742. Removing the factory changes both composition availability and posterior-precision
+admission. Holding the old population fixed substantially repairs the result, but neither
+this trace nor that intervention isolates admission, weighting and kernel construction from
+one another. It does not yet prove that replacing kernels alone will recover the lost mode.
+The large final error sits mainly in exons, where gDNA is under-called; it is not a simple
+remaining intron-count offset.
+
+On the ladder's g98 OFF condition, holding the population fixed repairs much less. Most
+of that loss is direct: the removed intron constraint supplied local composition information.
+A low absolute library-scale error can be large beside the residual RNA in a 98%-DNA sample.
+These results require both a population-training check and an accounting of local unstranded
+information. No class multiplier, uncertainty cutoff or capture gate follows from them.
+The original small test-chromosome OFF tradeoff is not itself a reason to reject the candidate;
+the full-panel mechanisms must be evaluated separately.
+
+Paired end-to-end follow-up preserves the stranded gap results and the original RNA-short
+repair, but the RNA-long unstranded ON condition fails the released 0.7.1 transcript/gene
+bar. The ladder g98 OFF count loss mostly enters unspliced RNA, with a much smaller mature
+transcript change. Neither the calibration metric nor the transcript table substitutes for
+the other. The owner subsequently confirms that unstranded capture-ON is deferred, not a
+0.8.0 requirement, and authorizes deeper investigation for robustness. That loss is not by
+itself a release veto. The owner also authorizes a separate evidence-curve admission
+prototype; composition requirements, structural exclusions and weights stay fixed in its
+first contrast. Production integration still needs the remaining in-scope validation and
+landing checks.
+
+Instrument: `.cache/rigel_runs/2026-10-07_full_panel_counts/` (`screen.py`, matched
+`*_screen.json`, per-condition arrays and `calibration_tables.md`; `diagnose.py` and
+`diagnosis.json` retain each refit's training counts and the fixed-landscape controls).
+
+VALIDATION COMPLETION (2026-10-07). The same frozen count candidate now has 54 paired
+end-to-end conditions: test chromosome 30, ladder 16 and four in each gap direction.
+Every in-scope stratum summary beats 0.7.1 for transcript and gene error. Individual
+high-DNA test conditions remain worse: g98 ss0.70 ON reads 71.94 / 45.54% versus
+55.98 / 39.60% on 0.7.1 and 69.50 / 42.44% on the current tree. Do not turn a
+stratum summary into an every-condition claim. The deferred RNA-long unstranded ON
+loss also remains visible at 43.22 / 11.26% versus current 6.55 / 0.94%.
+
+Four serial whole-genome pairs also completed, without calibration debug dumps.
+The candidate/current DNA fractions (%) are LBX0190 8.50/8.34, LBX0588 92.65/91.14,
+MO3021 15.87/15.46 and VCaP 23.95/23.44. VCaP moves toward its read-name mixture
+of 25.18%. Transcript absolute changes, normalized by the current transcript total,
+are 0.13%, 14.18%, 0.14% and 4.03%; gene changes are 0.07%, 6.03%, 0.06% and 0.28%.
+These are output changes, not accuracy scores. Half of LBX0588's transcript change
+lies in ten genes. The old capture reader is active in both arms, so changes in its
+count-derived effective lengths can redistribute isoforms. No real-data tuning follows.
+Source-landing checks and a detector-free reader remain outstanding.
+Instrument: `.cache/rigel_runs/2026-10-07_release_followup/` (`panel_comparison.json`,
+`report_all.py`, paired manifests and hook receipts; `real/manifest.json`,
+`real/comparison.json`, `real/change_diagnosis.json` and `report_real.py`).
+
+ADMISSION AND ESTIMATOR CONTROLS (2026-10-07; owner-authorized). Seven cached conditions
+separate deletion of the variance cut from changing the population estimator. The native
+candidate and factory removal are fixed. The first-refit counts, variances, opportunities,
+composition flags and grid are identical before the admission intervention. All controls
+retain the structural exclusions, composition requirement, zero-count anchors, posterior
+reliability weights and consumer-domain grid. Cells are **region / boundary DNA-count
+absolute error (%)**, with separate observed-incidence denominators, not transcript/gene errors.
+
+| condition | current tree | factory-free candidate | candidate, variance cutoff removed |
+|---|---:|---:|---:|
+| RNA-long g50 ss0.50 ON | 10.0085 / 9.5817 | 41.6758 / 32.9132 | 40.5559 / 33.6206 |
+| ladder g98 ss0.50 OFF | 0.7878 / 5.7109 | 2.4646 / 9.1235 | 2.4827 / 9.1821 |
+| RNA-short g50 ss0.99 OFF | 0.7854 / 2.9059 | 0.9246 / 2.9482 | 0.9258 / 2.9478 |
+| RNA-long g50 ss0.99 ON | 1.4974 / 3.4148 | 1.4657 / 3.3480 | 1.4659 / 3.3479 |
+| test g00 ss0.99 ON | 0.0029 / 0.0196 | 0.0035 / 0.0239 | 0.0037 / 0.0234 |
+| test g50 ss0.99 ON | 1.3702 / 1.6599 | 1.3371 / 1.1336 | 1.3343 / 1.1336 |
+| test g50 ss0.50 ON | 4.9502 / 9.9556 | 3.6884 / 2.5428 | 3.6977 / 2.5379 |
+
+Removing the cutoff admits 2,742 rather than 289 exons on the first RNA-long ON refit,
+yet does not repair the regression. At that refit, the newly expanded exonic population's
+fitted DNA totals are 783,235 against 1,313,802 true incidences. Thus admission alone is not
+the cure; preserving a poor point estimate is not equivalent to preserving its uncertainty.
+
+A second contrast freezes each refit's selected objects, weights, grid and individually
+rendered curves. Weighted recombination reproduces the original landscape to rounding;
+replaying all three frozen mean landscapes reproduces final count arrays bit-for-bit.
+Replacing only averaging with a mixture-likelihood fit of those same curves gives:
+
+| condition | original frozen mean | likelihood fit of the same old curves |
+|---|---:|---:|
+| RNA-long g50 ss0.50 ON | 41.6758 / 32.9132 | 20.7739 / 19.3768 |
+| test g00 ss0.99 ON | 0.0035 / 0.0239 | 0.1568 / 0.2559 |
+
+The captured-row improvement is concentrated in exons (44.2483 → 21.6501%); intron error
+worsens (10.8513 → 18.5429%). The zero control's false DNA rises from 32.66 to 1,455.90
+region incidences and from 23.33 to 249.69 boundary incidences; these axes are not additive.
+**The estimator-only arm is not a landing candidate.** Its inputs still contain inferred
+counts, population smoothing and the old prior-weighted low-count curves; they are not
+certified observation likelihoods. These measurements justify replacing the inputs, not
+declaring that the proposed honest-profile model succeeds or fails. No new end-to-end
+accuracy claim follows from these calibration-only controls.
+
+The small-grid reference also exposed a numerical dilution defect: with a sufficiently
+large weight on an exactly flat likelihood, a population-normalized stopping tolerance
+could accept the starting distribution. Analytically cancelling constant objective terms
+fixes this without an information cutoff. Ten likelihood gates pass, including a raw
+two-Poisson mixture checked against an independent optimum and preservation of an
+exclusively supported 1-in-10,001 minority. Six deliberate defects are caught. Admission
+and frozen-rendering checks add twelve gates and ten caught defects; every gate is hit.
+On the zero control, multiplicative updates did not reach the requested tolerance within
+100,000 iterations. An independent constrained optimizer certifies the same objective to
+a gap below 1e-6; its generic termination flag alone was insufficient. Numerical convergence
+and support remain explicit implementation requirements, not biological tuning parameters.
+Instrument: `.cache/rigel_runs/2026-10-07_profile_admission/` (`screen.py`, per-refit NPZ
+arrays, `current.json`, `candidate.json`, `cutoff_removed.json`, `frozen_curves.py`,
+`fit_frozen.py`, `replay_frozen.py`, `zero_optimizer.json`, mutation logs and
+`verification.json`); `.cache/rigel_runs/2026-10-07_profile_fit/` holds the likelihood reference.
+
+OBSERVATION-LIMIT INPUT CONTRAST (2026-10-07). On the same frozen training objects,
+weights, grid and likelihood objective, replace only structurally pure-DNA and empty
+objects' rendered curves with their own Poisson observation likelihoods. For an empty
+object, integrating its own RNA observation with the existing reference leaves
+`exp(-rho Eg)` times a density-independent constant. Other mixed-object curves are
+unchanged, so this is a partial input diagnosis, not a finished evidence model.
+Fresh replays of the old-curve controls reproduce their previous count arrays bit-for-bit.
+Cells remain **region / boundary DNA-count error (%)**, not transcript/gene error.
+
+| condition | likelihood fit on old curves | replace certified observation limits |
+|---|---:|---:|
+| test g00 ss0.99 ON | 0.1568 / 0.2559 | 0.0023 / 0.0201 |
+| RNA-long g50 ss0.50 ON | 20.7739 / 19.3768 | 20.9468 / 19.2018 |
+
+The zero control's false region DNA falls from 1,455.90 to 21.13 and false boundary DNA
+from 249.69 to 19.58. Of the remaining region count, 21 incidences are structurally
+assigned intergenic DNA despite RNA oracle truth; this contrast does not repair annotation
+misclassification. The frozen factory-free baseline, before changing the estimator, was
+32.66 / 23.33 false incidences. On RNA-long ON the regional total hides an intron loss:
+18.5429 → 24.1715% intron error; exons remain 21.6501 → 21.6612%. Do not promote this
+partial candidate on the zero-control improvement alone.
+
+The zero-control decomposition retains all other inputs and the same objective:
+
+| known/empty-row input | false region DNA | false boundary DNA |
+|---|---:|---:|
+| old population blur and previous-prior weighting | 1,455.90 | 249.69 |
+| remove only previous-prior weighting | 2,817.97 | 183.81 |
+| remove only population blur | 2,943.64 | 217.53 |
+| raw observation likelihood: remove both | 21.13 | 19.58 |
+
+This is an interaction; neither isolated deletion explains the recovery. A smoothed or
+prior-weighted distribution is not an observation likelihood merely because it is a curve.
+All population optima used here have finite objective and a global objective-gap certificate
+below 1e-6. A falsification caught an invalid-zero-likelihood certificate in the diagnostic
+optimizer; its guard is fixed. A tighter two-point request was explicitly refused rather
+than silently accepted; the independent optimum check uses the experiment's stated 1e-6
+numerical tolerance. This is not a panel-selected biological threshold.
+
+The splice-input audit now has a raw conditional observation factor for a single licensed
+face, keeping individual route counts and opportunities. Its derivation and the unstranded
+identification limit are in `EQUATIONS.md`, **Conditional observations at one splice face**.
+At this checkpoint an assembly policy for the local RNA route shares was not selected;
+the subsequently authorized profiling reference is recorded below. Graph-wide duplicate
+observations remain unverified. Forty scratch observation/optimizer checks pass and thirteen
+deliberate defects are caught, with every gate exercised. No production source was changed.
+Instrument: `.cache/rigel_runs/2026-10-07_observation_inputs/` (`limits.py`, `fit_inputs.py`,
+`replay.py`, per-refit arrays, separate ablation receipts, raw splice reference and mutation logs).
+
+ROUTE-PROFILE ROBUSTNESS STOP (2026-10-07). The owner authorizes exploring route profiling
+and requires a general, simple model, not optimization to a simulated dataset. A one-junction
+reference profiles the route share by a concave scalar solve, with no new prior or tunable.
+Independent maximization in the original route coordinate, analytic limits, component units,
+strand reversal and opportunity contrasts pass. The initial fixed-share placeholder fails
+22 of 33 arithmetic gates. The implemented reference plus counterexample characterization
+has 40 passing scratch checks, all exercised by nine deliberate defects. These certify the
+arithmetic and the failure diagnosis, not suitability as general evidence.
+
+The predeclared generality condition **fails before any panel run**. Hold the target DNA
+rate at 20 and RNA at 80, give both components and the junction unit opportunity, strand
+probability 0.75, and half the RNA each route. Unspliced expected columns are exactly
+40/20. Change only junction capture; all tabulated counts are integral expected means,
+with no sampling, fitted truth input or simulation. The factor profiles routing at each
+candidate density with the RNA amount held fixed:
+
+| junction capture multiplier | observed junction count | source factor's implied DNA rate | true DNA rate | log-likelihood advantage over truth |
+|---|---:|---:|---:|---:|
+| 0.1 | 4 | 36.3636 | 20 | 0.1254 |
+| 1 | 40 | 20 | 20 | 0 |
+| 10 | 400 | 3.6364 | 20 | 11.1040 |
+
+The implied rate attains the saturated multinomial likelihood; the incorrect opportunity
+at the true rate cannot. Tenfold depth multiplies each nonzero log-likelihood advantage
+by ten while preserving the rate bias. Supplying the true capture-weighted junction
+opportunity restores the true-rate optimum. This is an oracle control diagnosing the
+opportunity assumption, not an implementable capture estimator or an end-to-end error.
+The algebraic equivalence for multiple routes is derived in `EQUATIONS.md`,
+**Capture-opportunity nonidentification at a splice face**.
+
+Independent exhaustive fragment placement confirms that relative capture is not an
+impossible perturbation. At a donor separating a first exon from an intron, a probe in
+the second exon enriches spliced crossings while missing continuous crossings. A probe
+in the intron does the reverse. Twenty-four small placement/length/binding contrasts include
+both equal lengths and gaps in each direction; no single scalar correction survives them.
+This prices a structural possibility, not its prevalence in real data. The inherited
+shared-capture premise also exists in the point-rate maps; profiling exposes, not creates,
+this issue. Raw evidence curves and the prior-once goal are not rejected by this result.
+
+Stop before RNA integration, multiple-route implementation, frozen population replay or
+native integration. Do not select a correction factor, admission cutoff or probe-layout
+branch. The next proposed checkpoint is to establish what relative capture/opportunity
+information is identified by the existing fragment observations before treating splice
+ratios as transported density evidence. Until then this is a diagnostic reference, not a
+landing candidate. Existing factory-removal validation and deferred-stratum scope stand.
+Instrument: `.cache/rigel_runs/2026-10-07_route_profile/` (`PROTOCOL.md`, `route_profile.py`,
+`capture_mismatch.py`, the intentionally failing generality receipt, tests and mutations).
+
+LOCAL-FOOTPRINT CLARIFICATION (owner, 2026-10-07). The stop above applies to treating an
+isolated face's exact shared-capture formula as general evidence. Extending it to a rejection
+of useful local capture inference was too broad: the isolated comparison did not use the
+other enriched objects reached by the same probe. The owner's intended model is approximate
+local co-enrichment at region/boundary resolution (`DESIGN.md`, **Capture has a local footprint**),
+not arbitrary independent capture averages or an identical multiplier across all neighbors.
+
+A follow-up overlap calculation uses one junction-spanning probe with a 50-base part in
+each of two 300-base exons, separated by a 500-base intron. The spliced molecule sees one
+contiguous probe; continuous molecules can bind either part. Enumerate contained, ordinary
+crossing and junction-crossing fragments separately with their own component lengths.
+The established diagnostic law is `1 + binding * best contiguous overlap`. At binding=1,
+the expected capture multipliers (relative to uniform sampling) are:
+
+| RNA / DNA length | RNA exon-contained | RNA ordinary boundary | RNA junction | DNA exon-contained | DNA ordinary boundary |
+|---|---:|---:|---:|---:|---:|
+| 78 / 78 | 6.717 | 35.091 | 69.182 | 6.717 | 35.091 |
+| 78 / 250 | 6.717 | 35.091 | 69.182 | 26.000 | 46.080 |
+| 250 / 78 | 26.000 | 46.080 | 91.161 | 6.717 | 35.091 |
+
+The opposite flank has the same expectations by symmetry. All five channels are enriched
+in all nine length/binding contrasts (binding 0.1, 1 and 10); a far boundary at the other
+end of the first exon remains unenriched. A closed-form sum independently checks the
+contained expectations. This establishes local co-enrichment and unequal object averages
+in the same physical example. It does not fit a coupling strength or guarantee that every
+adjacent object is enriched. No calibrated density or end-to-end accuracy is measured.
+Receipt: `.cache/rigel_runs/2026-10-07_local_footprint/junction_probe.json`.
+
+EXISTING-MESSAGE EVIDENCE INTERFACE (2026-10-07). The factory-free exact-strand build's
+delivered composition rows can be read inside the exact own-observation RNA integral,
+without a second propagation system. The Python diagnostic implements this for a single
+admitted RNA strand, with pure-DNA and zero-opportunity limits. It preserves the existing
+transport maps, discrepancy treatment and directionality. It is not yet a production
+consumer or a certification of all delivered factors as independent observations.
+
+Fresh native replays on test g00 ss0.99 ON, g25 ss0.70 ON and g50 ss0.50 ON compare the
+fitted DNA prior with no DNA prior on the same solve grid. Every delivered composition
+row and every present RNA cube row is bit-identical (63, 101 and 27 delivered cube slots).
+The largest changes in final DNA share are 0.803, 0.903 and 0.604, respectively, so the
+prior intervention is effective. Re-reading the original prior with diagnostics preserves
+all count-belief arrays bit-for-bit. This establishes prior independence for these rebuilt
+rows on a fixed grid, not invariance to a changed library coordinate or shared technical fit.
+
+At the zero control's largest false-count single-strand exon and boundary, the old
+point-count Poisson input overstates the evidence against the measured background:
+
+| object | fitted DNA incidences | point-count log support at background, relative to its maximum | observation/message log support at background, relative to the sampled maximum |
+|---|---:|---:|---:|
+| exon 762 | 5.760 | -49.988 | -5.748 |
+| boundary 256 | 22.812 | -212.428 | -6.428 |
+
+The background density here is 3.65012e-6/bp. The new figures are likelihood contrasts,
+not capture weights or new count estimates; the sampled rate is not an oracle realized
+count. Own observations alone penalize zero DNA by only about 0.24 nats at each object.
+The delivered-row trace reconstructs the native rows bit-for-bit and identifies the
+additional pressure: exon 762 receives a strong boundary strand claim (27 opposite-column
+reads out of 1,447), and boundary 256 receives its left exon's composition and its right
+exon's DNA lower bound. These claims derive from observed strand imbalances, not a leaked
+DNA prior. This finding alone does not establish a faulty message or justify suppressing
+all positive DNA evidence in an RNA-only realization. Shared-fragment dependence and model
+mismatch remain possible contributors, and the evidence must retain finite uncertainty.
+
+The point-count control fails 13 of the original 21 checks. The completed adapter has
+24 passing scratch checks without integration warnings; eleven deliberate defects/reversions
+plus the control exercise every gate. One transported intron/boundary factor agrees with
+the independent two-object integral to the stated interpolation tolerance. General splice
+and level rows remain approximate. No capture prior, new biological constant, propagation
+rule, production source change or end-to-end reader improvement is claimed.
+Instrument: `.cache/rigel_runs/2026-10-07_message_evidence/` (`message_evidence.py`,
+`test_message_evidence.py`, falsification/mutation receipts, `audit_delivery.py`,
+`delivery_audit.json`, `trace_zero.py`, `zero_trace.json`).
+
+NATIVE EVIDENCE CHECKPOINT (2026-10-07). The same one-RNA-strand integral now has an
+isolated C++ evaluator with analytic physical limits, numerical tail control and no
+count-path call site. Forty-two reference/interface checks pass; twelve compiled defects
+and reversions exercise every gate. Two numerical defects were found and corrected:
+a cancelled Simpson error estimate, and loss of significance from subtracting far-tail
+Poisson log likelihoods. Neither fix changes the statistical model or adds a rate cap.
+Replaying the frozen training snapshots on test zero and RNA-long unstranded ON preserves
+all selected objects, beliefs, grids, weights and final count arrays bit-for-bit.
+The next contrast changes only the remaining mixed-object curves of the frozen final
+population refit. Both-strand cube integration, composite-evidence dependence, coordinate
+invariance and production throughput remain unresolved; no new reader accuracy is claimed.
+Instrument: `.cache/rigel_runs/2026-10-07_native_evidence/` (isolated source and package,
+`test.log`, `mutations.json`, delivery audit and numerical timing receipts) and
+`.cache/rigel_runs/2026-10-07_mixed_inputs/` (frozen inputs and count-identity receipts).
+
+MIXED-INPUT AND COORDINATE FOLLOW-UP (2026-10-08). Replacing the remaining mixed
+curves of the frozen final population refit, while holding objects, weights, grid and
+objective fixed, changes RNA-long unstranded-ON region/boundary DNA-count error from
+20.9468/19.2018% to 17.1196/19.1979%. Exon error improves from 21.6612% to 17.3622%,
+but intron error worsens from 24.1715% to 30.7955%. This is an attribution control,
+not a self-consistent new calibration or a landing candidate. The zero-control final
+selection has no mixed rows; its identical result cannot certify the future reader.
+The constrained population optimizer needed multiplicative initialization to reach the
+unchanged 1e-6 objective-gap requirement; the certified final bound is 6.21e-7.
+
+A held-level counterexample demonstrates a remaining interface loss. `profile_of_level`
+substitutes the target's observed total when converting absolute DNA density to composition.
+Feeding the resulting row to an integral over expected RNA amount reads a different density
+factor. With target counts 4/4, unit opportunities, strand fidelity 1/2 and a fixed
+one-sided DNA level from source count 20, the native converted row prefers density 8.2;
+reading the same held factor in its original density coordinate prefers 13.8. Both modes
+are on a 0.1-spaced diagnostic grid. This does not establish identical capture between
+neighbors or certify the original factor as an independent likelihood. It establishes
+that the final fused composition row is not a lossless density-evidence interface.
+Preserve the already-existing composition and absolute-level channels before the substitution;
+no new propagation or spatial coupling follows. The algebra is in `EQUATIONS.md`,
+**Absolute level factors retain their coordinates**.
+Instrument: `.cache/rigel_runs/2026-10-07_mixed_inputs/` (frozen curves, optimization
+certificate and matched final-refit replays); `.cache/rigel_runs/2026-10-07_native_evidence/`
+(`check_level_coordinates.py`, `level_coordinate_check.json`).
+
+SEPARATE-CHANNEL IMPLEMENTATION (2026-10-08). The isolated density evaluator now reads
+the existing DNA level at candidate DNA density and the existing RNA level inside the
+RNA-amount integral. Composition remains a ratio factor. No new message pass, spatial
+model, prior or count-path call site was added. Existing diagnostics already expose the
+received channels; rebuilding their final assembly is bit-identical. The control fails
+11/19 coordinate gates and the empty extractor fails 5/6 wiring gates. The corrected
+primitive plus earlier tests and wiring tests pass 67/67; eighteen native/adapter mutants
+and five extraction mutants exercise all 67. Native sources and binary are restored after
+the campaign. Main production source and installed native code are unchanged.
+
+The frozen RNA-long unstranded-ON final population selection contains 1,159 mixed objects;
+85 have a separate RNA level, none has a separate DNA level. The other 1,074 mixed
+composition rows are exactly unchanged. Recomputed controls match the archived curves
+exactly. Corrected curves plus controls take 43 seconds with two numerical workers;
+the unchanged population objective meets its 1e-6 certificate with a 7.58e-7 bound.
+The matched count replays take about 15 seconds each. DNA incidence-count errors (%):
+
+| class | previous mixed curves | separate factor coordinates |
+|---|---:|---:|
+| Regions | 17.1196 | 16.7259 |
+| Boundaries | 19.1979 | 18.8416 |
+| Introns | 30.7955 | 30.9444 |
+| Exons | 17.3622 | 16.9364 |
+
+This repairs the interface but does not resolve the deferred regression or validate a
+production population partner. The intron loss persists. The zero-control final selection
+again contains no mixed objects. Directly reading its worst exon leaves background log
+support unchanged at -5.7478 nats; its worst boundary changes only from -6.4282 to -6.4290
+nats, relative to each curve's sampled maximum. Thus this coordinate correction does not
+explain or remove their false-capture risk. No capture weights were inferred in this test.
+
+Three test-condition audits retain bit-identical count outputs and prior-independent
+received rows/cubes on fixed grids. That does not establish invariance when whole-library
+coordinate origins rebuild the tables, nor independence from `split_live`, nor independence
+of factors that share observations. In particular, earlier EDGE/LEVEL face builders can
+already encode absolute evidence through observed totals; correcting final delivery alone
+does not make those composition factors exact. The next tests must distinguish those
+inherited approximations from the authorized admission contrast, keeping each intervention
+separate. Both-strand evidence and production throughput remain uncompleted. The numerical
+primitive is a supported prototype; its population consumer is not a landing candidate.
+Instrument: `.cache/rigel_runs/2026-10-08_channel_evidence/` (source snapshots and isolated
+package, `falsification.log`, `tests.log`, `mutations.json`, `delivery_mutations.json`,
+`*_freeze*.json`, `long_unstr_on_evaluation2.json`, optimizer certificate, matched count
+replays and `channel_audit.json`).
+
+BOTH-STRAND DELIVERY (2026-10-08). The diagnostic adapter can now retain the existing
+two RNA-level factors at an object admitting both RNA strands. It reads the native cube
+table already emitted by final message assembly; it does not rebuild propagation or
+apply the single-strand side exclusion. That table contains each strand's intersection
+of held levels and its own lower-side bound. Composition and DNA factors reuse the
+previous typed adapter. Slot identity, presence bits and each table's density coordinate
+are preserved. No native function, count call site, prior or population policy changes.
+
+The former single-strand-only interface fails all 16 adapter specifications; the completed
+adapter passes all 16. Fifteen actual adapter mutations each fail, collectively exercising
+every specification. The first mutation attempt exposed a weak fixture: held levels
+entirely masked the own lower-side bounds. The strengthened fixture makes both matter;
+dropping either own bound now fails. A separate row-permutation check prevents silently
+reading another object's profile. These are delivery checks, not nuisance-integration checks.
+
+Three frozen test-chromosome input contexts each contain 198 both-strand objects. Native
+prepare/pass/assembly and the diagnostic reads take under one second together, excluding
+process startup. Presence counts are:
+
+| condition | DNA factor | RNA+ factor | RNA− factor | both RNA factors | neither RNA factor |
+|---|---:|---:|---:|---:|---:|
+| g50 ss0.99 ON | 83 | 63 | 75 | 18 | 78 |
+| g50 ss0.50 ON | 0 | 24 | 4 | 1 | 171 |
+| g00 ss0.99 ON | 48 | 24 | 52 | 13 | 135 |
+
+Every present RNA profile, axis and origin equals its native cube entry. Prepared inputs,
+received messages and cube storage are unchanged after extraction. A repeated final
+assembly reproduces the count-facing rows and all present cube entries bit-for-bit.
+These checks do not run calibration or the EM; they establish neither final-count identity
+under integration nor an accuracy improvement. None of these contexts supplies a composition
+factor at a both-strand object, so that combination is covered by the explicit fixture.
+The both-strand RNA-amount/tilt integration with delivered factors remains unimplemented;
+finite support, shared observations and inherited face approximations remain open.
+Instrument: `.cache/rigel_runs/2026-10-08_both_delivery/` (`both_delivery.py`,
+`before_complete.xml`, `candidate.xml`, `mutations_initial.json`, `mutations.json`,
+`census.py`, `census.json`, `verification.json`).
+
+BOTH-STRAND DENSITY REFERENCE (2026-10-08). The extracted RNA profiles now have a
+standalone consumer using the existing total-RNA measure and three tilt hypotheses.
+At fixed tilt it shifts both profiles into log total RNA amount, merges their knots
+and reuses the certified native one-amount integral. It integrates over tilt outside
+that call. A separate SciPy reference reverses the integration order and evaluates
+the original Poisson columns. No native source or production count call site changes.
+
+The initial own-observation control fails 8 of 18 factor checks. The generic reference
+then passes 26 observation, factor, normalization, coordinate, limit, missing-profile,
+narrow-profile, refinement and input-preservation checks. A subsequent rule audit
+finds that finite profile values alone omit existing hypothesis support: the native
+count solver uses a delivered RNA profile to exclude the opposite pure-strand atom.
+That audit fails 4 of 5 additional checks before the diagnostic consumer passes the
+presence bits explicitly. This is preservation of **The AMBIG tilt's hypothesis space
+is {pure +, pure −, mixed} — the tilt atom**, not a new strand-presence inference rule.
+
+The completed reference passes 31/31 checks in 26.22 seconds. Twelve actual defects
+collectively exercise every check; two further numerical defects are also detected.
+Dropping the profile-derived tilt breakpoints fails the narrower of the two deliberately
+peaked-profile cases. Dropping the pure-strand hypotheses fails neutral-profile and
+unwitnessed-support checks. All source mutations are restored. An initial mutation that
+changed inputs at every quadrature call failed through loss of numerical convergence;
+the final input-mutation check instead changes a profile once and fails the actual
+input-preservation assertion. The weaker initial receipt is retained separately.
+
+These checks establish a reference for the declared composite-factor calculation, not
+an independent joint likelihood for the inherited messages. Both-strand own lower-side
+bounds can reuse target observations. The existing witness rule remains explicit, and
+changing it requires its own model decision. Finite input support is still unresolved.
+Whole-genome cost is unmeasured: the scalar reference partitions tilt using pairs of
+profile knots and must not be called a production throughput result. No both-strand
+objects have been added to population training, no capture weights have been read and
+no count or transcript accuracy benchmark was run for this reference.
+Instrument: `.cache/rigel_runs/2026-10-08_both_evidence/` (`both_evidence.py`,
+`reference.py`, `before.xml`, `witness_before.xml`, `candidate.xml`, `mutations.json`,
+`numerical_mutations.json`, `generic_only/`, executed snapshots and `verification.json`).
+
+BOTH-STRAND NUMERICAL COST (2026-10-08). A table census and bounded scalar probes reject
+a direct port of the outer reference loop as the next production step. Representative
+two-profile objects have 992–1,090 tilt breakpoints from the pairwise knot construction.
+The stranded test object (slot 2780, 728/1,407 observed columns) exceeds a 20-second wall
+budget for one density, after 4,523 conditional evaluations. This is a measured cost
+barrier, not a new count-error or transcript-error result.
+
+An isolated exact compactor deletes only interior knots within constant stretches,
+retaining endpoints, all changing segments, absolute heights and profile presence.
+The stranded object's neutral composition table shrinks from 172 knots to two and
+its positive RNA profile from 172 to 37. Four of six representation checks fail before
+the change; all six plus the prior 31 numerical checks pass afterward. Three actual
+mutations exercise all six new checks. Interpolation at every original knot and interval
+midpoint is identical on all 210 saved object/condition inputs; presence is preserved.
+The mathematical reason is **Constant interpolation segments need only their ends** in
+`EQUATIONS.md`. No nonconstant curvature or small nonzero change is discarded.
+
+Serial scalar probes on the same saved inputs, without calibration or EM:
+
+| test condition / slot | original wall seconds | compact wall seconds | original / compact conditional calls | log-evidence difference |
+|---|---:|---:|---:|---:|
+| g50 ss0.99 ON / 2780 | >20, stopped | >20, stopped | 4,523 / 9,392 before stopping | unmeasured |
+| g50 ss0.50 ON / 3120 | 7.5394 | 2.9236 | 11,847 / 7,449 | 2.6e-14 |
+
+The latter object has only three reads: the cost is not confined to deep objects.
+The compact stranded probe spends 19.8345 of 20.0026 wall seconds inside the existing
+native inner function; the compact low-count probe spends 2.8167 of 2.9236 there.
+The machine reports high load, so these are bounded diagnostic costs, not release
+throughput or a general speed-up claim. CPU and wall times agree closely in the probes
+that record both. Main source, tests, goldens and both native binaries remain unchanged.
+
+The compact stranded probe also reports a SciPy integration warning. A separate census
+finds 75, 47 and 57 tilt intervals with no representable midpoint in the compact stranded,
+unstranded and zero-control representatives, respectively. Their summed widths are about
+1e-14 radians. Such intervals cannot be refined by subdivision; this observation does
+not yet attribute every warning to that cause. The reference currently requests relative
+accuracy separately for every interval, including negligible mass. The subsequent shared
+budget experiment below addresses that numerical schedule. Do not drop small intervals,
+merge nearby knots with an arbitrary tolerance, select a fixed tilt mesh or port the
+expensive loop unchanged. This is numerical work on the same integral, independent of
+the range proposal and the separate landscape-weight contrast.
+Instrument: `.cache/rigel_runs/2026-10-08_both_cost/` (`census.json`, saved object tables,
+`time_one.py`, scalar timing receipts, `compact.py`, `compact_before.xml`,
+`compact_candidate.xml`, `mutations.json`, `table_audit.json`, `verification.json`).
+
+BOTH-STRAND SHARED ERROR BUDGET (2026-10-08). This first shared-budget variant is
+superseded by the cancellation check below; its receipts remain the comparison control.
+The bound in **Tilt variation can be
+bounded without fitting RNA** separates observed-column variation from the finite
+profiles' slopes and ranges. It needs no inferred RNA amount, new prior or biological
+constant. Across all 179 saved intervals without a representable midpoint, native
+conditional log likelihoods change by at most 3.8e-12 and stay within the bound plus
+the nominal inner integration allowance. This supports an outer-scheduling diagnosis;
+it does not attribute every earlier integration warning to the same cause.
+
+A single global SciPy call is rejected by a narrow Gaussian peak: it misses 15.73% of
+the mass while reporting about 1.1e-14 relative error. The retained prototype instead
+uses adaptive Simpson integration with the existing profile-derived breakpoints and
+one error budget over all intervals. Endpoint samples expose the missed boundary
+layer. At floating-point resolution, an interval's mass and derived uncertainty remain
+in the sum; the prototype rejects an unresolved peak when the total cannot meet tolerance.
+The Simpson estimate is still an error estimate, not a global convergence theorem.
+
+The zero-variation bound control fails 10/14 initial checks. Further small-probability
+and unstranded-identity falsifications expose rounding defects before repair. The final
+25 new checks and the prior 37 pass together (62/62); fourteen actual mutations
+collectively exercise all 25 new gates and are restored. These include a tiny interval
+that dominates the integral, a negligible but uncertain interval, normalization, strand
+mirror, nonmonotone profiles and loss of precision during error summation.
+
+Fresh serial scalar pairs hold the saved inputs, isolated native binary and requested
+1e-8 tolerance fixed. Both arms use the exact compactor:
+
+| test condition / slot | separate-budget wall seconds | shared-budget wall seconds | conditional calls, separate / shared | absolute log-evidence difference |
+|---|---:|---:|---:|---:|
+| g50 ss0.99 ON / 2780 | >20, stopped | 4.9452 | 10,786 before stop / 2,504 | unmeasured |
+| g50 ss0.50 ON / 3120 | 2.8500 | 0.7582 | 7,449 / 1,708 | 8.2e-11 |
+| g00 ss0.99 ON / 2780 | 11.5175 | 3.4319 | 11,677 / 3,104 | 1.1e-10 |
+
+Refining the tolerance from 1e-8 to 1e-10 at zero, half the observed-total rate and
+twice that rate gives nine paired density points across those three saved objects.
+All pass the nominal error comparison; the largest log-evidence change is 5.4e-10.
+The three screens take 66.2, 14.0 and 60.8 seconds. This is a sparse curve/refinement
+check, not a complete production-grid audit or independent truth for these real-valued
+inherited factors.
+
+These remain single-object cost probes, not calibration or whole-genome speed claims.
+Native inner work still dominates. Seconds per density value remain too expensive for
+the production consumer; reduce unnecessary conditional evaluations under the same
+error target before choosing a native outer implementation. Keep factor support,
+hypothesis weights, witness bits and all statistical inputs fixed. No count solve,
+population fit, capture-weight calculation or release benchmark has changed.
+Instrument: `.cache/rigel_runs/2026-10-08_tilt_budget/` (`bounds.py`, `tilt_integral.py`,
+`budget_evidence.py`, failing controls, `reference.xml`, `mutation_coverage.json`,
+refinement and verification receipts); fresh paired timings are the `budget_pair_*`
+receipts in `.cache/rigel_runs/2026-10-08_both_cost/`.
+
+BOTH-STRAND REFINEMENT CANCELLATION (2026-10-08). An audit finds that the native inner
+integral already checks two successive Simpson differences, while the new outer
+integral checked only one. A positive polynomial with an exactly integrated mass
+exposes the consequence: the first outer implementation returns half the mass with a
+zero error estimate. Coordinate rescaling and log normalization preserve the defect.
+All three falsifications fail before the outer integral reuses the inner solver's
+second-refinement check; all three then pass. Two actual removals of the check each
+exercise every new gate. Together with the prior numerical and representation gates,
+the strengthened implementation passes 65/65. The derivation and limits are **One
+embedded difference can cancel** in EQUATIONS. This does not prove arbitrary-function
+convergence and does not change the likelihood model.
+
+Fresh serial saved-object pairs isolate this check, with the same native binary,
+factors and 1e-8 requested tolerance:
+
+| test condition / slot | one-check wall seconds | two-check wall seconds | conditional calls, one / two |
+|---|---:|---:|---:|
+| g50 ss0.99 ON / 2780 | 4.9443 | 8.1638 | 2,504 / 4,088 |
+| g50 ss0.50 ON / 3120 | 0.7984 | 1.1659 | 1,708 / 2,752 |
+| g00 ss0.99 ON / 2780 | 3.6477 | 6.3977 | 3,104 / 5,202 |
+
+Nine sparse density-curve points agree with the frozen 1e-10 reference values within
+6.0e-11 log likelihood. That agreement and the existing independent-integration gates
+are numerical evidence, not new count or transcript accuracy results. Retain the extra
+check when optimizing cost; the faster first variant is not the active candidate.
+Instrument: `.cache/rigel_runs/2026-10-08_outer_refinement/` (`test_aliasing.py`,
+`guarded_integral.py`, `run_guarded.py`, `before.xml`, `reference.xml`,
+`mutation_coverage.json`, paired screen receipts and verification).
+
+INNER-EVALUATION COST CENSUS (2026-10-08). A read-only table audit finds occasional
+rounding-induced slopes above the sum of the original profiles' maximum slopes. Maximum
+ratios are 1.58, 4.01 and 1.22 on the stranded, unstranded and zero-control representatives;
+median ratios are below one. This measures a representation effect, not its runtime cost
+or permission to discard near-coincident knots.
+
+A separate standalone C++ diagnostic records each inner integrand call's RNA coordinate
+and normalization anchor. On twelve conditional inputs drawn from the saved tables,
+32.1–49.7% of calls repeat an already evaluated pair. Instrumented and uninstrumented
+standalone results are bit-identical on all twelve inputs. The recursive refinement
+computes the next subdivision to check error, then recomputes those same values when it
+descends. The follow-up below isolates reuse from tolerance allocation and statistical
+approximation. No speed-up is claimed from this census alone. Native library binaries
+and the worktree's original header remained unchanged during this diagnostic.
+Instrument: `.cache/rigel_runs/2026-10-08_inner_cost/` (`tables.json`, `prepare.py`,
+`input_metadata.json`, `inputs.txt`, `plain.txt`, `counted.txt`, `counts.json`);
+standalone C++ source and binaries are under `.cache/density_cost/` in the isolated
+native worktree.
+
+INNER-SAMPLE REUSE (2026-10-08). The isolated native integral now passes the quarter-point
+values already evaluated by its error check into recursive children. Both error checks,
+the subdivision decisions, budgets, tail bound and summation expressions are unchanged.
+Twelve falsifications require fewer calls, bit-identical results, the same unique sampled
+coordinates and a byte-identical refinement-decision trace. All twelve fail before this
+change and pass afterwards. Two compiled mutations (restore redundant evaluation; count
+one child's mass twice) each fail all twelve gates. Calls fall by 21.4–32.9% on these
+conditional inputs.
+
+The independent numerical and delivery checks pass 138/138 against the rebuilt library.
+Two frozen reference families must run in separate processes: both import a module named
+`reference`, so the initial combined invocation reused the wrong oracle and failed eight
+signature checks. That receipt is retained; neither frozen test family was edited.
+Fresh serial scalar pairs use the guarded outer integral and the same factors/tolerance:
+
+| test condition / slot | previous wall seconds | reuse wall seconds | conditional calls, unchanged |
+|---|---:|---:|---:|
+| g50 ss0.99 ON / 2780 | 8.2243 | 5.6205 | 4,088 |
+| g50 ss0.50 ON / 3120 | 1.1099 | 0.8396 | 2,752 |
+| g00 ss0.99 ON / 2780 | 5.8905 | 4.0981 | 5,202 |
+
+The three output values are bit-identical. These scalar timings are 24–32% lower, but
+remain unsuitable for production throughput. Fresh cached calibration pairs on seven
+conditions also preserve every region and boundary DNA count exactly. This confirms
+count-path isolation; it is not a new calibration or transcript accuracy result.
+The frozen control library remains `1ddc6e63`; the reuse library is `05171a89` in its
+separate diagnostic site. Main source, tests, goldens and installed native library are
+unchanged. Measure remaining inner work against each interval's contribution before
+changing the allocation of numerical error; do not infer a need for a biological cutoff.
+Instrument: `.cache/rigel_runs/2026-10-08_inner_reuse/` (`prepare.py`, `test_reuse.py`,
+`before.xml`, `after.xml`, `mutation_coverage.json`, `single.xml`, `both.xml`,
+`timing_summary.json`, `counts_control.json`, `counts_candidate.json`, verification);
+standalone C++ and its traces are under `.cache/density_reuse/` in the isolated worktree.
+
+INNER TOTAL-ERROR BUDGET (2026-10-08). Interval instrumentation preserves all twelve
+conditional values and call counts. On the eight stranded and zero-control inputs,
+72.9–88.3% of evaluations in the final integration pass serve intervals whose combined
+mass is below the requested total numerical error. Separate relative budgets therefore
+explain much of the remaining work. This is a numerical cost finding, not permission to
+discard low-density evidence or objects.
+
+The first replacement distributed absolute error by interval width. Its thirteen analytic
+cost checks passed, but an existing independent narrow-profile test exhausted floating-point
+subdivision. That variant is rejected and its source, native binary and failed receipt are
+retained. The corrected scheduler keeps all intervals in a heap and refines the largest
+estimated error until the summed error meets the total budget. It re-sums before acceptance
+and retains both Simpson checks, sample reuse, all knots and stationary maxima, and the
+analytic tail bound. The derivation is **A total integral has a total numerical budget**
+in EQUATIONS. There is no new biological assumption or numerical tolerance.
+
+The thirteen cost gates fail against the frozen relative-budget control and pass against
+the correction. Two isolated components of the narrow-profile failure also pass. Three
+compiled challenges cover all fifteen gates: restore relative budgets (13 failures),
+restore width budgets (2), ignore estimated error (15). The rebuilt library passes
+141/141 targeted numerical and delivery checks, including the independent both-strand
+reference. Seven fresh cached calibrations preserve every region and boundary DNA count
+against the frozen reuse control from the same session.
+
+Fresh serial scalar pairs isolate the allocation change, keeping the guarded outer reader,
+factors and 1e-8 requested tolerance fixed:
+
+| test condition / slot | separate relative budgets, seconds | total budget, seconds | conditional calls, unchanged |
+|---|---:|---:|---:|
+| g50 ss0.99 ON / 2780 | 5.6327 | 0.5561 | 4,088 |
+| g50 ss0.50 ON / 3120 | 0.8400 | 0.4491 | 2,752 |
+| g00 ss0.99 ON / 2780 | 4.1419 | 0.5751 | 5,202 |
+
+These are scalar numerical timings, not whole-library throughput or new calibration
+accuracy. Tightening tolerance from 1e-8 to 1e-10 on nine saved density points changes
+log likelihood by at most 3.8e-11; the tighter values differ from the prior frozen tight
+reference by at most 3.7e-12. This is a sparse curve check, not a complete production grid.
+The active isolated library is `636debae`; `05171a89` remains its frozen control.
+Production source, tests, goldens and installed native library are unchanged.
+Instrument: `.cache/rigel_runs/2026-10-08_inner_budget_cost/` (read-only interval census)
+and `.cache/rigel_runs/2026-10-08_inner_budget/` (analytic inputs, conditional probes,
+rejected width allocation, compiled mutations, independent checks, timings, count identity
+and refinement receipts).
+
+COMPLETE DENSITY-CURVE COST (2026-10-08). The saved stranded ON object 2780 completes
+all 260 points of the existing frozen landscape grid. With the shared inner budget,
+the guarded outer reader takes 143.44 seconds at 1e-8 and 434.32 seconds at 1e-10.
+The maximum log-likelihood difference is 2.92e-10, at density 7.376. This validates
+the numerical calculation across this complete fixed grid, not the adequacy of
+that grid's support or the source factors. The nominal curve requires 1,062,258
+conditional calls, so the consumer is still unsuitable for production throughput.
+
+A cheap piecewise-linear compression screen at log-height tolerances from zero to
+1e-8 finds no further knot reduction on the six representative RNA profiles beyond
+the existing constant-segment compaction. This was an uncertified cost screen; no
+approximate compression was implemented and no tolerance was selected from panel error.
+
+The next prototype applies the existing uniform tilt envelopes to ordinary intervals
+before requesting their full Simpson stencil. It retains every interval's mass and
+uncertainty and falls back to the existing two-refinement check. Six analytic
+constant/background/peak cost gates fail before implementation and pass afterward.
+Its first scalar screen exposes a separate accounting defect: stranded ON exceeds
+20 seconds because subtraction of large initial error bounds leaves a false residual.
+Four of six additional analytic loose-bound cases reproduce the excess work. Direct
+sums over live intervals replace the incremental bookkeeping, and all twelve focused
+checks then pass. Four actual mutations cover all twelve gates. The independent
+both-strand, bound, cancellation and new checks pass 71/71.
+
+Fresh serial scalar pairs use the same native library and factors:
+
+| test condition / slot | guarded outer, seconds | envelope-first outer, seconds | conditional calls, guarded / envelope-first |
+|---|---:|---:|---:|
+| g50 ss0.99 ON / 2780 | 0.5581 | 0.3306 | 4,088 / 2,162 |
+| g50 ss0.50 ON / 3120 | 0.4491 | 0.3456 | 2,752 / 1,918 |
+| g00 ss0.99 ON / 2780 | 0.5732 | 0.4800 | 5,202 / 3,876 |
+
+The corrected outer reader also completes the same 260-point curve in 81.81 seconds;
+every value agrees with the frozen tight reference within 2.92e-10 log likelihood.
+That full-curve timing is an absolute feasibility measurement, not a fresh paired
+whole-curve speed-up claim. The initial stalled implementation and its receipts are
+retained. The derivation is **Envelope-first quadrature retains mass** in EQUATIONS.
+No native, count, opportunity, prior or capture rule changes in this contrast.
+The retained diagnostic runner is now `run_lazy.py`, with native `636debae`;
+the guarded runner remains the comparison control. These timings do not support
+whole-genome use. Complete source-factor and support certification before another consumer
+rewrite; numerical agreement does not certify the inherited evidence model.
+Instrument: `.cache/rigel_runs/2026-10-08_complete_curves/` (full grids and compression
+screen), `.cache/rigel_runs/2026-10-08_lazy_tilt/` (evaluator, falsifications, mutation
+coverage, stalled variant, independent checks, timings and verification).
+
+BLURRED-LIKELIHOOD TAILS (2026-10-08). The source-factor audit confirms a separate
+arithmetic defect. `blur_row` converts globally normalized log values to probabilities,
+convolves, then floors each result at `1e-300`. Distinct likelihood tails consequently
+collapse near -690. A direct evaluation of the same finite discrete Gaussian disagrees
+by 6,208 nats on a quadratic log row with curvature 100. Certified Poisson-source tests
+also fail: counts 100 and 500 lose their low-density tail. Ten of seventeen focused
+tests fail before the correction. These are numerical counterexamples, not transcript
+accuracy measurements or proof of the remaining RNA-short error's cause.
+
+The isolated native correction retains the ordinary convolution for sums in the normal
+floating-point range and uses a local log-sum-exp elsewhere, with log kernel weights.
+No blur width, finite radius, edge padding, lattice, message schedule or statistical
+rule changes. The derivation is **A convolution preserves relative likelihood in its
+tails** in EQUATIONS. All seventeen gates and the seven earlier source-footprint gates
+pass. Four compiled defects collectively trigger every new gate: restore the floor,
+omit the blur, invent nonzero width at zero variance, or drop tail kernel weights.
+
+A fresh seven-condition calibration A/B reads the existing synthetic scan caches and
+scores against per-object oracle truth. The control reproduces its frozen count arrays
+exactly. Six candidate conditions are also bit-identical. RNA-long ss0.99 ON changes
+at most 0.000106 of a region count and 0.001535 of a boundary count; total absolute
+movement is 0.000124 and 0.002575 respectively. Region error is
+1.4657218062% -> 1.4657218041%, boundary error 3.3480121193% -> 3.3480121346%.
+The zero control and RNA-short stranded OFF are among the identical cases. Retain this
+as a numerical repair; it does not solve the outstanding count or capture errors and
+does not justify repeating the full release panels. Main source and the installed
+library are preserved. The existing message tests retain the identical four old-Gaussian
+reference failures in both arms (47 passed / 4 failed each); they were not rewritten.
+Ruff, the eleven documentation checks and diff checks pass.
+Instrument: `.cache/rigel_runs/2026-10-08_blur_tails/`.
+
+BLUR-TAIL INTEGRATION (2026-10-09). The arithmetic correction is applied independently
+after the certified-source footprint repair. It retains ordinary convolution in the
+normal floating-point range and evaluates smaller sums in log space. The original
+spacing and finite Gaussian operator are unchanged. An additional gate preserves a
+window with exactly zero likelihood: its log value remains negative infinity, rather
+than becoming a NaN or a finite floor. Eleven of eighteen cases fail against the
+integrated control; all pass after correction. Five actual compiled defects collectively
+exercise all eighteen gates. The derivation is **A convolution preserves relative
+likelihood in its tails** in EQUATIONS.
+
+Six of seven fresh calibration conditions are bit-identical in all 29 result fields
+and both belief arrays, including RNA-short stranded OFF and the zero-DNA control.
+RNA-long stranded ON changes at most 0.000106 region DNA fragments and 0.001535 boundary
+DNA fragments. Every class's calibration-error change is below 0.000000072 percentage
+points; nonfinite uncertainty values and their positions are preserved.
+
+The changed condition was then run end to end in ordinary isolated packages, with
+scan=1, fractional assignment, seed zero and default calibration/EM threads. Values
+are transcript / gene error (%); the archived release's truth hashes are rechecked.
+
+| Condition | 0.7.1 | Before arithmetic repair | Arithmetic repair |
+|---|---:|---:|---:|
+| RNA-long, g50 ss0.99 ON | 7.3766 / 1.6179 | 4.2591 / 0.6831 | 4.2522 / 0.6832 |
+
+The RNA pool gains 7.50 fragments, the DNA pool gains 0.0623 and the unspliced-RNA pool
+loses 7.56. These small changes are not a reason to select or tune the arithmetic.
+The serial LBX0190 comparison is bit-identical across the complete 254,319-row
+transcript table, saved region/boundary DNA and RNA counts, pools and calibration
+scalars. The finite-support problem and the detector-free reader remain open.
+
+The installed source and native binary match the isolated candidate. The final main
+suite passes 2,814/2,814 with no skips or xfails; lint, format checks and full preflight
+pass. All 147 golden files retain their starting hashes. No commit or push was made.
+
+Receipts: `.cache/rigel_runs/2026-10-09_blur_tails/` (ordinary frozen packages,
+`before.xml`, `candidate.xml`, `mutations.json`, paired `screen` outputs,
+`quant_comparison.json`, `real/comparison.json`, `main_suite.xml`, `installed.json`,
+`verification.json`).
+
+EDGE-PRODUCER COORDINATE AUDIT (2026-10-08). The earlier held-level counterexample also
+occurs before delivery: the native EDGE builder converts a pure-DNA boundary's Poisson
+lower bound through the recipient's observed total and publishes it as composition.
+Reading this row at an expected DNA/RNA ratio evaluates the source at the wrong density.
+The derivation is **An edge's count projection is not its intensity coordinate** in
+EQUATIONS. This indicts that input to the new intensity reader; it does not establish
+a corresponding defect in the existing count solver.
+
+With source count 20, unit opportunities and target columns 4/4, the current producer's
+factor at fixed expected DNA 4 varies from -7.0678 to -32.1147 nats as expected RNA
+varies from 0.25 to 16. The unchanged source-density factor stays at -16.1888. The
+complete target density curve has sampled mode 8.2 through the composition projection
+and 13.8 through the source density, agreeing with the earlier generic counterexample.
+No capture assumption, source width or population prior changes in this comparison.
+
+Frozen native-message censuses identify 249 active direct EDGE messages in test g50
+ss0.99 ON, 243 in g50 ss0.50 ON, and zero in g00 ss0.99 ON. Each active source is
+structurally pure DNA; none of these receiving sides already carries a DNA-level
+message. Thus final-channel separation cannot recover these discarded coordinates,
+and this particular defect cannot explain the measured zero-control false capture.
+
+A small Python attribution adapter removes only a directly received EDGE contribution
+from composition and evaluates the same one-sided source factor at candidate DNA
+density. Other composition terms, DNA/RNA factors, presence bits and side exclusions
+are retained. No new message pass or count call site is added. Ten of thirteen gates
+fail against the unchanged interface; all thirteen pass with the adapter. Four actual
+reversions/mutations exercise all thirteen, including source duplication and invented
+evidence where no direct edge is delivered.
+
+On preselected median-index, single-RNA-strand recipients, the existing 260-point grids
+change as follows. These are input-curve attribution measurements, not oracle accuracy:
+
+| test condition / slot | old / corrected sampled density mode | maximum normalized-height change |
+|---|---:|---:|
+| g50 ss0.99 ON / 1282 | 0.003758 / 0.004892 | 0.34190 |
+| g50 ss0.50 ON / 1278 | 1.803805 / 1.803805 | 0.03970 |
+
+The original count-facing delivery remains unchanged. A further face ablation, with
+all other prebuilt rules and lane licences fixed, changes only the direct recipient in
+the stranded example. In the unstranded example it removes eight composition messages:
+the direct edge at slot 1278 and seven forwarded/transported copies through slot 1271.
+Consequently the direct-recipient adapter is not a general repair and must not be
+installed as one. The subsequent capture-order check also rejects carrying this source
+as an absolute density through the existing composition routes: that would change their
+meaning and reopen **The paradigm** in DESIGN. The transfer assumption itself now needs
+review (`ISSUES: the-edge-density-floor-under-capture`). Do not start a population refit
+on only the directly corrected inputs.
+Instrument: `.cache/rigel_runs/2026-10-08_edge_source/` (`audit.py`, `edge_sources.py`,
+falsification/mutation receipts, `replay.py` and `trace.py`). The first audit's offset-only
+comparison failure is retained; normalized native delivery is reconstructed exactly.
+
+MESSAGE-LOCALITY AUDIT (2026-10-08). Rebuilding the existing messages establishes two
+different dependencies on disconnected exon expression, with local observations,
+opportunities, topology, strand fit and incoming beliefs fixed. These checks concern
+message construction; a population landscape is still deliberately shared information.
+
+First, `TransferPolicy.library` makes `split_live` require both the measured live strand
+protocol and a counted single-strand exon somewhere in the library. Adding one remote
+exon with zero RNA opportunity toggles this bit while leaving both coordinate origins
+unchanged. It switches each RNA hop between total-column and strand-difference discrepancy
+pricing. A three-object interface counterexample changes the normalized DNA-evidence
+curve by up to 0.500 in relative height. A separate census of annotation-derived triples
+finds one affected triple among 36 eligible in test g50 ss0.99 ON, and none among 13 in
+its zero control. At chain slots 3052–3054, the RNA+ bound delivered to the both-strand
+exon changes by 0.250 nats, or 0.01565 of normalized height. These are isolated local
+interventions, not whole-panel count errors; the intact libraries already have counted
+single-strand exons and do not toggle the bit.
+
+The scratch repair removes only that extra expression condition: an available strand
+model and the existing protocol verdict determine witness availability. It preserves
+the two hop formulas, all observations, faces, coordinate reductions and the declared
+strand decision. Four of seven falsification tests fail first on the existing code;
+the repair passes all seven, and four actual implementation mutations exercise every
+gate. The annotation-derived bound and hand-built evidence become bit-identical under
+the remote-exon intervention. This restores the stated protocol rule; it does not certify
+the existing discrepancy approximation, especially at objects admitting both RNA strands.
+
+Seven cached calibration A/Bs cover RNA-long unstranded/stranded ON, ladder g98 unstranded
+OFF, RNA-short stranded OFF, and test zero/stranded/unstranded ON. All 35 library-input
+comparisons are identical, as are the final region/boundary DNA-count arrays. These are
+numerical no-op checks on those conditions, not new transcript/gene accuracy measurements.
+These were prototype receipts; production integration is recorded next.
+
+LOCAL-WITNESS INTEGRATION (2026-10-09). After count-foundation integration, the ordinary
+installed package reproduces the disconnected-expression dependency. The repair removes
+only the redundant counted-exon condition, implementing **Local strand-witness availability**
+in DESIGN and EQUATIONS. A fresh portable gate covers both protocol orientations, unavailable
+protocol/model guards, received RNA rows, and final single-/both-strand delivery. Six of ten
+cases fail before the change; all ten pass afterward. Five actual Python implementation
+mutations collectively exercise all ten gates. The 35 existing transfer-policy and RNA-lane
+checks also pass. Native source and binaries are unchanged.
+
+Fresh ordinary-package calibration pairs on the same seven conditions preserve all 29 result
+fields and both belief arrays exactly. Origin truth, slot identity and observed counts are
+checked afresh; class-specific count errors are unchanged. This is a sparse-input robustness
+repair, not a new transcript/gene accuracy improvement. The disconnected-coordinate audit also
+reproduces the separate zero-origin and finite-support losses on the integrated foundation;
+this one-condition removal does not repair those. No capture prior or reader is selected.
+
+The serial LBX0190 end-to-end pair is bit-identical across every payload/calibration array and
+the 254,319-row transcript digest. The first full suite identifies one additional golden move:
+`antisense_overlap_ss90` has 1,000 true RNA fragments and no DNA. Its false DNA decreases from
+2.145629 to 2.063161 fragments; the largest transcript change is 0.046568 fragments. Transcript
+and gene error both move from 0.214563% to 0.206316%. Every numeric field is reviewed, with
+schemas, dtypes and text unchanged. Only that fixture's seven golden files are regenerated;
+no tolerance changes. The completed suite derives **2,762 passed, zero failed/skipped/xfail**;
+lint, formatting and full preflight pass. The failed pre-update receipt is retained.
+
+Receipts: `.cache/rigel_runs/2026-10-09_reader_scope/` (`audit.py`, `audit.json`, the failed-first
+gate, frozen ordinary packages, `mutations.json`, seven paired `screen` outputs and truth scores,
+the real identity pair, `golden_review.json`, `main_suite.xml` and `verification.json`).
+
+Second, the RNA coordinate can be zero despite positive local RNA-source evidence.
+The exon fallback reads opportunity rather than positive count: an empty single-strand
+exon can suppress the positive both-strand-exon fallback. With no exon counts at all,
+counted introns can still publish strand claims, but `rna_lane` drops every source when
+the reference is zero. These are executable missing-source counterexamples, replacing
+the earlier unmeasured fallback item in the latent-defect inventory.
+
+A separate Python prototype now repairs only the zero-reference path. It forms a positive
+numerical coordinate from available RNA-admitting count/opportunity pairs and certified
+flux pairs `(count, count/route_rate)`. The original positive reference, DNA coordinate,
+strand-witness bit and native source rules are preserved. This does not fit a library RNA
+abundance or feed summed counts to a new likelihood. The control fails 12 of 17 new gates;
+the repair passes all 17, including flux-only empty pieces on both strands at either
+junction end. Six deliberate defects exercise every gate. Both fresh control and repaired
+builds pass the existing 17 RNA-lane tests. Seven saved panel contexts produce identical
+library inputs with no array mutation; there is no new end-to-end performance claim.
+The original two zero-coordinate locality specifications now pass. The separate finite-
+support specification remains failing. Main source, goldens and installed native code
+remain unchanged. Instrument: `.cache/rigel_runs/2026-10-08_rna_coordinate/`
+(`positive_coordinate.py`, `before.xml`, `candidate.xml`, `mutations.json`,
+`existing_control.xml`, `existing_candidate.xml`, `existing_locality.xml`, `inputs.json`).
+
+ZERO-COORDINATE INTEGRATION (2026-10-09). The correction above is applied independently
+on top of the local-witness repair. The existing positive RNA origin is returned unchanged;
+the zero path uses the already-derived positive count/exposure scale. The DNA origin, strand
+protocol verdict, native builders, grid, hop prices and source admission remain unchanged.
+This implements **Changing a coordinate preserves physical support** in EQUATIONS, without
+the proposed independent-range representation. No capture prior, cutoff or population model
+is introduced.
+
+The portable source/unit gates extend the archived cases to unstranded and absent-strand-model
+libraries at both junction ends on both RNA strands. Twenty of 25 cases fail against the
+integrated foundation; all 25 pass after correction. Six actual implementation defects
+collectively exercise every gate. A full frozen-package suite passes 2,787 tests, including
+the added gates, with no golden movement. Seven fresh cached calibration pairs preserve all
+29 result fields and both belief arrays; slot and observation identity are checked against
+the oracle before scoring regions, boundaries, introns and exons separately. All those
+count errors are unchanged. This restores missing-source behavior in the explicit limit
+cases, not an observed accuracy gain on the panels. The finite-support failure remains open.
+
+The integrated whole-library LBX0190 pipeline is bit-identical: 19 payload arrays, 20
+calibration arrays and all 254,319 transcript rows. The first main-suite run exposed the
+already-recorded scheduler-dependent reorder gate; its deterministic replacement is recorded
+under **hygiene-ledger**. The final main suite passes 2,788/2,788 with no skips or xfails;
+lint, format checks and full preflight pass. Every golden file is unchanged from the start
+of this repair. The installed native binary is unchanged, and the integrated Python source
+matches the frozen candidate used for the paired measurements.
+
+Receipts: `.cache/rigel_runs/2026-10-09_rna_coordinate/` (ordinary frozen packages,
+`before_expanded.xml`, `candidate.xml`, `mutations.json`, `worktree_suite.xml`, paired
+`screen` outputs and class-specific truth scores, `real_reference.json`, `real_candidate.log`,
+`main_suite.xml`, `verification.json`).
+
+Finite support is a distinct failure. With the default half-window 10, changing only the
+remote RNA coordinate by `exp(14)` moves the local source below the level grid and removes
+its delivered RNA factor. Halving the step retains the failure. Expanding the half-window
+to 24 in a diagnostic control restores the coordinate contrast to below 4.5e-13 nats at
+both spacings. Neither value is a proposed production constant. The algebra belongs to
+`EQUATIONS.md`, **Changing a coordinate preserves physical support**. A mode at the lower
+grid edge is not alone a truncation diagnosis: a zero-component mode may belong there.
+The seven real-input censuses do not establish a current panel loss from this mechanism.
+
+A further isolated source-table error is established with the mode still inside the
+grid. A certified count of one at exposure 1,000, reference one and its existing empty-
+recipient hop variance gives 0.08679 maximum relative-height error under endpoint-padded
+blurring at half-window 10. Direct evaluation of the same finite convolution agrees at
+half-windows 20 and 40. These are diagnostic windows, not selected constants. The
+source has a known Poisson likelihood beyond the table; repeating its endpoint is not
+that likelihood. The operator identity belongs to `EQUATIONS.md`, **A known source
+supplies the convolution footprint**.
+
+The isolated native repair evaluates the known source over the existing blur's halo
+and crops back to the original grid. It preserves the width, lower-side operation,
+zero-width path and all inference grids. Two of seven new gates fail on the control;
+all seven pass after repair, and four compiled implementation defects exercise every
+gate. The existing 17 RNA-lane gates pass. A fresh seven-condition calibration pair
+reproduces the frozen count candidate exactly in its control. The largest changed
+per-object DNA count is 0.05911 fragments; region/boundary calibration error changes
+are below 0.000011 percentage points. No transcript/gene improvement is claimed.
+The original finite-support locality specification still fails after this repair and
+the zero-coordinate fallback. Main source and the installed native library are unchanged.
+Instrument: `.cache/rigel_runs/2026-10-08_level_support/` (`audit.json`,
+`test_source_blur.py`, before/repaired JUnit receipts, `mutations.json`, paired screens
+and `existing_locality.xml`).
+
+SOURCE-FOOTPRINT INTEGRATION (2026-10-09). The isolated certified-flux repair is applied
+on top of the integrated count foundation and locality corrections. The source is
+evaluated over the existing Gaussian footprint before cropping to the retained table;
+the grid, source admission, one-sided readout and hop variance remain unchanged. This
+implements **A known source supplies the convolution footprint** in EQUATIONS. A fresh
+check found a rounding defect in the archived prototype: subtracting extended coordinates
+to reconstruct spacing can add a kernel cell. Passing the original spacing through the
+same blur corrects it. Two source checks fail against the control, the rounding check
+fails against the first prototype, and five actual compiled defects cover all eight gates.
+
+Seven fresh calibration pairs preserve slot/observation identity against truth. The
+largest changed DNA count is 0.059104 fragments; every class's error changes by less
+than 0.000012 percentage points. These are calibration errors, not transcript errors.
+The full candidate suite exposes one golden move: `extreme_abundance_ratio` shifts
+0.00000056635 fragments from DNA to RNA. All numeric columns, schemas and text were
+reviewed; transcript error is 0.455115648 → 0.455115660%, gene error is
+0.001595802 → 0.001595745%, and true DNA is zero. No tolerance change is selected.
+
+The ordinary test-chromosome pipelines use scan=1, fractional assignment, seed zero
+and default calibration/EM threads. Each cell is transcript / gene error (%), at g50:
+
+| Stratum | 0.7.1 archived | Integrated foundation | Source-footprint repair |
+|---|---:|---:|---:|
+| Unstranded OFF | 10.23 / 2.14 | 10.33 / 1.54 | 10.50 / 1.54 |
+| Stranded OFF | 10.27 / 1.43 | 9.28 / 1.16 | 9.28 / 1.16 |
+| Stranded ON | 12.97 / 4.07 | 10.17 / 1.20 | 10.33 / 1.20 |
+| Unstranded ON, deferred | 27.38 / 18.98 | 12.45 / 4.42 | 12.97 / 4.42 |
+
+The stranded-ON downstream movement is concentrated in three ambiguous isoform-cluster
+genes (2,457.52 of 2,526.32 changed transcript fragments). Under the existing uniform
+start, the contrast reverses: 9.8356 → 9.7458% transcript error, with genes 1.26221 →
+1.26216%. Both starts have bit-identical calibration to their respective cached arm.
+This supports downstream sensitivity; it does not establish equal objectives or a flat
+likelihood, nor justify selecting a different EM start. The shipped start remains under
+**the-em-answer-depends-on-where-it-starts**. No transcript-accuracy gain is claimed.
+
+The serial LBX0190 pair has matching inputs and settings. Across 254,319 transcripts,
+absolute count change totals 0.000001334 fragments (1.0544e-9%); the largest changed
+calibration DNA count is 1.71e-11 fragments. This is output stability, not real-data
+accuracy. The pair took 15.57 / 15.64 seconds and does not establish a speed-up. The
+finite-support and low-probability blur-arithmetic defects remain separate open work.
+
+The integrated extension is byte-identical to the isolated candidate. The eight portable
+gates pass against it, the final main suite passes 2,796/2,796 with no skips or xfails,
+and lint, format checks and full preflight pass. Only the seven files for the reviewed
+golden fixture changed; their values match the pre-update review exactly. No commit or
+push was made.
+
+Receipts: `.cache/rigel_runs/2026-10-09_flux_footprint/` (ordinary frozen packages,
+`before.xml`, `spacing_before.xml`, `candidate.xml`, `mutations.json`, paired `screen`
+and `quant` outputs, `golden_review.json`, `em_comparison.json`, `real/comparison.json`,
+`main_suite.xml`, `golden_landing.json`, `installed.json`, `verification.json`).
+
+SOURCE-RANGE LIMIT (2026-10-08). A subsequent Python diagnostic derives a shared range
+from the existing RNA-fraction limits, Poisson source tails and each certified source's
+actual blur footprint, at the configured spacing. No capture yield, fitted biological
+threshold or simulator label enters this calculation. The unchanged range first fails
+all 13 coordinate/unit/range specifications. Raw-source coverage passes those 13 but
+fails 17 of 25 flux/end/strand/no-source checks; including the source blur footprint and
+preserving an inert range passes all 38. These passes certify the source examples only.
+On seven frozen condition inputs, this shared range increases the grid-point count by
+2.07–4.22 times. That is an allocation-size estimate, not measured runtime.
+
+Repeated propagation rejects this diagnostic as a general range repair. An unstranded
+chain carries a certified RNA source through balanced low-count recipients, using the
+unchanged source, hop and propagation rules. At the same 0.2 spacing, the source-derived
+half-window 27 is compared with diagnostic half-windows 54, 108 and 216. All comparisons
+read the same physical log-density interval, -20 to 0. The errors below are maximum
+absolute differences in normalized row height, not transcript/gene or count errors.
+
+| Counted receiving nodes | Half-window 27 versus 216 | Half-window 108 versus 216 |
+|---:|---:|---:|
+| 10 | 2.94350e-8 | 9.66338e-13 |
+| 42 | 0.00105305 | 5.43565e-13 |
+| 122 | 0.0362012 | 3.64153e-13 |
+| 242 | 0.132593 | 4.72796e-8 |
+
+The two longer chains fail the existing one-percent row target; the wider pair supports
+the reference's numerical convergence. These synthetic operator checks use no capture
+scenario or expected yield. No new fixed window is selected. No mutation campaign,
+calibration screen or release benchmark was run for this rejected range proposal.
+The dependency identity belongs to `EQUATIONS.md`, **Repeated blurs require the propagated
+footprint**. Whether level tables should have numerical extents independent of the
+composition/count interval is an owner representation decision, not yet an approved rule.
+Instrument: `.cache/rigel_runs/2026-10-08_shared_support/` (`support.py`, `before.xml`,
+`source_only.xml`, `flux_before.xml`, `source_covered.xml`, `range_census.json`,
+`propagation.json`, `propagation_curves.npz`, `propagation_red.xml`).
+
+POST-INTEGRATION RANGE RECHECK (2026-10-09). All three retained range specifications
+still fail on the current ordinary production import after the witness, zero-coordinate,
+source-footprint and blur-tail repairs. The disconnected-expression contrast keeps local
+observations, opportunities, topology and the fitted strand protocol fixed. Its RNA
+contribution spans 33.7588 nats before the coordinate moves and exactly zero afterward;
+the native RNA conversion therefore drops that contribution. A DNA contribution remains,
+so this is not a claim that the entire delivered message disappears. Halving the spacing
+does not recover the RNA contribution; a wider diagnostic interval does. That establishes
+the loss, not complete coordinate invariance of the wider control.
+
+The four repeated-propagation comparisons reproduce the table above to its displayed
+precision, including convergence of the widest pair. The source-range diagnostic is
+byte-identical to the earlier `support.py`; only the harness interfaces were adapted to
+the integrated code. These are operator checks, not accuracy measurements. No source,
+production test, golden or native binary changed, and no independent density range was
+implemented. Instrument: `.cache/rigel_runs/2026-10-09_range_recheck/` (`audit.json`,
+`curves.npz`, source/native hashes and `range_red.xml`: three intentional failures).
+
+INDEPENDENT-RANGE PROTOTYPE (2026-10-09; owner-authorized experiment). A Python reference
+plans the needed intervals backward through the existing density operations and evaluates
+them forward, preserving each source's normalization and limiting values. A separate C++
+evaluator in the isolated worktree implements the same numerical operations. The count
+lattice, source admissions, face permissions and hop formulas stay fixed. No production
+count consumer is wired to it. The derivation is **A finite core certifies level
+normalization** in EQUATIONS; authorization is **Density-range prototype authorization**
+in DESIGN.
+
+Both evaluators pass 70 specifications covering the earlier range failures, both component
+opportunity-gap directions, both RNA strands and junction ends, empty relays, source
+absence, conflicting sources, zero-density limits and even count-grid sizes. Seventeen
+actual Python defects collectively exercise every specification; eight compiled evaluator
+defects are also caught. The seven frozen panel contexts require 0.846–2.582 times the
+cells in the currently present received-density rows, while retaining the count grid.
+This is an allocation census, not total pipeline memory. Three cached test-chromosome
+contexts agree between Python and C++ to about 1.1e-13 in normalized height. Their first
+paired native evaluations take 0.003–0.187 seconds; these are numerical evaluator timings,
+not pipeline or calibration timings. The reference adapter's repeated whole-chain total
+reduction was replaced by one cached array; all seven census records are otherwise exact.
+
+COORDINATE-PHASE LIMIT (2026-10-09). The independent-range prototype does not yet meet
+arbitrary-coordinate invariance. A subsequent check shifts the RNA reference through one
+0.2-wide cell while retaining the same local observations, opportunities, strand protocol
+and count lattice. For three objects containing 100, 1,000 or 100,000 observations each,
+the maximum normalized-message height changes are 0.02753, 0.05317 and 0.05370. All exceed
+the existing approximately one-percent row target. Whole-cell shifts agree to rounding.
+Moving the density knots along with the coordinate restores agreement; see
+**Coordinate translation preserves physical knots** in EQUATIONS. These are message-shape
+differences; transcript/gene and calibration consequences have not been measured.
+
+Three new specifications therefore remain red for the range-only prototype outside the production suite. Do not call
+the 70 passing range tests complete locality or density-interface certification. Do not
+port this evaluator directly into calibration or launch release panels for it. A local,
+unit-covariant numerical origin per connected part of each existing level lane was
+subsequently authorized for prototyping; see **Local density-unit prototype authorization**
+in DESIGN. It adds no biological edges or prior. It is not integrated.
+Instrument: `.cache/rigel_runs/2026-10-09_density_support/` (Python reference and replay,
+failed-first, Python/native/mutation receipts, census, timings, `phase.json` and
+`phase_red.xml`). The standalone C++ evaluator is in the existing isolated count worktree
+under `.cache/density_support/`.
+
+LOCAL-UNIT PROTOTYPE (2026-10-09; owner-authorized experiment). The Python replay now
+uses `sum(n)/sum(E)` from already admitted sources within each connected component of
+each permitted density lane. Counts for a composition source are observed totals, not
+estimated RNA or gDNA amounts; certified sources use their own count and implied
+exposure. The ratio supplies only a numerical unit. Source rules, hop prices, graph,
+count grid and density spacing remain fixed. The derivation is **Local units fix
+coordinates, not quadrature error** in EQUATIONS.
+
+All three failed-first coordinate specifications pass. The full isolated unit contract
+has 40 passing cases, including opportunity-unit covariance, both RNA strands and junction
+ends, source absence, source/storage/query order and disconnected-component packing.
+The same 40 checks pass through the existing isolated C++ evaluator; unit selection
+itself is Python, not a native policy implementation. Twelve actual Python defects
+collectively exercise every new passing check, then are restored. No native source,
+production source, production test or golden changes in this experiment.
+
+SPACING SENSITIVITY (2026-10-09). Coordinate invariance does not certify the unchanged
+density spacing. With the count lattice fixed, successively refining only the level
+evaluation gives the following results on the same three-object controls. The finest
+control uses 1/64 of the original density step; this is an instrument, not a proposed
+production setting. The last two refinements differ far less than the existing
+approximately one-percent row target.
+
+| Observations per object | Coarse vs finest, normalized message-height difference | Last two refinements, height difference | Coarse minus finest, gDNA fraction (percentage points) |
+|---|---:|---:|---:|
+| 100 | 0.0163663 | 0.00000472 | +0.079412 |
+| 1,000 | 0.0348723 | 0.00001712 | +0.019175 |
+| 100,000 | 0.0333289 | 0.00031931 | approximately 0 |
+
+The final column is a one-object sensitivity calculation through the existing native
+count solver: own observations and every other term are fixed, with the usual symmetric
+reference prior and no fitted landscape. It is not a calibration accuracy measurement,
+does not exercise landscape feedback, and does not validate the future density reader.
+Three new convergence checks remain intentionally red. They prevent reporting the
+local-unit covariance result as complete numerical certification. A native unit-selector
+port and larger benchmarks were withheld after this cheap screen. Do not select a fixed
+refinement from these fixtures. First price the residual approximation in density and
+count readouts on cached cases before proposing more numerical machinery or a changed
+error contract. Production integration still requires its separate checkpoint.
+
+Instrument: `.cache/rigel_runs/2026-10-09_density_units/` (`before.xml`, `reference.xml`,
+`native_evaluator.xml`, mutation receipts, `convergence.json`, `convergence_red.xml`).
+
+SPACING READOUT AUDIT (2026-10-09; owner requested practical effects before more numerical
+complexity). Seven fresh cached calibrations supply the fitted landscape, observations,
+opportunities, strand protocol and initial count beliefs. All are held fixed, as are the
+count lattice, composition messages, admissions, faces, hop prices and propagation. Only
+the density spacing changes, from the existing step to one quarter and one eighth. Both
+arms use independent support and local units: this isolates spacing, not the full
+representation change against production. There is no landscape refit or EM run.
+
+The three test-chromosome conditions cover every counted RNA-admitting object. Each larger
+condition selects evenly spaced depth ranks plus the largest-count objects within each
+class/strand-admission combination, without truth-based selection. All required message
+ancestors are retained. Larger-panel coverage is explicitly partial. The allocation shift
+below is `100 * sum(M * abs(delta f_g)) / sum(observed unspliced counts)` over the checked
+objects; region/boundary incidences are not unique fragments. Conditions are never pooled.
+
+| Condition | Objects checked / eligible | Count coverage | Absolute allocation shift (%) | Object share shift, 99th percentile / maximum (percentage points) |
+|---|---:|---:|---:|---:|
+| test g50 ss0.99 ON | 1,976 / 1,976 | 100% | 0.02339 | 0.5766 / 3.1080 |
+| test g00 ss0.99 ON | 870 / 870 | 100% | 0.00001 | 0.0003 / 0.0025 |
+| test g50 ss0.50 ON, deferred | 1,977 / 1,977 | 100% | 0.00763 | 0.0305 / 0.2400 |
+| RNA-short g50 ss0.99 OFF | 566 / 54,075 | 20.4% | 0.00024 | 0.0416 / 0.1282 |
+| RNA-long g50 ss0.99 ON | 566 / 38,730 | 23.3% | 0.14501 | 0.4389 / 12.3654 |
+| ladder g98 ss0.50 OFF | 566 / 51,494 | 15.2% | 0.00032 | 0.0331 / 0.1817 |
+| RNA-long g50 ss0.50 ON, deferred | 566 / 38,841 | 23.4% | 0.00197 | 0.0089 / 0.1652 |
+
+Two both-strand exons account for 93.5% of the sampled RNA-long stranded allocation shift.
+Their source counts and own strand likelihoods stay fixed. The finer reference is checked
+again at one sixteenth of the density step, on those objects alone; the last two count
+readouts differ by 0.0400 and 0.0581 percentage points. No fixed refinement is selected.
+
+| RNA-long object | Oracle gDNA fraction (%) | Production fraction (%) | Prototype, existing step (%) | Prototype, one-sixteenth step (%) |
+|---|---:|---:|---:|---:|
+| exon slot 39465 | 13.7293 | 13.5046 | 0.0387 | 11.2325 |
+| exon slot 44511 | 13.8294 | 14.0196 | 0.0373 | 12.4608 |
+
+Replacing only the delivered negative-RNA row at the first object or positive-RNA row at
+the second reproduces essentially the entire coarse-to-fine change. Replacing the gDNA
+rows alone does not. Thus the RNA-level numerical representation carries the effect;
+this does not yet identify which source/operation in its ancestry causes it. Unlike the
+test-chromosome outlier below, these two also have large posterior-mean changes. They
+cannot be explained away solely as an unstable median. The current production counts
+are close to truth here: this is a failure of the coarse prototype, not a newly measured
+production regression. The sample does not estimate its prevalence in other data.
+
+At test-chromosome exon 2962, in contrast, less than one percent total-variation distance
+separates the posteriors, but the median moves 3.108 points between two modes. The mean
+moves 0.378 points. This is a readout sensitivity under the same fitted prior, not grounds
+to change the count model. A count-derived geometric-mean density can be more sensitive
+than the allocation: the RNA-long maximum changes about 71-fold, and a zero-DNA test
+object changes 1.625-fold while its allocated DNA changes by only 0.0013 incidence counts.
+These moments include the existing count prior; they are not the proposed prior-free
+density evidence or a tested capture readout. Small count effects alone do not certify
+the unfinished reader.
+
+Instrument validation first exposed an adapter defect: omitting the existing pure-strand
+witness exclusions broke native-count identity. After correction, the independent
+legacy-table replay agrees with production in all seven conditions to at most 2.5e-14
+in fraction. Actually omitting that rule again makes every condition disagree. The entire
+spacing audit was rerun; earlier provisional values are superseded. The separate direct
+native replay is exact. The corrected seven-condition audit takes about four minutes;
+the focused finer reference takes 44 seconds and the lane attribution 12 seconds.
+
+This closes the proposed cheap count-readout measurement, not numerical certification or
+release validation. Most checked allocations have small sensitivity, but uniformly
+negligible effects are falsified by the two captured RNA-long exons. No refinement
+parameter, adaptive integrator, production landing, golden update or release A/B follows
+from this result. Keep the count foundation stable; retain the outliers for a bounded
+RNA-message diagnosis and eventual consumer comparison. Detector-free capture, its prior
+and opportunity validation remain separate release work. Instrument:
+`.cache/rigel_runs/2026-10-09_spacing_effect/` (`freeze.json`, `assembly_control.json`,
+`batch.json`, `report.json`, `outlier_reference.json`, `outlier_attribution.json`,
+`verification.json` and the reproducible scripts).
+
+NARROW-SOURCE INTERPOLATION (2026-10-09; follow-up authorized by the owner). Tracing only
+the two implicated RNA rows requires 23 numerical ancestors. The sensitive local sources
+are certified splice counts, 3,607 at RNA-long exon 39465 and 3,598 at exon 44511. Their
+declared source-blur variances are 0.00089929 and 0.00034835 in log density, against table
+spacing 0.199797. The functions are much narrower than that spacing. At the coarse knots,
+the normalized heights of the two own lower-side curves agree with the fine control to
+about 3.8e-10 and 5.1e-16. That apparently excellent nodal agreement misses the error where
+the consumer actually evaluates the functions, between stored points.
+
+A decisive contrast takes the *fine final RNA curves* and samples them back onto just
+the coarse knots. All other factors stay at the coarse control. The gDNA fractions are:
+
+| RNA-long exon slot | Original coarse curve (%) | Fine RNA curve (%) | Fine curve sampled onto coarse knots (%) |
+|---|---:|---:|---:|
+| 39465 | 0.03869 | 11.27251 | 0.03913 |
+| 44511 | 0.03728 | 12.40258 | 0.04072 |
+
+This isolates loss between the stored knots as sufficient to reproduce essentially all
+of the count effect. It does not prove that every source convolution or upstream table
+is exact. The own likelihoods, opportunities, counts, priors, admissions and discrepancy
+prices are unchanged. The ordinary coarse replay reproduces the previous count receipt
+to 1e-14. The trace takes about eight seconds and the resampling contrast about four;
+no new calibration or EM is run.
+
+Three independent Poisson-source specifications at 100, 1,000 and 100,000 observations
+also fail the existing one-percent normalized-height target *between* knots, with errors
+0.22449, 0.55797 and 0.60685. They use no panel truth or probe layout and remain red outside
+the production suite. The derivation is **A narrow likelihood can disappear between
+accurate knots** in EQUATIONS. A finer fixed default is not selected from these examples.
+
+The proposed small correction preserves the known source curve through its existing blur
+and lower-side operation at the consumer, instead of quantizing that direct measurement
+onto a coarse intermediate row. It still needs a complete reference, native design and
+falsification/mutation coverage; none is claimed implemented here. Keep the validated
+count foundation frozen and make this source-precision issue an explicit input contract
+of the capture reader. A broadly adaptive second message engine is not justified by this
+diagnosis. The owner subsequently authorized the isolated local-prior prototype
+recorded below; production selection remains separate. Instrument:
+`.cache/rigel_runs/2026-10-09_rna_spacing/` (`trace.py`, `trace.json`, saved ancestor curves,
+`interpolation.py`, `interpolation.json`, `interpolation_red.xml`, `verification.json`).
+
+PROPER LOCAL CAPTURE PRIOR (2026-10-09; owner-authorized prototype). The scalar reader
+consumes density evidence and a fixed normalized background, with an unbounded
+`1/C²` enrichment prior and the continuous counterarm. Its derivation and limits
+are **Proper local capture reference and continuous correction** in EQUATIONS.
+No count solve, background fit, landscape, junction rule or production source is
+changed. The proper tail and equal odds are separate contrasts; every contrast
+uses the same likelihood. The old bounded reader first fails three substantive
+gates: disconnected RNA changes its log weight by 0.19423, enlarging annotation
+changes it by 2.06808, and an external ceiling truncates a strongly supported
+capture factor. The candidate passes the mathematical limits and invariances;
+deliberate mutations of its tail, counterarm, background, zero-count treatment,
+units, ceiling and posterior probability are detected.
+
+The own-evidence screen covers all 139 archived captured objects with 4–30 total
+reads in the specified test conditions, plus the previously implicated zero-DNA
+boundary. The zero-DNA group has 52 objects including that boundary; its maximum
+weight is 1.04789 and the boundary reads 1.00069. This is an own-evidence diagnostic,
+not a selected strand-only reader. In weakly stranded capture the own curves often
+cannot identify enrichment: the 53 selected g25 ss0.70 objects have median weight
+1.168, despite much higher expected capture. Suppressing ambiguity alone would
+lose real capture; licensed neighbour evidence remains necessary.
+
+Using current typed message inputs on four prespecified objects gives the following
+weights. The two controls are **not shipped readers**: they apply the old bounded
+slab or the proper tail to the same honest curve, both at the archived `1/n` odds.
+
+| Condition / slot | Bounded slab, old odds | Proper tail, old odds | Proper tail, equal odds |
+|---|---:|---:|---:|
+| test g00 ss0.99 ON / boundary 513 | 1.134 | 1.00008 | 1.140 |
+| test g50 ss0.99 ON / exon 1000 | 603.83 | 279.94 | 443.87 |
+| test g50 ss0.99 ON / exon 1036 | 699.23 | 476.40 | 478.04 |
+| test g50 ss0.50 ON / exon 2958, deferred diagnostic | 811.61 | 810.05 | 810.05 |
+
+The captured stranded exons have 9 and 14 total reads and expected capture 787.33
+from the simulator's expected yields, not realized DNA counts. The g00 object
+tests amplification in the absence of DNA; its library physically has capture,
+so weight one is a neutral-evidence limit, not its known chemical capture factor.
+The residual 1.14 correction with messages is not claimed harmless end to end.
+Background distributions are frozen archive inputs. The deferred object uses the
+stranded condition's fixed background as a cost/reference control; this is not
+an unstranded background fit or accuracy score. Message tables retain the known
+support/interpolation approximations. Tightening outer tolerance from 1e-6 to
+1e-8 changes log weight by at most 3.2e-14 on the three stranded objects; it does
+not certify those input tables or total integration error.
+
+Exact Poisson risk calculations also show finite-count costs. At background
+expectation 0.01 and true capture 100, only one DNA read is expected and mean
+reported weight is 27.05; at background expectation 1 and true capture 100,
+mean weight is 98.50. An uncaptured pure-DNA object with expectation 0.01 has
+about 0.995% probability of a weight above two. These are consequences of the
+specified prior/readout and sampling, not a new fitted threshold or a guarantee
+of zero false corrections. No parameter was adjusted to these cases.
+
+The complete-consumer cost gate fails. Single-strand cases take about 0.5–1.3
+seconds each and thousands of density evaluations in this diagnostic Python/
+native oracle. Neither both-strand example completes within its 60-second budget:
+test stranded slot 2780 makes 149 calls and deferred unstranded slot 3120 makes
+164. The latter has only three reads. These are bounded cost probes, not a
+back-to-back speed comparison; the two bounded jobs overlapped briefly. Do not
+port the nested evaluator or expand to whole panels at this cost. The next
+implementation question is economical evaluation of the same three integrals,
+while retaining both RNA strands, local evidence, raw count uncertainty and
+certified source precision. No statistical rejection or release accuracy claim
+follows from a timeout. Instrument: `.cache/rigel_runs/2026-10-09_capture_prior/`
+(`local_prior.py`, exact reference tests, `mutations.json`, `screen.json`, current
+typed message snapshots, complete-consumer and tolerance receipts).
+
+SHARED CAPTURE INTEGRATION (2026-10-09; owner-authorized cheaper calculation).
+Replacing the scalar outer traversals with shared vector quadrature is rejected
+for performance. The raw observations, typed local factors, nuisance reference,
+prior and correction score stay fixed. Inner tolerance remains `1e-8`, outer
+tolerance `1e-6`. A fresh pre-implementation baseline on the three-read both-strand
+object times out at 60 seconds after 172 evidence calls; this is the cost failure
+the experiment attempts to repair, not a statistical falsification.
+
+The first global-vector version reports convergence but misses 16.6% of a narrow
+analytic curve's slab mass. Two prewritten equivalence checks catch it. Keeping
+the original per-interval relative checks repairs those failures; the only
+absolute tolerance is the smallest normal floating-point value, allowing fully
+underflowed pieces to terminate. This does not introduce a positive density floor.
+Reported integration error is an estimate, not certification of unobserved peaks
+or the inherited input tables.
+
+Four serial back-to-back pairs agree within `7e-12` in log weight, but all take
+more time and more expensive likelihood evaluations. The old scalar routine
+already memoizes common nodes; sharing the vector does not remove its inner
+RNA/strand integrations, and the new backend adds subdivision work.
+
+| Frozen object | Scalar / shared wall seconds | Scalar / shared evidence calls |
+|---|---:|---:|
+| test zero-DNA boundary 513 | 1.215 / 3.169 | 9,453 / 23,617 |
+| test stranded captured exon 1000 | 0.526 / 1.290 | 4,774 / 11,775 |
+| test stranded captured exon 1036 | 0.561 / 1.336 | 4,940 / 11,711 |
+| test deferred unstranded exon 2958 | 1.002 / 2.365 | 4,955 / 11,726 |
+
+The stranded both-strand slot 2780 times out at 60 seconds in both arms, each
+after 148 evidence calls. That already-launched pair finishes under its bound;
+the remaining unstranded pair is cancelled once the completed pairs reject the
+implementation. The earlier three-read failed-first receipt remains separate.
+These are Python/native-oracle timings on frozen inputs, not whole-tool speeds.
+Input and native hashes match across every executed pair. The unstranded control
+still uses a frozen stranded background and is not a background-estimation test.
+
+Retain the reference and mathematical checks, archive this performance-negative
+implementation, and seek the owner's requested external review before another
+numerical framework or native port. No statistical model has been rejected by
+this one implementation's cost, and no capture-weight, transcript/gene or
+production accuracy improvement is claimed. The final prototype passes 28 checks,
+catches seven actual mutated implementations and passes the 11-test docs boundary
+gate. Hash checks preserve 104 production source files and the installed native;
+the standing 2,814-test suite is not rerun for this source-preserving experiment.
+Instrument:
+`.cache/rigel_runs/2026-10-09_shared_capture/` (prewritten tests, initial failure
+receipt, scalar/vector receipts, mutation copies and source-identity verification).
+
+The shipped finite-support specification remains failing outside the production tests;
+the range-only prototype passes those original cases but retains the phase failures.
+The local-unit extension fixes those phase failures and retains the spacing limitations
+measured above.
+Do not claim complete locality certification from the repaired witness and zero-coordinate
+gates. The next representation test must preserve physical support and demonstrate
+numerical convergence, not introduce a positive biological rate floor or a capture threshold.
+Do not re-run whole-genome validation for the no-op witness input; price a count-changing
+coordinate repair first on these small controls and cached conditions.
+Instrument: `.cache/rigel_runs/2026-10-08_message_locality/` (`audit.json`,
+`actual_faces.json`, frozen contexts, `local_witness.py`, before/candidate JUnit receipts,
+`witness_mutations.json`, paired panel censuses and `coordinate_unrepaired.xml`).
+
+EVIDENCE-CURVE ADMISSION (2026-10-08). The authorized cutoff-removal contrast is now
+measured with the separate-channel density curves. Structural exclusions, composition
+requirement, zero-count anchors, existing weights, domain and earlier refits remain fixed.
+Previously admitted curves and weights are bit-identical. The final-refit training set
+adds 555 objects on test zero (12 introns, 543 exons; total reliability weight 114.4624)
+and 2,590 on RNA-long unstranded ON (267 introns, 2,323 exons; weight 295.2835).
+The corresponding old populations contain 699 and 3,989 objects with weights 699 and
+3,393.3259. All admitted new rows have positive weights and nonconstant curves.
+
+The old admission mask fails four of eight new gates; the corrected selector passes
+all eight and six deliberate defects exercise each gate. Ten earlier population-reference
+gates remain green. Curves require 85.5 seconds for test zero and 478.5 seconds for RNA-long
+with four workers; pilot curves reproduce exactly. Both fits meet the unchanged 1e-6
+objective-gap requirement (3.54e-7 and 5.24e-7). These are frozen final-refit comparisons,
+not self-consistent calibrations or release candidates. Capture-reference metadata is held
+fixed so this test does not silently alter the existing reader's reference selection.
+
+DNA incidence-count errors (%) on RNA-long unstranded ON:
+
+| class | variance cut retained | cut removed | cut removed, control smoothing strength |
+|---|---:|---:|---:|
+| Regions | 16.7259 | 19.6015 | 19.5770 |
+| Boundaries | 18.8416 | 20.6413 | 20.5961 |
+| Introns | 30.9444 | 25.6726 | 25.6625 |
+| Exons | 16.9364 | 20.1756 | 20.1498 |
+
+The intron improvement comes at the cost of exons and boundaries. Do not promote this
+model or tune the cutoff to hide that tradeoff. Under the changed unsmoothed population,
+the old introns gain 20.4336 weighted log-likelihood units while old exons lose 5.6796;
+new introns gain 1.7990, whereas the many new exons gain only 0.03494. This identifies
+which inputs support the movement; it does not prove whether weighting, local-factor
+misspecification or population uncertainty is the underlying limit.
+
+The test zero control remains stable. Its inferred region/boundary incidences are
+21.12983/19.58098 with the cut and 21.12978/18.78632 without it. The 21 region incidences
+fixed as DNA by annotation remain a known model mismatch. A crossed attribution shows
+why the boundary change should not be credited to new evidence:
+
+| population shape / pseudo-region strength | region incidences | boundary incidences |
+|---|---:|---:|
+| Old / old | 21.12983 | 19.58098 |
+| New / new | 21.12978 | 18.78632 |
+| New / old | 21.12983 | 19.58009 |
+| Old / new | 21.12979 | 18.78731 |
+
+The existing one-uniform-pseudo-region mix is diluted when total training weight grows;
+this accounts for almost all the zero-control change. Neutrality to flat evidence in the
+likelihood objective alone does not guarantee neutrality after that postprocessing
+(`EQUATIONS.md`, **Flat evidence and post-fit population mixing**). No smoothing rule is
+changed here. Raw likelihoods still inherit the earlier face-model limitations, and the
+count readout still has the duplicated density prior.
+
+The subsequent owner-approved equal-weight contrast is recorded below. No class multipliers,
+intermediate weight powers or new capture prior are selected. The full count candidate
+remains frozen; this deferred-stratum failure is not a new 0.8.0 release veto.
+Instrument: `.cache/rigel_runs/2026-10-08_evidence_admission/` (`falsification.log`,
+`tests.log`, `mutations.json`, frozen inputs, curve/pilot identity receipts, optimizer
+certificates, matched count replays, crossed smoothing controls and influence reports).
+
+EQUAL OBJECT WEIGHTS (2026-10-08). With explicit owner approval, the completed
+wide-admission curves were fitted with one unit per object instead of the retained
+posterior-derived weights. Objects, curves, grid, objective, 1e-6 numerical objective-gap
+requirement, earlier refits, reference metadata and count solver remain fixed. The
+post-fit uniform mixture uses the control's weight sum in both arms: 813.4624 on test zero
+and 3,688.6094 on RNA-long. It is not diluted by the candidate's 1,254 and 6,579 objects.
+All three refits receive bit-identical observations, opportunities and incoming beliefs
+between the paired replays. Only the final fitted population differs.
+
+The retained-weight implementation first fails two of four specification gates. Equal
+weighting passes all four. Three deliberate source defects cover every gate: restore old
+weights, change smoothing strength, or overwrite the frozen control weights. The two-density
+optima are checked against closed-form likelihood derivatives. Fits take 1.2–1.7 seconds
+each, pass the objective-gap certificate, and the four cached count replays total about
+17 seconds. There are no new scans, evidence evaluations or EM runs.
+
+RNA-long g50 unstranded capture-ON, DNA incidence-count errors (%):
+
+| class | fresh retained-weight control | equal object weights |
+|---|---:|---:|
+| Regions | 18.8154 | 22.0372 |
+| Boundaries | 19.7058 | 24.7044 |
+| Introns | 23.1580 | 17.1435 |
+| Exons | 19.4123 | 23.0449 |
+
+The intron improvement again costs exon and boundary accuracy. On test g00 stranded
+capture-ON, region incidences are 21.1297827 versus 21.1297759 and boundary incidences
+18.7863310 versus 18.7829682. This negligible movement neither creates a new zero-control
+failure nor resolves false capture. Twenty-one region incidences remain structurally
+fixed as DNA despite their simulated RNA origin. Equal weights are not promoted to
+larger panels or the production population; no intermediate weights are tuned.
+
+A numerical robustness concern also emerges in the retained-weight control. A fresh
+SLSQP fit from a uniform start and the earlier multiplicatively initialized fit differ
+in objective by only 2.88e-9 per unit weight; both satisfy the same global-gap certificate
+(4.96e-7 and 5.24e-7). Their population L1 distance is 0.08278. Replaying those populations
+moves intron error from 25.6726 to 23.1580, exon error from 20.1756 to 19.4123 and boundary
+error from 20.6413 to 19.7058. The equal-weight tradeoff has the same direction against
+either control. A small objective gap does not establish a stable population or stable
+downstream median (`EQUATIONS.md`, **Population objective and readout stability**).
+This is a limitation of the prototype, not evidence to select the initializer with the
+better truth score. Numerical/readout convergence and the inherited local evidence must
+be resolved before this population can serve as the prior-once partner. No new prior,
+smoothing rule or count readout is selected by this contrast.
+Instrument: `.cache/rigel_runs/2026-10-08_equal_weights/` (`before.xml`, `after.xml`,
+`mutations.json`, frozen-input hashes, `fits.json`, matched replay arrays/receipts and
+`optimizer_sensitivity.json`). Production source, tests, goldens and installed native
+remain unchanged.
+
+POPULATION FIT STOPPING (2026-10-08 follow-up). The retained-weight discrepancy above
+is largely explained by the loose numerical stopping requirement. More than 99.9% of
+the population L1 difference is a transfer between adjacent grid nodes at DNA densities
+6.8261e-6 and 7.4138e-6. Holding all other masses fixed, an independent one-dimensional
+likelihood derivative locates the conditional mass transfer; its objective gains are
+only 6.39e-9 and 9.16e-9 from the two starting fits.
+
+Refining the same constrained likelihood from both starts, with no changed observations,
+weights, grid, smoothing or earlier refit, reaches objective-gap bounds 8.05e-11 and
+8.18e-11. Their population L1 difference falls from 0.08278 to 3.54e-5. Fits take 0.58
+and 11.61 seconds. Matched final count replays give:
+
+| RNA-long unstranded ON class | refined archived start | refined fresh start |
+|---|---:|---:|
+| Introns, DNA-count error (%) | 25.005960 | 25.005627 |
+| Exons, DNA-count error (%) | 20.068190 | 20.068091 |
+| Boundaries, DNA-count error (%) | 20.452101 | 20.452057 |
+
+The maximum individual count difference is 1.2644 fragments, with total absolute
+difference 11.2780 incidences; this is close class-score agreement, not bit identity.
+The observation does not establish distinct exact optima or justify a new biological
+prior. It establishes that the original 1e-6 objective-gap criterion alone was insufficient
+for this readout. A production numerical tolerance is not selected from this one condition.
+
+The equal-weight fit was also challenged with the tighter target. SLSQP stops on a
+line-search condition at a 1.03e-7 gap, satisfying the earlier 1e-6 criterion but **not**
+the requested 1e-10 target. Its population L1 change is 0.000506; a diagnostic count
+replay gives intron/exon/boundary errors 17.142746/23.044106/24.704295%. This preserves
+the equal-weight tradeoff against either refined control. It is not a certified tighter
+equal-weight replacement. Do not add an optimizer or change the population model merely
+to rescue that failed arm. All three replays verify their incoming refit arrays exactly.
+Instrument: `.cache/rigel_runs/2026-10-08_population_stability/` (`refine.py`,
+`refinement.json`, saved populations, matched replay arrays and `comparison.json`).
+
+### the-edge-density-floor-under-capture
+`priority: now — source-model checkpoint before the density consumer · kind: design · 2026-10-08`
+
+The boundary's structurally pure-DNA count identifies its own capture-weighted density.
+It does not guarantee a lower bound on the adjacent exon's average DNA density.
+**Rule 5 is a level, and it is one-sided** in DESIGN assumes that ordering. The owner's
+subsequent clarification, **The edge floor is an approximation**, authorizes an isolated
+withdrawal experiment; it does not select a production replacement. **The paradigm** also refuses
+absolute DNA-level transport across capture locales, so relabelling the existing EDGE
+source as a level and forwarding it is not a coordinate-only repair.
+
+Exact placement enumeration supplies a counterexample with a probe wholly inside an
+exon, no unannotated RNA, equal RNA/DNA fragment lengths and no sampling noise. The exon
+is `[0,2000)`, the probe `[0,100)`, fragment length 200, and each fragment has weight
+`1 + 10 * overlap`, the simulator's current law. The 199 starts crossing the left edge
+have mean weight **752.2563**; the 1,801 starts contained in the exon have mean weight
+**29.0400**. The edge's DNA density is **25.9042 times** the exon's average. A common
+normalization of DNA yields cancels from that ratio. No probe trails outside the gene.
+
+This is not a dependence on linear binding. For overlap thresholds `t=1,...,100`, the
+fractions meeting the threshold are `(200-t)/199` at the boundary and `(101-t)/1801`
+inside the exon. The first exceeds the second at every threshold. Thus every
+nondecreasing binding function with a positive increment over overlaps 0 through 100
+has the same density ordering in this geometry. The comparison holds on reflecting the
+whole footprint to the other exon end. It is a counterexample to a guarantee, not an
+estimate of the defect's prevalence or its contribution to a release error.
+
+An 81-case enumeration varies DNA and RNA lengths independently over 75, 200 and 500,
+probe position over the two ends and centre, and binding over 0, 0.1 and 10. Eighteen
+cases violate the assumed ordering. A separate verifier checks **465,156** fragment
+weights through `CaptureSampler.fragment_weight` and actual genomic-to-transcript
+probe projection, including mirrored footprints; its expected counts agree exactly.
+Probe coordinates are diagnostic inputs only, never inputs to calibration.
+
+An independently checked conditional-binomial alternative correctly accounts for the
+recipient total's sampling noise under the same ordering. It matches an independent
+Poisson optimization to **2.05e-12** over 108 comparisons, but retains the false premise.
+With equal expected DNA and RNA counts in the example, both factors prefer an all-DNA
+recipient over its true DNA fraction of one half: **97,984.48** log units for the old
+factor and **90,786.42** for the conditional alternative, at the stated unit source
+rates. These are factors in a noiseless construction, not complete posterior or panel
+results. More sequencing strengthens this wrong factor rather than repairing it.
+
+Instrument: `.cache/rigel_runs/2026-10-08_edge_contract/`, `calculate.py` and
+`verify_geometry.py`, with JSON and log receipts. The calculation deliberately retains
+exit status 1 for the failed generality condition; successful independent verification
+does not turn it into a passing repair. No candidate, calibration solve or benchmark
+was run. The old EDGE constructor and all production sources are unchanged.
+
+The next proposed contrast is an isolated withdrawal of this cross-object floor while
+retaining the boundary's own DNA evidence and all other messages. It is an ablation to
+price information loss and propagation effects, not a selected production replacement.
+The prototype is authorized; its accuracy benefit and information loss remain unmeasured.
+No upper bound, detector, probe input, new coupling
+constant or absolute-density propagation is selected by this finding.
+
+ISOLATED WITHDRAWAL (2026-10-08). With owner authorization, the native worktree omits
+only the published EDGE row. The EDGE face role remains, blocking accidental activation
+of a gDNA level fallback; the boundary's own Poisson density measurement, every other
+source, face map, lane licence and propagation pass remain. The pre-change binary fails
+**18/24** specifications and the ablation passes **24/24**. Five actual native mutations
+cover all 24: restore the floor, leave an onward copy, erase the source's own measurement,
+enable a fallback lane, and remove unrelated claims. Neither this nor the following
+census changes the density reader, population admission, weighting, prior multiplicity
+or capture reference.
+
+Fresh cached-input pairs were scored separately at pass zero and after the default
+refits. Cells below are **region / boundary gDNA count error (%)**: summed absolute
+per-object error against `slot_truth.npz`, divided by observed counts on that axis.
+These are calibration census measurements, not transcript/gene error; no new end-to-end
+benchmark was run. The control is the frozen count candidate with the already-certified
+numerical message corrections, not 0.7.1 or an integrated detector-free reader.
+
+| Condition | Pass zero: control | Pass zero: EDGE absent | Full: control | Full: EDGE absent |
+|---|---:|---:|---:|---:|
+| RNA-long g50 ss0.50 ON (deferred) | 33.887 / 37.894 | 34.722 / 37.945 | 41.676 / 32.913 | 61.662 / 45.946 |
+| Ladder g98 ss0.50 OFF | 19.788 / 38.524 | 22.013 / 40.970 | 2.465 / 9.124 | 2.248 / 8.829 |
+| RNA-short g50 ss0.99 OFF | 1.504 / 4.281 | 1.511 / 4.293 | 0.925 / 2.948 | 0.926 / 2.959 |
+| RNA-long g50 ss0.99 ON | 1.762 / 3.904 | 1.763 / 3.904 | 1.466 / 3.348 | 1.466 / 3.348 |
+| Test g00 ss0.99 ON | 0.470 / 0.433 | 0.470 / 0.433 | 0.004 / 0.024 | 0.004 / 0.024 |
+| Test g50 ss0.99 ON | 1.682 / 1.246 | 1.654 / 1.247 | 1.337 / 1.134 | 1.313 / 1.135 |
+| Test g50 ss0.50 ON (deferred) | 21.800 / 14.932 | 21.795 / 30.578 | 3.688 / 2.543 | 43.467 / 61.946 |
+
+The zero control is exactly unchanged on both axes, not merely equal at the displayed
+precision. In the test unstranded captured case, the first-pass region error barely
+moves, while boundary and intron errors worsen. The later population refits accompany
+a much larger region loss. This establishes sensitivity to the lost neighbour evidence;
+it does not by itself isolate admission, weights or prior feedback as the cause.
+
+The 1,000-fragment weak-strand OFF fixture from **COUNT-CANDIDATE READINESS** improves
+substantially. Its observed counts were matched exactly to the previously validated
+origin partition. Intronic error changes **64.57 → 46.25%** at pass zero and
+**61.38 → 6.64%** after refits; exon error changes **52.18 → 23.67%** and
+**45.55 → 7.23%**, respectively. Boundary error changes **14.52 → 11.87%** and
+**16.28 → 6.84%**. With intron constraints already absent in both arms, this identifies
+an important contribution from EDGE and its downstream effects in that fixture. It is
+not evidence for restoring the intron constraint or for a strand/capture gate.
+
+Conclusion: withdrawing the approximation trades substantial useful imputation for
+less bias in some cases. It is not selected as a general replacement and does not solve
+the zero-gDNA capture problem. The deferred-stratum loss is a robustness result, not
+a new release veto. The next release work must retain this tradeoff without tuning a
+cutoff to these panels. No full-panel or real-library run is justified for the blanket
+ablation now. Instrument: `.cache/rigel_runs/2026-10-08_edge_ablation/`, frozen control,
+native package, assertion-only mutation failures, paired census and weak-strand receipts.
 
 ### the-scorer-reads-a-census-length-law
 `priority: now — released from parking (owner, 2026-10-02): the largest lever measured on stranded × capture ON; the open design is the capture × length half of the fragment-length review · kind: defect · 2026-09-24`
@@ -312,6 +2775,50 @@ where each origin sits (ladder gDNA 12–18 bp longer, the test chromosome 11 bp
 second time to an already-captured RNA law. Matched within exons the difference vanishes (219.00 against 218.98 bp).
 Nil off capture. The scorer reading the uncaptured gDNA law alone tips the other way
 (`ISSUES: the-scorer-reads-the-uniform-gdna-law`, refused).
+CALIBRATION HAS A RELATED FRAME MISMATCH (verified 2026-10-06): `pipeline.py` supplies `gdna_pmf`
+(uniform frame) and `rna_pmf` (junction-de-tilted but capture-selected) to `calibrate`.
+`region_geometry.py` integrates them separately for contained and crossing opportunities and uses
+the RNA law for junction rates. The component-opportunity count repair is algebraically correct for
+its supplied inputs; it does not establish a common pre-capture frame. Overriding calibration's RNA
+law with gDNA's on equal-chemistry simulations is a diagnostic, not an RNA-law estimator. A true-gap
+control requires the separate simulator laws. The repair's observed pool shifts and unresolved
+causal attribution are recorded in `ISSUES: calibration-detects-capture-on-a-capture-off-library`.
+
+**Calibration-only law-frame diagnostic, 2026-10-06.** Eight fresh cached calibrations on the
+uncommitted count-repair build: native input laws versus `rna_fl_pmf := gdna_fl_pmf`, only at the
+calibration entry point, on four equal-chemistry conditions. No scan or EM was run and no scorer
+law changed. The paired runs share payloads, drain choices, configuration and native build; the
+input arrays stayed unchanged. All object totals agree exactly with `slot_truth.npz`, and the
+matched-law arm has exactly equal gDNA/RNA geometric opportunities. The cache check initially
+rejected the default `auto` strand tag; both arms then used the cached scans' explicit `XS`, with
+all tally settings validated. Calibration threads remained at their default. Total wall time was
+16.93 s, individual calibrations 0.17–1.05 s. This is a diagnostic intervention, not an RNA estimator.
+
+The object metric below is `100 Σ|estimated gDNA − oracle gDNA| / Σ unspliced count`, separately
+for regions and boundaries. Pool under-call is true minus estimated conserved gDNA fragments;
+it is not an incidence sum. These are **calibration** measurements, not transcript/gene errors.
+
+| Condition | Native laws: regions / boundaries (%) | Matched laws: regions / boundaries (%) | gDNA pool under-call: native → matched (fragments) |
+|---|---:|---:|---:|
+| Test chromosome g98 ss0.70 OFF | 0.78548 / 2.67339 | 0.78508 / 2.67228 | 1,197 → 1,206 |
+| Test chromosome g98 ss0.70 ON | 2.67666 / 4.83476 | 2.67927 / 4.80878 | 24,651 → 24,707 |
+| Ladder g50 ss0.50 OFF | 1.11596 / 2.98516 | 1.11800 / 2.99574 | 8,978 → 9,303 |
+| Ladder g50 ss0.50 ON | 7.73254 / 12.99809 | 8.37262 / 13.27189 | 682,837 → 723,625 |
+
+The net captured calibration loss is **not rescued** by matching the laws: the ladder's gDNA
+estimate falls a further 40,788 fragments, with region and boundary errors both worse. On the
+test chromosome, the two implicated exons remain at 336 / 316 against truth 3,137 / 2,904
+(native-law estimates 341 / 319). Their original native-law counts reproduce the archived repair
+exactly. The input-frame mismatch is real, but the proposed substitution is not a fix. It also
+changes junction rates, RNA level lanes and the refitted landscape, so this result neither isolates
+the new maps' contribution nor proves that a consistent length treatment is unnecessary. Do not
+promote this arm to transcript benchmarks. Next separate frozen-state effects from population
+refitting, beside the independent discrepancy-center contrast.
+
+Receipt: `.cache/rigel_runs/2026-10-06_law_frame/` in the repository workspace (`run.py`,
+`metadata.json`, `results.jsonl`, per-condition arrays and logs; mirrored from
+`/private/tmp/rigel-law-frame-20261006/`). Native SHA-256:
+`a0d204eaff734b5e3cde63ff8cf6538c2f9eecdff7f5e25622cf3b20178870c3`.
 THE PRIZE (phase 0, 2026-09-30: oracle arms outside the tree, pinned and fractional, calibration untouched). Both tables
 and RNA's normalisers in one uncaptured frame — the uncoupled uniform gDNA law for both, right here only because the
 panel's chemistry is equal — on the ladder's stranded × capture-ON rows: transcripts −4.5 %, genes −14.5 %, gDNA pool
@@ -580,8 +3087,6 @@ LATENT (no current path reaches it):
   transcript keys are unchecked (a typo runs on the default of 100); an empty section fails with a TypeError;
   `sim_command` creates the output directory before validating.
 - `splice_graph._ref_slices`: unsorted input drops exons silently.
-- The transfer RNA coordinate's fallback keys on opportunity, not count, so all-zero-count single-strand exons build no
-  RNA lane.
 - An arm that injects `rna_sense_frac` without `n_rna_obs` silently kills the strand channel.
 - `fast_exp` on an all −inf row: `static_cast<int64_t>(NaN)` is undefined behaviour.
 - `connected_components_native` returns a 2-tuple early and a 5-tuple normally.
@@ -634,8 +3139,16 @@ prior (priced 2026-07, with no refusal entry here); `region_geometry`'s "no per-
 (relay-era); and `fl`'s crossing pools called "gDNA by structure" because mature RNA never crosses an
 exon|intron boundary, while RNA that has not spliced there does.
 (e) GATES THAT CHECK LESS THAN THEIR NAME:
-- FIRST, since any failure is a regression: `test_THE_FIXTURE_REALLY_DOES_REORDER_THE_BUFFER` asserts that a thread
-  race fired; it failed in two full runs and passed on rerun.
+- CLOSED (2026-10-09), scheduler-dependent reorder gate: another full-suite failure reproduced the
+  previously recorded race dependence. Three 16-thread scans legitimately returned serial order;
+  no calibration call occurs in that test. Its replacement deliberately reverses complete scanner
+  chunks through the real scorer, locus builder and EM, requiring a nonidentity permutation of the
+  same fragment set and identical output in both sampled and fractional modes. Existing thread-count
+  comparisons stay. Removing the actual fragment-ID sort in a frozen package breaks both new cases:
+  sampled counts move by two fragments and fractional counts by up to 5.91e-12. No scanner, locus,
+  production model, tolerance or golden changes. Receipt:
+  `.cache/rigel_runs/2026-10-09_rna_coordinate/` (`main_suite_race_failure.xml`,
+  `test_scan_order_replacement.py`, `permutation.xml`, `permutation_mutation.json`).
 - `test_sweep.py::test_gdna_sweep_zero_gdna_pin_and_monotone` asserts `f_g < ½` on slot 3, the AMBIG|intron−
   boundary, while the AMBIG region it means ends at 0.949 under the silent policy, and nothing in it checks
   monotonicity; the mature-exon chain's tests give the same `f_g` with the junction spliced or not, so none of them

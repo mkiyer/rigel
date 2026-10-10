@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 #include <vector>
 
 namespace transfer_rows {
@@ -113,22 +114,27 @@ inline void interp(const double* x, int n, const double* xp, const double* fp, i
 
 // blur_row: the delta-method counting width — a Gaussian blur of variance v along lam on a
 // max-normalised log-row, edge-padded; a non-positive v only re-normalises.
-inline void blur_row(const double* row, int K, const double* lam, double v, double* out,
-                     std::vector<double>& scratch) {
+inline int blur_radius(double v, double step) {
+    return std::max(static_cast<int>(std::ceil(4.0 * std::sqrt(v) / step)), 1);
+}
+
+inline void blur_row_at_step(const double* row, int K, double dlam, double v, double* out,
+                             std::vector<double>& scratch) {
     const double m = vmax(row, K);
     for (int j = 0; j < K; ++j) out[j] = row[j] - m;
     if (v > 0.0 && K > 1) {
-        const double dlam = lam[1] - lam[0];
-        const int half = std::max(static_cast<int>(std::ceil(4.0 * std::sqrt(v) / dlam)), 1);
+        const int half = blur_radius(v, dlam);
         const int W = 2 * half + 1;
-        scratch.resize(static_cast<size_t>(W) + static_cast<size_t>(K + 2 * half) + static_cast<size_t>(K));
+        scratch.resize(2u * static_cast<size_t>(W) + static_cast<size_t>(K + 2 * half) + static_cast<size_t>(K));
         double* kern = scratch.data();
-        double* edged = kern + W;
+        double* logkern = kern + W;
+        double* edged = logkern + W;
         double* pr = edged + (K + 2 * half);
         double ksum = 0.0;
         for (int t = 0; t < W; ++t) {
             const double x = (t - half) * dlam;
-            kern[t] = std::exp(-0.5 * x * x / v);
+            logkern[t] = -0.5 * x * x / v;
+            kern[t] = std::exp(logkern[t]);
             ksum += kern[t];
         }
         for (int t = 0; t < W; ++t) kern[t] /= ksum;
@@ -142,11 +148,36 @@ inline void blur_row(const double* row, int K, const double* lam, double v, doub
             double s = 0.0;
             const double* e = edged + j;
             for (int t = 0; t < W; ++t) s += e[t] * kern[t];
-            pr[j] = s;
+            if (s >= std::numeric_limits<double>::min()) {
+                pr[j] = std::log(s);
+            } else {
+                // Preserve the same convolution below the normal probability
+                // range; a probability floor would erase relative evidence.
+                double peak = -std::numeric_limits<double>::infinity();
+                for (int t = 0; t < W; ++t) {
+                    const int i = std::clamp(j + t - half, 0, K - 1);
+                    peak = std::max(peak, out[i] + logkern[t]);
+                }
+                if (peak == -std::numeric_limits<double>::infinity()) {
+                    pr[j] = peak;
+                    continue;
+                }
+                double scaled = 0.0;
+                for (int t = 0; t < W; ++t) {
+                    const int i = std::clamp(j + t - half, 0, K - 1);
+                    scaled += std::exp(out[i] + logkern[t] - peak);
+                }
+                pr[j] = peak + std::log(scaled) - std::log(ksum);
+            }
         }
-        for (int j = 0; j < K; ++j) out[j] = std::log(std::max(pr[j], TINY));
+        std::copy(pr, pr + K, out);
     }
     norm_inplace(out, K);
+}
+
+inline void blur_row(const double* row, int K, const double* lam, double v, double* out,
+                     std::vector<double>& scratch) {
+    blur_row_at_step(row, K, K > 1 ? lam[1] - lam[0] : 0.0, v, out, scratch);
 }
 
 inline void lower_side(const double* p, int K, double* out) {
@@ -177,6 +208,7 @@ inline void face_map_lambda(const double* lam, int K, double n_u, double a_g_b, 
 
 struct Scratch {
     std::vector<double> a, b, c, d, e, f, g, h, blur;
+    std::vector<double> extended_axis, extended_source, extended_blur;
     explicit Scratch(int K) : a(K), b(K), c(K), d(K), e(K), f(K), g(K), h(K) {}
 };
 
@@ -190,18 +222,21 @@ inline void transport_row(const double* row, const double* lam, int K, const dou
     blur_row(S.c.data(), K, lam, trigamma(n_u + 0.5) + trigamma(n_s + 0.5), out, S.blur);
 }
 
-// splice_out_row(row_e, lam, n_u, n_s, a_g_b, a_g_e)
+// The reverse face uses the same component opportunities and central RNA rate as the forward map.
 inline void splice_out_row(const double* row_e, const double* lam, int K, double n_u, double n_s,
-                           double a_g_b, double a_g_e, const double* nodes, int n_nodes, Scratch& S,
+                           double a_g_b, double a_g_e, double a_r_b, double a_r_e, double splice_rate,
+                           const double* nodes, int n_nodes, Scratch& S,
                            double* out) {
-    if (!(n_u > 0.0 && a_g_b > 0.0 && a_g_e > 0.0) || ptp(row_e, K) <= EPS) {
+    if (!(n_u > 0.0 && a_g_b > 0.0 && a_g_e > 0.0 && a_r_b > 0.0 && a_r_e > 0.0) || ptp(row_e, K) <= EPS) {
         std::fill(out, out + K, 0.0);
         return;
     }
     const double m = vmax(row_e, K);
     for (int j = 0; j < K; ++j) S.a[j] = row_e[j] - m;
     const double sd = std::sqrt(trigamma(n_s + 0.5) + trigamma(n_u + 0.5));
-    // the map at every node is face_map_lambda(lam, n_u, a_g_b, a_g_b, a_g_e, a_g_e, s) term for term, with
+    // The map is the forward face map read in reverse, with EACH component's own opportunity and
+    // the route-summed certified rate. Only that rate varies across the existing marginal nodes.
+    // The map at every node is face_map_lambda(lam, n_u, a_g_b, a_r_b, a_g_e, a_r_e, s), with
     // its node-independent half hoisted: the gDNA arm's log and the RNA arm's unspliced density are the
     // same at every node (only the node's spliced density s joins the RNA arm), so they are computed once
     // per face — the same operations in the same order per cell, so the same bits, at half the node loop's
@@ -211,12 +246,12 @@ inline void splice_out_row(const double* row_e, const double* lam, int K, double
     for (int j = 0; j < K; ++j) {
         const double sig = sigmoid(lam[j]);
         g_log[j] = std::log(std::max(n_u * sig / a_g_b * a_g_e, TINY));
-        r_unspl[j] = n_u * (1.0 - sig) / a_g_b;
+        r_unspl[j] = n_u * (1.0 - sig) / a_r_b;
     }
     std::fill(S.d.begin(), S.d.end(), 0.0);
     for (int t = 0; t < n_nodes; ++t) {
-        const double s = n_s / a_g_b * std::exp(nodes[t] * sd);
-        for (int j = 0; j < K; ++j) S.b[j] = g_log[j] - std::log(std::max((r_unspl[j] + s) * a_g_e, TINY));
+        const double s = splice_rate * std::exp(nodes[t] * sd);
+        for (int j = 0; j < K; ++j) S.b[j] = g_log[j] - std::log(std::max((r_unspl[j] + s) * a_r_e, TINY));
         interp(S.b.data(), K, lam, S.a.data(), K, S.a[0], S.a[K - 1], S.c.data());
         for (int j = 0; j < K; ++j) S.d[j] += std::exp(S.c[j]);
     }
@@ -343,31 +378,27 @@ inline void rna_row_of_level(const double* p, const double* u, const double* lam
 inline bool flux_level(const double* u, int K, double count, double rate, double rho_ref, double v, Scratch& S,
                        double* out) {
     if (!(count > 0.0 && rate > 0.0)) return false;
-    poisson_level(u, K, count, count / rate, rho_ref, S.a.data());
-    if (v > 0.0) {
-        blur_row(S.a.data(), K, u, v, S.b.data(), S.blur);
+    if (v > 0.0 && K > 1) {
+        // Evaluate the known likelihood across the Gaussian footprint instead
+        // of repeating its endpoint values outside the retained table.
+        const double step = u[1] - u[0];
+        const int half = blur_radius(v, step);
+        const unsigned M = static_cast<unsigned>(K) + 2u * static_cast<unsigned>(half);
+        if (M < static_cast<unsigned>(K) || M > static_cast<unsigned>(std::numeric_limits<int>::max()))
+            throw std::length_error("flux level grid is too large");
+        S.extended_axis.resize(M);
+        S.extended_source.resize(M);
+        S.extended_blur.resize(M);
+        for (int j = 0; j < M; ++j) S.extended_axis[j] = u[0] + (j - half) * step;
+        poisson_level(S.extended_axis.data(), M, count, count / rate, rho_ref, S.extended_source.data());
+        blur_row_at_step(S.extended_source.data(), M, step, v, S.extended_blur.data(), S.blur);
+        std::copy(S.extended_blur.begin() + half, S.extended_blur.begin() + half + K, S.b.begin());
         lower_side(S.b.data(), K, out);
     } else {
+        poisson_level(u, K, count, count / rate, rho_ref, S.a.data());
         lower_side(S.a.data(), K, out);
     }
     return true;
-}
-
-// strand_row(lam, u_pos, u_neg, live_pos, kappa, od_g, od_r, f_ref), max-normalised: one single-strand
-// node's own strand log-likelihood over the grid, the variance frozen at f_ref.
-inline void strand_row(const double* lam, int K, double u_pos, double u_neg, bool live_pos, double kappa,
-                       double od_g, double od_r, double f_ref, double* out) {
-    const double n = u_pos + u_neg;
-    f_ref = std::clamp(f_ref, EPS, 1.0 - EPS);
-    const double ref_pos = live_pos ? 1.0 - f_ref : 0.0, ref_neg = live_pos ? 0.0 : 1.0 - f_ref;
-    const double var = strand_variance(n, f_ref, ref_pos, ref_neg, kappa, od_g, od_r);
-    const double half_log_var = 0.5 * std::log(var);
-    for (int j = 0; j < K; ++j) {
-        const double fg = sigmoid(lam[j]);
-        const double f_pos = live_pos ? 1.0 - fg : 0.0, f_neg = live_pos ? 0.0 : 1.0 - fg;
-        out[j] = strand_term(u_pos, n, 0.5 * fg + kappa * f_pos + (1.0 - kappa) * f_neg, var, half_log_var);
-    }
-    norm_inplace(out, K);
 }
 
 }  // namespace transfer_rows

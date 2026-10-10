@@ -298,7 +298,6 @@ def _solve_regions_logodds_all(
     L: float,
     gdna_prior=None,
     gdna_support=None,
-    lam_logprior=None,
     row_logprior=None,
     fg_ref=None,
     fpos_ref=None,
@@ -326,8 +325,8 @@ def _solve_regions_logodds_all(
 
     All array inputs are full length ``m``. ``gdna_prior`` is the landscape's curve ``(log_rho, logP)`` and
     ``gdna_support`` the per-slot ``(mass, eff)`` it is read on: the kernel evaluates the fitted arm at each
-    cell's density itself, so no ``(m, K)`` arm exists (`_arm`). ``lam_logprior`` (the intron factory's λ-factor
-    rows) and ``row_logprior`` (the policy's delivered rows) are ``(m, K)`` on the σ(λ) grid, added per cell in
+    cell's density itself, so no ``(m, K)`` arm exists (`_arm`). ``row_logprior`` (the policy's delivered
+    composition rows) is ``(m, K)`` on the σ(λ) grid, added per cell in
     the kernel; ``cube_rows`` is the RNA level lanes' delivery at the AMBIG slots (:class:`CubeRows`, on this
     grid), evaluated at each slot's own θ nodes inside its ψ; ``None`` or an absent slot changes nothing. EMPTY
     slots — no per-strand count and no unspliced or spliced mass — are not solved: at genome scale most
@@ -361,7 +360,6 @@ def _solve_regions_logodds_all(
             od_r=float(od_r),
             lam=lam,
             gdna=_arm(gdna_prior, gdna_support, m),
-            lam_logprior=_prior(lam_logprior, lam.shape[0]),
             row_logprior=_prior(row_logprior, lam.shape[0]),
             **_cube_args(cube_rows, lam),
             n_tilt=int(_TILT_NODES if n_tilt is None else n_tilt),

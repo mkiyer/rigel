@@ -100,8 +100,30 @@ prior is worth end to end, so what remains under it is the EM's and the assignme
 **Deferred is not dropped, and that distinction carries the ruling.** The deferred stratum stays in every
 benchmark and every measurement and must keep being reported: a panel that cannot see the cell the tool
 is worst at cannot tell a real win from a re-labelling. If it improves as a side effect of work on the
-other three, that is a free win; it is never the justification for a change. It becomes a target only
-once the other three are optimised (owner, 2026-08-14). Every score is read per stratum and never pooled.
+other three, that is a free win. The original direction was to target it only once the other three
+were optimised (owner, 2026-08-14). **Owner clarification, 2026-10-07:** investigate the
+factory-removal regression here in depth for robustness, while retaining its deferred release
+status. Small accuracy penalties can be acceptable for a justified, more general model; this
+does not authorize tuning to the simulated panel. Every score is read per stratum and never pooled.
+
+**Release priority, owner clarification 2026-10-08:** robustness and generalizability across
+different input data, especially component fragment-length distributions, are the objective;
+continually improving aggregate simulated accuracy is not. Roughly 5% DNA/RNA separation
+error for most strata, about 5% transcript error and under 2% gene error would be very good.
+These are qualitative guides, not exact acceptance thresholds, new test tolerances or
+constants. Maintaining roughly the existing accuracy with a simpler, more robust model
+can establish a release candidate. Prefer fewer assumptions and less code; report material
+failures and separate calibration, transcript and gene metrics. The deferred stratum stays
+deferred, and the existing detector-free capture and fragment-length requirements remain.
+
+**Conservative allocation under uncertainty, owner ruling 2026-10-09:** accept the
+factory-free count foundation's measured weak-strand tradeoff. In ambiguous cases,
+overestimating gDNA is preferable to underestimating it. This authorizes integration and
+the reviewed golden updates; it adds no count floor or tuning constant. Preserve the
+uncertainty: a conservative DNA allocation is not a confident measurement of capture
+enrichment. Defer the bound-only landscape-admission experiment until foundation
+integration is complete. Reader integration and new statistical assumptions retain their
+owner checkpoint.
 
 **Why this shape.** Measured 2026-08-13/14 on the rebuilt 16-condition ladder: unstranded × capture-ON
 carried 64.5 % of transcript error and 90 % of gene-level error, and that cell is not a gradient anyone
@@ -869,7 +891,7 @@ transcripts and materialized as ordinary transcript rows in `index.t_df`, flagge
 index's graph) · `sweep` (the backbone) and `messages/` (the policy: `silent` · `transfer`; the row constructors `native/transfer_rows.h`) ·
 `region_chain` `region_geometry` `region_init` · `substrate` `region_arrays`
 `signature` · `effective_length` `capture_eff_length` `fl` `sj_opportunity` `gdna_opportunity` ·
-`strand_balance` · `density_deconv`
+`strand_balance`
 `density_model` `landscape` · `simplex_logodds` `derive` ·
 `priors` `result` `errors` `track` · `_layers` (the layering the imports already had).
 Re-derive this list from `calibration/_layers.py` and the imports rather than trusting it.
@@ -881,7 +903,7 @@ field documented with why it has its value). Code reads a constant by name and n
 varies one on a copy (`Constants.replaced`). Three kinds stay out of `config`, each in its one home:
 identifiers and formats (codes, flags, schema versions) with the format they define; named mathematical
 definitions where they are used; and the values the native kernels share with Python, defined in C++ and
-exported (`native.transfer_rows.DENSITY_EPS`, `ARM_EPS`, `JEFFREYS_REF`, `OWN_EVIDENCE_EPS`), never restated.
+exported (`native.transfer_rows.ARM_EPS`, `JEFFREYS_REF`, `OWN_EVIDENCE_EPS`), never restated.
 `tests/test_constants.py` gates it: a bare numeric module constant outside those homes fails.
 
 **C++** (`src/rigel/native/`, nanobind, C++17, `-O3`, LTO; threads from its own pool, `thread_pool.h`):
@@ -916,16 +938,18 @@ a clean rebuild — came out +103 %; a refactor gated on byte-identity has exact
 library = policy.library(view)   # once per sweep, over the WHOLE chain (a ChainView: no beliefs) — the
                                  #   only cross-block reductions a message may use
 policy.name                      # which layer the kernel runs for the chain's blocks
-policy.strand                    # the strand model its own claims read — (κ, od_gdna, od_rna) or None
+policy.kappa                     # the observed strand model its own claims read — κ or None
 ```
 
 A message may use the destination's CONSTANTS and OBSERVATIONS and never its BELIEFS
 (`TRAPS: a-message-from-the-destinations-belief`); the rule is about sending — a recipient may discount an
 arriving claim by its own counts, which only widens it. The kernel enforces the enforceable half by
 construction: the pass builds each destination's row from the SOURCE's claim and what the source holds, in the
-backbone's chain order, and the only belief the layer reads is the incoming belief at a node's OWN claim (the
-variance freeze of its own strand profile, a source-side read). `messages/__init__.py` states the contract in
-full.
+backbone's chain order. Own claims use the observed conditional-binomial strand likelihood, including
+eligible introns. No incoming count belief sets a message's value or width. The full-sweep gate in
+`test_observed_strand_claims.py` varies valid incoming compositions, including both vertices, and holds
+delivered composition/level rows and their masks identical. The count solver itself still uses frozen
+strand variances. `messages/__init__.py` states the message contract in full.
 
 #### The backbone's assertions, and why they live in the backbone
 
@@ -993,28 +1017,35 @@ An `intron|exon` boundary's unspliced crossing holds gDNA and the unspliced RNA 
 span it; the exon holds those AND the mature RNA that arrived by the splice junction. So the exon →
 boundary message removes the mature share — the SPLICE-OUT direction. Rescaling the boundary's spliced
 density into the exon's frame by the enrichment ratio, subtracting, and rescaling back, the enrichment
-CANCELS and only the face's own spliced-to-unspliced ratio survives: `f_b = f_E · (U_b + S_b) / U_b` —
-the splice-in face map solved for the boundary, so the boundary evaluates the exon's likelihood row AT
+CANCELS. The boundary evaluates the exon's likelihood row AT the component-opportunity splice-in map
+(`EQUATIONS.md`, **Component opportunities in a composition profile**). Its equal-opportunity special
+case is `f_b = f_E · (U_b + S_b) / U_b`; unequal fragment lengths require each component's own geometry.
+The splice-in face map is solved for the boundary, so the boundary evaluates the exon's likelihood row AT
 the map (``splice_out_row``, `native/transfer_rows.h`). Three rulings the measurements forced: (1) the exon publishes
 its OWN evidence only — its strand row — and only when the node's strand channel is live (`tau_lam > 0`,
 the library's protocol decision `region_init.strand_discriminability`), so an unstranded library's exon says nothing,
 exactly, with no constant; (2) both components convert counts to densities with ONE opportunity
-treatment, the capture-blind geometric opportunity for gDNA and RNA alike (a capture-aware opportunity
-on one component alone re-introduces a level across locales — a 12 % harm on sparse probes); (3) the
+treatment: the same capture-blind geometric operator, evaluated on each supplied component law.
+The input laws currently differ in frame: gDNA's is uniform-frame, RNA's is a capture-selected
+spliced census. Correcting the map algebra does not correct this input defect
+(`ISSUES: the-scorer-reads-a-census-length-law`). A capture-aware opportunity
+on one component alone re-introduces a level across locales — a 12 % harm on sparse probes; (3) the
 width is the marginal over the measured ratio (`log ρ ~ N(log S/U, 1/S + 1/U)`), not a uniform blur in
 log-odds, because noise in the ratio moves the boundary's log-odds by `σ/(1 − f_b)`, unbounded at the
 pure-gDNA vertex. The premise — spliced and unspliced fragments at the same face share capture affinity
 — reads a bias of `a ≈ 1.3` under benign capture, recorded and not corrected. Measured: ladder stranded
 capture-ON 0.987–0.995×, unstranded byte-identical (`tests/calibration/test_transfer_policy.py`).
 
-### 6b.5 The boundary → intron message is the boundary's own strand row, verbatim (2026-09-02)
+### 6b.5 The boundary → intron message preserves the boundary's density mixture (2026-09-02; unequal-length correction 2026-10-05)
 
 An intron and both of its `intron|exon` boundaries hold ONE unspliced population: mature RNA reaches an
 exon by the splice junction and crosses neither boundary (certified: 0.02–0.03 % of the crossing mass on
 the ladder, every case a ≤ 100 bp intron inside a fragment's unsequenced mate gap — an accepted
-accumulator residual). Under §6b.4's one-opportunity rule the map is the identity, so the row is
-delivered verbatim: the boundary's OWN strand row (`simplex_logodds.strand_row_logodds`, the variance
-frozen at the boundary's incoming belief — a source-side read), never its belief. The hop adds nothing:
+accumulator residual). The component density odds are shared, so COUNT log-odds shift by
+`log(Eg_i/Eg_b) − log(Er_i/Er_b)`; the map is the identity only when the opportunity ratios agree.
+The boundary's OWN strand row (`simplex_logodds.strand_row_logodds`, the variance
+frozen at the boundary's incoming belief — a source-side read), never its belief, is read in that frame.
+The intron → boundary direction uses the inverse shift. The hop adds no width:
 stage 0 on certified truth reads zero excess variance over counting between an intron's composition and
 its boundaries' on every panel, so no widening ships. The licence: the boundary must admit the intron's
 single strand set (``boundary_shares_strand``, `native/transfer_kernel.cpp`); a terminus flag does not refuse; the gate
@@ -1032,8 +1063,10 @@ flank differs by +0.25…+0.51 nats. The licence is NOT verbatim: a mature fragm
 `exon|exon` boundary and splices within its own extent is counted in the boundary's SPLICED bank, not
 its unspliced crossing, while a fragment contained in the outside piece has no junction by geometry (on
 1,003 deep pairs the boundary's true gDNA share exceeded its outside exon's by +0.11, entirely mature
-RNA). So the licence is §6b.4's map with the spliced crossing as S: `f_b = f_O (U_b + S_b) / U_b` — the
-residual +0.004 after the map against +0.055 before (`g50 ss.99 ON`). Three messages, every one a
+RNA). So the licence is §6b.4's map with the spliced crossing's RNA rate `S_b/Er_b`, plus the route
+rate if the junction's exonic side is outside. At equal component opportunities the map is
+`f_b = f_O (U_b + S_b) / U_b` — the residual +0.004 after the map against +0.055 before
+(`g50 ss.99 ON`). Three messages, every one a
 shipped constructor: the outside exon's own strand row to the boundary through `splice_out_row`; the
 boundary's own strand row to the outside exon through the face map (`transport_row`); and the composed
 transport — what the splice-in map and the edge delivered to the outside exon, carried one hop further
@@ -1055,7 +1088,8 @@ on either strand; an ACCEPTOR bit its high end), the two flanks are C, the flank
 intron side, and E, the flank where both isoforms are exonic (``junction_flanks``, `native/transfer_kernel.cpp`). C shares
 the boundary's full unspliced crossing, so it is §6b.6's law with the spliced crossing alone; E holds the
 crossing plus the isoform that splices out at this face, measured as the face's route flux `F`, so it is
-§6b.4's law with `S_b + F`. Certified on the ladder: C − pred +0.003 and E − pred −0.002 in f off
+§6b.4's law with `S_b + F`. The rates are `S_b/Er_b` for C and `S_b/Er_b + Σ_J J/A_J` for E, with
+both component opportunities retained in each direction of the map. Certified on the ladder: C − pred +0.003 and E − pred −0.002 in f off
 capture; the flanks swapped open ±0.10 OFF, ±0.25 ON. Each flank's own strand row travels to the boundary
 through `splice_out_row` and the boundary's to each flank through `transport_row`, gated on `tau_lam > 0`.
 
@@ -1063,7 +1097,8 @@ through `splice_out_row` and the boundary's to each flank through `transport_row
 the messages harmed the alt-ss boundaries on benign capture-ON rows (`g50 ss.99 ON`: 126 → 249
 node-locally): at every probed pair the gDNA's crossing-to-contained ratio runs ~10 % above the mature
 RNA's, by an amount that depends on the locus. So each pair holds two witnesses of one quantity — the
-boundary's own strand mode and the flank's mapped to it through the licence — and where they disagree
+boundary's own strand mode mapped to the flank through the component-opportunity licence and the
+flank's observed mode — and where they disagree
 beyond counting, that pair's messages are widened by the excess `max(0, d² − v)` (`blur_row`); no mode is
 shifted, no library-level quantity exists. ⛔ A pooled step per hop kind was landed for a day and
 refused: other pairs' behaviour does not predict this one's, and on the ladder the two forms are within
@@ -1072,6 +1107,14 @@ recorded, not re-litigated: the capture-ON rows at low gDNA on the benign and ju
 (+1.5…+9 %), where a systematic offset of the licence hides below each pair's counting — a shift would
 recover it and shifts are refused. The per-pair rule is the per-hop dampening the completion contract
 asks for: a chain of k hops accumulates k pairs' widths, none a constant and none pooled.
+
+**Relative likelihood survives smoothing.** The finite Gaussian convolution keeps its
+existing kernel, spacing, padding and variance. Ordinary probability arithmetic serves
+sums in the floating-point type's normal range; smaller sums use a local log-sum-exp,
+with kernel weights retained in log form. A probability floor must not turn distinct
+tails into a flat row. A window with exactly zero likelihood remains zero. This is the
+numerical identity **A convolution preserves relative likelihood in its tails** in
+EQUATIONS, not a new evidence threshold or message-width rule.
 
 ### 6b.9 The rebuild's foundation — the intron's forward, the splice-in map and the edge (owner, 2026-09-01/02)
 
@@ -1082,9 +1125,10 @@ founding refusal: a gDNA level carried between locales under capture is refuted 
 (measured on the adversarial probe panels), so a cross-locale level was refused as the rebuild's basis.
 
 **The intron's forward.** The intron and its boundary share their unspliced population, so the intron's
-own factory row is delivered unchanged at `intron|exon` boundaries; stage 0 on certified truth priced the
-hop's cost at zero beyond the row's own width, and the blur constant that survived the prototypes was
-deleted on the ladder A/B.
+observed strand row is delivered at `intron|exon` boundaries through the component-opportunity
+log-odds shift. It is unchanged only when the RNA/DNA opportunity ratio agrees at both objects.
+The intron has no additional abundance-based constraint. With no strand information, useful
+composition must arrive from licensed neighbours; total intronic abundance alone does not establish DNA.
 
 **The splice-in map.** The intron row travels into the exon through the splice-in FACE MAP at every
 licensed face (`face_is_licensed`: no terminus, the same strand set), `face_map_lambda` monotone with the
@@ -1161,6 +1205,17 @@ unstranded probed exons toward a centre below the truth (the sparse-probe panel'
 against 6,981). A ZERO count is vacuous: a dark edge under capture is not an empty one. The zero-gDNA rows
 are the landscape prior's to win (§7.1).
 
+**The edge floor is an approximation** (owner clarification, 2026-10-08). An exon-end
+probe can enrich boundary-crossing fragments more than the average of fragments
+contained throughout a long exon. Small exons often support the existing approximation;
+local co-enrichment alone does not guarantee its density ordering. The owner authorizes
+an isolated prototype withdrawing the cross-object EDGE floor, preserving the boundary's
+own DNA evidence, every other message and the existing lane licences. This is permission
+to measure bias against lost imputation information, not a selected production replacement
+or an expected large accuracy gain. Strand observations constrain the objects individually;
+unstranded regions may depend strongly on their neighbours. Keep the release and
+fragment-length priorities, and retain the separate reader-integration checkpoint.
+
 **Every message-policy idea is judged twice, and the two readings are never pooled.** The gDNA
 landscape prior is fitted after the first pass, on that pass's solved gDNA, and comes back in the second
 — so a first-pass error poisons the prior and the prior returns it everywhere
@@ -1182,9 +1237,29 @@ travel TOGETHER in one message (components only where measured, empties forwarde
 joins as an RNA source; ONE representation everywhere — profiles on the solve grid, no Gaussian summary
 anywhere in the transfer policy; the bar is about one percent of a row.
 
+**Density-range prototype authorization** (owner, 2026-10-09). An isolated prototype may
+give density-message tables numerical extents independent of the composition/count grid.
+Keep that grid, its spacing, the existing sources, neighbour relationships, message rules
+and count model. This authorizes testing the representation needed to preserve evidence;
+it does not authorize production integration or select a capture prior. The shipped
+representation above remains until the separate landing checkpoint.
+
+**Local density-unit prototype authorization** (owner, 2026-10-09). The isolated
+representation experiment may also choose one numerical unit per connected component of
+each existing density lane, from that component's already admitted positive source
+count/exposure pairs. This positions the density tables without a new prior or neighbour
+relationship. Keep the count grid, existing density spacing, source admissions and
+message operators; test coordinate covariance and numerical convergence separately.
+Production integration remains a separate checkpoint.
+
 * **The lanes.** `Received.level_rna_pos` / `level_rna_neg` (`Levels`): a strand's level as a profile over
-  `u_s = log(ρ_s / ρ_ref,s)` (`ρ_ref,s` the library's strand-`s` unspliced density over its
-  single-strand exons — a coordinate). Faces from the flag bits, per strand: strand `s`'s level crosses a
+  `u_s = log(ρ_s / ρ_ref)`, with one numerical RNA origin shared by both strands. The existing
+  positive exon-based origin is retained. If it is zero, available RNA-admitting count/opportunity
+  pairs and certified-flux count/exposure pairs supply a positive scale. This implements
+  **Changing a coordinate preserves physical support** in EQUATIONS: a zero coordinate cannot
+  silence measured local sources. The coordinate does not admit sources or estimate their RNA
+  counts; the existing builders do. With no usable pairs it stays zero. This fallback does not
+  repair loss outside a finite table. Faces from the flag bits, per strand: strand `s`'s level crosses a
   face iff the boundary carries none of `s`'s four bits and both nodes admit `s`; across `s`'s own
   junction it enters `s`'s intron and not `s`'s exon; a terminus of `s` stops `s` both ways. The intron
   test is PER STRAND (`BlockContext.exon_pos` / `exon_neg`): a region that admits `s` and carries no exon
@@ -1207,6 +1282,13 @@ anywhere in the transfer policy; the bar is about one percent of a row.
   control 94 → 448). **An empty exon piece beside a lit junction is a source too** (landed 2026-09-09):
   the level is built there, priced by `hop_price` on the piece's zero count, and emitted with the flux's
   own witness (`ISSUES: the-empty-flux-source-at-the-junctions-counting-alone`).
+  A known source must supply the full footprint of its blur, including source evaluations
+  outside the retained table (`EQUATIONS.md`, **A known source supplies the convolution
+  footprint**). Certified flux evaluates its Poisson source over that footprint, blurs it,
+  then retains the original output cells. The original spacing is passed through directly;
+  deriving it again from extended coordinates can change the finite kernel through rounding.
+  Temporary evaluations retain the one-lattice rule and do not change hop pricing. The remaining finite-support problem
+  is recorded in `ISSUES: the-gdna-prior-enters-psi-twice`.
 * **The delivery at AMBIG nodes** (`PsiMessage.cube_rows`, a `simplex_logodds.CubeRows` table): the held levels per strand as ONE
   row over ψ's `(λ, θ)` cube — at each cell `f_s = (1 − σ)(1 ± τ)/2`, the profile read at
   `log(ρ_s / ρ_ref,s)`; a one-sided profile stays one-sided (gated). The backbone adds the row inside the
@@ -1276,11 +1358,17 @@ node hears an open side instead of silence and its own flux is not read).
 
 `Policy.library(view)` runs once over the whole chain on a `ChainView` — observations and geometry, no
 beliefs, so a cross-block reduction over beliefs has no field to read — and `prepare(ctx, library)` sees
-one block. The transfer policy's library is three reference densities (the gDNA lane's, each RNA lane's)
+one block. The transfer policy's library is two coordinate origins (gDNA and one shared by both RNA lanes)
 and whether the strand split is a live witness, which is the library's strand protocol decision
-(`region_init.strand_discriminability`) rather than a per-slot solve. The intron factory's rows travel on
-the context (`factory_rows`, the very array ψ adds as its λ-factor), which retired the policy's grid-keyed
-row callback.
+(`region_init.strand_discriminability`) rather than a per-slot solve. No intron-background row
+travels on the context or enters the count solver.
+
+**Local strand-witness availability.** With a fitted strand model and a live protocol verdict,
+each RNA hop can read its local strand-difference witness. Expression at a disconnected exon
+cannot enable or disable that interpretation. Removing the redundant counted-exon condition
+does not change the protocol fit, either coordinate origin or either hop-price formula.
+The both-strand discrepancy approximation remains; availability does not certify that a column
+difference identifies either strand's RNA amount separately.
 
 #### 6b.15.3 ψ's read-out is chunk-exact, and that is what makes the block size a knob rather than a choice
 
@@ -1297,10 +1385,11 @@ on a real 2.09M-slot sweep for eight), so `CalibrationConfig.sweep_block_slots` 
 
 #### 6b.15.4 The message layer is refit-invariant (derived and measured 2026-09-11); the cache that shared it across the refit sweeps was deleted 2026-09-18
 
-Everything the layer reads is on the context — observations, geometry, the factory rows, the incoming
-belief's ``belief_fg`` and the liveness bits ``has_own_composition`` (`tau_lam > 0`, the one bit of the
-self-solve a policy may know; the context no longer carries the self-solve object) — plus the library and
-the grid, and never the prior; and `calibrate` resets the belief before every sweep. So for one grid every
+Everything the layer reads is on the context — observations, geometry and the liveness bits
+``has_own_composition`` (`tau_lam > 0`) — plus the library and the grid. The precision calculation
+clamps the fraction, so even an exact-vertex incoming belief cannot remove an otherwise available
+strand claim. Neither source-row values nor delivered evidence read a posterior belief or landscape.
+`calibrate` also resets the belief before every sweep. So for one grid every
 refit sweep's messages are the same: measured on the human chain, sweeps 1–3 deliver identical ψ rows and
 cube rows to the bit and every node hears the same thing. A content-keyed cache (`MessageCache`, 2026-09-11 to
 2026-09-18) held one grid's delivered messages and served the refit sweeps from it — on the 18.6M-fragment
@@ -1323,11 +1412,10 @@ before the row, and `test_transfer_policy.test_the_layer_reads_a_row_only_under_
 NaN and holds the passes and the delivered channels bit-identical.
 
 **The sweep is one native call.** `native.solve_blocks` (`native/solve_kernel.cpp`) takes the chain's arrays whole,
-the block table, the priors as their INPUTS (the landscape's curve with the per-slot support, the intron factory's
-background, mask, counts and opportunities) and the thread budget, and runs every locus block end to end on a pool
-of threads pulling blocks one at a time, each on its own arena: the factory rows and the arm's shift, the
+the block table, the landscape curve with per-slot support, and the thread budget. It runs every
+locus block end to end on a pool of threads pulling blocks one at a time, each on its own arena: the arm's shift, the
 self-solve ψ, the own-evidence precision, the layer (the builders into the arena's tables, the two passes, the
-solve) unless the policy is silent, the final ψ with the factory row and the delivered row added per cell, the
+solve) unless the policy is silent, the final ψ with the delivered row added per cell, the
 write-back on the owned slots, ``has_composition`` and the assertions as integer counts. Nothing is reduced
 across blocks but those counts, so the answer is BIT-IDENTICAL at every thread count and block size; ψ's slot pool
 is threaded the same way (one slot at a time), so `CalibrationConfig.n_threads` is a resource, never a tunable of
@@ -1391,8 +1479,8 @@ cumulative sums — the four-way min is piecewise linear in the fragment length 
 reaches and their sum, so its expectation is three sums read off ``F`` and ``S``
 (`effective_length.crossing_eff_length`; the matrix form is the brute force its gate compares with); the
 landscape's kernels are built and summed a row tile at a time (`landscape._render`, on ψ's own tiling
-rule), so a million training regions never exist as a matrix; the intron factory's rows are a
-`calibrate.FactoryRows` the sweep slices per block, never a chain-wide array. One back-to-back pair on the
+rule), so a million training regions never exist as a matrix. The former third allocation,
+block-local intron-factory rows, was removed with the factory. One back-to-back pair on the
 deep library: peak 19.2 → 11.4 GB, wall 505 → 498 s, untouched stages 1.00. The identity references and the
 replay captures were re-taken (`memory_identity_*`, `sweeps_MO_3021_step4`).
 
@@ -1627,8 +1715,9 @@ Read with §0b: an object class carrying the error is a mechanism, a stratum car
 Regions and boundaries measure different components — the gDNA/RNA opportunity ratio is 0.25 at a
 crossing point against 115.7 at a 100 bp region and 1.19 at 1,000 bp, so a short region is a good gDNA
 measurement and says nothing about RNA; carry per-component precision, not one scalar. On an unstranded
-library the density model carries the entire own-evidence budget: at κ = ½ the strand λ-term is exactly 0
-(`EQUATIONS.md` §5), and the intron factory is what makes such a library solvable at all. Pass-0 scores
+library the strand λ-term is exactly 0 at κ = ½ (`EQUATIONS.md` §5). Structurally pure-DNA
+observations, certified splice flux and licensed neighbour messages provide what evidence is
+available; the shared landscape supplies a count prior on later sweeps. There is no intron factory. Pass-0 scores
 honest ignorance as error, which is the wrong question: an object with no own evidence reporting
 `f_g ≈ ½` at zero precision is stating a true fact, and the measurement that matters is solvable → right /
 wrong → confidently wrong (its z-band table retired with `solvability_audit.py`, 2026-09-28). The deferred
@@ -1644,7 +1733,52 @@ unannotated transcription on `test_blank`, pinned gDNA by structure (`TESTING.md
 
 ### 7.1 The landscape prior — who trains it, where its kernels go, and what axis it lives on (owner rulings 2026-09-06 and 2026-09-10; landed 2026-09-10)
 
-**Three rulings, one gate file** (`tests/calibration/test_landscape_training_population.py`; the arms and
+**Factory-free count foundation, accepted 2026-10-09:** the separate intron-background
+constraint is removed. One explicit landscape remains for count inference; its admission,
+weights and refits are unchanged. Own messages use the observed strand likelihood at exons,
+boundaries and eligible introns. The measured weak-strand tradeoff is accepted under
+**Conservative allocation under uncertainty**. The owner also authorized prototyping evidence-curve contributions in
+place of posterior-variance admission. Isolate that contrast while retaining the composition
+requirement, structural exclusions and current weights; changing those is a separate contrast.
+The owner subsequently authorizes exploring local RNA route profiling, with generality,
+simplicity and robustness taking precedence over simulated-panel accuracy: vary placement,
+fragment opportunities and capture strength before calibration scoring. That prototype's
+arithmetic is certified, but its shared-capture premise fails a noiseless opportunity-mismatch
+check (`ISSUES: the-gdna-prior-enters-psi-twice`). It is not a production assembly decision.
+These approvals authorize experiments; the production training rules below remain in force
+until a replacement is reviewed and validated.
+
+**Evidence-interface boundary, 2026-10-08:** a prototype density consumer retains the
+existing composition, absolute DNA-level and absolute RNA-level factors separately.
+The integral and their coordinate requirements are derived under **Absolute level factors
+retain their coordinates** in `EQUATIONS.md`. This reuses the current graph, passes,
+intersections and directional exclusions. It neither changes the production count assembly
+nor certifies earlier face builders that already substitute observed totals. Those
+approximations, both-strand integration and population admission remain separate audits;
+the prototype's validation and limits are in `ISSUES: the-gdna-prior-enters-psi-twice`.
+
+**Admission experiment status, 2026-10-08:** the approved removal of posterior-variance
+admission has been tested with the prototype evidence curves. It does not establish a
+production replacement. The retained reliability weighting and post-fit uniform mixing
+are distinct mechanisms; changing them is outside the completed admission contrast.
+The existing production rules below continue to apply pending a reviewed replacement.
+
+**Equal-weight experiment, owner approval 2026-10-08:** an isolated comparison may give
+each already-admitted evidence curve one contribution, while retaining the same curves,
+objects, density grid, smoothing strength, earlier refits and count solver. This approval
+does not select new production weights or authorize reader integration. The completed
+contrast and its population-fit sensitivity are recorded in
+`ISSUES: the-gdna-prior-enters-psi-twice`.
+
+**Unstranded bootstrap, owner direction 2026-10-08:** do not train the first landscape
+by treating all intronic observations as known DNA. The owner agrees that this would
+teach real intronic RNA as DNA and authorizes continuing the evidence investigation.
+Keep useful splice, boundary and neighbour information. A provisional allocation is
+not an observed origin count; its uncertainty must survive into any proposed training
+input. The own-observation-only training ablation is held, not the selected replacement.
+This direction does not select a new RNA reference, population estimator or capture prior.
+
+**Training rules, one gate file** (`tests/calibration/test_landscape_training_population.py`; the arms and
 their numbers `ISSUES: the-landscape-training-population-arms`):
 
 1. **A node whose only evidence is a bound, or which has none, does not train the prior.**
@@ -1673,10 +1807,13 @@ their numbers `ISSUES: the-landscape-training-population-arms`):
    `count < 1`), and a Poisson count has `Var(log c) = 1/c`, so the wall in the variable every solve reports
    is `Var(log f_g) ≤ 1 nat²` (`CONSTANTS.landscape.located_var`, the identity's value, not a constant chosen). A
    slot wider than that has no location whatever produced its solve — a strand term at a pure-RNA vertex
-   (its median sits above zero by the term's width), an empty intron's factory row, a one-sided delivered
+   (its median sits above zero by the term's width), or a one-sided delivered
    row — and its median is the reference measure's under its bound; training on it re-seeds the landscape
    at the slot's resolution, a false mode two decades above the anchors. The rule is the CONJUNCTION of
-   rule 1 and the floor: a bound-only slot sharpened by the prior alone is the prior's echo and stays out.
+   rule 1 and the floor. This implementation excludes level-only evidence, but a one-sided gene-edge
+   floor delivered in the composition lane can still pass both tests; lane citizenship does not prove
+   a two-sided location. Its weak-strand feedback is an accepted limit for this foundation
+   (`ISSUES: the-gdna-prior-enters-psi-twice`); the admission experiment remains deferred.
    The symmetric floor alone (admission by width, no composition asked) was priced and is worse where echo
    exists (deferred +0.22 % against −0.87 %, unstranded OFF +0.11 % against −0.01 %); a floor on OWN
    evidence only, with a delivered row rescuing a wide slot, loses the unstranded OFF zero control
@@ -1718,6 +1855,29 @@ is per object or per placement and continuous, and "no enrichment" is the limit 
 The reader below, whose `None` switches every correction off, is such a decision and is a defect to replace, not a
 design: it quantifies the two sparse plasma libraries (LBX0190, MO_3021) as uncaptured where 0.7.1 contracts them
 (2026-10-05).
+
+**Capture has a local footprint (owner, 2026-10-07).** A probe can bind fragments that
+overlap either part of it; a junction-spanning probe does not enrich only fragments
+that themselves span the junction. At the region/boundary resolution, enrichment at
+an object gives reason to expect related enrichment at adjacent regions and boundaries,
+including the connected splice junction. The footprint depends on both probe extent
+and fragment lengths. The model should represent this local relationship at its existing
+object resolution, not reconstruct probe positions at base-pair resolution or use a
+fixed one-fragment-length cutoff. This is approximate local co-enrichment, not equality
+of capture averages, a fixed flank-to-region ordering, or a requirement that neighbors
+must show capture before an object may receive a weight. No particular coupling strength
+or new prior has yet been selected. The counterexample to exact face cancellation does
+not reject a model that uses the rest of this local footprint.
+
+**Local capture-prior prototype, owner approval 2026-10-09.** With count inference
+frozen, prototype a normalized background distribution and a local enrichment prior
+uniform in the retained background fraction `1/C`, hence density `1/C²` for `C >= 1`.
+Test the proper tail and equal background/enrichment odds as separate contrasts,
+retaining the continuous counterarm readout. This authorizes an isolated experiment,
+not production selection. Honest local evidence, including licensed neighbour
+messages, must survive; no annotation count, distant RNA maximum, capture detector
+or positive background floor is authorized. Production integration and junction
+pricing keep their separate owner checkpoints.
 
 The EM's effective length under capture (`capture_eff_length`, `priors.assemble_priors`, `EQUATIONS.md` §11)
 contracts every component by the capture efficiencies of the objects its fragments deposit on, each an

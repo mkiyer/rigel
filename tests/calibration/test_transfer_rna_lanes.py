@@ -610,10 +610,8 @@ def _empty_piece_ctx(flux: float = 40.0, rate: float = 0.02):
         exon_neg=np.zeros(n, bool),
         boundary_flags=flags,
         has_own_composition=np.array([False, False, False, False, True]),
-        belief_fg=np.full(n, 0.5),
         n_grid=41,
         logodds_window=10.0,
-        factory_rows=np.zeros((n, 41)),  # a factory with nothing to say: the lanes alone
         strand_live=True,  # the protocol preserves strand: the full exon's split is a witness
     )
 
@@ -629,7 +627,7 @@ def test_an_empty_exon_piece_beside_a_lit_junction_is_a_flux_source():
     from rigel.calibration.messages.transfer import TransferPolicy
 
     ctx = _empty_piece_ctx()
-    pol = TransferPolicy(strand=(0.99, 0.02, 0.02))
+    pol = TransferPolicy(kappa=0.99)
     prepared = _prepared(pol, ctx)
     lane = prepared.lanes["pos"]
     assert lane.empty[2], "the piece must be EMPTY for this gate to say anything"
@@ -657,9 +655,7 @@ def test_an_empty_exon_piece_beside_a_lit_junction_is_a_flux_source():
     v4 = R.hop_price(40.0, 40.0 / 0.02, float(lane.count[4]), float(lane.a[4]))
     np.testing.assert_allclose(got, R.blur_row(R.lower_side(own), lane.u, v4), atol=1e-9)
     # PERTURBATION: a silent junction builds no source, and the empty piece forwards nothing
-    quiet = _prepared(
-        TransferPolicy(strand=(0.99, 0.02, 0.02)), _empty_piece_ctx(flux=0.0, rate=0.0)
-    )
+    quiet = _prepared(TransferPolicy(kappa=0.99), _empty_piece_ctx(flux=0.0, rate=0.0))
     assert quiet.lanes["pos"].own_level[2] is None
     assert not _hop(quiet, 2, 3).level_rna_pos.present[3]
 
@@ -710,27 +706,9 @@ def _neg_only_ctx():
         exon_neg=np.array([False, False, True, False, True, False, True]),
         boundary_flags=flags,
         has_own_composition=np.array([False, False, False, False, True, False, False]),
-        belief_fg=np.full(n, 0.5),
         n_grid=41,
         logodds_window=10.0,
-        factory_rows=np.zeros((n, 41)),
         strand_live=True,
-    )
-
-
-def test_the_lanes_are_built_when_the_intron_factory_has_no_rows():
-    """A chain with no coarse intron has no factory rows; the message layer is still the message
-    layer. PERTURBATION: the same context with rows builds the same lanes."""
-    import dataclasses
-
-    from rigel.calibration.messages.transfer import TransferPolicy
-
-    pol = TransferPolicy(strand=(0.99, 0.02, 0.02))
-    with_rows = _prepared(pol, _neg_only_ctx())
-    no_rows = _prepared(pol, dataclasses.replace(_neg_only_ctx(), factory_rows=None))
-    assert "neg" in with_rows.lanes, "the gate's premise: the − lane exists with rows"
-    assert set(no_rows.lanes) == set(with_rows.lanes), (
-        f"the lanes vanished with the factory rows: {sorted(no_rows.lanes)} against {sorted(with_rows.lanes)}"
     )
 
 
@@ -740,7 +718,7 @@ def test_the_rna_lanes_are_built_without_a_gdna_lane():
     joins them."""
     from rigel.calibration.messages.transfer import TransferPolicy, _Library
 
-    pol = TransferPolicy(strand=(0.99, 0.02, 0.02))
+    pol = TransferPolicy(kappa=0.99)
     ctx = _neg_only_ctx()
     lib = pol.library(ctx)
     assert lib.rho_rna > 0.0, "the gate's premise: the RNA coordinate exists"
@@ -757,7 +735,7 @@ def test_a_strands_level_is_delivered_to_the_cube_when_the_other_strand_has_no_c
     lane holds something."""
     from rigel.calibration.messages.transfer import TransferPolicy
 
-    pol = TransferPolicy(strand=(0.99, 0.02, 0.02))
+    pol = TransferPolicy(kappa=0.99)
     ctx = _neg_only_ctx()
     prepared = _prepared(pol, ctx)
     assert prepared.lanes["pos"].rho_ref > 0.0, "one coordinate serves both strands"
@@ -785,7 +763,7 @@ def test_a_junctions_flux_is_a_source_when_the_strand_has_no_single_strand_exon(
     from rigel.calibration.messages.transfer import TransferPolicy
     from rigel.calibration.splice_graph import FLAG_ACCEPTOR_POS
 
-    pol = TransferPolicy(strand=(0.99, 0.02, 0.02))
+    pol = TransferPolicy(kappa=0.99)
     base = _neg_only_ctx()
     flags = base.boundary_flags.copy()
     flags[5] = FLAG_ACCEPTOR_POS  # the + junction's acceptor, its exon (slot 6) to the right
@@ -843,10 +821,8 @@ def _flux_pair_ctx(kappa: float):
         exon_neg=np.zeros(n, bool),
         boundary_flags=flags,
         has_own_composition=np.zeros(n, bool),
-        belief_fg=np.full(n, 0.5),
         n_grid=41,
         logodds_window=10.0,
-        factory_rows=np.zeros((n, 41)),
         strand_live=kappa > 0.5,
     )
 
@@ -862,7 +838,7 @@ def test_the_flux_price_carries_no_disagreement_when_the_pair_agrees_in_whole_st
 
     for kappa in (0.99, 0.7, 0.5):
         ctx = _flux_pair_ctx(kappa)
-        lane = _prepared(TransferPolicy(strand=(kappa, 0.02, 0.02)), ctx).lanes["pos"]
+        lane = _prepared(TransferPolicy(kappa=kappa), ctx).lanes["pos"]
         got = lane.flux_at(2, 0)
         assert got is not None, "no flux level at the exon"
         # the price the agreement owes: the junction's counting and the exon's column count's counting

@@ -323,7 +323,7 @@ def test_a_delivered_row_pulls_two_sided_and_not_to_the_vertex():
         od_r=0.0,
         n_grid=80,
         L=10.0,
-        lam_logprior=_gdna_share_row(80, 0.2, 200.0),
+        row_logprior=_gdna_share_row(80, 0.2, 200.0),
     )
     fg = float(d.gdna_frac[0])
     assert abs(fg - 0.2) < 0.05, fg
@@ -348,7 +348,7 @@ def test_a_weak_row_defers_to_a_decisive_strand():
         od_r=0.0,
         n_grid=80,
         L=10.0,
-        lam_logprior=_gdna_share_row(80, 0.9, 3.0),
+        row_logprior=_gdna_share_row(80, 0.9, 3.0),
     )
     fg = float(d.gdna_frac[0])
     assert fg < 0.1, fg
@@ -585,8 +585,7 @@ def _chunk_substrate(m=255, K=120, seed=3):
         L=10.0,
         gdna_prior=(log_rho, log_p),
         gdna_support=(mass, eff),
-        lam_logprior=rows,
-        row_logprior=delivered,
+        row_logprior=rows + delivered,
         fg_ref=fg_ref,
         fpos_ref=fpos_ref,
         fneg_ref=fneg_ref,
@@ -605,7 +604,7 @@ def _solve_in_chunks(args, kw, edges):
     for a, b in edges:
         sub_args = tuple(x[a:b] for x in args)
         sub_kw = dict(kw)
-        for key in ("lam_logprior", "row_logprior", "fg_ref", "fpos_ref", "fneg_ref"):
+        for key in ("row_logprior", "fg_ref", "fpos_ref", "fneg_ref"):
             sub_kw[key] = kw[key][a:b]
         sub_kw["gdna_support"] = tuple(x[a:b] for x in kw["gdna_support"])
         dc = _solve_regions_logodds_all(*sub_args, **sub_kw)

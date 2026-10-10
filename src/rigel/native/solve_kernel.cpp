@@ -3,7 +3,7 @@
 // (`transfer_kernel.h`) as its pieces, and every binding the gates read the same code through.
 //
 //   solve_blocks     THE SWEEP: every locus block of the chain — the prior rows (the fitted gDNA arm read from the
-//                    landscape's curve, the intron factory's rows), the SELF-SOLVE ψ, the own-evidence precision, the
+//                    landscape's curve), the SELF-SOLVE ψ, the own-evidence precision, the
 //                    message LAYER (the builders, the two passes, the solve — unless the policy is silent), the FINAL ψ,
 //                    the write-back on the owned slots, `has_composition`, the counts of
 //                    the backbone's assertions — each block on one thread of a pool, on that thread's arena; the belief
@@ -16,7 +16,7 @@
 //   transfer_prepare, transfer_pass, transfer_solve — the policy's three kernels on tables the call allocates and
 //                    returns, for the transfer gates (`tests/calibration/_transfer_harness.py`).
 //   rows             the row constructors of `transfer_rows.h`, the builders' flag predicates, and the constructions the
-//                    block pipeline absorbed — the factory rows, the factor precision, the strand evidence — bound
+//                    block pipeline absorbed — the strand evidence — bound
 //                    for the gates.
 //
 // One implementation of every arithmetic, in one module: the gates and the production path cannot drift apart.
@@ -140,75 +140,7 @@ double pairwise_sum(const double* a, int n) {
     return pairwise_sum(a, n2) + pairwise_sum(a + n2, n - n2);
 }
 
-// The density deconvolution's numerical floor, exported as `rows.DENSITY_EPS` and read there by
-// `density_deconv`, so the Python reference and this kernel share one value.
-constexpr double DENSITY_EPS = 1.0e-12;
 constexpr double OWN_EPS = 1.0e-9;       // region_init._EPS: the own-evidence predicate's guard, and the clips
-
-// the fitted gDNA background the factory scores each intron against (density_deconv.GdnaBackground)
-struct Background {
-    double log_mu_bg, alpha, size;
-    bool informative;
-    // effective size: 1/α_eff = 1/α + 1/size — the per-region over-dispersion ⊕ the posterior's own width
-    double alpha_eff() const {
-        double inv_alpha = std::isfinite(alpha) ? 1.0 / std::max(alpha, DENSITY_EPS) : 0.0;
-        inv_alpha += 1.0 / std::max(size, DENSITY_EPS);
-        return inv_alpha <= DENSITY_EPS ? std::numeric_limits<double>::infinity() : 1.0 / inv_alpha;
-    }
-};
-
-// log NegBinom(g; mean μ, size r) for continuous g ≥ 0 in the mean/size parameterisation,
-// Γln(g+r) − Γln(r) − Γln(g+1) + r·log(r/(r+μ)) + g·log(μ/(r+μ)); r → ∞ is the exact Poisson
-// limit g·log μ − μ − Γln(g+1) (taken directly: no Γln(∞))
-// ⛔ every product is a named temporary: numpy rounds each operation, and a product left inside the sum lets the
-// compiler fuse it into a multiply-add — one rounding fewer, and a row a bit off numpy's
-double log_negbinom(double g, double mu, double size) {
-    mu = std::max(mu, DENSITY_EPS);
-    const double lg_g1 = std::lgamma(g + 1.0);
-    if (!std::isfinite(size)) {
-        const double t = g * std::log(mu);
-        return t - mu - lg_g1;
-    }
-    const double r = std::max(size, DENSITY_EPS);
-    const double rpm = r + mu;
-    const double t_r = r * (std::log(r) - std::log(rpm));
-    const double t_g = g * (std::log(mu) - std::log(rpm));
-    return std::lgamma(g + r) - std::lgamma(r) - lg_g1 + t_r + t_g;
-}
-
-// The intron factory's λ-factor for one slot: log NegBinom(f_g·C; ρ_bg·E, α_eff) over the σ(λ) grid, the
-// row offset so its max is 0 (an f_g-independent constant is irrelevant to ψ)
-void factory_row(const Background& bg, double count, double eff, const double* fg, int K, double* out) {
-    if (!bg.informative) { std::fill(out, out + K, 0.0); return; }
-    const double Eg = std::max(eff, DENSITY_EPS);
-    const double alpha_eff = bg.alpha_eff();
-    const double mu = std::exp(bg.log_mu_bg) * Eg;  // the background gDNA count location
-    for (int k = 0; k < K; ++k) {
-        const double g = std::clamp(fg[k], DENSITY_EPS, 1.0 - DENSITY_EPS) * count;
-        out[k] = log_negbinom(g, mu, alpha_eff);
-    }
-    const double m = vmax(out, K);
-    for (int k = 0; k < K; ++k) out[k] -= m;
-}
-
-// The factor's precision for one row: the composition evidence a λ-factor carries, read off its own
-// curvature — τ = 1/Var_λ under the normalised factor; a flat row carries none (never the grid's own width)
-double factor_precision_row(const double* row, const double* lam, const double* lam2, int K, std::vector<double>& w) {
-    if (!(ptp(row, K) > DENSITY_EPS)) return 0.0;
-    w.resize(static_cast<size_t>(K) * 3);
-    double* e = w.data();
-    double* wl = e + K;
-    double* wl2 = wl + K;
-    const double m = vmax(row, K);
-    for (int k = 0; k < K; ++k) e[k] = std::exp(row[k] - m);
-    const double z = std::max(pairwise_sum(e, K), DENSITY_EPS);
-    for (int k = 0; k < K; ++k) e[k] /= z;
-    for (int k = 0; k < K; ++k) { wl[k] = e[k] * lam[k]; wl2[k] = e[k] * lam2[k]; }
-    const double mu = pairwise_sum(wl, K);
-    const double mu2 = mu * mu;  // a named product: no fused multiply-add against numpy's two roundings
-    const double var = pairwise_sum(wl2, K) - mu2;
-    return var > DENSITY_EPS ? 1.0 / std::max(var, DENSITY_EPS) : 0.0;
-}
 
 // one slot's reference-free strand composition evidence I_strand at the message-free fg_loc —
 // N_eff·disc·[f_g(1−f_g)]² / (4 p(1−p)), p = κ + f_g(½ − κ), the count overdispersed
@@ -239,24 +171,20 @@ struct ArmArrays {
     }
 };
 
-// the two prior rows (the λ-factor's, the delivered composition's) as a call receives them: None or (m, K)
+// The delivered composition rows as a call receives them: None or (m, K).
 struct RowPriors {
-    bool has_l, has_r;
-    Mat l, r;
-    RowPriors(nb::object lam_logprior, nb::object row_logprior, int K)
-        : has_l(!lam_logprior.is_none()), has_r(!row_logprior.is_none()) {
-        if (has_l) l = nb::cast<Mat>(lam_logprior);
-        if (has_r) r = nb::cast<Mat>(row_logprior);
-        if ((has_l && static_cast<int>(l.shape(1)) != K) || (has_r && static_cast<int>(r.shape(1)) != K))
+    bool present;
+    Mat rows;
+    RowPriors(nb::object row_logprior, int K) : present(!row_logprior.is_none()) {
+        if (present) rows = nb::cast<Mat>(row_logprior);
+        if (present && static_cast<int>(rows.shape(1)) != K)
             throw std::invalid_argument("psi: a prior row is not on the solve grid");
-    }
-    const double* row_of(const Mat& m, bool present, int i) const {
-        return present ? m.data() + static_cast<size_t>(i) * m.shape(1) : nullptr;
     }
     P::SlotInputs inputs(const P::Arm& arm, int i, double u_pos, double u_neg, double fg_ref, double fpos_ref,
                          double fneg_ref, bool ap, bool an, const P::Delivered* row) const {
         return P::SlotInputs{u_pos, u_neg, fg_ref, fpos_ref, fneg_ref, ap, an, arm.built(),
-                             arm.built() ? arm.shift(i) : 0.0, row_of(l, has_l, i), row_of(r, has_r, i), row};
+                             arm.built() ? arm.shift(i) : 0.0,
+                             present ? rows.data() + static_cast<size_t>(i) * rows.shape(1) : nullptr, row};
     }
 };
 
@@ -274,14 +202,14 @@ P::Rows unpack_rows(int m, int K, IdxVec& cube_slot, Mat& cube_pos, BoolVec& has
 // arithmetic per slot in the same order within the slot, whatever thread takes it: BIT-IDENTICAL to the serial loop
 // at every thread count. One slot at a time (no chunk constant) balances the load on asymmetric cores.
 void psi_solve(IdxVec slots, Vec u_pos, Vec u_neg, BoolVec allow_pos, BoolVec allow_neg, Vec fg_ref, Vec fpos_ref,
-               Vec fneg_ref, double kappa, double od_g, double od_r, Vec lam, nb::object gdna, nb::object lam_logprior,
+               Vec fneg_ref, double kappa, double od_g, double od_r, Vec lam, nb::object gdna,
                nb::object row_logprior, IdxVec cube_slot, Mat cube_pos, BoolVec cube_has_pos, Mat cube_neg,
                BoolVec cube_has_neg, Vec cube_u, Vec cube_total, Vec cube_opportunity, Vec cube_rho, int n_tilt,
                Vec out_fg, Vec out_fpos, Vec out_fneg, Vec out_var, int n_threads) {
     const int m = static_cast<int>(u_pos.shape(0)), K = static_cast<int>(lam.shape(0));
     if (n_tilt < 2) throw std::invalid_argument("psi_solve: the tilt needs at least two nodes");
     ArmArrays A(gdna, m);
-    RowPriors R(lam_logprior, row_logprior, K);
+    RowPriors R(row_logprior, K);
     P::Rows D = unpack_rows(m, K, cube_slot, cube_pos, cube_has_pos, cube_neg, cube_has_neg, cube_u, cube_total,
                             cube_opportunity, cube_rho);
     const P::Grid g(lam.data(), K, kappa, od_g, od_r, n_tilt, &A.arm);
@@ -316,13 +244,13 @@ void psi_solve(IdxVec slots, Vec u_pos, Vec u_neg, BoolVec allow_pos, BoolVec al
 // ψ itself, for the gates: the cube (m, K, C) with the two strand-fraction grids and the tilt beside it,
 // every slot of one class (ambig: n_tilt + 2 columns; else one)
 void psi_cube(Vec u_pos, Vec u_neg, BoolVec allow_pos, BoolVec allow_neg, Vec fg_ref, Vec fpos_ref, Vec fneg_ref,
-              double kappa, double od_g, double od_r, Vec lam, nb::object gdna, nb::object lam_logprior,
+              double kappa, double od_g, double od_r, Vec lam, nb::object gdna,
               nb::object row_logprior, IdxVec cube_slot, Mat cube_pos, BoolVec cube_has_pos, Mat cube_neg,
               BoolVec cube_has_neg, Vec cube_u, Vec cube_total, Vec cube_opportunity, Vec cube_rho, int n_tilt,
               bool ambig, Cube out_psi, Cube out_fpos, Cube out_fneg, Cube out_tau) {
     const int m = static_cast<int>(u_pos.shape(0)), K = static_cast<int>(lam.shape(0));
     ArmArrays A(gdna, m);
-    RowPriors R(lam_logprior, row_logprior, K);
+    RowPriors R(row_logprior, K);
     const P::Grid g(lam.data(), K, kappa, od_g, od_r, n_tilt, &A.arm);
     const int C = g.columns(ambig);
     if (static_cast<int>(out_psi.shape(1)) != K || static_cast<int>(out_psi.shape(2)) != C)
@@ -391,23 +319,16 @@ struct ChainArrays {  // the whole chain, read-only
 struct Params {
     double kappa, od_r, disc;  // ψ's strand model; the protocol's discriminability (0: the channel is dead)
     const double* lam; int K; int n_tilt;
-    // the policy: its kind, and the strand model ITS own claims read (a policy's, not the sweep's), the library's
-    // coordinates and strand witness
-    int policy; bool has_strand; double pol_kappa, pol_od_g, pol_od_r; double rho_gdna, rho_rna; bool split_live;
+    // The policy kind, strand availability, library coordinates and strand witness.
+    int policy; bool has_strand; double rho_gdna, rho_rna; bool split_live;
 };
 
 struct Landscape { bool built = false; const double* log_rho = nullptr; const double* logP = nullptr; int G = 0; };
 
-struct Factory {  // the intron factory: its inputs (the rows built per block), rows given as one array, or none
-    enum { NONE = 0, INPUTS = 1, ROWS = 2 } mode = NONE;
-    const bool* is_intron = nullptr; const double* count = nullptr; const double* eff = nullptr; Background bg{};
-    const double* rows = nullptr;  // (n, K) chain-wide, ROWS only
-};
-
 struct Outputs {  // written in place, the owned slots of each block
     double *fpos, *fneg, *fg, *var; bool* has_comp;
     // the diagnostics capture, or nullptr
-    double *fg_loc = nullptr, *fg_strand = nullptr, *tau_lam = nullptr, *tau_fac = nullptr, *lam_rows = nullptr;
+    double *fg_loc = nullptr, *fg_strand = nullptr, *tau_lam = nullptr, *lam_rows = nullptr;
 };
 
 struct Lane3 {  // one received lane as the capture returns it
@@ -427,9 +348,9 @@ struct BlockResult {
 // one thread's tables for one block, resized per block, the capacity kept across blocks
 struct Arena {
     int n = 0, K = 0;
-    std::vector<double> n_u, n_s, flux, cnt_col[2], factory, own_rows, lane_own[3], comp[2], prof[2][3], rows, cube_pos,
-        cube_neg, cube_total, cube_opp, cube_rho, f_par[6], lane_wit[3], face_store, flux_store[3], recv_count[2][3],
-        recv_opp[2][3], recv_rna[2][3], recv_rnav[2][3], fg_loc, tau_lam, tau_fac, out, bound, row, w, lam2;
+    std::vector<double> n_u, n_s, flux, cnt_col[2], own_rows, lane_own[3], comp[2], prof[2][3], rows, cube_pos,
+        cube_neg, cube_total, cube_opp, cube_rho, f_par[9], lane_wit[3], face_store, flux_store[3], recv_count[2][3],
+        recv_opp[2][3], recv_rna[2][3], recv_rnav[2][3], fg_loc, tau_lam, out, bound, row;
     std::vector<char> is_intron, is_intergenic;
     std::vector<int64_t> left, right, seq_f, seq_b, cube_slot;
     std::vector<int8_t> f_kind;
@@ -437,7 +358,7 @@ struct Arena {
     std::vector<uint8_t> own_mask, lane_face[3], lane_two[3], lane_own_mask[3], lane_wit_mask[3], empty_g, empty_r,
         has_nbr[2], has_comp[2], present[2][3], has_wit[2][3], cube_has_pos, cube_has_neg, held, solvable, has_own,
         own_ev;
-    std::vector<const double*> factory_ptr, row_ptr;
+    std::vector<const double*> row_ptr;
     std::unique_ptr<Scratch> S;  // transfer_rows' scratch, built for K
     P::Scratch psi;
 
@@ -446,10 +367,10 @@ struct Arena {
         n = n_; K = K_;
         const size_t nk = static_cast<size_t>(n) * K;
         auto grow = [](auto& v, size_t m) { if (v.size() < m) v.resize(m); };
-        for (auto* v : {&n_u, &n_s, &flux, &cnt_col[0], &cnt_col[1], &fg_loc, &tau_lam, &tau_fac, &cube_total,
+        for (auto* v : {&n_u, &n_s, &flux, &cnt_col[0], &cnt_col[1], &fg_loc, &tau_lam, &cube_total,
                         &cube_opp, &cube_rho})
             grow(*v, n);
-        for (auto* v : {&factory, &own_rows, &lane_own[0], &lane_own[1], &lane_own[2], &comp[0], &comp[1], &rows,
+        for (auto* v : {&own_rows, &lane_own[0], &lane_own[1], &lane_own[2], &comp[0], &comp[1], &rows,
                         &cube_pos, &cube_neg})
             grow(*v, nk);
         for (int s = 0; s < 2; ++s)
@@ -462,26 +383,24 @@ struct Arena {
             grow(lane_wit[l], 2 * n); grow(lane_face[l], 2 * n); grow(lane_two[l], 2 * n); grow(lane_own_mask[l], n);
             grow(lane_wit_mask[l], n); grow(flux_index[l], 2 * n);
         }
-        for (int t = 0; t < 6; ++t) grow(f_par[t], 2 * n);
+        for (auto& par : f_par) grow(par, 2 * n);
         grow(f_kind, 2 * n); grow(f_row, 2 * n); grow(f_row2, 2 * n);
         grow(is_intron, n); grow(is_intergenic, n);
         grow(left, n); grow(right, n); grow(seq_f, n); grow(seq_b, n); grow(cube_slot, n);
         for (auto* v : {&own_mask, &empty_g, &empty_r, &has_nbr[0], &has_nbr[1], &has_comp[0], &has_comp[1],
                         &cube_has_pos, &cube_has_neg, &held, &solvable, &has_own, &own_ev})
             grow(*v, n);
-        grow(factory_ptr, n); grow(row_ptr, n);
-        grow(lam2, K); grow(w, 3 * static_cast<size_t>(K));
+        grow(row_ptr, n);
     }
 };
 
 // one locus block, end to end, on one thread
-void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, const Landscape& L, const Factory& F,
+void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, const Landscape& L,
                      int64_t start, int64_t stop, int64_t end, bool want_capture, Outputs& out, Arena& A,
                      BlockResult& res) {
     const int n = static_cast<int>(end - start), n_owned = static_cast<int>(stop - start), K = p.K;
     A.size(n, K);
     Scratch& S = *A.S;
-    for (int k = 0; k < K; ++k) A.lam2[k] = p.lam[k] * p.lam[k];
     // the block's slices of the chain, its links re-based (a neighbour outside the block is no neighbour)
     const bool *is_bnd = C.is_bnd + start, *is_exon = C.is_exon + start, *fp = C.fp + start, *fn = C.fn + start;
     const bool *exon_pos = C.exon_pos + start, *exon_neg = C.exon_neg + start, *term = C.terminal + start;
@@ -501,21 +420,6 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
         A.seq_f[i] = i; A.seq_b[i] = n - 1 - i;
     }
     Chain::classify(n, is_bnd, is_exon, fp, fn, A.is_intron.data(), A.is_intergenic.data());
-    // THE PRIOR ROWS: the factory's per intron (its inputs, or the rows given), the arm's shift per slot
-    const double* fg = g.fg.data();
-    for (int i = 0; i < n; ++i) {
-        const double* r = nullptr;
-        if (F.mode == Factory::INPUTS) {
-            if (F.is_intron[start + i]) {
-                double* dest = A.factory.data() + static_cast<size_t>(i) * K;
-                factory_row(F.bg, F.count[start + i], F.eff[start + i], fg, K, dest);
-                r = dest;
-            }
-        } else if (F.mode == Factory::ROWS) {
-            r = F.rows + static_cast<size_t>(start + i) * K;
-        }
-        A.factory_ptr[i] = r;
-    }
     // THE SELF-SOLVE: every slot with a live strand and a fragment, on its own cube, the incoming belief the freeze
     auto in_slots = [&](int i) {
         const double signal = cnt[2 * i] + cnt[2 * i + 1] + A.n_u[i] + A.n_s[i];
@@ -526,22 +430,17 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
         A.fg_loc[i] = bel_fg[i];
         if (!in_slots(i)) continue;
         const P::SlotInputs s{cnt[2 * i], cnt[2 * i + 1], bel_fg[i], bel_fpos[i], bel_fneg[i], fp[i], fn[i], L.built,
-                              L.built ? P::Arm::shift_of(A.n_u[i], a_g[i]) : 0.0, A.factory_ptr[i], nullptr, nullptr};
+                              L.built ? P::Arm::shift_of(A.n_u[i], a_g[i]) : 0.0, nullptr, nullptr};
         double f_g, f_p, f_n, v_g;
         P::solve_slot(g, s, A.psi, f_g, f_p, f_n, v_g);
         if (as_bool(A.solvable)[i]) A.fg_loc[i] = f_g;
     }
-    // THE OWN EVIDENCE: the single-strand strand precision at fg_loc + the factory row's curvature
+    // THE OWN EVIDENCE: the single-strand precision at fg_loc
     for (int i = 0; i < n; ++i) {
         const bool single = fp[i] != fn[i];
         const double i_strand = strand_evidence(cnt[2 * i], cnt[2 * i + 1], A.fg_loc[i], p.kappa, p.od_r, p.disc);
         double tau = single ? i_strand : 0.0;
-        double fac = 0.0;
-        if (F.mode != Factory::NONE) {
-            fac = A.factory_ptr[i] ? factor_precision_row(A.factory_ptr[i], p.lam, A.lam2.data(), K, A.w) : 0.0;
-            tau = tau + fac;
-        }
-        A.tau_lam[i] = tau; A.tau_fac[i] = fac;
+        A.tau_lam[i] = tau;
         as_bool(A.has_own)[i] = tau > 0.0;
         as_bool(A.own_ev)[i] = tau > OWN_EPS;
     }
@@ -556,16 +455,17 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
         c.n = n; c.K = K; c.lam = p.lam;
         c.is_bnd = is_bnd; c.is_exon = is_exon; c.fp = fp; c.fn = fn; c.exon_pos = exon_pos; c.exon_neg = exon_neg;
         c.has_own = as_bool(A.has_own); c.left = A.left.data(); c.right = A.right.data(); c.flags = flags;
-        c.n_u = A.n_u.data(); c.n_s = A.n_s.data(); c.a_g = a_g; c.a_r = a_r; c.belief = bel_fg; c.cnt = cnt;
+        c.n_u = A.n_u.data(); c.n_s = A.n_s.data(); c.a_g = a_g; c.a_r = a_r; c.cnt = cnt;
         c.route_lo = route_lo; c.route_hi = route_hi; c.sj_lo = sj_lo; c.sj_hi = sj_hi; c.flux = A.flux.data();
-        c.src = A.factory_ptr.data(); c.is_intron = A.is_intron.data(); c.is_intergenic = A.is_intergenic.data();
-        c.has_strand = p.has_strand; c.kappa = p.pol_kappa; c.od_g = p.pol_od_g; c.od_r = p.pol_od_r;
+        c.is_intron = A.is_intron.data(); c.is_intergenic = A.is_intergenic.data();
+        c.has_strand = p.has_strand; c.kappa = p.kappa;
         // the tables, their bits cleared, their matrices unfilled
         std::fill_n(as_bool(A.own_mask), n, false);
         RowsOut own{A.own_rows.data(), as_bool(A.own_mask), K};
         std::fill_n(A.f_kind.data(), 2 * n, static_cast<int8_t>(NONE));
         FacesOut Fc{&c, A.f_kind.data(), A.f_row.data(), A.f_row2.data(), A.f_par[0].data(), A.f_par[1].data(),
-                    A.f_par[2].data(), A.f_par[3].data(), A.f_par[4].data(), A.f_par[5].data(), RowStore{&A.face_store, K}};
+                    A.f_par[2].data(), A.f_par[3].data(), A.f_par[4].data(), A.f_par[5].data(),
+                    A.f_par[6].data(), A.f_par[7].data(), A.f_par[8].data(), RowStore{&A.face_store, K}};
         LaneOut lanes_out[3];
         for (int l = 0; l < 3; ++l) {
             std::fill_n(as_bool(A.lane_own_mask[l]), n, false);
@@ -590,7 +490,7 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
                                      A.lane_own[0].data(), as_bool(A.lane_own_mask[0]), A.n_u.data(), a_g, nullptr,
                                      A.lane_wit[0].data(), as_bool(A.lane_wit_mask[0])});
         for (int s = 0; s < 2; ++s) {
-            const int col_read = read_column(s, p.has_strand, p.pol_kappa);
+            const int col_read = read_column(s, p.has_strand, p.kappa);
             lanes.push_back(LaneView{1 + s, as_bool(A.lane_face[1 + s]), as_bool(A.lane_two[1 + s]), as_bool(A.empty_r),
                                      A.lane_own[1 + s].data(), as_bool(A.lane_own_mask[1 + s]), A.cnt_col[col_read].data(),
                                      a_r, p.split_live ? A.cnt_col[1 - col_read].data() : nullptr, A.lane_wit[1 + s].data(),
@@ -598,6 +498,7 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
         }
         const FacesView Fv{A.f_kind.data(), A.f_row.data(), A.f_row2.data(), A.f_par[0].data(), A.f_par[1].data(),
                            A.f_par[2].data(), A.f_par[3].data(), A.f_par[4].data(), A.f_par[5].data(),
+                           A.f_par[6].data(), A.f_par[7].data(), A.f_par[8].data(),
                            A.face_store.data(), K};
         // THE TWO PASSES on the two received tables — the forward pass reads each node's low neighbour, the backward
         // its high one; the backbone's bit `has_neighbour` says the side exists
@@ -693,11 +594,11 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
             res.counts[CUBE_ROWS_FINITE][1] += 1;
         }
     }
-    // THE FINAL SOLVE: the arm, the factory row and the delivered row per cell, the cube rows at the AMBIG slots
+    // THE FINAL SOLVE: the arm and the delivered row per cell, the cube rows at the AMBIG slots
     for (int i = 0; i < n_owned; ++i) {
         const bool solvable = as_bool(A.solvable)[i];
         if (want_capture) {
-            out.fg_loc[start + i] = A.fg_loc[i]; out.tau_lam[start + i] = A.tau_lam[i]; out.tau_fac[start + i] = A.tau_fac[i];
+            out.fg_loc[start + i] = A.fg_loc[i]; out.tau_lam[start + i] = A.tau_lam[i];
             out.fg_strand[start + i] = 0.0;
             if (out.lam_rows) {
                 double* dest = out.lam_rows + static_cast<size_t>(start + i) * K;
@@ -707,7 +608,7 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
         }
         if (!in_slots(i)) continue;
         const P::SlotInputs s{cnt[2 * i], cnt[2 * i + 1], bel_fg[i], bel_fpos[i], bel_fneg[i], fp[i], fn[i], L.built,
-                              L.built ? P::Arm::shift_of(A.n_u[i], a_g[i]) : 0.0, A.factory_ptr[i], A.row_ptr[i],
+                              L.built ? P::Arm::shift_of(A.n_u[i], a_g[i]) : 0.0, A.row_ptr[i],
                               delivered.index.empty() || delivered.index[i] < 0 ? nullptr : &delivered.rows[delivered.index[i]]};
         double f_g, f_p, f_n, v_g;
         P::solve_slot(g, s, A.psi, f_g, f_p, f_n, v_g);
@@ -719,7 +620,7 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
         }
         if (want_capture) {  // the strand-only solve: no prior, no messages
             const P::SlotInputs bare{cnt[2 * i], cnt[2 * i + 1], bel_fg[i], bel_fpos[i], bel_fneg[i], fp[i], fn[i], false, 0.0,
-                                     nullptr, nullptr, nullptr};
+                                     nullptr, nullptr};
             double b_g, b_p, b_n, b_v;
             P::solve_slot(g, bare, A.psi, b_g, b_p, b_n, b_v);
             out.fg_strand[start + i] = b_g;
@@ -751,8 +652,7 @@ nb::dict lane_capture(Lane3&& ln, int n_owned, int K) {
     return d;
 }
 
-// THE SWEEP'S CALL. `blocks` is (B, 3) int64: start, stop, end per block. `gdna` is None or (log_rho, logP); `factory`
-// None, ("inputs", is_intron, count, eff, log_mu_bg, alpha, size, informative) or ("rows", rows). The belief arrays are
+// THE SWEEP'S CALL. `blocks` is (B, 3) int64: start, stop, end per block. `gdna` is None or (log_rho, logP); the belief arrays are
 // written in place on the owned slots (they arrive as copies of the incoming belief); `diagnostics` is None or a dict of
 // the capture's arrays to fill. Returns a dict: `counts` (B, 2, 2) int64 per assertion (violations, eligible),
 // `assertions` their names, `rows_delivered` / `cube_delivered` (B,) bool, and under a capture `cubes` — a list per
@@ -763,8 +663,8 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
                       Mat sj_count_lo, Mat sj_count_hi, Mat route_rate_lo, Mat route_rate_hi, Vec eff_gdna, Vec eff_rna,
                       Vec belief_fpos, Vec belief_fneg, Vec belief_fg, nb::ndarray<int64_t, nb::ndim<2>, nb::c_contig> blocks,
                       double kappa, double od_g, double od_r, double disc, Vec lam, int n_tilt, int policy, bool has_strand,
-                      double policy_kappa, double policy_od_g, double policy_od_r, double rho_gdna, double rho_rna,
-                      bool split_live, nb::object gdna, nb::object factory,
+                      double rho_gdna, double rho_rna,
+                      bool split_live, nb::object gdna,
                       Vec out_fpos, Vec out_fneg, Vec out_fg, Vec out_var, BoolVec out_has_composition,
                       nb::object diagnostics, int n_threads) {
     const int64_t n = static_cast<int64_t>(free_pos.shape(0));
@@ -777,7 +677,7 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
                   terminal.data(), left.data(), right.data(), flags.data(), cnt.data(), spliced.data(), sj_count.data(),
                   sj_count_lo.data(), sj_count_hi.data(), route_rate_lo.data(), route_rate_hi.data(), eff_gdna.data(),
                   eff_rna.data(), belief_fpos.data(), belief_fneg.data(), belief_fg.data()};
-    Params p{kappa, od_r, disc, lam.data(), K, n_tilt, policy, has_strand, policy_kappa, policy_od_g, policy_od_r,
+    Params p{kappa, od_r, disc, lam.data(), K, n_tilt, policy, has_strand,
              rho_gdna, rho_rna, split_live};
     Landscape L;
     if (!gdna.is_none()) {
@@ -788,30 +688,12 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
             throw std::invalid_argument("solve_blocks: the gDNA arm's curve is two (G,) arrays");
         L.built = true;
     }
-    Factory F;
-    if (!factory.is_none()) {
-        nb::tuple t = nb::cast<nb::tuple>(factory);
-        const std::string mode = nb::cast<std::string>(t[0]);
-        if (mode == "inputs") {
-            F.mode = Factory::INPUTS;
-            F.is_intron = opt<BoolVec>(t[1], keep); F.count = opt<Vec>(t[2], keep); F.eff = opt<Vec>(t[3], keep);
-            F.bg = Background{nb::cast<double>(t[4]), nb::cast<double>(t[5]), nb::cast<double>(t[6]), nb::cast<bool>(t[7])};
-        } else if (mode == "rows") {
-            F.mode = Factory::ROWS;
-            Mat rows = nb::cast<Mat>(t[1]);
-            if (static_cast<int64_t>(rows.shape(0)) != n || static_cast<int>(rows.shape(1)) != K)
-                throw std::invalid_argument("solve_blocks: the factory rows are (n, K)");
-            F.rows = opt<Mat>(t[1], keep);
-        } else {
-            throw std::invalid_argument("solve_blocks: the factory is None, ('inputs', ...) or ('rows', rows)");
-        }
-    }
     Outputs out{out_fpos.data(), out_fneg.data(), out_fg.data(), out_var.data(), out_has_composition.data()};
     const bool want_capture = !diagnostics.is_none();
     if (want_capture) {
         nb::dict cd = nb::cast<nb::dict>(diagnostics);
         out.fg_loc = nb::cast<Vec>(cd["fg_loc"]).data(); out.fg_strand = nb::cast<Vec>(cd["fg_strand"]).data();
-        out.tau_lam = nb::cast<Vec>(cd["tau_lam"]).data(); out.tau_fac = nb::cast<Vec>(cd["tau_fac"]).data();
+        out.tau_lam = nb::cast<Vec>(cd["tau_lam"]).data();
         out.lam_rows = cd["lam_rows"].is_none() ? nullptr : nb::cast<Mat>(cd["lam_rows"]).data();
     }
     const int64_t* bl = blocks.data();
@@ -828,7 +710,7 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
             Arena& A = arenas[tid];
             for (int64_t b; (b = next.fetch_add(1, std::memory_order_relaxed)) < B;) {
                 try {
-                    solve_one_block(C, p, g, L, F, bl[3 * b], bl[3 * b + 1], bl[3 * b + 2], want_capture, out, A,
+                    solve_one_block(C, p, g, L, bl[3 * b], bl[3 * b + 1], bl[3 * b + 2], want_capture, out, A,
                                     results[b]);
                 } catch (...) {
                     std::lock_guard<std::mutex> lk(err_mutex);
@@ -902,8 +784,8 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
 nb::dict transfer_prepare(Vec lam, BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, BoolVec free_neg, BoolVec exon_pos,
                           BoolVec exon_neg, IdxVec left, IdxVec right, FlagVec flags, Mat cnt, Mat spliced, Mat sj_count,
                           Mat sj_count_lo, Mat sj_count_hi, Mat route_rate_lo, Mat route_rate_hi, Vec eff_gdna, Vec eff_rna,
-                          Vec belief_fg, BoolVec has_own_composition, nb::object factory_rows, bool has_strand, double kappa,
-                          double od_g, double od_r, double rho_gdna, double rho_rna, bool split_live) {
+                          BoolVec has_own_composition, bool has_strand, double kappa,
+                          double rho_gdna, double rho_rna, bool split_live) {
     const int n = static_cast<int>(free_pos.shape(0)), K = static_cast<int>(lam.shape(0));
     std::vector<double> n_u(n), n_s(n), flux(n), cnt_col[2] = {std::vector<double>(n), std::vector<double>(n)};
     for (int i = 0; i < n; ++i) {
@@ -914,33 +796,26 @@ nb::dict transfer_prepare(Vec lam, BoolVec is_boundary, BoolVec is_exon, BoolVec
     }
     std::vector<char> is_intron(n), is_intergenic(n);
     Chain::classify(n, is_boundary.data(), is_exon.data(), free_pos.data(), free_neg.data(), is_intron.data(), is_intergenic.data());
-    std::vector<const double*> src(n, nullptr);
-    Mat rows_given;
-    if (!factory_rows.is_none()) {
-        rows_given = nb::cast<Mat>(factory_rows);
-        if (static_cast<int>(rows_given.shape(0)) != n || static_cast<int>(rows_given.shape(1)) != K)
-            throw std::invalid_argument("transfer_prepare: the factory rows are (n, K)");
-        for (int i = 0; i < n; ++i) src[i] = rows_given.data() + static_cast<size_t>(i) * K;
-    }
     Chain c;
     c.n = n; c.K = K; c.lam = lam.data();
     c.is_bnd = is_boundary.data(); c.is_exon = is_exon.data(); c.fp = free_pos.data(); c.fn = free_neg.data();
     c.exon_pos = exon_pos.data(); c.exon_neg = exon_neg.data(); c.has_own = has_own_composition.data();
     c.left = left.data(); c.right = right.data(); c.flags = flags.data();
-    c.n_u = n_u.data(); c.n_s = n_s.data(); c.a_g = eff_gdna.data(); c.a_r = eff_rna.data(); c.belief = belief_fg.data();
+    c.n_u = n_u.data(); c.n_s = n_s.data(); c.a_g = eff_gdna.data(); c.a_r = eff_rna.data();
     c.cnt = cnt.data(); c.route_lo = route_rate_lo.data(); c.route_hi = route_rate_hi.data();
     c.sj_lo = sj_count_lo.data(); c.sj_hi = sj_count_hi.data(); c.flux = flux.data();
-    c.src = src.data(); c.is_intron = is_intron.data(); c.is_intergenic = is_intergenic.data();
-    c.has_strand = has_strand; c.kappa = kappa; c.od_g = od_g; c.od_r = od_r;
+    c.is_intron = is_intron.data(); c.is_intergenic = is_intergenic.data();
+    c.has_strand = has_strand; c.kappa = kappa;
     const size_t nk = static_cast<size_t>(n) * K;
-    std::vector<double> own_rows(nk), face_store, f_par[6];
+    std::vector<double> own_rows(nk), face_store, f_par[9];
     std::vector<uint8_t> own_mask(n);
     std::vector<int8_t> f_kind(2 * n, static_cast<int8_t>(NONE));
     std::vector<int32_t> f_row(2 * n, -1), f_row2(2 * n, -1);
     for (auto& v : f_par) v.assign(2 * n, 0.0);
     RowsOut own{own_rows.data(), as_bool(own_mask), K};
     FacesOut F{&c, f_kind.data(), f_row.data(), f_row2.data(), f_par[0].data(), f_par[1].data(), f_par[2].data(),
-               f_par[3].data(), f_par[4].data(), f_par[5].data(), RowStore{&face_store, K}};
+               f_par[3].data(), f_par[4].data(), f_par[5].data(),
+               f_par[6].data(), f_par[7].data(), f_par[8].data(), RowStore{&face_store, K}};
     struct LaneBuf {
         std::vector<uint8_t> face, two, own_mask, wit_mask; std::vector<double> own_rows, wit, store; std::vector<int32_t> flux_index;
     } lb[3];
@@ -966,8 +841,8 @@ nb::dict transfer_prepare(Vec lam, BoolVec is_boundary, BoolVec is_exon, BoolVec
     f["kind"] = own2(std::move(f_kind), n, 2);
     f["row"] = own2(std::move(f_row), n, 2);
     f["row2"] = own2(std::move(f_row2), n, 2);
-    const char* par_names[6] = {"n_u", "n_s", "a_b", "a_x", "width", "var"};
-    for (int t = 0; t < 6; ++t) f[par_names[t]] = own2(std::move(f_par[t]), n, 2);
+    const char* par_names[] = {"n_u", "n_s", "a_b", "a_x", "width", "var", "a_r_b", "a_r_x", "splice_rate"};
+    for (int t = 0; t < 9; ++t) f[par_names[t]] = own2(std::move(f_par[t]), n, 2);
     face_store.resize(static_cast<size_t>(n_rows) * K);
     f["rows"] = own2(std::move(face_store), n_rows, K);
     out["faces"] = f;
@@ -1038,7 +913,7 @@ struct ReceivedArrays {
 // the tables dict `transfer_prepare` returns (or the harness builds by hand), as the pass and the solve read them
 struct TablesArrays {
     Vec lam; Mat own_rows; BoolVec own_mask;
-    KindMat f_kind; IdxMat f_row, f_row2; Mat f_par[6]; Mat f_rows;
+    KindMat f_kind; IdxMat f_row, f_row2; Mat f_par[9]; Mat f_rows;
     struct L {
         bool built = false; int field = 0; BoolMat face, two; BoolVec empty, own_mask, wit_mask; Mat own_rows, flux_rows, wit;
         IdxMat flux_index; Vec count, a, other, total; bool has_other = false; double rho_ref = 0.0;
@@ -1050,8 +925,8 @@ struct TablesArrays {
         own_rows = nb::cast<Mat>(o["rows"]); own_mask = nb::cast<BoolVec>(o["mask"]); n = static_cast<int>(own_mask.shape(0));
         nb::dict f = nb::cast<nb::dict>(t["faces"]);
         f_kind = nb::cast<KindMat>(f["kind"]); f_row = nb::cast<IdxMat>(f["row"]); f_row2 = nb::cast<IdxMat>(f["row2"]);
-        const char* par_names[6] = {"n_u", "n_s", "a_b", "a_x", "width", "var"};
-        for (int q = 0; q < 6; ++q) f_par[q] = nb::cast<Mat>(f[par_names[q]]);
+        const char* par_names[] = {"n_u", "n_s", "a_b", "a_x", "width", "var", "a_r_b", "a_r_x", "splice_rate"};
+        for (int q = 0; q < 9; ++q) f_par[q] = nb::cast<Mat>(f[par_names[q]]);
         f_rows = nb::cast<Mat>(f["rows"]);
         nb::dict ls = nb::cast<nb::dict>(t["lanes"]);
         const char* lane_names[3] = {"gdna", "pos", "neg"};
@@ -1072,7 +947,8 @@ struct TablesArrays {
     }
     FacesView faces() const {
         return FacesView{f_kind.data(), f_row.data(), f_row2.data(), f_par[0].data(), f_par[1].data(), f_par[2].data(),
-                         f_par[3].data(), f_par[4].data(), f_par[5].data(), f_rows.data(), K};
+                         f_par[3].data(), f_par[4].data(), f_par[5].data(),
+                         f_par[6].data(), f_par[7].data(), f_par[8].data(), f_rows.data(), K};
     }
     std::vector<LaneView> lane_views() const {
         std::vector<LaneView> v;
@@ -1189,13 +1065,16 @@ void bind_rows(nb::module_& m) {
         transport_row(row.data(), lam.data(), K, map.data(), n_u, n_s, S, out.data());
         return make_row(std::move(out));
     }, nb::arg("row"), nb::arg("lam"), nb::arg("lam_e_of_u"), nb::arg("n_u"), nb::arg("n_s"));
-    r.def("splice_out_row", [](Vec row_e, Vec lam, double n_u, double n_s, double a_g_b, double a_g_e, Vec nodes) {
+    r.def("splice_out_row", [](Vec row_e, Vec lam, double n_u, double n_s, double a_g_b, double a_g_e,
+                              double a_r_b, double a_r_e, double splice_rate, Vec nodes) {
         const int K = K_of(lam);
         Scratch S(K);
         std::vector<double> out(K);
-        splice_out_row(row_e.data(), lam.data(), K, n_u, n_s, a_g_b, a_g_e, nodes.data(), K_of(nodes), S, out.data());
+        splice_out_row(row_e.data(), lam.data(), K, n_u, n_s, a_g_b, a_g_e, a_r_b, a_r_e, splice_rate,
+                       nodes.data(), K_of(nodes), S, out.data());
         return make_row(std::move(out));
-    }, nb::arg("row_e"), nb::arg("lam"), nb::arg("n_u"), nb::arg("n_s"), nb::arg("a_g_b"), nb::arg("a_g_e"), nb::arg("nodes"));
+    }, nb::arg("row_e"), nb::arg("lam"), nb::arg("n_u"), nb::arg("n_s"), nb::arg("a_g_b"), nb::arg("a_g_e"),
+       nb::arg("a_r_b"), nb::arg("a_r_e"), nb::arg("splice_rate"), nb::arg("nodes"));
     r.def("level_map_lambda", [](Vec lam, double density_b, double opportunity_i, double total_i) {
         const int K = K_of(lam);
         std::vector<double> out(K);
@@ -1285,37 +1164,6 @@ void bind_rows(nb::module_& m) {
           nb::arg("col"), nb::arg("has_strand"), nb::arg("kappa"),
           "The genome-strand column strand `col`'s RNA reads on: its own when the library reads sense, else the other.");
     // the constructions the block pipeline absorbed
-    r.def("factory_rows", [](BoolVec is_intron, Vec count, Vec eff, double log_mu_bg, double alpha, double size, bool informative,
-                             Vec lam) {
-        const int n = K_of(count), K = K_of(lam);
-        std::vector<double> fg(K), out(static_cast<size_t>(n) * K, 0.0);
-        for (int k = 0; k < K; ++k) fg[k] = sigmoid(lam.data()[k]);
-        const Background bg{log_mu_bg, alpha, size, informative};
-        for (int i = 0; i < n; ++i)
-            if (is_intron.data()[i]) factory_row(bg, count.data()[i], eff.data()[i], fg.data(), K, out.data() + static_cast<size_t>(i) * K);
-        return own2(std::move(out), n, K);
-    }, nb::arg("is_intron"), nb::arg("count"), nb::arg("eff"), nb::arg("log_mu_bg"), nb::arg("alpha"), nb::arg("size"),
-       nb::arg("informative"), nb::arg("lam"),
-       "The intron factory's λ-factor rows (n, K) — log NegBinom(f_g·C; ρ_bg·E, α_eff) at the intron slots, max-normalised, "
-       "zero elsewhere — the block pipeline's own construction.");
-    r.def("log_negbinom", [](Vec g, Vec mu, double size) {
-        const int n = K_of(g);
-        std::vector<double> out(n);
-        for (int i = 0; i < n; ++i) out[i] = log_negbinom(g.data()[i], mu.data()[i], size);
-        return make_row(std::move(out));
-    }, nb::arg("g"), nb::arg("mu"), nb::arg("size"),
-       "log NegBinom(g; mean mu, size) per element, continuous g, the mean/size parameterisation; size = inf is the "
-       "exact Poisson limit.");
-    r.def("factor_precision", [](Mat rows, Vec lam) {
-        const int m = static_cast<int>(rows.shape(0)), K = static_cast<int>(rows.shape(1));
-        if (K_of(lam) != K) throw std::invalid_argument("factor_precision: the rows and the grid disagree");
-        std::vector<double> lam2(K), w, out(m);
-        for (int k = 0; k < K; ++k) lam2[k] = lam.data()[k] * lam.data()[k];
-        for (int i = 0; i < m; ++i) out[i] = factor_precision_row(rows.data() + static_cast<size_t>(i) * K, lam.data(), lam2.data(), K, w);
-        return make_row(std::move(out));
-    }, nb::arg("rows"), nb::arg("lam"),
-       "The composition evidence each λ-factor row carries, read off its own curvature: 1/Var_λ under the normalised row, "
-       "0 for a flat one.");
     r.def("strand_evidence", [](Vec u_pos, Vec u_neg, Vec fg_loc, double kappa, double od_r, double disc) {
         const int m = K_of(u_pos);
         std::vector<double> out(m);
@@ -1326,7 +1174,6 @@ void bind_rows(nb::module_& m) {
        "discriminability (0: the channel is dead).");
     r.attr("OWN_EVIDENCE_EPS") = OWN_EPS;
     // the constants ψ and the deconvolution share with their Python readers: one home each, here
-    r.attr("DENSITY_EPS") = DENSITY_EPS;
     r.attr("ARM_EPS") = P::ARM_EPS;
     r.attr("JEFFREYS_REF") = P::JEFFREYS_REF;
 }
@@ -1342,8 +1189,8 @@ NB_MODULE(_solve_impl, m) {
           nb::arg("route_rate_lo"), nb::arg("route_rate_hi"), nb::arg("eff_gdna"), nb::arg("eff_rna"), nb::arg("belief_fpos"),
           nb::arg("belief_fneg"), nb::arg("belief_fg"), nb::arg("blocks"), nb::arg("kappa"), nb::arg("od_g"), nb::arg("od_r"),
           nb::arg("disc"), nb::arg("lam"), nb::arg("n_tilt"), nb::arg("policy"), nb::arg("has_strand"),
-          nb::arg("policy_kappa"), nb::arg("policy_od_g"), nb::arg("policy_od_r"), nb::arg("rho_gdna"),
-          nb::arg("rho_rna"), nb::arg("split_live"), nb::arg("gdna").none(), nb::arg("factory").none(),
+          nb::arg("rho_gdna"),
+          nb::arg("rho_rna"), nb::arg("split_live"), nb::arg("gdna").none(),
           nb::arg("out_fpos"), nb::arg("out_fneg"), nb::arg("out_fg"), nb::arg("out_var"), nb::arg("out_has_composition"),
           nb::arg("diagnostics").none(), nb::arg("n_threads"),
           "Solve every locus block of the chain — the prior rows, the self-solve, the own evidence, the message layer, the "
@@ -1353,16 +1200,16 @@ NB_MODULE(_solve_impl, m) {
     m.def("psi_solve", &psi_solve, nb::arg("slots"), nb::arg("u_pos"), nb::arg("u_neg"), nb::arg("allow_pos"),
           nb::arg("allow_neg"), nb::arg("fg_ref"), nb::arg("fpos_ref"), nb::arg("fneg_ref"), nb::arg("kappa"),
           nb::arg("od_g"), nb::arg("od_r"), nb::arg("lam"), nb::arg("gdna").none(),
-          nb::arg("lam_logprior").none(), nb::arg("row_logprior").none(), nb::arg("cube_slot"), nb::arg("cube_pos"),
+          nb::arg("row_logprior").none(), nb::arg("cube_slot"), nb::arg("cube_pos"),
           nb::arg("cube_has_pos"), nb::arg("cube_neg"), nb::arg("cube_has_neg"), nb::arg("cube_u"), nb::arg("cube_total"),
           nb::arg("cube_opportunity"), nb::arg("cube_rho"), nb::arg("n_tilt"), nb::arg("out_fg"), nb::arg("out_fpos"),
           nb::arg("out_fneg"), nb::arg("out_var"), nb::arg("n_threads"),
           "Solve every slot in `slots` on its own cube and write f_g, f_pos, f_neg and Var(log f_g) in place, on "
           "`n_threads` threads (0: every core) — bit-identical at every thread count. `gdna` is the fitted arm as "
-          "(log_rho, logP, mass, eff) or None; `lam_logprior` / `row_logprior` the λ-factor and delivered rows or None.");
+          "(log_rho, logP, mass, eff) or None; `row_logprior` the delivered composition rows or None.");
     m.def("psi_cube", &psi_cube, nb::arg("u_pos"), nb::arg("u_neg"), nb::arg("allow_pos"), nb::arg("allow_neg"),
           nb::arg("fg_ref"), nb::arg("fpos_ref"), nb::arg("fneg_ref"), nb::arg("kappa"), nb::arg("od_g"),
-          nb::arg("od_r"), nb::arg("lam"), nb::arg("gdna").none(), nb::arg("lam_logprior").none(),
+          nb::arg("od_r"), nb::arg("lam"), nb::arg("gdna").none(),
           nb::arg("row_logprior").none(), nb::arg("cube_slot"), nb::arg("cube_pos"), nb::arg("cube_has_pos"), nb::arg("cube_neg"),
           nb::arg("cube_has_neg"), nb::arg("cube_u"), nb::arg("cube_total"), nb::arg("cube_opportunity"),
           nb::arg("cube_rho"), nb::arg("n_tilt"), nb::arg("ambig"), nb::arg("out_psi"), nb::arg("out_fpos"),
@@ -1381,8 +1228,8 @@ NB_MODULE(_solve_impl, m) {
           nb::arg("free_pos"), nb::arg("free_neg"), nb::arg("exon_pos"), nb::arg("exon_neg"), nb::arg("left"),
           nb::arg("right"), nb::arg("flags"), nb::arg("cnt"), nb::arg("spliced"), nb::arg("sj_count"), nb::arg("sj_count_lo"),
           nb::arg("sj_count_hi"), nb::arg("route_rate_lo"), nb::arg("route_rate_hi"), nb::arg("eff_gdna"), nb::arg("eff_rna"),
-          nb::arg("belief_fg"), nb::arg("has_own_composition"), nb::arg("factory_rows").none(), nb::arg("has_strand"),
-          nb::arg("kappa"), nb::arg("od_g"), nb::arg("od_r"), nb::arg("rho_gdna"), nb::arg("rho_rna"), nb::arg("split_live"),
+          nb::arg("has_own_composition"), nb::arg("has_strand"),
+          nb::arg("kappa"), nb::arg("rho_gdna"), nb::arg("rho_rna"), nb::arg("split_live"),
           "Build one block's own claims, face rules and level lanes into fresh tables and return them as a dict — `own` "
           "(rows, mask), `faces` (kind, row, row2, n_u, n_s, a_b, a_x, width, var, rows), `lanes` (gdna where the library "
           "has a gDNA coordinate, pos, neg: each its faces, two-sided faces, emptiness, own rows and mask, count, a, other, "

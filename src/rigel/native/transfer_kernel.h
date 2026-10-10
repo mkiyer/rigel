@@ -100,14 +100,12 @@ struct Chain {
     const bool *is_bnd, *is_exon, *fp, *fn, *exon_pos, *exon_neg, *has_own;
     const int64_t *left, *right;  // block-local, -1 off the block
     const uint16_t* flags;
-    const double *n_u, *n_s, *a_g, *a_r, *belief, *cnt;
+    const double *n_u, *n_s, *a_g, *a_r, *cnt;
     const double *route_lo, *route_hi, *sj_lo, *sj_hi;  // (n, 2) by transcript strand
     const double* flux;                                 // the sj count over both strands
-    //: the factory's row per slot, or nullptr where the slot has none (an intron with a row is the only reader)
-    const double* const* src;
     const char *is_intron, *is_intergenic;
     bool has_strand;
-    double kappa, od_g, od_r;
+    double kappa;
 
     bool intron(int i) const { return is_intron[i]; }
     bool intergenic(int i) const { return is_intergenic[i]; }
@@ -120,10 +118,17 @@ struct Chain {
         if (is_exon[lo] && intron(hi)) { e = lo; i = hi; }
         else if (is_exon[hi] && intron(lo)) { e = hi; i = lo; }
     }
-    // a slot's own strand profile, the variance frozen at its incoming belief
+    // Conditional on the observed total, two independent Poisson strand columns
+    // have a binomial split. Its likelihood depends on observations, not a belief.
     void strand_profile(int64_t x, double* out) const {
-        const double f_ref = std::isfinite(belief[x]) ? belief[x] : 0.5;
-        strand_row(lam, K, cnt[2 * x], cnt[2 * x + 1], fp[x], kappa, od_g, od_r, f_ref, out);
+        const double u = cnt[2 * x], v = cnt[2 * x + 1];
+        const double q = fp[x] ? kappa : 1.0 - kappa;
+        for (int j = 0; j < K; ++j) {
+            const double f = sigmoid(lam[j]);
+            const double p = 0.5 * f + (1.0 - f) * q;
+            out[j] = (u > 0.0 ? u * std::log(p) : 0.0) + (v > 0.0 ? v * std::log1p(-p) : 0.0);
+        }
+        norm_inplace(out, K);
     }
     // a node's own strand MODE and its log-odds variance; false at a vertex mode
     bool strand_mode(int64_t y, double& f, double& v) const {
@@ -170,11 +175,12 @@ struct RowStore {  // a store of (K,) rows written in order — the face maps, t
 struct FacesOut {  // the composition rules as typed tables over (destination, side)
     const Chain* c;
     int8_t* kind; int32_t* row; int32_t* row2;
-    double *n_u, *n_s, *a_b, *a_x, *width, *var;
+    double *n_u, *n_s, *a_b, *a_x, *width, *var, *a_r_b, *a_r_x, *splice_rate;
     RowStore store;
 
     void set(int64_t s, int64_t i, int k, const double* r = nullptr, const double* r2 = nullptr, double nu = 0.0,
-             double ns = 0.0, double ab = 0.0, double ax = 0.0, double w = 0.0, double v = 0.0) {
+             double ns = 0.0, double ab = 0.0, double ax = 0.0, double w = 0.0, double v = 0.0,
+             double arb = 0.0, double arx = 0.0, double sr = 0.0) {
         const int side = s < i ? 0 : 1;
         const int64_t nbr = side == 0 ? c->left[i] : c->right[i];
         if (nbr != s)
@@ -188,6 +194,17 @@ struct FacesOut {  // the composition rules as typed tables over (destination, s
         row[at] = store.keep(r);
         row2[at] = store.keep(r2);
         n_u[at] = nu; n_s[at] = ns; a_b[at] = ab; a_x[at] = ax; width[at] = w; var[at] = v;
+        a_r_b[at] = arb; a_r_x[at] = arx; splice_rate[at] = sr;
+    }
+
+    void shared_density(int64_t s, int64_t i, Scratch& S) {
+        // The same density mixture has different COUNT odds on different component opportunities.
+        // Pull the source profile back at lambda_src(lambda_dst); equal ratios remain the identity.
+        if (!(c->a_g[s] > 0.0 && c->a_r[s] > 0.0 && c->a_g[i] > 0.0 && c->a_r[i] > 0.0)) return;
+        const double shift = std::log(c->a_g[s] / c->a_r[s]) - std::log(c->a_g[i] / c->a_r[i]);
+        if (shift == 0.0) { set(s, i, FORWARD); return; }
+        for (int j = 0; j < c->K; ++j) S.a[j] = c->lam[j] + shift;
+        set(s, i, FORWARD, S.a.data());
     }
 };
 
@@ -200,19 +217,10 @@ struct LaneOut {  // a level lane's tables: faces, two-sided faces, own levels, 
 // ---- the builders — one per shipped message ---------------------------------------------------------
 
 inline void claims(const Chain& c, RowsOut& own, Scratch& S) {
-    for (int i = 0; i < c.n; ++i) {
-        if (!c.intron(i)) continue;
-        const double* r = c.src[i];
-        if (r != nullptr && ptp(r, c.K) > EPS) {
-            const double m = vmax(r, c.K);
-            for (int j = 0; j < c.K; ++j) S.a[j] = r[j] - m;
-            own.set(i, S.a.data());
-        }
-    }
     if (!c.has_strand) return;
     for (int x = 0; x < c.n; ++x) {
         const bool single = c.fp[x] != c.fn[x];
-        if (!(single && c.has_own[x] && (c.is_exon[x] || c.is_bnd[x]))) continue;
+        if (!(single && c.has_own[x])) continue;
         c.strand_profile(x, S.a.data());
         own.set(x, S.a.data());
     }
@@ -224,8 +232,8 @@ inline void splice_faces(const Chain& c, FacesOut& F, Scratch& S) {
         int64_t e, i;
         c.intron_exon_pair(b, e, i);
         if (e < 0) continue;
-        F.set(i, b, FORWARD);
-        if (boundary_shares_strand(c.fp[b], c.fn[b], c.fp[i], c.fn[i])) F.set(b, i, FORWARD);
+        F.shared_density(i, b, S);
+        if (boundary_shares_strand(c.fp[b], c.fn[b], c.fp[i], c.fn[i])) F.shared_density(b, i, S);
         const int hi = c.left[e] == b ? 1 : 0;
         if (!face_is_licensed(c.flags[b], c.fp[e], c.fn[e], c.fp[i], c.fn[i])) continue;
         if (!(c.n_u[b] > 0 && c.a_g[b] > 0 && c.a_r[b] > 0 && c.a_g[e] > 0 && c.a_r[e] > 0)) continue;
@@ -234,7 +242,8 @@ inline void splice_faces(const Chain& c, FacesOut& F, Scratch& S) {
         const double rate = rr[2 * b] + rr[2 * b + 1], s = sc[2 * b] + sc[2 * b + 1];
         face_map_lambda(c.lam, c.K, c.n_u[b], c.a_g[b], c.a_r[b], c.a_g[e], c.a_r[e], rate, S.a.data());
         F.set(b, e, TRANSPORT, S.a.data(), nullptr, c.n_u[b], s);
-        F.set(e, b, SPLICE_OUT, nullptr, nullptr, c.n_u[b], s, c.a_g[b], c.a_g[e]);
+        F.set(e, b, SPLICE_OUT, nullptr, nullptr, c.n_u[b], s, c.a_g[b], c.a_g[e], 0.0, 0.0,
+              c.a_r[b], c.a_r[e], rate);
     }
 }
 
@@ -262,11 +271,14 @@ inline void terminus_rules(const Chain& c, FacesOut& F, Scratch& S) {
         const int64_t ex_side = (c.flags[b] & SJ_FLAGS) ? junction_exon_side(c.flags[b], lo, hi) : -1;
         const double flux_b = ex_side >= 0 ? c.flux[b] : 0.0;
         if (c.is_exon[lo] && c.is_exon[hi] && boundary_shares_strand(c.fp[b], c.fn[b], c.fp[o], c.fn[o]) &&
-            c.n_u[b] > 0 && c.a_g[b] > 0 && c.a_g[o] > 0) {
+            c.n_u[b] > 0 && c.a_g[b] > 0 && c.a_g[o] > 0 && c.a_r[b] > 0 && c.a_r[o] > 0) {
             const double s_out = c.n_s[b] + (ex_side == o ? flux_b : 0.0);
-            face_map_lambda(c.lam, c.K, c.n_u[b], c.a_g[b], c.a_g[b], c.a_g[o], c.a_g[o], s_out / c.a_g[b],
+            const double* rr = o == lo ? c.route_lo : c.route_hi;
+            const double rate = c.n_s[b] / c.a_r[b] + (ex_side == o ? rr[2 * b] + rr[2 * b + 1] : 0.0);
+            face_map_lambda(c.lam, c.K, c.n_u[b], c.a_g[b], c.a_r[b], c.a_g[o], c.a_r[o], rate,
                             S.a.data());
-            F.set(o, b, SPLICE_OUT, nullptr, nullptr, c.n_u[b], s_out, c.a_g[b], c.a_g[o]);
+            F.set(o, b, SPLICE_OUT, nullptr, nullptr, c.n_u[b], s_out, c.a_g[b], c.a_g[o], 0.0, 0.0,
+                  c.a_r[b], c.a_r[o], rate);
             F.set(b, o, TRANSPORT, S.a.data(), nullptr, c.n_u[b], s_out);
         }
         // THE LEVEL RULE: the boundary's gDNA level into the inside region
@@ -303,26 +315,33 @@ inline void alternative_splice_site(const Chain& c, FacesOut& F, Scratch& S) {
         if (!(c.is_exon[lo] && c.is_exon[hi])) continue;
         int64_t c_side, e_side;
         junction_flanks(c.flags[b], lo, hi, c_side, e_side);
-        if (c_side < 0 || !(c.n_u[b] > 0 && c.a_g[b] > 0)) continue;
+        if (c_side < 0 || !(c.n_u[b] > 0 && c.a_g[b] > 0 && c.a_r[b] > 0)) continue;
         const int64_t flank[2] = {e_side, c_side};
         const double leaving[2] = {c.n_s[b] + c.flux[b], c.n_s[b]};
+        const double* rr = e_side == lo ? c.route_lo : c.route_hi;
+        const double leaving_rate[2] = {c.n_s[b] / c.a_r[b] + rr[2 * b] + rr[2 * b + 1],
+                                         c.n_s[b] / c.a_r[b]};
         for (int t = 0; t < 2; ++t) {
             const int64_t x = flank[t];
             const double s_out = leaving[t];
-            if (!(boundary_shares_strand(c.fp[b], c.fn[b], c.fp[x], c.fn[x]) && c.a_g[x] > 0)) continue;
+            const double rate = leaving_rate[t];
+            if (!(boundary_shares_strand(c.fp[b], c.fn[b], c.fp[x], c.fn[x]) && c.a_g[x] > 0 && c.a_r[x] > 0)) continue;
             double width = 0.0;
             if (c.has_own[b] && c.has_own[x]) {
                 double f_b, v_b, f_x, v_x;
                 if (c.strand_mode(b, f_b, v_b) && c.strand_mode(x, f_x, v_x)) {
-                    const double lo_b = std::log(f_b / (1.0 - f_b)), lo_x = std::log(f_x / (1.0 - f_x));
+                    const double predicted = std::log(c.n_u[b] * f_b / c.a_g[b] * c.a_g[x])
+                        - std::log((c.n_u[b] * (1.0 - f_b) / c.a_r[b] + rate) * c.a_r[x]);
+                    const double lo_x = std::log(f_x / (1.0 - f_x));
                     const double v_ratio = s_out > 0 ? s_out / (c.n_u[b] * (c.n_u[b] + s_out)) : 0.0;
-                    const double d = lo_b - lo_x - std::log((c.n_u[b] + s_out) / c.n_u[b]);
+                    const double d = predicted - lo_x;
                     width = std::max(0.0, d * d - (v_b + v_x + v_ratio));
                 }
             }
-            face_map_lambda(c.lam, c.K, c.n_u[b], c.a_g[b], c.a_g[b], c.a_g[x], c.a_g[x], s_out / c.a_g[b],
+            face_map_lambda(c.lam, c.K, c.n_u[b], c.a_g[b], c.a_r[b], c.a_g[x], c.a_r[x], rate,
                             S.a.data());
-            F.set(x, b, SPLICE_OUT, nullptr, nullptr, c.n_u[b], s_out, c.a_g[b], c.a_g[x], width);
+            F.set(x, b, SPLICE_OUT, nullptr, nullptr, c.n_u[b], s_out, c.a_g[b], c.a_g[x], width, 0.0,
+                  c.a_r[b], c.a_r[x], rate);
             F.set(b, x, TRANSPORT, S.a.data(), nullptr, c.n_u[b], s_out, 0.0, 0.0, width);
         }
     }
@@ -401,6 +420,9 @@ inline void rna_lane(const Chain& c, const RowsOut& own, int strand, double rho_
                 const double r_j = (hi ? c.route_hi : c.route_lo)[2 * b + col];
                 if (!(c_j > 0.0 && r_j > 0.0)) continue;
                 const double v = hop_price(c_j, c_j / r_j, c.cnt[2 * x + col_read], kappa_read * c.a_r[x]);
+                // an exon with reads but no RNA opportunity prices the hop infinitely wide: no claim, the
+                // limit of a vanishing opportunity
+                if (!std::isfinite(v)) continue;
                 double* fl = S.e.data();
                 flux_level(c.lam, c.K, c_j, r_j, rho_ref, v, S, fl);
                 if (n_parts == 0) std::copy(fl, fl + c.K, acc); else fold_min(fl, c.K, acc);
@@ -444,7 +466,7 @@ inline void prepare_block(const Chain& c, RowsOut& own, FacesOut& F, LaneOut* gd
 
 struct FacesView {
     const int8_t* kind; const int32_t* row; const int32_t* row2;
-    const double *n_u, *n_s, *a_b, *a_x, *width, *var;
+    const double *n_u, *n_s, *a_b, *a_x, *width, *var, *a_r_b, *a_r_x, *splice_rate;
     const double* rows; int K;
     const double* map(int r) const { return rows + static_cast<size_t>(r) * K; }
 };
@@ -582,6 +604,11 @@ inline const double* faces_apply(const FacesView& F, int i, int side, const doub
     if (k == FORWARD) {
         if (own == nullptr && held == nullptr) return nullptr;
         for (int j = 0; j < K; ++j) out[j] = (own ? own[j] : 0.0) + (held ? held[j] : 0.0);
+        const int r = F.row[at];
+        if (r >= 0) {
+            interp(F.map(r), K, lam, out, K, out[0], out[K - 1], S.a.data());
+            std::copy(S.a.begin(), S.a.end(), out);
+        }
         norm_inplace(out, K);
         return out;
     }
@@ -613,7 +640,8 @@ inline const double* faces_apply(const FacesView& F, int i, int side, const doub
     if (k == TRANSPORT) {
         transport_row(sending, lam, K, F.map(F.row[at]), n_u, n_s, S, tmp);
     } else {
-        splice_out_row(sending, lam, K, n_u, n_s, F.a_b[at], F.a_x[at], MARGINAL_NODES, N_MARGINAL_NODES, S, tmp);
+        splice_out_row(sending, lam, K, n_u, n_s, F.a_b[at], F.a_x[at], F.a_r_b[at], F.a_r_x[at],
+                       F.splice_rate[at], MARGINAL_NODES, N_MARGINAL_NODES, S, tmp);
     }
     const double w = F.width[at];
     if (w > 0.0) {

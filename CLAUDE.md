@@ -47,10 +47,10 @@ is a sampled draw), so it is exactly reproducible; an effect is judged by its si
 beside the transcript table.
 
 Three strata are in scope — unstranded × capture-OFF, stranded × capture-OFF, stranded × capture-ON — and
-**unstranded × capture-ON is DEFERRED**: reported on every benchmark, never a development target until the
-other three are optimised. It holds most of the error (the gDNA fraction cancels from the strand mean, so an
-unstranded AMBIG slot has no channel), so the debug loop takes the worst IN-SCOPE scenario, never the
-deferred one. Every score is read per stratum, never pooled.
+**unstranded × capture-ON is DEFERRED**: reported on every benchmark, not a 0.8.0 release requirement.
+The owner explicitly authorizes investigating the factory-removal regression in this stratum for
+robustness (2026-10-07); it does not replace the three in-scope release targets. The normal debug loop
+takes the worst IN-SCOPE scenario. Every score is read per stratum, never pooled.
 
 Fragment length is back in scope for 0.8.0 (owner, 2026-10-02): the composition channel, the capture-length
 frame and every other length item that waited for the release (`docs/DESIGN.md` §0b;
@@ -93,7 +93,7 @@ enforces it.
 | how many places a fragment COULD have sat | **2 · opportunity** — `effective_length` `capture_eff_length` `sj_opportunity` `gdna_opportunity` `gdna_density` `fl` |
 | one slot's own numbers and ψ | **3 · geometry + the per-slot solve** — `region_geometry` `simplex_logodds` |
 | which strand a fragment came from | **4 · strand** — `strand_balance` |
-| how dense a component is, and the priors | **5 · density and prior** — `density_model` `density_deconv` `landscape` `capture_efficiency` |
+| how dense a component is, and the priors | **5 · density and prior** — `density_model` `landscape` `capture_efficiency` |
 | what one neighbour tells another | **6 · the solve** — `sweep` (the backbone) + `blocks` + `messages/` (the policy) + `region_init` |
 | turning the solve into a result | **7 · assemble** — `calibrate` `priors` `result` `derive` `track` |
 
@@ -152,8 +152,9 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument's --self-test
 ```
 
-**The standing baseline: 0 failed / 2,651 passed / 0 skipped / 0 xfail, 2,651 collected** — re-derived
-2026-10-05 after the junction cap's falsification test was added (2,650 + 1). **Any failure at all is a
+**The standing baseline: 0 failed / 2,814 passed / 0 skipped / 0 xfail, 2,814 collected** — re-derived
+2026-10-09 after the blur-tail arithmetic repair, with no golden movement beyond the previously
+reviewed certified-source footprint change. **Any failure at all is a
 regression.** Re-derive a count, never adjust one (`TRAPS: re-record-the-baseline`): every gate that scans
 the files on disk is one case, so only adding or removing a test moves the total. Derive the failure set,
 never eyeball the tail (`TRAPS: read-the-whole-failure-list`). A golden update is where a regression gets

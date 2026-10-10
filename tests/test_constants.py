@@ -115,7 +115,6 @@ FORMAT_MODULES = {
 #: Named definitions: mathematics, or the model's own statement — not a choice anyone tunes.
 DEFINITIONS = {
     ("second_pass.py", "P_ORIENTATION_GIVEN_GDNA"),  # gDNA has no strand: ½
-    ("calibration/density_deconv.py", "_JEFFREYS_SHAPE"),  # the Jeffreys prior's shape, ½
     ("calibration/landscape.py", "_LN10"),  # ln 10, decades to nats
     (
         "calibration/effective_length.py",

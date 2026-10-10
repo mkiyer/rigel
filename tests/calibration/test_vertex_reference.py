@@ -73,7 +73,7 @@ def _rows(fn, n: int = 2):
     """``n`` copies of one claim as a λ-row on the coarse solve grid — the socket every message uses."""
     lam, _ = _logodds_grid(int(_BASE["n_grid"]), float(_BASE["L"]))
     row = np.asarray(fn(lam), np.float64)
-    return dict(lam_logprior=np.tile(row[None, :], (n, 1)))
+    return dict(row_logprior=np.tile(row[None, :], (n, 1)))
 
 
 def _msg_up(p):
@@ -146,7 +146,7 @@ def test_G2_psi_slope_in_the_vertex_tail_is_exactly_minus_the_reference_exponent
         od_r=0.0,
         lam=lam,
         ambig=False,
-        lam_logprior=(-0.5 * 1e3 * log_expit(lam) ** 2)[None, :],
+        row_logprior=(-0.5 * 1e3 * log_expit(lam) ** 2)[None, :],
     )
     p = psi[0, :, 0]
     lo, hi = int(0.90 * lam.size), lam.size - 1
@@ -165,7 +165,7 @@ def _with_exponents(msg: dict, c_g: float, c_r: float) -> dict:
     reached ψ would fail them."""
     lam, _ = _logodds_grid(int(_BASE["n_grid"]), float(_BASE["L"]))
     shift = jeffreys_arms(lam, c_g - 0.5, c_r - 0.5)
-    return dict(lam_logprior=np.asarray(msg["lam_logprior"], np.float64) + shift[None, :])
+    return dict(row_logprior=np.asarray(msg["row_logprior"], np.float64) + shift[None, :])
 
 
 def test_G3_each_half_of_the_constant_holds_ONE_vertex_and_is_NEGLIGIBLE_at_the_other():

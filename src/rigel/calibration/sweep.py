@@ -10,8 +10,8 @@ chain is a forest of linear paths, so that is exact belief propagation, not an i
 
 THE SWEEP IS ONE NATIVE CALL (`native.solve_blocks`, `native/solve_kernel.cpp`). This file cuts the chain
 into locus blocks, reduces the policy's library over the whole chain, hands the kernel the chain's arrays,
-the blocks and the priors' INPUTS (the landscape's curve; the intron factory's background, mask, counts
-and opportunities), and reads back the belief, ``has_composition`` and the assertions' counts.
+the blocks and the landscape's curve, and reads back the belief, ``has_composition`` and the
+assertions' counts.
 Inside the call a pool of threads pulls the blocks one at a time; each block runs the whole pipeline on
 its own thread and arena — the prior rows, the self-solve ψ, the own-evidence precision, the policy's
 builders, the two passes, the solve, the final ψ, the write-back, the counts — and nothing is reduced
@@ -30,8 +30,7 @@ every delivered row is one row per slot, finite      a NaN reaching ψ (a row of
 the kernel sees only the two NEIGHBOUR states        a message built from the destination's own belief —
                                                      enforced by construction: the pass builds each
                                                      destination's row from the source's claim and what
-                                                     the source holds, and the only belief the layer reads
-                                                     is the incoming one at a node's OWN claim
+                                                     the source holds; own claims read observations
 ===================================================  ====================================================
 
 The assertions' semantics live HERE (`AssertionCounts`), not in the policy, and that is the entire point:
@@ -160,7 +159,6 @@ def solve_chain(
     n_grid: int,
     logodds_window: float,
     gdna_prior=None,
-    intron_prior=None,
     policy=None,
     block_slots: int | None = None,
     n_threads: int = 1,
@@ -194,10 +192,6 @@ def solve_chain(
     — it is not the deliverable, and it does not have to answer objects it cannot solve. The kernel reads
     the curve at every cell itself, on each slot's own gDNA support (`region_geometry.region_gdna_geometry`).
 
-    ``intron_prior`` is the intron factory (`calibrate.FactoryRows`: its inputs, the rows built per block
-    inside the kernel), one ``(n, K)`` array of rows (a gate's), or ``None``. ⛔ ψ carries NO reference
-    location: the reference is the symmetric Jeffreys measure and asserts nothing; background information
-    enters as the factory's λ-factor, a likelihood whose precision scales with counts.
     """
     policy = policy if policy is not None else SilentPolicy()
     n = int(chain.n_slots)
@@ -213,7 +207,6 @@ def solve_chain(
     library = policy.library(view)
     lam, _ = _logodds_grid(int(n_grid), float(logodds_window))
     blocks = locus_blocks(chain, structure.terminal, block_slots)
-    factory = _factory_of(intron_prior)
     out = {
         k: np.ascontiguousarray(getattr(belief, k), dtype=np.float64).copy()
         for k in ("f_pos", "f_neg", "f_g", "var_gdna")
@@ -221,9 +214,8 @@ def solve_chain(
     has_composition = np.zeros(n, dtype=bool)
     diag = None
     if _capture is not None:  # the kernel's diagnostics mode fills these
-        diag = {k: np.zeros(n) for k in ("fg_loc", "fg_strand", "tau_lam", "tau_fac")}
+        diag = {k: np.zeros(n) for k in ("fg_loc", "fg_strand", "tau_lam")}
         diag["lam_rows"] = np.zeros((n, lam.shape[0]))
-    strand = policy.strand
     res = solve_blocks(
         **_chain_arrays(view, structure.terminal),
         belief_fpos=np.ascontiguousarray(belief.f_pos, np.float64),
@@ -237,10 +229,7 @@ def solve_chain(
         lam=lam,
         n_tilt=int(_TILT_NODES),
         policy=_POLICY_KERNEL[policy.name],
-        has_strand=strand is not None,
-        policy_kappa=float(strand[0]) if strand is not None else 0.0,
-        policy_od_g=float(strand[1]) if strand is not None else 0.0,
-        policy_od_r=float(strand[2]) if strand is not None else 0.0,
+        has_strand=policy.kappa is not None,
         rho_gdna=float(library.rho_gdna) if library is not None else 0.0,
         rho_rna=float(library.rho_rna) if library is not None else 0.0,
         split_live=bool(library.split_live) if library is not None else False,
@@ -250,7 +239,6 @@ def solve_chain(
             np.ascontiguousarray(gdna_prior.log_rho, np.float64),
             np.ascontiguousarray(gdna_prior.logP, np.float64),
         ),
-        factory=None if factory is None else factory.kernel(),
         out_fpos=out["f_pos"],
         out_fneg=out["f_neg"],
         out_fg=out["f_g"],
@@ -331,28 +319,6 @@ def _structure(chain, statics, region_arrays) -> _Structure:
     )
 
 
-class _RowsOfArray:
-    """The λ-factor rows given as ONE ``(n, K)`` array (a gate's synthetic rows), handed to the kernel whole —
-    the call `calibrate.FactoryRows` answers from its inputs."""
-
-    __slots__ = ("_rows",)
-
-    def __init__(self, rows):
-        self._rows = np.ascontiguousarray(rows, np.float64)
-
-    def kernel(self) -> tuple:
-        return ("rows", self._rows)
-
-
-def _factory_of(intron_prior):
-    """The λ-factor as the sweep hands it to the kernel — ``kernel()`` — from the factory (`calibrate.FactoryRows`:
-    the rows built per block inside the kernel from their inputs) or from one array of rows; ``None`` is no
-    factory."""
-    if intron_prior is None:
-        return None
-    return intron_prior if hasattr(intron_prior, "kernel") else _RowsOfArray(intron_prior)
-
-
 def _gather_diagnostics(view, out, diag, res, blocks, geometry, lam) -> SweepCapture:
     """The diagnostic capture of one sweep — the instruments' view (:class:`~.blocks.SweepCapture`),
     assembled from the kernel's per-slot arrays and its per-block cube rows and received tables. One extra
@@ -389,7 +355,6 @@ def _gather_diagnostics(view, out, diag, res, blocks, geometry, lam) -> SweepCap
         f_g=out["f_g"].copy(),
         var_g=out["var_gdna"].copy(),
         tau_lam=diag["tau_lam"],
-        tau_fac=diag["tau_fac"],
         solvable=(fp | fn) & (view.n_slot > 0.0),
         count=np.asarray(view.unspliced_count, np.float64),
         spliced=view.spliced_slot,

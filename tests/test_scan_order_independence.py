@@ -201,38 +201,47 @@ def test_the_reported_gdna_total_is_the_loci_summed_in_LOCUS_ORDER(many_loci, em
     )
 
 
-def test_THE_FIXTURE_REALLY_DOES_REORDER_THE_BUFFER(oracle):
-    """Non-vacuity, and it is not optional here.
+@pytest.mark.parametrize("mode", ["sample", "fractional"])
+def test_a_known_buffer_permutation_preserves_the_pipeline_answer(oracle, monkeypatch, mode):
+    """Exercise a guaranteed permutation instead of requiring a scheduler race.
 
-    The contract above passes trivially if the scan hands the buffer back in the same row order every
-    time — there is then no permutation to be immune to, and the gate reads as coverage it does not
-    have.
-
-    Retried, because the reordering is a RACE: a gate that asserts a race fired on the first try goes
-    red for the wrong reason on a loaded machine.
+    Reverse whole scanner chunks, preserving every fragment and candidate array. The
+    actual scorer, locus builder and EM consume the reversed stream. Removing the
+    fragment-identity sort must break this gate in both assignment modes.
     """
-    from rigel.pipeline import scan_and_buffer
+    from rigel.buffer import FragmentBuffer
 
-    def frag_id_order(threads: int) -> list[int]:
-        _stats, _strand, buffer, _payload = scan_and_buffer(
-            str(oracle.bam_path),
-            oracle.index,
-            BamScanConfig(sj_strand_tag="auto", total_threads=threads),
+    config = PipelineConfig(
+        em=EMConfig(seed=1234, assignment_mode=mode),
+        # Request four input batches so one serial scan supplies multiple chunks.
+        scan=BamScanConfig(
+            sj_strand_tag="auto", total_threads=1, fragments_per_chunk=oracle.n_simulated // 4
+        ),
+    )
+    baseline = np.asarray(
+        run_pipeline(oracle.bam_path, oracle.index, config=config).estimator.t_counts
+    ).copy()
+    consume = FragmentBuffer.iter_chunks_consuming
+    permutations = []
+
+    def reversed_chunks(buffer):
+        chunks = list(consume(buffer))
+        assert len(chunks) > 1, "the fixture must contain more than one completed chunk"
+        original = np.concatenate([chunk.frag_id for chunk in chunks])
+        reverse = np.concatenate([chunk.frag_id for chunk in reversed(chunks)])
+        assert not np.array_equal(original, reverse), (
+            "the intervention must actually reorder fragments"
         )
-        order = [int(i) for chunk in buffer.iter_chunks_consuming() for i in chunk.frag_id]
-        buffer.cleanup()
-        return order
+        np.testing.assert_array_equal(np.sort(original), np.sort(reverse))
+        permutations.append(original.size)
+        yield from reversed(chunks)
 
-    serial = frag_id_order(THREAD_COUNTS[0])
-    parallel_orders = [frag_id_order(THREAD_COUNTS[-1]) for _ in range(3)]
-    assert all(sorted(p) == sorted(serial) for p in parallel_orders), (
-        "the scans saw different fragments, so this is not a pure reordering"
+    monkeypatch.setattr(FragmentBuffer, "iter_chunks_consuming", reversed_chunks)
+    actual = np.asarray(
+        run_pipeline(oracle.bam_path, oracle.index, config=config).estimator.t_counts
     )
-    assert any(p != serial for p in parallel_orders), (
-        f"three {THREAD_COUNTS[-1]}-thread scans all returned the serial row order, so this module is "
-        f"not exercising the permutation it exists to be immune to — raise the fragment count or lower "
-        f"BamScanConfig.fragments_per_chunk until it does"
-    )
+    assert permutations and baseline.sum() > 0.0
+    np.testing.assert_array_equal(actual, baseline)
 
 
 def test_frag_id_IS_AN_IDENTITY_which_is_what_makes_it_a_legal_sort_key(oracle):

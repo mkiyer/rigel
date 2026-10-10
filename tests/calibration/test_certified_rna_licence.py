@@ -19,7 +19,6 @@ C2   NOT SOUND — with ``q`` unknown the profile likelihood in ``f_g`` is EXACT
 C2b  and ``S = 0`` is flat on the CLOSED interval, so a zero count is not vertex evidence either
 C3   the raw-count term is one-sided and UNBOUNDED — at ``S = 1000`` it answers ~0 whatever the truth
 C4   SOUND — reference + term is exactly Beta(½, ½+S), so ``S = 0`` recovers today's ψ identically
-C5   ``density_factor_precision`` must NOT price this factor — on a monotone factor it reads the WINDOW
 ===  ==========================================================================================
 
 The realised ``q`` is nowhere near small enough for the dropped term to be a correction, so a build
@@ -36,7 +35,6 @@ import pytest
 from scipy.special import expit, log_expit
 from scipy.stats import beta as _Beta, poisson as _Poisson
 
-from rigel.native import transfer_rows as R
 from rigel.calibration.simplex_logodds import _JEFFREYS_REF, _logodds_grid
 
 #: Every gate below scores against ``scipy.stats``' OWN Poisson / Beta rather than a log-pmf written
@@ -45,14 +43,6 @@ from rigel.calibration.simplex_logodds import _JEFFREYS_REF, _logodds_grid
 #: exactly this pmf.
 _C_GRID = (1e-4, 0.03, 1.0, 40.0)
 _M_GRID = (5.0, 900.0, 20000.0)
-
-
-def _factor_precision(rows, lam):
-    """The kernel's factor precision (`native.transfer_rows.factor_precision`): the composition evidence a
-    λ-factor row carries, read off its own curvature."""
-    return R.factor_precision(
-        np.ascontiguousarray(rows, np.float64), np.ascontiguousarray(lam, np.float64)
-    )
 
 
 def _residual(S, c, M, lam):
@@ -215,35 +205,3 @@ def test_C4_psi_reference_plus_the_term_is_EXACTLY_Beta_half_half_plus_S(S):
     w /= w.sum()
     grid_median = float(fg[int(np.searchsorted(np.cumsum(w), 0.5))])
     assert grid_median == pytest.approx(float(_Beta.ppf(0.5, 0.5, 0.5 + S)), abs=2e-4)
-
-
-# ── C5 — the precision the plan reached for reports the WINDOW, not the information ──────────────────
-
-
-def test_C5_density_factor_precision_reads_the_GRID_WINDOW_on_a_MONOTONE_factor():
-    """The obvious wiring — ``tau_lam += _factor_precision(cert, lam_grid)``, exactly as
-    ``tau_len`` is wired — is out of contract for this factor, and the tell is measurable.
-
-    ``density_factor_precision`` reads ``1/Var_λ`` under the NORMALIZED factor. For a peaked factor that
-    is the Laplace precision and it is a property of the factor: gated below at exactly 1.0 and 25.0,
-    unchanged from ``L = 6`` to ``L = 20``. The certified factor ``S·log σ(−λ)`` is MONOTONE — it has no
-    peak and no scale — so its normalized variance is the window's, and the reported "precision" moves by
-    orders of magnitude with ``L``.
-
-    ``simplex_logodds``' own stated acceptance test is L-invariance; a τ that scales with ``L`` is
-    disqualified by it. The honest λ-axis information of the term is analytic and window-free —
-    ``I = −∂²/∂λ²[S·log σ(−λ)] = S·f_g·(1−f_g)`` — which is what `strand_evidence` returns for its own
-    channel; that is the form a future build must use.
-    """
-    got_cert, got_peak = [], []
-    for L in (6.0, 10.0, 20.0):
-        lam, _ = _logodds_grid(4096, L)
-        got_cert.append(float(_factor_precision((1e4 * log_expit(-lam))[None, :], lam)[0]))
-        got_peak.append(float(_factor_precision((-0.5 * 25.0 * (lam - 1.0) ** 2)[None, :], lam)[0]))
-    assert np.allclose(got_peak, 25.0, rtol=1e-6), got_peak  # a real factor: L-invariant
-    assert max(got_cert) / min(got_cert) > 100.0, got_cert  # the certified one: it IS the window
-    # and the analytic form it should be replaced by has no grid in it at all: evaluated at a given
-    #   composition it is one number, identical whatever window the solver happens to be gridded on.
-    i_cert = lambda f: 1e4 * f * (1.0 - f)  # noqa: E731
-    assert i_cert(0.5) == pytest.approx(2500.0, rel=0.0, abs=0.0)
-    assert i_cert(0.03) == pytest.approx(291.0, rel=1e-12)

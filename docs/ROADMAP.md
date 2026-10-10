@@ -16,8 +16,8 @@ oracle calibration is what ranks a calibration mechanism (`calibration_vs_oracle
 capture-contracted length move). An A/B pair runs with the scan pinned (`--set scan.total_threads=1`), so it is exactly
 reproducible, and an effect is judged by its size, with genes and pools read beside the transcript table
 (`TRAPS: the-deliverable-is-not-reproducible-by-default`). Three strata are in scope; unstranded × capture-ON is
-deferred and never ranked on a pooled total (`TRAPS: never-pool-the-strata`). The fragment-length composition channel
-is retired until after 0.8.0.
+deferred and never ranked on a pooled total (`TRAPS: never-pool-the-strata`). Fragment-length robustness is
+in scope; a separate fragment-length composition channel has not been selected.
 
 The cleanup is closed; what it left — dead, duplicated and narrated code among it — is `ISSUES: hygiene-ledger`, with
 the correctness defects in `ISSUES: latent-defects`. The capture-contracted length of the locus gDNA component, the
@@ -34,6 +34,13 @@ sparse libraries lose their gDNA.
 
 ## Where the tool is — one line per claim; run the named instrument for a current number
 
+- **Count foundation**: the factory-free observation-based message implementation is integrated; conservative
+  allocation in ambiguous weak-strand cases is owner-accepted, with bounds admission deferred —
+  `rename_identity.py`, `calibration_vs_oracle.py`, `quant_accuracy.py`; `ISSUES: the-gdna-prior-enters-psi-twice`.
+- **Detector-free reader**: the proper-prior reference passes its mathematical screen; the complete evaluator
+  fails the cost gate and shared outer integration costs more. External design review precedes further numerical
+  machinery; preserve local evidence and validate opportunity transfer — `ruler_vs_truth.py`,
+  `quant_accuracy.py`; `ISSUES: calibration-detects-capture-on-a-capture-off-library`.
 - **Stage A (the accumulator)**: done; the fragment ledger closes exactly — `calibration_oracle.py`; one open deposit
   defect, the leading intron (`ISSUES: latent-defects`).
 - **Library gDNA fraction**: calibration's is accurate on the ladder's three in-scope strata at full depth and
@@ -51,17 +58,16 @@ sparse libraries lose their gDNA.
 - **Fragment lengths**: the scorer's two length tables are censuses that average capture over different placements,
   and the capture ruler counts capture a second time on RNA's; one uncaptured frame is the largest lever measured on
   stranded × capture ON, but it loses on real length gaps until the ruler prices RNA's capture from gDNA's
-  length-resolved mass, which Rigel does not collect — parked past 0.8.0 (owner, 2026-09-30),
+  length-resolved mass, which Rigel does not collect — reopened for 0.8.0 (owner, 2026-10-02),
   `ISSUES: the-scorer-reads-a-census-length-law`; the boundary inversion's second wave stays open; the RNA law trains on
   spliced fragments that carry splice artifacts (`ISSUES: splicing-artifacts`) — `calibration/fl.py`,
   `gdna_density.py`, `calibration_vs_oracle.py`; watch `ISSUES: capture-degeneracy-standing-risk`.
 - **Fragment-length gaps** (re-recorded 2026-10-03 on the re-simulated suite arms, pinned and fractional): the test
-  chromosome's two fl arms stay within 0.9 points of their equal-length control on every in-scope stratum (2026-10-01);
-  the genome-scale RNA-long arm reads transcripts 2.1–2.3 % off capture and 6.2 % stranded × ON. The RNA-short arm (RNA
-  shorter than gDNA) reads as captured on a stranded capture-OFF library — a false capture reference from short exons
-  with no gDNA opportunity — and loses 42.3 % of its transcripts against 3.8 % unstranded; the fix is the fragment-length
-  campaign's (`ISSUES: calibration-detects-capture-on-a-capture-off-library`). Its capture-ON rows (19.8 % stranded,
-  18.8 % unstranded) are `ISSUES: the-scorer-reads-a-census-length-law`, back in scope.
+  RNA-short OFF regression is repaired by the component-opportunity maps and maintained by the count foundation;
+  captured RNA-short and deferred unstranded RNA-long remain material robustness concerns —
+  `quant_accuracy.py` on both gap panels beside the equal-length ladder,
+  `ISSUES: calibration-detects-capture-on-a-capture-off-library` and
+  `ISSUES: the-scorer-reads-a-census-length-law`.
 - **Strand model**: od = 0 by policy (`DESIGN.md` §3.3a) and κ from the genuine junctions (§3.3b), both landed
   2026-10-01 after their VCaP A/Bs (LBX0588's κ 0.064 → 0.0030). The `summary.json` diagnostics and the pruning design
   are next — Tier 0, `ISSUES: strand-overdispersion-one-shared-value`; the prototype harness and the VCaP truth scorer are in
@@ -109,9 +115,29 @@ sparse libraries lose their gDNA.
 
 ## Next — the order
 
-Ranked for the release, most critical first (owner, 2026-09-30): the strand overdispersion is finished before
-anything else, the cluster track included; then what can ship wrong on real data, or cannot change once released,
-comes before the in-scope accuracy work, which is at diminishing returns on the ladder. `ISSUES.md`'s
+**Current local priority:** the count foundation is integrated; next are the detector-free reader,
+bounded robustness validation and release consolidation. The owner-approved prototype scope is to
+retain the count model and landscape training, allowing separately measured repairs to defective evidence
+inputs. The remote-expression condition, zero-coordinate source loss, known-source blur
+footprint and low-probability blur arithmetic are repaired; finite-support loss remains
+in production. The isolated range and local-unit prototypes repair missing support and
+arbitrary library-coordinate dependence; remaining density-spacing sensitivity needs a
+targeted source-preserving correction after coarse interpolation of a narrow known RNA
+source was isolated as sufficient to reproduce the two exceptions. Stop broad refinement
+experiments; preserve the stable count foundation and move the main design effort to the
+reader's economical evaluation of the same three proper-prior integrals
+(`ISSUES: the-gdna-prior-enters-psi-twice`, **NARROW-SOURCE INTERPOLATION** and
+**PROPER LOCAL CAPTURE PRIOR**). The bounded shared-quadrature experiment is rejected
+for cost (**SHARED CAPTURE INTEGRATION**); obtain the owner-requested external review
+of the smallest complete consumer before further numerical development. Production
+selection, background uncertainty and the release A/B remain open; do not expand
+panel runs or import the research integrator wholesale.
+Bounds admission is owner-deferred
+(2026-10-09). This supersedes the older local ordering
+below; the separate cluster track remains separate.
+
+The earlier release ordering (owner, 2026-09-30) puts what can ship wrong on real data, or cannot change once released,
+before in-scope accuracy work, which is at diminishing returns on the ladder. `ISSUES.md`'s
 OPEN section follows this order within each priority. The cluster track does not compete for local A/B windows; the
 local track takes one A/B window per mechanism, and a numeric no-op, proven with `rename_identity.py --check`, lands
 between any two windows.

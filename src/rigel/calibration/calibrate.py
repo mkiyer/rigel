@@ -7,17 +7,17 @@ Calibration models RNA vs gDNA only (the per-locus EM separates transcripts down
 composition has three sources: the STRAND LIKELIHOOD (the Beta-Binomial tilt of the per-strand
 counts, the only intrinsic signal, entering as its overdispersed Fisher information rather than as a
 raw count); the MESSAGES from its chain neighbours (:mod:`.messages`, each hop priced inside the
-sweep from the two nodes' own counts); and the POPULATION gDNA PRIOR (the intergenic-only background
-pool plus the phase-2 density landscape). The solver is the belief-propagation SWEEP over the
+sweep from the two nodes' own counts); and the POPULATION gDNA PRIOR (the phase-2 density
+landscape). The solver is the belief-propagation SWEEP over the
 ``N E N E … N`` chain (:mod:`rigel.calibration.sweep`)::
 
-    substrate  (five populations on three axes)
+    substrate  (observation banks on three axes)
       -> build chain + geometry + statics      (the geometry owns EVERY divisor)
       -> strand balance: rna_sense_frac (κ)
       -> strand overdispersion: 0 for both components (binomial, by policy)
       -> signature-binary init (G1/G2/G3)
       -> PASS 1 solve_chain (no fitted prior): ONE forward + ONE backward pass — each object integrates
-           its strand likelihood, the intron factory and its neighbours' messages
+           its strand likelihood and its neighbours' messages
       -> REFITS (``calib_refit_iters``): fit the gDNA-density landscape on the current belief, reset
            the belief, solve_chain again with the landscape added per object -> the per-object pie
       -> chain_region_deconv  -> per-REGION gDNA / RNA contained mass
@@ -27,7 +27,7 @@ pool plus the phase-2 density landscape). The solver is the belief-propagation S
 
 ⛔ THE GEOMETRY IS BUILT FIRST, AND IT OWNS EVERY DIVISOR. ``build_region_geometry`` produces the
 per-slot ``eff_gdna``/``eff_rna`` before anything reads a count, and everything downstream — the
-density clue, the background pool, the intron factory, the result's two supports — reads THAT array.
+density clue, landscape input and the result's two supports — reads THAT array.
 Computing a second length model anywhere below is how a consumer comes to divide by a length the
 solver never used.
 
@@ -60,10 +60,6 @@ from .region_geometry import (
 )
 from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
 from .derive import gdna_density_global
-from .density_deconv import (
-    GdnaBackground,
-    fit_intron_background,
-)
 from .capture_efficiency import capture_efficiencies
 from .effective_length import UNBOUNDED_REACH, conserved_cut_shares
 from .blocks import SweepCapture
@@ -126,53 +122,6 @@ def _project_eff(chain, eff_slots, payload) -> tuple[np.ndarray, np.ndarray]:
     return region_eff, boundary_eff
 
 
-class FactoryRows:
-    """The gDNA intron factory's λ-factor rows as their INPUTS: the background, the intron mask, each
-    intron's count and opportunity — the solve's kernel builds the rows per block from these
-    (`native/solve_kernel.cpp`, ``factory_row``), so no ``(n_slots, K)`` array ever exists.
-
-    For each INTRON REGION slot the row is ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` over the σ(λ) solve
-    grid — the factory deconvolves confident gDNA from introns against the intergenic background; NONE on
-    every other slot, a no-op there. BOUNDARY slots carry none structurally: the factor scores a CONTAINED
-    count against a CONTAINED support, and a boundary's count is a crossing with a different divisor. gDNA
-    is strand-symmetric, so the factor lives purely on ``λ`` and is consumed identically by every slot
-    class. ``kernel()`` is the tuple the sweep hands the kernel.
-    """
-
-    def __init__(self, background: GdnaBackground, chain, substrate, region_arrays, region_eff_len):
-        self.background = background
-        kind = np.asarray(chain.kind)
-        idx = np.asarray(chain.obj_idx, dtype=np.int64)
-        rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
-        self.is_intron = (kind == REGION) & (
-            rtype[np.clip(idx, 0, rtype.shape[0] - 1)] == RegionType.INTRON
-        )
-        ridx = idx[self.is_intron]
-        n = kind.shape[0]
-        # GENOME-strand columns summed: gDNA is strand-symmetric, so the deconvolution is against a total
-        self.count = np.zeros(n)
-        self.count[self.is_intron] = np.asarray(
-            substrate.region_contained.count, dtype=np.float64
-        ).sum(axis=1)[ridx]
-        self.eff = np.zeros(n)
-        self.eff[self.is_intron] = np.asarray(region_eff_len, dtype=np.float64)[ridx]
-
-    def kernel(self) -> tuple:
-        """The factory as the kernel takes it: its inputs — the intron mask, every slot's contained count and
-        gDNA opportunity, the background's location, over-dispersion, size and whether it is informative."""
-        bg = self.background
-        return (
-            "inputs",
-            np.ascontiguousarray(self.is_intron, bool),
-            np.ascontiguousarray(self.count, np.float64),
-            np.ascontiguousarray(self.eff, np.float64),
-            float(bg.log_mu_bg),
-            float(bg.alpha),
-            float(bg.size),
-            bool(bg.informative),
-        )
-
-
 def _fit_gdna_hyperprior(
     chain, belief, statics, region_arrays, mass_global, eff_global, *, prev=None
 ):
@@ -196,8 +145,8 @@ def _fit_gdna_hyperprior(
     * location → ADMISSION AT THE FLOOR, precision above it → a continuous WEIGHT
       (`landscape._reliability`). A slot whose solve is wider than one nat² in ``log f_g``
       (``CONSTANTS.landscape.located_var``, the count rule's one-fragment wall through ``Var(log c) = 1/c``) has no
-      location, whatever produced its solve: a strand term at a pure-RNA vertex, a factory row on an empty
-      intron, a one-sided delivered row. Its median is where the reference measure sits under its bound,
+      location, whatever produced its solve: a strand term at a pure-RNA vertex or a one-sided
+      delivered row. Its median is where the reference measure sits under its bound,
       and training on it re-seeds the landscape at that resolution.
     * geometry → BOUNDARIES ARE EXCLUDED. They cross rather than contain, are about as numerous as
       regions but far less often truly enriched, and their two-flank mixture fills the valley between
@@ -285,21 +234,10 @@ def lattice_points(window: float, step: float) -> int:
 class _Strand:
     """The library's strand model as the solve reads it: the RNA sense fraction ``κ``, ``N_rna`` — the spliced count
     κ was fit from, the sample the strand channel's protocol decision reads (`region_init.strand_discriminability`)
-    — and the two Beta-Binomial overdispersions, both 0 (binomial) by policy."""
+    — with no fitted dispersion state."""
 
     rna_sense_frac: float
     n_rna_obs: float
-    gdna_strand_overdispersion: float
-    rna_strand_overdispersion: float
-
-    @property
-    def model(self) -> tuple[float, float, float]:
-        """``(κ, od_gdna, od_rna)`` — the triple the transfer policy's own strand claims need."""
-        return (
-            self.rna_sense_frac,
-            self.gdna_strand_overdispersion,
-            self.rna_strand_overdispersion,
-        )
 
 
 def _fit_strand(strand_models) -> _Strand:
@@ -314,32 +252,18 @@ def _fit_strand(strand_models) -> _Strand:
     `tests/calibration/test_calibrate.py`'s ``test_the_strand_overdispersion_is_binomial_by_policy`` and
     ``test_an_empty_spliced_census_calibrates_as_unstranded``."""
     balance = fit_strand_balance(strand_models)
-    return _Strand(float(balance.rna_sense_frac), float(balance.n_observations), 0.0, 0.0)
-
-
-class _IntronFactory:
-    """The gDNA INTRON FACTORY: the intergenic background fitted here, and its λ-factor
-    rows as a :class:`FactoryRows` (the inputs the kernel builds each block's rows from). ``rows`` is
-    ``None`` when there is nothing to factor: the background uninformative, or no intron region."""
-
-    def __init__(self, chain, substrate, region_arrays, region_eff_gdna):
-        self.background = fit_intron_background(substrate, region_arrays, region_eff_gdna)
-        self.rows = None
-        if self.background.informative:
-            rows = FactoryRows(self.background, chain, substrate, region_arrays, region_eff_gdna)
-            if rows.is_intron.any():
-                self.rows = rows
+    return _Strand(float(balance.rna_sense_frac), float(balance.n_observations))
 
 
 def _policy(config, strand: _Strand):
     """The message-composition policy the config names. ⛔ THE NAME MUST SELECT THE POLICY — an arm that
     silently runs a different policy than it names is a benchmark that cannot be trusted, so an unknown
-    name raises. The transfer policy's own strand claims read the library's strand model; an intron's
-    own claim is the factory's row for it, which the sweep hands over on the context."""
+    name raises. The transfer policy's own strand claims read the library's strand model and
+    observed strand columns at each eligible object."""
     if config.message_policy == "silent":
         return SilentPolicy()
     if config.message_policy == "transfer":
-        return TransferPolicy(strand=strand.model)
+        return TransferPolicy(kappa=strand.rna_sense_frac)
     raise ValueError(
         f"unknown message_policy {config.message_policy!r} — expected 'silent' or 'transfer'"
     )
@@ -348,7 +272,7 @@ def _policy(config, strand: _Strand):
 @dataclass(frozen=True, slots=True)
 class _Solve:
     """Everything a sweep reads, fixed for the whole calibration: the chain, its statics and geometry,
-    the region arrays, the strand model, the intron factory, the policy, the config, and the per-slot
+    the region arrays, the strand model, the policy, the config, and the per-slot
     gDNA support ``(mass_global, eff_global)`` the landscape prior is fit and read on."""
 
     chain: object
@@ -356,7 +280,6 @@ class _Solve:
     geometry: object
     region_arrays: object
     strand: _Strand
-    factory: _IntronFactory
     policy: object
     config: object
     mass_global: np.ndarray
@@ -369,8 +292,6 @@ def _init_belief(s: _Solve):
         s.geometry,
         s.statics,
         rna_sense_frac=s.strand.rna_sense_frac,
-        gdna_strand_overdispersion=s.strand.gdna_strand_overdispersion,
-        rna_strand_overdispersion=s.strand.rna_strand_overdispersion,
         n_grid=lattice_points(s.config.sweep_logodds_window, s.config.sweep_logodds_step),
         logodds_window=s.config.sweep_logodds_window,
         n_threads=int(s.config.n_threads),
@@ -390,9 +311,7 @@ def _sweep(s: _Solve, belief, prior, capture=None):
     the lattice and confound two knobs. The TILT axis does not scale — θ is a share with no bracket
     problem — which keeps the AMBIG cube linear in the bracket.
 
-    ⛔ ψ has NO reference location. A located reference is a prior assertion at fixed strength and
-    becomes the whole answer wherever the strand channel is dead; background information enters as the
-    factory's λ-factor, a likelihood whose precision scales with counts. Every message's price is
+    The fitted landscape is the population prior passed to the solve. Every message's price is
     self-contained in the sweep (each hop charges the two nodes' counting and the pair's disagreement)
     — there is nothing to fit here."""
     cfg = s.config
@@ -415,13 +334,10 @@ def _sweep(s: _Solve, belief, prior, capture=None):
         belief,
         s.region_arrays,
         rna_sense_frac=s.strand.rna_sense_frac,
-        gdna_strand_overdispersion=s.strand.gdna_strand_overdispersion,
-        rna_strand_overdispersion=s.strand.rna_strand_overdispersion,
         n_rna_obs=s.strand.n_rna_obs,
         n_grid=n_grid,
         logodds_window=window,
         gdna_prior=prior,
-        intron_prior=s.factory.rows,
         policy=s.policy,
         block_slots=cfg.sweep_block_slots,
         n_threads=int(cfg.n_threads),
@@ -527,8 +443,8 @@ def _result(
         gdna_capture_efficiency_region=efficiency,
         gdna_capture_efficiency_boundary=efficiency_boundary,
         rna_sense_frac=strand.rna_sense_frac,
-        gdna_strand_overdispersion=strand.gdna_strand_overdispersion,
-        rna_strand_overdispersion=strand.rna_strand_overdispersion,
+        gdna_strand_overdispersion=0.0,
+        rna_strand_overdispersion=0.0,
         n_regions=int(substrate.n_regions),
         n_boundaries=int(substrate.n_boundaries),
         n_sj=int(substrate.n_sj),
@@ -627,7 +543,6 @@ def calibrate(
     region_eff_gdna, boundary_eff_gdna = _project_eff(chain, geometry.eff_gdna, payload)
 
     strand = _fit_strand(strand_model)
-    factory = _IntronFactory(chain, substrate, region_arrays, region_eff_gdna)
     # ⛔ A TOTAL density over ONE component's opportunity model is not a composition estimate; the
     # per-slot gDNA support below is the basis the landscape prior is fit and read on.
     mass_global, eff_global = region_gdna_geometry(geometry)
@@ -637,7 +552,6 @@ def calibrate(
         geometry,
         region_arrays,
         strand,
-        factory,
         _policy(config, strand),
         config,
         mass_global,

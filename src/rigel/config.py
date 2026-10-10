@@ -272,8 +272,8 @@ class CalibrationConfig:
     #: The λ lattice's STEP, in nats of log-odds. ψ's grid is ``λ ∈ [−L, L]`` at this spacing, ``K =
     #: round(2L/step) + 1`` points at whatever bracket ``L`` a pass solves on (the floor below, or the
     #: landscape prior's derived demand), so widening the bracket never coarsens the lattice. ONE lattice
-    #: serves every consumer — the read-out, the message rows, the AMBIG cube's λ axis, the intron
-    #: factory's rows and the composition prior (a second, finer single-strand grid with a linear
+    #: serves every consumer — the read-out, the message rows, the AMBIG cube's λ axis and the
+    #: composition prior (a second, finer single-strand grid with a linear
     #: regrid between the two measured worse than one grid on every in-scope stratum of both panels,
     #: and the regrid was the reason).
     #:
@@ -320,8 +320,8 @@ class CalibrationConfig:
     #: propagate → solve). ``"transfer"`` (:class:`~rigel.calibration.messages.transfer.TransferPolicy`,
     #: the composition transfer) is the shipped default; ``"silent"``
     #: (:class:`~rigel.calibration.messages.silent.SilentPolicy`) sends nothing, so ψ carries each slot's
-    #: OWN evidence alone (its two strand counts, its spliced count, the fitted gDNA prior and the intron
-    #: factory) — the measured floor every policy is judged against. Messages exist for the slots whose own
+    #: local evidence and the fitted gDNA prior — the measured floor every policy is judged against.
+    #: Messages exist for the slots whose own
     #: solve has no composition channel: unstranded data and the both-stranded (AMBIG) slots, where the
     #: strand likelihood is flat and the local answer is a default rather than a measurement; on stranded
     #: data a sighted exon's own solve is excellent and a message can mostly only disturb it. The standing

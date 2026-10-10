@@ -18,7 +18,6 @@ import numpy as np
 import pytest
 
 from rigel.calibration.blocks import SweepCapture
-from rigel.calibration.density_deconv import GdnaBackground
 from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain
 from rigel.calibration.region_geometry import build_region_statics, g1_locked, init_beliefs
@@ -33,7 +32,6 @@ from rigel.calibration.signature import (
     TS_NONE,
     transcript_strand_class,
 )
-from rigel.calibration.simplex_logodds import _logodds_grid
 from rigel.calibration.strand_balance import fit_strand_balance
 from rigel.calibration.sweep import solve_chain
 from rigel.native import transfer_rows as R
@@ -53,29 +51,6 @@ def strand_evidence(u_pos, u_neg, fg_loc, *, kappa, od_r, n_rna_obs):
     f64 = lambda a: np.ascontiguousarray(a, np.float64)  # noqa: E731
     return R.strand_evidence(
         f64(u_pos), f64(u_neg), f64(fg_loc), float(kappa), float(od_r), float(disc)
-    )
-
-
-def density_factor_precision(rows, lam):
-    """The kernel's factor precision (`native.transfer_rows.factor_precision`)."""
-    return R.factor_precision(
-        np.ascontiguousarray(rows, np.float64), np.ascontiguousarray(lam, np.float64)
-    )
-
-
-def density_lambda_factor(bg, count, eff_g, fg_grid):
-    """The kernel's factory rows (`native.transfer_rows.factory_rows`), every slot an intron."""
-    fg = np.asarray(fg_grid, np.float64)
-    count = np.ascontiguousarray(count, np.float64)
-    return R.factory_rows(
-        np.ones(count.shape[0], bool),
-        count,
-        np.ascontiguousarray(eff_g, np.float64),
-        float(bg.log_mu_bg),
-        float(bg.alpha),
-        float(bg.size),
-        bool(bg.informative),
-        np.log(fg) - np.log1p(-fg),
     )
 
 
@@ -113,7 +88,7 @@ def _scenario(kappa=0.9):
     return parts.chain, parts.statics, parts.geometry, belief, parts.region_arrays
 
 
-def _init(kappa=0.9, intron_prior=None):
+def _init(kappa=0.9):
     """The message-free self-solve of the scenario, read off the sweep under the SILENT policy: no message is
     sent, so a slot's final solve IS its self-solve (the same inputs to ψ), and the capture carries the own
     evidence ``tau_lam`` and the self-solve's ``fg_loc`` (`blocks.SweepCapture`)."""
@@ -131,7 +106,6 @@ def _init(kappa=0.9, intron_prior=None):
         n_rna_obs=85.0,
         n_grid=60,
         logodds_window=10.0,
-        intron_prior=intron_prior,
         policy=SilentPolicy(),
         _capture=cap,
     )
@@ -334,50 +308,6 @@ def test_perturbation_a_DIFFERENT_predicate_stops_matching_the_home():
 
 
 # ── source 2: density-deconvolution factor precision (I_density) ──────────────────────────────────────────────────────────
-
-
-def test_density_factor_precision_flat_carries_no_evidence():
-    """A flat λ-factor row carries τ = 0, not the solve grid's own width."""
-    lam, _ = _logodds_grid(60, 10.0)
-    assert np.all(density_factor_precision(np.zeros((4, lam.shape[0])), lam) == 0.0)
-
-
-def test_density_factor_precision_tracks_curvature_and_count():
-    """A sharper factor carries more evidence, and (via NegBinom Var(g)=μ+μ²/α_eff) a high-count
-    intron deconvolves more sharply than a low-count one — the self-limiting precision."""
-    lam, fg = _logodds_grid(60, 10.0)
-    sharp = -0.5 * ((lam - 1.0) ** 2) / 0.05
-    diffuse = -0.5 * ((lam - 1.0) ** 2) / 5.0
-    assert (
-        density_factor_precision(np.stack([sharp]), lam)[0]
-        > density_factor_precision(np.stack([diffuse]), lam)[0]
-        > 0.0
-    )
-
-    bg = GdnaBackground(
-        log_mu_bg=float(np.log(0.01)),
-        alpha=np.inf,
-        size=1.0e5 + 0.5,  # the Gamma-posterior shape: Σg + ½
-        informative=True,
-    )
-    eff = np.array([1.0e3, 1.0e5])
-    factor = density_lambda_factor(bg, count=0.02 * eff, eff_g=eff, fg_grid=fg)
-    tau = density_factor_precision(factor, lam)
-    assert tau[1] > tau[0] > 0.0
-
-
-def test_density_factor_precision_flows_into_the_own_evidence():
-    """End-to-end: passing an intron λ-factor lifts the intron's own evidence above its strand-only value
-    (the factory learning, registered as τ so the intron can propagate)."""
-    chain, *_ = _scenario(kappa=0.5)  # unstranded ⇒ strand τ=0
-    # a sharp λ-factor on the AMBIG region (id 5) — stand in for a confident intron deconvolve
-    lam, _ = _logodds_grid(60, 10.0)
-    prior = np.zeros((chain.n_slots, lam.shape[0]))
-    prior[4] = -0.5 * ((lam - 2.0) ** 2) / 0.05
-    ni_off, _ = _init(kappa=0.5)
-    ni_on, _ = _init(kappa=0.5, intron_prior=prior)
-    assert ni_off.tau_lam[4] == 0.0  # unstranded, no factory ⇒ silent
-    assert ni_on.tau_lam[4] > 0.0  # factory ⇒ the region can now speak
 
 
 # ── the signature-only classification the chain carries: free_* ───────────────────────────────

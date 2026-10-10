@@ -88,7 +88,7 @@ def test_the_policy_name_installs_the_transfer_policy(sweep_inputs):
     finally:
         calibrate_mod.solve_chain = orig
     assert seen and all(isinstance(p, TransferPolicy) for p in seen)
-    assert all(p.strand is not None for p in seen), (
+    assert all(p.kappa is not None for p in seen), (
         "the exon -> boundary message must be ON in production"
     )
     with pytest.raises(ValueError, match="unknown message_policy"):
@@ -188,7 +188,7 @@ def test_the_backbone_rows_equal_an_independent_recursive_reference_of_the_passe
     deliver equals the recursive definition — the message into a node is the face's rule applied to
     the sender's own claim composed with what reached the sender from ITS far side — on the live toy
     and on the toy with populated inside pieces and alternative splice sites (every rule family live)."""
-    pol, _p, _g, _w = _full_policy(sweep_inputs)
+    pol, _g, _w = _full_policy(sweep_inputs)
     for ctx in (_ctx_of(sweep_inputs), _with_alt_splice_sites(_ctx_of(sweep_inputs))):
         prepared = _prepared(pol, ctx)
         rows = _drive_the_backbone(prepared, ctx)
@@ -201,7 +201,7 @@ def test_PERTURBATION_no_node_ever_hears_its_own_claim_back(sweep_inputs):
     passes — what that node HOLDS from either side must not move (its claim never returns to it),
     while some other node's rows must (the claim did travel). Checked at an intron with two live faces
     and at a strand-live exon."""
-    pol, _p, n_grid, window = _full_policy(sweep_inputs)
+    pol, n_grid, window = _full_policy(sweep_inputs)
     ctx = _ctx_of(sweep_inputs)
     prepared = _prepared(pol, ctx)
     lam = np.linspace(-window, window, n_grid)
@@ -242,7 +242,7 @@ def test_a_dead_strand_channel_carries_no_own_claim(sweep_inputs):
 
     from rigel.calibration.messages.transfer import TransferPolicy
 
-    pol, _rows, _g, _w = _full_policy(sweep_inputs)
+    pol, _g, _w = _full_policy(sweep_inputs)
     ctx = _ctx_of(sweep_inputs)
     n = int(ctx.n_slots)
     is_bnd = np.asarray(ctx.is_boundary, bool)
@@ -655,7 +655,7 @@ def test_the_layer_reads_a_row_only_under_its_mask(sweep_inputs):
     code (`native/solve_kernel.cpp`), which the replay holds bit-identical. PERTURBATION: a kernel reading
     a row without its bit (`lane_emit` taking the own level unmasked; the solve reading a composition
     without its bit) fails here."""
-    pol, _rows, _n_grid, _window = _full_policy(sweep_inputs)
+    pol, _n_grid, _window = _full_policy(sweep_inputs)
     ctx = _ctx_of(sweep_inputs)
     n, K = int(ctx.n_slots), int(ctx.n_grid)
 

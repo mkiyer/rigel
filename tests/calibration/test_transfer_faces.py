@@ -29,7 +29,7 @@ from _transfer_harness import (
     _intron_mask,
     _prepared,
     _rule,
-    _strand_of,
+    _kappa_of,
     _strand_row_of,
     _with_alt_splice_sites,
     _with_populated_inside,
@@ -105,13 +105,16 @@ def _expected_exon_rows(si, ctx, src, lam, strand_of_si=None):
                 n_u[b] > 0 and A_g[b] > 0 and A_r[b] > 0 and A_g[e] > 0 and A_r[e] > 0
             ):
                 continue
+            # First express the intron's density mixture on the boundary's count frame.
+            shift = np.log(A_g[i] / A_r[i]) - np.log(A_g[b] / A_r[b])
+            row_b = np.interp(lam + shift, lam, row_i)
             s = float((rr_hi if hi else rr_lo)[b])
             n_s = float((sc_hi if hi else sc_lo)[b])
             le = np.log(n_u[b] * sig / A_g[b] * A_g[e]) - np.log(
                 (n_u[b] * (1.0 - sig) / A_r[b] + s) * A_r[e]
             )
             r = np.interp(
-                np.interp(lam, le, lam, left=lam[0], right=lam[-1]), lam, row_i - row_i.max()
+                np.interp(lam, le, lam, left=lam[0], right=lam[-1]), lam, row_b - row_b.max()
             )
             v = float(polygamma(1, n_u[b] + 0.5) + polygamma(1, n_s + 0.5))
             half = max(int(np.ceil(4.0 * np.sqrt(v) / dlam)), 1)
@@ -190,11 +193,11 @@ def test_the_ingredient_width_adds_the_counting_variance():
     assert abs(float(out.max())) < 1e-12
 
 
-def _expected_splice_out_rows(si, ctx, strand, lam):
+def _expected_splice_out_rows(si, ctx, kappa, lam):
     """The splice-out boundary rows recomputed INDEPENDENTLY of the policy: for every licensed
-    intron|exon face of every exon whose strand channel is live, the exon's own frozen-variance
-    strand row read at the GEOMETRIC splice-in map (both components on ``eff_gdna``, the
-    spliced density ``S / A_g^b``), marginalised over ``log rho ~ N(log S/U, trigamma(S+1/2) + trigamma(U+1/2))`` on nine
+    intron|exon face of every exon whose strand channel is live, the exon's conditional-binomial
+    strand row read at the component-specific splice-in map, with the measured route rate
+    marginalised over its existing log-rate counting uncertainty on nine
     equal-probability nodes — a second implementation, so a policy bug cannot hide."""
     from scipy.special import polygamma
     from scipy.stats import norm
@@ -206,7 +209,6 @@ def _expected_splice_out_rows(si, ctx, strand, lam):
         FLAG_TSS_POS,
     )
 
-    kappa, od_g, od_r = strand
     term = FLAG_TSS_POS | FLAG_TSS_NEG | FLAG_TES_POS | FLAG_TES_NEG
     is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
@@ -216,30 +218,19 @@ def _expected_splice_out_rows(si, ctx, strand, lam):
     flags = np.asarray(ctx.boundary_flags, np.uint16)
     n_u = np.asarray(ctx.n_slot, np.float64)
     A_g = np.asarray(ctx.eff_gdna, np.float64)
+    A_r = np.asarray(ctx.eff_rna, np.float64)
+    rr_lo = np.asarray(ctx.route_rate_lo, np.float64).sum(axis=1)
+    rr_hi = np.asarray(ctx.route_rate_hi, np.float64).sum(axis=1)
     sc_lo = np.asarray(ctx.sj_count_lo, np.float64).sum(axis=1)
     sc_hi = np.asarray(ctx.sj_count_hi, np.float64).sum(axis=1)
-    cnt = np.asarray(ctx.unspliced_count, np.float64)
     live = np.asarray(ctx.has_own_composition, bool)
-    belief = np.asarray(ctx.belief_fg, np.float64)
     fg = 1.0 / (1.0 + np.exp(-lam))
     nodes = norm.ppf((np.arange(9) + 0.5) / 9.0)
     out = {}
     for e in np.flatnonzero(is_exon):
         if fp[e] == fn[e] or not live[e]:
             continue
-        n = cnt[e].sum()
-        ks = kappa if fp[e] else 1.0 - kappa
-        f_ref = float(np.clip(belief[e], 1e-3, 1 - 1e-3))
-        p = 0.5 * fg + ks * (1 - fg)
-        p_ref = 0.5 * f_ref + ks * (1 - f_ref)
-        var = max(
-            n * p_ref * (1 - p_ref)
-            + (n * f_ref) ** 2 * 0.25 * od_g
-            + (n * (1 - f_ref)) ** 2 * ks * (1 - ks) * od_r,
-            1e-9,
-        )
-        row_e = -0.5 * (cnt[e, 0] - n * p) ** 2 / var
-        row_e -= row_e.max()
+        row_e = _strand_row_of(ctx, kappa, lam, e)
         if np.ptp(row_e) <= 1e-9:
             continue
         for b, hi in ((left[e], True), (right[e], False)):
@@ -249,14 +240,14 @@ def _expected_splice_out_rows(si, ctx, strand, lam):
             if i < 0 or not is_intron[i] or (flags[b] & term) or fp[e] != fp[i] or fn[e] != fn[i]:
                 continue
             n_s = float((sc_hi if hi else sc_lo)[b])
-            if not (n_u[b] > 0 and A_g[b] > 0 and A_g[e] > 0):
+            if not (n_u[b] > 0 and A_g[b] > 0 and A_g[e] > 0 and A_r[b] > 0 and A_r[e] > 0):
                 continue
             v = float(polygamma(1, n_s + 0.5) + polygamma(1, n_u[b] + 0.5))
             acc = np.zeros(lam.shape[0])
             for z in nodes:
-                s = n_s / A_g[b] * np.exp(z * np.sqrt(v))
+                s = float((rr_hi if hi else rr_lo)[b]) * np.exp(z * np.sqrt(v))
                 m = np.log(n_u[b] * fg / A_g[b] * A_g[e]) - np.log(
-                    (n_u[b] * (1 - fg) / A_g[b] + s) * A_g[e]
+                    (n_u[b] * (1 - fg) / A_r[b] + s) * A_r[e]
                 )
                 acc += np.exp(np.interp(m, lam, row_e, left=row_e[0], right=row_e[-1]))
             r = np.log(np.maximum(acc / nodes.size, 1e-300))
@@ -289,49 +280,64 @@ def test_the_splice_out_row_is_the_count_form_widened_by_the_marginal():
         return float(w @ (lam * lam) - m * m)
 
     deep = R.splice_out_row(
-        row_e, lam, n_u=2000.0, n_s=3000.0, a_g_b=210.0, a_g_e=210.0, nodes=MARGINAL_NODES
+        row_e,
+        lam,
+        n_u=2000.0,
+        n_s=3000.0,
+        a_g_b=210.0,
+        a_g_e=210.0,
+        a_r_b=210.0,
+        a_r_e=210.0,
+        splice_rate=3000.0 / 210.0,
+        nodes=MARGINAL_NODES,
     )
     assert _mode_f(deep) == pytest.approx(f_e * (2000 + 3000) / 2000, abs=0.01)
     assert _mode_f(deep) > f_e
     thin = R.splice_out_row(
-        row_e, lam, n_u=6.0, n_s=9.0, a_g_b=210.0, a_g_e=210.0, nodes=MARGINAL_NODES
+        row_e,
+        lam,
+        n_u=6.0,
+        n_s=9.0,
+        a_g_b=210.0,
+        a_g_e=210.0,
+        a_r_b=210.0,
+        a_r_e=210.0,
+        splice_rate=9.0 / 210.0,
+        nodes=MARGINAL_NODES,
     )
     assert _var(thin) > 3 * _var(deep), "a thin face must deliver a much wider claim"
     assert abs(float(deep.max())) < 1e-12 and abs(float(thin.max())) < 1e-12
     assert not R.splice_out_row(
-        row_e, lam, n_u=0.0, n_s=9.0, a_g_b=210.0, a_g_e=210.0, nodes=MARGINAL_NODES
+        row_e,
+        lam,
+        n_u=0.0,
+        n_s=9.0,
+        a_g_b=210.0,
+        a_g_e=210.0,
+        a_r_b=210.0,
+        a_r_e=210.0,
+        splice_rate=9.0 / 210.0,
+        nodes=MARGINAL_NODES,
     ).any()
 
 
-def _expected_boundary_rows(si, ctx, strand, lam):
+def _expected_boundary_rows(si, ctx, kappa, lam):
     """The boundary→intron rows recomputed INDEPENDENTLY of the policy: for every intron|exon pair whose
     boundary admits the intron's SINGLE strand set and whose strand channel the solver declares live
     (``own.tau_lam > 0`` at the boundary — the strand Fisher information itself, there being no
-    factory at a boundary), the boundary's own frozen-variance strand row VERBATIM, summed at the
+    factory at a boundary), the boundary's conditional-binomial strand row on the intron's count frame, summed at the
     intron — a second implementation, so a policy bug cannot hide."""
-    kappa, od_g, od_r = strand
     pairs, _n = _expected_pairs(si)
     fp, fn = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
-    cnt = np.asarray(ctx.unspliced_count, np.float64)
     live = np.asarray(ctx.has_own_composition, bool)
-    belief = np.asarray(ctx.belief_fg, np.float64)
-    fg = 1.0 / (1.0 + np.exp(-lam))
+    A_g, A_r = np.asarray(ctx.eff_gdna), np.asarray(ctx.eff_rna)
     out = {}
     for b, i in pairs:
         if fp[b] != fp[i] or fn[b] != fn[i] or fp[b] == fn[b] or not live[b]:
             continue
-        n = cnt[b].sum()
-        ks = kappa if fp[b] else 1.0 - kappa
-        f_ref = float(np.clip(belief[b], 1e-9, 1 - 1e-9))
-        p = 0.5 * fg + ks * (1 - fg)
-        p_ref = 0.5 * f_ref + ks * (1 - f_ref)
-        var = max(
-            n * p_ref * (1 - p_ref)
-            + (n * f_ref) ** 2 * 0.25 * od_g
-            + (n * (1 - f_ref)) ** 2 * ks * (1 - ks) * od_r,
-            1e-9,
-        )
-        row = -0.5 * (cnt[b, 0] - n * p) ** 2 / var
+        row = _strand_row_of(ctx, kappa, lam, b)
+        shift = np.log(A_g[b] / A_r[b]) - np.log(A_g[i] / A_r[i])
+        row = np.interp(lam + shift, lam, row)
         row -= row.max()
         if np.ptp(row) <= 1e-9:
             continue
@@ -353,11 +359,13 @@ def test_the_boundary_strand_licence_requires_one_shared_strand():
     assert not R.boundary_shares_strand(False, False, True, False), "an empty boundary must refuse"
 
 
-def test_the_intron_face_carries_the_pair_identity_and_the_face_map(sweep_inputs):
-    """The intron's face, as claims and rules: its own claim is its factory profile and its rule into
-    each boundary is the identity (FORWARD); the rule from a licensed face into the exon, applied to
+def test_the_intron_face_carries_the_density_mixture_and_the_face_map(sweep_inputs):
+    """The intron's face, as claims and rules: its own claim is its observed strand profile and its rule into
+    each boundary preserves density odds (FORWARD); the rule from a licensed face into the exon, applied to
     the intron's claim and summed with the edge's level rule, equals the independently recomputed
     splice-in + edge rows of that exon; an unlicensed face has no rule into the exon."""
+    from dataclasses import replace
+
     from rigel.calibration.messages.transfer import TransferPolicy
     from rigel.calibration.simplex_logodds import _logodds_grid
 
@@ -366,12 +374,22 @@ def test_the_intron_face_carries_the_pair_identity_and_the_face_map(sweep_inputs
     pairs, _n = _expected_pairs(sweep_inputs)
     assert pairs, "the toy must carry at least one intron|exon pair or this gate proves nothing"
     ctx = _ctx_of(sweep_inputs)
-    prepared = _prepared(TransferPolicy(), ctx)
-    src = ctx.factory_rows
+    # Isolate intron-originating claims. Other face families have their own integration gates.
+    ctx = replace(ctx, has_own_composition=ctx.has_own_composition & _intron_mask(ctx))
+    kappa = _kappa_of(sweep_inputs)
+    prepared = _prepared(TransferPolicy(kappa=kappa), ctx)
     lam, _ = _logodds_grid(n_grid, window)
+    src = np.zeros((ctx.n_slots, len(lam)))
+    n_claims = 0
     for b, j in pairs:
         assert prepared.faces.kind_at(j, b) == FORWARD, f"pair ({j}, {b}) is not FORWARD"
-        np.testing.assert_array_equal(prepared.own[j], src[j] - src[j].max())
+        if not ctx.has_own_composition[j] or ctx.free_pos[j] == ctx.free_neg[j]:
+            assert prepared.own[j] is None
+            continue
+        src[j] = _strand_row_of(ctx, kappa, lam, j)
+        n_claims += 1
+        np.testing.assert_allclose(prepared.own[j], src[j], rtol=1e-12, atol=1e-12)
+    assert n_claims, "The observed intron claim must actually be exercised"
     exon_rows = _expected_exon_rows(sweep_inputs, ctx, src, lam)
     assert exon_rows, "the toy must license at least one exon face or this gate proves nothing"
     is_exon = np.asarray(ctx.is_exon_region, bool)
@@ -383,7 +401,7 @@ def test_the_intron_face_carries_the_pair_identity_and_the_face_map(sweep_inputs
             if b < 0 or not prepared.faces.has(b, e):
                 continue
             i = left[b] if right[b] == e else right[b]
-            claim = prepared.own[i] if (i >= 0 and intron[i]) else prepared.own[b]
+            claim = _rule(prepared, i, b) if (i >= 0 and intron[i]) else prepared.own[b]
             if claim is None:
                 continue
             r = _rule(prepared, b, e, own=claim)
@@ -391,7 +409,9 @@ def test_the_intron_face_carries_the_pair_identity_and_the_face_map(sweep_inputs
                 acc = (r - r.max()) if acc is None else acc + (r - r.max())
         if int(e) in exon_rows:
             assert acc is not None, f"exon {e} has no rule where the recompute expects rows"
-            np.testing.assert_allclose(acc - acc.max(), exon_rows[int(e)], rtol=0, atol=1e-12)
+            np.testing.assert_allclose(
+                acc - acc.max(), exon_rows[int(e)], rtol=0, atol=1e-12, err_msg=f"exon {e}"
+            )
         else:
             assert acc is None, f"exon {e} received a rule it is not licensed for"
 
@@ -402,18 +422,18 @@ def test_the_exon_and_boundary_own_claims_are_the_strand_rows_and_their_rules_th
     """The two strand-borne rules, as claims and rules: at every licensed face of a strand-live exon the rule
     exon → boundary applied to the exon's claim, summed per boundary, equals the independently
     recomputed splice-out rows; at every intron|exon pair sharing one strand with a live boundary,
-    the rule boundary → intron is the identity and the boundary's claim, summed per intron, equals
+    the rule boundary → intron preserves density odds and the boundary's claim, summed per intron, equals
     the independently recomputed strand rows."""
     from rigel.calibration.simplex_logodds import _logodds_grid
 
-    pol, _p, n_grid, window = _full_policy(sweep_inputs)
+    pol, n_grid, window = _full_policy(sweep_inputs)
     ctx = _ctx_of(sweep_inputs)
-    strand = _strand_of(sweep_inputs)
+    kappa = _kappa_of(sweep_inputs)
     lam, _ = _logodds_grid(n_grid, window)
     prepared = _prepared(pol, ctx)
     is_exon = np.asarray(ctx.is_exon_region, bool)
     left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
-    expected = _expected_splice_out_rows(sweep_inputs, ctx, strand, lam)
+    expected = _expected_splice_out_rows(sweep_inputs, ctx, kappa, lam)
     assert expected, (
         "the toy must carry a strand-live exon with a licensed face or this gate proves nothing"
     )
@@ -436,7 +456,7 @@ def test_the_exon_and_boundary_own_claims_are_the_strand_rows_and_their_rules_th
         np.testing.assert_allclose(
             got[b] - got[b].max(), expected[b] - expected[b].max(), rtol=0, atol=1e-10
         )
-    expected_i = _expected_boundary_rows(sweep_inputs, ctx, strand, lam)
+    expected_i = _expected_boundary_rows(sweep_inputs, ctx, kappa, lam)
     assert expected_i, (
         "the toy must carry a strand-live intron|exon pair or this gate proves nothing"
     )
@@ -446,9 +466,9 @@ def test_the_exon_and_boundary_own_claims_are_the_strand_rows_and_their_rules_th
         if not prepared.faces.has(b, i) or prepared.own[b] is None:
             continue
         assert prepared.faces.kind_at(b, i) == FORWARD, (
-            f"the boundary → intron rule at ({b}, {i}) is not the identity"
+            f"the boundary → intron rule at ({b}, {i}) is not FORWARD"
         )
-        got_i[int(i)] = got_i.get(int(i), 0.0) + prepared.own[b]
+        got_i[int(i)] = got_i.get(int(i), 0.0) + _rule(prepared, b, i)
     assert set(got_i) == set(expected_i), set(got_i) ^ set(expected_i)
     for i in expected_i:
         np.testing.assert_allclose(
@@ -593,7 +613,7 @@ def test_the_sj_terminus_boundary_places_the_flux_where_the_junctions_exon_is(sw
         FLAG_TSS_POS,
     )
 
-    pol, _p, _g, _w = _full_policy(sweep_inputs)
+    pol, _g, _w = _full_policy(sweep_inputs)
     ctx = _ctx_of(sweep_inputs)
     is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
@@ -641,7 +661,7 @@ def test_the_sj_terminus_boundary_places_the_flux_where_the_junctions_exon_is(sw
     assert prep_before.faces.has(b, i) and prep_before.faces.kind_at(b, i) != LEVEL
 
 
-def _expected_level_rows(si, ctx, strand, lam):
+def _expected_level_rows(si, ctx, kappa, lam):
     """The level rule recomputed INDEPENDENTLY of the policy: at every terminus boundary with an inside
     EXON (the outside an exon or an intron), the boundary's own strand row through the level-kept map
     (the boundary's share times its crossing density, times the inside's opportunity, over the
@@ -651,7 +671,6 @@ def _expected_level_rows(si, ctx, strand, lam):
     boundary on the toy is live and single-strand with interior strand modes, which is asserted rather
     than branched on: the no-claim upper bound is the level test's ``own=None`` probe."""
 
-    kappa, od_g, od_r = strand
     is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
     fp, fn = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
@@ -700,7 +719,7 @@ def _expected_level_rows(si, ctx, strand, lam):
         v += float(polygamma(1, n_u[b] + 0.5) + polygamma(1, n_u[i] + 0.5))
         m = R.level_map_lambda(lam, d_b, A_g[i], n_u[i])
         assert live[b] and fp[b] != fn[b], b  # every served boundary is live and single-strand
-        row = R.level_row(_strand_row_of(ctx, strand, lam, b), lam, m, v)
+        row = R.level_row(_strand_row_of(ctx, kappa, lam, b), lam, m, v)
         if np.ptp(row) > 1e-9:
             out.setdefault(int(i), np.zeros(lam.shape[0]))
             out[int(i)] += row
@@ -750,9 +769,9 @@ def test_the_terminus_rules_land_at_the_outside_pair_and_nowhere_when_the_flags_
     row; the rules exist exactly at the outside pairs and vanish when the terminus bits are cleared."""
     from rigel.calibration.simplex_logodds import _logodds_grid
 
-    pol, _p, n_grid, window = _full_policy(sweep_inputs)
+    pol, n_grid, window = _full_policy(sweep_inputs)
     ctx = _ctx_of(sweep_inputs)
-    strand = _strand_of(sweep_inputs)
+    kappa = _kappa_of(sweep_inputs)
     lam, _ = _logodds_grid(n_grid, window)
     prepared = _prepared(pol, ctx)
     is_bnd = np.asarray(ctx.is_boundary, bool)
@@ -761,6 +780,11 @@ def test_the_terminus_rules_land_at_the_outside_pair_and_nowhere_when_the_flags_
     n_u = np.asarray(ctx.n_slot, np.float64)
     n_s = np.asarray(ctx.spliced_slot, np.float64)
     A_g = np.asarray(ctx.eff_gdna, np.float64)
+    A_r = np.asarray(ctx.eff_rna, np.float64)
+    flags = np.asarray(ctx.boundary_flags)
+    flux = np.asarray(ctx.sj_count).sum(axis=1)
+    rr_lo = np.asarray(ctx.route_rate_lo).sum(axis=1)
+    rr_hi = np.asarray(ctx.route_rate_hi).sum(axis=1)
     live = np.asarray(ctx.has_own_composition, bool)
     sites = _item5_slots(ctx)
     served = 0
@@ -782,15 +806,29 @@ def test_the_terminus_rules_land_at_the_outside_pair_and_nowhere_when_the_flags_
             else (None,)
         )
         assert o is not None
+        _, ex_side = R.junction_flanks(int(flags[b]), int(left[b]), int(right[b]))
+        s_out = n_s[b] + (flux[b] if ex_side == o else 0.0)
+        rate = n_s[b] / A_r[b]
+        if ex_side == o:
+            rate += (rr_lo if o == left[b] else rr_hi)[b]
         want = R.splice_out_row(
-            _strand_row_of(ctx, strand, lam, o), lam, n_u[b], n_s[b], A_g[b], A_g[o], MARGINAL_NODES
+            _strand_row_of(ctx, kappa, lam, o),
+            lam,
+            n_u[b],
+            s_out,
+            A_g[b],
+            A_g[o],
+            A_r[b],
+            A_r[o],
+            rate,
+            MARGINAL_NODES,
         )
         if live[o] and prepared.own[o] is not None:
             got = _rule(prepared, o, b)
             np.testing.assert_allclose(got - got.max(), want - want.max(), rtol=0, atol=1e-10)
         if live[b]:
-            le = R.face_map_lambda(lam, n_u[b], A_g[b], A_g[b], A_g[o], A_g[o], n_s[b] / A_g[b])
-            want_o = R.transport_row(_strand_row_of(ctx, strand, lam, b), lam, le, n_u[b], n_s[b])
+            le = R.face_map_lambda(lam, n_u[b], A_g[b], A_r[b], A_g[o], A_r[o], rate)
+            want_o = R.transport_row(_strand_row_of(ctx, kappa, lam, b), lam, le, n_u[b], s_out)
             got_o = _rule(prepared, b, o)
             np.testing.assert_allclose(
                 got_o - got_o.max(), want_o - want_o.max(), rtol=0, atol=1e-10
@@ -817,12 +855,12 @@ def test_the_level_rule_serves_every_terminus_inside_from_the_measurement_alone(
 
     from rigel.calibration.simplex_logodds import _logodds_grid
 
-    pol, _p, n_grid, window = _full_policy(sweep_inputs)
+    pol, n_grid, window = _full_policy(sweep_inputs)
     ctx = _with_populated_inside(_ctx_of(sweep_inputs))
-    strand = _strand_of(sweep_inputs)
+    kappa = _kappa_of(sweep_inputs)
     lam, _ = _logodds_grid(n_grid, window)
     prepared = _prepared(pol, ctx)
-    expected, served = _expected_level_rows(sweep_inputs, ctx, strand, lam)
+    expected, served = _expected_level_rows(sweep_inputs, ctx, kappa, lam)
     assert len(served) >= 2, (
         "the toy must carry two served terminus pairs or this gate proves nothing"
     )
@@ -884,14 +922,13 @@ def test_the_junction_flanks_read_the_flag_kind_alone():
     )
 
 
-def _expected_alt_splice_rows(si, ctx, strand, lam):
+def _expected_alt_splice_rows(si, ctx, kappa, lam):
     """The alternative-splice rows recomputed INDEPENDENTLY of the policy on the patched context: at
     each junction boundary the two flanks' own strand rows through the splice-out map (E with
     S_b + F, C with S_b) into the boundary, and the boundary's own row through the face map into
     each flank, each blurred by the pair's OWN disagreement beyond counting — per pair, nothing
     pooled. Keyed by slot; the pair widths returned beside."""
 
-    kappa, od_g, od_r = strand
     is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
     fp, fn = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
@@ -901,25 +938,14 @@ def _expected_alt_splice_rows(si, ctx, strand, lam):
     n_s = np.asarray(ctx.spliced_slot, np.float64)
     flux = np.asarray(ctx.sj_count, np.float64).sum(axis=1)
     A_g = np.asarray(ctx.eff_gdna, np.float64)
+    A_r = np.asarray(ctx.eff_rna, np.float64)
+    rr_lo = np.asarray(ctx.route_rate_lo).sum(axis=1)
+    rr_hi = np.asarray(ctx.route_rate_hi).sum(axis=1)
     cnt = np.asarray(ctx.unspliced_count, np.float64)
     live = np.asarray(ctx.has_own_composition, bool)
-    belief = np.asarray(ctx.belief_fg, np.float64)
-    fg = 1.0 / (1.0 + np.exp(-lam))
 
     def strand_row(x):
-        n = cnt[x].sum()
-        ks = kappa if fp[x] else 1.0 - kappa
-        f_ref = float(np.clip(belief[x], 1e-9, 1 - 1e-9))
-        p = 0.5 * fg + ks * (1 - fg)
-        p_ref = 0.5 * f_ref + ks * (1 - f_ref)
-        var = max(
-            n * p_ref * (1 - p_ref)
-            + (n * f_ref) ** 2 * 0.25 * od_g
-            + (n * (1 - f_ref)) ** 2 * ks * (1 - ks) * od_r,
-            1e-9,
-        )
-        row = -0.5 * (cnt[x, 0] - n * p) ** 2 / var
-        return row - row.max()
+        return _strand_row_of(ctx, kappa, lam, x)
 
     served = []
     for b in np.flatnonzero(is_bnd):
@@ -927,16 +953,20 @@ def _expected_alt_splice_rows(si, ctx, strand, lam):
         if lo < 0 or hi < 0 or not (is_exon[lo] and is_exon[hi]):
             continue
         c_side, e_side = R.junction_flanks(int(flags[b]), int(lo), int(hi))
-        if c_side is None or not (n_u[b] > 0 and A_g[b] > 0):
+        if c_side is None or not (n_u[b] > 0 and A_g[b] > 0 and A_r[b] > 0):
             continue
         for x, s_out, kind in ((e_side, n_s[b] + flux[b], "E"), (c_side, n_s[b], "C")):
             if (
                 R.boundary_shares_strand(bool(fp[b]), bool(fn[b]), bool(fp[x]), bool(fn[x]))
                 and A_g[x] > 0
+                and A_r[x] > 0
             ):
-                served.append((int(b), int(x), float(s_out), kind))
+                rate = n_s[b] / A_r[b]
+                if kind == "E":
+                    rate += (rr_lo if e_side == lo else rr_hi)[b]
+                served.append((int(b), int(x), float(s_out), float(rate)))
     width = {}
-    for b, x, s_out, _kind in served:
+    for b, x, s_out, rate in served:
         if not (live[b] and live[x]):
             continue
         lo_v = []
@@ -951,20 +981,33 @@ def _expected_alt_splice_rows(si, ctx, strand, lam):
         if len(lo_v) < 2:
             continue
         v_ratio = s_out / (n_u[b] * (n_u[b] + s_out)) if s_out > 0 else 0.0
-        d = lo_v[0][0] - lo_v[1][0] - np.log((n_u[b] + s_out) / n_u[b])
+        f_b = 1.0 / (1.0 + np.exp(-lo_v[0][0]))
+        predicted = np.log(n_u[b] * f_b / A_g[b] * A_g[x]) - np.log(
+            (n_u[b] * (1.0 - f_b) / A_r[b] + rate) * A_r[x]
+        )
+        d = predicted - lo_v[1][0]
         width[(b, x)] = max(0.0, d * d - (lo_v[0][1] + lo_v[1][1] + v_ratio))
     out = {}
-    for b, x, s_out, _kind in served:
+    for b, x, s_out, rate in served:
         w = width.get((b, x), 0.0)
         if live[x] and fp[x] != fn[x]:
             row = R.splice_out_row(
-                strand_row(x), lam, n_u[b], s_out, A_g[b], A_g[x], MARGINAL_NODES
+                strand_row(x),
+                lam,
+                n_u[b],
+                s_out,
+                A_g[b],
+                A_g[x],
+                A_r[b],
+                A_r[x],
+                rate,
+                MARGINAL_NODES,
             )
             if np.ptp(row) > 1e-9:
                 out.setdefault(b, np.zeros(lam.shape[0]))
                 out[b] += R.blur_row(row, lam, w)
         if live[b]:
-            le = R.face_map_lambda(lam, n_u[b], A_g[b], A_g[b], A_g[x], A_g[x], s_out / A_g[b])
+            le = R.face_map_lambda(lam, n_u[b], A_g[b], A_r[b], A_g[x], A_r[x], rate)
             row = R.transport_row(strand_row(b), lam, le, n_u[b], s_out)
             if np.ptp(row) > 1e-9:
                 out.setdefault(x, np.zeros(lam.shape[0]))
@@ -979,12 +1022,12 @@ def test_the_alt_splice_rules_carry_both_flanks_with_the_pair_width(sweep_inputs
     each flank — every message blurred by its own pair's disagreement beyond counting."""
     from rigel.calibration.simplex_logodds import _logodds_grid
 
-    pol, _p, n_grid, window = _full_policy(sweep_inputs)
+    pol, n_grid, window = _full_policy(sweep_inputs)
     ctx = _with_alt_splice_sites(_ctx_of(sweep_inputs))
-    strand = _strand_of(sweep_inputs)
+    kappa = _kappa_of(sweep_inputs)
     lam, _ = _logodds_grid(n_grid, window)
     prepared = _prepared(pol, ctx)
-    expected, widths = _expected_alt_splice_rows(sweep_inputs, ctx, strand, lam)
+    expected, widths = _expected_alt_splice_rows(sweep_inputs, ctx, kappa, lam)
     assert expected and any(w > 0.0 for w in widths.values()), (
         "the patched toy must carry served junctions with a live pair width or this gate proves nothing"
     )

@@ -156,11 +156,688 @@ a gap would let the EM split the origins on length alone and mask calibration (`
 
 **3.2 Density is the frame-invariant currency; a fraction is not.** `ρ_c = C_c/E_c` agrees across the
 contained / crossing / spliced frames. The log-odds shifts between frames by exactly
-`log(E_g^dst/E_g^src) − log(E_r^dst/E_r^src)`, and capture cancels identically — a ratio transports
-across a capture cliff, an absolute density does not.
+`log(E_g^dst/E_g^src) − log(E_r^dst/E_r^src)`. Capture cancels from the ratio when it is
+one common multiplier on both components at each object. That condition permits a ratio
+to cross a scalar capture cliff while an absolute density cannot. Different capture averages
+over the fragment banks do not cancel; a shared coordinate alone does not establish the
+condition. See **Capture-opportunity nonidentification at a splice face** below.
+
+**Observed strand evidence** (native message claims and the density-profile reference;
+the count solver retains its separate Gaussian approximation). At fixed component expectations `a=ρ Eg`
+and `r`, the columns have means `a/2+q r` and `a/2+(1-q)r`. Conditional on their observed
+total `M`, the positive column is `Binomial(M, p)` with
+
+    f = a/(a+r),     p = f/2 + (1-f)q,
+    log L(f) = u log(p) + v log(1-p) + constant.
+
+The message stores this row on the fraction grid, subtracting its maximum. The RNA
+orientation gives `q=κ` on the positive annotation strand and `q=1−κ` on the negative.
+Eligible introns use the same likelihood as exons and boundaries; no intron-background
+factor is added. At `q=1/2` the row is constant, and with no licensed own strand channel
+no row is sent. Gates: `tests/calibration/test_observed_strand_claims.py`, including a
+full-sweep comparison of delivered evidence under changed incoming count beliefs.
+
+No incoming belief sets its width. This is the likelihood of an EXPECTED mixture fraction,
+not the strand distribution conditional on a REALIZED DNA count; the latter is the convolution
+of the DNA and RNA binomials. An inferred fraction multiplied by `M` is not a newly observed
+Poisson DNA count (`ISSUES: calibration-detects-capture-on-a-capture-off-library`).
+
+For a licensed single-strand intron–boundary pair sharing a component-density ratio, let
+the target's RNA amount be `r` and RNA opportunity `Er_t`. Conditional on the source total,
+the source probability and factor are
+
+    p_s(ρ,r) = [ρ Eg_s/2 + q_s (r/Er_t) Er_s] / [ρ Eg_s + (r/Er_t) Er_s],
+    H_s(ρ,r) = Binomial(u_s; u_s+v_s, p_s(ρ,r)).
+
+With the existing target-RNA reference, the density evidence is
+
+    L_t(ρ) = integral_0^infinity
+        Poisson(u_t; ρ Eg_t/2 + q_t r)
+        Poisson(v_t; ρ Eg_t/2 + (1-q_t) r) H_s(ρ,r) r^(-1/2) dr.
+
+The source factor belongs INSIDE that integral. With `r=t²`, the RNA measure is `2 dt`.
+Expanding the four count polynomials gives an independent finite-sum integral, used to
+check the numerical reference. Conditioning the source removes its overall rate: a common
+multiplier on both source components cancels, while separate RNA/DNA capture multipliers
+do not. Thus this calculation certifies the shared-ratio model, not arbitrary capture
+physics under mismatched component length laws. At `q_s=1/2`, the source factor is constant
+in composition and cannot identify an unstranded mixture. Splice faces, both-strand neighbors
+and repeated observations require separate derivations.
+
+**Density readout of an existing composition row** (2026-10-07; diagnostic reference).
+Let `h(lambda)` be the delivered log row, already transported into the target's count-odds
+frame by the existing message system. For one admitted RNA strand, use
+
+    L(ρ) = integral_0^infinity Poisson(u; a/2+q r) Poisson(v; a/2+(1-q)r)
+           exp(h(log(a/r))) r^(-1/2) dr,       a = ρ Eg.
+
+The row is read at expected component odds inside the integral, not at the fitted DNA
+count divided by the observed total. The formula is exact for the certified conditional
+strand factor above; general delivered rows retain their existing approximations and
+shared-observation dependencies. This adapter does not make splice/level messages exact
+joint likelihoods or repair mismatched capture opportunities. No DNA landscape is an
+argument. An additive constant in `h` scales `L` and changes no evidence shape.
+
+The zero-density value follows analytically from the RNA-only observation law and the
+row's left-end continuation. With absent RNA opportunity, use the pure-DNA Poisson law
+and the row's right-end continuation; there is no RNA component to integrate. A positive
+RNA opportunity and zero DNA opportunity give a density-constant composition readout.
+Rates above the observed total divided by opportunity remain admissible.
+
+For numerical integration, set `r=t²` and let `F(t)` denote the resulting integrand
+apart from its factor 2. If the piecewise-linear log row has maximum absolute slope `B`,
+then for `R=M+B`, `T=sqrt(R)` and `t>=T`,
+
+    d log F / dt <= 2(R/t-t),
+    F(t) <= F(T) exp(R-t²) (t²/R)^R.
+
+The bound integrates to an incomplete Gamma tail and permits truncation at a declared
+numerical error tolerance. It is not a statistical ceiling on DNA density. Split quadrature
+at the row's actual interpolation knots; check table approximation by grid refinement.
+An alternative bound needs no special-function implementation: for any `T>sqrt(R)`,
+put `alpha=2T-2R/T`. The derivative bound decreases with `t`, so
+
+    integral_T^infinity F(t) dt <= F(T)/alpha.
+
+Extend `T` until this bound is below the declared integration error budget. In each
+interpolation interval, multiplying the log-integrand's derivative in RNA amount by
+that amount gives
+
+    G(r) = u q r/(a/2+q r) + v (1-q) r/(a/2+(1-q)r) - r - h',
+
+whose derivative decreases. Its descending zero is the only interior local maximum;
+including these maxima as quadrature endpoints prevents narrow count peaks being skipped.
+Evaluate likelihood differences with log ratios before subtracting their common
+`-a` and log-factorial terms, which otherwise lose precision far into the Poisson tail.
+
+**Absolute level factors retain their coordinates** (2026-10-08; density-interface
+requirement). Let `G(rho)` be a held DNA-level factor, and let the target's observed
+total be `M`. Converting it to a composition row gives `h(lambda)=log G(M sigmoid(lambda)/Eg)`.
+If that row is subsequently evaluated at `lambda=log(rho Eg/r)` inside the RNA integral,
+it reads
+
+    G(rho M / (rho Eg+r)),
+
+which equals `G(rho)` only when the expected total `rho Eg+r` is fixed to the observed
+`M`. It is not an identity when the total is a Poisson observation. The corresponding
+RNA conversion has the same issue. Thus the scalar composition readout above cannot
+recover absolute level information after these channels have been fused through a fixed
+total. Retain their existing coordinates instead. For a composition factor `C`, DNA-level
+factor `G` and RNA-level factor `H`, the intended single-strand assembly is
+
+    L(rho) = G(rho) integral_0^infinity
+        Pois(u; rho Eg/2+q r) Pois(v; rho Eg/2+(1-q)r)
+        C(log(rho Eg/r)) H(r/Er) r^(-1/2) dr.
+
+Density-coordinate origins are explicit conversions in `G` and `H`, not additional priors.
+This preserves the declared factors; it does not by itself prove their physical independence,
+shared-capture assumptions or discrepancy calibration. Existing message intersections and
+no-echo rules are held fixed when testing this interface correction.
+
+**Both-strand density evidence retains the hypothesis support.** For positive RNA
+opportunity, write the unknown total RNA amount as `r` and its positive-strand share
+as `s`. The observed positive-column probability within RNA is
+`q(s)=kappa s+(1-kappa)(1-s)`. With the existing delivered factors, define
+
+    K_rho(s) = integral_0^infinity
+        Pois(u; rho Eg/2+q(s) r) Pois(v; rho Eg/2+(1-q(s))r)
+        C(log(rho Eg/r)) H_plus(s r/Er) H_minus((1-s)r/Er) r^(-1/2) dr.
+
+The tilt measure in **The hypothesis space** consists of two pure-strand atoms and an
+arcsine continuum. Writing `s=cos(phi)^2`, its continuous part is `2 dphi/pi` on
+`[0,pi/2]`. Let `W_plus,W_minus` be the existing delivered strand-witness bits in
+**The witness**. Preserving their support restriction gives
+
+    L(rho) = G(rho)/3 * [ (1-W_minus) K_rho(1) + (1-W_plus) K_rho(0)
+                        + (2/pi) integral_0^(pi/2) K_rho(cos(phi)^2) dphi ].
+
+This preserves the current hypothesis weights and witness rule; it does not introduce
+independent priors on the two RNA amounts. A finite interpolated `H(0)` does not encode
+the witness's exclusion of the opposite pure-strand atom. The profile and its support
+bit are distinct inputs. Without a witness, that finite endpoint value still multiplies
+the corresponding atom. Zero RNA opportunity uses the pure-DNA limit stated above.
+
+At fixed `s`, each nonzero strand fraction shifts its level knots into log total RNA
+amount by `log(Er)+log(rho_ref)-log(fraction)`. The union of those knots represents the
+sum of the two piecewise-linear log factors exactly, including their additive constants.
+Thus the existing one-RNA-amount integral can serve each tilt hypothesis. Intersections
+of positive and negative knot amounts occur at
+`phi=atan(sqrt(amount_minus/amount_plus))`; splitting there prevents the diagnostic
+quadrature from relying on a fixed tilt mesh. Independent integration in the reverse
+order checks this numerical reference. It does not certify the inherited factors as an
+independent joint likelihood or establish whole-genome cost.
+Instrument: `.cache/rigel_runs/2026-10-08_both_evidence/` (diagnostic readout, reverse-order
+reference and witness-support checks; no production count call site).
+
+**Constant interpolation segments need only their ends.** If three consecutive knots
+of a piecewise-linear log profile have equal heights, deleting the middle knot preserves
+the interpolated function everywhere. Repeating this operation retains the endpoints
+of each constant run, every changing segment and the original table endpoints. Endpoint
+continuation is therefore also unchanged. Equality here is exact: no slope threshold,
+small-value cutoff, normalization or approximation is introduced. The profile's presence
+bit is retained even when all its values are equal; its separate witness support does
+not disappear with redundant numerical knots. This identity can reduce the numerical
+work in the density reference without changing its factors or reference measure.
+
+**Tilt variation can be bounded without fitting RNA.** In the both-strand integral,
+the composition factor, DNA factor, total Poisson exponential and RNA measure do not
+depend on `phi`. For one observed column of count `n`, write its mean as `a/2+q r`.
+If `q` ranges over `[q_low,q_high]` and is `q_anchor>0` at an anchor, then for every
+`a,r>=0` where the ratio is defined,
+
+    min(1,q_low/q_anchor) <= (a/2+q r)/(a/2+q_anchor r)
+                         <= max(1,q_high/q_anchor).
+
+Multiply the logarithmic bounds by `n` and add the two columns. Zero counts contribute
+zero; a zero anchor probability can require an infinite upper bound. It is not evidence
+that a nearby nonzero contribution vanishes.
+
+For a finite clamped log profile with range `R` and maximum absolute slope `B`, changing
+its log-density argument by `d` changes its height by at most `min(R,B abs(d))`.
+On a tilt interval `[l,h]`, with maximum distance `delta` from the anchor, the positive
+RNA argument therefore contributes at most `min(R,2 B tan(h) delta)` in absolute log
+height, and the negative argument at most `min(R,2 B cot(l) delta)`. Use the full range
+at the respective zero-fraction endpoint. These follow from the derivatives of
+`log(cos(phi)^2)` and `log(sin(phi)^2)`. Constant profiles contribute exactly zero.
+
+The combined lower/upper log-ratio bounds hold uniformly over unknown RNA amount, so
+they also bound the exact RNA-integrated likelihood `K` relative to its anchor. Multiplying
+by interval width bounds that interval's mass. This permits explicit accounting when
+floating-point angles cannot be subdivided; deleting their width is not an equivalent
+operation. Density origins and additive log normalizations cancel from the bound.
+These are mathematical bounds on exact likelihoods. Inner integration error and ordinary
+adaptive-quadrature error estimates remain separate numerical responsibilities; this
+argument is not a proof of the complete floating-point calculation's accuracy.
+
+**One embedded difference can cancel.** Let `S(h)` denote composite Simpson
+quadrature with step `h`. Its leading fourth-order error gives the correction
+`[S(h/2)-S(h)]/(2^4-1)`, but equality of two estimates does not imply an exact
+integral. For example, on `[0,1]`, let
+
+    p(x) = product_{j=0}^4 (x-j/4)^2,
+    I_p = integral_0^1 p(x) dx,
+    f(x) = 1+p(x)/I_p.
+
+The true integral is two. The five first-stencil values of `f` are all one, so
+both Simpson estimates are one and their difference is zero. An additional
+subdivision evaluates between those nodes and exposes the missing mass. The
+diagnostic integrators therefore check both successive differences, using their
+maximum as the error estimate and the finer result for Richardson correction.
+This reuses the inner density integral's existing check in the outer integral.
+It is a defense against this demonstrated cancellation, not a convergence theorem
+for arbitrary functions. Independent reference cases and interval bounds remain
+necessary.
+
+**Envelope-first quadrature retains mass.** If an interval of width `w` has
+`exp(l) K(c) <= K(phi) <= exp(h) K(c)` throughout, its integral lies between
+`w K(c) exp(l)` and `w K(c) exp(h)`. The anchored estimate `w K(c)` therefore has
+absolute error at most the larger distance to those bounds. Keep that estimate
+and uncertainty in the global sum before requesting a detailed quadrature stencil.
+If its error requires refinement, evaluate the existing two-step Simpson check;
+retain the envelope where floating-point subdivision is unavailable. This reuses
+the uniform tilt bound above and does not discard an interval's mass.
+
+An initially loose bound may be many orders larger than the final estimated error.
+Subtracting it from a floating-point running total can leave a false positive
+residual, as well as erase real error. Re-summing only before acceptance addresses
+the latter failure but can leave the former refining indefinitely. The diagnostic
+envelope-first implementation sums its live interval estimates and errors directly
+on each iteration. Inner-integration error remains separately budgeted; replacing
+a bound by Simpson's estimate does not turn that estimate into a rigorous bound.
+
+The second subdivision's samples also supply the children's quarter points if refinement
+continues. Passing those values into the children removes repeated evaluations without
+changing either Simpson sum or either error estimate. This identity requires the same
+integrand and normalization anchor; it does not justify reusing values from another
+density or RNA split, or changing the subdivision schedule.
+
+**A total integral has a total numerical budget.** For partition integrals `I_i`,
+the total is `I=sum_i I_i`; absolute integration errors accumulate by addition.
+Requiring separate relative accuracy in every `I_i` spends effort even on intervals
+whose entire mass is below the error allowed for `I`. Instead retain every interval's
+mass estimate and both successive Simpson error estimates. Split the interval with
+the largest estimated error until `sum_i E_i <= rtol sum_i I_i`, and re-sum the active
+intervals before accepting to avoid cancellation in incremental totals. Reuse the
+parent's samples in its children. This changes error allocation, not the integrand,
+profile knots, stationary maxima, requested tolerance or separate analytic tail bound.
+
+Allocating this budget in proportion to interval width is not equivalent: a tiny
+interval beside a sharp likelihood peak can receive a requirement below floating-point
+precision even though its uncertainty is negligible for the total. The global test
+requires no per-interval share. If further required subdivision cannot move the midpoint
+in floating point, report failure; do not silently drop that interval. Simpson error
+estimates remain estimates, not proved bounds for arbitrary functions. Independent
+integrals, narrow-profile challenges and tighter-tolerance checks remain necessary.
+
+**Changing a coordinate preserves physical support.** For a positive reference `a`, write
+`u=log(rho/a)` and a level row `R_a(u)`. Changing the reference to `b=a exp(delta)` requires
+`u_b=u_a-delta` and `R_b(u_b)=R_a(u_b+delta)`. The physical density interval must therefore
+remain the same: a fixed numerical interval in `u` is not a fixed interval in density.
+Rebuilding on an unchanged finite `u` grid can discard a source's likelihood support;
+endpoint-clamped interpolation does not recover it. Refining the spacing within that
+interval cannot recover missing support either. A zero reference is not a logarithmic
+coordinate and must not be interpreted as evidence that local RNA sources are absent.
+These are representation requirements, not a prescription for a new biological reference
+or a larger fixed grid limit.
+
+For the zero-reference limit, an available numerical scale can be made from positive
+count/exposure pairs. A counted RNA-admitting object's pair is `(N, Er)` when both are
+positive; an available certified-flux pair is `(C, C/R)` when its count `C` and route rate
+`R` are positive. The ratio of the summed numerators to summed exposures is positive and
+has density units. Rescaling RNA opportunities by `c` and rates by `1/c` rescales this
+reference by `1/c`, preserving `rho_ref Er`. The coordinate calculation is not an RNA
+count estimate or a likelihood: repeated fragment incidences and route ends here do not
+assert independent observations. Existing source builders retain responsibility for
+admission and inference. With no such pairs, no positive scale is supplied. The production
+RNA coordinate uses this zero-only fallback, preserving the previous positive-reference
+path. The unit/source gates include an unstranded protocol and an absent strand model:
+certified splice evidence does not require strand-column deconvolution. The fallback does
+not solve finite support.
+
+**A known source supplies the convolution footprint.** For a certified count `C`, rate
+`R` and reference `a`, the source has exposure `A=C/R` and log-likelihood
+`ell(u)=C log(a A exp(u))-a A exp(u)`, up to a constant. Holding the existing discrete
+Gaussian blur fixed, let its spacing be `d`, variance `v>0`, radius `h=ceil(4 sqrt(v)/d)`
+(at least one cell), and normalized weights `w_t` for `t=-h,...,h`. The blurred value is
+
+    B(u_j) = log sum_t w_t exp(ell(u_j+t d)).
+
+Every output cell therefore requires actual source values over that footprint. Retaining
+the source's mode inside a table is insufficient: repeating either endpoint changes
+the likelihood under the convolution. Evaluating `h` additional source cells on each
+side, applying the same operator, then retaining the original output cells computes
+the declared finite convolution without endpoint padding in its interior. The existing
+lower-side construction and row normalization follow unchanged. These temporary source
+evaluations do not change the inference lattice, its spacing or the hop variance.
+The kernel must use the original spacing directly: reconstructing it by subtracting
+two extended coordinates can round `4 sqrt(v)/d` across an integer and select a different
+finite convolution. This is an arithmetic requirement, not a new width or truncation rule.
+The factor four belongs to the existing blur being held fixed; this identity does not
+derive that model's width or certify its truncation error. Nor does it repair a generic
+transported table whose physical support was already discarded.
+
+**A convolution preserves relative likelihood in its tails.** For a log row `ell`, the
+same finite operator is `B_j=log sum_t exp(ell_{j+t}+log w_t)`. Subtracting one global
+maximum before exponentiation does not prevent underflow in a window far from that
+maximum. Flooring the resulting probability replaces distinct log-likelihood values
+with an arbitrary plateau. Instead choose the maximum within that window,
+`m_j=max_t(ell_{j+t}+log w_t)`, and evaluate
+
+    B_j = m_j + log sum_t exp(ell_{j+t}+log w_t-m_j).
+
+For a window with at least one finite log term, at least one term in the inner sum
+is one. If every term has zero likelihood, `m_j=-infinity` and `B_j=-infinity`;
+subtracting that peak would be undefined. A valid row has a finite maximum somewhere,
+so its zero-likelihood windows survive the final normalization. The existing edge padding, kernel radius,
+variance, lower-side construction and final normalization do not change. Ordinary
+probability arithmetic can still serve windows whose sums are in the floating-point
+type's normal range; evaluate the other windows with this local log-sum-exp. This
+numerical branch uses the machine representation's limit, not a density or evidence
+threshold. Retain kernel weights in log form too: a weight that underflows by itself
+can still matter relative to a very low source value. This identity addresses arithmetic
+loss; it does not restore missing table support or validate the factor's biological model.
+
+**An edge's count projection is not its intensity coordinate.** Hold the existing
+one-sided edge constraint fixed. A pure-DNA boundary has observed count `Nb` and DNA
+opportunity `Eb`. Write its relative log factor as
+
+    Qb(rho) = Nb log(min(rho Eb, Nb)/Nb) - min(rho Eb, Nb) + Nb.
+
+For `Nb>0`, it is a Poisson likelihood below its empirical mode and zero above.
+As a factor on the recipient, this assumes its DNA density is at least the boundary's.
+The source being pure DNA does not establish that ordering under capture
+(`ISSUES: the-edge-density-floor-under-capture`). This preserves the existing lower-bound
+model; it does not establish equal capture or an exact joint likelihood for adjacent observations. In the count solver, a
+recipient with observed total `Ne` and DNA opportunity `Ee` projects it to
+
+    Re(lambda) = Qb(sigmoid(lambda) Ne/Ee).
+
+That is exactly the current EDGE constructor. In an intensity readout, however,
+expected DNA incidences are `D=rho Ee` and expected RNA incidences are unknown `r`.
+Substituting `lambda=log(D/r)` into this projected row gives
+
+    Re(log(D/r)) = Qb(rho Ne/(D+r)),
+
+which is generally not `Qb(rho)`. It even changes when `r` changes at fixed DNA
+density. The equality requires substituting observed total for expected total;
+an integral over the latter does not restore the original factor. Under the retained
+lower-bound assumption, `Qb(rho)` would lie outside the recipient's RNA integral.
+That conditional comparison isolates the projection's meaning; it does not license
+absolute-density transport along composition routes or certify the transfer assumption.
+A change at the first recipient also does not correct copies already sent onward in
+composition units. Source transfer and observation reuse require their own derivations.
+
+**Repeated blurs require the propagated footprint.** A finite discrete convolution of
+radius `h` cells, evaluated on lattice indices `[a,b]`, reads input indices
+`[a-h,b+h]`. For successive radii `h_1,...,h_m`, the composed convolution reads
+`[a-sum h_i,b+sum h_i]`. Thus representing each original source accurately on a retained
+interval does not establish accuracy after repeated propagation on that same interval.
+Padding an intermediate row introduces values not supplied by the source; those values
+can enter later retained cells. Empty forwarding adds no convolution radius. This is
+an operator dependency, not a genomic distance or a new uncertainty model.
+
+The interval identity alone is not a complete message algorithm. Prefix maxima can read
+all earlier cells, normalization depends on the relevant maximum, and intersections can
+move that maximum. Their source limits and support requirements must also be preserved.
+Likewise, the unbounded RNA integral below needs a compatible tail representation. No
+fixed enlarged window, new endpoint rule or independent inference lattice is selected
+by this derivation.
+
+**A finite core certifies level normalization.** For the current positive-count level
+sources, choose an interval `[a,b]` outside which the likelihood is nondecreasing on the
+left and nonincreasing on the right. It contains a global maximum on the uniform lattice.
+A Poisson source needs the two knots bracketing its mode. A converted composition source
+can conservatively use `log(N/(E*rho_ref)) + [log(EPS),0]`: below it the existing fraction
+clamp is constant, and above it only the decreasing total-count tail remains.
+
+Pointwise minimum preserves this certificate on the union of the parents' core intervals.
+A positive finite convolution expands the core by its radius. Prefix maximum preserves
+the core, with a constant right tail after the global maximum. Consequently a requested
+interval, united with the operation's core and expanded backward by convolution radii,
+suffices for exact evaluation of these discrete operators. No probability-tail cutoff is
+needed. Normalize each parent before intersection, and apply the same normalization to
+its limiting values. Zero-count sources remain governed by the existing admission rules;
+this argument does not invent an observation where none is admitted.
+
+**Coordinate translation preserves physical knots.** If `u=log(rho/r)` and the numerical
+reference changes to `r'=r*exp(d)`, the same physical points have coordinates `u'=u-d`.
+Translating the stored knots by `-d` preserves interpolation and the finite convolution,
+whose offsets depend only on their differences. Keeping knots at the same numerical
+positions instead resamples the function on different physical densities. Complete range
+does not remove that phase error. A candidate local unit `r_C=sum(n_j)/sum(E_j)` over
+already admitted positive source count/exposure pairs is positive and transforms as
+`r_C'=r_C/c` when the component's exposure units change by `c`. It can position a numerical
+lattice without entering a likelihood or prior. This is a covariance property, not a
+claim that the ratio estimates the component's biological abundance; choosing that local
+unit as the production origin remains a separate design decision.
+
+**Local units fix coordinates, not quadrature error.** Label the undirected connected
+components of each existing level lane's permitted faces; either permitted direction
+joins a pair for this numerical purpose. Assign the positive-source ratio above once to
+each component, before selecting queries or packing blocks. Its physical knots are
+`rho_j=r_C*exp(u_0+j*Delta)`. A change in a disconnected component's observations cannot
+move these knots. If every exposure in this component changes by `c`, then both a
+physical density and `r_C` change by `1/c`; the source functions and recipient queries
+in `u=log(rho/r_C)` are unchanged. In particular, a recipient query
+`log(f*N/(E*r_C))` is invariant. Neither reduction nor conversion adds a statistical
+factor. With no admitted positive source there is no unit and no row.
+
+This covariance is conditional on fixed admissions, count grid and strand protocol.
+Changing a connected source can move the grid phase; finite spacing still incurs
+interpolation and convolution error. Coordinate covariance and convergence to a finer
+evaluation are distinct contracts. A small error in normalized message height is also
+distinct from a small error in a posterior readout: the latter depends on the other
+factors, and a median's sensitivity can change with posterior shape.
+
+**A narrow likelihood can disappear between accurate knots.** For a known Poisson
+count `n` on exposure `E`, the log likelihood at log rate `u` is
+`ell(u)=n*u-E*exp(u)+constant`. At `x=(1-t)*a+t*b`, the straight-line interpolant
+through `a,b` has the exact deficit
+
+    ell(x) - ((1-t)*ell(a)+t*ell(b))
+      = E*((1-t)*exp(a)+t*exp(b)-exp(x)) >= 0.
+
+The inequality is convexity of the exponential. Around the mode, curvature is `-n`;
+the midpoint deficit is approximately `n*(b-a)^2/8` for small spacing. Thus exact
+values at every stored point do not control interpolation error between points,
+and a fixed positive spacing does not give a depth-independent likelihood error.
+The log-rate width near the mode shrinks like `1/sqrt(n)`. An existing blur whose
+variance also shrinks with count does not impose a fixed minimum width.
+
+This identifies a representation error, not a new observation law. Preserving a
+known source function through its declared operations is a candidate remedy;
+evaluating that function before a blur does not by itself certify the blurred
+curve or a later interpolation. Consumer queries and normalization must be
+checked too. No new interpolation family or refinement constant follows from
+this identity alone.
+
+The same one-dimensional numerical integral evaluates the separate RNA factor. On
+`z=log r`, its log-factor is
+
+    h_C(log(rho Eg)-z) + h_H(z-log(Er rho_R_ref)).
+
+Partition at the union of the transformed composition knots and RNA-level knots. In
+each interval the score above replaces `-h'` with `-h_C' + h_H'`; the descending-root
+argument is unchanged. A conservative tail degree is
+`R=u+v+max|h_C'|+max|h_H'|`, so the same explicit tail bound applies. At zero DNA,
+the remaining integral is a Gamma-shaped RNA likelihood times `H`; the analytic Gamma
+limit applies only when `H` is constant. A positive numerical anchor permits stable log
+ratios at zero DNA without assigning a positive biological RNA rate. DNA-level factors
+multiply the completed integral at the candidate density; they are not evaluated at an
+allocated count. An absent RNA opportunity has the pure-DNA shape, and RNA-only factors
+then cannot affect its shape. These are coordinate and numerical changes, not new priors.
+
+**Proper local capture reference and continuous correction** (2026-10-09; prototype,
+not the shipped capture reader). Let `L(rho)` be the object's density evidence,
+including its licensed local factors, and let `Q(rho)` be a normalized background
+distribution with positive mean `mu`. Background has capture label one. In the
+enriched component, put a uniform reference on the retained background fraction
+`b=1/C` for `0<b<1`, where `rho=mu*C`. Its density is `p(C)=1/C²`, `C>=1`:
+
+    integral_1^infinity dC/C² = 1,
+    integral_1^infinity log(C) dC/C² = 1.
+
+These are explicit modelling choices. This slab scales the background **mean**;
+it does not mix `Q(rho/C)/C` over `C`. Equal component odds are not a learned
+prevalence or a consequence of symmetric measurements. Define
+
+    B = integral_0^infinity L(rho) Q(rho) d rho,
+    S = integral_1^infinity L(mu*C) dC/C²,
+    T = integral_1^infinity log(C) L(mu*C) dC/C².
+
+The background state's score is `-1`, and the enriched state's score is `log C`.
+Their prior mean is zero at equal odds. The positive posterior mean score gives
+
+    log(weight) = max(0, (T-B)/(B+S)).
+
+This is a correction score, not the posterior geometric mean of physical capture.
+For a general normalized slab with log moment `m` and prior probability `p`, the
+same neutral counterarm has background score `-p*m/(1-p)` and readout
+
+    log(weight) = max(0, p*(T-m*B)/((1-p)*B+p*S)).
+
+This expression permits isolated prior comparisons without silently changing the
+readout. Flat evidence has `B=S=L` and `T=m*L`, so the weight is exactly one.
+Multiplying all evidence by a positive constant cancels. Concentration on the
+background gives one; concentration at an enriched `C` gives `C` **only when the
+posterior background probability vanishes**. Background and enrichment densities
+can overlap even with arbitrarily precise observations. Continuity follows from
+continuous finite integrals and positive normalization; there is no median switch.
+
+Two exact numerical coordinates for the proper slab are
+
+    S = integral_0^1 L(mu/b) db
+      = integral_0^infinity L(mu*exp(x)) exp(-x) dx,
+    T = integral_0^1 -log(b) L(mu/b) db
+      = integral_0^infinity x L(mu*exp(x)) exp(-x) dx.
+
+Neither imposes an upper capture ceiling. Splits at known curve features resolve
+the quadrature without changing the prior. Numerical error in these integrals is
+separate from error in the supplied message curves and the observation model.
+Under a covariant rate change `rho'=c*rho`, `mu'=c*mu`, `Q'(rho')=Q(rho'/c)/c`
+and `L'(rho')=L(rho'/c)`, all three integrals and the weight are unchanged.
+
+A zero observation remains evidence. A missing own DNA opportunity makes only
+that own term flat; local density factors may still inform it. If a family of
+backgrounds collapses to zero with `mu` and `L` is bounded, continuous at zero
+and `L(0)>0`, dominated convergence gives `B,S,T -> L(0)` and weight one. This
+does not identify an absolute capture factor at exactly zero background. When
+`L(0)=0` that argument fails; do not install a positive floor or library capture
+gate to hide an unidentified scale.
+
+As a reference check, an observed pure-DNA count `k` has
+`L(mu*C) proportional to C^k exp(-mu*E*C)`. Conditional on enrichment, for
+`k>1` its proper-tail posterior is Gamma(`k-1`, rate `mu*E`) truncated below
+one. When truncation and background probability are negligible,
+`log(weight)=digamma(k-1)-log(mu*E)`. The finite-count shrinkage follows from
+the selected prior and log readout; it is not a numerical integration error.
+
+**Flat evidence and post-fit population mixing** (2026-10-08; diagnostic limitation).
+For a population grid with masses `p_j`, the evidence objective is
+`F(p)=sum_i w_i log(sum_j p_j L_ij)`. A row constant in `j` contributes a constant and
+cannot change an optimum of `F`. If the fitted shape is subsequently mixed with one
+uniform pseudo-region, however, the published shape is
+
+    p_tilde = (W p_hat + u)/(W+1),  W=sum_i w_i,  u_j=1/G.
+
+Adding a positive-weight constant likelihood leaves `p_hat` unchanged but changes this
+mixture unless `p_hat=u`. Thus flat-evidence neutrality of the likelihood fit does not
+automatically extend to its postprocessing. Attribute population-shape and mixing-strength
+changes separately when testing admission or weights; this observation does not prescribe
+a new population regularizer.
+
+**Population objective and readout stability** (2026-10-08; diagnostic limitation).
+For the objective above, normalize positive total object weight to one and write
+`m_i=sum_j p_j L_ij`. Its gradient is `d_j=sum_i w_i L_ij/m_i` and
+`sum_j p_j d_j=1`. Concavity therefore bounds the remaining objective improvement by
+`max_j d_j-1`. Constant likelihood rows may be cancelled before this numerical check.
+The bound controls objective value. Without a lower curvature bound it does not bound
+distance between fitted populations, nor changes in a posterior median that uses them.
+Population and downstream readout convergence require separate checks.
+
+Setting every object weight to one is an ordinary population-likelihood control: broad
+likelihoods retain their own uncertainty. It does not prove that delivered neighbour
+factors are independent observations. Replacing posterior-based weights, repairing
+inherited factors and selecting population regularization remain distinct interventions.
+The equal-weight contrast retains the control's post-fit mixing strength, so changing
+relative object contributions does not also change uniform smoothing.
+
+**Conditional observations at one splice face** (2026-10-07; reference only, no new
+production assembly). Let a single-strand exon have DNA density `rho`, RNA expectation
+`r` and RNA opportunity `Er_t`. Set `s=r/Er_t`. Let `z_j` be the local RNA share using
+each junction at this face, with `z_j >= 0` and `sum z_j <= 1`; the remaining share
+continues through the boundary. This describes routes within the same RNA strand,
+not additional solver populations. At the source face, define
+
+    a = rho Eg_b,   c = s (1-sum z_j) Er_b,
+    mu = (a/2 + q c, a/2 + (1-q)c, s z_1 A_1, ..., s z_J A_J).
+
+The disjoint observations at this one coordinate are the two unspliced columns and
+the individual junction counts. Conditional on their combined total `N`, their factor is
+
+    H(rho,r,z) = Multinomial((U_pos,U_neg,J_1,...); N, mu/sum(mu)).
+
+It follows by dividing the product of the independent Poisson observation probabilities
+by `Poisson(N; sum(mu))`. A common multiplier of all source means cancels exactly.
+This retains the existing premise that the source's unspliced and junction observations
+share capture affinity; separate component or route capture factors do not cancel.
+Each route needs its own `A_j`. Collapsing to a summed count and one effective opportunity
+does not preserve the full observation factor. With no splice routes the factor reduces
+to the conditional strand factor above. A positive junction count has no support at
+zero RNA or zero opportunity. An empty source contributes a constant.
+
+For an unstranded source, let `p_U=U/N`, `p_j=J_j/N`, and `B=sum_j p_j/A_j`.
+For `s>0`, `B>0`, the observed category proportions can be fitted exactly for every
+
+    0 <= rho <= s p_U / (Eg_b B),
+
+by setting `T=(rho Eg_b+s Er_b)/(p_U+Er_b B)` and `z_j=T p_j/(s A_j)`.
+The unspliced strand split contributes the same `Binomial(U_pos;U,1/2)` throughout.
+Thus these observations supply an upper constraint but cannot by themselves require
+positive DNA when the route shares are unknown. This is a local identification result,
+not a claim that neighboring pure-DNA observations or a population prior are useless.
+
+The factor is independently checked against Poisson conditioning, the no-splice limit,
+component units, strand reversal and the analytic unstranded family. A one-route profiling
+reference is now certified below; it has not been connected to calibration. Multiplication
+across both faces additionally requires accounting for fragments observed at more than one
+boundary.
+Reference: `.cache/rigel_runs/2026-10-07_observation_inputs/`
+(`splice_factor.py`, `test_splice_factor.py`, `test_splice_identification.py`).
+
+**Profiling a local RNA route** (2026-10-07; diagnostic reference, not production policy).
+At fixed `rho,r`, the source mean vector is affine in the route simplex. Let `v_k` be
+its all-continuing and all-on-junction vertices, with positive totals `T_k=sum v_k`.
+For route-simplex weights `alpha_k`, normalization gives
+
+    p = sum_k w_k (v_k/T_k),
+    w_k = alpha_k T_k / sum_l alpha_l T_l,
+    alpha_k = (w_k/T_k) / sum_l (w_l/T_l).
+
+Thus the allowed source probabilities are exactly the convex hull of the normalized
+vertices. Zero-total vertices add no probability vector; positive observations with no
+support remain impossible. With one junction there are two vertices, and
+
+    ell(w) = sum_c n_c log[(1-w)p_0c + w p_1c] + constant,
+    ell'(w) = sum_c n_c (p_1c-p_0c) / [(1-w)p_0c + w p_1c].
+
+The derivative is nonincreasing, so endpoints and a bracketed scalar root suffice.
+There is no route prior, RNA population fit or biological threshold. This maximization
+would belong inside the already specified RNA integral; a profile likelihood is not
+marginalization over a new Bayesian route reference. Integration was not implemented:
+the opportunity premise fails the structural robustness check below first.
+
+**Capture-opportunity nonidentification at a splice face** (2026-10-07). Let the actual
+source means have separate positive capture averages `gamma_D`, `gamma_C`, `gamma_j`
+on DNA, continuing RNA and junction route `j`. The target's `rho,r` remain fixed. Define
+
+    B = gamma_C (1-sum_j z_j) + sum_j gamma_j z_j,
+    rho_star = gamma_D rho / B,
+    z_star_j = gamma_j z_j / B.
+
+The shared-capture model evaluated at `(rho_star,r,z_star)` has exactly the actual mean
+vector divided by `B`. Conditioning on the source total cancels `B`, making the two
+explanations observationally identical at this source. Equal capture averages give
+`rho_star=rho`; otherwise they generally do not. This identity holds for arbitrary positive
+component and route opportunities, so more accurate uncaptured length integrals alone
+cannot repair it. For a stranded source with positive continuing/junction opportunities
+and informative column balance, the noiseless source factor can have its maximum at the
+wrong density. At an unstranded source retain the identification plateau above rather than
+claiming a unique density. Increasing depth scales the likelihood preference for the wrong
+density; it does not remove the misspecification.
+
+Using the correct capture-weighted opportunities restores the true explanation in the
+reference, but these opportunities are oracle inputs in that check, not an estimator.
+Profiling route shares cannot estimate the missing capture averages from the same source
+counts. The identity does not say that an informative target's own reads, other independent
+observations or the explicit DNA landscape are useless. It says this conditional face
+factor alone cannot distinguish routing/composition from relative capture. The same-capture
+premise is inherited from the point-rate maps, not introduced by the profiling arithmetic.
+See `ISSUES: the-gdna-prior-enters-psi-twice` for the noiseless and placement receipts.
+Reference: `.cache/rigel_runs/2026-10-07_route_profile/` (`route_profile.py`, independent
+route-coordinate tests, `capture_mismatch.py`, placement enumeration and mutation receipts).
+
+**3.2b Component opportunities in a composition profile.** Let a boundary have unspliced count `U`,
+count fraction `f`, component opportunities `Eg_b, Er_b`, and certified RNA rate `s` belonging to a
+flank. The implied flank COUNT log-odds are
+
+    g = U f / Eg_b                         u = U (1-f) / Er_b
+    lambda_x(f) = log(g Eg_x) − log((u+s) Er_x).
+
+All four opportunities use the same capture-blind geometric operator, evaluated on the supplied
+component laws. This does **not** establish that those laws share a capture frame: production passes
+the uniform-frame `gdna_pmf` and the capture-selected, junction-de-tilted `rna_pmf`. The maps are
+count-frame algebra conditional on these inputs; their interpretation as common component densities
+requires compatible law frames, which remains unresolved under capture
+(`ISSUES: the-scorer-reads-a-census-length-law`).
+Using `Eg` for RNA as well is valid only when the opportunities coincide. The splice rate is the
+route sum `Σ_J J/A_J`; a contiguous spliced crossing contributes `S/Er_b`. An alternative-splice
+site adds both on its exonic flank and only the crossing rate on its continuing flank. A terminus
+uses the same rule on its licensed outside flank; its inside level rule is a different claim.
+
+The forward face pushes the boundary's profile through this monotone map. The reverse face evaluates
+the exon's profile at `lambda_x(f)` and marginalizes its existing counting uncertainty in `s`.
+They must use the same opportunities and central rate. These are likelihood profiles, not a change
+of posterior density, so there is no Jacobian. The familiar `f_b = f_x (U+S)/U` is the equal-component-
+opportunity special case with `s = S/E_b`, not the general map.
+
+Where no RNA is added (the intron–boundary face), the map reduces to §3.2's exact log-odds shift.
+The received profile at `lambda_dst` reads the source at
+`lambda_dst + log(Eg_src/Er_src) − log(Eg_dst/Er_dst)`. No additional width is implied by this change
+of coordinates. For the alternative-splice pair's existing discrepancy rule, the disagreement is
+`lambda_x(f_b, measured s) − lambda_x_observed`; comparing the unmapped count odds prices geometry
+as biological disagreement. The existing counting-width terms are unchanged.
+
+Gates: `tests/calibration/test_splice_out_opportunities.py` reconstructs count fractions from analytic
+contained/crossing placements and known densities under both length gaps and their equal-length
+control. These are deep, mode-focused gates with junction opportunity equal to the boundary's RNA
+opportunity; they do not certify route-rate uncertainty or the estimated laws' frame.
+`tests/calibration/test_transfer_faces.py` checks wiring and profile composition, mostly using the
+native row functions themselves. Remaining uncertainty and builder coverage are recorded in
+`ISSUES: calibration-detects-capture-on-a-capture-off-library`.
 
 **3.3 Conservation with unequal effective lengths is `Σ_c ρ_c·E_c = M`**, not `Σ_c ρ_c = M/E`
-(`density_deconv.py`, `messages/transfer.py`). Its sensitivity is bounded: a purely compositional error
+(`region_geometry.py`, `messages/transfer.py`). Its sensitivity is bounded: a purely compositional error
 moves `M/Σρ_c E_c` by only ×1.04 on a contained region and ×1.50 at a crossing, so a large violation is
 accumulated drift, never one hop.
 
@@ -292,9 +969,10 @@ Matching component sets against each flank, `T(INTRON) = T(BOUNDARY, U only)` an
     (II) EXON   face:  phi_g(BOUNDARY) = rho_g / (rho_g + rho_u + rho_j)    ==  phi_g(EXON)
 
 One boundary, one gDNA density, two composition statements differing only in whether the sj term is in
-the total. (I) plus the boundary's own mass identity `U = rho_g·E_g + rho_u·E_r` is two equations in two
-unknowns, and the intron's composition is prior-free (the intron factory); (II) then delivers the exon's
-composition with every term measured.
+the total. Given an intron composition from its own observations or licensed messages, (I) plus the
+boundary mass identity `U = rho_g·E_g + rho_u·E_r` determines the boundary split; (II) maps it to the
+exon. The component-set identities alone do not measure the intron composition. In particular, an
+unstranded intron's total is not a DNA observation and no abundance-based intron prior is supplied.
 
 The estimator is not the identity. The sj sees only `E_J/(E_J + Σ E_r)` of a transcript's spliced
 fragments (about 11 % for two exons), so at low RNA `rho_j` is a handful of counts; face (I)'s job is to
@@ -450,6 +1128,10 @@ its two-component form is the gates' readable reference, `tests/calibration/_psi
     loglik = −½·(sense − N·p)²/var − ½·log(var)
 
 `od_g` and `od_r` are both 0 (§6, `DESIGN.md` §3.3a), so `var` is the binomial `N·p(1−p)`.
+In the production count solve this variance is evaluated at the incoming reference
+composition and held fixed while the grid changes the mean. It is a Gaussian approximation,
+not an exact small-count observation model. Own message claims instead use **Observed strand
+evidence** above: the conditional-binomial likelihood with no belief-frozen width.
 
 **5.2 What it can and cannot say.** With RNA tilt `d = f₊ − f₋`, `p = ½ + (κ−½)·d` — the gDNA fraction
 cancels identically. Strand measures the tilt; it reaches gDNA only through the triangle bound
@@ -566,7 +1248,7 @@ same likelihood as "a few objects of the other strand".
 
 ---
 
-## 7. Background rate, and deconvolving counts without strand
+## 7. Background rate
 
 **7.1 A faint background rate is measurable only in aggregate** (`gdna_density.pooled_log_rate`,
 `one_sided_rate`). `ρ_bg = Σg/ΣE`, `Var(log ρ_bg) ≈ 1/Σg`. A region of effective length `E` resolves a
@@ -574,10 +1256,6 @@ rate only above ~`1/E` (Fisher information = `ρ·E`), so no per-region estimato
 resolved sharpest. One-sided: `ρ_bg > 0` proves DNA present; `ρ_bg ≈ 0` does not prove absence, because
 capture depletes the off-target floor. Never a denominator or a scale.
 
-**7.2 Counts against a gDNA background with no strand data** (`density_deconv.fit_gdna_background`,
-`_log_negbinom`). `P(g|C) ∝ P_bg(g)·1[0 ≤ g ≤ C]` with `g ~ NegBinom(ρ_bg·E_g, α_eff)`, a flat one-sided
-prior on the RNA excess, truncated at the observed total. `α = Σμ²/max(Σ(g−μ)² − Σμ, 0⁺)` (∞ ⇒ Poisson),
-`1/α_eff = 1/α + 1/(Σg + n₀)`. No tuned constant.
 
 ---
 
@@ -812,9 +1490,9 @@ the mass outside `L = 10`); (iii) proper for every `m ∈ (0,1)`; (iv) substitut
 
 ⛔ **ψ ships without this term.** A reference location built on it was refuted and deleted on
 2026-08-24 (`DESIGN.md` §6b.1): a location is a prior assertion at fixed strength, and where the strand
-channel is dead it was the entire answer at any depth. Background information enters as likelihood terms
-whose precision scales with counts (the intron factory's rows, built in the solve's kernel from `density_deconv`'s background; the landscape prior). The
-derivation stays because it is what any future location would be judged against.
+channel is dead it was the entire answer at any depth. Count inference uses the explicit fitted landscape and licensed local evidence. There is no
+additional intron-background constraint. The reference-location derivation stays because it is
+what any future location would be judged against.
 
 ### 9c.1 The strength of a reference mean is a log-odds, and one pseudo-observation sets it
 
@@ -881,7 +1559,7 @@ neither scale beyond them. With `N` the largest slot count on the chain,
 
     A = max(c_κ · N, K²/2),      B_f = ½ · ε · T · A,      B_var = L̃² · ε · T · A,
 
-with `T = 6` (the strand term, two arms, the factory rows, the message rows, the cube row) and `ε` the
+with `T = 6` (the strand term, two reference halves, the fitted DNA landscape, the message row, the cube row) and `ε` the
 solve's rounding unit — float64's `2⁻⁵³`, the whole of ψ's precision. The
 bound is loose by construction (a full cancellation at a high-weight cell is assumed), which is why the
 report always shows the actual move beside it. Achievable rounding lands orders inside it: float32
@@ -1252,6 +1930,16 @@ low and high boundaries, under the additive model above
 (`ISSUES: ruler-witness-geometry-on-transcript-panels`).
 
 ## 12. The flux price's witness — the column count on the protocol's share of the opportunity (`transfer_kernel.h`'s `rna_lane`)
+
+**Local strand-witness availability.** For local DNA amount `g` and RNA amounts `R+`, `R−`,
+the expected column difference is `(2κ − 1)(R+ − R−)`; the equal DNA contributions cancel.
+At a single-RNA-strand object this supplies a local RNA contrast whenever the measured
+protocol permits strand interpretation. Availability therefore reads the fitted-model
+presence and protocol verdict, while the hop's observations determine its witness and
+precision. A disconnected exon's count is absent from this equation and cannot select the
+interpretation. This is conditional on the technical fit: re-estimating `κ` from different
+protocol observations is a different intervention. At a both-strand object the difference
+identifies a contrast, not either amount separately; the existing hop approximation is unchanged.
 
 The certified flux at one of an exon's junctions is that strand's RNA level at the exon (§6b.13's source):
 the spliced count `c_J` at the junction's route rate `r_J = Σ flux / A_route`, and every hop pays the

@@ -1017,13 +1017,17 @@ far end of the RNA-seq spectrum, not a sample of it: sweep the plausible space, 
 bring the domain call to the owner. In particular, never assume RNA fragments are longer than gDNA; true
 for cfRNA, false elsewhere.
 
-**running-an-arm-is-a-fresh-process. Six operational traps from running panel arms, each of which cost a
+**running-an-arm-is-a-fresh-process. Seven operational traps from running panel arms, each of which cost a
 launch.** (i) Never edit `src/` while an arm is running: every arm imports `src` at start-up, so a
 mid-flight edit changes what half the shards measured. (ii) zsh does not word-split an unquoted variable;
 use an array. (iii) A wait-loop whose `pgrep` pattern matches its own wrapper deadlocks; wait on a log
 marker. (iv) A default path stored in two homes goes stale in one. (v) Node-axis and region+boundary
 figures differ by ~2×; say which. (vi) A composite arm fires only its components' names, so a guard keyed
 on the arm's own name trips after a valid run; check why a guard fired before distrusting the data.
+(vii) Separate prototype test families can import different files under the same module name
+(`reference`). A combined pytest process then reuses the first oracle from `sys.modules`.
+Run the frozen families in separate processes, and retain the failed harness receipt; do not
+edit an independent oracle to accommodate an import collision.
 
 **shard-an-arm-sweep-by-condition. Shard a panel sweep by condition, never by arm over one condition; the
 instruments write their caches.** Concurrent arms on the same condition race writers on one directory:

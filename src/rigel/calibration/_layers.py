@@ -56,8 +56,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         # else.
         # `gdna_density` is the gDNA background RATE — a count divided by an opportunity, which is this
         # layer's job. It owns BOTH estimators of that one quantity (the naive pooled rate and the
-        # contamination-robust one-sided rate), so layer 5's `density_deconv` calls DOWN to it rather
-        # than carrying a second implementation.
+        # contamination-robust one-sided rate), shared by their consumers.
         (
             "effective_length",
             "capture_eff_length",
@@ -85,7 +84,6 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         # How dense a component is, and every fitted population prior.
         (
             "density_model",
-            "density_deconv",
             "landscape",
             # `capture_efficiency` is every region's and boundary's capture efficiency: a posterior under the
             # landscape prior from the object's own deconvolved gDNA count, read by the ruler and the locus

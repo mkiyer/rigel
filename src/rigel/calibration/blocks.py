@@ -59,8 +59,7 @@ class SweepCapture:
     belong here.
 
     Per slot (``(n,)`` unless stated): the message-free SELF-SOLVE's ``fg_loc`` and its ``tau_lam`` (the
-    slot's own composition evidence: the strand term's precision at ``fg_loc`` plus the factory row's
-    curvature, ``tau_fac``, which is published apart so an instrument can split the two sources); the
+    slot's own composition evidence: the strand term's precision at ``fg_loc``); the
     STRAND-ONLY solve's ``fg_strand`` (no prior, no messages, to split the local error into the strand
     likelihood against the prior's contribution); the FINAL solve's ``f_g`` and ``var_g``; ``solvable``;
     the observations ``count`` ``(n, 2)``, ``spliced``, ``mature``, ``free_pos``, ``free_neg``,
@@ -77,7 +76,6 @@ class SweepCapture:
     f_g: np.ndarray | None = None
     var_g: np.ndarray | None = None
     tau_lam: np.ndarray | None = None
-    tau_fac: np.ndarray | None = None
     solvable: np.ndarray | None = None
     count: np.ndarray | None = None
     spliced: np.ndarray | None = None

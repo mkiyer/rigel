@@ -11,14 +11,14 @@ policy has three parts, all of them the kernel's (`native/transfer_kernel.h`, ru
 `native/solve_kernel.cpp`); ``prepare_block`` is a table of contents: one named BUILDER per shipped
 message.
 
-* Every node's OWN CLAIM (``claims``): an intron's factory profile (its density against the
-  intergenic background — the factory's row for it, the very row ψ adds as its λ-factor); an exon's or
-  a boundary's own strand profile where the library's strand protocol decision declares the channel
-  live (``strand``); an intergenic|exon edge's gDNA COUNT (the level lane: the edge's crossing is
+* Every node's OWN CLAIM (``claims``): an eligible single-strand region's or boundary's conditional
+  binomial likelihood from its observed strand counts, where the library's strand protocol decision
+  declares the channel live (``strand``); an intergenic|exon edge's gDNA COUNT (the level lane: the edge's crossing is
   structurally pure gDNA). ⛔ A claim is data only — never a belief, which already holds the prior and
   the neighbours.
 * The RECIPIENT's rule per directed face: absent = STOP (composition cannot cross: the recipient
-  holds silence); the identity = FORWARD (the two objects share one unspliced population exactly); a
+  holds silence); FORWARD preserves the shared density mixture, shifting count odds by the component
+  opportunities where they differ; a
   map = MODIFY (the face's arithmetic with its counting width and, where two witnesses exist, the
   pair's own discrepancy). The rules are TYPED TABLES: every directed face is one of a node's two
   sides — it hears from its left neighbour or its right — so a rule is a KIND and its parameters at
@@ -26,7 +26,8 @@ message.
   messages, each built by the builder named:
 
   - ``splice_faces`` — the intron|exon face. intron ⇄ boundary: FORWARD both ways (one shared
-    unspliced population; into the intron only under a shared single strand). boundary → exon at a
+    unspliced population, expressed in each object's count frame; into the intron only under a shared
+    single strand). boundary → exon at a
     LICENSED face (no terminus, the same strand set): the splice-in face map, the certified flux
     capping the claimable gDNA share, widened by the face's counting. exon → boundary at that face:
     the splice-in map read backwards, marginalised over the face's spliced-to-unspliced ratio.
@@ -34,7 +35,7 @@ message.
     the edge's gDNA density, at the count's Poisson width; nothing above (no local witness prices
     capture's enrichment of the interior), a zero count vacuous (darkness is not absence).
   - ``terminus_rules`` — the exon|exon TERMINUS boundary ⇄ its OUTSIDE exon: the licence counts the
-    spliced crossing, ``f_b = f_O (U_b + S_b) / U_b`` — the outside exon's message travels the
+    spliced crossing, using each component's geometric opportunity and the crossing's RNA rate — the outside exon's message travels the
     splice-out map, the boundary's the face map with the spliced density. And a TERMINUS boundary →
     the region INSIDE it (exon|exon and exon|intron alike): THE LEVEL RULE. Composition cannot cross
     a terminus (new transcription starts or ends there), the gDNA LEVEL can: the boundary's OWN
@@ -86,7 +87,7 @@ message.
   as a constraint, and ψ fuses the row with the slot's own evidence and the prior.
 
 The laws the policy keeps: the sender publishes its claim unchanged; the recipient decides; a no-claim
-stays a no-claim — a flat profile or an absent factory row is no claim on that channel, never a
+stays a no-claim — a flat profile is no claim on that channel, never a
 zero-filled one; a message is built from the source's claim and the recipient's constants
 and observations, never the recipient's belief.
 
@@ -117,10 +118,11 @@ class _Library:
     cross-block information a message may use. ``rho_gdna``: the structurally pure gDNA density, the
     gDNA lane's coordinate (``0.0``: no positive density anywhere, so no level lane can be built).
     ``rho_rna``: the RNA lanes' one coordinate — the unspliced RNA density over the library's
-    single-strand exons, both strands pooled, or over every exon when no single-strand exon has counts
+    single-strand exons, both strands pooled, or over every exon when none has RNA opportunity.
+    When that origin is zero, available RNA count/opportunity pairs supply a numerical scale
     (a level is absolute and the coordinate only its origin, so one serves both strands and a strand with
-    no single-strand exon of its own still builds its flux levels). ``split_live``: the strand split is a witness of a strand's RNA somewhere — the
-    library's protocol preserves strand and some single-strand exon has counts."""
+    no single-strand exon of its own still builds its flux levels). ``split_live``: an available
+    strand model and the library's protocol verdict permit local strand-difference witnesses."""
 
     rho_gdna: float
     rho_rna: float
@@ -128,15 +130,16 @@ class _Library:
 
 
 class TransferPolicy:
-    """``strand = (kappa, od_g, od_r)`` is the library's fitted strand model, which the exon's and the
-    boundary's own claims need; ``None`` leaves every strand claim off. The intron factory's per-slot
-    profiles are the kernel's own rows; a factory with nothing to claim leaves the faces and the lanes
-    exactly as with one."""
+    """Observed strand claims use the fitted RNA sense fraction ``kappa``.
+
+    ``None`` leaves strand claims off; eligible regions and boundaries otherwise
+    supply the conditional-binomial likelihood of their observed strand counts.
+    """
 
     name = "transfer"
 
-    def __init__(self, strand: tuple[float, float, float] | None = None):
-        self.strand = None if strand is None else tuple(float(x) for x in strand)
+    def __init__(self, kappa: float | None = None):
+        self.kappa = None if kappa is None else float(kappa)
 
     # ── the library: the lanes' coordinates and the strand witness's liveness, once ─────────────────
     def library(self, view: ChainView) -> _Library:
@@ -157,20 +160,15 @@ class TransferPolicy:
         if not rho > 0.0:
             den = float(a_g[a_g > 0.0].sum())
             rho = float(n_u[a_g > 0.0].sum()) / den if den > 0.0 else 0.0
-        kappa = None if self.strand is None else float(self.strand[0])
+        kappa = self.kappa
         # the split is a witness of a strand's RNA only where the library's strand channel is live —
-        # the protocol decision (`ChainView.strand_live`): where the protocol preserves strand, every
-        # counted single-strand exon's strand precision is positive; where it does not, none is (an intron's
-        # factory precision joins its strand term, so introns cannot stand for the channel)
+        # the protocol decision (`ChainView.strand_live`). Availability does not depend on expression
+        # at disconnected exons; each hop reads its own observations.
         single = fp != fn
-        split_live = (
-            kappa is not None
-            and bool(view.strand_live)
-            and bool(np.any(is_exon & single & (n_u > 0.0)))
-        )
+        split_live = kappa is not None and bool(view.strand_live)
         # the RNA lanes' coordinate: the unspliced RNA density over the single-strand exons, each strand
         # read on its own column (the kernel's `read_column`: its own under a sense protocol, the other
-        # under an antisense one), both strands pooled; every exon when none has counts
+        # under an antisense one), both strands pooled; every exon when none has RNA opportunity
         num = den = 0.0
         for free, col in ((fp, 0), (fn, 1)):
             sel = is_exon & free & single & (a_r > 0.0)
@@ -183,4 +181,18 @@ class TransferPolicy:
             sel = is_exon & (a_r > 0.0)
             num, den = float(cnt[sel].sum()), float(a_r[sel].sum())
         rho_rna = num / den if den > 0.0 else 0.0
+        if rho_rna <= 0.0:
+            # A log coordinate must stay positive wherever local RNA evidence can exist.
+            # These pairs set only its units; the native builders still select the sources.
+            available = (fp | fn) & (n_u > 0.0) & (a_r > 0.0)
+            num, den = float(n_u[available].sum()), float(a_r[available].sum())
+            for flux, rate in (
+                (view.sj_count_lo, view.route_rate_lo),
+                (view.sj_count_hi, view.route_rate_hi),
+            ):
+                available = (flux > 0.0) & (rate > 0.0)
+                num += float(flux[available].sum())
+                den += float((flux[available] / rate[available]).sum())
+            if num > 0.0:
+                rho_rna = num / den
         return _Library(rho, rho_rna, split_live)

@@ -209,14 +209,13 @@ def psi_cube(
     ambig: bool,
     gdna_prior=None,
     gdna_support=None,
-    lam_logprior=None,
     row_logprior=None,
     cube_rows=None,
     n_tilt: int | None = None,
 ):
     """ψ ITSELF over the ``(λ, θ)`` cube for ``m`` slots of one class — the strand term + the two Jeffreys
     arms (``_JEFFREYS_REF``) + the fitted gDNA arm (the curve ``gdna_prior`` read on ``gdna_support`` at each
-    cell's density) + the λ-factor rows and the delivered rows, added per cell (+ the delivered cube rows) + the
+    cell's density) + the delivered composition rows, added per cell (+ the delivered cube rows) + the
     θ quadrature's log-weights — as ``(m, K, C)`` in float64, with the two strand-fraction grids it was
     evaluated on, ``(f_pos, f_neg)``, and the tilt ``tau`` they were built from. A single-strand call
     (``ambig=False``) has one column, the tilt of each slot's live strand (``τ = ±1``) and no weight. An
@@ -246,7 +245,6 @@ def psi_cube(
         od_r=float(od_r),
         lam=lam,
         gdna=_arm(gdna_prior, gdna_support, m),
-        lam_logprior=_prior(lam_logprior, K),
         row_logprior=_prior(row_logprior, K),
         **_cube_args(cube_rows, lam),
         n_tilt=n_tilt,

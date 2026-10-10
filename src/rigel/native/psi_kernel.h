@@ -110,7 +110,6 @@ struct SlotInputs {
     double u_pos, u_neg, fg_ref, fpos_ref, fneg_ref;
     bool ap, an;
     bool has_arm; double arm_shift;  // the fitted gDNA arm at this slot — its log M − log E — or no arm
-    const double* lam_prior;   // (K,) the λ-factor row, or nullptr
     const double* row_prior;   // (K,) the delivered composition row, or nullptr
     const Delivered* row;      // the delivered RNA level row, or nullptr
 };
@@ -176,11 +175,11 @@ inline void slot_cube(const Grid& g, const SlotInputs& s, bool ambig, double* ps
         }
     }
     // ψ before the delivered level row and the weights: strand + the Jeffreys arms + the fitted arm at the cell's
-    // density + (the λ-factor row + the delivered composition row)
+    // density + the delivered composition row
     for (int k = 0; k < K; ++k) {
         const double fg = g.fg[k], f_act = 1.0 - fg;
         const double base = g.jeffreys[k] + (s.has_arm ? g.arm->at(g.log_frac[k], s.arm_shift) : 0.0) +
-                            ((s.lam_prior ? s.lam_prior[k] : 0.0) + (s.row_prior ? s.row_prior[k] : 0.0));
+                            (s.row_prior ? s.row_prior[k] : 0.0);
         for (int t = 0; t < C; ++t) {
             const size_t at = static_cast<size_t>(k) * C + t;
             const double tv = tau[at];

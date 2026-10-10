@@ -45,15 +45,11 @@ def side_of(s: int, i: int) -> int:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class BlockContext(ChainView):
-    """One block of the chain as the kernel's builders read it: the :class:`ChainView` plus the two
-    source-side inputs — every node's own-evidence bit and the incoming belief — the factory's rows, and
-    the λ grid (``n_grid`` points on ``[−logodds_window, logodds_window]``)."""
+    """The observations, own-evidence availability and grid read by the builders."""
 
     has_own_composition: np.ndarray
-    belief_fg: np.ndarray
     n_grid: int
     logodds_window: float
-    factory_rows: np.ndarray | None = None
 
 
 # ── the containers: the kernel's tables, held and indexed ───────────────────────────────────────────────
@@ -111,7 +107,20 @@ class Faces:
                 row=np.full((n, 2), -1, np.int32),
                 row2=np.full((n, 2), -1, np.int32),
                 rows=np.zeros((0, self.lam.shape[0])),
-                **{k: np.zeros((n, 2)) for k in ("n_u", "n_s", "a_b", "a_x", "width", "var")},
+                **{
+                    k: np.zeros((n, 2))
+                    for k in (
+                        "n_u",
+                        "n_s",
+                        "a_b",
+                        "a_x",
+                        "width",
+                        "var",
+                        "a_r_b",
+                        "a_r_x",
+                        "splice_rate",
+                    )
+                },
             )
         self.tables = tables
         for k in ("kind", "row", "row2", "n_u", "n_s", "a_b", "a_x", "width", "var", "rows"):
@@ -529,19 +538,6 @@ def _expected_pairs(si):
     return pairs, int(chain.n_slots)
 
 
-def _live_rows(si, n_grid, window):
-    """Synthetic factory rows: a distinct non-flat row at every intron REGION slot, on the sweep's
-    grid — what the live toy's context carries as ``factory_rows``."""
-    from rigel.calibration.simplex_logodds import _logodds_grid
-
-    pairs, n_slots = _expected_pairs(si)
-    lam, _ = _logodds_grid(n_grid, window)
-    rows = np.zeros((n_slots, lam.shape[0]))
-    for _b, j in pairs:
-        rows[j] = -0.05 * (lam - (0.1 * (j % 7) - 0.3)) ** 2  # non-flat, slot-distinct
-    return rows
-
-
 def _bits(n, pairs):
     """A lane's face table from directed ``(source, destination)`` pairs: ``(n, 2)`` bits over
     (destination, side) — the form `LevelLane` holds its faces in."""
@@ -566,7 +562,7 @@ def _prepared(pol, ctx, library=None) -> Prepared:
     """The kernel's builders on ``ctx`` — the whole chain as one block, in every gate here — with the
     library reduced over that same context unless one is given, exactly as the backbone pairs the two."""
     lib = pol.library(ctx) if library is None else library
-    strand = pol.strand
+    kappa = pol.kappa
     tables = transfer_prepare(
         lam=np.linspace(-float(ctx.logodds_window), float(ctx.logodds_window), int(ctx.n_grid)),
         is_boundary=np.ascontiguousarray(ctx.is_boundary, bool),
@@ -587,15 +583,9 @@ def _prepared(pol, ctx, library=None) -> Prepared:
         route_rate_hi=np.ascontiguousarray(ctx.route_rate_hi, np.float64),
         eff_gdna=np.ascontiguousarray(ctx.eff_gdna, np.float64),
         eff_rna=np.ascontiguousarray(ctx.eff_rna, np.float64),
-        belief_fg=np.ascontiguousarray(ctx.belief_fg, np.float64),
         has_own_composition=np.ascontiguousarray(ctx.has_own_composition, bool),
-        factory_rows=None
-        if ctx.factory_rows is None
-        else np.ascontiguousarray(ctx.factory_rows, np.float64),
-        has_strand=strand is not None,
-        kappa=0.0 if strand is None else float(strand[0]),
-        od_g=0.0 if strand is None else float(strand[1]),
-        od_r=0.0 if strand is None else float(strand[2]),
+        has_strand=kappa is not None,
+        kappa=0.0 if kappa is None else kappa,
         rho_gdna=0.0 if lib is None else float(lib.rho_gdna),
         rho_rna=0.0 if lib is None else float(lib.rho_rna),
         split_live=False if lib is None else bool(lib.split_live),
@@ -604,35 +594,24 @@ def _prepared(pol, ctx, library=None) -> Prepared:
 
 
 def _ctx_of(si) -> BlockContext:
-    """The context exactly as the backbone builds it for the kernel — the chain's view, the incoming belief,
-    every node's own-evidence bit read off a captured sweep — with the live toy's synthetic factory rows
-    attached, so every gate's builders read the same rows the independent recomputes read
-    (``ctx.factory_rows``)."""
-    chain, statics, geometry, belief, ra = si["args"]
+    """The actual backbone context, including observed own-evidence availability."""
+    chain, statics, geometry, _, ra = si["args"]
     kw = si["kw"]
     cap = SweepCapture()
     SW.solve_chain(*si["args"], **kw, policy=SilentPolicy(), _capture=cap)
     disc = strand_discriminability(float(kw["rna_sense_frac"]), float(kw.get("n_rna_obs", 0.0)))
     structure = SW._structure(chain, statics, ra)
-    rows = _live_rows(si, int(kw["n_grid"]), float(kw["logodds_window"]))
     return BlockContext(
         **view_fields(chain, statics, geometry, structure),
         n_grid=int(kw["n_grid"]),
         logodds_window=float(kw["logodds_window"]),
         strand_live=disc > 0.0,
         has_own_composition=np.asarray(cap.tau_lam, np.float64) > 0.0,
-        belief_fg=np.asarray(belief.f_g, np.float64),
-        factory_rows=rows,
     )
 
 
-def _strand_of(si):
-    kw = si["kw"]
-    return (
-        float(kw["rna_sense_frac"]),
-        float(kw.get("gdna_strand_overdispersion", 0.0)),
-        float(kw.get("rna_strand_overdispersion", 0.0)),
-    )
+def _kappa_of(si):
+    return float(si["kw"]["rna_sense_frac"])
 
 
 def _intron_mask(ctx):
@@ -775,37 +754,25 @@ def _drive_the_backbone(prepared: Prepared, ctx):
     return _drive(prepared, ctx)[0]
 
 
-def _strand_row_of(ctx, strand, lam, x):
-    """A slot's own strand profile, recomputed independently (the frozen-variance count form)."""
-    kappa, od_g, od_r = strand
-    fp = np.asarray(ctx.free_pos, bool)
-    cnt = np.asarray(ctx.unspliced_count, np.float64)
-    belief = np.asarray(ctx.belief_fg, np.float64)
-    fg = 1.0 / (1.0 + np.exp(-lam))
-    n = cnt[x].sum()
-    ks = kappa if fp[x] else 1.0 - kappa
-    f_ref = float(np.clip(belief[x], 1e-9, 1 - 1e-9))
-    p = 0.5 * fg + ks * (1 - fg)
-    p_ref = 0.5 * f_ref + ks * (1 - f_ref)
-    var = max(
-        n * p_ref * (1 - p_ref)
-        + (n * f_ref) ** 2 * 0.25 * od_g
-        + (n * (1 - f_ref)) ** 2 * ks * (1 - ks) * od_r,
-        1e-9,
-    )
-    row = -0.5 * (cnt[x, 0] - n * p) ** 2 / var
+def _strand_row_of(ctx, kappa, lam, x):
+    """Conditional Poisson split, evaluated independently by scipy's binomial PMF."""
+    from scipy.special import expit
+    from scipy.stats import binom
+
+    u, v = np.asarray(ctx.unspliced_count, np.float64)[x]
+    q = kappa if ctx.free_pos[x] else 1.0 - kappa
+    p = 0.5 * expit(lam) + q * (1.0 - expit(lam))
+    row = binom.logpmf(u, u + v, p)
     return row - row.max()
 
 
 def _full_policy(sweep_inputs):
-    """The shipped policy with the toy's strand model, the live rows it will find on `_ctx_of`'s
-    context, and the grid: ``(policy, rows, n_grid, window)``."""
+    """The shipped policy with the toy's strand model and grid: ``(policy, n_grid, window)``."""
     from rigel.calibration.messages.transfer import TransferPolicy
 
     n_grid = int(sweep_inputs["kw"]["n_grid"])
     window = float(sweep_inputs["kw"]["logodds_window"])
-    rows = _live_rows(sweep_inputs, n_grid, window)
-    return TransferPolicy(strand=_strand_of(sweep_inputs)), rows, n_grid, window
+    return TransferPolicy(kappa=_kappa_of(sweep_inputs)), n_grid, window
 
 
 def _rna_lanes_of(sweep_inputs, ctx=None):

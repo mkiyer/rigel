@@ -14,7 +14,7 @@ __all__ = ["SilentPolicy"]
 
 class SilentPolicy:
     name = "silent"
-    strand = None
+    kappa = None
 
     def library(self, view):
         return None

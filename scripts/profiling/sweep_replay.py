@@ -116,8 +116,8 @@ def _compare(a, b, path="belief") -> list[str]:
     return [] if a == b else [f"{path}: {a!r} vs {b!r}"]
 
 
-#: the terms summed into one ψ cell: the strand Gaussian, the gDNA arm, the RNA arm, the factory rows,
-#: the message rows, and the cube row at an AMBIG slot — counted from `simplex_logodds`
+#: The terms summed into one ψ cell: the strand Gaussian, two reference halves, the fitted DNA
+#: landscape, the message row and the cube row at an AMBIG slot — counted from `psi_kernel.h`.
 PSI_TERMS = 6
 EPS64 = float(np.finfo(np.float64).eps) / 2.0  # the rounding unit, half an ulp at 1
 EPS32 = float(np.finfo(np.float32).eps) / 2.0

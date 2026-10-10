@@ -474,7 +474,7 @@ def test_the_block_solve_is_the_chain_solve_for_every_block_size(sweep_inputs):
         got = run(bs)
         for f in whole:
             assert np.array_equal(got[f], whole[f]), f"block_slots={bs}: {f} differs"
-        for key in ("f_g", "fg_loc", "tau_lam", "tau_fac", "solvable", "mass_global", "count"):
+        for key in ("f_g", "fg_loc", "tau_lam", "solvable", "mass_global", "count"):
             assert np.array_equal(getattr(caps[bs], key), getattr(caps[None], key)), (
                 f"block_slots={bs}: capture {key} differs"
             )

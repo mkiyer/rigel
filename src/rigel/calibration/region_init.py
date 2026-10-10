@@ -3,15 +3,12 @@
 The message-free self-solve ("pass-0") deconvolves each slot's unspliced fragment mass into
 ``(f_pos, f_neg, f_g)`` before any message passing and records what the slot's OWN data says about that
 split as ``tau_lam``, the slot's λ-axis composition evidence — the DATA's Fisher information and never a
-prior's, from two sources: the STRAND deconvolution (a Beta-Binomial that is RANK-1, so it informs only
+prior's, from the STRAND deconvolution (a Beta-Binomial that is RANK-1, so it informs only
 ``p``; at a single-strand slot the tilt is structurally locked and the strand PINS ``f_g``, at an AMBIG
 slot the tilt is free and the strand cancels out of ``f_g`` — the Schur marginal — so the strand term is
 gated to single-strand slots; identically zero on an unstranded library, where the protocol decision
-:func:`strand_discriminability` reads the spliced split as κ = ½ exactly) and the INTRON FACTORY (the
-curvature of the density deconvolution's per-slot λ-factor). Both are the kernel's, per block inside the
-solve (`native/solve_kernel.cpp`: ``strand_evidence``, ``factor_precision_row``; bound for the gates as
-`native.transfer_rows.strand_evidence` / `factor_precision`), and the sweep's diagnostics capture
-publishes ``tau_lam`` and the factory's part ``tau_fac`` per slot (`blocks.SweepCapture`).
+:func:`strand_discriminability` reads the spliced split as κ = ½ exactly). The kernel's ``strand_evidence`` computes it per block; the
+sweep publishes ``tau_lam`` in ``blocks.SweepCapture``.
 
 What lives here is what the kernel is told and what the gates read: the protocol decision — the
 library's one verdict on whether its strand split is a witness at all — and the ONE predicate on
