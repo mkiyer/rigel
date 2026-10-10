@@ -1,233 +1,378 @@
-# The RNA-short defect: what the fix requires, and the implementation plan
+# RNA-short and capture: the 0.8.0 implementation plan
 
-*Sandbox document (`docs/dev/`): provisional, not authoritative, cited by nothing outside the sandbox. Written
-2026-10-05 for an external reviewer who has not seen this project. Every number was measured on 2026-10-05 unless a
-date says otherwise, pinned (the BAM scan on one thread, fractional EM assignment) and scored against per-fragment
-simulation truth. The prototypes and their data are in `~/Downloads/rigel_runs/prototypes/2026-10-05_spectrum_ruler/`;
-`SPECTRUM_RULER.md` beside this file holds the full ledger of the ruler prototype in §3.4. What we ask of you is §7.*
+*Updated 2026-10-09 after the independent release-foundation review and owner acceptance.
+Foundation integration and the reviewed golden updates are authorized. The owner drives
+commits and release.*
 
-## 1. Rigel, in the terms this document uses
+## Objective and scope
 
-Rigel quantifies RNA-seq transcripts from libraries contaminated with genomic DNA (gDNA), in three stages.
+Deliver a robust, maintainable release candidate at roughly the current accuracy,
+including libraries whose RNA and DNA fragment-length distributions differ. Prefer a
+small, general model over additional accuracy on the simulation panels. The owner's
+rough accuracy guides are not fitted thresholds; their authoritative home is
+**Release priority** in [DESIGN.md](../DESIGN.md).
 
-1. **The scan** deposits every fragment on genomic *objects*: *regions* (an exon, an intron, an intergenic stretch) and
-   *boundaries* (the line between two adjacent regions). A fragment wholly inside a region deposits there; one that
-   crosses a boundary deposits on the boundary.
-2. **Calibration** solves every object for its composition: gDNA, RNA on the + strand, RNA on the − strand. The
-   per-object solver is called **ψ**. Its evidence is the read strand (in a stranded library RNA has one orientation,
-   gDNA both), a population prior over gDNA density called **the landscape** (fitted from the objects' own solves and
-   fed back in a refit loop), and messages between neighbouring objects. Its output per object is a gDNA count `k` on
-   the object's **gDNA opportunity** `S`: the number of positions where a gDNA fragment can start inside it, which
-   depends on gDNA's fragment-length distribution. A 100 bp exon has almost no opportunity for 250 bp fragments.
-3. **A per-locus EM** assigns RNA to transcripts and gDNA to a gDNA component, dividing counts by effective lengths.
+First consolidate and verify the production foundation. Then finish these deliverables:
 
-**Capture.** Hybrid-capture libraries enrich probed exons, about 1,000-fold in the simulations. Rigel gets no probe
-file; it learns capture from gDNA, which is uniform before capture. The EM's effective lengths are contracted by
-per-object capture weights; the component that computes them is called **the ruler**. The EM's per-component weight is
-`log θ − log L`, so a factor common to every length in a locus cancels: only relative weights matter.
+1. A compact, detector-free, continuous per-object capture reader that preserves
+   uncertainty and uses the existing message graph.
+2. Bounded validation across fragment lengths, probe layouts, capture strengths,
+   zero-DNA controls, depth and real libraries.
+3. One consolidated release candidate with complete landing checks.
 
-**The shipped ruler.** Each object's weight is the posterior mean of `min(ρ / ρ_ref, 1)` under the landscape, where
-`ρ_ref` is the landscape's "located enriched mode". When no such mode is found, `ρ_ref` is `None` and every weight is
-exactly 1.
+Three strata remain required: stranded OFF, stranded ON and unstranded OFF. Report
+unstranded ON separately; it remains deferred for 0.8.0. No pooling, capture detector,
+probe BED, new fitted cutoff, unconditional landscape class split or restored intron
+factory. Reader integration and a new statistical ruling still require owner discussion.
+The owner drives commits and publication.
 
-**Panels.** A 30-condition test chromosome (seconds per condition); a 16-condition genome-scale *ladder* whose gDNA and
-RNA share one fragment-length law by design; two *gap arms* on the same genome, RNA-short (RNA 78 bp, gDNA 250 bp) and
-RNA-long (the reverse); four real libraries (three plasma cfRNA, one VCaP mix whose reads carry their origin). Results
-are read per stratum: stranded or unstranded, capture on or off. Unstranded × capture-on is reported but deferred.
+## What exists today
 
-**Truth.** An oracle splits each simulated BAM by read origin and runs the production accumulator on each part. That
-gives certified per-object gDNA counts (`slot_truth.npz`), against which any object's calibration can be checked.
+| Implementation | Location and status |
+|---|---|
+| Component-opportunity map repairs | Main working tree, uncommitted. Preserve the owner's existing source, tests and golden changes. |
+| Factory-free count foundation | Integrated and verified in the main working tree on 2026-10-09. Removes the intron factory and supplies observed conditional-binomial strand messages, including eligible introns. |
+| Existing capture reader | Still used in all full-panel and real-library count-candidate receipts. These results do not validate a new reader. |
+| Detector-free point-count reader | Prototype only. Fails weak-evidence and zero-DNA controls by treating inferred counts as measured counts. |
+| Density-evidence references | Separate Python/native prototypes. Own observations are certified; the complete neighbour factor and efficient both-strand implementation are unfinished. |
+| Population, admission, equal-weight and edge-withdrawal alternatives | Measured research, not selected for production. None is part of the count candidate. |
 
-## 2. The defect and the constraints
+The count worktree is `/private/tmp/rigel-count-clean-20261008`. Its current frozen package is
+`.cache/rigel_runs/2026-10-09_foundation_landing/site`; the preceding cleanup control is
+`.cache/rigel_runs/2026-10-08_release_foundation/site`. Main production source contains no
+experimental density integrator or population alternatives to remove.
 
-On the RNA-short arm, the stranded × capture-off library reads transcript error **42.30 %** (genes 3.28 %) on the
-current tree against **6.31 %** (0.44 %) on the 0.7.1 release.
+The useful count change is small: remove a duplicated intron assumption and express
+own strand messages using observations rather than a posterior-frozen approximation.
+It retains the existing graph, transfer maps, discrepancy rules, count solver and
+landscape. It has not solved every uncertainty or capture-opportunity problem.
 
-The owner's constraints:
+## Foundation integrated
 
-1. Achieve or exceed 0.7.1 on every stratum of every panel, robust to a fragment-length gap in either direction.
-2. **Capture is a spectrum.** No capture detector, no on/off status, no "reference or `None`", no library-level test of
-   capture. Every capture weight is per object and continuous. A plasma panel enriches scarce transcripts that stay a
-   tiny fraction of the library, so any library-level statistic reads it as uncaptured.
-3. No probe file; capture is learned.
-4. No unexplained constants: every fixed number is derived and documented.
-5. One mechanism per A/B. Prototype outside the tree first; changes to the native (C++) solver in a separate worktree.
-6. Already refused, with measurements: a training guard admitting only objects with at least one gDNA position (a
-   threshold proxy that leaves over-calls at one to three positions); an unconditional exon/non-exon split of the
-   landscape (loses every capture-off stratum); a reference read from a strand-only evidence fit (reads no capture on
-   unstranded captured libraries).
+**Pause new statistical experiments.** Preserve their code and findings, but do not
+merge them into the selected candidate or optimize another panel average. The prior plan
+is saved at `.cache/rigel_runs/2026-10-08_release_foundation/RNA_SHORT_FIX_PLAN.md.before`;
+the checkpoint documents below preserve the research for review and resumption.
 
-## 3. What was measured
+Only demonstrably unused code and interface baggage were removed. The completed cleanup removes
+posterior beliefs and two dispersion arguments from message preparation, which no longer
+reads them. The count solver still uses its own beliefs and dispersion parameters; those
+stay. The Python policy now carries the single protocol parameter its messages use.
+Obsolete fixture fields and comments were removed without compatibility paths. The final
+landing also deletes the unused background fitter and Gaussian message helper, consolidates
+duplicate row/protocol inputs, and removes fixed-zero assembly dispersion state. Low-level
+dispersion parameters retain meaningful solver-test consumers.
 
-### 3.1 The damage enters through the ruler, from calibration's per-object errors
+The completed verification covered:
 
-Calibration's library-level gDNA on the defect row is right (5.01 M against a truth of 5.00 M). Setting every capture
-weight to 1 reads the row at **3.53 %** (genes 0.23 %). The shipped ruler loses it because about 400 short exons, each
-with under one gDNA start position, carry a fraction of a fragment of strand noise each. Divided by that opportunity,
-their density reads about 200 times the library's. They train a false mode in the landscape (1.9 % of its mass above
-30 times the off-target density), the mode is read as the capture reference, and every length contracts unevenly.
+- The observation-only interface specification, verified failing on the old implementation.
+- A native worktree build and a separately frozen, import-verified package.
+- All calibration fields against fresh controls on the existing seven cached cases,
+  and the existing end-to-end identity instrument. No output changed.
+- The independent observation-law gates and actual compiled perturbations.
+- The full integrated suite, lint and full preflight. The eight accepted golden cases were
+  regenerated and checked against the archived candidate exactly; no tolerance was relaxed.
+- The full-sweep belief-invariance gate and its compiled Gaussian restoration, a real-library
+  identity across the entire cleanup chain, and ordinary-import end-to-end stratum checks.
 
-### 3.2 Calibration's per-object counts are wrong under a gap, in both directions
+The exact changes and receipts are in
+[the readiness checkpoint](RNA_COUNT_READINESS_CHECKPOINT.md). Settled results belong
+in `ISSUES: the-gdna-prior-enters-psi-twice`, under the count-cleanup entries.
 
-Against the oracle, counting objects whose gDNA count is off by more than threefold and more than five Poisson standard
-deviations (a reporting criterion for this diagnosis, not a model constant):
+## Review incorporated: integrate the foundation, then address the reader
 
-| class | capture-off row | objects | signature |
-|---|---|---|---|
-| short-exon over-call | RNA-short, stranded | 173 regions, +2.4k fragments | median opportunity 1.4 positions; solver density median 101× off-target; ψ variance small (0.17 nats²); fed by the landscape's false mode |
-| intron under-call | RNA-short, stranded | 156 regions, −16k fragments | 151 are single-strand introns; median opportunity 1,524; ψ books 0.1 % of their fragments as gDNA, truth about 40 %; confident (variance 0.11) |
-| neighbourhood over-call | RNA-long, unstranded | 1,431 boundaries and 136 regions, +86k fragments | ψ books 78 % of a boundary's fragments as gDNA at 2–20× off-target, truth near 1×; confident (variance 0.009); the landscape is unimodal |
+The [independent review](RNA_RELEASE_FOUNDATION_REVIEW.md) supports integration of the
+count foundation with the weak-strand tradeoff explicitly accepted. I agree. Do not
+require a new solver or population model before integration. This is a recommendation
+for a stable development baseline, not a claim that the release candidate is complete.
 
-The neighbourhood over-call is coherent: whole RNA-rich neighbourhoods are booked as gDNA together, an exon and both
-its boundaries. One exon receives 2,071 gDNA fragments of its 3,037; its truth is 47.
+The owner has accepted the measured weak-strand limitation and authorized integration
+plus the eight deliberate golden updates. The standing preference is
+**Conservative allocation under uncertainty** in DESIGN. Goldens record expected outputs;
+updating them does not certify accuracy. Preserve the truth-scored stress pair and the
+reported deferred regression. Commit and push are separate owner instructions.
 
-### 3.3 The shipped ruler's `None` hides all three
+The review's frozen-row diagnosis is supported by a fresh array-only check. Gene-edge
+information can say only that DNA exceeds a lower bound. With no opposing evidence,
+the reference supplies the location and its posterior median trains the landscape.
+This is a real modelling limitation under the retained rules, not broken map arithmetic.
+The detailed measurement belongs in `ISSUES: the-gdna-prior-enters-psi-twice`, under
+**WEAK-STRAND FLOOR DIAGNOSIS**. Its prevalence on unseen real libraries is not established.
 
-On an uncaptured library the shipped ruler finds no enriched mode and ignores every per-object count. That is why the
-current tree scores well on every capture-off row except the RNA-short one, where the short-exon over-call builds a
-false mode. The spectrum ruling forbids the `None`, so the next ruler must face the per-object counts directly.
+### Completed foundation landing
 
-### 3.4 A ruler with no detector, prototyped
+1. Close the real-library identity gap against the validated count candidate, covering
+   the full cleanup chain. Run one whole-genome process at a time, without debug capture.
+   An earlier cleanup alone is not a sufficient control for the entire chain.
+2. Add the full-sweep observation-only gate: vary valid incoming compositions, including
+   endpoints, and compare delivered composition/level rows and presence masks with all
+   observations and technical inputs fixed. The count posterior itself may change.
+   Reintroduce the belief-dependent strand builder in a compiled copy to falsify the gate.
+3. Audit the remaining cleanup suggestions and take only proved no-ops. Remove the
+   redundant source-class predicate. Consolidate duplicate row inputs and protocol values
+   where no live caller distinguishes them. Remove fixed-zero dispersion plumbing only
+   after checking all solver, instrument and test callers. Do not add compatibility paths.
+4. Apply the selected worktree source/test diff to main while preserving the owner's
+   opportunity-map repairs and newer permanent docs. Rebuild; repeat identity checks on
+   the actual integrated package. Do not copy stale worktree docs over main.
+5. Regenerate the eight accepted golden outputs from that integrated package. Read the
+   actual diff again, update DESIGN/EQUATIONS/ISSUES together under the move rule, and
+   re-derive the suite count. Require no failures, lint and full preflight.
+6. Reproduce a condition from each stratum, retaining deferred reporting. Present the
+   concrete source, documentation, goldens and receipts for the owner's commit.
 
-Five steps, no constant chosen:
+All six steps above are complete. Their receipts and the exact implementation summary are
+in the readiness checkpoint. Commit and push remain owner actions.
 
-1. Each object's level is its posterior median under a nonparametric maximum-likelihood population of gDNA densities,
-   fitted on the landscape's grid with each object's Poisson likelihood. Each object votes by its gDNA opportunity, so
-   an object gDNA cannot sit in carries no weight.
-2. A floor at the off-target density, the intergenic regions' pooled count over their pooled opportunity, because
-   capture only enriches.
-3. Coherence: an exonic region takes the opportunity-weighted median of its own level and its two boundaries'; a
-   non-exonic region keeps its own, held below its boundaries' larger level where its own opportunity is the smaller;
-   every boundary lies between its two flanks.
-4. Weights are relative: no reference, no clip, no `None`.
-5. A junction is priced by the shipped sum by conservation of bases, capped at the larger of its two pieces' levels.
+All four available real libraries are stranded. The local cfRNA archive contains no genuine
+unstranded real input. This coverage gap remains explicit; changing a protocol parameter or
+scrambling a stranded library is not a substitute. Retain the synthetic unstranded checks.
 
-| transcripts / genes, % | 0.7.1 | current tree | prototype |
-|---|---|---|---|
-| RNA-short · stranded · off (the defect) | 6.31 / 0.44 | 42.30 / 3.28 | **3.55 / 0.23** |
-| RNA-short · stranded · on | 20.33 / 3.52 | 19.97 / 1.53 | 23.74 / 1.69 |
-| RNA-long · unstranded · off | 5.29 / 0.59 | 2.13 / 0.22 | **11.71 / 0.91** |
-| RNA-long · stranded · on | 7.38 / 1.62 | 4.48 / 0.68 | 7.09 / 0.74 |
-| test chromosome · stranded · on | 8.58 / 2.45 | 7.19 / 0.96 | 7.11 / 1.18 |
-| test chromosome · stranded · off | 8.20 | 7.39 / 1.08 | 7.52 / 1.08 |
-| test chromosome, junction-spanning probes · stranded · on | 40.01 / 1.46 | 32.12 / 1.15 | 37.36 / 0.82 |
-| test chromosome, one probe centred per exon · stranded · on | 74.76 / 63.06 | 24.39 / 3.15 | 22.36 / 2.85 |
+### Qualifications to the review's proposed next changes
 
-It fixes the defect exactly and, on the sparsest plasma library, finds the enriched levels the shipped mode reader
-misses. It cannot ship: the neighbourhood over-call is coherent, so no rule inside the ruler can tell it from capture,
-and the RNA-long unstranded row regresses from 2.13 to 11.71 %.
+- **Reader scope:** accept a consumer-focused prototype with the count solver and landscape
+  frozen. Retain licensed local neighbour evidence; the exact own-observation primitive
+  alone repeats the refused own-strand-only approach at ambiguous objects. The primitive
+  is a reference implementation, not an efficient complete production reader. Define its
+  capture prior, normalization and no-evidence limit explicitly before implementation;
+  removing the current reference and clip leaves those questions to answer.
+- **Acceptance:** use roughly maintained in-scope accuracy, zero-control false enrichment,
+  theoretical limits and input-variation robustness. A literal requirement for no change
+  beyond A/B noise is inappropriate for a deterministic fractional comparison. A frozen
+  count solver's unchanged false-DNA count is not a sufficient test of its new reader.
+- **One-sided admission:** explicitly deferred by the owner until foundation integration.
+  Keep the existing refusal in force. Any later experiment needs
+  owner approval under `ISSUES: the-landscape-training-population-arms`. Do not assume
+  that the frozen-landscape result bounds the outcome or that an endpoint maximum alone
+  proves a mathematical bound; finite grid support can also produce an endpoint maximum.
+- **Belief dependence:** the full-sweep gate is now present and passes at tested endpoint
+  beliefs as well as interior values. The precision calculation clamps the DNA fraction
+  before testing positivity; the proposed exact-vertex exception did not reproduce.
+  Distinguish message availability
+  from the separate posterior-based landscape admission/weighting, which this cleanup retains.
+- **Background estimator:** `density_deconv` and its obsolete tests are removed because
+  no selected consumer uses it. A future reader must justify its own background input;
+  retaining an unused fitter did not settle that design.
+- **Harnesses and documents:** after a reproducible baseline is established, stop using old
+  constructor patches and import hooks for new A/Bs. Prefer ordinary isolated builds. Archive
+  research with its dependencies, manifests and receipts before consolidating the active
+  checkpoint documents into the plan and a ledger. Do not delete the only reproducible evidence.
 
-### 3.5 Refuted on the way
+The detector-free reader remains the main release requirement. Capture/length transfer is
+an inherited limitation to measure with the existing cached expected-yield instrument, not
+proof that the count candidate regressed. Report both absolute adequacy and changes versus
+current; an equally biased baseline would not establish robustness. No new prior, numerical
+range policy or reader integration is authorized by the review alone.
 
-Each was run end to end or scored against the oracle, and fails as stated:
+## Reader scope: one responsibility, complete local evidence
 
-- Relative posterior means under the shipped landscape: an exposure bias at low depth (zero-gDNA rows 11–14 % against
-  5.7–7.0 %).
-- A quasi-likelihood using ψ's own variance as the count's noise: that variance is sharpened by the prior where the
-  count is false (the short-exon over-call) and far too wide where messages pinned an accurate count. RNA-short
-  stranded · on reads 56 %.
-- The arithmetic and geometric posterior means: each follows a far population level held by a handful of objects.
-- Pooling a region's count with its boundaries' crossings: biased at every capture edge.
-- A contamination model, each count either right or uniform on zero-to-total: it calls 85 % of captured objects wrong.
-- A global junction cap at the captured population's median level: worse than the local cap.
+The count solver answers **how much DNA to allocate**. The reader answers **how capture
+changes an object's contribution to effective length**. A conservative answer to the first
+question is appropriate under the owner's ruling, but it is not strong evidence for the
+second. If an object might contain a few DNA fragments, dividing that uncertain estimate
+by a nearly zero background must not manufacture confident, enormous enrichment.
 
-## 4. What the fix requires
+The recommended first prototype changes the reader while retaining the count model and
+landscape training. This freezes the statistical model, not every helper that prepares its
+inputs. It must use observations and licensed local neighbour evidence,
+with their uncertainty, instead of treating a posterior point count as a fresh Poisson
+observation. It reuses the existing region/boundary graph and splice information. It does
+not assume equal expression at distant genes, introduce a second propagation system, or
+select probes from a BED. Own-strand evidence alone remains insufficient.
 
-- **Honest counts. Calibration's per-object gDNA counts must be right under a fragment-length gap, in both directions and every
-  library type.** Gate: the §3.2 census near zero on both gap arms, with the ladder and the test chromosome no worse.
-  This is the root cause. No detector-free ruler can hide coherent errors, and with honest counts the shipped `None` is no
-  longer what keeps the capture-off rows right.
-- **A ruler with no detector**, built on those counts: §3.4's design, with its open items (§5, Phase 3).
-- **The release bar.** At or above 0.7.1 on every stratum of every panel; within noise of the current tree on
-  capture-off strata.
-- **Out of scope here.** The RNA-short stranded · on row is mostly the coupling between capture and fragment length.
-  A 78 bp RNA fragment overlaps less of a probe than a 250 bp gDNA fragment, so no gDNA-read level is RNA's level. That
-  needs a per-placement capture model, planned separately.
-
-## 5. The implementation plan
-
-Every phase changes one mechanism, has a falsification test that fails on the unfixed code and fires when the fix is
-broken, and passes the census and the panels before the next begins.
-
-**Phase 0: the measurement loop, cheap by construction.** The 2026-10-05 session ran end-to-end arms with every stage
-on one thread, one condition at a time, from the BAM. That cost 18 minutes per ladder condition per arm, against 6.4
-minutes on the standard protocol (scan pinned, every other stage on all cores, conditions sharded across processes).
-The loop from here:
-
-| step | cost | decides |
+| Approach | Advantage | Cost or limitation |
 |---|---|---|
-| per-object census from a calibration dump against `slot_truth.npz` | about 2 min per genome-scale condition, seconds per test condition | whether a calibration change removes the three error classes |
-| offline ruler screen on the same dumps | seconds | whether a ruler variant prices objects right |
-| test chromosome end to end, sharded | minutes | every stratum, three probe layouts |
-| gap arms and ladder end to end, standard protocol, sharded | tens of minutes | the release strata |
-| real libraries, one whole-genome process at a time | about 15 min each | plasma and VCaP sanity |
+| Reader first, retain the count model | Small change with a clear cause; protects validated count behaviour; avoids reopening the population model to pursue panel accuracy. | Defective opportunity or message inputs still need isolated repairs; correct uncertainty cannot be recovered after the input has discarded it. |
+| Change reader and count/population model together | Could repair an upstream limitation the reader cannot overcome. | More interacting assumptions, harder attribution, more validation and greater risk to already acceptable counts. |
 
-Nothing reaches the expensive rows until the cheap ones pass.
+Choose the first approach with broad robustness gates, not a restricted validation panel.
+Start with analytic no-evidence, zero-opportunity and no-DNA limits, the archived false-capture
+object, and a weak but real captured object. Then vary fragment laws in both directions,
+probe placement/count, capture strength and depth, without retuning. Score capture against
+expected yields, counts against origin truth, and transcripts/genes separately per stratum.
+Report deferred unstranded ON and the lack of an unstranded real-library validation input.
 
-**Phase 1: diagnose the intron under-call and the neighbourhood over-call to their mechanism.** The short-exon
-over-call's mechanism is known (§3.1). The other two are confident wrong answers, so evidence from outside the object
-must be pinning them. Two hypotheses lead:
+If a failure persists because the local factor or opportunity is wrong, demonstrate that
+cause with a frozen-input contrast and propose one upstream repair. Do not force a reader-only
+solution through clipping, a detector, a threshold, or a new prior that conceals the failure.
+The owner's robustness requirement decides whether to expand scope. Derive and review the
+capture prior, normalization, numerical support and no-evidence readout before implementation;
+the complete efficient density reader is still an open design, not a few lines ready to wire in.
 
-- **For the intron under-call:** an RNA level bound delivered by the message layer (its "level lanes" are lower
-  bounds on RNA) over-states the nascent RNA in a stranded intron and squeezes out gDNA the strand data support.
-- **For the neighbourhood over-call:** with no strand channel, a count-frame conversion somewhere in the message rows
-  or the intron background uses the wrong length law's opportunity. At these boundaries RNA's crossing opportunity is about 3.2 times gDNA's
-  (247 against 77 positions). Alternatively, ψ adds the gDNA prior twice: the reference's gDNA term and the fitted
-  landscape, already an open defect, tilting gDNA up by half a nat per nat of log density wherever no data constrain it.
+### Scope made concrete after integration
 
-Decisive measurement: for each such object, ψ's posterior with each received message row removed in turn, and with the
-duplicated prior removed, read against the oracle count. The row whose removal restores the truth is the mechanism.
-This needs the solver's per-slot debug capture on one gap condition; on the suite genome that peaked at 7.2 GB, inside
-budget (it must never run on the whole human genome, where it reached 25 GB).
+A fresh ordinary-import counterexample confirms that fixing only the final consumer is too
+restrictive. With all local observations, topology, opportunities and fitted protocol fixed,
+an unrelated exon's expression can change an RNA message's interpretation. Separately, the
+library coordinate can be zero or move the useful local profile outside its finite table.
+Finer spacing does not restore a profile outside the table; a wider diagnostic range does.
+These are evidence-preservation defects, not reasons to redesign the population prior.
 
-**Phase 2: fix calibration, one mechanism at a time.**
+The first correction is integrated independently: remove the counted-exon requirement on
+the existing strand-protocol verdict. Source and native observation laws, coordinate origins
+and hop formulas remain the same. The failed-first/mutation checks and seven calibration
+identities are in `ISSUES: the-gdna-prior-enters-psi-twice`, **LOCAL-WITNESS INTEGRATION**.
+The real-library pipeline is also identical. One tiny, truth-improving antisense golden move
+is reviewed there; the final suite has 2,762 passes, with lint and full preflight green.
 
-- **2a. The landscape's training votes by its information about density.** Each training object's vote is
-  `min(1, ρ_off · S)`: the gDNA fragments it expects at the off-target density, capped at one object. A slot that
-  cannot hold one fragment at the off-target density carries a fraction of a vote, continuously, with no admission
-  threshold. This is Python (the landscape fit); it targets the short-exon over-call. Its risk is the deferred stratum: unstranded captured
-  exons take their composition from the landscape, and an enriched mode with less mass could drain them, as two earlier
-  arms did. The test chromosome's unstranded · on rows and the ladder's deferred rows are its watch.
-- **2b. The fixes for the other two classes**, as Phase 1 finds them. If a message row converts with the wrong
-  opportunity, the fix is to convert in the density frame. If it is the duplicated prior, it is the existing prototype that lets the landscape
-  replace the reference's gDNA term; that prototype needs a partner keeping probed exons' enriched prior under
-  capture, which is an open owner ruling. Native-kernel changes are prototyped in a worktree.
-- **Gate for each:** the census on both gap arms, then every panel per stratum.
+The zero-coordinate correction is integrated separately afterward: measured intron and
+splice sources retain a positive numerical RNA origin when the exon-based reduction is
+zero. Existing positive origins and native source rules stay unchanged. Its portable gates,
+mutation coverage and seven complete calibration identities are recorded under
+**ZERO-COORDINATE INTEGRATION** in the same issue. This does not implement the independent
+density range or fix loss outside a finite table. The whole-library LBX0190 pipeline is also
+bit-identical. After replacing the scheduler-dependent reorder gate with two deterministic
+consumer checks, the actual main suite passes 2,788 tests; lint and full preflight pass.
+No goldens changed in this repair.
 
-**Phase 3: the ruler.** Land §3.4's design once the counts are honest, replacing the located-mode reader, the reference, the
-clip and the `None` path. Three items are open:
+The certified-source footprint correction follows separately. It evaluates the known
+Poisson likelihood over the existing blur's footprint and retains the original output
+grid. The fresh source and rounding falsifications, compiled defects, calibration census,
+four test-chromosome strata and real-library comparison are recorded under
+**SOURCE-FOOTPRINT INTEGRATION** in the same issue. It has a small downstream transcript
+cost on the test chromosome; the moved stranded-ON assignments concentrate in ambiguous
+isoform clusters and the contrast changes sign under a different existing EM start.
+The shipped start stays. This is a numerical evidence repair, not a claimed accuracy gain.
+The installed extension matches the tested candidate byte-for-byte; the final main suite
+passes 2,796 tests, lint and full preflight pass, and the one negligible golden move is
+reviewed before updating that fixture alone.
 
-- **The boundary clamp.** Where a probe sits at an exon's end, the boundary there is legitimately more captured than the
-  exon's average level, and the clamp under-prices it. It costs the junction-spanning layout: partly probed isoforms
-  spread 4 times more within a gene. Its only purpose was one false boundary on a zero-gDNA row, which honest counts
-  should remove.
-- **The exon assumption.** Probes sit on exons, so an intron's contained fragments are never captured. Without it, short
-  introns between probed exons read as captured.
-- **Speed.** The population fit is an EM over grid weights; 99 % of the medians are final at 200 iterations, and the
-  prototype runs 3,000 unaccelerated ones (2–8 minutes per genome-scale condition, 13–15 on a real library). An
-  accelerated solver and a convergence test on the medians are required before it lands.
+The low-probability arithmetic correction is then integrated independently, preserving
+the same finite Gaussian convolution while removing its artificial likelihood floor.
+Eighteen gates, five compiled defects, seven cached calibration comparisons, the changed
+RNA-long condition end to end and the LBX0190 comparison are recorded under
+**BLUR-TAIL INTEGRATION** in the same issue. The real-library output is bit-identical;
+this correction does not resolve missing numerical support or select a capture prior.
+The final integrated suite passes 2,814 tests, lint and full preflight pass, and no
+goldens change. The installed native binary matches the tested candidate exactly.
 
-**Phase 4: the release A/B.** Every panel and stratum against 0.7.1 and the current tree, the zero-gDNA controls, and
-the real libraries, VCaP against its read-name truth (gDNA fraction 0.2518).
+The remaining range failure is freshly confirmed on that integrated build: the three
+retained diagnostic specifications still fail, while wider controls reproduce the prior
+convergence result. See **POST-INTEGRATION RANGE RECHECK** in the same issue and the
+[representation proposal](RNA_MESSAGE_SUPPORT_DESIGN.md). This recheck changes no source
+or production test. The owner subsequently authorized the isolated representation
+prototype on 2026-10-09. Production integration remains a separate checkpoint.
 
-## 6. Risks
+That prototype is implemented in Python and as an isolated native numerical evaluator.
+The owner also authorized local numerical units. The Python unit-selection prototype
+removes the arbitrary library-coordinate dependence, with the count lattice fixed.
+Convergence checks separately expose residual error from the existing density spacing.
+The practical audit now exercises fixed, freshly fitted landscapes and the native count
+readout: most checked counts change little, but two captured RNA-long exons have material
+spacing sensitivity carried by their RNA messages. The landscape is not refitted and
+the future density reader is not exercised. See the
+[representation checkpoint](RNA_MESSAGE_SUPPORT_DESIGN.md) and **LOCAL-UNIT PROTOTYPE** /
+**SPACING READOUT AUDIT** in the same issue. A native unit-selector port and production
+consumer wiring remain undone; no numerical certification or accuracy gain is claimed.
 
-- Phase 1 may find the two unexplained classes are not one mechanism each, which would mean more phases.
-- 2a may trade the short-exon over-call for the deferred stratum. Its unconditional relatives failed that way.
-- With honest counts, the detector-free ruler may still trail the current tree by 0.05–0.3 points on capture-off strata, since
-  its weights are estimated rather than switched off. Constraint 2 makes that the price; it still beats 0.7.1 there.
-- The coupling remains: the RNA-short stranded · on row stays near 0.7.1's 20 % until the per-placement model exists.
+Keep the remaining work in this order:
 
-## 7. Questions for the reviewer
+1. The bounded spacing audit and narrow-source diagnosis are complete. Keep the count
+   foundation stable and stop broad refinement work. Retain the source-preserving
+   correction as an input contract of the reader. Preserve local-unit covariance, independent
+   support and the fixed count lattice. A small aggregate shift does not make those local
+   failures disappear; a failed strict curve tolerance alone does not justify a general
+   adaptive integrator. Do not substitute a larger fixed window, expression cap or
+   fixture-selected spacing. Review any numerical contract change before a native port.
+2. Review the smallest complete consumer before further numerical development. The bounded
+   shared-quadrature calculation is complete and rejected for cost; its outcome is **SHARED
+   CAPTURE INTEGRATION** in ISSUES. The owner's external-review packet is
+   [RNA_CAPTURE_RELEASE_REVIEW.md](RNA_CAPTURE_RELEASE_REVIEW.md), including a copyable prompt.
+   Keep both-strand and local neighbour evidence. Do not port the nested research oracle or
+   start another integration framework because the first optimization failed.
+3. Retain the owner-approved proper-prior prototype as the comparison reference, without
+   reinstating the old library ceiling or annotation-dependent odds. Validate background
+   estimation and uncertainty separately. Its mathematical screen does not select a
+   production prior or certify robust performance across panels.
+4. Run the bounded robustness screen, then the owner checkpoint before reader integration.
 
-1. Are honest per-object counts the right place to fix this, or is there a detector-free ruler that tolerates coherent
-   per-object errors like the neighbourhood over-call, which we have missed?
-2. Is `min(1, ρ_off · S)` a sound training vote? We considered a vote proportional to opportunity (which shrinks the
-   enriched mode with the probed share of the genome) and a deconvolved population in place of the kernel sum.
-3. For the two unexplained classes, is removing one message row at a time the most discriminating measurement, given that the solver
-   iterates to a fixed point with the landscape?
-4. The ruler snaps each object to a population level through the posterior median. Is that compatible with "capture
-   is a spectrum", given that the levels and their shares are learned and continuous while each object takes one?
-5. Can the boundary clamp and the exon assumption be replaced by one rule derived from the probe-binding physics
-   (a fragment binds its best single contiguous probe part)?
-6. Is anything in §3's evidence weaker than we treat it?
+Any further upstream repair needs its own demonstrated defect and isolated comparison.
+Do not broaden the count/population model to improve a simulated score.
+
+This is the recommended scope for discussion: a reader with trustworthy inputs, while the
+count/population model stays stable unless a separate causal diagnosis requires reopening it.
+The independent-range and proper local capture-prior prototypes are now authorized;
+production integration remains a separate decision. Bounds-training admission remains deferred.
+
+### Local capture-prior prototype: mathematical screen passed, cost gate open
+
+*Owner-authorized prototype completed, 2026-10-09. No production integration.*
+
+The implemented reference consumes the object's density evidence and a fixed normalized
+background distribution. The enrichment prior is uniform in retained background fraction,
+with no upper ceiling; the continuous counterarm replaces neither the observation model nor
+count inference. Its derivation, normalization, unit covariance and limits now live under
+**Proper local capture reference and continuous correction** in EQUATIONS. The original
+proposal's derivation has been moved there, rather than keeping a second mathematical home.
+Equal odds remain a model assumption, not an estimate of probe prevalence.
+
+The prior contrasts and complete-consumer measurements are recorded under **PROPER LOCAL
+CAPTURE PRIOR** in `ISSUES: the-gdna-prior-enters-psi-twice`. The implementation and exact
+reproduction commands are in [the local-prior checkpoint](RNA_LOCAL_CAPTURE_PRIOR_CHECKPOINT.md).
+The proper tail and mixture odds were varied separately. Own observation curves and local
+neighbour controls pass; the inherited message-support and narrow-source defects remain.
+The old statistical dependencies on remote RNA and annotation count are removed from the
+reader interface, conditional on fixed background and evidence. This does not certify the
+locality of the complete production pipeline.
+
+The complete nested evaluator fails the practical cost gate on both-strand objects. Stop
+larger panel runs here. A correct scalar readout does not make an expensive evidence oracle
+production-ready, and suppressing those objects would discard the evidence the owner wants
+retained. Do not copy the nested research evaluator into production or weaken the prior to
+make it faster.
+
+The authorized cheaper calculation is now complete. Sharing the outer quadrature preserves
+the selected answers but increases work; it does not repair the complete-consumer cost gate.
+The numerical findings live under **SHARED CAPTURE INTEGRATION** in ISSUES. The owner has
+requested an external review of the implementation decisions and the shortest release path;
+the [review packet](RNA_CAPTURE_RELEASE_REVIEW.md) is ready for that purpose. Do not expand
+this into another numerical engine while awaiting critique. A direct computation of the
+three required averages is a question for that review, not an implemented or proven speedup.
+Both RNA strands, witness exclusions, count uncertainty and distinct factor coordinates stay
+in the contract. The hard source-precision cases remain mandatory input checks.
+
+Background estimation and uncertainty remain unvalidated by this frozen-background contrast.
+The exact-zero/unidentified background case is explicit in the reference; there is no rate
+floor or capture-status fallback. Once the consumer passes numerical and cost checks, run
+expected-yield screens across probe layouts and both fragment-length gaps, then per-stratum
+transcript/gene A/Bs and serial real-library runs. Junction pricing and production integration
+retain their separate owner checkpoints.
+
+New production comparisons use main against an ordinary isolated
+worktree build. Historical import hooks, packages and receipts remain archived only to reproduce
+the earlier experiments. This plan is the active work list; the checkpoint documents below are
+the research record, not parallel implementation plans.
+
+## Research handoff
+
+| Question | Preserved checkpoint and outcome |
+|---|---|
+| How much is count error versus opportunity/readout error? | [Reader review](RNA_SHORT_READER_REVIEW.md): archived contrasts and corrected attribution. True final weights bypass several mechanisms and do not prove count inference is the only limit. |
+| What should honest density evidence mean? | [Density design](RNA_DENSITY_EVIDENCE_DESIGN.md) and [own-evidence checkpoint](RNA_DENSITY_EVIDENCE_CHECKPOINT.md): observations form the likelihood; population beliefs are not observations. |
+| Can existing messages carry it? | [Message checkpoint](RNA_MESSAGE_EVIDENCE_CHECKPOINT.md) and [channel checkpoint](RNA_CHANNEL_EVIDENCE_CHECKPOINT.md): reuse the graph, keep composition and absolute-level coordinates distinct. |
+| Does changing population inputs, admission or weights solve the problem? | [Admission checkpoint](RNA_EVIDENCE_ADMISSION_CHECKPOINT.md) and [weak-strand trace](RNA_WEAK_STRAND_EVIDENCE_CHECKPOINT.md): measured class tradeoffs; no selected replacement. |
+| Is boundary enrichment always below the exon's average? | [Message-source checkpoint](RNA_MESSAGE_SOURCE_CHECKPOINT.md): the assumption can fail with probe placement. Blanket removal is not a robust substitute. |
+| Is the full density reference ready to ship? | [Both-strand evidence](RNA_BOTH_STRAND_EVIDENCE_CHECKPOINT.md) and [support design](RNA_MESSAGE_SUPPORT_DESIGN.md): numerical support and cost remain unresolved; do not import the research implementation wholesale. |
+
+The last frozen evidence attribution, in
+`.cache/rigel_runs/2026-10-08_evidence_attribution/`, separates own observations, local
+edge messages and population influence without fitting a new model. It is diagnostic
+work, not an accuracy improvement or a selected production mechanism.
+
+## Validation after the foundation is accepted
+
+Start with frozen-input identities and analytically checkable limits, then the test
+chromosome, both fragment-length gap panels and the ladder. Keep zero-DNA and weak-evidence
+rows visible. Vary probe layout, fragment laws and capture strength without tuning constants
+to each arm. Reuse the existing instruments; whole-genome libraries run last and serially.
+
+Report transcript and gene errors per stratum against 0.7.1 and the current tree, with
+calibration region and boundary errors beside them. The existing count-candidate coverage
+is in [full-panel validation](RNA_FULL_PANEL_VALIDATION.md) and
+[real-library validation](RNA_REAL_LIBRARY_VALIDATION.md). Those receipts are reusable only
+for code proven numerically identical to the frozen candidate.
+
+Production landing requires falsification and mutation coverage, resolved golden changes,
+a fully passing re-derived suite, lint, full preflight and the move rule's coordinated
+DESIGN/EQUATIONS/ISSUES updates. The reader's owner checkpoint precedes wiring consumers
+and deleting the old reference/clip machinery. Commit, push and release remain owner actions.
