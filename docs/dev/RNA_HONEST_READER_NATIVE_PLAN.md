@@ -394,6 +394,9 @@ differ, by the unit (up to 1.82× on these small scenarios). Against HEAD the go
 recorded above (counts up to 28 % on `combo_extreme`, at most 0.3 % on 13 scenarios), the truth-scored
 instruments read beside it (the golden truth table, `quant_accuracy.py` in the review's A.4).
 
-Not run in the worktree: `preflight.py --full` (the instruments import the installed package, not a prototype
-site); it belongs to the landing into the main tree, with `pip install -e`, the suite and the commit — the
-owner's.
+LANDED (owner, 2026-10-10: "acceptable to land on production"): the worktree committed on the branch
+`honest-reader` (7240e929, pushed), main fast-forwarded to it, the sandbox notes committed (9c5cf4e8), the
+editable install rebuilt, the suite re-derived on main — 1 failed / 2,804 passed of 2,805, the paralog gate
+only — `preflight.py --full` green (every instrument imports, 5/5 self-tests), `ruff` clean, the baseline in
+CLAUDE.md re-derived (761ea951), main pushed. Next, in the owner's order: the accumulator's multimapper second
+pass (`ISSUES: the-calibration-count-is-blind-to-multimappers`), then the deep-library speed of the reader.
