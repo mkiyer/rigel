@@ -439,7 +439,9 @@ and on pieces shorter than a fragment (`TRAPS: perturb-every-gate`). Two more st
 every region and boundary at its own efficiency and finds the junction's objects by coordinate, never by the
 module's index arithmetic, and `::test_a_zero_length_fragment_places_nowhere` holds a length model's mass at
 `w = 0` out of every share. `test_priors.py` holds the gDNA component's length to gDNA's own conserved share
-and never the count's `q`; `test_capture_efficiency.py` holds each region and boundary to its own count.
+and never the count's `q`; `test_capture_reader.py` holds the published weights to the reader's modes relative to
+the largest, and `tests/native/test_honest_reader.py` holds the native reader to its executable specification
+(`tests/native/_honest_reader_reference.py`), curve by curve.
 
 ---
 

@@ -158,16 +158,8 @@ _SECTIONS = """
       </div>
     </section>
 
-    <section class="panel" id="s-enrich">
-      <div class="ph"><span class="eyebrow">06</span><h2>Calibration · Enrichment</h2><span class="desc">Capture on-target enrichment</span></div>
-      <div class="pb">
-        <div class="kpis" id="enrich-kpis"></div>
-        <div class="note" id="capture-note"></div>
-      </div>
-    </section>
-
     <section class="panel" id="s-density">
-      <div class="ph"><span class="eyebrow">07</span><h2>Calibration · gDNA density across the genome</h2><span class="desc">Per-reference gDNA levels</span></div>
+      <div class="ph"><span class="eyebrow">06</span><h2>Calibration · gDNA density across the genome</h2><span class="desc">Per-reference gDNA levels</span></div>
       <div class="pb">
         <div class="kpis" id="density-kpis"></div>
         <p class="cap" id="genome-cap">gDNA density across the genome</p>
@@ -187,7 +179,7 @@ _SECTIONS = """
     </section>
 
     <section class="panel" id="s-genes">
-      <div class="ph"><span class="eyebrow">08</span><h2>Gene expression</h2><span class="desc">Look up any gene</span></div>
+      <div class="ph"><span class="eyebrow">07</span><h2>Gene expression</h2><span class="desc">Look up any gene</span></div>
       <div class="pb">
         <div class="search">
           <input id="gsearch" type="text" placeholder="gene name, ID, biotype…" aria-label="Search genes"/>

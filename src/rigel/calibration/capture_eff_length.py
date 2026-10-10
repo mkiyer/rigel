@@ -4,8 +4,8 @@ efficiencies.
 Under hybrid capture a transcript's usable length is not its full length: only the probe-enriched part
 of its footprint is sampled, and contracting the gDNA component alone would leave it artificially
 concentrated against the RNA components. So EVERY transcript's EM effective length is contracted by the
-calibration's own efficiencies, read off the deconvolved gDNA against the fully captured level
-(`capture_efficiency`; `CalibrationResult.gdna_capture_efficiency_region` / ``_boundary``) — on the same
+calibration's own capture weights, each object's gDNA density under the population landscape relative to
+the largest (`CalibrationResult.gdna_capture_efficiency_region` / ``_boundary``) — on the same
 objects the deposit rule puts the transcript's fragments on (gate:
 ``tests/calibration/test_capture_eff_length.py``).
 
@@ -187,11 +187,25 @@ def _cut_efficiencies(
             c_region[intron_hi],
             c_boundary[right_of[intron_hi - 1]],
         )
+        # capture saturates: a fragment across a junction is captured no more than one wholly inside the best
+        # object it touches — the two pieces (an intron-short piece read at its far boundary) and the two
+        # boundaries — the simulator's own law of a fragment captured by its best single probe part
+        lvl_a = np.where(
+            gdna_contained[A[j]] > 0.0, c_region[A[j]], c_boundary[np.maximum(right_of[A[j]], 0)]
+        )
+        lvl_b = np.where(
+            gdna_contained[B[j]] > 0.0,
+            c_region[B[j]],
+            c_boundary[np.maximum(right_of[B[j] - 1], 0)],
+        )
+        cap = np.maximum(
+            np.maximum(lvl_a, lvl_b), np.maximum(c_boundary[junction_lo], c_boundary[junction_hi])
+        )
         out = out.copy()
         out[j] = np.clip(
             c_boundary[junction_lo] + c_boundary[junction_hi] - 0.5 * (c_intron_lo + c_intron_hi),
             0.0,
-            1.0,
+            cap,
         )
     return out
 
@@ -206,14 +220,14 @@ def transcript_capture_eff_lengths(
     """``eff_em_t = fl_t · Σ_o share_o c_o / Σ_o share_o`` over the transcript's pieces and cuts (gate:
     ``tests/calibration/test_capture_eff_length.py``).
 
-    The efficiencies are the result's: a piece's region's, a contiguous cut's boundary's, a junction's from
-    the objects beside it. With no reference (capture off, or no gDNA) every efficiency is 1 and ``fl`` is
-    returned verbatim; a transcript with no share on any object (shorter than every fragment) keeps ``fl``.
-    Every efficiency, a junction's included, lies in ``[0, 1]``, so ``eff_em`` never exceeds ``fl``.
+    The weights are the result's: a piece's region's, a contiguous cut's boundary's, a junction's from the
+    objects beside it, capped at the most captured object it touches. Weights of exactly 1 everywhere (no
+    landscape) return ``fl`` bit-identically; a transcript with no share on any object (shorter than every
+    fragment) keeps ``fl``. The weights are relative to the typical read object, so ``eff_em`` exceeds ``fl``
+    on a transcript more captured than that object and falls below it on one less captured; a junction's
+    weight lies between 0 and the most captured object it touches.
     """
     fl = np.asarray(fl_eff_lengths, dtype=np.float64)
-    if calibration.gdna_reference_density is None:
-        return fl.copy()
     c_region = np.asarray(calibration.gdna_capture_efficiency_region, dtype=np.float64)
     c_boundary = np.asarray(calibration.gdna_capture_efficiency_boundary, dtype=np.float64)
     gdna_contained = np.asarray(calibration.gdna_region_eff_len, dtype=np.float64)

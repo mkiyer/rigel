@@ -82,11 +82,8 @@ sys.path.insert(0, str(_REPO / "scripts" / "design"))
 from _shared import set_field, sibling  # noqa: E402
 from rigel.calibration.calibrate import calibrate  # noqa: E402
 from rigel.calibration.capture_eff_length import transcript_capture_eff_lengths  # noqa: E402
-from rigel.calibration.capture_efficiency import capture_efficiencies  # noqa: E402
-from rigel.calibration.landscape import fit_landscape, located_enriched_mode  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.region_chain import BOUNDARY, REGION  # noqa: E402
-from rigel.calibration.signature import RegionType, coarse_type_array  # noqa: E402
 from rigel.calibration.splice_graph import (  # noqa: E402
     build_boundary_flags_array,
     build_sj_geometry_arrays,
@@ -254,9 +251,9 @@ def calibrate_condition(index, region_arrays, panel_dir: Path, condition: str, c
 
 
 def oracle_gdna_result(cal, region_arrays, panel_dir: Path, condition: str, gdna_fl_pmf):
-    """The same result with the ruler's gDNA masses replaced by the CERTIFIED truth per object, the
-    reference read off a landscape fitted on the truth and the efficiencies recomputed from both: the
-    ideal witness, no estimator noise."""
+    """The same result with the ruler's gDNA masses replaced by the CERTIFIED truth per object and the
+    capture weights read from them — each object's true gDNA density on its support, relative to the
+    largest, which is exactly the reader's estimand: the ideal witness, no estimator noise."""
     z = np.load(panel_dir / "oracle_cache" / condition / "slot_truth.npz", allow_pickle=True)
     kind, obj, n_g = z["kind"], z["obj"], z["n_gdna"]
     m_reg = np.zeros_like(np.asarray(cal.count_gdna_region, float))
@@ -265,37 +262,21 @@ def oracle_gdna_result(cal, region_arrays, panel_dir: Path, condition: str, gdna
     b = kind == int(BOUNDARY)
     m_reg[obj[r]] = n_g[r]
     m_bnd[obj[b]] = n_g[b]
-    S = np.maximum(np.asarray(cal.gdna_region_eff_len, float), 1e-9)
-    rtype = coarse_type_array(np.asarray(region_arrays.signature))
-    live = S > 1e-9
-    anchor = live & (m_reg <= 1e-12) & (rtype != RegionType.EXON)
-    ls = fit_landscape(
-        m_reg[live],
-        np.maximum(m_reg[live], 1.0),
-        S[live],
-        np.zeros(int(live.sum())),
-        anchor=anchor[live],
-    )
-    mode = located_enriched_mode(ls) if ls is not None else None
-    ref = None if mode is None else float(np.exp(mode.mode.log_rho))
-    if ref is None:
+    S = np.asarray(cal.gdna_region_eff_len, float)
+    S_b = np.asarray(cal.gdna_boundary_eff_len, float)
+    dens_r = np.divide(m_reg, S, out=np.zeros_like(m_reg), where=S > 0.0)
+    dens_b = np.divide(m_bnd, S_b, out=np.zeros_like(m_bnd), where=S_b > 0.0)
+    top = max(float(dens_r.max(initial=0.0)), float(dens_b.max(initial=0.0)))
+    if top <= 0.0:
         efficiency = np.ones(m_reg.shape[0])
         efficiency_boundary = np.ones(m_bnd.shape[0])
     else:
-        efficiency, efficiency_boundary = capture_efficiencies(
-            ls,
-            ref,
-            m_reg,
-            S,
-            m_bnd,
-            np.asarray(cal.gdna_boundary_eff_len, float),
-        )
+        efficiency = dens_r / top
+        efficiency_boundary = dens_b / top
     return dataclasses.replace(
         cal,
         count_gdna_region=m_reg,
         count_gdna_boundary=m_bnd,
-        gdna_reference_density=ref,
-        gdna_reference_members=0 if mode is None else mode.n_members,
         gdna_capture_efficiency_region=efficiency,
         gdna_capture_efficiency_boundary=efficiency_boundary,
     )
@@ -384,9 +365,8 @@ def headline(d, measured, truth: Truth) -> dict:
 
 
 def _fmt_ref(cal) -> str:
-    if cal.gdna_reference_density is None:
-        return "None (factor 1 everywhere)"
-    return f"{cal.gdna_reference_density:.3e}/bp from {cal.gdna_reference_members:,} located kernels"
+    w = np.concatenate([cal.gdna_capture_efficiency_region, cal.gdna_capture_efficiency_boundary])
+    return f"weights: median {np.median(w):.3g} of the largest, {int((w < 0.5).sum()):,} objects below ½"
 
 
 def run_condition(index, region_arrays, index_dir, panel_dir, condition, config, arms, min_frags):
@@ -536,11 +516,8 @@ def main() -> int:
             )
             print(f"{'condition':<44}{'reference':>12} " + " ".join(f"{n:>30}" for n in names))
         cal = factors["shipped"][1]
-        ref = (
-            "None"
-            if cal.gdna_reference_density is None
-            else f"10^{np.log10(cal.gdna_reference_density):+.2f}"
-        )
+        w = np.concatenate([cal.gdna_capture_efficiency_region, cal.gdna_capture_efficiency_boundary])
+        ref = f"w50 {np.median(w):.2f}"
         cells = []
         for n in names:
             d, measured, _ = score(factors[n][0], truth, args.min_frags)
@@ -665,7 +642,7 @@ def footprint_gdna_length(region_arrays, block: tuple, gdna_fl_pmf) -> float:
         gdna_boundary_conserved_len=_gdna_boundary_conserved_len(region_arrays, gdna_fl_pmf),
         gdna_frac_region=z, rna_pos_frac_region=z,
         rna_neg_frac_region=z, gdna_frac_boundary=ez, rna_pos_frac_boundary=ez, rna_neg_frac_boundary=ez,
-        gdna_density_global=0.0, gdna_reference_density=None, gdna_reference_members=0,
+        gdna_density_global=0.0,
         gdna_capture_efficiency_region=np.ones(n), gdna_capture_efficiency_boundary=np.ones(ne),
         rna_sense_frac=0.5, gdna_strand_overdispersion=0.0, rna_strand_overdispersion=0.0,
         n_regions=n, n_boundaries=ne, n_sj=0,

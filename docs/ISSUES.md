@@ -14,6 +14,70 @@ the changelog is git.
 
 ## OPEN
 
+### the-calibration-count-is-blind-to-multimappers
+`priority: now — the owner's intended fix, after the native reader lands (2026-10-10); with the reader in place it is the one red gate in the suite · kind: defect · 2026-10-10`
+THE SYMPTOM. `tests/scenarios_aligned/test_multimap_counting.py::TestParalogMultimapping::test_gdna_sweep[gdna_100]`
+(two sequence-identical 500 bp single-exon paralogs, gDNA abundance 100, aligned reads): the shipped reader calls
+154 / 0 against a truth of 75 / 71 (the collapse the test asserts); the capture reader calls 123 / 79, a total
+of 202 against 146. Dissected: both paralog exons carry a calibration gDNA count of exactly 0 on a 155 bp
+contained support beside intergenic gDNA at 0.23–0.31 fragments/bp, because every fragment inside them maps
+twice and `bam_scanner.cpp` deposits into the calibration accumulator only for `is_unique_mapper` — a
+multimapper goes to the EM's buffer alone. The capture reader reads the zero honestly (`exp(−ρ·Eg)` at the
+background is `e^{−36}`), the weight is 870× below the flanking intergenic regions', `assemble_priors` contracts the locus's gDNA
+yield to its boundaries', the EM reads the zero yield as "cannot emit", and the gDNA at the paralogs is called
+RNA. The 123 / 79 split is the boundaries' crossing-count noise amplified by the vanished region weights, not a
+tie-break, so the test's instruction to delete its collapse branch does not apply. The pre-existing half is the
+shipped 154 against 146: the locus prior's gDNA count at a multimapper-only region is 0, so the EM has no gDNA
+prior there; the located-mode reader amplified it the same way on every captured library and its detector hid
+it on capture-OFF ones.
+
+THE FOOTPRINT. No benchmark saw it: every panel is an oracle BAM (`NH:i:1` throughout) and the production
+default is `include_multimap = True`. On the production index's 1,043,881 regions, per region the uniquely
+mapped first-mate starts against the multimapper alignment starts (every alignment counted):
+
+| library | unique fragments | multimapper alignments | regions with multimappers and no unique fragment (of them exon regions) | regions where multimappers outnumber unique fragments — share of all multimapper alignments inside them |
+|---|---|---|---|---|
+| LBX0190 (plasma) | 138,403 | 104,140 | 5,488 (762) | 6,504 — 95 % |
+| MO_3021 (plasma) | 772,744 | 583,407 | 23,443 (7,018) | 35,781 — 94 % |
+| VCaP mix (deep) | 18,417,903 | 544,065 | 10,099 (5,305) | 13,792 — 72 % |
+
+Multimappers are up to 43 % of a plasma library's alignments and they cluster where calibration counts almost
+nothing, which is exactly where the reader reads depletion and the locus prior reads no gDNA.
+
+THE FIX (owner, 2026-10-10, a known issue): a change to the accumulator phase. The accumulator today deposits
+uniquely aligned fragments for calibration and discards multimapping ones; it already buffers the fragments
+compatible with several fragment lengths (several isoforms) and assigns them in a second pass. Multimapping
+fragments are to be handled the same way — buffered, then assigned by the accumulator's second pass to the
+probabilistically best placement by the abundance of uniquely aligned fragments there — which fixes
+calibration and the capture reader at once; implementable without undue trouble, after the native reader is
+complete. The accumulator's own ruling already said as much — "a LATER phase: side buffer, then deterministic
+largest-remainder apportionment, integral always" — and the code implements it only for gap-hypothesis
+fragments on one placement. Derived: a multimapper enters the side
+buffer with one hypothesis per alignment (reference, start, end, introns), the second pass scores each
+placement with its existing score (`ρ(h)` from pass one's tally at the placement's objects, the length law,
+the strand term), draws one and the drain deposits it; calibration then counts the paralog exons at their
+density, the reader reads them and the locus prior holds their gDNA. It is a format change to
+`DeferredRecords` (per-hypothesis coordinates), a scanner change (defer instead of skip) and a drain change,
+each gated by `tests/native/_accumulator_reference.py`, A/B'd on the aligned scenarios (the only panels with
+multimappers) and on VCaP against its truth. The cheaper alternative — a per-region multimapper tally in the
+scanner and a unique-deposit opportunity `Eg_r = S_r · U_r / (U_r + A_r / NH_r)` under uniform genomic
+sampling — is a geometry estimated from data and needs its own ruling. Neither is a reader change: nothing in
+the reader can tell a withheld fragment from an absent one.
+
+### the-capture-weights-are-noisy-on-a-capture-off-library
+`priority: next — the price of no detector, to be reduced only by a mechanism A/B'd on its own · kind: cost · 2026-10-10`
+Every object's capture weight is its own gDNA density's posterior mode relative to the typical read object's, on every
+library (`DESIGN.md` §7.2). On a capture-OFF field the true weights are all one level and the published ones
+are its Poisson noise around that level: measured (`quant_accuracy.py`, pinned,
+fractional, shipped → reader, transcripts % / genes %) test chromosome stranded × OFF 6.88 / 1.00 → 8.74 /
+1.01, unstranded × OFF 7.99 / 1.13 → 8.41 / 1.19, ladder stranded × OFF 6.35 / 1.63 → 7.44 / 1.67; on the 21
+golden scenarios (10–12 kb, a handful of objects, every one capture-OFF, scored against the simulator's truth)
+the summed transcript error 298 → 324, worse on 7 and better on 5, the worst `combo_extreme` 6.7 → 22.1 of a
+54-fragment truth. The noise is the estimator's, not the kernel's (the kernel is its specification to 1e-9),
+and it is largest where objects are shallow. A reduction must be a mechanism of its own, A/B'd alone on both
+capture-OFF strata and the capture-ON ones, never a detector, never a reference (`ISSUES: the-located-mode-capture-reader`).
+
+
 Ordered by priority. An entry says what is open and the number a ranking turns on; what was done is git,
 what was ruled is `DESIGN.md`.
 
@@ -176,7 +240,7 @@ manifest or rebuild with `--alignable-zarr`. The one-line warning for a feather 
 Instrument: the manifest; `summary.json`'s `sj_blacklist_loaded`.
 
 ### calibration-detects-capture-on-a-capture-off-library
-`priority: now — release-critical: the uncommitted count repair is under review for law-frame and uncertainty defects; a detector-free ruler still fails its small-panel gate (2026-10-06) · kind: defect · 2026-09-29; mechanism 2026-10-01`
+`priority: now — release-critical: the uncommitted count repair is under review for law-frame and uncertainty defects; the detector-free reader landed 2026-10-10 (`DESIGN.md` §7.2) and this row's number under it is unmeasured · kind: defect · 2026-09-29; mechanism 2026-10-01`
 THE SYMPTOM (re-recorded 2026-10-03 on the re-simulated panel, pinned and fractional; the first record, 2026-10-01, was
 on the deleted old-physics panel and read 42.1 / 3.8 %, genes 4.2 / 0.3 %, 102k). On the genome-scale fl-gap arm
 `flgap_rna_short` (realised RNA 78 bp, gDNA 250 bp, 100 bp reads, `g50`), the stranded × capture-OFF library reads
@@ -3379,21 +3443,6 @@ normalisation is no alternative: at N_s = 0 it invents a uniform law (a2 0.109 a
 a2 moves only 0.1472 → 0.1482 as N_s goes 0 → 1e6, and on the ladder EB and plain agree to 0.002 bp; N_s ≈ 1e2–1e4 is
 unmeasured. The replacement is measured on the re-simulated fl-gap panels.
 
-### the-capture-reference-is-read-at-a-grid-point
-`priority: later — Tier 2; its fix does not land alone · kind: defect · 2026-09-29`
-`located_enriched_mode` reads the capture reference at a landscape grid point whose step is 8.4–8.9 %, so a 0.15 bp
-change in the length law can move the reference by up to 7.7 %.
-
-Reading it at the peak's parabolic vertex on log P needs no constant. It cuts the jitter to 0.13–0.80 % and leaves
-capture OFF byte-identical. Alone, though, it fails stranded × capture ON: transcripts −567, genes +758 (+0.5 %), and
-2 of 3 rows are worse.
-
-In 12 of 12 one-variable swaps a higher reference gave fewer transcript errors. So the ruler downstream prefers a
-reference above the density's peak, and that compensating error must be found first. The named candidate is the
-junction price (`ISSUES: the-junction-price-is-noisy-within-a-gene`).
-
-Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-29_precapture_rna/C_report.md` and its `C/` harness.
-
 ### intron-seeds-near-probes-are-capture-enriched
 `priority: later — Tier 2, the od research tail; answered before any purity weight or background repair that treats intron regions as off target · kind: question · 2026-09-28`
 Probes overhang exon edges and bind the bases there, so the intron regions next to probes are capture-enriched and
@@ -5527,3 +5576,35 @@ fl:
   within 0.011 bp of the fixed point.
 Sources: `~/Downloads/rigel_runs/prototypes/2026-09-28_od_design/` (`02_roots.md` §3, `03_bound.md` §3,
 `04_evidence.md` §2–§4, `01_fallback.md` §2 and §5, `06_fl.md` §3).
+
+### the-capture-reference-is-read-at-a-grid-point
+CLOSED by deletion 2026-10-10: the reference density no longer exists (`DESIGN.md` §7.2); the reader's mode
+is the lattice argmax refined by the parabola through its neighbours, per object, so there is no grid-point
+reference to jitter. The open half of the record — a higher reference gave fewer transcript errors in 12 of 12
+swaps, a compensating error downstream — is the junction price's structure
+(`ISSUES: the-junction-price-is-noisy-within-a-gene`) and stays there.
+
+### the-located-mode-capture-reader
+CLOSED by replacement 2026-10-10 (`DESIGN.md` §7.2, `EQUATIONS.md` §11): the reader that read the fully captured
+level off the landscape's located enriched mode (a basin above the depleted one with more than `√n` located
+members) and switched every correction off when it found none (`None`) was an on/off capture decision, which
+the owner refused ("an on-off switch for capture detection is not going to work", 2026-10-10). Do not rebuild
+it, and do not rebuild its detector-free replacements, all measured end to end, pinned and fractional, against
+the same shipped reader on the test chromosome (transcripts % / genes %):
+- the mass-weighted median of the solved gDNA density as the reference: within 10 % of the located mode on
+  every synthetic row that had one, 18.5× the located mode's answer on LBX0190; but on the zero-gDNA capture-OFF
+  rows calibration's 366 false fragments (`ISSUES: the-gdna-prior-enters-psi-twice`) become the contrast and
+  `g00 ss.99 OFF` reads 5.67 → 12.08; at `g05 OFF` +2 from Poisson noise; and where the probed class holds under
+  half the gDNA mass (`g50`, single probe) the gDNA component is priced through the same efficiencies and genes
+  read 1.48 → 16.82;
+- 0.7.1's kernel-density peak (bandwidth 0.4, prominence 0.05, mass-weighted): the same rows, the same way,
+  plus an outlier reference where one exon holds 7.7 % of a library's gDNA mass;
+- the located-only and gDNA-majority variants of the median: no change at `g00` — the false gDNA IS located,
+  and at `g00` exactly one object is gDNA-majority, and one object defines a median;
+- every cheap readout of the solve's inferred count under the landscape (mode, mean, median; 3–6 s a genome):
+  equal to the honest likelihood's mode on every panel except the zero-gDNA rows, where `g00 ss.99 ON` reads
+  7.35 → 14.65 through the same false gDNA.
+The honest likelihood with the RNA amount integrated out is immune to the false gDNA because it reads the
+strand columns, not the inferred count; its per-object error is at objects with no read under a median or mean
+readout (−0.14 to −0.79 nats, the breadth of the smoothed prior) and under 0.04 nats under the mode wherever an
+object has a read. Its native kernel reproduces the NumPy prototype to 1.2e-9 on 70,176 ladder slots.

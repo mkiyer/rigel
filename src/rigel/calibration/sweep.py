@@ -163,6 +163,7 @@ def solve_chain(
     block_slots: int | None = None,
     n_threads: int = 1,
     _capture: SweepCapture | None = None,
+    reader: dict | None = None,
 ) -> RegionBelief:
     """One forward-backward sweep over the chain. Returns the resolved :class:`RegionBelief`.
 
@@ -245,6 +246,7 @@ def solve_chain(
         out_var=out["var_gdna"],
         out_has_composition=has_composition,
         diagnostics=diag,
+        reader=reader,
         n_threads=int(n_threads),
     )
     n_owned = np.array([b.stop - b.start for b in blocks], np.int64)

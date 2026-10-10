@@ -519,8 +519,6 @@ scalars (it is `null` if calibration did not run):
 {
   "calibration": {
     "gdna_density_global":        <float>,       // library-average gDNA density (QC scalar)
-    "gdna_reference_density":     <float|null>,  // the captured gDNA level, gDNA fragments/bp; null = no enriched mode
-    "gdna_reference_members":     <int>,         // located regions that level rests on; 0 when it is null
     "rna_sense_frac":             <float>,       // kappa: sense-strand RNA fraction
     "gdna_strand_overdispersion": <float>,       // gDNA strand overdispersion: 0 (binomial) in this release
     "rna_strand_overdispersion":  <float>,       // RNA strand overdispersion: 0 (binomial) in this release
@@ -531,13 +529,12 @@ scalars (it is `null` if calibration did not run):
 }
 ```
 
-`gdna_reference_density` is calibration's capture answer: the density at the enriched mode of the
-gDNA-density landscape it fits, the fully captured gDNA level. Each region's capture efficiency is
-its gDNA density against that level, and `em_effective_length` is scaled by those efficiencies. It
-is `null` for a library without capture, or one whose gDNA is too sparse to locate its captured
-level, and then every `em_effective_length` equals `effective_length`. `gdna_reference_members`
-counts the located regions (those holding at least one gDNA fragment) in the mode. The report shows
-both, descriptively: no pass/fail verdict.
+Calibration's capture answer is per object, not a library scalar: every region's and boundary's capture
+weight is its own gDNA density under the population landscape, relative to the typical object's, and
+`em_effective_length` is each transcript's `effective_length` scaled by the weights of the objects its
+fragments land on. There is no capture detector and no on/off state: a library without capture reads
+weights near one level, and `em_effective_length` then sits close to `effective_length` on every
+transcript.
 
 The RNA and gDNA fragment-length models used by scoring/calibration are
 reported under the top-level **`fragment_length`** key (as
@@ -630,8 +627,8 @@ theory is in `docs/EQUATIONS.md` and the design in `docs/DESIGN.md`.
 ### What calibration produces
 
 - **Library scalars**, in `summary.json` → `calibration`: `gdna_density_global`,
-  `rna_sense_frac` (the sense fraction κ), the gDNA and RNA strand overdispersions, and the
-  captured gDNA level `gdna_reference_density` (`null` when no enriched gDNA mode was located).
+  `rna_sense_frac` (the sense fraction κ), and the gDNA and RNA strand overdispersions; the
+  capture weights are per object and enter the transcript table as `em_effective_length`.
 - **A per-locus Dirichlet prior** — `gdna_prior_count` and `rna_prior_count` in `loci.feather`
   — which sets the gDNA-vs-RNA split each locus's EM starts from, plus the gDNA component's
   effective length. RNA is distributed among transcripts by the EM, not by calibration.

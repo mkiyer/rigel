@@ -255,8 +255,8 @@ def assemble_priors(
 
         gdna_eff_len = Σ_regions share·S_r·c̃_r  +  Σ_boundaries share·M_e·c̃_e
 
-    ``c̃`` is each object's capture efficiency, the calibration's own
-    (`CalibrationResult.gdna_capture_efficiency_region` / ``_boundary``; `capture_efficiency`), ``S_r`` a
+    ``c̃`` is each object's capture weight, the calibration's own
+    (`CalibrationResult.gdna_capture_efficiency_region` / ``_boundary``), ``S_r`` a
     region's contained support and ``M_e`` gDNA's conserved share at a boundary
     (``gdna_boundary_conserved_len``).
 
@@ -291,10 +291,9 @@ def assemble_priors(
     exonic unspliced fragments and every probed gene under-calls (the test chromosome's `g50 ss.99 ON` row:
     gene-level Σ|Δ| 25,633 → 38,174 against 23,967 here).
 
-    The bedrock invariant — factor 1 under uniform gDNA. With no reference every efficiency is exactly
-    1 and ``gdna_eff_len == span == Σ S_r + Σ M_e`` bit-identically: an unenriched library contracts
-    NOTHING. Under capture a depleted object contributes its share at its efficiency and the length
-    contracts toward the probed footprint.
+    The bedrock invariant — factor 1 at weight 1. With every weight exactly 1 (no landscape fitted)
+    ``gdna_eff_len == span == Σ S_r + Σ M_e`` bit-identically. Under capture a depleted object contributes
+    its share at its weight and the length contracts toward the probed footprint.
 
     ⛔ NO RNA COUNT. The EM's gDNA share is gDNA's share of EVERY fragment in the locus, spliced ones
     included: the deterministic spliced fragments skip the E-step but are added to every M-step, and a
@@ -303,9 +302,9 @@ def assemble_priors(
     proportion to the spliced share (``tests/test_em_pseudocounts.py``). The RNA side is therefore the EM's
     own count less this one, formed where the EM's count exists.
 
-    No floor and no shrinkage: the efficiencies are posterior means under the population landscape, so a
-    locus with little evidence reads the population's own level, never a fabricated 0 and never the
-    uncontracted span.
+    No floor and no shrinkage beyond the reader's own: the weights are posterior modes under the population
+    landscape, so a locus with little evidence reads the population's own level, never a fabricated 0 and
+    never the uncontracted span.
     """
     if calibration.n_regions != region_arrays.n_regions:
         raise ValueError(
@@ -339,15 +338,13 @@ def assemble_priors(
     )
     c_region = np.asarray(calibration.gdna_capture_efficiency_region, dtype=np.float64)
     c_boundary = np.asarray(calibration.gdna_capture_efficiency_boundary, dtype=np.float64)
-    span = by_region(region_s) + by_boundary(boundary_m)
     eff_len = by_region(region_s * c_region) + by_boundary(boundary_m * c_boundary)
 
-    return LocusPriors(
-        gdna_count=gdna_locus,
-        # ≤ span by construction (every efficiency ≤ 1); the minimum absorbs an ulp. No floor: a locus
-        # with no start position has a yield of 0, and the EM reads a zero yield as "cannot emit".
-        gdna_eff_len=np.minimum(eff_len, span),
-    )
+    # The yield is the span at the objects' relative weights — above the span where the locus is more captured
+    # than the typical object, below it where less; the EM reads it as the component's rate denominator and is
+    # invariant to the unit. No floor: a locus with no start position has a yield of 0, and the EM reads a zero
+    # yield as "cannot emit".
+    return LocusPriors(gdna_count=gdna_locus, gdna_eff_len=eff_len)
 
 
 __all__ = ["LocusPriors", "assemble_priors"]

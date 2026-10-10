@@ -50,8 +50,6 @@ def _result(
     boundary_spliced=None,
     mass_per_crossing=None,
     gdna_density_global=0.01,
-    gdna_reference_density=None,
-    gdna_reference_members=0,
     efficiency=None,
     efficiency_boundary=None,
 ) -> CalibrationResult:
@@ -112,8 +110,6 @@ def _result(
         rna_pos_frac_boundary=ez.copy(),
         rna_neg_frac_boundary=ez.copy(),
         gdna_density_global=gdna_density_global,
-        gdna_reference_density=gdna_reference_density,
-        gdna_reference_members=0 if gdna_reference_density is None else 1,
         gdna_capture_efficiency_region=(
             np.ones(n) if efficiency is None else np.asarray(efficiency, dtype=np.float64)
         ),
@@ -560,8 +556,6 @@ def _stray_on_a_dead_boundary_cal(stray: float) -> CalibrationResult:
         boundary_g=[stray, 5.0, 50.0, 50.0, 50.0, 50.0],
         boundary_eff=[0.0, 50.0, 50.0, 50.0, 50.0, 50.0],
         gdna_density_global=1.0,
-        gdna_reference_density=1.0,
-        gdna_reference_members=1,
         efficiency=[1.0, 0.2, 1.0, 1.0, 1.0, 1.0, 1.0],
     )
 
@@ -614,8 +608,6 @@ def test_gdna_eff_len_is_the_span_when_every_object_sits_at_the_reference():
     rho = 2.0
     cal = dataclasses.replace(
         _uniform_field(np.full(6, 100.0), np.full(5, 50.0), rho),
-        gdna_reference_density=rho,
-        gdna_reference_members=1,
     )
     span = 6 * 100.0 + 5 * 50.0  # 850
     np.testing.assert_allclose(
@@ -640,8 +632,6 @@ def test_the_length_is_the_counts_objects_at_their_efficiencies():
         boundary_g=eg,
         boundary_eff=np.full(5, 50.0),
         gdna_density_global=1.0,
-        gdna_reference_density=1.0,
-        gdna_reference_members=1,
         efficiency=[0.1, 1.0, 1.0, 1.0, 1.0, 1.0],
         efficiency_boundary=[0.4, 1.0, 1.0, 1.0, 1.0],
     )
@@ -667,8 +657,6 @@ def test_a_locus_yield_below_one_base_is_not_floored():
             boundary_g=np.full(5, 50.0),
             boundary_eff=np.full(5, 50.0),
             gdna_density_global=1.0,
-            gdna_reference_density=1.0,
-            gdna_reference_members=1,
             efficiency=[c, 1.0, 1.0, 1.0, 1.0, 1.0],
             efficiency_boundary=[c, 1.0, 1.0, 1.0, 1.0],
         )

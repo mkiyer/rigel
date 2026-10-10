@@ -298,70 +298,9 @@ def _js_function(name: str) -> str:
     return m.group(1)
 
 
-def test_the_capture_answer_is_calibrations_located_enriched_mode(tmp_path):
-    """The capture tile, KPIs and note read calibration's reference and nothing else: a located mode
-    shows its density and members, no mode says so, and a summary without calibration shows no tile."""
-    located = build_view_model(
-        load_substrate(
-            _with_calibration(
-                _write_substrate(tmp_path / "on"),
-                gdna_reference_density=0.83,
-                gdna_reference_members=352,
-            )
-        )
-    )
-    assert located["calibration"]["capture"] == {"reference_density": 0.83, "n_members": 352}
-    tile = next(v for v in located["verdicts"] if v["k"] == "Capture")
-    assert (tile["v"], tile["fmt"]) == (0.83, "g4")
-    assert "352" in tile["n"]
-    assert [k["v"] for k in located["calibration"]["enrichment_kpis"]] == [0.83, 352]
-
-    none = build_view_model(
-        load_substrate(
-            _with_calibration(
-                _write_substrate(tmp_path / "off"),
-                gdna_reference_density=None,
-                gdna_reference_members=0,
-            )
-        )
-    )
-    assert none["calibration"]["capture"] == {"reference_density": None, "n_members": 0}
-    tile = next(v for v in none["verdicts"] if v["k"] == "Capture")
-    assert (tile["v"], tile["fmt"]) == ("None", "text")
-    assert [k["v"] for k in none["calibration"]["enrichment_kpis"]] == ["None"]
-
-    absent = build_view_model(load_substrate(_write_substrate(tmp_path / "absent")))
-    assert absent["calibration"]["capture"] is None
-    assert not any(v["k"] == "Capture" for v in absent["verdicts"])
-    assert absent["calibration"]["enrichment_kpis"] == []
-
-
-def test_the_capture_note_reads_only_keys_the_view_model_writes(tmp_path):
-    """A key the front end reads but the model never writes renders as ``NaN`` or ``undefined``, and
-    nothing fails, so every key the note reads off the capture answer must be one the model writes."""
-    d = _with_calibration(
-        _write_substrate(tmp_path / "run"), gdna_reference_density=0.83, gdna_reference_members=352
-    )
-    written = set(build_view_model(load_substrate(d))["calibration"]["capture"])
-    read = set(re.findall(r"\bc\.(\w+)", _js_function("captureNote")))
-    assert read, "the capture note reads no key of the capture answer"
-    assert read <= written, (
-        f"report.js reads {sorted(read - written)}, which the model never writes"
-    )
-
-
-@pytest.mark.parametrize("reference_density", [0.83, None])
-def test_the_report_shows_calibrations_rna_sense_fraction_whatever_the_capture_answer(
-    tmp_path, reference_density
-):
-    """The sense fraction is a library scalar, not a capture number, so it is shown with or without
-    a located enriched mode."""
-    d = _with_calibration(
-        _write_substrate(tmp_path / "run"),
-        rna_sense_frac=0.973,
-        gdna_reference_density=reference_density,
-        gdna_reference_members=0 if reference_density is None else 352,
-    )
+def test_the_report_shows_calibrations_rna_sense_fraction(tmp_path):
+    """The sense fraction is a library scalar and is shown as one."""
+    d = _with_calibration(_write_substrate(tmp_path / "run"), rna_sense_frac=0.973)
     kpis = build_view_model(load_substrate(d))["calibration"]["density_kpis"]
     assert {"l": "RNA sense", "v": 0.973, "fmt": "float3"} in kpis
 
@@ -369,9 +308,7 @@ def test_the_report_shows_calibrations_rna_sense_fraction_whatever_the_capture_a
 def test_every_format_tag_the_view_model_emits_is_one_the_front_end_formats(tmp_path):
     """``fmtValue`` falls through to the raw value on a tag it does not know, so a tag the model emits
     must be one of its cases (``text`` values are strings, which it passes through)."""
-    d = _with_calibration(
-        _write_substrate(tmp_path / "run"), gdna_reference_density=0.83, gdna_reference_members=352
-    )
+    d = _with_calibration(_write_substrate(tmp_path / "run"))
     _enriched_track().to_feather(d / "calibration_track.feather")
     vm = build_view_model(load_substrate(d))
 

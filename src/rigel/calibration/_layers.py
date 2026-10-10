@@ -85,10 +85,6 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         (
             "density_model",
             "landscape",
-            # `capture_efficiency` is every region's and boundary's capture efficiency: a posterior under the
-            # landscape prior from the object's own deconvolved gDNA count, read by the ruler and the locus
-            # prior through the result.
-            "capture_efficiency",
         ),
     ),
     (

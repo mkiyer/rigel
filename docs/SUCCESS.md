@@ -87,11 +87,12 @@ isoform split reads the ratios inside a gene and a repair of the scale can cost 
 
 Every EM component's length is one shared rule: the component's conserved share of each region and boundary
 its fragments deposit on (a junction, in a spliced transcript's own coordinates) times that object's capture
-efficiency (`DESIGN.md` §7.2, `EQUATIONS.md` §11). An object's efficiency is the posterior mean of its own gDNA
-density, its count on its support, clipped at the located enriched mode of the fitted gDNA landscape; a
-junction, where gDNA never deposits, is priced from the objects within one fragment of it. With no enriched
-mode — capture-OFF, or no gDNA, or a library too sparse to locate its probed level — every efficiency is exactly
-1 and nothing contracts, and the zero controls and both capture-OFF strata read 1.000 with nothing moved. A
+weight (`DESIGN.md` §7.2, `EQUATIONS.md` §11). An object's weight is the posterior mode of its own gDNA density
+under the fitted gDNA landscape, read inside the block solve from its strand columns with the RNA amount
+integrated out and the factors delivered to it, relative to the typical read object's; a junction, where gDNA never
+deposits, is priced from the objects within one fragment of it and capped at the most captured of them. There
+is no detector and no reference: a capture-OFF library is read the same way, and the Poisson noise its
+weights carry is priced per stratum (`ISSUES: the-capture-weights-are-noisy-on-a-capture-off-library`). A
 second lane is built and not wired: the per-transcript RNA prior (`rna_prior_weight`) is never passed in
 production (`ISSUES: per-transcript-prior-lane`).
 

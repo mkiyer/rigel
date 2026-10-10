@@ -39,6 +39,7 @@
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/string.h>
 
+#include "honest_reader.h"
 #include "psi_kernel.h"
 #include "thread_pool.h"
 #include "transfer_kernel.h"
@@ -329,6 +330,9 @@ struct Outputs {  // written in place, the owned slots of each block
     double *fpos, *fneg, *fg, *var; bool* has_comp;
     // the diagnostics capture, or nullptr
     double *fg_loc = nullptr, *fg_strand = nullptr, *tau_lam = nullptr, *lam_rows = nullptr;
+
+    double* reader_mode = nullptr;  // the capture reader's per-slot mode, on the last refit only
+    rigel::honest::Rules reader_rules{};
 };
 
 struct Lane3 {  // one received lane as the capture returns it
@@ -359,6 +363,7 @@ struct Arena {
         has_nbr[2], has_comp[2], present[2][3], has_wit[2][3], cube_has_pos, cube_has_neg, held, solvable, has_own,
         own_ev;
     std::vector<const double*> row_ptr;
+    std::vector<double> rd_comp, rd_dna, rd_rna, rd_old, rd_logL;  // the honest reader's per-slot factors
     std::unique_ptr<Scratch> S;  // transfer_rows' scratch, built for K
     P::Scratch psi;
 
@@ -391,6 +396,7 @@ struct Arena {
                         &cube_has_pos, &cube_has_neg, &held, &solvable, &has_own, &own_ev})
             grow(*v, n);
         grow(row_ptr, n);
+        grow(rd_comp, K); grow(rd_dna, K); grow(rd_rna, K); grow(rd_old, K);
     }
 };
 
@@ -629,6 +635,86 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
     // has_composition: an own composition channel, structural certainty, or a composition held from either side
     for (int i = 0; i < n_owned; ++i)
         out.has_comp[start + i] = as_bool(A.own_ev)[i] || (!fp[i] && !fn[i]) || as_bool(A.held)[i];
+    // THE CAPTURE READER: every owned slot's posterior mode of gDNA density under the landscape, from its
+    // own strand columns and the factors this block delivered to it — the composition row (the normalised sum of
+    // the sides' compositions), the held DNA level (the sides' present gDNA profiles intersected, at the gDNA
+    // lane's origin), the held RNA level of a single-strand slot (the present level and flux rows of the sides
+    // that hold no composition, intersected, admitted when its converted row is not flat) and the cube rows of a
+    // both-strand slot. The same evaluator as the standalone module (honest_reader.h), on psi's own lattices.
+    if (out.reader_mode != nullptr && L.built) {
+        namespace H = rigel::honest;
+        const int nx = L.G;
+        std::vector<double> rho(nx);
+        for (int i = 0; i < nx; ++i) rho[i] = std::exp(L.log_rho[i]);
+        const std::vector<int> peaks = H::prior_peaks_of(L.logP, nx);
+        const bool gdna_lane = p.rho_gdna > 0.0;
+        for (int i = 0; i < n_owned; ++i) {
+            H::Slot hs;
+            hs.u = cnt[2 * i]; hs.v = cnt[2 * i + 1]; hs.eg = a_g[i]; hs.er = a_r[i];
+            hs.both = fp[i] && fn[i]; hs.admits = fp[i] || fn[i];
+            hs.q = (hs.both || fp[i]) ? p.kappa : 1.0 - p.kappa;
+            double* comp = A.rd_comp.data();
+            bool any_comp = false;
+            std::fill_n(comp, K, 0.0);
+            for (int sd = 0; sd < 2; ++sd) {
+                if (!as_bool(A.has_comp[sd])[i]) continue;
+                const double* c = A.comp[sd].data() + static_cast<size_t>(i) * K;
+                for (int k = 0; k < K; ++k) comp[k] += c[k];
+                any_comp = true;
+            }
+            if (any_comp) norm_inplace(comp, K);
+            hs.comp = comp;
+            hs.dna = H::Level{};
+            if (gdna_lane && !as_bool(A.empty_g)[i]) {
+                double* dv = A.rd_dna.data();
+                bool any = false;
+                for (int sd = 0; sd < 2; ++sd) {
+                    if (!as_bool(A.present[sd][0])[i]) continue;
+                    const double* pr = A.prof[sd][0].data() + static_cast<size_t>(i) * K;
+                    if (!any) std::copy(pr, pr + K, dv);
+                    else for (int k = 0; k < K; ++k) dv[k] = std::min(dv[k], pr[k]);
+                    any = true;
+                }
+                if (any) { norm_inplace(dv, K); hs.dna = H::Level{p.lam, dv, K, p.rho_gdna, true}; }
+            }
+            hs.pos = H::Level{}; hs.neg = H::Level{};
+            if (!hs.both) {
+                const bool free2[2] = {fp[i], fn[i]};
+                for (int st = 0; st < 2; ++st) {
+                    if (!free2[st] || as_bool(A.empty_r)[i]) continue;
+                    const int l = 1 + st;
+                    double* rv = A.rd_rna.data();
+                    bool any = false;
+                    for (int sd = 0; sd < 2; ++sd) {
+                        if (!as_bool(A.has_nbr[sd])[i] || as_bool(A.has_comp[sd])[i]) continue;
+                        if (as_bool(A.present[sd][l])[i]) {
+                            const double* pr = A.prof[sd][l].data() + static_cast<size_t>(i) * K;
+                            if (!any) std::copy(pr, pr + K, rv); else for (int k = 0; k < K; ++k) rv[k] = std::min(rv[k], pr[k]);
+                            any = true;
+                        }
+                        const int32_t fr = A.flux_index[l][2 * i + sd];
+                        if (fr >= 0) {
+                            const double* pr = A.flux_store[l].data() + static_cast<size_t>(fr) * K;
+                            if (!any) std::copy(pr, pr + K, rv); else for (int k = 0; k < K; ++k) rv[k] = std::min(rv[k], pr[k]);
+                            any = true;
+                        }
+                    }
+                    if (!any) continue;
+                    norm_inplace(rv, K);
+                    rna_row_of_level(rv, p.lam, p.lam, K, A.n_u[i], a_r[i], p.rho_rna, *A.S, A.rd_old.data());
+                    double lo = A.rd_old[0], hi = A.rd_old[0];
+                    for (int k = 1; k < K; ++k) { lo = std::min(lo, A.rd_old[k]); hi = std::max(hi, A.rd_old[k]); }
+                    if (hi - lo > EPS) { hs.pos = H::Level{p.lam, rv, K, p.rho_rna, true}; break; }
+                }
+            } else if (!delivered.index.empty() && delivered.index[i] >= 0) {
+                const P::Delivered& row = delivered.rows[delivered.index[i]];
+                if (row.pos) hs.pos = H::Level{p.lam, row.pos, K, row.rho_ref, true};
+                if (row.neg) hs.neg = H::Level{p.lam, row.neg, K, row.rho_ref, true};
+            }
+            double max_post = 0.0;
+            out.reader_mode[start + i] = H::slot_mode(hs, p.lam, K, out.reader_rules, rho.data(), L.log_rho, L.logP, nx, peaks, A.rd_logL, &max_post);
+        }
+    }
 }
 
 // ---- the call ---------------------------------------------------------------------------------------------
@@ -666,7 +752,7 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
                       double rho_gdna, double rho_rna,
                       bool split_live, nb::object gdna,
                       Vec out_fpos, Vec out_fneg, Vec out_fg, Vec out_var, BoolVec out_has_composition,
-                      nb::object diagnostics, int n_threads) {
+                      nb::object diagnostics, nb::object reader, int n_threads) {
     const int64_t n = static_cast<int64_t>(free_pos.shape(0));
     const int K = static_cast<int>(lam.shape(0)), B = static_cast<int>(blocks.shape(0));
     if (n_tilt < 2) throw std::invalid_argument("solve_blocks: the tilt needs at least two nodes");
@@ -690,6 +776,12 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
     }
     Outputs out{out_fpos.data(), out_fneg.data(), out_fg.data(), out_var.data(), out_has_composition.data()};
     const bool want_capture = !diagnostics.is_none();
+    if (!reader.is_none()) {
+        nb::dict rd = nb::cast<nb::dict>(reader);
+        out.reader_mode = nb::cast<Vec>(rd["mode"]).data();
+        out.reader_rules = rigel::honest::replica_rules(nb::cast<double>(rd["coarse_step"]), nb::cast<double>(rd["window_sd"]),
+                                                         nb::cast<int>(rd["tilt_nodes"]), nb::cast<int>(rd["search_stride"]));
+    }
     if (want_capture) {
         nb::dict cd = nb::cast<nb::dict>(diagnostics);
         out.fg_loc = nb::cast<Vec>(cd["fg_loc"]).data(); out.fg_strand = nb::cast<Vec>(cd["fg_strand"]).data();
@@ -1192,7 +1284,7 @@ NB_MODULE(_solve_impl, m) {
           nb::arg("rho_gdna"),
           nb::arg("rho_rna"), nb::arg("split_live"), nb::arg("gdna").none(),
           nb::arg("out_fpos"), nb::arg("out_fneg"), nb::arg("out_fg"), nb::arg("out_var"), nb::arg("out_has_composition"),
-          nb::arg("diagnostics").none(), nb::arg("n_threads"),
+          nb::arg("diagnostics").none(), nb::arg("reader").none(), nb::arg("n_threads"),
           "Solve every locus block of the chain — the prior rows, the self-solve, the own evidence, the message layer, the "
           "final solve, the write-back, the assertions' counts — on a pool of threads, one block at a time; the belief and "
           "`has_composition` written in place on the owned slots; the counts and the capture returned. "

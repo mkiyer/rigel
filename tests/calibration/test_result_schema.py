@@ -55,8 +55,6 @@ def _valid_kwargs() -> dict:
         rna_pos_frac_boundary=boundary.copy(),
         rna_neg_frac_boundary=np.zeros(N_BOUNDARIES),
         gdna_density_global=1e-3,
-        gdna_reference_density=None,
-        gdna_reference_members=0,
         gdna_capture_efficiency_region=np.ones(N_REGIONS),
         gdna_capture_efficiency_boundary=np.ones(N_BOUNDARIES),
         rna_sense_frac=0.9,
@@ -367,40 +365,3 @@ def test_the_conserved_mass_survives_the_oracle_arms_dataclass_replace():
     swapped = dataclasses.replace(res, count_rna_sj=np.array([40.0, 60.0]))
     np.testing.assert_allclose(swapped.sj_conserved_mass, [20.0, 15.0])
     assert not np.allclose(swapped.sj_conserved_mass, res.sj_conserved_mass)
-
-
-def test_the_reference_density_is_None_or_positive_and_finite():
-    """`gdna_reference_density` is the fully-captured gDNA level or ``None`` (no enriched mode): a zero,
-    a negative or a non-finite reference is refused, since the ruler divides by it. With no reference every
-    capture efficiency must be exactly 1."""
-    kw = _valid_kwargs()
-    assert CalibrationResult(**kw).gdna_reference_density is None
-    kw["gdna_reference_density"] = 0.37
-    kw["gdna_reference_members"] = 12
-    assert CalibrationResult(**kw).gdna_reference_density == 0.37
-    for bad in (0.0, -1.0, float("nan"), float("inf")):
-        kw["gdna_reference_density"] = bad
-        with pytest.raises(ValueError):
-            CalibrationResult(**kw)
-    kw = _valid_kwargs()
-    kw["gdna_capture_efficiency_region"] = np.full(N_REGIONS, 0.5)
-    with pytest.raises(ValueError, match="no reference"):
-        CalibrationResult(**kw)
-
-
-def test_the_reference_members_count_the_kernels_behind_a_reference_and_are_ZERO_without_one():
-    """`gdna_reference_members` is the regime: the located kernels the enriched mode rests on. It is
-    positive exactly when a reference is present — a reference from no kernel and a member count with
-    no reference are both refused, so a consumer reading the pair cannot see a half-published state."""
-    kw = _valid_kwargs()
-    assert CalibrationResult(**kw).gdna_reference_members == 0
-    kw["gdna_reference_density"] = 0.37
-    kw["gdna_reference_members"] = 12
-    assert CalibrationResult(**kw).gdna_reference_members == 12
-    kw["gdna_reference_members"] = 0
-    with pytest.raises(ValueError, match="gdna_reference_members"):
-        CalibrationResult(**kw)
-    kw["gdna_reference_density"] = None
-    kw["gdna_reference_members"] = 3
-    with pytest.raises(ValueError, match="gdna_reference_members"):
-        CalibrationResult(**kw)

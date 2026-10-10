@@ -1846,7 +1846,7 @@ losing row a zero control at that floor; every contaminated row still favours `t
 that reaches the DELIVERED rows (under capture the probed exons' one-sided rows ARE the enriched mode's
 witness), the likelihood-kernel estimator, the all-kernel E-step and six refits.
 
-### 7.2 The ruler reads the landscape's located enriched mode (2026-09-14; `ISSUES: g00-shrinkage-upstream-repair` CLOSED)
+### 7.2 The capture reader: every object's own gDNA density under the landscape, no detector (owner, 2026-10-10; supersedes the located-mode reader of 2026-09-14)
 
 **Capture is a spectrum (owner, 2026-10-05).** There is never a binary capture-ON versus capture-OFF: a plasma panel
 enriches scarce transcripts that stay a tiny fraction of the library, so any library-level statistic reads the
@@ -1880,59 +1880,51 @@ or positive background floor is authorized. Production integration and junction
 pricing keep their separate owner checkpoints.
 
 The EM's effective length under capture (`capture_eff_length`, `priors.assemble_priors`, `EQUATIONS.md` §11)
-contracts every component by the capture efficiencies of the objects its fragments deposit on, each an
-object's gDNA density against a reference `ρ_ref`, the fully-captured level. THE RULING: `ρ_ref` is the
-located enriched mode of the fitted gDNA landscape — the same `DensityLandscape` ψ reads on the refits —
-published on the result as `CalibrationResult.gdna_reference_density` (`None` when no refit fit a landscape
-or no located mode lies above the depleted one, and then every efficiency is exactly 1), and read through
-those efficiencies by every component's length, the transcripts', the synthetic spans' and the locus gDNA
-component's; the private mass-weighted kernel density with its bandwidth and prominence constants, which
-accepted a mode from any five slots with positive mass, is deleted. Depleted is the largest-mass basin
-(`landscape.split_basins`), the enriched candidate the basin above it holding the most located kernels, and
-a mode is located iff the median rendered width of its member kernels is at most one nat
-(`CONSTANTS.landscape.located_var`, §7.1 rule 4 read at the population's own resolution, `knn_widths`; the within-basin
-spread is not the statement — a basin cut by the grid's edge is narrow whatever its kernels). Why this and not a repair of the composition: the composition had been
-fixed first and the factor did not follow — the ladder's zero rows carry 178–189 false fragments on
-35,135 regions (one slot at or above one fragment) and still read 0.51 / 0.12 / 0.62, because a detector
-that always returns a mode reads specks as a mode; and the oracle's own counts contracted 8 % at
-capture-OFF (`O` 0.923/0.926 against a contract of exactly 1.000), an estimator defect no composition can
-cure. Measured (`calibration_vs_oracle.py` ③, both panels): the zero controls' factor 0.141 / 0.154 →
-1.000 with nothing moved (5,108 / 51,436 transcripts had moved); both in-scope capture-OFF strata
-P = O = 1.000 with nothing moved (from P 0.946–0.970, O 0.923–0.939); stranded capture-ON P/O 1.015
-against 1.011 on the test chromosome and 1.013 against 1.011 on the ladder, with `ρ_ref` within 4 % of
-the truth's mass-weighted median on every capture-ON row measured; the solve untouched (`policy_benchmark.py`
-identical). The `U` arm is retired: with the reference a property of the solve, a uniform field against it
-is a number about nothing, and its question — what a noise-free field leaves — is answered structurally by
-`O` at capture-OFF reading 1.000 with no fitting (`ISSUES: u-ruler-arm` CLOSED). The verdict and the
-reference are stable across an 8× range of the landscape's render resolution
-(`TRAPS: a-mode-count-is-not-a-well-posed-quantity`).
+contracts every component by the capture weights of the objects its fragments deposit on. THE RULING (owner,
+2026-10-10): there is no capture detector. The reader this supersedes — the located enriched mode of the fitted
+landscape with its `√n`-members test, `None` switching every correction off — was exactly the on/off decision
+the first paragraph of this section names a defect: it read the two sparse plasma libraries and every small
+panel as uncaptured. Every detector-free REFERENCE tried in its place (the mass-weighted median of the gDNA
+density, 0.7.1's kernel-density peak, their located-only and gDNA-majority variants) failed the zero-gDNA
+capture-OFF rows through calibration's false gDNA (`ISSUES: the-gdna-prior-enters-psi-twice`: 366 false
+fragments become a contrast, transcripts 5.67 → 12.08 %) and the weak-capture rows through the gDNA prior
+(genes 1.48 → 16.82 % where the probed class holds under half the gDNA mass), and every cheap readout of the
+inferred count inherits the same false gDNA; the records are `ISSUES: the-located-mode-capture-reader`.
 
-**The members have a location (2026-09-16; `ISSUES: the-ruler-reference-on-sparse-real-libraries`
-CLOSED).** A basin's members are the kernels with a location — a count of at least one fragment, the wall
-`located_var` is read at, published by the fit as `DensityLandscape.located`; a zero-count anchor's or a
-sub-fragment kernel's centre is its resolution wall `1/E`, which says where the kernel could not see and is
-no member of anything. The enriched candidate is the basin above the depleted one holding the most located
-kernels, and it is a mode iff its members resolve it at the located population's own resolution: with
-`k = √n_located`, the median of the members' widths to their k-th nearest MEMBER is at most one nat, so a
-basin with k members or fewer — the cluster smaller than √n that reaches outside itself — is no mode however
-narrow the rendered density's cut. The result carries the regime beside the reference
-(`CalibrationResult.gdna_reference_members`, the CLI summary and the calibration log), and a library whose
-gDNA is too sparse to locate its probed level is told so. Why: a human index trains a quarter of a million
-anchors whose walls span every decade, and on the two sparse real libraries the shipped rule chose a
-reference an order of magnitude below the probed level from a basin of 16,931 and 20,071 walls around 10
-and 16 located kernels. Measured: both panels' 46 rows and the depth ladder's 26 capture-ON rows unchanged
-to the reference, the two sparse libraries (LBX0190 1,118 located kernels, MO_3021 15,088) `None`, the two
-deep ones unchanged (LBX0588 at 10^-0.53 from 11,579 members, the VCaP library at 10^-1.07 from 24,496);
-two capture-OFF rows of the depth ladder at a tenth of the depth that had read a reference from one located
-kernel among walls read `None`. The choice rule cannot be discriminated by number — the largest rendered
-mass, the most located members, the largest located weight and the highest located basin agree on every row
-measured once the members are located — so the most-located-members rule ships by derivation.
+What ships: every object's capture weight is the posterior MODE of its own gDNA density under the fitted
+landscape, read inside the native block solve (`native.solve_blocks`, `native/honest_reader.h`) on the last
+refit's sweep after its final ψ, from the slot's own strand columns with the RNA amount integrated out and
+the factors the sweep delivered to it — the composition row, the held DNA level and the held RNA levels; a
+both-strand slot over the arcsine continuum and the atoms its witness bits admit (`EQUATIONS.md` §11; the
+executable specification is `tests/native/_honest_reader_reference.py`, the lattices ψ's own). The weights
+are published relative to the typical read object (`CalibrationResult.gdna_capture_efficiency_region` /
+`_boundary`, the median read weight exactly 1), and are 1 everywhere only when the last refit fitted no
+landscape; the EM is invariant to a common factor (counts and TPM to machine precision; `em_effective_length`
+scales with it), so the unit is a convention, and the median is the one unit that is neither a detector nor
+an extreme value — relative to the largest of two million noisy objects every weight on a real library sat
+below 0.01.
+The junction price's cap moves from 1 to the most captured object a junction fragment touches. Why the mode
+and not the median or the mean: at an object with no read the posterior is the prior times `exp(−ρ·Eg)`,
+one-sided and broad, and its median or mean under-reads the background by 0.14–0.79 nats as the background
+thins; the mode is location-faithful, and wherever an object has a read the reader is right to 0.04 nats
+(`ISSUES: the-located-mode-capture-reader`). Measured end to end (`quant_accuracy.py`, pinned, fractional;
+transcripts % / genes %, shipped → this reader): test chromosome stranded × ON 6.27 / 0.79 → 6.95 / 0.87,
+stranded × OFF 6.88 / 1.00 → 8.74 / 1.01, unstranded × OFF 7.99 / 1.13 → 8.41 / 1.19; the ladder stranded × ON
+12.02 / 7.75 → 12.35 / 6.95 and OFF 6.35 / 1.63 → 7.44 / 1.67; the junction-probed panel 32.98 / 1.64 → 25.01
+/ 2.18; single-probe 9.22 / 2.12 → 9.81 / 1.22; the VCaP mix through the production path, pinned, gDNA
+fraction 0.2395 → 0.2401 against a truth of 0.2518. The cost: 11 s of LBX0190's 22 s pipeline, 43 s of
+MO_3021's 66 s, and 4.6 min on top of the VCaP mix's 3 min (2.09 M slots; the both-strand slots' strand
+integral is the whole of it) — the deep-library cost is the open performance item. Two prices are open and
+named: a capture-OFF library is read the same way, so its weights carry Poisson noise
+(`ISSUES: the-capture-weights-are-noisy-on-a-capture-off-library`), and the reader reads calibration's
+count, which never sees a multimapped fragment (`ISSUES: the-calibration-count-is-blind-to-multimappers`) —
+the release-blocking one.
 
 **The one shared rule: conserved shares over regions and boundaries (owner rulings 2026-09-22 and 2026-09-23;
 `ISSUES: the-gdna-component-length-rule-differs-from-the-transcripts` CLOSED; `EQUATIONS.md` §11).** THE RULING:
 every EM component — the locus gDNA component, every synthetic nascent span, every annotated transcript — takes
 its capture-contracted length by one rule, the sum over every object its fragments deposit on of its CONSERVED
-SHARE there times that object's CAPTURE EFFICIENCY, `L_T = Σ_pieces S_T(p)·c_p + Σ_cuts M_T(k)·c_k`. A component's
+SHARE there times that object's CAPTURE WEIGHT, `L_T = Σ_pieces S_T(p)·c_p + Σ_cuts M_T(k)·c_k`. A component's
 pieces are the regions its template covers; between two consecutive pieces is a cut, the boundary between them
 or, where a transcript splices, a junction. `S_T(p)` is its contained share of a piece and `M_T(k)` its share at a
 cut by the deposit rule itself (§3.1's `mass`: a crossing fragment's unit is cut into slices at the boundaries and
@@ -1943,33 +1935,34 @@ placements, so the shares total the fl-marginal length exactly however many cuts
 `Σ share·c / Σ share` over the transcript's pieces and cuts (`transcript_objects`). The gDNA component:
 `priors.assemble_priors` sums the locus's regions and every boundary touching them with the count's own weights,
 a boundary at gDNA's conserved share (`CalibrationResult.gdna_boundary_conserved_len`, computed by
-`calibrate` at a reach that never ends, since gDNA's template is the chromosome); at efficiency 1, beside outside
+`calibrate` at a reach that never ends, since gDNA's template is the chromosome); at weight 1, beside outside
 neighbours longer than a fragment, those objects hold exactly the locus's overlapping starts. The length reads
 neither the count's pooled `q` (`ISSUES: the-pooled-q-in-the-gdna-length`) nor the crossing support; the count
-side still converts a boundary's mass by `q` (§3.1c). With no reference every efficiency is exactly 1 and every
+side still converts a boundary's mass by `q` (§3.1c). With no landscape every weight is exactly 1 and every
 length is its uncontracted span bit-identically. The measurement that put the gDNA component, the synthetic
 spans and the annotated transcripts on one scale (`ruler_vs_truth.py --scale`, no EM) is recorded in
 `ISSUES: the-gdna-component-length-rule-differs-from-the-transcripts`.
 
-**The efficiencies: each object reads its own count.** `capture_efficiency.capture_efficiencies`, computed by
-`calibrate` and published as `CalibrationResult.gdna_capture_efficiency_region` / `_boundary`, gives a region the
-posterior mean `E[min(ρ/ρ_ref, 1)]` of its clipped gDNA density under the fitted landscape from its gDNA contained
-count on its contained support, and a boundary the same from its gDNA crossing count on its crossing support. No
-constant and no floor enter; the multimapper floor `C/(C+1)` stays deleted
-(`ISSUES: ruler-multimapper-floor-caps-the-correction`). The length prices every crossing at the boundary that
-holds it, so no region borrows the crossings around it (`ISSUES: the-crossing-apportionment`), and a piece too
-short to contain a fragment has no share to price: its efficiency is the population's and multiplies nothing.
-That is why the own count alone, refused on 2026-09-16 under the per-base length, ships under this one. A piece
-prices at its region's efficiency and a contiguous cut at its boundary's; where the rule is exact and where it is
-not is derived in `EQUATIONS.md` §11.
+**The weights: each object reads its own columns.** The reader, run by `native.solve_blocks` after the last
+refit's final ψ and published by `calibrate` as `CalibrationResult.gdna_capture_efficiency_region` / `_boundary`,
+gives a region the posterior mode of its gDNA density from its two unspliced strand columns on its contained
+supports, and a boundary the same from its crossing columns on its crossing supports, each with the RNA amount
+integrated out under the factors delivered to it. No constant and no floor enter; the multimapper floor `C/(C+1)`
+stays deleted (`ISSUES: ruler-multimapper-floor-caps-the-correction`). The length prices every crossing at the
+boundary that holds it, so no region borrows the crossings around it (`ISSUES: the-crossing-apportionment`), and
+a piece too short to contain a fragment has no share to price: its weight multiplies nothing. A piece prices at
+its region's weight and a contiguous cut at its boundary's; where the rule is exact and where it is not is
+derived in `EQUATIONS.md` §11.
 
 **A junction is priced by conservation of bases, from its neighbours.** gDNA never deposits on a junction, so no
 object gDNA measures prices one directly. THE RULING: `c_junction = c_lo + c_hi − ½(c_intron,lo + c_intron,hi)`,
-the efficiencies at the sj's low and high boundaries (§0) less the intron pieces just inside them, derived in
+the weights at the sj's low and high boundaries (§0) less the intron pieces just inside them, derived in
 `EQUATIONS.md` §11. An intron piece too short to contain a gDNA fragment has no count of its own and reads the
-boundary on its far side. The price is never below 0 and NEVER ABOVE 1 (owner, 2026-10-05, reversing the
-2026-09-23 refusal): capture saturates — a fragment binds its best single probe part, so a fragment across a
-junction is captured no more than one wholly inside a fully captured piece. Where probes tile the exons to their
+boundary on its far side. The price is never below 0 and NEVER ABOVE the most captured object the fragment
+touches — the two pieces and the two boundaries (owner, 2026-10-05, reversing the 2026-09-23 refusal; the cap
+was 1 while the weights had a unit, and became the touched objects' when they became relative, 2026-10-10):
+capture saturates — a fragment binds its best single probe part, so a fragment across a junction is captured no
+more than one wholly inside the most captured piece beside it. Where probes tile the exons to their
 edges each boundary reads most of the exon's level, not half of it, and the uncapped sum counted the junction's
 exon capture about twice: the test chromosome's stranded × capture-ON transcripts read 13.89 % against 0.7.1's 8.58 %,
 and 7.19 % with the cap (`ISSUES: the-junction-sum-over-prices-separately-probed-exons`). Where both sides of a

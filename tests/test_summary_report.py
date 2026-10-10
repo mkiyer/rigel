@@ -260,14 +260,12 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     assert bg[0].startswith("track type=bedGraph")
     assert len(bg) == len(track) + 1  # header + one line per region
 
-    # The calibration block is the library scalars and nothing else: calibration's capture answer is its
-    # reference (null when no enriched gDNA mode is located), with no second census beside it. The
-    # MANUAL's listing of the block is the same set, so the two cannot drift apart.
+    # The calibration block is the library scalars and nothing else; the capture weights are per object and
+    # live in the effective lengths, not here. The MANUAL's listing of the block is the same set, so the two
+    # cannot drift apart.
     written = set(summary["calibration"])
     assert written == {
         "gdna_density_global",
-        "gdna_reference_density",
-        "gdna_reference_members",
         "rna_sense_frac",
         "gdna_strand_overdispersion",
         "rna_strand_overdispersion",

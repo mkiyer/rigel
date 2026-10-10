@@ -45,7 +45,7 @@ BROKEN = {
         "mass_floor": -1.0,
         "fraction_tolerance": 1.0,
         "track_floor": 0.0,
-        "rate_log_floor": 0.0,
+        "reader_search_stride": 0,
     },
     "fragment_length": {
         "pool_prior_ess": -1.0,

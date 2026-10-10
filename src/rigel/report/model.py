@@ -22,23 +22,8 @@ def _pct(numer: float, denom: float) -> float:
     return (numer / denom) if denom else 0.0
 
 
-def _capture(summary: dict) -> dict | None:
-    """Calibration's capture answer: the located enriched mode of its gDNA landscape — the fully
-    captured gDNA level, in fragments per bp, that the effective lengths are contracted against — and
-    the located regions it rests on. ``reference_density`` is ``None`` when no enriched mode was
-    located; the answer is ``None`` when the summary carries none."""
-    cal = summary.get("calibration") or {}
-    if "gdna_reference_density" not in cal:
-        return None
-    return {
-        "reference_density": cal["gdna_reference_density"],
-        "n_members": cal["gdna_reference_members"],
-    }
-
-
 def _verdicts(summary: dict) -> list[dict]:
-    """Headline QC tiles: mapping, strandedness, gDNA, usable fragments, + calibration's capture
-    answer when the summary carries one."""
+    """Headline QC tiles: mapping, strandedness, gDNA, usable fragments."""
     out: list[dict] = []
     aln = summary.get("alignment_stats", {})
     frag = summary.get("fragment_stats", {})
@@ -108,32 +93,6 @@ def _verdicts(summary: dict) -> list[dict]:
         }
     )
 
-    # Capture — descriptive only: variable capture performance is expected, so a located mode is
-    # neither good nor bad. Styled neutral ("info").
-    capture = _capture(summary)
-    if capture is not None:
-        if capture["reference_density"] is not None:
-            out.append(
-                {
-                    "k": "Capture",
-                    "icon": "target",
-                    "v": capture["reference_density"],
-                    "fmt": "g4",
-                    "s": "info",
-                    "n": f"gDNA fragments/bp at the enriched mode · {capture['n_members']:,} located regions",
-                }
-            )
-        else:
-            out.append(
-                {
-                    "k": "Capture",
-                    "icon": "target",
-                    "v": "None",
-                    "fmt": "text",
-                    "s": "info",
-                    "n": "no enriched gDNA mode located",
-                }
-            )
     return out
 
 
@@ -381,22 +340,11 @@ def _genes(sub: ReportSubstrate, max_rows: int = 20000) -> dict:
 
 
 def _calibration(sub: ReportSubstrate) -> dict:
-    """Two panels' worth of data: 'enrichment' (calibration's capture answer + its KPIs) and
-    'density' (the genome track + per-reference table + its KPIs)."""
+    """The density panel's data: the genome track + per-reference table + its KPIs. The capture weights
+    are per object and live in the effective lengths, not in the summary, so there is no capture panel."""
     cal = sub.summary.get("calibration") or {}
     track = sub.calibration_track
     has_track = track is not None and len(track) > 0
-
-    # Enrichment panel KPIs (capture).
-    capture = _capture(sub.summary)
-    enrichment_kpis = []
-    if capture is not None and capture["reference_density"] is not None:
-        enrichment_kpis = [
-            {"l": "ρg reference", "v": capture["reference_density"], "fmt": "g4"},
-            {"l": "Located regions", "v": capture["n_members"], "fmt": "count"},
-        ]
-    elif capture is not None:
-        enrichment_kpis = [{"l": "ρg reference", "v": "None", "fmt": "text"}]
 
     # gDNA-density panel KPIs: calibration's library scalars, then the track's.
     density_kpis = [
@@ -410,12 +358,7 @@ def _calibration(sub: ReportSubstrate) -> dict:
         density_kpis.append({"l": "Regions >50% gDNA", "v": int((gf > 0.5).sum()), "fmt": "count"})
 
     ref_table = _reference_table(track) if has_track else []
-    return {
-        "enrichment_kpis": enrichment_kpis,
-        "density_kpis": density_kpis,
-        "capture": capture,
-        "ref_table": ref_table,
-    }
+    return {"density_kpis": density_kpis, "ref_table": ref_table}
 
 
 def _reference_table(track) -> list:

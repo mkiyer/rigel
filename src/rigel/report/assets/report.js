@@ -387,23 +387,6 @@
     });
   }
 
-  /* ---------- capture note: calibration's own answer ---------- */
-  function captureNote() {
-    const n = $("capture-note"); if (!n) return;
-    const c = M.calibration && M.calibration.capture;
-    if (!c) { n.innerHTML = "This summary carries no calibration, so there is no capture answer."; return; }
-    if (c.reference_density != null) {
-      n.innerHTML = `<b>An enriched gDNA mode was located</b> at <span class="num">${fmtValue(c.reference_density, "g4")}</span> ` +
-        `gDNA fragments/bp, resting on <span class="num">${grp(c.n_members)}</span> located regions. Calibration reads it as the fully ` +
-        `captured level: each region's capture efficiency is its gDNA density against it, and every ` +
-        `<span class="num">em_effective_length</span> the EM reads is scaled by those efficiencies.`;
-    } else {
-      n.innerHTML = `<b>No enriched gDNA mode was located</b> — a library without capture, or one whose gDNA is too ` +
-        `sparse to locate its captured level — so every <span class="num">em_effective_length</span> equals ` +
-        `<span class="num">effective_length</span>.`;
-    }
-  }
-
   /* ---------- reference table (all references, by gDNA mass) ---------- */
   function refTable() {
     const rt = (M.calibration || {}).ref_table || [];  // [ref, n_regions, gdna_mass, gdna/bp, gdna_frac]
@@ -461,9 +444,8 @@
     stackBar($("pool-bar"), M.quant.pools); legend($("pool-legend"), M.quant.pools, true); poolTable();
     kpis($("pool-kpis"), M.quant.kpis); donut($("pool-donut"), M.quant.pools, M.quant.rna_share);
     if (M.calibration) {
-      kpis($("enrich-kpis"), M.calibration.enrichment_kpis);
       kpis($("density-kpis"), M.calibration.density_kpis);
-      captureNote(); refTable();
+      refTable();
     }
     geneTable();
     config();

@@ -639,9 +639,13 @@ class CalibrationConstants:
     #: length, or a total — is at or below this.
     track_floor: float = 1e-9
 
-    #: The capture efficiency's Poisson log-likelihood reads ``log(max(λ, this))``, so an empty expectation scores
-    #: a finite floor rather than −∞ (``capture_efficiency``).
-    rate_log_floor: float = 1e-300
+    #: The capture reader's coarse-to-fine search over the landscape grid at a slot with NO read of its own
+    #: (``native.solve_blocks``' reader): the posterior is evaluated at every this-many-th grid node, at the
+    #: landscape's own peaks and at the delivered DNA witness, then exhaustively within this many nodes of
+    #: every local maximum, so a feature narrower than the stride is found through the seeds. A slot with a
+    #: read is evaluated at every node: its posterior may tie across a plateau the search cannot resolve
+    #: (gate: ``tests/native/test_honest_reader.py``, the search against the exhaustive evaluation).
+    reader_search_stride: int = 8
 
     def __post_init__(self) -> None:
         _check_ranges(
@@ -652,7 +656,7 @@ class CalibrationConstants:
             mass_floor=self.mass_floor >= 0.0,
             fraction_tolerance=0.0 <= self.fraction_tolerance < 1.0,
             track_floor=self.track_floor > 0.0,
-            rate_log_floor=self.rate_log_floor > 0.0,
+            reader_search_stride=self.reader_search_stride >= 1,
         )
 
 

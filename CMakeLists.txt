@@ -202,6 +202,17 @@ target_compile_options(_solve_impl PRIVATE -g)
 
 install(TARGETS _solve_impl LIBRARY DESTINATION rigel)
 
+# The capture reader's standalone binding: every slot's posterior mode of gDNA density under the landscape from
+# its own strand columns and delivered factors on fixed lattices (native/honest_reader.cpp) — the gates' entry
+# point; the block solve (_solve_impl) runs the same evaluator in place.
+nanobind_add_module(
+  _honest_reader_impl
+  NOMINSIZE
+  STABLE_ABI
+  src/rigel/native/honest_reader.cpp
+)
+install(TARGETS _honest_reader_impl LIBRARY DESTINATION rigel)
+
 # --- Compiler optimizations ---------------------------------------------------
 #
 # Performance flags: -O3, -march=native, FMA contraction, and LTO.
@@ -235,6 +246,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(_em_impl      PRIVATE ${RIGEL_OPT_FLAGS} -ffp-contract=fast)
     target_compile_options(_scoring_impl PRIVATE ${RIGEL_OPT_FLAGS} -ffast-math -fno-finite-math-only)
     target_compile_options(_resolve_impl PRIVATE ${RIGEL_OPT_FLAGS})
+    target_compile_options(_honest_reader_impl PRIVATE ${RIGEL_OPT_FLAGS})
     target_compile_options(_cgranges_impl PRIVATE ${RIGEL_OPT_FLAGS})
     target_compile_options(_bam_impl PRIVATE ${RIGEL_OPT_FLAGS})
 

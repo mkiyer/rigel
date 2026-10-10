@@ -528,13 +528,15 @@ def test_the_ruler_arm_hands_the_EM_the_lengths_it_names_and_its_noop_is_inert(t
     wrapper and the solver would leave the wrapper healthy (TRAPS: could-the-arm-have-fired). The factor
     differs between isoforms of one gene, the shape that moves a split, so the arm must move the counts;
     the noop builds the same factor and hands back the shipped lengths, so it must reproduce ``base`` by
-    the noop gate's own two standards. On this capture-OFF toy the shipped lengths are the plain ones."""
+    the noop gate's own two standards. The arm replaces the shipped ruler whole, so the lengths it names are
+    the PLAIN fl-marginal lengths (``effective_length``) times the factor — not the shipped ``em_effective_length``,
+    which carries the capture reader's own weights even on this capture-OFF toy."""
     base, _ = _quant(toy, "base", None)
     ids = toy.index.t_df["t_id"].to_numpy()
     factor = np.where(np.isin(ids, ["t1b", "t3b"]), 0.25, 1.0)
 
     sub, fired = _quant_ruler(toy, "oracle_ruler", factor)
-    plain = base.set_index("transcript_id")["em_effective_length"]
+    plain = base.set_index("transcript_id")["effective_length"]
     want = plain * pd.Series(factor, index=ids).reindex(plain.index)
     got = sub.set_index("transcript_id")["em_effective_length"].reindex(plain.index)
     np.testing.assert_allclose(got.to_numpy(), want.to_numpy(), rtol=1e-12, atol=0.0)

@@ -91,8 +91,9 @@ sparse libraries lose their gDNA.
   `quant_accuracy.py --arm oracle`; the per-transcript lane the EM never receives is worth far more —
   `quant_accuracy.py --arm oracle_alloc_seed`, `ISSUES: per-transcript-prior-lane`.
 - **The capture-contracted length**: one shared rule for every EM component — each object's conserved share at
-  that object's own capture efficiency, read against the landscape's located enriched mode, a junction priced
-  from its neighbours by conservation of bases and capped at 1, since capture saturates (owner, 2026-10-05;
+  that object's own capture weight — its gDNA density's posterior mode under the landscape, relative to the
+  typical read object's, with no detector and no reference (owner, 2026-10-10) — a junction priced from its neighbours by
+  conservation of bases and capped at the most captured object it touches, since capture saturates (owner, 2026-10-05;
   `DESIGN.md` §7.2, `EQUATIONS.md` §11); the classes sit near one
   scale and the junction price's within-gene error is its structure, which no neighbouring gDNA object sees — closed
   for now (owner, 2026-09-26), `ruler_vs_truth.py --scale` (the class means and the within-gene spread),

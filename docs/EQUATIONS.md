@@ -1702,7 +1702,7 @@ Known approximation: `ρ` enters as a hard multiplicative zero, but zero observa
 `P(0 | λ, E) = e^(−λE)`, not zero. The hard zero is the large-exposure limit of the correct likelihood, so
 it is right where the library is deep and wrong where it is shallow.
 
-## 11. The conserved frame — every component's shares of its objects at their capture efficiencies (`effective_length.conserved_cut_shares`, `capture_eff_length`, `capture_efficiency`, `priors.assemble_priors`, `calibrate._gdna_boundary_conserved_len`; the reference, `landscape.located_enriched_mode`)
+## 11. The conserved frame — every component's shares of its objects at their capture weights (`effective_length.conserved_cut_shares`, `capture_eff_length`, `priors.assemble_priors`, `calibrate._gdna_boundary_conserved_len`; the reader, `native/honest_reader.h`)
 
 Under hybrid capture the EM divides every component by its capture-contracted length, and one rule gives it
 for all three — the locus gDNA component, every synthetic nascent span, every annotated transcript: the sum,
@@ -1842,9 +1842,11 @@ intron piece too short to contain a gDNA fragment (`gdna_region_eff_len == 0`) h
 efficiency is the population's, which is not local — and reads the boundary on its far side instead, so an
 intron that is one such region prices its junction at `½(c_lo + c_hi)`. The derivation assumes capture adds
 over a fragment's bases, and capture saturates instead: a fragment binds its best single probe part, so a
-junction fragment is captured no more than one wholly inside a fully captured piece, and the price is held to
+junction fragment is captured no more than one wholly inside the most captured object it touches — the two
+pieces (an intron piece too short to contain a fragment read at its far boundary) and the two boundaries —
+and the price is held to
 
-    c_junction  =  min( max( c_lo + c_hi − ½(c_intron,lo + c_intron,hi), 0 ), 1 ).
+    c_junction  =  min( max( c_lo + c_hi − ½(c_intron,lo + c_intron,hi), 0 ),  max(c_piece,lo, c_piece,hi, c_lo, c_hi) ).
 
 Where probes tile both exons to their edges, a gDNA fragment crossing either boundary still binds most of a
 probe, so `c_lo` and `c_hi` each read most of their exon's level (0.835 on the test chromosome's panel, against
@@ -1857,67 +1859,44 @@ variance is theirs added; measured, the within-gene spread it leaves is mostly c
 sees, not the posteriors' noise (`ISSUES: the-junction-price-is-noisy-within-a-gene`; pooling junctions is
 refused, `ISSUES: pooling-junctions`).
 
-**The efficiency is the object's own posterior mean (`capture_efficiency.capture_efficiencies`).** gDNA is one
-template at a uniform rate before capture, so its density after capture at an object is the object's
-efficiency up to the one unit `ρ_ref`. Each object reads the fragments the deposit rule gives it — a region
-its gDNA contained count `k_r` on its contained support `S_r`, a boundary its gDNA crossing count `k_e` on its
-crossing support `S_e = E_f[w − 1]` — and with the fitted gDNA landscape `P(log ρ)` as the prior (the
-population's own statement of where gDNA densities sit) and the Poisson counting rule as the likelihood,
+**The weight is the object's own posterior mode (`native/honest_reader.h`; the specification,
+`tests/native/_honest_reader_reference.py`).** gDNA is one template at a uniform rate before capture, so its
+density after capture at an object is the object's capture weight up to one common factor. Each object reads
+the fragments the deposit rule gives it — a region its two unspliced strand columns `u, v` on its contained
+gDNA and RNA opportunities `Eg, Er`, a boundary its crossing columns on its crossing supports — and the RNA
+amount `r` is integrated out under the factors the sweep delivered to the slot, with the fitted landscape
+`P(log ρ)` as the prior:
 
-    c_o  =  E[ min(ρ_o / ρ_ref, 1) | k_o, S_o ]
+    log L(x) = log ∫ Pois(u; ρEg/2 + q·r) · Pois(v; ρEg/2 + (1−q)·r) · C(log(ρEg/r)) · H_pos(r·f_pos/Er) · H_neg(r·f_neg/Er) · r^(−1/2) dr  +  D(log ρ),   ρ = e^x
+    x*  =  argmax_x [ log L(x) + log P(x) ],        w = exp(x* − median x*)
 
-on the landscape's grid. At high depth it is the plug-in `min(k/S/ρ_ref, 1)`; at low depth the population's
-mixture weighted by the object's own likelihood; with no support the population's clipped mean. No constant
-enters and no floor (`ISSUES: ruler-multimapper-floor-caps-the-correction`). `k` is a deconvolved mass, so the
-Poisson enters through the gamma function as a continuation, and it already carries the landscape through the
-solve, so the prior enters twice in a small way. A boundary's crossing count and its conserved share see the
-same crossing fragments — the count takes each whole, the share its deposit-rule part — and read one density
-wherever the field is flat across them, so the efficiency read from the count prices the share. Every crossing
-is read once, by the boundary that holds it: a piece too short to contain a fragment has no contained share
-and its efficiency multiplies nothing, and no crossing is apportioned onto the pieces beside its boundary
-(`ISSUES: the-crossing-apportionment`).
+`q` the protocol's column probability for the slot's RNA strand (§5), `C` the delivered composition row on
+the λ lattice, `D` the held DNA level at `ρ` and `H_pos, H_neg` the held RNA levels at their own amounts (§6b,
+every delivered curve constant beyond its ends), `r^(−1/2)` the amount's reference measure. A both-strand
+slot integrates the share of its RNA on the positive strand over the arcsine continuum and the pure atoms its
+witness bits admit, normalised by `−log 3` (§9f); a slot with no RNA opportunity is the pure-DNA limit,
+`u log(ρEg/2) + v log(ρEg/2) − ρEg` with the composition at its all-gDNA end. The lattices are ψ's own (§9e,
+the 0.2-nat count lattice, the `√(2T)` window rule, `K_t = 24`), and the mode is the lattice argmax refined
+by the parabola through its neighbours. No reference density enters, no background, no detector and no clip.
+The weights are relative and the unit is the median read object: the EM is invariant to a common factor
+(counts and TPM to machine precision; the published `em_effective_length` scales with it), TPM is read on the
+plain length, and the median is the one unit that is neither a detector nor an extreme value.
 
-**`ρ_ref` is a population quantity.** It is the enriched mode of the population density `P(log ρ_g)`,
-and the tool fits exactly that density: `landscape.DensityLandscape`, the landscape ψ reads on the refits,
-trained on the located compositions and the zero-count anchors (DESIGN §7.1). Its census
-(`landscape._census`) partitions the grid into basins at the minima between interior maxima;
-the depleted basin is the largest by rendered mass (for gDNA the unprobed objects outnumber the probed
-ones — 0.70–1.00 of the mass on every row of both panels), and the enriched candidate is the basin
-above it holding the most located kernels, `None` when nothing lies above.
+**Why the mode.** At an object with no read the posterior is the prior times `exp(−ρ·Eg)`: broad and
+one-sided, so its median or its mean sit below the background by the breadth of the smoothed prior — 0.14
+nats on a `g50` row, 0.30 at `g05`, 0.79 at a tenth of the depth — while the mode sits on it; wherever an
+object has a read the three agree to 0.04 nats. A readout of the solve's own inferred count instead of this
+likelihood (the census readouts, or any always-defined reference density) inherits calibration's false gDNA
+at zero-gDNA rows (`ISSUES: the-gdna-prior-enters-psi-twice`), which the likelihood with the RNA amount
+integrated out does not (`ISSUES: the-located-mode-capture-reader`).
 
-**The location floor on the mode.** A basin's MEMBERS are the kernels with a location: a count of at
-least one fragment, published by the fit as `DensityLandscape.located` beside each kernel's `centre`
-(`log(max(count, 1)/E)`, in nats). A zero-count anchor or a sub-fragment kernel is centred at its
-resolution wall `1/E`, which is where the kernel could not see and not where a density is, so it is no
-member; a human index trains ~250–325 k anchors whose walls span every decade, and on a sparse library a
-basin above the bulk can be packed with them around ten measured kernels
-(`ISSUES: the-ruler-reference-on-sparse-real-libraries`). The candidate is a mode only if its members
-resolve it at the located population's own resolution, `k = √n_located` (`landscape.knn_widths`' k):
-each member's width is half the distance to its k-th nearest MEMBER, and
-
-    n_members > k   and   median(width_k)² ≤ located_var = 1 nat²,
-
-the floor DESIGN §7.1 rule 4 applies to a slot, in the same variable — not a constant chosen but the
-identity's value at the one-fragment wall (`Var(log c) = 1/c`), read at the population's own resolution. A
-basin with k members or fewer has no k-th neighbour inside itself — the cluster smaller than √n that reaches
-outside itself — and is no mode however narrow the rendered density's cut made it; the within-basin spread
-is NOT the statement, because a basin cut by the grid's edge is narrow whatever its kernels (a 1-fragment
-exon piece on 0.008 bp of support rendered a 0.30-nat basin at the top of the ladder's `g98 ss.50 OFF`
-grid). Reading the members at their own √n_members instead would call twenty-one kernels strewn across
-three nats a mode. The result publishes the count behind the reference
-(`CalibrationResult.gdna_reference_members`). Measured: every enriched mode on both panels has 257–3,606
-members at widths at the grid step, at a peak stable to 0.02 decades across an 8× range of the render
-resolution; the two sparse real libraries hold 10–16 located kernels in any basin above the bulk against
-k = 33 and 123, and read `None`.
-
-**No enriched mode ⇒ no contraction, exactly.** `CalibrationResult.gdna_reference_density` is `None`,
-every efficiency is exactly 1 on both axes (`gdna_capture_efficiency_region`, `_boundary`, which the
-result refuses otherwise), `transcript_capture_eff_lengths` returns `fl` verbatim and `assemble_priors`
-reads the locus's uncontracted `Σ S_r + Σ M_e`. This is the capture-OFF field (unimodal, Poisson noise around
-one level) and the gDNA-free field (the anchors' wall, with any false-positive basin above it a lone
-kernel). The plug-in `min(ρ_n/ρ_ref, 1)` on a noisy uniform field is biased below 1 (Jensen plus the
-clip), which is why a per-object reference read from the field itself contracted the oracle's own
-counts by 8 % at capture-OFF; a modal decision has no per-object noise to clip.
+**No landscape ⇒ no contraction, exactly.** With no refit there is nothing to read under, every weight is
+exactly 1 on both axes, `transcript_capture_eff_lengths` returns `fl` bit-identically and `assemble_priors`
+reads the locus's uncontracted `Σ S_r + Σ M_e`. Otherwise every library, captured or not, is read the same
+way: a capture-OFF field (unimodal, Poisson noise around one level) reads weights that are that noise, the
+price named in `ISSUES: the-capture-weights-are-noisy-on-a-capture-off-library`; and an object whose
+fragments the deposit rule withheld (every multimapped fragment) reads as empty, the defect named in
+`ISSUES: the-calibration-count-is-blind-to-multimappers`.
 
 **Where the rule is exact, and what gDNA cannot see.** For the gDNA component the rule's form is exact under
 any capture physics: its objects hold its own fragments. For any other component it is exact on the objects
