@@ -152,10 +152,11 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument's --self-test
 ```
 
-**The standing baseline: 0 failed / 2,814 passed / 0 skipped / 0 xfail, 2,814 collected** — re-derived
-2026-10-09 after the blur-tail arithmetic repair, with no golden movement beyond the previously
-reviewed certified-source footprint change. **Any failure at all is a
-regression.** Re-derive a count, never adjust one (`TRAPS: re-record-the-baseline`): every gate that scans
+**The standing baseline: 1 failed / 2,804 passed / 0 skipped / 0 xfail, 2,805 collected** — re-derived
+2026-10-10 after the capture reader landed (the goldens regenerated and read against truth). The one failure is
+`test_multimap_counting.py::TestParalogMultimapping::test_gdna_sweep[gdna_100]`, red by ruling until the
+accumulator's second pass assigns multimappers (`ISSUES: the-calibration-count-is-blind-to-multimappers`);
+never rewrite it to green. **Any other failure is a regression.** Re-derive a count, never adjust one (`TRAPS: re-record-the-baseline`): every gate that scans
 the files on disk is one case, so only adding or removing a test moves the total. Derive the failure set,
 never eyeball the tail (`TRAPS: read-the-whole-failure-list`). A golden update is where a regression gets
 laundered into "intended": read the diff, record its magnitude and check the truth-scored instruments
