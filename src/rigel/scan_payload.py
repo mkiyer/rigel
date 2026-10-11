@@ -103,6 +103,10 @@ class ScanQC:
     #: >1 surviving hypothesis, so the fragment's gap is undetermined. NOT dropped — it is held
     #: WHOLE for the second pass, and the identity is `deposited + deferred + dropped_* == offered`.
     deferred_undetermined_gap: int
+    #: >1 PLACEMENT admits a surviving (placement, hypothesis), so WHICH placement is undetermined. Held
+    #: WHOLE, every placement and hypothesis; the identity is
+    #: `deposited + deferred_undetermined_gap + deferred_multiple_placements + dropped_* == offered`.
+    deferred_multiple_placements: int
     unannotated_introns: int  # observed introns with no annotated sj
     contradictory_sj_strand: int  # the mates' motif tags disagreed; no splice trusted
     introns_absorbed: int  # overlapping or abutting introns merged away
@@ -192,8 +196,12 @@ class DrainQC:
     which is exactly what the census cannot record without an unreachable class.
     """
 
-    #: Pass one's ``qc.deferred_undetermined_gap`` — the denominator the conservation is checked against.
+    #: Pass one's ``qc.deferred_undetermined_gap + qc.deferred_multiple_placements`` — the denominator the
+    #: conservation is checked against.
     offered: int
+    #: Of those, the records held on their PLACEMENTS (a multimapping fragment); the rest were held on
+    #: their gap.
+    offered_multimapper: int
     deposited: int
     dropped_too_long: int
     dropped_empty: int
@@ -226,6 +234,11 @@ class DrainQC:
             raise ValueError(
                 f"the drain chose {self.chose_genomic + self.chose_spliced} hypotheses for "
                 f"{self.offered} offered fragments; exactly one hypothesis wins each whole fragment."
+            )
+        if not 0 <= self.offered_multimapper <= self.offered:
+            raise ValueError(
+                f"the drain reports {self.offered_multimapper} multimapping records among {self.offered} "
+                f"offered; the multimappers are a subset of the held population."
             )
 
 
@@ -301,9 +314,12 @@ class DeferredFragments:
     re-enters ``Accumulator::deposit`` with the chosen hypothesis, so there is one tally path and
     byte-identity with the specification is preserved for free.
 
-    Two nested variable-length levels — fragments hold hypotheses, hypotheses hold introns — so there are
-    two offset arrays at each level. Offsets are cumulative and always start at 0, so an empty bank is
-    ``[0]`` and never ``[]``, and ``n_fragments`` is ``len(offsets) - 1``.
+    Three nested variable-length levels — fragments hold PLACEMENTS, placements hold hypotheses,
+    hypotheses hold introns — so there are three offset arrays. A placement is one alignment of the
+    fragment on one reference with its own extent, strands, observed introns and gap hypotheses: a
+    gap-held unique mapper is a record with ONE placement, a multimapping fragment holds one per
+    admitted alignment, in their canonical order. Offsets are cumulative and always start at 0, so an
+    empty bank is ``[0]`` and never ``[]``, and ``n_fragments`` is ``len(placement_offsets) - 1``.
 
     This is the ONE bank whose order is observable. Every other is a sum of integers and integer
     addition is associative, so a per-worker merge is exact whatever order the chunks arrived in. This is a
@@ -316,16 +332,23 @@ class DeferredFragments:
     boundary compares equal by value.
     """
 
-    ref: np.ndarray  # int64[n] — which reference; the drain replays onto THAT region_bound axis
-    start: np.ndarray  # int64[n] — the CLIPPED extent, because that is what the drain must replay
-    end: np.ndarray  # int64[n]
-    align_strand: np.ndarray  # int64[n]
-    sj_strand: np.ndarray  # int64[n] — the OBSERVED motif strand, if any
-    observed_intron_offsets: np.ndarray  # int64[n + 1] — in PAIRS, into observed_introns
+    placement_offsets: np.ndarray  # int64[n_fragments + 1] — fragments → placements
+    ref: (
+        np.ndarray
+    )  # int64[n_placements] — which reference; the drain replays onto THAT region_bound axis
+    start: (
+        np.ndarray
+    )  # int64[n_placements] — the CLIPPED extent, because that is what the drain must replay
+    end: np.ndarray  # int64[n_placements]
+    align_strand: np.ndarray  # int64[n_placements]
+    sj_strand: np.ndarray  # int64[n_placements] — the OBSERVED motif strand, if any
+    observed_intron_offsets: np.ndarray  # int64[n_placements + 1] — in PAIRS, into observed_introns
     observed_introns: (
         np.ndarray
-    )  # int64[2 * n_observed] — flat (start, end); cut under EVERY hypothesis
-    hypothesis_offsets: np.ndarray  # int64[n + 1] — into the per-hypothesis arrays below
+    )  # int64[2 * n_observed] — flat (start, end); cut under EVERY hypothesis of the placement
+    hypothesis_offsets: (
+        np.ndarray
+    )  # int64[n_placements + 1] — placements → the per-hypothesis arrays below
     hypothesis_sj_strand: (
         np.ndarray
     )  # int64[n_hypotheses] — INFERRED; an observed motif always wins
@@ -336,11 +359,29 @@ class DeferredFragments:
 
     @property
     def n_fragments(self) -> int:
-        return int(self.hypothesis_offsets.shape[0]) - 1
+        return int(self.placement_offsets.shape[0]) - 1
+
+    @property
+    def n_placements(self) -> int:
+        return int(self.ref.shape[0])
 
     @property
     def n_hypotheses(self) -> int:
         return int(self.hypothesis_sj_strand.shape[0])
+
+    @property
+    def record_hypothesis_offsets(self) -> np.ndarray:
+        """``int64[n_fragments + 1]`` — each RECORD's run of the flat hypothesis axis, over its
+        placements in order; a choice is a local index into this run."""
+        return self.hypothesis_offsets[self.placement_offsets]
+
+    def placements_of(self, i: int) -> range:
+        """The placements of fragment ``i``, as indices into the per-placement arrays."""
+        return range(int(self.placement_offsets[i]), int(self.placement_offsets[i + 1]))
+
+    def placement_of_hypothesis(self, h: int) -> int:
+        """Which placement flat hypothesis ``h`` belongs to."""
+        return int(np.searchsorted(self.hypothesis_offsets, h, side="right")) - 1
 
     @classmethod
     def empty(cls) -> "DeferredFragments":
@@ -385,19 +426,27 @@ class DeferredFragments:
                 )
             arrays[name] = array
 
-        n = int(arrays["hypothesis_offsets"].shape[0]) - 1
+        n = int(arrays["placement_offsets"].shape[0]) - 1
         if n < 0:
             raise ValueError(
-                "deferred['hypothesis_offsets'] is empty; offsets are cumulative and start at 0, so an "
+                "deferred['placement_offsets'] is empty; offsets are cumulative and start at 0, so an "
                 "empty bank is [0] and never []"
             )
+        n_placements = int(arrays["placement_offsets"][-1]) if n >= 0 else 0
         for name in _DEFERRED_RECORD_FIELDS:
-            if arrays[name].shape != (n,):
+            if arrays[name].shape != (n_placements,):
                 raise ValueError(
-                    f"deferred[{name!r}] has {arrays[name].shape[0]} entries but the offsets describe "
-                    f"{n} fragments"
+                    f"deferred[{name!r}] has {arrays[name].shape[0]} entries but placement_offsets "
+                    f"describes {n_placements} placements"
+                )
+        for name in ("observed_intron_offsets", "hypothesis_offsets"):
+            if arrays[name].shape[0] != n_placements + 1:
+                raise ValueError(
+                    f"deferred[{name!r}] has {arrays[name].shape[0]} entries but there are "
+                    f"{n_placements} placements, so it must have {n_placements + 1}"
                 )
         for offsets_name, values_name, stride in (
+            ("placement_offsets", "ref", 1),
             ("observed_intron_offsets", "observed_introns", 2),
             ("hypothesis_offsets", "hypothesis_sj_strand", 1),
             ("hypothesis_intron_offsets", "hypothesis_introns", 2),
@@ -428,21 +477,21 @@ class DeferredFragments:
                     f"deferred[{name!r}] has {arrays[name].shape[0]} entries but there are "
                     f"{n_hypotheses} hypotheses, so it must have {n_hypotheses + 1}"
                 )
-        # A fragment is deferred BECAUSE two or more hypotheses survived, so a record carrying fewer
-        # than two is a bank that lost them — and the second pass would then "choose" from a set of one and
-        # deposit an answer nothing supported.
-        runs = np.diff(arrays["hypothesis_offsets"])
+        # A fragment is deferred BECAUSE two or more (placement, hypothesis) pairs survived, so a record
+        # carrying fewer than two over all its placements is a bank that lost them — and the second pass
+        # would then "choose" from a set of one and deposit an answer nothing supported.
+        runs = np.diff(arrays["hypothesis_offsets"][arrays["placement_offsets"]])
         if n and int(runs.min()) < 2:
             bad = int(np.argmin(runs))
             raise ValueError(
-                f"deferred fragment {bad} carries {int(runs[bad])} hypotheses. A fragment is deferred "
-                f"only when two or more survived, so every record must hold at least two."
+                f"deferred fragment {bad} carries {int(runs[bad])} hypotheses over its placements. A "
+                f"fragment is deferred only when two or more survived, so every record must hold at least two."
             )
         return cls(**arrays)
 
-    def observed_introns_of(self, i: int) -> np.ndarray:
-        """Fragment ``i``'s observed introns as an ``[k, 2]`` view. Spliced under **every** hypothesis."""
-        lo, hi = int(self.observed_intron_offsets[i]), int(self.observed_intron_offsets[i + 1])
+    def observed_introns_of(self, p: int) -> np.ndarray:
+        """Placement ``p``'s observed introns as an ``[k, 2]`` view. Spliced under **every** hypothesis."""
+        lo, hi = int(self.observed_intron_offsets[p]), int(self.observed_intron_offsets[p + 1])
         return self.observed_introns[2 * lo : 2 * hi].reshape(hi - lo, 2)
 
     def hypothesis_introns_of(self, h: int) -> np.ndarray:
@@ -651,6 +700,7 @@ class AccumulatorPayload:
                     self.qc.dropped_strand_undefined + drain.dropped_strand_undefined
                 ),
                 deferred_undetermined_gap=0,
+                deferred_multiple_placements=0,
             ),
             # `gap_resolved_spliced` is pass one's and is NOT extended. The census classifies pass one's
             # ARBITRATION, and it has no class for a chosen genomic path — see :class:`DrainQC`.
@@ -760,12 +810,19 @@ class AccumulatorPayload:
         # `deposited + deferred + dropped_* == offered` is worth nothing if the deferred term is a number
         # with no fragments behind it — and a cache can be truncated or partially written, which is
         # precisely how a bank would arrive short of the counter that describes it.
-        if deferred.n_fragments != qc.deferred_undetermined_gap:
+        held = qc.deferred_undetermined_gap + qc.deferred_multiple_placements
+        if deferred.n_fragments != held:
             raise ValueError(
                 f"the deferred bank holds {deferred.n_fragments} fragments but "
-                f"qc.deferred_undetermined_gap is {qc.deferred_undetermined_gap}; the counter and the "
-                f"fragments it counts must be the same population, or the second pass silently drains a "
-                f"different one."
+                f"qc.deferred_undetermined_gap + qc.deferred_multiple_placements is {held}; the counters "
+                f"and the fragments they count must be the same population, or the second pass silently "
+                f"drains a different one."
+            )
+        multi = np.diff(deferred.placement_offsets) > 1
+        if int(multi.sum()) != qc.deferred_multiple_placements:
+            raise ValueError(
+                f"the deferred bank holds {int(multi.sum())} multi-placement records but "
+                f"qc.deferred_multiple_placements is {qc.deferred_multiple_placements}."
             )
         gap_resolution = GapCensus.from_dict(cal["gap_resolution"])
         if gap_resolution.deferred != qc.deferred_undetermined_gap:

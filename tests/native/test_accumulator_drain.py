@@ -270,12 +270,13 @@ class _FakeScores:
 
 
 class _FakeDeferred:
-    """The two payload attributes the draw reaches: ``deferred.hypothesis_offsets`` and ``n_fragments``."""
+    """The two payload attributes the draw reaches: the records' runs of the hypothesis axis
+    (``deferred.record_hypothesis_offsets``) and ``n_fragments``."""
 
     def __init__(self, offsets: np.ndarray, n: int) -> None:
-        self.deferred = dataclasses.make_dataclass("_D", ["hypothesis_offsets", "n_fragments"])(
-            offsets, n
-        )
+        self.deferred = dataclasses.make_dataclass(
+            "_D", ["record_hypothesis_offsets", "n_fragments"]
+        )(offsets, n)
 
 
 # ── non-vacuity ────────────────────────────────────────────────────────────────────────────────────
@@ -413,6 +414,16 @@ def scanned_two_contigs(tmp_path_factory):
                 read(f"amb_{ref_id}_{k}", ref_id, 2000, [(_M, 100)], 1500, False),
             ]
 
+    # four MULTIMAPPING fragments, each with one hit per contig (NH = 2, the second hit secondary and
+    # numbered HI = 2), contained in the first exon on both: held on their placements, not their gap
+    for k in range(4):
+        for ref_id, hi in ((0, 1), (1, 2)):
+            for is_r1, pos, mate in ((True, 1100, 1300), (False, 1300, 1100)):
+                a = read(f"mm_{k}", ref_id, pos, [(_M, 100)], mate, is_r1)
+                if hi == 2:
+                    a.flag |= 0x100
+                a.set_tags([("NH", 2, "i"), ("HI", hi, "i")])
+                reads.append(a)
     bam = str(base / "drain.bam")
     header = {
         "HD": {"VN": "1.6", "SO": "queryname"},
@@ -452,7 +463,11 @@ def test_the_fixture_holds_fragments_on_BOTH_contigs(scanned_two_contigs):
     payload = scanned_two_contigs[0]
     refs = set(payload.deferred.ref.tolist())
     assert refs == {0, 1}, f"both contigs must hold fragments; got {refs}"
-    assert payload.deferred.n_fragments == 6
+    assert payload.deferred.n_fragments == 10, "six held on their gap, four on their placements"
+    assert sorted(np.diff(payload.deferred.placement_offsets).tolist()) == [1] * 6 + [2] * 4
+    assert (
+        payload.qc.deferred_undetermined_gap == 6 and payload.qc.deferred_multiple_placements == 4
+    )
 
 
 def test_the_drained_payload_CONSERVES_and_the_bank_is_empty(scanned_two_contigs):
@@ -461,7 +476,12 @@ def test_the_drained_payload_CONSERVES_and_the_bank_is_empty(scanned_two_contigs
     before, after, _choices = _drained(scanned_two_contigs)
 
     assert after.drain is not None and after.drain.conserved
-    assert after.drain.offered == before.qc.deferred_undetermined_gap
+    assert (
+        after.drain.offered
+        == before.qc.deferred_undetermined_gap + before.qc.deferred_multiple_placements
+    )
+    assert after.drain.offered_multimapper == before.qc.deferred_multiple_placements == 4
+    assert after.qc.deferred_multiple_placements == 0
     assert after.deferred.n_fragments == 0
     assert after.qc.deferred_undetermined_gap == 0
     assert after.qc.deposited == before.qc.deposited + after.drain.deposited
@@ -470,7 +490,7 @@ def test_the_drained_payload_CONSERVES_and_the_bank_is_empty(scanned_two_contigs
     assert int(after.deposited_lengths.sum()) == after.qc.deposited
     # Pass one's payload must be untouched — the delta is a separate object, which is what makes the
     # drain's contribution to every channel a subtraction rather than a rerun.
-    assert before.deferred.n_fragments == 6
+    assert before.deferred.n_fragments == 10
     assert before.drain is None
 
 
@@ -537,7 +557,7 @@ def test_a_payload_cannot_be_drained_TWICE(scanned_two_contigs):
     payload, region_types, sj, _strand = scanned_two_contigs
     with pytest.raises(ValueError, match="already been drained"):
         drain(after, np.zeros(0, np.int64), region_types=region_types, sj=sj)
-    assert len(choices) == 6
+    assert len(choices) == 10
 
 
 def test_the_DRAINED_payload_is_byte_identical_at_1_2_4_8_WORKERS(tmp_path_factory):

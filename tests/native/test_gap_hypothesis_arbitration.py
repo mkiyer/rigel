@@ -74,7 +74,7 @@ def test_TWO_COMPATIBLE_PATHS_are_BUFFERED_and_neither_is_chosen():
     assert int(t.deposited_lengths.sum()) == 0, "and has no length to bin"
     assert int(t.pool_lengths.sum()) == 0
     assert len(t.deferred) == 1
-    held = t.deferred[0]
+    held = t.deferred[0].placements[0]
     # Stored WHOLE, with both paths and the transcripts supporting each: the second pass cannot
     # choose between answers it was not given, and it weights them by those transcripts' abundance.
     assert held.hypotheses == (TA, TB)
@@ -322,9 +322,9 @@ def test_the_FLATTENED_queue_DOES_NOT_DEPEND_ON_DEPOSIT_ORDER():
     for ref, start, end, hypotheses in (SHORT, LONG):
         backward.deposit(ref, start, end, hypotheses=hypotheses)
 
-    assert [f.end for f in forward.tally.deferred] != [f.end for f in backward.tally.deferred], (
-        "the two accumulators must actually differ in deposit order, or this passes vacuously"
-    )
+    assert [f.placements[0].end for f in forward.tally.deferred] != [
+        f.placements[0].end for f in backward.tally.deferred
+    ], "the two accumulators must actually differ in deposit order, or this passes vacuously"
     a, b = forward.tally.deferred_arrays(), backward.tally.deferred_arrays()
     assert a.keys() == b.keys()
     for name in a:

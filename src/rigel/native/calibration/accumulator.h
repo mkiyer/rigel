@@ -180,6 +180,9 @@ enum class DepositOutcome : std::uint8_t {
     kStrandUndefined = 3,  // align_strand is NONE or AMBIGUOUS, so it names no column
     kDeferred        = 4,  // >1 surviving hypothesis: the gap is undetermined, so the fragment
                            // is held WHOLE for the second pass
+    kDeferredPlacements = 5,  // >1 PLACEMENT admits a surviving (placement, hypothesis): WHICH placement
+                              // is undetermined, so the multimapping fragment is held WHOLE, every
+                              // placement and hypothesis, for the second pass
 };
 
 /// The QC counter this outcome increments — and the specification's own key for it, so the two cannot
@@ -191,6 +194,7 @@ inline const char* outcome_key(DepositOutcome outcome) noexcept {
         case DepositOutcome::kEmpty:           return "dropped_empty";
         case DepositOutcome::kStrandUndefined: return "dropped_strand_undefined";
         case DepositOutcome::kDeferred:        return "deferred_undetermined_gap";
+        case DepositOutcome::kDeferredPlacements: return "deferred_multiple_placements";
     }
     return "";
 }
@@ -289,7 +293,21 @@ struct GapCensus {
 /// scanner, but the specification's flattening emits one dtype and the parity gate compares dtypes -- so
 /// widening here costs 8 bytes per deferred record and removes a conversion that would otherwise have to
 /// happen at the export, where getting it wrong compares equal by value.
+/// One rebuilt `OfferedFragment` with the storage its spans point into — the inverse of
+/// `DeferredFragments::append_placement`, for the set's offer and the parity surface.
+struct OfferedStorage {
+    std::vector<IntronBlock>    observed;
+    std::vector<IntronBlock>    implied;
+    std::vector<std::int32_t>   supporting;
+    std::vector<GapHypothesis>  spans;
+    OfferedFragment             offered{};
+};
+
 struct DeferredFragments {
+    /// ⭐ RECORDS → PLACEMENTS. A record is one fragment; a gap-held unique mapper holds ONE placement, a
+    /// multimapping fragment one per admitted alignment, each on its own reference. Every per-placement
+    /// array below carries exactly what the per-fragment array carried before placements existed.
+    std::vector<std::int64_t> placement_offsets{0};
     std::vector<std::int64_t> ref;                         // which reference: the drain needs the region_bound axis
     std::vector<std::int64_t> start, end;                  // the CLIPPED extent
     std::vector<std::int64_t> align_strand, sj_strand;
@@ -302,29 +320,59 @@ struct DeferredFragments {
     std::vector<std::int64_t> hypothesis_t_offsets{0};
     std::vector<std::int64_t> hypothesis_t;
 
-    std::size_t size() const noexcept { return start.size(); }
+    std::size_t n_records()    const noexcept { return placement_offsets.size() - 1; }
+    std::size_t n_placements() const noexcept { return start.size(); }
 
-    /// Append one fragment with every hypothesis it arrived with. `start`/`end` are the CLIPPED extent,
-    /// because that is what the drain must replay.
+    /// Append one PLACEMENT with every hypothesis it arrived with, to the record being built; `start`/`end`
+    /// are the CLIPPED extent, because that is what the drain must replay. `close_record` ends the record.
     ///
     /// ⚠ EVERY hypothesis, including any the length filter removed. The record is what was OFFERED: the
     /// second pass re-scores from scratch with a fragment-length distribution the first pass did not have,
     /// so pre-pruning here would decide with the weaker evidence and hide the decision.
+    void append_placement(const OfferedFragment& fragment,
+                          std::int64_t ref_id,
+                          std::int64_t start,
+                          std::int64_t end);
+    void close_record() { placement_offsets.push_back(static_cast<std::int64_t>(start.size())); }
+
+    /// One fragment held on its gap: one placement, one record.
     void append(const OfferedFragment& fragment,
                 std::int64_t ref_id,
                 std::int64_t start,
-                std::int64_t end);
+                std::int64_t end) {
+        append_placement(fragment, ref_id, start, end);
+        close_record();
+    }
+
+    /// Copy placement `p` of `from` onto the record being built here (the inverse of nothing: a plain copy
+    /// of every per-placement array, used by the canonical sort and by the set's offer).
+    void copy_placement(const DeferredFragments& from, std::size_t p);
+
+    /// Rebuild placement `p`'s offered fragment with its hypotheses `[h0, h1)` (indices LOCAL to the
+    /// placement) into `storage`, which owns every span the result points into.
+    const OfferedFragment& offered_of(std::size_t p, std::size_t h0, std::size_t h1,
+                                      OfferedStorage& storage) const;
+
+    /// ⭐ THE KEY, between two placements of this bank: the specification's
+    /// `(ref, start, end, align_strand, sj_strand, observed_introns, hypotheses)` compared as Python
+    /// compares those tuples (a PREFIX sorts before the sequence it is a prefix of). -1, 0 or 1.
+    int compare_placements(std::size_t a, std::size_t b) const noexcept;
+
+    /// Forget every record, keeping the capacity (the set's per-fragment scratch).
+    void clear();
 
     /// Concatenate `other`, shifting its offsets. ⚠ Order is not canonical until `canonicalise` runs.
     void merge_from(const DeferredFragments& other);
 
-    /// ⭐ Reorder the records into the ONE canonical order, which is the specification's:
+    /// ⭐ Reorder the records into the ONE canonical order, which is the specification's: a record is the
+    /// SEQUENCE of its placements' keys,
     ///
-    ///     (ref, start, end, align_strand, sj_strand, observed_introns, hypotheses)
+    ///     ((ref, start, end, align_strand, sj_strand, observed_introns, hypotheses), ...)
     ///
     /// compared exactly as Python compares those tuples -- element-wise, and a PREFIX sorts BEFORE the
-    /// longer sequence it is a prefix of. Two records that tie on this key are identical records, so their
-    /// relative order cannot be observed and the sort needs no tie-break.
+    /// longer sequence it is a prefix of, at both levels. A one-placement record's key is the placement's,
+    /// so the order among gap-held records is the order it always was. Two records that tie are identical
+    /// records, so their relative order cannot be observed and the sort needs no tie-break.
     ///
     /// ⚠ Idempotent, and it must be: the export calls it and a merged accumulator may already be sorted.
     void canonicalise();
@@ -361,6 +409,10 @@ struct DepositCounters {
     //: A name saying `dropped` for a population that is kept is how a recoverable loss gets read as
     //: a permanent one.
     std::int64_t deferred_undetermined_gap = 0;
+    //: ⭐ >1 placement admits a surviving pair, so WHICH placement is undetermined; held WHOLE in the
+    //: set-level bank. The identity is deposited + deferred_undetermined_gap + deferred_multiple_placements
+    //: + dropped_* == offered, `offered` counting FRAGMENTS (one offer per read name), never hits.
+    std::int64_t deferred_multiple_placements = 0;
     std::int64_t unannotated_introns    = 0;  // observed introns with no annotated sj
     std::int64_t contradictory_sj_strand = 0;  // the mates' motif tags disagreed; no splice trusted
     std::int64_t introns_absorbed       = 0;  // overlapping or abutting introns merged away
@@ -463,6 +515,23 @@ public:
     /// Deposit one fragment. Allocates nothing: `scratch` is reused across calls.
     DepositOutcome deposit(const OfferedFragment& fragment, DepositScratch& scratch);
 
+    /// The strand check and the clip, COUNTING NOTHING: the strand column with the clipped extent written
+    /// to `start`/`end`, or -1 when the fragment has no genome strand, -2 when it clips to nothing. The
+    /// first two steps of `deposit`, exposed so the set's offer can admit each placement of a
+    /// multimapping fragment by the one rule without counting a rejection per placement.
+    int admit(const OfferedFragment& fragment, std::int64_t* start, std::int64_t* end) const noexcept;
+
+    /// Every hypothesis's L and the survivors of the one filter `L <= max_length` into
+    /// `scratch.survivors` (the third step of `deposit`); with `all_stand_if_empty` the survivors are
+    /// every hypothesis when the filter would empty the set, as `deposit` has it, and without it the
+    /// caller sees the empty set (the set's union rule applies the clause over every placement at once).
+    void arbitrate(const OfferedFragment& fragment, std::int64_t start, std::int64_t end,
+                   DepositScratch& scratch, bool all_stand_if_empty, bool* any_spliced) const;
+
+    /// The umbrella census put back as it was — the set's offer deposits a multi-placement fragment's one
+    /// survivor through `deposit`, whose census answers a question such a fragment has no single answer to.
+    void restore_gap_census(const GapCensus& census) noexcept { gap_census_ = census; }
+
     /// ⭐ `L` under ONE hypothesis, without depositing anything — what the SECOND PASS scores against.
     ///
     /// ⛔ Exposed rather than reimplemented. The tool has ONE definition of fragment length, and the
@@ -513,6 +582,12 @@ private:
     void record_gap_resolution(const OfferedFragment& fragment,
                                const std::vector<ScoredHypothesis>& survivors) noexcept;
 
+    /// The write-out of the ONE surviving hypothesis: L, the pools, every channel of every object the path
+    /// touches — the last step of `deposit`.
+    DepositOutcome deposit_survivor(const OfferedFragment& fragment, const GapHypothesis& chosen,
+                                    int column, std::int64_t start, std::int64_t end,
+                                    DepositScratch& scratch);
+
     /// The annotated sj-boundary id for one intron, or -1 if it is not an annotated sj.
     std::int64_t sj_edge_id(std::int64_t intron_start,
                             std::int64_t intron_end,
@@ -556,6 +631,23 @@ private:
 // region_bounds[ref_region_bound_offsets[f] .. ref_region_bound_offsets[f+1]). A reference with fewer than 2 region_bounds owns no
 // regions and no boundaries, which is legal.
 //
+/// ONE alignment of a fragment on ONE reference, with every explanation of its unsequenced gaps — what the
+/// scanner offers per hit. A uniquely mapped fragment offers one; a multimapping fragment one per
+/// non-chimeric hit.
+struct Placement {
+    std::int32_t    ref_id;
+    OfferedFragment offered;
+};
+
+/// Reusable scratch for `AccumulatorSet::offer`: allocated once per worker, capacity kept across fragments.
+struct OfferScratch {
+    DeferredFragments        admitted;   // one record per admitted placement, canonicalised, then de-duplicated
+    std::vector<std::size_t> kept;       // the de-duplicated placements, in canonical order
+    OfferedStorage           storage;    // the materialised placement being arbitrated or deposited
+    DepositScratch           deposit;    // the accumulator's own scratch
+    std::vector<std::pair<std::size_t, std::size_t>> union_survivors;  // (kept index, hypothesis) within the limit
+};
+
 class AccumulatorSet {
 public:
     AccumulatorSet(const std::int64_t* region_bounds,
@@ -592,10 +684,35 @@ public:
     Accumulator&       at(std::int32_t ref_id);
     const Accumulator& at(std::int32_t ref_id) const;
 
+    /// ⭐ Offer ONE fragment with every placement it aligned to; deposit it, hold it, or reject it. The
+    /// specification is `_accumulator_reference.Accumulator.offer`:
+    ///
+    ///   * one placement: `at(ref).deposit`, bit for bit — the unique mapper's path, counters included;
+    ///   * per placement, the strand check and the clip exclude THAT placement alone; none left ⇒ the
+    ///     fragment is rejected ONCE on this set's counters, `dropped_strand_undefined` when every
+    ///     exclusion was the strand and `dropped_empty` otherwise;
+    ///   * identical admitted placements are ONE placement; one left ⇒ `deposit` at it with all of its
+    ///     hypotheses (its gap, if open, is held and censused exactly as a unique mapper's);
+    ///   * several left ⇒ the survivors are the UNION over placements of the (placement, hypothesis) pairs
+    ///     within the length limit, every pair standing if that union is empty; one survivor deposits at
+    ///     its placement with that hypothesis alone and leaves the umbrella census as it was; two or more
+    ///     hold the fragment WHOLE — every placement, every hypothesis, the placements in their canonical
+    ///     order — in this set's bank, `kDeferredPlacements`.
+    DepositOutcome offer(const Placement* placements, std::size_t n, OfferScratch& scratch);
+
+    /// This set's own bank — the multi-placement records — in its canonical order. The export merges it
+    /// with every reference's gap bank and canonicalises the union.
+    const DeferredFragments& deferred_canonical();
+
+    /// The set's own counters: the fragments it rejected whole and the ones it held on their placements.
+    const DepositCounters& counters() const noexcept { return counters_; }
+
     void merge_from(const AccumulatorSet& other);
 
 private:
     std::vector<Accumulator> accs_;
+    DeferredFragments        deferred_;
+    DepositCounters          counters_;
 };
 
 }  // namespace rigel::accumulator

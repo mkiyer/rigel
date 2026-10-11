@@ -131,6 +131,7 @@ def _calibration_dict(**overrides) -> dict:
             "dropped_empty": 2,
             "dropped_strand_undefined": 3,
             "deferred_undetermined_gap": 4,
+            "deferred_multiple_placements": 0,
             "unannotated_introns": 5,
             "contradictory_sj_strand": 6,
             "introns_absorbed": 8,

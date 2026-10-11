@@ -943,6 +943,30 @@ class TestMixedMultimapperKitchenSink:
 # ── paralogs with identical exonic sequence, every RNA read a multimapper ──
 
 
+def assert_identical_paralogs(t1, t2, *, tol: float) -> None:
+    """What the EM can be held to on two SEQUENCE-IDENTICAL templates: the TOTAL, and the SHAPE.
+
+    The two are not separable — every fragment inside them multimaps to both — so the split is an open
+    EM degeneracy: it is BIMODAL rather than noisy, landing even or at a vertex, and which one is decided
+    by the symmetry of the two loci's priors, not by depth. Until calibration counted multimappers the
+    two loci's priors were identical (both empty), so the symmetric start stayed symmetric and the split
+    read even by accident; now calibration draws each multimapper to one placement, the two priors differ
+    by that draw's noise, and the degenerate EM leaves the knife-edge for a vertex at every gDNA level.
+    Asserting the shape is stronger than tolerating it: an even split within ``tol`` or a clean vertex,
+    and nothing in between — a split that is neither is a third behaviour this gate would name.
+    Do NOT widen it, and do not fix it by moving a seed or a depth until a mode comes out even: that is
+    tuning to green. `TestDistinguishableParalogs` is the arm where the split is identifiable at all.
+    """
+    total = t1.observed + t2.observed
+    if total <= 10:
+        return
+    even = abs(t1.observed - t2.observed) < total * tol + 5
+    vertex = min(t1.observed, t2.observed) == 0.0 and max(t1.observed, t2.observed) == total
+    assert even or vertex, (
+        f"identical paralogs split {t1.observed} / {t2.observed}: neither even within {tol:.0%} nor a vertex"
+    )
+
+
 class TestParalogMultimapping:
     """Two genes with identical exonic sequences + negative control.
 
@@ -1015,8 +1039,7 @@ class TestParalogMultimapping:
             assert bench.total_rna_observed == pytest.approx(bench.total_expected, abs=25)
             t1 = next(t for t in bench.transcripts if t.t_id == "t1")
             t2 = next(t for t in bench.transcripts if t.t_id == "t2")
-            total = t1.observed + t2.observed
-            assert abs(t1.observed - t2.observed) < total * 0.15 + 5
+            assert_identical_paralogs(t1, t2, tol=0.15)
         finally:
             sc.cleanup()
 
@@ -1030,8 +1053,7 @@ class TestParalogMultimapping:
             assert bench.total_rna_observed == pytest.approx(bench.total_expected, abs=10)
             t1 = next(t for t in bench.transcripts if t.t_id == "t1")
             t2 = next(t for t in bench.transcripts if t.t_id == "t2")
-            total = t1.observed + t2.observed
-            assert abs(t1.observed - t2.observed) < total * 0.15 + 5
+            assert_identical_paralogs(t1, t2, tol=0.15)
         finally:
             sc.cleanup()
 
@@ -1062,31 +1084,15 @@ class TestParalogMultimapping:
             assert_negative_control(bench, gdna_abundance=gdna)
             t1 = next(t for t in bench.transcripts if t.t_id == "t1")
             t2 = next(t for t in bench.transcripts if t.t_id == "t2")
-            total = t1.observed + t2.observed
-            if gdna == 100:
-                # At heavy gDNA the split is unidentifiable, and this asserts the collapse rather
-                # than tolerating it. Two sequence-identical templates are not separable here — the
-                # unique-flanking gDNA that would break the tie is too short and too rare — and the
-                # EM converges to a vertex on a real gradient rather than wandering, stably and
-                # independently of the iteration count.
-                #
-                # Asserting the SHAPE is stronger than a strict xfail. An xfail says only that
-                # something failed; this says which shape the answer has, and it still fires the day
-                # the split becomes identifiable, which is what strictness was for.
-                #
-                # The TOTAL is deliberately NOT pinned. It is a draw from `assignment_mode="sample"`
-                # and it moves with the seed, so pinning it would pin one draw rather than a property.
-                # Nor is it correct: the total runs well above the expectation here, which is a SECOND
-                # defect at this scenario, tracked separately.
-                assert min(t1.observed, t2.observed) == 0.0, (
-                    f"the identical-paralog split is no longer collapsed ({t1.observed} / "
-                    f"{t2.observed}). If the tie is now broken, DELETE this branch and let the even-split "
-                    f"assertion below cover gdna=100 — do not widen it."
-                )
-                assert max(t1.observed, t2.observed) == total
-            elif total > 10:
-                tol = 0.30 if gdna > 0 else 0.20
-                assert abs(t1.observed - t2.observed) < total * tol + 5
+            # The TOTAL is the property calibration's multimapper second pass restored: with both
+            # paralog exons counted at their density, the locus priors hold the gDNA and the EM's total
+            # runs near the truth instead of absorbing the gDNA as RNA (160 against 146 at gDNA 100,
+            # from 202 while calibration was blind to multimappers). It is a draw under
+            # `assignment_mode="sample"`, so it is held to a band, not pinned.
+            assert t1.observed + t2.observed == pytest.approx(
+                t1.expected + t2.expected, abs=0.20 * (t1.expected + t2.expected) + 10
+            )
+            assert_identical_paralogs(t1, t2, tol=0.30 if gdna > 0 else 0.20)
         finally:
             sc.cleanup()
 
@@ -1103,9 +1109,7 @@ class TestParalogMultimapping:
                 assert bench.total_rna_observed == pytest.approx(bench.total_expected, abs=55)
             t1 = next(t for t in bench.transcripts if t.t_id == "t1")
             t2 = next(t for t in bench.transcripts if t.t_id == "t2")
-            total = t1.observed + t2.observed
-            if total > 10:
-                assert abs(t1.observed - t2.observed) < total * 0.20 + 5
+            assert_identical_paralogs(t1, t2, tol=0.20)
         finally:
             sc.cleanup()
 

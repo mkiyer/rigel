@@ -79,6 +79,20 @@ sentinel.
 are already exon endpoints. Boundaries always run `src < dst`, so genomic order is a topological order and
 there is no graph traversal anywhere.
 
+**1.8 The offer — one fragment, several placements** (`AccumulatorSet::offer`; the specification
+`Accumulator.offer`). A fragment arrives with one PLACEMENT per non-chimeric alignment, each on one
+reference with its own extent, strands, observed introns and gap hypotheses; its candidate set is the union
+`C = {(p, h) : p a placement, h ∈ H_p}` and the molecule took exactly one element of it. One placement is
+`deposit` unchanged. Otherwise the strand check and the clip exclude a placement alone (none left rejects
+the fragment once: `dropped_strand_undefined` when every exclusion was the strand, `dropped_empty`
+otherwise); identical admitted placements are one; one left is `deposit` with all its hypotheses; several
+left are arbitrated as the union under the one filter `L_{p,h} ≤ max_length`, every pair standing when the
+union is empty; one survivor deposits at its placement with that hypothesis alone (the umbrella gap census
+untouched); two or more are held WHOLE — every placement in its canonical order, every hypothesis — as
+`deferred_multiple_placements`, and `deposited + deferred_undetermined_gap + deferred_multiple_placements
++ dropped_* == offered` with `offered` counting fragments. A held record's canonical key is the sequence of
+its placements' keys, prefix rule at both levels, so a one-placement record sorts as it always did.
+
 ---
 
 ## 2. Reciprocal opportunity, and where it is model-free
@@ -1701,6 +1715,28 @@ fragments would draw identically and a 60/40 posterior would collapse to 100/0.
 Known approximation: `ρ` enters as a hard multiplicative zero, but zero observations is
 `P(0 | λ, E) = e^(−λE)`, not zero. The hard zero is the large-exposure limit of the correct likelihood, so
 it is right where the library is deep and wrong where it is shallow.
+
+**The placement term, for a fragment held on its placements (§1.8).** Over the record's whole run,
+
+    score(p, h)  =  A_p × ρ(h) × f(L_{p,h}) × s(p, h)
+
+with `A_p` the pass-one UNIQUE traffic at the objects the placement's own path — its extent with its
+observed introns cut out, the hypothesis that implies nothing — deposits on, read through the deposit rule's
+geometry (`second_pass.placement_abundance`): the bottleneck of `sj_inv_length_sum` over the annotated sj
+the observed introns resolve to (an AMBIGUOUS motif trusts no splice); else the bottleneck of
+`boundary_unspliced_inv_length_sum` over the contiguous boundaries the path crosses; else, contained in one
+region, `region_contained_count / contained_eff_length(ℓ, global_pmf)` — fragments per start opportunity in
+the frame calibration's density uses, under the unconditional anchor because the component is unknown, as
+for the genomic hypothesis's `f`; a path contained in no object (an unannotated intron swallowed every
+boundary between two regions) deposits on nothing and reads 0, as an empty bottleneck does. The bottleneck
+for the reason `ρ` uses it: a molecule that took this placement was present at every object on it. `A` is
+applied as its own factor between `s` and `ρ` — it rests on one placement's objects' traffic, the same kind
+of evidence as `ρ`, and is judged first so the within-placement question is asked among the placements
+unique evidence kept — and NOT on a one-placement record, where it is a common factor, so the gap-held
+population's scores are unchanged bit for bit. The zero rules above are the whole degenerate policy: every
+placement at `A = 0` makes the factor uninformative (a perfect paralog pair draws evenly and the record
+counts as undecided); a zero beside a positive stays hard (owner, 2026-10-10). The known approximation
+applies to `A` as to `ρ`.
 
 ## 11. The conserved frame — every component's shares of its objects at their capture weights (`effective_length.conserved_cut_shares`, `capture_eff_length`, `priors.assemble_priors`, `calibrate._gdna_boundary_conserved_len`; the reader, `native/honest_reader.h`)
 

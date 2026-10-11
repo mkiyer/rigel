@@ -426,6 +426,22 @@ scan runs at its default thread budget, and its fraction sums vary in the last b
 change, and in any instrument that must compare two end-to-end runs bit for bit pin `scan.total_threads=1`
 (`rename_identity.py` does, and so does every A/B pair).
 
+**A multimapping fragment is gated as one fragment with several placements** (`DESIGN.md` §4.2). The rule
+is stated once, in the specification's `Accumulator.offer`, and held three ways: `tests/native/test_multimapper_offer.py`
+is the rule case by case (one placement is `deposit` bit for bit; identical placements are one; a strand-undefined
+placement excludes itself alone; every pair over the limit means all stand; one survivor across placements
+deposits at its placement and leaves the gap census alone; two contained placements are held whole in canonical
+order whatever the hit order; a record-local choice names a placement and a hypothesis; a drained choice equals the
+direct deposit); `tests/native/test_multimapper_native_parity.py` holds `AccumulatorSet::offer` to it array by
+array, every reference's banks, the counters, the census and the ONE canonical bank, on those cases and on two
+thousand random fragments; `tests/test_second_pass_placements.py` holds the placement term: unique contained depth
+in a 3:1 ratio scores the placements exactly 0.75 / 0.25 and the draw follows within the binomial's own four
+standard deviations, no unique evidence anywhere is undecided and even, unique evidence on one side only is a hard
+zero, and the drain deposits exactly where it drew. The two-contig drain fixture carries four `NH = 2` fragments,
+so the worker-identity gate covers multi-placement records, and `tests/scenarios_aligned/test_multimap_counting.py`
+is the only panel with real multimappers: identical paralogs are held to the TOTAL and the SHAPE
+(`assert_identical_paralogs` — even, or a vertex, never between), because their split is the EM's own degeneracy.
+
 **The capture-contracted length is gated per object against the deposit rule.** Three gates run every
 placement of every fragment width through the reference accumulator (`tests/native/_accumulator_reference.py`)
 and hold each piece's contained share and each boundary's and junction's conserved share to 1e-12:

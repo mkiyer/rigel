@@ -14,56 +14,6 @@ the changelog is git.
 
 ## OPEN
 
-### the-calibration-count-is-blind-to-multimappers
-`priority: now — the owner's intended fix, after the native reader lands (2026-10-10); with the reader in place it is the one red gate in the suite · kind: defect · 2026-10-10`
-THE SYMPTOM. `tests/scenarios_aligned/test_multimap_counting.py::TestParalogMultimapping::test_gdna_sweep[gdna_100]`
-(two sequence-identical 500 bp single-exon paralogs, gDNA abundance 100, aligned reads): the shipped reader calls
-154 / 0 against a truth of 75 / 71 (the collapse the test asserts); the capture reader calls 123 / 79, a total
-of 202 against 146. Dissected: both paralog exons carry a calibration gDNA count of exactly 0 on a 155 bp
-contained support beside intergenic gDNA at 0.23–0.31 fragments/bp, because every fragment inside them maps
-twice and `bam_scanner.cpp` deposits into the calibration accumulator only for `is_unique_mapper` — a
-multimapper goes to the EM's buffer alone. The capture reader reads the zero honestly (`exp(−ρ·Eg)` at the
-background is `e^{−36}`), the weight is 870× below the flanking intergenic regions', `assemble_priors` contracts the locus's gDNA
-yield to its boundaries', the EM reads the zero yield as "cannot emit", and the gDNA at the paralogs is called
-RNA. The 123 / 79 split is the boundaries' crossing-count noise amplified by the vanished region weights, not a
-tie-break, so the test's instruction to delete its collapse branch does not apply. The pre-existing half is the
-shipped 154 against 146: the locus prior's gDNA count at a multimapper-only region is 0, so the EM has no gDNA
-prior there; the located-mode reader amplified it the same way on every captured library and its detector hid
-it on capture-OFF ones.
-
-THE FOOTPRINT. No benchmark saw it: every panel is an oracle BAM (`NH:i:1` throughout) and the production
-default is `include_multimap = True`. On the production index's 1,043,881 regions, per region the uniquely
-mapped first-mate starts against the multimapper alignment starts (every alignment counted):
-
-| library | unique fragments | multimapper alignments | regions with multimappers and no unique fragment (of them exon regions) | regions where multimappers outnumber unique fragments — share of all multimapper alignments inside them |
-|---|---|---|---|---|
-| LBX0190 (plasma) | 138,403 | 104,140 | 5,488 (762) | 6,504 — 95 % |
-| MO_3021 (plasma) | 772,744 | 583,407 | 23,443 (7,018) | 35,781 — 94 % |
-| VCaP mix (deep) | 18,417,903 | 544,065 | 10,099 (5,305) | 13,792 — 72 % |
-
-Multimappers are up to 43 % of a plasma library's alignments and they cluster where calibration counts almost
-nothing, which is exactly where the reader reads depletion and the locus prior reads no gDNA.
-
-THE FIX (owner, 2026-10-10, a known issue): a change to the accumulator phase. The accumulator today deposits
-uniquely aligned fragments for calibration and discards multimapping ones; it already buffers the fragments
-compatible with several fragment lengths (several isoforms) and assigns them in a second pass. Multimapping
-fragments are to be handled the same way — buffered, then assigned by the accumulator's second pass to the
-probabilistically best placement by the abundance of uniquely aligned fragments there — which fixes
-calibration and the capture reader at once; implementable without undue trouble, after the native reader is
-complete. The accumulator's own ruling already said as much — "a LATER phase: side buffer, then deterministic
-largest-remainder apportionment, integral always" — and the code implements it only for gap-hypothesis
-fragments on one placement. Derived: a multimapper enters the side
-buffer with one hypothesis per alignment (reference, start, end, introns), the second pass scores each
-placement with its existing score (`ρ(h)` from pass one's tally at the placement's objects, the length law,
-the strand term), draws one and the drain deposits it; calibration then counts the paralog exons at their
-density, the reader reads them and the locus prior holds their gDNA. It is a format change to
-`DeferredRecords` (per-hypothesis coordinates), a scanner change (defer instead of skip) and a drain change,
-each gated by `tests/native/_accumulator_reference.py`, A/B'd on the aligned scenarios (the only panels with
-multimappers) and on VCaP against its truth. The cheaper alternative — a per-region multimapper tally in the
-scanner and a unique-deposit opportunity `Eg_r = S_r · U_r / (U_r + A_r / NH_r)` under uniform genomic
-sampling — is a geometry estimated from data and needs its own ruling. Neither is a reader change: nothing in
-the reader can tell a withheld fragment from an absent one.
-
 ### the-capture-weights-are-noisy-on-a-capture-off-library
 `priority: next — the price of no detector, to be reduced only by a mechanism A/B'd on its own · kind: cost · 2026-10-10`
 Every object's capture weight is its own gDNA density's posterior mode relative to the typical read object's, on every
@@ -5608,3 +5558,29 @@ The honest likelihood with the RNA amount integrated out is immune to the false 
 strand columns, not the inferred count; its per-object error is at objects with no read under a median or mean
 readout (−0.14 to −0.79 nats, the breadth of the smoothed prior) and under 0.04 nats under the mode wherever an
 object has a read. Its native kernel reproduces the NumPy prototype to 1.2e-9 on 70,176 ladder slots.
+
+### the-calibration-count-is-blind-to-multimappers
+CLOSED by landing 2026-10-11 (`DESIGN.md` §4.2, `EQUATIONS.md` §1.8 and §10): the accumulator's second pass now
+holds a multimapping fragment WHOLE — one placement per non-chimeric alignment, every gap hypothesis — and
+assigns it by one draw over the (placement, hypothesis) pairs, scored by the existing three factors times the
+placement's own unique traffic, then deposits it through `deposit` at the drawn placement. The defect: pass one
+deposited only uniquely aligned fragments (`bam_scanner.cpp`'s deposit under `is_unique_mapper`), so a region
+whose fragments all multimap read as EMPTY to calibration — the composition, the landscape, the capture reader
+(an empty object beside a dense one is depleted, 870× on the paralog test) and the locus prior (a gDNA count of
+0, a yield of 0) all read the emptiness as fact; on the real libraries 95 % of LBX0190's multimapper alignments
+sat in regions where they outnumbered unique fragments. Killing numbers: the paralog gate (two identical 500 bp
+exons at gDNA 100) — calibration counts both at 0.24 and 0.28 fragments/bp against 0.24 beside them, from 0 / 0;
+the reader's weights there 1.0 and 1.2, from 1/2000 of the intergenic regions'; the EM's total 160 against a
+truth of 146, from 202 — and every aligned multimapper scenario passes, 49 / 49. The VCaP mix through the
+production path, pinned: gDNA fraction 0.2401 → 0.2528 against its truth of 0.2518 (the EM's gDNA 4,365,879 →
+4,600,368, its nascent RNA 746,774 → 523,324: the multimapped gDNA it had been calling nascent RNA), 126,154
+of its 136,188 multimapper molecules held on their placements, the second pass 13.2 → 27.1 s. The plasma
+libraries: LBX0190 gDNA fraction 0.0976 → 0.0997 (10,371 of 11,720 molecules held, +3 s), MO_3021 0.1631 →
+0.1653 (68,182 of 70,856, +14 s). On every `NH = 1` fragment the change is a numeric no-op by construction and
+by `rename_identity.py` on the ladder's `g00 ss.99 OFF`: the quant digest and every array bit-identical. The
+one finding: the EM's split of two sequence-identical templates is its own degeneracy — even or a vertex — and
+the even split the suite had asserted at gDNA < 100 was the accidental symmetry of two EMPTY priors; with the
+priors now holding the drawn multimappers it lands at a vertex at every level, the totals right, and the gate
+holds the total and the shape (`assert_identical_paralogs`). The named residual of the literal rule stands as
+the owner accepted it: a silent processed pseudogene without a unique fragment never receives a multimapper
+beside an expressed parent, and the mixed class is to be measured before any uniform component is considered.

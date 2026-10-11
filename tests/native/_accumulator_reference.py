@@ -64,6 +64,7 @@ __all__ = [
     "STRAND_COLUMNS",
     "Accumulator",
     "DeferredFragment",
+    "Placement",
     "DepositOutcome",
     "FragmentPool",
     "GapResolution",
@@ -127,6 +128,12 @@ class DepositOutcome(enum.Enum):
     #: name that said ``dropped`` for a population that is kept is how a recoverable loss gets read as a
     #: permanent one.
     DEFERRED = "deferred_undetermined_gap"
+    #: Two or more PLACEMENTS of one multimapping fragment admit a surviving (placement, hypothesis), so
+    #: WHICH placement the molecule took is undetermined — and with it every consequence the gap case
+    #: already lists. Held WHOLE, every placement and every hypothesis, for the second pass, which weighs
+    #: each placement by the unique traffic at its own objects. Not dropped: the identity is
+    #: ``deposited + deferred_undetermined_gap + deferred_multiple_placements + dropped_* == offered``.
+    DEFERRED_PLACEMENTS = "deferred_multiple_placements"
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,13 +218,13 @@ class GapResolution(enum.Enum):
 
 
 @dataclass(frozen=True, slots=True)
-class DeferredFragment:
-    """A fragment held for the second pass, stored WHOLE.
+class Placement:
+    """ONE alignment of a fragment on ONE reference, with every explanation of its unsequenced gaps.
 
-    The fragment is stored, never its consequences. Object ids are large, derived, and would have to be
-    kept consistent with the partition; the fragment is small and replays exactly. The drain re-enters
-    :meth:`Accumulator.deposit` with the chosen hypothesis, so there is no second deposit path, no
-    duplicated crossing logic, and byte-identity with the native accumulator is preserved for free.
+    A uniquely mapped fragment has exactly one; a multimapping fragment has one per non-chimeric
+    alignment, each on its own reference with its own extent, strands, observed introns and gap
+    hypotheses. This is both what the scanner OFFERS (:meth:`Accumulator.offer`) and what a held record
+    STORES, clipped to its reference.
     """
 
     ref: int
@@ -225,8 +232,48 @@ class DeferredFragment:
     end: int
     align_strand: int
     sj_strand: int
-    observed_introns: tuple[tuple[int, int], ...]
-    hypotheses: tuple[GapHypothesis, ...]
+    observed_introns: tuple[tuple[int, int], ...] = ()
+    hypotheses: tuple[GapHypothesis, ...] = UNSPLICED_ONLY
+
+    @property
+    def key(self):
+        """The placement's own content, in the canonical order's comparison form (Python tuple order,
+        prefix rule included)."""
+        return (
+            self.ref,
+            self.start,
+            self.end,
+            self.align_strand,
+            self.sj_strand,
+            self.observed_introns,
+            tuple((p.introns, p.sj_strand, p.supporting_t_inds) for p in self.hypotheses),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DeferredFragment:
+    """A fragment held for the second pass, stored WHOLE: every placement, every hypothesis.
+
+    The fragment is stored, never its consequences. Object ids are large, derived, and would have to be
+    kept consistent with the partition; the fragment is small and replays exactly. The drain re-enters
+    :meth:`Accumulator.deposit` at the chosen placement with the chosen hypothesis, so there is no second
+    deposit path, no duplicated crossing logic, and byte-identity with the native accumulator is preserved
+    for free.
+
+    A gap-held unique mapper is a record with ONE placement; a multimapper holds several, each on its own
+    reference, kept in their own canonical order so the record's content does not depend on the order
+    the aligner listed the hits in.
+    """
+
+    placements: tuple[Placement, ...]
+
+    @property
+    def n_placements(self) -> int:
+        return len(self.placements)
+
+    @property
+    def key(self):
+        return tuple(p.key for p in self.placements)
 
 
 class FragmentPool(enum.IntEnum):
@@ -621,18 +668,7 @@ class Tally:
 
         Mirrors ``Accumulator::deferred_canonical`` in the C++.
         """
-        return sorted(
-            self.deferred,
-            key=lambda f: (
-                f.ref,
-                f.start,
-                f.end,
-                f.align_strand,
-                f.sj_strand,
-                f.observed_introns,
-                tuple((p.introns, p.sj_strand, p.supporting_t_inds) for p in f.hypotheses),
-            ),
-        )
+        return sorted(self.deferred, key=lambda f: f.key)
 
     def deferred_arrays(self) -> dict[str, np.ndarray]:
         """The deferred queue flattened to the CSR the payload carries.
@@ -641,9 +677,11 @@ class Tally:
         one definition rather than two implementations that have to be argued equal. The parity gate
         compares this.
 
-        Two nested variable-length levels — fragments hold hypotheses, hypotheses hold introns — so there
-        are two offset arrays. Offsets are cumulative and always start at 0, so ``n`` is
-        ``len(offsets) - 1`` and an empty deferred queue is ``[0]``, never ``[]``.
+        Three nested variable-length levels — fragments hold placements, placements hold hypotheses,
+        hypotheses hold introns — so there are three offset arrays. Offsets are cumulative and always
+        start at 0, so ``n_fragments`` is ``len(placement_offsets) - 1`` and an empty deferred queue is
+        ``[0]``, never ``[]``. A gap-held unique mapper is a record with one placement, and every
+        per-placement array carries exactly what the per-fragment array carried before placements existed.
 
         SORTED, and that is what makes it bit-identical at any worker count. Every other bank is a
         sum, whose per-worker merge is exact for the uint32 counts and within a derived tolerance
@@ -653,10 +691,11 @@ class Tally:
         Sorting on the record's own content is the canonical form: two records that tie on this key
         are identical records, so their relative order cannot be observed.
         """
-        frag_fields = ("ref", "start", "end", "align_strand", "sj_strand")
-        out: dict[str, list[int]] = {name: [] for name in frag_fields}
+        placement_fields = ("ref", "start", "end", "align_strand", "sj_strand")
+        out: dict[str, list[int]] = {name: [] for name in placement_fields}
         ordered = self.deferred_canonical()
         out |= {
+            "placement_offsets": [0],
             "observed_intron_offsets": [0],
             "observed_introns": [],
             "hypothesis_offsets": [0],
@@ -667,19 +706,21 @@ class Tally:
             "hypothesis_t": [],
         }
         for frag in ordered:
-            for name in frag_fields:
-                out[name].append(getattr(frag, name))
-            for start, end in frag.observed_introns:
-                out["observed_introns"] += [start, end]
-            out["observed_intron_offsets"].append(len(out["observed_introns"]) // 2)
-            for path in frag.hypotheses:
-                out["hypothesis_sj_strand"].append(int(path.sj_strand))
-                for start, end in path.introns:
-                    out["hypothesis_introns"] += [start, end]
-                out["hypothesis_intron_offsets"].append(len(out["hypothesis_introns"]) // 2)
-                out["hypothesis_t"] += list(path.supporting_t_inds)
-                out["hypothesis_t_offsets"].append(len(out["hypothesis_t"]))
-            out["hypothesis_offsets"].append(len(out["hypothesis_sj_strand"]))
+            for placement in frag.placements:
+                for name in placement_fields:
+                    out[name].append(getattr(placement, name))
+                for start, end in placement.observed_introns:
+                    out["observed_introns"] += [start, end]
+                out["observed_intron_offsets"].append(len(out["observed_introns"]) // 2)
+                for path in placement.hypotheses:
+                    out["hypothesis_sj_strand"].append(int(path.sj_strand))
+                    for start, end in path.introns:
+                        out["hypothesis_introns"] += [start, end]
+                    out["hypothesis_intron_offsets"].append(len(out["hypothesis_introns"]) // 2)
+                    out["hypothesis_t"] += list(path.supporting_t_inds)
+                    out["hypothesis_t_offsets"].append(len(out["hypothesis_t"]))
+                out["hypothesis_offsets"].append(len(out["hypothesis_sj_strand"]))
+            out["placement_offsets"].append(len(out["ref"]))
         return {name: np.asarray(values, dtype=np.int64) for name, values in out.items()}
 
 
@@ -774,23 +815,10 @@ class Accumulator:
         # Checked FIRST, and before any geometry: the strand is a property of the fragment alone, and a
         # fragment with no single genome strand has no column in any bank. Rejecting it here rather than
         # upstream of the accumulator is what lets the loss be COUNTED instead of vanishing.
-        column = STRAND_COLUMNS.get(align_strand)
-        if column is None:
-            return self._reject(DepositOutcome.STRAND_UNDEFINED)
-
-        p = self.partition
-        first_region_bound, last_region_bound = (
-            int(p.ref_region_bound_offsets[ref]),
-            int(p.ref_region_bound_offsets[ref + 1]),
-        )
-        if last_region_bound - first_region_bound < 2:
-            return self._reject(DepositOutcome.EMPTY)
-        region_bounds = p.region_bounds[first_region_bound:last_region_bound]
-
-        # clip to the reference; L is the CLIPPED length, so the placement count stays consistent
-        start, end = max(int(start), int(region_bounds[0])), min(int(end), int(region_bounds[-1]))
-        if end <= start:
-            return self._reject(DepositOutcome.EMPTY)
+        admitted = self._admit(ref, start, end, align_strand)
+        if isinstance(admitted, DepositOutcome):
+            return self._reject(admitted)
+        column, region_bounds, start, end = admitted
 
         # ── arbitration: which hypotheses survive, and is exactly one left? ───────────────────────
         #
@@ -799,31 +827,180 @@ class Accumulator:
         # not recoverable by the second pass — that pass resolves which PATH, not which strand the read
         # aligned to — so the strand rejection must win over the deferral. And the clip has to come
         # first because a hypothesis is filtered on its `L`, which is measured after clipping.
+        _scored, survivors = self._arbitrate(start, end, observed_introns, hypotheses)
+        self._record_gap_resolution(hypotheses, survivors)
+        if len(survivors) > 1:
+            self.tally.deferred.append(
+                DeferredFragment(
+                    placements=(
+                        self._placement(
+                            ref, start, end, align_strand, sj_strand, observed_introns, hypotheses
+                        ),
+                    )
+                )
+            )
+            return self._reject(DepositOutcome.DEFERRED)
+        return self._deposit_survivor(
+            ref, column, region_bounds, start, end, sj_strand, survivors[0]
+        )
+
+    def offer(self, placements) -> DepositOutcome:
+        """Offer ONE fragment with every placement it aligned to; deposit it, hold it, or reject it.
+
+        A uniquely mapped fragment is the one-placement case and goes through :meth:`deposit` unchanged
+        — bit for bit, counters included. A multimapping fragment arrives with one :class:`Placement`
+        per non-chimeric alignment. The rule:
+
+        * per placement, the strand check and the clip EXCLUDE that placement alone (a placement with no
+          genome strand has no column; one that clips to nothing is not on its reference). If none
+          remains the fragment is rejected ONCE — ``STRAND_UNDEFINED`` when every exclusion was the
+          strand, ``EMPTY`` otherwise;
+        * identical placements (the same reference, clipped extent, strands, observed introns and
+          hypotheses, which the pairing of secondary alignments can produce twice) are ONE placement, as
+          two transcripts implying one path are one hypothesis;
+        * exactly one placement remains → :meth:`deposit` at it, with all of its hypotheses: the
+          fragment's one open question, if any, is its gap, and it is held, counted and censused exactly
+          as a unique mapper's is;
+        * several remain → the survivors are the UNION over placements of the (placement, hypothesis)
+          pairs whose ``L`` is within the fragment-length limit — the one filter, applied to the union
+          because the molecule took exactly one element of it — and if the union is empty every pair
+          stands and the ordinary ``TOO_LONG`` rejection counts the chosen one at the drain. One survivor
+          → deposited at its placement with that hypothesis alone; two or more → the fragment is held
+          WHOLE, every placement and every hypothesis, as :attr:`DepositOutcome.DEFERRED_PLACEMENTS`.
+
+        The umbrella gap census is LEFT ALONE by a multi-placement fragment, resolved or held: its classes
+        answer "how was the gap at one placement resolved", a question a multi-placement fragment has no
+        single answer to, and the record carries its placements so a census is derivable from the bank.
+        """
+        admitted = []
+        strand_rejected = empty_rejected = 0
+        seen = set()
+        for placement in placements:
+            result = self._admit(
+                placement.ref, placement.start, placement.end, placement.align_strand
+            )
+            if isinstance(result, DepositOutcome):
+                if result is DepositOutcome.STRAND_UNDEFINED:
+                    strand_rejected += 1
+                else:
+                    empty_rejected += 1
+                continue
+            _column, _region_bounds, start, end = result
+            clipped = self._placement(
+                placement.ref,
+                start,
+                end,
+                placement.align_strand,
+                placement.sj_strand,
+                placement.observed_introns,
+                placement.hypotheses,
+            )
+            if clipped.key in seen:
+                continue
+            seen.add(clipped.key)
+            admitted.append(clipped)
+        if not admitted:
+            return self._reject(
+                DepositOutcome.STRAND_UNDEFINED
+                if strand_rejected and not empty_rejected
+                else DepositOutcome.EMPTY
+            )
+        if len(admitted) == 1:
+            one = admitted[0]
+            return self.deposit(
+                one.ref,
+                one.start,
+                one.end,
+                observed_introns=one.observed_introns,
+                align_strand=one.align_strand,
+                sj_strand=one.sj_strand,
+                hypotheses=one.hypotheses,
+            )
+        # Within the record the placements sit in THEIR canonical order, so the record's content does not
+        # depend on the order the aligner listed the hits in.
+        admitted.sort(key=lambda pl: pl.key)
+        union = [
+            (pl, row)
+            for pl in admitted
+            for row in self._arbitrate(pl.start, pl.end, pl.observed_introns, pl.hypotheses)[0]
+            if row[1] <= self.max_fragment_length
+        ]
+        if not union:
+            union = [
+                (pl, row)
+                for pl in admitted
+                for row in self._arbitrate(pl.start, pl.end, pl.observed_introns, pl.hypotheses)[0]
+            ]
+        if len(union) == 1:
+            pl, (hypothesis, *_rest) = union[0]
+            census_before = dict(self.tally.gap_resolution)
+            outcome = self.deposit(
+                pl.ref,
+                pl.start,
+                pl.end,
+                observed_introns=pl.observed_introns,
+                align_strand=pl.align_strand,
+                sj_strand=pl.sj_strand,
+                hypotheses=(hypothesis,),
+            )
+            self.tally.gap_resolution.update(census_before)
+            return outcome
+        self.tally.deferred.append(DeferredFragment(placements=tuple(admitted)))
+        return self._reject(DepositOutcome.DEFERRED_PLACEMENTS)
+
+    def _admit(self, ref: int, start: int, end: int, align_strand: int):
+        """The strand check and the clip, counting nothing: ``(column, region_bounds, start, end)`` with
+        the CLIPPED extent, or the :class:`DepositOutcome` that rejects the placement."""
+        column = STRAND_COLUMNS.get(align_strand)
+        if column is None:
+            return DepositOutcome.STRAND_UNDEFINED
+        p = self.partition
+        first_region_bound, last_region_bound = (
+            int(p.ref_region_bound_offsets[ref]),
+            int(p.ref_region_bound_offsets[ref + 1]),
+        )
+        if last_region_bound - first_region_bound < 2:
+            return DepositOutcome.EMPTY
+        region_bounds = p.region_bounds[first_region_bound:last_region_bound]
+        # clip to the reference; L is the CLIPPED length, so the placement count stays consistent
+        start, end = max(int(start), int(region_bounds[0])), min(int(end), int(region_bounds[-1]))
+        if end <= start:
+            return DepositOutcome.EMPTY
+        return column, region_bounds, start, end
+
+    def _arbitrate(self, start, end, observed_introns, hypotheses):
+        """Every hypothesis scored ``(hypothesis, L, cut introns, absorbed)``, and the survivors of the
+        one filter ``L <= max_fragment_length`` — all of them when the filter would empty the set."""
         scored = [
             (hypothesis, *self._hypothesis_length(start, end, observed_introns, hypothesis))
             for hypothesis in hypotheses
         ]
         survivors = [row for row in scored if row[1] <= self.max_fragment_length] or scored
-        self._record_gap_resolution(hypotheses, survivors)
-        if len(survivors) > 1:
-            self.tally.deferred.append(
-                DeferredFragment(
-                    ref=int(ref),
-                    start=start,
-                    end=end,
-                    align_strand=int(align_strand),
-                    sj_strand=int(sj_strand),
-                    observed_introns=tuple((int(s), int(e)) for s, e in observed_introns),
-                    hypotheses=tuple(hypotheses),
-                )
-            )
-            return self._reject(DepositOutcome.DEFERRED)
+        return scored, survivors
 
+    @staticmethod
+    def _placement(
+        ref, start, end, align_strand, sj_strand, observed_introns, hypotheses
+    ) -> Placement:
+        return Placement(
+            ref=int(ref),
+            start=int(start),
+            end=int(end),
+            align_strand=int(align_strand),
+            sj_strand=int(sj_strand),
+            observed_introns=tuple((int(s), int(e)) for s, e in observed_introns),
+            hypotheses=tuple(hypotheses),
+        )
+
+    def _deposit_survivor(self, ref, column, region_bounds, start, end, sj_strand, survivor):
+        """The write-out of the ONE surviving hypothesis: ``L``, the pools, every channel of every object
+        the path touches."""
         # `cut_introns` and not `introns`: the introns actually removed from the molecule —
         # the observed ones UNIONED with the surviving hypothesis's implied ones, normalised and clipped.
         # Naming them apart from `observed_introns` is what stops the two being confused downstream.
-        hypothesis, length, cut_introns, absorbed = survivors[0]
+        hypothesis, length, cut_introns, absorbed = survivor
         segments = _segments(start, end, cut_introns)
+        p = self.partition
         if length <= 0:
             return self._reject(DepositOutcome.EMPTY)
         if length > self.max_fragment_length:
@@ -997,9 +1174,9 @@ class Accumulator:
     def drain(self, choices) -> dict[str, int]:
         """THE SECOND PASS'S DRAIN. Replay each held fragment with ONE chosen hypothesis.
 
-        ``choices[i]`` is an index into the hypothesis set of the ``i``-th record of
-        :meth:`Tally.deferred_canonical` — the queue's one canonical order, which is why that order is
-        defined in exactly one place.
+        ``choices[i]`` is an index into the ``i``-th record's hypotheses, over its placements in
+        order (:meth:`Tally.deferred_canonical` — the queue's one canonical order, which is why that order
+        is defined in exactly one place); it names a placement and a hypothesis at once.
 
         There is no second tally path. Each record re-enters :meth:`deposit` with its chosen hypothesis
         ALONE: a set of size one, so the arbitration is degenerate and the fragment either deposits or
@@ -1040,6 +1217,7 @@ class Accumulator:
             )
         counters = {
             "offered": len(held),
+            "offered_multimapper": 0,
             "deposited": 0,
             "dropped_too_long": 0,
             "dropped_empty": 0,
@@ -1054,15 +1232,18 @@ class Accumulator:
         # and the assertion below is what checks it.
         self.tally.deferred = []
         for fragment, choice in zip(held, choices):
-            path = fragment.hypotheses[int(choice)]
+            # The choice is a LOCAL index into the record's run of hypotheses over its placements, in
+            # the order the flattening emits them — so it names a placement and a hypothesis at once.
+            placement, path = self._locate(fragment, int(choice))
             counters["chose_genomic" if path.is_unspliced else "chose_spliced"] += 1
+            counters["offered_multimapper"] += int(fragment.n_placements > 1)
             outcome = self.deposit(
-                fragment.ref,
-                fragment.start,
-                fragment.end,
-                observed_introns=fragment.observed_introns,
-                align_strand=fragment.align_strand,
-                sj_strand=fragment.sj_strand,
+                placement.ref,
+                placement.start,
+                placement.end,
+                observed_introns=placement.observed_introns,
+                align_strand=placement.align_strand,
+                sj_strand=placement.sj_strand,
                 hypotheses=(path,),
             )
             if outcome is DepositOutcome.DEFERRED:
@@ -1088,7 +1269,20 @@ class Accumulator:
         ):
             self.tally.gap_resolution[key.value] = 0
         self.tally.qc[DepositOutcome.DEFERRED.value] = 0
+        self.tally.qc[DepositOutcome.DEFERRED_PLACEMENTS.value] = 0
         return counters
+
+    @staticmethod
+    def _locate(fragment: DeferredFragment, choice: int) -> tuple[Placement, GapHypothesis]:
+        """The (placement, hypothesis) a record-local hypothesis index names."""
+        remaining = choice
+        for placement in fragment.placements:
+            if remaining < len(placement.hypotheses):
+                return placement, placement.hypotheses[remaining]
+            remaining -= len(placement.hypotheses)
+        raise IndexError(
+            f"choice {choice} is outside the record's {sum(len(p.hypotheses) for p in fragment.placements)} hypotheses"
+        )
 
     # -- helpers ----------------------------------------------------------------------------------
 

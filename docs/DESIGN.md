@@ -839,6 +839,63 @@ chosen hypothesis alone — a set of size one, so arbitration is degenerate and 
 * **After the drain nothing is held**: the bank is empty and the deferred counters are 0. Pass one's
   numbers live in `DrainQC`.
 
+### 4.2 A multimapping fragment is one fragment with several PLACEMENTS, offered once (owner, 2026-10-10)
+
+**THE RULING.** Pass one deposited only uniquely aligned fragments and discarded multimapping ones, so every
+region whose fragments all multimap read as EMPTY to calibration however dense its gDNA, and everything
+downstream read the emptiness as fact — the composition, the landscape, the capture reader (an empty object
+beside a dense one is depleted), the locus prior (a gDNA count of 0, a yield of 0, "cannot emit")
+(`ISSUES: the-calibration-count-is-blind-to-multimappers`). The owner's fix (2026-10-10) is the side buffer
+itself: a multimapping fragment is buffered like a gap-ambiguous one and assigned in the second pass to the
+probabilistically best placement by the abundance of uniquely aligned fragments there. Built as follows.
+
+* **One record kind, one bank.** A held record is a FRAGMENT holding PLACEMENTS — one alignment on one
+  reference with its own extent, strands, observed introns and gap hypotheses — and each placement holds its
+  hypotheses. A gap-held unique mapper is a one-placement record whose key, behaviour and counters are
+  exactly what they were; a multimapping fragment holds one placement per admitted alignment, in the
+  placements' own canonical order. The candidate set is the UNION of its (placement, hypothesis) pairs, the
+  molecule took exactly one of them, and one multinomial draw per record decides. The alternative — a second
+  bank for multimappers beside the gap bank — would duplicate the order, the draw stream, the drain and the
+  door, and was not built.
+* **One offer per fragment** (`AccumulatorSet::offer`; the specification is
+  `tests/native/_accumulator_reference.py`, `Accumulator.offer`). Every non-chimeric hit — an intergenic hit
+  included: gDNA sits anywhere, and a repeat's gDNA often sits exactly there — is collected as a placement and
+  the fragment is offered whole after its last hit. One placement goes through `deposit` bit for bit. Per
+  placement the strand check and the clip exclude THAT placement alone; none left rejects the fragment ONCE,
+  named for the strand only when the strand was every exclusion; identical placements are one; one left goes
+  through `deposit` with all of its hypotheses; several left are arbitrated as the union under the one length
+  filter, every pair standing if the union is empty; one survivor deposits at its placement with that
+  hypothesis alone and leaves the umbrella gap census as it was; two or more hold the fragment WHOLE as
+  `deferred_multiple_placements`. The identity becomes
+  `deposited + deferred_undetermined_gap + deferred_multiple_placements + dropped_* == offered`, `offered`
+  counting fragments. The gap census is not recorded for a multi-placement record: its classes answer "how
+  was the gap at one placement resolved", a question such a record has no single answer to.
+* **The score gains the owner's term and nothing else.** `score(p, h) = A_p · rho(h) · f(L_{p,h}) · s(p, h)`
+  over the record's run, `A_p` the pass-one UNIQUE traffic at the objects the placement's own path deposits
+  on — read through the deposit rule's geometry, bottleneck over the path's objects, no constant
+  (`EQUATIONS.md` §10) — applied as its own factor between the strand term and `rho`, and NOT applied on a
+  one-placement record, where it would be a common factor: the gap-held population's scores are today's bit
+  for bit. `combine_factors`' two zero rules are the whole of the degenerate policy: every placement without
+  unique evidence (a perfect paralog pair) makes the term uninformative and the draw even; a placement
+  without unique evidence beside one with some is a hard zero and never chosen — the literal rule, with its
+  named consequence that a silent processed pseudogene's gDNA goes to its expressed parent (owner, 2026-10-10:
+  accepted for now, the mixed class to be measured on real libraries before any uniform component is
+  considered, as its own mechanism).
+* **The drain re-enters `deposit` at the chosen placement's reference**, so there is still one tally path;
+  `DrainQC.offered_multimapper` says how many records were held on their placements.
+* **The EM is untouched.** It still receives every non-chimeric hit of a multimapper and allocates it by
+  abundance and the locus priors; what changes is that the locus prior now holds the fragment where the second
+  pass drew it. The second pass's placement and the EM's allocation of the same fragment are not reconciled —
+  different questions, at different stages, exactly as the gap-held population's drawn path and the EM's
+  allocation are not.
+* **What it did on the paralog gate** (`TestParalogMultimapping`, two sequence-identical exons at gDNA 100):
+  calibration counts both at the intergenic density (0.24 and 0.28 against 0.24 beside them, from 0 / 0), the
+  reader's weights there read 1.0 and 1.2, and the EM's total reads 160 against a truth of 146 (154 while the
+  prior was zero, 202 with the reader reading the zero as depletion). The split of two identical templates is
+  the EM's own degeneracy: it lands even or at a vertex, and which was decided by the accidental symmetry of
+  two empty priors; with the priors now differing by the draw's noise it lands at a vertex at every level, so
+  the gate holds the TOTAL and the SHAPE (`assert_identical_paralogs`), not an even split.
+
 ### 4.1 Settled sub-decisions
 
 | | |

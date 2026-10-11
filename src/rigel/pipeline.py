@@ -410,9 +410,10 @@ def _drain_side_buffer(
         _lift.update(undrained=payload, choices=choices, region_types=region_types, sj=sj)
     report = drained.drain
     logger.info(
-        "[SP2] drained %d held fragments in %.1f s: %d deposited, %d dropped "
-        "(%d chose the genomic path, %d a spliced one); %d had candidates tied for the lead",
+        "[SP2] drained %d held fragments (%d held on their placements) in %.1f s: %d deposited, "
+        "%d dropped (%d chose the genomic path, %d a spliced one); %d had candidates tied for the lead",
         report.offered,
+        report.offered_multimapper,
         time.perf_counter() - start,
         report.deposited,
         report.dropped,
