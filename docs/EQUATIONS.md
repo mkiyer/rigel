@@ -1912,7 +1912,10 @@ every delivered curve constant beyond its ends), `r^(−1/2)` the amount's refer
 slot integrates the share of its RNA on the positive strand over the arcsine continuum and the pure atoms its
 witness bits admit, normalised by `−log 3` (§9f); a slot with no RNA opportunity is the pure-DNA limit,
 `u log(ρEg/2) + v log(ρEg/2) − ρEg` with the composition at its all-gDNA end. The lattices are ψ's own (§9e,
-the 0.2-nat count lattice, the `√(2T)` window rule, `K_t = 24`), and the mode is the lattice argmax refined
+the 0.2-nat count lattice, the `√(2T)` window rule, `K_t = 24`); the share lattice at a both-strand slot is the
+`K_t` midpoint nodes and the endpoints, the `√(2T)`-node window at step `sd_s = 1/(√(n+1)·|2q−1|)` around the
+observed share where the columns resolve it, and, at each density node, its own window at integer multiples of
+`sd_s` around its best base node (so `log L(x)` depends on `x` alone); the mode is the lattice argmax refined
 by the parabola through its neighbours. No reference density enters, no background, no detector and no clip.
 The weights are relative and the unit is the median read object: the EM is invariant to a common factor
 (counts and TPM to machine precision; the published `em_effective_length` scales with it), TPM is read on the

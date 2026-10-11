@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <exception>
@@ -332,6 +333,7 @@ struct Outputs {  // written in place, the owned slots of each block
     double *fg_loc = nullptr, *fg_strand = nullptr, *tau_lam = nullptr, *lam_rows = nullptr;
 
     double* reader_mode = nullptr;  // the capture reader's per-slot mode, on the last refit only
+    // PROTOTYPE PROFILE (never lands): per slot, the class bits and the reader's wall time
     rigel::honest::Rules reader_rules{};
 };
 

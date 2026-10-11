@@ -5584,3 +5584,19 @@ priors now holding the drawn multimappers it lands at a vertex at every level, t
 holds the total and the shape (`assert_identical_paralogs`). The named residual of the literal rule stands as
 the owner accepted it: a silent processed pseudogene without a unique fragment never receives a multimapper
 beside an expressed parent, and the mixed class is to be measured before any uniform component is considered.
+
+### a-branch-and-bound-over-the-density-grid
+`REFUSED (owner, 2026-10-11) · kind: performance · 2026-10-11`
+The capture reader's mode at a slot with reads by branch and bound over the landscape's density grid: a node whose
+posterior upper bound (the own term's maximum over the two strands' RNA amounts — jointly concave, its interior
+stationary point in closed form, else the admitted shares' rays — plus the composition's and the levels' maxima,
+the lattice's span and the held DNA level) lay below the best posterior found was never evaluated. Built in the
+reader's speed campaign of 2026-10-11, proven bit-identical to the full grid's mode and posterior maximum on every
+slot of the four fixtures, exact for any slot whose argmax is unique by more than its margin. KILLING NUMBERS: on the VCaP mix it removed 13 % of the reader's cost (1,777 → 1,440 CPU-seconds
+before the series math; 68 % of the grid still evaluated at the median) and nothing on the plasma libraries,
+because the landscape is broad — 37 % of its nodes within 1 nat of its maximum, 75 % within 2 — and the bound's
+gap at the argmax is 3.2 nats at the median; a bound tight to 1 nat would still leave 37 % of the grid. The
+prior's breadth caps it, not the bound. Refused as not worth a mechanism and a constant. The same campaign's
+measured-and-not-proposed lever: the share lattice's node count from the
+share posterior's width (`min(K_t, ⌈(π/2)/sd_s⌉)`), a quadrature change of up to 5e-3 on the modes, is the one
+large lever left on the small-read slots that are half the reader's cost — a ruling, after 0.8.0.

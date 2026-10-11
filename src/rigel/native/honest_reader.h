@@ -11,7 +11,10 @@
  * specification is tests/native/_honest_reader_reference.py, held curve by curve and mode by mode in
  * tests/native/test_honest_reader.py; the lattice rules are parameterised in `Rules`, and the shipped rules
  * (the coarse lattice at every slot, the own-term window centred under the slot's q, the zero-read search) are
- * the specification's. The derived reductions behind flags are each gated separately and ship off.
+ * the specification's. The evaluation is organised for speed without changing a value: the density-node loop is
+ * outermost and everything that depends on the density node alone (the composition row, the own term's mode and
+ * its window) or on the strand assignment alone (the held levels on the coarse lattice) is computed once; the
+ * Poisson logs and the trapezoid sums' exponentials run over the lattice through vmath.h.
  * Pure C++17, no Python.
  */
 
@@ -22,6 +25,8 @@
 #include <cstdint>
 #include <limits>
 #include <vector>
+
+#include "vmath.h"
 
 namespace rigel::honest {
 
@@ -38,13 +43,11 @@ struct Rules {
     bool ystar_slot_q;    // the replica centres the window at the own-term mode under the slot's q (the prototype
                           // computed it once per slot); the alternative uses the tilt node's own assignment
     double refine;        // divides every step (the convergence check)
-    bool derived_tilt;    // the share's node count from its own standard deviation (never more than tilt_nodes)
-    bool skip_far_tilt;   // base share nodes beyond sqrt(2T) standard deviations of the observed share are not evaluated
     int search_stride;    // the coarse-to-fine density search for ZERO-READ slots (0: the full grid for every slot)
 };
 
 inline Rules replica_rules(double coarse_step, double window_sd, int tilt_nodes, int search_stride) {
-    return Rules{coarse_step, window_sd, tilt_nodes, true, true, 1.0, false, false, search_stride};
+    return Rules{coarse_step, window_sd, tilt_nodes, true, true, 1.0, search_stride};
 }
 
 struct Level {
@@ -73,13 +76,18 @@ inline double interp_held(double x, const double* knots, const double* vals, int
     return vals[lo] + t * (vals[hi] - vals[lo]);
 }
 
-inline double logsumexp_v(const std::vector<double>& a) {
-    double m = kNegInf;
-    for (double x : a) if (x > m) m = x;
-    if (m == kNegInf) return kNegInf;
-    double s = 0.0;
-    for (double x : a) s += std::exp(x - m);
-    return m + std::log(s);
+// np.interp as above, with the search started at `hint` (the interval found for the previous argument of an ordered
+// run) and moved to the argument's own interval: the same interval `interp_held` finds, so the same value bit for bit
+inline double interp_held_from(double x, const double* knots, const double* vals, int n, int& hint) {
+    if (n == 0) return 0.0;
+    if (x <= knots[0]) { hint = 0; return vals[0]; }
+    if (x >= knots[n - 1]) { hint = n - 2; return vals[n - 1]; }
+    int lo = hint < 0 ? 0 : (hint > n - 2 ? n - 2 : hint);
+    while (lo > 0 && knots[lo] > x) --lo;
+    while (lo < n - 2 && knots[lo + 1] <= x) ++lo;
+    hint = lo;
+    double t = (x - knots[lo]) / (knots[lo + 1] - knots[lo]);
+    return vals[lo] + t * (vals[lo + 1] - vals[lo]);
 }
 
 // the RNA amount (log) maximising the own term with its r^(-1/2) measure: the right-hand zero of r d/dr log f
@@ -96,19 +104,42 @@ inline double rna_mode_y(double a, double u, double v, double q, double y_lo, do
     return 0.5 * (lo + hi);
 }
 
-// the per-slot evaluator; its vectors are the scratch, so no allocation happens per node once warmed
+// a strand assignment of the RNA amount: a node of the share's arcsine lattice (`phi`), or a pure atom. Its held
+// RNA-level terms on the coarse lattice do not depend on the density node, so they are evaluated once per slot
+// and read at every density node.
+struct Assignment {
+    double phi;  // the lattice angle (an atom carries NaN)
+    double qq, fpos, fneg;
+    double shift_pos = 0.0, shift_neg = 0.0;  // log(origin) + log(Er) - log(f), the level's argument shift
+    std::vector<double> lev;                  // level terms on the coarse lattice
+    bool lev_ready = false;
+};
+
+// the per-slot evaluator; its vectors are the scratch, so no allocation happens per node once warmed. The
+// density-node loop is outermost: the composition row on the coarse lattice, the own term's mode and the window
+// around it (its nodes, their r and composition values) are the node's context, set once and read by every
+// strand assignment evaluated there; a value that depends on neither (the level terms on the coarse lattice,
+// the coarse lattice's weights) is computed once per slot. Every expression is the specification's, term by
+// term in the same order, so the result is bit-identical to evaluating each node from scratch.
 struct Evaluator {
     const Slot& s;
     const double* lam;
     int n_lam;
     const Rules& R;
     double n, sd, h, coarse_step, lg, y_hi, y_lo;
-    bool comp_live;
-    std::vector<double> coarse, offs;
-    std::vector<double> y, logw, f, parts, hyps, phi, K;
-    std::vector<double> r_coarse, comp_coarse;
-    double comp_key = std::numeric_limits<double>::quiet_NaN();
-    std::vector<double> yA, fA, yB, fB, yC, fC;
+    bool comp_live, windowed;
+    double c_pos = 0.0, c_neg = 0.0;  // log(origin) + log(Er) per delivered RNA level
+    std::vector<double> coarse, offs, r_coarse, logw_coarse;  // logw_coarse: the coarse lattice's trapezoid weights
+    // the density node's context
+    double ctx_dna = std::numeric_limits<double>::quiet_NaN(), ctx_log_dna = 0.0, ctx_a2 = 0.0;
+    std::vector<double> comp_row, yB, rB, compB;
+    // scratch
+    std::vector<double> y, logw, f, parts, hyps, fA, fB, yC, fC;
+    std::vector<double> argA, argB, la, lb, ex, rC, compC;  // the Poisson pair's rates and logs, the exponentials, window C's values
+    std::vector<double> K;
+    // the share lattice at integer multiples of its resolution (the second pass's windows), cached
+    std::vector<Assignment> share_cache;
+    std::vector<uint8_t> share_ready;
 
     Evaluator(const Slot& slot, const double* lam_, int n_lam_, const Rules& rules)
         : s(slot), lam(lam_), n_lam(n_lam_), R(rules) {
@@ -116,6 +147,7 @@ struct Evaluator {
         sd = 1.0 / std::sqrt(n + 1.0) / R.refine;
         coarse_step = R.coarse_step / R.refine;
         h = std::min(coarse_step, sd);
+        windowed = h < coarse_step;
         lg = std::lgamma(s.u + 1.0) + std::lgamma(s.v + 1.0);
         double lo = s.comp[0], hi = s.comp[0];
         for (int i = 1; i < n_lam; ++i) { lo = std::min(lo, s.comp[i]); hi = std::max(hi, s.comp[i]); }
@@ -133,7 +165,12 @@ struct Evaluator {
         for (int i = -k; i <= k; ++i) offs.push_back(i * h);
         r_coarse.resize(coarse.size());
         for (size_t i = 0; i < coarse.size(); ++i) r_coarse[i] = std::exp(coarse[i]);
-        comp_coarse.assign(coarse.size(), 0.0);
+        weights_of(coarse);
+        logw_coarse = logw;
+        comp_row.assign(coarse.size(), 0.0);
+        yB.resize(offs.size()); rB.resize(offs.size()); compB.assign(offs.size(), 0.0);
+        if (s.pos.present) c_pos = std::log(s.pos.origin) + std::log(s.er);
+        if (s.neg.present) c_neg = std::log(s.neg.origin) + std::log(s.er);
     }
 
     double dna_term(double rho) const {
@@ -141,66 +178,128 @@ struct Evaluator {
         return interp_held(std::log(rho) - std::log(s.dna.origin), s.dna.grid, s.dna.vals, s.dna.n);
     }
 
-    static double interp_shifted(double x, const double* knots, const double* vals, int n, double shift) {
-        return interp_held(x - shift, knots, vals, n);
-    }
-
-    double level_terms(double yy, double fpos, double fneg) const {
+    // the held RNA levels' terms at one RNA amount under an assignment (its shifts already carry -log f)
+    double level_terms(double yy, const Assignment& a) const {
         double out = 0.0;
         if (s.pos.present) {
-            if (fpos == 0.0) out += s.pos.vals[0];
-            else out += interp_shifted(yy, s.pos.grid, s.pos.vals, s.pos.n, std::log(s.pos.origin) + std::log(s.er) - std::log(fpos));
+            if (a.fpos == 0.0) out += s.pos.vals[0];
+            else out += interp_held(yy - a.shift_pos, s.pos.grid, s.pos.vals, s.pos.n);
         }
         if (s.neg.present) {
-            if (fneg == 0.0) out += s.neg.vals[0];
-            else out += interp_shifted(yy, s.neg.grid, s.neg.vals, s.neg.n, std::log(s.neg.origin) + std::log(s.er) - std::log(fneg));
+            if (a.fneg == 0.0) out += s.neg.vals[0];
+            else out += interp_held(yy - a.shift_neg, s.neg.grid, s.neg.vals, s.neg.n);
         }
         return out;
     }
 
-    // log f at every node of `y` for density dna = rho*Eg and strand assignment (qq, fpos, fneg)
-    void log_f(double dna, double log_dna, double qq, double fpos, double fneg) {
-        int m = int(y.size());
-        f.resize(m);
-        double a2 = dna / 2.0;
-        for (int i = 0; i < m; ++i) {
-            double yy = y[i];
-            double r = std::exp(yy);
-            double out = -dna - r - lg + 0.5 * yy;
-            if (s.u > 0) out += s.u * std::log(a2 + qq * r);
-            if (s.v > 0) out += s.v * std::log(a2 + (1.0 - qq) * r);
-            if (comp_live) out += interp_held(log_dna - yy, lam, s.comp, n_lam);
-            out += level_terms(yy, fpos, fneg);
-            f[i] = out;
+    Assignment assignment(double phi, double qq, double fpos, double fneg) const {
+        Assignment a;
+        a.phi = phi; a.qq = qq; a.fpos = fpos; a.fneg = fneg;
+        if (s.pos.present && fpos != 0.0) a.shift_pos = c_pos - std::log(fpos);
+        if (s.neg.present && fneg != 0.0) a.shift_neg = c_neg - std::log(fneg);
+        return a;
+    }
+
+    Assignment node_of(double phi) const {
+        double sh = std::cos(phi); sh *= sh;
+        double qq = s.q * sh + (1.0 - s.q) * (1.0 - sh);
+        return assignment(phi, qq, sh, 1.0 - sh);
+    }
+
+    void ready(Assignment& a) {
+        if (a.lev_ready) return;
+        a.lev.resize(coarse.size());
+        int hp = 0, hn = 0;
+        for (size_t i = 0; i < coarse.size(); ++i) a.lev[i] = level_terms_from(coarse[i], a, hp, hn);
+        a.lev_ready = true;
+    }
+
+    // the window's nodes around a centre: positions clipped to the support's margins, their r and composition
+    void prepare_window(double centre) {
+        const int w = int(offs.size());
+        for (int k = 0; k < w; ++k) yB[k] = std::min(std::max(centre + offs[k], y_lo - 5.0), y_hi + 1.0);
+        vmath::vexp(yB.data(), rB.data(), w);
+        if (comp_live) {
+            int hint = n_lam - 2;
+            for (int k = 0; k < w; ++k) compB[k] = interp_held_from(ctx_log_dna - yB[k], lam, s.comp, n_lam, hint);
         }
     }
 
-    // log f on the coarse nodes with the cached r and composition values (identical values, fewer evaluations)
-    void log_f_coarse(double dna, double log_dna, double qq, double fpos, double fneg) {
-        int m = int(coarse.size());
-        f.resize(m);
-        if (comp_live && log_dna != comp_key) {
-            for (int i = 0; i < m; ++i) comp_coarse[i] = interp_held(log_dna - coarse[i], lam, s.comp, n_lam);
-            comp_key = log_dna;
+    // the density node's context: dna = rho * Eg
+    void set_node(double dna, double log_dna) {
+        ctx_dna = dna; ctx_log_dna = log_dna; ctx_a2 = dna / 2.0;
+        if (comp_live) {
+            int hint = n_lam - 2;
+            for (size_t i = 0; i < coarse.size(); ++i) comp_row[i] = interp_held_from(log_dna - coarse[i], lam, s.comp, n_lam, hint);
         }
-        double a2 = dna / 2.0;
-        for (int i = 0; i < m; ++i) {
-            double yy = coarse[i];
-            double r = r_coarse[i];
-            double out = -dna - r - lg + 0.5 * yy;
-            if (s.u > 0) out += s.u * std::log(a2 + qq * r);
-            if (s.v > 0) out += s.v * std::log(a2 + (1.0 - qq) * r);
-            if (comp_live) out += comp_coarse[i];
-            out += level_terms(yy, fpos, fneg);
-            f[i] = out;
-        }
+        if (windowed && R.ystar_slot_q) prepare_window(rna_mode_y(dna, s.u, s.v, s.q, y_lo - 5.0, y_hi + 1.0));
     }
 
-    void eval_window(double centre, double dna, double log_dna, double qq, double fpos, double fneg, std::vector<double>& yy, std::vector<double>& ff) {
-        yy.clear(); ff.clear();
-        for (double o : offs) yy.push_back(std::min(std::max(centre + o, y_lo - 5.0), y_hi + 1.0));
-        y.swap(yy); log_f(dna, log_dna, qq, fpos, fneg); y.swap(yy);
-        ff = f;
+    // log-sum-exp with the exponentials over the array (vmath::vexp)
+    double lse(const std::vector<double>& a) {
+        double m = kNegInf;
+        for (double v : a) if (v > m) m = v;
+        if (m == kNegInf) return kNegInf;
+        const int n_ = int(a.size());
+        ex.resize(n_);
+        for (int i = 0; i < n_; ++i) ex[i] = a[i] - m;
+        vmath::vexp(ex.data(), ex.data(), n_);
+        double sum = 0.0;
+        for (int i = 0; i < n_; ++i) sum += ex[i];
+        return m + std::log(sum);
+    }
+
+    // log Σ w·e^f, the trapezoid weights applied to the exponentials (one log for the sum, none per node)
+    double lse_weighted(const std::vector<double>& fv, const std::vector<double>& wv) {
+        double m = kNegInf;
+        for (double v : fv) if (v > m) m = v;
+        if (m == kNegInf) return kNegInf;
+        const int n_ = int(fv.size());
+        ex.resize(n_);
+        for (int i = 0; i < n_; ++i) ex[i] = fv[i] - m;
+        vmath::vexp(ex.data(), ex.data(), n_);
+        double sum = 0.0;
+        for (int i = 0; i < n_; ++i) sum += wv[i] * ex[i];
+        return m + std::log(sum);
+    }
+
+    // the Poisson pair's log terms at the nodes with rates `r` (n_ of them), vectorised: la = log(a2 + qq r),
+    // lb = log(a2 + (1 - qq) r), each only when its column has reads
+    void poisson_logs(const double* r, int n_, double qq) {
+        argA.resize(n_); argB.resize(n_); la.resize(n_); lb.resize(n_);
+        const double a2 = ctx_a2;
+        for (int i = 0; i < n_; ++i) { argA[i] = a2 + qq * r[i]; argB[i] = a2 + (1.0 - qq) * r[i]; }
+        if (s.u > 0) vmath::vlog(argA.data(), la.data(), n_);
+        if (s.v > 0) vmath::vlog(argB.data(), lb.data(), n_);
+    }
+
+    // the held RNA levels' terms along an ascending run of nodes, the searches moving with the run
+    double level_terms_from(double yy, const Assignment& a, int& hp, int& hn) const {
+        double out = 0.0;
+        if (s.pos.present) {
+            if (a.fpos == 0.0) out += s.pos.vals[0];
+            else out += interp_held_from(yy - a.shift_pos, s.pos.grid, s.pos.vals, s.pos.n, hp);
+        }
+        if (s.neg.present) {
+            if (a.fneg == 0.0) out += s.neg.vals[0];
+            else out += interp_held_from(yy - a.shift_neg, s.neg.grid, s.neg.vals, s.neg.n, hn);
+        }
+        return out;
+    }
+
+    // log f at the ascending nodes `yy` with rates `r` and composition values `comp_vals` under assignment `a`, into `out`
+    void log_f_nodes(const double* yy, const double* r, const double* comp_vals, int n_, const Assignment& a, double* out) {
+        poisson_logs(r, n_, a.qq);
+        const double dna = ctx_dna;
+        int hp = 0, hn = 0;
+        for (int i = 0; i < n_; ++i) {
+            double v = -dna - r[i] - lg + 0.5 * yy[i];
+            if (s.u > 0) v += s.u * la[i];
+            if (s.v > 0) v += s.v * lb[i];
+            if (comp_live) v += comp_vals[i];
+            v += level_terms_from(yy[i], a, hp, hn);
+            out[i] = v;
+        }
     }
 
     static void merge3(const std::vector<double>& ya, const std::vector<double>& fa, const std::vector<double>& yb, const std::vector<double>& fb,
@@ -216,41 +315,53 @@ struct Evaluator {
         }
     }
 
-    // trapezoid log-weights from the node spacings (a duplicated node, from clipping, gets zero weight)
+    // trapezoid weights from the node spacings (a duplicated node, from clipping, gets zero weight)
     void weights_of(const std::vector<double>& yy) {
         int m = int(yy.size());
-        logw.assign(m, kNegInf);
-        if (m == 1) { logw[0] = 0.0; return; }
-        auto lg0 = [](double d) { return d > 0.0 ? std::log(d) : kNegInf; };
-        logw[0] = lg0(0.5 * (yy[1] - yy[0]));
-        logw[m - 1] = lg0(0.5 * (yy[m - 1] - yy[m - 2]));
-        for (int i = 1; i < m - 1; ++i) logw[i] = lg0(0.5 * ((yy[i] - yy[i - 1]) + (yy[i + 1] - yy[i])));
+        logw.assign(m, 0.0);
+        if (m <= 1) { if (m == 1) logw[0] = 1.0; return; }
+        logw[0] = 0.5 * (yy[1] - yy[0]);
+        logw[m - 1] = 0.5 * (yy[m - 1] - yy[m - 2]);
+        for (int i = 1; i < m - 1; ++i) logw[i] = 0.5 * ((yy[i] - yy[i - 1]) + (yy[i + 1] - yy[i]));
     }
 
-    // the inner integral over y for one density node and one strand assignment: the coarse nodes, the window
-    // around the own term's mode, then the window around the peak found on those; every node evaluated once
-    double inner(double dna, double log_dna, double qq, double fpos, double fneg) {
-        bool windowed = h < coarse_step;
-        yA = coarse;
-        log_f_coarse(dna, log_dna, qq, fpos, fneg);
-        fA = f;
-        if (!windowed) {
-            weights_of(yA);
-            parts.resize(yA.size());
-            for (size_t i = 0; i < yA.size(); ++i) parts[i] = fA[i] + logw[i];
-            return logsumexp_v(parts);
+    // the inner integral over y at the current density node for one strand assignment: the coarse nodes, the
+    // window around the own term's mode, then the window around the peak found on those; every node evaluated once
+    double inner(Assignment& a) {
+        ready(a);
+        const double dna = ctx_dna;
+        const int m = int(coarse.size());
+        fA.resize(m);
+        poisson_logs(r_coarse.data(), m, a.qq);
+        for (int i = 0; i < m; ++i) {
+            double out = -dna - r_coarse[i] - lg + 0.5 * coarse[i];
+            if (s.u > 0) out += s.u * la[i];
+            if (s.v > 0) out += s.v * lb[i];
+            if (comp_live) out += comp_row[i];
+            out += a.lev[i];
+            fA[i] = out;
         }
-        double y_star = rna_mode_y(dna, s.u, s.v, R.ystar_slot_q ? s.q : qq, y_lo - 5.0, y_hi + 1.0);
-        eval_window(y_star, dna, log_dna, qq, fpos, fneg, yB, fB);
-        double best_y = yA.empty() ? yB[0] : yA[0], best_f = yA.empty() ? fB[0] : fA[0];
-        for (size_t i = 0; i < yA.size(); ++i) if (fA[i] > best_f) { best_f = fA[i]; best_y = yA[i]; }
-        for (size_t i = 0; i < yB.size(); ++i) if (fB[i] > best_f) { best_f = fB[i]; best_y = yB[i]; }
-        eval_window(best_y, dna, log_dna, qq, fpos, fneg, yC, fC);
-        merge3(yA, fA, yB, fB, yC, fC, y, f);
+        if (!windowed) return lse_weighted(fA, logw_coarse);
+        if (!R.ystar_slot_q) prepare_window(rna_mode_y(dna, s.u, s.v, a.qq, y_lo - 5.0, y_hi + 1.0));
+        const int w = int(offs.size());
+        fB.resize(w);
+        log_f_nodes(yB.data(), rB.data(), compB.data(), w, a, fB.data());
+        double best_y = m ? coarse[0] : yB[0], best_f = m ? fA[0] : fB[0];
+        for (int i = 0; i < m; ++i) if (fA[i] > best_f) { best_f = fA[i]; best_y = coarse[i]; }
+        for (int k = 0; k < w; ++k) if (fB[k] > best_f) { best_f = fB[k]; best_y = yB[k]; }
+        yC.resize(w); fC.resize(w); rC.resize(w); compC.resize(w);
+        for (int k = 0; k < w; ++k) yC[k] = std::min(std::max(best_y + offs[k], y_lo - 5.0), y_hi + 1.0);
+        vmath::vexp(yC.data(), rC.data(), w);
+        if (comp_live) {
+            int hint = n_lam - 2;
+            for (int k = 0; k < w; ++k) compC[k] = interp_held_from(ctx_log_dna - yC[k], lam, s.comp, n_lam, hint);
+        } else {
+            for (int k = 0; k < w; ++k) compC[k] = 0.0;
+        }
+        log_f_nodes(yC.data(), rC.data(), compC.data(), w, a, fC.data());
+        merge3(coarse, fA, yB, fB, yC, fC, y, f);
         weights_of(y);
-        parts.resize(y.size());
-        for (size_t i = 0; i < y.size(); ++i) parts[i] = f[i] + logw[i];
-        return logsumexp_v(parts);
+        return lse_weighted(f, logw);
     }
 
     void s_window(double centre, double sd_s, std::vector<double>& out) const {
@@ -259,6 +370,24 @@ struct Evaluator {
             double sw = centre + i * sd_s;
             if (sw > 0.0 && sw < 1.0) out.push_back(sw);
         }
+    }
+
+    // the share lattice's node at k times the share's resolution (the per-node second pass's window), cached
+    Assignment& share_node(int k, double sd_s) {
+        if (int(share_cache.size()) <= k) { share_cache.resize(k + 1); share_ready.resize(k + 1, 0); }
+        if (!share_ready[k]) { share_cache[k] = node_of(std::acos(std::sqrt(k * sd_s))); share_ready[k] = 1; }
+        return share_cache[k];
+    }
+
+    // the share's base lattice from a list of angles: the endpoints added, sorted, duplicates removed
+    std::vector<Assignment> lattice_of(std::vector<double> ph) const {
+        ph.push_back(0.0); ph.push_back(kPi / 2);
+        std::sort(ph.begin(), ph.end());
+        ph.erase(std::unique(ph.begin(), ph.end()), ph.end());
+        std::vector<Assignment> nodes;
+        nodes.reserve(ph.size());
+        for (double p : ph) nodes.push_back(node_of(p));
+        return nodes;
     }
 
     // log L at every density node of `rho`, written to `out`
@@ -273,113 +402,75 @@ struct Evaluator {
             }
             return;
         }
-        if (!s.both) {
+        // single-strand, and both-strand with no strand reads and no RNA level: the share integrand is a
+        // constant, the continuum integrates to that constant and so does each admitted atom, and the -log 3
+        // cancels the count of three
+        if (!s.both || (s.u == 0.0 && s.v == 0.0 && !s.pos.present && !s.neg.present)) {
+            Assignment single = assignment(std::numeric_limits<double>::quiet_NaN(), s.q, 1.0, 0.0);
             for (int ix = 0; ix < nx; ++ix) {
                 double dna = rho[ix] * s.eg;
-                out[ix] = inner(dna, std::log(dna), s.q, 1.0, 0.0) + dna_term(rho[ix]);
+                set_node(dna, std::log(dna));
+                out[ix] = inner(single) + dna_term(rho[ix]);
             }
             return;
         }
-        // both-strand with no strand reads and no RNA level: the share integrand is a constant, the continuum
-        // integrates to that constant and so does each admitted atom, and the -log 3 cancels the count of three
-        if (s.u == 0.0 && s.v == 0.0 && !s.pos.present && !s.neg.present) {
-            for (int ix = 0; ix < nx; ++ix) {
-                double dna = rho[ix] * s.eg;
-                out[ix] = inner(dna, std::log(dna), s.q, 1.0, 0.0) + dna_term(rho[ix]);
-            }
-            return;
-        }
-        // both-strand: the arcsine continuum over the share plus the pure atoms the witness bits admit
+        // both-strand: the arcsine continuum over the share plus the pure atoms the witness bits admit. The base
+        // lattice (the midpoint nodes, the endpoints, the window around the observed share where the columns
+        // resolve it) is shared by every density node; each density node then adds its own window at integer
+        // multiples of the share's resolution around its best base node, so its log L depends on nothing but
+        // itself.
         double sd_s = 1.0 / (std::sqrt(n + 1.0) * std::max(std::fabs(2 * s.q - 1), 1.0 / std::sqrt(n + 1.0))) / R.refine;
         int m = int(R.tilt_nodes * R.refine);
-        if (R.derived_tilt && !s.pos.present && !s.neg.present) {
-            int md = int(std::ceil((kPi / 2) / sd_s));
-            m = std::max(1, std::min(m, md));
-        }
         std::vector<double> base;
         bool located = n > 0 && std::fabs(2 * s.q - 1) * std::sqrt(n + 1) > 1.0;
         double s_star = located ? (s.u / n - (1 - s.q)) / (2 * s.q - 1) : 0.5;
-        for (int i = 0; i < m; ++i) {
-            double ph = (i + 0.5) * (kPi / 2) / m;
-            if (R.skip_far_tilt && located && !s.pos.present && !s.neg.present) {
-                double sh = std::cos(ph); sh *= sh;
-                if (std::fabs(sh - s_star) > R.window_sd * sd_s) continue;
-            }
-            base.push_back(ph);
-        }
+        for (int i = 0; i < m; ++i) base.push_back((i + 0.5) * (kPi / 2) / m);
         if (located) {
             std::vector<double> win;
             s_window(s_star, sd_s, win);
             for (double sw : win) base.push_back(std::acos(std::sqrt(sw)));
         }
-        std::vector<double> mixed(nx);
-        std::vector<double> phi_prev, K_prev;
-        auto tilt = [&](std::vector<double> ph) {
-            ph.push_back(0.0); ph.push_back(kPi / 2);
-            std::sort(ph.begin(), ph.end());
-            ph.erase(std::unique(ph.begin(), ph.end()), ph.end());
-            int np_ = int(ph.size());
-            K.assign(size_t(nx) * np_, 0.0);
-            int np_prev = int(phi_prev.size());
-            for (int j = 0; j < np_; ++j) {
-                int jp = -1;
-                if (np_prev) {
-                    auto it = std::lower_bound(phi_prev.begin(), phi_prev.end(), ph[j]);
-                    if (it != phi_prev.end() && *it == ph[j]) jp = int(it - phi_prev.begin());
-                }
-                if (jp >= 0) {
-                    for (int ix = 0; ix < nx; ++ix) K[size_t(ix) * np_ + j] = K_prev[size_t(ix) * np_prev + jp];
-                    continue;
-                }
-                double sh = std::cos(ph[j]); sh *= sh;
-                double qq = s.q * sh + (1.0 - s.q) * (1.0 - sh);
-                for (int ix = 0; ix < nx; ++ix) {
-                    double dna = rho[ix] * s.eg;
-                    K[size_t(ix) * np_ + j] = inner(dna, std::log(dna), qq, sh, 1.0 - sh);
-                }
-            }
-            phi_prev = ph; K_prev = K;
-            std::vector<double> lw(np_);
-            auto lg0 = [](double d) { return d > 0.0 ? std::log(d) : kNegInf; };
-            lw[0] = lg0(0.5 * (ph[1] - ph[0]));
-            lw[np_ - 1] = lg0(0.5 * (ph[np_ - 1] - ph[np_ - 2]));
-            for (int j = 1; j < np_ - 1; ++j) lw[j] = lg0(0.5 * ((ph[j] - ph[j - 1]) + (ph[j + 1] - ph[j])));
-            std::vector<double> row(np_);
-            for (int ix = 0; ix < nx; ++ix) {
-                for (int j = 0; j < np_; ++j) row[j] = K[size_t(ix) * np_ + j] + lw[j];
-                mixed[ix] = logsumexp_v(row) + std::log(2.0 / kPi);
-            }
-            phi = ph;
-        };
-        tilt(base);
-        {
-            int np_ = int(phi.size());
-            std::vector<double> rounded;
-            for (int ix = 0; ix < nx; ++ix) {
-                int best = 0;
-                for (int j = 1; j < np_; ++j) if (K[size_t(ix) * np_ + j] > K[size_t(ix) * np_ + best]) best = j;
-                double c = std::cos(phi[best]);
-                rounded.push_back(std::round(c * c / sd_s) * sd_s);
-            }
-            std::sort(rounded.begin(), rounded.end());
-            rounded.erase(std::unique(rounded.begin(), rounded.end()), rounded.end());
-            std::vector<double> extra;
-            for (double c : rounded) s_window(c, sd_s, extra);
-            std::sort(extra.begin(), extra.end());
-            extra.erase(std::unique(extra.begin(), extra.end()), extra.end());
-            if (!extra.empty()) {
-                std::vector<double> ph = base;
-                for (double e : extra) ph.push_back(std::acos(std::sqrt(e)));
-                tilt(ph);
-            }
-        }
+        std::vector<Assignment> nodes = lattice_of(base);
+        const int np1 = int(nodes.size());
+        Assignment atom_pos = assignment(std::numeric_limits<double>::quiet_NaN(), s.q, 1.0, 0.0);
+        Assignment atom_neg = assignment(std::numeric_limits<double>::quiet_NaN(), 1.0 - s.q, 0.0, 1.0);
+        std::vector<double> col(np1);
+        std::vector<std::pair<double, int>> order;  // (angle, index: base j, or -(k + 1) for the share cache's k)
+        std::vector<double> row;
+        const int kw = int(std::ceil(R.window_sd));
+        auto lg0 = [](double d) { return d > 0.0 ? std::log(d) : kNegInf; };
         for (int ix = 0; ix < nx; ++ix) {
-            hyps.clear();
-            hyps.push_back(mixed[ix]);
             double dna = rho[ix] * s.eg;
-            if (!s.neg.present) hyps.push_back(inner(dna, std::log(dna), s.q, 1.0, 0.0));
-            if (!s.pos.present) hyps.push_back(inner(dna, std::log(dna), 1.0 - s.q, 0.0, 1.0));
-            out[ix] = logsumexp_v(hyps) - std::log(3.0) + dna_term(rho[ix]);
+            set_node(dna, std::log(dna));
+            for (int j = 0; j < np1; ++j) col[j] = inner(nodes[j]);
+            order.clear();
+            for (int j = 0; j < np1; ++j) order.emplace_back(nodes[j].phi, j);
+            int best = 0;
+            for (int j = 1; j < np1; ++j) if (col[j] > col[best]) best = j;
+            double c = std::cos(nodes[best].phi);
+            int kc = int(std::round(c * c / sd_s));
+            for (int i = -kw; i <= kw; ++i) {
+                int k = kc + i;
+                double sw = k * sd_s;
+                if (!(sw > 0.0 && sw < 1.0)) continue;
+                order.emplace_back(share_node(k, sd_s).phi, -(k + 1));
+            }
+            std::sort(order.begin(), order.end());
+            order.erase(std::unique(order.begin(), order.end(), [](const auto& a, const auto& b) { return a.first == b.first; }), order.end());
+            const int np_ = int(order.size());
+            row.resize(np_);
+            for (int j = 0; j < np_; ++j) {
+                double lw = j == 0 ? lg0(0.5 * (order[1].first - order[0].first))
+                          : j == np_ - 1 ? lg0(0.5 * (order[np_ - 1].first - order[np_ - 2].first))
+                          : lg0(0.5 * ((order[j].first - order[j - 1].first) + (order[j + 1].first - order[j].first)));
+                int id = order[j].second;
+                row[j] = (id >= 0 ? col[id] : inner(share_node(-id - 1, sd_s))) + lw;
+            }
+            hyps.clear();
+            hyps.push_back(lse(row) + std::log(2.0 / kPi));
+            if (!s.neg.present) hyps.push_back(inner(atom_pos));
+            if (!s.pos.present) hyps.push_back(inner(atom_neg));
+            out[ix] = lse(hyps) - std::log(3.0) + dna_term(rho[ix]);
         }
     }
 };

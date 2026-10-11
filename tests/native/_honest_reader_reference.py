@@ -33,8 +33,8 @@ right-hand zero of ``r·d/dr log f``, by bisection, centred once per slot at the
 window around the full integrand's maximum on the first lattice; trapezoid weights from the spacings, every
 node clipped to ``[y_lo − 5, y_hi + 1]``. The strand share: ψ's 24 midpoint nodes in ``φ ∈ (0, π/2)`` with
 ``s = cos²φ`` and the arcsine measure ``2dφ/π``, plus a window at step ``sd_s`` around the observed share
-when the columns resolve it, plus a window around the density nodes' maxima clustered at ``sd_s``, the
-endpoints included; trapezoid in ``φ``. ``window_sd = √(2T)``, ``T = −log ε₆₄``, is ψ's window rule.
+when the columns resolve it, plus — at each density node, its own — a window at integer multiples of ``sd_s``
+around that node's best base node, the endpoints included; trapezoid in ``φ``. ``window_sd = √(2T)``, ``T = −log ε₆₄``, is ψ's window rule.
 """
 
 import math
@@ -182,15 +182,27 @@ def log_L(slot, rho, *, coarse_step, window_sd, tilt_nodes):
             s_star = (u / n - (1 - q)) / (2 * q - 1)
             phi = np.concatenate([phi, np.arccos(np.sqrt(s_window(s_star)))])
         phi, K, mixed = tilt(phi)
+        # each density node's own window, at integer multiples of the share's resolution around its best base
+        # node: the columns are evaluated once for the union of the windows, and each node mixes its own lattice
         peaks = np.cos(phi[np.argmax(K, axis=1)]) ** 2
-        centres = np.unique(np.round(peaks / sd_s)) * sd_s
-        extra = (
-            np.unique(np.concatenate([s_window(float(c)) for c in centres]))
-            if centres.size
-            else np.zeros(0)
-        )
-        if extra.size:
-            phi, K, mixed = tilt(np.concatenate([phi, np.arccos(np.sqrt(extra))]))
+        kc = np.round(peaks / sd_s).astype(int)
+        ks = np.unique(kc[:, None] + kwin[None, :])
+        ks = ks[(ks * sd_s > 0.0) & (ks * sd_s < 1.0)]
+        if ks.size:
+            phi_all, K_all, _ = tilt(np.concatenate([phi, np.arccos(np.sqrt(ks * sd_s))]))
+            mixed = np.empty(dna.size)
+            for i in range(dna.size):
+                own_k = kc[i] + kwin
+                own_k = own_k[(own_k * sd_s > 0.0) & (own_k * sd_s < 1.0)]
+                lattice_i = np.unique(np.concatenate([phi, np.arccos(np.sqrt(own_k * sd_s))]))
+                sel = np.isin(phi_all, lattice_i)
+                ph_i, K_i = phi_all[sel], K_all[i, sel]
+                dphi = np.diff(ph_i)
+                w = np.empty_like(ph_i)
+                w[1:-1] = 0.5 * (dphi[:-1] + dphi[1:])
+                w[0], w[-1] = 0.5 * dphi[0], 0.5 * dphi[-1]
+                with np.errstate(divide="ignore"):
+                    mixed[i] = logsumexp(K_i + np.log(w)) + math.log(2.0 / math.pi)
         hyps = [mixed]
         if neg_lv is None:
             hyps.append(inner(q, 1.0, 0.0))

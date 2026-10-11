@@ -457,7 +457,9 @@ module's index arithmetic, and `::test_a_zero_length_fragment_places_nowhere` ho
 `w = 0` out of every share. `test_priors.py` holds the gDNA component's length to gDNA's own conserved share
 and never the count's `q`; `test_capture_reader.py` holds the published weights to the reader's modes relative to
 the largest, and `tests/native/test_honest_reader.py` holds the native reader to its executable specification
-(`tests/native/_honest_reader_reference.py`), curve by curve.
+(`tests/native/_honest_reader_reference.py`), curve by curve; `tests/native/test_vmath.py` holds the reader's
+series `log` and `exp` (`native/vmath.h`) to libm — `log` within 2 ulp, `exp` within a bound derived from the
+double ln 2's own distance from ln 2 — on a million points.
 
 ---
 

@@ -48,6 +48,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+
 import numpy as np
 
 from .messages.silent import SilentPolicy

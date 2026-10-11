@@ -103,7 +103,9 @@ sparse libraries lose their gDNA.
   rejected genuine reads become gDNA-eligible — and an index whose manifest records no alignable store runs with
   detection off and no error — the cluster track, `ISSUES: splicing-artifacts`,
   `ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`; `summary.json`'s `sj_blacklist_loaded`.
-- **Performance**: the sweep is one native call, bit-identical at every thread count; the review's first two
+- **Performance**: the capture reader on the VCaP mix 4,643 → 1,106 CPU-seconds (the pinned pipeline 477 → 253 s)
+  after its speed campaign (`DESIGN.md` §7.2; `ISSUES: a-branch-and-bound-over-the-density-grid` the refused
+  mechanism); what remains of its cost is its quadrature, a ruling after 0.8.0. The sweep is one native call, bit-identical at every thread count; the review's first two
   numeric no-ops are unparked for Tier 4 and the rest of the thread stays parked —
   `ISSUES: performance-memory-bounded-solve`, `profiling/profiler.py`, `profiling/sweep_replay.py`; a `_debug`
   capture has no memory bound, so one real-genome job runs at a time (`ISSUES: debug-capture-memory-is-unbounded`).

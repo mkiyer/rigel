@@ -1969,10 +1969,27 @@ transcripts % / genes %, shipped → this reader): test chromosome stranded × O
 stranded × OFF 6.88 / 1.00 → 8.74 / 1.01, unstranded × OFF 7.99 / 1.13 → 8.41 / 1.19; the ladder stranded × ON
 12.02 / 7.75 → 12.35 / 6.95 and OFF 6.35 / 1.63 → 7.44 / 1.67; the junction-probed panel 32.98 / 1.64 → 25.01
 / 2.18; single-probe 9.22 / 2.12 → 9.81 / 1.22; the VCaP mix through the production path, pinned, gDNA
-fraction 0.2395 → 0.2401 against a truth of 0.2518. The cost: 11 s of LBX0190's 22 s pipeline, 43 s of
-MO_3021's 66 s, and 4.6 min on top of the VCaP mix's 3 min (2.09 M slots; the both-strand slots' strand
-integral is the whole of it) — the deep-library cost is the open performance item. Two prices are open and
-named: a capture-OFF library is read the same way, so its weights carry Poisson noise
+fraction 0.2395 → 0.2401 against a truth of 0.2518.
+
+**The share lattice's second pass is each density node's own (owner, 2026-10-11).** At a both-strand slot with
+reads the share integral's lattice is the base nodes (`K_t = 24` midpoints, the endpoints, the window around the
+observed share where the columns resolve it) plus a second pass: a window at integer multiples of the share's
+resolution `sd_s` around the best base node — AT EACH DENSITY NODE, ITS OWN. The kernel as first landed pooled
+those windows over the whole density grid, so one node's lattice depended on every other node's first pass and
+on rounding-decided ties in the gDNA regime; the per-node scope makes `log L(x)` a function of `x` alone. The
+change: modes within 3.3e-5 nats on every slot of the four fixtures (the ladder's 70,176 slots: 320 of 5,746
+both-strand read slots above 1e-6, none above 1e-3), VCaP's gDNA fraction identical to six decimals, the
+transcript table's changes within-gene redistributions among identical isoforms. **The cost, after the reader's
+speed campaign (the same session):** the evaluator computes everything that depends on the density node alone
+or on the strand assignment alone once, runs the Poisson logs and the trapezoid sums' exponentials over the
+lattice by their series (`native/vmath.h`, gated against libm to 2 ulp), and applies the trapezoid weights to
+the exponentials; the reader on the VCaP mix 4,643 → 1,106 CPU-seconds (the pinned pipeline 477 → 253 s; the
+plasma readers ~5 and ~17 s of wall), every step a numeric no-op to rounding against the one before. A branch
+and bound over the density grid was built, proven exact, and refused as not worth its mechanism
+(`ISSUES: a-branch-and-bound-over-the-density-grid`). What is left of the reader's cost is its quadrature — the
+share lattice's node count against the share posterior's width, the density grid's resolution — each a ruling
+with a measured number change, deferred past 0.8.0. Two prices are open and named: a capture-OFF library is
+read the same way, so its weights carry Poisson noise
 (`ISSUES: the-capture-weights-are-noisy-on-a-capture-off-library`), and the reader reads calibration's
 count, which never sees a multimapped fragment (`ISSUES: the-calibration-count-is-blind-to-multimappers`) —
 the release-blocking one.

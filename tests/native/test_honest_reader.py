@@ -137,8 +137,6 @@ def _native_modes(slots, logP, *, stride, n_threads=1, **rules):
         True,
         True,
         1.0,
-        False,
-        False,
         int(stride),
         int(n_threads),
     )
@@ -158,8 +156,6 @@ def _native_curve(slots, i):
         True,
         True,
         1.0,
-        False,
-        False,
     )
     return out
 

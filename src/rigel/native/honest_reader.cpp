@@ -16,6 +16,7 @@
 #include <nanobind/ndarray.h>
 
 #include "honest_reader.h"
+#include "vmath.h"
 
 namespace nb = nanobind;
 
@@ -83,13 +84,13 @@ void honest_modes(Vec u, Vec v, Vec eg, Vec er, Vec q, U8Vec both, U8Vec admits,
                   Mat neg_grid, Mat neg_vals, Vec neg_origin, U8Vec has_neg,
                   Vec land_logrho, Vec land_logP, Vec mode, Vec max_post,
                   double coarse_step, double window_sd, int tilt_nodes, bool use_coarse, bool ystar_slot_q, double refine,
-                  bool derived_tilt, bool skip_far_tilt, int search_stride, int n_threads) {
+                  int search_stride, int n_threads) {
     Packed P = unpack(u, v, eg, er, q, both, admits, lam, comp, dna_grid, dna_vals, dna_origin, has_dna,
                       pos_grid, pos_vals, pos_origin, has_pos, neg_grid, neg_vals, neg_origin, has_neg);
     int nx = int(land_logrho.shape(0));
     if (int(land_logP.shape(0)) != nx) throw std::invalid_argument("landscape grid and logP differ in length");
     if (int(mode.shape(0)) != P.n_slots || int(max_post.shape(0)) != P.n_slots) throw std::invalid_argument("mode/max_post must be (n_slots,)");
-    Rules R{coarse_step, window_sd, tilt_nodes, use_coarse, ystar_slot_q, refine, derived_tilt, skip_far_tilt, search_stride};
+    Rules R{coarse_step, window_sd, tilt_nodes, use_coarse, ystar_slot_q, refine, search_stride};
     std::vector<double> rho(nx);
     const double* x = land_logrho.data();
     for (int i = 0; i < nx; ++i) rho[i] = std::exp(x[i]);
@@ -121,14 +122,13 @@ void honest_logL(Vec u, Vec v, Vec eg, Vec er, Vec q, U8Vec both, U8Vec admits, 
                  Mat pos_grid, Mat pos_vals, Vec pos_origin, U8Vec has_pos,
                  Mat neg_grid, Mat neg_vals, Vec neg_origin, U8Vec has_neg,
                  Vec land_logrho, int slot, Vec out,
-                 double coarse_step, double window_sd, int tilt_nodes, bool use_coarse, bool ystar_slot_q, double refine,
-                 bool derived_tilt, bool skip_far_tilt) {
+                 double coarse_step, double window_sd, int tilt_nodes, bool use_coarse, bool ystar_slot_q, double refine) {
     Packed P = unpack(u, v, eg, er, q, both, admits, lam, comp, dna_grid, dna_vals, dna_origin, has_dna,
                       pos_grid, pos_vals, pos_origin, has_pos, neg_grid, neg_vals, neg_origin, has_neg);
     int nx = int(land_logrho.shape(0));
     if (int(out.shape(0)) != nx) throw std::invalid_argument("out must match the grid");
     if (slot < 0 || slot >= P.n_slots) throw std::invalid_argument("slot out of range");
-    Rules R{coarse_step, window_sd, tilt_nodes, use_coarse, ystar_slot_q, refine, derived_tilt, skip_far_tilt, 0};
+    Rules R{coarse_step, window_sd, tilt_nodes, use_coarse, ystar_slot_q, refine, 0};
     std::vector<double> rho(nx);
     for (int i = 0; i < nx; ++i) rho[i] = std::exp(land_logrho.data()[i]);
     Slot s = P.slot(slot);
@@ -136,7 +136,18 @@ void honest_logL(Vec u, Vec v, Vec eg, Vec er, Vec q, U8Vec both, U8Vec admits, 
     ev.log_L(rho.data(), nx, out.data());
 }
 
+void honest_vlog(Vec x, Vec out) {
+    if (x.shape(0) != out.shape(0)) throw std::invalid_argument("x and out must match");
+    rigel::vmath::vlog(x.data(), out.data(), int(x.shape(0)));
+}
+void honest_vexp(Vec x, Vec out) {
+    if (x.shape(0) != out.shape(0)) throw std::invalid_argument("x and out must match");
+    rigel::vmath::vexp(x.data(), out.data(), int(x.shape(0)));
+}
+
 NB_MODULE(_honest_reader_impl, m) {
+    m.def("vlog", &honest_vlog, nb::arg("x"), nb::arg("out"), "log over an array by its series (native/vmath.h).");
+    m.def("vexp", &honest_vexp, nb::arg("x"), nb::arg("out"), "exp over an array by its series (native/vmath.h).");
     m.doc() = "The honest capture reader: per-slot posterior modes of gDNA density under the landscape (standalone, the gates' entry point).";
     m.def("honest_modes", &honest_modes, nb::arg("u"), nb::arg("v"), nb::arg("eg"), nb::arg("er"), nb::arg("q"), nb::arg("both"), nb::arg("admits"),
           nb::arg("lam"), nb::arg("comp"), nb::arg("dna_grid"), nb::arg("dna_vals"), nb::arg("dna_origin"), nb::arg("has_dna"),
@@ -144,12 +155,12 @@ NB_MODULE(_honest_reader_impl, m) {
           nb::arg("neg_grid"), nb::arg("neg_vals"), nb::arg("neg_origin"), nb::arg("has_neg"),
           nb::arg("land_logrho"), nb::arg("land_logP"), nb::arg("mode"), nb::arg("max_post"),
           nb::arg("coarse_step"), nb::arg("window_sd"), nb::arg("tilt_nodes"), nb::arg("use_coarse"), nb::arg("ystar_slot_q"), nb::arg("refine"),
-          nb::arg("derived_tilt"), nb::arg("skip_far_tilt"), nb::arg("search_stride"), nb::arg("n_threads"));
+          nb::arg("search_stride"), nb::arg("n_threads"));
     m.def("honest_logL", &honest_logL, nb::arg("u"), nb::arg("v"), nb::arg("eg"), nb::arg("er"), nb::arg("q"), nb::arg("both"), nb::arg("admits"),
           nb::arg("lam"), nb::arg("comp"), nb::arg("dna_grid"), nb::arg("dna_vals"), nb::arg("dna_origin"), nb::arg("has_dna"),
           nb::arg("pos_grid"), nb::arg("pos_vals"), nb::arg("pos_origin"), nb::arg("has_pos"),
           nb::arg("neg_grid"), nb::arg("neg_vals"), nb::arg("neg_origin"), nb::arg("has_neg"),
           nb::arg("land_logrho"), nb::arg("slot"), nb::arg("out"),
           nb::arg("coarse_step"), nb::arg("window_sd"), nb::arg("tilt_nodes"), nb::arg("use_coarse"), nb::arg("ystar_slot_q"), nb::arg("refine"),
-          nb::arg("derived_tilt"), nb::arg("skip_far_tilt"));
+          "One slot's log L curve on the landscape grid (diagnostics and the evaluator gate).");
 }
