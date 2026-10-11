@@ -83,14 +83,13 @@ void honest_modes(Vec u, Vec v, Vec eg, Vec er, Vec q, U8Vec both, U8Vec admits,
                   Mat pos_grid, Mat pos_vals, Vec pos_origin, U8Vec has_pos,
                   Mat neg_grid, Mat neg_vals, Vec neg_origin, U8Vec has_neg,
                   Vec land_logrho, Vec land_logP, Vec mode, Vec max_post,
-                  double coarse_step, double window_sd, int tilt_nodes, bool use_coarse, bool ystar_slot_q, double refine,
-                  int search_stride, int n_threads) {
+                  double coarse_step, double window_sd, int tilt_nodes, int search_stride, int n_threads) {
     Packed P = unpack(u, v, eg, er, q, both, admits, lam, comp, dna_grid, dna_vals, dna_origin, has_dna,
                       pos_grid, pos_vals, pos_origin, has_pos, neg_grid, neg_vals, neg_origin, has_neg);
     int nx = int(land_logrho.shape(0));
     if (int(land_logP.shape(0)) != nx) throw std::invalid_argument("landscape grid and logP differ in length");
     if (int(mode.shape(0)) != P.n_slots || int(max_post.shape(0)) != P.n_slots) throw std::invalid_argument("mode/max_post must be (n_slots,)");
-    Rules R{coarse_step, window_sd, tilt_nodes, use_coarse, ystar_slot_q, refine, search_stride};
+    Rules R{coarse_step, window_sd, tilt_nodes, search_stride};
     std::vector<double> rho(nx);
     const double* x = land_logrho.data();
     for (int i = 0; i < nx; ++i) rho[i] = std::exp(x[i]);
@@ -122,13 +121,13 @@ void honest_logL(Vec u, Vec v, Vec eg, Vec er, Vec q, U8Vec both, U8Vec admits, 
                  Mat pos_grid, Mat pos_vals, Vec pos_origin, U8Vec has_pos,
                  Mat neg_grid, Mat neg_vals, Vec neg_origin, U8Vec has_neg,
                  Vec land_logrho, int slot, Vec out,
-                 double coarse_step, double window_sd, int tilt_nodes, bool use_coarse, bool ystar_slot_q, double refine) {
+                 double coarse_step, double window_sd, int tilt_nodes) {
     Packed P = unpack(u, v, eg, er, q, both, admits, lam, comp, dna_grid, dna_vals, dna_origin, has_dna,
                       pos_grid, pos_vals, pos_origin, has_pos, neg_grid, neg_vals, neg_origin, has_neg);
     int nx = int(land_logrho.shape(0));
     if (int(out.shape(0)) != nx) throw std::invalid_argument("out must match the grid");
     if (slot < 0 || slot >= P.n_slots) throw std::invalid_argument("slot out of range");
-    Rules R{coarse_step, window_sd, tilt_nodes, use_coarse, ystar_slot_q, refine, 0};
+    Rules R{coarse_step, window_sd, tilt_nodes, 0};
     std::vector<double> rho(nx);
     for (int i = 0; i < nx; ++i) rho[i] = std::exp(land_logrho.data()[i]);
     Slot s = P.slot(slot);
@@ -154,13 +153,11 @@ NB_MODULE(_honest_reader_impl, m) {
           nb::arg("pos_grid"), nb::arg("pos_vals"), nb::arg("pos_origin"), nb::arg("has_pos"),
           nb::arg("neg_grid"), nb::arg("neg_vals"), nb::arg("neg_origin"), nb::arg("has_neg"),
           nb::arg("land_logrho"), nb::arg("land_logP"), nb::arg("mode"), nb::arg("max_post"),
-          nb::arg("coarse_step"), nb::arg("window_sd"), nb::arg("tilt_nodes"), nb::arg("use_coarse"), nb::arg("ystar_slot_q"), nb::arg("refine"),
-          nb::arg("search_stride"), nb::arg("n_threads"));
+          nb::arg("coarse_step"), nb::arg("window_sd"), nb::arg("tilt_nodes"), nb::arg("search_stride"), nb::arg("n_threads"));
     m.def("honest_logL", &honest_logL, nb::arg("u"), nb::arg("v"), nb::arg("eg"), nb::arg("er"), nb::arg("q"), nb::arg("both"), nb::arg("admits"),
           nb::arg("lam"), nb::arg("comp"), nb::arg("dna_grid"), nb::arg("dna_vals"), nb::arg("dna_origin"), nb::arg("has_dna"),
           nb::arg("pos_grid"), nb::arg("pos_vals"), nb::arg("pos_origin"), nb::arg("has_pos"),
           nb::arg("neg_grid"), nb::arg("neg_vals"), nb::arg("neg_origin"), nb::arg("has_neg"),
           nb::arg("land_logrho"), nb::arg("slot"), nb::arg("out"),
-          nb::arg("coarse_step"), nb::arg("window_sd"), nb::arg("tilt_nodes"), nb::arg("use_coarse"), nb::arg("ystar_slot_q"), nb::arg("refine"),
-          "One slot's log L curve on the landscape grid (diagnostics and the evaluator gate).");
+          nb::arg("coarse_step"), nb::arg("window_sd"), nb::arg("tilt_nodes"), "One slot's log L curve on the landscape grid (diagnostics and the evaluator gate).");
 }

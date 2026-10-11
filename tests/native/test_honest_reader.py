@@ -134,9 +134,6 @@ def _native_modes(slots, logP, *, stride, n_threads=1, **rules):
         r["coarse_step"],
         r["window_sd"],
         r["tilt_nodes"],
-        True,
-        True,
-        1.0,
         int(stride),
         int(n_threads),
     )
@@ -153,9 +150,6 @@ def _native_curve(slots, i):
         RULES["coarse_step"],
         RULES["window_sd"],
         RULES["tilt_nodes"],
-        True,
-        True,
-        1.0,
     )
     return out
 

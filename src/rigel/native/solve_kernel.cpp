@@ -333,7 +333,6 @@ struct Outputs {  // written in place, the owned slots of each block
     double *fg_loc = nullptr, *fg_strand = nullptr, *tau_lam = nullptr, *lam_rows = nullptr;
 
     double* reader_mode = nullptr;  // the capture reader's per-slot mode, on the last refit only
-    // PROTOTYPE PROFILE (never lands): per slot, the class bits and the reader's wall time
     rigel::honest::Rules reader_rules{};
 };
 
@@ -781,8 +780,8 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
     if (!reader.is_none()) {
         nb::dict rd = nb::cast<nb::dict>(reader);
         out.reader_mode = nb::cast<Vec>(rd["mode"]).data();
-        out.reader_rules = rigel::honest::replica_rules(nb::cast<double>(rd["coarse_step"]), nb::cast<double>(rd["window_sd"]),
-                                                         nb::cast<int>(rd["tilt_nodes"]), nb::cast<int>(rd["search_stride"]));
+        out.reader_rules = rigel::honest::Rules{nb::cast<double>(rd["coarse_step"]), nb::cast<double>(rd["window_sd"]),
+                                                nb::cast<int>(rd["tilt_nodes"]), nb::cast<int>(rd["search_stride"])};
     }
     if (want_capture) {
         nb::dict cd = nb::cast<nb::dict>(diagnostics);

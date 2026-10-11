@@ -9,9 +9,8 @@
  * Shared by the standalone module (honest_reader.cpp, the gates' entry point) and the block solve
  * (solve_kernel.cpp: the reader streams with the blocks after the last refit's final psi). The executable
  * specification is tests/native/_honest_reader_reference.py, held curve by curve and mode by mode in
- * tests/native/test_honest_reader.py; the lattice rules are parameterised in `Rules`, and the shipped rules
- * (the coarse lattice at every slot, the own-term window centred under the slot's q, the zero-read search) are
- * the specification's. The evaluation is organised for speed without changing a value: the density-node loop is
+ * tests/native/test_honest_reader.py; the lattice rules (`Rules`) are the specification's. The evaluation is
+ * organised for speed without changing a value: the density-node loop is
  * outermost and everything that depends on the density node alone (the composition row, the own term's mode and
  * its window) or on the strand assignment alone (the held levels on the coarse lattice) is computed once; the
  * Poisson logs and the trapezoid sums' exponentials run over the lattice through vmath.h.
@@ -33,22 +32,13 @@ namespace rigel::honest {
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kNegInf = -std::numeric_limits<double>::infinity();
 
-// ── the lattice rules (the prototype's constants, each a derivation already in the tree) ─────────────────────
+// ── the lattice rules (each a derivation already in the tree) ────────────────────────────────────────────────
 struct Rules {
-    double coarse_step;   // the count solver's lattice, 0.2 nat; the coarse RNA lattice's step
+    double coarse_step;   // the count solver's lattice, 0.2 nat; the coarse RNA lattice's step, kept at every slot
     double window_sd;     // sqrt(2T), T = -log eps64: psi's window rule, in standard deviations
     int tilt_nodes;       // psi's K_t = 24 midpoint nodes on the strand share
-    bool use_coarse;      // the replica keeps the coarse lattice at every slot; production keeps it only where the
-                          // window step equals the coarse step (a shallow slot's integrand spans the whole support)
-    bool ystar_slot_q;    // the replica centres the window at the own-term mode under the slot's q (the prototype
-                          // computed it once per slot); the alternative uses the tilt node's own assignment
-    double refine;        // divides every step (the convergence check)
     int search_stride;    // the coarse-to-fine density search for ZERO-READ slots (0: the full grid for every slot)
 };
-
-inline Rules replica_rules(double coarse_step, double window_sd, int tilt_nodes, int search_stride) {
-    return Rules{coarse_step, window_sd, tilt_nodes, true, true, 1.0, search_stride};
-}
 
 struct Level {
     const double* grid = nullptr;
@@ -144,8 +134,8 @@ struct Evaluator {
     Evaluator(const Slot& slot, const double* lam_, int n_lam_, const Rules& rules)
         : s(slot), lam(lam_), n_lam(n_lam_), R(rules) {
         n = s.u + s.v;
-        sd = 1.0 / std::sqrt(n + 1.0) / R.refine;
-        coarse_step = R.coarse_step / R.refine;
+        sd = 1.0 / std::sqrt(n + 1.0);
+        coarse_step = R.coarse_step;
         h = std::min(coarse_step, sd);
         windowed = h < coarse_step;
         lg = std::lgamma(s.u + 1.0) + std::lgamma(s.v + 1.0);
@@ -154,9 +144,10 @@ struct Evaluator {
         comp_live = (hi - lo) > 0.0;
         y_hi = std::log(n + 12.0 * std::sqrt(n) + 12.0);
         y_lo = y_hi - 20.0;
-        if (R.use_coarse || !(h < coarse_step)) {
-            // np.arange(y_lo, y_hi + step, step): ceil((stop - start) / step) nodes. A shallow slot (step not below
-            // the coarse step) has an integrand as broad as the support: the coarse lattice IS its window.
+        {
+            // np.arange(y_lo, y_hi + step, step): ceil((stop - start) / step) nodes, at every slot; a shallow slot
+            // (window step not below the coarse step) has an integrand as broad as the support, and the coarse
+            // lattice IS its window
             int cnt = int(std::ceil((y_hi + coarse_step - y_lo) / coarse_step));
             coarse.resize(cnt);
             for (int i = 0; i < cnt; ++i) coarse[i] = y_lo + i * coarse_step;
@@ -225,14 +216,14 @@ struct Evaluator {
         }
     }
 
-    // the density node's context: dna = rho * Eg
+    // the density node's context: dna = rho * Eg; the own term's window is centred under the slot's q
     void set_node(double dna, double log_dna) {
         ctx_dna = dna; ctx_log_dna = log_dna; ctx_a2 = dna / 2.0;
         if (comp_live) {
             int hint = n_lam - 2;
             for (size_t i = 0; i < coarse.size(); ++i) comp_row[i] = interp_held_from(log_dna - coarse[i], lam, s.comp, n_lam, hint);
         }
-        if (windowed && R.ystar_slot_q) prepare_window(rna_mode_y(dna, s.u, s.v, s.q, y_lo - 5.0, y_hi + 1.0));
+        if (windowed) prepare_window(rna_mode_y(dna, s.u, s.v, s.q, y_lo - 5.0, y_hi + 1.0));
     }
 
     // log-sum-exp with the exponentials over the array (vmath::vexp)
@@ -342,7 +333,6 @@ struct Evaluator {
             fA[i] = out;
         }
         if (!windowed) return lse_weighted(fA, logw_coarse);
-        if (!R.ystar_slot_q) prepare_window(rna_mode_y(dna, s.u, s.v, a.qq, y_lo - 5.0, y_hi + 1.0));
         const int w = int(offs.size());
         fB.resize(w);
         log_f_nodes(yB.data(), rB.data(), compB.data(), w, a, fB.data());
@@ -419,8 +409,8 @@ struct Evaluator {
         // resolve it) is shared by every density node; each density node then adds its own window at integer
         // multiples of the share's resolution around its best base node, so its log L depends on nothing but
         // itself.
-        double sd_s = 1.0 / (std::sqrt(n + 1.0) * std::max(std::fabs(2 * s.q - 1), 1.0 / std::sqrt(n + 1.0))) / R.refine;
-        int m = int(R.tilt_nodes * R.refine);
+        double sd_s = 1.0 / (std::sqrt(n + 1.0) * std::max(std::fabs(2 * s.q - 1), 1.0 / std::sqrt(n + 1.0)));
+        int m = R.tilt_nodes;
         std::vector<double> base;
         bool located = n > 0 && std::fabs(2 * s.q - 1) * std::sqrt(n + 1) > 1.0;
         double s_star = located ? (s.u / n - (1 - s.q)) / (2 * s.q - 1) : 0.5;
