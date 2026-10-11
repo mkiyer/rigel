@@ -1,6 +1,61 @@
 # The capture weight as the posterior expectation of the contraction, not the plug-in mode — derivation (2026-10-11, sandbox, not authoritative)
 
-**Status: DERIVED, nothing built.** The owner chose this as option 1 on 2026-10-11, after the ladder's re-score and the
+**Status: BOTH arms REFUTED by their A/Bs (2026-10-11): the expectation of the density E[e^x] (§0) and the posterior
+mean of log density E[x] (§0c). The mode is the location-faithful readout; a posterior average moves the location
+instead of reducing the variance. The record is `ISSUES: the-capture-weights-are-noisy-on-a-capture-off-library`.**
+
+## 0. The A/B of E[e^x] (prototype site1, both arms from one build, pinned, fractional)
+
+| panel · stratum | mode arm → expectation arm, transcripts % (genes %) |
+|---|---|
+| ladder · stranded × OFF | 7.52 (0.53) → 15.57 (1.01) |
+| ladder · stranded × ON | 9.71 (1.87) → 14.11 (2.30) |
+| ladder · unstranded × OFF | 2.07 (0.24) → 11.26 (0.74) |
+| ladder · unstranded × ON (deferred) | 40.42 (15.40) → 22.25 (5.16) |
+| RNA-long · stranded × OFF / ON | 3.52 → 4.66 / 6.09 → 7.57 |
+| RNA-short · stranded × OFF / ON | 4.99 → 7.07 / 14.24 → 15.39 |
+| both gap panels · unstranded × ON (deferred) | 34.11 → 16.00 / 68.06 → 30.93 |
+| VCaP gDNA fraction (truth 0.2518) | 0.2528 → 0.2489; weights q10/q50/q90 0.366/1/425 → 0.0091/1/6.6 |
+
+Every in-scope row is worse; g00 unstranded OFF, which was fine, goes 1.59 → 23.39 %. The weights' spread says why:
+`E[e^x]` under a posterior as broad as the prior is dominated by the prior's HIGH tail (Jensen: `E[e^x] ≥ e^{E[x]}`,
+by orders of magnitude over a 20-nat support), so every shallow object was pulled ABOVE the deep ones, not toward the
+typical level; the published unit (the median) then sat among the inflated shallow objects and the deep ones fell to
+a hundredth of it. §2's claim that a shallow object shrinks "toward the prior's mean contraction, the one level" was
+wrong in its scale: the prior's typical level is its mode or median in LOG density, not its mean of `e^x`. The
+deferred stratum's large gain (and the same on both gap panels) is recorded, not pursued here.
+
+## 0c. The A/B of E[x] (prototype site2, the same protocol)
+
+| panel · stratum | mode arm → E[x] arm, transcripts % (genes %) |
+|---|---|
+| ladder · stranded × OFF | 7.52 (0.53) → 7.86 (0.52); the target row g00 13.61 → 9.50, but g05 2.72 → 7.38, g50 4.13 → 5.17 |
+| ladder · stranded × ON | 9.71 (1.87) → 13.00 (2.66) |
+| ladder · unstranded × OFF | 2.07 (0.24) → 4.16 (0.37); g00 1.59 → 4.05 |
+| ladder · unstranded × ON (deferred) | 40.42 → 46.68; g50's gDNA fraction 0.343 → 0.164 |
+| RNA-long · stranded × OFF / ON | 3.52 → 4.45 / 6.09 → 12.42 |
+| RNA-short · stranded × OFF / ON | 4.99 → 7.28 / 14.24 → 23.83 |
+| VCaP gDNA fraction (truth 0.2518) | 0.2528 → 0.2412; weights q10/q50/q90 0.366/1/425 → 0.091/1/311 |
+
+The mirror image of §0: the mean of log density under a broad, one-sided posterior sits BELOW the mode (the "why the
+mode" objection, 0.14–0.79 nats at a zero-read object, here on every shallow object), so shallow objects lose
+enrichment they have, and every capture-ON stratum pays for it; the one row that improves is the one whose noise was
+symmetric. Together the two arms say the same thing: the mode is the location-faithful readout of a one-sided
+posterior, and replacing it by any posterior average moves the LOCATION of every shallow object (up under E[e^x],
+down under E[x]) when what is wrong on a capture-OFF field is the VARIANCE of the modes across shallow objects. A
+repair must reduce that variance without moving the location — shrinkage of the mode toward a LOCAL reference by the
+posterior's width, which is the owner-approved local capture prior / local footprint direction
+(`DESIGN.md` §7.2, 2026-10-07 and 2026-10-09) — and is a design of its own, not a readout change.
+
+## 0b. The arm as run: the posterior mean of log density
+
+The same uncertainty-shrinkage on the scale where the prior's typical level lives: publish
+`w_o = exp(E_o[x] − median_o E[x])`, `E_o[x] = Σ_i x_i P_o(x_i)`. A variational EM maximises `E_P[log Pois(k; θ L(c))]`,
+which carries `E[log c]` where one object dominates a length, so this is the derived form under that view; the
+marginal-likelihood view that gave `E[c]` trusts the prior's tail literally and is what the A/B refused. The "why the
+mode" ruling's objection (the mean under-reads a one-sided zero-read posterior by 0.14–0.79 nats) is measured on the
+zero-read objects as before. Gates unchanged in form, the reference `Σ x_i P_i`.
+ The owner chose this as option 1 on 2026-10-11, after the ladder's re-score and the
 attribution below. Nothing enters the source before a prototype outside the tree is A/B'd per stratum against what ships.
 
 ## 1. What is wrong, measured

@@ -15,7 +15,7 @@ the changelog is git.
 ## OPEN
 
 ### the-capture-weights-are-noisy-on-a-capture-off-library
-`priority: next — the price of no detector, to be reduced only by a mechanism A/B'd on its own · kind: cost · 2026-10-10`
+`priority: now — the in-scope regression's owner (2026-10-11); to be reduced only by a mechanism A/B'd on its own · kind: cost · 2026-10-10`
 Every object's capture weight is its own gDNA density's posterior mode relative to the typical read object's, on every
 library (`DESIGN.md` §7.2). On a capture-OFF field the true weights are all one level and the published ones
 are its Poisson noise around that level: measured (`quant_accuracy.py`, pinned,
@@ -30,6 +30,24 @@ capture-OFF strata and the capture-ON ones, never a detector, never a reference 
 
 Ordered by priority. An entry says what is open and the number a ranking turns on; what was done is git,
 what was ruled is `DESIGN.md`.
+ATTRIBUTED (2026-10-11, the ladder re-scored on main 08536988): the stranded strata's regression since 2026-09-30 is
+these weights — g00 stranded OFF transcripts 1.94 → 13.61 % (genes 0.14 → 0.83; the mass on silent isoforms 17k →
+251k), and with every weight forced to one in a prototype build 13.61 → 1.93 %, calibration's gDNA estimate
+unchanged (1,126 vs 1,112). The gene level holds: the damage is isoform allocation through the capture-contracted
+lengths. The recorded price above excluded the zero-gDNA rows, which the terminal report drops.
+TWO READOUTS REFUSED the same day (each a pinned, fractional A/B on the test chromosome, the ladder, both gap panels and
+VCaP, both arms from one build): (1) the posterior EXPECTATION of the density, `exp(mode) → E[e^x]`: every in-scope row
+worse (ladder stranded OFF 7.52 → 15.57 %, unstranded OFF 2.07 → 11.26, stranded ON 9.71 → 14.11; VCaP's gDNA
+fraction 0.2528 → 0.2489 against 0.2518, the weights' q10/q90 0.366/425 → 0.0091/6.6) — under a posterior as broad as
+the prior, `E[e^x]` is the prior's high tail and lifts every shallow object above the deep ones; (2) the posterior
+MEAN of log density, `mode → E[x]`: the target row 13.61 → 9.50 % but every other in-scope row worse (stranded ON
+9.71 → 13.00, unstranded OFF 2.07 → 4.16, RNA-long stranded ON 6.09 → 12.42, RNA-short stranded ON 14.24 → 23.83;
+VCaP 0.2528 → 0.2412) — the one-sided posterior's mean sits below its mode on every shallow object. The mode is the
+location-faithful readout; a posterior average moves the location (up or down) where the defect is the VARIANCE of
+the modes across shallow objects on a flat field. The repair is shrinkage of the mode toward a LOCAL reference by the
+posterior's width — the local capture prior and local footprint direction of `DESIGN.md` §7.2 — a design of its own.
+Instrument: `quant_accuracy.py` per stratum, the g00 rows included; the prototype A/Bs' files are under
+`~/Downloads/rigel_runs/prototypes/2026-10-11_weight_expectation/`.
 
 ### strand-overdispersion-one-shared-value
 `priority: now — first (owner, 2026-09-30): od = 0 and κ LANDED 2026-10-01; next the summary.json diagnostics, then the pruning design · kind: design · 2026-09-27`
