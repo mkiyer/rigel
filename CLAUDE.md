@@ -152,10 +152,9 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument that has a --self-test runs it
 ```
 
-**The standing baseline: 0 failed / 2,913 passed / 0 skipped / 0 xfail, 2,913 collected** — re-derived
-2026-10-14 on a clean checkout after the release cut's user-path fixes, its two no-ops and the format batch
-(forty-nine gates added; the identical-paralog gates run the EM to convergence, `DESIGN.md` §4.2). **Any
-failure at all is a regression.** Re-derive a count, never adjust one (`TRAPS: re-record-the-baseline`): every gate that scans
+**The standing baseline: 0 failed / 2,949 passed / 0 skipped / 0 xfail, 2,949 collected** — re-derived
+2026-10-14 on a clean checkout after the release review's fixes (thirty-six gates added; the identical-paralog gates
+run the EM to convergence, `DESIGN.md` §4.2). **Any failure at all is a regression.** Re-derive a count, never adjust one (`TRAPS: re-record-the-baseline`): every gate that scans
 the files on disk is one case, so only adding or removing a test moves the total. Derive the failure set,
 never eyeball the tail (`TRAPS: read-the-whole-failure-list`). A golden update is where a regression gets
 laundered into "intended": read the diff, record its magnitude and check the truth-scored instruments
