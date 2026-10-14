@@ -178,24 +178,23 @@ class CalibrationResult:
 
     # --- library scalars ---
     gdna_density_global: float  # >= 0, global gDNA density (mass/bp); 0 in a zero-gDNA library
-    #: The fully-captured gDNA density the ruler and the locus gDNA effective length contract against:
-    #: the located enriched mode of the last refit's fitted landscape (`landscape.located_enriched_mode`),
-    #: or ``None`` — no enriched gDNA mode, which is every capture-OFF and every gDNA-free library, and
-    #: then nothing contracts. A positive finite density when present.
-    gdna_reference_density: float | None
-    #: The regime behind the reference: how many LOCATED kernels (`landscape.DensityLandscape.located`)
-    #: the enriched mode rests on — the located population's own resolution is ``√n``, so this is the
-    #: number a reader compares against; ``0`` exactly when the reference is ``None``.
-    gdna_reference_members: int
-    #: float64[n_regions] — each region's capture efficiency ``E[min(ρ/ρ_ref, 1)]``, the posterior mean
-    #: of its clipped gDNA density against the reference under the fitted landscape, from its own
-    #: contained count on its contained support (`capture_efficiency.capture_efficiencies`); exactly 1
-    #: everywhere when the reference is ``None``. The ruler and the locus prior price every contained
-    #: share at it and re-derive nothing (`capture_eff_length`, `priors`).
+    #: The unit the capture efficiencies are read in: the peak density of the last refit's gDNA landscape's
+    #: largest basin, the bulk, in gDNA fragments per bp (`capture_efficiency`). ``None`` when no landscape was
+    #: fitted, and then every efficiency is exactly 1. A positive finite density when present.
+    gdna_bulk_density: float | None
+    #: The landscape's saturated level against the bulk: the most massive enriched basin's peak over the bulk
+    #: peak, ``> 1``; exactly 1 when nothing lies above the bulk or no landscape was fitted. The ruler's junction
+    #: price saturates at it (`capture_eff_length`).
+    gdna_capture_saturation: float
+    #: float64[n_regions] — each region's capture efficiency: ``exp(E[min(x, s(x))] − x_b)``, its own gDNA
+    #: density against the bulk under the landscape as a two-group prior, from its own contained count on its
+    #: contained support (`capture_efficiency.capture_efficiencies`). A relative yield, so 1 at the bulk and above
+    #: 1 under capture; exactly 1 everywhere when there is no bulk density. The ruler and the locus prior price
+    #: every contained share at it and re-derive nothing (`capture_eff_length`, `priors`).
     gdna_capture_efficiency_region: np.ndarray
     #: float64[n_boundaries] — each boundary's own capture efficiency, from its crossing count on its
-    #: crossing support; exactly 1 everywhere when the reference is ``None``. The ruler and the locus
-    #: prior price every conserved share at a boundary at it, and the ruler prices a junction from the
+    #: crossing support, in the same unit; exactly 1 everywhere when there is no bulk density. The ruler and the
+    #: locus prior price every conserved share at a boundary at it, and the ruler prices a junction from the
     #: efficiencies beside it (`capture_eff_length`).
     gdna_capture_efficiency_boundary: np.ndarray
     rna_sense_frac: float  # in [0, 1], RNA sense fraction used by the strand clue
@@ -262,36 +261,33 @@ class CalibrationResult:
         _check_axis_array(
             self.gdna_capture_efficiency_region, "gdna_capture_efficiency_region", self.n_regions
         )
+        # finite and non-negative (the axis check): a relative yield against the bulk, with no upper bound
         c = np.asarray(self.gdna_capture_efficiency_region, dtype=np.float64)
-        if np.any(c < 0.0) or np.any(c > ceiling):
-            raise ValueError("CalibrationResult.gdna_capture_efficiency_region must lie in [0, 1].")
         _check_axis_array(
             self.gdna_capture_efficiency_boundary,
             "gdna_capture_efficiency_boundary",
             self.n_boundaries,
         )
         cb = np.asarray(self.gdna_capture_efficiency_boundary, dtype=np.float64)
-        if np.any(cb < 0.0) or np.any(cb > ceiling):
-            raise ValueError(
-                "CalibrationResult.gdna_capture_efficiency_boundary must lie in [0, 1]."
-            )
-        if self.gdna_reference_density is None and (np.any(c != 1.0) or np.any(cb != 1.0)):
-            raise ValueError(
-                "CalibrationResult.gdna_capture_efficiency_region and _boundary must be exactly 1 "
-                "everywhere when there is no reference: nothing is depleted relative to anything."
-            )
-
-        if self.gdna_reference_density is not None and not (
-            np.isfinite(self.gdna_reference_density) and self.gdna_reference_density > 0.0
+        if self.gdna_bulk_density is None and (
+            np.any(c != 1.0) or np.any(cb != 1.0) or self.gdna_capture_saturation != 1.0
         ):
             raise ValueError(
-                "CalibrationResult.gdna_reference_density must be None or finite and > 0; "
-                f"got {self.gdna_reference_density}."
+                "CalibrationResult.gdna_capture_efficiency_region and _boundary, and "
+                "gdna_capture_saturation, must be exactly 1 when there is no bulk density: with no landscape "
+                "nothing is read against anything."
             )
-        if (int(self.gdna_reference_members) > 0) != (self.gdna_reference_density is not None):
+        if self.gdna_bulk_density is not None and not (
+            np.isfinite(self.gdna_bulk_density) and self.gdna_bulk_density > 0.0
+        ):
             raise ValueError(
-                "CalibrationResult.gdna_reference_members must be > 0 exactly when a reference is "
-                f"present; got {self.gdna_reference_members} with reference {self.gdna_reference_density}."
+                "CalibrationResult.gdna_bulk_density must be None or finite and > 0; "
+                f"got {self.gdna_bulk_density}."
+            )
+        if not (np.isfinite(self.gdna_capture_saturation) and self.gdna_capture_saturation >= 1.0):
+            raise ValueError(
+                "CalibrationResult.gdna_capture_saturation must be finite and >= 1 (the bulk itself); "
+                f"got {self.gdna_capture_saturation}."
             )
         if not np.isfinite(self.gdna_density_global) or self.gdna_density_global < 0.0:
             raise ValueError(

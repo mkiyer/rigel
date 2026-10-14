@@ -392,15 +392,18 @@
     const n = $("capture-note"); if (!n) return;
     const c = M.calibration && M.calibration.capture;
     if (!c) { n.innerHTML = "This summary carries no calibration, so there is no capture answer."; return; }
-    if (c.reference_density != null) {
-      n.innerHTML = `<b>An enriched gDNA mode was located</b> at <span class="num">${fmtValue(c.reference_density, "g4")}</span> ` +
-        `gDNA fragments/bp, resting on <span class="num">${grp(c.n_members)}</span> located regions. Calibration reads it as the fully ` +
-        `captured level: each region's capture efficiency is its gDNA density against it, and every ` +
-        `<span class="num">em_effective_length</span> the EM reads is scaled by those efficiencies.`;
+    if (c.bulk_density == null) {
+      n.innerHTML = `<b>No gDNA landscape was fitted</b>, so every capture efficiency is 1 and every ` +
+        `<span class="num">em_effective_length</span> equals <span class="num">effective_length</span>.`;
+    } else if (c.saturation > 1) {
+      n.innerHTML = `<b>The gDNA landscape holds levels above its bulk</b> of <span class="num">${fmtValue(c.bulk_density, "g4")}</span> ` +
+        `gDNA fragments/bp, saturating at <span class="num">${fmtValue(c.saturation, "g4")}×</span> the bulk. Each region's capture ` +
+        `efficiency is its own gDNA density read against the bulk, and every <span class="num">em_effective_length</span> ` +
+        `the EM reads is scaled by those efficiencies.`;
     } else {
-      n.innerHTML = `<b>No enriched gDNA mode was located</b> — a library without capture, or one whose gDNA is too ` +
-        `sparse to locate its captured level — so every <span class="num">em_effective_length</span> equals ` +
-        `<span class="num">effective_length</span>.`;
+      n.innerHTML = `<b>The gDNA landscape is one level</b>, its bulk at <span class="num">${fmtValue(c.bulk_density, "g4")}</span> ` +
+        `gDNA fragments/bp, with nothing enriched above it: every capture efficiency is 1, so every ` +
+        `<span class="num">em_effective_length</span> equals <span class="num">effective_length</span>.`;
     }
   }
 

@@ -7,13 +7,13 @@ admissible starts weighted by capture, so a transcript's true effective length u
 ``Σ_w f_pre(w) · partition_t(w)`` over the pre-capture fragment-length pmf, and its plain length is
 ``Σ_w f_pre(w) · off_target_weight · (L_t − w + 1)+``. The truth FACTOR is their ratio; an arm's factor is
 its effective length over the same plain lengths (``transcript_capture_eff_lengths(...) / fl``). The two
-are compared in the log, ANCHORED on the fully probed transcripts (the reference makes them the unit on
-both sides, so a global scale is free), and summarised per class — the probed fraction of the transcript's
+are compared in the log, ANCHORED on the fully probed transcripts (a global scale is free, so they are made
+the unit on both sides), and summarised per class — the probed fraction of the transcript's
 bases, read off the sampler itself — and per kind (mRNA / annotated single-exon / synthetic nascent
 entity). A factor of exactly 0 is an infinite abundance: counted, and dropped from the quantiles.
 
 Arms: ``shipped`` is the ruler in ``src/`` on the shipped calibration; ``oracle_gdna`` is the same ruler
-fed the CERTIFIED true gDNA counts per object (``slot_truth.npz``) with the reference read off a landscape
+fed the CERTIFIED true gDNA counts per object (``slot_truth.npz``), read by the shipped reader under a landscape
 fitted on the truth — the ideal witness, so the gap between the two is the calibration's and what
 remains under ``oracle_gdna`` is the ruler's (or the witness geometry's,
 `ISSUES: ruler-witness-geometry-on-transcript-panels`); ``--module`` names a prototype file defining
@@ -24,7 +24,7 @@ shipped one on the same calibration — the harness every ruler mechanism
 is developed on before ``src/``; ``--set SECTION.FIELD=VALUE`` prices a config value on every arm.
 
 ⛔ Read the classes apart: the probed class is where the formula is exact when its witness is, the
-unprobed class is where the reference bites, and the partial classes are where the junction price lives.
+unprobed class is where the bulk bites, and the partial classes are where the junction price lives.
 The junction price reads a junction's capture from the gDNA objects beside it, by conservation of bases,
 right on average and noisy per junction (`ISSUES: the-junction-price-is-noisy-within-a-gene`); what no gDNA
 object sees is declared, not repaired (`ISSUES: ruler-witness-geometry-on-transcript-panels`).
@@ -83,7 +83,7 @@ from _shared import set_field, sibling  # noqa: E402
 from rigel.calibration.calibrate import calibrate  # noqa: E402
 from rigel.calibration.capture_eff_length import transcript_capture_eff_lengths  # noqa: E402
 from rigel.calibration.capture_efficiency import capture_efficiencies  # noqa: E402
-from rigel.calibration.landscape import fit_landscape, located_enriched_mode  # noqa: E402
+from rigel.calibration.landscape import fit_landscape  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.region_chain import BOUNDARY, REGION  # noqa: E402
 from rigel.calibration.signature import RegionType, coarse_type_array  # noqa: E402
@@ -254,9 +254,8 @@ def calibrate_condition(index, region_arrays, panel_dir: Path, condition: str, c
 
 
 def oracle_gdna_result(cal, region_arrays, panel_dir: Path, condition: str, gdna_fl_pmf):
-    """The same result with the ruler's gDNA masses replaced by the CERTIFIED truth per object, the
-    reference read off a landscape fitted on the truth and the efficiencies recomputed from both: the
-    ideal witness, no estimator noise."""
+    """The same result with the ruler's gDNA masses replaced by the CERTIFIED truth per object, read by the
+    shipped reader under a landscape fitted on the truth: the ideal witness, no estimator noise."""
     z = np.load(panel_dir / "oracle_cache" / condition / "slot_truth.npz", allow_pickle=True)
     kind, obj, n_g = z["kind"], z["obj"], z["n_gdna"]
     m_reg = np.zeros_like(np.asarray(cal.count_gdna_region, float))
@@ -276,28 +275,30 @@ def oracle_gdna_result(cal, region_arrays, panel_dir: Path, condition: str, gdna
         np.zeros(int(live.sum())),
         anchor=anchor[live],
     )
-    mode = located_enriched_mode(ls) if ls is not None else None
-    ref = None if mode is None else float(np.exp(mode.mode.log_rho))
-    if ref is None:
-        efficiency = np.ones(m_reg.shape[0])
-        efficiency_boundary = np.ones(m_bnd.shape[0])
-    else:
-        efficiency, efficiency_boundary = capture_efficiencies(
+    # the reader takes the true supports, as calibrate does: a region with none reads 1
+    reading = (
+        None
+        if ls is None
+        else capture_efficiencies(
             ls,
-            ref,
             m_reg,
-            S,
+            np.asarray(cal.gdna_region_eff_len, float),
             m_bnd,
             np.asarray(cal.gdna_boundary_eff_len, float),
         )
+    )
     return dataclasses.replace(
         cal,
         count_gdna_region=m_reg,
         count_gdna_boundary=m_bnd,
-        gdna_reference_density=ref,
-        gdna_reference_members=0 if mode is None else mode.n_members,
-        gdna_capture_efficiency_region=efficiency,
-        gdna_capture_efficiency_boundary=efficiency_boundary,
+        gdna_bulk_density=None if reading is None else reading.bulk_density,
+        gdna_capture_saturation=1.0 if reading is None else reading.saturation,
+        gdna_capture_efficiency_region=(
+            np.ones(m_reg.shape[0]) if reading is None else reading.efficiency_region
+        ),
+        gdna_capture_efficiency_boundary=(
+            np.ones(m_bnd.shape[0]) if reading is None else reading.efficiency_boundary
+        ),
     )
 
 
@@ -383,10 +384,10 @@ def headline(d, measured, truth: Truth) -> dict:
     )
 
 
-def _fmt_ref(cal) -> str:
-    if cal.gdna_reference_density is None:
+def _fmt_capture(cal) -> str:
+    if cal.gdna_bulk_density is None:
         return "None (factor 1 everywhere)"
-    return f"{cal.gdna_reference_density:.3e}/bp from {cal.gdna_reference_members:,} located kernels"
+    return f"bulk {cal.gdna_bulk_density:.3e}/bp, saturation {cal.gdna_capture_saturation:.4g}× the bulk"
 
 
 def run_condition(index, region_arrays, index_dir, panel_dir, condition, config, arms, min_frags):
@@ -429,7 +430,7 @@ def print_condition(condition, truth, factors, min_frags, elapsed):
         d, measured, n_zero = score(f, truth, min_frags)
         anchor = int((measured & probed).sum())
         print(
-            f"   arm {arm:<12} reference {_fmt_ref(cal)}; anchored on {anchor} probed transcripts "
+            f"   arm {arm:<12} capture {_fmt_capture(cal)}; anchored on {anchor} probed transcripts "
             f"with ≥ {min_frags} fragments; factor exactly 0 (dropped): {n_zero}"
         )
         print(
@@ -534,12 +535,12 @@ def main() -> int:
                 f"within ±{WITHIN} nat and the unprobed / partial classes' median log error "
                 f"(transcripts with ≥ {args.min_frags} fragments; entities excluded)"
             )
-            print(f"{'condition':<44}{'reference':>12} " + " ".join(f"{n:>30}" for n in names))
+            print(f"{'condition':<44}{'bulk':>12} " + " ".join(f"{n:>30}" for n in names))
         cal = factors["shipped"][1]
         ref = (
             "None"
-            if cal.gdna_reference_density is None
-            else f"10^{np.log10(cal.gdna_reference_density):+.2f}"
+            if cal.gdna_bulk_density is None
+            else f"10^{np.log10(cal.gdna_bulk_density):+.2f}"
         )
         cells = []
         for n in names:
@@ -644,7 +645,7 @@ def gdna_space_yield(sim: Sim, blocks: np.ndarray, n_loci: int, id2name: dict, w
 def footprint_gdna_length(region_arrays, block: tuple, gdna_fl_pmf) -> float:
     """The shipped gDNA component's length at efficiency 1 over one footprint ``(ref_id, start, end)``:
     ``priors.assemble_priors`` itself, on a result carrying calibration's own geometry for this partition
-    (the contained supports and ``calibrate._gdna_boundary_conserved_len``) and no reference."""
+    (the contained supports and ``calibrate._gdna_boundary_conserved_len``) and no landscape."""
     from rigel.calibration.calibrate import _gdna_boundary_conserved_len
     from rigel.calibration.effective_length import contained_eff_length
     from rigel.calibration.priors import assemble_priors
@@ -665,7 +666,7 @@ def footprint_gdna_length(region_arrays, block: tuple, gdna_fl_pmf) -> float:
         gdna_boundary_conserved_len=_gdna_boundary_conserved_len(region_arrays, gdna_fl_pmf),
         gdna_frac_region=z, rna_pos_frac_region=z,
         rna_neg_frac_region=z, gdna_frac_boundary=ez, rna_pos_frac_boundary=ez, rna_neg_frac_boundary=ez,
-        gdna_density_global=0.0, gdna_reference_density=None, gdna_reference_members=0,
+        gdna_density_global=0.0, gdna_bulk_density=None, gdna_capture_saturation=1.0,
         gdna_capture_efficiency_region=np.ones(n), gdna_capture_efficiency_boundary=np.ones(ne),
         rna_sense_frac=0.5, gdna_strand_overdispersion=0.0, rna_strand_overdispersion=0.0,
         n_regions=n, n_boundaries=ne, n_sj=0,

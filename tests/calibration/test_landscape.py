@@ -5,20 +5,20 @@ capture-enriched minority: the minority must stay a mode rather than being smoot
 the grid must span exactly what ψ can represent and nothing else, a zero-count region must decay
 downward instead of inventing a location at 1/E, an imprecise region must be damped rather than
 dropped, and the kernel widths must come from the local neighbour spacing so they widen on their own
-as regions thin out. The mode census that reads the ruler's reference off the fit closes the file.
+as regions thin out. The census that splits the fit into the bulk and the enriched basins closes the file.
 Each gate holds one property, so a regression names itself.
 """
 
 import numpy as np
 import pytest
 
+from rigel.calibration.capture_efficiency import capture_efficiencies
 from rigel.calibration.landscape import (
     DensityLandscape,
     LandscapeMode,
-    _census,
+    census,
     fit_landscape,
     knn_widths,
-    located_enriched_mode,
     split_basins,
 )
 
@@ -229,7 +229,19 @@ def test_declines_gracefully_on_degenerate_input():
     )
 
 
-# ── the mode census: the ruler's reference ─────────────────────────────────────────────────────────
+def test_the_landscape_keeps_its_own_density_beside_the_padded_one():
+    """``logP_free`` is the rendered population before the one pseudo-region of ignorance, and ``logP`` is that
+    density plus the uniform pseudo-mass and nothing else: one affine map takes the first to the second exactly."""
+    count, mass, e, var = _two_mode()
+    ls = fit_landscape(count, mass, e, var, anchor=np.zeros(count.size, bool))
+    free, padded = np.exp(ls.logP_free), np.exp(ls.logP)
+    assert free.sum() == pytest.approx(1.0, abs=1e-12)
+    slope, intercept = np.polyfit(free, padded, 1)
+    np.testing.assert_allclose(padded, slope * free + intercept, rtol=0, atol=1e-15)
+    assert 0.0 < slope < 1.0 and intercept > 0.0
+
+
+# ── the census: the bulk and the enriched basins ───────────────────────────────────────────────────────
 
 
 def test_split_basins_names_the_largest_basin_depleted_and_returns_only_the_basins_above_it():
@@ -247,91 +259,52 @@ def test_split_basins_names_the_largest_basin_depleted_and_returns_only_the_basi
     assert dep2 is top and above2 == ()
 
 
-def _hand_landscape(peaks, sds, masses, members, walls=(), spread=0.1, lo=-16.0, hi=3.0, n=400):
-    """A DensityLandscape rendered by hand — a mixture of Gaussians in natural-log density — with its
-    kernels stated outright: per peak, ``members`` LOCATED kernels spread evenly across ±``spread`` nat
-    of it, and ``walls`` as ``(centre, n)`` pairs of location-free kernels (anchors' resolution walls) —
-    so a test controls where each basin sits, how much it holds, and how many located kernels stand
-    behind it."""
-    x = np.linspace(lo, hi, n)
-    p = np.zeros_like(x)
-    for mu, sd, m in zip(peaks, sds, masses, strict=True):
-        p += m * np.exp(-0.5 * ((x - mu) / sd) ** 2) / sd
-    p /= p.sum()
-    centre = [
-        np.linspace(mu - spread, mu + spread, k) for mu, k in zip(peaks, members, strict=True)
-    ]
-    located = [np.ones(k, dtype=bool) for k in members]
-    for mu, k in walls:
-        centre.append(np.linspace(mu - 0.1, mu + 0.1, k))
-        located.append(np.zeros(k, dtype=bool))
+def _drawn(p) -> DensityLandscape:
+    """A landscape whose density is ``p`` itself, on a unit grid."""
+    p = np.asarray(p, dtype=np.float64)
+    with np.errstate(divide="ignore"):
+        lp = np.log(p / p.sum())
     return DensityLandscape(
-        log_rho=x,
-        logP=np.log(p + 1e-300),
-        n_train=int(sum(members) + sum(k for _, k in walls)),
-        centre=np.concatenate(centre),
-        located=np.concatenate(located),
+        log_rho=np.arange(p.size, dtype=np.float64), logP=lp, n_train=p.size, logP_free=lp
     )
 
 
-def test_a_unimodal_landscape_names_NO_enriched_mode():
-    """Capture-OFF: one basin, nothing above the depleted mode, no reference, no contraction."""
-    assert located_enriched_mode(_hand_landscape([-3.0], [0.3], [1000], [400])) is None
+def test_the_basins_partition_the_grid():
+    """Masses sum to one, adjacent basins share their bound and the basins span the grid, whatever the shape."""
+    for p in (
+        [0.70, 0.10, 0.05, 0.02, 0.03, 0.08, 0.02],
+        [1, 3, 1, 2, 5, 2, 1, 4, 9],
+        [5, 4, 3, 2, 1],
+    ):
+        modes = census(_drawn(p))
+        assert sum(m.basin_mass for m in modes) == pytest.approx(1.0, rel=0, abs=1e-12)
+        assert all(a.hi == b.lo for a, b in zip(modes, modes[1:]))
+        assert modes[0].lo == 0.0 and modes[-1].hi == len(p) - 1
 
 
-def test_a_bimodal_landscape_names_the_LOCATED_upper_mode_at_its_peak_with_its_members():
-    """Capture-ON: the basin above the depleted one holding the most located kernels, resolved by them
-    (60 members against k = √300 ≈ 17); the reference is its peak and the members are published."""
-    ref = located_enriched_mode(_hand_landscape([-7.0, 0.5], [0.4, 0.25], [700, 300], [240, 60]))
-    assert ref is not None and abs(ref.mode.log_rho - 0.5) < 0.05
-    assert ref.n_members == 60
+def test_a_density_highest_at_the_grid_edge_peaks_there():
+    """The review's case: a floor of mass 0.70 at the grid's low edge and a small bump at x = 5. The edge is a
+    maximum, so it is the bulk, and the bump is the enriched basin above it. PERTURBATION: reading interior
+    maxima only makes the bump the one basin, holding everything, and the floor-versus-enriched contrast is
+    gone."""
+    modes = census(_drawn([0.70, 0.10, 0.05, 0.02, 0.03, 0.08, 0.02]))
+    assert [m.log_rho for m in modes] == [0.0, 5.0]
+    bulk, above = split_basins(modes)
+    assert bulk.log_rho == 0.0 and [m.log_rho for m in above] == [5.0]
+    assert bulk.basin_mass == pytest.approx(0.85)
 
 
-def test_a_basin_of_fewer_than_k_located_kernels_is_not_a_mode_however_narrow():
-    """The blank contig's shadow transcription, a few false-positive fragments on slivers of support, or a
-    sparse library's tail of a dozen measured exons: a basin whose located members number at most
-    k = √n_located has no k-th neighbour inside itself and is no mode, whatever the density's cut made
-    of it. PERTURBATION: the same landscape with the cluster grown past k IS a mode."""
-    # 400 located kernels in all ⇒ k = 20; 20 members do not resolve the basin, 21 do
-    assert (
-        located_enriched_mode(_hand_landscape([-14.0, -5.0], [0.5, 0.2], [998, 2], [380, 20]))
-        is None
-    )
-    grown = located_enriched_mode(_hand_landscape([-14.0, -5.0], [0.5, 0.2], [998, 2], [379, 21]))
-    assert grown is not None and abs(grown.mode.log_rho - (-5.0)) < 0.05 and grown.n_members == 21
-    # and the members are read at the POPULATION's k, not their own √21: the same 21 strewn across
-    # ±1.5 nat put every member's 20th neighbour ~3 nat away, and that is no location either
-    strewn = _hand_landscape([-14.0, -5.0], [0.5, 2.0], [998, 2], [379, 21], spread=1.5)
-    assert located_enriched_mode(strewn) is None
+def test_the_high_edge_peaks_too_and_a_flat_edge_does_not():
+    """A density rising to the grid's top edge peaks there; an edge level with its neighbour is a plateau's end,
+    no peak; a monotone density peaks once, at its arg-max."""
+    assert [m.log_rho for m in census(_drawn([3, 1, 2, 5]))] == [0.0, 3.0]
+    assert [m.log_rho for m in census(_drawn([1, 1, 2, 5, 3]))] == [3.0]
+    assert [m.log_rho for m in census(_drawn([5, 4, 3, 2, 1]))] == [0.0]
+    assert [m.log_rho for m in census(_drawn([1, 2, 3, 4, 5]))] == [4.0]
 
 
-def test_anchors_walls_are_not_members_and_cannot_locate_a_basin():
-    """`ISSUES: the-ruler-reference-on-sparse-real-libraries`, the reader's half: a basin above the bulk
-    packed with 20,000 anchors' resolution walls around twelve located kernels names no reference — the
-    walls are not members, and twelve is below k = √n_located. PERTURBATION: admitting every centre as a
-    member, walls included, reads the walls as a located mode of 20,012 members."""
-    ls = _hand_landscape([-7.0, -1.5], [0.4, 0.2], [700, 300], [1000, 12], walls=[(-1.5, 20_000)])
-    assert located_enriched_mode(ls) is None
-    # and with the same twelve grown into a population the walls change nothing either way
-    ls2 = _hand_landscape([-7.0, -1.5], [0.4, 0.2], [700, 300], [1000, 200], walls=[(-1.5, 20_000)])
-    ref = located_enriched_mode(ls2)
-    assert ref is not None and ref.n_members == 200
-
-
-def test_the_enriched_mode_is_chosen_by_LOCATED_MEMBERS_above_the_depleted_one():
-    """Two basins above the depleted one: the reference is the one holding the located population, not
-    the one holding the most rendered mass — here the upper basin carries more density (walls render
-    mass too) but thirty located kernels against the middle basin's 250, so the middle one is the
-    reference. PERTURBATION: chosen by rendered mass, the upper basin is the candidate, and with thirty
-    members against k = 31 it is no mode at all. A basin with no located member is nothing."""
-    ls = _hand_landscape([-7.0, -1.0, 0.8], [0.4, 0.3, 0.1], [700, 100, 250], [700, 250, 30])
-    ref = located_enriched_mode(ls)
-    assert ref is not None and abs(ref.mode.log_rho - (-1.0)) < 0.05 and ref.n_members == 250
-    empty = _hand_landscape([-7.0, 0.5], [0.4, 0.25], [700, 300], [700, 0])
-    assert located_enriched_mode(empty) is None
-    modes = _census(ls)  # the basins partition the grid: masses sum to one, adjacent bounds shared
-    assert sum(m.basin_mass for m in modes) == pytest.approx(1.0, rel=0, abs=1e-9)
-    assert all(a.hi == b.lo for a, b in zip(modes, modes[1:]))
+def test_a_plateau_peaks_at_its_left_end():
+    assert [m.log_rho for m in census(_drawn([1, 3, 3, 3, 1]))] == [1.0]
 
 
 def _walls_around_a_tail(seed=0, n_long=20_000, n_dep=200, n_short=600, n_tail=12):
@@ -367,12 +340,19 @@ def _walls_around_a_tail(seed=0, n_long=20_000, n_dep=200, n_short=600, n_tail=1
     return ls
 
 
-def test_a_fitted_basin_of_walls_around_a_handful_of_located_kernels_is_NOT_a_mode():
-    """LBX0190's defect through the estimator itself (the falsification test, verified failing on the
-    shipped reader, which read a located mode of 612 members here): the walls' centres pack the basin
-    above the bulk so densely that every rendered width there sits at the grid step. A wall is not a
-    location: the basin's located members are twelve, fewer than k = √212, and it names no reference."""
+def test_walls_around_a_handful_of_exons_lift_nothing_and_the_exons_read_their_own_level():
+    """LBX0190's shape, through the estimator itself: the walls' mass goes to the bulk in the E-step, and the
+    twelve exons are a basin of a few parts in ten thousand. Read by the capture reader, nothing without evidence
+    is lifted — a 40 bp sliver with no fragment reads the bulk to a part in a thousand, a 100 kb intron with none
+    reads it exactly — and an exon at the tail's level, fifteen fragments on 300 bp, reads its own level: the
+    small panel the located-mode gate would not read at all."""
     ls = _walls_around_a_tail()
     assert ls is not None
-    assert int(ls.located.sum()) == 212
-    assert located_enriched_mode(ls) is None
+    _bulk, above = split_basins(census(ls))
+    assert len(above) == 1 and above[0].basin_mass < 1e-3
+    r = capture_efficiencies(
+        ls, np.array([0.0, 0.0, 15.0]), np.array([40.0, 1e5, 300.0]), np.zeros(0), np.zeros(0)
+    )
+    assert abs(r.efficiency_region[0] - 1.0) < 1e-3
+    assert abs(r.efficiency_region[1] - 1.0) < 1e-9
+    assert abs(np.log(r.efficiency_region[2] * r.bulk_density / 0.05)) < 0.2

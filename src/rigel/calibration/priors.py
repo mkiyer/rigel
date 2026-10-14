@@ -291,10 +291,11 @@ def assemble_priors(
     exonic unspliced fragments and every probed gene under-calls (the test chromosome's `g50 ss.99 ON` row:
     gene-level Σ|Δ| 25,633 → 38,174 against 23,967 here).
 
-    The bedrock invariant — factor 1 under uniform gDNA. With no reference every efficiency is exactly
-    1 and ``gdna_eff_len == span == Σ S_r + Σ M_e`` bit-identically: an unenriched library contracts
-    NOTHING. Under capture a depleted object contributes its share at its efficiency and the length
-    contracts toward the probed footprint.
+    The bedrock invariant — factor 1 under uniform gDNA. With no landscape, or a landscape of one basin,
+    every efficiency is exactly 1 and ``gdna_eff_len == Σ S_r + Σ M_e`` bit-identically: an unenriched
+    library contracts NOTHING. Under capture every object contributes its share at its efficiency, a relative
+    yield against the bulk, so the length weighs the probed footprint by its enrichment; the transcripts'
+    lengths are in the same unit (`capture_eff_length`), and a factor common to all of them cancels in the EM.
 
     ⛔ NO RNA COUNT. The EM's gDNA share is gDNA's share of EVERY fragment in the locus, spliced ones
     included: the deterministic spliced fragments skip the E-step but are added to every M-step, and a
@@ -339,14 +340,14 @@ def assemble_priors(
     )
     c_region = np.asarray(calibration.gdna_capture_efficiency_region, dtype=np.float64)
     c_boundary = np.asarray(calibration.gdna_capture_efficiency_boundary, dtype=np.float64)
-    span = by_region(region_s) + by_boundary(boundary_m)
     eff_len = by_region(region_s * c_region) + by_boundary(boundary_m * c_boundary)
 
     return LocusPriors(
         gdna_count=gdna_locus,
-        # ≤ span by construction (every efficiency ≤ 1); the minimum absorbs an ulp. No floor: a locus
-        # with no start position has a yield of 0, and the EM reads a zero yield as "cannot emit".
-        gdna_eff_len=np.minimum(eff_len, span),
+        # In the efficiencies' unit, the bulk: a captured locus's yield exceeds its plain support, as its
+        # transcripts' do (`capture_eff_length`). No floor: a locus with no start position has a yield of 0,
+        # and the EM reads a zero yield as "cannot emit".
+        gdna_eff_len=eff_len,
     )
 
 

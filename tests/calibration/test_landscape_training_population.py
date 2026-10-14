@@ -25,7 +25,6 @@ import sys
 from types import SimpleNamespace
 
 import numpy as np
-import pytest
 
 import rigel.calibration.sweep as SW
 from rigel.config import CONSTANTS
@@ -241,13 +240,8 @@ def _prev_at_floor(grid_log10):
     from rigel.calibration.landscape import DensityLandscape
 
     p = np.exp(-0.5 * ((grid_log10 - grid_log10[0]) / 0.1) ** 2) + 1e-12
-    return DensityLandscape(
-        log_rho=grid_log10 * np.log(10.0),
-        logP=np.log(p / p.sum()),
-        n_train=1,
-        centre=np.array([grid_log10[0] * np.log(10.0)]),
-        located=np.array([True]),
-    )
+    lp = np.log(p / p.sum())
+    return DensityLandscape(log_rho=grid_log10 * np.log(10.0), logP=lp, n_train=1, logP_free=lp)
 
 
 def test_the_estep_moves_a_location_free_kernel_to_the_population_and_leaves_a_counted_one_alone():
@@ -289,6 +283,7 @@ def test_fit_landscape_without_a_previous_fit_is_the_shipped_fit():
     a = LS.fit_landscape(count, mass, eff, var, anchor=anchor)
     b = LS.fit_landscape(count, mass, eff, var, anchor=anchor, prev=None)
     assert np.array_equal(a.logP, b.logP)
+    assert np.array_equal(a.logP_free, b.logP_free)
     # and WITH a previous fit at the floor the mass above the floor's neighbourhood falls
     c = LS.fit_landscape(
         count, mass, eff, var, anchor=anchor, prev=_prev_at_floor(a.log_rho / np.log(10.0))
@@ -321,11 +316,12 @@ def test_the_refit_loop_hands_each_fit_the_previous_landscape(sweep_inputs, monk
     assert seen[2] is not seen[1]
 
 
-def test_the_result_publishes_the_last_landscapes_located_enriched_mode(sweep_inputs, monkeypatch):
-    """The reference the ruler and the prior assembler read is the located enriched mode of the LAST
-    refit's landscape, published on the result; with no refit there is no landscape and no reference.
-    PERTURBATION: with the located-mode reader forced to answer, the result carries exactly that answer."""
-    from rigel.calibration.landscape import LandscapeMode, LocatedMode
+def test_the_result_publishes_the_capture_reading_of_the_last_landscape(sweep_inputs, monkeypatch):
+    """The efficiencies, the bulk density and the saturated level that the ruler and the prior assembler read
+    are the capture reader's answer on the LAST refit's landscape, published as they are; with no refit there
+    is no landscape, no bulk, a saturated level of 1 and every efficiency 1. PERTURBATION: with the reader
+    forced to answer, the result carries exactly that answer."""
+    from rigel.calibration.capture_efficiency import CaptureReading
     from rigel.config import CalibrationConfig
 
     res0 = CAL.calibrate(
@@ -333,40 +329,50 @@ def test_the_result_publishes_the_last_landscapes_located_enriched_mode(sweep_in
         config=CalibrationConfig(calib_refit_iters=0),
         **sweep_inputs["calibrate_kw"],
     )
-    assert res0.gdna_reference_density is None
+    assert res0.gdna_bulk_density is None and res0.gdna_capture_saturation == 1.0
+    np.testing.assert_array_equal(res0.gdna_capture_efficiency_region, 1.0)
 
-    seen = []
-    orig = CAL.located_enriched_mode
+    fits, reads = [], []
+    orig_fit, orig_read = CAL.fit_landscape, CAL.capture_efficiencies
 
-    def spy(ls):
-        out = orig(ls)
-        seen.append(out)
+    def fit_spy(*a, **k):
+        out = orig_fit(*a, **k)
+        fits.append(out)
         return out
 
-    monkeypatch.setattr(CAL, "located_enriched_mode", spy)
+    def read_spy(ls, *a):
+        out = orig_read(ls, *a)
+        reads.append((ls, out))
+        return out
+
+    monkeypatch.setattr(CAL, "fit_landscape", fit_spy)
+    monkeypatch.setattr(CAL, "capture_efficiencies", read_spy)
     res = CAL.calibrate(
         payload=sweep_inputs["payload"],
         config=CalibrationConfig(calib_refit_iters=2),
         **sweep_inputs["calibrate_kw"],
     )
-    assert len(seen) == 1, "the reader runs once, on the last landscape"
-    if seen[0] is None:
-        assert res.gdna_reference_density is None
-        assert res.gdna_reference_members == 0
-        np.testing.assert_array_equal(res.gdna_capture_efficiency_region, 1.0)
-    else:
-        assert res.gdna_reference_density == pytest.approx(float(np.exp(seen[0].mode.log_rho)))
-        assert res.gdna_reference_members == seen[0].n_members > 0
-        assert np.any(res.gdna_capture_efficiency_region < 1.0)
+    assert len(fits) == 2 and fits[-1] is not None
+    assert len(reads) == 1, "the reader runs once"
+    ls, out = reads[0]
+    assert ls is fits[-1], "on the last landscape"
+    assert res.gdna_bulk_density == out.bulk_density
+    assert res.gdna_capture_saturation == out.saturation
+    np.testing.assert_array_equal(res.gdna_capture_efficiency_region, out.efficiency_region)
+    np.testing.assert_array_equal(res.gdna_capture_efficiency_boundary, out.efficiency_boundary)
 
-    forced = LocatedMode(
-        mode=LandscapeMode(log_rho=-2.0, basin_mass=0.3, lo=-3.0, hi=-1.0), n_members=7
+    forced = CaptureReading(
+        efficiency_region=np.full(res0.n_regions, 3.0),
+        efficiency_boundary=np.full(res0.n_boundaries, 2.0),
+        bulk_density=0.01,
+        saturation=5.0,
     )
-    monkeypatch.setattr(CAL, "located_enriched_mode", lambda ls: forced)
+    monkeypatch.setattr(CAL, "capture_efficiencies", lambda ls, *a: forced)
     res2 = CAL.calibrate(
         payload=sweep_inputs["payload"],
         config=CalibrationConfig(calib_refit_iters=1),
         **sweep_inputs["calibrate_kw"],
     )
-    assert res2.gdna_reference_density == pytest.approx(float(np.exp(-2.0)))
-    assert res2.gdna_reference_members == 7
+    assert res2.gdna_bulk_density == 0.01 and res2.gdna_capture_saturation == 5.0
+    np.testing.assert_array_equal(res2.gdna_capture_efficiency_region, 3.0)
+    np.testing.assert_array_equal(res2.gdna_capture_efficiency_boundary, 2.0)

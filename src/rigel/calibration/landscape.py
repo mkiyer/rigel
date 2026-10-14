@@ -1,8 +1,9 @@
 """The population component-density hyperprior — the landscape.
 
 Fit `P(log ρ_c)` over the population from the previous solve's deconvolved mass for one component, then
-feed it to that component's ψ composition arm on the re-solve. The mode census at the end
-(:func:`located_enriched_mode`) reads the fitted gDNA density's enriched mode, the ruler's reference.
+feed it to that component's ψ composition arm on the re-solve. The census at the end (:func:`census`,
+:func:`split_basins`) splits the fitted density into basins; the capture reader (`capture_efficiency`) takes the
+gDNA landscape's largest basin as the bulk and every basin above it as the enriched spectrum.
 
 The estimator is component-agnostic, deliberately so. Every step below is arithmetic on
 ``(count, mass, eff)`` for whichever component the caller selected: :func:`_grid` is ``mass/eff``,
@@ -60,14 +61,12 @@ class DensityLandscape:
     log_rho: np.ndarray
     logP: np.ndarray
     n_train: int
-    #: The kernels this density was rendered from, one per training region: the centre
-    #: ``log(max(count, 1) / E)`` in nats, and whether it is a LOCATION — a count of at least one
-    #: fragment, the same wall ``CONSTANTS.landscape.located_var`` is read at. A zero-count anchor or a sub-fragment
-    #: kernel is centred at its resolution wall ``1/E``, which says where the kernel could not see, not
-    #: where a density is; a consumer reading a mode off the density (:func:`located_enriched_mode`)
-    #: counts members among the located kernels only, and never re-derives either array.
-    centre: np.ndarray
-    located: np.ndarray
+    #: The population's own rendered density on the same grid, before the one pseudo-region of ignorance
+    #: (:func:`fit_landscape`): ``-inf`` where no kernel puts mass. ψ reads ``logP``, whose pseudo-region
+    #: bounds how hard the prior can push. The capture reader (`capture_efficiency`) reads this one instead:
+    #: its alternative is the population's own spectrum, and the pseudo-region's uniform mass, spread up to
+    #: the top of the grid, is not a level any object was measured at.
+    logP_free: np.ndarray
 
     def required_logodds_window(self, mass, eff) -> float:
         """The λ bracket this prior's own support demands — derived, with no constant chosen.
@@ -153,14 +152,8 @@ def knn_widths(
     centres: np.ndarray,
     grid_step: float,
     scale: float = CONSTANTS.landscape.knn_scale,
-    k: int | None = None,
 ) -> np.ndarray:
     """The population resolution: ``h_i = scale · dist(a_i, k-th nearest neighbour)``, ``k = √n``.
-
-    ``k`` is the population's own by default; a caller asking about a SUBSET of the population at the
-    population's resolution passes the population's ``k`` (:func:`located_enriched_mode` reads a basin's
-    members at the located population's ``√n``, so a cluster smaller than ``k`` is not narrow but
-    unresolved).
 
     ⛔ Read this before changing the kernel. The per-region Poisson likelihood is a measurement width, and
     on the log axis it is ``1/(√g·ln10)`` decades, so it shrinks as ρ^(−1/2) — by well over an order of
@@ -193,7 +186,7 @@ def knn_widths(
     range.
     """
     n = centres.size
-    k = max(int(round(np.sqrt(n))), 2) if k is None else int(k)
+    k = max(int(round(np.sqrt(n))), 2)
     srt = np.sort(centres)
     if n <= k:
         return np.full(n, max(float(srt[-1] - srt[0]), grid_step))
@@ -381,24 +374,26 @@ def fit_landscape(
     # support. A population of `W` weighted regions cannot resolve a cell rarer than ~1/W, so the log-range
     # is bounded by log W and the prior stays weak and correctable — the governing principle for pass-0
     # output, which is exactly what this is fitted from.
+    free = density / total
     density = (density + total / (grid.size * max(float(weights.sum()), 1.0))) / total
+    with np.errstate(divide="ignore"):
+        log_free = np.log(free / free.sum())
     return DensityLandscape(
         log_rho=grid * _LN10,
         logP=np.log(density / density.sum()),
         n_train=int(live.sum()),
-        centre=centres * _LN10,
-        located=count >= 1.0,
+        logP_free=log_free,
     )
 
 
-# ── The mode census: the ruler's reference ───────────────────────────────────────────────────────────────
+# ── The census: the bulk and the enriched basins ─────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True, slots=True)
 class LandscapeMode:
     """One mode of a fitted density: the peak ``log_rho`` (natural log) and its basin ``[lo, hi]``, the
-    interior minima flanking it, with ``basin_mass`` the share of the density inside. Adjacent basins share
-    a bound, so the modes partition the grid."""
+    minima flanking it, with ``basin_mass`` the share of the density inside. Adjacent basins share a bound,
+    so the modes partition the grid."""
 
     log_rho: float
     basin_mass: float
@@ -406,16 +401,24 @@ class LandscapeMode:
     hi: float
 
 
-def _census(landscape: DensityLandscape) -> tuple[LandscapeMode, ...]:
-    """Every interior local maximum with its basin. Basins split at the interior minima between adjacent
-    maxima, so they partition the grid and their masses sum to one."""
+def census(landscape: DensityLandscape) -> tuple[LandscapeMode, ...]:
+    """Every local maximum of ``logP`` with its basin, in grid order. Basins split at the minimum between
+    adjacent maxima, so they partition the grid and their masses sum to one.
+
+    A maximum is an interior cell above its left neighbour and at least its right one (a plateau peaks at
+    its left end), or an EDGE cell strictly above its one neighbour: a density that is highest at the edge
+    of the grid peaks there, whatever else it holds. A flat edge is no peak. A density with no maximum at
+    all peaks at its arg-max."""
     x = np.asarray(landscape.log_rho, dtype=np.float64)
     p = np.exp(np.asarray(landscape.logP, dtype=np.float64))
     p = p / max(float(p.sum()), _EPS)
-    interior = np.where((p[1:-1] > p[:-2]) & (p[1:-1] >= p[2:]))[0] + 1
-    if interior.size == 0:
-        interior = np.array([int(np.argmax(p))])
-    peaks = np.sort(interior)
+    peaks = list(np.where((p[1:-1] > p[:-2]) & (p[1:-1] >= p[2:]))[0] + 1)
+    if p.size > 1 and p[0] > p[1]:
+        peaks.insert(0, 0)
+    if p.size > 1 and p[-1] > p[-2]:
+        peaks.append(p.size - 1)
+    if not peaks:
+        peaks = [int(np.argmax(p))]
     cuts = [0]
     for a, b in zip(peaks[:-1], peaks[1:], strict=False):
         cuts.append(int(a + np.argmin(p[a : b + 1])))
@@ -439,60 +442,8 @@ def _census(landscape: DensityLandscape) -> tuple[LandscapeMode, ...]:
 def split_basins(
     modes: tuple[LandscapeMode, ...],
 ) -> tuple[LandscapeMode, tuple[LandscapeMode, ...]]:
-    """The depleted basin, the largest by rendered mass, and the basins strictly above it (empty when the
-    density is unimodal)."""
-    depleted = max(modes, key=lambda m: m.basin_mass)
-    above = tuple(m for m in modes if m.lo >= depleted.hi - _EPS and m is not depleted)
-    return depleted, above
-
-
-@dataclass(frozen=True, slots=True)
-class LocatedMode:
-    """A mode of the located population: the basin, and the number of located kernels behind it — the
-    regime a consumer publishes beside the reference it reads off ``mode.log_rho``."""
-
-    mode: LandscapeMode
-    n_members: int
-
-
-def located_enriched_mode(landscape: DensityLandscape) -> LocatedMode | None:
-    """The mode a gDNA-density consumer may take as the fully-captured level, or ``None``.
-
-    The census names the depleted basin as the largest by rendered mass (for gDNA the unprobed
-    regions always outnumber the probed ones, and the zero-count anchors are that population's own
-    statement). Above it the candidate is the basin holding the most LOCATED kernels — a kernel with a
-    location, ``landscape.located``, is one that counted at least a fragment; an anchor's or a
-    sub-fragment kernel's centre is its resolution wall ``1/E`` and is no member of anything.
-
-    The candidate is a MODE only if its members resolve it at the located population's own
-    resolution: with ``k = √n_located`` (:func:`knn_widths`' population ``k``), each member's width is
-    half the distance to its ``k``-th nearest MEMBER, and the median of those satisfies
-    ``width² ≤ CONSTANTS.landscape.located_var``, the one-fragment floor in the population's own variable.
-    A basin with ``k`` members or fewer has no ``k``-th neighbour inside itself — the cluster smaller than ``√n``
-    that reaches outside itself — and is no mode, however narrow the rendered density's cut made it; the
-    within-basin spread is NOT the statement, since a basin cut by the grid's edge is narrow whatever its
-    kernels. ``None`` is "no enriched mode" — the capture-OFF field, the gDNA-free field, and a library
-    whose gDNA is too sparse to locate its probed level — and the consumer then contracts nothing
-    (`capture_eff_length`, `priors`).
-    """
-    _depleted, above = split_basins(_census(landscape))
-    if not above:
-        return None
-    centre = np.asarray(landscape.centre, dtype=np.float64)
-    located = np.asarray(landscape.located, dtype=bool)
-    n_located = int(located.sum())
-    k = max(int(round(np.sqrt(n_located))), 2)
-
-    def members(m: LandscapeMode) -> np.ndarray:
-        return located & (centre >= m.lo) & (centre <= m.hi)
-
-    enriched = max(above, key=lambda m: int(members(m).sum()))
-    mem = members(enriched)
-    n_members = int(mem.sum())
-    if n_members <= k:
-        return None
-    step = float(landscape.log_rho[1] - landscape.log_rho[0])
-    width = knn_widths(centre[mem], step, k=k)
-    if float(np.median(width)) ** 2 > CONSTANTS.landscape.located_var:
-        return None
-    return LocatedMode(mode=enriched, n_members=n_members)
+    """The bulk basin, the largest by rendered mass, and the basins wholly above it, in grid order (empty
+    when nothing lies above the bulk)."""
+    bulk = max(modes, key=lambda m: m.basin_mass)
+    above = tuple(m for m in modes if m.lo >= bulk.hi - _EPS and m is not bulk)
+    return bulk, above

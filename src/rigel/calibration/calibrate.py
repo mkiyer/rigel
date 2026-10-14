@@ -22,8 +22,10 @@ landscape). The solver is the belief-propagation SWEEP over the
            the belief, solve_chain again with the landscape added per object -> the per-object pie
       -> chain_region_deconv  -> per-REGION gDNA / RNA contained mass
       -> chain_boundary_deconv  -> per-BOUNDARY gDNA / RNA crossing mass, for the per-locus prior
-      -> gdna_density_global (the library-average density QC scalar) and gdna_reference_density (the
-         located enriched mode of the last refit's landscape — the ruler's reference; None ⇒ no contraction)
+      -> gdna_density_global (the library-average density QC scalar)
+      -> capture_efficiencies: every object's own gDNA density against the last refit's landscape, read as a
+         two-group prior — the efficiencies, the bulk density they are read in and the saturation level, for
+         the ruler; no landscape ⇒ every efficiency is 1
 
 ⛔ THE GEOMETRY IS BUILT FIRST, AND IT OWNS EVERY DIVISOR. ``build_region_geometry`` produces the
 per-slot ``eff_gdna``/``eff_rna`` before anything reads a count, and everything downstream — the
@@ -60,13 +62,13 @@ from .region_geometry import (
 )
 from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
 from .derive import gdna_density_global
-from .capture_efficiency import capture_efficiencies
+from .capture_efficiency import CaptureReading, capture_efficiencies
 from .effective_length import UNBOUNDED_REACH, conserved_cut_shares
 from .blocks import SweepCapture
 from .region_arrays import boundary_region_indices
 from .region_chain import build_region_chain
 from .result import CalibrationResult
-from .landscape import DensityLandscape, fit_landscape, located_enriched_mode
+from .landscape import DensityLandscape, fit_landscape
 from .signature import RegionType, coarse_type_array
 from .strand_balance import fit_strand_balance
 from .substrate import CalibrationSubstrate
@@ -395,10 +397,7 @@ def _result(
     strand: _Strand,
     region_eff_gdna,
     boundary_eff_gdna,
-    gdna_reference_density: float | None,
-    gdna_reference_members: int,
-    efficiency: np.ndarray,
-    efficiency_boundary: np.ndarray,
+    capture: CaptureReading | None,
     boundary_conserved_gdna: np.ndarray,
 ) -> CalibrationResult:
     """The solved chain projected onto the two payload axes and published as the
@@ -411,7 +410,9 @@ def _result(
     region's contained population cannot hold a spliced molecule. ``count_rna_sj`` is the JUMPING
     population, exported verbatim — pure RNA by construction, nothing to deconvolve. The three
     ``mass_per_crossing`` are each their own population's incidence→fragment conversion, never applied
-    to another population."""
+    to another population. ``capture`` is the capture reader's answer, ``None`` when no landscape was fitted:
+    then every efficiency is exactly 1, there is no bulk density and the saturation level is 1."""
+    n_regions, n_boundaries = int(substrate.n_regions), int(substrate.n_boundaries)
     return CalibrationResult(
         count_gdna_region=regions.gdna_mass,
         count_rna_region=regions.rna_mass,
@@ -438,15 +439,19 @@ def _result(
         gdna_density_global=gdna_density_global(
             regions, boundaries, region_eff_gdna, boundary_eff_gdna
         ),
-        gdna_reference_density=gdna_reference_density,
-        gdna_reference_members=gdna_reference_members,
-        gdna_capture_efficiency_region=efficiency,
-        gdna_capture_efficiency_boundary=efficiency_boundary,
+        gdna_bulk_density=None if capture is None else capture.bulk_density,
+        gdna_capture_saturation=1.0 if capture is None else capture.saturation,
+        gdna_capture_efficiency_region=(
+            np.ones(n_regions) if capture is None else capture.efficiency_region
+        ),
+        gdna_capture_efficiency_boundary=(
+            np.ones(n_boundaries) if capture is None else capture.efficiency_boundary
+        ),
         rna_sense_frac=strand.rna_sense_frac,
         gdna_strand_overdispersion=0.0,
         rna_strand_overdispersion=0.0,
-        n_regions=int(substrate.n_regions),
-        n_boundaries=int(substrate.n_boundaries),
+        n_regions=n_regions,
+        n_boundaries=n_boundaries,
         n_sj=int(substrate.n_sj),
     )
 
@@ -474,17 +479,17 @@ def _log_summary(result: CalibrationResult, strand: _Strand, substrate, sj) -> N
     spl_sense = float(np.where(is_pos, flux[:, 0], flux[:, 1]).sum())
     spl_total = float(flux.sum())
     sj_sense_frac = spl_sense / spl_total if spl_total > 0.0 else float("nan")
-    if result.gdna_reference_density is None:
+    if result.gdna_bulk_density is None:
         logger.info(
-            "calibration: no located enriched gDNA mode — effective lengths are not corrected for "
-            "capture (the reference needs about √n located probed pieces at one gDNA fragment or more)"
+            "calibration: no gDNA landscape — every capture efficiency is 1, and effective lengths are not "
+            "corrected for capture"
         )
     else:
         logger.info(
-            "calibration: capture reference %.3e gDNA fragments/bp, the located enriched mode of %d "
-            "kernels at one fragment or more",
-            result.gdna_reference_density,
-            result.gdna_reference_members,
+            "calibration: capture read against the gDNA bulk at %.3e fragments/bp; the landscape's saturated "
+            "level is %.4g× the bulk (1: no level above it)",
+            result.gdna_bulk_density,
+            result.gdna_capture_saturation,
         )
     logger.debug(
         "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
@@ -558,30 +563,23 @@ def calibrate(
         eff_global,
     )
     belief, gdna_hyperprior = _solve(solve, _debug)
-    # THE RULER'S REFERENCE: the fully-captured gDNA level is the located enriched mode of the fitted
-    # landscape, or nothing — capture-OFF and gDNA-free libraries carry no enriched mode and contract
-    # nothing. One definition, read by `capture_eff_length` and `priors`.
-    enriched = located_enriched_mode(gdna_hyperprior) if gdna_hyperprior is not None else None
-    gdna_reference_density = float(np.exp(enriched.mode.log_rho)) if enriched is not None else None
-    gdna_reference_members = enriched.n_members if enriched is not None else 0
-    # THE CAPTURE EFFICIENCIES: every object's clipped gDNA density against the reference, the posterior
-    # mean under the landscape from its own count — a region's contained, a boundary's crossing
-    # (`capture_efficiency`); published on the result for the ruler and the locus prior. No reference ⇒
-    # every efficiency is exactly 1.
+    # THE CAPTURE EFFICIENCIES: every object's own gDNA density read against the last landscape's bulk, the
+    # landscape as a two-group prior and the object's own count as the likelihood — a region's contained, a
+    # boundary's crossing (`capture_efficiency`). Published on the result with the bulk density and the
+    # saturation level, for the ruler and the locus prior. No landscape ⇒ every efficiency is exactly 1.
     regions = chain_region_deconv(chain, belief, substrate)
     boundaries = chain_boundary_deconv(chain, belief, substrate)
-    if gdna_reference_density is None:
-        efficiency = np.ones(int(substrate.n_regions))
-        efficiency_boundary = np.ones(int(substrate.n_boundaries))
-    else:
-        efficiency, efficiency_boundary = capture_efficiencies(
+    capture = (
+        None
+        if gdna_hyperprior is None
+        else capture_efficiencies(
             gdna_hyperprior,
-            gdna_reference_density,
             regions.gdna_mass,
             region_eff_gdna,
             boundaries.gdna_mass,
             boundary_eff_gdna,
         )
+    )
     result = _result(
         substrate,
         regions,
@@ -589,10 +587,7 @@ def calibrate(
         strand,
         region_eff_gdna,
         boundary_eff_gdna,
-        gdna_reference_density,
-        gdna_reference_members,
-        efficiency,
-        efficiency_boundary,
+        capture,
         _gdna_boundary_conserved_len(region_arrays, gdna_fl_pmf),
     )
 

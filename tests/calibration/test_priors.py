@@ -7,8 +7,8 @@ locus of ``k`` contiguous regions carries ``k + 1`` boundaries including its two
 no boundary's mass is ever folded into a region's total. The second half of this file gates that
 projection; the first half gates what ``assemble_priors`` builds on it. The gDNA length is gDNA's
 share of each object — a region's contained support ``S_r``, a boundary's conserved share ``M_e`` — at the
-object's own capture efficiency, and its bedrock invariant is that with no reference every efficiency is
-1, so ``gdna_eff_len == span == Σ S_r + Σ M_e`` exactly and an unenriched library contracts nothing.
+object's own capture efficiency, and its bedrock invariant is that with no landscape every efficiency is
+1, so ``gdna_eff_len == Σ S_r + Σ M_e`` exactly and an unenriched library contracts nothing.
 Reading the genomic ``region_size_bp`` instead of ``S`` fabricates a contraction.
 """
 
@@ -50,8 +50,7 @@ def _result(
     boundary_spliced=None,
     mass_per_crossing=None,
     gdna_density_global=0.01,
-    gdna_reference_density=None,
-    gdna_reference_members=0,
+    gdna_bulk_density=None,
     efficiency=None,
     efficiency_boundary=None,
 ) -> CalibrationResult:
@@ -62,7 +61,7 @@ def _result(
     own region axis is a mis-shaped fixture, not a "no boundaries" one.
 
     ``efficiency`` / ``efficiency_boundary`` are the per-object capture efficiencies (1 everywhere by
-    default, as a field with no reference must carry). ``boundary_share`` is gDNA's conserved share at each
+    default, as a library with no landscape carries). ``boundary_share`` is gDNA's conserved share at each
     boundary; it defaults to the crossing support, which it equals where both flanks exceed every fragment
     length — a crossing start then crosses one boundary, as ``q`` at its identity 1 says.
     """
@@ -112,8 +111,8 @@ def _result(
         rna_pos_frac_boundary=ez.copy(),
         rna_neg_frac_boundary=ez.copy(),
         gdna_density_global=gdna_density_global,
-        gdna_reference_density=gdna_reference_density,
-        gdna_reference_members=0 if gdna_reference_density is None else 1,
+        gdna_bulk_density=gdna_bulk_density,
+        gdna_capture_saturation=1.0,
         gdna_capture_efficiency_region=(
             np.ones(n) if efficiency is None else np.asarray(efficiency, dtype=np.float64)
         ),
@@ -183,7 +182,7 @@ def _ml(locus_id, blocks) -> MultiLocus:
 
 
 def test_factor_one_under_uniform_gdna():
-    # THE correctness criterion. A uniform (unenriched) gDNA field carries no reference, every efficiency
+    # THE correctness criterion. A uniform (unenriched) gDNA field is one level, every efficiency
     # is 1, and gdna_eff_len = span = Σ S EXACTLY: region_eff=[120,200,80] (region 1 is SHORT),
     # boundary shares [120,120] (q = 1), ρ=0.02 over 3 same-ref regions ⇒ span = 400 + 240 = 640; and the
     # gDNA per-position rate G/eff_len recovers the true ρ.
@@ -560,8 +559,7 @@ def _stray_on_a_dead_boundary_cal(stray: float) -> CalibrationResult:
         boundary_g=[stray, 5.0, 50.0, 50.0, 50.0, 50.0],
         boundary_eff=[0.0, 50.0, 50.0, 50.0, 50.0, 50.0],
         gdna_density_global=1.0,
-        gdna_reference_density=1.0,
-        gdna_reference_members=1,
+        gdna_bulk_density=1.0,
         efficiency=[1.0, 0.2, 1.0, 1.0, 1.0, 1.0, 1.0],
     )
 
@@ -605,17 +603,16 @@ def test_region_count_mismatch_raises():
         assemble_priors(cal, ra, [_ml(0, [(0, 0, 100)])])
 
 
-def test_gdna_eff_len_is_the_span_when_every_object_sits_at_the_reference():
-    # Priors-side factor-1 WITH a reference: 6 regions at the reference (efficiency 1 everywhere) read
-    # the span, 850, exactly — the same as with no reference on the result.
+def test_gdna_eff_len_is_the_plain_support_when_every_object_sits_at_the_bulk():
+    # Priors-side factor-1 WITH a landscape: 6 regions at the bulk (efficiency 1 everywhere) read the plain
+    # support, 850, exactly — the same as with no landscape on the result.
     import dataclasses
 
     ra = _six_region_ra()
     rho = 2.0
     cal = dataclasses.replace(
         _uniform_field(np.full(6, 100.0), np.full(5, 50.0), rho),
-        gdna_reference_density=rho,
-        gdna_reference_members=1,
+        gdna_bulk_density=rho,
     )
     span = 6 * 100.0 + 5 * 50.0  # 850
     np.testing.assert_allclose(
@@ -640,8 +637,7 @@ def test_the_length_is_the_counts_objects_at_their_efficiencies():
         boundary_g=eg,
         boundary_eff=np.full(5, 50.0),
         gdna_density_global=1.0,
-        gdna_reference_density=1.0,
-        gdna_reference_members=1,
+        gdna_bulk_density=1.0,
         efficiency=[0.1, 1.0, 1.0, 1.0, 1.0, 1.0],
         efficiency_boundary=[0.4, 1.0, 1.0, 1.0, 1.0],
     )
@@ -667,13 +663,57 @@ def test_a_locus_yield_below_one_base_is_not_floored():
             boundary_g=np.full(5, 50.0),
             boundary_eff=np.full(5, 50.0),
             gdna_density_global=1.0,
-            gdna_reference_density=1.0,
-            gdna_reference_members=1,
+            gdna_bulk_density=1.0,
             efficiency=[c, 1.0, 1.0, 1.0, 1.0, 1.0],
             efficiency_boundary=[c, 1.0, 1.0, 1.0, 1.0],
         )
         eff = assemble_priors(cal, ra, [_ml(0, [(0, 0, 100)])]).gdna_eff_len[0]
         np.testing.assert_allclose(eff, expect, rtol=1e-12, atol=0.0)
+
+
+def test_an_enriched_locus_reads_above_its_plain_support_and_nothing_clips_it():
+    """In the bulk unit an enriched object contributes its share at its efficiency, far above 1, so a captured
+    locus's yield exceeds its plain support. Nothing may clip it there: a bound at the plain support belonged
+    to the old unit, where every efficiency was at most 1."""
+    ra = _six_region_ra()
+    cal = _result(
+        region_g=np.full(6, 100.0),
+        region_r=np.zeros(6),
+        region_eff=np.full(6, 100.0),
+        boundary_g=np.zeros(5),
+        boundary_eff=np.full(5, 50.0),
+        gdna_density_global=1.0,
+        gdna_bulk_density=1e-3,
+        efficiency=np.full(6, 850.0),
+        efficiency_boundary=np.full(5, 850.0),
+    )
+    plain = 6 * 100.0 + 5 * 50.0
+    eff = assemble_priors(cal, ra, [_ml(0, [(0, 0, 600)])]).gdna_eff_len[0]
+    np.testing.assert_allclose(eff, 850.0 * plain, rtol=1e-12)
+
+
+def test_a_common_factor_on_every_efficiency_scales_the_length_by_it_and_leaves_the_count():
+    """The unit is free: the EM reads every component's length in the efficiencies' unit, so one factor on every
+    efficiency scales the gDNA length by exactly that factor, and the count, which has no divisor, not at all."""
+    ra = _six_region_ra()
+    rng = np.random.default_rng(11)
+    kw = dict(
+        region_g=rng.uniform(0.0, 50.0, 6),
+        region_r=np.zeros(6),
+        region_eff=rng.uniform(40.0, 160.0, 6),
+        boundary_g=rng.uniform(0.0, 20.0, 5),
+        boundary_eff=rng.uniform(20.0, 80.0, 5),
+        gdna_density_global=1.0,
+        gdna_bulk_density=1e-3,
+    )
+    c_r, c_b = rng.uniform(0.5, 900.0, 6), rng.uniform(0.5, 900.0, 5)
+    loci = [_ml(0, [(0, 0, 300)]), _ml(1, [(0, 300, 600)])]
+    one = assemble_priors(_result(**kw, efficiency=c_r, efficiency_boundary=c_b), ra, loci)
+    scaled = assemble_priors(
+        _result(**kw, efficiency=37.5 * c_r, efficiency_boundary=37.5 * c_b), ra, loci
+    )
+    np.testing.assert_allclose(scaled.gdna_eff_len, 37.5 * one.gdna_eff_len, rtol=1e-12)
+    np.testing.assert_array_equal(scaled.gdna_count, one.gdna_count)
 
 
 # ── the locus projection underneath: a locus collects REGIONS and BOUNDARIES alike ────────────

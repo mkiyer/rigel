@@ -384,13 +384,13 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         if cal is None
         else {
             "gdna_density_global": round(float(cal.gdna_density_global), 8),
-            # calibration's capture answer, which the ruler reads: the fully-captured gDNA level the
-            # effective lengths were contracted against (None = no located enriched mode, nothing
-            # contracted) and the located regions it rests on
-            "gdna_reference_density": (
-                None if cal.gdna_reference_density is None else float(cal.gdna_reference_density)
+            # calibration's capture answer, which the ruler reads: the gDNA bulk density the capture
+            # efficiencies are read against (None = no gDNA landscape, nothing contracted) and the
+            # landscape's saturated level against that bulk (1 = no level above it)
+            "gdna_bulk_density": (
+                None if cal.gdna_bulk_density is None else float(cal.gdna_bulk_density)
             ),
-            "gdna_reference_members": int(cal.gdna_reference_members),
+            "gdna_capture_saturation": float(cal.gdna_capture_saturation),
             "rna_sense_frac": round(float(cal.rna_sense_frac), SUMMARY_DECIMALS),
             "gdna_strand_overdispersion": round(
                 float(cal.gdna_strand_overdispersion), SUMMARY_DECIMALS

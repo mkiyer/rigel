@@ -23,16 +23,16 @@ def _pct(numer: float, denom: float) -> float:
 
 
 def _capture(summary: dict) -> dict | None:
-    """Calibration's capture answer: the located enriched mode of its gDNA landscape — the fully
-    captured gDNA level, in fragments per bp, that the effective lengths are contracted against — and
-    the located regions it rests on. ``reference_density`` is ``None`` when no enriched mode was
-    located; the answer is ``None`` when the summary carries none."""
+    """Calibration's capture answer: the bulk density of its gDNA landscape — the level, in fragments per
+    bp, every capture efficiency is read against — and the landscape's saturated level as a multiple of
+    that bulk (1: no level above it). ``bulk_density`` is ``None`` when no landscape was fitted; the
+    answer is ``None`` when the summary carries none."""
     cal = summary.get("calibration") or {}
-    if "gdna_reference_density" not in cal:
+    if "gdna_bulk_density" not in cal:
         return None
     return {
-        "reference_density": cal["gdna_reference_density"],
-        "n_members": cal["gdna_reference_members"],
+        "bulk_density": cal["gdna_bulk_density"],
+        "saturation": cal["gdna_capture_saturation"],
     }
 
 
@@ -108,32 +108,22 @@ def _verdicts(summary: dict) -> list[dict]:
         }
     )
 
-    # Capture — descriptive only: variable capture performance is expected, so a located mode is
+    # Capture — descriptive only: variable capture performance is expected, so an enriched level is
     # neither good nor bad. Styled neutral ("info").
     capture = _capture(summary)
     if capture is not None:
-        if capture["reference_density"] is not None:
-            out.append(
-                {
-                    "k": "Capture",
-                    "icon": "target",
-                    "v": capture["reference_density"],
-                    "fmt": "g4",
-                    "s": "info",
-                    "n": f"gDNA fragments/bp at the enriched mode · {capture['n_members']:,} located regions",
-                }
+        if capture["bulk_density"] is None:
+            value, note = "None", "no gDNA landscape: lengths not corrected for capture"
+        elif capture["saturation"] > 1.0:
+            value = f"{capture['saturation']:,.0f}×"
+            note = (
+                f"saturated gDNA level over the bulk ({capture['bulk_density']:.3g} fragments/bp)"
             )
         else:
-            out.append(
-                {
-                    "k": "Capture",
-                    "icon": "target",
-                    "v": "None",
-                    "fmt": "text",
-                    "s": "info",
-                    "n": "no enriched gDNA mode located",
-                }
-            )
+            value, note = "1×", "one gDNA level: nothing enriched above the bulk"
+        out.append(
+            {"k": "Capture", "icon": "target", "v": value, "fmt": "text", "s": "info", "n": note}
+        )
     return out
 
 
@@ -390,13 +380,13 @@ def _calibration(sub: ReportSubstrate) -> dict:
     # Enrichment panel KPIs (capture).
     capture = _capture(sub.summary)
     enrichment_kpis = []
-    if capture is not None and capture["reference_density"] is not None:
+    if capture is not None and capture["bulk_density"] is not None:
         enrichment_kpis = [
-            {"l": "ρg reference", "v": capture["reference_density"], "fmt": "g4"},
-            {"l": "Located regions", "v": capture["n_members"], "fmt": "count"},
+            {"l": "ρg bulk", "v": capture["bulk_density"], "fmt": "g4"},
+            {"l": "Saturation × bulk", "v": capture["saturation"], "fmt": "g4"},
         ]
     elif capture is not None:
-        enrichment_kpis = [{"l": "ρg reference", "v": "None", "fmt": "text"}]
+        enrichment_kpis = [{"l": "ρg bulk", "v": "None", "fmt": "text"}]
 
     # gDNA-density panel KPIs: calibration's library scalars, then the track's.
     density_kpis = [
