@@ -31,9 +31,9 @@ signal in the same library:
 
 A single-pass native BAM scan feeds a calibration stage that separates RNA from gDNA
 genome-wide, and a locus-level EM then assigns the RNA to transcripts. Nascent RNA is
-represented as one component per unique genomic span `(ref, strand, start, end)`, shared by
-every transcript with that span, so isoforms that start and end at the same coordinates do
-not multiply nRNA states.
+represented as one component per merged span — transcript start and end sites clustered within
+`--nrna-tolerance` on each strand — shared by every transcript in it, so isoforms that start and
+end at about the same coordinates do not multiply nRNA states.
 
 ### Key features
 
@@ -43,7 +43,7 @@ not multiply nRNA states.
 - gDNA/RNA calibration that solves each genomic region's unspliced mass into sense RNA, antisense RNA and gDNA, with a gDNA-density prior fitted from the library itself
 - Calibrated per-locus gDNA priors feeding the EM
 - MAP-EM and Variational Bayes EM (VBEM, default) solver modes with SQUAREM acceleration
-- Discrete fragment assignment: `fractional`, `map`, or `sample` (default) post-EM assignment modes
+- Post-EM assignment: `sample` (default: whole counts, each fragment to one transcript or gDNA) or `fractional` (posterior weights)
 - Parallel BAM scanning and parallel locus EM controlled through one `--threads` setting
 - Feather and TSV outputs plus optional annotated BAM output with per-fragment assignment tags
 
@@ -88,7 +88,7 @@ pip install --no-build-isolation -e .
 ### Requirements
 
 - Python 3.12+
-- C++17-capable compiler
+- C++17-capable compiler and CMake ≥ 3.15 (both only to build from source; `mamba_env.yaml` installs CMake)
 - Runtime dependencies (from `pyproject.toml`): `pysam>=0.22`, `numpy>=1.26`, `pandas>=2.1`,
   `pyarrow>=14.0`, `pyyaml>=6.0`, `scipy>=1.11`
 
@@ -113,9 +113,9 @@ rigel index \
     -o index/
 ```
 
-`rigel index` requires either `--alignable-zarr PATH` (a per-base mappability store built by
-the companion `alignable` tool for the same genome and aligner, recommended for real genomes)
-or `--no-mappability` to opt out explicitly.
+`rigel index` requires either `--alignable-zarr PATH` (the store the companion `alignable` tool
+builds for the same genome and aligner, whose splice-artifact blacklist Rigel reads; recommended for
+real genomes) or `--no-mappability` to opt out explicitly.
 
 ### 2. Quantify a BAM
 
@@ -129,9 +129,12 @@ rigel quant \
 
 Input BAM requirements:
 
+- Paired-end (the scan stops at the first unpaired record)
 - Name-sorted or collated
-- `NH` tag present for multimapper handling
-- Splice-junction strand tag available for best strand-model training (`XS` or `ts`, or let Rigel auto-detect)
+- `NH` tag used for multimapper handling when present (otherwise secondary flags)
+- For a stranded library, a splice-junction strand tag: `XS` (HISAT2, or STAR with
+  `--outSAMstrandField intronMotif`) or `ts` (minimap2). Without one no junction trains the strand
+  model and the library is quantified as unstranded; `--sj-strand-tag auto` only detects which tag is present
 
 ### 3. Inspect outputs
 
@@ -167,9 +170,9 @@ file), `export` (Feather to TSV or Parquet) and `report`. `rigel --version` prin
 
 | File | Description |
 |------|-------------|
-| `quant.feather` / `quant.tsv` | Transcript-level abundance table (annotated mRNA + nRNA rows) with `count`, `count_unambig`, `count_em`, `count_spliced`, `tpm`, `tpm_total_rna`, effective lengths, and per-transcript QC columns |
+| `quant.feather` / `quant.tsv` | Transcript-level abundance table (one row per annotated transcript; synthetic nascent spans are in `nrna_quant`) with `count`, `count_unambig`, `count_em`, `count_spliced`, `tpm`, `tpm_total_rna`, effective lengths, and per-transcript QC columns |
 | `gene_quant.feather` / `gene_quant.tsv` | Gene-level aggregates derived from transcript estimates |
-| `nrna_quant.feather` / `nrna_quant.tsv` | nRNA-span-level abundance estimates (one row per unique genomic nRNA span) |
+| `nrna_quant.feather` / `nrna_quant.tsv` | Nascent-entity abundance estimates (one row per nascent entity with a multi-exon child; read overlapping spans per gene) |
 | `loci.feather` / `loci.tsv` | Per-locus EM summary |
 | `summary.json` | Library protocol, strand specificity, per-category fragment-length summary statistics, the calibration scalars, alignment counts, and global quantification totals |
 | `fragment_lengths.feather` | Raw per-bin fragment-length histograms, tidy `(category, length, count)` |
@@ -177,7 +180,7 @@ file), `export` (Feather to TSV or Parquet) and `report`. `rigel --version` prin
 | `config.yaml` | Resolved run configuration (parameters, I/O paths). Rerun with `rigel quant --config config.yaml` |
 | `report.html` | Optional self-contained QC report, built by `rigel report` (see step 4) |
 | `locus_stats.feather` | Optional per-locus statistics, emitted only with `--emit-locus-stats` |
-| `annotated.bam` | Optional annotated BAM with per-fragment assignment tags, written with `--annotated-bam` (a second BAM pass); the same records as the input, collated |
+| `--annotated-bam PATH` | Optional annotated BAM with per-fragment assignment tags (a second BAM pass); the same records as the input, collated — except that a read name whose first record is filtered (QC-failed, unmapped or a skipped duplicate) can be split around its neighbour |
 
 `tpm` is normalized over annotated transcripts only; `tpm_total_rna` normalizes over all RNA
 (annotated + synthetic nRNA spans) and is comparable to the `nrna_quant` TPM column.

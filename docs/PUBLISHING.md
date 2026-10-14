@@ -41,15 +41,18 @@ what a release contains (the changelog and git). Cutting a release is two comman
    - appends the `[X.Y.Z]: …compare/vPREV…vX.Y.Z` link at the bottom.
 3. Bumps the version string in `pyproject.toml` **and** `conda/meta.yaml`.
 4. Shows the diff and asks for confirmation.
-5. `git commit`, `git tag vX.Y.Z`, `git push origin main --tags`.
+5. `git commit`, an annotated `git tag vX.Y.Z`, then `git push origin main` and `git push origin vX.Y.Z`.
 
 **Pushing the tag is the trigger.** `.github/workflows/publish.yml` runs on
-any `v*` tag push (and on manual dispatch, never on a GitHub Release — that
-would double-fire and the second upload would fail as "file already exists"):
+any `v*` tag push (and on manual dispatch, never on a GitHub Release, which
+would double-fire; the upload skips files PyPI already holds, so a second run
+does not fail, but PyPI never lets a file be overwritten):
 it builds the sdist + Linux x86_64/aarch64 + macOS arm64 wheels and uploads
 to PyPI via OIDC trusted publishing.
 
 ### `post_release.sh X.Y.Z` — stage 2 (run after the workflow is green)
+
+It needs a clean working tree, untracked files included — unlike stage 1, which ignores them.
 
 1. Polls `https://pypi.org/pypi/rigel-rnaseq/X.Y.Z/json` every 30 s (up to
    30 min) until the sdist is live.
@@ -133,13 +136,15 @@ manual PR.
 
   ```bash
   git tag -d vX.Y.Z && git push origin --delete vX.Y.Z
-  ./scripts/publishing/release.sh X.Y.Z
+  ./scripts/publishing/release.sh X.Y.Z --force   # the version is already bumped; --force re-releases it
   ```
 
 - **PyPI upload succeeded but the release is broken.** PyPI refuses re-uploads of a version:
   add a `## [Unreleased]` section with the fix and release the next patch version.
 - **`release.sh` says the tag already exists.** Stage 1 already ran: continue with
-  `./scripts/publishing/post_release.sh <same-version>`, or delete the tag as above and retry.
+  `./scripts/publishing/post_release.sh <same-version>`, or fix, commit and re-run
+  `./scripts/publishing/release.sh X.Y.Z --force`, which deletes and re-creates the tag — safe only if
+  nothing reached PyPI.
 
 ---
 
@@ -163,7 +168,7 @@ A matching GitHub environment named `pypi` exists in repo settings.
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| `ci.yml` | Push / PR to `main` | Tests on Ubuntu + macOS, Python 3.12 + 3.13 |
+| `ci.yml` | Manual dispatch only (the push and pull-request triggers are postponed) | Tests on Ubuntu + macOS, Python 3.12 + 3.13 |
 | `publish.yml` | **Tag push `v*`** / manual dispatch (deliberately not GitHub Release, which would double-fire) | Builds sdist + wheels → PyPI |
 
 ### Wheel matrix
@@ -172,17 +177,19 @@ A matching GitHub environment named `pypi` exists in repo settings.
 |----------|------|----------------|
 | Linux | x86_64 | `manylinux_2_28` |
 | Linux | aarch64 | `manylinux_2_28` (QEMU) |
-| macOS | arm64 | `macos-latest` |
+| macOS | arm64 | `macos-15`, deployment target 15.0 |
 
-`CIBW_BUILD: "cp312-*"` (with `*-musllinux_*` skipped) builds CPython 3.12 wheels only, so
-Python 3.13 — which CI tests and the package classifies — installs from the sdist on every
-platform, as do Intel Macs. Linux glibc ≥ 2.28 required.
+`CIBW_BUILD: "cp312-*"` (with `*-musllinux_*` skipped) builds one stable-ABI wheel per platform
+(`cp312-abi3`: `wheel.py-api = "cp312"` and nanobind's `STABLE_ABI`), which Python 3.12 and 3.13 —
+both of which CI tests and the package classifies — install alike; Intel Macs build from the sdist.
+Linux glibc ≥ 2.28 required.
 
 ---
 
 ## Release checklist
 
 - [ ] `CHANGELOG.md` has a `## [Unreleased]` section with real notes
+- [ ] `ci.yml` dispatched by hand on the release commit, and green
 - [ ] `./scripts/publishing/release.sh X.Y.Z`
 - [ ] `publish.yml` green on <https://github.com/mkiyer/rigel/actions>
 - [ ] `pip install rigel-rnaseq==X.Y.Z` works in a clean env

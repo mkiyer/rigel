@@ -159,7 +159,7 @@ _SECTIONS = """
     </section>
 
     <section class="panel" id="s-enrich">
-      <div class="ph"><span class="eyebrow">06</span><h2>Calibration · Enrichment</h2><span class="desc">Capture on-target enrichment</span></div>
+      <div class="ph"><span class="eyebrow">06</span><h2>Calibration · Enrichment</h2><span class="desc">The gDNA bulk level and capture saturation</span></div>
       <div class="pb">
         <div class="kpis" id="enrich-kpis"></div>
         <div class="note" id="capture-note"></div>

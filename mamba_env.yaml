@@ -15,8 +15,8 @@ dependencies:
   - minimap2>=2.30
   - salmon
   - kallisto
-  # Build dependencies for C/C++ extensions (nanobind)
-  # - cmake>=3.15
+  # Build dependencies for C/C++ extensions (nanobind); with --no-build-isolation pip installs no CMake
+  - cmake>=3.15
   - scikit-build-core
   - nanobind>=2.1
   # Optional: 'alignable' powers --alignable-zarr at index time. It is

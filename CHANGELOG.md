@@ -17,12 +17,14 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
   exon endpoint; the 0-bp cuts between regions are boundaries and the splice junctions are their own
   axis. The scanner tallies each fragment once on that partition under one specified deposit rule,
   with an executable specification the native code is held to byte for byte. Nascent RNA is one
-  synthetic single-exon entity per unique genomic span, shared by every transcript with that span.
+  synthetic single-exon entity per merged span (start and end sites clustered within `--nrna-tolerance`),
+  shared by every transcript in it.
 - **Calibration on three populations.** Each region's and boundary's unspliced mass is solved into
   gDNA, sense RNA and antisense RNA on a log-odds grid, against a gDNA-density prior fitted from the
   library itself and refit (`--calib-refit-iters`, default 3), with the strand channel switched on
-  only where a Bayes factor says the protocol preserves strand and a strand-overdispersion estimator
-  that holds regardless of the annotation. Neighbouring objects inform one another through a
+  only where a Bayes factor says the protocol preserves strand. κ is fitted over the junctions a
+  three-class fit credits to genuine RNA, splice artifacts and reversed junctions set apart, and the
+  strand channel is binomial (overdispersion 0, by policy). Neighbouring objects inform one another through a
   message layer (a composition transfer with certified-junction flux and gDNA/RNA level lanes), the
   only channel an unstranded library or a both-stranded exon has.
 - **A second pass that drains ambiguous fragments.** Fragments whose splice status the scan could
@@ -49,13 +51,16 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
   bit-identical at every thread count (`--sweep-block-slots` sizes the per-thread arena; `--threads`
   drives the scan, the sweep and the locus EM). The scan's thread budget is split by a measured
   ratio, the second pass's lookups run in the kernel, and the fragment-length fits are vectorised.
-- **`rigel sim`**: sparse nascent RNA, capture with a fragment binding through one contiguous part of
-  a probe, R1-sense libraries, FASTQ emission, and every simulated read's true origin in its name.
-- **`rigel index --collapse-duplicate-transcripts`** and provenance in the index manifest. A collapsed
-  transcript's ID is kept in `transcript_aliases.feather`, which maps it to the transcript kept for it.
+- **The simulator** (`rigel.sim`, which `scripts/sim/panel.py` drives): sparse nascent RNA, capture with a
+  fragment binding through one contiguous part of a probe, R1-sense libraries, FASTQ emission, and every
+  simulated read's true origin in its name. The `rigel sim` scenario YAML exposes a scenario's genes, read
+  model and depth, not capture or R1-sense.
+- **Index provenance**: the manifest records the build's sources and flags, and a transcript that
+  `--collapse-duplicate-transcripts` folds into an identical one is listed in `transcript_aliases.feather`
+  beside the transcript kept for it.
 - The splice blacklist keeps the alignable count behind each junction beside its anchors.
-- A scan cache keyed by the index, the graph, the boundary reaches and the scan settings (never a
-  thread count), so a stale cache is refused rather than reused.
+- For development, a scan cache (`scripts/design/build_scan_cache.py`) keyed by the index, the graph, the
+  boundary reaches and the scan settings (never a thread count), so a stale cache is refused rather than reused.
 
 ### Changed
 
@@ -63,8 +68,19 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
 - `summary.json`'s `strand_model` reports the junction fit behind κ: `kappa` pooled over every junction and over the
   genuine ones, each class's share (genuine, splice artifact, reversed) of the junctions and of their fragments,
   `strand_live`, and one `strand_overdispersion` (0, binomial), which replaces the calibration block's two.
-- Quantification is reproducible run to run: the second pass draws from one seeded stream and the
-  index loader refuses an index it did not build (no manifest, or another format version).
+- Quantification is reproducible from one seeded stream, which the second pass draws from; output is
+  bit-identical run to run with `--threads 1` (with more scan threads the order of floating-point sums can move
+  a few fragments between isoforms). The index loader refuses an index it did not build (no manifest, or
+  another format version).
+- `--assignment-mode sample` (the default) makes whole counts first: each fragment goes to exactly one
+  transcript or to gDNA, and the counts equal the fractional counts rounded, whatever the seed.
+- An unknown key in a `--config` file is an error that lists the keys this version knows and names the version
+  that wrote the file (0.7.1 warned and ignored it).
+- The fragment-length categories in `summary.json` and `fragment_lengths.feather` are `global`, `gdna`, `rna`
+  and five observed pools (`pool_dna_intergenic`, `pool_dna_intronic`, `pool_dna_intron_exon`,
+  `pool_dna_intergenic_exon`, `pool_rna_spliced`), replacing 0.7.1's per-splice-type categories.
+- Writing `loci.feather` no longer scales with loci × transcripts (a deep library's 22,787 loci: 11 s →
+  0.15 s), and a spilled fragment buffer holds one chunk less in memory.
 - Chimera detection checks genomic compatibility before calling a fragment a chimera, and an empty
   hypothesis set no longer dereferences a null pointer in the accumulator.
 - The locus EM hands loci to its threads one at a time, so long loci no longer queue behind one another
@@ -88,6 +104,8 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
 - The fragment-length composition channel and the NPMLE gDNA prior: measured and retired.
 - `--mappability-read-length` (a no-op), `--gdna-prior-mixture-bridge`, `--sweep-n-grid-single-strand`
   and `--gdna-em-llr-bias` (an underived odds dial), and the `measured_total` background estimator.
+- `--assignment-mode map` and `--assignment-min-posterior`: `sample` makes whole counts with no
+  per-fragment cutoff.
 - `gdna_density_kde.feather` and `gdna_density_regions.feather` (`gdna_density_nodes.feather` in 0.7.1): a
   fitted curve of the total fragment density, gDNA and RNA together, that no calibration number read.
 
@@ -98,9 +116,23 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
   splits its intergenic pool the same way, and the annotated BAM labels them `ZF` 0x21 rather than 0x25.
 - The nascent table's `n_contributing_transcripts` counts the contributors of every span a single-exon nascent entity
   covers, not only the last span's.
-- The gDNA fragment-length law the EM scores with read the spliced RNA fragment counts as if they were a
-  probability law, so every exon-flanking boundary read as pure gDNA. It now reads the smoothed RNA
-  length law. Output moves under hybrid capture and wherever nascent RNA crosses an exon boundary.
+- `--overhang-alpha 0`, documented as a hard gate, gave every candidate without overhang a NaN score, and every
+  EM-routed fragment was dropped silently. It is now a hard gate: a candidate with overhang is skipped and the rest
+  are scored.
+- GTF: a last attribute without its `;` is read. An exon with no `transcript_id`, or on another chromosome or strand
+  than its transcript, follows `--gtf-parse-mode` (`strict` refuses the file, `warn-skip` drops the exon) instead of
+  failing outside it or merging silently.
+- The splice-junction strand tag: an unknown `--sj-strand-tag` is refused. The tag the scan read with (what `auto`
+  resolved to) is logged and recorded in `summary.json` and `config.yaml`. A library whose spliced reads carry no tag
+  warns that it is quantified as unstranded.
+- An index whose splice blacklist is not applied warns when it loads: a manifest that names an alignable store whose
+  blacklist file is missing, or a blacklist file with no store in the manifest. 0.7.1 reported a missing blacklist
+  only through `summary.json`'s `sj_blacklist_loaded`.
+- The HTML report escapes sample names, paths, gene names and reference names before they become markup.
+- `rigel sim` refuses an empty fragment-length window instead of looping forever.
+- A SQUAREM jump that would carry a still-live EM component below the floor is shortened toward the plain EM
+  step instead of being clamped there, so which of several transcripts sharing fragments survives no longer
+  depends on where the EM started.
 
 ## [0.7.1] - 2026-07-12
 

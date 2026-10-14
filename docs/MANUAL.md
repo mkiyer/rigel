@@ -2,7 +2,7 @@
 
 This is the user's reference for Rigel: how to install it, what it needs as input, the five CLI
 subcommands (`index`, `quant`, `sim`, `export`, `report`) flag by flag, every output file and its
-columns, what the calibration stage produces and its two user-facing knobs, and recipes for common
+columns, what the calibration stage produces and its one user-facing knob, and recipes for common
 runs. It does not explain the statistical model or why the design is the way it is: the derivations
 live in `docs/EQUATIONS.md` and the design and its rulings in `docs/DESIGN.md`. `rigel <subcommand>
 --help` is always the authoritative flag list.
@@ -64,12 +64,13 @@ rigel -v quant ...       # -v / --verbose: DEBUG-level logging for any subcomman
 
 ### BAM
 
+- **Paired-end** — the scan stops at the first unpaired record
 - **Name-sorted or collated** — not coordinate-sorted
 - **`NH` tag** used for multimapper handling when present; otherwise
   multimappers are detected from secondary BAM flags
-- Splice-junction strand tag recommended for strand-model accuracy
-  (`XS` from HISAT2, or from STAR with `--outSAMstrandField intronMotif`; `ts` from minimap2; or `auto` for
-  detection)
+- **A splice-junction strand tag, for a stranded library** (`XS` from HISAT2, or from STAR with
+  `--outSAMstrandField intronMotif`; `ts` from minimap2). Without one no junction trains the strand model
+  and the library is quantified as unstranded; `--sj-strand-tag auto` only detects which tag is present
 
 Name-sort an existing BAM:
 
@@ -176,7 +177,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 |------|---------|-------------|
 | `--include-multimap` / `--no-include-multimap` | on | Include multimapping reads |
 | `--keep-duplicates` / `--no-keep-duplicates` | off | Keep reads marked PCR/optical duplicates |
-| `--sj-strand-tag TAG [...]` | `auto` | Splice-junction strand tag. `auto` detects from the first 1,000 spliced reads; use `XS` (HISAT2, or STAR with `--outSAMstrandField intronMotif`), `ts` (minimap2), or list several to try in order (e.g. `XS ts`). |
+| `--sj-strand-tag TAG [...]` | `auto` | Splice-junction strand tag. `auto` detects from the first 1,000 spliced reads; use `XS` (HISAT2, or STAR with `--outSAMstrandField intronMotif`), `ts` (minimap2), both to try in order (`XS ts`, either order), or `none` to read no tag (the library is then quantified as unstranded). Any other value is refused. |
 
 **Model parameters**
 
@@ -214,8 +215,8 @@ Every flag is also documented by `rigel <subcommand> --help`.
 ### rigel sim
 
 Generates a small synthetic scenario for benchmarking and development: a random
-genome, a GTF, simulated reads aligned with minimap2 and collated with samtools,
-and a ready-built index. The scenario is defined by a YAML file; the three CLI
+genome, a GTF, simulated reads aligned with minimap2 and name-sorted with samtools
+(both must be on `PATH`), and a ready-built index. The scenario is defined by a YAML file; the three CLI
 numeric options provide defaults that the YAML overrides.
 
 ```bash
@@ -286,7 +287,8 @@ rigel report results/sample/ -o qc.html --title "Sample 42"
 
 The report covers alignment fates, fragment composition (including the splice-artifact
 blacklist status), the strand model, per-category fragment-length distributions, the
-mRNA / nRNA / gDNA split, capture on-target enrichment, a genome-wide gDNA-density track, and
+mRNA / nRNA / gDNA split, calibration's capture answer (the gDNA bulk density and the saturated
+level over it), a genome-wide gDNA-density track, and
 a searchable gene-expression table, in one offline file.
 
 Without the `[report]` extra (see Installation) the report still builds, with every chart
@@ -298,7 +300,8 @@ omitted.
 
 Real genomes have regions where reads cannot map uniquely, and aligners emit
 recurrent spurious splice junctions there. Rigel can ingest a Zarr store built
-by the companion `alignable` tool (`pip install alignable`) for the *same*
+by the companion `alignable` tool (not yet on PyPI or Bioconda: install it from a checkout with
+`pip install -e /path/to/alignable`) for the *same*
 genome and aligner, at index time via `--alignable-zarr`. From it the index
 records a **splice-junction artifact blacklist**: those spurious sj are treated
 as unspliced during scoring, which the annotated BAM reports per record via the
@@ -357,7 +360,7 @@ Pass `--tsv` to also write `.tsv` mirrors, or convert afterward with
 
 | File | Contents |
 |------|----------|
-| `quant.feather` | Per-transcript abundance (mRNA + nRNA rows) |
+| `quant.feather` | Per-transcript abundance (one row per annotated transcript; synthetic nascent spans are in `nrna_quant`) |
 | `gene_quant.feather` | Gene-level aggregation |
 | `nrna_quant.feather` | nRNA entity estimates |
 | `loci.feather` | Per-locus EM summary |
@@ -394,14 +397,14 @@ transcripts are included; synthetic nRNA spans appear in `nrna_quant`.
 | `effective_length` | Length after fragment-length correction; the length `tpm` is normalised by, never contracted by capture |
 | `em_effective_length` | The yield the EM reads: `effective_length` scaled by the capture efficiency of every stretch the transcript's fragments land on (its exon pieces, the boundaries between them and its splice junctions), each read from the genomic DNA captured there or, for a junction, beside it. An efficiency is relative to uncaptured gDNA (the bulk), so `em_effective_length` equals `effective_length` off the probes and in a library without capture, and rises above it where capture enriched the transcript — to about `gdna_capture_saturation` times for a fully captured one. `count / em_effective_length` is the capture-corrected abundance, and a zero-count transcript's abundance is below about `3 / em_effective_length` |
 | `locus_id` | Locus ID; `-1` if not placed in an EM locus |
-| `nrna_id` | ID of the parent nRNA entity (`"."` if none or if the row is itself an nRNA entity) |
-| `is_basic` | `1` if the transcript has the GENCODE `basic` tag |
-| `is_mane` | `1` if MANE Select or MANE Plus Clinical |
-| `is_nrna` | `1` if single-exon (indistinguishable from nascent RNA) |
+| `nrna_id` | ID of the parent nRNA entity (`"."` if none; an annotated single-exon nascent entity names itself) |
+| `is_basic` | True if the transcript has the GENCODE `basic` tag |
+| `is_mane` | True if MANE Select or MANE Plus Clinical |
+| `is_nrna` | True if single-exon (indistinguishable from nascent RNA) |
 | `count` | Fragment count assigned to this transcript |
 | `count_unambig` | Deterministically assigned fragment count |
 | `count_em` | EM-assigned fragment count |
-| `count_spliced` | Fragment count from annotated-spliced fragments |
+| `count_spliced` | Fragment count from spliced fragments (annotated and unannotated junctions) |
 | `nrna_parent_count` | Parent nRNA entity's count (0 if `is_nrna=1` or no parent) |
 | `tpm` | Transcripts per million (annotated transcripts only) |
 | `tpm_total_rna` | TPM over all RNA (annotated + synthetic nRNA); comparable to `tpm` in `nrna_quant` |
@@ -445,7 +448,7 @@ child. Standalone single-exon genes with no multi-exon overlap appear in
 | `effective_length` | Effective length after fragment-length correction (the length TPM divides by) |
 | `em_effective_length` | The effective length the EM reads (capture-aware) |
 | `locus_id` | Locus containing this entity |
-| `is_synthetic` | `1` if synthesized by rigel |
+| `is_synthetic` | True if synthesized by rigel |
 | `n_contributing_transcripts` | Number of multi-exon transcripts merged into this span |
 | `n_mrna` | Number of multi-exon mRNA transcripts associated with the entity |
 | `mrna_count` | Sum of mRNA children's fragment counts |
@@ -479,7 +482,7 @@ components (one per transcript row + one gDNA).
 | `n_em_fragments` | Ambiguous fragments entering EM |
 | `count_unambig` | Deterministic (splice-confirmed) mRNA count that bypassed EM |
 | `mrna` | Total mRNA count (EM-assigned annotated + unambiguous) |
-| `nrna` | Total nRNA count |
+| `nrna` | nRNA count on the locus's synthetic spans (an annotated single-exon nascent entity's count is in `mrna`) |
 | `gdna` | Total gDNA count |
 | `total` | `mrna + nrna + gdna` |
 | `gdna_rate` | `gdna / total` |
@@ -490,20 +493,20 @@ components (one per transcript row + one gDNA).
 
 ### fragment_lengths.feather / fragment_lengths.tsv
 
-Raw fragment-length histograms in tidy long form — one row per non-empty 1-bp
-bin. This is the plotting substrate for the fragment-length distributions;
+Raw fragment-length histograms in tidy long form — one row per 1-bp bin from the
+first non-empty bin to the last. This is the plotting substrate for the fragment-length distributions;
 `summary.json` carries only their summary statistics.
 
 | Column | Description |
 |--------|-------------|
-| `category` | FL model: `global`, `gdna`, `rna`, or a splice category (`unspliced`, `spliced_annot`, `spliced_unannot`, `spliced_implicit`, `splice_artifact`) |
+| `category` | FL model: `global`, `gdna`, `rna`, or one of the five observed pools (`pool_dna_intergenic`, `pool_dna_intronic`, `pool_dna_intron_exon`, `pool_dna_intergenic_exon`, `pool_rna_spliced`) |
 | `length` | Fragment length (bp) |
 | `count` | Fragment weight in this bin (fractional for the `gdna` structural pool) |
 
 Per category, `count` sums to the matching `summary.json` →
 `fragment_length.<category>.n_observations`. The `gdna` / `rna` categories are
-the deconvolved structural pools used for scoring/calibration; the splice
-categories are the scanner's raw per-fragment histograms.
+the length models scoring and calibration use; the five pools are the observed
+histograms they are built from.
 
 ### summary.json
 
@@ -519,13 +522,13 @@ the current version is **3**. Top-level keys:
 | `command` | Subcommand, resolved arguments, config-file path |
 | `configuration` | All resolved pipeline parameters |
 | `input` | Absolute BAM and index paths |
-| `alignment_stats` | Two unit families: record-level counts (`total_reads`, `mapped_reads`, `secondary_reads`, `supplementary_reads`, `proper_pairs`, `duplicate_reads`, `qc_fail_reads`) and read-name-group counts (`read_groups`, `unique_reads`, `multimapping_reads`). The report's read-fate bar uses the read-group family so its segments share one denominator |
+| `alignment_stats` | Two unit families: record-level counts (`total_reads`, `mapped_reads`, `unmapped_reads`, `secondary_reads`, `supplementary_reads`, `proper_pairs`, `duplicate_reads`, `qc_fail_reads`) and read-name-group counts (`read_groups`, `unique_reads`, `multimapping_reads`). The report's read-fate bar uses the read-group family so its segments share one denominator |
 | `fragment_stats` | Total, genic, intergenic, and chimeric breakdowns; annotated/unannotated SJ counts; a `splice` sub-block with the per-fragment splice-type breakdown (`unspliced`, `spliced_annotated`, `spliced_unannotated`, `spliced_implicit`, `splice_artifact`) plus `sj_blacklisted`, and blacklist provenance `sj_blacklist_size` / `sj_blacklist_loaded` (so `splice_artifact: 0` reads as "detection off — no blacklist in the index" vs "detection on, none found") |
-| `strand_model` | Protocol (`R1-sense` / `R1-antisense`), strand specificity, `p_r1_sense`, training count, posterior variance, 95% CI; the junction fit behind κ — `kappa` (the spliced reads' sense fraction, `pooled` over every junction and `genuine` over the junctions the three-class fit credits to RNA), `junction_classes` (each class's share — `genuine`, `artifact`, `reversed` — `by_junction` and `by_fragment`; shallow splice artifacts are most of the junctions and few of the fragments), `strand_live` (whether the protocol preserves strand, the decision calibration's strand channel reads) and `strand_overdispersion` (0, `binomial`, for gDNA and RNA alike); and a `diagnostics` sub-block comparing the all-exonic model to the spliced-only model (`contamination_gap` — a positive value flags unstranded gDNA contamination) |
+| `strand_model` | Protocol (`R1-sense` / `R1-antisense`, and `read1_sense`), strand specificity, `p_r1_sense`, training count, the per-junction strand table's QC (`sj`), posterior variance, 95% CI; the junction fit behind κ — `kappa` (the spliced reads' sense fraction, `pooled` over every junction and `genuine` over the junctions the three-class fit credits to RNA), `junction_classes` (each class's share — `genuine`, `artifact`, `reversed` — `by_junction` and `by_fragment`; shallow splice artifacts are most of the junctions and few of the fragments), `strand_live` (whether the protocol preserves strand, the decision calibration's strand channel reads) and `strand_overdispersion` (0, `binomial`, for gDNA and RNA alike); and a `diagnostics` sub-block comparing the all-exonic model to the spliced-only model (`contamination_gap` — a positive value flags unstranded gDNA contamination) |
 | `calibration` | Library-scalar calibration outputs (see below) |
 | `gdna_eff_len` | Summary of the per-locus gDNA effective-length series (`em`) |
-| `fragment_length` | Per-category FL **summary statistics only** (`n_observations`, `mean`, `std`, `median`, `mode`, `max_size`, `overflow_count`, `overflow_fraction`) for `global`, `gdna`, `rna`, and each splice category. The raw per-bin histograms are in `fragment_lengths.feather` |
-| `quantification` | `n_transcripts`, `n_genes`, `n_loci`, assignment counts, and the pools' totals and fractions: mRNA, nRNA, the EM's genic gDNA (`gdna_total`), every intergenic fragment (`intergenic_total`) and the spliced ones among them (`intergenic_spliced`: RNA no annotated transcript holds, certified by its junction). `gdna_fraction` is the EM's gDNA plus the unspliced intergenic fragments; `mrna_fraction + nrna_fraction + gdna_fraction + intergenic_rna_fraction = 1` |
+| `fragment_length` | Per-category FL **summary statistics only** (`n_observations`, `mean`, `std`, `median`, `mode`, `max_size`, `overflow_count`, `overflow_fraction`) for `global`, `gdna`, `rna` and the five pools. The raw per-bin histograms are in `fragment_lengths.feather` |
+| `quantification` | `n_transcripts`, `n_genes`, `n_loci`, assignment counts, and the pools' totals and fractions: mRNA, nRNA, the EM's genic gDNA (`gdna_total`), every intergenic fragment (`intergenic_total`) and the spliced ones among them (`intergenic_spliced`: RNA no annotated transcript holds, certified by its junction). `gdna_fraction` is the EM's gDNA plus the unspliced intergenic fragments; `mrna_fraction + nrna_fraction + gdna_fraction + intergenic_rna_fraction = 1`. `gdna_em_fraction` is the EM's genic gDNA alone, and `intergenic_fraction` the share of every intergenic fragment |
 
 The **`calibration`** block holds exactly the library-wide calibration
 scalars (it is `null` if calibration did not run):
@@ -563,19 +566,19 @@ capture.
 
 The RNA and gDNA fragment-length models used by scoring/calibration are
 reported under the top-level **`fragment_length`** key (as
-`fragment_length.rna` and `fragment_length.gdna`), alongside the global and
-per-splice-category FL summaries. The `calibration` block above is the
-complete set of calibration keys; a manifest from an older release may carry
-keys this manual does not list, which the current version (0.7.1,
-`pyproject.toml`) no longer writes.
+`fragment_length.rna` and `fragment_length.gdna`), alongside the global model
+and the five pools. The `calibration` block above is the complete set of
+calibration keys; a manifest from an older release may carry keys this manual
+does not list, which the current version no longer writes.
 
 ### Annotated BAM
 
 Produced by `--annotated-bam PATH`. Requires a second pass over the BAM.
 
-The output is a collated BAM with exactly the same records as the input (no drops, no
-duplications, every qname in one contiguous run); filtered records (QCFAIL / unmapped / unpaired /
-skipped duplicates) are written through unchanged without annotation tags.
+The output is a BAM with exactly the same records as the input (no drops, no duplications), collated —
+every qname in one contiguous run, except that a qname whose first record is filtered (QC-failed, unmapped
+or a skipped duplicate) can be split around its neighbour, a known defect. Filtered records are written
+through unchanged without annotation tags.
 
 | Tag | Type | Description |
 |-----|------|-------------|
@@ -591,16 +594,15 @@ skipped duplicates) are written through unchanged without annotation tags.
 | `ZN` | int | Number of competing candidate components |
 | `ZS` | string | Splice type: `spliced_annot`, `spliced_unannot`, `spliced_implicit`, `splice_artifact`, `unspliced`, or `unknown` |
 | `ZL` | int | Locus ID (`-1` if no locus) |
-| `ZB` | int | Number of SJs in **this record's CIGAR** matched to the splice-artifact blacklist and treated as unspliced during scoring. Record-local. Always `0` when no blacklist is loaded. Summed over the BAM it equals the Pass-1 stat `n_sj_blacklisted`. |
+| `ZB` | int | Number of SJs in **this record's CIGAR** matched to the splice-artifact blacklist and treated as unspliced during scoring. Record-local. Always `0` when no blacklist is loaded. Summed over the BAM it equals `summary.json`'s `fragment_stats.splice.sj_blacklisted`. |
 
 #### ZF assignment flags
 
-`ZF` is an 8-bit bitfield describing the fate of the fragment (or read when
-unpaired) in the EM pipeline:
+`ZF` is an 8-bit bitfield describing the fate of the fragment in the pipeline:
 
 | Bit | Mask | Flag | Meaning |
 |-----|------|------|---------|
-| 0 | 0x01 | `is_resolved` | Fragment was scored and assigned by the EM |
+| 0 | 0x01 | `is_resolved` | Fragment was assigned to a pool, by the EM or deterministically |
 | 1 | 0x02 | `is_mrna` | Assigned to a spliced mRNA transcript |
 | 2 | 0x04 | `is_gdna` | Assigned to the gDNA component (EM gDNA or unspliced intergenic) |
 | 3 | 0x08 | `is_nrna` | Assigned to a nascent-RNA component |
@@ -613,6 +615,7 @@ Canonical `ZF` values (the only ones produced):
 
 | ZF (hex) | Dec | Meaning |
 |----------|-----|---------|
+| `0x00` |   0 | Unresolved: scored, but assigned no pool |
 | `0x03` |   3 | mRNA assigned (multi-exon transcript) |
 | `0x09` |   9 | nRNA assigned (annotated single-exon transcript) |
 | `0x19` |  25 | nRNA assigned (rigel-synthesized span) |
@@ -674,7 +677,8 @@ Advanced; the default suits standard libraries.
 
 The remaining `CalibrationConfig` fields (for example `sweep_logodds_step`, the log-odds
 lattice's step, which is dimensionless and guarantees every slot's composition to within 1.25 % of its
-mass) are not exposed on the CLI or in the YAML.
+mass) are not exposed on the CLI or in the YAML, save `--sweep-block-slots`, a memory setting that moves
+no number.
 
 Every fixed number the code reads — the numerical methods' settings, the QC thresholds and the resource
 budgets — is in `rigel.config.CONSTANTS`, by component, each documented with why it has its value. They are
@@ -761,7 +765,7 @@ tpm_matrix   = gene_quant.pivot(index="gene_id", columns="sample", values="tpm")
 |---------|--------------|-------|
 | STAR | `XS` | Written only with `--outSAMstrandField intronMotif`; name-grouped output by default |
 | HISAT2 | `XS` | Standard RNA-seq workflow |
-| minimap2 | `ts` | Long-read and splice-aware mode |
+| minimap2 | `ts` | Short-read splice mode (`-ax splice:sr`) |
 
 Use `--sj-strand-tag auto` (default) to detect the tag automatically, or list
 several tags to try in order (e.g. `--sj-strand-tag XS ts`). The tag the scan read with is logged and recorded in
@@ -806,8 +810,9 @@ rigel quant \
     --bam sample.bam --index index/ -o results/ \
     --annotated-bam results/annotated.bam
 
-# Count fragments assigned to gDNA by the EM (ZF=5)
-samtools view -F 256 results/annotated.bam \
+# Count fragments assigned to gDNA by the EM (ZF=5): first mate, primary, non-supplementary — one record
+# per fragment
+samtools view -f 64 -F 0x900 results/annotated.bam \
     | awk '{ for(i=12;i<=NF;i++) if($i=="ZF:i:5") count++ } END { print count }'
 ```
 
@@ -836,10 +841,11 @@ Use `samtools sort -n -o out.bam in.bam` or `samtools collate`.
 Total RNA-seq libraries contain both. Use `mrna` for standard differential
 expression; use `nrna` for transcription dynamics.
 
-**Why are nRNA counts non-integer or shared?**
-nRNA is estimated on shared genomic spans. Counts are pro-rated across all
-transcripts that map to the same span. Isoforms with identical start and end
-coordinates share one nRNA component.
+**Why are nRNA counts shared?**
+nRNA is one entity per merged span: transcript start and end sites clustered within
+`--nrna-tolerance` share one nascent component. `nrna_quant` holds its count once;
+`quant.feather`'s `nrna_parent_count` repeats it on every child transcript, so never sum
+it over isoforms. Counts are fractional only under `--assignment-mode fractional`.
 
 **Why is `strand_specificity` near 0.5?**
 Rigel trains the strand model from annotated spliced fragments only. On a
@@ -854,11 +860,12 @@ they are not exposed on the CLI.
 The per-strand counts are calibration's own composition signal: gDNA is unstranded, RNA is not, so
 a region's strand tilt says how much of its unspliced mass is gDNA, and the count sets how sharp
 that reading is. An unstranded or low-count region reads a flat tilt and its composition is then
-set by its neighbours and the library-wide gDNA-density prior. There is no strand-mode switch.
+set by its neighbours and the library-wide gDNA-density prior. There is no strand-mode setting: whether
+the protocol preserves strand is decided from the junctions (`summary.json`'s `strand_model.strand_live`).
 
 **Do I need the alignable Zarr store?**
-For real genomes it is recommended — it provides gDNA-aware effective length
-and the splice-artifact blacklist. For synthetic genomes or stranded-only
+For real genomes it is recommended — it provides the splice-artifact blacklist
+(its per-base mappability is not read). For synthetic genomes or stranded-only
 benchmarks, pass `--no-mappability` at index time.
 
 **How much memory does Rigel use?**
@@ -875,8 +882,7 @@ For read-level inspection, debugging, or assignment validation. It requires a
 second BAM pass and adds runtime overhead.
 
 **Does Rigel support single-end reads?**
-Single-end reads are handled but less thoroughly tested than paired-end.
-Fragment-length estimation uses alignment length rather than insert size.
+No: `rigel quant` requires paired-end alignments and stops at the first unpaired record.
 
 **How are whole counts made, and why no per-fragment cutoff?**
 In `sample` mode every fragment goes to exactly one transcript (or to gDNA), and the counts come first.
