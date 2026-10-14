@@ -554,6 +554,13 @@ efficiency is 1, and every `em_effective_length` equals `effective_length`. `gdn
 only when calibration fitted no landscape at all. The report shows both, descriptively: no pass/fail
 verdict.
 
+**Known limitation: a library with almost no gDNA.** There the bulk sits near the landscape's floor, and
+the few regions where calibration calls gDNA read as enormous capture against it. A transcriptome-only
+library with no capture panel reads `gdna_capture_saturation` of about 2 × 10⁷ and some thousands of
+regions above e× the bulk, and the `em_effective_length` of the transcripts on those regions is inflated
+by up to that factor. A saturation far above 1 on a library that was not captured is this limitation, not
+capture.
+
 The RNA and gDNA fragment-length models used by scoring/calibration are
 reported under the top-level **`fragment_length`** key (as
 `fragment_length.rna` and `fragment_length.gdna`), alongside the global and
@@ -646,9 +653,9 @@ theory is in `docs/EQUATIONS.md` and the design in `docs/DESIGN.md`.
 ### What calibration produces
 
 - **Library scalars**, in `summary.json` → `calibration`: `gdna_density_global`,
-  `rna_sense_frac` (the sense fraction κ), the gDNA and RNA strand overdispersions, the uncaptured
-  gDNA level `gdna_bulk_density` that capture is read against, and the saturated level over it,
-  `gdna_capture_saturation`.
+  `rna_sense_frac` (the sense fraction κ), the uncaptured gDNA level `gdna_bulk_density` that capture
+  is read against, and the saturated level over it, `gdna_capture_saturation`. The junction fit behind
+  κ and the strand overdispersion (0, binomial) are in `strand_model`.
 - **A per-locus Dirichlet prior** — `gdna_prior_count` and `rna_prior_count` in `loci.feather`
   — which sets the gDNA-vs-RNA split each locus's EM starts from, plus the gDNA component's
   effective length. RNA is distributed among transcripts by the EM, not by calibration.

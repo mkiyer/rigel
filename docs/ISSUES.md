@@ -18,7 +18,7 @@ Ordered by priority. An entry says what is open and the number a ranking turns o
 what was ruled is `DESIGN.md`.
 
 ### the-reader-reads-false-gdna-as-capture
-`priority: now — 0.8.0: the pinned A/B of ISSUES: the-gdna-prior-enters-psi-twice decides it; else documented and repaired in 0.8.1 (owner, 2026-10-14) · kind: defect · 2026-10-14`
+`priority: next — 0.8.1; documented in 0.8.0 as a known limitation, the ψ A/B having failed its bar (2026-10-14) · kind: defect · 2026-10-14`
 On a library with almost no gDNA the bulk sits at the landscape's floor, and calibration's false gDNA on a few objects reads
 as enormous capture (`capture_efficiency._read` reads the deconvolved mass as a point Poisson count). The real VCaP
 transcriptome-only library (no spike, no capture), the shipped reader against the foundation's, pinned and fractional:
@@ -30,9 +30,17 @@ on 2026-10-13 before the real-library magnitude was known. That library has no t
 capture is unphysical. The source is the false gDNA, not the reader's arithmetic; no reader-side guard exists, and a
 detector is refused (`DESIGN.md` §7.2). Instruments: `out/real/vcap_rna_only__{found,rel}*` in
 `~/Downloads/rigel_runs/prototypes/2026-10-13_modefree/` (`prod_real.py`), `arm_tally.py`.
+MEASURED 2026-10-14 with the ψ A/B (`ISSUES: the-gdna-prior-enters-psi-twice`): today's tree reads 3,300 objects above
+e× the bulk on the transcriptome-only library (1,824 on 2026-10-13, most likely the multimapper second pass's deposits,
+unverified) and a saturation of 2.31e7×. Part 1 leaves it: 3,010 objects, the saturation and the bulk unchanged, the
+transcript table moved 1.12 %. Nor does it touch the zero-gDNA capture-OFF rows of the test chromosome's panels
+(odg05, fl-gDNA-long, fl-RNA-long: about 8,600–9,300 false gDNA each, unchanged), while it removes the ladder's
+(1,609 / 677 / 1,594 / 467 → 28 / 20 / 35 / 26). So the false gDNA the reader reads as capture on a real library is not
+the double prior's; its source is unmeasured. 0.8.0 states the limitation in the MANUAL (calibration's capture
+answer): a saturation far above 1 on a library that was not captured is this, not capture.
 
 ### the-gdna-prior-enters-psi-twice
-`priority: now — 0.8.0: one pinned A/B of the ported fix decides ISSUES: the-reader-reads-false-gdna-as-capture (owner, 2026-10-14) · kind: defect · 2026-10-02`
+`priority: next — 0.8.1, with its partner; the 0.8.0 A/B failed its bar (2026-10-14) · kind: defect · 2026-10-02`
 ψ adds the fitted gDNA landscape to BOTH Jeffreys halves (`psi_kernel.h`: `jeffreys` holds ½·log f + ½·log(1 − f), and the
 composition row adds the arm on top), so wherever a landscape is fitted gDNA's ½·log f enters twice. A landscape shaped
 like the Jeffreys log-rate density moves log f_g by up to 0.85 nats (median 0.57) and an unstranded no-information slot
@@ -53,6 +61,15 @@ admission owner-deferred, 2026-10-09); the deferred RNA-long loss is
 `ISSUES: the-deferred-rna-long-regression-after-factory-removal`. Still open beside it: a level row is dropped when its
 source sits more than L (≥ 10) nats from the library's RNA reference (finite support), unmeasured on real libraries.
 Instrument: `part1.patch`, `gates.py`, `VERDICT.md` in `~/Downloads/rigel_runs/prototypes/2026-10-02_part1/`.
+MEASURED 2026-10-14 on today's tree (`~/Downloads/rigel_runs/prototypes/2026-10-14_psi1/`: the port, worktree
+`~/proj/rigel-psi1`, the gates reproduced to the digit — gate 1 0.852 → 8.9e-16, gate 4 slope 0 → ½):
+`calibration_vs_oracle.py`, object error B/A for stranded × ON, the in-scope capture stratum: ladder 1.119, fl-gap
+RNA-long 1.124, RNA-short 1.242, odg05 1.042, fl-gDNA-long 1.060, fl-RNA-long 1.069; ss 0.70 × ON 1.028 to 1.106; the
+deferred stratum 1.38 to 3.82; capture OFF flat (0.977 to 1.035), its gDNA pools worse on the ladder and the gap
+panels (stranded ladder 57,571 → 74,153). It removes the ladder's zero-gDNA false gDNA (−97 to −98 %) but not the
+real library's false capture (`ISSUES: the-reader-reads-false-gdna-as-capture`). NOT SHIPPED (the owner's bar: the
+false capture removed without the old capture-ON cost). 0.8.1: with its partner, the per-object enriched prior the
+2026-10-02 verdict names.
 
 ### latent-defects
 `priority: now — 0.8.0: the user-path items listed at the end, one commit each with a falsification test verified failing (owner, 2026-10-14); the rest 0.8.1 · kind: defect · 2026-09-28`

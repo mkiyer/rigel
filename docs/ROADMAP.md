@@ -132,9 +132,10 @@ priority. The local track takes one A/B window per mechanism, and a numeric no-o
    (`ISSUES: the-format-changes-to-batch-before-release`), with the docs and column gate of
    `ISSUES: overlapping-synthetic-shadows`. The benchmark indexes are rebuilt at format 9.
 4. DONE 2026-10-14: **the two numeric no-ops** of `ISSUES: performance-memory-bounded-solve`.
-5. **The false capture on uncaptured libraries**: one pinned A/B of the ported ψ double-prior fix decides it
-   (`ISSUES: the-reader-reads-false-gdna-as-capture`, `ISSUES: the-gdna-prior-enters-psi-twice`); if it fails, the
-   limitation is documented and its repair is 0.8.1.
+5. MEASURED 2026-10-14, documented: **the false capture on uncaptured libraries** — the ported ψ double-prior fix still
+   costs every capture-ON stratum and leaves the real library's false capture, so it is not shipped; the MANUAL states
+   the limitation, and both repairs are 0.8.1 (`ISSUES: the-reader-reads-false-gdna-as-capture`,
+   `ISSUES: the-gdna-prior-enters-psi-twice`).
 6. **Tier 0, the strand pruning**, then **the splicing artifacts on real data**, the cluster track — both
    release-critical (owner, 2026-10-14): `ISSUES: strand-overdispersion-one-shared-value`,
    `ISSUES: splicing-artifacts`.
@@ -145,6 +146,7 @@ priority. The local track takes one A/B window per mechanism, and a numeric no-o
 
 **0.8.1 — first after the release**, each its own derivation and A/B: `ISSUES: the-em-stops-before-it-converges` with
 `ISSUES: the-pseudocount-strength-is-not-derived` and `ISSUES: the-em-prior-share-excludes-drawn-multimappers` ·
+`ISSUES: the-reader-reads-false-gdna-as-capture` with `ISSUES: the-gdna-prior-enters-psi-twice` ·
 `ISSUES: the-transfer-policy-loses-to-silence-on-unstranded-capture-off` with
 `ISSUES: the-intron-own-solve-on-unstranded-capture-off` · `ISSUES: the-scorer-reads-a-census-length-law` with
 `ISSUES: the-pooled-q-in-the-gdna-count` · `ISSUES: psi-reads-kappa-where-the-strand-channel-is-dead` · the low-depth
