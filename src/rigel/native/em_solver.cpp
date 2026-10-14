@@ -2650,14 +2650,23 @@ static nb::tuple connected_components_native(
     const int64_t  n_units = static_cast<int64_t>(offsets_arr.shape(0)) - 1;
 
     if (n_units <= 0 || n_transcripts <= 0) {
-        // Return all -1 labels, 0 components
-        auto* labels = new int32_t[n_transcripts];
-        std::fill(labels, labels + n_transcripts, -1);
-        size_t shape[1] = {static_cast<size_t>(n_transcripts)};
-        nb::capsule owner(labels, [](void* p) noexcept { delete[] static_cast<int32_t*>(p); });
+        // No component: the same five-part CSR result as any other input, every array empty but the two offsets
+        // ([0]), so a caller unpacks one shape
+        auto* ct_off = new int64_t[1]{0};
+        auto* cu_off = new int64_t[1]{0};
+        auto* ct_flat = new int32_t[1];
+        auto* cu_flat = new int32_t[1];
+        size_t one[1] = {1}, none[1] = {0};
+        nb::capsule own_ct_off(ct_off, [](void* p) noexcept { delete[] static_cast<int64_t*>(p); });
+        nb::capsule own_ct_flat(ct_flat, [](void* p) noexcept { delete[] static_cast<int32_t*>(p); });
+        nb::capsule own_cu_off(cu_off, [](void* p) noexcept { delete[] static_cast<int64_t*>(p); });
+        nb::capsule own_cu_flat(cu_flat, [](void* p) noexcept { delete[] static_cast<int32_t*>(p); });
         return nb::make_tuple(
-            nb::ndarray<nb::numpy, int32_t, nb::ndim<1>>(labels, 1, shape, std::move(owner)),
-            nb::int_(0)
+            nb::int_(0),
+            nb::ndarray<nb::numpy, int64_t, nb::ndim<1>>(ct_off, 1, one, std::move(own_ct_off)),
+            nb::ndarray<nb::numpy, int32_t, nb::ndim<1>>(ct_flat, 1, none, std::move(own_ct_flat)),
+            nb::ndarray<nb::numpy, int64_t, nb::ndim<1>>(cu_off, 1, one, std::move(own_cu_off)),
+            nb::ndarray<nb::numpy, int32_t, nb::ndim<1>>(cu_flat, 1, none, std::move(own_cu_flat))
         );
     }
 

@@ -262,11 +262,9 @@ LATENT (no current path reaches it):
 - `splice_graph._ref_slices`: unsorted input drops exons silently.
 - An arm that injects `rna_sense_frac` without `n_rna_obs` silently kills the strand channel.
 - `fast_exp` on an all −inf row: `static_cast<int64_t>(NaN)` is undefined behaviour.
-- `connected_components_native` returns a 2-tuple early and a 5-tuple normally.
 - `FragmentAccumulator::finalize` drops `t_offsets_`'s leading 0.
 - `_resolve_core`'s non-empty-exons precondition is stated only in its doc comment (all four callers guard it): an
   assert.
-- `genomic_span` is 0 for a transcript at position 0 (a truthiness test).
 - `set_sj` narrows to int32 unchecked, justified only by a census.
 - The buffer's finalizer, run by garbage collection on a thread holding a logging lock, deadlocks joining the writer.
 - `transfer_rows.h`'s `level_bound_row` `std::max(v, 1e-12)` never binds on a reachable input: delete it together

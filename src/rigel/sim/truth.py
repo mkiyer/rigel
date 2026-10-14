@@ -139,7 +139,9 @@ def _length_stats(length_counts: Counter[int]) -> dict[str, float | int | None]:
 
 def _transcript_metadata(transcript) -> dict[str, object]:
     length = transcript.length or transcript.compute_length()
-    genomic_span = transcript.end - transcript.start if transcript.end and transcript.start else 0
+    genomic_span = (
+        transcript.end - transcript.start
+    )  # 0 for a transcript with no exon, as start and end are
     pre_capture_mrna = float(transcript.abundance or 0.0)
     pre_capture_nrna = float(transcript.nrna_abundance)
     return {

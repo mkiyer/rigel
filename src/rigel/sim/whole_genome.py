@@ -936,7 +936,7 @@ def write_truth_abundances(
         )
         for t in transcripts:
             total = (t.abundance or 0.0) + t.nrna_abundance
-            genomic_span = t.end - t.start if t.end and t.start else 0
+            genomic_span = t.end - t.start  # 0 for a transcript with no exon, as start and end are
             strand_str = t.strand.to_str()
             f.write(
                 f"{t.t_id}\t{t.g_id}\t{t.g_name}\t{t.ref}\t"

@@ -191,3 +191,14 @@ def test_manifest_round_trip(tmp_path):
     assert path == tmp_path / "manifest.json"
     assert loaded["simulation"]["frag_mean"] == 250
     assert loaded["conditions"] == conditions
+
+
+def test_a_transcript_at_position_zero_has_its_whole_genomic_span():
+    """The span was computed behind a truthiness test, so a transcript starting at base 0 recorded a span of 0."""
+    from rigel.sim.truth import _transcript_metadata
+    from rigel.transcript import Transcript
+    from rigel.types import Interval
+
+    t = Transcript(ref="chr1", exons=[Interval(0, 100), Interval(200, 300)], t_id="t1", g_id="g1")
+    t.compute_length()
+    assert _transcript_metadata(t)["genomic_span"] == 300

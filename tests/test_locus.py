@@ -206,3 +206,22 @@ def test_locus_ref_id_is_canonical_not_categorical(two_ref_index):
             elif loc.ref == "chrZ":
                 saw_chrZ = True
     assert saw_chrA and saw_chrZ, "Expected loci on both chrA and chrZ."
+
+
+def test_the_components_of_nothing_have_the_shape_of_any_components():
+    """The native union-find returned (labels, 0) when there was no unit or no transcript, and five CSR arrays
+    otherwise; its one caller unpacks five, so an empty input would fail as an unpacking error far from the cause."""
+    from rigel.native import connected_components
+
+    out = connected_components(
+        np.array([0], dtype=np.int64), np.array([], dtype=np.int32), np.int32(3)
+    )
+    assert len(out) == 5
+    n_comp, t_off, t_flat, u_off, u_flat = out
+    assert (
+        n_comp == 0
+        and list(t_off) == [0]
+        and len(t_flat) == 0
+        and list(u_off) == [0]
+        and len(u_flat) == 0
+    )
