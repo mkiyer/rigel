@@ -190,6 +190,7 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
 
     # versioned schema
     assert summary["schema_version"] == cli.SUMMARY_SCHEMA_VERSION == 3
+    assert summary["quantification"]["n_gated_out"] == 0  # the default alphas gate nothing
 
     # fragment_length is stats-only — the histogram bloat is gone
     fl = summary["fragment_length"]

@@ -166,6 +166,9 @@ class NativeFragmentScorer {
     // the penalty as 0; a candidate with any overhang is skipped, which is what the -inf would have done
     bool oh_gate_;
     double oh_log_pen_;
+    // `--mismatch-alpha 0` is a hard gate too; nm * -inf is -inf (nm > 0), so the EM path needs no flag, but the
+    // deterministic path, which scores nothing, reads it
+    bool mm_gate_;
     double mm_log_pen_;
     int32_t fl_max_size_;
     double  fl_tail_base_;
@@ -304,6 +307,7 @@ public:
         r1_antisense_(r1_antisense),
         oh_gate_(std::isinf(oh_log_pen) && oh_log_pen < 0.0),
         oh_log_pen_(std::isinf(oh_log_pen) && oh_log_pen < 0.0 ? 0.0 : oh_log_pen),
+        mm_gate_(std::isinf(mm_log_pen) && mm_log_pen < 0.0),
         mm_log_pen_(mm_log_pen),
         fl_max_size_(fl_max_size),
         fl_tail_base_(fl_tail_base),
@@ -736,6 +740,14 @@ private:
             if (fclass == FRAG_UNAMBIG &&
                 stype == SPLICE_SPLICED_ANNOT) {
                 int32_t t_idx = t_ind[start];
+
+                // The hard gates hold on this path too: at alpha 0 a mismatch, or an overhang past the one
+                // candidate's exons, excludes it, so the fragment is gated exactly as an EM-routed one would be
+                const int rl_det = r_len[i] > 0 ? static_cast<int>(r_len[i]) : 1;
+                if ((mm_gate_ && nm_arr[i] > 0) || (oh_gate_ && rl_det - e_bp[start] > 0)) {
+                    ++stat_gated;
+                    continue;
+                }
 
                 // ua_counts accumulation
                 {

@@ -683,6 +683,45 @@ def test_an_overhang_alpha_of_zero_gates_overhang_and_scores_the_rest(fragment_c
     assert em.log_liks[0] == default.log_liks[t0]
 
 
+@pytest.mark.parametrize("gate", ["mismatch", "overhang"])
+def test_a_hard_gate_drops_a_deterministic_fragment_it_fails_as_it_drops_an_em_routed_one(gate):
+    """At alpha 0 a mismatch or an overhang excludes a candidate outright. A fragment whose only candidate fails the
+    gate is dropped and counted as gated whatever its routing: the deterministic path, which assigns an unambiguous
+    annotated-spliced fragment without scoring it, read neither NM nor overhang, so the same mismatched fragment was
+    kept when deterministic and dropped when EM-routed."""
+    index = _Index(
+        t_to_g=[0],
+        t_to_strand=[int(Strand.POS)],
+        g_to_strand=[int(Strand.POS)],
+    )
+    strand_models, max_frag_size, estimator, stats = _make_env(index)
+    bf = _BF(
+        t_inds=np.array([0], dtype=np.int32),
+        splice_type=int(SpliceType.SPLICED_ANNOT),
+        align_strand=int(Strand.POS),
+        frag_lengths=np.array([200], dtype=np.int32),
+        exon_bp=np.array([90 if gate == "overhang" else 100], dtype=np.int16),
+        intron_bp=np.array([0], dtype=np.int16),
+        read_length=100,
+        nm=5 if gate == "mismatch" else 0,
+    )
+    chunk = _Chunk(bfs=[bf], fragment_classes=[FRAG_UNAMBIG], frag_ids=[1])
+    penalty = {f"{gate}_log_penalty": overhang_alpha_to_log_penalty(0.0)}
+    _scan_em_data(
+        _Buffer([chunk]), index, strand_models, max_frag_size, estimator, stats, **penalty
+    )
+    assert stats.deterministic_unambig_units == 0
+    assert stats.n_gated_out == 1
+
+    # the same fragment at the default alpha is assigned deterministically, so the gate is what dropped it
+    _, _, default_estimator, default_stats = _make_env(index)
+    _scan_em_data(
+        _Buffer([chunk]), index, strand_models, max_frag_size, default_estimator, default_stats
+    )
+    assert default_stats.deterministic_unambig_units == 1
+    assert default_stats.n_gated_out == 0
+
+
 # ── which fragments may be gDNA: one rule, by alignment ───────────────────────────────────────────
 #
 # gDNA can explain an alignment it can produce: an unspliced one; an IMPLICIT one — an unspliced pair whose

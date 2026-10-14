@@ -578,6 +578,8 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
                 + stats.em_routed_ambig_opp_strand_units
                 + stats.em_routed_multimapper_units
             ),
+            # dropped by a hard scoring gate (an alpha of 0): every candidate failed it, so no pool holds them
+            "n_gated_out": stats.n_gated_out,
             **_quantification_pools(stats, total_mrna, total_nrna, total_gdna),
         },
     }
