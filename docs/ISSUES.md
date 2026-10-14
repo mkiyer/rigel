@@ -216,8 +216,9 @@ REFUSED as targets: the scan (at its floor for eight threads) and the index load
 2026-09-28) for the first two, the rest batched:
 - `get_loci_df` builds `locus_ids == lid` per locus, O(loci × transcripts): 0.48 ms per locus at 450k transcripts,
   about 19 s at 40k loci, in the CLI writer; `np.bincount` fixes it.
-- `iter_chunks_consuming` holds the previous chunk while loading the next, and `_SpillWriter._run` keeps its last
-  chunk while blocked: with chunks of up to 1 M fragments against a 2 GiB budget, a `del` fixes both.
+- FIXED 2026-10-14: `iter_chunks_consuming` held the previous chunk while loading the next, and `_SpillWriter._run`
+  kept its last chunk while blocked: with chunks of up to 1 M fragments against a 2 GiB budget, a `del` fixed both
+  (`tests/test_buffer.py`).
 - `build_region_partition_arrays` runs 3+ times per run, `build_sj_arrays` twice.
 - `--annotated-bam` calls `add` per fragment where a batch API exists.
 - The EM clears `local_map` up to the largest global index per locus, and allocates per E-step (heap rows for

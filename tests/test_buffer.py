@@ -492,6 +492,56 @@ class TestDiskSpill:
         assert all(not path.exists() for path in spill_paths)
         buf.cleanup()
 
+    def test_the_spill_writer_drops_a_chunk_before_reporting_it_written(
+        self, mini_index, tmp_path, monkeypatch
+    ):
+        """A chunk is up to a million fragments against a 2 GiB budget, so a written chunk the writer still held
+        while blocked on its queue was one chunk over the budget. A chunk takes no weak reference; its arrays
+        do, and die with it."""
+        written = []
+        original = buffer_mod._spill_chunk
+
+        def spill(chunk, path):
+            written.append(weakref.ref(chunk.frag_id))
+            original(chunk, path)
+
+        monkeypatch.setattr(buffer_mod, "_spill_chunk", spill)
+        buf = FragmentBuffer(max_memory_bytes=1, spill_dir=tmp_path)
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        _inject(buf, [r] * 20, chunk_size=20)
+        try:
+            (pending,) = [c for c in buf._chunks if isinstance(c, buffer_mod._PendingSpill)]
+            pending.done.wait()
+            gc.collect()
+            assert len(written) == 1 and written[0]() is None
+        finally:
+            buf.cleanup()
+
+    def test_consuming_releases_a_chunk_before_loading_the_next(
+        self, mini_index, tmp_path, monkeypatch
+    ):
+        """The consumer drops each chunk before it advances (as scoring does); holding it in the iterator
+        while the next one loads from disk would put two chunks in memory at once."""
+        buf = FragmentBuffer(max_memory_bytes=1, spill_dir=tmp_path)
+        r = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        _inject(buf, [r] * 60, chunk_size=20)
+        yielded, alive_at_load = [], []
+        original = buffer_mod._load_chunk
+
+        def load(path):
+            gc.collect()
+            alive_at_load.append([ref() is not None for ref in yielded])
+            return original(path)
+
+        monkeypatch.setattr(buffer_mod, "_load_chunk", load)
+        try:
+            for chunk in buf.iter_chunks_consuming():
+                yielded.append(weakref.ref(chunk.frag_id))
+                del chunk
+            assert alive_at_load == [[], [False], [False, False]]
+        finally:
+            buf.cleanup()
+
     def test_writer_exception_reaches_next_consumer(self, mini_index, tmp_path, monkeypatch):
         def fail_spill(chunk, path):
             raise OSError("synthetic spill failure")

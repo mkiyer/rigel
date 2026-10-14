@@ -333,6 +333,7 @@ class _SpillWriter:
                 return
 
             chunk, pending = item
+            del item
             try:
                 logger.info(
                     "Writing spilled chunk (%s fragments, %.1f MB) -> %s",
@@ -346,6 +347,9 @@ class _SpillWriter:
                 pending.error = exc
                 logger.exception("Failed to write spilled chunk -> %s", pending.path)
             finally:
+                # Released before the chunk is reported written: kept while the writer blocks on its queue,
+                # a written chunk is one more than the memory budget allows.
+                del chunk
                 pending.done.set()
                 self._slots.release()
 
@@ -513,6 +517,8 @@ class FragmentBuffer:
                 chunk = chunk_ref
                 self._memory_bytes -= chunk.memory_bytes
             yield chunk
+            # The caller has it; held here as well, it would stay in memory while the next one loads.
+            del chunk
 
     # -- Cleanup --------------------------------------------------------------
 
