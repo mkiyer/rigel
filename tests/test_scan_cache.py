@@ -638,6 +638,7 @@ def test_the_cache_REFUSES_a_drained_payload(scanned, tmp_path):
         payload,
         drain=DrainQC(
             offered=0,
+            offered_multimapper=0,
             deposited=0,
             dropped_too_long=0,
             dropped_empty=0,

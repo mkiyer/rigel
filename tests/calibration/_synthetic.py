@@ -102,6 +102,7 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
             dropped_empty=0,
             dropped_strand_undefined=0,
             deferred_undetermined_gap=0,
+            deferred_multiple_placements=0,
             unannotated_introns=0,
             contradictory_sj_strand=0,
             introns_absorbed=0,

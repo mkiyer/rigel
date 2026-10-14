@@ -33,6 +33,7 @@ def _bank(records, n_hyp_each=2):
     n = len(recs)
     cols = list(zip(*recs)) if n else [()] * 5
     return DeferredFragments(
+        placement_offsets=np.arange(0, n + 1, dtype=np.int64),  # one placement per record
         ref=np.asarray(cols[0], np.int64),
         start=np.asarray(cols[1], np.int64),
         end=np.asarray(cols[2], np.int64),

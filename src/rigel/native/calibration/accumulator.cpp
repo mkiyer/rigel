@@ -21,6 +21,7 @@ void DepositCounters::merge_from(const DepositCounters& other) noexcept {
     dropped_empty            += other.dropped_empty;
     dropped_strand_undefined += other.dropped_strand_undefined;
     deferred_undetermined_gap += other.deferred_undetermined_gap;
+    deferred_multiple_placements += other.deferred_multiple_placements;
     unannotated_introns      += other.unannotated_introns;
     contradictory_sj_strand  += other.contradictory_sj_strand;
     introns_absorbed         += other.introns_absorbed;
@@ -33,10 +34,10 @@ void GapCensus::merge_from(const GapCensus& other) noexcept {
     deferred_both          += other.deferred_both;
 }
 
-void DeferredFragments::append(const OfferedFragment& fragment,
-                               std::int64_t ref_id,
-                               std::int64_t clipped_start,
-                               std::int64_t clipped_end) {
+void DeferredFragments::append_placement(const OfferedFragment& fragment,
+                                         std::int64_t ref_id,
+                                         std::int64_t clipped_start,
+                                         std::int64_t clipped_end) {
     ref.push_back(ref_id);
     start.push_back(clipped_start);
     end.push_back(clipped_end);
@@ -70,6 +71,7 @@ void DeferredFragments::merge_from(const DeferredFragments& other) {
         const std::int64_t base = into.back();
         for (std::size_t i = 1; i < from.size(); ++i) into.push_back(base + from[i]);
     };
+    shift_append(placement_offsets, other.placement_offsets);
     ref.insert(ref.end(), other.ref.begin(), other.ref.end());
     start.insert(start.end(), other.start.begin(), other.start.end());
     end.insert(end.end(), other.end.begin(), other.end.end());
@@ -114,57 +116,154 @@ inline int scalar_compare(std::int64_t a, std::int64_t b) noexcept {
 
 }  // namespace
 
+int DeferredFragments::compare_placements(std::size_t a, std::size_t b) const noexcept {
+    for (const std::vector<std::int64_t>* column : {&ref, &start, &end, &align_strand, &sj_strand}) {
+        const int c = scalar_compare((*column)[a], (*column)[b]);
+        if (c != 0) return c;
+    }
+    const auto observed_run = [this](std::size_t i) {
+        const std::size_t lo = static_cast<std::size_t>(observed_intron_offsets[i]);
+        const std::size_t hi = static_cast<std::size_t>(observed_intron_offsets[i + 1]);
+        return std::pair{observed_introns.data() + 2 * lo, 2 * (hi - lo)};
+    };
+    const auto [a_obs, a_n_obs] = observed_run(a);
+    const auto [b_obs, b_n_obs] = observed_run(b);
+    const int c_obs = lex_compare(a_obs, a_n_obs, b_obs, b_n_obs);
+    if (c_obs != 0) return c_obs;
+
+    const std::size_t a_h0 = static_cast<std::size_t>(hypothesis_offsets[a]);
+    const std::size_t a_h1 = static_cast<std::size_t>(hypothesis_offsets[a + 1]);
+    const std::size_t b_h0 = static_cast<std::size_t>(hypothesis_offsets[b]);
+    const std::size_t b_h1 = static_cast<std::size_t>(hypothesis_offsets[b + 1]);
+    const std::size_t common = std::min(a_h1 - a_h0, b_h1 - b_h0);
+    for (std::size_t k = 0; k < common; ++k) {
+        const std::size_t ga = a_h0 + k, gb = b_h0 + k;
+        const auto intron_run = [this](std::size_t g) {
+            const std::size_t lo = static_cast<std::size_t>(hypothesis_intron_offsets[g]);
+            const std::size_t hi = static_cast<std::size_t>(hypothesis_intron_offsets[g + 1]);
+            return std::pair{hypothesis_introns.data() + 2 * lo, 2 * (hi - lo)};
+        };
+        const auto [a_in, a_n_in] = intron_run(ga);
+        const auto [b_in, b_n_in] = intron_run(gb);
+        int c = lex_compare(a_in, a_n_in, b_in, b_n_in);
+        if (c != 0) return c;
+        c = scalar_compare(hypothesis_sj_strand[ga], hypothesis_sj_strand[gb]);
+        if (c != 0) return c;
+        const std::size_t a_t0 = static_cast<std::size_t>(hypothesis_t_offsets[ga]);
+        const std::size_t a_t1 = static_cast<std::size_t>(hypothesis_t_offsets[ga + 1]);
+        const std::size_t b_t0 = static_cast<std::size_t>(hypothesis_t_offsets[gb]);
+        const std::size_t b_t1 = static_cast<std::size_t>(hypothesis_t_offsets[gb + 1]);
+        c = lex_compare(hypothesis_t.data() + a_t0, a_t1 - a_t0,
+                        hypothesis_t.data() + b_t0, b_t1 - b_t0);
+        if (c != 0) return c;
+    }
+    return scalar_compare(static_cast<std::int64_t>(a_h1 - a_h0), static_cast<std::int64_t>(b_h1 - b_h0));
+}
+
+void DeferredFragments::copy_placement(const DeferredFragments& from, std::size_t i) {
+    ref.push_back(from.ref[i]);
+    start.push_back(from.start[i]);
+    end.push_back(from.end[i]);
+    align_strand.push_back(from.align_strand[i]);
+    sj_strand.push_back(from.sj_strand[i]);
+    for (std::size_t p = static_cast<std::size_t>(from.observed_intron_offsets[i]);
+         p < static_cast<std::size_t>(from.observed_intron_offsets[i + 1]); ++p) {
+        observed_introns.push_back(from.observed_introns[2 * p]);
+        observed_introns.push_back(from.observed_introns[2 * p + 1]);
+    }
+    observed_intron_offsets.push_back(static_cast<std::int64_t>(observed_introns.size() / 2));
+    for (std::size_t g = static_cast<std::size_t>(from.hypothesis_offsets[i]);
+         g < static_cast<std::size_t>(from.hypothesis_offsets[i + 1]); ++g) {
+        hypothesis_sj_strand.push_back(from.hypothesis_sj_strand[g]);
+        for (std::size_t p = static_cast<std::size_t>(from.hypothesis_intron_offsets[g]);
+             p < static_cast<std::size_t>(from.hypothesis_intron_offsets[g + 1]); ++p) {
+            hypothesis_introns.push_back(from.hypothesis_introns[2 * p]);
+            hypothesis_introns.push_back(from.hypothesis_introns[2 * p + 1]);
+        }
+        hypothesis_intron_offsets.push_back(static_cast<std::int64_t>(hypothesis_introns.size() / 2));
+        for (std::size_t t = static_cast<std::size_t>(from.hypothesis_t_offsets[g]);
+             t < static_cast<std::size_t>(from.hypothesis_t_offsets[g + 1]); ++t) {
+            hypothesis_t.push_back(from.hypothesis_t[t]);
+        }
+        hypothesis_t_offsets.push_back(static_cast<std::int64_t>(hypothesis_t.size()));
+    }
+    hypothesis_offsets.push_back(static_cast<std::int64_t>(hypothesis_sj_strand.size()));
+}
+
+const OfferedFragment& DeferredFragments::offered_of(std::size_t p, std::size_t h0, std::size_t h1,
+                                                     OfferedStorage& st) const {
+    st.observed.clear();
+    st.implied.clear();
+    st.supporting.clear();
+    st.spans.clear();
+    for (std::size_t q = static_cast<std::size_t>(observed_intron_offsets[p]);
+         q < static_cast<std::size_t>(observed_intron_offsets[p + 1]); ++q) {
+        st.observed.push_back({0, static_cast<std::int32_t>(observed_introns[2 * q]),
+                               static_cast<std::int32_t>(observed_introns[2 * q + 1]), 0});
+    }
+    const std::size_t g0 = static_cast<std::size_t>(hypothesis_offsets[p]) + h0;
+    const std::size_t g1 = static_cast<std::size_t>(hypothesis_offsets[p]) + h1;
+    // ⛔ Reserved up front: the spans below point INTO these vectors, so a reallocation while filling
+    // them would dangle every pointer already handed out.
+    st.implied.reserve(static_cast<std::size_t>(hypothesis_intron_offsets[g1] - hypothesis_intron_offsets[g0]));
+    st.supporting.reserve(static_cast<std::size_t>(hypothesis_t_offsets[g1] - hypothesis_t_offsets[g0]));
+    st.spans.reserve(g1 - g0);
+    for (std::size_t g = g0; g < g1; ++g) {
+        const std::size_t i0 = st.implied.size(), t0 = st.supporting.size();
+        for (std::size_t q = static_cast<std::size_t>(hypothesis_intron_offsets[g]);
+             q < static_cast<std::size_t>(hypothesis_intron_offsets[g + 1]); ++q) {
+            st.implied.push_back({0, static_cast<std::int32_t>(hypothesis_introns[2 * q]),
+                                  static_cast<std::int32_t>(hypothesis_introns[2 * q + 1]), 0});
+        }
+        for (std::size_t t = static_cast<std::size_t>(hypothesis_t_offsets[g]);
+             t < static_cast<std::size_t>(hypothesis_t_offsets[g + 1]); ++t) {
+            st.supporting.push_back(static_cast<std::int32_t>(hypothesis_t[t]));
+        }
+        st.spans.push_back({st.implied.data() + i0, st.implied.size() - i0,
+                            static_cast<std::int32_t>(hypothesis_sj_strand[g]),
+                            st.supporting.data() + t0, st.supporting.size() - t0});
+    }
+    st.offered.start = start[p];
+    st.offered.end = end[p];
+    st.offered.observed_introns = st.observed.data();
+    st.offered.n_observed_introns = st.observed.size();
+    st.offered.align_strand = static_cast<std::int32_t>(align_strand[p]);
+    st.offered.sj_strand = static_cast<std::int32_t>(sj_strand[p]);
+    st.offered.hypotheses = st.spans.data();
+    st.offered.n_hypotheses = st.spans.size();
+    return st.offered;
+}
+
+void DeferredFragments::clear() {
+    for (std::vector<std::int64_t>* v : {&ref, &start, &end, &align_strand, &sj_strand, &observed_introns,
+                                         &hypothesis_sj_strand, &hypothesis_introns, &hypothesis_t}) {
+        v->clear();
+    }
+    for (std::vector<std::int64_t>* v : {&placement_offsets, &observed_intron_offsets, &hypothesis_offsets,
+                                         &hypothesis_intron_offsets, &hypothesis_t_offsets}) {
+        v->clear();
+        v->push_back(0);
+    }
+}
+
 void DeferredFragments::canonicalise() {
-    const std::size_t n = size();
+    const std::size_t n = n_records();
     if (n < 2) return;
 
-    // ⭐ The specification's key, in the specification's order:
-    //     (ref, start, end, align_strand, sj_strand, observed_introns, hypotheses)
-    // where `hypotheses` is the sequence of (introns, sj_strand, supporting_t) triples. Compared as Python
-    // compares those tuples -- see `lex_compare` for the prefix rule, which is the part a hand-rolled
-    // comparator gets wrong: a one-intron path is NOT equal to a two-intron path that starts with it.
+    // ⭐ The specification's key: a record is the sequence of its placements' keys, compared as Python
+    // compares those tuples -- element-wise, and a PREFIX sorts BEFORE the longer sequence it is a prefix
+    // of -- at both levels; `compare_placements` is the placement's key.
     const auto record_less = [this](std::size_t a, std::size_t b) {
-        for (const std::vector<std::int64_t>* column : {&ref, &start, &end, &align_strand, &sj_strand}) {
-            const int c = scalar_compare((*column)[a], (*column)[b]);
-            if (c != 0) return c < 0;
-        }
-        const auto observed_run = [this](std::size_t i) {
-            const std::size_t lo = static_cast<std::size_t>(observed_intron_offsets[i]);
-            const std::size_t hi = static_cast<std::size_t>(observed_intron_offsets[i + 1]);
-            return std::pair{observed_introns.data() + 2 * lo, 2 * (hi - lo)};
-        };
-        const auto [a_obs, a_n_obs] = observed_run(a);
-        const auto [b_obs, b_n_obs] = observed_run(b);
-        const int c_obs = lex_compare(a_obs, a_n_obs, b_obs, b_n_obs);
-        if (c_obs != 0) return c_obs < 0;
-
-        const std::size_t a_h0 = static_cast<std::size_t>(hypothesis_offsets[a]);
-        const std::size_t a_h1 = static_cast<std::size_t>(hypothesis_offsets[a + 1]);
-        const std::size_t b_h0 = static_cast<std::size_t>(hypothesis_offsets[b]);
-        const std::size_t b_h1 = static_cast<std::size_t>(hypothesis_offsets[b + 1]);
-        const std::size_t common = std::min(a_h1 - a_h0, b_h1 - b_h0);
+        const std::size_t a0 = static_cast<std::size_t>(placement_offsets[a]);
+        const std::size_t a1 = static_cast<std::size_t>(placement_offsets[a + 1]);
+        const std::size_t b0 = static_cast<std::size_t>(placement_offsets[b]);
+        const std::size_t b1 = static_cast<std::size_t>(placement_offsets[b + 1]);
+        const std::size_t common = std::min(a1 - a0, b1 - b0);
         for (std::size_t k = 0; k < common; ++k) {
-            const std::size_t ga = a_h0 + k, gb = b_h0 + k;
-            const auto intron_run = [this](std::size_t g) {
-                const std::size_t lo = static_cast<std::size_t>(hypothesis_intron_offsets[g]);
-                const std::size_t hi = static_cast<std::size_t>(hypothesis_intron_offsets[g + 1]);
-                return std::pair{hypothesis_introns.data() + 2 * lo, 2 * (hi - lo)};
-            };
-            const auto [a_in, a_n_in] = intron_run(ga);
-            const auto [b_in, b_n_in] = intron_run(gb);
-            int c = lex_compare(a_in, a_n_in, b_in, b_n_in);
-            if (c != 0) return c < 0;
-            c = scalar_compare(hypothesis_sj_strand[ga], hypothesis_sj_strand[gb]);
-            if (c != 0) return c < 0;
-            const std::size_t a_t0 = static_cast<std::size_t>(hypothesis_t_offsets[ga]);
-            const std::size_t a_t1 = static_cast<std::size_t>(hypothesis_t_offsets[ga + 1]);
-            const std::size_t b_t0 = static_cast<std::size_t>(hypothesis_t_offsets[gb]);
-            const std::size_t b_t1 = static_cast<std::size_t>(hypothesis_t_offsets[gb + 1]);
-            c = lex_compare(hypothesis_t.data() + a_t0, a_t1 - a_t0,
-                            hypothesis_t.data() + b_t0, b_t1 - b_t0);
+            const int c = compare_placements(a0 + k, b0 + k);
             if (c != 0) return c < 0;
         }
-        return (a_h1 - a_h0) < (b_h1 - b_h0);
+        return (a1 - a0) < (b1 - b0);
     };
 
     std::vector<std::size_t> order(n);
@@ -178,50 +277,26 @@ void DeferredFragments::canonicalise() {
     if (identity) return;  // keeps a second export free, which is what makes this idempotent in practice
 
     DeferredFragments out;
-    out.ref.reserve(n);
-    out.start.reserve(n);
-    out.end.reserve(n);
-    out.align_strand.reserve(n);
-    out.sj_strand.reserve(n);
-    out.observed_intron_offsets.reserve(n + 1);
+    out.placement_offsets.reserve(n + 1);
+    out.ref.reserve(ref.size());
+    out.start.reserve(start.size());
+    out.end.reserve(end.size());
+    out.align_strand.reserve(align_strand.size());
+    out.sj_strand.reserve(sj_strand.size());
+    out.observed_intron_offsets.reserve(observed_intron_offsets.size());
     out.observed_introns.reserve(observed_introns.size());
-    out.hypothesis_offsets.reserve(n + 1);
+    out.hypothesis_offsets.reserve(hypothesis_offsets.size());
     out.hypothesis_sj_strand.reserve(hypothesis_sj_strand.size());
-    out.hypothesis_intron_offsets.reserve(hypothesis_sj_strand.size() + 1);
+    out.hypothesis_intron_offsets.reserve(hypothesis_intron_offsets.size());
     out.hypothesis_introns.reserve(hypothesis_introns.size());
-    out.hypothesis_t_offsets.reserve(hypothesis_sj_strand.size() + 1);
+    out.hypothesis_t_offsets.reserve(hypothesis_t_offsets.size());
     out.hypothesis_t.reserve(hypothesis_t.size());
-
-    for (const std::size_t i : order) {
-        out.ref.push_back(ref[i]);
-        out.start.push_back(start[i]);
-        out.end.push_back(end[i]);
-        out.align_strand.push_back(align_strand[i]);
-        out.sj_strand.push_back(sj_strand[i]);
-        for (std::size_t p = static_cast<std::size_t>(observed_intron_offsets[i]);
-             p < static_cast<std::size_t>(observed_intron_offsets[i + 1]); ++p) {
-            out.observed_introns.push_back(observed_introns[2 * p]);
-            out.observed_introns.push_back(observed_introns[2 * p + 1]);
+    for (const std::size_t r : order) {
+        for (std::size_t p = static_cast<std::size_t>(placement_offsets[r]);
+             p < static_cast<std::size_t>(placement_offsets[r + 1]); ++p) {
+            out.copy_placement(*this, p);
         }
-        out.observed_intron_offsets.push_back(
-            static_cast<std::int64_t>(out.observed_introns.size() / 2));
-        for (std::size_t g = static_cast<std::size_t>(hypothesis_offsets[i]);
-             g < static_cast<std::size_t>(hypothesis_offsets[i + 1]); ++g) {
-            out.hypothesis_sj_strand.push_back(hypothesis_sj_strand[g]);
-            for (std::size_t p = static_cast<std::size_t>(hypothesis_intron_offsets[g]);
-                 p < static_cast<std::size_t>(hypothesis_intron_offsets[g + 1]); ++p) {
-                out.hypothesis_introns.push_back(hypothesis_introns[2 * p]);
-                out.hypothesis_introns.push_back(hypothesis_introns[2 * p + 1]);
-            }
-            out.hypothesis_intron_offsets.push_back(
-                static_cast<std::int64_t>(out.hypothesis_introns.size() / 2));
-            for (std::size_t t = static_cast<std::size_t>(hypothesis_t_offsets[g]);
-                 t < static_cast<std::size_t>(hypothesis_t_offsets[g + 1]); ++t) {
-                out.hypothesis_t.push_back(hypothesis_t[t]);
-            }
-            out.hypothesis_t_offsets.push_back(static_cast<std::int64_t>(out.hypothesis_t.size()));
-        }
-        out.hypothesis_offsets.push_back(static_cast<std::int64_t>(out.hypothesis_sj_strand.size()));
+        out.close_record();
     }
     *this = std::move(out);
 }
@@ -473,33 +548,17 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     // ⚠ And it must win over the deferral, because every fragment counts exactly ONCE and a fragment can
     // be both. The queue sizes the population the SECOND PASS CAN RECOVER, and a fragment with no genome
     // strand is not recoverable -- that pass resolves which PATH, not which strand the read aligned to.
-    const int column = strand_column(fragment.align_strand);
-    if (column < 0) {
+    std::int64_t start = 0, end = 0;
+    const int column = admit(fragment, &start, &end);
+    if (column == -1) {
         ++counters_.dropped_strand_undefined;
         return DepositOutcome::kStrandUndefined;
     }
-    if (region_bounds_.size() < 2) {
+    if (column == -2) {
         ++counters_.dropped_empty;
         return DepositOutcome::kEmpty;
     }
 
-    // Clip to the reference. L is the CLIPPED length, so the placement count stays consistent -- and the
-    // clip must precede arbitration, because a hypothesis is filtered on its L.
-    const std::int64_t start = std::max(fragment.start, region_bounds_.front());
-    const std::int64_t end   = std::min(fragment.end,   region_bounds_.back());
-    if (end <= start) {
-        ++counters_.dropped_empty;
-        return DepositOutcome::kEmpty;
-    }
-
-    // ── arbitration: which hypotheses survive, and is exactly one left? ───────────────────────────
-    //
-    // ⭐ Short-read chemistry does not sequence molecules past `max_length_` -- the same statement that
-    // makes kTooLong a rejection -- so a hypothesis implying a longer L is not a molecule this library
-    // contains. Applied to the UNSPLICED hypothesis this is exactly "a fragment whose genomic span
-    // exceeds the limit must be RNA": that hypothesis's L IS the span. There is no second rule.
-    // ⚠ Unless the filter would empty the set, in which case the survivors stand and the ordinary
-    // kTooLong rejection counts them, as it did before any of this.
     // ⛔⛔ EVERY FRAGMENT HAS AT LEAST ONE HYPOTHESIS -- "cut nothing beyond what was sequenced" -- and
     // the executable specification makes that its DEFAULT (`UNSPLICED_ONLY`), not an option:
     // "the degenerate case is the general case, not a branch". A caller offering an EMPTY set is
@@ -517,14 +576,52 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     }
     const OfferedFragment& arbitrated = offered_or_default;
 
+    // ── arbitration: which hypotheses survive, and is exactly one left? ───────────────────────────
+    bool any_spliced_hypothesis = false;
+    arbitrate(arbitrated, start, end, scratch, /*all_stand_if_empty=*/true, &any_spliced_hypothesis);
+    auto& survivors = scratch.survivors;
+    if (any_spliced_hypothesis) record_gap_resolution(arbitrated, survivors);
+
+    if (survivors.size() > 1) {
+        deferred_.append(arbitrated, ref_id_, start, end);
+        ++counters_.deferred_undetermined_gap;
+        return DepositOutcome::kDeferred;
+    }
+    return deposit_survivor(arbitrated, arbitrated.hypotheses[survivors.front().index], column, start,
+                            end, scratch);
+}
+
+int Accumulator::admit(const OfferedFragment& fragment, std::int64_t* start, std::int64_t* end) const noexcept {
+    const int column = strand_column(fragment.align_strand);
+    if (column < 0) return -1;
+    if (region_bounds_.size() < 2) return -2;
+    // Clip to the reference. L is the CLIPPED length, so the placement count stays consistent -- and the
+    // clip must precede arbitration, because a hypothesis is filtered on its L.
+    const std::int64_t s = std::max(fragment.start, region_bounds_.front());
+    const std::int64_t e = std::min(fragment.end,   region_bounds_.back());
+    if (e <= s) return -2;
+    *start = s;
+    *end = e;
+    return column;
+}
+
+void Accumulator::arbitrate(const OfferedFragment& arbitrated, std::int64_t start, std::int64_t end,
+                            DepositScratch& scratch, bool all_stand_if_empty, bool* any_spliced) const {
+    // ⭐ Short-read chemistry does not sequence molecules past `max_length_` -- the same statement that
+    // makes kTooLong a rejection -- so a hypothesis implying a longer L is not a molecule this library
+    // contains. Applied to the UNSPLICED hypothesis this is exactly "a fragment whose genomic span
+    // exceeds the limit must be RNA": that hypothesis's L IS the span. There is no second rule.
+    // ⚠ Unless the filter would empty the set, in which case the survivors stand and the ordinary
+    // kTooLong rejection counts them, as it did before any of this -- `deposit`'s clause; the set's
+    // offer applies it over the union of every placement's pairs instead, and asks for the raw filter.
     auto& survivors = scratch.survivors;
     survivors.clear();
-    bool any_spliced_hypothesis = false;
+    bool any = false;
     for (std::size_t h = 0; h < arbitrated.n_hypotheses; ++h) {
         std::int64_t absorbed = 0;
         const std::int64_t candidate_length =
             hypothesis_length(arbitrated, arbitrated.hypotheses[h], start, end, scratch, &absorbed);
-        any_spliced_hypothesis |= !arbitrated.hypotheses[h].is_unspliced();
+        any |= !arbitrated.hypotheses[h].is_unspliced();
         survivors.push_back({h, candidate_length, absorbed});
     }
     const std::size_t n_offered = survivors.size();
@@ -533,7 +630,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
                                        return s.length > max_length_;
                                    }),
                     survivors.end());
-    if (survivors.empty()) {
+    if (survivors.empty() && all_stand_if_empty) {
         for (std::size_t h = 0; h < n_offered; ++h) {
             std::int64_t absorbed = 0;
             const std::int64_t candidate_length =
@@ -541,18 +638,15 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
             survivors.push_back({h, candidate_length, absorbed});
         }
     }
-    if (any_spliced_hypothesis) record_gap_resolution(arbitrated, survivors);
+    if (any_spliced != nullptr) *any_spliced = any;
+}
 
-    if (survivors.size() > 1) {
-        deferred_.append(arbitrated, ref_id_, start, end);
-        ++counters_.deferred_undetermined_gap;
-        return DepositOutcome::kDeferred;
-    }
-
+DepositOutcome Accumulator::deposit_survivor(const OfferedFragment& fragment, const GapHypothesis& chosen,
+                                             const int column, const std::int64_t start,
+                                             const std::int64_t end, DepositScratch& scratch) {
     // The single survivor. ⚠ Re-normalised rather than cached per hypothesis: one extra normalise on the
     // winner is cheaper than carrying a normalised list for every candidate, and it keeps ONE code path
     // from a hypothesis to its introns.
-    const GapHypothesis& chosen = arbitrated.hypotheses[survivors.front().index];
     std::int64_t absorbed = 0;
     const std::int64_t length =
         hypothesis_length(fragment, chosen, start, end, scratch, &absorbed);
@@ -1024,6 +1118,105 @@ void AccumulatorSet::merge_from(const AccumulatorSet& other) {
             std::to_string(accs_.size()) + ", other has " + std::to_string(other.accs_.size()) + ")");
     }
     for (std::size_t f = 0; f < accs_.size(); ++f) accs_[f].merge_from(other.accs_[f]);
+    deferred_.merge_from(other.deferred_);
+    counters_.merge_from(other.counters_);
+}
+
+const DeferredFragments& AccumulatorSet::deferred_canonical() {
+    deferred_.canonicalise();
+    return deferred_;
+}
+
+DepositOutcome AccumulatorSet::offer(const Placement* placements, std::size_t n, OfferScratch& sc) {
+    if (n == 0) throw std::invalid_argument("accumulator set: offer needs at least one placement");
+    // ⭐ ONE placement is the unique mapper's path, bit for bit: `deposit` admits, arbitrates, holds or
+    // deposits, and counts, exactly as it always has.
+    if (n == 1) return at(placements[0].ref_id).deposit(placements[0].offered, sc.deposit);
+
+    static const GapHypothesis kUnsplicedOnly{nullptr, 0, STRAND_NONE, nullptr, 0};
+    std::size_t strand_rejected = 0, empty_rejected = 0;
+    sc.admitted.clear();
+    for (std::size_t i = 0; i < n; ++i) {
+        const Placement& pl = placements[i];
+        if (pl.ref_id < 0 || static_cast<std::size_t>(pl.ref_id) >= accs_.size()) {
+            ++empty_rejected;
+            continue;
+        }
+        std::int64_t s = 0, e = 0;
+        const int column = accs_[static_cast<std::size_t>(pl.ref_id)].admit(pl.offered, &s, &e);
+        if (column == -1) { ++strand_rejected; continue; }
+        if (column == -2) { ++empty_rejected; continue; }
+        OfferedFragment offered = pl.offered;
+        if (offered.n_hypotheses == 0) {
+            offered.hypotheses = &kUnsplicedOnly;
+            offered.n_hypotheses = 1;
+        }
+        sc.admitted.append(offered, pl.ref_id, s, e);  // one record per admitted placement, CLIPPED
+    }
+    if (sc.admitted.n_records() == 0) {
+        // Every placement excluded: the fragment is rejected ONCE, on this set's counters, named for the
+        // strand only when the strand was every exclusion.
+        if (strand_rejected > 0 && empty_rejected == 0) {
+            ++counters_.dropped_strand_undefined;
+            return DepositOutcome::kStrandUndefined;
+        }
+        ++counters_.dropped_empty;
+        return DepositOutcome::kEmpty;
+    }
+    // The placements in THEIR canonical order (one record each, so the record sort is the placement sort),
+    // and identical placements collapsed to one -- the same content is the same placement.
+    sc.admitted.canonicalise();
+    sc.kept.clear();
+    for (std::size_t p = 0; p < sc.admitted.n_placements(); ++p) {
+        if (p == 0 || sc.admitted.compare_placements(p - 1, p) != 0) sc.kept.push_back(p);
+    }
+    const auto n_hyp = [&sc](std::size_t p) {
+        return static_cast<std::size_t>(sc.admitted.hypothesis_offsets[p + 1] - sc.admitted.hypothesis_offsets[p]);
+    };
+    const auto ref_of = [&sc](std::size_t p) { return static_cast<std::int32_t>(sc.admitted.ref[p]); };
+
+    if (sc.kept.size() == 1) {
+        // One placement left: the fragment's one open question, if any, is its gap -- `deposit`'s.
+        const std::size_t p = sc.kept[0];
+        const OfferedFragment& one = sc.admitted.offered_of(p, 0, n_hyp(p), sc.storage);
+        return at(ref_of(p)).deposit(one, sc.deposit);
+    }
+
+    // ── the union arbitration: every (placement, hypothesis) within the limit ────────────────────
+    sc.union_survivors.clear();
+    for (std::size_t k = 0; k < sc.kept.size(); ++k) {
+        const std::size_t p = sc.kept[k];
+        const OfferedFragment& whole = sc.admitted.offered_of(p, 0, n_hyp(p), sc.storage);
+        accs_[static_cast<std::size_t>(ref_of(p))].arbitrate(
+            whole, sc.admitted.start[p], sc.admitted.end[p], sc.deposit, /*all_stand_if_empty=*/false,
+            nullptr);
+        for (const ScoredHypothesis& sh : sc.deposit.survivors) sc.union_survivors.emplace_back(k, sh.index);
+    }
+    if (sc.union_survivors.empty()) {
+        // The filter would empty the union: every pair stands, and the drain's ordinary kTooLong
+        // rejection counts the chosen one.
+        for (std::size_t k = 0; k < sc.kept.size(); ++k) {
+            for (std::size_t h = 0; h < n_hyp(sc.kept[k]); ++h) sc.union_survivors.emplace_back(k, h);
+        }
+    }
+    if (sc.union_survivors.size() == 1) {
+        // One pair is a molecule this library contains: deposited at its placement with that hypothesis
+        // alone, and the umbrella census put back -- it answers a question this fragment has no single
+        // answer to.
+        const auto [k, h] = sc.union_survivors[0];
+        const std::size_t p = sc.kept[k];
+        const OfferedFragment& one = sc.admitted.offered_of(p, h, h + 1, sc.storage);
+        Accumulator& a = accs_[static_cast<std::size_t>(ref_of(p))];
+        const GapCensus before = a.gap_census();
+        const DepositOutcome outcome = a.deposit(one, sc.deposit);
+        a.restore_gap_census(before);
+        return outcome;
+    }
+    // Held WHOLE: every kept placement, every hypothesis, in canonical order, as ONE record.
+    for (const std::size_t p : sc.kept) deferred_.copy_placement(sc.admitted, p);
+    deferred_.close_record();
+    ++counters_.deferred_multiple_placements;
+    return DepositOutcome::kDeferredPlacements;
 }
 
 }  // namespace rigel::accumulator

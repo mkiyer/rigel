@@ -868,7 +868,7 @@ def test_TWO_SURVIVING_HYPOTHESES_deposit_on_NOTHING_and_are_BUFFERED_WHOLE():
     # RETAINED WHOLE, and with every hypothesis — the second pass cannot choose between answers it
     # was not given, and it needs the supporting transcripts to weight them by abundance.
     assert len(t.deferred) == 1
-    held = t.deferred[0]
+    held = t.deferred[0].placements[0]
     assert (held.ref, held.start, held.end) == (0, 150, 950)
     assert {path.introns for path in held.hypotheses} == {((201, 900),), ()}
     assert held.hypotheses[0].supporting_t_inds == (7,)

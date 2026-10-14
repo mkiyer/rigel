@@ -81,8 +81,9 @@ def build_and_run(
     nrna_abundance=0,
     include_multimap=False,
     scenario_name="",
+    em_config=None,
 ):
-    """Build via FASTQ+alignment and run the pipeline."""
+    """Build via FASTQ+alignment and run the pipeline (the shipped EM unless ``em_config`` names another)."""
     sc = sim_config(strand_specificity=strand_specificity)
     gdna = gdna_config(gdna_abundance)
     result = scenario.build(
@@ -92,7 +93,7 @@ def build_and_run(
         nrna_abundance=nrna_abundance,
     )
     config = PipelineConfig(
-        em=EMConfig(seed=PIPELINE_SEED),
+        em=em_config if em_config is not None else EMConfig(seed=PIPELINE_SEED),
         scan=BamScanConfig(sj_strand_tag="ts", include_multimap=include_multimap),
     )
     pr = run_pipeline(result.bam_path, result.index, config=config)

@@ -399,19 +399,41 @@ struct WorkerState {
     // sampling profiler because the time is attributed to `malloc`. Capacity amortizes to the high-water
     // mark and is never released.
     //
-    // Two buffers, because they belong to two different owners. `deposit_scratch` is the accumulator's
-    // (normalised introns, path segments, sj ids) and is opaque here. `deposit_introns` is the
-    // ADAPTER's: the fragment's introns restricted to the reference being deposited and de-duplicated,
-    // which is what `OfferedFragment::observed_introns` points at.
+    // `deposit_scratch` is the accumulator's (normalised introns, path segments, sj ids) and is opaque
+    // here. The placement arenas below are the ADAPTER's: a fragment's introns restricted to the reference
+    // of the hit being collected and de-duplicated, which is what `OfferedFragment::observed_introns`
+    // points at.
     //
     // ⛔ That restriction is mandatory, not tidiness. `Accumulator::deposit` normalises introns by
     // coordinate alone — it never looks at `IntronBlock::ref_id` — so an intron from another reference
-    // would be cut out of this reference's path. The adapter refuses a fragment whose exon blocks span
+    // would be cut out of this reference's path. The adapter refuses a hit whose exon blocks span
     // references, but that check cannot see a record whose CIGAR has an N and no M, D, = or X op: it adds
     // an intron and no exon block.
     rigel::accumulator::DepositScratch deposit_scratch;
-    std::vector<IntronBlock>           deposit_introns;
-    std::vector<rigel::accumulator::GapHypothesis> gap_hypotheses;
+
+    // ⭐ ONE OFFER PER FRAGMENT. Every non-chimeric hit of a fragment is collected as a placement — its
+    // observed introns, its gap hypotheses' implied introns and supporting transcripts COPIED into these
+    // arenas, because the resolver's result dies with the hit — and after the last hit the whole set is
+    // offered to the accumulator set at once (`AccumulatorSet::offer`), which is `deposit` for a unique
+    // mapper and the multimapper rule for the rest. Spans point into the arenas, so they are resolved
+    // from offsets only once nothing more will grow.
+    struct PendingPlacement {
+        int32_t ref_id;
+        int64_t start, end;
+        int32_t align_strand, sj_strand;
+        std::size_t obs0, obs1, hyp0, hyp1;
+    };
+    struct PendingHypothesis {
+        std::size_t imp0, imp1, sup0, sup1;
+        int32_t sj_strand;
+    };
+    std::vector<PendingPlacement>  pending;
+    std::vector<PendingHypothesis> pending_hypotheses;
+    std::vector<IntronBlock>       arena_observed, arena_implied;
+    std::vector<int32_t>           arena_supporting;
+    std::vector<rigel::accumulator::GapHypothesis> arena_spans;
+    std::vector<rigel::accumulator::Placement>     placements;
+    rigel::accumulator::OfferScratch               offer_scratch;
 
     explicit WorkerState(int32_t n_transcripts)
         : scratch(n_transcripts) {}
@@ -1075,6 +1097,7 @@ static nb::dict deferred_dict(const rigel::accumulator::DeferredFragments& defer
     const auto put = [&out](const char* name, const std::vector<int64_t>& v) {
         out[name] = rigel::vec_to_ndarray(std::vector<int64_t>(v));
     };
+    put("placement_offsets", deferred.placement_offsets);
     put("ref", deferred.ref);
     put("start", deferred.start);
     put("end", deferred.end);
@@ -1573,7 +1596,7 @@ private:
         // Sense/antisense is DERIVED by a consumer from the fragment strand and the sj's own strand.
         //
         // ⚠ No strand gate here. The deposit rejects an undefined `align_strand` itself and COUNTS it.
-        const auto deposit_to_accumulator =
+        const auto collect_placement =
             [&ws](const AssembledFragment& f, const RawResolveResult& cr) {
                 const int32_t st = cr.splice_type;
 
@@ -1623,11 +1646,11 @@ private:
                 // ordered, so consecutive comparison is enough; ⛔ it must NOT be re-keyed or merged in
                 // `build_fragment`, which shares it with the resolver (measured: merging demotes
                 // SPLICED_ANNOT to SPLICED_UNANNOT and widens `t_inds`).
-                auto& observed = ws.deposit_introns;
-                observed.clear();
+                auto& observed = ws.arena_observed;
+                const std::size_t obs0 = observed.size();
                 for (const auto& intron : f.introns) {
                     if (intron.ref_id != ref_id) continue;
-                    if (!observed.empty() && observed.back().start == intron.start &&
+                    if (observed.size() > obs0 && observed.back().start == intron.start &&
                         observed.back().end == intron.end) {
                         continue;
                     }
@@ -1639,18 +1662,17 @@ private:
                 // ⭐ The resolver enumerated them; the ACCUMULATOR arbitrates. This only re-presents the
                 // flat CSR as the span-of-spans the deposit interface takes. There is always at least
                 // one — the unspliced hypothesis — so `deposit` never receives an empty set.
-                auto& hypotheses = ws.gap_hypotheses;
-                hypotheses.clear();
+                const std::size_t hyp0 = ws.pending_hypotheses.size();
                 for (std::int32_t h = 0; h < cr.n_gap_hypotheses(); ++h) {
-                    const std::int32_t i0 = cr.gap_intron_offsets[h];
-                    const std::int32_t t0 = cr.gap_supporting_offsets[h];
-                    hypotheses.push_back({
-                        cr.gap_introns.data() + i0,
-                        static_cast<std::size_t>(cr.gap_intron_offsets[h + 1] - i0),
-                        cr.gap_sj_strand[h],
-                        cr.gap_supporting.data() + t0,
-                        static_cast<std::size_t>(cr.gap_supporting_offsets[h + 1] - t0),
-                    });
+                    const std::int32_t i0 = cr.gap_intron_offsets[h], i1 = cr.gap_intron_offsets[h + 1];
+                    const std::int32_t t0 = cr.gap_supporting_offsets[h], t1 = cr.gap_supporting_offsets[h + 1];
+                    const std::size_t imp0 = ws.arena_implied.size(), sup0 = ws.arena_supporting.size();
+                    ws.arena_implied.insert(ws.arena_implied.end(), cr.gap_introns.begin() + i0,
+                                            cr.gap_introns.begin() + i1);
+                    ws.arena_supporting.insert(ws.arena_supporting.end(), cr.gap_supporting.begin() + t0,
+                                               cr.gap_supporting.begin() + t1);
+                    ws.pending_hypotheses.push_back({imp0, ws.arena_implied.size(), sup0,
+                                                     ws.arena_supporting.size(), cr.gap_sj_strand[h]});
                 }
 
                 // The molecule's extent on this reference: leftmost block start to rightmost block end,
@@ -1662,7 +1684,12 @@ private:
                 std::int64_t start = 0, end = 0;
                 bool any = false;
                 for (const auto& block : f.exons) {
-                    if (block.ref_id != ref_id) { ws.stats.n_deposit_not_offered++; return; }
+                    if (block.ref_id != ref_id) {
+                        ws.stats.n_deposit_not_offered++;
+                        ws.arena_observed.resize(obs0);
+                        ws.pending_hypotheses.resize(hyp0);
+                        return;
+                    }
                     if (!any) {
                         start = block.start;
                         end = block.end;
@@ -1672,27 +1699,56 @@ private:
                         end = std::max<std::int64_t>(end, block.end);
                     }
                 }
-                if (!any) { ws.stats.n_deposit_not_offered++; return; }
+                if (!any) {
+                    ws.stats.n_deposit_not_offered++;
+                    ws.arena_observed.resize(obs0);
+                    ws.pending_hypotheses.resize(hyp0);
+                    return;
+                }
 
-                rigel::accumulator::OfferedFragment offered;
-                offered.start = start;
-                offered.end = end;
-                offered.observed_introns = observed.data();
-                offered.n_observed_introns = observed.size();
-                offered.align_strand = cr.align_strand;
                 // ⚠ The OBSERVED motif strand, straight from `cr`. A hypothesis carries the strand its
                 // supporting transcripts imply, and `deposit` falls back to that only when nothing was
                 // sequenced. An observed motif is evidence; an implied strand is an inference from the
                 // annotation, and mixing an inference into an observation is how `primary` went wrong.
-                offered.sj_strand = cr.sj_strand;
-                offered.hypotheses = hypotheses.data();
-                offered.n_hypotheses = hypotheses.size();
-
-                ws.acc_set->at(ref_id).deposit(offered, ws.deposit_scratch);
+                ws.pending.push_back({ref_id, start, end, cr.align_strand, cr.sj_strand,
+                                      obs0, observed.size(), hyp0, ws.pending_hypotheses.size()});
             };
+
+        // ── the offer: every placement of this fragment, at once ──────────────────────────────────────
+        const auto offer_placements = [&ws]() {
+            if (!ws.acc_set || ws.pending.empty()) return;
+            // Offsets → pointers, now that nothing more will grow.
+            ws.arena_spans.clear();
+            ws.arena_spans.reserve(ws.pending_hypotheses.size());
+            for (const auto& h : ws.pending_hypotheses) {
+                ws.arena_spans.push_back({ws.arena_implied.data() + h.imp0, h.imp1 - h.imp0, h.sj_strand,
+                                          ws.arena_supporting.data() + h.sup0, h.sup1 - h.sup0});
+            }
+            ws.placements.clear();
+            ws.placements.reserve(ws.pending.size());
+            for (const auto& p : ws.pending) {
+                rigel::accumulator::Placement pl;
+                pl.ref_id = p.ref_id;
+                pl.offered.start = p.start;
+                pl.offered.end = p.end;
+                pl.offered.observed_introns = ws.arena_observed.data() + p.obs0;
+                pl.offered.n_observed_introns = p.obs1 - p.obs0;
+                pl.offered.align_strand = p.align_strand;
+                pl.offered.sj_strand = p.sj_strand;
+                pl.offered.hypotheses = ws.arena_spans.data() + p.hyp0;
+                pl.offered.n_hypotheses = p.hyp1 - p.hyp0;
+                ws.placements.push_back(pl);
+            }
+            ws.acc_set->offer(ws.placements.data(), ws.placements.size(), ws.offer_scratch);
+        };
 
         // Per-worker state refs
         stats.n_read_names++;
+        ws.pending.clear();
+        ws.pending_hypotheses.clear();
+        ws.arena_observed.clear();
+        ws.arena_implied.clear();
+        ws.arena_supporting.clear();
 
         int32_t nh = 1;
         for (const auto& r : records) {
@@ -1814,10 +1870,12 @@ private:
                     ig_result.num_hits = num_hits;
                     ig_result.nm = frag.nm;
                     accumulator.append(ig_result, frag_id);
-
-                    // Deposit the intergenic fragment into the calibration accumulator.
-                    deposit_to_accumulator(frag, cr);
                 }
+
+                // An intergenic hit is a placement for calibration whatever the fragment's other hits:
+                // gDNA sits anywhere, and a repeat's gDNA often sits exactly here (the EM never sees a
+                // multimapper's intergenic hits, and that is unchanged).
+                collect_placement(frag, cr);
 
                 continue;
             }
@@ -1899,10 +1957,11 @@ private:
                     }
                 }
 
-                // Fractional accumulator deposit (resolved unique-mapper,
-                // non-chimeric). See deposit_to_accumulator above.
-                deposit_to_accumulator(frag, cr);
             }
+
+            // Every resolved non-chimeric hit is a placement for calibration; the fragment is offered
+            // whole after its last hit (`offer_placements`).
+            collect_placement(frag, cr);
 
             accumulator.append(result, frag_id);
 
@@ -1910,6 +1969,9 @@ private:
                 n_buffered_mm++;
             }
         }
+
+        // ⭐ THE OFFER: one per fragment, every placement at once.
+        offer_placements();
 
         // Chimera counting: per-fragment, not per-hit.
         // A fragment is chimeric only if it resolves but every
@@ -2177,6 +2239,12 @@ private:
                 for (std::size_t i = 0; i < deposited_lengths.size(); ++i) deposited_lengths[i] += dep[i];
                 qc.merge_from(a.counters());
             }
+            // ⭐ The multi-placement records live on the SET (a record spans references), so the bank is
+            // the union of every reference's gap bank and the set's own, in ONE canonical order: the
+            // reference-order concatenation above is canonical only among one-placement records.
+            deferred.merge_from(acc_set_->deferred_canonical());
+            deferred.canonicalise();
+            qc.merge_from(acc_set_->counters());
 
             nb::dict cal;
             // Echo the partition back, so a consumer can locate every object without reloading the index.
@@ -2209,6 +2277,7 @@ private:
             qc_dict["dropped_empty"]            = qc.dropped_empty;
             qc_dict["dropped_strand_undefined"] = qc.dropped_strand_undefined;
             qc_dict["deferred_undetermined_gap"] = qc.deferred_undetermined_gap;
+            qc_dict["deferred_multiple_placements"] = qc.deferred_multiple_placements;
             qc_dict["unannotated_introns"]      = qc.unannotated_introns;
             qc_dict["contradictory_sj_strand"]  = qc.contradictory_sj_strand;
             qc_dict["introns_absorbed"]         = qc.introns_absorbed;
@@ -2960,6 +3029,7 @@ NB_MODULE(_bam_impl, m) {
                 qc["dropped_empty"]            = c.dropped_empty;
                 qc["dropped_strand_undefined"] = c.dropped_strand_undefined;
                 qc["deferred_undetermined_gap"] = c.deferred_undetermined_gap;
+                qc["deferred_multiple_placements"] = c.deferred_multiple_placements;
                 qc["unannotated_introns"]      = c.unannotated_introns;
                 qc["contradictory_sj_strand"]  = c.contradictory_sj_strand;
                 qc["introns_absorbed"]         = c.introns_absorbed;
@@ -3068,6 +3138,95 @@ NB_MODULE(_bam_impl, m) {
                  [](Accumulator& a, const Accumulator& other) { a.merge_from(other); },
                  nb::arg("other"));
     }
+
+
+        // ⭐ The accumulator SET — the parity surface for `offer`, the multimapper rule. Built from the
+        // flat partition exactly as the scanner builds its own; `at(ref)` hands out each reference's
+        // accumulator, and `deferred` / `qc` / `gap_resolution` are the union the payload exports.
+        nb::class_<rigel::accumulator::AccumulatorSet>(m, "AccumulatorSet")
+            .def("__init__",
+                 [](rigel::accumulator::AccumulatorSet* self,
+                    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> region_bounds,
+                    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ref_region_bound_offsets,
+                    nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> region_types,
+                    int max_length) {
+                     new (self) rigel::accumulator::AccumulatorSet(
+                         region_bounds.data(), region_bounds.shape(0), ref_region_bound_offsets.data(),
+                         ref_region_bound_offsets.shape(0) - 1, region_types.data(),
+                         region_types.shape(0), max_length);
+                 },
+                 nb::arg("region_bounds"), nb::arg("ref_region_bound_offsets"), nb::arg("region_types"),
+                 nb::arg("max_length"))
+            .def("set_sj",
+                 [](rigel::accumulator::AccumulatorSet& s,
+                    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> offsets,
+                    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> boundary_right,
+                    nb::ndarray<const int8_t, nb::ndim<1>, nb::c_contig> sj_strand,
+                    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ref_region_bound_offsets) {
+                     s.set_sj(offsets.data(), offsets.shape(0), boundary_right.data(), sj_strand.data(),
+                              sj_strand.shape(0), ref_region_bound_offsets.data());
+                 },
+                 nb::arg("offsets"), nb::arg("boundary_right"), nb::arg("sj_strand"),
+                 nb::arg("ref_region_bound_offsets"))
+            .def_prop_ro("n_refs", [](const rigel::accumulator::AccumulatorSet& s) { return s.n_refs(); })
+            .def("at",
+                 [](rigel::accumulator::AccumulatorSet& s, int32_t ref) -> rigel::accumulator::Accumulator& {
+                     return s.at(ref);
+                 },
+                 nb::arg("ref"), nb::rv_policy::reference_internal)
+            // One fragment with every placement it aligned to; each placement reads attributes off
+            // whatever it is handed (`ref`, `start`, `end`, `align_strand`, `sj_strand`,
+            // `observed_introns`, `hypotheses`), so the parity gate passes the specification's own
+            // `Placement` objects. Returns the QC key the offer incremented.
+            .def("offer",
+                 [](rigel::accumulator::AccumulatorSet& s, nb::iterable placements) {
+                     static rigel::accumulator::OfferScratch offer_scratch;
+                     std::vector<MarshalledFragment> marshalled;
+                     std::vector<rigel::accumulator::Placement> pls;
+                     std::size_t n = 0;
+                     for (nb::handle _p : placements) ++n;
+                     marshalled.reserve(n);
+                     pls.reserve(n);
+                     for (nb::handle p : placements) {
+                         marshalled.emplace_back(nb::cast<int64_t>(nb::getattr(p, "start")),
+                                                 nb::cast<int64_t>(nb::getattr(p, "end")),
+                                                 nb::cast<nb::iterable>(nb::getattr(p, "observed_introns")),
+                                                 nb::cast<int32_t>(nb::getattr(p, "align_strand")),
+                                                 nb::cast<int32_t>(nb::getattr(p, "sj_strand")),
+                                                 nb::getattr(p, "hypotheses"));
+                         pls.push_back({nb::cast<int32_t>(nb::getattr(p, "ref")), marshalled.back().offered});
+                     }
+                     return std::string(rigel::accumulator::outcome_key(s.offer(pls.data(), pls.size(), offer_scratch)));
+                 },
+                 nb::arg("placements"))
+            .def_prop_ro("deferred", [](rigel::accumulator::AccumulatorSet& s) {
+                rigel::accumulator::DeferredFragments all;
+                for (std::size_t f = 0; f < s.n_refs(); ++f)
+                    all.merge_from(s.at(static_cast<int32_t>(f)).deferred_canonical());
+                all.merge_from(s.deferred_canonical());
+                all.canonicalise();
+                return deferred_dict(all);
+            })
+            .def_prop_ro("qc", [](const rigel::accumulator::AccumulatorSet& s) {
+                rigel::accumulator::DepositCounters c = s.counters();
+                for (std::size_t f = 0; f < s.n_refs(); ++f) c.merge_from(s.at(static_cast<int32_t>(f)).counters());
+                nb::dict qc;
+                qc["deposited"]                = c.deposited;
+                qc["dropped_too_long"]         = c.dropped_too_long;
+                qc["dropped_empty"]            = c.dropped_empty;
+                qc["dropped_strand_undefined"] = c.dropped_strand_undefined;
+                qc["deferred_undetermined_gap"] = c.deferred_undetermined_gap;
+                qc["deferred_multiple_placements"] = c.deferred_multiple_placements;
+                qc["unannotated_introns"]      = c.unannotated_introns;
+                qc["contradictory_sj_strand"]  = c.contradictory_sj_strand;
+                qc["introns_absorbed"]         = c.introns_absorbed;
+                return qc;
+            })
+            .def_prop_ro("gap_resolution", [](const rigel::accumulator::AccumulatorSet& s) {
+                rigel::accumulator::GapCensus g;
+                for (std::size_t f = 0; f < s.n_refs(); ++f) g.merge_from(s.at(static_cast<int32_t>(f)).gap_census());
+                return gap_census_dict(g);
+            });
 
 
     nb::class_<BamScanner>(m, "BamScanner")

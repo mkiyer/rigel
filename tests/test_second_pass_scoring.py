@@ -329,6 +329,7 @@ def test_the_sj_ids_the_scorer_reads_are_the_PAYLOAD_axis_on_every_reference():
         hypothesis_intron_offsets=np.array([0, 1, 2, 3], np.int64),
         hypothesis_introns=np.array([0, 100, 10, 200, 300, 400], np.int64),
         n_fragments=3,
+        n_placements=3,
         n_hypotheses=3,
     )
     payload = SimpleNamespace(

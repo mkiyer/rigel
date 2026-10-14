@@ -24,7 +24,7 @@ from ._bam_impl import detect_sj_strand_tag
 # -- The accumulator --------------------------------------------------------
 # The native class directly: there is no Python row-view façade in front of it, so a caller reads the
 # banks the accumulator actually exports.
-from ._bam_impl import Accumulator
+from ._bam_impl import Accumulator, AccumulatorSet
 
 # -- Fragment resolution ----------------------------------------------------
 from ._resolve_impl import FragmentResolver
@@ -72,6 +72,7 @@ __all__ = [
     "detect_sj_strand_tag",
     # The accumulator
     "Accumulator",
+    "AccumulatorSet",
     # Resolution
     "FragmentResolver",
     "FragmentAccumulator",

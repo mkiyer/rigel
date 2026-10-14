@@ -5527,3 +5527,30 @@ fl:
   within 0.011 bp of the fixed point.
 Sources: `~/Downloads/rigel_runs/prototypes/2026-09-28_od_design/` (`02_roots.md` §3, `03_bound.md` §3,
 `04_evidence.md` §2–§4, `01_fallback.md` §2 and §5, `06_fl.md` §3).
+
+### the-calibration-count-is-blind-to-multimappers
+CLOSED by landing 2026-10-11 (`DESIGN.md` §4.2, `EQUATIONS.md` §1.8 and §10): the accumulator's second pass now
+holds a multimapping fragment WHOLE — one placement per non-chimeric alignment, every gap hypothesis — and
+assigns it by one draw over the (placement, hypothesis) pairs, scored by the existing three factors times the
+placement's own unique traffic, then deposits it through `deposit` at the drawn placement. The defect: pass one
+deposited only uniquely aligned fragments (`bam_scanner.cpp`'s deposit under `is_unique_mapper`), so a region
+whose fragments all multimap read as EMPTY to calibration — the composition, the landscape, the capture reader
+(an empty object beside a dense one is depleted, 0.07 of the bulk on the paralog test) and the locus prior (a gDNA count of
+0, a yield of 0) all read the emptiness as fact; on the real libraries 95 % of LBX0190's multimapper alignments
+sat in regions where they outnumbered unique fragments. Killing numbers: the paralog gate (two identical 500 bp
+exons at gDNA 100) — calibration counts both at 0.24 and 0.28 fragments/bp against 0.24 beside them, from 0 / 0;
+the reader's efficiencies there 1.0 and 1.0, from 0.07 of the bulk; the EM's total 158 against a
+truth of 146, from 183 — and every aligned multimapper scenario passes, 49 / 49. The VCaP mix through the
+production path, pinned: gDNA fraction 0.2393 → 0.2520 against its truth of 0.2518 (the EM's gDNA 4,350,625 →
+4,587,216, its nascent RNA 771,133 → 537,599: the multimapped gDNA it had been calling nascent RNA), 126,154
+of its 136,188 multimapper molecules held on their placements, the second pass 13.8 → 27.7 s. The plasma
+libraries: LBX0190 gDNA fraction 0.0889 → 0.0908 (10,371 of 11,720 molecules held, +3 s), MO_3021 0.1615 →
+0.1642 (68,182 of 70,856, +14 s). On every `NH = 1` fragment the change is a numeric no-op by construction and
+by `rename_identity.py` on the ladder's `g00 ss.99 OFF`: the quant digest and every array bit-identical. The
+one finding: the EM's split of two sequence-identical templates is its own degeneracy — even or a vertex — and
+the even split the suite had asserted at gDNA < 100 was the accidental symmetry of two EMPTY priors; with the
+priors now holding the drawn multimappers it drifts toward a vertex, the totals right, and the shipped iteration
+budget can stop the drift on the way (513 / 39 at gDNA 20, a vertex 552 / 0 converged), so the gate holds the total
+and the shape with the EM run to convergence (`assert_identical_paralogs`, `CONVERGED_EM`). The named residual of the literal rule stands as
+the owner accepted it: a silent processed pseudogene without a unique fragment never receives a multimapper
+beside an expressed parent, and the mixed class is to be measured before any uniform component is considered.
