@@ -330,6 +330,31 @@ def test_the_strand_block_carries_the_junction_diagnostics_and_one_overdispersio
     )
 
 
+def test_a_dead_strand_channel_publishes_the_kappa_calibration_reads_and_no_classes():
+    """Where the strand channel is dead the three classes are not identified — at κ = ½ an artifact junction looks like
+    any other — so the fit's genuine κ and class shares are noise, and calibration reads the pooled counts instead
+    (``StrandModel.genuine_n_same``). The block must say what calibration used: genuine equals pooled, no classes."""
+    from rigel.strand_model import SJStrandTable, StrandModel, StrandModels
+
+    rng = np.random.default_rng(
+        5
+    )  # a dead channel whose fit reads 98 % artifact and genuine κ 0.82 from noise
+    depth = rng.integers(2, 12, size=60)
+    sense = rng.binomial(depth, 0.5)
+    table = SJStrandTable(
+        ref_id=np.zeros(depth.size, dtype=np.int32),
+        start=np.arange(depth.size, dtype=np.int64) * 1000,
+        end=np.arange(depth.size, dtype=np.int64) * 1000 + 100,
+        motif_strand=np.ones(depth.size, dtype=np.int8),
+        n_sense=sense.astype(np.int64),
+        n_antisense=(depth - sense).astype(np.int64),
+    )
+    block = cli._strand_fit_summary(StrandModels(exonic_spliced=StrandModel.from_sj_table(table)))
+    assert block["strand_live"] is False
+    assert block["kappa"]["genuine"] == block["kappa"]["pooled"]
+    assert block["junction_classes"] == {"by_junction": None, "by_fragment": None}
+
+
 def test_the_nascent_table_writes_exactly_the_columns_the_manual_lists(tmp_path):
     """``nrna_quant.feather`` is ``get_nrna_counts_df``: one row per nascent entity with a multi-exon child, and the
     MANUAL's table names exactly its columns, so the two cannot drift apart."""

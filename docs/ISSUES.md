@@ -209,14 +209,6 @@ deterministic ones with the same mismatches stay. Validate both in [0, 1], finit
 gated count beside the pools; gate on both paths. Test first: an NM-tagged fixture at alpha 0, where pools plus gated
 equal fragments less chimeric.
 
-### the-strand-summary-on-a-dead-channel
-`priority: now — 0.8.0, approved with the issues survey (owner, 2026-10-14); a field new in 0.8.0 · kind: defect · 2026-10-14`
-`summary.json`'s `strand_model` publishes `kappa.genuine` and the junction classes from the three-class fit even where
-`strand_live` is false. At κ = ½ the classes are not identified, so both are noise: an unstranded test row reads genuine
-0.412 against the 0.485 calibration used, 61 % of its junctions "artifact", and Binomial(n, ½) tables give 0.06 to 0.96,
-while calibration correctly reads the pooled counts. Where the channel is dead, publish the κ calibration used as
-`genuine`, and `null` classes. Test first: a fixed-seed unstranded table through `_strand_fit_summary`.
-
 ### an-unrecorded-splice-blacklist-is-dropped-silently
 `priority: now — 0.8.0: the cluster's manifest checked before any cluster quant; the warning landed 2026-10-14 · kind: risk · 2026-09-28`
 `TranscriptIndex.load` applies `splice_blacklist.feather` only when `manifest.json` records `sources.alignable_zarr`;

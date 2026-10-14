@@ -123,7 +123,7 @@ its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-mult
 2. **An independent code review.** Done; what it found is in ISSUES, release-relevant first: `ISSUES: the-release-builds`,
    `ISSUES: input-mistakes-pass-silently`, `ISSUES: the-annotated-bam-writer`,
    `ISSUES: the-gtf-parser-accepts-malformed-transcripts`, `ISSUES: the-em-depends-on-its-thread-count`,
-   `ISSUES: the-scoring-alphas-are-unchecked`, `ISSUES: the-strand-summary-on-a-dead-channel`; its smaller items are in
+   `ISSUES: the-scoring-alphas-are-unchecked`; its smaller items are in
    `ISSUES: latent-defects` and `ISSUES: hygiene-ledger`.
 3. **The full benchmark run**, the report card regenerated.
 4. **ISSUES cleanup and prioritization**: the OPEN section ordered by priority. Done.

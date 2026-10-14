@@ -66,8 +66,8 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
 
 - The package declares `Development Status :: 4 - Beta`.
 - `summary.json`'s `strand_model` reports the junction fit behind κ: `kappa` pooled over every junction and over the
-  genuine ones, each class's share (genuine, splice artifact, reversed) of the junctions and of their fragments,
-  `strand_live`, and one `strand_overdispersion` (0, binomial), which replaces the calibration block's two.
+  genuine ones, each class's share (genuine, splice artifact, reversed) of the junctions and of their fragments where
+  the strand channel is live, `strand_live`, and one `strand_overdispersion` (0, binomial), which replaces the calibration block's two.
 - Quantification is reproducible from one seeded stream, which the second pass draws from; output is
   bit-identical run to run with `--threads 1` (with more scan threads the order of floating-point sums can move
   a few fragments between isoforms). The index loader refuses an index it did not build (no manifest, or

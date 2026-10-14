@@ -269,14 +269,16 @@ def _strand_fit_summary(strand_models) -> dict:
     credits to genuine RNA; each class's share of the junctions and of their fragments (shallow splice artifacts
     are most of the junctions and few of the fragments); whether the strand channel is live, the protocol decision
     calibration's strand channel reads, made here by the same two functions on the same 2×2; and the strand
-    overdispersion, 0 by policy for gDNA and RNA alike, so the channel is binomial."""
+    overdispersion, 0 by policy for gDNA and RNA alike, so the channel is binomial. Where the channel is dead the
+    classes are not identified and calibration reads the pooled counts (``StrandModel.genuine_n_same``), so the
+    genuine κ is the pooled one and there are no class shares."""
     from .calibration.region_init import strand_discriminability
     from .calibration.strand_balance import fit_strand_balance
     from .junction_fit import junction_classes
 
     table = strand_models.sj_table
     n_sense, depth = float(table.n_sense.sum()), float(table.depth.sum())
-    classes = junction_classes(table.n_sense, table.depth)
+    pooled = round((n_sense + 1.0) / (depth + 2.0), SUMMARY_DECIMALS)
     names = ("genuine", "artifact", "reversed")
 
     def shares(values):
@@ -287,18 +289,17 @@ def _strand_fit_summary(strand_models) -> dict:
         )
 
     balance = fit_strand_balance(strand_models)
+    live = bool(strand_discriminability(balance.rna_sense_frac, balance.n_observations) > 0.0)
+    if live:
+        classes = junction_classes(table.n_sense, table.depth)
+        genuine = round(classes.kappa, SUMMARY_DECIMALS)
+        by_junction, by_fragment = shares(classes.by_junction), shares(classes.by_fragment)
+    else:
+        genuine, by_junction, by_fragment = pooled, None, None
     return {
-        "kappa": {
-            "pooled": round((n_sense + 1.0) / (depth + 2.0), SUMMARY_DECIMALS),
-            "genuine": round(classes.kappa, SUMMARY_DECIMALS),
-        },
-        "junction_classes": {
-            "by_junction": shares(classes.by_junction),
-            "by_fragment": shares(classes.by_fragment),
-        },
-        "strand_live": bool(
-            strand_discriminability(balance.rna_sense_frac, balance.n_observations) > 0.0
-        ),
+        "kappa": {"pooled": pooled, "genuine": genuine},
+        "junction_classes": {"by_junction": by_junction, "by_fragment": by_fragment},
+        "strand_live": live,
         "strand_overdispersion": {"value": 0.0, "model": "binomial"},
     }
 
