@@ -96,6 +96,7 @@ from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 from rigel.sim.capture import CaptureConfig, CaptureSampler  # noqa: E402
 from rigel.sim.whole_genome import fl_pmf, load_transcripts_from_index  # noqa: E402
+from rigel.sim.wgs_config import GDNASimConfig  # noqa: E402
 
 PB = sibling("policy_benchmark.py")
 PANELS = PB.PANELS
@@ -162,8 +163,8 @@ def sampler_truth(sampler: CaptureSampler, lengths, widths, pmf, off_target: flo
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Sim:
-    """The condition's simulator as the truth needs it: the sampler on the panel's probes, the pre-capture
-    fragment-length law, the two weight constants, the reference lengths and the transcript rows."""
+    """The condition's simulator as the truth needs it: the sampler on the panel's probes, the RNA and gDNA generating
+    fragment-length laws, the two weight constants, the reference lengths and the transcript rows."""
 
     sampler: CaptureSampler
     widths: np.ndarray
@@ -172,6 +173,8 @@ class Sim:
     bind: float
     ref_lengths: dict
     transcripts: list
+    gdna_widths: np.ndarray
+    gdna_pmf: np.ndarray
 
 
 def load_sim(index: TranscriptIndex, index_dir: Path, panel_dir: Path, condition: str) -> Sim:
@@ -195,6 +198,13 @@ def load_sim(index: TranscriptIndex, index_dir: Path, panel_dir: Path, condition
     )
     params = type("Sim", (), {k: sim[k] for k in ("frag_mean", "frag_std", "frag_min", "frag_max")})
     widths, pmf = fl_pmf(params)
+    gdna_defaults = GDNASimConfig()
+    gdna = manifest.get("gdna", {})
+    gdna_params = type("GDNA", (), {
+        k: gdna.get(k, getattr(gdna_defaults, k))
+        for k in ("frag_mean", "frag_std", "frag_min", "frag_max")
+    })
+    gdna_widths, gdna_pmf = fl_pmf(gdna_params)
     return Sim(
         sampler,
         np.asarray(widths, dtype=np.int64),
@@ -203,6 +213,8 @@ def load_sim(index: TranscriptIndex, index_dir: Path, panel_dir: Path, condition
         float(cap_cfg.get("binding_per_base", 0.0)),
         ref_lengths,
         transcripts,
+        np.asarray(gdna_widths, dtype=np.int64),
+        np.asarray(gdna_pmf, dtype=np.float64),
     )
 
 
@@ -610,16 +622,16 @@ def em_loci(index: TranscriptIndex, panel_dir: Path, condition: str, config):
 
 
 def gdna_space_yield(sim: Sim, blocks: np.ndarray, n_loci: int, id2name: dict, width_step: int = 4) -> np.ndarray:
-    """Per locus, ``Y_g = Σ_w f(w) Σ_{starts s whose fragment OVERLAPS a block} (off + bind · best single-part
+    """Per locus, ``Y_g = Σ_w f_g(w) Σ_{starts s whose fragment OVERLAPS a block} (off + bind · best single-part
     overlap)``, read off the simulator's own gDNA-space landscape — the same computation the reads were drawn
     with. ``blocks`` is ``int64[n, 4]`` of ``(locus, ref_id, start, end)``. The width grid is thinned by
     ``width_step`` with each kept width carrying its bin's pmf mass (the landscape is per width per reference)."""
     Y = np.zeros(n_loci, dtype=np.float64)
     if blocks.size == 0:
         return Y
-    keep = np.arange(0, sim.widths.size, max(int(width_step), 1))
-    wk = sim.widths[keep]
-    pk = np.add.reduceat(sim.pmf, keep)
+    keep = np.arange(0, sim.gdna_widths.size, max(int(width_step), 1))
+    wk = sim.gdna_widths[keep]
+    pk = np.add.reduceat(sim.gdna_pmf, keep)
     live = sim.sampler.enabled and sim.bind > 0.0
     for rid in np.unique(blocks[:, 1]):
         name = id2name[int(rid)]
@@ -768,7 +780,11 @@ def scale_stats(L: np.ndarray, Y: np.ndarray, weight: np.ndarray) -> dict:
 
 
 def scale_verdict(means: dict) -> tuple[float, str]:
-    """The largest pairwise disagreement among the class means, as a fraction, and its pair."""
+    """The largest raw class-mean disagreement, as a fraction, and its pair.
+
+    Interpreting this as a likelihood defect requires the component numerators to
+    share a unit: rescaling both K and L for one component leaves K/L unchanged.
+    """
     names = [k for k, v in means.items() if np.isfinite(v) and v > 0]
     worst, pair = 0.0, ""
     for i, a in enumerate(names):
@@ -877,6 +893,7 @@ def print_scale(r: dict) -> None:
     worst, pair = scale_verdict(r["means"])
     verdict = "ONE SCALE" if worst <= ONE_SCALE_TOL else f"NOT one scale ({worst:.1%} between {pair})"
     print(f"   class means: {_ratios(r['means'])}  →  {verdict}")
+    print("   Cross-population scale requires matching likelihood-numerator units; compare K/L, not L alone.")
     print(f"   within-gene sd of log(L / Y), annotated multi-exon: {r['within_gene_sd']:.3f}   (tolerance {ONE_SCALE_TOL:.0%} on class means)")
     print("   WITHIN each probed class: class-mean L / Y ×10⁻³ and the pairwise ratios")
     print(f"   {'probed class':<16}{'n iso/span/loci':>17} {'isoforms':>9} {'spans':>9} {'gDNA':>9}  {'spans/iso':>9} {'gDNA/iso':>9} {'gDNA/spans':>10}")
@@ -948,6 +965,26 @@ def self_test() -> int:
         )
         params = type("Sim", (), dict(frag_mean=200, frag_std=50, frag_min=100, frag_max=300))
         widths, pmf = fl_pmf(params)
+        # Exercise the manifest loader too: a consumer-only check cannot catch it
+        # silently reusing the RNA law or using RNA parameters as gDNA defaults.
+        manifest = {
+            "simulation": {k: getattr(params, k) for k in ("frag_mean", "frag_std", "frag_min", "frag_max")},
+            "gdna": dict(frag_mean=80, frag_std=10, frag_min=60, frag_max=100),
+            "capture_configs": [{"label": "off", "config": {"off_target_weight": 1.0}}],
+        }
+        manifest_path = Path(tmp) / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest))
+        loaded = load_sim(index, Path(index.index_dir), Path(tmp), "example_capture_off")
+        gw, gp = fl_pmf(type("GDNA", (), manifest["gdna"]))
+        check("the manifest loader keeps distinct RNA and gDNA laws",
+              np.array_equal(loaded.widths, widths) and np.array_equal(loaded.pmf, pmf)
+              and np.array_equal(loaded.gdna_widths, gw) and np.array_equal(loaded.gdna_pmf, gp))
+        manifest["gdna"] = {"frag_mean": 100}
+        manifest_path.write_text(json.dumps(manifest))
+        loaded = load_sim(index, Path(index.index_dir), Path(tmp), "example_capture_off")
+        gw, gp = fl_pmf(dataclasses.replace(GDNASimConfig(), frag_mean=100))
+        check("missing gDNA fields use simulator defaults independently of RNA",
+              np.array_equal(loaded.gdna_widths, gw) and np.array_equal(loaded.gdna_pmf, gp))
         L = np.array([int(t.length) for t in transcripts], dtype=np.int64)
         L_plain, factor, probed = sampler_truth(sampler, L, widths, pmf, off)
         t = index.t_df
@@ -1039,7 +1076,8 @@ def self_test() -> int:
         check("...and is outside the tolerance, while a per-mille difference is inside", worst > ONE_SCALE_TOL and scale_verdict({"a": 1.0, "b": 1.001})[0] < ONE_SCALE_TOL)
         # ⑩ the junction-probed flag is read off the sampler's own probe map: the probed gene's two-block probe
         #    spans its junction, the half-probed gene's single-exon probe does not, the unprobed gene has none
-        sim = Sim(sampler, np.asarray(widths, dtype=np.int64), np.asarray(pmf, dtype=np.float64), off, binding, {"chr1": 16000}, transcripts)
+        sim = Sim(sampler, np.asarray(widths, dtype=np.int64), np.asarray(pmf, dtype=np.float64), off, binding, {"chr1": 16000}, transcripts,
+                  np.asarray(widths, dtype=np.int64), np.asarray(pmf, dtype=np.float64))
         jp = junction_probed_flags(sim, index)
         check("a probe spanning a transcript's junction flags it, and only it", bool(jp[p]) and not jp[h] and not jp[u])
         # ⑪ the gDNA-space yield counts every start whose fragment OVERLAPS the footprint (the locus gDNA component
@@ -1050,6 +1088,22 @@ def self_test() -> int:
         plain = float(sum(pw * off * (2600 + int(wv) - 1) for wv, pw in zip(widths, pmf, strict=True)))
         check("an unprobed footprint's gDNA-space yield is its off-target plain length", abs(Yg[0] / plain - 1.0) < 1e-9)
         check("...and a probed footprint's yield exceeds it", Yg[1] > Yg[0] * 2.0)
+        # Unequal generating laws: gDNA truth must follow its own PMF, independent of RNA.
+        gap = dataclasses.replace(sim, gdna_widths=np.array([60, 80, 100]), gdna_pmf=np.array([0.25, 0.5, 0.25]))
+        Ygap = gdna_space_yield(gap, blocks, 2, {0: "chr1"}, width_step=1)
+        check("a gDNA length gap changes its footprint truth", not np.array_equal(Ygap, Yg))
+        check("the unprobed gap footprint uses E_g[w]", abs(Ygap[0] - off * (2600 + 80 - 1)) < 1e-9)
+        changed_rna = dataclasses.replace(gap, widths=np.array([400]), pmf=np.array([1.0]))
+        check("changing only RNA widths leaves gDNA truth identical",
+              np.array_equal(Ygap, gdna_space_yield(changed_rna, blocks, 2, {0: "chr1"}, width_step=1)))
+        direct = np.zeros(2)
+        for lid, rid, lo, hi in blocks:
+            for wv, pw in zip(gap.gdna_widths, gap.gdna_pmf, strict=True):
+                direct[lid] += pw * sum(
+                    sampler.fragment_weight("gdna", "chr1", 16000, start, int(wv))
+                    for start in range(max(0, int(lo-wv+1)), min(int(hi), 16000-int(wv)+1))
+                )
+        check("gap gDNA truth agrees with direct captured-start enumeration", np.allclose(Ygap, direct, rtol=1e-12, atol=1e-9))
         # ⑫ the shipped gDNA component's length (`assemble_priors`) at efficiency 1 counts the SAME overlapping
         #    starts as the yield, Σ_w f(w)(L + w − 1), on a footprint whose outside neighbours hold every outside
         #    base: each crossing fragment then starts in a neighbour, so its whole unit lands on the footprint's
