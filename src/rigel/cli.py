@@ -564,16 +564,20 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         )
 
     # Write config.yaml — reproducible run configuration
-    _write_config_yaml(config_yaml_path, args)
+    _write_config_yaml(config_yaml_path, args, result.pipeline_config)
 
 
-def _write_config_yaml(config_yaml_path: Path, args: argparse.Namespace) -> None:
+def _write_config_yaml(
+    config_yaml_path: Path, args: argparse.Namespace, pipeline_config=None
+) -> None:
     """Write a config.yaml that can reproduce the current run.
 
     The file uses the same key format accepted by ``--config``, so a user
     can rerun with::
 
         rigel quant --config results/config.yaml
+
+    With the run's ``pipeline_config`` the junction-strand tag is the one the scan read with, not ``auto``.
     """
     import yaml
 
@@ -603,6 +607,9 @@ def _write_config_yaml(config_yaml_path: Path, args: argparse.Namespace) -> None
             val = list(val)
         quant[dest] = val
 
+    if pipeline_config is not None:
+        tags = pipeline_config.scan.sj_strand_tag
+        quant["sj_strand_tag"] = list(tags) if isinstance(tags, (list, tuple)) else tags.split(",")
     data["quant"] = quant
 
     # Extra flags not in _PARAM_SPECS
@@ -1152,7 +1159,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=f"BAM tag(s) for splice-junction strand (default: {' '.join(qd['sj_strand_tag'])}). "
         "'auto' detects the tag from the first 1,000 spliced reads. "
-        "Use 'XS' for STAR, 'ts' for minimap2, or list multiple "
+        "Use 'XS' for HISAT2 or STAR (which writes it only with --outSAMstrandField intronMotif), "
+        "'ts' for minimap2, or list multiple "
         "tags to check in order (e.g. XS ts).",
     )
 

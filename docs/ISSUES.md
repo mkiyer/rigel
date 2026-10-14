@@ -127,21 +127,6 @@ multimappers the gDNA share is inflated by about (N_unique + N_mm) / N_unique, c
 alone gets no prior although calibration counted its gDNA. Invisible on the `NH = 1` panels; every real library and the
 aligned scenarios carry it. Magnitude unmeasured.
 
-### sj-strand-tag-chosen-from-the-first-reads
-`priority: now — 0.8.0: validate, log and record the resolved mode, warn on none; the per-record repair 0.8.1 · kind: defect · 2026-09-28`
-The scanner picks the junction-strand tag mode from the first 1,000 spliced reads (`detect_sj_strand_tag_native`) and
-returns "none" if none carries XS or ts, so a library whose first reads lack the tag loses its strand. An unknown
-`--sj-strand-tag` spec silently becomes XS_TS (`parse_sj_tag_spec`'s default), and the resolved mode is never logged
-or written to `summary.json` or `config.yaml`, so a run cannot be reproduced from its outputs. The repair reads the tag
-per record; it moves numbers only on libraries whose first 1,000 spliced reads lack it.
-Instrument: a fixture with the tag absent from the first reads.
-WIDER THAN STATED (2026-10-14): a BAM with no XS/ts tag at all loses its strand — the junction strand comes only
-from the tag, so no fragment qualifies for strand training, κ reads ½ and a stranded library is quantified as
-unstranded, with only generic warnings; STAR writes XS only with `--outSAMstrandField intronMotif`, while the MANUAL
-says it emits XS. 0.8.0 (owner): validate the spec, log the resolved mode and write it to `summary.json` and
-`config.yaml`, and warn loudly when "auto" resolves to "none" on a library with spliced reads. 0.8.1: the strand of the
-annotated junction, which the resolver already looks up, as the sense source.
-
 ### an-unrecorded-splice-blacklist-is-dropped-silently
 `priority: now — 0.8.0: the warning, both directions; the cluster's manifest checked before any cluster quant · kind: risk · 2026-09-28`
 `TranscriptIndex.load` applies `splice_blacklist.feather` only when `manifest.json` records `sources.alignable_zarr`;
@@ -908,6 +893,22 @@ reference above the density's peak, and that compensating error must be found fi
 junction price (`ISSUES: the-junction-price-is-noisy-within-a-gene`).
 
 Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-29_precapture_rna/C_report.md` and its `C/` harness.
+
+### sj-strand-tag-chosen-from-the-first-reads
+`priority: next — 0.8.1: the per-record or annotated-junction repair; the 0.8.0 minimum landed 2026-10-14 · kind: defect · 2026-09-28`
+The scanner picks the junction-strand tag mode from the first 1,000 spliced reads (`detect_sj_strand_tag_native`) and
+returns "none" if none carries XS or ts, so a library whose first reads lack the tag loses its strand. An unknown
+`--sj-strand-tag` spec silently becomes XS_TS (`parse_sj_tag_spec`'s default), and the resolved mode is never logged
+or written to `summary.json` or `config.yaml`, so a run cannot be reproduced from its outputs. The repair reads the tag
+per record; it moves numbers only on libraries whose first 1,000 spliced reads lack it.
+Instrument: a fixture with the tag absent from the first reads.
+WIDER THAN STATED (2026-10-14): a BAM with no XS/ts tag at all loses its strand — the junction strand comes only
+from the tag, so no fragment qualifies for strand training, κ reads ½ and a stranded library is quantified as
+unstranded, with only generic warnings; STAR writes XS only with `--outSAMstrandField intronMotif`, while the MANUAL
+says it emits XS. LANDED 2026-10-14 (`tests/test_sj_strand_tag.py`): an unknown spec is refused by `BamScanConfig`; the resolved
+mode is logged and recorded in `summary.json` and `config.yaml`; a library whose spliced reads are read with no
+tag warns that it is quantified as unstranded; the MANUAL's STAR lines name `--outSAMstrandField intronMotif`. 0.8.1: the strand of the
+annotated junction, which the resolver already looks up, as the sense source.
 
 ### the-bulk-can-be-calibrations-nascent-rna
 `priority: later — Tier 2, accepted for 0.8.0 on the capture-reference review's recommendation (2026-10-13); its repair is upstream · kind: defect · 2026-10-13`

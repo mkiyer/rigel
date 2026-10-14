@@ -68,7 +68,8 @@ rigel -v quant ...       # -v / --verbose: DEBUG-level logging for any subcomman
 - **`NH` tag** used for multimapper handling when present; otherwise
   multimappers are detected from secondary BAM flags
 - Splice-junction strand tag recommended for strand-model accuracy
-  (`XS` from STAR/HISAT2, `ts` from minimap2, or `auto` for detection)
+  (`XS` from HISAT2, or from STAR with `--outSAMstrandField intronMotif`; `ts` from minimap2; or `auto` for
+  detection)
 
 Name-sort an existing BAM:
 
@@ -171,7 +172,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 |------|---------|-------------|
 | `--include-multimap` / `--no-include-multimap` | on | Include multimapping reads |
 | `--keep-duplicates` / `--no-keep-duplicates` | off | Keep reads marked PCR/optical duplicates |
-| `--sj-strand-tag TAG [...]` | `auto` | Splice-junction strand tag. `auto` detects from the first 1,000 spliced reads; use `XS` (STAR/HISAT2), `ts` (minimap2), or list several to try in order (e.g. `XS ts`). |
+| `--sj-strand-tag TAG [...]` | `auto` | Splice-junction strand tag. `auto` detects from the first 1,000 spliced reads; use `XS` (HISAT2, or STAR with `--outSAMstrandField intronMotif`), `ts` (minimap2), or list several to try in order (e.g. `XS ts`). |
 
 **Model parameters**
 
@@ -738,12 +739,14 @@ tpm_matrix   = gene_quant.pivot(index="gene_id", columns="sample", values="tpm")
 
 | Aligner | SJ strand tag | Notes |
 |---------|--------------|-------|
-| STAR | `XS` | Name-grouped output by default |
+| STAR | `XS` | Written only with `--outSAMstrandField intronMotif`; name-grouped output by default |
 | HISAT2 | `XS` | Standard RNA-seq workflow |
 | minimap2 | `ts` | Long-read and splice-aware mode |
 
 Use `--sj-strand-tag auto` (default) to detect the tag automatically, or list
-several tags to try in order (e.g. `--sj-strand-tag XS ts`).
+several tags to try in order (e.g. `--sj-strand-tag XS ts`). The tag the scan read with is logged and recorded in
+`summary.json` and `config.yaml`. Junction strands come only from the tag: if no spliced read carries one, no
+junction trains the strand model and the library is quantified as unstranded, and Rigel warns.
 
 ---
 
@@ -751,7 +754,7 @@ several tags to try in order (e.g. `--sj-strand-tag XS ts`).
 
 ### STAR-aligned BAM
 
-STAR produces name-grouped BAMs with the `XS` tag:
+STAR produces name-grouped BAMs, and writes the `XS` tag only when run with `--outSAMstrandField intronMotif`:
 
 ```bash
 rigel quant \

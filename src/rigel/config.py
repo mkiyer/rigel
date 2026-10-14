@@ -223,6 +223,14 @@ class BamScanConfig:
                 f"BamScanConfig.splicing_anchor_tolerance must be >= 0; "
                 f"got {self.splicing_anchor_tolerance}."
             )
+        # the scanner's tag modes; anything else used to become "XS,ts" in the scanner without a word
+        tags = self.sj_strand_tag
+        spec = ",".join(tags) if isinstance(tags, (list, tuple)) else tags
+        if spec not in ("auto", "none", "", "XS", "ts", "XS,ts", "ts,XS"):
+            raise ValueError(
+                "BamScanConfig.sj_strand_tag must be auto, none, XS, ts, or XS and ts in either order; "
+                f"got {tags!r}."
+            )
 
     def resolved_total_threads(self) -> int:
         """Return the concrete total scan thread budget."""

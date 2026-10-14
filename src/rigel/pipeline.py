@@ -903,9 +903,26 @@ def run_pipeline(
     if scan.sj_strand_tag == "auto":
         detected_spec = _native_detect_sj_tag(bam_path)
         scan = _replace(scan, sj_strand_tag=detected_spec)
+        logger.info(
+            "[SCAN] splice-junction strand tag: %s (auto, from the first spliced reads)",
+            detected_spec,
+        )
+    else:
+        logger.info("[SCAN] splice-junction strand tag: %s", _sj_tag_to_spec(scan.sj_strand_tag))
+    # the result carries the mode the scan read with, so summary.json and config.yaml record it
+    config = _replace(config, scan=scan)
 
     # -- Single BAM pass (C++ native scanner) --
     stats, strand_models, buffer, calibration_payload = scan_and_buffer(bam_path, index, scan)
+    if (
+        _sj_tag_to_spec(scan.sj_strand_tag) == "none"
+        and stats.n_with_annotated_sj + stats.n_with_unannotated_sj > 0
+    ):
+        logger.warning(
+            "No splice-junction strand tag (XS, or minimap2's ts) is read on this library's spliced reads, so no "
+            "junction trains the strand model and the library is quantified as unstranded. If it is stranded, "
+            "align with the tag (STAR: --outSAMstrandField intronMotif) or name it with --sj-strand-tag."
+        )
 
     # -- The second pass: drain the side buffer, BEFORE calibration --
     calibration_payload = _drain_side_buffer(
