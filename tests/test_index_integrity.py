@@ -849,6 +849,80 @@ def test_collapse_three_way_group_keeps_one(tmp_path: Path):
     assert {t.t_id for t in txs} == {"ENST0000A"}
 
 
+def test_collapsed_duplicates_are_written_as_an_alias_map(tmp_path: Path):
+    """A user whose annotation names a collapsed transcript finds the one that stands for it; with nothing
+    collapsed the table is written empty."""
+    from rigel.index import TRANSCRIPT_ALIASES_FEATHER
+
+    fasta, _ = _mini_sources(tmp_path)
+    gtf = tmp_path / "collapse.gtf"
+    _write_gtf(
+        gtf,
+        [
+            _gtf_line("transcript", 100, 500, "+", "G1", "ENST00000002"),
+            _gtf_line("exon", 100, 200, "+", "G1", "ENST00000002"),
+            _gtf_line("exon", 400, 500, "+", "G1", "ENST00000002"),
+            _gtf_line("transcript", 100, 500, "+", "G1", "ENST00000001"),
+            _gtf_line("exon", 100, 200, "+", "G1", "ENST00000001"),
+            _gtf_line("exon", 400, 500, "+", "G1", "ENST00000001"),
+            _gtf_line("transcript", 1000, 1500, "+", "G2", "ENST00000009"),
+            _gtf_line("exon", 1000, 1500, "+", "G2", "ENST00000009"),
+        ],
+    )
+    TranscriptIndex.build(fasta, gtf, tmp_path / "idx", collapse_duplicate_transcripts=True)
+    aliases = pd.read_feather(tmp_path / "idx" / TRANSCRIPT_ALIASES_FEATHER)
+    assert aliases.to_dict("records") == [
+        {"dropped_t_id": "ENST00000002", "kept_t_id": "ENST00000001"}
+    ]
+
+    (tmp_path / "plain").mkdir()
+    _, plain_gtf = _mini_sources(tmp_path / "plain")
+    TranscriptIndex.build(fasta, plain_gtf, tmp_path / "plain_idx")
+    plain = pd.read_feather(tmp_path / "plain_idx" / TRANSCRIPT_ALIASES_FEATHER)
+    assert list(plain.columns) == ["dropped_t_id", "kept_t_id"] and plain.empty
+
+
+def test_the_index_writes_no_column_nothing_reads(tmp_path: Path):
+    """The simulator's abundances and the exon count in ``transcripts.feather``, and the constant interval type
+    in ``sj.feather``, were written and never read."""
+    from rigel.index import SJ_FEATHER
+
+    fasta, gtf = _mini_sources(tmp_path)
+    TranscriptIndex.build(fasta, gtf, tmp_path / "idx")
+    t_columns = set(pd.read_feather(tmp_path / "idx" / TRANSCRIPTS_FEATHER).columns)
+    assert not t_columns & {"abundance", "nrna_abundance", "n_exons"}
+    assert "interval_type" not in pd.read_feather(tmp_path / "idx" / SJ_FEATHER).columns
+    assert TranscriptIndex.load(tmp_path / "idx").num_transcripts > 0
+
+
+def test_a_single_exon_transcript_covering_two_spans_counts_the_contributors_of_both():
+    """The nascent entity a single-exon transcript stands for holds every multi-exon transcript of every span it
+    covers: one span of one transcript and one of two, three in all. An overwrite kept the last span's two."""
+    from rigel.index import create_nrna_transcripts
+
+    def tx(t_index, t_id, exons):
+        return Transcript(
+            ref="chr1",
+            strand=Strand.POS,
+            exons=[Interval(s, e) for s, e in exons],
+            t_id=t_id,
+            g_id="G1",
+            t_index=t_index,
+            g_index=0,
+        )
+
+    covering = tx(0, "SE", [(100, 2000)])
+    transcripts = [
+        covering,
+        tx(1, "T1", [(200, 300), (400, 500)]),
+        tx(2, "T2", [(1000, 1100), (1200, 1300)]),
+        tx(3, "T3", [(1000, 1100), (1250, 1300)]),
+    ]
+    create_nrna_transcripts(transcripts, tolerance=20)
+    assert covering.is_nrna
+    assert covering.nrna_n_contributors == 3
+
+
 def test_collapse_is_noop_without_duplicates(tmp_path: Path):
     """collapse=True must not drop transcripts that are merely similar (shared intron,
     different UTRs)."""

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The calibration stage — how a library's unspliced fragments are separated into genomic DNA and RNA
 before the transcript EM sees them — was rebuilt from its foundations. Indexes built by earlier
-versions must be rebuilt (`rigel index`; the on-disk format is now version 8).
+versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
 
 ### Added
 
@@ -51,7 +51,9 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 8).
   ratio, the second pass's lookups run in the kernel, and the fragment-length fits are vectorised.
 - **`rigel sim`**: sparse nascent RNA, capture with a fragment binding through one contiguous part of
   a probe, R1-sense libraries, FASTQ emission, and every simulated read's true origin in its name.
-- **`rigel index --collapse-duplicate-transcripts`** and provenance in the index manifest.
+- **`rigel index --collapse-duplicate-transcripts`** and provenance in the index manifest. A collapsed
+  transcript's ID is kept in `transcript_aliases.feather`, which maps it to the transcript kept for it.
+- The splice blacklist keeps the alignable count behind each junction beside its anchors.
 - A scan cache keyed by the index, the graph, the boundary reaches and the scan settings (never a
   thread count), so a stale cache is refused rather than reused.
 
@@ -78,6 +80,8 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 8).
   `calibration.gdna_capture_saturation`, the saturated captured level over it (1 when there is none).
 - Three `locus_stats.feather` columns (`--emit-locus-stats`): `gdna_log_eff_len`, `digamma_calls_per_estep`
   and `squarem_extrapolation_clamp_count`.
+- Index columns nothing read: `transcripts.feather`'s `abundance`, `nrna_abundance` and `n_exons`, and
+  `sj.feather`'s `interval_type`.
 - The fragment-length composition channel and the NPMLE gDNA prior: measured and retired.
 - `--mappability-read-length` (a no-op), `--gdna-prior-mixture-bridge`, `--sweep-n-grid-single-strand`
   and `--gdna-em-llr-bias` (an underived odds dial), and the `measured_total` background estimator.
@@ -86,6 +90,8 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 8).
 
 ### Fixed
 
+- The nascent table's `n_contributing_transcripts` counts the contributors of every span a single-exon nascent entity
+  covers, not only the last span's.
 - The gDNA fragment-length law the EM scores with read the spliced RNA fragment counts as if they were a
   probability law, so every exon-flanking boundary read as pure gDNA. It now reads the smoothed RNA
   length law. Output moves under hybrid capture and wherever nascent RNA crosses an exon boundary.

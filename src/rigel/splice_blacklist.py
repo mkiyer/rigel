@@ -52,6 +52,7 @@ BLACKLIST_COLUMNS = (
     "end",
     "max_anchor_left",
     "max_anchor_right",
+    "count",
 )
 
 
@@ -73,8 +74,9 @@ def aggregate_splice_blacklist(rows: pd.DataFrame, *, min_count: int = 2) -> pd.
     -------
     pandas.DataFrame
         One row per unique ``(ref, start, end)`` sj with columns :data:`BLACKLIST_COLUMNS`, the
-        anchors aggregated across the surviving read-length rows by ``max``, sorted by
-        ``(ref, start, end)``.
+        anchors aggregated across the surviving read-length rows by ``max`` and their counts summed,
+        sorted by ``(ref, start, end)``. The resolver reads the anchors; the count is kept so that a
+        threshold can be read off the index.
     """
     if min_count < 1:
         raise ValueError(f"min_count must be >= 1, got {min_count}")
@@ -96,7 +98,9 @@ def aggregate_splice_blacklist(rows: pd.DataFrame, *, min_count: int = 2) -> pd.
     agg = (
         kept.groupby(["ref", "start", "end"], sort=False, observed=True)
         .agg(
-            max_anchor_left=("max_anchor_left", "max"), max_anchor_right=("max_anchor_right", "max")
+            max_anchor_left=("max_anchor_left", "max"),
+            max_anchor_right=("max_anchor_right", "max"),
+            count=("count", "sum"),
         )
         .reset_index()
     )
@@ -106,6 +110,7 @@ def aggregate_splice_blacklist(rows: pd.DataFrame, *, min_count: int = 2) -> pd.
     agg["end"] = agg["end"].astype(np.int32)
     agg["max_anchor_left"] = agg["max_anchor_left"].astype(np.int32)
     agg["max_anchor_right"] = agg["max_anchor_right"].astype(np.int32)
+    agg["count"] = agg["count"].astype(np.int64)
 
     logger.info(
         f"Splice blacklist: {n_raw:,} raw rows → {int(keep_mask.sum()):,} kept "
@@ -165,5 +170,6 @@ def _empty_blacklist_df() -> pd.DataFrame:
             "end": pd.Series([], dtype=np.int32),
             "max_anchor_left": pd.Series([], dtype=np.int32),
             "max_anchor_right": pd.Series([], dtype=np.int32),
+            "count": pd.Series([], dtype=np.int64),
         }
     )

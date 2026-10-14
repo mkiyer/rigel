@@ -437,8 +437,8 @@ Calibration cost is depth-independent — every region in the index is solved re
 
 ## 2. The index
 
-`INDEX_FORMAT_VERSION 8`, shipped as `regions.feather` + `edges.feather`, built and checked by
-`calibration/splice_graph.py`.
+`INDEX_FORMAT_VERSION 9` (the splice graph since 8), shipped as `regions.feather` + `edges.feather`, built and
+checked by `calibration/splice_graph.py`.
 
 > The genome is a graph. **Regions** are intervals; **boundaries** connect them. A fragment is a **path**.
 > Regions count fragments *contained*; boundaries count fragments *crossing* (a 0-bp boundary, no width).

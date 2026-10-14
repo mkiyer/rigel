@@ -75,6 +75,8 @@ class Transcript:
     Setting ``nrna_abundance = k × abundance`` means there are *k* times
     as many nascent RNA molecules as mature mRNA molecules.
     """
+    aliases: tuple[str, ...] = ()
+    """The IDs of the identical transcripts ``--collapse-duplicate-transcripts`` folded into this one."""
 
     @classmethod
     def from_gtf(cls, feature) -> "Transcript":
@@ -134,13 +136,10 @@ class Transcript:
             "is_basic": self.is_basic,
             "is_mane": self.is_mane,
             "is_ccds": self.is_ccds,
-            "n_exons": len(self.exons),
             "is_nrna": self.is_nrna,
             "is_synthetic": self.is_synthetic,
             "nrna_t_index": self.nrna_t_index,
             "nrna_n_contributors": self.nrna_n_contributors,
-            "abundance": self.abundance,
-            "nrna_abundance": self.nrna_abundance,
         }
 
     @staticmethod

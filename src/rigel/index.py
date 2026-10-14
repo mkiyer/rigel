@@ -65,13 +65,20 @@ SJ_TSV = "sj.tsv"
 SJ_BLACKLIST_FEATHER = "splice_blacklist.feather"
 SJ_BLACKLIST_TSV = "splice_blacklist.tsv"
 
+#: ``dropped_t_id → kept_t_id`` for every transcript ``--collapse-duplicate-transcripts`` folded into an
+#: identical one; written for the user, never read.
+TRANSCRIPT_ALIASES_FEATHER = "transcript_aliases.feather"
+TRANSCRIPT_ALIASES_TSV = "transcript_aliases.tsv"
+
 MANIFEST_JSON = "manifest.json"
 
 #: On-disk index format version, bumped whenever the schema or the meaning of any persisted column
 #: changes; :meth:`TranscriptIndex.load` refuses any other. 8 is the splice graph: ``regions.feather`` +
 #: ``edges.feather``, both mandatory, adjacent regions not merged (a merge deletes the region bound at a
-#: majority of real transcript termini).
-INDEX_FORMAT_VERSION = 8
+#: majority of real transcript termini). 9 drops the columns nothing read, adds the duplicate-transcript
+#: alias table and the splice blacklist's count, and counts every span's contributors to a nascent entity
+#: that covers several.
+INDEX_FORMAT_VERSION = 9
 
 
 def _rigel_version() -> str:
@@ -247,6 +254,7 @@ def _collapse_duplicate_transcripts(transcripts: list[Transcript]) -> list[Trans
         keep = min(idxs, key=lambda i: transcripts[i].t_id or "")
         dropped = [i for i in idxs if i != keep]
         drop_idx.update(dropped)
+        transcripts[keep].aliases = tuple(sorted(transcripts[i].t_id for i in dropped))
         if len(examples) < CONSTANTS.qc.report_examples:
             examples.append(
                 f"  ({ref}, strand={strand}): kept {transcripts[keep].t_id!r}, "
@@ -484,7 +492,7 @@ def create_nrna_transcripts(
                 break  # sorted by start, no more can contain
             if s_start <= m_start and m_end <= s_end:
                 s_tx.is_nrna = True
-                s_tx.nrna_n_contributors = span_contributor_count[span_key]
+                s_tx.nrna_n_contributors += span_contributor_count[span_key]
                 covered.add(span_key)
                 covered_equiv[span_key] = s_tx
                 break
@@ -531,12 +539,10 @@ def build_splice_sj(transcripts: list[Transcript]) -> pd.DataFrame:
     The resulting DataFrame is sorted by (ref, start, end, strand).
     """
     rows = [
-        AnnotatedInterval(t.ref, start, end, t.strand, IntervalType.SJ, t.t_index)
-        for t in transcripts
-        for start, end in t.introns()
+        (t.ref, start, end, t.strand, t.t_index) for t in transcripts for start, end in t.introns()
     ]
-    rows.sort(key=lambda sj: (sj.ref, sj.start, sj.end, sj.strand))
-    return pd.DataFrame(rows, columns=AnnotatedInterval._fields)
+    rows.sort(key=lambda sj: (sj[0], sj[1], sj[2], sj[3]))
+    return pd.DataFrame(rows, columns=["ref", "start", "end", "strand", "t_index"])
 
 
 def write_bed12(
@@ -1030,6 +1036,14 @@ class TranscriptIndex:
         t_df.to_feather(output_dir / TRANSCRIPTS_FEATHER, **feather_kwargs)
         if write_tsv:
             t_df.to_csv(output_dir / TRANSCRIPTS_TSV, sep="\t", index=False)
+        aliases_df = pd.DataFrame(
+            [(alias, t.t_id) for t in transcripts for alias in t.aliases],
+            columns=["dropped_t_id", "kept_t_id"],
+            dtype=object,
+        )
+        aliases_df.to_feather(output_dir / TRANSCRIPT_ALIASES_FEATHER, **feather_kwargs)
+        if write_tsv:
+            aliases_df.to_csv(output_dir / TRANSCRIPT_ALIASES_TSV, sep="\t", index=False)
 
         # -- Splice junctions -------------------------------------------------
         logger.info("[START] Building splice junctions")
@@ -1206,7 +1220,6 @@ class TranscriptIndex:
             "strand": np.int8,
             "t_index": np.int32,
             "g_index": np.int32,
-            "n_exons": np.int16,
             "nrna_t_index": np.int32,
             "nrna_n_contributors": np.int16,
             "length": np.int32,

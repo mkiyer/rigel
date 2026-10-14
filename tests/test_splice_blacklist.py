@@ -141,6 +141,22 @@ class TestAggregation:
         assert df["max_anchor_left"].dtype == np.int32
         assert df["max_anchor_right"].dtype == np.int32
 
+    def test_the_count_behind_each_entry_is_kept(self) -> None:
+        """The count is summed over the read-length rows the entry is built from, the rows its anchors come
+        from, so a threshold can be read off the index rather than fixed when it was built."""
+        df = load_splice_blacklist_from_records(
+            [
+                _row("chr1", 100, 500, 100, 5, 15, 20),
+                _row("chr1", 100, 500, 150, 3, 25, 10),
+                _row(
+                    "chr1", 100, 500, 75, 1, 99, 99
+                ),  # below min_count: neither its count nor its anchors
+            ],
+            min_count=2,
+        )
+        assert df["count"].tolist() == [8]
+        assert (df["max_anchor_left"].tolist(), df["max_anchor_right"].tolist()) == ([25], [20])
+
     def test_invalid_min_count(self) -> None:
         with pytest.raises(ValueError):
             load_splice_blacklist_from_records([], min_count=0)
@@ -157,6 +173,7 @@ _BLACKLIST = pd.DataFrame(
         "end": np.asarray([200, 400], dtype=np.int32),
         "max_anchor_left": np.asarray([10, 12], dtype=np.int32),
         "max_anchor_right": np.asarray([15, 9], dtype=np.int32),
+        "count": np.asarray([4, 2], dtype=np.int64),
     }
 )
 

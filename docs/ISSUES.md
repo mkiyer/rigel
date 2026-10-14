@@ -59,8 +59,9 @@ Instrument: `part1.patch`, `gates.py`, `VERDICT.md` in `~/Downloads/rigel_runs/p
 Correctness defects from the 2026-09-27 review and the cleanup. A test's expectations may move; no panel number moves
 unless marked.
 MOVES A NUMBER (each alone):
-- `index.py`'s `s_tx.nrna_n_contributors = …` should be `+=`: a single-exon transcript covering two merged spans keeps
-  only the last count (the nascent table's `n_contributing_transcripts`).
+- FIXED 2026-10-14 with index format 9: `index.py`'s `s_tx.nrna_n_contributors = …` is `+=`, so a single-exon
+  transcript covering two merged spans counts both spans' contributors (the nascent table's
+  `n_contributing_transcripts`; `tests/test_index_integrity.py`).
 - `Scenario.build_oracle`'s fixed-total branch never reads `gdna_fraction`, so six fixtures simulate NO gDNA, among
   them `test_scan_order_independence`, whose docstring says it puts gDNA in introns. Raise on the combination, then
   repair; the expectations move.
@@ -117,7 +118,7 @@ LATENT (no current path reaches it):
   (`ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`).
 - `transfer_rows.h`'s `level_bound_row` `std::max(v, 1e-12)` never binds on a reachable input: delete it together
   with an assert v > 0 in the binding (today v = 0 reads 1e-12; without the floor it would be NaN).
-0.8.0 (owner, 2026-10-14): the overhang alpha (fixed), the index's `nrna_n_contributors` (`=` for `+=`, with the index bump),
+0.8.0 (owner, 2026-10-14): the overhang alpha (fixed), the index's `nrna_n_contributors` (fixed, with the index bump),
 the GTF parser (fixed),
 the unknown `config.yaml` key (fixed), the report's meta line through `innerHTML` (fixed), and `rigel sim`'s empty fragment-length
 window (fixed). The rest is 0.8.1 or later; the reorder gate's fixture simulates no gDNA (`build_oracle`'s
@@ -157,13 +158,13 @@ renamed (`ISSUES: the-total-density-landscape`).
 - the resolved junction-strand tag (`ISSUES: sj-strand-tag-chosen-from-the-first-reads`);
 - the annotated BAM labels spliced intergenic fragments as gDNA (ZF 0x25), the same Axiom-0 slip as `gdna_fraction`
   (`n_intergenic_spliced` is counted already, so nothing need be inferred).
-(b) The index (`INDEX_FORMAT_VERSION` 8): drop the written-never-read columns (`transcripts.feather`'s `abundance`,
-`nrna_abundance` and `n_exons`; `sj.feather`'s `interval_type`), and add the duplicate map as an alias map
-`dropped_t_id → kept_t_id`; with it `nrna_n_contributors` (`=` for `+=`, `ISSUES: latent-defects`) and the splice
-blacklist's aggregated count column (`ISSUES: splicing-artifacts`). 0.7.1 shipped index format 7, so users rebuild for
-0.8.0 anyway. Every index is rebuilt, the cluster's included, so land it before the cluster's
-working-index build and the cluster rebuilds once. `ISSUES: overlapping-synthetic-shadows`' index merge is a separate
-decision.
+(b) DONE 2026-10-14, index format 9 (`tests/test_index_integrity.py`, `tests/test_splice_blacklist.py`): the
+written-never-read columns are gone (`transcripts.feather`'s `abundance`, `nrna_abundance` and `n_exons`; `sj.feather`'s
+`interval_type`); `transcript_aliases.feather` maps each collapsed `dropped_t_id → kept_t_id`; `nrna_n_contributors`
+sums over every span a nascent entity covers; the splice blacklist keeps its count. Bit-identical:
+`rename_identity.py` on the ladder's `g05 ss.99 OFF` with the rebuilt index against the format-8 reference. The
+benchmark indexes are rebuilt (the format-8 copies kept beside them as `*_format8`); the cluster's index is rebuilt
+once, at its working-index build. `ISSUES: overlapping-synthetic-shadows`' index merge is a separate decision.
 
 ### overlapping-synthetic-shadows
 `priority: now — 0.8.0: the docs, a column gate and the documented limit; the index merge after 0.8.0 (owner, 2026-10-14) · kind: design · 2026-09-20`
@@ -456,8 +457,9 @@ Those three fragment types are a local A/B, independent of the cluster work.
   up to about 2m aligned bases. Measuring it needs an unspliced end-to-end realignment, alignable's per-record origins
   and a junction mappability table; the EM side needs `ISSUES: multimapper-intergenic-alignments`.
 - THE BUILDER applies `min_count` (2, underived) per (chrom, intron, strand, read_length) BEFORE aggregating over read
-  lengths, so a junction seen once at each of several read lengths never enters, and the shipped feather keeps no
-  count, so no threshold can be decided at run time. Fixed with the catalogue rebuild.
+  lengths, so a junction seen once at each of several read lengths never enters. Fixed with the catalogue rebuild.
+  Since index format 9 (2026-10-14) the feather keeps each junction's count, summed over the rows that built it, so
+  a threshold can be read off the index.
 - UNTESTED RULES, to pin with local falsification tests before any rule changes: the `<=`, the OR of the anchors, the
   inert stored 0, cumulative anchors across earlier introns, and the mixed fragment (one junction rejected, one kept,
   deposited as spliced with the rejected N as a gap); every fixture's anchors (500–10,000 bp) are longer than any

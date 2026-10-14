@@ -129,16 +129,20 @@ rigel index --fasta genome.fa --gtf annotation.gtf --alignable-zarr map.zarr -o 
 | `--no-mappability` | off | Explicitly opt out of the alignable store and its splice blacklist (synthetic genomes, stranded-only benchmarks). Mutually exclusive with `--alignable-zarr`. |
 | `--splice-blacklist-min-count N` | `2` | (Advanced) Minimum unique-fragment support per `(chrom, intron, read_length)` for a sj to enter the blacklist. Lower admits more singletons; higher keeps only the most reproducible artifacts. Ignored under `--no-mappability`. |
 | `--nrna-tolerance N` | `20` | Max distance (bp) for clustering transcript start/end sites into shared synthetic nRNA spans |
-| `--collapse-duplicate-transcripts` | off | Collapse transcripts sharing identical exon coordinates (keeps the lexicographically-smallest ID). Default: fail with a report. Useful for GENCODE, which has a few byte-identical annotations. |
+| `--collapse-duplicate-transcripts` | off | Collapse transcripts sharing identical exon coordinates (keeps the lexicographically-smallest ID; `transcript_aliases` maps each collapsed ID to the one kept). Default: fail with a report. Useful for GENCODE, which has a few byte-identical annotations. |
 | `--gtf-parse-mode {strict,warn-skip}` | `strict` | `strict` fails on malformed GTF records; `warn-skip` logs warnings and skips them |
 | `--feather-compression {lz4,zstd,uncompressed}` | `lz4` | Feather compression for index files |
 | `--no-tsv` | off | Skip writing TSV mirrors of index files |
 
 **Index artifacts** (Feather, plus `.tsv` mirrors unless `--no-tsv`):
-`transcripts`, `intervals`, `ref_lengths`, `sj`, `splice_blacklist`, `manifest.json`, and the
-two calibration partitions — `regions.feather` (the genome partition into intergenic / intron /
-exon pieces) and `edges.feather` (its TSV mirror is `boundaries.tsv`: the contiguous and
-splice-junction boundaries between those pieces).
+`transcripts`, `intervals`, `ref_lengths`, `sj`, `splice_blacklist` (each junction's anchors and
+the alignable count behind it), `transcript_aliases` (`dropped_t_id → kept_t_id` for every
+transcript `--collapse-duplicate-transcripts` folded into an identical one; empty otherwise),
+`manifest.json`, and the two calibration partitions — `regions.feather` (the genome partition into
+intergenic / intron / exon pieces) and `edges.feather` (its TSV mirror is `boundaries.tsv`: the
+contiguous and splice-junction boundaries between those pieces). The on-disk format is version 9;
+`rigel quant` refuses an index of any other version, so an index built by an earlier rigel is
+rebuilt with `rigel index`.
 
 ### rigel quant
 
