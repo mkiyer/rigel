@@ -17,362 +17,6 @@ the changelog is git.
 Ordered by priority. An entry says what is open and the number a ranking turns on; what was done is git,
 what was ruled is `DESIGN.md`.
 
-### the-reader-reads-false-gdna-as-capture
-`priority: next — 0.8.1; documented in 0.8.0 as a known limitation, the ψ A/B having failed its bar (2026-10-14) · kind: defect · 2026-10-14`
-On a library with almost no gDNA the bulk sits at the landscape's floor, and calibration's false gDNA on a few objects reads
-as enormous capture (`capture_efficiency._read` reads the deconvolved mass as a point Poisson count). The real VCaP
-transcriptome-only library (no spike, no capture), the shipped reader against the foundation's, pinned and fractional:
-1,824 objects above e× the bulk (1,786 above 1,000×, max 1.04e8×) where the foundation read none, a saturation level of
-2.9e7× that `summary.json` publishes, EM lengths of 2,730 annotated transcripts inflated 1e5–1.6e7×, and 3.56 % of the
-transcript counts moved (Σ|Δ| 478k of 13.4 M, inside 376 loci; genes 0.13 %). In simulation the family costs +2.3 to +2.8
-transcript points on the zero-gDNA capture-OFF robustness rows (odg05 κ0.70, flgl κ0.70, flrl κ0.99 and κ0.70), accepted
-on 2026-10-13 before the real-library magnitude was known. That library has no truth, but an efficiency of 1e8 off
-capture is unphysical. The source is the false gDNA, not the reader's arithmetic; no reader-side guard exists, and a
-detector is refused (`DESIGN.md` §7.2). Instruments: `out/real/vcap_rna_only__{found,rel}*` in
-`~/Downloads/rigel_runs/prototypes/2026-10-13_modefree/` (`prod_real.py`), `arm_tally.py`.
-MEASURED 2026-10-14 with the ψ A/B (`ISSUES: the-gdna-prior-enters-psi-twice`): today's tree reads 3,300 objects above
-e× the bulk on the transcriptome-only library (1,824 on 2026-10-13, most likely the multimapper second pass's deposits,
-unverified) and a saturation of 2.31e7×. Part 1 leaves it: 3,010 objects, the saturation and the bulk unchanged, the
-transcript table moved 1.12 %. Nor does it touch the zero-gDNA capture-OFF rows of the test chromosome's panels
-(odg05, fl-gDNA-long, fl-RNA-long: about 8,600–9,300 false gDNA each, unchanged), while it removes the ladder's
-(1,609 / 677 / 1,594 / 467 → 28 / 20 / 35 / 26). So the false gDNA the reader reads as capture on a real library is not
-the double prior's; its source is unmeasured. 0.8.0 states the limitation in the MANUAL (calibration's capture
-answer): a saturation far above 1 on a library that was not captured is this, not capture.
-
-### the-gdna-prior-enters-psi-twice
-`priority: next — 0.8.1, with its partner; the 0.8.0 A/B failed its bar (2026-10-14) · kind: defect · 2026-10-02`
-ψ adds the fitted gDNA landscape to BOTH Jeffreys halves (`psi_kernel.h`: `jeffreys` holds ½·log f + ½·log(1 − f), and the
-composition row adds the arm on top), so wherever a landscape is fitted gDNA's ½·log f enters twice. A landscape shaped
-like the Jeffreys log-rate density moves log f_g by up to 0.85 nats (median 0.57) and an unstranded no-information slot
-from f_g 0.50 to 0.75 (gate 1, re-run on 55fe212e; 1e-15 when the landscape replaces the half, "Part 1"). Part 1 alone,
-measured before the foundation with the located-mode reader: the ladder's zero-gDNA false gDNA 366 / 266 / 358 / 329 →
-13 / 9 / 12 / 8 fragments, but every capture-ON stratum lost (stranded ON 6.14 → 8.98 %, deferred 12.2 → 75.0 %), the
-extra half having propped enriched exons up against one landscape fitted across every class. Unmeasured since; the bulk
-reader now reads that false gDNA as capture (`ISSUES: the-reader-reads-false-gdna-as-capture`). Open: that A/B on
-today's tree (`part1.patch` edits the deleted factory and needs a port; the fix also needs the log-odds bracket to cover
-its continued tail, gate 2); if capture-ON still loses, a continuous per-object partner (the unconditional class split is
-refused, `ISSUES: an-unconditional-class-conditional-landscape`). `simplex_logodds.py`'s module docstring says the arm
-replaces the half; its comment at the reference says it is added: the code adds it.
-The ledger this entry carried until 2026-10-14 is closed in git: the count foundation and its cleanups landed in
-3e7e0fbc (blur tails, `split_live`, the zero RNA coordinate, the known-source footprint); the weak-strand floor became
-`ISSUES: the-bulk-can-be-calibrations-nascent-rna`; the density-evidence consumer, the local capture prior and shared
-capture integration are superseded by `DESIGN.md` §7.2; the landscape admission prototypes passed no candidate (bounds
-admission owner-deferred, 2026-10-09); the deferred RNA-long loss is
-`ISSUES: the-deferred-rna-long-regression-after-factory-removal`. Still open beside it: a level row is dropped when its
-source sits more than L (≥ 10) nats from the library's RNA reference (finite support), unmeasured on real libraries.
-Instrument: `part1.patch`, `gates.py`, `VERDICT.md` in `~/Downloads/rigel_runs/prototypes/2026-10-02_part1/`.
-MEASURED 2026-10-14 on today's tree (`~/Downloads/rigel_runs/prototypes/2026-10-14_psi1/`: the port, worktree
-`~/proj/rigel-psi1`, the gates reproduced to the digit — gate 1 0.852 → 8.9e-16, gate 4 slope 0 → ½):
-`calibration_vs_oracle.py`, object error B/A for stranded × ON, the in-scope capture stratum: ladder 1.119, fl-gap
-RNA-long 1.124, RNA-short 1.242, odg05 1.042, fl-gDNA-long 1.060, fl-RNA-long 1.069; ss 0.70 × ON 1.028 to 1.106; the
-deferred stratum 1.38 to 3.82; capture OFF flat (0.977 to 1.035), its gDNA pools worse on the ladder and the gap
-panels (stranded ladder 57,571 → 74,153). It removes the ladder's zero-gDNA false gDNA (−97 to −98 %) but not the
-real library's false capture (`ISSUES: the-reader-reads-false-gdna-as-capture`). NOT SHIPPED (the owner's bar: the
-false capture removed without the old capture-ON cost). 0.8.1: with its partner, the per-object enriched prior the
-2026-10-02 verdict names.
-
-### latent-defects
-`priority: now — 0.8.0: the user-path items listed at the end, one commit each with a falsification test verified failing (owner, 2026-10-14); the rest 0.8.1 · kind: defect · 2026-09-28`
-Correctness defects from the 2026-09-27 review and the cleanup. A test's expectations may move; no panel number moves
-unless marked.
-MOVES A NUMBER (each alone):
-- FIXED 2026-10-14 with index format 9: `index.py`'s `s_tx.nrna_n_contributors = …` is `+=`, so a single-exon
-  transcript covering two merged spans counts both spans' contributors (the nascent table's
-  `n_contributing_transcripts`; `tests/test_index_integrity.py`).
-- `Scenario.build_oracle`'s fixed-total branch never reads `gdna_fraction`, so six fixtures simulate NO gDNA, among
-  them `test_scan_order_independence`, whose docstring says it puts gDNA in introns. Raise on the combination, then
-  repair; the expectations move.
-- `lift_choices` keys records on (ref, start, end, align_strand, sj_strand) while the native key adds the introns and
-  the hypotheses, so tied records that differ in introns pool: oracle truth can replay the wrong record, or `drain`
-  can raise. Frequency unmeasured; only oracle truth moves.
-- The simulator's fragment-length sampler: `.astype(int)` truncates (mean frag_mean − 0.5 while `fl_pmf` is evaluated
-  at integers). Land with the next re-simulation. FIXED 2026-10-14: an empty [frag_min, frag_max] window, which the
-  rejection loop drew from forever, is refused (`tests/test_whole_genome_sim_config.py`).
-- Antisense at p_sense = ½: the deterministic path books a mismatched fragment as sense, the EM as antisense. Goes with
-  the scoring unification (`ISSUES: hygiene-ledger` (h)).
-- The leading intron: a first intron starting at the fragment start makes `build_segments` emit no leading segment
-  and `left_sj` mislabel every junction end. Fix the executable specification first; it re-caches.
-LATENT (no current path reaches it):
-- `run_parallel`: a throw from fn(0) leaves `task_` racing, and a worker throw terminates; the ψ and EM callers do not
-  catch.
-- nanobind: `nb::cast<A>(h).data()` in `em_solver.cpp` and `solve_kernel.cpp` converts into a temporary on a dtype or
-  order mismatch and dangles (GIL released); outputs without `.noconvert()` write into a discarded copy; the scatter
-  bindings downcast float64 silently; `StreamingScorer` has no `nb::keep_alive`.
-- FIXED 2026-10-14: `--overhang-alpha 0`, documented as a hard gate, gave 0 × −inf = NaN for every candidate with no
-  overhang, and the prune tests dropped every EM-routed fragment, silently. The gate is now a flag with a zero penalty,
-  and an overhanging candidate is skipped (`tests/test_pipeline_routing.py`, both scoring paths). The mismatch term
-  was already guarded.
-- The scan cache: `deposit_digest`'s fixture offers `hypotheses=()`, blind to gap arbitration and deferral;
-  `_payload_from_parts` skips `from_dict`'s conservation checks; the two `.npz` files and the manifest are written in
-  place, with no temp-and-rename. One validating `AccumulatorPayload` constructor would serve the scan, the cache and
-  the drain.
-- FIXED 2026-10-14: GTF parsing — a final attribute without its `;` is read, and an exon with no `transcript_id` or
-  off its transcript's reference or strand follows the parse mode (strict raises, warn-and-skip drops it)
-  (`tests/test_gtf.py`).
-- Simulator config: a capture entry without `enabled:` and without probes yields an empty `CaptureConfig`; gene and
-  transcript keys are unchecked (a typo runs on the default of 100); an empty section fails with a TypeError;
-  `sim_command` creates the output directory before validating.
-- `splice_graph._ref_slices`: unsorted input drops exons silently.
-- An arm that injects `rna_sense_frac` without `n_rna_obs` silently kills the strand channel.
-- `fast_exp` on an all −inf row: `static_cast<int64_t>(NaN)` is undefined behaviour.
-- `connected_components_native` returns a 2-tuple early and a 5-tuple normally.
-- `FragmentAccumulator::finalize` drops `t_offsets_`'s leading 0.
-- `_resolve_core`'s non-empty-exons precondition is stated only in its doc comment (all four callers guard it): an
-  assert.
-- `genomic_span` is 0 for a transcript at position 0 (a truthiness test).
-- `set_sj` narrows to int32 unchecked, justified only by a census.
-- The buffer's finalizer, run by garbage collection on a thread holding a logging lock, deadlocks joining the writer.
-- FIXED 2026-10-14: the report put strings a user or an annotation chose into `innerHTML` unescaped — the meta
-  line's sample and index names, and as well the warning banner, the configuration panel's paths and the gene table's
-  names, IDs, types and references. Each now passes through one `esc` helper (`tests/test_report.py`, read off
-  `report.js`'s source, since the suite runs no JavaScript). (Its capture note is in
-  `ISSUES: the-format-changes-to-batch-before-release`.)
-- FIXED 2026-10-14: an unknown quant YAML key raised a traceback that neither listed the known keys nor hinted at an
-  older build, so a 0.7.1 `config.yaml` (four removed keys) was refused unhelpfully. The refusal is now the CLI's
-  `Error:` exit, lists the keys this version knows, and names the version that wrote a `config.yaml` from another one;
-  the MANUAL's rerun line says a config reruns exactly on the version that wrote it (`tests/test_cli.py`).
-- FIXED 2026-10-14: a splice blacklist present without a recorded store is no longer dropped with no log line
-  (`ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`).
-- `transfer_rows.h`'s `level_bound_row` `std::max(v, 1e-12)` never binds on a reachable input: delete it together
-  with an assert v > 0 in the binding (today v = 0 reads 1e-12; without the floor it would be NaN).
-0.8.0 (owner, 2026-10-14): the overhang alpha (fixed), the index's `nrna_n_contributors` (fixed, with the index bump),
-the GTF parser (fixed),
-the unknown `config.yaml` key (fixed), the report's meta line through `innerHTML` (fixed), and `rigel sim`'s empty fragment-length
-window (fixed). The rest is 0.8.1 or later; the reorder gate's fixture simulates no gDNA (`build_oracle`'s
-fixed-total branch ignores `gdna_fraction`), so the reproducibility gate never exercises a gDNA path.
-
-### an-unrecorded-splice-blacklist-is-dropped-silently
-`priority: now — 0.8.0: the cluster's manifest checked before any cluster quant; the warning landed 2026-10-14 · kind: risk · 2026-09-28`
-`TranscriptIndex.load` applies `splice_blacklist.feather` only when `manifest.json` records `sources.alignable_zarr`;
-otherwise it sets `sj_blacklist_size = 0` with no log line. The cluster's production index
-(`hulkrna/refs/human/rigel_index/`) holds a 5.8 M-row feather: if it was placed by hand, the next quant there runs
-with splice-artifact detection off and no error — format 8 (eeba4b0a) predates the sources block (8c673324), with no
-version bump. The only trace is `sj_blacklist_loaded: false` in `summary.json`. Before any cluster quant, check the
-manifest or rebuild with `--alignable-zarr`.
-Instrument: the manifest; `summary.json`'s `sj_blacklist_loaded`; the load's warning.
-LANDED 2026-10-14 (`tests/test_splice_blacklist.py`): the load warns in both directions, naming the remedy — a
-blacklist whose manifest records no store is not applied, and a recorded store whose blacklist is missing leaves
-detection off — while an index built with no store loads quietly. Left: the cluster's manifest. Its format 9 rebuild
-(`ISSUES: the-format-changes-to-batch-before-release`) must name the store, since `rigel index` refuses a build that
-names neither `--alignable-zarr` nor `--no-mappability`.
-
-### the-annotated-bam-splits-a-read-name
-`priority: now — found by the 2026-10-14 docs audit; the issues survey decides 0.8.0 or 0.8.1 · kind: defect · 2026-10-14`
-The annotated BAM's writer (`bam_scanner.cpp`, the second BAM pass) writes a filtered record (QC-failed, unmapped, a
-skipped duplicate, or single-end) through as soon as it reads it, while the previous read name's records are still
-held for annotation. A read name whose first record is filtered therefore has that record written before the held
-group and its other records after it: every record is kept, but the output is no longer collated. A pair whose first
-mate is unmapped is the common case. The MANUAL and the README state the limit. The fix: write the held group before
-a filtered record of a new read name. The test to write first: a collated BAM whose second read name starts with an
-unmapped mate, asserting every read name is one contiguous run in the output.
-Instrument: `tests/test_annotate.py` (the gate to add).
-
-### the-flux-witness-units-past-an-empty-piece
-`priority: now — unconfirmed; the release code review settles it first · kind: question · 2026-10-14`
-`EQUATIONS.md` §12 prices an exon's flux witness at the column opportunity `κ_read·a_r`, so a single-strand gDNA-free
-exon that agrees with its junction pays nothing; the own-level builder does that (`transfer_kernel.h`, `hop_price(c_j,
-c_j / r_j, cnt, kappa_read * a_r)`). The 2026-10-14 docs audit read one path that may not. An EMPTY exon piece forwards
-the junctions' count and opportunity, `c_sum` and `a_sum`, as its witness, in whole-strand units (`lane_emit`). A FULL
-recipient then re-prices it in `lane_receive` against the RNA lane's column count over `a_r`, with no `κ_read`
-(`solve_kernel.cpp` builds the RNA lanes on `a_r`). If so, a hop out of an empty piece pays a disagreement of
-`log(κ_read)²` that is not there: 0.48 nats² at κ = ½, on every unstranded library. Settle it by reading the two paths
-side by side. If it is a defect, the falsification test is a single-strand gDNA-free toy whose empty piece and full
-recipient agree, and the instrument is `policy_benchmark.py --panel test --by-class` on the unstranded rows.
-
-### overlapping-synthetic-shadows
-`priority: later — the index merge, after 0.8.0 (owner, 2026-10-14); its 0.8.0 docs, column gate and documented limit landed 2026-10-14 · kind: design · 2026-09-20`
-`create_nrna_transcripts` clusters TSS/TES within a tolerance per strand and manufactures one synthetic
-nascent entity per merged span, so a gene with several isoform clusters carries several near-coincident
-shadows: 6,366 of the ladder index's 6,919 overlap a same-strand twin, 5,879 at ≥ 90 %, degrees up to 240.
-The twins are indistinguishable to the EM, which puts a family's mass on an arbitrary holder (the live
-entity is the holder in 78 % of live families off capture, 42 % on), so every PER-ENTITY nascent number is
-a coin flip and the family is the unit that can be scored. They do not cause the capture-ON siphon —
-collapsing every family to one component in the shipped EM reads 843k against 692k nascent at `g50 ss.99
-ON` — and they cost 7 % of live nascent off capture (live families 942,567 against 1,013,400 at
-`g50 ss.99 OFF`). The pool rows and the transcript table do not see them (synthetic rows are dropped);
-per-entity diagnostics do. The decision is whether the index should merge them
-(one span per gene per strand) or the scoring should. `quant_accuracy.py`, the per-family scoring in
-`~/Downloads/rigel_runs/prototypes/2026-09-20_siphon_mechanism/`.
-USER-FACING (2026-10-14): `nrna_quant.feather` has one row per span — on the ladder index 6,366 of 6,919
-synthetic spans overlap a same-strand twin (max degree 240, 1,264 same-strand families) — and `quant.feather`'s
-`nrna_id` / `nrna_parent_count` point each isoform at its own twin, so a transcript's parent count can read about 0
-while a sibling twin holds the family's mass. The MANUAL lists seven `nrna_quant` columns the code never writes and omits
-`em_effective_length`, and no test calls `get_nrna_counts_df`. 0.8.0 (owner): the docs, a column gate and the documented
-limit (per-span nascent counts are not identifiable among overlapping spans); the index merge after 0.8.0 — it changes
-the EM's component set and orphans the panels' nascent truth ids. LANDED 2026-10-14 (`tests/test_summary_report.py`): the
-MANUAL lists exactly the ten columns `get_nrna_counts_df` writes, gated against a run, and states the limit.
-
-### performance-memory-bounded-solve
-`priority: later — re-timed before it is ranked; the two 0.8.0 numeric no-ops landed 2026-10-14 · kind: build · 2026-08-17`
-A deep run must be fast enough to iterate on, and memory-bounded. The port (the sweep as one native call) and the
-work outside calibration are done (`DESIGN.md` §6b.15). THE BASELINE (VCaP, 18,568,456 fragments, `--threads 8`,
-interleaved pairs, 2026-09-19): 125 s — calibrate 39.5 (four sweeps 24.0, landscape fits 4.1, its Python 10.3),
-quant 33.7 (locus EM 14.4, capture effective lengths 5.2, scoring 5.7), the scan 28.4, the second pass 13.0, a
-second fragment-length fit 2.8, the index load 6.4; peak RSS 10.3 GB, in quant.
-OPEN, ranked (a cProfile share ranks, `TRAPS: a-profile-share-is-a-ranking`): ① the capture effective lengths
-(quant's 5.2 s) — the short-template taper table that held most of it is deleted with the per-base rule, and the
-one shared rule (`capture_eff_length.transcript_objects`, a closed form per object) is re-timed on the deep library
-before it is ranked; ② the second pass's
-factor combiner, 355,180 calls on 2–4-element arrays, hoistable to segment operations over the hypothesis CSR
-(exactness to check); ③ the landscape fits, ~5 s, unexamined; ④ the sweeps' 24.0 s, where the blur's loop
-interchange is priced at −1.5 s for a summation-order change and is the owner's call; ⑤ past 100 M fragments.
-REFUSED as targets: the scan (at its floor for eight threads) and the index load (mostly native already).
-⑥ THE REVIEW'S NUMERIC NO-OPS, each proven with `rename_identity.py --bam` from back-to-back pairs; UNPARKED (owner,
-2026-09-28) for the first two, the rest batched:
-- FIXED 2026-10-14: `get_loci_df` built `locus_ids == lid` per locus, O(loci × transcripts). It groups the transcripts
-  by locus once with a stable sort, keeping each locus's sums in index order (`np.bincount` sums in another order), and
-  finds every locus's range in two searches; bit-identical, and the VCaP mix's 22,787 loci take 0.15 s, not 11.2 s
-  (`tests/test_estimator.py`).
-- FIXED 2026-10-14: `iter_chunks_consuming` held the previous chunk while loading the next, and `_SpillWriter._run`
-  kept its last chunk while blocked: with chunks of up to 1 M fragments against a 2 GiB budget, a `del` fixed both
-  (`tests/test_buffer.py`).
-- `build_region_partition_arrays` runs 3+ times per run, `build_sj_arrays` twice.
-- `--annotated-bam` calls `add` per fragment where a batch API exists.
-- The EM clears `local_map` up to the largest global index per locus, and allocates per E-step (heap rows for
-  k > 512; the task list rebuilt).
-- The scan path copies `gap_introns` per hit, one malloc each.
-- The capture sampler's memo evicts across the mRNA and gDNA spaces, and its overlap lookup is O(T) per probe.
-- The solve builds whole cubes for slots it then discards, and `pool_of` rebuilds the pool when the task count
-  changes.
-
-Instrument: `profiling/profiler.py`, `profiling/sweep_replay.py`.
-
-### hygiene-ledger
-`priority: now — 0.8.0: the release-gating docs and the release docs made true; the rest later · kind: hygiene · 2026-08-31; the review of 2026-09-22`
-What the reviews left, each its own commit; content-only changes keep the collected count unchanged.
-(a) ROTTEN BUT LIVE, moving an instrument's numbers when repaired: `quant_accuracy`'s oracle arms are undrained
-(documented there).
-(b) DEAD, DEFERRED: `region_span_count` (the retired length channel's) and `region_end_count` (the retired
-total-density landscape's), tallied per fragment by the accumulator and carried through the payload and the caches,
-read by nothing. Deleting them changes the payload schema and re-caches both panels; step 1b re-cached every panel
-without taking them, so they ride the leading-intron fix's re-cache (`ISSUES: latent-defects`; owner, 2026-09-28).
-Until then `accumulator.h`'s "each population stores only the channels something READS" is false. The native
-`FragmentAccumulator` also still reserves, fills and exports `sj_strand` and `merge_criteria` per fragment, which the
-buffer drops at `from_raw`.
-(c) PRODUCTION-DEAD, KEPT AS TEST OR INSTRUMENT SURFACE: the resolver's `intron_bp`, the tested half of its overlap
-profile; `rigel.sim.benchmark` and `Scenario.build_oracle`, test tooling inside the package;
-`region_init.has_own_composition_evidence`, which tests use as a check; `priors._project_regions_to_loci`, kept for
-`prior_vs_oracle.py` (`assemble_priors` calls `_region_locus_shares` directly); `fl`'s `GdnaContrast` and
-`GdnaRealized`, computed and discarded, settled 2026-09-30 as test surface and taken out of `__all__`;
-the vendored `_cgranges_impl` extension, still compiled, optimised, LTO'd and shipped for a test-only `query()`, while
-`index.py`'s docstrings present it as a quantification facility.
-(d) CLAIMS NOT RE-DERIVED on the current tree, left standing: that most in-scope error sits at the simplex
-vertices (`simplex_logodds`, a relay-era measurement); `sweep`'s refused deferral of UNIDENTIFIED slots to the
-prior (priced 2026-07, with no refusal entry here); `region_geometry`'s "no per-region spliced floor" A/B
-(relay-era); and `fl`'s crossing pools called "gDNA by structure" because mature RNA never crosses an
-exon|intron boundary, while RNA that has not spliced there does.
-(e) GATES THAT CHECK LESS THAN THEIR NAME:
-- CLOSED (2026-10-09), scheduler-dependent reorder gate: another full-suite failure reproduced the
-  previously recorded race dependence. Three 16-thread scans legitimately returned serial order;
-  no calibration call occurs in that test. Its replacement deliberately reverses complete scanner
-  chunks through the real scorer, locus builder and EM, requiring a nonidentity permutation of the
-  same fragment set and identical output in both sampled and fractional modes. Existing thread-count
-  comparisons stay. Removing the actual fragment-ID sort in a frozen package breaks both new cases:
-  sampled counts move by two fragments and fractional counts by up to 5.91e-12. No scanner, locus,
-  production model, tolerance or golden changes. Receipt:
-  `.cache/rigel_runs/2026-10-09_rna_coordinate/` (`main_suite_race_failure.xml`,
-  `test_scan_order_replacement.py`, `permutation.xml`, `permutation_mutation.json`).
-- `test_sweep.py::test_gdna_sweep_zero_gdna_pin_and_monotone` asserts `f_g < ½` on slot 3, the AMBIG|intron−
-  boundary, while the AMBIG region it means ends at 0.949 under the silent policy, and nothing in it checks
-  monotonicity; the mature-exon chain's tests give the same `f_g` with the junction spliced or not, so none of them
-  exercises the junction reads.
-- `test_conserved_mass.py::test_the_mass_is_the_PER_BASE_attribution` allows `count` whole fragments where its
-  docstring claims `count` half-ulps; `test_region_geometry.py` still builds float64 banks as uint64 fixed point in
-  its fixtures.
-- `density_model.count_observable_masks` has had no production consumer since od = 0 landed (2026-10-01): it selected
-  the retired gDNA od fit's seeds. Delete it as a numeric no-op, rewriting `test_gdna_density.py`'s mask block and the
-  selector in `test_accumulator_span_unbiased.py`.
-- The report test's synthesized v3 summary omits `sj_blacklist_size` and `sj_blacklist_loaded`, so it renders
-  "detection off", a shape no real run produces; no test asserts the splice-artifact note.
-- The buffer's finalizer test asserts nothing about "still writes what it holds", and its writer-error test calls
-  `cleanup()` before consuming, the reverse of production.
-- The scan-worker exception gate runs one worker, so deleting `output_queue.abort()` stays green.
-- The annotated-BAM ZS check is set membership only, so a label swap passes.
-- The fragment-length proof's L check is still guarded by `if contained is not None`; two spec tests carry leftovers.
-- The docs-citation gate never checks that it scanned anything (an empty glob or a `.hpp` suffix passes); a URL
-  containing `/docs/` fails with no remedy; the TRAPS heading regex is written three times.
-- The log-odds window's single source is ungated: restoring a default stays green, and about 23 literal 10.0s sit in
-  the tests.
-- The deleted float64 pass-through gate was never retargeted at the live boundary masses; `test_substrate.py` still
-  says `sj_mass` arrives per strand "for artifact detection".
-- `test_a_blacklist_built_from_a_store_loads_into_the_resolver` asserts a size that Python sets, and stays green with
-  the native map stubbed.
-- The step-1c instrument fixes have no gates: `policy_benchmark`'s apart grouping, `calibration_vs_oracle`'s APART
-  strata and its `--json --jobs` merge, `prior_vs_oracle`'s strata, the `find_spec` guard.
-(f) SMALL: the `--no-mappability` flag names a store whose mappability the index no longer reads (it opts out of
-the splice blacklist); three unread scalars in `solve_kernel.cpp`'s positional aggregates; `pgzip` is an undeclared
-optional import in the simulator; eight test sites import `rigel._resolve_impl` for names `rigel.native` re-exports.
-- `_solve_impl` builds with `-g` only. Step 1b tried `-march=native` and IPO and reverted them: bit-identical on arm64,
-  but on x86-64 they turn on FMA contraction in the ψ, transfer and solve kernels (clang: 0 FMA instructions at -O3,
-  159 with -march=haswell) and move numbers (`TRAPS: a-kernel-edit-moves-ulps-under-fma-contraction`). RULED (owner,
-  2026-09-28): they stay off; correct the two CMakeLists comments that are false for it. The 3bb35bdd message's
-  "both proven bit-identical" is wrong for `_solve_impl` and stands corrected here.
-- The numpy bit-matching machinery: the native solve still carries numpy's pairwise-sum order (`PW_BLOCKSIZE = 128`),
-  the `lgamma` binding and named temporaries, with no Python twin left. Retiring it moves results by ulps and needs the
-  goldens and the sweep replay re-recorded. RULED (owner, 2026-09-28): retire it after the strand-overdispersion and
-  fl landings, in one golden re-record window.
-Kept as coverage GAPS, not dead code: the five CLI command bodies, the silent policy through `calibrate`, the
-simulator's sharded writers and its whole-genome grid, and the zarr splice blacklist.
-(g) COMMENT AND DOC RESIDUE, one content-only sweep:
-- Native: `bam_scanner.cpp`'s references to the deleted Python Fragment, "Fractional accumulator deposit", an
-  orphaned reference, a lost rationale, the intron filter justified twice, `std::mutex` without `<mutex>`;
-  `resolve_context.h` and `constants.h`'s history narration, "for compatibility" notes, a misplaced banner, four AF
-  bits unused in C++; `scoring.cpp`'s `-Wreorder-ctor` warning and its gDNA per-hit comment omitting `n_cand > 0`;
-  `fast_exp.h` listing three "call-site properties", one of them the function's own.
-- Calibration: the sweep docstring's "counted in the kernel"; the test named for owned slots; "bound for the gates",
-  although production reads `transfer_rows`; `region_geometry.py`'s "five populations" (there are four), the Axiom-0
-  tell "nascent-RNA-active" (also in `signature.py`) and mature/phantom history; `result.py` citing the deleted
-  `simplex_logodds._compose`; `calibrate.py`'s "two supports", a docstring that lost its conclusion, and the test
-  helper `_zero_rna_opportunity` zeroing a field already 0; `strand_model.py`'s spliced model's qualification stated
-  two ways, an undefined ε_CI, `posterior_95ci` not marked QC-only; the four texts stating "a quarter of the RNA side"
-  as a general property (a deleted measurement on a rebuilt ladder).
-- The EM, locus and CLI: `estimator.py`'s "every unambiguous fragment is deterministic" and a 102-character line
-  hard-coding (N_t, 10); `locus.py`'s false (ref_id, start) sort claim (it sorts by categorical code) and its pointer
-  to `calibration.priors` for the EM pseudocounts; `quant_command` omitting the `--annotated-bam` second pass;
-  `report/substrate.py` ("omits the panels") and `report/__init__.py` (the extra is needed only for the charts).
-- Tests: `test_estimator.py`'s "no EM at 0" (SQUAREM runs at least one step); `test_resolution.py`'s "(gap=0)";
-  `test_buffer.py`'s "None for intergenic"; over-long test docstrings; "Boundary cases" headings from the
-  edge→boundary rename.
-- The simulator: `whole_genome.py`'s "…and filtering" banner; `splice_motif.py`'s over-long lines.
-- Docs: `.github/copilot-instructions.md`'s compiler-flags line omits `-fno-finite-math-only`; `accumulator.h`'s
-  header ("each population stores … the reciprocal-opportunity sum") and `test_conserved_mass.py` still read as if a
-  region reciprocal bank were stored, and one measurement table can no longer be reproduced; the executable
-  specification and its C++ twin word one mass rule differently, and two payload comments point at inexact text
-  (UNCERTAIN: check when touched); `test_chr.yaml` says the shadows are "≈ 5 % of RNA fragments" while the render
-  realizes 0.76 %; the headers and TESTING list the YAML's extra keys without `blank:`; TESTING says `rigel sim`
-  accepts `index:`, which the CLI now rejects; TESTING has no section for the VCaP read-name truth mix (A00839 exome
-  DNA, HWI-D00127 transcriptome; its halves differ in fragment length, 307 / 244 bp, the confound the ladder forbids;
-  read-name truth labels the RNA library's own gDNA as RNA; calibration can be scored only as slot-mass overlap).
-- RELEASE-GATING: the MANUAL, README, report and cli texts still describe the deleted capture census or the old
-  density-file semantics ("Capture on-target enrichment"; MANUAL's density row contradicting its correct neighbour);
-  the MANUAL does not say that `sj_blacklisted` counts junction × record while the splice census counts fragments.
-(h) SIMPLIFICATIONS, each proven a numeric no-op:
-- `solve_one_block` and `transfer_prepare` each wire the chain, so the gates exercise the copy: one shared builder.
-- Scoring is written twice, for multimappers and singles; unifying it also removes the p = ½ antisense disagreement
-  (`ISSUES: latent-defects`).
-- SQUAREM's VBEM and MAP branches (about 150 lines) differ only in the weight, the floor and the normalisation.
-- `BamAnnotationWriter::write` re-implements `parse_bam_record`, and multimap detection is written twice.
-- `TranscriptIndex.load` round-trips through frozensets: build the CSR directly.
-- `intervals.feather`'s exons are read three ways: one walk would serve all three.
-- Two functions named `contained_opportunity` sit in layer 2, and one ramp is written twice.
-- `FragmentScorer` copies 13 fields into native: return the native scorer and store alphas.
-- `_apply_scan_stats` reads 33 hand-listed keys with `.get(key, 0)`: iterate the dataclass and index strictly.
-- The simulator's truth is spread over nine `ground_truth_*` methods and three file passes.
-- Five instruments import `tests/calibration/_oracle.py` through `sys.path`; four scripts redefine `_shared.RUNS`.
-(i) CONSTANTS — what the move into `config.CONSTANTS` left (2026-10-01; the layout is `DESIGN.md` §6):
-- The native kernels' own constants are named and commented in their translation units (`em_solver.cpp`'s
-  `SQUAREM_BUDGET_DIVISOR`, `transfer_rows.h`'s `EPS` and `TINY`, `solve_kernel.cpp`'s `PW_BLOCKSIZE`, the scanner's
-  batch sizes), not gathered in `native/constants.h`, and the C++ inline literals are unaudited. Only the values Python
-  shares are single-sourced (exported, never restated).
-- `rigel sim`'s CLI restates `Scenario`'s defaults (genome length 5000, seed 42, 1000 fragments); reading them from
-  the signature would import the simulator on every CLI start.
-- `FragmentLengthModel.to_dict` rounds inline (2 and 6 decimals), beside the CLI's `SUMMARY_DECIMALS`.
-RELEASE DOCS MADE TRUE (0.8.0, 2026-10-14): CHANGELOG's "strand-overdispersion estimator" (od = 0 since 2026-10-01);
-README's `map` assignment mode, which the CLI rejects; the MANUAL's STAR/XS lines; `pip install alignable` against
-`mamba_env.yaml`, which says alignable is on neither PyPI nor bioconda; the `--no-mappability` name, decided before it
-ships; `sj_blacklisted`'s unit; the report subtitle "Capture on-target enrichment"; a MANUAL known-limitation line for
-`ISSUES: the-reader-reads-false-gdna-as-capture` unless its A/B repairs it.
-
 ### strand-overdispersion-one-shared-value
 `priority: now — release-critical (owner, 2026-10-14): the pruning; the summary.json diagnostics landed 2026-10-14 · kind: design · 2026-09-27`
 The strand model's two inputs, κ and the od, were both contaminated on real libraries:
@@ -499,6 +143,303 @@ Those three fragment types are a local A/B, independent of the cluster work.
   `summary.json`) and LBX0190 / LBX0588 / MO_3021 (the same, with `SJ.out.tab.gz`) may exist only in
   `~/Downloads/rigel_runs/cfrna/`: confirm cluster copies before the substrate phase and upload any that are missing.
 
+### the-release-builds
+`priority: now — release-gating (the 2026-10-14 release review) · kind: release · 2026-10-14`
+The PyPI path is sound: a wheel built from a clean `git archive` sdist imports all six native modules and passes 302
+tests, and `twine check --strict` passes. Before tagging:
+- **The conda builds are tuned to the build host.** `RIGEL_PORTABLE` defaults off (`-O3 -march=native`) and neither
+  `conda/build.sh` nor the live bioconda recipe sets it: bioconda's 0.7.1 linux-64 `_em_impl` carries 823 ymm operands
+  and 203 FMA instructions (the PyPI wheel none), so it dies with SIGILL on a CPU without AVX2, and a bioconda host
+  with AVX-512 would compile the `_mm512` E-step for every user. Make the default portable, developers opting into
+  native, and bump the bioconda build number.
+- **Bioconda has no arm64 build**: the live recipe lacks `meta.yaml`'s `additional-platforms`, and
+  `post_release.sh`'s fallback copies `meta.yaml` without `build.sh`.
+- **No smoke test loads the newest extension.** `publish.yml` imports four modules, not `_solve_impl` or
+  `_cgranges_impl`, and conda's test loads none. `_solve_impl` has no Linux/GCC build on record: the last CI run
+  (2026-09-14) predates it, and it and the eight before it failed or were cancelled. Import `rigel.native` in both
+  tests, and dispatch `ci.yml` and `publish.yml` (`publish: no`) before tagging.
+- **Notices.** The Linux wheel vendors 25 libraries through htslib's `--enable-libcurl` (OpenSSL 1.1.1, Kerberos,
+  OpenLDAP and others) with no third-party notices, nanobind's included, and nothing documents remote input. Build
+  htslib without libcurl, GCS and S3, and ship a notices file.
+- Smaller: README's relative images and links break on PyPI, and its CI badge reads failing; the sdist ships
+  the sandbox, `.claude/`, `.vscode/` and `route_split.py` (a scratch script with local paths), and `MANIFEST.in` is dead
+  under scikit-build-core; the sdist's name follows the unbounded scikit-build-core version (`rigel-rnaseq-` against
+  the recipe's `rigel_rnaseq-`); `mamba_env.yaml` lacks `scipy`; README omits htslib and pkg-config for a source build
+  and the platforms wheels exist for; `release.sh` prints literal `\033` escapes; and `post_release.sh` refuses a tree
+  with untracked files (22 in the sandbox today).
+
+### input-mistakes-pass-silently
+`priority: now — the 2026-10-14 release review; the issues survey decides 0.8.0 or 0.8.1 · kind: defect · 2026-10-14`
+Four ordinary input mistakes produce a full, wrong output set with exit 0 (each reproduced on the test chromosome):
+- **A coordinate-sorted BAM.** The scan groups adjacent records by read name and reads no `@HD SO`, so each mate is
+  its own fragment: 1,170,000 pairs quantify as 2,318,315 fragments, the fragment-length mean reads 98 bp for 214, and
+  per-transcript counts run ×1.94 at the median. The MANUAL forbids the input; nothing enforces it. Refuse
+  `SO:coordinate`, and count the hits whose flag names a mapped mate that the group lacks.
+- **A truncated or corrupt BAM.** The scan, the annotated writer and the strand-tag detection loop
+  `while (sam_read1(...) >= 0)`, so an htslib error (< −1) ends the read like EOF: a BAM cut at half its bytes finishes
+  on half its reads; a CRAM whose reference is missing reads nothing and still writes every output. Throw on
+  `ret < −1`, naming the file and the records read.
+- **BAM reference names the index does not hold** (`chr1` against `1`). `build_tid_mapping` maps them to −1 and every
+  fragment is intergenic; the report then calls a pure-RNA library 51.6 % gDNA, critical. Refuse when no `@SQ` name
+  matches the index, warn and name them when some do not, and compare `LN` with `ref_lengths`.
+- **Paths checked after the work.** An unwritable `--annotated-bam` fails after the whole run; a mistyped
+  `--alignable-zarr` fails at the end of the build, after the old manifest is deleted, so rebuilding over a working
+  index leaves an unloadable one; a blacklist whose contigs miss the FASTA builds and reports detection on with nothing
+  to match. Validate before the first write.
+Smaller, in the same family: refusals the MANUAL documents (`--sj-strand-tag foo`, `--threads -1`, an index with no
+manifest, an unpaired record, a YAML list) arrive as tracebacks rather than `Error:` lines, and a reused output
+directory keeps the previous run's optional files (a `quant.tsv` beside a newer `quant.feather`).
+Tests first, each verified failing: a scenario BAM coordinate-sorted, cut to half its bytes, and reheadered with a
+`chr` prefix, each refused with its cause named.
+
+### the-annotated-bam-writer
+`priority: now — the 2026-10-14 docs audit and release review; the issues survey decides · kind: defect · 2026-10-14`
+`--annotated-bam`'s second pass (`annotate.py`, the writer in `bam_scanner.cpp`):
+- **A gene with no `gene_name` crashes it, and the finished run is lost.** `annotate.py` hands `g_df.g_name` to a
+  writer that takes strings; a NaN (Ensembl's unnamed genes, an NCBI GTF, 273 of the test chromosome's 638 genes)
+  raises a TypeError after scan, calibration and EM, before `cli.py` writes a table. Map a missing name or ID to `.`,
+  which the MANUAL's `ZR` already allows. The simulator always fills the name, so no test reaches it.
+- **The tables are written after the pass**, so any failure in it loses a finished quantification. Write them first.
+- **A filtered first record splits a read name** (the MANUAL and README state the limit). A QC-failed, unmapped or
+  skipped-duplicate record is written at once while the previous read name's group is still held, so a pair whose first
+  mate is unmapped comes out split around its neighbour. Every record is kept and frag ids do not drift: the filter
+  predicate is the scan's. Write the held group before a filtered record of a new read name.
+- **An existing tag of another type survives.** `stamp_and_write_hit` ignores `bam_aux_update_*`'s return, and HISAT2
+  writes `ZS:i` (its second-best score) on multimappers, so those records keep HISAT2's integer where Rigel's splice
+  type belongs, with an htslib error line each. Delete an existing tag before stamping, and throw on failure.
+Tests first: a GTF with a gene lacking `gene_name` through `run_pipeline(annotated_bam_path=…)`; a collated BAM whose
+second read name starts with an unmapped mate (every read name one run); records carrying `ZS:i` (every annotated `ZS`
+one of the documented strings).
+
+### the-gtf-parser-accepts-malformed-transcripts
+`priority: now — the 2026-10-14 release review; the issues survey decides · kind: defect · 2026-10-14`
+`--gtf-parse-mode strict` fails on malformed records (MANUAL), but a transcript's structure is never checked:
+- an exon with start > end parses, the index builds, and `rigel quant` dies in `sj_opportunity.py`;
+- duplicated or overlapping exons lengthen the transcript (600 → 900 bp, TPM 170,927 → 100,917) and write negative or
+  zero-length introns into `sj.feather`;
+- abutting exons, which RefSeq writes at genome indels, make a 0-bp intron: the transcript turns multi-exon and its
+  synthetic span takes half its reads (3,310 → 1,655, booked as nascent RNA);
+- two genes whose transcripts share a `transcript_id` on one reference and strand merge into one transcript behind a
+  9.7 kb fake intron (`read_gtf` keys on `t_id`, and the reference/strand check misses a second `gene_id`); the second
+  gene vanishes from both tables.
+Strict refuses start > end, overlaps and a second `gene_id`, warn-and-skip drops the offending exon, and abutting exons
+merge; the simulator already validates its own (`sim/annotation.py`'s `_validate_exons`). Smaller: Ensembl's
+`gene_biotype` is never read, so `gene_type` is empty for an Ensembl GTF. Tests first: one GTF per case.
+
+### the-em-depends-on-its-thread-count
+`priority: now — the 2026-10-14 release review; its docs for 0.8.0, the reduction for the issues survey · kind: defect · 2026-10-14`
+A locus whose E-step work reaches `total_work / threads` runs through `parallel_estep`, which adds each thread's column
+sums into a per-thread buffer and Kahan-reduces the buffers in thread order: a grouping that changes with the thread
+count and matches neither the sequential path nor another count. SQUAREM's rounding sensitivity
+(`ISSUES: the-em-stops-before-it-converges`) turns the ulps into whole isoforms. On g50 ss.99 capture ON with only
+`em.n_threads` varied, 1, 2, 4 and 8 threads agree bit for bit (no locus reaches the share); 16 makes three such loci and
+moves 42 transcripts by 3,293 fragments (`B4_capcluster_ba` T5 341.5 → 0, T4 2,155.8 → 3,059.0); one synthetic locus
+already differs between 1 and 2 threads (4e-10). Each thread count is deterministic, but the default `--threads 0` is
+`hardware_concurrency`, blind to cgroup and affinity limits, so one input gives different tables on machines with
+different core counts, and the MANUAL's reproducible-run note and the CHANGELOG blame the scan alone. The repair:
+store each task's column sums and reduce them in task order after the parallel phase, with the sequential path
+through the same tasks — a numeric change, so `rename_identity.py` and a pinned A/B. Test first: one locus through
+`batch_locus_em_partitioned` at 1, 2, 3, 4 and 16 threads, bit-identical.
+
+### the-scoring-alphas-are-unchecked
+`priority: now — the 2026-10-14 release review; the issues survey decides · kind: defect · 2026-10-14`
+`--overhang-alpha` and `--mismatch-alpha` take any float. NaN exits 0 having gated 96 % of fragments (a `gdna_fraction`
+of 0.92 for about 0.5) and writes NaN into `summary.json`; 0 writes `-Infinity`, which is not JSON; above 1 rewards
+overhang and mismatches. At 0, the documented hard gate, a fragment whose every candidate fails is dropped and counted
+only in the log's `n_gated_out`, and only on the EM path: the deterministic path reads neither NM nor overhang. An
+NM-tagged library at `--mismatch-alpha 0` loses 94.7 % of its genic fragments from every pool while the 59,524
+deterministic ones with the same mismatches stay. Validate both in [0, 1], finite; record a gate as a flag; report the
+gated count beside the pools; gate on both paths. Test first: an NM-tagged fixture at alpha 0, where pools plus gated
+equal fragments less chimeric.
+
+### the-strand-summary-on-a-dead-channel
+`priority: now — the 2026-10-14 release review; a field new in 0.8.0 · kind: defect · 2026-10-14`
+`summary.json`'s `strand_model` publishes `kappa.genuine` and the junction classes from the three-class fit even where
+`strand_live` is false. At κ = ½ the classes are not identified, so both are noise: an unstranded test row reads genuine
+0.412 against the 0.485 calibration used, 61 % of its junctions "artifact", and Binomial(n, ½) tables give 0.06 to 0.96,
+while calibration correctly reads the pooled counts. Where the channel is dead, publish the κ calibration used as
+`genuine`, and `null` classes. Test first: a fixed-seed unstranded table through `_strand_fit_summary`.
+
+### an-unrecorded-splice-blacklist-is-dropped-silently
+`priority: now — 0.8.0: the cluster's manifest checked before any cluster quant; the warning landed 2026-10-14 · kind: risk · 2026-09-28`
+`TranscriptIndex.load` applies `splice_blacklist.feather` only when `manifest.json` records `sources.alignable_zarr`;
+otherwise it sets `sj_blacklist_size = 0` with no log line. The cluster's production index
+(`hulkrna/refs/human/rigel_index/`) holds a 5.8 M-row feather: if it was placed by hand, the next quant there runs
+with splice-artifact detection off and no error — format 8 (eeba4b0a) predates the sources block (8c673324), with no
+version bump. The only trace is `sj_blacklist_loaded: false` in `summary.json`. Before any cluster quant, check the
+manifest or rebuild with `--alignable-zarr`.
+Instrument: the manifest; `summary.json`'s `sj_blacklist_loaded`; the load's warning.
+LANDED 2026-10-14 (`tests/test_splice_blacklist.py`): the load warns in both directions, naming the remedy — a
+blacklist whose manifest records no store is not applied, and a recorded store whose blacklist is missing leaves
+detection off — while an index built with no store loads quietly. Left: the cluster's manifest. Its format 9 rebuild
+(`ISSUES: the-format-changes-to-batch-before-release`) must name the store, since `rigel index` refuses a build that
+names neither `--alignable-zarr` nor `--no-mappability`.
+
+### the-reader-reads-false-gdna-as-capture
+`priority: next — 0.8.1; documented in 0.8.0 as a known limitation, the ψ A/B having failed its bar (2026-10-14) · kind: defect · 2026-10-14`
+On a library with almost no gDNA the bulk sits at the landscape's floor, and calibration's false gDNA on a few objects reads
+as enormous capture (`capture_efficiency._read` reads the deconvolved mass as a point Poisson count). The real VCaP
+transcriptome-only library (no spike, no capture), the shipped reader against the foundation's, pinned and fractional:
+1,824 objects above e× the bulk (1,786 above 1,000×, max 1.04e8×) where the foundation read none, a saturation level of
+2.9e7× that `summary.json` publishes, EM lengths of 2,730 annotated transcripts inflated 1e5–1.6e7×, and 3.56 % of the
+transcript counts moved (Σ|Δ| 478k of 13.4 M, inside 376 loci; genes 0.13 %). In simulation the family costs +2.3 to +2.8
+transcript points on the zero-gDNA capture-OFF robustness rows (odg05 κ0.70, flgl κ0.70, flrl κ0.99 and κ0.70), accepted
+on 2026-10-13 before the real-library magnitude was known. That library has no truth, but an efficiency of 1e8 off
+capture is unphysical. The source is the false gDNA, not the reader's arithmetic; no reader-side guard exists, and a
+detector is refused (`DESIGN.md` §7.2). Instruments: `out/real/vcap_rna_only__{found,rel}*` in
+`~/Downloads/rigel_runs/prototypes/2026-10-13_modefree/` (`prod_real.py`), `arm_tally.py`.
+MEASURED 2026-10-14 with the ψ A/B (`ISSUES: the-gdna-prior-enters-psi-twice`): today's tree reads 3,300 objects above
+e× the bulk on the transcriptome-only library (1,824 on 2026-10-13, most likely the multimapper second pass's deposits,
+unverified) and a saturation of 2.31e7×. Part 1 leaves it: 3,010 objects, the saturation and the bulk unchanged, the
+transcript table moved 1.12 %. Nor does it touch the zero-gDNA capture-OFF rows of the test chromosome's panels
+(odg05, fl-gDNA-long, fl-RNA-long: about 8,600–9,300 false gDNA each, unchanged), while it removes the ladder's
+(1,609 / 677 / 1,594 / 467 → 28 / 20 / 35 / 26). So the false gDNA the reader reads as capture on a real library is not
+the double prior's; its source is unmeasured. 0.8.0 states the limitation in the MANUAL (calibration's capture
+answer): a saturation far above 1 on a library that was not captured is this, not capture.
+
+### the-gdna-prior-enters-psi-twice
+`priority: next — 0.8.1, with its partner; the 0.8.0 A/B failed its bar (2026-10-14) · kind: defect · 2026-10-02`
+ψ adds the fitted gDNA landscape to BOTH Jeffreys halves (`psi_kernel.h`: `jeffreys` holds ½·log f + ½·log(1 − f), and the
+composition row adds the arm on top), so wherever a landscape is fitted gDNA's ½·log f enters twice. A landscape shaped
+like the Jeffreys log-rate density moves log f_g by up to 0.85 nats (median 0.57) and an unstranded no-information slot
+from f_g 0.50 to 0.75 (gate 1, re-run on 55fe212e; 1e-15 when the landscape replaces the half, "Part 1"). Part 1 alone,
+measured before the foundation with the located-mode reader: the ladder's zero-gDNA false gDNA 366 / 266 / 358 / 329 →
+13 / 9 / 12 / 8 fragments, but every capture-ON stratum lost (stranded ON 6.14 → 8.98 %, deferred 12.2 → 75.0 %), the
+extra half having propped enriched exons up against one landscape fitted across every class. Unmeasured since; the bulk
+reader now reads that false gDNA as capture (`ISSUES: the-reader-reads-false-gdna-as-capture`). Open: that A/B on
+today's tree (`part1.patch` edits the deleted factory and needs a port; the fix also needs the log-odds bracket to cover
+its continued tail, gate 2); if capture-ON still loses, a continuous per-object partner (the unconditional class split is
+refused, `ISSUES: an-unconditional-class-conditional-landscape`). `simplex_logodds.py`'s module docstring says the arm
+replaces the half; its comment at the reference says it is added: the code adds it.
+The ledger this entry carried until 2026-10-14 is closed in git: the count foundation and its cleanups landed in
+3e7e0fbc (blur tails, `split_live`, the zero RNA coordinate, the known-source footprint); the weak-strand floor became
+`ISSUES: the-bulk-can-be-calibrations-nascent-rna`; the density-evidence consumer, the local capture prior and shared
+capture integration are superseded by `DESIGN.md` §7.2; the landscape admission prototypes passed no candidate (bounds
+admission owner-deferred, 2026-10-09); the deferred RNA-long loss is
+`ISSUES: the-deferred-rna-long-regression-after-factory-removal`. Still open beside it: a level row is dropped when its
+source sits more than L (≥ 10) nats from the library's RNA reference (finite support), unmeasured on real libraries.
+Instrument: `part1.patch`, `gates.py`, `VERDICT.md` in `~/Downloads/rigel_runs/prototypes/2026-10-02_part1/`.
+MEASURED 2026-10-14 on today's tree (`~/Downloads/rigel_runs/prototypes/2026-10-14_psi1/`: the port, worktree
+`~/proj/rigel-psi1`, the gates reproduced to the digit — gate 1 0.852 → 8.9e-16, gate 4 slope 0 → ½):
+`calibration_vs_oracle.py`, object error B/A for stranded × ON, the in-scope capture stratum: ladder 1.119, fl-gap
+RNA-long 1.124, RNA-short 1.242, odg05 1.042, fl-gDNA-long 1.060, fl-RNA-long 1.069; ss 0.70 × ON 1.028 to 1.106; the
+deferred stratum 1.38 to 3.82; capture OFF flat (0.977 to 1.035), its gDNA pools worse on the ladder and the gap
+panels (stranded ladder 57,571 → 74,153). It removes the ladder's zero-gDNA false gDNA (−97 to −98 %) but not the
+real library's false capture (`ISSUES: the-reader-reads-false-gdna-as-capture`). NOT SHIPPED (the owner's bar: the
+false capture removed without the old capture-ON cost). 0.8.1: with its partner, the per-object enriched prior the
+2026-10-02 verdict names.
+
+### latent-defects
+`priority: next — 0.8.1; the 0.8.0 user-path items landed 2026-10-14, and the report's reference table is the one 0.8.0 item left · kind: defect · 2026-09-28`
+Correctness defects from the 2026-09-27 review, the cleanup and the 2026-10-14 release review. A test's expectations may
+move; no panel number moves unless marked.
+0.8.0: the report's reference table puts reference names into `innerHTML` unescaped (`report.js`'s `refTable` renders
+`${v}`); the `esc` gate in `tests/test_report.py` reads only the hero and the gene table, so add that sink to it.
+MOVES A NUMBER (each alone):
+- `Scenario.build_oracle`'s fixed-total branch never reads `gdna_fraction`, so six fixtures simulate NO gDNA, among
+  them `test_scan_order_independence`, whose docstring says it puts gDNA in introns. Raise on the combination, then
+  repair; the expectations move.
+- `lift_choices` keys records on (ref, start, end, align_strand, sj_strand) while the native key adds the introns and
+  the hypotheses, so tied records that differ in introns pool: oracle truth can replay the wrong record, or `drain`
+  can raise. Frequency unmeasured; only oracle truth moves.
+- The simulator's fragment-length sampler: `.astype(int)` truncates (mean frag_mean − 0.5 while `fl_pmf` is evaluated
+  at integers). Land with the next re-simulation.
+- Antisense at p_sense = ½: the deterministic path books a mismatched fragment as sense, the EM as antisense. Goes with
+  the scoring unification (`ISSUES: hygiene-ledger` (h)).
+- The leading intron: a first intron starting at the fragment start makes `build_segments` emit no leading segment
+  and `left_sj` mislabel every junction end. Fix the executable specification first; it re-caches.
+- A dead EM component keeps about 1e-300 of posterior: `assign_posteriors` weighs `log(theta + 1e-300)` where the
+  E-step gives a floored component exactly 0, so a fractional run writes counts of about 1e-299 (222 of 553 transcripts
+  on a test run; a `count > 0` filter finds about 530 expressed for 308), and sample mode can hand a whole fragment to
+  a dead component on a locus whose targets are unreachable (none of about 1,280 test loci). Give it −inf.
+- A motif tag that contradicts the annotated strand: the resolver calls the junction unannotated and trains no strand
+  on it, while the accumulator credits the annotated junction and the RNA length pool. One rule in both stages (the
+  stage disagreements of `ISSUES: splicing-artifacts`).
+- The splice census counts placements: a multimapper's secondary placements enter `splice.*` (an NH:2 fixture: 20,500
+  for 20,000 fragments), so `with_annotated_sj` and `splice.spliced_annotated` count different units; the census
+  identity gate omits `deferred_multiple_placements` and runs on NH = 1 only.
+- `summary.json`: `gdna_density_global` is rounded to 8 decimal places (0.0 below about 15 calibrated gDNA fragments on
+  a human genome) beside a full-precision `gdna_bulk_density`; `quantification.n_transcripts` counts the synthetic spans
+  (918 for 553 quant rows) while `n_genes` counts annotated genes; `read_groups` never counts a fully unmapped pair,
+  so the report's read-fate bar reads 100 % uniquely mapped with a quarter of the pairs unmapped; `mapped_reads`
+  counts a QC-failed unmapped record as mapped.
+- Sample mode's `posterior_mean` is Σp²/Σp (a transcript that won 17 units reports 0.891 for a plain mean of 0.687),
+  and NaN for a transcript with no EM unit, which the MANUAL does not say.
+- `fragment_lengths.feather` stores the censored overflow (≥ 1,000 bp) as a row labelled 1000; a `gene_id` with
+  transcripts on two references takes its reference and strand from one and its span across both; `config.yaml`
+  resolves the BAM, index and output paths but keeps `annotated_bam` and `tmpdir` as typed.
+LATENT (no current path reaches it):
+- `run_parallel`: a throw from fn(0) leaves `task_` racing, and a worker throw terminates; the ψ and EM callers do not
+  catch. `ThreadPool`'s constructor: a failed thread creation unwinds a vector of joinable threads into
+  `std::terminate`.
+- nanobind: `nb::cast<A>(h).data()` in `em_solver.cpp` and `solve_kernel.cpp` converts into a temporary on a dtype or
+  order mismatch and dangles (GIL released); outputs without `.noconvert()` write into a discarded copy; the scatter
+  bindings downcast float64 silently; `StreamingScorer` has no `nb::keep_alive`. (Calibration's callers hand every
+  array C-contiguous in the kernel's dtype, so none is made today.)
+- The scan cache: `deposit_digest`'s fixture offers `hypotheses=()`, blind to gap arbitration and deferral;
+  `_payload_from_parts` skips `from_dict`'s conservation checks; the two `.npz` files and the manifest are written in
+  place, with no temp-and-rename. One validating `AccumulatorPayload` constructor would serve the scan, the cache and
+  the drain.
+- A junction efficiency clipped at 0 can leave a transcript whose pieces are all shorter than any fragment with an
+  `em_effective_length` of about 1e-304, a +700-nat advantage per fragment; the shipped calibration's smallest
+  efficiency is 0.875.
+- The annotated writer's `hts_close` is unchecked, and a throw mid-write leaks its handles; `--scan-buffer-size` does
+  not bound the native queues, which hold up to three chunks per worker beyond it; `constants.h` says the strand test
+  checks that mates face inward, which it does not (an outward pair deposits as an ordinary molecule).
+- Simulator config: a capture entry without `enabled:` and without probes yields an empty `CaptureConfig`; gene and
+  transcript keys are unchecked (a typo runs on the default of 100); an empty section fails with a TypeError;
+  `sim_command` creates the output directory before validating.
+- `splice_graph._ref_slices`: unsorted input drops exons silently.
+- An arm that injects `rna_sense_frac` without `n_rna_obs` silently kills the strand channel.
+- `fast_exp` on an all −inf row: `static_cast<int64_t>(NaN)` is undefined behaviour.
+- `connected_components_native` returns a 2-tuple early and a 5-tuple normally.
+- `FragmentAccumulator::finalize` drops `t_offsets_`'s leading 0.
+- `_resolve_core`'s non-empty-exons precondition is stated only in its doc comment (all four callers guard it): an
+  assert.
+- `genomic_span` is 0 for a transcript at position 0 (a truthiness test).
+- `set_sj` narrows to int32 unchecked, justified only by a census.
+- The buffer's finalizer, run by garbage collection on a thread holding a logging lock, deadlocks joining the writer.
+- `transfer_rows.h`'s `level_bound_row` `std::max(v, 1e-12)` never binds on a reachable input: delete it together
+  with an assert v > 0 in the binding (today v = 0 reads 1e-12; without the floor it would be NaN).
+The reorder gate's fixture simulates no gDNA (`build_oracle`'s fixed-total branch ignores `gdna_fraction`), so the
+reproducibility gate never exercises a gDNA path.
+
+### an-anchor-only-landscape-reads-as-capture
+`priority: next — the 2026-10-14 release review; a small EM cost, a misleading summary · kind: defect · 2026-10-14`
+With no gDNA evidence the landscape trains on its zero-count anchors alone. Unsmoothed, that density has one maximum,
+but `_render`'s column-normalised Gaussian makes ripples at both grid edges and `census` reads the top one as an
+enriched basin: an empty or one-fragment BAM reports `gdna_capture_saturation` 9.65 beside `gdna_density_global` 0 and
+lengthens every `em_effective_length` by 6 % (1.044 → 1.066 as refits are added), where the MANUAL says a library
+without capture reads 1. It is not the false-gDNA source of `ISSUES: the-reader-reads-false-gdna-as-capture`: here
+there is no gDNA at all. Repair the render's edges or the census, and keep the anchor-only fit, which gDNA-free
+libraries need. Test first: anchors only give one basin, saturation 1 and zero-count efficiencies of exactly 1.
+
+### the-transfer-price-arithmetic
+`priority: next — 0.8.1; each a one-line kernel change, prototyped in C++ and A/B'd · kind: defect · 2026-10-14`
+Three width-only inconsistencies in the transfer kernel's prices, found by the 2026-10-14 docs audit and settled by the
+release review on the test chromosome's real chains, re-driven through the gates' bindings (a re-drive reproduces
+`solve_chain`'s `f_g` exactly, so a patched table emulates each fix):
+- **An empty piece's flux witness, re-priced in the wrong units.** `EQUATIONS.md` §12 prices an exon's witness on the
+  column opportunity `κ_read·a_r`, and the own-level builder does. An EMPTY piece writes the junctions' count and
+  opportunity (`c_sum`, `a_sum`) in whole-strand units, and the first full node past it re-prices that in
+  `lane_receive` on its column count over `a_r`, with no `κ_read`: at κ = ½ the hop pays `log(κ_read)² = 0.48` nats²
+  of disagreement that is not there (a toy's delivered row differs from §12's by 18.5 nats; ψ's `f_g` 0.348 against
+  0.346). Ordinary node-to-node hops are consistent. It needs a level to leave an empty piece across a boundary that
+  carries none of its strand's bits: one such face on six real chains, at `c_J = 1`, and the emulated fix moves 0
+  slots. The fix: write the witness opportunity as `a_sum / κ_read`. The gate `test_transfer_rna_lanes.py`'s
+  empty-piece test runs at κ = 0.99, where the two forms coincide, so it cannot fire; test first at κ = ½.
+- **The level rule's mode prediction reads a total.** Its value map uses `n_u/a_g`, but its width's `f_pred` divides by
+  a mode built on `n_u + n_s`, inflating it by `1 + n_s/n_u` (a toy at `n_s = 100`: width 3.56 for 1.22; one real face
+  saturates `f_pred` and is inflated by 350 nats², dropping that exon's level). It moves at most 5.6 fragments of
+  1.1 M. Build the mode on the density.
+- **§3.5g holds for values, not for prices.** `EQUATIONS.md` §3.5g rules that a total over an effective length is not
+  an abundance, and every value the kernel forms obeys it, but the gDNA lane prices `hop_price(n_u, a_g, n_u, a_g)` and
+  the level rule's `r` reads a total over one component's opportunity, so equal component densities differ by the
+  composition term. Its spread is negligible at equal fragment lengths (|log q_x/q_s| ≤ 0.056) and reaches a p90 of 1.81
+  on the fl-gDNA-long gap panel (up to about 6 nats² of manufactured disagreement); swapping the price's frame moves
+  124.7 fragments of 1.15 M there. AN OWNER RULING: scope §3.5g to values and record the width artifact, or A/B a
+  composition-free total in the prices on the gap panels.
+
 ### the-em-stops-before-it-converges
 `priority: next — 0.8.1: the solver stays as shipped for 0.8.0 (owner, 2026-10-14); a stable solver with explicit regularization · kind: defect · 2026-10-14`
 The locus EM (VBEM with SQUAREM, 1,000 iterations = 333 accelerated cycles, δ 1e-6) runs out of budget on
@@ -597,12 +538,8 @@ Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-28_od_design/01_fallback.
 `policy_benchmark.py --by-class`, unstranded rows.
 
 ### the-gdna-landscape-collapses-at-low-depth
-`priority: next — 0.8.1: the drift re-measured on today's tree, then its repair; the failed refit fixed 2026-10-14 · kind: defect · 2026-09-28`
-THE FAILED REFIT, FIXED 2026-10-14 (`tests/calibration/test_landscape_training_population.py`): when a later refit
-fitted no landscape, `calibrate`'s refit loop overwrote the
-landscape the final solve ran under with `None` and broke, so the capture reader was skipped and the result said no
-landscape was fitted (MANUAL: `gdna_bulk_density` is null only when none was); the loop now keeps the last fitted
-landscape, a numeric no-op wherever no refit fails. It absorbs `ISSUES: gdna-landscape-trains-on-false-positives` (2026-10-14):
+`priority: next — 0.8.1: the drift re-measured on today's tree, then its repair · kind: defect · 2026-09-28`
+It absorbs `ISSUES: gdna-landscape-trains-on-false-positives` (2026-10-14):
 a repair must not regress the zero controls; its blind-slot half is `ISSUES: the-gdna-prior-enters-psi-twice`.
 Every depth number below predates the count foundation; re-measure before ranking.
 Calibration's gDNA estimate falls with sequencing depth. LBX0588 (stranded, capture ON) reads 0.11 / 0.45 / 0.83 gDNA
@@ -620,12 +557,13 @@ The mechanism is the refits' gDNA landscape.
 How much each part owns:
 - The refits own 80 % / 69 % of LBX0588's drift (ln P_full/P_d, from 1 % / 10 %) and 86 % / 63 % of VCaP's.
 - Pass 0 drifts less. It nets an under-call on no-RNA objects against an over-call on no-gDNA objects.
-- The capture reference owns none of it, because it is computed after the solve, but it goes missing: its members
-  fall to 0 at 1 % for VCaP, LBX0588 and MO_3021 (0 at every depth for MO_3021), which sets every efficiency to 1. On
-  the test chromosome at capture ON the members are g001 0 / 0 / 57, g01 0 / 73 / 329, g05 20 / 313 / 352 (d100 /
-  d10 / full), and a reference that does form at low depth reads above proportional (×1.97 at g05 d100, ×1.48 at g01
-  d10). What that costs the EM is unmeasured, and `calibration_vs_oracle.py` cannot see it. The reference is a yes/no
-  switch; its continuous form, an efficiency whose uncertainty grows as members fall, is a direction to price.
+- The capture reader owns none of the drift, since it reads after the solve, but at low depth it reads the opposite
+  of what the retired member-counting reference did: the mode-free reader divides each object's density by a bulk
+  that itself collapses toward the zero-anchor floor, so efficiencies rise instead of falling to 1 (the 2026-10-14
+  release review, test chromosome): a 300-fragment library at 50 % gDNA reads saturation 14.6 and lengthens
+  `em_effective_length` 2.7–6.2×, and a BAM cut to one 150 kb block reads 5,813, the gDNA length ×5,000. The EM cost
+  measured small: d100 g05 transcripts 27.40 % shipped against 27.66 % with every efficiency forced to 1, and 11.5
+  against 15.3 fragments of 94.5k on the cut BAM. `calibration_vs_oracle.py` cannot see it; `ruler_vs_truth.py` can.
 - MO_3021 barely drifts (0.82 of full at 1 %): 65–80 % of its gDNA sits on intergenic regions and gene edges, which
   read their count at any depth.
 - The level survives in aggregate. VCaP's intergenic regions at 1 % hold 0.0097 of full depth's true gDNA.
@@ -800,6 +738,214 @@ locus's gDNA FRACTION, and a multiplier converts it to pseudocounts; that multip
 candidates and their likelihoods. Today it is the count of units whose gDNA candidate survives pruning (`U`), and
 the pruning (`DESIGN.md` §3.1d) is what stops a unit with a vanishing gDNA reading from counting.
 
+### sj-strand-tag-chosen-from-the-first-reads
+`priority: next — 0.8.1: the per-record or annotated-junction repair; the 0.8.0 minimum landed 2026-10-14 · kind: defect · 2026-09-28`
+The scanner picks the junction-strand tag mode from the first 1,000 spliced reads (`detect_sj_strand_tag_native`) and
+returns "none" if none carries XS or ts, so a library whose first reads lack the tag loses its strand. An unknown
+`--sj-strand-tag` spec silently becomes XS_TS (`parse_sj_tag_spec`'s default), and the resolved mode is never logged
+or written to `summary.json` or `config.yaml`, so a run cannot be reproduced from its outputs. The repair reads the tag
+per record; it moves numbers only on libraries whose first 1,000 spliced reads lack it.
+Instrument: a fixture with the tag absent from the first reads.
+WIDER THAN STATED (2026-10-14): a BAM with no XS/ts tag at all loses its strand — the junction strand comes only
+from the tag, so no fragment qualifies for strand training, κ reads ½ and a stranded library is quantified as
+unstranded, with only generic warnings; STAR writes XS only with `--outSAMstrandField intronMotif`, while the MANUAL
+says it emits XS. LANDED 2026-10-14 (`tests/test_sj_strand_tag.py`): an unknown spec is refused by `BamScanConfig`; the resolved
+mode is logged and recorded in `summary.json` and `config.yaml`; a library whose spliced reads are read with no
+tag warns that it is quantified as unstranded; the MANUAL's STAR lines name `--outSAMstrandField intronMotif`. 0.8.1: the strand of the
+annotated junction, which the resolver already looks up, as the sense source.
+
+### overlapping-synthetic-shadows
+`priority: later — the index merge, after 0.8.0 (owner, 2026-10-14); its 0.8.0 docs, column gate and documented limit landed 2026-10-14 · kind: design · 2026-09-20`
+`create_nrna_transcripts` clusters TSS/TES within a tolerance per strand and manufactures one synthetic
+nascent entity per merged span, so a gene with several isoform clusters carries several near-coincident
+shadows: 6,366 of the ladder index's 6,919 overlap a same-strand twin, 5,879 at ≥ 90 %, degrees up to 240.
+The twins are indistinguishable to the EM, which puts a family's mass on an arbitrary holder (the live
+entity is the holder in 78 % of live families off capture, 42 % on), so every PER-ENTITY nascent number is
+a coin flip and the family is the unit that can be scored. They do not cause the capture-ON siphon —
+collapsing every family to one component in the shipped EM reads 843k against 692k nascent at `g50 ss.99
+ON` — and they cost 7 % of live nascent off capture (live families 942,567 against 1,013,400 at
+`g50 ss.99 OFF`). The pool rows and the transcript table do not see them (synthetic rows are dropped);
+per-entity diagnostics do. The decision is whether the index should merge them
+(one span per gene per strand) or the scoring should. `quant_accuracy.py`, the per-family scoring in
+`~/Downloads/rigel_runs/prototypes/2026-09-20_siphon_mechanism/`.
+USER-FACING (2026-10-14): `nrna_quant.feather` has one row per span — on the ladder index 6,366 of 6,919
+synthetic spans overlap a same-strand twin (max degree 240, 1,264 same-strand families) — and `quant.feather`'s
+`nrna_id` / `nrna_parent_count` point each isoform at its own twin, so a transcript's parent count can read about 0
+while a sibling twin holds the family's mass. The MANUAL lists seven `nrna_quant` columns the code never writes and omits
+`em_effective_length`, and no test calls `get_nrna_counts_df`. 0.8.0 (owner): the docs, a column gate and the documented
+limit (per-span nascent counts are not identifiable among overlapping spans); the index merge after 0.8.0 — it changes
+the EM's component set and orphans the panels' nascent truth ids. LANDED 2026-10-14 (`tests/test_summary_report.py`): the
+MANUAL lists exactly the ten columns `get_nrna_counts_df` writes, gated against a run, and states the limit.
+
+### performance-memory-bounded-solve
+`priority: later — re-timed before it is ranked; the two 0.8.0 numeric no-ops landed 2026-10-14 · kind: build · 2026-08-17`
+A deep run must be fast enough to iterate on, and memory-bounded. The port (the sweep as one native call) and the
+work outside calibration are done (`DESIGN.md` §6b.15). THE BASELINE (VCaP, 18,568,456 fragments, `--threads 8`,
+interleaved pairs, 2026-09-19): 125 s — calibrate 39.5 (four sweeps 24.0, landscape fits 4.1, its Python 10.3),
+quant 33.7 (locus EM 14.4, capture effective lengths 5.2, scoring 5.7), the scan 28.4, the second pass 13.0, a
+second fragment-length fit 2.8, the index load 6.4; peak RSS 10.3 GB, in quant.
+OPEN, ranked (a cProfile share ranks, `TRAPS: a-profile-share-is-a-ranking`): ① the capture effective lengths
+(quant's 5.2 s) — the short-template taper table that held most of it is deleted with the per-base rule, and the
+one shared rule (`capture_eff_length.transcript_objects`, a closed form per object) is re-timed on the deep library
+before it is ranked; ② the second pass's
+factor combiner, 355,180 calls on 2–4-element arrays, hoistable to segment operations over the hypothesis CSR
+(exactness to check); ③ the landscape fits, ~5 s, unexamined; ④ the sweeps' 24.0 s, where the blur's loop
+interchange is priced at −1.5 s for a summation-order change and is the owner's call; ⑤ past 100 M fragments.
+REFUSED as targets: the scan (at its floor for eight threads) and the index load (mostly native already).
+⑥ THE REVIEW'S NUMERIC NO-OPS, each proven with `rename_identity.py --bam` from back-to-back pairs; UNPARKED (owner,
+2026-09-28) for the first two, the rest batched:
+- FIXED 2026-10-14: `get_loci_df` built `locus_ids == lid` per locus, O(loci × transcripts). It groups the transcripts
+  by locus once with a stable sort, keeping each locus's sums in index order (`np.bincount` sums in another order), and
+  finds every locus's range in two searches; bit-identical, and the VCaP mix's 22,787 loci take 0.15 s, not 11.2 s
+  (`tests/test_estimator.py`).
+- FIXED 2026-10-14: `iter_chunks_consuming` held the previous chunk while loading the next, and `_SpillWriter._run`
+  kept its last chunk while blocked: with chunks of up to 1 M fragments against a 2 GiB budget, a `del` fixed both
+  (`tests/test_buffer.py`).
+- `build_region_partition_arrays` runs 3+ times per run, `build_sj_arrays` twice.
+- `--annotated-bam` calls `add` per fragment where a batch API exists.
+- The EM clears `local_map` up to the largest global index per locus, and allocates per E-step (heap rows for
+  k > 512; the task list rebuilt).
+- The scan path copies `gap_introns` per hit, one malloc each.
+- The capture sampler's memo evicts across the mRNA and gDNA spaces, and its overlap lookup is O(T) per probe.
+- The solve builds whole cubes for slots it then discards, and `pool_of` rebuilds the pool when the task count
+  changes.
+
+Instrument: `profiling/profiler.py`, `profiling/sweep_replay.py`.
+
+### hygiene-ledger
+`priority: later — the 0.8.0 release docs were made true on 2026-10-14; (g)'s four 0.8.0 doc items go with the release fixes, the rest later · kind: hygiene · 2026-08-31; the review of 2026-09-22`
+What the reviews left, each its own commit; content-only changes keep the collected count unchanged.
+(a) ROTTEN BUT LIVE, moving an instrument's numbers when repaired: `quant_accuracy`'s oracle arms are undrained
+(documented there).
+(b) DEAD, DEFERRED: `region_span_count` (the retired length channel's) and `region_end_count` (the retired
+total-density landscape's), tallied per fragment by the accumulator and carried through the payload and the caches,
+read by nothing. Deleting them changes the payload schema and re-caches both panels; step 1b re-cached every panel
+without taking them, so they ride the leading-intron fix's re-cache (`ISSUES: latent-defects`; owner, 2026-09-28).
+Until then `accumulator.h`'s "each population stores only the channels something READS" is false. The native
+`FragmentAccumulator` also still reserves, fills and exports `sj_strand` and `merge_criteria` per fragment, which the
+buffer drops at `from_raw`.
+(c) PRODUCTION-DEAD, KEPT AS TEST OR INSTRUMENT SURFACE: the resolver's `intron_bp`, the tested half of its overlap
+profile; `rigel.sim.benchmark` and `Scenario.build_oracle`, test tooling inside the package;
+`region_init.has_own_composition_evidence`, which tests use as a check; `priors._project_regions_to_loci`, kept for
+`prior_vs_oracle.py` (`assemble_priors` calls `_region_locus_shares` directly); `fl`'s `GdnaContrast` and
+`GdnaRealized`, computed and discarded, settled 2026-09-30 as test surface and taken out of `__all__`;
+the vendored `_cgranges_impl` extension, still compiled, optimised, LTO'd and shipped for a test-only `query()`, while
+`index.py`'s docstrings present it as a quantification facility.
+(d) CLAIMS NOT RE-DERIVED on the current tree, left standing: that most in-scope error sits at the simplex
+vertices (`simplex_logodds`, a relay-era measurement); `sweep`'s refused deferral of UNIDENTIFIED slots to the
+prior (priced 2026-07, with no refusal entry here); `region_geometry`'s "no per-region spliced floor" A/B
+(relay-era); and `fl`'s crossing pools called "gDNA by structure" because mature RNA never crosses an
+exon|intron boundary, while RNA that has not spliced there does.
+(e) GATES THAT CHECK LESS THAN THEIR NAME:
+- CLOSED (2026-10-09), scheduler-dependent reorder gate: another full-suite failure reproduced the
+  previously recorded race dependence. Three 16-thread scans legitimately returned serial order;
+  no calibration call occurs in that test. Its replacement deliberately reverses complete scanner
+  chunks through the real scorer, locus builder and EM, requiring a nonidentity permutation of the
+  same fragment set and identical output in both sampled and fractional modes. Existing thread-count
+  comparisons stay. Removing the actual fragment-ID sort in a frozen package breaks both new cases:
+  sampled counts move by two fragments and fractional counts by up to 5.91e-12. No scanner, locus,
+  production model, tolerance or golden changes. Receipt:
+  `.cache/rigel_runs/2026-10-09_rna_coordinate/` (`main_suite_race_failure.xml`,
+  `test_scan_order_replacement.py`, `permutation.xml`, `permutation_mutation.json`).
+- `test_sweep.py::test_gdna_sweep_zero_gdna_pin_and_monotone` asserts `f_g < ½` on slot 3, the AMBIG|intron−
+  boundary, while the AMBIG region it means ends at 0.949 under the silent policy, and nothing in it checks
+  monotonicity; the mature-exon chain's tests give the same `f_g` with the junction spliced or not, so none of them
+  exercises the junction reads.
+- `test_conserved_mass.py::test_the_mass_is_the_PER_BASE_attribution` allows `count` whole fragments where its
+  docstring claims `count` half-ulps; `test_region_geometry.py` still builds float64 banks as uint64 fixed point in
+  its fixtures.
+- `density_model.count_observable_masks` has had no production consumer since od = 0 landed (2026-10-01): it selected
+  the retired gDNA od fit's seeds. Delete it as a numeric no-op, rewriting `test_gdna_density.py`'s mask block and the
+  selector in `test_accumulator_span_unbiased.py`.
+- The report test's synthesized v3 summary omits `sj_blacklist_size` and `sj_blacklist_loaded`, so it renders
+  "detection off", a shape no real run produces; no test asserts the splice-artifact note.
+- The buffer's finalizer test asserts nothing about "still writes what it holds", and its writer-error test calls
+  `cleanup()` before consuming, the reverse of production.
+- The scan-worker exception gate runs one worker, so deleting `output_queue.abort()` stays green.
+- The annotated-BAM ZS check is set membership only, so a label swap passes.
+- The fragment-length proof's L check is still guarded by `if contained is not None`; two spec tests carry leftovers.
+- The docs-citation gate never checks that it scanned anything (an empty glob or a `.hpp` suffix passes); a URL
+  containing `/docs/` fails with no remedy; the TRAPS heading regex is written three times.
+- The log-odds window's single source is ungated: restoring a default stays green, and about 23 literal 10.0s sit in
+  the tests.
+- The deleted float64 pass-through gate was never retargeted at the live boundary masses; `test_substrate.py` still
+  says `sj_mass` arrives per strand "for artifact detection".
+- `test_a_blacklist_built_from_a_store_loads_into_the_resolver` asserts a size that Python sets, and stays green with
+  the native map stubbed.
+- The step-1c instrument fixes have no gates: `policy_benchmark`'s apart grouping, `calibration_vs_oracle`'s APART
+  strata and its `--json --jobs` merge, `prior_vs_oracle`'s strata, the `find_spec` guard.
+(f) SMALL: the `--no-mappability` flag names a store whose mappability the index no longer reads (it opts out of
+the splice blacklist), a name to decide before 0.8.0 ships, since a released flag is a promise; three unread scalars in `solve_kernel.cpp`'s positional aggregates; `pgzip` is an undeclared
+optional import in the simulator; eight test sites import `rigel._resolve_impl` for names `rigel.native` re-exports.
+- `_solve_impl` builds with `-g` only. Step 1b tried `-march=native` and IPO and reverted them: bit-identical on arm64,
+  but on x86-64 they turn on FMA contraction in the ψ, transfer and solve kernels (clang: 0 FMA instructions at -O3,
+  159 with -march=haswell) and move numbers (`TRAPS: a-kernel-edit-moves-ulps-under-fma-contraction`). RULED (owner,
+  2026-09-28): they stay off; correct the two CMakeLists comments that are false for it. The 3bb35bdd message's
+  "both proven bit-identical" is wrong for `_solve_impl` and stands corrected here.
+- The numpy bit-matching machinery: the native solve still carries numpy's pairwise-sum order (`PW_BLOCKSIZE = 128`),
+  the `lgamma` binding and named temporaries, with no Python twin left. Retiring it moves results by ulps and needs the
+  goldens and the sweep replay re-recorded. RULED (owner, 2026-09-28): retire it after the strand-overdispersion and
+  fl landings, in one golden re-record window. `pairwise_sum` itself has no caller (the 2026-10-14 release review), so
+  its deletion is a numeric no-op; the `lgamma` binding and the named temporaries are what the re-record prices.
+Kept as coverage GAPS, not dead code: the five CLI command bodies, the silent policy through `calibrate`, the
+simulator's sharded writers and its whole-genome grid, and the zarr splice blacklist.
+(g) COMMENT AND DOC RESIDUE, one content-only sweep:
+- Native: `bam_scanner.cpp`'s references to the deleted Python Fragment, "Fractional accumulator deposit", an
+  orphaned reference, a lost rationale, the intron filter justified twice, `std::mutex` without `<mutex>`;
+  `resolve_context.h` and `constants.h`'s history narration, "for compatibility" notes, a misplaced banner, four AF
+  bits unused in C++; `scoring.cpp`'s `-Wreorder-ctor` warning and its gDNA per-hit comment omitting `n_cand > 0`;
+  `fast_exp.h` listing three "call-site properties", one of them the function's own.
+- Calibration: the sweep docstring's "counted in the kernel"; the test named for owned slots; "bound for the gates",
+  although production reads `transfer_rows`; `region_geometry.py`'s "five populations" (there are four), the Axiom-0
+  tell "nascent-RNA-active" (also in `signature.py`) and mature/phantom history; `result.py` citing the deleted
+  `simplex_logodds._compose`; `calibrate.py`'s "two supports", a docstring that lost its conclusion, and the test
+  helper `_zero_rna_opportunity` zeroing a field already 0; `strand_model.py`'s spliced model's qualification stated
+  two ways, an undefined ε_CI, `posterior_95ci` not marked QC-only; the four texts stating "a quarter of the RNA side"
+  as a general property (a deleted measurement on a rebuilt ladder).
+- The EM, locus and CLI: `estimator.py`'s "every unambiguous fragment is deterministic" and a 102-character line
+  hard-coding (N_t, 10); `locus.py`'s false (ref_id, start) sort claim (it sorts by categorical code) and its pointer
+  to `calibration.priors` for the EM pseudocounts; `quant_command` omitting the `--annotated-bam` second pass;
+  `report/substrate.py` ("omits the panels") and `report/__init__.py` (the extra is needed only for the charts).
+- Tests: `test_estimator.py`'s "no EM at 0" (SQUAREM runs at least one step); `test_resolution.py`'s "(gap=0)";
+  `test_buffer.py`'s "None for intergenic"; over-long test docstrings; "Boundary cases" headings from the
+  edge→boundary rename.
+- The simulator: `whole_genome.py`'s "…and filtering" banner; `splice_motif.py`'s over-long lines.
+- Docs: `.github/copilot-instructions.md`'s compiler-flags line omits `-fno-finite-math-only`; `accumulator.h`'s
+  header ("each population stores … the reciprocal-opportunity sum") and `test_conserved_mass.py` still read as if a
+  region reciprocal bank were stored, and one measurement table can no longer be reproduced; the executable
+  specification and its C++ twin word one mass rule differently, and two payload comments point at inexact text
+  (UNCERTAIN: check when touched); `test_chr.yaml` says the shadows are "≈ 5 % of RNA fragments" while the render
+  realizes 0.76 %; the headers and TESTING list the YAML's extra keys without `blank:`; TESTING says `rigel sim`
+  accepts `index:`, which the CLI now rejects; TESTING has no section for the VCaP read-name truth mix (A00839 exome
+  DNA, HWI-D00127 transcriptome; its halves differ in fragment length, 307 / 244 bp, the confound the ladder forbids;
+  read-name truth labels the RNA library's own gDNA as RNA; calibration can be scored only as slot-mass overlap).
+- 0.8.0, from the 2026-10-14 release review: the MANUAL lists `nrna_quant`'s last columns as `n_mrna, mrna_count,
+  count` where the file writes `count, n_mrna, mrna_count` (the gate compares sets, not order); `--calib-refit-iters 0`
+  also turns off the capture correction (no landscape, so every efficiency is 1), which neither the MANUAL's two
+  mentions nor the CLI help say; `pipeline.py` says calibration raises when no spliced fragment is observed, where it
+  reads κ = ½; the MANUAL says only the `gdna` length histogram is fractional, where the `rna` one is too.
+(h) SIMPLIFICATIONS, each proven a numeric no-op:
+- `solve_one_block` and `transfer_prepare` each wire the chain, so the gates exercise the copy: one shared builder.
+- Scoring is written twice, for multimappers and singles; unifying it also removes the p = ½ antisense disagreement
+  (`ISSUES: latent-defects`).
+- SQUAREM's VBEM and MAP branches (about 150 lines) differ only in the weight, the floor and the normalisation.
+- `BamAnnotationWriter::write` re-implements `parse_bam_record`, and multimap detection is written twice.
+- `TranscriptIndex.load` round-trips through frozensets: build the CSR directly.
+- `intervals.feather`'s exons are read three ways: one walk would serve all three.
+- Two functions named `contained_opportunity` sit in layer 2, and one ramp is written twice.
+- `FragmentScorer` copies 13 fields into native: return the native scorer and store alphas.
+- `_apply_scan_stats` reads 33 hand-listed keys with `.get(key, 0)`: iterate the dataclass and index strictly.
+- The simulator's truth is spread over nine `ground_truth_*` methods and three file passes.
+- Five instruments import `tests/calibration/_oracle.py` through `sys.path`; four scripts redefine `_shared.RUNS`.
+(i) CONSTANTS — what the move into `config.CONSTANTS` left (2026-10-01; the layout is `DESIGN.md` §6):
+- The native kernels' own constants are named and commented in their translation units (`em_solver.cpp`'s
+  `SQUAREM_BUDGET_DIVISOR`, `transfer_rows.h`'s `EPS` and `TINY`, `solve_kernel.cpp`'s `PW_BLOCKSIZE`, the scanner's
+  batch sizes), not gathered in `native/constants.h`, and the C++ inline literals are unaudited. Only the values Python
+  shares are single-sourced (exported, never restated).
+- `rigel sim`'s CLI restates `Scenario`'s defaults (genome length 5000, seed 42, 1000 fragments); reading them from
+  the signature would import the simulator on every CLI start.
+- `FragmentLengthModel.to_dict` rounds inline (2 and 6 decimals), beside the CLI's `SUMMARY_DECIMALS`.
+
 ### the-edge-density-floor-under-capture
 `priority: later — Tier 2: a design question; the withdrawal was measured and not selected · kind: design · 2026-10-08`
 The boundary's structurally pure-DNA count identifies its own capture-weighted density, not a lower bound on the adjacent
@@ -940,22 +1086,6 @@ reference above the density's peak, and that compensating error must be found fi
 junction price (`ISSUES: the-junction-price-is-noisy-within-a-gene`).
 
 Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-29_precapture_rna/C_report.md` and its `C/` harness.
-
-### sj-strand-tag-chosen-from-the-first-reads
-`priority: next — 0.8.1: the per-record or annotated-junction repair; the 0.8.0 minimum landed 2026-10-14 · kind: defect · 2026-09-28`
-The scanner picks the junction-strand tag mode from the first 1,000 spliced reads (`detect_sj_strand_tag_native`) and
-returns "none" if none carries XS or ts, so a library whose first reads lack the tag loses its strand. An unknown
-`--sj-strand-tag` spec silently becomes XS_TS (`parse_sj_tag_spec`'s default), and the resolved mode is never logged
-or written to `summary.json` or `config.yaml`, so a run cannot be reproduced from its outputs. The repair reads the tag
-per record; it moves numbers only on libraries whose first 1,000 spliced reads lack it.
-Instrument: a fixture with the tag absent from the first reads.
-WIDER THAN STATED (2026-10-14): a BAM with no XS/ts tag at all loses its strand — the junction strand comes only
-from the tag, so no fragment qualifies for strand training, κ reads ½ and a stranded library is quantified as
-unstranded, with only generic warnings; STAR writes XS only with `--outSAMstrandField intronMotif`, while the MANUAL
-says it emits XS. LANDED 2026-10-14 (`tests/test_sj_strand_tag.py`): an unknown spec is refused by `BamScanConfig`; the resolved
-mode is logged and recorded in `summary.json` and `config.yaml`; a library whose spliced reads are read with no
-tag warns that it is quantified as unstranded; the MANUAL's STAR lines name `--outSAMstrandField intronMotif`. 0.8.1: the strand of the
-annotated junction, which the resolver already looks up, as the sense source.
 
 ### the-bulk-can-be-calibrations-nascent-rna
 `priority: later — Tier 2, accepted for 0.8.0 on the capture-reference review's recommendation (2026-10-13); its repair is upstream · kind: defect · 2026-10-13`

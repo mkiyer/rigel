@@ -118,10 +118,14 @@ The 0.8.0 cut's release-critical items were settled on 2026-10-14: the user-path
 format batch landed; the multimapper prior share was kept as shipped and the ψ double-prior fix was not shipped, each on
 its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-multimappers`,
 `ISSUES: the-gdna-prior-enters-psi-twice`). The release now follows the owner's sequence, in order:
-1. **Docs cleanup**: every permanent doc true of the tree.
-2. **An independent code review.**
+1. **Docs cleanup**: every permanent doc true of the tree. Done.
+2. **An independent code review.** Done; what it found is in ISSUES, release-relevant first: `ISSUES: the-release-builds`,
+   `ISSUES: input-mistakes-pass-silently`, `ISSUES: the-annotated-bam-writer`,
+   `ISSUES: the-gtf-parser-accepts-malformed-transcripts`, `ISSUES: the-em-depends-on-its-thread-count`,
+   `ISSUES: the-scoring-alphas-are-unchecked`, `ISSUES: the-strand-summary-on-a-dead-channel`; its smaller items are in
+   `ISSUES: latent-defects` and `ISSUES: hygiene-ledger`.
 3. **The full benchmark run**, the report card regenerated.
-4. **ISSUES cleanup and prioritization**: the OPEN section ordered by priority.
+4. **ISSUES cleanup and prioritization**: the OPEN section ordered by priority. Done.
 5. **The survey**: implement or defer, entry by entry. The candidates include the two the cut called release-critical:
    the strand pruning (`ISSUES: strand-overdispersion-one-shared-value`) and the splicing artifacts on real data,
    the cluster track (`ISSUES: splicing-artifacts`), with the cluster's index rebuilt from its store at format 9
@@ -140,7 +144,8 @@ its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-mult
 `ISSUES: the-pooled-q-in-the-gdna-count` · `ISSUES: psi-reads-kappa-where-the-strand-channel-is-dead` ·
 `ISSUES: the-gdna-landscape-collapses-at-low-depth` with `ISSUES: strand-plug-in-bias-on-sparse-libraries` ·
 `ISSUES: the-sparse-capture-losses` with `ISSUES: the-efficiency-posterior-floor-on-empty-pieces` ·
-`ISSUES: sj-strand-tag-chosen-from-the-first-reads`.
+`ISSUES: sj-strand-tag-chosen-from-the-first-reads` · `ISSUES: an-anchor-only-landscape-reads-as-capture` ·
+`ISSUES: the-transfer-price-arithmetic` · `ISSUES: latent-defects`.
 
 **Later**, each with its entry: `ISSUES: the-edge-density-floor-under-capture` ·
 `ISSUES: capture-on-overcalls-gdna-at-low-gdna` · `ISSUES: nascent-stress-sensitivity` ·
@@ -155,7 +160,7 @@ its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-mult
 `ISSUES: unannotated-transcription-is-booked-as-gdna` · `ISSUES: ruler-witness-geometry-on-transcript-panels` ·
 `ISSUES: yield-variance-beside-the-count` · `ISSUES: drain-contaminates-certified-rna` ·
 `ISSUES: the-deferred-rna-long-regression-after-factory-removal` · `ISSUES: overlapping-synthetic-shadows` ·
-`ISSUES: performance-memory-bounded-solve`.
+`ISSUES: performance-memory-bounded-solve` · `ISSUES: hygiene-ledger`.
 
 **Parked — Tier 5**, each with its entry: `ISSUES: a-pure-gdna-library-reads-as-nascent-rna` ·
 `ISSUES: capture-premise-untested-on-cdna` · `ISSUES: the-atom-at-an-unwitnessed-both-strand-slot` ·
