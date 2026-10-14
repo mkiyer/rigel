@@ -1905,15 +1905,14 @@ losing row a zero control at that floor; every contaminated row still favours `t
 that reaches the DELIVERED rows (under capture the probed exons' one-sided rows ARE the enriched mode's
 witness), the likelihood-kernel estimator, the all-kernel E-step and six refits.
 
-### 7.2 The ruler reads the landscape's located enriched mode (2026-09-14; `ISSUES: g00-shrinkage-upstream-repair` CLOSED)
+### 7.2 The ruler reads every object's own gDNA density against the bulk (2026-10-13; `ISSUES: the-located-mode-capture-reader` CLOSED)
 
 **Capture is a spectrum (owner, 2026-10-05).** There is never a binary capture-ON versus capture-OFF: a plasma panel
 enriches scarce transcripts that stay a tiny fraction of the library, so any library-level statistic reads the
 uncaptured background. No capture detector, library-level test or on/off status is to be built; every capture weight
 is per object or per placement and continuous, and "no enrichment" is the limit where the estimated weights are 1.
-The reader below, whose `None` switches every correction off, is such a decision and is a defect to replace, not a
-design: it quantifies the two sparse plasma libraries (LBX0190, MO_3021) as uncaptured where 0.7.1 contracts them
-(2026-10-05).
+The located-mode reader, whose `None` switched every correction off, was such a decision; the reader below replaced
+it (2026-10-13).
 
 **Capture has a local footprint (owner, 2026-10-07).** A probe can bind fragments that
 overlap either part of it; a junction-spanning probe does not enrich only fragments
@@ -1939,53 +1938,31 @@ or positive background floor is authorized. Production integration and junction
 pricing keep their separate owner checkpoints.
 
 The EM's effective length under capture (`capture_eff_length`, `priors.assemble_priors`, `EQUATIONS.md` §11)
-contracts every component by the capture efficiencies of the objects its fragments deposit on, each an
-object's gDNA density against a reference `ρ_ref`, the fully-captured level. THE RULING: `ρ_ref` is the
-located enriched mode of the fitted gDNA landscape — the same `DensityLandscape` ψ reads on the refits —
-published on the result as `CalibrationResult.gdna_reference_density` (`None` when no refit fit a landscape
-or no located mode lies above the depleted one, and then every efficiency is exactly 1), and read through
-those efficiencies by every component's length, the transcripts', the synthetic spans' and the locus gDNA
-component's; the private mass-weighted kernel density with its bandwidth and prominence constants, which
-accepted a mode from any five slots with positive mass, is deleted. Depleted is the largest-mass basin
-(`landscape.split_basins`), the enriched candidate the basin above it holding the most located kernels, and
-a mode is located iff the median rendered width of its member kernels is at most one nat
-(`CONSTANTS.landscape.located_var`, §7.1 rule 4 read at the population's own resolution, `knn_widths`; the within-basin
-spread is not the statement — a basin cut by the grid's edge is narrow whatever its kernels). Why this and not a repair of the composition: the composition had been
-fixed first and the factor did not follow — the ladder's zero rows carry 178–189 false fragments on
-35,135 regions (one slot at or above one fragment) and still read 0.51 / 0.12 / 0.62, because a detector
-that always returns a mode reads specks as a mode; and the oracle's own counts contracted 8 % at
-capture-OFF (`O` 0.923/0.926 against a contract of exactly 1.000), an estimator defect no composition can
-cure. Measured (`calibration_vs_oracle.py` ③, both panels): the zero controls' factor 0.141 / 0.154 →
-1.000 with nothing moved (5,108 / 51,436 transcripts had moved); both in-scope capture-OFF strata
-P = O = 1.000 with nothing moved (from P 0.946–0.970, O 0.923–0.939); stranded capture-ON P/O 1.015
-against 1.011 on the test chromosome and 1.013 against 1.011 on the ladder, with `ρ_ref` within 4 % of
-the truth's mass-weighted median on every capture-ON row measured; the solve untouched (`policy_benchmark.py`
-identical). The `U` arm is retired: with the reference a property of the solve, a uniform field against it
-is a number about nothing, and its question — what a noise-free field leaves — is answered structurally by
-`O` at capture-OFF reading 1.000 with no fitting (`ISSUES: u-ruler-arm` CLOSED). The verdict and the
-reference are stable across an 8× range of the landscape's render resolution
-(`TRAPS: a-mode-count-is-not-a-well-posed-quantity`).
+contracts every component by the capture efficiencies of the objects its fragments deposit on. THE RULING (owner,
+2026-10-13, after two external reviews): each efficiency is the object's own gDNA density read against the BULK,
+the peak of the fitted gDNA landscape's largest basin, with the landscape as Efron's two-group prior (the bulk basin
+a point mass at its peak, the rest the landscape's own density) and the object's own Poisson count as the
+likelihood, read out as the posterior mean of the log density, saturated at its own enriched level's peak
+(`capture_efficiency.capture_efficiencies`, `EQUATIONS.md` §11). There is no mode to locate and no switch: no member
+is counted, no width tested, nothing gated; a one-basin landscape reads 1 everywhere, as does a library with no
+landscape. The result publishes the unit and the fully captured level (`gdna_bulk_density`,
+`gdna_capture_saturation`); the located-mode census and its reference are deleted. A junction's price is bounded by
+the saturation level or the best object it touches, whichever is higher, which in the old unit is exactly the clip
+at 1. Why: a cfRNA panel rarely shows a located mode (owner, 2026-10-13: "Why is it so important that we find a
+mode?"), and without one the old reader switched every correction off; the single-probe panel's target gene read
++65 / +117 % (g50 κ 0.99 / 0.70) under it.
 
-**The members have a location (2026-09-16; `ISSUES: the-ruler-reference-on-sparse-real-libraries`
-CLOSED).** A basin's members are the kernels with a location — a count of at least one fragment, the wall
-`located_var` is read at, published by the fit as `DensityLandscape.located`; a zero-count anchor's or a
-sub-fragment kernel's centre is its resolution wall `1/E`, which says where the kernel could not see and is
-no member of anything. The enriched candidate is the basin above the depleted one holding the most located
-kernels, and it is a mode iff its members resolve it at the located population's own resolution: with
-`k = √n_located`, the median of the members' widths to their k-th nearest MEMBER is at most one nat, so a
-basin with k members or fewer — the cluster smaller than √n that reaches outside itself — is no mode however
-narrow the rendered density's cut. The result carries the regime beside the reference
-(`CalibrationResult.gdna_reference_members`, the CLI summary and the calibration log), and a library whose
-gDNA is too sparse to locate its probed level is told so. Why: a human index trains a quarter of a million
-anchors whose walls span every decade, and on the two sparse real libraries the shipped rule chose a
-reference an order of magnitude below the probed level from a basin of 16,931 and 20,071 walls around 10
-and 16 located kernels. Measured: both panels' 46 rows and the depth ladder's 26 capture-ON rows unchanged
-to the reference, the two sparse libraries (LBX0190 1,118 located kernels, MO_3021 15,088) `None`, the two
-deep ones unchanged (LBX0588 at 10^-0.53 from 11,579 members, the VCaP library at 10^-1.07 from 24,496);
-two capture-OFF rows of the depth ladder at a tenth of the depth that had read a reference from one located
-kernel among walls read `None`. The choice rule cannot be discriminated by number — the largest rendered
-mass, the most located members, the largest located weight and the highest located basin agree on every row
-measured once the members are located — so the most-located-members rule ships by derivation.
+Measured against the foundation's reader (`quant_accuracy.py`, pinned and fractional): the single-probe
+target gene −10 / +0.1 %; sparse κ 0.99 ON 24.43 → 21.60 %, junction κ 0.99 ON 32.05 → 30.29 %; the plasma
+libraries LBX0190 and MO_3021 read 611 and 376 enriched objects where it read none; the ladder's in-scope strata
+within 0.06 (stranded ON 3.87 → 3.87). Two in-scope costs are accepted (owner, 2026-10-13): RNA-short stranded ON
+13.32 → 13.50 and RNA-long 4.25 → 5.17, both isoform allocation in junction-probed genes with the gene error flat.
+The benefits survive every EM view measured — shipped, ordinary updates, converged — with the gene-level gains
+identical and the transcript-level ones of the same sign (`ISSUES: the-em-stops-before-it-converges`). Refused on
+the way, with their numbers: `ISSUES: the-located-mode-capture-reader`, `ISSUES: the-one-sided-null`,
+`ISSUES: the-likelihood-fitted-null-location`. One limitation is accepted for 0.8.0 on the capture-reference
+review's recommendation: where calibration books nascent RNA as gDNA at weak strandedness, a small population can
+become the bulk (`ISSUES: the-bulk-can-be-calibrations-nascent-rna`).
 
 **The one shared rule: conserved shares over regions and boundaries (owner rulings 2026-09-22 and 2026-09-23;
 `ISSUES: the-gdna-component-length-rule-differs-from-the-transcripts` CLOSED; `EQUATIONS.md` §11).** THE RULING:

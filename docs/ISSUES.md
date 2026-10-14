@@ -153,10 +153,9 @@ renamed (`ISSUES: the-total-density-landscape`).
   and a spliced fragment is certified RNA (Axiom 0). The count is so far inferred (27 at g001 OFF, 29 at g01 OFF, from
   the three-exon shadows), not read from `n_intergenic_spliced`; `quant_accuracy.py` copies it into the release
   report's gDNA pool;
-- the depleted gDNA density, read off the gDNA landscape by `landscape.split_basins`, which `located_enriched_mode`
-  calls and discards: it restores the report's on-target / off-target fold (dividing by `gdna_density_global` instead
-  is biased, 25× against about 1,000× from the modes); it touches about six test construction sites and two
-  instruments;
+- DONE 2026-10-13 with the mode-free reader: the depleted gDNA density is the bulk the reader reads against, and
+  `summary.json` publishes it beside the fully captured level (`gdna_bulk_density`, `gdna_capture_saturation`), so the
+  report's on-target / off-target fold is the saturation level;
 - the report's capture note, which says "no calibration" for a 0.7.1 or schema-2 summary that has a calibration block.
 (b) The index (`INDEX_FORMAT_VERSION` 8): drop the written-never-read columns (`transcripts.feather`'s `abundance`,
 `nrna_abundance` and `n_exons`; `sj.feather`'s `interval_type`), and add the duplicate map as an alias map
@@ -3278,6 +3277,37 @@ REFUSED as targets: the scan (at its floor for eight threads) and the index load
 
 Instrument: `profiling/profiler.py`, `profiling/sweep_replay.py`.
 
+### the-em-stops-before-it-converges
+`priority: next — the owner's ruling for 0.8.0 (recommended: the solver as shipped); a stable solver with explicit regularization for 0.8.1 · kind: defect · 2026-10-14`
+The locus EM (VBEM with SQUAREM, 1,000 iterations = 333 accelerated cycles, δ 1e-6) runs out of budget on
+degenerate loci — near-identical isoforms, antisense overlaps, capture clusters, identical paralogs — and there its
+answer is wherever the solver stopped. Measured with a prototype ordinary-update path (`RIGEL_EM_PLAIN=1`: the same
+start, prior, updates, floor and stopping rule, no extrapolation), `em.n_threads=1`:
+- THE ACCELERATOR IS ROUNDING-SENSITIVE. On the test chromosome's ten-isoform capture cluster a common length factor
+  of 1 + 1e-12, which every E-step cancels exactly, moves 3,239 fragments under the shipped solver and under 2e-8
+  under ordinary updates at any budget; given the budget, both reach one answer. Over the test panel's 30 conditions
+  the shipped solver moves 40,860 fragments under that factor. Its step length −(r·v)/(v·v) is a ratio of near-zero
+  second differences along a flat direction, and the backtracking that keeps components above the floor is a
+  discrete decision a rounding change can flip.
+- THE STOPPING POINT IS A REGULARIZER WHOSE SIGN DEPENDS ON THE SUBSTRATE. Along a direction the data barely
+  determine VBEM drifts from the proportional split toward a vertex, the ψ(α) race of
+  `ISSUES: the-em-answer-depends-on-where-it-starts`: on that cluster, whose truth is ten even isoforms, the error is
+  867 fragments after 30 ordinary updates, 6,208 after 1,000, 15,089 under the shipped solver and 26,198 converged,
+  seven isoforms at zero. The test chromosome's designed blocks reward stopping early: ordinary updates at the
+  shipped budget read its transcripts 8.34 → 6.06 % (29 of 30 conditions), 300 updates 4.90 %, and convergence costs
+  +1.1 to +5.8 points across the test-chromosome panels. The deciding panels do not: ordinary updates at the shipped
+  budget are worse on 15 of 16 ladder conditions (4.32 → 4.62 %, stranded ON 3.87 → 4.39) and on all eight fl-gap
+  conditions (+0.01 to +0.49), at 1.15–1.25× the EM time. Matched to the accelerator's distance (about 3,000 updates)
+  they score the same on the test panel (8.12 against 8.34 %) at five times the EM time. Converged, the deciding
+  panels' capture-ON conditions move by −0.13 to +0.12 (every locus converged, at 2–3× the EM time), where the test
+  chromosome's moved +3.5 to +5.8: on realistic truth the stopping point is nearly neutral. Genes are untouched in
+  every arm.
+The identical-paralog gates meet the same drift (513 / 39 at the shipped budget, 552 / 0 converged) and run the EM to
+convergence (`DESIGN.md` §4.2); the reader's benefits hold in every view (`DESIGN.md` §7.2). The principled repair is
+explicit regularization of the poorly determined directions with a stable solver run to convergence, decided on the
+ladder in both views. `em_screen.py`, `solver_replay.py`, `locus_trajectory.py` and the prototype build
+`site_solverdiag` in `~/Downloads/rigel_runs/prototypes/2026-10-13_modefree/`.
+
 ### nascent-stress-sensitivity
 `priority: later — Tier 2, first: a cheap re-measure of Tier 0's verdicts at the realistic nascent level · kind: question · 2026-08-22`
 Does any in-scope verdict depend on the nascent stress level? The ladder runs `on_fraction 0.50`; realistic is ~0.10
@@ -3381,8 +3411,11 @@ unmeasured. The replacement is measured on the re-simulated fl-gap panels.
 
 ### the-capture-reference-is-read-at-a-grid-point
 `priority: later — Tier 2; its fix does not land alone · kind: defect · 2026-09-29`
-`located_enriched_mode` reads the capture reference at a landscape grid point whose step is 8.4–8.9 %, so a 0.15 bp
-change in the length law can move the reference by up to 7.7 %.
+The reader reads the bulk at a landscape grid point, the census peak's cell, whose step is 8.4–8.9 %, and the
+saturation level at another, so a 0.15 bp change in the length law can move either by a step. A step in the bulk is a
+factor common to every efficiency, which the EM cancels only at convergence
+(`ISSUES: the-em-stops-before-it-converges`); a step in `S` moves the junction bound. The measurements below were made
+on the located-mode reader (`ISSUES: the-located-mode-capture-reader`), whose reference moved by up to 7.7 %.
 
 Reading it at the peak's parabolic vertex on log P needs no constant. It cuts the jitter to 0.13–0.80 % and leaves
 capture OFF byte-identical. Alone, though, it fails stranded × capture ON: transcripts −567, genes +758 (+0.5 %), and
@@ -3393,6 +3426,29 @@ reference above the density's peak, and that compensating error must be found fi
 junction price (`ISSUES: the-junction-price-is-noisy-within-a-gene`).
 
 Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-29_precapture_rna/C_report.md` and its `C/` harness.
+
+### the-sparse-capture-losses
+`priority: later — Tier 2, 0.8.1: the length-weighted weak-evidence analysis the capture-reference review asked for · kind: defect · 2026-10-13`
+Where uncaptured gDNA is sparse the reader loses to the foundation's: the depth panels' captured strata +1.6 (d10)
+and +1.7 (lowg) points shipped, +1.2 to +3.7 converged, largest where the foundation applies no correction at all
+(d10 g001 ON, 117 gDNA fragments in the library). The bulk collapses there (4–21× low at 27–140 uncaptured
+fragments), but its location is not the cause: the null placed at the simulator's expected density deepens the
+losses (`ISSUES: the-likelihood-fitted-null-location`). The candidate is per-object reading noise when the evidence
+is scant, which the foundation's clip, or no correction, regularizes. The test that would localize it: the loss
+weighted by each object's contracted length, read against its own evidence. `oracle_runs.py`, `expected_bulk.py` in
+`~/Downloads/rigel_runs/prototypes/2026-10-13_modefree/`.
+
+### the-bulk-can-be-calibrations-nascent-rna
+`priority: later — Tier 2, accepted for 0.8.0 on the capture-reference review's recommendation (2026-10-13); its repair is upstream · kind: defect · 2026-10-13`
+On a small library at weak strandedness with heavy nascent RNA, calibration books nascent RNA in the genes as gDNA,
+and that population can outweigh the true intergenic gDNA and become the bulk, against which every object is read.
+The `combo_extreme` golden (two genes, heavy gDNA and nascent RNA, κ 0.65, no capture, 13 training objects): the
+genic deconvolved gDNA, 0.29 per bp, is the bulk, and the true intergenic density, 0.06, reads 0.2; transcripts
+36.8 % against the foundation's 12.4 %. Given the TRUE gDNA deposits (the oracle's read names, the landscape refit on
+them) the reader matches or beats the foundation at every size, so the origin is calibration. The design repeated K
+times at constant depth over several seeds, converged EM: the large regression in 1 of 8 seeds at K = 1, 2 of 4 at
+K = 5 and 0 of 2 at K = 25; those counts establish no falling rate. Refused as the fix:
+`ISSUES: the-one-sided-null`. `stress_causality.py` in `~/Downloads/rigel_runs/prototypes/2026-10-13_modefree/`.
 
 ### intron-seeds-near-probes-are-capture-enriched
 `priority: later — Tier 2, the od research tail; answered before any purity weight or background repair that treats intron regions as off target · kind: question · 2026-09-28`
@@ -3900,6 +3956,48 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### the-located-mode-capture-reader
+CLOSED by replacement 2026-10-13 (owner, after two external reviews; `DESIGN.md` §7.2, `EQUATIONS.md` §11). The reader
+that read the fully captured level off the landscape's located enriched mode, and switched every correction off when
+no basin above the bulk held one, was an on/off capture decision, and a cfRNA panel rarely shows a mode: under it the
+single-probe target gene read +65 / +117 %, and LBX0190 and MO_3021 read as uncaptured. Do not rebuild it, nor these
+readers of the same two-group prior, each measured end to end against the foundation's reader (transcripts %):
+- the linear posterior mean, no gate: a lone basin above a floor bulk lifts every short object, test κ 0.99 g00 OFF
+  6.99 → 32.61;
+- the null ratio (the object's evidence over the same measurement at the bulk) with Var(log f_g) widening: it
+  under-reads short captured pieces, test κ 0.99 / 0.70 ON 7.32 / 7.76 → 10.79 / 13.06;
+- the log readout widened by the solve's Var(log f_g): it erases capture at scarce gDNA, lowg g001 ON 19.22 → 38.30,
+  d10 g01 ON 26.91 → 40.38;
+- no saturation: junction κ 0.99 ON 24.36 but test κ 0.99 ON 8.33, against 7.44 per level;
+- one saturation level for every object: it flattens real spectra, junction κ 0.99 ON 31.98 against 30.29 per level,
+  ladder ON 4.34;
+- the pooled bulk measurement with the deepest-valley null: no change on the deciding panels (ladder ON 4.35);
+- type-specific base rates, and type-specific maximum-likelihood weights, linear: they close 0.09 of the ladder gap
+  and break the starved extreme, d10 g001 ON 14.75 → 27.28 and 39.36;
+- the deconvolved (NPMLE) landscape as the prior, offline: less uniform off capture (max 0.79 nats), worse on dense
+  rows (rms 0.52 against 0.29);
+- a point null nested inside the bulk basin, its split fitted by maximum likelihood: the weight on the spread fits to
+  0.000 on the ladder, 0.012 on the test chromosome;
+- the smoothed bulk as the null instead of its peak: single-probe g05 κ 0.99 10.53 against 7.70.
+
+### the-one-sided-null
+REFUSED 2026-10-13 (the capture-reference review). Reading every level at or below the bulk basin as the null —
+"capture only enriches" — restores the `combo_extreme` golden (36.8 → 12.4 %), but it erases a well-resolved capture
+ratio wherever the captured population is the majority: two levels at rates 0.001 and 0.1, the upper holding 0.6 of
+the mass, keep their 100× ratio under the two-sided null and lose it under the one-sided
+(`tests/calibration/test_capture_efficiency.py`). On the full matrix it is a wash against the two-sided reader —
+lowg OFF −0.74 and fle200 κ 0.70 ON −0.53, bind100 κ 0.99 ON +0.88 and flgl ON +0.3 — the two failing, in opposite
+directions, wherever the largest basin is not the uncaptured level.
+
+### the-likelihood-fitted-null-location
+REFUSED as not indicated 2026-10-13, by the capture-reference review's own criterion ("recovery prices the
+spike-location mechanism; non-recovery refutes its sufficiency"). Placing the null's spike at the simulator's
+EXPECTED uncaptured gDNA density (an oracle in closed form, nothing else changed) does not recover the sparse
+libraries' losses; it deepens them, converged EM: lowg g001 ON 23.82 → 25.54, d10 g01 ON 32.72 → 35.46, d10 g05 ON
+17.62 → 18.08. Where 267 or more uncaptured fragments witness the bulk it moves nothing beyond ±0.06. A fitted
+location could at best reach the oracle's, so none is built (`ISSUES: the-sparse-capture-losses`).
+`oracle_runs.py`, `expected_bulk.py` in `~/Downloads/rigel_runs/prototypes/2026-10-13_modefree/`.
 
 ### flgap-panels-stale-nascent-model
 CLOSED 2026-10-03 by the re-simulation. The two fl-gap side panels had not been regenerated in the sparse-nascent rebuild
