@@ -145,7 +145,7 @@ its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-mult
 `ISSUES: the-gdna-landscape-collapses-at-low-depth` with `ISSUES: strand-plug-in-bias-on-sparse-libraries` ·
 `ISSUES: the-sparse-capture-losses` with `ISSUES: the-efficiency-posterior-floor-on-empty-pieces` ·
 `ISSUES: sj-strand-tag-chosen-from-the-first-reads` · `ISSUES: an-anchor-only-landscape-reads-as-capture` ·
-`ISSUES: the-transfer-price-arithmetic` · `ISSUES: latent-defects`.
+`ISSUES: the-transfer-price-arithmetic` · `ISSUES: latent-defects` · `ISSUES: instrument-ledger`.
 
 **Later**, each with its entry: `ISSUES: the-edge-density-floor-under-capture` ·
 `ISSUES: capture-on-overcalls-gdna-at-low-gdna` · `ISSUES: nascent-stress-sensitivity` ·
@@ -156,7 +156,7 @@ its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-mult
 `ISSUES: per-transcript-prior-lane` · `ISSUES: message-layer-open-cases` ·
 `ISSUES: scoring-penalties-are-underived-constants` · `ISSUES: multimapper-intergenic-alignments` ·
 `ISSUES: unwitnessed-loci-and-multimappers-at-the-em` · `ISSUES: vcap-dna-only-objects-lose-gdna-at-full-depth` ·
-`ISSUES: instrument-ledger` · `ISSUES: debug-capture-memory-is-unbounded` · `ISSUES: expand-the-gdna-spectrum` ·
+`ISSUES: debug-capture-memory-is-unbounded` · `ISSUES: expand-the-gdna-spectrum` ·
 `ISSUES: unannotated-transcription-is-booked-as-gdna` · `ISSUES: ruler-witness-geometry-on-transcript-panels` ·
 `ISSUES: yield-variance-beside-the-count` · `ISSUES: drain-contaminates-certified-rna` ·
 `ISSUES: the-deferred-rna-long-regression-after-factory-removal` · `ISSUES: overlapping-synthetic-shadows` ·

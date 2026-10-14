@@ -754,6 +754,32 @@ mode is logged and recorded in `summary.json` and `config.yaml`; a library whose
 tag warns that it is quantified as unstranded; the MANUAL's STAR lines name `--outSAMstrandField intronMotif`. 0.8.1: the strand of the
 annotated junction, which the resolver already looks up, as the sense source.
 
+### instrument-ledger
+`priority: next — (i) before the next capture-ON ceiling is read; the rest Tier 4, (e) before any spectrum expansion · kind: instrument · 2026-09-28`
+What the instruments do wrong or leave out; each fix is its own commit, with its `--self-test` or a gate.
+(a) `slot_truth.npz` counts boundary gDNA per crossing, in incidence units, so under capture its sums exceed the
+library's true gDNA (slot-frame O 1,281 / 12,485 at g001 / g01 ON against 1,170 / 11,700 fragments; P/O 1.015 in the
+slot frame against 1.055 in fragments), while `policy_benchmark.py` calls its Σ|Δ| "in fragments". Document the frame.
+(b) No instrument output records the code revision, the `--set` overrides or the prototype arm
+(`TRAPS: an-ablation-that-never-ran`).
+(c) CLOSED 2026-10-14: every capture taken before the count foundation is invalid anyway (3e7e0fbc changed the solve).
+(d) `build_test_reference.py` puts `src` first on `sys.path` unconditionally; fix it before the contaminated panel's
+in-tree stage.
+(e) The ladder-report skill hard-codes the four ladder rungs (StopIteration on g25 or g001).
+(f) `panel.py --index` reaches the cache and oracle stages but not `simulate`.
+(g) `calibration_vs_oracle.py` has no arm that carries the true capture efficiencies, so no calibration A/B sees the
+capture-contracted length move; `quant_accuracy.py --arm oracle_ruler` is the model.
+(h) `calibration_vs_oracle.py` has no gDNA-only object row (owner's ruling, carried from the closed
+`ISSUES: the-background-dispersion-assumes-a-pure-intergenic-pool`): `test_blank`'s unannotated transcription is booked
+as gDNA by Axiom 0 and dominates `full_lowg` capture-OFF P/O.
+(i) `quant_accuracy.py --arm oracle_ruler` is wrong on capture ON since the mode-free reader: on 2026-10-14 it reads
+g50 ss.99 ON 13.06 % and g98 ss.99 ON 475.87 % of the transcript truth, against 2.92 % and 22.38 % on 2026-09-30, while
+`base` and `oracle` hold and every capture-OFF row is unmoved. The likely cause is its anchor: it scales the simulator's
+factor so the fully probed class reads 1, the old reader's reference, while the shipped efficiencies are now read
+against the uncaptured bulk and the locus gDNA component keeps its shipped length, so the injected transcript lengths
+sit on a scale far below gDNA's. Re-anchor on the shipped convention (an unprobed object reads 1), prove it on the
+capture-OFF identity and a capture-ON row, and re-read the ceiling.
+
 ### overlapping-synthetic-shadows
 `priority: later — the index merge, after 0.8.0 (owner, 2026-10-14); its 0.8.0 docs, column gate and documented limit landed 2026-10-14 · kind: design · 2026-09-20`
 `create_nrna_transcripts` clusters TSS/TES within a tolerance per strand and manufactures one synthetic
@@ -875,7 +901,7 @@ exon|intron boundary, while RNA that has not spliced there does.
 - The step-1c instrument fixes have no gates: `policy_benchmark`'s apart grouping, `calibration_vs_oracle`'s APART
   strata and its `--json --jobs` merge, `prior_vs_oracle`'s strata, the `find_spec` guard.
 (f) SMALL: the `--no-mappability` flag names a store whose mappability the index no longer reads (it opts out of
-the splice blacklist), a name to decide before 0.8.0 ships, since a released flag is a promise; three unread scalars in `solve_kernel.cpp`'s positional aggregates; `pgzip` is an undeclared
+the splice blacklist); 0.7.1 shipped the name, so renaming it now breaks scripts for clarity alone; three unread scalars in `solve_kernel.cpp`'s positional aggregates; `pgzip` is an undeclared
 optional import in the simulator; eight test sites import `rigel._resolve_impl` for names `rigel.native` re-exports.
 - `_solve_impl` builds with `-g` only. Step 1b tried `-march=native` and IPO and reverted them: bit-identical on arm64,
   but on x86-64 they turn on FMA contraction in the ψ, transfer and solve kernels (clang: 0 FMA instructions at -O3,
@@ -1197,25 +1223,6 @@ the library), −58,503 on mixed, +21,009 on no-gDNA. It is already in pass 0 (P
 `ISSUES: the-gdna-landscape-collapses-at-low-depth` excludes it.
 Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-28_depth_lowg/pages/explanation_depth.md`; the VCaP-mix scorer
 under `v2/scripts/`.
-
-### instrument-ledger
-`priority: later — Tier 4; (e) before any spectrum expansion; (c) closed · kind: instrument · 2026-09-28`
-What the instruments do wrong or leave out; each fix is its own commit, with its `--self-test` or a gate.
-(a) `slot_truth.npz` counts boundary gDNA per crossing, in incidence units, so under capture its sums exceed the
-library's true gDNA (slot-frame O 1,281 / 12,485 at g001 / g01 ON against 1,170 / 11,700 fragments; P/O 1.015 in the
-slot frame against 1.055 in fragments), while `policy_benchmark.py` calls its Σ|Δ| "in fragments". Document the frame.
-(b) No instrument output records the code revision, the `--set` overrides or the prototype arm
-(`TRAPS: an-ablation-that-never-ran`).
-(c) CLOSED 2026-10-14: every capture taken before the count foundation is invalid anyway (3e7e0fbc changed the solve).
-(d) `build_test_reference.py` puts `src` first on `sys.path` unconditionally; fix it before the contaminated panel's
-in-tree stage.
-(e) The ladder-report skill hard-codes the four ladder rungs (StopIteration on g25 or g001).
-(f) `panel.py --index` reaches the cache and oracle stages but not `simulate`.
-(g) `calibration_vs_oracle.py` has no arm that carries the true capture efficiencies, so no calibration A/B sees the
-capture-contracted length move; `quant_accuracy.py --arm oracle_ruler` is the model.
-(h) `calibration_vs_oracle.py` has no gDNA-only object row (owner's ruling, carried from the closed
-`ISSUES: the-background-dispersion-assumes-a-pure-intergenic-pool`): `test_blank`'s unannotated transcription is booked
-as gDNA by Axiom 0 and dominates `full_lowg` capture-OFF P/O.
 
 ### debug-capture-memory-is-unbounded
 `priority: later — Tier 4: the fix is in src; the one-real-genome-job rule stands meanwhile · kind: instrument · 2026-09-28`
