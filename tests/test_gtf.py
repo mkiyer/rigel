@@ -114,3 +114,87 @@ def test_an_exon_off_its_transcripts_reference_or_strand_follows_the_parse_mode(
         Transcript.read_gtf(path, parse_mode="strict")
     tx = Transcript.read_gtf(path, parse_mode="warn-skip")
     assert len(tx) == 1 and tx[0].ref == "chr1" and len(tx[0].exons) == 1
+
+
+def _exon(start, end, gene="g1", transcript="t1", ref="chr1", strand="+", extra=""):
+    return f'{ref}\ttest\texon\t{start}\t{end}\t.\t{strand}\t.\tgene_id "{gene}"; transcript_id "{transcript}";{extra}\n'
+
+
+def test_an_exon_ending_before_it_starts_follows_the_parse_mode(tmp_path: Path):
+    """An exon with its end before its start parsed, the index built, and `rigel quant` failed far from the cause."""
+    path = _write(tmp_path, [_exon(100, 200), _exon(500, 400)])
+    with pytest.raises(ValueError, match="line 2"):
+        Transcript.read_gtf(path, parse_mode="strict")
+    tx = Transcript.read_gtf(path, parse_mode="warn-skip")
+    assert [(e.start, e.end) for e in tx[0].exons] == [(99, 200)]
+
+
+@pytest.mark.parametrize(
+    "second",
+    [(150, 300), (100, 200)],
+    ids=["overlapping", "duplicated"],
+)
+def test_overlapping_or_duplicated_exons_follow_the_parse_mode(tmp_path: Path, second):
+    """Exons of one transcript are disjoint. Overlapping or duplicated ones lengthened the transcript (600 to 900 bp in
+    the release review's case) and wrote negative or empty introns into the splice graph."""
+    path = _write(tmp_path, [_exon(100, 200), _exon(*second), _exon(500, 600)])
+    with pytest.raises(ValueError, match="overlaps"):
+        Transcript.read_gtf(path, parse_mode="strict")
+    tx = Transcript.read_gtf(path, parse_mode="warn-skip")
+    assert [(e.start, e.end) for e in tx[0].exons] == [(99, 200), (499, 600)]
+    assert tx[0].length == 202
+
+
+def test_abutting_exons_are_one_exon(tmp_path: Path):
+    """Exons with no base between them (RefSeq writes them at genome indels) are one block of the transcript. Kept apart,
+    they made a 0-bp intron: the transcript turned multi-exon and its synthetic span took half its reads."""
+    path = _write(tmp_path, [_exon(100, 300), _exon(301, 500)])
+    for mode in ("strict", "warn-skip"):
+        (t,) = Transcript.read_gtf(path, parse_mode=mode)
+        assert [(e.start, e.end) for e in t.exons] == [(99, 500)] and t.length == 401 and t.is_nrna
+
+
+def test_a_transcript_id_shared_by_two_genes_follows_the_parse_mode(tmp_path: Path):
+    """Two genes' transcripts sharing an ID on one reference and strand were merged into one transcript behind a fake
+    intron, and the second gene vanished from the tables."""
+    path = _write(tmp_path, [_exon(100, 200, gene="g1"), _exon(5000, 5200, gene="g2")])
+    with pytest.raises(ValueError, match="g2"):
+        Transcript.read_gtf(path, parse_mode="strict")
+    tx = Transcript.read_gtf(path, parse_mode="warn-skip")
+    assert len(tx) == 1 and tx[0].g_id == "g1" and len(tx[0].exons) == 1
+
+
+def test_an_ensembl_gene_biotype_is_the_gene_type(tmp_path: Path):
+    path = _write(tmp_path, [_exon(100, 200, extra=' gene_biotype "lncRNA";')])
+    (t,) = Transcript.read_gtf(path, parse_mode="strict")
+    assert t.g_type == "lncRNA"
+
+
+def _fasta(tmp_path: Path, length: int) -> Path:
+    import pysam
+
+    fasta = tmp_path / "genome.fa"
+    fasta.write_text(">chr1\n" + "A" * length + "\n")
+    pysam.faidx(str(fasta))
+    return fasta
+
+
+@pytest.mark.parametrize(
+    "stray",
+    [
+        _exon(100, 300, gene="g2", transcript="t2", ref="chrUn"),
+        _exon(900, 1200, gene="g2", transcript="t2"),
+    ],
+    ids=["contig-missing-from-the-fasta", "past-the-contig-end"],
+)
+def test_a_transcript_off_the_fasta_follows_the_parse_mode(tmp_path: Path, stray):
+    """A transcript on a contig the FASTA lacks, or past a contig's end, raised a bare error from the build even under
+    warn-and-skip. Strict refuses it by name; warn-and-skip drops it and builds the rest."""
+    from rigel.index import TranscriptIndex
+
+    fasta = _fasta(tmp_path, 1000)
+    gtf = _write(tmp_path, [_exon(100, 300), _exon(500, 700), stray])
+    with pytest.raises(ValueError, match="t2"):
+        TranscriptIndex.build(fasta, gtf, tmp_path / "strict", gtf_parse_mode="strict")
+    TranscriptIndex.build(fasta, gtf, tmp_path / "skip", gtf_parse_mode="warn-skip")
+    assert list(TranscriptIndex.load(tmp_path / "skip").t_df["t_id"])[:1] == ["t1"]

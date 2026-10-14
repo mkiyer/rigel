@@ -58,6 +58,8 @@ class GTFRecord:
             end_pos = int(fields[4])
         except ValueError:
             raise ValueError(f"Non-integer coordinates in line: {fields}")
+        if end_pos <= start_pos:
+            raise ValueError(f"{fields[2]} ends ({fields[4]}) before it starts ({fields[3]})")
 
         # Parse Score: '.' -> None
         score_val = None

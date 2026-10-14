@@ -123,9 +123,12 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
 - `--overhang-alpha` and `--mismatch-alpha` outside [0, 1], or NaN, are refused before the index loads; NaN gated
   almost every fragment and wrote NaN into `summary.json`. Its `configuration` block records the alphas, so a hard
   gate no longer writes `-Infinity`.
-- GTF: a last attribute without its `;` is read. An exon with no `transcript_id`, or on another chromosome or strand
-  than its transcript, follows `--gtf-parse-mode` (`strict` refuses the file, `warn-skip` drops the exon) instead of
-  failing outside it or merging silently.
+- GTF: a last attribute without its `;` is read. An exon with no `transcript_id`, on another chromosome, strand or gene
+  than its transcript, ending before it starts, or overlapping another exon of its transcript follows
+  `--gtf-parse-mode` (`strict` refuses the file, `warn-skip` drops the exon) instead of failing outside it or building
+  a wrong transcript; so does a transcript on a reference the FASTA lacks or past its end. Exons with no base between
+  them (RefSeq writes them at genome indels) are one exon, not a 0-bp intron, and Ensembl's `gene_biotype` is read as
+  the gene type.
 - The splice-junction strand tag: an unknown `--sj-strand-tag` is refused. The tag the scan read with (what `auto`
   resolved to) is logged and recorded in `summary.json` and `config.yaml`. A library whose spliced reads carry no tag
   warns that it is quantified as unstranded.

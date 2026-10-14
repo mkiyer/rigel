@@ -125,21 +125,6 @@ tests, and `twine check --strict` passes. Before tagging:
   and the platforms wheels exist for; `release.sh` prints literal `\033` escapes; and `post_release.sh` refuses a tree
   with untracked files (22 in the sandbox today).
 
-### the-gtf-parser-accepts-malformed-transcripts
-`priority: now — 0.8.0, approved with the issues survey (owner, 2026-10-14) · kind: defect · 2026-10-14`
-`--gtf-parse-mode strict` fails on malformed records (MANUAL), but a transcript's structure is never checked:
-- an exon with start > end parses, the index builds, and `rigel quant` dies in `sj_opportunity.py`;
-- duplicated or overlapping exons lengthen the transcript (600 → 900 bp, TPM 170,927 → 100,917) and write negative or
-  zero-length introns into `sj.feather`;
-- abutting exons, which RefSeq writes at genome indels, make a 0-bp intron: the transcript turns multi-exon and its
-  synthetic span takes half its reads (3,310 → 1,655, booked as nascent RNA);
-- two genes whose transcripts share a `transcript_id` on one reference and strand merge into one transcript behind a
-  9.7 kb fake intron (`read_gtf` keys on `t_id`, and the reference/strand check misses a second `gene_id`); the second
-  gene vanishes from both tables.
-Strict refuses start > end, overlaps and a second `gene_id`, warn-and-skip drops the offending exon, and abutting exons
-merge; the simulator already validates its own (`sim/annotation.py`'s `_validate_exons`). Smaller: Ensembl's
-`gene_biotype` is never read, so `gene_type` is empty for an Ensembl GTF. Tests first: one GTF per case.
-
 ### the-em-depends-on-its-thread-count
 `priority: now — 0.8.0: the docs now; the reduction prototyped and measured after the simple fixes, then the owner decides (2026-10-14) · kind: defect · 2026-10-14`
 A locus whose E-step work reaches `total_work / threads` runs through `parallel_estep`, which adds each thread's column

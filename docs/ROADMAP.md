@@ -121,8 +121,8 @@ its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-mult
 `ISSUES: the-gdna-prior-enters-psi-twice`). The release now follows the owner's sequence, in order:
 1. **Docs cleanup**: every permanent doc true of the tree. Done.
 2. **An independent code review.** Done; what it found is in ISSUES, release-relevant first: `ISSUES: the-release-builds`,
-   `ISSUES: the-gtf-parser-accepts-malformed-transcripts`, `ISSUES: the-em-depends-on-its-thread-count`; its smaller
-   items are in `ISSUES: latent-defects` and `ISSUES: hygiene-ledger`.
+   `ISSUES: the-em-depends-on-its-thread-count`; its smaller items are in `ISSUES: latent-defects` and
+   `ISSUES: hygiene-ledger`.
 3. **The full benchmark run**, the report card regenerated.
 4. **ISSUES cleanup and prioritization**: the OPEN section ordered by priority. Done.
 5. **The survey**: implement or defer, entry by entry. Done (owner, 2026-10-14): the release review's fixes are approved;

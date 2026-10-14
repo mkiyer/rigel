@@ -305,11 +305,36 @@ def _collapse_duplicate_transcripts(transcripts: list[Transcript]) -> list[Trans
     return [t for i, t in enumerate(transcripts) if i not in drop_idx]
 
 
+def _on_the_fasta(
+    transcripts: list[Transcript], ref_lengths: dict[str, int], gtf_parse_mode: str
+) -> list[Transcript]:
+    """The transcripts that lie on the FASTA. One on a reference it lacks, or past a reference's end, is refused by
+    name under strict parsing and dropped with a warning under warn-and-skip."""
+    off = [t for t in transcripts if t.ref not in ref_lengths or t.end > ref_lengths[t.ref]]
+    if not off:
+        return transcripts
+
+    def where(t):
+        if t.ref not in ref_lengths:
+            return f"{t.t_id} on {t.ref}, which the FASTA lacks"
+        return f"{t.t_id} ending at {t.ref}:{t.end:,}, past its end at {ref_lengths[t.ref]:,}"
+
+    names = "; ".join(where(t) for t in off[:3]) + (
+        f"; and {len(off) - 3:,} more" if len(off) > 3 else ""
+    )
+    if gtf_parse_mode == "strict":
+        raise ValueError(f"{len(off):,} transcript(s) lie off the FASTA: {names}")
+    logger.warning("Skipping %s transcript(s) that lie off the FASTA: %s", f"{len(off):,}", names)
+    dropped = {id(t) for t in off}
+    return [t for t in transcripts if id(t) not in dropped]
+
+
 def read_transcripts(
     gtf_file: str | Path,
     *,
     gtf_parse_mode: Literal["strict", "warn-skip"] = "strict",
     collapse_duplicate_transcripts: bool = False,
+    ref_lengths: dict[str, int] | None = None,
 ) -> list[Transcript]:
     """Parse a GTF file and return a sorted list of Transcript objects.
 
@@ -327,6 +352,9 @@ def read_transcripts(
         are collapsed to a single representative — the lexicographically-
         smallest transcript ID per group — via
         :func:`_collapse_duplicate_transcripts`.
+    ref_lengths : dict, optional
+        The FASTA's references and lengths. A transcript on a reference it lacks, or running past one's end, follows
+        ``gtf_parse_mode``: strict refuses it by name, warn-and-skip drops it with a warning.
 
     Raises
     ------
@@ -340,6 +368,8 @@ def read_transcripts(
         str(gtf_file),
         parse_mode=gtf_parse_mode,
     )
+    if ref_lengths is not None:
+        transcripts = _on_the_fasta(transcripts, ref_lengths, gtf_parse_mode)
 
     if collapse_duplicate_transcripts:
         transcripts = _collapse_duplicate_transcripts(transcripts)
@@ -1019,6 +1049,7 @@ class TranscriptIndex:
             gtf_file,
             gtf_parse_mode=gtf_parse_mode,
             collapse_duplicate_transcripts=collapse_duplicate_transcripts,
+            ref_lengths=ref_lengths,
         )
         if not transcripts:
             raise ValueError(f"GTF {gtf_file} yields no transcripts; an index needs at least one")

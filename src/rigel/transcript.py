@@ -22,6 +22,26 @@ def _malformed_exon(parse_mode: str, message: str) -> None:
     logging.warning("Skipping GTF %s", message)
 
 
+def _disjoint_exons(t: "Transcript", parse_mode: str) -> list[Interval]:
+    """A transcript's exons in order, disjoint. Exons with no base between them (RefSeq writes them at genome indels)
+    are one block and merge; an exon that overlaps or repeats the one before it is malformed, so strict refuses it and
+    warn-and-skip drops it."""
+    exons: list[Interval] = []
+    for e in sorted(t.exons):
+        if exons and e.start < exons[-1].end:
+            _malformed_exon(
+                parse_mode,
+                f"exon {t.ref}:{e.start + 1}-{e.end} of transcript {t.t_id} overlaps its exon "
+                f"{exons[-1].start + 1}-{exons[-1].end}",
+            )
+            continue
+        if exons and e.start == exons[-1].end:
+            exons[-1] = Interval(exons[-1].start, e.end)
+            continue
+        exons.append(e)
+    return exons
+
+
 def _first_attr(val):
     """Return the first element when attrs are lists; otherwise the value itself."""
     if isinstance(val, list):
@@ -92,7 +112,8 @@ class Transcript:
         t.t_id = _first_attr(attrs.get("transcript_id"))
         t.g_id = _first_attr(attrs.get("gene_id"))
         t.g_name = _first_attr(attrs.get("gene_name"))
-        t.g_type = _first_attr(attrs.get("gene_type"))
+        # GENCODE writes gene_type, Ensembl gene_biotype
+        t.g_type = _first_attr(attrs.get("gene_type")) or _first_attr(attrs.get("gene_biotype"))
         # gencode specific tags
         tags = getattr(feature, "tags", set()) or set()
         t.is_basic = "basic" in tags
@@ -172,6 +193,14 @@ class Transcript:
                         f"{where} is off transcript {t_id}'s {t.ref}({t.strand.to_str()})",
                     )
                     continue
+                # and its gene: two genes sharing a transcript ID would merge behind a fake intron
+                g_id = _first_attr(f.attrs.get("gene_id"))
+                if g_id != t.g_id:
+                    _malformed_exon(
+                        parse_mode,
+                        f"{where} is in gene {g_id}, but transcript {t_id} is in {t.g_id}",
+                    )
+                    continue
             t.exons.append(Interval(f.start, f.end))
             n_exon_features += 1
             if n_exon_features % CONSTANTS.resources.gtf_log_interval == 0:
@@ -180,7 +209,7 @@ class Transcript:
 
         logging.debug("[Transcript] Processing transcripts")
         for t in transcripts.values():
-            t.exons.sort()
+            t.exons = _disjoint_exons(t, parse_mode)
             t.compute_length()
             if len(t.exons) == 1:
                 t.is_nrna = True
