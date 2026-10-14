@@ -131,7 +131,7 @@ rigel index --fasta genome.fa --gtf annotation.gtf --alignable-zarr map.zarr -o 
 | `--fasta` | required | Genome FASTA (must have a `.fai` index) |
 | `--gtf` | required | Annotation GTF (GENCODE recommended; `exon` records required) |
 | `-o`, `--output-dir` | required | Output directory for index files |
-| `--alignable-zarr PATH` | — | Alignable Zarr store built for the same genome + aligner. Provides the splice-junction artifact blacklist (applied at BAM-scan time). Required unless `--no-mappability` is set. |
+| `--alignable-zarr PATH` | — | Alignable Zarr store built for the same genome + aligner. Provides the splice-junction artifact blacklist (applied at BAM-scan time). Required unless `--no-mappability` is set. Read before anything is written, so a store that cannot be read, or whose blacklist names none of the FASTA's references, refuses the build and leaves an existing index in place. |
 | `--no-mappability` | off | Explicitly opt out of the alignable store and its splice blacklist (synthetic genomes, stranded-only benchmarks). Mutually exclusive with `--alignable-zarr`. |
 | `--splice-blacklist-min-count N` | `2` | (Advanced) Minimum unique-fragment support per `(chrom, intron, read_length)` for a sj to enter the blacklist. Lower admits more singletons; higher keeps only the most reproducible artifacts. Ignored under `--no-mappability`. |
 | `--nrna-tolerance N` | `20` | Max distance (bp) for clustering transcript start/end sites into shared synthetic nRNA spans |

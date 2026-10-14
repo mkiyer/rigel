@@ -356,6 +356,35 @@ def test_a_dead_strand_channel_publishes_the_kappa_calibration_reads_and_no_clas
     assert block["junction_classes"] == {"by_junction": None, "by_fragment": None}
 
 
+def test_a_reused_output_directory_keeps_no_optional_file_this_run_did_not_write(tmp_path):
+    """The TSV mirrors and the locus statistics are written only on request. A rerun into the same directory without
+    them used to leave the earlier run's copies, so a quant.tsv could disagree with the quant.feather beside it."""
+    sc, result = _build_scenario(tmp_path / "work")
+    cfg = PipelineConfig(
+        em=EMConfig(seed=SEED, assignment_mode="fractional", n_threads=1),
+        scan=BamScanConfig(sj_strand_tag="auto"),
+        emit_locus_stats=True,
+    )
+    pr = run_pipeline(result.bam_path, result.index, config=cfg)
+    out = tmp_path / "out"
+    out.mkdir()
+
+    def write(tsv, locus_stats):
+        args = argparse.Namespace(
+            bam_file=str(result.bam_path),
+            index_dir=str(result.index_dir),
+            config=None,
+            tsv=tsv,
+            emit_locus_stats=locus_stats,
+        )
+        cli._write_quant_outputs(pr, result.index, out, args)
+
+    write(tsv=True, locus_stats=True)
+    assert (out / "quant.tsv").exists() and (out / "locus_stats.feather").exists()
+    write(tsv=False, locus_stats=False)
+    assert not sorted(out.glob("*.tsv")) and not (out / "locus_stats.feather").exists()
+
+
 def test_the_nascent_table_writes_exactly_the_columns_the_manual_lists(tmp_path):
     """``nrna_quant.feather`` is ``get_nrna_counts_df``: one row per nascent entity with a multi-exon child, and the
     MANUAL's table names exactly its columns, in the file's order, so the two cannot drift apart."""

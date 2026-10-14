@@ -125,20 +125,6 @@ tests, and `twine check --strict` passes. Before tagging:
   and the platforms wheels exist for; `release.sh` prints literal `\033` escapes; and `post_release.sh` refuses a tree
   with untracked files (22 in the sandbox today).
 
-### input-mistakes-pass-silently
-`priority: now — 0.8.0, approved with the issues survey (owner, 2026-10-14); the BAM refusals landed 2026-10-14 · kind: defect · 2026-10-14`
-What is left of the input mistakes that produced a full, wrong output set with exit 0 (the coordinate-sorted, the
-renamed and the truncated BAM are refused since 2026-10-14, `tests/test_bam_input_checks.py`):
-- **Paths checked after the work.** An unwritable `--annotated-bam` fails after the whole run (the tables are written
-  first now); a mistyped `--alignable-zarr` fails at the end of the build, after the old manifest is deleted, so
-  rebuilding over a working index leaves an unloadable one; a blacklist whose contigs miss the FASTA builds and reports
-  detection on with nothing to match. Validate before the first write.
-- **Refusals as tracebacks**: an index with no manifest, an unpaired record, a YAML list, and `rigel index` with a
-  transcript on a contig missing from the FASTA (even under warn-skip).
-- **A reused output directory** keeps the previous run's optional files (a `quant.tsv` beside a newer `quant.feather`).
-- **A BAM without `@HD SO`** that is in fact coordinate-sorted still passes: refusing it needs a count of hits whose
-  mate the flag says is mapped but the group lacks, and a threshold on that count is the owner's call.
-
 ### the-gtf-parser-accepts-malformed-transcripts
 `priority: now — 0.8.0, approved with the issues survey (owner, 2026-10-14) · kind: defect · 2026-10-14`
 `--gtf-parse-mode strict` fails on malformed records (MANUAL), but a transcript's structure is never checked:
@@ -183,6 +169,15 @@ blacklist whose manifest records no store is not applied, and a recorded store w
 detection off — while an index built with no store loads quietly. Left: the cluster's manifest. Its format 9 rebuild
 (`ISSUES: the-format-changes-to-batch-before-release`) must name the store, since `rigel index` refuses a build that
 names neither `--alignable-zarr` nor `--no-mappability`.
+
+### input-mistakes-pass-silently
+`priority: next — 0.8.1; the 0.8.0 refusals landed 2026-10-14 · kind: defect · 2026-10-14`
+What is left of the input mistakes that produced a full, wrong output set with exit 0, or a traceback (the
+coordinate-sorted, renamed and truncated BAM, the late paths, the refusals and the stale optional files landed
+2026-10-14, `tests/test_bam_input_checks.py`, `tests/test_cli.py`, `tests/test_splice_blacklist.py`):
+- **A BAM without `@HD SO`** that is in fact coordinate-sorted still passes: refusing it needs a count of hits whose
+  mate the flag says is mapped but the group lacks, and a threshold on that count is the owner's call.
+- **An unpaired record** stops the scan with the scanner's own RuntimeError, a clear message but a traceback.
 
 ### the-reader-reads-false-gdna-as-capture
 `priority: next — 0.8.1; documented in 0.8.0 as a known limitation, the ψ A/B having failed its bar (2026-10-14) · kind: defect · 2026-10-14`

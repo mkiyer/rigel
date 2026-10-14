@@ -121,7 +121,6 @@ its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-mult
 `ISSUES: the-gdna-prior-enters-psi-twice`). The release now follows the owner's sequence, in order:
 1. **Docs cleanup**: every permanent doc true of the tree. Done.
 2. **An independent code review.** Done; what it found is in ISSUES, release-relevant first: `ISSUES: the-release-builds`,
-   `ISSUES: input-mistakes-pass-silently`,
    `ISSUES: the-gtf-parser-accepts-malformed-transcripts`, `ISSUES: the-em-depends-on-its-thread-count`; its smaller
    items are in `ISSUES: latent-defects` and `ISSUES: hygiene-ledger`.
 3. **The full benchmark run**, the report card regenerated.
@@ -147,7 +146,8 @@ its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-mult
 `ISSUES: the-gdna-landscape-collapses-at-low-depth` with `ISSUES: strand-plug-in-bias-on-sparse-libraries` ·
 `ISSUES: the-sparse-capture-losses` with `ISSUES: the-efficiency-posterior-floor-on-empty-pieces` ·
 `ISSUES: sj-strand-tag-chosen-from-the-first-reads` · `ISSUES: an-anchor-only-landscape-reads-as-capture` ·
-`ISSUES: the-transfer-price-arithmetic` · `ISSUES: latent-defects` · `ISSUES: instrument-ledger`.
+`ISSUES: the-transfer-price-arithmetic` · `ISSUES: latent-defects` · `ISSUES: instrument-ledger` ·
+`ISSUES: input-mistakes-pass-silently`.
 
 **Later**, each with its entry: `ISSUES: the-edge-density-floor-under-capture` ·
 `ISSUES: capture-on-overcalls-gdna-at-low-gdna` · `ISSUES: nascent-stress-sensitivity` ·

@@ -133,6 +133,11 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
   blacklist file is missing, or a blacklist file with no store in the manifest. 0.7.1 reported a missing blacklist
   only through `summary.json`'s `sj_blacklist_loaded`.
 - The HTML report escapes sample names, paths, gene names and reference names before they become markup.
+- Refusals come before the work and as errors, not tracebacks: an `--annotated-bam` directory that cannot be written,
+  an index that cannot be loaded, a config file that is not a mapping, and, at index build, an alignable store that
+  cannot be read or whose blacklist names references the FASTA lacks. The store is read before the first write, so a
+  failed rebuild over a working index leaves it loadable. A rerun into an output directory removes the optional files
+  it does not write (the TSV mirrors, `locus_stats.feather`).
 - A BAM the scan would read wrong is refused before its records are trusted: one sorted by coordinate (each mate was
   read as its own fragment, about doubling every count), one whose references the index does not hold (every fragment
   was intergenic) or holds at another length, and one truncated or corrupt (a read error ended the scan like the end of

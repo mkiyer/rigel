@@ -120,6 +120,44 @@ def test_quant_refuses_an_alpha_outside_zero_to_one_before_loading_the_index(tmp
     )
 
 
+def _quant_with_empty_inputs(tmp_path, *extra):
+    bam = tmp_path / "in.bam"
+    bam.write_bytes(b"")
+    index = tmp_path / "index"
+    index.mkdir(exist_ok=True)
+    return build_parser().parse_args(
+        ["quant", "--bam", str(bam), "--index", str(index), "-o", str(tmp_path / "out"), *extra]
+    )
+
+
+def test_quant_refuses_an_annotated_bam_it_could_not_write_before_the_run(tmp_path):
+    """The annotated BAM is written by a second pass after the quantification; a directory that does not exist used to
+    fail only then."""
+    args = _quant_with_empty_inputs(
+        tmp_path, "--annotated-bam", str(tmp_path / "missing" / "annotated.bam")
+    )
+    with pytest.raises(SystemExit) as exited:
+        args.func(args)
+    message = str(exited.value.code)
+    assert message.startswith("Error: --annotated-bam") and "missing" in message
+
+
+def test_quant_reports_an_index_it_cannot_load_as_an_error(tmp_path):
+    args = _quant_with_empty_inputs(tmp_path)
+    with pytest.raises(SystemExit) as exited:
+        args.func(args)
+    assert str(exited.value.code).startswith("Error: Index at")
+
+
+def test_quant_refuses_a_config_that_is_not_a_mapping(tmp_path):
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text("- em_iterations\n- 500\n")
+    args = _parse_quant("--config", str(cfg))
+    with pytest.raises(SystemExit) as exited:
+        args.func(args)
+    assert str(exited.value.code).startswith("Error: ") and "mapping" in str(exited.value.code)
+
+
 def test_a_hard_scoring_gate_dumps_as_strict_json():
     """An alpha of 0 is the hard gate, whose log-penalty is −inf. The configuration summary.json records holds the
     alphas, which are finite, so the file stays JSON (``-Infinity`` is not)."""

@@ -318,3 +318,61 @@ def mini_index_inputs(tmp_path: Path):
             'chr1\tsrc\texon\t1\t1000\t.\t+\t.\tgene_id "G2"; transcript_id "T2";\n'
         )
     return fasta, gtf
+
+
+def test_a_store_that_cannot_be_read_refuses_the_build_and_keeps_the_index(
+    mini_index_inputs, tmp_path
+):
+    """The store is read before the first write. A mistyped path used to fail at the end of the build, after the old
+    manifest was deleted, so rebuilding over a working index left one that cannot be loaded."""
+    fasta, gtf = mini_index_inputs
+    out = tmp_path / "idx"
+    TranscriptIndex.build(fasta, gtf, out)
+    with pytest.raises(FileNotFoundError, match="no_such_store"):
+        TranscriptIndex.build(fasta, gtf, out, alignable_zarr_path=tmp_path / "no_such_store")
+    assert (out / MANIFEST_JSON).exists()
+    TranscriptIndex.load(out)
+
+
+def _stub_blacklist(monkeypatch, refs):
+    import rigel.splice_blacklist as sb
+
+    rows = pd.DataFrame(
+        {
+            "ref": refs,
+            "start": [300] * len(refs),
+            "end": [400] * len(refs),
+            "max_anchor_left": [5] * len(refs),
+            "max_anchor_right": [5] * len(refs),
+            "count": [3] * len(refs),
+        }
+    )
+    monkeypatch.setattr(sb, "load_splice_blacklist_from_zarr", lambda path, min_count=2: rows)
+
+
+def test_a_blacklist_whose_references_miss_the_fasta_refuses_the_build(
+    mini_index_inputs, tmp_path, monkeypatch
+):
+    """A blacklist names junctions by reference. One built for references the FASTA does not hold (``1`` against
+    ``chr1``) matches nothing, while the index reported splice-artifact detection on."""
+    fasta, gtf = mini_index_inputs
+    out = tmp_path / "idx"
+    TranscriptIndex.build(fasta, gtf, out)
+    store = tmp_path / "store"
+    store.mkdir()
+    _stub_blacklist(monkeypatch, ["1"])
+    with pytest.raises(ValueError, match="None of"):
+        TranscriptIndex.build(fasta, gtf, out, alignable_zarr_path=store)
+    assert (out / MANIFEST_JSON).exists()
+
+
+def test_a_blacklist_reference_beyond_the_fasta_is_named_in_a_warning(
+    mini_index_inputs, tmp_path, monkeypatch, caplog
+):
+    fasta, gtf = mini_index_inputs
+    store = tmp_path / "store"
+    store.mkdir()
+    _stub_blacklist(monkeypatch, ["chr1", "chrUn_decoy"])
+    with caplog.at_level(logging.WARNING):
+        TranscriptIndex.build(fasta, gtf, tmp_path / "idx", alignable_zarr_path=store)
+    assert any("chrUn_decoy" in r.getMessage() for r in caplog.records)

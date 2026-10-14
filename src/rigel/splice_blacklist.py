@@ -143,6 +143,8 @@ def load_splice_blacklist_from_zarr(
     """
     if min_count < 1:
         raise ValueError(f"min_count must be >= 1, got {min_count}")
+    if not Path(store_path).exists():
+        raise FileNotFoundError(f"No alignable store at {store_path}")
 
     try:
         import alignable

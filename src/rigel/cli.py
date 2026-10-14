@@ -13,6 +13,7 @@ Subcommands:
 
 import argparse
 import logging
+import os
 import sys
 import time
 from dataclasses import dataclass as _dataclass
@@ -50,18 +51,24 @@ def index_command(args: argparse.Namespace) -> int:
             "explicitly when running on synthetic genomes or stranded-only benchmarks)."
         )
 
-    TranscriptIndex.build(
-        fasta_file=fasta,
-        gtf_file=gtf,
-        output_dir=args.output_dir,
-        feather_compression=args.feather_compression,
-        write_tsv=not args.no_tsv,
-        gtf_parse_mode=args.gtf_parse_mode,
-        collapse_duplicate_transcripts=args.collapse_duplicate_transcripts,
-        nrna_tolerance=args.nrna_tolerance,
-        alignable_zarr_path=(Path(args.alignable_zarr) if args.alignable_zarr else None),
-        splice_blacklist_min_count=args.splice_blacklist_min_count,
-    )
+    try:
+        TranscriptIndex.build(
+            fasta_file=fasta,
+            gtf_file=gtf,
+            output_dir=args.output_dir,
+            feather_compression=args.feather_compression,
+            write_tsv=not args.no_tsv,
+            gtf_parse_mode=args.gtf_parse_mode,
+            collapse_duplicate_transcripts=args.collapse_duplicate_transcripts,
+            nrna_tolerance=args.nrna_tolerance,
+            alignable_zarr_path=(Path(args.alignable_zarr) if args.alignable_zarr else None),
+            splice_blacklist_min_count=args.splice_blacklist_min_count,
+        )
+    except (
+        ValueError,
+        OSError,
+    ) as exc:  # a malformed annotation, an unreadable store, references that disagree
+        sys.exit(f"Error: {exc}")
     return 0
 
 
@@ -110,10 +117,22 @@ def quant_command(args: argparse.Namespace) -> int:
         pipeline_config = _build_pipeline_config(args)
     except ValueError as exc:
         sys.exit(f"Error: {exc}")
+    annotated = pipeline_config.annotated_bam_path
+    if annotated is not None:
+        target_dir = Path(annotated).resolve().parent
+        if not target_dir.is_dir() or not os.access(target_dir, os.W_OK):
+            sys.exit(
+                f"Error: --annotated-bam {annotated}: {target_dir} is not a directory this run can write to"
+            )
 
     # -- Load reference index --
+    from .index import IndexLoadError
+
     logging.info(f"[START] Loading index from {index_dir}")
-    index = TranscriptIndex.load(index_dir)
+    try:
+        index = TranscriptIndex.load(index_dir)
+    except IndexLoadError as exc:
+        sys.exit(f"Error: {exc}")
     logging.info(
         f"[DONE] Loaded index: {index.num_transcripts} transcripts, "
         f"{index.num_annotated_genes} genes"
@@ -358,6 +377,19 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     calibration_track_path = output_dir / "calibration_track.feather"
     calibration_bedgraph_path = output_dir / "calibration_track.bedgraph"
     config_yaml_path = output_dir / "config.yaml"
+    locus_stats_path = output_dir / "locus_stats.feather"
+
+    # A reused output directory keeps no product this run does not write: a quant.tsv from an earlier --tsv run
+    # beside this run's quant.feather would disagree with it silently.
+    estimator = result.estimator
+    stale = []
+    if not getattr(args, "tsv", False):
+        tables = (quant_path, gene_quant_path, nrna_quant_path, loci_path, fragment_lengths_path)
+        stale += [path.with_suffix(".tsv") for path in tables]
+    if not (getattr(args, "emit_locus_stats", False) and estimator.locus_stats):
+        stale.append(locus_stats_path)
+    for path in stale:
+        path.unlink(missing_ok=True)
 
     # Log stats
     for key, val in sorted(result.stats.to_dict().items()):
@@ -365,7 +397,6 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             logging.info(f"  {key}: {val:,}")
 
     # Write quant tables (Feather v2 + ZSTD compression)
-    estimator = result.estimator
     quant_df = estimator.get_counts_df(index)
     gene_quant_df = estimator.get_gene_counts_df(index)
     nrna_quant_df = estimator.get_nrna_counts_df(index)
@@ -382,7 +413,6 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     if getattr(args, "emit_locus_stats", False) and estimator.locus_stats:
         import pandas as _pd
 
-        locus_stats_path = output_dir / "locus_stats.feather"
         locus_stats_df = _pd.DataFrame(estimator.locus_stats)
         locus_stats_df.to_feather(str(locus_stats_path), **feather_kw)
         logging.info(f"[DONE] Wrote {locus_stats_path} ({len(locus_stats_df)} loci)")
@@ -959,6 +989,10 @@ def _resolve_quant_args(
         with open(config_path) as fh:
             text = fh.read()
         raw = yaml.safe_load(text) or {}
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"{config_path} must hold a mapping of keys to values, not a {type(raw).__name__}"
+            )
         # Normalise: allow hyphens, convert to underscores
         raw_normalized = {k.replace("-", "_"): v for k, v in raw.items()}
         quant_block = raw_normalized.pop("quant", None)

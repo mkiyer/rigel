@@ -139,6 +139,38 @@ def source_record(path: str | Path) -> dict:
     }
 
 
+def _check_blacklist_references(bl_df: pd.DataFrame, ref_lengths: dict[str, int], store) -> None:
+    """A splice blacklist names its junctions by reference. One whose references the FASTA does not hold matches
+    nothing, while the index would report splice-artifact detection on, so it refuses the build; references beyond the
+    FASTA (decoys, alternates) are named in a warning."""
+    if bl_df.empty:
+        return
+    refs = list(dict.fromkeys(bl_df["ref"].astype(str)))
+    beyond = [r for r in refs if r not in ref_lengths]
+
+    def some(names):
+        return ", ".join(names[:3]) + (f" and {len(names) - 3:,} more" if len(names) > 3 else "")
+
+    if len(beyond) == len(refs):
+        raise ValueError(
+            f"None of the {len(refs):,} references in the splice blacklist of the alignable store {store} is in the "
+            f"FASTA ({some(refs)}, against {some(list(ref_lengths))}): the store was built for another genome or "
+            "names its references differently."
+        )
+    if beyond:
+        logger.warning(
+            "%s of the splice blacklist's %s references are not in the FASTA (%s); their junctions match nothing.",
+            f"{len(beyond):,}",
+            f"{len(refs):,}",
+            some(beyond),
+        )
+
+
+class IndexLoadError(RuntimeError):
+    """An index :meth:`TranscriptIndex.load` refuses: no manifest, another format version, or a missing file. The
+    message names the rebuild."""
+
+
 def load_manifest(index_dir: str | Path) -> dict | None:
     """Load ``manifest.json`` from an index directory; ``None`` when there is none, which
     :meth:`TranscriptIndex.load` refuses."""
@@ -969,6 +1001,18 @@ class TranscriptIndex:
         ref_lengths = load_reference_lengths(fasta_file)
         logger.info(f"[DONE] Read {len(ref_lengths)} references")
 
+        # -- Splice-junction artifact blacklist: read and checked before the first write, so a store that cannot be
+        #    read, or one built for other references, refuses the build and leaves the index it would replace intact
+        bl_df = None
+        if alignable_zarr_path is not None:
+            from .splice_blacklist import load_splice_blacklist_from_zarr
+
+            bl_df = load_splice_blacklist_from_zarr(
+                alignable_zarr_path,
+                min_count=splice_blacklist_min_count,
+            )
+            _check_blacklist_references(bl_df, ref_lengths, alignable_zarr_path)
+
         # -- Transcripts ------------------------------------------------------
         logger.info(f"[START] Reading transcripts from {gtf_file}")
         transcripts = read_transcripts(
@@ -1075,13 +1119,7 @@ class TranscriptIndex:
         # Removed first, so a rebuild without a store leaves none behind from an earlier build.
         (output_dir / SJ_BLACKLIST_FEATHER).unlink(missing_ok=True)
         (output_dir / SJ_BLACKLIST_TSV).unlink(missing_ok=True)
-        if alignable_zarr_path is not None:
-            from .splice_blacklist import load_splice_blacklist_from_zarr
-
-            bl_df = load_splice_blacklist_from_zarr(
-                alignable_zarr_path,
-                min_count=splice_blacklist_min_count,
-            )
+        if bl_df is not None:
             bl_df.to_feather(output_dir / SJ_BLACKLIST_FEATHER, **feather_kwargs)
             if write_tsv:
                 bl_df.to_csv(output_dir / SJ_BLACKLIST_TSV, sep="\t", index=False)
@@ -1177,7 +1215,7 @@ class TranscriptIndex:
         # -- manifest (version gate) ------------------------------------------
         manifest = load_manifest(index_dir)
         if manifest is None:
-            raise RuntimeError(
+            raise IndexLoadError(
                 f"Index at {index_dir} has no manifest.json. "
                 f"Rebuild the index (rigel index --fasta ... --gtf ...). "
                 f"Older indexes are not supported."
@@ -1186,7 +1224,7 @@ class TranscriptIndex:
         if on_disk_version != INDEX_FORMAT_VERSION:
             built_by = manifest.get("rigel_version")
             built_str = f" (built by rigel {built_by})" if built_by else ""
-            raise RuntimeError(
+            raise IndexLoadError(
                 f"Index at {index_dir} has format_version={on_disk_version}"
                 f"{built_str}, but this rigel build (v{_rigel_version()}) "
                 f"requires {INDEX_FORMAT_VERSION}. "
@@ -1196,7 +1234,7 @@ class TranscriptIndex:
         # -- reference lengths -------------------------------------------------
         ref_lengths_path = os.path.join(index_dir, REF_LENGTHS_FEATHER)
         if not os.path.exists(ref_lengths_path):
-            raise RuntimeError(
+            raise IndexLoadError(
                 f"Index at {index_dir} is missing {REF_LENGTHS_FEATHER}. Rebuild the index."
             )
         self.ref_lengths = load_ref_lengths(ref_lengths_path)
