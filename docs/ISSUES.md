@@ -352,7 +352,7 @@ The reorder gate's fixture simulates no gDNA (`build_oracle`'s fixed-total branc
 reproducibility gate never exercises a gDNA path.
 
 ### an-anchor-only-landscape-reads-as-capture
-`priority: next — the 2026-10-14 release review; a small EM cost, a misleading summary · kind: defect · 2026-10-14`
+`priority: next — 0.8.1; the MANUAL states it for 0.8.0 (2026-10-14) · kind: defect · 2026-10-14`
 With no gDNA evidence the landscape trains on its zero-count anchors alone. Unsmoothed, that density has one maximum,
 but `_render`'s column-normalised Gaussian makes ripples at both grid edges and `census` reads the top one as an
 enriched basin: an empty or one-fragment BAM reports `gdna_capture_saturation` 9.65 beside `gdna_density_global` 0 and
@@ -837,7 +837,7 @@ REFUSED as targets: the scan (at its floor for eight threads) and the index load
 Instrument: `profiling/profiler.py`, `profiling/sweep_replay.py`.
 
 ### hygiene-ledger
-`priority: later — the 0.8.0 release docs were made true on 2026-10-14; (g)'s four 0.8.0 doc items go with the release fixes, the rest later · kind: hygiene · 2026-08-31; the review of 2026-09-22`
+`priority: later — the 0.8.0 release docs were made true on 2026-10-14; the rest later · kind: hygiene · 2026-08-31; the review of 2026-09-22`
 What the reviews left, each its own commit; content-only changes keep the collected count unchanged.
 (a) ROTTEN BUT LIVE, moving an instrument's numbers when repaired: `quant_accuracy`'s oracle arms are undrained
 (documented there).
@@ -943,11 +943,6 @@ simulator's sharded writers and its whole-genome grid, and the zarr splice black
   accepts `index:`, which the CLI now rejects; TESTING has no section for the VCaP read-name truth mix (A00839 exome
   DNA, HWI-D00127 transcriptome; its halves differ in fragment length, 307 / 244 bp, the confound the ladder forbids;
   read-name truth labels the RNA library's own gDNA as RNA; calibration can be scored only as slot-mass overlap).
-- 0.8.0, from the 2026-10-14 release review: the MANUAL lists `nrna_quant`'s last columns as `n_mrna, mrna_count,
-  count` where the file writes `count, n_mrna, mrna_count` (the gate compares sets, not order); `--calib-refit-iters 0`
-  also turns off the capture correction (no landscape, so every efficiency is 1), which neither the MANUAL's two
-  mentions nor the CLI help say; `pipeline.py` says calibration raises when no spliced fragment is observed, where it
-  reads κ = ½; the MANUAL says only the `gdna` length histogram is fractional, where the `rna` one is too.
 (h) SIMPLIFICATIONS, each proven a numeric no-op:
 - `solve_one_block` and `transfer_prepare` each wire the chain, so the gates exercise the copy: one shared builder.
 - Scoring is written twice, for multimappers and singles; unifying it also removes the p = ½ antisense disagreement
@@ -1326,7 +1321,7 @@ does not repair it (40.56 / 33.62). Admission, weighting and kernel construction
 Instrument: `.cache/rigel_runs/2026-10-07_full_panel_counts/` (`screen.py`, `diagnose.py`, `diagnosis.json`).
 
 ### a-pure-gdna-library-reads-as-nascent-rna
-`priority: parked — Tier 5, the deferred stratum; kept as an open challenge (owner, 2026-09-28) · kind: defect · 2026-09-28`
+`priority: parked — Tier 5, the deferred stratum; kept as an open challenge (owner, 2026-09-28); the MANUAL states the limit (2026-10-14) · kind: defect · 2026-09-28`
 Rigel reads a library of pure genomic DNA as 93 % RNA. The case is the exome-DNA half of the VCaP mix, 4,671,916
 fragments, separated by read name. It is unstranded (strand specificity 0.5008) and capture-enriched (calibration's
 gDNA reference density is 180× its genome-wide density).

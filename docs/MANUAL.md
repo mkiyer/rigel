@@ -204,7 +204,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--em-convergence-delta D` | `1e-6` | Convergence threshold for EM parameter updates |
-| `--calib-refit-iters N` | `3` | Number of times calibration re-solves after refitting its population gDNA prior. `0` gives the prior-free first solve only. |
+| `--calib-refit-iters N` | `3` | Number of times calibration re-solves after refitting its population gDNA prior. `0` gives the prior-free first solve only, and with it no capture correction: no gDNA landscape is fitted, so every capture efficiency is 1. |
 | `--sweep-block-slots N` | `1000` | Calibration's working set: the chain is solved one locus block at a time, the pieces between intergenic regions merged up to this many slots per block. Performance only — the answer is the same for every value; smaller blocks use less memory per sweep. |
 | `--overhang-alpha A` | `0.1` | Per-base overhang penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
 | `--mismatch-alpha A` | `0.1` | Per-mismatch (`NM` tag) penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
@@ -450,9 +450,9 @@ child. Standalone single-exon genes with no multi-exon overlap appear in
 | `locus_id` | Locus containing this entity |
 | `is_synthetic` | True if synthesized by rigel |
 | `n_contributing_transcripts` | Number of multi-exon transcripts merged into this span |
+| `count` | Entity's own fragment count |
 | `n_mrna` | Number of multi-exon mRNA transcripts associated with the entity |
 | `mrna_count` | Sum of mRNA children's fragment counts |
-| `count` | Entity's own fragment count |
 | `tpm` | Total-RNA TPM; comparable to `tpm_total_rna` in `quant.feather` |
 
 The entity's coordinates are its row in the index's `transcripts` table (synthetic entities are
@@ -501,7 +501,7 @@ first non-empty bin to the last. This is the plotting substrate for the fragment
 |--------|-------------|
 | `category` | FL model: `global`, `gdna`, `rna`, or one of the five observed pools (`pool_dna_intergenic`, `pool_dna_intronic`, `pool_dna_intron_exon`, `pool_dna_intergenic_exon`, `pool_rna_spliced`) |
 | `length` | Fragment length (bp) |
-| `count` | Fragment weight in this bin (fractional for the `gdna` structural pool) |
+| `count` | Fragment weight in this bin: whole fragments for `global` and the observed pools, fractional for the fitted `gdna` and `rna` models |
 
 Per category, `count` sums to the matching `summary.json` →
 `fragment_length.<category>.n_observations`. The `gdna` / `rna` categories are
@@ -562,7 +562,13 @@ the few regions where calibration calls gDNA read as enormous capture against it
 library with no capture panel reads `gdna_capture_saturation` of about 2 × 10⁷ and some thousands of
 regions above e× the bulk, and the `em_effective_length` of the transcripts on those regions is inflated
 by up to that factor. A saturation far above 1 on a library that was not captured is this limitation, not
-capture.
+capture. With no gDNA evidence at all (an empty or nearly empty library) the landscape's smoothing alone can read
+a saturation near 10 and lengthen every `em_effective_length` by a few percent.
+
+**Known limitation: an unstranded capture library.** Without a strand channel, gDNA on the captured exons is told
+from RNA only through the neighbouring regions and the fragment counts, and some of it is read as RNA, most of
+it as nascent RNA, so the gDNA fraction is underestimated. Stranded capture libraries, and unstranded libraries
+without capture, do not share this.
 
 The RNA and gDNA fragment-length models used by scoring/calibration are
 reported under the top-level **`fragment_length`** key (as
@@ -673,7 +679,8 @@ disagrees with calibration generally wins.
 Advanced; the default suits standard libraries.
 
 - `--calib-refit-iters N` (default `3`) — how many times calibration re-fits its population
-  gDNA-density prior on the current solve and re-solves. `0` gives the prior-free first solve.
+  gDNA-density prior on the current solve and re-solves. `0` gives the prior-free first solve, which fits no
+  gDNA landscape and so applies no capture correction (every capture efficiency is 1).
 
 The remaining `CalibrationConfig` fields (for example `sweep_logodds_step`, the log-odds
 lattice's step, which is dimensionless and guarantees every slot's composition to within 1.25 % of its

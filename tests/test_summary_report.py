@@ -357,7 +357,7 @@ def test_a_dead_strand_channel_publishes_the_kappa_calibration_reads_and_no_clas
 
 def test_the_nascent_table_writes_exactly_the_columns_the_manual_lists(tmp_path):
     """``nrna_quant.feather`` is ``get_nrna_counts_df``: one row per nascent entity with a multi-exon child, and the
-    MANUAL's table names exactly its columns, so the two cannot drift apart."""
+    MANUAL's table names exactly its columns, in the file's order, so the two cannot drift apart."""
     sc, result = _build_scenario(tmp_path / "work")
     cfg = PipelineConfig(
         em=EMConfig(seed=SEED, assignment_mode="fractional", n_threads=1),
@@ -370,6 +370,6 @@ def test_the_nascent_table_writes_exactly_the_columns_the_manual_lists(tmp_path)
     section = re.search(r"### nrna_quant\.feather / nrna_quant\.tsv\n(.*?)\n### ", manual, re.S)
     assert section, "docs/MANUAL.md has no nrna_quant section"
     rows = re.findall(r"^\| (`[^|]*`) \|", section.group(1), re.M)
-    listed = {name for cell in rows for name in re.findall(r"`(\w+)`", cell)}
-    assert listed == set(nascent.columns)
+    listed = [name for cell in rows for name in re.findall(r"`(\w+)`", cell)]
+    assert listed == list(nascent.columns), "the MANUAL lists the columns in the file's order"
     sc.cleanup()

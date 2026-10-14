@@ -159,7 +159,8 @@ def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
 def _warn_if_calibration_strand_unidentifiable(strand_models: StrandModels) -> None:
     """Warn when calibration's strand decision (`region_init.strand_discriminability`, on the spliced
     sense fraction `strand_balance.fit_strand_balance` fits) reads the library as unstranded. With no
-    spliced observation calibration raises instead."""
+    spliced observation it says nothing: the balance falls back to κ = ½ and calibration reads the library as
+    unstranded, and the empty spliced census is warned about where it is counted."""
     from .calibration.region_init import strand_discriminability
     from .calibration.strand_balance import fit_strand_balance
 

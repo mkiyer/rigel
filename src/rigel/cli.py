@@ -1341,7 +1341,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Calibration prior-bootstrap iterations (default {qd['calib_refit_iters']}). Each one re-fits the population gDNA "
         "landscape on the current solve, resets the belief, and re-solves. The bootstrap converges "
         "geometrically and iteration 3 captures ~96%% of the available gain; cost is linear (one extra "
-        "full sweep each). 0 = the prior-free pass-0 alone. Advanced calibration knob.",
+        "full sweep each). 0 = the prior-free pass-0 alone, which fits no gDNA landscape and so applies no "
+        "capture correction. Advanced calibration knob.",
     )
     adv.add_argument(
         "--sweep-block-slots",
