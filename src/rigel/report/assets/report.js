@@ -394,7 +394,12 @@
   function captureNote() {
     const n = $("capture-note"); if (!n) return;
     const c = M.calibration && M.calibration.capture;
-    if (!c) { n.innerHTML = "This summary carries no calibration, so there is no capture answer."; return; }
+    if (!c) {
+      n.innerHTML = M.calibration.calibrated
+        ? "This summary predates calibration's capture answer: rerun <span class=\"num\">rigel quant</span> to read it."
+        : "This summary carries no calibration, so there is no capture answer.";
+      return;
+    }
     if (c.bulk_density == null) {
       n.innerHTML = `<b>No gDNA landscape was fitted</b>, so every capture efficiency is 1 and every ` +
         `<span class="num">em_effective_length</span> equals <span class="num">effective_length</span>.`;

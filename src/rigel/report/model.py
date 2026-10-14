@@ -414,6 +414,8 @@ def _calibration(sub: ReportSubstrate) -> dict:
         "enrichment_kpis": enrichment_kpis,
         "density_kpis": density_kpis,
         "capture": capture,
+        # a summary from before calibration's capture answer (0.7.1, schema 2) has a block but no answer
+        "calibrated": bool(sub.summary.get("calibration")),
         "ref_table": ref_table,
     }
 

@@ -374,6 +374,20 @@ def test_the_capture_note_never_says_a_mode_was_located(tmp_path):
     assert "bulk" in note
 
 
+def test_the_capture_note_tells_an_older_summary_from_one_with_no_calibration(tmp_path):
+    """A 0.7.1 or schema-2 summary has a calibration block but not calibration's capture answer: the note says
+    the summary predates that answer, not that the run carries no calibration."""
+    older = build_view_model(
+        load_substrate(_with_calibration(_write_substrate(tmp_path / "older")))
+    )
+    assert older["calibration"]["capture"] is None
+    assert older["calibration"]["calibrated"] is True
+    bare = build_view_model(load_substrate(_write_substrate(tmp_path / "bare")))
+    assert bare["calibration"]["calibrated"] is False
+    note = _js_function("captureNote")
+    assert "M.calibration.calibrated" in note and "predates" in note
+
+
 def test_the_capture_note_reads_only_keys_the_view_model_writes(tmp_path):
     """A key the front end reads but the model never writes renders as ``NaN`` or ``undefined``, and
     nothing fails, so every key the note reads off the capture answer must be one the model writes."""

@@ -154,7 +154,8 @@ renamed (`ISSUES: the-total-density-landscape`).
 - DONE 2026-10-13 with the mode-free reader: the depleted gDNA density is the bulk the reader reads against, and
   `summary.json` publishes it beside the fully captured level (`gdna_bulk_density`, `gdna_capture_saturation`), so the
   report's on-target / off-target fold is the saturation level;
-- the report's capture note, which says "no calibration" for a 0.7.1 or schema-2 summary that has a calibration block;
+- DONE 2026-10-14: the report's capture note said "no calibration" for a 0.7.1 or schema-2 summary that has a
+  calibration block; it now says the summary predates calibration's capture answer (`tests/test_report.py`);
 - DONE 2026-10-14 (b8527b30): the resolved junction-strand tag, in `configuration.scan.sj_strand_tag`
   (`ISSUES: sj-strand-tag-chosen-from-the-first-reads`);
 - DONE 2026-10-14: the annotated BAM labels a spliced intergenic fragment ZF 0x21 (resolved, intergenic, no gDNA bit),
