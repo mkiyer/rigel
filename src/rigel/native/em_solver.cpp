@@ -2462,25 +2462,20 @@ batch_locus_em_partitioned(
             }
         }
 
-        // ---- Phase 2: work-steal normal loci ----
+        // ---- Phase 2: work-steal normal loci, one at a time ----
+        // The order is heaviest first, so a worker that took several loci at once would take the heaviest
+        // together and run them back to back while the others idle. Which worker runs a locus changes no
+        // number: each locus draws from its own stream and the totals are summed in locus order.
         int n_phase2 = n_loci - mega_end;
         if (n_phase2 > 0) {
-            constexpr int CHUNK_SIZE = 16;
             std::atomic<int> next_idx{0};
 
             auto worker_fn = [&]() {
                 LocusSubProblem sub;
                 std::vector<int32_t> local_map_vec(local_map_size, -1);
 
-                for (;;) {
-                    int chunk_start = next_idx.fetch_add(CHUNK_SIZE,
-                        std::memory_order_relaxed);
-                    if (chunk_start >= n_phase2) break;
-                    int chunk_end = std::min(chunk_start + CHUNK_SIZE, n_phase2);
-                    for (int idx = chunk_start; idx < chunk_end; ++idx) {
-                        int li = locus_order[mega_end + idx];
-                        process_locus(li, 1, sub, local_map_vec, false);
-                    }
+                for (int idx; (idx = next_idx.fetch_add(1, std::memory_order_relaxed)) < n_phase2;) {
+                    process_locus(locus_order[mega_end + idx], 1, sub, local_map_vec, false);
                 }
             };
 
