@@ -127,10 +127,10 @@ priority. The local track takes one A/B window per mechanism, and a numeric no-o
 2. MEASURED 2026-10-14, kept as shipped: **the multimapper prior share** — its A/B on the VCaP mix's truth and the
    aligned multimapper scenarios moved no number materially; its repair is the share's frame, in 0.8.1
    (`ISSUES: the-em-prior-share-excludes-drawn-multimappers`).
-3. **The format batch**, one window: `summary.json`, with the strand diagnostics of
+3. DONE 2026-10-14: **the format batch**, one window: `summary.json`, with the strand diagnostics of
    `ISSUES: strand-overdispersion-one-shared-value`, and index format 9
    (`ISSUES: the-format-changes-to-batch-before-release`), with the docs and column gate of
-   `ISSUES: overlapping-synthetic-shadows`.
+   `ISSUES: overlapping-synthetic-shadows`. The benchmark indexes are rebuilt at format 9.
 4. DONE 2026-10-14: **the two numeric no-ops** of `ISSUES: performance-memory-bounded-solve`.
 5. **The false capture on uncaptured libraries**: one pinned A/B of the ported ψ double-prior fix decides it
    (`ISSUES: the-reader-reads-false-gdna-as-capture`, `ISSUES: the-gdna-prior-enters-psi-twice`); if it fails, the

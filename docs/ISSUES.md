@@ -139,38 +139,8 @@ detection off — while an index built with no store loads quietly. Left: the cl
 (`ISSUES: the-format-changes-to-batch-before-release`) must name the store, since `rigel index` refuses a build that
 names neither `--alignable-zarr` nor `--no-mappability`.
 
-### the-format-changes-to-batch-before-release
-`priority: now — 0.8.0, in one window: summary.json and index format 9 (owner, 2026-09-28 and 2026-10-14) · kind: decision · 2026-09-28`
-Changes to an output or on-disk format, batched so each format changes once. RULED (owner, 2026-09-28): the whole
-batch, before 0.8.0; AMENDED the same day: the two density feathers are removed with the total-density landscape, not
-renamed (`ISSUES: the-total-density-landscape`).
-(a) `summary.json` (schema 3, unreleased):
-- DONE 2026-10-14: one od field instead of two, labelled binomial by policy (od = 0 since 2026-10-01), beside the
-  pooled and genuine κ, the class shares and strand-live (`ISSUES: strand-overdispersion-one-shared-value`, the
-  diagnostics step);
-- DONE 2026-10-14: `gdna_fraction` without the spliced intergenic fragments, which are certified RNA (Axiom 0) — the
-  summary's own pool, `intergenic_spliced`, beside `intergenic_total`; the report's intergenic pool split into RNA and
-  gDNA; `quant_accuracy.py`'s library split the same (`tests/test_summary_report.py`, `tests/test_report.py`,
-  `tests/calibration/test_quant_accuracy.py`);
-- DONE 2026-10-13 with the mode-free reader: the depleted gDNA density is the bulk the reader reads against, and
-  `summary.json` publishes it beside the fully captured level (`gdna_bulk_density`, `gdna_capture_saturation`), so the
-  report's on-target / off-target fold is the saturation level;
-- DONE 2026-10-14: the report's capture note said "no calibration" for a 0.7.1 or schema-2 summary that has a
-  calibration block; it now says the summary predates calibration's capture answer (`tests/test_report.py`);
-- DONE 2026-10-14 (b8527b30): the resolved junction-strand tag, in `configuration.scan.sj_strand_tag`
-  (`ISSUES: sj-strand-tag-chosen-from-the-first-reads`);
-- DONE 2026-10-14: the annotated BAM labels a spliced intergenic fragment ZF 0x21 (resolved, intergenic, no gDNA bit),
-  by the scanner's own test, and an unspliced one 0x25 (`tests/test_annotate.py`).
-(b) DONE 2026-10-14, index format 9 (`tests/test_index_integrity.py`, `tests/test_splice_blacklist.py`): the
-written-never-read columns are gone (`transcripts.feather`'s `abundance`, `nrna_abundance` and `n_exons`; `sj.feather`'s
-`interval_type`); `transcript_aliases.feather` maps each collapsed `dropped_t_id → kept_t_id`; `nrna_n_contributors`
-sums over every span a nascent entity covers; the splice blacklist keeps its count. Bit-identical:
-`rename_identity.py` on the ladder's `g05 ss.99 OFF` with the rebuilt index against the format-8 reference. The
-benchmark indexes are rebuilt (the format-8 copies kept beside them as `*_format8`); the cluster's index is rebuilt
-once, at its working-index build. `ISSUES: overlapping-synthetic-shadows`' index merge is a separate decision.
-
 ### overlapping-synthetic-shadows
-`priority: now — 0.8.0: the docs, a column gate and the documented limit; the index merge after 0.8.0 (owner, 2026-10-14) · kind: design · 2026-09-20`
+`priority: later — the index merge, after 0.8.0 (owner, 2026-10-14); its 0.8.0 docs, column gate and documented limit landed 2026-10-14 · kind: design · 2026-09-20`
 `create_nrna_transcripts` clusters TSS/TES within a tolerance per strand and manufactures one synthetic
 nascent entity per merged span, so a gene with several isoform clusters carries several near-coincident
 shadows: 6,366 of the ladder index's 6,919 overlap a same-strand twin, 5,879 at ≥ 90 %, degrees up to 240.
@@ -189,10 +159,11 @@ synthetic spans overlap a same-strand twin (max degree 240, 1,264 same-strand fa
 while a sibling twin holds the family's mass. The MANUAL lists seven `nrna_quant` columns the code never writes and omits
 `em_effective_length`, and no test calls `get_nrna_counts_df`. 0.8.0 (owner): the docs, a column gate and the documented
 limit (per-span nascent counts are not identifiable among overlapping spans); the index merge after 0.8.0 — it changes
-the EM's component set and orphans the panels' nascent truth ids.
+the EM's component set and orphans the panels' nascent truth ids. LANDED 2026-10-14 (`tests/test_summary_report.py`): the
+MANUAL lists exactly the ten columns `get_nrna_counts_df` writes, gated against a run, and states the limit.
 
 ### performance-memory-bounded-solve
-`priority: now — 0.8.0: the two numeric no-ops; the rest later, re-timed before it is ranked · kind: build · 2026-08-17`
+`priority: later — re-timed before it is ranked; the two 0.8.0 numeric no-ops landed 2026-10-14 · kind: build · 2026-08-17`
 A deep run must be fast enough to iterate on, and memory-bounded. The port (the sweep as one native call) and the
 work outside calibration are done (`DESIGN.md` §6b.15). THE BASELINE (VCaP, 18,568,456 fragments, `--threads 8`,
 interleaved pairs, 2026-09-19): 125 s — calibrate 39.5 (four sweeps 24.0, landscape fits 4.1, its Python 10.3),
@@ -3093,3 +3064,17 @@ budget can stop the drift on the way (513 / 39 at gDNA 20, a vertex 552 / 0 conv
 and the shape with the EM run to convergence (`assert_identical_paralogs`, `CONVERGED_EM`). The named residual of the literal rule stands as
 the owner accepted it: a silent processed pseudogene without a unique fragment never receives a multimapper
 beside an expressed parent, and the mixed class is to be measured before any uniform component is considered.
+
+
+### the-format-changes-to-batch-before-release
+CLOSED 2026-10-14 by landing, in one window, so each format changed once before 0.8.0 (owner, 2026-09-28; the two
+density feathers left with the total-density landscape, `ISSUES: the-total-density-landscape`):
+- `summary.json` (schema 3, unreleased): the junction fit behind κ and one strand overdispersion, binomial (4fab0926);
+  `gdna_fraction` without the spliced intergenic fragments, which are their own pool, `intergenic_spliced`, in the
+  summary, the report and `quant_accuracy.py` (df437334); the capture note for older summaries (fdeee235); the resolved
+  junction-strand tag (b8527b30); the bulk density and saturation (2026-10-13).
+- The annotated BAM: a spliced intergenic fragment is ZF 0x21, an unspliced one 0x25 (df437334).
+- Index format 9 (64f20594): the never-read columns dropped, `transcript_aliases.feather`, the blacklist's count, and
+  `nrna_n_contributors` summed over every span. The benchmark indexes are rebuilt, their format-8 copies kept as
+  `*_format8`; `rename_identity.py` is BIT-IDENTICAL on the ladder's `g05 ss.99 OFF` and on the VCaP mix. The cluster's
+  index is rebuilt once, at its working-index build (`ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`).

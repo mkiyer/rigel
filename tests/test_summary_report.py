@@ -328,3 +328,23 @@ def test_the_strand_block_carries_the_junction_diagnostics_and_one_overdispersio
     assert not {"gdna_strand_overdispersion", "rna_strand_overdispersion"} & set(
         summary["calibration"]
     )
+
+
+def test_the_nascent_table_writes_exactly_the_columns_the_manual_lists(tmp_path):
+    """``nrna_quant.feather`` is ``get_nrna_counts_df``: one row per nascent entity with a multi-exon child, and the
+    MANUAL's table names exactly its columns, so the two cannot drift apart."""
+    sc, result = _build_scenario(tmp_path / "work")
+    cfg = PipelineConfig(
+        em=EMConfig(seed=SEED, assignment_mode="fractional", n_threads=1),
+        scan=BamScanConfig(sj_strand_tag="auto"),
+    )
+    pr = run_pipeline(result.bam_path, result.index, config=cfg)
+    nascent = pr.estimator.get_nrna_counts_df(result.index)
+    assert len(nascent) > 0 and (nascent["n_mrna"] >= 1).all()
+    manual = (Path(__file__).resolve().parents[1] / "docs" / "MANUAL.md").read_text()
+    section = re.search(r"### nrna_quant\.feather / nrna_quant\.tsv\n(.*?)\n### ", manual, re.S)
+    assert section, "docs/MANUAL.md has no nrna_quant section"
+    rows = re.findall(r"^\| (`[^|]*`) \|", section.group(1), re.M)
+    listed = {name for cell in rows for name in re.findall(r"`(\w+)`", cell)}
+    assert listed == set(nascent.columns)
+    sc.cleanup()

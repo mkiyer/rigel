@@ -442,11 +442,8 @@ child. Standalone single-exon genes with no multi-exon overlap appear in
 | Column | Description |
 |--------|-------------|
 | `nrna_id` | nRNA entity transcript ID |
-| `gene_id` | Overlapping gene ID |
-| `gene_name` | Gene name |
-| `ref`, `strand`, `start`, `end` | Entity genomic coordinates |
-| `length` | Entity length (bp) |
-| `effective_length` | Effective length after fragment-length correction |
+| `effective_length` | Effective length after fragment-length correction (the length TPM divides by) |
+| `em_effective_length` | The effective length the EM reads (capture-aware) |
 | `locus_id` | Locus containing this entity |
 | `is_synthetic` | `1` if synthesized by rigel |
 | `n_contributing_transcripts` | Number of multi-exon transcripts merged into this span |
@@ -454,6 +451,16 @@ child. Standalone single-exon genes with no multi-exon overlap appear in
 | `mrna_count` | Sum of mRNA children's fragment counts |
 | `count` | Entity's own fragment count |
 | `tpm` | Total-RNA TPM; comparable to `tpm_total_rna` in `quant.feather` |
+
+The entity's coordinates are its row in the index's `transcripts` table (synthetic entities are
+gene-neutral, so they carry no gene).
+
+**Overlapping spans.** rigel makes one nascent entity per merged span — transcript start and end
+sites clustered within `--nrna-tolerance` — so a gene with several isoform clusters carries several
+overlapping same-strand spans. The EM cannot tell overlapping spans apart, so how their nascent mass
+splits among them is arbitrary: read nascent RNA per gene, or per family of overlapping spans, never
+per span. `quant.feather`'s `nrna_id` and `nrna_parent_count` point each transcript at its own span,
+so a transcript's parent count can read near 0 while an overlapping span holds the family's mass.
 
 ### loci.feather / loci.tsv
 
