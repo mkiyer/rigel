@@ -69,8 +69,9 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
   genuine ones, each class's share (genuine, splice artifact, reversed) of the junctions and of their fragments where
   the strand channel is live, `strand_live`, and one `strand_overdispersion` (0, binomial), which replaces the calibration block's two.
 - Quantification is reproducible from one seeded stream, which the second pass draws from; output is
-  bit-identical run to run with `--threads 1` (with more scan threads the order of floating-point sums can move
-  a few fragments between isoforms). The index loader refuses an index it did not build (no manifest, or
+  bit-identical run to run with `--threads 1`. With more threads the scan's batch order, which varies run to run,
+  and the locus EM's split of its largest loci, which follows the thread count (by default the machine's core
+  count), change the order of floating-point sums, which can move fragments between isoforms that share them. The index loader refuses an index it did not build (no manifest, or
   another format version).
 - `--assignment-mode sample` (the default) makes whole counts first: each fragment goes to exactly one
   transcript or to gDNA, and the counts equal the fractional counts rounded, whatever the seed.
@@ -85,7 +86,7 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
   hypothesis set no longer dereferences a null pointer in the accumulator.
 - The locus EM hands loci to its threads one at a time, so long loci no longer queue behind one another
   on a single thread. A benchmark library dominated by a few long loci runs in 69 s instead of 156 s;
-  the output is unchanged.
+  the output is unchanged at any given thread count.
 
 ### Removed
 

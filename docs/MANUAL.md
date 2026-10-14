@@ -811,9 +811,11 @@ rigel export results/ --format tsv            # or convert existing Feather outp
 ```
 
 The assignment's draw is seeded with a fixed default (`--seed` picks another draw), and `--threads 1`
-makes the output bit-reproducible: with more threads the BAM scan's workers take batches in whatever
-order they finish, its fraction sums are added in that order, and the difference in the last bits can
-move a few fragments between isoforms that share them.
+makes the output bit-reproducible. With more threads two things move the last bits of a sum: the BAM
+scan's workers take batches in whatever order they finish, and the locus EM splits the E-step of its
+largest loci across the threads, so the thread count itself — by default the machine's core count —
+changes the order those sums are added in. Either can move fragments between isoforms that share them;
+use `--threads 1` where two runs must match bit for bit.
 
 ### Inspect read assignments
 
@@ -917,6 +919,6 @@ MAP-EM alike. Before 2026-09-25 such components were clamped to the floor, and w
 transcripts sharing the same fragments survived then depended on where the EM started. VBEM keeps a
 milder dependence of its own, accepted as a known limit: where fragments are genuinely ambiguous, which
 of several near-equivalent explanations it settles on can depend on its starting point. Rigel always
-starts from the same coverage-weighted point, so one input and one version give one answer, and the
+starts from the same coverage-weighted point, so one input, one version and one thread count give one answer, and the
 alternatives measured no more accurate against simulated truth; a change that moves only the starting
 point, as a new version may, can move such fragments between isoforms, unspliced RNA and gDNA.

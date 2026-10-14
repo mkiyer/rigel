@@ -126,7 +126,7 @@ tests, and `twine check --strict` passes. Before tagging:
   with untracked files (22 in the sandbox today).
 
 ### the-em-depends-on-its-thread-count
-`priority: now — 0.8.0: the docs now; the reduction prototyped and measured after the simple fixes, then the owner decides (2026-10-14) · kind: defect · 2026-10-14`
+`priority: now — 0.8.0: the reduction prototyped and measured, then the owner decides (2026-10-14); the MANUAL and CHANGELOG state the dependence since 2026-10-14 · kind: defect · 2026-10-14`
 A locus whose E-step work reaches `total_work / threads` runs through `parallel_estep`, which adds each thread's column
 sums into a per-thread buffer and Kahan-reduces the buffers in thread order: a grouping that changes with the thread
 count and matches neither the sequential path nor another count. SQUAREM's rounding sensitivity
@@ -135,7 +135,7 @@ count and matches neither the sequential path nor another count. SQUAREM's round
 moves 42 transcripts by 3,293 fragments (`B4_capcluster_ba` T5 341.5 → 0, T4 2,155.8 → 3,059.0); one synthetic locus
 already differs between 1 and 2 threads (4e-10). Each thread count is deterministic, but the default `--threads 0` is
 `hardware_concurrency`, blind to cgroup and affinity limits, so one input gives different tables on machines with
-different core counts, and the MANUAL's reproducible-run note and the CHANGELOG blame the scan alone. The repair:
+different core counts (the MANUAL and the CHANGELOG now say so). The repair:
 store each task's column sums and reduce them in task order after the parallel phase, with the sequential path
 through the same tasks — a numeric change, so `rename_identity.py` and a pinned A/B. Test first: one locus through
 `batch_locus_em_partitioned` at 1, 2, 3, 4 and 16 threads, bit-identical.
