@@ -17,7 +17,7 @@ Reading rules: ``noop`` and ``oracle_ruler_noop`` must be byte-identical to ``ba
 scan.total_threads=1``), so it is exactly reproducible, and an effect is judged by its size, genes and pools
 read beside the transcript table; the oracle masses are undrained while the shipped pipeline drains, a small conservative
 bias that cannot explain a large surviving error or hide a large removed one. The library-level
-gDNA fraction counts intergenic fragments as gDNA, as ``cli.py`` does.
+gDNA fraction counts the unspliced intergenic fragments as gDNA and the spliced ones as RNA, as ``cli.py`` does.
 
 Gates: ``tests/calibration/test_quant_accuracy.py``.
 
@@ -313,13 +313,15 @@ def score_genes(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
 def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
     """The library-level split — the thermometer, not the target.
 
-    Intergenic fragments are gDNA and the denominator must say so. ``n_intergenic`` counts
+    Unspliced intergenic fragments are gDNA and the denominator must say so. ``n_intergenic`` counts
     fragments that reached no locus at all; they never enter the EM, so ``estimator.gdna_em_count``
     excludes them. Off capture, gDNA is genome-uniform and more than half of it is intergenic, so
     leaving them out of the numerator while RNA stays in the denominator understates the fraction
-    badly. This is ``cli.py``'s ``gdna_fraction`` — ``(gdna_em + n_intergenic) / (rna + gdna_em +
-    n_intergenic)`` — so the number here is the one a user reads. ``gdna_em_frac_est`` is kept
-    beside it because the two answer different questions and only one of them is the deliverable.
+    badly. A SPLICED intergenic fragment is certified RNA that no annotated transcript holds — the test
+    panel's shadow transcripts write them — so it is RNA here. This is ``cli.py``'s ``gdna_fraction`` —
+    ``(gdna_em + n_intergenic_gdna) / (rna + gdna_em + n_intergenic)`` — so the number here is the one a user
+    reads. ``gdna_em_frac_est`` is kept beside it because the two answer different questions and only one of
+    them is the deliverable.
 
     The truth is ``origin_counts`` from the simulator, which counts each fragment exactly once.
     """
@@ -328,6 +330,7 @@ def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
     nrna = float(est.nrna_em_count)
     gdna = float(est.gdna_em_count)
     intergenic = float(result.stats.n_intergenic)
+    intergenic_rna = float(result.stats.n_intergenic_spliced)
     oc = truth_summary.get("origin_counts", {})
     t_g = float(oc.get("gdna", float("nan")))
     t_m = float(oc.get("mrna", 0.0))
@@ -345,16 +348,17 @@ def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
         "mrna_true": t_m,
         "nrna_est": nrna,
         "nrna_true": t_n,
-        "rna_est": mrna + nrna,
+        "rna_est": mrna + nrna + intergenic_rna,
         "rna_true": t_r,
         "gdna_est": gdna,
         "gdna_true": t_g,
-        #: THE DELIVERABLE — intergenic included, cli.py's denominator.
-        "gdna_frac_est": (gdna + intergenic) / total_all if total_all > 0 else float("nan"),
+        #: THE DELIVERABLE — the unspliced intergenic fragments included, cli.py's denominator.
+        "gdna_frac_est": (gdna + intergenic - intergenic_rna) / total_all if total_all > 0 else float("nan"),
         #: the EM's own view, intergenic in NEITHER side. A different question; not the deliverable.
         "gdna_em_frac_est": gdna / total if total > 0 else float("nan"),
         "gdna_frac_true": t_g / (t_g + t_r) if (t_g + t_r) > 0 else float("nan"),
-        "n_intergenic": intergenic,
+        "n_intergenic_gdna": intergenic - intergenic_rna,
+        "n_intergenic_rna": intergenic_rna,
     }
 
 
@@ -679,8 +683,8 @@ def markdown_report(path: Path, out: Path) -> None:
     pool ALONE, because that is the table a user reads: synthetic entities are absent from it by
     construction and their mass is reported on the pool rows instead.
 
-    ⛔ The gDNA estimate is ``gdna_em + n_intergenic``. Intergenic fragments reach no locus, so they
-    never enter the EM, but they ARE gDNA and the truth counts them — comparing the EM's number alone
+    ⛔ The gDNA estimate is ``gdna_em + n_intergenic_gdna``. Unspliced intergenic fragments reach no locus, so
+    they never enter the EM, but they ARE gDNA and the truth counts them — comparing the EM's number alone
     against that truth would understate the estimate by more than half at capture-OFF.
     """
     primary, pname = _load(path), Path(path).stem
@@ -764,7 +768,7 @@ def markdown_report(path: Path, out: Path) -> None:
             w(f"| **{tag}** | | | | | |")
             for c in rows:
                 r = primary[(c, "library")]
-                est = (r["gdna_est"] + r["n_intergenic"]) if est_f is None else r[est_f]
+                est = (r["gdna_est"] + r["n_intergenic_gdna"]) if est_f is None else r[est_f]
                 true = r[true_f]
                 w(f"| `{c}` | {_gdna_level(r)} | {est:,.0f} | {true:,.0f} | "
                   f"{_signed(est - true)} | {_pct(est, true)} |")
@@ -854,7 +858,7 @@ def markdown_report(path: Path, out: Path) -> None:
         tt = sum(primary[(c, "transcript")]["count_true"] for c in rows)
         ne = sum(primary[(c, "library")]["nrna_est"] for c in rows)
         nt = sum(primary[(c, "library")]["nrna_true"] for c in rows)
-        ge = sum(primary[(c, "library")]["gdna_est"] + primary[(c, "library")]["n_intergenic"] for c in rows)
+        ge = sum(primary[(c, "library")]["gdna_est"] + primary[(c, "library")]["n_intergenic_gdna"] for c in rows)
         gt = sum(primary[(c, "library")]["gdna_true"] for c in rows)
         tag = f"{st[0]} × {st[1]}" + (" ⛔ DEFERRED" if st == ("unstranded", "capture ON") else "")
         w(f"| {tag} | {tt:,.0f} | {tx:,.0f} | {100 * tx / tt:.2f} % | {gn:,.0f} | "
@@ -976,7 +980,7 @@ def report(paths: list[Path]) -> None:
     print("        scores ASSIGNMENT. On a nrna_none panel nascent truth is 0, so that column is pure")
     print("        false positive and Δ% is undefined rather than large.")
     _POOL_FIELDS = ("gdna_est", "gdna_true", "nrna_est", "nrna_true", "mrna_est", "mrna_true",
-                    "n_intergenic")
+                    "n_intergenic_gdna")
     for a, name in arms:
         print()
         print(f"    arm: {name}")
@@ -996,7 +1000,7 @@ def report(paths: list[Path]) -> None:
             # before the fix: -50.7 % panel-wide, which is the intergenic pool and nothing else.
             # The `of which` rows are informational and carry no truth of their own; only the TOTAL
             # is scored, and it is `cli.py`'s own `gdna_fraction` numerator.
-            gdna_em, inter = tot("gdna_est"), tot("n_intergenic")
+            gdna_em, inter = tot("gdna_est"), tot("n_intergenic_gdna")
             rows = [
                 ("gDNA (total)", gdna_em + inter, tot("gdna_true")),
                 ("  of which EM", gdna_em, None),
@@ -1038,7 +1042,7 @@ def report(paths: list[Path]) -> None:
         print("    " + "-" * 122)
         for c in conds:
             r = a[(c, "library")]
-            print(f"    {c:<44} {r['gdna_est'] + r['n_intergenic']:>13,.0f} {r['gdna_true']:>13,.0f} "
+            print(f"    {c:<44} {r['gdna_est'] + r['n_intergenic_gdna']:>13,.0f} {r['gdna_true']:>13,.0f} "
                   f"{r['nrna_est']:>11,.0f} {r['nrna_true']:>10,.0f} "
                   f"{r['mrna_est']:>13,.0f} {r['mrna_true']:>13,.0f}")
 

@@ -383,14 +383,34 @@ class _FakeEstimator:
 @dataclasses.dataclass
 class _FakeStats:
     n_intergenic: float
+    n_intergenic_spliced: float = 0.0
 
 
 class _FakeResult:
-    """Enough of a ``PipelineResult`` for ``score_library`` — the three numbers it reads."""
+    """Enough of a ``PipelineResult`` for ``score_library`` — the four numbers it reads."""
 
-    def __init__(self, nrna_em_count, gdna_em_count, n_intergenic):
+    def __init__(self, nrna_em_count, gdna_em_count, n_intergenic, n_intergenic_spliced=0.0):
         self.estimator = _FakeEstimator(nrna_em_count, gdna_em_count)
-        self.stats = _FakeStats(n_intergenic)
+        self.stats = _FakeStats(n_intergenic, n_intergenic_spliced)
+
+
+def test_a_spliced_intergenic_fragment_is_rna_in_the_library_split():
+    """A spliced fragment is certified RNA whether or not an annotated transcript holds it (the test panel's
+    shadow transcripts write them), so of the intergenic fragments only the unspliced ones are gDNA, as in
+    ``cli.py``'s ``gdna_fraction``, and the spliced ones join the RNA estimate."""
+    mrna, gdna_em, intergenic, spliced = 5_000.0, 2_000.0, 3_000.0, 100.0
+    quant = pd.DataFrame({"transcript_id": ["a"], "count": [mrna]})
+    summary = {"origin_counts": {"gdna": 4_900, "mrna": 5_100, "nrna": 0}}
+    lib = QA.score_library(
+        _FakeResult(0.0, gdna_em, n_intergenic=intergenic, n_intergenic_spliced=spliced),
+        quant,
+        summary,
+    )
+    assert lib["gdna_frac_est"] == pytest.approx(
+        (gdna_em + intergenic - spliced) / (mrna + gdna_em + intergenic)
+    )
+    assert (lib["n_intergenic_gdna"], lib["n_intergenic_rna"]) == (intergenic - spliced, spliced)
+    assert lib["rna_est"] == mrna + spliced
 
 
 def test_the_count_metrics_do_not_move_when_the_length_model_does():
@@ -449,7 +469,7 @@ def test_the_report_REFUSES_arms_with_different_row_sets(tmp_path):
             "nrna_true": 0.0,
             "mrna_est": 1.0,
             "mrna_true": 1.0,
-            "n_intergenic": 0.0,
+            "n_intergenic_gdna": 0.0,
         }
         for g in ("01", "50")
         for ax in ("transcript", "library")
@@ -628,7 +648,7 @@ def _arm_rows(tmp_path, **over):
         "rna_true": 5_100.0,
         #: EM-only. The comparable total is this PLUS the intergenic fragments.
         "gdna_est": 2_000.0,
-        "n_intergenic": 3_100.0,
+        "n_intergenic_gdna": 3_100.0,
         "gdna_true": 4_900.0,
         "gdna_frac_est": 0.51,
         "gdna_frac_true": 0.49,
@@ -675,7 +695,7 @@ def test_the_report_scores_gDNA_INCLUDING_the_intergenic_fragments(tmp_path):
     reached no locus, while ``gdna_true`` counts every gDNA fragment there was. Off capture the
     intergenic half is the larger one, so a report that prints ``gdna_est`` against that truth
     understates the estimate by more than half and reads as a catastrophic under-call that is not
-    there. The comparable estimate is ``gdna_est + n_intergenic``.
+    there. The comparable estimate is ``gdna_est + n_intergenic_gdna``.
 
     Perturbation: rendering ``gdna_est`` alone prints 2,000 and a −59.2 % error.
     """

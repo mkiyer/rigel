@@ -518,7 +518,7 @@ the current version is **3**. Top-level keys:
 | `calibration` | Library-scalar calibration outputs (see below) |
 | `gdna_eff_len` | Summary of the per-locus gDNA effective-length series (`em`) |
 | `fragment_length` | Per-category FL **summary statistics only** (`n_observations`, `mean`, `std`, `median`, `mode`, `max_size`, `overflow_count`, `overflow_fraction`) for `global`, `gdna`, `rna`, and each splice category. The raw per-bin histograms are in `fragment_lengths.feather` |
-| `quantification` | `n_transcripts`, `n_genes`, `n_loci`, assignment counts, and mRNA/nRNA/gDNA totals + fractions |
+| `quantification` | `n_transcripts`, `n_genes`, `n_loci`, assignment counts, and the pools' totals and fractions: mRNA, nRNA, the EM's genic gDNA (`gdna_total`), every intergenic fragment (`intergenic_total`) and the spliced ones among them (`intergenic_spliced`: RNA no annotated transcript holds, certified by its junction). `gdna_fraction` is the EM's gDNA plus the unspliced intergenic fragments; `mrna_fraction + nrna_fraction + gdna_fraction + intergenic_rna_fraction = 1` |
 
 The **`calibration`** block holds exactly the library-wide calibration
 scalars (it is `null` if calibration did not run):
@@ -590,10 +590,10 @@ unpaired) in the EM pipeline:
 |-----|------|------|---------|
 | 0 | 0x01 | `is_resolved` | Fragment was scored and assigned by the EM |
 | 1 | 0x02 | `is_mrna` | Assigned to a spliced mRNA transcript |
-| 2 | 0x04 | `is_gdna` | Assigned to the gDNA component (EM gDNA or intergenic) |
+| 2 | 0x04 | `is_gdna` | Assigned to the gDNA component (EM gDNA or unspliced intergenic) |
 | 3 | 0x08 | `is_nrna` | Assigned to a nascent-RNA component |
 | 4 | 0x10 | `is_synthetic` | Assigned to a rigel-generated synthetic nRNA span |
-| 5 | 0x20 | `is_intergenic` | No annotation overlap (always paired with `is_gdna`) |
+| 5 | 0x20 | `is_intergenic` | No annotation overlap: with `is_gdna` when unspliced; alone when spliced (RNA no annotated transcript holds) |
 | 6 | 0x40 | `is_chimeric` | Chimeric fragment, skipped before scoring |
 | 7 | 0x80 | `is_multimapper_dropped` | Multimapper dropped when `--include-multimap` is off |
 
@@ -605,7 +605,8 @@ Canonical `ZF` values (the only ones produced):
 | `0x09` |   9 | nRNA assigned (annotated single-exon transcript) |
 | `0x19` |  25 | nRNA assigned (rigel-synthesized span) |
 | `0x05` |   5 | gDNA assigned by EM (annotation-overlapping) |
-| `0x25` |  37 | gDNA assigned by intergenic fallback |
+| `0x25` |  37 | gDNA assigned by intergenic fallback (unspliced) |
+| `0x21` |  33 | RNA no annotated transcript holds (spliced, intergenic) |
 | `0x40` |  64 | Chimeric, not scored |
 | `0x80` | 128 | Multimapper dropped, not scored |
 

@@ -262,6 +262,37 @@ def _fragment_length_report(fl_models):
     return summary_by_category, histogram_df
 
 
+def _quantification_pools(stats, total_mrna: float, total_nrna: float, total_gdna: float) -> dict:
+    """``summary.json``'s pools and their fractions of every fragment counted.
+
+    An intergenic fragment reaches no locus. Unspliced, it is gDNA by construction, so the gDNA fraction is the
+    EM's genic gDNA plus the unspliced intergenic fragments; leaving them out would halve the observed
+    contamination of a library with substantial gDNA. Spliced, it is certified RNA that no annotated transcript
+    holds, and it is its own pool (``intergenic_spliced``). The mRNA, nascent RNA, gDNA and intergenic RNA
+    fractions sum to one; ``gdna_em_fraction`` is the EM's genic part alone, and ``intergenic_fraction`` the
+    share of every intergenic fragment, both kinds."""
+    intergenic = stats.n_intergenic
+    intergenic_rna = stats.n_intergenic_spliced
+    total_all = total_mrna + total_nrna + total_gdna + intergenic
+
+    def share(x: float) -> float:
+        return round(x / total_all, SUMMARY_DECIMALS) if total_all > 0 else 0.0
+
+    return {
+        "mrna_total": round(total_mrna, 2),
+        "nrna_total": round(total_nrna, 2),
+        "gdna_total": round(total_gdna, 2),
+        "intergenic_total": intergenic,
+        "intergenic_spliced": intergenic_rna,
+        "mrna_fraction": share(total_mrna),
+        "nrna_fraction": share(total_nrna),
+        "gdna_fraction": share(total_gdna + intergenic - intergenic_rna),
+        "gdna_em_fraction": share(total_gdna),
+        "intergenic_fraction": share(intergenic),
+        "intergenic_rna_fraction": share(intergenic_rna),
+    }
+
+
 def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     """Write quantification tables and summary.json."""
     import json
@@ -320,8 +351,6 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     total_mrna = float(quant_df["count"].sum())
     total_nrna = float(estimator.nrna_em_count)
     total_gdna = float(estimator.gdna_em_count)
-    total_rna = total_mrna + total_nrna
-    total_all = total_rna + total_gdna + stats.n_intergenic
 
     def _df_series_summary(df, column: str) -> dict[str, float]:
         if column not in df.columns or df.empty:
@@ -513,31 +542,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
                 + stats.em_routed_ambig_opp_strand_units
                 + stats.em_routed_multimapper_units
             ),
-            "mrna_total": round(total_mrna, 2),
-            "nrna_total": round(total_nrna, 2),
-            "gdna_total": round(total_gdna, 2),
-            "intergenic_total": stats.n_intergenic,
-            "mrna_fraction": round(total_mrna / total_all, SUMMARY_DECIMALS)
-            if total_all > 0
-            else 0.0,
-            "nrna_fraction": round(total_nrna / total_all, SUMMARY_DECIMALS)
-            if total_all > 0
-            else 0.0,
-            # gDNA contamination = EM-assigned genic gDNA + intergenic.
-            # Intergenic fragments are gDNA by construction (no transcript
-            # overlap), so excluding them here would visually halve the
-            # observed contamination on libraries with substantial gDNA.
-            # ``gdna_em_fraction`` exposes the EM-only portion separately
-            # for users who want to disambiguate the two pools.
-            "gdna_fraction": round((total_gdna + stats.n_intergenic) / total_all, SUMMARY_DECIMALS)
-            if total_all > 0
-            else 0.0,
-            "gdna_em_fraction": round(total_gdna / total_all, SUMMARY_DECIMALS)
-            if total_all > 0
-            else 0.0,
-            "intergenic_fraction": round(stats.n_intergenic / total_all, SUMMARY_DECIMALS)
-            if total_all > 0
-            else 0.0,
+            **_quantification_pools(stats, total_mrna, total_nrna, total_gdna),
         },
     }
     with open(summary_path, "w") as f:

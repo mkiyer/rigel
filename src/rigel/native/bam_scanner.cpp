@@ -2496,6 +2496,20 @@ public:
             auto ann_it = frag_to_row.find(frag_id);
             bool has_ann = (ann_it != frag_to_row.end());
 
+            // A fragment the EM never saw is intergenic, and RNA when any hit is spliced, as the scanner counts
+            // it (`n_intergenic_spliced`): a spliced fragment is certified RNA whether or not a transcript
+            // holds it.
+            bool intergenic_rna = false;
+            if (!has_ann) {
+                for (const auto& [r1, r2] : all_hits) {
+                    AssembledFragment frag = build_fragment(r1, r2);
+                    if (!frag.exons.empty() && frag.has_introns()) {
+                        intergenic_rna = true;
+                        break;
+                    }
+                }
+            }
+
             // Deduplicate raw records across hits: the cross-pair
             // combinatorial block in pair_multimapper_reads intentionally
             // produces overlapping hits for EM scoring, so a single raw
@@ -2596,16 +2610,17 @@ public:
 
                     n_annotated++;
                 } else {
-                    // No EM annotation for this frag_id: deterministic
-                    // intergenic gDNA fast-path.  Stamp ZF with the
-                    // intergenic+gDNA outcome bits so a single AND-mask on
-                    // ZF captures total gDNA.  ZW=1.0 because there is no
-                    // competing hypothesis.
+                    // No EM annotation for this frag_id: the deterministic
+                    // intergenic fast-path. Unspliced, it is gDNA by construction
+                    // and ZF carries the intergenic+gDNA bits, so a single AND-mask
+                    // on ZF captures total gDNA; spliced, it is RNA no annotated
+                    // transcript holds. ZW=1.0 because there is no competing
+                    // hypothesis.
                     stamp_and_write_hit(
                         hit_raws, out, hdr,
                         ".", ".", ".",
                         -1, -1,
-                        AF_GDNA_INTERGENIC, 1.0f,
+                        intergenic_rna ? AF_RNA_INTERGENIC : AF_GDNA_INTERGENIC, 1.0f,
                         ".",
                         (hit_idx == 0) ? 1 : 0,
                         0, "unknown", -1);

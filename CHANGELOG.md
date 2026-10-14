@@ -90,6 +90,9 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
 
 ### Fixed
 
+- A spliced fragment that no annotated transcript holds is RNA, not gDNA: `summary.json`'s `gdna_fraction` counts only
+  the unspliced intergenic fragments and books the spliced ones as their own pool (`intergenic_spliced`), the report
+  splits its intergenic pool the same way, and the annotated BAM labels them `ZF` 0x21 rather than 0x25.
 - The nascent table's `n_contributing_transcripts` counts the contributors of every span a single-exon nascent entity
   covers, not only the last span's.
 - The gDNA fragment-length law the EM scores with read the spliced RNA fragment counts as if they were a

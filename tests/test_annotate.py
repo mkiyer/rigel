@@ -29,6 +29,7 @@ from rigel.annotate import (
     AF_NRNA_BIT,
     AF_NRNA_SYNTH,
     AF_RESOLVED,
+    AF_RNA_INTERGENIC,
     AF_SYNTHETIC_BIT,
     AF_UNRESOLVED,
 )
@@ -42,6 +43,7 @@ VALID_ZF_VALUES = {
     AF_NRNA_SYNTH,
     AF_GDNA_EM,
     AF_GDNA_INTERGENIC,
+    AF_RNA_INTERGENIC,
     AF_CHIMERIC,
     AF_MULTIMAPPER_DROP,
 }
@@ -64,26 +66,28 @@ def _assert_zf_invariants(zf: int) -> None:
     assert not (is_resolved and (is_chim or is_mm_drop)), (
         f"ZF={zf:#x}: resolved AND dropped bits both set"
     )
-    # 2: resolved -> exactly one pool bit
+    # 2: resolved -> one pool bit, or none for RNA no annotated transcript holds (spliced intergenic)
     if is_resolved:
         pool_count = int(is_mrna) + int(is_gdna) + int(is_nrna)
-        assert pool_count == 1, f"ZF={zf:#x}: resolved but {pool_count} pool bits set"
+        assert pool_count == 1 or (pool_count == 0 and is_interg), (
+            f"ZF={zf:#x}: resolved but {pool_count} pool bits set"
+        )
     else:
         # Pool bits are only meaningful when resolved
         assert not (is_mrna or is_gdna or is_nrna), f"ZF={zf:#x}: pool bit set without is_resolved"
     # 3: synthetic -> nrna
     if is_synth:
         assert is_nrna, f"ZF={zf:#x}: is_synthetic set without is_nrna"
-    # 4: intergenic -> resolved & gdna
+    # 4: intergenic -> resolved, gDNA when unspliced and RNA (no pool bit) when spliced
     if is_interg:
-        assert is_resolved and is_gdna, f"ZF={zf:#x}: is_intergenic without resolved&gdna"
+        assert is_resolved and not (is_mrna or is_nrna), f"ZF={zf:#x}: is_intergenic misplaced"
     # 5: chimeric and mm_dropped mutually exclusive
     assert not (is_chim and is_mm_drop), f"ZF={zf:#x}: chimeric AND mm_dropped both set"
     # 6: subtype bits only with their pool
     if is_synth:
         assert is_nrna, f"ZF={zf:#x}: synthetic subtype without nrna"
     if is_interg:
-        assert is_gdna, f"ZF={zf:#x}: intergenic subtype without gdna"
+        assert not (is_mrna or is_nrna), f"ZF={zf:#x}: intergenic subtype under an annotated pool"
 
 
 # =====================================================================
@@ -147,6 +151,7 @@ class TestAnnotationTable:
         assert AF_NRNA_SYNTH == 0x19
         assert AF_GDNA_EM == 0x05
         assert AF_GDNA_INTERGENIC == 0x25
+        assert AF_RNA_INTERGENIC == 0x21
         assert AF_CHIMERIC == 0x40
         assert AF_MULTIMAPPER_DROP == 0x80
         # All canonical values satisfy the invariants
@@ -158,6 +163,7 @@ class TestAnnotationTable:
         assert AF_NRNA_SYNTH & AF_RESOLVED
         assert AF_GDNA_EM & AF_RESOLVED
         assert AF_GDNA_INTERGENIC & AF_RESOLVED
+        assert AF_RNA_INTERGENIC & AF_RESOLVED and not AF_RNA_INTERGENIC & AF_GDNA_BIT
         assert not (AF_CHIMERIC & AF_RESOLVED)
         assert not (AF_MULTIMAPPER_DROP & AF_RESOLVED)
 
@@ -778,11 +784,13 @@ class TestAnnotatedBamIntegration:
                 # ZC retains no legacy terminal-outcome strings
                 assert zc not in ("intergenic", "chimeric")
 
-    def test_zf_intergenic_marked_gdna(self, scenario, tmp_path):
-        """A read placed in a pure intergenic region is stamped with the
-        deterministic gDNA fast-path bits on ZF (is_resolved & is_gdna &
-        is_intergenic) and ZC=".".
-        """
+    @staticmethod
+    def _annotate_with_intergenic_sentinel(scenario, tmp_path, *, spliced: bool):
+        """Run the pipeline over the scenario's library plus one pair moved to 6,000, past every transcript
+        (genome 8,000, genes end by 5,500), and return the sentinel's annotated records. The donor pair is
+        spliced (a CIGAR with an N) or not, as asked."""
+        from collections import defaultdict
+
         import pysam
         from rigel.sim import ReadSimConfig
         from rigel.config import EMConfig, PipelineConfig, BamScanConfig
@@ -798,49 +806,36 @@ class TestAnnotatedBamIntegration:
             seed=42,
         )
         result = scenario.build(n_fragments=200, sim_config=sim_config)
-
-        # Inject a clearly intergenic pair by cloning the last pair and
-        # moving it to ref position 7500 (scenario genome_length=8000,
-        # gene bounds end at 5500 — coordinate 7500 is outside any
-        # transcript).
-        augmented = tmp_path / "aug_intergenic.bam"
         with pysam.AlignmentFile(str(result.bam_path), "rb") as fin:
             header = fin.header
             records = list(fin.fetch(until_eof=True))
-
-        # Find an R1/R2 pair we can relocate.
-        from collections import defaultdict
-
         by_qname = defaultdict(list)
         for r in records:
             by_qname[r.query_name].append(r)
-        donor_qname = next(
-            qn
-            for qn, rs in by_qname.items()
-            if len(rs) >= 2 and not any(r.is_secondary for r in rs)
+        donor = next(
+            rs
+            for rs in by_qname.values()
+            if len(rs) >= 2
+            and not any(r.is_secondary for r in rs)
+            and any("N" in (r.cigarstring or "") for r in rs) == spliced
         )
-        donor = by_qname[donor_qname]
-        new_pair = []
+        sentinel = []
         for r in donor:
             c = r.__copy__()
             c.query_name = "INTERGENIC_SENTINEL"
-            c.reference_start = 7500
-            # Clear alignment tags that might reference old coords.
+            c.reference_start = 6000
             for tag in ("XS", "ts", "NH", "HI"):
                 try:
                     c.set_tag(tag, None)
                 except Exception:
                     pass
-            new_pair.append(c)
-        # Place the sentinel at the front so it's clearly separated.
-        records = new_pair + records
-
+            sentinel.append(c)
+        augmented = tmp_path / "aug_intergenic.bam"
         with pysam.AlignmentFile(str(augmented), "wb", header=header) as fout:
-            for r in records:
+            for r in sentinel + records:
                 fout.write(r)
-
         annotated_bam = tmp_path / "annotated_intergenic.bam"
-        run_pipeline(
+        pr = run_pipeline(
             augmented,
             result.index,
             config=PipelineConfig(
@@ -849,14 +844,16 @@ class TestAnnotatedBamIntegration:
                 annotated_bam_path=annotated_bam,
             ),
         )
-
         with pysam.AlignmentFile(str(annotated_bam), "rb") as fout:
-            sentinel_out = [
-                r for r in fout.fetch(until_eof=True) if r.query_name == "INTERGENIC_SENTINEL"
-            ]
+            out = [r for r in fout.fetch(until_eof=True) if r.query_name == "INTERGENIC_SENTINEL"]
+        assert len(out) >= 1, "Intergenic sentinel lost in output"
+        return out, pr.stats
 
-        assert len(sentinel_out) >= 1, "Intergenic sentinel lost in output"
-        for rec in sentinel_out:
+    def test_zf_intergenic_marked_gdna(self, scenario, tmp_path):
+        """An unspliced read pair no transcript holds is stamped with the deterministic gDNA fast-path bits on
+        ZF (is_resolved & is_gdna & is_intergenic) and ZC=".", and counted as unspliced intergenic."""
+        sentinel, stats = self._annotate_with_intergenic_sentinel(scenario, tmp_path, spliced=False)
+        for rec in sentinel:
             zf = rec.get_tag("ZF")
             assert zf == AF_GDNA_INTERGENIC, (
                 f"Intergenic record should have ZF=AF_GDNA_INTERGENIC "
@@ -866,6 +863,21 @@ class TestAnnotatedBamIntegration:
             assert zf & AF_GDNA_BIT, "Intergenic should set is_gdna bit"
             assert zf & AF_INTERGENIC_BIT, "Intergenic should set is_intergenic bit"
             assert rec.get_tag("ZC") == "."
+        assert stats.n_intergenic_unspliced >= 1
+
+    def test_zf_spliced_intergenic_marked_rna(self, scenario, tmp_path):
+        """A spliced read pair is certified RNA whether or not an annotated transcript holds it: no transcript
+        holds this one, so ZF is is_resolved & is_intergenic with no gDNA bit, as the scanner counts it."""
+        sentinel, stats = self._annotate_with_intergenic_sentinel(scenario, tmp_path, spliced=True)
+        for rec in sentinel:
+            zf = rec.get_tag("ZF")
+            assert zf == AF_RNA_INTERGENIC, (
+                f"Spliced intergenic record should have ZF=AF_RNA_INTERGENIC "
+                f"({AF_RNA_INTERGENIC:#x}), got {zf:#x}"
+            )
+            _assert_zf_invariants(zf)
+            assert rec.get_tag("ZC") == "."
+        assert stats.n_intergenic_spliced >= 1
 
     def test_zf_multimapper_dropped_without_include_multimap(self, scenario, tmp_path):
         """When --no-include-multimap drops a multimapper, ZF is

@@ -147,17 +147,18 @@ renamed (`ISSUES: the-total-density-landscape`).
 (a) `summary.json` (schema 3, unreleased):
 - one od field instead of two, labelled binomial by policy (od = 0 since 2026-10-01), beside the clean κ and the
   artifact shares (`ISSUES: strand-overdispersion-one-shared-value`, the diagnostics step);
-- `gdna_fraction` without the spliced intergenic fragments: `cli.py` adds `stats.n_intergenic`, which includes them,
-  and a spliced fragment is certified RNA (Axiom 0). The count is so far inferred (27 at g001 OFF, 29 at g01 OFF, from
-  the three-exon shadows), not read from `n_intergenic_spliced`; `quant_accuracy.py` copies it into the release
-  report's gDNA pool;
+- DONE 2026-10-14: `gdna_fraction` without the spliced intergenic fragments, which are certified RNA (Axiom 0) — the
+  summary's own pool, `intergenic_spliced`, beside `intergenic_total`; the report's intergenic pool split into RNA and
+  gDNA; `quant_accuracy.py`'s library split the same (`tests/test_summary_report.py`, `tests/test_report.py`,
+  `tests/calibration/test_quant_accuracy.py`);
 - DONE 2026-10-13 with the mode-free reader: the depleted gDNA density is the bulk the reader reads against, and
   `summary.json` publishes it beside the fully captured level (`gdna_bulk_density`, `gdna_capture_saturation`), so the
   report's on-target / off-target fold is the saturation level;
 - the report's capture note, which says "no calibration" for a 0.7.1 or schema-2 summary that has a calibration block;
-- the resolved junction-strand tag (`ISSUES: sj-strand-tag-chosen-from-the-first-reads`);
-- the annotated BAM labels spliced intergenic fragments as gDNA (ZF 0x25), the same Axiom-0 slip as `gdna_fraction`
-  (`n_intergenic_spliced` is counted already, so nothing need be inferred).
+- DONE 2026-10-14 (b8527b30): the resolved junction-strand tag, in `configuration.scan.sj_strand_tag`
+  (`ISSUES: sj-strand-tag-chosen-from-the-first-reads`);
+- DONE 2026-10-14: the annotated BAM labels a spliced intergenic fragment ZF 0x21 (resolved, intergenic, no gDNA bit),
+  by the scanner's own test, and an unspliced one 0x25 (`tests/test_annotate.py`).
 (b) DONE 2026-10-14, index format 9 (`tests/test_index_integrity.py`, `tests/test_splice_blacklist.py`): the
 written-never-read columns are gone (`transcripts.feather`'s `abundance`, `nrna_abundance` and `n_exons`; `sj.feather`'s
 `interval_type`); `transcript_aliases.feather` maps each collapsed `dropped_t_id → kept_t_id`; `nrna_n_contributors`

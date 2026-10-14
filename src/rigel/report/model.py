@@ -89,7 +89,7 @@ def _verdicts(summary: dict) -> list[dict]:
             "v": gfrac,
             "fmt": "pct",
             "s": "good" if gfrac < 0.1 else "warning" if gfrac < 0.3 else "critical",
-            "n": "EM-corrected; incl. intergenic",
+            "n": "EM-corrected; incl. unspliced intergenic",
         }
     )
 
@@ -284,11 +284,15 @@ def _quant(summary: dict) -> dict:
     nrna = q.get("nrna_total", 0.0)
     gdna_em = q.get("gdna_total", 0.0)
     inter = q.get("intergenic_total", 0.0)
+    # a spliced intergenic fragment is RNA no annotated transcript holds; a summary without the count read none
+    inter_rna = q.get("intergenic_spliced", 0)
+    inter_rna_frac = q.get("intergenic_rna_fraction", 0.0)
     pools = [
         {"label": "Mature mRNA", "value": mrna, "cls": _C[1]},
         {"label": "Nascent RNA", "value": nrna, "cls": _C[2]},
+        {"label": "Intergenic RNA", "value": inter_rna, "cls": _C[4]},
         {"label": "gDNA (EM)", "value": gdna_em, "cls": _C[8]},
-        {"label": "Intergenic gDNA", "value": inter, "cls": _C[3]},
+        {"label": "Intergenic gDNA", "value": inter - inter_rna, "cls": _C[3]},
     ]
     table = [
         ["Mature mRNA", mrna, q.get("mrna_fraction", 0.0), "spliced + EM-assigned transcript mass"],
@@ -305,13 +309,19 @@ def _quant(summary: dict) -> dict:
             "re-attributed from ambiguous transcript overlap",
         ],
         [
+            "RNA — intergenic",
+            inter_rna,
+            inter_rna_frac,
+            "spliced with no annotation overlap; RNA by its junction",
+        ],
+        [
             "gDNA — intergenic",
-            inter,
-            q.get("intergenic_fraction", 0.0),
-            "no annotation overlap; gDNA by construction",
+            inter - inter_rna,
+            q.get("intergenic_fraction", 0.0) - inter_rna_frac,
+            "unspliced with no annotation overlap; gDNA by construction",
         ],
     ]
-    rna_share = q.get("mrna_fraction", 0.0) + q.get("nrna_fraction", 0.0)
+    rna_share = q.get("mrna_fraction", 0.0) + q.get("nrna_fraction", 0.0) + inter_rna_frac
     kpis = [
         {"l": "Transcripts", "v": q.get("n_transcripts", 0), "fmt": "count"},
         {"l": "Genes", "v": q.get("n_genes", 0), "fmt": "count"},

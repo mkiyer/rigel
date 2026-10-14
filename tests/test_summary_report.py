@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 
 import numpy as np
+import pytest
 import pandas as pd
 
 from rigel import cli
@@ -281,3 +282,17 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     assert set(re.findall(r'^\s+"(\w+)":', listed.group(1), re.M)) == written
 
     sc.cleanup()
+
+
+def test_a_spliced_intergenic_fragment_is_rna_not_gdna():
+    """A spliced fragment is certified RNA whether or not an annotated transcript holds it, so the gDNA fraction
+    counts only the unspliced intergenic fragments, and the four pools' fractions sum to one."""
+    from types import SimpleNamespace
+
+    stats = SimpleNamespace(n_intergenic=100, n_intergenic_spliced=30)
+    q = cli._quantification_pools(stats, total_mrna=600.0, total_nrna=100.0, total_gdna=200.0)
+    assert (q["intergenic_total"], q["intergenic_spliced"]) == (100, 30)
+    assert q["gdna_fraction"] == round((200 + 70) / 1000, cli.SUMMARY_DECIMALS)
+    assert q["intergenic_rna_fraction"] == round(30 / 1000, cli.SUMMARY_DECIMALS)
+    fractions = ("mrna_fraction", "nrna_fraction", "gdna_fraction", "intergenic_rna_fraction")
+    assert sum(q[k] for k in fractions) == pytest.approx(1.0)

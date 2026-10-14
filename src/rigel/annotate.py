@@ -53,9 +53,10 @@ BAM Tag Schema
      - i
      - Outcome bitfield fully answering "what happened to this fragment?":
        bit 0 = is_resolved, bit 1 = is_mrna, bit 2 = is_gdna
-       (intergenic + EM-gDNA), bit 3 = is_nrna, bit 4 = is_synthetic,
-       bit 5 = is_intergenic, bit 6 = is_chimeric, bit 7 =
-       is_multimapper_dropped.  See ``AF_*`` constants for canonical values.
+       (unspliced intergenic + EM-gDNA), bit 3 = is_nrna, bit 4 = is_synthetic,
+       bit 5 = is_intergenic (no transcript holds the fragment: gDNA when
+       unspliced, RNA with no pool bit when spliced), bit 6 = is_chimeric,
+       bit 7 = is_multimapper_dropped.  See ``AF_*`` constants for canonical values.
    * - ZW
      - f
      - Posterior probability of assignment
@@ -105,20 +106,23 @@ logger = logging.getLogger(__name__)
 #
 #   bit 0 (0x01)  is_resolved             rigel assigned this fragment to a pool
 #   bit 1 (0x02)  is_mrna                 pool = mRNA
-#   bit 2 (0x04)  is_gdna                 pool = gDNA (intergenic + EM-gDNA)
+#   bit 2 (0x04)  is_gdna                 pool = gDNA (unspliced intergenic + EM-gDNA)
 #   bit 3 (0x08)  is_nrna                 pool = nRNA (annotated or synthetic)
 #   bit 4 (0x10)  is_synthetic            nRNA subtype: rigel-generated span
-#   bit 5 (0x20)  is_intergenic           gDNA subtype: deterministic fast-path
+#   bit 5 (0x20)  is_intergenic           no transcript holds it (deterministic fast-path): gDNA when
+#                                         unspliced; when spliced, RNA no annotated transcript holds
+#                                         (certified by its junction), with no pool bit
 #   bit 6 (0x40)  is_chimeric             unresolved reason: chimeric
 #   bit 7 (0x80)  is_multimapper_dropped  unresolved reason: --no-include-multimap drop
 #
 # Invariants (enforced by tests):
 #   1. is_resolved XOR (is_chimeric | is_multimapper_dropped)
-#   2. When is_resolved, exactly one of {is_mrna, is_gdna, is_nrna} is set
+#   2. When is_resolved, exactly one of {is_mrna, is_gdna, is_nrna} is set, except a spliced
+#      intergenic fragment (RNA no annotated transcript holds), which sets none
 #   3. is_synthetic  -> is_nrna
-#   4. is_intergenic -> is_resolved & is_gdna
+#   4. is_intergenic -> is_resolved, never with is_mrna or is_nrna
 #   5. is_chimeric and is_multimapper_dropped are mutually exclusive
-#   6. Subtype bits (is_synthetic, is_intergenic) only set with their pool bit
+#   6. is_synthetic only with is_nrna; is_intergenic only with is_gdna or alone
 # ---------------------------------------------------------------------------
 
 # Primitive bits
@@ -138,6 +142,7 @@ AF_NRNA: int = AF_RESOLVED | AF_NRNA_BIT  # 0x09
 AF_NRNA_SYNTH: int = AF_NRNA | AF_SYNTHETIC_BIT  # 0x19
 AF_GDNA_EM: int = AF_RESOLVED | AF_GDNA_BIT  # 0x05
 AF_GDNA_INTERGENIC: int = AF_GDNA_EM | AF_INTERGENIC_BIT  # 0x25
+AF_RNA_INTERGENIC: int = AF_RESOLVED | AF_INTERGENIC_BIT  # 0x21
 AF_CHIMERIC: int = AF_CHIMERIC_BIT  # 0x40
 AF_MULTIMAPPER_DROP: int = AF_MULTIMAPPER_DROP_BIT  # 0x80
 

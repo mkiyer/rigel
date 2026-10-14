@@ -428,6 +428,26 @@ def test_every_format_tag_the_view_model_emits_is_one_the_front_end_formats(tmp_
     assert emitted and emitted <= formatted, f"unformatted tags: {sorted(emitted - formatted)}"
 
 
+def test_the_pools_book_spliced_intergenic_fragments_as_rna(tmp_path):
+    """A spliced intergenic fragment is RNA no annotated transcript holds: the intergenic gDNA pool is the
+    unspliced remainder, and the RNA share counts it."""
+    d = _write_substrate(tmp_path / "run")
+    path = d / "summary.json"
+    summary = json.loads(path.read_text())
+    summary["quantification"].update(
+        intergenic_spliced=10, intergenic_rna_fraction=0.015, gdna_fraction=0.125
+    )
+    path.write_text(json.dumps(summary))
+    quant = build_view_model(load_substrate(d))["quant"]
+    pools = {p["label"]: p["value"] for p in quant["pools"]}
+    assert pools["Intergenic gDNA"] == 60
+    assert pools["Intergenic RNA"] == 10
+    q = summary["quantification"]
+    assert quant["rna_share"] == pytest.approx(
+        q["mrna_fraction"] + q["nrna_fraction"] + q["intergenic_rna_fraction"]
+    )
+
+
 def test_build_report_self_contained(tmp_path):
     d = _write_substrate(tmp_path / "run")
     out = build_report(d)
