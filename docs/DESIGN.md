@@ -41,9 +41,9 @@ GENOMIC order. Measured on the suite index: `src < dst` holds on all 13,482 sj i
 minus-strand ones — the code is correct — so an identifier such as `donor_cut` holds the ACCEPTOR for
 48.4 % of sj. The name lies about correct code, and a reader who trusts it writes a sign error. Say
 `boundary_left` / `boundary_right`, or `_lo` / `_hi`. The index's structural flag bits are the one place
-the words survive, and they are the hazard itself: `FLAG_DONOR_s` marks the genomic-LOW end of an
+the words are sanctioned, and they are the hazard itself: `FLAG_DONOR_s` marks the genomic-LOW end of an
 `s`-strand intron on both strands, so on `−` it sits at the transcript's biological ACCEPTOR;
-`region_geometry.py`, and the builders' ``junction_exon_side`` and ``outside_flank`` (`native/transfer_kernel.cpp`) read the bits in genomic
+`region_geometry.py`, and the builders' ``junction_exon_side`` and ``outside_flank`` (`native/transfer_kernel.h`) read the bits in genomic
 terms, gated on a `−`-strand sj specifically.
 
 **`splice-out` / `splice-in` are directional, and that is the whole reason for the pair.** The same
@@ -118,12 +118,12 @@ deferred, and the existing detector-free capture and fragment-length requirement
 
 **Conservative allocation under uncertainty, owner ruling 2026-10-09:** accept the
 factory-free count foundation's measured weak-strand tradeoff. In ambiguous cases,
-overestimating gDNA is preferable to underestimating it. This authorizes integration and
-the reviewed golden updates; it adds no count floor or tuning constant. Preserve the
-uncertainty: a conservative DNA allocation is not a confident measurement of capture
-enrichment. Defer the bound-only landscape-admission experiment until foundation
-integration is complete. Reader integration and new statistical assumptions retain their
-owner checkpoint.
+overestimating gDNA is preferable to underestimating it. This authorized the foundation's
+integration (3e7e0fbc, 2026-10-10) and its reviewed golden updates; it adds no count floor or
+tuning constant. Preserve the uncertainty: a conservative DNA allocation is not a confident
+measurement of capture enrichment. The bound-only landscape-admission experiment it deferred
+stays deferred (`ISSUES: the-gdna-prior-enters-psi-twice`); the reader landed at its own owner
+checkpoint (2026-10-13, §7.2).
 
 **Why this shape.** Measured 2026-08-13/14 on the rebuilt 16-condition ladder: unstranded × capture-ON
 carried 64.5 % of transcript error and 90 % of gene-level error, and that cell is not a gradient anyone
@@ -156,10 +156,11 @@ The ladder keeps equal lengths (below): it stays the panel that prices calibrati
 length-dependent mechanism is judged on the gap panels beside it, in both directions, with the equal-length
 control.
 
-### Calibration is the focus, and the metric is calibration against oracle calibration
+### The calibration metric is calibration against oracle calibration
 
-The metric is the calibration result scored against ORACLE calibration — not the end-to-end transcript
-number, which stays a thermometer (`SUCCESS.md` says why). The oracle is the origin-split truth, and the
+The metric that ranks a CALIBRATION mechanism is the calibration result scored against ORACLE calibration —
+never the end-to-end transcript number, which is the release's other primary number and ranks no calibration
+mechanism (the amendment above; `SUCCESS.md` says why). The oracle is the origin-split truth, and the
 instruments that own the comparison are `calibration_vs_oracle.py` and `prior_vs_oracle.py`. Scenarios are
 cached so calibration re-runs in seconds off a scan that took minutes (`scripts/design/build_scan_cache.py`;
 `scripts/sim/panel.py cache` builds the oracle cache beside the scan one). The pattern any future cache copies
@@ -253,9 +254,9 @@ has to come from its neighbours"*, you have arrived here again.
 
 ### The structural fact
 
-gDNA is directly measurable only where no mature transcript crosses. Three places, and the predicate is
-the solver's own `mrna_active` — the same one §6b's boundary-axis ruling turns on: intergenic REGIONs,
-intron REGIONs, and the BOUNDARIES against them (`exon|intron`, `exon|intergenic`). At an EXON the
+gDNA is directly measurable only where no mature transcript crosses — the predicate §6b's boundary-axis
+ruling turns on. Three places: intergenic REGIONs, intron REGIONs, and the BOUNDARIES against them
+(`exon|intron`, `exon|intergenic`). At an EXON the
 unspliced mass is `gDNA + unspliced RNA`, and that is the quantity being solved for.
 
 > ⛔ **An exon's gDNA level cannot be measured. It can only be imputed from its neighbours, and imputation
@@ -316,7 +317,8 @@ COMPOSITION (exact to the fragment where a LEVEL is off by 78–98 % under captu
 carries a LEVEL on every arm. ⛔ So a hop type is `object class × {splice site, terminus, both}` read off
 the boundary flags — the class alone conflates a TSS/TES inside a gene with a splice site, and the two
 have opposite currencies (`TRAPS: an-object-class-does-not-see-a-terminus`). At a TERMINUS INTO AN EXON
-UNDER CAPTURE neither currency survives — the residual §0c.3's spike-and-slab exists for. Three things
+UNDER CAPTURE neither currency survives — a residual no local message carries (§0c.3's spike-and-slab was
+ruled for it and never built). Three things
 are settled and are not re-asked: forward-backward stays; the three populations `{gDNA, RNA+, RNA−}` are
 carried natively (AXIOM 0); and messages DO flow into gDNA-measuring objects — an exon sends into its
 `exon|intron` boundary and the boundary does the splice-out arithmetic.
@@ -345,10 +347,12 @@ from those that do not (`TRAPS: an-imputation-must-cost-something-every-hop`).
 Owner, 2026-08-20. Calibration is circular from the beginning: the tool does not know whether the library
 is capture-enriched nor how much gDNA it holds. The goal of pass-0 is to solve or impute ENOUGH exons —
 not all of them — that the gDNA landscape can be trained on them; once trained, that per-object prior
-does the work. Two rulings follow: the data's background enters ψ as a LIKELIHOOD wherever the data allow
-it (the density λ-factor, whose precision scales with counts — never as a reference location, §6b.1), and
-message propagation's irreducible job is the deep chain — long runs of `exon|exon` boundaries where
-imputation is the only information there is, which is why it has to work and has to be weak.
+does the work. Two rulings follow. The data's background enters ψ as a LIKELIHOOD wherever the data allow
+it, never as a reference location (§6b.1); the density λ-factor that carried it, whose precision scaled with
+counts, was deleted with the intron factory (the count foundation, 2026-10-10), so background now reaches ψ
+only through the fitted landscape arm (§7.1) and the messages. And message propagation's irreducible job is
+the deep chain — long runs of `exon|exon` boundaries where imputation is the only information there is,
+which is why it has to work and has to be weak.
 
 ### 0c.0e The completion contract of the message policy (owner, 2026-09-02; fulfilled 2026-09-09)
 
@@ -368,17 +372,21 @@ held to.
 ### 0c.1 The mechanism is built and ships — do not build it again
 
 The hop the derivation above asks for is the transfer policy's SPLICE-IN FACE MAP
-(`native/transfer_kernel.cpp`'s `splice_faces`, ``face_map_lambda`` in `native/transfer_rows.h`; §6b.9 and §6b.12): the BOUNDARY's
+(`native/transfer_kernel.h`'s `splice_faces`, ``face_map_lambda`` in `native/transfer_rows.h`; §6b.9 and §6b.12): the BOUNDARY's
 measured sj flux is a density at the source, which joins the RNA claim entering the destination EXON —
 the certified flux caps the claimable gDNA share. Only an EXON receives it; the flux is a measurement
 with its own counting width, never an imputation; and it is registered by geometry, never gated on the
 strand channel's precision, so it survives exactly the stratum where the strand channel is dead.
 `CalibrationConfig.message_policy = "silent"` installs `SilentPolicy` — the measured floor (§6.1).
 
-### 0c.3 The shape of the reference under capture is spike-and-slab
+### 0c.3 Record — the shape of the reference under capture was ruled spike-and-slab, and never built
 
-A ruling on the SHAPE, stated here in full. Write `rho_g,i = rho_0 · eps_i`, with
-`rho_0` the un-enriched density and `eps_i ≥ 1` the enrichment at object `i`. A probe panel makes the
+Superseded before it was built: ψ has no reference location (§6b.1) and carries the fitted gDNA landscape as
+its population prior (§7.1; CLOSED `ISSUES: measured-prior-rung-4`), and the capture spectrum is read per
+object by the two-group reader (§7.2). Its two bounds ship as messages — the gDNA level lane's lower bound
+(§6c, rule 5 of §6b.12) and the certified flux's cap (§0c.1, §6b.13) — and the reconciliation by scope at the
+end of this section stands. The ruling on the SHAPE as it was stated (2026-08-17): write `rho_g,i = rho_0 · eps_i`,
+with `rho_0` the un-enriched density and `eps_i ≥ 1` the enrichment at object `i`. A probe panel makes the
 distribution of `eps` across exons a SPIKE at `eps = 1` (unprobed) plus a SLAB at high `eps` (probed) —
 the physical structure of a capture panel, and the 122× ladder of §0c seen as a marginal. So the reference
 on `log rho_g` is a two-component mixture, every part of it set by something already measured or ruled:
@@ -421,8 +429,9 @@ measures at that object, and capture moves that line.
 Three stages, `pipeline.py`:
 
 1. **Scan** (`scan_and_buffer`) — a C++ htslib single-pass reader. Resolves fragments against the index,
-   trains the strand and fragment-length models from unique mappers, buffers fragments into a columnar
-   `FragmentBuffer`, and deposits per-object tallies into the C++ accumulator → `AccumulatorPayload`.
+   trains the strand models from unique mappers, buffers fragments into a columnar `FragmentBuffer`, and
+   deposits per-object tallies into the C++ accumulator → `AccumulatorPayload`. No fragment-length model
+   comes out of the scan: every one is built from the payload (§3.4).
 2. **Second pass** (`_drain_side_buffer`) — drains the fragments pass 1 held, then **Calibrate**
    (`calibration.calibrate`) — deconvolves each object's unspliced mass into gDNA vs RNA by a
    belief-propagation sweep over the region chain, and fits the library-level parameters.
@@ -430,8 +439,9 @@ Three stages, `pipeline.py`:
    per-locus EM with `n_transcripts + 1` components. The calibration prior enters as two per-locus
    Dirichlet scalars, never per-transcript.
 
-Calibration cost is depth-independent — every region in the index is solved regardless of read depth
-(one real run: index load ~7 s, BAM scan ~2 s, calibration ~66 s, EM ~24 s). Calibration is the budget.
+Calibration's cost follows the index more than the depth: the geometry and the messages run over the whole
+chain, and ψ solves every RNA-admitting slot that holds a fragment. It is still the largest stage on a deep
+library; the current split is `ISSUES: performance-memory-bounded-solve`'s baseline.
 
 ---
 
@@ -456,13 +466,15 @@ checked by `calibration/splice_graph.py`.
   (`TRAPS: splicing-makes-the-graph-cyclic`).
 - **8 structural flag bits per contiguous boundary**: TSS / TES / DONOR / ACCEPTOR × {+,−}, not mutually
   exclusive. Carry the raw bits to the consumer; do not pre-derive predicates in the plumbing.
-- Validated by thirteen invariants, two of which re-derive the answer by a different algorithm
-  (`TRAPS: self-checking-validator`); `manifest.json` records the sources and the build is deterministic.
+- Validated by `validate_graph`'s invariants I1–I13 (there is no I10), two of which re-derive the answer by
+  a different algorithm (`TRAPS: self-checking-validator`); `manifest.json` records the sources and the
+  build is deterministic.
 
 ⛔ Never quote a stored census: region and boundary counts are properties of an annotation, not of the
-tool — re-derive them from the index. And `reach` is covered by no existing hash: a rebuild moved
+tool — re-derive them from the index. And `reach` is covered by neither index hash: a rebuild moved
 38 % of human reaches with both `partition_hash` and `graph_hash` byte-identical, so any
-calibration-facing cache needs a third key (`TRAPS: a-hash-that-misses-its-artifact`).
+calibration-facing cache needs a third key, as the scan cache's `scan_cache.reach_digest` is
+(`TRAPS: a-hash-that-misses-its-artifact`).
 
 ---
 
@@ -496,17 +508,17 @@ length — the composition-free TOTAL at a REGION — and are wall-blind only at
 ledger; END and SPAN are read by nothing (`ISSUES: hygiene-ledger` (b)). The ledger closes twice over:
 `ΣS = ΣE = qc.deposited`; per region `contained ≤ min(S, E)`.
 
-**What the banks do not carry, and why.** No spliced fragment touches the region axis: both endpoints of
-an annotated intron are region bounds, so a spliced fragment can never be *contained*. No length-sum
-bank exists: at `mu_g = mu_r` a `Σ L` row is proportional to the count row and adds no tilt
-(`TRAPS: equal-lengths-carry-no-composition`). The counts keep both genome-strand columns (the strand
-model is a Beta-Binomial over them); the inv-length sums and the boundary masses keep one, because every
-consumer sums the columns. `sj_count` and `sj_mass` keep both, for aligner-artifact detection (owner,
-2026-08-08 / 2026-08-12): in a stranded library a real sj inherits the global strand specificity while a
-false-positive `N` op from genomic DNA deposits onto both strands, and a count alone cannot separate a sj
-used by many short fragments from one used by few long ones. `substrate` folds the strand axis at its own
-boundary, so `PopulationView.mass` stays strand-agnostic
-(`test_the_junction_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION`).
+**What the banks do not carry, and why.** No spliced fragment touches the region CONTAINED bank (it books
+START, END and SPAN like any path): both endpoints of an annotated intron are region bounds, so a spliced
+fragment can never be *contained*. No length-sum bank exists: at `mu_g = mu_r` a `Σ L` row is proportional
+to the count row and adds no tilt (`TRAPS: equal-lengths-carry-no-composition`). The counts keep both
+genome-strand columns (the strand model is a Beta-Binomial over them); the inv-length sums and the boundary
+masses keep one, because every consumer sums the columns. `sj_count` and `sj_mass` keep both, for
+aligner-artifact detection (owner, 2026-08-08 / 2026-08-12): in a stranded library a real sj inherits the
+global strand specificity while a false-positive `N` op from genomic DNA deposits onto both strands, and a
+count alone cannot separate a sj used by many short fragments from one used by few long ones. `substrate`
+folds the strand axis at its own boundary, so `PopulationView.mass` stays strand-agnostic
+(`test_the_sj_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION`).
 
 **One numeric convention** (owner, 2026-08-11): a COUNT is an integer; a FRACTION is float64 — no fixed
 point, no scale constant, nothing decodes a bank (measured against exact rational arithmetic, float64 is
@@ -551,9 +563,10 @@ its EM candidates. Contention for a boundary is rare rather than impossible (~0.
 What this replaced: `assemble_priors` folded each boundary's
 mass into one flank region because `_project_regions_to_loci` cannot see a 0-bp object, and the fold then
 needed an intergenic re-key (`TRAPS: a-fold-grows-a-heuristic`). The prior's target, stated once:
-`n_gdna` in `em_solver.cpp:apply_grouped_prior_update` is a soft count of the gDNA fragments that are
-candidates in one multi-locus, each counted once; a first-base count of a locus's fragments is not this
-quantity, because it drops every fragment that overlaps the locus but starts outside it.
+calibration's per-locus `gdna_count` (`priors.assemble_priors`, the numerator of `pipeline.em_pseudocounts`'
+share, §3.1c) is a soft count of the gDNA fragments that are candidates in one multi-locus, each counted
+once; a first-base count of a locus's fragments is not this quantity, because it drops every fragment that
+overlaps the locus but starts outside it.
 
 ### 3.1b-ii Compatibility is checked before a fragment is called a chimera (owner, 2026-08-19)
 
@@ -589,7 +602,8 @@ falls 18.3k → 14.4k, 13.6k → 11.4k and 102.6k → 70.2k. The transcript tabl
 
 `g98` gets worse in every stratum: −18.7k → −62.8k, −3.1k → −37.8k and −54.2k → −118.3k. The old lean was
 offsetting two other errors: `ISSUES: rna-prior-floor-at-pure-gdna-loci`, and the capture likelihood's own lean
-toward RNA. The owner accepted the count form and ruled to work on those residuals afterwards (2026-09-24).
+toward RNA. The owner accepted the count form and ruled to work on those residuals afterwards (2026-09-24); the
+first was closed for 0.8.0 on 2026-09-26, to be reopened only with a fundamentally different algorithm.
 
 > **The prior's strength is one pseudo-fragment per gDNA-eligible unit, and there is deliberately no knob**
 > (owner, 2026-08-10; restated 2026-09-24).
@@ -622,9 +636,10 @@ annotated transcript at short introns, under every prior (`ISSUES: calibration-a
 A multimapper whose alignments all lie outside genes is intergenic and counted as gDNA. One with an alignment in a
 gene is solved by the EM, and it is compatible with gDNA if any alignment is unspliced — including an intergenic
 one (an unannotated pseudogene), which the scanner does not yet buffer (`ISSUES: multimapper-intergenic-alignments`).
-Calibration still holds artifact fragments and multimappers out of its SAMPLE, never in the other class, and the
-prior's share is read over that sample (§3.1c); bringing multimappers into calibration is
-`ISSUES: multimapper-blind-support`, and editing an artifact's alignment is `ISSUES: splicing-artifacts`.
+Calibration holds artifact fragments out of its SAMPLE, never in the other class (editing an artifact's alignment
+is `ISSUES: splicing-artifacts`); a multimapper enters it at the placement the second pass draws (§4.2; CLOSED
+`ISSUES: multimapper-blind-support`). The prior's share is still read over the unique units (§3.1c), so a locus
+holding drawn multimappers over-states it (`ISSUES: the-em-prior-share-excludes-drawn-multimappers`).
 
 ### 3.1e The accelerator never decides the answer (owner, 2026-09-25)
 
@@ -683,9 +698,10 @@ refused (`ISSUES: whole-counts-optimised-assignment`).
 
 ### 3.2 One strand convention
 
-Everything is stored by **genome** strand (`CHANNEL_PLUS` / `CHANNEL_MINUS`). *Sense* / *antisense* is
-the transcript-relative notion and is derived, never stored. Two strands exist and they are independent:
-`align_strand` and `sj_strand`. An inferred splice is `sj_implicit`, never "inferred".
+Everything is stored by **genome** strand (`kNStrandColumns` columns, + then −, chosen by `strand_column`).
+*Sense* / *antisense* is the transcript-relative notion and is derived, never stored. Two strands exist and
+they are independent: `align_strand` and `sj_strand`. An inferred splice is `SPLICED_IMPLICIT`, never
+"inferred".
 
 ### 3.3 Two components only
 
@@ -785,13 +801,15 @@ the candidate's own introns: the span less every intron of the transcript lying 
 
 ### 3.5 The five length pools
 
-Each is pure by construction, and purity is what removes the circularity: a model is fitted only from a
-population known to be one component, so nothing is estimated from the fragments it will later explain.
+Each is selected by structure, never by a fit, and that is what removes the circularity: nothing is estimated
+from the fragments it will later explain. No pool is pure, though (`calibration/fl.py`): the contained pair
+also carries RNA inside introns and unannotated transcription, which the gDNA law's two-pool contrast divides
+out (§3.6).
 
 | pool | rule | component |
 |---|---|---|
-| `DNA_INTERGENIC` | contained in exactly one intergenic region | gDNA |
-| `DNA_INTRONIC` | contained in exactly one intronic region | gDNA |
+| `DNA_INTERGENIC` | contained in exactly one intergenic region | gDNA, with unannotated RNA |
+| `DNA_INTRONIC` | contained in exactly one intronic region | gDNA, with RNA inside introns |
 | `DNA_INTRON_EXON` | crosses exactly one boundary, flanks {intron, exon} | gDNA |
 | `DNA_INTERGENIC_EXON` | crosses exactly one boundary, flanks {intergenic, exon} | gDNA |
 | `RNA_SPLICED` | used an annotated sj on its one surviving path, sequenced or implied | RNA |
@@ -805,12 +823,17 @@ are gDNA, because mature RNA never crosses an exon↔intron boundary
 ### 3.6 Each pool is divided by its own opportunity
 
 The gDNA model is fitted from all four gDNA pools, each divided by its own opportunity and then combined
-— `calibration/gdna_opportunity.py`, derivation in `EQUATIONS.md` §4. The RNA model is the sj pool divided
-by its own — `calibration/sj_opportunity.py`. ⛔ The four gDNA pools must never be pooled raw
+— `calibration/gdna_opportunity.py`, derivation in `EQUATIONS.md` §4 — with the contained pair's contaminant
+divided out by a two-pool CONTRAST whose weights come from `gdna_density`'s one-sided rate
+(`fl._deconvolved_gdna_counts`, which falls back to the de-tilted four-pool sum where it declines). The law is
+published twice: `gdna_pmf`, the uniform frame every opportunity reads, and `gdna_realized_pmf`, the library
+census the EM's scorer conditions on (`ISSUES: the-scorer-reads-a-census-length-law`). The RNA model is the
+sj pool divided by its own — `calibration/sj_opportunity.py`. ⛔ The four gDNA pools must never be pooled raw
 (`TRAPS: opposite-tilts-must-not-pool`), and every divisor is a probability, not a count
 (`TRAPS: divide-by-a-probability`). The contained pair dominates off capture; the crossing pair dominates
 under it, because the surviving off-target gDNA sits beside a probe and reaches the exon boundary. The
-second pass's scorer reads the same de-tilted pools calibration reads.
+second pass scores a spliced hypothesis with the de-tilted RNA law and a genomic one with the unconditional
+anchor (`global_pmf`, every deposited fragment), both from pass one's payload (§4).
 
 ### 3.7 The deposit weight is 1/opportunity
 
@@ -842,6 +865,17 @@ chosen hypothesis alone — a set of size one, so arbitration is degenerate and 
   (`TRAPS: integer-channels-reproduce`).
 * **After the drain nothing is held**: the bank is empty and the deferred counters are 0. Pass one's
   numbers live in `DrainQC`.
+
+### 4.1 Settled sub-decisions
+
+| | |
+|---|---|
+| **a composition may be imputed across a step iff the source supplied both components AND the two objects measure the same RNA population** | owner, 2026-08-04: *"is the source of the message measuring the same thing that I am measuring?"* — if yes, attribute the density discrepancy to capture enrichment; if no, enrichment and a population difference cannot be told apart. Termini only — DONOR/ACCEPTOR change the population too, but their flux is *measured* and the splice-in and splice-out route it |
+| **the population test is written in genomic terms, never TSS/TES** | the strand flips which flank a terminus implicates; the builders' ``outside_flank`` (`native/transfer_kernel.h`) is the one home (TSS+ / TES− bodies extend genomic-right, so the outside is the LEFT flank; TES+ / TSS− the reverse), gated on mirror-image annotations |
+| gDNA's strand term is **0.5** | double-stranded, no sense direction. A fitted mixture marginal was implemented and refuted (`EQUATIONS.md` §5) |
+| a flat-zero factor is **skipped**, not multiplied | `TRAPS: an-all-zero-factor-is-inert` |
+| the draw is keyed on **queue position**, never content | `EQUATIONS.md` §10 |
+| ambiguous assignment stays **integral** | `TRAPS: fractional-mass-is-the-problem` |
 
 ### 4.2 A multimapping fragment is one fragment with several PLACEMENTS, offered once (owner, 2026-10-10)
 
@@ -903,17 +937,6 @@ probabilistically best placement by the abundance of uniquely aligned fragments 
   converged, the total the same). So the gate holds the TOTAL and the SHAPE with the EM run to convergence
   (`assert_identical_paralogs`, `CONVERGED_EM`), not an even split and not where the solver happens to stop.
 
-### 4.1 Settled sub-decisions
-
-| | |
-|---|---|
-| **a composition may be imputed across a step iff the source supplied both components AND the two objects measure the same RNA population** | owner, 2026-08-04: *"is the source of the message measuring the same thing that I am measuring?"* — if yes, attribute the density discrepancy to capture enrichment; if no, enrichment and a population difference cannot be told apart. Termini only — DONOR/ACCEPTOR change the population too, but their flux is *measured* and the splice-in and splice-out route it |
-| **the population test is written in genomic terms, never TSS/TES** | the strand flips which flank a terminus implicates; the builders' ``outside_flank`` (`native/transfer_kernel.cpp`) is the one home (TSS+ / TES− bodies extend genomic-right, so the outside is the LEFT flank; TES+ / TSS− the reverse), gated on mirror-image annotations |
-| gDNA's strand term is **0.5** | double-stranded, no sense direction. A fitted mixture marginal was implemented and refuted (`EQUATIONS.md` §5) |
-| a flat-zero factor is **skipped**, not multiplied | `TRAPS: an-all-zero-factor-is-inert` |
-| the draw is keyed on **queue position**, never content | `EQUATIONS.md` §10 |
-| ambiguous assignment stays **integral** | `TRAPS: fractional-mass-is-the-problem` |
-
 ### 4.3 The frame ruling — instruments measure the DRAINED tally (owner, 2026-08-31)
 
 **Every calibration-facing instrument scores the frame production calibrates: the drained one.** The
@@ -952,12 +975,12 @@ transcripts and materialized as ordinary transcript rows in `index.t_df`, flagge
 `scan_cache` `locus` `locus_partition` `scored_fragments` `estimator` `strand_model` `junction_fit` `frag_length_model`
 `second_pass` `splice` `splice_blacklist` `native` `gtf` `transcript` `annotate` `stats` `types`, plus the
 `report/` and `sim/` subpackages. `calibration/`: `calibrate` (orchestrator) · `splice_graph` (the
-index's graph) · `sweep` (the backbone) and `messages/` (the policy: `silent` · `transfer`; the row constructors `native/transfer_rows.h`) ·
-`region_chain` `region_geometry` `region_init` · `substrate` `region_arrays`
-`signature` · `effective_length` `capture_eff_length` `fl` `sj_opportunity` `gdna_opportunity` ·
-`strand_balance`
-`density_model` `landscape` · `simplex_logodds` `derive` ·
-`priors` `result` `errors` `track` · `_layers` (the layering the imports already had).
+index's graph) · `sweep` (the backbone), `blocks` (its plumbing) and `messages/` (the policy: `silent` ·
+`transfer`; the row constructors `native/transfer_rows.h`) · `region_chain` `region_geometry` `region_init` ·
+`substrate` `region_arrays` `signature` · `effective_length` `capture_eff_length` `fl` `sj_opportunity`
+`gdna_opportunity` `gdna_density` · `strand_balance` `density_model` `landscape` `capture_efficiency` ·
+`simplex_logodds` `derive` · `priors` `result` `errors` `track` · `_layers` (the layering the imports already
+had).
 Re-derive this list from `calibration/_layers.py` and the imports rather than trusting it.
 
 **Where a number lives (2026-10-01).** `config` holds two frozen, validated trees: what a run may set
@@ -970,14 +993,15 @@ definitions where they are used; and the values the native kernels share with Py
 exported (`native.transfer_rows.ARM_EPS`, `JEFFREYS_REF`, `OWN_EVIDENCE_EPS`), never restated.
 `tests/test_constants.py` gates it: a bare numeric module constant outside those homes fails.
 
-**C++** (`src/rigel/native/`, nanobind, C++17, `-O3`, LTO; threads from its own pool, `thread_pool.h`):
+**C++** (`src/rigel/native/`, nanobind, C++17, `-O3`; LTO on every module but `_solve_impl`; threads from its own
+pool, `thread_pool.h`):
 
 | module | source | purpose |
 |---|---|---|
 | `_bam_impl` | `bam_scanner.cpp`, `calibration/accumulator.cpp` | BAM parsing, fragment grouping, strand-model training, the accumulator |
 | `_em_impl` | `em_solver.cpp` | per-locus EM, connected components (Kahan summation, SIMD `fast_exp.h`, `-ffp-contract=fast`) |
 | `_solve_impl` | `solve_kernel.cpp` (`psi_kernel.h`, `transfer_kernel.h`, `transfer_rows.h`) | the calibration sweep in one call (§6b.15.5) and the bindings the gates read |
-| `_scoring_impl` | `scoring.cpp` | fragment likelihood scoring (`-ffast-math`, no SIMD) |
+| `_scoring_impl` | `scoring.cpp` | fragment likelihood scoring (`-ffast-math -fno-finite-math-only`, no SIMD) |
 | `_resolve_impl` | `resolve.cpp` | fragment→transcript resolution via cgranges |
 | `_cgranges_impl` | vendored | interval overlap |
 
@@ -987,7 +1011,7 @@ exported (`native.transfer_rows.ARM_EPS`, `JEFFREYS_REF`, `OWN_EVIDENCE_EPS`), n
 |---|---|---|
 | `sweep.py` | **The backbone.** The structure, the library, the blocks, ONE native call (`native.solve_blocks`: per block the self-solve, the two passes, the solve, the write-back), the assertions' counts | It knows nothing about capture, splices, levels, lanes or enrichment — `test_sweep_backbone.py` asserts those words appear in none of its identifiers, read from the AST |
 | `blocks.py` | the block plumbing of the locus solve: `view_fields` (every per-slot array a policy may read — the arrays the kernel takes), `SweepCapture` (the diagnostic capture of a sweep, the instruments' view, never built in production) | nothing about what a solve or a message is |
-| `messages/silent.py` | `SilentPolicy` — sends nothing. **The measured floor**, what `message_policy = "silent"` installs | A reader who holds `sweep.py` plus this holds the entire working system |
+| `messages/silent.py` | `SilentPolicy` — sends nothing. **The measured floor**, what `message_policy = "silent"` installs | A reader who holds `sweep.py`, this and the native solve (`native/solve_kernel.cpp`, `psi_kernel.h`) holds the entire working system |
 | `messages/transfer.py` | `TransferPolicy` — **the shipped default** (2026-09-09): its name, its strand model and its library; the builders, the two passes and the solve are the kernel's (`native/transfer_kernel.h`, §6b.4–§6b.14) | `prepare_block` is a table of contents: a reader finds a message by its builder's name |
 | `messages/__init__.py` | the interface (`Policy`: a name, a strand model, a library) and `ChainView`, the whole chain's observations and geometry with no beliefs — the one scope a policy sees in Python | gate: `test_sweep_backbone.py` |
 
@@ -1041,16 +1065,17 @@ whatever is left is RNA. This is scoped to the off-target case and §0c.3 carrie
 **The boundary axis splits on whether mature RNA can cross, not on whether a splice junction attaches**
 (owner, 2026-08-15). A BOUNDARY owns the fragments that cross it contiguously, and mature RNA can do that
 only where the template is contiguous exon on both sides. So an `exon|intron` boundary is near-pure gDNA
-under sparse nascent, while an `exon|exon` boundary is crossed freely by mature RNA. The predicate is the
-solver's own `mrna_active`. A pool defined as "a splice junction attaches here" measured true `f_g`
-0.0000 over 955,428 fragments at the zero-gDNA control, because it lumps `exon|exon` in.
+under sparse nascent, while an `exon|exon` boundary is crossed freely by mature RNA. A pool defined as "a
+splice junction attaches here" measured true `f_g` 0.0000 over 955,428 fragments at the zero-gDNA control,
+because it lumps `exon|exon` in.
 
-**The reference and the gDNA landscape partition the object universe rather than competing.** Where the
-annotation determines the answer — intergenic and intron REGIONs, `exon|intron`, `intron|intron`,
-gene-edge and opposite-strand `exon|exon` BOUNDARIES, 47.5 % of slots — the reference carries it before
-any solve exists. Exons, same-strand `exon|exon` and AMBIG have no structural claim and are the
-population the landscape is fitted to serve. The reference is worth one pseudo-fragment, so it is
-swamped by any evidence channel — but on an evidence-free object posterior = prior at any depth.
+**Record — the reference and the gDNA landscape partitioned the object universe** (superseded by §6b.1). Where
+the annotation determined the answer — intergenic and intron REGIONs, `exon|intron`, `intron|intron`,
+gene-edge and opposite-strand `exon|exon` BOUNDARIES, 47.5 % of slots — a structural reference worth one
+pseudo-fragment carried it before any solve existed; exons, same-strand `exon|exon` and AMBIG were the
+population the landscape was fitted to serve. Today only a G1 slot (`region_geometry.g1_locked`: intergenic
+REGIONs, `intergenic|exon` BOUNDARIES) is fixed by the annotation, and every other slot that holds a fragment
+is solved under ψ's symmetric Jeffreys reference, its messages and the landscape prior (§7.1).
 
 ### 6b.1 The reference location — refuted and deleted (owner, 2026-08-24)
 
@@ -1060,8 +1085,9 @@ symmetric Jeffreys Beta reference, which asserts nothing, and the location conce
 flag, a constant or a "weakened" variant. The one measurement: where the strand channel carried no
 information (κ = ½, or near a vertex) the location was the entire answer at any depth — 0.7471 at every N
 from 10 to 10⁶ — and at zero refits it decided 100 % of the claimed-boundary error. Background
-information enters as LIKELIHOOD terms whose precision scales with counts (`density_lambda_factor`) and,
-per object, as the landscape prior (§7.1).
+information enters per object as the landscape prior (§7.1); the LIKELIHOOD form whose precision scaled with
+counts (`density_lambda_factor`, the intron factory's λ-factor row) was deleted with the count foundation
+(2026-10-10).
 
 ### 6b.2 Record — the RNA-anchored evidence factor
 
@@ -1107,12 +1133,12 @@ exon by the splice junction and crosses neither boundary (certified: 0.02–0.03
 the ladder, every case a ≤ 100 bp intron inside a fragment's unsequenced mate gap — an accepted
 accumulator residual). The component density odds are shared, so COUNT log-odds shift by
 `log(Eg_i/Eg_b) − log(Er_i/Er_b)`; the map is the identity only when the opportunity ratios agree.
-The boundary's OWN strand row (`simplex_logodds.strand_row_logodds`, the variance
-frozen at the boundary's incoming belief — a source-side read), never its belief, is read in that frame.
+The boundary's OWN strand row — the conditional binomial of its observed strand columns given their total
+(`native/transfer_kernel.h`'s `strand_profile`) — never its belief, is read in that frame.
 The intron → boundary direction uses the inverse shift. The hop adds no width:
 stage 0 on certified truth reads zero excess variance over counting between an intron's composition and
 its boundaries' on every panel, so no widening ships. The licence: the boundary must admit the intron's
-single strand set (``boundary_shares_strand``, `native/transfer_kernel.cpp`); a terminus flag does not refuse; the gate
+single strand set (``boundary_shares_strand``, `native/transfer_kernel.h`); a terminus flag does not refuse; the gate
 is `tau_lam > 0` at the boundary, so an unstranded library sends nothing. Measured node-locally at the
 receiving introns: −26…−38 % on the ladder's stranded capture-ON rows; the reversed row multiplies the
 destination error by 1.7–30×.
@@ -1121,7 +1147,7 @@ destination error by 1.7–30×.
 
 A transcript terminus at an `exon|exon` boundary covers exactly one flank, the INSIDE; the OUTSIDE is
 read off the flag alone (TSS+ and TES− bodies extend genomic-right, so the outside is the left flank;
-TES+ and TSS− the reverse; termini pointing both ways give no side — ``outside_flank``, `native/transfer_kernel.cpp`).
+TES+ and TSS− the reverse; termini pointing both ways give no side — ``outside_flank``, `native/transfer_kernel.h`).
 Certified: the outside flank's composition matches the crossing (13,985 ladder pairs) while the inside
 flank differs by +0.25…+0.51 nats. The licence is NOT verbatim: a mature fragment that crosses an
 `exon|exon` boundary and splices within its own extent is counted in the boundary's SPLICED bank, not
@@ -1149,7 +1175,7 @@ the boundary's level and the precision is dampened by the pair's own discrepanci
 An `exon|exon` boundary carrying a splice junction and no terminus: one isoform continues contiguously
 across it, the other splices out there. Read off the flag alone (a DONOR bit marks the intron's LOW end
 on either strand; an ACCEPTOR bit its high end), the two flanks are C, the flank on the junction's
-intron side, and E, the flank where both isoforms are exonic (``junction_flanks``, `native/transfer_kernel.cpp`). C shares
+intron side, and E, the flank where both isoforms are exonic (``junction_flanks``, `native/transfer_kernel.h`). C shares
 the boundary's full unspliced crossing, so it is §6b.6's law with the spliced crossing alone; E holds the
 crossing plus the isoform that splices out at this face, measured as the face's route flux `F`, so it is
 §6b.4's law with `S_b + F`. The rates are `S_b/Er_b` for C and `S_b/Er_b + Σ_J J/A_J` for E, with
@@ -1233,11 +1259,11 @@ backward pass; at each hop the RECIPIENT receives what its neighbour sends (the 
 composed with what the sender holds from its far side), decides to STOP, FORWARD or MODIFY it, and holds
 the result; beliefs do not change; when both passes end every node holds one message from each
 neighbour it has — silence being a neighbour with nothing present and a missing neighbour no hop at all,
-the two states the `Received` table expresses (2026-09-12: what a node holds is a ROW of the pass's
-table, never an object). `solve` — every node once, from its own evidence, the two tables and the gDNA
-hyperprior. The names are
-`prepare / run_pass(received, seq, nbr, terminal, backward) / solve(from_left, from_right)`; the
-per-sweep object is `Prepared`. Measured before the ruling: the formal form with the same messages won
+the two states the received table (`ReceivedView`) expresses (2026-09-12: what a node holds is a ROW of the
+pass's table, never an object). `solve` — every node once, from its own evidence, the two tables and the gDNA
+hyperprior. The names are the kernel's — `prepare_block` / `pass_block` (forward, then backward) /
+`solve_block` (`native/transfer_kernel.h`), run per locus block by `native.solve_blocks`. Measured before the
+ruling: the formal form with the same messages won
 both halves of the ladder against the one-hop form, 7/8 and 7/8 (`policy_prototype.py`, retired 2026-09-18).
 
 **The message's lanes.** A node's unknown is its COMPOSITION on the simplex — two degrees of freedom
@@ -1272,18 +1298,16 @@ are the landscape prior's to win (§7.1).
 **The edge floor is an approximation** (owner clarification, 2026-10-08). An exon-end
 probe can enrich boundary-crossing fragments more than the average of fragments
 contained throughout a long exon. Small exons often support the existing approximation;
-local co-enrichment alone does not guarantee its density ordering. The owner authorizes
-an isolated prototype withdrawing the cross-object EDGE floor, preserving the boundary's
-own DNA evidence, every other message and the existing lane licences. This is permission
-to measure bias against lost imputation information, not a selected production replacement
-or an expected large accuracy gain. Strand observations constrain the objects individually;
-unstranded regions may depend strongly on their neighbours. Keep the release and
-fragment-length priorities, and retain the separate reader-integration checkpoint.
+local co-enrichment alone does not guarantee its density ordering. Strand observations constrain
+the objects individually; unstranded regions may depend strongly on their neighbours. The isolated
+withdrawal of the cross-object EDGE floor the owner then authorized — the boundary's own DNA evidence,
+every other message and the lane licences kept — was measured and not selected: it trades useful
+imputation for less bias in some cases (`ISSUES: the-edge-density-floor-under-capture`). The floor ships.
 
 **Every message-policy idea is judged twice, and the two readings are never pooled.** The gDNA
 landscape prior is fitted after the first pass, on that pass's solved gDNA, and comes back in the second
 — so a first-pass error poisons the prior and the prior returns it everywhere
-(`ISSUES: gdna-landscape-trains-on-false-positives`). A mechanism is read at PASS ZERO
+(`ISSUES: the-gdna-landscape-collapses-at-low-depth`). A mechanism is read at PASS ZERO
 (`calib_refit_iters = 0`) and with the full pipeline, side by side; a win or a refutation read only
 through the full pipeline is not attributed. The first pass does not have to solve every node; it has to
 solve ENOUGH nodes confidently to train a landscape that solves the rest.
@@ -1301,23 +1325,16 @@ travel TOGETHER in one message (components only where measured, empties forwarde
 joins as an RNA source; ONE representation everywhere — profiles on the solve grid, no Gaussian summary
 anywhere in the transfer policy; the bar is about one percent of a row.
 
-**Density-range prototype authorization** (owner, 2026-10-09). An isolated prototype may
-give density-message tables numerical extents independent of the composition/count grid.
-Keep that grid, its spacing, the existing sources, neighbour relationships, message rules
-and count model. This authorizes testing the representation needed to preserve evidence;
-it does not authorize production integration or select a capture prior. The shipped
-representation above remains until the separate landing checkpoint.
+**Density-range and local density-unit prototypes** (owner authorizations, 2026-10-09): density-message
+tables with numerical extents independent of the composition/count grid, and one numerical unit per
+connected component of each density lane from its admitted source count/exposure pairs — each isolated, with
+the grid, its spacing, the sources, neighbour relationships, message rules and count model kept, and no
+capture prior selected. Neither was integrated: a level's coordinate is still the solve grid with one origin
+per lane (below), and the finite-support loss that leaves is open (`ISSUES: the-gdna-prior-enters-psi-twice`).
 
-**Local density-unit prototype authorization** (owner, 2026-10-09). The isolated
-representation experiment may also choose one numerical unit per connected component of
-each existing density lane, from that component's already admitted positive source
-count/exposure pairs. This positions the density tables without a new prior or neighbour
-relationship. Keep the count grid, existing density spacing, source admissions and
-message operators; test coordinate covariance and numerical convergence separately.
-Production integration remains a separate checkpoint.
-
-* **The lanes.** `Received.level_rna_pos` / `level_rna_neg` (`Levels`): a strand's level as a profile over
-  `u_s = log(ρ_s / ρ_ref)`, with one numerical RNA origin shared by both strands. The existing
+* **The lanes.** The received table's `level_rna_pos` / `level_rna_neg` lanes (`LevelsView`,
+  `native/transfer_kernel.h`): a strand's level as a profile over `u_s = log(ρ_s / ρ_ref)`, with one
+  numerical RNA origin shared by both strands. The existing
   positive exon-based origin is retained. If it is zero, available RNA-admitting count/opportunity
   pairs and certified-flux count/exposure pairs supply a positive scale. This implements
   **Changing a coordinate preserves physical support** in EQUATIONS: a zero coordinate cannot
@@ -1326,14 +1343,14 @@ Production integration remains a separate checkpoint.
   repair loss outside a finite table. Faces from the flag bits, per strand: strand `s`'s level crosses a
   face iff the boundary carries none of `s`'s four bits and both nodes admit `s`; across `s`'s own
   junction it enters `s`'s intron and not `s`'s exon; a terminus of `s` stops `s` both ways. The intron
-  test is PER STRAND (`BlockContext.exon_pos` / `exon_neg`): a region that admits `s` and carries no exon
-  of `s` is `s`'s intron whatever the other strand does there. Two-sided only between an intron of `s` and
-  its own boundary; lower-only everywhere else. **Every hop pays the pair's price, and the witness of the
-  strand's abundance is the column split's asymmetry** (`lanes.LevelLane.witness`, 2026-09-09): both column
-  counts' counting plus the disagreement, beyond its own counting, between the two nodes' estimates of
-  this strand's RNA — `count − other` on each (gDNA splits evenly and cancels; the protocol's contrast
-  `|1 − 2κ|` drops out of the ratio) — carried with the level across empty nodes. A node with no
-  asymmetry is DARK, and two dark nodes agree whatever their column densities do. The decisive
+  test is PER STRAND (the chain's `exon_pos` / `exon_neg`, `ChainView`): a region that admits `s` and carries
+  no exon of `s` is `s`'s intron whatever the other strand does there. Two-sided only between an intron of `s`
+  and its own boundary; lower-only everywhere else. **Every hop pays the pair's price, and the witness of the
+  strand's abundance is the column split's asymmetry** (`rna_lane`'s witness, `native/transfer_kernel.h`,
+  2026-09-09): both column counts' counting plus the disagreement, beyond its own counting, between the two
+  nodes' estimates of this strand's RNA — `count − other` on each (gDNA splits evenly and cancels; the
+  protocol's contrast `|1 − 2κ|` drops out of the ratio) — carried with the level across empty nodes. A node
+  with no asymmetry is DARK, and two dark nodes agree whatever their column densities do. The decisive
   measurement: counting alone carried a lit intron's sharp upper side across a probe cliff unpriced (the
   ladder's `g05 ss.99 ON` read a 93 % RNA junction as 86 % gDNA); the split witness keeps that row.
 * **The sources.** A single-strand node's own claim read as its live strand's RNA level
@@ -1353,14 +1370,14 @@ Production integration remains a separate checkpoint.
   deriving it again from extended coordinates can change the finite kernel through rounding.
   Temporary evaluations retain the one-lattice rule and do not change hop pricing. The remaining finite-support problem
   is recorded in `ISSUES: the-gdna-prior-enters-psi-twice`.
-* **The delivery at AMBIG nodes** (`PsiMessage.cube_rows`, a `simplex_logodds.CubeRows` table): the held levels per strand as ONE
-  row over ψ's `(λ, θ)` cube — at each cell `f_s = (1 − σ)(1 ± τ)/2`, the profile read at
-  `log(ρ_s / ρ_ref,s)`; a one-sided profile stays one-sided (gated). The backbone adds the row inside the
-  AMBIG solve, final solve only; absent, byte-identical (gated).
-* **The upper side at single-strand nodes** (`rna_row_of_level`, `_ceilings`; landed 2026-09-08). An RNA
-  level of the node's live strand says "at most this much gDNA": the held level read as a λ row through
-  `f_s = 1 − σ`, bounds intersected. **Read only from a face that sent no composition** — a licensed
-  face's splice-in map already carries the flux as its cap; the naive form that reads every level and
+* **The delivery at AMBIG nodes** (a `simplex_logodds.CubeRows` table, built by `solve_block`): the held
+  levels per strand as ONE row over ψ's `(λ, θ)` cube — at each cell `f_s = (1 − σ)(1 ± τ)/2`, the profile
+  read at `log(ρ_s / ρ_ref,s)`; a one-sided profile stays one-sided (gated). The backbone adds the row inside
+  the AMBIG solve, final solve only; absent, byte-identical (gated).
+* **The upper side at single-strand nodes** (`rna_row_of_level`, the ceilings in `solve_block`; landed
+  2026-09-08). An RNA level of the node's live strand says "at most this much gDNA": the held level read as
+  a λ row through `f_s = 1 − σ`, bounds intersected. **Read only from a face that sent no composition** — a
+  licensed face's splice-in map already carries the flux as its cap; the naive form that reads every level and
   every flux counts them twice (the weak-κ zero control 42 → 1,540).
 * **Measured at landing** (full pipeline, halves apart): the ladder wins every non-zero row of both halves
   (unstranded 6/6, worst 1.000×; stranded 6/6, worst 0.994×; `g98 ss.99 ON` 201,578 → 176,703).
@@ -1410,10 +1427,10 @@ and nothing may. Verified on the human chain before it was made structural: of 1
 and 4,621,302 lane faces the shipped policy built, none delivered into an intergenic region, none of a
 terminal's 65,852 gDNA-lane faces ever carried anything (a terminal has no own level), and the policy wrote
 no held message at one in either pass. The backbone now REFUSES to ask a kernel for a hop into a terminal
-(`sweep._pass`) and the lane no longer lists faces from one, so no future policy can move the boundary
-condition; the terminal predicate is `is_region & g1_locked`, one definition (33,120 slots on the human
-chain, exactly the intergenic set). The chain therefore breaks into 33,018 loci (median 19 slots, the
-largest 2,477 = 0.12 % of the chain) and `sweep.solve_chain` solves it a LOCUS BLOCK at a time
+(`pass_block` skips a terminal destination) and the lane no longer lists faces from one, so no future policy
+can move the boundary condition; the terminal predicate is `is_region & g1_locked`, one definition (33,120
+slots on the human chain, exactly the intergenic set). The chain therefore breaks into 33,018 loci (median 19
+slots, the largest 2,477 = 0.12 % of the chain) and `sweep.solve_chain` solves it a LOCUS BLOCK at a time
 (`region_chain.locus_blocks`): each block on its own slice of every input, reading one slot beyond itself
 where that slot is the terminal its last node receives from (the halo is load-bearing: without it the last
 node hears an open side instead of silence and its own flux is not read).
@@ -1421,7 +1438,7 @@ node hears an open side instead of silence and its own flux is not read).
 #### 6b.15.2 The only information that crosses a block boundary is the policy's LIBRARY
 
 `Policy.library(view)` runs once over the whole chain on a `ChainView` — observations and geometry, no
-beliefs, so a cross-block reduction over beliefs has no field to read — and `prepare(ctx, library)` sees
+beliefs, so a cross-block reduction over beliefs has no field to read — and the kernel's `prepare_block` sees
 one block. The transfer policy's library is two coordinate origins (gDNA and one shared by both RNA lanes)
 and whether the strand split is a live witness, which is the library's strand protocol decision
 (`region_init.strand_discriminability`) rather than a per-slot solve. No intron-background row
@@ -1504,8 +1521,9 @@ a 140 s deep run and cost 2.3 GB held through calibrate, a key that had to name 
 forgotten field serves stale messages silently), and the deliveries' round trip through Python. The kernel's
 contract is arrays in, arrays out, integer counts.
 
-**The measured price** (VCaP, 18.6 M fragments, 8 threads, interleaved pairs; `perf/` holds each step): the port took
-the deep library from 526 s to 144 s and the four sweeps from 396 s to 16 s (24.8 s once the cache went); the work
+**The measured price** (VCaP, 18.6 M fragments, 8 threads, interleaved pairs; `~/Downloads/rigel_runs/perf/` holds
+each step): the port took the deep library from 526 s to 144 s and the four sweeps from 396 s to 16 s (24.8 s once
+the cache went); the work
 outside calibration that followed — a bisection that ends when its bracket does, the Poisson identity's log-gamma as
 an integer table, one region-to-locus traversal per assembly, the scan's thread split by a measured ratio
 (`ISSUES: scan-thread-split-starves-the-workers`), the second pass asking the region-bound axis once per reference,
@@ -1516,11 +1534,12 @@ replay's budget), the owner's call (`ISSUES: performance-memory-bounded-solve`).
 #### 6b.15.6 One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer; native since 2026-09-17, §6b.15.5)
 
 A single-strand slot is the cube with a tilt grid of one cell — its tilt is its live strand, `τ = ±1` — so
-`simplex_logodds._solve_logodds` serves both classes, ψ built once by `_psi` on the `(m, K, K_t)` cube and
-read out once: `f_g` the posterior median over the θ-marginal, `Var(log f_g)` its grid moment, the tilt
-share `w_pos` the RNA-mass-weighted posterior share, the composition their image under `_compose`. The
-float32 cube was a memory choice the tiling made moot and is gone (`ISSUES: f32-strand-tilt-at-half` closed
-with it); the cache holds float64 rows (+1.4 GB on the deep library, plan step E's switch). The two strand
+`psi_kernel.h`'s `solve_slot` serves both classes (`native.psi_solve`), ψ built once by `slot_cube` on the
+slot's own cube and read out once: `f_g` the posterior median over the θ-marginal, `Var(log f_g)` its grid
+moment, the tilt share `w_pos` the RNA-mass-weighted posterior share, the composition their image under
+`compose`. The float32 cube was a memory choice the tiling made moot and is gone
+(`ISSUES: f32-strand-tilt-at-half` closed with it); the message cache held float64 rows (+1.4 GB on the deep
+library, plan step E's switch) until it was deleted (§6b.15.5). The two strand
 log-variances `Var(log f_±)` are DELETED: nothing downstream read them (`var_gdna` alone feeds the
 landscape's training weight), and computing them at every slot was the whole cost of the unified read-out;
 with them went the pseudo-fragment floor they were the only consumer of. Judged: the oracle metric and both
@@ -1538,9 +1557,9 @@ against the belief's retired fields.
 Measured before anything moved (`profiler.py`, peak and held per stage): the run's high-water mark was
 `crossing_eff_length`'s ``(objects × fragment lengths)`` matrix chain over the human sj axis, ~9 GB the RSS
 never gave back, and `fit_landscape`'s ``(training regions × grid)`` kernel matrices at the true peak.
-Three rulings, each a numeric no-op on the metric: the crossing divisor is a closed form over the pmf's
-cumulative sums — the four-way min is piecewise linear in the fragment length with breaks at the two
-reaches and their sum, so its expectation is three sums read off ``F`` and ``S``
+Three rulings, each a numeric no-op on the metric, two of which stand: the crossing divisor is a closed form
+over the pmf's cumulative sums — the four-way min is piecewise linear in the fragment length with breaks at
+the two reaches and their sum, so its expectation is three sums read off ``F`` and ``S``
 (`effective_length.crossing_eff_length`; the matrix form is the brute force its gate compares with); the
 landscape's kernels are built and summed a row tile at a time (`landscape._render`, on ψ's own tiling
 rule), so a million training regions never exist as a matrix. The former third allocation,
@@ -1550,26 +1569,28 @@ replay captures were re-taken (`memory_identity_*`, `sweeps_MO_3021_step4`).
 
 #### 6b.15.8 The received messages are tables (2026-09-12, bit-identical on the replay, the three references and the suite)
 
-After a pass every node holds a ROW of the pass's `Received` table — `has_neighbour` (the backbone's),
-`has_composition` and the composition row, and three `Levels` lanes (`present`, the profile, the count and
-opportunity of the last full node, the RNA witness where `has_witness`) — never an object; `Message` and
-`Level` are gone, and SILENCE / NO NEIGHBOUR are the table's two states (`silence`, `no_neighbour`). The
-kernel `receive(source, destination)` reads its far side from row `source` of the same table and writes row
-`destination`; the policy keeps no copy; a lane's `emit` writes the destination's row and its `receive`
-re-prices it in place. The transfer solve fuses the two composition tables as array code in the same
-addition order (left, right, then the gDNA bound); the ceilings and the cube keep their per-node loops.
+After a pass every node holds a ROW of the pass's received table (`ReceivedView`, `native/transfer_kernel.h`)
+— `has_neighbour` (the backbone's), `has_composition` and the composition row, and three level lanes
+(`LevelsView`: `present`, the profile, the count and opportunity of the last full node, the RNA witness where
+`has_witness`) — never an object; `Message` and `Level` are gone, and SILENCE / NO NEIGHBOUR are the table's
+two states (a neighbour bit with nothing present, and no neighbour bit). The pass (`pass_block`) reads a
+destination's far side from row `source` of the same table and writes row `destination`; the policy keeps
+no copy; a lane's `lane_emit` writes the destination's row and its `lane_receive` re-prices it in place. The
+solve (`solve_block`) fuses the two composition tables in the same addition order (left, right, then the
+gDNA bound), then the ceilings and the cube, node by node.
 Gates: `has_neighbour` equals the chain's links (a pass marking every side fires it); a level never sets
 `has_composition` (the training-population gates fire on the backbone, and a composition arrives only
 through a face with a composition rule — `test_transfer_policy` — fires on the kernel).
 
-#### 6b.15.9 Threads are the wrong tool for this sweep, and the executor waits for the port
+#### 6b.15.9 Record — Python threads were the wrong tool for this sweep, and the executor waited for the port (superseded by §6b.15.5)
 
 Measured on the real sweep: the locus-split passes at 8 threads 0.83–0.94× (GIL-bound Python), ψ's grid
 solves 2.06×, the same passes in 8 forked processes 6.16×. The owner's decision: no parallelism until the
 C/C++ port of the block solve, which parallelises there; this ruling delivers the structure the port lands
 on and the memory half of the problem — measured end to end on the 18.6M-fragment library at 8 threads, two
 back-to-back pairs: the run's peak RSS 33.2 → 14.9 GB and 32.6 → 15.0 GB, the wall 0.97–0.98, the sweeps
-0.96–0.97, and the peak now set outside the solve (`build_region_geometry`, `init_beliefs`).
+0.96–0.97, and the peak now set outside the solve (`build_region_geometry`, `init_beliefs`). The port landed
+2026-09-18: `native.solve_blocks` runs the locus blocks on a native pool of threads (§6b.15.5).
 
 #### 6b.15.10 One λ lattice, parametrised by its step (2026-09-13; W5, the grid study)
 
@@ -1581,7 +1602,7 @@ linearly in ``f``. Measured on both panels with every consumer on one grid (`cal
 points and 256 bought nothing (0.994–1.005 of the pair); the pair's remaining cost was the REGRID, a linear
 interpolation of log-profiles that loses their curvature (≈ 1 % in scope on the ladder, ≈ 10 % on the test
 chromosome's unstranded rows, and all of it in the message layer — the silent floor barely moves); refining
-the coarse grid alone recovered the whole gain, in the introns (`density_factor_precision` reads a factory
+the coarse grid alone recovered the whole gain, in the introns (`density_factor_precision` read a factory
 row's precision as a grid variance) and the AMBIG exons (the cube's λ axis). One grid at 138 or more beats
 the pair by 1.0–1.3 % on every in-scope stratum; the deferred stratum reads +1.4 % at every K and `g98`
 +0.8 %, the pair's regrid being an incidental smoothing that happens to help there (flat in K, independent
@@ -1595,7 +1616,7 @@ no tilt count exists). The step is the coarsest that loses nothing against the p
 / 1.000, `g00` 0.994; the panel's two bars unchanged on the ladder, the transfer policy's unstranded losses
 on the test chromosome repaired, 15/20 → 19/20 with the worst row 1.22× → 1.00×), and the landed tree costs
 1.07× wall, 1.08× `calibrate`, +1.8 GB on the deep library (the sweeps' own ψ solves 0.96–0.97×; the passes
-1.10×), because the AMBIG cube and its cached rows scale with K × K_t: 0.146 (138 points) buys −1.0 % for
+1.10×), because the AMBIG cube and the message cache's rows scaled with K × K_t: 0.146 (138 points) buys −1.0 % for
 1.33× and +3.7 GB, 0.10 (201) −1.3 % for 1.71× and +9.8 GB. What the step guarantees, in a user's units: a
 slot's composition is quantised by at most ``n·f(1−f)·step/4`` fragments, 1.25 % of its mass at worst and
 0.6 % on average. The refused forms carry their numbers in `ISSUES: the-second-lambda-grid-and-its-regrid`.
@@ -1608,7 +1629,7 @@ wherever a slot is deep the lattice's sum was a COMB across λ — a factor betw
 where the peak fell between nodes — and the read-out a coin toss on node placement: the recorded K_t 30
 failure (`g00 ss.99 ON`, 9,637 false fragments) was ONE 25k-fragment slot with 28 % of its RNA on the minor
 strand, which 60 nodes happened to land on; the strand-purity story was not the mechanism. The rule
-(`simplex_logodds._tilt_window`, `EQUATIONS.md` §9e): per `(slot, λ)` a window where the term is within `T`
+(`psi_kernel.h`'s `tilt_window`, `EQUATIONS.md` §9e): per `(slot, λ)` a window where the term is within `T`
 nats of its maximum on the domain, one closed form for interior, boundary and beyond-boundary peaks; `K_t`
 uniform nodes in θ across it; the trapezoid weights, exact at a domain end because the integrand is even
 there; `log h` written into ψ. Both constants are DERIVED: `T = −log ε₆₄`, and `K_t = 2T/π + 1 = 24`
@@ -1662,11 +1683,11 @@ messages repair it to 728) — 2,700 more exons, the walled and edge-only ones w
 evidence is their own strand, join the landscape's training population at their pass-0 median, which at a
 pure-RNA vertex sits above zero by the strand term's width (the training census: own:strand 13,104 slots
 and 3,771 false fragments trained at the first refit against 2,627; 585 against 325 at the third). That is
-the estimator's vertex-resolution bias, filed under `ISSUES: gdna-landscape-trains-on-false-positives`, and
-the owner's ruling stands over it: on a gDNA-free library every read is RNA and RNA levels are what must
-flow. On a `g00` donor the shared-exon stress reads the exon never worse and 139 → 109 / 93 → 64 false
-fragments at 50k (20 % / 50 % minor), and the encompassing locus's exon∩exon slots 0.054 / 0.046 → 0.002 /
-0.005 against 0.
+the estimator's vertex-resolution bias, which the location floor (§7.1 rule 4) later answered
+(`ISSUES: gdna-landscape-trains-on-false-positives`, since merged), and the owner's ruling stands over it: on
+a gDNA-free library every read is RNA and RNA levels are what must flow. On a `g00` donor the shared-exon
+stress reads the exon never worse and 139 → 109 / 93 → 64 false fragments at 50k (20 % / 50 % minor), and the
+encompassing locus's exon∩exon slots 0.054 / 0.046 → 0.002 / 0.005 against 0.
 **An RNA level read from a slot's belief is REFUSED** (the issue's second candidate): a belief at a slot
 with no strand information is the prior's answer, and a lane carrying it is the deleted relay (`TRAPS:
 one-hop-lifted-out-is-still-the-relay`). The stranded gDNA-free case is fixed by the gate alone; on an
@@ -1683,7 +1704,7 @@ impure tilt, weighted by the strand term's width — the largest AMBIG-class err
 ss.99 ON`; prior-free a truth of 0.50 read 0.31–0.37). THE RULING: presence per strand is discrete, so the
 tilt's reference measure is a mixture of three hypotheses at equal weight — two atoms at `τ = ±1` and the
 arcsine continuum between them (`dθ/π`) — written into ψ as two more θ columns per AMBIG slot
-(`simplex_logodds._psi`; the cube is `K × (K_t + 2)`), the continuum's trapezoid weights carrying `−log π`
+(`psi_kernel.h`'s `slot_cube`; the cube is `K × (K_t + 2)`), the continuum's trapezoid weights carrying `−log π`
 so that the three masses are equal wherever the strand term is flat; a held RNA level on a strand
 (a delivered row) is a certified witness that the strand carries RNA and rules the OTHER strand's atom out
 (`−∞`), nothing pooled and no constant. The structural witness (the per-strand exon bits) was measured to
@@ -1721,7 +1742,7 @@ the-atom-at-an-unwitnessed-both-strand-slot`.
 
 **The composition has two degrees of freedom, not three.** ψ solves a point on the 2-simplex,
 parametrised by `λ` (the gDNA-vs-RNA LEVEL) and `θ` (the RNA-internal TILT, a share with no absolute
-scale). The composition is their image — `simplex_logodds._compose`:
+scale). The composition is their image — `psi_kernel.h`'s `compose` (bound as `native.psi_compose`):
 
     f_g  = the ½-quantile of the λ posterior        RNA total := 1 − f_g
     f_pos = (1 − f_g)·w        f_neg = (1 − f_g)·(1 − w)
@@ -1747,12 +1768,12 @@ and the mechanism is the EMPTY node: 52 % of the ladder's exon pieces have no to
 a fragment, or a dark piece), every rule's licence asks its flank for a total, so the boundaries on both
 sides of such a piece heard nothing. The ruling that closes it:
 
-* **A level is absolute.** `Received.level_gdna` holds a PROFILE over `u = log(rho / rho_ref)` on the solve
-  grid (`rho_ref` the library's structurally pure gDNA density, a coordinate choice); it needs no map and
-  no knowledge of its recipient, which is what lets it cross a node with no total, and it is a profile
-  because what travels on it is one-sided. A node's own composition profile becomes a level through its
-  own total (`level_of_profile`) and a held level becomes the recipient's composition profile through ITS
-  total (`profile_of_level`) — one map read both ways.
+* **A level is absolute.** The received table's `level_gdna` lane holds a PROFILE over
+  `u = log(rho / rho_ref)` on the solve grid (`rho_ref` the library's structurally pure gDNA density, a
+  coordinate choice); it needs no map and no knowledge of its recipient, which is what lets it cross a node
+  with no total, and it is a profile because what travels on it is one-sided. A node's own composition
+  profile becomes a level through its own total (`level_of_profile`) and a held level becomes the
+  recipient's composition profile through ITS total (`profile_of_level`) — one map read both ways.
 * **The lane is the default rule of every directed face without a composition rule** — strand-change
   faces, termini pointing both ways, the AMBIG complex, and every face into or out of an empty node. STOP
   by omission is impossible by construction (gated); a face with a composition rule sends composition
@@ -1801,38 +1822,19 @@ unannotated transcription on `test_blank`, pinned gDNA by structure (`TESTING.md
 constraint is removed. One explicit landscape remains for count inference; its admission,
 weights and refits are unchanged. Own messages use the observed strand likelihood at exons,
 boundaries and eligible introns. The measured weak-strand tradeoff is accepted under
-**Conservative allocation under uncertainty**. The owner also authorized prototyping evidence-curve contributions in
-place of posterior-variance admission. Isolate that contrast while retaining the composition
-requirement, structural exclusions and current weights; changing those is a separate contrast.
-The owner subsequently authorizes exploring local RNA route profiling, with generality,
-simplicity and robustness taking precedence over simulated-panel accuracy: vary placement,
-fragment opportunities and capture strength before calibration scoring. That prototype's
-arithmetic is certified, but its shared-capture premise fails a noiseless opportunity-mismatch
-check (`ISSUES: the-gdna-prior-enters-psi-twice`). It is not a production assembly decision.
-These approvals authorize experiments; the production training rules below remain in force
-until a replacement is reviewed and validated.
+**Conservative allocation under uncertainty**; its standing form is
+`ISSUES: the-bulk-can-be-calibrations-nascent-rna`.
 
-**Evidence-interface boundary, 2026-10-08:** a prototype density consumer retains the
-existing composition, absolute DNA-level and absolute RNA-level factors separately.
-The integral and their coordinate requirements are derived under **Absolute level factors
-retain their coordinates** in `EQUATIONS.md`. This reuses the current graph, passes,
-intersections and directional exclusions. It neither changes the production count assembly
-nor certifies earlier face builders that already substitute observed totals. Those
-approximations, both-strand integration and population admission remain separate audits;
-the prototype's validation and limits are in `ISSUES: the-gdna-prior-enters-psi-twice`.
-
-**Admission experiment status, 2026-10-08:** the approved removal of posterior-variance
-admission has been tested with the prototype evidence curves. It does not establish a
-production replacement. The retained reliability weighting and post-fit uniform mixing
-are distinct mechanisms; changing them is outside the completed admission contrast.
-The existing production rules below continue to apply pending a reviewed replacement.
-
-**Equal-weight experiment, owner approval 2026-10-08:** an isolated comparison may give
-each already-admitted evidence curve one contribution, while retaining the same curves,
-objects, density grid, smoothing strength, earlier refits and count solver. This approval
-does not select new production weights or authorize reader integration. The completed
-contrast and its population-fit sensitivity are recorded in
-`ISSUES: the-gdna-prior-enters-psi-twice`.
+**The 2026-10-08/09 experiments, and their outcome.** The owner authorized isolated prototypes, each holding
+everything else fixed: evidence-curve contributions in place of posterior-variance admission; one
+contribution per already-admitted evidence curve; a density consumer keeping the composition, absolute
+DNA-level and absolute RNA-level factors apart, its integral and coordinate requirements derived under
+**Absolute level factors retain their coordinates** in `EQUATIONS.md`; and local RNA route profiling, whose
+arithmetic is certified but whose shared-capture premise fails a noiseless opportunity-mismatch check. None
+was adopted: the admission prototypes passed no candidate, the density consumer, the local capture prior and
+shared-capture integration are superseded by §7.2 (`ISSUES: the-gdna-prior-enters-psi-twice`), and the
+production admission and weights are unchanged (`calibrate._fit_gdna_hyperprior`, `landscape._reliability`).
+The training rules below stand.
 
 **Unstranded bootstrap, owner direction 2026-10-08:** do not train the first landscape
 by treating all intronic observations as known DNA. The owner agrees that this would
@@ -1851,8 +1853,8 @@ their numbers `ISSUES: the-landscape-training-population-arms`):
    `sweep.solve_chain` from the two received tables (`has_composition` on either side) and selected on by
    `calibrate._fit_gdna_hyperprior`; a level
    lane, a ceiling and a cube row are bounds; the zero-count anchor trains regardless. ⛔ "Any non-flat
-   λ-row" is NOT the predicate: `PsiMessage.lam_rows` fuses compositions and bounds (1,476 own-flux
-   ceilings at the unstranded zero control; 137k against 111k).
+   λ-row" is NOT the predicate: the delivered λ rows (`SweepCapture.lam_rows`) fuse compositions and bounds
+   (1,476 own-flux ceilings at the unstranded zero control; 137k against 111k).
 2. **The grid spans every region and boundary the prior is read at** (`fit_landscape(domain=…)`), so the
    training cut changes which kernels are summed and never the axis; the `min_training_regions` guard measures the
    annotation-admitted population. Found on the gDNA-free golden toys, where the cut left the anchors
@@ -1877,7 +1879,7 @@ their numbers `ISSUES: the-landscape-training-population-arms`):
    rule 1 and the floor. This implementation excludes level-only evidence, but a one-sided gene-edge
    floor delivered in the composition lane can still pass both tests; lane citizenship does not prove
    a two-sided location. Its weak-strand feedback is an accepted limit for this foundation
-   (`ISSUES: the-gdna-prior-enters-psi-twice`); the admission experiment remains deferred.
+   (`ISSUES: the-bulk-can-be-calibrations-nascent-rna`); the bound-only admission experiment remains deferred.
    The symmetric floor alone (admission by width, no composition asked) was priced and is worse where echo
    exists (deferred +0.22 % against −0.87 %, unstranded OFF +0.11 % against −0.01 %); a floor on OWN
    evidence only, with a delivered row rescuing a wide slot, loses the unstranded OFF zero control
@@ -1959,7 +1961,9 @@ identical and the transcript-level ones of the same sign (`ISSUES: the-em-stops-
 the way, with their numbers: `ISSUES: the-located-mode-capture-reader`, `ISSUES: the-one-sided-null`,
 `ISSUES: the-likelihood-fitted-null-location`. One limitation is accepted for 0.8.0 on the capture-reference
 review's recommendation: where calibration books nascent RNA as gDNA at weak strandedness, a small population can
-become the bulk (`ISSUES: the-bulk-can-be-calibrations-nascent-rna`).
+become the bulk (`ISSUES: the-bulk-can-be-calibrations-nascent-rna`). A second is stated for 0.8.0 (2026-10-14):
+on a library with almost no gDNA, calibration's false gDNA on a few objects reads as capture
+(`ISSUES: the-reader-reads-false-gdna-as-capture`).
 
 **The one shared rule: conserved shares over regions and boundaries (owner rulings 2026-09-22 and 2026-09-23;
 `ISSUES: the-gdna-component-length-rule-differs-from-the-transcripts` CLOSED; `EQUATIONS.md` §11).** THE RULING:
@@ -1979,10 +1983,10 @@ a boundary at gDNA's conserved share (`CalibrationResult.gdna_boundary_conserved
 `calibrate` at a reach that never ends, since gDNA's template is the chromosome); at efficiency 1, beside outside
 neighbours longer than a fragment, those objects hold exactly the locus's overlapping starts. The length reads
 neither the count's pooled `q` (`ISSUES: the-pooled-q-in-the-gdna-length`) nor the crossing support; the count
-side still converts a boundary's mass by `q` (§3.1c). With no reference every efficiency is exactly 1 and every
-length is its uncontracted span bit-identically. The measurement that put the gDNA component, the synthetic
-spans and the annotated transcripts on one scale (`ruler_vs_truth.py --scale`, no EM) is recorded in
-`ISSUES: the-gdna-component-length-rule-differs-from-the-transcripts`.
+side still converts a boundary's mass by `q` (`ISSUES: the-pooled-q-in-the-gdna-count`). With no reference every
+efficiency is exactly 1 and every length is its uncontracted span bit-identically. The measurement that put the
+gDNA component, the synthetic spans and the annotated transcripts on one scale (`ruler_vs_truth.py --scale`, no
+EM) is recorded in `ISSUES: the-gdna-component-length-rule-differs-from-the-transcripts`.
 
 **The efficiencies: each object reads its own count.** `capture_efficiency.capture_efficiencies`, computed by
 `calibrate` and published as `CalibrationResult.gdna_capture_efficiency_region` / `_boundary`, gives a region the
