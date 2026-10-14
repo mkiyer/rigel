@@ -15,6 +15,13 @@ from .types import Interval, Strand
 from .gtf import GTFRecord
 
 
+def _malformed_exon(parse_mode: str, message: str) -> None:
+    """An exon record the annotation cannot place: strict raises, warn-and-skip logs and drops that exon."""
+    if parse_mode == "strict":
+        raise ValueError(f"Malformed GTF: {message}")
+    logging.warning("Skipping GTF %s", message)
+
+
 def _first_attr(val):
     """Return the first element when attrs are lists; otherwise the value itself."""
     if isinstance(val, list):
@@ -149,12 +156,23 @@ class Transcript:
         for f in GTFRecord.parse_file(gtf_file, parse_mode=parse_mode):
             if f.feature != "exon":
                 continue
-            t_id = f.attrs["transcript_id"]
+            t_id = _first_attr(f.attrs.get("transcript_id"))
+            where = f"exon {f.seqname}:{f.start + 1}-{f.end}({f.strand})"
+            if t_id is None:
+                _malformed_exon(parse_mode, f"{where} has no transcript_id")
+                continue
             if t_id not in transcripts:
                 t = Transcript.from_gtf(f)
                 transcripts[t_id] = t
             else:
                 t = transcripts[t_id]
+                # a transcript's exons share its reference and strand; a stray one would join two chromosomes
+                if f.seqname != t.ref or Strand.from_str(f.strand) != t.strand:
+                    _malformed_exon(
+                        parse_mode,
+                        f"{where} is off transcript {t_id}'s {t.ref}({t.strand.to_str()})",
+                    )
+                    continue
             t.exons.append(Interval(f.start, f.end))
             n_exon_features += 1
             if n_exon_features % CONSTANTS.resources.gtf_log_interval == 0:

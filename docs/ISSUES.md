@@ -87,8 +87,9 @@ LATENT (no current path reaches it):
   `_payload_from_parts` skips `from_dict`'s conservation checks; the two `.npz` files and the manifest are written in
   place, with no temp-and-rename. One validating `AccumulatorPayload` constructor would serve the scan, the cache and
   the drain.
-- GTF parsing: a final attribute without `;` is dropped; a missing `transcript_id` escapes `warn-skip`; an exon on
-  another chromosome or strand is merged silently.
+- FIXED 2026-10-14: GTF parsing — a final attribute without its `;` is read, and an exon with no `transcript_id` or
+  off its transcript's reference or strand follows the parse mode (strict raises, warn-and-skip drops it)
+  (`tests/test_gtf.py`).
 - Simulator config: a capture entry without `enabled:` and without probes yields an empty `CaptureConfig`; gene and
   transcript keys are unchecked (a typo runs on the default of 100); an empty section fails with a TypeError;
   `sim_command` creates the output directory before validating.
@@ -111,7 +112,7 @@ LATENT (no current path reaches it):
 - `transfer_rows.h`'s `level_bound_row` `std::max(v, 1e-12)` never binds on a reachable input: delete it together
   with an assert v > 0 in the binding (today v = 0 reads 1e-12; without the floor it would be NaN).
 0.8.0 (owner, 2026-10-14): the overhang alpha (fixed), the index's `nrna_n_contributors` (`=` for `+=`, with the index bump),
-the GTF parser (a final attribute without its `;`, a missing `transcript_id`, an exon on another reference or strand),
+the GTF parser (fixed),
 the unknown `config.yaml` key, the report's meta line through `innerHTML`, and `rigel sim`'s empty fragment-length
 window (it loops forever). The rest is 0.8.1 or later; the reorder gate's fixture simulates no gDNA (`build_oracle`'s
 fixed-total branch ignores `gdna_fraction`), so the reproducibility gate never exercises a gDNA path.

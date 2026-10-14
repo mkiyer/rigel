@@ -37,9 +37,9 @@ class GTFRecord:
     tags: set[str] = field(default_factory=set)
 
     # Pre-compiled regex for performance
-    # Matches: key "value";  or  key value;
+    # Matches: key "value";  or  key value;  — the last attribute's `;` is optional, as many files omit it
     # Group 1: key, Group 2: quoted value, Group 3: unquoted value
-    ATTR_TOKEN_PATTERN = re.compile(r'\s*([^";\s]+)\s+(?:"([^"]*)"|([^;]+))\s*;')
+    ATTR_TOKEN_PATTERN = re.compile(r'\s*([^";\s]+)\s+(?:"([^"]*)"|([^;]+))\s*(?:;|$)')
 
     @classmethod
     def from_str(cls, s: str) -> "GTFRecord":
