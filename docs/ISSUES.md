@@ -101,29 +101,15 @@ Those three fragment types are a local A/B, independent of the cluster work.
   `~/Downloads/rigel_runs/cfrna/`: confirm cluster copies before the substrate phase and upload any that are missing.
 
 ### the-release-builds
-`priority: now — release-gating (the 2026-10-14 release review) · kind: release · 2026-10-14`
-The PyPI path is sound: a wheel built from a clean `git archive` sdist imports all six native modules and passes 302
-tests, and `twine check --strict` passes. Before tagging:
-- **The conda builds are tuned to the build host.** `RIGEL_PORTABLE` defaults off (`-O3 -march=native`) and neither
-  `conda/build.sh` nor the live bioconda recipe sets it: bioconda's 0.7.1 linux-64 `_em_impl` carries 823 ymm operands
-  and 203 FMA instructions (the PyPI wheel none), so it dies with SIGILL on a CPU without AVX2, and a bioconda host
-  with AVX-512 would compile the `_mm512` E-step for every user. Make the default portable, developers opting into
-  native, and bump the bioconda build number.
-- **Bioconda has no arm64 build**: the live recipe lacks `meta.yaml`'s `additional-platforms`, and
-  `post_release.sh`'s fallback copies `meta.yaml` without `build.sh`.
-- **No smoke test loads the newest extension.** `publish.yml` imports four modules, not `_solve_impl` or
-  `_cgranges_impl`, and conda's test loads none. `_solve_impl` has no Linux/GCC build on record: the last CI run
-  (2026-09-14) predates it, and it and the eight before it failed or were cancelled. Import `rigel.native` in both
-  tests, and dispatch `ci.yml` and `publish.yml` (`publish: no`) before tagging.
-- **Notices.** The Linux wheel vendors 25 libraries through htslib's `--enable-libcurl` (OpenSSL 1.1.1, Kerberos,
-  OpenLDAP and others) with no third-party notices, nanobind's included, and nothing documents remote input. Build
-  htslib without libcurl, GCS and S3, and ship a notices file.
-- Smaller: README's relative images and links break on PyPI, and its CI badge reads failing; the sdist ships
-  the sandbox, `.claude/`, `.vscode/` and `route_split.py` (a scratch script with local paths), and `MANIFEST.in` is dead
-  under scikit-build-core; the sdist's name follows the unbounded scikit-build-core version (`rigel-rnaseq-` against
-  the recipe's `rigel_rnaseq-`); `mamba_env.yaml` lacks `scipy`; README omits htslib and pkg-config for a source build
-  and the platforms wheels exist for; `release.sh` prints literal `\033` escapes; and `post_release.sh` refuses a tree
-  with untracked files (22 in the sandbox today).
+`priority: now — release-gating: the owner's actions before tagging; the build fixes landed 2026-10-14 · kind: release · 2026-10-14`
+The build fixes landed 2026-10-14: portable by default (the conda package was compiled with `-march=native`; the
+portable build is bit-identical to the native one on arm64, `rename_identity.py`), the smoke tests load every native
+extension, the Linux wheels' HTSlib without libcurl, GCS and S3, `THIRD_PARTY_NOTICES.txt` in every wheel and sdist,
+a backend pin that fixes the sdist's name, a trimmed sdist and wheel, absolute README links. Left, the owner's:
+- dispatch `ci.yml`, and `publish.yml` with `publish: no`, on the release commit: `_solve_impl` has no Linux/GCC build
+  on record, and CI has not passed since 2026-09-14 (README's badge reads failing until it does);
+- the bioconda recipe: the auto-bump bot copies only the version and sha256, so the first 0.8.0 PR carries
+  `conda/build.sh` and `meta.yaml`'s `additional-platforms` (`linux-aarch64`, `osx-arm64`) by hand.
 
 ### the-em-depends-on-its-thread-count
 `priority: now — 0.8.0: the reduction prototyped and measured, then the owner decides (2026-10-14); the MANUAL and CHANGELOG state the dependence since 2026-10-14 · kind: defect · 2026-10-14`

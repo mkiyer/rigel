@@ -65,6 +65,12 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
 ### Changed
 
 - The package declares `Development Status :: 4 - Beta`.
+- Builds from source are portable by default: no `-march=native`, so a build runs on every machine of its
+  architecture; `-DRIGEL_PORTABLE=OFF` (for example `CMAKE_ARGS="-DRIGEL_PORTABLE=OFF" pip install ...`) tunes one to
+  the machine it is built on. The Linux wheels' HTSlib is built without libcurl, GCS and S3, which nothing used, so the
+  wheels no longer bundle OpenSSL and the network libraries; `THIRD_PARTY_NOTICES.txt`, shipped in every wheel and
+  sdist, carries the licenses of what they do bundle. The sdist leaves out the development sandbox, the editor and
+  agent settings and the images, and the wheel the C and C++ sources.
 - `summary.json`'s `strand_model` reports the junction fit behind κ: `kappa` pooled over every junction and over the
   genuine ones, each class's share (genuine, splice artifact, reversed) of the junctions and of their fragments where
   the strand channel is live, `strand_live`, and one `strand_overdispersion` (0, binomial), which replaces the calibration block's two.
@@ -136,6 +142,8 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
 - An index whose splice blacklist is not applied warns when it loads: a manifest that names an alignable store whose
   blacklist file is missing, or a blacklist file with no store in the manifest. 0.7.1 reported a missing blacklist
   only through `summary.json`'s `sj_blacklist_loaded`.
+- The conda package was compiled for its build host's CPU (`-march=native`): on a CPU without that host's
+  instructions (AVX2 and FMA for 0.7.1's linux-64 build) it died with an illegal instruction. Conda builds are portable.
 - The HTML report escapes sample names, paths, gene names and reference names before they become markup.
 - Refusals come before the work and as errors, not tracebacks: an `--annotated-bam` directory that cannot be written,
   an index that cannot be loaded, a config file that is not a mapping, and, at index build, an alignable store that

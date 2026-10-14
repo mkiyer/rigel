@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/rigel_banner.png" alt="Rigel" width="100%"/>
+  <img src="https://raw.githubusercontent.com/mkiyer/rigel/main/docs/images/rigel_banner.png" alt="Rigel" width="100%"/>
 </p>
 
 <p align="center">
@@ -11,7 +11,7 @@
   <a href="https://pypi.org/project/rigel-rnaseq/"><img src="https://img.shields.io/pypi/v/rigel-rnaseq" alt="PyPI"></a>
   <a href="https://anaconda.org/bioconda/rigel"><img src="https://img.shields.io/conda/vn/bioconda/rigel" alt="Bioconda"></a>
   <a href="https://pypi.org/project/rigel-rnaseq/"><img src="https://img.shields.io/pypi/pyversions/rigel-rnaseq" alt="Python"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License"></a>
+  <a href="https://github.com/mkiyer/rigel/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License"></a>
 </p>
 
 ---
@@ -19,7 +19,7 @@
 ## Overview
 
 <p align="center">
-  <img src="docs/images/rigel_overview.png" alt="Rigel Overview" width="85%"/>
+  <img src="https://raw.githubusercontent.com/mkiyer/rigel/main/docs/images/rigel_overview.png" alt="Rigel Overview" width="85%"/>
 </p>
 
 Rigel quantifies RNA-seq alignments while explicitly modeling three sources of
@@ -88,7 +88,9 @@ pip install --no-build-isolation -e .
 ### Requirements
 
 - Python 3.12+
-- C++17-capable compiler and CMake ≥ 3.15 (both only to build from source; `mamba_env.yaml` installs CMake)
+- Wheels are published for Linux (x86_64 and aarch64, manylinux_2_28) and macOS 15+ on Apple silicon; anywhere
+  else pip builds from source, which needs a C++17-capable compiler, CMake ≥ 3.15, pkg-config and htslib
+  (`mamba_env.yaml` installs all of them)
 - Runtime dependencies (from `pyproject.toml`): `pysam>=0.22`, `numpy>=1.26`, `pandas>=2.1`,
   `pyarrow>=14.0`, `pyyaml>=6.0`, `scipy>=1.11`
 
@@ -162,7 +164,7 @@ reports can be built later and in bulk. Its charts need the `[report]` extra (se
 The five subcommands are `index`, `quant`, `sim` (a small synthetic scenario from a YAML
 file), `export` (Feather to TSV or Parquet) and `report`. `rigel --version` prints the version;
 `rigel -v <subcommand>` (`--verbose`) enables DEBUG-level logging. See
-[docs/MANUAL.md](docs/MANUAL.md) for every flag.
+[docs/MANUAL.md](https://github.com/mkiyer/rigel/blob/main/docs/MANUAL.md) for every flag.
 
 ---
 
@@ -204,8 +206,8 @@ BAM ──▶ 1. scan       C++ single pass: resolve fragments, train the strand
 
 A spliced fragment is certified RNA, so calibration's problem is the unspliced mass. Its
 answer enters the EM as a prior that a decisive locus likelihood can override. The design and
-its rulings are in [docs/DESIGN.md](docs/DESIGN.md); the derivations are in
-[docs/EQUATIONS.md](docs/EQUATIONS.md).
+its rulings are in [docs/DESIGN.md](https://github.com/mkiyer/rigel/blob/main/docs/DESIGN.md); the derivations are in
+[docs/EQUATIONS.md](https://github.com/mkiyer/rigel/blob/main/docs/EQUATIONS.md).
 
 ---
 
@@ -213,15 +215,15 @@ its rulings are in [docs/DESIGN.md](docs/DESIGN.md); the derivations are in
 
 | Document | Description |
 |----------|-------------|
-| [docs/MANUAL.md](docs/MANUAL.md) | The user manual: CLI reference, defaults, configuration rules, output schema |
-| [docs/DESIGN.md](docs/DESIGN.md) | What is built, and the rulings behind it |
-| [docs/EQUATIONS.md](docs/EQUATIONS.md) | The derivations the implementation depends on |
-| [docs/SUCCESS.md](docs/SUCCESS.md) | How performance is measured: the accumulator, then calibration against an oracle |
-| [docs/TESTING.md](docs/TESTING.md) | The benchmark panels, how to build them, and what the test suite can judge |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | The ranked view of what is next for the 0.8.0 release |
-| [docs/ISSUES.md](docs/ISSUES.md) | The issue log: open problems and the record of what was refused |
-| [docs/TRAPS.md](docs/TRAPS.md) | Mistakes already made, as named rules |
-| [docs/PUBLISHING.md](docs/PUBLISHING.md) | Release workflow for PyPI and Bioconda |
+| [docs/MANUAL.md](https://github.com/mkiyer/rigel/blob/main/docs/MANUAL.md) | The user manual: CLI reference, defaults, configuration rules, output schema |
+| [docs/DESIGN.md](https://github.com/mkiyer/rigel/blob/main/docs/DESIGN.md) | What is built, and the rulings behind it |
+| [docs/EQUATIONS.md](https://github.com/mkiyer/rigel/blob/main/docs/EQUATIONS.md) | The derivations the implementation depends on |
+| [docs/SUCCESS.md](https://github.com/mkiyer/rigel/blob/main/docs/SUCCESS.md) | How performance is measured: the accumulator, then calibration against an oracle |
+| [docs/TESTING.md](https://github.com/mkiyer/rigel/blob/main/docs/TESTING.md) | The benchmark panels, how to build them, and what the test suite can judge |
+| [docs/ROADMAP.md](https://github.com/mkiyer/rigel/blob/main/docs/ROADMAP.md) | The ranked view of what is next for the 0.8.0 release |
+| [docs/ISSUES.md](https://github.com/mkiyer/rigel/blob/main/docs/ISSUES.md) | The issue log: open problems and the record of what was refused |
+| [docs/TRAPS.md](https://github.com/mkiyer/rigel/blob/main/docs/TRAPS.md) | Mistakes already made, as named rules |
+| [docs/PUBLISHING.md](https://github.com/mkiyer/rigel/blob/main/docs/PUBLISHING.md) | Release workflow for PyPI and Bioconda |
 
 ---
 
@@ -236,7 +238,7 @@ If you use Rigel in research, cite the repository for now:
 
 ## License
 
-Rigel is distributed under the [GNU General Public License v3.0](LICENSE).
+Rigel is distributed under the [GNU General Public License v3.0](https://github.com/mkiyer/rigel/blob/main/LICENSE).
 
 ---
 

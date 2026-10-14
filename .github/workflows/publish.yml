@@ -85,12 +85,11 @@ jobs:
           CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
           # Install htslib inside the build container
           CIBW_BEFORE_ALL_LINUX: >
-            yum install -y autoconf automake bzip2-devel curl-devel
-            libcurl-devel xz-devel zlib-devel &&
+            yum install -y autoconf automake bzip2-devel xz-devel zlib-devel &&
             cd /tmp &&
             curl -L https://github.com/samtools/htslib/releases/download/1.21/htslib-1.21.tar.bz2 | tar xj &&
             cd htslib-1.21 &&
-            ./configure --prefix=/usr/local --enable-libcurl &&
+            ./configure --prefix=/usr/local --disable-libcurl --disable-gcs --disable-s3 &&
             make -j$(nproc) && make install &&
             ldconfig
           CIBW_BEFORE_ALL_MACOS: >
@@ -104,18 +103,14 @@ jobs:
             CMAKE_ARGS="-DRIGEL_PORTABLE=ON"
             PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
             MACOSX_DEPLOYMENT_TARGET="${{ matrix.macos_target }}"
-          # Smoke test: install rigel wheel with all runtime deps and verify
-          # all native extensions load. We only check that each module
-          # imports (not specific symbol names), so routine refactors don't
-          # break the release pipeline.
+          # Smoke test: install the wheel with its runtime deps and load every native extension (rigel.native
+          # binds five, _cgranges_impl is the sixth), then run the CLI, so a wheel that compiles but cannot load
+          # never uploads.
           CIBW_TEST_REQUIRES: >
             numpy>=1.26 pandas>=2.1 pyarrow>=14.0 pysam>=0.22 pyyaml>=6.0 scipy>=1.11
           CIBW_TEST_COMMAND: >-
-            python -c "import importlib;
-            mods = ['rigel._bam_impl', 'rigel._scoring_impl',
-            'rigel._em_impl', 'rigel._resolve_impl'];
-            [importlib.import_module(m) for m in mods];
-            import rigel; print('OK', rigel.__version__)"
+            python -c "import rigel, rigel.native, rigel._cgranges_impl; print('OK', rigel.__version__)" &&
+            rigel --version
 
       - uses: actions/upload-artifact@v4
         with:

@@ -204,7 +204,7 @@ install(TARGETS _solve_impl LIBRARY DESTINATION rigel)
 
 # --- Compiler optimizations ---------------------------------------------------
 #
-# Performance flags: -O3, -march=native, FMA contraction, and LTO.
+# Performance flags: -O3, FMA contraction and LTO, and -march=native when RIGEL_PORTABLE is OFF.
 # Applied per-target to control fast-math scope.
 #
 # _em_impl gets -ffp-contract=fast (enables FMA) but NOT full -ffast-math,
@@ -214,11 +214,13 @@ install(TARGETS _solve_impl LIBRARY DESTINATION rigel)
 #
 # _scoring_impl gets full -ffast-math (no compensated summation there) with
 # -fno-finite-math-only, because scoring.cpp uses -inf sentinels.
-# All other targets get -O3 -march=native without fast-math.
+# All other targets get -O3 (and -march=native when not portable) without fast-math.
 
-# RIGEL_PORTABLE: when ON, omit -march=native so wheels run on any machine
-# of the same architecture. CI wheel builds set this; local dev leaves it OFF.
-option(RIGEL_PORTABLE "Build portable wheels (no -march=native)" OFF)
+# RIGEL_PORTABLE (default ON): omit -march=native, so a build runs on every machine of its architecture. A
+# native build, tuned to the build host's CPU, dies with an illegal instruction on an older one (a conda package
+# built on an AVX-512 host would carry the AVX-512 E-step to every user); build one only for the machine it runs
+# on, with -DRIGEL_PORTABLE=OFF (e.g. CMAKE_ARGS="-DRIGEL_PORTABLE=OFF" pip install ...).
+option(RIGEL_PORTABLE "Build for every machine of the architecture (no -march=native)" ON)
 option(
   RIGEL_PROFILE_NATIVE
   "Build native extensions with profiler-friendly symbols/frame pointers and disable LTO"

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core>=0.4.3", "nanobind>=2.0"]
+requires = ["scikit-build-core>=0.12,<2", "nanobind>=2.0"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -8,6 +8,7 @@ version = "0.7.1"
 description = "Bayesian RNA-seq transcript quantification tool"
 readme = "README.md"
 license = "GPL-3.0-or-later"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.txt"]
 requires-python = ">=3.12"
 authors = [
     { name = "Matthew Iyer" },
@@ -53,8 +54,12 @@ Changelog = "https://github.com/mkiyer/rigel/blob/main/CHANGELOG.md"
 "Bug Tracker" = "https://github.com/mkiyer/rigel/issues"
 
 [tool.scikit-build]
-# Protect the configuration against future changes in scikit-build-core
-minimum-version = "0.4"
+# The behaviours of the backend versions build-system.requires admits; a pin keeps the sdist's name
+# (rigel_rnaseq-<version>.tar.gz, which the conda recipe fetches) the same whichever of them builds it
+minimum-version = "build-system.requires"
+
+# The sdist carries the package and its build, not the development sandbox, editor or agent settings, or images
+sdist.exclude = ["docs/dev", "docs/images", ".claude", ".vscode", ".github", "CLAUDE.md"]
 
 # Setuptools-style build caching in a local directory
 build-dir = "build/{wheel_tag}"
@@ -64,6 +69,9 @@ wheel.py-api = "cp312"
 
 # Tell scikit-build-core where to find the Python package
 wheel.packages = ["src/rigel"]
+
+# The wheel carries what runs: the compiled extensions, not their C and C++ sources
+wheel.exclude = ["rigel/native/**", "rigel/cgranges/**"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

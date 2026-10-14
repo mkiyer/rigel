@@ -1,3 +1,0 @@
-include CMakeLists.txt LICENSE README.md CHANGELOG.md
-recursive-include src/rigel/native *.cpp *.h
-recursive-include src/rigel/cgranges *.cpp *.c *.h

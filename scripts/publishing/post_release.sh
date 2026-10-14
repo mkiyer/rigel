@@ -166,8 +166,8 @@ If the bot doesn't fire, run this to open a manual PR:
   cd bioconda-recipes
   git checkout -b update-rigel-${VERSION}
   mkdir -p recipes/rigel
-  cp ../rigel/conda/meta.yaml recipes/rigel/meta.yaml
-  git add recipes/rigel/meta.yaml
+  cp ../rigel/conda/meta.yaml ../rigel/conda/build.sh recipes/rigel/
+  git add recipes/rigel/meta.yaml recipes/rigel/build.sh
   git commit -m "Update rigel to ${VERSION}"
   git push origin update-rigel-${VERSION}
   # then open a PR at https://github.com/bioconda/bioconda-recipes/pulls

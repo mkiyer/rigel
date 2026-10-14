@@ -190,8 +190,12 @@ Linux glibc ≥ 2.28 required.
 
 - [ ] `CHANGELOG.md` has a `## [Unreleased]` section with real notes
 - [ ] `ci.yml` dispatched by hand on the release commit, and green
+- [ ] `publish.yml` dispatched by hand with `publish: no` on the release commit, and green: it builds every wheel and
+      loads every native extension in each, and uploads nothing
 - [ ] `./scripts/publishing/release.sh X.Y.Z`
 - [ ] `publish.yml` green on <https://github.com/mkiyer/rigel/actions>
 - [ ] `pip install rigel-rnaseq==X.Y.Z` works in a clean env
 - [ ] `./scripts/publishing/post_release.sh X.Y.Z`
-- [ ] Bioconda PR opened (manually, or by the auto-bump bot within 24h)
+- [ ] Bioconda PR opened (manually, or by the auto-bump bot within 24h). The bot changes only the version and the
+      sha256, so the first time, and whenever `conda/build.sh` or `meta.yaml`'s `extra` changes, the PR carries both
+      files by hand: the portable build (`-DRIGEL_PORTABLE=ON`) and the `linux-aarch64` / `osx-arm64` platforms.
