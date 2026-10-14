@@ -117,6 +117,27 @@ def test_the_fl_pmf_is_the_one_the_engine_draws_from():
     assert np.abs(emp - wrong).max() > 5e-3, "a different sd must be distinguishable"
 
 
+def test_an_empty_fragment_length_window_is_refused_not_drawn_from_forever():
+    """No length lies in [400, 300], so the rejection loop never fills: `rigel sim` hung on a scenario whose
+    frag_min exceeded its frag_max. The generator here raises after a bounded number of draws, so without the
+    refusal this gate fails instead of hanging. A one-length window is not empty."""
+    from rigel.sim.sampling import truncated_normal_frag_lengths
+
+    class Bounded:
+        def __init__(self):
+            self.rng, self.draws = np.random.default_rng(0), 0
+
+        def normal(self, *args):
+            self.draws += 1
+            if self.draws > 100:
+                raise RuntimeError("the sampler kept drawing from an empty window")
+            return self.rng.normal(*args)
+
+    with pytest.raises(ValueError, match=r"\[400, 300\] holds no length"):
+        truncated_normal_frag_lengths(Bounded(), 5, 250.0, 50.0, 400, 300)
+    assert truncated_normal_frag_lengths(Bounded(), 5, 250.0, 50.0, 250, 250).tolist() == [250] * 5
+
+
 def test_parse_sparse_nrna_config(tmp_path):
     config_path = tmp_path / "sim.yaml"
     config_path.write_text(

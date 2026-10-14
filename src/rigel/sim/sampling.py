@@ -22,6 +22,13 @@ def truncated_normal_frag_lengths(
 ) -> np.ndarray:
     """Sample ``n`` integer fragment lengths from ``Normal(mean, std)`` truncated to
     ``[frag_min, frag_max]`` (inclusive), via rejection sampling against ``rng``."""
+    if frag_min > frag_max:
+        # The rejection loop would never fill: no draw lands in an empty window.
+        raise ValueError(
+            f"The fragment-length window [{frag_min}, {frag_max}] holds no length, so no fragment can be "
+            "drawn: frag_min must not exceed frag_max (an RNA window's frag_max is capped at the longest "
+            "transcript)."
+        )
     result = np.empty(n, dtype=int)
     filled = 0
     while filled < n:

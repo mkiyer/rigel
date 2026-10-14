@@ -68,7 +68,8 @@ MOVES A NUMBER (each alone):
   the hypotheses, so tied records that differ in introns pool: oracle truth can replay the wrong record, or `drain`
   can raise. Frequency unmeasured; only oracle truth moves.
 - The simulator's fragment-length sampler: `.astype(int)` truncates (mean frag_mean − 0.5 while `fl_pmf` is evaluated
-  at integers), and an empty [frag_min, frag_max] window loops forever. Land with the next re-simulation.
+  at integers). Land with the next re-simulation. FIXED 2026-10-14: an empty [frag_min, frag_max] window, which the
+  rejection loop drew from forever, is refused (`tests/test_whole_genome_sim_config.py`).
 - Antisense at p_sense = ½: the deterministic path books a mismatched fragment as sense, the EM as antisense. Goes with
   the scoring unification (`ISSUES: hygiene-ledger` (h)).
 - The leading intron: a first intron starting at the fragment start makes `build_segments` emit no leading segment
@@ -119,7 +120,7 @@ LATENT (no current path reaches it):
 0.8.0 (owner, 2026-10-14): the overhang alpha (fixed), the index's `nrna_n_contributors` (`=` for `+=`, with the index bump),
 the GTF parser (fixed),
 the unknown `config.yaml` key (fixed), the report's meta line through `innerHTML` (fixed), and `rigel sim`'s empty fragment-length
-window (it loops forever). The rest is 0.8.1 or later; the reorder gate's fixture simulates no gDNA (`build_oracle`'s
+window (fixed). The rest is 0.8.1 or later; the reorder gate's fixture simulates no gDNA (`build_oracle`'s
 fixed-total branch ignores `gdna_fraction`), so the reproducibility gate never exercises a gDNA path.
 
 ### the-em-prior-share-excludes-drawn-multimappers
