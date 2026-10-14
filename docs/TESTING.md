@@ -2,8 +2,8 @@
 
 **What this file is.** The manual for Rigel's test substrates: the simulated panels and what each can
 judge (§0), how the test chromosome is built, swept and read (§0a), the simulator's backbone and its
-gaps (§1), the build commands (§2), the simulator's gates (§3), how results are evaluated (§4), the test
-suite (§5) and the profiling substrate (§6). Not here: the 0.8.0 scope, the equal-fragment-length ruling
+gaps (§1), the build commands (§2), how results are evaluated (§4), the test suite (§5) and the profiling
+substrate (§6). Not here: the 0.8.0 scope, the equal-fragment-length ruling
 and the nascent scope ruling (`DESIGN.md` §0b); how performance is judged and the instruments' run order
 (`SUCCESS.md`); the suite's standing pass count (`CLAUDE.md`); lessons (`TRAPS.md`, cited by name); open
 problems and refusals (`ISSUES.md`). The panels' history is git.
@@ -16,7 +16,7 @@ Two rules govern the whole file (`TRAPS: prove-the-substrate`, `TRAPS: can-the-b
 
 ---
 
-## 0. The panels — one ladder and two fl-gap side panels
+## 0. The panels — one ladder and its side panels
 
 Everything simulated lives under `~/Downloads/rigel_runs/suite/` (the ladder, the two side panels, the
 carved reference and the index) and `~/Downloads/rigel_runs/test_reference/` (the test chromosome, §0a).
@@ -26,7 +26,7 @@ The panel says how much error there is and where.
 
 | | |
 |---|---|
-| judges | Stage B, the calibration solver (`SUCCESS.md`) |
+| judges | the tool, on its two primary numbers: the transcript table against per-transcript truth and the calibration result against an oracle calibration (`SUCCESS.md`) |
 | conditions | 16: gDNA `g00 / g05 / g50 / g98` × strand specificity `0.50 / 0.99` × capture off / on |
 | depth | 10 M fragments total per condition, fixed; the gDNA rate decides only the split |
 | fragment lengths | identical for both origins (206 ± 98, truncated to [50, 500], read 100) — a forcing function, `DESIGN.md` §0b |
@@ -125,14 +125,14 @@ substrate rather than the config, so that no condition is uniform in either:
 | strand specificity | `0.50` unstranded · `0.70` · `0.99` strand-specific | the config |
 | capture | off · on | the config |
 | which transcripts are captured | about half probed, half with no probe | `test_probes.bed` |
-| nascent RNA | sparse — up to about half the transcripts carry it, the rest exactly none, at levels below, near and above mature | the `nrna_abundance` column |
+| nascent RNA | sparse — ten transcripts carry it (the twin block's `nasc` and `capnasc` types), the rest exactly none, at levels below, near and above mature | the `nrna_abundance` column |
 
 `g00` is the zero control (every reported gDNA fragment is a false positive) and `ss 0.70` is the
 transition rung between the two regimes the bars below are written for. The nascent pattern is
 hand-authored, not drawn: on a chromosome this small a draw is mostly sampling noise, and the point of a
 debug substrate is knowing which structure carries nascent RNA before reading a number. Depth is
 `n_total_fragments: 1170000` per condition, raised with each block so per-transcript depth holds. The
-config's `nrna:` block is dead by design (`abundance.mode: file` makes the rendered TSV the one source).
+config has no `nrna:` block: `abundance.mode: file` makes the rendered TSV the one source.
 
 ### The commands — from the YAML to a scored benchmark
 
@@ -150,7 +150,7 @@ T=~/Downloads/rigel_runs/test_reference
 python scripts/sim/build_test_reference.py
 rigel index --fasta $T/test_chr.fa --gtf $T/test_chr.gtf --collapse-duplicate-transcripts --no-mappability --no-tsv -o $T/idx
 
-# 2. per panel (seven configs: the benign panel, the two adversarial probe panels, od05, three fl arms)
+# 2. per panel (seven configs: the benign panel, the two adversarial probe panels, odg05, three fl arms)
 #    ⛔ ONE panel's `cache` at a time, or give each its own RIGEL_SCRATCH: the origin split writes
 #    $RIGEL_SCRATCH/rigel_oracle_build/w_<condition>/<condition>.<origin>.bam, and six of the seven configs share their
 #    condition names, so two caching side by side corrupt each other's partition (sum-to-full fails).
@@ -183,7 +183,7 @@ default rather than a measurement.
 strata, and the halves are judged against different bars. A toy and the panel can disagree in rank
 (`TRAPS: a-toy-and-a-panel-can-disagree-in-rank`): develop on the test chromosome, confirm on the ladder.
 
-### The substrate — one hand-edited file, twelve blocks
+### The substrate — one hand-edited file, thirteen blocks
 
 `scripts/sim/test_reference/test_chr.yaml` is the one hand-edited file: the `rigel sim` scenario schema
 (`genes → {gene_id, strand, transcripts: [{t_id, exons, abundance, nrna_abundance}]}`, exons 0-based
@@ -226,9 +226,10 @@ intron makes that impossible to get wrong. The builder refuses a reference it ca
 every problem at once (an exon off the end, overlapping exons, an intron under 4 bp, a duplicate id, an
 abundance row without a transcript or the reverse, the wrong reference name); `--self-test` perturbs each.
 
-⚠ κ is fitted from spliced reads, so a transcriptome of only single-exon transcripts cannot calibrate
-(`CalibrationStrandError`): at least one multi-exon transcript with real depth is needed before a number
-means anything. Nascent RNA needs no declaration: `rigel index` creates a single-exon nascent entity
+⚠ κ is fitted from spliced reads, so a transcriptome of only single-exon transcripts calibrates as unstranded,
+silently — κ = ½ and the strand channel dead (`tests/calibration/test_calibrate.py`'s
+`test_an_empty_spliced_census_calibrates_as_unstranded`): at least one multi-exon transcript with real depth is
+needed before a stranded number means anything. Nascent RNA needs no declaration: `rigel index` creates a single-exon nascent entity
 over each multi-exon transcript, fed from the contributor's `nrna_abundance` column.
 
 ## 0c. The ruler's truth instrument and the gDNA-depth ladder
@@ -322,13 +323,14 @@ Two consequences ruled correct (owner, 2026-08-19): capture depletes nascent RNA
 of RNA fragments off capture, under 3 % on — read a condition's `truth_summary.json`), because probes
 tile exons and a pre-mRNA is mostly intron, and adding nascent after the capture simulation is wrong —
 molecules exist first; and the post-capture fl distribution and abundances are the ground truth
-(`truth_kind: post_capture_empirical`), which is why gate G-S5 (§3) is stated per RNA population.
+(`truth_kind: post_capture_empirical`), which is why a length claim about the simulated reads is stated per RNA
+population.
 
 ### What the simulator still does not do
 
 | | consequence |
 |---|---|
-| counts are Poisson by construction | nothing dispersion-dependent validates here |
+| counts are Poisson by construction, save the gDNA strand overdispersion the `odg05` panel plants | nothing else dispersion-dependent validates here |
 | the panel is all R1-antisense | the engine can emit either (`ReadSimConfig.r1_sense`, gated in `test_strand_sense_convention.py`) but `orchestrator.run_condition_grid` does not expose it. Real cfRNA is dUTP, so this is not urgent |
 | the tool's gDNA reach assumption (`taper_g = 1`) is untested | latent: gDNA is not simulated on the spike-ins |
 
@@ -348,7 +350,7 @@ python scripts/sim/panel.py status   --config $CFG              # always first
 python scripts/sim/panel.py build    --config $CFG              # index + capture probes
 python scripts/sim/panel.py simulate --config $CFG --jobs 8     # ~21 min, ~16 GB
 python scripts/sim/panel.py cache    --config $CFG --jobs 8     # BOTH caches — mandatory, §0
-python scripts/sim/panel.py score    --config $CFG --jobs 8 --arms base oracle noop
+python scripts/sim/panel.py score    --config $CFG --jobs 2 --arms base oracle noop   # ~8.5 GB per condition
 python scripts/sim/panel.py report   --config $CFG --arms base oracle
 ```
 
@@ -357,12 +359,13 @@ reference — that needs the source genome/GTF, which the config does not name �
 command and stops:
 
 ```bash
+REFS=~/Downloads/rigel_runs/refs SUITE=~/Downloads/rigel_runs/suite
 python scripts/sim/build_suite_reference.py \
     --fasta $REFS/genome_controls.fasta.bgz --gtf $REFS/genes_controls.sorted.gtf \
     --refs chr21 chr22 --ercc -o $SUITE/reference
 ```
 
-### Two workflow gotchas
+### Workflow gotchas
 
 * ⛔ **`--force` does not reach the `simulate` stage.** `cmd_cache` passes it to `build_scan_cache.py`
   and `cmd_build` honours it for the index and probes, but `cmd_simulate` shells out to
@@ -385,14 +388,15 @@ python scripts/sim/build_suite_reference.py \
 
 ## 4. How results are evaluated
 
-The 0.8.0 metric is the calibration result scored against oracle calibration, not the end-to-end
-transcript number (`DESIGN.md` §0b; the judging rules are `SUCCESS.md`). Three questions, three
+Two numbers are primary and neither stands in for the other (`DESIGN.md` §0b; the judging rules are
+`SUCCESS.md`): the transcript table against per-transcript truth is what the release ships on, and the
+calibration result against an oracle calibration ranks a calibration mechanism. Two questions, two
 instruments:
 
 | question | instrument |
 |---|---|
-| how wrong is calibration, against oracle calibration? — the 0.8.0 metric | `calibration_vs_oracle.py` · `prior_vs_oracle.py` (the `LocusPriors` the EM reads) |
-| how wrong is the end-to-end answer? — per transcript, per pool, against per-fragment truth | `panel.py score` / `report`, i.e. `quant_accuracy.py` — the only end-to-end scorer, a thermometer rather than the target |
+| how wrong is calibration, against oracle calibration? — what ranks a calibration mechanism | `calibration_vs_oracle.py` · `prior_vs_oracle.py` (the `LocusPriors` the EM reads) |
+| how wrong is the end-to-end answer? — per transcript, per pool, against per-fragment truth; what the release ships on | `panel.py score` / `report`, i.e. `quant_accuracy.py`, the only end-to-end scorer |
 
 ⛔ A ceiling only prices what its arm can reach: the effective-length shrinkage is built before
 `assemble_priors`, which every measurement arm patches (`SUCCESS.md`, the ruler). Say which call your
@@ -483,36 +487,38 @@ The instruments are `scripts/profiling/profiler.py` (the whole pipeline as a tre
 per-stage peak and held RSS; `--set` for any config field, `--scan-only` for the scan alone, `--compare`
 for two reports) and `scripts/profiling/sweep_replay.py` (one calibration sweep, replayed and compared
 bit for bit; `--block-slots N|none` replays it at another locus-block size, which must move nothing —
-the chunk-exactness of the whole sweep on real data); set `OMP_NUM_THREADS` deliberately. The frozen
-references are `~/Downloads/rigel_runs/arms/review_identity_<condition>.json` — two ladder conditions and the
-LBX0190 library, last re-frozen at `71037f6c` with the reason in `arms/refreeze_2026-09-21.log`. The instrument's
-default `--reference` does not exist and it prints ⛔ rather than failing, so pass each one and read the log, never
-the exit code:
+the chunk-exactness of the whole sweep on real data); set `OMP_NUM_THREADS` deliberately. A reference is frozen
+once, from the tree a stage starts on, and every `--check` of that stage reads against it; a reference from an older
+tree reads MOVED whatever the change, since the tool's output has moved since (the `arms/review_identity_*.json` of
+2026-09-21 are such). The current references were frozen at 27f6a1dc (2026-10-14) — the ladder's
+`gdna_g05_ss_0.99_nrna_mid_capture_off` and the VCaP mix — and every commit since checked BIT-IDENTICAL against them:
+`~/Downloads/rigel_runs/prototypes/2026-10-14_sched/identity_head_{g05off,vcap}.json`. The instrument's default
+`--reference` does not exist and it prints ⛔ rather than failing, so pass each one and read the log, never the exit
+code:
 
-    A=~/Downloads/rigel_runs/arms
-    for c in gdna_g05_ss_0.99_nrna_mid_capture_on gdna_g05_ss_0.50_nrna_mid_capture_off; do
-      python scripts/design/rename_identity.py --check --condition $c --reference $A/review_identity_$c.json
-    done
+    P=~/Downloads/rigel_runs/prototypes/2026-10-14_sched S=~/Downloads/rigel_runs/suite
+    python scripts/design/rename_identity.py --check --suite $S/ladder --index $S/rigel_index \
+      --condition gdna_g05_ss_0.99_nrna_mid_capture_off --reference $P/identity_head_g05off.json
     python scripts/design/rename_identity.py --check --index ~/Downloads/rigel_runs/refs/rigel_index \
-      --bam ~/Downloads/rigel_runs/cfrna/mctp_LBX0190_SI_43883_HHHKGDRX7/bam/star.srt.rmdup.collate.bam \
-      --reference $A/review_identity_LBX0190.json
+      --bam ~/Downloads/rigel_runs/cfrna/mctp_vcap_rna20m_dna05m/bam/star.srt.rmdup.collate.bam \
+      --reference $P/identity_head_vcap.json
 
-The captured sweeps are `~/Downloads/rigel_runs/perf/sweeps_VCaP_step19` (the deep library, VCaP) — the replay
-target; a step that moves numbers re-captures and deletes the superseded one (`DESIGN.md` §6b.15). A port is
+The replay target is a captured set of the deep library's (VCaP's) sweeps, re-captured by
+`sweep_replay.py capture` whenever a step moves numbers, the superseded set deleted (`DESIGN.md` §6b.15); none is
+on disk now (`~/Downloads/rigel_runs/perf/` is empty), so capture one before a sweep change is replayed. A port is
 held to the replay's `--tolerance` budget and to the transfer gates, which hold the kernel's tables — returned by
 `native.transfer_prepare` — to independent recomputes and drive single hops of the native pass through
 `native.transfer_pass` (`tests/calibration/_transfer_harness.py`, where the tables' containers live; the row constructors
 and flag predicates the gates recompute with are the native ones, `native.transfer_rows`). The sweep itself is one native
 call (`native.solve_blocks`): `sweep_replay.py replay --threads N` and `--block-slots N` hold it to a capture at any thread
-count and block size. The deep library's timing baseline is
-`perf/plan_final_2026-09-19/pair{1,2}_post.json` (the landed tree at 8 threads on VCaP, the post arm of two
-interleaved pairs; the pre arm beside it is the tree before the work outside calibration, and the drift between two
-runs of one arm, 0.98–1.07 per stage, is the noise floor a pair is read against). ⛔ Read a stage row from a PAIR,
+count and block size. The deep library's timing baseline is an
+interleaved pair of the landed tree at 8 threads on VCaP; the 2026-09-19 pair is gone, so re-time one before a speed
+claim (the drift between two runs of one arm, 0.98–1.07 per stage then, is the noise floor a pair is read against). ⛔ Read a stage row from a PAIR,
 never a wall from two sittings, and never a profiler's share as a saving (`TRAPS: a-profile-share-is-a-ranking`). Every
 captured sweep replays the whole message layer at its own bracket (the refit sweeps at K = 233 against the first
 sweep's 101). `ISSUES: performance-memory-bounded-solve` carries the work.
 
 A both-strand stress test needs ample single-stranded regions (the population prior trains on them).
 How to A/B honestly: in-process, opposite extremes, never on a saturated condition, one thing varied,
-both arms sharing their random input (`TRAPS: perturb-every-gate`) — a byte-identical hard-label result
-is no evidence.
+both arms sharing their random input — a byte-identical hard-label result is no evidence
+(`TRAPS: perturb-every-gate`).

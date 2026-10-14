@@ -3,8 +3,8 @@
 // Every slot with a live strand and a fragment is solved on its own cube in one pass, so the read-out is chunk-exact
 // by construction and the slots are independent — of each other and of the thread that takes them. Per slot: ψ = the
 // strand term (`transfer_rows.h`) + the two Jeffreys arms (½ log f_g + ½ log(1 − f_g)) + the fitted gDNA arm — the
-// landscape's curve read at the density each cell implies (`Arm`; no (n, K) matrix of it ever exists) — + the λ-factor
-// row and the delivered composition row, the two added per cell, + the delivered RNA level row + the θ quadrature's
+// landscape's curve read at the density each cell implies (`Arm`; no (n, K) matrix of it ever exists) — + the
+// delivered composition row, added per cell, + the delivered RNA level row + the θ quadrature's
 // log-weights, over K λ cells and — at an AMBIG slot — `n_tilt` θ nodes across the strand term's peak plus the two tilt
 // atoms (τ = ±1), a single-strand slot's one column being its live strand; then the read-out: `f_g` the continuous
 // ½-quantile of the θ-marginal on λ (through σ), `Var(log f_g)` its grid moment, `w_+` the RNA-mass-weighted share of

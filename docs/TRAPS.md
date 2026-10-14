@@ -2,8 +2,8 @@
 
 Read before designing anything. Every rule below was paid for: something was built, measured, and came
 out wrong in a way that was not obvious in advance. A rule is a lesson, stated as what looked right, what
-was wrong with it, and what to do instead; it is not a measurement, and a number that says where the tool
-*is* lives in `ROADMAP.md`, re-derived by the instrument it names. Open problems and refusals live in
+was wrong with it, and what to do instead; it is not a measurement, and a claim about where the tool *is*
+lives in `ROADMAP.md`, which names the instrument that re-derives it. Open problems and refusals live in
 `ISSUES.md`, rulings in `DESIGN.md`, derivations in `EQUATIONS.md`.
 
 Cite a rule by its name, e.g. `TRAPS: panel-before-src`. The name is the identifier, so a citation says
@@ -810,10 +810,10 @@ than a flat optimum. Measure the share of kernels at the floor before reading an
 
 **a-mode-count-is-not-a-well-posed-quantity. How many modes a fitted density has is a property of the
 render resolution, not of the field, so no consumer may depend on it.** Across a 16× range of `CONSTANTS.landscape.grid_points`
-the `AbundanceLandscape`'s mode count tracks 1/step and never converges, buys nothing in held-out
-likelihood, and reproduces worse across split halves as it grows. Sweep the resolution before a consumer
-reads any shape statistic off a fitted density: `rho_0` and the containment verdict survive, a ratio of
-two selected modes does not. *Sibling:* `TRAPS: a-floored-knob-is-not-the-bandwidth`.
+the since-retired `AbundanceLandscape`'s mode count tracked 1/step and never converged, bought nothing in
+held-out likelihood, and reproduced worse across split halves as it grew. Sweep the resolution before a consumer
+reads any shape statistic off a fitted density: its location (that landscape's `rho_0`) and the containment
+verdict survived, a ratio of two selected modes did not. *Sibling:* `TRAPS: a-floored-knob-is-not-the-bandwidth`.
 
 **measure-a-default-flip-before-you-write-it. A config default and a refusal are one design, and flipping
 the first can invalidate the second.** `CalibrationConfig.abundance_landscape` (a switch since retired) was written opt-in and
@@ -1039,9 +1039,10 @@ instrument writes.
 Possible unspliced paths are about a million regions times a few reachable ends at ~100 B each, several
 hundred MB, plus spliced paths. It was killed by memory, and no consumer needs it.
 
-**a-harness-that-imports-an-instrument-runs-that-repo. An instrument under `scripts/design/` puts its own
-repository's `src/` first on `sys.path`, so a harness that imports it from the main checkout runs main's package
-whatever the worktree shim says — and main's checkout holds no compiled modules, so it fails at the first native
-import, or worse, runs the wrong code silently. A harness that must run against a worktree takes the scripts
-directory as a parameter and imports the WORKTREE's copy of the instrument.** Two prototype runs of the
-calibrated-likelihood campaign died this way before `RIGEL_SCRIPTS` existed. *Sibling:* `TRAPS: worktrees-run-the-wrong-code`.
+**a-harness-that-imports-an-instrument-runs-that-repo. An instrument under `scripts/design/` runs whatever
+rigel its process imports — the installed one, which is the main tree installed editable, and its own checkout's
+`src/` only when none is installed — so a harness that imports an instrument, or an instrument that shards into
+fresh `python` processes, runs main's package whatever a worktree shim set up in the parent, silently. A prototype
+build is imported FIRST in every process: a `sitecustomize.py` on `PYTHONPATH` that imports the build's
+`use_proto` reaches the shards too, since they inherit the environment.** Two prototype runs of the
+calibrated-likelihood campaign died this way. *Sibling:* `TRAPS: worktrees-run-the-wrong-code`.

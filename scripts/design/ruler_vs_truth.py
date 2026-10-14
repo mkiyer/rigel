@@ -41,8 +41,8 @@ Usage::
     python scripts/design/ruler_vs_truth.py --self-test
 
 ⛔ ``--panel-dir`` names a directory of conditions, never the index: pass ``--panel ladder`` with it for a ladder-derived
-panel (``ladder_nrna_lo``, the depth ladder), or the test chromosome's index is loaded against the ladder's BAM and no
-fragment deposits.
+panel (``ladder_nrna_lo`` is the ladder's g50 ss.99 ON at a nascent ``on_fraction`` of 0.10), or the test
+chromosome's index is loaded against the ladder's BAM and no fragment deposits.
 
 ``--scale`` — ARE EVERY HYPOTHESIS CLASS'S OPPORTUNITIES ON ONE SCALE? The E-step balances two hypotheses at a
 fragment only if their opportunities are the same multiple of the yield the simulator actually drew them with, so

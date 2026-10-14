@@ -84,7 +84,7 @@ Nine permanent docs, none of them a changelog; each one's preamble says what it 
 ## Where does a change go? — the calibration layering
 
 An import may point DOWN a layer or SIDEWAYS within one, never UP; a module reaching up is telling you the
-thing belongs lower. `rigel/calibration/_layers.py` is authoritative, `tests/calibration/test_layering.py`
+thing belongs lower. `src/rigel/calibration/_layers.py` is authoritative, `tests/calibration/test_layering.py`
 enforces it.
 
 | if the change is about… | it goes in |
@@ -131,7 +131,7 @@ the halves are never pooled. `docs/TESTING.md` §0a has the recipe and the bars,
   deep real library, read a timing only from back-to-back A/B pairs, and prove every speed-up a numeric
   no-op (`docs/TESTING.md` §6).
 - **Renames**: grep every sense of a token first, and run `rename_identity.py --check` after each stage.
-  `arm` has three senses (an experiment arm, a component arm, `__ARM_NEON` in the scanner) and needs a
+  `arm` has three senses (an experiment arm, a component arm, `__ARM_NEON` in `native/simd_detect.h`) and needs a
   pass per sense, never a tail-end sweep.
 - **The owner drives commits.** Do not commit unless asked.
 
@@ -149,13 +149,13 @@ python -m pytest tests/ -q
 python -m pytest tests/ -q 2>&1 | grep '^FAILED' | sed 's/::.*//' | sort | uniq -c   # the failure set
 python -m pytest tests/ --update-golden         # regenerate tests/golden/ after an intended output change
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
-python scripts/design/preflight.py --full       # every instrument's --self-test
+python scripts/design/preflight.py --full       # every instrument that has a --self-test runs it
 ```
 
-**The standing baseline: 0 failed / 2,864 passed / 0 skipped / 0 xfail, 2,864 collected** — re-derived
-2026-10-14 after the multimapper second pass was ported (thirty gates added; the identical-paralog gates run the
-EM to convergence, `DESIGN.md` §4.2). **Any failure at all is a
-regression.** Re-derive a count, never adjust one (`TRAPS: re-record-the-baseline`): every gate that scans
+**The standing baseline: 0 failed / 2,913 passed / 0 skipped / 0 xfail, 2,913 collected** — re-derived
+2026-10-14 on a clean checkout after the release cut's user-path fixes, its two no-ops and the format batch
+(forty-nine gates added; the identical-paralog gates run the EM to convergence, `DESIGN.md` §4.2). **Any
+failure at all is a regression.** Re-derive a count, never adjust one (`TRAPS: re-record-the-baseline`): every gate that scans
 the files on disk is one case, so only adding or removing a test moves the total. Derive the failure set,
 never eyeball the tail (`TRAPS: read-the-whole-failure-list`). A golden update is where a regression gets
 laundered into "intended": read the diff, record its magnitude and check the truth-scored instruments
@@ -181,7 +181,7 @@ order. `tests/test_scripts_index.py` holds the `design/` rows against the disk i
 | `design/rename_identity.py` | Is a rename, refactor or speed-up numerically a no-op? `--freeze` once, `--check` after every stage, `--bam` on a real library; the reference is frozen, never rolling |
 | `sim/panel.py` | Build, simulate, cache, score and report a panel from one YAML; `status` names the next stage. ⛔ `cache` builds both caches; the oracle one is the truth every scorer reads |
 | `sim/build_test_reference.py` | Renders the test chromosome from its one hand-edited YAML, `test_chr.yaml` (`docs/TESTING.md` §0a) |
-| `sim/build_suite_reference.py` · `design_suite_probes.py` · `simulate_reads.py` | The panel's substrate; `panel.py build` drives the last two, and the reference carve is manual |
+| `sim/build_suite_reference.py` · `design_suite_probes.py` · `simulate_reads.py` | The panel's substrate; `panel.py build` drives the probe design, `panel.py simulate` the reads, and the reference carve is manual |
 | `sim/configs/gdna_ladder.yaml` | The 16-condition panel the tool is ranked on (`docs/TESTING.md` §0) |
 | `sim/configs/flgap_rna_long.yaml` · `flgap_rna_short.yaml` | The fl-gap side panel, re-simulated 2026-10-03 with the ladder's nascent block, so the length gap is its only difference from the ladder. ⛔ Never a ladder rung; read both arms, per stratum, beside the ladder |
 
@@ -195,4 +195,5 @@ rigel export results/ -f tsv
 rigel report results/ -o report.html
 ```
 
-Input BAM must be name-sorted with the `NH` tag.
+Input BAM must be name-sorted or collated; the `NH` tag is used when present, otherwise multimappers are detected
+from secondary flags.

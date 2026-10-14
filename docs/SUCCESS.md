@@ -2,7 +2,7 @@
 
 **What this file is.** How Rigel's performance is measured: the metric and its instruments, Stage A (the
 accumulator — is the tally faithful, unbiased and sufficient?), Stage B (calibration scored against an
-oracle calibration — the 0.8.0 work), the conditions under which 0.8.0 is done, which numbers are targets
+oracle calibration), the conditions under which 0.8.0 is done, which numbers are targets
 and which are thermometers, and the instruments in the order you run them. Not here: the scope and
 its rulings (`DESIGN.md` §0b), how the panels are built (`TESTING.md`), the ranked next steps
 (`ROADMAP.md`), current measurements (run the named instrument — a figure that appears here is a
@@ -12,7 +12,7 @@ worked example, never current behaviour), and lessons (`TRAPS.md`).
 
 ## The scope
 
-The version on disk is `pyproject.toml`'s; the target is 0.8.0, a calibration release. Three strata are
+The version on disk is `pyproject.toml`'s; the target is 0.8.0, a release of the tool (`DESIGN.md` §0b). Three strata are
 the target (unstranded × capture-OFF, stranded × capture-OFF, stranded × capture-ON) and unstranded ×
 capture-ON is deferred — reported on every table, never a development target — and fragment length is in
 scope (owner, 2026-10-02). The rulings, their reasons and the equal-fragment-length
@@ -55,7 +55,7 @@ calibration mechanism on the transcript table stays REFUSED for the reason above
 
 | | what is scored | against | instrument |
 |---|---|---|---|
-| **primary** | the `CalibrationResult` itself: the six deconvolved arrays | `O`, the same result with only the deconvolved arrays replaced by the origin-split truth (at capture-OFF it carries no enriched mode and is the no-enrichment null) | `calibration_vs_oracle.py`. `O` keeps `P`'s efficiencies, so it cannot see the capture-contracted length: read `ruler_vs_truth.py` beside every capture-ON arm |
+| **primary** | the `CalibrationResult` itself: the six deconvolved arrays | `O`, the same result with only the deconvolved arrays replaced by the origin-split truth | `calibration_vs_oracle.py`. `O` keeps `P`'s efficiencies, so it cannot see the capture-contracted length nor the efficiencies' own errors (on an uncaptured library they can read false capture, `ISSUES: the-reader-reads-false-gdna-as-capture`): read `ruler_vs_truth.py` beside every capture-ON arm |
 | **primary, the prior** | what calibration hands the EM's prior — `gdna_count`, `gdna_eff_len` per multi-locus (the EM forms the pseudocounts from `gdna_count` and its own fragment count) | `O`, the same assembler fed the origin-split truth masses | `prior_vs_oracle.py` (`P − O`, the count; `gdna_eff_len`'s truth is `ruler_vs_truth.py`) |
 | **primary, one number** | the library `f_gdna` | the simulator's per-fragment truth | `calibration_vs_oracle.py` — each row's `pools` block, `P_gdna` against `true_gdna` |
 | **controls** | zero gDNA, where truth is a constant | 0.000 exactly | the `g00` rung of the ladder, read per condition by `calibration_vs_oracle.py` and `quant_accuracy.py` |
@@ -110,17 +110,17 @@ The five identities that keep it done, all gated:
 | | | |
 |---|---|---|
 | C++ vs the executable specification | byte-identical | `tests/native/test_accumulator_spec.py` |
-| the same BAM at 1/2/4/8 workers | bit-identical, every bank | `tests/test_scan_order_independence.py` |
-| `Σ node_start_count == deposited` | exact | same |
+| the same BAM at 1/2/4/8 workers | the count banks bit-identical, the float64 mass banks within n·ε (their sums run in worker order) | `tests/test_scan_order_independence.py` |
+| `Σ region_start_count == deposited` | exact | same |
 | `deposited + deferred + dropped_* == offered` | exact, deferred non-empty | same |
-| the origin partitions sum to the full payload | exact, every channel | `tests/calibration/_oracle.py` |
+| the origin partitions sum to the full payload | exact on every count channel, within the representation on the three float64 mass banks | the oracle's own check, `tests/calibration/_oracle.py` |
 
 `ReadSimConfig.r1_sense` selects the protocol direction independently of `strand_specificity`, gated
 both ways in `test_strand_sense_convention.py`; the panel does not expose the knob (`TESTING.md` §1).
 
 ---
 
-## STAGE B — calibration: the 0.8.0 work
+## STAGE B — calibration
 
 Calibration is iterative; **pass-0** is the prior-free solve, the first thing after initialisation,
 before any fitted prior exists. It is the right place to start because it has no feedback loop in it —
@@ -233,7 +233,7 @@ python scripts/sim/panel.py score  --config $CFG --arms base oracle oracle_ruler
 python scripts/sim/panel.py report --config $CFG --arms base oracle oracle_ruler
 
 # 4. STAGE A is CLOSED — this block is a REGRESSION check, run it after an accumulator or native change.
-python -m pytest tests/native tests/calibration -q     # FIDELITY
+python -m pytest tests/native tests/calibration tests/test_scan_order_independence.py -q     # FIDELITY
 ```
 
 Steps 0 and 2(a)–(c) take about 15 minutes on a built panel. Run the set together and record it

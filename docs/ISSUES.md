@@ -156,6 +156,29 @@ detection off — while an index built with no store loads quietly. Left: the cl
 (`ISSUES: the-format-changes-to-batch-before-release`) must name the store, since `rigel index` refuses a build that
 names neither `--alignable-zarr` nor `--no-mappability`.
 
+### the-annotated-bam-splits-a-read-name
+`priority: now — found by the 2026-10-14 docs audit; the issues survey decides 0.8.0 or 0.8.1 · kind: defect · 2026-10-14`
+The annotated BAM's writer (`bam_scanner.cpp`, the second BAM pass) writes a filtered record (QC-failed, unmapped, a
+skipped duplicate, or single-end) through as soon as it reads it, while the previous read name's records are still
+held for annotation. A read name whose first record is filtered therefore has that record written before the held
+group and its other records after it: every record is kept, but the output is no longer collated. A pair whose first
+mate is unmapped is the common case. The MANUAL and the README state the limit. The fix: write the held group before
+a filtered record of a new read name. The test to write first: a collated BAM whose second read name starts with an
+unmapped mate, asserting every read name is one contiguous run in the output.
+Instrument: `tests/test_annotate.py` (the gate to add).
+
+### the-flux-witness-units-past-an-empty-piece
+`priority: now — unconfirmed; the release code review settles it first · kind: question · 2026-10-14`
+`EQUATIONS.md` §12 prices an exon's flux witness at the column opportunity `κ_read·a_r`, so a single-strand gDNA-free
+exon that agrees with its junction pays nothing; the own-level builder does that (`transfer_kernel.h`, `hop_price(c_j,
+c_j / r_j, cnt, kappa_read * a_r)`). The 2026-10-14 docs audit read one path that may not. An EMPTY exon piece forwards
+the junctions' count and opportunity, `c_sum` and `a_sum`, as its witness, in whole-strand units (`lane_emit`). A FULL
+recipient then re-prices it in `lane_receive` against the RNA lane's column count over `a_r`, with no `κ_read`
+(`solve_kernel.cpp` builds the RNA lanes on `a_r`). If so, a hop out of an empty piece pays a disagreement of
+`log(κ_read)²` that is not there: 0.48 nats² at κ = ½, on every unstranded library. Settle it by reading the two paths
+side by side. If it is a defect, the falsification test is a single-strand gDNA-free toy whose empty piece and full
+recipient agree, and the instrument is `policy_benchmark.py --panel test --by-class` on the unstranded rows.
+
 ### overlapping-synthetic-shadows
 `priority: later — the index merge, after 0.8.0 (owner, 2026-10-14); its 0.8.0 docs, column gate and documented limit landed 2026-10-14 · kind: design · 2026-09-20`
 `create_nrna_transcripts` clusters TSS/TES within a tolerance per strand and manufactures one synthetic
@@ -311,10 +334,9 @@ simulator's sharded writers and its whole-genome grid, and the zarr splice black
   `test_buffer.py`'s "None for intergenic"; over-long test docstrings; "Boundary cases" headings from the
   edge→boundary rename.
 - The simulator: `whole_genome.py`'s "…and filtering" banner; `splice_motif.py`'s over-long lines.
-- Docs: DESIGN names the solver's `mrna_active`, which no longer exists, cites a test by its pre-rename name, and its
-  compiler-flags row omits `-fno-finite-math-only` (as does `.github/copilot-instructions.md`); EQUATIONS §3.5g, DESIGN
-  §3.5's "four ways", `accumulator.h` and `test_conserved_mass.py` still describe the deleted
-  `region_contained_inv_opportunity_sum`, and one measurement table can no longer be reproduced; the executable
+- Docs: `.github/copilot-instructions.md`'s compiler-flags line omits `-fno-finite-math-only`; `accumulator.h`'s
+  header ("each population stores … the reciprocal-opportunity sum") and `test_conserved_mass.py` still read as if a
+  region reciprocal bank were stored, and one measurement table can no longer be reproduced; the executable
   specification and its C++ twin word one mass rule differently, and two payload comments point at inexact text
   (UNCERTAIN: check when touched); `test_chr.yaml` says the shadows are "≈ 5 % of RNA fragments" while the render
   realizes 0.76 %; the headers and TESTING list the YAML's extra keys without `blank:`; TESTING says `rigel sim`
@@ -2850,7 +2872,7 @@ geometry; the length-channel retirement is of a calibration composition channel.
 
 | | closed by | verdict |
 |---|---|---|
-| **the gDNA scale rule** · **the mass rescale** · **TSS/TES as the population licence** | landed 2026-08-04 | ✅ `EQUATIONS.md` §3.5/§3.5b/§3.5c (the gates named here retired with the relay policy, 2026-09-09). ⚠ The ceiling says the mass rescale cost the panel **nothing** (+0.0002 to delete it outright); it landed on the derivation and on being free |
+| **the gDNA scale rule** · **the mass rescale** · **TSS/TES as the population licence** | landed 2026-08-04 | ✅ `EQUATIONS.md` §3.5/§3.5b (the gates named here retired with the relay policy, 2026-09-09). ⚠ The ceiling says the mass rescale cost the panel **nothing** (+0.0002 to delete it outright); it landed on the derivation and on being free |
 | **face (I) of the `intron\|exon` BOUNDARY** | re-solve ceiling + panel arm | ⛔ **DO NOT BUILD.** The derivation (`EQUATIONS.md` §3.6) is re-verified and is not what failed: handing both BOUNDARIES the ORACLE truth and re-solving is worth **−0.000** off capture, and the ladder prototype is **negative** (mwae 0.0413 → 0.0426, confidently-wrong +10.7 %). TRAPS: panel-before-src |
 | **a LEVEL transfer from the intron** | toy + panel | ⛔ **REFUTED**, +0.207 on capture-ON × unstranded — capture inverts which side is well-counted (TRAPS: capture-inverts-the-counted-side) |
 | **the RNA fragment-length model** | a per-pmf ceiling arm (`length_ceiling.py`, retired 2026-09-10) | ⛔ **−0.02 %** at pass-0, **+0.21 % (worse)** over all objects. Root cause exact (`pi(w)` scores sj *crossing*, the pool requires the splice to be *seen*). ⭐ Its value is the BOUND: the whole fragment-length-model cluster costs ≤0.43 % of the shipped solve. TRAPS: price-the-halves-separately |
@@ -3092,6 +3114,6 @@ density feathers left with the total-density landscape, `ISSUES: the-total-densi
   junction-strand tag (b8527b30); the bulk density and saturation (2026-10-13).
 - The annotated BAM: a spliced intergenic fragment is ZF 0x21, an unspliced one 0x25 (df437334).
 - Index format 9 (64f20594): the never-read columns dropped, `transcript_aliases.feather`, the blacklist's count, and
-  `nrna_n_contributors` summed over every span. The benchmark indexes are rebuilt, their format-8 copies kept as
-  `*_format8`; `rename_identity.py` is BIT-IDENTICAL on the ladder's `g05 ss.99 OFF` and on the VCaP mix. The cluster's
+  `nrna_n_contributors` summed over every span. The benchmark indexes are rebuilt, their format-8 copies archived in
+  `~/Downloads/rigel_runs/archive/2026-10-14_index_format8/`; `rename_identity.py` is BIT-IDENTICAL on the ladder's `g05 ss.99 OFF` and on the VCaP mix. The cluster's
   index is rebuilt once, at its working-index build (`ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`).
