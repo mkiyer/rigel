@@ -313,7 +313,7 @@ blacklist; it is ignored under `--no-mappability`.
 Any `rigel quant` flag can be set in a YAML file via `--config`. Keys are the
 flag names with underscores (hyphens are also accepted), plus `bam_file`,
 `index_dir`, `output_dir` and `tsv` for the I/O arguments; a key that is not a
-`quant` flag is an error. Explicit CLI flags always override the
+`quant` flag is an error that lists the keys this version knows. Explicit CLI flags always override the
 YAML. A resolved `config.yaml` is written to the output directory after each
 run for reproducibility.
 
@@ -367,7 +367,10 @@ Pass `--tsv` to also write `.tsv` mirrors, or convert afterward with
 The `calibration_*` files are written only when calibration runs. Build the HTML
 report from all of the above with `rigel report`.
 A `config.yaml` is always written, recording all resolved parameters and I/O
-paths; rerun the exact analysis with `rigel quant --config results/config.yaml`.
+paths; rerun the exact analysis with `rigel quant --config results/config.yaml`
+on the rigel version that wrote it (its header names the version). Another
+version refuses a key it does not have, naming the version that wrote the file:
+every 0.7.1 `config.yaml` carries four keys removed in 0.8.0.
 
 ### quant.feather / quant.tsv
 

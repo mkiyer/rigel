@@ -105,15 +105,17 @@ LATENT (no current path reaches it):
 - The buffer's finalizer, run by garbage collection on a thread holding a logging lock, deadlocks joining the writer.
 - The report's meta line puts the sample and index names into `innerHTML` unescaped. (Its capture note is in
   `ISSUES: the-format-changes-to-batch-before-release`.)
-- An unknown quant YAML key raises without listing the known keys or hinting at an older build, so a 0.7.1
-  `config.yaml` is refused unhelpfully; MANUAL's "rerun the exact analysis" needs a caveat.
+- FIXED 2026-10-14: an unknown quant YAML key raised a traceback that neither listed the known keys nor hinted at an
+  older build, so a 0.7.1 `config.yaml` (four removed keys) was refused unhelpfully. The refusal is now the CLI's
+  `Error:` exit, lists the keys this version knows, and names the version that wrote a `config.yaml` from another one;
+  the MANUAL's rerun line says a config reruns exactly on the version that wrote it (`tests/test_cli.py`).
 - FIXED 2026-10-14: a splice blacklist present without a recorded store is no longer dropped with no log line
   (`ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`).
 - `transfer_rows.h`'s `level_bound_row` `std::max(v, 1e-12)` never binds on a reachable input: delete it together
   with an assert v > 0 in the binding (today v = 0 reads 1e-12; without the floor it would be NaN).
 0.8.0 (owner, 2026-10-14): the overhang alpha (fixed), the index's `nrna_n_contributors` (`=` for `+=`, with the index bump),
 the GTF parser (fixed),
-the unknown `config.yaml` key, the report's meta line through `innerHTML`, and `rigel sim`'s empty fragment-length
+the unknown `config.yaml` key (fixed), the report's meta line through `innerHTML`, and `rigel sim`'s empty fragment-length
 window (it loops forever). The rest is 0.8.1 or later; the reorder gate's fixture simulates no gDNA (`build_oracle`'s
 fixed-total branch ignores `gdna_fraction`), so the reproducibility gate never exercises a gDNA path.
 
