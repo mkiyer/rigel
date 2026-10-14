@@ -17,66 +17,23 @@ the changelog is git.
 Ordered by priority. An entry says what is open and the number a ranking turns on; what was done is git,
 what was ruled is `DESIGN.md`.
 
-### strand-overdispersion-one-shared-value
-`priority: now — release-critical (owner, 2026-10-14): the pruning; the summary.json diagnostics landed 2026-10-14 · kind: design · 2026-09-27`
-The strand model's two inputs, κ and the od, were both contaminated on real libraries:
-- splice artifacts (misaligned gDNA, ½ in a stranded library) inflate κ and the RNA-side spread;
-- antisense RNA inflates the gDNA side.
-
-od = 0 by policy landed 2026-10-01 (`DESIGN.md` §3.3a, `EQUATIONS.md` §6). Its A/B against what shipped, with every
-step proven to run its arm:
-- **VCaP mix, against read-name truth:** gDNA pool −6.40 → −6.11 %, transcripts −0.15 %, genes −1.1 %.
-- **Zero gDNA (VCaP RNA-only):** calibration false gDNA +6.1 %, EM +0.5 %.
-- **Zero RNA (VCaP DNA-only):** unchanged.
-- **LBX0588's gDNA total across subsamples:** 3.45 → 0.74 % at 10 %, 4.84 → 2.09 % at 1 %.
-- **Ladder:** flat.
-- **Test panel:** stranded × OFF transcripts −3.8 %.
-- **odg05's g98 rows (planted gDNA od 0.05):** genes +1.1k / +3.1k and gDNA pool −10k, the one cost.
-
-What the replaced mechanisms measured is in CLOSED: `ISSUES: the-strand-overdispersion-reconcile`,
-`ISSUES: the-away-half-gdna-overdispersion`, `ISSUES: the-joint-strand-overdispersion-fit`.
-
-OWNER RULINGS (2026-09-30):
-- **κ** comes from a three-class binomial fit over the per-junction strand table: genuine (κ), splice artifact (½),
-  reversed (1−κ).
-  - The class weights are concave for fixed κ. κ is the shipped Beta(1,1) posterior mean over the reads the
-    mixture's maximum credits to RNA, so it IS the shipped `(n_same + 1)/(n_obs + 2)` wherever the maximum puts every
-    junction in the genuine class (owner, 2026-10-01).
-  - The strand-live gate stays on the pooled counts. Removing artifacts only moves κ away from ½, so the fit cannot
-    switch a live channel off.
-- **An empty spliced census** is unstranded (κ = ½, od = 0), not an error.
-- **Splice-artifact pruning** weighs a fragment's unspliced-gDNA reading against its spliced one by the artifact
-  posterior, never a cut.
-- **If an od is ever needed**, the owner's first choice is an RNA-only value from the most deeply sequenced junctions,
-  applied as the shared value. It is developed on REAL data across several libraries, never one (an exception to
-  `TRAPS: real-data-is-a-test-input`, scoped to the od, because the simulator plants no RNA od and no splice
-  artifacts).
-
-κ from the genuine junctions LANDED 2026-10-01, after od = 0 (the retired RNA od fit read κ, and at the clean κ LBX0588's
-moment went 0.07 → 0.37). Its A/B is in `DESIGN.md` §3.3b and its fit in `EQUATIONS.md` §5.4.
-
-THE REMAINING LANDING, one window each:
-1. LANDED 2026-10-14: **the `summary.json` diagnostics** (`ISSUES: the-format-changes-to-batch-before-release` (a);
-   `tests/test_strand_model.py`, `tests/test_summary_report.py`), in `strand_model`: `kappa` pooled and genuine, the
-   classes' shares by junction and by fragment (`junction_fit.junction_classes`), `strand_live`, and one
-   `strand_overdispersion`, binomial. LBX0588 through `rigel quant`: κ 0.0635 pooled, 0.0030 genuine; artifacts 21.8 %
-   of the junctions and 12.0 % of the fragments, reversed 0.16 % and 0.08 %.
-2. **The pruning design** with `ISSUES: splicing-artifacts`: junction ids in the fragment buffer (it carries none
-   today), deposits deferred until the junction decision, and the weight derived on one page. Strand catches only
-   artifacts with a wrong-strand read (an n-read artifact shows none with probability 2⁻ⁿ), and sees nothing on
-   unstranded libraries.
-
-DEFERRED PAST 0.8.0:
-- an adaptive od whose evidence no single object can swing;
-- the native strand variance's `(n·f)²`, which should be `n(n−1)·f²` (`transfer_rows.h` `strand_variance`; it matters
-  only at od > 0).
-
-Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-30_robust_od/` — the harnesses (`harness/` od, `harness_w2/` κ),
-the per-object censuses, `runs/w1/VERDICT.md`, and the VCaP truth scorer `score_vcap.py`. The reviewer brief is the
-sandbox's strand-model review note.
-
 ### splicing-artifacts
-`priority: now — release-critical (owner, 2026-10-14): the cluster track, after the strand overdispersion · kind: defect · 2026-09-24`
+`priority: now — release-blocking (owner, 2026-10-14): handled before any release, started once the release candidate is clean · kind: defect · 2026-09-24`
+THE OWNER'S DESIGN (2026-10-14): spliced fragments are the most specific signal the tool has, so artifacts are
+removed by several prongs before any release, after the release candidate is clean.
+- **The strand prong.** A junction's strand split against the library's specificity is a likelihood: with a
+  within-junction artifact fraction `a`, a read falls on the wrong strand at `a/2 + (1 − a)(1 − ss)`, so 10 (+) and
+  90 (−) at ss 0.99 give `â ≈ 0.18`: about 18 artifacts and 82 genuine fragments. Each fragment's gDNA reading is
+  weighted by its junction's artifact share, never cut. Today's three-class fit (`junction_fit`) labels a junction
+  WHOLE and only cleans κ: that 10 / 90 junction is genuine, and all 100 fragments stay certified RNA. Strand sees an
+  artifact only through a wrong-strand read (an n-read artifact shows none with probability 2⁻ⁿ), and nothing on an
+  unstranded library, so the other prongs carry those.
+- **The gDNA hypothesis.** The fragment's largest contiguous aligned block, its shorter anchor clipped — the edit of
+  the alignment below — offered beside the spliced reading; the implicit spliced fragments need the same machinery.
+- **Missing infrastructure:** junction ids on buffered fragments (none today), a second, clipped unspliced hypothesis
+  per spliced fragment, deposits deferred until the junction decision, and the weight read by calibration and the EM
+  alike.
+- The other prongs, below: the aligner, the blacklist's builder, and the reference at the junction.
 A gDNA read that the aligner splices across an annotated junction reads as certified RNA unless the index's
 blacklist — junctions the same aligner wrote on simulated genomic reads, kept at two or more, with the longest
 anchor seen — rejects it. Today a fully rejected fragment is labelled artifact: the EM treats it as unspliced
@@ -169,7 +126,7 @@ tests, and `twine check --strict` passes. Before tagging:
   with untracked files (22 in the sandbox today).
 
 ### input-mistakes-pass-silently
-`priority: now — the 2026-10-14 release review; the issues survey decides 0.8.0 or 0.8.1 · kind: defect · 2026-10-14`
+`priority: now — 0.8.0, approved with the issues survey (owner, 2026-10-14) · kind: defect · 2026-10-14`
 Four ordinary input mistakes produce a full, wrong output set with exit 0 (each reproduced on the test chromosome):
 - **A coordinate-sorted BAM.** The scan groups adjacent records by read name and reads no `@HD SO`, so each mate is
   its own fragment: 1,170,000 pairs quantify as 2,318,315 fragments, the fragment-length mean reads 98 bp for 214, and
@@ -193,7 +150,7 @@ Tests first, each verified failing: a scenario BAM coordinate-sorted, cut to hal
 `chr` prefix, each refused with its cause named.
 
 ### the-annotated-bam-writer
-`priority: now — the 2026-10-14 docs audit and release review; the issues survey decides · kind: defect · 2026-10-14`
+`priority: now — 0.8.0, approved with the issues survey (owner, 2026-10-14) · kind: defect · 2026-10-14`
 `--annotated-bam`'s second pass (`annotate.py`, the writer in `bam_scanner.cpp`):
 - **A gene with no `gene_name` crashes it, and the finished run is lost.** `annotate.py` hands `g_df.g_name` to a
   writer that takes strings; a NaN (Ensembl's unnamed genes, an NCBI GTF, 273 of the test chromosome's 638 genes)
@@ -212,7 +169,7 @@ second read name starts with an unmapped mate (every read name one run); records
 one of the documented strings).
 
 ### the-gtf-parser-accepts-malformed-transcripts
-`priority: now — the 2026-10-14 release review; the issues survey decides · kind: defect · 2026-10-14`
+`priority: now — 0.8.0, approved with the issues survey (owner, 2026-10-14) · kind: defect · 2026-10-14`
 `--gtf-parse-mode strict` fails on malformed records (MANUAL), but a transcript's structure is never checked:
 - an exon with start > end parses, the index builds, and `rigel quant` dies in `sj_opportunity.py`;
 - duplicated or overlapping exons lengthen the transcript (600 → 900 bp, TPM 170,927 → 100,917) and write negative or
@@ -227,7 +184,7 @@ merge; the simulator already validates its own (`sim/annotation.py`'s `_validate
 `gene_biotype` is never read, so `gene_type` is empty for an Ensembl GTF. Tests first: one GTF per case.
 
 ### the-em-depends-on-its-thread-count
-`priority: now — the 2026-10-14 release review; its docs for 0.8.0, the reduction for the issues survey · kind: defect · 2026-10-14`
+`priority: now — 0.8.0: the docs now; the reduction prototyped and measured after the simple fixes, then the owner decides (2026-10-14) · kind: defect · 2026-10-14`
 A locus whose E-step work reaches `total_work / threads` runs through `parallel_estep`, which adds each thread's column
 sums into a per-thread buffer and Kahan-reduces the buffers in thread order: a grouping that changes with the thread
 count and matches neither the sequential path nor another count. SQUAREM's rounding sensitivity
@@ -242,7 +199,7 @@ through the same tasks — a numeric change, so `rename_identity.py` and a pinne
 `batch_locus_em_partitioned` at 1, 2, 3, 4 and 16 threads, bit-identical.
 
 ### the-scoring-alphas-are-unchecked
-`priority: now — the 2026-10-14 release review; the issues survey decides · kind: defect · 2026-10-14`
+`priority: now — 0.8.0, approved with the issues survey (owner, 2026-10-14) · kind: defect · 2026-10-14`
 `--overhang-alpha` and `--mismatch-alpha` take any float. NaN exits 0 having gated 96 % of fragments (a `gdna_fraction`
 of 0.92 for about 0.5) and writes NaN into `summary.json`; 0 writes `-Infinity`, which is not JSON; above 1 rewards
 overhang and mismatches. At 0, the documented hard gate, a fragment whose every candidate fails is dropped and counted
@@ -253,7 +210,7 @@ gated count beside the pools; gate on both paths. Test first: an NM-tagged fixtu
 equal fragments less chimeric.
 
 ### the-strand-summary-on-a-dead-channel
-`priority: now — the 2026-10-14 release review; a field new in 0.8.0 · kind: defect · 2026-10-14`
+`priority: now — 0.8.0, approved with the issues survey (owner, 2026-10-14); a field new in 0.8.0 · kind: defect · 2026-10-14`
 `summary.json`'s `strand_model` publishes `kappa.genuine` and the junction classes from the three-class fit even where
 `strand_live` is false. At κ = ½ the classes are not identified, so both are noise: an unstranded test row reads genuine
 0.412 against the 0.485 calibration used, 61 % of its junctions "artifact", and Binomial(n, ½) tables give 0.06 to 0.96,
@@ -779,6 +736,57 @@ factor so the fully probed class reads 1, the old reader's reference, while the 
 against the uncaptured bulk and the locus gDNA component keeps its shipped length, so the injected transcript lengths
 sit on a scale far below gDNA's. Re-anchor on the shipped convention (an unprobed object reads 1), prove it on the
 capture-OFF identity and a capture-ON row, and re-read the ceiling.
+
+### strand-overdispersion-one-shared-value
+`priority: later — od = 0 and κ from the genuine junctions ship in 0.8.0 with the class diagnostics; the pruning moved to ISSUES: splicing-artifacts (owner, 2026-10-14) · kind: design · 2026-09-27`
+The strand model's two inputs, κ and the od, were both contaminated on real libraries:
+- splice artifacts (misaligned gDNA, ½ in a stranded library) inflate κ and the RNA-side spread;
+- antisense RNA inflates the gDNA side.
+
+od = 0 by policy landed 2026-10-01 (`DESIGN.md` §3.3a, `EQUATIONS.md` §6). Its A/B against what shipped, with every
+step proven to run its arm:
+- **VCaP mix, against read-name truth:** gDNA pool −6.40 → −6.11 %, transcripts −0.15 %, genes −1.1 %.
+- **Zero gDNA (VCaP RNA-only):** calibration false gDNA +6.1 %, EM +0.5 %.
+- **Zero RNA (VCaP DNA-only):** unchanged.
+- **LBX0588's gDNA total across subsamples:** 3.45 → 0.74 % at 10 %, 4.84 → 2.09 % at 1 %.
+- **Ladder:** flat.
+- **Test panel:** stranded × OFF transcripts −3.8 %.
+- **odg05's g98 rows (planted gDNA od 0.05):** genes +1.1k / +3.1k and gDNA pool −10k, the one cost.
+
+What the replaced mechanisms measured is in CLOSED: `ISSUES: the-strand-overdispersion-reconcile`,
+`ISSUES: the-away-half-gdna-overdispersion`, `ISSUES: the-joint-strand-overdispersion-fit`.
+
+OWNER RULINGS (2026-09-30):
+- **κ** comes from a three-class binomial fit over the per-junction strand table: genuine (κ), splice artifact (½),
+  reversed (1−κ).
+  - The class weights are concave for fixed κ. κ is the shipped Beta(1,1) posterior mean over the reads the
+    mixture's maximum credits to RNA, so it IS the shipped `(n_same + 1)/(n_obs + 2)` wherever the maximum puts every
+    junction in the genuine class (owner, 2026-10-01).
+  - The strand-live gate stays on the pooled counts. Removing artifacts only moves κ away from ½, so the fit cannot
+    switch a live channel off.
+- **An empty spliced census** is unstranded (κ = ½, od = 0), not an error.
+- **Splice-artifact pruning** weighs a fragment's unspliced-gDNA reading against its spliced one by the artifact
+  posterior, never a cut.
+- **If an od is ever needed**, the owner's first choice is an RNA-only value from the most deeply sequenced junctions,
+  applied as the shared value. It is developed on REAL data across several libraries, never one (an exception to
+  `TRAPS: real-data-is-a-test-input`, scoped to the od, because the simulator plants no RNA od and no splice
+  artifacts).
+
+κ from the genuine junctions LANDED 2026-10-01, after od = 0 (the retired RNA od fit read κ, and at the clean κ LBX0588's
+moment went 0.07 → 0.37). Its A/B is in `DESIGN.md` §3.3b and its fit in `EQUATIONS.md` §5.4.
+
+`summary.json`'s `strand_model` reports the fit behind κ (LBX0588 through `rigel quant`: κ 0.0635 pooled, 0.0030
+genuine; artifacts 21.8 % of the junctions and 12.0 % of the fragments). The splice-artifact pruning the classes
+point at is `ISSUES: splicing-artifacts`' strand prong.
+
+DEFERRED PAST 0.8.0:
+- an adaptive od whose evidence no single object can swing;
+- the native strand variance's `(n·f)²`, which should be `n(n−1)·f²` (`transfer_rows.h` `strand_variance`; it matters
+  only at od > 0).
+
+Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-30_robust_od/` — the harnesses (`harness/` od, `harness_w2/` κ),
+the per-object censuses, `runs/w1/VERDICT.md`, and the VCaP truth scorer `score_vcap.py`. The reviewer brief is the
+sandbox's strand-model review note.
 
 ### overlapping-synthetic-shadows
 `priority: later — the index merge, after 0.8.0 (owner, 2026-10-14); its 0.8.0 docs, column gate and documented limit landed 2026-10-14 · kind: design · 2026-09-20`

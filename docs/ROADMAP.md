@@ -68,9 +68,10 @@ simulated panels cannot show, handled across the aligner, the blacklist's builde
   `ISSUES: the-deferred-rna-long-regression-after-factory-removal` and
   `ISSUES: the-scorer-reads-a-census-length-law`.
 - **Strand model**: od = 0 by policy (`DESIGN.md` §3.3a) and κ from the genuine junctions (§3.3b), both landed
-  2026-10-01 after their VCaP A/Bs; `summary.json` reports the junction fit behind κ (landed 2026-10-14); the pruning
-  is a candidate of the release survey — `ISSUES: strand-overdispersion-one-shared-value`; the prototype harness and the
-  VCaP truth scorer are in `~/Downloads/rigel_runs/prototypes/2026-09-30_robust_od/`.
+  2026-10-01 after their VCaP A/Bs; `summary.json` reports the junction fit behind κ (landed 2026-10-14) —
+  `ISSUES: strand-overdispersion-one-shared-value`; the splice-artifact pruning the fit points at is the strand prong
+  of `ISSUES: splicing-artifacts`; the prototype harness and the VCaP truth scorer are in
+  `~/Downloads/rigel_runs/prototypes/2026-09-30_robust_od/`.
 - **The message layer**: `transfer` ships on the two-phase backbone (`DESIGN.md` §6b.12–§6b.14); `silent` is the
   floor; the bar — win on unstranded, minimal harm on stranded, never pooled — is `policy_benchmark.py --panel
   ladder`; on the count foundation it loses to silent on the unstranded × capture-OFF contaminated rows
@@ -126,12 +127,14 @@ its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-mult
    `ISSUES: latent-defects` and `ISSUES: hygiene-ledger`.
 3. **The full benchmark run**, the report card regenerated.
 4. **ISSUES cleanup and prioritization**: the OPEN section ordered by priority. Done.
-5. **The survey**: implement or defer, entry by entry. The candidates include the two the cut called release-critical:
-   the strand pruning (`ISSUES: strand-overdispersion-one-shared-value`) and the splicing artifacts on real data,
-   the cluster track (`ISSUES: splicing-artifacts`), with the cluster's index rebuilt from its store at format 9
-   (`ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`).
-6. **The release issues fixed**, each with a falsification test verified failing; a numeric change gets its own A/B
-   window, and a numeric no-op, proven with `rename_identity.py --check`, lands between any two windows.
+5. **The survey**: implement or defer, entry by entry. Done (owner, 2026-10-14): the release review's fixes are approved;
+   the splice-artifact work is handled before any release, once the release candidate is clean
+   (`ISSUES: splicing-artifacts`, which now holds the strand pruning); the EM's thread dependence waits for a measured
+   prototype (`ISSUES: the-em-depends-on-its-thread-count`); everything else is deferred as tiered.
+6. **The release issues fixed**, simple ones first and as many closed as possible, each with a falsification test
+   verified failing; a numeric change gets its own A/B window, and a numeric no-op, proven with
+   `rename_identity.py --check`, lands between any two windows. Then the involved ones: the EM's reduction, measured;
+   then the splice-artifact design.
 7. **The release**: `docs/PUBLISHING.md` is the procedure; what gates it is the state — the deliverable measured per
    stratum, the zero rows clean, the suite at its standing count, `preflight.py --full` green, CI run once by hand, a
    real-data smoke run, the standing risks re-read, and the manual and the changelog true of what ships.
