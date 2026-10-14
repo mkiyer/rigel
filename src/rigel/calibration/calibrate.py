@@ -22,9 +22,10 @@ landscape). The solver is the belief-propagation SWEEP over the
            the belief, solve_chain again with the landscape added per object -> the per-object pie
       -> chain_region_deconv  -> per-REGION gDNA / RNA contained mass
       -> chain_boundary_deconv  -> per-BOUNDARY gDNA / RNA crossing mass, for the per-locus prior
-      -> gdna_density_global (the library-average density QC scalar) and the capture weights (every
-         object's posterior mode of gDNA density under the last refit's landscape, read in the native
-         block solve after its final ψ; relative to the typical read object, so no landscape ⇒ every weight 1)
+      -> gdna_density_global (the library-average density QC scalar)
+      -> capture_efficiencies: every object's own gDNA density against the last refit's landscape, read as a
+         two-group prior — the efficiencies, the bulk density they are read in and the saturation level, for
+         the ruler; no landscape ⇒ every efficiency is 1
 
 ⛔ THE GEOMETRY IS BUILT FIRST, AND IT OWNS EVERY DIVISOR. ``build_region_geometry`` produces the
 per-slot ``eff_gdna``/``eff_rna`` before anything reads a count, and everything downstream — the
@@ -48,7 +49,6 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-
 import numpy as np
 
 from .messages.silent import SilentPolicy
@@ -62,13 +62,13 @@ from .region_geometry import (
 )
 from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
 from .derive import gdna_density_global
+from .capture_efficiency import CaptureReading, capture_efficiencies
 from .effective_length import UNBOUNDED_REACH, conserved_cut_shares
 from .blocks import SweepCapture
 from .region_arrays import boundary_region_indices
 from .region_chain import build_region_chain
 from .result import CalibrationResult
 from .landscape import DensityLandscape, fit_landscape
-from .simplex_logodds import _TILT_NODES
 from .signature import RegionType, coarse_type_array
 from .strand_balance import fit_strand_balance
 from .substrate import CalibrationSubstrate
@@ -300,7 +300,7 @@ def _init_belief(s: _Solve):
     )
 
 
-def _sweep(s: _Solve, belief, prior, capture=None, reader=None):
+def _sweep(s: _Solve, belief, prior, capture=None):
     """One sweep of the chain from ``belief``, with the composition prior ``prior`` (``None``: the
     prior-free pass) — the λ bracket first, then `solve_chain`.
 
@@ -344,7 +344,6 @@ def _sweep(s: _Solve, belief, prior, capture=None, reader=None):
         block_slots=cfg.sweep_block_slots,
         n_threads=int(cfg.n_threads),
         _capture=capture,
-        reader=reader,
     )
 
 
@@ -366,7 +365,6 @@ def _solve(s: _Solve, _debug):
     capture = SweepCapture() if _debug is not None else None
     belief = _sweep(s, _init_belief(s), None, capture=capture)
     hyperprior: DensityLandscape | None = None
-    reader_mode = None
     for it in range(int(s.config.calib_refit_iters)):
         hyperprior = _fit_gdna_hyperprior(
             s.chain,
@@ -380,20 +378,7 @@ def _solve(s: _Solve, _debug):
         if hyperprior is None:
             break
         capture = SweepCapture() if _debug is not None else None
-        # THE HONEST READER runs on the last refit's sweep: every slot's posterior mode of gDNA density under
-        # this landscape, from its own observations and the factors the sweep delivers to it
-        reader = None
-        if it == int(s.config.calib_refit_iters) - 1:
-            reader = dict(
-                mode=np.full(int(s.chain.n_slots), np.nan),
-                coarse_step=float(s.config.sweep_logodds_step),
-                window_sd=float(np.sqrt(2.0 * -np.log(np.finfo(np.float64).eps))),
-                tilt_nodes=int(_TILT_NODES),
-                search_stride=int(CONSTANTS.calibration.reader_search_stride),
-            )
-        belief = _sweep(s, _init_belief(s), hyperprior, capture=capture, reader=reader)
-        if reader is not None:
-            reader_mode = reader["mode"]
+        belief = _sweep(s, _init_belief(s), hyperprior, capture=capture)
         logger.debug(
             "calibration: PHASE 2 gDNA-hyperprior refit %d/%d (%d training regions)",
             it + 1,
@@ -402,9 +387,7 @@ def _solve(s: _Solve, _debug):
         )
     if _debug is not None:
         _debug["capture"] = capture
-        _debug["reader_mode"] = reader_mode
-        _debug["chain"] = s.chain
-    return belief, hyperprior, reader_mode
+    return belief, hyperprior
 
 
 def _result(
@@ -414,8 +397,7 @@ def _result(
     strand: _Strand,
     region_eff_gdna,
     boundary_eff_gdna,
-    efficiency: np.ndarray,
-    efficiency_boundary: np.ndarray,
+    capture: CaptureReading | None,
     boundary_conserved_gdna: np.ndarray,
 ) -> CalibrationResult:
     """The solved chain projected onto the two payload axes and published as the
@@ -428,7 +410,9 @@ def _result(
     region's contained population cannot hold a spliced molecule. ``count_rna_sj`` is the JUMPING
     population, exported verbatim — pure RNA by construction, nothing to deconvolve. The three
     ``mass_per_crossing`` are each their own population's incidence→fragment conversion, never applied
-    to another population."""
+    to another population. ``capture`` is the capture reader's answer, ``None`` when no landscape was fitted:
+    then every efficiency is exactly 1, there is no bulk density and the saturation level is 1."""
+    n_regions, n_boundaries = int(substrate.n_regions), int(substrate.n_boundaries)
     return CalibrationResult(
         count_gdna_region=regions.gdna_mass,
         count_rna_region=regions.rna_mass,
@@ -455,39 +439,21 @@ def _result(
         gdna_density_global=gdna_density_global(
             regions, boundaries, region_eff_gdna, boundary_eff_gdna
         ),
-        gdna_capture_efficiency_region=efficiency,
-        gdna_capture_efficiency_boundary=efficiency_boundary,
+        gdna_bulk_density=None if capture is None else capture.bulk_density,
+        gdna_capture_saturation=1.0 if capture is None else capture.saturation,
+        gdna_capture_efficiency_region=(
+            np.ones(n_regions) if capture is None else capture.efficiency_region
+        ),
+        gdna_capture_efficiency_boundary=(
+            np.ones(n_boundaries) if capture is None else capture.efficiency_boundary
+        ),
         rna_sense_frac=strand.rna_sense_frac,
         gdna_strand_overdispersion=0.0,
         rna_strand_overdispersion=0.0,
-        n_regions=int(substrate.n_regions),
-        n_boundaries=int(substrate.n_boundaries),
+        n_regions=n_regions,
+        n_boundaries=n_boundaries,
         n_sj=int(substrate.n_sj),
     )
-
-
-def capture_weights(reader_mode, chain, n_regions: int, n_boundaries: int):
-    """Every object's capture weight from the reader's modes (``log ρ`` per slot, NaN where it did not read):
-    ``exp(mode − median mode)`` on the slots it read — the typical read object is the unit — and 1 elsewhere,
-    split onto the two object axes. The EM is invariant to the unit (counts and TPM to machine precision, the
-    published ``em_effective_length`` scales with it); the median is the one unit that is neither a
-    detector nor an extreme value — the largest of two million noisy objects is an outlier's (gate:
-    ``tests/calibration/test_capture_reader.py``)."""
-    efficiency = np.ones(n_regions)
-    efficiency_boundary = np.ones(n_boundaries)
-    if reader_mode is None:
-        return efficiency, efficiency_boundary
-    mode = np.asarray(reader_mode, dtype=np.float64)
-    finite = np.isfinite(mode)
-    if not finite.any():
-        return efficiency, efficiency_boundary
-    w = np.where(finite, np.exp(mode - np.median(mode[finite])), 1.0)
-    kind = np.asarray(chain.kind)
-    obj = np.asarray(chain.obj_idx, np.int64)
-    is_reg = kind == REGION
-    efficiency[obj[is_reg]] = w[is_reg]
-    efficiency_boundary[obj[~is_reg]] = w[~is_reg]
-    return efficiency, efficiency_boundary
 
 
 def _gdna_boundary_conserved_len(region_arrays, gdna_fl_pmf: np.ndarray) -> np.ndarray:
@@ -513,16 +479,18 @@ def _log_summary(result: CalibrationResult, strand: _Strand, substrate, sj) -> N
     spl_sense = float(np.where(is_pos, flux[:, 0], flux[:, 1]).sum())
     spl_total = float(flux.sum())
     sj_sense_frac = spl_sense / spl_total if spl_total > 0.0 else float("nan")
-    w = np.concatenate(
-        [result.gdna_capture_efficiency_region, result.gdna_capture_efficiency_boundary]
-    )
-    logger.info(
-        "calibration: capture weights on %d objects, 10th/90th percentile %.3g/%.3g of the typical object's "
-        "(every object's own gDNA density under the landscape; all 1 when the last refit fitted no landscape)",
-        w.size,
-        float(np.quantile(w, 0.1)),
-        float(np.quantile(w, 0.9)),
-    )
+    if result.gdna_bulk_density is None:
+        logger.info(
+            "calibration: no gDNA landscape — every capture efficiency is 1, and effective lengths are not "
+            "corrected for capture"
+        )
+    else:
+        logger.info(
+            "calibration: capture read against the gDNA bulk at %.3e fragments/bp; the landscape's saturated "
+            "level is %.4g× the bulk (1: no level above it)",
+            result.gdna_bulk_density,
+            result.gdna_capture_saturation,
+        )
     logger.debug(
         "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
         "strand overdispersion 0 (binomial, by policy) [sj sense_frac=%.3f vs κ=%.3f]",
@@ -594,17 +562,23 @@ def calibrate(
         mass_global,
         eff_global,
     )
-    belief, gdna_hyperprior, reader_mode = _solve(solve, _debug)
-    # THE CAPTURE WEIGHTS: the reader's posterior mode of gDNA density at every object (`native.solve_blocks`,
-    # run inside the last refit's sweep after its final ψ, from the object's own strand columns with the RNA
-    # amount integrated out and the factors the sweep delivered to it, under the fitted landscape) — no
-    # reference density, no located-mode test, no clip. Published relative to the typical read object: the EM
-    # is invariant to a common factor. A slot the reader did not read (no landscape on the last refit, or no
-    # refit at all) is 1.
+    belief, gdna_hyperprior = _solve(solve, _debug)
+    # THE CAPTURE EFFICIENCIES: every object's own gDNA density read against the last landscape's bulk, the
+    # landscape as a two-group prior and the object's own count as the likelihood — a region's contained, a
+    # boundary's crossing (`capture_efficiency`). Published on the result with the bulk density and the
+    # saturation level, for the ruler and the locus prior. No landscape ⇒ every efficiency is exactly 1.
     regions = chain_region_deconv(chain, belief, substrate)
     boundaries = chain_boundary_deconv(chain, belief, substrate)
-    efficiency, efficiency_boundary = capture_weights(
-        reader_mode, chain, int(substrate.n_regions), int(substrate.n_boundaries)
+    capture = (
+        None
+        if gdna_hyperprior is None
+        else capture_efficiencies(
+            gdna_hyperprior,
+            regions.gdna_mass,
+            region_eff_gdna,
+            boundaries.gdna_mass,
+            boundary_eff_gdna,
+        )
     )
     result = _result(
         substrate,
@@ -613,8 +587,7 @@ def calibrate(
         strand,
         region_eff_gdna,
         boundary_eff_gdna,
-        efficiency,
-        efficiency_boundary,
+        capture,
         _gdna_boundary_conserved_len(region_arrays, gdna_fl_pmf),
     )
 

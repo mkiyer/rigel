@@ -91,10 +91,10 @@ sparse libraries lose their gDNA.
   `quant_accuracy.py --arm oracle`; the per-transcript lane the EM never receives is worth far more —
   `quant_accuracy.py --arm oracle_alloc_seed`, `ISSUES: per-transcript-prior-lane`.
 - **The capture-contracted length**: one shared rule for every EM component — each object's conserved share at
-  that object's own capture weight — its gDNA density's posterior mode under the landscape, relative to the
-  typical read object's, with no detector and no reference (owner, 2026-10-10) — a junction priced from its neighbours by
-  conservation of bases and capped at the most captured object it touches, since capture saturates (owner, 2026-10-05;
-  `DESIGN.md` §7.2, `EQUATIONS.md` §11); the classes sit near one
+  that object's own capture efficiency, its gDNA density read against the bulk under the landscape as a two-group
+  prior (owner, 2026-10-13), a junction priced from its neighbours by conservation of bases and bounded by the
+  saturation level or the best object it touches, since capture saturates (`DESIGN.md` §7.2, `EQUATIONS.md` §11);
+  the classes sit near one
   scale and the junction price's within-gene error is its structure, which no neighbouring gDNA object sees — closed
   for now (owner, 2026-09-26), `ruler_vs_truth.py --scale` (the class means and the within-gene spread),
   `ISSUES: the-junction-price-is-noisy-within-a-gene`; what the gDNA witness cannot see of a
@@ -103,9 +103,7 @@ sparse libraries lose their gDNA.
   rejected genuine reads become gDNA-eligible — and an index whose manifest records no alignable store runs with
   detection off and no error — the cluster track, `ISSUES: splicing-artifacts`,
   `ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`; `summary.json`'s `sj_blacklist_loaded`.
-- **Performance**: the capture reader on the VCaP mix 4,643 → 1,106 CPU-seconds (the pinned pipeline 477 → 253 s)
-  after its speed campaign (`DESIGN.md` §7.2; `ISSUES: a-branch-and-bound-over-the-density-grid` the refused
-  mechanism); what remains of its cost is its quadrature, a ruling after 0.8.0. The sweep is one native call, bit-identical at every thread count; the review's first two
+- **Performance**: the sweep is one native call, bit-identical at every thread count; the review's first two
   numeric no-ops are unparked for Tier 4 and the rest of the thread stays parked —
   `ISSUES: performance-memory-bounded-solve`, `profiling/profiler.py`, `profiling/sweep_replay.py`; a `_debug`
   capture has no memory bound, so one real-genome job runs at a time (`ISSUES: debug-capture-memory-is-unbounded`).

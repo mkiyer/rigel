@@ -440,7 +440,9 @@ standard deviations, no unique evidence anywhere is undecided and even, unique e
 zero, and the drain deposits exactly where it drew. The two-contig drain fixture carries four `NH = 2` fragments,
 so the worker-identity gate covers multi-placement records, and `tests/scenarios_aligned/test_multimap_counting.py`
 is the only panel with real multimappers: identical paralogs are held to the TOTAL and the SHAPE
-(`assert_identical_paralogs` — even, or a vertex, never between), because their split is the EM's own degeneracy.
+(`assert_identical_paralogs` — even, or a vertex, never between), because their split is the EM's own degeneracy;
+the EM runs to convergence there (`CONVERGED_EM`), since the shipped budget can stop the drift toward a vertex on
+the way.
 
 **The capture-contracted length is gated per object against the deposit rule.** Three gates run every
 placement of every fragment width through the reference accumulator (`tests/native/_accumulator_reference.py`)
@@ -455,11 +457,7 @@ and on pieces shorter than a fragment (`TRAPS: perturb-every-gate`). Two more st
 every region and boundary at its own efficiency and finds the junction's objects by coordinate, never by the
 module's index arithmetic, and `::test_a_zero_length_fragment_places_nowhere` holds a length model's mass at
 `w = 0` out of every share. `test_priors.py` holds the gDNA component's length to gDNA's own conserved share
-and never the count's `q`; `test_capture_reader.py` holds the published weights to the reader's modes relative to
-the largest, and `tests/native/test_honest_reader.py` holds the native reader to its executable specification
-(`tests/native/_honest_reader_reference.py`), curve by curve; `tests/native/test_vmath.py` holds the reader's
-series `log` and `exp` (`native/vmath.h`) to libm — `log` within 2 ulp, `exp` within a bound derived from the
-double ln 2's own distance from ln 2 — on a million points.
+and never the count's `q`; `test_capture_efficiency.py` holds each region and boundary to its own count.
 
 ---
 

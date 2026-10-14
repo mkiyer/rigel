@@ -4,9 +4,9 @@ efficiencies.
 Under hybrid capture a transcript's usable length is not its full length: only the probe-enriched part
 of its footprint is sampled, and contracting the gDNA component alone would leave it artificially
 concentrated against the RNA components. So EVERY transcript's EM effective length is contracted by the
-calibration's own capture weights, each object's gDNA density under the population landscape relative to
-the largest (`CalibrationResult.gdna_capture_efficiency_region` / ``_boundary``) — on the same
-objects the deposit rule puts the transcript's fragments on (gate:
+calibration's own efficiencies, each object's deconvolved gDNA read against the bulk (`capture_efficiency`;
+`CalibrationResult.gdna_capture_efficiency_region` / ``_boundary``) — on the same objects the deposit rule puts
+the transcript's fragments on (gate:
 ``tests/calibration/test_capture_eff_length.py``).
 
 THE LENGTH IS A SUM OVER OBJECTS, CONSERVED. A transcript's pieces are the regions its exons cover (an
@@ -32,13 +32,25 @@ crossing positions each carries half a fragment of intron. Where capture adds ov
     c_junction = c_lo + c_hi − ½ (c_intron,lo + c_intron,hi),
 
 the junction's two boundaries less the intron pieces beside them — a piece too short to contain a fragment
-has no contained count, and reads the boundary on its far side instead. The sum is never below 0 and never
-above 1. CAPTURE SATURATES: a fragment binds its best single probe part, so a fragment across a junction is
-captured no more than one wholly inside a fully captured piece. Where probes tile the exons to their edges a
-gDNA fragment crossing an exon's boundary still binds most of a probe, so each boundary reads most of the
-exon's level, not half of it, and the uncapped sum would count the junction's exon capture about twice (gate:
-``test_a_junction_is_captured_no_more_than_a_fully_captured_piece``). A field with no reference — every
-efficiency 1 — returns ``fl_eff_lengths`` bit-identically; only the captured case contracts.
+has no contained count, and reads the boundary on its far side instead. The sum is never below 0.
+
+CAPTURE SATURATES. A fragment binds its best single probe part, so a fragment across a junction is captured no
+more than one wholly inside a fully captured piece: the landscape's saturated level
+(`CalibrationResult.gdna_capture_saturation`). Where probes tile the exons to their edges, a gDNA fragment
+crossing an exon's boundary still binds most of a probe, so each boundary reads most of the exon's level, not
+half of it, and the uncapped sum would count the junction's exon capture about twice (gate:
+``test_a_junction_is_captured_no_more_than_a_fully_captured_piece``). The bound is the larger of that level
+and the best object the junction touches, its two pieces and its two boundaries:
+
+- a probe spanning the junction binds a spliced RNA fragment as ONE part where gDNA sees two, so a junction
+  may out-capture every gDNA object beside it, up to saturation;
+- a junction beside an object read above the saturated level, at a stronger probe's own level, may reach that
+  object's.
+
+Where the saturated level is 1 and no object reads above it, the bound is 1. A library with no landscape
+returns ``fl_eff_lengths`` bit-identically, and so does one whose efficiencies are all exactly 1: only the
+captured case contracts. The unit is the bulk, so a captured transcript's length rises above ``fl``; the EM
+reads every component's length in the same unit, and a factor common to all of them cancels.
 """
 
 from __future__ import annotations
@@ -165,11 +177,12 @@ def _cut_efficiencies(
     c_region: np.ndarray,
     c_boundary: np.ndarray,
     gdna_contained: np.ndarray,
+    saturation: float,
 ) -> np.ndarray:
     """Every cut's efficiency: a contiguous cut's boundary's; a junction's by conservation of bases,
-    ``c_lo + c_hi − ½(c_intron,lo + c_intron,hi)``, within ``[0, 1]`` since capture saturates at a fully
-    captured piece's level — ``A`` the piece below the junction and ``B`` the piece above it, in genomic
-    order."""
+    ``c_lo + c_hi − ½(c_intron,lo + c_intron,hi)``, at least 0 and at most the larger of the saturated level
+    and the best object the junction touches — ``A`` the piece below the junction and ``B`` the piece above
+    it, in genomic order."""
     right_of = region_right_boundary(np.asarray(region_arrays.ref_id))
     A = objects.piece[objects.cut_row]
     B = objects.piece[objects.cut_row + 1]
@@ -187,25 +200,17 @@ def _cut_efficiencies(
             c_region[intron_hi],
             c_boundary[right_of[intron_hi - 1]],
         )
-        # capture saturates: a fragment across a junction is captured no more than one wholly inside the best
-        # object it touches — the two pieces (an intron-short piece read at its far boundary) and the two
-        # boundaries — the simulator's own law of a fragment captured by its best single probe part
-        lvl_a = np.where(
-            gdna_contained[A[j]] > 0.0, c_region[A[j]], c_boundary[np.maximum(right_of[A[j]], 0)]
-        )
-        lvl_b = np.where(
-            gdna_contained[B[j]] > 0.0,
-            c_region[B[j]],
-            c_boundary[np.maximum(right_of[B[j] - 1], 0)],
-        )
-        cap = np.maximum(
-            np.maximum(lvl_a, lvl_b), np.maximum(c_boundary[junction_lo], c_boundary[junction_hi])
-        )
         out = out.copy()
+        bound = np.maximum(
+            saturation,
+            np.maximum.reduce(
+                [c_region[A[j]], c_region[B[j]], c_boundary[junction_lo], c_boundary[junction_hi]]
+            ),
+        )
         out[j] = np.clip(
             c_boundary[junction_lo] + c_boundary[junction_hi] - 0.5 * (c_intron_lo + c_intron_hi),
             0.0,
-            cap,
+            bound,
         )
     return out
 
@@ -220,19 +225,26 @@ def transcript_capture_eff_lengths(
     """``eff_em_t = fl_t · Σ_o share_o c_o / Σ_o share_o`` over the transcript's pieces and cuts (gate:
     ``tests/calibration/test_capture_eff_length.py``).
 
-    The weights are the result's: a piece's region's, a contiguous cut's boundary's, a junction's from the
-    objects beside it, capped at the most captured object it touches. Weights of exactly 1 everywhere (no
-    landscape) return ``fl`` bit-identically; a transcript with no share on any object (shorter than every
-    fragment) keeps ``fl``. The weights are relative to the typical read object, so ``eff_em`` exceeds ``fl``
-    on a transcript more captured than that object and falls below it on one less captured; a junction's
-    weight lies between 0 and the most captured object it touches.
+    The efficiencies are the result's: a piece's region's, a contiguous cut's boundary's, a junction's from
+    the objects beside it. With no landscape every efficiency is 1 and ``fl`` is returned verbatim; a
+    transcript with no share on any object (shorter than every fragment) keeps ``fl``. The efficiencies are
+    relative yields against the bulk, so ``eff_em`` exceeds ``fl`` where capture enriched the transcript.
     """
     fl = np.asarray(fl_eff_lengths, dtype=np.float64)
+    if calibration.gdna_bulk_density is None:
+        return fl.copy()
     c_region = np.asarray(calibration.gdna_capture_efficiency_region, dtype=np.float64)
     c_boundary = np.asarray(calibration.gdna_capture_efficiency_boundary, dtype=np.float64)
     gdna_contained = np.asarray(calibration.gdna_region_eff_len, dtype=np.float64)
     obj = transcript_objects(index, region_arrays, rna_fl_pmf)
-    c_cut = _cut_efficiencies(obj, region_arrays, c_region, c_boundary, gdna_contained)
+    c_cut = _cut_efficiencies(
+        obj,
+        region_arrays,
+        c_region,
+        c_boundary,
+        gdna_contained,
+        calibration.gdna_capture_saturation,
+    )
     num = np.zeros(fl.shape[0])
     den = np.zeros(fl.shape[0])
     np.add.at(num, obj.t, obj.contained * c_region[obj.piece])

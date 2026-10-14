@@ -14,6 +14,7 @@ import shutil
 
 import pytest
 
+from rigel.config import EMConfig
 from rigel.sim import Scenario
 
 from .conftest import (
@@ -21,6 +22,7 @@ from .conftest import (
     STRAND_LEVELS,
     STRESS_COMBOS,
     STRESS_IDS,
+    PIPELINE_SEED,
     SIM_SEED,
     build_and_run,
     assert_alignment,
@@ -943,6 +945,14 @@ class TestMixedMultimapperKitchenSink:
 # ── paralogs with identical exonic sequence, every RNA read a multimapper ──
 
 
+#: The identical-paralog gates run the EM to convergence. On two sequence-identical templates the split is the EM's
+#: own degeneracy: it drifts from the even start toward a vertex, slowly, and at the shipped iteration budget it can
+#: stop on the way (513 / 39 at gDNA 20, a vertex 552 / 0 converged, the total the same) — where the SOLVER stops,
+#: not a property of the model. The shape is asserted where the model decides it; the start-independence gate
+#: (`tests/test_em_start_independence.py`) reads its converged answer for the same reason.
+CONVERGED_EM = EMConfig(seed=PIPELINE_SEED, iterations=100_000, convergence_delta=1e-12)
+
+
 def assert_identical_paralogs(t1, t2, *, tol: float) -> None:
     """What the EM can be held to on two SEQUENCE-IDENTICAL templates: the TOTAL, and the SHAPE.
 
@@ -1033,7 +1043,12 @@ class TestParalogMultimapping:
         """Equal-abundance unspliced paralogs -> ~50/50 split."""
         sc = self._make_scenario(tmp_path, 100, 100)
         try:
-            bench = build_and_run(sc, include_multimap=True, scenario_name="paralogs_eq_unspliced")
+            bench = build_and_run(
+                sc,
+                include_multimap=True,
+                scenario_name="paralogs_eq_unspliced",
+                em_config=CONVERGED_EM,
+            )
             assert_alignment(bench)
             assert_negative_control(bench)
             assert bench.total_rna_observed == pytest.approx(bench.total_expected, abs=25)
@@ -1047,7 +1062,12 @@ class TestParalogMultimapping:
         """Equal-abundance spliced paralogs -> ~50/50 split."""
         sc = self._make_scenario(tmp_path, 100, 100, spliced=True)
         try:
-            bench = build_and_run(sc, include_multimap=True, scenario_name="paralogs_eq_spliced")
+            bench = build_and_run(
+                sc,
+                include_multimap=True,
+                scenario_name="paralogs_eq_spliced",
+                em_config=CONVERGED_EM,
+            )
             assert_alignment(bench)
             assert_negative_control(bench)
             assert bench.total_rna_observed == pytest.approx(bench.total_expected, abs=10)
@@ -1079,6 +1099,7 @@ class TestParalogMultimapping:
                 gdna_abundance=gdna,
                 include_multimap=True,
                 scenario_name=f"paralogs_gdna_{gdna}",
+                em_config=CONVERGED_EM,
             )
             assert_alignment(bench)
             assert_negative_control(bench, gdna_abundance=gdna)
@@ -1086,8 +1107,8 @@ class TestParalogMultimapping:
             t2 = next(t for t in bench.transcripts if t.t_id == "t2")
             # The TOTAL is the property calibration's multimapper second pass restored: with both
             # paralog exons counted at their density, the locus priors hold the gDNA and the EM's total
-            # runs near the truth instead of absorbing the gDNA as RNA (160 against 146 at gDNA 100,
-            # from 202 while calibration was blind to multimappers). It is a draw under
+            # runs near the truth instead of absorbing the gDNA as RNA (158 against 146 at gDNA 100,
+            # from 183 while calibration was blind to multimappers). It is a draw under
             # `assignment_mode="sample"`, so it is held to a band, not pinned.
             assert t1.observed + t2.observed == pytest.approx(
                 t1.expected + t2.expected, abs=0.20 * (t1.expected + t2.expected) + 10
@@ -1101,7 +1122,11 @@ class TestParalogMultimapping:
         sc = self._make_scenario(tmp_path, 100, 100, name_suffix=f"_ss_{ss}")
         try:
             bench = build_and_run(
-                sc, strand_specificity=ss, include_multimap=True, scenario_name=f"paralogs_ss_{ss}"
+                sc,
+                strand_specificity=ss,
+                include_multimap=True,
+                scenario_name=f"paralogs_ss_{ss}",
+                em_config=CONVERGED_EM,
             )
             assert_alignment(bench)
             assert_negative_control(bench, strand_specificity=ss)

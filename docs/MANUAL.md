@@ -384,7 +384,7 @@ transcripts are included; synthetic nRNA spans appear in `nrna_quant`.
 | `start`, `end` | Genomic coordinates (0-based, half-open) |
 | `length` | Spliced exonic length (bp) |
 | `effective_length` | Length after fragment-length correction; the length `tpm` is normalised by, never contracted by capture |
-| `em_effective_length` | The yield the EM reads: `effective_length` scaled by the capture efficiency of every stretch the transcript's fragments land on (its exon pieces, the boundaries between them and its splice junctions), each read from the genomic DNA captured there or, for a junction, beside it (fragments per unit abundance; equal to `effective_length` when the library carries no enriched gDNA mode). It is usually below `effective_length`, and a transcript carried by well-captured junctions can read above it. `count / em_effective_length` is the capture-corrected abundance, and a zero-count transcript's abundance is below about `3 / em_effective_length` |
+| `em_effective_length` | The yield the EM reads: `effective_length` scaled by the capture efficiency of every stretch the transcript's fragments land on (its exon pieces, the boundaries between them and its splice junctions), each read from the genomic DNA captured there or, for a junction, beside it. An efficiency is relative to uncaptured gDNA (the bulk), so `em_effective_length` equals `effective_length` off the probes and in a library without capture, and rises above it where capture enriched the transcript — to about `gdna_capture_saturation` times for a fully captured one. `count / em_effective_length` is the capture-corrected abundance, and a zero-count transcript's abundance is below about `3 / em_effective_length` |
 | `locus_id` | Locus ID; `-1` if not placed in an EM locus |
 | `nrna_id` | ID of the parent nRNA entity (`"."` if none or if the row is itself an nRNA entity) |
 | `is_basic` | `1` if the transcript has the GENCODE `basic` tag |
@@ -519,6 +519,8 @@ scalars (it is `null` if calibration did not run):
 {
   "calibration": {
     "gdna_density_global":        <float>,       // library-average gDNA density (QC scalar)
+    "gdna_bulk_density":          <float|null>,  // the uncaptured gDNA level capture is read against, gDNA fragments/bp; null = no landscape
+    "gdna_capture_saturation":    <float>,       // the saturated gDNA level over that bulk; 1 = nothing above it
     "rna_sense_frac":             <float>,       // kappa: sense-strand RNA fraction
     "gdna_strand_overdispersion": <float>,       // gDNA strand overdispersion: 0 (binomial) in this release
     "rna_strand_overdispersion":  <float>,       // RNA strand overdispersion: 0 (binomial) in this release
@@ -529,12 +531,15 @@ scalars (it is `null` if calibration did not run):
 }
 ```
 
-Calibration's capture answer is per object, not a library scalar: every region's and boundary's capture
-weight is its own gDNA density under the population landscape, relative to the typical object's, and
-`em_effective_length` is each transcript's `effective_length` scaled by the weights of the objects its
-fragments land on. There is no capture detector and no on/off state: a library without capture reads
-weights near one level, and `em_effective_length` then sits close to `effective_length` on every
-transcript.
+`gdna_bulk_density` and `gdna_capture_saturation` are calibration's capture answer. Calibration fits a
+landscape of gDNA densities over the genome; its largest basin is the bulk, the gDNA off the probes, and
+each region's capture efficiency is its own gDNA density read against that bulk, so `em_effective_length`
+is scaled by those efficiencies and rises above `effective_length` where capture enriched the transcript.
+`gdna_capture_saturation` is the landscape's most massive enriched level over the bulk, the level at which
+capture saturates. A library without capture has a landscape of one level: its saturation is 1, every
+efficiency is 1, and every `em_effective_length` equals `effective_length`. `gdna_bulk_density` is `null`
+only when calibration fitted no landscape at all. The report shows both, descriptively: no pass/fail
+verdict.
 
 The RNA and gDNA fragment-length models used by scoring/calibration are
 reported under the top-level **`fragment_length`** key (as
@@ -627,8 +632,9 @@ theory is in `docs/EQUATIONS.md` and the design in `docs/DESIGN.md`.
 ### What calibration produces
 
 - **Library scalars**, in `summary.json` → `calibration`: `gdna_density_global`,
-  `rna_sense_frac` (the sense fraction κ), and the gDNA and RNA strand overdispersions; the
-  capture weights are per object and enter the transcript table as `em_effective_length`.
+  `rna_sense_frac` (the sense fraction κ), the gDNA and RNA strand overdispersions, the uncaptured
+  gDNA level `gdna_bulk_density` that capture is read against, and the saturated level over it,
+  `gdna_capture_saturation`.
 - **A per-locus Dirichlet prior** — `gdna_prior_count` and `rna_prior_count` in `loci.feather`
   — which sets the gDNA-vs-RNA split each locus's EM starts from, plus the gDNA component's
   effective length. RNA is distributed among transcripts by the EM, not by calibration.

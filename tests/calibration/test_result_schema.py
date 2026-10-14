@@ -55,6 +55,8 @@ def _valid_kwargs() -> dict:
         rna_pos_frac_boundary=boundary.copy(),
         rna_neg_frac_boundary=np.zeros(N_BOUNDARIES),
         gdna_density_global=1e-3,
+        gdna_bulk_density=None,
+        gdna_capture_saturation=1.0,
         gdna_capture_efficiency_region=np.ones(N_REGIONS),
         gdna_capture_efficiency_boundary=np.ones(N_BOUNDARIES),
         rna_sense_frac=0.9,
@@ -365,3 +367,61 @@ def test_the_conserved_mass_survives_the_oracle_arms_dataclass_replace():
     swapped = dataclasses.replace(res, count_rna_sj=np.array([40.0, 60.0]))
     np.testing.assert_allclose(swapped.sj_conserved_mass, [20.0, 15.0])
     assert not np.allclose(swapped.sj_conserved_mass, res.sj_conserved_mass)
+
+
+def test_the_bulk_density_is_None_or_positive_and_finite():
+    """`gdna_bulk_density` is the unit the efficiencies are read in, or ``None`` (no landscape): a zero, a
+    negative or a non-finite bulk is refused."""
+    kw = _valid_kwargs()
+    assert CalibrationResult(**kw).gdna_bulk_density is None
+    kw["gdna_bulk_density"] = 0.37
+    assert CalibrationResult(**kw).gdna_bulk_density == 0.37
+    for bad in (0.0, -1.0, float("nan"), float("inf")):
+        kw["gdna_bulk_density"] = bad
+        with pytest.raises(ValueError, match="gdna_bulk_density"):
+            CalibrationResult(**kw)
+
+
+def test_without_a_bulk_every_efficiency_and_the_saturation_are_exactly_one():
+    """No landscape, nothing read against anything: an efficiency or a saturation level other than 1 with no
+    bulk density is a half-published state, refused."""
+    for field, value in (
+        ("gdna_capture_efficiency_region", np.full(N_REGIONS, 0.5)),
+        ("gdna_capture_efficiency_boundary", np.full(N_BOUNDARIES, 2.0)),
+        ("gdna_capture_saturation", 3.0),
+    ):
+        kw = _valid_kwargs()
+        kw[field] = value
+        with pytest.raises(ValueError, match="no bulk density"):
+            CalibrationResult(**kw)
+        kw["gdna_bulk_density"] = 0.37
+        CalibrationResult(**kw)
+
+
+def test_an_efficiency_is_a_relative_yield_with_no_upper_bound():
+    """Against the bulk an enriched object reads far above 1, so there is no ceiling; a negative or a
+    non-finite efficiency is still refused."""
+    kw = _valid_kwargs()
+    kw["gdna_bulk_density"] = 1e-4
+    kw["gdna_capture_saturation"] = 850.0
+    kw["gdna_capture_efficiency_region"] = np.full(N_REGIONS, 850.0)
+    kw["gdna_capture_efficiency_boundary"] = np.full(N_BOUNDARIES, 1e4)
+    CalibrationResult(**kw)
+    for bad in (-0.5, float("nan"), float("inf")):
+        kw2 = dict(kw)
+        kw2["gdna_capture_efficiency_region"] = np.full(N_REGIONS, bad)
+        with pytest.raises(ValueError, match="gdna_capture_efficiency_region"):
+            CalibrationResult(**kw2)
+
+
+def test_the_saturation_is_finite_and_at_least_the_bulk():
+    """The saturated level is the most massive enriched basin's peak over the bulk — at least 1 — and a
+    junction's price is bounded by it, so a level below the bulk or a non-finite one is refused."""
+    kw = _valid_kwargs()
+    kw["gdna_bulk_density"] = 0.37
+    kw["gdna_capture_saturation"] = 1.0
+    CalibrationResult(**kw)
+    for bad in (0.5, 0.0, float("nan"), float("inf")):
+        kw["gdna_capture_saturation"] = bad
+        with pytest.raises(ValueError, match="gdna_capture_saturation"):
+            CalibrationResult(**kw)

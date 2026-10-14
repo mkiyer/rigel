@@ -152,9 +152,9 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument's --self-test
 ```
 
-**The standing baseline: 0 failed / 2,837 passed / 0 skipped / 0 xfail, 2,837 collected** — re-derived
-2026-10-11 after the reader's speed campaign landed (two gates added, the series `log`/`exp` against libm;
-the identical-paralog assertions hold the total and the shape, `DESIGN.md` §4.2). **Any failure at all is a
+**The standing baseline: 0 failed / 2,864 passed / 0 skipped / 0 xfail, 2,864 collected** — re-derived
+2026-10-14 after the multimapper second pass was ported (thirty gates added; the identical-paralog gates run the
+EM to convergence, `DESIGN.md` §4.2). **Any failure at all is a
 regression.** Re-derive a count, never adjust one (`TRAPS: re-record-the-baseline`): every gate that scans
 the files on disk is one case, so only adding or removing a test moves the total. Derive the failure set,
 never eyeball the tail (`TRAPS: read-the-whole-failure-list`). A golden update is where a regression gets

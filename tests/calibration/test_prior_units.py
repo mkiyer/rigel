@@ -175,6 +175,8 @@ def _uniform_library(region_len, rho_g, rho_r, pmf_g, pmf_r) -> CalibrationResul
         rna_pos_frac_boundary=np.zeros_like(cross_g),
         rna_neg_frac_boundary=np.zeros_like(cross_g),
         gdna_density_global=rho_g,
+        gdna_bulk_density=None,
+        gdna_capture_saturation=1.0,
         gdna_capture_efficiency_region=np.ones(n),
         gdna_capture_efficiency_boundary=np.ones(ne),
         rna_sense_frac=0.9,

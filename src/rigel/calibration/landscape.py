@@ -1,8 +1,9 @@
 """The population component-density hyperprior — the landscape.
 
 Fit `P(log ρ_c)` over the population from the previous solve's deconvolved mass for one component, then
-feed it to that component's ψ composition arm on the re-solve. The mode census at the end
-is the prior the capture reader reads each object's gDNA density under (`native.solve_blocks`).
+feed it to that component's ψ composition arm on the re-solve. The census at the end (:func:`census`,
+:func:`split_basins`) splits the fitted density into basins; the capture reader (`capture_efficiency`) takes the
+gDNA landscape's largest basin as the bulk and every basin above it as the enriched spectrum.
 
 The estimator is component-agnostic, deliberately so. Every step below is arithmetic on
 ``(count, mass, eff)`` for whichever component the caller selected: :func:`_grid` is ``mass/eff``,
@@ -60,6 +61,12 @@ class DensityLandscape:
     log_rho: np.ndarray
     logP: np.ndarray
     n_train: int
+    #: The population's own rendered density on the same grid, before the one pseudo-region of ignorance
+    #: (:func:`fit_landscape`): ``-inf`` where no kernel puts mass. ψ reads ``logP``, whose pseudo-region
+    #: bounds how hard the prior can push. The capture reader (`capture_efficiency`) reads this one instead:
+    #: its alternative is the population's own spectrum, and the pseudo-region's uniform mass, spread up to
+    #: the top of the grid, is not a level any object was measured at.
+    logP_free: np.ndarray
 
     def required_logodds_window(self, mass, eff) -> float:
         """The λ bracket this prior's own support demands — derived, with no constant chosen.
@@ -145,13 +152,8 @@ def knn_widths(
     centres: np.ndarray,
     grid_step: float,
     scale: float = CONSTANTS.landscape.knn_scale,
-    k: int | None = None,
 ) -> np.ndarray:
     """The population resolution: ``h_i = scale · dist(a_i, k-th nearest neighbour)``, ``k = √n``.
-
-    ``k`` is the population's own by default; a caller asking about a SUBSET of the population at the
-    population's resolution passes the population's ``k`` (a cluster smaller than ``k`` is then not narrow
-    but unresolved).
 
     ⛔ Read this before changing the kernel. The per-region Poisson likelihood is a measurement width, and
     on the log axis it is ``1/(√g·ln10)`` decades, so it shrinks as ρ^(−1/2) — by well over an order of
@@ -184,7 +186,7 @@ def knn_widths(
     range.
     """
     n = centres.size
-    k = max(int(round(np.sqrt(n))), 2) if k is None else int(k)
+    k = max(int(round(np.sqrt(n))), 2)
     srt = np.sort(centres)
     if n <= k:
         return np.full(n, max(float(srt[-1] - srt[0]), grid_step))
@@ -372,9 +374,76 @@ def fit_landscape(
     # support. A population of `W` weighted regions cannot resolve a cell rarer than ~1/W, so the log-range
     # is bounded by log W and the prior stays weak and correctable — the governing principle for pass-0
     # output, which is exactly what this is fitted from.
+    free = density / total
     density = (density + total / (grid.size * max(float(weights.sum()), 1.0))) / total
+    with np.errstate(divide="ignore"):
+        log_free = np.log(free / free.sum())
     return DensityLandscape(
         log_rho=grid * _LN10,
         logP=np.log(density / density.sum()),
         n_train=int(live.sum()),
+        logP_free=log_free,
     )
+
+
+# ── The census: the bulk and the enriched basins ─────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class LandscapeMode:
+    """One mode of a fitted density: the peak ``log_rho`` (natural log) and its basin ``[lo, hi]``, the
+    minima flanking it, with ``basin_mass`` the share of the density inside. Adjacent basins share a bound,
+    so the modes partition the grid."""
+
+    log_rho: float
+    basin_mass: float
+    lo: float
+    hi: float
+
+
+def census(landscape: DensityLandscape) -> tuple[LandscapeMode, ...]:
+    """Every local maximum of ``logP`` with its basin, in grid order. Basins split at the minimum between
+    adjacent maxima, so they partition the grid and their masses sum to one.
+
+    A maximum is an interior cell above its left neighbour and at least its right one (a plateau peaks at
+    its left end), or an EDGE cell strictly above its one neighbour: a density that is highest at the edge
+    of the grid peaks there, whatever else it holds. A flat edge is no peak. A density with no maximum at
+    all peaks at its arg-max."""
+    x = np.asarray(landscape.log_rho, dtype=np.float64)
+    p = np.exp(np.asarray(landscape.logP, dtype=np.float64))
+    p = p / max(float(p.sum()), _EPS)
+    peaks = list(np.where((p[1:-1] > p[:-2]) & (p[1:-1] >= p[2:]))[0] + 1)
+    if p.size > 1 and p[0] > p[1]:
+        peaks.insert(0, 0)
+    if p.size > 1 and p[-1] > p[-2]:
+        peaks.append(p.size - 1)
+    if not peaks:
+        peaks = [int(np.argmax(p))]
+    cuts = [0]
+    for a, b in zip(peaks[:-1], peaks[1:], strict=False):
+        cuts.append(int(a + np.argmin(p[a : b + 1])))
+    cuts.append(p.size - 1)
+    modes = []
+    for i, pk in enumerate(peaks):
+        s, e = cuts[i], cuts[i + 1]
+        # half-open segments, so a shared cut bin is counted once; the last basin takes the final point
+        hi_idx = e + 1 if i == len(peaks) - 1 else e
+        modes.append(
+            LandscapeMode(
+                log_rho=float(x[pk]),
+                basin_mass=float(p[s:hi_idx].sum()),
+                lo=float(x[s]),
+                hi=float(x[e]),
+            )
+        )
+    return tuple(modes)
+
+
+def split_basins(
+    modes: tuple[LandscapeMode, ...],
+) -> tuple[LandscapeMode, tuple[LandscapeMode, ...]]:
+    """The bulk basin, the largest by rendered mass, and the basins wholly above it, in grid order (empty
+    when nothing lies above the bulk)."""
+    bulk = max(modes, key=lambda m: m.basin_mass)
+    above = tuple(m for m in modes if m.lo >= bulk.hi - _EPS and m is not bulk)
+    return bulk, above

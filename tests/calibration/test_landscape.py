@@ -5,16 +5,21 @@ capture-enriched minority: the minority must stay a mode rather than being smoot
 the grid must span exactly what ψ can represent and nothing else, a zero-count region must decay
 downward instead of inventing a location at 1/E, an imprecise region must be damped rather than
 dropped, and the kernel widths must come from the local neighbour spacing so they widen on their own
-as regions thin out. The mode census that reads the ruler's reference off the fit closes the file.
+as regions thin out. The census that splits the fit into the bulk and the enriched basins closes the file.
 Each gate holds one property, so a regression names itself.
 """
 
 import numpy as np
 import pytest
 
+from rigel.calibration.capture_efficiency import capture_efficiencies
 from rigel.calibration.landscape import (
+    DensityLandscape,
+    LandscapeMode,
+    census,
     fit_landscape,
     knn_widths,
+    split_basins,
 )
 
 LN10 = np.log(10.0)
@@ -224,4 +229,130 @@ def test_declines_gracefully_on_degenerate_input():
     )
 
 
-# ── the mode census: the ruler's reference ─────────────────────────────────────────────────────────
+def test_the_landscape_keeps_its_own_density_beside_the_padded_one():
+    """``logP_free`` is the rendered population before the one pseudo-region of ignorance, and ``logP`` is that
+    density plus the uniform pseudo-mass and nothing else: one affine map takes the first to the second exactly."""
+    count, mass, e, var = _two_mode()
+    ls = fit_landscape(count, mass, e, var, anchor=np.zeros(count.size, bool))
+    free, padded = np.exp(ls.logP_free), np.exp(ls.logP)
+    assert free.sum() == pytest.approx(1.0, abs=1e-12)
+    slope, intercept = np.polyfit(free, padded, 1)
+    np.testing.assert_allclose(padded, slope * free + intercept, rtol=0, atol=1e-15)
+    assert 0.0 < slope < 1.0 and intercept > 0.0
+
+
+# ── the census: the bulk and the enriched basins ───────────────────────────────────────────────────────
+
+
+def test_split_basins_names_the_largest_basin_depleted_and_returns_only_the_basins_above_it():
+    """Depleted is the largest-mass basin; the basins returned beside it are those strictly above it, so a
+    smaller basin BELOW the depleted one is never an enriched candidate, and a density whose largest basin
+    is the top one has nothing above it."""
+    below = LandscapeMode(log_rho=-7.0, basin_mass=0.10, lo=-9.0, hi=-6.0)
+    base = LandscapeMode(log_rho=-4.0, basin_mass=0.60, lo=-6.0, hi=-2.0)
+    mid = LandscapeMode(log_rho=0.0, basin_mass=0.30, lo=-2.0, hi=1.5)
+    dep, above = split_basins((below, base, mid))
+    assert dep is base and above == (mid,)
+    small = LandscapeMode(log_rho=-4.0, basin_mass=0.20, lo=-6.0, hi=-2.0)
+    top = LandscapeMode(log_rho=0.0, basin_mass=0.70, lo=-2.0, hi=1.5)
+    dep2, above2 = split_basins((below, small, top))
+    assert dep2 is top and above2 == ()
+
+
+def _drawn(p) -> DensityLandscape:
+    """A landscape whose density is ``p`` itself, on a unit grid."""
+    p = np.asarray(p, dtype=np.float64)
+    with np.errstate(divide="ignore"):
+        lp = np.log(p / p.sum())
+    return DensityLandscape(
+        log_rho=np.arange(p.size, dtype=np.float64), logP=lp, n_train=p.size, logP_free=lp
+    )
+
+
+def test_the_basins_partition_the_grid():
+    """Masses sum to one, adjacent basins share their bound and the basins span the grid, whatever the shape."""
+    for p in (
+        [0.70, 0.10, 0.05, 0.02, 0.03, 0.08, 0.02],
+        [1, 3, 1, 2, 5, 2, 1, 4, 9],
+        [5, 4, 3, 2, 1],
+    ):
+        modes = census(_drawn(p))
+        assert sum(m.basin_mass for m in modes) == pytest.approx(1.0, rel=0, abs=1e-12)
+        assert all(a.hi == b.lo for a, b in zip(modes, modes[1:]))
+        assert modes[0].lo == 0.0 and modes[-1].hi == len(p) - 1
+
+
+def test_a_density_highest_at_the_grid_edge_peaks_there():
+    """The review's case: a floor of mass 0.70 at the grid's low edge and a small bump at x = 5. The edge is a
+    maximum, so it is the bulk, and the bump is the enriched basin above it. PERTURBATION: reading interior
+    maxima only makes the bump the one basin, holding everything, and the floor-versus-enriched contrast is
+    gone."""
+    modes = census(_drawn([0.70, 0.10, 0.05, 0.02, 0.03, 0.08, 0.02]))
+    assert [m.log_rho for m in modes] == [0.0, 5.0]
+    bulk, above = split_basins(modes)
+    assert bulk.log_rho == 0.0 and [m.log_rho for m in above] == [5.0]
+    assert bulk.basin_mass == pytest.approx(0.85)
+
+
+def test_the_high_edge_peaks_too_and_a_flat_edge_does_not():
+    """A density rising to the grid's top edge peaks there; an edge level with its neighbour is a plateau's end,
+    no peak; a monotone density peaks once, at its arg-max."""
+    assert [m.log_rho for m in census(_drawn([3, 1, 2, 5]))] == [0.0, 3.0]
+    assert [m.log_rho for m in census(_drawn([1, 1, 2, 5, 3]))] == [3.0]
+    assert [m.log_rho for m in census(_drawn([5, 4, 3, 2, 1]))] == [0.0]
+    assert [m.log_rho for m in census(_drawn([1, 2, 3, 4, 5]))] == [4.0]
+
+
+def test_a_plateau_peaks_at_its_left_end():
+    assert [m.log_rho for m in census(_drawn([1, 3, 3, 3, 1]))] == [1.0]
+
+
+def _walls_around_a_tail(seed=0, n_long=20_000, n_dep=200, n_short=600, n_tail=12):
+    """A sparse human-like library, refitted through the loop's own E-step: the depleted bulk is 20,000
+    long anchors (walls at 10^-5) with 200 located intron pieces at the depleted level; 600 SHORT anchors —
+    20–60 bp intergenic slivers that sequenced nothing — whose resolution walls 1/E sit between 10^-1.8
+    and 10^-1.3; and twelve located exon kernels near 10^-1.3, a tail and not a population."""
+    rng = np.random.default_rng(seed)
+    eff = np.concatenate(
+        [
+            np.full(n_long, 1e5),
+            np.full(n_dep, 1e5),
+            rng.uniform(20.0, 60.0, n_short),
+            np.full(n_tail, 300.0),
+        ]
+    )
+    count = np.concatenate(
+        [
+            np.zeros(n_long),
+            rng.poisson(3e-5 * 1e5, n_dep) + 1.0,
+            np.zeros(n_short),
+            rng.poisson(0.05 * 300.0, n_tail) + 1.0,
+        ]
+    )
+    mass = np.maximum(count * 2.0, 1.0)
+    var = np.where(count > 0, 0.1, np.inf)
+    anchor = count <= 0.0
+    ls = None
+    for _ in range(
+        3
+    ):  # calib_refit_iters: the E-step moves the walls' mass to the bulk, not their centres
+        ls = fit_landscape(count, mass, eff, var, anchor=anchor, prev=ls)
+    return ls
+
+
+def test_walls_around_a_handful_of_exons_lift_nothing_and_the_exons_read_their_own_level():
+    """LBX0190's shape, through the estimator itself: the walls' mass goes to the bulk in the E-step, and the
+    twelve exons are a basin of a few parts in ten thousand. Read by the capture reader, nothing without evidence
+    is lifted — a 40 bp sliver with no fragment reads the bulk to a part in a thousand, a 100 kb intron with none
+    reads it exactly — and an exon at the tail's level, fifteen fragments on 300 bp, reads its own level: the
+    small panel the located-mode gate would not read at all."""
+    ls = _walls_around_a_tail()
+    assert ls is not None
+    _bulk, above = split_basins(census(ls))
+    assert len(above) == 1 and above[0].basin_mass < 1e-3
+    r = capture_efficiencies(
+        ls, np.array([0.0, 0.0, 15.0]), np.array([40.0, 1e5, 300.0]), np.zeros(0), np.zeros(0)
+    )
+    assert abs(r.efficiency_region[0] - 1.0) < 1e-3
+    assert abs(r.efficiency_region[1] - 1.0) < 1e-9
+    assert abs(np.log(r.efficiency_region[2] * r.bulk_density / 0.05)) < 0.2

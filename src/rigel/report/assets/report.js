@@ -387,6 +387,26 @@
     });
   }
 
+  /* ---------- capture note: calibration's own answer ---------- */
+  function captureNote() {
+    const n = $("capture-note"); if (!n) return;
+    const c = M.calibration && M.calibration.capture;
+    if (!c) { n.innerHTML = "This summary carries no calibration, so there is no capture answer."; return; }
+    if (c.bulk_density == null) {
+      n.innerHTML = `<b>No gDNA landscape was fitted</b>, so every capture efficiency is 1 and every ` +
+        `<span class="num">em_effective_length</span> equals <span class="num">effective_length</span>.`;
+    } else if (c.saturation > 1) {
+      n.innerHTML = `<b>The gDNA landscape holds levels above its bulk</b> of <span class="num">${fmtValue(c.bulk_density, "g4")}</span> ` +
+        `gDNA fragments/bp, saturating at <span class="num">${fmtValue(c.saturation, "g4")}×</span> the bulk. Each region's capture ` +
+        `efficiency is its own gDNA density read against the bulk, and every <span class="num">em_effective_length</span> ` +
+        `the EM reads is scaled by those efficiencies.`;
+    } else {
+      n.innerHTML = `<b>The gDNA landscape is one level</b>, its bulk at <span class="num">${fmtValue(c.bulk_density, "g4")}</span> ` +
+        `gDNA fragments/bp, with nothing enriched above it: every capture efficiency is 1, so every ` +
+        `<span class="num">em_effective_length</span> equals <span class="num">effective_length</span>.`;
+    }
+  }
+
   /* ---------- reference table (all references, by gDNA mass) ---------- */
   function refTable() {
     const rt = (M.calibration || {}).ref_table || [];  // [ref, n_regions, gdna_mass, gdna/bp, gdna_frac]
@@ -444,8 +464,9 @@
     stackBar($("pool-bar"), M.quant.pools); legend($("pool-legend"), M.quant.pools, true); poolTable();
     kpis($("pool-kpis"), M.quant.kpis); donut($("pool-donut"), M.quant.pools, M.quant.rna_share);
     if (M.calibration) {
+      kpis($("enrich-kpis"), M.calibration.enrichment_kpis);
       kpis($("density-kpis"), M.calibration.density_kpis);
-      refTable();
+      captureNote(); refTable();
     }
     geneTable();
     config();

@@ -298,9 +298,74 @@ def _js_function(name: str) -> str:
     return m.group(1)
 
 
-def test_the_report_shows_calibrations_rna_sense_fraction(tmp_path):
-    """The sense fraction is a library scalar and is shown as one."""
-    d = _with_calibration(_write_substrate(tmp_path / "run"), rna_sense_frac=0.973)
+def test_the_capture_answer_is_calibrations_bulk_and_saturation(tmp_path):
+    """The capture tile, KPIs and note read calibration's bulk density and saturated level and nothing else: an
+    enriched landscape shows its saturation over the bulk, a one-level landscape says nothing is enriched, no
+    landscape says so, and a summary without calibration shows no tile."""
+
+    def view(name, **keys):
+        return build_view_model(
+            load_substrate(_with_calibration(_write_substrate(tmp_path / name), **keys))
+        )
+
+    enriched = view("on", gdna_bulk_density=1.2e-4, gdna_capture_saturation=852.0)
+    assert enriched["calibration"]["capture"] == {"bulk_density": 1.2e-4, "saturation": 852.0}
+    tile = next(v for v in enriched["verdicts"] if v["k"] == "Capture")
+    assert (tile["v"], tile["fmt"], tile["s"]) == ("852×", "text", "info")
+    assert "0.00012" in tile["n"]
+    assert [k["v"] for k in enriched["calibration"]["enrichment_kpis"]] == [1.2e-4, 852.0]
+
+    one = view("off", gdna_bulk_density=6e-3, gdna_capture_saturation=1.0)
+    tile = next(v for v in one["verdicts"] if v["k"] == "Capture")
+    assert (tile["v"], tile["fmt"]) == ("1×", "text")
+    assert "one gDNA level" in tile["n"]
+
+    none = view("none", gdna_bulk_density=None, gdna_capture_saturation=1.0)
+    assert none["calibration"]["capture"] == {"bulk_density": None, "saturation": 1.0}
+    tile = next(v for v in none["verdicts"] if v["k"] == "Capture")
+    assert (tile["v"], tile["fmt"]) == ("None", "text")
+    assert [k["v"] for k in none["calibration"]["enrichment_kpis"]] == ["None"]
+
+    absent = build_view_model(load_substrate(_write_substrate(tmp_path / "absent")))
+    assert absent["calibration"]["capture"] is None
+    assert not any(v["k"] == "Capture" for v in absent["verdicts"])
+    assert absent["calibration"]["enrichment_kpis"] == []
+
+
+def test_the_capture_note_never_says_a_mode_was_located(tmp_path):
+    """The reader locates no mode, so the note may not say it did — in any of its three cases — and it names
+    the bulk the efficiencies are read against."""
+    note = _js_function("captureNote")
+    assert "mode was located" not in note and "located" not in note
+    assert "bulk" in note
+
+
+def test_the_capture_note_reads_only_keys_the_view_model_writes(tmp_path):
+    """A key the front end reads but the model never writes renders as ``NaN`` or ``undefined``, and
+    nothing fails, so every key the note reads off the capture answer must be one the model writes."""
+    d = _with_calibration(
+        _write_substrate(tmp_path / "run"), gdna_bulk_density=1.2e-4, gdna_capture_saturation=852.0
+    )
+    written = set(build_view_model(load_substrate(d))["calibration"]["capture"])
+    read = set(re.findall(r"\bc\.(\w+)", _js_function("captureNote")))
+    assert read, "the capture note reads no key of the capture answer"
+    assert read <= written, (
+        f"report.js reads {sorted(read - written)}, which the model never writes"
+    )
+
+
+@pytest.mark.parametrize("bulk_density", [1.2e-4, None])
+def test_the_report_shows_calibrations_rna_sense_fraction_whatever_the_capture_answer(
+    tmp_path, bulk_density
+):
+    """The sense fraction is a library scalar, not a capture number, so it is shown whatever calibration says
+    about capture."""
+    d = _with_calibration(
+        _write_substrate(tmp_path / "run"),
+        rna_sense_frac=0.973,
+        gdna_bulk_density=bulk_density,
+        gdna_capture_saturation=1.0 if bulk_density is None else 852.0,
+    )
     kpis = build_view_model(load_substrate(d))["calibration"]["density_kpis"]
     assert {"l": "RNA sense", "v": 0.973, "fmt": "float3"} in kpis
 
@@ -308,7 +373,9 @@ def test_the_report_shows_calibrations_rna_sense_fraction(tmp_path):
 def test_every_format_tag_the_view_model_emits_is_one_the_front_end_formats(tmp_path):
     """``fmtValue`` falls through to the raw value on a tag it does not know, so a tag the model emits
     must be one of its cases (``text`` values are strings, which it passes through)."""
-    d = _with_calibration(_write_substrate(tmp_path / "run"))
+    d = _with_calibration(
+        _write_substrate(tmp_path / "run"), gdna_bulk_density=1.2e-4, gdna_capture_saturation=852.0
+    )
     _enriched_track().to_feather(d / "calibration_track.feather")
     vm = build_view_model(load_substrate(d))
 

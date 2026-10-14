@@ -5,9 +5,11 @@ The geometry half: ``transcript_objects`` must map every transcript to every pie
 partition it is handed (the coarse partition built here by hand still has exon boundaries in a region's
 interior, which the shipped partition no longer produces — losing that fixture would retire the guard); each
 object's share must be what the deposit rule gives it, per object, through the reference accumulator; and a
-transcript's shares must sum to its fl-marginal length exactly. The pricing half: every efficiency 1 (a field
-with no reference) returns the FL-marginal lengths bit-identically; a piece prices at its region, a
-contiguous cut at its boundary, a junction at its two splice sites' boundaries less the intron beside them;
+transcript's shares must sum to its fl-marginal length exactly. The pricing half: every efficiency 1 (a library
+with no landscape, or one level) returns the FL-marginal lengths bit-identically; a piece prices at its region, a
+contiguous cut at its boundary, a junction at its two splice sites' boundaries less the intron beside them, bounded
+by the larger of the saturated level and the best object it touches; one factor on every efficiency is one factor
+on every length;
 a transcript of exons shorter than a fragment is read through its cuts; the ruler reads the result's
 efficiencies and the geometry, never the counts.
 """
@@ -56,10 +58,15 @@ def _flank_mean(ra: RegionArrays, c) -> np.ndarray:
     return 0.5 * (c[lo] + c[hi])
 
 
-def _cal(ra: RegionArrays, efficiency, boundary=None) -> CalibrationResult:
+def _cal(
+    ra: RegionArrays, efficiency, bulk: float | None, boundary=None, saturation: float = 1.0
+) -> CalibrationResult:
     """THE fixture: a result whose capture efficiencies are stated outright — a region's, and a boundary's
     (its flanks' mean unless given) — with counts that carry nothing; the supports are the geometry the
-    ruler reads to find an intron piece too short to contain a fragment."""
+    ruler reads to find an intron piece too short to contain a fragment. ``bulk`` ``None`` is a library with
+    no landscape, where every efficiency must be 1. ``saturation`` is the landscape's saturated level in the
+    efficiencies' unit; at its default 1, with every efficiency at most 1, the unit is the fully captured
+    level and the junction's bound is 1."""
     n = int(ra.n_regions)
     lo, _hi = boundary_region_indices(np.asarray(ra.ref_id))
     ne = lo.shape[0]
@@ -88,6 +95,8 @@ def _cal(ra: RegionArrays, efficiency, boundary=None) -> CalibrationResult:
         rna_pos_frac_boundary=ez.copy(),
         rna_neg_frac_boundary=ez.copy(),
         gdna_density_global=0.01,
+        gdna_bulk_density=bulk,
+        gdna_capture_saturation=1.0 if bulk is None else saturation,
         gdna_capture_efficiency_region=c,
         gdna_capture_efficiency_boundary=(
             _flank_mean(ra, c) if boundary is None else np.asarray(boundary, dtype=np.float64)
@@ -340,26 +349,37 @@ def test_each_share_is_what_the_deposit_rule_gives_the_object(pieces_index):
 # --- the pricing: efficiencies 1 return fl; each object at its own efficiency; the junction ---------
 
 
-def test_weights_of_one_everywhere_return_the_fl_marginal_lengths_bit_identically(multiexon_index):
-    """No landscape, so every weight is exactly 1: the ruler is ``fl`` EXACTLY on every transcript, spliced
-    and unspliced alike (a junction between two exons at 1, its introns at 1, prices at 1) — not within
-    float noise, since a contraction from rounding would be a systematic bias, not a tolerance."""
+def test_no_landscape_returns_the_fl_marginal_lengths_bit_identically(multiexon_index):
+    """No landscape: every efficiency is 1 and the ruler is ``fl`` EXACTLY, not within float noise — a
+    contraction from rounding is a systematic bias, not a tolerance."""
+    idx = multiexon_index
+    ra = RegionArrays.from_index(idx)
+    fl = np.linspace(900.0, 2000.0, len(idx.t_df))
+    eff = transcript_capture_eff_lengths(_cal(ra, np.ones(ra.n_regions), None), ra, idx, fl, PMF)
+    np.testing.assert_array_equal(eff, fl)
+
+
+def test_efficiencies_of_one_everywhere_contract_nothing_bit_identically(multiexon_index):
+    """A landscape of one level reads every object at the bulk: the factor is exactly 1 on every transcript,
+    spliced and unspliced alike — a junction between two exons at 1, its introns at 1, prices at exactly 1 —
+    so a capture-OFF library's lengths are ``fl`` bit for bit, as with no landscape at all."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     fl = _fl(idx.t_df["length"].to_numpy())
-    eff = transcript_capture_eff_lengths(_cal(ra, np.ones(ra.n_regions)), ra, idx, fl, PMF)
+    eff = transcript_capture_eff_lengths(_cal(ra, np.ones(ra.n_regions), 1.0), ra, idx, fl, PMF)
     np.testing.assert_array_equal(eff, fl)
 
 
 def test_a_field_contracts_and_never_expands(multiexon_index):
-    """On a field where capture adds over bases — every boundary at its flanks' mean — a junction prices
-    at its two exons' mean and no transcript reads longer than its fl-marginal length."""
+    """In the unit of the fully captured level (saturation 1, no object above it), on a field where capture
+    adds over bases — every boundary at its flanks' mean — a junction prices at its two exons' mean and no
+    transcript reads longer than its fl-marginal length."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     c = np.full(ra.n_regions, 0.001)
     c[_exon_mask(ra, 1000, 1500)] = 1.0  # the first exon captured, everything else depleted
     fl = _fl(idx.t_df["length"].to_numpy())
-    eff = transcript_capture_eff_lengths(_cal(ra, c), ra, idx, fl, PMF)
+    eff = transcript_capture_eff_lengths(_cal(ra, c, 1.0), ra, idx, fl, PMF)
     assert np.all(eff <= fl + 1e-9)
     assert np.any(eff < fl - 1e-6)
 
@@ -376,7 +396,7 @@ def test_the_length_is_the_share_weighted_mean_of_the_objects_efficiencies(multi
         c[_exon_mask(ra, s, s + 500)] = level[k]
     m = _tidx(idx, "mrna")
     fl = _fl(idx.t_df["length"].to_numpy())
-    eff = transcript_capture_eff_lengths(_cal(ra, c), ra, idx, fl, PMF)
+    eff = transcript_capture_eff_lengths(_cal(ra, c, 1.0), ra, idx, fl, PMF)
     contained, cut = 501.0 - MU, MU - 1.0
     junctions = [0.5 * (a + b) for a, b in zip(level[:-1], level[1:])]
     expected = fl[m] * (contained * sum(level) + cut * sum(junctions)) / (6 * contained + 5 * cut)
@@ -399,7 +419,7 @@ def test_a_junction_adds_its_two_sides_it_does_not_average_them(multiexon_index)
         c[_exon_mask(ra, s, s + 500)] = 1.0
     m = _tidx(idx, "mrna")
     fl = _fl(idx.t_df["length"].to_numpy())
-    eff = transcript_capture_eff_lengths(_cal(ra, c), ra, idx, fl, PMF)
+    eff = transcript_capture_eff_lengths(_cal(ra, c, 1.0), ra, idx, fl, PMF)
     assert eff[m] == pytest.approx(fl[m], rel=1e-12)
 
 
@@ -421,29 +441,84 @@ def test_a_junction_is_captured_no_more_than_a_fully_captured_piece(multiexon_in
     ne = int(boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0])
     m = _tidx(idx, "mrna")
     fl = _fl(idx.t_df["length"].to_numpy())
-    eff = transcript_capture_eff_lengths(_cal(ra, c, boundary=np.full(ne, 0.835)), ra, idx, fl, PMF)
+    eff = transcript_capture_eff_lengths(
+        _cal(ra, c, 1.0, boundary=np.full(ne, 0.835)), ra, idx, fl, PMF
+    )
     assert eff[m] == pytest.approx(fl[m], rel=1e-12)
     assert np.all(eff <= fl * (1.0 + 1e-12))
 
 
-def test_a_junction_is_captured_no_more_than_the_most_captured_object_it_touches(multiexon_index):
-    """THE FALSIFICATION TEST for the junction's cap at the objects it touches. The sum of the two boundaries
-    less the introns' mean can exceed every object beside the junction when the boundaries read near the
-    exons' level; a junction fragment binds its best single probe part, so it is captured no more than the
-    most captured of the two pieces and the two boundaries it touches. Every exon at 0.5, every boundary at
-    0.45, every intron at 0.001: the uncapped sum prices each junction at 0.899, above every object the
-    fragment touches; capped, the mRNA reads exactly half its fl-marginal length, every piece and cut at 0.5.
-    PERTURBATION: a cap at 1 instead reads the mRNA's cuts at 0.899 and the mRNA longer than half."""
+def _mrna_length(fl_m: float, exon_levels, junction_prices) -> float:
+    """The six-exon mRNA's length from its objects: each 500 bp exon holds ``501 − E[w]`` of contained share and
+    each junction ``E[w − 1]`` (no fragment reaches a second cut)."""
+    contained, cut = 501.0 - MU, MU - 1.0
+    return (
+        fl_m
+        * (contained * sum(exon_levels) + cut * sum(junction_prices))
+        / (len(exon_levels) * contained + len(junction_prices) * cut)
+    )
+
+
+def test_a_junction_may_out_capture_every_object_it_touches_up_to_saturation(multiexon_index):
+    """THE FALSIFICATION TEST for the junction's bound in the bulk unit. A probe spanning a junction binds a
+    spliced RNA fragment as ONE part, where gDNA sees two: each exon side then reads part of the probe's level,
+    and the junction more than either. Saturation 100, every exon and boundary at 40, the introns at the bulk:
+    the junction prices at ``40 + 40 − ½(1 + 1) = 79``, above every object it touches and below saturation.
+    PERTURBATION: a bound at the best touched object prices it at 40 — the reviewed arm's rule, which cost the
+    deciding panels."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
-    c = np.full(ra.n_regions, 0.001)
+    c = np.ones(ra.n_regions)
     for s in range(1000, 6500, 1000):
-        c[_exon_mask(ra, s, s + 500)] = 0.5
+        c[_exon_mask(ra, s, s + 500)] = 40.0
     ne = int(boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0])
     m = _tidx(idx, "mrna")
     fl = _fl(idx.t_df["length"].to_numpy())
-    eff = transcript_capture_eff_lengths(_cal(ra, c, boundary=np.full(ne, 0.45)), ra, idx, fl, PMF)
-    assert eff[m] == pytest.approx(0.5 * fl[m], rel=1e-12)
+    eff = transcript_capture_eff_lengths(
+        _cal(ra, c, 1e-3, boundary=np.full(ne, 40.0), saturation=100.0), ra, idx, fl, PMF
+    )
+    assert eff[m] == pytest.approx(_mrna_length(fl[m], [40.0] * 6, [79.0] * 5), rel=1e-12)
+    assert eff[m] > _mrna_length(fl[m], [40.0] * 6, [40.0] * 5) * (1.0 + 1e-6)
+
+
+def test_a_junction_beside_an_object_above_saturation_may_reach_that_objects_level(multiexon_index):
+    """Capture saturates per level: an object of a stronger probe reads above the library's saturated level, and
+    a junction beside it is captured as that object is, not cut back to the library's level. Saturation 100,
+    every exon and boundary at 300, the introns at the bulk: the sum ``599`` is bounded by the best touched
+    object, 300, and the mRNA reads every object at 300. PERTURBATION: a bound at saturation alone prices the
+    junctions at 100, under the exons beside them."""
+    idx = multiexon_index
+    ra = RegionArrays.from_index(idx)
+    c = np.ones(ra.n_regions)
+    for s in range(1000, 6500, 1000):
+        c[_exon_mask(ra, s, s + 500)] = 300.0
+    ne = int(boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0])
+    m = _tidx(idx, "mrna")
+    fl = _fl(idx.t_df["length"].to_numpy())
+    eff = transcript_capture_eff_lengths(
+        _cal(ra, c, 1e-3, boundary=np.full(ne, 300.0), saturation=100.0), ra, idx, fl, PMF
+    )
+    assert eff[m] == pytest.approx(300.0 * fl[m], rel=1e-12)
+
+
+def test_one_factor_on_every_efficiency_is_one_factor_on_every_length(multiexon_index):
+    """The unit is free. Scaling every efficiency AND the saturated level by one factor scales every
+    transcript's length by exactly that factor — spliced, unspliced and nascent alike — so the EM, which reads
+    every component in the same unit, cannot tell the two units apart."""
+    idx = multiexon_index
+    ra = RegionArrays.from_index(idx)
+    rng = np.random.default_rng(5)
+    c = rng.uniform(0.5, 400.0, ra.n_regions)
+    ne = int(boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0])
+    b = rng.uniform(0.5, 400.0, ne)
+    fl = _fl(idx.t_df["length"].to_numpy())
+    one = transcript_capture_eff_lengths(
+        _cal(ra, c, 1e-3, boundary=b, saturation=120.0), ra, idx, fl, PMF
+    )
+    scaled = transcript_capture_eff_lengths(
+        _cal(ra, 7.25 * c, 1e-3, boundary=7.25 * b, saturation=7.25 * 120.0), ra, idx, fl, PMF
+    )
+    np.testing.assert_allclose(scaled, 7.25 * one, rtol=1e-12)
 
 
 def test_an_intron_piece_too_short_to_contain_a_fragment_reads_its_far_boundary(short_intron_index):
@@ -461,10 +536,10 @@ def test_an_intron_piece_too_short_to_contain_a_fragment_reads_its_far_boundary(
     c[_exon_mask(ra, 1000, 1500) | _exon_mask(ra, 1550, 2050)] = 1.0
     cb = _flank_mean(ra, c)
     fl = _fl(idx.t_df["length"].to_numpy())
-    eff = transcript_capture_eff_lengths(_cal(ra, c, boundary=cb), ra, idx, fl, PMF)
+    eff = transcript_capture_eff_lengths(_cal(ra, c, 1.0, boundary=cb), ra, idx, fl, PMF)
     c2 = c.copy()
     c2[intron] = 0.9
-    eff2 = transcript_capture_eff_lengths(_cal(ra, c2, boundary=cb), ra, idx, fl, PMF)
+    eff2 = transcript_capture_eff_lengths(_cal(ra, c2, 1.0, boundary=cb), ra, idx, fl, PMF)
     assert eff2[si] == eff[si]
     contained, cut = 501.0 - MU, MU - 1.0
     expected = fl[si] * (2 * contained + cut * 0.5005) / (2 * contained + cut)
@@ -499,7 +574,7 @@ def test_a_junction_reads_the_objects_beside_it_on_a_multi_region_intron(multi_r
         return int(np.flatnonzero(ends == pos)[0])
 
     fl = _fl(idx.t_df["length"].to_numpy())
-    eff = transcript_capture_eff_lengths(_cal(ra, c, boundary=cb), ra, idx, fl, PMF)
+    eff = transcript_capture_eff_lengths(_cal(ra, c, 1.0, boundary=cb), ra, idx, fl, PMF)
     contained, cut = 501.0 - MU, MU - 1.0
     for tid, (e1, e2), (intron_lo, intron_hi) in (
         ("tk", (5000, 7000), (c[region_from(5500)], c[region_to(7000)])),
@@ -525,8 +600,8 @@ def test_a_zero_length_fragment_places_nowhere(multiexon_index):
     with_zero = PMF.copy()
     with_zero[0] = 0.05
     np.testing.assert_allclose(
-        transcript_capture_eff_lengths(_cal(ra, c), ra, idx, fl, with_zero),
-        transcript_capture_eff_lengths(_cal(ra, c), ra, idx, fl, PMF),
+        transcript_capture_eff_lengths(_cal(ra, c, 1.0), ra, idx, fl, with_zero),
+        transcript_capture_eff_lengths(_cal(ra, c, 1.0), ra, idx, fl, PMF),
         rtol=1e-12,
     )
 
@@ -546,26 +621,26 @@ def test_a_transcript_of_exons_shorter_than_a_fragment_is_read_through_its_cuts(
     half = np.full(ra.n_regions, 0.5)
     ne = int(boundary_region_indices(np.asarray(ra.ref_id))[0].shape[0])
     eff = transcript_capture_eff_lengths(
-        _cal(ra, half, boundary=np.full(ne, 0.5)), ra, idx, fl, PMF
+        _cal(ra, half, 1.0, boundary=np.full(ne, 0.5)), ra, idx, fl, PMF
     )
     assert eff[t] == pytest.approx(0.5 * fl[t], rel=1e-12)
     loud = half.copy()
     loud[exons] = 0.9
     eff2 = transcript_capture_eff_lengths(
-        _cal(ra, loud, boundary=np.full(ne, 0.5)), ra, idx, fl, PMF
+        _cal(ra, loud, 1.0, boundary=np.full(ne, 0.5)), ra, idx, fl, PMF
     )
     assert eff2[t] == eff[t]
 
 
 def test_the_ruler_reads_the_efficiencies_and_nothing_from_the_counts(multiexon_index):
     """Two results with the same efficiencies and wildly different counts give the same lengths: the
-    evidence was weighed upstream (the reader), and the ruler is geometry."""
+    evidence was weighed upstream (`capture_efficiency`), and the ruler is geometry."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     c = np.full(ra.n_regions, 0.3)
     c[_exon_mask(ra, 1000, 1500)] = 1.0
     fl = _fl(idx.t_df["length"].to_numpy())
-    cal = _cal(ra, c)
+    cal = _cal(ra, c, 1.0)
     loud = dataclasses.replace(
         cal,
         count_gdna_region=np.full(ra.n_regions, 1e6),
@@ -587,7 +662,7 @@ def test_no_nascent_mature_inversion_under_capture(multiexon_index):
     c = np.full(ra.n_regions, 0.001)
     c[_exon_mask(ra, 1000, 1500)] = 1.0
     fl = _fl(idx.t_df["length"].to_numpy())
-    eff = transcript_capture_eff_lengths(_cal(ra, c), ra, idx, fl, PMF)
+    eff = transcript_capture_eff_lengths(_cal(ra, c, 1.0), ra, idx, fl, PMF)
     mrna, nasc = _tidx(idx, "mrna"), _tidx(idx, "nasc")
     assert eff[nasc] >= eff[mrna] - 1e-9
     assert eff[mrna] < fl[mrna] - 1e-6
