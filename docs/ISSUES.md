@@ -214,8 +214,10 @@ interchange is priced at −1.5 s for a summation-order change and is the owner'
 REFUSED as targets: the scan (at its floor for eight threads) and the index load (mostly native already).
 ⑥ THE REVIEW'S NUMERIC NO-OPS, each proven with `rename_identity.py --bam` from back-to-back pairs; UNPARKED (owner,
 2026-09-28) for the first two, the rest batched:
-- `get_loci_df` builds `locus_ids == lid` per locus, O(loci × transcripts): 0.48 ms per locus at 450k transcripts,
-  about 19 s at 40k loci, in the CLI writer; `np.bincount` fixes it.
+- FIXED 2026-10-14: `get_loci_df` built `locus_ids == lid` per locus, O(loci × transcripts). It groups the transcripts
+  by locus once with a stable sort, keeping each locus's sums in index order (`np.bincount` sums in another order), and
+  finds every locus's range in two searches; bit-identical, and the VCaP mix's 22,787 loci take 0.15 s, not 11.2 s
+  (`tests/test_estimator.py`).
 - FIXED 2026-10-14: `iter_chunks_consuming` held the previous chunk while loading the next, and `_SpillWriter._run`
   kept its last chunk while blocked: with chunks of up to 1 M fragments against a 2 GiB budget, a `del` fixed both
   (`tests/test_buffer.py`).

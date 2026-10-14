@@ -1796,3 +1796,42 @@ def test_the_gDNA_PSEUDOCOUNT_bounds_the_shadow_but_does_NOT_close_the_channel()
     anchored = _shadow_share(6.223, gdna_prior=10_000.0)  # half the locus's fragments
     assert anchored < free, "the gDNA pseudocount did not damp the shadow at all"
     assert anchored > 0.3, "the pseudocount closed a channel it can only bound"
+
+
+def test_the_loci_table_sums_a_locus_s_transcripts_in_their_index_order():
+    """``get_loci_df`` groups the transcripts by locus once, and each locus's sums still add its transcripts in
+    index order, as a mask over every transcript selected them, so the table is bit-identical to the mask's.
+    The order is visible here: 0.1 + 0.2 + 0.3 and 0.3 + 0.2 + 0.1 differ in the last bit."""
+    from types import SimpleNamespace
+
+    est = AbundanceEstimator(6)
+    est.locus_id_per_transcript = np.array([0, 1, 0, 1, 0, 1], dtype=np.int32)
+    synthetic = np.array([True, False, True, False, True, False])
+    est.em_counts[[0, 2, 4], 0] = [0.1, 0.2, 0.3]  # locus 0's synthetic transcripts
+    est.unambig_counts[[1, 3, 5], 0] = [0.1, 0.2, 0.3]  # locus 1's annotated ones
+    est.locus_results = [
+        dict(
+            locus_id=lid,
+            locus_span_bp=100,
+            n_transcripts=3,
+            n_genes=1,
+            n_em_fragments=0,
+            rna_total=1.0,
+            gdna=0.0,
+            gdna_prior_count=0.0,
+            rna_prior_count=0.0,
+            enable_gdna=1,
+            gdna_eff_len_em=1.0,
+        )
+        for lid in (0, 1)
+    ]
+    index = SimpleNamespace(t_df=pd.DataFrame({"is_nrna": synthetic, "is_synthetic": synthetic}))
+    loci = est.get_loci_df(index).set_index("locus_id")
+    in_order = 0.1 + 0.2 + 0.3
+    assert in_order != 0.3 + 0.2 + 0.1
+    assert loci.loc[0, "nrna"] == in_order
+    assert loci.loc[1, "count_unambig"] == in_order
+    assert (loci["n_nrna_entities"].tolist(), loci["n_annotated_transcripts"].tolist()) == (
+        [3, 0],
+        [0, 3],
+    )

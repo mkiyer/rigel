@@ -816,11 +816,21 @@ class AbundanceEstimator:
         is_nrna = index.t_df["is_nrna"].values
         is_synthetic = index.t_df["is_synthetic"].values
         locus_ids = self.locus_id_per_transcript
+        # Transcripts grouped by locus once, not a mask over every transcript per locus. A stable sort keeps
+        # each locus's members in index order, so every sum below adds the values a mask would select, in
+        # the same order: the table is bit-identical.
+        order = np.argsort(locus_ids, kind="stable")
+        sorted_ids = locus_ids[order]
+        # Every locus's member range in two searches: one search per locus pays the call's overhead each time
+        # (7.3 s over 22,787 loci of the VCaP mix).
+        lids = np.array([r["locus_id"] for r in self.locus_results], dtype=sorted_ids.dtype)
+        first = np.searchsorted(sorted_ids, lids, side="left")
+        last = np.searchsorted(sorted_ids, lids, side="right")
 
         rows = []
-        for r in self.locus_results:
+        for r, lo, hi in zip(self.locus_results, first, last):
             lid = r["locus_id"]
-            in_locus = locus_ids == lid
+            members = order[lo:hi]
             # ``r["rna_total"]`` is the C++ EM accumulator
             # (em_solver.cpp::assign_posteriors -> ````rna_total````):
             # the sum of posteriors assigned to every non-gDNA component
@@ -833,12 +843,12 @@ class AbundanceEstimator:
             #   mrna       = ``rna_total`` - nrna + unambig (annotated only)
             #   total      = mrna + nrna + gdna
             # n_nrna_entities: count all nRNA entities (informational)
-            syn_in_locus = in_locus & is_synthetic
-            annot_in_locus = in_locus & ~is_synthetic
+            syn_in_locus = members[is_synthetic[members]]
+            annot_in_locus = members[~is_synthetic[members]]
             nrna = float(t_total[syn_in_locus].sum())
-            n_nrna = int((in_locus & is_nrna).sum())
-            n_syn = int(syn_in_locus.sum())
-            n_annot = int(in_locus.sum()) - n_syn
+            n_nrna = int(is_nrna[members].sum())
+            n_syn = int(syn_in_locus.size)
+            n_annot = int(members.size) - n_syn
 
             # Unambiguous counts for annotated transcripts in this locus
             # (splice-confirmed fragments that bypass EM).
