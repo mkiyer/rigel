@@ -7,7 +7,8 @@
 * :func:`build_multi_loci` — the connected-component partition, one :class:`MultiLocus` per
   component.
 
-Per-locus EM Dirichlet priors are assembled by ``rigel.calibration.priors``.
+The EM's two pseudocounts are formed per locus by ``rigel.pipeline.em_pseudocounts``, from
+calibration's per-locus gDNA count (``rigel.calibration.priors``).
 """
 
 from __future__ import annotations
@@ -66,7 +67,8 @@ class MultiLocus:
         floored at 1. Reported as the loci table's ``locus_span_bp``.
     loci : tuple[Locus, ...]
         The contiguous intervals composing this multi-locus, sorted
-        ascending by ``(ref_id, start)``.
+        ascending by the ``ref`` column's categorical code (not ``ref_id``),
+        then by ``start``.
     """
 
     multi_locus_id: int

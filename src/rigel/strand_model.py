@@ -173,8 +173,9 @@ class StrandModel:
     marginal (:meth:`from_sj_table`) — the four counters are never maintained independently of
     it.  The all-exonic diagnostic model has no sj and therefore no table.
 
-    The spliced model's qualification (applied in the C++ scanner, not here): annotated splice
-    junction, unique mapper, unambiguous exon strand, unambiguous SJ strand, non-chimeric.
+    The spliced model's qualification is applied in the C++ scanner, not here
+    (``ResolvedFragment::get_is_strand_qualified`` on a unique mapper); :class:`StrandModels`
+    states it.
     """
 
     # --- 2×2 raw counts ---
@@ -320,7 +321,11 @@ class StrandModel:
         return (p * (1.0 - p)) / n
 
     def posterior_95ci(self) -> tuple[float, float]:
-        """95% confidence interval for p_r1_sense (Wald interval)."""
+        """95% confidence interval for p_r1_sense (Wald interval).
+
+        QC only. Its one consumer is ``summary.json``'s ``strand_model.ci_95`` (:mod:`rigel.cli`),
+        which the report displays.
+        """
         import math
 
         from scipy.special import ndtri
@@ -358,7 +363,7 @@ class StrandModel:
         beta = (n - self.n_minor) + 1.0
         # UCL on minor-orientation rate r = 1 − ss at the given confidence.
         r_ucl = float(betaincinv(alpha, beta, confidence))
-        # Clamp to [0, 0.5]: ss = max(p, 1-p) ≥ 0.5 so ε_CI ≤ 0.5.
+        # Clamp to [0, 0.5]: ss = max(p, 1-p) ≥ 0.5, so the minor rate 1 − ss is at most 0.5.
         return max(0.0, min(0.5, r_ucl))
 
 
@@ -462,7 +467,8 @@ class StrandModels:
     def strand_specificity_ci_epsilon(
         self, confidence: float = CONSTANTS.qc.strand_ci_confidence
     ) -> float:
-        """Delegate: ε_CI from the primary (exonic_spliced) strand model."""
+        """Delegate: the primary (exonic_spliced) model's upper credible limit on
+        ``1 − strand_specificity``."""
         return self.exonic_spliced.strand_specificity_ci_epsilon(confidence)
 
     def log_summary(self) -> None:

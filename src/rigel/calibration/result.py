@@ -166,8 +166,9 @@ class CalibrationResult:
     #: ``{gDNA} ∪ {RNA+ if free_pos} ∪ {RNA− if free_neg}`` at every slot, so the answer is three
     #: numbers; ``count_gdna_*`` and ``count_rna_*`` are that answer with the two RNA strands summed.
     #:
-    #: The three close by construction: ψ solves ``(f_g, w_pos)`` and `simplex_logodds._compose` maps
-    #: them onto the simplex, while a slot the solve does not reach keeps its signature-binary belief.
+    #: The three close by construction: ψ solves ``(f_g, w_pos)`` and ψ's ``compose``
+    #: (`native/psi_kernel.h`) maps them onto the simplex, while a slot the solve does not reach keeps
+    #: its signature-binary belief.
     #: They are published as solved, never renormalised.
     gdna_frac_region: np.ndarray
     rna_pos_frac_region: np.ndarray
@@ -240,7 +241,7 @@ class CalibrationResult:
             _check_axis_array(getattr(self, name), name, self.n_boundaries)
 
         # Each component is a FRACTION, so it is bounded by 1. Closure holds by construction
-        # (`simplex_logodds._compose`) and is not re-asserted here.
+        # (ψ's ``compose``, `native/psi_kernel.h`) and is not re-asserted here.
         for name in (
             "gdna_frac_region",
             "rna_pos_frac_region",

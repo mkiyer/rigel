@@ -134,8 +134,9 @@ def _nrna_children_counts(
 class AbundanceEstimator:
     """Bayesian fragment abundance estimator with locus-level EM.
 
-    Accumulates per-transcript and per-gene fragment counts from both
-    deterministic (unambig) and probabilistic (EM) assignment paths.
+    Accumulates per-transcript and per-gene fragment counts from both the
+    deterministic path (an unambiguous SPLICED_ANNOT fragment, assigned with no EM)
+    and the probabilistic (EM) path.
     Estimates transcript abundances and each locus's gDNA count.
 
     Locus-level EM architecture::
@@ -234,7 +235,10 @@ class AbundanceEstimator:
 
     @property
     def t_counts(self) -> np.ndarray:
-        """Total transcript counts (unambig + EM), shape (N_t, NUM_SPLICE_STRAND_COLS) = (N_t, 10)."""
+        """Total transcript counts (unambig + EM).
+
+        Shape (N_t, NUM_SPLICE_STRAND_COLS) = (N_t, 10).
+        """
         return self.unambig_counts + self.em_counts
 
     # ------------------------------------------------------------------

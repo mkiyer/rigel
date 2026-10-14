@@ -312,10 +312,10 @@ public:
         fl_max_size_(fl_max_size),
         fl_tail_base_(fl_tail_base),
         has_fl_lut_(false),
+        max_ll_delta_(pruning_max_ll_delta),
         gdna_fl_max_size_(gdna_fl_max_size),
         gdna_fl_tail_base_(gdna_fl_tail_base),
-        has_gdna_fl_lut_(false),
-        max_ll_delta_(pruning_max_ll_delta)
+        has_gdna_fl_lut_(false)
     {
         // Copy index arrays
         n_transcripts_ = static_cast<int32_t>(t_strand_arr.shape(0));
@@ -510,10 +510,11 @@ private:
             st.mm_best_stype = SPLICE_SPLICED_UNANNOT;
         }
 
-        // gDNA per-hit term, from every hit gDNA can explain (`gdna_can_explain`); a spliced hit does not
-        // remove gDNA from the group. The EM applies the gDNA effective length. At flush time
+        // gDNA per-hit term, from every hit gDNA can explain (`gdna_can_explain`) that has a transcript
+        // candidate (`n_cand > 0`); a spliced hit does not remove gDNA from the group. The EM applies the
+        // gDNA effective length. At flush time
         //    gdna_log_lik = lse_max + log(lse_sum) - log(nh_gdna)
-        // the mean over the hits gDNA can explain (nh_gdna of them), not over NH.
+        // the mean over those hits (nh_gdna of them), not over NH.
         int32_t gfp_val = cp.g_fp[row];
         if (gdna_can_explain(stype) && n_cand > 0)
         {

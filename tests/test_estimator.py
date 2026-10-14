@@ -220,7 +220,8 @@ class TestLocusEM:
         assert rc.em_counts[0].sum() > rc.em_counts[1].sum()
 
     def test_zero_iterations_uses_unambig_priors(self):
-        """With em_iterations=0, assignment comes from unambig counts + prior only."""
+        """em_iterations=0 does not skip the EM: one SQUAREM step always runs, so every unit is
+        assigned, and the unambig counts tilt the split toward t0."""
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
         rc.unambig_counts[0, 0] = 10.0
         rc.unambig_counts[1, 0] = 5.0

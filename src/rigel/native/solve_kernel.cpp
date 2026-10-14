@@ -16,8 +16,9 @@
 //   transfer_prepare, transfer_pass, transfer_solve — the policy's three kernels on tables the call allocates and
 //                    returns, for the transfer gates (`tests/calibration/_transfer_harness.py`).
 //   rows             the row constructors of `transfer_rows.h`, the builders' flag predicates, and the constructions the
-//                    block pipeline absorbed — the strand evidence — bound
-//                    for the gates.
+//                    block pipeline absorbed — the strand evidence — bound for the gates; beside them `read_column`
+//                    and the constants the kernel shares with its Python readers (`ARM_EPS`, `JEFFREYS_REF`,
+//                    `OWN_EVIDENCE_EPS`), which production reads.
 //
 // One implementation of every arithmetic, in one module: the gates and the production path cannot drift apart.
 
@@ -996,7 +997,8 @@ nb::tuple transfer_solve(nb::dict tables, nb::dict from_left, nb::dict from_righ
 // ═══ THE ROW CONSTRUCTORS, THE FLAG PREDICATES AND THE ABSORBED CONSTRUCTIONS, BOUND FOR THE GATES ═════════════
 // The one implementation of every row constructor (`transfer_rows.h`), flag predicate (`transfer_kernel.h`) and
 // absorbed construction (above) is read by the gates through these bindings — as ψ's is through `psi_cube` — each a
-// fresh array from its own arguments, on a scratch of its own.
+// fresh array from its own arguments, on a scratch of its own. Production reads the submodule too: `read_column` and
+// the constants bound at its end, each the one home of a value the kernel shares with its Python readers.
 
 using Row = nb::ndarray<nb::numpy, double, nb::ndim<1>>;
 
@@ -1009,7 +1011,7 @@ nb::object flank(int64_t x) { return x < 0 ? nb::none() : nb::cast(x); }
 void bind_rows(nb::module_& m) {
     nb::module_ r = m.def_submodule(
         "rows", "The row constructors of transfer_rows.h, the builders' flag predicates and the constructions the block "
-                "pipeline absorbed, bound for the gates.");
+                "pipeline absorbed, bound for the gates; and read_column and the shared constants production reads.");
     r.attr("EPS") = EPS;
     r.attr("MARGINAL_NODES") = own1(std::vector<double>(MARGINAL_NODES, MARGINAL_NODES + N_MARGINAL_NODES));
     r.def("trigamma", &trigamma, nb::arg("x"), "zeta(2, x), the counting variance's one home.");

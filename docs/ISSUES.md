@@ -819,7 +819,7 @@ exon|intron boundary, while RNA that has not spliced there does.
   strata and its `--json --jobs` merge, `prior_vs_oracle`'s strata, the `find_spec` guard.
 (f) SMALL: the `--no-mappability` flag names a store whose mappability the index no longer reads (it opts out of
 the splice blacklist); 0.7.1 shipped the name, so renaming it now breaks scripts for clarity alone; three unread scalars in `solve_kernel.cpp`'s positional aggregates; `pgzip` is an undeclared
-optional import in the simulator; eight test sites import `rigel._resolve_impl` for names `rigel.native` re-exports.
+optional import in the simulator.
 - `_solve_impl` builds with `-g` only. Step 1b tried `-march=native` and IPO and reverted them: bit-identical on arm64,
   but on x86-64 they turn on FMA contraction in the ψ, transfer and solve kernels (clang: 0 FMA instructions at -O3,
   159 with -march=haswell) and move numbers (`TRAPS: a-kernel-edit-moves-ulps-under-fma-contraction`). RULED (owner,
@@ -832,29 +832,16 @@ optional import in the simulator; eight test sites import `rigel._resolve_impl` 
 Kept as coverage GAPS, not dead code: the five CLI command bodies, the silent policy through `calibrate`, the
 simulator's sharded writers and its whole-genome grid, and the zarr splice blacklist.
 (g) COMMENT AND DOC RESIDUE, one content-only sweep:
-- Native: `bam_scanner.cpp`'s references to the deleted Python Fragment, "Fractional accumulator deposit", an
-  orphaned reference, a lost rationale, the intron filter justified twice, `std::mutex` without `<mutex>`;
-  `resolve_context.h` and `constants.h`'s history narration, "for compatibility" notes, a misplaced banner, four AF
-  bits unused in C++; `scoring.cpp`'s `-Wreorder-ctor` warning and its gDNA per-hit comment omitting `n_cand > 0`;
-  `fast_exp.h` listing three "call-site properties", one of them the function's own.
-- Calibration: the sweep docstring's "counted in the kernel"; the test named for owned slots; "bound for the gates",
-  although production reads `transfer_rows`; `region_geometry.py`'s "five populations" (there are four), the Axiom-0
-  tell "nascent-RNA-active" (also in `signature.py`) and mature/phantom history; `result.py` citing the deleted
-  `simplex_logodds._compose`; `calibrate.py`'s "two supports", a docstring that lost its conclusion, and the test
-  helper `_zero_rna_opportunity` zeroing a field already 0; `strand_model.py`'s spliced model's qualification stated
-  two ways, an undefined ε_CI, `posterior_95ci` not marked QC-only; the four texts stating "a quarter of the RNA side"
-  as a general property (a deleted measurement on a rebuilt ladder).
-- The EM, locus and CLI: `estimator.py`'s "every unambiguous fragment is deterministic" and a 102-character line
-  hard-coding (N_t, 10); `locus.py`'s false (ref_id, start) sort claim (it sorts by categorical code) and its pointer
-  to `calibration.priors` for the EM pseudocounts; `quant_command` omitting the `--annotated-bam` second pass;
-  `report/substrate.py` ("omits the panels") and `report/__init__.py` (the extra is needed only for the charts).
-- Tests: `test_estimator.py`'s "no EM at 0" (SQUAREM runs at least one step); `test_resolution.py`'s "(gap=0)";
-  `test_buffer.py`'s "None for intergenic"; over-long test docstrings; "Boundary cases" headings from the
-  edge→boundary rename.
-- The simulator: `whole_genome.py`'s "…and filtering" banner; `splice_motif.py`'s over-long lines.
-- Docs: `.github/copilot-instructions.md`'s compiler-flags line omits `-fno-finite-math-only`; `accumulator.h`'s
-  header ("each population stores … the reciprocal-opportunity sum") and `test_conserved_mass.py` still read as if a
-  region reciprocal bank were stored, and one measurement table can no longer be reproduced; the executable
+- Native: `constants.h`'s four AF bits unused in C++.
+- Calibration: the test named for owned slots; the test helper `_zero_rna_opportunity` zeroing a field already 0.
+- The EM, locus and CLI: `quant_command` omitting the `--annotated-bam` second pass.
+- Tests: over-long test docstrings.
+- The simulator: `splice_motif.py`'s over-long lines.
+- Docs: `TRAPS: an-identity-with-a-qualifier` sizing its complement as "a quarter of the RNA library", a deleted
+  measurement on a rebuilt ladder; `.github/copilot-instructions.md`'s compiler-flags line omits
+  `-fno-finite-math-only`; `accumulator.h`'s header ("each population stores … the reciprocal-opportunity sum") and
+  `test_conserved_mass.py` still read as if a region reciprocal bank were stored, and one measurement table can no
+  longer be reproduced; the executable
   specification and its C++ twin word one mass rule differently, and two payload comments point at inexact text
   (UNCERTAIN: check when touched); `test_chr.yaml` says the shadows are "≈ 5 % of RNA fragments" while the render
   realizes 0.76 %; the headers and TESTING list the YAML's extra keys without `blank:`; TESTING says `rigel sim`

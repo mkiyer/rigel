@@ -11,8 +11,8 @@ _scoring_impl : Per-fragment likelihood scoring (strand, coverage, splice)
 _em_impl      : Locus-level EM solver, connected components, effective-length normalization
 _solve_impl   : The calibration solve — the sweep's block pipeline in one call (`solve_blocks`), ψ (`psi_solve`
                and its pieces for the gates), the composition transfer's builders, pass and solve on tables the
-               call allocates (for the gates), and `rows`, the row constructors, flag predicates and absorbed
-               constructions bound for the gates
+               call allocates (for the gates), and `rows`: the row constructors, flag predicates and absorbed
+               constructions bound for the gates, with `read_column` and the shared constants production reads
 _cgranges_impl: Interval overlap queries (vendored cgranges)
 """
 
@@ -59,7 +59,8 @@ from ._solve_impl import transfer_prepare
 from ._solve_impl import transfer_pass
 from ._solve_impl import transfer_solve
 
-# the row constructors, the flag predicates and the constructions the block pipeline absorbed
+# the row constructors, the flag predicates and the constructions the block pipeline absorbed,
+# for the gates; and `read_column` and the shared constants, which production reads
 from ._solve_impl import rows as transfer_rows
 
 # -- Interval overlap -------------------------------------------------------

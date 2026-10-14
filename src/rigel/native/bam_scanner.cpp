@@ -3,10 +3,10 @@
  *
  * A single C++ scan that:
  *
- *   1. Reads BAM records via htslib (no pysam overhead)
+ *   1. Reads BAM records via htslib
  *   2. Groups records by query name (name-sorted BAM)
  *   3. Parses CIGAR → exon blocks + splice junctions
- *   4. Builds Fragment-equivalent structures in C++
+ *   4. Assembles each hit's mates into one fragment (AssembledFragment)
  *   5. Calls FragmentResolver::_resolve_core() directly
  *   6. Appends results to FragmentAccumulator
  *   7. Collects model training observations as arrays
@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -250,12 +251,13 @@ struct StrandObservations {
     // strand-qualified fragment credits its leftmost ANNOTATED sj with one
     // sense (align_strand == sj_strand) or antisense observation.
     //
-    // ⭐ This is a strict REFINEMENT of the exonic_spliced 2×2 above, which is
-    // exactly its marginal: summing n_sense over motif-POS sj gives
-    // pos_pos, n_antisense over motif-POS gives neg_pos, and symmetrically for
-    // motif-NEG.  Populated from the SAME `get_is_strand_qualified()` branch, one
-    // observation per fragment, so the identity is unconditional.  It exists
-    // because a dispersion ACROSS sj cannot be recovered from the 2×2.
+    // ⭐ This is a strict REFINEMENT of the spliced strand model's 2×2 (Python's
+    // `exonic_spliced`), which is exactly its marginal: summing n_sense over
+    // motif-POS sj gives pos_pos, n_antisense over motif-POS gives neg_pos, and
+    // symmetrically for motif-NEG.  Populated from the SAME
+    // `get_is_strand_qualified()` branch, one observation per fragment, so the
+    // identity is unconditional.  It exists because a dispersion ACROSS sj cannot
+    // be recovered from the 2×2.
     std::unordered_map<SJKey, SJStrandCounts, SJKeyHash> sj_strand_table;
 };
 
@@ -371,7 +373,7 @@ struct BamScanStats {
 };
 
 // ================================================================
-// Fragment-equivalent structure (built in C++, no Python object)
+// AssembledFragment — one hit's mates, merged into exon blocks and introns
 // ================================================================
 
 struct AssembledFragment {
@@ -402,7 +404,7 @@ struct WorkerState {
     FragmentAccumulator accumulator;
     BamScanStats stats;
     StrandObservations strand_obs;
-    // Per-worker fractional accumulator (one Accumulator per ref). Owned
+    // Per-worker accumulator set (one Accumulator per ref). Owned
     // here so worker threads never touch the shared template. Null when no
     // region partition was provided.
     std::unique_ptr<rigel::accumulator::AccumulatorSet> acc_set;
@@ -416,12 +418,6 @@ struct WorkerState {
     // here. The placement arenas below are the ADAPTER's: a fragment's introns restricted to the reference
     // of the hit being collected and de-duplicated, which is what `OfferedFragment::observed_introns`
     // points at.
-    //
-    // ⛔ That restriction is mandatory, not tidiness. `Accumulator::deposit` normalises introns by
-    // coordinate alone — it never looks at `IntronBlock::ref_id` — so an intron from another reference
-    // would be cut out of this reference's path. The adapter refuses a hit whose exon blocks span
-    // references, but that check cannot see a record whose CIGAR has an N and no M, D, = or X op: it adds
-    // an intron and no exon block.
     rigel::accumulator::DepositScratch deposit_scratch;
 
     // ⭐ ONE OFFER PER FRAGMENT. Every non-chimeric hit of a fragment is collected as a placement — its
@@ -1567,7 +1563,9 @@ public:
         // Wait for reader thread to finish
         reader_thread.join();
 
-        // Propagate exceptions: reader, then worker, then main thread
+        // Propagate exceptions: reader, then worker, then main thread. The reader's comes first because a BAM
+        // it cannot read is the root cause of whatever followed. An abort makes no other thread throw (an
+        // aborted push or pop returns false), so no stored exception is an echo of another's.
         if (reader_exception) {
             std::rethrow_exception(reader_exception);
         }
@@ -1657,7 +1655,9 @@ private:
                 //
                 // ⛔ Restricting to `ref_id` is DEFINITIONAL, not defensive: `OfferedFragment` means the
                 // introns on the reference being deposited, and `Accumulator::deposit` normalises them by
-                // coordinate alone — it never looks at `ref_id`.
+                // coordinate alone — it never looks at `ref_id` — so an intron from another reference would
+                // be cut out of this reference's path. The exon-block check below cannot catch one: a record
+                // whose CIGAR has an N and no M, D, = or X op adds an intron and no exon block.
                 //
                 // ⚠ The de-duplication is for the QC denominator, NOT to prevent double-crediting a
                 // sj: `parse_bam_record` reads XS/ts once per RECORD and `build_fragment` keys
@@ -1730,7 +1730,7 @@ private:
                 // ⚠ The OBSERVED motif strand, straight from `cr`. A hypothesis carries the strand its
                 // supporting transcripts imply, and `deposit` falls back to that only when nothing was
                 // sequenced. An observed motif is evidence; an implied strand is an inference from the
-                // annotation, and mixing an inference into an observation is how `primary` went wrong.
+                // annotation.
                 ws.pending.push_back({ref_id, start, end, cr.align_strand, cr.sj_strand,
                                       obs0, observed.size(), hyp0, ws.pending_hypotheses.size()});
             };

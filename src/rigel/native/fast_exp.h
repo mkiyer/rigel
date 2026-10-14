@@ -1,12 +1,12 @@
 // fast_exp.h — Vectorized exp() for the EM E-step hot path
 //
-// Exploits three properties of the call site in em_step_kernel_range():
+// Exploits two properties of the call site in em_step_kernel_range():
 //   1. Input x is always <= 0  (log-sum-exp normalization subtracts max_val)
-//   2. Inputs below EXP_CUTOFF return 0.0 (std::exp there is below 3.3e-308)
-//   3. Moderate accuracy suffices (posteriors are normalized; ~25 ULP is fine)
+//   2. Moderate accuracy suffices (posteriors are normalized; ~25 ULP is fine)
 //
-// Variants: scalar, NEON (2-wide), AVX2+FMA (4-wide) and AVX-512 (8-wide). The E-step kernel skips a
-// whole vector block when every lane is below EXP_CUTOFF.
+// Inputs below EXP_CUTOFF return 0.0 (std::exp there is below 3.3e-308). Variants: scalar, NEON (2-wide),
+// AVX2+FMA (4-wide) and AVX-512 (8-wide). The E-step kernel skips a whole vector block when every lane is
+// below EXP_CUTOFF.
 //
 // Algorithm: Cody-Waite range reduction + degree-11 Horner polynomial (FMA)
 //   x = n*ln2 + r,  |r| <= ln2/2

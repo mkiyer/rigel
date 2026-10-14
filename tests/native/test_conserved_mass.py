@@ -383,9 +383,8 @@ def test_a_spliced_fragment_crossing_NO_BOUNDARY_still_deposits_a_WHOLE_FRAGMENT
     while ``sj_count`` credits it, which is a fragment that exists on the incidence axis and on no
     conserved one.
 
-    On a contaminated library it is a quarter of the RNA side and none of the gDNA side, because gDNA
-    cannot splice — which is why the gDNA side's conserved count is complete without this bank and the
-    RNA side's is not.
+    It is all RNA and none of it gDNA, because gDNA cannot splice — which is why the gDNA side's
+    conserved count is complete without this bank and the RNA side's is not.
     """
     accumulator = Accumulator(_spliced_partition(), max_fragment_length=MAX_LENGTH)
     outcome = accumulator.deposit(

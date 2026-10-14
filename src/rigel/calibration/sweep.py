@@ -20,7 +20,8 @@ across blocks but integer counts, so the answer is BIT-IDENTICAL at every thread
 This file knows nothing about capture, splice in, levels, lanes or enrichment — those words do not appear
 in it, and that is the design rather than tidiness. Everything about *what a message says* is a
 :mod:`~.messages` policy, built in the kernel. What is left here is the shape of the solve and the two
-invariants no policy may break, counted in the kernel on every block's owned slots and judged here:
+invariants no policy may break — the first counted in the kernel on every block's owned slots and
+judged here, the second enforced by construction:
 
 ===================================================  ====================================================
 the backbone asserts                                 it would have caught

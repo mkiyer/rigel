@@ -36,7 +36,8 @@ from rigel.buffer import (
 def _resolve(index, exons, introns=()):
     """Create a Fragment and resolve it via C++ FragmentResolver.
 
-    Returns the C++ ResolvedFragment (or None for intergenic).
+    Returns the C++ ResolvedFragment, or None when the fragment has no exon blocks; an intergenic
+    fragment resolves, with empty ``t_inds``.
     """
     frag = make_fragment(exons=tuple(exons), introns=tuple(introns))
     return resolve_fragment(frag, index)
@@ -117,8 +118,6 @@ class TestFragmentAccumulator:
     """Test FragmentAccumulator directly (no FragmentBuffer)."""
 
     def test_append_and_size(self, mini_index):
-        from rigel._resolve_impl import FragmentAccumulator
-
         acc = FragmentAccumulator()
         assert acc.size == 0
 
@@ -128,8 +127,6 @@ class TestFragmentAccumulator:
         assert acc.size == 1
 
     def test_finalize_returns_dict(self, mini_index):
-        from rigel._resolve_impl import FragmentAccumulator
-
         acc = FragmentAccumulator()
         result = _resolve(mini_index, [_exon("chr1", 120, 180)])
         acc.append(result, 0)
@@ -142,8 +139,6 @@ class TestFragmentAccumulator:
         assert "t_indices" in raw
 
     def test_finalize_carries_the_stored_ambig_strand(self, mini_index):
-        from rigel._resolve_impl import FragmentAccumulator
-
         acc = FragmentAccumulator()
         result = _resolve(mini_index, [_exon("chr1", 120, 180)])
         assert result.ambig_strand == 0
@@ -155,8 +150,6 @@ class TestFragmentAccumulator:
         assert raw["ambig_strand"].tolist() == [0]
 
     def test_finalize_multiple(self, mini_index):
-        from rigel._resolve_impl import FragmentAccumulator
-
         acc = FragmentAccumulator()
 
         # Exon in g1 region -> hits t1, t2
@@ -171,8 +164,6 @@ class TestFragmentAccumulator:
         assert raw["size"] == 2
 
     def test_finalize_buffer_payload_dtypes(self, mini_index):
-        from rigel._resolve_impl import FragmentAccumulator
-
         acc = FragmentAccumulator()
         result = _resolve(mini_index, [_exon("chr1", 120, 180)])
         acc.append(result, 0)
@@ -184,8 +175,6 @@ class TestFragmentAccumulator:
         assert "intron_bp" not in raw
 
     def test_append_read_length_overflow_names_column(self, mini_index):
-        from rigel._resolve_impl import FragmentAccumulator
-
         result = _resolve(mini_index, [_exon("chr1", 10_000, 10_000 + 65_536)])
         assert result is not None
         assert result.read_length == 65_536
@@ -195,8 +184,6 @@ class TestFragmentAccumulator:
             acc.append(result, 0)
 
     def test_append_read_length_uint16_boundary(self, mini_index):
-        from rigel._resolve_impl import FragmentAccumulator
-
         result = _resolve(mini_index, [_exon("chr1", 10_000, 10_000 + 65_535)])
         assert result is not None
         assert result.read_length == 65_535

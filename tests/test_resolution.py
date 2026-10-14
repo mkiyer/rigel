@@ -138,7 +138,8 @@ class TestDetectIntrachromosomalChimera:
         assert _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=1000) is None
 
     def test_adjacent_blocks_zero_gap(self):
-        """Disjoint transcript sets with blocks that are adjacent (gap=0)."""
+        """Disjoint transcript sets on two abutting blocks: the implied fragment spans 200 bp,
+        past the 100 bp limit, so it is a chimera."""
         blocks = (
             GenomicInterval("chr1", 100, 200, Strand.POS),
             GenomicInterval("chr1", 200, 300, Strand.POS),

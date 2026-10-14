@@ -577,8 +577,8 @@ class AccumulatorPayload:
     #: computable. A spliced fragment's block containing no interior boundary deposits on neither boundary
     #: bank, and is not ``contained`` either — its path spans a sj, so it lies in no single region. Such a
     #: fragment would otherwise exist on the incidence axis (``sj_count``) and on no conserved one, which
-    #: on a contaminated library leaves the RNA side's conserved count short by roughly a quarter while
-    #: the gDNA side, which cannot splice, is already exact.
+    #: leaves the RNA side's conserved count short by that whole population while the gDNA side, which
+    #: cannot splice, is already exact.
     #:
     #: A sj bounds a block exactly as a contiguous boundary does, so a slice bounded by both shares its
     #: bases between them. Gated by ``tests/native/test_conserved_mass.py``.

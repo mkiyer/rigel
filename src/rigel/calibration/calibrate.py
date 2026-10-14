@@ -29,7 +29,8 @@ landscape). The solver is the belief-propagation SWEEP over the
 
 ⛔ THE GEOMETRY IS BUILT FIRST, AND IT OWNS EVERY DIVISOR. ``build_region_geometry`` produces the
 per-slot ``eff_gdna``/``eff_rna`` before anything reads a count, and everything downstream — the
-density clue, landscape input and the result's two supports — reads THAT array.
+density clue, landscape input and the result's gDNA effective lengths (``gdna_region_eff_len``,
+``gdna_boundary_eff_len``) — reads THAT array.
 Computing a second length model anywhere below is how a consumer comes to divide by a length the
 solver never used.
 
@@ -357,7 +358,9 @@ def _solve(s: _Solve, _debug):
     fitted landscape, so an over-confident region cannot refuse to budge when the prior lands — and
     re-solve with it as ψ's composition arm; ``calib_refit_iters`` times, each refit's landscape the
     E-step's start for the next. Every sweep runs the whole message layer: the messages never read the
-    prior, so on one grid a refit's messages equal the previous refit's.
+    prior, so on one grid a refit's messages equal the previous refit's, and they are recomputed rather
+    than cached: a cache would save little time against the memory it holds through calibrate and a key
+    that must name every input the layer reads.
 
     Returns ``(belief, hyperprior)`` — the final belief and the landscape it was solved under (``None`` if no
     refit fitted one). With ``_debug`` the last sweep fills ``_debug["capture"]`` (a

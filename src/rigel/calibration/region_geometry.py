@@ -141,7 +141,7 @@ def build_region_geometry(
     gdna_fl_pmf: np.ndarray,
     rna_fl_pmf: np.ndarray,
 ) -> RegionGeometry:
-    """Assemble the per-slot geometry from the substrate's five populations onto the chain.
+    """Assemble the per-slot geometry from the substrate's four populations onto the chain.
 
     The divisors:
 
@@ -402,7 +402,7 @@ class RegionStatics:
     """
 
     n_slots: int
-    free_pos: np.ndarray  # bool — nascent-RNA-active (transcript continuity); the RNA-crossing gate
+    free_pos: np.ndarray  # bool — RNA-active (transcript continuity); the RNA-crossing gate
     free_neg: np.ndarray  # bool
     boundary_flags: np.ndarray  # uint16 — graph structural bits; 0 on REGION slots
 
@@ -460,10 +460,10 @@ def build_region_statics(
 
     return RegionStatics(
         n_slots=n,
-        # No per-region spliced floor. Spliced mature handling is owned by the message layer, so a
-        # region-local floor would double-count it and would inflate a boundary's unspliced f_pos with
-        # mature RNA, pushing phantom RNA into introns. Measured at least as good as keeping it in every
-        # κ × capture × ±gDNA regime.
+        # No per-region spliced floor. Spliced RNA is owned by the message layer, so a region-local
+        # floor would double-count it and would inflate a boundary's unspliced f_pos with RNA that
+        # spliced elsewhere, inventing RNA inside introns. Measured at least as good as keeping it in
+        # every κ × capture × ±gDNA regime.
         free_pos=free_pos,
         free_neg=free_neg,
         boundary_flags=np.where(

@@ -106,13 +106,13 @@ def transcript_strand_class(signature: np.ndarray) -> np.ndarray:
 
 
 def nrna_active_strands(signature: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Per-strand nascent-RNA-active masks from a signature array — ``(pos, neg)``.
+    """Per-strand RNA-active masks from a signature array — ``(pos, neg)``.
 
-    Nascent RNA is present wherever a transcript is (exon OR intron), so ``nrna_active`` on strand
-    ``s`` is the union of that strand's exon and intron bits. This is the boundary solver's
-    transcript-continuity gate ``free_s``: a region's ``nrna_active`` is its own bits; a boundary's
-    is the AND of its two flanks, because both flanks must carry the strand for an unspliced
-    fragment to cross.
+    RNA can be present wherever a transcript is (exon OR intron: RNA inside an intron is RNA
+    that has not spliced there), so the mask on strand ``s`` is the union of that strand's exon
+    and intron bits. This is the boundary solver's transcript-continuity gate ``free_s``: a
+    region's mask is its own bits; a boundary's is the AND of its two flanks, because both flanks
+    must carry the strand for an unspliced fragment to cross.
     """
     sig = np.asarray(signature)
     return (sig & (BIT_EXON_POS | BIT_INTRON_POS)) != 0, (

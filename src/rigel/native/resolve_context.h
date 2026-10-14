@@ -1,8 +1,8 @@
 /**
  * resolve_context.h — FragmentResolver, ResolvedFragment, FragmentAccumulator.
  *
- * Extracted from resolve.cpp so that bam_scanner.cpp can call
- * _resolve_core() directly in C++ and accumulate results into
+ * Shared by resolve.cpp (the Python binding) and bam_scanner.cpp, which
+ * calls _resolve_core() directly in C++ and accumulates results into
  * FragmentAccumulator without crossing the Python boundary.
  *
  * Depends on constants.h and cgranges.h.
@@ -123,7 +123,7 @@ public:
         return nb::frozenset(s);
     }
 
-    // Return frag_lengths as a Python dict for compatibility
+    // Return frag_lengths as a Python dict {t_ind: length}, positive lengths only
     nb::dict get_frag_lengths() const {
         nb::dict d;
         for (size_t i = 0; i < t_inds.size(); i++) {
@@ -148,7 +148,7 @@ public:
         return out;
     }
 
-    // Return overlap_bp as a Python dict for compatibility
+    // Return overlap_bp as a Python dict {t_ind: (exon_bp, intron_bp)}
     nb::dict get_overlap_bp() const {
         nb::dict d;
         for (size_t i = 0; i < t_inds.size(); i++) {
@@ -308,7 +308,7 @@ public:
 // ================================================================
 // ResolverScratch — per-thread mutable scratch buffers
 // ================================================================
-// Extracted from FragmentResolver so that multiple threads can call
+// Kept apart from FragmentResolver so that multiple threads can call
 // _resolve_core() concurrently, each with its own scratch. The single-threaded path uses FragmentResolver's
 // internal scratch_ member.
 
@@ -659,7 +659,7 @@ public:
     }
 
     // ----------------------------------------------------------------
-    // SPLICED_IMPLICIT detection
+    // Chimera detection
     // ----------------------------------------------------------------
 
     /// The library's fragment-length limit (`BamScanConfig.max_frag_length`), used by
@@ -669,6 +669,10 @@ public:
             "set_max_fragment_length: must be >= 0, got " + std::to_string(L));
         max_fragment_length_ = L;
     }
+
+    // ----------------------------------------------------------------
+    // SPLICED_IMPLICIT detection
+    // ----------------------------------------------------------------
 
     /// Set the splicing-anchor tolerance K (bp) used for one-sided slack
     /// in the SPLICED_IMPLICIT per-intron whole-containment discriminant.

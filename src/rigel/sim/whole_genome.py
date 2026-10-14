@@ -390,7 +390,7 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# Transcript loading and filtering
+# Transcript loading
 # ═══════════════════════════════════════════════════════════════════
 
 

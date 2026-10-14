@@ -582,9 +582,8 @@ class Tally:
     #: count computable at all. A spliced fragment's block that contains no interior boundary deposits
     #: nothing on either boundary bank, and it is not ``contained`` either — its path spans a sj, so it
     #: lies in no single region. Without this bank such a fragment exists on the incidence axis
-    #: (``sj_count``) and on no conserved one, so no sum over conserved banks can count it — and on a
-    #: contaminated library that population is a quarter of the RNA side and none of the gDNA side,
-    #: because gDNA cannot splice.
+    #: (``sj_count``) and on no conserved one, so no sum over conserved banks can count it — and that
+    #: population is all RNA and none of it gDNA, because gDNA cannot splice.
     #:
     #: A sj bounds a block exactly as a contiguous boundary does (:meth:`Accumulator.deposit`), so a slice
     #: bounded by both shares its bases between them.

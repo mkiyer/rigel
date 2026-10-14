@@ -7,8 +7,8 @@ The substrate is what the report reads from a ``rigel quant`` output directory:
   ``gene_quant``, ``calibration_track``) — read lazily on first access, so a
   report only pays I/O and memory for the tables it actually uses.
 
-Only ``summary.json`` is required; a missing companion table omits the panels
-drawn from it.
+Only ``summary.json`` is required; a missing companion table empties the
+charts and tables drawn from it.
 """
 
 from __future__ import annotations
