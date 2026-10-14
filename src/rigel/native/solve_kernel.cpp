@@ -115,31 +115,6 @@ int resolve_threads(int n_threads, int64_t n_tasks) {
 
 // ═══ THE CONSTRUCTIONS THE BLOCK PIPELINE ABSORBED ═════════════════════════════════════════════════════════════
 
-// numpy's pairwise summation of a contiguous float64 row (`pairwise_sum` in its loops: eight accumulators over blocks
-// of at most 128, halves above), the summation order `np.sum(axis=1)` uses — the one reduction the factor precision
-// makes, reproduced so that the precision is the same bits
-constexpr int PW_BLOCKSIZE = 128;
-double pairwise_sum(const double* a, int n) {
-    if (n < 8) {
-        double res = 0.0;
-        for (int i = 0; i < n; ++i) res += a[i];
-        return res;
-    }
-    if (n <= PW_BLOCKSIZE) {
-        double r[8];
-        for (int j = 0; j < 8; ++j) r[j] = a[j];
-        int i = 8;
-        for (; i < n - (n % 8); i += 8)
-            for (int j = 0; j < 8; ++j) r[j] += a[i + j];
-        double res = ((r[0] + r[1]) + (r[2] + r[3])) + ((r[4] + r[5]) + (r[6] + r[7]));
-        for (; i < n; ++i) res += a[i];
-        return res;
-    }
-    int n2 = n / 2;
-    n2 -= n2 % 8;
-    return pairwise_sum(a, n2) + pairwise_sum(a + n2, n - n2);
-}
-
 constexpr double OWN_EPS = 1.0e-9;       // region_init._EPS: the own-evidence predicate's guard, and the clips
 
 // one slot's reference-free strand composition evidence I_strand at the message-free fg_loc —

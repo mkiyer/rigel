@@ -496,7 +496,8 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         None
         if cal is None
         else {
-            "gdna_density_global": round(float(cal.gdna_density_global), 8),
+            # full precision: a density is a few fragments per Mb, which a fixed count of decimals rounds to 0
+            "gdna_density_global": float(cal.gdna_density_global),
             # calibration's capture answer, which the ruler reads: the gDNA bulk density the capture
             # efficiencies are read against (None = no gDNA landscape, nothing contracted) and the
             # landscape's saturated level against that bulk (1 = no level above it)
@@ -686,6 +687,9 @@ def _write_config_yaml(
             continue
         seen.add(dest)
         val = getattr(args, dest, None)
+        # Paths absolute, as the I/O paths above, so the config reruns from any directory
+        if dest in ("annotated_bam", "tmpdir") and val is not None:
+            val = Path(val).resolve()
         # Normalise types for clean YAML serialisation
         if isinstance(val, Path):
             val = str(val)

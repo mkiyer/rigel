@@ -505,7 +505,7 @@ first non-empty bin to the last. This is the plotting substrate for the fragment
 | Column | Description |
 |--------|-------------|
 | `category` | FL model: `global`, `gdna`, `rna`, or one of the five observed pools (`pool_dna_intergenic`, `pool_dna_intronic`, `pool_dna_intron_exon`, `pool_dna_intergenic_exon`, `pool_rna_spliced`) |
-| `length` | Fragment length (bp) |
+| `length` | Fragment length (bp); the row at the maximum fragment length the scan models (1000 bp) holds every fragment at least that long |
 | `count` | Fragment weight in this bin: whole fragments for `global` and the observed pools, fractional for the fitted `gdna` and `rna` models |
 
 Per category, `count` sums to the matching `summary.json` →

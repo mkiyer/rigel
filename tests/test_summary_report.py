@@ -326,6 +326,12 @@ def test_the_strand_block_carries_the_junction_diagnostics_and_one_overdispersio
         assert sum(shares.values()) == pytest.approx(1.0, abs=1e-6)
     assert strand["strand_live"] is True  # the scenario is stranded at 0.9
     assert strand["strand_overdispersion"] == {"value": 0.0, "model": "binomial"}
+    # calibration's density at full precision: rounded to 8 places, a human-genome density below ~15 fragments was 0.0
+    assert (
+        summary["calibration"]["gdna_density_global"]
+        == float(pr.calibration.gdna_density_global)
+        > 0
+    )
     assert not {"gdna_strand_overdispersion", "rna_strand_overdispersion"} & set(
         summary["calibration"]
     )

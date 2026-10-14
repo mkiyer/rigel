@@ -158,6 +158,22 @@ def test_quant_refuses_a_config_that_is_not_a_mapping(tmp_path):
     assert str(exited.value.code).startswith("Error: ") and "mapping" in str(exited.value.code)
 
 
+def test_config_yaml_records_every_path_absolute(tmp_path, monkeypatch):
+    """A config.yaml reruns from any directory: the BAM, index and output were resolved, but the annotated BAM and the
+    spill directory were kept as typed, so a rerun from elsewhere wrote them elsewhere."""
+    import yaml
+
+    from rigel.cli import _write_config_yaml
+
+    monkeypatch.chdir(tmp_path)
+    args = _parse_quant("--annotated-bam", "ann/annotated.bam", "--tmpdir", "spill")
+    _resolve_quant_args(args, _build_quant_defaults())
+    _write_config_yaml(tmp_path / "config.yaml", args)
+    quant = yaml.safe_load((tmp_path / "config.yaml").read_text())["quant"]
+    assert quant["annotated_bam"] == str((tmp_path / "ann/annotated.bam").resolve())
+    assert quant["tmpdir"] == str((tmp_path / "spill").resolve())
+
+
 def test_a_hard_scoring_gate_dumps_as_strict_json():
     """An alpha of 0 is the hard gate, whose log-penalty is −inf. The configuration summary.json records holds the
     alphas, which are finite, so the file stays JSON (``-Infinity`` is not)."""

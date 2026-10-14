@@ -231,16 +231,13 @@ MOVES A NUMBER (each alone):
 - The splice census counts placements: a multimapper's secondary placements enter `splice.*` (an NH:2 fixture: 20,500
   for 20,000 fragments), so `with_annotated_sj` and `splice.spliced_annotated` count different units; the census
   identity gate omits `deferred_multiple_placements` and runs on NH = 1 only.
-- `summary.json`: `gdna_density_global` is rounded to 8 decimal places (0.0 below about 15 calibrated gDNA fragments on
-  a human genome) beside a full-precision `gdna_bulk_density`; `quantification.n_transcripts` counts the synthetic spans
+- `summary.json`: `quantification.n_transcripts` counts the synthetic spans
   (918 for 553 quant rows) while `n_genes` counts annotated genes; `read_groups` never counts a fully unmapped pair,
   so the report's read-fate bar reads 100 % uniquely mapped with a quarter of the pairs unmapped; `mapped_reads`
   counts a QC-failed unmapped record as mapped.
 - Sample mode's `posterior_mean` is Σp²/Σp (a transcript that won 17 units reports 0.891 for a plain mean of 0.687),
   and NaN for a transcript with no EM unit, which the MANUAL does not say.
-- `fragment_lengths.feather` stores the censored overflow (≥ 1,000 bp) as a row labelled 1000; a `gene_id` with
-  transcripts on two references takes its reference and strand from one and its span across both; `config.yaml`
-  resolves the BAM, index and output paths but keeps `annotated_bam` and `tmpdir` as typed.
+- A `gene_id` with transcripts on two references takes its reference and strand from one and its span across both.
 LATENT (no current path reaches it):
 - `run_parallel`: a throw from fn(0) leaves `task_` racing, and a worker throw terminates; the ψ and EM callers do not
   catch. `ThreadPool`'s constructor: a failed thread creation unwinds a vector of joinable threads into
@@ -257,8 +254,8 @@ LATENT (no current path reaches it):
   `em_effective_length` of about 1e-304, a +700-nat advantage per fragment; the shipped calibration's smallest
   efficiency is 0.875.
 - The annotated writer's `hts_close` is unchecked, and a throw mid-write leaks its handles; `--scan-buffer-size` does
-  not bound the native queues, which hold up to three chunks per worker beyond it; `constants.h` says the strand test
-  checks that mates face inward, which it does not (an outward pair deposits as an ordinary molecule).
+  not bound the native queues, which hold up to three chunks per worker beyond it; an outward-facing (RF) pair deposits
+  as an ordinary molecule, since the strand test sees one strand, not the mates' orientation.
 - Simulator config: a capture entry without `enabled:` and without probes yields an empty `CaptureConfig`; gene and
   transcript keys are unchecked (a typo runs on the default of 100); an empty section fails with a TypeError;
   `sim_command` creates the output directory before validating.
@@ -832,11 +829,10 @@ optional import in the simulator; eight test sites import `rigel._resolve_impl` 
   159 with -march=haswell) and move numbers (`TRAPS: a-kernel-edit-moves-ulps-under-fma-contraction`). RULED (owner,
   2026-09-28): they stay off; correct the two CMakeLists comments that are false for it. The 3bb35bdd message's
   "both proven bit-identical" is wrong for `_solve_impl` and stands corrected here.
-- The numpy bit-matching machinery: the native solve still carries numpy's pairwise-sum order (`PW_BLOCKSIZE = 128`),
-  the `lgamma` binding and named temporaries, with no Python twin left. Retiring it moves results by ulps and needs the
-  goldens and the sweep replay re-recorded. RULED (owner, 2026-09-28): retire it after the strand-overdispersion and
-  fl landings, in one golden re-record window. `pairwise_sum` itself has no caller (the 2026-10-14 release review), so
-  its deletion is a numeric no-op; the `lgamma` binding and the named temporaries are what the re-record prices.
+- The numpy bit-matching machinery: the native solve still carries the `lgamma` binding and named temporaries, with
+  no Python twin left. Retiring them moves results by ulps and needs the goldens and the sweep replay re-recorded.
+  RULED (owner, 2026-09-28): retire them after the strand-overdispersion and fl landings, in one golden re-record
+  window.
 Kept as coverage GAPS, not dead code: the five CLI command bodies, the silent policy through `calibrate`, the
 simulator's sharded writers and its whole-genome grid, and the zarr splice blacklist.
 (g) COMMENT AND DOC RESIDUE, one content-only sweep:
@@ -884,7 +880,7 @@ simulator's sharded writers and its whole-genome grid, and the zarr splice black
 - Five instruments import `tests/calibration/_oracle.py` through `sys.path`; four scripts redefine `_shared.RUNS`.
 (i) CONSTANTS — what the move into `config.CONSTANTS` left (2026-10-01; the layout is `DESIGN.md` §6):
 - The native kernels' own constants are named and commented in their translation units (`em_solver.cpp`'s
-  `SQUAREM_BUDGET_DIVISOR`, `transfer_rows.h`'s `EPS` and `TINY`, `solve_kernel.cpp`'s `PW_BLOCKSIZE`, the scanner's
+  `SQUAREM_BUDGET_DIVISOR`, `transfer_rows.h`'s `EPS` and `TINY`, the scanner's
   batch sizes), not gathered in `native/constants.h`, and the C++ inline literals are unaudited. Only the values Python
   shares are single-sourced (exported, never restated).
 - `rigel sim`'s CLI restates `Scenario`'s defaults (genome length 5000, seed 42, 1000 fragments); reading them from

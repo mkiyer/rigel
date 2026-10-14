@@ -400,10 +400,10 @@ inline int32_t detect_chimera(
     int32_t chimera_type = (unique_strands.size() == 1)
         ? CHIMERA_CIS_STRAND_SAME : CHIMERA_CIS_STRAND_DIFF;
 
-    // ⭐⭐⭐ THE COMPATIBILITY CHECK. `unique_strands.size() == 1` IS "facing inward": `build_fragment`
-    // keys blocks by (ref_id, ref_strand) with R2's orientation flipped, so both mates of an
-    // inward-facing pair carry the same strand and an outward-facing pair does not. What remains is
-    // whether a molecule of the implied length could exist in this library.
+    // ⭐⭐⭐ THE COMPATIBILITY CHECK. `unique_strands.size() == 1` says the mates lie on one strand of one
+    // molecule: `build_fragment` keys blocks by (ref_id, ref_strand) with R2's orientation flipped. It does
+    // NOT say they face inward: an outward-facing (RF) pair carries one strand too and passes as an ordinary
+    // molecule. What remains is whether a molecule of the implied length could exist in this library.
     // ⚠ The span is the implied FRAGMENT LENGTH -- outermost start to outermost end -- and NOT
     // the gap between the blocks: the two differ by the blocks' own lengths, and the gap would admit a
     // molecule longer than the library can contain.
