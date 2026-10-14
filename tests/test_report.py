@@ -314,6 +314,7 @@ def test_the_escape_helper_escapes_every_html_special_character():
     [
         ("hero", r"\bm\."),  # the sample, the index, the timestamp, the version, the warnings
         ("geneTable", r"\bv\b|\br\["),  # gene names, IDs and types, references
+        ("refTable", r"\bv\b"),  # the reference names of the per-reference gDNA table
     ],
 )
 def test_a_string_a_user_or_an_annotation_chose_is_escaped_before_it_becomes_markup(sink, chosen):

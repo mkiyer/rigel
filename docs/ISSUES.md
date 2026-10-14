@@ -287,11 +287,9 @@ false capture removed without the old capture-ON cost). 0.8.1: with its partner,
 2026-10-02 verdict names.
 
 ### latent-defects
-`priority: next — 0.8.1; the 0.8.0 user-path items landed 2026-10-14, and the report's reference table is the one 0.8.0 item left · kind: defect · 2026-09-28`
+`priority: next — 0.8.1; its 0.8.0 user-path items landed 2026-10-14 · kind: defect · 2026-09-28`
 Correctness defects from the 2026-09-27 review, the cleanup and the 2026-10-14 release review. A test's expectations may
 move; no panel number moves unless marked.
-0.8.0: the report's reference table puts reference names into `innerHTML` unescaped (`report.js`'s `refTable` renders
-`${v}`); the `esc` gate in `tests/test_report.py` reads only the hero and the gene table, so add that sink to it.
 MOVES A NUMBER (each alone):
 - `Scenario.build_oracle`'s fixed-total branch never reads `gdna_fraction`, so six fixtures simulate NO gDNA, among
   them `test_scan_order_independence`, whose docstring says it puts gDNA in introns. Raise on the combination, then

@@ -424,7 +424,7 @@
       table: "ref-table", search: "rsearch", count: "rcount", pager: "ref-pager",
       noun: "references", rows: rt, sort: 2, dir: -1,
       columns: [
-        { idx: 0, label: "Reference", search: true, render: (v) => `<span class="num">${v}</span>` },
+        { idx: 0, label: "Reference", search: true, render: (v) => `<span class="num">${esc(v)}</span>` },
         { idx: 1, label: "regions", num: true, render: (v) => grp(v) },
         { idx: 2, label: "gDNA mass", num: true, render: (v) => si(v) },
         { idx: 3, label: "gDNA/bp", num: true, render: (v) => Number(v).toExponential(2) },
