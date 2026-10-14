@@ -180,6 +180,63 @@ def _warn_if_calibration_strand_unidentifiable(strand_models: StrandModels) -> N
     )
 
 
+class BamInputError(ValueError):
+    """A BAM the scan would read wrong, refused before its records are trusted; the message names the remedy."""
+
+
+def _check_bam_header(bam_path: str, index: TranscriptIndex) -> None:
+    """Refuse, from its header alone, a BAM the scan would read wrong.
+
+    A coordinate-sorted BAM puts a pair's mates apart, and the scan groups adjacent records by read name, so every mate
+    would be its own fragment. References the index does not hold would book every fragment intergenic, and a
+    reference it holds at another length is another assembly. References beyond the index (decoys, alternates, a
+    contig the annotation leaves out) are allowed and named in a warning, since their reads are counted intergenic.
+    """
+    import pysam
+
+    try:
+        with pysam.AlignmentFile(bam_path, "r", check_sq=False) as f:
+            header = f.header.to_dict()
+    except (
+        OSError
+    ) as exc:  # pysam refuses a BAM missing its BGZF end-of-file marker: a truncated file
+        raise BamInputError(f"{bam_path} cannot be read: {exc}") from exc
+    if header.get("HD", {}).get("SO") == "coordinate":
+        raise BamInputError(
+            f"{bam_path} is sorted by coordinate (@HD SO:coordinate), so a pair's mates are not adjacent and each "
+            "would be read as its own fragment; sort it by read name (samtools sort -n) or collate it "
+            "(samtools collate) first."
+        )
+    bam_refs = {sq["SN"]: int(sq["LN"]) for sq in header.get("SQ", [])}
+    shared = [name for name in bam_refs if name in index.ref_lengths]
+
+    def some(names):
+        names = list(names)
+        return ", ".join(names[:3]) + (f" and {len(names) - 3:,} more" if len(names) > 3 else "")
+
+    if bam_refs and not shared:
+        raise BamInputError(
+            f"None of {bam_path}'s {len(bam_refs):,} references is in the index ({some(bam_refs)}, against "
+            f"{some(index.ref_lengths)}): the BAM and the index name their references differently, or were built on "
+            "different genomes."
+        )
+    relengthed = [name for name in shared if bam_refs[name] != int(index.ref_lengths[name])]
+    if relengthed:
+        raise BamInputError(
+            f"{len(relengthed):,} of {bam_path}'s references have another length in the index "
+            f"({some(f'{n}: {bam_refs[n]:,} against {int(index.ref_lengths[n]):,}' for n in relengthed)}): "
+            "the BAM and the index were built on different assemblies."
+        )
+    beyond = [name for name in bam_refs if name not in index.ref_lengths]
+    if beyond:
+        logger.warning(
+            "%s of the BAM's %s references are not in the index (%s); their reads are counted intergenic.",
+            f"{len(beyond):,}",
+            f"{len(bam_refs):,}",
+            some(beyond),
+        )
+
+
 def scan_and_buffer(
     bam_path: str,
     index: TranscriptIndex,
@@ -213,6 +270,7 @@ def scan_and_buffer(
     built from the payload by :func:`rigel.calibration.fl.build_fl_models`, so length is measured by
     one rule — the accumulator's ``L`` — over one stated population.
     """
+    _check_bam_header(bam_path, index)
     stats = PipelineStats()
     buffer = FragmentBuffer(
         max_memory_bytes=scan.buffer_size_bytes,

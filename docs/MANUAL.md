@@ -65,7 +65,12 @@ rigel -v quant ...       # -v / --verbose: DEBUG-level logging for any subcomman
 ### BAM
 
 - **Paired-end** — the scan stops at the first unpaired record
-- **Name-sorted or collated** — not coordinate-sorted
+- **Name-sorted or collated** — a BAM whose header says `SO:coordinate` is refused, since its mates are not
+  adjacent
+- **Aligned to the index's genome** — references are matched by name: a BAM none of whose references is in the
+  index, or one holding a reference at another length, is refused; references beyond the index (decoys,
+  alternates) are named in a warning and their reads counted intergenic
+- **Complete** — a truncated or corrupt BAM is refused, never quantified on the records read before the damage
 - **`NH` tag** used for multimapper handling when present; otherwise
   multimappers are detected from secondary BAM flags
 - **A splice-junction strand tag, for a stranded library** (`XS` from HISAT2, or from STAR with

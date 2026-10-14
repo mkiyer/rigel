@@ -133,6 +133,10 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
   blacklist file is missing, or a blacklist file with no store in the manifest. 0.7.1 reported a missing blacklist
   only through `summary.json`'s `sj_blacklist_loaded`.
 - The HTML report escapes sample names, paths, gene names and reference names before they become markup.
+- A BAM the scan would read wrong is refused before its records are trusted: one sorted by coordinate (each mate was
+  read as its own fragment, about doubling every count), one whose references the index does not hold (every fragment
+  was intergenic) or holds at another length, and one truncated or corrupt (a read error ended the scan like the end of
+  the file). References beyond the index are named in a warning.
 - `--annotated-bam`: a gene without a `gene_name` (Ensembl's unnamed genes, NCBI annotations) crashed the pass after
   the whole run, losing every output; it now reads `.`. The quantification tables are written before the pass. A read
   name whose first record is filtered is no longer split around its neighbour, and an aligner's tag of the same name

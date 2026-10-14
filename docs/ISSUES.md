@@ -126,28 +126,18 @@ tests, and `twine check --strict` passes. Before tagging:
   with untracked files (22 in the sandbox today).
 
 ### input-mistakes-pass-silently
-`priority: now — 0.8.0, approved with the issues survey (owner, 2026-10-14) · kind: defect · 2026-10-14`
-Four ordinary input mistakes produce a full, wrong output set with exit 0 (each reproduced on the test chromosome):
-- **A coordinate-sorted BAM.** The scan groups adjacent records by read name and reads no `@HD SO`, so each mate is
-  its own fragment: 1,170,000 pairs quantify as 2,318,315 fragments, the fragment-length mean reads 98 bp for 214, and
-  per-transcript counts run ×1.94 at the median. The MANUAL forbids the input; nothing enforces it. Refuse
-  `SO:coordinate`, and count the hits whose flag names a mapped mate that the group lacks.
-- **A truncated or corrupt BAM.** The scan, the annotated writer and the strand-tag detection loop
-  `while (sam_read1(...) >= 0)`, so an htslib error (< −1) ends the read like EOF: a BAM cut at half its bytes finishes
-  on half its reads; a CRAM whose reference is missing reads nothing and still writes every output. Throw on
-  `ret < −1`, naming the file and the records read.
-- **BAM reference names the index does not hold** (`chr1` against `1`). `build_tid_mapping` maps them to −1 and every
-  fragment is intergenic; the report then calls a pure-RNA library 51.6 % gDNA, critical. Refuse when no `@SQ` name
-  matches the index, warn and name them when some do not, and compare `LN` with `ref_lengths`.
-- **Paths checked after the work.** An unwritable `--annotated-bam` fails after the whole run; a mistyped
-  `--alignable-zarr` fails at the end of the build, after the old manifest is deleted, so rebuilding over a working
-  index leaves an unloadable one; a blacklist whose contigs miss the FASTA builds and reports detection on with nothing
-  to match. Validate before the first write.
-Smaller, in the same family: refusals the MANUAL documents (`--sj-strand-tag foo`, `--threads -1`, an index with no
-manifest, an unpaired record, a YAML list) arrive as tracebacks rather than `Error:` lines, and a reused output
-directory keeps the previous run's optional files (a `quant.tsv` beside a newer `quant.feather`).
-Tests first, each verified failing: a scenario BAM coordinate-sorted, cut to half its bytes, and reheadered with a
-`chr` prefix, each refused with its cause named.
+`priority: now — 0.8.0, approved with the issues survey (owner, 2026-10-14); the BAM refusals landed 2026-10-14 · kind: defect · 2026-10-14`
+What is left of the input mistakes that produced a full, wrong output set with exit 0 (the coordinate-sorted, the
+renamed and the truncated BAM are refused since 2026-10-14, `tests/test_bam_input_checks.py`):
+- **Paths checked after the work.** An unwritable `--annotated-bam` fails after the whole run (the tables are written
+  first now); a mistyped `--alignable-zarr` fails at the end of the build, after the old manifest is deleted, so
+  rebuilding over a working index leaves an unloadable one; a blacklist whose contigs miss the FASTA builds and reports
+  detection on with nothing to match. Validate before the first write.
+- **Refusals as tracebacks**: an index with no manifest, an unpaired record, a YAML list, and `rigel index` with a
+  transcript on a contig missing from the FASTA (even under warn-skip).
+- **A reused output directory** keeps the previous run's optional files (a `quant.tsv` beside a newer `quant.feather`).
+- **A BAM without `@HD SO`** that is in fact coordinate-sorted still passes: refusing it needs a count of hits whose
+  mate the flag says is mapped but the group lacks, and a threshold on that count is the owner's call.
 
 ### the-gtf-parser-accepts-malformed-transcripts
 `priority: now — 0.8.0, approved with the issues survey (owner, 2026-10-14) · kind: defect · 2026-10-14`

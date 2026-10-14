@@ -132,6 +132,19 @@ static const char* splice_type_label(int code) {
 }
 
 // ================================================================
+// A read error is never the end of the file
+// ================================================================
+
+// htslib's sam_read1 returns -1 at the end of the file and less than -1 on an error. A loop that stops on either
+// would quantify a truncated or corrupt BAM, or a CRAM whose reference cannot be found, on the records read before
+// the error, with no sign of it; each read loop keeps the return and throws this instead.
+static std::runtime_error read_error(const std::string& path, int ret, int64_t n_records) {
+    return std::runtime_error("Failed to read " + path + " after " + std::to_string(n_records) +
+                              " records (htslib error " + std::to_string(ret) +
+                              "): a truncated or corrupt BAM, or a CRAM whose reference cannot be found");
+}
+
+// ================================================================
 // Build htslib tid → internal ref_id mapping
 // ================================================================
 
@@ -1441,7 +1454,8 @@ public:
                     return input_queue.push(std::move(current_batch));
                 };
 
-                while (sam_read1(fp, hdr, b) >= 0) {
+                int read_ret = 0;
+                while ((read_ret = sam_read1(fp, hdr, b)) >= 0) {
                     stats_.total++;
 
                     uint16_t flag = b->core.flag;
@@ -1478,6 +1492,13 @@ public:
                                           ctx_,
                                           &stats_.n_sj_observed,
                                           &stats_.n_sj_blacklisted));
+                }
+
+                if (read_ret < -1) {
+                    bam_destroy1(b);
+                    bam_hdr_destroy(hdr);
+                    hts_close(fp);
+                    throw read_error(bam_path, read_ret, stats_.total);
                 }
 
                 // Flush last group
@@ -2679,7 +2700,8 @@ public:
         };
 
         // ---- Main BAM read loop ----
-        while (sam_read1(fp, hdr, b) >= 0) {
+        int read_ret = 0;
+        while ((read_ret = sam_read1(fp, hdr, b)) >= 0) {
             uint16_t flag = b->core.flag;
 
             // Filtered reads: write through as-is (no annotation tags)
@@ -2762,6 +2784,15 @@ public:
             }
 
             light_group.push_back(std::move(rec));
+        }
+
+        if (read_ret < -1) {
+            for (auto* r : raw_group) bam_destroy1(r);
+            bam_destroy1(b);
+            bam_hdr_destroy(hdr);
+            hts_close(fp);
+            hts_close(out);
+            throw read_error(bam_path, read_ret, n_records_written);
         }
 
         // Process last group
@@ -2848,7 +2879,10 @@ static std::string detect_sj_strand_tag_native(
     bool found_ts = false;
     int n_spliced = 0;
 
-    while (sam_read1(fp, hdr, b) >= 0 && n_spliced < max_spliced_reads) {
+    int read_ret = 0;
+    int64_t n_read = 0;
+    while (n_spliced < max_spliced_reads && (read_ret = sam_read1(fp, hdr, b)) >= 0) {
+        ++n_read;
         if (b->core.flag & (BAM_FUNMAP | BAM_FQCFAIL)) continue;
         if (b->core.n_cigar == 0) continue;
 
@@ -2873,6 +2907,7 @@ static std::string detect_sj_strand_tag_native(
     bam_destroy1(b);
     bam_hdr_destroy(hdr);
     hts_close(fp);
+    if (read_ret < -1) throw read_error(bam_path, read_ret, n_read);
 
     // Return detected tags in priority order (XS first)
     if (found_xs && found_ts) return "XS,ts";

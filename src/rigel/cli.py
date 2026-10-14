@@ -120,12 +120,17 @@ def quant_command(args: argparse.Namespace) -> int:
     )
 
     # -- Run; the tables are written before the optional annotated-BAM pass, so a failure there loses nothing --
-    run_pipeline(
-        bam_path,
-        index,
-        config=pipeline_config,
-        before_second_pass=lambda result: _write_quant_outputs(result, index, output_dir, args),
-    )
+    from .pipeline import BamInputError
+
+    try:
+        run_pipeline(
+            bam_path,
+            index,
+            config=pipeline_config,
+            before_second_pass=lambda result: _write_quant_outputs(result, index, output_dir, args),
+        )
+    except BamInputError as exc:
+        sys.exit(f"Error: {exc}")
     return 0
 
 
