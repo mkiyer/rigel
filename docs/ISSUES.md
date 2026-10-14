@@ -79,9 +79,10 @@ LATENT (no current path reaches it):
 - nanobind: `nb::cast<A>(h).data()` in `em_solver.cpp` and `solve_kernel.cpp` converts into a temporary on a dtype or
   order mismatch and dangles (GIL released); outputs without `.noconvert()` write into a discarded copy; the scatter
   bindings downcast float64 silently; `StreamingScorer` has no `nb::keep_alive`.
-- `--overhang-alpha 0`, documented as a hard gate, gives 0 × −inf = NaN for every candidate with no overhang
-  (`scoring.cpp`, the overhang term at both scoring sites); the prune tests then drop every EM-routed fragment, silently.
-  LIVE, not latent (0.8.0). The mismatch term is already guarded (`nm > 0 ? … : 0.0`).
+- FIXED 2026-10-14: `--overhang-alpha 0`, documented as a hard gate, gave 0 × −inf = NaN for every candidate with no
+  overhang, and the prune tests dropped every EM-routed fragment, silently. The gate is now a flag with a zero penalty,
+  and an overhanging candidate is skipped (`tests/test_pipeline_routing.py`, both scoring paths). The mismatch term
+  was already guarded.
 - The scan cache: `deposit_digest`'s fixture offers `hypotheses=()`, blind to gap arbitration and deferral;
   `_payload_from_parts` skips `from_dict`'s conservation checks; the two `.npz` files and the manifest are written in
   place, with no temp-and-rename. One validating `AccumulatorPayload` constructor would serve the scan, the cache and
@@ -109,7 +110,7 @@ LATENT (no current path reaches it):
   (`ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`).
 - `transfer_rows.h`'s `level_bound_row` `std::max(v, 1e-12)` never binds on a reachable input: delete it together
   with an assert v > 0 in the binding (today v = 0 reads 1e-12; without the floor it would be NaN).
-0.8.0 (owner, 2026-10-14): the overhang alpha, the index's `nrna_n_contributors` (`=` for `+=`, with the index bump),
+0.8.0 (owner, 2026-10-14): the overhang alpha (fixed), the index's `nrna_n_contributors` (`=` for `+=`, with the index bump),
 the GTF parser (a final attribute without its `;`, a missing `transcript_id`, an exon on another reference or strand),
 the unknown `config.yaml` key, the report's meta line through `innerHTML`, and `rigel sim`'s empty fragment-length
 window (it loops forever). The rest is 0.8.1 or later; the reorder gate's fixture simulates no gDNA (`build_oracle`'s

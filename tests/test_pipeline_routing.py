@@ -24,7 +24,7 @@ from rigel.splice import SpliceType
 from rigel.config import EMConfig, FragmentScoringConfig
 from rigel.estimator import AbundanceEstimator
 from rigel.frag_length_model import FragmentLengthModel
-from rigel.scoring import FragmentScorer
+from rigel.scoring import FragmentScorer, overhang_alpha_to_log_penalty
 from rigel.scan import FragmentRouter
 from rigel.stats import PipelineStats
 from rigel.strand_model import StrandModel, StrandModels
@@ -606,6 +606,81 @@ def test_nm_penalty_zero_when_disabled():
 
     # Log-liks should be identical since penalty is 0
     assert em_a.log_liks[0] == pytest.approx(em_b.log_liks[0])
+
+
+# ── `--overhang-alpha 0` is a hard gate, not a NaN ─────────────────────────────────────────────────
+
+
+def _overhang_pair(fragment_class):
+    """One fragment with two candidates that differ only in overhang: t0 holds the whole read in its exon
+    (overhang 0), t1 leaves 10 bp outside (overhang 10). A multimapper carries them as two hits."""
+    if fragment_class == FRAG_MULTIMAPPER:
+        bfs = [
+            _BF(
+                t_inds=np.array([t], dtype=np.int32),
+                splice_type=int(SpliceType.UNSPLICED),
+                align_strand=int(Strand.POS),
+                frag_lengths=np.array([200], dtype=np.int32),
+                exon_bp=np.array([ebp], dtype=np.int16),
+                intron_bp=np.array([0], dtype=np.int16),
+                read_length=100,
+            )
+            for t, ebp in ((0, 100), (1, 90))
+        ]
+        return _Chunk(bfs=bfs, fragment_classes=[FRAG_MULTIMAPPER] * 2, frag_ids=[1, 1])
+    bf = _BF(
+        t_inds=np.array([0, 1], dtype=np.int32),
+        splice_type=int(SpliceType.UNSPLICED),
+        align_strand=int(Strand.POS),
+        frag_lengths=np.array([200, 200], dtype=np.int32),
+        exon_bp=np.array([100, 90], dtype=np.int16),
+        intron_bp=np.array([0, 0], dtype=np.int16),
+        read_length=100,
+    )
+    return _Chunk(bfs=[bf], fragment_classes=[fragment_class], frag_ids=[1])
+
+
+@pytest.mark.parametrize(
+    "fragment_class",
+    [FRAG_AMBIG_SAME_STRAND, FRAG_MULTIMAPPER],
+    ids=["one-alignment", "multimapper"],
+)
+def test_an_overhang_alpha_of_zero_gates_overhang_and_scores_the_rest(fragment_class):
+    """`--overhang-alpha 0` is documented as a hard gate (the CLI's help, MANUAL): a candidate with any overhang
+    is excluded and a candidate with none is scored as under any other alpha. The penalty is ``log 0 = -inf``,
+    and ``0 * -inf`` is NaN, which every prune test rejects, so an unguarded scorer dropped EVERY candidate —
+    a run that silently quantified almost nothing. Both scoring paths carry the term."""
+    index = _Index(
+        t_to_g=[0, 0],
+        t_to_strand=[int(Strand.POS), int(Strand.POS)],
+        g_to_strand=[int(Strand.POS)],
+    )
+    strand_models, max_frag_size, estimator, stats = _make_env(index)
+    em = _scan_em_data(
+        _Buffer([_overhang_pair(fragment_class)]),
+        index,
+        strand_models,
+        max_frag_size,
+        estimator,
+        stats,
+        overhang_log_penalty=overhang_alpha_to_log_penalty(0.0),
+    )
+    assert em.n_units == 1
+    assert list(em.t_indices) == [0]
+    assert np.all(np.isfinite(em.log_liks))
+
+    # the gate costs nothing where nothing overhangs: t0's likelihood equals its score at the default alpha
+    _, _, default_estimator, default_stats = _make_env(index)
+    default = _scan_em_data(
+        _Buffer([_overhang_pair(fragment_class)]),
+        index,
+        strand_models,
+        max_frag_size,
+        default_estimator,
+        default_stats,
+    )
+    t0 = list(default.t_indices).index(0)
+    assert em.log_liks[0] == default.log_liks[t0]
 
 
 # ── which fragments may be gDNA: one rule, by alignment ───────────────────────────────────────────

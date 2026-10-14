@@ -162,6 +162,9 @@ class NativeFragmentScorer {
     double log_p_sense_;
     double log_p_antisense_;
     bool   r1_antisense_;
+    // `--overhang-alpha 0` is a hard gate: log 0 = -inf, and 0 * -inf is NaN, so the gate is carried as a flag and
+    // the penalty as 0; a candidate with any overhang is skipped, which is what the -inf would have done
+    bool oh_gate_;
     double oh_log_pen_;
     double mm_log_pen_;
     int32_t fl_max_size_;
@@ -299,7 +302,8 @@ public:
       : log_p_sense_(log_p_sense),
         log_p_antisense_(log_p_antisense),
         r1_antisense_(r1_antisense),
-        oh_log_pen_(oh_log_pen),
+        oh_gate_(std::isinf(oh_log_pen) && oh_log_pen < 0.0),
+        oh_log_pen_(std::isinf(oh_log_pen) && oh_log_pen < 0.0 ? 0.0 : oh_log_pen),
         mm_log_pen_(mm_log_pen),
         fl_max_size_(fl_max_size),
         fl_tail_base_(fl_tail_base),
@@ -531,6 +535,7 @@ private:
 
             int32_t oh = rl - ebp;
             if (oh < 0) oh = 0;
+            if (oh_gate_ && oh > 0) continue;
 
             int32_t flen = cp.f_len[k];
             double log_fl = frag_len_log_lik(flen);
@@ -793,6 +798,7 @@ private:
 
                 int32_t oh = rl - ebp;
                 if (oh < 0) oh = 0;
+                if (oh_gate_ && oh > 0) continue;
 
                 int32_t flen = f_len[k];
                 double log_fl = frag_len_log_lik(flen);
