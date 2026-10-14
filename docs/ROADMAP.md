@@ -99,7 +99,7 @@ sparse libraries lose their gDNA.
   transcript-designed panel is declared — `ISSUES: ruler-witness-geometry-on-transcript-panels`.
 - **Splice-artifact detection**: the blacklist errs both ways on real data — artifacts pass as certified RNA and
   rejected genuine reads become gDNA-eligible — and an index whose manifest records no alignable store runs with
-  detection off and no error — the cluster track, `ISSUES: splicing-artifacts`,
+  detection off, which its load now says — the cluster track, `ISSUES: splicing-artifacts`,
   `ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`; `summary.json`'s `sj_blacklist_loaded`.
 - **Performance**: the sweep is one native call, bit-identical at every thread count; the locus EM hands loci to its
   threads one at a time; two numeric no-ops are in the 0.8.0 cut and the rest of the thread stays parked —

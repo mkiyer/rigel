@@ -1501,10 +1501,12 @@ class TranscriptIndex:
             self.sj_map = None
 
         # 2b. Splice-junction artifact blacklist: used only when the manifest records the store it
-        # was built from.
+        # was built from. A blacklist with no store recorded, or a recorded store with no blacklist,
+        # leaves artifact detection off with no other sign, so the load warns.
         blacklist_path = os.path.join(index_dir, SJ_BLACKLIST_FEATHER)
         store = manifest.get("sources", {}).get("alignable_zarr")
-        if store is not None and os.path.exists(blacklist_path):
+        has_blacklist = os.path.exists(blacklist_path)
+        if store is not None and has_blacklist:
             logger.debug("Loading splice-artifact blacklist")
             bl_df = pd.read_feather(blacklist_path)
             ctx.build_sj_blacklist_map(
@@ -1517,8 +1519,19 @@ class TranscriptIndex:
             self.sj_blacklist_size = int(len(bl_df))
             logger.info(f"Splice artifact blacklist: {len(bl_df):,} sj active")
         else:
-            # No store recorded, or its blacklist file removed → artifact detection is off.
             self.sj_blacklist_size = 0
+            if has_blacklist:
+                logger.warning(
+                    f"{SJ_BLACKLIST_FEATHER} is not applied: this index's manifest records no alignable "
+                    "store it was built from, so splice-artifact detection is off. Rebuild the index "
+                    "with --alignable-zarr to use a blacklist."
+                )
+            elif store is not None:
+                logger.warning(
+                    f"This index was built from the alignable store {store['path']}, but its "
+                    f"{SJ_BLACKLIST_FEATHER} is missing, so splice-artifact detection is off. "
+                    "Rebuild the index."
+                )
 
         # 3. Per-transcript exon CSR for transcript-space FL computation.
         #    build_exon_csr() is the single owner of this CSR (it is also

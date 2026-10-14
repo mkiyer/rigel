@@ -107,7 +107,7 @@ LATENT (no current path reaches it):
   `ISSUES: the-format-changes-to-batch-before-release`.)
 - An unknown quant YAML key raises without listing the known keys or hinting at an older build, so a 0.7.1
   `config.yaml` is refused unhelpfully; MANUAL's "rerun the exact analysis" needs a caveat.
-- A splice blacklist present without a recorded store is dropped with no log line: a one-line warning
+- FIXED 2026-10-14: a splice blacklist present without a recorded store is no longer dropped with no log line
   (`ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`).
 - `transfer_rows.h`'s `level_bound_row` `std::max(v, 1e-12)` never binds on a reachable input: delete it together
   with an assert v > 0 in the binding (today v = 0 reads 1e-12; without the floor it would be NaN).
@@ -128,15 +128,19 @@ alone gets no prior although calibration counted its gDNA. Invisible on the `NH 
 aligned scenarios carry it. Magnitude unmeasured.
 
 ### an-unrecorded-splice-blacklist-is-dropped-silently
-`priority: now — 0.8.0: the warning, both directions; the cluster's manifest checked before any cluster quant · kind: risk · 2026-09-28`
+`priority: now — 0.8.0: the cluster's manifest checked before any cluster quant; the warning landed 2026-10-14 · kind: risk · 2026-09-28`
 `TranscriptIndex.load` applies `splice_blacklist.feather` only when `manifest.json` records `sources.alignable_zarr`;
 otherwise it sets `sj_blacklist_size = 0` with no log line. The cluster's production index
 (`hulkrna/refs/human/rigel_index/`) holds a 5.8 M-row feather: if it was placed by hand, the next quant there runs
 with splice-artifact detection off and no error — format 8 (eeba4b0a) predates the sources block (8c673324), with no
 version bump. The only trace is `sj_blacklist_loaded: false` in `summary.json`. Before any cluster quant, check the
-manifest or rebuild with `--alignable-zarr`. The one-line warning for a feather without a recorded store is in
-`ISSUES: latent-defects`.
-Instrument: the manifest; `summary.json`'s `sj_blacklist_loaded`.
+manifest or rebuild with `--alignable-zarr`.
+Instrument: the manifest; `summary.json`'s `sj_blacklist_loaded`; the load's warning.
+LANDED 2026-10-14 (`tests/test_splice_blacklist.py`): the load warns in both directions, naming the remedy — a
+blacklist whose manifest records no store is not applied, and a recorded store whose blacklist is missing leaves
+detection off — while an index built with no store loads quietly. Left: the cluster's manifest. Its format 9 rebuild
+(`ISSUES: the-format-changes-to-batch-before-release`) must name the store, since `rigel index` refuses a build that
+names neither `--alignable-zarr` nor `--no-mappability`.
 
 ### the-format-changes-to-batch-before-release
 `priority: now — 0.8.0, in one window: summary.json and index format 9 (owner, 2026-09-28 and 2026-10-14) · kind: decision · 2026-09-28`

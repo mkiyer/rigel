@@ -7,13 +7,15 @@ it as unknown. The gates run the shipped aggregation (`aggregate_splice_blacklis
 loader calls) over rows built in memory, so the suite does not require the store to be installed.
 The index gates then check that an index uses a blacklist only when its manifest records the store
 it came from: a build from a store loads it into the resolver, a build or rebuild without one leaves
-none on disk, `load` ignores one dropped into an index built without a store or whose manifest has no
-`sources`, and an index whose recorded blacklist was removed loads with detection off.
+none on disk, `load` does not apply one dropped into an index built without a store or whose manifest
+has no `sources`, and an index whose recorded blacklist was removed loads with detection off. Either way
+the load warns, since detection is off with no other sign; an index built with no store loads quietly.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -159,9 +161,18 @@ _BLACKLIST = pd.DataFrame(
 )
 
 
+def _load_and_warnings(index_dir: Path, caplog) -> tuple[TranscriptIndex, list[str]]:
+    """Load an index, and the warnings its load gave about a splice blacklist."""
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="rigel.index"):
+        index = TranscriptIndex.load(index_dir)
+    warned = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    return index, [m for m in warned if "blacklist" in m]
+
+
 class TestIndexRoundTrip:
     def test_a_blacklist_built_from_a_store_loads_into_the_resolver(
-        self, tmp_path: Path, mini_index_inputs
+        self, tmp_path: Path, mini_index_inputs, caplog
     ) -> None:
         fasta, gtf = mini_index_inputs
         out_dir = tmp_path / "idx"
@@ -170,20 +181,25 @@ class TestIndexRoundTrip:
 
         on_disk = pd.read_feather(out_dir / SJ_BLACKLIST_FEATHER)
         assert list(on_disk.columns) == list(BLACKLIST_COLUMNS)
-        assert TranscriptIndex.load(out_dir).sj_blacklist_size == len(_BLACKLIST)
+        index, warned = _load_and_warnings(out_dir, caplog)
+        assert index.sj_blacklist_size == len(_BLACKLIST)
+        assert warned == []
 
     def test_build_without_a_store_writes_no_blacklist(
-        self, tmp_path: Path, mini_index_inputs
+        self, tmp_path: Path, mini_index_inputs, caplog
     ) -> None:
+        """The opt-out: no store, no blacklist, and nothing to warn about."""
         fasta, gtf = mini_index_inputs
         out_dir = tmp_path / "idx"
         TranscriptIndex.build(fasta, gtf, out_dir)
 
         assert not (out_dir / SJ_BLACKLIST_FEATHER).exists()
-        assert TranscriptIndex.load(out_dir).sj_blacklist_size == 0
+        index, warned = _load_and_warnings(out_dir, caplog)
+        assert index.sj_blacklist_size == 0
+        assert warned == []
 
     def test_a_rebuild_without_a_store_applies_no_blacklist(
-        self, tmp_path: Path, mini_index_inputs
+        self, tmp_path: Path, mini_index_inputs, caplog
     ) -> None:
         """Built with a blacklist, then rebuilt in place without a store: the old one is not applied."""
         fasta, gtf = mini_index_inputs
@@ -192,7 +208,9 @@ class TestIndexRoundTrip:
         rebuild_with_splice_blacklist(out_dir, _BLACKLIST)
         TranscriptIndex.build(fasta, gtf, out_dir)
 
-        assert TranscriptIndex.load(out_dir).sj_blacklist_size == 0
+        index, warned = _load_and_warnings(out_dir, caplog)
+        assert index.sj_blacklist_size == 0
+        assert warned == []
 
     def test_a_rebuild_without_a_store_removes_the_old_blacklist(
         self, tmp_path: Path, mini_index_inputs
@@ -208,30 +226,39 @@ class TestIndexRoundTrip:
         assert not (out_dir / SJ_BLACKLIST_FEATHER).exists()
         assert not (out_dir / SJ_BLACKLIST_TSV).exists()
 
-    def test_load_ignores_a_blacklist_in_an_index_built_without_a_store(
-        self, tmp_path: Path, mini_index_inputs
+    def test_a_blacklist_in_an_index_built_without_a_store_is_not_applied_and_says_so(
+        self, tmp_path: Path, mini_index_inputs, caplog
     ) -> None:
         fasta, gtf = mini_index_inputs
         out_dir = tmp_path / "idx"
         TranscriptIndex.build(fasta, gtf, out_dir)
         _BLACKLIST.to_feather(out_dir / SJ_BLACKLIST_FEATHER)
 
-        assert TranscriptIndex.load(out_dir).sj_blacklist_size == 0
+        index, warned = _load_and_warnings(out_dir, caplog)
+        assert index.sj_blacklist_size == 0
+        assert len(warned) == 1, warned
+        assert SJ_BLACKLIST_FEATHER in warned[0] and "not applied" in warned[0]
+        assert "detection is off" in warned[0]
 
-    def test_a_recorded_blacklist_removed_loads_with_detection_off(
-        self, tmp_path: Path, mini_index_inputs
+    def test_a_recorded_blacklist_removed_loads_with_detection_off_and_says_so(
+        self, tmp_path: Path, mini_index_inputs, caplog
     ) -> None:
-        """Removing the feather from a store-built index gives its blacklist-free twin."""
+        """Removing the feather from a store-built index gives its blacklist-free twin, and a warning."""
         fasta, gtf = mini_index_inputs
         out_dir = tmp_path / "idx"
         TranscriptIndex.build(fasta, gtf, out_dir)
         rebuild_with_splice_blacklist(out_dir, _BLACKLIST)
         (out_dir / SJ_BLACKLIST_FEATHER).unlink()
+        store = json.loads((out_dir / MANIFEST_JSON).read_text())["sources"]["alignable_zarr"]
 
-        assert TranscriptIndex.load(out_dir).sj_blacklist_size == 0
+        index, warned = _load_and_warnings(out_dir, caplog)
+        assert index.sj_blacklist_size == 0
+        assert len(warned) == 1, warned
+        assert SJ_BLACKLIST_FEATHER in warned[0] and "missing" in warned[0]
+        assert store["path"] in warned[0] and "detection is off" in warned[0]
 
-    def test_a_manifest_without_sources_loads_with_no_blacklist(
-        self, tmp_path: Path, mini_index_inputs
+    def test_a_manifest_without_sources_does_not_apply_its_blacklist_and_says_so(
+        self, tmp_path: Path, mini_index_inputs, caplog
     ) -> None:
         """A manifest written before `sources` existed records no store, so its feather is not applied."""
         fasta, gtf = mini_index_inputs
@@ -242,7 +269,10 @@ class TestIndexRoundTrip:
         del manifest["sources"]
         (out_dir / MANIFEST_JSON).write_text(json.dumps(manifest))
 
-        assert TranscriptIndex.load(out_dir).sj_blacklist_size == 0
+        index, warned = _load_and_warnings(out_dir, caplog)
+        assert index.sj_blacklist_size == 0
+        assert len(warned) == 1, warned
+        assert SJ_BLACKLIST_FEATHER in warned[0] and "not applied" in warned[0]
 
 
 # ----------------------------------------------------------------------
