@@ -4,8 +4,10 @@ A minimal but realistic substrate — a v3 ``summary.json`` and its companion fe
 to a temp directory, and the loader, the view model, the chart specifications and the full HTML
 build run against it. The report must be self-contained, inlining its runtime, and must honour a
 custom output path. The capture panel shows calibration's own answer, and the front end reads only the
-keys and format tags the view model writes. Every chart the page embeds must compile and read every mark
-property it sets. Vega-specific assertions are conditional on ``vl-convert-python``.
+keys and format tags the view model writes, and escapes every string a user or an annotation chose before it
+becomes markup (read off ``report.js``'s source: the suite runs no JavaScript). Every chart the page embeds
+must compile and read every mark property it sets. Vega-specific assertions are conditional on
+``vl-convert-python``.
 """
 
 import importlib.util
@@ -296,6 +298,38 @@ def _js_function(name: str) -> str:
     m = re.search(rf"\n  function {name}\(.*?\) \{{\n(.*?)\n  \}}\n", js, re.S)
     assert m, f"report.js has no function {name}"
     return m.group(1)
+
+
+def test_the_escape_helper_escapes_every_html_special_character():
+    m = re.search(r"\n  const esc = (.*?);\n", _asset("report.js"))
+    assert m, "report.js has no esc helper"
+    replaced = re.search(r"\.replace\(/\[([^\]]*)\]/g", m.group(1))
+    assert replaced and set(replaced.group(1)) == set("&<>\"'"), "esc does not replace all five"
+    entities = {ch: e for _, ch, e in re.findall(r"""(["'])(.)\1: "(&#?\w+;)\"""", m.group(1))}
+    assert entities == {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}
+
+
+@pytest.mark.parametrize(
+    "sink, chosen",
+    [
+        ("hero", r"\bm\."),  # the sample, the index, the timestamp, the version, the warnings
+        ("geneTable", r"\bv\b|\br\["),  # gene names, IDs and types, references
+    ],
+)
+def test_a_string_a_user_or_an_annotation_chose_is_escaped_before_it_becomes_markup(sink, chosen):
+    """``innerHTML`` parses what it is given, so a sample name, a path, a gene name or a reference holding ``<`` or
+    ``&`` would become markup instead of text."""
+    found = [e for e in re.findall(r"\$\{([^}]*)\}", _js_function(sink)) if re.search(chosen, e)]
+    assert found, f"{sink} interpolates no chosen string, so this gate reads nothing"
+    raw = [e for e in found if not (e.startswith("esc(") or ".map(esc)" in e)]
+    assert not raw, f"{sink} puts {raw} into markup unescaped"
+
+
+def test_the_configuration_panel_escapes_every_group_key_and_value():
+    """The configuration holds the BAM, index and output paths the user typed."""
+    shown = re.findall(r'H\("\w+", "[\w-]+", (.+?)\)\);', _js_function("config"))
+    assert len(shown) == 3, shown
+    assert all(a.startswith("esc(") for a in shown), shown
 
 
 def test_the_capture_answer_is_calibrations_bulk_and_saturation(tmp_path):

@@ -27,6 +27,9 @@
   }
   const SVGNS = "http://www.w3.org/2000/svg";
   const $ = (id) => document.getElementById(id);
+  // A string a user or an annotation chose (a sample, a path, a gene, a reference) is text: escaped before
+  // it joins markup that innerHTML parses.
+  const esc = (s) => s == null ? "" : String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   function H(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
   function el(tag, attrs, kids) { const e = document.createElementNS(SVGNS, tag); for (const k in (attrs || {})) e.setAttribute(k, attrs[k]); (kids || []).forEach((c) => e.appendChild(c)); return e; }
   function txt(t) { const e = document.createElementNS(SVGNS, "tspan"); e.textContent = t; return e; }
@@ -266,10 +269,10 @@
       noun: "expressed genes", rows: g.rows || [], sort: 4, dir: -1,
       hint: () => (g.truncated ? ` · showing top ${grp(g.shown)} of ${grp(g.total)} by TPM (full set in gene_quant.feather)` : ""),
       columns: [
-        { idx: 0, label: "Gene", search: true, render: (v) => `<b>${v}</b>` },
-        { idx: 1, label: "ID", search: true, render: (v) => `<span class="num" style="color:var(--muted);font-size:11.5px">${v}</span>` },
-        { idx: 2, label: "type", search: true, render: (v) => `<span style="font-size:11px;color:var(--ink-2)">${v}</span>` },
-        { idx: 3, label: "locus", render: (v, r) => `<span class="num" style="font-size:11.5px">${r[3]} ${r[4]}</span>` },
+        { idx: 0, label: "Gene", search: true, render: (v) => `<b>${esc(v)}</b>` },
+        { idx: 1, label: "ID", search: true, render: (v) => `<span class="num" style="color:var(--muted);font-size:11.5px">${esc(v)}</span>` },
+        { idx: 2, label: "type", search: true, render: (v) => `<span style="font-size:11px;color:var(--ink-2)">${esc(v)}</span>` },
+        { idx: 3, label: "locus", render: (v, r) => `<span class="num" style="font-size:11.5px">${esc(r[3])} ${esc(r[4])}</span>` },
         { idx: 5, label: "TPM", num: true, render: (v) => Number(v).toLocaleString("en-US") },
         { idx: 6, label: "mature", num: true, render: (v) => grp(v) },
         { idx: 7, label: "nascent", num: true, render: (v) => grp(v) },
@@ -281,11 +284,11 @@
     const b = $("cfg-body"); if (!b) return; b.innerHTML = "";
     const cfg = M.config || {};
     for (const g in cfg) {
-      b.appendChild(H("div", "cfg-group", g));
+      b.appendChild(H("div", "cfg-group", esc(g)));
       for (const k in cfg[g]) {
         const r = H("div", "cfg-row");
-        r.appendChild(H("span", "kk", k));
-        r.appendChild(H("span", "vv", cfg[g][k]));
+        r.appendChild(H("span", "kk", esc(k)));
+        r.appendChild(H("span", "vv", esc(cfg[g][k])));
         b.appendChild(r);
       }
     }
@@ -298,10 +301,10 @@
     const meta = $("hero-meta");
     if (meta) {
       const bits = [];
-      if (m.sample) bits.push(`Sample <b>${m.sample}</b>`);
-      if (m.created) bits.push(`Generated <b>${m.created}</b>`);
-      if (m.version) bits.push(`Rigel <b>${m.version}</b>`);
-      if (m.index) bits.push(`Index <b>${m.index.split("/").pop()}</b>`);
+      if (m.sample) bits.push(`Sample <b>${esc(m.sample)}</b>`);
+      if (m.created) bits.push(`Generated <b>${esc(m.created)}</b>`);
+      if (m.version) bits.push(`Rigel <b>${esc(m.version)}</b>`);
+      if (m.index) bits.push(`Index <b>${esc(m.index.split("/").pop())}</b>`);
       meta.innerHTML = bits.join("");
     }
     const v = $("verdicts"); if (v) {
@@ -314,7 +317,7 @@
     }
     const wb = $("warn-banner");
     if (wb && m.warnings && m.warnings.length) {
-      wb.innerHTML = `<b>Note.</b> ${m.warnings.join(" ")}`;
+      wb.innerHTML = `<b>Note.</b> ${m.warnings.map(esc).join(" ")}`;
       wb.style.display = "";
     }
   }

@@ -103,7 +103,10 @@ LATENT (no current path reaches it):
 - `genomic_span` is 0 for a transcript at position 0 (a truthiness test).
 - `set_sj` narrows to int32 unchecked, justified only by a census.
 - The buffer's finalizer, run by garbage collection on a thread holding a logging lock, deadlocks joining the writer.
-- The report's meta line puts the sample and index names into `innerHTML` unescaped. (Its capture note is in
+- FIXED 2026-10-14: the report put strings a user or an annotation chose into `innerHTML` unescaped — the meta
+  line's sample and index names, and as well the warning banner, the configuration panel's paths and the gene table's
+  names, IDs, types and references. Each now passes through one `esc` helper (`tests/test_report.py`, read off
+  `report.js`'s source, since the suite runs no JavaScript). (Its capture note is in
   `ISSUES: the-format-changes-to-batch-before-release`.)
 - FIXED 2026-10-14: an unknown quant YAML key raised a traceback that neither listed the known keys nor hinted at an
   older build, so a 0.7.1 `config.yaml` (four removed keys) was refused unhelpfully. The refusal is now the CLI's
@@ -115,7 +118,7 @@ LATENT (no current path reaches it):
   with an assert v > 0 in the binding (today v = 0 reads 1e-12; without the floor it would be NaN).
 0.8.0 (owner, 2026-10-14): the overhang alpha (fixed), the index's `nrna_n_contributors` (`=` for `+=`, with the index bump),
 the GTF parser (fixed),
-the unknown `config.yaml` key (fixed), the report's meta line through `innerHTML`, and `rigel sim`'s empty fragment-length
+the unknown `config.yaml` key (fixed), the report's meta line through `innerHTML` (fixed), and `rigel sim`'s empty fragment-length
 window (it loops forever). The rest is 0.8.1 or later; the reorder gate's fixture simulates no gDNA (`build_oracle`'s
 fixed-total branch ignores `gdna_fraction`), so the reproducibility gate never exercises a gDNA path.
 
