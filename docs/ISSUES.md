@@ -198,17 +198,6 @@ store each task's column sums and reduce them in task order after the parallel p
 through the same tasks — a numeric change, so `rename_identity.py` and a pinned A/B. Test first: one locus through
 `batch_locus_em_partitioned` at 1, 2, 3, 4 and 16 threads, bit-identical.
 
-### the-scoring-alphas-are-unchecked
-`priority: now — 0.8.0, approved with the issues survey (owner, 2026-10-14) · kind: defect · 2026-10-14`
-`--overhang-alpha` and `--mismatch-alpha` take any float. NaN exits 0 having gated 96 % of fragments (a `gdna_fraction`
-of 0.92 for about 0.5) and writes NaN into `summary.json`; 0 writes `-Infinity`, which is not JSON; above 1 rewards
-overhang and mismatches. At 0, the documented hard gate, a fragment whose every candidate fails is dropped and counted
-only in the log's `n_gated_out`, and only on the EM path: the deterministic path reads neither NM nor overhang. An
-NM-tagged library at `--mismatch-alpha 0` loses 94.7 % of its genic fragments from every pool while the 59,524
-deterministic ones with the same mismatches stay. Validate both in [0, 1], finite; record a gate as a flag; report the
-gated count beside the pools; gate on both paths. Test first: an NM-tagged fixture at alpha 0, where pools plus gated
-equal fragments less chimeric.
-
 ### an-unrecorded-splice-blacklist-is-dropped-silently
 `priority: now — 0.8.0: the cluster's manifest checked before any cluster quant; the warning landed 2026-10-14 · kind: risk · 2026-09-28`
 `TranscriptIndex.load` applies `splice_blacklist.feather` only when `manifest.json` records `sources.alignable_zarr`;

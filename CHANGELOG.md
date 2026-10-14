@@ -118,7 +118,11 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
   covers, not only the last span's.
 - `--overhang-alpha 0`, documented as a hard gate, gave every candidate without overhang a NaN score, and every
   EM-routed fragment was dropped silently. It is now a hard gate: a candidate with overhang is skipped and the rest
-  are scored.
+  are scored. At either alpha's 0 an unambiguous spliced fragment, assigned without scoring, now meets the gate too,
+  and `summary.json` counts the fragments a gate drops (`n_gated_out`).
+- `--overhang-alpha` and `--mismatch-alpha` outside [0, 1], or NaN, are refused before the index loads; NaN gated
+  almost every fragment and wrote NaN into `summary.json`. Its `configuration` block records the alphas, so a hard
+  gate no longer writes `-Infinity`.
 - GTF: a last attribute without its `;` is read. An exon with no `transcript_id`, or on another chromosome or strand
   than its transcript, follows `--gtf-parse-mode` (`strict` refuses the file, `warn-skip` drops the exon) instead of
   failing outside it or merging silently.

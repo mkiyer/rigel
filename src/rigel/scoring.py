@@ -1,11 +1,11 @@
 """rigel.scoring — scoring parameter assembly for the native scorer.
 
 The fragment-scoring math itself lives in the C++ extension
-(``src/rigel/native/scoring.cpp``).  This module only holds
-``overhang_alpha_to_log_penalty()`` and the ``FragmentScorer`` builder,
-which gathers the trained strand / fragment-length models and index
-geometry into a single parameter bundle and hands them to a
-``NativeFragmentScorer``.
+(``src/rigel/native/scoring.cpp``).  This module only holds the
+``FragmentScorer`` builder, which gathers the trained strand /
+fragment-length models and index geometry into a single parameter
+bundle and hands them to a ``NativeFragmentScorer``. The alphas a user
+sets become log-penalties in ``FragmentScoringConfig``.
 """
 
 import math
@@ -14,28 +14,6 @@ from dataclasses import dataclass
 import numpy as np
 
 from .config import CONSTANTS, FragmentScoringConfig
-
-
-def overhang_alpha_to_log_penalty(alpha: float) -> float:
-    """Convert user-facing alpha to internal log-penalty.
-
-    Parameters
-    ----------
-    alpha : float
-        Per-base overhang penalty in [0, 1].
-        - 0.0 → hard binary gate (any overhang → −∞)
-        - 0.01 → aggressive (−4.605 per base)
-        - 0.1 → default (−2.303 per base)
-        - 1.0 → no penalty (off)
-
-    Returns
-    -------
-    float
-        ``log(alpha)`` or ``−inf`` when alpha ≤ 0.
-    """
-    if alpha <= 0.0:
-        return -np.inf
-    return np.log(alpha)
 
 
 # ---------------------------------------------------------------------------
@@ -86,8 +64,8 @@ class FragmentScorer:
         gdna_fl,
         index,
         *,
-        overhang_log_penalty: float = FragmentScoringConfig.overhang_log_penalty,
-        mismatch_log_penalty: float = FragmentScoringConfig.mismatch_log_penalty,
+        overhang_log_penalty: float = FragmentScoringConfig().overhang_log_penalty,
+        mismatch_log_penalty: float = FragmentScoringConfig().mismatch_log_penalty,
         pruning_min_posterior: float = FragmentScoringConfig.pruning_min_posterior,
     ) -> "FragmentScorer":
         """Build a FragmentScorer from trained models and index.

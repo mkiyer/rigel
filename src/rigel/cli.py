@@ -13,7 +13,6 @@ Subcommands:
 
 import argparse
 import logging
-import math as _math
 import sys
 import time
 from dataclasses import dataclass as _dataclass
@@ -106,6 +105,12 @@ def quant_command(args: argparse.Namespace) -> int:
     if isinstance(args.sj_strand_tag, str):
         args.sj_strand_tag = [args.sj_strand_tag]
 
+    # -- Build the pipeline config first: a refused value costs no index load --
+    try:
+        pipeline_config = _build_pipeline_config(args)
+    except ValueError as exc:
+        sys.exit(f"Error: {exc}")
+
     # -- Load reference index --
     logging.info(f"[START] Loading index from {index_dir}")
     index = TranscriptIndex.load(index_dir)
@@ -114,8 +119,7 @@ def quant_command(args: argparse.Namespace) -> int:
         f"{index.num_annotated_genes} genes"
     )
 
-    # -- Build pipeline config + run --
-    pipeline_config = _build_pipeline_config(args)
+    # -- Run --
     result = run_pipeline(bam_path, index, config=pipeline_config)
 
     # -- Write outputs --
@@ -799,7 +803,9 @@ class _ParamSpec:
 
     cli_dest: str  # argparse dest, e.g. "em_iterations"
     config_path: str  # dotted config path, e.g. "em.iterations"
-    transform: str = "direct"  # "direct" | "invert_bool" | "log_penalty"
+    transform: str = (
+        "direct"  # "direct" | "invert_bool" | "sj_tag" | "path_or_none" | "gb_to_bytes"
+    )
     #                             | "path_or_none" | "sj_tag" | "gb_to_bytes"
 
 
@@ -821,8 +827,8 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("sj_strand_tag", "scan.sj_strand_tag", "sj_tag"),
     _ParamSpec("tmpdir", "scan.spill_dir", "path_or_none"),
     # -- FragmentScoringConfig: transformed --
-    _ParamSpec("overhang_alpha", "scoring.overhang_log_penalty", "log_penalty"),
-    _ParamSpec("mismatch_alpha", "scoring.mismatch_log_penalty", "log_penalty"),
+    _ParamSpec("overhang_alpha", "scoring.overhang_alpha"),
+    _ParamSpec("mismatch_alpha", "scoring.mismatch_alpha"),
     _ParamSpec("pruning_min_posterior", "scoring.pruning_min_posterior"),
     # -- CalibrationConfig: advanced --
     _ParamSpec("calib_refit_iters", "calibration.calib_refit_iters"),
@@ -855,8 +861,6 @@ def _config_to_cli(val: object, transform: str) -> object:
         return not val
     if transform == "sj_tag":
         return [val] if isinstance(val, str) else list(val)
-    if transform == "log_penalty":
-        return _math.exp(val) if val > float("-inf") else 0.0
     if transform == "path_or_none":
         return str(val) if val else None
     if transform == "gb_to_bytes":
@@ -874,10 +878,6 @@ def _cli_to_config(val: object, transform: str) -> object:
         if isinstance(val, str):
             return val
         return val[0] if len(val) == 1 else tuple(val)
-    if transform == "log_penalty":
-        from .scoring import overhang_alpha_to_log_penalty
-
-        return overhang_alpha_to_log_penalty(val)
     if transform == "path_or_none":
         return Path(val) if val else None
     if transform == "gb_to_bytes":
@@ -895,31 +895,16 @@ def _build_quant_defaults() -> dict:
 
     Single source of truth: all default values derived from the frozen
     dataclasses in ``config.py`` via the ``_PARAM_SPECS`` registry.
-
-    Scoring fields (overhang_alpha, mismatch_alpha) use the exact CLI-space alphas
-    ``FragmentScoringConfig`` keeps, to avoid float noise from log/exp round-tripping.
     """
-    from .config import FragmentScoringConfig, PipelineConfig
+    from .config import PipelineConfig
 
     cfg = PipelineConfig()
-
-    # Scoring fields have different representations in CLI (alpha) vs
-    # config (log-penalty).  Use exact constants to avoid float
-    # noise from math.exp(math.log(alpha)).
-    _scoring_defaults = {
-        "overhang_alpha": FragmentScoringConfig.overhang_alpha,
-        "mismatch_alpha": FragmentScoringConfig.mismatch_alpha,
-    }
-
     defaults: dict = {}
     for spec in _PARAM_SPECS:
         if spec.cli_dest in defaults:
             continue  # skip fan-out duplicates (e.g. threads)
-        if spec.cli_dest in _scoring_defaults:
-            defaults[spec.cli_dest] = _scoring_defaults[spec.cli_dest]
-        else:
-            val = _resolve_config_path(cfg, spec.config_path)
-            defaults[spec.cli_dest] = _config_to_cli(val, spec.transform)
+        val = _resolve_config_path(cfg, spec.config_path)
+        defaults[spec.cli_dest] = _config_to_cli(val, spec.transform)
     return defaults
 
 

@@ -21,7 +21,7 @@ import operator
 import os
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Literal
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     import numpy as np
@@ -111,27 +111,49 @@ class EMConfig:
 class FragmentScoringConfig:
     """Configuration for fragment scoring penalties.
 
-    All penalties are in log-space.
-
     Parameters
     ----------
-    overhang_log_penalty : float
-        Log-penalty per base of overhang.  Default ``log(0.1) ≈ −2.303``
-        (i.e. each overhang base cuts probability by 10×).
-    mismatch_log_penalty : float
-        Log-penalty per NM mismatch.  Default ``log(0.1) ≈ −2.303``
-        (i.e. each mismatch cuts probability by 10×).
+    overhang_alpha : float
+        The probability kept per base of overhang, in [0, 1]: the default 0.1 cuts each base's likelihood 10×, 1 is
+        no penalty, and 0 is a hard gate that excludes any candidate with overhang. Its log is the scorer's
+        per-base log-penalty (:attr:`overhang_log_penalty`, −inf at the gate).
+    mismatch_alpha : float
+        The same, per NM mismatch (:attr:`mismatch_log_penalty`).
+    pruning_min_posterior : float
+        A candidate whose likelihood falls below this fraction of its fragment's best is pruned.
     """
 
-    #: The CLI's ``--overhang-alpha`` and ``--mismatch-alpha`` default: the probability kept per base of overhang,
-    #: and per NM mismatch. The log-penalties below are their logs; the CLI keeps the alpha itself so its default
-    #: prints without a log/exp round trip.
-    overhang_alpha: ClassVar[float] = 0.1
-    mismatch_alpha: ClassVar[float] = 0.1
-
-    overhang_log_penalty: float = math.log(overhang_alpha)
-    mismatch_log_penalty: float = math.log(mismatch_alpha)
+    overhang_alpha: float = 0.1
+    mismatch_alpha: float = 0.1
     pruning_min_posterior: float = 1e-4
+
+    def __post_init__(self):
+        for name in ("overhang_alpha", "mismatch_alpha"):
+            value = getattr(self, name)
+            # NaN fails both comparisons; a bool is an int to Python but never an alpha
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not 0.0 <= value <= 1.0
+            ):
+                raise ValueError(
+                    f"--{name.replace('_', '-')} must be a number in [0, 1], got {value!r}"
+                )
+
+    @property
+    def overhang_log_penalty(self) -> float:
+        """``log(overhang_alpha)``: the per-base log-penalty, −inf at the hard gate."""
+        return alpha_log_penalty(self.overhang_alpha)
+
+    @property
+    def mismatch_log_penalty(self) -> float:
+        """``log(mismatch_alpha)``: the per-mismatch log-penalty, −inf at the hard gate."""
+        return alpha_log_penalty(self.mismatch_alpha)
+
+
+def alpha_log_penalty(alpha: float) -> float:
+    """An alpha's log-penalty: ``log(alpha)``, or −inf at 0, the hard gate."""
+    return math.log(alpha) if alpha > 0.0 else -math.inf
 
 
 # ======================================================================

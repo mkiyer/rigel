@@ -21,10 +21,10 @@ from rigel.buffer import (
     FRAG_UNAMBIG,
 )
 from rigel.splice import SpliceType
-from rigel.config import EMConfig, FragmentScoringConfig
+from rigel.config import EMConfig, FragmentScoringConfig, alpha_log_penalty
 from rigel.estimator import AbundanceEstimator
 from rigel.frag_length_model import FragmentLengthModel
-from rigel.scoring import FragmentScorer, overhang_alpha_to_log_penalty
+from rigel.scoring import FragmentScorer
 from rigel.scan import FragmentRouter
 from rigel.stats import PipelineStats
 from rigel.strand_model import StrandModel, StrandModels
@@ -159,8 +159,8 @@ def _scan_em_data(
     stats,
     log_every=1_000_000,
     *,
-    overhang_log_penalty=FragmentScoringConfig.overhang_log_penalty,
-    mismatch_log_penalty=FragmentScoringConfig.mismatch_log_penalty,
+    overhang_log_penalty=FragmentScoringConfig().overhang_log_penalty,
+    mismatch_log_penalty=FragmentScoringConfig().mismatch_log_penalty,
     annotations=None,
     fl=None,
 ):
@@ -663,7 +663,7 @@ def test_an_overhang_alpha_of_zero_gates_overhang_and_scores_the_rest(fragment_c
         max_frag_size,
         estimator,
         stats,
-        overhang_log_penalty=overhang_alpha_to_log_penalty(0.0),
+        overhang_log_penalty=alpha_log_penalty(0.0),
     )
     assert em.n_units == 1
     assert list(em.t_indices) == [0]
@@ -706,7 +706,7 @@ def test_a_hard_gate_drops_a_deterministic_fragment_it_fails_as_it_drops_an_em_r
         nm=5 if gate == "mismatch" else 0,
     )
     chunk = _Chunk(bfs=[bf], fragment_classes=[FRAG_UNAMBIG], frag_ids=[1])
-    penalty = {f"{gate}_log_penalty": overhang_alpha_to_log_penalty(0.0)}
+    penalty = {f"{gate}_log_penalty": alpha_log_penalty(0.0)}
     _scan_em_data(
         _Buffer([chunk]), index, strand_models, max_frag_size, estimator, stats, **penalty
     )
