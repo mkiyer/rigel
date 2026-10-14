@@ -38,6 +38,24 @@ class _TranscriptSpec:
     nrna_abundance: float = 0.0
 
 
+#: Every key a transcript entry of ``add_gene`` reads, and the ones it must have.
+TRANSCRIPT_KEYS = frozenset({"t_id", "exons", "abundance", "nrna_abundance"})
+_TRANSCRIPT_REQUIRED = frozenset({"t_id", "exons"})
+
+
+def check_transcript_keys(gene_id: str, tdef: dict) -> None:
+    """Refuse a transcript entry with a key ``add_gene`` does not read (a misspelled ``abundance`` would simulate the
+    default of 100) or without one it needs."""
+    unknown = sorted(set(tdef) - TRANSCRIPT_KEYS)
+    missing = sorted(_TRANSCRIPT_REQUIRED - set(tdef))
+    if unknown or missing:
+        raise ValueError(
+            f"gene {gene_id!r}, transcript {tdef.get('t_id')!r}: "
+            + (f"unknown key(s) {unknown}" if unknown else f"missing {missing}")
+            + f"; a transcript takes {sorted(TRANSCRIPT_KEYS)}"
+        )
+
+
 class GeneBuilder:
     """Accumulates gene/transcript annotations and edits the genome.
 
@@ -108,6 +126,7 @@ class GeneBuilder:
             gene_name = gene_id
 
         for tdef in transcripts:
+            check_transcript_keys(gene_id, tdef)
             t_id = tdef["t_id"]
             raw_exons = tdef["exons"]
             abundance = tdef.get("abundance", _TranscriptSpec.abundance)

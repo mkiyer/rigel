@@ -256,9 +256,7 @@ LATENT (no current path reaches it):
 - The annotated writer's `hts_close` is unchecked, and a throw mid-write leaks its handles; `--scan-buffer-size` does
   not bound the native queues, which hold up to three chunks per worker beyond it; an outward-facing (RF) pair deposits
   as an ordinary molecule, since the strand test sees one strand, not the mates' orientation.
-- Simulator config: a capture entry without `enabled:` and without probes yields an empty `CaptureConfig`; gene and
-  transcript keys are unchecked (a typo runs on the default of 100); an empty section fails with a TypeError;
-  `sim_command` creates the output directory before validating.
+- Simulator config: a panel's capture entry without `enabled:` and without probes yields an empty `CaptureConfig`.
 - `splice_graph._ref_slices`: unsorted input drops exons silently.
 - An arm that injects `rna_sense_frac` without `n_rna_obs` silently kills the strand channel.
 - `fast_exp` on an all −inf row: `static_cast<int64_t>(NaN)` is undefined behaviour.

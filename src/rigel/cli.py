@@ -731,22 +731,55 @@ _SIM_READ_KEYS = ("frag_mean", "frag_std", "frag_min", "frag_max", "read_length"
 _SIM_KEYS = frozenset(
     {"name", "ref_name", "genome_length", "seed", "n_fragments", "genes", *_SIM_READ_KEYS}
 )
+#: Every key a gene entry reads, and the ones it must have.
+_SIM_GENE_KEYS = frozenset({"gene_id", "strand", "transcripts", "gene_name", "gene_type"})
+_SIM_GENE_REQUIRED = frozenset({"gene_id", "strand", "transcripts"})
+
+
+def _read_sim_scenario(path) -> dict:
+    """A ``rigel sim`` scenario, checked before anything is written: every key one this command reads (a misspelled
+    one would run on its default), at least one gene, and every gene's and transcript's keys."""
+    import yaml
+
+    from .sim.annotation import check_transcript_keys
+
+    with open(path) as f:
+        cfg = yaml.safe_load(f)
+    if not isinstance(cfg, dict):
+        raise ValueError(f"{path} must hold a mapping of scenario keys")
+    unknown = sorted(set(cfg) - _SIM_KEYS)
+    if unknown:
+        raise ValueError(f"unknown scenario key(s): {unknown}; known: {sorted(_SIM_KEYS)}")
+    genes = cfg.get("genes") or []
+    if not genes:
+        raise ValueError("a scenario needs at least one gene under `genes:`")
+    for gene in genes:
+        if not isinstance(gene, dict):
+            raise ValueError(f"a gene entry must be a mapping, not {gene!r}")
+        unknown = sorted(set(gene) - _SIM_GENE_KEYS)
+        missing = sorted(_SIM_GENE_REQUIRED - set(gene))
+        if unknown or missing:
+            raise ValueError(
+                f"gene {gene.get('gene_id')!r}: "
+                + (f"unknown key(s) {unknown}" if unknown else f"missing {missing}")
+                + f"; a gene takes {sorted(_SIM_GENE_KEYS)}"
+            )
+        for tdef in gene["transcripts"] or []:
+            check_transcript_keys(gene["gene_id"], tdef)
+    cfg["genes"] = genes
+    return cfg
 
 
 def sim_command(args: argparse.Namespace) -> int:
     """Run the ``rigel sim`` subcommand."""
-    import yaml
     from .sim import Scenario, ReadSimConfig
 
+    try:
+        cfg = _read_sim_scenario(args.config)
+    except ValueError as exc:
+        sys.exit(f"Error: {exc}")
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Load scenario config from YAML
-    with open(args.config) as f:
-        cfg = yaml.safe_load(f)
-    unknown = sorted(set(cfg) - _SIM_KEYS)
-    if unknown:
-        raise ValueError(f"unknown scenario key(s): {unknown}; known: {sorted(_SIM_KEYS)}")
 
     genome_length = cfg.get("genome_length", args.genome_length)
     seed = cfg.get("seed", args.seed)
@@ -763,7 +796,7 @@ def sim_command(args: argparse.Namespace) -> int:
     )
 
     # Add genes from config
-    for gene in cfg.get("genes", []):
+    for gene in cfg["genes"]:
         sc.add_gene(
             gene_id=gene["gene_id"],
             strand=gene["strand"],

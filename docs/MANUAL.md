@@ -239,12 +239,12 @@ rigel sim --config scenario.yaml -o sim_out/
 The YAML schema is what `sim_command` in `src/rigel/cli.py` reads: optional
 top-level `name`, `ref_name` (default `chr1`), `genome_length`, `seed`,
 `n_fragments`, the read-model keys `frag_mean`, `frag_std`, `frag_min`,
-`frag_max`, `read_length`, `error_rate`, and a `genes` list; any other top-level
-key is an error. Each gene has
+`frag_max`, `read_length`, `error_rate`, and a `genes` list of at least one gene. Each gene has
 `gene_id`, `strand`, optional `gene_name` / `gene_type`, and a `transcripts`
 list whose entries carry `t_id`, `exons` (0-based half-open `[start, end]`
 pairs), and optional `abundance` (default 100) and `nrna_abundance` (nascent
-RNA laid across the gene span, default 0):
+RNA laid across the gene span, default 0). Any other key, at any level, is an error
+reported before anything is written:
 
 ```yaml
 genome_length: 5000

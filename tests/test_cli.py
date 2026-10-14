@@ -76,8 +76,40 @@ def test_sim_unknown_scenario_key_is_refused(tmp_path):
     cfg = tmp_path / "scenario.yaml"
     cfg.write_text("genome_length: 5000\nn_fragment: 10\n")
     args = build_parser().parse_args(["sim", "--config", str(cfg), "-o", str(tmp_path / "out")])
-    with pytest.raises(ValueError, match=r"\['n_fragment'\]"):
+    with pytest.raises(SystemExit, match=r"Error: .*\['n_fragment'\]"):
         args.func(args)
+    assert not (tmp_path / "out").exists()  # checked before anything is written
+
+
+_SIM_GENE = """genes:
+  - gene_id: g1
+    strand: "+"
+    transcripts:
+      - t_id: t1
+        exons: [[100, 300], [500, 700]]
+"""
+
+
+@pytest.mark.parametrize(
+    "scenario, refusal",
+    [
+        (_SIM_GENE + "        abundnace: 50\n", r"abundnace"),
+        (_SIM_GENE.replace("    strand:", "    gene_nmae: G1\n    strand:"), r"gene_nmae"),
+        ("genome_length: 5000\ngenes:\n", r"at least one gene"),
+    ],
+    ids=["misspelled-transcript-key", "misspelled-gene-key", "no-gene"],
+)
+def test_sim_refuses_a_scenario_it_would_read_wrong(tmp_path, scenario, refusal):
+    """A misspelled gene or transcript key ran on its default (an abundance of 100), and an empty genes section failed
+    as a TypeError; each is refused by name before the output directory is made."""
+    cfg = tmp_path / "scenario.yaml"
+    cfg.write_text(
+        "genome_length: 5000\n" + scenario if not scenario.startswith("genome_length") else scenario
+    )
+    args = build_parser().parse_args(["sim", "--config", str(cfg), "-o", str(tmp_path / "out")])
+    with pytest.raises(SystemExit, match=refusal):
+        args.func(args)
+    assert not (tmp_path / "out").exists()
 
 
 def test_quant_refuses_an_unknown_config_key_with_an_error_not_a_traceback(tmp_path):
