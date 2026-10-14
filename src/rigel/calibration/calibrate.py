@@ -359,14 +359,14 @@ def _solve(s: _Solve, _debug):
     E-step's start for the next. Every sweep runs the whole message layer: the messages never read the
     prior, so on one grid a refit's messages equal the previous refit's.
 
-    Returns ``(belief, hyperprior)`` — the final belief and the last fitted landscape (``None`` if no
-    refit ran). With ``_debug`` the last sweep fills ``_debug["capture"]`` (a
+    Returns ``(belief, hyperprior)`` — the final belief and the landscape it was solved under (``None`` if no
+    refit fitted one). With ``_debug`` the last sweep fills ``_debug["capture"]`` (a
     :class:`~.blocks.SweepCapture`)."""
     capture = SweepCapture() if _debug is not None else None
     belief = _sweep(s, _init_belief(s), None, capture=capture)
     hyperprior: DensityLandscape | None = None
     for it in range(int(s.config.calib_refit_iters)):
-        hyperprior = _fit_gdna_hyperprior(
+        fitted = _fit_gdna_hyperprior(
             s.chain,
             belief,
             s.statics,
@@ -375,8 +375,10 @@ def _solve(s: _Solve, _debug):
             s.eff_global,
             prev=hyperprior,
         )
-        if hyperprior is None:
+        if fitted is None:
+            # the belief stands as solved under the previous landscape, so that landscape is the answer's
             break
+        hyperprior = fitted
         capture = SweepCapture() if _debug is not None else None
         belief = _sweep(s, _init_belief(s), hyperprior, capture=capture)
         logger.debug(

@@ -316,6 +316,44 @@ def test_the_refit_loop_hands_each_fit_the_previous_landscape(sweep_inputs, monk
     assert seen[2] is not seen[1]
 
 
+def test_a_failed_later_refit_keeps_the_landscape_the_final_solve_ran_under(
+    sweep_inputs, monkeypatch
+):
+    """When a later refit fits no landscape, the final belief was still solved under the previous one, so the result
+    carries THAT landscape: the capture reader reads it and the result publishes its bulk. A loop that overwrote the
+    landscape with the failed fit's ``None`` skipped the reader and published no landscape at all — every efficiency
+    1, no bulk — for a belief solved under one: a silent loss of the capture correction (MANUAL: the bulk is null
+    only when calibration fitted no landscape)."""
+    from rigel.config import CalibrationConfig
+
+    fits, reads = [], []
+    orig_fit, orig_read = CAL.fit_landscape, CAL.capture_efficiencies
+
+    def first_fit_then_none(*a, **k):
+        out = orig_fit(*a, **k) if not fits else None
+        fits.append(out)
+        return out
+
+    def read_spy(ls, *a):
+        reads.append(ls)
+        return orig_read(ls, *a)
+
+    monkeypatch.setattr(CAL, "fit_landscape", first_fit_then_none)
+    monkeypatch.setattr(CAL, "capture_efficiencies", read_spy)
+    res = CAL.calibrate(
+        payload=sweep_inputs["payload"],
+        config=CalibrationConfig(calib_refit_iters=3),
+        **sweep_inputs["calibrate_kw"],
+    )
+    assert len(fits) == 2 and fits[0] is not None and fits[1] is None, (
+        "the second refit failed and the loop stopped"
+    )
+    assert len(reads) == 1 and reads[0] is fits[0], (
+        "the reader reads the landscape the final solve ran under"
+    )
+    assert res.gdna_bulk_density is not None
+
+
 def test_the_result_publishes_the_capture_reading_of_the_last_landscape(sweep_inputs, monkeypatch):
     """The efficiencies, the bulk density and the saturated level that the ruler and the prior assembler read
     are the capture reader's answer on the LAST refit's landscape, published as they are; with no refit there

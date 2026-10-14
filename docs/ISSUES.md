@@ -126,114 +126,6 @@ multimappers the gDNA share is inflated by about (N_unique + N_mm) / N_unique, c
 alone gets no prior although calibration counted its gDNA. Invisible on the `NH = 1` panels; every real library and the
 aligned scenarios carry it. Magnitude unmeasured.
 
-### the-gdna-landscape-collapses-at-low-depth
-`priority: now — 0.8.0: the failed-refit bug; the drift re-measured on today's tree, its repair 0.8.1 · kind: defect · 2026-09-28`
-THE FAILED REFIT (0.8.0, 2026-10-14): when a later refit fits no landscape, `calibrate`'s refit loop overwrites the
-landscape the final solve ran under with `None` and breaks, so the capture reader is skipped and the result says no
-landscape was fitted (MANUAL: `gdna_bulk_density` is null only when none was). The fix keeps the last fitted landscape,
-a numeric no-op wherever no refit fails. It absorbs `ISSUES: gdna-landscape-trains-on-false-positives` (2026-10-14):
-a repair must not regress the zero controls; its blind-slot half is `ISSUES: the-gdna-prior-enters-psi-twice`.
-Every depth number below predates the count foundation; re-measure before ranking.
-Calibration's gDNA estimate falls with sequencing depth. LBX0588 (stranded, capture ON) reads 0.11 / 0.45 / 0.83 gDNA
-per deposited fragment at 1 % / 10 % / full depth. The EM follows it (gDNA fraction 0.16 / 0.62 / 0.91), so at 1 %
-the RNA pool is about 9× too large. The VCaP mix, which has truth by read name, reads P/O 0.125 / 0.52 / 0.92.
-
-The mechanism is the refits' gDNA landscape.
-- A slot trains as located only when Var(log f_g) ≤ 1 nat², which in practice means it holds a gDNA fragment.
-- At 1 % depth an object at VCaP's bulk density needs about 1.26 Mb to expect one fragment. So 0.23 % of the ~323k
-  kernels locate, and those few are selected above the bulk.
-- The rest are zero-count anchors, flat down to the grid floor. The refit loop converges to one mode at the floor
-  (log ρ ≈ −17) in all three real libraries.
-- Under that prior, sparse unspliced fragments go to RNA.
-
-How much each part owns:
-- The refits own 80 % / 69 % of LBX0588's drift (ln P_full/P_d, from 1 % / 10 %) and 86 % / 63 % of VCaP's.
-- Pass 0 drifts less. It nets an under-call on no-RNA objects against an over-call on no-gDNA objects.
-- The capture reference owns none of it, because it is computed after the solve, but it goes missing: its members
-  fall to 0 at 1 % for VCaP, LBX0588 and MO_3021 (0 at every depth for MO_3021), which sets every efficiency to 1. On
-  the test chromosome at capture ON the members are g001 0 / 0 / 57, g01 0 / 73 / 329, g05 20 / 313 / 352 (d100 /
-  d10 / full), and a reference that does form at low depth reads above proportional (×1.97 at g05 d100, ×1.48 at g01
-  d10). What that costs the EM is unmeasured, and `calibration_vs_oracle.py` cannot see it. The reference is a yes/no
-  switch; its continuous form, an efficiency whose uncertainty grows as members fall, is a direction to price.
-- MO_3021 barely drifts (0.82 of full at 1 %): 65–80 % of its gDNA sits on intergenic regions and gene edges, which
-  read their count at any depth.
-- The level survives in aggregate. VCaP's intergenic regions at 1 % hold 0.0097 of full depth's true gDNA.
-- The drift is not the od's: calibration's gDNA share falls with depth under every od arm. LBX0588 per deposited
-  fragment at 1 % → 10 % → full, beside shipped's above: binomial 0.113 → 0.471 → 0.835, the 0.2 value 0.098 → 0.145 →
-  0.679. The VCaP transcriptome half drifts too (gDNA fraction 0.50–0.63 % at full depth against 0.34–0.41 % at 10 %
-  and 1 %, every arm); MO_3021 (0.075 → 0.077 → 0.091) and the VCaP DNA half (0.045 → 0.044 → 0.054) barely move. The
-  0.2 value deepens LBX0588's collapse at 10 % (0.145 against 0.450), so the od landing and this repair are A/B'd
-  apart, in that order.
-- Strand inputs, an untested cause: two inputs fitted before pass 0 move with depth. MO_3021's gDNA od reads
-  0.171 ± 0.042 at 1 % against 0.0084 at full depth; LBX0588's strand specificity rests on about 150 spliced reads
-  (0.913 / 0.919 / 0.934 at 1 % against 0.937), and its pass 0 follows the same order (0.5465 / 0.5555 / 0.5641).
-  MO_3021's pass 0 rises as depth falls (0.199 / 0.164 / 0.139), the opposite of the others. On the test chromosome,
-  planting the true strand model moves the error by at most 6.3 points. Re-check now that od = 0 has landed and once
-  κ's fix lands (`ISSUES: strand-overdispersion-one-shared-value`).
-- The EM does not always follow calibration. On VCaP it recovers much of what calibration loses (EM recall 0.614 /
-  0.747 / 0.853 against calibration P/O 0.125 / 0.518 / 0.922); LBX0588's EM follows calibration down (0.164 / 0.620 /
-  0.906). Why is untested: the libraries differ on three axes at once — strand specificity 0.9998 against 0.91–0.94,
-  spliced share 51 % against 1.3 %, fragment length (VCaP DNA 307 bp and RNA 244 bp against LBX0588's 104 bp).
-
-On the test chromosome's stranded depth family:
-- Under a depth-invariant true landscape, the landscape owns 69–94 % of the capture-ON low-gDNA drift at d100 and
-  d10.
-- The capture-OFF drift is per-object.
-- Injecting the full-depth landscape, shifted by log f, cures g01 and g05 at d100 capture ON (−81.1 → −0.8 and
-  −52.6 → −8.3 points of O). It only halves g001, does nothing at capture OFF, and worsens g25 and g50 at d100.
-- True values on every structural region at depth d still fail at g01 and g001 d100. So fitting count/E kernels on
-  sparse counts is itself part of the defect.
-- The same fragile regime at full depth: at g001 capture ON, removing the one 19-fragment `test_blank` slot from the
-  training set moves the annotated chromosome's net gDNA error +3 → −630 (Σ|Δ| 983.1 → 1,090.9, n_train 754 → 722).
-  The depleted mode rests on very few located kernels at low gDNA.
-- Under a correct, depth-invariant landscape the capture-ON residual is misplacement, not loss: g01 d100 no-gDNA
-  +62.95, mixed −45.91, no-RNA −23.12 (net −6.08); g001 d100 +83.34 / −55.79 / −24.81 (net +2.75); g001 full +20.63,
-  cancelled by the landscape term −16.23. A repair is scored BY CLASS (no-gDNA, mixed, no-RNA), never on the net.
-- The collapsed landscape beats the true one at g25 d100 ON (shipped −6.8 against −10.9), and the shifted full-depth
-  landscape moves g25 −6.8 → −10.6 and g50 −4.2 → −8.0: two compensating errors, and a repair must not regress these
-  rows.
-- Not separated: whether the landscape or the density fit removes pass 0's mirror floor (RNA-only objects 1,894.5
-  against a predicted 1,806.9, and 65.3 after the refits). No arm isolates the message layer: shipped − silent is
-  +33.65 (g05 d100 ON), +79.39 (g01 d10 ON), +34.88 (g25 d100 ON).
-- The depth family is ss 0.99 only, so the drift on in-scope unstranded × capture OFF is unmeasured; TESTING §0c still
-  describes these configs as the ruler's substrate only. RULED (owner, 2026-09-28): add ss 0.50 rows at d100 for g01
-  and g05 only.
-- An oracle landscape trained on the library's own true counts leaks the answer (it gave the landscape 29–63 % of the
-  capture-OFF drift, against about 0 under the depth-invariant true landscape): use the depth-invariant one.
-
-First, alone: a failed refit overwrites the last landscape with None after the belief was solved under it, losing the
-reference, the efficiencies and the debug record. It fires in sparse fits.
-
-Direction: at its maximum, the exact Poisson mixture keeps the prior's implied total equal to the pooled count
-(Σ E_i·E[ρ | c_i] = Σ c_i). The shipped fit loses that, and a fit at depth f should equal the full-depth fit shifted by
-log f wherever the data resolve it.
-- The location floor and the anchor E-step that brought the zero controls down
-  (`ISSUES: gdna-landscape-trains-on-false-positives`) are what collapse here; a repair must not regress them.
-- `estep_all` and `row_kernel` stay refused (`ISSUES: the-landscape-training-population-arms`).
-
-Not this entry: VCaP's 7.8 % full-depth deficit, already present in pass 0
-(`ISSUES: vcap-dna-only-objects-lose-gdna-at-full-depth`).
-
-Still unmeasured:
-- The real-data arm: the full-depth VCaP landscape, shifted by log f, on the 1 % and 10 % caches; check that it fires
-  (`TRAPS: could-the-arm-have-fired`). The VCaP 10 % seeds put the mode at −14.70 / −14.56 / −17.05 with P/O 0.514 /
-  0.526 / 0.516 against a bulk at −11.74, so P is insensitive to where the collapsed mode sits. Run it through
-  `v2/scripts/cal_nodebug.py` under `one_at_a_time.sh` (4.4–4.8 GiB peak): one real-genome job, never `_debug`.
-- What the drift costs the transcript table: `quant_accuracy.py` and `prior_vs_oracle.py` never ran on the depth
-  family, nor `prior_vs_oracle.py` on `full_lowg`. The real-library EM numbers are sampled draws (seed 0), and the
-  read-name scorer needs hard labels, against the fractional-benchmark rule. If full depth is roughly right, LBX0588's
-  RNA pool is 8.9× too large at 1 % and 4.0× at 10 %; VCaP's DNA sent to annotated transcripts is 11.8 / 5.9 / 4.4 %
-  of the DNA.
-- Full-depth cfRNA has no truth: MO_3021's refits remove 34 % of pass 0's gDNA (0.139 → 0.091 per deposited fragment;
-  exons 21,552 → 4,156; exon|exon 11,363 → 367). Only a truth-labelled mix can settle it (the truth mixes of
-  `ISSUES: splicing-artifacts`); a √n depth extrapolation fails on VCaP (8.2 / 2.6 against a true 7.0).
-
-Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-28_depth_lowg/`: `pages/explanation_depth.md`; the depth-drift
-chain `rerun/scripts/depth_harness.py`; the arms `shifted_landscape.py`; the tables `rerun/scripts/tables.py` (test
-chromosome) and `v2/scripts/tab_v2.py` (real libraries); the substrates `test_reference/scenarios_depth_d100`, `_d10`
-and full depth. RULED (owner, 2026-09-28): the harness stays outside the tree until a repair is A/B'd; the one tree
-addition is the gDNA-only row of `ISSUES: the-background-dispersion-assumes-a-pure-intergenic-pool`.
-
 ### sj-strand-tag-chosen-from-the-first-reads
 `priority: now — 0.8.0: validate, log and record the resolved mode, warn on none; the per-record repair 0.8.1 · kind: defect · 2026-09-28`
 The scanner picks the junction-strand tag mode from the first 1,000 spliced reads (`detect_sj_strand_tag_native`) and
@@ -698,6 +590,115 @@ true 0 (test panel, κ̂ 0.485). Not dissected. The candidate — ψ reads κ = 
 A/B; od itself is 0 since 2026-10-01 (`ISSUES: strand-overdispersion-one-shared-value`).
 Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-28_od_design/01_fallback.md` (its last open question);
 `policy_benchmark.py --by-class`, unstranded rows.
+
+### the-gdna-landscape-collapses-at-low-depth
+`priority: next — 0.8.1: the drift re-measured on today's tree, then its repair; the failed refit fixed 2026-10-14 · kind: defect · 2026-09-28`
+THE FAILED REFIT, FIXED 2026-10-14 (`tests/calibration/test_landscape_training_population.py`): when a later refit
+fitted no landscape, `calibrate`'s refit loop overwrote the
+landscape the final solve ran under with `None` and broke, so the capture reader was skipped and the result said no
+landscape was fitted (MANUAL: `gdna_bulk_density` is null only when none was); the loop now keeps the last fitted
+landscape, a numeric no-op wherever no refit fails. It absorbs `ISSUES: gdna-landscape-trains-on-false-positives` (2026-10-14):
+a repair must not regress the zero controls; its blind-slot half is `ISSUES: the-gdna-prior-enters-psi-twice`.
+Every depth number below predates the count foundation; re-measure before ranking.
+Calibration's gDNA estimate falls with sequencing depth. LBX0588 (stranded, capture ON) reads 0.11 / 0.45 / 0.83 gDNA
+per deposited fragment at 1 % / 10 % / full depth. The EM follows it (gDNA fraction 0.16 / 0.62 / 0.91), so at 1 %
+the RNA pool is about 9× too large. The VCaP mix, which has truth by read name, reads P/O 0.125 / 0.52 / 0.92.
+
+The mechanism is the refits' gDNA landscape.
+- A slot trains as located only when Var(log f_g) ≤ 1 nat², which in practice means it holds a gDNA fragment.
+- At 1 % depth an object at VCaP's bulk density needs about 1.26 Mb to expect one fragment. So 0.23 % of the ~323k
+  kernels locate, and those few are selected above the bulk.
+- The rest are zero-count anchors, flat down to the grid floor. The refit loop converges to one mode at the floor
+  (log ρ ≈ −17) in all three real libraries.
+- Under that prior, sparse unspliced fragments go to RNA.
+
+How much each part owns:
+- The refits own 80 % / 69 % of LBX0588's drift (ln P_full/P_d, from 1 % / 10 %) and 86 % / 63 % of VCaP's.
+- Pass 0 drifts less. It nets an under-call on no-RNA objects against an over-call on no-gDNA objects.
+- The capture reference owns none of it, because it is computed after the solve, but it goes missing: its members
+  fall to 0 at 1 % for VCaP, LBX0588 and MO_3021 (0 at every depth for MO_3021), which sets every efficiency to 1. On
+  the test chromosome at capture ON the members are g001 0 / 0 / 57, g01 0 / 73 / 329, g05 20 / 313 / 352 (d100 /
+  d10 / full), and a reference that does form at low depth reads above proportional (×1.97 at g05 d100, ×1.48 at g01
+  d10). What that costs the EM is unmeasured, and `calibration_vs_oracle.py` cannot see it. The reference is a yes/no
+  switch; its continuous form, an efficiency whose uncertainty grows as members fall, is a direction to price.
+- MO_3021 barely drifts (0.82 of full at 1 %): 65–80 % of its gDNA sits on intergenic regions and gene edges, which
+  read their count at any depth.
+- The level survives in aggregate. VCaP's intergenic regions at 1 % hold 0.0097 of full depth's true gDNA.
+- The drift is not the od's: calibration's gDNA share falls with depth under every od arm. LBX0588 per deposited
+  fragment at 1 % → 10 % → full, beside shipped's above: binomial 0.113 → 0.471 → 0.835, the 0.2 value 0.098 → 0.145 →
+  0.679. The VCaP transcriptome half drifts too (gDNA fraction 0.50–0.63 % at full depth against 0.34–0.41 % at 10 %
+  and 1 %, every arm); MO_3021 (0.075 → 0.077 → 0.091) and the VCaP DNA half (0.045 → 0.044 → 0.054) barely move. The
+  0.2 value deepens LBX0588's collapse at 10 % (0.145 against 0.450), so the od landing and this repair are A/B'd
+  apart, in that order.
+- Strand inputs, an untested cause: two inputs fitted before pass 0 move with depth. MO_3021's gDNA od reads
+  0.171 ± 0.042 at 1 % against 0.0084 at full depth; LBX0588's strand specificity rests on about 150 spliced reads
+  (0.913 / 0.919 / 0.934 at 1 % against 0.937), and its pass 0 follows the same order (0.5465 / 0.5555 / 0.5641).
+  MO_3021's pass 0 rises as depth falls (0.199 / 0.164 / 0.139), the opposite of the others. On the test chromosome,
+  planting the true strand model moves the error by at most 6.3 points. Re-check now that od = 0 has landed and once
+  κ's fix lands (`ISSUES: strand-overdispersion-one-shared-value`).
+- The EM does not always follow calibration. On VCaP it recovers much of what calibration loses (EM recall 0.614 /
+  0.747 / 0.853 against calibration P/O 0.125 / 0.518 / 0.922); LBX0588's EM follows calibration down (0.164 / 0.620 /
+  0.906). Why is untested: the libraries differ on three axes at once — strand specificity 0.9998 against 0.91–0.94,
+  spliced share 51 % against 1.3 %, fragment length (VCaP DNA 307 bp and RNA 244 bp against LBX0588's 104 bp).
+
+On the test chromosome's stranded depth family:
+- Under a depth-invariant true landscape, the landscape owns 69–94 % of the capture-ON low-gDNA drift at d100 and
+  d10.
+- The capture-OFF drift is per-object.
+- Injecting the full-depth landscape, shifted by log f, cures g01 and g05 at d100 capture ON (−81.1 → −0.8 and
+  −52.6 → −8.3 points of O). It only halves g001, does nothing at capture OFF, and worsens g25 and g50 at d100.
+- True values on every structural region at depth d still fail at g01 and g001 d100. So fitting count/E kernels on
+  sparse counts is itself part of the defect.
+- The same fragile regime at full depth: at g001 capture ON, removing the one 19-fragment `test_blank` slot from the
+  training set moves the annotated chromosome's net gDNA error +3 → −630 (Σ|Δ| 983.1 → 1,090.9, n_train 754 → 722).
+  The depleted mode rests on very few located kernels at low gDNA.
+- Under a correct, depth-invariant landscape the capture-ON residual is misplacement, not loss: g01 d100 no-gDNA
+  +62.95, mixed −45.91, no-RNA −23.12 (net −6.08); g001 d100 +83.34 / −55.79 / −24.81 (net +2.75); g001 full +20.63,
+  cancelled by the landscape term −16.23. A repair is scored BY CLASS (no-gDNA, mixed, no-RNA), never on the net.
+- The collapsed landscape beats the true one at g25 d100 ON (shipped −6.8 against −10.9), and the shifted full-depth
+  landscape moves g25 −6.8 → −10.6 and g50 −4.2 → −8.0: two compensating errors, and a repair must not regress these
+  rows.
+- Not separated: whether the landscape or the density fit removes pass 0's mirror floor (RNA-only objects 1,894.5
+  against a predicted 1,806.9, and 65.3 after the refits). No arm isolates the message layer: shipped − silent is
+  +33.65 (g05 d100 ON), +79.39 (g01 d10 ON), +34.88 (g25 d100 ON).
+- The depth family is ss 0.99 only, so the drift on in-scope unstranded × capture OFF is unmeasured; TESTING §0c still
+  describes these configs as the ruler's substrate only. RULED (owner, 2026-09-28): add ss 0.50 rows at d100 for g01
+  and g05 only.
+- An oracle landscape trained on the library's own true counts leaks the answer (it gave the landscape 29–63 % of the
+  capture-OFF drift, against about 0 under the depth-invariant true landscape): use the depth-invariant one.
+
+First, alone: a failed refit overwrites the last landscape with None after the belief was solved under it, losing the
+reference, the efficiencies and the debug record. It fires in sparse fits.
+
+Direction: at its maximum, the exact Poisson mixture keeps the prior's implied total equal to the pooled count
+(Σ E_i·E[ρ | c_i] = Σ c_i). The shipped fit loses that, and a fit at depth f should equal the full-depth fit shifted by
+log f wherever the data resolve it.
+- The location floor and the anchor E-step that brought the zero controls down
+  (`ISSUES: gdna-landscape-trains-on-false-positives`) are what collapse here; a repair must not regress them.
+- `estep_all` and `row_kernel` stay refused (`ISSUES: the-landscape-training-population-arms`).
+
+Not this entry: VCaP's 7.8 % full-depth deficit, already present in pass 0
+(`ISSUES: vcap-dna-only-objects-lose-gdna-at-full-depth`).
+
+Still unmeasured:
+- The real-data arm: the full-depth VCaP landscape, shifted by log f, on the 1 % and 10 % caches; check that it fires
+  (`TRAPS: could-the-arm-have-fired`). The VCaP 10 % seeds put the mode at −14.70 / −14.56 / −17.05 with P/O 0.514 /
+  0.526 / 0.516 against a bulk at −11.74, so P is insensitive to where the collapsed mode sits. Run it through
+  `v2/scripts/cal_nodebug.py` under `one_at_a_time.sh` (4.4–4.8 GiB peak): one real-genome job, never `_debug`.
+- What the drift costs the transcript table: `quant_accuracy.py` and `prior_vs_oracle.py` never ran on the depth
+  family, nor `prior_vs_oracle.py` on `full_lowg`. The real-library EM numbers are sampled draws (seed 0), and the
+  read-name scorer needs hard labels, against the fractional-benchmark rule. If full depth is roughly right, LBX0588's
+  RNA pool is 8.9× too large at 1 % and 4.0× at 10 %; VCaP's DNA sent to annotated transcripts is 11.8 / 5.9 / 4.4 %
+  of the DNA.
+- Full-depth cfRNA has no truth: MO_3021's refits remove 34 % of pass 0's gDNA (0.139 → 0.091 per deposited fragment;
+  exons 21,552 → 4,156; exon|exon 11,363 → 367). Only a truth-labelled mix can settle it (the truth mixes of
+  `ISSUES: splicing-artifacts`); a √n depth extrapolation fails on VCaP (8.2 / 2.6 against a true 7.0).
+
+Instrument: `~/Downloads/rigel_runs/prototypes/2026-09-28_depth_lowg/`: `pages/explanation_depth.md`; the depth-drift
+chain `rerun/scripts/depth_harness.py`; the arms `shifted_landscape.py`; the tables `rerun/scripts/tables.py` (test
+chromosome) and `v2/scripts/tab_v2.py` (real libraries); the substrates `test_reference/scenarios_depth_d100`, `_d10`
+and full depth. RULED (owner, 2026-09-28): the harness stays outside the tree until a repair is A/B'd; the one tree
+addition is the gDNA-only row of `ISSUES: the-background-dispersion-assumes-a-pure-intergenic-pool`.
 
 ### strand-plug-in-bias-on-sparse-libraries
 `priority: next — 0.8.1, with the low-depth repair; re-measured first · kind: defect · 2026-09-21`
