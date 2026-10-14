@@ -264,6 +264,19 @@ class TestGenuineKappa:
         assert model.p_r1_sense == pytest.approx(kappa, rel=0.01)  # the EM reads the same κ
         assert model.contingency_matches_table()  # the 2x2 stays the observed record
 
+    def test_the_junction_classes_split_the_junctions_and_their_fragments(self):
+        """The fit's class shares, read as a library diagnostic: the shallow artifacts are most of the junctions
+        and few of the fragments, and κ is the one the strand model reads."""
+        from rigel.junction_fit import genuine_sense_fraction, junction_classes
+
+        table = self._contaminated()
+        classes = junction_classes(table.n_sense, table.depth)
+        assert classes.kappa == genuine_sense_fraction(table.n_sense, table.depth)
+        assert classes.by_junction == pytest.approx((200 / 610, 400 / 610, 10 / 610), abs=0.02)
+        assert classes.by_fragment == pytest.approx(
+            (20_000 / 21_100, 900 / 21_100, 200 / 21_100), abs=0.01
+        )
+
     def test_without_contamination_kappa_is_the_shipped_posterior_mean(self):
         from rigel.calibration.strand_balance import fit_strand_balance
 

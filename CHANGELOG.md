@@ -60,6 +60,9 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
 ### Changed
 
 - The package declares `Development Status :: 4 - Beta`.
+- `summary.json`'s `strand_model` reports the junction fit behind κ: `kappa` pooled over every junction and over the
+  genuine ones, each class's share (genuine, splice artifact, reversed) of the junctions and of their fragments,
+  `strand_live`, and one `strand_overdispersion` (0, binomial), which replaces the calibration block's two.
 - Quantification is reproducible run to run: the second pass draws from one seeded stream and the
   index loader refuses an index it did not build (no manifest, or another format version).
 - Chimera detection checks genomic compatibility before calling a fragment a chimera, and an empty

@@ -145,8 +145,9 @@ Changes to an output or on-disk format, batched so each format changes once. RUL
 batch, before 0.8.0; AMENDED the same day: the two density feathers are removed with the total-density landscape, not
 renamed (`ISSUES: the-total-density-landscape`).
 (a) `summary.json` (schema 3, unreleased):
-- one od field instead of two, labelled binomial by policy (od = 0 since 2026-10-01), beside the clean κ and the
-  artifact shares (`ISSUES: strand-overdispersion-one-shared-value`, the diagnostics step);
+- DONE 2026-10-14: one od field instead of two, labelled binomial by policy (od = 0 since 2026-10-01), beside the
+  pooled and genuine κ, the class shares and strand-live (`ISSUES: strand-overdispersion-one-shared-value`, the
+  diagnostics step);
 - DONE 2026-10-14: `gdna_fraction` without the spliced intergenic fragments, which are certified RNA (Axiom 0) — the
   summary's own pool, `intergenic_spliced`, beside `intergenic_total`; the report's intergenic pool split into RNA and
   gDNA; `quant_accuracy.py`'s library split the same (`tests/test_summary_report.py`, `tests/test_report.py`,
@@ -363,7 +364,7 @@ ships; `sj_blacklisted`'s unit; the report subtitle "Capture on-target enrichmen
 `ISSUES: the-reader-reads-false-gdna-as-capture` unless its A/B repairs it.
 
 ### strand-overdispersion-one-shared-value
-`priority: now — release-critical (owner, 2026-10-14): the summary.json diagnostics in the format batch, then the pruning · kind: design · 2026-09-27`
+`priority: now — release-critical (owner, 2026-10-14): the pruning; the summary.json diagnostics landed 2026-10-14 · kind: design · 2026-09-27`
 The strand model's two inputs, κ and the od, were both contaminated on real libraries:
 - splice artifacts (misaligned gDNA, ½ in a stranded library) inflate κ and the RNA-side spread;
 - antisense RNA inflates the gDNA side.
@@ -401,10 +402,11 @@ OWNER RULINGS (2026-09-30):
 moment went 0.07 → 0.37). Its A/B is in `DESIGN.md` §3.3b and its fit in `EQUATIONS.md` §5.4.
 
 THE REMAINING LANDING, one window each:
-1. **The `summary.json` diagnostics** (`ISSUES: the-format-changes-to-batch-before-release` (a)):
-   - pooled and clean κ;
-   - artifact share by junction and by fragment (LBX0588: 22 % against 12 %);
-   - reversed share, strand-live, and the od's label.
+1. LANDED 2026-10-14: **the `summary.json` diagnostics** (`ISSUES: the-format-changes-to-batch-before-release` (a);
+   `tests/test_strand_model.py`, `tests/test_summary_report.py`), in `strand_model`: `kappa` pooled and genuine, the
+   classes' shares by junction and by fragment (`junction_fit.junction_classes`), `strand_live`, and one
+   `strand_overdispersion`, binomial. LBX0588 through `rigel quant`: κ 0.0635 pooled, 0.0030 genuine; artifacts 21.8 %
+   of the junctions and 12.0 % of the fragments, reversed 0.16 % and 0.08 %.
 2. **The pruning design** with `ISSUES: splicing-artifacts`: junction ids in the fragment buffer (it carries none
    today), deposits deferred until the junction decision, and the weight derived on one page. Strand catches only
    artifacts with a wrong-strand read (an n-read artifact shows none with probability 2⁻ⁿ), and sees nothing on

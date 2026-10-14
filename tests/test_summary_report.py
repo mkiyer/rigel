@@ -270,8 +270,6 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
         "gdna_bulk_density",
         "gdna_capture_saturation",
         "rna_sense_frac",
-        "gdna_strand_overdispersion",
-        "rna_strand_overdispersion",
         "n_regions",
         "n_boundaries",
         "n_sj",
@@ -296,3 +294,37 @@ def test_a_spliced_intergenic_fragment_is_rna_not_gdna():
     assert q["intergenic_rna_fraction"] == round(30 / 1000, cli.SUMMARY_DECIMALS)
     fractions = ("mrna_fraction", "nrna_fraction", "gdna_fraction", "intergenic_rna_fraction")
     assert sum(q[k] for k in fractions) == pytest.approx(1.0)
+
+
+def test_the_strand_block_carries_the_junction_diagnostics_and_one_overdispersion(tmp_path):
+    """The strand model's junction fit is surfaced: κ pooled over every junction and over the genuine ones, each
+    class's share of the junctions and of their fragments, and whether the strand channel is live. The two
+    overdispersions, both 0 by policy, are one field that says the channel is binomial."""
+    out = tmp_path / "out"
+    out.mkdir()
+    sc, result = _build_scenario(tmp_path / "work")
+    cfg = PipelineConfig(
+        em=EMConfig(seed=SEED, assignment_mode="fractional", n_threads=1),
+        scan=BamScanConfig(sj_strand_tag="auto"),
+    )
+    pr = run_pipeline(result.bam_path, result.index, config=cfg)
+    args = argparse.Namespace(
+        bam_file=str(result.bam_path),
+        index_dir=str(result.index_dir),
+        config=None,
+        tsv=False,
+        emit_locus_stats=False,
+    )
+    cli._write_quant_outputs(pr, result.index, out, args)
+    summary = json.loads((out / "summary.json").read_text())
+    strand = summary["strand_model"]
+    assert set(strand["kappa"]) == {"pooled", "genuine"}
+    assert set(strand["junction_classes"]) == {"by_junction", "by_fragment"}
+    for shares in strand["junction_classes"].values():
+        assert set(shares) == {"genuine", "artifact", "reversed"}
+        assert sum(shares.values()) == pytest.approx(1.0, abs=1e-6)
+    assert strand["strand_live"] is True  # the scenario is stranded at 0.9
+    assert strand["strand_overdispersion"] == {"value": 0.0, "model": "binomial"}
+    assert not {"gdna_strand_overdispersion", "rna_strand_overdispersion"} & set(
+        summary["calibration"]
+    )

@@ -7,9 +7,12 @@ fit maximises that three-class binomial mixture over κ and the class shares tog
 ``Beta(1, 1)`` posterior mean over the reads the maximum credits to RNA (:func:`genuine_sense_fraction`).
 
 Every numerical setting of the search is ``rigel.config.CONSTANTS.junction_fit``; this module holds no constant of
-its own. The one consumer is :attr:`rigel.strand_model.StrandModel.genuine_n_same`. Gates:
-``tests/test_strand_model.py``'s ``TestGenuineKappa``.
+its own. The consumers are :attr:`rigel.strand_model.StrandModel.genuine_n_same`, and ``summary.json``'s strand
+block, which reads the fit's class shares (:func:`junction_classes`). Gates: ``tests/test_strand_model.py``'s
+``TestGenuineKappa``.
 """
+
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -23,6 +26,48 @@ def genuine_sense_fraction(
     2)``, over the reads the three-class mixture credits to RNA at its maximum (:func:`_genuine_mixture`). Where every
     junction is genuine that is exactly ``(n_same + 1)/(n_obs + 2)``; it is never 0. The table is oriented so the
     genuine class's minority rate lies below ½."""
+    k, n, c, flip = _oriented_groups(n_sense, n_total)
+    _, _, minority, reads, _ = _genuine_mixture(k, n, c, constants)
+    kappa = (minority + 1.0) / (reads + 2.0)
+    return 1.0 - kappa if flip else kappa
+
+
+@dataclass(frozen=True, slots=True)
+class JunctionClasses:
+    """The three-class fit at its maximum, read as a library diagnostic: the genuine junctions' sense fraction
+    (:func:`genuine_sense_fraction`), and each class's share — genuine RNA, splice artifact, reversed — of the
+    junctions and of their fragments. A table with no fragment has no shares."""
+
+    kappa: float
+    by_junction: tuple[float, float, float] | None
+    by_fragment: tuple[float, float, float] | None
+
+
+def junction_classes(
+    n_sense, n_total, constants: JunctionFitConstants = CONSTANTS.junction_fit
+) -> JunctionClasses:
+    """:func:`genuine_sense_fraction`'s fit, with the class shares it maximises over: by junction, the shares
+    themselves; by fragment, each class's expected reads at the maximum over all the junctions' reads."""
+    k, n, c, flip = _oriented_groups(n_sense, n_total)
+    rate, shares, minority, reads, _ = _genuine_mixture(k, n, c, constants)
+    kappa = (minority + 1.0) / (reads + 2.0)
+    kappa = 1.0 - kappa if flip else kappa
+    if not float(c @ n) > 0.0:
+        return JunctionClasses(kappa, None, None)
+    lp = _class_log_likelihoods(k, n, rate)
+    f = np.exp(lp - lp.max(axis=0))
+    resp = shares[:, None] * f / (shares @ f)
+    fragments = resp @ (c * n)
+    return JunctionClasses(
+        kappa,
+        tuple(float(x) for x in shares),
+        tuple(float(x) for x in fragments / fragments.sum()),
+    )
+
+
+def _oriented_groups(n_sense, n_total):
+    """The table as the fit reads it: junctions with no read dropped, oriented so the genuine class's minority rate
+    lies below ½, and the junctions with one ``(minority, reads)`` counted once. Returns ``(k, n, c, flip)``."""
     s = np.asarray(n_sense, dtype=np.float64)
     n = np.asarray(n_total, dtype=np.float64)
     keep = n > 0
@@ -30,11 +75,19 @@ def genuine_sense_fraction(
     flip = s.sum() > 0.5 * n.sum()
     k = n - s if flip else s
     kn, cnt = np.unique(np.stack([k, n], axis=1), axis=0, return_counts=True)
-    _, _, minority, reads, _ = _genuine_mixture(
-        kn[:, 0], kn[:, 1], cnt.astype(np.float64), constants
+    return kn[:, 0], kn[:, 1], cnt.astype(np.float64), flip
+
+
+def _class_log_likelihoods(k: np.ndarray, n: np.ndarray, kappa: float) -> np.ndarray:
+    """Each junction group's log-likelihood (3, G) under genuine RNA (minority rate κ), a splice artifact (½) and a
+    reversed junction (1 − κ), up to the binomial coefficient, which no class changes."""
+    return np.stack(
+        [
+            k * np.log(kappa) + (n - k) * np.log1p(-kappa),
+            n * np.log(0.5),
+            k * np.log1p(-kappa) + (n - k) * np.log(kappa),
+        ]
     )
-    kappa = (minority + 1.0) / (reads + 2.0)
-    return 1.0 - kappa if flip else kappa
 
 
 def _genuine_mixture(
@@ -51,17 +104,9 @@ def _genuine_mixture(
     ``minority`` and ``reads`` being the RNA classes' expected counts at the maximum."""
     from scipy.optimize import minimize_scalar
 
-    half = n * np.log(0.5)
-
     def profile(u):
         kappa = 0.5 / (1.0 + float(np.exp(-u)))
-        lp = np.stack(
-            [
-                k * np.log(kappa) + (n - k) * np.log1p(-kappa),
-                half,
-                k * np.log1p(-kappa) + (n - k) * np.log(kappa),
-            ]
-        )
+        lp = _class_log_likelihoods(k, n, kappa)
         top = lp.max(axis=0)
         f = np.exp(lp - top)
         value, shares = _class_shares(f, c, constants)

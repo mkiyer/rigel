@@ -262,6 +262,47 @@ def _fragment_length_report(fl_models):
     return summary_by_category, histogram_df
 
 
+def _strand_fit_summary(strand_models) -> dict:
+    """``summary.json``'s view of the junction fit behind κ.
+
+    κ, the spliced reads' sense fraction, pooled over every junction and over the junctions the three-class fit
+    credits to genuine RNA; each class's share of the junctions and of their fragments (shallow splice artifacts
+    are most of the junctions and few of the fragments); whether the strand channel is live, the protocol decision
+    calibration's strand channel reads, made here by the same two functions on the same 2×2; and the strand
+    overdispersion, 0 by policy for gDNA and RNA alike, so the channel is binomial."""
+    from .calibration.region_init import strand_discriminability
+    from .calibration.strand_balance import fit_strand_balance
+    from .junction_fit import junction_classes
+
+    table = strand_models.sj_table
+    n_sense, depth = float(table.n_sense.sum()), float(table.depth.sum())
+    classes = junction_classes(table.n_sense, table.depth)
+    names = ("genuine", "artifact", "reversed")
+
+    def shares(values):
+        return (
+            None
+            if values is None
+            else {k: round(v, SUMMARY_DECIMALS) for k, v in zip(names, values)}
+        )
+
+    balance = fit_strand_balance(strand_models)
+    return {
+        "kappa": {
+            "pooled": round((n_sense + 1.0) / (depth + 2.0), SUMMARY_DECIMALS),
+            "genuine": round(classes.kappa, SUMMARY_DECIMALS),
+        },
+        "junction_classes": {
+            "by_junction": shares(classes.by_junction),
+            "by_fragment": shares(classes.by_fragment),
+        },
+        "strand_live": bool(
+            strand_discriminability(balance.rna_sense_frac, balance.n_observations) > 0.0
+        ),
+        "strand_overdispersion": {"value": 0.0, "model": "binomial"},
+    }
+
+
 def _quantification_pools(stats, total_mrna: float, total_nrna: float, total_gdna: float) -> dict:
     """``summary.json``'s pools and their fractions of every fragment counted.
 
@@ -368,6 +409,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     # Strand model summary (exonic_spliced only)
     sm_primary = sm.exonic_spliced
     ci_lo, ci_hi = sm_primary.posterior_95ci()
+    strand_fit = _strand_fit_summary(sm)
 
     # Fragment length: lean per-category summary statistics go into summary.json;
     # the raw 1-bp histograms are written separately to fragment_lengths.feather, which keeps
@@ -408,8 +450,6 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     }
 
     # Calibration section — library scalars only, never a per-region dict.
-    # gdna_strand_overdispersion is surfaced here so that a silently-zero estimate is visible in the
-    # summary rather than only inside the solver.
     cal = getattr(result, "calibration", None)
     cal_dict = (
         None
@@ -424,12 +464,6 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             ),
             "gdna_capture_saturation": float(cal.gdna_capture_saturation),
             "rna_sense_frac": round(float(cal.rna_sense_frac), SUMMARY_DECIMALS),
-            "gdna_strand_overdispersion": round(
-                float(cal.gdna_strand_overdispersion), SUMMARY_DECIMALS
-            ),
-            "rna_strand_overdispersion": round(
-                float(cal.rna_strand_overdispersion), SUMMARY_DECIMALS
-            ),
             "n_regions": int(cal.n_regions),
             "n_boundaries": int(cal.n_boundaries),
             "n_sj": int(cal.n_sj),
@@ -512,6 +546,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             # hundreds of reads before one disagreeing read is even expected, and the
             # RNA strand overdispersion is fitted from exactly this population.
             "sj": sm.sj_table.to_dict(),
+            **strand_fit,
             # All-exonic (RNA+gDNA) diagnostic model, never used for scoring.
             # A positive ``contamination_gap`` means unstranded gDNA is dragging
             # the mixed all-exonic estimate toward 0.5 relative to the clean
