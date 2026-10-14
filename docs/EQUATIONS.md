@@ -194,7 +194,7 @@ full-sweep comparison of delivered evidence under changed incoming count beliefs
 No incoming belief sets its width. This is the likelihood of an EXPECTED mixture fraction,
 not the strand distribution conditional on a REALIZED DNA count; the latter is the convolution
 of the DNA and RNA binomials. An inferred fraction multiplied by `M` is not a newly observed
-Poisson DNA count (`ISSUES: calibration-detects-capture-on-a-capture-off-library`).
+Poisson DNA count (`ISSUES: the-reader-reads-false-gdna-as-capture`).
 
 For a licensed single-strand intron–boundary pair sharing a component-density ratio, let
 the target's RNA amount be `r` and RNA opportunity `Er_t`. Conditional on the source total,
@@ -847,8 +847,8 @@ contained/crossing placements and known densities under both length gaps and the
 control. These are deep, mode-focused gates with junction opportunity equal to the boundary's RNA
 opportunity; they do not certify route-rate uncertainty or the estimated laws' frame.
 `tests/calibration/test_transfer_faces.py` checks wiring and profile composition, mostly using the
-native row functions themselves. Remaining uncertainty and builder coverage are recorded in
-`ISSUES: calibration-detects-capture-on-a-capture-off-library`.
+native row functions themselves. Remaining route-rate uncertainty is recorded in
+`ISSUES: transfer-variance-premise`.
 
 **3.3 Conservation with unequal effective lengths is `Σ_c ρ_c·E_c = M`**, not `Σ_c ρ_c = M/E`
 (`region_geometry.py`, `messages/transfer.py`). Its sensitivity is bounded: a purely compositional error

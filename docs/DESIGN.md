@@ -138,9 +138,13 @@ channel at all (`EQUATIONS.md` §5).
 > capture-length frame (parked 2026-09-30, `ISSUES: the-scorer-reads-a-census-length-law`) are back in scope
 > for 0.8.0, as is every other fragment-length item that waited for the release.
 
+The census length law itself moved to 0.8.1 (owner, 2026-10-14, the 0.8.0 reassessment): no candidate repairs it yet,
+and the one-frame route loses on real length gaps; fragment-length robustness stays a 0.8.0 bar.
+
 Why: calibration assumes equal gDNA and RNA lengths in several places, and the ladder's equal lengths hid all
-of them. On a stranded capture-OFF library whose RNA is shorter than its gDNA, that reads as capture and
-loses 42 % of the transcripts (`ISSUES: calibration-detects-capture-on-a-capture-off-library`). Real
+of them. On a stranded capture-OFF library whose RNA is shorter than its gDNA, that read as capture and
+lost 42 % of the transcripts until the component-opportunity maps and the mode-free reader (3.55 % now;
+`ISSUES: calibration-detects-capture-on-a-capture-off-library`, closed). Real
 libraries carry gaps in both directions; the VCaP halves differ by 63 bp.
 
 The bar a length mechanism must clear is the 2026-08-10 verdict on the old channel: a Gaussian moment row
@@ -883,7 +887,8 @@ probabilistically best placement by the abundance of uniquely aligned fragments 
   considered, as its own mechanism).
 * **The drain re-enters `deposit` at the chosen placement's reference**, so there is still one tally path;
   `DrainQC.offered_multimapper` says how many records were held on their placements.
-* **The EM is untouched.** It still receives every non-chimeric hit of a multimapper and allocates it by
+* **The EM is untouched.** It still receives every non-chimeric genic hit of a multimapper (an intergenic hit never
+  reaches it, `ISSUES: multimapper-intergenic-alignments`) and allocates it by
   abundance and the locus priors; what changes is that the locus prior now holds the fragment where the second
   pass drew it. The second pass's placement and the EM's allocation of the same fragment are not reconciled —
   different questions, at different stages, exactly as the gap-held population's drawn path and the EM's
@@ -1899,7 +1904,9 @@ the rule and the E-step together; every in-scope contaminated row 0.95–1.00× 
 the deferred rows 0.96–1.02×; the zero-RNA controls within ±4 %. The test chromosome: wins or ties all 30
 rows. Under both, `silent`'s zero controls fell to a few hundred fragments as well (the prior alone solves
 a gDNA-free library), so `policy_benchmark.py`'s "beats silence" count reads 6/8 per half with every
-losing row a zero control at that floor; every contaminated row still favours `transfer`.
+losing row a zero control at that floor; every contaminated row then favoured `transfer`. On the count
+foundation the unstranded × capture-OFF contaminated rows lose to `silent`
+(`ISSUES: the-transfer-policy-loses-to-silence-on-unstranded-capture-off`).
 
 ⛔ Refused with numbers, in `ISSUES: the-landscape-training-population-arms`: every reading of "a bound"
 that reaches the DELIVERED rows (under capture the probed exons' one-sided rows ARE the enriched mode's
@@ -1926,16 +1933,6 @@ of capture averages, a fixed flank-to-region ordering, or a requirement that nei
 must show capture before an object may receive a weight. No particular coupling strength
 or new prior has yet been selected. The counterexample to exact face cancellation does
 not reject a model that uses the rest of this local footprint.
-
-**Local capture-prior prototype, owner approval 2026-10-09.** With count inference
-frozen, prototype a normalized background distribution and a local enrichment prior
-uniform in the retained background fraction `1/C`, hence density `1/C²` for `C >= 1`.
-Test the proper tail and equal background/enrichment odds as separate contrasts,
-retaining the continuous counterarm readout. This authorizes an isolated experiment,
-not production selection. Honest local evidence, including licensed neighbour
-messages, must survive; no annotation count, distant RNA maximum, capture detector
-or positive background floor is authorized. Production integration and junction
-pricing keep their separate owner checkpoints.
 
 The EM's effective length under capture (`capture_eff_length`, `priors.assemble_priors`, `EQUATIONS.md` §11)
 contracts every component by the capture efficiencies of the objects its fragments deposit on. THE RULING (owner,
@@ -1989,12 +1986,13 @@ spans and the annotated transcripts on one scale (`ruler_vs_truth.py --scale`, n
 
 **The efficiencies: each object reads its own count.** `capture_efficiency.capture_efficiencies`, computed by
 `calibrate` and published as `CalibrationResult.gdna_capture_efficiency_region` / `_boundary`, gives a region the
-posterior mean `E[min(ρ/ρ_ref, 1)]` of its clipped gDNA density under the fitted landscape from its gDNA contained
-count on its contained support, and a boundary the same from its gDNA crossing count on its crossing support. No
+posterior mean of its log gDNA density against the bulk, saturated at its own enriched level, under the fitted
+landscape as a two-group prior (the ruling above), from its gDNA contained count on its contained support, and a
+boundary the same from its gDNA crossing count on its crossing support. No
 constant and no floor enter; the multimapper floor `C/(C+1)` stays deleted
 (`ISSUES: ruler-multimapper-floor-caps-the-correction`). The length prices every crossing at the boundary that
 holds it, so no region borrows the crossings around it (`ISSUES: the-crossing-apportionment`), and a piece too
-short to contain a fragment has no share to price: its efficiency is the population's and multiplies nothing.
+short to contain a fragment has no share to price: its efficiency reads 1 and multiplies nothing.
 That is why the own count alone, refused on 2026-09-16 under the per-base length, ships under this one. A piece
 prices at its region's efficiency and a contiguous cut at its boundary's; where the rule is exact and where it is
 not is derived in `EQUATIONS.md` §11.
@@ -2003,9 +2001,10 @@ not is derived in `EQUATIONS.md` §11.
 object gDNA measures prices one directly. THE RULING: `c_junction = c_lo + c_hi − ½(c_intron,lo + c_intron,hi)`,
 the efficiencies at the sj's low and high boundaries (§0) less the intron pieces just inside them, derived in
 `EQUATIONS.md` §11. An intron piece too short to contain a gDNA fragment has no count of its own and reads the
-boundary on its far side. The price is never below 0 and NEVER ABOVE 1 (owner, 2026-10-05, reversing the
-2026-09-23 refusal): capture saturates — a fragment binds its best single probe part, so a fragment across a
-junction is captured no more than one wholly inside a fully captured piece. Where probes tile the exons to their
+boundary on its far side. The price is never below 0 and never above the saturation level or the best object the
+junction touches, whichever is higher — in the unit of the fully captured level, 1 (owner, 2026-10-05, reversing the
+2026-09-23 refusal; the bound's form 2026-10-13): capture saturates — a fragment binds its best single probe part, so
+a fragment across a junction is captured no more than one wholly inside the most captured piece it touches. Where probes tile the exons to their
 edges each boundary reads most of the exon's level, not half of it, and the uncapped sum counted the junction's
 exon capture about twice: the test chromosome's stranded × capture-ON transcripts read 13.89 % against 0.7.1's 8.58 %,
 and 7.19 % with the cap (`ISSUES: the-junction-sum-over-prices-separately-probed-exons`). Where both sides of a

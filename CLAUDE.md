@@ -53,8 +53,8 @@ robustness (2026-10-07); it does not replace the three in-scope release targets.
 takes the worst IN-SCOPE scenario. Every score is read per stratum, never pooled.
 
 Fragment length is back in scope for 0.8.0 (owner, 2026-10-02): the composition channel, the capture-length
-frame and every other length item that waited for the release (`docs/DESIGN.md` §0b;
-`ISSUES: calibration-detects-capture-on-a-capture-off-library`, `ISSUES: the-scorer-reads-a-census-length-law`). The ladder still gives gDNA and RNA EQUAL fragment lengths on purpose:
+frame and every other length item that waited for the release (`docs/DESIGN.md` §0b); the census length law itself
+moved to 0.8.1 (owner, 2026-10-14; `ISSUES: the-scorer-reads-a-census-length-law`). The ladder still gives gDNA and RNA EQUAL fragment lengths on purpose:
 a gap would let the EM split origins on length alone and mask calibration bugs. So a length mechanism is
 judged on the gap panels beside it, in both directions, against the equal-length control.
 
