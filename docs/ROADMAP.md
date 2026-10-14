@@ -120,17 +120,18 @@ priority. The local track takes one A/B window per mechanism, and a numeric no-o
 `rename_identity.py --check`, lands between any two windows; the cluster track does not compete for local windows.
 
 **Release-critical — before 0.8.0, in order.**
-1. **The user-path fixes**, one commit each with a falsification test verified failing: `ISSUES: latent-defects`'
-   0.8.0 list, the failed refit of `ISSUES: the-gdna-landscape-collapses-at-low-depth`, the minimum of
-   `ISSUES: sj-strand-tag-chosen-from-the-first-reads`, and
-   `ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`.
-2. **The multimapper prior share**, its own A/B window on the VCaP mix's truth and the aligned multimapper scenarios
+1. DONE 2026-10-14: **the user-path fixes**, one commit each with a falsification test verified failing:
+   `ISSUES: latent-defects`' 0.8.0 list (its `nrna_n_contributors` rides the index bump), the failed refit of
+   `ISSUES: the-gdna-landscape-collapses-at-low-depth`, the minimum of `ISSUES: sj-strand-tag-chosen-from-the-first-reads`,
+   and `ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`.
+2. MEASURED 2026-10-14, kept as shipped: **the multimapper prior share** — its A/B on the VCaP mix's truth and the
+   aligned multimapper scenarios moved no number materially; its repair is the share's frame, in 0.8.1
    (`ISSUES: the-em-prior-share-excludes-drawn-multimappers`).
 3. **The format batch**, one window: `summary.json`, with the strand diagnostics of
    `ISSUES: strand-overdispersion-one-shared-value`, and index format 9
    (`ISSUES: the-format-changes-to-batch-before-release`), with the docs and column gate of
    `ISSUES: overlapping-synthetic-shadows`.
-4. **The two numeric no-ops** of `ISSUES: performance-memory-bounded-solve`.
+4. DONE 2026-10-14: **the two numeric no-ops** of `ISSUES: performance-memory-bounded-solve`.
 5. **The false capture on uncaptured libraries**: one pinned A/B of the ported ψ double-prior fix decides it
    (`ISSUES: the-reader-reads-false-gdna-as-capture`, `ISSUES: the-gdna-prior-enters-psi-twice`); if it fails, the
    limitation is documented and its repair is 0.8.1.
@@ -143,7 +144,7 @@ priority. The local track takes one A/B window per mechanism, and a numeric no-o
    re-read, and the manual and the changelog true of what ships.
 
 **0.8.1 — first after the release**, each its own derivation and A/B: `ISSUES: the-em-stops-before-it-converges` with
-`ISSUES: the-pseudocount-strength-is-not-derived` ·
+`ISSUES: the-pseudocount-strength-is-not-derived` and `ISSUES: the-em-prior-share-excludes-drawn-multimappers` ·
 `ISSUES: the-transfer-policy-loses-to-silence-on-unstranded-capture-off` with
 `ISSUES: the-intron-own-solve-on-unstranded-capture-off` · `ISSUES: the-scorer-reads-a-census-length-law` with
 `ISSUES: the-pooled-q-in-the-gdna-count` · `ISSUES: psi-reads-kappa-where-the-strand-channel-is-dead` · the low-depth

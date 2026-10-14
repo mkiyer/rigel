@@ -631,10 +631,13 @@ def em_pseudocounts(
     fragment in the locus — the E-step's units and the deterministic spliced fragments, which skip the
     E-step but enter every M-step — and the grouped prior update is exact EM for
     ``P_g log theta_g + P_R log(1 − theta_g)``. It leaves the EM's own answer in place iff
-    ``P_g : P_R = G : (N − G)``. Calibration counts ``gdna_count`` from its own sample of the locus, the
-    ``n_calibrated`` fragments it deposits (no multimapper, no fragment whose every junction the blacklist
-    rejected), so the share is read over that sample and applied to the whole locus: which fragments either
-    stage calls spliced never enters, and a fragment calibration never saw carries the locus's share, not RNA.
+    ``P_g : P_R = G : (N − G)``. Calibration counts ``gdna_count`` from its own sample of the locus, and
+    ``n_calibrated`` counts that sample's unique fragments (no multimapper, no fragment whose every junction the
+    blacklist rejected), so the share is read over that sample and applied to the whole locus: which fragments
+    either stage calls spliced never enters, and a fragment calibration never saw carries the locus's share, not
+    RNA. Calibration also deposits each multimapper at the placement its second pass draws, and
+    ``n_calibrated`` does not count those, so in a locus holding multimappers the count covers more fragments
+    than the share is read over.
 
     THE STRENGTH is one pseudocount per unit that has a gDNA candidate, the shipped total before the odds
     were corrected; it is not derived (``tests/test_em_pseudocounts.py``). A share above one is a share of
@@ -671,8 +674,9 @@ def _run_locus_em_partitioned(
     one ``run_batch_locus_em_partitioned`` call (the solver runs its own
     ``std::thread`` workers), and appends a per-locus dict to ``estimator.locus_results`` for
     ``get_loci_df``. Calibration enters as its per-locus gDNA count, which :func:`em_pseudocounts` reads
-    against the part of the locus calibration counts from: its non-multimapper units that the blacklist did
-    not reject, plus the deterministic fragments of its transcripts. The
+    against the unique part of the locus calibration counts from: its non-multimapper units that the blacklist
+    did not reject, plus the deterministic fragments of its transcripts (the multimappers calibration deposits
+    at their drawn placements are not counted). The
     loci table's ``enable_gdna`` reports the structural eligibility (any unspliced unit carrying a finite
     gDNA log-lik — the rule the C++ extractor applies).
 
@@ -705,8 +709,9 @@ def _run_locus_em_partitioned(
         [np.count_nonzero((p.is_spliced == 0) & np.isfinite(p.gdna_log_liks)) for p in parts],
         dtype=np.float64,
     )
-    # Calibration's sample: the deterministic fragments (unique by construction) and every unit it deposits —
-    # not a multimapper, not a fragment whose every junction the blacklist rejected.
+    # The unique part of calibration's sample: the deterministic fragments (unique by construction) and every
+    # unit it deposits that is not a multimapper or a fragment whose every junction the blacklist rejected. The
+    # multimappers it deposits at their drawn placements are not counted.
     deterministic = estimator.unambig_counts.sum(axis=1)
     n_calibrated = np.array(
         [

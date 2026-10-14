@@ -123,16 +123,6 @@ the unknown `config.yaml` key (fixed), the report's meta line through `innerHTML
 window (fixed). The rest is 0.8.1 or later; the reorder gate's fixture simulates no gDNA (`build_oracle`'s
 fixed-total branch ignores `gdna_fraction`), so the reproducibility gate never exercises a gDNA path.
 
-### the-em-prior-share-excludes-drawn-multimappers
-`priority: now — 0.8.0, its own A/B window (VCaP truth, the aligned multimapper scenarios) · kind: defect · 2026-10-14`
-Since the multimapper second pass, calibration deposits every multimapper at its drawn placement, so a locus's
-`gdna_count` includes them; `pipeline._run_locus_em_partitioned` still divides it by `n_calibrated`, which counts no
-multimapper unit (`p.frag_class != FRAG_MULTIMAPPER`), and `em_pseudocounts`' docstring and
-`tests/test_em_pseudocounts.py` still say calibration deposits none (d87313ab left the EM untouched). In a locus holding
-multimappers the gDNA share is inflated by about (N_unique + N_mm) / N_unique, clipped at 1, and a locus of multimappers
-alone gets no prior although calibration counted its gDNA. Invisible on the `NH = 1` panels; every real library and the
-aligned scenarios carry it. Magnitude unmeasured.
-
 ### an-unrecorded-splice-blacklist-is-dropped-silently
 `priority: now — 0.8.0: the cluster's manifest checked before any cluster quant; the warning landed 2026-10-14 · kind: risk · 2026-09-28`
 `TranscriptIndex.load` applies `splice_blacklist.feather` only when `manifest.json` records `sources.alignable_zarr`;
@@ -748,6 +738,34 @@ constant; the open question is what an object holding under one expected fragmen
 `ISSUES: the-gdna-landscape-collapses-at-low-depth` on capture-ON transcripts, and of fl's unmeasurable regions
 (`ISSUES: the-fl-boundary-inversion-reads-missing-evidence-as-a-value`). `ruler_vs_truth.py
 --scale` (the unprobed rows); the census in `~/Downloads/rigel_runs/prototypes/2026-09-23_junction_price/`.
+
+### the-em-prior-share-excludes-drawn-multimappers
+`priority: next — 0.8.1, with the share's frame; 0.8.0 keeps the shipped denominator on its A/B (2026-10-14) · kind: defect · 2026-10-14`
+Since the multimapper second pass, calibration deposits every multimapper at its drawn placement, so a locus's
+`gdna_count` includes them; `pipeline._run_locus_em_partitioned` still divides it by `n_calibrated`, which counts no
+multimapper unit (`p.frag_class != FRAG_MULTIMAPPER`). In a locus holding multimappers the gDNA share is inflated by
+about (N_unique + N_mm) / N_unique, clipped at 1, and a locus of multimappers alone gets no prior although calibration
+counted its gDNA. Invisible on the `NH = 1` panels; every real library and the aligned scenarios carry it.
+MEASURED 2026-10-14, a pinned A/B of three denominators (`~/Downloads/rigel_runs/prototypes/2026-10-14_mmshare/`):
+A as shipped, u + d (the unique non-artifact units and the deterministic fragments); B with every non-artifact
+multimapper unit, u + d + M; C with the multimapping molecules the second pass drew onto the locus, u + d + m, each
+deposited draw placed by its placement's midpoint (VCaP: 125,073 of 126,154 held multimappers deposit, 91,511 inside
+a locus).
+- The inflation is real, and it is not the only gap. A's share is above one in 692 of VCaP's 22,787 loci and clipped
+  at one in every multimapper locus of the aligned scenarios; with C's exact draws 377 VCaP loci still read G above
+  the sample, because partly covered regions and a locus's outer crossings sit in G's frame and not among the EM's
+  units.
+- The aligned scenarios (49 runs, Σ|err| against truth), A / B / C: transcripts 6,985 / 6,498 / 6,784; gDNA pool
+  648 / 984 / 730; nascent 547 / 592 / 466. B's transcript gain is almost all on the identical paralogs, whose split
+  is the EM's own degeneracy.
+- VCaP against its read-name origins — the EM's gDNA per locus against the exome-DNA fragments the annotated BAM
+  puts there: over the 8,691 multimapper loci Σ|EM − truth| 169,552 / 169,336 / 168,631 (net +15,523 / +5,214 /
+  +8,070); over the 191 multimapper-only loci 301 / 344 / 312; the pooled gDNA fraction +0.00024 / −0.00031 /
+  −0.00016 against 0.2518.
+KEPT AS SHIPPED for 0.8.0: C, the best of the three on the real library, gains 0.5 % on the loci it touches and costs
+the aligned scenarios' gDNA pool 13 %, and B is dominated by C. The repair is the share's FRAME — its numerator and
+its denominator over the same fragments, which also closes the 377 loci C leaves above one — with C's draws as its
+multimapper term.
 
 ### the-pseudocount-strength-is-not-derived
 `priority: next — 0.8.1, with ISSUES: the-em-stops-before-it-converges · kind: open question · 2026-09-24`

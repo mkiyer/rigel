@@ -38,9 +38,9 @@ def test_the_odds_are_calibrations_gdna_share_of_the_fragments_it_counted():
 
 
 def test_a_fragment_calibration_never_saw_carries_the_locus_share_not_rna():
-    """Calibration deposits no multimapper, so its count covers the fragments it saw. Reading that count
-    against the whole locus instead would call every unseen fragment RNA: here gDNA is 3/10 of what
-    calibration saw, and the prior must say 3/10 whether or not the locus also holds unseen fragments."""
+    """Calibration's count covers the fragments it saw. Reading that count against the whole locus instead
+    would call every unseen fragment RNA: here gDNA is 3/10 of what calibration saw, and the prior must say
+    3/10 whether or not the locus also holds unseen fragments."""
     seen_only = em_pseudocounts(np.array([300.0]), np.array([1000.0]), np.array([1000.0]))
     with_unseen = em_pseudocounts(np.array([300.0]), np.array([1000.0]), np.array([1500.0]))
     for pg, pr in (seen_only, with_unseen):
