@@ -29,9 +29,17 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 8).
   not decide are held in a side buffer and assigned by one multinomial draw after the tally exists,
   so calibration and the EM read one drained frame.
 - **Capture-aware effective lengths.** Under a capture panel a transcript's EM effective length is
-  its bases at their regions' capture efficiencies, each a posterior mean from that region's own gDNA
-  count, against the enriched mode of the fitted gDNA landscape; with no enriched mode nothing
-  contracts. The gDNA component's length follows the same conversion as its count.
+  its share of every region and boundary its fragments land on, each at that object's capture
+  efficiency: the object's own gDNA density read against the uncaptured (bulk) gDNA level, as a
+  posterior under the library's fitted gDNA landscape, and saturated at its own captured level. There
+  is no capture detector or on/off switch: capture is read object by object, and a library whose gDNA
+  sits at one level reads every efficiency as 1. The gDNA component's length follows the same
+  conversion as its count.
+- **Multimapping fragments in calibration.** A fragment with several alignments is offered once, every
+  alignment a placement, held in the side buffer and assigned to one placement by the second pass in
+  proportion to the uniquely aligned fragments there. A region whose fragments all multimap no longer
+  reads as empty: on a cell-line mix of known composition the gDNA fraction moves from 0.239 to 0.252
+  against its truth of 0.252. Libraries without multimappers are unchanged.
 - **The EM's priors from calibration.** Two conserved fragment counts per locus, gDNA and unspliced
   RNA, enter the locus EM as pseudocounts; the RNA one is shared over every RNA component, nascent
   entities included, in proportion to the evidence each carries.
@@ -54,6 +62,9 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 8).
   index loader refuses an index it did not build (no manifest, or another format version).
 - Chimera detection checks genomic compatibility before calling a fragment a chimera, and an empty
   hypothesis set no longer dereferences a null pointer in the accumulator.
+- The locus EM hands loci to its threads one at a time, so long loci no longer queue behind one another
+  on a single thread. A benchmark library dominated by a few long loci runs in 69 s instead of 156 s;
+  the output is unchanged.
 
 ### Removed
 
@@ -62,8 +73,9 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 8).
   `gdna_eff_len.per_bp`, which summarised them; `summary.json` is schema 3.
 - `summary.json`'s `calibration.capture` block and the report's by-count / by-mass density chart, a
   second density census of the gDNA track with its own thresholds. The report's capture tile and panel
-  show calibration's own answer instead: `calibration.gdna_reference_density`, the captured gDNA level
-  (`null` when no enriched gDNA mode is located), and `gdna_reference_members`.
+  show calibration's own answer instead: `calibration.gdna_bulk_density`, the uncaptured gDNA level the
+  capture efficiencies are read against (`null` when no gDNA landscape was fitted), and
+  `calibration.gdna_capture_saturation`, the saturated captured level over it (1 when there is none).
 - Three `locus_stats.feather` columns (`--emit-locus-stats`): `gdna_log_eff_len`, `digamma_calls_per_estep`
   and `squarem_extrapolation_clamp_count`.
 - The fragment-length composition channel and the NPMLE gDNA prior: measured and retired.
