@@ -119,12 +119,13 @@ def quant_command(args: argparse.Namespace) -> int:
         f"{index.num_annotated_genes} genes"
     )
 
-    # -- Run --
-    result = run_pipeline(bam_path, index, config=pipeline_config)
-
-    # -- Write outputs --
-    _write_quant_outputs(result, index, output_dir, args)
-
+    # -- Run; the tables are written before the optional annotated-BAM pass, so a failure there loses nothing --
+    run_pipeline(
+        bam_path,
+        index,
+        config=pipeline_config,
+        before_second_pass=lambda result: _write_quant_outputs(result, index, output_dir, args),
+    )
     return 0
 
 

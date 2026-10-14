@@ -582,9 +582,9 @@ does not list, which the current version no longer writes.
 Produced by `--annotated-bam PATH`. Requires a second pass over the BAM.
 
 The output is a BAM with exactly the same records as the input (no drops, no duplications), collated —
-every qname in one contiguous run, except that a qname whose first record is filtered (QC-failed, unmapped
-or a skipped duplicate) can be split around its neighbour, a known defect. Filtered records are written
-through unchanged without annotation tags.
+every qname in one contiguous run. Filtered records (QC-failed, unmapped or a skipped duplicate) are written
+through unchanged without annotation tags. Rigel's tags replace any tag of the same name the aligner wrote
+(HISAT2's `ZS:i`, for one). The quantification tables are written before this pass begins.
 
 | Tag | Type | Description |
 |-----|------|-------------|

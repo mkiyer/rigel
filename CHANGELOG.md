@@ -133,6 +133,10 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
   blacklist file is missing, or a blacklist file with no store in the manifest. 0.7.1 reported a missing blacklist
   only through `summary.json`'s `sj_blacklist_loaded`.
 - The HTML report escapes sample names, paths, gene names and reference names before they become markup.
+- `--annotated-bam`: a gene without a `gene_name` (Ensembl's unnamed genes, NCBI annotations) crashed the pass after
+  the whole run, losing every output; it now reads `.`. The quantification tables are written before the pass. A read
+  name whose first record is filtered is no longer split around its neighbour, and an aligner's tag of the same name
+  as Rigel's (HISAT2's `ZS:i`) is replaced rather than kept.
 - `rigel sim` refuses an empty fragment-length window instead of looping forever.
 - A SQUAREM jump that would carry a still-live EM component below the floor is shortened toward the plain EM
   step instead of being clamped there, so which of several transcripts sharing fragments survives no longer

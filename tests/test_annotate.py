@@ -178,43 +178,44 @@ pytestmark_scenario = pytest.mark.skipif(
 )
 
 
+@pytest.fixture
+def scenario(tmp_path):
+    from rigel.sim import Scenario
+
+    sc = Scenario(
+        "annot_bam_test",
+        genome_length=8000,
+        seed=42,
+        work_dir=tmp_path / "annot_bam",
+    )
+    # Spliced gene for strand training + deterministic unambig
+    sc.add_gene(
+        "g1",
+        "+",
+        [
+            {"t_id": "t1", "exons": [(500, 1000), (1500, 2000)], "abundance": 80},
+        ],
+    )
+    # Second gene for EM-routed isoform ambiguity
+    sc.add_gene(
+        "g2",
+        "+",
+        [
+            {"t_id": "t2", "exons": [(3000, 3500), (4000, 4500)], "abundance": 40},
+            {
+                "t_id": "t3",
+                "exons": [(3000, 3500), (4000, 4500), (5000, 5500)],
+                "abundance": 40,
+            },
+        ],
+    )
+    yield sc
+    sc.cleanup()
+
+
 @pytestmark_scenario
 class TestAnnotatedBamIntegration:
     """End-to-end: scenario → run_pipeline with annotated_bam_path."""
-
-    @pytest.fixture
-    def scenario(self, tmp_path):
-        from rigel.sim import Scenario
-
-        sc = Scenario(
-            "annot_bam_test",
-            genome_length=8000,
-            seed=42,
-            work_dir=tmp_path / "annot_bam",
-        )
-        # Spliced gene for strand training + deterministic unambig
-        sc.add_gene(
-            "g1",
-            "+",
-            [
-                {"t_id": "t1", "exons": [(500, 1000), (1500, 2000)], "abundance": 80},
-            ],
-        )
-        # Second gene for EM-routed isoform ambiguity
-        sc.add_gene(
-            "g2",
-            "+",
-            [
-                {"t_id": "t2", "exons": [(3000, 3500), (4000, 4500)], "abundance": 40},
-                {
-                    "t_id": "t3",
-                    "exons": [(3000, 3500), (4000, 4500), (5000, 5500)],
-                    "abundance": 40,
-                },
-            ],
-        )
-        yield sc
-        sc.cleanup()
 
     def test_annotated_bam_produced(self, scenario, tmp_path):
         """run_pipeline with annotated_bam_path writes a valid BAM."""
@@ -958,3 +959,165 @@ class TestAnnotatedBamIntegration:
             _assert_zf_invariants(zf)
             assert not (zf & AF_RESOLVED)
             assert rec.get_tag("ZC") == "."
+
+
+@pytestmark_scenario
+class TestAnnotatedBamWriterRobustness:
+    """What an aligner's or an annotation's ordinary output must not break in the second pass."""
+
+    _DOCUMENTED_ZS = {
+        "spliced_annot",
+        "spliced_unannot",
+        "spliced_implicit",
+        "splice_artifact",
+        "unspliced",
+        "unknown",
+    }
+
+    @staticmethod
+    def _sim(scenario, n_fragments=300):
+        from rigel.sim import ReadSimConfig
+
+        return scenario.build(
+            n_fragments=n_fragments,
+            sim_config=ReadSimConfig(
+                frag_mean=200,
+                frag_std=30,
+                frag_min=80,
+                frag_max=450,
+                read_length=100,
+                strand_specificity=1.0,
+                seed=42,
+            ),
+        )
+
+    @staticmethod
+    def _run(bam_path, index, annotated_bam, **kwargs):
+        from rigel.config import BamScanConfig, EMConfig, PipelineConfig
+        from rigel.pipeline import run_pipeline
+
+        return run_pipeline(
+            bam_path,
+            index,
+            config=PipelineConfig(
+                em=EMConfig(seed=42),
+                scan=BamScanConfig(sj_strand_tag="ts"),
+                annotated_bam_path=annotated_bam,
+            ),
+            **kwargs,
+        )
+
+    @staticmethod
+    def _rewrite(src, dst, edit):
+        """Copy a BAM record by record, in order, through ``edit(record, seen_names)``."""
+        import pysam
+
+        seen = set()
+        with pysam.AlignmentFile(str(src), "rb") as fin:
+            with pysam.AlignmentFile(str(dst), "wb", header=fin.header) as fout:
+                for r in fin.fetch(until_eof=True):
+                    edit(r, seen)
+                    seen.add(r.query_name)
+                    fout.write(r)
+
+    def test_a_gene_without_a_name_is_annotated_with_a_dot(self, scenario, tmp_path):
+        """A GTF need not name its genes (Ensembl leaves an unnamed gene without ``gene_name``; NCBI never writes it),
+        so the index holds NaN there. The writer takes strings: it raised a TypeError after scan, calibration and EM,
+        and the run was lost."""
+        import pysam
+
+        result = self._sim(scenario)
+        g_df = result.index.g_df
+        g_df["g_name"] = g_df["g_name"].astype(object)
+        g_df.loc[g_df["g_id"] == "g1", "g_name"] = np.nan
+        out = tmp_path / "annotated.bam"
+        self._run(result.bam_path, result.index, out)
+        with pysam.AlignmentFile(str(out), "rb") as f:
+            names = {
+                r.get_tag("ZR")
+                for r in f.fetch(until_eof=True)
+                if r.has_tag("ZG") and r.get_tag("ZG") == "g1"
+            }
+        assert names == {"."}
+
+    def test_a_read_name_whose_first_record_is_filtered_stays_one_run(self, scenario, tmp_path):
+        """A filtered record (here unmapped) is written through as it is read. When it opens a new read name while
+        the previous read name's records are still held, writing it first split its own read name around the held
+        group, and the output was no longer collated."""
+        import pysam
+
+        result = self._sim(scenario)
+        src = tmp_path / "unmapped_first.bam"
+
+        def unmap_first_mate_of_every_other_name(r, seen):
+            if r.query_name not in seen and hash(r.query_name) % 2 == 0:
+                r.flag |= 0x4
+
+        self._rewrite(result.bam_path, src, unmap_first_mate_of_every_other_name)
+        out = tmp_path / "annotated.bam"
+        self._run(src, result.index, out)
+        with pysam.AlignmentFile(str(out), "rb") as f:
+            names = [r.query_name for r in f.fetch(until_eof=True)]
+        runs = sum(1 for i, name in enumerate(names) if i == 0 or name != names[i - 1])
+        assert runs == len(set(names))
+
+    def test_an_aligners_tag_of_another_type_is_replaced(self, scenario, tmp_path):
+        """HISAT2 writes ``ZS:i`` (its second-best alignment score). Rigel's ``ZS`` is a string, htslib will not
+        update a tag in place across types, and the return was ignored, so the record kept HISAT2's integer."""
+        import pysam
+
+        result = self._sim(scenario)
+        src = tmp_path / "zs_int.bam"
+        self._rewrite(result.bam_path, src, lambda r, seen: r.set_tag("ZS", -12, value_type="i"))
+        out = tmp_path / "annotated.bam"
+        self._run(src, result.index, out)
+        with pysam.AlignmentFile(str(out), "rb") as f:
+            stamped = [r.get_tag("ZS") for r in f.fetch(until_eof=True) if r.has_tag("ZT")]
+        assert stamped and set(stamped) <= self._DOCUMENTED_ZS
+
+    def test_the_result_is_handed_over_before_the_second_pass(self, scenario, tmp_path):
+        """The CLI writes its tables in this hook, so a failure in the second pass cannot lose a finished run."""
+        result = self._sim(scenario)
+        out = tmp_path / "annotated.bam"
+        seen = []
+        self._run(
+            result.bam_path,
+            result.index,
+            out,
+            before_second_pass=lambda res: seen.append((out.exists(), res.estimator is not None)),
+        )
+        assert seen == [(False, True)] and out.exists()
+
+    def test_the_cli_writes_its_tables_before_the_second_pass(
+        self, scenario, tmp_path, monkeypatch
+    ):
+        """The annotated-BAM pass re-reads the whole BAM after the quantification is done; if it fails, the finished
+        tables must already be on disk rather than lost with it."""
+        import rigel.annotate as annotate
+        from rigel.cli import build_parser
+
+        result = self._sim(scenario)
+
+        def fail(*args, **kwargs):
+            raise RuntimeError("the second pass failed")
+
+        monkeypatch.setattr(annotate, "write_annotated_bam", fail)
+        out = tmp_path / "out"
+        args = build_parser().parse_args(
+            [
+                "quant",
+                "--bam",
+                str(result.bam_path),
+                "--index",
+                str(result.index_dir),
+                "-o",
+                str(out),
+                "--annotated-bam",
+                str(tmp_path / "annotated.bam"),
+                "--sj-strand-tag",
+                "ts",
+            ]
+        )
+        with pytest.raises(RuntimeError, match="second pass"):
+            args.func(args)
+        assert (out / "quant.feather").exists() and (out / "summary.json").exists()

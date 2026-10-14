@@ -149,25 +149,6 @@ directory keeps the previous run's optional files (a `quant.tsv` beside a newer 
 Tests first, each verified failing: a scenario BAM coordinate-sorted, cut to half its bytes, and reheadered with a
 `chr` prefix, each refused with its cause named.
 
-### the-annotated-bam-writer
-`priority: now — 0.8.0, approved with the issues survey (owner, 2026-10-14) · kind: defect · 2026-10-14`
-`--annotated-bam`'s second pass (`annotate.py`, the writer in `bam_scanner.cpp`):
-- **A gene with no `gene_name` crashes it, and the finished run is lost.** `annotate.py` hands `g_df.g_name` to a
-  writer that takes strings; a NaN (Ensembl's unnamed genes, an NCBI GTF, 273 of the test chromosome's 638 genes)
-  raises a TypeError after scan, calibration and EM, before `cli.py` writes a table. Map a missing name or ID to `.`,
-  which the MANUAL's `ZR` already allows. The simulator always fills the name, so no test reaches it.
-- **The tables are written after the pass**, so any failure in it loses a finished quantification. Write them first.
-- **A filtered first record splits a read name** (the MANUAL and README state the limit). A QC-failed, unmapped or
-  skipped-duplicate record is written at once while the previous read name's group is still held, so a pair whose first
-  mate is unmapped comes out split around its neighbour. Every record is kept and frag ids do not drift: the filter
-  predicate is the scan's. Write the held group before a filtered record of a new read name.
-- **An existing tag of another type survives.** `stamp_and_write_hit` ignores `bam_aux_update_*`'s return, and HISAT2
-  writes `ZS:i` (its second-best score) on multimappers, so those records keep HISAT2's integer where Rigel's splice
-  type belongs, with an htslib error line each. Delete an existing tag before stamping, and throw on failure.
-Tests first: a GTF with a gene lacking `gene_name` through `run_pipeline(annotated_bam_path=…)`; a collated BAM whose
-second read name starts with an unmapped mate (every read name one run); records carrying `ZS:i` (every annotated `ZS`
-one of the documented strings).
-
 ### the-gtf-parser-accepts-malformed-transcripts
 `priority: now — 0.8.0, approved with the issues survey (owner, 2026-10-14) · kind: defect · 2026-10-14`
 `--gtf-parse-mode strict` fails on malformed records (MANUAL), but a transcript's structure is never checked:

@@ -2325,6 +2325,26 @@ using cf32_1d = nb::ndarray<const float,    nb::ndim<1>, nb::c_contig>;
 using ci8_1d  = nb::ndarray<const int8_t,   nb::ndim<1>, nb::c_contig>;
 using ci16_1d = nb::ndarray<const int16_t,  nb::ndim<1>, nb::c_contig>;
 
+// Rigel owns the tags it stamps: an aligner's tag of the same name (HISAT2 writes ZS:i, its second-best score) is
+// replaced, never kept — htslib will not update a tag in place across types — and a failed write throws.
+static void set_tag_int(bam1_t* r, const char* tag, int64_t v) {
+    if (uint8_t* old = bam_aux_get(r, tag)) bam_aux_del(r, old);
+    if (bam_aux_update_int(r, tag, v) < 0)
+        throw std::runtime_error(std::string("Failed to write the ") + tag + " tag");
+}
+
+static void set_tag_float(bam1_t* r, const char* tag, float v) {
+    if (uint8_t* old = bam_aux_get(r, tag)) bam_aux_del(r, old);
+    if (bam_aux_update_float(r, tag, v) < 0)
+        throw std::runtime_error(std::string("Failed to write the ") + tag + " tag");
+}
+
+static void set_tag_str(bam1_t* r, const char* tag, const char* v) {
+    if (uint8_t* old = bam_aux_get(r, tag)) bam_aux_del(r, old);
+    if (bam_aux_update_str(r, tag, static_cast<int>(strlen(v) + 1), v) < 0)
+        throw std::runtime_error(std::string("Failed to write the ") + tag + " tag");
+}
+
 class BamAnnotationWriter {
 public:
     FragmentResolver* ctx_;
@@ -2455,7 +2475,7 @@ public:
                 // multimapper filtering, so we must still advance frag_id
                 // here to keep pass-2 lookup synchronized.
                 for (size_t i = 0; i < raw_group.size(); i++) {
-                    bam_aux_update_int(
+                    set_tag_int(
                         raw_group[i], "ZB",
                         static_cast<int>(light_group[i].n_sj_blacklisted));
                 }
@@ -2535,7 +2555,7 @@ public:
                     ptrdiff_t idx = lr - &light_group[0];
                     if (rec_written[idx]) continue;
                     rec_written[idx] = true;
-                    bam_aux_update_int(
+                    set_tag_int(
                         raw_group[idx], "ZB",
                         static_cast<int>(light_group[idx].n_sj_blacklisted));
                     hit_raws.push_back(raw_group[idx]);
@@ -2544,7 +2564,7 @@ public:
                     ptrdiff_t idx = lr - &light_group[0];
                     if (rec_written[idx]) continue;
                     rec_written[idx] = true;
-                    bam_aux_update_int(
+                    set_tag_int(
                         raw_group[idx], "ZB",
                         static_cast<int>(light_group[idx].n_sj_blacklisted));
                     hit_raws.push_back(raw_group[idx]);
@@ -2637,7 +2657,7 @@ public:
             std::vector<bam1_t*> orphan;
             for (size_t i = 0; i < raw_group.size(); i++) {
                 if (!rec_written[i]) {
-                    bam_aux_update_int(
+                    set_tag_int(
                         raw_group[i], "ZB",
                         static_cast<int>(light_group[i].n_sj_blacklisted));
                     orphan.push_back(raw_group[i]);
@@ -2671,6 +2691,14 @@ public:
                          || ((flag & BAM_FDUP) && skip_duplicates_)
                          || !(flag & BAM_FPAIRED);
             if (filtered) {
+                // A filtered record that opens a new read name: write the held group first, or this read name
+                // would be split around it and the output would no longer be collated
+                if (!light_group.empty() && current_qname != bam_get_qname(b)) {
+                    process_and_write();
+                    for (auto* r : raw_group) bam_destroy1(r);
+                    raw_group.clear();
+                    light_group.clear();
+                }
                 if (sam_write1(out, hdr, b) < 0)
                     throw std::runtime_error(
                         "Failed to write filtered BAM record");
@@ -2778,23 +2806,18 @@ private:
         int zl)            // locus_id (-1 = no locus)
     {
         for (bam1_t* r : records) {
-            bam_aux_update_str(r, "ZT",
-                static_cast<int>(strlen(zt) + 1), zt);
-            bam_aux_update_str(r, "ZG",
-                static_cast<int>(strlen(zg) + 1), zg);
-            bam_aux_update_str(r, "ZR",
-                static_cast<int>(strlen(zr) + 1), zr);
-            bam_aux_update_int(r, "ZI", zi);
-            bam_aux_update_int(r, "ZJ", zj);
-            bam_aux_update_int(r, "ZF", zf);
-            bam_aux_update_float(r, "ZW", zw);
-            bam_aux_update_str(r, "ZC",
-                static_cast<int>(strlen(zc) + 1), zc);
-            bam_aux_update_int(r, "ZH", zh);
-            bam_aux_update_int(r, "ZN", zn);
-            bam_aux_update_str(r, "ZS",
-                static_cast<int>(strlen(zs) + 1), zs);
-            bam_aux_update_int(r, "ZL", zl);
+            set_tag_str(r, "ZT", zt);
+            set_tag_str(r, "ZG", zg);
+            set_tag_str(r, "ZR", zr);
+            set_tag_int(r, "ZI", zi);
+            set_tag_int(r, "ZJ", zj);
+            set_tag_int(r, "ZF", zf);
+            set_tag_float(r, "ZW", zw);
+            set_tag_str(r, "ZC", zc);
+            set_tag_int(r, "ZH", zh);
+            set_tag_int(r, "ZN", zn);
+            set_tag_str(r, "ZS", zs);
+            set_tag_int(r, "ZL", zl);
 
             if (sam_write1(out, hdr, r) < 0) {
                 throw std::runtime_error("Failed to write BAM record");

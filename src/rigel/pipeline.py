@@ -62,6 +62,8 @@ from .stats import PipelineStats
 from .strand_model import StrandModels
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .annotate import AnnotationTable
     from .calibration import CalibrationResult
     from .calibration.fl import FLModels
@@ -879,6 +881,8 @@ def run_pipeline(
     bam_path,
     index: TranscriptIndex,
     config: PipelineConfig | None = None,
+    *,
+    before_second_pass: "Callable[[PipelineResult], None] | None" = None,
 ) -> PipelineResult:
     """Run the complete quantification pipeline with locus-level EM.
 
@@ -893,6 +897,9 @@ def run_pipeline(
         The loaded reference index.
     config : PipelineConfig or None
         Complete pipeline configuration.  If ``None``, uses defaults.
+    before_second_pass : callable or None
+        Called with the finished result before the optional annotated-BAM pass, so a caller can persist the
+        quantification before a pass that re-reads the whole BAM; the CLI writes its tables here.
 
     Returns
     -------
@@ -1035,6 +1042,24 @@ def run_pipeline(
     finally:
         buffer.cleanup()
 
+    # Genome-wide gDNA track for the QC report (+ bedGraph). Pure persistence of
+    # the per-region calibration solution.
+    from .calibration.track import build_gdna_track
+
+    calibration_track = build_gdna_track(calibration, region_arrays, index.ref_names)
+
+    result = PipelineResult(
+        stats=stats,
+        strand_models=strand_models,
+        estimator=estimator,
+        pipeline_config=config,
+        calibration=calibration,
+        fl_models=fl_models,
+        calibration_track=calibration_track,
+    )
+    if before_second_pass is not None:
+        before_second_pass(result)
+
     # -- Second BAM pass: write annotated BAM (opt-in) --
     if annotations is not None:
         from .annotate import write_annotated_bam
@@ -1049,19 +1074,4 @@ def run_pipeline(
             sj_strand_tag=scan.sj_strand_tag,
             locus_id_per_transcript=estimator.locus_id_per_transcript,
         )
-
-    # Genome-wide gDNA track for the QC report (+ bedGraph). Pure persistence of
-    # the per-region calibration solution.
-    from .calibration.track import build_gdna_track
-
-    calibration_track = build_gdna_track(calibration, region_arrays, index.ref_names)
-
-    return PipelineResult(
-        stats=stats,
-        strand_models=strand_models,
-        estimator=estimator,
-        pipeline_config=config,
-        calibration=calibration,
-        fl_models=fl_models,
-        calibration_track=calibration_track,
-    )
+    return result

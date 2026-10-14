@@ -341,6 +341,11 @@ class AnnotationTable:
         return self._size
 
 
+def _tag_strings(values) -> list[str]:
+    """IDs and names as the BAM's string tags: a missing or empty one is ``.``."""
+    return [v if isinstance(v, str) and v else "." for v in values]
+
+
 def write_annotated_bam(
     bam_path: str,
     output_path: str,
@@ -420,9 +425,10 @@ def write_annotated_bam(
         current = annotations.locus_id[:n]
         annotations.locus_id[:n] = np.where(current >= 0, current, from_tid)
 
-    t_ids = list(index.t_df["t_id"].values)
-    g_ids = list(index.g_df["g_id"].values)
-    g_names = list(index.g_df["g_name"].values)
+    # The writer takes strings; an annotation may leave a gene unnamed (NaN in the index), which the BAM reads `.`
+    t_ids = _tag_strings(index.t_df["t_id"].values)
+    g_ids = _tag_strings(index.g_df["g_id"].values)
+    g_names = _tag_strings(index.g_df["g_name"].values)
 
     summary = writer.write(
         bam_path,

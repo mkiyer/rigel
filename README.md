@@ -180,7 +180,7 @@ file), `export` (Feather to TSV or Parquet) and `report`. `rigel --version` prin
 | `config.yaml` | Resolved run configuration (parameters, I/O paths). Rerun with `rigel quant --config config.yaml` |
 | `report.html` | Optional self-contained QC report, built by `rigel report` (see step 4) |
 | `locus_stats.feather` | Optional per-locus statistics, emitted only with `--emit-locus-stats` |
-| `--annotated-bam PATH` | Optional annotated BAM with per-fragment assignment tags (a second BAM pass); the same records as the input, collated — except that a read name whose first record is filtered (QC-failed, unmapped or a skipped duplicate) can be split around its neighbour |
+| `--annotated-bam PATH` | Optional annotated BAM with per-fragment assignment tags (a second BAM pass); the same records as the input, collated |
 
 `tpm` is normalized over annotated transcripts only; `tpm_total_rna` normalizes over all RNA
 (annotated + synthetic nRNA spans) and is comparable to the `nrna_quant` TPM column.
