@@ -76,9 +76,8 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
   the strand channel is live, `strand_live`, and one `strand_overdispersion` (0, binomial), which replaces the calibration block's two.
 - Quantification is reproducible from one seeded stream, which the second pass draws from; output is
   bit-identical run to run with `--threads 1`. With more threads the scan's batch order, which varies run to run,
-  and the locus EM's split of its largest loci, which follows the thread count (by default the machine's core
-  count), change the order of floating-point sums, which can move fragments between isoforms that share them. The index loader refuses an index it did not build (no manifest, or
-  another format version).
+  changes the order of floating-point sums, which can move fragments between isoforms that share them. The index
+  loader refuses an index it did not build (no manifest, or another format version).
 - `--assignment-mode sample` (the default) makes whole counts first: each fragment goes to exactly one
   transcript or to gDNA, and the counts equal the fractional counts rounded, whatever the seed.
 - An unknown key in a `--config` file is an error that lists the keys this version knows and names the version
@@ -118,6 +117,11 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
 
 ### Fixed
 
+- The locus EM gives one answer at any thread count. 0.7.1 split the E-step of its largest loci across the threads
+  and added their sums in an order that followed the thread count, so one input gave different tables on machines with
+  different core counts (by default `--threads` is the core count); isoforms that share fragments could swap whole
+  counts. Each thread now runs whole equivalence classes, whose sums are added in the order one thread adds them,
+  at no cost in speed.
 - A spliced fragment that no annotated transcript holds is RNA, not gDNA: `summary.json`'s `gdna_fraction` counts only
   the unspliced intergenic fragments and books the spliced ones as their own pool (`intergenic_spliced`), the report
   splits its intergenic pool the same way, and the annotated BAM labels them `ZF` 0x21 rather than 0x25.

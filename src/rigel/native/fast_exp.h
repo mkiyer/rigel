@@ -1,6 +1,6 @@
 // fast_exp.h — Vectorized exp() for the EM E-step hot path
 //
-// Exploits two properties of the call site in em_step_kernel_range():
+// Exploits two properties of the call site in em_step_kernel():
 //   1. Input x is always <= 0  (log-sum-exp normalization subtracts max_val)
 //   2. Moderate accuracy suffices (posteriors are normalized; ~25 ULP is fine)
 //

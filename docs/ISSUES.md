@@ -111,21 +111,6 @@ a backend pin that fixes the sdist's name, a trimmed sdist and wheel, absolute R
 - the bioconda recipe: the auto-bump bot copies only the version and sha256, so the first 0.8.0 PR carries
   `conda/build.sh` and `meta.yaml`'s `additional-platforms` (`linux-aarch64`, `osx-arm64`) by hand.
 
-### the-em-depends-on-its-thread-count
-`priority: now — 0.8.0: the reduction prototyped and measured, then the owner decides (2026-10-14); the MANUAL and CHANGELOG state the dependence since 2026-10-14 · kind: defect · 2026-10-14`
-A locus whose E-step work reaches `total_work / threads` runs through `parallel_estep`, which adds each thread's column
-sums into a per-thread buffer and Kahan-reduces the buffers in thread order: a grouping that changes with the thread
-count and matches neither the sequential path nor another count. SQUAREM's rounding sensitivity
-(`ISSUES: the-em-stops-before-it-converges`) turns the ulps into whole isoforms. On g50 ss.99 capture ON with only
-`em.n_threads` varied, 1, 2, 4 and 8 threads agree bit for bit (no locus reaches the share); 16 makes three such loci and
-moves 42 transcripts by 3,293 fragments (`B4_capcluster_ba` T5 341.5 → 0, T4 2,155.8 → 3,059.0); one synthetic locus
-already differs between 1 and 2 threads (4e-10). Each thread count is deterministic, but the default `--threads 0` is
-`hardware_concurrency`, blind to cgroup and affinity limits, so one input gives different tables on machines with
-different core counts (the MANUAL and the CHANGELOG now say so). The repair:
-store each task's column sums and reduce them in task order after the parallel phase, with the sequential path
-through the same tasks — a numeric change, so `rename_identity.py` and a pinned A/B. Test first: one locus through
-`batch_locus_em_partitioned` at 1, 2, 3, 4 and 16 threads, bit-identical.
-
 ### an-unrecorded-splice-blacklist-is-dropped-silently
 `priority: now — 0.8.0: the cluster's manifest checked before any cluster quant; the warning landed 2026-10-14 · kind: risk · 2026-09-28`
 `TranscriptIndex.load` applies `splice_blacklist.feather` only when `manifest.json` records `sources.alignable_zarr`;
@@ -1369,6 +1354,26 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### the-em-depends-on-its-thread-count
+CLOSED 2026-10-14 by the fix (owner: land it): the locus EM gives the single thread's answer at every thread count. A
+locus whose E-step work reached `total_work / threads` cut its equivalence classes into row ranges, added each thread's
+column sums into a buffer of its own and Kahan-reduced the buffers in thread order, a grouping that followed the thread
+count. Each thread now runs whole classes, each class's column sums go to a slot of their own, and the slots are added
+in class order, one thread's order; the plan (the slots, the classes dealt heaviest first) is built once per locus.
+Gate: `tests/test_em_thread_count.py`, one locus at 2, 3, 4 and 16 threads against one, each failing on the old code.
+Measured (`~/Downloads/rigel_runs/prototypes/2026-10-14_emreduce/`):
+- bit-identical to `--threads 1`: ladder g50 ss.99 ON (fractional, pinned) at 1, 3 and 16 threads; VCaP (sampled,
+  pinned) at 16; VCaP's EM replayed on one frozen input at 1 and 16;
+- against the old 16-thread default: every ladder stratum within 0.004 % (the largest condition 42 of 627k fragments);
+  the test chromosome's capture-ON strata ±1.5–1.8 % at transcript level, genes unchanged — isoforms near a tie now
+  break one way. The "42 transcripts by 3,293 fragments" this entry quoted (`B4_capcluster_ba`) was that panel, not the
+  ladder, where 16 threads moved 46 transcripts by 0.1 fragments in all;
+- speed, no penalty: ladder g50 ON's EM 15.40 → 15.46 s (two pairs); VCaP's EM replayed in bracketed pairs 17.64 →
+  17.52 s, its threaded locus 4.43 → 4.21 s.
+Refused on the way: row ranges fixed for both paths (thread-invariant, but it moved the single-thread answer, g50 ON's
+gDNA by −34 fragments, and ran slower). Left as accepted: the scan's sums at more than one scan thread
+(`ISSUES: the-scan-fraction-banks-are-not-reproducible`), so `--threads 1` stays the one bit-reproducible run.
 
 ### calibration-detects-capture-on-a-capture-off-library
 CLOSED 2026-10-14 (the 0.8.0 reassessment): its headline symptom is fixed. `flgap_rna_short` stranded × capture-OFF

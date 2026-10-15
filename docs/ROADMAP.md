@@ -127,12 +127,12 @@ its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-mult
 4. **ISSUES cleanup and prioritization**: the OPEN section ordered by priority. Done.
 5. **The survey**: implement or defer, entry by entry. Done (owner, 2026-10-14): the release review's fixes are approved;
    the splice-artifact work is handled before any release, once the release candidate is clean
-   (`ISSUES: splicing-artifacts`, which now holds the strand pruning); the EM's thread dependence waits for a measured
-   prototype (`ISSUES: the-em-depends-on-its-thread-count`); everything else is deferred as tiered.
+   (`ISSUES: splicing-artifacts`, which now holds the strand pruning); the EM's thread dependence waited for a measured
+   prototype, and landed on it (`ISSUES: the-em-depends-on-its-thread-count`); everything else is deferred as tiered.
 6. **The release issues fixed**, simple ones first and as many closed as possible, each with a falsification test
    verified failing; a numeric change gets its own A/B window, and a numeric no-op, proven with
-   `rename_identity.py --check`, lands between any two windows. Then the involved ones: the EM's reduction, measured;
-   then the splice-artifact design.
+   `rename_identity.py --check`, lands between any two windows. Then the involved ones: the EM's reduction, landed
+   2026-10-14; then the splice-artifact design.
 7. **The release**: `docs/PUBLISHING.md` is the procedure; what gates it is the state — the deliverable measured per
    stratum, the zero rows clean, the suite at its standing count, `preflight.py --full` green, CI run once by hand, a
    real-data smoke run, the standing risks re-read, and the manual and the changelog true of what ships.

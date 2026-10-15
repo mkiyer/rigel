@@ -45,11 +45,6 @@ namespace nb = nanobind;
 static constexpr double EM_LOG_EPSILON = 1e-300;
 static constexpr int    SQUAREM_BUDGET_DIVISOR = 3;
 
-// Target number of element-operations per E-step parallel task.
-// Each equivalence class row with k components costs O(k); tasks are
-// sized to ~ESTEP_TASK_WORK_TARGET / k rows for load-balanced threading.
-static constexpr int    ESTEP_TASK_WORK_TARGET = 4096;
-
 // VBEM floor: the minimum alpha a component keeps, EM_LOG_EPSILON (≈1e-300), deep enough that digamma
 // returns ≈ −1e300. After max-subtraction in the E-step kernel exp(−1e300) = 0.0 (IEEE underflow), so a
 // component at the floor receives zero responsibility, and the evidence-proportional prior gives it
@@ -297,22 +292,17 @@ struct KahanAccumulator {
 // EM step kernel — the hot inner loop (range-based)
 // ================================================================
 //
-// Processes rows [row_start, row_end) of one equivalence class:
-// computes posteriors from log_weights, normalizes rows via
-// log-sum-exp, accumulates column sums into em_totals with
-// Kahan summation for numerical stability.
+// Processes every row of one equivalence class: computes posteriors
+// from log_weights, normalizes rows via log-sum-exp, and writes the k
+// column sums, each Kahan-summed in row order, to col_sums.
 //
-// Thread safety: multiple threads may process non-overlapping row
-// ranges of the same EC concurrently; the EC is read-only and each
-// row's posteriors live in a stack-local buffer.  em_totals must be
-// thread-private when called from parallel_estep.
+// Thread safety: the EC is read-only, each row's posteriors live in a
+// stack-local buffer, and col_sums is the caller's slot.
 
-static inline void em_step_kernel_range(
+static inline void em_step_kernel(
     const EmEquivClass& ec,
-    int               row_start,
-    int               row_end,
     const double*     log_weights,   // [n_components]
-    double*           em_totals)     // [n_components], accumulated
+    double*           col_sums)      // [k], overwritten
 {
     const int k = ec.k;
     const double* ll = ec.ll_flat.data();
@@ -330,10 +320,10 @@ static inline void em_step_kernel_range(
         row = heap_row.data();
     }
 
-    // One Kahan accumulator per column, fed in row order (row_start to row_end).
+    // One Kahan accumulator per column, fed in row order.
     std::vector<KahanAccumulator> col_acc(k);
 
-    for (int i = row_start; i < row_end; ++i) {
+    for (int i = 0; i < ec.n; ++i) {
 
         // Compute row values and find max
         double max_val = ll[i * k] + log_weights[cidx[0]];
@@ -465,119 +455,95 @@ static inline void em_step_kernel_range(
         }
     }
 
-    // Flush column sums to em_totals
     for (int j = 0; j < k; ++j) {
-        em_totals[cidx[j]] += col_acc[j].sum;
+        col_sums[j] = col_acc[j].sum;
     }
 }
 
 // ================================================================
-// Parallel E-step: task-based load balancing with Kahan reduction
+// The E-step: per-class column sums, added in class order
 // ================================================================
 //
-// Breaks large ECs into row-range tasks of bounded size
-// (~ESTEP_TASK_WORK_TARGET/k rows), partitions tasks across threads
-// by actual computational cost (n*k), and reduces with Kahan summation.
-//
-// Determinism: tasks are created and assigned in a fixed order;
-// each thread processes its partition sequentially; cross-thread
-// reduction sums in thread-index order with Kahan.  Result is
-// fully deterministic.
+// Each equivalence class's column sums go to a slot of their own, and the
+// slots are added into em_totals in class order once every class is done:
+// the single-thread E-step's additions in its order, on one thread or many, so
+// the totals are the same to the last bit whatever the thread count and the
+// threads change only which class runs where. A class is never split across
+// threads, since a split would re-associate its row sums. Built once per locus,
+// its slots and order reused by every step.
 
-struct EStepTask {
-    int ec_idx;
-    int row_start;
-    int row_end;
-    int64_t cost;
-};
-
-static void parallel_estep(
-    const std::vector<EmEquivClass>& ec_data,
-    const double*  log_weights,
-    double*        em_totals,      // [n_components], zeroed by caller
-    int            n_components,
-    int            n_threads,
-    rigel::ThreadPool* pool = nullptr)
-{
-    // 1. Break ECs into granular tasks for load balance
-    std::vector<EStepTask> tasks;
-    int64_t total_cost = 0;
-
-    for (int i = 0; i < static_cast<int>(ec_data.size()); ++i) {
-        int n = ec_data[i].n;
-        int k = ec_data[i].k;
-        int chunk_rows = std::max(1, ESTEP_TASK_WORK_TARGET / std::max(k, 1));
-
-        for (int r = 0; r < n; r += chunk_rows) {
-            int r_end = std::min(r + chunk_rows, n);
-            int64_t cost = static_cast<int64_t>(r_end - r) * k;
-            tasks.push_back({i, r, r_end, cost});
-            total_cost += cost;
-        }
-    }
-
-    // 2. Partition tasks by cumulative cost (greedy sequential)
-    std::vector<int> thread_bounds(n_threads + 1, 0);
+class EStep {
+public:
+    // pool: the locus's threads, or nullptr to run on the caller's thread alone.
+    EStep(const std::vector<EmEquivClass>& ec_data, rigel::ThreadPool* pool)
+        : ec_data_(ec_data), pool_(pool), slot_(ec_data.size() + 1, 0)
     {
-        int cur_thread = 1;
-        int64_t cur_cost = 0;
-        int64_t target = total_cost / n_threads;
-
-        for (size_t t = 0; t < tasks.size(); ++t) {
-            cur_cost += tasks[t].cost;
-            if (cur_cost >= target && cur_thread < n_threads) {
-                thread_bounds[cur_thread++] = static_cast<int>(t + 1);
-                cur_cost = 0;
+        const int n_ec = static_cast<int>(ec_data.size());
+        for (int i = 0; i < n_ec; ++i) {
+            slot_[i + 1] = slot_[i] + static_cast<size_t>(ec_data[i].k);
+        }
+        sums_.resize(slot_[n_ec]);
+        if (pool_) {
+            // The classes dealt heaviest first, each to the thread with the least work so far.
+            auto work = [&](int i) { return static_cast<int64_t>(ec_data[i].n) * ec_data[i].k; };
+            std::vector<int> order(static_cast<size_t>(n_ec));
+            std::iota(order.begin(), order.end(), 0);
+            std::sort(order.begin(), order.end(), [&](int a, int b) {
+                return work(a) != work(b) ? work(a) > work(b) : a < b;
+            });
+            const int n_threads = pool_->n_threads();
+            std::vector<int64_t> load(static_cast<size_t>(n_threads), 0);
+            std::vector<std::vector<int>> dealt(static_cast<size_t>(n_threads));
+            for (int i : order) {
+                const int t = static_cast<int>(std::min_element(load.begin(), load.end()) - load.begin());
+                dealt[t].push_back(i);
+                load[t] += work(i);
+            }
+            thread_start_.assign(static_cast<size_t>(n_threads) + 1, 0);
+            for (int t = 0; t < n_threads; ++t) {
+                thread_start_[t + 1] = thread_start_[t] + static_cast<int>(dealt[t].size());
+                thread_classes_.insert(thread_classes_.end(), dealt[t].begin(), dealt[t].end());
             }
         }
-        while (cur_thread <= n_threads) {
-            thread_bounds[cur_thread++] = static_cast<int>(tasks.size());
+    }
+
+    // Adds the posteriors' column sums into em_totals [n_components], zeroed by the caller.
+    void run(const double* log_weights, double* em_totals) {
+        const int n_ec = static_cast<int>(ec_data_.size());
+        auto run_class = [&](int i) {
+            em_step_kernel(ec_data_[i], log_weights, sums_.data() + slot_[i]);
+        };
+        auto add_class = [&](int i) {
+            const int32_t* cidx = ec_data_[i].comp_idx.data();
+            const double* s = sums_.data() + slot_[i];
+            for (int j = 0; j < ec_data_[i].k; ++j) {
+                em_totals[cidx[j]] += s[j];
+            }
+        };
+        if (pool_) {
+            pool_->run_parallel([&](int tid) {
+                for (int c = thread_start_[tid]; c < thread_start_[tid + 1]; ++c) {
+                    run_class(thread_classes_[c]);
+                }
+            });
+            for (int i = 0; i < n_ec; ++i) add_class(i);
+        } else {
+            // The same additions in the same order, each class's while its slot is still in cache.
+            for (int i = 0; i < n_ec; ++i) {
+                run_class(i);
+                add_class(i);
+            }
         }
     }
 
-    // 3. Thread-local em_totals buffers
-    std::vector<std::vector<double>> local_totals(n_threads);
-    for (int t = 0; t < n_threads; ++t) {
-        local_totals[t].assign(static_cast<size_t>(n_components), 0.0);
-    }
-
-    // 4. Worker: process assigned tasks
-    auto worker = [&](int tid) {
-        int start_task = thread_bounds[tid];
-        int end_task   = thread_bounds[tid + 1];
-        double* my_totals = local_totals[tid].data();
-
-        for (int t = start_task; t < end_task; ++t) {
-            em_step_kernel_range(ec_data[tasks[t].ec_idx],
-                                 tasks[t].row_start,
-                                 tasks[t].row_end,
-                                 log_weights,
-                                 my_totals);
-        }
-    };
-
-    // 5. Launch threads (use pool if available, else spawn/join)
-    if (pool) {
-        pool->run_parallel(worker);
-    } else {
-        std::vector<std::thread> threads;
-        threads.reserve(n_threads - 1);
-        for (int t = 1; t < n_threads; ++t) {
-            threads.emplace_back(worker, t);
-        }
-        worker(0);
-        for (auto& th : threads) th.join();
-    }
-
-    // 6. Deterministic Kahan reduction across threads
-    for (int i = 0; i < n_components; ++i) {
-        KahanAccumulator acc;
-        for (int t = 0; t < n_threads; ++t) {
-            acc.add(local_totals[t][i]);
-        }
-        em_totals[i] += acc.sum;
-    }
-}
+private:
+    const std::vector<EmEquivClass>& ec_data_;
+    rigel::ThreadPool* pool_;
+    std::vector<size_t> slot_;   // [n_ec + 1]: class i's k sums are sums_[slot_[i], slot_[i + 1])
+    std::vector<double> sums_;
+    std::vector<int> thread_start_;    // threaded only: thread t runs thread_classes_[thread_start_[t], thread_start_[t + 1])
+    std::vector<int> thread_classes_;
+};
 
 // ================================================================
 // Grouped RNA/gDNA prior update
@@ -785,15 +751,13 @@ static void apply_grouped_prior_update(
 
 static void map_em_step(
     const double* theta,
-    const std::vector<EmEquivClass>& ec_data,
+    EStep&        estep,
     const double* log_eff_len,
     const double* unambig_totals,
     const AggregatePrior& aggregate_prior,
     double*       em_totals,    // zeroed then accumulated
     double*       theta_new,    // output: normalized
-    int           n_components,
-    int           estep_threads = 1,
-    rigel::ThreadPool* pool = nullptr)
+    int           n_components)
 {
     // Compute log_weights = log(theta + epsilon) - log_eff_len
     std::vector<double> log_weights(static_cast<size_t>(n_components));
@@ -805,14 +769,7 @@ static void map_em_step(
     std::fill(em_totals, em_totals + n_components, 0.0);
 
     // E-step: accumulate posteriors
-    if (estep_threads > 1) {
-        parallel_estep(ec_data, log_weights.data(), em_totals,
-                       n_components, estep_threads, pool);
-    } else {
-        for (const auto& ec : ec_data) {
-            em_step_kernel_range(ec, 0, ec.n, log_weights.data(), em_totals);
-        }
-    }
+    estep.run(log_weights.data(), em_totals);
 
     // Grouped MAP-EM: raw counts first, then aggregate prior projection.
     std::vector<double> raw_counts(static_cast<size_t>(n_components));
@@ -840,15 +797,13 @@ static void map_em_step(
 
 static void vbem_step(
     const double* alpha,
-    const std::vector<EmEquivClass>& ec_data,
+    EStep&        estep,
     const double* log_eff_len,
     const double* unambig_totals,
     const AggregatePrior& aggregate_prior,
     double*       em_totals,
     double*       alpha_new,
-    int           n_components,
-    int           estep_threads = 1,
-    rigel::ThreadPool* pool = nullptr)
+    int           n_components)
 {
     // Compute alpha_sum
     double alpha_sum = 0.0;
@@ -868,14 +823,7 @@ static void vbem_step(
     std::fill(em_totals, em_totals + n_components, 0.0);
 
     // E-step
-    if (estep_threads > 1) {
-        parallel_estep(ec_data, log_weights.data(), em_totals,
-                       n_components, estep_threads, pool);
-    } else {
-        for (const auto& ec : ec_data) {
-            em_step_kernel_range(ec, 0, ec.n, log_weights.data(), em_totals);
-        }
-    }
+    estep.run(log_weights.data(), em_totals);
 
     // M-step: grouped count-space update (unnormalized alpha-like mass).
     std::vector<double> raw_counts(static_cast<size_t>(n_components));
@@ -1054,11 +1002,11 @@ static EMResult run_squarem(
     int           max_iterations,
     double        convergence_delta,
     bool          use_vbem,
-    int           estep_threads = 1,
     rigel::ThreadPool* pool = nullptr)
 {
     int max_sq_iters = std::max(max_iterations / SQUAREM_BUDGET_DIVISOR, 1);
     size_t nc = static_cast<size_t>(n_components);
+    EStep estep(ec_data, pool);
 
     std::vector<double> em_totals(nc, 0.0);
 
@@ -1090,13 +1038,13 @@ static EMResult run_squarem(
 
         for (int iter = 0; iter < max_sq_iters; ++iter) {
             // Two plain VBEM steps
-            vbem_step(state0.data(), ec_data, log_eff_len,
+            vbem_step(state0.data(), estep, log_eff_len,
                       unambig_totals, aggregate_prior, em_totals.data(),
-                      state1.data(), n_components, estep_threads, pool);
+                      state1.data(), n_components);
 
-            vbem_step(state1.data(), ec_data, log_eff_len,
+            vbem_step(state1.data(), estep, log_eff_len,
                       unambig_totals, aggregate_prior, em_totals.data(),
-                      state2.data(), n_components, estep_threads, pool);
+                      state2.data(), n_components);
 
             // SQUAREM extrapolation
             double sv2 = 0.0, srv = 0.0;
@@ -1138,9 +1086,9 @@ static EMResult run_squarem(
             }
 
             // Stabilisation step
-            vbem_step(state_extrap.data(), ec_data, log_eff_len,
+            vbem_step(state_extrap.data(), estep, log_eff_len,
                       unambig_totals, aggregate_prior, em_totals.data(),
-                      state_new.data(), n_components, estep_threads, pool);
+                      state_new.data(), n_components);
 
             // Floor-clamp + convergence check on normalized theta
             double sum_old = 0.0, sum_new = 0.0;
@@ -1204,15 +1152,13 @@ static EMResult run_squarem(
 
         for (int iter = 0; iter < max_sq_iters; ++iter) {
             // Two EM steps
-            map_em_step(state0.data(), ec_data, log_eff_len,
+            map_em_step(state0.data(), estep, log_eff_len,
                         unambig_totals, aggregate_prior, em_totals.data(),
-                        state1.data(), n_components,
-                        estep_threads, pool);
+                        state1.data(), n_components);
 
-            map_em_step(state1.data(), ec_data, log_eff_len,
+            map_em_step(state1.data(), estep, log_eff_len,
                         unambig_totals, aggregate_prior, em_totals.data(),
-                        state2.data(), n_components,
-                        estep_threads, pool);
+                        state2.data(), n_components);
 
             // SQUAREM extrapolation
             double sv2 = 0.0, srv = 0.0;
@@ -1260,10 +1206,9 @@ static EMResult run_squarem(
             }
 
             // Stabilisation step
-            map_em_step(state_extrap.data(), ec_data, log_eff_len,
+            map_em_step(state_extrap.data(), estep, log_eff_len,
                         unambig_totals, aggregate_prior, em_totals.data(),
-                        state_new.data(), n_components,
-                        estep_threads, pool);
+                        state_new.data(), n_components);
 
             for (size_t i = 0; i < nc; ++i) {
                 if (!std::isfinite(state_new[i])) {
@@ -2374,7 +2319,7 @@ batch_locus_em_partitioned(
                 init_counts.data(),
                 nc, max_iterations, convergence_delta,
                 use_vbem,
-                estep_thr, pool);
+                pool);
             auto t6 = hrclock::now();
 
             // 7. Assign posteriors
