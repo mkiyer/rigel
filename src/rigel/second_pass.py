@@ -591,9 +591,17 @@ def score_held_fragments(
                 length_likelihood[slot] = float(pmf[L]) if 0 <= L <= max_size else 0.0
 
                 # -- strand ---------------------------------------------------------------------------
-                # An OBSERVED motif pins the fragment's strand, and pass 1 has already constrained the
-                # hypotheses to it, so the term is constant across the set and cancels.
-                if observed_motif == int(Strand.NONE):
+                # Every placement's factor is the probability of its observed orientation under its own
+                # reading. An OBSERVED motif makes every hypothesis of the placement RNA on that motif's
+                # strand, since its intron is cut under all of them: constant within the placement, but not
+                # across a multimapper's placements, where an unspliced hit carries gDNA's ½.
+                if observed_motif != int(Strand.NONE):
+                    strand[slot], _ = strand_terms(
+                        align=align,
+                        implied_strand=observed_motif,
+                        rna_sense_frac=rna_sense_frac,
+                    )
+                else:
                     spliced_term, genomic_term = strand_terms(
                         align=align,
                         implied_strand=implied_strand,
