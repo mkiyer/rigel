@@ -20,7 +20,7 @@ from rigel.calibration.signature import (
     TS_NONE,
     TS_POS,
     RegionStrand,
-    nrna_active_strands,
+    rna_active_strands,
     transcript_strand_class,
 )
 
@@ -67,8 +67,8 @@ def test_strand_convention_unified():
 # ---------------------------------------------------------------------------
 
 
-def test_nrna_active_strands():
-    """Nascent-active = a transcript is present (exon OR intron) on the strand."""
+def test_rna_active_strands():
+    """RNA-active = a transcript is present (exon OR intron) on the strand."""
     sig = np.array(
         [
             0,  # intergenic
@@ -81,22 +81,22 @@ def test_nrna_active_strands():
         ],
         dtype=np.int64,
     )
-    pos, neg = nrna_active_strands(sig)
+    pos, neg = rna_active_strands(sig)
     np.testing.assert_array_equal(pos, [False, True, True, False, False, True, True])
     np.testing.assert_array_equal(neg, [False, False, False, True, True, True, True])
 
 
 def test_boundary_taxonomy_from_flank_helpers():
     """The boundary types as the AND of the two flanks' helper masks: a strand crosses iff both flanks
-    are nrna-active."""
+    are RNA-active."""
     # (left_sig, right_sig) per type, tested on the + strand unless noted.
     intergenic, exon_p, intron_p = 0, BIT_EXON_POS, BIT_INTRON_POS
     ambig = BIT_EXON_POS | BIT_EXON_NEG
 
     def crosses(left, right):
-        nlp, _ = nrna_active_strands(np.array([left]))
-        nrp, _ = nrna_active_strands(np.array([right]))
-        return bool((nlp & nrp)[0])
+        left_pos, _ = rna_active_strands(np.array([left]))
+        right_pos, _ = rna_active_strands(np.array([right]))
+        return bool((left_pos & right_pos)[0])
 
     # 1) intergenic ↔ exon: no + transcript on the left flank ⇒ no crossing ⇒ gDNA sink.
     assert crosses(intergenic, exon_p) is False
@@ -105,6 +105,6 @@ def test_boundary_taxonomy_from_flank_helpers():
     assert crosses(exon_p, exon_p) is True
     assert crosses(ambig, ambig) is True
     # ambig ↔ ambig also crosses on the − strand (the AMBIG 2-D region).
-    _, nln = nrna_active_strands(np.array([ambig]))
-    _, nrn = nrna_active_strands(np.array([ambig]))
-    assert bool((nln & nrn)[0])
+    _, left_neg = rna_active_strands(np.array([ambig]))
+    _, right_neg = rna_active_strands(np.array([ambig]))
+    assert bool((left_neg & right_neg)[0])

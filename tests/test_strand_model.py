@@ -1,10 +1,10 @@
 """`rigel.strand_model` — the 2x2 sense/antisense counts, the per-sj table underneath them, and the
 posterior they imply.
 
-The counts and their accumulation; the per-sj strand table, which is what the overdispersion fit
+The counts and their accumulation; the per-sj strand table, which is what the junction fit behind κ
 reads and which the 2x2 is only the marginal of; the posterior over a fragment's strand; the derived
 properties; and the container that holds one model per population. A model that kept only the 2x2
-would satisfy every marginal check and silently disable the dispersion estimate.
+would satisfy every marginal check and silently fall back to the pooled κ, splice artifacts and all.
 """
 
 import numpy as np

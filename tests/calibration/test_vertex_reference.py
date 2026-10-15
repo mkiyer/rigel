@@ -8,7 +8,7 @@ vertex is priced rather than forbidden, and no achievable depth buys it. G1 and 
 law at the two vertices, G2 the tail slope, G3 the halves' orthogonality, G4 how weak a lever
 softening the reference is, G5 the control that the same claim on ``λ`` is honoured at par, and G6
 ψ's blindness to the certified-splice channel. The second half gates the read-out, where
-``_compose`` maps ψ's level and tilt onto the simplex so that closure is an identity.
+``compose`` maps ψ's level and tilt onto the simplex so that closure is an identity.
 """
 
 from __future__ import annotations

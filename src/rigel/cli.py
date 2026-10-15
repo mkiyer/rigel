@@ -582,11 +582,10 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "n_training_fragments": sm.n_observations,
             "posterior_variance": round(sm_primary.posterior_variance(), 8),
             "ci_95": [round(ci_lo, SUMMARY_DECIMALS), round(ci_hi, SUMMARY_DECIMALS)],
-            # The per-sj strand table this 2×2 is the marginal of. "How many
-            # sj are deep enough to measure the strand dispersion" is a
-            # first-class question about a library: at κ ≈ 0.002 a sj needs
-            # hundreds of reads before one disagreeing read is even expected, and the
-            # RNA strand overdispersion is fitted from exactly this population.
+            # The per-sj strand table this 2×2 is the marginal of, and the population
+            # the junction fit reads κ from. "How many sj are deep enough to show a
+            # disagreeing read" is a first-class question about a library: at κ ≈ 0.002
+            # a sj needs hundreds of reads before one is even expected.
             "sj": sm.sj_table.to_dict(),
             **strand_fit,
             # All-exonic (RNA+gDNA) diagnostic model, never used for scoring.

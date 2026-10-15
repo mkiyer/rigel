@@ -157,8 +157,8 @@ class TestTheCachedTallyIsTheSCANNEDTally:
         assert cache.payload.gap_resolution == original.gap_resolution
 
     def test_the_strand_model_survives_including_its_per_sj_table(self, scanned, tmp_path):
-        """The 2x2 is the MARGINAL of the per-sj table; the dispersion fit needs the table
-        itself, so a cache that kept only the 2x2 would silently disable the dispersion estimate."""
+        """The 2x2 is the MARGINAL of the per-sj table; the junction fit behind κ needs the table
+        itself, so a cache that kept only the 2x2 would silently fall back to the pooled κ."""
         _cache_dir, cache = round_trip(scanned, tmp_path)
         original = scanned[4]
         for name in ("exonic_spliced", "exonic"):

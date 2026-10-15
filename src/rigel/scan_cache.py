@@ -323,8 +323,8 @@ class ScanCache:
 
 
 # ── strand model round-trip ──────────────────────────────────────────────────────────────────────
-# The 2x2 is the MARGINAL of the per-sj table, and the strand OVERDISPERSION is fitted from the
-# table, not the marginal. A cache that kept only the 2x2 would silently disable the dispersion estimate.
+# The 2x2 is the MARGINAL of the per-sj table, and the junction fit reads κ from the table, not the
+# marginal. A cache that kept only the 2x2 would silently fall back to the pooled κ, splice artifacts and all.
 _SJ_COLUMNS = ("ref_id", "start", "end", "motif_strand", "n_sense", "n_antisense")
 _STRAND_SUBMODELS = ("exonic_spliced", "exonic")
 _COUNT_FIELDS = ("pos_pos", "pos_neg", "neg_pos", "neg_neg")

@@ -59,13 +59,14 @@ class SJStrandTable:
     **antisense** means it does not.  Each strand-qualified fragment contributes exactly ONE
     observation, to its leftmost annotated sj — ``sj_strand`` is read from the BAM
     ``XS``/``ts`` tag and is one value per *fragment*, so all sj a fragment spans share
-    a single sense bit and crediting them all would repeat one observation K times, inflating
-    the very dispersion this table exists to measure honestly.
+    a single sense bit and crediting them all would count one observation K times.
 
     Consumers
     ---------
-    * the **mean** κ — via the derived 2×2's ``n_same / n_observations``
-      (:attr:`StrandModel.p_r1_sense`, then ``calibration.strand_balance.fit_strand_balance``).
+    * κ — the junction fit (:mod:`rigel.junction_fit`) over the table, through
+      :attr:`StrandModel.genuine_n_same` and :attr:`StrandModel.p_r1_sense`, then
+      ``calibration.strand_balance.fit_strand_balance``;
+    * ``summary.json``'s strand block: the table itself and the fit's class shares.
     """
 
     ref_id: np.ndarray  # int32[n_sj]

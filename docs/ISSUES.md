@@ -818,8 +818,8 @@ exon|intron boundary, while RNA that has not spliced there does.
 - The step-1c instrument fixes have no gates: `policy_benchmark`'s apart grouping, `calibration_vs_oracle`'s APART
   strata and its `--json --jobs` merge, `prior_vs_oracle`'s strata, the `find_spec` guard.
 (f) SMALL: the `--no-mappability` flag names a store whose mappability the index no longer reads (it opts out of
-the splice blacklist); 0.7.1 shipped the name, so renaming it now breaks scripts for clarity alone; three unread scalars in `solve_kernel.cpp`'s positional aggregates; `pgzip` is an undeclared
-optional import in the simulator.
+the splice blacklist); 0.7.1 shipped the name, so renaming it now breaks scripts for clarity alone; three unread
+scalars in `solve_kernel.cpp`'s positional aggregates.
 - `_solve_impl` builds with `-g` only. Step 1b tried `-march=native` and IPO and reverted them: bit-identical on arm64,
   but on x86-64 they turn on FMA contraction in the ψ, transfer and solve kernels (clang: 0 FMA instructions at -O3,
   159 with -march=haswell) and move numbers (`TRAPS: a-kernel-edit-moves-ulps-under-fma-contraction`). RULED (owner,

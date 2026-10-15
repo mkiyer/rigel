@@ -105,7 +105,7 @@ def transcript_strand_class(signature: np.ndarray) -> np.ndarray:
     return out
 
 
-def nrna_active_strands(signature: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def rna_active_strands(signature: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Per-strand RNA-active masks from a signature array — ``(pos, neg)``.
 
     RNA can be present wherever a transcript is (exon OR intron: RNA inside an intron is RNA
@@ -134,5 +134,5 @@ __all__ = [
     "TS_AMBIG",
     "coarse_type_array",
     "transcript_strand_class",
-    "nrna_active_strands",
+    "rna_active_strands",
 ]

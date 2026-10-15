@@ -137,7 +137,7 @@ class CalibrationResult:
     boundary_spliced_mass_per_crossing: np.ndarray
     sj_mass_per_crossing: np.ndarray
 
-    # --- the gDNA geometric supports: expected admissible START POSITIONS, per component ---
+    # --- the gDNA geometric supports: expected admissible START POSITIONS, per object ---
     #: float64[n_regions] — ``effective_length.contained_eff_length`` on the gDNA pmf,
     #: ``E_f[(region_len − w + 1)+]``. Under uniform genomic gDNA at density ρ the expected contained
     #: mass is EXACTLY ``ρ · gdna_region_eff_len`` (a fragment must FIT to be contained), so dividing by

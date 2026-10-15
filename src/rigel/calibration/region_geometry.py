@@ -44,7 +44,7 @@ from .signature import (
     TS_AMBIG,
     TS_NEG,
     TS_POS,
-    nrna_active_strands,
+    rna_active_strands,
 )
 from .simplex_logodds import _solve_regions_logodds_all
 
@@ -452,11 +452,11 @@ def build_region_statics(
     ts = np.where(
         is_region, np.asarray(region_arrays.strand_class)[region_idx] if n_regions else 0, -1
     )
-    nrp_l, nrn_l = nrna_active_strands(sig_l)
-    nrp_r, nrn_r = nrna_active_strands(sig_r)
+    pos_l, neg_l = rna_active_strands(sig_l)
+    pos_r, neg_r = rna_active_strands(sig_r)
 
-    free_pos = np.where(is_region, (ts == TS_POS) | (ts == TS_AMBIG), nrp_l & nrp_r)
-    free_neg = np.where(is_region, (ts == TS_NEG) | (ts == TS_AMBIG), nrn_l & nrn_r)
+    free_pos = np.where(is_region, (ts == TS_POS) | (ts == TS_AMBIG), pos_l & pos_r)
+    free_neg = np.where(is_region, (ts == TS_NEG) | (ts == TS_AMBIG), neg_l & neg_r)
 
     return RegionStatics(
         n_slots=n,

@@ -202,17 +202,12 @@ struct RawResolveResult {
     //   (a) the 2×2 marginal identity REQUIRES one row per fragment;
     //   (b) the K >= 2 stratum is a materially cleaner population (minor rate
     //       0.35x at K=2, 0.14x at K=3, 0 at K>=4), so crediting all K shifts
-    //       kappa by 21-34% — and the fit feeds kappa in as the MoM region mean.
-    // ⛔ NOT because credit-all "inflates" the dispersion: measured null bias is
-    // -7.3e-5 +/- 3.0e-4 on LBX0190, i.e. none.
-    // ⛔ A 1/K split is provably BIASED (4-12 sigma): Var(sum w_i X_i) = pq*sum w^2
-    // but the estimator subtracts pq*sum w. Do not use it.
+    //       kappa by 21-34%.
     //
-    // ⚠ Two costs of the deterministic leftmost pick, recorded so they are not
-    // rediscovered as bugs: od_mom is 0.85-0.99x the random-pick value, and 3-5%
-    // of sj never receive an observation (leftmost and rightmost agree, so
-    // this is concentration on fewer sj, not a 5'/3' bias). Determinism
-    // wins anyway — random-pick jitter is 3.8% CV and this repo has goldens.
+    // ⚠ A cost of the deterministic leftmost pick, recorded so it is not
+    // rediscovered as a bug: 3-5% of sj never receive an observation (leftmost
+    // and rightmost agree, so this is concentration on fewer sj, not a 5'/3'
+    // bias). Determinism wins anyway: this repo has goldens.
     //
     // ⚠ ANNOTATED, not merely leftmost: `sj_strand` is the OR of the ANNOTATED
     // introns' strands only, so an unannotated intron may carry a different (or
@@ -336,7 +331,7 @@ inline MergeResult merge_sets(const std::vector<std::vector<int32_t>>& sets) {
 // contiguous and routinely spans two transcripts that share nothing -- that is what the annotation
 // looks like there. Such fragments carry no junction anywhere in them, so there is nothing to infer a
 // chimera FROM. A candidate is a chimera only if the mates are genomically INCOMPATIBLE: a different
-// reference (the caller gates on `is_interchromosomal`), an orientation that is not facing inward, or
+// reference (the caller gates on `is_interchromosomal`), components on different reference strands, or
 // an implied fragment length beyond the library's `max_fragment_length`.
 inline int32_t detect_chimera(
     const std::vector<ExonBlock>& exons,

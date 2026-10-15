@@ -545,8 +545,10 @@ def calibrate(
     # THE CHAIN AND ITS GEOMETRY COME FIRST, and the geometry owns every divisor from here down:
     # `eff_gdna` / `eff_rna` are the CONTAINED placements at a REGION slot and the CROSSING placements at
     # a BOUNDARY slot, one rule, one array. Nothing below computes a second length model; the result's
-    # supports are PROJECTED off the geometry (`_project_eff`), so the number `priors` divides by is
-    # byte-identically the one the solver divided by.
+    # gDNA effective lengths are PROJECTED off the geometry (`_project_eff`), so the number the solver
+    # divided by is byte-identically the one published. gDNA's conserved share at a boundary
+    # (`_gdna_boundary_conserved_len`) is no solver divisor: it partitions gDNA's starts over the objects
+    # for the EM's gDNA length (`priors`).
     chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
     geometry = build_region_geometry(chain, substrate, region_arrays, sj, gdna_fl_pmf, rna_fl_pmf)
     statics = build_region_statics(chain, region_arrays, boundary_flags)

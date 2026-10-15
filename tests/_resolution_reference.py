@@ -97,9 +97,9 @@ def _detect_intrachromosomal_chimera(
     transcript sets are not evidence of a rearrangement: a genomic
     molecule is contiguous and routinely spans two transcripts that
     share nothing.  A candidate is only a chimera if the mates are
-    genomically INCOMPATIBLE — an orientation that is not facing inward
-    (the two components carry different reference strands), or an
-    implied fragment length beyond ``max_fragment_length``.  Otherwise
+    genomically INCOMPATIBLE — the two components carry different
+    reference strands, or an implied fragment length beyond
+    ``max_fragment_length``.  Otherwise
     it is an ordinary molecule and this returns ``None``.
 
     Parameters
@@ -170,10 +170,11 @@ def _detect_intrachromosomal_chimera(
         chimera_type = ChimeraType.CIS_STRAND_DIFF
 
     # COMPATIBILITY BEFORE CHIMERA.  One reference is already given (the caller
-    # gates on `is_interchromosomal`); facing inward is exactly `len(unique_strands) == 1`,
-    # because `build_fragment` keys blocks by (ref, ref_strand) with R2's orientation
-    # flipped, so an inward-facing pair lands both mates on ONE strand.  What remains is
-    # whether a molecule of the implied length could exist in this library.
+    # gates on `is_interchromosomal`); `len(unique_strands) == 1` says the mates lie on one
+    # strand of one molecule, because `build_fragment` keys blocks by (ref, ref_strand) with
+    # R2's orientation flipped.  It does not say they face inward: an outward-facing pair lands
+    # on one strand too.  What remains is whether a molecule of the implied length could exist
+    # in this library.
     if chimera_type == ChimeraType.CIS_STRAND_SAME:
         span = max(b.end for b, _ in items) - min(b.start for b, _ in items)
         if span <= max_fragment_length:

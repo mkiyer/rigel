@@ -178,7 +178,7 @@ public:
         r.sj_key_start = cr.sj_key_start;
         r.sj_key_end = cr.sj_key_end;
         // ⛔ COPIED, NOT MOVED, and the difference is a bug. `bam_scanner.cpp` builds the
-        // ResolvedFragment first and calls `deposit_to_accumulator(frag, cr)` afterwards, so moving
+        // ResolvedFragment first and calls `collect_placement(frag, cr)` afterwards, so moving
         // this out of `cr` would hand the deposit adapter an empty intron list and silently stop
         // cutting every gap intron — the exact defect this field exists to make visible.
         r.gap_introns = cr.gap_introns;
