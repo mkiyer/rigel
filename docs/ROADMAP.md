@@ -132,7 +132,9 @@ its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-mult
 6. **The release issues fixed**, simple ones first and as many closed as possible, each with a falsification test
    verified failing; a numeric change gets its own A/B window, and a numeric no-op, proven with
    `rename_identity.py --check`, lands between any two windows. Then the involved ones: the EM's reduction, landed
-   2026-10-14; then the splice-artifact design.
+   2026-10-14; then the splice-artifact mechanism (`ISSUES: splicing-artifacts`), its design externally reviewed
+   2026-10-14. The derivation, the mechanism fixtures, a prototype and the VCaP A/B come next. The release waits
+   for its validation on independent artifact-containing evidence on the cluster (owner, 2026-10-14).
 7. **The release**: `docs/PUBLISHING.md` is the procedure; what gates it is the state — the deliverable measured per
    stratum, the zero rows clean, the suite at its standing count, `preflight.py --full` green, CI run once by hand, a
    real-data smoke run, the standing risks re-read, and the manual and the changelog true of what ships.

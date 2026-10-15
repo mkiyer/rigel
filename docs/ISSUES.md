@@ -18,7 +18,7 @@ Ordered by priority. An entry says what is open and the number a ranking turns o
 what was ruled is `DESIGN.md`.
 
 ### splicing-artifacts
-`priority: now — release-blocking (owner, 2026-10-14): handled before any release, started once the release candidate is clean · kind: defect · 2026-09-24`
+`priority: now — release-blocking (owner, 2026-10-14): 0.8.0 waits for the mechanism AND its validation on independent artifact-containing evidence (the cluster); the design is externally reviewed, its derivation next · kind: defect · 2026-09-24`
 THE OWNER'S DESIGN (2026-10-14): spliced fragments are the most specific signal the tool has, so artifacts are
 removed by several prongs before any release, after the release candidate is clean.
 - **The strand prong.** A junction's strand split against the library's specificity is a likelihood: with a
@@ -34,6 +34,30 @@ removed by several prongs before any release, after the release candidate is cle
   per spliced fragment, deposits deferred until the junction decision, and the weight read by calibration and the EM
   alike.
 - The other prongs, below: the aligner, the blacklist's builder, and the reference at the junction.
+THE DESIGN AFTER AN EXTERNAL REVIEW (2026-10-14). The proposal reviewed: gDNA may explain a spliced alignment at a
+weight `r`, read by both stages. The verdict: build the competing-placement architecture, but not as first specified.
+Three blockers, each checked and accepted:
+- `r` multiplied a class's artifact share (a posterior, already carrying gDNA's prevalence) into an EM that weighs
+  abundance again. Class evidence may enter only as the likelihood ratio odds(class share) / odds(library share).
+- A local edit or clip is not a whole-fragment origin. The gDNA reading is a contiguous placement of every sequenced
+  base: anchored from either side, both mates, the whole path.
+- Pruning on `r` alone is not the existing rule. On the wrong strand ½/κ lifts an h = 2 reading above the bound.
+The revised direction:
+- every candidate is scored as `(θ/ℓ)·f(L)·s(o)·e(x)`, each term counted once;
+- the sequence emission is `[ε/(3(1−ε))]^h` over the bases that match the RNA reference, so it needs SEQ, not NM;
+- the contiguous geometry is also an admissible RNA reading;
+- one stage contract: today calibration banks an all-unannotated-intron fragment as UNSPLICED while the EM keeps it
+  RNA-only (`accumulator.cpp`, `spliced = !sj_ids.empty()`);
+- a singleton at a likelihood tie stays undecided by the prior: with every prior unit on gDNA and B = 0.05, MAP leaves
+  0.947 on RNA.
+On VCaP (unique primary units; DNA 6,517 artifacts, RNA 14.9 M):
+- **strand:** a per-junction share catches 31 % of the artifact mass for 1,961 RNA lost; a library share catches 37 %
+  for 8,066;
+- **h = 0:** 93 % of the artifacts at annotated short sides of 1–5 bp, against 10 % of the RNA;
+- **the harmful class:** artifacts on DNA-majority junctions are 72 % unannotated, and 97 % of the unannotated
+  artifacts use neither known splice site, against 18 % of the RNA.
+The work, in order: the derivation; mechanism fixtures; a prototype; the VCaP matched A/B. Then validation on the
+cluster: an aligned truth panel or new truth mixes.
 A gDNA read that the aligner splices across an annotated junction reads as certified RNA unless the index's
 blacklist — junctions the same aligner wrote on simulated genomic reads, kept at two or more, with the longest
 anchor seen — rejects it. Today a fully rejected fragment is labelled artifact: the EM treats it as unspliced
