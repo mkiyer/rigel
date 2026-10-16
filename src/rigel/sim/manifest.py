@@ -5,7 +5,8 @@ generator and every consumer derive it the same way; an overdispersion slug appe
 value is non-zero, which keeps names stable for suites that do not sweep that axis.
 :func:`write_manifest` serialises the config dataclasses and the per-condition entries to
 ``manifest.json`` under the output directory, resolving genome, GTF and shadow-GTF paths to
-absolute ones so a manifest stays readable from anywhere.
+absolute ones so a manifest stays readable from anywhere, and records the index the transcriptome
+comes from: its resolved path and its own manifest, which holds the sha256 of its FASTA and GTF.
 """
 
 from __future__ import annotations
@@ -63,9 +64,15 @@ def _jsonable(value: Any) -> Any:
 
 
 def write_manifest(
-    outdir: Path, config: Any, conditions: list[dict[str, Any]], *, n_shadow_transcripts: int = 0
+    outdir: Path,
+    config: Any,
+    conditions: list[dict[str, Any]],
+    *,
+    index: dict[str, Any],
+    n_shadow_transcripts: int = 0,
 ) -> Path:
-    """Write a simulation manifest and return its path."""
+    """Write a simulation manifest and return its path. ``index`` is the index the transcriptome comes
+    from, as ``whole_genome._index_provenance`` returns it: ``{"path", "manifest"}``."""
     truth_abundances = "truth_abundances.tsv"
     for condition in conditions:
         if condition.get("truth_abundances"):
@@ -73,6 +80,9 @@ def write_manifest(
             break
     manifest = {
         "version": 1,
+        # The transcriptome is the index's, so the index is its source: the resolved path and the index's
+        # own manifest (the FASTA and the GTF it was built from, each with its sha256, and its build flags).
+        "index": _jsonable(index),
         # Shadow transcripts: unannotated transcription simulated from `shadow_gtf` and never given
         # to the index — recorded here so a scored panel says it carried them.
         "n_shadow_transcripts": int(n_shadow_transcripts),

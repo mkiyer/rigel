@@ -1,20 +1,24 @@
-"""The whole-genome simulator's configuration and its nascent-abundance helpers.
+"""The whole-genome simulator's configuration, a run's own refusals, and its nascent-abundance helpers.
 
-The YAML parser and its refusals, the fragment-share solve that turns a panel's stated nascent
-FRAGMENT share into the molecular ratio the engine needs, and the sparse nascent model: nascent lives
-on the index's nRNA entities, the on/off draw is per gene SPAN rather than per isoform, the level is
-log-uniform over the configured range, and it is drawn independently of the mature level. Most of
-these properties are only observable statistically, so each gate states the band it uses and where
-that band comes from, and several exist because a perturbation to the mechanism passed every other
-gate in the file.
+The YAML parser and its refusals; a run's refusals of a GTF its index was not built from and of a run
+that keeps no reads, and the manifest's record of that index; the fragment-length pmf the engine draws
+from; and the sparse nascent model: nascent lives on the index's nRNA entities, the on/off draw is per
+gene SPAN rather than per isoform, the level is log-uniform over the configured range, and it is drawn
+independently of the mature level. Most of these properties are only observable statistically, so
+each gate states the band it uses and where that band comes from, and several exist because a
+perturbation to the mechanism passed every other gate in the file.
 """
 
+import hashlib
+import importlib.util
+import json
+import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from rigel.sim.whole_genome import apply_sparse_nrna, parse_yaml_config
+from rigel.sim.whole_genome import apply_sparse_nrna, parse_yaml_config, run_simulation
 from rigel.transcript import Transcript
 from rigel.types import Interval, Strand
 
@@ -195,6 +199,41 @@ def test_an_unknown_key_is_refused_at_the_top_level_and_in_each_section(tmp_path
         config_path.write_text("genome: /tmp/genome.fa\ngtf: /tmp/genes.gtf\n" + body)
         with pytest.raises(ValueError, match=rf"unknown key\(s\) \['{key}'\]"):
             parse_yaml_config(config_path)
+
+
+@pytest.mark.parametrize(
+    ("body", "key"),
+    [
+        ("nrna:\n  shares: [0.2]\n  ratio_labels: [s20]\n", "shares"),
+        ("transcript_filter: all\n", "transcript_filter"),
+    ],
+    ids=["shares", "transcript_filter"],
+)
+def test_a_retired_key_is_refused_not_run_on_a_default(tmp_path, body, key):
+    """`shares` belonged to the deleted fragment-share nascent mode. Still allowed and never read,
+    `nrna: {shares: [0.2], ratio_labels: [s20]}` ran `additive_ratio` at ratio 0.0: a nascent-free
+    condition named `s20`. `transcript_filter` has nothing to filter once the transcriptome is the
+    index's, and `all` was accepted silently. Both are unknown keys. PERTURBATION: putting either back
+    on its allow-list fails this gate."""
+    config_path = tmp_path / "sim.yaml"
+    config_path.write_text("genome: /tmp/genome.fa\ngtf: /tmp/genes.gtf\n" + body)
+    with pytest.raises(ValueError, match=rf"unknown key\(s\) \['{key}'\]"):
+        parse_yaml_config(config_path)
+
+
+def test_no_oracle_bam_and_no_fastq_is_refused_when_the_config_is_read(tmp_path):
+    """With no oracle BAM written and the FASTQs deleted once the truth is, a condition keeps no read
+    and loses its resume key, so the run exits 0 with nothing to score and the next run simulates it
+    all again. Either output alone is a panel. PERTURBATION: `or` for `and` refuses the fl-gap panels'
+    `emit_fastq: false`; deleting the parse-time check passes the last config."""
+    config_path = tmp_path / "sim.yaml"
+    base = "genome: /tmp/genome.fa\ngtf: /tmp/genes.gtf\n"
+    for body in ("oracle_bam: false\n", "emit_fastq: false\n"):
+        config_path.write_text(base + body)
+        parse_yaml_config(config_path)
+    config_path.write_text(base + "oracle_bam: false\nemit_fastq: false\n")
+    with pytest.raises(ValueError, match="oracle_bam and emit_fastq are both false"):
+        parse_yaml_config(config_path)
 
 
 def test_every_in_repo_sim_config_parses():
@@ -399,3 +438,106 @@ def test_the_FUNCTION_validates_its_own_range_and_fraction_not_just_the_PARSER()
     for bad in (1.5, -0.1):
         with pytest.raises(ValueError, match="on_fraction"):
             apply_sparse_nrna(list(rows), (1.0, 10.0), on_fraction=bad, seed=1)
+
+
+# ── a run: the index the transcriptome comes from, and the outputs it keeps ─────────────────────────
+
+_TINY_GTF = (
+    'chr1\tsrc\texon\t101\t400\t.\t+\t.\tgene_id "G1"; transcript_id "T1";\n'
+    'chr1\tsrc\texon\t501\t800\t.\t+\t.\tgene_id "G1"; transcript_id "T1";\n'
+    'chr1\tsrc\texon\t1001\t1800\t.\t-\t.\tgene_id "G2"; transcript_id "T2";\n'
+)
+
+
+@pytest.fixture(scope="module")
+def tiny_reference(tmp_path_factory):
+    """A 2 kb genome, a two-gene GTF and the rigel index built from them: enough for `run_simulation`
+    to simulate one small condition."""
+    import pysam
+
+    from rigel.index import TranscriptIndex
+
+    base = tmp_path_factory.mktemp("tiny_reference")
+    genome = base / "genome.fa"
+    rng = np.random.default_rng(0)
+    genome.write_text(">chr1\n" + "".join(rng.choice(list("ACGT"), 2000)) + "\n")
+    pysam.faidx(str(genome))
+    gtf = base / "genes.gtf"
+    gtf.write_text(_TINY_GTF)
+    index = base / "index"
+    TranscriptIndex.build(str(genome), str(gtf), str(index), write_tsv=False)
+    return genome, gtf, index
+
+
+def _tiny_config(path, genome, gtf, index, outdir, extra=""):
+    """One condition of 40 RNA fragments, every transcript expressed."""
+    path.write_text(
+        f"genome: {genome}\ngtf: {gtf}\nindex: {index}\noutdir: {outdir}\n"
+        "simulation:\n  n_rna_fragments: 40\n  frag_mean: 150\n  frag_std: 20\n"
+        "  frag_min: 100\n  frag_max: 200\n  read_length: 50\n"
+        "abundance:\n  frac_expressed: 1.0\n  min: 1.0\n  max: 10.0\n" + extra
+    )
+    return path
+
+
+def test_the_manifest_records_the_index_the_transcriptome_comes_from(tiny_reference, tmp_path):
+    """The simulated transcriptome is the index's, so the manifest names the index: its resolved path and
+    its own manifest, which carries the sha256 of the FASTA and the GTF it was built from. The config's
+    `gtf:` here is a byte-identical COPY at another path; the check is on content, so the run proceeds
+    and the record still names the file the index was built from. PERTURBATIONS: comparing paths instead
+    of digests refuses this run; dropping the record fails the equality."""
+    genome, gtf, index = tiny_reference
+    copy = tmp_path / "copy_of_genes.gtf"
+    copy.write_bytes(gtf.read_bytes())
+    outdir = tmp_path / "out"
+    cfg = parse_yaml_config(_tiny_config(tmp_path / "sim.yaml", genome, copy, index, outdir))
+
+    run_simulation(cfg)
+
+    recorded = json.loads((outdir / "manifest.json").read_text())["index"]
+    assert recorded == {
+        "path": str(index.resolve()),
+        "manifest": json.loads((index / "manifest.json").read_text()),
+    }
+    sources = recorded["manifest"]["sources"]
+    assert sources["gtf"]["path"] == str(gtf.resolve())
+    assert sources["gtf"]["sha256"] == hashlib.sha256(gtf.read_bytes()).hexdigest()
+    assert sources["fasta"]["sha256"] == hashlib.sha256(genome.read_bytes()).hexdigest()
+
+
+def test_a_gtf_the_index_was_not_built_from_is_refused(tiny_reference, tmp_path):
+    """`run_simulation` reads its transcriptome from `index:` and never parses `gtf:`, so a config naming
+    another GTF simulated the index's transcripts while its manifest named the other file. A one-byte
+    edit is refused, before any condition is simulated. PERTURBATION: deleting the digest comparison
+    simulates this config."""
+    genome, gtf, index = tiny_reference
+    edited = tmp_path / "edited.gtf"
+    edited.write_text(gtf.read_text().replace("\t1800\t", "\t1799\t"))
+    outdir = tmp_path / "out"
+    cfg = parse_yaml_config(_tiny_config(tmp_path / "sim.yaml", genome, edited, index, outdir))
+
+    with pytest.raises(ValueError, match="is not the GTF the index"):
+        run_simulation(cfg)
+    assert not list(outdir.glob("gdna_*")) and not (outdir / "manifest.json").exists()
+
+
+def test_no_oracle_on_a_config_without_fastqs_is_refused_before_anything_is_simulated(
+    tiny_reference, tmp_path, monkeypatch
+):
+    """`simulate_reads.py --no-oracle` turns the oracle BAM off AFTER the config is read, so the parser
+    cannot see it; `run_simulation` refuses it before writing anything. The config alone is valid: it is
+    the fl-gap panels' `emit_fastq: false`. PERTURBATION: without the run-time check this run exits 0
+    having simulated the condition and deleted its only reads."""
+    genome, gtf, index = tiny_reference
+    outdir = tmp_path / "out"
+    config = _tiny_config(tmp_path / "sim.yaml", genome, gtf, index, outdir, "emit_fastq: false\n")
+    spec = importlib.util.spec_from_file_location(
+        "_simulate_reads", ROOT / "scripts" / "sim" / "simulate_reads.py"
+    )
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    monkeypatch.setattr(sys, "argv", ["simulate_reads.py", "--config", str(config), "--no-oracle"])
+
+    with pytest.raises(ValueError, match="oracle_bam and emit_fastq are both false"):
+        script.main()
+    assert not outdir.exists()

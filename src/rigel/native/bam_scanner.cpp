@@ -1045,10 +1045,13 @@ pair_multimapper_reads(
 
 /// One `OfferedFragment` marshalled out of Python, with the storage its spans point into.
 ///
-/// ⭐ Shared by `Accumulator.deposit` and `Accumulator.length_under` so the two cannot disagree about how
-/// a hypothesis set crosses the ABI. ⚠ Reads attributes off whatever it is handed, so the parity gate can
-/// pass the SAME `GapHypothesis` objects to the specification and to the binding; a binding with its own
-/// tuple convention would be a second representation to keep in step.
+/// ⭐ Shared by `Accumulator.deposit`, `Accumulator.length_under` and `AccumulatorSet.offer` so they cannot
+/// disagree about how a hypothesis set crosses the ABI. ⚠ Reads attributes off whatever it is handed, so the
+/// parity gate can pass the SAME `GapHypothesis` objects to the specification and to the binding; a binding
+/// with its own tuple convention would be a second representation to keep in step.
+///
+/// ⛔ Not copyable: `offered` points into this object's own vectors, so a copy's `offered` would point into
+/// the original's. A move hands the vectors' buffers over unchanged, so the moved-to `offered` stays valid.
 struct MarshalledFragment {
     std::vector<IntronBlock> observed;
     std::vector<IntronBlock> implied;
@@ -1062,16 +1065,11 @@ struct MarshalledFragment {
             auto pair = nb::cast<nb::tuple>(item);
             observed.push_back({0, nb::cast<int32_t>(pair[0]), nb::cast<int32_t>(pair[1]), 0});
         }
-        // ⛔ Reserved up front: the GapHypothesis spans below point INTO these vectors, so a reallocation
-        // while filling them would dangle every pointer already handed out.
-        std::size_t n_implied = 0, n_supporting = 0;
-        for (nb::handle h : hypotheses) {
-            n_implied += nb::len(nb::getattr(h, "introns"));
-            n_supporting += nb::len(nb::getattr(h, "supporting_t_inds"));
-        }
-        implied.reserve(n_implied);
-        supporting.reserve(n_supporting);
-
+        // ⚠ ONE pass over `hypotheses`: a second pass over a one-shot iterable (a generator) sees nothing,
+        // and an empty set deposits as the unspliced fragment alone. While `implied` and `supporting` grow,
+        // each span holds OFFSETS into them, turned into pointers only after the last hypothesis is read,
+        // so a reallocation during the fill invalidates nothing. Pinned by
+        // `test_a_GENERATOR_of_hypotheses_is_the_same_fragment_as_the_tuple`.
         for (nb::handle h : hypotheses) {
             const std::size_t i0 = implied.size(), t0 = supporting.size();
             for (nb::handle item : nb::getattr(h, "introns")) {
@@ -1100,6 +1098,11 @@ struct MarshalledFragment {
         offered.hypotheses = spans.data();
         offered.n_hypotheses = spans.size();
     }
+
+    MarshalledFragment(const MarshalledFragment&) = delete;
+    MarshalledFragment& operator=(const MarshalledFragment&) = delete;
+    MarshalledFragment(MarshalledFragment&&) = default;
+    MarshalledFragment& operator=(MarshalledFragment&&) = default;
 };
 
 // ================================================================
@@ -3280,12 +3283,11 @@ NB_MODULE(_bam_impl, m) {
             .def("offer",
                  [](rigel::accumulator::AccumulatorSet& s, nb::iterable placements) {
                      static rigel::accumulator::OfferScratch offer_scratch;
+                     // ⚠ ONE pass over `placements`, as over each placement's hypotheses, so a one-shot
+                     // iterable offers the same fragment as a list. The `Placement`s are taken after the
+                     // loop, once `marshalled` has stopped growing.
                      std::vector<MarshalledFragment> marshalled;
-                     std::vector<rigel::accumulator::Placement> pls;
-                     std::size_t n = 0;
-                     for (nb::handle _p : placements) ++n;
-                     marshalled.reserve(n);
-                     pls.reserve(n);
+                     std::vector<int32_t> refs;
                      for (nb::handle p : placements) {
                          marshalled.emplace_back(nb::cast<int64_t>(nb::getattr(p, "start")),
                                                  nb::cast<int64_t>(nb::getattr(p, "end")),
@@ -3293,8 +3295,11 @@ NB_MODULE(_bam_impl, m) {
                                                  nb::cast<int32_t>(nb::getattr(p, "align_strand")),
                                                  nb::cast<int32_t>(nb::getattr(p, "sj_strand")),
                                                  nb::getattr(p, "hypotheses"));
-                         pls.push_back({nb::cast<int32_t>(nb::getattr(p, "ref")), marshalled.back().offered});
+                         refs.push_back(nb::cast<int32_t>(nb::getattr(p, "ref")));
                      }
+                     std::vector<rigel::accumulator::Placement> pls;
+                     pls.reserve(marshalled.size());
+                     for (std::size_t i = 0; i < marshalled.size(); ++i) pls.push_back({refs[i], marshalled[i].offered});
                      return std::string(rigel::accumulator::outcome_key(s.offer(pls.data(), pls.size(), offer_scratch)));
                  },
                  nb::arg("placements"))

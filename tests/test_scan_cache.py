@@ -98,6 +98,30 @@ def round_trip(scanned, tmp_path: Path) -> tuple:
     return cache_dir, read_scan_cache(cache_dir, index)
 
 
+def _assert_round_trip(before, after, name: str) -> None:
+    """``after`` is ``before``: an array by dtype, shape and content, a dataclass by type and then field by
+    field over ``dataclasses.fields`` at whatever depth it nests, anything else by type and value."""
+    if isinstance(before, np.ndarray):
+        assert isinstance(after, np.ndarray), f"{name} came back as {type(after).__name__}"
+        assert after.dtype == before.dtype, f"{name} dtype moved"
+        assert after.shape == before.shape, f"{name} shape moved"
+        assert np.array_equal(after, before), f"{name} content moved"
+    elif dataclasses.is_dataclass(before):
+        assert type(after) is type(before), (
+            f"{name} came back as {type(after).__name__}, not {type(before).__name__} — a bank "
+            f"rebuilt as a plain dict has lost its validation as well as its type"
+        )
+        for sub in dataclasses.fields(before):
+            _assert_round_trip(
+                getattr(before, sub.name), getattr(after, sub.name), f"{name}.{sub.name}"
+            )
+    else:
+        assert type(after) is type(before), (
+            f"{name} came back as {type(after).__name__}, not {type(before).__name__}"
+        )
+        assert after == before, name
+
+
 class TestTheCachedTallyIsTheSCANNEDTally:
     """Byte-identity, field by field: the cached inputs must be the scanned inputs, array for array and
     dtype for dtype."""
@@ -113,27 +137,10 @@ class TestTheCachedTallyIsTheSCANNEDTally:
         """
         _cache_dir, cache = round_trip(scanned, tmp_path)
         original: AccumulatorPayload = scanned[3]
-
-        def compare(before, after, name):
-            if isinstance(before, np.ndarray):
-                assert isinstance(after, np.ndarray), f"{name} came back as {type(after).__name__}"
-                assert after.dtype == before.dtype, f"{name} dtype moved"
-                assert after.shape == before.shape, f"{name} shape moved"
-                assert np.array_equal(after, before), f"{name} content moved"
-            elif dataclasses.is_dataclass(before):
-                assert type(after) is type(before), (
-                    f"{name} came back as {type(after).__name__}, not {type(before).__name__} — a bank "
-                    f"rebuilt as a plain dict has lost its validation as well as its type"
-                )
-                for sub in dataclasses.fields(before):
-                    compare(
-                        getattr(before, sub.name), getattr(after, sub.name), f"{name}.{sub.name}"
-                    )
-            else:
-                assert after == before, name
-
         for field in dataclasses.fields(AccumulatorPayload):
-            compare(getattr(original, field.name), getattr(cache.payload, field.name), field.name)
+            _assert_round_trip(
+                getattr(original, field.name), getattr(cache.payload, field.name), field.name
+            )
 
     def test_THE_SIDE_BUFFER_SURVIVES_THE_ROUND_TRIP_AND_IS_NOT_EMPTY(self, scanned, tmp_path):
         """Byte-identity over an empty bank is free, so the fixture must defer something.
@@ -159,26 +166,79 @@ class TestTheCachedTallyIsTheSCANNEDTally:
             assert np.array_equal(after, before), f"deferred.{field.name} content moved"
         assert cache.payload.gap_resolution == original.gap_resolution
 
-    def test_the_strand_model_survives_including_its_per_sj_table(self, scanned, tmp_path):
+    def test_the_strand_model_survives_FIELD_BY_FIELD_including_its_per_sj_table(
+        self, scanned, tmp_path
+    ):
         """The 2x2 is the MARGINAL of the per-sj table; the junction fit behind κ needs the table
-        itself, so a cache that kept only the 2x2 would silently fall back to the pooled κ."""
+        itself, so a cache that kept only the 2x2 would silently fall back to the pooled κ.
+
+        Compared over ``dataclasses.fields`` at every level — the sub-models, their counters, the table's
+        columns — and never over names written here. Every field has a default, so a list restating the
+        cache's own would stay green beside it while a field both missed was dropped on write and
+        defaulted on load.
+        """
         _cache_dir, cache = round_trip(scanned, tmp_path)
         original = scanned[4]
-        for name in ("exonic_spliced", "exonic"):
-            before, after = getattr(original, name), getattr(cache.strand_model, name)
-            assert (after.pos_pos, after.pos_neg, after.neg_pos, after.neg_neg) == (
-                before.pos_pos,
-                before.pos_neg,
-                before.neg_pos,
-                before.neg_neg,
-            ), f"{name} 2x2 moved"
-            if before.sj_table is None:
-                assert after.sj_table is None, f"{name} invented an sj_table"
-            else:
-                for column in ("ref_id", "start", "end", "motif_strand", "n_sense", "n_antisense"):
-                    assert np.array_equal(
-                        getattr(after.sj_table, column), getattr(before.sj_table, column)
-                    ), f"{name}.sj_table.{column} moved"
+        table = original.exonic_spliced.sj_table
+        assert table is not None and table.n_sj > 0, (
+            "the fixture's spliced model carries no per-sj table, so its round trip proves nothing"
+        )
+        _assert_round_trip(original, cache.strand_model, "strand_model")
+
+    def test_a_NEW_strand_counter_is_written_and_read_back_not_defaulted(
+        self, scanned, tmp_path, monkeypatch
+    ):
+        """PERTURBATION: a counter added to ``StrandModel`` must reach the cache. Every field has a
+        default, so a layout that did not know the counter would drop it on write and fill in the default
+        on load, and nothing would fail."""
+        from rigel import strand_model
+
+        @dataclasses.dataclass(frozen=True)
+        class WithACounter(strand_model.StrandModel):
+            added: int = 0
+
+        monkeypatch.setattr(strand_model, "StrandModel", WithACounter)
+        index, bam, scan, payload, original = scanned
+        models = {}
+        for i, field in enumerate(dataclasses.fields(original)):
+            sub = getattr(original, field.name)
+            kept = {f.name: getattr(sub, f.name) for f in dataclasses.fields(sub)}
+            models[field.name] = WithACounter(**kept, added=7 + i)  # anything but the default
+        widened = strand_model.StrandModels(**models)
+        cache_dir = tmp_path / "cache"
+        write_scan_cache(
+            cache_dir,
+            payload=payload,
+            strand_model=widened,
+            index=index,
+            bam=bam,
+            scan_config=scan,
+        )
+        _assert_round_trip(widened, read_scan_cache(cache_dir, index).strand_model, "strand_model")
+
+    def test_a_strand_model_field_the_cache_cannot_store_is_REFUSED(
+        self, scanned, tmp_path, monkeypatch
+    ):
+        """A sub-model is cached as its int counters, one int64 vector, and its per-sj table. A field that
+        is neither has no place in that layout, and packed into the vector it would be truncated to an
+        int, so the write refuses it by name."""
+        from rigel import strand_model
+
+        @dataclasses.dataclass(frozen=True)
+        class WithARate(strand_model.StrandModel):
+            rate: float = 0.5
+
+        monkeypatch.setattr(strand_model, "StrandModel", WithARate)
+        index, bam, scan, payload, original = scanned
+        with pytest.raises(TypeError, match="rate"):
+            write_scan_cache(
+                tmp_path / "refused",
+                payload=payload,
+                strand_model=original,
+                index=index,
+                bam=bam,
+                scan_config=scan,
+            )
 
     def test_THE_FL_HISTOGRAMS_ARE_THE_PAYLOAD_AND_ARE_NOT_CACHED_SEPARATELY(
         self, scanned, tmp_path
@@ -453,6 +513,41 @@ class TestTheKeyRefusesAMovedIndex:
                 )
             finally:
                 nested.__dataclass_fields__ = original
+        assert payload_schema_digest() == before
+
+    def test_the_schema_digest_moves_when_a_STRAND_MODEL_field_moves(self):
+        """The strand half of the cache is keyed as the payload is. Every ``StrandModels`` and
+        ``StrandModel`` field has a default, so a cache written before a field existed would load with
+        that field silently defaulted; the key refuses such a cache instead.
+
+        Each of the three dataclasses is perturbed in turn, because the claim is that each is covered. The
+        counters are also REORDERED: they are stored as one vector and read back by position, so a
+        reorder that keeps every name would swap two counts.
+        """
+        from rigel.scan_cache import payload_schema_digest
+        from rigel.strand_model import SJStrandTable, StrandModel, StrandModels
+
+        before = payload_schema_digest()
+        for owner in (StrandModels, StrandModel, SJStrandTable):
+            original = owner.__dataclass_fields__
+            dropped = next(iter(original))
+            try:
+                owner.__dataclass_fields__ = {k: v for k, v in original.items() if k != dropped}
+                assert payload_schema_digest() != before, (
+                    f"dropping {owner.__name__}.{dropped} did not move the digest, so a cache written "
+                    f"before that field existed would load it defaulted"
+                )
+            finally:
+                owner.__dataclass_fields__ = original
+        original = StrandModel.__dataclass_fields__
+        try:
+            StrandModel.__dataclass_fields__ = dict(reversed(original.items()))
+            assert payload_schema_digest() != before, (
+                "reordering StrandModel's counters did not move the digest, so a cache written under "
+                "the old order would load with its counts swapped"
+            )
+        finally:
+            StrandModel.__dataclass_fields__ = original
         assert payload_schema_digest() == before
 
     def test_a_changed_TALLY_setting_is_refused(self, scanned, tmp_path):

@@ -783,14 +783,27 @@ class AccumulatorPayload:
         for name, axis, dtype in SINGLE_COLUMN_AXES:
             banks[name] = _single_column_bank(cal, name, rows_on[axis], dtype)
 
-        pool_lengths = np.ascontiguousarray(cal["pool_lengths"], dtype=np.int64)
+        qc = ScanQC.from_dict(cal["qc"])
+        # THE LEDGER, checked at the door. A deposited fragment books its first covered base in
+        # region_start_count and its last in region_end_count, so each bank sums, over both columns, to
+        # qc.deposited: a bank that disagrees lost or invented a fragment.
+        for name in ("region_start_count", "region_end_count"):
+            n_booked = int(banks[name].sum())
+            if n_booked != qc.deposited:
+                raise ValueError(
+                    f"{name} sums to {n_booked} but {qc.deposited} fragments were deposited; the ledger "
+                    f"books every deposited fragment exactly once in each of region_start_count and "
+                    f"region_end_count."
+                )
+
+        pool_lengths = _exact_dtype(cal, "pool_lengths", np.int64)
         if pool_lengths.size != N_FRAGMENT_POOLS * (max_length + 1):
             raise ValueError(
                 f"pool_lengths has {pool_lengths.size} entries, expected "
                 f"{N_FRAGMENT_POOLS} x (max_length + 1) = {N_FRAGMENT_POOLS * (max_length + 1)}"
             )
 
-        deposited_lengths = np.ascontiguousarray(cal["deposited_lengths"], dtype=np.uint32)
+        deposited_lengths = _exact_dtype(cal, "deposited_lengths", np.uint32)
         if deposited_lengths.shape != (max_length + 1,):
             raise ValueError(
                 f"deposited_lengths has shape {deposited_lengths.shape}, expected ({max_length + 1},)"
@@ -801,13 +814,12 @@ class AccumulatorPayload:
         # was located in space, this one that every fragment was binned by length. A histogram that is
         # the anchor for every FL model in the tool must not be allowed in one fragment short.
         n_binned = int(deposited_lengths.sum())
-        if n_binned != int(cal["qc"]["deposited"]):
+        if n_binned != qc.deposited:
             raise ValueError(
-                f"deposited_lengths sums to {n_binned} but {int(cal['qc']['deposited'])} fragments were "
+                f"deposited_lengths sums to {n_binned} but {qc.deposited} fragments were "
                 "deposited; the unconditional length histogram must bin every one of them exactly once."
             )
 
-        qc = ScanQC.from_dict(cal["qc"])
         deferred = DeferredFragments.from_dict(cal["deferred"])
         # The conservation half, refused at the door. `qc.deferred_undetermined_gap` says how many
         # fragments were held; this bank is supposed to BE them. The identity
@@ -857,20 +869,27 @@ def _offsets(cal: dict[str, Any], name: str, n_refs: int) -> np.ndarray:
     return array
 
 
-def _bank(cal: dict[str, Any], name: str, rows: int, dtype: type) -> np.ndarray:
-    """One two-column bank, reshaped from the flat array the C++ emits.
+def _exact_dtype(cal: dict[str, Any], name: str, dtype: type) -> np.ndarray:
+    """``cal[name]`` as a contiguous array, its dtype asserted rather than coerced.
 
-    The dtype is asserted rather than coerced. ``ascontiguousarray`` would happily widen a uint32 count
-    to uint64, which compares equal by value — so a schema drift would pass every value check downstream
-    while the payload silently stopped matching the specification.
+    ``ascontiguousarray(x, dtype=D)`` would happily widen a uint32 count to uint64, or narrow an int64
+    histogram, and either compares equal by value — so a schema drift would pass every value check
+    downstream while the payload silently stopped matching the specification. Without a dtype it is a
+    no-op on the arrays the C++ emits, which stay views.
     """
     array = np.ascontiguousarray(cal[name])
     if array.dtype != dtype:
         raise ValueError(
-            f"{name} has dtype {array.dtype}, expected {np.dtype(dtype)}. Counts are uint32 and "
-            f"reciprocal-opportunity sums are float64; a widened array compares equal by value and "
-            f"would hide the change."
+            f"{name} has dtype {array.dtype}, expected {np.dtype(dtype)}. A widened or narrowed array "
+            f"compares equal by value and would hide the change."
         )
+    return array
+
+
+def _bank(cal: dict[str, Any], name: str, rows: int, dtype: type) -> np.ndarray:
+    """One two-column bank, reshaped from the flat array the C++ emits; its dtype is asserted by
+    :func:`_exact_dtype`."""
+    array = _exact_dtype(cal, name, dtype)
     if array.size != rows * N_STRAND_COLUMNS:
         raise ValueError(
             f"{name} has {array.size} entries, which does not divide into {rows} rows x "
@@ -886,12 +905,7 @@ def _single_column_bank(cal: dict[str, Any], name: str, rows: int, dtype: type) 
     different claims: a two-column bank asserts the strand axis is meaningful for that channel, and this
     one asserts it is not. A shared function taking ``n_columns=1`` would read as the same statement.
     """
-    array = np.ascontiguousarray(cal[name])
-    if array.dtype != dtype:
-        raise ValueError(
-            f"{name} has dtype {array.dtype}, expected {np.dtype(dtype)}. A narrowed array loses "
-            f"precision at realistic depth."
-        )
+    array = _exact_dtype(cal, name, dtype)
     if array.shape != (rows,):
         raise ValueError(
             f"{name} has shape {array.shape}, expected ({rows},). This bank has ONE value per object, "

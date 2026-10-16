@@ -25,6 +25,7 @@ from __future__ import annotations
 import dataclasses
 
 import numpy as np
+import pytest
 
 from rigel.native import Accumulator as NativeAccumulator
 from rigel.types import Strand
@@ -796,6 +797,107 @@ def test_the_per_worker_merge_is_bit_identical_at_any_shard_count():
                 )
 
 
+def _exported(native) -> dict:
+    """Every bank the binding exports, COPIED.
+
+    The array properties are views into the C++ storage, so a snapshot that kept them would move with
+    the accumulator it is meant to pin and compare equal to anything.
+    """
+    out = {}
+    for field in dataclasses.fields(Tally):
+        value = getattr(native, field.name)
+        if field.name in _NON_ARRAY_FIELDS:
+            out[field.name] = {
+                key: np.array(v, copy=True) if isinstance(v, np.ndarray) else v
+                for key, v in dict(value).items()
+            }
+        else:
+            out[field.name] = np.array(value, copy=True)
+    return out
+
+
+def _assert_unchanged(before: dict, after: dict, label: str) -> None:
+    """Two :func:`_exported` snapshots agree on every bank, dtypes included."""
+    for name, want in before.items():
+        got = after[name]
+        if isinstance(want, dict):
+            assert got.keys() == want.keys(), f"{label}: {name} keys"
+            for key, expected in want.items():
+                if isinstance(expected, np.ndarray):
+                    _assert_array(got[key], expected, label, f"{name}[{key!r}]")
+                else:
+                    assert got[key] == expected, f"{label}: {name}[{key!r}] changed"
+            continue
+        _assert_array(got, want, label, name)
+
+
+def test_an_accumulator_merging_ITSELF_is_refused_before_ANY_bank_is_touched():
+    """``merge_from`` refuses ``other is this`` before anything else.
+
+    Every other precondition holds trivially between an accumulator and itself, so nothing else stops
+    the merge: every bank would double, and the held-record bank would be appended to itself, which once
+    it holds a record is a loop that reads the vector it grows and never ends.
+
+    Two arms, and their order is the point. The first holds NO record, so its self-merge cannot hang:
+    without the refusal it doubles every bank and returns, and the test fails cleanly before the second
+    arm, which holds records (the case that hangs), is reached.
+
+    PERTURBATION: deleting the refusal fails the first arm with DID NOT RAISE; moving it anywhere below
+    the first bank merge fails the first arm's unchanged-banks assertion.
+    """
+    single = [(label, kw) for label, kw in CASES if len(kw.get("hypotheses", UNSPLICED_ONLY)) < 2]
+    for label, corpus, holds_records in (
+        ("no record held", single, False),
+        ("records held", CASES, True),
+    ):
+        _, accumulator = _pair()
+        for _case, kw in corpus:
+            accumulator.deposit(**{"hypotheses": UNSPLICED_ONLY, **kw})
+        held = dict(accumulator.deferred)["start"].size
+        assert (held > 0) == holds_records, f"{label}: {held} records held"
+        # not vacuous: the census, the first bank merged, has something a doubling would change
+        assert dict(accumulator.qc)["deposited"] > 0
+        assert any(dict(accumulator.gap_resolution).values()), f"{label}: an all-zero census"
+
+        before = _exported(accumulator)
+        with pytest.raises(ValueError, match="cannot merge itself"):
+            accumulator.merge_from(accumulator)
+        _assert_unchanged(before, _exported(accumulator), f"a refused self-merge, {label}")
+
+
+def test_a_merge_across_two_WIDTHS_is_refused_before_ANY_bank_is_touched():
+    """``merge_from`` checks ``max_length`` with every other precondition, before it merges anything.
+
+    ``max_length`` is the width of the pool and deposited-length histograms. A width check placed after
+    the bank merges threw on a half-merged accumulator — the census, the held records and every region,
+    boundary and sj bank already summed — and an ``other`` NARROWER than ``this`` was read past the end
+    of its deposited-length histogram before the check was reached. So a refusal must leave every bank
+    ``this`` exports exactly as it was, whichever side is wider.
+
+    The WIDER ``other`` comes first on purpose: with the check misplaced it fails on the half-merge
+    alone, before the narrower arm can read out of bounds.
+
+    PERTURBATION: moving the ``max_length`` check back below the bank merges fails the unchanged-banks
+    assertion on the first arm; deleting it lets the first arm merge without raising.
+    """
+    for other_length in (MAX_LENGTH + 500, 120):
+        _, this = _pair()
+        _, other = _pair(max_length=other_length)
+        for _label, kw in CASES:
+            this.deposit(**{"hypotheses": UNSPLICED_ONLY, **kw})
+            other.deposit(**{"hypotheses": UNSPLICED_ONLY, **kw})
+        # not vacuous: `other` holds what a half-merge would have summed into `this` first
+        assert dict(other.qc)["deposited"] > 0
+        assert dict(other.deferred)["start"].size > 0
+
+        before = _exported(this)
+        with pytest.raises(ValueError, match="max_length"):
+            this.merge_from(other)
+        _assert_unchanged(
+            before, _exported(this), f"a refused merge with an other of max_length {other_length}"
+        )
+
+
 def test_an_EMPTY_hypothesis_set_is_the_UNSPLICED_ONLY_set_and_does_not_CRASH():
     """A regression gate for a hard segfault.
 
@@ -822,3 +924,40 @@ def test_an_EMPTY_hypothesis_set_is_the_UNSPLICED_ONLY_set_and_does_not_CRASH():
     reference_default.deposit(REF, **kw, hypotheses=UNSPLICED_ONLY)
     native_default.deposit(**kw, hypotheses=())
     _assert_parity(reference_default, native_default, "empty-hypotheses vs UNSPLICED_ONLY")
+
+
+def test_a_GENERATOR_of_hypotheses_is_the_same_fragment_as_the_tuple():
+    """The binding reads ``hypotheses`` in ONE pass, so a one-shot iterable marshals as its tuple does.
+
+    A second pass over a generator sees nothing, and an empty hypothesis set deposits as the unspliced
+    fragment alone (the test above): an implied intron goes uncut, a fragment that must be held is
+    deposited, nothing says so, and ``length_under`` answers 0 for every index. So the specification
+    receives each case's tuple and the native accumulator a generator over it, and the two must stay
+    byte-identical; and ``length_under`` must give the tuple's length under every hypothesis.
+
+    PERTURBATION: restoring the reservation pass over ``hypotheses`` ahead of the fill fails the
+    parity on the first case (its implied intron is not cut), and ``length_under`` returns 0.
+    """
+    reference, native = _pair()
+    lengths = []
+    for label, kw in CASES:
+        if "hypotheses" not in kw:
+            continue
+        hypotheses = kw["hypotheses"]
+        want = reference.deposit(REF, **kw)
+        got = native.deposit(**{**kw, "hypotheses": (h for h in hypotheses)})
+        assert got == want.value, f"{label}: a generator gave {got!r}, the tuple {want.value!r}"
+        _assert_parity(reference, native, f"{label}, its hypotheses as a generator")
+        for index in range(len(hypotheses)):
+            listed = native.length_under(**kw, hypothesis_index=index)
+            generated = native.length_under(
+                **{**kw, "hypotheses": (h for h in hypotheses)}, hypothesis_index=index
+            )
+            assert generated == listed, (
+                f"{label}: L under hypothesis {index} is {generated} from a generator, "
+                f"{listed} from the tuple"
+            )
+            lengths.append(listed)
+    # not vacuous: two-path fragments were held, and the lengths compared are not all zero
+    assert reference.tally.qc["deferred_undetermined_gap"] > 0
+    assert any(length > 0 for length in lengths)

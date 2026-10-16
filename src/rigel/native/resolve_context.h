@@ -18,6 +18,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -319,6 +320,30 @@ struct GapBlock {
     int32_t end;
 };
 
+/// The cgranges query buffer and its capacity, owned. `cr_overlap` grows it with `realloc` through the
+/// addresses of `ptr` and `cap`, so it is released with `free`. A move hands both over and leaves the source
+/// empty, as a fresh buffer is: a source keeping its `cap` with no `ptr` would be written through null by
+/// its next query, because cgranges reallocates only once the count reaches `cap`.
+struct OverlapQueryBuffer {
+    int64_t* ptr = nullptr;
+    int64_t  cap = 0;
+
+    OverlapQueryBuffer() = default;
+    OverlapQueryBuffer(const OverlapQueryBuffer&) = delete;
+    OverlapQueryBuffer& operator=(const OverlapQueryBuffer&) = delete;
+    OverlapQueryBuffer(OverlapQueryBuffer&& o) noexcept
+        : ptr(std::exchange(o.ptr, nullptr)), cap(std::exchange(o.cap, 0)) {}
+    OverlapQueryBuffer& operator=(OverlapQueryBuffer&& o) noexcept {
+        if (this != &o) {
+            free(ptr);
+            ptr = std::exchange(o.ptr, nullptr);
+            cap = std::exchange(o.cap, 0);
+        }
+        return *this;
+    }
+    ~OverlapQueryBuffer() { free(ptr); }
+};
+
 struct ResolverScratch {
     // Per-transcript bp counters (sparse-cleaned)
     std::vector<int32_t> t_exon_bp;
@@ -329,9 +354,8 @@ struct ResolverScratch {
     // past it.
     static constexpr size_t DIRTY_INDICES_RESERVE = 512;
 
-    // cgranges query buffers (reusable per-call)
-    int64_t* buf = nullptr;
-    int64_t  buf_cap = 0;
+    // cgranges query buffer (reusable per-call)
+    OverlapQueryBuffer buf;
 
     // Reusable scratch for SPLICED_IMPLICIT detection
     // (per-fragment block sort + PE-gap collection)
@@ -358,55 +382,12 @@ struct ResolverScratch {
         dirty_indices.reserve(DIRTY_INDICES_RESERVE);
     }
 
-    ~ResolverScratch() {
-        free(buf);
-    }
-
-    // Non-copyable, movable
+    // Non-copyable. ⚠ The moves are the members' own, defaulted, so a member added later cannot be left out
+    // of them, as a hand-written member list once left out `hypothesis_path`.
     ResolverScratch(const ResolverScratch&) = delete;
     ResolverScratch& operator=(const ResolverScratch&) = delete;
-
-    ResolverScratch(ResolverScratch&& o) noexcept
-        : t_exon_bp(std::move(o.t_exon_bp)),
-          t_transcript_bp(std::move(o.t_transcript_bp)),
-          t_dirty(std::move(o.t_dirty)),
-          dirty_indices(std::move(o.dirty_indices)),
-          buf(o.buf),
-          buf_cap(o.buf_cap),
-          implicit_blocks(std::move(o.implicit_blocks)),
-          implicit_gaps(std::move(o.implicit_gaps)),
-          exon_t_sets(std::move(o.exon_t_sets)),
-          transcript_t_sets(std::move(o.transcript_t_sets)),
-          sj_t_sets(std::move(o.sj_t_sets)),
-          tmp_a(std::move(o.tmp_a)),
-          tmp_union(std::move(o.tmp_union)),
-          all_overlap_t(std::move(o.all_overlap_t)),
-          nrna_t(std::move(o.nrna_t))
-    {
-        o.buf = nullptr; o.buf_cap = 0;
-    }
-
-    ResolverScratch& operator=(ResolverScratch&& o) noexcept {
-        if (this != &o) {
-            free(buf);
-            t_exon_bp = std::move(o.t_exon_bp);
-            t_transcript_bp = std::move(o.t_transcript_bp);
-            t_dirty = std::move(o.t_dirty);
-            dirty_indices = std::move(o.dirty_indices);
-            implicit_blocks = std::move(o.implicit_blocks);
-            implicit_gaps = std::move(o.implicit_gaps);
-            exon_t_sets = std::move(o.exon_t_sets);
-            transcript_t_sets = std::move(o.transcript_t_sets);
-            sj_t_sets = std::move(o.sj_t_sets);
-            tmp_a = std::move(o.tmp_a);
-            tmp_union = std::move(o.tmp_union);
-            all_overlap_t = std::move(o.all_overlap_t);
-            nrna_t = std::move(o.nrna_t);
-            buf = o.buf; buf_cap = o.buf_cap;
-            o.buf = nullptr; o.buf_cap = 0;
-        }
-        return *this;
-    }
+    ResolverScratch(ResolverScratch&&) = default;
+    ResolverScratch& operator=(ResolverScratch&&) = default;
 
     void mark_dirty(int32_t t_idx) {
         if (!t_dirty[t_idx]) {
@@ -443,6 +424,12 @@ struct ResolverScratch {
         implicit_gaps.clear();
     }
 };
+
+// The defaulted moves take their exception specification from the members, so this holds them to the
+// `noexcept` the hand-written moves promised: a member whose move can throw fails here, at compile time.
+static_assert(std::is_nothrow_move_constructible_v<ResolverScratch> &&
+                  std::is_nothrow_move_assignable_v<ResolverScratch>,
+              "ResolverScratch: every member must move without throwing");
 
 // ================================================================
 // FragmentResolver — holds all index data for C++ resolution
@@ -1076,10 +1063,10 @@ public:
 
             const char* ref_str = id_to_ref_[eb.ref_id].c_str();
             int64_t n = cr_overlap(cr_, ref_str, bstart, bend,
-                                   &scratch.buf, &scratch.buf_cap);
+                                   &scratch.buf.ptr, &scratch.buf.cap);
 
             for (int64_t hi = 0; hi < n; hi++) {
-                int64_t idx = scratch.buf[hi];
+                int64_t idx = scratch.buf.ptr[hi];
                 int32_t h_start = cr_start(cr_, idx);
                 int32_t h_end   = cr_end(cr_, idx);
                 int32_t label   = cr_label(cr_, idx);

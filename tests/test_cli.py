@@ -71,6 +71,29 @@ def test_index_gtf_parse_mode_warn_skip():
     assert args.gtf_parse_mode == "warn-skip"
 
 
+def test_index_refuses_a_negative_nrna_tolerance_as_an_error_before_writing(tmp_path):
+    """A negative tolerance clustered as 0 does, and the manifest recorded it as given. `build` validates its settings
+    as an `IndexConfig`, so the refusal is an error before the output directory is made."""
+    import pysam
+    from _index_builder import MINI_GTF
+
+    fasta = tmp_path / "genome.fa"
+    fasta.write_text(">chr1\n" + "N" * 2000 + "\n")
+    pysam.faidx(str(fasta))
+    gtf = tmp_path / "test.gtf"
+    gtf.write_text(MINI_GTF)
+    out = tmp_path / "idx"
+    args = build_parser().parse_args(
+        ["index", "--fasta", str(fasta), "--gtf", str(gtf), "-o", str(out), "--no-mappability"]
+        + ["--nrna-tolerance", "-5"]
+    )
+    with pytest.raises(SystemExit) as exited:
+        args.func(args)
+    message = str(exited.value.code)
+    assert message.startswith("Error: ") and "nrna_merge_tolerance must be >= 0; got -5" in message
+    assert not out.exists()
+
+
 def test_sim_unknown_scenario_key_is_refused(tmp_path):
     """``n_fragment`` for ``n_fragments`` must not simulate the default fragment count."""
     cfg = tmp_path / "scenario.yaml"
@@ -162,6 +185,38 @@ def _quant_with_empty_inputs(tmp_path, *extra):
     )
 
 
+@pytest.mark.parametrize("value", ["nan", "-0.5", "1", "1.5"])
+def test_quant_refuses_a_pruning_threshold_outside_zero_to_one_before_loading_the_index(
+    tmp_path, value
+):
+    """A candidate is pruned when its likelihood falls below this fraction of its fragment's best. At 1 or above, or
+    NaN, the margin became 0 and a fragment kept only its tied-best candidates; below 0 nothing was pruned. 0 keeps
+    every candidate, so the range is [0, 1), refused as an error before the index loads."""
+    args = _quant_with_empty_inputs(tmp_path, "--pruning-min-posterior", value)
+    with pytest.raises(SystemExit) as exited:
+        args.func(args)
+    assert str(exited.value.code) == (
+        f"Error: --pruning-min-posterior must be a number in [0, 1), got {float(value)!r}"
+    )
+
+
+@pytest.mark.parametrize("value", [False, "1e-4"])
+def test_a_pruning_threshold_that_is_not_a_number_is_refused(value):
+    """YAML reads ``1e-4`` as a string, which reached the scorer and failed there as a TypeError, after the scan; a
+    bool is an int to Python but never a threshold (False, as 0, would pass the range check alone)."""
+    from rigel.config import FragmentScoringConfig
+
+    with pytest.raises(ValueError, match=r"--pruning-min-posterior must be a number in \[0, 1\)"):
+        FragmentScoringConfig(pruning_min_posterior=value)
+
+
+@pytest.mark.parametrize("value", [0, 0.0, 1e-4, 0.999])
+def test_a_pruning_threshold_in_zero_to_one_is_accepted(value):
+    from rigel.config import FragmentScoringConfig
+
+    assert FragmentScoringConfig(pruning_min_posterior=value).pruning_min_posterior == value
+
+
 def test_quant_refuses_an_annotated_bam_it_could_not_write_before_the_run(tmp_path):
     """The annotated BAM is written by a second pass after the quantification; a directory that does not exist used to
     fail only then."""
@@ -179,6 +234,28 @@ def test_quant_reports_an_index_it_cannot_load_as_an_error(tmp_path):
     with pytest.raises(SystemExit) as exited:
         args.func(args)
     assert str(exited.value.code).startswith("Error: Index at")
+
+
+def test_quant_reports_an_index_missing_a_file_as_an_error_not_a_traceback(
+    tmp_path, tmp_path_factory
+):
+    """`rigel quant` catches the index's load refusal; a missing file used to escape it as another exception."""
+    from pathlib import Path
+
+    from _index_builder import MINI_GTF, build_test_index
+
+    index_dir = Path(build_test_index(tmp_path_factory, MINI_GTF, name="cli_missing").index_dir)
+    (index_dir / "regions.feather").unlink()
+    bam = tmp_path / "in.bam"
+    bam.write_bytes(b"")
+    args = build_parser().parse_args(
+        ["quant", "--bam", str(bam), "--index", str(index_dir), "-o", str(tmp_path / "out")]
+    )
+    with pytest.raises(SystemExit) as exited:
+        args.func(args)
+    message = str(exited.value.code)
+    assert message.startswith(f"Error: Index at {index_dir} is missing regions.feather")
+    assert "Rebuild" in message
 
 
 def test_quant_refuses_a_config_that_is_not_a_mapping(tmp_path):

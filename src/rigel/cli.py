@@ -1440,7 +1440,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="pruning_min_posterior",
         type=float,
         default=None,
-        help="Minimum posterior threshold for candidate pruning "
+        help="Minimum posterior threshold for candidate pruning, in [0,1) "
         f"(default: {qd['pruning_min_posterior']:g}). Lower values keep more candidates "
         "(conservative). Set to 0 to disable pruning entirely.",
     )

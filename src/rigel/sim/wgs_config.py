@@ -114,12 +114,15 @@ class WholeGenomeSimConfig:
     """Top-level simulation configuration."""
 
     genome: str = ""
+    #: The GTF the index is built from. A run refuses a GTF whose sha256 differs from the one the index
+    #: recorded at build time.
     gtf: str = ""
     #: The rigel index the simulation's transcriptome comes from. The simulator takes the index's
     #: transcript list — annotated transcripts plus the synthetic nascent-RNA entities `rigel index`
     #: creates (`index.create_nrna_transcripts`, TSS/TES clustered within `IndexConfig.nrna_merge_tolerance`) —
     #: so what it simulates is exactly what `rigel quant` sees. ``None`` ⇒ an index is built from
-    #: ``genome`` + ``gtf`` into ``<outdir>/rigel_index`` on first use.
+    #: ``genome`` + ``gtf`` into ``<outdir>/rigel_index`` on first use. The manifest records the index
+    #: used: its resolved path and its own manifest.
     index: str | None = None
     #: Shadow transcripts: a supplemental GTF the simulator draws fragments from but the index never
     #: sees — unannotated transcription, simulated. Their ids must be unknown to the index (a shadow
@@ -138,6 +141,7 @@ class WholeGenomeSimConfig:
     capture_configs: list[CaptureScenario] = field(default_factory=list)
     strand_specificities: list[float] = field(default_factory=lambda: [1.0])
 
+    #: The two read outputs; at least one must be kept, since a run keeping neither keeps no reads.
     oracle_bam: bool = True
     emit_fastq: bool = True
     verbose: bool = True

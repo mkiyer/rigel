@@ -213,7 +213,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 | `--sweep-block-slots N` | `1000` | Calibration's working set: the chain is solved one locus block at a time, the pieces between intergenic regions merged up to this many slots per block. Performance only — the answer is the same for every value; smaller blocks use less memory per sweep. |
 | `--overhang-alpha A` | `0.1` | Per-base overhang penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
 | `--mismatch-alpha A` | `0.1` | Per-mismatch (`NM` tag) penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
-| `--pruning-min-posterior P` | `1e-4` | Minimum posterior for candidate pruning. Lower keeps more candidates; `0` disables pruning. |
+| `--pruning-min-posterior P` | `1e-4` | Minimum posterior for candidate pruning, in [0, 1). Lower keeps more candidates; `0` disables pruning. |
 | `--splicing-anchor-tolerance K` | `3` | Splicing-anchor tolerance (bp) at annotated introns. An annotated intron in a fragment's unsequenced gap may overlap up to K aligned bases at either end and still count as lying in the gap, and a transcript is contradicted only by an intron that overlaps an aligned block by more than K bases. It shapes the gap hypotheses calibration arbitrates, so it changes calibration's tally. It is not the splice blacklist's anchor test, which it never changes. |
 | `--emit-locus-stats` / `--no-emit-locus-stats` | off | Write per-locus EM convergence profiling (iteration counts, timing, equivalence-class stats) to `locus_stats.feather` |
 

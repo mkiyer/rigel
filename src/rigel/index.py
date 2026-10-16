@@ -183,7 +183,8 @@ def _check_blacklist_references(bl_df: pd.DataFrame, ref_lengths: dict[str, int]
 
 
 class IndexLoadError(RuntimeError):
-    """An index :meth:`TranscriptIndex.load` refuses: no manifest, another format version, or a missing file. The
+    """An index :meth:`TranscriptIndex.load` refuses: no manifest, another format version, a missing file, or a
+    transcript table whose ``t_index`` is not its row order or whose ``g_index`` does not number the genes 0..n−1. The
     message names the rebuild."""
 
 
@@ -1001,6 +1002,9 @@ class TranscriptIndex:
     ) -> None:
         """Build the rigel reference index and write to disk.
 
+        The settings are validated as one :class:`~rigel.config.IndexConfig`, so a value it refuses raises
+        ``ValueError`` before anything is written, whoever the caller.
+
         Parameters
         ----------
         fasta_file : path
@@ -1039,6 +1043,14 @@ class TranscriptIndex:
             Minimum per-row count for a (chrom, intron, read_length)
             artifact to enter the blacklist.  Default ``2``.
         """
+        IndexConfig(
+            feather_compression=feather_compression,
+            write_tsv=write_tsv,
+            gtf_parse_mode=gtf_parse_mode,
+            collapse_duplicate_transcripts=collapse_duplicate_transcripts,
+            nrna_merge_tolerance=nrna_tolerance,
+            splice_blacklist_min_count=splice_blacklist_min_count,
+        )
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         feather_kwargs = {"compression": feather_compression}
@@ -1279,20 +1291,35 @@ class TranscriptIndex:
                 f"Rebuild: rigel index --fasta ... --gtf ... -o {index_dir}"
             )
 
-        # -- reference lengths -------------------------------------------------
-        ref_lengths_path = os.path.join(index_dir, REF_LENGTHS_FEATHER)
-        if not os.path.exists(ref_lengths_path):
-            raise IndexLoadError(
-                f"Index at {index_dir} is missing {REF_LENGTHS_FEATHER}. Rebuild the index."
+        # -- the files every index has, checked before any is read -------------
+        # The splice blacklist is read only when the manifest records its store, and the alias table never.
+        missing = [
+            name
+            for name in (
+                REF_LENGTHS_FEATHER,
+                TRANSCRIPTS_FEATHER,
+                REGIONS_FEATHER,
+                BOUNDARIES_FEATHER,
+                INTERVALS_FEATHER,
+                SJ_FEATHER,
             )
-        self.ref_lengths = load_ref_lengths(ref_lengths_path)
+            if not os.path.exists(os.path.join(index_dir, name))
+        ]
+        if missing:
+            raise IndexLoadError(
+                f"Index at {index_dir} is missing {', '.join(missing)}. "
+                f"Rebuild the index (rigel index --fasta ... --gtf ... -o {index_dir})."
+            )
+
+        # -- reference lengths -------------------------------------------------
+        self.ref_lengths = load_ref_lengths(os.path.join(index_dir, REF_LENGTHS_FEATHER))
         self.ref_names = list(self.ref_lengths.keys())
         self.ref_name_to_id = {name: i for i, name in enumerate(self.ref_names)}
 
         # -- transcripts ------------------------------------------------------
         self.t_df = pd.read_feather(os.path.join(index_dir, TRANSCRIPTS_FEATHER))
         if not (self.t_df.index == self.t_df["t_index"]).all():
-            raise ValueError(
+            raise IndexLoadError(
                 f"Invalid index in {index_dir}: row index does not match "
                 f"'t_index' column in {TRANSCRIPTS_FEATHER}; rebuild index"
             )
@@ -1316,7 +1343,7 @@ class TranscriptIndex:
         # -- gene table (derived) ---------------------------------------------
         self.g_df = cls._build_gene_table(self.t_df)
         if not (self.g_df.index == self.g_df["g_index"]).all():
-            raise ValueError(
+            raise IndexLoadError(
                 f"Invalid index in {index_dir}: derived gene table row index "
                 f"does not match 'g_index'; rebuild index"
             )
@@ -1334,16 +1361,8 @@ class TranscriptIndex:
         from .calibration.splice_graph import load_boundaries, load_regions, validate_graph
 
         logger.debug("Reading splice graph")
-        regions_path = os.path.join(index_dir, REGIONS_FEATHER)
-        boundaries_path = os.path.join(index_dir, BOUNDARIES_FEATHER)
-        for name, path in ((REGIONS_FEATHER, regions_path), (BOUNDARIES_FEATHER, boundaries_path)):
-            if not os.path.exists(path):
-                raise RuntimeError(
-                    f"Index at {index_dir} is missing {name} (the splice graph). "
-                    f"Rebuild the index (rigel index --fasta ... --gtf ... -o {index_dir})."
-                )
-        self.regions_df = load_regions(regions_path)
-        self.edges_df = load_boundaries(boundaries_path)
+        self.regions_df = load_regions(os.path.join(index_dir, REGIONS_FEATHER))
+        self.edges_df = load_boundaries(os.path.join(index_dir, BOUNDARIES_FEATHER))
         validate_graph(self.regions_df, self.edges_df, self.ref_lengths)
 
         # -- interval index (unified cgranges) ---------------------------------

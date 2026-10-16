@@ -235,7 +235,7 @@ def test_parse_yaml_capture_config(tmp_path):
         f"gtf: annotation.gtf\n"
         f"capture:\n"
         f"  probes: {probes}\n"
-        f"  format: transcript\n"
+        f"  probe_format: transcript\n"
         f"  off_target_weight: 0.5\n"
         f"  binding_per_base: 7\n"
         f"  min_overlap: 4\n"
@@ -267,6 +267,27 @@ def test_a_capture_key_the_loader_does_not_know_is_REFUSED(tmp_path):
         parse_yaml_config(config)
 
 
+@pytest.mark.parametrize(
+    ("body", "key"),
+    [
+        ("capture:\n  probes: {probes}\n  format: transcript\n", "format"),
+        ("capture:\n  configs:\n    - name: on\n      probes: {probes}\n", "name"),
+        ("capture:\n  scenarios:\n    - label: on\n      probes: {probes}\n", "scenarios"),
+    ],
+    ids=["format", "name", "scenarios"],
+)
+def test_a_capture_alias_is_refused_only_the_canonical_key_is_read(tmp_path, body, key):
+    """`format` for `probe_format`, `name` for `label` and `scenarios` for `configs` were aliases no
+    config used. A second spelling of a key lets one config carry both, with only one of them applied,
+    so each is an unknown key. PERTURBATION: restoring any of the three aliases fails this gate."""
+    probes = tmp_path / "probes.tsv"
+    probes.write_text("T1\t10\t130\n")
+    config = tmp_path / "sim.yaml"
+    config.write_text("genome: genome.fa\ngtf: annotation.gtf\n" + body.format(probes=probes))
+    with pytest.raises(ValueError, match=rf"unknown key\(s\) \['{key}'\]"):
+        parse_yaml_config(config)
+
+
 def test_parse_yaml_capture_config_sweep(tmp_path):
     probes = tmp_path / "probes.tsv"
     probes.write_text("T1\t10\t130\n")
@@ -281,7 +302,7 @@ def test_parse_yaml_capture_config_sweep(tmp_path):
         f"      enabled: false\n"
         f"    - label: on\n"
         f"      probes: {probes}\n"
-        f"      format: transcript\n"
+        f"      probe_format: transcript\n"
         f"      binding_per_base: 7\n"
     )
 

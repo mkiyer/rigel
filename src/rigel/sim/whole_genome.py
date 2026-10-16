@@ -4,7 +4,7 @@ Parses one YAML scenario, builds the transcript set, assigns the mature abundanc
 condition to :func:`rigel.sim.orchestrator.run_condition_grid`, which applies the nascent setting,
 generates the reads, the optional oracle BAM and the per-condition truth, and writes one molecular-truth table
 per nascent setting (``truth_abundances_nrna_<label>.tsv``) beside the condition directories.
-Finishes by writing ``manifest.json``.
+Finishes by writing ``manifest.json``, which records the index the transcriptome comes from.
 
 The transcript set is the rigel index's (:func:`load_transcripts_from_index`): annotated
 transcripts plus the synthetic single-exon nascent entities, each with ``t_index`` equal to its
@@ -66,16 +66,14 @@ from rigel.sim.manifest import (
 logger = logging.getLogger(__name__)
 
 
-#: Every key a capture mapping may carry: the scenario's own (``label``/``name``, ``enabled``) and the
-#: ``CaptureConfig`` fields, ``format`` an alias of ``probe_format``.
+#: Every key a capture mapping may carry: the scenario's own (``label``, ``enabled``) and the
+#: ``CaptureConfig`` fields.
 _CAPTURE_KEYS = frozenset(
     {
         "label",
-        "name",
         "enabled",
         "probes",
         "probe_format",
-        "format",
         "off_target_weight",
         "binding_per_base",
         "min_overlap",
@@ -91,7 +89,6 @@ _TOP_KEYS = frozenset(
         "shadow_gtf",
         "index",
         "outdir",
-        "transcript_filter",
         "simulation",
         "abundance",
         "nrna",
@@ -121,7 +118,7 @@ _SECTION_KEYS = {
     ),
     "abundance": frozenset({"mode", "seed", "min", "max", "frac_expressed", "file"}),
     "nrna": frozenset(
-        {"mode", "shares", "ratios", "abundance_ranges", "ratio_labels", "on_fraction", "seed"}
+        {"mode", "ratios", "abundance_ranges", "ratio_labels", "on_fraction", "seed"}
     ),
     "gdna": frozenset(
         {
@@ -145,6 +142,19 @@ def _refuse_unknown_keys(raw: dict, known: frozenset[str], where: str) -> None:
     unknown = sorted(set(raw) - known)
     if unknown:
         raise ValueError(f"{where}: unknown key(s) {unknown}; known: {sorted(known)}")
+
+
+def _refuse_a_run_that_keeps_no_reads(cfg: WholeGenomeSimConfig) -> None:
+    """Raise when ``oracle_bam`` and ``emit_fastq`` are both false. No oracle BAM is written and the FASTQs
+    are deleted once each condition's truth is, so no condition keeps a read; and without a BAM the FASTQ
+    is the condition's resume key, so the next run simulates every condition again."""
+    if not cfg.oracle_bam and not cfg.emit_fastq:
+        raise ValueError(
+            "oracle_bam and emit_fastq are both false (--no-oracle sets oracle_bam false): no condition "
+            "would keep a read, since no oracle BAM is written and the FASTQs are deleted once the truth "
+            "is, and every run would simulate every condition again. Keep oracle_bam true (the reads "
+            "every instrument scores) or emit_fastq true."
+        )
 
 
 def _capture_config_from_mapping(
@@ -175,9 +185,7 @@ def _capture_config_from_mapping(
 
     return CaptureConfig(
         probes=str(probes),
-        probe_format=str(
-            merged.get("probe_format", merged.get("format", CaptureConfig.probe_format))
-        ),
+        probe_format=str(merged.get("probe_format", CaptureConfig.probe_format)),
         off_target_weight=float(merged.get("off_target_weight", CaptureConfig.off_target_weight)),
         binding_per_base=float(merged.get("binding_per_base", CaptureConfig.binding_per_base)),
         min_overlap=int(merged.get("min_overlap", CaptureConfig.min_overlap)),
@@ -191,20 +199,20 @@ def _capture_label_text(value: object) -> str:
 
 
 def _capture_scenarios_from_mapping(raw: dict) -> list[CaptureScenario]:
-    """Parse capture.configs/capture.scenarios from a YAML mapping."""
-    raw_configs = raw.get("configs", raw.get("scenarios"))
+    """Parse capture.configs from a YAML mapping."""
+    raw_configs = raw.get("configs")
     if raw_configs is None:
         return []
     if not isinstance(raw_configs, list) or not raw_configs:
         raise ValueError("capture.configs must be a non-empty list")
 
-    defaults = {key: value for key, value in raw.items() if key not in {"configs", "scenarios"}}
+    defaults = {key: value for key, value in raw.items() if key != "configs"}
     scenarios: list[CaptureScenario] = []
     seen_labels: set[str] = set()
     for index, item in enumerate(raw_configs, start=1):
         if not isinstance(item, dict):
             raise ValueError("each capture.configs entry must be a mapping")
-        label = _capture_label_text(item.get("label", item.get("name", f"c{index}")))
+        label = _capture_label_text(item.get("label", f"c{index}"))
         if not label:
             raise ValueError("capture config labels must be non-empty")
         if label in seen_labels:
@@ -246,11 +254,6 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     cfg.shadow_gtf = raw.get("shadow_gtf", cfg.shadow_gtf)
     cfg.index = raw.get("index", cfg.index)
     cfg.outdir = raw.get("outdir", cfg.outdir)
-    if raw.get("transcript_filter", "all") != "all":
-        raise ValueError(
-            "transcript_filter is not applicable when the transcriptome comes from a rigel index: the "
-            "index IS the transcript set. Build the index from a filtered GTF instead."
-        )
 
     # Simulation params
     sim_raw = raw.get("simulation", {})
@@ -374,6 +377,7 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     # them, so a panel built this way cannot be compared against another aligner or quantifier
     # without re-simulating. Honoured by `sim.orchestrator.run_condition_grid`.
     cfg.emit_fastq = bool(raw.get("emit_fastq", True))
+    _refuse_a_run_that_keeps_no_reads(cfg)
     cfg.verbose = bool(raw.get("verbose", True))
 
     return cfg
@@ -525,6 +529,32 @@ def ensure_index(cfg: "WholeGenomeSimConfig") -> Path:
             collapse_duplicate_transcripts=True,
         )
     return index_dir
+
+
+def _index_provenance(index_dir: Path, gtf: str | Path) -> dict:
+    """The index the transcriptome comes from, as ``manifest.json`` records it: the index's resolved path
+    and its own manifest verbatim (the FASTA and GTF it was built from, each with its sha256, and its
+    build flags).
+
+    Refuses a ``gtf`` whose content is not the GTF the index was built from: the transcriptome is the
+    index's, so without the check a config could name one annotation and simulate another. The test is
+    the content digest the index recorded (``index.source_record``), so a byte-identical copy at another
+    path passes and an edited file at the same path does not. Called once :meth:`TranscriptIndex.load`
+    has accepted the index, which refuses one without a manifest. Gate:
+    ``tests/test_whole_genome_sim_config.py``."""
+    from ..index import load_manifest, source_record
+
+    index_manifest = load_manifest(index_dir)
+    built_from = index_manifest["sources"]["gtf"]
+    given = source_record(gtf)
+    if given["sha256"] != built_from["sha256"]:
+        raise ValueError(
+            f"gtf {given['path']} is not the GTF the index {Path(index_dir).resolve()} was built from "
+            f"({built_from['path']}): sha256 {given['sha256']} against {built_from['sha256']}. The "
+            "simulated transcriptome is the index's, so gtf: must name that GTF; or build the index "
+            "from this one."
+        )
+    return {"path": str(Path(index_dir).resolve()), "manifest": index_manifest}
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1002,14 +1032,16 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
     """Run full simulation.
 
     1. Load the transcripts from the rigel index (built from genome + GTF when none is
-       configured), plus any shadow GTF
+       configured; a GTF the index was not built from is refused), plus any shadow GTF
     2. Assign base abundances (total RNA) once
     3. Sweep nRNA settings x gdna_rates x gDNA strand overdispersions x strand_specificities
        x capture scenarios
-    4. Write manifest
+    4. Write manifest, recording the index the transcriptome comes from
 
     Returns list of condition dicts (for manifest).
     """
+    # checked again here because a caller can set `oracle_bam` after the config is read (--no-oracle)
+    _refuse_a_run_that_keeps_no_reads(cfg)
     outdir = Path(cfg.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -1027,6 +1059,7 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
     transcripts = load_transcripts_from_index(index_dir)
     if not transcripts:
         raise RuntimeError(f"No transcripts loaded from index {index_dir}")
+    index_record = _index_provenance(index_dir, gtf_path)
     n_shadow = 0
     if cfg.shadow_gtf:
         if not Path(cfg.shadow_gtf).exists():
@@ -1120,6 +1153,8 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
     )
 
     # 4. Write manifest
-    manifest_path = write_manifest(outdir, cfg, conditions, n_shadow_transcripts=n_shadow)
+    manifest_path = write_manifest(
+        outdir, cfg, conditions, index=index_record, n_shadow_transcripts=n_shadow
+    )
     logger.info("Wrote manifest to %s", manifest_path)
     return conditions

@@ -192,6 +192,26 @@ def test_every_multi_placement_case_is_byte_identical():
     )
 
 
+def test_a_GENERATOR_of_placements_is_the_same_fragment_as_the_tuple():
+    """``offer`` reads ``placements`` in ONE pass, so a one-shot iterable offers what its tuple does.
+
+    The binding once counted the placements in one pass and marshalled them in a second, which over a
+    generator is empty: the offer then raised for want of a placement. So the specification receives
+    each case's tuple and the native set a generator over it, and the two must stay byte-identical.
+
+    PERTURBATION: restoring the counting pass over ``placements`` raises ``ValueError`` ("offer needs at
+    least one placement") on the first case.
+    """
+    reference, native = _pair()
+    cases = [(label, (placement,)) for label, placement in ONE_PLACEMENT_CASES] + MULTI_CASES
+    for label, placements in cases:
+        want = reference.offer(placements)
+        got = native.offer(p for p in placements)
+        assert got == want.value, f"{label}: a generator gave {got!r}, the tuple {want.value!r}"
+        _assert_parity(reference, native, f"{label}, its placements as a generator")
+    assert reference.tally.qc["deferred_multiple_placements"] > 0
+
+
 def test_the_union_bank_interleaves_gap_held_and_multimapping_records_in_one_order():
     """Gap-held records on both references and multi-placement records between them: the native union
     (every reference's bank and the set's own, sorted once) is the specification's one list."""

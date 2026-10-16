@@ -120,7 +120,8 @@ class FragmentScoringConfig:
     mismatch_alpha : float
         The same, per NM mismatch (:attr:`mismatch_log_penalty`).
     pruning_min_posterior : float
-        A candidate whose likelihood falls below this fraction of its fragment's best is pruned.
+        A candidate whose likelihood falls below this fraction of its fragment's best is pruned, in [0, 1): at 1 a
+        fragment would keep only its tied-best candidates.
     """
 
     overhang_alpha: float = 0.1
@@ -139,6 +140,10 @@ class FragmentScoringConfig:
                 raise ValueError(
                     f"--{name.replace('_', '-')} must be a number in [0, 1], got {value!r}"
                 )
+        # NaN fails both comparisons; a bool is an int to Python but never a threshold
+        value = self.pruning_min_posterior
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0.0 <= value < 1.0:
+            raise ValueError(f"--pruning-min-posterior must be a number in [0, 1), got {value!r}")
 
     @property
     def overhang_log_penalty(self) -> float:
@@ -409,7 +414,8 @@ class CalibrationConfig:
 
 @dataclass(frozen=True)
 class IndexConfig:
-    """What ``rigel index`` may set; the CLI's defaults and :meth:`rigel.index.TranscriptIndex.build`'s are these.
+    """What ``rigel index`` may set; the CLI's defaults and :meth:`rigel.index.TranscriptIndex.build`'s are these, and
+    ``build`` validates its arguments as one.
 
     The index is built once and read by every run, so these are fixed for every quantification against it.
     """

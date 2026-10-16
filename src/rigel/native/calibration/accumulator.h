@@ -554,7 +554,9 @@ public:
                      std::size_t n,
                      std::int64_t* out) const noexcept;
 
-    /// Element-wise sum of `other` into this accumulator. Requires identical region_bound positions.
+    /// Element-wise sum of `other` into this accumulator. Requires a DIFFERENT accumulator with the same
+    /// `max_length`, reference, region_bound positions and sj count, all checked before anything is
+    /// merged: a refusal throws and leaves this accumulator unchanged.
     void merge_from(const Accumulator& other);
 
 private:

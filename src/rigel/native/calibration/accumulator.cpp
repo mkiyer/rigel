@@ -935,6 +935,27 @@ const DeferredFragments& Accumulator::deferred_canonical() {
 // ============================================================================
 
 void Accumulator::merge_from(const Accumulator& other) {
+    // ⛔ EVERY precondition is checked before anything is merged, so a refusal leaves `this` exactly as it
+    // was. A check placed after the first bank is summed does not guard the merge: it throws on a
+    // half-merged accumulator.
+    //
+    // Not itself, first: every other precondition holds trivially between an accumulator and itself. With
+    // `other` aliasing `this` every bank would double, and the held-record bank would be appended to
+    // itself, which once it holds a record is a loop that reads the vector it grows and never ends.
+    // Pinned by `test_an_accumulator_merging_ITSELF_is_refused_before_ANY_bank_is_touched`.
+    if (&other == this) {
+        throw std::invalid_argument("accumulator: an accumulator cannot merge itself");
+    }
+    // Then `max_length`. It is the width of both length histograms, `pool_lengths_` and
+    // `deposited_lengths_`, and the merge walks `this`'s width, so an `other` built with a smaller limit
+    // would be read past the end of its histograms. It throws rather than skipping them, which would lose
+    // one side's pools whole. Pinned by `test_a_merge_across_two_WIDTHS_is_refused_before_ANY_bank_is_touched`.
+    if (max_length_ != other.max_length_) {
+        throw std::invalid_argument(
+            "accumulator: merge_from requires the same max_length (this has " + std::to_string(max_length_) +
+            ", other has " + std::to_string(other.max_length_) +
+            "); it is the width of the pool and deposited-length histograms");
+    }
     // ⚠ The region_bound arrays must match element-wise. A ref-id mismatch here once silently dropped 476,719 of
     // 476,732 fragments while every golden test passed, so this compares positions rather than sizes.
     //
@@ -991,15 +1012,6 @@ void Accumulator::merge_from(const Accumulator& other) {
             sj_[i].mass[c]    += other.sj_[i].mass[c];
         }
         sj_[i].inv_length_sum += other.sj_[i].inv_length_sum;
-    }
-    // ⚠ Throws rather than skipping. A size mismatch means the two were built with different `max_length`,
-    // and silently not merging would lose one side's pools entirely — the same class of defect as the
-    // shipped accumulator disabling its pools on an empty type array.
-    if (pool_lengths_.size() != other.pool_lengths_.size()) {
-        throw std::invalid_argument(
-            "accumulator: merge_from requires the same pool-histogram width (this has " +
-            std::to_string(pool_lengths_.size()) + " bins, other has " +
-            std::to_string(other.pool_lengths_.size()) + "); they were built with different max_length");
     }
     for (std::size_t i = 0; i < pool_lengths_.size(); ++i) {
         pool_lengths_[i] += other.pool_lengths_[i];

@@ -81,6 +81,18 @@ def _deposited_lengths(total: int) -> np.ndarray:
     return out
 
 
+def _ledger_bank(total: int, region: int = 0) -> np.ndarray:
+    """A flat uint32[n_regions x 2] region bank booking ``total`` fragments, all in ``region``'s first column.
+
+    ``region_start_count`` and ``region_end_count`` are the ledger: each deposited fragment books its first
+    covered base in one and its last in the other, so each must sum, over both columns, to ``qc.deposited``.
+    """
+    n_regions = sum(max(len(region_bounds) - 1, 0) for region_bounds in REGION_BOUNDS_PER_REF)
+    out = np.zeros(n_regions * N_STRAND_COLUMNS, dtype=np.uint32)
+    out[region * N_STRAND_COLUMNS] = total
+    return out
+
+
 def _calibration_dict(**overrides) -> dict:
     """A flat calibration dict shaped exactly as ``BamScanner::build_result`` emits one."""
     ref_region_bound_offsets = np.zeros(len(REGION_BOUNDS_PER_REF) + 1, np.int64)
@@ -107,8 +119,10 @@ def _calibration_dict(**overrides) -> dict:
         "ref_boundary_offsets": ref_boundary_offsets,
         "ref_sj_offsets": ref_sj_offsets,
         "region_contained_count": np.arange(n_regions * 2, dtype=np.uint32),
-        "region_start_count": np.arange(n_regions * 2, dtype=np.uint32),
-        "region_end_count": np.arange(n_regions * 2, dtype=np.uint32) * 3,
+        # The ledger banks book every deposited fragment once each, so neither can carry an arbitrary
+        # array: both sum to 41, matching qc.deposited below, in different regions.
+        "region_start_count": _ledger_bank(41),
+        "region_end_count": _ledger_bank(41, region=n_regions - 1),
         "region_span_count": np.arange(n_regions * 2, dtype=np.uint32) * 5,
         "boundary_unspliced_count": np.arange(n_boundaries * 2, dtype=np.uint32),
         "boundary_unspliced_inv_length_sum": np.arange(n_boundaries, dtype=np.float64),
@@ -262,6 +276,17 @@ def test_a_WRONG_dtype_is_REJECTED_rather_than_coerced():
         _payload(sj_inv_length_sum=np.arange(6, dtype=np.uint32))
 
 
+def test_a_length_HISTOGRAM_of_the_WRONG_dtype_is_REJECTED_rather_than_coerced():
+    """The two length histograms are under the banks' contract: ``pool_lengths`` arrives int64 and
+    ``deposited_lengths`` uint32, as the C++ emits them. A cast to those dtypes passes every check on the
+    payload's own output whatever the C++ sent, so a narrowed or widened histogram must be refused."""
+    pools = _calibration_dict()["calibration"]["pool_lengths"]
+    with pytest.raises(ValueError, match="pool_lengths has dtype uint32"):
+        _payload(pool_lengths=pools.astype(np.uint32))
+    with pytest.raises(ValueError, match="deposited_lengths has dtype int64"):
+        _payload(deposited_lengths=_deposited_lengths(41).astype(np.int64))
+
+
 def test_a_MISSING_qc_denominator_is_REJECTED():
     """PERTURBATION: nothing was feeding an incomplete qc block until this was written.
 
@@ -388,22 +413,27 @@ def test_a_DEFERRED_RECORD_WITH_FEWER_THAN_TWO_HYPOTHESES_IS_REJECTED():
         _payload(deferred=lone)
 
 
-def test_the_start_count_invariant_is_checkable_from_the_payload_alone():
-    """``Σ region_start_count == deposited`` — the accumulator's one non-tautological invariant.
+def test_a_LEDGER_bank_that_does_not_book_every_deposited_fragment_is_REJECTED():
+    """``Σ region_start_count == Σ region_end_count == qc.deposited``, refused at the door.
 
-    It replaced three "conservation identities" whose right-hand sides could only be evaluated by
-    re-running the deposit, so a deliberately broken replay satisfied all three while 91 % of the
-    crossings were junk. This one is checkable against a number the deposit counted independently, and
-    the payload must carry both halves of it.
+    The start bank's sum is the accumulator's one non-tautological invariant. It replaced three
+    "conservation identities" whose right-hand sides could only be evaluated by re-running the deposit,
+    so a deliberately broken replay satisfied all three while 91 % of the crossings were junk. This one is
+    checkable against a number the deposit counted independently, and the end bank, its mirror, closes the
+    ledger twice over. A bank one fragment off, in either direction, lost or invented a fragment.
     """
+    for name in ("region_start_count", "region_end_count"):
+        for total in (40, 42):  # one short of qc.deposited = 41, and one too many
+            with pytest.raises(ValueError, match=f"{name} sums to {total} but 41"):
+                _payload(**{name: _ledger_bank(total)})
+    # a self-consistent bank is accepted wherever its fragments sit
     counts = np.zeros(10, np.uint32)  # 5 regions x 2 strand columns, flat as the C++ emits it
     counts[:3] = [10, 20, 11]
-    payload = _payload(region_start_count=counts, qc=dict(_calibration_dict()["calibration"]["qc"]))
+    payload = _payload(region_start_count=counts)
     assert int(payload.region_start_count.sum()) == payload.qc.deposited
-    # the ledger closes twice over: the END bank is the START bank's mirror
     ends = np.zeros(10, np.uint32)
     ends[2:6] = [5, 6, 7, 23]
-    payload = _payload(region_end_count=ends, qc=dict(_calibration_dict()["calibration"]["qc"]))
+    payload = _payload(region_end_count=ends)
     assert int(payload.region_end_count.sum()) == payload.qc.deposited
 
 

@@ -35,9 +35,10 @@ output would mean a change to the fl model silently does not reach a cached scan
 THE KEY NEEDS FIVE PARTS, AND THE CACHE NAMES ITS BAM
 -----------------------------------------------------
 * ``graph_hash`` — the region partition plus the sj CSR. The payload already carries it.
-* a PAYLOAD-SCHEMA digest — the accumulator's own field list. None of the other keys moves when the
-  accumulator changes, so without it a cache written before an accumulator change is accepted and then
-  fails deep inside the loader with a bare ``KeyError``.
+* a PAYLOAD-SCHEMA digest — the accumulator's own field list, and the strand model's. None of the other
+  keys moves when either changes, so without it a cache written before an accumulator change is accepted
+  and then fails deep inside the loader with a bare ``KeyError``, and one written before a strand-model
+  field existed loads that field at its default.
 * a REACH digest. ``reach`` is consumed by calibration and covered by neither ``partition_hash`` nor
   ``graph_hash`` — correctly, since neither the scan nor the accumulator reads it — so a reach-blind
   key would verify clean against an index rebuild that moved the splice-junction reaches while both
@@ -236,14 +237,15 @@ def _schema_names() -> list[str]:
 
 
 def payload_schema_digest() -> str:
-    """Hash the schema the cached arrays were written under — ``AccumulatorPayload``'s field list and
-    the fields of every bank nested inside it.
+    """Hash the schema the cached arrays were written under — ``AccumulatorPayload``'s field list, the
+    fields of every bank nested inside it, and the strand model's layout (:func:`_strand_layout`).
 
     No other key covers this. ``graph_hash`` describes the index, ``reach_digest`` the reaches,
     the recorded ``scan_config`` the scan settings — none of them changes when the ACCUMULATOR changes. Adding
     a field to a population without this key means a cache written beforehand is accepted and then fails
     deep inside ``_payload_from_parts`` with a bare ``KeyError``, which reads as a bug in the cache
-    rather than as a stale cache.
+    rather than as a stale cache. A strand-model field fails quieter still: every one has a default, so
+    a cache written before it existed would load it at that default.
 
     It recurses because the banks nest: ``DeferredFragments`` puts thirteen array names inside one field
     and every one of them is an ``.npz`` key, and ``DrainQC`` nests a ``GapCensus`` inside itself. A
@@ -265,6 +267,7 @@ def payload_schema_digest() -> str:
     return _digest(
         *(name.encode() for name in _schema_names()),
         *(shape.encode() for shape in _schema_shapes()),
+        *(part.encode() for part in _strand_schema()),
         deposit_digest().encode(),
     )
 
@@ -396,22 +399,58 @@ class ScanCache:
 # ── strand model round-trip ──────────────────────────────────────────────────────────────────────
 # The 2x2 is the MARGINAL of the per-sj table, and the junction fit reads κ from the table, not the
 # marginal. A cache that kept only the 2x2 would silently fall back to the pooled κ, splice artifacts and all.
-_SJ_COLUMNS = ("ref_id", "start", "end", "motif_strand", "n_sense", "n_antisense")
-_STRAND_SUBMODELS = ("exonic_spliced", "exonic")
-_COUNT_FIELDS = ("pos_pos", "pos_neg", "neg_pos", "neg_neg")
+
+
+def _strand_layout() -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """The strand half of the cache, read off the strand model's own dataclasses: the sub-models, the
+    counters each one stores as a single int64 vector (in field order), and the per-sj table's columns.
+
+    Derived rather than listed. Every field has a default, so a listed layout that missed a new field
+    would drop it on write and fill in the default on load; a derived one stores it, and moves
+    :func:`payload_schema_digest`, which then refuses a cache written without it. A sub-model field that
+    is neither an int counter nor ``sj_table`` has no place in this layout, and is refused rather than
+    packed into the counter vector and truncated.
+    """
+    from .strand_model import SJStrandTable, StrandModel, StrandModels
+
+    hints = typing.get_type_hints(StrandModel)
+    counters = tuple(f.name for f in dataclasses.fields(StrandModel) if hints[f.name] is int)
+    unstored = [
+        f.name for f in dataclasses.fields(StrandModel) if f.name not in (*counters, "sj_table")
+    ]
+    if unstored:
+        raise TypeError(
+            f"StrandModel fields {unstored} are neither int counters nor sj_table, and the scan cache "
+            f"stores a sub-model as exactly those, so it has nowhere to put them."
+        )
+    submodels = tuple(f.name for f in dataclasses.fields(StrandModels))
+    columns = tuple(f.name for f in dataclasses.fields(SJStrandTable))
+    return submodels, counters, columns
+
+
+def _strand_schema() -> list[str]:
+    """The strand half of the schema key: :func:`_strand_layout`, ORDER INCLUDED — a sub-model's
+    counters are one vector read back by position, so a reorder that keeps every name swaps two counts."""
+    submodels, counters, columns = _strand_layout()
+    return [
+        f"strand submodels:{','.join(submodels)}",
+        f"strand counters:{','.join(counters)}",
+        f"strand sj columns:{','.join(columns)}",
+    ]
 
 
 def _strand_arrays(strand_model) -> dict[str, np.ndarray]:
+    submodels, counters, columns = _strand_layout()
     out: dict[str, np.ndarray] = {}
-    for name in _STRAND_SUBMODELS:
+    for name in submodels:
         sub = getattr(strand_model, name)
         out[f"{name}__counts"] = np.array(
-            [getattr(sub, field) for field in _COUNT_FIELDS], dtype=np.int64
+            [getattr(sub, field) for field in counters], dtype=np.int64
         )
         table = sub.sj_table
         out[f"{name}__has_table"] = np.array([table is not None], dtype=bool)
         if table is not None:
-            for column in _SJ_COLUMNS:
+            for column in columns:
                 out[f"{name}__sj_{column}"] = np.ascontiguousarray(getattr(table, column))
     return out
 
@@ -419,15 +458,14 @@ def _strand_arrays(strand_model) -> dict[str, np.ndarray]:
 def _strand_from_arrays(data) -> object:
     from .strand_model import SJStrandTable, StrandModel, StrandModels
 
+    submodels, counters, columns = _strand_layout()
     built = {}
-    for name in _STRAND_SUBMODELS:
+    for name in submodels:
         counts = data[f"{name}__counts"]
         table = None
         if bool(data[f"{name}__has_table"][0]):
-            table = SJStrandTable(**{c: data[f"{name}__sj_{c}"] for c in _SJ_COLUMNS})
-        built[name] = StrandModel(
-            **dict(zip(_COUNT_FIELDS, (int(v) for v in counts))), sj_table=table
-        )
+            table = SJStrandTable(**{c: data[f"{name}__sj_{c}"] for c in columns})
+        built[name] = StrandModel(**dict(zip(counters, (int(v) for v in counts))), sj_table=table)
     return StrandModels(**built)
 
 
@@ -530,9 +568,10 @@ def _check_manifest(manifest: dict, index: "TranscriptIndex", bam: str | Path | 
     if manifest.get("payload_schema_digest") != expected_schema:
         raise ScanCacheKeyError(
             f"cache payload_schema_digest {manifest.get('payload_schema_digest')!r} != "
-            f"{expected_schema!r}. The ACCUMULATOR's schema moved, so these arrays are not the fields "
-            f"this build reads — a missing one would otherwise surface as a bare KeyError far from here. "
-            f"Re-scan; nothing derivable from the index needs rebuilding."
+            f"{expected_schema!r}. The ACCUMULATOR's or the STRAND MODEL's schema moved, so these arrays "
+            f"are not the fields this build reads — a missing one would otherwise surface as a bare "
+            f"KeyError far from here, or load at its default. Re-scan; nothing derivable from the index "
+            f"needs rebuilding."
         )
 
     expected_blacklist = splice_blacklist_digest(index)

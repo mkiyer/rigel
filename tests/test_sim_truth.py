@@ -241,13 +241,15 @@ def test_manifest_round_trip(tmp_path):
         abundance = {"kind": "lognormal"}
 
     conditions = [{"name": "gdna_none_ss_1.00_nrna_none", "n_rna": 10}]
+    index = {"path": "/idx", "manifest": {"sources": {"gtf": {"path": "/a.gtf", "sha256": "ab"}}}}
 
-    path = write_manifest(tmp_path, Config(), conditions)
+    path = write_manifest(tmp_path, Config(), conditions, index=index)
     loaded = json.loads(path.read_text())
 
     assert path == tmp_path / "manifest.json"
     assert loaded["simulation"]["frag_mean"] == 250
     assert loaded["conditions"] == conditions
+    assert loaded["index"] == index
 
 
 def test_a_transcript_at_position_zero_has_its_whole_genomic_span():

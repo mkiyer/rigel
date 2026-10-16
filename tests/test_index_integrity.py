@@ -3,14 +3,17 @@ duplicate-transcript guard the reader applies, and the layout iterator underneat
 region tables. The first block verifies every structure `load()` builds: the transcript and gene
 tables and their derived arrays, collapsed and exon intervals, splice junctions, the fragment
 resolver, and the build/load round trip on a larger index and on edge cases. The second gates what
-`build()` and `load()` refuse: a reordered transcript table, a GTF with no transcripts (refused
-before an existing index is touched), and an index whose rebuild stopped part-way. The third gates
+`build()` and `load()` refuse: a reordered transcript table or a gapped gene index, an index missing
+a file `load()` reads (the alias table it never reads stays optional), a setting `IndexConfig`
+refuses and a GTF with no transcripts (both refused before an existing index is touched), and an
+index whose rebuild stopped part-way. The third gates
 the duplicate-exon-structure guard in `read_transcripts` and its collapse flag. The fourth gates
 `_iter_reference_layout`, which both `intervals.feather` and `regions.feather` are derived from.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import numpy as np
@@ -18,7 +21,14 @@ import pandas as pd
 import pytest
 
 from rigel.index import (
+    BOUNDARIES_FEATHER,
+    INTERVALS_FEATHER,
+    REF_LENGTHS_FEATHER,
+    REGIONS_FEATHER,
+    SJ_FEATHER,
+    TRANSCRIPT_ALIASES_FEATHER,
     TRANSCRIPTS_FEATHER,
+    IndexLoadError,
     TranscriptIndex,
     _GenicSpan,
     _IntergenicSpan,
@@ -616,7 +626,7 @@ class TestEdgeCases:
         assert single_exon_index.resolver is not None
 
 
-# ── What ``TranscriptIndex`` REFUSES — a reordered table, an empty GTF, a half-rebuilt index ─────
+# ── What ``TranscriptIndex`` REFUSES — a reordered table, a missing file, a refused setting, an empty GTF, a half-rebuilt index ─
 
 
 def test_load_refuses_a_reordered_transcript_table(tmp_path: Path):
@@ -627,8 +637,77 @@ def test_load_refuses_a_reordered_transcript_table(tmp_path: Path):
     t_df = pd.read_feather(idx_dir / TRANSCRIPTS_FEATHER)
     t_df.iloc[::-1].reset_index(drop=True).to_feather(idx_dir / TRANSCRIPTS_FEATHER)
 
-    with pytest.raises(ValueError, match="row index does not match 't_index'"):
+    with pytest.raises(IndexLoadError, match="row index does not match 't_index'"):
         TranscriptIndex.load(idx_dir)
+
+
+def test_load_refuses_a_gene_index_with_a_gap(tmp_path: Path):
+    """The gene table is keyed by row position too, so a ``g_index`` that skips a value would mis-map it."""
+    fasta, gtf = _mini_sources(tmp_path)
+    idx_dir = tmp_path / "idx"
+    TranscriptIndex.build(fasta, gtf, idx_dir, write_tsv=False)
+    t_df = pd.read_feather(idx_dir / TRANSCRIPTS_FEATHER)
+    t_df["g_index"] += 1
+    t_df.to_feather(idx_dir / TRANSCRIPTS_FEATHER)
+
+    with pytest.raises(IndexLoadError, match="does not match 'g_index'"):
+        TranscriptIndex.load(idx_dir)
+
+
+@pytest.mark.parametrize(
+    "required",
+    [
+        REF_LENGTHS_FEATHER,
+        TRANSCRIPTS_FEATHER,
+        INTERVALS_FEATHER,
+        REGIONS_FEATHER,
+        BOUNDARIES_FEATHER,
+        SJ_FEATHER,
+    ],
+)
+def test_load_refuses_an_index_missing_a_file_it_reads_by_name(tmp_path: Path, required):
+    """`rigel quant` reports a load refusal as an error; a missing file used to escape as pyarrow's
+    ``FileNotFoundError`` or a bare ``RuntimeError``, a traceback with no remedy."""
+    fasta, gtf = _mini_sources(tmp_path)
+    idx_dir = tmp_path / "idx"
+    TranscriptIndex.build(fasta, gtf, idx_dir, write_tsv=False)
+    (idx_dir / required).unlink()
+
+    with pytest.raises(IndexLoadError, match=rf"(?s)is missing {re.escape(required)}\b.*Rebuild"):
+        TranscriptIndex.load(idx_dir)
+
+
+def test_load_does_not_need_the_alias_table(tmp_path: Path):
+    """``transcript_aliases.feather`` is written for the user and never read, so an index without it loads."""
+    fasta, gtf = _mini_sources(tmp_path)
+    idx_dir = tmp_path / "idx"
+    TranscriptIndex.build(fasta, gtf, idx_dir, write_tsv=False)
+    (idx_dir / TRANSCRIPT_ALIASES_FEATHER).unlink()
+
+    assert TranscriptIndex.load(idx_dir).num_transcripts == 5
+
+
+@pytest.mark.parametrize(
+    "setting, refusal",
+    [
+        ({"nrna_tolerance": -5}, "nrna_merge_tolerance must be >= 0; got -5"),
+        ({"splice_blacklist_min_count": 0}, "splice_blacklist_min_count must be >= 1; got 0"),
+        ({"feather_compression": "gzip"}, "Unknown Feather compression: 'gzip'"),
+        ({"gtf_parse_mode": "lenient"}, "Unknown GTF parse mode: 'lenient'"),
+    ],
+    ids=["negative-tolerance", "zero-blacklist-count", "compression", "parse-mode"],
+)
+def test_build_refuses_a_setting_its_config_refuses_before_writing(
+    tmp_path: Path, setting, refusal
+):
+    """`build` validates its settings as one `IndexConfig`, for every caller: a negative tolerance clustered as 0 does
+    and was recorded in the manifest as given, and a blacklist count below 1 was recorded whenever no store was."""
+    fasta, gtf = _mini_sources(tmp_path)
+    idx_dir = tmp_path / "idx"
+
+    with pytest.raises(ValueError, match=re.escape(refusal)):
+        TranscriptIndex.build(fasta, gtf, idx_dir, write_tsv=False, **setting)
+    assert not idx_dir.exists()
 
 
 def test_build_refuses_a_gtf_without_transcripts_before_writing(tmp_path: Path):

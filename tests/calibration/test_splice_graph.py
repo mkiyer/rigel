@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from rigel.index import TranscriptIndex
+from rigel.index import IndexLoadError, TranscriptIndex
 
 from rigel.calibration.splice_graph import (
     EDGE_KIND_CONTIGUOUS,
@@ -623,7 +623,7 @@ def test_graph_is_REQUIRED_at_load(tmp_path_factory):
     idx = build_test_index(tmp_path_factory, _INTEGRATION_GTF, genome_size=2000, name="sg_opt")
     for fname in ("regions.feather", "edges.feather"):
         (Path(idx.index_dir) / fname).unlink()
-        with pytest.raises(RuntimeError, match=r"(?s)splice graph.*[Rr]ebuild"):
+        with pytest.raises(IndexLoadError, match=rf"(?s)is missing .*{fname}.*Rebuild"):
             TranscriptIndex.load(idx.index_dir)
 
 
