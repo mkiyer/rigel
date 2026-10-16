@@ -22,20 +22,11 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .region_arrays import boundary_region_indices
-from .signature import BIT_EXON_NEG, BIT_EXON_POS, BIT_INTRON_NEG, BIT_INTRON_POS
 
 if TYPE_CHECKING:
     from ..locus import MultiLocus
     from .region_arrays import RegionArrays
     from .result import CalibrationResult
-
-# A region with none of these strand/type bits is intergenic — it overlaps no locus and is dropped by the
-# per-locus projection.
-# ⛔ No re-attribution happens here: a boundary is projected AS a boundary, so a boundary beside a
-# dropped intergenic region does not have to be re-keyed to its other flank to keep its gDNA.
-# The constant's one consumer is ``tests/calibration/test_prior_vs_oracle.py``, which imports it to
-# rebuild the same in-locus predicate rather than restate the bits.
-_RNA_SIGNATURE_BITS = BIT_EXON_POS | BIT_EXON_NEG | BIT_INTRON_POS | BIT_INTRON_NEG
 
 
 @dataclass(frozen=True, slots=True)

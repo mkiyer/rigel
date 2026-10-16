@@ -383,7 +383,6 @@ struct DeferredFragments {
 struct ScoredHypothesis {
     std::size_t  index;     // into OfferedFragment::hypotheses
     std::int64_t length;    // L under this hypothesis
-    std::int64_t absorbed;  // introns normalise merged away while computing it
 };
 
 /// Reusable scratch so `deposit` allocates nothing on the per-fragment path. One instance per worker;

@@ -1,7 +1,7 @@
 """The gDNA background rate, and which counts are gDNA counts at all.
 
-The rate blocks gate the closed form `poisson_lower_mean`, the pooled rate, the contamination-robust
-one-sided root, the contained opportunity and the per-reference region lengths. The last block gates
+The rate blocks gate the closed form `poisson_lower_mean`, the contamination-robust one-sided root,
+the contained opportunity and the per-reference region lengths. The last block gates
 `density_model.count_observable_masks`, the selector deciding which counts are gDNA counts at all; its
 rule is signature arithmetic and nothing else. A
 REGION is count-observable iff it carries no exon bit, because an exon's contained count holds
@@ -28,7 +28,6 @@ from rigel.calibration.gdna_density import (
     contained_opportunity,
     one_sided_rate,
     poisson_lower_mean,
-    pooled_log_rate,
     region_lengths_from_partition,
 )
 from rigel.calibration.signature import (
@@ -73,19 +72,6 @@ def test_dropping_the_floor_breaks_the_identity():
     lam = 2.7
     wrong = float(np.exp((lam + 1.0) * np.log(lam) - lam - gammaln(lam + 1.0)))
     assert wrong != pytest.approx(poisson_lower_mean(np.array([lam]))[0], rel=1e-6)
-
-
-# ── the pooled rate ──────────────────────────────────────────────────────────────────────────────
-
-
-def test_pooled_log_rate_is_the_ratio_and_carries_the_shape():
-    c, e = np.array([3.0, 5.0]), np.array([10.0, 30.0])
-    assert pooled_log_rate(c, e) == pytest.approx(np.log(8.0 / 40.0))
-    assert pooled_log_rate(c, e, shape=0.5) == pytest.approx(np.log(8.5 / 40.0))
-
-
-def test_pooled_log_rate_reports_no_support_rather_than_raising():
-    assert pooled_log_rate(np.array([1.0]), np.array([0.0])) == -np.inf
 
 
 def test_the_log_gamma_table_is_the_direct_form_TO_THE_BIT():

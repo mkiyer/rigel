@@ -202,7 +202,6 @@ struct ParsedAlignment {
     int32_t nm;             // NM tag (edit distance), 0 if absent
     int32_t nh;             // NH tag, 1 if absent
     int32_t hi;             // HI tag, -1 if absent
-    int32_t sj_strand;      // from XS/ts tag, STRAND_NONE if absent
 
     // CIGAR-parsed exon blocks and splice junctions
     std::vector<std::pair<int32_t, int32_t>> exons;  // (start, end)
@@ -427,11 +426,10 @@ struct WorkerState {
     // sampling profiler because the time is attributed to `malloc`. Capacity amortizes to the high-water
     // mark and is never released.
     //
-    // `deposit_scratch` is the accumulator's (normalised introns, path segments, sj ids) and is opaque
-    // here. The placement arenas below are the ADAPTER's: a fragment's introns restricted to the reference
-    // of the hit being collected and de-duplicated, which is what `OfferedFragment::observed_introns`
-    // points at.
-    rigel::accumulator::DepositScratch deposit_scratch;
+    // `offer_scratch` is the accumulator set's (its `deposit` member holds the accumulator's normalised
+    // introns, path segments, sj ids) and is opaque here. The placement arenas below are the ADAPTER's: a
+    // fragment's introns restricted to the reference of the hit being collected and de-duplicated, which is
+    // what `OfferedFragment::observed_introns` points at.
 
     // ⭐ ONE OFFER PER FRAGMENT. Every non-chimeric hit of a fragment is collected as a placement — its
     // observed introns, its gap hypotheses' implied introns and supporting transcripts COPIED into these
@@ -660,10 +658,9 @@ static ParsedAlignment parse_bam_record(
         rec.ref_id < static_cast<int32_t>(tid_to_ref_id.size()))
         ? tid_to_ref_id[rec.ref_id] : -1;
     parse_cigar(b, rec.exons, rec.sjs);
-    rec.sj_strand = STRAND_NONE;
     if (!rec.sjs.empty()) {
-        rec.sj_strand = read_sj_strand(b, sj_tag_mode);
-        for (auto& sj : rec.sjs) sj.strand = rec.sj_strand;
+        const int32_t sj_strand = read_sj_strand(b, sj_tag_mode);
+        for (auto& sj : rec.sjs) sj.strand = sj_strand;
     }
     rec.ref_id = mapped_ref_id;
 
@@ -1312,10 +1309,10 @@ public:
 
     nb::dict scan(const std::string& bam_path,
                   nb::callable chunk_callback,
-                  int64_t chunk_size = 1000000,
-                  int n_workers = 1,
-                  int n_decomp_threads = 2,
-                  int qname_batch_size = 512)
+                  int64_t chunk_size,
+                  int n_workers,
+                  int n_decomp_threads,
+                  int qname_batch_size)
     {
         if (n_workers < 1) n_workers = 1;
         if (chunk_size < 1) chunk_size = 1;
@@ -2781,10 +2778,9 @@ public:
                 rec.ref_id < static_cast<int32_t>(tid_to_ref_id_.size()))
                 ? tid_to_ref_id_[rec.ref_id] : -1;
             parse_cigar(b, rec.exons, rec.sjs);
-            rec.sj_strand = STRAND_NONE;
             if (!rec.sjs.empty()) {
-                rec.sj_strand = read_sj_strand(b, sj_tag_mode_);
-                for (auto& sj : rec.sjs) sj.strand = rec.sj_strand;
+                const int32_t sj_strand = read_sj_strand(b, sj_tag_mode_);
+                for (auto& sj : rec.sjs) sj.strand = sj_strand;
             }
             rec.ref_id = mapped_ref_id;
 
@@ -2967,7 +2963,7 @@ NB_MODULE(_bam_impl, m) {
         using rigel::accumulator::kNStrandColumns;
 
         // One scratch per thread, shared by every bound `Accumulator`. The scan path uses
-        // `WorkerState::deposit_scratch` instead.
+        // `WorkerState::offer_scratch.deposit` instead.
         static thread_local DepositScratch binding_scratch;
 
         nb::class_<Accumulator>(m, "Accumulator")
@@ -3322,8 +3318,8 @@ NB_MODULE(_bam_impl, m) {
         .def(nb::init<FragmentResolver&, const std::string&, bool, bool>(),
              nb::arg("ctx"),
              nb::arg("sj_tag_spec"),
-             nb::arg("skip_duplicates") = true,
-             nb::arg("include_multimap") = false,
+             nb::arg("skip_duplicates"),
+             nb::arg("include_multimap"),
              "Create a BAM scanner.\n\n"
              "Parameters\n"
              "----------\n"
@@ -3332,18 +3328,18 @@ NB_MODULE(_bam_impl, m) {
              "sj_tag_spec : str\n"
              "    SJ strand tag specification: 'XS', 'ts', 'XS,ts', 'ts,XS', or 'none'.\n"
              "skip_duplicates : bool\n"
-             "    Skip duplicate-flagged reads (default True).\n"
+             "    Skip duplicate-flagged reads.\n"
              "include_multimap : bool\n"
-             "    Include multimapping reads (default False).\n",
+             "    Include multimapping reads.\n",
              nb::keep_alive<1, 2>()  // BamScanner must keep FragmentResolver alive
         )
         .def("scan", &BamScanner::scan,
              nb::arg("bam_path"),
              nb::arg("chunk_callback"),
-             nb::arg("chunk_size") = 1000000,
-             nb::arg("n_workers") = 1,
-             nb::arg("n_decomp_threads") = 2,
-             nb::arg("qname_batch_size") = 512,
+             nb::arg("chunk_size"),
+             nb::arg("n_workers"),
+             nb::arg("n_decomp_threads"),
+             nb::arg("qname_batch_size"),
              "Scan BAM file with streaming chunk output.\n\n"
              "Reads the BAM in a background thread, resolves fragments in\n"
              "worker threads, and streams finalized chunks to a Python\n"
@@ -3356,13 +3352,13 @@ NB_MODULE(_bam_impl, m) {
              "    Called with a dict of capsule-backed numpy arrays for\n"
              "    each finalized chunk.\n"
              "chunk_size : int\n"
-             "    Target number of fragments per chunk (default 1000000).\n"
+             "    Target number of fragments per chunk.\n"
              "n_workers : int\n"
-             "    Number of worker threads (default 1).\n"
+             "    Number of worker threads.\n"
              "n_decomp_threads : int\n"
-             "    Number of htslib BGZF decompression threads (default 2).\n"
+             "    Number of htslib BGZF decompression threads.\n"
              "qname_batch_size : int\n"
-             "    Read-name groups per input queue item (default 512).\n\n"
+             "    Read-name groups per input queue item.\n\n"
              "Returns\n"
              "-------\n"
              "dict\n"
@@ -3428,8 +3424,8 @@ NB_MODULE(_bam_impl, m) {
         .def(nb::init<FragmentResolver&, const std::string&, bool, bool>(),
              nb::arg("ctx"),
              nb::arg("sj_tag_spec"),
-             nb::arg("skip_duplicates") = true,
-             nb::arg("include_multimap") = false,
+             nb::arg("skip_duplicates"),
+             nb::arg("include_multimap"),
              "Create a BAM annotation writer.\n\n"
              "Parameters\n"
              "----------\n"

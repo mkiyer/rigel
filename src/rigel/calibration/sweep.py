@@ -215,7 +215,7 @@ def solve_chain(
     has_composition = np.zeros(n, dtype=bool)
     diag = None
     if _capture is not None:  # the kernel's diagnostics mode fills these
-        diag = {k: np.zeros(n) for k in ("fg_loc", "fg_strand", "tau_lam")}
+        diag = {k: np.zeros(n) for k in ("fg_loc", "tau_lam")}
         diag["lam_rows"] = np.zeros((n, lam.shape[0]))
     res = solve_blocks(
         **_chain_arrays(view, structure.terminal),
@@ -322,9 +322,7 @@ def _structure(chain, statics, region_arrays) -> _Structure:
 
 def _gather_diagnostics(view, out, diag, res, blocks, geometry, lam) -> SweepCapture:
     """The diagnostic capture of one sweep — the instruments' view (:class:`~.blocks.SweepCapture`),
-    assembled from the kernel's per-slot arrays and its per-block cube rows and received tables. One extra
-    solve lives in the kernel's capture mode and nowhere in production: the strand-ONLY belief (no prior, no
-    messages), to split the local error into the strand likelihood against the prior's contribution."""
+    assembled from the kernel's per-slot arrays and its per-block cube rows and received tables."""
     fp, fn = np.asarray(view.free_pos, bool), np.asarray(view.free_neg, bool)
     mass_global, _ = region_gdna_geometry(geometry)
     cubes = []
@@ -352,17 +350,12 @@ def _gather_diagnostics(view, out, diag, res, blocks, geometry, lam) -> SweepCap
     delivered_rows = bool(np.asarray(res["rows_delivered"], bool).any())
     return SweepCapture(
         fg_loc=diag["fg_loc"],
-        fg_strand=diag["fg_strand"],
         f_g=out["f_g"].copy(),
-        var_g=out["var_gdna"].copy(),
         tau_lam=diag["tau_lam"],
         solvable=(fp | fn) & (view.n_slot > 0.0),
         count=np.asarray(view.unspliced_count, np.float64),
-        spliced=view.spliced_slot,
-        mature=np.asarray(view.sj_count, np.float64).sum(axis=1),
         free_pos=fp,
         free_neg=fn,
-        eff_gdna=np.asarray(view.eff_gdna, np.float64),
         mass_global=mass_global,
         lam_rows=diag["lam_rows"] if delivered_rows else None,
         cube_rows=CubeRows.concat(cubes) if cubes else None,

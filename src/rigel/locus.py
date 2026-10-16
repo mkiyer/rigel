@@ -63,8 +63,8 @@ class MultiLocus:
         int32 — EM unit indices (rows in global CSR) belonging to
         this multi-locus.
     gdna_span : int
-        Total merged genomic footprint (bp): ``sum(l.span for l in loci)``,
-        floored at 1. Reported as the loci table's ``locus_span_bp``.
+        Total merged genomic footprint (bp): ``sum(l.span for l in loci)``.
+        Reported as the loci table's ``locus_span_bp``.
     loci : tuple[Locus, ...]
         The contiguous intervals composing this multi-locus, sorted
         ascending by the ``ref`` column's categorical code (not ``ref_id``),
@@ -225,7 +225,7 @@ def build_multi_loci(
                     comp_u_indices[comp_u_offsets[lid] : comp_u_offsets[lid + 1]],
                     em_data.frag_ids,
                 ),
-                gdna_span=max(span, 1),
+                gdna_span=span,
                 loci=loci_tuple,
             )
         )

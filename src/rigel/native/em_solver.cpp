@@ -139,13 +139,6 @@ using f64_2d     = nb::ndarray<const double, nb::ndim<2>, nb::c_contig>;
 // ================================================================
 
 static inline double digamma(double x) {
-    // Handle non-positive values that can arise from EM_LOG_EPSILON
-    if (x <= 0.0) {
-        if (x == 0.0) return -1e300;
-        // For very small positive values after clamping
-        return -1e300;
-    }
-
     double result = 0.0;
     // Shift x up so asymptotic series is accurate (need x >= 6)
     while (x < 6.0) {

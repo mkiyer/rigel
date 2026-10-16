@@ -37,15 +37,17 @@ from rigel.calibration.signature import (
     TS_POS,
 )
 from rigel.calibration.splice_graph import (
+    FLAG_ACCEPTOR_NEG,
     FLAG_ACCEPTOR_POS,
+    FLAG_DONOR_NEG,
     FLAG_DONOR_POS,
+    FLAG_TES_NEG,
     FLAG_TES_POS,
+    FLAG_TSS_NEG,
     FLAG_TSS_POS,
     SpliceJunctionGeometry,
     build_boundary_flags_array,
     build_region_partition_arrays,
-    is_splice_site,
-    is_terminus,
 )
 from rigel.calibration.substrate import CalibrationSubstrate
 from rigel.types import Strand
@@ -953,11 +955,13 @@ def test_the_terminus_and_splice_site_predicates(index):
     assert at[200] & FLAG_TSS_POS  # t0's 5' end
 
     arr = np.array([at[700], at[400], at[200]], dtype=np.uint16)
-    np.testing.assert_array_equal(is_terminus(arr, Strand.POS), [True, False, True])
-    np.testing.assert_array_equal(is_splice_site(arr, Strand.POS), [True, True, False])
+    terminus_pos, splice_pos = FLAG_TSS_POS | FLAG_TES_POS, FLAG_DONOR_POS | FLAG_ACCEPTOR_POS
+    terminus_neg, splice_neg = FLAG_TSS_NEG | FLAG_TES_NEG, FLAG_DONOR_NEG | FLAG_ACCEPTOR_NEG
+    np.testing.assert_array_equal((arr & terminus_pos) != 0, [True, False, True])
+    np.testing.assert_array_equal((arr & splice_pos) != 0, [True, True, False])
     # the fixture is + only, so nothing may leak onto the − strand
-    assert not is_terminus(arr, Strand.NEG).any()
-    assert not is_splice_site(arr, Strand.NEG).any()
+    assert not (arr & terminus_neg).any()
+    assert not (arr & splice_neg).any()
 
 
 def test_flags_align_with_a_REALLY_SCANNED_payload(tmp_path):

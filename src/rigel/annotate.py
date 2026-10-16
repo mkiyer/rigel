@@ -361,9 +361,9 @@ def write_annotated_bam(
     annotations: AnnotationTable,
     index,
     *,
-    skip_duplicates: bool = True,
-    include_multimap: bool = False,
-    sj_strand_tag: str | tuple[str, ...] = "auto",
+    skip_duplicates: bool,
+    include_multimap: bool,
+    sj_strand_tag: str | tuple[str, ...],
     locus_id_per_transcript: np.ndarray | None = None,
 ) -> dict:
     """Second BAM pass: stamp every record with assignment tags.

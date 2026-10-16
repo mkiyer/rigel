@@ -116,7 +116,6 @@ class _Index:
 
         self.t_to_g_arr = np.array(t_to_g, dtype=np.int64)
         self.t_to_strand_arr = np.array(t_to_strand, dtype=np.int8)
-        self.g_to_strand_arr = np.array(g_to_strand, dtype=np.int8)
         self.num_transcripts = len(t_to_g)
         self.num_genes = len(g_to_strand)
         self.t_df = pd.DataFrame(

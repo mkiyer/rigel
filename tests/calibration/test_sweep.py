@@ -130,20 +130,16 @@ def test_precision_state_count_resolution():
     from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
 
     kappa = 0.99
-    z = np.zeros(2)
     # Same single-strand + composition at two evidence levels: region 1 has 20× the counts of region 0.
     u_pos = np.array([20.0, 400.0])
     u_neg = np.array([20.0, 400.0])
     allow_pos = np.array([True, True])
     allow_neg = np.array([False, False])  # both single-strand
-    mass = u_pos + u_neg
     d = _solve_regions_logodds_all(
         u_pos,
         u_neg,
         allow_pos,
         allow_neg,
-        mass,
-        z,
         kappa=kappa,
         od_g=0.2,
         od_r=0.1,
@@ -166,8 +162,6 @@ def test_precision_state_count_resolution():
         np.array([0.0]),
         np.array([True]),
         np.array([True]),
-        np.array([0.0]),
-        np.array([0.0]),
         kappa=kappa,
         od_g=0.2,
         od_r=0.1,
@@ -309,15 +303,12 @@ def test_a_delivered_row_pulls_two_sided_and_not_to_the_vertex():
     0.2 — two-sided by construction (a profile on the grid, no boundary wall), not to the f_g=1 vertex."""
     from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
 
-    z = np.zeros(1)
     # AMBIG region, balanced counts ⇒ the strand is flat (κ=0.5); only the row shapes f_g.
     d = _solve_regions_logodds_all(
         np.array([50.0]),
         np.array([50.0]),
         np.array([True]),
         np.array([True]),
-        np.array([100.0]),
-        z,
         kappa=0.5,
         od_g=0.0,
         od_r=0.0,
@@ -335,14 +326,11 @@ def test_a_weak_row_defers_to_a_decisive_strand():
     the data; no log-wall forces it off zero)."""
     from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
 
-    z = np.zeros(1)
     d = _solve_regions_logodds_all(
         np.array([1000.0]),
         np.array([5.0]),
         np.array([True]),
         np.array([False]),
-        np.array([1005.0]),
-        z,
         kappa=0.99,
         od_g=0.0,
         od_r=0.0,
@@ -480,16 +468,12 @@ def test_pure_gdna_region_confident_at_near_binomial_od():
     # κ=0.7 (intermediate strand): gDNA mean ½ is near enough to the RNA mean that the gDNA BB width
     # matters — exactly where an inflated prior does its damage.
     def solve(u_pos, u_neg, od):
-        z = np.zeros(1)
-        n = float(u_pos + u_neg)
         return float(
             _solve_regions_logodds_all(
                 np.array([float(u_pos)]),
                 np.array([float(u_neg)]),
                 np.array([True]),
                 np.array([False]),
-                np.array([n]),
-                z,
                 kappa=0.7,
                 od_g=od,
                 od_r=od,
@@ -576,7 +560,7 @@ def _chunk_substrate(m=255, K=120, seed=3):
     rest = 1.0 - fg_ref
     fpos_ref = np.where(ap & an, rest / 2, np.where(ap, rest, 0.0))
     fneg_ref = np.where(ap & an, rest / 2, np.where(an, rest, 0.0))
-    args = (u_pos, u_neg, ap, an, u_pos + u_neg, np.zeros(m))
+    args = (u_pos, u_neg, ap, an)
     kw = dict(
         kappa=0.9,
         od_g=0.02,

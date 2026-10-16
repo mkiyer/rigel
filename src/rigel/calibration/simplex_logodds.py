@@ -45,7 +45,7 @@ Five facts that determine this file's shape:
    ``tests/calibration/test_vertex_reference.py``; the cost at an unwitnessed both-strand slot is the
    atom's and is recorded where it was measured.
 
-There is NO spliced term: ``mass_spliced`` enters only the signal mask, never ψ. That
+There is NO spliced term: ψ never reads the spliced mass. That
 is correct — RNA that splices at a sj *jumps* it rather than crossing it, so the unspliced crossing mass
 is gDNA plus RNA that has not spliced there, a channel genuinely disjoint from the (directly observed,
 already-pure-RNA) spliced mass.
@@ -290,8 +290,6 @@ def _solve_regions_logodds_all(
     u_neg,
     allow_pos,
     allow_neg,
-    mass_unspl,
-    mass_spliced,
     *,
     kappa,
     od_g,
@@ -331,7 +329,7 @@ def _solve_regions_logodds_all(
     composition rows) is ``(m, K)`` on the σ(λ) grid, added per cell in
     the kernel; ``cube_rows`` is the RNA level lanes' delivery at the AMBIG slots (:class:`CubeRows`, on this
     grid), evaluated at each slot's own θ nodes inside its ψ; ``None`` or an absent slot changes nothing. EMPTY
-    slots — no per-strand count and no unspliced or spliced mass — are not solved: at genome scale most
+    slots — no per-strand count — are not solved: at genome scale most
     slots carry no fragments, and their zeros are the solve's own answer. ``n_tilt`` is the derived
     ``_TILT_NODES`` unless a gate asks for another count. ``n_threads`` is the kernel's thread budget
     (``CalibrationConfig.n_threads``; 0 is every core): the slots are pulled one at a time by a pool, and
@@ -341,9 +339,7 @@ def _solve_regions_logodds_all(
     m = u_pos.shape[0]
     ap, an = np.ascontiguousarray(allow_pos, bool), np.ascontiguousarray(allow_neg, bool)
     fg_ref, fpos_ref, fneg_ref = _reference_composition(ap, an, fg_ref, fpos_ref, fneg_ref)
-    signal = (
-        u_pos + u_neg + np.asarray(mass_unspl, np.float64) + np.asarray(mass_spliced, np.float64)
-    ) > 0.0
+    signal = (u_pos + u_neg) > 0.0
     slots = np.flatnonzero((ap | an) & signal).astype(np.int64)
     lam, _fg = _logodds_grid(int(n_grid), L)
     out = {k: np.zeros(m) for k in ("fg", "fp", "fn", "vg")}

@@ -486,7 +486,6 @@ class CaptureSampler:
                 continue
             ref = fields[0]
             chrom_start = int(fields[1])
-            strand = Strand.from_str(fields[5]) if fields[5] in {"+", "-"} else Strand.NONE
             block_count = int(fields[9])
             block_sizes = _parse_bed_list(fields[10])
             block_starts = _parse_bed_list(fields[11])
@@ -499,7 +498,7 @@ class CaptureSampler:
             ]
             if not blocks:
                 continue
-            self._add_bed12_probe(ref, strand, blocks)
+            self._add_genomic_probe(ref, blocks)
             n_loaded += 1
         logger.info("Loaded %d BED12 capture probes from %s", n_loaded, path)
 
@@ -525,17 +524,6 @@ class CaptureSampler:
         transcript = self.transcripts[t_idx]
         blocks = transcript_to_genomic_blocks(start, end, transcript)
         self._add_genomic_probe(str(transcript.ref), blocks)
-
-    def _add_bed12_probe(
-        self,
-        ref: str,
-        strand: Strand,
-        blocks: list[tuple[int, int]],
-    ) -> None:
-        # ``strand`` is parsed and ignored: the library is DNA at capture time, so a probe binds the
-        # molecules of either strand that carry its sequence.
-        del strand
-        self._add_genomic_probe(ref, blocks)
 
     def _add_genomic_probe(self, ref: str, blocks: Sequence[tuple[int, int]]) -> None:
         """One probe, as genomic blocks, mapped by overlap to gDNA and to every transcript on the

@@ -400,9 +400,7 @@ class RegionStatics:
 
     Raw bits, not pre-derived predicates. Every consumer wants a different combination of them, and a
     single pre-derived "is this a splice site" predicate was measured to be nearly the complement of
-    what it was meant to replace. Compose with
-    :func:`~rigel.calibration.splice_graph.is_terminus` /
-    :func:`~rigel.calibration.splice_graph.is_splice_site`.
+    what it was meant to replace.
     """
 
     n_slots: int
@@ -524,10 +522,6 @@ def init_beliefs(
         count[:, 1],
         fp & single,
         fn & single,
-        count.sum(axis=1),
-        # the strand solve's certified-RNA floor is strand-agnostic, so the two GENOME-strand columns
-        # are summed here rather than stored pre-summed — the geometry keeps the axis it was deposited on.
-        np.asarray(geometry.spliced_count, np.float64).sum(axis=1),
         kappa=float(rna_sense_frac),
         od_g=gdna_strand_overdispersion,
         od_r=rna_strand_overdispersion,

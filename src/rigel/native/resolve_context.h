@@ -1139,7 +1139,7 @@ public:
                 if (ti < 0 ||
                     ti >= static_cast<int32_t>(nrna_parent_.size())) return;
                 int32_t n = nrna_parent_[ti];
-                if (n >= 0 && n != ti) scratch.nrna_t.push_back(n);
+                if (n >= 0) scratch.nrna_t.push_back(n);
             };
             for (const auto& s : exon_t_sets)
                 for (int32_t ti : s) add_nrna(ti);
@@ -1150,8 +1150,8 @@ public:
             for (int32_t n : scratch.nrna_t) {
                 // Synthetic nRNAs have exactly one exon by construction;
                 // annotated nascent-equivs are handled via cgranges and
-                // never appear here (their nrna_parent_[ti] == ti was
-                // filtered out by the n != ti guard above).
+                // never appear here (nrna_parent_ holds only synthetic
+                // parents; a non-synthetic one is installed as -1).
                 int32_t ns = exon_starts_[exon_offsets_[n]];
                 int32_t ne = exon_ends_  [exon_offsets_[n]];
                 int32_t bp_total = 0;
@@ -1216,28 +1216,18 @@ public:
 
         if (has_annotated_sj && any_exon) {
             auto exon_merge = merge_sets(exon_t_sets);
+            // Never empty: `sj_t_sets_vec` keeps only non-empty lookups, and `has_annotated_sj` means one.
             auto sj_merge   = merge_sets(sj_t_sets_vec);
 
-            if (!sj_merge.is_empty()) {
-                if (!exon_merge.is_empty()) {
-                    auto isect = vec_intersect(exon_merge.t_inds,
-                                               sj_merge.t_inds);
-                    cr.t_inds = isect.empty() ? std::move(sj_merge.t_inds)
-                                              : std::move(isect);
-                } else {
-                    cr.t_inds = std::move(sj_merge.t_inds);
-                }
-                cr.merge_criteria = sj_merge.criteria;
+            if (!exon_merge.is_empty()) {
+                auto isect = vec_intersect(exon_merge.t_inds,
+                                           sj_merge.t_inds);
+                cr.t_inds = isect.empty() ? std::move(sj_merge.t_inds)
+                                          : std::move(isect);
             } else {
-                std::vector<std::vector<int32_t>> all_sets;
-                all_sets.insert(all_sets.end(),
-                                exon_t_sets.begin(), exon_t_sets.end());
-                all_sets.insert(all_sets.end(),
-                                sj_t_sets_vec.begin(), sj_t_sets_vec.end());
-                auto mr = merge_sets(all_sets);
-                cr.t_inds = std::move(mr.t_inds);
-                cr.merge_criteria = mr.criteria;
+                cr.t_inds = std::move(sj_merge.t_inds);
             }
+            cr.merge_criteria = sj_merge.criteria;
             cr.splice_type = SPLICE_SPLICED_ANNOT;
 
         } else if (any_exon || any_transcript) {

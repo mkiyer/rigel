@@ -779,8 +779,8 @@ same likelihood as "a few objects of the other strand".
 
 ## 7. Background rate
 
-**7.1 A faint background rate is measurable only in aggregate** (`gdna_density.pooled_log_rate`,
-`one_sided_rate`). `ρ_bg = Σg/ΣE`, `Var(log ρ_bg) ≈ 1/Σg`. A region of effective length `E` resolves a
+**7.1 A faint background rate is measurable only in aggregate** (`gdna_density.one_sided_rate`,
+which reports the pooled rate beside its estimate). `ρ_bg = Σg/ΣE`, `Var(log ρ_bg) ≈ 1/Σg`. A region of effective length `E` resolves a
 rate only above ~`1/E` (Fisher information = `ρ·E`), so no per-region estimator finds it and true zero is
 resolved sharpest. One-sided: `ρ_bg > 0` proves DNA present; `ρ_bg ≈ 0` does not prove absence, because
 capture depletes the off-target floor. Never a denominator or a scale.

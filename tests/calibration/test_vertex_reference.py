@@ -6,9 +6,9 @@ Beta(½,½) with a tail of ``−C·|λ|``. A Gaussian claim of precision ``p`` w
 an exponentially decaying gradient there, so it balances the reference at ``λ* = ½·log(p/C)``: the
 vertex is priced rather than forbidden, and no achievable depth buys it. G1 and G1b measure that
 law at the two vertices, G2 the tail slope, G3 the halves' orthogonality, G4 how weak a lever
-softening the reference is, G5 the control that the same claim on ``λ`` is honoured at par, and G6
-ψ's blindness to the certified-splice channel. The second half gates the read-out, where
-``compose`` maps ψ's level and tilt onto the simplex so that closure is an identity.
+softening the reference is, and G5 the control that the same claim on ``λ`` is honoured at par.
+The second half gates the read-out, where ``compose`` maps ψ's level and tilt onto the simplex so
+that closure is an identity.
 """
 
 from __future__ import annotations
@@ -50,18 +50,15 @@ def _regions(n: int = 2):
     """``n`` single-strand (+) regions carrying data. Single-strand keeps this on the exact 1-D λ solve."""
     u_pos = np.full(n, 200.0)
     u_neg = np.zeros(n)
-    return u_pos, u_neg, np.ones(n, bool), np.zeros(n, bool), u_pos + u_neg, np.zeros(n)
+    return u_pos, u_neg, np.ones(n, bool), np.zeros(n, bool)
 
 
 def _solve(**over):
     n = int(over.pop("n", 2))
-    u_pos, u_neg, ap, an, mu, ms = _regions(n)
-    ms = np.asarray(over.pop("mass_spliced", ms), np.float64)
+    u_pos, u_neg, ap, an = _regions(n)
     kw = dict(_BASE)
     kw.update(over)
-    return np.asarray(
-        _solve_regions_logodds_all(u_pos, u_neg, ap, an, mu, ms, **kw).gdna_frac, np.float64
-    )
+    return np.asarray(_solve_regions_logodds_all(u_pos, u_neg, ap, an, **kw).gdna_frac, np.float64)
 
 
 def _lam(f):
@@ -132,7 +129,7 @@ def test_G2_psi_slope_in_the_vertex_tail_is_exactly_minus_the_reference_exponent
     ψ is CALLED (`psi_cube`, the solver's own cube), not reimplemented, so this cannot drift from
     what the solver computes (TRAPS: self-checking-validator)."""
     lam, _fg = _logodds_grid(1024, 10.0)
-    u_pos, u_neg, ap, an, _mu, _ms = _regions(1)
+    u_pos, u_neg, ap, an = _regions(1)
     psi, _fp, _fn, _tau = psi_cube(
         u_pos,
         u_neg,
@@ -244,40 +241,6 @@ def test_G5_the_SAME_claim_delivered_on_lambda_is_honoured_AT_PAR():
     assert float(_lam(np.array([on_lambda]))[0] - _lam(np.array([on_log_fg]))[0]) > 2.0
 
 
-# ── G6 — the root cause: the certified-RNA channel is not read ───────────────────────────────────────
-
-
-def test_G6_psi_is_BLIND_to_the_certified_RNA_channel():
-    """The root cause, as an observable — and the one a fix must move
-    (TRAPS: name-the-observable-per-site).
-
-    ``f_g = 1`` is a claim about ``ρ_r = 0``, and no gDNA-side message can establish it at any
-    precision: G1 prices exactly that attempt. The channel that speaks about RNA directly is the
-    certified splice — ``boundary_spliced``, the fragments that crossed this boundary contiguously
-    having spliced elsewhere — which has no gDNA term at all, because a spliced fragment cannot be
-    gDNA. (Spliced-vs-unspliced is a property of the fragment, never a second species of RNA.)
-
-    ψ does not read it: sweeping ``mass_spliced`` from 0 to 1e5 at fixed strand counts leaves
-    ``f_g`` bit-identical. The exclusion is deliberate, and its reason is sound as far as it goes —
-    the spliced mass must not be double-counted into the unspliced likelihood — but "do not add it
-    to that likelihood" is not "discard the information in it", and this gate is what fires if the
-    second is ever addressed. ``boundary_spliced`` is boundary-only and structurally zero on every
-    toy geometry, so the sweep uses ``mass_spliced`` purely as a handle; it is not a claim about
-    the channel's size.
-
-    Read ``test_certified_rna_licence.py`` before acting on this: the obvious fix is refuted. A
-    zero spliced count is not evidence for the vertex, because the chance a crossing RNA fragment
-    shows a visible splice is a free nuisance and ``S = 0`` is explained at ``f_g = 1`` too; the
-    information lives entirely in ``S > 0`` and points away from this vertex. What survives is the
-    algebra — reference plus term is exactly Beta(½, ½+S) — and not the coefficient, which scores
-    worse than the uninformative reference on a third of the ladder."""
-    quiet = float(_solve(mass_spliced=np.zeros(2), **_msg_up(10.0))[0])
-    loud = float(_solve(mass_spliced=np.full(2, 1e5), **_msg_up(10.0))[0])
-    assert loud == pytest.approx(quiet, abs=0.0), (quiet, loud)
-    # and the object it would matter for is nowhere near the vertex without it.
-    assert quiet < 0.95, quiet
-
-
 # ── the read-out: ψ's composition is a point on the simplex by construction ────────────────────
 
 
@@ -290,8 +253,6 @@ def _solve_composition(u_pos, u_neg, *, kappa, allow_pos, allow_neg, n_grid=60):
         np.asarray(u_neg, np.float64),
         np.asarray(allow_pos, bool),
         np.asarray(allow_neg, bool),
-        np.asarray(u_pos, np.float64) + np.asarray(u_neg, np.float64),
-        np.zeros_like(np.asarray(u_pos, np.float64)),
         kappa=kappa,
         od_g=0.0,
         od_r=0.0,
@@ -569,8 +530,6 @@ def _solve_case(args, cube_rows=None, n_grid: int = 101, n_tilt=None):
         u_neg,
         ap,
         an,
-        u_pos + u_neg,
-        np.zeros(1),
         kappa=_THETA_KAPPA,
         od_g=0.0,
         od_r=0.0,

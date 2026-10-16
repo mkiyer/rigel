@@ -626,7 +626,7 @@ void Accumulator::arbitrate(const OfferedFragment& arbitrated, std::int64_t star
         const std::int64_t candidate_length =
             hypothesis_length(arbitrated, arbitrated.hypotheses[h], start, end, scratch, &absorbed);
         any |= !arbitrated.hypotheses[h].is_unspliced();
-        survivors.push_back({h, candidate_length, absorbed});
+        survivors.push_back({h, candidate_length});
     }
     const std::size_t n_offered = survivors.size();
     survivors.erase(std::remove_if(survivors.begin(), survivors.end(),
@@ -639,7 +639,7 @@ void Accumulator::arbitrate(const OfferedFragment& arbitrated, std::int64_t star
             std::int64_t absorbed = 0;
             const std::int64_t candidate_length =
                 hypothesis_length(arbitrated, arbitrated.hypotheses[h], start, end, scratch, &absorbed);
-            survivors.push_back({h, candidate_length, absorbed});
+            survivors.push_back({h, candidate_length});
         }
     }
     if (any_spliced != nullptr) *any_spliced = any;

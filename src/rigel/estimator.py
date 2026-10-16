@@ -160,7 +160,6 @@ class AbundanceEstimator:
         *,
         em_config: EMConfig | None = None,
         geometry: TranscriptGeometry | None = None,
-        is_nrna: np.ndarray | None = None,
         is_synthetic: np.ndarray | None = None,
     ):
         if em_config is None:
@@ -168,11 +167,6 @@ class AbundanceEstimator:
         self.em_config = em_config
         self.num_transcripts = num_transcripts
         self._rng = np.random.default_rng(em_config.seed)
-        self._nrna_mask = (
-            np.asarray(is_nrna, dtype=bool)
-            if is_nrna is not None
-            else np.zeros(num_transcripts, dtype=bool)
-        )
         self._synthetic_mask = (
             np.asarray(is_synthetic, dtype=bool)
             if is_synthetic is not None

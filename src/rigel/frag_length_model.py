@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .config import CONSTANTS, BamScanConfig
+from .config import BamScanConfig
 
 
 @dataclass
@@ -56,7 +56,6 @@ class FragmentLengthModel:
             self._total_weight: float = float(self.counts.sum())
         self._log_prob: np.ndarray | None = None
         self._prob: np.ndarray | None = None
-        self._stats_use_prob: bool = False
         self._finalized: bool = False
         # Lazy cache for _build_eff_len_cache(), populated on the first call on a finalized model.
         self._cdf_cache: np.ndarray | None = None
@@ -87,8 +86,7 @@ class FragmentLengthModel:
         """Create a finalized model from an already-normalized PMF.
 
         This is intended for calibrated scoring surfaces whose probabilities
-        have already been regularized and normalized upstream, so it adds no
-        unseen-bin reserve.
+        have already been regularized and normalized upstream.
         """
         prob_in = np.asarray(pmf, dtype=np.float64)
         if prob_in.ndim != 1:
@@ -120,7 +118,6 @@ class FragmentLengthModel:
         model._total_weight = 1.0
         model._prob = prob
         model._log_prob = np.log(prob)
-        model._stats_use_prob = True
         model._tail_base = float(model._log_prob[model.max_size])
         model._finalized = True
         model._cdf_cache = None
@@ -141,15 +138,14 @@ class FragmentLengthModel:
     def pmf(self) -> np.ndarray:
         """Public probability vector, shape ``(max_size + 1,)``.
 
-        Returns the finalized pmf of a :meth:`from_pmf` model, or a smoothed
-        estimate from the raw counts of a QC view. This is the
+        Returns the finalized pmf of a :meth:`from_pmf` model. This is the
         *same* vector used internally by
         :meth:`compute_all_transcript_eff_lens` and the analytical
         moment helpers, so consumers that need the underlying PMF (e.g.
         the calibration boundary-crossing exposure) stay consistent
         with effective-length math without reaching into private state.
 
-        Always returns a freshly normalized ``float64`` array; do not
+        Always returns the model's own normalized ``float64`` array; do not
         mutate.
         """
         return self._normalized_probs()
@@ -165,7 +161,7 @@ class FragmentLengthModel:
         The censored count is surfaced separately (``to_dict()`` → ``overflow``).
         Returns 0.0 if there are no in-range observations.
         """
-        w = self._stats_weights()[: self.max_size]
+        w = self.counts[: self.max_size]
         total = float(w.sum())
         if total <= 0.0:
             return 0.0
@@ -180,7 +176,7 @@ class FragmentLengthModel:
         (the spread is reported about the in-range mean). Returns 0.0 if there
         are no in-range observations.
         """
-        w = self._stats_weights()[: self.max_size]
+        w = self.counts[: self.max_size]
         total = float(w.sum())
         if total <= 0.0:
             return 0.0
@@ -198,11 +194,6 @@ class FragmentLengthModel:
         is below 50%, so the ``>= max_size`` bin is retained here (it correctly
         places the censored tail on the high side). Returns 0.0 if no observations.
         """
-        probs = self._stats_probs()
-        if probs is not None:
-            cumsum = np.cumsum(probs)
-            idx = np.searchsorted(cumsum, 0.5)
-            return float(min(idx, self.max_size))
         total = self.total_weight
         if total == 0:
             return 0.0
@@ -218,22 +209,10 @@ class FragmentLengthModel:
         censored tail, so it can be the single largest bin without representing a
         genuine peak (see :meth:`mean`). Returns 0 if no in-range observations.
         """
-        w = self._stats_weights()[: self.max_size]
+        w = self.counts[: self.max_size]
         if float(w.sum()) <= 0.0:
             return 0
         return int(np.argmax(w))
-
-    def _stats_probs(self) -> np.ndarray | None:
-        """Finalized probability vector for summary statistics, when informative."""
-        if self._finalized and self._prob is not None and self._stats_use_prob:
-            return self._prob
-        return None
-
-    def _stats_weights(self) -> np.ndarray:
-        """Weight vector for summary statistics: the finalized posterior-predictive
-        PMF when informative, else the raw counts."""
-        probs = self._stats_probs()
-        return probs if probs is not None else self.counts
 
     @property
     def overflow_count(self) -> float:
@@ -245,16 +224,16 @@ class FragmentLengthModel:
     # ------------------------------------------------------------------
 
     def _normalized_probs(self) -> np.ndarray:
-        """Return the smoothed probability vector, shape (max_size+1,)."""
-        if self._finalized and self._prob is not None:
-            return self._prob
-        total = self.total_weight
-        if total == 0:
-            n = self.max_size + 1
-            return np.full(n, 1.0 / n, dtype=np.float64)
-        n = self.max_size + 1
-        ess = CONSTANTS.fragment_length.unseen_smoothing_ess
-        return (self.counts + ess / n) / (total + ess)
+        """Return the finalized probability vector, shape (max_size+1,).
+
+        Only a :meth:`from_pmf` model has one. A raw-count model is a statistics view, and refuses
+        rather than answering ``None``."""
+        if self._prob is None:
+            raise ValueError(
+                "this FragmentLengthModel holds raw counts only; pmf() and the effective lengths need "
+                "a model built by FragmentLengthModel.from_pmf"
+            )
+        return self._prob
 
     # ------------------------------------------------------------------
     # Analytical transcript effective length (salmon-style eCDF)
@@ -269,7 +248,7 @@ class FragmentLengthModel:
             cmom[k] = sum_{l=0}^{k} l * P(l)
 
         A finalized model is immutable, so its cumulative arrays are
-        computed once and memoized; a raw QC view recomputes on every call.
+        computed once and memoized.
         """
         if self._finalized and self._cdf_cache is not None:
             return self._cdf_cache, self._cmom_cache

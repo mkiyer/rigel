@@ -51,7 +51,6 @@ BROKEN = {
         "pool_prior_ess": -1.0,
         "gdna_mean_passes": 0,
         "gdna_mean_tolerance_bp": 0.0,
-        "unseen_smoothing_ess": 0.0,
     },
     "scoring": {"strand_probability_floor": 0.5, "pruning_floor": 0.0},
     "qc": {"strand_min_observations": -1, "strand_ci_confidence": 1.0, "report_examples": 0},

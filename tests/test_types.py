@@ -127,7 +127,6 @@ class TestIntervalType:
         assert int(IntervalType.EXON) == 0
         assert int(IntervalType.TRANSCRIPT) == 1
         assert int(IntervalType.INTERGENIC) == 2
-        assert int(IntervalType.SJ) == 3
 
 
 # =====================================================================

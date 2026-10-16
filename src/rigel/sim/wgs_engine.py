@@ -260,7 +260,6 @@ class WholeGenomeSimulator:
         genomic_refs: Sequence[str],
         strand_specificity: float = 1.0,
         r1_sense: bool = False,
-        seed: int | None = None,
         capture_config: CaptureConfig | None = None,
         capture_sampler: "CaptureSampler | None" = None,
     ):
@@ -272,8 +271,7 @@ class WholeGenomeSimulator:
         #: Protocol DIRECTION: False = R1-antisense (dUTP), True = R1-sense (KAPA). Independent of
         #: ``strand_specificity``, which is the FIDELITY about whichever direction is targeted.
         self.r1_sense = bool(r1_sense)
-        eff_seed = seed if seed is not None else sim_params.sim_seed
-        self._rng = np.random.default_rng(eff_seed)
+        self._rng = np.random.default_rng(sim_params.sim_seed)
 
         N = len(transcripts)
         self._genome = GenomeCache(self.fasta)

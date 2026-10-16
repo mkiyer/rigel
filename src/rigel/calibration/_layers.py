@@ -55,8 +55,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         # The deposit weight is 1/opportunity, so every divisor in the tool is derived here and nowhere
         # else.
         # `gdna_density` is the gDNA background RATE — a count divided by an opportunity, which is this
-        # layer's job. It owns BOTH estimators of that one quantity (the naive pooled rate and the
-        # contamination-robust one-sided rate), shared by their consumers.
+        # layer's job: the contamination-robust one-sided rate, reported beside the naive pooled one.
         (
             "effective_length",
             "capture_eff_length",

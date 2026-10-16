@@ -245,7 +245,7 @@ def scan_and_buffer(
     PipelineStats,
     StrandModels,
     FragmentBuffer,
-    "object",  # AccumulatorPayload | None
+    "object",  # AccumulatorPayload
 ]:
     """Single-pass C++ BAM scan: resolve, train models, buffer — all in one pass.
 
@@ -306,14 +306,12 @@ def scan_and_buffer(
     )
 
     # Calibration region wiring: install the splice graph's region partition into the scanner so
-    # per-region evidence is collected during the scan. The loader refuses an index without the graph;
-    # a genome whose references are all zero-length has no regions and nothing to deposit.
-    if len(index.regions_df) > 0:
-        _wire_calibration_regions(
-            scanner,
-            index,
-            scan.max_frag_length,
-        )
+    # per-region evidence is collected during the scan. The loader refuses an index without the graph.
+    _wire_calibration_regions(
+        scanner,
+        index,
+        scan.max_frag_length,
+    )
 
     # Streaming chunk callback — receives zero-copy dict from C++
     def _on_chunk(raw: dict) -> None:
@@ -576,7 +574,6 @@ def _setup_geometry_and_estimator(
         index.num_transcripts,
         em_config=em_config,
         geometry=geometry,
-        is_nrna=index.t_df["is_nrna"].values,
         is_synthetic=index.t_df["is_synthetic"].values,
     )
     return estimator

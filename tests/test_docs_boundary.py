@@ -240,7 +240,7 @@ ALLOWED: dict[str, tuple[str, ...]] = {
     "A3": ("docs/SUCCESS.md",),
     "B1": ("tests/test_second_pass_scoring.py", "tests/test_sim_genomic_refs.py"),
     "B2": ("tests/test_second_pass_scoring.py",),
-    # gene ids in the implicit-splice GTF fixture, two rungs of `test_vertex_reference.py`'s own G1…G6
+    # gene ids in the implicit-splice GTF fixture, two rungs of `test_vertex_reference.py`'s own G1…G5
     # case series, and the method-development test chromosome's gene ids — all beside their definitions,
     # and all naming genes or cases rather than rules. Scoped to the files that carry them, never blanket.
     # Each key is declared ONCE: a duplicate key in a dict literal is not an error, it is a lost edit,
@@ -265,7 +265,7 @@ ALLOWED: dict[str, tuple[str, ...]] = {
     # A test file's own case ids, scoped to the file that defines them. A local id a reader meets beside
     # its definition is legible; the same id cited from another document is not, and those citations
     # belong in prose rather than here.
-    # A case-id series is scoped WHOLE. `C2b` and `G1b` are rungs of C1…C5 and G1…G6, each mirrored by
+    # A case-id series is scoped WHOLE. `C2b` and `G1b` are rungs of C1…C5 and G1…G5, each mirrored by
     # the `def test_<id>_…` names that carry them, so exempting only the sub-lettered rungs leaves a bulk
     # rename free to rewrite their plain-numbered siblings and break the series in half.
     "C2b": ("tests/calibration/test_certified_rna_licence.py",),
@@ -305,7 +305,6 @@ ALLOWED: dict[str, tuple[str, ...]] = {
     "G6": (
         "tests/test_implicit_splice.py",
         "tests/test_scanner_accumulator_integration.py",
-        "tests/calibration/test_vertex_reference.py",
         "docs/TESTING.md",
     ),
     # more of the test chromosome's gene ids — genes, not rules, exactly as `G4`/`G5`/`G6` above. Scoped

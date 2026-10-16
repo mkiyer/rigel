@@ -1,8 +1,8 @@
 """`rigel.locus` — the `Locus` / `MultiLocus` surface, and the reference id a `Locus` carries. The
 first block pins the dataclass invariants: `Locus` is a frozen contiguous interval with a `span`, a
 `MultiLocus` carries one or more of them (a paralog cluster spans two references), and the
-`gdna_span` `build_multi_loci` computes is the sum of its loci's spans, floored at one so nothing
-downstream divides by zero. The second pins that `Locus.ref_id` is the canonical resolver/BAM ref id
+`gdna_span` `build_multi_loci` computes is the sum of its loci's spans. The second pins that
+`Locus.ref_id` is the canonical resolver/BAM ref id
 given by `index.ref_lengths` insertion order through `index.ref_name_to_id`, and not the pandas
 categorical code of `index.t_df["ref"]` — the two id spaces coincide only when reference names are
 inserted in lexical order, so the fixture builds an index where they disagree and the wrong one would
@@ -77,7 +77,7 @@ def test_multi_locus_multi_ref():
 
 
 def test_build_multi_loci_gdna_span_matches_sum_of_loci(mini_index):
-    """``gdna_span`` should equal Σ(end-start) over ``loci`` (within max(_,1))."""
+    """``gdna_span`` should equal Σ(end-start) over ``loci``."""
     from rigel.scored_fragments import ScoredFragments
 
     # Synthetic em_data: one ambiguous unit linking t0 and t1 (both on chr1).
@@ -99,8 +99,7 @@ def test_build_multi_loci_gdna_span_matches_sum_of_loci(mini_index):
     assert len(multi_loci) > 0
     for ml in multi_loci:
         loci_sum = sum(loc.span for loc in ml.loci)
-        # build_multi_loci floors gdna_span at 1 to avoid downstream div-by-zero.
-        assert ml.gdna_span == max(loci_sum, 1)
+        assert ml.gdna_span == loci_sum
         for loc in ml.loci:
             assert isinstance(loc, Locus)
             assert loc.start <= loc.end

@@ -91,7 +91,6 @@ def _simulate_gdna(tmp_path, fasta, transcripts, *, genomic_refs, n_gdna, seed=1
             read_length=100,
         ),
         GDNASimConfig(frag_mean=157, frag_std=125, frag_min=40, frag_max=1000),
-        seed=seed,
         genomic_refs=genomic_refs,
     )
     try:

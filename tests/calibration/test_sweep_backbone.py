@@ -367,20 +367,16 @@ def test_the_solvers_cube_is_inert_when_absent_and_walls_the_tilt_when_present()
     ap = np.ones(m, bool)
     an = np.array([True, True, False, True])
     kw = dict(kappa=0.99, od_g=0.0, od_r=0.0, n_grid=K_, L=10.0)
-    base = _solve_regions_logodds_all(u_pos, u_neg, ap, an, u_pos + u_neg, np.zeros(m), **kw)
+    base = _solve_regions_logodds_all(u_pos, u_neg, ap, an, **kw)
     u = np.linspace(-10.0, 10.0, K_)
     for empty in (None, CubeRows.blank(0, u)):
-        again = _solve_regions_logodds_all(
-            u_pos, u_neg, ap, an, u_pos + u_neg, np.zeros(m), cube_rows=empty, **kw
-        )
+        again = _solve_regions_logodds_all(u_pos, u_neg, ap, an, cube_rows=empty, **kw)
         assert np.array_equal(again.gdna_frac, base.gdna_frac)
         assert np.array_equal(again.rna_pos_frac, base.rna_pos_frac)
     # "at least 30 % RNA+": a wall below the density that share implies, n = 100, a_r = 100, ρ_ref = 1
     floor = np.where(u < np.log(0.3), -50.0, 0.0)
     wall = cube_rows_of({1: (floor, None, 100.0, 100.0, 1.0)}, u)
-    walled = _solve_regions_logodds_all(
-        u_pos, u_neg, ap, an, u_pos + u_neg, np.zeros(m), cube_rows=wall, **kw
-    )
+    walled = _solve_regions_logodds_all(u_pos, u_neg, ap, an, cube_rows=wall, **kw)
     assert walled.rna_pos_frac[1] > base.rna_pos_frac[1] + 0.05
     for i in (0, 2, 3):
         assert (

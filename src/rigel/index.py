@@ -613,7 +613,7 @@ def create_nrna_transcripts(
 def build_splice_sj(transcripts: list[Transcript]) -> pd.DataFrame:
     """Extract splice junctions (introns) from all transcripts.
 
-    Each intron of each transcript produces one ``IntervalType.SJ`` row.
+    Each intron of each transcript produces one row.
     The resulting DataFrame is sorted by (ref, start, end, strand).
     """
     rows = [
@@ -866,7 +866,6 @@ class TranscriptIndex:
         self.g_df: pd.DataFrame | None = None
         self.t_to_g_arr: np.ndarray | None = None
         self.t_to_strand_arr: np.ndarray | None = None
-        self.g_to_strand_arr: np.ndarray | None = None
 
         # Unified cgranges index (collapsed EXON + TRANSCRIPT + INTERGENIC)
         # Label = index into _iv_type and _iv_t_set lookup lists.
@@ -1325,7 +1324,6 @@ class TranscriptIndex:
         # -- fast numpy lookup arrays -----------------------------------------
         self.t_to_g_arr = self.t_df["g_index"].values
         self.t_to_strand_arr = self.t_df["strand"].values
-        self.g_to_strand_arr = self.g_df["strand"].values
 
         # -- the splice graph: THE calibration partition ----------------------
         # The load-time validation is the GRAPH-INTERNAL half only. The checks that need the

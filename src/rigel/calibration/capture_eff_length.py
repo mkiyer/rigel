@@ -118,17 +118,16 @@ def transcript_objects(
         )
     ]
     tdf = index.t_df
-    if tdf is not None and "is_synthetic" in tdf.columns:
-        syn = tdf[tdf["is_synthetic"].to_numpy(dtype=bool)]
-        syn = syn[~np.isin(syn["t_index"].to_numpy(np.int64), parts[0][0])]
-        parts.append(
-            (
-                syn["t_index"].to_numpy(np.int64),
-                syn["ref"].astype(str).to_numpy(),
-                syn["start"].to_numpy(np.int64),
-                syn["end"].to_numpy(np.int64),
-            )
+    syn = tdf[tdf["is_synthetic"].to_numpy(dtype=bool)]
+    syn = syn[~np.isin(syn["t_index"].to_numpy(np.int64), parts[0][0])]
+    parts.append(
+        (
+            syn["t_index"].to_numpy(np.int64),
+            syn["ref"].astype(str).to_numpy(),
+            syn["start"].to_numpy(np.int64),
+            syn["end"].to_numpy(np.int64),
         )
+    )
     t = np.concatenate([p[0] for p in parts])
     ref = np.concatenate([p[1] for p in parts])
     a = np.concatenate([p[2] for p in parts])

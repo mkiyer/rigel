@@ -100,15 +100,11 @@ class IntervalType(IntEnum):
     full transcript span ``[start, end)`` — intron overlap is derived as
     ``transcript_bp - exon_bp``.  ``INTERGENIC`` covers the reference outside
     every transcript.
-
-    ``SJ`` is an annotated splice junction that exactly matches a known
-    intron in the transcript reference.
     """
 
     EXON = 0
     TRANSCRIPT = 1
     INTERGENIC = 2
-    SJ = 3
 
 
 # ---------------------------------------------------------------------------
@@ -119,10 +115,9 @@ class IntervalType(IntEnum):
 class AnnotatedInterval(NamedTuple):
     """A reference-annotated genomic interval with index metadata.
 
-    Used for both tiling intervals (EXON/TRANSCRIPT/INTERGENIC in the
-    cgranges overlap index) and splice junctions (SJ in the exact-match
-    lookup).  Gene index is derived from the transcript table at load
-    time — not stored per-interval.
+    Used for the tiling intervals (EXON/TRANSCRIPT/INTERGENIC in the
+    cgranges overlap index).  Gene index is derived from the transcript
+    table at load time — not stored per-interval.
     """
 
     ref: str

@@ -154,3 +154,11 @@ class TestFragmentLengthModelSerialization:
 
 # The report's fragment-length categories come from `FLModels` rather than from a per-splice-category
 # histogram of the scanner's, and are gated in tests/test_summary_report.py.
+
+
+def test_a_RAW_COUNT_model_refuses_a_pmf():
+    """A model built from raw counts is a statistics view. The smoothing that once gave it a pmf was
+    deleted with the path nothing called, so asking for one must refuse rather than return None."""
+    model = FragmentLengthModel(max_size=100, counts=np.ones(101))
+    with pytest.raises(ValueError, match="from_pmf"):
+        model.pmf()

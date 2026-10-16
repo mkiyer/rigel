@@ -885,7 +885,6 @@ def _simulator(fasta, transcripts, probes, *, seed=23):
         transcripts,
         SimulationParams(sim_seed=seed, read_length=100, **RNA_LENGTH),
         GDNASimConfig(**GDNA_LENGTH),
-        seed=seed,
         genomic_refs=GENOMIC_REFS,
         capture_config=(
             CaptureConfig(probes=probes, probe_format="transcript", binding_per_base=10.0)

@@ -49,7 +49,6 @@ class MockIndex:
         self.num_genes = num_genes
         self.t_to_g_arr = np.array(t_to_g, dtype=np.int64)
         self.t_to_strand_arr = np.array(t_to_strand, dtype=np.int64)
-        self.g_to_strand_arr = np.array(g_to_strand, dtype=np.int64)
 
         # DataFrames for output methods
         if t_ids is None:

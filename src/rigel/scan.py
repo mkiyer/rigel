@@ -126,7 +126,6 @@ class FragmentRouter:
             n_em_as,
             n_em_ao,
             n_gated,
-            _,
             n_mm,
         ) = result
 

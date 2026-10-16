@@ -304,7 +304,7 @@ struct Landscape { bool built = false; const double* log_rho = nullptr; const do
 struct Outputs {  // written in place, the owned slots of each block
     double *fpos, *fneg, *fg, *var; bool* has_comp;
     // the diagnostics capture, or nullptr
-    double *fg_loc = nullptr, *fg_strand = nullptr, *tau_lam = nullptr, *lam_rows = nullptr;
+    double *fg_loc = nullptr, *tau_lam = nullptr, *lam_rows = nullptr;
 };
 
 struct Lane3 {  // one received lane as the capture returns it
@@ -575,7 +575,6 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
         const bool solvable = as_bool(A.solvable)[i];
         if (want_capture) {
             out.fg_loc[start + i] = A.fg_loc[i]; out.tau_lam[start + i] = A.tau_lam[i];
-            out.fg_strand[start + i] = 0.0;
             if (out.lam_rows) {
                 double* dest = out.lam_rows + static_cast<size_t>(start + i) * K;
                 if (has_rows) std::copy(A.rows.data() + static_cast<size_t>(i) * K, A.rows.data() + static_cast<size_t>(i + 1) * K, dest);
@@ -593,13 +592,6 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
             out.fneg[start + i] = std::clamp(f_n, 0.0, 1.0);
             out.fg[start + i] = std::clamp(f_g, 0.0, 1.0);
             out.var[start + i] = v_g;
-        }
-        if (want_capture) {  // the strand-only solve: no prior, no messages
-            const P::SlotInputs bare{cnt[2 * i], cnt[2 * i + 1], bel_fg[i], bel_fpos[i], bel_fneg[i], fp[i], fn[i], false, 0.0,
-                                     nullptr, nullptr};
-            double b_g, b_p, b_n, b_v;
-            P::solve_slot(g, bare, A.psi, b_g, b_p, b_n, b_v);
-            out.fg_strand[start + i] = b_g;
         }
     }
     // has_composition: an own composition channel, structural certainty, or a composition held from either side
@@ -668,7 +660,7 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
     const bool want_capture = !diagnostics.is_none();
     if (want_capture) {
         nb::dict cd = nb::cast<nb::dict>(diagnostics);
-        out.fg_loc = nb::cast<Vec>(cd["fg_loc"]).data(); out.fg_strand = nb::cast<Vec>(cd["fg_strand"]).data();
+        out.fg_loc = nb::cast<Vec>(cd["fg_loc"]).data();
         out.tau_lam = nb::cast<Vec>(cd["tau_lam"]).data();
         out.lam_rows = cd["lam_rows"].is_none() ? nullptr : nb::cast<Mat>(cd["lam_rows"]).data();
     }

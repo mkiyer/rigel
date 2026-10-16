@@ -14,32 +14,20 @@ import pytest
 from rigel.sim.reads import GDNAConfig
 
 
-def test_overdispersion_converts_to_beta_concentration():
-    # od = 1/(kappa+1)  ⇒  kappa = (1-od)/od
-    assert GDNAConfig(gdna_strand_overdispersion=0.2).strand_kappa == pytest.approx(4.0)
-    assert GDNAConfig(gdna_strand_overdispersion=0.05).strand_kappa == pytest.approx(19.0)
-    # od == 0 ⇒ Binomial (no region partition)
-    assert GDNAConfig(gdna_strand_overdispersion=0.0).strand_kappa is None
-    # explicit strand_kappa still works when the clear knob is unset
-    assert GDNAConfig(strand_kappa=9.0).strand_kappa == 9.0
-
-
 @pytest.mark.parametrize("bad", [-0.1, 1.0, 1.5])
 def test_overdispersion_out_of_range_rejected(bad):
     with pytest.raises(ValueError):
         GDNAConfig(gdna_strand_overdispersion=bad)
 
 
-def test_scenario_gdna_config_both_knobs_reach_the_engine():
-    """Scenario's GDNAConfig → engine GDNASimConfig: both the clear overdispersion knob and the
-    legacy strand_kappa flow through (kappa=9 ⇒ od=0.1), so locus_sweep's strand_kappa still works
-    after the single-engine consolidation."""
+def test_scenario_gdna_config_overdispersion_reaches_the_engine():
+    """Scenario's GDNAConfig → engine GDNASimConfig: the overdispersion knob flows through, and an
+    unset knob or no gDNA config reaches the engine as 0."""
     from rigel.sim.scenario import _to_gdna_sim
 
     assert _to_gdna_sim(
         GDNAConfig(gdna_strand_overdispersion=0.2)
     ).strand_overdispersion == pytest.approx(0.2)
-    assert _to_gdna_sim(GDNAConfig(strand_kappa=9.0)).strand_overdispersion == pytest.approx(0.1)
     assert _to_gdna_sim(GDNAConfig()).strand_overdispersion == 0.0
     assert _to_gdna_sim(None).strand_overdispersion == 0.0
 

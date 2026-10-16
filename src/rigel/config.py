@@ -689,7 +689,7 @@ class CalibrationConstants:
 
 @dataclass(frozen=True)
 class FragmentLengthConstants:
-    """The fragment-length laws (``calibration.fl``, ``frag_length_model``)."""
+    """The fragment-length laws (``calibration.fl``)."""
 
     #: Dirichlet pseudo-count of the smooth empirical-Bayes shrink of each pool's length law toward the global
     #: law. Not a cliff: a pool total far above it gives the empirical law, far below it the global anchor, and
@@ -703,17 +703,12 @@ class FragmentLengthConstants:
     #: ... stopping early once the mean moves by less than this many bp.
     gdna_mean_tolerance_bp: float = 0.25
 
-    #: One pseudo-observation spread across the whole length support keeps an unseen length finite without
-    #: pulling a short library toward the middle of the histogram (``FragmentLengthModel``).
-    unseen_smoothing_ess: float = 1.0
-
     def __post_init__(self) -> None:
         _check_ranges(
             self,
             pool_prior_ess=self.pool_prior_ess >= 0.0,
             gdna_mean_passes=self.gdna_mean_passes >= 1,
             gdna_mean_tolerance_bp=self.gdna_mean_tolerance_bp > 0.0,
-            unseen_smoothing_ess=self.unseen_smoothing_ess > 0.0,
         )
 
 

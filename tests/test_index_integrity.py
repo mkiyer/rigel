@@ -102,11 +102,6 @@ class TestTranscriptTable:
         assert arr[1] == 1
         assert arr[2] == 2
 
-    def test_g_to_strand_arr(self, mini_index):
-        arr = mini_index.g_to_strand_arr
-        assert arr[0] == 1  # g1 +
-        assert arr[1] == 2  # g2 -
-
 
 class TestGeneTable:
     """Verify derived gene table."""
@@ -384,7 +379,6 @@ class TestBuildLoadRoundTrip:
         assert idx1.g_df.equals(idx2.g_df)
         np.testing.assert_array_equal(idx1.t_to_g_arr, idx2.t_to_g_arr)
         np.testing.assert_array_equal(idx1.t_to_strand_arr, idx2.t_to_strand_arr)
-        np.testing.assert_array_equal(idx1.g_to_strand_arr, idx2.g_to_strand_arr)
 
         # Collapsed intervals
         assert len(idx1._iv_type) == len(idx2._iv_type)

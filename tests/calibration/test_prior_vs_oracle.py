@@ -20,8 +20,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from rigel.calibration.signature import BIT_EXON_NEG, BIT_EXON_POS, BIT_INTRON_NEG, BIT_INTRON_POS
 from rigel.config import PipelineConfig
 from _prior_toy import build_toy, build_toy_zero_gdna
+
+#: a region carrying none of these strand/type bits is intergenic, and the locus projection drops it
+_RNA_SIGNATURE_BITS = BIT_EXON_POS | BIT_EXON_NEG | BIT_INTRON_POS | BIT_INTRON_NEG
 
 _MODULES: dict = {}
 
@@ -117,8 +121,6 @@ def test_the_noop_arm_is_byte_identical_and_the_lever_resolves_a_PICOFRAGMENT(me
     magnitude below the unit the prior is denominated in, so the lever is not the limiting factor.
     """
     assert all(measured.noop_identical.values()), measured.noop_identical
-
-    from rigel.calibration.priors import _RNA_SIGNATURE_BITS
 
     sig = np.asarray(measured.region_arrays.signature).astype(np.int64)
     in_locus = (sig & _RNA_SIGNATURE_BITS) != 0
@@ -389,8 +391,6 @@ def test_over_and_under_call_are_reported_separately_and_reconcile(measured):
 def _in_locus_regions(measured) -> np.ndarray:
     """``bool[N]`` — regions the locus projection keeps. An intergenic region carries no exon/intron bit
     and is DROPPED, so a perturbation there is inert by design (see the noop gate)."""
-    from rigel.calibration.priors import _RNA_SIGNATURE_BITS
-
     sig = np.asarray(measured.region_arrays.signature).astype(np.int64)
     return (sig & _RNA_SIGNATURE_BITS) != 0
 

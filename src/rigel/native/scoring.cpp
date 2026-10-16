@@ -682,7 +682,7 @@ private:
         FillState& st,
         int64_t& stat_det, int64_t& stat_em_u,
         int64_t& stat_em_as, int64_t& stat_em_ao,
-        int64_t& stat_gated, int64_t& stat_chim,
+        int64_t& stat_gated,
         int64_t& stat_mm) const
     {
         static constexpr double NEG_INF =
@@ -709,7 +709,6 @@ private:
                 // Accumulate chimeric info for annotation
                 st.v_chim_fid->push_back(f_id[i]);
                 st.v_chim_stype->push_back(s_type[i]);
-                ++stat_chim;
                 continue;
             }
 
@@ -950,7 +949,7 @@ class StreamingScorer {
 
     // Statistics
     int64_t stat_det_, stat_em_u_, stat_em_as_, stat_em_ao_;
-    int64_t stat_gated_, stat_chim_, stat_mm_;
+    int64_t stat_gated_, stat_mm_;
 
     bool finished_;
 
@@ -961,7 +960,7 @@ public:
         f64_2d_mut unambig_counts)
       : scorer_(scorer),
         stat_det_(0), stat_em_u_(0), stat_em_as_(0),
-        stat_em_ao_(0), stat_gated_(0), stat_chim_(0),
+        stat_em_ao_(0), stat_gated_(0),
         stat_mm_(0), finished_(false)
     {
         // Allocate growing vectors
@@ -1051,7 +1050,7 @@ public:
         scorer_.score_chunk_impl(
             cp, st_,
             stat_det_, stat_em_u_, stat_em_as_,
-            stat_em_ao_, stat_gated_, stat_chim_,
+            stat_em_ao_, stat_gated_,
             stat_mm_);
     }
 
@@ -1091,7 +1090,6 @@ public:
             stat_em_as_,
             stat_em_ao_,
             stat_gated_,
-            stat_chim_,
             stat_mm_
         );
 

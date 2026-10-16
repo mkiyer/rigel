@@ -64,11 +64,7 @@ class GDNAConfig:
     gdna_strand_overdispersion : float or None
         gDNA strand overdispersion — the intra-class correlation of the per-region sense/antisense
         split in ``[0, 1)``, in the same units the calibrator fits. ``0`` ⇒ exact Binomial 50/50;
-        larger ⇒ more region-to-region strand skew. Overrides ``strand_kappa`` when set.
-    strand_kappa : float or None
-        The same knob in its low-level Beta concentration form (per-region rate
-        ``Beta(kappa/2, kappa/2)``, intra-class correlation ``1/(kappa + 1)``). Prefer
-        ``gdna_strand_overdispersion``, whose units are the ones everything else states.
+        larger ⇒ more region-to-region strand skew.
     """
 
     abundance: float = 10.0
@@ -76,11 +72,9 @@ class GDNAConfig:
     frag_std: float = 100.0
     frag_min: int = 100
     frag_max: int = 1000
-    strand_kappa: float | None = None
     gdna_strand_overdispersion: float | None = None
 
     def __post_init__(self) -> None:
-        # The clear-units knob (intra-class correlation) overrides the Beta concentration.
         if self.gdna_strand_overdispersion is not None:
             od = float(self.gdna_strand_overdispersion)
             if not (0.0 <= od < 1.0):
@@ -88,5 +82,3 @@ class GDNAConfig:
                     "GDNAConfig.gdna_strand_overdispersion must be in [0, 1); "
                     f"got {self.gdna_strand_overdispersion!r}."
                 )
-            # od = 1/(kappa + 1) ⇒ kappa = (1 − od)/od; od == 0 ⇒ Binomial (no region partition).
-            self.strand_kappa = None if od == 0.0 else (1.0 - od) / od

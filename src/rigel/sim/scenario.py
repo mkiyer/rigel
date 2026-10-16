@@ -71,20 +71,10 @@ def _to_sim_params(sim_config: ReadSimConfig, n_rna: int) -> SimulationParams:
 
 
 def _gdna_overdispersion(gdna_config: GDNAConfig) -> float:
-    """Resolve a single gDNA strand overdispersion from either knob on ``GDNAConfig``.
-
-    ``gdna_strand_overdispersion`` (intra-class correlation, the units everything else states)
-    wins; otherwise the low-level ``strand_kappa`` Beta concentration is converted by
-    ``od = 1/(kappa + 1)``, the inverse of ``GDNAConfig``'s own ``kappa = (1 − od)/od``, so both
-    spellings reach the engine as the same Beta(kappa/2, kappa/2) per-region rate. ``0`` when
-    neither is set.
-    """
+    """The gDNA strand overdispersion ``GDNAConfig`` sets; ``0`` when it is unset."""
     od = gdna_config.gdna_strand_overdispersion
     if od is not None:
         return float(od)
-    kappa = gdna_config.strand_kappa
-    if kappa is not None and kappa > 0.0:
-        return 1.0 / (float(kappa) + 1.0)
     return 0.0
 
 

@@ -105,8 +105,6 @@ __all__ = [
     "build_sj_geometry_arrays",
     "SpliceJunctionArrays",
     "SpliceJunctionGeometry",
-    "is_terminus",
-    "is_splice_site",
     "validate_graph",
     "load_regions",
     "load_boundaries",
@@ -1119,28 +1117,6 @@ def build_sj_geometry_arrays(index) -> SpliceJunctionGeometry:
         reach_lo=reach("reach_lo_pos", "reach_lo_neg"),
         reach_hi=reach("reach_hi_pos", "reach_hi_neg"),
     )
-
-
-def is_terminus(flags: np.ndarray, strand: int) -> np.ndarray:
-    """``TSS_s or TES_s`` — a transcript of strand ``s`` starts or ends here."""
-    bits = (FLAG_TSS_POS | FLAG_TES_POS) if strand == Strand.POS else (FLAG_TSS_NEG | FLAG_TES_NEG)
-    return (np.asarray(flags, dtype=np.uint16) & bits) != 0
-
-
-def is_splice_site(flags: np.ndarray, strand: int) -> np.ndarray:
-    """``DONOR_s or ACCEPTOR_s`` — a strand-``s`` intron begins or ends here.
-
-    NOT the complement of :func:`is_terminus`: the two are independent bits, and a position can
-    carry both — the case a 4-bit signature is structurally blind to. On a human annotation almost
-    every contiguous boundary is terminus-only or splice-only, about a percent are both, and none
-    carries neither; the both-bits case is real and must be handled, but it is rare.
-    """
-    bits = (
-        (FLAG_DONOR_POS | FLAG_ACCEPTOR_POS)
-        if strand == Strand.POS
-        else (FLAG_DONOR_NEG | FLAG_ACCEPTOR_NEG)
-    )
-    return (np.asarray(flags, dtype=np.uint16) & bits) != 0
 
 
 def load_regions(path) -> pd.DataFrame:

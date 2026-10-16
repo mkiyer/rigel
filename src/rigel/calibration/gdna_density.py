@@ -1,14 +1,10 @@
 """The gDNA background RATE, from counts and their opportunity.
 
-Two estimators of one quantity, over one signature ``(counts, exposure) -> rate``, so there is exactly
-one implementation of each and no second home to drift:
+:func:`one_sided_rate` estimates it for a pool that transcription may have added to, and it is the one the
+fragment-length model uses. Beside its estimate it reports the naive pooled rate ``sum n / sum E``, which
+assumes the pool it is handed is pure gDNA.
 
-* :func:`pooled_log_rate` — ``ln((sum g + shape) / sum E)``, the Gamma-posterior location. It assumes the
-  pool it is handed is pure gDNA, which is why it is the naive one.
-* :func:`one_sided_rate` — the same rate WITHOUT that assumption, for a pool that transcription may have
-  added to. This is the one the fragment-length model uses.
-
-The one-sided argument, which is why the second estimator exists: no structural class of objects is
+The one-sided argument, which is why the estimator exists: no structural class of objects is
 pure gDNA. "Intergenic" is whatever the annotation leaves over, RNA sits inside introns wherever it
 has not spliced, and pervasive transcription is real. But transcription can only ADD fragments to an
 object, never remove them, so every object's observed density ``n_i / E_i`` is an overestimate and
@@ -53,7 +49,6 @@ __all__ = [
     "contained_opportunity",
     "one_sided_rate",
     "poisson_lower_mean",
-    "pooled_log_rate",
     "region_lengths_from_partition",
 ]
 
@@ -119,23 +114,6 @@ def _log_factorial(k: np.ndarray) -> np.ndarray:
         return gammaln(k + 1.0)
     table = gammaln(np.arange(int(kmax) + 2, dtype=np.float64))
     return table[k.astype(np.int64) + 1]
-
-
-def pooled_log_rate(counts, exposure, *, shape: float = 0.0) -> float:
-    """``ln((sum counts + shape) / sum exposure)`` — the naive pooled rate, in logs.
-
-    It assumes the pool is pure, which no structural class of objects is; that is what
-    :func:`one_sided_rate` exists to avoid. It stays here because it is the other estimator of the
-    same quantity and both belong in one module.
-
-    ``shape`` is the caller's prior pseudo-count (a Gamma-posterior location uses the Jeffreys ``½``);
-    the default of 0 is the plain ratio. Returns ``-inf`` when the pool has no support, which is the
-    honest value rather than a raised error: a chain with no intergenic region is a real state.
-    """
-    se = float(np.asarray(exposure, dtype=np.float64).sum())
-    if not se > 0.0:
-        return -np.inf
-    return float(np.log(float(np.asarray(counts, dtype=np.float64).sum()) + shape) - np.log(se))
 
 
 def one_sided_rate(counts, exposure) -> GdnaDensityFit:
