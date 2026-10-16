@@ -192,14 +192,12 @@ def _assert_parity(reference, native, label: str) -> None:
 
 #: Hypotheses, named, so the cases below read as what they mean. ``()`` — cut nothing — is the GENOMIC
 #: hypothesis and needs no flag: the gap is real template, so the molecule is gDNA or unspliced RNA.
-#: ``supporting_t_inds`` are carried but never read by the first pass; they are what the second pass
-#: weights a path by, so the deferred queue has to preserve them and this gate has to compare them.
 GENOMIC = GapHypothesis()
-LONG_SJ = GapHypothesis(((201, 900),), sj_strand=Strand.POS, supporting_t_inds=(7,))
-SHORT_SJ = GapHypothesis(((100, 200),), sj_strand=Strand.POS, supporting_t_inds=(9, 11))
-NEG_SJ = GapHypothesis(((400, 900),), sj_strand=Strand.NEG, supporting_t_inds=(13,))
+LONG_SJ = GapHypothesis(((201, 900),), sj_strand=Strand.POS)
+SHORT_SJ = GapHypothesis(((100, 200),), sj_strand=Strand.POS)
+NEG_SJ = GapHypothesis(((400, 900),), sj_strand=Strand.NEG)
 INTRONIC_PATH = GapHypothesis(((201, 400),), sj_strand=Strand.POS)
-BOTH_SJ = GapHypothesis(((100, 200), (201, 900)), sj_strand=Strand.POS, supporting_t_inds=(7, 9))
+BOTH_SJ = GapHypothesis(((100, 200), (201, 900)), sj_strand=Strand.POS)
 
 #: ``(label, deposit kwargs)``. Ordered so that a fragment which changes state (the QC counters, the
 #: sj bank, the deferred queue) is followed by one that reads it, and every case names what it is FOR.
@@ -547,8 +545,6 @@ def test_the_deferred_RECORD_carries_the_fragment_WHOLE_and_the_two_agree_on_it(
     )
     assert got["hypothesis_intron_offsets"].tolist() == [0, 1, 2, 2]
     assert got["hypothesis_introns"].tolist() == [201, 900, 100, 200]
-    assert got["hypothesis_t_offsets"].tolist() == [0, 1, 3, 3]
-    assert got["hypothesis_t"].tolist() == [7, 9, 11]
 
 
 def test_TWO_accumulators_STAMP_THEIR_OWN_REFERENCE():
@@ -587,9 +583,9 @@ def test_TWO_accumulators_STAMP_THEIR_OWN_REFERENCE():
 def _random_hypotheses(rng, interesting) -> tuple[GapHypothesis, ...]:
     """0–3 hypotheses over the interesting coordinate set, plus a biased shot at the genomic one.
 
-    Duplicate paths, prefix paths, empty paths and shared supporting lists all occur, which is what
-    exercises the deferred queue's canonical SORT — the one place in the tally where order is observable and
-    therefore the one place where a comparator can be subtly wrong.
+    Duplicate paths, prefix paths and empty paths all occur, which is what exercises the deferred queue's
+    canonical SORT — the one place in the tally where order is observable and therefore the one place
+    where a comparator can be subtly wrong.
     """
     out = []
     for _ in range(int(rng.integers(0, 4))):
@@ -607,11 +603,7 @@ def _random_hypotheses(rng, interesting) -> tuple[GapHypothesis, ...]:
             introns.append((a, b))
         out.append(
             GapHypothesis(
-                tuple(introns),
-                sj_strand=int(rng.choice([Strand.POS, Strand.NEG, Strand.NONE])),
-                supporting_t_inds=tuple(
-                    int(t) for t in rng.integers(0, 5, int(rng.integers(0, 3)))
-                ),
+                tuple(introns), sj_strand=int(rng.choice([Strand.POS, Strand.NEG, Strand.NONE]))
             )
         )
     return tuple(out) or UNSPLICED_ONLY

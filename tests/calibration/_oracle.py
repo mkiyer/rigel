@@ -44,8 +44,6 @@ _BANKS = (
     "boundary_spliced_count",
     "sj_count",
     "region_start_count",
-    "region_end_count",
-    "region_span_count",
     # The three CONSERVED MASS banks — exactly what `component_shares` reads, so a bank left out of
     # the tuple is a bank the origin split is never validated on. These three are float64, so
     # sum-to-full holds to within the representation rather than byte-exact (see `_validate`).

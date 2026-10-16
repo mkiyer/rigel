@@ -226,8 +226,7 @@ struct RawResolveResult {
     int32_t sj_key_end = -1;
 
     // ⭐ EVERY explanation of this fragment's UNSEQUENCED gaps, flat. Hypothesis h owns introns
-    // [gap_intron_offsets[h], gap_intron_offsets[h+1]) and supporting transcripts
-    // [gap_supporting_offsets[h], gap_supporting_offsets[h+1]).
+    // [gap_intron_offsets[h], gap_intron_offsets[h+1]).
     //
     // A mate gap may hold no intron, one, or several, and which it is CANNOT be observed -- the bases are
     // not there. Each compatible transcript determines exactly one answer (its own introns lying inside
@@ -241,8 +240,6 @@ struct RawResolveResult {
     std::vector<IntronBlock> gap_introns;
     std::vector<int32_t>     gap_intron_offsets;      // n_hypotheses + 1, always starts at 0
     std::vector<int32_t>     gap_sj_strand;           // n_hypotheses
-    std::vector<int32_t>     gap_supporting;          // flat candidate transcript indices
-    std::vector<int32_t>     gap_supporting_offsets;  // n_hypotheses + 1, always starts at 0
 
     int32_t n_gap_hypotheses() const {
         return gap_intron_offsets.empty()

@@ -217,8 +217,6 @@ struct GapHypothesis {
     const IntronBlock*  introns;        // implied; empty => the unspliced (genomic) hypothesis
     std::size_t         n_introns;
     std::int32_t        sj_strand;      // ⚠ an INFERENCE; an observed motif always wins
-    const std::int32_t* supporting_t;   // candidate transcripts implying this path -- kept in the deferred record;
-    std::size_t         n_supporting;   //   their one use is the last tie-break of `compare_placements`
 
     bool is_unspliced() const noexcept { return n_introns == 0; }
 };
@@ -280,7 +278,6 @@ struct GapCensus {
 struct OfferedStorage {
     std::vector<IntronBlock>    observed;
     std::vector<IntronBlock>    implied;
-    std::vector<std::int32_t>   supporting;
     std::vector<GapHypothesis>  spans;
     OfferedFragment             offered{};
 };
@@ -294,8 +291,8 @@ struct OfferedStorage {
 /// crossing logic, and byte-identity with the specification is preserved for free.
 ///
 /// Three nested variable-length levels -- records hold placements; placements hold observed introns and
-/// hypotheses; hypotheses hold implied introns and supporting transcripts -- so there are five offset
-/// arrays. Offsets are cumulative and start at 0, so an empty queue is `{0}`, never `{}`.
+/// hypotheses; hypotheses hold implied introns -- so there are four offset arrays. Offsets are cumulative
+/// and start at 0, so an empty queue is `{0}`, never `{}`.
 ///
 /// ⛔ This is a LIST. Concatenating per-worker queues gives a different byte sequence at 1, 2, 4 and 8
 /// workers with identical contents -- so the EXPORT sorts on the record's own content, exactly as
@@ -319,8 +316,6 @@ struct DeferredFragments {
     std::vector<std::int64_t> hypothesis_sj_strand;
     std::vector<std::int64_t> hypothesis_intron_offsets{0};
     std::vector<std::int64_t> hypothesis_introns;
-    std::vector<std::int64_t> hypothesis_t_offsets{0};
-    std::vector<std::int64_t> hypothesis_t;
 
     std::size_t n_records()    const noexcept { return placement_offsets.size() - 1; }
     std::size_t n_placements() const noexcept { return start.size(); }
@@ -414,9 +409,6 @@ struct DepositCounters {
     //: set-level bank. The identity is deposited + deferred_undetermined_gap + deferred_multiple_placements
     //: + dropped_* == offered, `offered` counting FRAGMENTS (one offer per read name), never hits.
     std::int64_t deferred_multiple_placements = 0;
-    std::int64_t unannotated_introns    = 0;  // observed introns with no annotated sj
-    std::int64_t contradictory_sj_strand = 0;  // the mates' motif tags disagreed; no splice trusted
-    std::int64_t introns_absorbed       = 0;  // overlapping or abutting introns merged away
 
     void merge_from(const DepositCounters& other) noexcept;
 };
@@ -469,11 +461,9 @@ public:
 
     /// One uint32 per region counting fragments whose FIRST COVERED BASE lies in it.
     ///
-    /// ⭐ The accumulator's ledger invariant: `sum(region_start_count) == sum(region_end_count) ==
-    /// deposited` (both strand columns), checkable against a number the scanner knows independently.
+    /// ⭐ The accumulator's ledger invariant: `sum(region_start_count) == deposited` (both strand
+    /// columns), checkable against a number the scanner knows independently.
     const std::uint32_t* region_start_count_data() const noexcept { return region_start_count_.data(); }
-    const std::uint32_t* region_end_count_data() const noexcept { return region_end_count_.data(); }
-    const std::uint32_t* region_span_count_data() const noexcept { return region_span_count_.data(); }
 
     /// Length histograms, pool-major: pool p occupies [p*(max_length+1), (p+1)*(max_length+1)), binned
     /// at L.
@@ -577,8 +567,7 @@ private:
                                    const GapHypothesis& hypothesis,
                                    std::int64_t start,
                                    std::int64_t end,
-                                   DepositScratch& scratch,
-                                   std::int64_t* absorbed) const;
+                                   DepositScratch& scratch) const;
 
     /// ⭐ The umbrella census, at its ONE site. Called only when the fragment had a question to answer,
     /// i.e. at least one hypothesis was not the unspliced one.
@@ -603,14 +592,10 @@ private:
     std::vector<Region>          regions_;             // n_region_bounds - 1
     std::vector<Boundary> boundaries_;            // n_region_bounds - 2, the interior boundaries
     std::vector<SpliceJunction>  sj_;         // one per annotated sj on this reference
-    // The START/END/SPAN region banks — flat [n_regions * kNStrandColumns], their own
-    // arrays so Region keeps its static_assert'd 8 B. START/END: the path's first/last COVERED base,
-    // by align strand — opportunity ℓ for every fragment length, wall-blind only at the template's
-    // downstream/upstream end respectively. SPAN: regions STRICTLY covered by one segment, neither
-    // path endpoint inside — opportunity (w−ℓ−1)₊, a pmf functional per component BY DESIGN.
+    // The START region bank — flat [n_regions * kNStrandColumns], its own array so Region keeps its
+    // static_assert'd 8 B: the path's first COVERED base, by align strand — opportunity ℓ for every
+    // fragment length, wall-blind only at the template's downstream end.
     std::vector<std::uint32_t> region_start_count_;
-    std::vector<std::uint32_t> region_end_count_;
-    std::vector<std::uint32_t> region_span_count_;
 
     std::vector<std::int32_t>  sj_offsets_;        // n_region_bounds + 1, CSR over the donor region_bound index
     std::vector<std::int32_t>  sj_boundary_right_;   // n_sj

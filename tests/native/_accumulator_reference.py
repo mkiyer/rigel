@@ -121,7 +121,7 @@ class DepositOutcome(enum.Enum):
     #: Two or more hypotheses survived, so the path is not determined — and therefore neither is
     #: ``L``, its ``1/A(w)`` deposit, the pool bin, or the set of boundaries the fragment crosses.
     #: It deposits on nothing and goes to the deferred queue, where the second pass resolves it with
-    #: the fragment-length distribution and the transcript abundances.
+    #: the fragment-length distribution and the pass-one tally.
     #:
     #: Not "dropped". The fragment is retained in full and the conservation identity is
     #: ``deposited + deferred + dropped_* == offered``. The qc key says ``deferred`` for that reason: a
@@ -156,12 +156,9 @@ class GapHypothesis:
 
     #: The implied introns as ``(start, end)`` pairs. Empty ⇒ the genomic hypothesis.
     introns: tuple[tuple[int, int], ...] = ()
-    #: The strand the supporting transcripts imply. An INFERENCE, and it is only used when no motif was
-    #: sequenced anywhere on the fragment — an observed motif always wins.
+    #: The strand of the transcripts that imply this path. An INFERENCE, and it is only used when no
+    #: motif was sequenced anywhere on the fragment — an observed motif always wins.
     sj_strand: int = Strand.NONE
-    #: Which candidate transcripts imply this path. The second pass weights hypotheses by their
-    #: abundance, so it needs the ids; the first pass never reads them.
-    supporting_t_inds: tuple[int, ...] = ()
 
     @property
     def is_unspliced(self) -> bool:
@@ -246,7 +243,7 @@ class Placement:
             self.align_strand,
             self.sj_strand,
             self.observed_introns,
-            tuple((p.introns, p.sj_strand, p.supporting_t_inds) for p in self.hypotheses),
+            tuple((p.introns, p.sj_strand) for p in self.hypotheses),
         )
 
 
@@ -440,8 +437,8 @@ def _exact_region_bound(region_bounds, region_bound_offsets, ref: int, position:
     return k if k < last and int(region_bounds[k]) == position else -1
 
 
-def _normalise_introns(introns, start: int, end: int) -> tuple[list[tuple[int, int]], int]:
-    """The introns as a sorted, DISJOINT set clipped to ``[start, end)``, and how many were absorbed.
+def _normalise_introns(introns, start: int, end: int) -> list[tuple[int, int]]:
+    """The introns as a sorted, DISJOINT set clipped to ``[start, end)``.
 
     The caller is contracted to hand over a clean set, but a real BAM does not always allow it: the
     splice-motif strand tag is read once per RECORD (``XS`` for STAR, ``ts`` for minimap2 — the scanner
@@ -453,12 +450,10 @@ def _normalise_introns(introns, start: int, end: int) -> tuple[list[tuple[int, i
     one quantity is how the same number ends up different in two places; with an overlap they disagreed
     by up to 1.5×, and a wide overlap drove ``L`` negative so a good fragment was silently discarded.
     """
-    absorbed = 0
     merged: list[tuple[int, int]] = []
     for raw_start, raw_end in sorted((int(s), int(e)) for s, e in introns):
         intron_start, intron_end = max(raw_start, start), min(raw_end, end)
         if intron_end <= intron_start:  # zero-length, or entirely outside the fragment
-            absorbed += 1
             continue
         # Overlapping OR ABUTTING introns are both malformed and both merge. Abutting means a
         # zero-length exon between them, which is physically impossible — there is no molecular
@@ -469,10 +464,9 @@ def _normalise_introns(introns, start: int, end: int) -> tuple[list[tuple[int, i
         if merged and intron_start <= merged[-1][1]:
             previous_start, previous_end = merged[-1]
             merged[-1] = (previous_start, max(previous_end, intron_end))
-            absorbed += 1
             continue
         merged.append((intron_start, intron_end))
-    return merged, absorbed
+    return merged
 
 
 def _segments(start: int, end: int, introns) -> list[tuple[int, int]]:
@@ -525,16 +519,6 @@ class Tally:
     #: fragment, so ``Σ (both columns) == qc.deposited`` — THE ledger invariant. Opportunity ``ℓ``
     #: for every fragment length; wall-blind only at the template's DOWNSTREAM end.
     region_start_count: np.ndarray
-    #: uint32[n_regions, 2] — the MIRROR: the path's LAST covered base, by align strand. Its own
-    #: ledger: ``Σ == qc.deposited``. Wall-blind only at the template's UPSTREAM end.
-    region_end_count: np.ndarray
-    #: uint32[n_regions, 2] — regions STRICTLY SPANNED: every base covered by ONE segment and
-    #: neither path endpoint inside. Opportunity ``(w − ℓ − 1)₊`` — a pmf functional per component
-    #: BY DESIGN (the length-solve channel's input; TRAPS: a-cancellation-is-conditional-on-its-support
-    #: applies to it as it does to `contained`). A region a spliced path JUMPS over is not covered and
-    #: books nothing. A CONTAINED fragment books start and end in one region and never span, so
-    #: ``contained ≤ min(start, end)`` per region, and ``span ≡ 0`` wherever ``ℓ ≥ w_max − 1``.
-    region_span_count: np.ndarray
     boundary_unspliced_count: np.ndarray  # uint32[n_boundaries, 2]
     boundary_unspliced_inv_length_sum: np.ndarray  # float64[n_boundaries] — ONE column
     #: float64[n_boundaries] — THE CONSERVED MASS. See :meth:`Accumulator.deposit`. A COUNT and a MASS
@@ -634,8 +618,6 @@ class Tally:
         return cls(
             region_contained_count=counts(n_regions),
             region_start_count=counts(n_regions),
-            region_end_count=counts(n_regions),
-            region_span_count=counts(n_regions),
             boundary_unspliced_count=counts(n_boundaries),
             boundary_unspliced_inv_length_sum=fraction(n_boundaries),
             boundary_unspliced_mass=fraction(n_boundaries),
@@ -647,12 +629,7 @@ class Tally:
             sj_mass=np.zeros((n_sj, N_STRAND_COLUMNS), np.float64),
             pool_lengths=np.zeros((len(FragmentPool), max_length + 1), np.int64),
             deposited_lengths=np.zeros(max_length + 1, np.uint32),
-            qc={outcome.value: 0 for outcome in DepositOutcome}
-            | {
-                "unannotated_introns": 0,
-                "contradictory_sj_strand": 0,
-                "introns_absorbed": 0,
-            },
+            qc={outcome.value: 0 for outcome in DepositOutcome},
             deferred=[],
             gap_resolution={cls.value: 0 for cls in GapResolution},
         )
@@ -676,11 +653,12 @@ class Tally:
         one definition rather than two implementations that have to be argued equal. The parity gate
         compares this.
 
-        Three nested variable-length levels — fragments hold placements, placements hold hypotheses,
-        hypotheses hold introns — so there are three offset arrays. Offsets are cumulative and always
-        start at 0, so ``n_fragments`` is ``len(placement_offsets) - 1`` and an empty deferred queue is
-        ``[0]``, never ``[]``. A gap-held unique mapper is a record with one placement, and every
-        per-placement array carries exactly what the per-fragment array carried before placements existed.
+        Three nested variable-length levels — fragments hold placements, placements hold observed introns
+        and hypotheses, hypotheses hold implied introns — so there are four offset arrays. Offsets are
+        cumulative and always start at 0, so ``n_fragments`` is ``len(placement_offsets) - 1`` and an empty
+        deferred queue is ``[0]``, never ``[]``. A gap-held unique mapper is a record with one placement,
+        and every per-placement array carries exactly what the per-fragment array carried before
+        placements existed.
 
         SORTED, and that is what makes it bit-identical at any worker count. Every other bank is a
         sum, whose per-worker merge is exact for the uint32 counts and within a derived tolerance
@@ -701,8 +679,6 @@ class Tally:
             "hypothesis_sj_strand": [],
             "hypothesis_intron_offsets": [0],
             "hypothesis_introns": [],
-            "hypothesis_t_offsets": [0],
-            "hypothesis_t": [],
         }
         for frag in ordered:
             for placement in frag.placements:
@@ -716,8 +692,6 @@ class Tally:
                     for start, end in path.introns:
                         out["hypothesis_introns"] += [start, end]
                     out["hypothesis_intron_offsets"].append(len(out["hypothesis_introns"]) // 2)
-                    out["hypothesis_t"] += list(path.supporting_t_inds)
-                    out["hypothesis_t_offsets"].append(len(out["hypothesis_t"]))
                 out["hypothesis_offsets"].append(len(out["hypothesis_sj_strand"]))
             out["placement_offsets"].append(len(out["ref"]))
         return {name: np.asarray(values, dtype=np.int64) for name, values in out.items()}
@@ -772,7 +746,7 @@ class Accumulator:
         * exactly one survives → deposit it. The path is determined and nothing is in doubt;
         * two or more survive → :attr:`DepositOutcome.DEFERRED`, and the fragment goes WHOLE into
           :attr:`Tally.deferred` for the second pass, which has the fragment-length distribution and the
-          transcript abundances to discriminate with.
+          pass-one tally to discriminate with.
 
         The decision belongs here rather than in the caller, because a caller that decided it would have
         to collapse the answer before handing it over — and the outcome is reported from here anyway.
@@ -968,8 +942,8 @@ class Accumulator:
         return column, region_bounds, start, end
 
     def _arbitrate(self, start, end, observed_introns, hypotheses):
-        """Every hypothesis scored ``(hypothesis, L, cut introns, absorbed)``, and the survivors of the
-        one filter ``L <= max_fragment_length`` — all of them when the filter would empty the set."""
+        """Every hypothesis scored ``(hypothesis, L, cut introns)``, and the survivors of the one
+        filter ``L <= max_fragment_length`` — all of them when the filter would empty the set."""
         scored = [
             (hypothesis, *self._hypothesis_length(start, end, observed_introns, hypothesis))
             for hypothesis in hypotheses
@@ -997,14 +971,13 @@ class Accumulator:
         # `cut_introns` and not `introns`: the introns actually removed from the molecule —
         # the observed ones UNIONED with the surviving hypothesis's implied ones, normalised and clipped.
         # Naming them apart from `observed_introns` is what stops the two being confused downstream.
-        hypothesis, length, cut_introns, absorbed = survivor
+        hypothesis, length, cut_introns = survivor
         segments = _segments(start, end, cut_introns)
         p = self.partition
         if length <= 0:
             return self._reject(DepositOutcome.EMPTY)
         if length > self.max_fragment_length:
             return self._reject(DepositOutcome.TOO_LONG)
-        self.tally.qc["introns_absorbed"] += absorbed
         # An implied strand is used ONLY when no motif was sequenced anywhere on this fragment. An
         # observed motif is evidence; an implied strand is an inference from the annotation, and mixing
         # an inference into an observation corrupts the observation.
@@ -1015,21 +988,18 @@ class Accumulator:
         # A contradictory motif strand disqualifies the whole fragment's splices, so it is checked once
         # here rather than per intron: `sj_strand` is the OR of the per-record strand-tag values, so
         # AMBIGUOUS means the mates disagreed about the same molecule. That is contradictory EVIDENCE,
-        # not missing evidence, and it is counted on its own denominator — folding it into
-        # `unannotated_introns` would poison the one metric whose job is measuring annotation coverage.
+        # not missing evidence, and no splice is trusted.
         # Resolved PER INTRON POSITION, with -1 where the annotation has no such sj, because
         # the conserved mass needs to know WHICH of a block's two ends is a sj boundary. A
         # filtered list cannot answer that — dropping the unannotated entries destroys the alignment
         # between intron `i` and the gap between blocks `i` and `i+1`.
         if sj_strand == Strand.AMBIGUOUS:
             sj_id_at_gap: list[int] = [-1] * len(cut_introns)
-            self.tally.qc["contradictory_sj_strand"] += 1
         else:
             sj_id_at_gap = [
                 self._sj_edge_id(ref, intron_start, intron_end, sj_strand)
                 for intron_start, intron_end in cut_introns
             ]
-            self.tally.qc["unannotated_introns"] += sum(1 for jid in sj_id_at_gap if jid < 0)
         sj_ids = [jid for jid in sj_id_at_gap if jid >= 0]
         spliced = bool(sj_ids)
 
@@ -1045,9 +1015,7 @@ class Accumulator:
             int(p.ref_boundary_offsets[ref]),
         )
         r_first = self._local_region(region_bounds, first_base)
-        r_last = self._local_region(region_bounds, last_base)
         t.region_start_count[region_base + r_first, column] += 1
-        t.region_end_count[region_base + r_last, column] += 1
         # The unconditional length histogram, incremented HERE — beside the start count and the
         # DEPOSITED counter — so all three describe one population by construction rather than by
         # agreement (TRAPS: a-purity-filter-is-a-length-filter). ``length`` is already clipped to the
@@ -1057,10 +1025,7 @@ class Accumulator:
 
         # ── crossings, per contiguous SEGMENT of the path ─────────────────────────────────────────
         # A boundary is crossed iff it lies strictly inside a segment, so per segment the crossed
-        # boundaries are a contiguous index range and no container is needed. A region is SPANNED iff
-        # ONE segment crosses both of its boundaries — not merely "both boundaries crossed", which would
-        # count a region the fragment JUMPS OVER, whose two boundaries are touched by the two flanking
-        # segments from opposite sides.
+        # boundaries are a contiguous index range and no container is needed.
         # TWO channels on the spliced bank, FOUR on the unspliced one, and the asymmetry is the design
         # rather than an omission. A spliced crossing is certified RNA: nothing deconvolves it, so its
         # length moments have no consumer and are not stored. The unspliced bank is the mixture, and the
@@ -1079,16 +1044,6 @@ class Accumulator:
                     t.boundary_unspliced_inv_length_sum[boundary_base + boundary - 1] += (
                         inv_boundary
                     )
-            # ── STRICT SPAN: regions this segment covers whole, excluding the path's own endpoint
-            # regions. `side="left"`/`- 1` rather than the crossing loop's bounds: a NON-FIRST segment
-            # starts exactly ON a region bound (its acceptor), and the region beginning there IS fully
-            # covered — the crossing window would miss it (TRAPS: could-the-arm-have-fired).
-            f2 = int(np.searchsorted(region_bounds, seg_start, side="left"))
-            l2 = int(np.searchsorted(region_bounds, seg_end, side="right")) - 1
-            for r_loc in range(f2, l2):
-                if r_loc == r_first or r_loc == r_last:
-                    continue
-                t.region_span_count[region_base + r_loc, column] += 1
             # ── THE CONSERVED MASS, per SLICE, over ONE BOUNDARY SET ───────────────────────────────
             # The crossed bounds split this block into `last - first + 1` slices. Each slice's
             # `slice_len / length` is shared EQUALLY between the objects that bound it, so every bounded
@@ -1291,15 +1246,15 @@ class Accumulator:
 
     @staticmethod
     def _hypothesis_length(start, end, observed, path: GapHypothesis):
-        """``(L, normalised introns, absorbed)`` for one hypothesis.
+        """``(L, normalised introns)`` for one hypothesis.
 
         ONE definition of ``L``, and one code path to it, whether the hypothesis wins or is only being
         scored for the filter. The observed introns and the implied ones are UNIONED — they are disjoint
         by construction (the enumeration never searches a gap the CIGAR already explained) so this is a
         union and not a merge, and ``_normalise_introns`` sorts and clips it either way.
         """
-        introns, absorbed = _normalise_introns(tuple(observed) + path.introns, start, end)
-        return sum(b - a for a, b in _segments(start, end, introns)), introns, absorbed
+        introns = _normalise_introns(tuple(observed) + path.introns, start, end)
+        return sum(b - a for a, b in _segments(start, end, introns)), introns
 
     def _record_gap_resolution(self, hypotheses, survivors) -> None:
         """The umbrella census — the ONE site, so the subclasses cannot drift out of sync.
@@ -1353,9 +1308,8 @@ class Accumulator:
                 continue
             # The strand filter applies only when the motif strand is DEFINITE. AMBIGUOUS means "no
             # strand information", not "a strand that matches nothing"; reading it as the latter
-            # silently demotes an annotated spliced fragment to an unspliced deposit, credits
-            # `unannotated_introns` (poisoning the one metric that measures annotation coverage), and
-            # drops it from the RNA pool the length model is fitted from.
+            # silently demotes an annotated spliced fragment to an unspliced deposit and drops it from
+            # the RNA pool the length model is fitted from.
             #
             # The filter exists only to separate two sj sharing a coordinate pair, and no human sj
             # coordinate pair is annotated on both strands, so it can only ever lose a match and never

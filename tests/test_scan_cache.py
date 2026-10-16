@@ -25,6 +25,7 @@ import numpy as np
 import pytest
 
 from rigel import scan_payload
+from rigel.calibration.splice_graph import EDGE_KIND_CONTIGUOUS, EDGE_KIND_SJ
 from rigel.scan_cache import (
     REACH_COLUMNS,
     ScanCacheKeyError,
@@ -587,21 +588,42 @@ class TestTheKeyRefusesAMovedIndex:
             read_scan_cache(cache_dir, index, scan)
 
     @pytest.mark.parametrize("column", REACH_COLUMNS)
-    def test_the_reach_digest_depends_on_EVERY_reach_column(self, scanned, column):
-        """PERTURBATION: teeth on the digest itself, one column at a time.
+    def test_the_reach_digest_depends_on_EVERY_reach_column_of_a_JUNCTION(self, scanned, column):
+        """PERTURBATION: teeth on the digest itself, one column at a time, on a splice-junction row —
+        the rows `build_sj_geometry_arrays` reads.
 
         Perturbing a single column lets a digest that covers only that strand's pair pass, leaving half
         the reach unguarded. Per strand and per side, each column must move the digest.
         """
         index = scanned[0]
         before = reach_digest(index)
+        row = index.edges_df.index[index.edges_df["kind"] == EDGE_KIND_SJ][0]
         original = index.edges_df[column].copy()
         try:
-            index.edges_df.loc[index.edges_df.index[0], column] = int(original.iloc[0]) + 1
+            index.edges_df.loc[row, column] = int(original.loc[row]) + 1
             assert reach_digest(index) != before, f"{column} does not reach the digest"
         finally:
             index.edges_df[column] = original
         assert reach_digest(index) == before
+
+    @pytest.mark.parametrize("column", REACH_COLUMNS)
+    def test_a_CONTIGUOUS_boundary_reach_is_not_part_of_the_key(self, scanned, column):
+        """Nothing reads a contiguous boundary's reach: the one reader of a reach,
+        `build_sj_geometry_arrays`, takes the splice-junction rows. Moving every contiguous row's value
+        must leave the digest where it was, because a key over values no consumer sees refuses a good
+        cache."""
+        index = scanned[0]
+        before = reach_digest(index)
+        contiguous = index.edges_df["kind"] == EDGE_KIND_CONTIGUOUS
+        assert contiguous.any(), "the fixture must have contiguous rows, or this asserts nothing"
+        original = index.edges_df[column].copy()
+        moved = (original[contiguous] + 1).astype(original.dtype)
+        try:
+            index.edges_df.loc[contiguous, column] = moved
+            assert index.edges_df[column].dtype == original.dtype
+            assert reach_digest(index) == before, f"{column} on a contiguous row reaches the digest"
+        finally:
+            index.edges_df[column] = original
 
     def test_a_cache_whose_graph_hash_disagrees_with_the_INDEX_is_refused(self, scanned, tmp_path):
         """Distinct from the manifest-tampering test above, which trips the self-consistency check

@@ -229,19 +229,6 @@ def test_U1b_the_unspliced_control_is_untouched(payload):
     assert _lengths(payload)[L_PURE] == 1
 
 
-def test_the_two_intron_lists_are_DISJOINT_so_the_union_absorbs_nothing(payload):
-    """The union of observed and implied introns is a union, not a merge.
-
-    ``introns_absorbed`` counts introns the accumulator had to normalise away because they overlapped
-    or abutted. The exact-match filter's claim is that the implied list can only hold holes the CIGAR
-    did not explain, so unioning the two lists can never produce an overlap — and this counter is where
-    that claim shows up. It is also what the adapter's sort protects: the de-duplication before the
-    deposit is an adjacent-pair comparison, so an unsorted union would pass a duplicate through to be
-    absorbed here instead of skipped there.
-    """
-    assert payload.qc.introns_absorbed == 0
-
-
 # ── U3 · the near-match trap ───────────────────────────────────────────────────────────────────────
 
 
@@ -286,9 +273,9 @@ def test_U5_a_mixed_fragment_with_disagreeing_candidates_is_DEFERRED_and_HELD(pa
     difference in ``L`` for one molecule. There is no answer to deposit, and picking either is picking a
     fragment length at random.
 
-    Not "dropped". The fragment is retained in full, with both paths and the transcript that supports
-    each, so the second pass can score them against a fragment-length distribution the first pass did not
-    have. A counter alone would size the population; the bank is what makes it recoverable.
+    Not "dropped". The fragment is retained in full, with both paths, so the second pass can score them
+    against a fragment-length distribution the first pass did not have. A counter alone would size the
+    population; the bank is what makes it recoverable.
     """
     (record,) = [
         i for i in range(payload.deferred.n_fragments) if int(payload.deferred.start[i]) == 66_100
@@ -308,18 +295,6 @@ def test_U5_a_mixed_fragment_with_disagreeing_candidates_is_DEFERRED_and_HELD(pa
     assert payload.gap_resolution.gap_deferred_rna_or_gdna == 1
     assert payload.gap_resolution.gap_deferred_both == 0
     assert payload.gap_resolution.deferred == payload.qc.deferred_undetermined_gap == _DEFERRED
-    # Every supporting transcript is recorded: the second pass weights a path by their abundance.
-    supporting = [
-        payload.deferred.supporting_t_of(h).tolist()
-        for h in range(
-            int(payload.deferred.hypothesis_offsets[record]),
-            int(payload.deferred.hypothesis_offsets[record + 1]),
-        )
-    ]
-    assert all(len(t) == 1 for t in supporting), (
-        f"each path has exactly one supporter here: {supporting}"
-    )
-    assert supporting[0] != supporting[1], "and they are DIFFERENT transcripts"
 
 
 def test_EVERY_HELD_RECORD_IS_STAMPED_WITH_ITS_OWN_REFERENCE(payload):

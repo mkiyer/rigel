@@ -489,7 +489,7 @@ byte-identity to it; where it and a document disagree, the reference wins.
 populations therefore do not all carry the same channels, and that asymmetry is the design:
 
     region_contained    count
-    region (per path)   start_count[2]  end_count[2]  span_count[2]
+    region (per path)   start_count[2]
     boundary_unspliced  count  inv_length_sum       mass
     boundary_spliced    count                       mass      certified RNA — nothing deconvolves it
     sj                  count  inv_length_sum       mass[2]   inv_length_sum is LIVE in second_pass
@@ -500,16 +500,14 @@ populations therefore do not all carry the same channels, and that asymmetry is 
 | `inv_length_sum` | `Σ 1/A(w)` (float64) | the deposit cancels its opportunity on its own support (`E[Σ] = ρ·P(A>0)`, `EQUATIONS.md` §2): the BOUNDARY/sj form `1/(w−1)` has `P(w≥2) = 1` on any real library — an exact model-free density |
 | `mass` | `Σ (slice/L)/n_bounds` (float64) | the conserved fragment count — sums to one per fragment, where `count` is `+1` on each of `max(K,1)` objects. A SJ BOUNDARY is a boundary exactly like a contiguous one, so a spliced fragment shares its one unit across every object it crosses, sj included (`EQUATIONS.md` §3b) |
 
-**The start/end/span region banks** (owner's taxonomy, 2026-08-21). Every accepted path books its first
-covered base (`region_start_count`), its last (`region_end_count`), and every region it strictly spans
-(`region_span_count`), each by genome strand. START and END have opportunity `ℓ` for every fragment
-length — the composition-free TOTAL at a REGION — and are wall-blind only at one end each
-(`EQUATIONS.md` §2.3b); SPAN's opportunity is `(w−ℓ−1)₊`, a per-component pmf functional. START is the
-ledger; END and SPAN are read by nothing (`ISSUES: hygiene-ledger` (b)). The ledger closes twice over:
-`ΣS = ΣE = qc.deposited`; per region `contained ≤ min(S, E)`.
+**The start region bank** (owner's taxonomy, 2026-08-21). Every accepted path books its first covered
+base (`region_start_count`), by genome strand. START has opportunity `ℓ` for every fragment length — the
+composition-free TOTAL at a REGION — and is wall-blind only at the template's genomic-high end
+(`EQUATIONS.md` §2.3b). START is the ledger, checked where the payload is built: `ΣS = qc.deposited`; per
+region `contained ≤ S`.
 
 **What the banks do not carry, and why.** No spliced fragment touches the region CONTAINED bank (it books
-START, END and SPAN like any path): both endpoints of an annotated intron are region bounds, so a spliced
+START like any path): both endpoints of an annotated intron are region bounds, so a spliced
 fragment can never be *contained*. No length-sum bank exists: at `mu_g = mu_r` a `Σ L` row is proportional
 to the count row and adds no tilt (`TRAPS: equal-lengths-carry-no-composition`). The counts keep both
 genome-strand columns (the strand model is a Beta-Binomial over them); the inv-length sums and the boundary

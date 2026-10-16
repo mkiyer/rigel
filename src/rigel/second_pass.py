@@ -890,14 +890,10 @@ class _Span:
     """The shape ``Accumulator.length_under`` reads a hypothesis in.
 
     Duck-typed on purpose, matching the specification's ``GapHypothesis`` attribute names: the binding
-    reads ``introns`` / ``sj_strand`` / ``supporting_t_inds`` off whatever it is handed, so the parity gate
-    can pass the reference's own objects. A second tuple convention here would be a second representation
-    to keep in step.
+    reads ``introns`` / ``sj_strand`` off whatever it is handed, so the parity gate can pass the
+    reference's own objects. A second tuple convention here would be a second representation to keep in
+    step.
     """
 
     introns: list
     sj_strand: int
-
-    @property
-    def supporting_t_inds(self):  # the first pass never reads these, and neither does the scorer
-        return ()

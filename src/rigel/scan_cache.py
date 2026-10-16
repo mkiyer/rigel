@@ -39,10 +39,10 @@ THE KEY NEEDS FIVE PARTS, AND THE CACHE NAMES ITS BAM
   keys moves when either changes, so without it a cache written before an accumulator change is accepted
   and then fails deep inside the loader with a bare ``KeyError``, and one written before a strand-model
   field existed loads that field at its default.
-* a REACH digest. ``reach`` is consumed by calibration and covered by neither ``partition_hash`` nor
-  ``graph_hash`` — correctly, since neither the scan nor the accumulator reads it — so a reach-blind
-  key would verify clean against an index rebuild that moved the splice-junction reaches while both
-  existing hashes stayed byte-identical.
+* a REACH digest. The splice-junction reaches are consumed by calibration and covered by neither
+  ``partition_hash`` nor ``graph_hash`` — correctly, since neither the scan nor the accumulator reads
+  them — so a reach-blind key would verify clean against an index rebuild that moved the splice-junction
+  reaches while both existing hashes stayed byte-identical.
 * the scan config, because two scans of one BAM under different settings are different tallies.
 * the SPLICE BLACKLIST the scan applied. The scan strips every junction it names and holds back a fragment whose
   every junction it rejects, so two blacklists make two tallies, and none of the four parts above sees it.
@@ -113,21 +113,29 @@ def _digest(*parts: bytes) -> str:
 
 
 def reach_digest(index: "TranscriptIndex") -> str:
-    """Hash the boundary reach columns — the part of the index calibration reads and no other key covers.
+    """Hash the splice-junction rows' reach columns — the part of the index calibration reads and no other
+    key covers.
+
+    The sj rows only: `build_sj_geometry_arrays`, the one reader of a reach, reads those. The contiguous rows
+    carry reaches too and nothing reads them, so hashing them would refuse a good cache over values no
+    consumer sees.
 
     Computed on demand, never stored beside the index. It is stored in the CACHE's manifest, which is a
     different thing: the cache is describing an external artifact it cannot recompute, exactly as
     `index.source_record` does for the FASTA and the GTF.
     """
+    from .calibration.splice_graph import EDGE_KIND_SJ  # noqa: PLC0415
+
     boundaries = index.edges_df
     if boundaries is None:
         raise ScanCacheKeyError("index has no edges_df loaded; cannot compute the reach digest")
     missing = [column for column in REACH_COLUMNS if column not in boundaries.columns]
     if missing:
         raise ScanCacheKeyError(f"edges.feather is missing reach columns {missing}")
+    sj_rows = boundaries["kind"].to_numpy() == EDGE_KIND_SJ
     parts: list[bytes] = []
     for column in REACH_COLUMNS:
-        values = np.ascontiguousarray(boundaries[column].to_numpy())
+        values = np.ascontiguousarray(boundaries[column].to_numpy()[sj_rows])
         parts.append(column.encode())
         parts.append(str(values.dtype).encode())
         parts.append(values.tobytes())
@@ -247,8 +255,8 @@ def payload_schema_digest() -> str:
     rather than as a stale cache. A strand-model field fails quieter still: every one has a default, so
     a cache written before it existed would load it at that default.
 
-    It recurses because the banks nest: ``DeferredFragments`` puts thirteen array names inside one field
-    and every one of them is an ``.npz`` key, and ``DrainQC`` nests a ``GapCensus`` inside itself. A
+    It recurses because the banks nest: ``DeferredFragments`` puts the held-record bank's arrays inside one
+    field and every one of them is an ``.npz`` key, and ``DrainQC`` nests a ``GapCensus`` inside itself. A
     top-level walk would leave a renamed field inside either one invisible to the key.
     :func:`_schema_names` is fully recursive and looks through ``Optional``.
 

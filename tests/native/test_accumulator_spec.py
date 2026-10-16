@@ -233,7 +233,6 @@ def test_an_UNANNOTATED_intron_credits_no_sj_and_nothing_across_the_gap():
         "block [50,200) crosses the boundary at 100"
     )
     assert int(t.boundary_unspliced_count[_boundary(0, 3), 0]) == 0, "the swallowed boundary at 201"
-    assert t.qc["unannotated_introns"] == 1
 
 
 def test_a_fragment_straddling_two_regions_without_crossing_a_boundary_is_NOT_contained():
@@ -257,7 +256,6 @@ def test_an_unannotated_intron_inside_one_region_is_a_contained_unspliced_fragme
     t = acc.tally
     assert int(t.region_contained_count[_region(0, 3), 0]) == 1
     assert int(t.deposited_lengths[180 - 40]) == 1
-    assert t.qc["unannotated_introns"] == 1
 
 
 def test_opposite_strand_sj_at_the_same_coordinates_are_DISTINCT_boundaries():
@@ -309,7 +307,6 @@ def test_a_fragment_using_TWO_sj_credits_BOTH():
     t = acc.tally
     assert int(t.sj_count[0, STRAND_COLUMNS[Strand.POS]]) == 1
     assert int(t.sj_count[1, STRAND_COLUMNS[Strand.POS]]) == 1
-    assert t.qc["introns_absorbed"] == 0, "a real exon separates them; nothing is malformed"
 
 
 # ---------------------------------------------------------------------------
@@ -657,18 +654,18 @@ def test_the_deposit_is_independent_of_the_ORDER_fragments_arrive_in():
 
 
 @pytest.mark.parametrize(
-    "introns,expected_length,expected_crossings,expected_absorbed",
+    "introns,expected_length,expected_crossings",
     [
-        ([(210, 260), (240, 300)], 360, 4, 1),  # overlapping
-        ([(200, 400), (250, 300)], 250, 1, 1),  # nested
-        ([(150, 480), (160, 470)], 120, 1, 1),  # wide overlap: the naive formula went NEGATIVE
-        ([(210, 260), (210, 260)], 400, 4, 1),  # duplicated, as two disagreeing mates produce
-        ([(300, 300)], 450, 4, 1),  # zero length
-        ([(210, 260), (300, 340)], 360, 4, 0),  # well formed: nothing absorbed
+        ([(210, 260), (240, 300)], 360, 4),  # overlapping
+        ([(200, 400), (250, 300)], 250, 1),  # nested
+        ([(150, 480), (160, 470)], 120, 1),  # wide overlap: the naive formula went NEGATIVE
+        ([(210, 260), (210, 260)], 400, 4),  # duplicated, as two disagreeing mates produce
+        ([(300, 300)], 450, 4),  # zero length
+        ([(210, 260), (300, 340)], 360, 4),  # well formed: nothing merged
     ],
 )
 def test_L_is_the_total_of_the_path_segments_even_when_the_intron_list_is_malformed(
-    introns, expected_length, expected_crossings, expected_absorbed
+    introns, expected_length, expected_crossings
 ):
     """ONE definition of ``L``: the total length of the path's segments.
 
@@ -685,7 +682,6 @@ def test_L_is_the_total_of_the_path_segments_even_when_the_intron_list_is_malfor
     acc = _acc(max_fragment_length=10_000)
     assert acc.deposit(0, 50, 500, observed_introns=introns) is DepositOutcome.DEPOSITED
     t = acc.tally
-    assert t.qc["introns_absorbed"] == expected_absorbed
     crossings = int(t.boundary_unspliced_count.sum())
     assert crossings == expected_crossings
     assert close(
@@ -713,7 +709,6 @@ def test_a_duplicated_intron_credits_its_sj_ONCE():
     acc = _acc(sj=[SJ])
     acc.deposit(0, 150, 950, observed_introns=[(201, 900), (201, 900)], sj_strand=Strand.POS)
     assert int(acc.tally.sj_count[0, 0]) == 1
-    assert acc.tally.qc["introns_absorbed"] == 1
 
 
 def test_ABUTTING_introns_are_MALFORMED_and_merge():
@@ -722,11 +717,10 @@ def test_ABUTTING_introns_are_MALFORMED_and_merge():
     molecule can never legitimately use both, and the pair is an alignment artifact.
 
     The index cannot produce it either: a zero-length exon is dropped when the exon arrays are built,
-    which fuses its two flanking introns into one. Merged here, and counted."""
+    which fuses its two flanking introns into one. Merged here."""
     acc = _acc(sj=[(0, 201, 400, Strand.POS), (0, 400, 900, Strand.POS)])
     acc.deposit(0, 150, 950, observed_introns=[(201, 400), (400, 900)], sj_strand=Strand.POS)
     t = acc.tally
-    assert t.qc["introns_absorbed"] == 1
     assert t.sj_count.sum() == 0, "the merged span 201->900 is not an annotated sj"
 
 
@@ -849,7 +843,7 @@ def test_TWO_SURVIVING_HYPOTHESES_deposit_on_NOTHING_and_are_BUFFERED_WHOLE():
         150,
         950,
         sj_strand=Strand.POS,
-        hypotheses=(GapHypothesis(((201, 900),), supporting_t_inds=(7,)), GapHypothesis()),
+        hypotheses=(GapHypothesis(((201, 900),)), GapHypothesis()),
     )
     assert outcome is DepositOutcome.DEFERRED
     t = acc.tally
@@ -866,12 +860,11 @@ def test_TWO_SURVIVING_HYPOTHESES_deposit_on_NOTHING_and_are_BUFFERED_WHOLE():
         assert int(getattr(t, name).sum()) == 0, f"{name} must be untouched"
 
     # RETAINED WHOLE, and with every hypothesis — the second pass cannot choose between answers it
-    # was not given, and it needs the supporting transcripts to weight them by abundance.
+    # was not given.
     assert len(t.deferred) == 1
     held = t.deferred[0].placements[0]
     assert (held.ref, held.start, held.end) == (0, 150, 950)
     assert {path.introns for path in held.hypotheses} == {((201, 900),), ()}
-    assert held.hypotheses[0].supporting_t_inds == (7,)
     # The genomic path competes against exactly one spliced path: the open question is RNA or gDNA.
     assert t.gap_resolution["gap_deferred_rna_or_gdna"] == 1
 
@@ -987,7 +980,6 @@ def test_a_MISSING_sj_strand_MATCHES_on_coordinates_alone():
     acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.NONE)
     t = acc.tally
     assert int(t.sj_count[0, STRAND_COLUMNS[Strand.POS]]) == 1
-    assert t.qc["unannotated_introns"] == 0
     assert int(t.pool_lengths[FragmentPool.RNA_SPLICED].sum()) == 1, "certified RNA"
 
 
@@ -1000,10 +992,6 @@ def test_an_AMBIGUOUS_sj_strand_is_CONTRADICTORY_and_credits_NO_sj():
     agreeing in reference orientation, so the splice must not be trusted: no sj is credited and the
     fragment deposits on the unspliced channel, which is the safe direction the design already takes
     for unannotated sj.
-
-    It must NOT be counted as an unannotated intron. That counter's whole purpose is measuring
-    annotation coverage, so feeding it alignment disagreements makes the metric report a stale
-    annotation whenever the aligner is inconsistent. It gets its own denominator.
 
     Reachable without any contrivance: ``collect_implicit_splice_introns`` stamps each PE gap's
     intron with the first matching candidate transcript's strand and the caller ORs them, so a two-gap
@@ -1021,24 +1009,20 @@ def test_an_AMBIGUOUS_sj_strand_is_CONTRADICTORY_and_credits_NO_sj():
     t = acc.tally
     assert outcome is DepositOutcome.DEPOSITED, "the fragment is real; only its splice is untrusted"
     assert int(t.sj_count.sum()) == 0
-    assert t.qc["contradictory_sj_strand"] == 1
-    assert t.qc["unannotated_introns"] == 0, "the annotation-coverage metric must not be poisoned"
     assert int(t.pool_lengths[FragmentPool.RNA_SPLICED].sum()) == 0, "not certified RNA"
     assert int(t.boundary_unspliced_count.sum()) > 0, "it competes with gDNA, the safe direction"
 
 
 def test_a_DEFINITE_but_WRONG_sj_strand_still_misses():
-    """The third arm, so the rule above cannot be over-applied: a definite strand that disagrees with the
-    sj boundary's own strand is a real disagreement, and it IS an unannotated intron — that coordinate
-    pair is not annotated on the strand it was observed on."""
+    """The third arm: a definite strand that disagrees with the sj boundary's own strand is a real
+    disagreement, and it IS an unannotated intron — that coordinate pair is not annotated on the strand it
+    was observed on."""
     acc = _acc(sj=[SJ])  # (0, 201, 900, POS)
     acc.deposit(
         0, 150, 950, observed_introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG
     )
     t = acc.tally
     assert int(t.sj_count.sum()) == 0
-    assert t.qc["unannotated_introns"] == 1
-    assert t.qc["contradictory_sj_strand"] == 0
     assert int(t.boundary_spliced_count.sum()) == 0, "not certified RNA — the strand disagreed"
 
 
@@ -1084,16 +1068,15 @@ def test_the_density_FIELD_NAME_is_gone_everywhere():
 
 
 # ---------------------------------------------------------------------------
-# the START / END / SPAN region banks — the ledger
+# the START region bank — the ledger
 # ---------------------------------------------------------------------------
-# S and E have opportunity ℓ for EVERY fragment length (the walls are at template ends); V is a pmf
-# functional per component BY DESIGN. A contained fragment is START ∧ END in one region and never
-# SPAN. The ledger closes twice over.
+# START has opportunity ℓ for EVERY fragment length (the walls are at template ends). A contained
+# fragment books its START in its own region.
 
 
-def test_every_deposited_fragment_has_exactly_one_START_and_one_END():
-    """The ledger, twice over: ΣS == ΣE == deposited — summed over BOTH strand columns, across a mixed
-    population (contained, crossing, spliced) on two references."""
+def test_every_deposited_fragment_has_exactly_one_START():
+    """The ledger: ΣS == deposited — summed over BOTH strand columns, across a mixed population
+    (contained, crossing, spliced) on two references."""
     acc = _acc(sj=[SJ])
     assert acc.deposit(0, 120, 180) is DepositOutcome.DEPOSITED  # contained in r0
     assert (
@@ -1105,82 +1088,22 @@ def test_every_deposited_fragment_has_exactly_one_START_and_one_END():
     t = acc.tally
     deposited = t.qc[DepositOutcome.DEPOSITED.value]
     assert int(t.region_start_count.sum()) == deposited
-    assert int(t.region_end_count.sum()) == deposited
 
 
-def test_START_and_END_are_the_PATHS_covered_bases_never_the_extent():
-    """A leading intron means the molecule does not begin at ``start`` — the covered-base rule the
-    start bank keeps must hold for the END bank symmetrically, with a trailing intron."""
-    acc = _acc(sj=[SJ])
-    # extent [150, 950) but the intron (201, 900) makes the path [150,201)+[900,950):
-    # START in the region of base 150, END in the region of base 949 — never the extent's midpoints.
-    acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS)
-    t = acc.tally
-    rb = np.asarray(CHR1_REGION_BOUNDS)
-    r_start = int(np.searchsorted(rb, 150, side="right")) - 1
-    r_end = int(np.searchsorted(rb, 949, side="right")) - 1
-    assert t.region_start_count[r_start].sum() == 1
-    assert t.region_end_count[r_end].sum() == 1
-    assert t.region_end_count[r_start].sum() == 0, "END booked at the extent's start region"
-
-
-def test_a_CONTAINED_fragment_increments_START_and_END_in_its_own_region_and_never_SPAN():
+def test_a_CONTAINED_fragment_increments_START_in_its_own_region():
     acc = _acc()
     acc.deposit(0, 120, 180)  # wholly inside r0 = [100, 200) per CHR1_REGION_BOUNDS
     t = acc.tally
     r = int(np.argmax(t.region_contained_count.sum(axis=1)))
     assert t.region_start_count[r].sum() == 1
-    assert t.region_end_count[r].sum() == 1
-    assert t.region_span_count.sum() == 0, "a contained fragment spans nothing"
-    assert (
-        t.region_contained_count.sum(axis=1)
-        <= np.minimum(t.region_start_count.sum(axis=1), t.region_end_count.sum(axis=1))
-    ).all()
+    assert (t.region_contained_count.sum(axis=1) <= t.region_start_count.sum(axis=1)).all()
 
 
-def test_SPAN_counts_regions_STRICTLY_covered_and_a_JUMPED_region_gets_NOTHING():
-    """span = every base covered by ONE segment, neither path endpoint inside. A region the path
-    JUMPS over (intron exactly = the region) is not covered and must read 0 on every bank."""
-    bounds = [0, 100, 200, 300, 600]
-    part = Partition.from_region_bounds([bounds], sj=[(0, 200, 300, Strand.POS)])
-    acc = Accumulator(part, max_fragment_length=10_000)
-    # unspliced [50, 350): starts r0, ends r3, strictly covers r1 [100,200) and r2 [200,300)
-    assert acc.deposit(0, 50, 350) is DepositOutcome.DEPOSITED
-    t = acc.tally
-    assert t.region_span_count[1].sum() == 1 and t.region_span_count[2].sum() == 1
-    assert t.region_span_count[0].sum() == 0 and t.region_span_count[3].sum() == 0
-    # spliced [150, 350) with intron exactly r2 = [200, 300): r2 is JUMPED — no span, no start, no end
-    acc2 = Accumulator(part, max_fragment_length=10_000)
-    assert (
-        acc2.deposit(0, 150, 350, observed_introns=[(200, 300)], sj_strand=Strand.POS)
-        is DepositOutcome.DEPOSITED
-    )
-    t2 = acc2.tally
-    assert t2.region_span_count[2].sum() == 0, "a jumped region was counted as spanned"
-    assert t2.region_start_count[1].sum() == 1 and t2.region_end_count[3].sum() == 1
-
-
-def test_the_START_and_END_banks_carry_the_ALIGN_STRAND_column():
-    """PERTURBATION: a NEG deposit must land in column 1 on BOTH banks, so a bank that sums the strands
-    or fixes column 0 cannot pass."""
+def test_the_START_bank_carries_the_ALIGN_STRAND_column():
+    """PERTURBATION: a NEG deposit must land in column 1, so a bank that sums the strands or fixes
+    column 0 cannot pass."""
     acc = _acc()
     acc.deposit(0, 120, 180, align_strand=Strand.NEG)
     t = acc.tally
     assert t.region_start_count[:, STRAND_COLUMNS[Strand.NEG]].sum() == 1
     assert t.region_start_count[:, STRAND_COLUMNS[Strand.POS]].sum() == 0
-    assert t.region_end_count[:, STRAND_COLUMNS[Strand.NEG]].sum() == 1
-    assert t.region_end_count[:, STRAND_COLUMNS[Strand.POS]].sum() == 0
-
-
-def test_SPAN_matches_the_strict_span_opportunity_ABSOLUTELY_on_a_uniform_field():
-    """One fragment at every admissible start (rho = 1 per length): the interior region r1 of
-    length ℓ = 100 must read V = (w − ℓ − 1)₊ EXACTLY — 0 at w = ℓ+1, w−101 above."""
-    bounds = [0, 1000, 1100, 2100]
-    part = Partition.from_region_bounds([bounds])
-    ell = 100
-    for w, want in ((ell, 0), (ell + 1, 0), (ell + 2, 1), (ell + 50, 49), (300, 199)):
-        acc = Accumulator(part, max_fragment_length=10_000)
-        for s in range(0, 2100 - w + 1):
-            acc.deposit(0, s, s + w)
-        got = int(acc.tally.region_span_count[1].sum())
-        assert got == want, f"w={w}: V_r1 = {got}, want (w-ell-1)+ = {want}"

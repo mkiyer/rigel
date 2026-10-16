@@ -454,11 +454,11 @@ struct WorkerState {
     // what `OfferedFragment::observed_introns` points at.
 
     // ⭐ ONE OFFER PER FRAGMENT. Every non-chimeric hit of a fragment is collected as a placement — its
-    // observed introns, its gap hypotheses' implied introns and supporting transcripts COPIED into these
-    // arenas, because the resolver's result dies with the hit — and after the last hit the whole set is
-    // offered to the accumulator set at once (`AccumulatorSet::offer`), which is `deposit` for a unique
-    // mapper and the multimapper rule for the rest. Spans point into the arenas, so they are resolved
-    // from offsets only once nothing more will grow.
+    // observed introns and its gap hypotheses' implied introns COPIED into these arenas, because the
+    // resolver's result dies with the hit — and after the last hit the whole set is offered to the
+    // accumulator set at once (`AccumulatorSet::offer`), which is `deposit` for a unique mapper and the
+    // multimapper rule for the rest. Spans point into the arenas, so they are resolved from offsets only
+    // once nothing more will grow.
     struct PendingPlacement {
         int32_t ref_id;
         int64_t start, end;
@@ -466,13 +466,12 @@ struct WorkerState {
         std::size_t obs0, obs1, hyp0, hyp1;
     };
     struct PendingHypothesis {
-        std::size_t imp0, imp1, sup0, sup1;
+        std::size_t imp0, imp1;
         int32_t sj_strand;
     };
     std::vector<PendingPlacement>  pending;
     std::vector<PendingHypothesis> pending_hypotheses;
     std::vector<IntronBlock>       arena_observed, arena_implied;
-    std::vector<int32_t>           arena_supporting;
     std::vector<rigel::accumulator::GapHypothesis> arena_spans;
     std::vector<rigel::accumulator::Placement>     placements;
     rigel::accumulator::OfferScratch               offer_scratch;
@@ -1055,7 +1054,6 @@ pair_multimapper_reads(
 struct MarshalledFragment {
     std::vector<IntronBlock> observed;
     std::vector<IntronBlock> implied;
-    std::vector<int32_t>     supporting;
     std::vector<rigel::accumulator::GapHypothesis> spans;
     rigel::accumulator::OfferedFragment offered{};
 
@@ -1066,27 +1064,22 @@ struct MarshalledFragment {
             observed.push_back({0, nb::cast<int32_t>(pair[0]), nb::cast<int32_t>(pair[1]), 0});
         }
         // ⚠ ONE pass over `hypotheses`: a second pass over a one-shot iterable (a generator) sees nothing,
-        // and an empty set deposits as the unspliced fragment alone. While `implied` and `supporting` grow,
-        // each span holds OFFSETS into them, turned into pointers only after the last hypothesis is read,
-        // so a reallocation during the fill invalidates nothing. Pinned by
+        // and an empty set deposits as the unspliced fragment alone. While `implied` grows, each span holds
+        // an OFFSET into it, turned into a pointer only after the last hypothesis is read, so a
+        // reallocation during the fill invalidates nothing. Pinned by
         // `test_a_GENERATOR_of_hypotheses_is_the_same_fragment_as_the_tuple`.
         for (nb::handle h : hypotheses) {
-            const std::size_t i0 = implied.size(), t0 = supporting.size();
+            const std::size_t i0 = implied.size();
             for (nb::handle item : nb::getattr(h, "introns")) {
                 auto pair = nb::cast<nb::tuple>(item);
                 implied.push_back({0, nb::cast<int32_t>(pair[0]), nb::cast<int32_t>(pair[1]), 0});
             }
-            for (nb::handle t : nb::getattr(h, "supporting_t_inds"))
-                supporting.push_back(nb::cast<int32_t>(t));
             spans.push_back({nullptr, implied.size() - i0,
-                             nb::cast<int32_t>(nb::getattr(h, "sj_strand")),
-                             nullptr, supporting.size() - t0});
+                             nb::cast<int32_t>(nb::getattr(h, "sj_strand"))});
             spans.back().introns = reinterpret_cast<const IntronBlock*>(i0);
-            spans.back().supporting_t = reinterpret_cast<const int32_t*>(t0);
         }
         for (auto& span : spans) {  // offsets -> pointers, now that nothing more will grow
             span.introns = implied.data() + reinterpret_cast<std::size_t>(span.introns);
-            span.supporting_t = supporting.data() + reinterpret_cast<std::size_t>(span.supporting_t);
         }
 
         offered.start = start;
@@ -1124,9 +1117,6 @@ static nb::dict qc_dict(const rigel::accumulator::DepositCounters& c) {
     out["dropped_strand_undefined"]     = c.dropped_strand_undefined;
     out["deferred_undetermined_gap"]    = c.deferred_undetermined_gap;
     out["deferred_multiple_placements"] = c.deferred_multiple_placements;
-    out["unannotated_introns"]          = c.unannotated_introns;
-    out["contradictory_sj_strand"]      = c.contradictory_sj_strand;
-    out["introns_absorbed"]             = c.introns_absorbed;
     return out;
 }
 
@@ -1166,8 +1156,6 @@ static nb::dict deferred_dict(const rigel::accumulator::DeferredFragments& defer
     put("hypothesis_sj_strand", deferred.hypothesis_sj_strand);
     put("hypothesis_intron_offsets", deferred.hypothesis_intron_offsets);
     put("hypothesis_introns", deferred.hypothesis_introns);
-    put("hypothesis_t_offsets", deferred.hypothesis_t_offsets);
-    put("hypothesis_t", deferred.hypothesis_t);
     return out;
 }
 
@@ -1707,14 +1695,14 @@ private:
                 // be cut out of this reference's path. The exon-block check below cannot catch one: a record
                 // whose CIGAR has an N and no M, D, = or X op adds an intron and no exon block.
                 //
-                // ⚠ The de-duplication is for the QC denominator, NOT to prevent double-crediting a
-                // sj: `parse_bam_record` reads XS/ts once per RECORD and `build_fragment` keys
-                // `intron_set` on (ref, start, end, strand), so a pair where one mate carries the tag
-                // yields the same intron twice. Each duplicate would increment `introns_absorbed`, on
-                // every spliced pair from such an aligner, and that counter is reported. `intron_set` is
-                // ordered, so consecutive comparison is enough; ⛔ it must NOT be re-keyed or merged in
-                // `build_fragment`, which shares it with the resolver (measured: merging demotes
-                // SPLICED_ANNOT to SPLICED_UNANNOT and widens `t_inds`).
+                // ⚠ The de-duplication is NOT to prevent double-crediting a sj -- `deposit` normalises a
+                // duplicate away either way. `parse_bam_record` reads XS/ts once per RECORD and
+                // `build_fragment` keys `intron_set` on (ref, start, end, strand), so a pair where one mate
+                // carries the tag yields the same intron twice; dropping the second keeps it out of a
+                // held record, which stores its observed introns as offered and sorts on them.
+                // `intron_set` is ordered, so consecutive comparison is enough; ⛔ it must NOT be re-keyed
+                // or merged in `build_fragment`, which shares it with the resolver (measured: merging
+                // demotes SPLICED_ANNOT to SPLICED_UNANNOT and widens `t_inds`).
                 auto& observed = ws.arena_observed;
                 const std::size_t obs0 = observed.size();
                 for (const auto& intron : f.introns) {
@@ -1734,14 +1722,10 @@ private:
                 const std::size_t hyp0 = ws.pending_hypotheses.size();
                 for (std::int32_t h = 0; h < cr.n_gap_hypotheses(); ++h) {
                     const std::int32_t i0 = cr.gap_intron_offsets[h], i1 = cr.gap_intron_offsets[h + 1];
-                    const std::int32_t t0 = cr.gap_supporting_offsets[h], t1 = cr.gap_supporting_offsets[h + 1];
-                    const std::size_t imp0 = ws.arena_implied.size(), sup0 = ws.arena_supporting.size();
+                    const std::size_t imp0 = ws.arena_implied.size();
                     ws.arena_implied.insert(ws.arena_implied.end(), cr.gap_introns.begin() + i0,
                                             cr.gap_introns.begin() + i1);
-                    ws.arena_supporting.insert(ws.arena_supporting.end(), cr.gap_supporting.begin() + t0,
-                                               cr.gap_supporting.begin() + t1);
-                    ws.pending_hypotheses.push_back({imp0, ws.arena_implied.size(), sup0,
-                                                     ws.arena_supporting.size(), cr.gap_sj_strand[h]});
+                    ws.pending_hypotheses.push_back({imp0, ws.arena_implied.size(), cr.gap_sj_strand[h]});
                 }
 
                 // The molecule's extent on this reference: leftmost block start to rightmost block end,
@@ -1790,8 +1774,7 @@ private:
             ws.arena_spans.clear();
             ws.arena_spans.reserve(ws.pending_hypotheses.size());
             for (const auto& h : ws.pending_hypotheses) {
-                ws.arena_spans.push_back({ws.arena_implied.data() + h.imp0, h.imp1 - h.imp0, h.sj_strand,
-                                          ws.arena_supporting.data() + h.sup0, h.sup1 - h.sup0});
+                ws.arena_spans.push_back({ws.arena_implied.data() + h.imp0, h.imp1 - h.imp0, h.sj_strand});
             }
             ws.placements.clear();
             ws.placements.reserve(ws.pending.size());
@@ -1817,7 +1800,6 @@ private:
         ws.pending_hypotheses.clear();
         ws.arena_observed.clear();
         ws.arena_implied.clear();
-        ws.arena_supporting.clear();
 
         int32_t nh = 1;
         for (const auto& r : records) {
@@ -2214,8 +2196,6 @@ private:
 
             std::vector<uint32_t> region_contained_count(n_regions * kNStrandColumns, 0u);
             std::vector<uint32_t> region_start_count(n_regions * kNStrandColumns, 0u);
-            std::vector<uint32_t> region_end_count(n_regions * kNStrandColumns, 0u);
-            std::vector<uint32_t> region_span_count(n_regions * kNStrandColumns, 0u);
             std::vector<uint32_t> boundary_unspliced_count(n_boundaries * kNStrandColumns, 0u);
             std::vector<double> boundary_unspliced_inv_length_sum(n_boundaries, 0.0);
             std::vector<uint32_t> boundary_spliced_count(n_boundaries * kNStrandColumns, 0u);
@@ -2249,8 +2229,6 @@ private:
                 const Boundary* boundaries = a.boundaries_data();
                 const SpliceJunction* sj = a.sj_data();
                 const uint32_t* starts = a.region_start_count_data();
-                const uint32_t* ends   = a.region_end_count_data();
-                const uint32_t* spans  = a.region_span_count_data();
                 const auto region_base = static_cast<std::size_t>(ref_region_offsets[f]);
                 const auto boundary_base = static_cast<std::size_t>(ref_boundary_offsets[f]);
                 const auto sj_base   = static_cast<std::size_t>(ref_sj_offsets[f]);
@@ -2258,8 +2236,6 @@ private:
                 for (std::size_t i = 0; i < a.n_regions(); ++i) {
                     for (std::size_t c = 0; c < kNStrandColumns; ++c) {
                         region_start_count[(region_base + i) * kNStrandColumns + c] = starts[i * kNStrandColumns + c];
-                        region_end_count[(region_base + i) * kNStrandColumns + c]   = ends[i * kNStrandColumns + c];
-                        region_span_count[(region_base + i) * kNStrandColumns + c]  = spans[i * kNStrandColumns + c];
                     }
                     for (std::size_t c = 0; c < kNStrandColumns; ++c) {
                         const std::size_t o = (region_base + i) * kNStrandColumns + c;
@@ -2329,8 +2305,6 @@ private:
 
             cal["region_contained_count"]   = vec_to_ndarray(std::move(region_contained_count));
             cal["region_start_count"]       = vec_to_ndarray(std::move(region_start_count));
-            cal["region_end_count"]         = vec_to_ndarray(std::move(region_end_count));
-            cal["region_span_count"]        = vec_to_ndarray(std::move(region_span_count));
             cal["boundary_unspliced_count"]   = vec_to_ndarray(std::move(boundary_unspliced_count));
             cal["boundary_unspliced_inv_length_sum"] = vec_to_ndarray(std::move(boundary_unspliced_inv_length_sum));
             cal["boundary_spliced_count"]     = vec_to_ndarray(std::move(boundary_spliced_count));
@@ -2978,7 +2952,7 @@ NB_MODULE(_bam_impl, m) {
     // ⚠ Every view into a struct bank needs EXPLICIT STRIDES. The storage is AoS with mixed widths — a 40 B
     // `Boundary` holds two uint32 pairs then three float64s, a 32 B `SpliceJunction` one uint32 pair then three
     // float64s — so the row stride is `sizeof(struct)/sizeof(element)`, not the column count. The 8 B `Region`
-    // is one uint32 pair, so there the two coincide; the START/END/SPAN banks are flat arrays and need none.
+    // is one uint32 pair, so there the two coincide; the START bank is a flat array and needs none.
     {
         using rigel::accumulator::Accumulator;
         using rigel::accumulator::Boundary;
@@ -3048,16 +3022,6 @@ NB_MODULE(_bam_impl, m) {
                 auto& a = nb::cast<Accumulator&>(h);
                 return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<2>>(
                     a.region_start_count_data(), {a.n_regions(), kNStrandColumns}, h).cast();
-            })
-            .def_prop_ro("region_end_count", [](nb::handle h) {
-                auto& a = nb::cast<Accumulator&>(h);
-                return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<2>>(
-                    a.region_end_count_data(), {a.n_regions(), kNStrandColumns}, h).cast();
-            })
-            .def_prop_ro("region_span_count", [](nb::handle h) {
-                auto& a = nb::cast<Accumulator&>(h);
-                return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<2>>(
-                    a.region_span_count_data(), {a.n_regions(), kNStrandColumns}, h).cast();
             })
 
             // ── contiguous boundaries ─────────────────────────────────────────────────────────────────────

@@ -47,8 +47,8 @@ def _acc(**kw):
 #
 #: TA's path crosses an exon — (3000,3050) — that no read ever touched. A gap hypothesis is a PATH
 #: through the annotation, not "an intron", and that is the whole reason the first pass cannot resolve it.
-TA = GapHypothesis(((2000, 3000), (3050, 4000)), sj_strand=Strand.POS, supporting_t_inds=(11,))
-TB = GapHypothesis(((2000, 4000),), sj_strand=Strand.POS, supporting_t_inds=(22,))
+TA = GapHypothesis(((2000, 3000), (3050, 4000)), sj_strand=Strand.POS)
+TB = GapHypothesis(((2000, 4000),), sj_strand=Strand.POS)
 L_TA = 2400 - (1000 + 950)  # 450
 L_TB = 2400 - 2000  # 400
 
@@ -60,7 +60,7 @@ def test_the_two_compatible_paths_have_the_lengths_the_owner_computed():
     assert (L_TA, L_TB) == (450, 400)
     acc = _acc()
     for path, expected in ((TA, L_TA), (TB, L_TB)):
-        length, _introns, _absorbed = acc._hypothesis_length(1800, 4200, (), path)
+        length, _introns = acc._hypothesis_length(1800, 4200, (), path)
         assert length == expected
 
 
@@ -75,10 +75,8 @@ def test_TWO_COMPATIBLE_PATHS_are_BUFFERED_and_neither_is_chosen():
     assert int(t.pool_lengths.sum()) == 0
     assert len(t.deferred) == 1
     held = t.deferred[0].placements[0]
-    # Stored WHOLE, with both paths and the transcripts supporting each: the second pass cannot
-    # choose between answers it was not given, and it weights them by those transcripts' abundance.
+    # Stored WHOLE, with both paths: the second pass cannot choose between answers it was not given.
     assert held.hypotheses == (TA, TB)
-    assert [path.supporting_t_inds for path in held.hypotheses] == [(11,), (22,)]
     # Both are spliced and neither is the unspliced hypothesis — the molecule is certified RNA and
     # the open question is purely WHICH STRUCTURE.
     assert t.gap_resolution["gap_deferred_which_introns"] == 1
@@ -126,14 +124,12 @@ def test_the_GENOMIC_hypothesis_is_ALWAYS_the_LONGEST():
         if end == start:
             continue
         observed = tuple(tuple(rng.sample(range(0, 6001), 2)) for _ in range(rng.randint(0, 2)))
-        genomic, _introns, _absorbed = acc._hypothesis_length(start, end, observed, GapHypothesis())
+        genomic, _introns = acc._hypothesis_length(start, end, observed, GapHypothesis())
         for _ in range(rng.randint(1, 3)):
             spliced_path = GapHypothesis(
                 tuple(tuple(rng.sample(range(0, 6001), 2)) for _ in range(rng.randint(1, 3)))
             )
-            spliced, _introns, _absorbed = acc._hypothesis_length(
-                start, end, observed, spliced_path
-            )
+            spliced, _introns = acc._hypothesis_length(start, end, observed, spliced_path)
             checked += 1
             assert spliced <= genomic, (
                 f"[{start},{end}) observed={observed} path={spliced_path.introns}: the spliced path "
@@ -300,8 +296,6 @@ def test_the_deferred_queue_FLATTENS_to_a_CSR_that_round_trips():
         2000, 3000, 3050, 4000,   # TA
         2000, 4000,               # TB
     ]  # fmt: skip
-    assert arrays["hypothesis_t"].tolist() == [11, 22]
-    assert arrays["hypothesis_t_offsets"].tolist() == [0, 0, 0, 1, 2]
     assert Accumulator(
         Partition.from_region_bounds([REGION_BOUNDS], region_types=[TYPES])
     ).tally.deferred_arrays()["hypothesis_offsets"].tolist() == [0]
@@ -554,14 +548,6 @@ def test_ONE_PATH_claimed_by_BOTH_STRANDS_is_marked_AMBIGUOUS(scanned):
         f"the merged hypothesis reports strand {strand}, but its two supporters disagree. Taking the "
         f"first supporter's strand makes the answer depend on GTF line order."
     )
-    assert (
-        len(
-            scanned.deferred.supporting_t_of(
-                int(scanned.deferred.hypothesis_offsets[_record(scanned, 3050)])
-            )
-        )
-        == 2
-    ), "both transcripts must remain recorded as supporters of the merged path"
 
 
 def test_the_fixture_reaches_every_branch_it_claims_to(scanned):

@@ -41,8 +41,8 @@ SJ = [
     (1, 1700, 1900, int(Strand.NEG)),
 ]
 MAX_LENGTH = 1000
-WIDE = GapHypothesis(introns=((1600, 2000),), sj_strand=int(Strand.POS), supporting_t_inds=(1,))
-NARROW = GapHypothesis(introns=((1700, 1900),), sj_strand=int(Strand.NEG), supporting_t_inds=(2,))
+WIDE = GapHypothesis(introns=((1600, 2000),), sj_strand=int(Strand.POS))
+NARROW = GapHypothesis(introns=((1700, 1900),), sj_strand=int(Strand.NEG))
 GENOMIC = GapHypothesis()
 
 
@@ -286,7 +286,6 @@ def test_the_bank_flattens_with_a_placement_level_and_round_trips():
         "one hypothesis per contained placement, three on the gap"
     )
     assert arrays["hypothesis_intron_offsets"].tolist() == [0, 0, 0, 1, 2, 2]
-    assert arrays["hypothesis_t_offsets"].tolist() == [0, 0, 0, 1, 2, 2]
     assert all(v.dtype == np.int64 for v in arrays.values())
     assert set(arrays) == {
         "placement_offsets",
@@ -301,8 +300,6 @@ def test_the_bank_flattens_with_a_placement_level_and_round_trips():
         "hypothesis_sj_strand",
         "hypothesis_intron_offsets",
         "hypothesis_introns",
-        "hypothesis_t_offsets",
-        "hypothesis_t",
     }
 
 

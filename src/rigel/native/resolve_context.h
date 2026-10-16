@@ -203,10 +203,8 @@ class FragmentAccumulator {
 public:
     std::vector<uint8_t>  splice_type_;
     std::vector<uint8_t>  align_strand_;
-    std::vector<uint8_t>  sj_strand_;
     std::vector<uint8_t>  ambig_strand_;
     std::vector<uint16_t> num_hits_;
-    std::vector<uint8_t>  merge_criteria_;
     std::vector<uint8_t>  chimera_type_;
     std::vector<int32_t>  t_indices_;
     std::vector<int32_t>  t_offsets_;
@@ -230,10 +228,8 @@ public:
     void reserve(int64_t n_fragments, int64_t n_candidates) {
         splice_type_.reserve(n_fragments);
         align_strand_.reserve(n_fragments);
-        sj_strand_.reserve(n_fragments);
         ambig_strand_.reserve(n_fragments);
         num_hits_.reserve(n_fragments);
-        merge_criteria_.reserve(n_fragments);
         chimera_type_.reserve(n_fragments);
         frag_id_.reserve(n_fragments);
         read_length_.reserve(n_fragments);
@@ -249,10 +245,8 @@ public:
     void append(const ResolvedFragment& r, int64_t frag_id) {
         splice_type_.push_back(static_cast<uint8_t>(r.splice_type));
         align_strand_.push_back(static_cast<uint8_t>(r.align_strand));
-        sj_strand_.push_back(static_cast<uint8_t>(r.sj_strand));
         ambig_strand_.push_back(static_cast<uint8_t>(r.ambig_strand));
         num_hits_.push_back(static_cast<uint16_t>(r.num_hits));
-        merge_criteria_.push_back(static_cast<uint8_t>(r.merge_criteria));
         chimera_type_.push_back(static_cast<uint8_t>(r.chimera_type));
 
         // CSR data — parallel arrays to t_indices
@@ -286,9 +280,7 @@ public:
         nb::dict result;
         result["splice_type"]       = vec_to_ndarray(std::move(splice_type_));
         result["align_strand"]       = vec_to_ndarray(std::move(align_strand_));
-        result["sj_strand"]         = vec_to_ndarray(std::move(sj_strand_));
         result["num_hits"]          = vec_to_ndarray(std::move(num_hits_));
-        result["merge_criteria"]    = vec_to_ndarray(std::move(merge_criteria_));
         result["chimera_type"]      = vec_to_ndarray(std::move(chimera_type_));
         result["t_indices"]         = vec_to_ndarray(std::move(t_indices_));
         result["t_offsets"]         = vec_to_ndarray(std::move(t_offsets_));
@@ -735,9 +727,7 @@ public:
     {
         cr.gap_introns.clear();
         cr.gap_sj_strand.clear();
-        cr.gap_supporting.clear();
         cr.gap_intron_offsets.assign(1, 0);
-        cr.gap_supporting_offsets.assign(1, 0);
 
         auto& gaps = scratch.implicit_gaps;
         gaps.clear();
@@ -806,7 +796,7 @@ public:
                 any_candidate_implies_nothing = true;
                 continue;
             }
-            add_hypothesis(cr, path, strand, t);
+            add_hypothesis(cr, path, strand);
         }
 
         // ⭐ The UNSPLICED hypothesis. Present when some compatible transcript implies nothing in the
@@ -849,11 +839,10 @@ private:
         }
     }
 
-    /// Record ``path`` as a hypothesis, or credit ``t`` to the identical one already there.
+    /// Record ``path`` as a hypothesis, or fold its strand into the identical one already there.
     static void add_hypothesis(RawResolveResult& cr,
                                const std::vector<IntronBlock>& path,
-                               int32_t strand,
-                               int32_t t)
+                               int32_t strand)
     {
         for (int32_t h = 0; h < cr.n_gap_hypotheses(); ++h) {
             const int32_t lo = cr.gap_intron_offsets[h], hi = cr.gap_intron_offsets[h + 1];
@@ -876,17 +865,11 @@ private:
             // one. Handled because the alternative is a silent answer that flips when two GTF
             // lines are swapped.
             if (cr.gap_sj_strand[h] != strand) cr.gap_sj_strand[h] = STRAND_AMBIGUOUS;
-            // ⚠ Inserted in place so the supporting lists stay contiguous per hypothesis.
-            cr.gap_supporting.insert(cr.gap_supporting.begin() + cr.gap_supporting_offsets[h + 1], t);
-            for (int32_t k = h + 1; k < static_cast<int32_t>(cr.gap_supporting_offsets.size()); ++k)
-                ++cr.gap_supporting_offsets[k];
             return;
         }
         cr.gap_introns.insert(cr.gap_introns.end(), path.begin(), path.end());
         cr.gap_intron_offsets.push_back(static_cast<int32_t>(cr.gap_introns.size()));
         cr.gap_sj_strand.push_back(strand);
-        cr.gap_supporting.push_back(t);
-        cr.gap_supporting_offsets.push_back(static_cast<int32_t>(cr.gap_supporting.size()));
     }
 
     /// The empty path: cut nothing. ⚠ Idempotent, because two routes can both call for it.
@@ -896,7 +879,6 @@ private:
         }
         cr.gap_intron_offsets.push_back(static_cast<int32_t>(cr.gap_introns.size()));
         cr.gap_sj_strand.push_back(STRAND_NONE);
-        cr.gap_supporting_offsets.push_back(static_cast<int32_t>(cr.gap_supporting.size()));
     }
 
 public:
@@ -1338,8 +1320,6 @@ public:
             cr.gap_introns.clear();
             cr.gap_sj_strand.assign(1, STRAND_NONE);
             cr.gap_intron_offsets.assign(2, 0);
-            cr.gap_supporting.clear();
-            cr.gap_supporting_offsets.assign(2, 0);
         }
 
         // ⛔ THE SPLICE_IMPLICIT PROMOTION IS UNSPLICED-ONLY.

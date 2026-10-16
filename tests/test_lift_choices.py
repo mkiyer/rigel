@@ -45,8 +45,6 @@ def _bank(records, n_hyp_each=2):
         hypothesis_sj_strand=np.zeros(n_hyp_each * n, np.int64),
         hypothesis_intron_offsets=np.zeros(n_hyp_each * n + 1, np.int64),
         hypothesis_introns=np.zeros(0, np.int64),
-        hypothesis_t_offsets=np.zeros(n_hyp_each * n + 1, np.int64),
-        hypothesis_t=np.zeros(0, np.int64),
     )
 
 

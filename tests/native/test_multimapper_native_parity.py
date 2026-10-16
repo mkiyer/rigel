@@ -241,7 +241,7 @@ def test_a_random_battery_is_byte_identical():
         WIDE,
         NARROW,
         GENOMIC,
-        GapHypothesis(introns=((1650, 1950),), sj_strand=int(Strand.POS), supporting_t_inds=(5,)),
+        GapHypothesis(introns=((1650, 1950),), sj_strand=int(Strand.POS)),
     )
     for k in range(2000):
         n = int(rng.integers(1, 4))

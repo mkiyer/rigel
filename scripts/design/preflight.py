@@ -4,19 +4,20 @@
 A session that assumes its environment is fine discovers otherwise hours in, usually as a confusing
 wrong number rather than an error. This checks first that the toolchain (the `rigel` conda env, the
 compiled native extension, the `rigel` CLI), both references (the panel's genome/GTF/index/probes and
-the test chromosome's YAML with its renders), both panels (scan caches, oracle caches carrying every part
-`panel.py` requires, the certified `slot_truth.npz`) and every `scripts/design/` instrument (each one imports)
-are present and working. It changes nothing and measures nothing: every check is a read or an import,
-and a failed check prints the exact command that regenerates the missing artifact, because most of this
-data is derived and a missing derived artifact is a command not yet run rather than damage. An import
-break is the check that actually rots after a `src/` deletion or a rename, so the default path is the
-fast one; the `--self-test` sweep over every instrument is opt-in via `--full`, runs each one in a
-subprocess, and is what to run after a deposit-rule change, a default flip, or before a commit that
-touches many instruments.
+the test chromosome's YAML with its renders), both panels (scan caches and oracle caches carrying every
+part `panel.py` requires, each one VALID: its key checked against this build and the panel's index by the
+cache module's own check, so a stale cache never reads as present; the certified `slot_truth.npz`) and
+every `scripts/design/` instrument (each one imports) are present and working. It changes nothing and
+measures nothing: every check is a read or an import, and a failed check prints the exact command that
+regenerates the missing or stale artifact, because most of this data is derived and a missing derived
+artifact is a command not yet run rather than damage. An import break is the check that actually rots
+after a `src/` deletion or a rename, so the default path is the fast one; the `--self-test` sweep over
+every instrument is opt-in via `--full`, runs each one in a subprocess, and is what to run after a
+deposit-rule change, a default flip, or before a commit that touches many instruments.
 
 Usage::
 
-    python scripts/design/preflight.py            # the fast path: toolchain, data, imports
+    python scripts/design/preflight.py            # the fast path: toolchain, data and cache keys, imports
     python scripts/design/preflight.py --full     # + every instrument's --self-test, in parallel
     python scripts/design/preflight.py --self-test
 """
@@ -36,8 +37,10 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 REPO = Path(__file__).resolve().parents[2]
 RUNS = Path.home() / "Downloads" / "rigel_runs"
 SUITE = RUNS / "suite"
+SUITE_INDEX = SUITE / "rigel_index"
 LADDER = SUITE / "ladder"
 TESTREF = RUNS / "test_reference"
+TESTREF_INDEX = TESTREF / "idx"
 
 
 class Report:
@@ -85,7 +88,7 @@ def check_reference(rep: Report) -> None:
             str(SUITE / "reference"),
             "scripts/sim/build_suite_reference.py --fasta <source.fa> --gtf <source.gtf> "
             "--refs chr21 chr22 --ercc -o <reference>")
-    rep.add((SUITE / "rigel_index").is_dir(), "panel rigel index", str(SUITE / "rigel_index"),
+    rep.add(SUITE_INDEX.is_dir(), "panel rigel index", str(SUITE_INDEX),
             "python scripts/sim/panel.py build --config scripts/sim/configs/gdna_ladder.yaml")
     rep.add((SUITE / "reference" / "capture_panel.tsv").is_file(), "panel capture probes", "",
             "python scripts/sim/panel.py build --config scripts/sim/configs/gdna_ladder.yaml")
@@ -98,7 +101,7 @@ def check_reference(rep: Report) -> None:
             "python scripts/sim/build_test_reference.py")
     rep.add((TESTREF / "test_chr.fa").is_file(), "test chromosome FASTA (DERIVED)", str(TESTREF),
             "python scripts/sim/build_test_reference.py")
-    rep.add((TESTREF / "idx").is_dir(), "test chromosome rigel index (DERIVED)", "",
+    rep.add(TESTREF_INDEX.is_dir(), "test chromosome rigel index (DERIVED)", "",
             "rigel index --fasta <T>/test_chr.fa --gtf <T>/test_chr.gtf --no-mappability "
             "--no-tsv -o <T>/idx")
 
@@ -127,24 +130,91 @@ def test_chromosome_renders_in_sync(spec: Path) -> bool:
 
 def _conditions(root: Path) -> list[str]:
     d = root / "scan_cache"
-    return sorted(p.name for p in d.iterdir()) if d.is_dir() else []
+    return sorted(p.name for p in d.iterdir() if p.is_dir()) if d.is_dir() else []
 
 
-def check_panel(rep: Report, root: Path, label: str, rebuild: str) -> None:
+def _refusal(check, *args) -> str:
+    """Why ``check(*args)`` refuses a cache, as the first sentence of its refusal, or "" when it accepts.
+
+    A refusal is what `build_scan_cache.py` re-scans and the instruments refuse to read: a key that does
+    not describe this build and index, a manifest without a key it needs, a file that is not there.
+    Anything else escapes, because it is not a stale cache."""
+    from rigel.scan_cache import ScanCacheKeyError
+
+    try:
+        check(*args)
+    except ScanCacheKeyError as exc:
+        return str(exc).split(". ")[0]
+    except (FileNotFoundError, KeyError) as exc:
+        return f"{type(exc).__name__}: {exc}"
+    return ""
+
+
+def _cache_refusal(cache_dir: Path, index) -> str:
+    """"" when the cache at *cache_dir* is one this build reads against *index*, else why it is not.
+
+    The cache module's own check, from the manifest alone: `scan_cache.check_scan_cache`, the one
+    `build_scan_cache.py` decides a skip by. The BAM is compared at its recorded path when it is still
+    there, and its bytes are read only when its size matches and its modification time does not."""
+    from rigel.scan_cache import check_scan_cache
+
+    if not (cache_dir / "payload.npz").is_file():
+        return "missing"
+    return _refusal(check_scan_cache, cache_dir, index)
+
+
+def _first_part_refusal(cond_dir: Path, parts, index) -> tuple[str, str]:
+    """``(name, why)`` for one condition's oracle cache: its first part that is not valid, or the
+    condition with "" when every part is."""
+    for part in parts:
+        why = _cache_refusal(cond_dir / part, index)
+        if why:
+            return f"{cond_dir.name}/{part}", why
+    return cond_dir.name, ""
+
+
+def cache_verdict(refusals: list[tuple[str, str]]) -> tuple[bool, str]:
+    """``(ok, detail)`` over caches given as ``(name, why)``, ``why`` "" for a valid one: how many are
+    valid, and the first stale one named with its reason. No cache at all is not a pass."""
+    stale = [(name, why) for name, why in refusals if why]
+    detail = f"{len(refusals) - len(stale)}/{len(refusals)} valid"
+    if stale:
+        detail += f"; {stale[0][0]}: {stale[0][1]}"
+    return bool(refusals) and not stale, detail
+
+
+def _load_index(index_dir: Path):
+    """``(index, "")``, or ``(None, why)`` when the index is not there or does not load."""
+    from rigel.index import IndexLoadError, TranscriptIndex
+
+    if not index_dir.is_dir():
+        return None, f"no index at {index_dir}"
+    try:
+        return TranscriptIndex.load(str(index_dir)), ""
+    except (IndexLoadError, ValueError) as exc:
+        return None, f"the index does not load: {str(exc).split('. ')[0]}"
+
+
+def check_panel(rep: Report, root: Path, index_dir: Path, label: str, rebuild: str) -> None:
+    """A panel's caches, each VALID: keyed to this build and the panel's index, as the instruments that read it
+    require, so a stale cache never reads as present."""
     conds = _conditions(root)
-    rep.add(bool(conds), f"{label}: scan caches", f"{len(conds)} conditions", rebuild)
     if not conds:
+        rep.add(False, f"{label}: scan caches", "0 conditions", rebuild)
         return
+    recache = rebuild.replace("simulate", "cache")
     oracle = root / "oracle_cache"
-    parts = _sim_script("panel").ORACLE_PARTS
-    complete, partial = [], []
-    for c in conds:
-        done = all((oracle / c / part / "payload.npz").is_file() for part in parts)
-        (complete if done else partial).append(c)
-    rep.add(not partial, f"{label}: oracle caches, every part",
-            f"{len(complete)}/{len(conds)} complete"
-            + (f"; missing on {partial[0]}…" if partial else ""),
-            rebuild.replace("simulate", "cache"))
+    index, why = _load_index(index_dir)
+    if index is None:
+        for what in ("scan caches", "oracle caches, every part"):
+            rep.add(False, f"{label}: {what}", f"{len(conds)} conditions, keys unchecked: {why}",
+                    "the index must load first; REFERENCE DATA names the command that builds it")
+    else:
+        ok, detail = cache_verdict([(c, _cache_refusal(root / "scan_cache" / c, index)) for c in conds])
+        rep.add(ok, f"{label}: scan caches", detail, recache)
+        parts = _sim_script("panel").ORACLE_PARTS
+        ok, detail = cache_verdict([_first_part_refusal(oracle / c, parts, index) for c in conds])
+        rep.add(ok, f"{label}: oracle caches, every part", detail, recache)
     stamped = [c for c in conds if (oracle / c / "slot_truth.npz").is_file()]
     rep.add(len(stamped) == len(conds), f"{label}: certified slot_truth", f"{len(stamped)}/{len(conds)}",
             "python scripts/design/calibration_oracle.py")
@@ -198,7 +268,8 @@ def check_instruments(rep: Report, full: bool) -> None:
 
 
 def self_test() -> int:
-    """The reporter perturbed, with no I/O: a preflight that cannot report a failure is decoration."""
+    """The reporter and the cache verdict perturbed, with no I/O: a preflight that cannot report a
+    failure is decoration."""
     ok = fail = 0
 
     def check(name, cond):
@@ -225,6 +296,33 @@ def self_test() -> int:
     check("a failure prints its fix", "fix me" in out)
     check("a pass does not print a fix line", out.count("↳") == 1)
     check("both marks are rendered", "✔" in out and "✘" in out)
+
+    # the cache rows: a stale cache is counted and the first one named with the reason the cache module
+    # gave; an error that is not a refusal is not turned into a verdict
+    from rigel.scan_cache import ScanCacheKeyError
+
+    check("every cache valid passes", cache_verdict([("a", ""), ("b", "")]) == (True, "2/2 valid"))
+    check("a stale cache fails the row, counted, the FIRST named with its reason",
+          cache_verdict([("a", ""), ("b", "moved"), ("c", "gone")]) == (False, "1/3 valid; b: moved"))
+    check("no cache at all is not a pass", cache_verdict([])[0] is False)
+
+    def refuse():
+        raise ScanCacheKeyError("cache reach digest a != index reach digest b. The reaches moved. Re-scan.")
+
+    def broken():
+        raise ValueError("not a stale cache")
+
+    check("a refusal reads as its first sentence",
+          _refusal(refuse) == "cache reach digest a != index reach digest b")
+    check("an accepted cache has no refusal", _refusal(lambda: None) == "")
+    check("a manifest without a key is a refusal",
+          _refusal(lambda: {}["reach_digest"]) == "KeyError: 'reach_digest'")
+    try:
+        _refusal(broken)
+        escaped = False
+    except ValueError:
+        escaped = True
+    check("an error that is not a refusal escapes", escaped)
     print(f"\n   self-test: {ok} passed, {fail} failed")
     return 1 if fail else 0
 
@@ -241,9 +339,9 @@ def main() -> int:
     tool, ref, panel, testref, inst = Report(), Report(), Report(), Report(), Report()
     check_toolchain(tool)
     check_reference(ref)
-    check_panel(panel, LADDER, "panel (16 conditions)",
+    check_panel(panel, LADDER, SUITE_INDEX, "panel (16 conditions)",
                 "python scripts/sim/panel.py simulate --config scripts/sim/configs/gdna_ladder.yaml --jobs 16")
-    check_panel(testref, TESTREF / "scenarios", "test chromosome",
+    check_panel(testref, TESTREF / "scenarios", TESTREF_INDEX, "test chromosome",
                 "python scripts/sim/panel.py simulate --config scripts/sim/configs/test_reference.yaml")
     check_instruments(inst, args.full)
 
@@ -257,11 +355,12 @@ def main() -> int:
     print()
     if bad:
         print(f"⛔ {bad} check(s) failed. Each one above names the command that regenerates it.")
-        print("   ⚠ A missing DERIVED artifact is not damage — it is a command you have not run yet.")
+        print("   ⚠ A missing or stale DERIVED artifact is not damage — it is a command you have not run yet.")
     else:
         print("⭐ everything present and working: the toolchain, the references, both panels and every "
               "instrument.")
-    print("\n⚠ This checks PRESENCE and IMPORTABILITY. It does not run the suite — do that too:")
+    print("\n⚠ This checks PRESENCE, the caches' KEYS and IMPORTABILITY. It does not run the suite — do "
+          "that too:")
     print("   python -m pytest tests/ -q   (ANY failure is a regression; the baseline count lives in CLAUDE.md)")
     return 1 if bad else 0
 

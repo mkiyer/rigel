@@ -107,9 +107,6 @@ class ScanQC:
     #: WHOLE, every placement and hypothesis; the identity is
     #: `deposited + deferred_undetermined_gap + deferred_multiple_placements + dropped_* == offered`.
     deferred_multiple_placements: int
-    unannotated_introns: int  # observed introns with no annotated sj
-    contradictory_sj_strand: int  # the mates' motif tags disagreed; no splice trusted
-    introns_absorbed: int  # overlapping or abutting introns merged away
 
     @classmethod
     def from_dict(cls, qc: dict[str, Any]) -> "ScanQC":
@@ -247,12 +244,9 @@ class DrainQC:
 #: and miss the other.
 BANK_AXES: tuple[tuple[str, str, Any], ...] = (
     ("region_contained_count", "region", np.uint32),
-    # the START/END/SPAN banks: the path's first/last covered base and the regions it
-    # strictly spans, by align strand. START and END each sum (over both columns) to qc.deposited —
-    # the ledger, twice over. SPAN's opportunity is (w−ℓ−1)₊, a pmf functional per component by design.
+    # the START bank: the path's first covered base, by align strand. It sums (over both columns) to
+    # qc.deposited — the ledger.
     ("region_start_count", "region", np.uint32),
-    ("region_end_count", "region", np.uint32),
-    ("region_span_count", "region", np.uint32),
     ("boundary_unspliced_count", "boundary", np.uint32),
     ("boundary_spliced_count", "boundary", np.uint32),
     ("sj_count", "sj", np.uint32),
@@ -316,12 +310,13 @@ class DeferredFragments:
     re-enters ``Accumulator::deposit`` with the chosen hypothesis, so there is one tally path and
     byte-identity with the specification is preserved for free.
 
-    Three nested variable-length levels — fragments hold PLACEMENTS, placements hold hypotheses,
-    hypotheses hold introns — so there are three offset arrays. A placement is one alignment of the
-    fragment on one reference with its own extent, strands, observed introns and gap hypotheses: a
-    gap-held unique mapper is a record with ONE placement, a multimapping fragment holds one per
-    admitted alignment, in their canonical order. Offsets are cumulative and always start at 0, so an
-    empty bank is ``[0]`` and never ``[]``, and ``n_fragments`` is ``len(placement_offsets) - 1``.
+    Three nested variable-length levels — fragments hold PLACEMENTS, placements hold observed introns
+    and hypotheses, hypotheses hold implied introns — so there are four offset arrays. A placement is
+    one alignment of the fragment on one reference with its own extent, strands, observed introns and
+    gap hypotheses: a gap-held unique mapper is a record with ONE placement, a multimapping fragment
+    holds one per admitted alignment, in their canonical order. Offsets are cumulative and always start
+    at 0, so an empty bank is ``[0]`` and never ``[]``, and ``n_fragments`` is
+    ``len(placement_offsets) - 1``.
 
     This is the ONE bank whose order is observable. Every other is a sum of integers and integer
     addition is associative, so a per-worker merge is exact whatever order the chunks arrived in. This is a
@@ -356,8 +351,6 @@ class DeferredFragments:
     )  # int64[n_hypotheses] — INFERRED; an observed motif always wins
     hypothesis_intron_offsets: np.ndarray  # int64[n_hypotheses + 1] — in PAIRS
     hypothesis_introns: np.ndarray  # int64[2 * n_implied] — the IMPLIED introns; empty ⇒ unspliced
-    hypothesis_t_offsets: np.ndarray  # int64[n_hypotheses + 1]
-    hypothesis_t: np.ndarray  # int64[n_supporting] — which transcripts imply this path
 
     @property
     def n_fragments(self) -> int:
@@ -452,7 +445,6 @@ class DeferredFragments:
             ("observed_intron_offsets", "observed_introns", 2),
             ("hypothesis_offsets", "hypothesis_sj_strand", 1),
             ("hypothesis_intron_offsets", "hypothesis_introns", 2),
-            ("hypothesis_t_offsets", "hypothesis_t", 1),
         ):
             offsets = arrays[offsets_name]
             if offsets.shape[0] == 0 or int(offsets[0]) != 0:
@@ -473,12 +465,12 @@ class DeferredFragments:
                     f"({int(offsets[-1])} x {stride} expected)"
                 )
         n_hypotheses = int(arrays["hypothesis_offsets"][-1])
-        for name in ("hypothesis_intron_offsets", "hypothesis_t_offsets"):
-            if arrays[name].shape[0] != n_hypotheses + 1:
-                raise ValueError(
-                    f"deferred[{name!r}] has {arrays[name].shape[0]} entries but there are "
-                    f"{n_hypotheses} hypotheses, so it must have {n_hypotheses + 1}"
-                )
+        if arrays["hypothesis_intron_offsets"].shape[0] != n_hypotheses + 1:
+            raise ValueError(
+                f"deferred['hypothesis_intron_offsets'] has "
+                f"{arrays['hypothesis_intron_offsets'].shape[0]} entries but there are "
+                f"{n_hypotheses} hypotheses, so it must have {n_hypotheses + 1}"
+            )
         # A fragment is deferred BECAUSE two or more (placement, hypothesis) pairs survived, so a record
         # carrying fewer than two over all its placements is a bank that lost them — and the second pass
         # would then "choose" from a set of one and deposit an answer nothing supported.
@@ -501,11 +493,6 @@ class DeferredFragments:
         lo, hi = int(self.hypothesis_intron_offsets[h]), int(self.hypothesis_intron_offsets[h + 1])
         return self.hypothesis_introns[2 * lo : 2 * hi].reshape(hi - lo, 2)
 
-    def supporting_t_of(self, h: int) -> np.ndarray:
-        """Which candidate transcripts imply hypothesis ``h``. Empty for the unspliced one."""
-        lo, hi = int(self.hypothesis_t_offsets[h]), int(self.hypothesis_t_offsets[h + 1])
-        return self.hypothesis_t[lo:hi]
-
 
 @dataclass(frozen=True, slots=True)
 class AccumulatorPayload:
@@ -520,7 +507,7 @@ class AccumulatorPayload:
     ref_boundary_offsets: np.ndarray  # int64[n_refs + 1] — contiguous boundaries
     ref_sj_offsets: np.ndarray  # int64[n_refs + 1] — sj boundaries
 
-    # -- regions: two disjoint populations, each two genome-strand columns --
+    # -- regions: two banks, each two genome-strand columns; a contained path books both --
     region_contained_count: (
         np.ndarray
     )  # uint32[n_regions, 2] — the whole path lies inside the region
@@ -528,14 +515,6 @@ class AccumulatorPayload:
     #: Σ over both columns == qc.deposited. Opportunity ℓ for every fragment length; wall-blind only
     #: at the template's DOWNSTREAM end.
     region_start_count: np.ndarray
-    #: uint32[n_regions, 2] — the MIRROR: the path's LAST covered base. Σ == qc.deposited; wall-blind
-    #: only at the template's UPSTREAM end.
-    region_end_count: np.ndarray
-    #: uint32[n_regions, 2] — regions STRICTLY spanned (every base covered by one segment, neither
-    #: path endpoint inside; a jumped region books nothing). Opportunity (w−ℓ−1)₊ — a per-component
-    #: pmf functional BY DESIGN; consumer-gated (the parked length-solve channel). Invariants:
-    #: contained ≤ min(start, end) per region; span ≡ 0 wherever ℓ ≥ w_max − 1.
-    region_span_count: np.ndarray
 
     # -- contiguous boundaries: the 0-bp boundary between two adjacent regions --
     boundary_unspliced_count: np.ndarray  # uint32[n_boundaries, 2] — the mixture being deconvolved
@@ -785,16 +764,14 @@ class AccumulatorPayload:
 
         qc = ScanQC.from_dict(cal["qc"])
         # THE LEDGER, checked at the door. A deposited fragment books its first covered base in
-        # region_start_count and its last in region_end_count, so each bank sums, over both columns, to
-        # qc.deposited: a bank that disagrees lost or invented a fragment.
-        for name in ("region_start_count", "region_end_count"):
-            n_booked = int(banks[name].sum())
-            if n_booked != qc.deposited:
-                raise ValueError(
-                    f"{name} sums to {n_booked} but {qc.deposited} fragments were deposited; the ledger "
-                    f"books every deposited fragment exactly once in each of region_start_count and "
-                    f"region_end_count."
-                )
+        # region_start_count, so the bank sums, over both columns, to qc.deposited: a bank that
+        # disagrees lost or invented a fragment.
+        n_booked = int(banks["region_start_count"].sum())
+        if n_booked != qc.deposited:
+            raise ValueError(
+                f"region_start_count sums to {n_booked} but {qc.deposited} fragments were deposited; "
+                f"the ledger books every deposited fragment exactly once in region_start_count."
+            )
 
         pool_lengths = _exact_dtype(cal, "pool_lengths", np.int64)
         if pool_lengths.size != N_FRAGMENT_POOLS * (max_length + 1):

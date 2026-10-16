@@ -97,7 +97,7 @@ its placements' keys, prefix rule at both levels, so a one-placement record sort
 
 ## 2. Reciprocal opportunity, and where it is model-free
 
-Implemented by `accumulator.cpp` (the boundary and sj `1/(w−1)` deposits, and the start/end banks of
+Implemented by `accumulator.cpp` (the boundary and sj `1/(w−1)` deposits, and the start bank of
 §2.3b, which no calibration stage reads).
 
 **The general rule: deposit `1/A(w)` where `A(w)` is that population's own opportunity** — the number of
@@ -124,14 +124,14 @@ contained opportunity is `A(w) = (ell − w + 1)₊`, and a deposit of `1/(ell �
 
 `P(w ≤ ell)` is a pmf functional and differs per component, so at region scale the gDNA-vs-RNA circularity
 moves out of the divisor and into the support (exactly zero below `ell < frag_min`). No bank deposits it;
-a region's total is its start/end pair (§2.3b).
+a region's total is its start count (§2.3b).
 
 **2.3 And it fails at a terminus, exactly.** `E[Σ1/L] = ρ · E_f[placements(w)/w]`, which equals `ρ` only
 where placements ∝ `w`. At a point 50 bases from an end, placements = 50 for every `w > 51`, independent
 of `w`. So `Σ1/L` fixes the length bias and a reach taper fixes the placement loss; neither substitutes
 for the other.
 
-**2.3b The start/end relation is model-free at a region, and the wall is the only exception.** A
+**2.3b The start count is model-free at a region, and the wall is the only exception.** A
 fragment's first covered base falls in region `r` iff its start lies in `r`, so the opportunity is `ℓ` —
 the same number for every fragment length, which is exactly what the contained relation is not:
 
@@ -145,7 +145,7 @@ within `d` of the template's genomic-high end, only starts that still admit a le
     A_start(w | d)  =  ℓ    for every w    ⟺    d ≥ w_max − 1   ← the exactness condition
 
 and at `d = 0` this is `(ℓ − w + 1)₊`, the contained opportunity, still deposited as a flat `+1` read
-against `ℓ`. `E_r` is the mirror, exact iff `d_low ≥ w_max − 1`.
+against `ℓ`.
 
 **2.4 Superadditivity.** Contained effective lengths are superadditive — `Σ E(children) < E(whole)` for
 any split — so densities, effective lengths and variances cannot be pooled across two partitions; only
@@ -447,7 +447,7 @@ reciprocal-opportunity deposit (§2) cancels the opportunity on its own support:
     E[ Σ 1/(ℓ−w+1) ]    =  rho · P(w ≤ ℓ)            in a REGION of length ℓ — NOT rho
 
 So the boundary form is a model-free total and the region form only a density shape, which no bank deposits
-(§2.2); a region's total is its start/end pair (§2.3b). Calibration reads neither: the reciprocal banks' one
+(§2.2); a region's total is its start count (§2.3b). Calibration reads neither: the reciprocal banks' one
 consumer is the second pass (§10). Its face arithmetic runs on counts and on each component's own geometric
 opportunity, `E_g` or `E_r` from its length law (§3.2b), and a face's total adds the sj flux whose bodies lie
 on that side as the route rate `Σ_J J/A_J` on the junctions' own opportunities (§3.6c;

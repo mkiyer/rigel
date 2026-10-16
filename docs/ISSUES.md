@@ -884,13 +884,8 @@ Instrument: `profiling/profiler.py`, `profiling/sweep_replay.py`.
 What the reviews left, each its own commit; content-only changes keep the collected count unchanged.
 (a) ROTTEN BUT LIVE, moving an instrument's numbers when repaired: `quant_accuracy`'s oracle arms are undrained
 (documented there).
-(b) DEAD, DEFERRED: `region_span_count` (the retired length channel's) and `region_end_count` (the retired
-total-density landscape's), tallied per fragment by the accumulator and carried through the payload and the caches,
-read by nothing. Deleting them changes the payload schema and re-caches both panels; step 1b re-cached every panel
-without taking them, so they ride the leading-intron fix's re-cache (`ISSUES: latent-defects`; owner, 2026-09-28).
-Until then `accumulator.h`'s "each population stores only the channels something READS" is false. The native
-`FragmentAccumulator` also still reserves, fills and exports `sj_strand` and `merge_criteria` per fragment, which the
-buffer drops at `from_raw`.
+(b) TEST-ONLY: the resolver's `merge_criteria` and its `MC_*` codes, which production stores and only
+`tests/test_resolution.py` reads.
 (c) PRODUCTION-DEAD, KEPT AS TEST OR INSTRUMENT SURFACE: the resolver's `intron_bp`, the tested half of its overlap
 profile; `rigel.sim.benchmark` and `Scenario.build_oracle`, test tooling inside the package;
 `region_init.has_own_composition_evidence`, which tests use as a check; `priors._project_regions_to_loci`, kept for

@@ -74,11 +74,9 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         ref_sj_offsets=np.array([0, n_sj], dtype=np.int64),
         region_contained_count=contained,
         # per genome strand; every value distinct from every other bank's so a consumer reading the
-        # wrong one cannot pass by coincidence. Ledger: ΣS == ΣE (== deposited in a real scan; this
-        # fixture's qc uses its own totals).
+        # wrong one cannot pass by coincidence. Ledger: ΣS == deposited in a real scan; this fixture's
+        # qc uses its own totals.
         region_start_count=np.array([[6, 5], [7, 5], [9, 4]], dtype=np.uint32),
-        region_end_count=np.array([[5, 6], [8, 4], [10, 3]], dtype=np.uint32),
-        region_span_count=np.array([[0, 1], [2, 0], [0, 0]], dtype=np.uint32),
         boundary_unspliced_count=unspliced,
         boundary_unspliced_inv_length_sum=inv(unspliced, 25),
         boundary_unspliced_mass=mass(unspliced),
@@ -103,9 +101,6 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
             dropped_strand_undefined=0,
             deferred_undetermined_gap=0,
             deferred_multiple_placements=0,
-            unannotated_introns=0,
-            contradictory_sj_strand=0,
-            introns_absorbed=0,
         ),
         max_length=200,
         n_refs=1,

@@ -55,10 +55,7 @@ def _deferred_bank(n_fragments: int = 4) -> dict[str, np.ndarray]:
             0,
             100 + i,
             500,
-            hypotheses=(
-                GapHypothesis(((200, 300),), sj_strand=Strand.POS, supporting_t_inds=(i,)),
-                GapHypothesis(),
-            ),
+            hypotheses=(GapHypothesis(((200, 300),), sj_strand=Strand.POS), GapHypothesis()),
         )
         assert outcome.value == "deferred_undetermined_gap", outcome
     return acc.tally.deferred_arrays()
@@ -81,15 +78,15 @@ def _deposited_lengths(total: int) -> np.ndarray:
     return out
 
 
-def _ledger_bank(total: int, region: int = 0) -> np.ndarray:
-    """A flat uint32[n_regions x 2] region bank booking ``total`` fragments, all in ``region``'s first column.
+def _ledger_bank(total: int) -> np.ndarray:
+    """A flat uint32[n_regions x 2] region bank booking ``total`` fragments, all in the first column.
 
-    ``region_start_count`` and ``region_end_count`` are the ledger: each deposited fragment books its first
-    covered base in one and its last in the other, so each must sum, over both columns, to ``qc.deposited``.
+    ``region_start_count`` is the ledger: each deposited fragment books its first covered base in it, so
+    it must sum, over both columns, to ``qc.deposited``.
     """
     n_regions = sum(max(len(region_bounds) - 1, 0) for region_bounds in REGION_BOUNDS_PER_REF)
     out = np.zeros(n_regions * N_STRAND_COLUMNS, dtype=np.uint32)
-    out[region * N_STRAND_COLUMNS] = total
+    out[0] = total
     return out
 
 
@@ -119,11 +116,9 @@ def _calibration_dict(**overrides) -> dict:
         "ref_boundary_offsets": ref_boundary_offsets,
         "ref_sj_offsets": ref_sj_offsets,
         "region_contained_count": np.arange(n_regions * 2, dtype=np.uint32),
-        # The ledger banks book every deposited fragment once each, so neither can carry an arbitrary
-        # array: both sum to 41, matching qc.deposited below, in different regions.
+        # The ledger bank books every deposited fragment once, so it cannot carry an arbitrary array: it
+        # sums to 41, matching qc.deposited below.
         "region_start_count": _ledger_bank(41),
-        "region_end_count": _ledger_bank(41, region=n_regions - 1),
-        "region_span_count": np.arange(n_regions * 2, dtype=np.uint32) * 5,
         "boundary_unspliced_count": np.arange(n_boundaries * 2, dtype=np.uint32),
         "boundary_unspliced_inv_length_sum": np.arange(n_boundaries, dtype=np.float64),
         "boundary_spliced_count": np.arange(n_boundaries * 2, dtype=np.uint32),
@@ -146,9 +141,6 @@ def _calibration_dict(**overrides) -> dict:
             "dropped_strand_undefined": 3,
             "deferred_undetermined_gap": 4,
             "deferred_multiple_placements": 0,
-            "unannotated_introns": 5,
-            "contradictory_sj_strand": 6,
-            "introns_absorbed": 8,
         },
         "deferred": _deferred_bank(),
         "gap_resolution": _gap_census(),
@@ -207,8 +199,6 @@ def test_the_two_column_banks_are_reshaped_and_the_one_column_ones_are_not():
     ):
         assert getattr(payload, name).shape == (rows,), name
     assert payload.region_start_count.shape == (n_regions, 2)
-    assert payload.region_end_count.shape == (n_regions, 2)
-    assert payload.region_span_count.shape == (n_regions, 2)
     assert payload.pool_lengths.shape == (5, MAX_LENGTH + 1)
 
 
@@ -399,42 +389,36 @@ def test_a_DEFERRED_RECORD_WITH_FEWER_THAN_TWO_HYPOTHESES_IS_REJECTED():
     set of one and deposit an answer nothing supported — the exact outcome the deferral exists to prevent.
     """
     bank = _deferred_bank()
-    # Drop the LAST record's second (unspliced) hypothesis, which carries neither introns nor supporting
-    # transcripts — so every other array stays self-consistent and the ONLY thing wrong is the run length.
+    # Drop the LAST record's second (unspliced) hypothesis, which carries no introns — so every other
+    # array stays self-consistent and the ONLY thing wrong is the run length.
     # Written this way on purpose: a bank that also broke the CSR would be caught by the test above and
     # this one would pass for the wrong reason.
     lone = dict(bank) | {
         "hypothesis_offsets": np.asarray([0, 2, 4, 6, 7], np.int64),
         "hypothesis_sj_strand": bank["hypothesis_sj_strand"][:-1],
         "hypothesis_intron_offsets": bank["hypothesis_intron_offsets"][:-1],
-        "hypothesis_t_offsets": bank["hypothesis_t_offsets"][:-1],
     }
     with pytest.raises(ValueError, match="carries 1 hypotheses"):
         _payload(deferred=lone)
 
 
 def test_a_LEDGER_bank_that_does_not_book_every_deposited_fragment_is_REJECTED():
-    """``Σ region_start_count == Σ region_end_count == qc.deposited``, refused at the door.
+    """``Σ region_start_count == qc.deposited``, refused at the door.
 
     The start bank's sum is the accumulator's one non-tautological invariant. It replaced three
     "conservation identities" whose right-hand sides could only be evaluated by re-running the deposit,
     so a deliberately broken replay satisfied all three while 91 % of the crossings were junk. This one is
-    checkable against a number the deposit counted independently, and the end bank, its mirror, closes the
-    ledger twice over. A bank one fragment off, in either direction, lost or invented a fragment.
+    checkable against a number the deposit counted independently. A bank one fragment off, in either
+    direction, lost or invented a fragment.
     """
-    for name in ("region_start_count", "region_end_count"):
-        for total in (40, 42):  # one short of qc.deposited = 41, and one too many
-            with pytest.raises(ValueError, match=f"{name} sums to {total} but 41"):
-                _payload(**{name: _ledger_bank(total)})
+    for total in (40, 42):  # one short of qc.deposited = 41, and one too many
+        with pytest.raises(ValueError, match=f"region_start_count sums to {total} but 41"):
+            _payload(region_start_count=_ledger_bank(total))
     # a self-consistent bank is accepted wherever its fragments sit
     counts = np.zeros(10, np.uint32)  # 5 regions x 2 strand columns, flat as the C++ emits it
     counts[:3] = [10, 20, 11]
     payload = _payload(region_start_count=counts)
     assert int(payload.region_start_count.sum()) == payload.qc.deposited
-    ends = np.zeros(10, np.uint32)
-    ends[2:6] = [5, 6, 7, 23]
-    payload = _payload(region_end_count=ends)
-    assert int(payload.region_end_count.sum()) == payload.qc.deposited
 
 
 # ---------------------------------------------------------------------------
