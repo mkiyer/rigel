@@ -124,6 +124,75 @@ Those three fragment types are a local A/B, independent of the cluster work.
   `summary.json`) and LBX0190 / LBX0588 / MO_3021 (the same, with `SJ.out.tab.gz`) may exist only in
   `~/Downloads/rigel_runs/cfrna/`: confirm cluster copies before the substrate phase and upload any that are missing.
 
+### the-scanner-builds-fragments-from-one-mate
+`priority: now — release-blocking (owner, 2026-10-15); the first wave of the paired-end repair, whose plan the owner accepted 2026-10-16 · kind: defect · 2026-10-15`
+The BAM scanner makes "fragments" from a single mate:
+- a primary whose mate is unmapped;
+- a mate-unmapped or unpaired secondary (`pair_multimapper_reads`' singletons);
+- a half-filled HI group.
+
+Each becomes a read-length fragment, a false multimapper (`num_hits = max(NH, hits)`) and a read-length deposit in the
+fragment-length pools; `collect_placement` checks no mate.
+
+Measured:
+- on the local minimap2 panel (g50 ss.99 capture OFF): 771 k fragments with orphan secondaries (3.9 M records),
+  501 k multimappers only through one-mate hits, and 105 k primaries whose mate is unmapped;
+- on VCaP (STAR): 318 of 18.7 M templates (`~/Downloads/rigel_runs/prototypes/2026-10-15_mate_pairing/`).
+
+The repair:
+- every hit places both mates as one molecule, with a computable fragment length;
+- pairs come from STAR's HI groups, or from a bounded R1 × R2 search where the aligner writes no HI;
+- `num_hits` counts the usable hits;
+- a template without a usable hit is withheld and counted.
+
+Rigel reads alignments and does not repair them (owner, 2026-10-16). Fixing this exposes two defects that compensated
+for it: `the-gdna-length-contrast-is-ill-conditioned-on-aligned-input` and `region-lengths-count-unobservable-bases`.
+Instruments: `quant_accuracy.py` and `calibration_vs_oracle.py` on the aligned panel, with the gDNA law and the capture
+ruler held fixed; the oracle ladder for identity.
+
+### the-gdna-length-contrast-is-ill-conditioned-on-aligned-input
+`priority: now — release-blocking (owner, 2026-10-15); the third wave of the paired-end repair, designed on the repaired scan · kind: defect · 2026-10-15`
+`fl.py`'s gDNA length law is a two-pool contrast, g = [(1 − a1)·f0 − (1 − a0)·f1] / (a0 − a1). It divides by the
+difference of the two pools' purities, so it amplifies any difference between the pools by 1/(a0 − a1).
+- **The amplification.** On the aligned panel the internal gDNA density reads 7.5× (capture ON) to 72× (capture OFF)
+  below the oracle's, the purities read about 9% and 2%, and the contrast amplifies pool differences 64–74×.
+- **What the one-mate repair exposed.** With the one-mate fragments repaired, the fitted law at stranded capture ON has
+  mean 318 bp, against the oracle's 217. The old law's 217.5 bp was right only through a 26% spike at 100 bp, which
+  was the one-mate deposits.
+- **Mediation.** Injecting the oracle's law turns every pairing stage into an improvement: transcript error 592 k →
+  578 k → 567 k → 558 k. The diagnosis shows this law mediates the regression; it does not show the law is the whole of
+  it.
+
+Instrument: the aligned panel, with the gDNA law injected from the oracle BAM.
+
+### region-lengths-count-unobservable-bases
+`priority: now — release-blocking (owner, 2026-10-15); the third wave of the paired-end repair · kind: defect · 2026-10-15`
+Calibration's region lengths count bases on which no fragment can be observed.
+- **How much.** On the ladder's suite genome, 18.2 of 51.0 Mb of intergenic sequence is N (36%); on GRCh38, 150 of
+  1,318 Mb (11.4%).
+- **Why it matters.** The gDNA pool's purity reads its opportunity inflated by those bases, and
+  `the-gdna-length-contrast-is-ill-conditioned-on-aligned-input` amplifies the error.
+- **It is more than N.** Two mates can span an N gap, and a repeat can be unobservable to an aligner that keeps unique
+  placements.
+- **The simulator hides it.** The simulator draws gDNA over the N runs too: about 0.99 M of 5 M gDNA fragments at g50
+  capture OFF are all-N reads, which no aligner places and the oracle BAM places by truth.
+
+### the-anchor-tolerance-applies-beyond-implicit-splicing
+`priority: now — the first wave of the paired-end repair; the owner's scope ruling of 2026-10-16 · kind: defect · 2026-10-16`
+`--splicing-anchor-tolerance` (K, default 3) belongs to implicitly spliced fragments: mates aligned to different exons
+with a whole intron between them. The owner keeps it in scope there (2026-10-16), "but we must be judicious about
+deciding which cases apply it".
+
+The code applies it more widely (`resolve_context.h:693-696, 797, 807, 813, 846-857`):
+- to every non-chimeric fragment's gap hypotheses, SPLICED_ANNOT included;
+- to `transcript_contradicts_blocks`;
+- to cutting an annotated intron whole when up to K sequenced bases lie inside it. That removes those bases from L, so
+  in effect it moves the splice point to the annotation.
+
+Its documentation says it "tunes the resolver alone", but it moves calibration's tally and the scan-cache key.
+
+Each use outside implicit splicing is either justified or removed, each in its own measured arm.
+
 ### the-release-builds
 `priority: now — release-gating: the owner's actions before tagging; the build fixes landed 2026-10-14 · kind: release · 2026-10-14`
 The build fixes landed 2026-10-14: portable by default (the conda package was compiled with `-march=native`; the
@@ -655,6 +724,51 @@ against the uncaptured bulk and the locus gDNA component keeps its shipped lengt
 sit on a scale far below gDNA's. Re-anchor on the shipped convention (an unprobed object reads 1), prove it on the
 capture-OFF identity and a capture-ON row, and re-read the ceiling.
 
+### merge-keeps-least-overhang
+`priority: next — the second wave of the paired-end repair: the combination rule (the code-health review, 2026-10-16) · kind: defect · 2026-10-16`
+A multimapper's hit for each transcript is chosen by the least overhang, then the likelihood (`scoring.cpp:569-582`).
+But each hit's likelihood already contains `oh × ln overhang_alpha`, so overhang counts twice.
+- At the default alphas, a hit with overhang 0 and NM 3 beats one with overhang 1 and NM 0, which is 4.6 nats more
+  likely.
+- At `--mismatch-alpha 0`, the transcript is lost: its −inf entry is never replaced.
+
+No test puts two hits on one transcript. The candidate rule is the hit with the highest likelihood. For alternatives at
+one place with equal NM, both rules choose the same hit.
+Instrument: that fixture, at the default alpha and at the gate; then the A/B on the STAR-aligned ladder.
+
+### pruning-uses-three-references
+`priority: next — the second wave of the paired-end repair · kind: defect · 2026-10-16`
+Pruning uses three references (`scoring.cpp:604-629, 843-868, 883-888`):
+- annotated candidates are pruned against the best annotated candidate;
+- synthetic spans are pruned against the best span;
+- gDNA is pruned against the best of both.
+
+A span and the gDNA term read the same footprint, and under equal length laws they differ by log(2·p_sense). Yet the
+span survives any distance below the annotated reading, while gDNA is cut at 9.21 nats. So an implicit unit with a long
+gap can go to the annotated transcript or to the span, but never to gDNA. DESIGN §3.1d's "competes exactly as an RNA
+candidate does" holds for neither pool.
+
+The candidate rule is one reference: the unit's best candidate of any kind. Instrument: a per-stratum A/B. The routing
+tests set `is_synthetic` False everywhere, so pool separation is untested.
+
+### mismatch-gate-nan-in-multimapper-gdna
+`priority: next — the second wave of the paired-end repair, with the sum over places · kind: defect · 2026-10-16`
+At `--mismatch-alpha 0`, a mismatched hit's gDNA term is −inf. Two such hits make the multimapper's log-sum-exp NaN
+(`scoring.cpp:57-73, 519-527, 646-653`). The NaN then fails `> 0`, so whether a later NM = 0 hit keeps its gDNA reading
+depends on the order of the hits. This is the live remainder of `scoring-penalties-are-underived-constants`' "a zero
+alpha gives NaN". Instrument: a test over the three hit orders; a pure-Python transcription reproduces it.
+
+### output-names-are-not-consistent
+`priority: next — the rename stage of the first wave's cleanup; the owner agrees the names must be consistent (2026-10-16), and a naming proposal comes first · kind: defect · 2026-10-16`
+The outputs use "nascent" for two different sets of fragments:
+- `nrna_total` and the report's "Nascent RNA" row count the synthetic spans (`estimator.nrna_em_count`);
+- `gene_quant`'s `nascent_count` holds the annotated single-exon transcripts and leaves the spans out
+  (`estimator.py:564-575`).
+
+The report row's description, "synthetic + annotated single-exon spans", is false (`report/model.py:298-304`). Both
+splits also name mature and nascent as populations, against Axiom 0. The column names (`mature_count`,
+`nascent_count`, `mrna_*`, `nrna_*`) are a user contract, carried by the MANUAL and the goldens.
+
 ### strand-overdispersion-one-shared-value
 `priority: later — od = 0 and κ from the genuine junctions ship in 0.8.0 with the class diagnostics; the pruning moved to ISSUES: splicing-artifacts (owner, 2026-10-14) · kind: design · 2026-09-27`
 The strand model's two inputs, κ and the od, were both contaminated on real libraries:
@@ -1095,7 +1209,7 @@ Instrument: none yet; the splice truth mixes.
 A multimapper whose alignments all lie outside genes is intergenic and counted as gDNA — correct. One with an
 alignment in a gene is solved by the EM, and the owner's rule is that it is compatible with gDNA if ANY alignment
 is unspliced. The scanner never buffers a multimapper's alignment that overlaps no transcript
-(`bam_scanner.cpp:1808-1845`: only unique mappers are appended), so a gDNA read from an unannotated processed
+(`bam_scanner.cpp:1892-1897`: only unique mappers are appended), so a gDNA read from an unannotated processed
 pseudogene whose other alignment splices across the parent gene reaches the EM with its spliced alignment alone
 and is certified RNA on the parent. The owner expects multimappers to matter most. The repair buffers those
 alignments, lets the scorer take a gDNA term from an alignment with no transcript candidate
@@ -1233,6 +1347,90 @@ changed population fit carries the loss: at the first refit the admitted exonic 
 eligible, those with a composition channel 5,339 → 2,742; gDNA is under-called in exons. Removing the variance cutoff
 does not repair it (40.56 / 33.62). Admission, weighting and kernel construction are not yet separated.
 Instrument: `.cache/rigel_runs/2026-10-07_full_panel_counts/` (`screen.py`, `diagnose.py`, `diagnosis.json`).
+
+### coverage-weight-plateau-for-short-transcripts
+`priority: later (the code-health review, 2026-10-16) · kind: defect · 2026-10-16`
+The coverage weight's plateau is min(f, L/2) (`scoring.cpp:93-96, 111`). Enumerating uniform placements gives min(f,
+L − f), and the two differ when L < 2f:
+- L = 300, f = 200, at offset 50: 1.50 against 1.14;
+- L = 260, f = 250: 1.93 against 1.02.
+
+The gate (`tests/test_pipeline_routing.py:1004`) restates the formula, so it cannot catch this. The weight moves
+numbers only through the EM's warm start. Instrument: a gate against enumeration; then the A/B where the EM depends on
+its start.
+
+### two-own-composition-thresholds
+`priority: later (the code-health review, 2026-10-16) · kind: defect · 2026-10-16`
+"Has its own composition" is tested two ways:
+- τ > 0 in the transfer policy's claims, the level rule's strand term and the splice-site width
+  (`transfer_kernel.h:223, 295, 330`);
+- τ > 1e-9 (`OWN_EPS`) in `has_comp`, which decides landscape training (`solve_kernel.cpp:420-421, 607`;
+  `region_init.py:38, 58`).
+
+A slot with 0 < τ ≤ 1e-9 therefore sends a claim but is not counted as having a composition. At κ = 0.95, τ ≈ 4.3·n·f²,
+so the window needs f < 1.5e-5/√n. That is below the λ lattice's floor, so the window opens only inside a refit's
+widened bracket or on a weakly stranded library. How many slots fall in it is unmeasured. The candidate rule is τ > 0
+alone, with `OWN_EPS` kept as the clamp.
+
+### chimera-span-over-exon-blocks-only
+`priority: later (the code-health review, 2026-10-16) · kind: contract · 2026-10-16`
+`detect_chimera` measures the outermost span over exon-touching blocks only (`constants.h:341-347, 405-410`).
+- An outer block lying in an intron or in intergenic space is left out of "outermost start to outermost end".
+- With at most one exon-touching component, the check never runs.
+
+Such a fragment gets gap hypotheses over any distance and can be promoted to SPLICE_IMPLICIT. Only downstream limits
+catch it: L ≤ max_length in the accumulator, and the scorer's tail decay. The owner picks the rule: all blocks, or the
+subset documented. The extent is also computed in four places.
+
+### capture-probes-on-dropped-duplicates
+`priority: later — at the next panel rebuild (the code-health review, 2026-10-16) · kind: contract · 2026-10-16`
+The ladder's capture panel is designed on the raw GTF (`design_suite_probes.py:37`), but simulated against an index
+built with `--collapse-duplicate-transcripts`. A transcript-coordinate probe that names a dropped duplicate is skipped
+at debug level, and is still counted in "Loaded N probes" (`sim/capture/sampler.py:470-476, 514-517`).
+- On the ladder, 2 of 13,824 probes are lost (`ENST00000397293.6`, `ENST00000703226.1`).
+- Their kept twins carry different probes, so real coverage is lost.
+- `ruler_vs_truth.py` and `quant_accuracy.py` skip the same two, so they agree with the simulator.
+
+The fix: refuse an unknown id, or resolve it through `transcript_aliases`, and design the panel on the index's
+transcripts.
+
+### contiguous-reaches-unread
+`priority: later (the code-health review, 2026-10-16) · kind: hygiene · 2026-10-16`
+Contiguous-boundary reaches are computed (`splice_graph.py:317`), stored, gated (`test_splice_graph.py:338-518`) and
+hashed into the scan-cache key (`scan_cache.reach_digest`), but nothing reads them. `build_sj_geometry_arrays` reads
+only the sj rows. `region_geometry.py:152-155` rules the boundary reach unbounded, pending a per-boundary taper A/B
+that was never run. Either that A/B owns this code, or the contiguous reaches go and the digest covers the sj rows
+only.
+
+### second-pass-geometry-in-python
+`priority: later (the code-health review, 2026-10-16) · kind: hygiene · 2026-10-16`
+`placement_abundance` re-derives the deposit's geometry in Python (`second_pass.py:374-392, 447-461`): the path's
+segments, the boundaries it crosses, and the region that contains it. These are copies of `normalise_introns` /
+`build_segments`, the crossing loop and `region_of_pos`. They are equivalent today (same sort, clip and merge; the same
+searchsorted sides), but they can drift. The candidate is one kernel call that returns a placement's objects.
+
+### draw-clamp-can-pick-a-zero
+`priority: later (the code-health review, 2026-10-16) · kind: defect · 2026-10-16`
+`choose_hypotheses` clamps a draw into its record's run (`second_pass.py:767-771`), but not onto a positive score.
+When a run ends in zero-score hypotheses, an overshooting uniform lands on a zero. The rate is about half an ulp of the
+cumulative sum per record, under 10⁻³ expected events per library. `test_the_draw_never_leaks_into_the_NEXT_records_run`
+passes either way. The fix: clamp to the run's last positive-score slot.
+
+### loci-table-recomputes-mrna
+`priority: later (the code-health review, 2026-10-16) · kind: hygiene · 2026-10-16`
+The output tables recompute values the estimator already holds:
+- `loci.feather` rebuilds mRNA as `max(rna_total − nrna, 0) + unambig` (`estimator.py:861-863`), behind a clamp that
+  hides drift, although `t_total[annot_in_locus].sum()` is the same quantity;
+- `get_nrna_counts_df` re-codes the TPM denominator inline (`estimator.py:743-745`);
+- the `is_synthetic` fallback (`estimator.py:608-612`) exists only for a test mock.
+
+Removing the recomputation moves ulps in `loci.feather`.
+
+### simulated-errors-redraw-the-base
+`priority: later — before any error-bearing panel (the code-health review, 2026-10-16) · kind: defect · 2026-10-16`
+The simulator's error injection draws the replacement over all four bases (`sim/wgs_engine.py:461-465`). A quarter of
+the "substitutions" leave the base unchanged, so the realised rate is ¾ of `error_rate`. Every panel and test uses
+0.0, and no test calls `_introduce_errors_batch`. The fix: draw from the three other bases, and gate the realised rate.
 
 ### a-pure-gdna-library-reads-as-nascent-rna
 `priority: parked — Tier 5, the deferred stratum; kept as an open challenge (owner, 2026-09-28); the MANUAL states the limit (2026-10-14) · kind: defect · 2026-09-28`
