@@ -326,8 +326,9 @@ def _oracle_parts(bam, index, scan, work_dir, tag, cache_root):
         parts[origin] = payload
         if cache_root is not None:
             d = Path(cache_root) / tag / origin
+            # the BAM the part was split from; the split file is scratch that another build overwrites
             write_scan_cache(d, payload=payload, strand_model=strand_model, index=index,
-                             bam=paths[origin], scan_config=scan)
+                             bam=bam, scan_config=scan)
     return parts
 
 

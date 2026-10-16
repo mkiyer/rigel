@@ -526,6 +526,34 @@ def test_a_missing_or_stale_oracle_cache_ABORTS(toy, tmp_path):
         QA.load_oracle(bam, toy.index, cfg, tmp_path, orc, "t")
 
 
+def test_an_oracle_part_records_the_BAM_it_was_SPLIT_from(toy, tmp_path):
+    """An oracle part is scanned from a split file in a scratch directory named for its condition, which
+    the next build of a same-named condition, in any panel, overwrites. The part is a function of the BAM
+    it was split from, so that is the BAM its cache records, and a reused split file cannot refuse it.
+
+    PERTURBATION: record the split file (``bam=paths[origin]``) in ``load_or_build_oracle``.
+    """
+    import _oracle_arms
+
+    from rigel.pipeline import resolve_scan_config, scan_and_buffer
+    from rigel.scan_cache import read_scan_cache
+
+    bam, cfg = str(toy.bam_path), PipelineConfig()
+    scan = resolve_scan_config(cfg.scan, bam)
+    _stats, _sm, _buf, payload = scan_and_buffer(bam, toy.index, scan)
+    orc, work = tmp_path / "oracle_cache", tmp_path / "w"
+    _oracle_arms.load_or_build_oracle(bam, toy.index, cfg, work, "t", payload, orc)
+    parts = sorted(m.parent for m in orc.glob("t/*/manifest.json"))
+    splits = sorted(work.glob("*.bam"))
+    assert parts and splits
+    for split in splits:  # what another condition's build with this tag leaves at the same paths
+        split.write_bytes(b"another condition's reads")
+    for part in parts:
+        recorded = json.loads((part / "manifest.json").read_text())["bam"]
+        assert recorded["path"] == str(Path(bam).resolve()), part.name
+        read_scan_cache(part, toy.index, scan)
+
+
 # ── GATE 7: the ruler arm hands the EM the lengths it names, and its noop is inert ──────────────────
 
 

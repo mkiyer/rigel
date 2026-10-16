@@ -163,8 +163,10 @@ def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payloa
     for origin in ORIGINS:
         _stats, strand_model, _buf, payload = scan_and_buffer(paths[origin], index, scan)
         parts[origin] = payload
+        # a part records the BAM it was split from: the split file is scratch, and the next build of a
+        # condition with this tag, in any panel, overwrites it
         write_scan_cache(dirs[origin], payload=payload, strand_model=strand_model, index=index,
-                         bam=paths[origin], scan_config=scan)
+                         bam=bam, scan_config=scan)
     ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root)
     # the cache stays pass one (write_scan_cache refuses a drained payload); the returned truth is
     # lifted into the drained frame exactly as the cached path is.
@@ -189,7 +191,7 @@ def ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root) -> bool
     for key in RNA_STRAND_ORIGINS:
         _stats, strand_model, _buf, payload = scan_and_buffer(paths[key], index, scan)
         write_scan_cache(dirs[key], payload=payload, strand_model=strand_model, index=index,
-                         bam=paths[key], scan_config=scan)
+                         bam=bam, scan_config=scan)  # the BAM it was split from, as load_or_build_oracle's parts
     return True
 
 
