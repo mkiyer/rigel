@@ -424,7 +424,9 @@ std::int64_t Accumulator::sj_edge_id(std::int64_t intron_start,
     // ⚠ The strand filter applies only when the observed strand is DEFINITE. NONE means the aligner wrote
     // no motif tag at all (STAR writes XS, minimap2 ts, some write neither), so on such a BAM every
     // spliced fragment arrives with NONE -- demanding a strand there would delete 100 % of that aligner's
-    // annotated sj. AMBIGUOUS never reaches here; `deposit` rejects the whole fragment's splices.
+    // annotated sj. AMBIGUOUS never arrives from `deposit`, which trusts none of such a fragment's splices;
+    // it does arrive through `sj_edge_ids`, the second pass's batched lookup, and is then treated as NONE:
+    // the first annotated sj with these two ends answers, whatever its strand.
     const bool definite = (sj_strand == STRAND_POS || sj_strand == STRAND_NEG);
     const std::int32_t lo = sj_offsets_[static_cast<std::size_t>(donor)];
     const std::int32_t hi = sj_offsets_[static_cast<std::size_t>(donor) + 1];
@@ -611,9 +613,11 @@ void Accumulator::arbitrate(const OfferedFragment& arbitrated, std::int64_t star
     // makes kTooLong a rejection -- so a hypothesis implying a longer L is not a molecule this library
     // contains. Applied to the UNSPLICED hypothesis this is exactly "a fragment whose genomic span
     // exceeds the limit must be RNA": that hypothesis's L IS the span. There is no second rule.
-    // ⚠ Unless the filter would empty the set, in which case the survivors stand and the ordinary
-    // kTooLong rejection counts them, as it did before any of this -- `deposit`'s clause; the set's
-    // offer applies it over the union of every placement's pairs instead, and asks for the raw filter.
+    // ⚠ Unless the filter would empty the set, in which case every hypothesis stands -- `deposit`'s
+    // clause. The ordinary kTooLong rejection then counts the fragment: at once when it offered one
+    // hypothesis, and at the drain, which replays the chosen one alone, when it offered several and was
+    // held. The set's offer applies the clause over the union of every placement's pairs instead, and
+    // asks for the raw filter.
     auto& survivors = scratch.survivors;
     survivors.clear();
     bool any = false;

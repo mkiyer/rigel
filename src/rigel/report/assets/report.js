@@ -263,7 +263,7 @@
   }
 
   function geneTable() {
-    const g = M.genes || { rows: [] };  // rows: [name, id, type, ref, strand, tpm, mature, nascent, n_tx]
+    const g = M.genes || { rows: [] };  // rows: [gene_name, gene_id, gene_type, ref, strand, tpm, mature_count, nascent_count, n_transcripts]
     dataTable({
       table: "gene-table", search: "gsearch", count: "gcount", pager: "gene-pager",
       noun: "expressed genes", rows: g.rows || [], sort: 4, dir: -1,

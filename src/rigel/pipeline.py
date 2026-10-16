@@ -278,14 +278,19 @@ def scan_and_buffer(
     )
     logger.info("[START] Native C++ BAM scan → resolve + train + buffer")
 
-    # Per-transcript strands drive the all-exonic diagnostic strand model.
+    # Per-transcript strands set every fragment's ambiguous-strand flag (its candidates disagree on
+    # strand), the strand each gap hypothesis infers from the transcripts that imply it, and the truth
+    # label of the all-exonic diagnostic strand model.
     resolve_ctx = index.resolver
     resolve_ctx.set_transcript_strands(index.t_to_strand_arr.tolist())
 
-    # Splicing-anchor tolerance K (bp): resolver-only one-sided slack used
-    # by the SPLICED_IMPLICIT per-intron whole-containment discriminant.
-    # The calibration accumulator tallies each fragment's path against the
-    # regions and boundaries and does not consume this tolerance.
+    # Splicing-anchor tolerance K (bp): the slack the resolver allows when it enumerates a
+    # non-chimeric fragment's gap hypotheses. An annotated intron is placed in an unsequenced gap
+    # when it overlaps the gap and lies within it widened by K at each end, and a candidate
+    # transcript is excluded from the enumeration as contradicting the alignment when one of its
+    # introns overlaps an aligned block by more than K. The calibration accumulator arbitrates those
+    # hypotheses and deposits the survivor, so K changes calibration's tally (the scan-cache key
+    # includes it), and it decides which unspliced fragments are relabelled SPLICED_IMPLICIT.
     resolve_ctx.set_splicing_anchor_tolerance(int(scan.splicing_anchor_tolerance))
     # `detect_chimera` needs the library's fragment-length limit to tell an ordinary genomic
     # molecule (contiguous, spanning whatever transcripts lie under it) from a real rearrangement.
@@ -412,9 +417,10 @@ def _drain_side_buffer(
 ):
     """THE SECOND PASS: score the held fragments, draw one hypothesis each, re-deposit.
 
-    Pass 1 holds every fragment whose unsequenced gap has more than one surviving explanation — a small
-    percent of a library, and systematically the long ones, because a longer gap admits more
-    hypotheses. Nothing is lost, but nothing is tallied either until this runs.
+    Pass 1 holds two kinds of fragment WHOLE: one whose unsequenced gap has more than one surviving
+    explanation — systematically the long ones, because a longer gap admits more hypotheses — and a
+    multimapping fragment more than one of whose placements admits a surviving (placement,
+    hypothesis) pair. Nothing is lost, but nothing is tallied either until this runs.
 
     It runs HERE, between the scan and calibration, and that is a structural decision. Every input the
     score needs — the densities at each object, the fragment-length models, the strand model — comes
@@ -1053,7 +1059,7 @@ def run_pipeline(
 
     # FRAGMENTS, not object incidences. The sum still runs over all three axes — gDNA is contained
     # in a region or crosses a boundary, RNA also jumps, and at a donor boundary the sj flux IS the
-    # gene's whole mature output — but each axis is converted by its own population's
+    # RNA that spliced there — but each axis is converted by its own population's
     # mass-per-crossing first. Adding the raw banks would count one fragment once per boundary it
     # crossed AND once per sj it used, which reads `f_gdna` badly low on a contaminated library.
     logger.info(

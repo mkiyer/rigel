@@ -73,27 +73,31 @@ class Transcript:
     (synthetic or annotated single-exon) that covers this transcript's
     merged TSS/TES span.
     For single-exon transcripts: points to itself if it is the
-    nascent-equiv covering a merged multi-exon span, else -1.
+    annotated single-exon transcript (``is_nrna``) covering a merged multi-exon span, else -1.
     For synthetics: -1.
     """
     nrna_n_contributors: int = 0
     """Number of annotated multi-exon transcripts merged into this nRNA entity.
 
-    Only meaningful for synthetic nRNA transcripts and nascent equivalents.
+    Only meaningful for synthetic nRNA transcripts and their annotated single-exon equivalents.
     Zero for regular annotated transcripts.
     """
     abundance: float | None = None
     nrna_abundance: float = 0.0
-    """Nascent RNA (pre-mRNA) molecular abundance.
+    """A simulator input, read only by ``rigel.sim``; the quantifier never reads it.
 
-    Independent of ``abundance`` (mature mRNA molecular abundance).
+    The molecular abundance of RNA that has not spliced, which the simulator
+    samples contiguously over the genomic span (pooled first onto the
+    single-exon entity covering the span,
+    ``sim.whole_genome.assign_nrna_to_entities``). Independent of
+    ``abundance``, the molecules the simulator samples on the spliced template.
     Read fractions are proportional to::
 
-        mRNA  : abundance      × spliced_effective_length
-        nRNA  : nrna_abundance × genomic_span_effective_length
+        spliced template : abundance      × spliced_effective_length
+        genomic span     : nrna_abundance × genomic_span_effective_length
 
-    Setting ``nrna_abundance = k × abundance`` means there are *k* times
-    as many nascent RNA molecules as mature mRNA molecules.
+    Setting ``nrna_abundance = k × abundance`` puts *k* molecules on the
+    genomic span for every one on the spliced template.
     """
     aliases: tuple[str, ...] = ()
     """The IDs of the identical transcripts ``--collapse-duplicate-transcripts`` folded into this one."""

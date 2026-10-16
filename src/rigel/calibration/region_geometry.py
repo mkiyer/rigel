@@ -21,8 +21,9 @@ Contents:
 * `RegionGeometry` / `build_region_geometry` — the per-slot static geometry: the unspliced count being
   deconvolved, its two per-component divisors, and the sj flux with its per-face route rates.
 * `RegionBelief` — the per-slot pie ``(f_pos, f_neg, f_g)``; the per-component message densities
-  ``rho = f·M/E`` are computed inline in ``sweep.solve_chain``.
-* `RegionStatics` / `build_region_statics` — the static per-slot solver inputs (per-strand counts, masks).
+  ``rho = f·M/E`` are formed inside the sweep's one native call (``native.solve_blocks``).
+* `RegionStatics` / `build_region_statics` — the static per-slot structure (the two RNA-strand masks and
+  the boundary flags; no count).
 * `init_beliefs` — the signature-binary G1/G2/G3 initial belief.
 
 Layering: LAYER 3. It imports DOWN to `region_chain` and `signature` (0) and `effective_length` (2),
@@ -75,7 +76,7 @@ class RegionGeometry:
         sj_count    never crossed it -- it JUMPED from here        certified RNA
 
     The last two are different molecules and routinely differ by two orders of magnitude at the same
-    boundary. At a donor boundary the sj flux is the gene's whole mature output while the spliced
+    boundary. At a donor boundary the sj flux is all the RNA that splices there while the spliced
     crossing is the handful of molecules that read through without splicing; at a region bound inside an
     exon there is no sj at all, so ``sj_count`` is 0 while ``spliced_count`` carries everything. The
     word *mature* fits both and therefore distinguishes neither, which is why it is not used.
@@ -261,8 +262,11 @@ def build_region_geometry(
 
 
 def region_gdna_geometry(geometry: RegionGeometry):
-    """Per-slot gDNA support ``(unspliced count, eff_gdna)``, shared by :func:`sweep.solve_chain` and
-    ``calibrate`` so every consumer divides by ONE definition.
+    """Per-slot gDNA support ``(unspliced count, eff_gdna)`` — what ``calibrate`` fits the landscape
+    prior on and derives the λ bracket from, and the ``mass_global`` the sweep's diagnostics capture
+    publishes. The native sweep does not call it: `native/solve_kernel.cpp` forms the same pair from the
+    arrays :func:`sweep.solve_chain` hands it (``n_u``, the two unspliced columns summed, and
+    ``eff_gdna``), so the definition is written twice, here and in the kernel.
 
     It returns ``eff_gdna`` and nothing else, so ``rho_g = f_g·M/E_g`` — which is exactly what makes
     ``sum_c rho_c·E_c = M`` hold and therefore what makes ``f_g`` a COUNT share rather than a density

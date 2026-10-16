@@ -159,7 +159,7 @@ def build_multi_loci(
 
     # Integer ref codes for fast sort/compare within merge loops.
     # The "ref" column is already categorical; use its codes directly
-    # instead of an O(N log N) np.unique sort on 457K string objects.
+    # instead of an O(N log N) np.unique sort on the transcripts' string ids.
     #
     # NOTE: pandas categorical codes are NOT the canonical resolver/BAM
     # ref-id space (which is defined by ``index.ref_lengths`` insertion

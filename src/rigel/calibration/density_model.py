@@ -1,9 +1,9 @@
 """Signature-derived count-observability masks: which regions and which contiguous boundaries hold a count
-that is a gDNA count, rather than one unspliced mature RNA can also contribute to.
+that is a gDNA count, rather than one RNA can also contribute to.
 
 A region is count-observable iff it carries no exon bit. A contiguous boundary is count-observable iff its
 two flanks share no exon bit — a shared exon-strand means one exon continues across the boundary, so
-unspliced mature RNA crosses it and the crossing count is not a gDNA count.
+RNA crosses it inside that exon and the crossing count is not a gDNA count.
 
 Both masks are pure functions of the signature array and the reference ids: no count, no density and no
 solve enters here.
@@ -34,7 +34,7 @@ def count_observable_masks(
     region_count_observable = (sig & _EXON_BITS) == 0
     lo, hi = boundary_region_indices(ref_id)
     # observable ⇔ no exon bit is SHARED across the boundary ⇒ no single exon-strand continues across it
-    # ⇒ no unspliced mature RNA crosses, so the crossing count is gDNA (+ nascent).
+    # ⇒ no RNA crosses it inside an exon, so the crossing count is gDNA plus RNA that has not spliced there.
     boundary_count_observable = (sig[lo] & sig[hi] & _EXON_BITS) == 0
     return region_count_observable, boundary_count_observable
 

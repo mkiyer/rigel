@@ -190,7 +190,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 |------|---------|-------------|
 | `--seed N` | `0` | Seed of the `sample` assignment's draw; another seed is another draw from the same posterior. |
 | `--em-iterations N` | `1000` | EM iteration budget. The EM runs accelerated (SQUAREM) steps of three EM updates each, up to a third of this budget, until it converges. At least one step always runs, so `0` does not skip the EM: every fragment is still assigned. |
-| `--em-mode {vbem,map}` | `vbem` | EM variant. `vbem` = Variational Bayes EM (digamma soft updates); `map` = MAP-EM with hard `max(0, n+a-1)` updates. |
+| `--em-mode {vbem,map}` | `vbem` | EM variant. `vbem` = Variational Bayes EM (digamma soft updates); `map` = MAP-EM: each step adds the calibration's gDNA and RNA pseudocounts to the components' fragment counts and normalises. |
 | `--assignment-mode {sample,fractional}` | `sample` | Post-EM fragment assignment. `sample` gives every fragment to one transcript (or gDNA), count first: each transcript's fractional count is rounded within its EM locus, then each fragment is drawn from its own posterior toward the transcripts still short of their count, so whole counts equal the rounded fractional counts. `fractional` keeps each fragment's posterior weights. |
 
 **Performance**
@@ -214,7 +214,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 | `--overhang-alpha A` | `0.1` | Per-base overhang penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
 | `--mismatch-alpha A` | `0.1` | Per-mismatch (`NM` tag) penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
 | `--pruning-min-posterior P` | `1e-4` | Minimum posterior for candidate pruning. Lower keeps more candidates; `0` disables pruning. |
-| `--splicing-anchor-tolerance K` | `3` | Resolver-side splicing-anchor tolerance (bp) around annotated introns. The fractional calibration accumulator does not interpret this value, and it is not the splice blacklist's anchor test, which it never changes. |
+| `--splicing-anchor-tolerance K` | `3` | Splicing-anchor tolerance (bp) at annotated introns. An annotated intron in a fragment's unsequenced gap may overlap up to K aligned bases at either end and still count as lying in the gap, and a transcript is contradicted only by an intron that overlaps an aligned block by more than K bases. It shapes the gap hypotheses calibration arbitrates, so it changes calibration's tally. It is not the splice blacklist's anchor test, which it never changes. |
 | `--emit-locus-stats` / `--no-emit-locus-stats` | off | Write per-locus EM convergence profiling (iteration counts, timing, equivalence-class stats) to `locus_stats.feather` |
 
 ### rigel sim

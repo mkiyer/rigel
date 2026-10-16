@@ -105,9 +105,10 @@ def test_draining_a_choice_equals_depositing_it_directly(choice):
     arbitration with three hypotheses, a canonical sort and a replay; the other deposits once. If they
     agree on every ``Tally`` field then the drain genuinely has no tally semantics of its own.
 
-    The one field that must NOT agree is ``qc``: the drained route counted a `deferred` on the way in.
-    That is checked separately in :func:`test_the_drain_consumes_the_bank_and_conserves`, and excluded
-    here by name so this gate cannot pass by comparing nothing.
+    ``qc`` must agree too: the drained route counted a `deferred` on the way in, and the drain takes it
+    back out with the bank (:func:`test_the_drain_consumes_the_bank_and_conserves` checks that on its
+    own). The one field allowed to differ is ``gap_resolution``, and it is named in the assertion below:
+    every other field is compared.
     """
     drained = _fresh()
     _offer_held(drained)

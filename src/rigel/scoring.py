@@ -98,9 +98,9 @@ class FragmentScorer:
         # Per-transcript geometry arrays for RNA scoring.
         t_length_arr = index.t_df["length"].values.astype(np.int32)
 
-        # Build per-transcript exon CSR arrays for coverage-weight
-        # and genomic→transcript coordinate mapping. This replaces
-        # a 457K-iteration Python loop with a single vectorized call.
+        # Per-transcript exon CSR arrays for the coverage weight and the
+        # genomic→transcript coordinate mapping, built once by the index
+        # and cached there.
         exon_offsets, exon_starts, exon_ends, exon_cumsum = index.build_exon_csr()
 
         ctx = FragmentScorer(
@@ -129,10 +129,10 @@ class FragmentScorer:
         _eps = max(pruning_min_posterior, CONSTANTS.scoring.pruning_floor)
         max_ll_delta = -math.log(_eps) if _eps < 1.0 else 0.0
 
-        # Build is_nrna array for pool separation.
-        # Only synthetic (rigel-generated) nRNA spans belong to the nRNA pool.
-        # Annotated single-exon transcripts are valid mRNA and must be scored
-        # as mRNA even though they can serve as nRNA components.
+        # The synthetic flag drives the scorer's pool separation: only rigel's
+        # synthetic spans form the span pool. An annotated single-exon transcript,
+        # even one that covers a multi-exon transcript's span (``is_nrna``), is an
+        # annotated transcript and is pruned with them.
         t_is_nrna_arr = index.t_df["is_synthetic"].values.astype(np.uint8)
 
         native_ctx = NativeFragmentScorer(

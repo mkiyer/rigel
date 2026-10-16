@@ -72,8 +72,8 @@ class RegionChain:
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────
 # ONE SLOT'S DECONVOLUTION RESULT — vocabulary, so it lives at the bottom layer: `region_geometry` and
-# `simplex_logodds` (layer 3), the strand family (layer 4) and `sweep` (layer 6) all need the type, and
-# a type every layer reaches for belongs below all of them. It is not a strand concept: the composition
+# `simplex_logodds` (layer 3) and `sweep` (layer 6) all need the type, and a type more than one layer
+# reaches for belongs below all of them. It is not a strand concept: the composition
 # `(f_pos, f_neg, f_g)` is the tool's central datum and a slot is what carries it.
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -86,7 +86,7 @@ class RegionDeconv:
       ``*_frac`` plus ``*_frac_var``, and no mass: a region's mass is a per-FACE quantity and the
       solve is face-invariant, so a single ``*_mass`` here would be meaningless;
     * the chain PROJECTION (`sweep.chain_region_deconv` / `chain_boundary_deconv`) returns the mass
-      the downstream `CalibrationResult` consumes, and no precision.
+      and the composition the downstream `CalibrationResult` publishes, and no precision.
     """
 
     gdna_frac: (
@@ -96,7 +96,8 @@ class RegionDeconv:
     # ψ's `compose` in `native/psi_kernel.h`, so f_pos+f_neg+gdna_frac = 1).
     rna_pos_frac: "np.ndarray | None" = None  # float64[K] — f_pos
     rna_neg_frac: "np.ndarray | None" = None  # float64[K] — f_neg
-    # the PROJECTION's consumed output (calibrate/derive read ONLY these); None on the per-region solve.
+    # the PROJECTION's masses; None on the per-region solve. `calibrate` publishes them as the result's
+    # counts beside the fractions above, and `derive` and the capture efficiencies read the gDNA one.
     gdna_mass: "np.ndarray | None" = None  # float64[K]
     rna_mass: "np.ndarray | None" = None  # float64[K]  (= (1−gdna_frac)·M_unspliced + spliced mass)
     # `Var(log f_g)`, NOT `Var(f_g)` — a grid moment of `log f_g` over the lambda lattice

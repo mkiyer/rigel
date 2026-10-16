@@ -40,15 +40,18 @@ class ScoredFragments:
     t_indices : np.ndarray
         int32[n_candidates] — candidate transcript indices.
     log_liks : np.ndarray
-        float32[n_candidates] — log(P_strand × P_insert) per candidate.
+        float32[n_candidates] — per candidate, ``log P_strand + log P_insert`` plus the overhang
+        penalty (log-penalty × overhang bases) and the mismatch penalty (log-penalty × NM).
     count_cols : np.ndarray
         uint8[n_candidates] — ``SpliceStrandCol`` index per candidate (0–9).
     coverage_weights : np.ndarray
         float32[n_candidates] — coverage weight per candidate.
     is_spliced : np.ndarray
-        bool[n_units] — True if gDNA cannot explain this unit: certified RNA (the scorer's
-        ``gdna_can_explain``). An artifact or an implicit splice within the maximum fragment length is
-        False; a sequenced junction, or an implicit splice beyond that length, is True.
+        bool[n_units] — True when the unit has no gDNA candidate: gDNA can explain none of its
+        alignments (each carries a sequenced junction the blacklist kept; the scorer's
+        ``gdna_can_explain``), or its gDNA term fell outside the pruning bound of the unit's best RNA
+        candidate (``gdna_competes``). An unspliced, artifact or implicit unit is True only in the
+        second case.
     gdna_log_liks : np.ndarray
         float32[n_units] — pre-computed gDNA log-likelihood per unit.
         -inf where ``is_spliced``.

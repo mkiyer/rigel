@@ -1,9 +1,9 @@
 """
 rigel.sim.scenario — End-to-end simulation scenario orchestrator.
 
-A ``Scenario`` bundles genome generation, gene annotation, read
-simulation, alignment (minimap2), BAM collation (samtools), and
-index building (TranscriptIndex) into a single reproducible workflow.
+A ``Scenario`` bundles genome generation, gene annotation, index
+building (TranscriptIndex), read simulation, alignment (minimap2) and
+BAM name-sorting (samtools) into a single reproducible workflow.
 
 All artifacts are written to a working directory (temp by default)
 and can be cleaned up via ``cleanup()`` or the context-manager
@@ -113,7 +113,8 @@ class ScenarioResult:
     gtf_path : Path
         Gene annotation GTF file.
     bam_path : Path
-        Name-sorted BAM file (aligned or oracle).
+        BAM file: name-sorted (``samtools sort -n``) when aligned,
+        query-grouped (``SO:unsorted GO:query``) when oracle.
     index_dir : Path
         TranscriptIndex output directory (Feather files).
     index : TranscriptIndex
@@ -174,7 +175,8 @@ class ScenarioResult:
         Unlike :meth:`ground_truth_from_bam`, this counts *all* simulated
         fragments regardless of alignment success, providing the true
         number of fragments the simulator produced per transcript.
-        gDNA reads (``gdna:`` prefix) are excluded.
+        Only mature-RNA origins are counted: gDNA (``gdna:`` prefix) and
+        nascent RNA (``nrna_`` prefix) reads are excluded.
 
         Returns
         -------
@@ -330,11 +332,10 @@ class Scenario:
         """Execute the full simulation pipeline.
 
         1. Write genome FASTA + index.
-        2. Write gene annotations (GTF).
+        2. Write gene annotations (GTF) and build the TranscriptIndex from them.
         3. Simulate paired-end reads (FASTQ).
         4. Align with minimap2 (``splice:sr``).
-        5. Collate BAM with samtools.
-        6. Build TranscriptIndex.
+        5. Name-sort the BAM with ``samtools sort -n``.
 
         Parameters
         ----------
@@ -439,15 +440,16 @@ class Scenario:
     ) -> ScenarioResult:
         """Execute the simulation pipeline using oracle (perfect) alignments.
 
-        Bypasses FASTQ generation and external alignment (minimap2/samtools):
-        :class:`wgs_engine.WholeGenomeSimulator` writes the name-sorted oracle
-        BAM directly (CIGAR strings derived from known transcript structure).
+        Bypasses external alignment (minimap2/samtools):
+        :class:`wgs_engine.WholeGenomeSimulator` writes the oracle BAM directly,
+        query-grouped (``SO:unsorted GO:query``), with CIGAR strings derived from
+        the known transcript structure. The engine writes its FASTQ pair as well,
+        but the result carries no FASTQ.
 
         Pipeline:
         1. Write genome FASTA + index.
-        2. Write gene annotations (GTF).
+        2. Write gene annotations (GTF) and build the TranscriptIndex from them.
         3. Generate oracle BAM (perfect alignments).
-        4. Build TranscriptIndex.
 
         Parameters
         ----------

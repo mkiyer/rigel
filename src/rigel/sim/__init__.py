@@ -12,7 +12,7 @@ reads
     (the engine itself is ``wgs_engine.WholeGenomeSimulator``).
 scenario
     ``Scenario``, ``ScenarioResult`` — end-to-end orchestration
-    (genome → GTF → FASTQ → BAM → TranscriptIndex).
+    (genome → GTF → TranscriptIndex → FASTQ → BAM).
 benchmark
     ``BenchmarkResult``, ``TranscriptAccuracy``, ``run_benchmark`` —
     accuracy benchmarking comparing observed vs expected counts.

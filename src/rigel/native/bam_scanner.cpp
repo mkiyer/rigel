@@ -9,8 +9,10 @@
  *   4. Assembles each hit's mates into one fragment (AssembledFragment)
  *   5. Calls FragmentResolver::_resolve_core() directly
  *   6. Appends results to FragmentAccumulator
- *   7. Collects model training observations as arrays
- *   8. Returns everything to Python in one call
+ *   7. Offers each read name's placements to the calibration tally at once (AccumulatorSet::offer)
+ *   8. Collects model training observations as arrays
+ *   9. Streams FragmentAccumulator chunks to Python through `chunk_callback` as they fill, and returns
+ *      the stats, the strand observations and the calibration payload once the whole BAM is read
  *
  * Module: rigel._bam_impl
  *
@@ -190,8 +192,11 @@ struct ParsedAlignment {
     int32_t ref_start;      // pos
     uint16_t flag;
     // Per-record count of CIGAR sj dropped by the splice-artifact
-    // blacklist.  Populated by filter_blacklisted_sjs in Pass 1 (for
-    // scanner stats parity) and Pass 2 (for the ZB:i annotated-BAM tag).
+    // blacklist.  Populated by filter_blacklisted_sjs in Pass 1 (summed
+    // per fragment for the resolver's SPLICE_ARTIFACT promotion; the
+    // n_sj_blacklisted stat is accumulated through parse_bam_record's
+    // pointer argument, not from here) and Pass 2 (for the ZB:i
+    // annotated-BAM tag).
     // Fits into the padding after `flag` — zero effective memory growth.
     uint16_t n_sj_blacklisted = 0;
     int32_t nm;             // NM tag (edit distance), 0 if absent
@@ -313,10 +318,10 @@ struct BamScanStats {
 
     // ── the per-fragment splice census ────────────────────────────────────────────────────────────
     //
-    // ⭐ ONE observation per fragment the scanner offers the accumulator, filed under the resolver's
-    // own classification. This IS `rigel report`'s splice breakdown, which used to be read off the
-    // fragment-length CATEGORY MODELS — so it counted only the fragments that also yielded a length
-    // observation, a population nobody had stated. The scanner classifies, so the scanner counts.
+    // ⭐ ONE observation per HIT the scanner offers the accumulator (a multimapper's hits one by one), filed
+    // under the resolver's own classification. This IS `rigel report`'s splice breakdown, which used to be
+    // read off the fragment-length CATEGORY MODELS — so it counted only the fragments that also yielded a
+    // length observation, a population nobody had stated. The scanner classifies, so the scanner counts.
     //
     // ⚠ An ARRAY and not five named fields, deliberately: `census[st]++` is one statement, the merge
     // is one loop, the export is one loop, and a category added to `SpliceType` cannot slip past any
@@ -328,7 +333,12 @@ struct BamScanStats {
     // accumulator was installed. ⭐ It exists to close the books — without it those `return`s are a
     // silent loss, which is the pattern this accumulator was rewritten to delete. With it:
     //
-    //   Σ census − census[SPLICE_ARTIFACT] == qc.deposited + Σ qc.dropped_* + n_deposit_not_offered
+    //   Σ census − census[SPLICE_ARTIFACT] == qc.deposited + qc.deferred_undetermined_gap
+    //       + qc.deferred_multiple_placements + Σ qc.dropped_* + n_deposit_not_offered
+    //
+    // ⚠ Exact while no read name offers more than one placement. The census and this counter count
+    // assembled hits and the qc counts one offer per read name, so a multimapper offering k placements
+    // adds k on the left and 1 on the right.
     //
     // ⚠ Artifacts are subtracted rather than counted here because holding them out is a POSITIVE
     // scanner decision about the data, not a failure to represent it — and `census[SPLICE_ARTIFACT]`
@@ -1625,7 +1635,7 @@ private:
                 // ── the splice census ─────────────────────────────────────────────────────────────
                 //
                 // ⭐ FIRST, and before any gate, because this is the count of what the scanner SAW:
-                // one observation per fragment reaching this adapter.
+                // one observation per hit reaching this adapter.
                 //
                 // ⚠ It is deliberately NOT gated on `ws.acc_set`: what the scanner classified does
                 // not depend on whether an accumulator happened to be installed.
@@ -2133,10 +2143,12 @@ private:
         // contiguous buffer and does not depend on the AccumulatorSet's internal layout. Arrays are emitted
         // FLAT; the two-column ones are reshaped Python-side.
         //
-        // ⚠ And this copy cannot be a memcpy: the accumulator stores AoS (a 48 B `Region` interleaving four
-        // channel pairs) while the payload is SoA, so the transpose is a strided read by construction. That
-        // is the price of the hot struct being 48 B with no padding, which is the right trade — this loop is
-        // O(partition) once per scan, the deposit is O(fragments).
+        // ⚠ And the boundary and sj copies cannot be a memcpy: the accumulator stores AoS — a 40 B `Boundary`
+        // interleaves two uint32 count pairs with three float64 channels, a 32 B `SpliceJunction` one count pair
+        // with three float64s — while the payload is SoA, so their transpose is a strided read by construction.
+        // (The 8 B `Region` is one count pair, already the payload's layout.) That is the price of hot structs
+        // with no padding, which is the right trade — this loop is O(partition) once per scan, the deposit is
+        // O(fragments).
         if (acc_set_) {
             using rigel::accumulator::Accumulator;
             using rigel::accumulator::Boundary;
@@ -2571,7 +2583,7 @@ public:
                 // Gather bam1_t* for all records in this hit,
                 // skipping any already emitted by an earlier hit.
                 // Stamp the per-record ZB:i tag (splice-artifact count)
-                // on each bam1_t as we select it \u2014 this is a record-local
+                // on each bam1_t as we select it — this is a record-local
                 // property of the CIGAR, not a hit-level value, so it
                 // lives outside the uniform stamp_and_write_hit helper.
                 std::vector<bam1_t*> hit_raws;
@@ -2939,10 +2951,10 @@ NB_MODULE(_bam_impl, m) {
     // character. The gate reads them off `dataclasses.fields(Tally)`, so a name that drifts fails loudly
     // instead of quietly dropping out of the comparison.
     //
-    // ⚠ Every two-column view needs EXPLICIT STRIDES. The storage is AoS with mixed widths — a 48 B `Region`
-    // holds two uint32 pairs then two uint64 pairs — so the row stride is `sizeof(struct)/sizeof(element)`,
-    // not the column count. The binding this replaced passed no strides at all and worked only because the
-    // old `Region` was exactly four contiguous uint32.
+    // ⚠ Every view into a struct bank needs EXPLICIT STRIDES. The storage is AoS with mixed widths — a 40 B
+    // `Boundary` holds two uint32 pairs then three float64s, a 32 B `SpliceJunction` one uint32 pair then three
+    // float64s — so the row stride is `sizeof(struct)/sizeof(element)`, not the column count. The 8 B `Region`
+    // is one uint32 pair, so there the two coincide; the START/END/SPAN banks are flat arrays and need none.
     {
         using rigel::accumulator::Accumulator;
         using rigel::accumulator::Boundary;
@@ -3208,8 +3220,9 @@ NB_MODULE(_bam_impl, m) {
 
             // Element-wise sum of `other` into this accumulator — the per-worker merge the parallel scan
             // performs internally, exposed so the DETERMINISM contract can be tested directly: shard one
-            // fragment corpus K ways, merge, and require bit-identity with the unsharded run. Every channel
-            // is an integer now, so that identity is exact rather than approximate.
+            // fragment corpus K ways, merge, and compare with the unsharded run. The count banks are integers
+            // and merge bit for bit; the five float64 banks (the inverse-length sums and the conserved masses)
+            // agree to within the float64 representation, because the merge re-associates their sums.
             .def("merge_from",
                  [](Accumulator& a, const Accumulator& other) { a.merge_from(other); },
                  nb::arg("other"));

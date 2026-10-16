@@ -81,8 +81,9 @@ public:
     std::vector<int32_t> exon_bp;
     std::vector<int32_t> intron_bp;
 
-    // The annotated introns found inside this fragment's UNSEQUENCED gaps, and whether the candidate
-    // transcripts disagreed about them. Carried out of `RawResolveResult` unchanged.
+    // The annotated introns found inside this fragment's UNSEQUENCED gaps, one run per gap hypothesis
+    // (`gap_intron_offsets`; an empty run is the unspliced hypothesis). Carried out of `RawResolveResult`
+    // unchanged.
     //
     // ⚠ INSTRUMENTATION, and it is load-bearing for one gate that is otherwise unobservable. The
     // deposit adapter unions these with the observed CIGAR-N introns and the accumulator normalises
@@ -489,7 +490,7 @@ public:
     std::vector<int32_t> exon_ends_;       // [total_exons] — genomic end coords
     std::vector<int32_t> exon_cumsum_;     // [total_exons] — cumulative spliced bp before each exon
 
-    // --- SPLICED_IMPLICIT discriminant tolerance (bp) ---
+    // --- Splicing-anchor tolerance K (bp), the gap-hypothesis enumeration's slack ---
     int32_t splicing_anchor_tolerance_ = 0;
     //: the library's fragment-length limit; 0 ⇒ no molecule is compatible, so the compatibility
     //: rescue in `detect_chimera` cannot fire and every disjoint candidate stays a chimera.
@@ -674,9 +675,12 @@ public:
     // SPLICED_IMPLICIT detection
     // ----------------------------------------------------------------
 
-    /// Set the splicing-anchor tolerance K (bp) used for one-sided slack
-    /// in the SPLICED_IMPLICIT per-intron whole-containment discriminant.
-    /// Negative K is clamped to 0; default 0 (strict containment).
+    /// Set the splicing-anchor tolerance K (bp) of the gap-hypothesis enumeration, which every
+    /// non-chimeric fragment with an unsequenced gap goes through. K is the slack in both of its tests:
+    /// an annotated intron in a gap may overlap up to K aligned bases on either side and is still cut
+    /// whole (`collect_transcript_introns_in_gap`), and a transcript is contradicted only by an intron
+    /// overlapping more than K bases of an aligned block (`transcript_contradicts_blocks`). Negative K
+    /// is clamped to 0; the resolver's own default, before this is called, is 0.
     void set_splicing_anchor_tolerance(int32_t K) {
         if (K < 0) K = 0;
         splicing_anchor_tolerance_ = K;
@@ -820,7 +824,7 @@ public:
 
         // ⭐ The UNSPLICED hypothesis. Present when some compatible transcript implies nothing in the
         // gaps (a retained-intron isoform), and ALWAYS when no annotated sj was sequenced -- then
-        // the molecule may be gDNA or nascent, and the gap is real template.
+        // the molecule may be gDNA or RNA that has not spliced there, and the gap is real template.
         if (any_candidate_implies_nothing || !certified_rna || cr.n_gap_hypotheses() == 0)
             emit_unspliced_hypothesis(cr);
     }

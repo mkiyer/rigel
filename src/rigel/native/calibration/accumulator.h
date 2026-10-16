@@ -207,9 +207,9 @@ inline const char* outcome_key(DepositOutcome outcome) noexcept {
 /// hypothesis.
 ///
 /// ⭐ THE EMPTY HYPOTHESIS IS THE UNSPLICED ONE, and it is the genomic explanation: cutting nothing means
-/// the gap is real template, i.e. the molecule is gDNA -- or nascent RNA, which is the same unspliced
-/// span. That is why the accumulator needs no separate "could this be gDNA?" flag, and why the nascent
-/// shadow transcript is not a candidate: it IS this hypothesis.
+/// the gap is real template, i.e. the molecule is gDNA -- or RNA that has not spliced there, which is the
+/// same unspliced span. That is why the accumulator needs no separate "could this be gDNA?" flag, and why
+/// the synthetic span adds no hypothesis of its own: it IS this hypothesis.
 ///
 /// ⚠ `introns` are the IMPLIED ones only. Introns the CIGAR actually stated are cut under EVERY
 /// hypothesis and live on `OfferedFragment` instead, because they are not in doubt.
@@ -217,8 +217,8 @@ struct GapHypothesis {
     const IntronBlock*  introns;        // implied; empty => the unspliced (genomic) hypothesis
     std::size_t         n_introns;
     std::int32_t        sj_strand;      // ⚠ an INFERENCE; an observed motif always wins
-    const std::int32_t* supporting_t;   // candidate transcripts implying this path -- the second pass
-    std::size_t         n_supporting;   //   weights hypotheses by their abundance; pass one never reads
+    const std::int32_t* supporting_t;   // candidate transcripts implying this path -- kept in the deferred record;
+    std::size_t         n_supporting;   //   their one use is the last tie-break of `compare_placements`
 
     bool is_unspliced() const noexcept { return n_introns == 0; }
 };
@@ -275,26 +275,8 @@ struct GapCensus {
     void merge_from(const GapCensus& other) noexcept;
 };
 
-/// ⭐ Fragments whose gap has more than one surviving explanation, held WHOLE for the second pass.
-///
-/// The FRAGMENT is stored, never its consequences. Object ids are large, derived, and would have to be
-/// kept consistent with the partition; the fragment is small and replays exactly. The drain re-enters
-/// `Accumulator::deposit` with the chosen hypothesis, so there is no second deposit path, no duplicated
-/// crossing logic, and byte-identity with the specification is preserved for free.
-///
-/// Two nested variable-length levels -- fragments hold hypotheses, hypotheses hold introns -- so there
-/// are two offset arrays. Offsets are cumulative and start at 0, so an empty queue is `{0}`, never `{}`.
-///
-/// ⛔ This is a LIST. Concatenating per-worker queues gives a different byte sequence at 1, 2, 4 and 8
-/// workers with identical contents -- so the EXPORT sorts on the record's own content, exactly as
-/// `Tally.deferred_arrays()` does in the specification. Two records that tie are identical records.
-///
-/// ⚠ EVERY ARRAY IS int64, INCLUDING THE TWO STRAND COLUMNS. They are int32 everywhere else in the
-/// scanner, but the specification's flattening emits one dtype and the parity gate compares dtypes -- so
-/// widening here costs 8 bytes per deferred record and removes a conversion that would otherwise have to
-/// happen at the export, where getting it wrong compares equal by value.
 /// One rebuilt `OfferedFragment` with the storage its spans point into — the inverse of
-/// `DeferredFragments::append_placement`, for the set's offer and the parity surface.
+/// `DeferredFragments::append_placement`, for the set's offer.
 struct OfferedStorage {
     std::vector<IntronBlock>    observed;
     std::vector<IntronBlock>    implied;
@@ -303,6 +285,26 @@ struct OfferedStorage {
     OfferedFragment             offered{};
 };
 
+/// ⭐ Fragments held WHOLE for the second pass: more than one surviving explanation of the gap, or of
+/// which placement the molecule took.
+///
+/// The FRAGMENT is stored, never its consequences. Object ids are large, derived, and would have to be
+/// kept consistent with the partition; the fragment is small and replays exactly. The drain re-enters
+/// `Accumulator::deposit` with the chosen hypothesis, so there is no second deposit path, no duplicated
+/// crossing logic, and byte-identity with the specification is preserved for free.
+///
+/// Three nested variable-length levels -- records hold placements; placements hold observed introns and
+/// hypotheses; hypotheses hold implied introns and supporting transcripts -- so there are five offset
+/// arrays. Offsets are cumulative and start at 0, so an empty queue is `{0}`, never `{}`.
+///
+/// ⛔ This is a LIST. Concatenating per-worker queues gives a different byte sequence at 1, 2, 4 and 8
+/// workers with identical contents -- so the EXPORT sorts on the record's own content, exactly as
+/// `Tally.deferred_arrays()` does in the specification. Two records that tie are identical records.
+///
+/// ⚠ EVERY ARRAY IS int64, INCLUDING THE THREE STRAND COLUMNS (two per placement, one per hypothesis). They
+/// are int32 everywhere else in the scanner, but the specification's flattening emits one dtype and the parity
+/// gate compares dtypes -- so widening here costs 8 bytes per placement and 4 per hypothesis, and removes a conversion that would otherwise have to
+/// happen at the export, where getting it wrong compares equal by value.
 struct DeferredFragments {
     /// ⭐ RECORDS → PLACEMENTS. A record is one fragment; a gap-held unique mapper holds ONE placement, a
     /// multimapping fragment one per admitted alignment, each on its own reference. Every per-placement

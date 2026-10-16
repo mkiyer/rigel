@@ -73,9 +73,10 @@ class PipelineStats:
 
     # --- The per-fragment splice census (scanner QC; ``rigel report``'s splice breakdown) ---
     #
-    # ONE observation per fragment the scanner offers the accumulator — unique mapper, resolved,
-    # non-chimeric. That population is stated; reading these off a fragment-length category model
-    # instead would silently count only the fragments that also yielded a length observation.
+    # ONE observation per placement the scanner hands the accumulator's deposit adapter — every
+    # non-chimeric hit, intergenic ones included: once for a unique mapper, once per placement for a
+    # multimapping fragment. That population is stated; reading these off a fragment-length category
+    # model instead would silently count only the fragments that also yielded a length observation.
     #
     # The field names are derived, not chosen — ``rigel.splice.census_field`` builds each one from
     # its :class:`~rigel.splice.SpliceType` member name, and the C++ builds the same key from
@@ -91,9 +92,13 @@ class PipelineStats:
     #: molecule on one region_bound axis (chiefly blocks on more than one reference). It exists so that
     #:
     #:   Σ census − n_census_splice_artifact
-    #:       == qc.deposited + Σ qc.dropped_* + n_deposit_not_offered
+    #:       == qc.deposited + Σ qc.dropped_* + qc.deferred_undetermined_gap
+    #:          + qc.deferred_multiple_placements + n_deposit_not_offered
     #:
-    #: closes exactly. Those returns were a silent loss before this counter.
+    #: closes exactly when no fragment offers more than one placement. The census counts placements
+    #: and the ``qc`` counters count fragments, so a multimapping fragment that offers several
+    #: placements is censused once per placement and counted once. Those returns were a silent loss
+    #: before this counter.
     n_deposit_not_offered: int = 0
 
     @property

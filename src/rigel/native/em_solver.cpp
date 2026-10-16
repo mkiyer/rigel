@@ -1888,8 +1888,11 @@ struct PartitionView {
 // equivalence-class builder downstream).
 //
 // Populates ``sub.log_eff_len`` from per-transcript effective lengths
-// (``all_t_eff_lens`` is the FL-marginal containment effective length
-// L̃_t computed in Python) and the per-locus gDNA overlap effective length.
+// (``all_t_eff_lens`` is the EM's capture-contracted effective length,
+// computed in Python: the FL-marginal containment length L̃_t scaled by the
+// transcript's share-weighted mean capture efficiency, and L̃_t itself off
+// capture) and the per-locus gDNA component's capture-contracted effective
+// length.
 //
 // Candidates are written to pre-allocated output arrays via a write cursor
 // to avoid dynamic allocation in the inner loop. A reusable sort buffer
@@ -2044,9 +2047,10 @@ static void extract_locus_sub_problem_from_partition(
         double Le = all_t_eff_lens[t_arr[i]];
         sub.log_eff_len[i] = Le > 0.0 ? std::log(Le) : kInf;
     }
-    // gDNA component: FL-marginal overlap effective length for this
-    // MultiLocus. The scorer contributes log h_G(ell_f); the EM applies
-    // -log L̃_gDNA here, matching the RNA component contract.
+    // gDNA component: the capture-contracted effective length of this
+    // MultiLocus's gDNA (uncontracted off capture). The scorer contributes
+    // log h_G(ell_f); the EM applies -log L̃_gDNA here, matching the RNA
+    // component contract.
     double GLe = gdna_eff_len;
     sub.log_eff_len[sub.gdna_idx] = (GLe > 0.0 ? std::log(GLe) : kInf);
 
@@ -2063,7 +2067,7 @@ static void extract_locus_sub_problem_from_partition(
 
 static std::tuple<
     double,  // total_gdna_em
-    nb::ndarray<nb::numpy, double, nb::ndim<1>>,  // locus_rna_total[n_loci] (annotated mRNA + synthetic nRNA)
+    nb::ndarray<nb::numpy, double, nb::ndim<1>>,  // locus_rna_total[n_loci] (annotated transcripts + synthetic spans)
     nb::ndarray<nb::numpy, double, nb::ndim<1>>,  // locus_gdna[n_loci]
     nb::list,  // locus_stats
     nb::object,  // out_winner_tid (ndarray or None)
@@ -2078,7 +2082,7 @@ batch_locus_em_partitioned(
     // Per-locus grouped additive calibration priors
     f64_1d   locus_gdna_prior_count,
     f64_1d   locus_rna_prior_count,
-    // Per-locus FL-marginal overlap effective length for the gDNA component.
+    // Per-locus capture-contracted effective length of the gDNA component (uncontracted off capture).
     f64_1d   locus_gdna_eff_lens,
     // Per-transcript globals
     f64_2d   unambig_counts,
@@ -2818,8 +2822,8 @@ NB_MODULE(_em_impl, m) {
           " out_winner_tid, out_winner_post, out_n_candidates).\n"
           "\n"
           "locus_rna_total is the sum of posteriors assigned to any\n"
-          "transcript-like component (annotated mRNA + synthetic nRNA);\n"
-          "splitting into annotated mRNA vs synthetic nRNA is done by\n"
+          "transcript-like component (annotated transcripts and synthetic spans);\n"
+          "splitting into annotated transcripts vs synthetic spans is done by\n"
           "the Python caller.");
 
     m.def("connected_components", &connected_components_native,

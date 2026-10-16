@@ -78,7 +78,7 @@ class Interval(NamedTuple):
 class GenomicInterval(NamedTuple):
     """An interval located on a specific reference and strand.
 
-    Used by ``Fragment`` for aligned exons and splice junctions (introns),
+    Used for an aligned block passed to :meth:`rigel.index.TranscriptIndex.query`,
     and anywhere a positioned interval is needed without annotation metadata.
     """
 

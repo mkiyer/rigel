@@ -52,10 +52,14 @@ BAM Tag Schema
    * - ZF
      - i
      - Outcome bitfield fully answering "what happened to this fragment?":
-       bit 0 = is_resolved, bit 1 = is_mrna, bit 2 = is_gdna
-       (unspliced intergenic + EM-gDNA), bit 3 = is_nrna, bit 4 = is_synthetic,
+       bit 0 = is_resolved; bits 1-3 record which kind of candidate won:
+       bit 1 = is_mrna (an annotated transcript not flagged ``is_nrna``),
+       bit 2 = is_gdna (gDNA: unspliced intergenic + EM-gDNA), bit 3 = is_nrna
+       (a single-exon span over a multi-exon transcript's extent: an annotated
+       single-exon transcript covering it, or the synthetic span);
+       bit 4 = is_synthetic (the winning span is the synthetic span),
        bit 5 = is_intergenic (no transcript holds the fragment: gDNA when
-       unspliced, RNA with no pool bit when spliced), bit 6 = is_chimeric,
+       unspliced, RNA with no winner-kind bit when spliced), bit 6 = is_chimeric,
        bit 7 = is_multimapper_dropped.  See ``AF_*`` constants for canonical values.
    * - ZW
      - f
@@ -104,21 +108,26 @@ logger = logging.getLogger(__name__)
 # predicate answers "what happened to this fragment?" without requiring
 # cross-reference to any other tag.
 #
-#   bit 0 (0x01)  is_resolved             rigel assigned this fragment to a pool
-#   bit 1 (0x02)  is_mrna                 pool = mRNA
-#   bit 2 (0x04)  is_gdna                 pool = gDNA (unspliced intergenic + EM-gDNA)
-#   bit 3 (0x08)  is_nrna                 pool = nRNA (annotated or synthetic)
-#   bit 4 (0x10)  is_synthetic            nRNA subtype: rigel-generated span
+#   bit 0 (0x01)  is_resolved             a candidate won, or the intergenic fast path took it
+#   bit 1 (0x02)  is_mrna                 the winner is an annotated transcript not flagged is_nrna
+#   bit 2 (0x04)  is_gdna                 the winner is gDNA (unspliced intergenic + EM-gDNA)
+#   bit 3 (0x08)  is_nrna                 the winner is a single-exon span over a multi-exon
+#                                         transcript's extent: an annotated single-exon transcript
+#                                         covering it, or the synthetic span
+#   bit 4 (0x10)  is_synthetic            the winning span is the synthetic span (rigel-generated)
 #   bit 5 (0x20)  is_intergenic           no transcript holds it (deterministic fast-path): gDNA when
 #                                         unspliced; when spliced, RNA no annotated transcript holds
-#                                         (certified by its junction), with no pool bit
+#                                         (certified by its junction), with no winner-kind bit
 #   bit 6 (0x40)  is_chimeric             unresolved reason: chimeric
 #   bit 7 (0x80)  is_multimapper_dropped  unresolved reason: --no-include-multimap drop
 #
+# Bits 1-3 are the winner-kind bits: they record which kind of candidate won.
+#
 # Invariants (enforced by tests):
-#   1. is_resolved XOR (is_chimeric | is_multimapper_dropped)
-#   2. When is_resolved, exactly one of {is_mrna, is_gdna, is_nrna} is set, except a spliced
-#      intergenic fragment (RNA no annotated transcript holds), which sets none
+#   1. is_resolved and (is_chimeric | is_multimapper_dropped) are never both set; ZF = 0, the
+#      unresolved sentinel, sets neither
+#   2. When is_resolved, exactly one winner-kind bit {is_mrna, is_gdna, is_nrna} is set, except a
+#      spliced intergenic fragment (RNA no annotated transcript holds), which sets none
 #   3. is_synthetic  -> is_nrna
 #   4. is_intergenic -> is_resolved, never with is_mrna or is_nrna
 #   5. is_chimeric and is_multimapper_dropped are mutually exclusive

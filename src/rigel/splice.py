@@ -2,8 +2,8 @@
 rigel.splice — Splice classification enums for the quantification pipeline.
 
 Internal count arrays use 10 columns: 5 splice types × 2 strands
-(sense/antisense).  Strand is an internal signal used for gDNA
-estimation and is not exposed in user-facing output.
+(sense/antisense).  The output sums the two strand columns; strand is
+not exposed in user-facing output.
 
 Fragment splice types are based on splice junction status only:
 - UNSPLICED: no splice junctions detected
@@ -12,8 +12,8 @@ Fragment splice types are based on splice junction status only:
 - SPLICED_IMPLICIT: the mate gap spans an annotated intron of a candidate
 - SPLICE_ARTIFACT: a CIGAR junction the splice blacklist rejected
 
-Intronic vs exonic overlap is captured separately in the per-candidate
-overlap profile (n_exon_bp, n_intron_bp), not in the splice type.
+Intronic vs exonic overlap is recorded separately, per candidate (the
+resolver's ``exon_bp`` / ``intron_bp``), not in the splice type.
 """
 
 from enum import IntEnum

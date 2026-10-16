@@ -96,7 +96,9 @@ NB_MODULE(_resolve_impl, m) {
              "Set the transcript count and allocate scratch buffers.")
         .def("resolve_fragment", &FragmentResolver::resolve_fragment,
              nb::arg("frag"),
-             "Resolve a Fragment object to its compatible transcript set.\n\n"
+             "Resolve a Fragment object to its candidate transcript set (t_inds).\n"
+             "A candidate need not be compatible with the alignment: the merge falls\n"
+             "back to a union when the per-block sets share no transcript.\n\n"
              "Returns a ResolvedFragment, or None when the fragment has no exon blocks.")
         .def("set_transcript_strands", &FragmentResolver::set_transcript_strands,
              nb::arg("t_strand"),
@@ -119,8 +121,12 @@ NB_MODULE(_resolve_impl, m) {
         .def("set_splicing_anchor_tolerance",
              &FragmentResolver::set_splicing_anchor_tolerance,
              nb::arg("K"),
-             "Set splicing-anchor tolerance K (bp, >= 0) used by the\n"
-             "SPLICED_IMPLICIT per-intron whole-containment discriminant.")
+             "Set the splicing-anchor tolerance K (bp) of the gap-hypothesis\n"
+             "enumeration: an annotated intron in an unsequenced gap may overlap up\n"
+             "to K aligned bases on either side and is still cut whole, and a\n"
+             "transcript is contradicted only by an intron overlapping more than K\n"
+             "bases of an aligned block. Negative K is clamped to 0; the resolver's\n"
+             "own default, before this is called, is 0.")
         ;
 
     // --- The SpliceType constants, mirrored for the parity gate against rigel.splice ---

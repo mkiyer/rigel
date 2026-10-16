@@ -1,11 +1,12 @@
 """rigel.second_pass — scoring the side buffer's held fragments, and draining it.
 
-Pass 1 holds every fragment whose unsequenced gap has more than one surviving explanation — a small
-percent of a library, and systematically the long ones, because a longer gap admits more hypotheses.
-This module resolves them, in three steps that are three functions::
+Pass 1 holds two kinds of fragment WHOLE: one whose unsequenced gap has more than one surviving
+explanation — systematically the long ones, because a longer gap admits more hypotheses — and a
+multimapping fragment more than one of whose placements admits a surviving (placement, hypothesis)
+pair. This module resolves them, in three steps that are three functions::
 
     score_held_fragments  ->  choose_hypotheses  ->  drain
-        the three factors      one multinomial       re-enter deposit with the
+        the factors            one multinomial       re-enter deposit with the
         kept apart             draw per fragment     winner ALONE, and consume the bank
 
 ``drain`` is PURE: payload in, payload out. It rebuilds one accumulator per reference from the payload's
@@ -23,6 +24,10 @@ objects; pass 1 already counted how many molecules used each of them. So the sco
 abundance, no calibration output, and no second pass over the BAM::
 
     score(h)  =  rho(h)  x  f(L_h)  x  s(h)
+
+and on a multi-placement record a fourth factor, ``A_p``: the pass-1 unique traffic at the objects the
+hypothesis's placement deposits on (:func:`placement_abundance`). On a one-placement record it would be
+a common factor, so it is not applied.
 
 Every input comes from pass 1, which is what lets this run BEFORE calibration and lets calibration then
 run exactly once, on the complete tally.
@@ -63,10 +68,11 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class HypothesisTerms:
-    """The three factors, kept apart — diagnostics, not bookkeeping.
+    """The factors — ``rho``, ``f(L_h)``, ``s(h)`` and, on a multi-placement record, ``A_p`` — kept apart:
+    diagnostics, not bookkeeping.
 
-    The umbrella gap census partitions the held set by which question is open, which is the same thing
-    as which factor discriminates. Reporting the terms separately is what lets a regression be
+    The umbrella gap census partitions the gap-held records by which question is open, which is the same
+    thing as which factor discriminates. Reporting the terms separately is what lets a regression be
     attributed to one of them instead of to "the score moved".
 
     Every array is flat and aligned with ``payload.deferred.hypothesis_offsets`` — one entry per

@@ -378,10 +378,15 @@ class TestSpliceCensus:
             )
 
     def test_the_census_accounts_for_every_fragment_offered_to_the_accumulator(self, oracle):
-        """The invariant: every censused fragment either deposited, was named as a rejection, or
-        was named as a hold-out. Nothing is lost between the two subsystems.
+        """The invariant: every censused fragment either deposited, was named as a rejection, was
+        held for the second pass, or was named as a hold-out. Nothing is lost between the two
+        subsystems.
 
-            Σ census − census[SPLICE_ARTIFACT] == qc.deposited + Σ qc.dropped_* + n_deposit_not_offered
+            Σ census − census[SPLICE_ARTIFACT]
+                == qc.deposited + Σ qc.dropped_* + qc.deferred_undetermined_gap + n_deposit_not_offered
+
+        Every fragment of this fixture has one placement, so the census, which counts placements,
+        and the ``qc`` counters, which count fragments, count the same fragments.
 
         ``SPLICE_ARTIFACT`` is subtracted because it is censused and then **held out by the
         scanner**: a blacklisted CIGAR-N sj may be a real-but-rejected sj OR a wholly
@@ -417,7 +422,7 @@ class TestSpliceCensus:
             f"reconcile with deposited={qc.deposited} dropped=("
             f"too_long={qc.dropped_too_long}, empty={qc.dropped_empty}, "
             f"strand_undefined={qc.dropped_strand_undefined}, "
-            f"ambiguous_path={qc.deferred_undetermined_gap}) "
+            f"deferred_undetermined_gap={qc.deferred_undetermined_gap}) "
             f"not_offered={stats.n_deposit_not_offered}"
         )
 
@@ -547,7 +552,7 @@ class TestSpliceCensus:
     # The census being a SUPERSET of the fragment-length observation population is the entire reason
     # it exists, but there is no separate observation counter left to compare it against. The
     # population statement that survives is the identity above: every censused fragment either
-    # deposits, is a named rejection, or is a named hold-out.
+    # deposits, is a named rejection, is held for the second pass, or is a named hold-out.
 
 
 def test_an_intron_on_another_reference_is_not_cut(tmp_path):

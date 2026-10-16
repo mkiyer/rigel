@@ -1,8 +1,11 @@
 /**
  * scoring.cpp — nanobind C++ extension for hot-path scoring functions.
  *
- * This module provides performance-critical kernels called from the
- * Python scoring loop.  Functions are exposed as ``rigel._scoring_impl``.
+ * This module provides the performance-critical scoring kernels. Python
+ * builds one NativeFragmentScorer per run (``rigel.scoring``) and feeds the
+ * buffer's chunks to a StreamingScorer (``rigel.scan.FragmentRouter``); the
+ * per-fragment loop runs here, in C++.  Functions are exposed as
+ * ``rigel._scoring_impl``.
  *
  * Contents:
  *   - compute_fragment_weight (the coverage weight, used by the kernels below)
@@ -166,8 +169,11 @@ class NativeFragmentScorer {
     // the penalty as 0; a candidate with any overhang is skipped, which is what the -inf would have done
     bool oh_gate_;
     double oh_log_pen_;
-    // `--mismatch-alpha 0` is a hard gate too; nm * -inf is -inf (nm > 0), so the EM path needs no flag, but the
-    // deterministic path, which scores nothing, reads it
+    // `--mismatch-alpha 0` is a hard gate too, carried by the penalty on the EM path: nm * -inf is -inf
+    // (nm > 0), which prunes an RNA candidate and keeps a non-multimapper's gDNA term from competing. ⚠ In a
+    // multimapper's online log-sum-exp, two -inf gDNA terms before any finite one make the sum NaN, and
+    // `flush_mm_group` then emits no gDNA candidate even when a later hit's term is finite. The deterministic
+    // path, which scores nothing, reads the flag
     bool mm_gate_;
     double mm_log_pen_;
     int32_t fl_max_size_;
@@ -178,7 +184,7 @@ class NativeFragmentScorer {
     // --- Copied index arrays ---
     std::vector<int8_t>  t_strand_;   // int8[n_transcripts]
     std::vector<int32_t> t_length_;   // spliced exonic length
-    std::vector<uint8_t> t_is_nrna_;  // uint8[n_transcripts] — 1=nRNA, 0=mRNA
+    std::vector<uint8_t> t_is_nrna_;  // uint8[n_transcripts] — synthetic flag: 1 = the synthetic span, 0 = annotated
 
     // --- Pool-separated likelihood pruning ---
     double max_ll_delta_;             // Δ = -log(ε), pre-computed
@@ -527,10 +533,10 @@ private:
             ++st.mm_nh_gdna;
         }
 
-        // Track member count for NH bookkeeping
+        // Count the group's alignments — read only as the group's non-empty test, before a flush
         ++st.mm_n_members;
 
-        // Score and merge mRNA candidates
+        // Score and merge every transcript candidate, annotated or the synthetic span
         if (n_cand <= 0) return;
 
         for (int64_t k = start; k < end; ++k) {
@@ -601,7 +607,8 @@ private:
 
         if (st.mm_n_members == 0) return;
 
-        // Pool-separated likelihood pruning
+        // Pool-separated likelihood pruning: annotated transcripts (`mrna_best`) and synthetic spans
+        // (`nrna_best`, by `t_is_nrna_`) are each pruned against their own pool's best
         double mrna_best = NEG_INF;
         double nrna_best = NEG_INF;
         for (auto& [t_idx, mc] : st.mm_merged) {
@@ -790,7 +797,7 @@ private:
             int64_t emit_start = st.cand_cur;
             double best_ll = NEG_INF;
 
-            // ===== mRNA scoring =====
+            // ===== candidate scoring: annotated transcripts and synthetic spans alike =====
             struct MrnaScored {
                 int32_t t_idx, oh, ct;
                 double  log_lik, cov_wt;
@@ -840,7 +847,8 @@ private:
                 m_scored[m_n++] = {t_idx, oh, ct, log_lik, cov_wt};
             }
 
-            // Pool-separated likelihood pruning
+            // Pool-separated likelihood pruning: annotated transcripts (`mrna_best`) and synthetic spans
+            // (`nrna_best`, by `t_is_nrna_`) are each pruned against their own pool's best
             double mrna_best = NEG_INF;
             double nrna_best = NEG_INF;
             for (int j = 0; j < m_n; ++j) {

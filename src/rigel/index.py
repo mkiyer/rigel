@@ -7,12 +7,14 @@ TSV mirrors) in an output directory:
 
     ref_lengths.feather        — reference names and lengths
     transcripts.feather        — one row per transcript with integer indices
-    intervals.feather          — exon/intron/intergenic tiling of the genome
+    intervals.feather          — each transcript's exons and span, and the intergenic gaps
     regions.feather            — the splice graph's regions (the calibration partition)
     edges.feather              — the splice graph's boundaries: contiguous and splice-junction
     sj.feather                 — annotated splice junctions from transcript introns
     splice_blacklist.feather   — (optional) splice-artifact sj derived
                                  from the alignable Zarr store
+    transcript_aliases.feather — dropped → kept transcript IDs of the duplicates
+                                 ``--collapse-duplicate-transcripts`` folded
     manifest.json              — the format version, the build sources and flags
 
 The ``TranscriptIndex`` class provides both the ``build()`` method for creating
@@ -851,9 +853,8 @@ class TranscriptIndex:
     Use ``TranscriptIndex.build()`` to create the on-disk index from a FASTA +
     GTF, then ``TranscriptIndex.load()`` to read it back for quantification.
 
-    The gene table is derived on-the-fly from the transcript table so
-    that only transcripts, intervals, and splice junctions are stored
-    on disk.
+    The gene table is derived on-the-fly from the transcript table, so
+    no gene table is stored on disk.
     """
 
     def __init__(self):
@@ -1683,7 +1684,7 @@ class TranscriptIndex:
         Parameters
         ----------
         exon : GenomicInterval
-            An aligned exon block from a ``Fragment``.
+            An aligned exon block.
 
         Returns
         -------

@@ -210,15 +210,15 @@ class BamScanConfig:
     """Scan buffer spill directory (default ``None`` = system temp dir)."""
 
     splicing_anchor_tolerance: int = 3
-    """Resolver-side splicing-anchor tolerance ``K`` (bp).
+    """Splicing-anchor tolerance ``K`` (bp): the slack the resolver allows when it
+    enumerates a non-chimeric fragment's gap hypotheses.
 
-    Used only by implicit-splice resolution: a paired-end genomic gap
-    can be treated as containing an annotated intron when the intron is
-    supported with this many bp of one-sided slack.
-
-    The calibration accumulator does not read this value: compartment,
-    splice and strand are recorded directly into the per-region
-    channels. It tunes the resolver alone.
+    An annotated intron is placed in an unsequenced gap when it overlaps the gap and
+    lies within it widened by ``K`` at each end, and a candidate transcript is excluded
+    from the enumeration as contradicting the alignment when one of its introns overlaps
+    an aligned block by more than ``K``. The calibration accumulator arbitrates those
+    hypotheses and deposits the survivor, so ``K`` changes calibration's tally, and the
+    scan-cache key includes it.
     """
 
     def __post_init__(self) -> None:
@@ -460,17 +460,18 @@ class IndexConfig:
 class PipelineConfig:
     """Top-level pipeline configuration composing all sub-configs.
 
-    Pass a single ``PipelineConfig`` to ``run_pipeline`` instead of
-    25+ individual keyword arguments.
+    Pass a single ``PipelineConfig`` to ``run_pipeline`` instead of one
+    keyword argument per setting.
     """
 
     em: EMConfig = field(default_factory=EMConfig)
     scan: BamScanConfig = field(default_factory=BamScanConfig)
     scoring: FragmentScoringConfig = field(default_factory=FragmentScoringConfig)
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
-    # The second pass's multinomial draw. Pass 1 holds every
-    #: fragment whose unsequenced gap has more than one surviving explanation; the drain picks one
-    #: hypothesis each and re-deposits, and this seeds that draw.
+    #: The second pass's multinomial draw. Pass 1 holds every fragment whose unsequenced gap has more
+    #: than one surviving explanation, and every multimapping fragment more than one of whose
+    #: placements admits a surviving (placement, hypothesis); the drain picks one (placement,
+    #: hypothesis) each and re-deposits, and this seeds that draw.
     #:
     #: Deliberately NOT ``em.seed``. They are two independent RNG consumers, and sharing one field
     #: would mean changing the EM's seed silently re-drew every held fragment — so an EM A/B would move
@@ -763,7 +764,7 @@ class QcConstants:
 class SimulatorConstants:
     """The simulator's fixed numbers (``rigel.sim``). They change what is drawn, so a change re-simulates."""
 
-    #: Truncated fragment lengths are drawn by rejection: each pass draws ``ceil(needed × ratio) + extra``
+    #: Truncated fragment lengths are drawn by rejection: each pass draws ``floor(needed × ratio) + extra``
     #: candidates so the truncation usually fills the request in one pass.
     oversample_ratio: float = 1.5
     oversample_extra: int = 10

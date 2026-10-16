@@ -229,7 +229,7 @@ struct RawResolveResult {
     // ⚠ An EMPTY hypothesis (no introns) is the UNSPLICED one, and it is the genomic explanation: cutting
     // nothing means the gap is real template. It is present whenever some compatible transcript implies
     // nothing there, or whenever the fragment carries no annotated CIGAR-N sj and so could be gDNA.
-    // ⛔ It is never added as a synthetic nascent-shadow candidate -- the shadow IS this hypothesis.
+    // ⛔ It is never added as the synthetic span candidate -- the synthetic span IS this hypothesis.
     std::vector<IntronBlock> gap_introns;
     std::vector<int32_t>     gap_intron_offsets;      // n_hypotheses + 1, always starts at 0
     std::vector<int32_t>     gap_sj_strand;           // n_hypotheses

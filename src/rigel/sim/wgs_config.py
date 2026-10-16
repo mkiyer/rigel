@@ -75,7 +75,7 @@ class GDNASimConfig:
 class NRNAConfig:
     """Nascent RNA sweep configuration: which mode sets the entity levels, and its sweep values.
 
-    Three modes are supported, and ``mode`` selects exactly one; a field belonging to another mode
+    Two modes are supported, and ``mode`` selects exactly one; a field belonging to another mode
     is refused rather than ignored, so a config cannot silently run a scenario it does not name.
 
     - ``sparse`` (via ``abundance_ranges`` + ``on_fraction``): nascent RNA is absent from most gene
@@ -102,7 +102,7 @@ class NRNAConfig:
     ratios: list[float] = field(default_factory=lambda: [0.0])
     #: per-condition (lo, hi) for the log-uniform absolute nascent abundance, for ``mode="sparse"``
     abundance_ranges: list[tuple[float, float]] | None = None
-    #: labels the condition whatever the quantity swept (ratios, shares or abundance ranges)
+    #: labels the condition whatever the quantity swept (ratios or abundance ranges)
     ratio_labels: list[str] | None = None
     #: fraction of eligible gene spans that carry nascent RNA at all, for ``mode="sparse"``
     on_fraction: float = 1.0

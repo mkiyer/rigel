@@ -19,7 +19,7 @@ The five pools, as ``rigel.scan_payload`` orders them:
   implied. gDNA cannot splice, so this pool is certified RNA.
 
 No pool is pure, and nothing here may assume one is. Against an origin-split oracle the intronic
-pool is dominated by RNA inside introns and the intergenic pool carries mature RNA too, because
+pool is dominated by RNA inside introns and the intergenic pool carries RNA too, because
 "intergenic" is whatever the annotation leaves over. The resulting bias is
 ``RNA_share x (len_RNA - len_gDNA)``, so it is invisible on any panel that gives the two components
 equal fragment lengths.
@@ -478,11 +478,11 @@ def _realized_gdna_counts(
       weighted by the contained pools' own gDNA mass;
     * the BOUNDARY stratum — the two crossing pools, deconvolved by the same two-shape contrast, with
       per-boundary composition CALIBRATED BY THE REGIONS: probes bind nucleic acid indiscriminately, so
-      at one boundary gDNA and nascent share the enrichment and it CANCELS from the composition —
-      ``a_b = 1/(1 + R_b)`` with ``R_b`` the RNA:gDNA odds transported from the adjacent region's own
-      one-sided RNA excess. The pair is solved COMPLEMENT-FIRST (the contaminant clipped to the cone,
-      then subtracted), which damps the ``1/sep`` noise by ``(1 - a_mix)`` — small exactly when the
-      separation is small, so the conditioning fix is the algebra's own;
+      at one boundary gDNA and the RNA that has not spliced there share the enrichment and it CANCELS
+      from the composition — ``a_b = 1/(1 + R_b)`` with ``R_b`` the RNA:gDNA odds transported from the
+      adjacent region's own one-sided RNA excess. The pair is solved COMPLEMENT-FIRST (the contaminant
+      clipped to the cone, then subtracted), which damps the ``1/sep`` noise by ``(1 - a_mix)`` — small
+      exactly when the separation is small, so the conditioning fix is the algebra's own;
     * the ON-TARGET EXCESS — the exon classes no pool samples (contained-in-exon, spanning-the-exon),
       priced by each exon's own boundaries' measured enrichment and entering at ``(eps - 1)+`` ONLY:
       the sampled union already carries every class's uniform part, so at ``eps = 1`` (no capture) the

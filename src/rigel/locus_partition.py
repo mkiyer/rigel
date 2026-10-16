@@ -49,7 +49,7 @@ def partition_and_free(
     offsets_list = build_partition_offsets(em_data.offsets, locus_units, n_loci)
 
     # ---- Scatter per-candidate arrays (largest first) ----
-    # g_offsets must stay alive during this phase.
+    # ``em_data.offsets`` must stay alive during this phase: every candidate scatter reads it.
     CAND_ARRAYS = [
         ("log_liks", scatter_candidates_f32),
         ("coverage_weights", scatter_candidates_f32),

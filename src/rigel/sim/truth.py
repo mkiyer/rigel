@@ -141,7 +141,7 @@ def _transcript_metadata(transcript) -> dict[str, object]:
     length = transcript.length or transcript.compute_length()
     genomic_span = (
         transcript.end - transcript.start
-    )  # 0 for a transcript with no exon, as start and end are
+    )  # 0 for a transcript with no exon, whose start and end are both 0
     pre_capture_mrna = float(transcript.abundance or 0.0)
     pre_capture_nrna = float(transcript.nrna_abundance)
     return {

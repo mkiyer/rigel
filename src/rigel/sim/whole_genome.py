@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Whole-genome RNA-seq read simulator: config, abundances, and the condition grid.
 
-Parses one YAML scenario, builds the transcript set, assigns mature and nascent abundances, and
-hands every condition to :func:`rigel.sim.orchestrator.run_condition_grid`, which generates the
-reads, the optional oracle BAM and the per-condition truth. Finishes by writing ``manifest.json``
-and ``truth_abundances.tsv`` beside one directory per condition.
+Parses one YAML scenario, builds the transcript set, assigns the mature abundances, and hands every
+condition to :func:`rigel.sim.orchestrator.run_condition_grid`, which applies the nascent setting,
+generates the reads, the optional oracle BAM and the per-condition truth, and writes one molecular-truth table
+per nascent setting (``truth_abundances_nrna_<label>.tsv``) beside the condition directories.
+Finishes by writing ``manifest.json``.
 
 The transcript set is the rigel index's (:func:`load_transcripts_from_index`): annotated
 transcripts plus the synthetic single-exon nascent entities, each with ``t_index`` equal to its
@@ -549,8 +550,8 @@ def assign_random_abundances(
     """Assign random total-RNA abundances using log-uniform sampling.
 
     All abundance is assigned to ``t.abundance`` (mRNA).  ``nrna_abundance``
-    is left at zero. The additive nRNA ratio is applied per-condition in
-    ``run_simulation`` via ``apply_nrna_ratio``.
+    is left at zero. The nascent mode (``apply_nrna_ratio`` or ``apply_sparse_nrna``)
+    is applied per condition in ``orchestrator.run_condition_grid``.
 
     1. Bernoulli(frac_expressed) → expressed flag.
     2. For expressed: total_RNA ~ LogUniform(min, max).
@@ -606,8 +607,8 @@ def _detect_abundance_format(
     -----------------
     salmon   — ``quant.sf`` with columns ``Name``, ``TPM``.
     kallisto — ``abundance.tsv`` with columns ``target_id``, ``tpm``.
-    sim      — sim.py TSV with ``transcript_id``, ``mrna_abundance``
-               (and optionally ``nrna_abundance``).
+    sim      — the simulator's own truth TSV (:func:`write_truth_abundances`) with
+               ``transcript_id``, ``mrna_abundance`` (and optionally ``nrna_abundance``).
     """
     import pandas as pd
 
@@ -782,7 +783,7 @@ def apply_sparse_nrna(
     it is, its absolute molecular abundance log-uniformly over ``abundance_range``. Returns the
     realised nascent:mature molecular ratio.
 
-    The level is independent of the mature level, which is what this mode gives that the ratio modes
+    The level is independent of the mature level, which is what this mode gives that the ratio mode
     cannot. Under a ratio, ``nascent = mature × ratio``, so nascent mass tracks mature abundance and
     can never exceed it; the steady state says the opposite, since mature reflects synthesis and
     degradation while nascent reflects synthesis alone, making the nascent:mature ratio a stability
@@ -886,7 +887,7 @@ def assign_file_abundances(
     has_nrna_data = False
     # A file names annotated transcripts, and its nRNA column is that transcript's nascent molecules,
     # which live on its entity. Collect them per contributor and pool in one pass, exactly as the
-    # ratio modes do; a file row naming an entity directly is honoured too.
+    # ratio mode does; a file row naming an entity directly is honoured too.
     per_contributor = np.zeros(len(transcripts))
 
     for i, t in enumerate(transcripts):
@@ -936,7 +937,8 @@ def write_truth_abundances(
         )
         for t in transcripts:
             total = (t.abundance or 0.0) + t.nrna_abundance
-            genomic_span = t.end - t.start  # 0 for a transcript with no exon, as start and end are
+            # 0 for a transcript with no exon, whose start and end are both 0
+            genomic_span = t.end - t.start
             strand_str = t.strand.to_str()
             f.write(
                 f"{t.t_id}\t{t.g_id}\t{t.g_name}\t{t.ref}\t"
@@ -1029,9 +1031,11 @@ def write_manifest(
 def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
     """Run full simulation.
 
-    1. Load genome + GTF -> transcripts
+    1. Load the transcripts from the rigel index (built from genome + GTF when none is
+       configured), plus any shadow GTF
     2. Assign base abundances (total RNA) once
-    3. Sweep nRNA settings x gdna_rates x strand_specificities
+    3. Sweep nRNA settings x gdna_rates x gDNA strand overdispersions x strand_specificities
+       x capture scenarios
     4. Write manifest
 
     Returns list of condition dicts (for manifest).

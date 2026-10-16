@@ -339,9 +339,9 @@ def _quantification_pools(stats, total_mrna: float, total_nrna: float, total_gdn
     An intergenic fragment reaches no locus. Unspliced, it is gDNA by construction, so the gDNA fraction is the
     EM's genic gDNA plus the unspliced intergenic fragments; leaving them out would halve the observed
     contamination of a library with substantial gDNA. Spliced, it is certified RNA that no annotated transcript
-    holds, and it is its own pool (``intergenic_spliced``). The mRNA, nascent RNA, gDNA and intergenic RNA
-    fractions sum to one; ``gdna_em_fraction`` is the EM's genic part alone, and ``intergenic_fraction`` the
-    share of every intergenic fragment, both kinds."""
+    holds, and it is its own pool (``intergenic_spliced``). The annotated-transcript (``mrna_fraction``),
+    synthetic-span (``nrna_fraction``), gDNA and intergenic RNA fractions sum to one; ``gdna_em_fraction`` is
+    the EM's genic part alone, and ``intergenic_fraction`` the share of every intergenic fragment, both kinds."""
     intergenic = stats.n_intergenic
     intergenic_rna = stats.n_intergenic_spliced
     total_all = total_mrna + total_nrna + total_gdna + intergenic
@@ -878,7 +878,6 @@ class _ParamSpec:
     transform: str = (
         "direct"  # "direct" | "invert_bool" | "sj_tag" | "path_or_none" | "gb_to_bytes"
     )
-    #                             | "path_or_none" | "sj_tag" | "gb_to_bytes"
 
 
 _PARAM_SPECS: tuple[_ParamSpec, ...] = (
@@ -1318,7 +1317,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=f"EM algorithm variant (default: {qd['em_mode']}). "
         "'vbem' uses Variational Bayes EM with digamma-based soft "
-        "updates. 'map' uses MAP-EM with hard max(0, n+a-1) updates.",
+        "updates. 'map' uses MAP-EM: each step adds the calibration's gDNA and RNA "
+        "pseudocounts to the components' fragment counts and normalises.",
     )
     model_grp.add_argument(
         "--assignment-mode",
@@ -1449,10 +1449,13 @@ def build_parser() -> argparse.ArgumentParser:
         dest="splicing_anchor_tolerance",
         type=int,
         default=None,
-        help="Resolver-side splicing-anchor tolerance K (bp). Used only "
-        "for implicit-splice resolution slack around annotated introns; "
-        "the fractional calibration accumulator does not interpret this "
-        f"value. Default: {qd['splicing_anchor_tolerance']}.",
+        help="Splicing-anchor tolerance K (bp), used when a fragment's unsequenced gap is "
+        "matched to annotated introns: an intron overlapping the gap counts as lying in it when it "
+        "extends past neither end of the gap by more than K bp, and a transcript is excluded as "
+        "contradicting the alignment when one of its introns overlaps an aligned block by more "
+        "than K bp. It changes the gap hypotheses calibration arbitrates, and so calibration's "
+        "tally. "
+        f"Default: {qd['splicing_anchor_tolerance']}.",
     )
     adv.add_argument(
         "--emit-locus-stats",

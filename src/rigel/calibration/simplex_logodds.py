@@ -6,11 +6,12 @@ bounds the 5–6-decade ρ_g range and resolves both the ``f_g→0`` and the ``f
 linear lattice cannot. ``λ`` is gridded on a FIXED ``[−L, L]`` window (no region-adaptivity) and the
 linear fraction is read out as ``f_g = σ(λ)``. ``O(m·K)`` per region, so it is genome-scale tractable.
 
-The ``ψ`` integrand is ``strand + (gDNA arm) + (RNA arm) + the λ-factor rows``, where each arm is that
-component group's fitted log-rate prior when there is one, else the Jeffreys reference ``+½·log f``
-(``_JEFFREYS_REF``).
+The ``ψ`` integrand is ``strand + (gDNA arm) + (RNA arm) + the λ-factor rows``. Each arm carries the
+Jeffreys reference ``+½·log f`` on its own fraction (``_JEFFREYS_REF``); the gDNA arm adds the fitted
+landscape's log-rate prior when there is one, and the RNA arm has no fitted prior, so it is the
+reference alone.
 
-Three facts that determine this file's shape:
+Five facts that determine this file's shape:
 
 1. Omitting a component's term is not "no prior" — the grid's own measure supplies one. A bare
    uniform-λ grid IS Haldane per component ⇒ Beta(0,0) on the composition: improper at BOTH vertices, a
@@ -45,8 +46,9 @@ Three facts that determine this file's shape:
    atom's and is recorded where it was measured.
 
 There is NO spliced term: ``mass_spliced`` enters only the signal mask, never ψ. That
-is correct — at a sj mature RNA *splices*, so the unspliced crossing mass is gDNA plus RNA that has not
-spliced there, a channel genuinely disjoint from the (directly observed, already-pure-RNA) spliced mass.
+is correct — RNA that splices at a sj *jumps* it rather than crossing it, so the unspliced crossing mass
+is gDNA plus RNA that has not spliced there, a channel genuinely disjoint from the (directly observed,
+already-pure-RNA) spliced mass.
 
 One solver, native (`native.psi_solve`, ``src/rigel/native/psi_kernel.h``), over the ``(λ, θ)`` cube in
 float64, one slot at a time on the slot's own cube. A single-strand region (exactly one of ``allow_pos`` /
@@ -86,9 +88,9 @@ __all__ = [
 # Berger–Bernardo reference prior for the composition with `f_g` of interest and the tilt as nuisance, whose
 # `f_g` marginal is Beta(½,½) — the SAME `+½·log f_g + ½·log(1−f_g)`.
 #
-# Its ONLY job is to make ψ proper (Beta(½,½) integrates; Beta(0,0) does not). A fitted `logP_g`/`logP_r`
-# is ADDED to it, never substituted for it — the reference is the MEASURE ψ is written against, not an
-# information claim to be superseded.
+# Its ONLY job is to make ψ proper (Beta(½,½) integrates; Beta(0,0) does not). The fitted gDNA `logP` (the
+# landscape's; the RNA arm has none) is ADDED to it, never substituted for it — the reference is the
+# MEASURE ψ is written against, not an information claim to be superseded.
 #
 # A declared choice, not forced by the likelihood: the observed-data Fisher information for f_g is
 # `∝ n(½−κ)²`, exactly 0 on an unstranded library, where the strand term is bit-flat and the posterior
@@ -317,8 +319,8 @@ def _solve_regions_logodds_all(
     No Jacobian and no tilt term are written, and that is the point of the θ coordinate: the Berger–Bernardo
     tilt conditional ``(1−τ²)^{−½}`` is cancelled identically by ``|dτ/dθ| = cos θ``, and on the two-group λ
     axis the log-rate conversions cancel ``log σ'(λ)``; the only weights in ψ are the θ quadrature's own.
-    Both arms are always written — a fitted ``logP`` where there is one, else the ``_JEFFREYS_REF``
-    reference — because omitting one is not neutral (the module docstring). The strand mixture's variance
+    Both arms always carry the ``_JEFFREYS_REF`` reference, the fitted gDNA ``logP`` added to it where
+    there is one, because omitting one is not neutral (the module docstring). The strand mixture's variance
     is frozen at the reference composition (``fg_ref`` / ``fpos_ref`` / ``fneg_ref``, per slot, the
     incoming belief; the structural-neutral default at init), so the count sets precision and not
     composition. Zero-count slots report 0.

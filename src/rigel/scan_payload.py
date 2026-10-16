@@ -302,12 +302,14 @@ _DEFERRED_RECORD_FIELDS = ("ref", "start", "end", "align_strand", "sj_strand")
 
 @dataclass(frozen=True, slots=True)
 class DeferredFragments:
-    """THE SIDE BUFFER: fragments whose gap has more than one surviving explanation, held WHOLE.
+    """THE SIDE BUFFER: fragments held WHOLE — one whose gap has more than one surviving explanation, or
+    a multimapping fragment more than one of whose placements admits a surviving (placement, hypothesis).
 
     A fragment's unsequenced mate gap may hold no intron, one, or several, and *which* cannot be observed —
     the bases are not there. Deciding needs a fragment-length distribution that does not exist until the
     first pass is over, so the first pass does not guess: it enumerates, and when more than one hypothesis
-    survives it holds the fragment here.
+    survives it holds the fragment here. A multimapping fragment is held for the same reason when the open
+    question is WHICH placement: more than one of them still admits a surviving hypothesis.
 
     The FRAGMENT is stored, never its consequences. Object ids are large, derived, and would have to
     be kept consistent with the partition; the fragment is small and replays exactly. The second pass
@@ -597,9 +599,11 @@ class AccumulatorPayload:
     #: are drawn from, which is what makes it the right anchor rather than merely a convenient one.
     deposited_lengths: np.ndarray
 
-    #: The side buffer — fragments whose gap has more than one surviving explanation, held WHOLE for
-    #: the second pass. NOT a loss: ``deposited + deferred + dropped_* == offered``, and this bank holds
-    #: the fragments ``qc.deferred_undetermined_gap`` counts.
+    #: The side buffer — fragments held WHOLE for the second pass: one whose gap has more than one
+    #: surviving explanation, or a multimapping fragment more than one of whose placements admits a
+    #: surviving (placement, hypothesis). NOT a loss: ``deposited + deferred_undetermined_gap +
+    #: deferred_multiple_placements + dropped_* == offered``, and this bank holds exactly the fragments
+    #: those two ``qc.deferred_*`` counters count.
     deferred: DeferredFragments
     #: How each gap was resolved — its own axis, cutting across the splice census.
     gap_resolution: GapCensus

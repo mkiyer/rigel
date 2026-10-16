@@ -457,7 +457,8 @@ class AbundanceEstimator:
         count_em = self.em_counts.sum(axis=1)
 
         # Synthetics get count=0 (they appear in nrna_quant only).
-        # Annotated nRNAs keep their full counts — they are both mature and nascent.
+        # Annotated ``is_nrna`` transcripts (single-exon transcripts covering a
+        # multi-exon span) are annotated transcripts and keep their full counts.
         is_synthetic = index.t_df["is_synthetic"].values
         is_nrna = index.t_df["is_nrna"].values
         count = np.where(is_synthetic, 0.0, t_total)
@@ -529,8 +530,9 @@ class AbundanceEstimator:
         """Primary gene-level abundance estimates.
 
         Gene counts sum annotated (non-synthetic) transcript counts only.
-        ``mature_count`` / ``nascent_count`` split those over the gene's
-        multi-exon vs single-exon (``is_nrna``) annotated transcripts
+        ``nascent_count`` sums the gene's annotated ``is_nrna`` transcripts (a
+        single-exon transcript that covers a multi-exon transcript's span) and
+        ``mature_count`` every other annotated transcript
         (``count == mature_count + nascent_count``). Synthetic nRNA spans are
         gene-neutral (many-to-many) and are reported per-entity in ``nrna_quant``,
         not attributed to genes here.
@@ -543,7 +545,7 @@ class AbundanceEstimator:
         locus_id : int32, primary EM locus for this gene (-1 if none)
         effective_length : abundance-weighted mean effective length
         count : sum of annotated transcript counts
-        mature_count, nascent_count : annotated mature / nascent split
+        mature_count, nascent_count : ``count`` split by ``is_nrna``, as above
         count_unambig : uniquely-assigned count
         count_em : EM-assigned count
         count_spliced : spliced fragment count
@@ -561,9 +563,10 @@ class AbundanceEstimator:
         t_counts_all = total.sum(axis=1)
         count = _aggregate_to_gene(t_to_g, n_genes, t_counts_all * annotated_mask)
 
-        # Mature vs nascent split over the gene's ANNOTATED transcripts:
-        # single-exon annotated transcripts (is_nrna) are the nascent side, the
-        # rest mature. count == mature_count + nascent_count. Synthetic nRNA spans
+        # The mature_count / nascent_count columns split the gene's ANNOTATED
+        # transcripts by is_nrna (a single-exon transcript covering a multi-exon
+        # span goes to nascent_count, the rest to mature_count).
+        # count == mature_count + nascent_count. Synthetic nRNA spans
         # are gene-neutral (many-to-many) and are NOT attributed here — that mass
         # lives in nrna_quant.
         is_nrna_f = index.t_df["is_nrna"].to_numpy().astype(np.float64)
@@ -601,10 +604,13 @@ class AbundanceEstimator:
         # n_transcripts (annotated only, excluding synthetics)
         n_annotated = _aggregate_to_gene(t_to_g, n_genes, annotated_mask).astype(int)
 
-        # TPM — computed from annotated-only counts.  Synthetic gene rows
-        # (placeholders for gene-neutral nRNA transcripts) contribute zero to
-        # all aggregates above because ``annotated_mask`` zeros them out, so
-        # excluding them here is a display-level filter only.
+        # TPM — computed from annotated-only counts.  Every synthetic span is
+        # its own gene row (a gene-neutral placeholder), so no aggregate above
+        # puts synthetic mass on an annotated gene.  ``annotated_mask`` zeros a
+        # synthetic row's count, mature_count, nascent_count and count_em, but
+        # count_unambig, count_spliced, the effective-length sums and the locus
+        # id are aggregated unmasked, so this filter is what keeps the synthetic
+        # rows' values out of the table.
         annotated_gene_mask = (
             ~index.g_df["is_synthetic"].to_numpy()
             if "is_synthetic" in index.g_df.columns

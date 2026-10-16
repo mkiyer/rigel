@@ -344,10 +344,13 @@ class StrandModel:
     def strand_specificity_ci_epsilon(
         self, confidence: float = CONSTANTS.qc.strand_ci_confidence
     ) -> float:
-        """Upper credible limit on the minor-orientation rate ``1 − strand_specificity``.
+        """Upper credible limit on the pooled 2×2's minor-orientation rate ``n_minor / n``.
 
         The ``confidence`` quantile of the Beta(n_minor + 1, n − n_minor + 1) posterior, clamped
-        to [0, 0.5]; 0.5 when there are no observations.
+        to [0, 0.5]; 0.5 when there are no observations. ``n_minor`` comes from the pooled table,
+        splice artifacts and reversed junctions included, while ``strand_specificity`` comes from the
+        genuine junctions (:attr:`genuine_n_same`), so this bounds ``1 − strand_specificity`` only
+        where that fit falls back to the pooled counts.
 
         QC only. Its one consumer is the ``[CAL] Strand trainer`` log line in
         :func:`rigel.pipeline.run_pipeline`.
@@ -362,9 +365,9 @@ class StrandModel:
         # stray-minority rate is what sizes the uncertainty.
         alpha = self.n_minor + 1.0
         beta = (n - self.n_minor) + 1.0
-        # UCL on minor-orientation rate r = 1 − ss at the given confidence.
+        # UCL on the pooled minor-orientation rate r = n_minor / n at the given confidence.
         r_ucl = float(betaincinv(alpha, beta, confidence))
-        # Clamp to [0, 0.5]: ss = max(p, 1-p) ≥ 0.5, so the minor rate 1 − ss is at most 0.5.
+        # Clamp to [0, 0.5]: n_minor = min(n_same, n_opposite), so the minor rate is at most 0.5.
         return max(0.0, min(0.5, r_ucl))
 
 
@@ -468,8 +471,8 @@ class StrandModels:
     def strand_specificity_ci_epsilon(
         self, confidence: float = CONSTANTS.qc.strand_ci_confidence
     ) -> float:
-        """Delegate: the primary (exonic_spliced) model's upper credible limit on
-        ``1 − strand_specificity``."""
+        """Delegate: the primary (exonic_spliced) model's upper credible limit on its pooled
+        2×2's minor-orientation rate (:meth:`StrandModel.strand_specificity_ci_epsilon`)."""
         return self.exonic_spliced.strand_specificity_ci_epsilon(confidence)
 
     def log_summary(self) -> None:

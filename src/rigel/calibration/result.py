@@ -199,8 +199,10 @@ class CalibrationResult:
     #: efficiencies beside it (`capture_eff_length`).
     gdna_capture_efficiency_boundary: np.ndarray
     rna_sense_frac: float  # in [0, 1], RNA sense fraction used by the strand clue
-    gdna_strand_overdispersion: float  # in [0, 1), fitted gDNA strand Beta-Binomial dispersion
-    rna_strand_overdispersion: float  # in [0, 1), fitted RNA strand Beta-Binomial dispersion
+    #: The gDNA and RNA strand Beta-Binomial dispersions, in [0, 1). Nothing fits them: ``calibrate``
+    #: always writes 0.0, and beyond the range check in ``__post_init__`` only tests read them.
+    gdna_strand_overdispersion: float
+    rna_strand_overdispersion: float
 
     # --- provenance: the three axis lengths, independent of each other ---
     n_regions: int

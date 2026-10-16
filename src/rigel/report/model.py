@@ -4,9 +4,12 @@ The view model is a plain, JSON-serializable dict consumed by the report's
 front-end. Keeping this transform in Python (not JavaScript) means the HTML
 layer only lays out already-computed values — no business logic in the browser.
 
-All formatting (thousands separators, percentages) is deferred to the front-end;
-this module emits raw numbers so the same values drive tooltips, tables, and
-chart data without rounding drift.
+Most values are emitted as raw numbers and formatted by the front-end
+(thousands separators, percentages), so the same values drive tooltips, tables,
+and chart data. The exceptions are finished here: the headline tiles' captions
+and a few text KPIs are formatted strings, and some table cells are rounded (the
+fragment-length overflow, as a percentage; the gene table's TPM and counts; the
+per-reference gDNA mass and fraction).
 """
 
 from __future__ import annotations
@@ -295,12 +298,12 @@ def _quant(summary: dict) -> dict:
         {"label": "Intergenic gDNA", "value": inter - inter_rna, "cls": _C[3]},
     ]
     table = [
-        ["Mature mRNA", mrna, q.get("mrna_fraction", 0.0), "spliced + EM-assigned transcript mass"],
+        ["Mature mRNA", mrna, q.get("mrna_fraction", 0.0), "every annotated transcript's count"],
         [
             "Nascent RNA",
             nrna,
             q.get("nrna_fraction", 0.0),
-            "synthetic + annotated single-exon spans",
+            "synthetic spans only; annotated single-exon spans are in the row above",
         ],
         [
             "gDNA — EM genic",

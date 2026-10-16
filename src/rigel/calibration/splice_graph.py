@@ -18,10 +18,10 @@ inside a merged region vanishes from the partition entirely; on a human annotati
 of all termini. The price of not merging is roughly 40 % more regions.
 
 The transcript filter is ``~is_synthetic``, and it is one predicate, defined once in :func:`_is_real`
-and shared by the builder and the validator. Every manufactured nascent-span row is ``is_synthetic``,
+and shared by the builder and the validator. Every manufactured span row is ``is_synthetic``,
 so that predicate already excludes all of them. Do not add ``& ~is_nrna``: on a non-synthetic row
-``is_nrna`` does not mean "manufactured span", it means "this real transcript is single-exon, so its
-mature and nascent forms coincide", and excluding those rows deletes the TSS and TES of tens of
+``is_nrna`` does not mean "manufactured span", it means "this real single-exon transcript covers a
+multi-exon transcript's span, so it stands for that span unspliced", and excluding those rows deletes the TSS and TES of tens of
 thousands of real transcripts — exactly the visibility this partition exists to buy.
 
 .. _flags:
@@ -33,11 +33,11 @@ transcript and a splice site for another is exactly the case the 4-bit signature
 Reaches are how many bases of the molecule's own sequence remain either side of a boundary. The two
 boundary kinds carry different reaches, deliberately:
 
-* A CONTIGUOUS boundary is crossed by gDNA, by nascent RNA and by mature RNA alike. RNA inside an
-  intron is RNA that has not spliced at that position, and a genomic distance is never shorter than
-  the exonic distance within the same span, so the reach is the GENOMIC distance to a covering
-  transcript's span ends. It is therefore nonzero inside an intron; an exonic reach would declare
-  zero RNA opportunity across every intron in the genome.
+* A CONTIGUOUS boundary is crossed by gDNA and by RNA alike, whether the RNA spliced elsewhere or
+  nowhere. RNA inside an intron is RNA that has not spliced at that position, and a genomic distance
+  is never shorter than the exonic distance within the same span, so the reach is the GENOMIC distance
+  to a covering transcript's span ends. It is therefore nonzero inside an intron; an exonic reach
+  would declare zero RNA opportunity across every intron in the genome.
 * An SJ boundary is used only by a molecule that spliced across it, so what remains either side is
   EXONIC. :func:`_sj_edges` is deliberately left on the exonic reach.
 
@@ -46,14 +46,14 @@ Reaches are named ``lo`` / ``hi``, never ``donor`` / ``acceptor``. Boundaries st
 on the right; the divisor is symmetric in the two reaches, so no number changes, but a ``reach_donor``
 would mislabel about half the sj. ``lo`` / ``hi`` means genomically lower/higher and cannot be misread.
 
-Reaches are per strand, because the mature-crossing gate is per strand: at an AMBIG boundary a ``+``
+Reaches are per strand, because the RNA-crossing gate is per strand: at an AMBIG boundary a ``+``
 and a ``-`` transcript have different reaches, and a strand-agnostic maximum would over-state one of
 them on exactly the population that carries the most calibration error.
 
 Reaches are maximal over isoforms, independently per side. A genomic position usually belongs to
 several transcripts that disagree about where the molecule ends, and the isoform abundances are
 precisely what calibration does not know. The independent maximum is one-sided: it over-states
-opportunity, hence under-states the mature density, hence over-states the gDNA fraction.
+opportunity, hence under-states the RNA density, hence over-states the gDNA fraction.
 
 A reach of 0 is meaningful, not a sentinel: no strand-``s`` RNA molecule can occupy that side of the
 boundary, so the opportunity is genuinely zero and the trapezoid returns 0 for free. On a contiguous
@@ -404,7 +404,7 @@ def _is_real(tx, reflen) -> bool:
     It must stay shared: a validator with its own copy of the predicate checks the flags against a
     filter that can drift from the one that built them, and the two then agree while both are wrong.
 
-    Manufactured nascent spans are ``is_synthetic``; a non-synthetic ``is_nrna`` row is a real
+    Manufactured spans are ``is_synthetic``; a non-synthetic ``is_nrna`` row is a real
     single-exon transcript, whose termini are real. See the module docstring.
     """
     return (
@@ -846,7 +846,7 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
                         f"{'is missing' if want[k] else 'wrongly carries'} flag bit {int(bit):#06x}."
                     )
 
-        # I11a — every mature exon boundary lands exactly on a region interface
+        # I11a — every annotated exon boundary lands exactly on a region interface
         if rows.size:
             for arr, what in ((ex.start[rows], "start"), (ex.end[rows], "end")):
                 hit = np.searchsorted(region_bounds, arr)
@@ -859,7 +859,7 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
                         f"interfaces (first at {int(arr[bad][0])})."
                     )
 
-        # I11b — every mature intron is realised by a SJ boundary on that strand
+        # I11b — every annotated intron is realised by a SJ boundary on that strand
         if i_rows.size:
             a, b, st = intr[1][i_rows], intr[2][i_rows], intr[3][i_rows].astype(np.int64)
             js = base + np.searchsorted(region_bounds, a) - 1

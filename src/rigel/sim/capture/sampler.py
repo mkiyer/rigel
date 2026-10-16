@@ -715,7 +715,7 @@ def _clip_interval(start: int, end: int, length: int) -> ProbeInterval | None:
     return ProbeInterval(start, end)
 
 
-# Interval helpers (merge_intervals / project_genomic_block(s)_to_transcript) live in
+# Interval helpers (merge_intervals / project_genomic_block_to_transcript) live in
 # rigel.sim.intervals.
 
 
