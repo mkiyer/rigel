@@ -375,7 +375,10 @@ class CalibrationConfig:
     #: earned it. ``0`` ⇒ the prior-free pass-0 alone.
     #:
     #: Cost is linear — one landscape fit plus one full sweep each — so lower it if
-    #: calibration wall-clock matters more than the last few percent of its accuracy.
+    #: calibration wall-clock matters more than the last few percent of its accuracy. Why 3: measured
+    #: 2026-07-28 on that day's panel, the third refit captured 96 % of the gain the bootstrap reaches, each
+    #: later increment 2–3× smaller and every stratum improving monotonically; not re-measured since the
+    #: landscape was rebuilt.
     calib_refit_iters: int = 3
 
     #: ψ's thread budget: the slots of a block are solved by a pool of this many threads (``0``, the
@@ -785,8 +788,8 @@ class SimulatorConstants:
 
 @dataclass(frozen=True)
 class ResourceConstants:
-    """Memory, I/O and logging budgets. None reaches the arithmetic: every value gives the same answer, and only
-    speed, memory or log volume changes."""
+    """Memory, I/O and logging budgets: each sets speed, memory or log volume. ``solve_block_bytes`` alone can
+    also reach the last bits of the answer (its comment says how)."""
 
     #: Scan workers one BGZF decompression thread keeps fed, measured on the deep library
     #: (``BamScanConfig.resolved_scan_threads`` carries the table): the budget is split by this ratio, so a
@@ -794,8 +797,9 @@ class ResourceConstants:
     scan_workers_per_bgzf_thread: int = 8
 
     #: Cache-tiling target for the row-tiled fits (the landscape's kernels, the capture efficiency), as a
-    #: working-set size; ``simplex_logodds._block_rows`` turns it into rows. Every reduction those fits make is
-    #: within a row, so the block size cannot reach the arithmetic.
+    #: working-set size; ``simplex_logodds._block_rows`` turns it into rows. ⚠ Not arithmetic-free: the
+    #: landscape adds each tile's partial sums into its per-bin totals, so the tile height orders those float
+    #: additions and can move their last bits; no gate holds the tiling to the bit.
     solve_block_bytes: int = 1 << 20
 
     #: Read size when the index digests its input files.

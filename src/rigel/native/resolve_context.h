@@ -1283,13 +1283,15 @@ public:
         }
 
         // --- ambig_strand ---
-        int32_t first_strand = -999;
+        bool seen = false;
+        int32_t first_strand = 0;
         bool mixed = false;
         for (int32_t t : cr.t_inds) {
             if (t >= 0 && t < static_cast<int32_t>(t_strand_arr_.size())) {
                 int32_t s = t_strand_arr_[t];
-                if (first_strand == -999) {
+                if (!seen) {
                     first_strand = s;
+                    seen = true;
                 } else if (s != first_strand) {
                     mixed = true;
                     break;

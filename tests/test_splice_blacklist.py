@@ -23,6 +23,7 @@ import pandas as pd
 import pytest
 
 from _index_builder import rebuild_with_splice_blacklist
+from rigel.config import IndexConfig
 from rigel.index import MANIFEST_JSON, SJ_BLACKLIST_FEATHER, SJ_BLACKLIST_TSV, TranscriptIndex
 from rigel.splice_blacklist import BLACKLIST_COLUMNS, aggregate_splice_blacklist
 
@@ -40,7 +41,9 @@ def _row(chrom: str, s: int, e: int, rl: int, count: int, al: int, ar: int) -> d
     }
 
 
-def load_splice_blacklist_from_records(records, *, min_count: int = 2) -> pd.DataFrame:
+def load_splice_blacklist_from_records(
+    records, *, min_count: int = IndexConfig.splice_blacklist_min_count
+) -> pd.DataFrame:
     """The shipped aggregation over a DataFrame of alignable rows, built here from dicts."""
     return aggregate_splice_blacklist(pd.DataFrame(list(records)), min_count=min_count)
 

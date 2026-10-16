@@ -288,7 +288,7 @@ def _render(count, eff, grid, prev, weights, widths) -> np.ndarray:
     # the bin of each width: the last bin includes its upper boundary, every other bin excludes it
     bin_of = np.clip(np.searchsorted(boundaries, widths, side="right") - 1, 0, n_bins - 1)
     sums = np.zeros((n_bins, grid.size))
-    rows = _block_rows(grid.size, 8)
+    rows = _block_rows(grid.size, sums.itemsize)
     for r0 in range(0, count.size, rows):
         sl = slice(r0, r0 + rows)
         kernels = _estep_kernels(_poisson_kernels(count[sl], eff[sl], grid), count[sl], grid, prev)

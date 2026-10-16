@@ -44,6 +44,8 @@ namespace nb = nanobind;
 // ================================================================
 
 static constexpr double EM_LOG_EPSILON = 1e-300;
+// One SQUAREM iteration runs three VBEM steps (two plain, one stabilising), so `iterations / 3` SQUAREM
+// iterations spend the same VBEM budget `EMConfig.iterations` names.
 static constexpr int    SQUAREM_BUDGET_DIVISOR = 3;
 
 // VBEM floor: the minimum alpha a component keeps, EM_LOG_EPSILON (≈1e-300), deep enough that digamma

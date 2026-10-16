@@ -165,7 +165,8 @@ def _check_blacklist_references(bl_df: pd.DataFrame, ref_lengths: dict[str, int]
     beyond = [r for r in refs if r not in ref_lengths]
 
     def some(names):
-        return ", ".join(names[:3]) + (f" and {len(names) - 3:,} more" if len(names) > 3 else "")
+        k = CONSTANTS.qc.report_examples
+        return ", ".join(names[:k]) + (f" and {len(names) - k:,} more" if len(names) > k else "")
 
     if len(beyond) == len(refs):
         raise ValueError(
@@ -336,8 +337,9 @@ def _on_the_fasta(
             return f"{t.t_id} on {t.ref}, which the FASTA lacks"
         return f"{t.t_id} ending at {t.ref}:{t.end:,}, past its end at {ref_lengths[t.ref]:,}"
 
-    names = "; ".join(where(t) for t in off[:3]) + (
-        f"; and {len(off) - 3:,} more" if len(off) > 3 else ""
+    k = CONSTANTS.qc.report_examples
+    names = "; ".join(where(t) for t in off[:k]) + (
+        f"; and {len(off) - k:,} more" if len(off) > k else ""
     )
     if gtf_parse_mode == "strict":
         raise ValueError(f"{len(off):,} transcript(s) lie off the FASTA: {names}")

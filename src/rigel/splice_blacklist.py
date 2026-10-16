@@ -56,7 +56,7 @@ BLACKLIST_COLUMNS = (
 )
 
 
-def aggregate_splice_blacklist(rows: pd.DataFrame, *, min_count: int = 2) -> pd.DataFrame:
+def aggregate_splice_blacklist(rows: pd.DataFrame, *, min_count: int) -> pd.DataFrame:
     """Aggregate raw alignable splice-blacklist rows into Rigel form.
 
     Parameters
@@ -66,9 +66,8 @@ def aggregate_splice_blacklist(rows: pd.DataFrame, *, min_count: int = 2) -> pd.
         columns ``chrom``, ``intron_start``, ``intron_end``, ``count``, ``max_anchor_left`` and
         ``max_anchor_right``; any others are ignored.
     min_count
-        Only rows with ``count >= min_count`` enter the blacklist. Default ``2`` matches the
-        alignable threshold; ``1`` admits singletons, higher values keep only the most reproducible
-        artifacts.
+        Only rows with ``count >= min_count`` enter the blacklist;
+        ``IndexConfig.splice_blacklist_min_count`` sets it and says why.
 
     Returns
     -------
@@ -123,7 +122,7 @@ def aggregate_splice_blacklist(rows: pd.DataFrame, *, min_count: int = 2) -> pd.
 def load_splice_blacklist_from_zarr(
     store_path: str | Path,
     *,
-    min_count: int = 2,
+    min_count: int,
 ) -> pd.DataFrame:
     """Load and aggregate the splice-artifact blacklist from an alignable store.
 
