@@ -182,6 +182,7 @@ def _density_case(
         free_neg=fn,
         exon_pos=is_exon & fp,
         exon_neg=is_exon & fn,
+        terminal=np.zeros(3, bool),  # both regions admit the case's strand
         left=left,
         right=right,
         flags=np.array([0, flags, 0], np.uint16),

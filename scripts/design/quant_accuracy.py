@@ -57,7 +57,7 @@ from _shared import is_zero_gdna, set_field, strata, stratum  # noqa: E402
 import rigel.calibration.priors as PRIORS  # noqa: E402
 from rigel.config import EMConfig, PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
-from rigel.pipeline import _native_detect_sj_tag, run_pipeline  # noqa: E402
+from rigel.pipeline import resolve_scan_config, run_pipeline  # noqa: E402
 from rigel.scan_cache import ScanCacheKeyError, read_scan_cache  # noqa: E402
 
 _RUNS = Path.home() / "Downloads" / "rigel_runs"
@@ -123,7 +123,7 @@ def load_oracle(bam: str, index, pipeline_config, suite: Path, cache_root: Path,
     index — ``reach`` is covered by no other hash — so a stale cache is a loud refusal rather than a
     silent wrong truth.
     """
-    scan = dataclasses.replace(pipeline_config.scan, sj_strand_tag=_native_detect_sj_tag(bam))
+    scan = resolve_scan_config(pipeline_config.scan, bam)
     root = Path(cache_root) / tag
     try:
         full = read_scan_cache(Path(suite) / "scan_cache" / tag, index, scan).payload
@@ -360,6 +360,12 @@ def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
         "n_intergenic_gdna": intergenic - intergenic_rna,
         "n_intergenic_rna": intergenic_rna,
     }
+
+
+def gdna_estimate(library: dict) -> float:
+    """A library row's gDNA estimate, the one ``gdna_true`` is scored against: the EM's gDNA plus the
+    unspliced intergenic fragments, which reach no locus and so never enter the EM (``score_library``)."""
+    return library["gdna_est"] + library["n_intergenic_gdna"]
 
 
 # ── one condition ────────────────────────────────────────────────────────────────────────────────
@@ -768,7 +774,7 @@ def markdown_report(path: Path, out: Path) -> None:
             w(f"| **{tag}** | | | | | |")
             for c in rows:
                 r = primary[(c, "library")]
-                est = (r["gdna_est"] + r["n_intergenic_gdna"]) if est_f is None else r[est_f]
+                est = gdna_estimate(r) if est_f is None else r[est_f]
                 true = r[true_f]
                 w(f"| `{c}` | {_gdna_level(r)} | {est:,.0f} | {true:,.0f} | "
                   f"{_signed(est - true)} | {_pct(est, true)} |")
@@ -858,7 +864,7 @@ def markdown_report(path: Path, out: Path) -> None:
         tt = sum(primary[(c, "transcript")]["count_true"] for c in rows)
         ne = sum(primary[(c, "library")]["nrna_est"] for c in rows)
         nt = sum(primary[(c, "library")]["nrna_true"] for c in rows)
-        ge = sum(primary[(c, "library")]["gdna_est"] + primary[(c, "library")]["n_intergenic_gdna"] for c in rows)
+        ge = sum(gdna_estimate(primary[(c, "library")]) for c in rows)
         gt = sum(primary[(c, "library")]["gdna_true"] for c in rows)
         tag = f"{st[0]} × {st[1]}" + (" ⛔ DEFERRED" if st == ("unstranded", "capture ON") else "")
         w(f"| {tag} | {tt:,.0f} | {tx:,.0f} | {100 * tx / tt:.2f} % | {gn:,.0f} | "
@@ -1042,7 +1048,7 @@ def report(paths: list[Path]) -> None:
         print("    " + "-" * 122)
         for c in conds:
             r = a[(c, "library")]
-            print(f"    {c:<44} {r['gdna_est'] + r['n_intergenic_gdna']:>13,.0f} {r['gdna_true']:>13,.0f} "
+            print(f"    {c:<44} {gdna_estimate(r):>13,.0f} {r['gdna_true']:>13,.0f} "
                   f"{r['nrna_est']:>11,.0f} {r['nrna_true']:>10,.0f} "
                   f"{r['mrna_est']:>13,.0f} {r['mrna_true']:>13,.0f}")
 

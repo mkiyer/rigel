@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .region_arrays import boundary_region_indices
+from .region_arrays import boundary_region_indices, overlapping_region_runs
 
 if TYPE_CHECKING:
     from ..locus import MultiLocus
@@ -71,20 +71,23 @@ def _region_locus_shares(
 
     starts = np.asarray(region_arrays.start, dtype=np.int64)
     ends = np.asarray(region_arrays.end, dtype=np.int64)
-    ref_offsets = region_arrays.ref_offsets
     for ref_id in range(int(region_arrays.n_refs)):
         blocks = blocks_by_ref.get(ref_id)
         if not blocks:
             continue
-        lo, hi = int(ref_offsets[ref_id]), int(ref_offsets[ref_id + 1])
-        # The regions partition the reference, so each block overlaps one contiguous run of them: the
-        # first region ending after the block starts through the last starting before it ends. Visiting
-        # each region's overlapping blocks in sorted-block order keeps every float sum in the same order
-        # as a scan over all earlier blocks, while touching only the pairs that overlap.
+        # Each block overlaps one contiguous run of regions, `[first, last)` (`overlapping_region_runs`).
+        # Visiting each region's overlapping blocks in sorted-block order keeps every float sum in the same
+        # order as a scan over all earlier blocks, while touching only the pairs that overlap.
         b_start = np.fromiter((b[0] for b in blocks), dtype=np.int64, count=len(blocks))
         b_end = np.fromiter((b[1] for b in blocks), dtype=np.int64, count=len(blocks))
-        first = lo + np.searchsorted(ends[lo:hi], b_start, side="right")
-        last = lo + np.searchsorted(starts[lo:hi], b_end, side="left")
+        first, last = overlapping_region_runs(
+            np.full(len(blocks), ref_id, dtype=np.int64),
+            b_start,
+            b_end,
+            starts,
+            ends,
+            region_arrays.ref_offsets,
+        )
         width = np.maximum(last - first, 0)
         pair_block = np.repeat(np.arange(len(blocks), dtype=np.int64), width)
         pair_region = np.repeat(first, width) + (

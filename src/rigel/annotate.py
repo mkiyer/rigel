@@ -363,7 +363,7 @@ def write_annotated_bam(
     *,
     skip_duplicates: bool,
     include_multimap: bool,
-    sj_strand_tag: str | tuple[str, ...],
+    sj_spec: str,
     locus_id_per_transcript: np.ndarray | None = None,
 ) -> dict:
     """Second BAM pass: stamp every record with assignment tags.
@@ -389,8 +389,9 @@ def write_annotated_bam(
         Must match the value used in Pass 1.
     include_multimap : bool
         Must match the value used in Pass 1.
-    sj_strand_tag : str or tuple
-        Must match the value used in Pass 1.
+    sj_spec : str
+        The splice-junction tag spec Pass 1's scanner read with, resolved (``"XS"``, ``"ts"``,
+        ``"XS,ts"``, ``"ts,XS"`` or ``"none"``), never ``"auto"``.
     locus_id_per_transcript : np.ndarray or None
         int32 array mapping transcript index → locus_id. If provided,
         used to populate the ZL (locus_id) BAM tag.
@@ -401,12 +402,6 @@ def write_annotated_bam(
         Summary statistics of the annotation pass.
     """
     from .native import BamAnnotationWriter
-
-    # Convert sj_strand_tag to spec string
-    if isinstance(sj_strand_tag, (list, tuple)):
-        sj_spec = ",".join(sj_strand_tag) if sj_strand_tag else "none"
-    else:
-        sj_spec = sj_strand_tag if sj_strand_tag else "none"
 
     # Build writer using the same FragmentResolver as pass 1
     writer = BamAnnotationWriter(

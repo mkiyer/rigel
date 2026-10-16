@@ -3,7 +3,8 @@ posterior they imply.
 
 The counts and their accumulation; the per-sj strand table, which is what the junction fit behind κ
 reads and which the 2x2 is only the marginal of; the posterior over a fragment's strand; the derived
-properties; and the container that holds one model per population. A model that kept only the 2x2
+properties; the container that holds one model per population; and the scanner's own count of the
+all-exonic diagnostic's 2x2, against a recount of the same fragments. A model that kept only the 2x2
 would satisfy every marginal check and silently fall back to the pooled κ, splice artifacts and all.
 """
 
@@ -13,18 +14,25 @@ import pytest
 from rigel.types import Strand
 from rigel.strand_model import SJStrandTable, StrandModel, StrandModels
 
+#: ``(alignment strand, reference strand)`` → the ``StrandModel`` cell that counts it.
+_CELLS = {
+    (Strand.POS, Strand.POS): "pos_pos",
+    (Strand.POS, Strand.NEG): "pos_neg",
+    (Strand.NEG, Strand.POS): "neg_pos",
+    (Strand.NEG, Strand.NEG): "neg_neg",
+}
 
-def _labels(pairs):
-    """Expand ``[(align, sj, count), ...]`` into the C++ scanner's two parallel label arrays."""
-    align, sj = [], []
+
+def _counts(pairs) -> dict[str, int]:
+    """File ``[(align, reference, count), ...]`` into the four cells of the 2x2."""
+    counts = dict.fromkeys(_CELLS.values(), 0)
     for a, s, n in pairs:
-        align += [int(a)] * n
-        sj += [int(s)] * n
-    return np.asarray(align, dtype=np.int8), np.asarray(sj, dtype=np.int8)
+        counts[_CELLS[(a, s)]] += n
+    return counts
 
 
 def _model(pairs) -> StrandModel:
-    return StrandModel.from_labels(*_labels(pairs))
+    return StrandModel(**_counts(pairs))
 
 
 def _table(rows) -> SJStrandTable:
@@ -52,7 +60,7 @@ class TestStrandModelCounts:
         assert sm.n_observations == 0
         assert sm.sj_table is None
 
-    def test_from_labels_fills_each_cell(self):
+    def test_same_and_opposite_are_the_diagonals(self):
         sm = _model(
             [
                 (Strand.POS, Strand.POS, 3),
@@ -90,12 +98,13 @@ class TestSJStrandTable:
         assert neg_neg == 5  # sense on motif-NEG sj
         assert pos_neg == 4  # antisense on motif-NEG sj
 
-    def test_from_sj_table_agrees_with_from_labels(self):
-        """Both constructors, one population: the same fragments give the same 2×2 and κ."""
+    def test_from_sj_table_agrees_with_the_counted_cells(self):
+        """One population, two routes: the table's marginal and the same fragments filed cell by cell give the
+        same 2×2 and κ."""
         rows = [(Strand.POS, 3, 7), (Strand.POS, 10, 2), (Strand.NEG, 5, 4)]
         from_table = StrandModel.from_sj_table(_table(rows))
-        # The same fragments as raw labels: motif POS + sense ⇒ (align POS, sj POS), etc.
-        from_labels = _model(
+        # The same fragments, each in its cell: motif POS + sense ⇒ (align POS, sj POS), etc.
+        from_cells = _model(
             [
                 (Strand.POS, Strand.POS, 13),  # sense on motif POS
                 (Strand.NEG, Strand.POS, 9),  # antisense on motif POS
@@ -104,12 +113,12 @@ class TestSJStrandTable:
             ]
         )
         assert (from_table.pos_pos, from_table.pos_neg, from_table.neg_pos, from_table.neg_neg) == (
-            from_labels.pos_pos,
-            from_labels.pos_neg,
-            from_labels.neg_pos,
-            from_labels.neg_neg,
+            from_cells.pos_pos,
+            from_cells.pos_neg,
+            from_cells.neg_pos,
+            from_cells.neg_neg,
         )
-        assert from_table.p_r1_sense == pytest.approx(from_labels.p_r1_sense)
+        assert from_table.p_r1_sense == pytest.approx(from_cells.p_r1_sense)
 
     def test_depth_and_totals(self):
         t = _table([(Strand.POS, 3, 7), (Strand.NEG, 100, 0)])
@@ -181,7 +190,6 @@ class TestStrandModelsContainer:
 
     def _scan_dict(self, rows, exonic=()):
         t = _table(rows)
-        align, sj = _labels(exonic) if exonic else (np.empty(0, np.int8), np.empty(0, np.int8))
         return {
             "sj_ref_id": t.ref_id,
             "sj_start": t.start,
@@ -189,8 +197,7 @@ class TestStrandModelsContainer:
             "sj_motif_strand": t.motif_strand,
             "sj_n_sense": t.n_sense,
             "sj_n_antisense": t.n_antisense,
-            "exonic_obs": align,
-            "exonic_truth": sj,
+            **{f"exonic_{cell}": n for cell, n in _counts(exonic).items()},
         }
 
     def test_delegation_to_exonic_spliced(self):
@@ -222,15 +229,80 @@ class TestStrandModelsContainer:
             StrandModels.from_scan(self._scan_dict([(Strand.POS, 5, 0)]))
         assert "Only 5 spliced strand observations" in caplog.text
 
-    def test_diagnostic_model_built_from_labels_and_has_no_table(self):
-        models = StrandModels.from_scan(
-            self._scan_dict([(Strand.POS, 1, 0)], exonic=[(Strand.POS, Strand.POS, 10)])
-        )
-        assert models.exonic.n_observations == 10
-        assert models.exonic.sj_table is None
+    def test_diagnostic_model_built_from_its_counts_and_has_no_table(self):
+        """Each of the scanner's four counts lands in its own cell: distinct counts, so a swap shows."""
+        exonic = [
+            (Strand.POS, Strand.POS, 3),
+            (Strand.POS, Strand.NEG, 5),
+            (Strand.NEG, Strand.POS, 7),
+            (Strand.NEG, Strand.NEG, 11),
+        ]
+        models = StrandModels.from_scan(self._scan_dict([(Strand.POS, 1, 0)], exonic=exonic))
+        m = models.exonic
+        assert (m.pos_pos, m.pos_neg, m.neg_pos, m.neg_neg) == (3, 5, 7, 11)
+        assert m.n_observations == 26
+        assert m.sj_table is None
 
     def test_default_container_has_an_empty_table(self):
         assert StrandModels().sj_table.n_sj == 0
+
+
+class TestTheScannersExonicCounts:
+    """The scanner counts the all-exonic diagnostic's 2x2 itself, so its cells are checked against an
+    independent recount of the same fragments from the scan's own buffer: unique mappers that are not
+    chimeric, whose candidates share one strand, filed by alignment strand and the first candidate's
+    strand."""
+
+    def test_each_fragment_is_counted_in_its_cell(self, tmp_path):
+        from rigel.config import BamScanConfig
+        from rigel.pipeline import scan_and_buffer
+        from rigel.sim import ReadSimConfig, Scenario
+
+        # Two genes on opposite strands, imperfectly stranded, so every cell holds fragments.
+        sc = Scenario("exonic_2x2", genome_length=5000, seed=11, work_dir=tmp_path / "exonic_2x2")
+        sc.add_gene("g1", "+", [{"t_id": "t1", "exons": [(200, 400), (600, 800)], "abundance": 80}])
+        sc.add_gene(
+            "g2", "-", [{"t_id": "t2", "exons": [(2500, 2700), (3000, 3200)], "abundance": 30}]
+        )
+        sim = ReadSimConfig(
+            frag_mean=200,
+            frag_std=30,
+            frag_min=80,
+            frag_max=450,
+            read_length=100,
+            strand_specificity=0.8,
+            seed=11,
+        )
+        result = sc.build_oracle(n_fragments=400, sim_config=sim)
+        expect = dict.fromkeys(_CELLS.values(), 0)
+        try:
+            _stats, models, buffer, _payload = scan_and_buffer(
+                str(result.bam_path), result.index, BamScanConfig(sj_strand_tag="XS")
+            )
+            t_strand = np.asarray(result.index.t_to_strand_arr)
+            with buffer:
+                for chunk in buffer.iter_chunks_consuming():
+                    first, end = chunk.t_offsets[:-1], chunk.t_offsets[1:]
+                    keep = (
+                        (chunk.num_hits == 1)
+                        & (chunk.chimera_type == 0)
+                        & (chunk.ambig_strand == 0)
+                        & (end > first)
+                    )
+                    align = chunk.align_strand[keep]
+                    ref = t_strand[chunk.t_indices[first[keep]]]
+                    for (a, s), cell in _CELLS.items():
+                        expect[cell] += int(np.count_nonzero((align == int(a)) & (ref == int(s))))
+        finally:
+            sc.cleanup()
+        assert min(expect.values()) > 0, "every cell must hold fragments for the check to bite"
+        m = models.exonic
+        assert (m.pos_pos, m.pos_neg, m.neg_pos, m.neg_neg) == (
+            expect["pos_pos"],
+            expect["pos_neg"],
+            expect["neg_pos"],
+            expect["neg_neg"],
+        )
 
 
 class TestGenuineKappa:

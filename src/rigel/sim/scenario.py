@@ -145,7 +145,7 @@ class ScenarioResult:
         Returns
         -------
         int
-            Number of fragments with ``gdna:`` prefix.
+            Number of gDNA-origin fragments.
         """
         return count_origins_from_fastq(self.fastq_r1)["gdna"]
 
@@ -155,7 +155,7 @@ class ScenarioResult:
         Returns
         -------
         int
-            Number of fragments with ``nrna_`` prefix.
+            Number of nascent-RNA-origin fragments.
         """
         return count_origins_from_fastq(self.fastq_r1)["nrna"]
 
@@ -165,8 +165,8 @@ class ScenarioResult:
         Unlike :meth:`ground_truth_from_bam`, this counts *all* simulated
         fragments regardless of alignment success, providing the true
         number of fragments the simulator produced per transcript.
-        Only mature-RNA origins are counted: gDNA (``gdna:`` prefix) and
-        nascent RNA (``nrna_`` prefix) reads are excluded.
+        Only mature-RNA origins are counted: gDNA and nascent-RNA reads are
+        excluded.
 
         Returns
         -------
@@ -180,7 +180,7 @@ class ScenarioResult:
     def ground_truth_from_bam(self) -> dict[str, int]:
         """Parse BAM read names for ground-truth mRNA fragment counts.
 
-        Read-name format: ``{t_id}:{start}-{end}:{strand}:{idx}``
+        The read-name format is :mod:`rigel.sim.read_name`'s.
 
         Returns
         -------

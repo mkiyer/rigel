@@ -104,6 +104,19 @@ def _sj_tag_to_spec(sj_strand_tag) -> str:
     return "none"
 
 
+def resolve_scan_config(scan: BamScanConfig, bam_path) -> BamScanConfig:
+    """``scan`` with ``sj_strand_tag="auto"`` replaced by the tag spec the BAM's spliced reads carry.
+
+    ``"auto"`` is a request, never a mode the native readers take: the detector reads the first spliced
+    reads and names ``"XS"``, ``"ts"``, ``"XS,ts"`` or ``"none"``. Any other config comes back as it is,
+    so resolving twice is resolving once. Whatever records a scan's settings, a scan cache's key among
+    them, records the config this returns.
+    """
+    if _sj_tag_to_spec(scan.sj_strand_tag) != "auto":
+        return scan
+    return _replace(scan, sj_strand_tag=_native_detect_sj_tag(str(bam_path)))
+
+
 def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
     """Apply C++ scan statistics to PipelineStats.
 
@@ -259,7 +272,8 @@ def scan_and_buffer(
     index : TranscriptIndex
         The loaded reference index.
     scan : BamScanConfig
-        BAM scanning and buffering configuration.
+        BAM scanning and buffering configuration. ``sj_strand_tag="auto"`` is resolved here
+        (:func:`resolve_scan_config`), after the header check.
 
     Returns
     -------
@@ -271,6 +285,7 @@ def scan_and_buffer(
     one rule — the accumulator's ``L`` — over one stated population.
     """
     _check_bam_header(bam_path, index)
+    scan = resolve_scan_config(scan, bam_path)
     stats = PipelineStats()
     buffer = FragmentBuffer(
         max_memory_bytes=scan.buffer_size_bytes,
@@ -971,18 +986,14 @@ def run_pipeline(
 
     bam_path = str(bam_path)
 
-    # -- Resolve sj_strand_tag "auto" → concrete tag(s): a spec string ("XS", "ts", "XS,ts" or
-    # "none") read by htslib, which ``_sj_tag_to_spec`` already handles --
-    scan = config.scan
-    if scan.sj_strand_tag == "auto":
-        detected_spec = _native_detect_sj_tag(bam_path)
-        scan = _replace(scan, sj_strand_tag=detected_spec)
-        logger.info(
-            "[SCAN] splice-junction strand tag: %s (auto, from the first spliced reads)",
-            detected_spec,
-        )
-    else:
-        logger.info("[SCAN] splice-junction strand tag: %s", _sj_tag_to_spec(scan.sj_strand_tag))
+    # -- Resolve sj_strand_tag "auto" to the tag the BAM carries --
+    scan = resolve_scan_config(config.scan, bam_path)
+    detected = scan.sj_strand_tag != config.scan.sj_strand_tag
+    logger.info(
+        "[SCAN] splice-junction strand tag: %s%s",
+        _sj_tag_to_spec(scan.sj_strand_tag),
+        " (auto, from the first spliced reads)" if detected else "",
+    )
     # the result carries the mode the scan read with, so summary.json and config.yaml record it
     config = _replace(config, scan=scan)
 
@@ -1132,7 +1143,7 @@ def run_pipeline(
             index,
             skip_duplicates=scan.skip_duplicates,
             include_multimap=scan.include_multimap,
-            sj_strand_tag=scan.sj_strand_tag,
+            sj_spec=_sj_tag_to_spec(scan.sj_strand_tag),
             locus_id_per_transcript=estimator.locus_id_per_transcript,
         )
     return result

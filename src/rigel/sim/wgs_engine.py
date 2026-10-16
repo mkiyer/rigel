@@ -58,6 +58,7 @@ from rigel.sim.bam import (
 )
 from rigel.sim.capture import CaptureConfig, CaptureSampler
 from rigel.sim.genome import reverse_complement
+from rigel.sim.read_name import STRAND_FORWARD, STRAND_REVERSE, format_gdna_name, format_rna_name
 from rigel.sim.sampling import truncated_normal_frag_lengths
 from rigel.sim.wgs_config import GDNASimConfig, SimulationParams
 
@@ -237,8 +238,8 @@ class WholeGenomeSimulator:
        capture-aware effective length. Accumulate per-row fragment counts.
     5. Iterate rows: pull sequence ONCE, extract all fragments via numpy fancy indexing, and write
        FASTQ.gz + BAM simultaneously (one RNA writer; a nascent row differs from a mature one ONLY by
-       its read-name origin tag, ``nrna_<entity id>``). gzip compression is multi-threaded via pgzip
-       when available.
+       its read-name origin tag, :func:`~rigel.sim.read_name.format_rna_name`'s ``nascent``). gzip
+       compression is multi-threaded via pgzip when available.
 
     Nascent RNA is a transcript here, not a parallel pre-mRNA space. The transcript list comes from
     the rigel index and already holds the nascent entities — single-exon transcripts over each
@@ -285,9 +286,9 @@ class WholeGenomeSimulator:
             self._t_seq_bytes.append(_seq_to_bytes(seq))
             self._t_lengths[i] = len(seq)
 
-        # Strand chars and abundance arrays
+        # Read-name strand letters and abundance arrays
         self._t_strand_chars: list[str] = [
-            "r" if t.strand == Strand.NEG else "f" for t in transcripts
+            STRAND_REVERSE if t.strand == Strand.NEG else STRAND_FORWARD for t in transcripts
         ]
         self._mrna_abund = np.array([t.abundance or 0.0 for t in transcripts])
         # nascent lives on single-exon entity rows only: a multi-exon row carrying nascent would be
@@ -608,7 +609,6 @@ class WholeGenomeSimulator:
 
         seq_bytes = self._t_seq_bytes[t_idx]
         seq_len = int(self._t_lengths[t_idx])
-        qname_prefix = f"nrna_{t_id}" if is_nrna else t_id
 
         ref_id = self._ref_name_to_id.get(t.ref) if bam_fh else None
         n_written = 0
@@ -661,10 +661,11 @@ class WholeGenomeSimulator:
                 self._introduce_errors_batch(r2_seqs)
 
             # Build query names
-            base_n = n_written
             qnames = [
-                f"{qname_prefix}:{int(frag_starts[i])}-{int(frag_starts[i]) + frag_len}:{strand_char}:{base_n + i}"
-                for i in range(count)
+                format_rna_name(
+                    t_id, start, start + frag_len, strand_char, n_written + i, nascent=is_nrna
+                )
+                for i, start in enumerate(frag_starts.tolist())
             ]
 
             # Batch FASTQ writes
@@ -885,9 +886,10 @@ class WholeGenomeSimulator:
             self._introduce_errors_batch(r2_seqs)
 
         qnames = [
-            f"gdna:{ref}:{int(starts[j])}-{int(starts[j]) + fl}:"
-            f"{'r' if chrom_strands[j] else 'f'}:{n_offset + j}"
-            for j in range(count)
+            format_gdna_name(
+                ref, start, start + fl, STRAND_REVERSE if reverse else STRAND_FORWARD, n_offset + j
+            )
+            for j, (start, reverse) in enumerate(zip(starts.tolist(), chrom_strands.tolist()))
         ]
 
         r1_buf.write_records_batch(qnames, r1_seqs, quals, "/1")

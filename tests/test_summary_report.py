@@ -188,8 +188,23 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
 
     summary = json.loads((out / "summary.json").read_text())
 
-    # versioned schema
+    # versioned schema, ONE constant: the report targets the version the writer writes, so a bump of the
+    # writer's moves the report's with it — the bumped summary reads clean and the older one now warns. A
+    # copy restated in the report would stay behind and warn on the bumped one.
+    from rigel.report.substrate import load_substrate
+
+    def schema_warnings(run_dir):
+        return [w for w in load_substrate(run_dir).warnings if "schema_version" in w]
+
     assert summary["schema_version"] == cli.SUMMARY_SCHEMA_VERSION == 3
+    assert schema_warnings(out) == []
+    bumped = tmp_path / "bumped"
+    bumped.mkdir()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(cli, "SUMMARY_SCHEMA_VERSION", cli.SUMMARY_SCHEMA_VERSION + 1)
+        cli._write_quant_outputs(pr, result.index, bumped, args)
+        assert json.loads((bumped / "summary.json").read_text())["schema_version"] == 4
+        assert schema_warnings(bumped) == [] and schema_warnings(out) != []
     assert summary["quantification"]["n_gated_out"] == 0  # the default alphas gate nothing
 
     # fragment_length is stats-only — the histogram bloat is gone

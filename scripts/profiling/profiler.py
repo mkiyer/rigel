@@ -341,9 +341,8 @@ def profile_run(bam: str, index_dir: str, *, threads: int | None, knobs: list[st
             profiler.enable()
         index = TranscriptIndex.load(index_dir)
         if scan_only:
-            scan_cfg = cfg.scan
-            if scan_cfg.sj_strand_tag == "auto":
-                scan_cfg = dataclasses.replace(scan_cfg, sj_strand_tag=pipeline._native_detect_sj_tag(bam))
+            # resolved here, as run_pipeline does, so the scan stage times the same work in both modes
+            scan_cfg = pipeline.resolve_scan_config(cfg.scan, bam)
             stats = pipeline.scan_and_buffer(bam, index, scan_cfg)[0]
         else:
             stats = pipeline.run_pipeline(bam, index, cfg).stats

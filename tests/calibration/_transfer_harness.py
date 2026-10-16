@@ -450,13 +450,12 @@ def capture_sweep_inputs(tmp_path_factory):
         build_sj_geometry_arrays,
     )
     from rigel.config import CalibrationConfig, PipelineConfig
-    from rigel.pipeline import _native_detect_sj_tag, scan_and_buffer
+    from rigel.pipeline import scan_and_buffer
 
     index = toy.index
-    scan_cfg = dataclasses.replace(
-        PipelineConfig().scan, sj_strand_tag=_native_detect_sj_tag(str(toy.bam_path))
+    _stats, strand_model, _buf, payload = scan_and_buffer(
+        str(toy.bam_path), index, PipelineConfig().scan
     )
-    _stats, strand_model, _buf, payload = scan_and_buffer(str(toy.bam_path), index, scan_cfg)
     ra = RegionArrays.from_frame(index.regions_df, index.ref_name_to_id)
     fl = build_fl_models(
         payload,
@@ -571,6 +570,7 @@ def _prepared(pol, ctx, library=None) -> Prepared:
         free_neg=np.ascontiguousarray(ctx.free_neg, bool),
         exon_pos=np.ascontiguousarray(ctx.exon_pos, bool),
         exon_neg=np.ascontiguousarray(ctx.exon_neg, bool),
+        terminal=np.ascontiguousarray(ctx.terminal, bool),
         left=np.ascontiguousarray(ctx.left, np.int64),
         right=np.ascontiguousarray(ctx.right, np.int64),
         flags=np.ascontiguousarray(ctx.boundary_flags, np.uint16),
@@ -600,7 +600,7 @@ def _ctx_of(si) -> BlockContext:
     cap = SweepCapture()
     SW.solve_chain(*si["args"], **kw, policy=SilentPolicy(), _capture=cap)
     disc = strand_discriminability(float(kw["rna_sense_frac"]), float(kw.get("n_rna_obs", 0.0)))
-    structure = SW._structure(chain, statics, ra)
+    structure = SW._structure(chain, ra)
     return BlockContext(
         **view_fields(chain, statics, geometry, structure),
         n_grid=int(kw["n_grid"]),

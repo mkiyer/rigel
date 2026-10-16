@@ -143,19 +143,18 @@ class TransferPolicy:
 
     # ── the library: the lanes' coordinates and the strand witness's liveness, once ─────────────────
     def library(self, view: ChainView) -> _Library:
-        is_bnd = np.asarray(view.is_boundary, bool)
         is_exon = np.asarray(view.is_exon_region, bool)
         fp, fn = np.asarray(view.free_pos, bool), np.asarray(view.free_neg, bool)
-        is_intergenic = ~is_bnd & ~is_exon & ~fp & ~fn
         n_u = np.asarray(view.n_slot, np.float64)
         a_g = np.asarray(view.eff_gdna, np.float64)
         a_r = np.asarray(view.eff_rna, np.float64)
         cnt = np.asarray(view.unspliced_count, np.float64)
-        # the gDNA lane's coordinate: the library's structurally pure gDNA density. It is a REFERENCE
-        # for a log axis, so any positive density serves; when the intergenic count is zero (a
-        # zero-gDNA library with no intergenic reads) the library-wide density stands in. ⛔ Without
-        # that fallback the coordinate is zero and the gDNA lane is never built.
-        pure = is_intergenic & (a_g > 0.0)
+        # the gDNA lane's coordinate: the library's structurally pure gDNA density, over the intergenic
+        # regions (`ChainView.terminal`). It is a REFERENCE for a log axis, so any positive density
+        # serves; when the intergenic count is zero (a zero-gDNA library with no intergenic reads) the
+        # library-wide density stands in. ⛔ Without that fallback the coordinate is zero and the gDNA
+        # lane is never built.
+        pure = view.terminal & (a_g > 0.0)
         rho = float(n_u[pure].sum() / a_g[pure].sum()) if a_g[pure].sum() > 0.0 else 0.0
         if not rho > 0.0:
             den = float(a_g[a_g > 0.0].sum())

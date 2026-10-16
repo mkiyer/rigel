@@ -138,9 +138,7 @@ class _Index:
 
 
 def _make_env(index):
-    strand_models = StrandModels(
-        exonic_spliced=StrandModel.from_labels([int(Strand.POS)] * 20, [int(Strand.POS)] * 20)
-    )
+    strand_models = StrandModels(exonic_spliced=StrandModel(pos_pos=20))
     # Only the SIZE is needed here — an int, rather than a whole length-model container threaded
     # through several frames as an object.
     max_frag_size = 1000

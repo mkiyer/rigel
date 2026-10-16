@@ -495,14 +495,15 @@ def test_a_missing_or_stale_oracle_cache_ABORTS(toy, tmp_path):
     """
     import _oracle_arms
 
-    from rigel.pipeline import _native_detect_sj_tag, scan_and_buffer
+    from rigel.pipeline import resolve_scan_config, scan_and_buffer
     from rigel.scan_cache import write_scan_cache
 
     bam, cfg = str(toy.bam_path), PipelineConfig()
     with pytest.raises(SystemExit, match="no valid scan or oracle cache"):
         QA.load_oracle(bam, toy.index, cfg, tmp_path, tmp_path, "absent")
 
-    scan = dataclasses.replace(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
+    # resolved, because the cache records the config it scanned with
+    scan = resolve_scan_config(cfg.scan, bam)
     _stats, strand_model, _buf, payload = scan_and_buffer(bam, toy.index, scan)
     orc = tmp_path / "oracle_cache"
     _oracle_arms.load_or_build_oracle(bam, toy.index, cfg, tmp_path / "w", "t", payload, orc)

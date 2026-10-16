@@ -412,17 +412,32 @@ def test_a_terminal_receives_nothing_and_the_kernel_is_never_asked_for_the_hop_i
 
 
 def test_the_terminal_predicate_is_the_solve_gates_lock_on_a_region():
-    """One predicate, two names must not appear: the slots the backbone never delivers into are exactly
-    the REGIONS `g1_locked` locks — no admissible RNA strand — read off the source, so a reader cannot
-    find a second definition of "terminal" in the file; and the kernel is told them."""
+    """One predicate, one home: the slots the backbone never delivers into are exactly the REGIONS
+    `g1_locked` locks — no admissible RNA strand — defined once, on the view (`ChainView.terminal`), so a
+    reader cannot find a second definition of "terminal". The backbone cuts the chain at them and tells
+    the kernel them, whose builders read the array as their intergenic class, and the transfer library
+    reads its structurally pure gDNA off the same property — read off the source. On a hand-built view a
+    BOUNDARY that admits no strand is no terminal: only a region is."""
     import inspect
     import re
 
+    from rigel.calibration.messages import transfer as TR
+
+    prop = inspect.getsource(ChainView.terminal.fget)
+    assert re.search(r"~np\.asarray\(self\.is_boundary, bool\) & g1_locked\(", prop), (
+        "the predicate moved"
+    )
     src = inspect.getsource(SW)
-    assert re.search(r"terminal ?= ?.*is_region & g1_locked\(fp, fn\)", src), "the predicate moved"
+    assert re.search(r"terminal = view\.terminal", src), "the backbone re-derives the terminals"
     assert re.search(r"terminal=bits\(terminal\)", src), (
         "the kernel is no longer told the terminals"
     )
+    assert "view.terminal" in inspect.getsource(TR.TransferPolicy.library), (
+        "the library re-derives the terminals"
+    )
+    fp = np.ones(N, bool)
+    fp[[2, 3]] = False  # slot 2 is a region, slot 3 a boundary, neither admitting a strand
+    assert np.flatnonzero(_ctx(free_pos=fp).terminal).tolist() == [2]
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════

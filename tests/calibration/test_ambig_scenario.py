@@ -13,7 +13,6 @@ arm from passing trivially by always answering zero.
 
 from __future__ import annotations
 
-import dataclasses
 
 import numpy as np
 
@@ -22,7 +21,7 @@ from rigel.calibration.fl import build_fl_models
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.signature import TS_AMBIG
 from rigel.config import PipelineConfig
-from rigel.pipeline import _native_detect_sj_tag, scan_and_buffer
+from rigel.pipeline import scan_and_buffer
 from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 
 
@@ -82,8 +81,7 @@ def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nrna_abundance: float
     )
     idx, bam = res.index, str(res.bam_path)
     cfg = PipelineConfig()
-    scan = dataclasses.replace(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
-    _st, sm, _buf, pl = scan_and_buffer(bam, idx, scan)
+    _st, sm, _buf, pl = scan_and_buffer(bam, idx, cfg.scan)
     ra = RegionArrays.from_frame(idx.regions_df, idx.ref_name_to_id)
     # The length models from the payload alone, with no index inputs: the RNA pool is not de-tilted
     # and the gDNA pmf is fitted from the contained pair (production's

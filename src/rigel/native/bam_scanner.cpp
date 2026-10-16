@@ -97,14 +97,17 @@ enum class SJTagMode : uint8_t {
     TS_XS = 4,    // Check ts first, then XS
 };
 
-// Parse SJ tag configuration string → SJTagMode enum.
+// Parse SJ tag configuration string → SJTagMode enum. Any other spec is refused, "auto" included: the caller
+// resolves it to one of these (`detect_sj_strand_tag`) before the scan.
 static SJTagMode parse_sj_tag_spec(const std::string& spec) {
     if (spec == "XS")    return SJTagMode::XS_ONLY;
     if (spec == "ts")    return SJTagMode::TS_ONLY;
     if (spec == "XS,ts") return SJTagMode::XS_TS;
     if (spec == "ts,XS") return SJTagMode::TS_XS;
     if (spec == "none" || spec.empty()) return SJTagMode::NONE;
-    return SJTagMode::XS_TS;  // default
+    throw std::invalid_argument(
+        "sj_tag_spec must be 'XS', 'ts', 'XS,ts', 'ts,XS' or 'none' (resolve 'auto' with "
+        "detect_sj_strand_tag before the scan); got '" + spec + "'");
 }
 
 // ================================================================
@@ -238,20 +241,39 @@ struct QnameBatch {
 // Model training observation collectors
 // ================================================================
 
-/// Per-sj sense / antisense counts.  ⚠ These ARE counts, unlike the
-/// int8 label vectors below (whose count is the vector's size()), so they are
-/// sized as counts: uint64 removes the overflow question permanently at a cost
-/// of ~2.4 MB over a human sj set.
+/// Per-sj sense / antisense counts, sized as counts: uint64 removes the
+/// overflow question permanently at a cost of ~2.4 MB over a human sj set.
 struct SJStrandCounts {
     uint64_t n_sense = 0;
     uint64_t n_antisense = 0;
 };
 
+/// A 2×2 of fragment counts, alignment strand × reference strand — the cells of Python's `StrandModel`.
+struct StrandContingency {
+    int64_t pos_pos = 0;  // align POS, reference POS
+    int64_t pos_neg = 0;  // align POS, reference NEG
+    int64_t neg_pos = 0;  // align NEG, reference POS
+    int64_t neg_neg = 0;  // align NEG, reference NEG
+
+    /// One fragment; the caller has qualified both strands to POS or NEG.
+    void add(int32_t align_strand, int32_t ref_strand) {
+        const bool ref_pos = ref_strand == STRAND_POS;
+        if (align_strand == STRAND_POS) ++(ref_pos ? pos_pos : pos_neg);
+        else                            ++(ref_pos ? neg_pos : neg_neg);
+    }
+
+    void merge_from(const StrandContingency& o) {
+        pos_pos += o.pos_pos;
+        pos_neg += o.pos_neg;
+        neg_pos += o.neg_pos;
+        neg_neg += o.neg_neg;
+    }
+};
+
 struct StrandObservations {
-    // exonic: (align_strand, transcript_strand) for unique-mapper, non-chimeric fragments whose
-    // candidate transcripts share one strand
-    std::vector<int8_t> exonic_obs;
-    std::vector<int8_t> exonic_truth;
+    // exonic: the 2×2 of (align_strand, transcript_strand) over unique-mapper, non-chimeric fragments
+    // whose candidate transcripts share one strand
+    StrandContingency exonic;
 
     // ⭐ The per-sj strand table.
     // A sj is uniquely specified by (ref, start, end, motif strand); each
@@ -461,10 +483,7 @@ struct WorkerState {
 
 // Merge observations
 static void merge_strand_obs(StrandObservations& dst, StrandObservations& src) {
-    dst.exonic_obs.insert(dst.exonic_obs.end(),
-                          src.exonic_obs.begin(), src.exonic_obs.end());
-    dst.exonic_truth.insert(dst.exonic_truth.end(),
-                            src.exonic_truth.begin(), src.exonic_truth.end());
+    dst.exonic.merge_from(src.exonic);
     for (const auto& [key, counts] : src.sj_strand_table) {
         auto& dst_counts = dst.sj_strand_table[key];
         dst_counts.n_sense     += counts.n_sense;
@@ -1084,13 +1103,29 @@ struct MarshalledFragment {
 };
 
 // ================================================================
-// the two non-array banks, as Python dicts
+// the three non-array banks, as Python dicts
 // ================================================================
 //
-// ⭐ Written ONCE and used by both the bound `Accumulator` (the parity surface) and `build_result` (the
-// payload). The specification's key strings live here and nowhere else on this side of the ABI, so the two
-// exports cannot disagree about a name — which is the whole reason the payload, the reference and the
-// parity gate share one vocabulary.
+// ⭐ Written ONCE and used by the bound `Accumulator` and `AccumulatorSet` (the parity surface) and by
+// `build_result` (the payload). The specification's key strings live here and nowhere else on this side of
+// the ABI, so the exports cannot disagree about a name — which is the whole reason the payload, the
+// reference and the parity gate share one vocabulary.
+
+/// The deposit counters: the QC denominators. Every conservation statement downstream has to be able to
+/// name what it excluded, and none of these is derivable after the fact.
+static nb::dict qc_dict(const rigel::accumulator::DepositCounters& c) {
+    nb::dict out;
+    out["deposited"]                    = c.deposited;
+    out["dropped_too_long"]             = c.dropped_too_long;
+    out["dropped_empty"]                = c.dropped_empty;
+    out["dropped_strand_undefined"]     = c.dropped_strand_undefined;
+    out["deferred_undetermined_gap"]    = c.deferred_undetermined_gap;
+    out["deferred_multiple_placements"] = c.deferred_multiple_placements;
+    out["unannotated_introns"]          = c.unannotated_introns;
+    out["contradictory_sj_strand"]      = c.contradictory_sj_strand;
+    out["introns_absorbed"]             = c.introns_absorbed;
+    return out;
+}
 
 /// The umbrella census, keyed by the specification's `GapResolution` values.
 ///
@@ -1139,10 +1174,11 @@ static nb::dict deferred_dict(const rigel::accumulator::DeferredFragments& defer
 
 class BamScanner {
 public:
+    // Set by the one constructor, from the caller's scan config.
     FragmentResolver* ctx_;
-    SJTagMode sj_tag_mode_ = SJTagMode::XS_ONLY;
-    bool skip_duplicates_ = true;
-    bool include_multimap_ = false;
+    SJTagMode sj_tag_mode_;
+    bool skip_duplicates_;
+    bool include_multimap_;
 
     // Mapping from htslib tid → internal ref_id (FragmentResolver's numbering)
     std::vector<int32_t> tid_to_ref_id_;
@@ -1172,11 +1208,10 @@ public:
                bool skip_duplicates,
                bool include_multimap)
         : ctx_(&ctx),
+          sj_tag_mode_(parse_sj_tag_spec(sj_tag_spec)),
           skip_duplicates_(skip_duplicates),
           include_multimap_(include_multimap)
-    {
-        sj_tag_mode_ = parse_sj_tag_spec(sj_tag_spec);
-    }
+    {}
 
     // ----------------------------------------------------------------
     // The accumulator's partition
@@ -1982,8 +2017,7 @@ private:
                         int32_t t_strand = ctx.t_strand_arr_[t_idx];
                         if (t_strand == STRAND_POS ||
                             t_strand == STRAND_NEG) {
-                            strand_obs.exonic_obs.push_back(static_cast<int8_t>(result.align_strand));
-                            strand_obs.exonic_truth.push_back(static_cast<int8_t>(t_strand));
+                            strand_obs.exonic.add(result.align_strand, t_strand);
                         }
                     }
                 }
@@ -2089,8 +2123,11 @@ private:
 
         // Strand observations
         nb::dict strand_dict;
-        strand_dict["exonic_obs"]           = vec_to_ndarray(std::move(strand_obs_.exonic_obs));
-        strand_dict["exonic_truth"]         = vec_to_ndarray(std::move(strand_obs_.exonic_truth));
+        // The all-exonic diagnostic's 2×2, cell by cell.
+        strand_dict["exonic_pos_pos"]       = strand_obs_.exonic.pos_pos;
+        strand_dict["exonic_pos_neg"]       = strand_obs_.exonic.pos_neg;
+        strand_dict["exonic_neg_pos"]       = strand_obs_.exonic.neg_pos;
+        strand_dict["exonic_neg_neg"]       = strand_obs_.exonic.neg_neg;
 
         // The per-sj strand table, as six parallel arrays.  Sorted by
         // (ref, start, end, motif strand) because the source is an unordered_map
@@ -2302,22 +2339,10 @@ private:
             cal["pool_lengths"]           = vec_to_ndarray(std::move(pool_lengths));
             cal["deposited_lengths"]      = vec_to_ndarray(std::move(deposited_lengths));
 
-            // The QC denominators. Every conservation statement downstream has to be able
-            // to name what it excluded, and none of these is derivable after the fact.
-            nb::dict qc_dict;
-            qc_dict["deposited"]                = qc.deposited;
-            qc_dict["dropped_too_long"]         = qc.dropped_too_long;
-            qc_dict["dropped_empty"]            = qc.dropped_empty;
-            qc_dict["dropped_strand_undefined"] = qc.dropped_strand_undefined;
-            qc_dict["deferred_undetermined_gap"] = qc.deferred_undetermined_gap;
-            qc_dict["deferred_multiple_placements"] = qc.deferred_multiple_placements;
-            qc_dict["unannotated_introns"]      = qc.unannotated_introns;
-            qc_dict["contradictory_sj_strand"]  = qc.contradictory_sj_strand;
-            qc_dict["introns_absorbed"]         = qc.introns_absorbed;
-            cal["qc"] = qc_dict;
-
-            // ⭐ The side buffer and the umbrella census, through the SAME two exporters the parity
-            // surface uses, so the payload and the bound Accumulator cannot disagree about a key.
+            // ⭐ The QC denominators, the side buffer and the umbrella census, through the SAME three
+            // exporters the parity surface uses, so the payload and the bound Accumulator cannot disagree
+            // about a key.
+            cal["qc"]             = qc_dict(qc);
             cal["deferred"]       = deferred_dict(deferred);
             cal["gap_resolution"] = gap_census_dict(gap_census);
 
@@ -2380,10 +2405,11 @@ static void set_tag_str(bam1_t* r, const char* tag, const char* v) {
 
 class BamAnnotationWriter {
 public:
+    // Set by the one constructor, from the caller's scan config (pass 1's).
     FragmentResolver* ctx_;
-    SJTagMode sj_tag_mode_ = SJTagMode::XS_ONLY;
-    bool skip_duplicates_ = true;
-    bool include_multimap_ = false;
+    SJTagMode sj_tag_mode_;
+    bool skip_duplicates_;
+    bool include_multimap_;
     std::vector<int32_t> tid_to_ref_id_;
 
     BamAnnotationWriter(FragmentResolver& ctx,
@@ -2391,11 +2417,10 @@ public:
                         bool skip_duplicates,
                         bool include_multimap)
         : ctx_(&ctx),
+          sj_tag_mode_(parse_sj_tag_spec(sj_tag_spec)),
           skip_duplicates_(skip_duplicates),
           include_multimap_(include_multimap)
-    {
-        sj_tag_mode_ = parse_sj_tag_spec(sj_tag_spec);
-    }
+    {}
 
     // ----------------------------------------------------------------
     // Main write entry point
@@ -3106,18 +3131,7 @@ NB_MODULE(_bam_impl, m) {
                     {static_cast<std::size_t>(a.max_length()) + 1}, h).cast();
             })
             .def_prop_ro("qc", [](const Accumulator& a) {
-                const auto& c = a.counters();
-                nb::dict qc;
-                qc["deposited"]                = c.deposited;
-                qc["dropped_too_long"]         = c.dropped_too_long;
-                qc["dropped_empty"]            = c.dropped_empty;
-                qc["dropped_strand_undefined"] = c.dropped_strand_undefined;
-                qc["deferred_undetermined_gap"] = c.deferred_undetermined_gap;
-                qc["deferred_multiple_placements"] = c.deferred_multiple_placements;
-                qc["unannotated_introns"]      = c.unannotated_introns;
-                qc["contradictory_sj_strand"]  = c.contradictory_sj_strand;
-                qc["introns_absorbed"]         = c.introns_absorbed;
-                return qc;
+                return qc_dict(a.counters());
             })
 
             // ⭐ The umbrella census. The keys are the specification's `GapResolution` VALUES, character
@@ -3295,17 +3309,7 @@ NB_MODULE(_bam_impl, m) {
             .def_prop_ro("qc", [](const rigel::accumulator::AccumulatorSet& s) {
                 rigel::accumulator::DepositCounters c = s.counters();
                 for (std::size_t f = 0; f < s.n_refs(); ++f) c.merge_from(s.at(static_cast<int32_t>(f)).counters());
-                nb::dict qc;
-                qc["deposited"]                = c.deposited;
-                qc["dropped_too_long"]         = c.dropped_too_long;
-                qc["dropped_empty"]            = c.dropped_empty;
-                qc["dropped_strand_undefined"] = c.dropped_strand_undefined;
-                qc["deferred_undetermined_gap"] = c.deferred_undetermined_gap;
-                qc["deferred_multiple_placements"] = c.deferred_multiple_placements;
-                qc["unannotated_introns"]      = c.unannotated_introns;
-                qc["contradictory_sj_strand"]  = c.contradictory_sj_strand;
-                qc["introns_absorbed"]         = c.introns_absorbed;
-                return qc;
+                return qc_dict(c);
             })
             .def_prop_ro("gap_resolution", [](const rigel::accumulator::AccumulatorSet& s) {
                 rigel::accumulator::GapCensus g;
@@ -3326,7 +3330,8 @@ NB_MODULE(_bam_impl, m) {
              "ctx : FragmentResolver\n"
              "    The resolve context from index building.\n"
              "sj_tag_spec : str\n"
-             "    SJ strand tag specification: 'XS', 'ts', 'XS,ts', 'ts,XS', or 'none'.\n"
+             "    SJ strand tag specification: 'XS', 'ts', 'XS,ts', 'ts,XS', or 'none'. Any other\n"
+             "    spec, 'auto' included, raises ValueError: resolve 'auto' with detect_sj_strand_tag.\n"
              "skip_duplicates : bool\n"
              "    Skip duplicate-flagged reads.\n"
              "include_multimap : bool\n"
@@ -3432,7 +3437,7 @@ NB_MODULE(_bam_impl, m) {
              "ctx : FragmentResolver\n"
              "    The resolve context from index building.\n"
              "sj_tag_spec : str\n"
-             "    SJ strand tag specification (must match pass 1).\n"
+             "    SJ strand tag specification (must match pass 1); the specs BamScanner accepts.\n"
              "skip_duplicates : bool\n"
              "    Skip duplicate-flagged reads (must match pass 1).\n"
              "include_multimap : bool\n"

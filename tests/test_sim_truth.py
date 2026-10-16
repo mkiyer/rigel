@@ -1,10 +1,11 @@
 """Per-fragment truth is carried in the read name, and these are the helpers that write and read it.
 
-Parsing an origin back out of a FASTQ or BAM read name for each of mature, nascent and gDNA,
-including ids that contain ":"; counting origins over a whole FASTQ; writing post-capture truth from
-the origins actually observed rather than from what was requested; the condition directory naming;
-and the manifest round trip. Every truth-scoring instrument in the project reads through these, so a
-silent parse failure would make the oracle agree with anything.
+Writing a read name and parsing an origin back out of a FASTQ or BAM read name for each of mature,
+nascent and gDNA, including ids that contain ":", and refusing a strand outside the alphabet;
+counting origins over a whole FASTQ; writing post-capture truth from the origins actually observed
+rather than from what was requested; the condition directory naming; and the manifest round trip.
+Every truth-scoring instrument in the project reads through these, so a silent parse failure would
+make the oracle agree with anything.
 """
 
 import json
@@ -14,7 +15,16 @@ import pandas as pd
 import pytest
 
 from rigel.sim.manifest import condition_dir_name, gdna_label_for_rate, write_manifest
-from rigel.sim.truth import count_origins_from_fastq, parse_origin, write_post_capture_truth
+from rigel.sim.read_name import (
+    STRAND_FORWARD,
+    STRAND_REVERSE,
+    STRANDS,
+    Origin,
+    format_gdna_name,
+    format_rna_name,
+    parse_origin,
+)
+from rigel.sim.truth import count_origins_from_fastq, write_post_capture_truth
 from rigel.transcript import Transcript
 from rigel.types import Interval, Strand
 
@@ -92,6 +102,53 @@ def test_parse_origin_keeps_a_colon_inside_a_contig_or_transcript_id():
 
     nrna = parse_origin("nrna_tx:1:4-300:f:11")
     assert (nrna.kind, nrna.transcript_id, nrna.start, nrna.end) == ("nrna", "tx:1", 4, 300)
+
+
+def test_the_format_functions_write_the_simulator_names():
+    """The exact bytes: every oracle BAM and FASTQ already simulated carries names of this form."""
+    assert format_rna_name("tx1", 10, 250, STRAND_FORWARD, 7, nascent=False) == "tx1:10-250:f:7"
+    assert format_rna_name("tx1", 4, 300, STRAND_REVERSE, 11, nascent=True) == (
+        "nrna_tx1:4-300:r:11"
+    )
+    assert format_gdna_name("chr1", 100, 390, STRAND_REVERSE, 3) == "gdna:chr1:100-390:r:3"
+
+
+def test_a_formatted_name_parses_back_to_its_fields():
+    """The writer and the parser are inverses: every kind, both strands, a transcript id or contig
+    that contains ":", and the same name as a FASTQ header."""
+    for strand in STRANDS:
+        cases = [
+            (
+                format_rna_name("tx:1", 10, 250, strand, 7, nascent=False),
+                Origin("mrna", "tx:1", None, 10, 250, strand, 7),
+            ),
+            (
+                format_rna_name("tx:1", 4, 300, strand, 11, nascent=True),
+                Origin("nrna", "tx:1", None, 4, 300, strand, 11),
+            ),
+            (
+                format_gdna_name("HLA-A*01:01", 100, 390, strand, 3),
+                Origin("gdna", None, "HLA-A*01:01", 100, 390, strand, 3),
+            ),
+        ]
+        for name, origin in cases:
+            assert parse_origin(name) == origin, name
+            assert parse_origin(f"@{name}/2") == origin, name
+
+
+def test_parse_origin_refuses_a_strand_outside_the_alphabet():
+    """``+``, ``-`` and ``.`` are the GTF's strand letters, never the simulator's: a name carrying one,
+    or any letter outside the alphabet, was not written by the simulator and is refused rather than
+    read as truth."""
+    for qname in (
+        "tx1:10-250:+:7",
+        "nrna_tx1:4-300:-:11",
+        "gdna:chr1:100-390:.:3",
+        "tx1:10-250:F:7",
+        "tx1:10-250::7",
+    ):
+        with pytest.raises(ValueError, match="invalid strand"):
+            parse_origin(qname)
 
 
 def test_count_origins_from_fastq(tmp_path):

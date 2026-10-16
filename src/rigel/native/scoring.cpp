@@ -1161,4 +1161,11 @@ NB_MODULE(_scoring_impl, m) {
     // Export scoring constants for Python-side parity tests
     m.attr("LOG_HALF")      = rigel::LOG_HALF;
     m.attr("TAIL_DECAY_LP") = rigel::TAIL_DECAY_LP;
+
+    // The fragment classes this scorer routes on, the one definition rigel.buffer reads
+    m.attr("FRAG_UNAMBIG")           = rigel::FRAG_UNAMBIG;
+    m.attr("FRAG_AMBIG_SAME_STRAND") = rigel::FRAG_AMBIG_SAME_STRAND;
+    m.attr("FRAG_AMBIG_OPP_STRAND")  = rigel::FRAG_AMBIG_OPP_STRAND;
+    m.attr("FRAG_MULTIMAPPER")       = rigel::FRAG_MULTIMAPPER;
+    m.attr("FRAG_CHIMERIC")          = rigel::FRAG_CHIMERIC;
 }

@@ -72,7 +72,6 @@ from .region_geometry import (
     RegionBelief,
     RegionGeometry,
     RegionStatics,
-    g1_locked,
     region_gdna_geometry,
 )
 from .region_init import strand_discriminability
@@ -196,7 +195,7 @@ def solve_chain(
     """
     policy = policy if policy is not None else SilentPolicy()
     n = int(chain.n_slots)
-    structure = _structure(chain, statics, region_arrays)
+    structure = _structure(chain, region_arrays)
     kappa = float(rna_sense_frac)
     disc = strand_discriminability(kappa, n_rna_obs)
     # THE LIBRARY — the policy's reductions over the WHOLE chain, once, from observations and geometry
@@ -207,7 +206,8 @@ def solve_chain(
     )
     library = policy.library(view)
     lam, _ = _logodds_grid(int(n_grid), float(logodds_window))
-    blocks = locus_blocks(chain, structure.terminal, block_slots)
+    terminal = view.terminal
+    blocks = locus_blocks(chain, terminal, block_slots)
     out = {
         k: np.ascontiguousarray(getattr(belief, k), dtype=np.float64).copy()
         for k in ("f_pos", "f_neg", "f_g", "var_gdna")
@@ -218,7 +218,7 @@ def solve_chain(
         diag = {k: np.zeros(n) for k in ("fg_loc", "tau_lam")}
         diag["lam_rows"] = np.zeros((n, lam.shape[0]))
     res = solve_blocks(
-        **_chain_arrays(view, structure.terminal),
+        **_chain_arrays(view, terminal),
         belief_fpos=np.ascontiguousarray(belief.f_pos, np.float64),
         belief_fneg=np.ascontiguousarray(belief.f_neg, np.float64),
         belief_fg=np.ascontiguousarray(belief.f_g, np.float64),
@@ -294,29 +294,26 @@ def _chain_arrays(view: ChainView, terminal) -> dict:
 @dataclass(frozen=True, slots=True)
 class _Structure:
     """The structural classes per slot, from the signature and once for the chain: the EXON region (the
-    SPLICE IN's destination class, a policy input rather than a gate); the signature's two EXON bits per
-    slot — a strand's opportunity geometry, which the RNA level lanes read to tell a strand's intron
-    from its exon inside an overlapping locus; and the TERMINAL — a region with no admissible RNA
-    strand, the same predicate the SOLVE gate locks — which receives nothing and where the chain
-    breaks."""
+    SPLICE IN's destination class, a policy input rather than a gate), and the signature's two EXON bits
+    per slot — a strand's opportunity geometry, which the RNA level lanes read to tell a strand's intron
+    from its exon inside an overlapping locus. The TERMINAL — a region with no admissible RNA strand, the
+    same predicate the SOLVE gate locks — which receives nothing and where the chain breaks, is not here:
+    it is the view's own predicate (`ChainView.terminal`)."""
 
     is_exon_region: np.ndarray
     exon_pos: np.ndarray
     exon_neg: np.ndarray
-    terminal: np.ndarray
 
 
-def _structure(chain, statics, region_arrays) -> _Structure:
+def _structure(chain, region_arrays) -> _Structure:
     is_region = np.asarray(chain.kind) == REGION
     rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
     ri = np.clip(np.asarray(chain.obj_idx, dtype=np.int64), 0, rtype.shape[0] - 1)
     sig = np.asarray(region_arrays.signature).astype(np.int64)[ri]
-    fp, fn = np.asarray(statics.free_pos, bool), np.asarray(statics.free_neg, bool)
     return _Structure(
         is_exon_region=is_region & (rtype[ri] == RegionType.EXON),
         exon_pos=is_region & ((sig & BIT_EXON_POS) > 0),
         exon_neg=is_region & ((sig & BIT_EXON_NEG) > 0),
-        terminal=is_region & g1_locked(fp, fn),
     )
 
 

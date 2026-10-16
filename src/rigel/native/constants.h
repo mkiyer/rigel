@@ -1,7 +1,8 @@
 /**
  * constants.h — Shared constants and helper types for rigel C++ extensions.
  *
- * The enum-mirror constants must match the Python values each block names.
+ * The enum-mirror constants must match the Python values each block names; the fragment classes are
+ * defined here alone and Python reads them from the native module.
  */
 
 #pragma once
@@ -55,7 +56,8 @@ static constexpr int32_t STRAND_POS       = 1;
 static constexpr int32_t STRAND_NEG       = 2;
 static constexpr int32_t STRAND_AMBIGUOUS = 3;  // POS | NEG
 
-// FragmentClass (rigel.buffer — fragment classification codes)
+// FragmentClass — the fragment classification codes, defined here alone: `_scoring_impl`, which routes on
+// them, exports them, and rigel.buffer reads them from it (pinned by tests/test_buffer.py).
 static constexpr int32_t FRAG_UNAMBIG           = 0;
 static constexpr int32_t FRAG_AMBIG_SAME_STRAND = 1;
 static constexpr int32_t FRAG_AMBIG_OPP_STRAND  = 2;
@@ -112,6 +114,12 @@ struct MergeResult {
     bool is_empty() const { return t_inds.empty(); }
 };
 
+// Fold one int32 key field into a running hash (the boost hash_combine step). 0x9e3779b9 is 2^32/φ, the
+// golden-ratio increment that spreads consecutive values across the bits.
+inline void hash_combine(size_t& h, int32_t v) {
+    h ^= std::hash<int32_t>()(v) + 0x9e3779b9 + (h << 6) + (h >> 2);
+}
+
 // SJ exact-match map key
 struct SJKey {
     int32_t ref_id;
@@ -128,9 +136,9 @@ struct SJKey {
 struct SJKeyHash {
     size_t operator()(const SJKey& k) const {
         size_t h = std::hash<int32_t>()(k.ref_id);
-        h ^= std::hash<int32_t>()(k.start)  + 0x9e3779b9 + (h << 6) + (h >> 2);
-        h ^= std::hash<int32_t>()(k.end)    + 0x9e3779b9 + (h << 6) + (h >> 2);
-        h ^= std::hash<int32_t>()(k.strand) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        hash_combine(h, k.start);
+        hash_combine(h, k.end);
+        hash_combine(h, k.strand);
         return h;
     }
 };
@@ -150,8 +158,8 @@ struct SJBlacklistKey {
 struct SJBlacklistKeyHash {
     size_t operator()(const SJBlacklistKey& k) const {
         size_t h = std::hash<int32_t>()(k.ref_id);
-        h ^= std::hash<int32_t>()(k.start) + 0x9e3779b9 + (h << 6) + (h >> 2);
-        h ^= std::hash<int32_t>()(k.end)   + 0x9e3779b9 + (h << 6) + (h >> 2);
+        hash_combine(h, k.start);
+        hash_combine(h, k.end);
         return h;
     }
 };

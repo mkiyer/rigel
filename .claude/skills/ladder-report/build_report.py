@@ -79,9 +79,8 @@ def build(arms: Path, arm: str, suite: Path | None) -> dict:
             "strand": strand, "capture": cap,
             "deferred": strand == "unstranded" and cap == "ON",
             "pools": {
-                # ⛔ EM + intergenic. Intergenic fragments reach no locus and never enter the EM, but
-                # they ARE gDNA and the truth counts them; off capture they are more than half of it.
-                "gdna": {"est": lib["gdna_est"] + lib["n_intergenic"], "true": lib["gdna_true"]},
+                # ⛔ EM + intergenic: the instrument's own definition, never restated here
+                "gdna": {"est": qa.gdna_estimate(lib), "true": lib["gdna_true"]},
                 #: SYNTHETIC entities only — the split is `is_synthetic`, never `is_nrna`
                 "nascent": {"est": lib["nrna_est"], "true": lib["nrna_true"]},
                 "annotated": {"est": lib["mrna_est"], "true": lib["mrna_true"]},

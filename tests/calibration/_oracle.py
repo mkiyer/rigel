@@ -20,8 +20,8 @@ from pathlib import Path
 import numpy as np
 import pysam
 
-from rigel.pipeline import scan_and_buffer, _native_detect_sj_tag
-from rigel.sim.read_name import parse_origin
+from rigel.pipeline import scan_and_buffer
+from rigel.sim.read_name import STRAND_FORWARD, parse_origin
 
 ORIGINS = ("gdna", "mrna", "nrna")
 
@@ -105,12 +105,8 @@ def split_rna_by_transcript_strand(bam: str, out_dir, tag: str):
             origin = parse_origin(record.query_name)
             if origin.kind == "gdna":
                 continue
-            if origin.strand not in ("f", "r"):
-                raise AssertionError(
-                    f"RNA read {record.query_name!r} carries strand {origin.strand!r}; the simulator "
-                    "writes the TRANSCRIPT's 'f'/'r' and a per-arm truth cannot be built without it"
-                )
-            key = "rna_pos" if origin.strand == "f" else "rna_neg"
+            # an RNA name's strand letter is its TRANSCRIPT's; `parse_origin` refuses any other letter
+            key = "rna_pos" if origin.strand == STRAND_FORWARD else "rna_neg"
             writers[key].write(record)
             counts[key] += 1
             n_rna += 1
@@ -122,10 +118,7 @@ def split_rna_by_transcript_strand(bam: str, out_dir, tag: str):
 
 
 def _scan_payload(bam: str, index, cfg):
-    from dataclasses import replace as dc
-
-    sc = dc(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
-    _stats, _sm, _buf, payload = scan_and_buffer(bam, index, sc)
+    _stats, _sm, _buf, payload = scan_and_buffer(bam, index, cfg.scan)
     return payload
 
 

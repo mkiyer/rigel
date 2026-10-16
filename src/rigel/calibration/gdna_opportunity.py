@@ -78,6 +78,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .gdna_density import region_lengths_from_partition
+from .region_arrays import boundary_region_indices
 from .signature import RegionType
 
 if TYPE_CHECKING:
@@ -203,50 +205,29 @@ def gdna_opportunity_from_index(index: "TranscriptIndex", max_width: int) -> Gdn
     """
     from .splice_graph import build_region_partition_arrays
 
-    region_bounds, ref_region_bound_offsets, region_types = build_region_partition_arrays(index)
+    region_bounds, offsets, region_types = build_region_partition_arrays(index)
     region_bounds = np.asarray(region_bounds, dtype=np.int64)
-    offsets = np.asarray(ref_region_bound_offsets, dtype=np.int64)
+    offsets = np.asarray(offsets, dtype=np.int64)
     types = np.asarray(region_types, dtype=np.int64)
-
-    region_lengths: list[np.ndarray] = []
-    boundary_left: list[np.ndarray] = []
-    boundary_right: list[np.ndarray] = []
-    boundary_pairs: list[np.ndarray] = []
-    reference_lengths: list[int] = []
-    region_base = 0
-    for r in range(len(offsets) - 1):
-        lo, hi = int(offsets[r]), int(offsets[r + 1])
-        if hi - lo < 2:
-            # A reference with no regions contributes no bounds, so it cannot host a gDNA fragment.
-            continue
-        reference_region_bounds = region_bounds[lo:hi]
-        lengths = np.diff(reference_region_bounds)
-        n_regions = len(lengths)
-        reference_lengths.append(int(reference_region_bounds[-1]))
-        region_lengths.append(lengths)
-        if n_regions >= 2:
-            # Interior boundaries only: boundary i sits between region i-1 and region i.
-            boundary_left.append(lengths[:-1])
-            boundary_right.append(lengths[1:])
-            flanks = np.stack(
-                [
-                    types[region_base : region_base + n_regions - 1],
-                    types[region_base + 1 : region_base + n_regions],
-                ]
-            )
-            # Sorted, so the flank pair is order-insensitive exactly as the accumulator's own
-            # `_SPLASH_POOL` key is.
-            boundary_pairs.append(np.sort(flanks, axis=0))
-        region_base += n_regions
-
-    if not region_lengths:
+    if types.size == 0:
+        # No reference has a region, so none can host a gDNA fragment.
         zero = np.zeros(max_width + 1, dtype=np.float64)
         return GdnaOpportunity(zero, zero.copy(), zero.copy(), zero.copy(), zero.copy())
 
-    lengths = np.concatenate(region_lengths)
-    left = np.concatenate(boundary_left) if boundary_left else np.zeros(0, np.int64)
-    right = np.concatenate(boundary_right) if boundary_right else np.zeros(0, np.int64)
-    pairs = np.concatenate(boundary_pairs, axis=1) if boundary_pairs else np.zeros((2, 0), np.int64)
+    # float64 holding exact integers; every opportunity function casts them to int64 before it counts.
+    lengths = region_lengths_from_partition(region_bounds, offsets, types.size)
+    # ``k`` regions from a reference's ``k + 1`` bounds; a reference with no bounds has none.
+    regions_per_reference = np.maximum(np.diff(offsets) - 1, 0)
+    # Interior boundaries only: between two adjacent regions of one reference, never between references.
+    lo, hi = boundary_region_indices(
+        np.repeat(np.arange(regions_per_reference.size), regions_per_reference)
+    )
+    left, right = lengths[lo], lengths[hi]
+    # Sorted, so the flank pair is order-insensitive exactly as the accumulator's own `_SPLASH_POOL`
+    # key is.
+    pairs = np.sort(np.stack([types[lo], types[hi]]), axis=0)
+    # A reference's length is its last bound.
+    reference_lengths = region_bounds[offsets[1:][regions_per_reference > 0] - 1]
 
     intron_exon = (pairs[0] == RegionType.INTRON) & (pairs[1] == RegionType.EXON)
     intergenic_exon = (pairs[0] == RegionType.INTERGENIC) & (pairs[1] == RegionType.EXON)
@@ -260,5 +241,5 @@ def gdna_opportunity_from_index(index: "TranscriptIndex", max_width: int) -> Gdn
         intergenic_exon_crossing=crossing_opportunity(
             left[intergenic_exon], right[intergenic_exon], max_width
         ),
-        total=total_opportunity(np.asarray(reference_lengths, dtype=np.int64), max_width),
+        total=total_opportunity(reference_lengths, max_width),
     )

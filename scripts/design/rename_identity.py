@@ -41,7 +41,7 @@ import numpy as np  # noqa: E402
 
 from rigel.config import PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
-from rigel.pipeline import _native_detect_sj_tag, run_pipeline  # noqa: E402
+from rigel.pipeline import run_pipeline  # noqa: E402
 
 _RUNS = Path.home() / "Downloads" / "rigel_runs"
 DEFAULT_SUITE = _RUNS / "suite" / "ladder"
@@ -83,7 +83,7 @@ def capture(suite: Path, index_dir: Path, condition: str, bam: Path | None = Non
     base = PipelineConfig()
     cfg = dataclasses.replace(
         base,
-        scan=dataclasses.replace(base.scan, sj_strand_tag=_native_detect_sj_tag(bam), **DETERMINISM),
+        scan=dataclasses.replace(base.scan, **DETERMINISM),
         em=dataclasses.replace(base.em, seed=EM_SEED),
     )
     # the payload is not on `PipelineResult` and holds the very banks being renamed, so it is captured

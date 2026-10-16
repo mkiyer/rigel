@@ -405,6 +405,23 @@ class TestFragmentClasses:
         assert fc[1] == FRAG_AMBIG_SAME_STRAND
         assert fc[2] == FRAG_MULTIMAPPER
 
+    def test_the_class_codes_are_the_native_scorers(self):
+        """The codes have one definition, in the native scorer that routes on them: ``rigel.buffer`` reads
+        them from ``_scoring_impl`` rather than restating them. Their values are pinned as the splice types'
+        are (``tests/test_splice.py``): they cross the ABI in uint8 and int8 arrays, where -1 is no class."""
+        import rigel._scoring_impl as native_scoring
+
+        names = (
+            "FRAG_UNAMBIG",
+            "FRAG_AMBIG_SAME_STRAND",
+            "FRAG_AMBIG_OPP_STRAND",
+            "FRAG_MULTIMAPPER",
+            "FRAG_CHIMERIC",
+        )
+        native = [getattr(native_scoring, name) for name in names]
+        assert [getattr(buffer_mod, name) for name in names] == native
+        assert native == [0, 1, 2, 3, 4]
+
 
 # =====================================================================
 # FragmentBuffer -- disk spill

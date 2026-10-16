@@ -327,7 +327,6 @@ struct Arena {
     std::vector<double> n_u, n_s, flux, cnt_col[2], own_rows, lane_own[3], comp[2], prof[2][3], rows, cube_pos,
         cube_neg, cube_total, cube_opp, cube_rho, f_par[9], lane_wit[3], face_store, flux_store[3], recv_count[2][3],
         recv_opp[2][3], recv_rna[2][3], recv_rnav[2][3], fg_loc, tau_lam, out, bound, row;
-    std::vector<char> is_intron, is_intergenic;
     std::vector<int64_t> left, right, seq_f, seq_b, cube_slot;
     std::vector<int8_t> f_kind;
     std::vector<int32_t> f_row, f_row2, flux_index[3];
@@ -361,7 +360,6 @@ struct Arena {
         }
         for (auto& par : f_par) grow(par, 2 * n);
         grow(f_kind, 2 * n); grow(f_row, 2 * n); grow(f_row2, 2 * n);
-        grow(is_intron, n); grow(is_intergenic, n);
         grow(left, n); grow(right, n); grow(seq_f, n); grow(seq_b, n); grow(cube_slot, n);
         for (auto* v : {&own_mask, &empty_g, &empty_r, &has_nbr[0], &has_nbr[1], &has_comp[0], &has_comp[1],
                         &cube_has_pos, &cube_has_neg, &held, &solvable, &has_own, &own_ev})
@@ -395,7 +393,6 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
         A.cnt_col[0][i] = cnt[2 * i]; A.cnt_col[1][i] = cnt[2 * i + 1];
         A.seq_f[i] = i; A.seq_b[i] = n - 1 - i;
     }
-    Chain::classify(n, is_bnd, is_exon, fp, fn, A.is_intron.data(), A.is_intergenic.data());
     // THE SELF-SOLVE: every slot with a live strand and a fragment, on its own cube, the incoming belief the freeze
     auto in_slots = [&](int i) {
         const double signal = cnt[2 * i] + cnt[2 * i + 1] + A.n_u[i] + A.n_s[i];
@@ -433,7 +430,7 @@ void solve_one_block(const ChainArrays& C, const Params& p, const P::Grid& g, co
         c.has_own = as_bool(A.has_own); c.left = A.left.data(); c.right = A.right.data(); c.flags = flags;
         c.n_u = A.n_u.data(); c.n_s = A.n_s.data(); c.a_g = a_g; c.a_r = a_r; c.cnt = cnt;
         c.route_lo = route_lo; c.route_hi = route_hi; c.sj_lo = sj_lo; c.sj_hi = sj_hi; c.flux = A.flux.data();
-        c.is_intron = A.is_intron.data(); c.is_intergenic = A.is_intergenic.data();
+        c.terminal = term;
         c.has_strand = p.has_strand; c.kappa = p.kappa;
         // the tables, their bits cleared, their matrices unfilled
         std::fill_n(as_bool(A.own_mask), n, false);
@@ -750,9 +747,9 @@ nb::dict solve_blocks(BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, Bo
 
 // the tables of one block as the gates read them: a dict of fresh arrays (`tests/calibration/_transfer_harness.py`)
 nb::dict transfer_prepare(Vec lam, BoolVec is_boundary, BoolVec is_exon, BoolVec free_pos, BoolVec free_neg, BoolVec exon_pos,
-                          BoolVec exon_neg, IdxVec left, IdxVec right, FlagVec flags, Mat cnt, Mat spliced, Mat sj_count,
-                          Mat sj_count_lo, Mat sj_count_hi, Mat route_rate_lo, Mat route_rate_hi, Vec eff_gdna, Vec eff_rna,
-                          BoolVec has_own_composition, bool has_strand, double kappa,
+                          BoolVec exon_neg, BoolVec terminal, IdxVec left, IdxVec right, FlagVec flags, Mat cnt, Mat spliced,
+                          Mat sj_count, Mat sj_count_lo, Mat sj_count_hi, Mat route_rate_lo, Mat route_rate_hi, Vec eff_gdna,
+                          Vec eff_rna, BoolVec has_own_composition, bool has_strand, double kappa,
                           double rho_gdna, double rho_rna, bool split_live) {
     const int n = static_cast<int>(free_pos.shape(0)), K = static_cast<int>(lam.shape(0));
     std::vector<double> n_u(n), n_s(n), flux(n), cnt_col[2] = {std::vector<double>(n), std::vector<double>(n)};
@@ -762,8 +759,6 @@ nb::dict transfer_prepare(Vec lam, BoolVec is_boundary, BoolVec is_exon, BoolVec
         flux[i] = sj_count.data()[2 * i] + sj_count.data()[2 * i + 1];
         cnt_col[0][i] = cnt.data()[2 * i]; cnt_col[1][i] = cnt.data()[2 * i + 1];
     }
-    std::vector<char> is_intron(n), is_intergenic(n);
-    Chain::classify(n, is_boundary.data(), is_exon.data(), free_pos.data(), free_neg.data(), is_intron.data(), is_intergenic.data());
     Chain c;
     c.n = n; c.K = K; c.lam = lam.data();
     c.is_bnd = is_boundary.data(); c.is_exon = is_exon.data(); c.fp = free_pos.data(); c.fn = free_neg.data();
@@ -772,7 +767,7 @@ nb::dict transfer_prepare(Vec lam, BoolVec is_boundary, BoolVec is_exon, BoolVec
     c.n_u = n_u.data(); c.n_s = n_s.data(); c.a_g = eff_gdna.data(); c.a_r = eff_rna.data();
     c.cnt = cnt.data(); c.route_lo = route_rate_lo.data(); c.route_hi = route_rate_hi.data();
     c.sj_lo = sj_count_lo.data(); c.sj_hi = sj_count_hi.data(); c.flux = flux.data();
-    c.is_intron = is_intron.data(); c.is_intergenic = is_intergenic.data();
+    c.terminal = terminal.data();
     c.has_strand = has_strand; c.kappa = kappa;
     const size_t nk = static_cast<size_t>(n) * K;
     std::vector<double> own_rows(nk), face_store, f_par[9];
@@ -1194,12 +1189,13 @@ NB_MODULE(_solve_impl, m) {
           "The fitted gDNA arm as (m, K): the landscape's curve at log σ(λ) + log M − log E per slot and cell, numpy's "
           "interpolation with the ends held — the kernel's own construction, written in place for the gates.");
     m.def("transfer_prepare", &transfer_prepare, nb::arg("lam"), nb::arg("is_boundary"), nb::arg("is_exon"),
-          nb::arg("free_pos"), nb::arg("free_neg"), nb::arg("exon_pos"), nb::arg("exon_neg"), nb::arg("left"),
-          nb::arg("right"), nb::arg("flags"), nb::arg("cnt"), nb::arg("spliced"), nb::arg("sj_count"), nb::arg("sj_count_lo"),
-          nb::arg("sj_count_hi"), nb::arg("route_rate_lo"), nb::arg("route_rate_hi"), nb::arg("eff_gdna"), nb::arg("eff_rna"),
-          nb::arg("has_own_composition"), nb::arg("has_strand"),
+          nb::arg("free_pos"), nb::arg("free_neg"), nb::arg("exon_pos"), nb::arg("exon_neg"), nb::arg("terminal"),
+          nb::arg("left"), nb::arg("right"), nb::arg("flags"), nb::arg("cnt"), nb::arg("spliced"), nb::arg("sj_count"),
+          nb::arg("sj_count_lo"), nb::arg("sj_count_hi"), nb::arg("route_rate_lo"), nb::arg("route_rate_hi"),
+          nb::arg("eff_gdna"), nb::arg("eff_rna"), nb::arg("has_own_composition"), nb::arg("has_strand"),
           nb::arg("kappa"), nb::arg("rho_gdna"), nb::arg("rho_rna"), nb::arg("split_live"),
-          "Build one block's own claims, face rules and level lanes into fresh tables and return them as a dict — `own` "
+          "Build one block's own claims, face rules and level lanes into fresh tables, reading the caller's `terminal` "
+          "as the intergenic class, and return them as a dict — `own` "
           "(rows, mask), `faces` (kind, row, row2, n_u, n_s, a_b, a_x, width, var, rows), `lanes` (gdna where the library "
           "has a gDNA coordinate, pos, neg: each its faces, two-sided faces, emptiness, own rows and mask, count, a, other, "
           "flux rows and index, witnesses), `lam`, `n_u`. For the gates.");

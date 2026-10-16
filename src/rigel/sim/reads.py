@@ -5,11 +5,8 @@ tests use to describe one condition; ``Scenario`` translates them into the engin
 ``SimulationParams`` / ``GDNASimConfig``, and the engine itself is
 :class:`rigel.sim.wgs_engine.WholeGenomeSimulator`. Nothing here generates reads.
 
-The read names the engine emits encode each fragment's ground-truth origin, and
-:mod:`read_name` parses them back:
-
-    RNA:   {t_id}:{frag_start}-{frag_end}:{strand_char}:{index}/1
-    gDNA:  gdna:{ref}:{genomic_start}-{genomic_end}:{strand_char}:{index}/1
+The read names the engine emits encode each fragment's ground-truth origin; :mod:`read_name`
+defines that format, writes it and parses it back.
 """
 
 from dataclasses import dataclass

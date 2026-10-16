@@ -103,12 +103,15 @@ struct Chain {
     const double *n_u, *n_s, *a_g, *a_r, *cnt;
     const double *route_lo, *route_hi, *sj_lo, *sj_hi;  // (n, 2) by transcript strand
     const double* flux;                                 // the sj count over both strands
-    const char *is_intron, *is_intergenic;
+    const bool* terminal;  // the caller's terminals (`ChainView.terminal`): the regions that admit no RNA strand
     bool has_strand;
     double kappa;
 
-    bool intron(int i) const { return is_intron[i]; }
-    bool intergenic(int i) const { return is_intergenic[i]; }
+    // the two structural classes of a non-exon region: an INTRON admits a strand; an INTERGENIC region admits none
+    // and is a terminal, read from the caller and never re-derived here, so the sweep's cut, the library's gDNA
+    // coordinate and these builders read one predicate
+    bool intron(int i) const { return !is_bnd[i] && !is_exon[i] && (fp[i] || fn[i]); }
+    bool intergenic(int i) const { return terminal[i]; }
     int64_t other_flank(int64_t b, int64_t e) const { return right[b] == e ? left[b] : right[b]; }
     // (exon, intron) across boundary b, or (-1, -1)
     void intron_exon_pair(int64_t b, int64_t& e, int64_t& i) const {
@@ -140,15 +143,6 @@ struct Chain {
         const double v_log = p * (1.0 - p) / nn / ((p - ks) * (p - ks));
         v = v_log / ((1.0 - f) * (1.0 - f));
         return true;
-    }
-    // the two structural classes of a region, from its bits: an intron admits a strand, intergenic none
-    static void classify(int n, const bool* is_bnd, const bool* is_exon, const bool* fp, const bool* fn, char* intron,
-                         char* intergenic) {
-        for (int i = 0; i < n; ++i) {
-            const bool region = !is_bnd[i] && !is_exon[i];
-            intron[i] = region && (fp[i] || fn[i]);
-            intergenic[i] = region && !fp[i] && !fn[i];
-        }
     }
 };
 

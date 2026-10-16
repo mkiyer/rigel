@@ -20,6 +20,7 @@
 #include <cstring>
 #include <memory>
 #include <numeric>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -52,9 +53,16 @@ static constexpr int    SQUAREM_BUDGET_DIVISOR = 3;
 // may put a component there — never SQUAREM's extrapolation (`backtracked_squarem_step`).
 static constexpr double VBEM_SQUAREM_PRIOR_FLOOR = EM_LOG_EPSILON;
 
-// Assignment mode constants (must match Python _ASSIGNMENT_MODE_MAP)
-static constexpr int ASSIGN_FRACTIONAL = 0;
-static constexpr int ASSIGN_SAMPLE     = 1;
+// The mode codes: labels, not quantities, so any distinct values would do. Defined here alone — the module
+// exports them, rigel.estimator reads them, and `batch_locus_em_partitioned` refuses any other code.
+//
+// The assignment (`assign_posteriors`)
+static constexpr int ASSIGN_FRACTIONAL = 0;  // every candidate keeps its posterior share
+static constexpr int ASSIGN_SAMPLE     = 1;  // count first, then one component per unit
+// The warm start (`compute_grouped_warm_start`)
+static constexpr int WARM_START_COVERAGE = 0;  // the shipped coverage-weighted seed
+static constexpr int WARM_START_PRIOR    = 1;  // the prior alone: the seed is zeroed
+static constexpr int WARM_START_UNIFORM  = 2;  // every component equal
 
 // ================================================================
 // Profiling instrumentation — per-locus and aggregate statistics
@@ -870,12 +878,12 @@ static void compute_grouped_warm_start(
     const AggregatePrior& aggregate_prior,
     double*       warm_counts_out,
     int           n_components,
-    int           warm_mode = 0)   // 0 = coverage (shipped), 1 = prior only, 2 = uniform
+    int           warm_mode)   // a WARM_START_* code
 {
     // Warm start = unambig_totals (an INDEPENDENT, non-competing seed) + coverage-weighted shares of the
     // AMBIGUOUS (competing) fragments, then the grouped aggregate-prior projection.
     //
-    // ⭐⭐ `prior_only` ZEROES that seed, so the projection below runs on all-zero evidence and theta
+    // ⭐⭐ `WARM_START_PRIOR` ZEROES that seed, so the projection below runs on all-zero evidence and theta
     // starts proportional to the PRIOR ALONE. It exists because the shipped seed and the prior are two
     // different methods and the projection MULTIPLIES them: a coverage-weighted share scaled by a
     // per-transcript allocation derived some other way is neither method's answer. Zeroing the seed is
@@ -886,17 +894,17 @@ static void compute_grouped_warm_start(
     // every fragment goes to gDNA — `theta = 0` is the absorbing state. With a weight vector the same
     // input yields `out[i] = rna_prior * w_i / Σw`, which is exactly the intent.
     //
-    // ⭐⭐ `warm_mode == 2` is UNIFORM: every component starts equal, so the seed asserts nothing at all
+    // ⭐⭐ `WARM_START_UNIFORM`: every component starts equal, so the seed asserts nothing at all
     // and the EM's landing point is a property of the LIKELIHOOD rather than of where it was put down.
     // It is the control that separates "the shipped seed steers the solver into a bad basin" from "the
     // objective itself has one" — and it needs no weight vector, unlike `prior`.
     std::vector<double> warm_raw(static_cast<size_t>(n_components), 0.0);
-    if (warm_mode == 1) {
+    if (warm_mode == WARM_START_PRIOR) {
         apply_grouped_prior_update(
             warm_raw.data(), nullptr, aggregate_prior, warm_counts_out, n_components);
         return;
     }
-    if (warm_mode == 2) {
+    if (warm_mode == WARM_START_UNIFORM) {
         std::fill(warm_raw.begin(), warm_raw.end(), 1.0);
         apply_grouped_prior_update(
             warm_raw.data(), nullptr, aggregate_prior, warm_counts_out, n_components);
@@ -2083,9 +2091,9 @@ batch_locus_em_partitioned(
     //: ⭐ The RNA prior's per-transcript ALLOCATION WEIGHT, on the same flat lane. EMPTY means
     //: "allocate in proportion to current evidence" — the shipped rule, bit-identical.
     f64_1d   t_rna_prior_weight_arr,
-    //: ⭐ 0 = the shipped coverage-weighted seed; 1 = the PRIOR ALONE (the seed is zeroed, so theta
-    //: starts proportional to the per-component prior instead of to a product of two methods);
-    //: 2 = UNIFORM (every component equal — the seed asserts nothing).
+    //: ⭐ WARM_START_COVERAGE = the shipped coverage-weighted seed; WARM_START_PRIOR = the PRIOR ALONE
+    //: (the seed is zeroed, so theta starts proportional to the per-component prior instead of to a
+    //: product of two methods); WARM_START_UNIFORM (every component equal — the seed asserts nothing).
     int      warm_start_mode,
     // Mutable output accumulators
     f64_2d_mut em_counts_out,
@@ -2103,6 +2111,21 @@ batch_locus_em_partitioned(
     bool   emit_locus_stats,
     bool   emit_assignments)
 {
+    // A code this module does not define is refused rather than read: an unknown assignment code would
+    // index the per-unit draw that only ASSIGN_SAMPLE fills (`assign_posteriors`), and an unknown warm
+    // start would run the coverage seed.
+    if (assignment_mode != ASSIGN_FRACTIONAL && assignment_mode != ASSIGN_SAMPLE) {
+        throw std::invalid_argument(
+            "batch_locus_em_partitioned: assignment_mode must be ASSIGN_FRACTIONAL or ASSIGN_SAMPLE; got " +
+            std::to_string(assignment_mode));
+    }
+    if (warm_start_mode != WARM_START_COVERAGE && warm_start_mode != WARM_START_PRIOR &&
+        warm_start_mode != WARM_START_UNIFORM) {
+        throw std::invalid_argument(
+            "batch_locus_em_partitioned: warm_start_mode must be WARM_START_COVERAGE, WARM_START_PRIOR or "
+            "WARM_START_UNIFORM; got " + std::to_string(warm_start_mode));
+    }
+
     int n_loci = static_cast<int>(nb::len(partition_tuples));
     int N_T = n_transcripts_total;
     int N_COLS = n_splice_strand_cols;
@@ -2832,6 +2855,13 @@ NB_MODULE(_em_impl, m) {
 
     // The log floor, exported for the grouped-prior-update gate.
     m.attr("EM_LOG_EPSILON")         = EM_LOG_EPSILON;
+
+    // The mode codes, the one definition rigel.estimator reads; batch_locus_em_partitioned refuses any other.
+    m.attr("ASSIGN_FRACTIONAL")      = ASSIGN_FRACTIONAL;
+    m.attr("ASSIGN_SAMPLE")          = ASSIGN_SAMPLE;
+    m.attr("WARM_START_COVERAGE")    = WARM_START_COVERAGE;
+    m.attr("WARM_START_PRIOR")       = WARM_START_PRIOR;
+    m.attr("WARM_START_UNIFORM")     = WARM_START_UNIFORM;
 
     // ----------------------------------------------------------------
     // Test-only: expose the grouped prior update, so the one identity the

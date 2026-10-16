@@ -31,7 +31,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 from rigel.config import BamScanConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
-from rigel.pipeline import _native_detect_sj_tag, scan_and_buffer  # noqa: E402
+from rigel.pipeline import resolve_scan_config, scan_and_buffer  # noqa: E402
 from rigel.scan_cache import (  # noqa: E402
     ScanCacheKeyError,
     check_scan_cache,
@@ -45,7 +45,7 @@ ORACLE_BAM = "sim_oracle.bam"
 
 def cache_one(index: TranscriptIndex, bam: Path, out_dir: Path) -> tuple[float, float, int]:
     """Scan *bam* against *index* and write its cache. Returns (scan seconds, load seconds, bytes)."""
-    scan = BamScanConfig(sj_strand_tag=_native_detect_sj_tag(str(bam)))
+    scan = resolve_scan_config(BamScanConfig(), bam)
 
     start = time.perf_counter()
     _stats, strand_model, _buffer, payload = scan_and_buffer(str(bam), index, scan)

@@ -31,16 +31,19 @@ import numpy as np
 
 from .config import BamScanConfig
 
+# The fragment classes ``fragment_classes`` assigns: the codes the native scorer routes on, read from
+# it rather than restated. Other modules import them from here.
+from .native import (
+    FRAG_AMBIG_OPP_STRAND,
+    FRAG_AMBIG_SAME_STRAND,
+    FRAG_CHIMERIC,
+    FRAG_MULTIMAPPER,
+    FRAG_UNAMBIG,
+)
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["FragmentBuffer"]
-
-# Fragment classification constants used by fragment_classes property
-FRAG_UNAMBIG: int = 0  # same-strand, 1 transcript, NH=1
-FRAG_AMBIG_SAME_STRAND: int = 1  # same-strand, >1 transcript, NH=1
-FRAG_AMBIG_OPP_STRAND: int = 2  # ambig-strand transcripts, NH=1
-FRAG_MULTIMAPPER: int = 3  # NH > 1 (multimapped molecule)
-FRAG_CHIMERIC: int = 4  # chimeric fragment (disjoint transcript sets)
 
 
 # ---------------------------------------------------------------------------
@@ -141,11 +144,11 @@ class _FinalizedChunk:
         Returns
         -------
         np.ndarray
-            ``FRAG_UNAMBIG`` (0): same-strand, 1 transcript, NH=1.
-            ``FRAG_AMBIG_SAME_STRAND`` (1): same-strand, >1 transcript, NH=1.
-            ``FRAG_AMBIG_OPP_STRAND`` (2): ambig-strand transcripts, NH=1.
-            ``FRAG_MULTIMAPPER`` (3): NH > 1.
-            ``FRAG_CHIMERIC`` (4): chimeric fragment.
+            ``FRAG_UNAMBIG``: same-strand, 1 transcript, NH=1.
+            ``FRAG_AMBIG_SAME_STRAND``: same-strand, >1 transcript, NH=1.
+            ``FRAG_AMBIG_OPP_STRAND``: ambig-strand transcripts, NH=1.
+            ``FRAG_MULTIMAPPER``: NH > 1.
+            ``FRAG_CHIMERIC``: chimeric fragment.
         """
         if self._fragment_classes is not None:
             return self._fragment_classes

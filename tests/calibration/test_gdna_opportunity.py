@@ -317,3 +317,36 @@ class TestFromTheIndex:
         assert opportunity.total[0] > 0, "the fixture partition must host at least one placement"
         probability = opportunity.combined_probability()
         assert np.all((probability >= 0) & (probability <= 1 + 1e-12))
+
+    def test_a_partition_of_several_references_is_the_sum_of_its_references(self, monkeypatch):
+        """The index path reads the partition one reference at a time, so its pools are the oracle's
+        per-reference counts summed: a reference with no regions contributes nothing, each reference's
+        length is its own last bound, and no boundary straddles two references. PERTURBATION: a
+        boundary axis read straight through the references adds a phantom crossing at every junction —
+        here an intron|exon and an intergenic|exon one — which the sum refuses."""
+        import rigel.calibration.splice_graph as splice_graph
+        from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
+
+        references = [PARTITIONS[0], ([], []), PARTITIONS[1], PARTITIONS[4]]
+        bounds = np.concatenate([np.asarray(b, np.int64) for b, _t in references])
+        offsets = np.cumsum([0] + [len(b) for b, _t in references]).astype(np.int64)
+        types = np.concatenate([np.asarray(t, np.uint8) for _b, t in references])
+        monkeypatch.setattr(
+            splice_graph, "build_region_partition_arrays", lambda index: (bounds, offsets, types)
+        )
+        got = gdna_opportunity_from_index(None, max(WIDTHS))
+        for width in WIDTHS:
+            oracles = [enumerate_pools(b, t, width) for b, t in references if b]
+            want = {
+                "intergenic_contained": sum(o["contained"][TYPE_INTERGENIC] for o in oracles),
+                "intronic_contained": sum(o["contained"][TYPE_INTRON] for o in oracles),
+                "intron_exon_crossing": sum(
+                    o["crossing"].get((TYPE_INTRON, TYPE_EXON), 0) for o in oracles
+                ),
+                "intergenic_exon_crossing": sum(
+                    o["crossing"].get((TYPE_INTERGENIC, TYPE_EXON), 0) for o in oracles
+                ),
+                "total": sum(o["total"] for o in oracles),
+            }
+            for pool, count in want.items():
+                assert getattr(got, pool)[width] == pytest.approx(count), f"{pool}, width {width}"

@@ -1,10 +1,8 @@
 """Fragment-origin aggregation + post-capture truth-table writing.
 
-The read-name parsing (``Origin`` / ``parse_origin``) lives in :mod:`read_name`; this module
-consumes it to count origins and write each condition's truth tables — the per-transcript
-post-capture abundances, the fragment-length table and the summary JSON. ``Origin``,
-``OriginKind`` and ``parse_origin`` are re-exported here, so a caller that reads truth need not
-also import :mod:`read_name`.
+The read-name format and its parser (``Origin`` / ``parse_origin``) live in :mod:`read_name`; this
+module consumes the parser to count origins and write each condition's truth tables — the
+per-transcript post-capture abundances, the fragment-length table and the summary JSON.
 """
 
 from __future__ import annotations
@@ -17,17 +15,14 @@ from typing import Iterable
 
 import pysam
 
-from .read_name import Origin, OriginKind, parse_origin  # re-exported (see module docstring)
+from .read_name import Origin, OriginKind, parse_origin
 
 __all__ = [
-    "Origin",
-    "OriginKind",
     "count_mrna_by_transcript_from_bam",
     "count_mrna_by_transcript_from_fastq",
     "count_origins_from_bam",
     "count_origins_from_fastq",
     "deduplicate_bam_qnames",
-    "parse_origin",
     "summarize_post_capture_truth",
     "write_post_capture_truth",
 ]

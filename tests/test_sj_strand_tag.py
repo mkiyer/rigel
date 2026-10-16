@@ -30,6 +30,25 @@ def test_an_unknown_tag_spec_is_refused(spec):
         BamScanConfig(sj_strand_tag=spec)
 
 
+@pytest.mark.parametrize("spec", ["auto", "XZ", "xs", "XS;ts", "ts,ts"])
+def test_the_native_readers_refuse_a_spec_they_cannot_read(spec):
+    """One layer down, the same rule: the scanner and the annotation writer refuse any spec but the ones
+    they read, ``auto`` included (the caller resolves it first), rather than reading it as ``XS,ts``."""
+    from rigel.native import BamAnnotationWriter, BamScanner, FragmentResolver
+
+    for reader in (BamScanner, BamAnnotationWriter):
+        with pytest.raises(ValueError, match="sj_tag_spec must be"):
+            reader(FragmentResolver(), spec, True, True)
+
+
+@pytest.mark.parametrize("spec", ["XS", "ts", "XS,ts", "ts,XS", "none", ""])
+def test_the_native_readers_accept_every_spec_they_read(spec):
+    from rigel.native import BamAnnotationWriter, BamScanner, FragmentResolver
+
+    for reader in (BamScanner, BamAnnotationWriter):
+        reader(FragmentResolver(), spec, True, True)
+
+
 @pytest.fixture(scope="module")
 def spliced_library(tmp_path_factory):
     sc = Scenario("sjtag", genome_length=4000, seed=7, work_dir=tmp_path_factory.mktemp("sjtag"))
@@ -64,6 +83,23 @@ def test_auto_is_resolved_said_and_recorded(spliced_library, caplog):
         "splice-junction strand tag" in r.getMessage() and resolved in r.getMessage()
         for r in caplog.records
     )
+
+
+def test_auto_is_resolved_in_one_place_and_only_once(spliced_library):
+    """``resolve_scan_config`` is where ``auto`` becomes a tag, for the pipeline, ``scan_and_buffer`` and every
+    instrument that keys a scan cache by its config: it names what the detector reads, however ``auto`` is spelled,
+    and hands any other config back as it is, so a resolved config resolves to itself and a named tag stands."""
+    from rigel.native import detect_sj_strand_tag
+    from rigel.pipeline import resolve_scan_config
+
+    bam = spliced_library.bam_path
+    detected = detect_sj_strand_tag(str(bam))
+    for spelled in ("auto", ("auto",)):
+        resolved = resolve_scan_config(BamScanConfig(sj_strand_tag=spelled, total_threads=1), bam)
+        assert resolved == BamScanConfig(sj_strand_tag=detected, total_threads=1)
+        assert resolve_scan_config(resolved, bam) is resolved
+    named = BamScanConfig(sj_strand_tag="none")
+    assert resolve_scan_config(named, bam) is named
 
 
 def test_spliced_reads_with_no_tag_are_not_quantified_unstranded_in_silence(

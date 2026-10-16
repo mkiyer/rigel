@@ -693,7 +693,8 @@ Instrument: a fixture with the tag absent from the first reads.
 WIDER THAN STATED (2026-10-14): a BAM with no XS/ts tag at all loses its strand — the junction strand comes only
 from the tag, so no fragment qualifies for strand training, κ reads ½ and a stranded library is quantified as
 unstranded, with only generic warnings; STAR writes XS only with `--outSAMstrandField intronMotif`, while the MANUAL
-says it emits XS. LANDED 2026-10-14 (`tests/test_sj_strand_tag.py`): an unknown spec is refused by `BamScanConfig`; the resolved
+says it emits XS. LANDED 2026-10-14 (`tests/test_sj_strand_tag.py`): an unknown spec is refused by `BamScanConfig`, and since
+2026-10-16 by the native readers too, with `auto` resolved in one place (`resolve_scan_config`); the resolved
 mode is logged and recorded in `summary.json` and `config.yaml`; a library whose spliced reads are read with no
 tag warns that it is quantified as unstranded; the MANUAL's STAR lines name `--outSAMstrandField intronMotif`. 0.8.1: the strand of the
 annotated junction, which the resolver already looks up, as the sense source.

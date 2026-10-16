@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from rigel.sim.read_name import parse_origin
+from rigel.sim.read_name import STRAND_FORWARD, format_rna_name, parse_origin
 from rigel.sim.whole_genome import merge_shadow_transcripts
 from rigel.transcript import Transcript
 from rigel.types import Interval, Strand
@@ -68,8 +68,10 @@ def test_a_shadow_the_index_already_knows_is_refused(tmp_path):
 
 
 def test_a_shadow_fragment_is_filed_as_mrna_by_the_oracle():
-    """No read-name change is needed: ``{t_id}:{start}-{end}:{strand}:{index}`` parses as RNA of that
-    transcript, so the certified truth shows RNA where the annotation says there is none."""
-    o = parse_origin("shadow_U1_SE2kb_plus:100050-100260:+:7")
+    """No read-name change is needed: a shadow's fragment is named like any mature RNA fragment and
+    parses as RNA of that transcript, so the certified truth shows RNA where the annotation says there
+    is none."""
+    name = format_rna_name("shadow_U1_SE2kb_plus", 100050, 100260, STRAND_FORWARD, 7, nascent=False)
+    o = parse_origin(name)
     assert o.kind == "mrna"
     assert o.transcript_id == "shadow_U1_SE2kb_plus"

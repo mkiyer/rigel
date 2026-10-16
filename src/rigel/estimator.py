@@ -22,10 +22,25 @@ import numpy as np
 import pandas as pd
 
 from .config import EMConfig, TranscriptGeometry
+from .native import (
+    ASSIGN_FRACTIONAL,
+    ASSIGN_SAMPLE,
+    WARM_START_COVERAGE,
+    WARM_START_PRIOR,
+    WARM_START_UNIFORM,
+)
 from .native import batch_locus_em_partitioned as _batch_locus_em_partitioned
 from .splice import NUM_SPLICE_STRAND_COLS, SPLICED_COLS
 
 logger = logging.getLogger(__name__)
+
+#: ``EMConfig``'s mode names → the codes the native EM defines (it refuses any other code).
+_ASSIGNMENT_MODE_CODES = {"fractional": ASSIGN_FRACTIONAL, "sample": ASSIGN_SAMPLE}
+_WARM_START_CODES = {
+    "coverage": WARM_START_COVERAGE,
+    "prior": WARM_START_PRIOR,
+    "uniform": WARM_START_UNIFORM,
+}
 
 
 # ======================================================================
@@ -342,8 +357,6 @@ class AbundanceEstimator:
             self._em_posterior_sum = np.zeros(n_transcripts, dtype=np.float64)
             self._em_n_assigned = np.zeros(n_transcripts, dtype=np.float64)
 
-        _ASSIGNMENT_MODE_MAP = {"fractional": 0, "sample": 1}
-        assignment_mode_int = _ASSIGNMENT_MODE_MAP[self.em_config.assignment_mode]
         rng_seed = int(self._rng.integers(0, 2**63))
 
         (
@@ -363,14 +376,14 @@ class AbundanceEstimator:
             self.unambig_counts,
             t_eff_lens,
             t_rna_prior_weight,
-            {"coverage": 0, "prior": 1, "uniform": 2}[self.em_config.warm_start],
+            _WARM_START_CODES[self.em_config.warm_start],
             self.em_counts,
             self._em_posterior_sum,
             self._em_n_assigned,
             em_iterations,
             em_convergence_delta,
             self.em_config.mode == "vbem",
-            assignment_mode_int,
+            _ASSIGNMENT_MODE_CODES[self.em_config.assignment_mode],
             rng_seed,
             n_transcripts,
             NUM_SPLICE_STRAND_COLS,

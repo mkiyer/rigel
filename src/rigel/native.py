@@ -35,6 +35,13 @@ from ._resolve_impl import ResolvedFragment
 from ._scoring_impl import NativeFragmentScorer
 from ._scoring_impl import StreamingScorer
 
+# the fragment classes the scorer routes on, which rigel.buffer reads
+from ._scoring_impl import FRAG_UNAMBIG
+from ._scoring_impl import FRAG_AMBIG_SAME_STRAND
+from ._scoring_impl import FRAG_AMBIG_OPP_STRAND
+from ._scoring_impl import FRAG_MULTIMAPPER
+from ._scoring_impl import FRAG_CHIMERIC
+
 # -- EM solver --------------------------------------------------------------
 from ._em_impl import batch_locus_em_partitioned
 from ._em_impl import connected_components
@@ -45,6 +52,13 @@ from ._em_impl import scatter_candidates_u8
 from ._em_impl import scatter_units_f32
 from ._em_impl import scatter_units_i64
 from ._em_impl import scatter_units_u8
+
+# the EM's assignment and warm-start codes, which rigel.estimator reads; the EM refuses any other
+from ._em_impl import ASSIGN_FRACTIONAL
+from ._em_impl import ASSIGN_SAMPLE
+from ._em_impl import WARM_START_COVERAGE
+from ._em_impl import WARM_START_PRIOR
+from ._em_impl import WARM_START_UNIFORM
 
 # -- The calibration solve: the sweep's block pipeline, ψ, the transfer kernels for the gates -----
 from ._solve_impl import solve_blocks
@@ -81,6 +95,11 @@ __all__ = [
     # Scoring
     "NativeFragmentScorer",
     "StreamingScorer",
+    "FRAG_UNAMBIG",
+    "FRAG_AMBIG_SAME_STRAND",
+    "FRAG_AMBIG_OPP_STRAND",
+    "FRAG_MULTIMAPPER",
+    "FRAG_CHIMERIC",
     # EM
     "batch_locus_em_partitioned",
     "connected_components",
@@ -91,6 +110,11 @@ __all__ = [
     "scatter_units_f32",
     "scatter_units_i64",
     "scatter_units_u8",
+    "ASSIGN_FRACTIONAL",
+    "ASSIGN_SAMPLE",
+    "WARM_START_COVERAGE",
+    "WARM_START_PRIOR",
+    "WARM_START_UNIFORM",
     # The solve
     "solve_blocks",
     "transfer_prepare",

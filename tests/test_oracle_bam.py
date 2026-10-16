@@ -2,9 +2,10 @@
 
 Projecting a transcript-space interval back to genomic blocks, projecting a pre-mRNA interval, the
 CIGAR those blocks imply, and the take-from-left/right helpers that trim a fragment to its two
-reads. Then the whole-genome simulator's oracle BAM, whose mate orientation and strand flags are
-what every truth-scoring instrument reads a fragment's origin from — an inverted pair there is a
-truth source that disagrees with itself.
+reads. Then the whole-genome simulator's oracle BAM, whose read names, mate orientation and strand
+flags are what every truth-scoring instrument reads a fragment's origin from — an inverted pair there
+is a truth source that disagrees with itself, and a name the engine writes other than as
+:mod:`rigel.sim.read_name` defines it is one the parser misreads.
 """
 
 import pysam
@@ -14,6 +15,14 @@ from rigel.sim.bam import (
     transcript_to_genomic_blocks,
 )
 from rigel.sim.genome import MutableGenome
+from rigel.sim.read_name import (
+    STRAND_FORWARD,
+    STRAND_REVERSE,
+    Origin,
+    format_gdna_name,
+    format_rna_name,
+    parse_origin,
+)
 from rigel.sim.wgs_config import GDNASimConfig, SimulationParams
 from rigel.sim.wgs_engine import WholeGenomeSimulator
 from rigel.transcript import Transcript
@@ -71,6 +80,20 @@ def _reference_sequence_for_record(read: pysam.AlignedSegment, fasta: pysam.Fast
         elif op in (2, 3):
             ref_pos += length
     return "".join(parts)
+
+
+def _name_from_origin(origin: Origin) -> str:
+    """The name ``read_name``'s format functions build from a parsed origin's fields."""
+    if origin.kind == "gdna":
+        return format_gdna_name(origin.ref, origin.start, origin.end, origin.strand, origin.index)
+    return format_rna_name(
+        origin.transcript_id,
+        origin.start,
+        origin.end,
+        origin.strand,
+        origin.index,
+        nascent=origin.kind == "nrna",
+    )
 
 
 # =====================================================================
@@ -230,18 +253,26 @@ class TestWholeGenomeOracleBamOrientation:
             sim.close()
 
         assert bam_path is not None
+        strand_letter = {
+            t.t_id: STRAND_REVERSE if t.strand == Strand.NEG else STRAND_FORWARD
+            for t in transcripts
+        }
         seen_categories = set()
         with (
             pysam.FastaFile(str(fasta_path)) as fasta,
             pysam.AlignmentFile(str(bam_path), "rb") as bam,
         ):
             for read in bam.fetch(until_eof=True):
-                if read.query_name.startswith("gdna:"):
-                    seen_categories.add("gdna")
-                elif read.query_name.startswith("nrna_"):
-                    seen_categories.add("nrna")
+                origin = parse_origin(read.query_name)
+                seen_categories.add(origin.kind)
+                # the engine writes `read_name`'s names, field for field, with the strand letter the
+                # format defines: the transcript's strand for RNA, the fragment's genomic strand for
+                # gDNA (R1 reverse-aligned on `f`, forward on `r`)
+                assert _name_from_origin(origin) == read.query_name
+                if origin.kind == "gdna":
+                    assert read.is_reverse == (read.is_read1 == (origin.strand == STRAND_FORWARD))
                 else:
-                    seen_categories.add("mrna")
+                    assert origin.strand == strand_letter[origin.transcript_id]
                 assert read.query_sequence == _reference_sequence_for_record(read, fasta)
 
         assert seen_categories == {"mrna", "nrna", "gdna"}

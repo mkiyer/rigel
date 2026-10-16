@@ -31,6 +31,8 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 
+from ..region_geometry import g1_locked
+
 __all__ = [
     "ChainView",
     "Policy",
@@ -89,6 +91,14 @@ class ChainView:
     #: single-strand exon's strand precision exactly zero, and a policy reading the split as an RNA
     #: witness must know that before it prices a single hop
     strand_live: bool = False
+
+    @property
+    def terminal(self) -> np.ndarray:
+        """A REGION that admits no RNA strand — intergenic, structurally pure gDNA (a region in
+        `region_geometry.g1_locked`'s class). The one definition: the sweep cuts the chain into loci at
+        these and never delivers into one, the library reads its gDNA coordinate off them, and the
+        kernel's builders are handed this array as their intergenic class rather than re-deriving it."""
+        return ~np.asarray(self.is_boundary, bool) & g1_locked(self.free_pos, self.free_neg)
 
     @property
     def n_slots(self) -> int:

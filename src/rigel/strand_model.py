@@ -26,7 +26,7 @@ The per-sj refinement keeps what the 2×2 loses: how the sense split varies ACRO
 accumulator's boundary spliced channels are not that population — they also pool unannotated and
 implicit splices.
 
-Models are immutable: built once from the scanner's arrays, then read.  There is no
+Models are immutable: built once from the scanner's observations, then read.  There is no
 observe/finalize lifecycle and therefore no way to score against a half-trained model.
 
 This module does not serialize itself.  ``summary.json``'s ``strand_model`` block is hand-built
@@ -167,7 +167,7 @@ class StrandModel:
     """A 2×2 contingency table of alignment strand × reference strand.
 
     Probabilities are pure MLE from the counts, with a safe fallback to 0.5 when there are no
-    observations.  Immutable: build it with :meth:`from_labels` or :meth:`from_sj_table` and
+    observations.  Immutable: build it from its four counts, or with :meth:`from_sj_table`, and
     read it.
 
     ``sj_table`` is present on the **spliced** model only, where the 2×2 is exactly its
@@ -192,20 +192,6 @@ class StrandModel:
     # ------------------------------------------------------------------
     # Construction
     # ------------------------------------------------------------------
-
-    @classmethod
-    def from_labels(cls, align_strands, sj_strands) -> "StrandModel":
-        """Build the 2×2 from parallel per-fragment strand-label arrays (1=POS, 2=NEG)."""
-        exon = np.asarray(align_strands)
-        sj = np.asarray(sj_strands)
-        e_pos = exon == int(Strand.POS)
-        s_pos = sj == int(Strand.POS)
-        return cls(
-            pos_pos=int(np.count_nonzero(e_pos & s_pos)),
-            pos_neg=int(np.count_nonzero(e_pos & ~s_pos)),
-            neg_pos=int(np.count_nonzero(~e_pos & s_pos)),
-            neg_neg=int(np.count_nonzero(~e_pos & ~s_pos)),
-        )
 
     @classmethod
     def from_sj_table(cls, table: SJStrandTable) -> "StrandModel":
@@ -411,12 +397,17 @@ class StrandModels:
         """Build both sub-models from the C++ scanner's ``strand_observations`` dict.
 
         The spliced model comes from the per-sj table (its 2×2 is the marginal); the
-        all-exonic diagnostic has no sj identity and comes from its label arrays.
+        all-exonic diagnostic has no sj identity, and the scanner counts its 2×2 cell by cell.
         Emits the low-evidence warnings once, here, where the counts first exist.
         """
         models = cls(
             exonic_spliced=StrandModel.from_sj_table(SJStrandTable.from_arrays(strand_dict)),
-            exonic=StrandModel.from_labels(strand_dict["exonic_obs"], strand_dict["exonic_truth"]),
+            exonic=StrandModel(
+                pos_pos=int(strand_dict["exonic_pos_pos"]),
+                pos_neg=int(strand_dict["exonic_pos_neg"]),
+                neg_pos=int(strand_dict["exonic_neg_pos"]),
+                neg_neg=int(strand_dict["exonic_neg_neg"]),
+            ),
         )
         models._warn_if_underpowered()
         return models

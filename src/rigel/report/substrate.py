@@ -2,7 +2,7 @@
 
 The substrate is what the report reads from a ``rigel quant`` output directory:
 
-* ``summary.json`` — the lean run manifest (schema v3), read eagerly.
+* ``summary.json`` — the lean run manifest, read eagerly.
 * the companion feather tables the report draws (``fragment_lengths``,
   ``gene_quant``, ``calibration_track``) — read lazily on first access, so a
   report only pays I/O and memory for the tables it actually uses.
@@ -20,9 +20,10 @@ from pathlib import Path
 
 import pandas as pd
 
-#: summary.json schema this builder targets. Reports still build on other
-#: versions, but a mismatch is surfaced as a warning banner.
-EXPECTED_SCHEMA_VERSION = 3
+# The summary.json schema this builder targets is the one its writer writes,
+# ``cli.SUMMARY_SCHEMA_VERSION``, read at call time and never restated here. Reports still build on
+# other versions, but a mismatch is surfaced as a warning banner.
+from .. import cli
 
 
 class SubstrateError(Exception):
@@ -104,10 +105,10 @@ def load_substrate(output_dir: str | Path) -> ReportSubstrate:
 
     warnings: list[str] = []
     sv = summary.get("schema_version")
-    if sv != EXPECTED_SCHEMA_VERSION:
+    if sv != cli.SUMMARY_SCHEMA_VERSION:
         warnings.append(
             f"summary.json schema_version is {sv}; this builder targets "
-            f"v{EXPECTED_SCHEMA_VERSION}. Some panels may be incomplete."
+            f"v{cli.SUMMARY_SCHEMA_VERSION}. Some panels may be incomplete."
         )
     if not (output_dir / "fragment_lengths.feather").exists():
         warnings.append(

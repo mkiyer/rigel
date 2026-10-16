@@ -5,7 +5,7 @@ effective lengths, the gDNA component and discrete assignment. The second calls
 `run_batch_locus_em_partitioned` directly on the production path, gating structural gDNA eligibility,
 the gDNA effective length, the aggregate RNA prior, and the rule that every RNA component receives its
 share of that prior in proportion to its evidence. The third gates `EMConfig.warm_start`: what the initial theta is
-derived from, and that an unknown name is refused.
+derived from, that an unknown name is refused, and that the native EM refuses a mode code it does not define.
 """
 
 from __future__ import annotations
@@ -1700,6 +1700,40 @@ def test_an_unknown_warm_start_is_REFUSED():
     explicitly, or it silently falls through to the shipped path."""
     with pytest.raises(ValueError, match="Unknown warm start"):
         EMConfig(warm_start="zero")
+
+
+@pytest.mark.parametrize(
+    "codes, name, parameter",
+    [
+        ("_ASSIGNMENT_MODE_CODES", "fractional", "assignment_mode"),
+        ("_WARM_START_CODES", "coverage", "warm_start_mode"),
+    ],
+)
+def test_an_unknown_mode_CODE_is_REFUSED_by_the_native_EM(monkeypatch, codes, name, parameter):
+    """The mode codes have one definition, in ``_em_impl``: the estimator maps the config's names onto the
+    codes it reads from there, and the binding refuses a code it does not define rather than indexing the
+    draw only SAMPLE fills or running the coverage seed. The config refuses an unknown NAME first, so the
+    unknown code is planted in the estimator's own map."""
+    import rigel.estimator as estimator_mod
+    from rigel import native
+
+    assert estimator_mod._ASSIGNMENT_MODE_CODES == {
+        "fractional": native.ASSIGN_FRACTIONAL,
+        "sample": native.ASSIGN_SAMPLE,
+    }
+    assert estimator_mod._WARM_START_CODES == {
+        "coverage": native.WARM_START_COVERAGE,
+        "prior": native.WARM_START_PRIOR,
+        "uniform": native.WARM_START_UNIFORM,
+    }
+    part = _warm_start_partition(n_units=20, log_liks=(0.0, -0.4))
+    _warm_start_run(_warm_start_estimator(2), part, [0, 1])  # the control: a defined code runs
+    table = getattr(estimator_mod, codes)
+    for unknown in (max(table.values()) + 1, -1):
+        monkeypatch.setitem(table, name, unknown)
+        with pytest.raises(ValueError, match=f"{parameter} must be") as refused:
+            _warm_start_run(_warm_start_estimator(2), part, [0, 1])
+        assert str(refused.value).endswith(f"got {unknown}")
 
 
 # ── The shadow-vs-gDNA contest: theta_n = 0 is stable only while L_n >= L_g ──────────────────────
