@@ -4,8 +4,10 @@ Calibration is the phase under development and re-running it must cost seconds, 
 script runs the single-pass scan on each condition's oracle BAM (or on one BAM) and writes the payload
 and strand model to a `rigel.scan_cache` directory. Each cache is independently keyed against the index
 it was built from — `graph_hash`, a reach digest (which neither `partition_hash` nor `graph_hash`
-covers) and the scan config — and is refused at load if the index does not match, so a partial suite is
-usable and one condition can be rebuilt without touching the others. Every cache is read straight back
+covers), the scan config and the splice blacklist — and records its BAM's identity, and is refused at
+load if either has moved, so a partial suite is usable and one condition can be rebuilt without touching
+the others. An existing cache is skipped only when it still describes this index and this BAM; a stale
+one is re-scanned. Every cache is read straight back
 after it is written so a cache that cannot be loaded fails here rather than in a later session. The
 cache key hashes the accumulator's deposit rule and not the fragment construction, so a change to which
 fragments are offered needs `--force`. Nothing is calibrated or scored.
@@ -30,7 +32,12 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 from rigel.config import BamScanConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.pipeline import _native_detect_sj_tag, scan_and_buffer  # noqa: E402
-from rigel.scan_cache import read_scan_cache, write_scan_cache  # noqa: E402
+from rigel.scan_cache import (  # noqa: E402
+    ScanCacheKeyError,
+    check_scan_cache,
+    read_scan_cache,
+    write_scan_cache,
+)
 
 #: Where a simulated condition keeps its oracle BAM, relative to the condition directory.
 ORACLE_BAM = "sim_oracle.bam"
@@ -96,12 +103,17 @@ def main() -> None:
     total_scan = 0.0
     total_load = 0.0
     for name, bam, out_dir in jobs:
-        if out_dir.exists() and not args.force:
-            print(f"{name:<48} {'cached':>9} {'':>9} {'skip':>10}")
-            continue
         if not bam.exists():
             print(f"{name:<48} {'MISSING':>9} {'':>9} {'':>10}")
             continue
+        if out_dir.exists() and not args.force:
+            try:
+                check_scan_cache(out_dir, index, bam)
+            except (ScanCacheKeyError, FileNotFoundError, KeyError) as stale:
+                print(f"{name:<48} {'stale':>9}  re-scanning: {stale}")
+            else:
+                print(f"{name:<48} {'cached':>9} {'':>9} {'skip':>10}")
+                continue
         scan_seconds, load_seconds, size = cache_one(index, bam, out_dir)
         total_scan += scan_seconds
         total_load += load_seconds

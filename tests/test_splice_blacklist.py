@@ -202,6 +202,34 @@ class TestIndexRoundTrip:
         assert index.sj_blacklist_size == len(_BLACKLIST)
         assert warned == []
 
+    def test_the_index_DIGESTS_the_blacklist_it_applies(
+        self, tmp_path: Path, mini_index_inputs, caplog
+    ) -> None:
+        """The scan cache keys on the blacklist the resolver was given (`tests/test_scan_cache.py`). So the digest
+        is "none" exactly when none is applied, moves when any value the resolver receives moves, and ignores the
+        count, which the resolver never receives."""
+        fasta, gtf = mini_index_inputs
+        out_dir = tmp_path / "idx"
+        TranscriptIndex.build(fasta, gtf, out_dir)
+        without, _ = _load_and_warnings(out_dir, caplog)
+        assert without.sj_blacklist_digest == "none"
+
+        rebuild_with_splice_blacklist(out_dir, _BLACKLIST)
+        first, _ = _load_and_warnings(out_dir, caplog)
+        assert first.sj_blacklist_digest not in (None, "none")
+
+        moved = _BLACKLIST.copy()
+        moved.loc[0, "max_anchor_left"] += 1
+        rebuild_with_splice_blacklist(out_dir, moved)
+        second, _ = _load_and_warnings(out_dir, caplog)
+        assert second.sj_blacklist_digest != first.sj_blacklist_digest
+
+        recounted = _BLACKLIST.copy()
+        recounted["count"] += 5
+        rebuild_with_splice_blacklist(out_dir, recounted)
+        third, _ = _load_and_warnings(out_dir, caplog)
+        assert third.sj_blacklist_digest == first.sj_blacklist_digest
+
     def test_build_without_a_store_writes_no_blacklist(
         self, tmp_path: Path, mini_index_inputs, caplog
     ) -> None:

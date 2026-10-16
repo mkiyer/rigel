@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +29,7 @@ from rigel.scan_cache import (
     REACH_COLUMNS,
     ScanCacheKeyError,
     calibration_inputs,
+    check_scan_cache,
     index_derived_inputs,
     read_scan_cache,
     reach_digest,
@@ -251,6 +254,27 @@ class TestTheKeyRefusesAMovedIndex:
         del manifest["payload_schema_digest"]
         (cache_dir / "manifest.json").write_text(json.dumps(manifest))
         with pytest.raises(ScanCacheKeyError, match="schema"):
+            read_scan_cache(cache_dir, scanned[0])
+
+    def test_a_cache_scanned_under_another_SPLICE_BLACKLIST_is_refused(self, scanned, tmp_path):
+        """The scan strips every junction the index's splice blacklist names and holds back a fragment whose every
+        junction it rejects, so a blacklist is part of the tally. `graph_hash`, the reach digest, the schema digest
+        and the scan settings all stay byte-identical when it changes."""
+        cache_dir, _cache = round_trip(scanned, tmp_path)
+        manifest = json.loads((cache_dir / "manifest.json").read_text())
+        manifest["splice_blacklist_digest"] = "0" * 16
+        (cache_dir / "manifest.json").write_text(json.dumps(manifest))
+        with pytest.raises(ScanCacheKeyError, match="blacklist"):
+            read_scan_cache(cache_dir, scanned[0])
+
+    def test_a_cache_with_NO_BLACKLIST_RECORD_is_refused(self, scanned, tmp_path):
+        """Absent must not read as "no blacklist": a cache written before the blacklist was keyed says nothing
+        about the one it was scanned under."""
+        cache_dir, _cache = round_trip(scanned, tmp_path)
+        manifest = json.loads((cache_dir / "manifest.json").read_text())
+        del manifest["splice_blacklist_digest"]
+        (cache_dir / "manifest.json").write_text(json.dumps(manifest))
+        with pytest.raises(ScanCacheKeyError, match="blacklist"):
             read_scan_cache(cache_dir, scanned[0])
 
     def test_the_schema_digest_moves_when_a_PAYLOAD_FIELD_moves(self):
@@ -495,6 +519,86 @@ class TestTheKeyRefusesAMovedIndex:
         (cache_dir / "manifest.json").write_text(json.dumps(manifest))
         with pytest.raises(ScanCacheKeyError, match="index graph_hash"):
             read_scan_cache(cache_dir, scanned[0])
+
+
+class TestTheCacheDescribesItsBAM:
+    """A cache is OF one BAM, and a BAM re-simulated in place keeps its path, so the recorded path proves nothing.
+    The cache records the file's size, its modification time and a digest of its bytes, and refuses a BAM whose
+    bytes differ. A copy (the same bytes under a new time) still matches, and a BAM no longer at its path cannot
+    be compared, so it is not."""
+
+    @staticmethod
+    def _cache_of(scanned, tmp_path):
+        index, bam, scan, payload, strand_model = scanned
+        local = tmp_path / "scanned.bam"
+        shutil.copyfile(bam, local)
+        cache_dir = tmp_path / "cache"
+        write_scan_cache(
+            cache_dir,
+            payload=payload,
+            strand_model=strand_model,
+            index=index,
+            bam=str(local),
+            scan_config=scan,
+        )
+        return index, local, cache_dir
+
+    @staticmethod
+    def _touch_later(path: Path) -> None:
+        stat = path.stat()
+        os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+
+    def test_a_BAM_REWRITTEN_in_place_is_refused(self, scanned, tmp_path):
+        index, local, cache_dir = self._cache_of(scanned, tmp_path)
+        local.write_bytes(local.read_bytes() + b"\0")
+        with pytest.raises(ScanCacheKeyError, match="BAM"):
+            read_scan_cache(cache_dir, index)
+
+    def test_a_BAM_rewritten_to_the_SAME_SIZE_is_refused(self, scanned, tmp_path):
+        """Size alone cannot decide: one changed byte under a new modification time must fail the content
+        check."""
+        index, local, cache_dir = self._cache_of(scanned, tmp_path)
+        data = bytearray(local.read_bytes())
+        data[len(data) // 2] ^= 0xFF
+        local.write_bytes(bytes(data))
+        self._touch_later(local)
+        with pytest.raises(ScanCacheKeyError, match="BAM"):
+            read_scan_cache(cache_dir, index)
+
+    def test_a_COPY_of_the_BAM_still_matches(self, scanned, tmp_path):
+        """The same bytes under a new modification time are the same BAM: the content digest decides."""
+        index, local, cache_dir = self._cache_of(scanned, tmp_path)
+        self._touch_later(local)
+        read_scan_cache(cache_dir, index)
+
+    def test_a_BAM_no_longer_at_its_path_is_not_checked(self, scanned, tmp_path):
+        """A cache carried to another machine without its BAM still loads: there is nothing to compare."""
+        index, local, cache_dir = self._cache_of(scanned, tmp_path)
+        local.unlink()
+        read_scan_cache(cache_dir, index)
+
+    def test_a_cache_recording_only_the_BAM_PATH_is_refused(self, scanned, tmp_path):
+        """A manifest that records only a path predates the identity, and a path says nothing about the bytes."""
+        index, local, cache_dir = self._cache_of(scanned, tmp_path)
+        manifest = json.loads((cache_dir / "manifest.json").read_text())
+        manifest["bam"] = str(local)
+        (cache_dir / "manifest.json").write_text(json.dumps(manifest))
+        with pytest.raises(ScanCacheKeyError, match="BAM"):
+            read_scan_cache(cache_dir, index)
+
+    def test_the_build_script_finds_a_STALE_cache_from_the_manifest_alone(self, scanned, tmp_path):
+        """`build_scan_cache.py` used to skip every existing directory, so a BAM re-simulated in place kept its old
+        tally. It now asks `check_scan_cache` first, which reads the manifest and never the arrays."""
+        index, local, cache_dir = self._cache_of(scanned, tmp_path)
+        check_scan_cache(cache_dir, index, local)
+        # The BAM the caller names is the one compared, not the recorded path: a suite copied elsewhere and
+        # re-simulated there is refused even while the file the cache recorded is untouched.
+        elsewhere = tmp_path / "elsewhere.bam"
+        shutil.copyfile(local, elsewhere)
+        check_scan_cache(cache_dir, index, elsewhere)
+        elsewhere.write_bytes(elsewhere.read_bytes() + b"\0")
+        with pytest.raises(ScanCacheKeyError, match="BAM"):
+            check_scan_cache(cache_dir, index, elsewhere)
 
 
 class TestNothingDerivableFromTheIndexIsStored:

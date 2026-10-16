@@ -32,8 +32,8 @@ the payload, so caching the payload caches them, in one frame, by construction. 
 remains the single source of truth for the derived pmfs, which are still not cached: freezing its
 output would mean a change to the fl model silently does not reach a cached scan.
 
-THE KEY NEEDS FOUR PARTS
-------------------------
+THE KEY NEEDS FIVE PARTS, AND THE CACHE NAMES ITS BAM
+-----------------------------------------------------
 * ``graph_hash`` — the region partition plus the sj CSR. The payload already carries it.
 * a PAYLOAD-SCHEMA digest — the accumulator's own field list. None of the other keys moves when the
   accumulator changes, so without it a cache written before an accumulator change is accepted and then
@@ -43,6 +43,13 @@ THE KEY NEEDS FOUR PARTS
   key would verify clean against an index rebuild that moved the splice-junction reaches while both
   existing hashes stayed byte-identical.
 * the scan config, because two scans of one BAM under different settings are different tallies.
+* the SPLICE BLACKLIST the scan applied. The scan strips every junction it names and holds back a fragment whose
+  every junction it rejects, so two blacklists make two tallies, and none of the four parts above sees it.
+
+The BAM itself is not a key, because the caller names it, but the cache records its identity: the path, the size,
+the modification time and a digest of its bytes. A BAM re-simulated in place keeps its path, so the path alone
+proves nothing. A cache whose BAM is still at its recorded path is refused when the bytes differ; one carried to a
+machine without its BAM cannot be compared, and is not.
 
 Not pickle. A pickle of numpy-holding dataclasses is fragile exactly across the schema changes this
 cache has to survive; arrays go to ``.npz``, scalars and provenance to JSON.
@@ -53,6 +60,8 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import logging
+import os
 import typing
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -67,14 +76,20 @@ if TYPE_CHECKING:  # pragma: no cover
 __all__ = [
     "ScanCache",
     "ScanCacheKeyError",
+    "bam_identity",
     "calibration_inputs",
+    "check_bam_identity",
+    "check_scan_cache",
     "check_scan_config",
     "index_derived_inputs",
     "payload_schema_digest",
     "reach_digest",
     "read_scan_cache",
+    "splice_blacklist_digest",
     "write_scan_cache",
 ]
+
+logger = logging.getLogger(__name__)
 
 MANIFEST_JSON = "manifest.json"
 PAYLOAD_NPZ = "payload.npz"
@@ -116,6 +131,62 @@ def reach_digest(index: "TranscriptIndex") -> str:
         parts.append(str(values.dtype).encode())
         parts.append(values.tobytes())
     return _digest(*parts)
+
+
+def splice_blacklist_digest(index: "TranscriptIndex") -> str:
+    """The digest of the splice blacklist this index applies, ``"none"`` when it applies none.
+
+    `TranscriptIndex.load` computes it from exactly the rows it hands the resolver. An index built any other way
+    has none, and is refused here rather than read as "no blacklist".
+    """
+    digest = getattr(index, "sj_blacklist_digest", None)
+    if digest is None:
+        raise ScanCacheKeyError(
+            "the index records no splice-blacklist digest; load it with TranscriptIndex.load"
+        )
+    return digest
+
+
+def bam_identity(bam: str | Path) -> dict:
+    """What the cache records about the BAM it scanned: the resolved path, the size, the modification time and a
+    digest of the bytes. The time lets an unchanged file skip the digest; the digest decides when the time moved."""
+    path = Path(bam).resolve()
+    stat = path.stat()
+    with path.open("rb") as handle:
+        digest = hashlib.file_digest(handle, lambda: hashlib.blake2b(digest_size=8)).hexdigest()
+    return {
+        "path": str(path),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "blake2b": digest,
+    }
+
+
+def check_bam_identity(recorded, bam: str | Path | None) -> None:
+    """Refuse *bam* unless its bytes are the ones the cache was scanned from.
+
+    A manifest without an identity is refused before *bam* is looked at, so *bam* may be None then. A different
+    size refuses at once. The same size and modification time accept without reading the file. Any other case is
+    decided by the digest, so a copy under a new time still matches.
+    """
+    if not isinstance(recorded, dict) or not {"size", "mtime_ns", "blake2b"} <= recorded.keys():
+        raise ScanCacheKeyError(
+            "the cache records no identity for its BAM, only a path, and a path says nothing about the bytes. "
+            "Re-scan."
+        )
+    path = Path(bam)
+    stat = path.stat()
+    if stat.st_size != recorded["size"]:
+        raise ScanCacheKeyError(
+            f"the BAM at {path} has {stat.st_size:,} bytes; the cache was scanned from {recorded['size']:,}. "
+            f"Re-scan."
+        )
+    if stat.st_mtime_ns == recorded["mtime_ns"]:
+        return
+    if bam_identity(path)["blake2b"] != recorded["blake2b"]:
+        raise ScanCacheKeyError(
+            f"the BAM at {path} is not the one this cache was scanned from: its bytes differ. Re-scan."
+        )
 
 
 def _payload_field_types() -> dict[str, type]:
@@ -420,8 +491,9 @@ def write_scan_cache(
         "scan_config": dataclasses.asdict(scan_config)
         if dataclasses.is_dataclass(scan_config)
         else dict(scan_config),
+        "splice_blacklist_digest": splice_blacklist_digest(index),
         # ── provenance: what this cache is OF ────────────────────────────────────────────────────
-        "bam": str(Path(bam).resolve()),
+        "bam": bam_identity(bam),
         "payload_scalars": scalars,
     }
     (cache_dir / MANIFEST_JSON).write_text(
@@ -430,17 +502,21 @@ def write_scan_cache(
     return cache_dir
 
 
-def read_scan_cache(cache_dir: str | Path, index: "TranscriptIndex", scan_config=None) -> ScanCache:
-    """Load a cache and REFUSE it unless it describes this index — and, if ``scan_config`` is given,
-    unless it was produced under that configuration.
+def check_scan_cache(
+    cache_dir: str | Path, index: "TranscriptIndex", bam: str | Path | None = None
+) -> None:
+    """Refuse a cache, from its manifest alone, unless it describes this index and this BAM.
 
-    Pass ``scan_config`` whenever you have one. Without it this checks only that the manifest is
-    consistent with ITSELF; a cache scanned under different settings is a different tally and will load
-    silently. The check is :func:`check_scan_config`.
+    Everything :func:`read_scan_cache` checks before it reads the arrays: the reach, the payload schema, the
+    splice blacklist, the graph hash and the BAM. ``bam`` names the BAM the caller is about to use; without it the
+    BAM at the recorded path is compared, when it is still there. `build_scan_cache.py` calls this before it skips
+    an existing cache.
     """
-    cache_dir = Path(cache_dir)
-    manifest = json.loads((cache_dir / MANIFEST_JSON).read_text())
+    manifest = json.loads((Path(cache_dir) / MANIFEST_JSON).read_text())
+    _check_manifest(manifest, index, bam)
 
+
+def _check_manifest(manifest: dict, index: "TranscriptIndex", bam: str | Path | None) -> None:
     expected_reach = reach_digest(index)
     if manifest["reach_digest"] != expected_reach:
         raise ScanCacheKeyError(
@@ -459,11 +535,49 @@ def read_scan_cache(cache_dir: str | Path, index: "TranscriptIndex", scan_config
             f"Re-scan; nothing derivable from the index needs rebuilding."
         )
 
-    payload_scalars = manifest["payload_scalars"]
-    if payload_scalars["graph_hash"] != manifest["graph_hash"]:
+    expected_blacklist = splice_blacklist_digest(index)
+    if manifest.get("splice_blacklist_digest") != expected_blacklist:
+        raise ScanCacheKeyError(
+            f"cache splice-blacklist digest {manifest.get('splice_blacklist_digest')!r} != index "
+            f"{expected_blacklist!r}. The scan strips the junctions a blacklist names and holds back the fragments "
+            f"it rejects, so this tally was taken under another blacklist. Re-scan against this index."
+        )
+
+    if manifest["payload_scalars"]["graph_hash"] != manifest["graph_hash"]:
         raise ScanCacheKeyError(
             "cache manifest graph_hash disagrees with its own payload's graph_hash"
         )
+    if manifest["graph_hash"] != index.graph_hash:
+        raise ScanCacheKeyError(
+            f"cache graph_hash {manifest['graph_hash']} != index graph_hash {index.graph_hash}. The region "
+            f"partition or the sj CSR moved; this tally does not describe this index."
+        )
+
+    recorded = manifest.get("bam")
+    if bam is None and isinstance(recorded, dict):
+        if not os.path.exists(recorded["path"]):
+            logger.info(
+                "the BAM this cache was scanned from is not at %s, so its identity is not checked",
+                recorded["path"],
+            )
+            return
+        bam = recorded["path"]
+    check_bam_identity(recorded, bam)
+
+
+def read_scan_cache(
+    cache_dir: str | Path, index: "TranscriptIndex", scan_config=None, bam: str | Path | None = None
+) -> ScanCache:
+    """Load a cache and REFUSE it unless it describes this index and its BAM — and, if ``scan_config`` is given,
+    unless it was produced under that configuration.
+
+    Pass ``scan_config`` whenever you have one. Without it a cache scanned under different settings is a different
+    tally and will load silently. The check is :func:`check_scan_config`. ``bam`` is as in :func:`check_scan_cache`.
+    """
+    cache_dir = Path(cache_dir)
+    manifest = json.loads((cache_dir / MANIFEST_JSON).read_text())
+    _check_manifest(manifest, index, bam)
+    payload_scalars = manifest["payload_scalars"]
 
     with np.load(cache_dir / PAYLOAD_NPZ) as data:
         arrays = {name: data[name] for name in data.files}
@@ -473,12 +587,6 @@ def read_scan_cache(cache_dir: str | Path, index: "TranscriptIndex", scan_config
     if payload.graph_hash != manifest["graph_hash"]:
         raise ScanCacheKeyError(
             f"cache graph_hash {payload.graph_hash} != manifest graph_hash {manifest['graph_hash']}"
-        )
-    expected_graph = index.graph_hash
-    if payload.graph_hash != expected_graph:
-        raise ScanCacheKeyError(
-            f"cache graph_hash {payload.graph_hash} != index graph_hash {expected_graph}. The region "
-            f"partition or the sj CSR moved; this tally does not describe this index."
         )
 
     cache = ScanCache(

@@ -139,6 +139,20 @@ def source_record(path: str | Path) -> dict:
     }
 
 
+def _blacklist_digest(columns) -> str:
+    """A content hash of the splice blacklist exactly as the resolver receives it: the columns `load` passes to
+    `build_sj_blacklist_map`, in its argument order and the rows' stored order. Gate:
+    `tests/test_splice_blacklist.py`."""
+    import hashlib
+
+    refs, *positions = columns
+    h = hashlib.blake2b(digest_size=8)
+    h.update("\x00".join(refs).encode())
+    for values in positions:
+        h.update(np.asarray(values, dtype=np.int32).tobytes())
+    return h.hexdigest()
+
+
 def _check_blacklist_references(bl_df: pd.DataFrame, ref_lengths: dict[str, int], store) -> None:
     """A splice blacklist names its junctions by reference. One whose references the FASTA does not hold matches
     nothing, while the index would report splice-artifact detection on, so it refuses the build; references beyond the
@@ -867,6 +881,9 @@ class TranscriptIndex:
         #   0    → no blacklisted sj active (artifact detection is OFF)
         #   >0   → number of blacklisted sj active (detection is ON)
         self.sj_blacklist_size: int | None = None
+        # The digest of the blacklist rows handed to the resolver, "none" when none are: set at load(), and read
+        # by the scan cache's key, because the blacklist changes what a scan tallies.
+        self.sj_blacklist_digest: str | None = None
 
         # Per-transcript exon intervals for coverage-weight model.
         # Maps t_index → (n_exons, 2) int32 array of [start, end) intervals
@@ -1591,17 +1608,20 @@ class TranscriptIndex:
         if store is not None and has_blacklist:
             logger.debug("Loading splice-artifact blacklist")
             bl_df = pd.read_feather(blacklist_path)
-            ctx.build_sj_blacklist_map(
+            columns = (
                 bl_df["ref"].astype(str).tolist(),
                 bl_df["start"].astype(np.int32).tolist(),
                 bl_df["end"].astype(np.int32).tolist(),
                 bl_df["max_anchor_left"].astype(np.int32).tolist(),
                 bl_df["max_anchor_right"].astype(np.int32).tolist(),
             )
+            ctx.build_sj_blacklist_map(*columns)
             self.sj_blacklist_size = int(len(bl_df))
+            self.sj_blacklist_digest = _blacklist_digest(columns)
             logger.info(f"Splice artifact blacklist: {len(bl_df):,} sj active")
         else:
             self.sj_blacklist_size = 0
+            self.sj_blacklist_digest = "none"
             if has_blacklist:
                 logger.warning(
                     f"{SJ_BLACKLIST_FEATHER} is not applied: this index's manifest records no alignable "
