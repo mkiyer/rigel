@@ -125,7 +125,7 @@ def _capture_output(result, index):
 
     scalars = {
         "gdna_em_count": float(est.gdna_em_count),
-        "nrna_em_count": float(est.nrna_em_count),
+        "nrna_em_count": float(est.synthetic_count),
         "n_fragments": int(pr.stats.n_fragments),
     }
 

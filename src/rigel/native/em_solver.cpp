@@ -592,8 +592,8 @@ static inline double nonnegative_finite(double x) {
 // among the RNA components in proportion to the evidence each already carries.
 //
 // ⭐ EVERY RNA COMPONENT RECEIVES ITS SHARE, AND NONE IS SINGLED OUT FOR ZERO.
-// RNA is RNA: whether the annotation happens to assert a given RNA component — a synthetic nascent
-// entity is a shadow span this index manufactured — is not a fact about this locus's composition, so
+// RNA is RNA: whether the annotation happens to assert a given RNA component — a synthetic span is a
+// transcript this index manufactured — is not a fact about this locus's composition, so
 // the allocation does not read it. The rule the prior implements is therefore sayable in one line:
 // the RNA pseudocount is distributed over the RNA components in proportion to the evidence each
 // already carries.
@@ -604,9 +604,9 @@ static inline double nonnegative_finite(double x) {
 // thing it is for. Withholding the share from synthetic components would make the factor un-common and
 // let the prior ALONE redistribute RNA between entities the data cannot tell apart (at a locus of two
 // equally good explanations it drives the synthetic one to 1e-298). The price is that the prior does
-// not help a shadow entity decay: its geometric rate is `kappa = w_N/w_T < 1` rather than
-// `kappa/(1 + rna_prior/rna_count)`, still strictly below one for free, since a shadow span is longer
-// than the transcript it shadows.
+// not help a synthetic span decay: its geometric rate is `kappa = w_N/w_T < 1` rather than
+// `kappa/(1 + rna_prior/rna_count)`, still strictly below one for free, since a synthetic span is
+// longer than the annotated transcript it spans.
 //
 // ⛔ A ZERO-EVIDENCE COMPONENT STILL CANNOT BE REVIVED. `out[i]` is proportional to `raw[i]`, so
 // `out[i] = 0` is an ABSORBING STATE under these weights — the structural guard against a zombie

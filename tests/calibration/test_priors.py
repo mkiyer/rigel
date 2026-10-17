@@ -173,7 +173,7 @@ def _ml(locus_id, blocks) -> MultiLocus:
         multi_locus_id=locus_id,
         transcript_indices=np.array([], dtype=np.int32),
         unit_indices=np.array([], dtype=np.int32),
-        gdna_span=sum(e - s for _, s, e in blocks),
+        span_bp=sum(e - s for _, s, e in blocks),
         loci=loci,
     )
 

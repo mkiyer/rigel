@@ -25,7 +25,7 @@ from rigel.config import EMConfig, FragmentScoringConfig, alpha_log_penalty
 from rigel.estimator import AbundanceEstimator
 from rigel.frag_length_model import FragmentLengthModel
 from rigel.scoring import FragmentScorer
-from rigel.scan import FragmentRouter
+from rigel.routing import FragmentRouter
 from rigel.stats import PipelineStats
 from rigel.strand_model import StrandModel, StrandModels
 from rigel.types import Strand
@@ -46,7 +46,7 @@ class _BF:
 
 
 class _Chunk:
-    """Columnar mock chunk: the ``size`` and ``to_scoring_arrays`` that ``FragmentRouter.scan`` reads."""
+    """Columnar mock chunk: the ``size`` and ``to_scoring_arrays`` that ``FragmentRouter.route`` reads."""
 
     def __init__(self, bfs, fragment_classes, frag_ids):
         self._bfs = bfs
@@ -147,7 +147,7 @@ def _make_env(index):
     return strand_models, max_frag_size, estimator, stats
 
 
-def _scan_em_data(
+def _route_buffer(
     buffer,
     index,
     strand_models,
@@ -181,10 +181,10 @@ def _scan_em_data(
         index,
         annotations=annotations,
     )
-    return builder.scan(buffer, log_every)
+    return builder.route(buffer, log_every)
 
 
-def test_multimapper_spliced_annot_skips_shadows():
+def test_multimapper_spliced_annot_has_transcript_candidates_only():
     index = _Index(
         t_to_g=[0, 0],
         t_to_strand=[int(Strand.POS), int(Strand.POS)],
@@ -219,7 +219,7 @@ def test_multimapper_spliced_annot_skips_shadows():
     )
     buffer = _Buffer([chunk])
 
-    em = _scan_em_data(
+    em = _route_buffer(
         buffer,
         index,
         strand_models,
@@ -276,7 +276,7 @@ def test_multimapper_unspliced_has_transcript_candidates_only_and_a_gdna_log_lik
     )
     buffer = _Buffer([chunk])
 
-    em = _scan_em_data(
+    em = _route_buffer(
         buffer,
         index,
         strand_models,
@@ -288,7 +288,7 @@ def test_multimapper_unspliced_has_transcript_candidates_only_and_a_gdna_log_lik
 
     assert em.n_units == 1
     assert stats.em_routed_multimapper_units == 1
-    # All candidates are transcript-level (no nRNA shadows)
+    # All candidates are transcript-level (nothing is appended for synthetic spans)
     assert np.all(em.t_indices < index.num_transcripts)
     # gDNA candidates NOT in global CSR (added per-locus)
     # gDNA log-likelihood is pre-computed per unit for unspliced
@@ -308,14 +308,14 @@ def test_multimapper_gdna_likelihood_is_the_mean_over_its_gdna_explainable_hits(
         g_to_strand=[int(Strand.POS), int(Strand.POS)],
     )
 
-    def scan_for(bfs, frag_ids):
+    def route_for(bfs, frag_ids):
         strand_models, max_frag_size, estimator, stats = _make_env(index)
         chunk = _Chunk(
             bfs=bfs,
             fragment_classes=[FRAG_MULTIMAPPER] * len(bfs),
             frag_ids=frag_ids,
         )
-        return _scan_em_data(
+        return _route_buffer(
             _Buffer([chunk]),
             index,
             strand_models,
@@ -345,8 +345,8 @@ def test_multimapper_gdna_likelihood_is_the_mean_over_its_gdna_explainable_hits(
         genomic_footprint=200,
     )
 
-    one_hit = scan_for([hit0], [21])
-    two_hits = scan_for([hit0, hit1], [22, 22])
+    one_hit = route_for([hit0], [21])
+    two_hits = route_for([hit0, hit1], [22, 22])
 
     assert one_hit.n_units == 1
     assert two_hits.n_units == 1
@@ -437,7 +437,7 @@ def test_route_counters_are_exclusive_per_unit():
     )
     buffer = _Buffer([chunk])
 
-    em = _scan_em_data(
+    em = _route_buffer(
         buffer,
         index,
         strand_models,
@@ -511,7 +511,7 @@ def test_nm_penalty_discriminates_multimapper_hits():
     )
     buffer = _Buffer([chunk])
 
-    em = _scan_em_data(
+    em = _route_buffer(
         buffer,
         index,
         strand_models,
@@ -580,7 +580,7 @@ def test_nm_penalty_zero_when_disabled():
     chunk_a = _Chunk(bfs=[bf_nm0], fragment_classes=[FRAG_UNAMBIG], frag_ids=[1])
     chunk_b = _Chunk(bfs=[bf_nm5], fragment_classes=[FRAG_UNAMBIG], frag_ids=[1])
 
-    em_a = _scan_em_data(
+    em_a = _route_buffer(
         _Buffer([chunk_a]),
         index,
         strand_models,
@@ -590,7 +590,7 @@ def test_nm_penalty_zero_when_disabled():
         log_every=1_000_000,
         mismatch_log_penalty=mismatch_lp,
     )
-    em_b = _scan_em_data(
+    em_b = _route_buffer(
         _Buffer([chunk_b]),
         index,
         strand_models,
@@ -653,7 +653,7 @@ def test_an_overhang_alpha_of_zero_gates_overhang_and_scores_the_rest(fragment_c
         g_to_strand=[int(Strand.POS)],
     )
     strand_models, max_frag_size, estimator, stats = _make_env(index)
-    em = _scan_em_data(
+    em = _route_buffer(
         _Buffer([_overhang_pair(fragment_class)]),
         index,
         strand_models,
@@ -668,7 +668,7 @@ def test_an_overhang_alpha_of_zero_gates_overhang_and_scores_the_rest(fragment_c
 
     # the gate costs nothing where nothing overhangs: t0's likelihood equals its score at the default alpha
     _, _, default_estimator, default_stats = _make_env(index)
-    default = _scan_em_data(
+    default = _route_buffer(
         _Buffer([_overhang_pair(fragment_class)]),
         index,
         strand_models,
@@ -704,7 +704,7 @@ def test_a_hard_gate_drops_a_deterministic_fragment_it_fails_as_it_drops_an_em_r
     )
     chunk = _Chunk(bfs=[bf], fragment_classes=[FRAG_UNAMBIG], frag_ids=[1])
     penalty = {f"{gate}_log_penalty": alpha_log_penalty(0.0)}
-    _scan_em_data(
+    _route_buffer(
         _Buffer([chunk]), index, strand_models, max_frag_size, estimator, stats, **penalty
     )
     assert stats.deterministic_unambig_units == 0
@@ -712,7 +712,7 @@ def test_a_hard_gate_drops_a_deterministic_fragment_it_fails_as_it_drops_an_em_r
 
     # the same fragment at the default alpha is assigned deterministically, so the gate is what dropped it
     _, _, default_estimator, default_stats = _make_env(index)
-    _scan_em_data(
+    _route_buffer(
         _Buffer([chunk]), index, strand_models, max_frag_size, default_estimator, default_stats
     )
     assert default_stats.deterministic_unambig_units == 1
@@ -737,7 +737,7 @@ def _one_unit(bfs, fragment_classes, frag_ids, fl=None):
         g_to_strand=[int(Strand.POS)],
     )
     strand_models, max_frag_size, estimator, stats = _make_env(index)
-    em = _scan_em_data(
+    em = _route_buffer(
         _Buffer([_Chunk(bfs=bfs, fragment_classes=fragment_classes, frag_ids=frag_ids)]),
         index,
         strand_models,
@@ -975,7 +975,7 @@ def _fragment(t, genomic_start, flen=_FLEN):
 def _weights(exons, bfs, fragment_classes, frag_ids):
     index = _ExonIndex(exons)
     strand_models, max_frag_size, estimator, stats = _make_env(index)
-    em = _scan_em_data(
+    em = _route_buffer(
         _Buffer([_Chunk(bfs=bfs, fragment_classes=fragment_classes, frag_ids=frag_ids)]),
         index,
         strand_models,

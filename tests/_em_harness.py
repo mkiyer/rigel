@@ -105,7 +105,7 @@ def _make_locus_em_data(
         multi_locus_id=0,
         transcript_indices=np.arange(n_t, dtype=np.int32),
         unit_indices=np.arange(n_units, dtype=np.int32),
-        gdna_span=10000,
+        span_bp=10000,
         loci=(Locus(ref="chr1", ref_id=0, start=0, end=10000),),
     )
     loci = [locus]
@@ -155,6 +155,6 @@ def _run_and_assign(rc, em_data, loci=None, gdna_prior_count=None, *, em_iterati
 
     return {
         "mrna": float(rc.em_counts.sum()),
-        "nrna": float(rc.nrna_em_count),
+        "nrna": float(rc.synthetic_count),
         "gdna": float(total_gdna),
     }

@@ -3,7 +3,7 @@
  *
  * This module provides the performance-critical scoring kernels. Python
  * builds one NativeFragmentScorer per run (``rigel.scoring``) and feeds the
- * buffer's chunks to a StreamingScorer (``rigel.scan.FragmentRouter``); the
+ * buffer's chunks to a StreamingScorer (``rigel.routing.FragmentRouter``); the
  * per-fragment loop runs here, in C++.  Functions are exposed as
  * ``rigel._scoring_impl``.
  *
@@ -184,7 +184,7 @@ class NativeFragmentScorer {
     // --- Copied index arrays ---
     std::vector<int8_t>  t_strand_;   // int8[n_transcripts]
     std::vector<int32_t> t_length_;   // spliced exonic length
-    std::vector<uint8_t> t_is_nrna_;  // uint8[n_transcripts] — synthetic flag: 1 = the synthetic span, 0 = annotated
+    std::vector<uint8_t> t_is_synthetic_;  // uint8[n_transcripts] — 1 = a synthetic span, 0 = an annotated transcript
 
     // --- Pool-separated likelihood pruning ---
     double max_ll_delta_;             // Δ = -log(ε), pre-computed
@@ -306,7 +306,7 @@ public:
         i32_1d  exon_starts_arr,
         i32_1d  exon_ends_arr,
         i32_1d  exon_cumsum_arr,
-        u8_1d   t_is_nrna_arr,
+        u8_1d   t_is_synthetic_arr,
         double  pruning_max_ll_delta)
       : log_p_sense_(log_p_sense),
         log_p_antisense_(log_p_antisense),
@@ -334,8 +334,8 @@ public:
             t_length_.assign(p, p + n_transcripts_);
         }
         {
-            const auto* p = t_is_nrna_arr.data();
-            t_is_nrna_.assign(p, p + n_transcripts_);
+            const auto* p = t_is_synthetic_arr.data();
+            t_is_synthetic_.assign(p, p + n_transcripts_);
         }
 
         // Copy fragment-length LUT (RNA model)
@@ -400,8 +400,9 @@ private:
         int N;
     };
 
-    // Merged candidate entry for MM cross-alignment merge.
-    struct MergedMrna {
+    // One transcript's merged candidate across a multimapper's hits — an annotated transcript or a
+    // synthetic span alike.
+    struct MergedCandidate {
         int32_t overhang;
         double  log_lik;
         int32_t count_col;
@@ -441,7 +442,7 @@ private:
         // arrive.  flush_mm_group() only prunes + emits.
         int64_t mm_fid;
         int     mm_n_members;
-        std::unordered_map<int32_t, MergedMrna> mm_merged;
+        std::unordered_map<int32_t, MergedCandidate> mm_merged;
         int     mm_best_stype;
 
         // Online logsumexp of per-hit gDNA log-liks. The emitted
@@ -607,23 +608,23 @@ private:
 
         if (st.mm_n_members == 0) return;
 
-        // Pool-separated likelihood pruning: annotated transcripts (`mrna_best`) and synthetic spans
-        // (`nrna_best`, by `t_is_nrna_`) are each pruned against their own pool's best
-        double mrna_best = NEG_INF;
-        double nrna_best = NEG_INF;
+        // Pool-separated likelihood pruning: annotated transcripts (`annotated_best`) and synthetic spans
+        // (`synthetic_best`, by `t_is_synthetic_`) are each pruned against their own pool's best
+        double annotated_best = NEG_INF;
+        double synthetic_best = NEG_INF;
         for (auto& [t_idx, mc] : st.mm_merged) {
-            if (t_is_nrna_[t_idx])
-                nrna_best = std::max(nrna_best, mc.log_lik);
+            if (t_is_synthetic_[t_idx])
+                synthetic_best = std::max(synthetic_best, mc.log_lik);
             else
-                mrna_best = std::max(mrna_best, mc.log_lik);
+                annotated_best = std::max(annotated_best, mc.log_lik);
         }
 
         int64_t emit_start = st.cand_cur;
         double best_ll = NEG_INF;
 
         for (auto& [t_idx, mc] : st.mm_merged) {
-            double pool_best = t_is_nrna_[t_idx]
-                             ? nrna_best : mrna_best;
+            double pool_best = t_is_synthetic_[t_idx]
+                             ? synthetic_best : annotated_best;
             if (pool_best - mc.log_lik <= max_ll_delta_) {
                 st.v_ti->push_back(t_idx);
                 st.v_ll->push_back(static_cast<float>(mc.log_lik));
@@ -797,18 +798,18 @@ private:
             double best_ll = NEG_INF;
 
             // ===== candidate scoring: annotated transcripts and synthetic spans alike =====
-            struct MrnaScored {
+            struct ScoredCandidate {
                 int32_t t_idx, oh, ct;
                 double  log_lik, cov_wt;
             };
-            MrnaScored m_stack[SCORED_STACK_CAPACITY];
-            std::vector<MrnaScored> m_heap;
-            MrnaScored* m_scored = m_stack;
+            ScoredCandidate scored_stack[SCORED_STACK_CAPACITY];
+            std::vector<ScoredCandidate> scored_heap;
+            ScoredCandidate* scored = scored_stack;
             if (n_cand > SCORED_STACK_CAPACITY) {
-                m_heap.resize(n_cand);
-                m_scored = m_heap.data();
+                scored_heap.resize(n_cand);
+                scored = scored_heap.data();
             }
-            int m_n = 0;
+            int n_scored = 0;
 
             for (int64_t k = start; k < end; ++k) {
                 int32_t t_idx = t_ind[k];
@@ -843,26 +844,24 @@ private:
                 double cov_wt = (has_genomic && flen > 0)
                     ? coverage_weight(genomic_start, flen, t_idx) : 1.0;
 
-                m_scored[m_n++] = {t_idx, oh, ct, log_lik, cov_wt};
+                scored[n_scored++] = {t_idx, oh, ct, log_lik, cov_wt};
             }
 
-            // Pool-separated likelihood pruning: annotated transcripts (`mrna_best`) and synthetic spans
-            // (`nrna_best`, by `t_is_nrna_`) are each pruned against their own pool's best
-            double mrna_best = NEG_INF;
-            double nrna_best = NEG_INF;
-            for (int j = 0; j < m_n; ++j) {
-                if (t_is_nrna_[m_scored[j].t_idx])
-                    nrna_best = std::max(nrna_best,
-                                         m_scored[j].log_lik);
+            // Pool-separated likelihood pruning: annotated transcripts (`annotated_best`) and synthetic spans
+            // (`synthetic_best`, by `t_is_synthetic_`) are each pruned against their own pool's best
+            double annotated_best = NEG_INF;
+            double synthetic_best = NEG_INF;
+            for (int j = 0; j < n_scored; ++j) {
+                if (t_is_synthetic_[scored[j].t_idx])
+                    synthetic_best = std::max(synthetic_best, scored[j].log_lik);
                 else
-                    mrna_best = std::max(mrna_best,
-                                         m_scored[j].log_lik);
+                    annotated_best = std::max(annotated_best, scored[j].log_lik);
             }
 
-            for (int j = 0; j < m_n; ++j) {
-                auto& s = m_scored[j];
-                double pool_best = t_is_nrna_[s.t_idx]
-                                 ? nrna_best : mrna_best;
+            for (int j = 0; j < n_scored; ++j) {
+                auto& s = scored[j];
+                double pool_best = t_is_synthetic_[s.t_idx]
+                                 ? synthetic_best : annotated_best;
                 if (pool_best - s.log_lik <= max_ll_delta_) {
                     st.v_ti->push_back(s.t_idx);
                     st.v_ll->push_back(static_cast<float>(s.log_lik));
@@ -1140,7 +1139,7 @@ NB_MODULE(_scoring_impl, m) {
              nb::arg("exon_starts"),
              nb::arg("exon_ends"),
              nb::arg("exon_cumsum"),
-             nb::arg("t_is_nrna_arr"),
+             nb::arg("t_is_synthetic_arr"),
              nb::arg("pruning_max_ll_delta"))
 ;
 

@@ -22,8 +22,8 @@ CSR data, and run locus-level native EM.
 
 ``scoring.py`` assembles the native scorer's parameters.  Locus
 construction lives in ``locus.py``; the EM's warm start is computed inside
-the native solver (``em_solver.cpp``).  The CSR builder lives in
-``scan.py``.  This module is a thin orchestrator.
+the native solver (``em_solver.cpp``).  The router that scores the buffer
+and builds the CSR lives in ``routing.py``.  This module is a thin orchestrator.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ from .frag_length_model import FragmentLengthModel
 from .index import TranscriptIndex
 from .native import BamScanner as _NativeBamScanner
 from .native import detect_sj_strand_tag as _native_detect_sj_tag
-from .scan import FragmentRouter
+from .routing import FragmentRouter
 from .scoring import FragmentScorer
 from .splice import SpliceType, census_field
 from .stats import PipelineStats
@@ -606,7 +606,7 @@ def _score_fragments(
     log_every: int,
     annotations,
 ) -> "ScoredFragments":
-    """Build FragmentScorer, scan buffer, and return ScoredFragments."""
+    """Build FragmentScorer, route the buffer, and return ScoredFragments."""
     ctx = FragmentScorer.from_models(
         strand_models,
         rna_fl,
@@ -623,9 +623,9 @@ def _score_fragments(
         index,
         annotations=annotations,
     )
-    em_data = builder.scan(buffer, log_every)
+    em_data = builder.route(buffer, log_every)
 
-    # Scanner accumulators no longer needed; buffer was consumed during scan
+    # The router and the scorer's parameters are no longer needed; routing consumed the buffer
     del builder, ctx
     return em_data
 
@@ -845,7 +845,7 @@ def _run_locus_em_partitioned(
         estimator.locus_results.append(
             {
                 "locus_id": lid,
-                "locus_span_bp": loc.gdna_span,
+                "locus_span_bp": loc.span_bp,
                 "n_transcripts": len(loc.transcript_indices),
                 "n_genes": len(gene_set),
                 "n_em_fragments": len(loc.unit_indices),
@@ -958,7 +958,7 @@ def run_pipeline(
     index: TranscriptIndex,
     config: PipelineConfig | None = None,
     *,
-    before_second_pass: "Callable[[PipelineResult], None] | None" = None,
+    before_annotated_bam: "Callable[[PipelineResult], None] | None" = None,
 ) -> PipelineResult:
     """Run the complete quantification pipeline with locus-level EM.
 
@@ -973,7 +973,7 @@ def run_pipeline(
         The loaded reference index.
     config : PipelineConfig or None
         Complete pipeline configuration.  If ``None``, uses defaults.
-    before_second_pass : callable or None
+    before_annotated_bam : callable or None
         Called with the finished result before the optional annotated-BAM pass, so a caller can persist the
         quantification before a pass that re-reads the whole BAM; the CLI writes its tables here.
 
@@ -1053,7 +1053,7 @@ def run_pipeline(
         float(np.dot(_bins, fl_models.global_pmf)),
     )
 
-    # NOTE: the buffer is NOT freed here — quant_from_buffer scans it below.
+    # NOTE: the buffer is NOT freed here — quant_from_buffer routes it below.
     calibration = calibrate(
         payload=calibration_payload,
         region_arrays=region_arrays,
@@ -1084,7 +1084,7 @@ def run_pipeline(
     )
 
     # -- Quantification: calibration prior → per-locus EM --
-    # Annotation table for the optional second BAM pass (opt-in).
+    # Annotation table for the optional annotated-BAM pass (opt-in).
     annotations = None
     if config.annotated_bam_path is not None:
         from .annotate import AnnotationTable
@@ -1129,10 +1129,10 @@ def run_pipeline(
         fl_models=fl_models,
         calibration_track=calibration_track,
     )
-    if before_second_pass is not None:
-        before_second_pass(result)
+    if before_annotated_bam is not None:
+        before_annotated_bam(result)
 
-    # -- Second BAM pass: write annotated BAM (opt-in) --
+    # -- The annotated-BAM pass: re-read the BAM and write it with assignment tags (opt-in) --
     if annotations is not None:
         from .annotate import write_annotated_bam
 

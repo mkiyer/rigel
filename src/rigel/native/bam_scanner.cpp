@@ -2338,7 +2338,7 @@ private:
 };
 
 // ================================================================
-// BamAnnotationWriter — second-pass BAM tag stamping
+// BamAnnotationWriter — the annotated-BAM pass's tag stamping
 // ================================================================
 //
 // Reuses the same BAM reading, hit grouping, fragment building, and

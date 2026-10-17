@@ -970,7 +970,7 @@ transcripts and materialized as ordinary transcript rows in `index.t_df`, flagge
 
 ## 6. Code layout
 
-**Python.** Top level: `cli` `pipeline` `config` `index` `scan` `scoring` `buffer` `scan_payload`
+**Python.** Top level: `cli` `pipeline` `config` `index` `routing` `scoring` `buffer` `scan_payload`
 `scan_cache` `locus` `locus_partition` `scored_fragments` `estimator` `strand_model` `junction_fit` `frag_length_model`
 `second_pass` `splice` `splice_blacklist` `native` `gtf` `transcript` `annotate` `stats` `types`, plus the
 `report/` and `sim/` subpackages. `calibration/`: `calibrate` (orchestrator) · `splice_graph` (the

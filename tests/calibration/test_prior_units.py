@@ -213,7 +213,7 @@ def _one_locus(span: int) -> list[MultiLocus]:
             multi_locus_id=0,
             transcript_indices=np.array([], dtype=np.int32),
             unit_indices=np.array([], dtype=np.int32),
-            gdna_span=span,
+            span_bp=span,
             loci=(Locus(ref="0", ref_id=0, start=0, end=span),),
         )
     ]

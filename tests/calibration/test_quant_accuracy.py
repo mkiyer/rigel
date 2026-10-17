@@ -343,7 +343,7 @@ def test_the_library_gDNA_fraction_COUNTS_INTERGENIC_and_the_EM_only_view_does_n
     """
     mrna, gdna_em, intergenic = 5_000_000.0, 2_330_992.0, 2_601_271.0
     quant = pd.DataFrame({"transcript_id": ["a"], "count": [mrna]})
-    result = _FakeResult(nrna_em_count=0.0, gdna_em_count=gdna_em, n_intergenic=intergenic)
+    result = _FakeResult(synthetic_count=0.0, gdna_em_count=gdna_em, n_intergenic=intergenic)
     summary = {"origin_counts": {"gdna": 5_000_000, "mrna": 5_000_000, "nrna": 0}}
     lib = QA.score_library(result, quant, summary)
 
@@ -366,7 +366,9 @@ def test_the_library_gDNA_fraction_COUNTS_INTERGENIC_and_the_EM_only_view_does_n
 
     # the perturbation: with NO intergenic fragments the two views must coincide exactly
     same = QA.score_library(
-        _FakeResult(nrna_em_count=0.0, gdna_em_count=2_330_992.0, n_intergenic=0.0), quant, summary
+        _FakeResult(synthetic_count=0.0, gdna_em_count=2_330_992.0, n_intergenic=0.0),
+        quant,
+        summary,
     )
     assert same["gdna_frac_est"] == pytest.approx(same["gdna_em_frac_est"]), (
         "with zero intergenic fragments the two denominators are identical and the two numbers must "
@@ -376,7 +378,7 @@ def test_the_library_gDNA_fraction_COUNTS_INTERGENIC_and_the_EM_only_view_does_n
 
 @dataclasses.dataclass
 class _FakeEstimator:
-    nrna_em_count: float
+    synthetic_count: float
     gdna_em_count: float
 
 
@@ -389,8 +391,8 @@ class _FakeStats:
 class _FakeResult:
     """Enough of a ``PipelineResult`` for ``score_library`` — the four numbers it reads."""
 
-    def __init__(self, nrna_em_count, gdna_em_count, n_intergenic, n_intergenic_spliced=0.0):
-        self.estimator = _FakeEstimator(nrna_em_count, gdna_em_count)
+    def __init__(self, synthetic_count, gdna_em_count, n_intergenic, n_intergenic_spliced=0.0):
+        self.estimator = _FakeEstimator(synthetic_count, gdna_em_count)
         self.stats = _FakeStats(n_intergenic, n_intergenic_spliced)
 
 
@@ -909,9 +911,9 @@ def test_a_strand_specificity_in_NEITHER_half_is_reported_APART_never_pooled(tmp
 
 
 def _alloc_truth_table():
-    """Two annotated transcripts and the SYNTHETIC shadow of each of their genes, as the simulator
-    writes them: a shadow's fragments are ``observed_nrna_fragments`` on its OWN row, and its
-    ``observed_mrna_fragments`` is zero because a shadow emits no mature RNA. A single-exon annotated
+    """Two annotated transcripts and the SYNTHETIC span of each of their genes, as the simulator
+    writes them: a synthetic span's fragments are ``observed_nrna_fragments`` on its OWN row, and its
+    ``observed_mrna_fragments`` is zero because a synthetic span emits no mature RNA. A single-exon annotated
     transcript carries both columns."""
     return pd.DataFrame(
         {
@@ -935,7 +937,7 @@ class _AllocIndex:
 
 
 def test_the_allocation_arm_does_NOT_hand_a_weight_of_ZERO_to_an_RNA_EMITTING_transcript():
-    """⛔ THE ARM MUST WEIGH EVERY RNA COMPONENT, AND A SYNTHETIC SHADOW IS ONE (`EQUATIONS.md` §9b).
+    """⛔ THE ARM MUST WEIGH EVERY RNA COMPONENT, AND A SYNTHETIC SPAN IS ONE (`EQUATIONS.md` §9b).
 
     ``--arm oracle_alloc*`` claims to hand the EM the true per-transcript allocation. Reading a MATURE
     column alone gives every synthetic nascent entity a weight of exactly zero — on the ladder, 6,919
@@ -947,7 +949,7 @@ def test_the_allocation_arm_does_NOT_hand_a_weight_of_ZERO_to_an_RNA_EMITTING_tr
     The invariant is structural and needs no number: a transcript the simulator gave RNA fragments
     must receive a POSITIVE weight, and one it gave none must receive zero.
 
-    Perturbation: reading ``observed_mrna_fragments`` alone zeroes both shadow rows here, and on the
+    Perturbation: reading ``observed_mrna_fragments`` alone zeroes both synthetic-span rows here, and on the
     ladder turns the arm into a re-run of ``alpha = 0`` — its nascent estimate tracks the
     pre-restoration baseline to within 15 % on every in-scope condition.
     """
@@ -967,7 +969,7 @@ def test_the_allocation_arm_does_NOT_hand_a_weight_of_ZERO_to_an_RNA_EMITTING_tr
 
 def test_the_allocation_weights_fall_back_to_the_ABUNDANCE_pair_not_to_a_MATURE_column():
     """With no ``observed_*`` columns the fallback must still be a PAIR. Falling back to
-    ``mrna_abundance`` alone reinstates the same zero on every shadow row on any panel whose truth
+    ``mrna_abundance`` alone reinstates the same zero on every synthetic-span row on any panel whose truth
     table predates the observed columns.
 
     Perturbation: a single-column fallback gives ``nrna_gene_a`` weight 0 here.
@@ -980,8 +982,8 @@ def test_the_allocation_weights_fall_back_to_the_ABUNDANCE_pair_not_to_a_MATURE_
 
 
 def test_the_allocation_weights_REFUSE_a_truth_table_that_carries_no_nascent_column():
-    """A truth table with a mature column and no nascent one cannot express a shadow's allocation, so
-    the arm refuses rather than silently weighting every shadow at zero."""
+    """A truth table with a mature column and no nascent one cannot express a synthetic span's
+    allocation, so the arm refuses rather than silently weighting every synthetic span at zero."""
     truth = _alloc_truth_table().drop(
         columns=["observed_nrna_fragments", "nrna_abundance", "mrna_abundance"]
     )

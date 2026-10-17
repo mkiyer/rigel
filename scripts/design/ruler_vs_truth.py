@@ -687,7 +687,7 @@ def footprint_gdna_length(region_arrays, block: tuple, gdna_fl_pmf) -> float:
         multi_locus_id=0,
         transcript_indices=np.array([], dtype=np.int32),
         unit_indices=np.array([], dtype=np.int32),
-        gdna_span=e0 - s0,
+        span_bp=e0 - s0,
         loci=(Locus(ref=str(rid), ref_id=rid, start=s0, end=e0),),
     )
     return float(assemble_priors(cal, region_arrays, [ml]).gdna_eff_len[0])

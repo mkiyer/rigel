@@ -124,10 +124,10 @@ class TestCrossChunkRegression:
             rtol=1e-12,
         )
 
-    def test_nrna_em_count_match(self):
+    def test_synthetic_count_match(self):
         np.testing.assert_allclose(
-            self.pr_big.estimator.nrna_em_count,
-            self.pr_tiny.estimator.nrna_em_count,
+            self.pr_big.estimator.synthetic_count,
+            self.pr_tiny.estimator.synthetic_count,
             atol=1e-10,
             rtol=1e-12,
         )

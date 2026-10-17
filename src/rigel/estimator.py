@@ -235,8 +235,8 @@ class AbundanceEstimator:
         return self._gdna_em_total
 
     @property
-    def nrna_em_count(self) -> float:
-        """Total nRNA count (sum of EM + unambig counts for synthetic nRNA transcripts)."""
+    def synthetic_count(self) -> float:
+        """Total count on the synthetic spans: their unambiguous and EM counts, summed."""
         mask = self._synthetic_mask
         if not mask.any():
             return 0.0

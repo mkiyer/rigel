@@ -1,7 +1,7 @@
-"""rigel.scan — CSR builder / buffer scanner.
+"""rigel.routing — score every buffered fragment and route it.
 
 Converts a ``FragmentBuffer`` into ``ScoredFragments`` for the EM solver.
-The ``FragmentRouter`` class builds per-fragment scoring data, routes
+The ``FragmentRouter`` class drives the native scorer over the buffer, routes
 unambiguous fragments to deterministic assignment, and accumulates
 ambiguous fragments into CSR-formatted equivalence-class data for
 the locus-level EM.
@@ -37,14 +37,14 @@ class FragmentRouter:
     ctx : FragmentScorer
         Pre-computed scoring parameters.
     estimator : AbundanceEstimator
-        Accumulates unambig counts during scan.
+        Accumulates unambig counts during routing.
     stats : PipelineStats
         Pipeline statistics accumulator.
     index : TranscriptIndex
         Reference index.
     annotations : AnnotationTable or None
         If provided, deterministic-unambig and chimeric fragments are
-        annotated immediately during the scan.
+        annotated as they are routed.
     """
 
     def __init__(
@@ -62,11 +62,11 @@ class FragmentRouter:
         self.annotations = annotations
 
     # ------------------------------------------------------------------
-    # Main scan driver
+    # The routing pass
     # ------------------------------------------------------------------
 
-    def scan(self, buffer: FragmentBuffer, log_every: int) -> ScoredFragments:
-        """Single pass over buffer.  Returns packed ScoredFragments.
+    def route(self, buffer: FragmentBuffer, log_every: int) -> ScoredFragments:
+        """Score and route every buffered fragment in one pass.  Returns packed ScoredFragments.
 
         Deterministic-unique (SPLICED_ANNOT + FRAG_UNAMBIG) fragments
         are assigned directly via the C++ scoring path.  All other
@@ -101,7 +101,7 @@ class FragmentRouter:
             scorer.score_chunk(arrays)
             n_processed += chunk.size
             if n_processed % log_every < chunk.size:
-                logger.debug(f"  Scan: {n_processed:,} / {n_total:,}")
+                logger.debug(f"  Routed: {n_processed:,} / {n_total:,}")
             del arrays, chunk
 
         result = scorer.finish()

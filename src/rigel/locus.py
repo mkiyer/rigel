@@ -62,7 +62,7 @@ class MultiLocus:
     unit_indices : np.ndarray
         int32 — EM unit indices (rows in global CSR) belonging to
         this multi-locus.
-    gdna_span : int
+    span_bp : int
         Total merged genomic footprint (bp): ``sum(l.span for l in loci)``.
         Reported as the loci table's ``locus_span_bp``.
     loci : tuple[Locus, ...]
@@ -74,7 +74,7 @@ class MultiLocus:
     multi_locus_id: int
     transcript_indices: np.ndarray
     unit_indices: np.ndarray
-    gdna_span: int
+    span_bp: int
     loci: tuple[Locus, ...]
 
 
@@ -106,7 +106,7 @@ def build_multi_loci(
     Parameters
     ----------
     em_data : ScoredFragments
-        Global EM data (mRNA + nRNA candidates + per-unit metadata).
+        Global EM data (annotated-transcript and synthetic-span candidates + per-unit metadata).
     index : TranscriptIndex
         Reference index.
 
@@ -225,7 +225,7 @@ def build_multi_loci(
                     comp_u_indices[comp_u_offsets[lid] : comp_u_offsets[lid + 1]],
                     em_data.frag_ids,
                 ),
-                gdna_span=span,
+                span_bp=span,
                 loci=loci_tuple,
             )
         )

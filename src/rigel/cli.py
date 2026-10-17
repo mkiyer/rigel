@@ -146,7 +146,9 @@ def quant_command(args: argparse.Namespace) -> int:
             bam_path,
             index,
             config=pipeline_config,
-            before_second_pass=lambda result: _write_quant_outputs(result, index, output_dir, args),
+            before_annotated_bam=lambda result: _write_quant_outputs(
+                result, index, output_dir, args
+            ),
         )
     except BamInputError as exc:
         sys.exit(f"Error: {exc}")
@@ -431,7 +433,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     stats = result.stats
     sm = result.strand_models
     total_mrna = float(quant_df["count"].sum())
-    total_nrna = float(estimator.nrna_em_count)
+    total_nrna = float(estimator.synthetic_count)
     total_gdna = float(estimator.gdna_em_count)
 
     def _df_series_summary(df, column: str) -> dict[str, float]:

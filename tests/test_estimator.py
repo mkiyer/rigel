@@ -718,12 +718,12 @@ class TestPartitionedEffectiveLength:
 
 
 # =====================================================================
-# gDNA in locus EM — unspliced compete with gDNA shadow
+# gDNA in locus EM — unspliced fragments compete with the gDNA component
 # =====================================================================
 
 
 class TestGDNAInLocusEM:
-    """Verify gDNA shadow competes with mRNA in locus EM."""
+    """Verify the gDNA component competes with RNA in locus EM."""
 
     def test_gdna_absorbs_when_init_high(self):
         """With a gDNA prior count of 5 and equal likelihoods, gDNA takes a share."""
@@ -1431,12 +1431,12 @@ def test_under_VBEM_the_prior_moves_the_split_only_by_the_DIGAMMA_CORRECTION(sha
 
 
 @pytest.mark.parametrize("mode", ["map", "vbem"])
-def test_a_SHADOW_SPAN_STILL_LOSES_to_the_transcript_it_shadows(mode):
+def test_a_SYNTHETIC_SPAN_STILL_LOSES_to_the_transcript_it_spans(mode):
     """What guards against a zombie.
 
-    The RNA prior reaches every RNA component as the same factor, so it does nothing to make a shadow
-    decay; the decay rests on the LIKELIHOOD alone, and the likelihood is sufficient. A shadow span is longer than the
-    transcript it shadows, so at equal per-fragment likelihood its yield ratio `kappa = w_N/w_T` is
+    The RNA prior reaches every RNA component as the same factor, so it does nothing to make a synthetic
+    span decay; the decay rests on the LIKELIHOOD alone, and the likelihood is sufficient. A synthetic span is longer
+    than the transcript it spans, so at equal per-fragment likelihood its yield ratio `kappa = w_N/w_T` is
     strictly below 1 and a component with no evidence of its own decays geometrically at that rate
     (`EQUATIONS.md` §9b).
 
@@ -1453,7 +1453,7 @@ def test_a_SHADOW_SPAN_STILL_LOSES_to_the_transcript_it_shadows(mode):
     )
     counts = est.em_counts.sum(axis=1)
     assert counts[1] < 0.01 * counts.sum(), (
-        f"a shadow span with no evidence of its own kept mass: {counts}"
+        f"a synthetic span with no evidence of its own kept mass: {counts}"
     )
 
 
@@ -1736,17 +1736,17 @@ def test_an_unknown_mode_CODE_is_REFUSED_by_the_native_EM(monkeypatch, codes, na
         assert str(refused.value).endswith(f"got {unknown}")
 
 
-# ── The shadow-vs-gDNA contest: theta_n = 0 is stable only while L_n >= L_g ──────────────────────
+# ── The synthetic-span-vs-gDNA contest: theta_n = 0 is stable only while L_n >= L_g ──────────────
 
 
-def _shadow_locus(n_sense: int, n_anti: int, ss: float = 0.99):
-    """One locus of unspliced fragments that ONLY gDNA and the gene's shadow span can explain — an
+def _synthetic_span_locus(n_sense: int, n_anti: int, ss: float = 0.99):
+    """One locus of unspliced fragments that ONLY gDNA and the gene's synthetic span can explain — an
     intronic position, where no mature isoform reaches. Every fragment is gDNA in truth. gDNA is
-    strandless (½ either way); the shadow carries the library's strandedness."""
+    strandless (½ either way); the synthetic span carries the library's strandedness."""
     ti, ll, gll = [], [], []
     for n, p_rna in ((n_sense, ss), (n_anti, 1.0 - ss)):
         for _ in range(int(n)):
-            ti += [0, 1]  # [0] the mature isoform, out of reach here; [1] the shadow
+            ti += [0, 1]  # [0] the mature isoform, out of reach here; [1] the synthetic span
             ll += [-np.inf, float(np.log(p_rna))]
             gll.append(float(np.log(0.5)))
     n_units = int(n_sense + n_anti)
@@ -1761,8 +1761,8 @@ def _shadow_locus(n_sense: int, n_anti: int, ss: float = 0.99):
     )
 
 
-def _shadow_share(ratio: float, *, n: int = 20_000, gdna_prior: float = 0.0) -> float:
-    """The shadow's share of ``n`` fragments that are ALL gDNA in truth, at ``L_g / L_n = ratio``."""
+def _synthetic_span_share(ratio: float, *, n: int = 20_000, gdna_prior: float = 0.0) -> float:
+    """The synthetic span's share of ``n`` fragments that are ALL gDNA in truth, at ``L_g / L_n = ratio``."""
     L_n = 10_000.0
     est = AbundanceEstimator(
         2,
@@ -1777,7 +1777,7 @@ def _shadow_share(ratio: float, *, n: int = 20_000, gdna_prior: float = 0.0) -> 
         geometry=_lengths([L_n * 10.0, L_n]),
     )
     est.run_batch_locus_em_partitioned(
-        partition_tuples=[_shadow_locus(n // 2, n // 2)],
+        partition_tuples=[_synthetic_span_locus(n // 2, n // 2)],
         locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
         gdna_prior_count=np.array([gdna_prior], dtype=np.float64),
         gdna_eff_len=np.array([L_n * ratio], dtype=np.float64),
@@ -1786,24 +1786,24 @@ def _shadow_share(ratio: float, *, n: int = 20_000, gdna_prior: float = 0.0) -> 
 
 
 @pytest.mark.parametrize("ratio", [0.5, 1.0])
-def test_a_shadow_entity_holding_NOTHING_decays_to_ZERO_while_it_is_the_LONGER_component(ratio):
+def test_a_synthetic_span_holding_NOTHING_decays_to_ZERO_while_it_is_the_LONGER_component(ratio):
     """⛔ THE THRESHOLD IS `L_g / L_n = 1`, AND IT IS DERIVED (`EQUATIONS.md` §9b), NOT CHOSEN.
 
-    Every fragment here is gDNA, so the only correct answer is that the shadow holds none of them.
-    While the shadow's effective length is at least the gDNA component's, `theta_n = 0` is the fixed
-    point the EM reaches and stays at: the shadow's density is multiplied by `L_g/L_n <= 1` each
+    Every fragment here is gDNA, so the only correct answer is that the synthetic span holds none of
+    them. While the span's effective length is at least the gDNA component's, `theta_n = 0` is the
+    fixed point the EM reaches and stays at: the span's density is multiplied by `L_g/L_n <= 1` each
     iteration and collapses.
     """
-    assert _shadow_share(ratio) == pytest.approx(0.0, abs=1e-9)
+    assert _synthetic_span_share(ratio) == pytest.approx(0.0, abs=1e-9)
 
 
 @pytest.mark.parametrize(
     "ratio,expected",
     [(2.0, 0.3519), (6.223, 0.5269), (20.0, 0.8204)],
 )
-def test_a_shadow_entity_holding_NOTHING_GROWS_once_it_is_the_SHORTER_component(ratio, expected):
+def test_a_synthetic_span_holding_NOTHING_GROWS_once_it_is_the_SHORTER_component(ratio, expected):
     """⛔⛔ THE SIPHON'S MECHANISM (`ISSUES: nascent-siphons-gdna-under-capture`). Past the threshold
-    `theta_n = 0` is UNSTABLE — the shadow's density is multiplied by `L_g/L_n > 1` every iteration and
+    `theta_n = 0` is UNSTABLE — the synthetic span's density is multiplied by `L_g/L_n > 1` every iteration and
     climbs off zero — and it settles where the strand channel alone stops it. The shares here are the
     closed-form fixed point of `EQUATIONS.md` §9b, so this gate pins the SOLVER against the derivation
     rather than against a recorded run.
@@ -1812,23 +1812,23 @@ def test_a_shadow_entity_holding_NOTHING_GROWS_once_it_is_the_SHORTER_component(
     structural and grows with the component's gene count: on the ladder at `g50 ss.99 ON` the ratio's
     mass-weighted mean over the leaked fragments is 9.7.
 
-    Perturbation: dividing the shadow by the locus's `L_g` instead of its own length reads 0.0 on every
+    Perturbation: dividing the synthetic span by the locus's `L_g` instead of its own length reads 0.0 on every
     row. Dropping the strand term leaves the contest fully degenerate and it goes to the CORNER — the
     shorter component takes everything: 1.0 at every ratio above 1, exactly 0.5 at 1, 0.0 below. So the
     strand channel is not what opens this channel, only what bounds it.
     """
-    assert _shadow_share(ratio) == pytest.approx(expected, abs=2e-3)
+    assert _synthetic_span_share(ratio) == pytest.approx(expected, abs=2e-3)
 
 
-def test_the_gDNA_PSEUDOCOUNT_bounds_the_shadow_but_does_NOT_close_the_channel():
+def test_the_gDNA_PSEUDOCOUNT_bounds_the_synthetic_span_but_does_NOT_close_the_channel():
     """The calibration's own gDNA count anchors `theta_g`, so it damps the climb — which is why the
     ladder leaks ~10-20 % of the contested pool where the bare contest gives ~50 %. It is a bound, not
-    a fix: the shadow still takes a large share, and at `g98`, where the anchor is strongest, the
+    a fix: the synthetic span still takes a large share, and at `g98`, where the anchor is strongest, the
     capture-ON rows still over-call nascent by 100x.
     """
-    free = _shadow_share(6.223, gdna_prior=0.0)
-    anchored = _shadow_share(6.223, gdna_prior=10_000.0)  # half the locus's fragments
-    assert anchored < free, "the gDNA pseudocount did not damp the shadow at all"
+    free = _synthetic_span_share(6.223, gdna_prior=0.0)
+    anchored = _synthetic_span_share(6.223, gdna_prior=10_000.0)  # half the locus's fragments
+    assert anchored < free, "the gDNA pseudocount did not damp the synthetic span at all"
     assert anchored > 0.3, "the pseudocount closed a channel it can only bound"
 
 

@@ -762,7 +762,7 @@ alpha gives NaN". Instrument: a test over the three hit orders; a pure-Python tr
 ### output-names-are-not-consistent
 `priority: now — the rename stage of the first wave's cleanup, to the convention the owner ruled on 2026-10-17 (`DESIGN.md` §0, annotated / nascent) · kind: defect · 2026-10-16`
 The outputs use "nascent" for two different sets of fragments:
-- `nrna_total` and the report's "Nascent RNA" row count the synthetic spans (`estimator.nrna_em_count`);
+- `nrna_total` and the report's "Nascent RNA" row count the synthetic spans (`estimator.synthetic_count`);
 - `gene_quant`'s `nascent_count` holds the annotated single-exon transcripts and leaves the spans out
   (`estimator.py:564-575`).
 

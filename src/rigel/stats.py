@@ -14,7 +14,7 @@ class PipelineStats:
 
     The scan counters are copied from the native scanner's stats by
     ``pipeline._apply_scan_stats``; the routing and gating counters are
-    added by ``FragmentRouter.scan``.
+    added by ``FragmentRouter.route``.
 
     Use ``to_dict()`` for JSON serialization.
     """

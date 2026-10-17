@@ -3,7 +3,7 @@
 Pure dataclasses with no logic.
 
 - ``ScoredFragments`` — global CSR arrays linking fragment units to
-  candidate transcripts with log-likelihoods, built by ``scan.py``.
+  candidate transcripts with log-likelihoods, built by ``routing.py``.
 - ``LocusPartition`` — per-locus CSR subset for the partitioned native
   EM path, scattered from it by ``locus_partition.partition_and_free``.
 
@@ -22,11 +22,11 @@ import numpy as np
 
 @dataclass(slots=True)
 class ScoredFragments:
-    """Fragment-level candidate data from the BAM scan pass.
+    """Fragment-level candidate data for the EM, scored from the fragment buffer.
 
     Contains pre-computed CSR (compressed sparse row) arrays linking
     each ambiguous fragment unit to its candidate transcripts and
-    their log-likelihoods.  Produced by ``FragmentRouter`` in scan.py
+    their log-likelihoods.  Produced by ``FragmentRouter`` in routing.py
     and consumed during locus EM construction.
 
     The global ScoredFragments contains transcript candidates only

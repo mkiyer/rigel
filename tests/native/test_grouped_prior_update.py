@@ -141,7 +141,7 @@ def test_the_prior_changes_NO_component_s_SHARE_of_the_RNA_pool(raw):
 
 def test_a_zero_count_component_CANNOT_be_revived_by_the_prior():
     """``out[i]`` is PROPORTIONAL to ``raw[i]``, so ``raw[i] == 0`` stays 0 — an ABSORBING STATE no
-    prior magnitude escapes. That is the structural guard against reviving a shadow entity, it is a
+    prior magnitude escapes. That is the structural guard against reviving a synthetic span, it is a
     property of the WEIGHTS rather than of any eligibility test, and it is why admitting every RNA
     component at these weights costs nothing on that axis (``EQUATIONS.md`` §9b.1). The
     coverage-weighted warm start remains the only spark such an entity gets."""
@@ -326,7 +326,7 @@ def test_a_ZERO_COUNT_component_CAN_be_revived_by_a_weighted_prior():
     warm-start evidence. A strictly positive weight has no such state.
 
     This is a capability, not automatically a good thing — it is precisely the mechanism that could
-    revive a shadow entity the data does not support, so it is what an allocation rule must earn.
+    revive a synthetic span the data does not support, so it is what an allocation rule must earn.
     """
     raw = np.array([100.0, 0.0, 70.0], dtype=np.float64)
     assert _update(raw, rna_prior=500.0)[1] == 0.0, "the shipped rule should not revive it"

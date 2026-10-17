@@ -133,7 +133,7 @@ class FragmentScorer:
         # synthetic spans form the span pool. An annotated single-exon transcript,
         # even one that covers a multi-exon transcript's span (``is_nrna``), is an
         # annotated transcript and is pruned with them.
-        t_is_nrna_arr = index.t_df["is_synthetic"].values.astype(np.uint8)
+        t_is_synthetic_arr = index.t_df["is_synthetic"].values.astype(np.uint8)
 
         native_ctx = NativeFragmentScorer(
             log_p_sense=float(ctx.log_p_sense),
@@ -153,7 +153,7 @@ class FragmentScorer:
             exon_starts=np.ascontiguousarray(exon_starts, dtype=np.int32),
             exon_ends=np.ascontiguousarray(exon_ends, dtype=np.int32),
             exon_cumsum=np.ascontiguousarray(exon_cumsum, dtype=np.int32),
-            t_is_nrna_arr=np.ascontiguousarray(t_is_nrna_arr),
+            t_is_synthetic_arr=np.ascontiguousarray(t_is_synthetic_arr),
             pruning_max_ll_delta=max_ll_delta,
         )
         object.__setattr__(ctx, "_native_ctx", native_ctx)

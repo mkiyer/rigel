@@ -366,7 +366,7 @@ def write_annotated_bam(
     sj_spec: str,
     locus_id_per_transcript: np.ndarray | None = None,
 ) -> dict:
-    """Second BAM pass: stamp every record with assignment tags.
+    """The annotated-BAM pass: stamp every record with assignment tags.
 
     Re-reads the input BAM in the same name-sorted order as pass 1.
     For each read-name group, looks up the annotation by ``frag_id``

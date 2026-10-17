@@ -963,7 +963,7 @@ class TestAnnotatedBamIntegration:
 
 @pytestmark_scenario
 class TestAnnotatedBamWriterRobustness:
-    """What an aligner's or an annotation's ordinary output must not break in the second pass."""
+    """What an aligner's or an annotation's ordinary output must not break in the annotated-BAM pass."""
 
     _DOCUMENTED_ZS = {
         "spliced_annot",
@@ -1075,8 +1075,9 @@ class TestAnnotatedBamWriterRobustness:
             stamped = [r.get_tag("ZS") for r in f.fetch(until_eof=True) if r.has_tag("ZT")]
         assert stamped and set(stamped) <= self._DOCUMENTED_ZS
 
-    def test_the_result_is_handed_over_before_the_second_pass(self, scenario, tmp_path):
-        """The CLI writes its tables in this hook, so a failure in the second pass cannot lose a finished run."""
+    def test_the_result_is_handed_over_before_the_annotated_bam_pass(self, scenario, tmp_path):
+        """The CLI writes its tables in this hook, so a failure in the annotated-BAM pass cannot lose a
+        finished run."""
         result = self._sim(scenario)
         out = tmp_path / "annotated.bam"
         seen = []
@@ -1084,11 +1085,11 @@ class TestAnnotatedBamWriterRobustness:
             result.bam_path,
             result.index,
             out,
-            before_second_pass=lambda res: seen.append((out.exists(), res.estimator is not None)),
+            before_annotated_bam=lambda res: seen.append((out.exists(), res.estimator is not None)),
         )
         assert seen == [(False, True)] and out.exists()
 
-    def test_the_cli_writes_its_tables_before_the_second_pass(
+    def test_the_cli_writes_its_tables_before_the_annotated_bam_pass(
         self, scenario, tmp_path, monkeypatch
     ):
         """The annotated-BAM pass re-reads the whole BAM after the quantification is done; if it fails, the finished
@@ -1099,7 +1100,7 @@ class TestAnnotatedBamWriterRobustness:
         result = self._sim(scenario)
 
         def fail(*args, **kwargs):
-            raise RuntimeError("the second pass failed")
+            raise RuntimeError("the annotated-BAM pass failed")
 
         monkeypatch.setattr(annotate, "write_annotated_bam", fail)
         out = tmp_path / "out"
@@ -1118,6 +1119,6 @@ class TestAnnotatedBamWriterRobustness:
                 "ts",
             ]
         )
-        with pytest.raises(RuntimeError, match="second pass"):
+        with pytest.raises(RuntimeError, match="annotated-BAM pass"):
             args.func(args)
         assert (out / "quant.feather").exists() and (out / "summary.json").exists()

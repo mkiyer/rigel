@@ -142,7 +142,7 @@ def test_the_GENOMIC_hypothesis_is_ALWAYS_the_LONGEST():
 def test_the_genomic_hypothesis_is_the_EMPTY_path_and_needs_no_flag():
     """Cutting nothing means the gap is real template — the molecule is gDNA, or RNA that has not
     spliced there, which is the same unspliced span. So "could this be genomic?" needs no separate
-    flag, and a spanning shadow transcript is not a candidate: it IS this hypothesis.
+    flag, and a synthetic span is not a candidate: it IS this hypothesis.
 
     The limit is raised above the 2400 bp span on purpose. At the default 1000 the unspliced hypothesis
     is ruled out by length and the fragment deposits — which is the NEXT test, and keeping the two
@@ -564,19 +564,19 @@ def test_the_fixture_reaches_every_branch_it_claims_to(scanned):
 # A PERTURBATION THAT DOES NOT FIRE, AND WHY — recorded rather than left as a hole.
 #
 # Removing `!certified_rna` from `enumerate_gap_hypotheses`'s unspliced-hypothesis condition fails
-# nothing here, and the cause is not a weak fixture: the spanning SHADOW transcripts are in the
-# candidate set. A shadow is single-exon, so it implies nothing in the gap, so
+# nothing here, and the cause is not a weak fixture: the SYNTHETIC SPANS are in the
+# candidate set. A synthetic span is single-exon, so it implies nothing in the gap, so
 # `any_candidate_implies_nothing` is already true and the genomic path is emitted without the clause.
 # The two mechanisms agree rather than conflict:
 #
-#   * SPLICED fragment: an observed CIGAR-N intron falls inside the shadow's single exon, so the shadow
+#   * SPLICED fragment: an observed CIGAR-N intron falls inside the span's single exon, so the span
 #     cannot explain the read and drops out of `t_inds`. The genomic path is then correctly absent —
 #     gated in `test_gap_introns_are_cut.py`, where the certified-RNA `mixed` fragment has exactly ONE
 #     hypothesis.
-#   * UNSPLICED fragment: the shadow survives, implies nothing, and supplies the genomic path, which is
+#   * UNSPLICED fragment: the span survives, implies nothing, and supplies the genomic path, which is
 #     what "no annotated sj ⇒ the genomic path is always available" requires.
 #
 # So `!certified_rna` is REDUNDANT here, not wrong, and it is kept: it states the rule directly instead
-# of depending on the shadow mechanism continuing to exist. A single-exon gene has no separate shadow
+# of depending on the synthetic spans continuing to exist. A single-exon gene has no synthetic span
 # row at all, and that is the case the clause covers on its own. Do not delete it on the strength of
 # this perturbation.

@@ -108,7 +108,7 @@ class TestIsoformCollapse:
 
 
 class TestUnsplicedLowStrand:
-    """At low SS, unspliced genes may lose reads to gDNA shadow.
+    """At low SS, unspliced genes may lose reads to the gDNA component.
 
     Spliced genes survive because splice-junction strand evidence
     is independent of library strandedness.

@@ -171,7 +171,7 @@ def _run(ss: float, junction_len: int, mode: str):
         multi_locus_id=0,
         transcript_indices=np.arange(n_t, dtype=np.int32),
         unit_indices=np.arange(em.n_units, dtype=np.int32),
-        gdna_span=int(gdna_len),
+        span_bp=int(gdna_len),
         loci=(Locus(ref="chr1", ref_id=0, start=0, end=int(gdna_len)),),
     )
     index = SimpleNamespace(

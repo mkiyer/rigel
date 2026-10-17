@@ -147,7 +147,7 @@ class GapHypothesis:
 
     The empty path is the GENOMIC hypothesis. Cutting nothing means the gap is real template, i.e. the
     molecule is gDNA — or RNA that has not spliced there, which is the same unspliced span. That is why
-    the accumulator needs no separate "could this be gDNA?" flag and why a spanning shadow transcript is
+    the accumulator needs no separate "could this be gDNA?" flag and why a synthetic span is
     not a candidate: it IS this hypothesis, and it is always in the set unless something rules it out.
 
     ``introns`` are the IMPLIED ones only. Introns the CIGAR actually stated are cut under EVERY

@@ -1,7 +1,7 @@
 """`rigel.locus` — the `Locus` / `MultiLocus` surface, and the reference id a `Locus` carries. The
 first block pins the dataclass invariants: `Locus` is a frozen contiguous interval with a `span`, a
 `MultiLocus` carries one or more of them (a paralog cluster spans two references), and the
-`gdna_span` `build_multi_loci` computes is the sum of its loci's spans. The second pins that
+`span_bp` `build_multi_loci` computes is the sum of its loci's spans. The second pins that
 `Locus.ref_id` is the canonical resolver/BAM ref id
 given by `index.ref_lengths` insertion order through `index.ref_name_to_id`, and not the pandas
 categorical code of `index.t_df["ref"]` — the two id spaces coincide only when reference names are
@@ -46,7 +46,7 @@ def _make_multi_locus(loci_seq, *, multi_locus_id=0):
         multi_locus_id=multi_locus_id,
         transcript_indices=np.array([0], dtype=np.int32),
         unit_indices=np.array([0], dtype=np.int32),
-        gdna_span=sum(loc.span for loc in loci_seq),
+        span_bp=sum(loc.span for loc in loci_seq),
         loci=tuple(loci_seq),
     )
 
@@ -54,7 +54,7 @@ def _make_multi_locus(loci_seq, *, multi_locus_id=0):
 def test_multi_locus_single_interval():
     ml = _make_multi_locus([Locus("chr1", 0, 0, 10000)])
     assert len(ml.loci) == 1
-    assert ml.gdna_span == ml.loci[0].span == 10000
+    assert ml.span_bp == ml.loci[0].span == 10000
 
 
 def test_multi_locus_multi_ref():
@@ -65,7 +65,7 @@ def test_multi_locus_multi_ref():
     )
     ml = _make_multi_locus(loci)
     assert len(ml.loci) == 2
-    assert ml.gdna_span == sum(loc.span for loc in ml.loci) == 700
+    assert ml.span_bp == sum(loc.span for loc in ml.loci) == 700
     # ref_id ordering assertion: the constructor accepts them sorted by
     # (ref_id, start); confirm we can iterate in declared order.
     assert [loc.ref for loc in ml.loci] == ["chr1", "chr2"]
@@ -76,8 +76,8 @@ def test_multi_locus_multi_ref():
 # ---------------------------------------------------------------------------
 
 
-def test_build_multi_loci_gdna_span_matches_sum_of_loci(mini_index):
-    """``gdna_span`` should equal Σ(end-start) over ``loci``."""
+def test_build_multi_loci_span_bp_matches_sum_of_loci(mini_index):
+    """``span_bp`` should equal Σ(end-start) over ``loci``."""
     from rigel.scored_fragments import ScoredFragments
 
     # Synthetic em_data: one ambiguous unit linking t0 and t1 (both on chr1).
@@ -99,7 +99,7 @@ def test_build_multi_loci_gdna_span_matches_sum_of_loci(mini_index):
     assert len(multi_loci) > 0
     for ml in multi_loci:
         loci_sum = sum(loc.span for loc in ml.loci)
-        assert ml.gdna_span == loci_sum
+        assert ml.span_bp == loci_sum
         for loc in ml.loci:
             assert isinstance(loc, Locus)
             assert loc.start <= loc.end

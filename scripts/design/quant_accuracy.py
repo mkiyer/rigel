@@ -327,7 +327,7 @@ def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
     """
     est = result.estimator
     mrna = float(quant["count"].sum())
-    nrna = float(est.nrna_em_count)
+    nrna = float(est.synthetic_count)
     gdna = float(est.gdna_em_count)
     intergenic = float(result.stats.n_intergenic)
     intergenic_rna = float(result.stats.n_intergenic_spliced)
@@ -385,9 +385,9 @@ def seeded(pipeline_config, arm: str, em_seed: int):
 
 
 #: The truth table's RNA fragment columns, most realised first. Each entry is the MATURE and the
-#: NASCENT column together, and that pairing is the point: a synthetic shadow entity emits no mature
+#: NASCENT column together, and that pairing is the point: a synthetic span emits no mature
 #: RNA, so its whole realised mass sits in the nascent column of its OWN row, while a single-exon
-#: annotated transcript carries both. A mature column read alone weights every shadow at zero.
+#: annotated transcript carries both. A mature column read alone weights every synthetic span at zero.
 _WEIGHT_COLUMNS = (
     ("observed_mrna_fragments", "observed_nrna_fragments"),
     ("mrna_abundance", "nrna_abundance"),
@@ -401,13 +401,13 @@ def truth_weights(truth: pd.DataFrame, index) -> np.ndarray:
     Within a locus the EM only reads their RATIOS, so no normalisation is needed here.
 
     ⛔ THE WEIGHT IS MATURE **AND** NASCENT, because the RNA prior's recipients are every RNA component
-    and a synthetic shadow entity is one of them (`EQUATIONS.md` §9b). A shadow's realised fragments are
+    and a synthetic span is one of them (`EQUATIONS.md` §9b). A synthetic span's realised fragments are
     the NASCENT column of its own row and its mature column is identically zero, so reading the mature
-    column alone hands every shadow a weight of exactly zero — which is not an allocation but the
+    column alone hands every synthetic span a weight of exactly zero — which is not an allocation but the
     retired ``alpha = 0`` rule (`ISSUES: nascent-gets-no-rna-prior`, CLOSED) under an oracle's name, and
     it reads as a perfect allocation removing the nascent over-call. Gated by
     ``tests/calibration/test_quant_accuracy.py``. A table with no nascent column cannot express a
-    shadow's allocation and is refused rather than silently weighted at zero.
+    synthetic span's allocation and is refused rather than silently weighted at zero.
 
     Exact-duplicate transcripts are folded onto the twin the index kept — the truth table is keyed on
     the un-collapsed annotation, so without the fold their fragments would be dropped rather than
