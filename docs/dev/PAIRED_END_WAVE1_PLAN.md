@@ -1,7 +1,7 @@
 # Wave 1 plan: the scan stage
 
-2026-10-17 · base `bb3967cb` · revision 3. Step 1's review is delivered and its cleanup has landed through the
-re-cache; the renames and the last constants follow before step 2. Nothing in steps 2–6 is implemented.
+2026-10-17 · base `3941a0dd` · revision 3. Step 1 is complete: its review is delivered and every cleanup stage has
+landed (§5). Nothing in steps 2–6 is implemented.
 
 Revision 1 also scrutinized each pair's alignment and constructed alternative readings, using a genome stored in the
 index. The owner then narrowed Rigel's scope (2026-10-16): Rigel reads alignments and does not repair or re-align
@@ -69,11 +69,11 @@ The owner's earlier decisions still hold:
    - reading the junction-strand tag per record instead of choosing one mode from the first spliced reads (§6).
 3. Check §14: does revision 3 answer the blockers of both earlier reviews, or only claim to?
 4. Review the code-health step as carried out (§5): did the cleanup cover what steps 2–6 will change, and was each
-   stage's proof sufficient (one stage was measured rather than proven a no-op)? What should the two remaining stages
-   (the renames and the last constants) include?
+   stage's proof sufficient? Three stages were measured rather than proven no-ops: the re-cache, the output names'
+   relabelling, and the tile-invariant fits.
 5. Answer the open questions (§13), and say what evidence must gate implementation and the end of wave 1.
 
-**Materials.** All in the bundle, at base commit `bb3967cb` (the cleanup's commits are `41899ae4..bb3967cb`; their
+**Materials.** All in the bundle, at base commit `3941a0dd` (the cleanup's commits are `41899ae4..3941a0dd`; their
 diff is in the bundle):
 
 - this plan, which you should read first and completely;
@@ -131,8 +131,7 @@ derivable cost.
    - a falsifiable test.
 3. **The five arguments** above, each confirmed or refuted with a finite example.
 4. **§14:** each earlier blocker, answered or not.
-5. **The code-health step (§5):** what the cleanup missed that steps 2–6 depend on, and what the remaining stages
-   need.
+5. **The code-health step (§5):** what the cleanup missed that steps 2–6 depend on.
 6. **Calibration (§9.3):** are the four corrections right? Is the all-held approximation acceptable now that the
    recommended STAR parameters will hold more templates, and how should it be measured?
 7. **Tests (§11):** recompute at least four expected values; name the missing cases and break tests.
@@ -250,9 +249,9 @@ The owner asked (2026-10-16) that wave 1 include a general code-health review.
 - **In depth, the scan path**, about 14,000 lines from the BAM record to the EM unit and calibration's deposit:
   - native: `bam_scanner.cpp`, `resolve.cpp`, `resolve_context.h`, `scoring.cpp`, `constants.h`,
     `calibration/accumulator.*`;
-  - Python: `buffer.py`, `scan.py`, `scan_payload.py`, `scan_cache.py`, `scored_fragments.py`, `scoring.py`,
-    `splice.py`, `splice_blacklist.py`, `annotate.py`, `stats.py`, `second_pass.py`, `locus.py`,
-    `locus_partition.py`, and the scan's part of `pipeline.py`.
+  - Python: `buffer.py`, `scan.py` (`routing.py` since `fd012918`), `scan_payload.py`, `scan_cache.py`,
+    `scored_fragments.py`, `scoring.py`, `splice.py`, `splice_blacklist.py`, `annotate.py`, `stats.py`,
+    `second_pass.py`, `locus.py`, `locus_partition.py`, and the scan's part of `pipeline.py`.
 - **A lighter sweep of the rest of `src/`**, about 29,000 lines, looking for:
   - dead code;
   - duplicated rules;
@@ -290,7 +289,7 @@ The owner asked (2026-10-16) that wave 1 include a general code-health review.
 contracts only.
 
 **Baseline.** Re-derived on a clean worktree before the first stage (2,959 at `41899ae4`) and after every stage since:
-3,026 at `bb3967cb`. On this disk, untracked review files in `docs/dev` trip the docs-boundary gate, so the baseline is
+3,051 at `3941a0dd`. On this disk, untracked review files in `docs/dev` trip the docs-boundary gate, so the baseline is
 always derived on a clean checkout.
 
 **Delivered** on 2026-10-16: `SCAN_CODE_HEALTH_REVIEW.md`, with the nine slice reports in `scan_code_health_slices/`.
@@ -299,7 +298,7 @@ The owner took all of it the same day:
 - the defects inside the scan path join steps 2–6 below, each as its own arm;
 - the later-wave findings are ISSUES entries.
 
-**Carried out,** 2026-10-16, each stage on a clean worktree, gated by the full suite, `rename_identity.py --check` on
+**Carried out,** 2026-10-16/17, each stage on a clean worktree, gated by the full suite, `rename_identity.py --check` on
 three frozen references (the ladder's oracle, the minimap2 panel and VCaP) and `preflight.py --full`:
 
 | stage | commit | what | the proof |
@@ -312,18 +311,24 @@ three frozen references (the ladder's oracle, the minimap2 panel and VCaP) and `
 | one re-cache | `d5a08e46` | the fields nothing reads, deleted from the scan, the payload and the cache | measured: only the two deleted region banks gone; the transcript table and calibration identical |
 | the oracle's provenance | `30357fb3` | an oracle part records the BAM it was split from | bit-identical |
 | constants, part 1 | `bb3967cb` | six numbers given their reason or a name | bit-identical |
+| the identity check | `8ebf71ea` | `rename_identity.py` digests the transcript table's content, not its column names | its self-test |
+| internal names | `fd012918` | names that said the wrong thing, inside the code | bit-identical |
+| the output names | `1fa1c143` | outputs report RNA as annotated or nascent (owner's convention); `summary.json` schema 4 | measured: every number unchanged on the ladder end to end, only the defined relabellings move |
+| the public repository's scrub | `8401aeba` | no local path, cluster detail or lab identifier in a tracked file; the data root is `$RIGEL_RUNS` | bit-identical |
+| index and scan names | `dc736e39` | index format 10; `--nascent-tolerance`, `--intron-overhang-tolerance`; the contiguous reaches no longer computed | bit-identical; every index rebuilt and checked file by file |
+| the truth tables | `5c67c1f4` | the simulator's one truth writer, each quantity once | an A/B gives identical reads |
+| constants, part 2 | `0c754afc` | the resource and display numbers given a home and a reason | bit-identical |
+| tile-invariant fits | `4bcc72d9` | the row-tiled calibration fits give one answer whatever their tile height | measured: noise-level per stratum on the ladder (0.997–1.003 of HEAD) |
 
-The suite went from 2,959 to 3,026 cases: gates added for each refusal and definition, cases deleted with the code
-they tested. Every new native gate was broken in a rebuild and seen to fire. Every panel was re-cached once (262
-conditions re-certified), and the references were re-frozen at `d5a08e46`, proven equal to the first freeze but for
-the two deleted banks. Preflight now checks each cache's key, not only its presence, and that check found the oracle
-defect.
+The suite went from 2,959 to 3,051 cases: gates added for each refusal and definition, cases deleted with the code
+they tested. Every new native gate was broken in a rebuild and seen to fire. Every panel was re-cached twice (262
+conditions re-certified each time: once for the payload's schema, once for index format 10), and the references were
+re-frozen at each measured stage, each new freeze proven equal to the one before but for the measured change.
+Preflight now checks each cache's key, not only its presence, and that check found the oracle defect.
 
-**Remaining before step 2:**
-- the renames, to the output-name convention the owner ruled on 2026-10-17 (`OUTPUT_NAMES_PROPOSAL.md`): `summary.json`
-  at schema 4, the index-side names, and one index rebuild, which also deletes the contiguous boundaries' unread
-  reaches;
-- the constants that needed rulings (`CONSTANTS_PROPOSAL.md`).
+**Moved out of step 1:** the tag detector's 1,000-read cutoff is repaired in step 2 (the junction-strand tag read per
+record); and two renames wait for the next re-simulation, because every panel on disk carries the old names and must
+stay readable: the synthetic spans' `RIGEL_NRNA_` ids and the truth columns `pre_capture_*` → `molar_*`.
 
 ## 6. Step 2 — records into mate locations
 
@@ -446,9 +451,9 @@ planned.
 
 ### 7.5 The anchor tolerance (owner, 2026-10-16)
 
-`--splicing-anchor-tolerance` (K, default 3) belongs to implicitly spliced fragments: mates aligned to different exons
-with a whole intron between them, where up to K aligned bases may sit inside the intron. The owner keeps it there,
-"but we must be judicious about deciding which cases apply it".
+`--intron-overhang-tolerance` (K, default 3; `--splicing-anchor-tolerance` until 2026-10-17) belongs to implicitly
+spliced fragments: mates aligned to different exons with a whole intron between them, where up to K aligned bases may
+sit inside the intron. The owner keeps it there, "but we must be judicious about deciding which cases apply it".
 
 Today it is applied more widely (`ISSUES: the-anchor-tolerance-applies-beyond-implicit-splicing`):
 - to every non-chimeric fragment's gap hypotheses, SPLICED_ANNOT included;
@@ -458,8 +463,8 @@ Today it is applied more widely (`ISSUES: the-anchor-tolerance-applies-beyond-im
 Wave 1 lists every use, keeps the implicit-splicing ones, and justifies or removes each other one in its own measured
 arm. The mates that disagree in §7.3 are not a use of K: the overhang term prices those bases, as the owner ruled.
 
-**Renamed** (owner, 2026-10-17): K is a valid tolerance for implicit splicing, and the renames stage gives it a name
-that says what it is, `intron_overhang_tolerance` (`--intron-overhang-tolerance`).
+**Renamed** (owner, 2026-10-17): K is a valid tolerance for implicit splicing, and the renames stage gave it a name
+that says what it is, `intron_overhang_tolerance` (`--intron-overhang-tolerance`, `dc736e39`).
 
 ## 8. Step 4 — unannotated junctions, hit by hit (owner, 2026-10-16)
 
@@ -854,7 +859,7 @@ step 2.
 ## Appendix B — evidence pointers
 
 - **The code-health review:** `SCAN_CODE_HEALTH_REVIEW.md` and `scan_code_health_slices/`; the cleanup is
-  `41899ae4..bb3967cb`.
+  `41899ae4..3941a0dd`.
 
 - **Diagnosis tables:** revision 2 of the first design, Appendix A, with `paired_end_repair_evidence/arms.json`.
 - **The mate-disagreement census:** `census_*.json`.
