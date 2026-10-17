@@ -683,7 +683,7 @@ candidates and their likelihoods. Today it is the count of units whose gDNA cand
 the pruning (`DESIGN.md` §3.1d) is what stops a unit with a vanishing gDNA reading from counting.
 
 ### sj-strand-tag-chosen-from-the-first-reads
-`priority: next — 0.8.1: the per-record or annotated-junction repair; the 0.8.0 minimum landed 2026-10-14 · kind: defect · 2026-09-28`
+`priority: now — 0.8.0 (owner, 2026-10-17): the per-record repair, in wave 1's step 2; the 0.8.0 minimum landed 2026-10-14 · kind: defect · 2026-09-28`
 The scanner picks the junction-strand tag mode from the first 1,000 spliced reads (`detect_sj_strand_tag_native`) and
 returns "none" if none carries XS or ts, so a library whose first reads lack the tag loses its strand. An unknown
 `--sj-strand-tag` spec silently becomes XS_TS (`parse_sj_tag_spec`'s default), and the resolved mode is never logged
@@ -760,7 +760,7 @@ depends on the order of the hits. This is the live remainder of `scoring-penalti
 alpha gives NaN". Instrument: a test over the three hit orders; a pure-Python transcription reproduces it.
 
 ### output-names-are-not-consistent
-`priority: next — the rename stage of the first wave's cleanup; the owner agrees the names must be consistent (2026-10-16), and a naming proposal comes first · kind: defect · 2026-10-16`
+`priority: now — the rename stage of the first wave's cleanup, to the convention the owner ruled on 2026-10-17 (`DESIGN.md` §0, annotated / nascent) · kind: defect · 2026-10-16`
 The outputs use "nascent" for two different sets of fragments:
 - `nrna_total` and the report's "Nascent RNA" row count the synthetic spans (`estimator.nrna_em_count`);
 - `gene_quant`'s `nascent_count` holds the annotated single-exon transcripts and leaves the spans out

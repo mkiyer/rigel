@@ -28,7 +28,9 @@ T(slot) = {gDNA}                                  # always — gDNA is genomical
 so `|T| ∈ {1,2,3}`. The tell that you have violated this: a population set with more than three members,
 or the words "mature", "nascent" or "a third component" in a solver or composition question. Re-ask it as
 "what is this channel's OPPORTUNITY for RNA at this object?" — a geometry, derivable from the index. The
-words survive only as simulator inputs (`nrna_abundance`). Nascent RNA is sparse in real data and is
+words survive only as simulator inputs (`nrna_abundance`) and in what a user reads: an output reports RNA as
+**annotated** (every reference transcript, single-exon included) or **nascent** (Rigel's synthetic spans), never as
+a solver population (owner, 2026-10-17; `docs/DESIGN.md` §0). Nascent RNA is sparse in real data and is
 modelled for robustness, so a number measured at the panel's nascent share is a stress reading, never a
 design driver (`docs/DESIGN.md` §0b, the nascent scope ruling).
 
