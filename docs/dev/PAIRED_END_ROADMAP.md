@@ -33,9 +33,9 @@ and reassess before the next.
 
 Kept current until wave 4 closes (owner, 2026-10-16). ☑ done · ◐ in progress · ☐ not started.
 
-**Wave 1, the scan stage** (plan revision 2, accepted 2026-10-16)
+**Wave 1, the scan stage** (plan revision 2 accepted 2026-10-16; revision 3 out for review 2026-10-17)
 
-- ◐ Step 1, the code-health review
+- ☑ Step 1, the code-health review and its cleanup (2026-10-16/17)
   - ☑ the baseline re-derived on a clean checkout at `41899ae4` after a rebuild: 0 failed / 2,959 passed / 0 skipped
     / 0 xfail, 2,959 collected (2026-10-16; CLAUDE.md updated, uncommitted)
   - ☑ the review, in nine read-only slices: the scan path in depth (six), the rest of `src/` swept (three); the
@@ -43,7 +43,7 @@ Kept current until wave 4 closes (owner, 2026-10-16). ☑ done · ◐ in progres
   - ☑ the report, `SCAN_CODE_HEALTH_REVIEW.md` (2026-10-16)
   - ☑ the owner's selection: all of it (2026-10-16). The scan-path defects joined steps 2–6, the later-wave findings
     became ISSUES entries, and the anchor tolerance is kept for implicit splicing with every other use audited
-  - ◐ the cleanup stages, each a proven no-op, in the report's order:
+  - ☑ the cleanup stages, each a proven no-op or measured, in the report's order (2026-10-16/17):
     - ☑ the scan-cache key (blacklist and BAM): committed `b6aec8a4` and pushed, 2026-10-16 (suite 2,968 / 0 failed;
       bit-identical on all three references; preflight clean). Every existing cache is refused until the re-cache
     - ☑ the words: comments, docstrings and help text, 45 files: committed `a7c5ebe3` and pushed (suite 2,968;
@@ -79,8 +79,10 @@ Kept current until wave 4 closes (owner, 2026-10-16). ☑ done · ◐ in progres
     - ☑ the public repository scrubbed of local paths, cluster details and lab identifiers, owner's request
       (`8401aeba`, suite 3,048); docs/dev keeps markdown only (`20f187ab`); the data a commit of mine pushed was
       taken out of history by rewriting that one commit (owner-authorized)
-    - ◐ constants: the six that need no ruling settled, committed `bb3967cb` and pushed; the rest await the owner
-      (`CONSTANTS_PROPOSAL.md`, six questions)
+    - ☑ constants, to the owner's rulings of 2026-10-17: the six that needed none (`bb3967cb`); the resource and
+      display numbers (`0c754afc`, bit-identical); the row-tiled fits made independent of their tile height
+      (`4bcc72d9`: measured, noise-level per stratum on the ladder, fix / HEAD 0.997-1.003); the tag detector's
+      1,000-read cutoff is repaired in step 2 instead (the junction-strand tag read per record)
 - ◐ the plan's external review, of revision 3 (owner, 2026-10-17); bundle `rigel_wave1_review_r3.zip`
 - ☐ Step 2, mate locations
 - ☐ Step 3, pairing: HI groups; the bounded R1 × R2 search; the anchor tolerance's uses audited
