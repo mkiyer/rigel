@@ -59,6 +59,15 @@ def _sha(a: np.ndarray) -> str:
     return hashlib.sha256(np.ascontiguousarray(a).tobytes()).hexdigest()[:16]
 
 
+def quant_digest(quant) -> str:
+    """The transcript table as one digest: sorted by transcript id and rendered at full precision WITHOUT the header,
+    so it states the numbers and their column order, not the row order, the float formatting or a column's name. A
+    renamed column is invisible; a moved value or a reordered column is not."""
+    key = "transcript_id" if "transcript_id" in quant.columns else quant.columns[0]
+    text = quant.sort_values(key).to_csv(index=False, header=False, float_format="%.17g")
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
 def content_multiset(obj) -> list[str]:
     """Every array as ``dtype|shape|sha256``, sorted and with the field name discarded.
 
@@ -108,14 +117,9 @@ def capture(suite: Path, index_dir: Path, condition: str, bam: Path | None = Non
                            "missing the payload would silently gate less than it claims")
 
     quant = result.estimator.get_counts_df(index)
-    # canonicalised: sorted by the transcript id and rendered at full precision, so the digest is a
-    # statement about the numbers and not about row order or float formatting
-    key = "transcript_id" if "transcript_id" in quant.columns else quant.columns[0]
-    q = quant.sort_values(key).to_csv(index=False, float_format="%.17g")
-
     return {
         "condition": condition,
-        "quant_sha": hashlib.sha256(q.encode()).hexdigest(),
+        "quant_sha": quant_digest(quant),
         "quant_rows": int(len(quant)),
         "payload_multiset": content_multiset(box["payload"]),
         "calibration_multiset": content_multiset(result.calibration),
@@ -167,6 +171,15 @@ def self_test() -> int:
     B = dataclasses.make_dataclass("B", [("renamed_x", np.ndarray), ("renamed_y", np.ndarray)])
     u, v = np.arange(3), np.ones(4)
     checks.append(("a pure rename => silent", content_multiset(A(u, v)) == content_multiset(B(u, v))))
+
+    # the transcript table's digest: a renamed column is invisible, a moved value is not
+    import pandas as pd
+
+    table = pd.DataFrame({"transcript_id": ["t2", "t1"], "count": [1.0, 2.0]})
+    checks.append(("a renamed transcript-table column => silent",
+                   quant_digest(table) == quant_digest(table.rename(columns={"count": "count_annotated"}))))
+    checks.append(("a moved transcript-table value => caught",
+                   quant_digest(table) != quant_digest(table.assign(count=[1.0, 2.0 + 2**-40]))))
 
     # a changed value must be caught, however small; the hash has no tolerance
     moved = dict(ref, payload_multiset=sorted(["int64|(3,)|aaa", "float64|(4,)|bbZ"]))
