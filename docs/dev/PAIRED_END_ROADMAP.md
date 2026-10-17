@@ -67,10 +67,11 @@ Kept current until wave 4 closes (owner, 2026-10-16). ☑ done · ◐ in progres
       rebuilt, and preflight reads every cache valid (16/16 and 30/30, 262 conditions certified); committed
       `30357fb3` and pushed (suite 3,026)
     - ☑ stale benchmark data deleted for space, at the owner's request (107.6 GiB; text receipts kept)
-    - ◐ renames, to the convention the owner ruled on 2026-10-17 (`OUTPUT_NAMES_PROPOSAL.md`, five steps):
+    - ☑ renames, to the convention the owner ruled on 2026-10-17 (`OUTPUT_NAMES_PROPOSAL.md`, five steps):
       ☑ 1. the identity digest ignores column names (`8ebf71ea`), references re-frozen there; ☑ 2. the internal
       names (`fd012918`, bit-identical); ☑ 3. the outputs to the convention, `summary.json` schema 4 (`1fa1c143`:
-      every number verified unchanged on the ladder end to end, the defined relabellings only; suite 3,045);
+      every output file compared on one ladder condition, g50 stranded capture-ON: each renamed field keeps its
+      values bit for bit and only the defined relabellings move; suite 3,045);
       ☑ 4. the index and scan names, index format 10 (`dc736e39`: every index rebuilt and checked file by file
       against its format-9 build, every panel re-cached, bit-identical on all three references; the synthetic
       spans keep `RIGEL_NRNA_` ids, which the panels' read names carry); ☑ 5. the simulator's truth tables through
@@ -81,9 +82,11 @@ Kept current until wave 4 closes (owner, 2026-10-16). ☑ done · ◐ in progres
       taken out of history by rewriting that one commit (owner-authorized)
     - ☑ constants, to the owner's rulings of 2026-10-17: the six that needed none (`bb3967cb`); the resource and
       display numbers (`0c754afc`, bit-identical); the row-tiled fits made independent of their tile height
-      (`4bcc72d9`: measured, noise-level per stratum on the ladder, fix / HEAD 0.997-1.003); the tag detector's
+      (`4bcc72d9`: measured on the ladder against truth, fix / before 0.998-1.001 per stratum, 0.996-1.007 per
+      condition); the tag detector's
       1,000-read cutoff is repaired in step 2 instead (the junction-strand tag read per record)
-- ◐ the plan's external review, of revision 3 (owner, 2026-10-17); bundle `rigel_wave1_review_r3.zip`
+- ◐ the plan's external review, of revision 3 (owner, 2026-10-17); bundle `rigel_wave1_review_r3b.zip`, at `3941a0dd`
+  with every stage's gate record
 - ☐ Step 2, mate locations
 - ☐ Step 3, pairing: HI groups; the bounded R1 × R2 search; the anchor tolerance's uses audited
 - ☐ Step 4, unannotated hits withheld, hit by hit
