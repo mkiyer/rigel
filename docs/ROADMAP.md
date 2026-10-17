@@ -71,7 +71,7 @@ simulated panels cannot show, handled across the aligner, the blacklist's builde
   2026-10-01 after their VCaP A/Bs; `summary.json` reports the junction fit behind κ (landed 2026-10-14) —
   `ISSUES: strand-overdispersion-one-shared-value`; the splice-artifact pruning the fit points at is the strand prong
   of `ISSUES: splicing-artifacts`; the prototype harness and the VCaP truth scorer are in
-  `~/Downloads/rigel_runs/prototypes/2026-09-30_robust_od/`.
+  `$RIGEL_RUNS/prototypes/2026-09-30_robust_od/`.
 - **The message layer**: `transfer` ships on the two-phase backbone (`DESIGN.md` §6b.12–§6b.14); `silent` is the
   floor; the bar — win on unstranded, minimal harm on stranded, never pooled — is `policy_benchmark.py --panel
   ladder`; on the count foundation it loses to silent on the unstranded × capture-OFF contaminated rows

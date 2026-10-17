@@ -248,7 +248,7 @@ CASES: list[tuple[str, dict]] = [
         dict(start=150, end=500, observed_introns=[(210, 260)]),
     ),
     (
-        "OVERLAPPING introns merge (the MO_3021 chr8 case)",
+        "OVERLAPPING introns merge (the cfRNA-C chr8 case)",
         dict(start=150, end=500, observed_introns=[(210, 260), (240, 300)]),
     ),
     ("NESTED introns merge", dict(start=150, end=500, observed_introns=[(200, 400), (250, 300)])),

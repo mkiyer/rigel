@@ -57,9 +57,7 @@ from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 
-from _shared import set_field, strandedness  # noqa: E402
-
-RUNS = Path.home() / "Downloads" / "rigel_runs"
+from _shared import RUNS, set_field, strandedness  # noqa: E402
 
 #: the substrates, each: (index dir, the panel dir holding `scan_cache/` and `oracle_cache/`)
 PANELS = {

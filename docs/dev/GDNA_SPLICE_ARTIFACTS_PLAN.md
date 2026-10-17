@@ -27,12 +27,12 @@ records. Phase 1 re-derives them on today's tree.
 
 ### The judge: the VCaP mix carries per-fragment truth
 
-`mctp_vcap_rna20m_dna05m` blends two real libraries in silico, and the instrument field of the read name names
+`vcap_mix` blends two real libraries in silico, and the instrument field of the read name names
 the source (owner-confirmed):
 
-- `A00839:75:H7MFFDSXY` (NovaSeq, 150-bp reads): VCaP **exome DNA**. 4.71 M fragments, 10,164 with a sequenced
+- The DNA library's instrument prefix (NovaSeq, 150-bp reads): VCaP **exome DNA**. 4.71 M fragments, 10,164 with a sequenced
   junction, every one an alignment artifact.
-- `HWI-D00127:189:C6EL5ANXX` (HiSeq, 125-bp reads): VCaP **transcriptome**, mostly RNA (it may hold a little
+- The RNA library's instrument prefix (HiSeq, 125-bp reads): VCaP **transcriptome**, mostly RNA (it may hold a little
   gDNA). 14.0 M fragments, 9.31 M spliced.
 
 Exome DNA is concentrated on exons, as the gDNA in a capture-enriched library is. One BAM therefore measures
@@ -85,7 +85,7 @@ annotated junction STAR's `sjdbScore` bonus (+2) breaks the tie toward the splic
     Most are genuine reads lost.
   - Separately, 30,119 h = 0 records were kept and certified as spliced.
 
-Method and tables: `~/Downloads/rigel_runs/prototypes/2026-09-26_splice_artifacts/` on the owner's Mac. It holds
+Method and tables: `$RIGEL_RUNS/prototypes/2026-09-26_splice_artifacts/` on the owner's Mac. It holds
 `extract_single_junction.sh` and `overhang_ambiguity.py`, about 60 lines together, and re-derivable from the
 definition above.
 
@@ -177,9 +177,9 @@ treat them as pointers.
 
 ## Data
 
-**On the cluster,** under `/scratch/mkiyer_root/mkiyer0/shared_data/`. `/scratch` is purged by policy.
+**On the cluster,** under `<cluster scratch>/shared_data/`. `/scratch` is purged by policy.
 
-- **The index case**, `mctp_LBX0077_SI_44263_HKWNYDRX7` (96.4 % gDNA, 138-bp mates), under
+- **The index case**, `cfRNA-D` (96.4 % gDNA, 138-bp mates), under
   `hulkrna_gdna_debug/`:
   - `runs/human/…/bam/star.srt.rmdup.collate.bam`;
   - `evidence/`: `spliced_only.bam`, the per-junction parquets, the four bug tables, `validation_targets.json`
@@ -195,11 +195,11 @@ treat them as pointers.
   - The unpackaged output with its `splice/` directory, if it survives.
 - **The 344-library cohort's** `rigel/summary.json` and `star/SJ.out.tab.gz`.
 
-**Only on the owner's Mac** (`~/Downloads/rigel_runs/cfrna/`), possibly the last copies — check the cluster
+**Only on the owner's Mac** (`$RIGEL_RUNS/cfrna/`), possibly the last copies — check the cluster
 first:
 
 - **The VCaP mix:** its BAM (4.5 GB), the 0.7.1 `rigel/annotated.bam` (5.1 GB) and `summary.json`.
-- **LBX0190, LBX0588 and MO_3021** (cfRNA at 13 %, 97 % and 22 % gDNA): each BAM, 0.7.1 `annotated.bam`,
+- **cfRNA-A, cfRNA-B and cfRNA-C** (cfRNA at 13 %, 97 % and 22 % gDNA): each BAM, 0.7.1 `annotated.bam`,
   `summary.json` and `SJ.out.tab.gz`.
 
 ## The plan
@@ -224,7 +224,7 @@ per A/B.
    - New mixes of matched exome DNA and transcriptome RNA from the same patients or cell lines, spanning DNA
      fraction, read length and chemistry. Each read name carries its source.
 5. **Real libraries re-run with `--notemp`.**
-   - LBX0077; MI_1104 (98.6 % gDNA); the clean MI_1089 and MI_1083; LBX0054 (74 % gDNA, 104-bp mates, does not
+   - cfRNA-D; cfRNA-G (98.6 % gDNA); the clean cfRNA-H and cfRNA-I; cfRNA-F (74 % gDNA, 104-bp mates, does not
      leak).
    - A spread from the cohort across gDNA fraction and read length, since the notes find leakage grows with read
      length.

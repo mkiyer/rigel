@@ -69,7 +69,7 @@ borrows it by reading the inferred count.
 what the release ships on. Land the mode readout (`land_map`) with the touched-objects junction cap, under
 the gates of §7, because on the test chromosome's in-scope strata it is within a point or two of the shipped
 reader on transcripts and equal on genes while removing the detector, reading a single probe, surviving
-strength-100 capture and contracting the plasma library the shipped reader leaves uncontracted (LBX0190:
+strength-100 capture and contracting the plasma library the shipped reader leaves uncontracted (cfRNA-A:
 half a percent of objects read enriched, gDNA fraction 8.5 → 10.0 %, measured with the median readout); and
 declare its one measured cost, the capture-OFF transcript points at low gDNA, in the release notes. One
 reservation stands against that recommendation, measured where it counts: at genome scale, and most on the
@@ -83,7 +83,7 @@ does not close the tail, so the tail's objects are not yet named. On the ladder 
 metric, that spread costs +0.3 transcript points on the captured rows with genes better by 0.8, and +1.1 on
 the capture-OFF rows with genes equal (§1.4): no row moves against the shipped reader by more than the test
 chromosome's cost, so the recommendation stands, with the tail's dissection as the first item after landing. The alternative is
-(b): ship 0.8.0 with the current reader and its two known failures declared (LBX0190 and MO_3021 quantified
+(b): ship 0.8.0 with the current reader and its two known failures declared (cfRNA-A and cfRNA-C quantified
 uncontracted; a single probe read as uncaptured), keeping the honest reader as the line after 0.8.0. The
 owner chooses between a declared cost on synthetic low-gDNA capture-OFF rows and a declared blindness on
 real plasma libraries; the numbers for both are in §1. The third failure on the first
@@ -186,7 +186,7 @@ points on the g05–g25 capture-OFF rows with genes equal.
 | genome-scale suite: RNA-long gap panel, stranded × ON g50 | 0.98 / +0.00 / +1.02 (oracle 0.95 / −0.15 / +0.69) | median 0.82 / −0.19 / +0.61; mode with the touched cap 0.87 / −0.17 / +0.63 | the same pattern: the honest readouts trail on the probed class and are nearer the oracle on the unprobed one; the capture-OFF twin reads clean for both (every shipped weight 1; median sd 0.031) |
 | **the ladder** (genome scale, equal lengths), stranded × ON g05 / g50 / g98 | probed within 0.96 / 0.98 / 0.97; partial +0.08 / +0.08 / +0.07; unprobed +1.24 / +0.24 / —; within-gene sd 0.040 / 0.035 / 0.022 (the oracle: 0.97 / 0.98 / 0.97) | mode with the touched cap: 0.70 / 0.75 / 0.83; partial +0.04 / +0.01 / +0.01; unprobed +0.98 / +0.08 / —; sd 0.065 / 0.042 / 0.032 (the median: 0.59 / 0.73 / 0.70) | at genome scale the honest readouts' probed class is spread 1.5–2× wider than the shipped census's on every captured row, at equal fragment lengths too; the partial class is nearer zero. The capture-OFF rows read clean for every arm (mode sd 0.015–0.022, zero-DNA q90 ≤ 0.02). End to end these rows are the release metric: §1.4 |
 | genome-scale suite: RNA-long gap panel, unstranded × ON g50 (deferred) | probed within 0.10, within-gene sd 0.41 | 0.80 / +0.07 / +7.02, sd 0.034 | both fail the deferred stratum at genome scale in different places |
-| real plasma library LBX0190 (147,000 fragments, 2,087,476 slots, no truth) | reference `None` from 0 kernels: every weight 1, gDNA fraction 0.0850, pools mRNA 126,512 / nascent 7,699 / gDNA 10,109 / intergenic 2,357 | `land_med`: gDNA fraction 0.0997, pools 123,618 / 8,433 / 12,270 / 2,357; weights q50 / q90 / q99 = 0.00 / 0.01 / 0.01 (relative log), 0.49 % of objects above 2 nats, max +13.5 (`slab_bg`: 0.0979; `land_geo`: 0.0998) | the honest reader contracts the library the shipped reader cannot: half a percent of objects read enriched 7× or more with the bulk at 1, the EM's gDNA pool rises 21 %, mRNA falls 2.3 %, nascent rises 9.5 %. Whether that is right is unknowable here (no truth); it is the direction a captured plasma library should move. The NumPy prototype needed 4.8 h at four workers and 37 GB peak for this one library (§5); the mode readout was not yet built when this run started and was not repeated |
+| real plasma library cfRNA-A (147,000 fragments, 2,087,476 slots, no truth) | reference `None` from 0 kernels: every weight 1, gDNA fraction 0.0850, pools mRNA 126,512 / nascent 7,699 / gDNA 10,109 / intergenic 2,357 | `land_med`: gDNA fraction 0.0997, pools 123,618 / 8,433 / 12,270 / 2,357; weights q50 / q90 / q99 = 0.00 / 0.01 / 0.01 (relative log), 0.49 % of objects above 2 nats, max +13.5 (`slab_bg`: 0.0979; `land_geo`: 0.0998) | the honest reader contracts the library the shipped reader cannot: half a percent of objects read enriched 7× or more with the bulk at 1, the EM's gDNA pool rises 21 %, mRNA falls 2.3 %, nascent rises 9.5 %. Whether that is right is unknowable here (no truth); it is the direction a captured plasma library should move. The NumPy prototype needed 4.8 h at four workers and 37 GB peak for this one library (§5); the mode readout was not yet built when this run started and was not repeated |
 
 ### 1.4 The one mechanism behind the in-scope cost, located
 
@@ -323,7 +323,7 @@ that row stays a declared limit of a local reader.
 
 Agreed, and measured. The background-relative readout needs `(μ, α)` from the intergenic pool; at capture
 strength 100 that pool holds 25–75 reads in the whole test chromosome, and on the plasma libraries it is the
-same picture (LBX0190: 2,357 intergenic fragments of 147,000). The slab arm is the worst arm on every captured
+same picture (cfRNA-A: 2,357 intergenic fragments of 147,000). The slab arm is the worst arm on every captured
 stratum (benign stranded × ON 33.5 / 14.3 against 22.0 / 10.1 end to end; within-gene sd 0.010–0.033 against
 0.003–0.005), and the per-object scoring shows why: its weights are unbiased at the object (captured exons
 −0.01, data-poor objects 0.00) but dispersed by each object's own count (captured boundaries' 10th percentile
@@ -419,7 +419,7 @@ did not run while the benchmarks held the machine.
 
 ## 5. What this benchmark cannot show
 
-- Real libraries carry no truth beyond the VCaP mixture's gDNA fraction; the LBX0190 row reports pools,
+- Real libraries carry no truth beyond the VCaP mixture's gDNA fraction; the cfRNA-A row reports pools,
   runtime and the weight census only, for the median readout; the other three libraries were not run (one
   whole-genome process at a time, and this one took the session's remaining hours).
 - The sparse-probe layout and the single-probe panel are the only transcript-designed panels; their
@@ -475,7 +475,7 @@ The owner's decisions, each with its number beside it:
 1. **Which reader ships 0.8.0.** (a) the mode readout with the touched cap: on the test chromosome it costs
    +0.7 / +0.1 on the captured g05–g25 rows, +0.4…+3.1 / 0.0 on the capture-OFF rows, and +0.4 / +0.3 under
    strength-100 capture; it reads the single probe (genes 2.1 → 1.2), the junction-probed layout
-   (33.0 → 25.0) and the plasma library the shipped reader cannot (LBX0190, gDNA fraction 8.5 → 10.0 %); at
+   (33.0 → 25.0) and the plasma library the shipped reader cannot (cfRNA-A, gDNA fraction 8.5 → 10.0 %); at
    genome scale it trails the shipped census on the probed class at calibration level (0.70–0.83 against
    0.96–0.98 within 0.1 on the ladder's captured rows), which on the ladder end to end costs +0.3 transcript
    points on the captured rows with genes better by 0.8 and +1.1 on the capture-OFF rows with genes equal. Or
@@ -990,7 +990,7 @@ deferred stratum, per-condition rows and the mode readout's per-object tables ar
 
 ### A.6 The real library (`real/`)
 
-**lbx0190** (real library, in process; the pools and the gDNA fraction, no truth except the VCaP mixture)
+**cfrna-a** (real library, in process; the pools and the gDNA fraction, no truth except the VCaP mixture)
 
 | arm | gDNA fraction | mRNA / nascent / gDNA (EM) / intergenic | reader s | EM s | peak GB | weights: q50 / q90 / q99 / max (log, relative) |
 |---|---|---|---|---|---|---|
@@ -1018,6 +1018,6 @@ session scratch directory it was copied from is not in the repository:
 | `tables_*.md`, `appendix_a.md` | every rendered table |
 
 Environment: the `rigel` conda env, `OMP_NUM_THREADS=1`, `READER_WORKERS=4` on a shared machine; every panel
-from `~/Downloads/rigel_runs/test_reference/` and `~/Downloads/rigel_runs/suite/`, every real BAM from
-`~/Downloads/rigel_runs/cfrna/`. Repository state at the end: only this file differs from the owner's working
+from `$RIGEL_RUNS/test_reference/` and `$RIGEL_RUNS/suite/`, every real BAM from
+`$RIGEL_RUNS/cfrna/`. Repository state at the end: only this file differs from the owner's working
 tree as it was at the start (verified with `git status`).

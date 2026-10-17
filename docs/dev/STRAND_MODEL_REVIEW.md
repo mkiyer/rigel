@@ -125,10 +125,10 @@ The shipped values, and the joint fit we prototyped (§6, option 3):
 |---|---|---|---|---|
 | VCaP, RNA-only half | full | 0.047 / 0.047 | **0.2 (clip)** | gDNA seeds are antisense RNA: raw moment 0.42–0.86 |
 | VCaP, RNA-only half | 1 % (3 draws) | 0.020–0.065 / **0.121–0.200** | 0.2 | |
-| MO_3021 | full | 0.008 (gDNA) | 0.121 | gDNA side alone 0.133 |
-| MO_3021 | 1 % (3 draws) | gDNA 0.12–0.20 | 0.2 | |
-| LBX0588 (~90 % gDNA) | full | 0.055 / 0.017 | 0.017 | clean gDNA seeds |
-| LBX0588 | 10 % (3 draws) | gDNA 0–0.019 | 0.011–0.019 | gDNA total varies 3.4 % across draws (shipped) against a 0.7–1.5 % floor |
+| cfRNA-C | full | 0.008 (gDNA) | 0.121 | gDNA side alone 0.133 |
+| cfRNA-C | 1 % (3 draws) | gDNA 0.12–0.20 | 0.2 | |
+| cfRNA-B (~90 % gDNA) | full | 0.055 / 0.017 | 0.017 | clean gDNA seeds |
+| cfRNA-B | 10 % (3 draws) | gDNA 0–0.019 | 0.011–0.019 | gDNA total varies 3.4 % across draws (shipped) against a 0.7–1.5 % floor |
 
 ---
 
@@ -140,7 +140,7 @@ All the tables below come from per-object censuses extracted from real scans.
 
 The wrong-strand fraction of junction reads, by junction depth:
 
-| reads at the junction | LBX0588 (~90 % gDNA) | MO_3021 | LBX0190 | VCaP RNA, 10 % |
+| reads at the junction | cfRNA-B (~90 % gDNA) | cfRNA-C | cfRNA-A | VCaP RNA, 10 % |
 |---|---|---|---|---|
 | 1 | 12.0 % | 0.21 % | 0.28 % | 0.06 % |
 | 2–3 | 13.8 % | 0.17 % | 0.34 % | 0.01 % |
@@ -152,18 +152,18 @@ The wrong-strand fraction of junction reads, by junction depth:
 - **On the gDNA-heavy library, shallow junctions are largely artifacts.** gDNA misaligned as spliced has a
   strand split near ½. As depth rises, the rate falls to the true κ.
 - **RNA-rich libraries are flat with depth.**
-- So the pooled κ (0.064 on LBX0588) is about 20× the deep-junction value.
+- So the pooled κ (0.064 on cfRNA-B) is about 20× the deep-junction value.
 
 An older case shows the same thing:
-- LBX0077 (96 % gDNA, 2026-08) had a strand specificity of 0.786, against 0.991–0.999 for its 20 same-flowcell
+- cfRNA-D (96 % gDNA, 2026-08) had a strand specificity of 0.786, against 0.991–0.999 for its 20 same-flowcell
   siblings.
 - Two independent estimates put **42–43 % of its spliced "RNA"** in the artifact category.
 - κ and the RNA fragment-length law are both trained on that population.
 
 ### 3.2 Seeds (the gDNA side): antisense RNA inflates the gDNA od
 
-- **LBX0588:** away fractions centre on 0.49 and are symmetric at every depth. These seeds are gDNA.
-- **MO_3021, VCaP RNA and LBX0190:** away fractions pile up at 0 (host-strand RNA) and at 1 (antisense RNA). The
+- **cfRNA-B:** away fractions centre on 0.49 and are symmetric at every depth. These seeds are gDNA.
+- **cfRNA-C, VCaP RNA and cfRNA-A:** away fractions pile up at 0 (host-strand RNA) and at 1 (antisense RNA). The
   away-half estimator keeps exactly the pile at 1.
 
 ### 3.3 A mixture prototype: every object belongs to one of the three populations
@@ -181,26 +181,26 @@ the best od over od = 0, with κ and the class weights re-maximised at each od:
 
 | library | shipped κ | κ, artifacts out | artifact share | reversed share | best od | evidence |
 |---|---|---|---|---|---|---|
-| LBX0588, full depth | 0.064 | **0.0029** | 22 % | 0.2 % | 0.03 | 16.3 |
-| LBX0588, 10 % (3 draws) | 0.060–0.070 | 0.0024–0.0064 | 1–14 % | 3–8 % | 0 / 0.05 / 0.2 | 0.0 / 0.4 / 0.3 |
-| MO_3021, full / 10 % / 1 % | 0.0023 | 0.0023 / 0.0021 / 0.0012 | 0 | 0 | 0.02 / 0.02 / 0 | 215 / 5.2 / 0.0 |
+| cfRNA-B, full depth | 0.064 | **0.0029** | 22 % | 0.2 % | 0.03 | 16.3 |
+| cfRNA-B, 10 % (3 draws) | 0.060–0.070 | 0.0024–0.0064 | 1–14 % | 3–8 % | 0 / 0.05 / 0.2 | 0.0 / 0.4 / 0.3 |
+| cfRNA-C, full / 10 % / 1 % | 0.0023 | 0.0023 / 0.0021 / 0.0012 | 0 | 0 | 0.02 / 0.02 / 0 | 215 / 5.2 / 0.0 |
 | VCaP RNA, 10 % / 1 % | 0.0001 | ≈ 0 | 0 | ≈ 0 | 0.03 / 0.999 | 1.1 / 0.0 |
-| LBX0190 | 0.0025 | 0.0024 | 0.1 % | ≈ 0 | 0.003 | 27.3 |
+| cfRNA-A | 0.0025 | 0.0024 | 0.1 % | ≈ 0 | 0.003 | 27.3 |
 | every simulated row (true od 0) | ≈ 0.010 | exact to 4 digits | 0 | 0 | 0 | 0.0 |
 
-**κ hardly depends on the od.** On LBX0588 it stays at 0.0024–0.0030 for any od from 0 to 0.03.
+**κ hardly depends on the od.** On cfRNA-B it stays at 0.0024–0.0030 for any od from 0 to 0.03.
 
 **Junctions and seeds together**, with one od for each population:
-- **LBX0588:** gDNA 0.015, RNA 0.024. One shared od fits both (likelihood-ratio statistic 0.6).
-- **MO_3021:** gDNA 0.068, RNA 0.014. The data reject one shared value (statistic 86), but the gDNA seeds there
+- **cfRNA-B:** gDNA 0.015, RNA 0.024. One shared od fits both (likelihood-ratio statistic 0.6).
+- **cfRNA-C:** gDNA 0.068, RNA 0.014. The data reject one shared value (statistic 86), but the gDNA seeds there
   are partly antisense RNA (§4).
 
 ### 3.4 Where the prototype fails
 
-1. **Walking from od = 0 finds the wrong answer.** Iterating "label, then estimate" from binomial on LBX0588's
+1. **Walking from od = 0 finds the wrong answer.** Iterating "label, then estimate" from binomial on cfRNA-B's
    junctions settled on κ 0.11 and od 0.52 with no artifacts. That is 27 log-likelihood units worse than the
    global fit (κ 0.0029, 22 % artifacts). The artifact class has to be found by a global fit.
-2. **Relabelling explains away every bit of spread.** On LBX0588's seeds, the same walk labelled 26 % of seeds
+2. **Relabelling explains away every bit of spread.** On cfRNA-B's seeds, the same walk labelled 26 % of seeds
    antisense RNA and 28 % host RNA, and returned od = 0 exactly, on a library that is about 90 % gDNA.
 3. **Partly mixed objects read as od.**
    - The ladder's g05 capture-ON row has a true od of 0, yet its seeds read 0.021, and 0.134 when the RNA inside
@@ -209,7 +209,7 @@ the best od over od = 0, with κ and the class weights re-maximised at each od:
 4. **The od is undetermined at κ ≈ 0.** On VCaP at 1 %, the junction likelihood is flat to within 0.005 units
    anywhere from od = 0 to od = 0.999. The maximum is arbitrary (0.999), driven by 2 reversed junctions out of
    44,241.
-5. **Low depth.** On LBX0588 at 10 % (mostly 2–3 fragments per seed), two fits of the same seed model from
+5. **Low depth.** On cfRNA-B at 10 % (mostly 2–3 fragments per seed), two fits of the same seed model from
    different starting weights land far apart:
    - one labels 62–81 % of seeds gDNA, with od 0.003–0.015;
    - the other labels 4–6 % gDNA, with od ≤ 0.003;
@@ -285,15 +285,15 @@ one strand, the solve reads antisense RNA as gDNA. It would certify exactly the 
   - Junctions are certified RNA once artifacts are out, so they are the cleanest pure population.
   - It never touches the antisense-contaminated seeds.
   - It is exactly 0 on every simulated row.
-  - The real-data instabilities fall away: the three LBX0588 10 % draws and VCaP 1 % all carry under 0.4 units
+  - The real-data instabilities fall away: the three cfRNA-B 10 % draws and VCaP 1 % all carry under 0.4 units
     of evidence, so they stay at 0.
-  - Where evidence exists, the value holds across depth (MO_3021 reads 0.02 at full depth and at 10 %).
+  - Where evidence exists, the value holds across depth (cfRNA-C reads 0.02 at full depth and at 10 %).
   - On unstranded libraries no artifact detection is needed: artifacts and genuine junctions both sit at ½, so
     neither κ nor the od is biased.
 - **Against:**
   - If gDNA's true od exceeds RNA's, the tool uses RNA's value. On odg05 that costs about 20 % of stranded
     capture-OFF calibration error.
-  - The one real library with clean gDNA seeds (LBX0588) shows no such gap: seeds 0.008–0.015, junctions 0.03.
+  - The one real library with clean gDNA seeds (cfRNA-B) shows no such gap: seeds 0.008–0.015, junctions 0.03.
   - It needs one constant, the evidence bar (question 3).
 
 **Option 2: one joint three-class mixture over junctions and seeds, with a shared od.**
@@ -305,9 +305,9 @@ one strand, the solve reads antisense RNA as gDNA. It would certify exactly the 
 sums gDNA seeds and junctions, with each object weighted by its inverse variance.
 - **For it:**
   - On odg05: calibration −10 % / −19 % and transcripts −3 % / −7 % (stranded OFF / ON).
-  - Steadiest on LBX0588 at 10 %.
+  - Steadiest on cfRNA-B at 10 %.
 - **Against:**
-  - On antisense-contaminated real libraries it sits at the 0.2 clip (VCaP RNA, MO_3021 subsamples).
+  - On antisense-contaminated real libraries it sits at the 0.2 clip (VCaP RNA, cfRNA-C subsamples).
   - At low gDNA it has two roots, so it needs a root rule.
   - Artifacts inflate its junction side.
 
@@ -329,7 +329,7 @@ once more.
 
 **Option 6: binomial everywhere (od ≡ 0).**
 - **For it:** the simplest possible; it cannot be sabotaged; it is what Option 1 returns whenever evidence is weak.
-- **Against:** where a real od exists, the channel is overconfident. That costs +20 % on odg05, and on MO_3021,
+- **Against:** where a real od exists, the channel is overconfident. That costs +20 % on odg05, and on cfRNA-C,
   where junctions show an od of 0.02 with overwhelming evidence (215 units).
 
 **Option 7: change what od means.**
@@ -385,7 +385,7 @@ simulator writes no splice artifacts, so the simulated panels cannot see this de
 - **It fails both ways.**
   - On the VCaP RNA-only half, the blacklist rejected 598,010 records where a pure-gDNA library's rate predicts
     about 20,000.
-  - On gDNA-heavy libraries, artifacts escape (LBX0077: 42–43 %).
+  - On gDNA-heavy libraries, artifacts escape (cfRNA-D: 42–43 %).
 - **The largest artifact class is decided by the reference sequence.** At annotated junctions with a 1–10 bp short
   side, 96 % of DNA-library artifacts have zero reference mismatches between their spliced and unspliced
   placements.
@@ -406,7 +406,7 @@ On a stranded library:
 The same per-junction fit that gives κ and the od gives each junction a posterior probability for each class.
 **Limits:**
 - **Shallow artifacts mostly look genuine.** An n-read artifact junction has every read on the right strand with
-  probability 2⁻ⁿ, so it shows no strand signal at all. With LBX0588's fit, P(artifact) is:
+  probability 2⁻ⁿ, so it shows no strand signal at all. With cfRNA-B's fit, P(artifact) is:
   - 0.97 for a 1-read junction whose read is on the wrong strand;
   - 0.12 for a 1-read junction whose read is on the right strand;
   - 0.07 for a 2-read junction with both reads on the right strand.
@@ -531,7 +531,7 @@ Please return, in this order:
 
 ## Appendix: data and code
 
-**Prototypes (read-only, numpy/scipy):** `~/Downloads/rigel_runs/prototypes/2026-09-30_robust_od/`
+**Prototypes (read-only, numpy/scipy):** `$RIGEL_RUNS/prototypes/2026-09-30_robust_od/`
 
 | file | contents |
 |---|---|
@@ -541,14 +541,14 @@ Please return, in this order:
 | `junction_evidence.py` | the global junction fit and the profile-likelihood evidence for od > 0 |
 | `real3.txt` / `synth3.txt` | the mixture results |
 
-**Censuses:** `~/Downloads/rigel_runs/prototypes/2026-09-28_od_design/scratch/`
+**Censuses:** `$RIGEL_RUNS/prototypes/2026-09-28_od_design/scratch/`
 - `census_<library>.npz` (real): per-junction `sj_sense`/`sj_anti`; per-seed `r_*` (introns) and `b_*`
   (boundaries) sense/total; `kappa`.
 - `seeds/*.npz` (simulated, with known truth): `g_sense`/`g_total` (seeds), `r_sense`/`r_total` (junctions).
 
 **The 2026-09-27 measurements of the shipped value, the joint fit, binomial and the ceiling:**
-`~/Downloads/rigel_runs/prototypes/2026-09-27_strand_od/REPORT.md`. Earlier derivations:
-`~/Downloads/rigel_runs/prototypes/2026-09-28_od_design/` (`00_synthesis.md` first).
+`$RIGEL_RUNS/prototypes/2026-09-27_strand_od/REPORT.md`. Earlier derivations:
+`$RIGEL_RUNS/prototypes/2026-09-28_od_design/` (`00_synthesis.md` first).
 
 **Code:**
 

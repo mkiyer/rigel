@@ -115,13 +115,13 @@
 #
 # Run:  python scripts/sim/panel.py status --config scripts/sim/configs/gdna_ladder.yaml
 
-genome: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genome.fa
-gtf: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genes.gtf
+genome: $RIGEL_RUNS/suite/reference/genome.fa
+gtf: $RIGEL_RUNS/suite/reference/genes.gtf
 # ⭐ THE TRANSCRIPTOME THE SIMULATION DRAWS FROM — the same index `rigel quant` will read, so the
 # synthetic nascent-RNA entities are identical on both sides (owner, 2026-08-19). `panel.py build`
 # creates it; without this key one is built into `<outdir>/rigel_index`.
-index: /Users/mkiyer/Downloads/rigel_runs/suite/rigel_index
-outdir: /Users/mkiyer/Downloads/rigel_runs/suite/ladder
+index: $RIGEL_RUNS/suite/rigel_index
+outdir: $RIGEL_RUNS/suite/ladder
 
 # ── Read simulation ─────────────────────────────────────────────────────────────────────────────
 # ⚠ `n_total_fragments` is what governs; `n_rna_fragments` is ignored in this mode and is left at
@@ -131,7 +131,7 @@ simulation:
   n_rna_fragments: 10000000
   sim_seed: 42
   # ⭐ REALISTIC AND IDENTICAL TO THE gDNA BLOCK BELOW. Real fragments run ~50 bp to ~500 bp with
-  # little above that (owner). The mean and sd are MO_3021's measured RNA pool. ⛔ All four must
+  # little above that (owner). The mean and sd are cfRNA-C's measured RNA pool. ⛔ All four must
   # match, not just the mean: a different support is itself a gap.
   frag_mean: 206
   frag_std: 98
@@ -213,7 +213,7 @@ capture:
   min_overlap: 1
   configs:
     - {label: "off", enabled: false}
-    - {label: "on", probes: /Users/mkiyer/Downloads/rigel_runs/suite/reference/capture_panel.tsv}
+    - {label: "on", probes: $RIGEL_RUNS/suite/reference/capture_panel.tsv}
 
 oracle_bam: true
 verbose: true

@@ -390,7 +390,7 @@ def test_a_reach_that_excludes_its_own_piece_is_refused():
 
 
 def test_a_length_model_with_mass_at_zero_length_shares_without_a_nan():
-    """A smoothed real-library model put mass at ``w = 0`` (LBX0588): a zero-length fragment crosses no
+    """A smoothed real-library model put mass at ``w = 0`` (cfRNA-B): a zero-length fragment crosses no
     cut, so the shares are finite and equal those of the same pmf with that mass removed, rescaled by the
     normalisation."""
     pmf = _normal_pmf(200.0, 60.0, n=501)

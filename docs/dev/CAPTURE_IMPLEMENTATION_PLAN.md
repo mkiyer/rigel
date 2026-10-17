@@ -11,7 +11,7 @@ they land; do not make this file authoritative by citation.
 
 ## 0. Execution readiness (2026-10-05)
 
-Verified on the day, in the campaign directory `~/Downloads/rigel_runs/prototypes/2026-10-05_capture_learning/`
+Verified on the day, in the campaign directory `$RIGEL_RUNS/prototypes/2026-10-05_capture_learning/`
 (`README.md` there maps every file; `manifest.json` records commit `bdfd8709`, the dirty-diff and source-tree hashes,
 the environment and every panel's manifest hash and cache counts; `protocol.json` holds the section 2 contract with
 every unchosen value `null`):
@@ -20,7 +20,7 @@ every unchosen value `null`):
 |---|---|
 | toolchain, references, panels | `preflight.py` passes: ladder 16/16 and test chromosome 30/30 scan and oracle caches, certified; the two suite gap arms (4 + 4) and the test chromosome's `fl_rna_long`, `fl_gdna_long`, `fl_equal200` and `probes_junction` panels (30 each) cached |
 | the seams this plan names | every file, function and test file in sections 6, 8 and 10 exists at `bdfd8709`, and every instrument flag in section 10; the claims checked against the tree: index format 7 at the tag against 8 (`INDEX_FORMAT_VERSION`), `deposit_digest` hashes top-level arrays only, `SJStrandTable` counts once per fragment at its leftmost annotated junction, the tag's CLI has `--threads` (mapped to `scan.total_threads`), `--assignment-mode fractional` and `--seed` |
-| `release_tag` | built from the worktree `~/proj/rigel-v071` (`pip wheel --no-build-isolation --no-deps`, unpacked into `release_tag/site`); `release_tag/rigel071.py` launches its CLI from that site and refuses the editable tree; its own index of the test chromosome built (format 7; `--collapse-duplicate-transcripts --no-mappability`, matching the tree's index manifests); one pinned quant: 5.9 s, 0.69 GB peak |
+| `release_tag` | built from the worktree `<worktree>` (`pip wheel --no-build-isolation --no-deps`, unpacked into `release_tag/site`); `release_tag/rigel071.py` launches its CLI from that site and refuses the editable tree; its own index of the test chromosome built (format 7; `--collapse-duplicate-transcripts --no-mappability`, matching the tree's index manifests); one pinned quant: 5.9 s, 0.69 GB peak |
 | the adapter | `phase0/score_release.py` scores any `rigel quant` output directory with `quant_accuracy.py`'s own `score_transcripts` / `score_genes` and rebuilds the library row from `summary.json`'s `quantification` block (`mrna_total`, `nrna_total`, `gdna_total`, `intergenic_total`, present at the tag and at HEAD); on today's CLI output it reproduces `quant_accuracy --arm base` on the same condition to the printed digit (transcript abs error 50,972.042, gene 6,563.284, gDNA fraction 0.503) |
 | the first tagged number | test chromosome `gdna_g50_ss_0.99_nrna_file_capture_off`: 0.7.1 transcript abs error 57,845 / gene 8,070 / gDNA fraction 0.506 against today's 50,972 / 6,563 / 0.503 |
 | Phase Audit task 6 | reproduced: 834/1709/3166 to 799/1744/3166; 206 fractions above 1 (max 5.3); 699 finite of 834 (`phase0/census_audit.py`) |
@@ -66,7 +66,7 @@ Implement these changes in the outside-tree campaign scripts before running them
 Use this explicit simulated-run inventory, expanding conditions from each panel's manifest and
 checking that each has the required BAM/truth files:
 
-| `panel_id` | Input directory under `~/Downloads/rigel_runs/` | `index_label` | Expected conditions |
+| `panel_id` | Input directory under `$RIGEL_RUNS/` | `index_label` | Expected conditions |
 |---|---|---|---|
 | `test_base` | `test_reference/scenarios` | `test` | 30 |
 | `flgap_rna_short` | `suite/flgap_rna_short` | `suite` | 4 |
@@ -185,17 +185,18 @@ interface `PANEL_DIR REF_FASTA REF_GTF INDEX_LABEL PANEL_ID CONDITION...` over i
 
   | library | 0.7.1: gDNA fraction, its KDE reading | current: gDNA fraction, its located mode |
   |---|---|---|
-  | LBX0190 (plasma, 147k fragments) | 0.130; enriched, fold 14.7, on-target 0.62 | 0.083; no located mode |
-  | LBX0588 (plasma, 1.29 M, gDNA-rich) | 0.966; enriched, fold 2,246, on-target 0.76 | 0.915; 0.297/bp from 12,154 members |
-  | MO_3021 (plasma, 835k) | 0.225; enriched, fold 1,079, on-target 0.03 | 0.155; no located mode |
+  | cfRNA-A (plasma, 147k fragments) | 0.130; enriched, fold 14.7, on-target 0.62 | 0.083; no located mode |
+  | cfRNA-B (plasma, 1.29 M, gDNA-rich) | 0.966; enriched, fold 2,246, on-target 0.76 | 0.915; 0.297/bp from 12,154 members |
+  | cfRNA-C (plasma, 835k) | 0.225; enriched, fold 1,079, on-target 0.03 | 0.155; no located mode |
   | VCaP mix (18.5 M; exome DNA + transcriptome, per-fragment truth by read name) | 0.263; enriched, fold 254, on-target 0.72 | 0.236; 0.086/bp from 24,512 members |
 
   The tag declares capture on every real library, as the panels warrant; the current reader locates a reference
   on the two deep libraries only and quantifies the two sparse plasma libraries as uncaptured, reading less gDNA
   than the tag on all four. That is the binary reader's cost the owner's ruling names, and the regime the kernel is
   for; the VCaP origin labels give the one real truth for the gDNA fraction: by read-name prefix over the
-  BAM's primary first-in-pair alignments (`results/vcap_origin_counts_r1.txt`; A00839 exome DNA 4,708,907,
-  HWI-D00127 transcriptome 13,994,657) the gDNA fraction is 0.2518, which the tag reads +0.011 high (0.263) and
+  BAM's primary first-in-pair alignments (`results/vcap_origin_counts_r1.txt`; exome DNA 4,708,907 under the DNA
+  library's instrument prefix, transcriptome 13,994,657 under the RNA library's) the gDNA fraction is 0.2518, which
+  the tag reads +0.011 high (0.263) and
   the current tree −0.016 low (0.236). That domain is the aligner's, not the tools' fragment filter (18.70 M
   against 18.5 M fragments), so it is an approximate library-level truth; the matched-domain origin-pool
   comparison the real-input readiness section asks for is still to do.
@@ -203,9 +204,9 @@ interface `PANEL_DIR REF_FASTA REF_GTF INDEX_LABEL PANEL_ID CONDITION...` over i
 Current-tree simulation commands, after recording the frozen build (these flags already exist):
 
 ```bash
-CAPTURE_CAMPAIGN=~/Downloads/rigel_runs/prototypes/2026-10-05_capture_learning
-CAPTURE_TEST=~/Downloads/rigel_runs/test_reference
-CAPTURE_SUITE=~/Downloads/rigel_runs/suite
+CAPTURE_CAMPAIGN=$RIGEL_RUNS/prototypes/2026-10-05_capture_learning
+CAPTURE_TEST=$RIGEL_RUNS/test_reference
+CAPTURE_SUITE=$RIGEL_RUNS/suite
 export OMP_NUM_THREADS=1
 python scripts/design/quant_accuracy.py --arm base --em-seed 0 \
   --set scan.total_threads=1 --set em.assignment_mode=fractional --jobs 1 \
@@ -224,17 +225,17 @@ condition basenames are not unique across files. Do not append all panels into a
 
 ### Real-input readiness
 
-Four local BAMs were found under `~/Downloads/rigel_runs/cfrna/<sample>/bam/star.srt.rmdup.collate.bam`:
+Four local BAMs were found under `$RIGEL_RUNS/cfrna/<sample>/bam/star.srt.rmdup.collate.bam`:
 
 | `sample` | Role |
 |---|---|
-| `mctp_LBX0190_SI_43883_HHHKGDRX7` | Plasma |
-| `mctp_LBX0588_SI_43875_HHHKGDRX7` | Plasma |
-| `mctp_MO_3021_SI_42465_HGL7VDRX7` | Plasma |
-| `mctp_vcap_rna20m_dna05m` | VCaP mixture |
+| `cfRNA-A` | Plasma |
+| `cfRNA-B` | Plasma |
+| `cfRNA-C` | Plasma |
+| `vcap_mix` | VCaP mixture |
 
 Their quick checks passed, and all 286 reference names/lengths match the FASTA index. The existing
-format-8 real index is `~/Downloads/rigel_runs/refs/rigel_index`. Its source files are
+format-8 real index is `$RIGEL_RUNS/refs/rigel_index`. Its source files are
 `refs/genome_controls.fasta.bgz` and `refs/genes_controls.sorted.gtf` under that run root; their
 recomputed hashes match its manifest. Build the tagged real index from those same sources and options.
 Add these inputs, hashes, explicit sample IDs and output locations to the campaign manifest; they are
@@ -1329,14 +1330,14 @@ These are provenance and diagnostic inputs, not runtime dependencies:
 - `docs/dev/CAPTURE_CLEAN_SLATE.md` — the 2026-10-05 revised design, retained measurements and four
   questions answered by the recommendations in section 1. Its compressed claims are qualified here.
 - `docs/dev/FRAGMENT_LENGTH_POSTMORTEM.md` — defect, refused mechanisms and campaign history.
-- `~/Downloads/rigel_runs/prototypes/2026-10-03_fl_arms/VERDICT.md` — per-stratum Q3/Q4 results.
-- `~/Downloads/rigel_runs/prototypes/2026-10-04_clean_slate/` — census/mass scripts and complete outputs.
-- `~/Downloads/rigel_runs/prototypes/2026-10-02_stage3/` — exact operator fixtures, law controls,
+- `$RIGEL_RUNS/prototypes/2026-10-03_fl_arms/VERDICT.md` — per-stratum Q3/Q4 results.
+- `$RIGEL_RUNS/prototypes/2026-10-04_clean_slate/` — census/mass scripts and complete outputs.
+- `$RIGEL_RUNS/prototypes/2026-10-02_stage3/` — exact operator fixtures, law controls,
   matched-denominator diagnostics and support audits. Its README includes historical generator notes;
   use each run's recorded generator identity rather than treating old notes as current panel status.
-- `~/Downloads/rigel_runs/prototypes/2026-10-04_capture_compromise/bed_geometry.py` — incidence integral
+- `$RIGEL_RUNS/prototypes/2026-10-04_capture_compromise/bed_geometry.py` — incidence integral
   prototype; not a proof of conserved-share equality.
-- `/private/tmp/rigel_capture_review_audit.py` — review census audit, if still present. Copy it into the
+- `<scratch>/rigel_capture_review_audit.py` — review census audit, if still present. Copy it into the
   campaign artifacts before use; if missing, reconstruct the union/finite-ratio audit from the named
   census inputs and verify the historical values in Phase Audit.
 

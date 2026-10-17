@@ -27,13 +27,13 @@
 #               from ten times above to a thousand times below mature, and every other transcript
 #               carries exactly none — so you know WHICH structure carries it before reading a number.
 
-genome: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_chr.fa
-gtf: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_chr.gtf
+genome: $RIGEL_RUNS/test_reference/test_chr.fa
+gtf: $RIGEL_RUNS/test_reference/test_chr.gtf
 # ⭐ SHADOW transcripts (owner, 2026-08-29): unannotated transcription on the BLANK chromosome `test_blank`,
 #   simulated from this file and NEVER given to the index. `docs/TESTING.md` §0a.
-shadow_gtf: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_shadow.gtf
-index: /Users/mkiyer/Downloads/rigel_runs/test_reference/idx
-outdir: /Users/mkiyer/Downloads/rigel_runs/test_reference/scenarios_depth_d100
+shadow_gtf: $RIGEL_RUNS/test_reference/test_shadow.gtf
+index: $RIGEL_RUNS/test_reference/idx
+outdir: $RIGEL_RUNS/test_reference/scenarios_depth_d100
 
 simulation:
   # ⭐ small on purpose — the point of this reference is a SECONDS-long loop
@@ -52,7 +52,7 @@ simulation:
 
 abundance:
   mode: file
-  file: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_abundances.tsv
+  file: $RIGEL_RUNS/test_reference/test_abundances.tsv
 
 gdna:
   # ⭐ THE FIVE gDNA RUNGS (owner, 2026-08-27): zero, 5 %, 25 %, 50 %, 98 %. `g00`'s truth is
@@ -87,7 +87,7 @@ capture:
   min_overlap: 1
   configs:
     - {label: "off", enabled: false}
-    - {label: "on", probes: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_probes.bed}
+    - {label: "on", probes: $RIGEL_RUNS/test_reference/test_probes.bed}
 
 oracle_bam: true
 verbose: true

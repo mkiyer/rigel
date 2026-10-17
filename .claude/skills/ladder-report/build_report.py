@@ -22,7 +22,11 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 SKILL = Path(__file__).resolve().parent
-DEFAULT_ARMS = Path.home() / "Downloads/rigel_runs/suite/ladder/arms"
+# the panel as every instrument spells it: `scripts/design/_shared.py`, under the data root `$RIGEL_RUNS`
+sys.path.insert(0, str(REPO / "scripts" / "design"))
+from _shared import DEFAULT_SUITE  # noqa: E402
+
+DEFAULT_ARMS = DEFAULT_SUITE / "arms"
 
 #: the per-axis fields the page renders. ⛔ `fn_mass`/`fn_n` are deliberately absent: a false negative
 #: needs an estimate of exactly zero, which a fractional posterior never is, so the column reads 0 on
@@ -110,7 +114,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--arms", type=Path, default=DEFAULT_ARMS, help="directory of arm jsonl files")
     ap.add_argument("--arm", default="qa_ladder_base")
-    ap.add_argument("--suite", type=Path, default=Path.home() / "Downloads/rigel_runs/suite/ladder",
+    ap.add_argument("--suite", type=Path, default=DEFAULT_SUITE,
                     help="panel directory, read ONLY to derive the truth table's composition")
     ap.add_argument("--html", type=Path, required=True)
     ap.add_argument("--markdown", type=Path, default=None,

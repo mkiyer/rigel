@@ -1,0 +1,290 @@
+# The paired-end repair: roadmap to release
+
+2026-10-16 · base `41899ae4` · sandbox roadmap; nothing here is implemented.
+
+This file holds the waves, what each must deliver, and the gate between them.
+
+- **The plan for wave 1:** `PAIRED_END_WAVE1_PLAN.md` (revision 2).
+- **The diagnosis behind it:** `PAIRED_END_REPAIR.md` (revision 2, superseded for planning) and its independent
+  review, `PAIRED_END_REPAIR_INDEPENDENT_REVIEW.md`.
+- **The STAR study's brief:** `star_parameters/PROMPT.md`.
+
+The owner's direction (2026-10-16) is to go slowly, one wave at a time: design it, review it, build it, measure it,
+and reassess before the next.
+
+## Where we are
+
+- **The bug.** Rigel's BAM scanner built "fragments" from a single mate. A lone secondary alignment, a primary whose
+  mate was unmapped, or a half-filled HI group each became a read-length fragment, a false multimapper and a 100-bp
+  length deposit.
+- **The first repair** proved that, but transcript error rose. The diagnosis found two downstream defects the bug had
+  been hiding:
+  - the gDNA fragment-length estimator is ill-conditioned on aligned input;
+  - the capture ruler finds capture on uncaptured libraries.
+
+  With those two held fixed in diagnostic runs, the pairing repair improves every in-scope condition that has gDNA.
+- **Splice artifacts** remain the release-blocking false positive: gDNA aligned as spliced, and certified as RNA.
+  Unannotated splicing is handled inconsistently today.
+- **The scope is narrowed** (owner, 2026-10-16). Rigel reads alignments; it does not repair or re-align them.
+  - Near-tied spliced and contiguous alignments are the aligner's to report.
+  - A parallel study on the cluster is establishing STAR parameters that do so, and Rigel will recommend them.
+
+## Progress
+
+Kept current until wave 4 closes (owner, 2026-10-16). ☑ done · ◐ in progress · ☐ not started.
+
+**Wave 1, the scan stage** (plan revision 2, accepted 2026-10-16)
+
+- ◐ Step 1, the code-health review
+  - ☑ the baseline re-derived on a clean checkout at `41899ae4` after a rebuild: 0 failed / 2,959 passed / 0 skipped
+    / 0 xfail, 2,959 collected (2026-10-16; CLAUDE.md updated, uncommitted)
+  - ☑ the review, in nine read-only slices: the scan path in depth (six), the rest of `src/` swept (three); the
+    slice reports are in `scan_code_health_slices/` (2026-10-16)
+  - ☑ the report, `SCAN_CODE_HEALTH_REVIEW.md` (2026-10-16)
+  - ☑ the owner's selection: all of it (2026-10-16). The scan-path defects joined steps 2–6, the later-wave findings
+    became ISSUES entries, and the anchor tolerance is kept for implicit splicing with every other use audited
+  - ◐ the cleanup stages, each a proven no-op, in the report's order:
+    - ☑ the scan-cache key (blacklist and BAM): committed `b6aec8a4` and pushed, 2026-10-16 (suite 2,968 / 0 failed;
+      bit-identical on all three references; preflight clean). Every existing cache is refused until the re-cache
+    - ☑ the words: comments, docstrings and help text, 45 files: committed `a7c5ebe3` and pushed (suite 2,968;
+      bit-identical on all three references)
+    - ☑ dead code, 51 files: committed `26d37589` and pushed (suite 2,964: five cases deleted with their code, one
+      gate added for the raw fragment-length model's refusal; bit-identical on all three references)
+    - ☑ one definition each, 49 files: committed `c1156e86` and pushed (suite 2,984: twenty gates added, the native
+      ones broken one by one and each fired; bit-identical on all three references). The exonic strand vectors
+      are gone, so the renames stage's `exonic_truth` item is moot
+    - ☑ contracts, 23 files: committed `1b4a46c6` and pushed (suite 3,025: forty-one gates added, the four native
+      ones broken in one rebuild and each fired; bit-identical on all three references)
+    - ☑ one re-cache, 25 files: committed `d5a08e46` and pushed (suite 3,025; measured, since a canonical-key field
+      went: on all three references exactly the two deleted region banks are gone, nothing appeared, and the
+      transcript table and every calibration array are bit-identical). The contiguous reaches' deletion waits
+      for an index-format change, so it joins the renames stage's index rebuild. Every panel's caches
+      rebuilt (13 configs, 262 conditions certified) and the three identity references re-frozen at `d5a08e46`
+      (proven equal to the old freeze but for the two deleted banks). Preflight's new key check then caught
+      a defect from the first stage: an oracle part recorded its scratch split file as its BAM, which a
+      same-named condition in another panel overwrites (12/16 ladder, 0/30 test chromosome refused). Fixed
+      in the three writers (a part records the BAM it was split from) with a gate; every oracle part
+      rebuilt, and preflight reads every cache valid (16/16 and 30/30, 262 conditions certified); committed
+      `30357fb3` and pushed (suite 3,026)
+    - ☑ stale benchmark data deleted for space, at the owner's request (107.6 GiB; text receipts kept)
+    - ◐ renames, to the convention the owner ruled on 2026-10-17 (`OUTPUT_NAMES_PROPOSAL.md`, five steps):
+      ☑ 1. the identity digest ignores column names (`8ebf71ea`), references re-frozen there; ◐ 2. the internal
+      names; ☐ 3. the outputs to the convention, `summary.json` schema 4; ☐ 4. the index and scan names, one index
+      rebuild and re-cache; ☐ 5. the simulator's truth tables through one writer
+    - ◐ constants: the six that need no ruling settled, committed `bb3967cb` and pushed; the rest await the owner
+      (`CONSTANTS_PROPOSAL.md`, six questions)
+- ◐ the plan's external review, of revision 3 (owner, 2026-10-17); bundle `rigel_wave1_review_r3.zip`
+- ☐ Step 2, mate locations
+- ☐ Step 3, pairing: HI groups; the bounded R1 × R2 search; the anchor tolerance's uses audited
+- ☐ Step 4, unannotated hits withheld, hit by hit
+- ☐ Step 5, the hand-off, the single length rule, and the four second-pass corrections (one arm each)
+- ☐ Step 6, accounting
+- ☐ the end-of-wave gate, and the owner's reassessment
+
+**Wave 2, multimapping**
+
+- ☐ the design: the combination rule, intergenic hits, pass-2 weights, fewer unique templates
+- ☐ its review, the build, and the gate
+- ☐ only if the STAR report shows the gap: remote copies; the clipped-bases rule
+
+**Wave 3, calibration and downstream**
+
+- ☐ the gDNA length estimator
+- ☐ the capture ruler's false capture
+- ☐ the aligned gDNA/RNA split
+- ☐ the clip length model
+- ☐ observable opportunity
+
+**Wave 4, validation and release**
+
+- ◐ the STAR study (cluster session): ☐ its checkpoint; ☐ its report
+- ☐ the STAR-aligned ladder, at the recommended and the production parameters
+- ☐ independent artifact-containing libraries, and VCaP
+- ☐ the fragment-length-gap panels and the zero-gDNA controls
+- ☐ the blacklist-retirement comparison
+- ☐ the manual's STAR command, and the BAM-header check
+- ☐ the full suite, caches, persistence, docs and release steps
+
+## The owner's rules that every wave keeps
+
+- **Three populations:** gDNA, RNA+ and RNA−.
+- **Both mates.** Every hit places both mates, and is scorable only if its fragment length can be computed. A template
+  without such a hit is withheld and counted.
+- **The emission model is kept:**
+  - candidates by overlap;
+  - an overhang penalty;
+  - a mismatch penalty;
+  - per-candidate lengths.
+- **Plausible RNA and gDNA alignments of one read pair compete in the EM,** as the aligner reports them.
+- **Rigel reads alignments and never repairs or re-aligns them.** It recommends STAR with tested parameters.
+- **Annotated transcripts only.** Rigel does not assemble transcripts or quantify chimeras.
+- **No new constant.**
+- **Fix everything before release.**
+
+## The waves
+
+| wave | what it delivers | depends on |
+|---|---|---|
+| 1. The scan stage | a code-health review of the scan path, and its cleanup; pairs by HI (STAR) or by a bounded R1 × R2 search (aligners without HI), each validated; the unannotated rule, hit by hit; every template accounted for; four corrections to calibration's second pass | nothing |
+| 2. Multimapping | how a template's hits combine, for RNA and gDNA alike, in the EM and in calibration | wave 1; the STAR study, which sets how many templates this touches |
+| 3. Calibration and downstream | the gDNA length estimator; the capture ruler's false capture; the aligned gDNA/RNA split; the clip length model; observable opportunity | wave 1 (the order against wave 2 is reassessed after wave 1) |
+| 4. Validation and release | the STAR-aligned ladder at the recommended parameters; independent artifact-containing libraries; the blacklist-retirement comparison; the manual's STAR recommendation; the full suite and release steps | waves 1–3; the STAR report |
+
+### Wave 1: the scan stage
+
+The scan stage reads the BAM faithfully, and turns every template into validated hits or a disposition. It has six
+steps:
+
+1. **Review the scan path's code health, and clean it up.** Each cleanup stage is proven to change no number.
+2. **One mate location per alignment record.**
+3. **Hits from pairs:** STAR's HI groups, or a bounded R1 × R2 search for aligners without HI (minimap2). Each is
+   validated as one molecule.
+4. **Unannotated junctions withheld, hit by hit.** A template keeps its other hits.
+5. **The hand-off to calibration and the EM,** with four corrections to calibration's second pass:
+   - a spliced placement takes the RNA length law;
+   - a placement with nothing contested reads "not applicable", not zero;
+   - pass 2 weighs each hit's mismatches as the EM does;
+   - pass 2 decides a placement's splice and strand by the deposit's rule.
+6. **One disposition per template;** every record written once.
+
+**Gate.**
+
+- Every suite passes, and every deliberate break test fires.
+- The full suite passes at the re-derived baseline.
+- The oracle ladder is identical, except for enumerated cases.
+- With the gDNA law and the ruler held fixed, no in-scope stratum gets worse, except by the explicitly accepted policy
+  costs: the unpaired templates and the withheld unannotated hits. Each cost is measured and reported.
+
+### Wave 2: multimapping
+
+Today, when a template has several hits, the EM builds one unit from them in two ways:
+
+- **RNA:** each transcript keeps the likelihood from the single hit where it fits best.
+- **gDNA:** the term is the **average** of the per-hit gDNA likelihoods. Only hits that gDNA can explain and that
+  overlap at least one transcript count.
+
+A worked example:
+
+- A template fits gene A perfectly (gDNA likelihood 1, in relative units) and a paralog B with two mismatches (gDNA
+  likelihood 0.01).
+- Today's gDNA term is (1 + 0.01) / 2 ≈ 0.5.
+- gDNA could have come from either place, so its probability should be the **sum** over places, each weighted by that
+  place's genomic prior: about 1.01 here, not 0.5.
+- The RNA candidates of gene A, meanwhile, keep their full likelihood.
+
+Adding a poor second place therefore halves gDNA but leaves RNA untouched, which biases multimappers toward RNA. A hit
+in an intergenic region (no transcript) is dropped from the gDNA term altogether, so its gDNA hypothesis disappears.
+
+**Why this wave is now critical.** With the recommended STAR parameters, every near-tied template becomes a
+multimapper. This wave decides how all of them are scored. It derives:
+
+- **the combination rule** (owner: a sum, not the mean):
+  - gDNA sums over distinct places, each with its genomic prior, its capture efficiency and its observable
+    opportunity;
+  - alternatives at one place count once;
+- **intergenic hits,** which keep their gDNA hypothesis;
+- **the matching weights in calibration's second pass;**
+- **the calibration consequence of fewer unique templates.**
+
+Only if the STAR report shows the gap:
+
+- **remote copies from the index.** At index build, the annotated transcripts are aligned to the genome unspliced
+  (minimap2 via `mappy`), which proposes the remote copies a fragment could have come from. This applies only if STAR
+  misses retrocopies. A 2026-10-14 measurement found such copies for 2,658 of 404,168 annotated junctions, and they
+  recalled 95.5% of VCaP's retrocopy artifacts.
+- **a rule for clipped bases,** so that an alignment cannot win by explaining fewer of the read's bases. This applies
+  only if the recommended alignment keeps soft clipping.
+
+**Gate.**
+
+- Finite enumeration matches the combination rule.
+- The per-stratum comparison of both errors on the STAR-aligned ladder.
+
+### Wave 3: calibration and downstream
+
+- **The gDNA length estimator.** Its two-pool contrast is ill-conditioned when the estimated pool purities are low.
+  Its internal density is 7.5–72× too low on aligned input.
+- **The capture ruler on uncaptured libraries.** At zero gDNA it carries 94% of the transcript error. At g50 capture
+  OFF, about 2% of transcripts are off by more than 2×.
+- **The aligned gDNA/RNA split** in the unstranded stratum.
+- **The clip length model:** molecule ends inferred from 5′ soft clips, along each candidate's path.
+- **Observable opportunity:** not only N bases. Two mates can span an N gap, and repeats can be unobservable.
+
+Each is designed and measured on the repaired scan.
+
+### Wave 4: validation and release
+
+- **The STAR-aligned ladder** at the recommended parameters, which are Rigel's supported input; and at the production
+  parameters, to price what a default BAM gets.
+- **Independent artifact-containing libraries, and VCaP.**
+- **Both fragment-length-gap panels, and the zero-gDNA controls.**
+- **The blacklist-retirement comparison.** The blacklist repairs alignments, so the narrowed scope retires it once the
+  comparison justifies it.
+- **The manual,** with the recommended STAR command, and a check of the BAM header's `@PG` line that warns when a BAM
+  was aligned otherwise.
+- **The full suite, the cache and persistence checks, the docs, and the release steps.**
+
+## Ideas held for evaluation
+
+- **A dual-aligner input** (owner, 2026-10-16). Every read pair is aligned twice, by a spliced aligner and by a genome
+  aligner, and the two are merged by read name into one BAM for Rigel. Rigel would then see the empirical gDNA
+  alternatives directly.
+  - It is the fallback if STAR cannot be parameterized to report them itself.
+  - The STAR study prices it against a single STAR run.
+- **Unannotated isoforms** (owner). Rescuing reads whose junctions reuse annotated splice sites would need implied
+  transcripts, which is transcript assembly. That is outside Rigel's scope, so such reads are withheld and counted.
+
+## Decisions
+
+**Recorded (owner, 2026-10-15/16):**
+
+- complete pairs, and a fragment length is required;
+- plausible spliced and contiguous alignments both compete in the EM;
+- unannotated spliced alignments are withheld;
+- fix everything before release;
+- go one wave at a time, and start no wave before its design is confident and reviewed.
+
+**Recorded (owner, 2026-10-16, third round):**
+
+- a multimapper's gDNA term is a sum over its places, not the mean;
+- Rigel proposes no spliced reading for an unspliced read, because that is the aligner's job;
+- mismatch differences are tolerated, and every hit is scored with its own mismatches;
+- unannotated junctions are withheld completely;
+- STAR's parameters are explored in a parallel session on the cluster (`star_parameters/PROMPT.md`).
+
+**Recorded (owner, 2026-10-16, fourth round):**
+
+- wave 1 is split: the scan stage goes first, without alignment scrutiny, and opens with a general code-health
+  review;
+- the genome store is dropped for now;
+- Rigel's scope is narrowed: no alignment repair and no second aligner inside Rigel;
+- Rigel documents and recommends STAR with the recommended parameters;
+- a dual-aligner input is the eventual fallback.
+
+**Recorded (owner, 2026-10-16, fifth round):**
+
+- two pairing strategies: STAR by HI groups, and minimap2 by an R1 × R2 search made efficient (same reference, sorted
+  by distance);
+- a mate spliced at a junction beside a partner running into its intron is passed on as reported: the hit is spliced
+  (RNA only), and the overhang penalty does not matter because no other transcript competes;
+- the wave-1 plan (revision 2) is accepted; step 1, the code-health review, starts first;
+- the roadmap is tracked to the completion of every wave and step (§Progress).
+
+**Recorded (owner, 2026-10-16, sixth round):**
+
+- the code-health review is taken whole: the cleanup stages in its order, starting with the scan-cache key; its
+  scan-path defects in wave 1; its later-wave findings as ISSUES entries;
+- the output column names must be consistent (a naming proposal first);
+- the anchor tolerance stays in scope for implicitly spliced fragments, but every case that applies it is judged.
+
+**Recorded (owner, 2026-10-17, seventh round):**
+
+- output names: `count_<what>` word order; RNA is reported as annotated (every reference transcript, single-exon
+  included) or nascent (Rigel's synthetic spans) — `DESIGN.md` §0; the gene table's mature / nascent split goes;
+  the index-side names are renamed and every index rebuilt;
+- the 1,000-read tag cutoff is repaired before 0.8.0 (the tag read per record, wave 1 step 2);
+- K stays as the implicit-splicing tolerance, renamed;
+- the report tiles, the summary's depth keys and rounding, and the resource constants as proposed;
+- wave 1 is reviewed again, at revision 3, before step 2 is implemented.
+
+**Open for wave 1:** the questions in `PAIRED_END_WAVE1_PLAN.md` §13.

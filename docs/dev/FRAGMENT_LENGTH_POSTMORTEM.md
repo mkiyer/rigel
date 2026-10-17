@@ -3,7 +3,7 @@
 *Sandbox document (`docs/dev/`): provisional, not authoritative, cited by nothing outside the sandbox. Written
 2026-10-04 against `main` at `bdfd8709` plus the uncommitted working tree of 2026-10-03, for external reviewers who have
 not seen this project. Every number below was measured in the 2026-10-03 session unless a date says otherwise; the
-tables and the harness are in `~/Downloads/rigel_runs/prototypes/2026-10-03_fl_arms/` (`VERDICT.md`). Open questions for
+tables and the harness are in `$RIGEL_RUNS/prototypes/2026-10-03_fl_arms/` (`VERDICT.md`). Open questions for
 reviewers are collected in §7.*
 
 ## 0. What Rigel is, in the terms this document uses
@@ -259,10 +259,10 @@ coupling. It is the path of least change and most residual risk.
 
 ## Appendix: where everything is
 
-- Tables and verdicts: `~/Downloads/rigel_runs/prototypes/2026-10-03_fl_arms/VERDICT.md`; the data in `q3/`, `q4/`,
+- Tables and verdicts: `$RIGEL_RUNS/prototypes/2026-10-03_fl_arms/VERDICT.md`; the data in `q3/`, `q4/`,
   `step2/`; the harness `harness/sitecustomize.py` (`RIGEL_ARM=evidence_ref | evidence_ref_blind | classwise`,
   `RIGEL_BUILD=part1`), inert unless armed, one stderr line per process when it fires.
-- Part 1: the worktree `~/proj/rigel-part1`, `prototypes/2026-10-02_part1/` (gates, class diagnosis, the patch).
+- Part 1: the worktree `<worktree>`, `prototypes/2026-10-02_part1/` (gates, class diagnosis, the patch).
 - Part 2: `prototypes/2026-10-02_fl_stage0/` (the fit, the falsifier bench, the verdict).
 - Stage 3: `prototypes/2026-10-02_stage3/` (`B_match`, `B_transfer1`, 35 checks with 28 deliberate breaks).
 - The campaign's state: `prototypes/HANDOFF_2026-10-03.md`; the plan: `docs/dev/FRAGMENT_LENGTH_PLAN.md`; the five

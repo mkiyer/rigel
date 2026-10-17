@@ -51,7 +51,7 @@ sys.path.insert(0, str(_REPO / "tests" / "calibration"))
 sys.path.insert(0, str(_REPO / "scripts" / "design"))
 
 from _oracle import ORIGINS, OracleTruth  # noqa: E402
-from _shared import is_zero_gdna, set_field, strata, stratum  # noqa: E402
+from _shared import DEFAULT_INDEX, DEFAULT_SUITE, is_zero_gdna, set_field, strata, stratum  # noqa: E402
 
 
 import rigel.calibration.priors as PRIORS  # noqa: E402
@@ -59,10 +59,6 @@ from rigel.config import EMConfig, PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.pipeline import resolve_scan_config, run_pipeline  # noqa: E402
 from rigel.scan_cache import ScanCacheKeyError, read_scan_cache  # noqa: E402
-
-_RUNS = Path.home() / "Downloads" / "rigel_runs"
-DEFAULT_SUITE = _RUNS / "suite" / "ladder"
-DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
 #: ``oracle_alloc`` is a capability proof rather than a ceiling. It hands the EM the true relative
 #: transcript abundances as the per-transcript allocation weights and zeroes the coverage seed, so

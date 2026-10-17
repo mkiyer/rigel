@@ -6,8 +6,9 @@ registers it in ``sys.modules`` under its stem BEFORE executing it (a dataclass 
 resolves its own module through ``sys.modules`` at class-creation time), and returns the cached module on
 every later call, so two instruments loading the same sibling share one copy of it. This is a helper, not
 an instrument: it answers no question and has no row in the instrument table. It also holds
-``set_field``, the one ``SECTION.FIELD=VALUE`` parser behind every instrument's ``--set``, and the panel's
-default paths, the six override fields, the stratum readers and the pool ledger the instruments share.
+``set_field``, the one ``SECTION.FIELD=VALUE`` parser behind every instrument's ``--set``, the data root
+and the panel's default paths, the six override fields, the stratum readers and the pool ledger the
+instruments share.
 
 Usage::
 
@@ -20,6 +21,7 @@ from __future__ import annotations
 import dataclasses
 import importlib.util
 import json
+import os
 import re
 import sys
 import typing
@@ -28,8 +30,10 @@ from pathlib import Path
 DESIGN = Path(__file__).resolve().parent
 
 
-#: The panel every instrument reads by default, and its index — one spelling, here, for every instrument.
-RUNS = Path.home() / "Downloads" / "rigel_runs"
+#: The data root every script reads by default — ``$RIGEL_RUNS``, else ``Downloads/rigel_runs`` in the home
+#: directory — and the panel and its index under it: one spelling, here, for every script. The sim configs
+#: name their paths under ``$RIGEL_RUNS``, so a script that reads a config exports this first.
+RUNS = Path(os.environ.get("RIGEL_RUNS") or Path.home() / "Downloads" / "rigel_runs").expanduser()
 DEFAULT_SUITE = RUNS / "suite" / "ladder"
 DEFAULT_INDEX = RUNS / "suite" / "rigel_index"
 

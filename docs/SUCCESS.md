@@ -197,7 +197,7 @@ both caches survive it (neither depends on `calibration/`).
 ```bash
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 export OMP_NUM_THREADS=1
-SUITE=~/Downloads/rigel_runs/suite
+SUITE=$RIGEL_RUNS/suite
 LADDER=$SUITE/ladder
 INDEX=$SUITE/rigel_index
 CFG=scripts/sim/configs/gdna_ladder.yaml

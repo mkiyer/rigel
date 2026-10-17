@@ -98,7 +98,7 @@ and change the RNA reference. The duplicate-factor test guards this local calcul
 it does not certify fragment independence across the entire graph.
 
 The main-tree source/tests/goldens diff and installed calibration binary were verified
-unchanged. The native worktree is `/private/tmp/rigel-density-20261007`; wheel builds were
+unchanged. The native worktree is `<worktree>`; wheel builds were
 unpacked into isolated sites rather than installed into the shared environment. The
 drivers verify both native modules' import paths. Calibration threads stayed at their
 defaults; the screens read scan caches and ran no EM.

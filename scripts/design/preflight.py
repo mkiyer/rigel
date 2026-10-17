@@ -34,8 +34,9 @@ from pathlib import Path
 
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
+from _shared import RUNS  # noqa: E402
+
 REPO = Path(__file__).resolve().parents[2]
-RUNS = Path.home() / "Downloads" / "rigel_runs"
 SUITE = RUNS / "suite"
 SUITE_INDEX = SUITE / "rigel_index"
 LADDER = SUITE / "ladder"

@@ -44,6 +44,15 @@ REPO = Path(__file__).resolve().parents[2]
 DESIGN = REPO / "scripts" / "design"
 SIM = REPO / "scripts" / "sim"
 
+# the configs name their paths under `$RIGEL_RUNS`: unset, it is the data root every instrument defaults to,
+# exported before any config is read so every stage's subprocess reads the same one
+sys.path.insert(0, str(DESIGN))
+from _shared import RUNS  # noqa: E402
+
+os.environ.setdefault("RIGEL_RUNS", str(RUNS))
+
+from rigel.sim.whole_genome import expand_config_path  # noqa: E402
+
 #: the three origin partitions the oracle cache holds and the per-strand RNA pair the certifier requires.
 ORACLE_PARTS = ("gdna", "mrna", "nrna", "rna_pos", "rna_neg")
 
@@ -63,16 +72,21 @@ class Panel:
                     f"config; a panel that does not say where it lives cannot be driven by it."
                 )
         self.cfg = cfg
-        self.genome = Path(cfg["genome"])
-        self.gtf = Path(cfg["gtf"])
-        self.dir = Path(cfg["outdir"])
+        # every path expanded as the simulator expands it (`~`, `$RIGEL_RUNS`)
+        self.genome = Path(expand_config_path(cfg["genome"], "genome"))
+        self.gtf = Path(expand_config_path(cfg["gtf"], "gtf"))
+        self.dir = Path(expand_config_path(cfg["outdir"], "outdir"))
         self.reference = self.gtf.parent
         # the index the simulator reads (`index:`), else the reference's sibling by convention
-        self.index = Path(index or cfg.get("index") or self.reference.parent / "rigel_index")
+        self.index = Path(
+            index or expand_config_path(cfg.get("index"), "index") or self.reference.parent / "rigel_index"
+        )
         # the probe panel the capture arm reads, as the config names it: the ladder's designed
         # `capture_panel.tsv` or a substrate's rendered BED. With no capture arm, the ladder's layout.
         named = [c["probes"] for c in (cfg.get("capture") or {}).get("configs", []) if c.get("probes")]
-        self.probes = Path(named[0]) if named else self.reference / "capture_panel.tsv"
+        self.probes = (
+            Path(expand_config_path(named[0], "probes")) if named else self.reference / "capture_panel.tsv"
+        )
         self.scan_cache = self.dir / "scan_cache"
         self.oracle_cache = self.dir / "oracle_cache"
         self.arms = Path(os.environ.get("RIGEL_ARMS", self.dir / "arms"))

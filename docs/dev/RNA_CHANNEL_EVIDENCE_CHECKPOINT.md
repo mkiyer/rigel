@@ -15,7 +15,7 @@ The derivation's home is **Absolute level factors retain their coordinates** in
 
 All scratch files and receipts are under
 `.cache/rigel_runs/2026-10-08_channel_evidence/`. C++ work remains in the isolated worktree
-`/private/tmp/rigel-density-20261007`; the main source, tests and goldens were preserved.
+`<worktree>`; the main source, tests and goldens were preserved.
 
 | File | Responsibility |
 |---|---|

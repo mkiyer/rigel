@@ -1,7 +1,7 @@
 # The capture reader's deep-library speed — design (2026-10-11, sandbox, not authoritative)
 
-**Status: LANDED on main at fa872c60 (owner, 2026-10-11): the per-node scope, no branch-and-bound; the reader on VCaP 4,643 → 1,106 CPU-s (the pipeline 477 → 253 s), the 60 s gate at the boundary, the 30 s aim a quadrature ruling after 0.8.0 (§9). This note is the campaign's receipt; the rulings and numbers live in DESIGN §7.2, EQUATIONS §11 and ISSUES.** The reader landed 2026-10-10 (`DESIGN.md` §7.2) at 11 s of LBX0190's 22 s
-pipeline and 43 s of MO_3021's 66 s, and at 4.6 min on top of the VCaP mix's 3 min — the deep-library cost the
+**Status: LANDED on main at fa872c60 (owner, 2026-10-11): the per-node scope, no branch-and-bound; the reader on VCaP 4,643 → 1,106 CPU-s (the pipeline 477 → 253 s), the 60 s gate at the boundary, the 30 s aim a quadrature ruling after 0.8.0 (§9). This note is the campaign's receipt; the rulings and numbers live in DESIGN §7.2, EQUATIONS §11 and ISSUES.** The reader landed 2026-10-10 (`DESIGN.md` §7.2) at 11 s of cfRNA-A's 22 s
+pipeline and 43 s of cfRNA-C's 66 s, and at 4.6 min on top of the VCaP mix's 3 min — the deep-library cost the
 owner's performance stance refuses ("the entire tool runs in ~3 minutes on 8 cores"). This note derives where
 the time goes, two reductions that are EXACT under the window rule the kernel already uses, a third that is
 exact on one side, the gates each must pass, and the stages. Nothing here changes a number: every reduction is a
@@ -135,7 +135,7 @@ is measured on the fixtures (§8) and is the owner's ruling.
 | `prune-identity` | `test_honest_reader.py`: with the branch and bound, the mode to 1e-7 and the posterior maximum to 1e-9 against the full grid at every read slot, under scopes 1 and 2 |
 | `thread-identity` | bit-identical at 1 and 4 threads, with the pruning on |
 | `fixture-identity` | stage 1 bit-identical to the landed kernel on the four fixtures (modes and maxima); stage 2's scope-0 path likewise |
-| `end-to-end-identity` | LBX0190, MO_3021, VCaP through the pinned production path: the transcript table within the pair's own variation, the gDNA fraction to four decimals |
+| `end-to-end-identity` | cfRNA-A, cfRNA-C, VCaP through the pinned production path: the transcript table within the pair's own variation, the gDNA fraction to four decimals |
 | `speed` | the reader stage on VCaP: at most 60 s, aim 30 s (from 276 s); timings from back-to-back pairs on an idle machine |
 
 ## 6. What is NOT proposed
@@ -156,7 +156,7 @@ is measured on the fixtures (§8) and is the owner's ruling.
    pass's scope behind `reader_second_pass` (0 pooled = the landed specification, 1 per node, 2 none), the
    specification taking the same switch. `site2`. The constants are PROTOTYPE knobs: the ruling replaces them.
 3. **Measuring**: on the fixtures, the scope variants' change against the pooled specification (every slot) and
-   the pruning's identity and speed; on VCaP, LBX0190 and MO_3021 through the pinned production path, the reader
+   the pruning's identity and speed; on VCaP, cfRNA-A and cfRNA-C through the pinned production path, the reader
    stage's time for (scope 0, no pruning) — the restructure alone — against (scope 1, pruning) and (scope 2,
    pruning), and the end-to-end identity.
 4. **Land** (after the ruling): the chosen scope hard-wired, the knobs and the flags `derived_tilt` and
@@ -191,15 +191,15 @@ with the branch and bound):**
 | library | pipeline wall A → B | reader CPU-s: landed → A → B | both-strand read slots (ms each, B) | single-strand | zero-read |
 |---|---|---|---|---|---|
 | VCaP (2.09 M slots) | 311.8 → 294.7 s (landed 477) | 4,643 → 2,047 → 1,777 | 1,490 → 1,253 (103,718 × 12.1 ms) | 475 → 444 | 81 → 79 |
-| LBX0190 | 20.3 → 20.1 s (landed 22) | — → 87 → 84 | 19 → 16 (2,753 × 5.9 ms) | 4 → 7 | 63 → 60 |
-| MO_3021 | 57.6 → 57.8 s (landed 66) | — → 275 → 287 | 142 → 135 (21,147 × 6.4 ms) | 38 → 61 | 95 → 90 |
+| cfRNA-A | 20.3 → 20.1 s (landed 22) | — → 87 → 84 | 19 → 16 (2,753 × 5.9 ms) | 4 → 7 | 63 → 60 |
+| cfRNA-C | 57.6 → 57.8 s (landed 66) | — → 275 → 287 | 142 → 135 (21,147 × 6.4 ms) | 38 → 61 | 95 → 90 |
 
 End to end, B against A: VCaP's gDNA fraction 0.252753 in both, the pools within 0.1 fragments, the weights'
 quantiles identical to four figures, the reader's modes within 9.6e-6 nats (17 slots above 1e-6; scope 1's
 lattice difference); the transcript table moves 1,561 fragments in |Δ| on 31 rows, all within-gene
 redistributions among near-identical isoforms (the largest gene moves 759 among three isoforms with a net of
 −1.7; three of eleven genes have a net above one fragment) — the known identical-isoform tie collapse under a
-1e-5 prior difference, not an accuracy change. LBX0190 and MO_3021: modes within 1e-10, tables within 2e-3.
+1e-5 prior difference, not an accuracy change. cfRNA-A and cfRNA-C: modes within 1e-10, tables within 2e-3.
 
 **Reading.** The restructure is the whole gain so far (2.27× on VCaP's reader; the plasma readers 11 → ~5 s
 and 43 → ~16 s of wall). The branch and bound removes only ~16 % of VCaP's both-strand cost and MAKES the
@@ -264,7 +264,7 @@ reader's wall is 52 s by the pipeline's difference from the landed run and 66 s 
 | pipeline wall (pinned scan) | 477 s | 312 s | 295 s | 276 s | **253 s** |
 | modes against the landed | — | identical | ≤ 3.3e-5 (scope 1) | ≤ 8e-11 further | ≤ 4e-12 further |
 
-The fixtures against the landed kernel: 7–14× (the ladder's 70,176 slots 59.9 → 8.7 s). LBX0190 and MO_3021 were
+The fixtures against the landed kernel: 7–14× (the ladder's 70,176 slots 59.9 → 8.7 s). cfRNA-A and cfRNA-C were
 measured through stage 2 (87 → 84 and 275 → 287 CPU-s, their readers ~5 and ~17 s of wall; the single-strand
 slowdown there is what restricted the tight tier to both-strand slots) and not re-timed since.
 

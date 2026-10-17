@@ -519,7 +519,7 @@ This needs its own A/B; we record it here because the guard exposed it.
 
 ## A. Reproducing the numbers
 
-Everything is under `~/Downloads/rigel_runs/prototypes/2026-10-01_shortrna/`.
+Everything is under `$RIGEL_RUNS/prototypes/2026-10-01_shortrna/`.
 
 | file | what it shows |
 |---|---|
@@ -535,8 +535,8 @@ Everything is under `~/Downloads/rigel_runs/prototypes/2026-10-01_shortrna/`.
 | `ruler/` | §6's `ruler_vs_truth.py` tables |
 
 **Panels:**
-- `~/Downloads/rigel_runs/suite/{ladder,flgap_rna_short,flgap_rna_long}`;
-- `~/Downloads/rigel_runs/test_reference/scenarios*`;
+- `$RIGEL_RUNS/suite/{ladder,flgap_rna_short,flgap_rna_long}`;
+- `$RIGEL_RUNS/test_reference/scenarios*`;
 - each has scan and oracle caches, and `slot_truth.npz` per condition, holding per-object true counts and both
   opportunities.
 

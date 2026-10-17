@@ -10,9 +10,9 @@ These are inferred DNA fractions (%), not transcript error. Only VCaP has an ava
 
 | Library | 0.7.1 archived | Current | Candidate |
 |---|---:|---:|---:|
-| lbx0190 | 13.04 | 8.34 | 8.50 |
-| lbx0588 | 96.62 | 91.14 | 92.65 |
-| mo3021 | 22.48 | 15.46 | 15.87 |
+| cfrna-a | 13.04 | 8.34 | 8.50 |
+| cfrna-b | 96.62 | 91.14 | 92.65 |
+| cfrna-c | 22.48 | 15.46 | 15.87 |
 | vcap | 26.31 | 23.44 | 23.95 |
 
 VCaP moves toward the known mixture, but still under-calls DNA. The archived release used its compatible index and scanner; its assignment denominator differs from the current pair. It is a historical reference, not a perfectly matched mechanism contrast. No unlabelled library supplies a transcript-accuracy verdict.
@@ -23,12 +23,12 @@ Absolute changes sum the per-transcript or per-gene count differences and divide
 
 | Library | Transcript absolute change (%) | Gene absolute change (%) | Transcript total change (%) |
 |---|---:|---:|---:|
-| lbx0190 | 0.133 | 0.072 | -0.066 |
-| lbx0588 | 14.179 | 6.030 | -2.614 |
-| mo3021 | 0.144 | 0.063 | -0.047 |
+| cfrna-a | 0.133 | 0.072 | -0.066 |
+| cfrna-b | 14.179 | 6.030 | -2.614 |
+| cfrna-c | 0.144 | 0.063 | -0.047 |
 | vcap | 4.033 | 0.280 | +0.133 |
 
-LBX0588 redistributes 14.18% of transcript counts and 6.03% of gene counts; half its transcript change lies in ten genes. VCaP redistributes 4.03% of transcript counts but only 0.28% of gene counts. These changes must not be described as uniformly small. The largest DNA shift is in LBX0588, with most of the displaced mass coming from the unspliced-RNA pool. VCaP transcript total changes by approximately 0.13%; the principal pool change is also less unspliced RNA. This is consistent with removing the intron constraint, but does not prove an improvement in the absence of origin truth for those assignments.
+cfRNA-B redistributes 14.18% of transcript counts and 6.03% of gene counts; half its transcript change lies in ten genes. VCaP redistributes 4.03% of transcript counts but only 0.28% of gene counts. These changes must not be described as uniformly small. The largest DNA shift is in cfRNA-B, with most of the displaced mass coming from the unspliced-RNA pool. VCaP transcript total changes by approximately 0.13%; the principal pool change is also less unspliced RNA. This is consistent with removing the intron constraint, but does not prove an improvement in the absence of origin truth for those assignments.
 
 ## Reproduction and limitations
 
@@ -39,7 +39,7 @@ Each pipeline used one scan thread, fractional assignment, seed zero, default ca
 The count candidate now has panel and real-library validation. The subsequent
 [readiness audit](RNA_COUNT_READINESS_CHECKPOINT.md) completed the suite, preflight and
 golden review. On 2026-10-09 the count foundation was integrated and its eight accepted
-goldens updated; the complete cleanup chain and integrated package preserve the LBX0190
+goldens updated; the complete cleanup chain and integrated package preserve the cfRNA-A
 pipeline bit-for-bit against the original validated candidate. All four available real
 libraries are strongly stranded, so genuine unstranded real-data validation remains a gap.
 The separate detector-free reader remains outstanding. See

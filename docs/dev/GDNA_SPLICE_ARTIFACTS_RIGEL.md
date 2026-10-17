@@ -1,6 +1,6 @@
 # `rigel`: Improving Splice-Artifact Detection
 
-**Audience:** a session working in `/home/mkiyer/proj/rigel`
+**Audience:** a session working in `<cluster home>/proj/rigel`
 **Status:** specification; no changes made to `rigel` by this investigation
 **Parent:** [GDNA_SPLICE_ARTIFACTS_OVERVIEW.md](GDNA_SPLICE_ARTIFACTS_OVERVIEW.md)
 **Version investigated:** rigel 0.7.1, index format_version 7
@@ -146,10 +146,10 @@ Junction capture, exact-triple rule vs both-sites rule:
 
 | library | gDNA | exact | both-sites | newly-caught *genuine* junctions¹ |
 |---|---|---|---|---|
-| `mctp_LBX0077_SI_44263_HKWNYDRX7` | 0.964 | 43.5% | **60.2%** | 1 of 523 (0.19%) |
-| `mctp_MI_1104_SI_43016_HNMVYDMXY` | 0.986 | 37.6% | **64.1%** | 6 of 1,024 (0.59%) |
-| `mctp_MI_1089_SI_40085_HKF7JDRX5` | 0.001 | 20.6% | 21.1% | 4 of 1,441 (0.28%) |
-| `mctp_MI_1083_SI_40080_HKF7JDRX5` | 0.003 | 19.6% | 19.9% | 2 of 1,087 (0.18%) |
+| `cfRNA-D` | 0.964 | 43.5% | **60.2%** | 1 of 523 (0.19%) |
+| `cfRNA-G` | 0.986 | 37.6% | **64.1%** | 6 of 1,024 (0.59%) |
+| `cfRNA-H` | 0.001 | 20.6% | 21.1% | 4 of 1,441 (0.28%) |
+| `cfRNA-I` | 0.003 | 19.6% | 19.9% | 2 of 1,087 (0.18%) |
 
 ¹ newly-rejected junctions that are annotated with `max_spliced_overhang > 20`
 and `n_uniquely_mapped_crossing ≥ 5` — the presumed-genuine population.
@@ -202,7 +202,7 @@ site-derived path.
 The related question — drop `--splice-blacklist-min-count` to 1 — was measured
 separately: annotated capture 53.6% → 70.5%, novel 36.4% → 49.2%. Cost: 3,315
 newly-blacklisted annotated junctions carrying 185,542 unique crossing reads in
-clean control `LBX0629`.
+clean control `cfRNA-E`.
 
 **The site-pair rule dominates it** (+28 points of novel capture vs +13) at a much
 lower specificity cost, because requiring *both* sites is a stronger condition
@@ -334,10 +334,10 @@ The analysis in this investigation re-implements the reject rule in Python and
 **reproduces `sj_blacklisted = 50,907` exactly**. Reuse it as a regression check.
 
 ```bash
-EV=/scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_gdna_debug/evidence
-BAM=/scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_gdna_debug/runs/human/\
-mctp_LBX0077_SI_44263_HKWNYDRX7/bam/star.srt.rmdup.collate.bam
-PY=/home/mkiyer/sw/miniforge3/envs/rigel/bin/python
+EV=<cluster scratch>/shared_data/hulkrna_gdna_debug/evidence
+BAM=<cluster scratch>/shared_data/hulkrna_gdna_debug/runs/human/\
+cfRNA-D/bam/star.srt.rmdup.collate.bam
+PY=<cluster home>/sw/miniforge3/envs/rigel/bin/python
 
 # 1. re-quant against a modified rigel / new index  (~25 min, no re-alignment)
 rigel quant --index <INDEX> --bam "$BAM" --threads 8 -o <OUT> \

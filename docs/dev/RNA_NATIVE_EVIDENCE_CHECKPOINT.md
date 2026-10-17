@@ -10,7 +10,7 @@ for numerical testing and the next frozen population-input contrast.
 
 ## Exactly what is implemented
 
-In `/private/tmp/rigel-density-20261007`:
+In `<worktree>`:
 
 - `src/rigel/native/density_evidence.h` implements the single-RNA-strand integral.
 - `src/rigel/native/solve_kernel.cpp` adds an independent `density_evidence` binding.

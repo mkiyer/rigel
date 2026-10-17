@@ -229,8 +229,8 @@ The exact STAR input FASTQs are retained, so parameter variants can be tested
 without re-fetching or re-trimming:
 
 ```
-/scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_gdna_debug/runs/human/\
-mctp_LBX0077_SI_44263_HKWNYDRX7/fastq/k2_prefilter_{1,2}.dedup.fastq.gz
+<cluster scratch>/shared_data/hulkrna_gdna_debug/runs/human/\
+cfRNA-D/fastq/k2_prefilter_{1,2}.dedup.fastq.gz
 ```
 
 ### Sweep design
@@ -240,10 +240,10 @@ production index (`refs/human/star_index`, `sjdbOverhang 149`) — no rebuild ne
 for any of R1–R3, R5.
 
 ```bash
-export PATH=/home/mkiyer/sw/miniforge3/envs/star/bin:$PATH
-IDX=/scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/star_index
-PF=/home/mkiyer/proj/hulkrna/resources/star_arriba_parameters.txt
-FQ=/scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_gdna_debug/runs/human/mctp_LBX0077_SI_44263_HKWNYDRX7/fastq
+export PATH=<cluster home>/sw/miniforge3/envs/star/bin:$PATH
+IDX=<cluster scratch>/shared_data/hulkrna/refs/human/star_index
+PF=<cluster home>/proj/hulkrna/resources/star_arriba_parameters.txt
+FQ=<cluster scratch>/shared_data/hulkrna_gdna_debug/runs/human/cfRNA-D/fastq
 
 STAR --runThreadN 8 --genomeDir $IDX --parametersFiles $PF \
      --readFilesIn $FQ/k2_prefilter_1.dedup.fastq.gz $FQ/k2_prefilter_2.dedup.fastq.gz \
@@ -261,14 +261,14 @@ annotation status directly on each record, which simplifies per-read scoring.
 (`3 -1 3 3`) · `stitch000` (`0 -1 0 0`) · `bySJout` · `combo`
 (`sjdbOH8` + `stitch333`).
 
-Use SLURM account `mkiyer99` (the pipeline's account) for consistency.
+Use the pipeline's SLURM account for consistency.
 
 ### Metrics per arm
 
 Compute both a sensitivity and a specificity axis. **A single-library sweep can
 only measure the specificity axis** — the index case has almost no genuine
 splicing, so true-positive loss must be measured on a clean control. Run the same
-arms on `mctp_MI_1089_SI_40085_HKF7JDRX5` (gDNA 0.001) — its FASTQs are not
+arms on `cfRNA-H` (gDNA 0.001) — its FASTQs are not
 retained, so this requires a second targeted rerun (see the parent document §3.1
 for the command pattern).
 

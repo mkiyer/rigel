@@ -197,14 +197,14 @@ Two-stage pipeline: (1) C++ BAM scan → FragmentBuffer, (2) Python/C++ locus-le
 - `_scoring_impl` uses `-ffast-math`; `_em_impl` uses `-ffp-contract=fast` (preserves Kahan summation)
 - SIMD: `fast_exp.h` provides AVX2/AVX-512/NEON code paths
 
-## Armis2 SLURM Cluster — Full-Scale Simulation Benchmarking
+## The SLURM Cluster — Full-Scale Simulation Benchmarking
 
 ### Unified Benchmark Directory
 
 All simulation data, tool outputs, and indexes are consolidated in:
 
 ```
-/scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_benchmarks/
+<cluster scratch>/shared_data/hulkrna_benchmarks/
 ├── manifest.json                       # simulation parameters & condition definitions
 ├── truth_abundances_nrna_none.tsv      # ground truth (nrna_none conditions)
 ├── truth_abundances_nrna_rand.tsv      # ground truth (nrna_rand conditions)
@@ -232,7 +232,7 @@ New rigel runs go into `runs/<condition>/rigel/<config_name>/`.
 
 ### Reference Data (original locations)
 
-All references are under `/scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/`:
+All references are under `<cluster scratch>/shared_data/hulkrna/refs/human/`:
 
 | Asset | Path |
 |-------|------|

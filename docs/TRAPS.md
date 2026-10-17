@@ -119,7 +119,7 @@ toy); it is fixed now (`EMConfig.seed = 0`, and `tests/test_scan_order_independe
 three times). The rest is the BAM SCAN: its workers pull batches from one queue in whatever order they finish, each
 sums its own float64 fraction banks, and the merge adds the workers' sums, so the tally's last bits change from run
 to run at ANY scan thread count above one — `em.n_threads=1` pins neither. MEASURED 2026-09-25 at `g50 ss.99 OFF`
-(`~/Downloads/rigel_runs/prototypes/2026-09-26_repro/FINDINGS.md`): with the scan on one thread, 214 of 214 stage
+(`$RIGEL_RUNS/prototypes/2026-09-26_repro/FINDINGS.md`): with the scan on one thread, 214 of 214 stage
 arrays repeat bit for bit with calibration and the EM on every core; with it on all of them, the six fraction banks
 differ at ~1e-15, which reaches 64 loci's gDNA prior at ~3e-16 and, through the EM's forks, moves 317 transcripts by
 up to 0.88 fragments and nascent parent counts by up to 42 (four runs spanned 145 fragments of transcript Σ|Δ|).

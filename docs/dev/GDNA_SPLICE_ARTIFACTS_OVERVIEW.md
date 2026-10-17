@@ -2,7 +2,7 @@
 
 **Status:** investigation complete, fixes not yet implemented
 **Date:** 2026-08-03
-**Index case:** `mctp_LBX0077_SI_44263_HKWNYDRX7` (human, GRCh38 / gencode v46)
+**Index case:** `cfRNA-D` (human, GRCh38 / gencode v46)
 **Companion documents:**
 [GDNA_SPLICE_ARTIFACTS_ALIGNABLE.md](GDNA_SPLICE_ARTIFACTS_ALIGNABLE.md) ·
 [GDNA_SPLICE_ARTIFACTS_STAR.md](GDNA_SPLICE_ARTIFACTS_STAR.md) ·
@@ -63,11 +63,11 @@ The original run deleted every BAM (all declared `temp()`). The library was
 re-run in an isolated tree with references symlinked, retaining all intermediates:
 
 ```
-/scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_gdna_debug/
-  refs -> /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs   (symlink)
-  sample_sheets/gdna_debug_LBX0077.xlsx
-  logs/rerun_LBX0077.log
-  runs/human/mctp_LBX0077_SI_44263_HKWNYDRX7/
+<cluster scratch>/shared_data/hulkrna_gdna_debug/
+  refs -> <cluster scratch>/shared_data/hulkrna/refs   (symlink)
+  sample_sheets/gdna_debug_cfRNA-D.xlsx
+  logs/rerun_cfRNA-D.log
+  runs/human/cfRNA-D/
     fastq/k2_prefilter_{1,2}.dedup.fastq.gz    exact STAR input
     bam/star.srt.rmdup.collate.bam             direct rigel input
     bam/star.srt.rmdup.bam(.bai)               coord-sorted, indexed
@@ -79,15 +79,15 @@ Command used (12 jobs; no reference rebuild, no Globus upload, no
 salmon/kallisto/arriba/ciri3/bcftools/stringtie/zna):
 
 ```bash
-export PATH=/home/mkiyer/sw/miniforge3/envs/hulkrna/bin:$PATH
+export PATH=<cluster home>/sw/miniforge3/envs/hulkrna/bin:$PATH
 export HULKRNA_PREFLIGHT_OK=1
-BASE=/scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_gdna_debug
+BASE=<cluster scratch>/shared_data/hulkrna_gdna_debug
 snakemake --snakefile workflow/Snakefile --directory "$BASE" \
-  --profile profiles/arc_armis2_slurm \
-  --conda-prefix /scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/.snakemake/conda \
-  --config sample_sheet="$BASE/sample_sheets/gdna_debug_LBX0077.xlsx" \
+  --profile profiles/<cluster profile> \
+  --conda-prefix <cluster scratch>/shared_data/hulkrna/.snakemake/conda \
+  --config sample_sheet="$BASE/sample_sheets/gdna_debug_cfRNA-D.xlsx" \
   --notemp \
-  runs/human/mctp_LBX0077_SI_44263_HKWNYDRX7/rigel/annotated.bam
+  runs/human/cfRNA-D/rigel/annotated.bam
 ```
 
 **Reproducibility is exact where it matters.** Every spliced counter is identical
@@ -99,7 +99,7 @@ to the original run: `spliced_annotated` 10,643, `spliced_unannotated` 2,126,
 
 ### 3.2 Evidence bundle
 
-`/scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_gdna_debug/evidence/`
+`<cluster scratch>/shared_data/hulkrna_gdna_debug/evidence/`
 
 | file | contents |
 |---|---|
@@ -206,17 +206,17 @@ with both `rigel/summary.json` and `star/SJ.out.tab.gz`:
 - novel-junction blacklist capture correlates with `gdna_fraction` at Pearson
   **r = +0.857** / Spearman **+0.890** — the most gDNA-responsive junction-level
   statistic available
-- `LBX0077` ranks **1 of 344** (worst) on strand specificity, at 0.7856
+- `cfRNA-D` ranks **1 of 344** (worst) on strand specificity, at 0.7856
 - the best on-disk predictor of leakage among the 19 libraries with
   `gdna_fraction ≥ 0.90` is `calibration.gdna_density_global`
   (r = +0.758), **not** `gdna_fraction` (r = +0.347)
 - two same-flowcell siblings at 74% and 82% gDNA show clean strand specificity
-  (0.9911, 0.9931). They have **104 bp** mates; `LBX0077` has **138 bp**.
+  (0.9911, 0.9931). They have **104 bp** mates; `cfRNA-D` has **138 bp**.
   `104/2 = 52 < 62`, `138/2 = 69 > 62` — consistent with the anchor ceiling being
   a contributing mechanism, and implying **the problem worsens as read lengths
   grow**.
 
-Second-worst candidate for follow-up: `mctp_MI_1104_SI_43016_HNMVYDMXY`
+Second-worst candidate for follow-up: `cfRNA-G`
 (98.6% gDNA, strand specificity 0.9088, 19.1M fragments).
 
 ## 7. Design principle

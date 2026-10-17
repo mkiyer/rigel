@@ -4,7 +4,7 @@
 owner and for reviewers. Every number is pinned (one thread everywhere, fractional assignment, EM seed 0), in
 process, one scan and one calibration per condition with every arm's EM on the same replayed buffer
 (`harness.py --verify` reproduces the CLI to the fragment). The prototype, its harness and every table:
-`~/Downloads/rigel_runs/prototypes/2026-10-05_spectrum_ruler/` (`arms.py`, arm `pwfx_own_med`; README there). Nothing
+`$RIGEL_RUNS/prototypes/2026-10-05_spectrum_ruler/` (`arms.py`, arm `pwfx_own_med`; README there). Nothing
 in `src/` implements it.*
 
 ## 1. The question and the answer
@@ -112,12 +112,12 @@ The real libraries (the CLI's gDNA fraction; only VCaP has a truth, 0.2518 by re
 
 | library | 0.7.1 | tree (cap at 1) | prototype |
 |---|---|---|---|
-| LBX0190 (sparse plasma; the tree reads no reference) | 0.130 | 0.083 | 0.088 |
-| MO_3021 (sparse plasma; no reference) | 0.225 | 0.155 | 0.157 |
-| LBX0588 | 0.966 | 0.915 | 0.912 |
+| cfRNA-A (sparse plasma; the tree reads no reference) | 0.130 | 0.083 | 0.088 |
+| cfRNA-C (sparse plasma; no reference) | 0.225 | 0.155 | 0.157 |
+| cfRNA-B | 0.966 | 0.915 | 0.912 |
 | VCaP mix | 0.263 | 0.236 | 0.236 |
 
-On LBX0190 the prototype's population finds enriched levels near 106× and 13× the off-target density, at about 5 % of
+On cfRNA-A the prototype's population finds enriched levels near 106× and 13× the off-target density, at about 5 % of
 the opportunity each, where the tree's mode reader finds none: a sparse panel gets its capture with no detector. The
 ladder was still running when this was written (`ladder_pwfx.*` in the prototype directory).
 

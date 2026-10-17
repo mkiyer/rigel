@@ -40,7 +40,7 @@ validation items above before the reader rather than after it.
 
 Verified by direct inspection:
 
-- The worktree `/private/tmp/rigel-count-clean-20261008` is byte-identical to the frozen
+- The worktree `<worktree>` is byte-identical to the frozen
   `after/` snapshot in `.cache/rigel_runs/2026-10-08_release_foundation/` (source and tests),
   and the frozen package's `_solve_impl` hash matches `package.json` and `verification.json`.
 - The complete candidate diff against the owner's working tree (which includes the owner's
@@ -50,8 +50,8 @@ Verified by direct inspection:
   `strand_mode`, `claims`), the suite receipt (2,756 collected, 2,748 passed, 8 failed, 0 skipped,
   every failure a golden), the golden-disposition numbers, the stress-count receipts, and the
   frozen per-slot message rows of the extreme fixture (read below).
-- The real-library receipts' fitted sense fractions: VCaP 0.00013, lbx0190 0.0024, mo3021 0.0023,
-  lbx0588 0.0030. All four are strongly stranded antisense protocols.
+- The real-library receipts' fitted sense fractions: VCaP 0.00013, cfrna-a 0.0024, cfrna-c 0.0023,
+  cfrna-b 0.0030. All four are strongly stranded antisense protocols.
 
 Taken from receipts without re-running: byte identity of all 29 calibration fields and both
 belief arrays on seven cached conditions (test zero, test stranded ON, test unstranded ON,
@@ -197,7 +197,7 @@ each stage and `--bam` on a real library. The real-library validation of the cou
 sound but says nothing about the weak-strand path: every library is stranded.
 
 **Remedy.** (a) Freeze the frozen count candidate's package as the reference and run
-`rename_identity.py --check --bam` on lbx0190 (16 s per pipeline) with the cleaned package;
+`rename_identity.py --check --bam` on cfrna-a (16 s per pipeline) with the cleaned package;
 expect bit identity; any difference stops the landing. (b) If the owner's archive holds an
 unstranded library, run the one paired pipeline on it and read the gDNA fraction and the
 intronic-pool change beside the stranded four; if none exists, record the gap in `ISSUES` as a
@@ -329,7 +329,7 @@ Steps, all engineering, in order:
    the owner's uncommitted map repairs, so this is the worktree minus its stale `docs/`);
    rebuild with `pip install --no-build-isolation -e ".[dev]"`.
 2. Identity: `rename_identity.py --check` against the frozen count candidate on the test
-   chromosome, and `--bam` on lbx0190 (finding 3a). Bit identity or stop.
+   chromosome, and `--bam` on cfrna-a (finding 3a). Bit identity or stop.
 3. Goldens: `--update-golden` once, the eight movements named in the commit (finding 4).
 4. Docs: the factory out of DESIGN and EQUATIONS; the one-line note in ISSUES; the plan's
    Goal-service paragraph deleted (findings 5, 8).

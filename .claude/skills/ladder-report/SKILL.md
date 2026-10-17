@@ -14,11 +14,12 @@ after a code change.
 
 ## 1. Are the arms current?
 
-The arms live in `~/Downloads/rigel_runs/suite/ladder/arms/`. They are current only if they were
+The arms live in `$RIGEL_RUNS/suite/ladder/arms/` (the data root, `RUNS` in `scripts/design/_shared.py`;
+export it in the shell these commands run in). They are current only if they were
 written *after* the last change that could move a number.
 
 ```bash
-ls -la ~/Downloads/rigel_runs/suite/ladder/arms/*.jsonl
+ls -la $RIGEL_RUNS/suite/ladder/arms/*.jsonl
 git log -1 --format='%h %ad %s' --date=iso
 ```
 
@@ -39,7 +40,7 @@ is what makes the next delta attributable.
 ```bash
 python .claude/skills/ladder-report/build_report.py \
     --html /tmp/ladder_report.html \
-    --markdown ~/Downloads/rigel_runs/reports/ladder_accuracy_<DATE>.md
+    --markdown $RIGEL_RUNS/reports/ladder_accuracy_<DATE>.md
 ```
 
 The markdown comes from `quant_accuracy.py --markdown`, which the suite gates

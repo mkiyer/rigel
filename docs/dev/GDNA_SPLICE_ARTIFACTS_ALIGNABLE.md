@@ -1,6 +1,6 @@
 # `alignable`: Defects and Specifications for Splice-Artifact Cataloguing
 
-**Audience:** a dedicated session working in `/home/mkiyer/proj/alignable`
+**Audience:** a dedicated session working in `<cluster home>/proj/alignable`
 **Status:** specification; no changes made to `alignable` by this investigation
 **Parent:** [GDNA_SPLICE_ARTIFACTS_OVERVIEW.md](GDNA_SPLICE_ARTIFACTS_OVERVIEW.md)
 **Version investigated:** `alignable` 0.1.0, zarr built 2026-04-18
@@ -31,7 +31,7 @@ pre-registered validation target.
 ## 1. The production artefact under discussion
 
 ```
-/scratch/mkiyer_root/mkiyer0/shared_data/hulkrna/refs/human/alignable.zarr.zip   26 GB
+<cluster scratch>/shared_data/hulkrna/refs/human/alignable.zarr.zip   26 GB
 ```
 
 Recorded root attributes (ground truth for what the current blacklist covers):
@@ -47,14 +47,14 @@ Recorded root attributes (ground truth for what the current blacklist covers):
   "error_rate": 0.01,
   "tolerance": 3,
   "coverage": 5,
-  "genome_fasta": "/scratch/.../shared_data/alignable/refs/genome_controls.fasta.bgz"
+  "genome_fasta": "<cluster scratch>/shared_data/alignable/refs/genome_controls.fasta.bgz"
 }
 ```
 
 The generating config survives at
-`/scratch/mkiyer_root/mkiyer0/shared_data/alignable/config.yaml`. Note the STAR
+`<cluster scratch>/shared_data/alignable/config.yaml`. Note the STAR
 index it referenced
-(`/scratch/.../shared_data/alignable/refs/star_index`) **has been deleted**;
+(`<cluster scratch>/shared_data/alignable/refs/star_index`) **has been deleted**;
 regeneration will need a fresh index built with `--sjdbGTFfile` and
 `--sjdbOverhang` matching production (currently 149).
 
@@ -295,7 +295,7 @@ The simulation is centred **85 bp longer** than the real gDNA population
   5,433) than its blacklisted ones (median 2,037) — i.e. long-range spurious
   stitches are *under*-sampled, consistent with the fragment model being centred
   too long **and** too narrow to populate the tails densely.
-- By contrast, in `LBX0054` (74% gDNA, 104 bp reads) the artifact classes are much
+- By contrast, in `cfRNA-F` (74% gDNA, 104 bp reads) the artifact classes are much
   shorter (novel median 603, blacklisted 234), so the short-intron signature is
   **read-length dependent** and is not a general discriminator.
 
@@ -336,7 +336,7 @@ Every change must be evaluated on **both** an extreme-gDNA library and a clean
 library. Loosening the catalogue has a real specificity cost:
 
 Moving to `min_count = 1` would newly blacklist **3,315 annotated junctions**
-carrying **185,542 unique crossing reads** in clean control `LBX0629`
+carrying **185,542 unique crossing reads** in clean control `cfRNA-E`
 (annotated capture 25.1% → 43.6%). Under the current anchor rule most still
 escape via long anchors, so immediate damage is limited — but raising coverage
 raises `max_anchor` values, which starts rejecting genuine RNA.
@@ -345,11 +345,11 @@ raises `max_anchor` values, which starts rejecting genuine RNA.
 
 | role | library | gDNA | note |
 |---|---|---|---|
-| positive (artifact-rich) | `mctp_LBX0077_SI_44263_HKWNYDRX7` | 0.964 | index case, BAM retained |
-| positive (second) | `mctp_MI_1104_SI_43016_HNMVYDMXY` | 0.986 | strand specificity 0.9088 |
-| negative (clean) | `mctp_MI_1089_SI_40085_HKF7JDRX5` | 0.001 | strand 0.9982 |
-| negative (clean) | `mctp_MI_1083_SI_40080_HKF7JDRX5` | 0.003 | strand 0.9975 |
-| intermediate | `mctp_LBX0054_SI_43886_HKWNYDRX7` | 0.742 | 104 bp mates, does **not** leak |
+| positive (artifact-rich) | `cfRNA-D` | 0.964 | index case, BAM retained |
+| positive (second) | `cfRNA-G` | 0.986 | strand specificity 0.9088 |
+| negative (clean) | `cfRNA-H` | 0.001 | strand 0.9982 |
+| negative (clean) | `cfRNA-I` | 0.003 | strand 0.9975 |
+| intermediate | `cfRNA-F` | 0.742 | 104 bp mates, does **not** leak |
 
 ### Primary metrics
 
@@ -372,8 +372,8 @@ Re-running `rigel quant` against a new index using the retained BAM takes ~25 mi
 and requires no re-alignment:
 
 ```bash
-BAM=/scratch/mkiyer_root/mkiyer0/shared_data/hulkrna_gdna_debug/runs/human/\
-mctp_LBX0077_SI_44263_HKWNYDRX7/bam/star.srt.rmdup.collate.bam
+BAM=<cluster scratch>/shared_data/hulkrna_gdna_debug/runs/human/\
+cfRNA-D/bam/star.srt.rmdup.collate.bam
 rigel quant --index <NEW_INDEX> --bam "$BAM" --threads 8 -o <OUTDIR> \
             --annotated-bam <OUTDIR>/annotated.bam
 ```

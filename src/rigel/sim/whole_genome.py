@@ -48,6 +48,8 @@ supplies nRNA values.
 from __future__ import annotations
 
 import logging
+import os
+import re
 from pathlib import Path
 
 import numpy as np
@@ -144,6 +146,29 @@ def _refuse_unknown_keys(raw: dict, known: frozenset[str], where: str) -> None:
         raise ValueError(f"{where}: unknown key(s) {unknown}; known: {sorted(known)}")
 
 
+#: A variable reference in a path, ``$NAME`` or ``${NAME}``: the pattern :func:`os.path.expandvars` reads, an
+#: unclosed ``${`` included, so every reference the expansion would leave in place is one the check sees.
+_PATH_VARIABLE = re.compile(r"\$(\w+|\{[^}]*\}?)", re.ASCII)
+
+
+def expand_config_path(value, key: str):
+    """A path a sim config names, with ``~`` and every ``$NAME`` / ``${NAME}`` expanded: the one expansion
+    every path in a config goes through, so a config names its data root as ``$RIGEL_RUNS`` rather than
+    as an absolute path. A variable that is unset or empty is refused by name: left in place it would
+    make a path literally named ``$RIGEL_RUNS``, and expanded to nothing it would move the path to ``/``.
+    A value that is not a string (an absent key's ``None``) is returned as it is."""
+    if not isinstance(value, str):
+        return value
+    names = {ref.strip("{}") for ref in _PATH_VARIABLE.findall(value)}
+    unset = sorted(name for name in names if not os.environ.get(name))
+    if unset:
+        raise ValueError(
+            f"{key}: {value!r} names an environment variable that is unset or empty "
+            f"({', '.join('$' + name for name in unset)}); export it, or write the path out"
+        )
+    return os.path.expanduser(os.path.expandvars(value))
+
+
 def _refuse_a_run_that_keeps_no_reads(cfg: WholeGenomeSimConfig) -> None:
     """Raise when ``oracle_bam`` and ``emit_fastq`` are both false. No oracle BAM is written and the FASTQs
     are deleted once each condition's truth is, so no condition keeps a read; and without a BAM the FASTQ
@@ -184,7 +209,7 @@ def _capture_config_from_mapping(
         return CaptureConfig()
 
     return CaptureConfig(
-        probes=str(probes),
+        probes=expand_config_path(str(probes), f"capture config '{label}': probes"),
         probe_format=str(merged.get("probe_format", CaptureConfig.probe_format)),
         off_target_weight=float(merged.get("off_target_weight", CaptureConfig.off_target_weight)),
         binding_per_base=float(merged.get("binding_per_base", CaptureConfig.binding_per_base)),
@@ -249,11 +274,11 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
         _refuse_unknown_keys(raw.get(section, {}), known, section)
 
     cfg = WholeGenomeSimConfig()
-    cfg.genome = raw.get("genome", cfg.genome)
-    cfg.gtf = raw.get("gtf", cfg.gtf)
-    cfg.shadow_gtf = raw.get("shadow_gtf", cfg.shadow_gtf)
-    cfg.index = raw.get("index", cfg.index)
-    cfg.outdir = raw.get("outdir", cfg.outdir)
+    cfg.genome = expand_config_path(raw.get("genome", cfg.genome), "genome")
+    cfg.gtf = expand_config_path(raw.get("gtf", cfg.gtf), "gtf")
+    cfg.shadow_gtf = expand_config_path(raw.get("shadow_gtf", cfg.shadow_gtf), "shadow_gtf")
+    cfg.index = expand_config_path(raw.get("index", cfg.index), "index")
+    cfg.outdir = expand_config_path(raw.get("outdir", cfg.outdir), "outdir")
 
     # Simulation params
     sim_raw = raw.get("simulation", {})
@@ -280,7 +305,7 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     ab.min = float(ab_raw.get("min", ab.min))
     ab.max = float(ab_raw.get("max", ab.max))
     ab.frac_expressed = float(ab_raw.get("frac_expressed", ab.frac_expressed))
-    ab.file = ab_raw.get("file", ab.file)
+    ab.file = expand_config_path(ab_raw.get("file", ab.file), "abundance.file")
 
     # nRNA spike-in sweep — top-level "nrna:" section is canonical
     nrna_raw = raw.get("nrna", {})

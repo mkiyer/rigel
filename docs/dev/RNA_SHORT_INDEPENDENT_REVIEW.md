@@ -11,7 +11,7 @@
 - the three named ISSUES entries;
 - FRAGMENT_LENGTH_POSTMORTEM §2.
 
-**Archive:** `~/Downloads/rigel_runs/prototypes/2026-10-06_rna_short_counts/`. Its receipts and gate logs were read, not re-run.
+**Archive:** `$RIGEL_RUNS/prototypes/2026-10-06_rna_short_counts/`. Its receipts and gate logs were read, not re-run.
 
 **Computed here:** two offline numpy passes over the archive's frozen native inputs (no solve; commands in the appendix).
 
@@ -532,7 +532,7 @@ Settled by derivation, so not a question:
 
 ```bash
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
-cd ~/Downloads/rigel_runs/prototypes/2026-10-06_rna_short_counts
+cd $RIGEL_RUNS/prototypes/2026-10-06_rna_short_counts
 python - <<'EOF'
 import pickle, numpy as np
 for p in ["test_g50_terminus/scenarios_0.50_native.pkl", "test_g98_terminus/scenarios_0.70_on_native.pkl"]:

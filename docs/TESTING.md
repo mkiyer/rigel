@@ -18,8 +18,10 @@ Two rules govern the whole file (`TRAPS: prove-the-substrate`, `TRAPS: can-the-b
 
 ## 0. The panels — one ladder and its side panels
 
-Everything simulated lives under `~/Downloads/rigel_runs/suite/` (the ladder, the two side panels, the
-carved reference and the index) and `~/Downloads/rigel_runs/test_reference/` (the test chromosome, §0a).
+`$RIGEL_RUNS` names the benchmark data root, which lives outside the repository: the instruments read it from
+the environment, and the shell lines below need it exported (`export RIGEL_RUNS=<the data root>`). Everything
+simulated lives under `$RIGEL_RUNS/suite/` (the ladder, the two side panels, the carved reference and the index)
+and `$RIGEL_RUNS/test_reference/` (the test chromosome, §0a).
 The panel says how much error there is and where.
 
 **The ladder** (`scripts/sim/configs/gdna_ladder.yaml`, `ladder/`) is the only panel the tool is ranked on.
@@ -143,7 +145,7 @@ COMPOSITION-certified). One row by hand is a §2 gotcha.
 
 ```bash
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
-T=~/Downloads/rigel_runs/test_reference
+T=$RIGEL_RUNS/test_reference
 
 # 1. renders (GTFs, abundances, probe panels — into the repo AND the runs dir) + the two-contig FASTA;
 #    `--check` alone says whether the checked-in renders still match the YAML
@@ -251,7 +253,7 @@ seconds; `--condition` prints the per-class table, without it every capture-ON c
 python scripts/design/ruler_vs_truth.py --panel test --condition gdna_g05_ss_0.99_nrna_file_capture_on
 python scripts/design/ruler_vs_truth.py --panel ladder                       # one line per capture-ON row
 python scripts/design/ruler_vs_truth.py --panel test --condition C --module proto.py --out table.tsv
-python scripts/design/ruler_vs_truth.py --panel test --panel-dir ~/Downloads/rigel_runs/test_reference/scenarios_depth_d10
+python scripts/design/ruler_vs_truth.py --panel test --panel-dir $RIGEL_RUNS/test_reference/scenarios_depth_d10
 python scripts/design/ruler_vs_truth.py --panel ladder --condition gdna_g50_ss_0.99_nrna_mid_capture_on --scale
 ```
 
@@ -359,7 +361,7 @@ reference — that needs the source genome/GTF, which the config does not name �
 command and stops:
 
 ```bash
-REFS=~/Downloads/rigel_runs/refs SUITE=~/Downloads/rigel_runs/suite
+REFS=$RIGEL_RUNS/refs SUITE=$RIGEL_RUNS/suite
 python scripts/sim/build_suite_reference.py \
     --fasta $REFS/genome_controls.fasta.bgz --gtf $REFS/genes_controls.sorted.gtf \
     --refs chr21 chr22 --ercc -o $SUITE/reference
@@ -492,20 +494,20 @@ once, from the tree a stage starts on, and every `--check` of that stage reads a
 tree reads MOVED whatever the change, since the tool's output has moved since (the `arms/review_identity_*.json` of
 2026-09-21 are such). The current references were frozen at 27f6a1dc (2026-10-14) — the ladder's
 `gdna_g05_ss_0.99_nrna_mid_capture_off` and the VCaP mix — and every commit since checked BIT-IDENTICAL against them:
-`~/Downloads/rigel_runs/prototypes/2026-10-14_sched/identity_head_{g05off,vcap}.json`. The instrument's default
+`$RIGEL_RUNS/prototypes/2026-10-14_sched/identity_head_{g05off,vcap}.json`. The instrument's default
 `--reference` does not exist and it prints ⛔ rather than failing, so pass each one and read the log, never the exit
 code:
 
-    P=~/Downloads/rigel_runs/prototypes/2026-10-14_sched S=~/Downloads/rigel_runs/suite
+    P=$RIGEL_RUNS/prototypes/2026-10-14_sched S=$RIGEL_RUNS/suite
     python scripts/design/rename_identity.py --check --suite $S/ladder --index $S/rigel_index \
       --condition gdna_g05_ss_0.99_nrna_mid_capture_off --reference $P/identity_head_g05off.json
-    python scripts/design/rename_identity.py --check --index ~/Downloads/rigel_runs/refs/rigel_index \
-      --bam ~/Downloads/rigel_runs/cfrna/mctp_vcap_rna20m_dna05m/bam/star.srt.rmdup.collate.bam \
+    python scripts/design/rename_identity.py --check --index $RIGEL_RUNS/refs/rigel_index \
+      --bam $RIGEL_RUNS/cfrna/vcap_mix/bam/star.srt.rmdup.collate.bam \
       --reference $P/identity_head_vcap.json
 
 The replay target is a captured set of the deep library's (VCaP's) sweeps, re-captured by
 `sweep_replay.py capture` whenever a step moves numbers, the superseded set deleted (`DESIGN.md` §6b.15); none is
-on disk now (`~/Downloads/rigel_runs/perf/` is empty), so capture one before a sweep change is replayed. A port is
+on disk now (`$RIGEL_RUNS/perf/` is empty), so capture one before a sweep change is replayed. A port is
 held to the replay's `--tolerance` budget and to the transfer gates, which hold the kernel's tables — returned by
 `native.transfer_prepare` — to independent recomputes and drive single hops of the native pass through
 `native.transfer_pass` (`tests/calibration/_transfer_harness.py`, where the tables' containers live; the row constructors

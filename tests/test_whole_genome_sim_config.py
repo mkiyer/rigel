@@ -12,6 +12,8 @@ perturbation to the mechanism passed every other gate in the file.
 import hashlib
 import importlib.util
 import json
+import os
+import re
 import sys
 from pathlib import Path
 
@@ -236,12 +238,85 @@ def test_no_oracle_bam_and_no_fastq_is_refused_when_the_config_is_read(tmp_path)
         parse_yaml_config(config_path)
 
 
-def test_every_in_repo_sim_config_parses():
-    """A key the parser refuses would stop a panel from being re-simulated."""
+def _paths_named(cfg) -> list[str]:
+    """Every path a parsed config names: the five top-level paths, the abundance file, the probes."""
+    top = [cfg.genome, cfg.gtf, cfg.shadow_gtf, cfg.index, cfg.outdir, cfg.abundance.file]
+    probes = [cfg.capture.probes, *(scenario.config.probes for scenario in cfg.capture_configs)]
+    return [path for path in [*top, *probes] if path]
+
+
+def test_a_config_path_expands_its_variables_and_the_home_directory(tmp_path, monkeypatch):
+    """The in-repo configs name their data root as `$RIGEL_RUNS`, so every path a config names goes
+    through one expansion, `$NAME`, `${NAME}` and `~`, in each of the seven places a path is read.
+    PERTURBATIONS: dropping `expandvars` fails every `$` path, dropping `expanduser` the two `~`
+    paths, and a call site that skips the expansion fails its own key."""
+    root, home = tmp_path / "root", tmp_path / "home"
+    monkeypatch.setenv("RIGEL_TEST_ROOT", str(root))
+    monkeypatch.setenv("HOME", str(home))
+    config_path = tmp_path / "sim.yaml"
+    config_path.write_text(
+        "genome: $RIGEL_TEST_ROOT/genome.fa\n"
+        "gtf: ${RIGEL_TEST_ROOT}/genes.gtf\n"
+        "shadow_gtf: ~/shadow.gtf\n"
+        "index: $RIGEL_TEST_ROOT/idx\n"
+        "outdir: ~/out\n"
+        "abundance:\n  mode: file\n  file: $RIGEL_TEST_ROOT/abundances.tsv\n"
+        "capture:\n  configs:\n"
+        '    - {label: "off", enabled: false}\n'
+        '    - {label: "on", probes: $RIGEL_TEST_ROOT/probes.bed}\n'
+    )
+
+    cfg = parse_yaml_config(config_path)
+
+    assert cfg.genome == str(root / "genome.fa")
+    assert cfg.gtf == str(root / "genes.gtf")
+    assert cfg.shadow_gtf == str(home / "shadow.gtf")
+    assert cfg.index == str(root / "idx")
+    assert cfg.outdir == str(home / "out")
+    assert cfg.abundance.file == str(root / "abundances.tsv")
+    assert cfg.capture_configs[1].config.probes == str(root / "probes.bed")
+
+
+def test_a_config_path_naming_an_unset_or_empty_variable_is_refused_by_name(tmp_path, monkeypatch):
+    """`os.path.expandvars` leaves an unset variable as written, so an unset `RIGEL_RUNS` would read and
+    write a directory literally named `$RIGEL_RUNS`, and an empty one would move the path to `/`. Both
+    are refused, naming the key and the variable. PERTURBATIONS: deleting the refusal fails every row;
+    testing that the name is in the environment rather than that its value is not empty fails the
+    empty one."""
+    monkeypatch.delenv("RIGEL_TEST_UNSET", raising=False)
+    monkeypatch.setenv("RIGEL_TEST_EMPTY", "")
+    config_path = tmp_path / "sim.yaml"
+    genome, gtf = "genome: /tmp/genome.fa\n", "gtf: /tmp/genes.gtf\n"
+    probes = 'capture:\n  configs:\n    - {label: "on", probes: $RIGEL_TEST_UNSET/p.bed}\n'
+    for body, key, variable in [
+        ("genome: $RIGEL_TEST_UNSET/genome.fa\n" + gtf, "genome", "RIGEL_TEST_UNSET"),
+        (genome + "gtf: ${RIGEL_TEST_UNSET}/genes.gtf\n", "gtf", "RIGEL_TEST_UNSET"),
+        (genome + gtf + "outdir: $RIGEL_TEST_EMPTY/out\n", "outdir", "RIGEL_TEST_EMPTY"),
+        (genome + gtf + probes, "capture config 'on': probes", "RIGEL_TEST_UNSET"),
+    ]:
+        config_path.write_text(body)
+        with pytest.raises(ValueError, match=rf"^{re.escape(key)}: .*\(\${variable}\)"):
+            parse_yaml_config(config_path)
+
+
+def test_every_in_repo_sim_config_parses(monkeypatch):
+    """A key the parser refuses would stop a panel from being re-simulated. The configs name their
+    paths under `$RIGEL_RUNS`, set here as `panel.py` and `simulate_reads.py` set it, to the data root
+    the instruments default to (`RUNS` in `scripts/design/_shared.py`), and every path such a config
+    names lands under it. PERTURBATIONS: without the variable every such config is refused; a path in
+    one written under another root fails the last assertion."""
+    monkeypatch.syspath_prepend(str(ROOT / "scripts" / "design"))
+    runs = importlib.import_module("_shared").RUNS
+    monkeypatch.setenv("RIGEL_RUNS", str(runs))
+    # the template's `outdir` names `$USER`; set it for a shell that has none
+    monkeypatch.setenv("USER", os.environ.get("USER") or "rigel")
     configs = sorted((ROOT / "scripts" / "sim" / "configs").glob("*.yaml"))
     assert configs, "no sim configs found — this test would pass vacuously"
     for path in configs:
-        parse_yaml_config(path)
+        cfg = parse_yaml_config(path)
+        if "$RIGEL_RUNS" in path.read_text():
+            outside = [p for p in _paths_named(cfg) if not Path(p).is_relative_to(runs)]
+            assert not outside, f"{path.name} names a path outside $RIGEL_RUNS: {outside}"
 
 
 def _sparse_population(n: int, *, seed: int = 3) -> tuple[list[Transcript], list[Transcript]]:

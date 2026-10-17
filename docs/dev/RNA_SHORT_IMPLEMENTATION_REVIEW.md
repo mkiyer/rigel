@@ -453,7 +453,7 @@ the owner's external feedback.
 
 ## 10. Evidence package and reproduction references
 
-Local archive: `~/Downloads/rigel_runs/prototypes/2026-10-06_rna_short_counts/`.
+Local archive: `$RIGEL_RUNS/prototypes/2026-10-06_rna_short_counts/`.
 The archive is local evidence, not a public download; a reviewer outside this workspace needs the
 owner to provide it or the relevant receipts. The formulas, file map and selected results above are
 included so the request can be understood without access to that directory.

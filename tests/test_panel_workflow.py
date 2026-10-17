@@ -89,6 +89,29 @@ def test_the_probe_panel_is_the_one_the_capture_config_names(tmp_path):
     assert p.probes == probes
 
 
+def test_every_path_is_expanded_as_the_simulator_expands_it(tmp_path, monkeypatch):
+    """The in-repo configs name their paths under `$RIGEL_RUNS`. The workflow must derive the paths the
+    simulator reads, or `status` checks one directory while `simulate` writes another. PERTURBATION:
+    any one of the five without the expansion is a directory literally named `$RIGEL_TEST_ROOT`."""
+    root = tmp_path / "root"
+    monkeypatch.setenv("RIGEL_TEST_ROOT", str(root))
+    paths = {
+        "genome": "$RIGEL_TEST_ROOT/ref/genome.fa",
+        "gtf": "$RIGEL_TEST_ROOT/ref/genes.gtf",
+        "outdir": "${RIGEL_TEST_ROOT}/panel",
+        "index": "$RIGEL_TEST_ROOT/idx",
+        "capture": {"configs": [{"label": "on", "probes": "$RIGEL_TEST_ROOT/probes.bed"}]},
+    }
+    p = PANEL.Panel(_config(tmp_path, **paths))
+    assert (p.genome, p.gtf, p.dir, p.index, p.probes) == (
+        root / "ref" / "genome.fa",
+        root / "ref" / "genes.gtf",
+        root / "panel",
+        root / "idx",
+        root / "probes.bed",
+    )
+
+
 @pytest.mark.parametrize("missing", ["genome", "gtf", "outdir"])
 def test_a_config_missing_a_path_key_is_REFUSED(tmp_path, missing):
     """Not defaulted, not guessed. A panel that does not say where it lives cannot be driven, and

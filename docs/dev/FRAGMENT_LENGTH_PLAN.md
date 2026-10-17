@@ -9,7 +9,7 @@ version, 2026-10-02, against `bdfd8709`. Nothing in it is built. The problem sta
 
 **Status, 2026-10-03:**
 - Stage 0 tier 1, Stage 1, Stage 3 and the bench-only Part 2 prototype have run. The verdicts and the owner's open
-  questions are in `~/Downloads/rigel_runs/prototypes/HANDOFF_2026-10-03.md`.
+  questions are in `$RIGEL_RUNS/prototypes/HANDOFF_2026-10-03.md`.
 - In short:
   - Part 1 is correct but needs a class-conditional partner.
   - Part 2 is right as the ruler's reference source and not ready as ψ's prior.

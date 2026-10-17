@@ -78,13 +78,13 @@
 #
 # Run:  python scripts/sim/panel.py status --config scripts/sim/configs/flgap_rna_short.yaml
 
-genome: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genome.fa
-gtf: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genes.gtf
+genome: $RIGEL_RUNS/suite/reference/genome.fa
+gtf: $RIGEL_RUNS/suite/reference/genes.gtf
 # ⭐ The SAME reference and index as the ladder, so the annotation, the probes and the set of synthetic
 # nascent ENTITIES are identical. ⛔ ONE thing differs from the ladder: the fragment-length parameters,
 # deliberately, this panel's whole purpose.
-index: /Users/mkiyer/Downloads/rigel_runs/suite/rigel_index
-outdir: /Users/mkiyer/Downloads/rigel_runs/suite/flgap_rna_short
+index: $RIGEL_RUNS/suite/rigel_index
+outdir: $RIGEL_RUNS/suite/flgap_rna_short
 
 # ⭐ No FASTQs (owner, 2026-10-03): nothing reads them — every scorer reads the oracle BAM and `panel.py`
 # finds a condition by `sim_oracle.bam`. The truth tables are written from the oracle BAM first.
@@ -139,7 +139,7 @@ capture:
   min_overlap: 1
   configs:
     - {label: "off", enabled: false}
-    - {label: "on", probes: /Users/mkiyer/Downloads/rigel_runs/suite/reference/capture_panel.tsv}
+    - {label: "on", probes: $RIGEL_RUNS/suite/reference/capture_panel.tsv}
 
 oracle_bam: true
 verbose: true

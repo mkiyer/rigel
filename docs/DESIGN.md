@@ -718,11 +718,11 @@ Three reasons, each measured.
 1. **No population measures it cleanly.**
    - On the gDNA side no object class is pure: pervasive transcription is real, the intergenic space is whatever the
      GTF leaves over, and antisense RNA pushes a genic seed onto the side the away-half moment kept. The VCaP
-     RNA-only library's 118,622 away-half seeds read 0.47; MO_3021's gDNA fit read 0.133 against its junctions' 0.02.
+     RNA-only library's 118,622 away-half seeds read 0.47; cfRNA-C's gDNA fit read 0.133 against its junctions' 0.02.
    - A strand count alone cannot tell a noisy gDNA rate from gDNA plus a little RNA. At n ≤ 3 the two are the same
-     law exactly (`EQUATIONS.md` §6a), and 73 % of LBX0588's seeds (95 % at 10 % depth) have n ≤ 3.
+     law exactly (`EQUATIONS.md` §6a), and 73 % of cfRNA-B's seeds (95 % at 10 % depth) have n ≤ 3.
    - On the RNA side, splice artifacts sit at ½ in a stranded library, and one junction can decide the value: one
-     LBX0588 junction (7 wrong-strand reads of 95) carries 12.5 of the 16.3 log-likelihood units for od > 0.
+     cfRNA-B junction (7 wrong-strand reads of 95) carries 12.5 of the 16.3 log-likelihood units for od > 0.
 2. **The costs are lopsided.**
    - 0.2 where the truth is 0 costs +200 % calibration error on the ladder's stranded × capture-ON rows.
    - 0 where gDNA's truth is 0.05 costs +17 % on `odg05`'s stranded × capture-OFF calibration, all of it on the
@@ -730,7 +730,7 @@ Three reasons, each measured.
 3. **Binomial wins where it can be scored.**
    - On the VCaP mix, against read-name truth, the gDNA pool error falls from −6.40 % to −6.11 %, transcripts by
      0.15 % and genes by 1.1 %.
-   - LBX0588's gDNA total varies across 10 % subsamples by 0.74 % instead of 3.45 %.
+   - cfRNA-B's gDNA total varies across 10 % subsamples by 0.74 % instead of 3.45 %.
    - The ladder is flat, and the test panel's stranded × capture-OFF transcripts improve by 3.8 %.
 
 What this replaced:
@@ -759,7 +759,7 @@ empty spliced census is an unstranded library — κ = ½, od = 0, a dead strand
 
 **Why.** Splice artifacts sit at ½ in a stranded library, and on a gDNA-heavy library they are a large share of the
 shallow junctions:
-- LBX0588's pooled κ is 0.064 against 0.0030 from its genuine junctions, with 22 % of its junctions in the artifact
+- cfRNA-B's pooled κ is 0.064 against 0.0030 from its genuine junctions, with 22 % of its junctions in the artifact
   class.
 - A κ too high credits real gDNA's wrong-strand reads to RNA.
 
@@ -768,7 +768,7 @@ shallow junctions:
   gDNA pool error −9.57 → −9.23 %; transcripts −0.7 %; genes −1.7 %. The remaining error, about 430k gDNA fragments
   called RNA under either κ, is the exome-captured DNA half reading as RNA, not κ's.
 - **The VCaP mix:** gDNA pool error −6.11 → −6.09 %; transcripts and genes flat.
-- **LBX0588's gDNA share:** 0.45 → 0.53 at 10 % depth. Subsampling cannot change it; full depth reads 0.84.
+- **cfRNA-B's gDNA share:** 0.45 → 0.53 at 10 % depth. Subsampling cannot change it; full depth reads 0.84.
   - At 1 % every draw rises, 0.10–0.11 → 0.11–0.12.
   - The spread across draws widens, 4.9 → 7.8 %. At 150 spliced reads, κ is 0.059 on one draw and 0.006 on two.
 - **Without artifacts, bit-identical:** every ladder row, and 35 of 40 stranded test and `odg05` rows. The other five move
@@ -780,7 +780,7 @@ observed record. Where the maximum puts every junction in the genuine class, κ 
 5×10⁻⁴ and 9×10⁻³ of κ, the second toward its truth (0.3032 → 0.3005 against 0.30) (`EQUATIONS.md` §5.4).
 
 **Why the MLE (owner, 2026-10-01).** It reads the RNA classes' reads directly and is exact where every junction is
-genuine. On LBX0588's draws it tracks full depth (0.0030) more closely than the profiled posterior mean: 0.0031–0.0071
+genuine. On cfRNA-B's draws it tracks full depth (0.0030) more closely than the profiled posterior mean: 0.0031–0.0071
 against 0.0052–0.0093 at 10 % depth.
 
 **Limits.** This is strand evidence only.
@@ -1520,7 +1520,7 @@ a 140 s deep run and cost 2.3 GB held through calibrate, a key that had to name 
 forgotten field serves stale messages silently), and the deliveries' round trip through Python. The kernel's
 contract is arrays in, arrays out, integer counts.
 
-**The measured price** (VCaP, 18.6 M fragments, 8 threads, interleaved pairs; `~/Downloads/rigel_runs/perf/` holds
+**The measured price** (VCaP, 18.6 M fragments, 8 threads, interleaved pairs; `$RIGEL_RUNS/perf/` holds
 each step): the port took the deep library from 526 s to 144 s and the four sweeps from 396 s to 16 s (24.8 s once
 the cache went); the work
 outside calibration that followed — a bisection that ends when its bracket does, the Poisson identity's log-gamma as
@@ -1547,8 +1547,8 @@ tolerance report shows the AMBIG slots' fractions moving by ≤ 2e-7 (float32 �
 single-strand slots by less, through the messages; the suite; and timing on a back-to-back pair on the deep
 library — wall 518 → 524 s (1.01), the ψ solves inside the sweep 0.94, untouched stages 1.00, peak 18.1 →
 19.5 GB (the cache's float64 rows). The replay's captures and the identity references were re-taken from
-this tree (`sweeps_MO_3021_step3`, `onesolver_identity_*`; again after the memory steps:
-`sweeps_MO_3021_step4`, `memory_identity_*`): the earlier ones describe the two-solver code and unpickle
+this tree (`sweeps_cfRNA-C_step3`, `onesolver_identity_*`; again after the memory steps:
+`sweeps_cfRNA-C_step4`, `memory_identity_*`): the earlier ones describe the two-solver code and unpickle
 against the belief's retired fields.
 
 #### 6b.15.7 Memory: the transients, not the sweeps (2026-09-12)
@@ -1564,7 +1564,7 @@ landscape's kernels are built and summed a row tile at a time (`landscape._rende
 rule), so a million training regions never exist as a matrix. The former third allocation,
 block-local intron-factory rows, was removed with the factory. One back-to-back pair on the
 deep library: peak 19.2 → 11.4 GB, wall 505 → 498 s, untouched stages 1.00. The identity references and the
-replay captures were re-taken (`memory_identity_*`, `sweeps_MO_3021_step4`).
+replay captures were re-taken (`memory_identity_*`, `sweeps_cfRNA-C_step4`).
 
 #### 6b.15.8 The received messages are tables (2026-09-12, bit-identical on the replay, the three references and the suite)
 
@@ -1952,7 +1952,7 @@ mode?"), and without one the old reader switched every correction off; the singl
 
 Measured against the foundation's reader (`quant_accuracy.py`, pinned and fractional): the single-probe
 target gene −10 / +0.1 %; sparse κ 0.99 ON 24.43 → 21.60 %, junction κ 0.99 ON 32.05 → 30.29 %; the plasma
-libraries LBX0190 and MO_3021 read 611 and 376 enriched objects where it read none; the ladder's in-scope strata
+libraries cfRNA-A and cfRNA-C read 611 and 376 enriched objects where it read none; the ladder's in-scope strata
 within 0.06 (stranded ON 3.87 → 3.87). Two in-scope costs are accepted (owner, 2026-10-13): RNA-short stranded ON
 13.32 → 13.50 and RNA-long 4.25 → 5.17, both isoform allocation in junction-probed genes with the gene error flat.
 The benefits survive every EM view measured — shipped, ordinary updates, converged — with the gene-level gains
@@ -2059,7 +2059,7 @@ corrected abundance and its detection limit from it. The yield has no floor. A c
 position has a yield of exactly 0 and cannot emit — its E-step weight is −∞, and a fragment no component can
 emit is left unassigned, never NaN (gate `test_a_transcript_with_no_start_position_cannot_emit`) — and every
 positive yield enters as it is. The 1 bp floors the EM and the assembler carried were geometric guards that
-capture had turned into efficiency clamps: on LBX0588 every transcript shorter than a kilobase sat on them,
+capture had turned into efficiency clamps: on cfRNA-B every transcript shorter than a kilobase sat on them,
 and the floor was the mechanism deciding the isoform split of 319 of 725 multi-isoform genes (the lever
 census, 2026-09-17). What the census then showed is a property of the model and not of the floor, measured on
 VCaP on the per-base length, as were the draws below: 4,677 of 12,039 multi-isoform genes with ≥ 20 fragments

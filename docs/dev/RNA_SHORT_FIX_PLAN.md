@@ -37,7 +37,7 @@ The owner drives commits and publication.
 | Density-evidence references | Separate Python/native prototypes. Own observations are certified; the complete neighbour factor and efficient both-strand implementation are unfinished. |
 | Population, admission, equal-weight and edge-withdrawal alternatives | Measured research, not selected for production. None is part of the count candidate. |
 
-The count worktree is `/private/tmp/rigel-count-clean-20261008`. Its current frozen package is
+The count worktree is `<worktree>`. Its current frozen package is
 `.cache/rigel_runs/2026-10-09_foundation_landing/site`; the preceding cleanup control is
 `.cache/rigel_runs/2026-10-08_release_foundation/site`. Main production source contains no
 experimental density integrator or population alternatives to remove.
@@ -220,7 +220,7 @@ splice sources retain a positive numerical RNA origin when the exon-based reduct
 zero. Existing positive origins and native source rules stay unchanged. Its portable gates,
 mutation coverage and seven complete calibration identities are recorded under
 **ZERO-COORDINATE INTEGRATION** in the same issue. This does not implement the independent
-density range or fix loss outside a finite table. The whole-library LBX0190 pipeline is also
+density range or fix loss outside a finite table. The whole-library cfRNA-A pipeline is also
 bit-identical. After replacing the scheduler-dependent reorder gate with two deterministic
 consumer checks, the actual main suite passes 2,788 tests; lint and full preflight pass.
 No goldens changed in this repair.
@@ -240,7 +240,7 @@ reviewed before updating that fixture alone.
 The low-probability arithmetic correction is then integrated independently, preserving
 the same finite Gaussian convolution while removing its artificial likelihood floor.
 Eighteen gates, five compiled defects, seven cached calibration comparisons, the changed
-RNA-long condition end to end and the LBX0190 comparison are recorded under
+RNA-long condition end to end and the cfRNA-A comparison are recorded under
 **BLUR-TAIL INTEGRATION** in the same issue. The real-library output is bit-identical;
 this correction does not resolve missing numerical support or select a capture prior.
 The final integrated suite passes 2,814 tests, lint and full preflight pass, and no

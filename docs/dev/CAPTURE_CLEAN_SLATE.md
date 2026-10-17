@@ -4,7 +4,7 @@
 2026-10-04 at the owner's direction ("start over, clean slate; the method must learn capture; it needs some gDNA to
 learn from; no probe panel"); REVISED 2026-10-05 after an external adversarial review of that version, whose
 implementation plan is `CAPTURE_IMPLEMENTATION_PLAN.md` beside this file. The measurements this design rests on are in
-`~/Downloads/rigel_runs/prototypes/2026-10-04_clean_slate/` and `2026-10-04_capture_compromise/`; the campaign record
+`$RIGEL_RUNS/prototypes/2026-10-04_clean_slate/` and `2026-10-04_capture_compromise/`; the campaign record
 is `FRAGMENT_LENGTH_POSTMORTEM.md`. Nothing here is built.*
 
 **The bar (owner, 2026-10-05).** No probe BED now; capture is learned. The tool must achieve or exceed the shipped
@@ -37,7 +37,7 @@ and it was right on each. Taken, with the argument in the section named:
    length and five genome-pooled length histograms; nothing in it can condition on length per object or read a probe
    edge from a crossing's offset. Items 1, 3 and 4 all need the same bank (§6.2), built spec-first as every
    accumulator change is.
-6. **The census was mis-labelled and the ratio hid its zeros.** Re-run 2026-10-05 (`/private/tmp/rigel_capture_review_audit.py`,
+6. **The census was mis-labelled and the ratio hid its zeros.** Re-run 2026-10-05 (`<scratch>/rigel_capture_review_audit.py`,
    read-only): 2,175 of the suite's 17,620 projected probe blocks overlap, so the probed fraction summed to above 1 on
    206 exons (max 5.3) and the classes are 799 / 1,744 / 3,166 by union coverage, not 834 / 1,709 / 3,166; and of the
    834 "probed" exons 135 had a positive boundary count over a ZERO intron count, so the medians in §5 are over the
@@ -66,7 +66,7 @@ already counts each fragment once and lacks only layout stratification (§6.2); 
 distinguish from capture is a stated limit, not an automatic `unresolved` (§6.3); Phases 0–3 do change rows beyond the
 defect's, and which ones is listed and priced (§8); and the strand gate's Bayes factor is a model comparison under its
 own prior, not a fixed-size guarantee (§6.3). **Phase 0 began the same day** (§8; the campaign directory
-`~/Downloads/rigel_runs/prototypes/2026-10-05_capture_learning/`): the tagged 0.7.1 is built, indexed and validated on
+`$RIGEL_RUNS/prototypes/2026-10-05_capture_learning/`): the tagged 0.7.1 is built, indexed and validated on
 one condition through a neutral adapter that reproduces the instrument to the printed digit, and the pooled-length
 diagnostic on 17 cached conditions reads the geometric null within 1 % on every capture-OFF row at genome scale, both
 gap arms included, and 10–20× above it on every captured row.
@@ -564,11 +564,11 @@ choice gDNA cannot make (§7).
 
 ## Appendix: the record
 
-`~/Downloads/rigel_runs/prototypes/2026-10-04_clean_slate/`: `mass_fraction.py` (§2's table), `witness_census.py` and
+`$RIGEL_RUNS/prototypes/2026-10-04_clean_slate/`: `mass_fraction.py` (§2's table), `witness_census.py` and
 `suite_probes_bed.py` (§5's table and the projected suite panel), the full outputs per class and row.
 `2026-10-04_capture_compromise/`: the BED ceiling prototype (`bed_geometry.py`, brute-force checked; the `g00`
 stop; `witness_census.jsonl` with the shadow finding). `2026-10-02_stage3/`: `oracle.py`'s per-placement integrals,
 `laws.py`'s oracle source laws, 35 checks with 28 deliberate breaks, `B_match`'s tables. `2026-10-03_fl_arms/VERDICT.md`:
-Q3 and Q4. `/private/tmp/rigel_capture_review_audit.py`: the review's census audit (copy it into the Phase 0 artifact
+Q3 and Q4. `<scratch>/rigel_capture_review_audit.py`: the review's census audit (copy it into the Phase 0 artifact
 set before relying on it). The 0.7.1 rule: `git show v0.7.1:src/rigel/calibration/capture_eff_length.py`,
 `_global_reference_density`. The review's plan, from which §8 and §9 are drawn: `CAPTURE_IMPLEMENTATION_PLAN.md`.

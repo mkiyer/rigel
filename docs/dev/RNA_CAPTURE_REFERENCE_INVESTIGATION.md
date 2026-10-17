@@ -20,8 +20,8 @@ The lineage, verified in the tagged source:
 
 | version | the reference | fails where |
 |---|---|---|
-| 0.7.1 | the rightmost significant peak of a **mass-weighted** kernel density of per-region gDNA density (bandwidth 0.4, prominence 0.05, snapped to a node); `None` below 5 nodes | outliers: one exon holding 8 % of LBX0190's gDNA mass becomes the reference (10,801× the median) |
-| shipped | the landscape's located enriched mode: the basin above the depleted one with the most located kernels, a mode only if it has more than √n members with median width ≤ 1 nat² | sparse panels: LBX0190 and MO_3021 have no such basin, so they contract nothing; a single probe never forms a mode |
+| 0.7.1 | the rightmost significant peak of a **mass-weighted** kernel density of per-region gDNA density (bandwidth 0.4, prominence 0.05, snapped to a node); `None` below 5 nodes | outliers: one exon holding 8 % of cfRNA-A's gDNA mass becomes the reference (10,801× the median) |
+| shipped | the landscape's located enriched mode: the basin above the depleted one with the most located kernels, a mode only if it has more than √n members with median width ≤ 1 nat² | sparse panels: cfRNA-A and cfRNA-C have no such basin, so they contract nothing; a single probe never forms a mode |
 
 The second line is the owner's objection. The first line is why the shipped rule was made stricter: the
 2026-09-15 finding that anchors' resolution walls were being counted as located members on sparse plasma
@@ -45,13 +45,13 @@ On the real libraries, as a multiple of the median region density:
 
 | library | gDNA mass; top 1 % of regions hold | located mode | mass-weighted median | mass-weighted mean | 0.7.1 kernel peak |
 |---|---|---|---|---|---|
-| LBX0190 | 4,855 fragments; 34.5 % (one exon alone 7.7 %) | none | 18.5× | 1,722× | 10,801× |
-| MO_3021 | 82,381; 8.6 % | none | 1.0× | 149× | 0.9× |
-| LBX0588 | 741,693; 3.6 % | 2,699× (12,551 members) | 1,294× | 1,590× | 2,352× |
+| cfRNA-A | 4,855 fragments; 34.5 % (one exon alone 7.7 %) | none | 18.5× | 1,722× | 10,801× |
+| cfRNA-C | 82,381; 8.6 % | none | 1.0× | 149× | 0.9× |
+| cfRNA-B | 741,693; 3.6 % | 2,699× (12,551 members) | 1,294× | 1,590× | 2,352× |
 | VCaP | 1,008,422; 0.4 % | 98× (24,932 members) | 64× | 90× | 107× |
 
 Reading: the **mass-weighted median** reproduces the located mode within 10 % on every synthetic row that
-has one, needs no constant, always exists, and is the one statistic the outlier exon of LBX0190 cannot drag.
+has one, needs no constant, always exists, and is the one statistic the outlier exon of cfRNA-A cannot drag.
 It fails only where the located mode also fails (the sparse layout, a single probe) and where the captured
 objects hold less than half of the gDNA mass (weak capture, 0.08×; VCaP is already at 0.65× of its mode).
 The 0.7.1 kernel peak handles weak capture but needs two constants and follows the outlier.
@@ -101,8 +101,8 @@ alone: captured 7.83 / 1.42 → 11.51 / 1.42 (one row, g00 ss0.99, carries it: 7
 6.67 / 0.87 → 7.23 / 1.07.
 
 On the real libraries these readouts cost 3–6 s of reader time per whole genome at 6 GB peak (against the
-honest prototype's 4.8 h and 37 GB) and move the EM's gDNA fraction the way the honest median did: LBX0190
-0.0850 → 0.0971, MO_3021 0.1587 → 0.1638, LBX0588 0.9265 → 0.9260, VCaP 0.2395 → 0.2400 against a truth of
+honest prototype's 4.8 h and 37 GB) and move the EM's gDNA fraction the way the honest median did: cfRNA-A
+0.0850 → 0.0971, cfRNA-C 0.1587 → 0.1638, cfRNA-B 0.9265 → 0.9260, VCaP 0.2395 → 0.2400 against a truth of
 0.2518 (neither reader reaches it; the cheap readout moves it by 0.0005).
 
 The same false gDNA breaks these too (g00 captured 7.35 → 14.65; capture-off genes 1.01 → 1.88), because
@@ -166,8 +166,8 @@ the reference it is gated against.
 
 1. **The reference can be approximated without a mode.** The mass-weighted median of the gDNA density
    reproduces the located mode within 10 % wherever the captured objects hold at least half of the gDNA mass
-   (every normal-strength row, LBX0588, nearly VCaP), needs no constant, always exists, and the outlier exon
-   that captures 0.7.1's kernel peak cannot move it. It gives LBX0190 a reference (18.5×; 26.9× over
+   (every normal-strength row, cfRNA-B, nearly VCaP), needs no constant, always exists, and the outlier exon
+   that captures 0.7.1's kernel peak cannot move it. It gives cfRNA-A a reference (18.5×; 26.9× over
    gDNA-majority objects) where the census gives none.
 2. **An always-defined reference is not a shipping option on its own**, for three measured reasons, each
    of which the census's thresholds were silently handling: a zero-gDNA capture-off library, which is ordinary

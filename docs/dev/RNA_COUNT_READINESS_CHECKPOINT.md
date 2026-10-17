@@ -185,7 +185,7 @@ part of the full release objective.
 
 ## Portable gate preparation
 
-Two new test modules are prepared in `/private/tmp/rigel-density-20261007/tests/calibration/`:
+Two new test modules are prepared in `<worktree>/tests/calibration/`:
 
 | Module | Contract and fixture |
 |---|---|
@@ -237,7 +237,7 @@ confirm that the instruments inspected the intended code.
 
 ## Remaining intron-specific plumbing removed
 
-The separate worktree `/private/tmp/rigel-count-clean-20261008` contains the direct
+The separate worktree `<worktree>` contains the direct
 count candidate with its unused factory inputs removed from `sweep.py` and the native
 block solver. It deletes the factory kernels, their row buffers and the obsolete
 `tau_fac` diagnostic. The explicit intergenic background estimator and generic

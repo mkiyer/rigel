@@ -33,11 +33,11 @@ Usage::
 
     python scripts/design/ruler_vs_truth.py --panel test --condition gdna_g05_ss_0.99_nrna_file_capture_on
     python scripts/design/ruler_vs_truth.py --panel test                      # every capture-ON condition, one line each
-    python scripts/design/ruler_vs_truth.py --panel test --panel-dir ~/Downloads/rigel_runs/test_reference/scenarios_depth_d10
+    python scripts/design/ruler_vs_truth.py --panel test --panel-dir $RIGEL_RUNS/test_reference/scenarios_depth_d10
     python scripts/design/ruler_vs_truth.py --panel ladder --condition C --module proto.py --out table.tsv
     python scripts/design/ruler_vs_truth.py --panel test --condition C --set calibration.message_policy=silent
     python scripts/design/ruler_vs_truth.py --panel ladder --condition C --scale        # THE ONE-SCALE READ-OUT
-    python scripts/design/ruler_vs_truth.py --panel ladder --panel-dir ~/Downloads/rigel_runs/suite/ladder_nrna_lo --condition gdna_g50_ss_0.99_nrna_lo_capture_on --scale
+    python scripts/design/ruler_vs_truth.py --panel ladder --panel-dir $RIGEL_RUNS/suite/ladder_nrna_lo --condition gdna_g50_ss_0.99_nrna_lo_capture_on --scale
     python scripts/design/ruler_vs_truth.py --self-test
 
 ⛔ ``--panel-dir`` names a directory of conditions, never the index: pass ``--panel ladder`` with it for a ladder-derived

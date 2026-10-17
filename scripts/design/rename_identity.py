@@ -43,11 +43,10 @@ from rigel.config import PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.pipeline import run_pipeline  # noqa: E402
 
-_RUNS = Path.home() / "Downloads" / "rigel_runs"
-DEFAULT_SUITE = _RUNS / "suite" / "ladder"
-DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
+from _shared import DEFAULT_INDEX, DEFAULT_SUITE, RUNS  # noqa: E402
+
 DEFAULT_CONDITION = "gdna_g00_ss_0.99_nrna_mid_capture_off"
-REFERENCE = _RUNS / "arms" / "rename_identity_reference.json"
+REFERENCE = RUNS / "arms" / "rename_identity_reference.json"
 
 #: every source of run-to-run variation, pinned; removing any one makes "bit-identical" unprovable.
 #: ``total_threads=1`` is the load-bearing one: float addition is not associative across worker threads.

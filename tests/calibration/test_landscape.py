@@ -341,7 +341,7 @@ def _walls_around_a_tail(seed=0, n_long=20_000, n_dep=200, n_short=600, n_tail=1
 
 
 def test_walls_around_a_handful_of_exons_lift_nothing_and_the_exons_read_their_own_level():
-    """LBX0190's shape, through the estimator itself: the walls' mass goes to the bulk in the E-step, and the
+    """cfRNA-A's shape, through the estimator itself: the walls' mass goes to the bulk in the E-step, and the
     twelve exons are a basin of a few parts in ten thousand. Read by the capture reader, nothing without evidence
     is lifted — a 40 bp sliver with no fragment reads the bulk to a part in a thousand, a 100 kb intron with none
     reads it exactly — and an exon at the tail's level, fifteen fragments on 300 bp, reads its own level: the

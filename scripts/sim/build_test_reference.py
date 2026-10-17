@@ -65,10 +65,14 @@ from pathlib import Path
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+# the data root, as every instrument spells it
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "design"))
 
 from rigel.sim.genome import MutableGenome  # noqa: E402
 from rigel.transcript import Transcript  # noqa: E402
 from rigel.types import Interval, Strand  # noqa: E402
+
+from _shared import RUNS  # noqa: E402
 
 REF_NAME = "test_chr"
 #: the chromosome's random sequence is fixed by this seed, so the same annotation always gives the same
@@ -89,7 +93,7 @@ JUNCTION_BLOCKS = (62, 63)
 
 HERE = Path(__file__).resolve().parent / "test_reference"
 DEFAULT_SPEC = HERE / "test_chr.yaml"
-DEFAULT_OUT = Path.home() / "Downloads" / "rigel_runs" / "test_reference"
+DEFAULT_OUT = RUNS / "test_reference"
 
 
 # ── the spec ─────────────────────────────────────────────────────────────────────────────────────

@@ -58,9 +58,9 @@ is the convergence receipt and stays in the gate suite, not in production.
 | `thread-identity` | thread count and block packing do not change a single value (bit identity across `n_threads ∈ {1, 4, 8}`) | `rename_identity.py --check` pattern |
 | `solve-untouched` | the count outputs of the solve are untouched (the reader runs after the solve and must not perturb it): seven cached conditions bit-identical | `rename_identity.py` |
 | `deliberate-defects` | the deliberate defects fire: wrong tail Jacobian in `y`, omitted `−log 3`, a dropped witness atom, the DNA level read at the wrong origin, the composition row read at `log(ρEg)` instead of `log(ρEg/r)`, the window rule off by one, `q` and `1−q` swapped, the parabola refinement disabled (`prototype-identity` tolerance) | `frozen-objects`, `analytic-limits`, `prototype-identity` |
-| `speed` | SPEED: the reader stage on LBX0190 (2,087,476 slots) in at most 60 s on 8 cores, target 20 s; reported beside the sweep's own time | this plan §6 |
+| `speed` | SPEED: the reader stage on cfRNA-A (2,087,476 slots) in at most 60 s on 8 cores, target 20 s; reported beside the sweep's own time | this plan §6 |
 | `end-to-end-identity` | end to end, pinned and fractional: the kernel's weights through the harness reproduce the NumPy arm `land_map_cap4` on the benchmark's rows (g05–g25 test chromosome, single probe, strength 100, junction-probed, the ladder's six rows) to the pair's own variation | the review's §1.4 table |
-| `real-libraries` | real libraries, one process at a time: the four cfRNA BAMs, gDNA fraction and pools against the NumPy arm's numbers where they exist (LBX0190: 0.0997 with the median readout) and the shipped reader's | the review's §1.3 |
+| `real-libraries` | real libraries, one process at a time: the four cfRNA BAMs, gDNA fraction and pools against the NumPy arm's numbers where they exist (cfRNA-A: 0.0997 with the median readout) and the shipped reader's | the review's §1.3 |
 
 ## 4. Stages
 
@@ -82,8 +82,8 @@ is the convergence receipt and stays in the gate suite, not in production.
 
 ## 5. Isolation
 
-The worktree `~/proj/rigel-honest-reader` (detached at `55f5843d`), built with `pip wheel
---no-build-isolation --no-deps` into `~/Downloads/rigel_runs/prototypes/2026-10-10_honest_reader/`, unpacked
+The worktree `<worktree>` (detached at `55f5843d`), built with `pip wheel
+--no-build-isolation --no-deps` into `$RIGEL_RUNS/prototypes/2026-10-10_honest_reader/`, unpacked
 into its `site/`, imported through `use_proto.py` which drops the editable finder; `assert_proto()` proves
 which build answered. The main install and its suite are untouched until stage 3.
 
@@ -171,11 +171,11 @@ multimapper alignment starts, every alignment counted; the production index's 1,
 
 | library | unique fragments | multimapper alignments | regions with multimappers and NO unique fragment (exon regions) | regions where multimappers outnumber unique fragments, and the share of all multimapper alignments they hold |
 |---|---|---|---|---|
-| LBX0190 (plasma) | 138,403 | 104,140 | 5,488 (762) | 6,504 — 95 % |
-| MO_3021 (plasma) | 772,744 | 583,407 | 23,443 (7,018) | 35,781 — 94 % |
+| cfRNA-A (plasma) | 138,403 | 104,140 | 5,488 (762) | 6,504 — 95 % |
+| cfRNA-C (plasma) | 772,744 | 583,407 | 23,443 (7,018) | 35,781 — 94 % |
 | VCaP mix (deep) | 18,417,903 | 544,065 | 10,099 (5,305) | 13,792 — 72 % |
 
-Multimappers are a large share of a plasma library (43 % of LBX0190's alignments) and they cluster in regions
+Multimappers are a large share of a plasma library (43 % of cfRNA-A's alignments) and they cluster in regions
 where calibration counts almost nothing, which is exactly where the honest reader reads depletion and the locus
 prior reads no gDNA. The production-path VCaP A/B (main against the worktree, pinned, truth 0.2518) prices it
 end to end: [pending, running].
@@ -212,7 +212,7 @@ that finds such peaks; it stays. Speed comes from elsewhere.
 
 **The cost, measured.** The replica evaluates about 100 ns per lattice node in this first C++ (three
 logarithms, an exponential and two interpolations per node): 1.5 ms per single-strand slot and about 160 ms
-per both-strand slot (the tilt multiplies the whole y × x work by 24 or more). Extrapolated to LBX0190's
+per both-strand slot (the tilt multiplies the whole y × x work by 24 or more). Extrapolated to cfRNA-A's
 2.1 M slots with 14 % both-strand that is of order an hour and a half on 8 threads: far from `speed`. The program,
 each step gated as a numeric no-op on the mode (1e-6 on every slot of the fixtures) before it is kept:
 
@@ -226,12 +226,12 @@ each step gated as a numeric no-op on the mode (1e-6 on every slot of the fixtur
 4. the detection scan of the far-peak net on the s-independent factors only (once per density node, not per
    tilt node) for both-strand slots: about 4×.
 
-Target after 1–4: a both-strand slot near 1 ms, a single-strand slot near 20 µs, LBX0190's reader stage near
+Target after 1–4: a both-strand slot near 1 ms, a single-strand slot near 20 µs, cfRNA-A's reader stage near
 a minute on 8 threads, with the shortcut of step 2 deciding whether the 20 s target is reached.
 
 **Progress, same day.** `prototype-identity` holds at genome scale: the ladder's `g50 ss0.99 ON` fixture (70,176 slots, 14 %
 both-strand, the deepest 35,184 reads) matches the prototype to 1.2e-9 on every slot; the unoptimised
-replica took 198 s on 8 threads there, which extrapolates to 98 min for LBX0190, the honest baseline.
+replica took 198 s on 8 threads there, which extrapolates to 98 min for cfRNA-A, the honest baseline.
 Then, each kept only after the gate on every slot of the test fixture:
 
 | step | mode against the full-grid replica | test chromosome, 8 threads |
@@ -252,7 +252,7 @@ slot with a read. A zero-read slot's log likelihood is the log of a convolution 
 RNA-amount kernel, smooth at the kernel's width, so the search is exact there once its windows are a stride
 wide at the prior's own peaks as well: with that rule the test fixture is bit-identical to the full grid and
 the ladder fixture's differences are confined to the tilt skip below (no zero-read slot among them); those
-slots are 43 % of the ladder fixture and 99 % of LBX0190.
+slots are 43 % of the ladder fixture and 99 % of cfRNA-A.
 
 **The tilt, measured and bounded.** Per slot class on the ladder fixture (CPU time, the replica lattices with
 the exact reuse and caches):
@@ -295,16 +295,16 @@ reader is about 60 s, as the per-class costs predicted. (A fixture file written 
 standalone kernel, before its own-term window rule was aligned, differs from the in-kernel modes by up to
 1.8e-2 at both-strand slots; the prototype is the reference and the in-kernel reader matches it.)
 
-**The plasma library, in place.** LBX0190 (2,087,476 slots): the whole calibration with the in-kernel reader
+**The plasma library, in place.** cfRNA-A (2,087,476 slots): the whole calibration with the in-kernel reader
 on its last refit takes 43 s on 8 threads, of which the reader is about 34 s (the main install's calibration
 alone is about 9 s); every slot is read, 0.47 % of objects sit above 2 nats (the NumPy prototype read 0.49 %),
 the largest at +16.9, where the shipped census locates no reference at all. Against the prototype's 4.8 hours
 that is a 500× reduction, inside the `speed` gate's 60 s with the 20 s target in reach of the derived
-reductions still behind flags. MO_3021 (194,341 slots with reads): 105 s for the whole calibration on 8
+reductions still behind flags. cfRNA-C (194,341 slots with reads): 105 s for the whole calibration on 8
 threads, the reader about 85 s, every slot read, 4.1 % of objects above 2 nats (its gDNA is concentrated after
 all, which no mass-based reference could see: §2 of the reference investigation read it at 1.0× the median),
 the largest at +10.2; the census again locates nothing. The `speed` gate is passed on the sparser plasma
-library and missed by 25 s on the deeper one; the shallow both-strand slots that carry MO_3021's cost are
+library and missed by 25 s on the deeper one; the shallow both-strand slots that carry cfRNA-C's cost are
 exactly what the two flagged reductions address.
 
 **Stage 3 built in the worktree, same day.** `calibrate` publishes the reader's weights as the result's
@@ -329,17 +329,17 @@ moved up to 0.45 on one of these rows between runs), from weights that differ at
 near-tie sensitivity. The gate is passed: the production path IS the benchmark's recommended arm.
 
 **The extrapolation to the real libraries, from their measured slot populations** (`inputs/real__*.npz`):
-LBX0190 has 2,087,476 slots of which 98.9 % carry no read and 22,473 do (20,339 with fewer than ten);
-MO_3021 90.7 % none, 194,341 with; VCaP 60.9 % none, 816,798 with (375k between ten and a hundred). At the
+cfRNA-A has 2,087,476 slots of which 98.9 % carry no read and 22,473 do (20,339 with fewer than ten);
+cfRNA-C 90.7 % none, 194,341 with; VCaP 60.9 % none, 816,798 with (375k between ten and a hundred). At the
 costs above (the zero-read search at 56 µs with its final windows) with 14 % of read-slots both-strand:
-LBX0190 about 210 CPU-s, **26 s on 8 threads**; MO_3021 about 800 CPU-s, 100 s; VCaP about 5,400 CPU-s,
+cfRNA-A about 210 CPU-s, **26 s on 8 threads**; cfRNA-C about 800 CPU-s, 100 s; VCaP about 5,400 CPU-s,
 11 min. The plasma libraries, the product's case, are inside
 the target; a deep library is governed by its shallow both-strand slots, which the derived tilt count is
 meant for.
 
 ### Stage 4 (2026-10-10, evening): landed in the worktree, one red gate by ruling
 
-Done in `~/proj/rigel-honest-reader` (uncommitted; the main tree untouched):
+Done in `<worktree>` (uncommitted; the main tree untouched):
 - `CONSTANTS.calibration.reader_search_stride` (documented, range-checked, `BROKEN` entry).
 - Deleted: the located-mode census (`landscape.py`: `LandscapeMode`, `_census`, `split_basins`, `LocatedMode`,
   `located_enriched_mode`, the kernel record `centre`/`located`), `capture_efficiency.py` and its test, the
@@ -376,11 +376,11 @@ Production path, pinned (scan threads 1, fractional), main → worktree (`prod_r
 | library | wall s | gDNA fraction | mRNA | nRNA | gDNA (EM) |
 |---|---|---|---|---|---|
 | VCaP mix (truth 0.2518) | 178 → 454 | 0.2395 → 0.2401 | 13,336,410 → 13,334,253 | 755,354 → 746,792 | 4,355,162 → 4,365,881 |
-| LBX0190 | 9 → 22 | 0.0850 → 0.0976 | 126,512 → 123,408 | 7,699 → 8,959 | 10,109 → 11,954 |
-| MO_3021 | 21 → 66 | 0.1587 → 0.1631 | 632,561 → 624,526 | 69,895 → 74,247 | 79,444 → 83,128 |
+| cfRNA-A | 9 → 22 | 0.0850 → 0.0976 | 126,512 → 123,408 | 7,699 → 8,959 | 10,109 → 11,954 |
+| cfRNA-C | 21 → 66 | 0.1587 → 0.1631 | 632,561 → 624,526 | 69,895 → 74,247 | 79,444 → 83,128 |
 
-The reader is 4.6 min of VCaP's 7.6 (the last refit's sweep: 12:11:12 → 12:16:03), 11 s of LBX0190's 22, 43 s
-of MO_3021's 66; peak RSS unchanged (10.7 GB VCaP, 6.2 GB plasma against 4.0 under main). The deep-library
+The reader is 4.6 min of VCaP's 7.6 (the last refit's sweep: 12:11:12 → 12:16:03), 11 s of cfRNA-A's 22, 43 s
+of cfRNA-C's 66; peak RSS unchanged (10.7 GB VCaP, 6.2 GB plasma against 4.0 under main). The deep-library
 cost is the open performance item (the plan's flagged reductions, each a converged lattice change with its
 gate). The plasma libraries' gDNA fraction rises 3–15 % relative with no truth to judge it; VCaP's moves
 0.0006 toward its truth.

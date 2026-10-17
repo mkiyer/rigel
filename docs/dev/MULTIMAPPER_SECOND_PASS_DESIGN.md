@@ -1,6 +1,6 @@
 # The multimapper second pass — design (2026-10-10, sandbox, not authoritative)
 
-**Status: BUILT in the worktree `~/proj/rigel-multimapper` (branch `multimapper-second-pass`), uncommitted; see §13.** The owner's framing (2026-10-10): the accumulator deposits uniquely aligned
+**Status: BUILT in the worktree `<worktree>` (branch `multimapper-second-pass`), uncommitted; see §13.** The owner's framing (2026-10-10): the accumulator deposits uniquely aligned
 fragments for calibration and discards multimapping ones; it already buffers the fragments whose unsequenced
 gap admits several fragment lengths and assigns them in a second pass; multimapping fragments are to be
 handled the same way — buffered, then assigned to the probabilistically best placement by the abundance of
@@ -34,8 +34,8 @@ alignment start):
 
 | library | fragments | multimapper molecules | multimapper alignments | mean alignments per molecule | regions holding multimappers and no unique fragment (exon regions) | regions where multimappers outnumber unique fragments, holding this share of all multimapper alignments | gap-held fragments today, drained in |
 |---|---|---|---|---|---|---|---|
-| LBX0190 (plasma) | 155,352 | 11,720 | 104,140 | 8.9 | 5,488 (762) | 6,504 — 95 % | 3,216 in 0.9 s |
-| MO_3021 (plasma) | 875,670 | 70,856 | 583,407 | 8.2 | 23,443 (7,018) | 35,781 — 94 % | 8,760 in 1.2 s |
+| cfRNA-A (plasma) | 155,352 | 11,720 | 104,140 | 8.9 | 5,488 (762) | 6,504 — 95 % | 3,216 in 0.9 s |
+| cfRNA-C (plasma) | 875,670 | 70,856 | 583,407 | 8.2 | 23,443 (7,018) | 35,781 — 94 % | 8,760 in 1.2 s |
 | VCaP mix (deep) | 18,568,456 | 136,188 | 544,065 | 4.0 | 10,099 (5,305) | 13,792 — 72 % | 355,180 in 13.1 s |
 
 Multimappers are 7.5 % of a plasma library's molecules and they land, with their eight placements each, in
@@ -300,7 +300,7 @@ population's drawn path and the EM's allocation are not reconciled today.
   a fixture with multimappers (gate §9.6).
 - **Cost.** The second pass is a Python loop over records at ~37 µs per gap-held record (VCaP: 355,180 in
   13.1 s). A multimapper record carries ~8 placements on a plasma library and ~4 on VCaP; at ~40 µs per
-  placement: LBX0190 11,720 × 8 → ~4 s, MO_3021 70,856 × 8 → ~23 s, VCaP 136,188 × 4 → ~22 s. Acceptable
+  placement: cfRNA-A 11,720 × 8 → ~4 s, cfRNA-C 70,856 × 8 → ~23 s, VCaP 136,188 × 4 → ~22 s. Acceptable
   for the landing; a native scorer is a later speed item and is not part of this fix. Memory: ~300 bytes per
   record → ~40 MB on VCaP.
 - **The cache.** The payload's schema digest is part of the scan-cache key (`scan_cache.py`), so every
@@ -321,7 +321,7 @@ population's drawn path and the EM's allocation are not reconciled today.
 | `workers-identity` | the drained payload byte-identical at 1, 2, 4 and 8 workers with multimappers in the fixture; and on an `NH = 1` library the WHOLE change is a numeric no-op — `rename_identity.py --check` against a frozen reference of the ladder's scan caches and a frozen VCaP payload restricted to its unique fragments |
 | `the paralog gate` | `TestParalogMultimapping.test_gdna_sweep[gdna_100]` turns green: the collapse branch is deleted as the test itself instructs and the even-split assertion covers it; the total approaches 146 |
 | `aligned-scenarios` | every class in `tests/scenarios_aligned/test_multimap_counting.py` scored against the simulator's truth before and after (`run_benchmark`), per scenario, the table in the landing note; none worse beyond its own noise, the paralog and pseudogene classes better |
-| `real-libraries` | LBX0190, MO_3021, VCaP through the production path, pinned, before and after: the footprint re-measured on the DRAINED payload (regions with multimappers and no unique fragment must now carry deposits), VCaP's gDNA fraction against 0.2518, the capture weights at those regions, the second pass's time and the share of records in each `A_p` class (all zero / mixed / all positive) |
+| `real-libraries` | cfRNA-A, cfRNA-C, VCaP through the production path, pinned, before and after: the footprint re-measured on the DRAINED payload (regions with multimappers and no unique fragment must now carry deposits), VCaP's gDNA fraction against 0.2518, the capture weights at those regions, the second pass's time and the share of records in each `A_p` class (all zero / mixed / all positive) |
 
 ## 10. Stages and the A/B
 
@@ -430,12 +430,12 @@ BIT-IDENTICAL — the quant digest (8,750 rows) and every payload and calibratio
 
 | library | wall s | gDNA fraction | mRNA | nRNA | gDNA (EM) | second pass |
 |---|---|---|---|---|---|---|
-| LBX0190 | 22.1 → 26.4 | 0.0976 → 0.0997 | 123,407 → 123,476 | 8,958 → 8,580 | 11,953 → 12,262 | 3,216 held in 0.9 s → 13,703 held (10,371 on their placements) in 3.8 s |
-| MO_3021 | 70.1 → 83.5 | 0.1631 → 0.1653 | 624,525 → 624,445 | 74,246 → 72,518 | 83,128 → 84,936 | 8,760 in 1.1 s → 77,452 (68,182 on their placements) in 15.2 s |
+| cfRNA-A | 22.1 → 26.4 | 0.0976 → 0.0997 | 123,407 → 123,476 | 8,958 → 8,580 | 11,953 → 12,262 | 3,216 held in 0.9 s → 13,703 held (10,371 on their placements) in 3.8 s |
+| cfRNA-C | 70.1 → 83.5 | 0.1631 → 0.1653 | 624,525 → 624,445 | 74,246 → 72,518 | 83,128 → 84,936 | 8,760 in 1.1 s → 77,452 (68,182 on their placements) in 15.2 s |
 | VCaP mix (truth 0.2518) | 531.5 → 468.3 (both under a running suite; not a timing) | 0.2401 → 0.2528 | 13,334,271 → 13,323,232 | 746,774 → 523,324 | 4,365,879 → 4,600,368 | 355,180 in 13.2 s → 481,880 (126,154 on their placements) in 27.1 s |
 
-Of LBX0190's 11,720 multimapper molecules 10,371 are held on their placements (the rest resolve to one
-admissible placement, or are excluded whole); of MO_3021's 70,856, 68,182; of VCaP's 136,188, 126,154. The
+Of cfRNA-A's 11,720 multimapper molecules 10,371 are held on their placements (the rest resolve to one
+admissible placement, or are excluded whole); of cfRNA-C's 70,856, 68,182; of VCaP's 136,188, 126,154. The
 second pass's cost is the projected one (+3, +14, +14 s at ~0.1–0.4 ms per held multimapper). **VCaP's gDNA
 fraction moves from 0.2401 to 0.2528 against its truth of 0.2518**: the 234,000 fragments the EM gains as gDNA
 are the 223,000 it loses as nascent RNA — the multimapped gDNA at repeat loci that an empty prior had let it

@@ -3,7 +3,7 @@
 *Sandbox record (`docs/dev/`): the external reviews of the fragment-length work, verbatim, oldest first. The plan
 they shaped is [`FRAGMENT_LENGTH_PLAN.md`](FRAGMENT_LENGTH_PLAN.md); the problem statement the first one reviewed is
 [`FRAGMENT_LENGTH_REVIEW.md`](FRAGMENT_LENGTH_REVIEW.md). The plan versions the later reviews read are kept outside the
-repo, in `~/Downloads/rigel_runs/prototypes/2026-10-02_fl_review/`, as `plan_round1.md` to `plan_round3.md`.*
+repo, in `$RIGEL_RUNS/prototypes/2026-10-02_fl_review/`, as `plan_round1.md` to `plan_round3.md`.*
 
 ## The first review, verbatim
 
@@ -20,7 +20,7 @@ It reviewed `FRAGMENT_LENGTH_REVIEW.md`.
 >   \(\operatorname{Var}(\log\rho_g)=\operatorname{Var}(\log f_g)\).
 >   Changing the variance test’s name would do nothing. The missing uncertainty concerns the opportunity estimate and the observation model.
 >
-> The August history also shows that “make length fuzzier” is insufficient by itself. Nearly flat likelihoods became endpoint estimates with nonzero precision. The current [factor-precision calculation](/Users/mkiyer/proj/rigel/src/rigel/native/solve_kernel.cpp:196) still has that near-flat discontinuity.
+> The August history also shows that “make length fuzzier” is insufficient by itself. Nearly flat likelihoods became endpoint estimates with nonzero precision. The current [factor-precision calculation](src/rigel/native/solve_kernel.cpp:196) still has that near-flat discontinuity.
 >
 > Here is my step-0 plan, before building anything.
 >
@@ -37,7 +37,7 @@ It reviewed `FRAGMENT_LENGTH_REVIEW.md`.
 > 3. **Derive and test the background model without changing fragment accumulation.**
 >    For an exon, let expected counts be \(x=\rho_gE_g\), \(y=\rho_rE_r\), with \(N\sim\mathrm{Poisson}(x+y)\). The external background constrains \(\rho_g\); RNA remains locally free. Thus a short exon with \(E_g=0.09\) and background density 0.05 expects **0.0045 gDNA fragments**, continuously rather than through a one-position cutoff.
 >
->    The existing [factory row](/Users/mkiyer/proj/rigel/src/rigel/native/solve_kernel.cpp:179) evaluates a continuous extension of \(\mathrm{NB}(Nf_g)\). That is an approximation worth testing, not an exact observed-count likelihood.
+>    The existing [factory row](src/rigel/native/solve_kernel.cpp:179) evaluates a continuous extension of \(\mathrm{NB}(Nf_g)\). That is an approximation worth testing, not an exact observed-count likelihood.
 >
 >    A compact mathematical comparator is available. With background density \(\rho_g\sim\mathrm{Gamma}(a,b)\), RNA’s Jeffreys rate reference, and \(\beta=b/E_g\), integrating total intensity gives the following density on the existing logit grid:
 >
@@ -55,7 +55,7 @@ It reviewed `FRAGMENT_LENGTH_REVIEW.md`.
 >
 >    Two additional gates are essential:
 >
->    - A background-driven exon must not acquire apparent independent evidence merely by training the landscape that subsequently reinforces it. The [current evidence and training path](/Users/mkiyer/proj/rigel/src/rigel/calibration/calibrate.py:248) makes a blanket factory extension vulnerable to this.
+>    - A background-driven exon must not acquire apparent independent evidence merely by training the landscape that subsequently reinforces it. The [current evidence and training path](src/rigel/calibration/calibrate.py:248) makes a blanket factory extension vulnerable to this.
 >    - The capture slab must be justified separately. A lower endpoint near background does **not** collapse a slab whose upper endpoint is the RNA-rich exon’s total density. The proposed OFF-collapse argument is incomplete.
 >
 >    Prototype C++ outside the main tree, vary one mechanism per A/B, and deliberately break each successful fix to verify its gates. Background evidence may remain at equal lengths; only added **length discrimination** must vanish as the local laws coincide.
@@ -87,28 +87,28 @@ It reviewed `plan_round1.md`, and its section numbers refer to that version.
 >    Replacing that expectation by its value at \(T=N\) is an approximation; the integration kernel’s mode is \(N-\tfrac12\). The smallest check is numerical quadrature versus the plug-in for sparse counts and narrow or multimodal landscapes.
 >
 > 2. **Disagree with the guarantee; \(a=\tfrac12\) is a defensible experimental choice, not a derived biological dispersion.**
->    It imposes density CV \(=\sqrt2\), regardless of measured heterogeneity. More decisively, using the [shipped grid](/Users/mkiyer/proj/rigel/src/rigel/config.py:288), reference plus proposed term **alone**, at \(\mu=0.0045\), produces native `Var(log f)` **0.709 at \(N=30\)** and **0.106 at \(N=300\)**—both “located.” Widening the bracket from 10 to 40 gives **4.968 and 4.938**: truncation manufactured the precision. The inverse-variance addition argument also fails for these non-Gaussian distributions; even without truncation, it supplies no universal echo bound.
+>    It imposes density CV \(=\sqrt2\), regardless of measured heterogeneity. More decisively, using the [shipped grid](src/rigel/config.py:288), reference plus proposed term **alone**, at \(\mu=0.0045\), produces native `Var(log f)` **0.709 at \(N=30\)** and **0.106 at \(N=300\)**—both “located.” Widening the bracket from 10 to 40 gives **4.968 and 4.938**: truncation manufactured the precision. The inverse-variance addition argument also fails for these non-Gaussian distributions; even without truncation, it supplies no universal echo bound.
 >
 > 3. **Unsure about admissibility under the ruling; disagree with §4.7’s justification.**
->    This is a located density prior conditioned on total count, mathematically different from the refuted fixed-share prior in [EQUATIONS §9c](/Users/mkiyer/proj/rigel/docs/EQUATIONS.md:787). However, its precision does **not** keep growing with \(N\): at fixed \(\mu\), `Var(log f)` approaches \(\pi^2/2\). If sequencing depth increases, \(\mu\) increases too, so the claimed \(1/N\) share decrease need not occur. A tiny depth-scaling experiment should distinguish increasing RNA alone from increasing the whole library; accepting this as a population-prior change still requires reconciling the ruling explicitly.
+>    This is a located density prior conditioned on total count, mathematically different from the refuted fixed-share prior in [EQUATIONS §9c](docs/EQUATIONS.md:787). However, its precision does **not** keep growing with \(N\): at fixed \(\mu\), `Var(log f)` approaches \(\pi^2/2\). If sequencing depth increases, \(\mu\) increases too, so the claimed \(1/N\) share decrease need not occur. A tiny depth-scaling experiment should distinguish increasing RNA alone from increasing the whole library; accepting this as a population-prior change still requires reconciling the ruling explicitly.
 >
 > 4. **Agree: pass 0 only for the first experiment.**
->    Multiplying the fitted population prior by the same background prior again would assert an additional constraint. But removing the term after pass 0 does not remove its influence: the [refit loop](/Users/mkiyer/proj/rigel/src/rigel/calibration/calibrate.py:448) learns from its answers. Record training membership and density modes at every refit; recovery after three refits is an experimental question.
+>    Multiplying the fitted population prior by the same background prior again would assert an additional constraint. But removing the term after pass 0 does not remove its influence: the [refit loop](src/rigel/calibration/calibrate.py:448) learns from its answers. Record training membership and density modes at every refit; recovery after three refits is an experimental question.
 >
 > 5. **Agree with the squeeze estimate only as a local approximation.**
 >    I derive \(-c/(2P+c)\) as one Newton step when \(N\gg c\). Under the same Gaussian log-count approximation, solving the displacement fully gives \(-W(c/(2P))\): at \(c=100,P=25\), **−0.853**, versus **−0.667** in the table. I would try the pooled-exon centre first as the cheapest diagnostic A/B, with the evaluated exon excluded from its estimate. It is an opportunity-weighted, potentially biased mean; it neither equals background automatically OFF nor protects a rare highly enriched population.
 >
 > 6. **Agree that the declared landscape semantics imply an extra prior tilt; disagree that the proposed reconciliation is automatically correct.**
->    [The kernel](/Users/mkiyer/proj/rigel/src/rigel/native/psi_kernel.h:182) unquestionably adds both halves, while [the landscape](/Users/mkiyer/proj/rigel/src/rigel/calibration/landscape.py:48) declares itself a population density in log-rate. Under that interpretation, the extra \(f^{1/2}\) reweights \(q\) by \(\rho_g^{1/2}\); it is not a necessary Jacobian. Continuing slope \(+\tfrac12\) below the grid repairs the lower tail, but continuing it toward infinite density does **not** define a proper population prior—even though an individual slot’s plug-in density is bounded by \(N/E_g\). Test tail completion and bracket/grid-extension invariance together; dropping the half while retaining constant tails would confound the comparison with impropriety.
+>    [The kernel](src/rigel/native/psi_kernel.h:182) unquestionably adds both halves, while [the landscape](src/rigel/calibration/landscape.py:48) declares itself a population density in log-rate. Under that interpretation, the extra \(f^{1/2}\) reweights \(q\) by \(\rho_g^{1/2}\); it is not a necessary Jacobian. Continuing slope \(+\tfrac12\) below the grid repairs the lower tail, but continuing it toward infinite density does **not** define a proper population prior—even though an individual slot’s plug-in density is bounded by \(N/E_g\). Test tail completion and bracket/grid-extension invariance together; dropping the half while retaining constant tails would confound the comparison with impropriety.
 >
 > 7. **Agree to a separate exact-form intron experiment; disagree that prior curvature is independent own evidence.**
->    Preserve the existing background shape when comparing integration against `NB(Nf)`; otherwise two mechanisms change. The [current kernel](/Users/mkiyer/proj/rigel/src/rigel/native/solve_kernel.cpp:534) counts factory-row precision as own evidence, so the provenance concern is real. External background measurements can inform introns, but reproducing their constraint at many introns does not create independent measurements of the background. Start with a small intron chain and vary background uncertainty and repeated use separately.
+>    Preserve the existing background shape when comparing integration against `NB(Nf)`; otherwise two mechanisms change. The [current kernel](src/rigel/native/solve_kernel.cpp:534) counts factory-row precision as own evidence, so the provenance concern is real. External background measurements can inform introns, but reproducing their constraint at many introns does not create independent measurements of the background. Start with a small intron chain and vary background uncertainty and repeated use separately.
 >
 > 8. **Disagree with calling the proposed subtraction derived information.**
 >    It fixes continuity, but inverse-variance subtraction and clipping remain a heuristic. An informative bimodal row can have greater variance than the flat distribution and receive zero precision; the result also depends on the bracket. Prefer information derived from the observation model. The smallest discriminator is a collection of flat, weakly tilted, concentrated and bimodal rows evaluated across bracket widths—not another genome run.
 >
 > 9. **Agree with the original `B_match`; disagree with the ruler-only causal test described here.**
->    Feeding simulator yields into an instrument scored against those yields mostly verifies plumbing. The [specified experiment](/Users/mkiyer/proj/rigel/docs/ISSUES.md:289) also requires `B_transfer1`, matched scorer laws, the gDNA denominator on the same scale, and downstream quantification controls. For production, I favour optional probe geometry plus a measured capture response: it represents reach explicitly. The response and behaviour without probe information remain to be established.
+>    Feeding simulator yields into an instrument scored against those yields mostly verifies plumbing. The [specified experiment](docs/ISSUES.md:289) also requires `B_transfer1`, matched scorer laws, the gDNA denominator on the same scale, and downstream quantification controls. For production, I favour optional probe geometry plus a measured capture response: it represents reach explicitly. The response and behaviour without probe information remain to be established.
 >
 > 10. **Agree with the rejection bars, with additional numerical and provenance gates.**
 >     Reject the proposed implementation if its apparent success comes from clipping posteriors against the grid, suppressing genuine capture, increasing g00 contamination, or teaching the landscape its own imposed background. Also reject a transcript-only win that leaves the low-opportunity calibration error intact. The “term alone never locates” gate already fails under the existing numerical settings; that must be resolved before panel A/Bs.
@@ -116,10 +116,10 @@ It reviewed `plan_round1.md`, and its section numbers refer to that version.
 > Additional errors or unsupported claims in the document:
 >
 > - **§4.4:** the Gamma statement is asymptotic. For finite \(N\) and very small \(\mu\), \(f/(2\mu)\) approaches a beta-prime distribution with shapes \(\tfrac12,N+\tfrac12\); its log-variance is \(\psi_1(\tfrac12)+\psi_1(N+\tfrac12)\).
-> - **§4.3 and Appendix B:** the contained-opportunity formula applies to regions. [Boundaries use crossing opportunity](/Users/mkiyer/proj/rigel/src/rigel/calibration/region_geometry.py:193). Small global TV error also does not bound relative error in a tiny opportunity.
-> - **§8 numbers:** the review’s table gives oracle-gDNA unprobed RNA-short error **+1.62**, not **+2.96**; the latter is shipped. RNA-long unprobed error is **+2.13**, so “within ±0.1” needs restriction to the partially probed classes. [Source table](/Users/mkiyer/proj/rigel/docs/dev/FRAGMENT_LENGTH_REVIEW.md:264).
-> - **§7 citation:** the supposed Python reference [calls the same native cube](/Users/mkiyer/proj/rigel/tests/calibration/_psi_reference.py:236); it is not independent mathematical corroboration.
-> - **§2 and §9:** the ladder and gap arm share the annotation, so “the ladder’s exons are long” is misleading. Uniform Poisson simulation also does not guarantee the finite-sample [dispersion estimator](/Users/mkiyer/proj/rigel/src/rigel/calibration/density_deconv.py:106) returns infinity.
+> - **§4.3 and Appendix B:** the contained-opportunity formula applies to regions. [Boundaries use crossing opportunity](src/rigel/calibration/region_geometry.py:193). Small global TV error also does not bound relative error in a tiny opportunity.
+> - **§8 numbers:** the review’s table gives oracle-gDNA unprobed RNA-short error **+1.62**, not **+2.96**; the latter is shipped. RNA-long unprobed error is **+2.13**, so “within ±0.1” needs restriction to the partially probed classes. [Source table](docs/dev/FRAGMENT_LENGTH_REVIEW.md:264).
+> - **§7 citation:** the supposed Python reference [calls the same native cube](tests/calibration/_psi_reference.py:236); it is not independent mathematical corroboration.
+> - **§2 and §9:** the ladder and gap arm share the annotation, so “the ladder’s exons are long” is misleading. Uniform Poisson simulation also does not guarantee the finite-sample [dispersion estimator](src/rigel/calibration/density_deconv.py:106) returns infinity.
 >
 > The main misreading of my previous review is treating the comparator as an endorsement of fixed shape \(a=\tfrac12\). I proposed comparing models whose uncertainty was justified; I did not establish that shape, the echo guarantee, or prior-only causation.
 >
@@ -135,7 +135,7 @@ way to solve this definitively?"
 >
 > I checked the selection, landscape estimator, solver, accumulator and downstream scoring code. The numerical counterexamples below are my own derivations.
 >
-> 1. **The expected-count cut does not remove selection bias.** The current selector requires a located composition ([calibrate.py:248](/Users/mkiyer/proj/rigel/src/rigel/calibration/calibrate.py:248)). Adding `ρ_ref E_g ≥ 1` leaves that outcome-dependent selection in place.
+> 1. **The expected-count cut does not remove selection bias.** The current selector requires a located composition ([calibrate.py:248](src/rigel/calibration/calibrate.py:248)). Adding `ρ_ref E_g ≥ 1` leaves that outcome-dependent selection in place.
 >
 >    Even in the simpler case `K ~ Poisson(μ)`, retaining `K ≥ 1` gives
 >    \[
@@ -151,13 +151,13 @@ way to solve this definitively?"
 >
 >    The census is useful, but surviving membership alone cannot certify preservation of capture. It must also measure reference displacement and truth error through the refits.
 >
-> 3. **I agree with replacing the extra gDNA Jeffreys half, with two implementation qualifications.** Under the declared interpretation of `q` as a population density in log rate, adding the full reference introduces an additional `√ρ_g` tilt ([psi_kernel.h:182](/Users/mkiyer/proj/rigel/src/rigel/native/psi_kernel.h:182)).
+> 3. **I agree with replacing the extra gDNA Jeffreys half, with two implementation qualifications.** Under the declared interpretation of `q` as a population density in log rate, adding the full reference introduces an additional `√ρ_g` tilt ([psi_kernel.h:182](src/rigel/native/psi_kernel.h:182)).
 >
->    The proposed lower-tail continuation fixes the integrability problem **only if evaluated using the unclipped log fraction**. The current evaluator clips `f` at `10⁻¹²` ([psi_kernel.h:65](/Users/mkiyer/proj/rigel/src/rigel/native/psi_kernel.h:65)); continuing a slope after that clipping eventually produces a flat tail again.
+>    The proposed lower-tail continuation fixes the integrability problem **only if evaluated using the unclipped log fraction**. The current evaluator clips `f` at `10⁻¹²` ([psi_kernel.h:65](src/rigel/native/psi_kernel.h:65)); continuing a slope after that clipping eventually produces a flat tail again.
 >
 >    The upper-grid argument works for the current `T = N` evaluation, provided every consumer is covered. It does **not** extend to exact integration over `T`, which has unbounded support. That version needs an explicit upper-tail definition. I would prototype this correction independently before adopting a new training cut.
 >
-> The simpler design principle is: **retain uncertainty as evidence instead of turning an uncertain estimate into a new observation.** Currently, calibration passes `f_g M` to the landscape, which treats it as a Poisson count ([calibrate.py:255](/Users/mkiyer/proj/rigel/src/rigel/calibration/calibrate.py:255), [landscape.py:138](/Users/mkiyer/proj/rigel/src/rigel/calibration/landscape.py:138)). That is the deeper statistical seam.
+> The simpler design principle is: **retain uncertainty as evidence instead of turning an uncertain estimate into a new observation.** Currently, calibration passes `f_g M` to the landscape, which treats it as a Poisson count ([calibrate.py:255](src/rigel/calibration/calibrate.py:255), [landscape.py:138](src/rigel/calibration/landscape.py:138)). That is the deeper statistical seam.
 >
 > If training needs redesign, the principled target is a population fit using the observation likelihood:
 > \[
@@ -166,9 +166,9 @@ way to solve this definitively?"
 > \]
 > with RNA nuisance quantities handled explicitly. A likelihood constant in `z` contributes no information about `q`. This requires preserving genuinely independent evidence, rather than recycling posterior beliefs or counting shared messages repeatedly.
 >
-> This is **a candidate to prove**, not an endorsement of resurrecting the old estimator. The refused `row_kernel` and `estep_all` experiments matter: averaging normalized likelihoods is different from this objective, and the counted-minority failure remains a mandatory falsifier ([ISSUES.md:2563](/Users/mkiyer/proj/rigel/docs/ISSUES.md:2563)).
+> This is **a candidate to prove**, not an endorsement of resurrecting the old estimator. The refused `row_kernel` and `estep_all` experiments matter: averaging normalized likelihoods is different from this objective, and the counted-minority failure remains a mandatory falsifier ([ISSUES.md:2563](docs/ISSUES.md:2563)).
 >
-> For the whole workflow, I see a more promising route than estimating an uncertain global gDNA length distribution and giving it another calibration role: **measure the relative RNA:gDNA length law within objects where capture cancels.** This is already identified in [ISSUES.md:278](/Users/mkiyer/proj/rigel/docs/ISSUES.md:278).
+> For the whole workflow, I see a more promising route than estimating an uncertain global gDNA length distribution and giving it another calibration role: **measure the relative RNA:gDNA length law within objects where capture cancels.** This is already identified in [ISSUES.md:278](docs/ISSUES.md:278).
 >
 > For a one-RNA-strand object, when both origins share the same placement and capture factor at length `b`,
 > \[
@@ -183,7 +183,7 @@ way to solve this definitively?"
 > - Derive opportunities for precisely those deposits.
 > - Supply fragment scores and their effective-length integrals from the same component-specific observation model.
 >
-> The current region payload retains only two strand totals ([accumulator.h:97](/Users/mkiyer/proj/rigel/src/rigel/native/calibration/accumulator.h:97)). Global length pools cannot recover the lost association. Uncertainty in the relative length law should be propagated through the model; that gives the requested softness without inventing a likelihood-temperature constant.
+> The current region payload retains only two strand totals ([accumulator.h:97](src/rigel/native/calibration/accumulator.h:97)). Global length pools cannot recover the lost association. Uncertainty in the relative length law should be propagated through the model; that gives the requested softness without inventing a likelihood-temperature constant.
 >
 > **What I would do first:** build a small truth-controlled falsifier varying RNA depth at fixed gDNA opportunity, alongside genuinely enriched short exons. Use it to judge the cut and any replacement training method. Separately prototype the prior correction, and run the specified `B_match`/`B_transfer1` experiment before committing to a capture implementation. Keep the background prior deferred.
 >
@@ -201,22 +201,22 @@ It reviewed `plan_round3.md`, and its section numbers refer to that version.
 >    =\sqrt{\pi}e^{-X}(X+\tfrac12),
 >    \]
 >    which peaks at X = ½, despite there being no strand information. I verified this by quadrature. The RNA reference itself favours a positive gDNA intensity here. This is the first new falsifier to add.
->    Also, the both-stranded row discards useful strand evidence: a 90:10 split constrains gDNA even when both RNA strands are allowed. Integrate the RNA strand allocation, consistent with the solver’s existing treatment, rather than collapsing immediately to N ([simplex_logodds.py (line 37)](/Users/mkiyer/proj/rigel/src/rigel/calibration/simplex_logodds.py:37)).
+>    Also, the both-stranded row discards useful strand evidence: a 90:10 split constrains gDNA even when both RNA strands are allowed. Integrate the RNA strand allocation, consistent with the solver’s existing treatment, rather than collapsing immediately to N ([simplex_logodds.py (line 37)](src/rigel/calibration/simplex_logodds.py:37)).
 >    Excluding messages, the factory row and overlapping boundary observations from this first population fit is sound. But call the result a likelihood marginalized under an explicit RNA reference, and test that reference’s influence.
 > 2. Full fit versus frozen variant: use the full fit as the candidate; reject the frozen variant as specified.
 >    The full fit has a defined objective. The frozen variant reintroduces selection and uses a normalized likelihood as a population contribution—the same conceptual problem that motivated this redesign.
 >    There is a sharper mathematical issue: for RNA-admitting regions, generally L(z) → L₀ > 0 as z → −∞. Consequently, normalizing that likelihood over log density requires an artificial lower boundary. Its variance, and therefore “located” status, depends on that boundary.
 >    Population 3 is necessary, but vary minority size, exposure and RNA depth. Require recovery only where the observations can distinguish the minority. Many individually weak regions can jointly locate a population; requiring every capture-reference member to have a located individual likelihood would discard that collective information. The proposed “mostly in the basin” and inherited √n rules therefore need their own justification.
 > 3. Fit once before the sweep: agree conditionally.
->    With the likelihood inputs and fitted prior fixed, this simplification is sound. The current code resets the beliefs before every refit sweep; repeating the same prior and grid repeats the same calculation ([calibrate.py (line 448)](/Users/mkiyer/proj/rigel/src/rigel/calibration/calibrate.py:448)).
+>    With the likelihood inputs and fitted prior fixed, this simplification is sound. The current code resets the beliefs before every refit sweep; repeating the same prior and grid repeats the same calculation ([calibrate.py (line 448)](src/rigel/calibration/calibrate.py:448)).
 >    What remains unproved is whether the reduced evidence produces an adequate prior. Losing message-derived training information affects unstranded capture-OFF too, not only the deferred stratum. Include that comparison explicitly.
 >    The smallest check is to compare one sweep against repeated, fully reset sweeps using an identical fixed prior. Then assess the new prior’s accuracy separately. Removing redundant sweeps should not be bundled with an unmeasured loss of evidence.
 > 4. Part 1 implementation: mostly agree, but amend the domain and convergence gates.
->    The unclipped axis and lower-tail slope are correct. However, “no consumer reads above the grid” is not currently guaranteed: the grid domain excludes opportunities at or below 10⁻⁹, while the native arm evaluates opportunities down to its 10⁻¹² floor. A positive-count consumer with E_g = 10⁻¹⁰ can therefore read above the grid ([calibrate.py (line 240)](/Users/mkiyer/proj/rigel/src/rigel/calibration/calibrate.py:240), [psi_kernel.h (line 72)](/Users/mkiyer/proj/rigel/src/rigel/native/psi_kernel.h:72)). Make the domain agree with the actual consumers.
->    Also inspect [required_logodds_window (line 72)](/Users/mkiyer/proj/rigel/src/rigel/calibration/landscape.py:72): it clips the fraction and only ensures that the bracket reaches the landscape floor, not that it includes the completed tail.
+>    The unclipped axis and lower-tail slope are correct. However, “no consumer reads above the grid” is not currently guaranteed: the grid domain excludes opportunities at or below 10⁻⁹, while the native arm evaluates opportunities down to its 10⁻¹² floor. A positive-count consumer with E_g = 10⁻¹⁰ can therefore read above the grid ([calibrate.py (line 240)](src/rigel/calibration/calibrate.py:240), [psi_kernel.h (line 72)](src/rigel/native/psi_kernel.h:72)). Make the domain agree with the actual consumers.
+>    Also inspect [required_logodds_window (line 72)](src/rigel/calibration/landscape.py:72): it clips the fraction and only ensures that the bracket reaches the landscape floor, not that it includes the completed tail.
 >    Replace unconditional “invariance at 10, 20, 40” with convergence after controlling omitted tail mass and moments. Even reference-only Jeffreys gives Var(log f) ≈ 2.804 at L = 10, versus 3.290 at L = 40, by continuous quadrature. Properness alone does not make a short bracket accurate.
 > 5. Stage 3: agree. Part 3: promising, but the production chain is incomplete.
->    Run the specified matched-table/integral experiment unchanged ([ISSUES.md (line 289)](/Users/mkiyer/proj/rigel/docs/ISSUES.md:289)). A partial improvement would establish a contributing mechanism; failure to close the entire gap would not prove that the mechanism lies elsewhere.
+>    Run the specified matched-table/integral experiment unchanged ([ISSUES.md (line 289)](docs/ISSUES.md:289)). A partial improvement would establish a contributing mechanism; failure to close the entire gap would not prove that the mechanism lies elsewhere.
 >    Within-object cancellation is valid for shared placements and a shared capture response. But relative odds do not identify both absolute length laws and capture. Even the ratio equation has the invariance
 >    r_b → a r_b, α_o → α_o + log a. An independently established RNA law can fix that scale on shared support; a capture-biased spliced histogram cannot automatically supply that law. Stage 3 cannot determine how to estimate the response without a BED.
 >    A simplification: prototype with sparse, exact integer lengths. Capture cancellation need not survive pooling lengths into a bin when r varies within it. Introduce compression only after measuring its error. Preserve conserved mass jointly with length and strand wherever attribution uses both.
@@ -226,7 +226,7 @@ It reviewed `plan_round3.md`, and its section numbers refer to that version.
 >    \[
 >    L(\rho)=e^{-\rho\sum_o E_o}.
 >    \]
->    The informative scale is 1/ΣE, not 1/max(E). Reusing the current landscape grid therefore excludes densities the pooled observations distinguish ([landscape.py (line 118)](/Users/mkiyer/proj/rigel/src/rigel/calibration/landscape.py:118)). Specify zero-rate handling and lower-support convergence before fitting q.
+>    The informative scale is 1/ΣE, not 1/max(E). Reusing the current landscape grid therefore excludes densities the pooled observations distinguish ([landscape.py (line 118)](src/rigel/calibration/landscape.py:118)). Specify zero-rate handling and lower-support convergence before fitting q.
 >    Third, use repeated realizations, held-out loci, exposure correlated with enrichment, uncertain strand specificity, and oracle-prior controls. These separate sampling error, model misspecification, self-influence and estimator failure. For Part 3, add disjoint length support and capture variation within proposed bins.
 > 7. Rejection criteria: agree with the intent; make them more precise.
 >    Reject a candidate that learns reference-induced composition from blind regions, creates locations through numerical boundaries, erases a detectable enriched minority, increases in-scope truth error, or succeeds only by disabling genuine capture.
@@ -256,10 +256,10 @@ It reviewed the fourth version of the plan. Its `plan:38` is that version's doma
 >    Add this cheap population-null check before the larger prototype. Use the shared-Y expression above as a comparator: it requires one scalar nuisance per region and no RNA quadrature. Neither approach should be declared adequate before testing.
 >    Also, profiling removes the RNA integral from training. It does not settle the solver’s separate T ≈ N approximation.
 > 2. One shared opportunity floor needs one shared consumer domain.
->    At [plan:38 (line 38)](/Users/mkiyer/proj/rigel/docs/dev/FRAGMENT_LENGTH_PLAN.md:38), specify that the grid is constructed from the same floored opportunities and masses for every actual arm consumer. Merely making the two epsilon constants equal does not suffice: a domain filter can still exclude a slot that the evaluator processes after flooring.
+>    At [plan:38 (line 38)](docs/dev/FRAGMENT_LENGTH_PLAN.md:38), specify that the grid is constructed from the same floored opportunities and masses for every actual arm consumer. Merely making the two epsilon constants equal does not suffice: a domain filter can still exclude a slot that the evaluator processes after flooring.
 >    The decisive gate remains: enumerate actual consumer coordinates and verify that none exceed the represented upper domain.
 > 3. 1/ΣE is a resolution scale, not a justified hard lower boundary.
 >    For pooled zeros, the likelihood at that rate is e⁻¹, while its supremum is at zero. Substantial likelihood remains below the proposed floor.
->    At [plan:71 (line 71)](/Users/mkiyer/proj/rigel/docs/dev/FRAGMENT_LENGTH_PLAN.md:71), check convergence of predictions and consumed quantities as the lower support extends. Checking the fitted mass at the floor is insufficient: it can remain 100% while the implied rate keeps changing. This does not require introducing a zero atom.
+>    At [plan:71 (line 71)](docs/dev/FRAGMENT_LENGTH_PLAN.md:71), check convergence of predictions and consumed quantities as the lower support extends. Checking the fitted mass at the floor is insufficient: it can remain 100% while the implied rate keeps changing. This does not require introducing a zero atom.
 > The capture-reference readout and unstranded capture-OFF adequacy are correctly left open. I would measure both before adding junction evidence or choosing a new membership rule.
 > I agree with postponing the broader test programme. The profiling null check above belongs in the first tier because it takes seconds and directly tests the proposed objective. Start there, alongside the prior-arithmetic prototype and the specified capture experiment.

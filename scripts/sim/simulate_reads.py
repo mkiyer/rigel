@@ -5,10 +5,16 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import time
+from pathlib import Path
 
 from rigel.sim.whole_genome import parse_yaml_config, run_simulation
+
+# the data root the in-repo configs name their paths under (`$RIGEL_RUNS`), as every instrument spells it
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "design"))
+from _shared import RUNS  # noqa: E402
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -37,6 +43,8 @@ def main() -> int:
     parser = build_arg_parser()
     args = parser.parse_args()
 
+    # unset, `$RIGEL_RUNS` is the data root every instrument defaults to
+    os.environ.setdefault("RIGEL_RUNS", str(RUNS))
     cfg = parse_yaml_config(args.config)
 
     # CLI overrides
