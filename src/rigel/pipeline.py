@@ -651,7 +651,6 @@ def _populate_em_annotations(
         return
 
     t_to_g = index.t_to_g_arr
-    is_nrna_arr = index.t_df["is_nrna"].values.astype(bool)
     is_synth_arr = index.t_df["is_synthetic"].values.astype(bool)
 
     # Concatenate per-locus metadata in same order as C++ output
@@ -679,10 +678,7 @@ def _populate_em_annotations(
     tx_flags[best_tid == -2] = AF_GDNA_EM
     if valid_t.any():
         winner_tids = best_tid[valid_t]
-        tx_flags[valid_t] = winner_flags(
-            is_nrna_arr[winner_tids],
-            is_synth_arr[winner_tids],
-        )
+        tx_flags[valid_t] = winner_flags(is_synth_arr[winner_tids])
 
     # Clean sentinel: -2 (gDNA) -> -1
     best_tid_clean = best_tid.copy()
@@ -756,7 +752,7 @@ def _run_locus_em_partitioned(
     against the unique part of the locus calibration counts from: its non-multimapper units that the blacklist
     did not reject, plus the deterministic fragments of its transcripts (the multimappers calibration deposits
     at their drawn placements are not counted). The
-    loci table's ``enable_gdna`` reports the structural eligibility (any unspliced unit carrying a finite
+    loci table's ``has_gdna`` reports the structural eligibility (any unspliced unit carrying a finite
     gDNA log-lik — the rule the C++ extractor applies).
 
     ``rna_prior_weight`` is the one PER-TRANSCRIPT array here and it is passed FLAT, while every
@@ -807,7 +803,7 @@ def _run_locus_em_partitioned(
     )
     gdna_prior = np.ascontiguousarray(gdna_prior)
     rna_prior = np.ascontiguousarray(rna_prior)
-    enable_gdna = (n_gdna_eligible > 0).astype(np.uint8)
+    has_gdna = n_gdna_eligible > 0
 
     em_result = estimator.run_batch_locus_em_partitioned(
         partition_tuples,
@@ -846,15 +842,14 @@ def _run_locus_em_partitioned(
             {
                 "locus_id": lid,
                 "locus_span_bp": loc.span_bp,
-                "n_transcripts": len(loc.transcript_indices),
                 "n_genes": len(gene_set),
                 "n_em_fragments": len(loc.unit_indices),
                 "rna_total": float(rna_arr[i]),
-                "gdna": float(gdna_arr[i]),
-                "gdna_prior_count": float(gdna_prior[i]),
-                "rna_prior_count": float(rna_prior[i]),
-                "enable_gdna": int(enable_gdna[i]),
-                "gdna_eff_len_em": float(gdna_eff_len[lid]),
+                "count_gdna": float(gdna_arr[i]),
+                "count_gdna_prior": float(gdna_prior[i]),
+                "count_rna_prior": float(rna_prior[i]),
+                "has_gdna": bool(has_gdna[i]),
+                "gdna_em_effective_length": float(gdna_eff_len[lid]),
             }
         )
 

@@ -152,12 +152,11 @@ class FragmentRouter:
 
         # Det-unambig annotations
         if annotations is not None and len(det_tids) > 0:
-            is_nrna_arr = index.t_df["is_nrna"].values.astype(bool)
             is_synth_arr = index.t_df["is_synthetic"].values.astype(bool)
             for j in range(len(det_tids)):
                 tid = int(det_tids[j])
                 gid = int(t_to_g[tid])
-                flags = winner_flag(bool(is_nrna_arr[tid]), bool(is_synth_arr[tid]))
+                flags = winner_flag(bool(is_synth_arr[tid]))
                 annotations.add(
                     frag_id=int(det_fids[j]),
                     best_tid=tid,

@@ -2489,8 +2489,8 @@ batch_locus_em_partitioned(
 
             nb::dict d;
             d["locus_idx"] = p.locus_idx;
-            d["n_transcripts"] = p.n_transcripts;
-            d["n_units"] = p.n_units;
+            d["n_rna_components"] = p.n_transcripts;
+            d["n_em_fragments"] = p.n_units;
             d["n_components"] = p.n_components;
             d["n_equiv_classes"] = p.n_equiv_classes;
             d["ec_total_elements"] = p.ec_total_elements;
@@ -2507,7 +2507,7 @@ batch_locus_em_partitioned(
                 p.squarem_grouped_stabilization_fail_count;
             d["assignment_stranded"] = p.assignment_stranded;
             d["assignment_unrepaired"] = p.assignment_unrepaired;
-            d["gdna_eff_len"] = p.gdna_eff_len;
+            d["gdna_em_effective_length"] = p.gdna_eff_len;
             d["final_data_loglik"] = p.final_data_loglik;
             d["extract_us"] = p.extract_us;
             d["build_ec_us"] = p.build_ec_us;

@@ -163,10 +163,10 @@
     fillTable($("align-table"), `<th>Metric</th><th class="n">Reads</th><th class="n">%</th>`, rows);
   }
   function flTable() {
-    const rows = (M.fl.table || []).map((r) => {
+    const rows = (M.fl.table || []).map((r) => {  // [category, N, mean, sd, median, mode, overflow %, label]
       const tr = H("tr");
       const color = r[0] === "rna" ? "var(--s1)" : r[0] === "gdna" ? "var(--s8)" : "var(--ink)";
-      tr.appendChild(H("td", null, `<span class="num" style="color:${color}">${r[0]}</span>`));
+      tr.appendChild(H("td", null, `<span class="num" style="color:${color}">${esc(r[7])}</span>`));
       tr.appendChild(H("td", "n num", si(r[1])));
       [r[2], r[3], r[4], r[5]].forEach((v) => tr.appendChild(H("td", "n num", v)));
       tr.appendChild(H("td", "n num", r[6] + "%"));
@@ -263,7 +263,7 @@
   }
 
   function geneTable() {
-    const g = M.genes || { rows: [] };  // rows: [gene_name, gene_id, gene_type, ref, strand, tpm, mature_count, nascent_count, n_transcripts]
+    const g = M.genes || { rows: [] };  // rows: [gene_name, gene_id, gene_type, ref, strand, tpm, count, n_transcripts]
     dataTable({
       table: "gene-table", search: "gsearch", count: "gcount", pager: "gene-pager",
       noun: "expressed genes", rows: g.rows || [], sort: 4, dir: -1,
@@ -274,9 +274,8 @@
         { idx: 2, label: "type", search: true, render: (v) => `<span style="font-size:11px;color:var(--ink-2)">${esc(v)}</span>` },
         { idx: 3, label: "locus", render: (v, r) => `<span class="num" style="font-size:11.5px">${esc(r[3])} ${esc(r[4])}</span>` },
         { idx: 5, label: "TPM", num: true, render: (v) => Number(v).toLocaleString("en-US") },
-        { idx: 6, label: "mature", num: true, render: (v) => grp(v) },
-        { idx: 7, label: "nascent", num: true, render: (v) => grp(v) },
-        { idx: 8, label: "n_tx", num: true, render: (v) => String(v) },
+        { idx: 6, label: "count", num: true, render: (v) => grp(v) },
+        { idx: 7, label: "n_tx", num: true, render: (v) => String(v) },
       ],
     });
   }
@@ -415,20 +414,20 @@
     }
   }
 
-  /* ---------- reference table (all references, by gDNA mass) ---------- */
+  /* ---------- reference table (all references, by gDNA count) ---------- */
   function refTable() {
-    const rt = (M.calibration || {}).ref_table || [];  // [ref, n_regions, gdna_mass, gdna/bp, gdna_frac]
+    const rt = (M.calibration || {}).ref_table || [];  // [ref, n_regions, count_gdna, gdna/bp, fraction_gdna]
     const cap = $("genome-cap");
-    if (cap) cap.textContent = `gDNA density across the genome — top ${Math.min(24, rt.length)} of ${grp(rt.length)} references by gDNA mass`;
+    if (cap) cap.textContent = `gDNA density across the genome — top ${Math.min(24, rt.length)} of ${grp(rt.length)} references by gDNA count`;
     dataTable({
       table: "ref-table", search: "rsearch", count: "rcount", pager: "ref-pager",
       noun: "references", rows: rt, sort: 2, dir: -1,
       columns: [
         { idx: 0, label: "Reference", search: true, render: (v) => `<span class="num">${esc(v)}</span>` },
         { idx: 1, label: "regions", num: true, render: (v) => grp(v) },
-        { idx: 2, label: "gDNA mass", num: true, render: (v) => si(v) },
+        { idx: 2, label: "gDNA count", num: true, render: (v) => si(v) },
         { idx: 3, label: "gDNA/bp", num: true, render: (v) => Number(v).toExponential(2) },
-        { idx: 4, label: "gDNA frac", num: true, render: (v) => pc(v) },
+        { idx: 4, label: "gDNA fraction", num: true, render: (v) => pc(v) },
       ],
     });
   }

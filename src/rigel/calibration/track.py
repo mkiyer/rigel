@@ -5,7 +5,7 @@ coordinates this yields a per-region gDNA level across the genome — a QC track
 that traces contamination and, on capture libraries, on-target enrichment.
 
 This is pure persistence: every value is already in ``CalibrationResult`` (the
-per-region deconvolved masses + the density-correct effective length) and
+per-region deconvolved counts + the density-correct effective length) and
 ``RegionArrays`` (the coordinates). No new calibration computation.
 """
 
@@ -18,17 +18,18 @@ from ..config import CONSTANTS
 
 
 def build_gdna_track(calibration, region_arrays, ref_names) -> pd.DataFrame:
-    """Per-region gDNA track: ``(ref, start, end, gdna_mass, rna_mass, gdna_density, gdna_frac)``.
+    """Per-region gDNA track: ``(ref, start, end, count_gdna, count_rna, gdna_density, fraction_gdna)``.
 
     Rows are in genomic order (``RegionArrays`` is sorted by ``(ref_id, start)``),
     which is the same order the ``CalibrationResult`` per-REGION arrays are aligned
-    to. ``gdna_density`` is the density-correct contained gDNA mass per bp
-    (mass / ``gdna_region_eff_len``); ``gdna_frac`` is gDNA's share of the region's
-    contained mass.
+    to. ``count_gdna`` and ``count_rna`` are the region's contained fragments
+    calibration deconvolves into gDNA and RNA; ``gdna_density`` is the density-correct
+    contained gDNA count per bp (``count_gdna`` / ``gdna_region_eff_len``);
+    ``fraction_gdna`` is gDNA's share of the region's contained count.
 
     Contained only, deliberately: a contiguous boundary is a 0-bp boundary, so it has no genomic
-    extent to occupy a row of a track, and attributing its crossing mass to a flank region would
-    report a density at a position where that mass was never contained.
+    extent to occupy a row of a track, and attributing its crossing count to a flank region would
+    report a density at a position where those fragments were never contained.
     """
     gdna = np.asarray(calibration.count_gdna_region, dtype=np.float64)
     rna = np.asarray(calibration.count_rna_region, dtype=np.float64)
@@ -47,10 +48,10 @@ def build_gdna_track(calibration, region_arrays, ref_names) -> pd.DataFrame:
             "ref": ref,
             "start": np.asarray(region_arrays.start, dtype=np.int64),
             "end": np.asarray(region_arrays.end, dtype=np.int64),
-            "gdna_mass": gdna,
-            "rna_mass": rna,
+            "count_gdna": gdna,
+            "count_rna": rna,
             "gdna_density": density.astype(np.float64),
-            "gdna_frac": frac.astype(np.float64),
+            "fraction_gdna": frac.astype(np.float64),
         }
     )
 

@@ -134,7 +134,7 @@ rigel index --fasta genome.fa --gtf annotation.gtf --alignable-zarr map.zarr -o 
 | `--alignable-zarr PATH` | — | Alignable Zarr store built for the same genome + aligner. Provides the splice-junction artifact blacklist (applied at BAM-scan time). Required unless `--no-mappability` is set. Read before anything is written, so a store that cannot be read, or whose blacklist names none of the FASTA's references, refuses the build and leaves an existing index in place. |
 | `--no-mappability` | off | Explicitly opt out of the alignable store and its splice blacklist (synthetic genomes, stranded-only benchmarks). Mutually exclusive with `--alignable-zarr`. |
 | `--splice-blacklist-min-count N` | `2` | (Advanced) Minimum unique-fragment support per `(chrom, intron, read_length)` for a sj to enter the blacklist. Lower admits more singletons; higher keeps only the most reproducible artifacts. Ignored under `--no-mappability`. |
-| `--nrna-tolerance N` | `20` | Max distance (bp) for clustering transcript start/end sites into shared synthetic nRNA spans |
+| `--nrna-tolerance N` | `20` | Max distance (bp) for clustering multi-exon transcripts' start and end sites into the shared synthetic spans that model their nascent RNA |
 | `--collapse-duplicate-transcripts` | off | Collapse transcripts sharing identical exon coordinates (keeps the lexicographically-smallest ID; `transcript_aliases` maps each collapsed ID to the one kept). Default: fail with a report. Useful for GENCODE, which has a few byte-identical annotations. |
 | `--gtf-parse-mode {strict,warn-skip}` | `strict` | `strict` fails on malformed GTF records; `warn-skip` logs warnings and skips them. Malformed: a line that cannot be parsed, a feature that ends before it starts, an exon without a `transcript_id`, an exon off its transcript's reference, strand or gene, an exon overlapping another of its transcript, and a transcript on a reference the FASTA lacks or past its end. Exons with no base between them are one exon. |
 | `--feather-compression {lz4,zstd,uncompressed}` | `lz4` | Feather compression for index files |
@@ -291,8 +291,9 @@ rigel report results/sample/ -o qc.html --title "Sample 42"
 | `--title` | `Rigel QC · <sample>` | Document title |
 
 The report covers alignment fates, fragment composition (including the splice-artifact
-blacklist status), the strand model, per-category fragment-length distributions, the
-mRNA / nRNA / gDNA split, calibration's capture answer (the gDNA bulk density and the saturated
+blacklist status), the strand model, per-category fragment-length distributions, the split of
+the fragments into annotated transcripts, nascent RNA, gDNA (EM), intergenic RNA and intergenic
+gDNA, calibration's capture answer (the gDNA bulk density and the saturated
 level over it), a genome-wide gDNA-density track, and
 a searchable gene-expression table, in one offline file.
 
@@ -365,13 +366,13 @@ Pass `--tsv` to also write `.tsv` mirrors, or convert afterward with
 
 | File | Contents |
 |------|----------|
-| `quant.feather` | Per-transcript abundance (one row per annotated transcript; synthetic nascent spans are in `nrna_quant`) |
-| `gene_quant.feather` | Gene-level aggregation |
-| `nrna_quant.feather` | nRNA entity estimates |
+| `quant.feather` | Per-transcript abundance: one row per annotated transcript, single-exon included |
+| `gene_quant.feather` | Per-gene abundance, summed over each gene's annotated transcripts |
+| `nascent_quant.feather` | Nascent RNA: one row per synthetic span Rigel adds to model a multi-exon transcript's unspliced RNA |
 | `loci.feather` | Per-locus EM summary |
-| `summary.json` | Run-level QC manifest + calibration scalars (`schema_version` 3) |
+| `summary.json` | Run-level QC manifest + calibration scalars (`schema_version` 4) |
 | `fragment_lengths.feather` | Raw fragment-length histograms, tidy `(category, length, count)` |
-| `calibration_track.feather` | Per-region gDNA solution: `(ref, start, end, gdna_mass, rna_mass, gdna_density, gdna_frac)` |
+| `calibration_track.feather` | Per-region gDNA solution: `(ref, start, end, count_gdna, count_rna, gdna_density, fraction_gdna)` |
 | `calibration_track.bedgraph` | Per-region gDNA density as a genome-browser track (IGV / UCSC) |
 | `locus_stats.feather` | Per-locus EM convergence profiling — only with `--emit-locus-stats` |
 | `config.yaml` | Resolved run configuration (reproducibility) |
@@ -384,10 +385,17 @@ on the rigel version that wrote it (its header names the version). Another
 version refuses a key it does not have, naming the version that wrote the file:
 every 0.7.1 `config.yaml` carries four keys removed in 0.8.0.
 
+**How the outputs name RNA.** Every table, `summary.json` key and report label puts RNA in one of two
+categories. **Annotated** RNA is RNA on a transcript of the reference annotation, single-exon transcripts
+included: a single-exon transcript does not splice, so it is reported with the annotation. **Nascent** RNA is
+RNA on the synthetic spans Rigel adds over the genomic extent of multi-exon transcripts to model their
+unspliced RNA, introns included. Beside them, `gdna` is genomic DNA, `rna` all RNA, and `intergenic` a place:
+a fragment no transcript or span overlaps. A `count` is fragments and a `fraction` a share.
+
 ### quant.feather / quant.tsv
 
-Transcript-level abundance estimates. Only annotated (non-synthetic)
-transcripts are included; synthetic nRNA spans appear in `nrna_quant`.
+Transcript-level abundance estimates: one row per annotated transcript, single-exon included. The
+synthetic nascent spans are rows of `nascent_quant`.
 
 | Column | Description |
 |--------|-------------|
@@ -402,26 +410,24 @@ transcripts are included; synthetic nRNA spans appear in `nrna_quant`.
 | `effective_length` | Length after fragment-length correction; the length `tpm` is normalised by, never contracted by capture |
 | `em_effective_length` | The yield the EM reads: `effective_length` scaled by the capture efficiency of every stretch the transcript's fragments land on (its exon pieces, the boundaries between them and its splice junctions), each read from the genomic DNA captured there or, for a junction, beside it. An efficiency is relative to uncaptured gDNA (the bulk), so `em_effective_length` equals `effective_length` off the probes and in a library without capture, and rises above it where capture enriched the transcript — to about `gdna_capture_saturation` times for a fully captured one. `count / em_effective_length` is the capture-corrected abundance, and a zero-count transcript's abundance is below about `3 / em_effective_length` |
 | `locus_id` | Locus ID; `-1` if not placed in an EM locus |
-| `nrna_id` | ID of the parent nRNA entity (`"."` if none; an annotated single-exon nascent entity names itself) |
+| `nascent_id` | The transcript's synthetic nascent span, a row of `nascent_quant`; `"."` when it has none: a single-exon transcript, or a transcript whose span an annotated single-exon transcript covers, which reports that RNA as annotated on its own row |
 | `is_basic` | True if the transcript has the GENCODE `basic` tag |
 | `is_mane` | True if MANE Select or MANE Plus Clinical |
-| `is_nrna` | True if single-exon (indistinguishable from nascent RNA) |
+| `is_single_exon` | True for a single-exon transcript. It does not splice, so its RNA is annotated RNA like any other transcript's |
 | `count` | Fragment count assigned to this transcript |
 | `count_unambig` | Deterministically assigned fragment count |
 | `count_em` | EM-assigned fragment count |
 | `count_spliced` | Fragment count from spliced fragments (annotated and unannotated junctions) |
-| `nrna_parent_count` | Parent nRNA entity's count (0 if `is_nrna=1` or no parent) |
-| `tpm` | Transcripts per million (annotated transcripts only) |
-| `tpm_total_rna` | TPM over all RNA (annotated + synthetic nRNA); comparable to `tpm` in `nrna_quant` |
+| `count_nascent` | Fragment count of the transcript's nascent span (`nascent_id`); `0` when it has none. Every transcript the span models repeats it, so never sum it over isoforms |
+| `tpm` | Transcripts per million, over the annotated transcripts |
+| `tpm_total_rna` | TPM over all RNA, annotated transcripts and nascent spans together; comparable to `tpm_total_rna` in `nascent_quant` |
 | `posterior_mean` | Mean EM posterior over units assigned to this transcript |
 
 ### gene_quant.feather / gene_quant.tsv
 
-Gene-level abundance aggregated from annotated (non-synthetic) transcripts.
-`mature_count` / `nascent_count` split that over the gene's multi-exon vs
-single-exon (`is_nrna`) annotated transcripts (`count = mature_count +
-nascent_count`). Synthetic nRNA spans are gene-neutral (many-to-many) and are
-reported per-entity in `nrna_quant`, not attributed to genes here.
+Gene-level abundance, summed over each gene's annotated transcripts: a gene's RNA is its annotated
+`count`. The nascent spans are gene-neutral (one span can model the transcripts of more than one gene),
+so they are reported per span in `nascent_quant` and never attributed to a gene here.
 
 | Column | Description |
 |--------|-------------|
@@ -432,69 +438,64 @@ reported per-entity in `nrna_quant`, not attributed to genes here.
 | `n_transcripts` | Number of annotated transcripts |
 | `locus_id` | Primary locus assigned to the gene |
 | `effective_length` | Abundance-weighted mean effective transcript length |
-| `count` | Total fragment count (sum of annotated transcript counts) |
-| `mature_count` | Count over multi-exon annotated transcripts |
-| `nascent_count` | Count over single-exon (`is_nrna`) annotated transcripts |
+| `count` | Fragment count, the sum of the gene's annotated transcripts' counts |
 | `count_unambig` | Deterministic fragment count |
 | `count_em` | EM-assigned fragment count |
 | `count_spliced` | Spliced fragment count |
 | `tpm` | Gene-level TPM |
 
-### nrna_quant.feather / nrna_quant.tsv
+### nascent_quant.feather / nascent_quant.tsv
 
-nRNA entity estimates. Each row is one nRNA entity (a single-exon
-transcript, annotated or synthetic) that has at least one multi-exon mRNA
-child. Standalone single-exon genes with no multi-exon overlap appear in
-`quant.feather` with `is_nrna=1` instead.
+Nascent RNA, one row per synthetic span. Rigel clusters the start and end sites of the multi-exon
+transcripts within `--nrna-tolerance` and adds one span over each merged extent, which holds the unspliced
+RNA, introns included, of the transcripts it models. Where an annotated single-exon transcript already
+covers the extent, Rigel adds no span: that transcript models it, and its RNA is annotated, a row of
+`quant.feather`.
 
 | Column | Description |
 |--------|-------------|
-| `nrna_id` | nRNA entity transcript ID |
+| `nascent_id` | Span ID |
 | `effective_length` | Effective length after fragment-length correction (the length TPM divides by) |
 | `em_effective_length` | The effective length the EM reads (capture-aware) |
-| `locus_id` | Locus containing this entity |
-| `is_synthetic` | True if synthesized by rigel |
-| `n_contributing_transcripts` | Number of multi-exon transcripts merged into this span |
-| `count` | Entity's own fragment count |
-| `n_mrna` | Number of multi-exon mRNA transcripts associated with the entity |
-| `mrna_count` | Sum of mRNA children's fragment counts |
-| `tpm` | Total-RNA TPM; comparable to `tpm_total_rna` in `quant.feather` |
+| `locus_id` | Locus containing this span |
+| `count` | The span's own fragment count: its nascent RNA |
+| `n_annotated` | Number of annotated transcripts the span models |
+| `count_annotated` | Sum of those transcripts' fragment counts |
+| `tpm_total_rna` | TPM over all RNA, annotated transcripts and nascent spans together; comparable to `tpm_total_rna` in `quant.feather` |
 
-The entity's coordinates are its row in the index's `transcripts` table (synthetic entities are
-gene-neutral, so they carry no gene).
+A span's coordinates are its row in the index's `transcripts` table; spans are gene-neutral, so they carry
+no gene.
 
-**Overlapping spans.** rigel makes one nascent entity per merged span — transcript start and end
-sites clustered within `--nrna-tolerance` — so a gene with several isoform clusters carries several
-overlapping same-strand spans. The EM cannot tell overlapping spans apart, so how their nascent mass
-splits among them is arbitrary: read nascent RNA per gene, or per family of overlapping spans, never
-per span. `quant.feather`'s `nrna_id` and `nrna_parent_count` point each transcript at its own span,
-so a transcript's parent count can read near 0 while an overlapping span holds the family's mass.
+**Overlapping spans.** Rigel makes one span per merged extent, so a gene with several isoform clusters
+carries several overlapping same-strand spans. The EM cannot tell overlapping spans apart, so how their
+nascent RNA splits among them is arbitrary: read nascent RNA per gene, or per family of overlapping spans,
+never per span. `quant.feather`'s `nascent_id` and `count_nascent` point each transcript at its own span,
+so a transcript's `count_nascent` can read near 0 while an overlapping span holds the family's fragments.
 
 ### loci.feather / loci.tsv
 
 Per-locus EM summary. One row per connected component of overlapping
-transcripts. Each locus is an independent EM subproblem with `n_t + 1`
-components (one per transcript row + one gDNA).
+transcripts. Each locus is an independent EM subproblem with one component per annotated
+transcript and nascent span, plus a gDNA component where `has_gdna`.
 
 | Column | Description |
 |--------|-------------|
 | `locus_id` | Locus ID |
 | `locus_span_bp` | Genomic span of the locus (bp) |
-| `n_transcripts` | Total transcript rows (mRNA + nRNA spans) |
-| `n_annotated_transcripts` | Annotated (non-synthetic) transcript count |
-| `n_nrna_entities` | Number of nRNA entities (all single-exon transcripts) |
+| `n_transcripts` | Number of annotated transcripts |
+| `n_nascent` | Number of nascent spans |
 | `n_genes` | Number of genes |
 | `n_em_fragments` | Ambiguous fragments entering EM |
-| `count_unambig` | Deterministic (splice-confirmed) mRNA count that bypassed EM |
-| `mrna` | Total mRNA count (EM-assigned annotated + unambiguous) |
-| `nrna` | nRNA count on the locus's synthetic spans (an annotated single-exon nascent entity's count is in `mrna`) |
-| `gdna` | Total gDNA count |
-| `total` | `mrna + nrna + gdna` |
-| `gdna_rate` | `gdna / total` |
-| `gdna_prior_count` | Calibrated per-locus gDNA Dirichlet prior scalar |
-| `rna_prior_count` | Calibrated per-locus RNA Dirichlet prior scalar |
-| `enable_gdna` | `1` if the gDNA component is enabled for this locus |
-| `gdna_eff_len_em` | Exposure-adjusted EM effective length of the locus gDNA component |
+| `count_unambig` | Deterministic (splice-confirmed) count on the annotated transcripts, which bypassed the EM |
+| `count_annotated` | Fragment count on the annotated transcripts, single-exon included: EM-assigned plus `count_unambig` |
+| `count_nascent` | Fragment count on the nascent spans |
+| `count_gdna` | gDNA fragment count from the locus EM |
+| `count` | `count_annotated + count_nascent + count_gdna` |
+| `fraction_gdna` | `count_gdna / count` |
+| `count_gdna_prior` | Calibrated gDNA pseudocount of the locus EM's Dirichlet prior |
+| `count_rna_prior` | Calibrated RNA pseudocount of the locus EM's Dirichlet prior |
+| `has_gdna` | True if the locus has a gDNA component: some unspliced fragment in it can be gDNA |
+| `gdna_em_effective_length` | Exposure-adjusted EM effective length of the locus gDNA component |
 
 ### fragment_lengths.feather / fragment_lengths.tsv
 
@@ -504,7 +505,7 @@ first non-empty bin to the last. This is the plotting substrate for the fragment
 
 | Column | Description |
 |--------|-------------|
-| `category` | FL model: `global`, `gdna`, `rna`, or one of the five observed pools (`pool_dna_intergenic`, `pool_dna_intronic`, `pool_dna_intron_exon`, `pool_dna_intergenic_exon`, `pool_rna_spliced`) |
+| `category` | FL model: `global`, `gdna`, `rna`, or one of the five observed pools (`pool_gdna_intergenic`, `pool_gdna_intronic`, `pool_gdna_intron_exon`, `pool_gdna_intergenic_exon`, `pool_rna_spliced`) |
 | `length` | Fragment length (bp); the row at the maximum fragment length the scan models (1000 bp) holds every fragment at least that long |
 | `count` | Fragment weight in this bin: whole fragments for `global` and the observed pools, fractional for the fitted `gdna` and `rna` models |
 
@@ -518,22 +519,22 @@ histograms they are built from.
 Run-level QC manifest. It is a small, human-readable index — the bulky raw
 fragment-length histograms live in the `fragment_lengths.feather` companion
 (see above), not in the JSON. `schema_version` (integer) identifies the layout;
-the current version is **3**. Top-level keys:
+the current version is **4**. Top-level keys:
 
 | Key | Contents |
 |-----|----------|
-| `schema_version` | Manifest schema version (currently `3`) |
+| `schema_version` | Manifest schema version (currently `4`) |
 | `rigel_version`, `timestamp` | Version and run time |
 | `command` | Subcommand, resolved arguments, config-file path |
 | `configuration` | All resolved pipeline parameters |
 | `input` | Absolute BAM and index paths |
 | `alignment_stats` | Two unit families: record-level counts (`total_reads`, `mapped_reads`, `unmapped_reads`, `secondary_reads`, `supplementary_reads`, `proper_pairs`, `duplicate_reads`, `qc_fail_reads`) and read-name-group counts (`read_groups`, `unique_reads`, `multimapping_reads`). The report's read-fate bar uses the read-group family so its segments share one denominator |
 | `fragment_stats` | Total, genic, intergenic, and chimeric breakdowns; annotated/unannotated SJ counts; a `splice` sub-block with the per-fragment splice-type breakdown (`unspliced`, `spliced_annotated`, `spliced_unannotated`, `spliced_implicit`, `splice_artifact`) plus `sj_blacklisted` (blacklisted junctions × records, multimapper records included: the annotated BAM's `ZB` summed), and blacklist provenance `sj_blacklist_size` / `sj_blacklist_loaded` (so `splice_artifact: 0` reads as "detection off — no blacklist in the index" vs "detection on, none found") |
-| `strand_model` | Protocol (`R1-sense` / `R1-antisense`, and `read1_sense`), strand specificity, `p_r1_sense`, training count, the per-junction strand table's QC (`sj`), posterior variance, 95% CI; the junction fit behind κ — `kappa` (the spliced reads' sense fraction, `pooled` over every junction and `genuine` over the junctions the three-class fit credits to RNA), `junction_classes` (each class's share — `genuine`, `artifact`, `reversed` — `by_junction` and `by_fragment`; shallow splice artifacts are most of the junctions and few of the fragments; `null` where the strand channel is dead, since the classes are not identified at κ = ½ and `genuine` then equals `pooled`, the κ calibration reads), `strand_live` (whether the protocol preserves strand, the decision calibration's strand channel reads) and `strand_overdispersion` (0, `binomial`, for gDNA and RNA alike); and a `diagnostics` sub-block comparing the all-exonic model to the spliced-only model (`contamination_gap` — a positive value flags unstranded gDNA contamination) |
+| `strand_model` | Protocol (`R1-sense` / `R1-antisense`, and `read1_sense`), strand specificity, `p_r1_sense`, training count, the per-junction strand table's QC (`sj`: `n_sj`, `n_observations` and the junctions' depth, `depth_median`, `depth_p90`, `depth_p99`, `depth_max`), posterior variance, 95% CI; the junction fit behind κ — `kappa` (the spliced reads' sense fraction, `pooled` over every junction and `genuine` over the junctions the three-class fit credits to RNA), `junction_classes` (each class's share — `genuine`, `artifact`, `reversed` — `by_junction` and `by_fragment`; shallow splice artifacts are most of the junctions and few of the fragments; `null` where the strand channel is dead, since the classes are not identified at κ = ½ and `genuine` then equals `pooled`, the κ calibration reads), `strand_live` (whether the protocol preserves strand, the decision calibration's strand channel reads) and `strand_overdispersion` (0, `binomial`, for gDNA and RNA alike); and a `diagnostics` sub-block comparing the all-exonic model to the spliced-only model (`contamination_gap` — a positive value flags unstranded gDNA contamination) |
 | `calibration` | Library-scalar calibration outputs (see below) |
-| `gdna_eff_len` | Summary of the per-locus gDNA effective-length series (`em`) |
+| `gdna_em_effective_length` | Summary of the loci table's column of that name: its `min`, `median`, `p95`, `max` |
 | `fragment_length` | Per-category FL **summary statistics only** (`n_observations`, `mean`, `std`, `median`, `mode`, `max_size`, `overflow_count`, `overflow_fraction`) for `global`, `gdna`, `rna` and the five pools. The raw per-bin histograms are in `fragment_lengths.feather` |
-| `quantification` | `n_transcripts`, `n_genes`, `n_loci`, assignment counts (`n_unambig_assigned`, `n_em_assigned`, and `n_gated_out`: the fragments a hard scoring gate dropped — `--overhang-alpha 0` or `--mismatch-alpha 0` — which no pool holds), and the pools' totals and fractions: mRNA, nRNA, the EM's genic gDNA (`gdna_total`), every intergenic fragment (`intergenic_total`) and the spliced ones among them (`intergenic_spliced`: RNA no annotated transcript holds, certified by its junction). `gdna_fraction` is the EM's gDNA plus the unspliced intergenic fragments; `mrna_fraction + nrna_fraction + gdna_fraction + intergenic_rna_fraction = 1`. `gdna_em_fraction` is the EM's genic gDNA alone, and `intergenic_fraction` the share of every intergenic fragment |
+| `quantification` | `n_transcripts` (the annotated transcripts) and `n_nascent` (the nascent spans), `n_genes`, `n_loci`, assignment counts (`n_unambig_assigned`, `n_em_assigned`, and `n_gated_out`: the fragments a hard scoring gate dropped — `--overhang-alpha 0` or `--mismatch-alpha 0` — which no pool holds), and four pools, each a `count_*` beside its `fraction_*` of the four together: `count_annotated` (the annotated transcripts), `count_nascent` (the nascent spans), `count_gdna` (gDNA: the EM's plus the unspliced intergenic fragments, which reach no locus) and `count_intergenic_rna` (the spliced intergenic fragments: RNA no annotated transcript holds, certified by its junction), so `fraction_annotated + fraction_nascent + fraction_gdna + fraction_intergenic_rna = 1`. `count_gdna_em` and `fraction_gdna_em` are the EM's genic gDNA alone, so the intergenic gDNA is `count_gdna − count_gdna_em`. `fraction_intergenic` is the share of every intergenic fragment, both kinds; their count is `fragment_stats.intergenic` |
 
 The **`calibration`** block holds exactly the library-wide calibration
 scalars (it is `null` if calibration did not run):
@@ -544,7 +545,7 @@ scalars (it is `null` if calibration did not run):
     "gdna_density_global":        <float>,       // library-average gDNA density (QC scalar)
     "gdna_bulk_density":          <float|null>,  // the uncaptured gDNA level capture is read against, gDNA fragments/bp; null = no landscape
     "gdna_capture_saturation":    <float>,       // the saturated gDNA level over that bulk; 1 = nothing above it
-    "rna_sense_frac":             <float>,       // kappa: sense-strand RNA fraction
+    "fraction_rna_sense":         <float>,       // kappa: sense-strand RNA fraction
     "n_regions":                  <int>,         // number of calibration regions
     "n_boundaries":               <int>,         // number of contiguous boundaries between adjacent regions
     "n_sj":                       <int>          // number of splice junctions
@@ -609,15 +610,16 @@ through unchanged without annotation tags. Rigel's tags replace any tag of the s
 
 #### ZF assignment flags
 
-`ZF` is an 8-bit bitfield describing the fate of the fragment in the pipeline:
+`ZF` is an 8-bit bitfield describing the fate of the fragment in the pipeline. Bits 1, 2 and 4 say which
+kind of candidate won, named for the category the tables report it under:
 
 | Bit | Mask | Flag | Meaning |
 |-----|------|------|---------|
 | 0 | 0x01 | `is_resolved` | Fragment was assigned to a pool, by the EM or deterministically |
-| 1 | 0x02 | `is_mrna` | Assigned to a spliced mRNA transcript |
-| 2 | 0x04 | `is_gdna` | Assigned to the gDNA component (EM gDNA or unspliced intergenic) |
-| 3 | 0x08 | `is_nrna` | Assigned to a nascent-RNA component |
-| 4 | 0x10 | `is_synthetic` | Assigned to a rigel-generated synthetic nRNA span |
+| 1 | 0x02 | `is_annotated` | Assigned to an annotated transcript: any reference transcript, single-exon included |
+| 2 | 0x04 | `is_gdna` | Assigned to gDNA (the EM's gDNA component, or unspliced intergenic) |
+| 3 | 0x08 | — | Retired: never set, so no earlier `ZF` value is reused with a new meaning |
+| 4 | 0x10 | `is_nascent` | Assigned to a synthetic nascent span |
 | 5 | 0x20 | `is_intergenic` | No annotation overlap: with `is_gdna` when unspliced; alone when spliced (RNA no annotated transcript holds) |
 | 6 | 0x40 | `is_chimeric` | Chimeric fragment, skipped before scoring |
 | 7 | 0x80 | `is_multimapper_dropped` | Multimapper dropped when `--include-multimap` is off |
@@ -627,12 +629,11 @@ Canonical `ZF` values (the only ones produced):
 | ZF (hex) | Dec | Meaning |
 |----------|-----|---------|
 | `0x00` |   0 | Unresolved: scored, but assigned no pool |
-| `0x03` |   3 | mRNA assigned (multi-exon transcript) |
-| `0x09` |   9 | nRNA assigned (annotated single-exon transcript) |
-| `0x19` |  25 | nRNA assigned (rigel-synthesized span) |
-| `0x05` |   5 | gDNA assigned by EM (annotation-overlapping) |
-| `0x25` |  37 | gDNA assigned by intergenic fallback (unspliced) |
-| `0x21` |  33 | RNA no annotated transcript holds (spliced, intergenic) |
+| `0x03` |   3 | Annotated: assigned to a reference transcript, single-exon included |
+| `0x11` |  17 | Nascent: assigned to a synthetic nascent span |
+| `0x05` |   5 | gDNA, assigned by the EM (annotation-overlapping) |
+| `0x25` |  37 | Intergenic gDNA (unspliced, no annotation overlap) |
+| `0x21` |  33 | Intergenic RNA: spliced, no annotation overlap — RNA no annotated transcript holds |
 | `0x40` |  64 | Chimeric, not scored |
 | `0x80` | 128 | Multimapper dropped, not scored |
 
@@ -641,10 +642,9 @@ Pysam usage:
 ```python
 zf = read.get_tag("ZF")
 is_resolved   = (zf & 0x01) != 0
-is_mrna       = (zf & 0x02) != 0
+is_annotated  = (zf & 0x02) != 0
 is_gdna       = (zf & 0x04) != 0
-is_nrna       = (zf & 0x08) != 0
-is_synthetic  = (zf & 0x10) != 0
+is_nascent    = (zf & 0x10) != 0
 is_intergenic = (zf & 0x20) != 0
 is_chimeric   = (zf & 0x40) != 0
 is_mm_dropped = (zf & 0x80) != 0
@@ -657,7 +657,7 @@ is_mm_dropped = (zf & 0x80) != 0
 Calibration is the middle stage of `rigel quant`: it runs once, in-process, between the BAM
 scan and the per-locus EM, on the fragment tallies the scanner deposits during its single pass
 (no extra read of the BAM). Rigel's model has three fragment origins — spliced RNA, unspliced
-RNA (which includes nascent pre-mRNA), and genomic DNA contamination, which is unspliced,
+RNA (nascent RNA among it), and genomic DNA contamination, which is unspliced,
 unstranded and genome-wide (and enriched on probed exons under hybrid capture). A spliced
 fragment is certified RNA; calibration's job is to split each genomic region's *unspliced* mass
 into sense RNA, antisense RNA and gDNA, using the strand tilt of the counts, what neighbouring
@@ -667,10 +667,10 @@ theory is in `docs/EQUATIONS.md` and the design in `docs/DESIGN.md`.
 ### What calibration produces
 
 - **Library scalars**, in `summary.json` → `calibration`: `gdna_density_global`,
-  `rna_sense_frac` (the sense fraction κ), the uncaptured gDNA level `gdna_bulk_density` that capture
+  `fraction_rna_sense` (the sense fraction κ), the uncaptured gDNA level `gdna_bulk_density` that capture
   is read against, and the saturated level over it, `gdna_capture_saturation`. The junction fit behind
   κ and the strand overdispersion (0, binomial) are in `strand_model`.
-- **A per-locus Dirichlet prior** — `gdna_prior_count` and `rna_prior_count` in `loci.feather`
+- **A per-locus Dirichlet prior** — `count_gdna_prior` and `count_rna_prior` in `loci.feather`
   — which sets the gDNA-vs-RNA split each locus's EM starts from, plus the gDNA component's
   effective length. RNA is distributed among transcripts by the EM, not by calibration.
 - **A genome-browser track** of the solved gDNA density, `calibration_track.feather` /
@@ -698,10 +698,10 @@ not user-configurable.
 
 ### When to suspect calibration is misfiring
 
-- A high `gdna_fraction` in `summary.json` → `quantification` on a presumed-clean library, or an
+- A high `fraction_gdna` in `summary.json` → `quantification` on a presumed-clean library, or an
   implausible `gdna_density_global`, usually means the strand signal is weak (near-unstranded
   data), so the solve is leaning on the prior. Inspect `strand_model.strand_specificity`.
-- Heavy mass on nRNA components in `nrna_quant.feather` for a short-fragment library is usually
+- Heavy nascent RNA in `nascent_quant.feather` for a short-fragment library is usually
   an identifiability limit within that locus rather than a calibration error.
 
 ---
@@ -823,10 +823,11 @@ rigel quant \
     --bam sample.bam --index index/ -o results/ \
     --annotated-bam results/annotated.bam
 
-# Count fragments assigned to gDNA by the EM (ZF=5): first mate, primary, non-supplementary — one record
-# per fragment
+# Tally the fragments by ZF value (3 annotated, 17 nascent, 5 gDNA by the EM, 37 intergenic gDNA,
+# 33 intergenic RNA): first mate, primary, non-supplementary — one record per fragment
 samtools view -f 64 -F 0x900 results/annotated.bam \
-    | awk '{ for(i=12;i<=NF;i++) if($i=="ZF:i:5") count++ } END { print count }'
+    | awk '{ for(i=12;i<=NF;i++) if($i ~ /^ZF:i:/) n[substr($i,6)]++ } END { for(v in n) print v, n[v] }' \
+    | sort -n
 ```
 
 ### Exclude multimappers, profile the EM
@@ -848,17 +849,20 @@ package are all `rigel`.
 Name-sorted or collated — not coordinate-sorted.
 Use `samtools sort -n -o out.bam in.bam` or `samtools collate`.
 
-**What is the difference between `mrna` and `nrna`?**
-`mrna` counts fragments consistent with mature, spliced RNA.
-`nrna` counts fragments consistent with unspliced, nascent pre-mRNA.
-Total RNA-seq libraries contain both. Use `mrna` for standard differential
-expression; use `nrna` for transcription dynamics.
+**What is the difference between annotated transcripts and nascent RNA?**
+An annotated transcript's `count` is the RNA assigned to that reference transcript, spliced fragments
+and unspliced ones alike; a single-exon transcript's RNA is annotated too, since it does not splice.
+Nascent RNA is the RNA assigned to the synthetic spans Rigel adds over the extent of multi-exon
+transcripts: RNA that has not spliced, introns included. Total RNA-seq libraries carry both. Use the
+annotated counts (`quant`, `gene_quant`) for standard differential expression, and nascent RNA
+(`nascent_quant`, or `count_nascent` per transcript) for transcription dynamics, read per gene or per
+family of overlapping spans (see Overlapping spans under `nascent_quant`).
 
-**Why are nRNA counts shared?**
-nRNA is one entity per merged span: transcript start and end sites clustered within
-`--nrna-tolerance` share one nascent component. `nrna_quant` holds its count once;
-`quant.feather`'s `nrna_parent_count` repeats it on every child transcript, so never sum
-it over isoforms. Counts are fractional only under `--assignment-mode fractional`.
+**Why is `count_nascent` shared?**
+One synthetic span models every multi-exon transcript whose start and end sites cluster within
+`--nrna-tolerance`. `nascent_quant` holds its count once; `quant.feather`'s `count_nascent` repeats it on
+every transcript the span models, so never sum it over isoforms. Counts are fractional only under
+`--assignment-mode fractional`.
 
 **Why is `strand_specificity` near 0.5?**
 Rigel trains the strand model from annotated spliced fragments only. On a

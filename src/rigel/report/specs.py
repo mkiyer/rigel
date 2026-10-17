@@ -20,9 +20,29 @@ _SCHEMA = "https://vega.github.io/schema/vega-lite/v5.json"
 # Overlay compares the deconvolved pools; per-category small multiples show all.
 _OVERLAY_CATEGORIES = ["rna", "gdna"]
 
+#: The label the report shows for each fragment-length category ``rigel quant`` writes: the anchor, the two
+#: modelled pools, and the five pools, selected by structure, that they are built from. The one map: the
+#: summary table, the overlay's legend and the per-category facets all read it.
+FL_CATEGORY_LABELS = {
+    "global": "All fragments",
+    "gdna": "gDNA",
+    "rna": "RNA",
+    "pool_gdna_intergenic": "gDNA pool · intergenic",
+    "pool_gdna_intronic": "gDNA pool · intronic",
+    "pool_gdna_intron_exon": "gDNA pool · intron|exon",
+    "pool_gdna_intergenic_exon": "gDNA pool · intergenic|exon",
+    "pool_rna_spliced": "RNA pool · spliced",
+}
+
+
+def fl_label(category: str) -> str:
+    """A fragment-length category's label; a category the labels do not name shows as itself."""
+    return FL_CATEGORY_LABELS.get(category, category)
+
 
 def _binned_density(fl_df: pd.DataFrame, categories, binsize: int = 5) -> list[dict]:
-    """Area-normalized density per category so pools of different N overlay fairly."""
+    """Area-normalized density per category so pools of different N overlay fairly; each row names its
+    category by its label."""
     rows: list[dict] = []
     for cat in categories:
         sub = fl_df[fl_df["category"] == cat]
@@ -36,7 +56,7 @@ def _binned_density(fl_df: pd.DataFrame, categories, binsize: int = 5) -> list[d
         for b, c in agg.items():
             rows.append(
                 {
-                    "category": cat,
+                    "category": fl_label(cat),
                     "length": int(b),
                     "density": float(c) / total / binsize,
                 }
@@ -45,7 +65,7 @@ def _binned_density(fl_df: pd.DataFrame, categories, binsize: int = 5) -> list[d
 
 
 def fl_overlay_spec(fl_df: pd.DataFrame) -> dict | None:
-    """Density overlay of the gDNA vs RNA fragment-length pools."""
+    """Density overlay of the gDNA vs RNA fragment-length pools, named by their labels."""
     cats = [c for c in _OVERLAY_CATEGORIES if (fl_df["category"] == c).any()]
     if not cats:
         return None
@@ -82,7 +102,7 @@ def fl_overlay_spec(fl_df: pd.DataFrame) -> dict | None:
                 "field": "category",
                 "type": "nominal",
                 "title": None,
-                "sort": _OVERLAY_CATEGORIES,
+                "sort": [fl_label(c) for c in _OVERLAY_CATEGORIES],
                 "legend": {"orient": "top-right"},
             },
             "tooltip": [
@@ -96,13 +116,13 @@ def fl_overlay_spec(fl_df: pd.DataFrame) -> dict | None:
 
 
 def fl_small_multiples_spec(fl_df: pd.DataFrame, exclude=("global",)) -> dict | None:
-    """Per-category histogram small multiples (independent y per facet)."""
+    """Per-category histogram small multiples (independent y per facet), each headed by its label."""
     cats = [c for c in fl_df["category"].unique() if c not in exclude]
     if not cats:
         return None
     sub = fl_df[fl_df["category"].isin(cats)].copy()
     rows = [
-        {"category": str(c), "length": int(x), "count": float(n)}
+        {"category": fl_label(str(c)), "length": int(x), "count": float(n)}
         for c, x, n in zip(sub["category"], sub["length"], sub["count"])
     ]
     return {
@@ -114,7 +134,7 @@ def fl_small_multiples_spec(fl_df: pd.DataFrame, exclude=("global",)) -> dict | 
             "type": "nominal",
             "title": None,
             "header": {"labelFontWeight": "bold"},
-            "sort": cats,
+            "sort": [fl_label(str(c)) for c in cats],
         },
         "spec": {
             "width": 180,
@@ -185,9 +205,9 @@ def _bin_track(track: pd.DataFrame, bins_per_ref: int = 160) -> list[dict]:
 
 
 def genome_track_spec(track: pd.DataFrame | None, top_n: int = 24) -> dict | None:
-    """Per-reference gDNA-density track for the top references by gDNA mass.
+    """Per-reference gDNA-density track for the top references by gDNA count.
 
-    References are ranked by total gDNA mass (data-driven, organism-agnostic — no
+    References are ranked by their total gDNA count (data-driven, organism-agnostic — no
     name-based filtering) and only the top ``top_n`` are faceted, so hundreds of
     small alt/haplotype contigs don't flood the panel (the full list is in the
     reference table). The y-axis is **log** and **independent per facet**, so a
@@ -195,8 +215,8 @@ def genome_track_spec(track: pd.DataFrame | None, top_n: int = 24) -> dict | Non
     """
     if track is None or track.empty:
         return None
-    mass = track.groupby("ref", observed=True)["gdna_mass"].sum().sort_values(ascending=False)
-    top = [str(r) for r in mass.index[:top_n]]
+    gdna = track.groupby("ref", observed=True)["count_gdna"].sum().sort_values(ascending=False)
+    top = [str(r) for r in gdna.index[:top_n]]
     sub = track[track["ref"].astype(str).isin(top)]
     # log axis needs strictly positive density
     rows = [r for r in _bin_track(sub) if r["density"] > 0]
@@ -211,7 +231,7 @@ def genome_track_spec(track: pd.DataFrame | None, top_n: int = 24) -> dict | Non
             "field": "ref",
             "type": "nominal",
             "title": None,
-            "sort": top,  # biggest-mass references first
+            "sort": top,  # the references holding the most gDNA first
             "header": {"labelAnchor": "start", "labelFontWeight": "bold"},
         },
         "spec": {

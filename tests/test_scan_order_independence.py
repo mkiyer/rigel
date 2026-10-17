@@ -190,7 +190,7 @@ def test_the_reported_gdna_total_is_the_loci_summed_in_LOCUS_ORDER(many_loci, em
         scan=BamScanConfig(sj_strand_tag="auto", total_threads=1),
     )
     estimator = run_pipeline(many_loci.bam_path, many_loci.index, config=config).estimator
-    per_locus = [float(r["gdna"]) for r in estimator.locus_results]
+    per_locus = [float(r["count_gdna"]) for r in estimator.locus_results]
     assert sum(g > 0 for g in per_locus) >= 6, "too few loci carry gDNA for the order to matter"
     in_locus_order = 0.0
     for g in per_locus:

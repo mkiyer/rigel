@@ -167,17 +167,17 @@ def test_the_noop_arm_reproduces_BASE_byte_identically_through_the_whole_pipelin
 
     compare(noop)
     # The EM's gDNA count per locus, the component the injected field names: integer-derived, so exact.
-    base_gdna = base_result.estimator.get_loci_df(toy.index)["gdna"]
+    base_gdna = base_result.estimator.get_loci_df(toy.index)["count_gdna"]
     pd.testing.assert_series_equal(
-        base_gdna, noop_result.estimator.get_loci_df(toy.index)["gdna"], check_exact=True
+        base_gdna, noop_result.estimator.get_loci_df(toy.index)["count_gdna"], check_exact=True
     )
 
     perturbed_result, _ = _run(toy, "oracle", toy_oracle)
     # The witness is the EM's gDNA count, not the transcript `count` column. On this toy the mass the
-    # oracle's gDNA count moves lands between gDNA and nascent RNA (the loci table's `gdna` moves by 7
-    # and 9 fragments on two of the three loci); the annotated transcripts move by under one fragment
+    # oracle's gDNA count moves lands between gDNA and nascent RNA (the loci table's `count_gdna` moves
+    # by 7 and 9 fragments on two of the three loci); the annotated transcripts move by under one fragment
     # (fractional: t1 +0.95), which one seeded draw over five transcripts need not flip.
-    assert not perturbed_result.estimator.get_loci_df(toy.index)["gdna"].equals(base_gdna), (
+    assert not perturbed_result.estimator.get_loci_df(toy.index)["count_gdna"].equals(base_gdna), (
         "taking the oracle's gDNA count changed no locus's gDNA count on a contaminated toy — the "
         "injection does not reach the EM and every ceiling this script reports would be zero"
     )
@@ -399,7 +399,7 @@ class _FakeResult:
 def test_a_spliced_intergenic_fragment_is_rna_in_the_library_split():
     """A spliced fragment is certified RNA whether or not an annotated transcript holds it (the test panel's
     shadow transcripts write them), so of the intergenic fragments only the unspliced ones are gDNA, as in
-    ``cli.py``'s ``gdna_fraction``, and the spliced ones join the RNA estimate."""
+    ``cli.py``'s ``fraction_gdna``, and the spliced ones join the RNA estimate."""
     mrna, gdna_em, intergenic, spliced = 5_000.0, 2_000.0, 3_000.0, 100.0
     quant = pd.DataFrame({"transcript_id": ["a"], "count": [mrna]})
     summary = {"origin_counts": {"gdna": 4_900, "mrna": 5_100, "nrna": 0}}
@@ -749,12 +749,12 @@ def test_a_percent_error_is_REFUSED_where_the_truth_is_zero(tmp_path):
 
 def test_the_three_pools_are_reported_APART_and_the_synthetic_one_by_name(tmp_path):
     """The split is on ``is_synthetic``, and the report must say so where a reader will see it: a
-    single-exon ANNOTATED transcript carries ``is_nrna`` and belongs to the ANNOTATED pool
-    (TRAPS: nrna-does-not-mean-synthetic). Folding the two RNA pools together would hide the
-    false-positive channel the nascent row exists to expose."""
+    single-exon ANNOTATED transcript (``is_single_exon``, the index's ``is_nrna``) belongs to the
+    ANNOTATED pool (TRAPS: nrna-does-not-mean-synthetic). Folding the two RNA pools together would hide
+    the false-positive channel the nascent row exists to expose."""
     md = _render(tmp_path)
     assert "SYNTHETIC entities only" in md
-    assert "is_synthetic`, never `is_nrna" in md
+    assert "is_synthetic`, never `is_single_exon" in md
     for n in ("900", "1,000", "4,000", "4,100"):  # nascent est/true, annotated est/true
         assert n in md, f"pool figure {n} missing"
 

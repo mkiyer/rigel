@@ -743,7 +743,8 @@ class ScoringConstants:
 
 @dataclass(frozen=True)
 class QcConstants:
-    """Quality-control thresholds: what is warned about, and what the QC summary reports."""
+    """Quality-control thresholds: what is warned about, what the QC summary reports, and how the QC report
+    (``rigel report``) displays it."""
 
     #: Fewer spliced strand observations than this draws a warning that the strand estimate may be noisy
     #: (``StrandModels``); zero draws a stronger one.
@@ -755,12 +756,62 @@ class QcConstants:
     #: An error or warning that lists offending items (duplicate transcript groups, …) shows at most this many.
     report_examples: int = 5
 
+    # --- The QC report's display (``rigel report``). Each is a display choice the owner signed off on 2026-10-17,
+    # with no other reason recorded. They set how a headline tile is coloured, how much of a table the page
+    # embeds and how far a cell is rounded; none reaches a number Rigel computes ---
+
+    #: The mapping tile is good at this share of the BAM's records mapped or more, ...
+    mapping_rate_good: float = 0.75
+
+    #: ... a warning at this share or more, and critical below it.
+    mapping_rate_warning: float = 0.5
+
+    #: The gDNA tile, which reads the summary's ``fraction_gdna``, is good below this fraction, ...
+    gdna_fraction_good: float = 0.1
+
+    #: ... a warning below this one, and critical at it or above.
+    gdna_fraction_warning: float = 0.3
+
+    #: The usable-fragments tile is good at this genic share of the fragments or more, and a warning below it.
+    genic_fraction_good: float = 0.6
+
+    #: The gDNA-density panel counts the calibration track's regions whose gDNA fraction exceeds this, and its
+    #: label states it.
+    region_gdna_fraction: float = 0.5
+
+    #: The gene table embeds at most this many expressed genes, the highest TPM first; every gene stays in
+    #: ``gene_quant``. The cap keeps the page a sane size.
+    gene_table_rows: int = 20_000
+
+    #: Decimals a gene's TPM is rounded to.
+    tpm_decimals: int = 2
+
+    #: Decimals a count is rounded to: a gene's, and a reference's gDNA count.
+    count_decimals: int = 1
+
+    #: Decimals a reference's gDNA fraction is rounded to.
+    fraction_decimals: int = 4
+
+    #: Decimals a fragment-length category's overflow is rounded to, as a percentage.
+    overflow_percent_decimals: int = 2
+
     def __post_init__(self) -> None:
         _check_ranges(
             self,
             strand_min_observations=self.strand_min_observations >= 0,
             strand_ci_confidence=0.0 < self.strand_ci_confidence < 1.0,
             report_examples=self.report_examples >= 1,
+            mapping_rate_good=0.0 < self.mapping_rate_good <= 1.0,
+            mapping_rate_warning=0.0 <= self.mapping_rate_warning <= self.mapping_rate_good,
+            gdna_fraction_good=0.0 < self.gdna_fraction_good <= 1.0,
+            gdna_fraction_warning=self.gdna_fraction_good <= self.gdna_fraction_warning <= 1.0,
+            genic_fraction_good=0.0 < self.genic_fraction_good <= 1.0,
+            region_gdna_fraction=0.0 <= self.region_gdna_fraction < 1.0,
+            gene_table_rows=self.gene_table_rows >= 1,
+            tpm_decimals=self.tpm_decimals >= 0,
+            count_decimals=self.count_decimals >= 0,
+            fraction_decimals=self.fraction_decimals >= 0,
+            overflow_percent_decimals=self.overflow_percent_decimals >= 0,
         )
 
 

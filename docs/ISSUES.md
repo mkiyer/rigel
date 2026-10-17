@@ -835,14 +835,14 @@ ON` — and they cost 7 % of live nascent off capture (live families 942,567 aga
 per-entity diagnostics do. The decision is whether the index should merge them
 (one span per gene per strand) or the scoring should. `quant_accuracy.py`, the per-family scoring in
 `~/Downloads/rigel_runs/prototypes/2026-09-20_siphon_mechanism/`.
-USER-FACING (2026-10-14): `nrna_quant.feather` has one row per span — on the ladder index 6,366 of 6,919
+USER-FACING (2026-10-14): `nascent_quant.feather` has one row per span — on the ladder index 6,366 of 6,919
 synthetic spans overlap a same-strand twin (max degree 240, 1,264 same-strand families) — and `quant.feather`'s
-`nrna_id` / `nrna_parent_count` point each isoform at its own twin, so a transcript's parent count can read about 0
-while a sibling twin holds the family's mass. The MANUAL lists seven `nrna_quant` columns the code never writes and omits
-`em_effective_length`, and no test calls `get_nrna_counts_df`. 0.8.0 (owner): the docs, a column gate and the documented
+`nascent_id` / `count_nascent` point each isoform at its own twin, so a transcript's `count_nascent` can read about 0
+while a sibling twin holds the family's mass. The MANUAL listed seven columns of the table that the code never wrote and
+omitted `em_effective_length`, and no test called its writer. 0.8.0 (owner): the docs, a column gate and the documented
 limit (per-span nascent counts are not identifiable among overlapping spans); the index merge after 0.8.0 — it changes
 the EM's component set and orphans the panels' nascent truth ids. LANDED 2026-10-14 (`tests/test_summary_report.py`): the
-MANUAL lists exactly the ten columns `get_nrna_counts_df` writes, gated against a run, and states the limit.
+MANUAL lists exactly the columns the nascent table writes, gated against a run, and states the limit.
 
 ### performance-memory-bounded-solve
 `priority: later — re-timed before it is ranked; the two 0.8.0 numeric no-ops landed 2026-10-14 · kind: build · 2026-08-17`
@@ -1415,9 +1415,10 @@ passes either way. The fix: clamp to the run's last positive-score slot.
 ### loci-table-recomputes-mrna
 `priority: later (the code-health review, 2026-10-16) · kind: hygiene · 2026-10-16`
 The output tables recompute values the estimator already holds:
-- `loci.feather` rebuilds mRNA as `max(rna_total − nrna, 0) + unambig` (`estimator.py:861-863`), behind a clamp that
-  hides drift, although `t_total[annot_in_locus].sum()` is the same quantity;
-- `get_nrna_counts_df` re-codes the TPM denominator inline (`estimator.py:743-745`);
+- `loci.feather` rebuilds `count_annotated` as `max(rna_total − count_nascent, 0) + count_unambig`
+  (`estimator.py:861-863`), behind a clamp that hides drift, although `t_total[annot_in_locus].sum()` is the same
+  quantity;
+- the nascent table re-codes the TPM denominator inline (`estimator.py:743-745`);
 - the `is_synthetic` fallback (`estimator.py:608-612`) exists only for a test mock.
 
 Removing the recomputation moves ulps in `loci.feather`.

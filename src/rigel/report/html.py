@@ -143,7 +143,7 @@ _SECTIONS = """
     </section>
 
     <section class="panel" id="s-quant">
-      <div class="ph"><span class="eyebrow">05</span><h2>Quantification</h2><span class="desc">Mature mRNA · nascent RNA · gDNA</span></div>
+      <div class="ph"><span class="eyebrow">05</span><h2>Quantification</h2><span class="desc">Annotated transcripts · nascent RNA · gDNA</span></div>
       <div class="pb">
         <div class="kpis" id="pool-kpis"></div>
         <div class="grid2 wide-left">
@@ -176,7 +176,7 @@ _SECTIONS = """
           chrM can't flatten the others). Full per-base signal is in
           <span class="num">calibration_track.bedgraph</span> (IGV / UCSC).</div>
 
-        <p class="cap" style="margin-top:22px">All references · by gDNA mass</p>
+        <p class="cap" style="margin-top:22px">All references · by gDNA count</p>
         <div class="search">
           <input id="rsearch" type="text" placeholder="reference…" aria-label="Search references"/>
           <span class="hint" id="rcount"></span>

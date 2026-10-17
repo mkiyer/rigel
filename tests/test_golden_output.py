@@ -125,7 +125,7 @@ def _capture_output(result, index):
 
     scalars = {
         "gdna_em_count": float(est.gdna_em_count),
-        "nrna_em_count": float(est.synthetic_count),
+        "synthetic_count": float(est.synthetic_count),
         "n_fragments": int(pr.stats.n_fragments),
     }
 
@@ -192,7 +192,7 @@ _TRANSCRIPT_NUMERIC_COLS = [
     "count_unambig",
     "count_em",
     "count_spliced",
-    "nrna_parent_count",
+    "count_nascent",
     "tpm",
     "tpm_total_rna",
     "posterior_mean",
@@ -210,15 +210,15 @@ _GENE_NUMERIC_COLS = [
 _LOCI_NUMERIC_COLS = [
     "locus_span_bp",
     "n_em_fragments",
-    "mrna",
-    "nrna",
-    "gdna",
-    "total",
-    "gdna_rate",
-    "gdna_prior_count",
-    "rna_prior_count",
+    "count_annotated",
+    "count_nascent",
+    "count_gdna",
+    "count",
+    "fraction_gdna",
+    "count_gdna_prior",
+    "count_rna_prior",
     "count_unambig",
-    "gdna_eff_len_em",
+    "gdna_em_effective_length",
 ]
 
 
@@ -280,7 +280,7 @@ def _compare_output(actual, expected, scenario_name):
     )
 
     # Scalars
-    for key in ("gdna_em_count", "nrna_em_count", "n_fragments"):
+    for key in ("gdna_em_count", "synthetic_count", "n_fragments"):
         np.testing.assert_allclose(
             actual["scalars"][key],
             expected["scalars"][key],

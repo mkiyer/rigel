@@ -156,11 +156,12 @@ def _extract_results(pr, bench, result):
     info["gdna_em"] = float(est.gdna_em_count)
     info["n_loci"] = len(est.locus_results)
 
-    # Locus details
-    for i, lr in enumerate(est.locus_results):
-        info[f"locus_{i}_n_transcripts"] = lr.get("n_transcripts", 0)
-        info[f"locus_{i}_n_em_fragments"] = lr.get("n_em_fragments", 0)
-        info[f"locus_{i}_gdna_prior_count"] = lr.get("gdna_prior_count", 0.0)
+    # Locus details, from the loci table
+    for i, row in enumerate(est.get_loci_df(result.index).itertuples(index=False)):
+        info[f"locus_{i}_n_transcripts"] = row.n_transcripts
+        info[f"locus_{i}_n_nascent"] = row.n_nascent
+        info[f"locus_{i}_n_em_fragments"] = row.n_em_fragments
+        info[f"locus_{i}_count_gdna_prior"] = row.count_gdna_prior
 
     return info
 
@@ -360,7 +361,7 @@ class TestOppositeStrandOverlap:
 
         # Check that results are close (allow small FP tolerance)
         for k, v1, v2, ad, rd in diffs:
-            if "n_loci" in k or "n_transcripts" in k or "n_em_fragments" in k:
+            if any(s in k for s in ("n_loci", "n_transcripts", "n_nascent", "n_em_fragments")):
                 # Structural properties must be exact
                 assert v1 == v2, f"Structural difference in {k}: {v1} vs {v2}"
 

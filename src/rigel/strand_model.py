@@ -154,11 +154,6 @@ class SJStrandTable:
             "depth_p90": q90,
             "depth_p99": q99,
             "depth_max": int(depth.max()) if self.n_sj else 0,
-            # "How many sj are deep enough to see the minority strand" is a
-            # first-class question about a library: at κ ≈ 0.002 a sj needs
-            # hundreds of reads before one disagreeing read is even expected.
-            "n_sj_depth_ge_100": int(np.count_nonzero(depth >= 100)),
-            "n_sj_depth_ge_1000": int(np.count_nonzero(depth >= 1000)),
         }
 
 
@@ -476,12 +471,7 @@ class StrandModels:
             f"p_r1_sense={self.exonic_spliced.p_r1_sense:.4f}, "
             f"specificity={self.exonic_spliced.strand_specificity:.4f}"
         )
-        logger.info(
-            f"    sj={table.n_sj:,} "
-            f"(depth median={table.depth_quantiles((0.5,))[0]:,}, "
-            f"≥100={int(np.count_nonzero(table.depth >= 100)):,}, "
-            f"≥1000={int(np.count_nonzero(table.depth >= 1000)):,})"
-        )
+        logger.info(f"    sj={table.n_sj:,} (depth median={table.depth_quantiles((0.5,))[0]:,})")
         logger.info(
             f"  [exonic] (diagnostic)  "
             f"{self.exonic.n_observations:,} obs, "

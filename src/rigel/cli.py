@@ -206,21 +206,33 @@ def _build_pipeline_config(args: argparse.Namespace) -> "PipelineConfig":  # noq
 
 #: summary.json schema version, which a consumer should read before parsing. The fragment-length
 #: histograms live in ``fragment_lengths.feather``, not the JSON; the JSON carries the splice and
-#: strand-contamination diagnostics; ``gdna_eff_len`` summarises the loci table's one gDNA length column.
-SUMMARY_SCHEMA_VERSION = 3
+#: strand-contamination diagnostics; ``gdna_em_effective_length`` summarises the loci table's column of that name.
+SUMMARY_SCHEMA_VERSION = 4
 
 #: summary.json's floats (fractions, strand rates, quantiles) are rounded to this many decimals.
 SUMMARY_DECIMALS = 6
+
+#: summary.json's fragment counts are rounded to this many decimals: a hundredth of a fragment.
+SUMMARY_COUNT_DECIMALS = 2
+
+#: summary.json's strand posterior variance keeps this many SIGNIFICANT digits: it is p(1 − p)/n, of order 1e-8 at a
+#: million fragments, where fixed decimals print 0, and at most 0.25, so 8 significant digits are at least 8 decimals.
+SUMMARY_VARIANCE_DIGITS = 8
+
+
+def _significant(x: float, digits: int) -> float:
+    """``x`` rounded to ``digits`` significant digits."""
+    return float(f"{x:.{digits}g}")
 
 
 #: ``fragment_lengths.feather``'s pure-pool categories, in ``FragmentPool`` order. Named here rather
 #: than derived from the enum because these are an OUTPUT CONTRACT — a rename in the enum must not
 #: silently rename a reported category.
 _POOL_REPORT_NAMES = (
-    "pool_dna_intergenic",
-    "pool_dna_intronic",
-    "pool_dna_intron_exon",
-    "pool_dna_intergenic_exon",
+    "pool_gdna_intergenic",
+    "pool_gdna_intronic",
+    "pool_gdna_intron_exon",
+    "pool_gdna_intergenic_exon",
     "pool_rna_spliced",
 )
 
@@ -335,34 +347,38 @@ def _strand_fit_summary(strand_models) -> dict:
     }
 
 
-def _quantification_pools(stats, total_mrna: float, total_nrna: float, total_gdna: float) -> dict:
+def _quantification_pools(
+    stats, count_annotated: float, count_nascent: float, count_gdna_em: float
+) -> dict:
     """``summary.json``'s pools and their fractions of every fragment counted.
 
-    An intergenic fragment reaches no locus. Unspliced, it is gDNA by construction, so the gDNA fraction is the
-    EM's genic gDNA plus the unspliced intergenic fragments; leaving them out would halve the observed
-    contamination of a library with substantial gDNA. Spliced, it is certified RNA that no annotated transcript
-    holds, and it is its own pool (``intergenic_spliced``). The annotated-transcript (``mrna_fraction``),
-    synthetic-span (``nrna_fraction``), gDNA and intergenic RNA fractions sum to one; ``gdna_em_fraction`` is
-    the EM's genic part alone, and ``intergenic_fraction`` the share of every intergenic fragment, both kinds."""
+    An intergenic fragment reaches no locus. Unspliced, it is gDNA by construction, so ``count_gdna`` is the
+    EM's genic gDNA (``count_gdna_em``) plus the unspliced intergenic fragments; leaving them out would halve the
+    observed contamination of a library with substantial gDNA. Spliced, it is certified RNA that no annotated
+    transcript holds, and it is its own pool (``count_intergenic_rna``). The annotated-transcript
+    (``fraction_annotated``), synthetic-span (``fraction_nascent``), gDNA and intergenic RNA fractions sum to
+    one; ``fraction_gdna_em`` is the EM's genic part alone, and ``fraction_intergenic`` the share of every
+    intergenic fragment, both kinds."""
     intergenic = stats.n_intergenic
     intergenic_rna = stats.n_intergenic_spliced
-    total_all = total_mrna + total_nrna + total_gdna + intergenic
+    total_all = count_annotated + count_nascent + count_gdna_em + intergenic
+    count_gdna = count_gdna_em + intergenic - intergenic_rna
 
     def share(x: float) -> float:
         return round(x / total_all, SUMMARY_DECIMALS) if total_all > 0 else 0.0
 
     return {
-        "mrna_total": round(total_mrna, 2),
-        "nrna_total": round(total_nrna, 2),
-        "gdna_total": round(total_gdna, 2),
-        "intergenic_total": intergenic,
-        "intergenic_spliced": intergenic_rna,
-        "mrna_fraction": share(total_mrna),
-        "nrna_fraction": share(total_nrna),
-        "gdna_fraction": share(total_gdna + intergenic - intergenic_rna),
-        "gdna_em_fraction": share(total_gdna),
-        "intergenic_fraction": share(intergenic),
-        "intergenic_rna_fraction": share(intergenic_rna),
+        "count_annotated": round(count_annotated, SUMMARY_COUNT_DECIMALS),
+        "count_nascent": round(count_nascent, SUMMARY_COUNT_DECIMALS),
+        "count_gdna": round(count_gdna, SUMMARY_COUNT_DECIMALS),
+        "count_gdna_em": round(count_gdna_em, SUMMARY_COUNT_DECIMALS),
+        "count_intergenic_rna": intergenic_rna,
+        "fraction_annotated": share(count_annotated),
+        "fraction_nascent": share(count_nascent),
+        "fraction_gdna": share(count_gdna),
+        "fraction_gdna_em": share(count_gdna_em),
+        "fraction_intergenic": share(intergenic),
+        "fraction_intergenic_rna": share(intergenic_rna),
     }
 
 
@@ -372,7 +388,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
 
     quant_path = output_dir / "quant.feather"
     gene_quant_path = output_dir / "gene_quant.feather"
-    nrna_quant_path = output_dir / "nrna_quant.feather"
+    nascent_quant_path = output_dir / "nascent_quant.feather"
     loci_path = output_dir / "loci.feather"
     summary_path = output_dir / "summary.json"
     fragment_lengths_path = output_dir / "fragment_lengths.feather"
@@ -386,7 +402,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     estimator = result.estimator
     stale = []
     if not getattr(args, "tsv", False):
-        tables = (quant_path, gene_quant_path, nrna_quant_path, loci_path, fragment_lengths_path)
+        tables = (quant_path, gene_quant_path, nascent_quant_path, loci_path, fragment_lengths_path)
         stale += [path.with_suffix(".tsv") for path in tables]
     if not (getattr(args, "emit_locus_stats", False) and estimator.locus_stats):
         stale.append(locus_stats_path)
@@ -401,15 +417,15 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     # Write quant tables (Feather v2 + ZSTD compression)
     quant_df = estimator.get_counts_df(index)
     gene_quant_df = estimator.get_gene_counts_df(index)
-    nrna_quant_df = estimator.get_nrna_counts_df(index)
+    nascent_quant_df = estimator.get_nascent_quant_df(index)
     loci_df = estimator.get_loci_df(index)
 
     feather_kw = {"compression": "zstd"}
     quant_df.to_feather(str(quant_path), **feather_kw)
     gene_quant_df.to_feather(str(gene_quant_path), **feather_kw)
-    nrna_quant_df.to_feather(str(nrna_quant_path), **feather_kw)
+    nascent_quant_df.to_feather(str(nascent_quant_path), **feather_kw)
     loci_df.to_feather(str(loci_path), **feather_kw)
-    logging.info(f"[DONE] Wrote {quant_path}, {gene_quant_path}, {nrna_quant_path}, {loci_path}")
+    logging.info(f"[DONE] Wrote {quant_path}, {gene_quant_path}, {nascent_quant_path}, {loci_path}")
 
     # Write locus-level profiling stats if requested
     if getattr(args, "emit_locus_stats", False) and estimator.locus_stats:
@@ -424,7 +440,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         for df, path in [
             (quant_df, quant_path),
             (gene_quant_df, gene_quant_path),
-            (nrna_quant_df, nrna_quant_path),
+            (nascent_quant_df, nascent_quant_path),
             (loci_df, loci_path),
         ]:
             df.to_csv(str(path.with_suffix(".tsv")), sep="\t", index=False)
@@ -432,9 +448,11 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     # Build and write summary.json
     stats = result.stats
     sm = result.strand_models
-    total_mrna = float(quant_df["count"].sum())
-    total_nrna = float(estimator.synthetic_count)
-    total_gdna = float(estimator.gdna_em_count)
+    count_annotated = float(quant_df["count"].sum())
+    count_nascent = float(estimator.synthetic_count)
+    count_gdna_em = float(estimator.gdna_em_count)
+    is_synthetic = index.t_df["is_synthetic"].to_numpy(dtype=bool)
+    n_nascent = int(is_synthetic.sum())
 
     def _df_series_summary(df, column: str) -> dict[str, float]:
         if column not in df.columns or df.empty:
@@ -507,7 +525,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
                 None if cal.gdna_bulk_density is None else float(cal.gdna_bulk_density)
             ),
             "gdna_capture_saturation": float(cal.gdna_capture_saturation),
-            "rna_sense_frac": round(float(cal.rna_sense_frac), SUMMARY_DECIMALS),
+            "fraction_rna_sense": round(float(cal.rna_sense_frac), SUMMARY_DECIMALS),
             "n_regions": int(cal.n_regions),
             "n_boundaries": int(cal.n_boundaries),
             "n_sj": int(cal.n_sj),
@@ -582,12 +600,12 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "p_r1_sense": round(sm.p_r1_sense, SUMMARY_DECIMALS),
             "read1_sense": bool(sm.read1_sense),
             "n_training_fragments": sm.n_observations,
-            "posterior_variance": round(sm_primary.posterior_variance(), 8),
+            "posterior_variance": _significant(
+                sm_primary.posterior_variance(), SUMMARY_VARIANCE_DIGITS
+            ),
             "ci_95": [round(ci_lo, SUMMARY_DECIMALS), round(ci_hi, SUMMARY_DECIMALS)],
             # The per-sj strand table this 2×2 is the marginal of, and the population
-            # the junction fit reads κ from. "How many sj are deep enough to show a
-            # disagreeing read" is a first-class question about a library: at κ ≈ 0.002
-            # a sj needs hundreds of reads before one is even expected.
+            # the junction fit reads κ from.
             "sj": sm.sj_table.to_dict(),
             **strand_fit,
             # All-exonic (RNA+gDNA) diagnostic model, never used for scoring.
@@ -605,12 +623,12 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             },
         },
         "calibration": cal_dict,
-        "gdna_eff_len": {
-            "em": _df_series_summary(loci_df, "gdna_eff_len_em"),
-        },
+        "gdna_em_effective_length": _df_series_summary(loci_df, "gdna_em_effective_length"),
         "fragment_length": fl_summary,
         "quantification": {
-            "n_transcripts": index.num_transcripts,
+            # the annotated transcripts, single-exon included; ``n_nascent`` counts the synthetic spans
+            "n_transcripts": int(is_synthetic.size) - n_nascent,
+            "n_nascent": n_nascent,
             "n_genes": index.num_annotated_genes,
             "n_loci": len(estimator.locus_results),
             "n_unambig_assigned": stats.deterministic_unambig_units,
@@ -622,7 +640,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             ),
             # dropped by a hard scoring gate (an alpha of 0): every candidate failed it, so no pool holds them
             "n_gated_out": stats.n_gated_out,
-            **_quantification_pools(stats, total_mrna, total_nrna, total_gdna),
+            **_quantification_pools(stats, count_annotated, count_nascent, count_gdna_em),
         },
     }
     with open(summary_path, "w") as f:

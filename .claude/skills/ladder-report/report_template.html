@@ -174,7 +174,7 @@ footer code{background:none;padding:0}
       <li><b>Three pools, three different questions.</b> <b>gDNA</b> is contamination the deconvolution
         must remove. <b>Nascent RNA</b> is the <em>synthetic</em> entity the index manufactures for each
         multi-exon gene. <b>Annotated RNA</b> is the transcript table a user reads. The split is on
-        <code>is_synthetic</code>, never <code>is_nrna</code> — a single-exon annotated transcript is
+        <code>is_synthetic</code>, never <code>is_single_exon</code> — a single-exon annotated transcript is
         <em>annotated</em> RNA, not nascent.</li>
       <li><b>The gDNA estimate includes intergenic fragments.</b> They reach no locus and never enter
         the EM, but they are gDNA and the truth counts them. Off capture they are more than half of it.</li>

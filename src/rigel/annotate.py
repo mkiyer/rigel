@@ -13,7 +13,7 @@ assignment decision for each fragment:
 - ``best_tid`` — transcript index (-1 = intergenic / gDNA / unassigned)
 - ``best_gid`` — gene index (-1 = intergenic / unassigned)
 - ``tx_flags`` — ZF outcome bitfield (see ``AF_*`` constants; includes
-  is_resolved, is_mrna, is_gdna, is_nrna, is_synthetic, is_intergenic,
+  is_resolved, is_annotated, is_gdna, is_nascent, is_intergenic,
   is_chimeric, is_multimapper_dropped)
 - ``posterior``— posterior probability of the winning assignment
 - ``frag_class`` — fragment class (unambig / ambig_same_strand / …)
@@ -52,12 +52,11 @@ BAM Tag Schema
    * - ZF
      - i
      - Outcome bitfield fully answering "what happened to this fragment?":
-       bit 0 = is_resolved; bits 1-3 record which kind of candidate won:
-       bit 1 = is_mrna (an annotated transcript not flagged ``is_nrna``),
-       bit 2 = is_gdna (gDNA: unspliced intergenic + EM-gDNA), bit 3 = is_nrna
-       (a single-exon span over a multi-exon transcript's extent: an annotated
-       single-exon transcript covering it, or the synthetic span);
-       bit 4 = is_synthetic (the winning span is the synthetic span),
+       bit 0 = is_resolved; bits 1, 2 and 4 record which kind of candidate won:
+       bit 1 = is_annotated (a reference transcript, single-exon included),
+       bit 2 = is_gdna (gDNA: unspliced intergenic + EM-gDNA),
+       bit 4 = is_nascent (a synthetic span, which Rigel adds to model a
+       multi-exon transcript's unspliced RNA); bit 3 is retired and never set;
        bit 5 = is_intergenic (no transcript holds the fragment: gDNA when
        unspliced, RNA with no winner-kind bit when spliced), bit 6 = is_chimeric,
        bit 7 = is_multimapper_dropped.  See ``AF_*`` constants for canonical values.
@@ -109,46 +108,45 @@ logger = logging.getLogger(__name__)
 # cross-reference to any other tag.
 #
 #   bit 0 (0x01)  is_resolved             a candidate won, or the intergenic fast path took it
-#   bit 1 (0x02)  is_mrna                 the winner is an annotated transcript not flagged is_nrna
+#   bit 1 (0x02)  is_annotated            the winner is a reference transcript, single-exon included
 #   bit 2 (0x04)  is_gdna                 the winner is gDNA (unspliced intergenic + EM-gDNA)
-#   bit 3 (0x08)  is_nrna                 the winner is a single-exon span over a multi-exon
-#                                         transcript's extent: an annotated single-exon transcript
-#                                         covering it, or the synthetic span
-#   bit 4 (0x10)  is_synthetic            the winning span is the synthetic span (rigel-generated)
+#   bit 3 (0x08)  retired                 never set, so no value of an earlier layout is reused with a
+#                                         new meaning
+#   bit 4 (0x10)  is_nascent              the winner is a synthetic span, which Rigel adds to model a
+#                                         multi-exon transcript's unspliced RNA
 #   bit 5 (0x20)  is_intergenic           no transcript holds it (deterministic fast-path): gDNA when
 #                                         unspliced; when spliced, RNA no annotated transcript holds
 #                                         (certified by its junction), with no winner-kind bit
 #   bit 6 (0x40)  is_chimeric             unresolved reason: chimeric
 #   bit 7 (0x80)  is_multimapper_dropped  unresolved reason: --no-include-multimap drop
 #
-# Bits 1-3 are the winner-kind bits: they record which kind of candidate won.
+# Bits 1, 2 and 4 are the winner-kind bits: they record which kind of candidate won, named for the
+# category the output tables report it under.
 #
-# Invariants (enforced by tests):
+# Invariants (tests/test_annotate.py holds every canonical value and every stamped record to them):
 #   1. is_resolved and (is_chimeric | is_multimapper_dropped) are never both set; ZF = 0, the
 #      unresolved sentinel, sets neither
-#   2. When is_resolved, exactly one winner-kind bit {is_mrna, is_gdna, is_nrna} is set, except a
-#      spliced intergenic fragment (RNA no annotated transcript holds), which sets none
-#   3. is_synthetic  -> is_nrna
-#   4. is_intergenic -> is_resolved, never with is_mrna or is_nrna
-#   5. is_chimeric and is_multimapper_dropped are mutually exclusive
-#   6. is_synthetic only with is_nrna; is_intergenic only with is_gdna or alone
+#   2. A winner-kind bit {is_annotated, is_gdna, is_nascent} is set only with is_resolved, and then
+#      exactly one is, except a spliced intergenic fragment (RNA no annotated transcript holds),
+#      which sets none
+#   3. is_intergenic -> is_resolved, never with is_annotated or is_nascent
+#   4. is_chimeric and is_multimapper_dropped are mutually exclusive
+#   5. bit 3 (0x08) is never set
 # ---------------------------------------------------------------------------
 
 # Primitive bits
 AF_RESOLVED: int = 0x01
-AF_MRNA_BIT: int = 0x02
+AF_ANNOTATED_BIT: int = 0x02
 AF_GDNA_BIT: int = 0x04
-AF_NRNA_BIT: int = 0x08
-AF_SYNTHETIC_BIT: int = 0x10
+AF_NASCENT_BIT: int = 0x10
 AF_INTERGENIC_BIT: int = 0x20
 AF_CHIMERIC_BIT: int = 0x40
 AF_MULTIMAPPER_DROP_BIT: int = 0x80
 
 # Canonical composed values (the only legitimate ZF outputs).
 AF_UNRESOLVED: int = 0x00  # 0x00
-AF_MRNA: int = AF_RESOLVED | AF_MRNA_BIT  # 0x03
-AF_NRNA: int = AF_RESOLVED | AF_NRNA_BIT  # 0x09
-AF_NRNA_SYNTH: int = AF_NRNA | AF_SYNTHETIC_BIT  # 0x19
+AF_ANNOTATED: int = AF_RESOLVED | AF_ANNOTATED_BIT  # 0x03
+AF_NASCENT: int = AF_RESOLVED | AF_NASCENT_BIT  # 0x11
 AF_GDNA_EM: int = AF_RESOLVED | AF_GDNA_BIT  # 0x05
 AF_GDNA_INTERGENIC: int = AF_GDNA_EM | AF_INTERGENIC_BIT  # 0x25
 AF_RNA_INTERGENIC: int = AF_RESOLVED | AF_INTERGENIC_BIT  # 0x21
@@ -156,37 +154,25 @@ AF_CHIMERIC: int = AF_CHIMERIC_BIT  # 0x40
 AF_MULTIMAPPER_DROP: int = AF_MULTIMAPPER_DROP_BIT  # 0x80
 
 
-def winner_flag(is_nrna: bool, is_synthetic: bool) -> int:
-    """Return the AF_* flag for a single winning (non-gDNA) transcript.
+def winner_flag(is_synthetic: bool) -> int:
+    """Return the ZF value of a fragment a transcript won.
 
-    Precedence: synthetic > nRNA > mRNA.  A row flagged ``is_synthetic``
-    is by construction also an nRNA row, so the synthetic branch takes
-    priority.  gDNA-component winners are stamped separately at the call
-    site using ``AF_GDNA_EM`` and do not pass through this helper.
+    ``AF_NASCENT`` when the winner is a synthetic span, ``AF_ANNOTATED``
+    for every reference transcript, single-exon included.  gDNA-component
+    winners are stamped separately at the call site using ``AF_GDNA_EM``
+    and do not pass through this helper.
     """
-    if is_synthetic:
-        return AF_NRNA_SYNTH
-    if is_nrna:
-        return AF_NRNA
-    return AF_MRNA
+    return AF_NASCENT if is_synthetic else AF_ANNOTATED
 
 
-def winner_flags(
-    is_nrna: np.ndarray,
-    is_synthetic: np.ndarray,
-) -> np.ndarray:
-    """Vectorized :func:`winner_flag` over bool arrays of equal length.
+def winner_flags(is_synthetic: np.ndarray) -> np.ndarray:
+    """Vectorized :func:`winner_flag` over the winning transcripts' ``is_synthetic`` flags.
 
-    Returns a ``uint8`` array with the same precedence rule as the
-    scalar form.  Use on arrays of winner-transcript flags (already
-    filtered to valid-winner indices).
+    Returns a ``uint8`` array, one ZF value per winner (the input is
+    already filtered to valid-winner indices).
     """
-    is_nrna_b = np.asarray(is_nrna, dtype=bool)
     is_synth_b = np.asarray(is_synthetic, dtype=bool)
-    flags = np.full(len(is_nrna_b), AF_MRNA, dtype=np.uint8)
-    flags[is_nrna_b & ~is_synth_b] = AF_NRNA
-    flags[is_synth_b] = AF_NRNA_SYNTH
-    return flags
+    return np.where(is_synth_b, AF_NASCENT, AF_ANNOTATED).astype(np.uint8)
 
 
 @dataclass(slots=True)

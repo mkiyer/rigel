@@ -130,13 +130,19 @@ class TestSJStrandTable:
             103 / 110
         )  # the marginal; κ is TestGenuineKappa's
 
-    def test_to_dict_reports_deep_sj(self):
+    def test_to_dict_reports_the_sj_evidence(self):
         t = _table([(Strand.POS, 1, 1), (Strand.POS, 60, 60), (Strand.NEG, 900, 200)])
         d = t.to_dict()
+        assert set(d) == {
+            "n_sj",
+            "n_observations",
+            "depth_median",
+            "depth_p90",
+            "depth_p99",
+            "depth_max",
+        }
         assert d["n_sj"] == 3
         assert d["n_observations"] == 2 + 120 + 1100
-        assert d["n_sj_depth_ge_100"] == 2
-        assert d["n_sj_depth_ge_1000"] == 1
         assert d["depth_max"] == 1100
 
     def test_model_carries_table_through(self):

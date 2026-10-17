@@ -81,7 +81,7 @@ def build(arms: Path, arm: str, suite: Path | None) -> dict:
             "pools": {
                 # ⛔ EM + intergenic: the instrument's own definition, never restated here
                 "gdna": {"est": qa.gdna_estimate(lib), "true": lib["gdna_true"]},
-                #: SYNTHETIC entities only — the split is `is_synthetic`, never `is_nrna`
+                #: SYNTHETIC entities only — the split is `is_synthetic`, never `is_single_exon`
                 "nascent": {"est": lib["nrna_est"], "true": lib["nrna_true"]},
                 "annotated": {"est": lib["mrna_est"], "true": lib["mrna_true"]},
             },

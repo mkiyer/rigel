@@ -318,7 +318,7 @@ def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
     excludes them. Off capture, gDNA is genome-uniform and more than half of it is intergenic, so
     leaving them out of the numerator while RNA stays in the denominator understates the fraction
     badly. A SPLICED intergenic fragment is certified RNA that no annotated transcript holds — the test
-    panel's shadow transcripts write them — so it is RNA here. This is ``cli.py``'s ``gdna_fraction`` —
+    panel's shadow transcripts write them — so it is RNA here. This is ``cli.py``'s ``fraction_gdna`` —
     ``(gdna_em + n_intergenic_gdna) / (rna + gdna_em + n_intergenic)`` — so the number here is the one a user
     reads. ``gdna_em_frac_est`` is kept beside it because the two answer different questions and only one of
     them is the deliverable.
@@ -683,9 +683,9 @@ def markdown_report(path: Path, out: Path) -> None:
 
     THREE POOLS AND THEY ARE NOT THE SAME QUESTION. Every fragment in the library is gDNA, SYNTHETIC
     nascent RNA, or ANNOTATED RNA, and the split is on ``is_synthetic`` — a span this index
-    manufactured — never on ``is_nrna``. A single-exon ANNOTATED transcript carries ``is_nrna`` because
-    it is at once the nascent and the mature form of a real gene, and it belongs to the ANNOTATED pool
-    (`TRAPS: nrna-does-not-mean-synthetic`). The transcript and gene sections then score the annotated
+    manufactured — never on ``is_single_exon`` (the index's ``is_nrna``). A single-exon ANNOTATED
+    transcript is at once the nascent and the mature form of a real gene, and it belongs to the ANNOTATED
+    pool (`TRAPS: nrna-does-not-mean-synthetic`). The transcript and gene sections then score the annotated
     pool ALONE, because that is the table a user reads: synthetic entities are absent from it by
     construction and their mass is reported on the pool rows instead.
 
@@ -717,7 +717,7 @@ def markdown_report(path: Path, out: Path) -> None:
     w("- **Three pools, and they answer different questions.** `gDNA` is contamination the "
       "deconvolution must remove; `nascent RNA` is the SYNTHETIC entity this index manufactures for "
       "each multi-exon gene; `annotated RNA` is the transcript table a user reads. The split is on "
-      "`is_synthetic`, never `is_nrna` — a single-exon annotated transcript is ANNOTATED RNA.")
+      "`is_synthetic`, never `is_single_exon` — a single-exon annotated transcript is ANNOTATED RNA.")
     w("- **The gDNA estimate includes intergenic fragments**, which reach no locus and never enter "
       "the EM. Off capture they are more than half of all gDNA.")
     w("- **Percent error is undefined where the truth is zero** and is printed `n/a`. At `g00` the "
@@ -1005,7 +1005,7 @@ def report(paths: list[Path]) -> None:
             # 0.5000 and fabricated an off-capture EM under-call that does not exist. Measured here
             # before the fix: -50.7 % panel-wide, which is the intergenic pool and nothing else.
             # The `of which` rows are informational and carry no truth of their own; only the TOTAL
-            # is scored, and it is `cli.py`'s own `gdna_fraction` numerator.
+            # is scored, and it is `cli.py`'s own `count_gdna`, the `fraction_gdna` numerator.
             gdna_em, inter = tot("gdna_est"), tot("n_intergenic_gdna")
             rows = [
                 ("gDNA (total)", gdna_em + inter, tot("gdna_true")),

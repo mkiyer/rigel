@@ -25,19 +25,19 @@
 Rigel quantifies RNA-seq alignments while explicitly modeling three sources of
 signal in the same library:
 
-- Mature RNA (mRNA)
-- Nascent RNA (nRNA)
+- RNA from the annotated transcripts (every reference transcript, single-exon included)
+- Nascent RNA: RNA that has not spliced, over the span of a multi-exon gene
 - Genomic DNA contamination (gDNA)
 
 A single-pass native BAM scan feeds a calibration stage that separates RNA from gDNA
 genome-wide, and a locus-level EM then assigns the RNA to transcripts. Nascent RNA is
-represented as one component per merged span — transcript start and end sites clustered within
+represented as one synthetic span per merged span — transcript start and end sites clustered within
 `--nrna-tolerance` on each strand — shared by every transcript in it, so isoforms that start and
-end at about the same coordinates do not multiply nRNA states.
+end at about the same coordinates do not multiply nascent states.
 
 ### Key features
 
-- Joint mRNA, nRNA, and gDNA quantification in one locus-level model
+- Joint quantification of annotated transcripts, nascent RNA and gDNA in one locus-level model
 - Single-pass C++ BAM scanner using htslib, with memory-bounded buffering and spill-to-disk support
 - Automatic strand-model training from annotated spliced fragments; protocol auto-detection (`R1-sense` / `R1-antisense`)
 - gDNA/RNA calibration that solves each genomic region's unspliced mass into sense RNA, antisense RNA and gDNA, with a gDNA-density prior fitted from the library itself
@@ -146,7 +146,7 @@ Outputs are Feather files; `--tsv` above also writes `.tsv` mirrors (or convert 
 ```bash
 head results/quant.tsv
 head results/gene_quant.tsv
-head results/nrna_quant.tsv
+head results/nascent_quant.tsv
 head results/loci.tsv
 cat results/summary.json
 ```
@@ -172,9 +172,9 @@ file), `export` (Feather to TSV or Parquet) and `report`. `rigel --version` prin
 
 | File | Description |
 |------|-------------|
-| `quant.feather` / `quant.tsv` | Transcript-level abundance table (one row per annotated transcript; synthetic nascent spans are in `nrna_quant`) with `count`, `count_unambig`, `count_em`, `count_spliced`, `tpm`, `tpm_total_rna`, effective lengths, and per-transcript QC columns |
+| `quant.feather` / `quant.tsv` | Transcript-level abundance table (one row per annotated transcript; nascent RNA is in `nascent_quant`) with `count`, `count_unambig`, `count_em`, `count_spliced`, `tpm`, `tpm_total_rna`, effective lengths, and per-transcript QC columns |
 | `gene_quant.feather` / `gene_quant.tsv` | Gene-level aggregates derived from transcript estimates |
-| `nrna_quant.feather` / `nrna_quant.tsv` | Nascent-entity abundance estimates (one row per nascent entity with a multi-exon child; read overlapping spans per gene) |
+| `nascent_quant.feather` / `nascent_quant.tsv` | Nascent RNA: one row per synthetic span Rigel adds to model the unspliced RNA of multi-exon transcripts (read overlapping spans per gene) |
 | `loci.feather` / `loci.tsv` | Per-locus EM summary |
 | `summary.json` | Library protocol, strand specificity, per-category fragment-length summary statistics, the calibration scalars, alignment counts, and global quantification totals |
 | `fragment_lengths.feather` | Raw per-bin fragment-length histograms, tidy `(category, length, count)` |
@@ -185,7 +185,7 @@ file), `export` (Feather to TSV or Parquet) and `report`. `rigel --version` prin
 | `--annotated-bam PATH` | Optional annotated BAM with per-fragment assignment tags (a second BAM pass); the same records as the input, collated |
 
 `tpm` is normalized over annotated transcripts only; `tpm_total_rna` normalizes over all RNA
-(annotated + synthetic nRNA spans) and is comparable to the `nrna_quant` TPM column.
+(annotated and nascent) and is comparable to `nascent_quant`'s `tpm_total_rna`.
 
 ---
 

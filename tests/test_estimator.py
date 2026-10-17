@@ -551,15 +551,15 @@ class TestCountsOutput:
             "effective_length",
             "em_effective_length",
             "locus_id",
-            "nrna_id",
+            "nascent_id",
             "is_basic",
             "is_mane",
-            "is_nrna",
+            "is_single_exon",
             "count",
             "count_unambig",
             "count_em",
             "count_spliced",
-            "nrna_parent_count",
+            "count_nascent",
             "tpm",
             "tpm_total_rna",
             "posterior_mean",
@@ -595,8 +595,6 @@ class TestCountsOutput:
             "locus_id",
             "effective_length",
             "count",
-            "mature_count",
-            "nascent_count",
             "count_unambig",
             "count_em",
             "count_spliced",
@@ -682,6 +680,39 @@ class TestCountsOutput:
         df = rc.get_counts_df(index)
         assert list(df["transcript_id"]) == ["t0", "t1", "t2"]
         assert list(df["gene_id"]) == ["g0", "g0", "g1"]
+
+    def test_a_span_an_annotated_single_exon_transcript_covers_is_NO_nascent_span(self):
+        """``nascent_id`` and ``count_nascent`` name a transcript's SYNTHETIC span, and the nascent table's rows
+        are the synthetic spans alone. Where an annotated single-exon transcript covers a multi-exon transcript's
+        merged span, the index makes it the span's entity and adds no synthetic span; it is annotated RNA, a row
+        of the transcript table, so the transcript whose span it covers has no nascent span ("." and 0) and the
+        coverer is no row of the nascent table."""
+        # t0, t4: multi-exon, their span the synthetic t5; t1: multi-exon, its span covered by t2;
+        # t2: single-exon, the coverer, naming itself; t3: single-exon, covering nothing; t5: synthetic
+        index = MockIndex(
+            num_transcripts=6,
+            num_genes=6,
+            t_to_g=[0, 1, 2, 3, 4, 5],
+            t_to_strand=[int(Strand.POS)] * 6,
+            g_to_strand=[int(Strand.POS)] * 6,
+        )
+        index.t_df["is_nrna"] = [False, False, True, True, False, True]
+        index.t_df["is_synthetic"] = [False, False, False, False, False, True]
+        index.t_df["nrna_t_index"] = [5, 2, 2, -1, 5, -1]
+        index.t_df["nrna_n_contributors"] = [0, 0, 1, 0, 0, 2]
+        rc = AbundanceEstimator(6, em_config=EMConfig(seed=42))
+        rc.unambig_counts[:, _UNSPLICED_SENSE] = [10.0, 20.0, 7.0, 3.0, 5.0, 4.0]
+
+        quant = rc.get_counts_df(index)
+        assert quant["transcript_id"].tolist() == ["t0", "t1", "t2", "t3", "t4"]
+        assert quant["nascent_id"].tolist() == ["t5", ".", ".", ".", "t5"]
+        assert quant["count_nascent"].tolist() == [4.0, 0.0, 0.0, 0.0, 4.0]
+        assert quant["is_single_exon"].tolist() == [False, False, True, True, False]
+
+        nascent = rc.get_nascent_quant_df(index)
+        assert nascent["nascent_id"].tolist() == ["t5"]
+        row = nascent.iloc[0]
+        assert (row["count"], row["n_annotated"], row["count_annotated"]) == (4.0, 2, 15.0)
 
 
 class TestPartitionedEffectiveLength:
@@ -1847,25 +1878,22 @@ def test_the_loci_table_sums_a_locus_s_transcripts_in_their_index_order():
         dict(
             locus_id=lid,
             locus_span_bp=100,
-            n_transcripts=3,
             n_genes=1,
             n_em_fragments=0,
             rna_total=1.0,
-            gdna=0.0,
-            gdna_prior_count=0.0,
-            rna_prior_count=0.0,
-            enable_gdna=1,
-            gdna_eff_len_em=1.0,
+            count_gdna=0.0,
+            count_gdna_prior=0.0,
+            count_rna_prior=0.0,
+            has_gdna=True,
+            gdna_em_effective_length=1.0,
         )
         for lid in (0, 1)
     ]
-    index = SimpleNamespace(t_df=pd.DataFrame({"is_nrna": synthetic, "is_synthetic": synthetic}))
+    index = SimpleNamespace(t_df=pd.DataFrame({"is_synthetic": synthetic}))
     loci = est.get_loci_df(index).set_index("locus_id")
     in_order = 0.1 + 0.2 + 0.3
     assert in_order != 0.3 + 0.2 + 0.1
-    assert loci.loc[0, "nrna"] == in_order
+    assert loci.loc[0, "count_nascent"] == in_order
     assert loci.loc[1, "count_unambig"] == in_order
-    assert (loci["n_nrna_entities"].tolist(), loci["n_annotated_transcripts"].tolist()) == (
-        [3, 0],
-        [0, 3],
-    )
+    # n_transcripts counts the annotated transcripts alone, n_nascent the synthetic spans
+    assert (loci["n_nascent"].tolist(), loci["n_transcripts"].tolist()) == ([3, 0], [0, 3])

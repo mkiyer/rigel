@@ -1,46 +1,48 @@
 """`rigel.annotate` — writing the scanner's per-fragment decisions back out as BAM tags.
 
-The annotation table itself: what it stores per fragment, how it grows, and the canonical ZF
-values. Then the writer, through a real `run_pipeline`: the annotated BAM must be valid, its tag
-values must lie in their domains, its per-class counts must agree with the run's own, and it must
-preserve every input record and its collation, multimappers included, because an annotated BAM that
-silently drops records is not the same library the numbers describe. The blacklist tag is gated for
-presence, for the blacklisted case and for its absence on a filtered passthrough.
+The annotation table itself: what it stores per fragment, how it grows, the canonical ZF values,
+and the category a transcript's win is stamped with. Then the writer, through a real
+`run_pipeline`: the annotated BAM must be valid, its tag values must lie in their domains, a
+transcript's win must read annotated or nascent as the output tables do, its per-class counts must
+agree with the run's own, and it must preserve every input record and its collation, multimappers
+included, because an annotated BAM that silently drops records is not the same library the numbers
+describe. The blacklist tag is gated for presence, for the blacklisted case and for its absence on
+a filtered passthrough.
 """
 
 import shutil
+from collections import defaultdict
 
 import numpy as np
 import pytest
 
 from rigel.annotate import (
     AnnotationTable,
+    AF_ANNOTATED,
+    AF_ANNOTATED_BIT,
     AF_CHIMERIC,
     AF_CHIMERIC_BIT,
     AF_GDNA_BIT,
     AF_GDNA_EM,
     AF_GDNA_INTERGENIC,
     AF_INTERGENIC_BIT,
-    AF_MRNA,
-    AF_MRNA_BIT,
     AF_MULTIMAPPER_DROP,
     AF_MULTIMAPPER_DROP_BIT,
-    AF_NRNA,
-    AF_NRNA_BIT,
-    AF_NRNA_SYNTH,
+    AF_NASCENT,
+    AF_NASCENT_BIT,
     AF_RESOLVED,
     AF_RNA_INTERGENIC,
-    AF_SYNTHETIC_BIT,
     AF_UNRESOLVED,
+    winner_flag,
+    winner_flags,
 )
 
 
 # Set of the only legitimate ZF outputs produced by rigel.
 VALID_ZF_VALUES = {
     AF_UNRESOLVED,
-    AF_MRNA,
-    AF_NRNA,
-    AF_NRNA_SYNTH,
+    AF_ANNOTATED,
+    AF_NASCENT,
     AF_GDNA_EM,
     AF_GDNA_INTERGENIC,
     AF_RNA_INTERGENIC,
@@ -48,17 +50,32 @@ VALID_ZF_VALUES = {
     AF_MULTIMAPPER_DROP,
 }
 
+#: Bit 3, retired: it marked a single-exon winner (0x09) or a synthetic span's (0x19) under the earlier
+#: layout, so a value carrying it can only be read with that layout's meaning.
+RETIRED_BIT = 0x08
+
+#: Every bit the table names; a ZF value carries no other.
+NAMED_BITS = (
+    AF_RESOLVED
+    | AF_ANNOTATED_BIT
+    | AF_GDNA_BIT
+    | AF_NASCENT_BIT
+    | AF_INTERGENIC_BIT
+    | AF_CHIMERIC_BIT
+    | AF_MULTIMAPPER_DROP_BIT
+)
+
 
 def _assert_zf_invariants(zf: int) -> None:
-    """Assert the 6 ZF invariants."""
+    """Assert the five ZF invariants `rigel.annotate` states, and that no bit outside its table is set."""
     is_resolved = bool(zf & AF_RESOLVED)
-    is_mrna = bool(zf & AF_MRNA_BIT)
+    is_annotated = bool(zf & AF_ANNOTATED_BIT)
     is_gdna = bool(zf & AF_GDNA_BIT)
-    is_nrna = bool(zf & AF_NRNA_BIT)
-    is_synth = bool(zf & AF_SYNTHETIC_BIT)
+    is_nascent = bool(zf & AF_NASCENT_BIT)
     is_interg = bool(zf & AF_INTERGENIC_BIT)
     is_chim = bool(zf & AF_CHIMERIC_BIT)
     is_mm_drop = bool(zf & AF_MULTIMAPPER_DROP_BIT)
+    n_kind = int(is_annotated) + int(is_gdna) + int(is_nascent)
 
     # 1: resolved XOR (chimeric OR mm_dropped) — every stamped record is
     #    exactly one or the other (unresolved sentinel ZF=0 also
@@ -66,28 +83,24 @@ def _assert_zf_invariants(zf: int) -> None:
     assert not (is_resolved and (is_chim or is_mm_drop)), (
         f"ZF={zf:#x}: resolved AND dropped bits both set"
     )
-    # 2: resolved -> one pool bit, or none for RNA no annotated transcript holds (spliced intergenic)
+    # 2: a winner-kind bit only when resolved, and then exactly one, or none for RNA no annotated
+    #    transcript holds (spliced intergenic)
     if is_resolved:
-        pool_count = int(is_mrna) + int(is_gdna) + int(is_nrna)
-        assert pool_count == 1 or (pool_count == 0 and is_interg), (
-            f"ZF={zf:#x}: resolved but {pool_count} pool bits set"
+        assert n_kind == 1 or (n_kind == 0 and is_interg), (
+            f"ZF={zf:#x}: resolved but {n_kind} winner-kind bits set"
         )
     else:
-        # Pool bits are only meaningful when resolved
-        assert not (is_mrna or is_gdna or is_nrna), f"ZF={zf:#x}: pool bit set without is_resolved"
-    # 3: synthetic -> nrna
-    if is_synth:
-        assert is_nrna, f"ZF={zf:#x}: is_synthetic set without is_nrna"
-    # 4: intergenic -> resolved, gDNA when unspliced and RNA (no pool bit) when spliced
+        assert n_kind == 0, f"ZF={zf:#x}: winner-kind bit set without is_resolved"
+    # 3: intergenic -> resolved, gDNA when unspliced and RNA (no winner-kind bit) when spliced
     if is_interg:
-        assert is_resolved and not (is_mrna or is_nrna), f"ZF={zf:#x}: is_intergenic misplaced"
-    # 5: chimeric and mm_dropped mutually exclusive
+        assert is_resolved and not (is_annotated or is_nascent), (
+            f"ZF={zf:#x}: is_intergenic misplaced"
+        )
+    # 4: chimeric and mm_dropped mutually exclusive
     assert not (is_chim and is_mm_drop), f"ZF={zf:#x}: chimeric AND mm_dropped both set"
-    # 6: subtype bits only with their pool
-    if is_synth:
-        assert is_nrna, f"ZF={zf:#x}: synthetic subtype without nrna"
-    if is_interg:
-        assert not (is_mrna or is_nrna), f"ZF={zf:#x}: intergenic subtype under an annotated pool"
+    # 5: the retired bit is never set, nor any bit the table does not name
+    assert not zf & RETIRED_BIT, f"ZF={zf:#x}: the retired bit 0x08 is set"
+    assert not zf & ~NAMED_BITS, f"ZF={zf:#x}: a bit outside the table is set"
 
 
 # =====================================================================
@@ -109,7 +122,7 @@ class TestAnnotationTable:
             frag_id=42,
             best_tid=5,
             best_gid=2,
-            tx_flags=AF_MRNA,
+            tx_flags=AF_ANNOTATED,
             posterior=0.95,
             frag_class=0,
             n_candidates=3,
@@ -119,7 +132,7 @@ class TestAnnotationTable:
         assert tbl.frag_ids[0] == 42
         assert tbl.best_tid[0] == 5
         assert tbl.best_gid[0] == 2
-        assert tbl.tx_flags[0] == AF_MRNA
+        assert tbl.tx_flags[0] == AF_ANNOTATED
         assert abs(tbl.posterior[0] - 0.95) < 0.01
         assert tbl.frag_class[0] == 0
         assert tbl.n_candidates[0] == 3
@@ -132,7 +145,7 @@ class TestAnnotationTable:
                 frag_id=i,
                 best_tid=i,
                 best_gid=0,
-                tx_flags=AF_MRNA,
+                tx_flags=AF_ANNOTATED,
                 posterior=1.0,
                 frag_class=0,
                 n_candidates=1,
@@ -143,29 +156,42 @@ class TestAnnotationTable:
         np.testing.assert_array_equal(tbl.best_tid[: tbl.size], np.arange(10))
 
     def test_zf_canonical_values(self):
-        """All canonical ZF values satisfy the redesign invariants."""
+        """All canonical ZF values satisfy the invariants, and none reuses the retired bit 0x08."""
         # Documented composed values
         assert AF_UNRESOLVED == 0x00
-        assert AF_MRNA == 0x03
-        assert AF_NRNA == 0x09
-        assert AF_NRNA_SYNTH == 0x19
+        assert AF_ANNOTATED == 0x03
+        assert AF_NASCENT == 0x11
         assert AF_GDNA_EM == 0x05
         assert AF_GDNA_INTERGENIC == 0x25
         assert AF_RNA_INTERGENIC == 0x21
         assert AF_CHIMERIC == 0x40
         assert AF_MULTIMAPPER_DROP == 0x80
-        # All canonical values satisfy the invariants
+        # All canonical values satisfy the invariants, which include the retired bit's absence
         for v in VALID_ZF_VALUES:
             _assert_zf_invariants(v)
         # Resolved-ness is coherent
-        assert AF_MRNA & AF_RESOLVED
-        assert AF_NRNA & AF_RESOLVED
-        assert AF_NRNA_SYNTH & AF_RESOLVED
+        assert AF_ANNOTATED & AF_RESOLVED
+        assert AF_NASCENT & AF_RESOLVED
         assert AF_GDNA_EM & AF_RESOLVED
         assert AF_GDNA_INTERGENIC & AF_RESOLVED
         assert AF_RNA_INTERGENIC & AF_RESOLVED and not AF_RNA_INTERGENIC & AF_GDNA_BIT
         assert not (AF_CHIMERIC & AF_RESOLVED)
         assert not (AF_MULTIMAPPER_DROP & AF_RESOLVED)
+
+    def test_a_transcript_win_is_annotated_or_nascent(self):
+        """A transcript's win reads as the output tables report its RNA: a synthetic span's is nascent
+        (0x11), every reference transcript's annotated (0x03), single-exon included, so the helpers take
+        only ``is_synthetic``. The scalar and the vectorized form agree."""
+        assert winner_flag(False) == AF_ANNOTATED == 0x03
+        assert winner_flag(True) == AF_NASCENT == 0x11
+        is_synthetic = np.array([False, True, False, True])
+        flags = winner_flags(is_synthetic)
+        assert flags.dtype == np.uint8
+        np.testing.assert_array_equal(flags, [0x03, 0x11, 0x03, 0x11])
+        assert [winner_flag(bool(s)) for s in is_synthetic] == flags.tolist()
+        for v in flags.tolist():
+            _assert_zf_invariants(v)
+        assert winner_flags(np.zeros(0, dtype=bool)).dtype == np.uint8
 
 
 # =====================================================================
@@ -209,6 +235,35 @@ def scenario(tmp_path):
             },
         ],
     )
+    yield sc
+    sc.cleanup()
+
+
+@pytest.fixture
+def winner_kinds_scenario(tmp_path):
+    """One of each kind of transcript a fragment can be won by: a multi-exon transcript nothing covers, so
+    the index adds a synthetic span over it; a single-exon transcript covering its multi-exon sibling's
+    span, so there is no synthetic span there; and a single-exon transcript alone."""
+    from rigel.sim import Scenario
+
+    sc = Scenario(
+        "annot_winner_kinds",
+        genome_length=8000,
+        seed=42,
+        work_dir=tmp_path / "winner_kinds",
+    )
+    sc.add_gene(
+        "g1", "+", [{"t_id": "t_multi", "exons": [(500, 1000), (1500, 2000)], "abundance": 60}]
+    )
+    sc.add_gene(
+        "g2",
+        "+",
+        [
+            {"t_id": "t_sibling", "exons": [(3000, 3400), (3800, 4200)], "abundance": 30},
+            {"t_id": "t_cover", "exons": [(3000, 4200)], "abundance": 30},
+        ],
+    )
+    sc.add_gene("g3", "+", [{"t_id": "t_single", "exons": [(5500, 6500)], "abundance": 60}])
     yield sc
     sc.cleanup()
 
@@ -959,6 +1014,72 @@ class TestAnnotatedBamIntegration:
             _assert_zf_invariants(zf)
             assert not (zf & AF_RESOLVED)
             assert rec.get_tag("ZC") == "."
+
+    def test_zf_names_the_category_of_the_winning_transcript(self, winner_kinds_scenario, tmp_path):
+        """ZF names a transcript's win as the output tables report its RNA: every reference transcript's
+        fragments read annotated (0x03), single-exon included — alone, or covering its sibling's span, both
+        0x09 before — and a synthetic span's read nascent (0x11, 0x19 before); no record sets the retired
+        bit. The single-exon and span fragments are unspliced, so the EM decides them; the multi-exon
+        transcripts' spliced ones are also decided on the deterministic path, so both stamp sites are read.
+        """
+        import pysam
+        from rigel.sim import ReadSimConfig
+        from rigel.config import EMConfig, PipelineConfig, BamScanConfig
+        from rigel.pipeline import run_pipeline
+
+        sim_config = ReadSimConfig(
+            frag_mean=200,
+            frag_std=30,
+            frag_min=80,
+            frag_max=450,
+            read_length=100,
+            strand_specificity=1.0,
+            seed=42,
+        )
+        result = winner_kinds_scenario.build(
+            n_fragments=600, sim_config=sim_config, nrna_abundance=60
+        )
+
+        annotated_bam = tmp_path / "annotated_kinds.bam"
+        run_pipeline(
+            result.bam_path,
+            result.index,
+            config=PipelineConfig(
+                em=EMConfig(seed=42),
+                scan=BamScanConfig(sj_strand_tag="ts"),
+                annotated_bam_path=annotated_bam,
+            ),
+        )
+
+        t_df = result.index.t_df
+        spans = set(t_df.loc[t_df["is_synthetic"].astype(bool), "t_id"])
+        annotated = {"t_multi", "t_sibling", "t_cover", "t_single"}
+        stamped = defaultdict(set)  # winning transcript -> the ZF values its records carry
+        # winners the deterministic path stamped: only it writes ZC unambig with ZS spliced_annot
+        deterministic = set()
+        with pysam.AlignmentFile(str(annotated_bam), "rb") as fout:
+            for rec in fout.fetch(until_eof=True):
+                if not rec.has_tag("ZF"):
+                    continue  # filtered pass-through
+                zf = rec.get_tag("ZF")
+                _assert_zf_invariants(zf)
+                if rec.get_tag("ZI") >= 0:
+                    stamped[rec.get_tag("ZT")].add(zf)
+                    if (rec.get_tag("ZC"), rec.get_tag("ZS")) == ("unambig", "spliced_annot"):
+                        deterministic.add(rec.get_tag("ZT"))
+
+        won = set(stamped)
+        assert won <= annotated | spans, f"unexpected winners: {sorted(won - annotated - spans)}"
+        assert {"t_cover", "t_single"} <= won, (
+            f"a single-exon transcript won nothing: {sorted(won)}"
+        )
+        assert won & spans, f"no fragment was won by a synthetic span: {sorted(won)}"
+        assert deterministic & {"t_multi", "t_sibling"}, "the deterministic path stamped no winner"
+        for t_id, values in stamped.items():
+            expected = AF_NASCENT if t_id in spans else AF_ANNOTATED
+            assert values == {expected}, (
+                f"{t_id} won records stamped {sorted(hex(v) for v in values)}, not {expected:#x}"
+            )
 
 
 @pytestmark_scenario

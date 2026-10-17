@@ -1,15 +1,25 @@
 """The `rigel report` HTML builder, from a synthesized substrate rather than a pipeline run.
 
-A minimal but realistic substrate — a v3 ``summary.json`` and its companion feathers — is written
-to a temp directory, and the loader, the view model, the chart specifications and the full HTML
-build run against it. The report must be self-contained, inlining its runtime, and must honour a
-custom output path. The capture panel shows calibration's own answer, and the front end reads only the
-keys and format tags the view model writes, and escapes every string a user or an annotation chose before it
+A minimal but realistic substrate — a schema-4 ``summary.json`` and its companion feathers — is written
+to a temp directory, and the loader, the view model, the chart specifications and the full HTML build run
+against it. The report must be self-contained, inlining its runtime, and must honour a custom output path.
+The pools carry the output convention's five names, one spelling each, and the summary's own counts and
+fractions; the strandedness tile is the strand model's own verdict; a gene's RNA is its count; every
+fragment-length category shows one readable label; and every cut, cap and rounding the report applies is
+``CONSTANTS.qc``'s. The capture panel shows calibration's own answer, and the front end reads only the keys,
+cells and format tags the view model writes, and escapes every string a user or an annotation chose before it
 becomes markup (read off ``report.js``'s source: the suite runs no JavaScript). Every chart the page embeds
 must compile and read every mark property it sets. Vega-specific assertions are conditional on
 ``vl-convert-python``.
+
+The report reads ``summary.json`` only through the keys ``SUMMARY_KEYS`` lists, and tolerantly, so a key
+misspelled on the report's side would read its default without a sound — and the synthesized substrate, written
+by the same hand, would agree with it. One gate therefore reads a REAL output directory, written by the writer
+``rigel quant`` runs from a small simulated library: every listed key, every gene-table column and every
+fragment-length category must be one that writer writes.
 """
 
+import argparse
 import importlib.util
 import json
 import re
@@ -21,19 +31,43 @@ import pytest
 
 import numpy as np
 
+from rigel import cli
+from rigel.config import CONSTANTS, BamScanConfig, EMConfig, PipelineConfig
+from rigel.pipeline import run_pipeline
+from rigel.report import model as report_model
 from rigel.report.build import build_report
-from rigel.report.html import _asset
-from rigel.report.model import _reference_table, build_view_model
-from rigel.report.specs import build_charts, build_fl_specs, genome_track_spec
-from rigel.report.substrate import SubstrateError, load_substrate
+from rigel.report.html import _SECTIONS, _asset
+from rigel.report.model import GENE_COLUMNS, _reference_table, build_view_model
+from rigel.report.specs import (
+    FL_CATEGORY_LABELS,
+    build_charts,
+    build_fl_specs,
+    fl_label,
+    genome_track_spec,
+)
+from rigel.report.substrate import SUMMARY_KEYS, SubstrateError, SummaryReader, load_substrate
+from rigel.sim import ReadSimConfig, Scenario
 
 _HAS_VEGA = importlib.util.find_spec("vl_convert") is not None
+
+#: The ``summary.json`` schema the synthesized substrate mirrors, and the one the real writer must write.
+_SCHEMA = 4
+
+#: The output convention's five pools, as the report names them.
+_POOLS = ("Annotated transcripts", "Nascent RNA", "gDNA (EM)", "Intergenic RNA", "Intergenic gDNA")
 
 
 def _write_substrate(d: Path) -> Path:
     d.mkdir(parents=True, exist_ok=True)
+    # The pools, as ``rigel quant`` books them: an unspliced intergenic fragment is gDNA, a spliced one RNA.
+    annotated, nascent, gdna_em, intergenic, intergenic_rna = 500.0, 60.0, 20.0, 70, 0
+    every = annotated + nascent + gdna_em + intergenic
+
+    def share(x):
+        return round(x / every, 6)
+
     summary = {
-        "schema_version": 3,
+        "schema_version": _SCHEMA,
         "rigel_version": "0.7.0",
         "timestamp": "2026-07-11 09:42",
         "input": {"bam_file": "/data/SampleX.bam", "index_dir": "/refs/gencode"},
@@ -51,7 +85,7 @@ def _write_substrate(d: Path) -> Path:
         "fragment_stats": {
             "total": 700,
             "genic": 600,
-            "intergenic": 70,
+            "intergenic": intergenic,
             "chimeric": 30,
             "chimeric_trans": 10,
             "chimeric_cis_same": 15,
@@ -75,6 +109,7 @@ def _write_substrate(d: Path) -> Path:
             "n_training_fragments": 400,
             "posterior_variance": 0.0001,
             "ci_95": [0.975, 0.985],
+            "strand_live": True,
             "diagnostics": {
                 "exonic_all_specificity": 0.93,
                 "exonic_all_p_r1_sense": 0.07,
@@ -84,69 +119,65 @@ def _write_substrate(d: Path) -> Path:
         },
         "quantification": {
             "n_transcripts": 120,
+            "n_nascent": 30,
             "n_genes": 40,
             "n_loci": 35,
-            "mrna_total": 500.0,
-            "nrna_total": 60.0,
-            "gdna_total": 20.0,
-            "intergenic_total": 70,
-            "mrna_fraction": 0.77,
-            "nrna_fraction": 0.09,
-            "gdna_fraction": 0.14,
-            "gdna_em_fraction": 0.03,
-            "intergenic_fraction": 0.11,
+            "count_annotated": annotated,
+            "count_nascent": nascent,
+            "count_gdna": gdna_em + intergenic - intergenic_rna,
+            "count_gdna_em": gdna_em,
+            "count_intergenic_rna": intergenic_rna,
+            "fraction_annotated": share(annotated),
+            "fraction_nascent": share(nascent),
+            "fraction_gdna": share(gdna_em + intergenic - intergenic_rna),
+            "fraction_gdna_em": share(gdna_em),
+            "fraction_intergenic": share(intergenic),
+            "fraction_intergenic_rna": share(intergenic_rna),
         },
+        # every category ``rigel quant`` writes, in its order: the anchor, the two modelled pools, and the five
+        # pools they are built from (``gdna`` is the two contained pools, ``rna`` the spliced one)
         "fragment_length": {
-            "global": {
-                "n_observations": 700,
-                "mean": 200.0,
-                "std": 40.0,
-                "median": 195.0,
-                "mode": 190,
+            cat: {
+                "n_observations": n,
+                "mean": mean,
+                "std": std,
+                "median": median,
+                "mode": mode,
                 "max_size": 1000,
-                "overflow_count": 0.0,
-                "overflow_fraction": 0.0,
-            },
-            "rna": {
-                "n_observations": 400,
-                "mean": 205.0,
-                "std": 35.0,
-                "median": 200.0,
-                "mode": 195,
-                "max_size": 1000,
-                "overflow_count": 0.0,
-                "overflow_fraction": 0.0,
-            },
-            "gdna": {
-                "n_observations": 120,
-                "mean": 175.0,
-                "std": 60.0,
-                "median": 160.0,
-                "mode": 150,
-                "max_size": 1000,
-                "overflow_count": 1.0,
-                "overflow_fraction": 0.008,
-            },
+                "overflow_count": overflow,
+                "overflow_fraction": round(overflow / n, 6),
+            }
+            for cat, (n, mean, std, median, mode, overflow) in {
+                "global": (700, 200.0, 40.0, 195.0, 190, 0.0),
+                "gdna": (125, 175.0, 60.0, 160.0, 150, 1.0),
+                "rna": (400, 205.0, 35.0, 200.0, 195, 0.0),
+                "pool_gdna_intergenic": (60, 172.0, 58.0, 158.0, 150, 1.0),
+                "pool_gdna_intronic": (65, 178.0, 61.0, 162.0, 150, 0.0),
+                "pool_gdna_intron_exon": (20, 181.0, 55.0, 170.0, 160, 0.0),
+                "pool_gdna_intergenic_exon": (10, 179.0, 57.0, 168.0, 155, 0.0),
+                "pool_rna_spliced": (400, 205.0, 35.0, 200.0, 195, 0.0),
+            }.items()
         },
     }
     (d / "summary.json").write_text(json.dumps(summary))
 
-    # fragment_lengths.feather — a couple of gaussian-ish bumps
-    rows = []
-    for cat, mu in (("global", 200), ("rna", 205), ("gdna", 175)):
-        for length in range(mu - 40, mu + 41, 5):
-            rows.append((cat, length, max(0.0, 50.0 - abs(length - mu))))
+    # fragment_lengths.feather — a gaussian-ish bump per category
+    rows = [
+        (cat, length, max(0.0, 50.0 - abs(length - int(stats["mean"]))))
+        for cat, stats in summary["fragment_length"].items()
+        for length in range(int(stats["mean"]) - 40, int(stats["mean"]) + 41, 5)
+    ]
     pd.DataFrame(rows, columns=["category", "length", "count"]).astype(
-        {"length": "int32", "count": "float64"}
+        {"category": "category", "length": "int32", "count": "float64"}
     ).to_feather(d / "fragment_lengths.feather")
 
     pd.DataFrame(
         {
             "gene_id": [f"ENSG{i:05d}" for i in range(5)],
             "gene_name": ["GAPDH", "ACTB", "TP53", "MYC", "MALAT1"],
-            "count": [4200.0, 3800.0, 120.0, 300.0, 900.0],
+            "count": [4200.37, 3800.0, 120.0, 300.0, 900.0],
             "count_spliced": [4100.0, 3700.0, 110.0, 280.0, 40.0],
-            "tpm": [42000.0, 38000.0, 1200.0, 2900.0, 9000.0],
+            "tpm": [42000.456, 38000.0, 1200.0, 2900.0, 9000.0],
             "n_transcripts": [3, 4, 6, 2, 1],
         }
     ).to_feather(d / "gene_quant.feather")
@@ -154,22 +185,22 @@ def _write_substrate(d: Path) -> Path:
 
 
 def _enriched_track() -> pd.DataFrame:
-    """A capture-like gDNA track: many low-density off-target regions carrying little gDNA mass, and a
-    few high-density on-target regions carrying most of it."""
+    """A capture-like gDNA track: many low-density off-target regions carrying few gDNA fragments, and a few
+    high-density on-target regions carrying most of them."""
     rng = np.random.default_rng(0)
     low_d = np.exp(rng.normal(-9.0, 0.4, 4000))
     high_d = np.exp(rng.normal(0.0, 0.4, 120))
     dens = np.concatenate([low_d, high_d])
-    gmass = np.concatenate([np.full(4000, 0.01), np.full(120, 50.0)])
+    gdna = np.concatenate([np.full(4000, 0.01), np.full(120, 50.0)])
     return pd.DataFrame(
         {
             "ref": pd.Categorical(["chr1"] * len(dens)),
             "start": np.arange(len(dens)) * 100,
             "end": np.arange(len(dens)) * 100 + 50,
-            "gdna_mass": gmass,
-            "rna_mass": np.ones(len(dens)),
+            "count_gdna": gdna,
+            "count_rna": np.ones(len(dens)),
             "gdna_density": dens,
-            "gdna_frac": np.clip(dens, 0, 1),
+            "fraction_gdna": np.clip(dens, 0, 1),
         }
     )
 
@@ -210,7 +241,7 @@ def test_load_substrate_missing(tmp_path):
 def test_view_model_shape(tmp_path):
     d = _write_substrate(tmp_path / "run")
     sub = load_substrate(d)
-    assert sub.schema_version == 3
+    assert sub.schema_version == _SCHEMA
     assert sub.sample_name == "SampleX"
     vm = build_view_model(sub)
 
@@ -248,10 +279,10 @@ def test_genome_track_spec_bins_per_ref():
             "ref": pd.Categorical(["chr1"] * 4 + ["chr2"] * 2),
             "start": [0, 1000, 2000, 3000, 0, 5000],
             "end": [1000, 2000, 3000, 4000, 5000, 10000],
-            "gdna_mass": [1.0, 8.0, 2.0, 1.0, 30.0, 90.0],  # chr1 sum 12, chr2 sum 120
-            "rna_mass": [9.0, 2.0, 8.0, 9.0, 7.0, 1.0],
+            "count_gdna": [1.0, 8.0, 2.0, 1.0, 30.0, 90.0],  # chr1 sum 12, chr2 sum 120
+            "count_rna": [9.0, 2.0, 8.0, 9.0, 7.0, 1.0],
             "gdna_density": [0.01, 0.09, 0.02, 0.01, 0.03, 0.10],
-            "gdna_frac": [0.1, 0.8, 0.2, 0.1, 0.3, 0.9],
+            "fraction_gdna": [0.1, 0.8, 0.2, 0.1, 0.3, 0.9],
         }
     )
     spec = genome_track_spec(track)
@@ -261,10 +292,10 @@ def test_genome_track_spec_bins_per_ref():
     # log + independent y per facet (so a high-density ref can't flatten others)
     assert spec["spec"]["encoding"]["y"]["scale"]["type"] == "log"
     assert spec["resolve"]["scale"]["y"] == "independent"
-    # top-N ranks by gDNA mass; chr2 (120) outranks chr1 (12)
+    # top-N ranks by gDNA count; chr2 (120) outranks chr1 (12)
     top1 = genome_track_spec(track, top_n=1)
     assert {row["ref"] for row in top1["data"]["values"]} == {"chr2"}
-    # reference table: every reference, sorted by gDNA mass desc
+    # reference table: every reference, sorted by gDNA count desc
     rt = _reference_table(track)
     assert [r[0] for r in rt] == ["chr2", "chr1"]
     assert rt[0][1] == 2  # chr2 n_regions
@@ -290,6 +321,24 @@ def _with_calibration(d: Path, **keys) -> Path:
     summary["calibration"] = {"gdna_density_global": 0.03, "n_regions": 1760, **keys}
     path.write_text(json.dumps(summary))
     return d
+
+
+def _with(d: Path, section: str, **keys) -> Path:
+    """Give one section of the substrate's ``summary.json`` these keys."""
+    path = d / "summary.json"
+    summary = json.loads(path.read_text())
+    summary[section].update(keys)
+    path.write_text(json.dumps(summary))
+    return d
+
+
+def _view(d: Path, monkeypatch, **qc) -> dict:
+    """The view model with these ``CONSTANTS.qc`` fields changed, the way an experiment varies a constant."""
+    constants = CONSTANTS
+    for name, value in qc.items():
+        constants = constants.replaced(f"qc.{name}", value)
+    monkeypatch.setattr(report_model, "CONSTANTS", constants)
+    return build_view_model(load_substrate(d))
 
 
 def _js_function(name: str) -> str:
@@ -403,6 +452,28 @@ def test_the_capture_note_reads_only_keys_the_view_model_writes(tmp_path):
     )
 
 
+@pytest.mark.parametrize(
+    "table, rows",
+    [
+        ("flTable", lambda vm: vm["fl"]["table"]),
+        ("geneTable", lambda vm: vm["genes"]["rows"]),
+        ("refTable", lambda vm: vm["calibration"]["ref_table"]),
+    ],
+)
+def test_each_table_reads_every_cell_the_view_model_writes_and_no_other(tmp_path, table, rows):
+    """A row position the front end reads past the end of a row renders ``undefined``, and one it never reads is a
+    column nobody sees; nothing fails in either case, so the positions each table reads must be exactly the ones
+    its rows carry."""
+    d = _with_calibration(_write_substrate(tmp_path / "run"))
+    _enriched_track().to_feather(d / "calibration_track.feather")
+    written = rows(build_view_model(load_substrate(d)))
+    assert written, f"{table} has no rows in this substrate, so this gate reads nothing"
+    (width,) = {len(r) for r in written}
+    js = _js_function(table)
+    read = {int(i) for i in re.findall(r"\bidx: (\d+)", js) + re.findall(r"\br\[(\d+)\]", js)}
+    assert read == set(range(width)), f"{table} reads {sorted(read)} of a {width}-cell row"
+
+
 @pytest.mark.parametrize("bulk_density", [1.2e-4, None])
 def test_the_report_shows_calibrations_rna_sense_fraction_whatever_the_capture_answer(
     tmp_path, bulk_density
@@ -411,7 +482,7 @@ def test_the_report_shows_calibrations_rna_sense_fraction_whatever_the_capture_a
     about capture."""
     d = _with_calibration(
         _write_substrate(tmp_path / "run"),
-        rna_sense_frac=0.973,
+        fraction_rna_sense=0.973,
         gdna_bulk_density=bulk_density,
         gdna_capture_saturation=1.0 if bulk_density is None else 852.0,
     )
@@ -443,24 +514,310 @@ def test_every_format_tag_the_view_model_emits_is_one_the_front_end_formats(tmp_
     assert emitted and emitted <= formatted, f"unformatted tags: {sorted(emitted - formatted)}"
 
 
+def test_each_pool_is_named_once_and_shows_the_summarys_own_count_and_fraction(tmp_path):
+    """The bar, its legend, the donut, the table and the KPIs name each pool the same way, in the output
+    convention's words, and show the count and fraction ``summary.json`` holds for it; the intergenic fragments
+    are split by their junction. The words the convention retired name nothing the report shows."""
+    d = _with(
+        _write_substrate(tmp_path / "run"),
+        "quantification",
+        count_intergenic_rna=10,
+        fraction_intergenic_rna=0.015,
+    )
+    summary = json.loads((d / "summary.json").read_text())
+    q, intergenic = summary["quantification"], summary["fragment_stats"]["intergenic"]
+    quant = build_view_model(load_substrate(d))["quant"]
+    expected = {
+        "Annotated transcripts": (q["count_annotated"], q["fraction_annotated"]),
+        "Nascent RNA": (q["count_nascent"], q["fraction_nascent"]),
+        "gDNA (EM)": (q["count_gdna_em"], q["fraction_gdna_em"]),
+        "Intergenic RNA": (q["count_intergenic_rna"], q["fraction_intergenic_rna"]),
+        "Intergenic gDNA": (
+            intergenic - q["count_intergenic_rna"],
+            q["fraction_intergenic"] - q["fraction_intergenic_rna"],
+        ),
+    }
+    assert set(expected) == set(_POOLS)
+    assert {p["label"]: p["value"] for p in quant["pools"]} == {
+        k: n for k, (n, _) in expected.items()
+    }
+    assert {row[0]: (row[1], row[2]) for row in quant["table"]} == expected
+    kpis = {k["l"]: k["v"] for k in quant["kpis"]}
+    assert kpis["Annotated transcripts"] == q["count_annotated"]
+    assert kpis["Nascent RNA"] == q["count_nascent"]
+    assert kpis["Transcripts"] == q["n_transcripts"]  # annotated transcripts only, in schema 4
+    shown = json.dumps(quant) + _SECTIONS + _asset("report.js")
+    assert not re.findall(r"\b(?:[Mm]ature|mRNA|nRNA)\b", shown)
+
+
 def test_the_pools_book_spliced_intergenic_fragments_as_rna(tmp_path):
     """A spliced intergenic fragment is RNA no annotated transcript holds: the intergenic gDNA pool is the
     unspliced remainder, and the RNA share counts it."""
-    d = _write_substrate(tmp_path / "run")
-    path = d / "summary.json"
-    summary = json.loads(path.read_text())
-    summary["quantification"].update(
-        intergenic_spliced=10, intergenic_rna_fraction=0.015, gdna_fraction=0.125
+    d = _with(
+        _write_substrate(tmp_path / "run"),
+        "quantification",
+        count_intergenic_rna=10,
+        fraction_intergenic_rna=0.015,
+        count_gdna=80.0,
+        fraction_gdna=0.125,
     )
-    path.write_text(json.dumps(summary))
     quant = build_view_model(load_substrate(d))["quant"]
     pools = {p["label"]: p["value"] for p in quant["pools"]}
     assert pools["Intergenic gDNA"] == 60
     assert pools["Intergenic RNA"] == 10
-    q = summary["quantification"]
+    q = json.loads((d / "summary.json").read_text())["quantification"]
     assert quant["rna_share"] == pytest.approx(
-        q["mrna_fraction"] + q["nrna_fraction"] + q["intergenic_rna_fraction"]
+        q["fraction_annotated"] + q["fraction_nascent"] + q["fraction_intergenic_rna"]
     )
+
+
+@pytest.mark.parametrize(
+    "live, read1_sense, specificity, shown, state",
+    [
+        (True, False, 0.98, "Reverse (R1−)", "good"),
+        (True, True, 0.98, "Forward (R1+)", "good"),
+        (True, False, 0.55, "Reverse (R1−)", "good"),
+        (False, False, 0.98, "Unstranded", "warning"),
+    ],
+)
+def test_the_strandedness_tile_is_the_strand_models_own_verdict(
+    tmp_path, live, read1_sense, specificity, shown, state
+):
+    """The tile shows ``strand_live``, the verdict calibration's strand channel reads, and draws no cut of its own
+    on the strand specificity. The two are set apart here so the test can tell which one the tile read: a live
+    channel at a specificity of 0.55 reads stranded, a dead one at 0.98 unstranded. A stranded tile names the
+    protocol's orientation."""
+    d = _with(
+        _write_substrate(tmp_path / "run"),
+        "strand_model",
+        strand_live=live,
+        read1_sense=read1_sense,
+        strand_specificity=specificity,
+    )
+    tile = next(
+        v for v in build_view_model(load_substrate(d))["verdicts"] if v["k"] == "Strandedness"
+    )
+    assert (tile["v"], tile["s"]) == (shown, state)
+
+
+def test_a_genes_rna_is_its_count(tmp_path):
+    """The gene table shows a gene's annotated ``count``, and no mature or nascent column: under the output
+    convention a single-exon transcript is annotated, and the nascent spans belong to no gene."""
+    d = _write_substrate(tmp_path / "run")
+    rows = build_view_model(load_substrate(d))["genes"]["rows"]
+    counts = pd.read_feather(d / "gene_quant.feather").set_index("gene_name")["count"]
+    assert {r[0]: r[6] for r in rows} == {
+        g: round(c, CONSTANTS.qc.count_decimals) for g, c in counts.items()
+    }
+    assert not re.search(r"mature|nascent", _js_function("geneTable"))
+
+
+def test_every_fragment_length_category_shows_one_readable_label(tmp_path):
+    """The summary table, the overlay's legend and the per-category facets name each category by its one label,
+    every category ``rigel quant`` writes has a label of its own, and a category the labels do not know shows as
+    itself."""
+    d = _write_substrate(tmp_path / "run")
+    sub = load_substrate(d)
+    cats = list(sub.summary["fragment_length"])
+    labels = [fl_label(c) for c in cats]
+    assert len(set(labels)) == len(labels) and not set(labels) & set(cats)
+    assert fl_label("not_a_category") == "not_a_category"
+
+    assert [row[-1] for row in build_view_model(sub)["fl"]["table"]] == labels
+    specs = build_fl_specs(sub.fragment_lengths)
+    overlay = {r["category"] for r in specs["overlay"]["data"]["values"]}
+    assert overlay == {fl_label("gdna"), fl_label("rna")}
+    assert set(specs["overlay"]["encoding"]["color"]["sort"]) == overlay
+    facets = specs["small_multiples"]["facet"]["sort"]
+    assert facets == [fl_label(c) for c in cats if c != "global"]
+    assert {r["category"] for r in specs["small_multiples"]["data"]["values"]} == set(facets)
+
+
+def test_the_tiles_cut_where_the_qc_constants_say(tmp_path, monkeypatch):
+    """Each headline tile's cuts are ``CONSTANTS.qc``'s display thresholds, so moving one moves the tile. The
+    substrate maps 95 % of its records and holds 13.8 % gDNA and 85.7 % genic fragments."""
+    d = _write_substrate(tmp_path / "run")
+
+    def states(**qc):
+        vm = _view(d, monkeypatch, **qc)
+        return tuple(
+            next(v["s"] for v in vm["verdicts"] if v["k"] == k)
+            for k in ("Mapping rate", "gDNA contamination", "Usable fragments")
+        )
+
+    assert states() == ("good", "warning", "good")
+    assert states(mapping_rate_good=0.96, gdna_fraction_good=0.2, genic_fraction_good=0.9) == (
+        "warning",
+        "good",
+        "warning",
+    )
+    assert states(
+        mapping_rate_good=0.99, mapping_rate_warning=0.96, gdna_fraction_warning=0.12
+    ) == ("critical", "critical", "good")
+
+
+def test_the_gdna_region_count_reads_the_qc_cut_and_names_it(tmp_path, monkeypatch):
+    """The density panel counts the track's regions above ``CONSTANTS.qc``'s gDNA-fraction cut, and its label
+    states that cut."""
+    d = _with_calibration(_write_substrate(tmp_path / "run"))
+    track = _enriched_track()
+    track.to_feather(d / "calibration_track.feather")
+    for cut, label in ((None, "Regions >50% gDNA"), (0.99, "Regions >99% gDNA")):
+        moved = {} if cut is None else {"region_gdna_fraction": cut}
+        kpis = {
+            k["l"]: k["v"] for k in _view(d, monkeypatch, **moved)["calibration"]["density_kpis"]
+        }
+        threshold = CONSTANTS.qc.region_gdna_fraction if cut is None else cut
+        assert kpis[label] == int((track["fraction_gdna"] > threshold).sum())
+
+
+def test_the_gene_table_embeds_at_most_the_qc_cap(tmp_path, monkeypatch):
+    """Expressed genes, the highest TPM first, up to ``CONSTANTS.qc``'s cap."""
+    d = _write_substrate(tmp_path / "run")
+    genes = _view(d, monkeypatch)["genes"]
+    assert (genes["shown"], genes["total"], genes["truncated"]) == (5, 5, False)
+    genes = _view(d, monkeypatch, gene_table_rows=2)["genes"]
+    assert (genes["shown"], genes["total"], genes["truncated"]) == (2, 5, True)
+    assert [r[0] for r in genes["rows"]] == ["GAPDH", "ACTB"]
+
+
+def test_every_cell_the_report_rounds_takes_its_decimals_from_qc(tmp_path, monkeypatch):
+    """A gene's TPM and count, a reference's gDNA count and fraction, and a category's overflow percentage are
+    rounded to ``CONSTANTS.qc``'s decimals."""
+    d = _with_calibration(_write_substrate(tmp_path / "run"))
+    pd.DataFrame(
+        {
+            "ref": pd.Categorical(["chr1", "chr1"]),
+            "start": [0, 1000],
+            "end": [1000, 2000],
+            "count_gdna": [10.26, 2.0],
+            "count_rna": [5.0, 3.0],
+            "gdna_density": [0.01, 0.002],
+            "fraction_gdna": [0.67, 0.4],
+        }
+    ).to_feather(d / "calibration_track.feather")
+
+    def cells(**qc):
+        vm = _view(d, monkeypatch, **qc)
+        gapdh, chr1 = vm["genes"]["rows"][0], vm["calibration"]["ref_table"][0]
+        overflow = {row[0]: row[6] for row in vm["fl"]["table"]}["gdna"]
+        return gapdh[5], gapdh[6], chr1[2], chr1[4], overflow
+
+    assert cells() == (42000.46, 4200.4, 12.3, 0.6051, 0.8)
+    moved = cells(
+        tpm_decimals=0, count_decimals=0, fraction_decimals=1, overflow_percent_decimals=0
+    )
+    assert moved == (42000.0, 4200.0, 12.0, 0.6, 1.0)
+
+
+def test_the_summary_reader_hands_out_only_the_keys_it_lists():
+    """A listed key reads the summary's own value or its listed default, a missing or ``null`` section reads as
+    all defaults, and a section or key the list does not name raises: the report cannot read past the list the
+    gate below holds to the writer."""
+    reader = SummaryReader(
+        {"quantification": {"count_annotated": 5.0, "unlisted": 1}, "calibration": None}
+    )
+    q = reader["quantification"]
+    assert q["count_annotated"] == 5.0
+    assert q["count_nascent"] == SUMMARY_KEYS["quantification"]["count_nascent"]
+    assert set(q) == set(SUMMARY_KEYS["quantification"])
+    assert reader["calibration"] == SUMMARY_KEYS["calibration"]
+    assert reader["strand_model.diagnostics"] == SUMMARY_KEYS["strand_model.diagnostics"]
+    assert reader["fragment_length.*"] == {}
+    assert reader.holds("quantification.count_annotated")
+    assert not reader.holds("calibration.gdna_bulk_density")
+    for unlisted in (
+        lambda: reader["not_a_section"],
+        lambda: q["unlisted"],
+        lambda: reader.holds("calibration.unlisted"),
+    ):
+        with pytest.raises(KeyError):
+            unlisted()
+
+
+@pytest.fixture(scope="module")
+def quant_output(tmp_path_factory) -> Path:
+    """A real ``rigel quant`` output directory: a small stranded library with gDNA and nascent RNA, simulated,
+    run through the pipeline and written by the writer ``rigel quant`` runs (``cli._write_quant_outputs``)."""
+    work = tmp_path_factory.mktemp("quant")
+    sc = Scenario("report", genome_length=12000, seed=42, work_dir=work / "sim")
+    sc.add_gene(
+        "g1",
+        "+",
+        [
+            {"t_id": "t1", "exons": [(500, 900), (1500, 1900), (2500, 2900)], "abundance": 80},
+            {"t_id": "t2", "exons": [(500, 900), (2500, 2900)], "abundance": 40},
+        ],
+    )
+    sc.add_gene("g2", "-", [{"t_id": "t3", "exons": [(6000, 6400), (7000, 7400)], "abundance": 50}])
+    sim = ReadSimConfig(
+        frag_mean=200,
+        frag_std=40,
+        frag_min=80,
+        frag_max=450,
+        read_length=100,
+        strand_specificity=0.9,
+        seed=42,
+    )
+    oracle = sc.build_oracle(
+        n_fragments=2000, sim_config=sim, gdna_fraction=0.2, nrna_abundance=15.0
+    )
+    config = PipelineConfig(
+        em=EMConfig(seed=42, assignment_mode="fractional", n_threads=1),
+        scan=BamScanConfig(sj_strand_tag="auto"),
+    )
+    result = run_pipeline(oracle.bam_path, oracle.index, config=config)
+    out = work / "out"
+    out.mkdir()
+    args = argparse.Namespace(
+        bam_file=str(oracle.bam_path),
+        index_dir=str(oracle.index_dir),
+        config=None,
+        tsv=False,
+        emit_locus_stats=False,
+    )
+    cli._write_quant_outputs(result, oracle.index, out, args)
+    return out
+
+
+def _held(summary: dict, path: str) -> bool:
+    """Whether a summary holds a dotted key path, read off the raw JSON rather than through the report's reader."""
+    node = summary
+    for step in path.split("."):
+        if not isinstance(node, dict) or step not in node:
+            return False
+        node = node[step]
+    return True
+
+
+def test_every_key_the_report_reads_is_one_the_schema_4_writer_writes(quant_output):
+    """Every ``SUMMARY_KEYS`` key, at every fragment-length category, is one the writer wrote; so is every
+    ``gene_quant`` column the gene table shows; the fragment-length categories it lists are the ones the labels
+    name (its histogram table holds the ones with observations); and the whole report builds from what it
+    wrote."""
+    summary = json.loads((quant_output / "summary.json").read_text())
+    assert summary["schema_version"] == _SCHEMA, (
+        "the writer has moved past the schema the report reads"
+    )
+    categories = list(summary["fragment_length"])
+    paths = [
+        f"{section}.{key}" if section else key
+        for name, keys in SUMMARY_KEYS.items()
+        for section in ([name.replace("*", c) for c in categories] if "*" in name else [name])
+        for key in keys
+    ]
+    assert categories and paths
+    missing = [p for p in paths if not _held(summary, p)]
+    assert not missing, (
+        f"the report reads {missing}, which the schema-{_SCHEMA} writer does not write"
+    )
+
+    columns = set(pd.read_feather(quant_output / "gene_quant.feather").columns)
+    assert set(GENE_COLUMNS) <= columns, f"gene_quant has no {sorted(set(GENE_COLUMNS) - columns)}"
+    assert set(categories) == set(FL_CATEGORY_LABELS)
+    histograms = set(pd.read_feather(quant_output / "fragment_lengths.feather")["category"])
+    assert histograms and histograms <= set(categories)
+    assert build_report(quant_output).exists()
 
 
 def test_build_report_self_contained(tmp_path):

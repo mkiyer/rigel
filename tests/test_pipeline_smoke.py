@@ -1,7 +1,7 @@
 """The whole quantification pipeline runs, and its output is internally consistent.
 
 ``run_pipeline`` end to end on a minimal oracle scenario: the transcript, gene and locus frames have
-the expected schema and are non-empty, mature RNA counts are positive, the fragment count agrees
+the expected schema and are non-empty, the annotated transcripts' counts are positive, the fragment count agrees
 with the scan, and TPM sums to a million. Also that the scan's read-name batch size does not change
 the answer at its boundaries, and that the scan spills into a ``spill_dir`` given as a ``str``. None of this is a precision claim — it is the gate that catches
 import and interface breakage between components that each pass their own unit tests.
@@ -157,7 +157,7 @@ class TestPipelineSmoke:
         n_annotated = sum(1 for tid in df["transcript_id"] if not tid.startswith("RIGEL_NRNA_"))
         assert n_annotated == 3, f"Expected 3 annotated transcripts, got {n_annotated}"
 
-    def test_transcript_positive_mrna(self):
+    def test_transcript_counts_positive(self):
         df = self.pr.estimator.get_counts_df(self.index)
         assert (df["count"] >= 0).all()
         assert df["count"].sum() > 0
@@ -177,7 +177,7 @@ class TestPipelineSmoke:
 
     def test_loci_df_schema(self):
         df = self.pr.estimator.get_loci_df(self.index)
-        required = {"locus_id", "mrna", "gdna"}
+        required = {"locus_id", "count_annotated", "count_gdna"}
         assert required.issubset(df.columns), f"Missing columns: {required - set(df.columns)}"
 
     def test_loci_df_nonempty(self):

@@ -106,10 +106,10 @@ def test_the_reported_categories_are_the_anchor_the_two_models_and_the_FIVE_PURE
         "global",
         "gdna",
         "rna",
-        "pool_dna_intergenic",
-        "pool_dna_intronic",
-        "pool_dna_intron_exon",
-        "pool_dna_intergenic_exon",
+        "pool_gdna_intergenic",
+        "pool_gdna_intronic",
+        "pool_gdna_intron_exon",
+        "pool_gdna_intergenic_exon",
         "pool_rna_spliced",
     }
 
@@ -125,8 +125,8 @@ def test_the_modelled_pools_are_SUMS_OF_the_reported_pure_pools():
     summary, _ = cli._fragment_length_report(_fl_models())
     n = {k: v["n_observations"] for k, v in summary.items()}
     assert n["rna"] == n["pool_rna_spliced"]
-    assert n["gdna"] == n["pool_dna_intergenic"] + n["pool_dna_intronic"]
-    assert n["gdna"] < n["gdna"] + n["pool_dna_intron_exon"] + n["pool_dna_intergenic_exon"], (
+    assert n["gdna"] == n["pool_gdna_intergenic"] + n["pool_gdna_intronic"]
+    assert n["gdna"] < n["gdna"] + n["pool_gdna_intron_exon"] + n["pool_gdna_intergenic_exon"], (
         "the on-target crossing pools are empty in this fixture, so their exclusion is untested"
     )
 
@@ -196,16 +196,20 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     def schema_warnings(run_dir):
         return [w for w in load_substrate(run_dir).warnings if "schema_version" in w]
 
-    assert summary["schema_version"] == cli.SUMMARY_SCHEMA_VERSION == 3
+    assert summary["schema_version"] == cli.SUMMARY_SCHEMA_VERSION == 4
     assert schema_warnings(out) == []
     bumped = tmp_path / "bumped"
     bumped.mkdir()
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(cli, "SUMMARY_SCHEMA_VERSION", cli.SUMMARY_SCHEMA_VERSION + 1)
         cli._write_quant_outputs(pr, result.index, bumped, args)
-        assert json.loads((bumped / "summary.json").read_text())["schema_version"] == 4
+        assert json.loads((bumped / "summary.json").read_text())["schema_version"] == 5
         assert schema_warnings(bumped) == [] and schema_warnings(out) != []
     assert summary["quantification"]["n_gated_out"] == 0  # the default alphas gate nothing
+    # the transcripts are the annotated ones; the synthetic spans are counted apart, as the nascent RNA
+    is_synthetic = result.index.t_df["is_synthetic"].to_numpy(dtype=bool)
+    assert summary["quantification"]["n_nascent"] == int(is_synthetic.sum()) > 0
+    assert summary["quantification"]["n_transcripts"] == int((~is_synthetic).sum())
 
     # fragment_length is stats-only — the histogram bloat is gone
     fl = summary["fragment_length"]
@@ -229,16 +233,13 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     assert splice["sj_blacklist_loaded"] is False
     assert splice["sj_blacklist_size"] == 0
 
-    # per-sj strand table QC: "how many sj are deep enough to
-    # measure the strand dispersion" is a first-class question about a library.
+    # per-sj strand table QC: how much junction evidence the library carries
     junc = summary["strand_model"]["sj"]
     assert {
         "n_sj",
         "n_observations",
         "depth_median",
         "depth_max",
-        "n_sj_depth_ge_100",
-        "n_sj_depth_ge_1000",
     } <= set(junc)
     # The table's total IS the 2x2's total — one observation per qualified fragment.
     assert junc["n_observations"] == summary["strand_model"]["n_training_fragments"]
@@ -266,13 +267,13 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
         "ref",
         "start",
         "end",
-        "gdna_mass",
-        "rna_mass",
+        "count_gdna",
+        "count_rna",
         "gdna_density",
-        "gdna_frac",
+        "fraction_gdna",
     ]
     assert len(track) == pr.calibration.n_regions
-    assert (track["gdna_frac"] >= 0).all() and (track["gdna_frac"] <= 1).all()
+    assert (track["fraction_gdna"] >= 0).all() and (track["fraction_gdna"] <= 1).all()
     bg = (out / "calibration_track.bedgraph").read_text().splitlines()
     assert bg[0].startswith("track type=bedGraph")
     assert len(bg) == len(track) + 1  # header + one line per region
@@ -285,7 +286,7 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
         "gdna_density_global",
         "gdna_bulk_density",
         "gdna_capture_saturation",
-        "rna_sense_frac",
+        "fraction_rna_sense",
         "n_regions",
         "n_boundaries",
         "n_sj",
@@ -299,16 +300,36 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
 
 
 def test_a_spliced_intergenic_fragment_is_rna_not_gdna():
-    """A spliced fragment is certified RNA whether or not an annotated transcript holds it, so the gDNA fraction
-    counts only the unspliced intergenic fragments, and the four pools' fractions sum to one."""
+    """A spliced fragment is certified RNA whether or not an annotated transcript holds it, so the gDNA count and
+    fraction take only the unspliced intergenic fragments, and the four pools' fractions sum to one."""
     from types import SimpleNamespace
 
     stats = SimpleNamespace(n_intergenic=100, n_intergenic_spliced=30)
-    q = cli._quantification_pools(stats, total_mrna=600.0, total_nrna=100.0, total_gdna=200.0)
-    assert (q["intergenic_total"], q["intergenic_spliced"]) == (100, 30)
-    assert q["gdna_fraction"] == round((200 + 70) / 1000, cli.SUMMARY_DECIMALS)
-    assert q["intergenic_rna_fraction"] == round(30 / 1000, cli.SUMMARY_DECIMALS)
-    fractions = ("mrna_fraction", "nrna_fraction", "gdna_fraction", "intergenic_rna_fraction")
+    q = cli._quantification_pools(
+        stats, count_annotated=600.0, count_nascent=100.0, count_gdna_em=200.0
+    )
+    assert set(q) == {
+        "count_annotated",
+        "count_nascent",
+        "count_gdna",
+        "count_gdna_em",
+        "count_intergenic_rna",
+        "fraction_annotated",
+        "fraction_nascent",
+        "fraction_gdna",
+        "fraction_gdna_em",
+        "fraction_intergenic",
+        "fraction_intergenic_rna",
+    }
+    assert (q["count_gdna"], q["count_gdna_em"], q["count_intergenic_rna"]) == (270.0, 200.0, 30)
+    assert q["fraction_gdna"] == round((200 + 70) / 1000, cli.SUMMARY_DECIMALS)
+    assert q["fraction_intergenic_rna"] == round(30 / 1000, cli.SUMMARY_DECIMALS)
+    fractions = (
+        "fraction_annotated",
+        "fraction_nascent",
+        "fraction_gdna",
+        "fraction_intergenic_rna",
+    )
     assert sum(q[k] for k in fractions) == pytest.approx(1.0)
 
 
@@ -407,19 +428,23 @@ def test_a_reused_output_directory_keeps_no_optional_file_this_run_did_not_write
 
 
 def test_the_nascent_table_writes_exactly_the_columns_the_manual_lists(tmp_path):
-    """``nrna_quant.feather`` is ``get_nrna_counts_df``: one row per nascent entity with a multi-exon child, and the
-    MANUAL's table names exactly its columns, in the file's order, so the two cannot drift apart."""
+    """``nascent_quant.feather`` is ``get_nascent_quant_df``: one row per synthetic span, and the MANUAL's table names
+    exactly its columns, in the file's order, so the two cannot drift apart."""
     sc, result = _build_scenario(tmp_path / "work")
     cfg = PipelineConfig(
         em=EMConfig(seed=SEED, assignment_mode="fractional", n_threads=1),
         scan=BamScanConfig(sj_strand_tag="auto"),
     )
     pr = run_pipeline(result.bam_path, result.index, config=cfg)
-    nascent = pr.estimator.get_nrna_counts_df(result.index)
-    assert len(nascent) > 0 and (nascent["n_mrna"] >= 1).all()
+    nascent = pr.estimator.get_nascent_quant_df(result.index)
+    t_df = result.index.t_df
+    assert sorted(nascent["nascent_id"]) == sorted(t_df.loc[t_df["is_synthetic"], "t_id"])
+    assert len(nascent) > 0 and (nascent["n_annotated"] >= 1).all()
     manual = (Path(__file__).resolve().parents[1] / "docs" / "MANUAL.md").read_text()
-    section = re.search(r"### nrna_quant\.feather / nrna_quant\.tsv\n(.*?)\n### ", manual, re.S)
-    assert section, "docs/MANUAL.md has no nrna_quant section"
+    section = re.search(
+        r"### nascent_quant\.feather / nascent_quant\.tsv\n(.*?)\n### ", manual, re.S
+    )
+    assert section, "docs/MANUAL.md has no nascent_quant section"
     rows = re.findall(r"^\| (`[^|]*`) \|", section.group(1), re.M)
     listed = [name for cell in rows for name in re.findall(r"`(\w+)`", cell)]
     assert listed == list(nascent.columns), "the MANUAL lists the columns in the file's order"

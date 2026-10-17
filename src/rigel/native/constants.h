@@ -66,16 +66,14 @@ static constexpr int32_t FRAG_CHIMERIC          = 4;
 
 // Assignment flags bitfield (written to BAM as ZF:i tag).
 // ZF is the unified per-fragment outcome bitfield.  See
-// src/rigel/annotate.py for the full schema + invariants.
+// src/rigel/annotate.py for the full schema + invariants; it composes
+// every value but the three the C++ stamp sites write, so only those
+// three values' bits are named here.
 //
 // Primitive bits
 static constexpr int32_t AF_RESOLVED_BIT         = 0x01;
-static constexpr int32_t AF_MRNA_BIT             = 0x02;
 static constexpr int32_t AF_GDNA_BIT             = 0x04;
-static constexpr int32_t AF_NRNA_BIT             = 0x08;
-static constexpr int32_t AF_SYNTHETIC_BIT        = 0x10;
 static constexpr int32_t AF_INTERGENIC_BIT       = 0x20;
-static constexpr int32_t AF_CHIMERIC_BIT         = 0x40;
 static constexpr int32_t AF_MULTIMAPPER_DROP_BIT = 0x80;
 
 // The composed values the C++ stamp sites write.

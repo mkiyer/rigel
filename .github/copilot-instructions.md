@@ -219,7 +219,7 @@ All simulation data, tool outputs, and indexes are consolidated in:
     ├── rigel/<config_name>/            # rigel output per named config
     │   ├── quant.feather               # transcript-level quantification
     │   ├── gene_quant.feather          # gene-level quantification
-    │   ├── nrna_quant.feather          # nRNA quantification
+    │   ├── nascent_quant.feather       # nascent RNA quantification
     │   ├── loci.feather                # locus-level summary
     │   ├── summary.json                # run stats (calibration, strand model, etc.)
     │   └── config.yaml                 # rigel config used

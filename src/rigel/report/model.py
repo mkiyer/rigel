@@ -9,48 +9,66 @@ Most values are emitted as raw numbers and formatted by the front-end
 and chart data. The exceptions are finished here: the headline tiles' captions
 and a few text KPIs are formatted strings, and some table cells are rounded (the
 fragment-length overflow, as a percentage; the gene table's TPM and counts; the
-per-reference gDNA mass and fraction).
+per-reference gDNA count and fraction). Every cut a tile draws, the gene table's
+cap and every rounding are ``CONSTANTS.qc``'s. The summary is read only through
+:class:`~rigel.report.substrate.SummaryReader`, so only the keys it lists.
 """
 
 from __future__ import annotations
 
-from .substrate import ReportSubstrate
+from ..config import CONSTANTS
+from .specs import fl_label
+from .substrate import ReportSubstrate, SummaryReader
 
 # Categorical colour slots (indices into the validated data-viz palette). The
 # front-end resolves these to hex per theme; here we only assign roles.
 _C = {i: f"f{i}" for i in range(1, 9)}
+
+#: The ``gene_quant`` columns the gene table shows, in its row order. A column the table lacks reads as empty
+#: cells, so ``tests/test_report.py`` holds each one to what the writer writes.
+GENE_COLUMNS = (
+    "gene_name",
+    "gene_id",
+    "gene_type",
+    "ref",
+    "strand",
+    "tpm",
+    "count",
+    "n_transcripts",
+)
 
 
 def _pct(numer: float, denom: float) -> float:
     return (numer / denom) if denom else 0.0
 
 
-def _capture(summary: dict) -> dict | None:
+def _capture(summary: SummaryReader) -> dict | None:
     """Calibration's capture answer: the bulk density of its gDNA landscape — the level, in fragments per
     bp, every capture efficiency is read against — and the landscape's saturated level as a multiple of
     that bulk (1: no level above it). ``bulk_density`` is ``None`` when no landscape was fitted; the
     answer is ``None`` when the summary carries none."""
-    cal = summary.get("calibration") or {}
-    if "gdna_bulk_density" not in cal:
+    if not summary.holds("calibration.gdna_bulk_density"):
         return None
+    cal = summary["calibration"]
     return {
         "bulk_density": cal["gdna_bulk_density"],
         "saturation": cal["gdna_capture_saturation"],
     }
 
 
-def _verdicts(summary: dict) -> list[dict]:
+def _verdicts(summary: SummaryReader) -> list[dict]:
     """Headline QC tiles: mapping, strandedness, gDNA, usable fragments, + calibration's capture
     answer when the summary carries one."""
     out: list[dict] = []
-    aln = summary.get("alignment_stats", {})
-    frag = summary.get("fragment_stats", {})
-    strand = summary.get("strand_model", {})
-    quant = summary.get("quantification", {})
+    qc = CONSTANTS.qc
+    aln = summary["alignment_stats"]
+    frag = summary["fragment_stats"]
+    strand = summary["strand_model"]
+    quant = summary["quantification"]
 
     # Mapping rate
-    total = aln.get("total_reads", 0)
-    mapped = aln.get("mapped_reads", 0)
+    total = aln["total_reads"]
+    mapped = aln["mapped_reads"]
     mrate = _pct(mapped, total)
     out.append(
         {
@@ -58,18 +76,20 @@ def _verdicts(summary: dict) -> list[dict]:
             "icon": "check",
             "v": mrate,
             "fmt": "pct",
-            "s": "good" if mrate >= 0.75 else "warning" if mrate >= 0.5 else "critical",
+            "s": "good"
+            if mrate >= qc.mapping_rate_good
+            else "warning"
+            if mrate >= qc.mapping_rate_warning
+            else "critical",
             "n": f"{mapped:,} of {total:,} reads mapped",
         }
     )
 
-    # Strandedness
-    spec = strand.get("strand_specificity", 0.5)
-    protocol = strand.get("protocol", "?")
-    if spec >= 0.75:
-        s, label = "good", "Reverse (R1−)" if not strand.get("read1_sense") else "Forward (R1+)"
-    elif spec >= 0.6:
-        s, label = "warning", "Weakly stranded"
+    # Strandedness: the strand model's own verdict, the one calibration's strand channel reads
+    spec = strand["strand_specificity"]
+    protocol = strand["protocol"]
+    if strand["strand_live"]:
+        s, label = "good", "Reverse (R1−)" if not strand["read1_sense"] else "Forward (R1+)"
     else:
         s, label = "warning", "Unstranded"
     out.append(
@@ -84,21 +104,25 @@ def _verdicts(summary: dict) -> list[dict]:
     )
 
     # gDNA contamination
-    gfrac = quant.get("gdna_fraction", 0.0)
+    gfrac = quant["fraction_gdna"]
     out.append(
         {
             "k": "gDNA contamination",
             "icon": "warn",
             "v": gfrac,
             "fmt": "pct",
-            "s": "good" if gfrac < 0.1 else "warning" if gfrac < 0.3 else "critical",
+            "s": "good"
+            if gfrac < qc.gdna_fraction_good
+            else "warning"
+            if gfrac < qc.gdna_fraction_warning
+            else "critical",
             "n": "EM-corrected; incl. unspliced intergenic",
         }
     )
 
     # Usable (genic) fragments
-    ftot = frag.get("total", 0)
-    genic = frag.get("genic", 0)
+    ftot = frag["total"]
+    genic = frag["genic"]
     grate = _pct(genic, ftot)
     out.append(
         {
@@ -106,7 +130,7 @@ def _verdicts(summary: dict) -> list[dict]:
             "icon": "check",
             "v": genic,
             "fmt": "count",
-            "s": "good" if grate >= 0.6 else "warning",
+            "s": "good" if grate >= qc.genic_fraction_good else "warning",
             "n": f"{grate * 100:.1f}% genic of {_si(ftot)}",
         }
     )
@@ -139,15 +163,15 @@ def _si(n: float) -> str:
     return f"{n:.0f}"
 
 
-def _alignment(summary: dict) -> dict:
-    a = summary.get("alignment_stats", {})
+def _alignment(summary: SummaryReader) -> dict:
+    a = summary["alignment_stats"]
     # Record-level (individual BAM alignment records).
-    total = a.get("total_reads", 0)
-    mapped = a.get("mapped_reads", 0)
+    total = a["total_reads"]
+    mapped = a["mapped_reads"]
     # Read-NAME-group level (one per read/pair) — the "read fate" denominator.
-    unique = a.get("unique_reads", 0)
-    multi = a.get("multimapping_reads", 0)
-    groups = a.get("read_groups", 0)
+    unique = a["unique_reads"]
+    multi = a["multimapping_reads"]
+    groups = a["read_groups"]
     unmapped_grp = max(0, groups - unique - multi)
 
     # Fate over read groups: every segment shares the read-group denominator.
@@ -163,7 +187,7 @@ def _alignment(summary: dict) -> dict:
         {"l": "Uniquely mapped", "v": _pct(unique, groups), "fmt": "pct"},
         {"l": "Multi-mapping", "v": _pct(multi, groups), "fmt": "pct"},
         {"l": "Alignment records", "v": total, "fmt": "count"},
-        {"l": "Duplicates", "v": _pct(a.get("duplicate_reads", 0), total), "fmt": "pct"},
+        {"l": "Duplicates", "v": _pct(a["duplicate_reads"], total), "fmt": "pct"},
     ]
     # Table keeps both unit families, each labeled so they are not conflated.
     rows = [
@@ -173,28 +197,24 @@ def _alignment(summary: dict) -> dict:
         ["  unmapped", unmapped_grp, _pct(unmapped_grp, groups)],
         ["Alignment records", total, 1.0],
         ["  mapped", mapped, _pct(mapped, total)],
-        ["  secondary", a.get("secondary_reads", 0), _pct(a.get("secondary_reads", 0), total)],
-        [
-            "  supplementary",
-            a.get("supplementary_reads", 0),
-            _pct(a.get("supplementary_reads", 0), total),
-        ],
-        ["  proper pairs", a.get("proper_pairs", 0), _pct(a.get("proper_pairs", 0), total)],
-        ["  duplicates", a.get("duplicate_reads", 0), _pct(a.get("duplicate_reads", 0), total)],
-        ["  QC-fail", a.get("qc_fail_reads", 0), _pct(a.get("qc_fail_reads", 0), total)],
+        ["  secondary", a["secondary_reads"], _pct(a["secondary_reads"], total)],
+        ["  supplementary", a["supplementary_reads"], _pct(a["supplementary_reads"], total)],
+        ["  proper pairs", a["proper_pairs"], _pct(a["proper_pairs"], total)],
+        ["  duplicates", a["duplicate_reads"], _pct(a["duplicate_reads"], total)],
+        ["  QC-fail", a["qc_fail_reads"], _pct(a["qc_fail_reads"], total)],
     ]
     return {"kpis": kpis, "fate": fate, "table": rows}
 
 
-def _fragments(summary: dict) -> dict:
-    f = summary.get("fragment_stats", {})
-    total = f.get("total", 0)
-    genic = f.get("genic", 0)
-    inter = f.get("intergenic", 0)
-    chim = f.get("chimeric", 0)
-    sp = f.get("splice", {})
+def _fragments(summary: SummaryReader) -> dict:
+    f = summary["fragment_stats"]
+    total = f["total"]
+    genic = f["genic"]
+    inter = f["intergenic"]
+    chim = f["chimeric"]
+    sp = summary["fragment_stats.splice"]
     spliced = sum(
-        sp.get(k, 0)
+        sp[k]
         for k in ("spliced_annotated", "spliced_unannotated", "spliced_implicit", "splice_artifact")
     )
 
@@ -204,16 +224,16 @@ def _fragments(summary: dict) -> dict:
         {"label": "Chimeric", "value": chim, "cls": _C[6]},
     ]
     chim_bar = [
-        {"label": "Cis, same strand", "value": f.get("chimeric_cis_same", 0), "cls": _C[2]},
-        {"label": "Trans", "value": f.get("chimeric_trans", 0), "cls": _C[5]},
-        {"label": "Cis, opposite strand", "value": f.get("chimeric_cis_diff", 0), "cls": _C[6]},
+        {"label": "Cis, same strand", "value": f["chimeric_cis_same"], "cls": _C[2]},
+        {"label": "Trans", "value": f["chimeric_trans"], "cls": _C[5]},
+        {"label": "Cis, opposite strand", "value": f["chimeric_cis_diff"], "cls": _C[6]},
     ]
     splice_bar = [
-        {"label": "Unspliced", "value": sp.get("unspliced", 0), "cls": "fmuted"},
-        {"label": "Annotated", "value": sp.get("spliced_annotated", 0), "cls": _C[1]},
-        {"label": "Implicit", "value": sp.get("spliced_implicit", 0), "cls": _C[2]},
-        {"label": "Unannotated", "value": sp.get("spliced_unannotated", 0), "cls": _C[3]},
-        {"label": "Artifact", "value": sp.get("splice_artifact", 0), "cls": _C[6]},
+        {"label": "Unspliced", "value": sp["unspliced"], "cls": "fmuted"},
+        {"label": "Annotated", "value": sp["spliced_annotated"], "cls": _C[1]},
+        {"label": "Implicit", "value": sp["spliced_implicit"], "cls": _C[2]},
+        {"label": "Unannotated", "value": sp["spliced_unannotated"], "cls": _C[3]},
+        {"label": "Artifact", "value": sp["splice_artifact"], "cls": _C[6]},
     ]
     kpis = [
         {"l": "Fragments", "v": total, "fmt": "count"},
@@ -225,133 +245,123 @@ def _fragments(summary: dict) -> dict:
     # Blacklist provenance so a 0-artifact bar can be read correctly:
     #   loaded is False → no blacklist in the index; detection is OFF
     #   loaded is True  → detection ON; `size` junctions active
-    bl_size = sp.get("sj_blacklist_size")
-    bl_loaded = sp.get("sj_blacklist_loaded")
     return {
         "kpis": kpis,
         "ctx": ctx,
         "chim": chim_bar,
         "splice": splice_bar,
-        "blacklisted": sp.get("sj_blacklisted", 0),
-        "blacklist": {"size": bl_size, "loaded": bl_loaded},
+        "blacklisted": sp["sj_blacklisted"],
+        "blacklist": {"size": sp["sj_blacklist_size"], "loaded": sp["sj_blacklist_loaded"]},
     }
 
 
-def _strand(summary: dict) -> dict:
-    s = summary.get("strand_model", {})
-    d = s.get("diagnostics", {})
-    ci = s.get("ci_95", [0.0, 1.0])
+def _strand(summary: SummaryReader) -> dict:
+    s = summary["strand_model"]
+    d = summary["strand_model.diagnostics"]
+    ci = s["ci_95"]
     eps = (ci[1] - ci[0]) / 2 if len(ci) == 2 else 0.0
+    exonic = d["exonic_all_specificity"]
     return {
-        "spec": s.get("strand_specificity", 0.5),
-        "read1_sense": bool(s.get("read1_sense", True)),
-        "protocol": s.get("protocol", "?"),
-        "exonic_all_spec": d.get("exonic_all_specificity"),
-        "contamination_gap": d.get("contamination_gap"),
+        "spec": s["strand_specificity"],
+        "read1_sense": bool(s["read1_sense"]),
+        "protocol": s["protocol"],
+        "exonic_all_spec": exonic,
+        "contamination_gap": d["contamination_gap"],
         "kpis": [
-            {"l": "P(R1 sense)", "v": s.get("p_r1_sense", 0.5), "fmt": "float3"},
-            {"l": "Specificity", "v": s.get("strand_specificity", 0.5), "fmt": "float3"},
+            {"l": "P(R1 sense)", "v": s["p_r1_sense"], "fmt": "float3"},
+            {"l": "Specificity", "v": s["strand_specificity"], "fmt": "float3"},
             {"l": "95% CI", "v": f"±{eps:.4f}", "fmt": "text"},
-            {
-                "l": "Exonic (all)",
-                "v": d.get("exonic_all_specificity", "—")
-                if d.get("exonic_all_specificity") is not None
-                else "—",
-                "fmt": "float3",
-            },
+            {"l": "Exonic (all)", "v": exonic if exonic is not None else "—", "fmt": "float3"},
         ],
     }
 
 
-def _fragment_length(summary: dict) -> dict:
-    """The summary table, one row per category in the order ``rigel quant`` wrote them."""
+def _fragment_length(summary: SummaryReader) -> dict:
+    """The summary table, one row per category in the order ``rigel quant`` wrote them: the category, its
+    statistics, and the label it shows."""
     table = []
-    for cat, d in summary.get("fragment_length", {}).items():
+    for cat, d in summary["fragment_length.*"].items():
         table.append(
             [
                 cat,
-                d.get("n_observations", 0),
-                d.get("mean", 0),
-                d.get("std", 0),
-                d.get("median", 0),
-                d.get("mode", 0),
-                round(d.get("overflow_fraction", 0.0) * 100, 2),
+                d["n_observations"],
+                d["mean"],
+                d["std"],
+                d["median"],
+                d["mode"],
+                round(d["overflow_fraction"] * 100, CONSTANTS.qc.overflow_percent_decimals),
+                fl_label(cat),
             ]
         )
     return {"table": table}
 
 
-def _quant(summary: dict) -> dict:
-    q = summary.get("quantification", {})
-    mrna = q.get("mrna_total", 0.0)
-    nrna = q.get("nrna_total", 0.0)
-    gdna_em = q.get("gdna_total", 0.0)
-    inter = q.get("intergenic_total", 0.0)
-    # a spliced intergenic fragment is RNA no annotated transcript holds; a summary without the count read none
-    inter_rna = q.get("intergenic_spliced", 0)
-    inter_rna_frac = q.get("intergenic_rna_fraction", 0.0)
+def _quant(summary: SummaryReader) -> dict:
+    q = summary["quantification"]
+    annotated = q["count_annotated"]
+    nascent = q["count_nascent"]
+    gdna_em = q["count_gdna_em"]
+    # every intergenic fragment: a spliced one is RNA no annotated transcript holds, an unspliced one gDNA
+    inter = summary["fragment_stats"]["intergenic"]
+    inter_rna = q["count_intergenic_rna"]
+    inter_rna_frac = q["fraction_intergenic_rna"]
     pools = [
-        {"label": "Mature mRNA", "value": mrna, "cls": _C[1]},
-        {"label": "Nascent RNA", "value": nrna, "cls": _C[2]},
+        {"label": "Annotated transcripts", "value": annotated, "cls": _C[1]},
+        {"label": "Nascent RNA", "value": nascent, "cls": _C[2]},
         {"label": "Intergenic RNA", "value": inter_rna, "cls": _C[4]},
         {"label": "gDNA (EM)", "value": gdna_em, "cls": _C[8]},
         {"label": "Intergenic gDNA", "value": inter - inter_rna, "cls": _C[3]},
     ]
     table = [
-        ["Mature mRNA", mrna, q.get("mrna_fraction", 0.0), "every annotated transcript's count"],
+        [
+            "Annotated transcripts",
+            annotated,
+            q["fraction_annotated"],
+            "every reference transcript, single-exon included",
+        ],
         [
             "Nascent RNA",
-            nrna,
-            q.get("nrna_fraction", 0.0),
-            "synthetic spans only; annotated single-exon spans are in the row above",
+            nascent,
+            q["fraction_nascent"],
+            "Rigel's synthetic spans, which model the unspliced RNA of multi-exon transcripts",
         ],
         [
-            "gDNA — EM genic",
+            "gDNA (EM)",
             gdna_em,
-            q.get("gdna_em_fraction", 0.0),
-            "re-attributed from ambiguous transcript overlap",
+            q["fraction_gdna_em"],
+            "genic fragments the EM assigns to gDNA",
         ],
         [
-            "RNA — intergenic",
+            "Intergenic RNA",
             inter_rna,
             inter_rna_frac,
             "spliced with no annotation overlap; RNA by its junction",
         ],
         [
-            "gDNA — intergenic",
+            "Intergenic gDNA",
             inter - inter_rna,
-            q.get("intergenic_fraction", 0.0) - inter_rna_frac,
+            q["fraction_intergenic"] - inter_rna_frac,
             "unspliced with no annotation overlap; gDNA by construction",
         ],
     ]
-    rna_share = q.get("mrna_fraction", 0.0) + q.get("nrna_fraction", 0.0) + inter_rna_frac
+    rna_share = q["fraction_annotated"] + q["fraction_nascent"] + inter_rna_frac
     kpis = [
-        {"l": "Transcripts", "v": q.get("n_transcripts", 0), "fmt": "count"},
-        {"l": "Genes", "v": q.get("n_genes", 0), "fmt": "count"},
-        {"l": "Loci", "v": q.get("n_loci", 0), "fmt": "count"},
-        {"l": "mRNA", "v": mrna, "fmt": "count"},
-        {"l": "nRNA", "v": nrna, "fmt": "count"},
+        {"l": "Transcripts", "v": q["n_transcripts"], "fmt": "count"},
+        {"l": "Genes", "v": q["n_genes"], "fmt": "count"},
+        {"l": "Loci", "v": q["n_loci"], "fmt": "count"},
+        {"l": "Annotated transcripts", "v": annotated, "fmt": "count"},
+        {"l": "Nascent RNA", "v": nascent, "fmt": "count"},
     ]
     return {"pools": pools, "table": table, "rna_share": rna_share, "kpis": kpis}
 
 
-def _genes(sub: ReportSubstrate, max_rows: int = 20000) -> dict:
+def _genes(sub: ReportSubstrate) -> dict:
+    """The gene table's rows: a gene's RNA is its annotated ``count``, since a nascent span belongs to no gene."""
+    qc = CONSTANTS.qc
     gq = sub.gene_quant
     if gq is None or gq.empty:
         return {"rows": [], "total": 0, "shown": 0, "truncated": False}
-    want = [
-        "gene_name",
-        "gene_id",
-        "gene_type",
-        "ref",
-        "strand",
-        "tpm",
-        "count",
-        "mature_count",
-        "nascent_count",
-        "n_transcripts",
-    ]
-    df = gq[[c for c in want if c in gq.columns]]
+    df = gq[[c for c in GENE_COLUMNS if c in gq.columns]]
     # Embed only expressed genes for lookup; the long tail of zero-count genes
     # stays in gene_quant.feather. Cap the embed to keep the HTML a sane size.
     if "count" in df.columns:
@@ -359,8 +369,8 @@ def _genes(sub: ReportSubstrate, max_rows: int = 20000) -> dict:
     if "tpm" in df.columns:
         df = df.sort_values("tpm", ascending=False)
     total = len(df)
-    truncated = total > max_rows
-    df = df.head(max_rows)
+    truncated = total > qc.gene_table_rows
+    df = df.head(qc.gene_table_rows)
 
     # Build the row arrays column-wise (vectorized) — far faster than iterrows.
     def col(name, cast, default):
@@ -368,30 +378,25 @@ def _genes(sub: ReportSubstrate, max_rows: int = 20000) -> dict:
             return [default] * len(df)
         return [cast(v) for v in df[name].to_numpy()]
 
-    cols = [
-        col("gene_name", str, ""),
-        col("gene_id", str, ""),
-        col("gene_type", str, ""),
-        col("ref", str, ""),
-        col("strand", str, ""),
-        col("tpm", lambda v: round(float(v), 2), 0.0),
-        col("mature_count", lambda v: round(float(v), 1), 0.0),
-        col("nascent_count", lambda v: round(float(v), 1), 0.0),
-        col("n_transcripts", int, 0),
-    ]
+    # each cell as the front end shows it, and what a missing column shows: text, or a number to its decimals
+    cell = {
+        "tpm": (lambda v: round(float(v), qc.tpm_decimals), 0.0),
+        "count": (lambda v: round(float(v), qc.count_decimals), 0.0),
+        "n_transcripts": (int, 0),
+    }
+    cols = [col(name, *cell.get(name, (str, ""))) for name in GENE_COLUMNS]
     rows = [list(r) for r in zip(*cols)]
     return {"rows": rows, "total": total, "shown": len(rows), "truncated": truncated}
 
 
-def _calibration(sub: ReportSubstrate) -> dict:
+def _calibration(summary: SummaryReader, track) -> dict:
     """Two panels' worth of data: 'enrichment' (calibration's capture answer + its KPIs) and
     'density' (the genome track + per-reference table + its KPIs)."""
-    cal = sub.summary.get("calibration") or {}
-    track = sub.calibration_track
+    cal = summary["calibration"]
     has_track = track is not None and len(track) > 0
 
     # Enrichment panel KPIs (capture).
-    capture = _capture(sub.summary)
+    capture = _capture(summary)
     enrichment_kpis = []
     if capture is not None and capture["bulk_density"] is not None:
         enrichment_kpis = [
@@ -403,14 +408,17 @@ def _calibration(sub: ReportSubstrate) -> dict:
 
     # gDNA-density panel KPIs: calibration's library scalars, then the track's.
     density_kpis = [
-        {"l": "Regions", "v": cal.get("n_regions", 0), "fmt": "count"},
-        {"l": "ρg global", "v": cal.get("gdna_density_global", 0), "fmt": "g4"},
-        {"l": "RNA sense", "v": cal.get("rna_sense_frac", 0), "fmt": "float3"},
+        {"l": "Regions", "v": cal["n_regions"], "fmt": "count"},
+        {"l": "ρg global", "v": cal["gdna_density_global"], "fmt": "g4"},
+        {"l": "RNA sense", "v": cal["fraction_rna_sense"], "fmt": "float3"},
     ]
     if has_track:
-        gf = track["gdna_frac"].to_numpy(dtype="float64")
-        density_kpis.append({"l": "Mean gDNA frac", "v": float(gf.mean()), "fmt": "pct"})
-        density_kpis.append({"l": "Regions >50% gDNA", "v": int((gf > 0.5).sum()), "fmt": "count"})
+        gf = track["fraction_gdna"].to_numpy(dtype="float64")
+        cut = CONSTANTS.qc.region_gdna_fraction
+        density_kpis.append({"l": "Mean gDNA fraction", "v": float(gf.mean()), "fmt": "pct"})
+        density_kpis.append(
+            {"l": f"Regions >{cut:.0%} gDNA", "v": int((gf > cut).sum()), "fmt": "count"}
+        )
 
     ref_table = _reference_table(track) if has_track else []
     return {
@@ -418,51 +426,52 @@ def _calibration(sub: ReportSubstrate) -> dict:
         "density_kpis": density_kpis,
         "capture": capture,
         # a summary from before calibration's capture answer (0.7.1, schema 2) has a block but no answer
-        "calibrated": bool(sub.summary.get("calibration")),
+        "calibrated": bool(summary[""]["calibration"]),
         "ref_table": ref_table,
     }
 
 
 def _reference_table(track) -> list:
-    """Per-reference gDNA summary (all references), sorted by gDNA mass desc.
+    """Per-reference gDNA summary (all references), sorted by gDNA count desc.
 
-    Rows: ``[ref, n_regions, gdna_mass, mean_density, gdna_frac]``. This is the
+    Rows: ``[ref, n_regions, count_gdna, mean_density, fraction_gdna]``. This is the
     complete, compact view of every reference — the track chart only facets the
-    top few by mass, so users never sift through hundreds of panels.
+    top few by gDNA count, so users never sift through hundreds of panels.
 
-    ``mean_density`` is the reference-wide gDNA mass per bp (Σ gDNA mass / Σ region
+    ``mean_density`` is the reference-wide gDNA count per bp (Σ gDNA count / Σ region
     length) — NOT a median. On most references the median per-region density is 0
-    (most regions carry no gDNA), which is a useless column; the mass-per-bp
+    (most regions carry no gDNA), which is a useless column; the count-per-bp
     average discriminates references and is what "density" means at this scale.
     """
+    qc = CONSTANTS.qc
     length = (track["end"] - track["start"]).clip(lower=1)
     agg = (
         track.assign(_len=length)
         .groupby("ref", observed=True)
         .agg(
             n_regions=("start", "size"),
-            gdna_mass=("gdna_mass", "sum"),
-            rna_mass=("rna_mass", "sum"),
+            count_gdna=("count_gdna", "sum"),
+            count_rna=("count_rna", "sum"),
             len_bp=("_len", "sum"),
         )
     )
-    agg["mean_density"] = (agg["gdna_mass"] / agg["len_bp"]).fillna(0.0)
-    agg["gdna_frac"] = (agg["gdna_mass"] / (agg["gdna_mass"] + agg["rna_mass"])).fillna(0.0)
-    agg = agg.sort_values("gdna_mass", ascending=False)
+    agg["mean_density"] = (agg["count_gdna"] / agg["len_bp"]).fillna(0.0)
+    agg["fraction_gdna"] = (agg["count_gdna"] / (agg["count_gdna"] + agg["count_rna"])).fillna(0.0)
+    agg = agg.sort_values("count_gdna", ascending=False)
     return [
         [
             str(ref),
             int(v["n_regions"]),
-            round(float(v["gdna_mass"]), 1),
+            round(float(v["count_gdna"]), qc.count_decimals),
             float(v["mean_density"]),
-            round(float(v["gdna_frac"]), 4),
+            round(float(v["fraction_gdna"]), qc.fraction_decimals),
         ]
         for ref, v in agg.iterrows()
     ]
 
 
-def _config(summary: dict) -> dict:
-    cfg = summary.get("configuration", {})
+def _config(summary: SummaryReader) -> dict:
+    cfg = summary[""]["configuration"] or {}
     groups: dict[str, dict] = {}
     # top-level scalars first
     top = {k: v for k, v in cfg.items() if not isinstance(v, dict)}
@@ -486,14 +495,15 @@ def _fmt_val(v) -> str:
 
 def build_view_model(sub: ReportSubstrate) -> dict:
     """Assemble the complete JSON-serializable view model for the report."""
-    s = sub.summary
+    s = SummaryReader(sub.summary)
+    top = s[""]
     return {
         "meta": {
             "sample": sub.sample_name,
-            "index": s.get("input", {}).get("index_dir"),
-            "created": s.get("timestamp"),
-            "version": s.get("rigel_version"),
-            "schema_version": s.get("schema_version"),
+            "index": s["input"]["index_dir"],
+            "created": top["timestamp"],
+            "version": top["rigel_version"],
+            "schema_version": top["schema_version"],
             "warnings": sub.warnings,
         },
         "verdicts": _verdicts(s),
@@ -502,7 +512,7 @@ def build_view_model(sub: ReportSubstrate) -> dict:
         "strand": _strand(s),
         "fl": _fragment_length(s),
         "quant": _quant(s),
-        "calibration": _calibration(sub),
+        "calibration": _calibration(s, sub.calibration_track),
         "genes": _genes(sub),
         "config": _config(s),
     }
