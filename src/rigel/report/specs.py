@@ -7,13 +7,16 @@ re-embeds on theme change). Densities are pre-computed here so the same numbers
 back the chart, its tooltip, and the summary table.
 
 The composition, pool and strand components are native HTML/SVG; every chart is built here and
-embedded by the same driver.
+embedded by the same driver. The width a chart bins at, the references it caps and the rounding of
+its positions are ``CONSTANTS.qc``'s.
 """
 
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+
+from ..config import CONSTANTS
 
 _SCHEMA = "https://vega.github.io/schema/vega-lite/v5.json"
 
@@ -40,9 +43,10 @@ def fl_label(category: str) -> str:
     return FL_CATEGORY_LABELS.get(category, category)
 
 
-def _binned_density(fl_df: pd.DataFrame, categories, binsize: int = 5) -> list[dict]:
-    """Area-normalized density per category so pools of different N overlay fairly; each row names its
-    category by its label."""
+def _binned_density(fl_df: pd.DataFrame, categories) -> list[dict]:
+    """Area-normalized density per category, in bins ``CONSTANTS.qc.fl_overlay_bin_bp`` wide, so pools of
+    different N overlay fairly; each row names its category by its label."""
+    binsize = CONSTANTS.qc.fl_overlay_bin_bp
     rows: list[dict] = []
     for cat in categories:
         sub = fl_df[fl_df["category"] == cat]
@@ -173,13 +177,14 @@ def build_fl_specs(fl_df: pd.DataFrame | None) -> dict:
     return specs
 
 
-def _bin_track(track: pd.DataFrame, bins_per_ref: int = 160) -> list[dict]:
+def _bin_track(track: pd.DataFrame) -> list[dict]:
     """Length-weighted per-bin gDNA density, binned within each reference.
 
     Binning happens here (Python) so a genome with millions of region rows still
-    emits only ~bins_per_ref points per chromosome to the chart. One ``groupby``
-    over the ref column keeps this O(regions) rather than O(refs × regions).
+    emits at most ``CONSTANTS.qc.genome_track_bins`` points per reference to the chart. One
+    ``groupby`` over the ref column keeps this O(regions) rather than O(refs × regions).
     """
+    bins_per_ref = CONSTANTS.qc.genome_track_bins
     rows: list[dict] = []
     length = (track["end"] - track["start"]).clip(lower=1).to_numpy(dtype="float64")
     dens = track["gdna_density"].to_numpy(dtype="float64")
@@ -197,26 +202,26 @@ def _bin_track(track: pd.DataFrame, bins_per_ref: int = 160) -> list[dict]:
             rows.append(
                 {
                     "ref": str(ref),
-                    "pos_mb": round((b + 0.5) * width / 1e6, 4),
+                    "pos_mb": round((b + 0.5) * width / 1e6, CONSTANTS.qc.position_mb_decimals),
                     "density": float(num[b] / den[b]),
                 }
             )
     return rows
 
 
-def genome_track_spec(track: pd.DataFrame | None, top_n: int = 24) -> dict | None:
+def genome_track_spec(track: pd.DataFrame | None) -> dict | None:
     """Per-reference gDNA-density track for the top references by gDNA count.
 
     References are ranked by their total gDNA count (data-driven, organism-agnostic — no
-    name-based filtering) and only the top ``top_n`` are faceted, so hundreds of
-    small alt/haplotype contigs don't flood the panel (the full list is in the
+    name-based filtering) and only the top ``CONSTANTS.qc.genome_track_refs`` are faceted, so
+    hundreds of small alt/haplotype contigs don't flood the panel (the full list is in the
     reference table). The y-axis is **log** and **independent per facet**, so a
     high-density outlier like chrM cannot flatten the other references' scales.
     """
     if track is None or track.empty:
         return None
     gdna = track.groupby("ref", observed=True)["count_gdna"].sum().sort_values(ascending=False)
-    top = [str(r) for r in gdna.index[:top_n]]
+    top = [str(r) for r in gdna.index[: CONSTANTS.qc.genome_track_refs]]
     sub = track[track["ref"].astype(str).isin(top)]
     # log axis needs strictly positive density
     rows = [r for r in _bin_track(sub) if r["density"] > 0]

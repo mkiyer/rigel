@@ -10,7 +10,8 @@ and chart data. The exceptions are finished here: the headline tiles' captions
 and a few text KPIs are formatted strings, and some table cells are rounded (the
 fragment-length overflow, as a percentage; the gene table's TPM and counts; the
 per-reference gDNA count and fraction). Every cut a tile draws, the gene table's
-cap and every rounding are ``CONSTANTS.qc``'s. The summary is read only through
+cap, the genome track's reference cap its caption states and every rounding are
+``CONSTANTS.qc``'s. The summary is read only through
 :class:`~rigel.report.substrate.SummaryReader`, so only the keys it lists.
 """
 
@@ -428,6 +429,8 @@ def _calibration(summary: SummaryReader, track) -> dict:
         # a summary from before calibration's capture answer (0.7.1, schema 2) has a block but no answer
         "calibrated": bool(summary[""]["calibration"]),
         "ref_table": ref_table,
+        # the genome track's reference cap, which its caption states
+        "genome_track_refs": CONSTANTS.qc.genome_track_refs,
     }
 
 

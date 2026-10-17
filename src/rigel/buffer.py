@@ -29,7 +29,7 @@ from typing import Iterator
 
 import numpy as np
 
-from .config import BamScanConfig
+from .config import CONSTANTS, BamScanConfig
 
 # The fragment classes ``fragment_classes`` assigns: the codes the native scorer routes on, read from
 # it rather than restated. Other modules import them from here.
@@ -291,7 +291,7 @@ class _SpillWriter:
 
     _STOP = object()
 
-    def __init__(self, spill_dir: Path | None, capacity: int = 2):
+    def __init__(self, spill_dir: Path | None, capacity: int):
         if spill_dir is not None:
             spill_dir.mkdir(parents=True, exist_ok=True)
         self.temp_dir = Path(tempfile.mkdtemp(dir=spill_dir, prefix="rigel_buf_"))
@@ -463,7 +463,9 @@ class FragmentBuffer:
 
     def _ensure_spill_writer(self) -> _SpillWriter:
         if self._spill_writer is None:
-            self._spill_writer = _SpillWriter(self._spill_dir, capacity=2)
+            self._spill_writer = _SpillWriter(
+                self._spill_dir, capacity=CONSTANTS.resources.spill_queue_chunks
+            )
             # Stops the writer and removes its directory if cleanup() is never called.
             self._spill_finalizer = weakref.finalize(self, self._spill_writer.stop)
         return self._spill_writer

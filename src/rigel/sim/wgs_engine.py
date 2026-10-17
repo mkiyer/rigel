@@ -44,10 +44,12 @@ try:
 except ImportError:
     pgzip = None  # type: ignore[assignment]
 
+from rigel import __version__ as rigel_version
 from rigel.config import CONSTANTS
 from rigel.transcript import Transcript
 from rigel.types import Strand
 from rigel.sim.bam import (
+    BASE_QUALITY,
     BASE_R1_FLAG,
     BASE_R2_FLAG,
     FLAG_MATE_REVERSE,
@@ -125,11 +127,13 @@ def _bam_seq_from_fastq_bytes(seq: np.ndarray, is_reverse: bool) -> str:
     return seq.tobytes().decode("ascii")
 
 
-def _open_gzip_write(path: Path, threads: int = 4):
-    """Open a gzip file for text writing, using pgzip if available."""
+def _open_gzip_write(path: Path, threads: int):
+    """Open a gzip file for text writing at the simulator's gzip level: with ``threads`` pgzip
+    compressors when pgzip is installed, the standard library's single-threaded gzip otherwise."""
+    level = CONSTANTS.resources.fastq_gzip_level
     if pgzip is not None:
-        return pgzip.open(path, "wt", thread=threads, compresslevel=3)
-    return gzip.open(path, "wt", compresslevel=3)
+        return pgzip.open(path, "wt", thread=threads, compresslevel=level)
+    return gzip.open(path, "wt", compresslevel=level)
 
 
 class _FastqBuffer:
@@ -371,7 +375,7 @@ class WholeGenomeSimulator:
                     {
                         "ID": "rigel_sim",
                         "PN": "rigel_sim",
-                        "VN": "1.0",
+                        "VN": rigel_version,
                         "CL": "simulated",
                     }
                 ],
@@ -404,7 +408,7 @@ class WholeGenomeSimulator:
         """Return cached quality string of the given length."""
         q = self._quals_cache.get(read_len)
         if q is None:
-            q = "I" * read_len
+            q = BASE_QUALITY * read_len
             self._quals_cache[read_len] = q
         return q
 
@@ -1098,9 +1102,10 @@ class WholeGenomeSimulator:
         oracle_bam: bool,
     ) -> None:
         bam_fh: pysam.AlignmentFile | None = None
+        threads = CONSTANTS.resources.fastq_gzip_threads
         with (
-            _open_gzip_write(r1_path) as r1_fh,
-            _open_gzip_write(r2_path) as r2_fh,
+            _open_gzip_write(r1_path, threads) as r1_fh,
+            _open_gzip_write(r2_path, threads) as r2_fh,
         ):
             r1_buf = _FastqBuffer(r1_fh)
             r2_buf = _FastqBuffer(r2_fh)
@@ -1247,6 +1252,7 @@ class WholeGenomeSimulator:
         bam_path = shard_path / f"{prefix}.shard{shard_id:03d}.bam" if oracle_bam else None
 
         bam_fh: pysam.AlignmentFile | None = None
+        # one compressor thread per file: the shards are the parallelism, each a process of its own
         with (
             _open_gzip_write(r1_path, threads=1) as r1_fh,
             _open_gzip_write(r2_path, threads=1) as r2_fh,

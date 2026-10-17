@@ -416,9 +416,11 @@
 
   /* ---------- reference table (all references, by gDNA count) ---------- */
   function refTable() {
-    const rt = (M.calibration || {}).ref_table || [];  // [ref, n_regions, count_gdna, gdna/bp, fraction_gdna]
+    const cal = M.calibration || {};
+    const rt = cal.ref_table || [];  // [ref, n_regions, count_gdna, gdna/bp, fraction_gdna]
     const cap = $("genome-cap");
-    if (cap) cap.textContent = `gDNA density across the genome — top ${Math.min(24, rt.length)} of ${grp(rt.length)} references by gDNA count`;
+    // the genome track's reference cap is the view model's, never restated here
+    if (cap) cap.textContent = `gDNA density across the genome — top ${Math.min(cal.genome_track_refs, rt.length)} of ${grp(rt.length)} references by gDNA count`;
     dataTable({
       table: "ref-table", search: "rsearch", count: "rcount", pager: "ref-pager",
       noun: "references", rows: rt, sort: 2, dir: -1,

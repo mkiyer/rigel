@@ -136,7 +136,7 @@ def _read(prior: _TwoGroups, k: np.ndarray, S: np.ndarray) -> np.ndarray:
     rate = np.exp(x)
     n = k.shape[0]
     out = np.ones(n)
-    rows = _block_rows(x.size, 16)
+    rows = _block_rows(x.size, CONSTANTS.resources.capture_tile_cell_bytes)
     for r0 in range(0, n, rows):
         sl = slice(r0, min(r0 + rows, n))
         lam = rate[None, :] * S[sl, None]

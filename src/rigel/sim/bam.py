@@ -7,8 +7,9 @@ callers always pass strand-oriented template coordinates.
 
 The BAM group turns blocks into records: :func:`blocks_to_cigar` writes gaps between blocks as
 ``N`` operations, so a fragment spanning a junction reads as spliced, and
-:func:`make_aligned_segment` fills in the simulator's standard defaults. The flag constants and
-the two base flags for R1 and R2 are here so the writers cannot disagree about them.
+:func:`make_aligned_segment` fills in the simulator's standard defaults. The flag constants, the
+two base flags for R1 and R2 and the base quality are here so the writers cannot disagree about
+them.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ __all__ = [
     "FLAG_READ2",
     "BASE_R1_FLAG",
     "BASE_R2_FLAG",
+    "BASE_QUALITY",
     "blocks_to_cigar",
     "make_aligned_segment",
     "transcript_to_genomic_blocks",
@@ -42,6 +44,10 @@ FLAG_READ2 = 0x80
 
 BASE_R1_FLAG = FLAG_PAIRED | FLAG_PROPER_PAIR | FLAG_READ1
 BASE_R2_FLAG = FLAG_PAIRED | FLAG_PROPER_PAIR | FLAG_READ2
+
+#: The quality every simulated base carries, in the FASTQ and in the oracle BAM alike: Phred+33 ``I``,
+#: Q40.
+BASE_QUALITY = "I"
 
 
 def transcript_to_genomic_blocks(
@@ -115,7 +121,7 @@ def make_aligned_segment(
     segment.reference_start = reference_start
     segment.cigar = cigar
     segment.mapping_quality = mapping_quality
-    segment.query_qualities = pysam.qualitystring_to_array("I" * len(query_sequence))
+    segment.query_qualities = pysam.qualitystring_to_array(BASE_QUALITY * len(query_sequence))
     segment.next_reference_id = mate_reference_id
     segment.next_reference_start = mate_reference_start
     segment.template_length = template_length

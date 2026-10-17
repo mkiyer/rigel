@@ -5,12 +5,18 @@ CIGAR those blocks imply, and the take-from-left/right helpers that trim a fragm
 reads. Then the whole-genome simulator's oracle BAM, whose read names, mate orientation and strand
 flags are what every truth-scoring instrument reads a fragment's origin from — an inverted pair there
 is a truth source that disagrees with itself, and a name the engine writes other than as
-:mod:`rigel.sim.read_name` defines it is one the parser misreads.
+:mod:`rigel.sim.read_name` defines it is one the parser misreads. Its header names the Rigel that
+wrote it, and the FASTQ and the BAM give every base the one simulated quality.
 """
+
+import gzip
+from pathlib import Path
 
 import pysam
 
+import rigel
 from rigel.sim.bam import (
+    BASE_QUALITY,
     blocks_to_cigar,
     transcript_to_genomic_blocks,
 )
@@ -276,3 +282,43 @@ class TestWholeGenomeOracleBamOrientation:
                 assert read.query_sequence == _reference_sequence_for_record(read, fasta)
 
         assert seen_categories == {"mrna", "nrna", "gdna"}
+
+
+class TestWholeGenomeOracleBamHeader:
+    """What the oracle BAM says about itself, and the quality both writers give a base."""
+
+    def test_the_header_names_the_rigel_version_and_every_base_has_the_one_quality(self, tmp_path):
+        """The @PG version is the installed Rigel's, not a number of the simulator's own; the FASTQ writer and
+        the BAM writer read ``BASE_QUALITY`` from one definition, so they cannot disagree."""
+        genome = MutableGenome(length=2000, seed=3, name="ref")
+        fasta_path = genome.write_fasta(tmp_path)
+        sim = WholeGenomeSimulator(
+            fasta_path,
+            [_make_pos_transcript([(200, 500), (700, 1000)])],
+            SimulationParams(
+                sim_seed=5,
+                frag_mean=150,
+                frag_std=1,
+                frag_min=150,
+                frag_max=150,
+                read_length=50,
+                error_rate=0.0,
+            ),
+            GDNASimConfig(frag_mean=150, frag_std=1, frag_min=150, frag_max=150),
+            genomic_refs=[genome.name],
+        )
+        try:
+            r1_path, r2_path, bam_path = sim.simulate_and_write(
+                tmp_path / "out", n_rna=20, n_gdna=10, oracle_bam=True, n_workers=1
+            )
+        finally:
+            sim.close()
+
+        with pysam.AlignmentFile(str(bam_path), "rb") as bam:
+            (pg,) = bam.header.to_dict()["PG"]
+            bam_qualities = {q for read in bam.fetch(until_eof=True) for q in read.query_qualities}
+        assert pg["VN"] == rigel.__version__
+        assert bam_qualities == set(pysam.qualitystring_to_array(BASE_QUALITY))
+        for path in (r1_path, r2_path):
+            lines = gzip.decompress(Path(path).read_bytes()).decode().splitlines()
+            assert lines and {c for quality in lines[3::4] for c in quality} == {BASE_QUALITY}

@@ -759,7 +759,8 @@ class QcConstants:
 
     # --- The QC report's display (``rigel report``). Each is a display choice the owner signed off on 2026-10-17,
     # with no other reason recorded. They set how a headline tile is coloured, how much of a table the page
-    # embeds and how far a cell is rounded; none reaches a number Rigel computes ---
+    # embeds, how far a cell is rounded and how a chart bins and caps what it draws; none reaches a number Rigel
+    # computes ---
 
     #: The mapping tile is good at this share of the BAM's records mapped or more, ...
     mapping_rate_good: float = 0.75
@@ -796,6 +797,19 @@ class QcConstants:
     #: Decimals a fragment-length category's overflow is rounded to, as a percentage.
     overflow_percent_decimals: int = 2
 
+    #: The fragment-length overlay bins lengths this many bp wide before it normalises each pool's density.
+    fl_overlay_bin_bp: int = 5
+
+    #: The genome track facets at most this many references, those holding the most gDNA first, and its caption
+    #: states the cap; the reference table lists every reference.
+    genome_track_refs: int = 24
+
+    #: The genome track draws each reference as this many equal-width bins of its span.
+    genome_track_bins: int = 160
+
+    #: Decimals a genome-track bin's position, in Mb, is rounded to.
+    position_mb_decimals: int = 4
+
     def __post_init__(self) -> None:
         _check_ranges(
             self,
@@ -813,6 +827,10 @@ class QcConstants:
             count_decimals=self.count_decimals >= 0,
             fraction_decimals=self.fraction_decimals >= 0,
             overflow_percent_decimals=self.overflow_percent_decimals >= 0,
+            fl_overlay_bin_bp=self.fl_overlay_bin_bp >= 1,
+            genome_track_refs=self.genome_track_refs >= 1,
+            genome_track_bins=self.genome_track_bins >= 1,
+            position_mb_decimals=self.position_mb_decimals >= 0,
         )
 
 
@@ -840,19 +858,35 @@ class SimulatorConstants:
 
 @dataclass(frozen=True)
 class ResourceConstants:
-    """Memory, I/O and logging budgets: each sets speed, memory or log volume. ``solve_block_bytes`` alone can
-    also reach the last bits of the answer (its comment says how)."""
+    """Memory, I/O and logging budgets: each sets speed, memory, file size or log volume. ``solve_block_bytes``
+    and ``capture_tile_cell_bytes`` can also reach the last bits of the answer, through a tile's height (their
+    comments say how)."""
 
     #: Scan workers one BGZF decompression thread keeps fed, measured on the deep library
     #: (``BamScanConfig.resolved_scan_threads`` carries the table): the budget is split by this ratio, so a
     #: 4-thread run spends none on decompression and a 16-thread run spends two.
     scan_workers_per_bgzf_thread: int = 8
 
+    #: Chunks the scan buffer's spill writer holds queued at once. Each stays in memory until it is written, so
+    #: the buffer's memory can exceed ``BamScanConfig.buffer_size_bytes`` by up to this many chunks, and the scan
+    #: waits when it would queue one more. A resource choice the owner signed off on 2026-10-17, with no other
+    #: reason recorded.
+    spill_queue_chunks: int = 2
+
     #: Cache-tiling target for the row-tiled fits (the landscape's kernels, the capture efficiency), as a
     #: working-set size; ``simplex_logodds._block_rows`` turns it into rows. ⚠ Not arithmetic-free: the
     #: landscape adds each tile's partial sums into its per-bin totals, so the tile height orders those float
     #: additions and can move their last bits; no gate holds the tiling to the bit.
     solve_block_bytes: int = 1 << 20
+
+    #: The bytes per grid cell the capture efficiency's row tile is sized for (``_block_rows``'s itemsize): two
+    #: float64 arrays' worth, while a tile holds four at once (the expectation, its log-likelihood, the
+    #: alternative's log weight and its weight) and a temporary fifth at its peak, so a tile peaks at about two
+    #: and a half times ``solve_block_bytes``. A resource choice the owner signed off on 2026-10-17, with no other
+    #: reason recorded. ⚠ It sets the tile height, and the tile's matrix product need not sum in the same order at
+    #: another height, so a change can move last bits: ``tests/calibration/test_capture_efficiency.py`` holds tile
+    #: heights to 1e-13, not to the bit.
+    capture_tile_cell_bytes: int = 16
 
     #: Read size when the index digests its input files.
     digest_chunk_bytes: int = 1 << 20
@@ -868,6 +902,15 @@ class ResourceConstants:
 
     #: The simulator's FASTQ writer buffers this many records before a write.
     fastq_buffer_records: int = 100_000
+
+    #: The simulator's FASTQ writer compresses with this many pgzip threads when pgzip is installed; a sharded
+    #: run writes each shard with one, every shard being a process of its own.
+    fastq_gzip_threads: int = 4
+
+    #: The gzip level the simulator writes its FASTQ at. It and the threads above set the speed and the
+    #: compressed bytes, never a read: resource choices the owner signed off on 2026-10-17, with no other reason
+    #: recorded.
+    fastq_gzip_level: int = 3
 
     #: Chunk size when the simulator concatenates gzip streams.
     file_copy_bytes: int = 4 * 1024 * 1024

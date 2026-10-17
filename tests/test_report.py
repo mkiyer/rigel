@@ -35,6 +35,7 @@ from rigel import cli
 from rigel.config import CONSTANTS, BamScanConfig, EMConfig, PipelineConfig
 from rigel.pipeline import run_pipeline
 from rigel.report import model as report_model
+from rigel.report import specs as report_specs
 from rigel.report.build import build_report
 from rigel.report.html import _SECTIONS, _asset
 from rigel.report.model import GENE_COLUMNS, _reference_table, build_view_model
@@ -273,7 +274,7 @@ def test_fl_specs_present(tmp_path):
     assert "overlay" in specs and "small_multiples" in specs
 
 
-def test_genome_track_spec_bins_per_ref():
+def test_genome_track_spec_bins_per_ref(monkeypatch):
     track = pd.DataFrame(
         {
             "ref": pd.Categorical(["chr1"] * 4 + ["chr2"] * 2),
@@ -293,8 +294,10 @@ def test_genome_track_spec_bins_per_ref():
     assert spec["spec"]["encoding"]["y"]["scale"]["type"] == "log"
     assert spec["resolve"]["scale"]["y"] == "independent"
     # top-N ranks by gDNA count; chr2 (120) outranks chr1 (12)
-    top1 = genome_track_spec(track, top_n=1)
+    _charts_with(monkeypatch, genome_track_refs=1)
+    top1 = genome_track_spec(track)
     assert {row["ref"] for row in top1["data"]["values"]} == {"chr2"}
+    monkeypatch.undo()
     # reference table: every reference, sorted by gDNA count desc
     rt = _reference_table(track)
     assert [r[0] for r in rt] == ["chr2", "chr1"]
@@ -339,6 +342,15 @@ def _view(d: Path, monkeypatch, **qc) -> dict:
         constants = constants.replaced(f"qc.{name}", value)
     monkeypatch.setattr(report_model, "CONSTANTS", constants)
     return build_view_model(load_substrate(d))
+
+
+def _charts_with(monkeypatch, **qc) -> None:
+    """Have the chart builders read these ``CONSTANTS.qc`` fields changed, the way an experiment varies a
+    constant."""
+    constants = CONSTANTS
+    for name, value in qc.items():
+        constants = constants.replaced(f"qc.{name}", value)
+    monkeypatch.setattr(report_specs, "CONSTANTS", constants)
 
 
 def _js_function(name: str) -> str:
@@ -708,6 +720,67 @@ def test_every_cell_the_report_rounds_takes_its_decimals_from_qc(tmp_path, monke
         tpm_decimals=0, count_decimals=0, fraction_decimals=1, overflow_percent_decimals=0
     )
     assert moved == (42000.0, 4200.0, 12.0, 0.6, 1.0)
+
+
+def test_the_charts_bin_cap_and_round_where_the_qc_constants_say(monkeypatch):
+    """The fragment-length overlay's bin width, the genome track's bins per reference, its reference cap and the
+    rounding of its positions are ``CONSTANTS.qc``'s, so moving one moves the chart. chr1 spans 10 Mb in a
+    thousand regions and holds the most gDNA, chr2 the next most."""
+    fl = pd.DataFrame(
+        {"category": ["rna"] * 20, "length": np.arange(100, 120), "count": np.ones(20)}
+    )
+    n = {"chr1": 1000, "chr2": 10, "chr3": 10}
+    starts = np.concatenate([np.arange(k) * 10_000 for k in n.values()])
+    track = pd.DataFrame(
+        {
+            "ref": pd.Categorical([ref for ref, k in n.items() for _ in range(k)]),
+            "start": starts,
+            "end": starts + 10_000,
+            "count_gdna": np.repeat([1.0, 5.0, 1.0], list(n.values())),
+            "count_rna": np.ones(len(starts)),
+            "gdna_density": np.full(len(starts), 1e-4),
+            "fraction_gdna": np.full(len(starts), 0.5),
+        }
+    )
+
+    def charts():
+        overlay = sorted({r["length"] for r in build_fl_specs(fl)["overlay"]["data"]["values"]})
+        rows = genome_track_spec(track)["data"]["values"]
+        chr1 = [r["pos_mb"] for r in rows if r["ref"] == "chr1"]
+        return overlay, {r["ref"] for r in rows}, chr1
+
+    overlay, refs, chr1 = charts()
+    assert overlay == [100, 105, 110, 115]
+    assert refs == {"chr1", "chr2", "chr3"}
+    assert chr1 == [round((b + 0.5) * 10 / 160, 4) for b in range(160)]
+    _charts_with(
+        monkeypatch,
+        fl_overlay_bin_bp=10,
+        genome_track_refs=2,
+        genome_track_bins=7,
+        position_mb_decimals=1,
+    )
+    overlay, refs, chr1 = charts()
+    assert overlay == [100, 110]
+    assert refs == {"chr1", "chr2"}
+    assert chr1 == [0.7, 2.1, 3.6, 5.0, 6.4, 7.9, 9.3]
+
+
+def test_the_genome_caption_states_the_cap_the_view_model_passes(tmp_path, monkeypatch):
+    """The caption over the genome track states its reference cap. The front end reads it off the view model,
+    which writes ``CONSTANTS.qc``'s, so the caption and the track cannot disagree and the number is written down
+    once: the caption's text holds no number of its own."""
+    d = _with_calibration(_write_substrate(tmp_path / "run"))
+    calibration = build_view_model(load_substrate(d))["calibration"]
+    assert calibration["genome_track_refs"] == CONSTANTS.qc.genome_track_refs
+    assert _view(d, monkeypatch, genome_track_refs=3)["calibration"]["genome_track_refs"] == 3
+    js = _js_function("refTable")
+    assert "const cal = M.calibration" in js
+    read = set(re.findall(r"\bcal\.(\w+)", js))
+    assert "genome_track_refs" in read and read <= set(calibration), sorted(read - set(calibration))
+    (caption,) = re.findall(r"cap\.textContent = `(.*?)`;", js)
+    assert "cal.genome_track_refs" in caption
+    assert not re.search(r"\d", caption), f"the caption restates a number: {caption}"
 
 
 def test_the_summary_reader_hands_out_only_the_keys_it_lists():
