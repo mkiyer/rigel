@@ -134,7 +134,7 @@ rigel index --fasta genome.fa --gtf annotation.gtf --alignable-zarr map.zarr -o 
 | `--alignable-zarr PATH` | — | Alignable Zarr store built for the same genome + aligner. Provides the splice-junction artifact blacklist (applied at BAM-scan time). Required unless `--no-mappability` is set. Read before anything is written, so a store that cannot be read, or whose blacklist names none of the FASTA's references, refuses the build and leaves an existing index in place. |
 | `--no-mappability` | off | Explicitly opt out of the alignable store and its splice blacklist (synthetic genomes, stranded-only benchmarks). Mutually exclusive with `--alignable-zarr`. |
 | `--splice-blacklist-min-count N` | `2` | (Advanced) Minimum unique-fragment support per `(chrom, intron, read_length)` for a sj to enter the blacklist. Lower admits more singletons; higher keeps only the most reproducible artifacts. Ignored under `--no-mappability`. |
-| `--nrna-tolerance N` | `20` | Max distance (bp) for clustering multi-exon transcripts' start and end sites into the shared synthetic spans that model their nascent RNA |
+| `--nascent-tolerance N` | `20` | Max distance (bp) for clustering multi-exon transcripts' start and end sites into the shared synthetic spans that model their nascent RNA |
 | `--collapse-duplicate-transcripts` | off | Collapse transcripts sharing identical exon coordinates (keeps the lexicographically-smallest ID; `transcript_aliases` maps each collapsed ID to the one kept). Default: fail with a report. Useful for GENCODE, which has a few byte-identical annotations. |
 | `--gtf-parse-mode {strict,warn-skip}` | `strict` | `strict` fails on malformed GTF records; `warn-skip` logs warnings and skips them. Malformed: a line that cannot be parsed, a feature that ends before it starts, an exon without a `transcript_id`, an exon off its transcript's reference, strand or gene, an exon overlapping another of its transcript, and a transcript on a reference the FASTA lacks or past its end. Exons with no base between them are one exon. |
 | `--feather-compression {lz4,zstd,uncompressed}` | `lz4` | Feather compression for index files |
@@ -146,7 +146,7 @@ the alignable count behind it), `transcript_aliases` (`dropped_t_id → kept_t_i
 transcript `--collapse-duplicate-transcripts` folded into an identical one; empty otherwise),
 `manifest.json`, and the two calibration partitions — `regions.feather` (the genome partition into
 intergenic / intron / exon pieces) and `edges.feather` (its TSV mirror is `boundaries.tsv`: the
-contiguous and splice-junction boundaries between those pieces). The on-disk format is version 9;
+contiguous and splice-junction boundaries between those pieces). The on-disk format is version 10;
 `rigel quant` refuses an index of any other version, so an index built by an earlier rigel is
 rebuilt with `rigel index`.
 
@@ -214,7 +214,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 | `--overhang-alpha A` | `0.1` | Per-base overhang penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
 | `--mismatch-alpha A` | `0.1` | Per-mismatch (`NM` tag) penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
 | `--pruning-min-posterior P` | `1e-4` | Minimum posterior for candidate pruning, in [0, 1). Lower keeps more candidates; `0` disables pruning. |
-| `--splicing-anchor-tolerance K` | `3` | Splicing-anchor tolerance (bp) at annotated introns. An annotated intron in a fragment's unsequenced gap may overlap up to K aligned bases at either end and still count as lying in the gap, and a transcript is contradicted only by an intron that overlaps an aligned block by more than K bases. It shapes the gap hypotheses calibration arbitrates, so it changes calibration's tally. It is not the splice blacklist's anchor test, which it never changes. |
+| `--intron-overhang-tolerance K` | `3` | Intron-overhang tolerance (bp) at annotated introns: how many bases an alignment may run into an intron, and an intron overhang a mate gap, and still be read as spliced there. An annotated intron in a fragment's unsequenced gap may overlap up to K aligned bases at either end and still count as lying in the gap, and a transcript is contradicted only by an intron that overlaps an aligned block by more than K bases. It shapes the gap hypotheses calibration arbitrates, so it changes calibration's tally. It is not the splice blacklist's anchor test, which it never changes. |
 | `--emit-locus-stats` / `--no-emit-locus-stats` | off | Write per-locus EM convergence profiling (iteration counts, timing, equivalence-class stats) to `locus_stats.feather` |
 
 ### rigel sim
@@ -383,7 +383,8 @@ A `config.yaml` is always written, recording all resolved parameters and I/O
 paths; rerun the exact analysis with `rigel quant --config results/config.yaml`
 on the rigel version that wrote it (its header names the version). Another
 version refuses a key it does not have, naming the version that wrote the file:
-every 0.7.1 `config.yaml` carries four keys removed in 0.8.0.
+every 0.7.1 `config.yaml` carries four keys removed in 0.8.0 and one renamed
+(`splicing_anchor_tolerance`, now `intron_overhang_tolerance`).
 
 **How the outputs name RNA.** Every table, `summary.json` key and report label puts RNA in one of two
 categories. **Annotated** RNA is RNA on a transcript of the reference annotation, single-exon transcripts
@@ -447,7 +448,7 @@ so they are reported per span in `nascent_quant` and never attributed to a gene 
 ### nascent_quant.feather / nascent_quant.tsv
 
 Nascent RNA, one row per synthetic span. Rigel clusters the start and end sites of the multi-exon
-transcripts within `--nrna-tolerance` and adds one span over each merged extent, which holds the unspliced
+transcripts within `--nascent-tolerance` and adds one span over each merged extent, which holds the unspliced
 RNA, introns included, of the transcripts it models. Where an annotated single-exon transcript already
 covers the extent, Rigel adds no span: that transcript models it, and its RNA is annotated, a row of
 `quant.feather`.
@@ -860,7 +861,7 @@ family of overlapping spans (see Overlapping spans under `nascent_quant`).
 
 **Why is `count_nascent` shared?**
 One synthetic span models every multi-exon transcript whose start and end sites cluster within
-`--nrna-tolerance`. `nascent_quant` holds its count once; `quant.feather`'s `count_nascent` repeats it on
+`--nascent-tolerance`. `nascent_quant` holds its count once; `quant.feather`'s `count_nascent` repeats it on
 every transcript the span models, so never sum it over isoforms. Counts are fractional only under
 `--assignment-mode fractional`.
 

@@ -815,7 +815,7 @@ def drain(
         "dropped_empty": 0,
         "dropped_strand_undefined": 0,
     }
-    chose_genomic = 0
+    chose_no_implied_intron = 0
     offered_multimapper = 0
     record_runs = deferred.record_hypothesis_offsets
 
@@ -828,7 +828,7 @@ def drain(
         p = deferred.placement_of_hypothesis(h)
         offered_multimapper += int(len(deferred.placements_of(i)) > 1)
         introns = [tuple(pair) for pair in deferred.hypothesis_introns_of(h).tolist()]
-        chose_genomic += not introns
+        chose_no_implied_intron += not introns
         outcome = accumulators[int(deferred.ref[p])].deposit(
             start=int(deferred.start[p]),
             end=int(deferred.end[p]),
@@ -851,8 +851,8 @@ def drain(
             offered=n,
             offered_multimapper=offered_multimapper,
             **counts,
-            chose_genomic=chose_genomic,
-            chose_spliced=n - chose_genomic,
+            chose_no_implied_intron=chose_no_implied_intron,
+            chose_implied_intron=n - chose_no_implied_intron,
             census_before=payload.gap_resolution,
         ),
     )

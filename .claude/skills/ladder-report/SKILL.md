@@ -70,7 +70,7 @@ watched to fail under its own perturbation — if you change the rendering, keep
 |---|---|
 | gDNA scored EM-only | `gdna_est` **excludes** intergenic fragments; the truth counts them. The comparable estimate is `gdna_est + n_intergenic`, and off capture the intergenic half is the larger one |
 | a percent error at a truth of zero | The `g00` rung has no gDNA at all. Print `n/a`; the raw count is the whole answer (`TRAPS: a-ratio-cannot-carry-zero`) |
-| the two RNA pools folded together | The split is `is_synthetic`, **never** `is_single_exon` (the index's `is_nrna`). A single-exon transcript is **annotated** RNA (`TRAPS: nrna-does-not-mean-synthetic`) |
+| the two RNA pools folded together | The split is `is_synthetic`, **never** `is_single_exon`. A single-exon transcript is **annotated** RNA (`TRAPS: nrna-does-not-mean-synthetic`) |
 | a false-negative column | `fn_mass` needs an estimate of *exactly* zero, which a fractional posterior never is — it reads 0 on all 16 conditions and looks like a perfect score for something unmeasured (`TRAPS: could-the-arm-have-fired`). Report `count_under` |
 | the truth table's row count as a transcript count | The table carries a row per synthetic entity too (6,919 of 15,669 on the current index), zero on **both** sides. Only 2,466 of 9,385 gene rows are real genes. `expressed` and `detected` are the scored sets |
 | the deferred stratum unmarked | Unstranded × capture-ON carries most of the error; unmarked, a reader takes a pooled total for the tool's accuracy (`TRAPS: never-pool-the-strata`) |

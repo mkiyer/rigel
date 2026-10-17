@@ -864,8 +864,8 @@ def test_the_cache_REFUSES_a_drained_payload(scanned, tmp_path):
             dropped_too_long=0,
             dropped_empty=0,
             dropped_strand_undefined=0,
-            chose_genomic=0,
-            chose_spliced=0,
+            chose_no_implied_intron=0,
+            chose_implied_intron=0,
             census_before=GapCensus.zeros(),
         ),
     )

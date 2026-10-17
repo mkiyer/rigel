@@ -38,6 +38,7 @@ from rigel.calibration.splice_graph import (
     validate_graph,
 )
 from rigel.calibration.signature import BIT_EXON_NEG, BIT_EXON_POS, BIT_INTRON_POS
+from rigel.scan_cache import REACH_COLUMNS
 from rigel.transcript import Interval, Transcript
 from rigel.types import Strand
 
@@ -268,7 +269,7 @@ def test_G18_coincident_opposite_strand_sj():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
-# The REACH columns — the per-strand exonic and genomic distances each boundary carries.
+# The REACH columns — the per-strand exonic distances each sj carries; a contiguous row holds 0.
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 
@@ -330,67 +331,30 @@ def test_reach_is_per_strand_and_does_not_mix():
     assert _reach(e, src, dst, EDGE_KIND_SJ, Strand.NEG) == (0, 0, 200, 1000)
 
 
-def test_reach_on_a_contiguous_boundary_inside_an_exon():
-    """Reaches live on contiguous boundaries too, which is where the taper near a TES bites."""
-    n, e = _graph([_tx([(400, 1000)], t_id="a"), _tx([(700, 1000)], t_id="b")])
-    ns = _regions(n)
-    i = ns.index((400, 700))
-    lo, hi, _, _ = _reach(e, i, i + 1, EDGE_KIND_CONTIGUOUS)
-    assert (lo, hi) == (300, 300)  # transcript "a": 300 exonic bases either side of position 700
+def test_a_CONTIGUOUS_boundary_carries_no_reach(sample_graph):
+    """Every contiguous row holds 0 in all four reach columns: the one reader of a reach,
+    `build_sj_geometry_arrays`, takes the sj rows, so the builder computes none for a contiguous boundary.
 
-
-def test_contiguous_reach_is_NONZERO_INSIDE_AN_INTRON():
-    """The reach on a CONTIGUOUS boundary is the genomic distance to the transcript's span ends.
-
-    Nascent RNA is an ordinary transcript spanning its gene, so RNA opportunity inside an intron is
-    real — the intron is where nascent RNA lives. An exonic reach would report 0 here and so declare
-    zero RNA opportunity across every intron in the genome.
-
-    Fixture: one + transcript, exons [500,700) and [1200,1500), so span [500,1500) and intron
-    [700,1200). Both interior interfaces sit on that span.
+    The fixture has transcripts on both strands, an intron on each and a single-exon transcript, so a
+    span reach would be nonzero on both strands' columns here.
     """
-    n, e = _graph([_tx([(500, 700), (1200, 1500)])])
-    ns = _regions(n)
-    at_left_boundary = ns.index((500, 700))  # the boundary at 700, the intron's low end
-    at_right_boundary = ns.index((700, 1200))  # the boundary at 1200, the intron's high end
-    assert _reach(e, at_left_boundary, at_left_boundary + 1, EDGE_KIND_CONTIGUOUS) == (
-        200,
-        800,
-        0,
-        0,
-    )
-    assert _reach(e, at_right_boundary, at_right_boundary + 1, EDGE_KIND_CONTIGUOUS) == (
-        700,
-        300,
-        0,
-        0,
-    )
-
-
-def test_reach_is_zero_outside_a_span_and_on_a_strand_with_no_transcript():
-    """A reach of 0 is meaningful, not a sentinel — but it now means *no RNA of any form* here.
-
-    Two ways to earn a zero, both asserted: the outward side of a span's own boundary (nothing continues
-    past a transcript end), and every position on a strand carrying no transcript at all.
-    """
-    n, e = _graph([_tx([(500, 700), (1200, 1500)], strand=Strand.POS)])
-    ns = _regions(n)
-    at_tss = ns.index((0, 500))  # the boundary at 500 — the span's low boundary
-    at_tes = ns.index((1200, 1500))  # the boundary at 1500 — the span's high boundary
-    assert _reach(e, at_tss, at_tss + 1, EDGE_KIND_CONTIGUOUS) == (0, 1000, 0, 0)
-    assert _reach(e, at_tes, at_tes + 1, EDGE_KIND_CONTIGUOUS) == (1000, 0, 0, 0)
+    _n, e, _txs = sample_graph
+    contiguous = e[e["kind"] == EDGE_KIND_CONTIGUOUS]
+    assert len(contiguous), "the fixture must have contiguous rows, or this asserts nothing"
+    for column in REACH_COLUMNS:
+        nonzero = int((contiguous[column] != 0).sum())
+        assert nonzero == 0, f"{nonzero} contiguous rows carry a {column} nothing reads"
 
 
 def test_a_SYNTHETIC_nrna_span_is_excluded_from_everything():
     """A manufactured nRNA span row contributes no region_bound, no flag and no reach.
 
-    The filter is ``~is_synthetic`` alone. On a non-synthetic row ``is_nrna`` means "this real
-    transcript is single-exon", not "this is a manufactured span", so using it as part of the
-    exclusion deletes real transcripts (TRAPS: nrna-does-not-mean-synthetic); the test below is what
-    that costs.
+    The filter is ``~is_synthetic`` alone. ``is_single_exon`` is true of a real single-exon
+    transcript too, so using it as part of the exclusion deletes real transcripts
+    (TRAPS: nrna-does-not-mean-synthetic); the test below is what that costs.
     """
     real = _tx([(400, 600), (1000, 1200)], t_id="real")
-    span = _tx([(300, 1500)], t_id="span", is_nrna=True, is_synthetic=True)
+    span = _tx([(300, 1500)], t_id="span", is_single_exon=True, is_synthetic=True)
     n, e = _graph([real, span])
     region_bounds = set(n["start"].tolist()) | set(n["end"].tolist())
     assert not ({300, 1500} & region_bounds), "a synthetic span must contribute NO region_bound"
@@ -492,31 +456,18 @@ def test_I3b_FIRES_on_a_corrupted_signature():
 def test_a_single_exon_transcript_is_a_REAL_transcript_with_REAL_termini():
     """What the second filter costs (TRAPS: nrna-does-not-mean-synthetic).
 
-    Specifying the flags and reaches as ``~is_synthetic & ~is_nrna`` reasons that an nRNA span's ends
-    are not real transcript termini. True — but on a non-synthetic row ``is_nrna`` does not mean
-    "manufactured span": it means the transcript is single-exon, so mature is nascent. On the human
-    annotation every such row is single-exon and none is a manufactured one, so the extra clause
-    deletes tens of thousands of real terminus positions — the exact visibility the unmerged
-    partition exists to buy.
+    Specifying the flags as ``~is_synthetic & ~is_single_exon`` reasons that a span's ends are not
+    real transcript termini. True of a manufactured span — but a non-synthetic single-exon row is a
+    real transcript, and on the human annotation the extra clause deletes tens of thousands of real
+    terminus positions — the exact visibility the unmerged partition exists to buy.
     """
-    single = _tx([(300, 1500)], t_id="single_exon", is_nrna=True)  # is_synthetic is False
+    single = _tx([(300, 1500)], t_id="single_exon", is_single_exon=True)  # is_synthetic is False
     txs = [_tx([(400, 600), (1000, 1200)], t_id="real"), single]
     n, e = build_splice_graph(txs, REF)
     validate_graph(n, e, REF, transcripts=txs)
     assert {300, 1500} <= set(n["start"].tolist()) | set(n["end"].tolist())
     assert _flags_at(n, e, 300) & FLAG_TSS_POS, "a real single-exon transcript's 5' end IS a TSS"
     assert _flags_at(n, e, 1500) & FLAG_TES_POS, "...and its 3' end IS a TES"
-
-
-def test_reach_covers_a_single_exon_transcript():
-    """The same row is also a real MATURE molecule, so it carries reach — 1,200 exonic bases split
-    at whichever interior interface falls inside it."""
-    single = _tx([(300, 1500)], t_id="single_exon", is_nrna=True)
-    n, e = _graph([single, _tx([(700, 800)], t_id="cutter")])
-    ns = _regions(n)
-    i = ns.index((300, 700))
-    lo, hi, _ln, _hn = _reach(e, i, i + 1, EDGE_KIND_CONTIGUOUS)
-    assert (lo, hi) == (400, 800), "400 exonic bases before position 700, 800 after"
 
 
 def test_P4_determinism_build_twice_is_identical():

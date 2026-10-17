@@ -214,16 +214,17 @@ class BamScanConfig:
     spill_dir: Path | str | None = None
     """Scan buffer spill directory (default ``None`` = system temp dir)."""
 
-    splicing_anchor_tolerance: int = 3
-    """Splicing-anchor tolerance ``K`` (bp): the slack the resolver allows when it
-    enumerates a non-chimeric fragment's gap hypotheses.
+    intron_overhang_tolerance: int = 3
+    """Intron-overhang tolerance ``K`` (bp): how many bases an alignment may run into an
+    annotated intron, and an annotated intron overhang a mate gap, and still be read as
+    spliced there.
 
-    An annotated intron is placed in an unsequenced gap when it overlaps the gap and
-    lies within it widened by ``K`` at each end, and a candidate transcript is excluded
-    from the enumeration as contradicting the alignment when one of its introns overlaps
-    an aligned block by more than ``K``. The calibration accumulator arbitrates those
-    hypotheses and deposits the survivor, so ``K`` changes calibration's tally, and the
-    scan-cache key includes it.
+    The resolver applies it when it enumerates a non-chimeric fragment's gap hypotheses: a
+    candidate transcript is excluded as contradicting the alignment only when one of its
+    introns overlaps an aligned block by more than ``K``, and an annotated intron is placed
+    in an unsequenced gap when it overlaps the gap and lies within it widened by ``K`` at
+    each end. The calibration accumulator arbitrates those hypotheses and deposits the
+    survivor, so ``K`` changes calibration's tally, and the scan-cache key includes it.
     """
 
     def __post_init__(self) -> None:
@@ -245,10 +246,10 @@ class BamScanConfig:
             raise ValueError(
                 f"BamScanConfig.buffer_size_bytes must be >= 0; got {self.buffer_size_bytes}."
             )
-        if self.splicing_anchor_tolerance < 0:
+        if self.intron_overhang_tolerance < 0:
             raise ValueError(
-                f"BamScanConfig.splicing_anchor_tolerance must be >= 0; "
-                f"got {self.splicing_anchor_tolerance}."
+                f"BamScanConfig.intron_overhang_tolerance must be >= 0; "
+                f"got {self.intron_overhang_tolerance}."
             )
         # the scanner's tag modes; anything else used to become "XS,ts" in the scanner without a word
         tags = self.sj_strand_tag
@@ -436,9 +437,9 @@ class IndexConfig:
     #: report of each group; ``True`` keeps the lexicographically smallest transcript ID per group, loss-free.
     collapse_duplicate_transcripts: bool = False
 
-    #: Transcript start and end sites within this many bp cluster into one synthetic nascent-RNA span
-    #: (``index.create_nrna_transcripts``).
-    nrna_merge_tolerance: int = 20
+    #: Multi-exon transcripts' start and end sites within this many bp cluster into one synthetic span,
+    #: which models their nascent RNA (``index.create_nrna_transcripts``).
+    nascent_tolerance: int = 20
 
     #: Fewest unique fragments per (chromosome, intron, read length) for a junction to enter the
     #: splice-artifact blacklist from the alignable store. 2 matches the alignable tool's own threshold; 1 admits
@@ -450,9 +451,9 @@ class IndexConfig:
             raise ValueError(f"Unknown Feather compression: {self.feather_compression!r}")
         if self.gtf_parse_mode not in ("strict", "warn-skip"):
             raise ValueError(f"Unknown GTF parse mode: {self.gtf_parse_mode!r}")
-        if self.nrna_merge_tolerance < 0:
+        if self.nascent_tolerance < 0:
             raise ValueError(
-                f"IndexConfig.nrna_merge_tolerance must be >= 0; got {self.nrna_merge_tolerance}."
+                f"IndexConfig.nascent_tolerance must be >= 0; got {self.nascent_tolerance}."
             )
         if self.splice_blacklist_min_count < 1:
             raise ValueError(

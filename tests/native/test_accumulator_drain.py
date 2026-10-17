@@ -149,7 +149,7 @@ def test_the_drain_consumes_the_bank_and_conserves():
     assert counters["deposited"] + dropped == counters["offered"], (
         f"every offered fragment must deposit or be rejected exactly once; got {counters}"
     )
-    assert counters["chose_genomic"] + counters["chose_spliced"] == 7
+    assert counters["chose_no_implied_intron"] + counters["chose_implied_intron"] == 7
     assert len(accumulator.tally.deferred) == 0, "the drain consumes the bank"
     # The held counter goes to 0 WITH the bank. The two must describe one population — the payload
     # refuses a bank that disagrees with its counter at the door, and a drained payload gets no exception.
@@ -174,7 +174,7 @@ def test_the_drain_leaves_the_ARBITRATION_census_alone():
         counters = accumulator.drain(choices)
         censuses.append(dict(accumulator.tally.gap_resolution))
         assert counters["census_before"] == before
-        assert counters["chose_genomic"] == sum(1 for c in choices if c == 2)
+        assert counters["chose_no_implied_intron"] == sum(1 for c in choices if c == 2)
 
     assert censuses[0] == censuses[1] == censuses[2], (
         f"the arbitration census must not depend on what the drain chose; got {censuses}"
@@ -505,7 +505,7 @@ def test_the_drain_credits_the_sj_on_the_RIGHT_CONTIG(scanned_two_contigs):
     """
     before, after, choices = _drained(scanned_two_contigs)
     delta = after.sj_count.astype(np.int64) - before.sj_count.astype(np.int64)
-    n_spliced = after.drain.chose_spliced
+    n_spliced = after.drain.chose_implied_intron
     assert n_spliced > 0, "the fixture must have drawn at least one spliced hypothesis to gate this"
     assert int(delta.sum()) == n_spliced, (
         f"every spliced choice credits exactly one sj slot; {n_spliced} were chosen but the sj "

@@ -73,10 +73,10 @@ class MockIndex:
                 "length": [500] * num_transcripts,
                 "is_basic": [True] * num_transcripts,
                 "is_mane": [False] * num_transcripts,
-                "is_nrna": [False] * num_transcripts,
+                "is_single_exon": [False] * num_transcripts,
                 "is_synthetic": [False] * num_transcripts,
-                "nrna_t_index": [-1] * num_transcripts,
-                "nrna_n_contributors": [0] * num_transcripts,
+                "span_t_index": [-1] * num_transcripts,
+                "span_n_contributors": [0] * num_transcripts,
             }
         )
         self.g_df = pd.DataFrame(
@@ -696,10 +696,10 @@ class TestCountsOutput:
             t_to_strand=[int(Strand.POS)] * 6,
             g_to_strand=[int(Strand.POS)] * 6,
         )
-        index.t_df["is_nrna"] = [False, False, True, True, False, True]
+        index.t_df["is_single_exon"] = [False, False, True, True, False, True]
         index.t_df["is_synthetic"] = [False, False, False, False, False, True]
-        index.t_df["nrna_t_index"] = [5, 2, 2, -1, 5, -1]
-        index.t_df["nrna_n_contributors"] = [0, 0, 1, 0, 0, 2]
+        index.t_df["span_t_index"] = [5, 2, 2, -1, 5, -1]
+        index.t_df["span_n_contributors"] = [0, 0, 1, 0, 0, 2]
         rc = AbundanceEstimator(6, em_config=EMConfig(seed=42))
         rc.unambig_counts[:, _UNSPLICED_SENSE] = [10.0, 20.0, 7.0, 3.0, 5.0, 4.0]
 

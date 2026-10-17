@@ -749,7 +749,7 @@ def test_a_percent_error_is_REFUSED_where_the_truth_is_zero(tmp_path):
 
 def test_the_three_pools_are_reported_APART_and_the_synthetic_one_by_name(tmp_path):
     """The split is on ``is_synthetic``, and the report must say so where a reader will see it: a
-    single-exon ANNOTATED transcript (``is_single_exon``, the index's ``is_nrna``) belongs to the
+    single-exon ANNOTATED transcript (``is_single_exon``) belongs to the
     ANNOTATED pool (TRAPS: nrna-does-not-mean-synthetic). Folding the two RNA pools together would hide
     the false-positive channel the nascent row exists to expose."""
     md = _render(tmp_path)

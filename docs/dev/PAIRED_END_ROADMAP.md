@@ -68,9 +68,14 @@ Kept current until wave 4 closes (owner, 2026-10-16). ☑ done · ◐ in progres
       `30357fb3` and pushed (suite 3,026)
     - ☑ stale benchmark data deleted for space, at the owner's request (107.6 GiB; text receipts kept)
     - ◐ renames, to the convention the owner ruled on 2026-10-17 (`OUTPUT_NAMES_PROPOSAL.md`, five steps):
-      ☑ 1. the identity digest ignores column names (`8ebf71ea`), references re-frozen there; ◐ 2. the internal
-      names; ☐ 3. the outputs to the convention, `summary.json` schema 4; ☐ 4. the index and scan names, one index
-      rebuild and re-cache; ☐ 5. the simulator's truth tables through one writer
+      ☑ 1. the identity digest ignores column names (`8ebf71ea`), references re-frozen there; ☑ 2. the internal
+      names (`fd012918`, bit-identical); ☑ 3. the outputs to the convention, `summary.json` schema 4 (`1fa1c143`:
+      every number verified unchanged on the ladder end to end, the defined relabellings only; suite 3,045);
+      ☐ 4. the index and scan names, one index rebuild and re-cache; ☐ 5. the simulator's truth tables through one
+      writer
+    - ☑ the public repository scrubbed of local paths, cluster details and lab identifiers, owner's request
+      (`8401aeba`, suite 3,048); docs/dev keeps markdown only (`20f187ab`); the data a commit of mine pushed was
+      taken out of history by rewriting that one commit (owner-authorized)
     - ◐ constants: the six that need no ruling settled, committed `bb3967cb` and pushed; the rest await the owner
       (`CONSTANTS_PROPOSAL.md`, six questions)
 - ◐ the plan's external review, of revision 3 (owner, 2026-10-17); bundle `rigel_wave1_review_r3.zip`

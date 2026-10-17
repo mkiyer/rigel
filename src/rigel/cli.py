@@ -60,7 +60,7 @@ def index_command(args: argparse.Namespace) -> int:
             write_tsv=not args.no_tsv,
             gtf_parse_mode=args.gtf_parse_mode,
             collapse_duplicate_transcripts=args.collapse_duplicate_transcripts,
-            nrna_tolerance=args.nrna_tolerance,
+            nascent_tolerance=args.nascent_tolerance,
             alignable_zarr_path=(Path(args.alignable_zarr) if args.alignable_zarr else None),
             splice_blacklist_min_count=args.splice_blacklist_min_count,
         )
@@ -909,7 +909,7 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("em_mode", "em.mode"),
     # -- BamScanConfig: direct --
     _ParamSpec("include_multimap", "scan.include_multimap"),
-    _ParamSpec("splicing_anchor_tolerance", "scan.splicing_anchor_tolerance"),
+    _ParamSpec("intron_overhang_tolerance", "scan.intron_overhang_tolerance"),
     _ParamSpec("scan_bgzf_threads", "scan.bgzf_threads"),
     _ParamSpec("scan_fragments_per_chunk", "scan.fragments_per_chunk"),
     _ParamSpec("scan_read_name_batch_size", "scan.read_name_batch_size"),
@@ -1181,13 +1181,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     idx.add_argument(
-        "--nrna-tolerance",
-        dest="nrna_tolerance",
+        "--nascent-tolerance",
+        dest="nascent_tolerance",
         type=int,
-        default=IndexConfig.nrna_merge_tolerance,
+        default=IndexConfig.nascent_tolerance,
         help=(
-            "Max distance (bp) for clustering transcript start/end sites "
-            "when building synthetic nascent RNA transcripts (default: %(default)s)"
+            "Max distance (bp) for clustering multi-exon transcripts' start and end sites "
+            "into the synthetic spans that model their nascent RNA (default: %(default)s)"
         ),
     )
     idx.add_argument(
@@ -1465,17 +1465,18 @@ def build_parser() -> argparse.ArgumentParser:
         "(conservative). Set to 0 to disable pruning entirely.",
     )
     adv.add_argument(
-        "--splicing-anchor-tolerance",
-        dest="splicing_anchor_tolerance",
+        "--intron-overhang-tolerance",
+        dest="intron_overhang_tolerance",
         type=int,
         default=None,
-        help="Splicing-anchor tolerance K (bp), used when a fragment's unsequenced gap is "
-        "matched to annotated introns: an intron overlapping the gap counts as lying in it when it "
-        "extends past neither end of the gap by more than K bp, and a transcript is excluded as "
-        "contradicting the alignment when one of its introns overlaps an aligned block by more "
-        "than K bp. It changes the gap hypotheses calibration arbitrates, and so calibration's "
-        "tally. "
-        f"Default: {qd['splicing_anchor_tolerance']}.",
+        help="Intron-overhang tolerance K (bp): how many bases an alignment may run into an "
+        "annotated intron, and an annotated intron overhang a mate gap, and still be read as "
+        "spliced there. A transcript is excluded as contradicting the alignment only when one of "
+        "its introns overlaps an aligned block by more than K bp, and an intron overlapping a "
+        "fragment's unsequenced gap counts as lying in it when it extends past neither end of the "
+        "gap by more than K bp. It changes the gap hypotheses calibration arbitrates, and so "
+        "calibration's tally. "
+        f"Default: {qd['intron_overhang_tolerance']}.",
     )
     adv.add_argument(
         "--emit-locus-stats",

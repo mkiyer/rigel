@@ -5,15 +5,15 @@ fragment's own path — and this module gates one of its inputs. Implicit-splice
 every fragment, not only on those the resolver already called unspliced: a fragment carrying an
 observed CIGAR-N splice still has an unsequenced mate gap, and an annotated intron inside that gap
 belongs outside ``L``. The other half of the gate is the near-match trap: the gap finder walks
-consecutive aligned blocks and emits every hole, so a CIGAR-N intron is a hole too, and only dropping
-the gaps that EXACTLY match an observed intron stops the detector substituting a DIFFERENT annotated
-intron that happens to lie within the anchor tolerance — which would normalise into one wider interval
-and make ``L`` too SHORT. Four fragments are written by hand rather than simulated, because every
-number here is a length asserted to the base pair and a simulated library gives a distribution where
-four hand-written reads give an answer. Two of the four deposit and their ``L`` is read straight off
-``deposited_lengths``; the other two are HELD, so their gate is asserted on the enumerated hypothesis
-coordinates instead — a stronger statement than a deposited length, since it says the enumeration
-produced exactly the intended intron set and never the near-miss.
+consecutive aligned blocks and emits every hole, so a CIGAR-N intron is a hole too, and only
+dropping the gaps that EXACTLY match an observed intron stops the detector substituting a DIFFERENT
+annotated intron that happens to lie within the intron-overhang tolerance — which would normalise
+into one wider interval and make ``L`` too SHORT. Four fragments are written by hand rather than
+simulated, because every number here is a length asserted to the base pair and a simulated library
+gives a distribution where four hand-written reads give an answer. Two of the four deposit and their
+``L`` is read straight off ``deposited_lengths``; the other two are HELD, so their gate is asserted
+on the enumerated hypothesis coordinates instead — a stronger statement than a deposited length,
+since it says the enumeration produced exactly the intended intron set and never the near-miss.
 """
 
 from __future__ import annotations

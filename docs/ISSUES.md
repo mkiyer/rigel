@@ -179,7 +179,7 @@ Calibration's region lengths count bases on which no fragment can be observed.
 
 ### the-anchor-tolerance-applies-beyond-implicit-splicing
 `priority: now — the first wave of the paired-end repair; the owner's scope ruling of 2026-10-16 · kind: defect · 2026-10-16`
-`--splicing-anchor-tolerance` (K, default 3) belongs to implicitly spliced fragments: mates aligned to different exons
+`--intron-overhang-tolerance` (K, default 3) belongs to implicitly spliced fragments: mates aligned to different exons
 with a whole intron between them. The owner keeps it in scope there (2026-10-16), "but we must be judicious about
 deciding which cases apply it".
 
@@ -1391,14 +1391,6 @@ at debug level, and is still counted in "Loaded N probes" (`sim/capture/sampler.
 The fix: refuse an unknown id, or resolve it through `transcript_aliases`, and design the panel on the index's
 transcripts.
 
-### contiguous-reaches-unread
-`priority: later (the code-health review, 2026-10-16) · kind: hygiene · 2026-10-16`
-Contiguous-boundary reaches are computed (`splice_graph.py:317`), stored, gated (`test_splice_graph.py:338-518`) and
-hashed into the scan-cache key (`scan_cache.reach_digest`), but nothing reads them. `build_sj_geometry_arrays` reads
-only the sj rows. `region_geometry.py:152-155` rules the boundary reach unbounded, pending a per-boundary taper A/B
-that was never run. Either that A/B owns this code, or the contiguous reaches go and the digest covers the sj rows
-only.
-
 ### second-pass-geometry-in-python
 `priority: later (the code-health review, 2026-10-16) · kind: hygiene · 2026-10-16`
 `placement_abundance` re-derives the deposit's geometry in Python (`second_pass.py:374-392, 447-461`): the path's
@@ -1574,6 +1566,15 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### contiguous-reaches-unread
+CLOSED 2026-10-17 by the fix (the output-names convention, index format 10): the index computes no contiguous-boundary
+reach, and a contiguous row holds 0 in the four reach columns. `build_sj_geometry_arrays`, the one reader of a reach,
+takes the sj rows, and `scan_cache.reach_digest` already hashed only those. On the test chromosome and its shadow
+annotation the regions, every non-reach column and the 562 + 4 sj rows are byte-identical, while 3,330 + 32
+contiguous reach cells go to 0. The boundary's RNA reach stays unbounded by ruling (`region_geometry`); a
+per-boundary taper A/B would derive its reaches again. Gate:
+`test_splice_graph.py::test_a_CONTIGUOUS_boundary_carries_no_reach`.
 
 ### the-em-depends-on-its-thread-count
 CLOSED 2026-10-14 by the fix (owner: land it): the locus EM gives the single thread's answer at every thread count. A

@@ -19,10 +19,9 @@ of all termini. The price of not merging is roughly 40 % more regions.
 
 The transcript filter is ``~is_synthetic``, and it is one predicate, defined once in :func:`_is_real`
 and shared by the builder and the validator. Every manufactured span row is ``is_synthetic``,
-so that predicate already excludes all of them. Do not add ``& ~is_nrna``: on a non-synthetic row
-``is_nrna`` does not mean "manufactured span", it means "this real single-exon transcript covers a
-multi-exon transcript's span, so it stands for that span unspliced", and excluding those rows deletes the TSS and TES of tens of
-thousands of real transcripts — exactly the visibility this partition exists to buy.
+so that predicate already excludes all of them. Do not add ``& ~is_single_exon``: a real single-exon
+transcript is a real transcript, and excluding those rows deletes the TSS and TES of tens of
+thousands of them — exactly the visibility this partition exists to buy.
 
 .. _flags:
 
@@ -30,35 +29,26 @@ Structural flags (contiguous boundaries) are ``TSS_s`` / ``TES_s`` / ``DONOR_s``
 ``s`` in ``{+, -}``. They are not mutually exclusive: a position that is both a terminus for one
 transcript and a splice site for another is exactly the case the 4-bit signature is blind to.
 
-Reaches are how many bases of the molecule's own sequence remain either side of a boundary. The two
-boundary kinds carry different reaches, deliberately:
-
-* A CONTIGUOUS boundary is crossed by gDNA and by RNA alike, whether the RNA spliced elsewhere or
-  nowhere. RNA inside an intron is RNA that has not spliced at that position, and a genomic distance
-  is never shorter than the exonic distance within the same span, so the reach is the GENOMIC distance
-  to a covering transcript's span ends. It is therefore nonzero inside an intron; an exonic reach
-  would declare zero RNA opportunity across every intron in the genome.
-* An SJ boundary is used only by a molecule that spliced across it, so what remains either side is
-  EXONIC. :func:`_sj_edges` is deliberately left on the exonic reach.
+Reaches are how many bases of the molecule's own sequence remain either side of an sj boundary. An sj
+is used only by a molecule that spliced across it, so what remains either side is EXONIC
+(:func:`_sj_edges`). A contiguous boundary carries 0 in the four reach columns: nothing reads a
+contiguous reach, and the one reader of a reach, :func:`build_sj_geometry_arrays`, takes the sj rows.
 
 Reaches are named ``lo`` / ``hi``, never ``donor`` / ``acceptor``. Boundaries store ``src < dst``, so
 ``src`` is genomically LEFT whatever the strand, while for a minus-strand sj the biological donor is
 on the right; the divisor is symmetric in the two reaches, so no number changes, but a ``reach_donor``
 would mislabel about half the sj. ``lo`` / ``hi`` means genomically lower/higher and cannot be misread.
 
-Reaches are per strand, because the RNA-crossing gate is per strand: at an AMBIG boundary a ``+``
-and a ``-`` transcript have different reaches, and a strand-agnostic maximum would over-state one of
-them on exactly the population that carries the most calibration error.
+Reaches are per strand: an sj row fills its own strand's pair and leaves the other strand's at 0, so two
+strand-coincident sj, which share ``(src, dst)`` and differ only in strand, never read each other's.
 
-Reaches are maximal over isoforms, independently per side. A genomic position usually belongs to
-several transcripts that disagree about where the molecule ends, and the isoform abundances are
-precisely what calibration does not know. The independent maximum is one-sided: it over-states
-opportunity, hence under-states the RNA density, hence over-states the gDNA fraction.
+Reaches are maximal over isoforms, independently per side. An sj is often shared by several transcripts
+that disagree about where the molecule ends, and the isoform abundances are precisely what calibration
+does not know. The independent maximum is one-sided: it over-states opportunity, hence under-states the
+RNA density, hence over-states the gDNA fraction.
 
-A reach of 0 is meaningful, not a sentinel: no strand-``s`` RNA molecule can occupy that side of the
-boundary, so the opportunity is genuinely zero and the trapezoid returns 0 for free. On a contiguous
-boundary that means outside every transcript span on that strand; on an sj boundary, that no
-strand-``s`` molecule splices across it.
+On an sj row a reach of 0 is meaningful, not a sentinel: no strand-``s`` RNA molecule splices across it,
+so the opportunity is genuinely zero and the trapezoid returns 0 for free.
 """
 
 from __future__ import annotations
@@ -303,7 +293,7 @@ def build_splice_graph(
             )
         )
 
-        # ── 3. contiguous boundaries: flags + per-strand reaches at each interior interface ────────────
+        # ── 3. contiguous boundaries: the flags at each interior interface, and no reach ─────────────
         pos = region_bounds[1:-1]  # the n-1 interior interfaces
         flags = np.zeros(pos.shape[0], np.uint16)
         if pos.size:
@@ -312,7 +302,6 @@ def build_splice_graph(
                     hit = np.searchsorted(pos, arr)
                     ok = (hit < pos.size) & (pos[np.clip(hit, 0, max(pos.size - 1, 0))] == arr)
                     np.bitwise_or.at(flags, hit[ok], bit)
-        c_reach = _contiguous_reaches(ex, rows, pos)
 
         # ── 4. sj boundaries: one per distinct (intron_start, intron_end, strand) ────────────────
         j_src, j_dst, j_strand, j_reach = _sj_edges(region_bounds, intr, i_rows, name)
@@ -327,7 +316,10 @@ def build_splice_graph(
         )
         strand = np.concatenate([np.zeros(max(n - 1, 0), np.int8), j_strand])
         allflags = np.concatenate([flags, np.zeros(j_src.size, np.uint16)])
-        reach = {k: np.concatenate([c_reach[k], j_reach[k]]) for k in c_reach}
+        # A contiguous row's reach columns hold 0: the one reader of a reach takes the sj rows.
+        reach = {
+            k: np.concatenate([np.zeros(pos.shape[0], np.int64), v]) for k, v in j_reach.items()
+        }
         e_rows.append(
             pd.DataFrame(
                 {
@@ -402,7 +394,7 @@ def _is_real(tx, reflen) -> bool:
     It must stay shared: a validator with its own copy of the predicate checks the flags against a
     filter that can drift from the one that built them, and the two then agree while both are wrong.
 
-    Manufactured spans are ``is_synthetic``; a non-synthetic ``is_nrna`` row is a real
+    Manufactured spans are ``is_synthetic``; a non-synthetic ``is_single_exon`` row is a real
     single-exon transcript, whose termini are real. See the module docstring.
     """
     return (
@@ -498,68 +490,6 @@ def _events_independently(ex: _Exons, rows, intr, i_rows):
         k = i_rows[intr[3][i_rows] == st] if i_rows.size else i_rows
         out.append((np.unique(intr[1][k]) if k.size else EMPTY_I64, don_bit))
         out.append((np.unique(intr[2][k]) if k.size else EMPTY_I64, acc_bit))
-    return out
-
-
-def _contiguous_reaches(ex: _Exons, rows, pos):
-    """Per-strand RNA reach either side of each interior interface, over TRANSCRIPT SPANS.
-
-    "Reach" is how much RNA molecule can still exist on each side of the interface — the quantity the
-    fragment-placement count is truncated by near a transcript end.
-
-    A genomic distance is never shorter than the exonic distance inside the same span, so the widest
-    RNA molecule covering a position is one that has not spliced there, and the reach is the GENOMIC
-    distance to the ends of a covering transcript's span — maximised per side and per strand,
-    independently.
-
-    In particular the reach inside an intron is not zero: that is precisely where unspliced RNA
-    lives. An exonic reach declares zero RNA opportunity across every intron in the genome, which is
-    backwards.
-
-    This is the contiguous-boundary rule only. A sj boundary is used solely by a molecule that
-    spliced across it, so what remains either side of it is exonic — see :func:`_sj_edges`, which
-    is deliberately left on the exonic reach.
-    """
-    keys = ("reach_lo_pos", "reach_hi_pos", "reach_lo_neg", "reach_hi_neg")
-    out = {k: np.zeros(pos.shape[0], np.int64) for k in keys}
-    if pos.size == 0 or rows.size == 0:
-        return out
-
-    # per-transcript genomic span on this reference: [min exon start, max exon end)
-    uniq, inv = np.unique(ex.tid[rows], return_inverse=True)
-    span_start = np.full(uniq.size, np.iinfo(np.int64).max, np.int64)
-    span_end = np.full(uniq.size, np.iinfo(np.int64).min, np.int64)
-    np.minimum.at(span_start, inv, ex.start[rows])
-    np.maximum.at(span_end, inv, ex.end[rows])
-    strand_of = np.zeros(uniq.size, np.int8)
-    strand_of[inv] = ex.strand[rows]
-
-    for s, key_lo, key_hi in (
-        (Strand.POS, "reach_lo_pos", "reach_hi_pos"),
-        (Strand.NEG, "reach_lo_neg", "reach_hi_neg"),
-    ):
-        keep = strand_of == s
-        if not keep.any():
-            continue
-        lo_boundary, hi_boundary = span_start[keep], span_end[keep]
-
-        # HIGH side: among spans starting at or before p, the one reaching furthest right. If that
-        # furthest end is still left of p then no span covers p and the reach is 0.
-        n_span = lo_boundary.size
-        by_start = np.argsort(lo_boundary, kind="stable")
-        furthest_end = np.maximum.accumulate(hi_boundary[by_start])
-        i = np.searchsorted(lo_boundary[by_start], pos, side="right")
-        covered = i > 0  # some span starts at or before p
-        far = furthest_end[np.maximum(i, 1) - 1]  # clamped: the value is discarded where ~covered
-        out[key_hi] = np.maximum(np.where(covered, far, pos) - pos, 0)
-
-        # LOW side: among spans ending at or after p, the one starting furthest left. Symmetric.
-        by_end = np.argsort(hi_boundary, kind="stable")
-        furthest_start = np.minimum.accumulate(lo_boundary[by_end][::-1])[::-1]
-        j = np.searchsorted(hi_boundary[by_end], pos, side="left")
-        covered = j < n_span  # some span ends at or after p
-        near = furthest_start[np.minimum(j, n_span - 1)]  # clamped, as above
-        out[key_lo] = np.maximum(pos - np.where(covered, near, pos), 0)
     return out
 
 
@@ -1067,9 +997,8 @@ class SpliceJunctionGeometry:
     to; which transcript the molecule came from is a property of the annotation, stated here, and
     deriving sense from an sj's own strand is exactly this join.
 
-    ``reach_lo`` / ``reach_hi`` are EXONIC, unlike a contiguous boundary's genomic spans. Only a
-    spliced molecule uses an sj, so what remains either side of it is exonic — see the module
-    docstring. A reach of 0 is meaningful, not a sentinel.
+    ``reach_lo`` / ``reach_hi`` are EXONIC: only a spliced molecule uses an sj, so what remains either
+    side of it is exonic — see the module docstring. A reach of 0 is meaningful, not a sentinel.
 
     ``lo`` / ``hi`` are genomically lower/higher, never donor/acceptor: boundaries store
     ``src < dst``, so on a minus-strand sj the biological donor is on the right.

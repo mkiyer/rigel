@@ -64,22 +64,22 @@ class Transcript:
     is_basic: bool = False
     is_mane: bool = False
     is_ccds: bool = False
-    is_nrna: bool = False
+    is_single_exon: bool = False
+    """The transcript has one exon. The GTF reader sets it on every single-exon transcript, and every
+    synthetic span is single-exon too."""
     is_synthetic: bool = False
-    nrna_t_index: int = -1
-    """t_index of the associated nRNA entity (-1 = none).
+    span_t_index: int = -1
+    """t_index of the transcript's span entity (-1 = none).
 
-    For multi-exon transcripts: points to the nRNA transcript
-    (synthetic or annotated single-exon) that covers this transcript's
-    merged TSS/TES span.
-    For single-exon transcripts: points to itself if it is the
-    annotated single-exon transcript (``is_nrna``) covering a merged multi-exon span, else -1.
+    For multi-exon transcripts: the entity over this transcript's merged TSS/TES span — a synthetic
+    span, or the annotated single-exon transcript that covers the span.
+    For single-exon transcripts: itself if it covers a merged span, else -1.
     For synthetics: -1.
     """
-    nrna_n_contributors: int = 0
-    """Number of annotated multi-exon transcripts merged into this nRNA entity.
+    span_n_contributors: int = 0
+    """Number of annotated multi-exon transcripts whose merged spans this entity stands for.
 
-    Only meaningful for synthetic nRNA transcripts and their annotated single-exon equivalents.
+    Only meaningful for synthetic spans and the annotated single-exon transcripts that cover a span.
     Zero for regular annotated transcripts.
     """
     abundance: float | None = None
@@ -161,10 +161,10 @@ class Transcript:
             "is_basic": self.is_basic,
             "is_mane": self.is_mane,
             "is_ccds": self.is_ccds,
-            "is_nrna": self.is_nrna,
+            "is_single_exon": self.is_single_exon,
             "is_synthetic": self.is_synthetic,
-            "nrna_t_index": self.nrna_t_index,
-            "nrna_n_contributors": self.nrna_n_contributors,
+            "span_t_index": self.span_t_index,
+            "span_n_contributors": self.span_n_contributors,
         }
 
     @staticmethod
@@ -216,7 +216,7 @@ class Transcript:
             t.exons = _disjoint_exons(t, parse_mode)
             t.compute_length()
             if len(t.exons) == 1:
-                t.is_nrna = True
+                t.is_single_exon = True
         sorted_transcripts = sorted(
             transcripts.values(),
             key=lambda t: (t.ref, t.start, t.end, t.strand),

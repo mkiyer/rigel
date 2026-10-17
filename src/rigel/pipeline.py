@@ -299,14 +299,15 @@ def scan_and_buffer(
     resolve_ctx = index.resolver
     resolve_ctx.set_transcript_strands(index.t_to_strand_arr.tolist())
 
-    # Splicing-anchor tolerance K (bp): the slack the resolver allows when it enumerates a
-    # non-chimeric fragment's gap hypotheses. An annotated intron is placed in an unsequenced gap
-    # when it overlaps the gap and lies within it widened by K at each end, and a candidate
-    # transcript is excluded from the enumeration as contradicting the alignment when one of its
-    # introns overlaps an aligned block by more than K. The calibration accumulator arbitrates those
-    # hypotheses and deposits the survivor, so K changes calibration's tally (the scan-cache key
-    # includes it), and it decides which unspliced fragments are relabelled SPLICED_IMPLICIT.
-    resolve_ctx.set_splicing_anchor_tolerance(int(scan.splicing_anchor_tolerance))
+    # Intron-overhang tolerance K (bp): how many bases an alignment may run into an annotated intron,
+    # and an annotated intron overhang a mate gap, and still be read as spliced there. The resolver
+    # applies it when it enumerates a non-chimeric fragment's gap hypotheses: a candidate transcript
+    # is excluded as contradicting the alignment only when one of its introns overlaps an aligned
+    # block by more than K, and an annotated intron is placed in an unsequenced gap when it overlaps
+    # the gap and lies within it widened by K at each end. The calibration accumulator arbitrates
+    # those hypotheses and deposits the survivor, so K changes calibration's tally (the scan-cache
+    # key includes it), and it decides which unspliced fragments are relabelled SPLICED_IMPLICIT.
+    resolve_ctx.set_intron_overhang_tolerance(int(scan.intron_overhang_tolerance))
     # `detect_chimera` needs the library's fragment-length limit to tell an ordinary genomic
     # molecule (contiguous, spanning whatever transcripts lie under it) from a real rearrangement.
     resolve_ctx.set_max_fragment_length(int(scan.max_frag_length))
@@ -491,14 +492,15 @@ def _drain_side_buffer(
     report = drained.drain
     logger.info(
         "[SP2] drained %d held fragments (%d held on their placements) in %.1f s: %d deposited, "
-        "%d dropped (%d chose the genomic path, %d a spliced one); %d had candidates tied for the lead",
+        "%d dropped (%d chose a hypothesis that implies no gap intron, %d one that implies a gap "
+        "intron); %d had candidates tied for the lead",
         report.offered,
         report.offered_multimapper,
         time.perf_counter() - start,
         report.deposited,
         report.dropped,
-        report.chose_genomic,
-        report.chose_spliced,
+        report.chose_no_implied_intron,
+        report.chose_implied_intron,
         scores.n_undecided,
     )
     return drained

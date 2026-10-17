@@ -690,7 +690,7 @@ def test_load_does_not_need_the_alias_table(tmp_path: Path):
 @pytest.mark.parametrize(
     "setting, refusal",
     [
-        ({"nrna_tolerance": -5}, "nrna_merge_tolerance must be >= 0; got -5"),
+        ({"nascent_tolerance": -5}, "nascent_tolerance must be >= 0; got -5"),
         ({"splice_blacklist_min_count": 0}, "splice_blacklist_min_count must be >= 1; got 0"),
         ({"feather_compression": "gzip"}, "Unknown Feather compression: 'gzip'"),
         ({"gtf_parse_mode": "lenient"}, "Unknown GTF parse mode: 'lenient'"),
@@ -991,9 +991,12 @@ def test_a_single_exon_transcript_covering_two_spans_counts_the_contributors_of_
         tx(2, "T2", [(1000, 1100), (1200, 1300)]),
         tx(3, "T3", [(1000, 1100), (1250, 1300)]),
     ]
-    create_nrna_transcripts(transcripts, tolerance=20)
-    assert covering.is_nrna
-    assert covering.nrna_n_contributors == 3
+    synthetics, _t_to_span_key, _span_to_syn_idx, covered_equiv = create_nrna_transcripts(
+        transcripts, tolerance=20
+    )
+    assert synthetics == [] and len(covered_equiv) == 2
+    assert all(entity is covering for entity in covered_equiv.values())
+    assert covering.span_n_contributors == 3
 
 
 def test_collapse_is_noop_without_duplicates(tmp_path: Path):

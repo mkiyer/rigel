@@ -189,8 +189,8 @@ class DrainQC:
     The drain has its OWN axis and does not extend `GapCensus`. That census has no
     ``gap_resolved_unspliced`` class because pass-one arbitration cannot produce one — the genomic path is
     always the longest, so it can never be the sole survivor. The drain, however, chooses, and it can
-    choose the genomic path. ``chose_genomic`` / ``chose_spliced`` is the composition the drain assigned,
-    which is exactly what the census cannot record without an unreachable class.
+    choose the genomic path. ``chose_no_implied_intron`` / ``chose_implied_intron`` is the composition the
+    drain assigned, which is exactly what the census cannot record without an unreachable class.
     """
 
     #: Pass one's ``qc.deferred_undetermined_gap + qc.deferred_multiple_placements`` — the denominator the
@@ -203,10 +203,12 @@ class DrainQC:
     dropped_too_long: int
     dropped_empty: int
     dropped_strand_undefined: int
-    #: The drain's own census: the genomic path against a spliced path. Sums to ``offered``, not to
-    #: ``deposited`` — a chosen hypothesis can still be rejected afterwards, a different question.
-    chose_genomic: int
-    chose_spliced: int
+    #: The drain's own census: the held records whose chosen hypothesis implies no gap intron, against
+    #: those whose chosen hypothesis implies one (on a multimapping record, the hypothesis it chose on the
+    #: placement it chose). Sums to ``offered``, not to ``deposited``: a chosen hypothesis can still be
+    #: rejected afterwards, a different question.
+    chose_no_implied_intron: int
+    chose_implied_intron: int
     # Pass one's arbitration census, kept verbatim so the per-class before/after
     #: is still readable off a drained payload.
     census_before: GapCensus
@@ -227,9 +229,10 @@ class DrainQC:
                 f"{self.deposited + self.dropped} (deposited {self.deposited} + dropped {self.dropped}); "
                 f"a drained fragment that is neither deposited nor rejected has been lost."
             )
-        if self.chose_genomic + self.chose_spliced != self.offered:
+        n_chosen = self.chose_no_implied_intron + self.chose_implied_intron
+        if n_chosen != self.offered:
             raise ValueError(
-                f"the drain chose {self.chose_genomic + self.chose_spliced} hypotheses for "
+                f"the drain chose {n_chosen} hypotheses for "
                 f"{self.offered} offered fragments; exactly one hypothesis wins each whole fragment."
             )
         if not 0 <= self.offered_multimapper <= self.offered:

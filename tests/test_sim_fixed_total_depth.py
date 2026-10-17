@@ -90,7 +90,7 @@ def test_the_nascent_split_is_INSIDE_the_RNA_budget_not_on_top(tmp_path):
     fasta = genome.write_fasta(tmp_path)
     mature = builder.get_transcripts()[0]
     mature.t_index = 0
-    mature.nrna_t_index = 1
+    mature.span_t_index = 1
     entity = Transcript(
         ref="chr1",
         strand=Strand.POS,
@@ -98,7 +98,7 @@ def test_the_nascent_split_is_INSIDE_the_RNA_budget_not_on_top(tmp_path):
         t_id="N1",
         g_id="N1",
         t_index=1,
-        is_nrna=True,
+        is_single_exon=True,
         is_synthetic=True,
         abundance=0.0,
     )

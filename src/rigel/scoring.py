@@ -130,9 +130,9 @@ class FragmentScorer:
         max_ll_delta = -math.log(_eps) if _eps < 1.0 else 0.0
 
         # The synthetic flag drives the scorer's pool separation: only rigel's
-        # synthetic spans form the span pool. An annotated single-exon transcript,
-        # even one that covers a multi-exon transcript's span (``is_nrna``), is an
-        # annotated transcript and is pruned with them.
+        # synthetic spans form the span pool. An annotated single-exon transcript
+        # (``is_single_exon``), even one that covers a multi-exon transcript's span,
+        # is an annotated transcript and is pruned with them.
         t_is_synthetic_arr = index.t_df["is_synthetic"].values.astype(np.uint8)
 
         native_ctx = NativeFragmentScorer(

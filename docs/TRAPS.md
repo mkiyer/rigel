@@ -848,8 +848,8 @@ two-sweep forward-backward is exact only on a tree. Never break a cycle by dropp
 re-isolates the exon the boundary exists for.
 
 **nrna-does-not-mean-synthetic. `~is_synthetic & ~is_nrna` as the "real transcript" filter deleted tens
-of thousands of real termini.** On a non-synthetic row `is_nrna` means "single-exon, so mature ≡ nascent",
-not "manufactured span". One filter: `~is_synthetic`.
+of thousands of real termini.** The flag, named `is_single_exon` since index format 10, means "single-exon,
+so mature ≡ nascent", not "manufactured span". One filter: `~is_synthetic`.
 
 **credit-exactly-one-sj. A fragment crossing K sj must credit exactly one, the leftmost annotated.**
 Crediting all K shifts the library sense fraction by tens of percent and creates between-side correlation

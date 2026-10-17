@@ -151,7 +151,11 @@ def test_abutting_exons_are_one_exon(tmp_path: Path):
     path = _write(tmp_path, [_exon(100, 300), _exon(301, 500)])
     for mode in ("strict", "warn-skip"):
         (t,) = Transcript.read_gtf(path, parse_mode=mode)
-        assert [(e.start, e.end) for e in t.exons] == [(99, 500)] and t.length == 401 and t.is_nrna
+        assert (
+            [(e.start, e.end) for e in t.exons] == [(99, 500)]
+            and t.length == 401
+            and t.is_single_exon
+        )
 
 
 def test_a_transcript_id_shared_by_two_genes_follows_the_parse_mode(tmp_path: Path):

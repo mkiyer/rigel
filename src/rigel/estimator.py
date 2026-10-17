@@ -112,16 +112,17 @@ def _tpm(
     return (rpk / denom * 1e6) if denom > 0 else np.zeros_like(rpk)
 
 
-def _nrna_children_counts(
-    nrna_t_idx: np.ndarray,
+def _span_children_counts(
+    span_t_idx: np.ndarray,
     t_totals: np.ndarray,
     n_transcripts: int,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Aggregate multi-exon children to their parent nRNA entity.
+    """Aggregate multi-exon children to their span entity.
 
-    For every transcript ``i`` with ``nrna_t_idx[i] >= 0`` and
-    ``nrna_t_idx[i] != i`` (i.e., a *proper* child — not a nascent-equiv
-    self-reference), accumulate ``t_totals[i]`` into the parent row.
+    For every transcript ``i`` with ``span_t_idx[i] >= 0`` and
+    ``span_t_idx[i] != i`` (i.e., a *proper* child — not the self-reference
+    of a single-exon transcript that covers a span), accumulate
+    ``t_totals[i]`` into the entity's row.
 
     Returns
     -------
@@ -130,8 +131,8 @@ def _nrna_children_counts(
     children_count : float64[n_transcripts]
         Sum of children's totals per transcript.
     """
-    child_mask = (nrna_t_idx >= 0) & (nrna_t_idx != np.arange(n_transcripts))
-    parents = nrna_t_idx[child_mask]
+    child_mask = (span_t_idx >= 0) & (span_t_idx != np.arange(n_transcripts))
+    parents = span_t_idx[child_mask]
     n_children = np.bincount(parents, minlength=n_transcripts).astype(np.int32)
     children_count = np.bincount(
         parents,
@@ -471,9 +472,7 @@ class AbundanceEstimator:
 
         # A synthetic span's count is the nascent table's: 0 here, and its row is dropped below.
         is_synthetic = index.t_df["is_synthetic"].values
-        # The index's ``is_nrna`` flags every single-exon transcript and every synthetic span; on
-        # this table's rows, which hold no synthetic span, it is the single-exon fact.
-        is_single_exon = index.t_df["is_nrna"].values
+        is_single_exon = index.t_df["is_single_exon"].values
         count = np.where(is_synthetic, 0.0, t_total)
         pmean = self.posterior_mean()
 
@@ -487,13 +486,13 @@ class AbundanceEstimator:
         tpm = _tpm(count, eff)
         tpm_total_rna = _tpm(count, eff, denom_counts=t_total)
 
-        # The nascent span: the span entity ``nrna_t_index`` names, when that entity is a
+        # The nascent span: the span entity ``span_t_index`` names, when that entity is a
         # synthetic span. An annotated single-exon transcript that covers a multi-exon span is the
         # entity there (it names itself), and it is annotated RNA with a row of its own here, so a
         # transcript whose span it covers has no nascent span. The column is guaranteed by the
         # index schema (see TranscriptIndex.load).
         t_ids = index.t_df["t_id"].values
-        span = index.t_df["nrna_t_index"].values
+        span = index.t_df["span_t_index"].values
         has_nascent = (span >= 0) & is_synthetic[span.clip(0)]
         nascent_id = np.where(has_nascent, t_ids[span.clip(0)], ".")
         count_nascent = np.where(has_nascent, t_total[span.clip(0)], 0.0)
@@ -655,7 +654,7 @@ class AbundanceEstimator:
 
         A synthetic span is the transcript the index adds to model the unspliced RNA of the
         multi-exon transcripts whose merged span it is, and those transcripts name it in
-        ``nrna_t_index``. A merged span that an annotated single-exon transcript covers gets no
+        ``span_t_index``. A merged span that an annotated single-exon transcript covers gets no
         synthetic span: that transcript is annotated RNA, a row of the transcript table, and is no
         row here. A synthetic span that no multi-exon transcript names is not a row either.
 
@@ -689,13 +688,13 @@ class AbundanceEstimator:
 
         t_total = self.t_counts.sum(axis=1)
 
-        # nrna_t_index is guaranteed by the index
+        # span_t_index is guaranteed by the index
         # schema (see TranscriptIndex.load dtype contract).  Compute the
         # span → named-by aggregation once, vectorized, then take the
         # slice for the synthetic spans' rows.
-        nrna_t_idx = t_df["nrna_t_index"].values
-        n_annotated_per_span, count_annotated_per_span = _nrna_children_counts(
-            nrna_t_idx,
+        span_t_idx = t_df["span_t_index"].values
+        n_annotated_per_span, count_annotated_per_span = _span_children_counts(
+            span_t_idx,
             t_total,
             n_transcripts=len(t_df),
         )

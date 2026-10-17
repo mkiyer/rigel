@@ -118,11 +118,13 @@ NB_MODULE(_resolve_impl, m) {
              nb::arg("max_fragment_length"),
              "The library's fragment-length limit. A same-strand, same-reference pair whose implied "
              "fragment length is within it is an ordinary genomic molecule, not a chimera.")
-        .def("set_splicing_anchor_tolerance",
-             &FragmentResolver::set_splicing_anchor_tolerance,
+        .def("set_intron_overhang_tolerance",
+             &FragmentResolver::set_intron_overhang_tolerance,
              nb::arg("K"),
-             "Set the splicing-anchor tolerance K (bp) of the gap-hypothesis\n"
-             "enumeration: an annotated intron in an unsequenced gap may overlap up\n"
+             "Set the intron-overhang tolerance K (bp): how many bases an alignment\n"
+             "may run into an annotated intron, and an annotated intron overhang a\n"
+             "mate gap, and still be read as spliced there. In the gap-hypothesis\n"
+             "enumeration an annotated intron in an unsequenced gap may overlap up\n"
              "to K aligned bases on either side and is still cut whole, and a\n"
              "transcript is contradicted only by an intron overlapping more than K\n"
              "bases of an aligned block. Negative K is clamped to 0; the resolver's\n"

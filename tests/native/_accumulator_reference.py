@@ -1150,7 +1150,7 @@ class Accumulator:
         counted at all. So a naive drain would grow the census by however many draws happened to pick a
         spliced path: a census that depends on the RNG. This method snapshots it and puts it back, and
         the information the census cannot express lives on the drain's own axis as
-        ``chose_genomic`` / ``chose_spliced``.
+        ``chose_no_implied_intron`` / ``chose_implied_intron``.
 
         After the drain the tally describes the FINAL state: nothing is held, so the bank is empty AND
         ``deferred_undetermined_gap`` is 0 and the three ``gap_deferred_*`` are 0. That keeps "the
@@ -1176,8 +1176,8 @@ class Accumulator:
             "dropped_too_long": 0,
             "dropped_empty": 0,
             "dropped_strand_undefined": 0,
-            "chose_genomic": 0,
-            "chose_spliced": 0,
+            "chose_no_implied_intron": 0,
+            "chose_implied_intron": 0,
             "census_before": dict(self.tally.gap_resolution),
         }
         census_before = dict(self.tally.gap_resolution)
@@ -1189,7 +1189,8 @@ class Accumulator:
             # The choice is a LOCAL index into the record's run of hypotheses over its placements, in
             # the order the flattening emits them — so it names a placement and a hypothesis at once.
             placement, path = self._locate(fragment, int(choice))
-            counters["chose_genomic" if path.is_unspliced else "chose_spliced"] += 1
+            chose = "chose_no_implied_intron" if path.is_unspliced else "chose_implied_intron"
+            counters[chose] += 1
             counters["offered_multimapper"] += int(fragment.n_placements > 1)
             outcome = self.deposit(
                 placement.ref,

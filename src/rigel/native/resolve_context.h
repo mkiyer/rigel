@@ -469,8 +469,8 @@ public:
     std::vector<int32_t> exon_ends_;       // [total_exons] — genomic end coords
     std::vector<int32_t> exon_cumsum_;     // [total_exons] — cumulative spliced bp before each exon
 
-    // --- Splicing-anchor tolerance K (bp), the gap-hypothesis enumeration's slack ---
-    int32_t splicing_anchor_tolerance_ = 0;
+    // --- Intron-overhang tolerance K (bp), the gap-hypothesis enumeration's slack ---
+    int32_t intron_overhang_tolerance_ = 0;
     //: the library's fragment-length limit; 0 ⇒ no molecule is compatible, so the compatibility
     //: rescue in `detect_chimera` cannot fire and every disjoint candidate stays a chimera.
     int32_t max_fragment_length_ = 0;
@@ -654,15 +654,17 @@ public:
     // SPLICED_IMPLICIT detection
     // ----------------------------------------------------------------
 
-    /// Set the splicing-anchor tolerance K (bp) of the gap-hypothesis enumeration, which every
-    /// non-chimeric fragment with an unsequenced gap goes through. K is the slack in both of its tests:
-    /// an annotated intron in a gap may overlap up to K aligned bases on either side and is still cut
-    /// whole (`collect_transcript_introns_in_gap`), and a transcript is contradicted only by an intron
-    /// overlapping more than K bases of an aligned block (`transcript_contradicts_blocks`). Negative K
-    /// is clamped to 0; the resolver's own default, before this is called, is 0.
-    void set_splicing_anchor_tolerance(int32_t K) {
+    /// Set the intron-overhang tolerance K (bp): how many bases an alignment may run into an annotated
+    /// intron, and an annotated intron overhang a mate gap, and still be read as spliced there. It is the
+    /// slack in both tests of the gap-hypothesis enumeration, which every non-chimeric fragment with an
+    /// unsequenced gap goes through: an annotated intron in a gap may overlap up to K aligned bases on
+    /// either side and is still cut whole (`collect_transcript_introns_in_gap`), and a transcript is
+    /// contradicted only by an intron overlapping more than K bases of an aligned block
+    /// (`transcript_contradicts_blocks`). Negative K is clamped to 0; the resolver's own default, before
+    /// this is called, is 0.
+    void set_intron_overhang_tolerance(int32_t K) {
         if (K < 0) K = 0;
-        splicing_anchor_tolerance_ = K;
+        intron_overhang_tolerance_ = K;
     }
 
     /// Does transcript ``t`` contradict the alignment? True when one of its introns overlaps the
@@ -674,7 +676,7 @@ public:
     /// this test the enumeration would emit hypotheses no molecule has.
     ///
     /// ⚠ Abutting is fine: an intron may START where a block ends. And the overlap must exceed the
-    /// SPLICING ANCHOR TOLERANCE K before it counts -- the same slack the gap match uses, because it is
+    /// INTRON-OVERHANG TOLERANCE K before it counts -- the same slack the gap match uses, because it is
     /// the same physical thing: an aligner routinely runs a read a base or two past a donor. Without
     /// this the predicate rejects exactly the fragments K exists to accept.
     inline bool transcript_contradicts_blocks(int32_t t,
@@ -710,10 +712,10 @@ public:
     ///
     /// ⛔ THE GAPS ARE ONLY THE UNSEQUENCED ONES. The walk over consecutive blocks emits every hole, and a
     /// read `50M200N50M` has two blocks, so a sequenced intron arrives indistinguishable from a mate gap.
-    /// Searching it again is not merely redundant: the ±K anchor tolerance lets a DIFFERENT nearby intron
-    /// answer for it, the two normalise into one wider interval, and L comes out too SHORT. Gaps matching
-    /// an observed intron by EXACT (start, end) equality are dropped -- never by overlap, which would also
-    /// drop a genuine gap intron abutting an observed one.
+    /// Searching it again is not merely redundant: the ±K intron-overhang tolerance lets a DIFFERENT
+    /// nearby intron answer for it, the two normalise into one wider interval, and L comes out too SHORT.
+    /// Gaps matching an observed intron by EXACT (start, end) equality are dropped -- never by overlap,
+    /// which would also drop a genuine gap intron abutting an observed one.
     ///
     /// ⚠ The path is compared WHOLE, across every gap, never per gap. A per-gap union can take gap A's
     /// intron from T1 and gap B's from T2 and emit a path no single molecule has; grouping by the whole
@@ -775,7 +777,7 @@ public:
 
         // ⭐ No unsequenced gap ⇒ one hypothesis, the unspliced one, and nothing to arbitrate. The
         // degenerate case is the general case: `deposit` still receives a set, of size one.
-        const int32_t K = splicing_anchor_tolerance_;
+        const int32_t K = intron_overhang_tolerance_;
         if (gaps.empty()) {
             emit_unspliced_hypothesis(cr);
             return;

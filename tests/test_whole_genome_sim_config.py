@@ -51,7 +51,7 @@ def _entity(transcript_id: str, start: int, end: int, t_index: int) -> Transcrip
         t_id=transcript_id,
         g_id=transcript_id,
         t_index=t_index,
-        is_nrna=True,
+        is_single_exon=True,
         is_synthetic=True,
         abundance=0.0,
     )
@@ -74,8 +74,8 @@ def test_sparse_nascent_pools_onto_entities_and_the_SPAN_is_the_unit():
     lone = _entity("N_off", 1300, 1600, 5)
     for i, t in enumerate((multi_a, multi_b, single, off)):
         t.t_index = i
-    multi_a.nrna_t_index = multi_b.nrna_t_index = 4
-    off.nrna_t_index = 5
+    multi_a.span_t_index = multi_b.span_t_index = 4
+    off.span_t_index = 5
     transcripts = [multi_a, multi_b, single, off, shared, lone]
 
     realized_ratio = apply_sparse_nrna(transcripts, (150.0, 150.0), on_fraction=1.0, seed=17)
@@ -333,7 +333,7 @@ def _sparse_population(n: int, *, seed: int = 3) -> tuple[list[Transcript], list
             [(base, base + 100), (base + 200, base + 300)],
         )
         t.t_index = i
-        t.nrna_t_index = n + i
+        t.span_t_index = n + i
         contributors.append(t)
         entities.append(_entity(f"N{i}", base, base + 300, n + i))
     return contributors, entities
@@ -452,7 +452,7 @@ def test_the_on_off_DRAW_IS_PER_SPAN_NOT_PER_ISOFORM():
                 [(off, off + 100), (off + 200, off + 300)],
             )
             t.t_index = sp * k + j
-            t.nrna_t_index = 10_000 + sp
+            t.span_t_index = 10_000 + sp
             rows.append(t)
     apply_sparse_nrna(rows + entities, (1.0, 1000.0), on_fraction=p, seed=31)
 
@@ -492,7 +492,7 @@ def test_a_multi_exon_contributor_with_no_ENTITY_raises_in_the_SPARSE_path_too()
     own raise with `continue` passes every test. A transcript list without entities is not a rigel
     index's, and dropping its molecules silently is the failure the rule exists to stop."""
     orphan = _transcript("orphan", 100.0, [(0, 100), (200, 300)])
-    orphan.t_index = 0  # nrna_t_index stays unset/-1: no entity
+    orphan.t_index = 0  # span_t_index stays unset/-1: no entity
     with pytest.raises(ValueError, match="nascent entity"):
         apply_sparse_nrna([orphan], (1.0, 100.0), on_fraction=1.0, seed=1)
 

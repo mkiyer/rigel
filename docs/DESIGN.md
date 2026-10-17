@@ -27,7 +27,7 @@ for a concept that already had a name, and the ambiguity cost a reader real time
 | **the sj's LOW end / HIGH end** — `_lo` / `_hi`, or `boundary_left` / `boundary_right` | the two BOUNDARIES a sj is anchored at, named in GENOMIC order, which is the order the code stores them in | `donor` · `acceptor` — see below |
 | **slot** | one entry of the chain, which alternates REGION, BOUNDARY, REGION, BOUNDARY … A slot is a REGION **or** a BOUNDARY | — |
 | **step** | one adjacency move along the chain: REGION→BOUNDARY or BOUNDARY→REGION. So REGION→BOUNDARY→REGION is **two steps** | `hop` |
-| **structurally pure-gDNA object** (**G1 object**) | a slot at which no RNA strand is admissible ACCORDING TO THE ANNOTATION, so its composition is certain *given the annotation*: an intergenic REGION, or an `intergenic\|exon` BOUNDARY. Its gDNA density is directly observed, with nothing to deconvolve. The predicate is `region_geometry.g1_locked`. On real data the certainty is annotation-derived rather than physical — intergenic space carries unannotated transcription the tool does not model (§0b) — which is safe for a POOLED level and is not a licence to treat one such slot as ground truth | `anchor` as an object name. The word survives only for the landscape's pooled intergenic level and the aligner's splice-anchor tolerance |
+| **structurally pure-gDNA object** (**G1 object**) | a slot at which no RNA strand is admissible ACCORDING TO THE ANNOTATION, so its composition is certain *given the annotation*: an intergenic REGION, or an `intergenic\|exon` BOUNDARY. Its gDNA density is directly observed, with nothing to deconvolve. The predicate is `region_geometry.g1_locked`. On real data the certainty is annotation-derived rather than physical — intergenic space carries unannotated transcription the tool does not model (§0b) — which is safe for a POOLED level and is not a licence to treat one such slot as ground truth | `anchor` as an object name. The word survives only for the landscape's pooled intergenic level and the aligner's splice anchors (the aligned bases either side of a junction, which the splice blacklist tests) |
 | **counts** | discrete integer fragment counts | — |
 | **density** = **abundance** | counts per base. The two words mean the same thing | not the simulator's molar `abundance=` field, which is a per-transcript weight |
 | **crossing fragment** | a **fragment** that spans a BOUNDARY. Legitimate and necessary — `crossing_eff_length` is the opportunity for exactly this — and it stays | only the *object* sense is banned: objects are REGIONs and BOUNDARIES, never "crossings" |
@@ -448,7 +448,7 @@ library; the current split is `ISSUES: performance-memory-bounded-solve`'s basel
 
 ## 2. The index
 
-`INDEX_FORMAT_VERSION 9` (the splice graph since 8), shipped as `regions.feather` + `edges.feather`, built and
+`INDEX_FORMAT_VERSION 10` (the splice graph since 8), shipped as `regions.feather` + `edges.feather`, built and
 checked by `calibration/splice_graph.py`.
 
 > The genome is a graph. **Regions** are intervals; **boundaries** connect them. A fragment is a **path**.
@@ -961,9 +961,11 @@ an open defect: `ISSUES: drain-contaminates-certified-rna`.
 ## 5. nRNA components
 
 Not per-transcript shadows: unique nascent spans keyed by `(ref, strand, start, end)` are shared across
-transcripts and materialized as ordinary transcript rows in `index.t_df`, flagged `is_nrna` /
-`is_synthetic`. On a non-synthetic row `is_nrna` means "single-exon, so mature ≡ nascent" — not
-"manufactured span". The real-transcript filter is `~is_synthetic`, alone
+transcripts and materialized as ordinary transcript rows in `index.t_df`, flagged `is_synthetic`; each
+multi-exon transcript names its span's entity in `span_t_index` — the synthetic span, or the annotated
+single-exon transcript that covers the span. `is_single_exon` is the structural fact, true of every
+single-exon row (every synthetic span is one): on a real row it means "single-exon, so mature ≡ nascent",
+never "manufactured span". The real-transcript filter is `~is_synthetic`, alone
 (`TRAPS: nrna-does-not-mean-synthetic`).
 
 ---

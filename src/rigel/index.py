@@ -79,8 +79,10 @@ MANIFEST_JSON = "manifest.json"
 #: ``edges.feather``, both mandatory, adjacent regions not merged (a merge deletes the region bound at a
 #: majority of real transcript termini). 9 drops the columns nothing read, adds the duplicate-transcript
 #: alias table and the splice blacklist's count, and counts every span's contributors to a nascent entity
-#: that covers several.
-INDEX_FORMAT_VERSION = 9
+#: that covers several. 10 names the transcript table's columns for what they hold (``is_single_exon``,
+#: ``span_t_index``, ``span_n_contributors``) and the manifest's ``nascent_tolerance``, and writes 0 in the
+#: contiguous boundaries' reach columns, which nothing reads.
+INDEX_FORMAT_VERSION = 10
 
 
 def _rigel_version() -> str:
@@ -436,7 +438,7 @@ def _cluster_coordinates(coords: np.ndarray, tolerance: int) -> np.ndarray:
 
 def create_nrna_transcripts(
     transcripts: list[Transcript],
-    tolerance: int = IndexConfig.nrna_merge_tolerance,
+    tolerance: int = IndexConfig.nascent_tolerance,
 ) -> tuple[list[Transcript], dict[int, tuple], dict[tuple, int], dict[tuple, "Transcript"]]:
     """Create synthetic nRNA transcripts, detect annotated equivalents.
 
@@ -448,9 +450,10 @@ def create_nrna_transcripts(
        so synthetics are never smaller than any contributing transcript.
     3. Check if an existing **single-exon** transcript already covers
        each merged span (exact match or full containment).
-       If so, mark it ``is_nrna = True`` — no synthetic needed.
+       If so, that transcript is the span's entity — no synthetic needed;
+       its ``span_n_contributors`` counts the span's transcripts.
     4. For uncovered spans, create a synthetic single-exon ``Transcript``
-       flagged ``is_nrna = True, is_synthetic = True``.
+       flagged ``is_synthetic = True`` (and ``is_single_exon = True``).
     5. Synthetic transcripts are **gene-neutral** by design: they receive a
        sentinel ``g_id`` equal to their own ``t_id`` and ``g_type =
        "nascent_rna"``.  Rigel is transcript-centric, and a merged nRNA span
@@ -475,12 +478,12 @@ def create_nrna_transcripts(
     t_to_span_key : dict[int, tuple]
         Mapping from annotated multi-exon transcript ``t_index`` to its
         merged nRNA span key ``(ref, strand, start, end)``.  Used by
-        the caller to set ``nrna_t_index`` after ``t_index`` assignment.
+        the caller to set ``span_t_index`` after ``t_index`` assignment.
     span_to_syn_idx : dict[tuple, int]
         Mapping from uncovered span key to the index in *synthetics*.
     covered_equiv : dict[tuple, Transcript]
-        Mapping from covered span key to the annotated nascent-equiv
-        transcript.
+        Mapping from covered span key to the annotated single-exon
+        transcript that covers it.
     """
     from .types import Interval, Strand
 
@@ -572,8 +575,7 @@ def create_nrna_transcripts(
             if s_start > m_start:
                 break  # sorted by start, no more can contain
             if s_start <= m_start and m_end <= s_end:
-                s_tx.is_nrna = True
-                s_tx.nrna_n_contributors += span_contributor_count[span_key]
+                s_tx.span_n_contributors += span_contributor_count[span_key]
                 covered.add(span_key)
                 covered_equiv[span_key] = s_tx
                 break
@@ -598,9 +600,9 @@ def create_nrna_transcripts(
             g_id=t_id,
             g_name="",
             g_type="nascent_rna",
-            is_nrna=True,
+            is_single_exon=True,
             is_synthetic=True,
-            nrna_n_contributors=span_contributor_count[span_key],
+            span_n_contributors=span_contributor_count[span_key],
         )
         span_to_syn_idx[span_key] = len(synthetics)
         synthetics.append(syn)
@@ -682,9 +684,9 @@ def _gen_transcript_intervals(t: Transcript) -> Iterator[AnnotatedInterval]:
 
     Synthetic nRNA transcripts yield nothing: the C++ resolver derives
     their candidates from the transcripts a fragment hits, through each
-    one's ``nrna_t_index``.  Annotated nascent-equiv single-exon
-    transcripts (``is_nrna=True, is_synthetic=False``) yield intervals
-    like any other transcript.
+    one's ``span_t_index``.  An annotated single-exon transcript that
+    covers a span (``is_synthetic=False``) yields intervals like any
+    other transcript.
     """
     if t.is_synthetic:
         return
@@ -998,7 +1000,7 @@ class TranscriptIndex:
         write_tsv: bool = IndexConfig.write_tsv,
         gtf_parse_mode: Literal["strict", "warn-skip"] = IndexConfig.gtf_parse_mode,
         collapse_duplicate_transcripts: bool = IndexConfig.collapse_duplicate_transcripts,
-        nrna_tolerance: int = IndexConfig.nrna_merge_tolerance,
+        nascent_tolerance: int = IndexConfig.nascent_tolerance,
         alignable_zarr_path: str | Path | None = None,
         splice_blacklist_min_count: int = IndexConfig.splice_blacklist_min_count,
     ) -> None:
@@ -1030,9 +1032,9 @@ class TranscriptIndex:
         gtf_parse_mode : {"strict", "warn-skip"}
             GTF parsing behavior. ``"strict"`` (default) fails fast on
             malformed lines; ``"warn-skip"`` logs warnings and skips.
-        nrna_tolerance : int
-            Max distance (bp) for clustering transcript start/end sites
-            when building synthetic nascent RNA transcripts.
+        nascent_tolerance : int
+            Max distance (bp) for clustering multi-exon transcripts' start
+            and end sites into the synthetic spans that model their nascent RNA.
         alignable_zarr_path : path, optional
             Path to an alignable Zarr store built for the same genome+
             aligner.  When provided, the splice-junction artifact
@@ -1050,7 +1052,7 @@ class TranscriptIndex:
             write_tsv=write_tsv,
             gtf_parse_mode=gtf_parse_mode,
             collapse_duplicate_transcripts=collapse_duplicate_transcripts,
-            nrna_merge_tolerance=nrna_tolerance,
+            nascent_tolerance=nascent_tolerance,
             splice_blacklist_min_count=splice_blacklist_min_count,
         )
         output_dir = Path(output_dir)
@@ -1099,7 +1101,7 @@ class TranscriptIndex:
         # -- Synthetic nRNA transcripts ---------------------------------------
         logger.info("[START] Creating synthetic nRNA transcripts")
         synthetics, t_to_span_key, span_to_syn_idx, covered_equiv = create_nrna_transcripts(
-            transcripts, tolerance=nrna_tolerance
+            transcripts, tolerance=nascent_tolerance
         )
         # Synthetic transcripts are gene-neutral (see create_nrna_transcripts
         # docstring). Each synthetic gets its OWN dedicated g_index — we do
@@ -1111,7 +1113,7 @@ class TranscriptIndex:
         next_g_index = max((t.g_index for t in transcripts), default=-1) + 1
 
         # Assign t_index and g_index to each synthetic; build span→t_index
-        span_to_nrna_t_index: dict[tuple, int] = {}
+        span_entity_t_index: dict[tuple, int] = {}
         next_t_index = len(transcripts)
         for syn in synthetics:
             syn.t_index = next_t_index
@@ -1119,16 +1121,16 @@ class TranscriptIndex:
             syn.g_index = next_g_index
             next_g_index += 1
             span_key = (syn.ref, int(syn.strand), syn.start, syn.end)
-            span_to_nrna_t_index[span_key] = syn.t_index
+            span_entity_t_index[span_key] = syn.t_index
 
-        # For covered spans, the nRNA entity is the nascent-equiv transcript
+        # A covered span's entity is the annotated single-exon transcript that covers it
         for span_key, equiv_tx in covered_equiv.items():
-            span_to_nrna_t_index[span_key] = equiv_tx.t_index
-            equiv_tx.nrna_t_index = equiv_tx.t_index
+            span_entity_t_index[span_key] = equiv_tx.t_index
+            equiv_tx.span_t_index = equiv_tx.t_index
 
-        # Set nrna_t_index on every multi-exon annotated transcript
+        # Set span_t_index on every multi-exon annotated transcript
         for me_tidx, span_key in t_to_span_key.items():
-            transcripts[me_tidx].nrna_t_index = span_to_nrna_t_index.get(span_key, -1)
+            transcripts[me_tidx].span_t_index = span_entity_t_index.get(span_key, -1)
 
         transcripts.extend(synthetics)
         logger.info(
@@ -1210,7 +1212,7 @@ class TranscriptIndex:
                 "collapse_duplicate_transcripts": collapse_duplicate_transcripts,
                 "feather_compression": feather_compression,
                 "gtf_parse_mode": gtf_parse_mode,
-                "nrna_tolerance": nrna_tolerance,
+                "nascent_tolerance": nascent_tolerance,
                 "splice_blacklist_min_count": splice_blacklist_min_count,
                 "write_tsv": write_tsv,
             },
@@ -1335,8 +1337,8 @@ class TranscriptIndex:
             "strand": np.int8,
             "t_index": np.int32,
             "g_index": np.int32,
-            "nrna_t_index": np.int32,
-            "nrna_n_contributors": np.int16,
+            "span_t_index": np.int32,
+            "span_n_contributors": np.int16,
             "length": np.int32,
         }
         for col, dtype in _INT_DOWNCAST.items():
@@ -1675,12 +1677,12 @@ class TranscriptIndex:
         #    (see _gen_transcript_intervals).  The resolver materialises
         #    each synthetic candidate from real-tx hits via nrna_parent_.
         is_synth = self.t_df["is_synthetic"].to_numpy(dtype=bool)
-        nrna_idx = self.t_df["nrna_t_index"].to_numpy(dtype=np.int32)
-        parent = np.full(nrna_idx.shape, -1, dtype=np.int32)
-        valid = (nrna_idx >= 0) & (nrna_idx < is_synth.size)
-        parent_is_synth = np.zeros_like(nrna_idx, dtype=bool)
-        parent_is_synth[valid] = is_synth[nrna_idx[valid]]
-        parent[parent_is_synth] = nrna_idx[parent_is_synth]
+        span_idx = self.t_df["span_t_index"].to_numpy(dtype=np.int32)
+        parent = np.full(span_idx.shape, -1, dtype=np.int32)
+        valid = (span_idx >= 0) & (span_idx < is_synth.size)
+        parent_is_synth = np.zeros_like(span_idx, dtype=bool)
+        parent_is_synth[valid] = is_synth[span_idx[valid]]
+        parent[parent_is_synth] = span_idx[parent_is_synth]
         ctx.set_nrna_parent_index(parent.tolist())
 
         self.resolver = ctx

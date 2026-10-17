@@ -329,7 +329,7 @@ def test_draining_a_placement_choice_equals_depositing_that_placement_directly(c
     direct.deposit(chosen.ref, chosen.start, chosen.end)
     _assert_same(held, direct, f"choice {choice}")
     assert counters["offered"] == 1 and counters["offered_multimapper"] == 1
-    assert counters["deposited"] == 1 and counters["chose_genomic"] == 1
+    assert counters["deposited"] == 1 and counters["chose_no_implied_intron"] == 1
     assert held.tally.deferred == [] and held.tally.qc["deferred_multiple_placements"] == 0
     _conserved(held, 1)
 

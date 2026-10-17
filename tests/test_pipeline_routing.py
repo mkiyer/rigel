@@ -125,7 +125,7 @@ class _Index:
                 "start": np.zeros(self.num_transcripts, dtype=np.int32),
                 "end": np.full(self.num_transcripts, 10000, dtype=np.int32),
                 "length": np.full(self.num_transcripts, 1000, dtype=np.int32),
-                "is_nrna": np.zeros(self.num_transcripts, dtype=bool),
+                "is_single_exon": np.zeros(self.num_transcripts, dtype=bool),
                 "is_synthetic": np.zeros(self.num_transcripts, dtype=bool),
             }
         )

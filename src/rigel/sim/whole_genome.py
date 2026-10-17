@@ -16,7 +16,7 @@ expressed with probability ``frac_expressed``, or from a salmon / kallisto / sim
 Nascent RNA
 -----------
 Nascent abundance lives on the nascent entities: every multi-exon transcript links through
-``nrna_t_index`` to one entity spanning its TSS/TES cluster, and annotated multi-exon transcripts
+``span_t_index`` to one entity spanning its TSS/TES cluster, and annotated multi-exon transcripts
 always end with ``nrna_abundance = 0``. Two modes set the entity levels. ``sparse``
 (``abundance_ranges`` + ``on_fraction``) switches each entity on with probability ``on_fraction``
 and draws its level log-uniformly over ``(lo, hi)``; that level is absolute and independent of the
@@ -446,8 +446,8 @@ def merge_shadow_transcripts(
 
     ``transcripts`` is the index's list (annotated rows plus nascent entities). The shadow GTF is read
     with the ordinary GTF loader and appended with ``t_index`` continuing after the index's rows,
-    ``is_nrna = is_synthetic = False`` and ``nrna_t_index = -1`` — a shadow carries no nascent because
-    it is itself the unannotated RNA. A shadow whose ``t_id`` the index already knows is refused: it
+    ``is_synthetic = False`` and ``span_t_index = -1`` — a shadow carries no nascent because it is
+    itself the unannotated RNA. A shadow whose ``t_id`` the index already knows is refused: it
     would be annotated, and the point of a shadow is that the tool cannot know about it. Their
     fragments are named like any RNA fragment (``{t_id}:…``), so the oracle split files them as
     ``mrna`` and the certified per-slot truth shows RNA exactly where the annotation says there is
@@ -463,9 +463,8 @@ def merge_shadow_transcripts(
     base = max((t.t_index for t in transcripts), default=-1) + 1
     for k, t in enumerate(shadows):
         t.t_index = base + k
-        t.is_nrna = False
         t.is_synthetic = False
-        t.nrna_t_index = -1
+        t.span_t_index = -1
         t.nrna_abundance = 0.0
     logger.info(
         "Shadow transcripts: %d appended from %s (unknown to the index by construction)",
@@ -479,9 +478,9 @@ def load_transcripts_from_index(index_dir: str | Path) -> list[Transcript]:
     """The simulation's transcriptome is the rigel index's.
 
     Rebuilds one :class:`Transcript` per index row — annotated transcripts and the synthetic nascent
-    entities, with ``is_nrna`` / ``is_synthetic`` / ``nrna_t_index`` / ``nrna_n_contributors`` exactly as
-    the index carries them and ``t_index`` equal to the index row — so the simulator, the oracle and
-    `rigel quant` all speak about the same transcript set. The GTF loader is not used here because it
+    entities, with ``is_single_exon`` / ``is_synthetic`` / ``span_t_index`` / ``span_n_contributors``
+    exactly as the index carries them and ``t_index`` equal to the index row — so the simulator, the
+    oracle and `rigel quant` all speak about the same transcript set. The GTF loader is not used here because it
     cannot know what the index did (duplicate collapse, nascent consolidation), and a simulator fed the
     raw GTF would carry a different nascent model from the tool's. Raises if the rebuilt rows are not
     contiguous ``t_index`` 0..n-1, or if an index row has no exon intervals.
@@ -508,10 +507,10 @@ def load_transcripts_from_index(index_dir: str | Path) -> list[Transcript]:
             is_basic=bool(row.is_basic),
             is_mane=bool(row.is_mane),
             is_ccds=bool(row.is_ccds),
-            is_nrna=bool(row.is_nrna),
+            is_single_exon=bool(row.is_single_exon),
             is_synthetic=bool(row.is_synthetic),
-            nrna_t_index=int(row.nrna_t_index),
-            nrna_n_contributors=int(row.nrna_n_contributors),
+            span_t_index=int(row.span_t_index),
+            span_n_contributors=int(row.span_n_contributors),
         )
         t.length = t.compute_length()
         transcripts.append(t)
@@ -731,12 +730,12 @@ def assign_nrna_to_entities(transcripts: list[Transcript], per_contributor: np.n
 
     ``per_contributor[i]`` is transcript ``i``'s nascent molecular abundance (zero for anything that
     is not an expressed multi-exon transcript). Every multi-exon transcript links to one entity through
-    ``nrna_t_index`` — the index's synthetic single-exon transcript over the clustered span, or the
+    ``span_t_index`` — the index's synthetic single-exon transcript over the clustered span, or the
     annotated single-exon transcript that already covers it — and the entity's ``nrna_abundance`` is
     the sum over its contributors. Annotated multi-exon transcripts end with ``nrna_abundance = 0``:
     their nascent molecules are the entity's, and are sampled on the entity's template.
 
-    Raises rather than skipping when a contributor has no entity (``nrna_t_index < 0``) or is
+    Raises rather than skipping when a contributor has no entity (``span_t_index < 0``) or is
     single-exon: both mean the transcript list did not come from a rigel index.
     Returns the number of entities that received nascent.
     """
@@ -749,12 +748,12 @@ def assign_nrna_to_entities(transcripts: list[Transcript], per_contributor: np.n
             continue
         if len(t.exons) <= 1:
             raise ValueError(f"{t.t_id} is single-exon and cannot contribute nascent RNA")
-        if t.nrna_t_index < 0 or t.nrna_t_index not in by_index:
+        if t.span_t_index < 0 or t.span_t_index not in by_index:
             raise ValueError(
-                f"{t.t_id} is multi-exon but links to no nascent entity (nrna_t_index="
-                f"{t.nrna_t_index}); the transcript list did not come from a rigel index"
+                f"{t.t_id} is multi-exon but links to no nascent entity (span_t_index="
+                f"{t.span_t_index}); the transcript list did not come from a rigel index"
             )
-        entity = by_index[t.nrna_t_index]
+        entity = by_index[t.span_t_index]
         if entity.nrna_abundance == 0.0:
             n_entities += 1
         entity.nrna_abundance += float(amount)
@@ -871,10 +870,10 @@ def apply_sparse_nrna(
     for t in transcripts:
         if (t.abundance or 0.0) <= 0.0 or len(t.exons) <= 1:
             continue
-        entity = by_index.get(t.nrna_t_index)
+        entity = by_index.get(t.span_t_index)
         if entity is None:
             raise ValueError(
-                f"transcript {t.t_id} has no nascent entity (nrna_t_index={t.nrna_t_index}); a "
+                f"transcript {t.t_id} has no nascent entity (span_t_index={t.span_t_index}); a "
                 f"transcript list without entities is not a rigel index's"
             )
         if entity.t_index not in seen:

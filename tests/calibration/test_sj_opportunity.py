@@ -308,8 +308,8 @@ def test_the_index_adapter_uses_the_REAL_transcripts_and_only_those(mini_index):
     """``~is_synthetic``, alone. The manufactured nascent spans are not molecules anyone sequenced,
     and weighting them would put opportunity on exon structures the library does not contain.
 
-    Not ``~is_synthetic & ~is_nrna``: on a real row ``is_nrna`` means "single-exon, so mature is
-    nascent", and using it as a realness filter deletes real transcripts
+    Not ``~is_synthetic & ~is_single_exon``: a real single-exon transcript is a real transcript, and
+    using that flag as a realness filter deletes real transcripts
     (TRAPS: nrna-does-not-mean-synthetic).
     """
     max_length = 400

@@ -117,8 +117,8 @@ def reach_digest(index: "TranscriptIndex") -> str:
     key covers.
 
     The sj rows only: `build_sj_geometry_arrays`, the one reader of a reach, reads those. The contiguous rows
-    carry reaches too and nothing reads them, so hashing them would refuse a good cache over values no
-    consumer sees.
+    hold 0 in the reach columns (the index computes no contiguous reach) and nothing reads them, so hashing
+    them would refuse a good cache over values no consumer sees.
 
     Computed on demand, never stored beside the index. It is stored in the CACHE's manifest, which is a
     different thing: the cache is describing an external artifact it cannot recompute, exactly as

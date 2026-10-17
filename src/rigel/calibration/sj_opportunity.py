@@ -149,9 +149,8 @@ def crossing_probability_from_index(index: "TranscriptIndex", max_length: int) -
 
     The transcript filter is ``~is_synthetic``, alone. The manufactured unspliced spans are not
     molecules anybody sequenced, and giving them opportunity puts weight on exon structures the
-    library does not contain. It is NOT ``~is_synthetic & ~is_nrna``: on a real row ``is_nrna``
-    means "a single-exon transcript that covers a multi-exon transcript's span", and using it as a realness
-    filter silently deletes real transcripts.
+    library does not contain. It is NOT ``~is_synthetic & ~is_single_exon``: a real single-exon transcript
+    is a real transcript, and using that flag as a realness filter silently deletes real transcripts.
     """
     offsets, exon_starts, exon_ends, _ = index.build_exon_csr()
     theta = (~index.t_df["is_synthetic"].to_numpy()).astype(np.float64)

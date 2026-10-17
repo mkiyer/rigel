@@ -3,7 +3,7 @@ the splice motif was never read. The first block gates the per-intron ``SPLICED_
 discriminant, exercising the C++ ``FragmentResolver`` through the test driver
 ``_resolution_reference.resolve_fragment`` and its ``make_fragment`` helper over an acceptance matrix of
 transcript geometries; one comprehensive GTF fixture built once per session supplies every geometry
-the matrix needs, and each test sets the resolver's ``splicing_anchor_tolerance`` explicitly so the
+the matrix needs, and each test sets the resolver's ``intron_overhang_tolerance`` explicitly so the
 cases do not depend on execution order. It also gates that gap introns are searched whatever the
 splice type. The second block gates what the scanner does with such a fragment on a real scan: a
 determined path deposits, and an undetermined one is held in the deferred bank with every hypothesis
@@ -81,11 +81,11 @@ def with_tolerance(implicit_index):
     resolver = implicit_index.resolver
 
     def _set(k: int) -> None:
-        resolver.set_splicing_anchor_tolerance(int(k))
+        resolver.set_intron_overhang_tolerance(int(k))
 
     yield implicit_index, _set
     # Restore default K=0 between tests so ordering does not bleed state.
-    resolver.set_splicing_anchor_tolerance(0)
+    resolver.set_intron_overhang_tolerance(0)
 
 
 def _exon(start: int, end: int) -> GenomicInterval:
@@ -335,7 +335,8 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
     MIXED_BLOCKS = ((62100, 62200), (62400, 62500), (62900, 63000))
 
     #: The same molecule with the observed splice landing 2 bp INSIDE the annotated donor, so the
-    #: observed intron is UNANNOTATED and the annotated one sits within the ±K anchor tolerance of it.
+    #: observed intron is UNANNOTATED and the annotated one sits within the ±K intron-overhang
+    #: tolerance of it.
     NEAR_MISS_BLOCKS = ((62100, 62202), (62400, 62500), (62900, 63000))
     NEAR_MISS_OBSERVED = (62202, 62400)
 
@@ -388,10 +389,10 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
         # misalignment, which is why `FragmentPool.RNA_SPLICED` requires an ANNOTATED sj). The
         # unspliced — genomic — hypothesis therefore stays live and the accumulator will defer.
         assert self._emitted(result) == [[self.IMPLIED], []], (
-            "the observed gap [62202,62400) is within the K=3 anchor tolerance of the ANNOTATED intron "
-            "[62200,62400), so dropping only exact matches is what stops a DIFFERENT intron being "
-            "substituted for it. Two overlapping introns then normalise into one wider one and L comes "
-            "out too SHORT — "
+            "the observed gap [62202,62400) is within the K=3 intron-overhang tolerance of the "
+            "ANNOTATED intron [62200,62400), so dropping only exact matches is what stops a "
+            "DIFFERENT intron being substituted for it. Two overlapping introns then normalise into "
+            "one wider one and L comes out too SHORT — "
         )
 
     # U4 — the classification does not move. This work is about L, not about labelling.

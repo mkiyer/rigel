@@ -679,7 +679,7 @@ def markdown_report(path: Path, out: Path) -> None:
 
     THREE POOLS AND THEY ARE NOT THE SAME QUESTION. Every fragment in the library is gDNA, SYNTHETIC
     nascent RNA, or ANNOTATED RNA, and the split is on ``is_synthetic`` — a span this index
-    manufactured — never on ``is_single_exon`` (the index's ``is_nrna``). A single-exon ANNOTATED
+    manufactured — never on ``is_single_exon``. A single-exon ANNOTATED
     transcript is at once the nascent and the mature form of a real gene, and it belongs to the ANNOTATED
     pool (`TRAPS: nrna-does-not-mean-synthetic`). The transcript and gene sections then score the annotated
     pool ALONE, because that is the table a user reads: synthetic entities are absent from it by

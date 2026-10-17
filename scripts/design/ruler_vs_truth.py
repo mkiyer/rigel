@@ -227,7 +227,7 @@ def load_truth(index: TranscriptIndex, index_dir: Path, panel_dir: Path, conditi
     kind = np.where(
         t.is_synthetic.to_numpy(bool),
         "entity",
-        np.where(t.is_nrna.to_numpy(bool), "single-exon", "mRNA"),
+        np.where(t.is_single_exon.to_numpy(bool), "single-exon", "mRNA"),
     )
     truth = pd.read_csv(panel_dir / condition / "truth_abundances.tsv", sep="\t").set_index(
         "transcript_id"
@@ -807,7 +807,7 @@ def scale_readout(index, region_arrays, index_dir, panel_dir, condition, config,
     loci, pri = cap["multi_loci"], cap["priors"]
     t = index.t_df
     syn = t["is_synthetic"].to_numpy(dtype=bool)
-    single = (~syn) & t["is_nrna"].to_numpy(dtype=bool)
+    single = (~syn) & t["is_single_exon"].to_numpy(dtype=bool)
     multi = (~syn) & ~single
     frags = truth.frags
     # the locus gDNA component against the gDNA-space yield
@@ -1008,7 +1008,7 @@ def self_test() -> int:
         kind = np.where(
             t.is_synthetic.to_numpy(bool),
             "entity",
-            np.where(t.is_nrna.to_numpy(bool), "single-exon", "mRNA"),
+            np.where(t.is_single_exon.to_numpy(bool), "single-exon", "mRNA"),
         )
         truth = Truth(L_plain, factor, probed, kind, np.full(L.size, 100.0), np.full(L.size, 10.0))
 

@@ -50,12 +50,7 @@ def test_shadows_are_appended_after_the_index_rows_with_no_nascent(tmp_path):
     assert [t.t_id for t in merged] == ["A", "B", "S1", "S2"]
     s1, s2 = merged[2], merged[3]
     assert (s1.t_index, s2.t_index) == (2, 3)  # continue after the index's rows
-    assert (
-        not s1.is_nrna
-        and not s1.is_synthetic
-        and s1.nrna_t_index == -1
-        and s1.nrna_abundance == 0.0
-    )
+    assert not s1.is_synthetic and s1.span_t_index == -1 and s1.nrna_abundance == 0.0
     assert s2.strand == Strand.NEG
 
 
