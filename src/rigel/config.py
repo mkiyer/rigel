@@ -859,8 +859,8 @@ class SimulatorConstants:
 @dataclass(frozen=True)
 class ResourceConstants:
     """Memory, I/O and logging budgets: each sets speed, memory, file size or log volume. ``solve_block_bytes``
-    and ``capture_tile_cell_bytes`` can also reach the last bits of the answer, through a tile's height (their
-    comments say how)."""
+    and ``capture_tile_cell_bytes`` set a row tile's height, and the fits they tile are gated to give the same
+    bits at every height (their comments name the gates)."""
 
     #: Scan workers one BGZF decompression thread keeps fed, measured on the deep library
     #: (``BamScanConfig.resolved_scan_threads`` carries the table): the budget is split by this ratio, so a
@@ -874,18 +874,17 @@ class ResourceConstants:
     spill_queue_chunks: int = 2
 
     #: Cache-tiling target for the row-tiled fits (the landscape's kernels, the capture efficiency), as a
-    #: working-set size; ``simplex_logodds._block_rows`` turns it into rows. ⚠ Not arithmetic-free: the
-    #: landscape adds each tile's partial sums into its per-bin totals, so the tile height orders those float
-    #: additions and can move their last bits; no gate holds the tiling to the bit.
+    #: working-set size; ``simplex_logodds._block_rows`` turns it into rows. It orders no addition: the landscape
+    #: adds every row into its group's sum in row order, whatever the tile, and
+    #: ``tests/calibration/test_landscape.py`` holds the tile heights to the bit.
     solve_block_bytes: int = 1 << 20
 
     #: The bytes per grid cell the capture efficiency's row tile is sized for (``_block_rows``'s itemsize): two
     #: float64 arrays' worth, while a tile holds four at once (the expectation, its log-likelihood, the
     #: alternative's log weight and its weight) and a temporary fifth at its peak, so a tile peaks at about two
     #: and a half times ``solve_block_bytes``. A resource choice the owner signed off on 2026-10-17, with no other
-    #: reason recorded. ⚠ It sets the tile height, and the tile's matrix product need not sum in the same order at
-    #: another height, so a change can move last bits: ``tests/calibration/test_capture_efficiency.py`` holds tile
-    #: heights to 1e-13, not to the bit.
+    #: reason recorded. It sets the tile height and no bit: every sum runs along one object's own row, and
+    #: ``tests/calibration/test_capture_efficiency.py`` holds the tile heights to the bit.
     capture_tile_cell_bytes: int = 16
 
     #: Read size when the index digests its input files.

@@ -293,20 +293,20 @@ def test_the_density_unit_is_free():
 
 
 def test_the_row_tiles_change_nothing_and_equal_the_dense_reader(monkeypatch):
-    """The objects are read in row tiles so a million never exist against the grid at once: the tile size moves no
-    efficiency beyond the last bits of the matrix product's summation order, and the tiled reader equals the reader
-    written out densely with its bulk term in closed form."""
+    """The objects are read in row tiles so a million never exist against the grid at once, and the tile's height
+    is a resource setting, so it moves no bit: an object's moments are sums over its own row, in an order no tile
+    changes. The tiled reader equals the reader written out densely with its bulk term in closed form.
+    PERTURBATION: the level moment as a matrix–vector product, as it once was, fails here at a one-row tile."""
     ls = _hand([1e-5, 1e-3, 0.03, 0.2, 1.0], [0.02, 0.80, 0.03, 0.03, 0.12])
     rng = np.random.default_rng(12)
     S = np.where(rng.random(1000) < 0.05, 0.0, rng.uniform(1.0, 1e5, 1000))
     k = np.floor(np.exp(rng.uniform(np.log(1e-6), np.log(5.0), 1000)) * S)
     tiled = capture_efficiencies(ls, k, S, k[:10], S[:10]).efficiency_region
     np.testing.assert_allclose(tiled, _dense_reference(ls, k, S), rtol=1e-12)
-    for rows in (1, 7, 333):
+    for rows in (1, 7, 333, k.size):
         monkeypatch.setattr(CE, "_block_rows", lambda n_grid, n_arrays, rows=rows: rows)
-        np.testing.assert_allclose(
-            capture_efficiencies(ls, k, S, k[:10], S[:10]).efficiency_region, tiled, rtol=1e-13
-        )
+        got = capture_efficiencies(ls, k, S, k[:10], S[:10]).efficiency_region
+        assert np.array_equal(got, tiled), f"rows {rows}: {int((got != tiled).sum())} objects moved"
 
 
 def test_the_saturation_level_is_the_most_massive_enriched_basins_peak():

@@ -12,6 +12,7 @@ Each gate holds one property, so a regression names itself.
 import numpy as np
 import pytest
 
+import rigel.calibration.landscape as LS
 from rigel.calibration.capture_efficiency import capture_efficiencies
 from rigel.calibration.landscape import (
     DensityLandscape,
@@ -21,6 +22,7 @@ from rigel.calibration.landscape import (
     knn_widths,
     split_basins,
 )
+from rigel.config import CONSTANTS
 
 LN10 = np.log(10.0)
 
@@ -45,6 +47,40 @@ def test_fit_is_deterministic():
     a = fit_landscape(*args, anchor=anchor)
     b = fit_landscape(*args, anchor=anchor)
     assert np.array_equal(a.logP, b.logP) and np.array_equal(a.log_rho, b.log_rho)
+
+
+def test_the_row_tiles_move_no_bit(monkeypatch):
+    """The kernels are built and summed a row tile at a time, and the tile's height is a resource setting
+    (`simplex_logodds._block_rows`), so it must order no addition: a population spanning several tiles, fitted
+    and refitted (the refit's E-step runs tile by tile), gives the same bits at a one-row tile, an odd tile, the
+    shipped tile and one tile for the whole population. PERTURBATION: adding each tile's partial sum into the
+    per-group totals, as the fit once did, fails here at every height."""
+    rng = np.random.default_rng(5)
+    n = 1600
+    eff = rng.uniform(100.0, 3000.0, n)
+    enriched = rng.random(n) < 0.15
+    rho = np.where(enriched, 10.0 ** rng.uniform(-0.5, 1.0, n), 10.0 ** rng.uniform(-3.5, -2.5, n))
+    count = rng.poisson(rho * eff).astype(float)
+    mass = np.maximum(count * rng.uniform(1.5, 4.0, n), 1.0)
+    var = rng.uniform(0.01, 0.9, n)
+    anchor = (count == 0.0) & (rng.random(n) < 0.2)
+
+    def fit(prev=None):
+        return fit_landscape(count, mass, eff, var, anchor=anchor, prev=prev)
+
+    shipped = LS._block_rows(CONSTANTS.landscape.grid_points, np.dtype(np.float64).itemsize)
+    assert n > 2 * shipped, "the shipped tile must split the population, or the gate tests one tile"
+    assert (count < 1.0).sum() > 100, "the refit's E-step must act on location-free kernels"
+    first = fit()
+    refit = fit(prev=first)
+    for rows in (1, 7, 333, n):
+        monkeypatch.setattr(LS, "_block_rows", lambda cells, itemsize, rows=rows: rows)
+        for got, want in ((fit(), first), (fit(prev=first), refit)):
+            for field in ("log_rho", "logP", "logP_free"):
+                a, b = getattr(got, field), getattr(want, field)
+                assert np.array_equal(a, b), (
+                    f"rows {rows}, {field}: {int((a != b).sum())} cells moved"
+                )
 
 
 def test_recovers_both_modes():

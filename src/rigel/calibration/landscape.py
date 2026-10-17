@@ -280,7 +280,9 @@ def _render(count, eff, grid, prev, weights, widths) -> np.ndarray:
     — which is why kernels are grouped by width and each group convolved once
     (``CONSTANTS.landscape.width_bins`` groups). The kernels are built and summed a row tile at a time
     (`simplex_logodds._block_rows`, the same working-set rule ψ tiles by): a training set of a million
-    regions never exists as an ``(n, K)`` matrix, only its per-group weighted sums do.
+    regions never exists as an ``(n, K)`` matrix, only its per-group weighted sums do. Each row joins its
+    group's sum in row order, one order at every tile height, so the tile's height — a resource setting —
+    sets the working set and no bit (``tests/calibration/test_landscape.py``).
     """
     n_bins = CONSTANTS.landscape.width_bins
     step = float(grid[1] - grid[0])
@@ -292,9 +294,14 @@ def _render(count, eff, grid, prev, weights, widths) -> np.ndarray:
     for r0 in range(0, count.size, rows):
         sl = slice(r0, r0 + rows)
         kernels = _estep_kernels(_poisson_kernels(count[sl], eff[sl], grid), count[sl], grid, prev)
+        contrib = weights[sl, None] * kernels
         for b in np.unique(bin_of[sl]):
-            m = bin_of[sl] == b
-            sums[b] += (weights[sl][m][:, None] * kernels[m]).sum(0)
+            part = contrib[bin_of[sl] == b]
+            # the group's running sum enters as its first row, and a sum down the rows adds them in row order,
+            # so every row is added after the one before it: no tile boundary regroups an addition, as adding
+            # the tile's own partial sum into the total would
+            part[0] += sums[b]
+            sums[b] = part.sum(0)
     out = np.zeros_like(grid)
     for b in range(n_bins):
         m = bin_of == b

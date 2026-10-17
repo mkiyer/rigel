@@ -41,7 +41,7 @@ beside it as well. An object with no gDNA support (``S = 0``) has no likelihood 
 fragment could sit there to witness its capture.
 
 The objects are read in row tiles (`simplex_logodds._block_rows`), so a million objects never exist against the
-grid at once.
+grid at once; every sum runs along one object's own row, so the tile's height moves no bit.
 
 Layer 5: a posterior under the density prior. The consumer is `calibrate`, which publishes the efficiencies, the
 bulk density and the saturation level on the result. Gate: ``tests/calibration/test_capture_efficiency.py``.
@@ -153,7 +153,10 @@ def _read(prior: _TwoGroups, k: np.ndarray, S: np.ndarray) -> np.ndarray:
         w_null = np.exp(a_null - top)
         w_alt = np.exp(a_alt - top[:, None])
         den = np.maximum(w_null + w_alt.sum(1), _TINY)
-        mean_level = (w_null * xb + w_alt @ prior.level) / den
+        # the level moment as a sum over the object's own row, not a matrix–vector product: BLAS need not sum a
+        # row in one order at every tile height (a one-row tile takes another kernel), and the height is a
+        # resource setting (``tests/calibration/test_capture_efficiency.py``)
+        mean_level = (w_null * xb + (w_alt * prior.level).sum(1)) / den
         out[sl] = np.where(S[sl] > 0.0, np.exp(mean_level - xb), 1.0)
     return out
 
