@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The calibration stage — how a library's unspliced fragments are separated into genomic DNA and RNA
 before the transcript EM sees them — was rebuilt from its foundations. Indexes built by earlier
-versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
+versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
 
 ### Added
 
@@ -17,7 +17,7 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
   exon endpoint; the 0-bp cuts between regions are boundaries and the splice junctions are their own
   axis. The scanner tallies each fragment once on that partition under one specified deposit rule,
   with an executable specification the native code is held to byte for byte. Nascent RNA is one
-  synthetic single-exon entity per merged span (start and end sites clustered within `--nrna-tolerance`),
+  synthetic single-exon entity per merged span (start and end sites clustered within `--nascent-tolerance`),
   shared by every transcript in it.
 - **Calibration on three populations.** Each region's and boundary's unspliced mass is solved into
   gDNA, sense RNA and antisense RNA on a log-odds grid, against a gDNA-density prior fitted from the
@@ -64,6 +64,27 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
 
 ### Changed
 
+- **Output names (breaking).** RNA is reported as *annotated* (every reference transcript, single-exon included) or
+  *nascent* (Rigel's synthetic spans); counts are `count_<what>` and shares `fraction_<what>`; `summary.json` is
+  schema 4.
+  - `quant`: `is_single_exon` (was `is_nrna`); `nascent_id` and `count_nascent` (were `nrna_id` and
+    `nrna_parent_count`), which name a transcript's synthetic span only, so a transcript whose span is an annotated
+    single-exon transcript reads `.` and 0.
+  - `gene_quant`: `mature_count` and `nascent_count` are removed; a gene's RNA is its `count`.
+  - `nascent_quant.feather` (was `nrna_quant.feather`) holds the synthetic spans only: `nascent_id`, `n_annotated`,
+    `count_annotated`, `tpm_total_rna`.
+  - `loci`: `count_annotated`, `count_nascent`, `count_gdna`, `count`, `fraction_gdna`, `n_transcripts` (annotated)
+    and `n_nascent`, `has_gdna`, `count_gdna_prior`, `count_rna_prior`, `gdna_em_effective_length`.
+  - `summary.json`: the `quantification` pools are `count_*` beside `fraction_*`, with `count_gdna` (the EM's gDNA
+    plus the unspliced intergenic fragments) and `n_nascent`; `calibration.fraction_rna_sense`;
+    `gdna_em_effective_length`; `intergenic_total` and the junction-depth keys are removed.
+  - `calibration_track`: `count_gdna`, `count_rna`, `fraction_gdna`. `locus_stats`: `n_em_fragments`,
+    `n_rna_components`, `gdna_em_effective_length`.
+  - The annotated BAM's `ZF`: bit 0x02 is an annotated winner and 0x10 a nascent one, and 0x08 is retired, so a
+    single-exon winner reads 0x03 (was 0x09) and a synthetic span 0x11 (was 0x19).
+- **Renamed options (breaking).** `rigel index --nascent-tolerance` (was `--nrna-tolerance`) and `rigel quant
+  --intron-overhang-tolerance` (was `--splicing-anchor-tolerance`); their `config.yaml` keys follow. The index
+  format is version 10, so every index is rebuilt.
 - The package declares `Development Status :: 4 - Beta`.
 - Builds from source are portable by default: no `-march=native`, so a build runs on every machine of its
   architecture; `-DRIGEL_PORTABLE=OFF` (for example `CMAKE_ARGS="-DRIGEL_PORTABLE=OFF" pip install ...`) tunes one to
@@ -83,8 +104,8 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
 - An unknown key in a `--config` file is an error that lists the keys this version knows and names the version
   that wrote the file (0.7.1 warned and ignored it).
 - The fragment-length categories in `summary.json` and `fragment_lengths.feather` are `global`, `gdna`, `rna`
-  and five observed pools (`pool_dna_intergenic`, `pool_dna_intronic`, `pool_dna_intron_exon`,
-  `pool_dna_intergenic_exon`, `pool_rna_spliced`), replacing 0.7.1's per-splice-type categories.
+  and five observed pools (`pool_gdna_intergenic`, `pool_gdna_intronic`, `pool_gdna_intron_exon`,
+  `pool_gdna_intergenic_exon`, `pool_rna_spliced`), replacing 0.7.1's per-splice-type categories.
 - Writing `loci.feather` no longer scales with loci × transcripts (a deep library's 22,787 loci: 11 s →
   0.15 s), and a spilled fragment buffer holds one chunk less in memory.
 - Chimera detection checks genomic compatibility before calling a fragment a chimera, and an empty
@@ -97,7 +118,7 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
 
 - Four `loci.feather` columns no code ever filled (`n_regions_touched`, `multi_locus_region_mass`,
   `partial_coverage_region_mass`, `gdna_eff_len_per_bp`, always 0), and `summary.json`'s
-  `gdna_eff_len.per_bp`, which summarised them; `summary.json` is schema 3.
+  `gdna_eff_len.per_bp`, which summarised them; `summary.json` is schema 4.
 - `summary.json`'s `calibration.capture` block and the report's by-count / by-mass density chart, a
   second density census of the gDNA track with its own thresholds. The report's capture tile and panel
   show calibration's own answer instead: `calibration.gdna_bulk_density`, the uncaptured gDNA level the
@@ -122,11 +143,9 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 9).
   different core counts (by default `--threads` is the core count); isoforms that share fragments could swap whole
   counts. Each thread now runs whole equivalence classes, whose sums are added in the order one thread adds them,
   at no cost in speed.
-- A spliced fragment that no annotated transcript holds is RNA, not gDNA: `summary.json`'s `gdna_fraction` counts only
-  the unspliced intergenic fragments and books the spliced ones as their own pool (`intergenic_spliced`), the report
+- A spliced fragment that no annotated transcript holds is RNA, not gDNA: `summary.json`'s `fraction_gdna` counts only
+  the unspliced intergenic fragments and books the spliced ones as their own pool (`count_intergenic_rna`), the report
   splits its intergenic pool the same way, and the annotated BAM labels them `ZF` 0x21 rather than 0x25.
-- The nascent table's `n_contributing_transcripts` counts the contributors of every span a single-exon nascent entity
-  covers, not only the last span's.
 - `--overhang-alpha 0`, documented as a hard gate, gave every candidate without overhang a NaN score, and every
   EM-routed fragment was dropped silently. It is now a hard gate: a candidate with overhang is skipped and the rest
   are scored. At either alpha's 0 an unambiguous spliced fragment, assigned without scoring, now meets the gate too,
