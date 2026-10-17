@@ -313,12 +313,12 @@ three frozen references (the ladder's oracle, the minimap2 panel and VCaP) and `
 | constants, part 1 | `bb3967cb` | six numbers given their reason or a name | bit-identical |
 | the identity check | `8ebf71ea` | `rename_identity.py` digests the transcript table's content, not its column names | its self-test |
 | internal names | `fd012918` | names that said the wrong thing, inside the code | bit-identical |
-| the output names | `1fa1c143` | outputs report RNA as annotated or nascent (owner's convention); `summary.json` schema 4 | measured: every number unchanged on the ladder end to end, only the defined relabellings move |
+| the output names | `1fa1c143` | outputs report RNA as annotated or nascent (owner's convention); `summary.json` schema 4 | measured on one ladder condition (g50, stranded, capture-ON), every output file compared: each renamed field keeps its values bit for bit, and only the defined relabellings move |
 | the public repository's scrub | `8401aeba` | no local path, cluster detail or lab identifier in a tracked file; the data root is `$RIGEL_RUNS` | bit-identical |
 | index and scan names | `dc736e39` | index format 10; `--nascent-tolerance`, `--intron-overhang-tolerance`; the contiguous reaches no longer computed | bit-identical; every index rebuilt and checked file by file |
 | the truth tables | `5c67c1f4` | the simulator's one truth writer, each quantity once | an A/B gives identical reads |
-| constants, part 2 | `0c754afc` | the resource and display numbers given a home and a reason | bit-identical |
-| tile-invariant fits | `4bcc72d9` | the row-tiled calibration fits give one answer whatever their tile height | measured: noise-level per stratum on the ladder (0.997–1.003 of HEAD) |
+| constants, part 2 | `0c754afc` | the resource and display numbers given a home and a reason | bit-identical; the simulator's reads identical, its BAM's `@PG` version now the package's |
+| tile-invariant fits | `4bcc72d9` | the row-tiled calibration fits give one answer whatever their tile height | measured on the ladder, per stratum: 0.998–1.001 of the tree before (0.996–1.007 per condition) |
 
 The suite went from 2,959 to 3,051 cases: gates added for each refusal and definition, cases deleted with the code
 they tested. Every new native gate was broken in a rebuild and seen to fire. Every panel was re-cached twice (262
