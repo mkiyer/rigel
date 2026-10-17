@@ -221,3 +221,9 @@ scratchpad/*.npz
 scratchpad/_*.json
 scratchpad/_*.txt
 scratchpad/_*.err
+
+# docs/dev is the working sandbox: its markdown planning documents may be tracked; its data, figures, bundles and
+# scripts never are (data does not belong in the repository)
+docs/dev/**
+!docs/dev/**/
+!docs/dev/**/*.md
