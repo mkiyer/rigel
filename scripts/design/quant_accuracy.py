@@ -196,7 +196,7 @@ def _spearman_pearson(true_v: np.ndarray, est_v: np.ndarray) -> tuple[float, flo
 def score_transcripts(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
     """Score one arm's transcript table against the condition's realised fragment truth.
 
-    ``count`` against ``mrna_abundance``, both fragment counts. No effective length, no
+    ``count`` against ``observed_mrna_fragments``, both fragment counts. No effective length, no
     normalisation, no model between the two sides — so a difference is a fragment the tool put
     somewhere the simulator did not.
 
@@ -213,7 +213,7 @@ def score_transcripts(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
     )
     for col in ("count", "count_em", "tpm", "effective_length"):
         m[col] = m[col].fillna(0.0)
-    t = m["mrna_abundance"].to_numpy(np.float64)  # the realised OBSERVED fragment count
+    t = m["observed_mrna_fragments"].to_numpy(np.float64)
     e = m["count"].to_numpy(np.float64)
     d = e - t
     expressed = t > 0.0
@@ -273,8 +273,8 @@ def score_genes(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
     """
     m = truth.merge(quant[["transcript_id", "count"]], on="transcript_id", how="left")
     m["count"] = m["count"].fillna(0.0)
-    g = m.groupby("gene_id", observed=True)[["mrna_abundance", "count"]].sum()
-    t = g["mrna_abundance"].to_numpy(np.float64)
+    g = m.groupby("gene_id", observed=True)[["observed_mrna_fragments", "count"]].sum()
+    t = g["observed_mrna_fragments"].to_numpy(np.float64)
     e = g["count"].to_numpy(np.float64)
     d = e - t
     expressed = t > 0.0
@@ -380,14 +380,11 @@ def seeded(pipeline_config, arm: str, em_seed: int):
     )
 
 
-#: The truth table's RNA fragment columns, most realised first. Each entry is the MATURE and the
-#: NASCENT column together, and that pairing is the point: a synthetic span emits no mature
-#: RNA, so its whole realised mass sits in the nascent column of its OWN row, while a single-exon
-#: annotated transcript carries both. A mature column read alone weights every synthetic span at zero.
-_WEIGHT_COLUMNS = (
-    ("observed_mrna_fragments", "observed_nrna_fragments"),
-    ("mrna_abundance", "nrna_abundance"),
-)
+#: The truth table's realised RNA fragment columns, the MATURE and the NASCENT together, and that
+#: pairing is the point: a synthetic span emits no mature RNA, so its whole realised mass sits in the
+#: nascent column of its OWN row, while a single-exon annotated transcript carries both. A mature
+#: column read alone weights every synthetic span at zero.
+_WEIGHT_COLUMNS = ("observed_mrna_fragments", "observed_nrna_fragments")
 
 
 def truth_weights(truth: pd.DataFrame, index) -> np.ndarray:
@@ -410,14 +407,15 @@ def truth_weights(truth: pd.DataFrame, index) -> np.ndarray:
     attributed. For such a pair the per-transcript truth is not merely awkward, it is UNDEFINED: the
     two are the same molecule and only the group total is a fact about the world.
     """
-    pair = next((p for p in _WEIGHT_COLUMNS if all(c in truth.columns for c in p)), None)
-    if pair is None:
+    missing = [c for c in _WEIGHT_COLUMNS if c not in truth.columns]
+    if missing:
         raise SystemExit(
-            "⛔ truth table carries no mature+nascent RNA pair "
-            f"({' or '.join('+'.join(p) for p in _WEIGHT_COLUMNS)}); a mature column alone cannot "
-            "express a synthetic nascent entity's allocation"
+            f"⛔ truth table lacks {'+'.join(missing)} of the realised mature+nascent RNA pair "
+            f"({'+'.join(_WEIGHT_COLUMNS)}); a mature column alone cannot express a synthetic "
+            "nascent entity's allocation"
         )
-    total = truth[pair[0]].to_numpy(np.float64) + truth[pair[1]].to_numpy(np.float64)
+    mature, nascent = _WEIGHT_COLUMNS
+    total = truth[mature].to_numpy(np.float64) + truth[nascent].to_numpy(np.float64)
     t_index = dict(zip(index.t_df["t_id"].to_numpy(), index.t_df["t_index"].to_numpy(), strict=True))
     w = np.zeros(int(index.num_transcripts), dtype=np.float64)
     for tid, n in zip(truth["transcript_id"], total, strict=True):

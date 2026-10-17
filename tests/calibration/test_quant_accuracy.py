@@ -214,7 +214,7 @@ def test_an_injection_that_never_fires_RAISES_rather_than_reporting_no_effect(
     """
     cond = tmp_path / "c1"
     cond.mkdir()
-    pd.DataFrame({"transcript_id": ["a"], "mrna_abundance": [1.0]}).to_csv(
+    pd.DataFrame({"transcript_id": ["a"], "observed_mrna_fragments": [1]}).to_csv(
         cond / "truth_abundances.tsv", sep="\t", index=False
     )
     (cond / "truth_summary.json").write_text('{"origin_counts": {"gdna": 0, "mrna": 1, "nrna": 0}}')
@@ -227,22 +227,54 @@ def test_an_injection_that_never_fires_RAISES_rather_than_reporting_no_effect(
 # ── GATE 3: the truth column is the REALISED fragment count, not the molar abundance ─────────────
 
 
-def test_the_scorer_reads_the_realised_fragment_column_and_a_molar_one_would_be_visible():
-    """The panel ships two truth tables and they are different quantities. The per-condition
-    ``truth_abundances.tsv`` gives the realised OBSERVED fragment count; the suite-level
-    ``truth_abundances_nrna_none.tsv`` gives the pre-capture MOLAR abundance. Scoring a fragment
-    estimate against a molar truth charges the tool for hybrid capture, which it never claims to
-    invert.
+def test_the_scorer_reads_the_realised_fragment_column_and_refuses_the_molar_table(tmp_path):
+    """The panel ships two truth tables and they are different quantities. A condition's
+    ``truth_abundances.tsv`` gives the realised OBSERVED fragment count (``observed_mrna_fragments``)
+    beside the pre-capture MOLAR abundance (``pre_capture_mrna_abundance``); the suite-level
+    ``truth_abundances_nrna_<label>.tsv`` gives the molar abundance alone, as ``mrna_abundance``.
+    Scoring a fragment estimate against a molar truth charges the tool for hybrid capture, which it
+    never claims to invert.
 
-    The perturbation feeds the scorer a molar-scaled truth (the same shape, a different unit) and
-    asserts the error explodes — so a future edit that reaches for the wrong file cannot pass quietly.
+    Both tables are written here by the simulator's own writers and read as the instrument reads them.
+    The scorer must score the realised count exactly, must refuse the molar table rather than score it,
+    and must see a molar truth in the realised column (the same shape, a different unit) as error, so
+    a future edit that reaches for the wrong file or the wrong column cannot pass quietly.
+
+    Perturbation: the scorer reading ``pre_capture_mrna_abundance`` misses the exact score, and reading
+    ``mrna_abundance`` cannot read the condition's table at all.
     """
-    truth = pd.DataFrame(
-        {
-            "transcript_id": ["a", "b", "c"],
-            "mrna_abundance": [1000.0, 500.0, 0.0],
-        }
+    from rigel.sim.truth import write_molar_truth, write_post_capture_truth
+    from rigel.transcript import Transcript
+    from rigel.types import Interval, Strand
+
+    transcripts = []
+    for t_id, molecules in (("a", 40.0), ("b", 10.0), ("c", 5.0)):
+        transcript = Transcript(
+            ref="chr1",
+            strand=Strand.POS,
+            exons=[Interval(0, 500)],
+            t_id=t_id,
+            g_id=f"g_{t_id}",
+            abundance=molecules,
+        )
+        transcript.compute_length()
+        transcripts.append(transcript)
+    # `c` has molecules and was never captured, so it realised no fragment
+    reads = ["a"] * 1000 + ["b"] * 500
+    fastq = tmp_path / "reads.fq"
+    fastq.write_text("".join(f"@{t}:0-100:f:{i}/1\nACGT\n+\nIIII\n" for i, t in enumerate(reads)))
+    cond = tmp_path / "cond"
+    write_post_capture_truth(
+        transcripts,
+        cond / "truth_abundances.tsv",
+        cond / "truth_fragment_lengths.tsv",
+        cond / "truth_summary.json",
+        fastq_path=fastq,
     )
+    write_molar_truth(transcripts, tmp_path / "truth_abundances_nrna_none.tsv")
+    realised = pd.read_csv(cond / "truth_abundances.tsv", sep="\t")
+    molar = pd.read_csv(tmp_path / "truth_abundances_nrna_none.tsv", sep="\t")
+
     quant = pd.DataFrame(
         {
             "transcript_id": ["a", "b", "c"],
@@ -252,12 +284,16 @@ def test_the_scorer_reads_the_realised_fragment_column_and_a_molar_one_would_be_
             "effective_length": [100.0, 100.0, 100.0],
         }
     )
-    exact = QA.score_transcripts(quant, truth)
+    exact = QA.score_transcripts(quant, realised)
     assert exact["count_abs_err"] == pytest.approx(0.0)
     assert exact["fp_mass"] == pytest.approx(0.0)
 
-    molar = truth.assign(mrna_abundance=truth["mrna_abundance"] / 1500.0 * 4.6)
-    wrong = QA.score_transcripts(quant, molar)
+    with pytest.raises(KeyError, match="observed_mrna_fragments"):
+        QA.score_transcripts(quant, molar)
+
+    wrong = QA.score_transcripts(
+        quant, realised.assign(observed_mrna_fragments=realised["pre_capture_mrna_abundance"])
+    )
     assert wrong["count_abs_err"] > 1000.0, (
         "a molar truth scored as a fragment count produced almost no error — the two units are not "
         "distinguishable to this scorer and the wrong file could be read silently"
@@ -274,7 +310,9 @@ def test_false_positive_and_false_negative_mass_are_separate_and_reconcile():
     its mass moves out of ``fp_mass`` — a scorer that keyed on the estimate rather than on the truth
     would keep it there.
     """
-    truth = pd.DataFrame({"transcript_id": ["a", "b", "c"], "mrna_abundance": [100.0, 0.0, 50.0]})
+    truth = pd.DataFrame(
+        {"transcript_id": ["a", "b", "c"], "observed_mrna_fragments": [100.0, 0.0, 50.0]}
+    )
     quant = pd.DataFrame(
         {
             "transcript_id": ["a", "b", "c"],
@@ -290,7 +328,7 @@ def test_false_positive_and_false_negative_mass_are_separate_and_reconcile():
     assert s["count_over"] - s["count_under"] == pytest.approx(s["count_net_err"])
     assert s["count_over"] + s["count_under"] == pytest.approx(s["count_abs_err"])
 
-    lifted = truth.assign(mrna_abundance=[100.0, 25.0, 50.0])
+    lifted = truth.assign(observed_mrna_fragments=[100.0, 25.0, 50.0])
     s2 = QA.score_transcripts(quant, lifted)
     assert s2["fp_mass"] == pytest.approx(0.0), (
         "a transcript the truth now expresses is still counted as a false positive — fp_mass is "
@@ -308,7 +346,7 @@ def test_the_GENE_row_collapses_isoform_ambiguity_and_still_sees_real_gene_error
         {
             "transcript_id": ["a1", "a2", "b1"],
             "gene_id": ["A", "A", "B"],
-            "mrna_abundance": [100.0, 0.0, 50.0],
+            "observed_mrna_fragments": [100.0, 0.0, 50.0],
         }
     )
     swapped = pd.DataFrame(
@@ -419,7 +457,7 @@ def test_the_count_metrics_do_not_move_when_the_length_model_does():
     """TRAPS: price-the-halves-separately. The count rows must be free of the fragment-length model,
     or this instrument would silently price the length models too and neither number would be
     attributable. The perturbation changes one transcript's effective length by 100x."""
-    truth = pd.DataFrame({"transcript_id": ["a", "b"], "mrna_abundance": [100.0, 50.0]})
+    truth = pd.DataFrame({"transcript_id": ["a", "b"], "observed_mrna_fragments": [100.0, 50.0]})
     quant = pd.DataFrame(
         {
             "transcript_id": ["a", "b"],
@@ -920,8 +958,6 @@ def _alloc_truth_table():
             "transcript_id": ["t_spliced", "t_single_exon", "nrna_gene_a", "nrna_gene_b"],
             "observed_mrna_fragments": [900.0, 100.0, 0.0, 0.0],
             "observed_nrna_fragments": [0.0, 7.0, 300.0, 50.0],
-            "mrna_abundance": [900.0, 100.0, 0.0, 0.0],
-            "nrna_abundance": [0.0, 7.0, 300.0, 50.0],
         }
     )
 
@@ -967,25 +1003,18 @@ def test_the_allocation_arm_does_NOT_hand_a_weight_of_ZERO_to_an_RNA_EMITTING_tr
     np.testing.assert_allclose(w, [900.0, 107.0, 300.0, 50.0], rtol=1e-12)
 
 
-def test_the_allocation_weights_fall_back_to_the_ABUNDANCE_pair_not_to_a_MATURE_column():
-    """With no ``observed_*`` columns the fallback must still be a PAIR. Falling back to
-    ``mrna_abundance`` alone reinstates the same zero on every synthetic-span row on any panel whose truth
-    table predates the observed columns.
-
-    Perturbation: a single-column fallback gives ``nrna_gene_a`` weight 0 here.
-    """
-    truth = _alloc_truth_table().drop(
-        columns=["observed_mrna_fragments", "observed_nrna_fragments"]
-    )
-    w = QA.truth_weights(truth, _AllocIndex(truth["transcript_id"]))
-    np.testing.assert_allclose(w, [900.0, 107.0, 300.0, 50.0], rtol=1e-12)
-
-
 def test_the_allocation_weights_REFUSE_a_truth_table_that_carries_no_nascent_column():
     """A truth table with a mature column and no nascent one cannot express a synthetic span's
-    allocation, so the arm refuses rather than silently weighting every synthetic span at zero."""
-    truth = _alloc_truth_table().drop(
-        columns=["observed_nrna_fragments", "nrna_abundance", "mrna_abundance"]
-    )
+    allocation, so the arm refuses rather than silently weighting every synthetic span at zero. The
+    suite-level molar table is refused too: its ``mrna_abundance`` / ``nrna_abundance`` pair is
+    molecules, not the fragments a condition realised.
+
+    Perturbation: a fallback to the ``mrna_abundance`` + ``nrna_abundance`` pair weights by molecules."""
+    truth = _alloc_truth_table().drop(columns=["observed_nrna_fragments"])
     with pytest.raises(SystemExit, match="nascent"):
         QA.truth_weights(truth, _AllocIndex(truth["transcript_id"]))
+    molar = _alloc_truth_table().set_axis(
+        ["transcript_id", "mrna_abundance", "nrna_abundance"], axis=1
+    )
+    with pytest.raises(SystemExit, match="nascent"):
+        QA.truth_weights(molar, _AllocIndex(molar["transcript_id"]))

@@ -72,12 +72,8 @@ def write_manifest(
     n_shadow_transcripts: int = 0,
 ) -> Path:
     """Write a simulation manifest and return its path. ``index`` is the index the transcriptome comes
-    from, as ``whole_genome._index_provenance`` returns it: ``{"path", "manifest"}``."""
-    truth_abundances = "truth_abundances.tsv"
-    for condition in conditions:
-        if condition.get("truth_abundances"):
-            truth_abundances = str(condition["truth_abundances"])
-            break
+    from, as ``whole_genome._index_provenance`` returns it: ``{"path", "manifest"}``. Each truth file's
+    path is in its condition's entry, under one key."""
     manifest = {
         "version": 1,
         # The transcriptome is the index's, so the index is its source: the resolved path and the index's
@@ -92,7 +88,6 @@ def write_manifest(
         "capture": _jsonable(getattr(config, "capture", {})),
         "capture_configs": _jsonable(getattr(config, "capture_configs", [])),
         "abundance": _jsonable(getattr(config, "abundance", {})),
-        "truth_abundances": truth_abundances,
         "conditions": _jsonable(conditions),
     }
     for key in ("genome", "gtf", "shadow_gtf", "strand_specificities"):

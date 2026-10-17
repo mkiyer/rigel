@@ -650,8 +650,11 @@ def _detect_abundance_format(
     -----------------
     salmon   — ``quant.sf`` with columns ``Name``, ``TPM``.
     kallisto — ``abundance.tsv`` with columns ``target_id``, ``tpm``.
-    sim      — the simulator's own truth TSV (:func:`write_truth_abundances`) with
+    sim      — the simulator's own molar table (:func:`rigel.sim.truth.write_molar_truth`) with
                ``transcript_id``, ``mrna_abundance`` (and optionally ``nrna_abundance``).
+
+    A condition's truth table (:func:`rigel.sim.truth.write_post_capture_truth`) is refused: it holds the
+    fragments one condition realised, which are not molecules.
     """
     import pandas as pd
 
@@ -667,6 +670,13 @@ def _detect_abundance_format(
     df = pd.read_csv(path, sep="\t", compression=compression)
     cols = set(df.columns)
 
+    # A condition's table is known by its realised column, whatever else it carries: one written before
+    # the realised counts' molar-named copies were dropped still holds them as ``mrna_abundance``.
+    if "observed_mrna_fragments" in cols:
+        raise ValueError(
+            f"{path} is a condition's truth table, the fragments one condition realised, not an "
+            "abundance input; the molar table is the run's truth_abundances_nrna_<label>.tsv"
+        )
     # salmon quant.sf
     if {"Name", "TPM"}.issubset(cols):
         return "salmon", df
@@ -965,32 +975,6 @@ def assign_file_abundances(
     )
 
     return has_nrna_data
-
-
-def write_truth_abundances(
-    transcripts: list[Transcript],
-    path: Path,
-) -> None:
-    """Write ground-truth abundances to a TSV file."""
-    with open(path, "w") as f:
-        f.write(
-            "transcript_id\tgene_id\tgene_name\tref\tstrand\t"
-            "mrna_abundance\tnrna_abundance\ttotal_rna\tn_exons\t"
-            "spliced_length\tgenomic_span\n"
-        )
-        for t in transcripts:
-            total = (t.abundance or 0.0) + t.nrna_abundance
-            # 0 for a transcript with no exon, whose start and end are both 0
-            genomic_span = t.end - t.start
-            strand_str = t.strand.to_str()
-            f.write(
-                f"{t.t_id}\t{t.g_id}\t{t.g_name}\t{t.ref}\t"
-                f"{strand_str}\t"
-                f"{t.abundance:.4f}\t{t.nrna_abundance:.4f}\t"
-                f"{total:.4f}\t{len(t.exons)}\t"
-                f"{t.length or t.compute_length()}\t{genomic_span}\n"
-            )
-    logger.info("Wrote truth abundances to %s", path)
 
 
 # ═══════════════════════════════════════════════════════════════════

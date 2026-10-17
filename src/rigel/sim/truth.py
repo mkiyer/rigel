@@ -1,14 +1,25 @@
-"""Fragment-origin aggregation + post-capture truth-table writing.
+"""Fragment-origin aggregation and the simulator's truth tables, all written here.
 
 The read-name format and its parser (``Origin`` / ``parse_origin``) live in :mod:`read_name`; this
-module consumes the parser to count origins and write each condition's truth tables — the
-per-transcript post-capture abundances, the fragment-length table and the summary JSON.
+module consumes the parser to count origins and writes the truth. There are two transcript tables,
+each quantity in one column:
+
+- the molar table, one per nascent setting (:func:`write_molar_truth`): the molecules each transcript
+  was simulated at, under the simulator's own input names (``mrna_abundance``, ``nrna_abundance``), so
+  the file is also a valid abundance input;
+- one per condition (:func:`write_post_capture_truth`): the same molecules (``pre_capture_*``) beside
+  the fragments the condition realised, read off its read names (``observed_*_fragments``), written with
+  the condition's fragment-length table and summary JSON.
+
+Both transcript tables are written by :func:`_write_transcript_table` from the identity and structure
+columns :func:`_transcript_metadata` derives, so a fix to either reaches both tables.
 """
 
 from __future__ import annotations
 
 import gzip
 import json
+import logging
 from collections import Counter
 from pathlib import Path
 from typing import Iterable
@@ -24,8 +35,44 @@ __all__ = [
     "count_origins_from_fastq",
     "deduplicate_bam_qnames",
     "summarize_post_capture_truth",
+    "write_molar_truth",
     "write_post_capture_truth",
 ]
+
+logger = logging.getLogger(__name__)
+
+#: The molar table's columns. ``total_rna`` is the mature plus the nascent molecules.
+_MOLAR_COLUMNS = (
+    "transcript_id",
+    "gene_id",
+    "gene_name",
+    "ref",
+    "strand",
+    "mrna_abundance",
+    "nrna_abundance",
+    "total_rna",
+    "n_exons",
+    "spliced_length",
+    "genomic_span",
+)
+
+#: A condition's table's columns: the molecules before capture, then the fragments realised.
+_POST_CAPTURE_COLUMNS = (
+    "transcript_id",
+    "gene_id",
+    "gene_name",
+    "ref",
+    "strand",
+    "pre_capture_mrna_abundance",
+    "pre_capture_nrna_abundance",
+    "pre_capture_total_rna",
+    "observed_mrna_fragments",
+    "observed_nrna_fragments",
+    "observed_total_rna_fragments",
+    "n_exons",
+    "spliced_length",
+    "genomic_span",
+)
 
 
 def deduplicate_bam_qnames(bam_path: Path) -> list[str]:
@@ -133,6 +180,8 @@ def _length_stats(length_counts: Counter[int]) -> dict[str, float | int | None]:
 
 
 def _transcript_metadata(transcript) -> dict[str, object]:
+    """A transcript's identity and structure columns, and the molecules it was simulated at (mature,
+    nascent, and their sum), as both truth tables write them."""
     length = transcript.length or transcript.compute_length()
     genomic_span = (
         transcript.end - transcript.start
@@ -152,6 +201,36 @@ def _transcript_metadata(transcript) -> dict[str, object]:
         "pre_capture_nrna_abundance": pre_capture_nrna,
         "pre_capture_total_rna": pre_capture_mrna + pre_capture_nrna,
     }
+
+
+def _write_transcript_table(path: Path, columns: tuple[str, ...], rows: Iterable[dict]) -> None:
+    """The one writer of both transcript tables: a header of ``columns``, then one tab-separated line
+    per row, each value as ``str`` gives it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as handle:
+        handle.write("\t".join(columns) + "\n")
+        for row in rows:
+            handle.write("\t".join(str(row[col]) for col in columns) + "\n")
+
+
+def _molar_row(transcript) -> dict[str, object]:
+    meta = _transcript_metadata(transcript)
+    return {
+        **meta,
+        "mrna_abundance": f"{meta['pre_capture_mrna_abundance']:.4f}",
+        "nrna_abundance": f"{meta['pre_capture_nrna_abundance']:.4f}",
+        "total_rna": f"{meta['pre_capture_total_rna']:.4f}",
+    }
+
+
+def write_molar_truth(transcripts, path: Path) -> None:
+    """Write the molar truth table: the molecules each transcript was simulated at, mature and nascent,
+    before capture and before sampling, to four decimals. The molecules depend on a condition's nascent
+    setting alone, so the grid writes one table per setting. The columns are the simulator's own
+    abundance-input names (``whole_genome``'s ``sim`` format), so the table can be given back as
+    ``abundance.file``. Gates: ``tests/test_sim_truth.py``."""
+    _write_transcript_table(path, _MOLAR_COLUMNS, (_molar_row(t) for t in transcripts))
+    logger.info("Wrote truth abundances to %s", path)
 
 
 def summarize_post_capture_truth(
@@ -202,12 +281,6 @@ def summarize_post_capture_truth(
         transcript_rows.append(
             {
                 **meta,
-                "post_capture_mrna_fragments": mrna_count,
-                "post_capture_nrna_fragments": nrna_count,
-                "post_capture_total_rna_fragments": total_count,
-                "mrna_abundance": float(mrna_count),
-                "nrna_abundance": float(nrna_count),
-                "total_rna": float(total_count),
                 "observed_mrna_fragments": mrna_count,
                 "observed_nrna_fragments": nrna_count,
                 "observed_total_rna_fragments": total_count,
@@ -222,37 +295,6 @@ def summarize_post_capture_truth(
         "fragment_length_counts": length_counts,
         "fragment_lengths": {kind: _length_stats(counts) for kind, counts in length_counts.items()},
     }
-
-
-def _write_post_capture_abundances(summary: dict[str, object], path: Path) -> None:
-    rows = list(summary["transcript_rows"])  # type: ignore[index]
-    path.parent.mkdir(parents=True, exist_ok=True)
-    columns = [
-        "transcript_id",
-        "gene_id",
-        "gene_name",
-        "ref",
-        "strand",
-        "mrna_abundance",
-        "nrna_abundance",
-        "total_rna",
-        "pre_capture_mrna_abundance",
-        "pre_capture_nrna_abundance",
-        "pre_capture_total_rna",
-        "post_capture_mrna_fragments",
-        "post_capture_nrna_fragments",
-        "post_capture_total_rna_fragments",
-        "observed_mrna_fragments",
-        "observed_nrna_fragments",
-        "observed_total_rna_fragments",
-        "n_exons",
-        "spliced_length",
-        "genomic_span",
-    ]
-    with open(path, "w") as handle:
-        handle.write("\t".join(columns) + "\n")
-        for row in rows:
-            handle.write("\t".join(str(row[col]) for col in columns) + "\n")
 
 
 def _write_fragment_length_truth(summary: dict[str, object], path: Path) -> None:
@@ -278,38 +320,39 @@ def write_post_capture_truth(
     bam_path: Path | None = None,
     fastq_path: Path | None = None,
     condition: str | None = None,
-    molecular_truth: str | None = None,
+    pre_capture_abundances: str | None = None,
     gdna_strand_overdispersion: float | None = None,
 ) -> dict[str, object]:
-    """Write condition-local empirical truth tables after simulation.
+    """Write one condition's truth after simulation, from the origins its read names carry.
 
-    ``abundance_path`` is compatible with existing analysis code: the
-    ``mrna_abundance`` and ``nrna_abundance`` columns contain observed
-    post-capture fragment counts. Molecular pre-capture abundances are retained
-    in separate columns for provenance.
+    ``abundance_path`` gets one row per transcript: the molecules it was simulated at
+    (``pre_capture_*``, the molar table's values) and the fragments the condition realised
+    (``observed_*_fragments``), the truth a fragment count is scored against. ``fl_path`` gets the
+    realised fragment lengths per origin, and ``summary_path`` the origin counts, the length statistics
+    and the paths of the three tables, each under one key: ``pre_capture_abundances`` (the molar table,
+    as given), ``post_capture_abundances`` and ``post_capture_fragment_lengths``.
     """
     summary = summarize_post_capture_truth(
         transcripts,
         bam_path=bam_path,
         fastq_path=fastq_path,
     )
-    _write_post_capture_abundances(summary, abundance_path)
+    _write_transcript_table(
+        abundance_path,
+        _POST_CAPTURE_COLUMNS,
+        summary["transcript_rows"],  # type: ignore[arg-type]
+    )
     _write_fragment_length_truth(summary, fl_path)
 
     json_summary = {
         "condition": condition,
         "truth_kind": "post_capture_empirical",
         "gdna_strand_overdispersion_true": gdna_strand_overdispersion,
-        "pre_capture_abundances": molecular_truth,
+        "pre_capture_abundances": pre_capture_abundances,
         "post_capture_abundances": str(abundance_path),
         "post_capture_fragment_lengths": str(fl_path),
         "origin_counts": summary["origin_counts"],
         "fragment_lengths": summary["fragment_lengths"],
-        "files": {
-            "pre_capture_abundances": molecular_truth,
-            "post_capture_abundances": str(abundance_path),
-            "post_capture_fragment_lengths": str(fl_path),
-        },
     }
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     with open(summary_path, "w") as handle:

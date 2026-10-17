@@ -61,4 +61,7 @@ In order, each gated (suite on a clean worktree, the identity check on three ref
    `calibration/sj_opportunity.py`); the drain's `chose_genomic` / `chose_spliced`, held back from step 2 because the
    cache's schema digest covers them, become `chose_no_implied_intron` / `chose_implied_intron`.
 5. The simulator's truth tables, through one writer, and the instruments that read them (`quant_accuracy.py`'s
-   fallback for older tables deleted: every panel on disk carries `observed_*`).
+   fallback for older tables deleted: every panel on disk carries `observed_*`). Held for the next re-simulation,
+   because every panel on disk carries the old names and its readers must keep reading it: `pre_capture_*` →
+   `molar_*`, the synthetic spans' `RIGEL_NRNA_` id prefix, the manifest key `post_capture_abundances` and the file
+   name `truth_abundances.tsv`.

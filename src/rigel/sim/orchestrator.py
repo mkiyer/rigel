@@ -25,14 +25,10 @@ from itertools import product
 from pathlib import Path
 
 from .manifest import condition_dir_name
-from .truth import write_post_capture_truth
+from .truth import write_molar_truth, write_post_capture_truth
 from .capture import CaptureSampler
 from .wgs_engine import WholeGenomeSimulator
-from .whole_genome import (
-    apply_nrna_ratio,
-    apply_sparse_nrna,
-    write_truth_abundances,
-)
+from .whole_genome import apply_nrna_ratio, apply_sparse_nrna
 
 __all__ = [
     "stable_seed",
@@ -202,7 +198,7 @@ def run_condition_grid(
             )
 
         molecular_truth_name = f"truth_abundances_nrna_{nrna_label}.tsv"
-        write_truth_abundances(cond_transcripts, outdir / molecular_truth_name)
+        write_molar_truth(cond_transcripts, outdir / molecular_truth_name)
 
         for gdna_label, gdna_rate in gdna_pairs:
             for (gdna_od_label, gdna_od), strand_spec in product(
@@ -255,13 +251,11 @@ def run_condition_grid(
                         "n_gdna": n_gdna,
                         "n_total": n_rna + n_gdna,
                         "seed": condition_seed,
+                        # one key per path, and each table's key the one its truth_summary.json uses
                         "truth_kind": "post_capture_empirical",
                         "pre_capture_abundances": molecular_truth_name,
                         "post_capture_abundances": truth_abundances_name,
                         "post_capture_fragment_lengths": truth_fl_name,
-                        "molecular_truth_abundances": molecular_truth_name,
-                        "truth_abundances": truth_abundances_name,
-                        "truth_fragment_lengths": truth_fl_name,
                         "truth_summary": truth_summary_name,
                         "fastq_r1": f"{cond_name}/sim_R1.fq.gz",
                         "fastq_r2": f"{cond_name}/sim_R2.fq.gz",
@@ -314,7 +308,7 @@ def run_condition_grid(
                         bam_path=bam_source if bam_source.exists() else None,
                         fastq_path=cond_dir / "sim_R1.fq.gz",
                         condition=cond_name,
-                        molecular_truth=molecular_truth_name,
+                        pre_capture_abundances=molecular_truth_name,
                         gdna_strand_overdispersion=gdna_od,
                     )
                     # The FASTQs are dropped only after the truth is written, which reads the oracle

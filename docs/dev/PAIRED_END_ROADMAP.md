@@ -71,8 +71,11 @@ Kept current until wave 4 closes (owner, 2026-10-16). ☑ done · ◐ in progres
       ☑ 1. the identity digest ignores column names (`8ebf71ea`), references re-frozen there; ☑ 2. the internal
       names (`fd012918`, bit-identical); ☑ 3. the outputs to the convention, `summary.json` schema 4 (`1fa1c143`:
       every number verified unchanged on the ladder end to end, the defined relabellings only; suite 3,045);
-      ☐ 4. the index and scan names, one index rebuild and re-cache; ☐ 5. the simulator's truth tables through one
-      writer
+      ☑ 4. the index and scan names, index format 10 (`dc736e39`: every index rebuilt and checked file by file
+      against its format-9 build, every panel re-cached, bit-identical on all three references; the synthetic
+      spans keep `RIGEL_NRNA_` ids, which the panels' read names carry); ☑ 5. the simulator's truth tables through
+      one writer (each quantity once, each path under one key; reads and kept truth identical in an A/B; the
+      renames that need a re-simulation are held)
     - ☑ the public repository scrubbed of local paths, cluster details and lab identifiers, owner's request
       (`8401aeba`, suite 3,048); docs/dev keeps markdown only (`20f187ab`); the data a commit of mine pushed was
       taken out of history by rewriting that one commit (owner-authorized)
