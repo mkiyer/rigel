@@ -91,10 +91,19 @@ targeted re-review)
   implementing, eight findings; each verified against the source and accepted
 - ◐ revision 4, answering the eight findings (2026-10-17); ☐ its targeted re-review
 - ☐ step 1b, the gates' own proof: each gate broken on purpose and seen to fail (plan §12)
-- ◐ the STAR panel (owner, 2026-10-17): the five conditions of the minimap2 panel at production and recommended
-  parameters; the request for the cluster session drafted, with error-injected copies proposed (plan §13)
-- ☐ the first measurement: today's tree on the STAR panel, production against recommended, with the census of the
-  deferred defects (plan §12)
+- ☑ the STAR panel (2026-10-18): the five conditions of the minimap2 panel aligned on the cluster by STAR 2.7.11b at
+  production and recommended parameters; all twelve BAMs collated, complete and carrying NM. Error-injected copies not
+  made (plan §13, open question 3)
+- ☑ rustar approved for local alignment (owner, 2026-10-18): 99.9% of templates identical to STAR on a 100k-pair
+  sample; wrapper in `$RIGEL_RUNS/rustar/`
+- ☑ the first measurement (2026-10-18; `$RIGEL_RUNS/star_panel/first_measurement.md`), today's tree, pinned and
+  fractional, scored against truth:
+  - on STAR alignments 18–22% of the g50 conditions' gDNA is counted as RNA, mostly in nascent spans, against near zero
+    on the oracle alignments; 99.5% of it is unspliced (the deconvolution, not splice artifacts);
+  - the recommended parameters cut annotated-junction artifacts 25–55%, but raise unannotated-junction ones 12–60% and
+    spliced intergenic ones about twofold, which the annotated-path rule (step 4) withholds;
+  - with today's tree they raise gDNA counted as RNA 2–6% and transcript error 7–24% per stratum;
+  - ☐ still to take: the census of the deferred defects (the merger, the gDNA mean, the prior's cohort)
 - ☐ the fixtures, with the exhaustive pairing oracle
 - ☐ Step 2, mate locations
 - ☐ Step 3, pairing: HI groups, completeness per mate and duplicates; every R1 × R2 pair without HI; the anchor
@@ -322,5 +331,11 @@ Each is designed and measured on the repaired scan.
 - the owner has found STAR parameters that report both readings of a template whose alignments score alike; by
   default STAR's bonus for the spliced reading reports it alone;
 - open questions or uncertainties after revision 4 go to a targeted re-review.
+
+**Recorded (owner, 2026-10-18, ninth round):**
+
+- rustar, the Rust port of STAR, is approved for local alignment; its residual difference from STAR (about 0.1% of
+  templates on a 100k-pair sample, with the spliced-and-contiguous counts within one template per class) is accepted;
+- the first measurement proceeds on the STAR panel aligned on the cluster.
 
 **Open for wave 1:** the questions in `PAIRED_END_WAVE1_PLAN.md` §13.
