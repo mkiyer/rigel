@@ -1,7 +1,7 @@
 # The paired-end repair: roadmap to release
 
-2026-10-18 · code base `23fb2435` · sandbox roadmap; the fix order (owner, 2026-10-18) below supersedes the waves'
-order, and its first change is implemented.
+2026-10-18 · code base `07eba0fc` · sandbox roadmap; the fix order (owner, 2026-10-18) below supersedes the waves'
+order, and its first two changes are implemented.
 
 This file holds the waves, what each must deliver, and the gate between them.
 
@@ -45,7 +45,9 @@ steps 2–6 and waves 2 and 3 into one list; the waves below keep their record. 
    full suite and preflight;
 5. commit, push and record, then the next change.
 
-*Phase A, the scan*
+*Phase A, the scan.* Its two goals come first (owner, 2026-10-18): keep competing spliced and unspliced alignments,
+and give every accepted alignment a valid fragment length, so no unpaired reads. The rest is bundled after them because
+the code is open; each is less critical.
 1. ☑ The junction-strand tag read per record (2026-10-18; `ISSUES: sj-strand-tag-chosen-from-the-first-reads`,
   closed). Pinned and fractional, against baselines from the same code: the STAR panel at the recommended
   parameters 15/15 quant_accuracy rows and the oracle ladder 48/48 identical in every field; suite 3,050. The panel
@@ -55,20 +57,28 @@ steps 2–6 and waves 2 and 3 into one list; the waves below keep their record. 
 2. ☑ Transcript strands installed by the index (2026-10-18): a fragment resolved without a scan sees them, so an
   antisense overlap reads strand-ambiguous; pinned and fractional, the STAR panel 15/15 and the oracle ladder 48/48
   quant_accuracy rows identical in every field; suite 3,052
-3. ☐ One location per alignment: aliases kept; NM conflicts and missing NM counted; unindexed references apart; tag
-  types checked; count widths that cannot wrap
-4. ☐ Hits only from complete HI groups (STAR): a group missing a mate is a counted unpaired alignment, duplicate
-  groups collapse, truncated output stops the run
-5. ☐ `num_hits` counts distinct usable hits (today `max(NH, hits)`)
-6. ☐ Without HI (minimap2), every same-reference pair validated, the span bound first
-7. ☐ Each hit validated as one molecule along a path: K by the resolver's rule; outward and too-long pairs
-  rejected; clips walked
-8. ☐ Supplementary chains and hard-clipped 5′ ends withheld, and counted
-9. ☐ The annotated-path rule: a spliced hit is usable only if one annotated transcript holds all its junctions
-10. ☐ Each use of K outside implicit splicing, one at a time
+3. ☐ The pairing question: STAR's HI pairs against Rigel's own search, each scored against the molecule's truth
+  (`ISSUES: star-hi-pairs-against-rigels-own-pairing`; owner, 2026-10-18); a measurement, no change to the tool
+4. ☐ The gates' own proof (the plan's step 1b), before the first change whose identity claim leans on those gates
+5. ☐ Location identity and aliases (D and N apart, M/=/X runs coalesced), which duplicate hits need
+6. ☐ Complete pairs only: HI groups (a group missing a mate is a counted unpaired alignment, duplicate groups collapse,
+  truncated output stops the run, a mixed template keeps its asserted pairs), or the search, as the pairing question
+  decides
+7. ☐ `num_hits` counts distinct usable hits (today `max(NH, hits)`)
+8. ☐ Without HI (minimap2), every same-reference pair validated, the span bound first
+9. ☐ Each hit validated as one molecule along a path, with one witness transcript: K by the resolver's rule; outward
+  and too-long pairs rejected; clips walked
+10. ☐ The annotated-path rule: a spliced hit is usable only if one annotated transcript holds all its junctions; its
+  contiguous competitor stays
 11. ☐ One length rule for overlapping mates
-12. ☐ Accounting: one outcome per template, each record's status, the counters and the annotated-BAM tags; the
-  annotation pass checked against the scan by identity
+
+*The bundle*
+12. ☐ The rest of one location per alignment: NM conflicts and missing NM counted; unindexed references apart; tag
+  types checked; count widths that cannot wrap
+13. ☐ Supplementary chains and hard-clipped 5′ ends withheld, and counted
+14. ☐ Each use of K outside implicit splicing, one at a time
+15. ☐ Accounting: one outcome per template, each record's status from its template's outcome, the counters and the
+  annotated-BAM tags; the annotation pass checked against the scan by identity
 
 *Phase B, calibration*
 1. ☐ The second pass: an observed annotated splice takes the RNA length law
@@ -147,8 +157,10 @@ targeted re-review)
   must witness a path's observed and implied junctions alike, and that a mixed-HI template must keep its known pairs;
   two fixes before implementing, stronger evidence gates with the normalization contract, and each record's status
   from its template's final outcome; the six open questions answered with recommendations
-- ☐ revision 5, answering the targeted review before the steps it governs (the HI groups and the no-HI pairs, the
-  path witness and the annotated-path rule, the accounting, the second pass's weights)
+- ☑ revision 5 (2026-10-18), answering the targeted review: one witness transcript per path; a mixed-HI template keeps
+  its asserted pairs and invents none; unique hypotheses and log weights in pass 2; each record's status from its
+  template's outcome; the six open questions adopted or put to the owner. ☐ The reviewer's check of it, optional,
+  before the changes it governs
 - ☐ step 1b, the gates' own proof: each gate broken on purpose and seen to fail (plan §12)
 - ☑ the STAR panel (2026-10-18): the five conditions of the minimap2 panel aligned on the cluster by STAR 2.7.11b at
   production and recommended parameters; all twelve BAMs collated, complete and carrying NM. Error-injected copies not
@@ -408,5 +420,18 @@ Each is designed and measured on the repaired scan.
 - the caches are rebuilt once, when the scan's changes are done, and not after each one: the scan's changes are
   measured end to end, which reads no cache, and each one leaves the caches stale anyway;
 - the production-parameter BAMs are deleted (their logs, junction tables and checks are kept).
+
+**Recorded (owner, 2026-10-18, eleventh round):**
+
+- the scan and buffer phase has two goals: keep competing spliced and unspliced alignments, so the aligner's choice no
+  longer certifies a gDNA fragment as RNA; and a valid fragment length for every accepted alignment, so no unpaired
+  reads. Every other scan defect is bundled with them, less critical;
+- a gene-level count for templates that one gene holds but no single transcript is a future enhancement
+  (`ISSUES: fragments-that-fit-one-gene-but-no-transcript`);
+- whether STAR input is paired by its HI groups or by Rigel's own search, and whether that search is valid, is to be
+  investigated (`ISSUES: star-hi-pairs-against-rigels-own-pairing`);
+- stale or unneeded BAMs and results are removed once nothing needs them. Removed 2026-10-18, text receipts kept: the
+  production-parameter BAMs, the parked threads' annotated BAMs and prototype wheels, the superseded pairing
+  prototype's arrays and builds, the closed fl-tilt campaign's fragment dumps, and the parity and smoke BAMs.
 
 **Open for wave 1:** the questions in `PAIRED_END_WAVE1_PLAN.md` §13.

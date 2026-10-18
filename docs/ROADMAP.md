@@ -134,7 +134,10 @@ its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-mult
    `rename_identity.py --check`, lands between any two windows. Then the involved ones: the EM's reduction, landed
    2026-10-14; then the splice-artifact mechanism (`ISSUES: splicing-artifacts`), its design externally reviewed
    2026-10-14. The derivation, the mechanism fixtures, a prototype and the VCaP A/B come next. The release waits
-   for its validation on independent artifact-containing evidence on the cluster (owner, 2026-10-14).
+   for its validation on independent artifact-containing evidence on the cluster (owner, 2026-10-14). Since 2026-10-16
+   the release-blocking repair is the scan's (`ISSUES: the-scanner-builds-fragments-from-one-mate`), fixed in pipeline
+   order, the scan first, one change at a time (owner, 2026-10-18), with
+   `ISSUES: star-hi-pairs-against-rigels-own-pairing` deciding how STAR input is paired.
 7. **The release**: `docs/PUBLISHING.md` is the procedure; what gates it is the state — the deliverable measured per
    stratum, the zero rows clean, the suite at its standing count, `preflight.py --full` green, CI run once by hand, a
    real-data smoke run, the standing risks re-read, and the manual and the changelog true of what ships.
@@ -164,7 +167,8 @@ its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-mult
 `ISSUES: unannotated-transcription-is-booked-as-gdna` · `ISSUES: ruler-witness-geometry-on-transcript-panels` ·
 `ISSUES: yield-variance-beside-the-count` · `ISSUES: drain-contaminates-certified-rna` ·
 `ISSUES: the-deferred-rna-long-regression-after-factory-removal` · `ISSUES: overlapping-synthetic-shadows` ·
-`ISSUES: performance-memory-bounded-solve` · `ISSUES: hygiene-ledger`.
+`ISSUES: performance-memory-bounded-solve` · `ISSUES: fragments-that-fit-one-gene-but-no-transcript` ·
+`ISSUES: hygiene-ledger`.
 
 **Parked — Tier 5**, each with its entry: `ISSUES: a-pure-gdna-library-reads-as-nascent-rna` ·
 `ISSUES: capture-premise-untested-on-cdna` · `ISSUES: the-atom-at-an-unwitnessed-both-strand-slot` ·

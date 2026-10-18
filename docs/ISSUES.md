@@ -150,6 +150,20 @@ for it: `the-gdna-length-contrast-is-ill-conditioned-on-aligned-input` and `regi
 Instruments: `quant_accuracy.py` and `calibration_vs_oracle.py` on the aligned panel, with the gDNA law and the capture
 ruler held fixed; the oracle ladder for identity.
 
+### star-hi-pairs-against-rigels-own-pairing
+`priority: now — decides how STAR input is paired, before the scan's HI-group change is built (owner, 2026-10-18: investigate) · kind: question · 2026-10-18`
+STAR writes HI, the index of each pair alignment, carried by both mates' records; minimap2 writes none and reports
+secondaries per mate. The plan pairs STAR input by its HI groups alone, and input without HI by validating every R1 × R2
+pair of locations along a path. Which is better for STAR input is open (owner): forcing HI's pairs trusts the aligner and
+never revives a pair it did not report; ignoring HI and pairing all input by Rigel's own search treats both aligners
+alike, and the targeted review's mixed-HI blocker goes with it. The owner also asks whether Rigel's own pairing is valid.
+Today's pairing without HI joins locations whose transcript sets overlap, so anything inside one gene's span pairs; the
+plan replaces it with geometry along a path, and that is what is compared.
+Decide on the STAR panel, whose read names carry each molecule's true source and coordinates: STAR's HI pairs and the
+pairs the search finds with HI ignored, each scored against the true molecule, template by template (pairs both find,
+pairs only HI asserts, with the search's reason for rejecting them, and pairs only the search finds, true or not), then
+end to end per stratum. Instrument: a prototype of the search over the panel's records, ahead of the HI change.
+
 ### the-gdna-length-contrast-is-ill-conditioned-on-aligned-input
 `priority: now — release-blocking (owner, 2026-10-15); the third wave of the paired-end repair, designed on the repaired scan · kind: defect · 2026-10-15`
 `fl.py`'s gDNA length law is a two-pool contrast, g = [(1 − a1)·f0 − (1 − a0)·f1] / (a0 − a1). It divides by the
@@ -753,6 +767,23 @@ The outputs use "nascent" for two different sets of fragments:
 The report row's description, "synthetic + annotated single-exon spans", is false (`report/model.py:298-304`). Both
 splits also name mature and nascent as populations, against Axiom 0. The column names (`mature_count`,
 `nascent_count`, `mrna_*`, `nrna_*`) are a user contract, carried by the MANUAL and the goldens.
+
+### fragments-that-fit-one-gene-but-no-transcript
+`priority: later — a future enhancement (owner, 2026-10-18) · kind: design · 2026-10-18`
+Every accepted alignment needs a valid fragment length, because the EM scores by it, so the scan's repair withholds the
+templates it cannot measure. A template whose only reported pairings are a lone mate, or a spliced pair whose observed
+junctions no one annotated transcript holds (a novel junction, an annotated combination no transcript joins, mates on
+two transcripts' junctions), is lost; an unspliced pair keeps its overlap candidates and the gene's nascent span. Some
+of the lost ones are recoverable (owner): a template whose mates both align within one gene, along a path of valid
+length that no single transcript holds, could be counted to that gene and to no transcript. Unique to the gene, it would
+skip the EM, stay out of transcript abundance and add to the gene's. Unmapped mates and chimeras stay lost.
+Open before it is designed:
+- which path gives the length when no transcript holds it;
+- splice artifacts concentrate on unannotated junctions (`ISSUES: splicing-artifacts`), so a gene count that bypasses
+  the EM's gDNA competition would re-admit them as RNA;
+- a gene's total would then exceed the sum of its transcripts, which the tables and the report must say.
+Instrument: the scan's withheld-template census, its unannotated-splice outcome by class (within one gene, between genes,
+touching an intergenic region), on the STAR panel with truth.
 
 ### strand-overdispersion-one-shared-value
 `priority: later — od = 0 and κ from the genuine junctions ship in 0.8.0 with the class diagnostics; the pruning moved to ISSUES: splicing-artifacts (owner, 2026-10-14) · kind: design · 2026-09-27`

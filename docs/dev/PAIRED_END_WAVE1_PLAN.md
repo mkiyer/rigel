@@ -1,10 +1,11 @@
 # Wave 1 plan: the scan stage
 
-2026-10-17 · code base `3941a0dd` · revision 4. Revision 3 was reviewed the same day
-(`PAIRED_END_WAVE1_READINESS_REVIEW.md`): revise before implementing steps 2–6, with eight findings. Revision 4 answers
-each one (§14), states today's behavior with a citation to the source wherever it describes it, and records the owner's
-decisions of 2026-10-17 on the STAR panel and on measuring splice artifacts with simulated truth (§12). Nothing in steps
-2–6 is implemented.
+2026-10-18 · code base `01aba957` · revision 5. Revision 4 had a targeted re-review on 2026-10-18
+(`PAIRED_END_WAVE1_TARGETED_REVIEW.md`): two blockers, two fixes before implementing, and a recommendation for each open
+question. Revision 5 answers them (§14) and follows the owner's fix order of 2026-10-18 (`PAIRED_END_ROADMAP.md`): the
+scan's changes one at a time, each measured end to end, and the panel caches rebuilt once, when the scan's changes are
+done (§12). Two changes have landed: the junction-strand tag read per record (`01aba957`) and the transcript strands
+installed by the index (`07eba0fc`). Revision 4 answered the readiness review of revision 3 (`PAIRED_END_WAVE1_READINESS_REVIEW.md`).
 
 The history: revision 1 also scrutinized each pair's alignment and constructed alternative readings, using a genome
 stored in the index. The owner then narrowed Rigel's scope (2026-10-16): Rigel reads alignments and does not repair or
@@ -12,46 +13,21 @@ re-align them. Revision 2 replaced revision 1 and was accepted on 2026-10-16. Re
 (§5) and the owner's rulings of 2026-10-16 and 2026-10-17. The waves are in `PAIRED_END_ROADMAP.md`. Part A is the
 prompt for the reviewer; Part B is the plan.
 
-# Part A — Prompt for a targeted re-review (copy everything below the line)
+# Part A — Prompt for a check of revision 5 (copy everything below the line)
 
 ---
 
-You reviewed revision 3 of this plan (`PAIRED_END_WAVE1_READINESS_REVIEW.md`) and found eight defects. Revision 4
-answers them. Review what changed; the rest of your earlier report stands unless revision 4 contradicts it. The code is
-unchanged since your review (base `3941a0dd`); only this plan, the roadmap and the checks below are new.
+You reviewed revision 4 of this plan (`PAIRED_END_WAVE1_TARGETED_REVIEW.md`). Revision 5 answers your findings, and §14
+maps each one to the section that answers it. Check only what changed:
 
-**Check, most severe first:**
+1. **Your two blockers:** the one-witness rule (§7.2, §8) and the mixed-HI rule with its asserted pairs (§7.1). Does
+   each falsifier you gave now hold, and does either rule admit anything it should refuse?
+2. **Your two fixes:** the evidence gates and the normalization contract (§9.3, §11), and each record's status from its
+   template's outcome (§10).
+3. **The open questions (§13):** where revision 5 departs from your recommendation, is the reason sound?
 
-1. **Your eight findings.** Is each answer right and complete, or does it only claim to be? §14 maps each finding to the
-   section that answers it.
-2. **The mechanisms revision 4 adds,** which no review has seen:
-   - location identity (§6);
-   - the annotated-path rule, with the blacklist exception and mates whose junctions contradict each other (§8);
-   - the pairing mode per template, completeness per mate, duplicate hits, and every pair validated with the span bound
-     as the validator's first length test (§7.1);
-   - the validator's K rule, shared with the resolver (§7.2, §7.5);
-   - the second pass's weights: one placement factor and a share within the placement (§9.3);
-   - the outcome order and each record's status (§10).
-3. **The citations.** Every statement about today's code cites a file and line. Check at least five against the source.
-4. **The enumeration checks** (`$RIGEL_RUNS/arms/2026-10-17_wave1_rev4_checks/`): do they test what the plan claims,
-   and does each fail when the claimed property is broken?
-5. **The measurement plan (§12):** the STAR panel, the first measurement, and the census of the deferred defects. Is it
-   enough to decide the end-of-wave gate per stratum?
-6. **The open questions (§13):** answer each with a recommendation.
-
-**Rules the plan must keep** are unchanged from revision 3: three populations; both mates and a length; the emission
-model (overlap nomination, overhang and NM penalties, per-candidate lengths, no candidate deleted to make a path fit);
-the aligner proposes and the EM decides; read, don't repair; annotated transcripts only; no new constant; one mechanism
-per A/B, pinned and read per stratum with both errors.
-
-**Deliver** a markdown report of 1–3 pages:
-
-1. a verdict, in at most 5 lines;
-2. findings, numbered, each with a severity (blocker, fix before implementing, consider later), the section, the
-   reasoning labelled *derived*, *measured* (cite the number) or *conjecture*, and a falsifiable test;
-3. one line per finding of your first review: answered, partly, or not.
-
-Be specific and terse. A finding without a test is a conjecture: say so. Do not write production code.
+**Deliver** at most one page: a verdict in at most three lines, then one line per finding of yours (answered, partly
+or not) with the falsifier that decides it. Do not write production code.
 
 ---
 
@@ -62,6 +38,17 @@ Be specific and terse. A finding without a test is a conjecture: say so. Do not 
 For every template in the BAM, the scan stage produces either a set of validated hits, or one disposition saying why
 there is none. A **hit** is one alignment of the template as the aligner reported it: both mates, checked to be one
 molecule, with a computable fragment length.
+
+**The two goals** (owner, 2026-10-18). The scan and buffer phase must:
+
+- **keep competing spliced and unspliced alignments**, the potential splice artifacts that the recommended STAR
+  parameters now report, so that a gDNA fragment is no longer certified as RNA by the aligner's choice alone;
+- **give every accepted alignment a valid fragment length:** no more unpaired reads, because a length cannot be
+  computed from one mate, and the EM scores by it.
+
+Every other scan defect in this plan is bundled with them because the code is open anyway; each is less critical, and
+the arms take the two goals first (§12). What the length rule loses, and one way to win part of it back, is
+`ISSUES: fragments-that-fit-one-gene-but-no-transcript` (a future enhancement).
 
 Wave 1 delivers six things:
 
@@ -274,7 +261,8 @@ No bases are kept, because nothing in wave 1 re-scores a sequence.
 **Rules:**
 
 - **One location per alignment.** A location is identified by its mate, reference, strand, leftmost aligned position
-  and CIGAR, with M, = and X read as one operation and soft and hard clips kept apart. So `50M3D50M` and `50M3N50M` at
+  and CIGAR, with M, = and X read as one operation, adjacent runs of them coalesced (`50=50X` and `100M` are one
+  alignment), and soft and hard clips kept apart. So `50M3D50M` and `50M3N50M` at
   one start are two locations, a deletion and an intron, although they place the same aligned bases. Records with one
   identity are one location: STAR repeats a mate's record in every pair alignment that shares it, and each repeat is
   an alias. The identity is a property of each record alone, so record order cannot change it.
@@ -323,16 +311,34 @@ length come from the scan configuration. Today only the scan installs them (`res
 
 ### 7.1 Which pairs: two strategies (owner, 2026-10-16)
 
-**The mode is read per template**, from its own records, not from the BAM's first records:
+**The mode is read per template**, from its own records, not from the BAM's first records. Whether STAR input
+should be paired by HI at all, or by Rigel's own search with HI ignored, is open (owner, 2026-10-18,
+`ISSUES: star-hi-pairs-against-rigels-own-pairing`): it is measured on the STAR panel, against each molecule's truth,
+before the HI-group arm is built. The rules below hold if HI is kept.
 
 - **With HI (STAR).** Every record of the template carries HI. STAR groups the records of each pair alignment by HI. A
   hit starts from the R1 and R2 locations of one HI group, and Rigel forms no other combination: crossing HI groups
   would only duplicate reported hits, or revive pairs STAR did not report.
 - **Without HI (minimap2).** No record carries HI. minimap2 reports secondaries per mate, so pairing is the reader's
   job (below).
-- **Mixed.** A template that mixes the two is an input defect: counted, and paired without HI, which reads every
-  reported alignment and lets geometry decide. Today a record without HI joins group 0 of its template
-  (`bam_scanner.cpp:821-846`).
+- **Mixed.** A template whose eligible records mix the two keeps STAR's pairs and invents none (targeted review,
+  finding 2). It is read with HI: each HI group's asserted pair stands, and a record without HI is an input defect,
+  counted and paired with nothing. Revision 4 paired a mixed template without HI, which crossed known groups: with
+  forward locations at 100 and 120 under HI 1 and 2, and reverse ones at 250 under HI 1 and 270 untagged, it accepted
+  all four lengths (250, 270, 230, 250), forward HI 2 with reverse HI 1 among them. Today a record without HI joins
+  group 0 of its template (`bam_scanner.cpp:821-846`).
+
+**What decides the mode.** The template's eligible records only: the mapped records the scan reads after its QC-fail
+and duplicate filters. An excluded record never sets or switches the mode, so adding an unmapped untagged record to a
+template changes nothing. HI is read as STAR documents it, the index of one pair alignment, carried by both of its
+mates' records, and the completeness checks below test that reading template by template. Rigel does not name
+producers: STAR and its port rustar write different program lines (`STAR`, `rustar-aligner`) with the same semantics,
+and a list of trusted names would be one more thing to keep current. An aligner whose HI meant something else would
+fail the per-group checks, counted, not paired across groups.
+
+**An asserted pair** is an HI group with exactly one distinct location for each mate, after aliases collapse. A group
+with two distinct locations for one mate is ambiguous: counted, and it yields no hit, because STAR asserts one pair per
+group.
 
 **Completeness.** Under STAR's semantics, a template's HI values run from 1 to NH, and every group holds both mates.
 
@@ -390,6 +396,14 @@ A candidate pair is a hit when two conditions hold.
      within K bases of its ends, on each side, is cut whole (`resolve_context.h:816-842`), and a transcript with an
      intron overlapping an aligned block by more than K bases offers no path (`resolve_context.h:682-704`). Aligned
      bases inside a cut intron are off the path, and the overhang term prices them.
+   - **One witness** (targeted review, finding 1). The transcript whose introns an alternative P removes must hold
+     every junction the hit observes, the junctions §8 checks, so the observed chain and the implied introns come
+     from one transcript, clip walks included. For an unspliced hit any transcript qualifies. The base path, the
+     observed skips alone, stands; the blacklist exception and the ordinary overhang are unchanged; and the witness
+     limits neither the candidates nor their lengths. Revision 4 let the two come from different transcripts: with F
+     `10M100N10M` at 100, R `10M` at 1700, `max_frag_length` 1,000 and K 0, T1 holding the observed intron [110,210)
+     and T2 the intron [300,1300), the base path is 1,510 and fails, but T2's intron gave 510 while §8 passed on T1.
+     Now the pair is rejected for length, and a transcript holding both introns admits it at 510.
    - Walking F's 5′ clip back along P gives the molecule's start a. Walking R's 5′ clip forward gives its end b. A walk
      that leaves the reference is unresolved geometry.
    - Require a < b, both mates' aligned bases inside [a, b), and 1 ≤ L ≤ `max_frag_length`, where L is the number of
@@ -490,7 +504,8 @@ The hit is withheld, with one of three reasons:
 A junction matches an annotated one as the resolver matches it today: exactly, at the strand of a definite motif, and at
 either strand when the motif is absent or ambiguous (`resolve_context.h:959-993`). The rule decides only whether a hit
 is usable. Its candidates are still nominated by overlap, and the transcript that holds its junctions limits neither the
-candidates nor their lengths.
+candidates nor their lengths. It is the transcript whose introns may fill the hit's unaligned stretches when §7.2
+validates it (one witness).
 
 **The template's other hits stay.** Take a gDNA template that the aligner reports both as an unannotated splice and as
 a contiguous alignment: it keeps the contiguous hit.
@@ -505,6 +520,10 @@ junction:
 
 **No alternatives.** Rigel constructs no contiguous or partial reading of an unannotated junction. If the aligner
 reports one, it is a hit like any other.
+
+**Not in wave 1:** counting a withheld template that one gene holds, but no single transcript, to that gene alone,
+outside the EM (owner, 2026-10-18; `ISSUES: fragments-that-fit-one-gene-but-no-transcript`). The census of withheld
+templates above, by class, is what it would be designed from.
 
 **What changes from today.** Today such hits are quantified through overlap candidates, whose lengths count the novel
 junction's skipped bases as if they were sequenced: a candidate's length subtracts only its own annotated introns
@@ -630,12 +649,24 @@ A count of zero weights alone is not enough.
      one that has (today its ρ reads 0, `second_pass.py:593`);
    - all-zero ρ within a placement gives an even share within it, and a partial zero stays a hard zero; the existing
      uninformative rule still applies to A_p, f and s;
-   - on a one-placement record it equals today's weight.
+   - on a one-placement record it equals today's weight;
+   - the share is taken over **unique hypotheses**: two descriptions of one physical path are one hypothesis, merged
+     before the share and kept merged through the deferred bank. Without it, duplicating one hypothesis moved a
+     placement from 0.354839 to 0.411765 in the targeted review's probe. It is a contract on the input, not a claim
+     that today's resolver emits duplicates;
+   - the weights are formed in logs and normalized against the largest, so a small factor raised to a large power
+     cannot underflow: 0.1^400 against 0.1^401 is odds of 10:1, where the direct products both read 0. A hard gate is an
+     explicit −∞, kept apart from the zero-evidence fallback (an even share), which applies only where a factor is
+     uninformative for every candidate.
 
    Revision 3 proposed ρ = 1, "not applicable", for such a placement. That gives some candidates two densities and
    others one, so a tenfold change of units moves an even pair to 1/11 against 10/11. The checks (Appendix B): 20,000
    random records unchanged under any rescaling of ρ and A_p; one-placement records equal to today; an uncontested
-   placement never zeroed beside contested ones; and the raw-density break caught.
+   placement never zeroed beside contested ones; and the raw-density break caught. The targeted review found them
+   blind to the evidence itself: a uniform draw over every multi-placement record, with today's one-placement weight,
+   also passes all four. So the gate adds independently computed cases (§11): two single-hypothesis placements with A_p
+   1 and 3 and every other factor equal draw 1/4 and 3/4; a duplicated hypothesis keeps the physical paths'
+   probabilities; a common NM offset keeps the odds.
 3. **The sequence evidence.** Pass 2 never reads mismatches: the deferred bank carries none
    (`bam_scanner.cpp:1142-1158`), so a placement with 37 more mismatches is drawn as often as a perfect one.
    - Each held placement carries its NM into the deferred bank: a new field in the bank's schema, its spill format, the
@@ -682,11 +713,16 @@ shortcut is removed in its own arm; most of the candidates it affects already si
 
 Every reason that any pair reached is recorded beside the outcome.
 
-**Each record's status** is separate from its template's outcome:
+**Each record's status** follows from its template's final outcome (targeted review, finding 4):
 
-- **used:** in a usable hit;
+- **used:** in a usable hit of a placed template;
 - **unused:** in a placed template, but in no usable hit (a withheld hit's records, a lone secondary);
-- **unplaced:** its template has no usable hit.
+- **unplaced:** every record of a template with any other outcome, an excluded one included.
+
+So `records = used + unused + unplaced` holds template by template. Revision 4 tied the status to usable hits, so a
+template excluded by the multimap option left a record in none of the three: two usable HI groups and an orphan third,
+under `include_multimap=false`, came out one short. The usable-hit counts taken before the option are reported apart,
+and neither an option exclusion nor a hit §8 withheld reaches calibration or the EM.
 
 **A placed template records its route:**
 
@@ -743,7 +779,10 @@ One suite per step. Each fixture is one of two kinds:
 
 **The exhaustive pairing oracle.** A small, independent Python enumeration of every R1 × R2 pair of a template, along
 every path of §7.2, stands beside the suites. On tiny references with clips, several introns and both orientations,
-the scanner's hits and every rejection reason must equal the oracle's.
+the scanner's hits and every rejection reason must equal the oracle's: the complete accepted and rejected sets, with
+the clip and K cases among them, not lengths the validator returns. The span-bound check of Appendix B is necessary,
+not complete: with every annotated path removed from the validator it still prints `ALL CHECKS PASS`, with 47,255
+pairs accepted.
 
 **The toy reference.** These are the annotation's exons, 0-based and half-open:
 
@@ -786,6 +825,10 @@ for that candidate. Cases marked † use their own tiny reference, named in the 
 | annotated path | a known and a novel junction | one mate at TA1's [1200,1500), the other at a novel junction | withheld (novel) |
 | annotated path | blacklisted junctions | one hit whose only junction is blacklisted; one with one of two junctions blacklisted | the kept junctions decide; the census records the raw ones |
 | pairing | one-base overlap, both outer boundaries, long-intron witness | as in revision 2 of the first design, §12 | as there |
+| pairing | † a hybrid witness (finding 1) | F `10M100N10M` at 100 / R `10M` at 1700; T1 holds [110,210), T2 [300,1300); `max_frag_length` 1,000; K 0 | rejected for length (1,510); with a T3 holding both introns, one hit at L 510; TA2's clip case still L 100 and the K case still 247 |
+| pairing | a mixed-HI template (finding 2) | 100-bp forward at 100 (HI 1) and 120 (HI 2); reverse at 250 (HI 1) and 270 (no HI) | one hit, (100, 250); HI 2 an unpaired alignment; the untagged record a counted defect. The same with an excluded untagged record added, and with the records permuted |
+| pairing | an HI group with two distinct locations for one mate | HI 1: R1 at 100 and at 400, R2 at 250 | ambiguous: counted; no hit |
+| accounting | an excluded template's records (finding 4) | two usable HI groups and an orphan third; `include_multimap=false` | one outcome; five disjoint record statuses, all unplaced; conserved through the annotation and under permutation |
 
 **Other cases:**
 
@@ -829,7 +872,9 @@ for that candidate. Cases marked † use their own tiny reference, named in the 
   - an all-held junction; a partly held one; one supported only by held templates; one supported by nothing;
   - the length-law correction;
   - the weights: every density scaled tenfold leaves every probability unchanged; a duplicated hypothesis description
-    changes nothing; a placement with no contested region beside contested ones is not zeroed;
+    changes nothing; a placement with no contested region beside contested ones is not zeroed; two single-hypothesis
+    placements with A_p 1 and 3, every other factor equal, draw 1/4 and 3/4; factors of 0.1^400 against 0.1^401 give
+    odds of 10:1; a common NM offset keeps the odds;
   - placements that differ only in NM, 37 apart: odds 10^-37; α_mm 0 with every placement carrying NM: not deposited,
     counted; α_mm 1: inert;
   - NM surviving the deferred bank's spill and reload, the cache, and `lift_choices` across partitions;
@@ -875,7 +920,14 @@ for that candidate. Cases marked † use their own tiny reference, named in the 
 - stamp a gated fragment intergenic;
 - accept an annotation pass whose groups differ, by count or by identity;
 - decide "RNA" in pass 2 from the motif tag;
-- keep the single-block length shortcut.
+- keep the single-block length shortcut;
+- borrow an implied intron from a transcript that does not hold the observed junctions (the hybrid witness must fail);
+- remove every annotated path from the validator (the oracle's accepted and rejected sets must differ);
+- pair a mixed-HI template without HI, and let an excluded record set the mode;
+- draw every multi-placement record uniformly (the 1/4 against 3/4 case must fail);
+- reverse each weight factor in turn, and make every NM gate fire;
+- form the weights as direct products (the 0.1^400 case must fail);
+- tie a record's status to usable hits rather than to its template's outcome (the excluded template must fail).
 
 ## 12. Measurement and gates
 
@@ -903,9 +955,10 @@ for that candidate. Cases marked † use their own tiny reference, named in the 
   that simulation cannot show: the annotated-path rule's cost on genuine RNA, because the simulator writes only
   annotated isoforms, and artifacts from sample variants or library chemistry.
 
-**The first measurement, before any arm** (owner, 2026-10-17). Today's tree on the STAR panel, production against
-recommended parameters, per stratum, scored against truth. It shows what the aligner alone does to splice artifacts,
-and it takes the census of the deferred defects (§9.2):
+**The first measurement, before any arm** (owner, 2026-10-17; taken 2026-10-18, `PAIRED_END_ROADMAP.md`). Today's
+tree on the STAR panel, production against recommended parameters, per stratum, scored against truth. By the owner's
+ruling of 2026-10-18 it records today's tree and is no evidence about the parameters, which stay. It also takes the
+census of the deferred defects (§9.2), still to do:
 
 - templates by number of usable hits, and by kind;
 - units in which the merger keeps a hit other than the most likely one, for some transcript;
@@ -913,30 +966,40 @@ and it takes the census of the deferred defects (§9.2):
 - per locus, the held templates deposited against `n_calibrated`;
 - spliced placements given zero weight in pass 2, with their truth.
 
-**Arms,** one mechanism each, in order:
+**Arms,** one mechanism each, in the owner's fix order of 2026-10-18 (`PAIRED_END_ROADMAP.md`), the two goals of §1
+first:
 
-1. the gates' own proof (below); it changes no number of the tool;
-2. locations: a numeric no-op except for the enumerated input defects (identity, the NM count, the unindexed
-   references, the tag types and widths);
-3. the junction-strand tag read per record (§6), its own arm;
-4. the resolver set up by the index;
-5. pairs by HI, and every pair validated without HI, with duplicate hits, completeness per mate and the new
-   `num_hits` (the one-mate fix);
-6. the path witness for clipped and outward pairs;
-7. chains withheld;
-8. the annotated-path rule (§8);
-9. each use of the anchor tolerance outside implicit splicing, one arm per use (§7.5);
-10. the single length rule (§9.4);
-11. the accounting fixes (tags and counters; no quantification number moves);
-12. the length-law correction;
-13. the weights in pass 2;
-14. mismatches in pass 2;
-15. the motif rule in pass 2.
+1. the junction-strand tag read per record (§6): landed, `01aba957`, a numeric no-op on the STAR panel and the ladder;
+2. the transcript strands installed by the index: landed, `07eba0fc`, a numeric no-op on both panels, as it is by
+   construction (the scan installed them before every scan);
+3. the pairing question, HI's pairs against Rigel's own search (`ISSUES: star-hi-pairs-against-rigels-own-pairing`):
+   a measurement, which changes no number of the tool;
+4. the gates' own proof (below), before the first arm whose identity claim leans on those gates;
+5. location identity and aliases, which duplicate hits need (§6);
+6. complete pairs only: HI groups, with duplicate hits, completeness per mate and the mixed-template rule (§7.1), or
+   the search, as the pairing question decides;
+7. `num_hits` counting distinct usable hits (the one-mate fix);
+8. every pair validated without HI, the bound first;
+9. the path witness for clipped and outward pairs, with one witness transcript (§7.2);
+10. the annotated-path rule (§8), which withholds an unannotated spliced hit and keeps its contiguous competitor;
+11. the single length rule (§9.4);
+
+then the bundle, each its own arm:
+
+12. the rest of §6: the NM count, the unindexed references, the tag types and the widths;
+13. chains withheld;
+14. each use of the anchor tolerance outside implicit splicing, one arm per use (§7.5);
+15. the accounting fixes (tags and counters; no quantification number moves);
+16. the length-law correction;
+17. the weights in pass 2;
+18. mismatches in pass 2;
+19. the motif rule in pass 2.
 
 **Every arm:**
 
-- scans afresh (`build_scan_cache.py --force`), because the cache's key covers the deposit rule, not pairing or
-  resolution;
+- measures end to end on fresh scans: quant_accuracy's base arm reads each BAM and no cache, because the cache's key
+  covers the deposit rule, not pairing or resolution. The panel caches are rebuilt once, when the scan's changes are
+  done, before calibration's instruments read them (owner, 2026-10-18);
 - records its inputs' content digests, the paths of the modules it imported, and the native build's hash;
 - is compared with its parent and with the common baseline, recorded on the tree after the tile fix (§5);
 - runs pinned (`scan.total_threads=1`, `OMP_NUM_THREADS=1`, fractional assignment), with pass-2 draws at matched seeds
@@ -969,7 +1032,8 @@ and it takes the census of the deferred defects (§9.2):
 
 **The implementation gate:**
 
-- this plan reviewed and revised: revision 4's re-review;
+- this plan reviewed and revised: revision 5's check of the targeted review's findings, before the arms they govern
+  (6, 8, 9, 15 and 17);
 - the gates' own proof done;
 - every suite's fixtures written, failing where they demonstrate a defect, with the exhaustive pairing oracle;
 - the injection hooks proven to reach their consumers: the frozen calibration and pass-2 laws, the EM's realized laws,
@@ -988,24 +1052,47 @@ and it takes the census of the deferred defects (§9.2):
 
 ## 13. Open questions
 
-1. **The deferred defects' exposure** (§9.2). The recommended STAR parameters make spliced-and-contiguous
-   multimappers common, so the merger rule, the gDNA mean and the prior's denominator touch many more templates than
-   on production BAMs. The first measurement (§12) counts it. If it is large, does a fix move from wave 2 into wave 1?
-2. **The prior's denominator for 0.8.0** (`ISSUES: the-em-prior-share-excludes-drawn-multimappers`). It was kept on a
-   three-denominator A/B with production STAR, where few templates hold two hits. Should that A/B be re-run on the STAR
-   panel before the end-of-wave gate?
-3. **Sequencing errors** (§12). Should the panel carry an error-injected copy of each condition at VCaP's mismatch
-   rate beside the error-free reads, and the 0.01 stress copy as well? Without one, the mechanism by which a sequencing
-   error tips STAR to the spliced reading goes unmeasured.
-4. **The all-held approximation** (§9.3) under the recommended parameters: what result of its measurement would reopen
-   it?
-5. **What simulation cannot show** (§12): is VCaP's library-level truth enough to price the annotated-path rule's cost
-   on genuine RNA, and artifacts from sample variants or library chemistry?
-6. **The no-HI search's form** (§7.1). The owner's fifth round named a walk sorted by distance. Revision 4 validates
-   every pair, bound first: the same hits with simpler code, at most 36 pairs per template under minimap2's defaults.
-   A sorted walk with a stop over all remaining partners gives the same set, if a measured cost ever asks for it.
+The targeted review recommended an answer to each of revision 4's six (its finding 5). Revision 5 adopts them, except
+where the owner must decide:
+
+1. **The deferred defects' exposure** (§9.2). Adopted: the wave boundaries stand unless a separate causal arm shows that
+   a deferred mechanism stops a stratum from meeting its gate; counts alone promote nothing. Likelihood losses, gDNA
+   multiplicity and prior distortion are recorded beside the truth errors, and the validated-hit census is taken with
+   the oracle, since today's `num_hits` is not it.
+2. **The prior's denominator** (`ISSUES: the-em-prior-share-excludes-drawn-multimappers`). Adopted in substance: the
+   three-denominator comparison is re-run before the wave completes, all-multimapper loci included, and the
+   denominator is not replaced merely because its cohort mismatch is real. **For the owner:** the review asks for
+   production STAR inputs too, and their BAMs were deleted on 2026-10-18; they are re-aligned (rustar locally, or the
+   cluster) only if the owner wants that half.
+3. **Sequencing errors** (§12). The review recommends matched seeded error copies of all five conditions, the 0.01 copy
+   as a separately reported stress arm, further seeds, and the substitution and indel coverage documented; VCaP's
+   mismatch rate is a proxy that mixes error sources, not a sequencing-error law. **For the owner** (asked 2026-10-18);
+   needed for the end-of-wave gate only.
+4. **The all-held approximation** (§9.3). Adopted: reopened only if matched support, depth and seed experiments show a
+   loss from zero support that stops an in-scope gate; changing support from zero to independently supported must move
+   the probabilities and deposits as predicted. Exposure alone decides nothing.
+5. **What simulation cannot show** (§12). Adopted for VCaP: withholding in its RNA library is reported as exposure, not
+   as genuine RNA lost, since a withheld alignment can be genuine unannotated RNA or misaligned contamination, and VCaP
+   corroborates. **For the owner:** the review's instrument for the cost on genuine RNA, known-origin RNA simulated from
+   a richer annotation and quantified against a deliberately restricted one, is new simulator work.
+6. **The no-HI search's form** (§7.1). Adopted, as revision 4 had it: every pair validated, the bound applied to each
+   pair; multiplicity tails and memory profiled, and optimized only if a cost asks, keeping exact hits and reasons.
+   Joined by the owner's question whether STAR input is paired by HI at all (`ISSUES: star-hi-pairs-against-rigels-own-pairing`).
 
 ## 14. How this answers the reviews
+
+**The targeted review of revision 4** (2026-10-18):
+
+| finding | revision 5 |
+|---|---|
+| 1 (blocker). the observed and implied junctions can have different witnesses | §7.2: one witness, the transcript that holds the observed junctions supplying every implied intron, clip walks included; §8; the hybrid fixture and its break (§11) |
+| 2 (blocker). the mixed-HI fallback discards known pairs | §7.1: a mixed template keeps its asserted pairs and invents none; the mode from eligible records only; one distinct location per mate in an asserted group; ambiguous groups counted. Producer naming declined, because the per-group checks test HI's reading. Whether HI is kept at all is the owner's open question (§7.1) |
+| 3. the evidence gates and the normalization contract | §9.3: unique hypotheses, weights in logs, hard gates apart from the zero-evidence fallback; §11: the oracle's complete accepted and rejected sets, the unequal-factor, duplicate and offset cases, and their mutants |
+| 4. an excluded template leaves records without a status | §10: each status from the final outcome; the five-record fixture (§11) |
+| 5. exposure, error and unidentifiable cost | §13: each recommendation adopted, or put to the owner |
+
+The review judged revision 4's answers to the readiness review: 1, 3, 5 and 6 answered (1 with M/=/X runs to coalesce,
+now §6); 2, 4, 7 and 8 partly, now completed by its findings 1, 3, 2 and 4.
 
 **The readiness review of revision 3** (2026-10-17):
 
@@ -1053,6 +1140,8 @@ and it takes the census of the deferred defects (§9.2):
 
 ## Appendix B — evidence pointers
 
+- **The targeted review of revision 4:** `PAIRED_END_WAVE1_TARGETED_REVIEW.md`, with its reproduction record (lab use
+  only).
 - **The readiness review of revision 3:** `PAIRED_END_WAVE1_READINESS_REVIEW.md`, with its reproduction record (lab
   use only).
 - **Revision 4's checks:** `$RIGEL_RUNS/arms/2026-10-17_wave1_rev4_checks/`: the span bound (200,000 random cases,
