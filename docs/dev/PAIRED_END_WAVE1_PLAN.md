@@ -1,141 +1,55 @@
 # Wave 1 plan: the scan stage
 
-2026-10-17 · base `3941a0dd` · revision 3. Step 1 is complete: its review is delivered and every cleanup stage has
-landed (§5). Nothing in steps 2–6 is implemented.
+2026-10-17 · code base `3941a0dd` · revision 4. Revision 3 was reviewed the same day
+(`PAIRED_END_WAVE1_READINESS_REVIEW.md`): revise before implementing steps 2–6, with eight findings. Revision 4 answers
+each one (§14), states today's behavior with a citation to the source wherever it describes it, and records the owner's
+decisions of 2026-10-17 on the STAR panel and on measuring splice artifacts with simulated truth (§12). Nothing in steps
+2–6 is implemented.
 
-Revision 1 also scrutinized each pair's alignment and constructed alternative readings, using a genome stored in the
-index. The owner then narrowed Rigel's scope (2026-10-16): Rigel reads alignments and does not repair or re-align
-them. Revision 2 replaced revision 1 and was accepted on 2026-10-16. Revision 3 adds what has happened since: step 1
-carried out (§5); the owner's rulings of 2026-10-16 on pairing, mates that disagree and the anchor tolerance (§7.1,
-§7.3, §7.5); and those of 2026-10-17: the junction-strand tag read per record (§6), the anchor tolerance renamed
-(§7.5) and the output names settled (§13). The waves are in `PAIRED_END_ROADMAP.md`. Part A is the prompt for the
-reviewer; Part B is the plan.
+The history: revision 1 also scrutinized each pair's alignment and constructed alternative readings, using a genome
+stored in the index. The owner then narrowed Rigel's scope (2026-10-16): Rigel reads alignments and does not repair or
+re-align them. Revision 2 replaced revision 1 and was accepted on 2026-10-16. Revision 3 recorded step 1 carried out
+(§5) and the owner's rulings of 2026-10-16 and 2026-10-17. The waves are in `PAIRED_END_ROADMAP.md`. Part A is the
+prompt for the reviewer; Part B is the plan.
 
-# Part A — Prompt for the reviewer (copy everything below the line)
+# Part A — Prompt for a targeted re-review (copy everything below the line)
 
 ---
 
-You are an independent technical reviewer with a background in short-read alignment (STAR), paired-end library
-geometry, splice-junction biology, the likelihood models of RNA-seq quantification, and C++/Python code health. You
-are reviewing the **design of one stage** of **Rigel**, a Bayesian RNA-seq quantifier that separates RNA from
-genomic-DNA (gDNA) contamination.
+You reviewed revision 3 of this plan (`PAIRED_END_WAVE1_READINESS_REVIEW.md`) and found eight defects. Revision 4
+answers them. Review what changed; the rest of your earlier report stands unless revision 4 contradicts it. The code is
+unchanged since your review (base `3941a0dd`); only this plan, the roadmap and the checks below are new.
 
-Rigel reads a name-collated BAM, calibrates the library's gDNA and RNA content, and runs a per-locus EM over annotated
-transcripts and one gDNA component. The design under review is **wave 1, the scan stage**: how alignment records
-become complete, validated read-pair hits before any likelihood is computed. It covers:
+**Check, most severe first:**
 
-- a code-health review of the scan path and its cleanup, each stage proven to change no number (carried out: §5);
-- each alignment record as a mate location, its junction-strand tag read per record;
-- hits from the aligner's pairs (STAR's HI groups) or, for aligners without HI, from a bounded R1 × R2 search, each
-  validated as one molecule;
-- one rule for unannotated junctions, applied hit by hit;
-- the hand-off to calibration and the EM, with four corrections to calibration's second pass;
-- the accounting of every template and every record.
+1. **Your eight findings.** Is each answer right and complete, or does it only claim to be? §14 maps each finding to the
+   section that answers it.
+2. **The mechanisms revision 4 adds,** which no review has seen:
+   - location identity (§6);
+   - the annotated-path rule, with the blacklist exception and mates whose junctions contradict each other (§8);
+   - the pairing mode per template, completeness per mate, duplicate hits, and every pair validated with the span bound
+     as the validator's first length test (§7.1);
+   - the validator's K rule, shared with the resolver (§7.2, §7.5);
+   - the second pass's weights: one placement factor and a share within the placement (§9.3);
+   - the outcome order and each record's status (§10).
+3. **The citations.** Every statement about today's code cites a file and line. Check at least five against the source.
+4. **The enumeration checks** (`$RIGEL_RUNS/arms/2026-10-17_wave1_rev4_checks/`): do they test what the plan claims,
+   and does each fail when the claimed property is broken?
+5. **The measurement plan (§12):** the STAR panel, the first measurement, and the census of the deferred defects. Is it
+   enough to decide the end-of-wave gate per stratum?
+6. **The open questions (§13):** answer each with a recommendation.
 
-**History.**
+**Rules the plan must keep** are unchanged from revision 3: three populations; both mates and a length; the emission
+model (overlap nomination, overhang and NM penalties, per-candidate lengths, no candidate deleted to make a path fit);
+the aligner proposes and the EM decides; read, don't repair; annotated transcripts only; no new constant; one mechanism
+per A/B, pinned and read per stratum with both errors.
 
-- A first design (`PAIRED_END_REPAIR.md`, revision 2) was reviewed (`PAIRED_END_REPAIR_INDEPENDENT_REVIEW.md`) and
-  had four blockers.
-- A first wave-1 plan followed, in which Rigel would also have constructed alternative readings: the contiguous
-  reading of a short spliced side, and consistent readings of mates that disagree. It was reviewed
-  (`PAIRED_END_WAVE1_INDEPENDENT_REVIEW.md`, seven blockers).
-- The owner then narrowed Rigel's scope (2026-10-16):
-  - Rigel reads alignments; it does not repair or re-align them.
-  - Near-tied spliced and contiguous alignments are the aligner's to report. A parallel study is establishing STAR
-    parameters that do so (`star_parameters/PROMPT.md`), and Rigel will recommend them.
-  - The genome store is dropped for now.
-- Revision 2 of this plan followed and was accepted. Its step 1, the code-health review and cleanup, has since been
-  carried out (§5). This is revision 3; it has not been reviewed.
+**Deliver** a markdown report of 1–3 pages:
 
-The owner's earlier decisions still hold:
-
-- plausible RNA and gDNA alignments of one pair compete in the EM;
-- calibration's two-pass approximation is accepted as an approximation;
-- unannotated spliced alignments are withheld, because Rigel does not assemble transcripts;
-- a template whose fragment length cannot be computed is withheld;
-- the multimapper combination rules belong to wave 2;
-- the downstream calibration defects belong to wave 3.
-
-**Your job:**
-
-1. Find the plan's defects, most severe first. Name every blocker: a defect that must be fixed before implementation,
-   with the evidence that it is one.
-2. Check the arguments the plan relies on:
-   - the two pairing strategies (§7.1): HI groups for STAR, and a bounded R1 × R2 search for aligners without HI. Is
-     anything lost, and is the search's bound complete?
-   - passing mates that disagree on as reported, priced by the existing overhang term (§7.3; the owner agrees);
-   - the existing EM combination is right for alternatives the aligner reports at one place (§9.2);
-   - the unannotated rule, applied per hit (§8);
-   - reading the junction-strand tag per record instead of choosing one mode from the first spliced reads (§6).
-3. Check §14: does revision 3 answer the blockers of both earlier reviews, or only claim to?
-4. Review the code-health step as carried out (§5): did the cleanup cover what steps 2–6 will change, and was each
-   stage's proof sufficient? Three stages were measured rather than proven no-ops: the re-cache, the output names'
-   relabelling, and the tile-invariant fits.
-5. Answer the open questions (§13), and say what evidence must gate implementation and the end of wave 1.
-
-**Materials.** All in the bundle, at base commit `3941a0dd` (the cleanup's commits are `41899ae4..3941a0dd`; their
-diff is in the bundle):
-
-- this plan, which you should read first and completely;
-- `PAIRED_END_ROADMAP.md`;
-- the STAR study's brief, `star_parameters/PROMPT.md`;
-- the first design, revision 2 (`PAIRED_END_REPAIR.md`), with its evidence (`paired_end_repair_evidence/`);
-- both earlier reviews and their evidence (`paired_end_repair_review_evidence/`, `paired_end_wave1_review_evidence/`);
-- the owner's restart note (`paired_fragment_completion/RESTART_HANDOFF.txt`);
-- the code-health review (`SCAN_CODE_HEALTH_REVIEW.md`, with its nine slice reports), the output-name convention
-  (`OUTPUT_NAMES_PROPOSAL.md`, ruled 2026-10-17) and the constants rulings (`CONSTANTS_PROPOSAL.md`);
-- the code, as it stands after the cleanup:
-  - `src/rigel/native/bam_scanner.cpp`;
-  - `resolve.cpp` and `resolve_context.h`;
-  - `constants.h`;
-  - `scoring.cpp` (the multimapper merge is `score_mm_alignment` and `flush_mm_group`);
-  - `calibration/accumulator.*`;
-  - `second_pass.py`;
-  - `pipeline.py`;
-  - `config.py`;
-  - `locus.py`;
-- `docs/ISSUES.md`, for the `hygiene-ledger`, `multimapper-intergenic-alignments`,
-  `sj-strand-tag-chosen-from-the-first-reads` and `the-anchor-tolerance-applies-beyond-implicit-splicing` entries;
-- the project's rules: `CLAUDE.md` and `docs/DESIGN.md` §0.
-
-The BAMs are not included; the recorded measurements stand in for them.
-
-**Rules the plan must keep** (the owner's). You may argue that one costs accuracy, but only with a measured or
-derivable cost.
-
-1. **Three populations:** gDNA, RNA+, RNA−.
-2. **Both mates.** Every hit places both mates and has a computable fragment length. No single-mate scoring and no
-   mate rescue.
-3. **The emission model is kept:**
-   - candidates by overlap (one base nominates);
-   - an overhang penalty per base;
-   - a mismatch penalty per mismatch;
-   - per-candidate lengths;
-   - no candidate deleted to make a path fit.
-4. **The aligner proposes, the EM decides.** The scan stage never chooses between hits.
-5. **Read, don't repair.** Rigel never moves bases, never forms an alignment the aligner did not report, and never
-   re-aligns. Pairing mate alignments that an aligner reports per mate is reading, not repair.
-6. **Annotated transcripts only.** No transcript assembly; chimeras are not quantified.
-7. **No new constant.** A tuned cut on a continuous quantity counts as one.
-8. **One mechanism per A/B.** Each A/B is pinned (`scan.total_threads=1`, `OMP_NUM_THREADS=1`, fractional
-   assignment), scored against truth, and read per stratum (unstranded OFF, stranded OFF, stranded ON; unstranded ON
-   reported separately), with both errors: artifacts counted as RNA, and genuine RNA lost.
-
-**Deliver** a markdown report of about 3–6 pages:
-
-1. **Verdict,** in at most 10 lines.
-2. **Findings,** numbered. Each has:
-   - a severity: blocker, fix before implementing, or consider later;
-   - the section it concerns;
-   - the reasoning, labelled *derived*, *measured* (cite the number) or *conjecture*;
-   - a falsifiable test.
-3. **The five arguments** above, each confirmed or refuted with a finite example.
-4. **§14:** each earlier blocker, answered or not.
-5. **The code-health step (§5):** what the cleanup missed that steps 2–6 depend on.
-6. **Calibration (§9.3):** are the four corrections right? Is the all-held approximation acceptable now that the
-   recommended STAR parameters will hold more templates, and how should it be measured?
-7. **Tests (§11):** recompute at least four expected values; name the missing cases and break tests.
-8. **The open questions (§13),** one paragraph each, with a recommendation.
+1. a verdict, in at most 5 lines;
+2. findings, numbered, each with a severity (blocker, fix before implementing, consider later), the section, the
+   reasoning labelled *derived*, *measured* (cite the number) or *conjecture*, and a falsifiable test;
+3. one line per finding of your first review: answered, partly, or not.
 
 Be specific and terse. A finding without a test is a conjecture: say so. Do not write production code.
 
@@ -151,12 +65,12 @@ molecule, with a computable fragment length.
 
 Wave 1 delivers six things:
 
-1. a code-health review of the scan path, and its cleanup, before anything else changes (carried out through the
-   re-cache, §5);
-2. one mate location per alignment record;
+1. a code-health review of the scan path, and its cleanup, before anything else changes (carried out, §5), and proof
+   that the gates which judge the rest can fail (§12);
+2. one mate location per alignment;
 3. hits from the aligner's pairs, or from R1 × R2 pairing where the aligner leaves pairing to the reader, each
    validated;
-4. the unannotated-junction rule, applied hit by hit;
+4. the annotated-path rule, applied hit by hit;
 5. the hand-off to calibration and the EM, with four corrections to calibration's second pass;
 6. one disposition per template, with every record written once.
 
@@ -164,7 +78,8 @@ Wave 1 does **not**:
 
 - construct, edit or re-align any alignment: no bases are moved, no reading is proposed, and no genome is stored
   (owner, 2026-10-16);
-- change how a template's several hits combine (wave 2);
+- change how a template's several hits combine (wave 2), although it measures how many templates that rule touches
+  (§9.2);
 - change the gDNA length estimator or the capture ruler (wave 3);
 - infer molecule length from clips (wave 3).
 
@@ -188,28 +103,30 @@ Each candidate's likelihood uses:
 
 A template with several hits is one EM unit (a multimapper).
 
-**Calibration** estimates the library's gDNA and RNA content before the EM, in two passes. Pass 1 deposits
-unambiguous templates (one hit). Pass 2 assigns each held template to one of its placements by a seeded draw,
-weighted by pass-1 traffic. The owner treats this as a deliberate approximation to a circular problem: the EM needs
-calibration, and calibration would need the EM.
+**Calibration** estimates the library's gDNA and RNA content before the EM, in two passes. Pass 1 deposits each template
+whose placement and path it can decide, and holds the rest: templates left with several placements, and templates whose
+gap between the mates admits more than one path (`accumulator.cpp:1073-1163`). Pass 2 assigns each held template to one
+of its placements by a seeded draw, weighted by pass-1 traffic. The owner treats this as a deliberate approximation to a
+circular problem: the EM needs calibration, and calibration would need the EM.
 
 **The bug that started this.** The scanner built "fragments" out of single mates. A lone secondary, a primary whose
 mate was unmapped, or a half-filled HI group each became a read-length fragment, a false multimapper and a 100-bp
 length deposit. Fixing it exposed two downstream defects that had compensated for it (the roadmap, wave 3).
 
 **The scope (owner, 2026-10-16).** A gDNA molecule aligned as spliced is certified as RNA, because gDNA cannot
-splice. Its bases usually fit a contiguous alignment almost as well, and STAR reports only one of the two.
+splice. Its bases usually fit a contiguous alignment almost as well, but by default STAR gives the spliced alignment a
+bonus and reports it alone.
 
 - Rigel will not construct the other alignment itself.
-- The remedy is the aligner's. A parallel study is establishing STAR parameters under which STAR reports both
-  alignments when they nearly tie, and Rigel will recommend them. Rigel then scores what is reported.
+- The remedy is the aligner's. The owner has found STAR parameters under which STAR reports both alignments when they
+  score alike (2026-10-17), and Rigel will recommend them. Rigel then scores what is reported.
 - Wave 1 is what Rigel must get right whichever parameters produced the BAM.
 
 ## 3. Principles
 
 1. **Read, don't repair.** A hit is an alignment the aligner reported, checked. Rigel never moves bases, never forms an
    alignment the aligner did not report, and never re-aligns. Pairing mate alignments that an aligner reports per mate
-   (§7.1) is reading, not repair.
+   (§7.1) is reading, not repair. The splice blacklist is the one declared exception until wave 4 (§8).
 2. **Both mates, and a length.** A hit is usable only if it places both mates and its fragment length can be computed.
 3. **The emission model is unchanged.**
 4. **The aligner proposes, the EM decides.** The scan stage never chooses between hits.
@@ -217,19 +134,21 @@ splice. Its bases usually fit a contiguous alignment almost as well, and STAR re
 6. **Clean before changing.** Every cleanup is proven to change no number, and every behavior change is its own
    measured arm.
 7. **No new constant.**
+8. **Today's behavior is cited, never recalled.** Every statement of what the code does today names the file and line
+   it was read from; every claim that a rule is exact or complete is checked by enumeration.
 
 ## 4. The scan stage in one picture
 
 ```
-step 1  the code-health review, and its cleanup as proven no-ops, before anything below changes
+step 1  the code-health review and its cleanup as proven no-ops; then proof that the gates can fail
 
 the BAM records of one template
  │
- ├─ step 2  one mate location per record (CIGAR map, clips, skips, NM, motif); chains withheld
- ├─ step 3  pairs → hits: HI groups (STAR) or a bounded R1 × R2 search (no HI); each validated as one molecule
+ ├─ step 2  one mate location per alignment (CIGAR, clips, skips, NM, motif); chains withheld
+ ├─ step 3  pairs → hits: HI groups (STAR), or every R1 × R2 pair (no HI); each validated as one molecule
  │            one reference · opposite strands · inward · some path with 1 ≤ L ≤ max_frag_length
- ├─ step 4  hits with an unannotated junction are withheld, hit by hit
- ├─ step 5  usable hits → calibration and the EM; num_hits = the number of usable hits
+ ├─ step 4  a spliced hit is usable only if one annotated transcript holds all its junctions
+ ├─ step 5  usable hits → the EM; offered placements → calibration; num_hits = distinct usable hits
  └─ step 6  one disposition per template; every record written once
 ```
 
@@ -330,71 +249,131 @@ Preflight now checks each cache's key, not only its presence, and that check fou
 record); and two renames wait for the next re-simulation, because every panel on disk carries the old names and must
 stay readable: the synthetic spans' `RIGEL_NRNA_` ids and the truth columns `pre_capture_*` → `molar_*`.
 
+**The readiness review's qualifications** (2026-10-17), accepted:
+
+- the identity references cover one ladder condition, its minimap2 counterpart and VCaP. Re-certifying 262 caches
+  proves that they are accepted, not that 262 conditions are unchanged;
+- the tile fix is a measured numerical change, not a no-op, so every wave-1 baseline is recorded on the tree after it;
+- the gates themselves must be shown to fail before the fixtures rely on them: step 1b, the gates' own proof (§12);
+- no second general cleanup is needed.
+
 ## 6. Step 2 — records into mate locations
 
 Each eligible, non-supplementary record becomes one **mate location**. It holds:
 
-- reference and strand;
+- its mate (R1 or R2), reference and strand;
 - the full CIGAR as a query-to-reference map;
 - soft and hard clips at each end, kept apart;
 - the raw CIGAR-N skips (before the blacklist) and the kept ones;
 - NM, as the record reports it;
-- the motif strand (XS or ts);
-- provenance: the record, its HI and its flags.
+- the motif strand (XS or ts, below);
+- its aliases: every record and HI value that carries it.
 
 No bases are kept, because nothing in wave 1 re-scores a sequence.
 
 **Rules:**
 
-- **One location per alignment.** Two records are one location when they map every aligned query base to the same
-  genome base with the same clips. STAR repeats a mate's record in every pair alignment that shares it, and those
-  records collapse to one location.
-- **Conflicts are input defects.** Records of one location that disagree on NM are counted, and the location keeps the
-  larger NM. Opposing motif strands make the motif ambiguous.
+- **One location per alignment.** A location is identified by its mate, reference, strand, leftmost aligned position
+  and CIGAR, with M, = and X read as one operation and soft and hard clips kept apart. So `50M3D50M` and `50M3N50M` at
+  one start are two locations, a deletion and an intron, although they place the same aligned bases. Records with one
+  identity are one location: STAR repeats a mate's record in every pair alignment that shares it, and each repeat is
+  an alias. The identity is a property of each record alone, so record order cannot change it.
+- **Conflicts are input defects.** Aliases of one location that disagree on NM are counted, and the location keeps the
+  larger NM. Aliases that disagree on the motif make it ambiguous.
 - **No M/=/X base, no location.**
 - **Withheld, not absent.** A location that depends on a supplementary chain, or has a hard-clipped 5′ end, is
   withheld: counted, and not paired. A mate whose only locations are withheld is "unresolved", not "missing".
-- **Reporting completeness.** Under STAR's semantics, a template whose NH exceeds its number of distinct HI groups
-  stops the run, with the remedy `--outSAMmultNmax -1`. Without HI, completeness is recorded as unknown.
-- **NM is required.** A record without NM is counted and warned about; its NM still reads 0. STAR's default attributes
-  omit NM, so the recommended command asks for it (`nm-absent-reads-as-zero`).
+- **NM is required.** A record without NM is counted and warned about; its NM still reads 0, as today
+  (`bam_scanner.cpp:662-664`). That is a disclosed approximation: it can favor a hit of unknown NM over one whose NM is
+  known. STAR's default attributes omit NM, so the recommended command asks for it. STAR's `nM` is never read in its
+  place: it counts the pair's mismatches, while NM counts one mate's edits, indels included.
+- **Widths.** `num_hits` and NM are stored wide enough for any count the scan can produce, or refused explicitly when
+  they would not fit. Today both are stored in 16 bits through unchecked casts, so 65,536 hits read as 0 and 65,537 as
+  1 (`resolve_context.h:207,249,268`).
 - **Unindexed references keep their own identity.** Two mates on different references outside the index are a trans
-  pair, not one reference (`unindexed-references-share-id-minus-one`).
-- **Tag types are checked.** NH and HI must be integers. Another type is an input defect, and is counted.
+  pair, not one reference. Today every unindexed reference shares the id −1 (`bam_scanner.cpp:160-173`), so
+  a pair on two unindexed references is merged into one fragment by coordinate (`bam_scanner.cpp:711-771`;
+  `unindexed-references-share-id-minus-one`).
+- **Tag types are checked.** NH and HI must be integers. Another type is an input defect, and is counted. A missing NH
+  is counted too (§7.1).
 - **The junction-strand tag is read per record** (owner, 2026-10-17: before 0.8.0). Today one mode (XS, ts, both or
-  none) is chosen from the first 1,000 spliced reads, so a library whose first spliced reads lack the tag loses its
-  strand (`ISSUES: sj-strand-tag-chosen-from-the-first-reads`). Each location reads its own record's tag by the rules
-  the scanner applies today; an explicit `--sj-strand-tag` still restricts which tags are read, and a spliced record
-  without one is counted. Its own arm: it moves numbers only on libraries whose tags are absent from their first
-  spliced reads, or mixed.
+  none) is chosen per BAM from its first 1,000 spliced records, a literal default (`bam_scanner.cpp:2877-2930`,
+  resolved once per run at `pipeline.py:987`), so a library whose first spliced reads lack the tag
+  loses its strand (`ISSUES: sj-strand-tag-chosen-from-the-first-reads`). Revision 4 reads each record's tags on their
+  own:
+  - XS is genomic. minimap2's ts is relative to the read, so it is flipped on a reverse record, as today
+    (`bam_scanner.cpp:610-613`);
+  - both present and agreeing give that strand; disagreeing, the motif is ambiguous and the record is counted. Today,
+    with both tags, XS is read and ts only when XS is absent, so a conflict passes unseen (`bam_scanner.cpp:626-629`);
+  - one present gives that strand; none, on a spliced record, is counted;
+  - a value other than `+` or `−` is read as absent, and counted. Today an invalid XS also hides ts
+    (`bam_scanner.cpp:594-613`);
+  - an explicit `--sj-strand-tag` restricts which tags are read, and is recorded.
+
+  There is no "mostly missing" threshold. The counts and fractions of missing and conflicting tags are reported, and the
+  existing strand-model diagnostic warns when strand evidence is unavailable. This is its own arm (§12): it moves
+  numbers only on libraries whose tags are absent from their first spliced reads, mixed, or conflicting.
 
 **The index sets up the resolver.** It installs the transcript strands when it loads, and K and the maximum fragment
-length come from the scan configuration. Today `scan_and_buffer` installs them on the shared resolver, so every unit
-test runs without strands (`resolver-strands-installed-only-by-the-scan`).
+length come from the scan configuration. Today only the scan installs them (`resolve_context.h:613-615`, called from
+`pipeline.py:296-300`), so every unit test runs without strands, and without them `ambig_strand` is always 0
+(`resolve_context.h:1287-1303`; `resolver-strands-installed-only-by-the-scan`).
 
 ## 7. Step 3 — hits from the aligner's pairs
 
 ### 7.1 Which pairs: two strategies (owner, 2026-10-16)
 
-The strategy follows what the aligner writes. It is chosen per BAM, the way the junction-strand tag (XS or ts) is
-detected today. A template that contradicts the BAM's mode is counted as an input defect.
+**The mode is read per template**, from its own records, not from the BAM's first records:
 
-- **With HI (STAR).** STAR groups the records of each pair alignment by HI. A hit starts from the R1 and R2 records of
-  one HI group, and Rigel forms no other combination. Crossing HI groups would only duplicate reported hits, or revive
-  pairs STAR did not report.
-- **Without HI (minimap2).** minimap2 reports secondaries per mate, so pairing is the reader's job. Each R1 location
-  is tried against the R2 locations that could be its partner, and each candidate pair goes through the validator
-  (§7.2). The search is kept small:
-  - only locations on the same reference, with opposite strands, are paired;
-  - each mate's locations are sorted by position, so each R1 location walks its partners in order of distance;
-  - the walk stops at a bound read off the index and the two locations: `max_frag_length`, plus both mates' observed
-    skips, plus the longest total intron length of any annotated transcript on that reference. Beyond it, no path of
-    §7.2 can bring L under `max_frag_length`, so the bound is exact, not a tuned cut;
-  - the aligner caps the locations per mate (minimap2 keeps at most 5 secondaries by default), so a template has at
-    most a few dozen candidate pairs;
-  - the search decides by geometry alone. Today's pairing without HI pairs mates whose resolved transcript sets
-    intersect, and every location inside one gene shares the gene's synthetic span, so every combination passes
-    (`no-hi-pairing-by-transcript-overlap`).
+- **With HI (STAR).** Every record of the template carries HI. STAR groups the records of each pair alignment by HI. A
+  hit starts from the R1 and R2 locations of one HI group, and Rigel forms no other combination: crossing HI groups
+  would only duplicate reported hits, or revive pairs STAR did not report.
+- **Without HI (minimap2).** No record carries HI. minimap2 reports secondaries per mate, so pairing is the reader's
+  job (below).
+- **Mixed.** A template that mixes the two is an input defect: counted, and paired without HI, which reads every
+  reported alignment and lets geometry decide. Today a record without HI joins group 0 of its template
+  (`bam_scanner.cpp:821-846`).
+
+**Completeness.** Under STAR's semantics, a template's HI values run from 1 to NH, and every group holds both mates.
+
+- **Truncated output:** the template's distinct HI values number fewer than NH. The run stops, with the remedy
+  `--outSAMmultNmax -1`. No remedy recovers what STAR filtered before output: a template beyond
+  `--outFilterMultimapNmax` is reported unmapped.
+- **A group missing one mate**, checked group by group, yields no hit. Its record is an unpaired alignment, counted as
+  incomplete mate reporting. The template-wide count above cannot see this: R1 with HI 1 and 2, R2 with HI 1 only, and
+  NH 2, has two HI values against NH 2, and its group 2 holds R1 alone.
+- A missing NH, or an NH that differs between a template's records, means completeness is unknown: counted, not
+  refused. Today the scan takes the first NH above 1 it meets (`bam_scanner.cpp:1804-1807`).
+
+**Duplicate hits.** Two groups whose R1 and R2 locations are identical are one hit, which keeps both HI values as
+aliases. `num_hits` counts distinct hits.
+
+**Without HI: every pair, the bound first.** Each R1 location is paired with each R2 location on the same reference
+with the opposite strand, and every such pair goes to the validator (§7.2). The validator's first length test is the
+span bound
+
+    G ≤ max_frag_length + S1 + S2 + Tmax
+
+where G is the two mates' aligned envelope, S1 and S2 their observed skip totals, and Tmax the largest total intron
+length of any annotated transcript on that reference. A pair beyond it is rejected for length, which it would fail
+along every path of §7.2:
+
+- L counts the path bases in [a, b), and the removed bases inside [a, b) are at most S1 + S2 + Tmax, so
+  G ≤ b − a ≤ L + S1 + S2 + Tmax;
+- checked by enumeration on tiny references with clips, several introns and K from 0 to 3: 48,301 accepted pairs in
+  200,000 random cases, with no violation; removing any one term of the bound produces violations (Appendix B).
+
+The work is O(n1 · n2) per template, where n1 and n2 count the two mates' locations, with no cap. Under minimap2's
+default of five secondaries it is at most 36 pairs. Revision 3 walked the partners by distance and stopped at the first
+one beyond its own bound. That misses a farther partner whose longer skip raises its bound: the readiness review's
+counterexample has a near partner at span 2,100 against a bound of 1,000, and a farther spliced partner at 3,100
+against 3,850 that validates at L 250.
+
+The search decides by geometry alone. Today, without HI, a unique mapper's primaries form one hit unconditionally
+(`bam_scanner.cpp:892-899`). A multimapper's locations are paired first wherever their resolved transcript sets
+intersect, then nearest first, then every remaining cross pair, and what is left becomes one-mate hits
+(`bam_scanner.cpp:907-1043`). Every location inside one gene shares the gene's synthetic span, so every combination
+there passes (`no-hi-pairing-by-transcript-overlap`).
 
 Pairing mate alignments that the aligner reported per mate is reading, not repair.
 
@@ -405,13 +384,22 @@ A candidate pair is a hit when two conditions hold.
 1. **The mates are on one reference, with opposite strands.** Call the forward mate F and the reverse mate R; either
    may be R1.
 2. **They can be one molecule along some path.**
-   - The path P is the genome between the mates with every observed raw skip removed. An alternative P also removes
-     one annotated transcript's introns where they lie wholly inside a gap that neither mate aligned. An aligned base
-     inside a removed skip is off the path (§7.3).
-   - Walking F's 5′ clip back along P gives the molecule's start a. Walking R's 5′ clip forward gives its end b.
+   - The path P is the genome with every observed raw skip of either mate removed. An alternative P also removes one
+     annotated transcript's introns that lie in a stretch neither mate aligned, between the mates or beyond a mate's 5′
+     end where its clip is walked, by the rule the resolver applies (§7.5): an intron that overlaps the stretch and lies
+     within K bases of its ends, on each side, is cut whole (`resolve_context.h:816-842`), and a transcript with an
+     intron overlapping an aligned block by more than K bases offers no path (`resolve_context.h:682-704`). Aligned
+     bases inside a cut intron are off the path, and the overhang term prices them.
+   - Walking F's 5′ clip back along P gives the molecule's start a. Walking R's 5′ clip forward gives its end b. A walk
+     that leaves the reference is unresolved geometry.
    - Require a < b, both mates' aligned bases inside [a, b), and 1 ≤ L ≤ `max_frag_length`, where L is the number of
      path bases between a and b.
    - The path decides acceptance only. It never removes a candidate or changes a candidate's length.
+
+**One K rule with the resolver.** A strict reading of "wholly inside a gap" would reject pairs the resolver scores.
+With intron [1200,2100), F [1103,1203), R [2150,2250) and K 3, the strict path gives L 1,147, beyond the default
+1,000, while the resolver's rule removes the intron, keeps F's three intronic bases as overhang and gives L 247. The
+validator uses the resolver's rule (checked, Appendix B: K 3 and 4 accept at 247, K 2 rejects).
 
 **Outward and clipped pairs.**
 
@@ -432,22 +420,27 @@ aligner would not splice so short an end. The pair is passed on **as reported**.
   prices them.
 - Today's resolver already does this. In the toy case (§11), the acceptor-side pair keeps one candidate, TA2, with 148
   exon bases, overhang 2 and length 148.
-- With one candidate the penalty cancels. It matters only where the template has other hits.
+- The penalty cancels only when every surviving explanation of the template carries it. A clean alternative elsewhere
+  changes the odds, and a hard gate (overhang α = 0) removes the hit, which is then counted as gated.
 
 **The owner agrees (2026-10-16).** One mate is spliced, so the hit is spliced: RNA only, with no gDNA candidate. The
 intron overhang is penalized, but no other transcript is expected to compete for the template, so the penalty does not
 matter. Revision 1 constructed both consistent readings instead; that is repair, so it is out, and no fallback is
 planned.
 
+**Mates whose junctions contradict.** Both mates spliced at overlapping but unequal junctions disagree about a donor or
+an acceptor. No transcript holds two overlapping introns, so no path explains both, and the hit is withheld by §8 with
+its own reason. Today calibration measures such a fragment along the union of the two introns, a path neither mate
+reported (`accumulator.cpp:425-464`).
+
 ### 7.4 What a hit carries
 
-- **Contents.** Each hit carries:
-  - both locations;
-  - its raw and kept skips;
-  - NM summed over the two mates.
-- **Kind.** Hits of one template whose spans overlap on one reference are **same-place alternatives**: for example,
-  the aligner's spliced and contiguous alignments of one molecule. They are counted apart from **multi-place** hits.
-- **`num_hits`** is the number of usable hits after step 4. It replaces today's `max(NH, hits)`.
+- **Contents.** Each hit carries both locations, its raw and kept skips, its aliases, and NM summed over the two mates.
+- **Kind.** Hits of one template whose spans overlap on one reference are **same-place alternatives**: for example, the
+  aligner's spliced and contiguous alignments of one molecule. The kind is a reporting class only. Overlapping spans do
+  not prove one physical origin, so no rule treats such hits as one (§9.2).
+- **`num_hits`** is the number of distinct usable hits after step 4. It replaces today's `max(NH, hits)`
+  (`bam_scanner.cpp:1857`). The multimap option (`include_multimap=false`) is applied after it is counted (§10).
 
 ### 7.5 The anchor tolerance (owner, 2026-10-16)
 
@@ -455,29 +448,56 @@ planned.
 spliced fragments: mates aligned to different exons with a whole intron between them, where up to K aligned bases may
 sit inside the intron. The owner keeps it there, "but we must be judicious about deciding which cases apply it".
 
-Today it is applied more widely (`ISSUES: the-anchor-tolerance-applies-beyond-implicit-splicing`):
-- to every non-chimeric fragment's gap hypotheses, SPLICED_ANNOT included;
-- to `transcript_contradicts_blocks`;
-- to cutting an annotated intron whole when up to K sequenced bases lie inside it.
+**A use is classified by the gap it is applied to, not by the hit's splice label.** A hit with an observed junction can
+also have an unsequenced gap between its mates, and an annotated intron in that gap is an implicit splice. So the
+question at each use is whether it tests an implied intron in an unaligned gap.
 
-Wave 1 lists every use, keeps the implicit-splicing ones, and justifies or removes each other one in its own measured
-arm. The mates that disagree in §7.3 are not a use of K: the overhang term prices those bases, as the owner ruled.
+Today K is read in one place, inside the gap enumeration, which runs for every non-chimeric fragment of any splice
+type, SPLICED_ANNOT included (`resolve_context.h:780`, `1320-1322`;
+`ISSUES: the-anchor-tolerance-applies-beyond-implicit-splicing`). It matters only where two blocks leave a gap that is
+not exactly an observed intron (`resolve_context.h:736-784`), and from there it reaches three decisions:
+
+- `transcript_contradicts_blocks` (`resolve_context.h:682-704`, called at `:790`): a transcript with an intron
+  overlapping an aligned block by more than K bases contributes no hypothesis;
+- `collect_transcript_introns_in_gap` (`resolve_context.h:816-842`, called at `:796`): an annotated intron that overlaps
+  the gap and lies within K bases of its ends is cut whole;
+- the number of hypotheses then decides the SPLICE_IMPLICIT label (`resolve_context.h:1334-1336`).
+
+K is not used for fragment lengths, chimera detection, junction matching or scoring.
+
+Wave 1 keeps the uses that test an implied intron in a gap, and justifies or removes each other one in its own measured
+arm. Each use is tested at 0, K and K + 1, once with an implied gap and once beside an observed splice. No use may shift
+an observed junction, delete alignment evidence or a candidate, or forgive two observed skips that conflict. The mates
+that disagree in §7.3 are not a use of K: the overhang term prices those bases, as the owner ruled.
 
 **Renamed** (owner, 2026-10-17): K is a valid tolerance for implicit splicing, and the renames stage gave it a name
 that says what it is, `intron_overhang_tolerance` (`--intron-overhang-tolerance`, `dc736e39`).
 
-## 8. Step 4 — unannotated junctions, hit by hit (owner, 2026-10-16)
+## 8. Step 4 — the annotated-path rule, hit by hit (owner, 2026-10-16)
 
-**Rule.** A hit containing an observed junction that no annotated transcript contains is not usable:
+**Rule.** A spliced hit is usable only if **one annotated transcript holds every junction the hit observes**, both
+mates' together. Otherwise it is not usable:
 
-- **Not as RNA:** no annotated transcript has its path, so its length on a transcript cannot be computed.
-- **Not as gDNA:** it is spliced.
+- **not as RNA:** no annotated transcript has its path, so its length on a transcript cannot be computed;
+- **not as gDNA:** it is spliced.
 
-The hit is withheld. **The template's other hits stay.** Take a gDNA template that the aligner reports both as an
-unannotated splice and as a contiguous alignment: it keeps the contiguous hit.
+The hit is withheld, with one of three reasons:
 
-**Templates left with nothing.** A template with no usable hit left is withheld, with the reason **unannotated
-splice**. It is reported in three classes, read off the genes whose span contains each side of the junction:
+- **a novel junction:** some junction is in no annotated transcript;
+- **an unsupported combination:** each junction is annotated, but no one transcript holds them all;
+- **contradictory mates:** two observed junctions overlap without being equal (§7.3).
+
+A junction matches an annotated one as the resolver matches it today: exactly, at the strand of a definite motif, and at
+either strand when the motif is absent or ambiguous (`resolve_context.h:959-993`). The rule decides only whether a hit
+is usable. Its candidates are still nominated by overlap, and the transcript that holds its junctions limits neither the
+candidates nor their lengths.
+
+**The template's other hits stay.** Take a gDNA template that the aligner reports both as an unannotated splice and as
+a contiguous alignment: it keeps the contiguous hit.
+
+**Templates left with nothing.** A template with no usable hit left, and with a hit withheld here, takes the outcome
+**unannotated splice** (§10). It is reported in three classes, read off the genes whose span contains each side of the
+junction:
 
 - within one gene;
 - between genes (read-through);
@@ -486,134 +506,187 @@ splice**. It is reported in three classes, read off the genes whose span contain
 **No alternatives.** Rigel constructs no contiguous or partial reading of an unannotated junction. If the aligner
 reports one, it is a hit like any other.
 
-**What changes from today.** Today such hits are quantified through overlap candidates whose lengths keep the
-junction's skip. The cost of withholding them is measured as an explicit policy cost:
+**What changes from today.** Today such hits are quantified through overlap candidates, whose lengths count the novel
+junction's skipped bases as if they were sequenced: a candidate's length subtracts only its own annotated introns
+(`resolve_context.h:900-954`). A fragment with one annotated and one novel junction is labelled annotated-spliced
+(`resolve_context.h:1188-1202`). A combination of annotated junctions that no transcript joins is scored like a
+supported path, with overhang: the readiness review's same-gene fixture gives TJ1 150/50/500 and TJ2 150/50/250, as an
+annotated splice. The cost of withholding them is an explicit policy cost:
 
-- **on VCaP**, an earlier screen counted 114,519 RNA-library junction units (about 0.8% of spliced RNA units) against
-  2,253 DNA-library artifacts;
+- **on VCaP**, an earlier screen counted 114,519 RNA-library junction units, about 0.8% of spliced RNA units, against
+  2,253 DNA-library artifacts. That is exposure by junction unit, not genuine RNA lost: it is recounted by validated
+  template, under the three reasons;
 - **on the minimap2 panel**, 90% of gDNA artifacts are unannotated long-anchor junctions.
 
 Rigel does not assemble transcripts. Reads of unannotated isoforms, even ones that reuse annotated splice sites,
-contribute to no transcript or gene.
+contribute to no transcript or gene. The simulator writes only annotated isoforms, so their cost on genuine RNA is
+priced on VCaP's RNA library (§12).
 
-**The blacklist** (`alignable`) is unchanged in wave 1. It removes a junction before step 4 sees it. It is itself a
-repair of alignments, so the narrowed scope retires it once wave 4's matched comparison justifies that.
+**The blacklist: the one declared exception.** The blacklist (`alignable`) is unchanged in wave 1, as ruled. It removes
+a junction before step 4 sees it: a record's N whose shorter anchor is within the junction's blacklisted anchor length
+is erased from its junction list, which leaves an unaligned hole between two blocks
+(`bam_scanner.cpp:567-583, 689-693`). With no other junction left, the fragment is labelled an artifact splice
+(`resolve_context.h:1253-1257`), and calibration never receives it (`bam_scanner.cpp:1675`). So the rule reads the kept
+junctions, and a hit whose only junction is blacklisted is a contiguous hit. That deletes alignment evidence. It is a
+repair, and the one exception to "read, don't repair", until wave 4's matched comparison retires it. Until then a census
+records every hit whose raw skips include a blacklisted junction, annotated or novel, with its disposition.
 
 ## 9. Step 5 — usable hits into calibration and the EM
 
-### 9.1 Hits into units
+### 9.1 Usable hits, offered placements, held templates
 
-- **Units.** Each usable hit is one EM hit. A template with more than one is a multimapper unit, and calibration holds
-  it in pass 1, as with any multimapper today.
-- **Intergenic hits are kept as hits**, so that `num_hits` and the accounting see them. Today the scanner drops a
-  multimapper's hit that overlaps no transcript (`ISSUES: multimapper-intergenic-alignments`), while NH still counts
-  it.
-- **No consumer changes in wave 1.** The EM and calibration treat intergenic hits exactly as today until wave 2 sets
-  their rule. The EM's gDNA term ignores a hit with no transcript candidate, and calibration's placements exclude
-  intergenic hits.
-- **For STAR input with complete pairs**, `num_hits` then equals NH, except where step 3 rejects a hit or step 4
-  withholds one.
+Three sets, told apart:
 
-### 9.2 Why the existing EM combination is right for same-place alternatives
+- **Usable hits** reach the EM. Each is one EM hit; a template with more than one is a multimapper unit.
+- **Offered placements** reach calibration: every hit of the template, whatever its candidates, except an
+  artifact-spliced hit (`bam_scanner.cpp:1675`) and a hit on an unindexed reference (`bam_scanner.cpp:1679-1683`).
+  Today the scanner offers a multimapper's intergenic hit as a placement (`bam_scanner.cpp:1926-1929`), while the EM
+  never sees it: only a unique mapper's intergenic fragment enters the buffer (`bam_scanner.cpp:1915-1920`). NH still
+  counts it (`ISSUES: multimapper-intergenic-alignments`).
+- **Held templates** are the ones calibration's pass 1 holds. Offering several placements does not by itself hold a
+  template (`accumulator.cpp:1073-1163`):
+  - identical placements collapse to one (`accumulator.cpp:1109-1115`);
+  - one placement left takes the one-placement path, which deposits it, or holds it when the gap between its mates
+    admits more than one path (`accumulator.cpp:1121-1126`, `549-553`);
+  - with several left, every (placement, hypothesis) within the length limit survives; exactly one survivor is
+    deposited, and otherwise the template is held whole (`accumulator.cpp:1128-1162`).
 
-**RNA.** For each transcript, the EM keeps the hit where that transcript has the least overhang, then the highest
-likelihood.
+**No consumer changes in wave 1.** The EM and calibration keep these routes, including calibration's intergenic
+placements, until wave 2 sets the rule for intergenic hits.
 
-- Under transcript t, the molecule followed t's path. The right likelihood for t is the hit that best explains the read
-  along t's path, counting its overhang and its mismatches once each.
-- Today's rule takes the least overhang first, although overhang is already inside each hit's likelihood. So a hit
-  with overhang 0 and NM 3 beats one with overhang 1 and NM 0 (`SCAN_CODE_HEALTH_REVIEW.md`,
-  `merge-keeps-least-overhang`).
-- For same-place alternatives with equal NM, both rules choose the same hit, so wave 1 keeps today's rule. Wave 2's
-  combination rule decides.
-- In the toy pair of §11 (a 3-base tie at TA1's donor, reported both spliced and contiguous), TA1 takes the spliced
-  hit, with overhang 0, not 3, under either rule.
-- TA2 and the gene's unspliced-RNA candidate appear only in the contiguous hit.
+**For STAR input with complete pairs,** `num_hits` then equals NH, except where step 3 rejects a hit or collapses a
+duplicate, or step 4 withholds one.
 
-**gDNA.** Only unspliced hits are gDNA-capable, so the gDNA term comes from contiguous hits only. Today the term is
-the average over gDNA-capable hits:
+### 9.2 The EM's combination: kept, and measured
 
-- **With one contiguous hit,** the average is that hit's own term. That is correct, and the spliced hit never enters
-  it.
-- **With two contiguous hits at different origins,** the average is half the correct sum. This is the wave-2 defect,
-  bounded here by a factor of 2. It is counted in wave 1 and fixed in wave 2 by a sum over places (owner,
-  2026-10-16).
+Wave 1 changes none of the EM's combination rules; wave 2 does (owner, 2026-10-16). Revision 3 said the existing rules
+were right for same-place alternatives. In general they are not:
 
-**The prior.** The EM prior's count of calibrated fragments excludes multimapper units. Calibration holds these
-templates too, so the two agree.
+- **The RNA merge.** For each transcript, the EM keeps the hit with the least overhang, then the highest likelihood
+  (`scoring.cpp:576-589`). Overhang is already inside each hit's likelihood, so the rule can keep a worse term:
+  - (overhang, NM) = (0, 2) beats (1, 0): it keeps weight 0.01 instead of 0.1 (`merge-keeps-least-overhang`);
+  - at equal NM, lengths 200 and 201 with overhang 0 and 1, where f(200)/f(201) = 10^-4, it keeps a term 1,000-fold
+    worse (the readiness review's probe).
 
-So wave 1 needs no EM change. The code-health review also found that pruning compares candidates against three
-different references (`pruning-uses-three-references`). Like the merge rule, that belongs to wave 2.
+  The two rules agree when NM, length and strand agree, as in §11's same-place toy, where TA1 takes the spliced hit,
+  with overhang 0, under either rule.
+- **The gDNA term** is the mean of the gDNA-capable hits' likelihoods, not their sum (`scoring.cpp:654-661`). With one
+  gDNA-capable hit it is that hit's own term, which is correct; in a spliced-and-contiguous pair only the contiguous hit
+  is gDNA-capable. With k gDNA-capable hits at different origins it is 1/k of the sum the owner ruled for wave 2, not at
+  most a factor 2, as revision 3 said.
+- **The prior's denominator.** Calibration deposits each held template at its drawn placement before the EM prior is
+  read, but `n_calibrated` counts unique fragments only (`pipeline.py:700-720`). In a locus holding multimappers the
+  gDNA share is inflated, and a locus of multimappers alone gets no prior. The owner kept this denominator for 0.8.0
+  on a measured A/B (`ISSUES: the-em-prior-share-excludes-drawn-multimappers`). Revision 3 said the two stages agree;
+  they do not.
+- **Pruning** compares candidates against three different references (`pruning-uses-three-references`).
+
+**Their exposure grows with wave 1's input.** The recommended STAR parameters report a contiguous reading beside many
+spliced ones, so more templates become two-hit units. The first measurement and every arm count it (§12). Open
+questions 1 and 2 (§13) ask what would move a fix into wave 1.
 
 ### 9.3 Calibration's second pass: four corrections
 
-Pass 2 draws one placement of a held template. The draw is weighted by:
+Pass 2 draws one (placement, hypothesis) of each held template by a seeded draw (`second_pass.py:745`). Today the
+draw's weight is, within the record (`second_pass.py:170-240`):
 
-- the pass-1 traffic at the objects that placement would deposit on: a junction for a spliced placement, an
-  exon–intron boundary for a contiguous one;
-- the placement's length likelihood;
-- its strand.
+- the placement's traffic A_p, the unique pass-1 traffic at the objects the placement would deposit on, when the
+  record has more than one placement (`second_pass.py:540-542`);
+- the hypothesis's density ρ, in fragments per base: at the junction for a spliced path, at the exon–intron
+  boundaries for the contiguous one, the scarcest object deciding (`second_pass.py:549, 567-593`);
+- the length likelihood f(L), and the strand term s.
 
-**The all-held approximation (accepted, measured).**
+A factor that is zero for every surviving candidate is dropped as uninformative; a partial zero is a hard zero.
 
-- If every template that crosses a junction is held, the junction's pass-1 traffic is zero, and pass 2 deposits all of
-  them as contiguous.
-- The owner expects this to be rare: templates that map uniquely across the junction establish its traffic.
-- The measurement is the number of templates whose spliced placement gets zero weight in pass 2, with their truth.
-- The recommended STAR parameters will hold more templates, so this is re-measured on the STAR-aligned ladder.
+**The all-held approximation (accepted by the owner, and measured).** If every template that crosses a junction is
+held, the junction's pass-1 traffic is zero. A spliced placement then gets weight 0 when its contiguous alternative has
+positive traffic, and an even 1/2 against 1/2 when neither has any and the other factors tie. A contiguous draw is a
+deposit in the unspliced tally, not a gDNA assignment.
+
+The owner expects all-held junctions to be rare, because templates that map uniquely across a junction establish its
+traffic. The recommended STAR parameters hold more templates, so it is measured on the STAR panel (§12):
+
+- all-held, partly held, independently supported and unsupported junctions, across depths;
+- the predicted probabilities and the actual draws, with truth;
+- what support was available, and the RNA length and strand training;
+- the deposits and calibration against the oracle, the priors, and the genuine RNA finally lost;
+- matched seeds and further seeds.
+
+A count of zero weights alone is not enough.
 
 **Four corrections, each its own arm.** Each also changes today's multimapper draws.
 
-1. **The length law.** A placement whose observed junction is annotated is RNA, and should take the RNA law. Today the
-   law is chosen from implied (mate-gap) introns only, so a spliced placement takes the global law.
-2. **The density factor.** A placement with no contested region has no within-placement question, so its factor
-   should be "not applicable". Today it reads 0: a hard zero against a placement that does have a gap hypothesis.
-3. **The sequence evidence.** Pass 2 never reads mismatches, so a placement with 37 more mismatches is drawn as often
-   as a perfect one.
-   - Each held placement carries its NM into the deferred bank, as a new field in the bank's schema and its spill
-     format.
-   - Pass 2 multiplies the placement's weight by the EM's own mismatch term, α_mm^NM. Calibration and the EM then weigh
-     hits by the same sequence evidence. This is the owner's rule of 2026-10-16: every hit is scored with its own
-     mismatches.
-   - At a tie the factor is equal and changes nothing.
-4. **The motif rule** (`second-pass-restates-the-motif-rule`). Pass 2 restates the deposit's rule two other ways:
+1. **The length law.** A placement with an admissible annotated junction, observed or implied, is RNA and takes the RNA
+   law. Today the law is chosen from the hypothesis's implied introns only (`second_pass.py:596`), so an observed
+   spliced placement takes the global law.
+2. **The weights.** Each candidate carries exactly one placement factor and one share within its placement:
+
+   ```
+   w(p, h) = A_p × ρ(h) / Σ ρ(h′ of p) × f(L) × s
+   ```
+
+   - the share is dimensionless, so the draw no longer depends on ρ's units;
+   - a placement with one hypothesis has share 1, so a placement with no contested region is no longer zeroed against
+     one that has (today its ρ reads 0, `second_pass.py:593`);
+   - all-zero ρ within a placement gives an even share within it, and a partial zero stays a hard zero; the existing
+     uninformative rule still applies to A_p, f and s;
+   - on a one-placement record it equals today's weight.
+
+   Revision 3 proposed ρ = 1, "not applicable", for such a placement. That gives some candidates two densities and
+   others one, so a tenfold change of units moves an even pair to 1/11 against 10/11. The checks (Appendix B): 20,000
+   random records unchanged under any rescaling of ρ and A_p; one-placement records equal to today; an uncontested
+   placement never zeroed beside contested ones; and the raw-density break caught.
+3. **The sequence evidence.** Pass 2 never reads mismatches: the deferred bank carries none
+   (`bam_scanner.cpp:1142-1158`), so a placement with 37 more mismatches is drawn as often as a perfect one.
+   - Each held placement carries its NM into the deferred bank: a new field in the bank's schema, its spill format, the
+     cache, and every copy `lift_choices` makes.
+   - Pass 2 multiplies the weight by the EM's own mismatch term, α_mm^NM, with the configured α_mm, once.
+   - α_mm = 0 is a hard gate, as in the EM: a placement with NM > 0 gets weight 0, and a record whose every placement
+     is gated is not deposited, and is counted. α_mm = 1 is inert. At a tie the factor is equal and changes nothing.
+4. **The motif rule** (`second-pass-restates-the-motif-rule`). Pass 2 restates the deposit's rule two other ways
+   (`second_pass.py:282-304, 604-609`):
    - it passes an AMBIGUOUS motif into its sj lookup, which matches it at either strand, while the deposit trusts no
      splice on an AMBIGUOUS motif;
-   - it decides that a placement is RNA from the motif tag, while the deposit and `A_p` decide it from an observed intron
-     that resolves to an annotated sj. So an annotated splice whose tag is missing, or contradicts the annotation, gets
-     gDNA's ½ in pass 2 while the deposit books it as spliced.
+   - it decides that a placement is RNA from the motif tag, while the deposit and A_p decide it from an observed intron
+     that resolves to an annotated sj. Upstream the motif is set only from an observed intron that matched an
+     annotated junction (`resolve_context.h:1165-1167`), so an annotated splice whose tag is missing, or contradicts
+     the annotation, gets gDNA's ½ in pass 2 while the deposit books it as spliced.
 
-   Each placement's annotated-sj use and its strand are derived once, by the deposit's rule, and every factor reads
-   them. It moves numbers only on rare held placements of tagged stranded libraries. The ladder cannot see it, because
-   the simulator writes XS on every spliced read.
+   Each placement's annotated-junction use and its strand are derived once, by the deposit's rule, and the length,
+   placement and strand factors all read them. Fixtures cover a missing tag, a tag that contradicts the annotation, and
+   two opposite-strand annotations sharing coordinates. It moves numbers only on rare held placements of tagged
+   stranded libraries. The ladder cannot see it, because the simulator writes XS on every spliced read.
 
 The first, second and fourth are local to `second_pass.py`. The third also touches the accumulator's deferred bank.
 
 ### 9.4 One length rule
 
-The resolver gives a lone merged block its own length for every candidate. That skips the subtraction of the
-candidate's introns inside the block, which `tx_frag_length` and DESIGN §3.4 apply (`single-block-length-shortcut`).
-So one molecule gets two lengths, depending on whether its mates overlapped. The shortcut is removed in its own arm;
-most of the candidates it affects already sit deep in overhang.
+The resolver gives a lone merged block its own length for every candidate (`resolve_context.h:935-940`). That skips the
+subtraction of the candidate's introns inside the block, which `tx_frag_length` and DESIGN §3.4 apply
+(`single-block-length-shortcut`). So one molecule gets two lengths, depending on whether its mates overlapped. The
+shortcut is removed in its own arm; most of the candidates it affects already sit deep in overhang.
 
 ## 10. Step 6 — accounting for every template
 
-**Outcomes.** Each template is exactly one of:
+**Outcomes.** Each template has exactly one, decided in this order:
 
-- **placed:** at least one usable hit;
-- **reported chimera:** none usable, but a candidate pair resolves as chimeric;
-- **unpaired:** none, with a reason;
-- **excluded:** no eligible record, or the multimap option.
+1. **excluded:** no eligible record;
+2. **excluded by the multimap option:** more than one usable hit under `include_multimap=false`, counted after step 4;
+3. **placed:** at least one usable hit;
+4. **unannotated splice:** none usable, and some hit was a valid molecule that §8 withheld, with its class (within one
+   gene, read-through, touching an intergenic region). A chimera label on that hit is kept as a secondary reason,
+   because a read-through is a withheld unannotated splice (owner, 2026-10-16);
+5. **reported chimera:** none usable, none withheld by §8, and a candidate pair resolves as chimeric;
+6. **unpaired:** none of the above, with the furthest reason any candidate pair reached: missing mate; unresolved
+   location; geometry; unresolved geometry; length.
 
-**Unpaired reasons.** Each candidate pair (an HI group, or an R1 × R2 combination) records how far it got, and the
-template's reason is the furthest stage that any of them reached:
+Every reason that any pair reached is recorded beside the outcome.
 
-- missing mate;
-- unresolved location;
-- geometry;
-- unresolved geometry;
-- unannotated splice;
-- length.
+**Each record's status** is separate from its template's outcome:
+
+- **used:** in a usable hit;
+- **unused:** in a placed template, but in no usable hit (a withheld hit's records, a lone secondary);
+- **unplaced:** its template has no usable hit.
 
 **A placed template records its route:**
 
@@ -623,31 +696,40 @@ template's reason is the furthest stage that any of them reached:
 - its hits by kind: same-place alternatives, multi-place;
 - its records that were not used.
 
-**The counts reconcile:**
+**The counts reconcile, by identity as well as by total:**
 
-> templates = placed + reported chimera + unpaired + excluded
+> templates = excluded + placed + unannotated splice + reported chimera + unpaired
 >
-> records = used + unused + records of unplaced templates
+> records = used + unused + unplaced
+
+The annotated BAM's records are matched to the scan's by template and record, not only counted.
 
 **Counters.**
 
-- Today's `mate_unmapped` actually counts one-mate hit groups. It is renamed `one_mate_groups`, and a raw count of
-  records flagged mate-unmapped sits beside it.
-- New counters: `unpaired_alignments`, `nm_conflicts`, `withheld_chains`.
+- Today's `mate_unmapped` actually counts one-mate hit groups (`bam_scanner.cpp:1824-1828`). It is renamed
+  `one_mate_groups`, and a raw count of records flagged mate-unmapped sits beside it.
+- New counters: `unpaired_alignments`, `incomplete_mate_reporting`, `duplicate_hits`, `mixed_pairing_mode`,
+  `missing_nh`, `nm_conflicts`, `tag_conflicts`, `withheld_chains`, and the blacklist census of §8.
 - Rates are reported against all templates and against eligible templates.
 
-**The annotated BAM** writes every original record once. Tags carry the template's outcome and reason
-(`ZC:unpaired` with the reason, `ZC:unused_alignment`), and stale tags are cleared.
+**The annotated BAM** writes every original record once, with only the intended tag changes. Tags carry the template's
+outcome and reason and the record's status (`ZC:unpaired` with the reason, `ZC:unused_alignment`), and stale tags are
+cleared.
 
 **Fixes the code-health review found** (2026-10-16), each with its fixture:
 
 - `proper_pairs` counts primary records that carry the proper-pair flag, so it matches its record-level label
-  (`proper-pairs-counts-hits`).
+  (`proper-pairs-counts-hits`). Today it counts two-mate hits by their first primary R1's flag
+  (`bam_scanner.cpp:1829-1837`).
 - A gated fragment is annotated as gated, with its reason, not as intergenic, and the writer refuses duplicate
-  frag_ids (`gated-fragments-stamped-intergenic`).
+  frag_ids (`gated-fragments-stamped-intergenic`; today `bam_scanner.cpp:2551-2566`).
 - The intergenic append is deleted, so an intergenic pair on two references is no longer counted and annotated
   chimeric (`intergenic-append-is-dead-and-mislabels`).
-- The annotation pass's read-group count must equal the scan's, or the run stops (`annotation-pass-can-drift-a-group`).
+- The annotation pass's groups must equal the scan's, by identity (each group's read name and record count) and not
+  only by count, or the run stops (`annotation-pass-can-drift-a-group`). Today nothing compares the two passes
+  (`annotate.py:441-449`), and a real drift exists: a filtered record between two records of one name splits the group
+  in the annotation pass only, so every later frag_id is off by one (`bam_scanner.cpp:1494-1512` against
+  `2730-2737`).
 - A multimapper's ZS ranks all five splice types (`multimapper-splice-type-drops-implicit`).
 - Every scan counter is asserted exactly, on one hand-built BAM, at one worker and at four (`scan-counters-untested`).
 
@@ -659,6 +741,10 @@ One suite per step. Each fixture is one of two kinds:
 - **defect demonstration:** fails on the baseline, passes after the fix, and fails again when the fix is broken on
   purpose.
 
+**The exhaustive pairing oracle.** A small, independent Python enumeration of every R1 × R2 pair of a template, along
+every path of §7.2, stands beside the suites. On tiny references with clips, several introns and both orientations,
+the scanner's hits and every rejection reason must equal the oracle's.
+
 **The toy reference.** These are the annotation's exons, 0-based and half-open:
 
 | transcript | strand | exons |
@@ -668,63 +754,87 @@ One suite per step. Each fixture is one of two kinds:
 | TB1 | + | [5000,5150) |
 | TC1 | − | [2200,2400) [2600,2800) |
 
-**Expected hits.** The emission values come from the baseline resolver (`counterexample_baseline.py`). In the table,
-"x/y/z" means exon bases / overhang / fragment length for that candidate.
+**Expected hits.** The emission values come from the baseline resolver (`counterexample_baseline.py`), and the
+readiness review recomputed them independently. In the table, "x/y/z" means exon bases / overhang / fragment length
+for that candidate. Cases marked † use their own tiny reference, named in the case.
 
 | suite | case | records (F / R) | expected |
 |---|---|---|---|
+| locations | a deletion against an intron | `50M3D50M` and `50M3N50M` at one start, each with the same partner | two locations and two hits |
+| locations | one pair under two HI values | HI 1 and HI 2 carry identical records | one hit with both HI values as aliases; `num_hits` 1 |
 | pairing | same-place alternatives, as STAR would report them | HI 1: `97M300N3M` at 1103 / [1550,1650); HI 2: [1103,1203) / [1550,1650) | two hits, one unit. HI 1 gives TA1 200/0/247. HI 2 gives TA1 197/3/247, TA2 97/103/547 and unspliced A 200/0/547, with gDNA at 547 |
 | pairing | mates disagree, acceptor side | F `50M800N50M` at 1150 / R [1998,2098) | one hit, as reported: TA2 148/2/148 |
 | pairing | mates disagree, donor side | F [1103,1203) / R `50M300N50M` at 1150 | one hit, as reported: TA1 147/3/147 |
 | pairing | clips hiding TA2's junction | F `50S50M` at 2000 / R `50M50S` at 1150 | placed along TA2's path, L 100 |
 | pairing | outward, unclipped | F [1300,1400) / R [1100,1200) | unpaired: geometry |
 | pairing | a lone secondary, no partner in its HI group | one mate only | an unpaired alignment, counted; no hit |
+| pairing | one mate's record missing from an HI group | R1 HI 1 and 2, R2 HI 1 only, NH 2 | HI 1 is the hit; HI 2 is an unpaired alignment, counted as incomplete mate reporting |
 | pairing | a primary whose mate is unmapped | one mate only | unpaired: missing mate |
 | pairing | two HI groups at different loci | both asserted | exactly the two asserted hits; no cross pair |
-| pairing | per-mate secondaries, no HI (minimap2 style) | R1 at A and B, R2 at A′ and B′ | two hits, (A, A′) and (B, B′); the cross pairs fail validation |
+| pairing | per-mate secondaries, no HI, far copies | R1 at A and B, R2 at A′ and B′, with A and B farther apart than the span bound | two hits, (A, A′) and (B, B′); the cross pairs fail the bound (length) |
+| pairing | per-mate secondaries, no HI, near copies | 100-bp R1 forward at 100 and 120, R2 reverse at 250 and 270 | four hits, lengths 250, 270, 230 and 250; all kept |
 | pairing | no HI, a partner inside the bound but beyond `max_frag_length` | the long-intron witness ([1050,1150) / [2100,2200)), its mates reported per mate | paired: the genomic span is 1,150 against the default 1,000, but L is 350 along TA2 and 550 along TA1 |
-| pairing | no HI, a partner on another reference, on the same strand, or beyond the bound | R1 and R2 per mate | never tried; counted |
+| pairing | † the variable bound (no annotation) | reverse R1 [10000,10100); forward partners `100M` at 8000 and `50M2850N50M` at 7000; `max_frag_length` 1,000 | the near partner fails the bound (span 2,100 against 1,000); the far one passes (3,100 against 3,850), validates at L 250, then §8 withholds it (novel junction) |
+| pairing | no HI, a partner on another reference or on the same strand | R1 and R2 per mate | rejected for geometry; counted |
 | pairing | NH above the number of HI groups | truncated output | the run stops, with the remedy |
-| unannotated | a novel junction inside gene A, with a contiguous alternative | HI 1: junction [1250,1500); HI 2: contiguous | HI 1 withheld; HI 2 kept; the template is placed, unique |
-| unannotated | a junction between genes A and B, alone | `50M2800N50M` at 2200 / [5100,5200) | withheld: unannotated splice, read-through |
+| pairing | the tolerance K | intron [1200,2100) of a † one-transcript reference; F [1103,1203), R [2150,2250); `max_frag_length` 1,000 | K 3: one hit, L 247, overhang 3. K 2: rejected for length (1,147 along the genome) |
+| annotated path | a novel junction inside gene A, with a contiguous alternative | HI 1: junction [1250,1500); HI 2: contiguous | HI 1 withheld; HI 2 kept; the template is placed, unique |
+| annotated path | a junction between genes A and B, alone | `50M2800N50M` at 2200 / [5100,5200) | withheld: unannotated splice, read-through; the chimera label is a secondary reason |
+| annotated path | the same junction, with a valid contiguous alternative | HI 1 as above; HI 2 contiguous | HI 2 placed; HI 1's reasons recorded |
+| annotated path | mates whose junctions contradict | F `50M300N50M` at 1150 / R `50M800N50M` at 1150 (TA1's and TA2's overlapping junctions) | withheld: contradictory mates; calibration never measures their union |
+| annotated path | † two annotated junctions that no transcript joins | one gene, TJ1 holding one junction and TJ2 the other | withheld: unsupported combination (today TJ1 150/50/500, TJ2 150/50/250) |
+| annotated path | a known and a novel junction | one mate at TA1's [1200,1500), the other at a novel junction | withheld (novel) |
+| annotated path | blacklisted junctions | one hit whose only junction is blacklisted; one with one of two junctions blacklisted | the kept junctions decide; the census records the raw ones |
 | pairing | one-base overlap, both outer boundaries, long-intron witness | as in revision 2 of the first design, §12 | as there |
 
 **Other cases:**
 
 - **Locations:**
-  - duplicates within and across HI groups;
+  - duplicates within and across HI groups, and an alias reused by several hits;
+  - the same records in another order: identical locations and hits;
   - `5S95M` against `95M5S`;
   - conflicting NM or motif;
-  - missing NM;
-  - hard-clipped carriers;
-  - chains without SA;
-  - adjacent H and S;
+  - missing NM, and a BAM without NM: counted and warned;
+  - hard-clipped carriers; chains without SA; adjacent H and S;
   - a record with no M/=/X base;
-  - a BAM without NM: counted and warned;
   - mates on two unindexed references;
-  - NH or HI typed as a string;
-  - CIGAR D, I, =, X and H, before and after an N (`no-indel-cigar-fixtures`).
+  - NH or HI typed as a string; NH missing; NH conflicting between a template's records;
+  - malformed mate flags; two templates sharing a read name;
+  - CIGAR D, I, =, X and H, before and after an N (`no-indel-cigar-fixtures`);
+  - 65,535, 65,536 and 65,537 hits, through persistence: exact counts or an explicit refusal.
+- **The junction-strand tag:**
+  - XS `+` with ts `−` on a reverse record: `+`; XS `+` with ts `+` on a reverse record: ambiguous, counted;
+  - 1,000 untagged spliced records, then a tagged one: the tagged record's strand is read;
+  - an explicit `--sj-strand-tag`, honored and recorded;
+  - an invalid tag value: counted.
 - **Pairing and the resolver:**
+  - a template whose first records lack HI and whose later ones carry it; a template mixing the two;
   - without HI, two copies inside one gene's introns: only the geometric pairs;
   - an antisense overlap with the strands installed by the index: `ambig_strand` is 1;
-  - one fixture per use of the anchor tolerance (§7.5);
+  - each use of the anchor tolerance (§7.5) at 0, K and K + 1, once with an implied gap and once beside an observed
+    splice;
   - a merged block over an intron: the candidate's path length (§9.4).
 - **Accounting:**
-  - one fixture per reason;
+  - one fixture per reason, and one per outcome in the order of §10;
   - a geometry failure beside a too-long consistent pair;
-  - every record written once;
-  - stale tags cleared;
-  - the counts reconciling on a mixed BAM;
+  - a group whose every hit the multimap option excludes;
+  - every original record written once, with only the intended tag changes; stale tags cleared;
+  - the counts reconciling on a mixed BAM, by identity as well as by total;
   - the counters BAM, every counter exact;
   - a gated fragment's annotation;
-  - an annotation pass out of step with the scan: refused.
+  - an annotation pass out of step with the scan, including equal-sized groups in another order: refused.
 - **Calibration:**
-  - an all-held junction;
+  - the genic and intergenic pair (HI 1 [1010,1150), HI 2 [6000,6150)): one EM hit and two calibration placements,
+    through a fresh scan, the cache and the drain, traced into the priors;
+  - an all-held junction; a partly held one; one supported only by held templates; one supported by nothing;
   - the length-law correction;
-  - the density-factor correction;
-  - a held template whose placements differ only in NM, drawn in proportion to α_mm^NM;
-  - NM surviving the deferred bank's spill and reload;
-  - the motif rule: an AMBIGUOUS motif, a missing tag, and a tag that contradicts the annotation.
+  - the weights: every density scaled tenfold leaves every probability unchanged; a duplicated hypothesis description
+    changes nothing; a placement with no contested region beside contested ones is not zeroed;
+  - placements that differ only in NM, 37 apart: odds 10^-37; α_mm 0 with every placement carrying NM: not deposited,
+    counted; α_mm 1: inert;
+  - NM surviving the deferred bank's spill and reload, the cache, and `lift_choices` across partitions;
+  - the motif rule: an AMBIGUOUS motif, a missing tag, a tag that contradicts the annotation, and two opposite-strand
+    annotations sharing coordinates.
 - **Code health:**
   - each cleanup stage passes `rename_identity.py --check`;
   - a deliberately moved output value in a stage makes `--check` fire.
@@ -736,112 +846,195 @@ One suite per step. Each fixture is one of two kinds:
 - skip pair validation;
 - form a pair across two HI groups;
 - take only the primary pair on a BAM without HI;
-- bound the no-HI walk by `max_frag_length` alone (the long-intron witness must fail);
+- stop the no-HI search at the first partner beyond its own bound (the variable bound must fail);
+- bound the no-HI search by `max_frag_length` alone (the long-intron witness must fail);
+- identify a location by its aligned bases alone (D against N must fail);
+- count a pair reported under two HI values twice;
+- choose the pairing mode from the first records of the BAM;
+- check HI completeness over the template instead of per mate;
+- store `num_hits` in 16 bits;
 - bound candidates by exon ends;
 - prune by `L_t`;
 - walk clips contiguously only;
 - fail containment on a mate's bases inside its partner's skip;
+- validate with the strict gap rule instead of the resolver's K rule (the tolerance case must fail);
 - withhold the whole template when only one of its hits is unannotated;
-- withhold a hit with only annotated junctions;
+- withhold a hit whose junctions one transcript holds;
+- check junctions one by one instead of together;
+- merge contradictory mates' junctions into their union;
+- let the chimera label outrank a withheld unannotated splice;
 - drop intergenic hits from `num_hits`;
+- read XS alone when both tags are present;
 - drop NM from the deferred bank on spill;
+- weight an uncontested placement by its raw density in pass 2;
 - let a cleanup stage move a number;
 - read a missing NM as 0 without counting it;
 - pair without HI by transcript sets;
 - file unindexed references under one id;
 - leave the strands to the scan;
 - stamp a gated fragment intergenic;
-- accept an annotation pass whose read-group count differs;
+- accept an annotation pass whose groups differ, by count or by identity;
 - decide "RNA" in pass 2 from the motif tag;
 - keep the single-block length shortcut.
 
 ## 12. Measurement and gates
 
+**Inputs:**
+
+- **The STAR panel** (owner, 2026-10-17), the decisive input. It holds the five ladder conditions of the local minimap2
+  panel:
+  - `gdna_g00_ss_0.99_nrna_mid_capture_off`, the zero-gDNA control;
+  - `gdna_g05_ss_0.50_nrna_mid_capture_off` and `gdna_g50_ss_0.50_nrna_mid_capture_off`;
+  - `gdna_g50_ss_0.99_nrna_mid_capture_off` and `gdna_g50_ss_0.99_nrna_mid_capture_on`.
+
+  They cover the three in-scope strata and compare condition for condition with minimap2. Each is aligned at the
+  production parameters and at the recommended ones, under which STAR reports a near-tied contiguous reading beside
+  the spliced one (the owner's result, 2026-10-17). Splice artifacts are measured here, on simulated reads, because
+  their truth is exact (owner, 2026-10-17).
+- **Sequencing errors (proposed; open question 3).** The ladder's reads are error-free, so the mechanism by which a
+  sequencing error near a junction tips STAR to the spliced reading is absent from them. The proposal aligns one seeded
+  copy of each condition beside them, with substitutions at the VCaP DNA library's mismatch rate (the STAR study's
+  injection instrument). The names, and so the truth, are kept, and the two copies hold the same templates.
+- **The local minimap2 panel** (five conditions, simulator truth). Its per-mate secondaries are paired by the search
+  (§7.1).
+- **The oracle ladder**, as the identity check. Its alignments are perfect, so the location and pairing arms must leave
+  it unchanged apart from enumerated cases.
+- **VCaP** (STAR, production parameters): a test input only. It covers transitions, library provenance, and the costs
+  that simulation cannot show: the annotated-path rule's cost on genuine RNA, because the simulator writes only
+  annotated isoforms, and artifacts from sample variants or library chemistry.
+
+**The first measurement, before any arm** (owner, 2026-10-17). Today's tree on the STAR panel, production against
+recommended parameters, per stratum, scored against truth. It shows what the aligner alone does to splice artifacts,
+and it takes the census of the deferred defects (§9.2):
+
+- templates by number of usable hits, and by kind;
+- units in which the merger keeps a hit other than the most likely one, for some transcript;
+- units with two or more gDNA-capable hits;
+- per locus, the held templates deposited against `n_calibrated`;
+- spliced placements given zero weight in pass 2, with their truth.
+
 **Arms,** one mechanism each, in order:
 
-1. the cleanup stages, each a proven numeric no-op. The first is the scan-cache key: it must cover the splice
-   blacklist and the BAM before any arm reads a cache (`scan-cache-key-misses-blacklist-and-bam`);
-2. locations, a numeric no-op except for the enumerated input defects (with the NM count, the unindexed references'
-   identity and the tag checks);
-3. the resolver set up by the index;
-4. pairs by HI, and the bounded R1 × R2 search without HI, with validation and the new `num_hits` (the one-mate
-   fix);
-5. the path witness for clipped and outward pairs;
-6. chains withheld;
-7. unannotated hits withheld, hit by hit;
-8. each use of the anchor tolerance outside implicit splicing, one arm per use (§7.5);
-9. the single length rule (§9.4);
-10. the accounting fixes (tags and counters; no quantification number moves);
-11. the length-law correction;
-12. the density-factor correction;
-13. mismatches in pass 2;
-14. the motif rule in pass 2.
+1. the gates' own proof (below); it changes no number of the tool;
+2. locations: a numeric no-op except for the enumerated input defects (identity, the NM count, the unindexed
+   references, the tag types and widths);
+3. the junction-strand tag read per record (§6), its own arm;
+4. the resolver set up by the index;
+5. pairs by HI, and every pair validated without HI, with duplicate hits, completeness per mate and the new
+   `num_hits` (the one-mate fix);
+6. the path witness for clipped and outward pairs;
+7. chains withheld;
+8. the annotated-path rule (§8);
+9. each use of the anchor tolerance outside implicit splicing, one arm per use (§7.5);
+10. the single length rule (§9.4);
+11. the accounting fixes (tags and counters; no quantification number moves);
+12. the length-law correction;
+13. the weights in pass 2;
+14. mismatches in pass 2;
+15. the motif rule in pass 2.
+
+**Every arm:**
+
+- scans afresh (`build_scan_cache.py --force`), because the cache's key covers the deposit rule, not pairing or
+  resolution;
+- records its inputs' content digests, the paths of the modules it imported, and the native build's hash;
+- is compared with its parent and with the common baseline, recorded on the tree after the tile fix (§5);
+- runs pinned (`scan.total_threads=1`, `OMP_NUM_THREADS=1`, fractional assignment), with pass-2 draws at matched seeds
+  and at further seeds, so that sampling variation is told apart from the effect;
+- is read per stratum, never pooled.
 
 **Readings of each arm:**
 
 - **the setup:** the gDNA law and the ruler frozen, with a hash of the arrays each consumer received, and also each
   arm's own; per stratum; scored against truth;
 - **the errors:**
-  - both errors (artifact RNA mass, and genuine RNA lost);
+  - both errors, by truth origin: artifact RNA mass, and genuine RNA lost;
   - transcript and gene error;
   - calibration against the oracle;
   - the pools, including the unspliced-RNA over-call;
-- **the census:** a per-template transition census with truth, and the hits counted by kind;
-- **calibration:** the second pass's all-held count;
+- **the census:** a per-template transition census with truth; the hits counted by kind; the deferred defects' census
+  above;
+- **calibration:** the second pass's predicted probabilities and actual draws, with truth;
 - **cost:** scan time and memory.
 
-**Inputs:**
+**The gates' own proof** (step 1b; before any fixture relies on them). Each gate is broken on purpose and seen to fire:
 
-- **the oracle ladder**, as the identity check. Its alignments are perfect, so arms 2–7 must leave it unchanged apart
-  from enumerated cases.
-- **the local minimap2 panel** (five conditions, simulator truth). Its per-mate secondaries are paired by the R1 × R2
-  search (§7.1).
-- **VCaP** (STAR, production parameters), for transitions and library provenance.
-- **the STAR-aligned ladder conditions** from the STAR study, once delivered, at both production and recommended
-  parameters. This is the decisive input, because the recommended parameters are Rigel's supported input.
+- `stage_gate.sh` and every arm's gate exit non-zero when any check fails (today they record a failure and exit 0);
+- the output comparison checks record counts, and each record's position, CIGAR and sequence, not only names, flags
+  and tags (today it pairs records with `zip`, so a tail goes unseen);
+- `rename_identity.py` checks fields by name where names are unchanged, the nested banks and the scalar QC, and captures
+  the EM under fractional assignment;
+- the mutants: a stale cache after a pairing-only change; an input changed under the same size and time; a failed
+  suite; a BAM tail appended or deleted; a moved coordinate; two arrays swapped; a changed nested NM.
 
 **The implementation gate:**
 
-- the code-health report reviewed (done, 2026-10-16), and its cleanup landed;
-- this plan reviewed and revised;
-- every suite's fixtures written, and failing where they demonstrate a defect;
-- the injection hooks proven to reach their consumers.
+- this plan reviewed and revised: revision 4's re-review;
+- the gates' own proof done;
+- every suite's fixtures written, failing where they demonstrate a defect, with the exhaustive pairing oracle;
+- the injection hooks proven to reach their consumers: the frozen calibration and pass-2 laws, the EM's realized laws,
+  the priors where declared, and the transcript and gDNA rulers.
 
 **The end-of-wave gate:**
 
-- every suite and break test passes, and the full suite passes at the re-derived baseline;
-- oracle identity holds, apart from enumerated cases;
-- with the law and the ruler frozen, no in-scope stratum gets worse, except by the measured, accepted policy costs
-  (unpaired templates, withheld unannotated hits);
+- every fixture passes, and every deliberate reversal fails;
+- the full suite passes at the re-derived baseline, and every annotated record is conserved;
+- oracle identity holds, with every template-level exception enumerated;
+- on the STAR panel, per stratum, with the law and the ruler frozen and also with each arm's own, no in-scope stratum
+  gets worse, except by the measured, accepted policy costs (unpaired templates, withheld unannotated hits,
+  contradictory mates);
+- the readings above are reported for every arm;
 - the owner reassesses before wave 2.
 
 ## 13. Open questions
 
-1. **The no-HI search's bound** (§7.1). Is it complete: can any pair that §7.2 accepts lie beyond it?
-2. **The per-hit unannotated rule** (§8), and the blacklist's interaction with it.
-3. **The existing EM combination for same-place alternatives** (§9.2), and its factor-2 case.
-4. **Calibration's all-held approximation and the four corrections** (§9.3), now that the recommended parameters will
-   hold more templates.
-5. **The code-health step as carried out** (§5). Is anything left that steps 2–6 depend on?
-6. **The anchor tolerance** (§7.5). Which of K's uses are implicit splicing?
-7. **The junction-strand tag per record** (§6). When a record carries both XS and ts and they disagree, which stands?
-   Is a library-level warning still needed when most spliced records carry no tag?
+1. **The deferred defects' exposure** (§9.2). The recommended STAR parameters make spliced-and-contiguous
+   multimappers common, so the merger rule, the gDNA mean and the prior's denominator touch many more templates than
+   on production BAMs. The first measurement (§12) counts it. If it is large, does a fix move from wave 2 into wave 1?
+2. **The prior's denominator for 0.8.0** (`ISSUES: the-em-prior-share-excludes-drawn-multimappers`). It was kept on a
+   three-denominator A/B with production STAR, where few templates hold two hits. Should that A/B be re-run on the STAR
+   panel before the end-of-wave gate?
+3. **Sequencing errors** (§12). Should the panel carry an error-injected copy of each condition at VCaP's mismatch
+   rate beside the error-free reads, and the 0.01 stress copy as well? Without one, the mechanism by which a sequencing
+   error tips STAR to the spliced reading goes unmeasured.
+4. **The all-held approximation** (§9.3) under the recommended parameters: what result of its measurement would reopen
+   it?
+5. **What simulation cannot show** (§12): is VCaP's library-level truth enough to price the annotated-path rule's cost
+   on genuine RNA, and artifacts from sample variants or library chemistry?
+6. **The no-HI search's form** (§7.1). The owner's fifth round named a walk sorted by distance. Revision 4 validates
+   every pair, bound first: the same hits with simpler code, at most 36 pairs per template under minimap2's defaults.
+   A sorted walk with a stop over all remaining partners gives the same set, if a measured cost ever asks for it.
 
-The output names are settled (owner, 2026-10-17; `OUTPUT_NAMES_PROPOSAL.md`), and the renames stage applies them before
-step 2.
+## 14. How this answers the reviews
 
-## 14. How this answers the earlier reviews
+**The readiness review of revision 3** (2026-10-17):
 
-| finding | here |
+| finding | revision 4 |
 |---|---|
-| tied alternatives meet best-hit RNA and mean gDNA | correct for same-place alternatives (§9.2); remote ones wait for wave 2's sum |
-| preference is not identification | the scan stage never chooses between hits; the aligner proposes, the EM decides (§3) |
-| one owner of the sequence evidence | the aligner's NM for each hit, in the EM and now in pass 2 (§9.3) |
-| calibration can zero a held RNA placement | accepted by the owner and measured; four corrections (§9.3) |
-| the clip walk is not exact | the path witness walks along annotated paths; unresolved geometry otherwise (§7.2) |
-| location identity; the ledger | §6 and §10 |
-| read-through membership | subsumed: unannotated hits are withheld; the read-through class is reporting only (§8) |
-| revision 1's open questions: the generation tolerance, K where bases are missing, multi-junction enumeration | moot: wave 1 constructs no reading |
+| 1. location identity collapses D and N | §6: identity is the alignment itself, aliases kept; duplicate hits collapse (§7.1); order invariance tested |
+| 2. junctions one by one are not an annotated path | §8: one transcript must hold every observed junction; contradictory mates withheld; the blacklist declared as an exception, with its census |
+| 3. the search's stopping rule | §7.1: every pair validated, the span bound first; checked by enumeration, each term needed |
+| 4. pass 2's normalization | §9.3: one placement factor and a share within the placement; checked by enumeration; zero and hard-zero behavior stated; NM through every path |
+| 5. consumer descriptions and closure claims | §9.1–§9.2 restated from the source with citations; the deferred defects named with their ISSUES entries and measured (§12); this section says what is deferred |
+| 6. cache validity and proof | §12: fresh scans, content digests and build hashes; the gates' own proof |
+| 7. input and numeric contracts | §6, §7.1: the mode per template, completeness per mate, a missing NH, the widths, `nM` never read as NM |
+| 8. outcomes and the tolerance | §10: the outcome order with every reason kept, record status, the multimap option after counting, groups checked by identity; §7.2, §7.5: K applied by gap, one rule with the resolver |
+
+**The earlier reviews' blockers**, as the readiness review judged them, with revision 4's status:
+
+| blocker | status |
+|---|---|
+| first design 1: best-hit RNA, mean gDNA | not answered: deferred to wave 2 (§9.2), with its exposure measured in wave 1 |
+| first design 2: preference is not identification; one owner of the sequence evidence | removed: the aligner proposes and owns NM; a missing NM is counted and disclosed (§6) |
+| first design 3: calibration can zero a held RNA placement | an accepted approximation, not resolved: measured, and the weights' units fixed (§9.3) |
+| first design 4: the clip walk | design answered (§7.2; L 100 along TA2); record-level fixtures pending (§11) |
+| wave-1 review 1: the local merger | not answered: wave 2 (§9.2); exposure measured |
+| wave-1 review 2: the prior's denominator | not answered: kept for 0.8.0 by ruling; exposure measured; open question 2 |
+| wave-1 review 3: the mismatch proposal cutoff | removed: Rigel proposes nothing; the aligner's recall is the STAR study's |
+| wave-1 review 4: validation before reconstruction | removed: each reported alignment is validated as it stands |
+| wave-1 review 5: incomplete reconstruction | removed |
+| wave-1 review 6: unsupported paths; the blacklist bypass | answered by §8's whole-path rule; the blacklist is a declared exception until wave 4 |
+| wave-1 review 7: sequence for recomputed NM | removed: nothing is recomputed; a missing NM is a disclosed approximation |
 
 ## Appendix A — what left wave 1, and where it went
 
@@ -850,21 +1043,27 @@ step 2.
   parameters Rigel will recommend.
 - **The genome stored in the index:** dropped for now (owner, 2026-10-16). Nothing in the plan reads bases.
 - **The splice-artifact machinery of 2026-10-14/15** (the local tie table and its second hit, the hold rule, the
-  mismatch emission factor): superseded by the aligner's alternatives and their NM, pending the STAR report.
-- **R1 × R2 enumeration:** kept only for aligners without HI, as a bounded search (§7.1); STAR input is paired by HI.
+  mismatch emission factor): superseded by the aligner's alternatives and their NM.
+- **R1 × R2 enumeration:** kept only for aligners without HI (§7.1); STAR input is paired by HI.
 - **A dual-aligner input:** a spliced aligner and a genome aligner, merged by read name into one BAM for Rigel. This is
-  the owner's eventual fallback if STAR cannot be parameterized, and the STAR study prices it.
+  the owner's eventual fallback if STAR cannot be parameterized; the STAR study prices it.
 - **Remote copies** (the index-time copy table): wave 2, and only if VCaP shows that STAR misses them.
+- **The merger rule, the gDNA sum and the prior's frame:** wave 2 and 0.8.1, by ruling; wave 1 measures their
+  exposure (§9.2, §12).
 
 ## Appendix B — evidence pointers
 
+- **The readiness review of revision 3:** `PAIRED_END_WAVE1_READINESS_REVIEW.md`, with its reproduction record (lab
+  use only).
+- **Revision 4's checks:** `$RIGEL_RUNS/arms/2026-10-17_wave1_rev4_checks/`: the span bound (200,000 random cases,
+  48,301 accepted pairs, no violation; each term's removal produces violations), the second pass's units (four checks,
+  and the raw-density break caught), and the K example. Each script prints its receipt beside it.
 - **The code-health review:** `SCAN_CODE_HEALTH_REVIEW.md` and `scan_code_health_slices/`; the cleanup is
   `41899ae4..3941a0dd`.
-
 - **Diagnosis tables:** revision 2 of the first design, Appendix A, with `paired_end_repair_evidence/arms.json`.
 - **The mate-disagreement census:** `census_*.json`.
   - End-extensions within 3 bases are 495 mRNA against 58 artifact templates on minimap2 OFF.
   - On VCaP they are 2,165 RNA-library against 5 DNA-library templates.
   - Recount after pair validation.
 - **Emission values on the toy annotation:** `counterexample_baseline.py`, confirmed independently by the first
-  review.
+  review and again by the readiness review.

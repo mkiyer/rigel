@@ -1,10 +1,10 @@
 # The paired-end repair: roadmap to release
 
-2026-10-16 · base `41899ae4` · sandbox roadmap; nothing here is implemented.
+2026-10-17 · code base `3941a0dd` · sandbox roadmap; nothing in waves 1–4 beyond step 1 is implemented.
 
 This file holds the waves, what each must deliver, and the gate between them.
 
-- **The plan for wave 1:** `PAIRED_END_WAVE1_PLAN.md` (revision 2).
+- **The plan for wave 1:** `PAIRED_END_WAVE1_PLAN.md` (revision 4).
 - **The diagnosis behind it:** `PAIRED_END_REPAIR.md` (revision 2, superseded for planning) and its independent
   review, `PAIRED_END_REPAIR_INDEPENDENT_REVIEW.md`.
 - **The STAR study's brief:** `star_parameters/PROMPT.md`.
@@ -27,13 +27,15 @@ and reassess before the next.
   Unannotated splicing is handled inconsistently today.
 - **The scope is narrowed** (owner, 2026-10-16). Rigel reads alignments; it does not repair or re-align them.
   - Near-tied spliced and contiguous alignments are the aligner's to report.
-  - A parallel study on the cluster is establishing STAR parameters that do so, and Rigel will recommend them.
+  - A parallel study on the cluster has found STAR parameters that do so (owner, 2026-10-17), and Rigel will
+    recommend them.
 
 ## Progress
 
 Kept current until wave 4 closes (owner, 2026-10-16). ☑ done · ◐ in progress · ☐ not started.
 
-**Wave 1, the scan stage** (plan revision 2 accepted 2026-10-16; revision 3 out for review 2026-10-17)
+**Wave 1, the scan stage** (plan revision 2 accepted 2026-10-16; revision 3 reviewed 2026-10-17; revision 4 for a
+targeted re-review)
 
 - ☑ Step 1, the code-health review and its cleanup (2026-10-16/17)
   - ☑ the baseline re-derived on a clean checkout at `41899ae4` after a rebuild: 0 failed / 2,959 passed / 0 skipped
@@ -85,11 +87,19 @@ Kept current until wave 4 closes (owner, 2026-10-16). ☑ done · ◐ in progres
       (`4bcc72d9`: measured on the ladder against truth, fix / before 0.998-1.001 per stratum, 0.996-1.007 per
       condition); the tag detector's
       1,000-read cutoff is repaired in step 2 instead (the junction-strand tag read per record)
-- ◐ the plan's external review, of revision 3 (owner, 2026-10-17); bundle `rigel_wave1_review_r3b.zip`, at `3941a0dd`
-  with every stage's gate record
+- ☑ the readiness review of revision 3 (2026-10-17, `PAIRED_END_WAVE1_READINESS_REVIEW.md`): revise before
+  implementing, eight findings; each verified against the source and accepted
+- ◐ revision 4, answering the eight findings (2026-10-17); ☐ its targeted re-review
+- ☐ step 1b, the gates' own proof: each gate broken on purpose and seen to fail (plan §12)
+- ◐ the STAR panel (owner, 2026-10-17): the five conditions of the minimap2 panel at production and recommended
+  parameters; the request for the cluster session drafted, with error-injected copies proposed (plan §13)
+- ☐ the first measurement: today's tree on the STAR panel, production against recommended, with the census of the
+  deferred defects (plan §12)
+- ☐ the fixtures, with the exhaustive pairing oracle
 - ☐ Step 2, mate locations
-- ☐ Step 3, pairing: HI groups; the bounded R1 × R2 search; the anchor tolerance's uses audited
-- ☐ Step 4, unannotated hits withheld, hit by hit
+- ☐ Step 3, pairing: HI groups, completeness per mate and duplicates; every R1 × R2 pair without HI; the anchor
+  tolerance's uses audited
+- ☐ Step 4, the annotated-path rule, hit by hit
 - ☐ Step 5, the hand-off, the single length rule, and the four second-pass corrections (one arm each)
 - ☐ Step 6, accounting
 - ☐ the end-of-wave gate, and the owner's reassessment
@@ -110,7 +120,7 @@ Kept current until wave 4 closes (owner, 2026-10-16). ☑ done · ◐ in progres
 
 **Wave 4, validation and release**
 
-- ◐ the STAR study (cluster session): ☐ its checkpoint; ☐ its report
+- ◐ the STAR study (cluster session): ☑ parameters that report both readings (owner, 2026-10-17); ☐ its report
 - ☐ the STAR-aligned ladder, at the recommended and the production parameters
 - ☐ independent artifact-containing libraries, and VCaP
 - ☐ the fragment-length-gap panels and the zero-gDNA controls
@@ -150,12 +160,14 @@ steps:
 
 1. **Review the scan path's code health, and clean it up.** Each cleanup stage is proven to change no number.
 2. **One mate location per alignment record.**
-3. **Hits from pairs:** STAR's HI groups, or a bounded R1 × R2 search for aligners without HI (minimap2). Each is
-   validated as one molecule.
-4. **Unannotated junctions withheld, hit by hit.** A template keeps its other hits.
+3. **Hits from pairs:** STAR's HI groups, or every R1 × R2 pair for aligners without HI (minimap2). Each is validated
+   as one molecule.
+4. **The annotated-path rule, hit by hit:** a spliced hit is usable only if one annotated transcript holds all its
+   junctions. A template keeps its other hits.
 5. **The hand-off to calibration and the EM,** with four corrections to calibration's second pass:
    - a spliced placement takes the RNA length law;
-   - a placement with nothing contested reads "not applicable", not zero;
+   - each candidate carries one placement factor and a share within its placement, so a placement with nothing
+     contested is no longer zeroed, and the draw does not depend on units;
    - pass 2 weighs each hit's mismatches as the EM does;
    - pass 2 decides a placement's splice and strand by the deposit's rule.
 6. **One disposition per template;** every record written once.
@@ -166,7 +178,8 @@ steps:
 - The full suite passes at the re-derived baseline.
 - The oracle ladder is identical, except for enumerated cases.
 - With the gDNA law and the ruler held fixed, no in-scope stratum gets worse, except by the explicitly accepted policy
-  costs: the unpaired templates and the withheld unannotated hits. Each cost is measured and reported.
+  costs: the unpaired templates, the withheld unannotated hits and the contradictory mates. Each cost is measured
+  and reported, on the STAR panel (simulated truth) and, where simulation cannot show it, on VCaP.
 
 ### Wave 2: multimapping
 
@@ -299,5 +312,15 @@ Each is designed and measured on the repaired scan.
 - K stays as the implicit-splicing tolerance, renamed;
 - the report tiles, the summary's depth keys and rounding, and the resource constants as proposed;
 - wave 1 is reviewed again, at revision 3, before step 2 is implemented.
+
+**Recorded (owner, 2026-10-17, eighth round):**
+
+- the STAR panel for wave 1's end-of-wave gate is the five conditions of the local minimap2 panel, at the production
+  and the recommended parameters;
+- splice-artifact behavior is measured on simulated data aligned with the recommended parameters, because its truth
+  is exact;
+- the owner has found STAR parameters that report both readings of a template whose alignments score alike; by
+  default STAR's bonus for the spliced reading reports it alone;
+- open questions or uncertainties after revision 4 go to a targeted re-review.
 
 **Open for wave 1:** the questions in `PAIRED_END_WAVE1_PLAN.md` §13.
