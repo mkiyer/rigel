@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass, replace as _replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -54,7 +54,6 @@ from .estimator import AbundanceEstimator
 from .frag_length_model import FragmentLengthModel
 from .index import TranscriptIndex
 from .native import BamScanner as _NativeBamScanner
-from .native import detect_sj_strand_tag as _native_detect_sj_tag
 from .routing import FragmentRouter
 from .scoring import FragmentScorer
 from .splice import SpliceType, census_field
@@ -104,17 +103,36 @@ def _sj_tag_to_spec(sj_strand_tag) -> str:
     return "none"
 
 
-def resolve_scan_config(scan: BamScanConfig, bam_path) -> BamScanConfig:
-    """``scan`` with ``sj_strand_tag="auto"`` replaced by the tag spec the BAM's spliced reads carry.
+def _log_sj_tags(stats: PipelineStats, scan: BamScanConfig) -> None:
+    """Say what the junction-strand tag gave on the library's spliced records, and warn when it gave none a strand.
 
-    ``"auto"`` is a request, never a mode the native readers take: the detector reads the first spliced
-    reads and names ``"XS"``, ``"ts"``, ``"XS,ts"`` or ``"none"``. Any other config comes back as it is,
-    so resolving twice is resolving once. Whatever records a scan's settings, a scan cache's key among
-    them, records the config this returns.
+    The tag is read on every record, so the counts are the whole library's. No share of untagged records is a
+    threshold: only a library none of whose spliced records carries a usable tag trains no junction strand.
     """
-    if _sj_tag_to_spec(scan.sj_strand_tag) != "auto":
-        return scan
-    return _replace(scan, sj_strand_tag=_native_detect_sj_tag(str(bam_path)))
+    spliced = stats.n_sj_tag_tagged + stats.n_sj_tag_untagged + stats.n_sj_tag_conflicting
+
+    def share(n: int) -> float:
+        return 100.0 * n / spliced if spliced else 0.0
+
+    logger.info(
+        "[SCAN] splice-junction strand tag %s: %d spliced records, %d with a strand (%.2f %%), %d without one "
+        "(%.2f %%), %d whose XS and ts disagree, read as ambiguous (%.2f %%); %d unreadable tag values",
+        _sj_tag_to_spec(scan.sj_strand_tag),
+        spliced,
+        stats.n_sj_tag_tagged,
+        share(stats.n_sj_tag_tagged),
+        stats.n_sj_tag_untagged,
+        share(stats.n_sj_tag_untagged),
+        stats.n_sj_tag_conflicting,
+        share(stats.n_sj_tag_conflicting),
+        stats.n_sj_tag_invalid,
+    )
+    if spliced > 0 and stats.n_sj_tag_tagged == 0:
+        logger.warning(
+            "No splice-junction strand tag (XS, or minimap2's ts) is read on this library's spliced reads, so no "
+            "junction trains the strand model and the library is quantified as unstranded. If it is stranded, "
+            "align with the tag (STAR: --outSAMstrandField intronMotif) or name it with --sj-strand-tag."
+        )
 
 
 def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
@@ -160,6 +178,11 @@ def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
         # Splice-artifact blacklist
         "n_sj_observed",
         "n_sj_blacklisted",
+        # The junction-strand tag, per spliced record
+        "n_sj_tag_tagged",
+        "n_sj_tag_untagged",
+        "n_sj_tag_conflicting",
+        "n_sj_tag_invalid",
         # The deposit hold-out that closes the census identity
         "n_deposit_not_offered",
     ):
@@ -272,8 +295,7 @@ def scan_and_buffer(
     index : TranscriptIndex
         The loaded reference index.
     scan : BamScanConfig
-        BAM scanning and buffering configuration. ``sj_strand_tag="auto"`` is resolved here
-        (:func:`resolve_scan_config`), after the header check.
+        BAM scanning and buffering configuration.
 
     Returns
     -------
@@ -285,7 +307,6 @@ def scan_and_buffer(
     one rule — the accumulator's ``L`` — over one stated population.
     """
     _check_bam_header(bam_path, index)
-    scan = resolve_scan_config(scan, bam_path)
     stats = PipelineStats()
     buffer = FragmentBuffer(
         max_memory_bytes=scan.buffer_size_bytes,
@@ -983,28 +1004,10 @@ def run_pipeline(
 
     bam_path = str(bam_path)
 
-    # -- Resolve sj_strand_tag "auto" to the tag the BAM carries --
-    scan = resolve_scan_config(config.scan, bam_path)
-    detected = scan.sj_strand_tag != config.scan.sj_strand_tag
-    logger.info(
-        "[SCAN] splice-junction strand tag: %s%s",
-        _sj_tag_to_spec(scan.sj_strand_tag),
-        " (auto, from the first spliced reads)" if detected else "",
-    )
-    # the result carries the mode the scan read with, so summary.json and config.yaml record it
-    config = _replace(config, scan=scan)
-
     # -- Single BAM pass (C++ native scanner) --
+    scan = config.scan
     stats, strand_models, buffer, calibration_payload = scan_and_buffer(bam_path, index, scan)
-    if (
-        _sj_tag_to_spec(scan.sj_strand_tag) == "none"
-        and stats.n_with_annotated_sj + stats.n_with_unannotated_sj > 0
-    ):
-        logger.warning(
-            "No splice-junction strand tag (XS, or minimap2's ts) is read on this library's spliced reads, so no "
-            "junction trains the strand model and the library is quantified as unstranded. If it is stranded, "
-            "align with the tag (STAR: --outSAMstrandField intronMotif) or name it with --sj-strand-tag."
-        )
+    _log_sj_tags(stats, scan)
 
     # -- The second pass: drain the side buffer, BEFORE calibration --
     calibration_payload = _drain_side_buffer(

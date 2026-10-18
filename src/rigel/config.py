@@ -179,7 +179,9 @@ class BamScanConfig:
     max_frag_length : int
         Maximum fragment length for histogram models (default 1000).
     sj_strand_tag : str or tuple of str
-        BAM tag(s) for splice-junction strand (default ``"auto"``).
+        BAM tag(s) for splice-junction strand (default ``"auto"``). ``"auto"`` reads XS and minimap2's ts on every
+        spliced record: agreeing tags give the strand, disagreeing ones an ambiguous motif. A named tag, or two in
+        order, reads only those, the first present winning; ``"none"`` reads no tag.
     log_every : int
         Log scoring progress (debug level) every N buffered fragments,
         checked once per buffer chunk (default 1M).

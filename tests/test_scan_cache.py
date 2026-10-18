@@ -560,6 +560,20 @@ class TestTheKeyRefusesAMovedIndex:
         with pytest.raises(ScanCacheKeyError, match="scan"):
             read_scan_cache(cache_dir, index, other)
 
+    def test_the_manifest_check_refuses_a_changed_TALLY_setting_too(self, scanned, tmp_path):
+        """`build_scan_cache.py` decides a skip and `preflight.py` calls a cache valid from the manifest alone
+        (`check_scan_cache`). Without the settings, both took a cache scanned under other settings for a valid one,
+        while every reader that holds settings refused it: the caches the scan recorded under a resolved junction
+        tag (``XS``) after the tag came to be read per record (``auto``)."""
+        index, _bam, scan, *_ = scanned
+        cache_dir, _cache = round_trip(scanned, tmp_path)
+        check_scan_cache(cache_dir, index, scan_config=scan)
+        check_scan_cache(cache_dir, index, scan_config=dataclasses.replace(scan, total_threads=7))
+        with pytest.raises(ScanCacheKeyError, match="scan settings"):
+            check_scan_cache(
+                cache_dir, index, scan_config=dataclasses.replace(scan, sj_strand_tag="XS")
+            )
+
     def test_a_THREAD_COUNT_is_not_part_of_the_key(self, scanned, tmp_path):
         """A thread count divides the work and not the tally (`test_scan_order_independence.py` holds the
         tally identical from one worker to eight), so a cache scanned under one budget reads under any

@@ -159,9 +159,13 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   a wrong transcript; so does a transcript on a reference the FASTA lacks or past its end. Exons with no base between
   them (RefSeq writes them at genome indels) are one exon, not a 0-bp intron, and Ensembl's `gene_biotype` is read as
   the gene type.
-- The splice-junction strand tag: an unknown `--sj-strand-tag` is refused. The tag the scan read with (what `auto`
-  resolved to) is logged and recorded in `summary.json` and `config.yaml`. A library whose spliced reads carry no tag
-  warns that it is quantified as unstranded.
+- The splice-junction strand tag is read on every spliced record. 0.7.1 chose which tags to read from a library's
+  first 1,000 spliced reads, so a library whose first spliced reads carried none lost every junction's strand and was
+  quantified as unstranded. Where it found both tags it read `XS` first, so a record whose `XS` and `ts` disagreed
+  passed unseen, and an `XS` holding neither `+` nor `-` hid a readable `ts`. `auto` now reads both tags on each
+  record: two that disagree read as ambiguous and train no strand, and an unreadable value reads as absent. What the
+  tags gave is logged and counted in `summary.json` (`alignment_stats.sj_strand_tag`). An unknown `--sj-strand-tag`
+  is refused, and a library whose spliced reads carry no tag warns that it is quantified as unstranded.
 - An index whose splice blacklist is not applied warns when it loads: a manifest that names an alignable store whose
   blacklist file is missing, or a blacklist file with no store in the manifest. 0.7.1 reported a missing blacklist
   only through `summary.json`'s `sj_blacklist_loaded`.

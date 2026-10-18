@@ -535,15 +535,14 @@ def test_a_missing_or_stale_oracle_cache_ABORTS(toy, tmp_path):
     """
     import _oracle_arms
 
-    from rigel.pipeline import resolve_scan_config, scan_and_buffer
+    from rigel.pipeline import scan_and_buffer
     from rigel.scan_cache import write_scan_cache
 
     bam, cfg = str(toy.bam_path), PipelineConfig()
     with pytest.raises(SystemExit, match="no valid scan or oracle cache"):
         QA.load_oracle(bam, toy.index, cfg, tmp_path, tmp_path, "absent")
 
-    # resolved, because the cache records the config it scanned with
-    scan = resolve_scan_config(cfg.scan, bam)
+    scan = cfg.scan
     _stats, strand_model, _buf, payload = scan_and_buffer(bam, toy.index, scan)
     orc = tmp_path / "oracle_cache"
     _oracle_arms.load_or_build_oracle(bam, toy.index, cfg, tmp_path / "w", "t", payload, orc)
@@ -575,11 +574,11 @@ def test_an_oracle_part_records_the_BAM_it_was_SPLIT_from(toy, tmp_path):
     """
     import _oracle_arms
 
-    from rigel.pipeline import resolve_scan_config, scan_and_buffer
+    from rigel.pipeline import scan_and_buffer
     from rigel.scan_cache import read_scan_cache
 
     bam, cfg = str(toy.bam_path), PipelineConfig()
-    scan = resolve_scan_config(cfg.scan, bam)
+    scan = cfg.scan
     _stats, _sm, _buf, payload = scan_and_buffer(bam, toy.index, scan)
     orc, work = tmp_path / "oracle_cache", tmp_path / "w"
     _oracle_arms.load_or_build_oracle(bam, toy.index, cfg, work, "t", payload, orc)

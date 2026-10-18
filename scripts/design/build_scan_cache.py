@@ -6,8 +6,8 @@ and strand model to a `rigel.scan_cache` directory. Each cache is independently 
 it was built from — `graph_hash`, a reach digest (which neither `partition_hash` nor `graph_hash`
 covers), the scan config and the splice blacklist — and records its BAM's identity, and is refused at
 load if either has moved, so a partial suite is usable and one condition can be rebuilt without touching
-the others. An existing cache is skipped only when it still describes this index and this BAM; a stale
-one is re-scanned. Every cache is read straight back
+the others. An existing cache is skipped only when it still describes this index and this BAM and was scanned
+under the settings below; a stale one is re-scanned. Every cache is read straight back
 after it is written so a cache that cannot be loaded fails here rather than in a later session. The
 cache key hashes the accumulator's deposit rule and not the fragment construction, so a change to which
 fragments are offered needs `--force`. Nothing is calibrated or scored.
@@ -31,7 +31,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 from rigel.config import BamScanConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
-from rigel.pipeline import resolve_scan_config, scan_and_buffer  # noqa: E402
+from rigel.pipeline import scan_and_buffer  # noqa: E402
 from rigel.scan_cache import (  # noqa: E402
     ScanCacheKeyError,
     check_scan_cache,
@@ -42,13 +42,15 @@ from rigel.scan_cache import (  # noqa: E402
 #: Where a simulated condition keeps its oracle BAM, relative to the condition directory.
 ORACLE_BAM = "sim_oracle.bam"
 
+#: The settings every cache is scanned under, and the ones the instruments read caches with, so an existing cache
+#: is skipped only when it was scanned under them.
+SCAN = BamScanConfig()
+
 
 def cache_one(index: TranscriptIndex, bam: Path, out_dir: Path) -> tuple[float, float, int]:
     """Scan *bam* against *index* and write its cache. Returns (scan seconds, load seconds, bytes)."""
-    scan = resolve_scan_config(BamScanConfig(), bam)
-
     start = time.perf_counter()
-    _stats, strand_model, _buffer, payload = scan_and_buffer(str(bam), index, scan)
+    _stats, strand_model, _buffer, payload = scan_and_buffer(str(bam), index, SCAN)
     scan_seconds = time.perf_counter() - start
 
     write_scan_cache(
@@ -57,12 +59,12 @@ def cache_one(index: TranscriptIndex, bam: Path, out_dir: Path) -> tuple[float, 
         strand_model=strand_model,
         index=index,
         bam=str(bam),
-        scan_config=scan,
+        scan_config=SCAN,
     )
     # Read it straight back: a cache that cannot be loaded against the index it was just written
     # from is worse than no cache, and the failure should surface here.
     start = time.perf_counter()
-    read_scan_cache(out_dir, index)
+    read_scan_cache(out_dir, index, SCAN)
     load_seconds = time.perf_counter() - start
 
     size = sum(p.stat().st_size for p in out_dir.iterdir() if p.is_file())
@@ -108,7 +110,7 @@ def main() -> None:
             continue
         if out_dir.exists() and not args.force:
             try:
-                check_scan_cache(out_dir, index, bam)
+                check_scan_cache(out_dir, index, bam, SCAN)
             except (ScanCacheKeyError, FileNotFoundError, KeyError) as stale:
                 print(f"{name:<48} {'stale':>9}  re-scanning: {stale}")
             else:

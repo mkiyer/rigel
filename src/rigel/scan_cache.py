@@ -81,7 +81,6 @@ __all__ = [
     "calibration_inputs",
     "check_bam_identity",
     "check_scan_cache",
-    "check_scan_config",
     "index_derived_inputs",
     "payload_schema_digest",
     "reach_digest",
@@ -532,7 +531,7 @@ def write_scan_cache(
         "reach_digest": reach_digest(index),
         "payload_schema_digest": payload_schema_digest(),
         # The settings the scan ran under. Their part of the key is DERIVED from this record when the
-        # cache is read (`check_scan_config`), never stored beside it: a stored digest is a second home
+        # cache is checked (`check_scan_cache`), never stored beside it: a stored digest is a second home
         # that goes stale the day the key's definition changes.
         "scan_config": dataclasses.asdict(scan_config)
         if dataclasses.is_dataclass(scan_config)
@@ -549,20 +548,28 @@ def write_scan_cache(
 
 
 def check_scan_cache(
-    cache_dir: str | Path, index: "TranscriptIndex", bam: str | Path | None = None
+    cache_dir: str | Path,
+    index: "TranscriptIndex",
+    bam: str | Path | None = None,
+    scan_config=None,
 ) -> None:
-    """Refuse a cache, from its manifest alone, unless it describes this index and this BAM.
+    """Refuse a cache, from its manifest alone, unless it describes this index and this BAM, and, if
+    ``scan_config`` is given, unless it was scanned under those settings.
 
     Everything :func:`read_scan_cache` checks before it reads the arrays: the reach, the payload schema, the
-    splice blacklist, the graph hash and the BAM. ``bam`` names the BAM the caller is about to use; without it the
-    BAM at the recorded path is compared, when it is still there. `build_scan_cache.py` calls this before it skips
-    an existing cache.
+    splice blacklist, the graph hash, the BAM and the scan settings. ``bam`` names the BAM the caller is about to
+    use; without it the BAM at the recorded path is compared, when it is still there. `build_scan_cache.py` calls
+    this before it skips an existing cache, and `preflight.py` to call one valid, each with the settings the
+    instruments read the caches with: without them a cache scanned under other settings read as valid there and
+    was refused by every reader that holds settings.
     """
     manifest = json.loads((Path(cache_dir) / MANIFEST_JSON).read_text())
-    _check_manifest(manifest, index, bam)
+    _check_manifest(manifest, index, bam, scan_config)
 
 
-def _check_manifest(manifest: dict, index: "TranscriptIndex", bam: str | Path | None) -> None:
+def _check_manifest(
+    manifest: dict, index: "TranscriptIndex", bam: str | Path | None, scan_config=None
+) -> None:
     expected_reach = reach_digest(index)
     if manifest["reach_digest"] != expected_reach:
         raise ScanCacheKeyError(
@@ -600,6 +607,18 @@ def _check_manifest(manifest: dict, index: "TranscriptIndex", bam: str | Path | 
             f"partition or the sj CSR moved; this tally does not describe this index."
         )
 
+    if scan_config is not None:
+        # Two scans of one BAM under different tally settings are different tallies, and nothing else notices.
+        # Both sides are computed here, from the settings the manifest records and the ones the caller holds, so
+        # a thread count on either side decides nothing (``_WORK_ONLY_FIELDS``).
+        recorded_settings = _scan_config_digest(manifest["scan_config"])
+        expected_settings = _scan_config_digest(scan_config)
+        if recorded_settings != expected_settings:
+            raise ScanCacheKeyError(
+                f"cache scan settings digest {recorded_settings} != {expected_settings}. Two scans of one BAM "
+                f"under different tally settings are different tallies."
+            )
+
     recorded = manifest.get("bam")
     if bam is None and isinstance(recorded, dict):
         if not os.path.exists(recorded["path"]):
@@ -619,11 +638,11 @@ def read_scan_cache(
     unless it was produced under that configuration.
 
     Pass ``scan_config`` whenever you have one. Without it a cache scanned under different settings is a different
-    tally and will load silently. The check is :func:`check_scan_config`. ``bam`` is as in :func:`check_scan_cache`.
+    tally and will load silently. The checks are :func:`check_scan_cache`'s; ``bam`` is as there.
     """
     cache_dir = Path(cache_dir)
     manifest = json.loads((cache_dir / MANIFEST_JSON).read_text())
-    _check_manifest(manifest, index, bam)
+    _check_manifest(manifest, index, bam, scan_config)
     payload_scalars = manifest["payload_scalars"]
 
     with np.load(cache_dir / PAYLOAD_NPZ) as data:
@@ -636,14 +655,11 @@ def read_scan_cache(
             f"cache graph_hash {payload.graph_hash} != manifest graph_hash {manifest['graph_hash']}"
         )
 
-    cache = ScanCache(
+    return ScanCache(
         payload=payload,
         strand_model=_strand_from_arrays(strand),
         provenance=manifest,
     )
-    if scan_config is not None:
-        check_scan_config(cache, scan_config)
-    return cache
 
 
 def _payload_from_parts(arrays: dict, scalars: dict) -> AccumulatorPayload:
@@ -673,23 +689,6 @@ def _payload_from_parts(arrays: dict, scalars: dict) -> AccumulatorPayload:
         else:
             kwargs[field.name] = scalars[field.name]
     return AccumulatorPayload(**kwargs)
-
-
-def check_scan_config(cache: ScanCache, scan_config) -> None:
-    """Refuse a cache produced under a different scan configuration.
-
-    Called by :func:`read_scan_cache` when it is given a ``scan_config``. Two scans of one BAM under
-    different tally settings are different tallies, and nothing else notices. Both sides of the comparison
-    are computed here, from the settings the manifest records and the ones the caller holds, so a thread
-    count on either side decides nothing (``_WORK_ONLY_FIELDS``).
-    """
-    recorded = _scan_config_digest(cache.provenance["scan_config"])
-    expected = _scan_config_digest(scan_config)
-    if recorded != expected:
-        raise ScanCacheKeyError(
-            f"cache scan settings digest {recorded} != {expected}. Two scans of one BAM under different "
-            f"tally settings are different tallies."
-        )
 
 
 def index_derived_inputs(index: "TranscriptIndex") -> dict:

@@ -101,8 +101,8 @@ in it may re-scan a BAM. Two caches carry it and `panel.py cache` builds both:
 
 | cache | holds | invalidated by |
 |---|---|---|
-| scan (`build_scan_cache.py`) | the accumulator payload — scan once, calibrate many times | any accumulator change (`payload_schema_digest`), the index (`graph_hash`, `reach_digest`) |
-| oracle (`<panel>/oracle_cache/`) | the origin-split truth every scorer reads: five partitions per condition (`gdna` / `mrna` / `nrna` and the per-strand `rna_pos` / `rna_neg`), checked sum-to-full against the scan cache, and the certified `slot_truth.npz` | the accumulator or the index, and nothing else |
+| scan (`build_scan_cache.py`) | the accumulator payload — scan once, calibrate many times | any accumulator change (`payload_schema_digest`), the index (`graph_hash`, `reach_digest`), a tally setting of the scan (`sj_strand_tag` among them, never a thread count) |
+| oracle (`<panel>/oracle_cache/`) | the origin-split truth every scorer reads: five partitions per condition (`gdna` / `mrna` / `nrna` and the per-strand `rna_pos` / `rna_neg`), checked sum-to-full against the scan cache, and the certified `slot_truth.npz` | the accumulator, the index or a tally setting of the scan, and nothing else |
 
 Neither is invalidated by a calibration change. A scenario without both caches is not usable for
 development: `panel.py status` names what is missing, and an instrument fed a stale cache refuses it

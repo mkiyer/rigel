@@ -28,7 +28,7 @@ from _oracle import (  # noqa: E402
     _split_bam,
     split_rna_by_transcript_strand,
 )
-from rigel.pipeline import resolve_scan_config, scan_and_buffer  # noqa: E402
+from rigel.pipeline import scan_and_buffer  # noqa: E402
 from rigel.scan_cache import ScanCacheKeyError, read_scan_cache, write_scan_cache  # noqa: E402
 
 #: The two axes ``CalibrationResult`` deconvolves. The sj axis is pure RNA by construction, so
@@ -145,7 +145,7 @@ def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payloa
     # partitions are drained by replaying the whole's choices. An empty ``lift`` (no held fragments)
     # keeps the pass-one identity unchanged.
     lift = lift or {}
-    scan = resolve_scan_config(pipeline_config.scan, bam)
+    scan = pipeline_config.scan
     dirs = {k: Path(cache_root) / tag / k for k in ORIGINS}
     try:
         parts = {k: read_scan_cache(dirs[k], index, scan).payload for k in ORIGINS}

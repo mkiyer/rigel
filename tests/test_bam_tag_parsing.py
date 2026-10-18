@@ -2,192 +2,16 @@
 
 One aligner writes ``XS`` as a single character and another as a string; ``ts`` follows a different
 convention again and must be flipped on a reverse read; ``NH`` and ``NM`` arrive as any of several
-integer subtypes. The same library tagged two ways must produce the same strand model, tag
-auto-detection must pick the right one when both are present and fall back when the first is
-absent, an unparseable value must read as no strand rather than as a strand, and a library with no
-strand tags at all must yield zero spliced observations and refuse calibration rather than invent
-one. Driven through Python, because the native module is fully exposed and needs no C++ harness.
+integer subtypes. The same library tagged two ways must produce the same strand model; ``auto`` reads
+both tags on every spliced record, an agreement giving the strand and a disagreement an ambiguous
+motif, counted; an ordered spec takes the first tag present; an unparseable value must read as absent
+rather than as a strand, and a library with no strand tags at all must yield zero spliced
+observations rather than invent one. Driven through Python, because the native module is fully
+exposed and needs no C++ harness.
 """
-
-from pathlib import Path
 
 import pysam
 import pytest
-
-from rigel.native import detect_sj_strand_tag
-
-
-# =====================================================================
-# Helpers — write minimal BAMs with controlled tag types
-# =====================================================================
-
-_REF_NAME = "chr1"
-_REF_LEN = 100_000
-_HEADER = {
-    "HD": {"VN": "1.6", "SO": "queryname"},
-    "SQ": [{"SN": _REF_NAME, "LN": _REF_LEN}],
-}
-
-
-def _write_bam(path: Path, reads: list[pysam.AlignedSegment]) -> str:
-    """Write a sorted + indexed BAM from a list of pysam AlignedSegments."""
-    bam_path = str(path / "test.bam")
-    with pysam.AlignmentFile(bam_path, "wb", header=_HEADER) as out:
-        for r in reads:
-            out.write(r)
-    pysam.sort("-n", "-o", bam_path, bam_path)
-    return bam_path
-
-
-def _make_read_pair(
-    qname: str,
-    pos: int,
-    *,
-    r1_cigar: list[tuple[int, int]] | None = None,
-    r2_cigar: list[tuple[int, int]] | None = None,
-    r1_tags: list[tuple] | None = None,
-    r2_tags: list[tuple] | None = None,
-    r1_is_reverse: bool = False,
-    r2_is_reverse: bool = True,
-) -> list[pysam.AlignedSegment]:
-    """Create a properly paired R1/R2 pair."""
-    if r1_cigar is None:
-        r1_cigar = [(0, 50), (3, 200), (0, 50)]
-    if r2_cigar is None:
-        r2_cigar = [(0, 100)]
-
-    seq_len_r1 = sum(n for op, n in r1_cigar if op in (0, 1, 4))
-    seq_len_r2 = sum(n for op, n in r2_cigar if op in (0, 1, 4))
-
-    r2_start = pos + 400
-
-    # R1
-    r1 = pysam.AlignedSegment()
-    r1.query_name = qname
-    r1.reference_id = 0
-    r1.reference_start = pos
-    r1.mapping_quality = 60
-    r1_flag = 0x1 | 0x2 | 0x40  # paired, proper, read1
-    if r1_is_reverse:
-        r1_flag |= 0x10
-    if r2_is_reverse:
-        r1_flag |= 0x20
-    r1.flag = r1_flag
-    r1.cigar = r1_cigar
-    r1.query_sequence = "A" * seq_len_r1
-    r1.query_qualities = pysam.qualitystring_to_array("I" * seq_len_r1)
-    r1.next_reference_id = 0
-    r1.next_reference_start = r2_start
-    r1.template_length = r2_start + seq_len_r2 - pos
-    if r1_tags is not None:
-        r1.set_tags(r1_tags)
-
-    # R2
-    r2 = pysam.AlignedSegment()
-    r2.query_name = qname
-    r2.reference_id = 0
-    r2.reference_start = r2_start
-    r2.mapping_quality = 60
-    r2_flag = 0x1 | 0x2 | 0x80  # paired, proper, read2
-    if r2_is_reverse:
-        r2_flag |= 0x10
-    if r1_is_reverse:
-        r2_flag |= 0x20
-    r2.flag = r2_flag
-    r2.cigar = r2_cigar
-    r2.query_sequence = "A" * seq_len_r2
-    r2.query_qualities = pysam.qualitystring_to_array("I" * seq_len_r2)
-    r2.next_reference_id = 0
-    r2.next_reference_start = pos
-    r2.template_length = -(r2_start + seq_len_r2 - pos)
-    if r2_tags is not None:
-        r2.set_tags(r2_tags)
-
-    return [r1, r2]
-
-
-# =====================================================================
-# Test: detect_sj_strand_tag
-# =====================================================================
-
-
-class TestDetectSJStrandTag:
-    """Tests for the native ``detect_sj_strand_tag()`` function."""
-
-    def test_detect_xs_type_a(self, tmp_path):
-        """XS tag stored as type 'A' → detected as 'XS'."""
-        reads = _make_read_pair(
-            "r1",
-            1000,
-            r1_tags=[("NH", 1), ("XS", "+", "A")],
-            r2_tags=[("NH", 1)],
-        )
-        bam_path = _write_bam(tmp_path, reads)
-        assert detect_sj_strand_tag(bam_path) == "XS"
-
-    def test_detect_xs_type_z(self, tmp_path):
-        """XS tag stored as type 'Z' → still detected (tag is present)."""
-        reads = _make_read_pair(
-            "r1",
-            1000,
-            r1_tags=[("NH", 1), ("XS", "+", "Z")],
-            r2_tags=[("NH", 1)],
-        )
-        bam_path = _write_bam(tmp_path, reads)
-        assert detect_sj_strand_tag(bam_path) == "XS"
-
-    def test_detect_ts(self, tmp_path):
-        """ts tag detected."""
-        reads = _make_read_pair(
-            "r1",
-            1000,
-            r1_tags=[("NH", 1), ("ts", "+", "A")],
-            r2_tags=[("NH", 1)],
-        )
-        bam_path = _write_bam(tmp_path, reads)
-        assert detect_sj_strand_tag(bam_path) == "ts"
-
-    def test_detect_both_xs_ts(self, tmp_path):
-        """Both XS and ts present → 'XS,ts'."""
-        reads = _make_read_pair(
-            "r1",
-            1000,
-            r1_tags=[("NH", 1), ("XS", "+", "A"), ("ts", "+", "A")],
-            r2_tags=[("NH", 1)],
-        )
-        bam_path = _write_bam(tmp_path, reads)
-        assert detect_sj_strand_tag(bam_path) == "XS,ts"
-
-    def test_detect_none_unspliced(self, tmp_path):
-        """Unspliced reads only → 'none' (no spliced reads to find tags on)."""
-        r1 = pysam.AlignedSegment()
-        r1.query_name = "r1"
-        r1.reference_id = 0
-        r1.reference_start = 1000
-        r1.mapping_quality = 60
-        r1.flag = 0x1 | 0x2 | 0x40
-        r1.cigar = [(0, 100)]  # no splicing
-        r1.query_sequence = "A" * 100
-        r1.query_qualities = pysam.qualitystring_to_array("I" * 100)
-        r1.next_reference_id = 0
-        r1.next_reference_start = 1200
-        r1.template_length = 300
-        r1.set_tags([("NH", 1), ("XS", "+", "A")])
-
-        bam_path = _write_bam(tmp_path, [r1])
-        # XS is on the read but it's not spliced — detect only checks spliced
-        assert detect_sj_strand_tag(bam_path) == "none"
-
-    def test_detect_none_no_tags(self, tmp_path):
-        """Spliced reads without strand tags → 'none'."""
-        reads = _make_read_pair(
-            "r1",
-            1000,
-            r1_tags=[("NH", 1)],  # no XS/ts
-            r2_tags=[("NH", 1)],
-        )
-        bam_path = _write_bam(tmp_path, reads)
-        assert detect_sj_strand_tag(bam_path) == "none"
 
 
 # =====================================================================
@@ -911,3 +735,105 @@ class TestSJTagPriority:
         sm = pr.strand_models.exonic_spliced
         assert sm.n_observations > 0, "Fallback to ts should produce exonic_spliced observations"
         assert sm.strand_specificity > 0.8
+
+
+# =====================================================================
+# Test: the tag read per record
+# =====================================================================
+
+
+@pytest.fixture(scope="module")
+def plus_strand_library(tmp_path_factory):
+    """A stranded library of one '+' gene: every true junction motif is '+'."""
+    from rigel.sim import ReadSimConfig, Scenario
+
+    work = tmp_path_factory.mktemp("per_record_tags")
+    scenario = Scenario("per_record_tags", genome_length=100_000, seed=42, work_dir=work)
+    scenario.add_gene(
+        gene_id="G1",
+        strand="+",
+        transcripts=[
+            {"t_id": "T1", "exons": [(1000, 2000), (3000, 4000), (5000, 6000)], "abundance": 100.0}
+        ],
+    )
+    sim = ReadSimConfig(
+        frag_mean=250,
+        frag_std=40,
+        frag_min=100,
+        frag_max=500,
+        read_length=100,
+        strand_specificity=0.95,
+        seed=42,
+    )
+    result = scenario.build_oracle(n_fragments=600, sim_config=sim)
+    yield work, result
+    scenario.cleanup()
+
+
+def _retag(src, dst, *, xs, ts):
+    """``src`` rewritten in its own record order, every spliced record given XS ``xs`` (None: no XS) and a ts naming
+    GENOMIC strand ``ts`` (None: no ts), written read-relative as minimap2 writes it. Returns the spliced records."""
+    flip = {"+": "-", "-": "+"}
+    n = 0
+    with (
+        pysam.AlignmentFile(str(src), "rb") as inp,
+        pysam.AlignmentFile(str(dst), "wb", template=inp) as out,
+    ):
+        for r in inp:
+            if any(op == 3 for op, _ in (r.cigartuples or ())):
+                n += 1
+                r.set_tag("XS", None)
+                r.set_tag("ts", None)
+                if xs is not None:
+                    r.set_tag("XS", xs, "A")
+                if ts is not None:
+                    r.set_tag("ts", flip[ts] if r.is_reverse else ts, "A")
+            out.write(r)
+    return n
+
+
+class TestTagReadPerRecord:
+    """``auto`` reads XS and ts on every spliced record. Every spliced record is counted exactly once: given a
+    strand, given none, or, when its two tags disagree, ambiguous."""
+
+    @staticmethod
+    def _scan(bam, index, spec):
+        from rigel.config import BamScanConfig
+        from rigel.pipeline import scan_and_buffer
+
+        stats, strand_models, _, _ = scan_and_buffer(
+            str(bam), index, BamScanConfig(sj_strand_tag=spec)
+        )
+        counts = (stats.n_sj_tag_tagged, stats.n_sj_tag_untagged, stats.n_sj_tag_conflicting)
+        return counts, stats.n_sj_tag_invalid, strand_models.exonic_spliced
+
+    def test_agreeing_tags_give_the_strand(self, plus_strand_library):
+        work, result = plus_strand_library
+        n = _retag(result.bam_path, work / "agree.bam", xs="+", ts="+")
+        counts, invalid, sm = self._scan(work / "agree.bam", result.index, "auto")
+        assert counts == (n, 0, 0) and invalid == 0
+        assert sm.n_observations > 0 and sm.strand_specificity > 0.8
+
+    def test_disagreeing_tags_are_ambiguous_counted_and_train_no_strand(self, plus_strand_library):
+        work, result = plus_strand_library
+        n = _retag(result.bam_path, work / "conflict.bam", xs="+", ts="-")
+        counts, invalid, sm = self._scan(work / "conflict.bam", result.index, "auto")
+        assert counts == (0, 0, n) and invalid == 0
+        assert sm.n_observations == 0
+
+    def test_an_ordered_spec_takes_the_first_tag_present(self, plus_strand_library):
+        """A named order is the user's choice: XS, the truth here, is read, and no disagreement is looked for."""
+        work, result = plus_strand_library
+        n = _retag(result.bam_path, work / "conflict_ordered.bam", xs="+", ts="-")
+        counts, _, sm = self._scan(work / "conflict_ordered.bam", result.index, "XS,ts")
+        assert counts == (n, 0, 0)
+        assert sm.strand_specificity > 0.8
+
+    def test_an_unreadable_xs_does_not_hide_a_readable_ts(self, plus_strand_library):
+        work, result = plus_strand_library
+        n = _retag(result.bam_path, work / "invalid_xs.bam", xs=".", ts="+")
+        counts, invalid, sm = self._scan(work / "invalid_xs.bam", result.index, "auto")
+        assert counts == (n, 0, 0) and invalid == n
+        assert sm.n_observations > 0 and sm.strand_specificity > 0.8
+        counts, invalid, _ = self._scan(work / "invalid_xs.bam", result.index, "XS")
+        assert counts == (0, n, 0) and invalid == n

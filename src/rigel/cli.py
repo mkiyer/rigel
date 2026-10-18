@@ -581,6 +581,15 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "read_groups": stats.n_read_names,
             "unique_reads": stats.unique,
             "multimapping_reads": stats.multimapping,
+            # Each spliced record's junction-strand tag, read on that record: given a strand, given none,
+            # or ambiguous because its XS and ts disagree; ``invalid`` counts the tag values that were
+            # neither '+' nor '-', each read as absent.
+            "sj_strand_tag": {
+                "tagged": stats.n_sj_tag_tagged,
+                "untagged": stats.n_sj_tag_untagged,
+                "conflicting": stats.n_sj_tag_conflicting,
+                "invalid": stats.n_sj_tag_invalid,
+            },
         },
         "fragment_stats": {
             "total": stats.n_fragments,
@@ -1305,10 +1314,9 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         default=None,
         help=f"BAM tag(s) for splice-junction strand (default: {' '.join(qd['sj_strand_tag'])}). "
-        "'auto' detects the tag from the first 1,000 spliced reads. "
-        "Use 'XS' for HISAT2 or STAR (which writes it only with --outSAMstrandField intronMotif), "
-        "'ts' for minimap2, or list multiple "
-        "tags to check in order (e.g. XS ts).",
+        "'auto' reads XS and minimap2's ts on every spliced record; when both are present and disagree, the "
+        "junction's strand is ambiguous. Name 'XS' (HISAT2, or STAR with --outSAMstrandField intronMotif) or "
+        "'ts' (minimap2) to read only that tag, or list two to check in order (e.g. XS ts).",
     )
 
     # -- Model parameters -----------------------------------------------------

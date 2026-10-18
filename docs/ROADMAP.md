@@ -147,7 +147,7 @@ its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-mult
 `ISSUES: the-pooled-q-in-the-gdna-count` · `ISSUES: psi-reads-kappa-where-the-strand-channel-is-dead` ·
 `ISSUES: the-gdna-landscape-collapses-at-low-depth` with `ISSUES: strand-plug-in-bias-on-sparse-libraries` ·
 `ISSUES: the-sparse-capture-losses` with `ISSUES: the-efficiency-posterior-floor-on-empty-pieces` ·
-`ISSUES: sj-strand-tag-chosen-from-the-first-reads` · `ISSUES: an-anchor-only-landscape-reads-as-capture` ·
+`ISSUES: an-anchor-only-landscape-reads-as-capture` ·
 `ISSUES: the-transfer-price-arithmetic` · `ISSUES: latent-defects` · `ISSUES: instrument-ledger` ·
 `ISSUES: input-mistakes-pass-silently`.
 

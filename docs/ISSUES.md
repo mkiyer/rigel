@@ -305,7 +305,8 @@ MOVES A NUMBER (each alone):
   a dead component on a locus whose targets are unreachable (none of about 1,280 test loci). Give it −inf.
 - A motif tag that contradicts the annotated strand: the resolver calls the junction unannotated and trains no strand
   on it, while the accumulator credits the annotated junction and the RNA length pool. One rule in both stages (the
-  stage disagreements of `ISSUES: splicing-artifacts`).
+  stage disagreements of `ISSUES: splicing-artifacts`). 0.8.1: the strand of the annotated junction, which the
+  resolver already looks up, as the sense source, so a library aligned without a tag keeps its annotated strands.
 - The splice census counts placements: a multimapper's secondary placements enter `splice.*` (an NH:2 fixture: 20,500
   for 20,000 fragments), so `with_annotated_sj` and `splice.spliced_annotated` count different units; the census
   identity gate omits `deferred_multiple_placements` and runs on NH = 1 only.
@@ -681,23 +682,6 @@ toward RNA that no strength may be chosen to cover. The owner's framing (2026-09
 locus's gDNA FRACTION, and a multiplier converts it to pseudocounts; that multiplier depends on the number of gDNA
 candidates and their likelihoods. Today it is the count of units whose gDNA candidate survives pruning (`U`), and
 the pruning (`DESIGN.md` §3.1d) is what stops a unit with a vanishing gDNA reading from counting.
-
-### sj-strand-tag-chosen-from-the-first-reads
-`priority: now — 0.8.0 (owner, 2026-10-17): the per-record repair, in wave 1's step 2; the 0.8.0 minimum landed 2026-10-14 · kind: defect · 2026-09-28`
-The scanner picks the junction-strand tag mode from the first 1,000 spliced reads (`detect_sj_strand_tag_native`) and
-returns "none" if none carries XS or ts, so a library whose first reads lack the tag loses its strand. An unknown
-`--sj-strand-tag` spec silently becomes XS_TS (`parse_sj_tag_spec`'s default), and the resolved mode is never logged
-or written to `summary.json` or `config.yaml`, so a run cannot be reproduced from its outputs. The repair reads the tag
-per record; it moves numbers only on libraries whose first 1,000 spliced reads lack it.
-Instrument: a fixture with the tag absent from the first reads.
-WIDER THAN STATED (2026-10-14): a BAM with no XS/ts tag at all loses its strand — the junction strand comes only
-from the tag, so no fragment qualifies for strand training, κ reads ½ and a stranded library is quantified as
-unstranded, with only generic warnings; STAR writes XS only with `--outSAMstrandField intronMotif`, while the MANUAL
-says it emits XS. LANDED 2026-10-14 (`tests/test_sj_strand_tag.py`): an unknown spec is refused by `BamScanConfig`, and since
-2026-10-16 by the native readers too, with `auto` resolved in one place (`resolve_scan_config`); the resolved
-mode is logged and recorded in `summary.json` and `config.yaml`; a library whose spliced reads are read with no
-tag warns that it is quantified as unstranded; the MANUAL's STAR lines name `--outSAMstrandField intronMotif`. 0.8.1: the strand of the
-annotated junction, which the resolver already looks up, as the sense source.
 
 ### instrument-ledger
 `priority: next — (i) before the next capture-ON ceiling is read; the rest Tier 4, (e) before any spectrum expansion · kind: instrument · 2026-09-28`
@@ -1566,6 +1550,27 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### sj-strand-tag-chosen-from-the-first-reads
+CLOSED 2026-10-18 by the fix (owner, 2026-10-17: before 0.8.0; the first change of the pipeline-order plan): the
+junction-strand tag is read on every spliced record. The per-BAM mode chosen from the first 1,000 spliced records
+(`detect_sj_strand_tag_native`, resolved once per run by `resolve_scan_config`) is deleted, so a library whose first
+spliced reads lack the tag keeps its strand. `auto` reads XS and ts on each record: one present gives its strand,
+two that agree give it, and two that disagree give STRAND_AMBIGUOUS, which trains no strand (with both tags XS was
+read alone, so a conflict passed unseen). A value other than `+` or `-` reads as absent; it used to hide a readable
+ts. A named spec reads only its tags, the first present. Every spliced record is counted (tagged, untagged,
+conflicting, and the unreadable values), logged with its share and written to `summary.json`'s
+`alignment_stats.sj_strand_tag`; `config.yaml` records the spec. The 2026-10-14 minimum stands: an unknown spec is
+refused at both layers, and a library none of whose spliced reads gives a strand warns that it is quantified as
+unstranded. Measured 2026-10-18, pinned and fractional, against baselines from the same code: on the STAR panel at
+the recommended parameters 15 of 15 `quant_accuracy` rows identical in every field, on the oracle ladder 48 of 48;
+every spliced record of the STAR BAMs (18.2 M) carries a readable XS and none a ts, so each keeps the strand the
+per-BAM mode gave it. The caches had recorded the resolved tag, so every reader holding settings refused them, while
+`build_scan_cache.py`'s skip and `preflight.py` read the manifest without the settings and called them valid:
+`check_scan_cache` now takes the settings, and every panel cache was re-scanned once. Gate: `test_sj_strand_tag.py::test_auto_reads_the_tag_on_every_record_not_from_the_first_spliced_reads`
+(on the old code no junction trained, 0 observations) and `test_bam_tag_parsing.py::TestTagReadPerRecord`; each of
+four breaks fired its own test (XS read alone, an unreadable XS hiding ts, ts unflipped on a reverse record, a
+conflict uncounted), and the no-tag warning and the summary block each fired theirs.
 
 ### contiguous-reaches-unread
 CLOSED 2026-10-17 by the fix (the output-names convention, index format 10): the index computes no contiguous-boundary

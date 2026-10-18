@@ -71,6 +71,12 @@ class PipelineStats:
     n_sj_observed: int = 0
     n_sj_blacklisted: int = 0
 
+    # --- The junction-strand tag on each spliced record (``sj_strand_tag``; read per record) ---
+    n_sj_tag_tagged: int = 0  # spliced records given a strand
+    n_sj_tag_untagged: int = 0  # spliced records no tag gave a strand
+    n_sj_tag_conflicting: int = 0  # spliced records whose XS and ts disagree (ambiguous)
+    n_sj_tag_invalid: int = 0  # XS or ts tags holding neither '+' nor '-' (read as absent)
+
     # --- The per-fragment splice census (scanner QC; ``rigel report``'s splice breakdown) ---
     #
     # ONE observation per placement the scanner hands the accumulator's deposit adapter — every

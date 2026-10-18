@@ -154,8 +154,9 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument that has a --self-test runs it
 ```
 
-**The standing baseline: 0 failed / 3,051 passed / 0 skipped / 0 xfail, 3,051 collected** — re-derived
-2026-10-17 on a clean worktree carrying the tile-invariant fits (one gate added; 3,050 before). **Any failure at all is a regression.** Re-derive a count, never adjust one (`TRAPS: re-record-the-baseline`): every gate that scans
+**The standing baseline: 0 failed / 3,050 passed / 0 skipped / 0 xfail, 3,050 collected** — re-derived
+2026-10-18 on the worktree carrying the junction-strand tag read per record (six detector cases and one resolve
+case gone; four per-record cases, the late-tag case and the cache settings check added; 3,051 before). **Any failure at all is a regression.** Re-derive a count, never adjust one (`TRAPS: re-record-the-baseline`): every gate that scans
 the files on disk is one case, so only adding or removing a test moves the total. Derive the failure set,
 never eyeball the tail (`TRAPS: read-the-whole-failure-list`). A golden update is where a regression gets
 laundered into "intended": read the diff, record its magnitude and check the truth-scored instruments

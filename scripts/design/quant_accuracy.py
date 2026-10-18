@@ -57,7 +57,7 @@ from _shared import DEFAULT_INDEX, DEFAULT_SUITE, is_zero_gdna, set_field, strat
 import rigel.calibration.priors as PRIORS  # noqa: E402
 from rigel.config import EMConfig, PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
-from rigel.pipeline import resolve_scan_config, run_pipeline  # noqa: E402
+from rigel.pipeline import run_pipeline  # noqa: E402
 from rigel.scan_cache import ScanCacheKeyError, read_scan_cache  # noqa: E402
 
 #: ``oracle_alloc`` is a capability proof rather than a ceiling. It hands the EM the true relative
@@ -119,7 +119,7 @@ def load_oracle(bam: str, index, pipeline_config, suite: Path, cache_root: Path,
     index — ``reach`` is covered by no other hash — so a stale cache is a loud refusal rather than a
     silent wrong truth.
     """
-    scan = resolve_scan_config(pipeline_config.scan, bam)
+    scan = pipeline_config.scan
     root = Path(cache_root) / tag
     try:
         full = read_scan_cache(Path(suite) / "scan_cache" / tag, index, scan).payload

@@ -155,13 +155,15 @@ def _cache_refusal(cache_dir: Path, index) -> str:
     """"" when the cache at *cache_dir* is one this build reads against *index*, else why it is not.
 
     The cache module's own check, from the manifest alone: `scan_cache.check_scan_cache`, the one
-    `build_scan_cache.py` decides a skip by. The BAM is compared at its recorded path when it is still
-    there, and its bytes are read only when its size matches and its modification time does not."""
+    `build_scan_cache.py` decides a skip by, under the scan settings every instrument reads a cache with. The BAM is
+    compared at its recorded path when it is still there, and its bytes are read only when its size matches and its
+    modification time does not."""
+    from rigel.config import BamScanConfig
     from rigel.scan_cache import check_scan_cache
 
     if not (cache_dir / "payload.npz").is_file():
         return "missing"
-    return _refusal(check_scan_cache, cache_dir, index)
+    return _refusal(check_scan_cache, cache_dir, index, None, BamScanConfig())
 
 
 def _first_part_refusal(cond_dir: Path, parts, index) -> tuple[str, str]:

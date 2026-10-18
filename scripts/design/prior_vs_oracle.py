@@ -66,7 +66,6 @@ from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.pipeline import (  # noqa: E402
     _drain_side_buffer,
     quant_from_buffer,
-    resolve_scan_config,
     scan_and_buffer,
 )
 from rigel.scan_cache import ScanCacheKeyError, read_scan_cache, write_scan_cache  # noqa: E402
@@ -357,7 +356,7 @@ def _calibrate_and_prior(payload, strand_model, buffer, stats, index, ra, pipeli
 def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cache=None) -> ConditionResult:
     """Scan once, drain to the production frame, build P / O / S."""
     start = time.perf_counter()
-    scan = resolve_scan_config(pipeline_config.scan, bam)
+    scan = pipeline_config.scan
     ra = RegionArrays.from_index(index)
 
     stats, strand_model, buffer, payload = scan_and_buffer(bam, index, scan)

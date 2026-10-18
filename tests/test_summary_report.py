@@ -233,6 +233,16 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     assert splice["sj_blacklist_loaded"] is False
     assert splice["sj_blacklist_size"] == 0
 
+    # the junction-strand tag, read on every spliced record: what each record's tags gave, as the scan counted it
+    tags = summary["alignment_stats"]["sj_strand_tag"]
+    assert tags == {
+        "tagged": pr.stats.n_sj_tag_tagged,
+        "untagged": pr.stats.n_sj_tag_untagged,
+        "conflicting": pr.stats.n_sj_tag_conflicting,
+        "invalid": pr.stats.n_sj_tag_invalid,
+    }
+    assert tags["tagged"] > 0
+
     # per-sj strand table QC: how much junction evidence the library carries
     junc = summary["strand_model"]["sj"]
     assert {

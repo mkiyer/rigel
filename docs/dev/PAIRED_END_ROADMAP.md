@@ -1,6 +1,7 @@
 # The paired-end repair: roadmap to release
 
-2026-10-17 · code base `3941a0dd` · sandbox roadmap; nothing in waves 1–4 beyond step 1 is implemented.
+2026-10-18 · code base `23fb2435` · sandbox roadmap; the fix order (owner, 2026-10-18) below supersedes the waves'
+order, and its first change is implemented.
 
 This file holds the waves, what each must deliver, and the gate between them.
 
@@ -33,6 +34,56 @@ and reassess before the next.
 ## Progress
 
 Kept current until wave 4 closes (owner, 2026-10-16). ☑ done · ◐ in progress · ☐ not started.
+
+**The fix order** (owner, 2026-10-18). Rigel is fixed in pipeline order: the scan, then calibration, then after
+calibration, one small change at a time, built on the STAR panel at the recommended parameters. It folds wave 1's
+steps 2–6 and waves 2 and 3 into one list; the waves below keep their record. Each change gets:
+1. a failing test on a hand-built case;
+2. the fix alone;
+3. each gate broken on purpose and seen to fire;
+4. the STAR panel against truth, per stratum, with the census by true origin; the oracle ladder for regressions; the
+   full suite and preflight;
+5. commit, push and record, then the next change.
+
+*Phase A, the scan*
+1. ☑ The junction-strand tag read per record (2026-10-18; `ISSUES: sj-strand-tag-chosen-from-the-first-reads`,
+  closed). Pinned and fractional, against baselines from the same code: the STAR panel at the recommended
+  parameters 15/15 quant_accuracy rows and the oracle ladder 48/48 identical in every field; suite 3,050. The panel
+  caches had recorded the old resolved tag, so the cache check now reads the scan settings (preflight and
+  `build_scan_cache.py`'s skip did not), and every panel was re-scanned once: only float sums moved, by the scan's
+  thread-order noise (two threaded scans of one BAM differ by up to 4e-15 relative; pinned scans are identical)
+2. ☐ Transcript strands installed from the index (today only the scan installs them)
+3. ☐ One location per alignment: aliases kept; NM conflicts and missing NM counted; unindexed references apart; tag
+  types checked; count widths that cannot wrap
+4. ☐ Hits only from complete HI groups (STAR): a group missing a mate is a counted unpaired alignment, duplicate
+  groups collapse, truncated output stops the run
+5. ☐ `num_hits` counts distinct usable hits (today `max(NH, hits)`)
+6. ☐ Without HI (minimap2), every same-reference pair validated, the span bound first
+7. ☐ Each hit validated as one molecule along a path: K by the resolver's rule; outward and too-long pairs
+  rejected; clips walked
+8. ☐ Supplementary chains and hard-clipped 5′ ends withheld, and counted
+9. ☐ The annotated-path rule: a spliced hit is usable only if one annotated transcript holds all its junctions
+10. ☐ Each use of K outside implicit splicing, one at a time
+11. ☐ One length rule for overlapping mates
+12. ☐ Accounting: one outcome per template, each record's status, the counters and the annotated-BAM tags; the
+  annotation pass checked against the scan by identity
+
+*Phase B, calibration*
+1. ☐ The second pass: an observed annotated splice takes the RNA length law
+2. ☐ The second pass's weights: one placement factor times a unit-free share within the placement
+3. ☐ The second pass reads NM, carried in the deferred bank
+4. ☐ The second pass's motif rule, derived once as the deposit derives it
+5. ☐ The gDNA fragment-length estimator on aligned input
+6. ☐ The capture ruler's false capture on uncaptured libraries
+7. ☐ The rule for intergenic placements
+8. ☐ Observable opportunity, and the clip-length model
+
+*Phase C, after calibration (the EM)*
+1. ☐ The per-transcript merge chooses by full likelihood (today the least overhang first)
+2. ☐ The gDNA term a sum over places (the owner's ruling; today the mean)
+3. ☐ Intergenic hits enter the EM
+4. ☐ The prior's denominator (today it excludes the multimappers calibration deposited)
+5. ☐ Pruning against one reference
 
 **Wave 1, the scan stage** (plan revision 2 accepted 2026-10-16; revision 3 reviewed 2026-10-17; revision 4 for a
 targeted re-review)
@@ -89,7 +140,13 @@ targeted re-review)
       1,000-read cutoff is repaired in step 2 instead (the junction-strand tag read per record)
 - ☑ the readiness review of revision 3 (2026-10-17, `PAIRED_END_WAVE1_READINESS_REVIEW.md`): revise before
   implementing, eight findings; each verified against the source and accepted
-- ◐ revision 4, answering the eight findings (2026-10-17); ☐ its targeted re-review
+- ☑ revision 4, answering the eight findings (2026-10-17)
+- ☑ its targeted re-review (2026-10-18, `PAIRED_END_WAVE1_TARGETED_REVIEW.md`): two blockers, that one transcript
+  must witness a path's observed and implied junctions alike, and that a mixed-HI template must keep its known pairs;
+  two fixes before implementing, stronger evidence gates with the normalization contract, and each record's status
+  from its template's final outcome; the six open questions answered with recommendations
+- ☐ revision 5, answering the targeted review before the steps it governs (the HI groups and the no-HI pairs, the
+  path witness and the annotated-path rule, the accounting, the second pass's weights)
 - ☐ step 1b, the gates' own proof: each gate broken on purpose and seen to fail (plan §12)
 - ☑ the STAR panel (2026-10-18): the five conditions of the minimap2 panel aligned on the cluster by STAR 2.7.11b at
   production and recommended parameters; all twelve BAMs collated, complete and carrying NM. Error-injected copies not
@@ -337,5 +394,17 @@ Each is designed and measured on the repaired scan.
 - rustar, the Rust port of STAR, is approved for local alignment; its residual difference from STAR (about 0.1% of
   templates on a 100k-pair sample, with the spliced-and-contiguous counts within one template per class) is accepted;
 - the first measurement proceeds on the STAR panel aligned on the cluster.
+
+**Recorded (owner, 2026-10-18, tenth round):**
+
+- the recommended STAR parameters stay. They are more correct: they make ambiguous alignments visible instead of
+  hiding them, and Rigel's job is to use that data. They are not evaluated against today's tool, which is known to
+  be broken, so the first measurement's production-against-recommended comparison records today's tree and is no
+  evidence about the parameters;
+- Rigel is fixed in pipeline order, the scan, then calibration, then after calibration, one small change at a time
+  (the fix order above);
+- the caches are rebuilt once, when the scan's changes are done, and not after each one: the scan's changes are
+  measured end to end, which reads no cache, and each one leaves the caches stale anyway;
+- the production-parameter BAMs are deleted (their logs, junction tables and checks are kept).
 
 **Open for wave 1:** the questions in `PAIRED_END_WAVE1_PLAN.md` §13.

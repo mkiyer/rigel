@@ -1,10 +1,9 @@
-"""The splice-junction strand tag a library is read with: what the user names is checked, what ``auto`` finds is said
-and recorded, and a library whose spliced reads carry no tag is not quantified as unstranded in silence.
+"""The splice-junction strand tag a library is read with: what the user names is checked, what the tags gave is
+counted and said, and a library whose spliced reads carry no tag is not quantified as unstranded in silence.
 
-Junction strands come only from the tag (XS, or minimap2's ts). ``auto`` reads the first spliced reads and falls to
-``none`` when none carries a tag — then no fragment trains the strand model and a stranded library is quantified as
-unstranded. An unknown spec used to become ``XS,ts`` in the scanner without a word, and the resolved mode was written
-nowhere, so a run could not be reproduced from its outputs.
+Junction strands come only from the tag (XS, or minimap2's ts). ``auto`` reads both on every spliced record, so a
+library whose first spliced reads lack the tag still has its strand: choosing one mode from the first spliced reads
+read none of a late-tagged library's tags. An unknown spec used to become ``XS,ts`` in the scanner without a word.
 """
 
 import logging
@@ -30,10 +29,10 @@ def test_an_unknown_tag_spec_is_refused(spec):
         BamScanConfig(sj_strand_tag=spec)
 
 
-@pytest.mark.parametrize("spec", ["auto", "XZ", "xs", "XS;ts", "ts,ts"])
+@pytest.mark.parametrize("spec", ["XZ", "xs", "XS;ts", "ts,ts"])
 def test_the_native_readers_refuse_a_spec_they_cannot_read(spec):
     """One layer down, the same rule: the scanner and the annotation writer refuse any spec but the ones
-    they read, ``auto`` included (the caller resolves it first), rather than reading it as ``XS,ts``."""
+    they read, rather than reading it as ``XS,ts``."""
     from rigel.native import BamAnnotationWriter, BamScanner, FragmentResolver
 
     for reader in (BamScanner, BamAnnotationWriter):
@@ -41,7 +40,7 @@ def test_the_native_readers_refuse_a_spec_they_cannot_read(spec):
             reader(FragmentResolver(), spec, True, True)
 
 
-@pytest.mark.parametrize("spec", ["XS", "ts", "XS,ts", "ts,XS", "none", ""])
+@pytest.mark.parametrize("spec", ["auto", "XS", "ts", "XS,ts", "ts,XS", "none", ""])
 def test_the_native_readers_accept_every_spec_they_read(spec):
     from rigel.native import BamAnnotationWriter, BamScanner, FragmentResolver
 
@@ -73,33 +72,20 @@ def _run(library, spec):
     return run_pipeline(library.bam_path, library.index, config=config)
 
 
-def test_auto_is_resolved_said_and_recorded(spliced_library, caplog):
-    """The result carries the mode the scan read with, not ``auto``, and the log says which it was."""
+def test_auto_is_kept_and_what_the_tags_gave_is_said(spliced_library, caplog):
+    """``auto`` is a mode the scan reads with, so the result keeps it; the log says what the tags gave, record by
+    record, and every spliced record is counted once."""
     with caplog.at_level(logging.INFO, logger="rigel.pipeline"):
         pr = _run(spliced_library, "auto")
-    resolved = pr.pipeline_config.scan.sj_strand_tag
-    assert resolved in ("XS", "ts", "XS,ts", "none")
-    assert any(
-        "splice-junction strand tag" in r.getMessage() and resolved in r.getMessage()
+    assert pr.pipeline_config.scan.sj_strand_tag == "auto"
+    st = pr.stats
+    assert st.n_sj_tag_tagged > 0 and st.n_sj_tag_untagged == 0 and st.n_sj_tag_conflicting == 0
+    said = [
+        r.getMessage()
         for r in caplog.records
-    )
-
-
-def test_auto_is_resolved_in_one_place_and_only_once(spliced_library):
-    """``resolve_scan_config`` is where ``auto`` becomes a tag, for the pipeline, ``scan_and_buffer`` and every
-    instrument that keys a scan cache by its config: it names what the detector reads, however ``auto`` is spelled,
-    and hands any other config back as it is, so a resolved config resolves to itself and a named tag stands."""
-    from rigel.native import detect_sj_strand_tag
-    from rigel.pipeline import resolve_scan_config
-
-    bam = spliced_library.bam_path
-    detected = detect_sj_strand_tag(str(bam))
-    for spelled in ("auto", ("auto",)):
-        resolved = resolve_scan_config(BamScanConfig(sj_strand_tag=spelled, total_threads=1), bam)
-        assert resolved == BamScanConfig(sj_strand_tag=detected, total_threads=1)
-        assert resolve_scan_config(resolved, bam) is resolved
-    named = BamScanConfig(sj_strand_tag="none")
-    assert resolve_scan_config(named, bam) is named
+        if "splice-junction strand tag auto" in r.getMessage()
+    ]
+    assert said and f"{st.n_sj_tag_tagged} with a strand" in said[0], said
 
 
 def test_spliced_reads_with_no_tag_are_not_quantified_unstranded_in_silence(
@@ -112,8 +98,8 @@ def test_spliced_reads_with_no_tag_are_not_quantified_unstranded_in_silence(
     assert any("strand tag" in m and "unstranded" in m for m in warnings), warnings
 
 
-def test_config_yaml_records_the_resolved_tag(spliced_library, tmp_path):
-    """The config.yaml a run writes names the tag the scan read with, so a rerun from it reads the same."""
+def test_config_yaml_records_the_tag_spec(spliced_library, tmp_path):
+    """The config.yaml a run writes names the tag spec the scan read with, so a rerun from it reads the same."""
     from rigel.cli import (
         _build_quant_defaults,
         _resolve_quant_args,
@@ -128,3 +114,71 @@ def test_config_yaml_records_the_resolved_tag(spliced_library, tmp_path):
     _write_config_yaml(written, args, pr.pipeline_config)
     recorded = yaml.safe_load(written.read_text())["quant"]["sj_strand_tag"]
     assert ",".join(recorded) == pr.pipeline_config.scan.sj_strand_tag
+
+
+def _strip_tags_from_first_spliced(src, dst, n):
+    """``src`` rewritten in its own record order with XS and ts removed from its first ``n`` spliced records."""
+    import pysam
+
+    seen = 0
+    with (
+        pysam.AlignmentFile(str(src), "rb") as inp,
+        pysam.AlignmentFile(str(dst), "wb", template=inp) as out,
+    ):
+        for r in inp:
+            if seen < n and any(op == 3 for op, _ in (r.cigartuples or ())):
+                seen += 1
+                r.set_tag("XS", None)
+                r.set_tag("ts", None)
+            out.write(r)
+    return seen
+
+
+@pytest.fixture(scope="module")
+def late_tagged_library(tmp_path_factory):
+    """A stranded library whose first 1,200 spliced records carry no strand tag and whose later ones carry XS."""
+    work = tmp_path_factory.mktemp("late_tags")
+    sc = Scenario("late_tags", genome_length=20_000, seed=11, work_dir=work)
+    sc.add_gene(
+        "g1",
+        "+",
+        [
+            {
+                "t_id": "t1",
+                "exons": [(1000, 1300), (2000, 2300), (3000, 3300), (4000, 4300)],
+                "abundance": 100,
+            }
+        ],
+    )
+    sim = ReadSimConfig(
+        frag_mean=250,
+        frag_std=40,
+        frag_min=120,
+        frag_max=450,
+        read_length=100,
+        strand_specificity=0.95,
+        seed=11,
+    )
+    result = sc.build_oracle(n_fragments=6000, sim_config=sim)
+    late = work / "late_tagged.bam"
+    stripped = _strip_tags_from_first_spliced(result.bam_path, late, 1200)
+    assert stripped == 1200, stripped
+    yield late, result.index
+    sc.cleanup()
+
+
+def test_auto_reads_the_tag_on_every_record_not_from_the_first_spliced_reads(late_tagged_library):
+    """``auto`` reads each record's own tag. Choosing one mode from the first spliced reads finds no tag in a library
+    whose first 1,200 spliced records lack one, and then reads none of the later, tagged records: a stranded library
+    trains no strand observation and is quantified as unstranded."""
+    bam, index = late_tagged_library
+    pr = run_pipeline(
+        str(bam),
+        index,
+        config=PipelineConfig(em=EMConfig(seed=7), scan=BamScanConfig(sj_strand_tag="auto")),
+    )
+    sm = pr.strand_models.exonic_spliced
+    assert sm.n_observations > 0, (
+        "the tagged spliced records after the first 1,200 trained no strand observation"
+    )
+    assert sm.strand_specificity > 0.8

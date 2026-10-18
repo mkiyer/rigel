@@ -75,7 +75,8 @@ rigel -v quant ...       # -v / --verbose: DEBUG-level logging for any subcomman
   multimappers are detected from secondary BAM flags
 - **A splice-junction strand tag, for a stranded library** (`XS` from HISAT2, or from STAR with
   `--outSAMstrandField intronMotif`; `ts` from minimap2). Without one no junction trains the strand model
-  and the library is quantified as unstranded; `--sj-strand-tag auto` only detects which tag is present
+  and the library is quantified as unstranded; `--sj-strand-tag auto` reads whichever tag each spliced record
+  carries, and cannot supply one the aligner did not write
 
 Name-sort an existing BAM:
 
@@ -182,7 +183,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 |------|---------|-------------|
 | `--include-multimap` / `--no-include-multimap` | on | Include multimapping reads |
 | `--keep-duplicates` / `--no-keep-duplicates` | off | Keep reads marked PCR/optical duplicates |
-| `--sj-strand-tag TAG [...]` | `auto` | Splice-junction strand tag. `auto` detects from the first 1,000 spliced reads; use `XS` (HISAT2, or STAR with `--outSAMstrandField intronMotif`), `ts` (minimap2), both to try in order (`XS ts`, either order), or `none` to read no tag (the library is then quantified as unstranded). Any other value is refused. |
+| `--sj-strand-tag TAG [...]` | `auto` | Splice-junction strand tag. `auto` reads `XS` and `ts` on every spliced record, and a record whose two tags disagree reads as ambiguous; name `XS` (HISAT2, or STAR with `--outSAMstrandField intronMotif`) or `ts` (minimap2) to read only that tag, both to take the first present on each record (`XS ts`, either order), or `none` to read no tag (the library is then quantified as unstranded). Any other value is refused. |
 
 **Model parameters**
 
@@ -336,7 +337,7 @@ run for reproducibility.
 # Library handling
 include_multimap: true
 keep_duplicates: false
-sj_strand_tag: [auto]       # [XS] for STAR, [ts] for minimap2, [XS, ts] to try both
+sj_strand_tag: [auto]       # both tags on every record; [XS] for STAR, [ts] for minimap2, [XS, ts] first present
 
 # EM algorithm (defaults are suitable for most libraries)
 em_iterations: 1000
@@ -529,7 +530,7 @@ the current version is **4**. Top-level keys:
 | `command` | Subcommand, resolved arguments, config-file path |
 | `configuration` | All resolved pipeline parameters |
 | `input` | Absolute BAM and index paths |
-| `alignment_stats` | Two unit families: record-level counts (`total_reads`, `mapped_reads`, `unmapped_reads`, `secondary_reads`, `supplementary_reads`, `proper_pairs`, `duplicate_reads`, `qc_fail_reads`) and read-name-group counts (`read_groups`, `unique_reads`, `multimapping_reads`). The report's read-fate bar uses the read-group family so its segments share one denominator |
+| `alignment_stats` | Two unit families: record-level counts (`total_reads`, `mapped_reads`, `unmapped_reads`, `secondary_reads`, `supplementary_reads`, `proper_pairs`, `duplicate_reads`, `qc_fail_reads`) and read-name-group counts (`read_groups`, `unique_reads`, `multimapping_reads`). The report's read-fate bar uses the read-group family so its segments share one denominator. An `sj_strand_tag` sub-block counts the spliced records the scan read (secondary and supplementary included) by what their junction-strand tags gave: `tagged` (a strand), `untagged` (none) and `conflicting` (XS and ts disagree, read as ambiguous), with `invalid` the tag values that were neither `+` nor `-`, each read as absent |
 | `fragment_stats` | Total, genic, intergenic, and chimeric breakdowns; annotated/unannotated SJ counts; a `splice` sub-block with the per-fragment splice-type breakdown (`unspliced`, `spliced_annotated`, `spliced_unannotated`, `spliced_implicit`, `splice_artifact`) plus `sj_blacklisted` (blacklisted junctions × records, multimapper records included: the annotated BAM's `ZB` summed), and blacklist provenance `sj_blacklist_size` / `sj_blacklist_loaded` (so `splice_artifact: 0` reads as "detection off — no blacklist in the index" vs "detection on, none found") |
 | `strand_model` | Protocol (`R1-sense` / `R1-antisense`, and `read1_sense`), strand specificity, `p_r1_sense`, training count, the per-junction strand table's QC (`sj`: `n_sj`, `n_observations` and the junctions' depth, `depth_median`, `depth_p90`, `depth_p99`, `depth_max`), posterior variance, 95% CI; the junction fit behind κ — `kappa` (the spliced reads' sense fraction, `pooled` over every junction and `genuine` over the junctions the three-class fit credits to RNA), `junction_classes` (each class's share — `genuine`, `artifact`, `reversed` — `by_junction` and `by_fragment`; shallow splice artifacts are most of the junctions and few of the fragments; `null` where the strand channel is dead, since the classes are not identified at κ = ½ and `genuine` then equals `pooled`, the κ calibration reads), `strand_live` (whether the protocol preserves strand, the decision calibration's strand channel reads) and `strand_overdispersion` (0, `binomial`, for gDNA and RNA alike); and a `diagnostics` sub-block comparing the all-exonic model to the spliced-only model (`contamination_gap` — a positive value flags unstranded gDNA contamination) |
 | `calibration` | Library-scalar calibration outputs (see below) |
@@ -780,10 +781,13 @@ tpm_matrix   = gene_quant.pivot(index="gene_id", columns="sample", values="tpm")
 | HISAT2 | `XS` | Standard RNA-seq workflow |
 | minimap2 | `ts` | Short-read splice mode (`-ax splice:sr`) |
 
-Use `--sj-strand-tag auto` (default) to detect the tag automatically, or list
-several tags to try in order (e.g. `--sj-strand-tag XS ts`). The tag the scan read with is logged and recorded in
-`summary.json` and `config.yaml`. Junction strands come only from the tag: if no spliced read carries one, no
-junction trains the strand model and the library is quantified as unstranded, and Rigel warns.
+`--sj-strand-tag auto` (default) reads both tags on every spliced record: one present gives that record's strand,
+two that agree give it too, and two that disagree read as ambiguous, so that record trains no strand. A tag holding
+anything but `+` or `-` reads as absent. Name one tag to read only that one, or several to take the first present on
+each record (e.g. `--sj-strand-tag XS ts`). The run logs what the tags gave and records it in `summary.json`
+(`alignment_stats.sj_strand_tag`); `config.yaml` records the spec. Junction strands come only from the tag: if no
+spliced read carries one, no junction trains the strand model, the library is quantified as unstranded, and Rigel
+warns.
 
 ---
 

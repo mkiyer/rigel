@@ -95,20 +95,37 @@ enum class SJTagMode : uint8_t {
     TS_ONLY = 2,  // Check ts tag only (minimap2)
     XS_TS = 3,    // Check XS first, then ts
     TS_XS = 4,    // Check ts first, then XS
+    AUTO = 5,     // Read both on every record; a disagreement is AMBIGUOUS
 };
 
-// Parse SJ tag configuration string → SJTagMode enum. Any other spec is refused, "auto" included: the caller
-// resolves it to one of these (`detect_sj_strand_tag`) before the scan.
+// Parse SJ tag configuration string → SJTagMode enum. Any other spec is refused.
 static SJTagMode parse_sj_tag_spec(const std::string& spec) {
+    if (spec == "auto")  return SJTagMode::AUTO;
     if (spec == "XS")    return SJTagMode::XS_ONLY;
     if (spec == "ts")    return SJTagMode::TS_ONLY;
     if (spec == "XS,ts") return SJTagMode::XS_TS;
     if (spec == "ts,XS") return SJTagMode::TS_XS;
     if (spec == "none" || spec.empty()) return SJTagMode::NONE;
     throw std::invalid_argument(
-        "sj_tag_spec must be 'XS', 'ts', 'XS,ts', 'ts,XS' or 'none' (resolve 'auto' with "
-        "detect_sj_strand_tag before the scan); got '" + spec + "'");
+        "sj_tag_spec must be 'auto', 'XS', 'ts', 'XS,ts', 'ts,XS' or 'none'; got '" + spec + "'");
 }
+
+// What the junction-strand tag said on each spliced record of the scan (the annotation pass reads the same tags
+// and counts nothing). A tag holding neither '+' nor '-' reads as absent; under AUTO a record whose XS and ts both
+// give a strand and disagree is AMBIGUOUS.
+struct SJTagCounts {
+    int64_t tagged = 0;       // spliced records given a strand
+    int64_t untagged = 0;     // spliced records no tag gave a strand
+    int64_t conflicting = 0;  // spliced records whose XS and ts disagree (AUTO only)
+    int64_t invalid = 0;      // XS or ts tags holding neither '+' nor '-'
+
+    void merge(const SJTagCounts& o) {
+        tagged += o.tagged;
+        untagged += o.untagged;
+        conflicting += o.conflicting;
+        invalid += o.invalid;
+    }
+};
 
 // ================================================================
 // Fragment class / pool / splice-type label helpers
@@ -337,6 +354,9 @@ struct BamScanStats {
     int64_t n_sj_observed = 0;
     int64_t n_sj_blacklisted = 0;
 
+    // The junction-strand tag on each spliced record
+    SJTagCounts sj_tags;
+
     // ── the per-fragment splice census ────────────────────────────────────────────────────────────
     //
     // ⭐ ONE observation per HIT the scanner offers the accumulator (a multimapper's hits one by one), filed
@@ -400,6 +420,7 @@ struct BamScanStats {
         n_multimapper_alignments += o.n_multimapper_alignments;
         n_sj_observed += o.n_sj_observed;
         n_sj_blacklisted += o.n_sj_blacklisted;
+        sj_tags.merge(o.sj_tags);
         for (size_t i = 0; i < splice_census.size(); i++)
             splice_census[i] += o.splice_census[i];
         n_deposit_not_offered += o.n_deposit_not_offered;
@@ -586,15 +607,18 @@ static inline int32_t filter_blacklisted_sjs(
 // Read SJ strand tag from a BAM record
 // ================================================================
 
-static int32_t read_sj_strand(const bam1_t* b, SJTagMode mode) {
-    if (mode == SJTagMode::NONE) return STRAND_NONE;
+static int32_t read_sj_strand(const bam1_t* b, SJTagMode mode, SJTagCounts* counts) {
+    if (mode == SJTagMode::NONE) {
+        if (counts) ++counts->untagged;
+        return STRAND_NONE;
+    }
 
-    auto try_tag = [&](const char* tag, bool is_ts) -> int32_t {
+    auto try_tag = [&](const char* tag, bool is_ts) -> int32_t {  // a strand, or -1 when absent or unreadable
         uint8_t* aux = bam_aux_get(b, tag);
         if (!aux) return -1;  // tag not present
         // Dispatch on the htslib type code (*aux) to call the correct
         // accessor.  Type 'A' = single char, type 'Z'/'H' = string
-        // (take first character).  Any other type → val 0 → STRAND_NONE.
+        // (take first character).  Any other type or value reads as absent, counted.
         char val = 0;
         if (*aux == 'A') {
             val = bam_aux2A(aux);
@@ -605,7 +629,10 @@ static int32_t read_sj_strand(const bam1_t* b, SJTagMode mode) {
         int32_t strand;
         if (val == '+') strand = STRAND_POS;
         else if (val == '-') strand = STRAND_NEG;
-        else return STRAND_NONE;
+        else {
+            if (counts) ++counts->invalid;
+            return -1;
+        }
 
         // minimap2's 'ts' tag is alignment-relative: flip for reverse reads
         if (is_ts && (b->core.flag & BAM_FREVERSE)) {
@@ -631,11 +658,27 @@ static int32_t read_sj_strand(const bam1_t* b, SJTagMode mode) {
             result = try_tag("ts", true);
             if (result < 0) result = try_tag("XS", false);
             break;
+        case SJTagMode::AUTO: {
+            // Both tags, every record: neither name proves which is right, so a disagreement is AMBIGUOUS
+            const int32_t xs = try_tag("XS", false);
+            const int32_t ts = try_tag("ts", true);
+            if (xs >= 0 && ts >= 0 && xs != ts) {
+                if (counts) ++counts->conflicting;
+                return STRAND_AMBIGUOUS;
+            }
+            result = (xs >= 0) ? xs : ts;
+            break;
+        }
         default:
             break;
     }
 
-    return (result >= 0) ? result : STRAND_NONE;
+    if (result < 0) {
+        if (counts) ++counts->untagged;
+        return STRAND_NONE;
+    }
+    if (counts) ++counts->tagged;
+    return result;
 }
 
 // ================================================================
@@ -651,7 +694,8 @@ static ParsedAlignment parse_bam_record(
     SJTagMode sj_tag_mode,
     const FragmentResolver* resolver,
     int64_t* n_sj_observed,
-    int64_t* n_sj_blacklisted)
+    int64_t* n_sj_blacklisted,
+    SJTagCounts* sj_tag_counts)
 {
     ParsedAlignment rec;
     rec.flag = b->core.flag;
@@ -677,7 +721,7 @@ static ParsedAlignment parse_bam_record(
         ? tid_to_ref_id[rec.ref_id] : -1;
     parse_cigar(b, rec.exons, rec.sjs);
     if (!rec.sjs.empty()) {
-        const int32_t sj_strand = read_sj_strand(b, sj_tag_mode);
+        const int32_t sj_strand = read_sj_strand(b, sj_tag_mode, sj_tag_counts);
         for (auto& sj : rec.sjs) sj.strand = sj_strand;
     }
     rec.ref_id = mapped_ref_id;
@@ -1523,7 +1567,8 @@ public:
                         parse_bam_record(b, tid_to_ref_id_, sj_tag_mode_,
                                           ctx_,
                                           &stats_.n_sj_observed,
-                                          &stats_.n_sj_blacklisted));
+                                          &stats_.n_sj_blacklisted,
+                                          &stats_.sj_tags));
                 }
 
                 if (read_ret < -1) {
@@ -2096,6 +2141,10 @@ private:
         stats_dict["n_multimapper_alignments"] = stats_.n_multimapper_alignments;
         stats_dict["n_sj_observed"] = stats_.n_sj_observed;
         stats_dict["n_sj_blacklisted"] = stats_.n_sj_blacklisted;
+        stats_dict["n_sj_tag_tagged"] = stats_.sj_tags.tagged;
+        stats_dict["n_sj_tag_untagged"] = stats_.sj_tags.untagged;
+        stats_dict["n_sj_tag_conflicting"] = stats_.sj_tags.conflicting;
+        stats_dict["n_sj_tag_invalid"] = stats_.sj_tags.invalid;
         // ⭐ The splice census, keyed off the ONE name table. `splice_type_label`'s strings are the
         // `SpliceType` member names lower-cased, so `rigel.splice.census_field` derives the very same
         // key on the Python side without a second table to drift from this one.
@@ -2781,7 +2830,7 @@ public:
                 ? tid_to_ref_id_[rec.ref_id] : -1;
             parse_cigar(b, rec.exons, rec.sjs);
             if (!rec.sjs.empty()) {
-                const int32_t sj_strand = read_sj_strand(b, sj_tag_mode_);
+                const int32_t sj_strand = read_sj_strand(b, sj_tag_mode_, nullptr);
                 for (auto& sj : rec.sjs) sj.strand = sj_strand;
             }
             rec.ref_id = mapped_ref_id;
@@ -2869,65 +2918,6 @@ private:
         }
     }
 };
-
-// ================================================================
-// SJ strand tag auto-detection
-// ================================================================
-
-static std::string detect_sj_strand_tag_native(
-    const std::string& bam_path,
-    int max_spliced_reads = 1000)
-{
-    htsFile* fp = hts_open(bam_path.c_str(), "rb");
-    if (!fp) throw std::runtime_error("Failed to open BAM: " + bam_path);
-
-    bam_hdr_t* hdr = sam_hdr_read(fp);
-    if (!hdr) {
-        hts_close(fp);
-        throw std::runtime_error("Failed to read header: " + bam_path);
-    }
-
-    bam1_t* b = bam_init1();
-    bool found_xs = false;
-    bool found_ts = false;
-    int n_spliced = 0;
-
-    int read_ret = 0;
-    int64_t n_read = 0;
-    while (n_spliced < max_spliced_reads && (read_ret = sam_read1(fp, hdr, b)) >= 0) {
-        ++n_read;
-        if (b->core.flag & (BAM_FUNMAP | BAM_FQCFAIL)) continue;
-        if (b->core.n_cigar == 0) continue;
-
-        // Check for CIGAR N (ref skip)
-        const uint32_t* cigar = bam_get_cigar(b);
-        bool has_splice = false;
-        for (int i = 0; i < static_cast<int>(b->core.n_cigar); i++) {
-            if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) {
-                has_splice = true;
-                break;
-            }
-        }
-        if (!has_splice) continue;
-
-        n_spliced++;
-        if (!found_xs && bam_aux_get(b, "XS")) found_xs = true;
-        if (!found_ts && bam_aux_get(b, "ts")) found_ts = true;
-
-        if (found_xs && found_ts) break;
-    }
-
-    bam_destroy1(b);
-    bam_hdr_destroy(hdr);
-    hts_close(fp);
-    if (read_ret < -1) throw read_error(bam_path, read_ret, n_read);
-
-    // Return detected tags in priority order (XS first)
-    if (found_xs && found_ts) return "XS,ts";
-    if (found_xs) return "XS";
-    if (found_ts) return "ts";
-    return "none";
-}
 
 // ================================================================
 // nanobind module definition
@@ -3299,8 +3289,9 @@ NB_MODULE(_bam_impl, m) {
              "ctx : FragmentResolver\n"
              "    The resolve context from index building.\n"
              "sj_tag_spec : str\n"
-             "    SJ strand tag specification: 'XS', 'ts', 'XS,ts', 'ts,XS', or 'none'. Any other\n"
-             "    spec, 'auto' included, raises ValueError: resolve 'auto' with detect_sj_strand_tag.\n"
+             "    SJ strand tag specification: 'auto' (XS and ts read on every record, a disagreement\n"
+             "    ambiguous), 'XS', 'ts', 'XS,ts', 'ts,XS' (the first present wins), or 'none'. Any other\n"
+             "    spec raises ValueError.\n"
              "skip_duplicates : bool\n"
              "    Skip duplicate-flagged reads.\n"
              "include_multimap : bool\n"
@@ -3448,9 +3439,4 @@ NB_MODULE(_bam_impl, m) {
              "    Summary: n_read_groups, n_annotated, n_intergenic, etc.\n")
         ;
 
-    m.def("detect_sj_strand_tag", &detect_sj_strand_tag_native,
-          nb::arg("bam_path"),
-          nb::arg("max_spliced_reads") = 1000,
-          "Auto-detect SJ strand tags in a BAM file.\n\n"
-          "Returns a tag specification string: 'XS', 'ts', 'XS,ts', or 'none'.");
 }
