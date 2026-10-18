@@ -314,7 +314,10 @@ length come from the scan configuration. Today only the scan installs them (`res
 **The mode is read per template**, from its own records, not from the BAM's first records. Whether STAR input
 should be paired by HI at all, or by Rigel's own search with HI ignored, is open (owner, 2026-10-18,
 `ISSUES: star-hi-pairs-against-rigels-own-pairing`): it is measured on the STAR panel, against each molecule's truth,
-before the HI-group arm is built. The rules below hold if HI is kept.
+before the HI-group arm is built. The rules below hold if HI is kept. Measured 2026-10-18 at the template level (the
+ISSUES entry has the numbers): STAR's HI groups are always complete; the validator rejects no correct pair; ignoring HI
+finds the correct pair in 0.31 % more of the multi-hit templates and adds 475 k pairs STAR did not assert, 98 % of them
+incorrect. The end-to-end comparison follows once both pairing sources exist.
 
 - **With HI (STAR).** Every record of the template carries HI. STAR groups the records of each pair alignment by HI. A
   hit starts from the R1 and R2 locations of one HI group, and Rigel forms no other combination: crossing HI groups

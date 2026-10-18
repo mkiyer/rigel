@@ -57,8 +57,11 @@ the code is open; each is less critical.
 2. ☑ Transcript strands installed by the index (2026-10-18): a fragment resolved without a scan sees them, so an
   antisense overlap reads strand-ambiguous; pinned and fractional, the STAR panel 15/15 and the oracle ladder 48/48
   quant_accuracy rows identical in every field; suite 3,052
-3. ☐ The pairing question: STAR's HI pairs against Rigel's own search, each scored against the molecule's truth
-  (`ISSUES: star-hi-pairs-against-rigels-own-pairing`; owner, 2026-10-18); a measurement, no change to the tool
+3. ◐ The pairing question: STAR's HI pairs against Rigel's own search, each scored against the molecule's truth
+  (`ISSUES: star-hi-pairs-against-rigels-own-pairing`; owner, 2026-10-18). ☑ Template level (2026-10-18, 47.9 M
+  templates, per-base truth): the validator rejects no correct pair and removes 1.40 M incorrect STAR pairs; HI misses
+  the correct pair in 0.31 % of multi-hit templates, and ignoring HI adds 475 k pairs, 98 % incorrect. ☐ End to end, once
+  both pairing sources exist
 4. ☐ The gates' own proof (the plan's step 1b), before the first change whose identity claim leans on those gates
 5. ☐ Location identity and aliases (D and N apart, M/=/X runs coalesced), which duplicate hits need
 6. ☐ Complete pairs only: HI groups (a group missing a mate is a counted unpaired alignment, duplicate groups collapse,

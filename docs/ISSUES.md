@@ -163,6 +163,21 @@ Decide on the STAR panel, whose read names carry each molecule's true source and
 pairs the search finds with HI ignored, each scored against the true molecule, template by template (pairs both find,
 pairs only HI asserts, with the search's reason for rejecting them, and pairs only the search finds, true or not), then
 end to end per stratum. Instrument: a prototype of the search over the panel's records, ahead of the HI change.
+Measured 2026-10-18 on the five STAR conditions at the recommended parameters (47.9 M templates), every pair scored
+base by base against the molecule's truth: correct when each aligned base sits where its read base truly maps
+(`$RIGEL_RUNS/prototypes/2026-10-18_pairing_question/`). A looser test, half of a location's bases on the molecule,
+called readings with a short anchor moved across another junction true; it is not quoted.
+- Every template's records carry HI; no HI group misses a mate or holds two locations for one mate; 39–170 groups per
+  condition repeat another group's pair.
+- Rigel's own pairing is valid: the geometric validator rejects no correct pair. Of STAR's pairs in templates with
+  several locations it rejects 1.40 M (20 % of the gDNA ones, 6 % of the mRNA ones), and 1,331–2,109 unique pairs per
+  condition, every one an incorrect reading.
+- Where a correct pair exists among a template's mate locations, the search with HI ignored always finds it. STAR's HI
+  groups miss it in 10,108 of 3.22 M such templates (0.31 %): STAR reported both correct mate readings, in different
+  groups.
+- Ignoring HI adds 475 k pairs STAR did not assert, 2 % of them correct (10,114).
+Open: the end-to-end comparison of the two pairing sources per stratum, once both are built; the search is needed for
+input without HI anyway, and the validator comes first, since both need it.
 
 ### the-gdna-length-contrast-is-ill-conditioned-on-aligned-input
 `priority: now — release-blocking (owner, 2026-10-15); the third wave of the paired-end repair, designed on the repaired scan · kind: defect · 2026-10-15`
