@@ -1061,20 +1061,21 @@ where the owner must decide:
    the oracle, since today's `num_hits` is not it.
 2. **The prior's denominator** (`ISSUES: the-em-prior-share-excludes-drawn-multimappers`). Adopted in substance: the
    three-denominator comparison is re-run before the wave completes, all-multimapper loci included, and the
-   denominator is not replaced merely because its cohort mismatch is real. **For the owner:** the review asks for
-   production STAR inputs too, and their BAMs were deleted on 2026-10-18; they are re-aligned (rustar locally, or the
-   cluster) only if the owner wants that half.
-3. **Sequencing errors** (§12). The review recommends matched seeded error copies of all five conditions, the 0.01 copy
-   as a separately reported stress arm, further seeds, and the substitution and indel coverage documented; VCaP's
-   mismatch rate is a proxy that mixes error sources, not a sequencing-error law. **For the owner** (asked 2026-10-18);
-   needed for the end-of-wave gate only.
+   denominator is not replaced merely because its cohort mismatch is real. It runs on the recommended STAR inputs only:
+   the parameters are final and nothing runs on the production ones again (owner, 2026-10-18).
+3. **Sequencing errors** (§12). Not whole error-injected copies of the panel (owner, 2026-10-18): random errors over
+   millions of templates spend a lot of compute to reach the handful that tip STAR at a junction. Instead, engineered
+   cases: templates built at specific junctions with specific errors placed where they tip the aligner (a substitution
+   in a short anchor, a mismatch just inside an exon end, an indel near a donor), aligned at the recommended parameters,
+   to show that the near-tied contiguous reading is reported beside the spliced one. Needed for the end-of-wave gate.
 4. **The all-held approximation** (§9.3). Adopted: reopened only if matched support, depth and seed experiments show a
    loss from zero support that stops an in-scope gate; changing support from zero to independently supported must move
    the probabilities and deposits as predicted. Exposure alone decides nothing.
 5. **What simulation cannot show** (§12). Adopted for VCaP: withholding in its RNA library is reported as exposure, not
    as genuine RNA lost, since a withheld alignment can be genuine unannotated RNA or misaligned contamination, and VCaP
-   corroborates. **For the owner:** the review's instrument for the cost on genuine RNA, known-origin RNA simulated from
-   a richer annotation and quantified against a deliberately restricted one, is new simulator work.
+   corroborates. The review's instrument for the cost on genuine RNA, known-origin RNA simulated from a richer annotation
+   and quantified against the normal one, is not planned: the cost it would price is accepted by the annotated-only
+   ruling (owner, 2026-10-16), and VCaP's count bounds it (owner, 2026-10-18).
 6. **The no-HI search's form** (§7.1). Adopted, as revision 4 had it: every pair validated, the bound applied to each
    pair; multiplicity tails and memory profiled, and optimized only if a cost asks, keeping exact hits and reasons.
    Joined by the owner's question whether STAR input is paired by HI at all (`ISSUES: star-hi-pairs-against-rigels-own-pairing`).
@@ -1086,7 +1087,7 @@ where the owner must decide:
 | finding | revision 5 |
 |---|---|
 | 1 (blocker). the observed and implied junctions can have different witnesses | §7.2: one witness, the transcript that holds the observed junctions supplying every implied intron, clip walks included; §8; the hybrid fixture and its break (§11) |
-| 2 (blocker). the mixed-HI fallback discards known pairs | §7.1: a mixed template keeps its asserted pairs and invents none; the mode from eligible records only; one distinct location per mate in an asserted group; ambiguous groups counted. Producer naming declined, because the per-group checks test HI's reading. Whether HI is kept at all is the owner's open question (§7.1) |
+| 2 (blocker). the mixed-HI fallback discards known pairs | §7.1: a mixed template keeps its asserted pairs and invents none; the mode from eligible records only; one distinct location per mate in an asserted group; ambiguous groups counted. Producer naming declined, because the per-group checks test HI's reading (the owner agrees, 2026-10-18). Whether HI is kept at all is the owner's open question (§7.1) |
 | 3. the evidence gates and the normalization contract | §9.3: unique hypotheses, weights in logs, hard gates apart from the zero-evidence fallback; §11: the oracle's complete accepted and rejected sets, the unequal-factor, duplicate and offset cases, and their mutants |
 | 4. an excluded template leaves records without a status | §10: each status from the final outcome; the five-record fixture (§11) |
 | 5. exposure, error and unidentifiable cost | §13: each recommendation adopted, or put to the owner |

@@ -434,4 +434,13 @@ Each is designed and measured on the repaired scan.
   production-parameter BAMs, the parked threads' annotated BAMs and prototype wheels, the superseded pairing
   prototype's arrays and builds, the closed fl-tilt campaign's fragment dumps, and the parity and smoke BAMs.
 
+**Recorded (owner, 2026-10-18, twelfth round):**
+
+- the recommended STAR parameters are final: nothing runs on the production ones again, so the prior-denominator
+  comparison uses the recommended inputs only;
+- sequencing errors are shown with engineered cases, specific errors placed at specific junctions, not with whole
+  error-injected copies of the panel;
+- the richer-annotation simulation is not planned: the cost it would price is accepted by the annotated-only ruling;
+- no header check of the aligner for HI: the per-group checks suffice.
+
 **Open for wave 1:** the questions in `PAIRED_END_WAVE1_PLAN.md` §13.
