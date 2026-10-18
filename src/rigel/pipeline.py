@@ -314,11 +314,8 @@ def scan_and_buffer(
     )
     logger.info("[START] Native C++ BAM scan → resolve + train + buffer")
 
-    # Per-transcript strands set every fragment's ambiguous-strand flag (its candidates disagree on
-    # strand), the strand each gap hypothesis infers from the transcripts that imply it, and the truth
-    # label of the all-exonic diagnostic strand model.
+    # The index installs what it knows (the transcript strands among it); the scan sets what is a setting.
     resolve_ctx = index.resolver
-    resolve_ctx.set_transcript_strands(index.t_to_strand_arr.tolist())
 
     # Intron-overhang tolerance K (bp): how many bases an alignment may run into an annotated intron,
     # and an annotated intron overhang a mate gap, and still be read as spliced there. The resolver

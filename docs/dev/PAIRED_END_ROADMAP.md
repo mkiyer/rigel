@@ -52,7 +52,9 @@ steps 2–6 and waves 2 and 3 into one list; the waves below keep their record. 
   caches had recorded the old resolved tag, so the cache check now reads the scan settings (preflight and
   `build_scan_cache.py`'s skip did not), and every panel was re-scanned once: only float sums moved, by the scan's
   thread-order noise (two threaded scans of one BAM differ by up to 4e-15 relative; pinned scans are identical)
-2. ☐ Transcript strands installed from the index (today only the scan installs them)
+2. ☑ Transcript strands installed by the index (2026-10-18): a fragment resolved without a scan sees them, so an
+  antisense overlap reads strand-ambiguous; pinned and fractional, the STAR panel 15/15 and the oracle ladder 48/48
+  quant_accuracy rows identical in every field; suite 3,052
 3. ☐ One location per alignment: aliases kept; NM conflicts and missing NM counted; unindexed references apart; tag
   types checked; count widths that cannot wrap
 4. ☐ Hits only from complete HI groups (STAR): a group missing a mate is a counted unpaired alignment, duplicate

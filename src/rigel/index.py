@@ -1672,6 +1672,12 @@ class TranscriptIndex:
         # 4. The transcript count, which sizes the resolver's scratch buffers.
         ctx.set_metadata(self.num_transcripts)
 
+        # 4b. Each transcript's strand. It sets every fragment's ambiguous-strand flag (its candidates disagree on
+        #     strand), the strand each gap hypothesis infers from the transcripts that imply it, and the truth label
+        #     of the all-exonic diagnostic strand model. An index fact, so every use of the resolver has it, a scan
+        #     or not.
+        ctx.set_transcript_strands(self.t_to_strand_arr.tolist())
+
         # 5. nRNA parent-index for derive-on-demand resolution.
         #    Synthetic nRNAs are intentionally absent from cgranges
         #    (see _gen_transcript_intervals).  The resolver materialises

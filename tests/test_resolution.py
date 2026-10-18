@@ -222,6 +222,38 @@ def overlap_index(tmp_path_factory):
     return build_test_index(tmp_path_factory, OVERLAP_GTF, name="overlap_idx")
 
 
+# Two single-exon genes on opposite strands, overlapping on [300, 500) after parse.
+ANTISENSE_GTF = textwrap.dedent("""\
+    chr1\ttest\texon\t101\t500\t.\t+\t.\tgene_id "gp"; transcript_id "tp"; gene_name "GP"; gene_type "protein_coding";
+    chr1\ttest\texon\t301\t700\t.\t-\t.\tgene_id "gm"; transcript_id "tm"; gene_name "GM"; gene_type "protein_coding";
+""")
+
+
+@pytest.fixture(scope="session")
+def antisense_index(tmp_path_factory):
+    return build_test_index(tmp_path_factory, ANTISENSE_GTF, name="antisense_idx")
+
+
+class TestTheIndexInstallsTheTranscriptStrands:
+    """The resolver reads each transcript's strand, and a fragment whose candidates disagree on it is
+    ``ambig_strand``. The strands are an index fact, so the loaded index carries them: when only the scan installed
+    them, a fragment resolved without a scan (every resolver test) read every overlap as single-stranded."""
+
+    def test_an_antisense_overlap_is_strand_ambiguous_without_a_scan(self, antisense_index):
+        tm = _t_map(antisense_index)
+        result = resolve_fragment(make_fragment(exons=(_exon("chr1", 350, 450),)), antisense_index)
+        assert result is not None
+        assert {tm["tp"], tm["tm"]} <= result.t_inds
+        assert result.ambig_strand == 1
+
+    def test_a_same_strand_overlap_is_not(self, overlap_index):
+        tm = _t_map(overlap_index)
+        result = resolve_fragment(make_fragment(exons=(_exon("chr1", 150, 190),)), overlap_index)
+        assert result is not None
+        assert {tm["t_two_exon"], tm["t_one_left"]} <= result.t_inds
+        assert result.ambig_strand == 0
+
+
 class TestResolveFragment:
     """Annotated SJ narrows transcript candidates via C++ FragmentResolver.
 
