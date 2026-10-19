@@ -17,27 +17,59 @@ the changelog is git.
 Ordered by priority. An entry says what is open and the number a ranking turns on; what was done is git,
 what was ruled is `DESIGN.md`.
 
-### calibrations-strand-channel-misreads-aligned-input
-`priority: now — the highest priority, release-blocking (owner, 2026-10-19) · kind: defect · 2026-10-19`
-On STAR input, calibration's strand channel costs the stranded capture-OFF conditions most of their error. The same
-reads under the tree before the annotated-path rule, pinned and fractional (g00 ss0.99 capture-OFF; truth 7,975,957
-annotated, 2,024,043 nascent):
+### the-reader-reads-false-gdna-as-capture
+`priority: now — the highest priority, release-blocking (owner, 2026-10-19); found on aligned input as "calibration's strand bug" · kind: defect · 2026-10-14`
+MEASURED 2026-10-19 on the STAR panel at the recommended parameters, pinned and fractional, against truth: on aligned
+input the capture efficiencies are most of the error of every capture-OFF condition. With every efficiency held at 1
+(the landscape kept; `capture_efficiency.capture_efficiencies` answering nothing):
 
-| run | transcript error | annotated − true | nascent − true |
-|---|---:|---:|---:|
-| shipped: calibration and the EM stranded | 3,285,985 | −352,891 | +334,819 |
-| calibration unstranded, the EM stranded | 745,251 | −37,866 | +32,169 |
-| both unstranded (no strand tag read) | 759,093 | −44,310 | +38,362 |
-| the EM unstranded, calibration stranded | 3,376,570 | −408,915 | +390,086 |
+| condition | transcript error, shipped → efficiencies 1 | gene error, shipped → efficiencies 1 |
+|---|---|---|
+| g00 κ0.99 capture-OFF | 3,441,365 → 247,234 (−92.8 %) | 667,766 → 28,485 (−95.7 %) |
+| g05 κ0.50 capture-OFF | 372,038 → 242,588 (−34.8 %) | 117,184 → 44,369 (−62.1 %) |
+| g50 κ0.50 capture-OFF | 200,292 → 164,302 (−18.0 %) | 70,374 → 51,199 (−27.2 %) |
+| g50 κ0.99 capture-OFF | 230,948 → 152,157 (−34.1 %) | 89,779 → 36,760 (−59.1 %) |
+| g50 κ0.99 capture-ON | 629,002 → 2,086,050 (+232 %) | 354,398 → 1,669,095 (+371 %) |
 
-g50 ss0.99 capture-OFF: 226,398 against 202,457 with calibration unstranded (gene 89,904 against 65,440). On the
-simulator's own alignments the channel is neutral (g00 153,799 against 153,131), and capture-ON needs it (g50 ON
-621,052 against 1,051,884). So the EM's strand model is sound, and calibration's strand channel misreads something
-aligned input carries and the simulator's alignments do not. A candidate: reads misplaced across inverted duplications
-read as antisense (on g50 ss0.99, 2.1 % of antisense-oriented RNA's primary spliced records carry a junction no
-transcript holds, against 0.10 % of sense ones; unstranded, 0.12 against 0.11 %).
-Instruments: `$RIGEL_RUNS/arms/2026-10-19_annotated_path/dissect/run_cond.py` (`CAL_UNSTRANDED=1`, `EM_UNSTRANDED=1`,
-`ORACLE=1`; `BASE=1` runs the tree before the rule), `junction_strand_audit.py`.
+Capture-ON needs them; capture-OFF is hurt both ways by false gDNA read as yield:
+- FALSE ENRICHMENT where the bulk sits at the floor. g00 holds no gDNA, yet calibration deconvolves 33 k fragments of
+  it on STAR input (1.6 k on the simulator's alignments): STAR's unique placements of RNA in intergenic repeats
+  (certified gDNA by the owner's case 1, 231–435 per region) seed an enriched basin, and under it the
+  both-stranded introns' two roots resolve to gDNA (CYYR1/CYYR1-AS1: 76 % of each intron, 3,226 fragments, against 9
+  on the simulator's alignments). Read against a bulk of 1.1e-7 fragments/bp the saturation is 15,528 and 486
+  regions read above 10× (max 1.9e7), 250 of them both-stranded; transcripts' EM lengths inflate (22 % above 2×),
+  and their fragments move to nascent spans less inflated (annotated −386 k, nascent +366 k). Calibration read as
+  unstranded (κ = ½) leaves 163 such regions and a transcript error of 0.75 M, so the strand channel enlarges this,
+  through the both-stranded regions; it is not its source.
+- FALSE DEPLETION where RNA swamps an exon: deconvolved gDNA below the bulk reads below 1 (g05: 11,055 of 17,075 exon
+  regions under 0.9; g50 κ0.99: 493; the simulator's alignments: 62, and no intron below 0.98). A junction is priced
+  `c_lo + c_hi − ½(c_intron,lo + c_intron,hi)`, clipped at 0, so one inflated intron zeroes it: 14.4 % of g05's
+  transcripts and 3.1 % of g50's have EM lengths under 0.9× their plain length (down to 0.017×).
+The reader reads each object's deconvolved gDNA mass as a point Poisson count, whatever the deconvolution's own
+uncertainty; on the simulator's alignments the efficiencies stay at 1 in every condition here.
+Instruments: `$RIGEL_RUNS/arms/2026-10-19_annotated_path/dissect/` — `calib_dump.py` (the landscape, bulk, saturation and
+per-region efficiencies; `CAL_UNSTRANDED=1`, `ORACLE=1`), `run_cond.py` (`NO_CAPTURE=1`, `CAL_UNSTRANDED=1`,
+`EM_UNSTRANDED=1`, `ORACLE=1`).
+EARLIER, ON REAL DATA (2026-10-13/14), when this was deferred to 0.8.1 as a known limitation:
+On a library with almost no gDNA the bulk sits at the landscape's floor, and calibration's false gDNA on a few objects reads
+as enormous capture (`capture_efficiency._read` reads the deconvolved mass as a point Poisson count). The real VCaP
+transcriptome-only library (no spike, no capture), the shipped reader against the foundation's, pinned and fractional:
+1,824 objects above e× the bulk (1,786 above 1,000×, max 1.04e8×) where the foundation read none, a saturation level of
+2.9e7× that `summary.json` publishes, EM lengths of 2,730 annotated transcripts inflated 1e5–1.6e7×, and 3.56 % of the
+transcript counts moved (Σ|Δ| 478k of 13.4 M, inside 376 loci; genes 0.13 %). In simulation the family costs +2.3 to +2.8
+transcript points on the zero-gDNA capture-OFF robustness rows (odg05 κ0.70, flgl κ0.70, flrl κ0.99 and κ0.70), accepted
+on 2026-10-13 before the real-library magnitude was known. That library has no truth, but an efficiency of 1e8 off
+capture is unphysical. The source is the false gDNA, not the reader's arithmetic; no reader-side guard exists, and a
+detector is refused (`DESIGN.md` §7.2). Instruments: `out/real/vcap_rna_only__{found,rel}*` in
+`$RIGEL_RUNS/prototypes/2026-10-13_modefree/` (`prod_real.py`), `arm_tally.py`.
+MEASURED 2026-10-14 with the ψ A/B (`ISSUES: the-gdna-prior-enters-psi-twice`): today's tree reads 3,300 objects above
+e× the bulk on the transcriptome-only library (1,824 on 2026-10-13, most likely the multimapper second pass's deposits,
+unverified) and a saturation of 2.31e7×. Part 1 leaves it: 3,010 objects, the saturation and the bulk unchanged, the
+transcript table moved 1.12 %. Nor does it touch the zero-gDNA capture-OFF rows of the test chromosome's panels
+(odg05, fl-gDNA-long, fl-RNA-long: about 8,600–9,300 false gDNA each, unchanged), while it removes the ladder's
+(1,609 / 677 / 1,594 / 467 → 28 / 20 / 35 / 26). So the false gDNA the reader reads as capture on a real library is not
+the double prior's; its source is unmeasured. 0.8.0 states the limitation in the MANUAL (calibration's capture
+answer): a saturation far above 1 on a library that was not captured is this, not capture.
 
 ### splicing-artifacts
 `priority: now — release-blocking (owner, 2026-10-14): 0.8.0 waits for the mechanism AND its validation on independent artifact-containing evidence (the cluster); the design is externally reviewed, its derivation next · kind: defect · 2026-09-24`
@@ -279,7 +311,7 @@ On the STAR panel at the recommended parameters, pinned and fractional, against 
 1.6–1.8 k templates: nearly every rejected hit is one of STAR's alternatives within 2 points of the best, in a template
 that keeps another hit, most of them in segmental duplications.
 LOCALIZED 2026-10-19: the stranded capture-OFF loss is calibration's strand channel on aligned input
-(`ISSUES: calibrations-strand-channel-misreads-aligned-input`), not the rule. With calibration read as unstranded
+(`ISSUES: the-reader-reads-false-gdna-as-capture`), not the rule. With calibration read as unstranded
 (κ = ½) and the EM keeping its strand model, the rule improves g00 by 8.65 % and g50 by 0.42 % (gene −9.31 / −0.54 %),
 as it improves every unstranded condition; with only the EM read as unstranded it still costs g00 4.22 %, and MAP-EM
 and a 20× VBEM budget give the same +4.7 % as the shipped solver. The junction's strand is not the cause: the rule
@@ -347,28 +379,6 @@ coordinate-sorted, renamed and truncated BAM, the late paths, the refusals and t
 - **A BAM without `@HD SO`** that is in fact coordinate-sorted still passes: refusing it needs a count of hits whose
   mate the flag says is mapped but the group lacks, and a threshold on that count is the owner's call.
 - **An unpaired record** stops the scan with the scanner's own RuntimeError, a clear message but a traceback.
-
-### the-reader-reads-false-gdna-as-capture
-`priority: next — 0.8.1; documented in 0.8.0 as a known limitation, the ψ A/B having failed its bar (2026-10-14) · kind: defect · 2026-10-14`
-On a library with almost no gDNA the bulk sits at the landscape's floor, and calibration's false gDNA on a few objects reads
-as enormous capture (`capture_efficiency._read` reads the deconvolved mass as a point Poisson count). The real VCaP
-transcriptome-only library (no spike, no capture), the shipped reader against the foundation's, pinned and fractional:
-1,824 objects above e× the bulk (1,786 above 1,000×, max 1.04e8×) where the foundation read none, a saturation level of
-2.9e7× that `summary.json` publishes, EM lengths of 2,730 annotated transcripts inflated 1e5–1.6e7×, and 3.56 % of the
-transcript counts moved (Σ|Δ| 478k of 13.4 M, inside 376 loci; genes 0.13 %). In simulation the family costs +2.3 to +2.8
-transcript points on the zero-gDNA capture-OFF robustness rows (odg05 κ0.70, flgl κ0.70, flrl κ0.99 and κ0.70), accepted
-on 2026-10-13 before the real-library magnitude was known. That library has no truth, but an efficiency of 1e8 off
-capture is unphysical. The source is the false gDNA, not the reader's arithmetic; no reader-side guard exists, and a
-detector is refused (`DESIGN.md` §7.2). Instruments: `out/real/vcap_rna_only__{found,rel}*` in
-`$RIGEL_RUNS/prototypes/2026-10-13_modefree/` (`prod_real.py`), `arm_tally.py`.
-MEASURED 2026-10-14 with the ψ A/B (`ISSUES: the-gdna-prior-enters-psi-twice`): today's tree reads 3,300 objects above
-e× the bulk on the transcriptome-only library (1,824 on 2026-10-13, most likely the multimapper second pass's deposits,
-unverified) and a saturation of 2.31e7×. Part 1 leaves it: 3,010 objects, the saturation and the bulk unchanged, the
-transcript table moved 1.12 %. Nor does it touch the zero-gDNA capture-OFF rows of the test chromosome's panels
-(odg05, fl-gDNA-long, fl-RNA-long: about 8,600–9,300 false gDNA each, unchanged), while it removes the ladder's
-(1,609 / 677 / 1,594 / 467 → 28 / 20 / 35 / 26). So the false gDNA the reader reads as capture on a real library is not
-the double prior's; its source is unmeasured. 0.8.0 states the limitation in the MANUAL (calibration's capture
-answer): a saturation far above 1 on a library that was not captured is this, not capture.
 
 ### the-gdna-prior-enters-psi-twice
 `priority: next — 0.8.1, with its partner; the 0.8.0 A/B failed its bar (2026-10-14) · kind: defect · 2026-10-02`

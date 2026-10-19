@@ -138,7 +138,8 @@ its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-mult
    the release-blocking repair is the scan's (`ISSUES: the-scanner-builds-fragments-from-one-mate`), fixed in pipeline
    order, the scan first, one change at a time (owner, 2026-10-18), with
    `ISSUES: star-hi-pairs-against-rigels-own-pairing` deciding how STAR input is paired. Since 2026-10-19 the release
-   also waits on two more (owner): first, the highest priority, `ISSUES: calibrations-strand-channel-misreads-aligned-input`;
+   also waits on two more (owner): first, the highest priority, `ISSUES: the-reader-reads-false-gdna-as-capture` (on aligned input the capture
+   efficiencies are most of every capture-OFF condition's error);
    and `ISSUES: multimapper-intergenic-alignments`, a fragment's valid intergenic and genic alignments competing in the EM.
 7. **The release**: `docs/PUBLISHING.md` is the procedure; what gates it is the state — the deliverable measured per
    stratum, the zero rows clean, the suite at its standing count, `preflight.py --full` green, CI run once by hand, a
@@ -146,7 +147,7 @@ its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-mult
 
 **0.8.1 — first after the release**, each its own derivation and A/B: `ISSUES: the-em-stops-before-it-converges` with
 `ISSUES: the-pseudocount-strength-is-not-derived` and `ISSUES: the-em-prior-share-excludes-drawn-multimappers` ·
-`ISSUES: the-reader-reads-false-gdna-as-capture` with `ISSUES: the-gdna-prior-enters-psi-twice` ·
+`ISSUES: the-gdna-prior-enters-psi-twice` ·
 `ISSUES: the-transfer-policy-loses-to-silence-on-unstranded-capture-off` with
 `ISSUES: the-intron-own-solve-on-unstranded-capture-off` · `ISSUES: the-scorer-reads-a-census-length-law` with
 `ISSUES: the-pooled-q-in-the-gdna-count` · `ISSUES: psi-reads-kappa-where-the-strand-channel-is-dead` ·

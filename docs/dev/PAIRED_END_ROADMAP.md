@@ -99,15 +99,15 @@ the code is open; each is less critical.
   annotated-BAM tags; the annotation pass checked against the scan by identity
 
 *Phase B, calibration*
-0. ☐ First, the highest priority (owner, 2026-10-19): calibration's strand channel misreads aligned input
-  (`ISSUES: calibrations-strand-channel-misreads-aligned-input`); on g00, 3.29 M transcript error with it, 0.75 M
-  with calibration read as unstranded
+0. ☐ First, the highest priority (owner, 2026-10-19): the capture reader reads false gDNA as capture on aligned input
+  (`ISSUES: the-reader-reads-false-gdna-as-capture`); with every efficiency at 1, g00's transcript error falls 3.44 M →
+  0.25 M and every capture-OFF condition's by 18–93 %, while capture-ON needs them (+232 %)
 1. ☐ The second pass: an observed annotated splice takes the RNA length law
 2. ☐ The second pass's weights: one placement factor times a unit-free share within the placement
 3. ☐ The second pass reads NM, carried in the deferred bank
 4. ☐ The second pass's motif rule, derived once as the deposit derives it
 5. ☐ The gDNA fragment-length estimator on aligned input
-6. ☐ The capture ruler's false capture on uncaptured libraries
+6. ☐ The capture ruler's false capture on uncaptured libraries: item 0
 7. ☐ The rule for intergenic placements
 8. ☐ Observable opportunity, and the clip-length model
 
