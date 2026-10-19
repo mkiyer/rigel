@@ -64,9 +64,10 @@ the code is open; each is less critical.
   both pairing sources exist
 4. ☐ The gates' own proof (the plan's step 1b), before the first change whose identity claim leans on those gates
 5. ☐ Location identity and aliases (D and N apart, M/=/X runs coalesced), which duplicate hits need
-6. ☐ Complete pairs only: HI groups (a group missing a mate is a counted unpaired alignment, duplicate groups collapse,
+6. ◐ Complete pairs only: HI groups (a group missing a mate is a counted unpaired alignment, duplicate groups collapse,
   truncated output stops the run, a mixed template keeps its asserted pairs), or the search, as the pairing question
-  decides
+  decides. ☑ One-mate hits dropped, counted as `missing_mate` (2026-10-18): the STAR panel 15/15 and the ladder 48/48
+  identical, as neither holds one; suite 3,063
 7. ☐ `num_hits` counts distinct usable hits (today `max(NH, hits)`)
 8. ☐ Without HI (minimap2), every same-reference pair validated, the span bound first
 9. ◐ Each hit validated as one molecule along a path, with one witness transcript: K by the resolver's rule; outward

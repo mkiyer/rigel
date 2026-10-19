@@ -974,8 +974,9 @@ static AlignmentGroup group_records_by_hit(
 // ================================================================
 
 /// `PAIR_OK` when a hit's two mates can be one molecule (`FragmentResolver::validate_pair`), or when the hit is not
-/// a pair this rule judges: a mate missing (a one-mate hit) or carried by several records, or a mate off the index.
-/// Those stay as they were, for the changes that own them. Otherwise the reason the hit is rejected.
+/// a pair this rule judges: a mate carried by several records, or a mate off the index. Those stay as they were, for
+/// the changes that own them. Otherwise the reason the hit is rejected; a hit with one mate gives no fragment length
+/// at all (`PAIR_MISSING_MATE`).
 static int32_t hit_verdict(
     const std::pair<std::vector<ParsedAlignment*>, std::vector<ParsedAlignment*>>& hit,
     const FragmentResolver& ctx,
@@ -993,7 +994,8 @@ static int32_t hit_verdict(
         if (m2) return PAIR_OK;
         m2 = rec;
     }
-    if (!m1 || !m2 || m1->exons.empty() || m2->exons.empty()) return PAIR_OK;
+    if (!m1 || !m2) return PAIR_MISSING_MATE;
+    if (m1->exons.empty() || m2->exons.empty()) return PAIR_OK;
     if (m1->ref_id < 0 || m2->ref_id < 0) return PAIR_OK;
     if (m1->ref_id != m2->ref_id) return PAIR_REFERENCE;
     if (m1->is_reverse() == m2->is_reverse()) return PAIR_STRAND;
@@ -2237,6 +2239,7 @@ private:
         stats_dict["n_pairs_rejected_strand"] = stats_.pairs_rejected[PAIR_STRAND];
         stats_dict["n_pairs_rejected_outward"] = stats_.pairs_rejected[PAIR_OUTWARD];
         stats_dict["n_pairs_rejected_length"] = stats_.pairs_rejected[PAIR_LENGTH];
+        stats_dict["n_pairs_rejected_missing_mate"] = stats_.pairs_rejected[PAIR_MISSING_MATE];
         stats_dict["n_withheld_no_valid_pair"] = stats_.n_withheld_no_valid_pair;
         // ⭐ The splice census, keyed off the ONE name table. `splice_type_label`'s strings are the
         // `SpliceType` member names lower-cased, so `rigel.splice.census_field` derives the very same

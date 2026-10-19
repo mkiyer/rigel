@@ -138,11 +138,11 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
 
 ### Fixed
 
-- A read pair's alignment is a fragment only if its two mates can be one molecule with a valid fragment length: on
-  one reference, on opposite strands, facing inward once each 5' soft clip is walked back, and 1 to `max_frag_length`
+- A read pair's alignment is a fragment only if it places both mates and the two can be one molecule with a valid
+  fragment length: on one reference, on opposite strands, facing inward once each 5' soft clip is walked back, and 1 to `max_frag_length`
   bases long along the genome or along one annotated transcript that holds every junction the pair observes. 0.7.1
-  placed every reported pair, so mates kilobases apart or facing away from each other entered the EM with lengths it
-  could only penalize. Such an alignment is now dropped, and a read pair left with none is withheld: counted in
+  placed every reported alignment, so a lone mate became a read-length fragment, and mates kilobases apart or facing
+  away from each other entered the EM with lengths it could only penalize. Such an alignment is now dropped, and a read pair left with none is withheld: counted in
   `summary.json` (`fragment_stats.withheld_no_valid_pair`, `pairs_rejected`) and written to the annotated BAM as
   unresolved (`ZC` `unpaired`), not counted intergenic. On simulated STAR alignments it drops 0.8–4.7 % of the
   reported pair alignments, rising with the gDNA share, and none whose alignment is correct.

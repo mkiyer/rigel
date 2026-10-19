@@ -604,6 +604,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             # Templates withheld because no pair of their mates is one molecule, and the hits dropped for it
             "withheld_no_valid_pair": stats.n_withheld_no_valid_pair,
             "pairs_rejected": {
+                "missing_mate": stats.n_pairs_rejected_missing_mate,
                 "reference": stats.n_pairs_rejected_reference,
                 "strand": stats.n_pairs_rejected_strand,
                 "outward": stats.n_pairs_rejected_outward,

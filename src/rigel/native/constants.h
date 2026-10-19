@@ -88,7 +88,8 @@ static constexpr int32_t PAIR_REFERENCE  = 1;  // the mates lie on two reference
 static constexpr int32_t PAIR_STRAND     = 2;  // on one strand
 static constexpr int32_t PAIR_OUTWARD    = 3;  // facing away from each other, or a mate past the other's 5' end
 static constexpr int32_t PAIR_LENGTH     = 4;  // no path gives a fragment length in [1, max_fragment_length]
-static constexpr int32_t N_PAIR_VERDICTS = 5;
+static constexpr int32_t PAIR_MISSING_MATE = 5;  // one mate only: no fragment length at all
+static constexpr int32_t N_PAIR_VERDICTS = 6;
 
 // ================================================================
 // Scoring constants (shared by scoring.cpp and Python side)

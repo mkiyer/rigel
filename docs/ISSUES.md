@@ -150,8 +150,10 @@ for it: `the-gdna-length-contrast-is-ill-conditioned-on-aligned-input` and `regi
 LANDED 2026-10-18, the pair validator (`tests/test_pair_validation.py`): a hit's two mates must be one molecule, on
 one reference and opposite strands, inward once each 5' soft clip is walked back along the genome, 1 to
 `max_frag_length` long along the genome or along one transcript that holds every observed junction (one witness); a
-rejected hit is dropped and a template left with none is withheld. One-mate hits, mates carried by several records
-and clip walks along a transcript path are not yet judged. Measured on the STAR panel at the recommended parameters,
+rejected hit is dropped and a template left with none is withheld. Then the same day, a one-mate hit (a lone
+secondary, a half-filled HI group, a primary whose mate is unmapped) is dropped as no pair, a numeric no-op on the
+STAR panel and the ladder, which hold none. Mates carried by several records and clip walks along a transcript path
+are not yet judged. Measured on the STAR panel at the recommended parameters,
 pinned and fractional, against main: transcript error −2.87 % stranded capture-OFF, +1.18 % unstranded capture-OFF,
 +0.29 % stranded capture-ON (gene −3.33 / +3.27 / −0.62 %); true gDNA counted as RNA −10 k to −17 k in the g50
 capture-OFF conditions and +5.5 k capture-ON; 2.7–4.0 k templates withheld per 10 M, none with a correct alignment

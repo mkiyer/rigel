@@ -4,8 +4,8 @@ Every accepted alignment needs a fragment length, which the EM scores by. A hit'
 on opposite strands, facing inward once each 5' soft clip is walked back, with both mates' aligned bases inside the
 molecule; its length, the molecule's bases with every observed skip removed, must lie in 1..max_frag_length along the
 genome, or along one annotated transcript that holds every junction the pair observes, that transcript's other introns
-in the unaligned stretches cut by the resolver's K rule. A hit that fails is dropped and counted by its reason; a
-template left with no hit is withheld, not counted intergenic. Measured on the STAR panel (47.9 M templates, per-base
+in the unaligned stretches cut by the resolver's K rule. A hit with one mate gives no length at all. A hit that fails
+is dropped and counted by its reason; a template left with no hit is withheld, not counted intergenic. Measured on the STAR panel (47.9 M templates, per-base
 truth), the rule rejects no correct pair (`ISSUES: star-hi-pairs-against-rigels-own-pairing`).
 
 The toy reference, 0-based half-open:
@@ -92,15 +92,22 @@ def _bam(base, records, name="p.bam"):
 
 
 def _scan(base, index, records, **scan):
-    stats, *_ = scan_and_buffer(_bam(base, records), index, BamScanConfig(total_threads=1, **scan))
-    return stats
+    return _scan_full(base, index, records, **scan)[0]
+
+
+def _scan_full(base, index, records, **scan):
+    """The scan's stats and its accumulator payload."""
+    stats, _strand, _buffer, payload = scan_and_buffer(
+        _bam(base, records), index, BamScanConfig(total_threads=1, **scan)
+    )
+    return stats, payload
+
+
+REASONS = ("missing_mate", "reference", "strand", "outward", "length")
 
 
 def _rejected(stats):
-    return {
-        r: getattr(stats, f"n_pairs_rejected_{r}")
-        for r in ("reference", "strand", "outward", "length")
-    }
+    return {r: getattr(stats, f"n_pairs_rejected_{r}") for r in REASONS}
 
 
 CONTROL = ("control", 1010, "100M", 1100, "100M")  # inward, L 190 along the genome
@@ -119,7 +126,7 @@ def index_t3(tmp_path_factory):
 def test_a_valid_pair_is_a_fragment(index, tmp_path):
     stats = _scan(tmp_path, index, _pair(*CONTROL))
     assert stats.n_fragments == 1
-    assert _rejected(stats) == {"reference": 0, "strand": 0, "outward": 0, "length": 0}
+    assert _rejected(stats) == dict.fromkeys(REASONS, 0)
     assert stats.n_withheld_no_valid_pair == 0
 
 
@@ -176,6 +183,56 @@ def test_an_invalid_hit_is_dropped_and_its_template_kept(index, tmp_path):
     stats = _scan(tmp_path, index, records)
     assert stats.n_fragments == 1
     assert _rejected(stats)["outward"] == 1
+    assert stats.n_withheld_no_valid_pair == 0
+
+
+def _unmapped_mate(qname, mate_pos):
+    """R2 unmapped, placed beside its mate as aligners write it; the scan reads no unmapped record."""
+    a = pysam.AlignedSegment()
+    a.query_name = qname
+    a.flag = 0x1 | 0x80 | 0x4
+    a.reference_id = 0
+    a.reference_start = mate_pos
+    a.next_reference_id = 0
+    a.next_reference_start = mate_pos
+    a.query_sequence = "A" * 100
+    a.query_qualities = pysam.qualitystring_to_array("I" * 100)
+    return a
+
+
+def test_a_mate_whose_partner_is_unmapped_is_no_hit(index, tmp_path):
+    """R1 at [1010,1110) and R2 unmapped: one mate gives no fragment length, so the template is withheld rather than
+    read as a 100-bp fragment."""
+    records = [_record("lone", R1_FWD | 0x8, 1010, "100M", 1010), _unmapped_mate("lone", 1010)]
+    stats = _scan(tmp_path, index, records)
+    assert stats.n_fragments == 0, "a lone mate is no molecule"
+    assert _rejected(stats)["missing_mate"] == 1
+    assert stats.n_withheld_no_valid_pair == 1
+
+
+def test_an_hi_group_missing_a_mate_is_dropped_and_its_template_kept(index, tmp_path):
+    """HI 1 holds both mates; HI 2 holds R1 alone, a half-filled group. The half group is no hit, so calibration is
+    offered one placement, not a read-length second one."""
+    records = _pair("half", 1010, "100M", 1100, "100M", nh=2, hi=1) + [
+        _record("half", R1_FWD | SECONDARY, 1500, "100M", 1600, nh=2, hi=2)
+    ]
+    stats, payload = _scan_full(tmp_path, index, records)
+    assert payload.qc.deferred_multiple_placements == 0, "the one-mate group became a placement"
+    assert stats.n_fragments == 1
+    assert _rejected(stats)["missing_mate"] == 1
+    assert stats.n_withheld_no_valid_pair == 0
+
+
+def test_a_lone_secondary_without_hi_is_no_hit(index, tmp_path):
+    """Without HI, a secondary R1 whose mate is unmapped becomes a one-mate hit; it is dropped, and the primary pair
+    stays, calibration's one placement."""
+    records = _pair("nohi", 1010, "100M", 1100, "100M", nh=2) + [
+        _record("nohi", R1_FWD | SECONDARY | 0x8, 1500, "100M", 1500, nh=2)
+    ]
+    stats, payload = _scan_full(tmp_path, index, records)
+    assert payload.qc.deferred_multiple_placements == 0, "the lone secondary became a placement"
+    assert stats.n_fragments == 1
+    assert _rejected(stats)["missing_mate"] >= 1
     assert stats.n_withheld_no_valid_pair == 0
 
 

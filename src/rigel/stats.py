@@ -78,6 +78,7 @@ class PipelineStats:
     n_sj_tag_invalid: int = 0  # XS or ts tags holding neither '+' nor '-' (read as absent)
 
     # --- Hits whose two mates are not one molecule, by reason, and the templates left with none ---
+    n_pairs_rejected_missing_mate: int = 0  # one mate only: no fragment length at all
     n_pairs_rejected_reference: int = 0  # the mates on two references
     n_pairs_rejected_strand: int = 0  # on one strand
     n_pairs_rejected_outward: int = (

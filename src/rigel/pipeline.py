@@ -139,6 +139,7 @@ def _log_pair_validation(stats: PipelineStats) -> None:
     """Say how many hits were dropped because their two mates are not one molecule, and how many templates that
     left with no hit at all."""
     rejected = {
+        "one mate only": stats.n_pairs_rejected_missing_mate,
         "two references": stats.n_pairs_rejected_reference,
         "one strand": stats.n_pairs_rejected_strand,
         "facing outward": stats.n_pairs_rejected_outward,
@@ -203,6 +204,7 @@ def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
         "n_sj_tag_conflicting",
         "n_sj_tag_invalid",
         # Hits whose mates are not one molecule, and the templates left with none
+        "n_pairs_rejected_missing_mate",
         "n_pairs_rejected_reference",
         "n_pairs_rejected_strand",
         "n_pairs_rejected_outward",
