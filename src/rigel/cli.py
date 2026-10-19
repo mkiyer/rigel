@@ -602,7 +602,10 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "with_annotated_sj": stats.n_with_annotated_sj,
             "with_unannotated_sj": stats.n_with_unannotated_sj,
             # Templates withheld, with no usable hit, by outcome; the hits dropped, by reason, are below
-            "withheld": {"unpaired": stats.n_withheld_unpaired},
+            "withheld": {
+                "unpaired": stats.n_withheld_unpaired,
+                "unannotated_splice": stats.n_withheld_unannotated_splice,
+            },
             # Templates whose NH exceeds the alignments reported for them (a truncated output)
             "nh_above_reported": stats.n_nh_above_reported,
             "hits_rejected": {
@@ -611,6 +614,9 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
                 "strand": stats.n_hits_rejected_strand,
                 "outward": stats.n_hits_rejected_outward,
                 "length": stats.n_hits_rejected_length,
+                "contradictory": stats.n_hits_rejected_contradictory,
+                "novel_junction": stats.n_hits_rejected_novel_junction,
+                "unsupported": stats.n_hits_rejected_unsupported,
             },
             "splice": splice_counts,
         },

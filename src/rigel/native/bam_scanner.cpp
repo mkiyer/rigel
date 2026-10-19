@@ -360,9 +360,11 @@ struct BamScanStats {
     // The junction-strand tag on each spliced record
     SJTagCounts sj_tags;
 
-    // Hits that are not usable, by `HIT_*` reason, and the templates left with none: unpaired
+    // Hits that are not usable, by `HIT_*` reason, and the templates left with none: an unannotated splice when the
+    // annotated-path rule withheld one of their hits, else unpaired
     std::array<int64_t, N_HIT_VERDICTS> hits_rejected{};
     int64_t n_withheld_unpaired = 0;
+    int64_t n_withheld_unannotated_splice = 0;
     // Templates whose NH exceeds their HI groups: the aligner truncated its output
     int64_t n_nh_above_reported = 0;
 
@@ -432,6 +434,7 @@ struct BamScanStats {
         sj_tags.merge(o.sj_tags);
         for (int32_t v = 0; v < N_HIT_VERDICTS; v++) hits_rejected[v] += o.hits_rejected[v];
         n_withheld_unpaired += o.n_withheld_unpaired;
+        n_withheld_unannotated_splice += o.n_withheld_unannotated_splice;
         n_nh_above_reported += o.n_nh_above_reported;
         for (size_t i = 0; i < splice_census.size(); i++)
             splice_census[i] += o.splice_census[i];
@@ -954,16 +957,16 @@ static AlignmentGroup group_records_by_hit(
 // Thread-safe: uses caller-supplied ResolverScratch for all resolve calls.
 
 // ================================================================
-// Pair validation: a hit is two mates that can be one molecule
+// The hit verdict: two mates that can be one molecule, whose junctions one annotated transcript holds
 // ================================================================
 
 /// `HIT_USABLE` when a hit's two mates can be one molecule (`FragmentResolver::validate_pair`), or when the hit is not
 /// a pair this rule judges: a mate carried by several records, or a mate off the index. Those stay as they were, for
-/// the changes that own them. Otherwise the reason the hit is rejected; a hit with one mate gives no fragment length
-/// at all (`HIT_MISSING_MATE`). A transcript that witnesses a path must hold every junction the hit observes, a
-/// supplementary record's too (`observed_junctions`).
-static int32_t hit_verdict(
+/// the changes that own them. Otherwise the reason they cannot; a hit with one mate gives no fragment length at all
+/// (`HIT_MISSING_MATE`). A transcript that witnesses a path must hold every junction the hit observes (``junctions``).
+static int32_t pair_verdict(
     const std::pair<std::vector<ParsedAlignment*>, std::vector<ParsedAlignment*>>& hit,
+    const std::vector<IntronBlock>& junctions,
     const FragmentResolver& ctx,
     ResolverScratch& scratch)
 {
@@ -986,11 +989,25 @@ static int32_t hit_verdict(
     if (m1->is_reverse() == m2->is_reverse()) return HIT_STRAND;
     const ParsedAlignment* f = m1->is_reverse() ? m2 : m1;
     const ParsedAlignment* r = m1->is_reverse() ? m1 : m2;
-    auto& junctions = scratch.hit_junctions;
-    observed_junctions(hit.first, hit.second, junctions);
     const PairMate pf{&f->exons, f->clip_lead, f->clip_trail};
     const PairMate pr{&r->exons, r->clip_lead, r->clip_trail};
     return ctx.validate_pair(f->ref_id, pf, pr, junctions, scratch);
+}
+
+/// Why a hit is not usable, or `HIT_USABLE`. Its two mates must be able to be one molecule (`pair_verdict`), and one
+/// annotated transcript must hold every junction it observes, a supplementary record's too (`observed_junctions`,
+/// `FragmentResolver::junction_holders`): the annotated-path rule. The molecule is judged first, so a hit the rule
+/// withholds always has a fragment length.
+static int32_t hit_verdict(
+    const std::pair<std::vector<ParsedAlignment*>, std::vector<ParsedAlignment*>>& hit,
+    const FragmentResolver& ctx,
+    ResolverScratch& scratch)
+{
+    auto& junctions = scratch.hit_junctions;
+    observed_junctions(hit.first, hit.second, junctions);
+    const int32_t pair = pair_verdict(hit, junctions, ctx, scratch);
+    if (pair != HIT_USABLE || junctions.empty()) return pair;
+    return ctx.junction_holders(junctions, scratch, scratch.pair_candidates);
 }
 
 static std::vector<std::pair<std::vector<ParsedAlignment*>,
@@ -1951,14 +1968,18 @@ private:
         all_hits.insert(all_hits.end(),
                         secondary_pairs.begin(), secondary_pairs.end());
 
-        // ⭐ A hit is two mates that can be one molecule (`hit_verdict`). A rejected hit is dropped, counted by its
-        // reason; a template left with no hit is withheld, and is no fragment.
+        // ⭐ A hit is usable when its two mates can be one molecule and one annotated transcript holds every junction
+        // it observes (`hit_verdict`). A hit that is not is dropped, counted by its reason; a template left with none
+        // is withheld, and is no fragment: an unannotated splice when the annotated-path rule withheld one of its
+        // hits, else unpaired.
         if (!all_hits.empty()) {
             size_t kept = 0;
+            bool unannotated_splice = false;
             for (size_t h = 0; h < all_hits.size(); ++h) {
                 const int32_t verdict = hit_verdict(all_hits[h], ctx, scratch);
                 if (verdict != HIT_USABLE) {
                     stats.hits_rejected[verdict]++;
+                    unannotated_splice |= is_unannotated_splice(verdict);
                     continue;
                 }
                 if (kept != h) all_hits[kept] = std::move(all_hits[h]);
@@ -1966,7 +1987,8 @@ private:
             }
             all_hits.resize(kept);
             if (kept == 0) {
-                stats.n_withheld_unpaired++;
+                if (unannotated_splice) stats.n_withheld_unannotated_splice++;
+                else stats.n_withheld_unpaired++;
                 return;
             }
         }
@@ -2224,7 +2246,11 @@ private:
         stats_dict["n_hits_rejected_outward"] = stats_.hits_rejected[HIT_OUTWARD];
         stats_dict["n_hits_rejected_length"] = stats_.hits_rejected[HIT_LENGTH];
         stats_dict["n_hits_rejected_missing_mate"] = stats_.hits_rejected[HIT_MISSING_MATE];
+        stats_dict["n_hits_rejected_contradictory"] = stats_.hits_rejected[HIT_CONTRADICTORY];
+        stats_dict["n_hits_rejected_novel_junction"] = stats_.hits_rejected[HIT_NOVEL_JUNCTION];
+        stats_dict["n_hits_rejected_unsupported"] = stats_.hits_rejected[HIT_UNSUPPORTED];
         stats_dict["n_withheld_unpaired"] = stats_.n_withheld_unpaired;
+        stats_dict["n_withheld_unannotated_splice"] = stats_.n_withheld_unannotated_splice;
         stats_dict["n_nh_above_reported"] = stats_.n_nh_above_reported;
         // ⭐ The splice census, keyed off the ONE name table. `splice_type_label`'s strings are the
         // `SpliceType` member names lower-cased, so `rigel.splice.census_field` derives the very same
@@ -2674,12 +2700,16 @@ public:
                             secondary_pairs.begin(),
                             secondary_pairs.end());
 
-            // The scan's pair verdicts, replayed (`hit_verdict`): a rejected hit's records are written as a
-            // secondary hit's, and a template left with no hit is written unresolved, class `unpaired`.
+            // The scan's hit verdicts, replayed (`hit_verdict`): a rejected hit's records are written as a
+            // secondary hit's, and a template left with no hit is written unresolved, class `unannotated_splice`
+            // when the annotated-path rule withheld one of its hits, else `unpaired`.
             std::vector<uint8_t> hit_rejected(all_hits.size(), 0);
             int32_t n_valid_hits = 0;
+            bool unannotated_splice = false;
             for (size_t h = 0; h < all_hits.size(); ++h) {
-                hit_rejected[h] = hit_verdict(all_hits[h], *ctx_, scratch) != HIT_USABLE;
+                const int32_t verdict = hit_verdict(all_hits[h], *ctx_, scratch);
+                hit_rejected[h] = verdict != HIT_USABLE;
+                unannotated_splice |= is_unannotated_splice(verdict);
                 n_valid_hits += hit_rejected[h] ? 0 : 1;
             }
 
@@ -2692,7 +2722,7 @@ public:
                 stamp_and_write_hit(raw_group, out, hdr, ".", ".", ".",
                                     -1, -1,
                                     AF_UNRESOLVED, 0.0f,
-                                    "unpaired", 0, 0, "unknown", -1);
+                                    unannotated_splice ? "unannotated_splice" : "unpaired", 0, 0, "unknown", -1);
                 n_records_written += static_cast<int64_t>(raw_group.size());
                 frag_id++;
                 return;

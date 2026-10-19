@@ -744,14 +744,53 @@ public:
         sort_unique(out);
     }
 
+    /// The transcripts that hold every junction in ``junctions`` (a hit's, as the scan collects them: at least one,
+    /// ascending by reference, coordinates and motif strand, each once), each matched as `sj_lookup_into` matches it,
+    /// into ``holders``: `HIT_USABLE` when there are any. Otherwise the reason there are none, the first that applies:
+    /// `HIT_CONTRADICTORY` when no one molecule can carry the junctions as observed (two overlap without being equal,
+    /// or their motifs name both strands), `HIT_NOVEL_JUNCTION` when one is held by no transcript, and
+    /// `HIT_UNSUPPORTED` when each is held by some transcript and none holds them all.
+    int32_t junction_holders(const std::vector<IntronBlock>& junctions, ResolverScratch& scratch,
+                             std::vector<int32_t>& holders) const
+    {
+        holders.clear();
+        int32_t motifs = STRAND_NONE;
+        for (size_t j = 0; j < junctions.size(); ++j) {
+            const IntronBlock& x = junctions[j];
+            motifs |= x.strand;
+            if (j == 0) continue;
+            // Sorted, so two that overlap unequal leave such a pair adjacent.
+            const IntronBlock& w = junctions[j - 1];
+            if (x.ref_id == w.ref_id && x.start < w.end && (x.start != w.start || x.end != w.end))
+                return HIT_CONTRADICTORY;
+        }
+        if (motifs == STRAND_AMBIGUOUS) return HIT_CONTRADICTORY;
+        for (size_t j = 0; j < junctions.size(); ++j) {
+            const IntronBlock& x = junctions[j];
+            sj_lookup_into(x.ref_id, x.start, x.end, x.strand, scratch.pair_tmp);
+            if (scratch.pair_tmp.empty()) {
+                holders.clear();
+                return HIT_NOVEL_JUNCTION;
+            }
+            if (j == 0) {
+                holders.swap(scratch.pair_tmp);
+            } else {
+                holders.erase(std::set_intersection(holders.begin(), holders.end(), scratch.pair_tmp.begin(),
+                                                    scratch.pair_tmp.end(), holders.begin()),
+                              holders.end());
+            }
+        }
+        return holders.empty() ? HIT_UNSUPPORTED : HIT_USABLE;
+    }
+
     /// Whether the forward mate ``f`` and the reverse mate ``r``, on reference ``ref_id``, can be one molecule:
     /// `HIT_USABLE`, or `HIT_OUTWARD` or `HIT_LENGTH` (the caller has checked the reference and the strands).
     ///
     /// The forward mate's 5' soft clip is walked back along the genome and the reverse mate's forward, giving the
     /// molecule [a, b); the mates must face inward, with both mates' aligned bases inside it. Its length counts the
     /// bases of [a, b) with every observed skip of either mate removed, and must lie in [1, max_fragment_length].
-    /// Failing that, one annotated transcript that holds every junction the hit observes (``junctions``, matched
-    /// as `sj_lookup_into` matches them), or, with none observed, any transcript over the molecule, may witness a
+    /// Failing that, one annotated transcript that holds every junction the hit observes (``junctions``, as
+    /// `junction_holders` reads them), or, with none observed, any transcript over the molecule, may witness a
     /// shorter path: its other introns in the stretches neither mate aligned are cut whole by the K rule of
     /// `collect_transcript_introns_in_gap`, and it offers no path when one of them overlaps an aligned block by more
     /// than K. One transcript supplies both the observed junctions and the implied introns, so a junction one
@@ -794,23 +833,10 @@ public:
         if (length >= 1 && length <= max_len) return HIT_USABLE;
 
         auto& cands = scratch.pair_candidates;  // the witnesses
-        cands.clear();
-        if (junctions.empty()) {
+        if (junctions.empty())
             transcripts_overlapping(ref_id, a, b, scratch, cands);
-        } else {
-            for (size_t j = 0; j < junctions.size(); ++j) {
-                sj_lookup_into(junctions[j].ref_id, junctions[j].start, junctions[j].end,
-                               junctions[j].strand, scratch.pair_tmp);
-                if (j == 0) {
-                    cands.swap(scratch.pair_tmp);
-                } else {
-                    auto end = std::set_intersection(cands.begin(), cands.end(), scratch.pair_tmp.begin(),
-                                                     scratch.pair_tmp.end(), cands.begin());
-                    cands.erase(end, cands.end());
-                }
-                if (cands.empty()) return HIT_LENGTH;
-            }
-        }
+        else if (junction_holders(junctions, scratch, cands) != HIT_USABLE)
+            return HIT_LENGTH;
 
         auto& aligned = scratch.pair_aligned;  // both mates' aligned blocks
         aligned.assign(f.blocks->begin(), f.blocks->end());

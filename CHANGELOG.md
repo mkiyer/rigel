@@ -154,9 +154,17 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   different core counts (by default `--threads` is the core count); isoforms that share fragments could swap whole
   counts. Each thread now runs whole equivalence classes, whose sums are added in the order one thread adds them,
   at no cost in speed.
-- A spliced fragment that no annotated transcript holds is RNA, not gDNA: `summary.json`'s `fraction_gdna` counts only
-  the unspliced intergenic fragments and books the spliced ones as their own pool (`count_intergenic_rna`), the report
-  splits its intergenic pool the same way, and the annotated BAM labels them `ZF` 0x21 rather than 0x25.
+- A spliced alignment is used only if one annotated transcript holds every junction it observes, both mates' and any
+  supplementary record's; Rigel does not assemble transcripts. An alignment with a junction no transcript has, with
+  annotated junctions no one transcript joins, or with junctions no one molecule can carry (two overlapping without
+  being equal, or motifs naming both strands) is neither RNA Rigel can place nor, spliced, gDNA. 0.7.1 called such an
+  alignment an annotated splice once one of its junctions matched and placed it through the union of its junctions'
+  transcripts; with none matching, the EM kept it as RNA while calibration counted it unspliced, and outside every
+  gene it was counted gDNA. Such an alignment is now dropped and the read pair keeps its others; a read pair left with
+  none is withheld, counted in `summary.json` (`fragment_stats.withheld.unannotated_splice`, and `hits_rejected` by
+  reason: `contradictory`, `novel_junction`, `unsupported`) and written to the annotated BAM as unresolved (`ZC`
+  `unannotated_splice`). On simulated STAR alignments it drops 78–91 k alignments per 10 M read pairs, almost all of
+  them alternatives of a read pair that keeps another, and withholds 1.6–1.8 k read pairs.
 - `--overhang-alpha 0`, documented as a hard gate, gave every candidate without overhang a NaN score, and every
   EM-routed fragment was dropped silently. It is now a hard gate: a candidate with overhang is skipped and the rest
   are scored. At either alpha's 0 an unambiguous spliced fragment, assigned without scoring, now meets the gate too,

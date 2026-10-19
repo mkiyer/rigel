@@ -69,12 +69,13 @@ yes/no cut (count ≥ 2, anchor ≤ the longest seen) on a continuous quantity, 
 junction on genomic sequence at that anchor length. Measurable only on aligned data: the aligned ladder is drafted
 for the cluster (`$RIGEL_RUNS/aligned_ladder/`), and on the production store 23.3 % of the ladder's
 annotated junctions are blacklisted. Also here, from
-`ISSUES: calibration-and-the-em-disagree-on-what-can-be-gdna` (closed): three fragment types calibration still puts on
-its unspliced bank, gDNA-eligible, that the EM treats as RNA only — an unannotated sequenced junction; two annotated
-junctions on opposite motif strands; mates disagreeing on an acceptor, which calibration merges into an unannotated
-intron and the resolver calls annotated — and one length rule the stages apply differently: calibration drops an
-unspliced or artifact reading past the maximum fragment length, the EM keeps gDNA while its likelihood competes.
-Those three fragment types are a local A/B, independent of the cluster work.
+`ISSUES: calibration-and-the-em-disagree-on-what-can-be-gdna` (closed): one length rule the stages apply differently:
+calibration drops an unspliced or artifact reading past the maximum fragment length, the EM keeps gDNA while its
+likelihood competes. LANDED 2026-10-19, the annotated-path rule (`tests/test_hit_verdict.py`): a spliced hit is usable
+only if one annotated transcript holds every junction it observes, so the three fragment types calibration banked as
+unspliced while the EM kept them RNA only (an unannotated sequenced junction; two annotated junctions on opposite motif
+strands; mates disagreeing on an acceptor) reach neither stage. Its cost on the stranded strata is
+`ISSUES: the-annotated-path-rule-costs-the-stranded-strata`.
 - BOTH WAYS. On the VCaP RNA half the production blacklist rejected 598,010 records where a pure-gDNA library's rate
   predicts about 20,000 (uniquely mapped single-junction records 429,208 of 12.55 M, 3.4 %; multi-junction 154,604 of
   1.88 M, 8.2 %). A rejected genuine read becomes an unspliced, gDNA-eligible fragment whose footprint spans the
@@ -147,7 +148,7 @@ The repair:
 
 Rigel reads alignments and does not repair them (owner, 2026-10-16). Fixing this exposes two defects that compensated
 for it: `the-gdna-length-contrast-is-ill-conditioned-on-aligned-input` and `region-lengths-count-unobservable-bases`.
-LANDED 2026-10-18, the pair validator (`tests/test_pair_validation.py`): a hit's two mates must be one molecule, on
+LANDED 2026-10-18, the pair validator (`tests/test_hit_verdict.py`): a hit's two mates must be one molecule, on
 one reference and opposite strands, inward once each 5' soft clip is walked back along the genome, 1 to
 `max_frag_length` long along the genome or along one transcript that holds every observed junction (one witness); a
 rejected hit is dropped and a template left with none is withheld. Then the same day, a one-mate hit (a lone
@@ -218,6 +219,30 @@ Calibration's region lengths count bases on which no fragment can be observed.
   placements.
 - **The simulator hides it.** The simulator draws gDNA over the N runs too: about 0.99 M of 5 M gDNA fragments at g50
   capture OFF are all-N reads, which no aligner places and the oracle BAM places by truth.
+
+### the-annotated-path-rule-costs-the-stranded-strata
+`priority: now — the calibration and post-calibration phases, after the scan; the rule landed regardless (owner, 2026-10-19) · kind: defect · 2026-10-19`
+The annotated-path rule (`tests/test_hit_verdict.py`) withholds a spliced hit that no one annotated transcript holds.
+On the STAR panel at the recommended parameters, pinned and fractional, against the tree before it: transcript error
+−10.2 % unstranded capture-OFF, +4.6 % stranded capture-OFF (g00 +4.7 %, g50 +2.0 %), +1.3 % stranded capture-ON
+(gene −6.2 / +5.2 / +2.2 %); the oracle ladder identical. It rejects 78–91 k hits per condition and withholds
+1.6–1.8 k templates: nearly every rejected hit is one of STAR's alternatives within 2 points of the best, in a template
+that keeps another hit, most of them in segmental duplications. The losses are not the withheld templates:
+- each condition's EM has one component holding 7.5–8.8 M of its 10 M fragments (1,200–1,600 genes), and the changed
+  hit sets move mass across it. At 20× the EM budget and δ 1e-10 the difference is the same, so it is the converged
+  answer that moves, not `ISSUES: the-em-stops-before-it-converges`;
+- direct: NDUFA6-DT, in the CYP2D6/7 duplication, whose 50-bp fragments STAR reads three ways (an annotated junction in
+  each copy, and a novel one between the copies at a score of 97 against 98). With the third dropped the gene falls
+  31,370 → 22,600 of 31,379, and an antisense nascent span rises 4 → 8,066;
+- indirect: genes with no novel junction lose to their own nascent spans, MMP11 24,652 → 18,959 of 24,666 (its span
+  0 → 5,521) and HMOX1 10,910 → 7,790 of 10,922; paralogs in chr22's low-copy repeats move both ways;
+- capture-ON: calibration's gDNA prior in the large component falls 3,117,466 → 3,075,548, and true gDNA counted as RNA
+  rises 42 k. The rejected hits were partly spliced gDNA, which calibration had banked as unspliced gDNA evidence.
+Open: why a part of the component whose own fragments did not change moves at convergence (the RNA prior's allocation
+across the component is the first suspect), and what gDNA evidence calibration should take from a spliced artifact
+that the scan no longer offers.
+Instruments: `quant_accuracy.py` on the STAR panel, pinned and fractional; the per-gene dissection, two builds side by
+side, in `$RIGEL_RUNS/arms/2026-10-19_annotated_path/dissect/`.
 
 ### the-anchor-tolerance-applies-beyond-implicit-splicing
 `priority: now — the first wave of the paired-end repair; the owner's scope ruling of 2026-10-16 · kind: defect · 2026-10-16`
@@ -820,8 +845,11 @@ Open before it is designed:
 - splice artifacts concentrate on unannotated junctions (`ISSUES: splicing-artifacts`), so a gene count that bypasses
   the EM's gDNA competition would re-admit them as RNA;
 - a gene's total would then exceed the sum of its transcripts, which the tables and the report must say.
-Instrument: the scan's withheld-template census, its unannotated-splice outcome by class (within one gene, between genes,
-touching an intergenic region), on the STAR panel with truth.
+Instrument: the census of the templates the annotated-path rule withholds (`ZC` `unannotated_splice` in the annotated
+BAM), by where the molecule lies (within one gene, between genes, outside the genes) and true origin, on the STAR panel
+(`$RIGEL_RUNS/arms/2026-10-19_annotated_path/salvage_census.py`). Measured 2026-10-19, per 10 M templates: within one
+gene 0.4–1.0 k RNA (the annotated ones all but 3–7 on their true gene) and 0–0.8 k gDNA; between genes 0.1–0.6 k RNA
+and 0–0.5 k gDNA; outside the genes gDNA only, 0–0.4 k.
 
 ### strand-overdispersion-one-shared-value
 `priority: later — od = 0 and κ from the genuine junctions ship in 0.8.0 with the class diagnostics; the pruning moved to ISSUES: splicing-artifacts (owner, 2026-10-14) · kind: design · 2026-09-27`

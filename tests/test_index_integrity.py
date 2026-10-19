@@ -345,6 +345,32 @@ class TestSpliceJunctions:
                 break
         assert found, "t2 intron 1100-1199 not found in sj_map"
 
+    def test_the_resolver_and_calibration_hold_the_same_junctions(self, mini_index):
+        assert _resolver_junctions(mini_index) == _calibration_junctions(mini_index)
+
+
+def _resolver_junctions(index) -> set[tuple[str, int, int, int]]:
+    """The junctions the resolver matches a read's against (`sj_map`), as (reference, start, end, strand)."""
+    return {
+        (str(ref), int(start), int(end), int(strand)) for ref, start, end, strand in index.sj_map
+    }
+
+
+def _calibration_junctions(index) -> set[tuple[str, int, int, int]]:
+    """The junctions calibration's deposit matches a read's against: the splice graph's sj edges on the flat
+    region-bound axis (`build_sj_arrays`), turned back into coordinates. Built along another path than `sj_map`; a
+    junction one holds and the other lacks would be spliced RNA to the EM and unspliced to calibration."""
+    from rigel.calibration.splice_graph import build_region_partition_arrays, build_sj_arrays
+
+    bounds, ref_offsets, _ = build_region_partition_arrays(index)
+    sj = build_sj_arrays(index)
+    donor = np.repeat(np.arange(len(sj.offsets) - 1), np.diff(sj.offsets))
+    ref = np.searchsorted(ref_offsets, donor, side="right") - 1
+    return {
+        (index.ref_names[r], int(bounds[d]), int(bounds[a]), int(s))
+        for r, d, a, s in zip(ref, donor, sj.boundary_right, sj.strand)
+    }
+
 
 # ═════════════════════════════════════════════════════════════════════
 # C++ FragmentResolver
@@ -554,6 +580,9 @@ class TestLargerIndex:
                 f"Single-exon transcript tD1 (t_idx={td1_idx}) should not "
                 f"appear in SJ map, but found in ({ref},{start},{end},{strand})"
             )
+
+    def test_the_resolver_and_calibration_hold_the_same_junctions(self, complex_index):
+        assert _resolver_junctions(complex_index) == _calibration_junctions(complex_index)
 
     def test_overlapping_exons_both_found(self, complex_index):
         """Query exon region 900-1100 shared by gA and gC transcripts."""

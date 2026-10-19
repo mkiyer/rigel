@@ -77,7 +77,7 @@ static constexpr int32_t AF_INTERGENIC_BIT       = 0x20;
 static constexpr int32_t AF_MULTIMAPPER_DROP_BIT = 0x80;
 
 // The composed values the C++ stamp sites write.
-static constexpr int32_t AF_UNRESOLVED        = 0x00;  // withheld: no pair of the template's mates is one molecule
+static constexpr int32_t AF_UNRESOLVED        = 0x00;  // withheld: the template has no usable hit
 static constexpr int32_t AF_GDNA_INTERGENIC   = AF_RESOLVED_BIT | AF_GDNA_BIT | AF_INTERGENIC_BIT;  // 0x25
 static constexpr int32_t AF_RNA_INTERGENIC    = AF_RESOLVED_BIT | AF_INTERGENIC_BIT;                // 0x21
 static constexpr int32_t AF_MULTIMAPPER_DROP  = AF_MULTIMAPPER_DROP_BIT;                            // 0x80
@@ -90,7 +90,17 @@ static constexpr int32_t HIT_STRAND       = 2;  // on one strand
 static constexpr int32_t HIT_OUTWARD      = 3;  // facing away from each other, or a mate past the other's 5' end
 static constexpr int32_t HIT_LENGTH       = 4;  // no path gives a fragment length in [1, max_fragment_length]
 static constexpr int32_t HIT_MISSING_MATE = 5;  // one mate only: no fragment length at all
-static constexpr int32_t N_HIT_VERDICTS   = 6;
+// Or they are, and no one annotated transcript holds every junction the hit observes (the annotated-path rule,
+// `FragmentResolver::junction_holders`):
+static constexpr int32_t HIT_CONTRADICTORY  = 6;  // two junctions overlap unequal, or their motifs name both strands
+static constexpr int32_t HIT_NOVEL_JUNCTION = 7;  // a junction no transcript holds
+static constexpr int32_t HIT_UNSUPPORTED    = 8;  // each junction held by some transcript, none holding them all
+static constexpr int32_t N_HIT_VERDICTS     = 9;
+
+/// A molecule the annotated-path rule withheld: its template, left with no usable hit, is an unannotated splice.
+inline bool is_unannotated_splice(int32_t verdict) {
+    return verdict == HIT_CONTRADICTORY || verdict == HIT_NOVEL_JUNCTION || verdict == HIT_UNSUPPORTED;
+}
 
 // ================================================================
 // Scoring constants (shared by scoring.cpp and Python side)

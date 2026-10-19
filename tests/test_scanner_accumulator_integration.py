@@ -126,8 +126,9 @@ def blacklisted_oracle(tmp_path):
     sc.cleanup()
 
 
-def _two_contig_index(tmp_path):
-    """chr1 and chr2, 3,000 bp each; one two-exon transcript on chr1 at 101-300 and 501-700."""
+def _two_contig_index(tmp_path, extra_gtf=""):
+    """chr1 and chr2, 3,000 bp each; one two-exon transcript on chr1 at 101-300 and 501-700, and the GTF rows
+    ``extra_gtf`` adds."""
     import pysam
 
     from rigel.index import TranscriptIndex
@@ -137,7 +138,7 @@ def _two_contig_index(tmp_path):
     pysam.faidx(str(fasta))
     gtf.write_text(
         'chr1\ttest\texon\t101\t300\t.\t+\t.\tgene_id "g1"; transcript_id "t1";\n'
-        'chr1\ttest\texon\t501\t700\t.\t+\t.\tgene_id "g1"; transcript_id "t1";\n'
+        'chr1\ttest\texon\t501\t700\t.\t+\t.\tgene_id "g1"; transcript_id "t1";\n' + extra_gtf
     )
     index_dir = tmp_path / "idx"
     TranscriptIndex.build(str(fasta), str(gtf), str(index_dir), write_tsv=False)
@@ -189,7 +190,7 @@ def multi_reference_bam(tmp_path):
     so the deposit adapter refuses it. The refusal is right; being silent about it is not, which is what
     the counter is for. A pair whose mates sit on two references used to reach the same refusal; it no
     longer reaches the deposit at all, because the scan withholds a pair that is not one molecule
-    (`tests/test_pair_validation.py`).
+    (`tests/test_hit_verdict.py`).
 
     Returns ``(bam_path, index)``.
     """
@@ -560,9 +561,16 @@ def test_an_intron_on_another_reference_is_not_cut(tmp_path):
 
     A record whose CIGAR has an N and no M, D, = or X op adds an intron and no exon block, so a pair
     whose exon blocks all sit on chr1 can carry an intron on chr2. The deposit reads an intron's
-    coordinates and never its reference, so kept, that intron would be cut out of the chr1 extent.
+    coordinates and never its reference, so kept, that intron would be cut out of the chr1 extent. The
+    intron is annotated on both references (tA, tB), or the scan would withhold the pair before any
+    deposit (`tests/test_hit_verdict.py`).
     """
-    index = _two_contig_index(tmp_path)
+    two_transcripts = "".join(
+        f'{ref}\ttest\texon\t{s}\t{e}\t.\t+\t.\tgene_id "g{t}"; transcript_id "{t}";\n'
+        for ref, t in (("chr1", "tA"), ("chr2", "tB"))
+        for s, e in ((1401, 1520), (1561, 1700))
+    )
+    index = _two_contig_index(tmp_path, two_transcripts)
 
     def deposit(name, mate_ref_id, mate_cigar):
         reads = [

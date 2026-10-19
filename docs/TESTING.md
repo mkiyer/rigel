@@ -216,6 +216,8 @@ draws them.
 
 `shadow_genes` sit on the blank contig `test_blank`: unannotated transcription the simulator draws from
 and the index never sees — the control for anything that trusts the annotation's notion of "pure gDNA".
+The scan withholds the spliced reads of the two spliced ones (U5, U6), whose junctions no annotated
+transcript holds; their unspliced reads, and the single-exon shadows', are the control.
 The GTFs, `test_abundances.tsv` and the three probe BEDs are rendered by `build_test_reference.py` and
 versioned beside the YAML (`--check` and `tests/test_test_reference_renders.py` refuse a drifted render);
 the benign panel tiles each probed gene's exon union 8 × 125 bp, never spanning an sj (a union piece shorter

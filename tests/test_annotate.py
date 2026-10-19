@@ -921,19 +921,15 @@ class TestAnnotatedBamIntegration:
             assert rec.get_tag("ZC") == "."
         assert stats.n_intergenic_unspliced >= 1
 
-    def test_zf_spliced_intergenic_marked_rna(self, scenario, tmp_path):
-        """A spliced read pair is certified RNA whether or not an annotated transcript holds it: no transcript
-        holds this one, so ZF is is_resolved & is_intergenic with no gDNA bit, as the scanner counts it."""
+    def test_zf_spliced_intergenic_withheld(self, scenario, tmp_path):
+        """A spliced read pair that no annotated transcript holds is withheld (the annotated-path rule): ZF 0, ZC
+        ``unannotated_splice``, and nothing counted intergenic."""
         sentinel, stats = self._annotate_with_intergenic_sentinel(scenario, tmp_path, spliced=True)
         for rec in sentinel:
-            zf = rec.get_tag("ZF")
-            assert zf == AF_RNA_INTERGENIC, (
-                f"Spliced intergenic record should have ZF=AF_RNA_INTERGENIC "
-                f"({AF_RNA_INTERGENIC:#x}), got {zf:#x}"
-            )
-            _assert_zf_invariants(zf)
-            assert rec.get_tag("ZC") == "."
-        assert stats.n_intergenic_spliced >= 1
+            assert rec.get_tag("ZF") == AF_UNRESOLVED
+            assert rec.get_tag("ZC") == "unannotated_splice"
+        assert stats.n_intergenic_spliced == 0
+        assert stats.n_withheld_unannotated_splice >= 1
 
     def test_zf_multimapper_dropped_without_include_multimap(self, scenario, tmp_path):
         """When --no-include-multimap drops a multimapper, ZF is

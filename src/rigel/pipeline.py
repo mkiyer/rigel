@@ -136,14 +136,16 @@ def _log_sj_tags(stats: PipelineStats, scan: BamScanConfig) -> None:
 
 
 def _log_hit_verdicts(stats: PipelineStats) -> None:
-    """Say how many hits were dropped because their two mates are not one molecule, and how many templates that
-    left with no hit at all."""
+    """Say how many hits were dropped, and why, and how many templates that left with no usable hit."""
     rejected = {
         "one mate only": stats.n_hits_rejected_missing_mate,
         "two references": stats.n_hits_rejected_reference,
         "one strand": stats.n_hits_rejected_strand,
         "facing outward": stats.n_hits_rejected_outward,
         "too long on every path": stats.n_hits_rejected_length,
+        "junctions that contradict": stats.n_hits_rejected_contradictory,
+        "a novel junction": stats.n_hits_rejected_novel_junction,
+        "junctions no one transcript holds": stats.n_hits_rejected_unsupported,
     }
     if stats.n_nh_above_reported:
         logger.warning(
@@ -154,10 +156,11 @@ def _log_hit_verdicts(stats: PipelineStats) -> None:
     if not any(rejected.values()):
         return
     logger.info(
-        "[SCAN] %d hits dropped, their mates not one molecule (%s); %d templates left with no hit, withheld",
+        "[SCAN] %d hits dropped (%s); templates left with no usable hit, withheld: %d unpaired, %d unannotated splices",
         sum(rejected.values()),
         ", ".join(f"{why} {n}" for why, n in rejected.items() if n),
         stats.n_withheld_unpaired,
+        stats.n_withheld_unannotated_splice,
     )
 
 
@@ -209,13 +212,17 @@ def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
         "n_sj_tag_untagged",
         "n_sj_tag_conflicting",
         "n_sj_tag_invalid",
-        # Hits whose mates are not one molecule, and the templates left with none
+        # Hits that are not usable, and the templates left with none
         "n_hits_rejected_missing_mate",
         "n_hits_rejected_reference",
         "n_hits_rejected_strand",
         "n_hits_rejected_outward",
         "n_hits_rejected_length",
+        "n_hits_rejected_contradictory",
+        "n_hits_rejected_novel_junction",
+        "n_hits_rejected_unsupported",
         "n_withheld_unpaired",
+        "n_withheld_unannotated_splice",
         "n_nh_above_reported",
         # The deposit hold-out that closes the census identity
         "n_deposit_not_offered",
