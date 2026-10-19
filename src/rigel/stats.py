@@ -78,12 +78,12 @@ class PipelineStats:
     n_sj_tag_invalid: int = 0  # XS or ts tags holding neither '+' nor '-' (read as absent)
 
     # --- Hits whose two mates are not one molecule, by reason, and the templates left with none ---
-    n_pairs_rejected_missing_mate: int = 0  # one mate only: no fragment length at all
-    n_pairs_rejected_reference: int = 0  # the mates on two references
-    n_pairs_rejected_strand: int = 0  # on one strand
-    n_pairs_rejected_outward: int = 0  # facing away, or a mate past the other's 5' end
-    n_pairs_rejected_length: int = 0  # no path gives a fragment length in [1, max_frag_length]
-    n_withheld_no_valid_pair: int = 0  # templates with no hit left: no fragment, not intergenic
+    n_hits_rejected_missing_mate: int = 0  # one mate only: no fragment length at all
+    n_hits_rejected_reference: int = 0  # the mates on two references
+    n_hits_rejected_strand: int = 0  # on one strand
+    n_hits_rejected_outward: int = 0  # facing away, or a mate past the other's 5' end
+    n_hits_rejected_length: int = 0  # no path gives a fragment length in [1, max_frag_length]
+    n_withheld_unpaired: int = 0  # templates with no hit left: no fragment, not intergenic
     n_nh_above_reported: int = 0  # templates whose NH exceeds their HI groups (truncated output)
 
     # --- The per-fragment splice census (scanner QC; ``rigel report``'s splice breakdown) ---

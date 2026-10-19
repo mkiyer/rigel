@@ -745,7 +745,7 @@ public:
     }
 
     /// Whether the forward mate ``f`` and the reverse mate ``r``, on reference ``ref_id``, can be one molecule:
-    /// `PAIR_OK`, or `PAIR_OUTWARD` or `PAIR_LENGTH` (the caller has checked the reference and the strands).
+    /// `HIT_USABLE`, or `HIT_OUTWARD` or `HIT_LENGTH` (the caller has checked the reference and the strands).
     ///
     /// The forward mate's 5' soft clip is walked back along the genome and the reverse mate's forward, giving the
     /// molecule [a, b); the mates must face inward, with both mates' aligned bases inside it. Its length counts the
@@ -764,7 +764,7 @@ public:
         const int64_t max_len = max_fragment_length_;
         const int32_t a = f.blocks->front().first - f.clip_lead;
         const int32_t b = r.blocks->back().second + r.clip_trail;
-        if (!(a < b && f.blocks->back().second <= b && r.blocks->front().first >= a)) return PAIR_OUTWARD;
+        if (!(a < b && f.blocks->back().second <= b && r.blocks->front().first >= a)) return HIT_OUTWARD;
 
         auto& skips = scratch.pair_skips;  // each mate's holes between consecutive blocks, the two merged
         skips.clear();
@@ -791,7 +791,7 @@ public:
         }
         if (open) removed += run_e - run_s;
         const int64_t length = static_cast<int64_t>(b) - a - removed;
-        if (length >= 1 && length <= max_len) return PAIR_OK;
+        if (length >= 1 && length <= max_len) return HIT_USABLE;
 
         auto& cands = scratch.pair_candidates;  // the witnesses
         cands.clear();
@@ -808,7 +808,7 @@ public:
                                                      scratch.pair_tmp.end(), cands.begin());
                     cands.erase(end, cands.end());
                 }
-                if (cands.empty()) return PAIR_LENGTH;
+                if (cands.empty()) return HIT_LENGTH;
             }
         }
 
@@ -854,9 +854,9 @@ public:
             for (size_t i = 0; i < cut.size(); ++i)
                 if (i == 0 || cut[i].start != cut[i - 1].start || cut[i].end != cut[i - 1].end)
                     extra += cut[i].end - cut[i].start;
-            if (length - extra >= 1 && length - extra <= max_len) return PAIR_OK;
+            if (length - extra >= 1 && length - extra <= max_len) return HIT_USABLE;
         }
-        return PAIR_LENGTH;
+        return HIT_LENGTH;
     }
 
     /// ⭐ EVERY explanation of this fragment's UNSEQUENCED gaps, grouped so that identical paths are ONE

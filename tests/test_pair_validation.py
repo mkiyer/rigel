@@ -107,7 +107,7 @@ REASONS = ("missing_mate", "reference", "strand", "outward", "length")
 
 
 def _rejected(stats):
-    return {r: getattr(stats, f"n_pairs_rejected_{r}") for r in REASONS}
+    return {r: getattr(stats, f"n_hits_rejected_{r}") for r in REASONS}
 
 
 CONTROL = ("control", 1010, "100M", 1100, "100M")  # inward, L 190 along the genome
@@ -127,7 +127,7 @@ def test_a_valid_pair_is_a_fragment(index, tmp_path):
     stats = _scan(tmp_path, index, _pair(*CONTROL))
     assert stats.n_fragments == 1
     assert _rejected(stats) == dict.fromkeys(REASONS, 0)
-    assert stats.n_withheld_no_valid_pair == 0
+    assert stats.n_withheld_unpaired == 0
 
 
 def test_a_pair_facing_outward_is_withheld_not_intergenic(index, tmp_path):
@@ -136,7 +136,7 @@ def test_a_pair_facing_outward_is_withheld_not_intergenic(index, tmp_path):
     assert stats.n_fragments == 0, "an unclipped pair facing outward is no molecule"
     assert stats.n_intergenic_unspliced == 0
     assert _rejected(stats)["outward"] == 1
-    assert stats.n_withheld_no_valid_pair == 1
+    assert stats.n_withheld_unpaired == 1
 
 
 def test_a_5_prime_soft_clip_is_walked_back(index, tmp_path):
@@ -151,7 +151,7 @@ def test_a_pair_too_long_along_every_path_is_withheld(index, tmp_path):
     stats = _scan(tmp_path, index, _pair("far", 6000, "100M", 8000, "100M"))
     assert stats.n_fragments == 0
     assert _rejected(stats)["length"] == 1
-    assert stats.n_withheld_no_valid_pair == 1
+    assert stats.n_withheld_unpaired == 1
 
 
 def test_the_tolerance_lets_a_mate_run_k_bases_into_an_intron(index, tmp_path):
@@ -183,7 +183,7 @@ def test_an_invalid_hit_is_dropped_and_its_template_kept(index, tmp_path):
     stats = _scan(tmp_path, index, records)
     assert stats.n_fragments == 1
     assert _rejected(stats)["outward"] == 1
-    assert stats.n_withheld_no_valid_pair == 0
+    assert stats.n_withheld_unpaired == 0
 
 
 def _unmapped_mate(qname, mate_pos):
@@ -207,7 +207,7 @@ def test_a_mate_whose_partner_is_unmapped_is_no_hit(index, tmp_path):
     stats = _scan(tmp_path, index, records)
     assert stats.n_fragments == 0, "a lone mate is no molecule"
     assert _rejected(stats)["missing_mate"] == 1
-    assert stats.n_withheld_no_valid_pair == 1
+    assert stats.n_withheld_unpaired == 1
 
 
 def test_an_hi_group_missing_a_mate_is_dropped_and_its_template_kept(index, tmp_path):
@@ -220,7 +220,7 @@ def test_an_hi_group_missing_a_mate_is_dropped_and_its_template_kept(index, tmp_
     assert payload.qc.deferred_multiple_placements == 0, "the one-mate group became a placement"
     assert stats.n_fragments == 1
     assert _rejected(stats)["missing_mate"] == 1
-    assert stats.n_withheld_no_valid_pair == 0
+    assert stats.n_withheld_unpaired == 0
 
 
 def test_a_lone_secondary_without_hi_is_no_hit(index, tmp_path):
@@ -233,7 +233,7 @@ def test_a_lone_secondary_without_hi_is_no_hit(index, tmp_path):
     assert payload.qc.deferred_multiple_placements == 0, "the lone secondary became a placement"
     assert stats.n_fragments == 1
     assert _rejected(stats)["missing_mate"] >= 1
-    assert stats.n_withheld_no_valid_pair == 0
+    assert stats.n_withheld_unpaired == 0
 
 
 # ── multiplicity: a template's distinct valid hits ──────────────────────────────────────────────────

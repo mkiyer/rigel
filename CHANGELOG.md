@@ -143,7 +143,7 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   bases long along the genome or along one annotated transcript that holds every junction the pair observes. 0.7.1
   placed every reported alignment, so a lone mate became a read-length fragment, and mates kilobases apart or facing
   away from each other entered the EM with lengths it could only penalize. Such an alignment is now dropped, and a read pair left with none is withheld: counted in
-  `summary.json` (`fragment_stats.withheld_no_valid_pair`, `pairs_rejected`) and written to the annotated BAM as
+  `summary.json` (`fragment_stats.withheld.unpaired`, `hits_rejected`) and written to the annotated BAM as
   unresolved (`ZC` `unpaired`), not counted intergenic. On simulated STAR alignments it drops 0.8–4.7 % of the
   reported pair alignments, rising with the gDNA share, and none whose alignment is correct. A read pair's
   multiplicity is its valid alignments, not the aligner's `NH`, so a pair whose other alignments were dropped is read

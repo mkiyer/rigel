@@ -361,9 +361,9 @@ struct BamScanStats {
     // The junction-strand tag on each spliced record
     SJTagCounts sj_tags;
 
-    // Hits whose mates are not one molecule, by `PAIR_*` reason, and the templates left with none
-    std::array<int64_t, N_PAIR_VERDICTS> pairs_rejected{};
-    int64_t n_withheld_no_valid_pair = 0;
+    // Hits that are not usable, by `HIT_*` reason, and the templates left with none: unpaired
+    std::array<int64_t, N_HIT_VERDICTS> hits_rejected{};
+    int64_t n_withheld_unpaired = 0;
     // Templates whose NH exceeds their HI groups: the aligner truncated its output
     int64_t n_nh_above_reported = 0;
 
@@ -431,8 +431,8 @@ struct BamScanStats {
         n_sj_observed += o.n_sj_observed;
         n_sj_blacklisted += o.n_sj_blacklisted;
         sj_tags.merge(o.sj_tags);
-        for (int32_t v = 0; v < N_PAIR_VERDICTS; v++) pairs_rejected[v] += o.pairs_rejected[v];
-        n_withheld_no_valid_pair += o.n_withheld_no_valid_pair;
+        for (int32_t v = 0; v < N_HIT_VERDICTS; v++) hits_rejected[v] += o.hits_rejected[v];
+        n_withheld_unpaired += o.n_withheld_unpaired;
         n_nh_above_reported += o.n_nh_above_reported;
         for (size_t i = 0; i < splice_census.size(); i++)
             splice_census[i] += o.splice_census[i];
@@ -976,10 +976,10 @@ static AlignmentGroup group_records_by_hit(
 // Pair validation: a hit is two mates that can be one molecule
 // ================================================================
 
-/// `PAIR_OK` when a hit's two mates can be one molecule (`FragmentResolver::validate_pair`), or when the hit is not
+/// `HIT_USABLE` when a hit's two mates can be one molecule (`FragmentResolver::validate_pair`), or when the hit is not
 /// a pair this rule judges: a mate carried by several records, or a mate off the index. Those stay as they were, for
 /// the changes that own them. Otherwise the reason the hit is rejected; a hit with one mate gives no fragment length
-/// at all (`PAIR_MISSING_MATE`).
+/// at all (`HIT_MISSING_MATE`).
 static int32_t hit_verdict(
     const std::pair<std::vector<ParsedAlignment*>, std::vector<ParsedAlignment*>>& hit,
     const FragmentResolver& ctx,
@@ -989,19 +989,19 @@ static int32_t hit_verdict(
     const ParsedAlignment* m2 = nullptr;
     for (const auto* rec : hit.first) {
         if (rec->is_supplementary()) continue;
-        if (m1) return PAIR_OK;
+        if (m1) return HIT_USABLE;
         m1 = rec;
     }
     for (const auto* rec : hit.second) {
         if (rec->is_supplementary()) continue;
-        if (m2) return PAIR_OK;
+        if (m2) return HIT_USABLE;
         m2 = rec;
     }
-    if (!m1 || !m2) return PAIR_MISSING_MATE;
-    if (m1->exons.empty() || m2->exons.empty()) return PAIR_OK;
-    if (m1->ref_id < 0 || m2->ref_id < 0) return PAIR_OK;
-    if (m1->ref_id != m2->ref_id) return PAIR_REFERENCE;
-    if (m1->is_reverse() == m2->is_reverse()) return PAIR_STRAND;
+    if (!m1 || !m2) return HIT_MISSING_MATE;
+    if (m1->exons.empty() || m2->exons.empty()) return HIT_USABLE;
+    if (m1->ref_id < 0 || m2->ref_id < 0) return HIT_USABLE;
+    if (m1->ref_id != m2->ref_id) return HIT_REFERENCE;
+    if (m1->is_reverse() == m2->is_reverse()) return HIT_STRAND;
     const ParsedAlignment* f = m1->is_reverse() ? m2 : m1;
     const ParsedAlignment* r = m1->is_reverse() ? m1 : m2;
     auto& junctions = scratch.pair_junctions;  // the kept junctions both mates observe
@@ -1985,8 +1985,8 @@ private:
             size_t kept = 0;
             for (size_t h = 0; h < all_hits.size(); ++h) {
                 const int32_t verdict = hit_verdict(all_hits[h], ctx, scratch);
-                if (verdict != PAIR_OK) {
-                    stats.pairs_rejected[verdict]++;
+                if (verdict != HIT_USABLE) {
+                    stats.hits_rejected[verdict]++;
                     continue;
                 }
                 if (kept != h) all_hits[kept] = std::move(all_hits[h]);
@@ -1994,7 +1994,7 @@ private:
             }
             all_hits.resize(kept);
             if (kept == 0) {
-                stats.n_withheld_no_valid_pair++;
+                stats.n_withheld_unpaired++;
                 return;
             }
         }
@@ -2247,12 +2247,12 @@ private:
         stats_dict["n_sj_tag_untagged"] = stats_.sj_tags.untagged;
         stats_dict["n_sj_tag_conflicting"] = stats_.sj_tags.conflicting;
         stats_dict["n_sj_tag_invalid"] = stats_.sj_tags.invalid;
-        stats_dict["n_pairs_rejected_reference"] = stats_.pairs_rejected[PAIR_REFERENCE];
-        stats_dict["n_pairs_rejected_strand"] = stats_.pairs_rejected[PAIR_STRAND];
-        stats_dict["n_pairs_rejected_outward"] = stats_.pairs_rejected[PAIR_OUTWARD];
-        stats_dict["n_pairs_rejected_length"] = stats_.pairs_rejected[PAIR_LENGTH];
-        stats_dict["n_pairs_rejected_missing_mate"] = stats_.pairs_rejected[PAIR_MISSING_MATE];
-        stats_dict["n_withheld_no_valid_pair"] = stats_.n_withheld_no_valid_pair;
+        stats_dict["n_hits_rejected_reference"] = stats_.hits_rejected[HIT_REFERENCE];
+        stats_dict["n_hits_rejected_strand"] = stats_.hits_rejected[HIT_STRAND];
+        stats_dict["n_hits_rejected_outward"] = stats_.hits_rejected[HIT_OUTWARD];
+        stats_dict["n_hits_rejected_length"] = stats_.hits_rejected[HIT_LENGTH];
+        stats_dict["n_hits_rejected_missing_mate"] = stats_.hits_rejected[HIT_MISSING_MATE];
+        stats_dict["n_withheld_unpaired"] = stats_.n_withheld_unpaired;
         stats_dict["n_nh_above_reported"] = stats_.n_nh_above_reported;
         // ⭐ The splice census, keyed off the ONE name table. `splice_type_label`'s strings are the
         // `SpliceType` member names lower-cased, so `rigel.splice.census_field` derives the very same
@@ -2707,7 +2707,7 @@ public:
             std::vector<uint8_t> hit_rejected(all_hits.size(), 0);
             int32_t n_valid_hits = 0;
             for (size_t h = 0; h < all_hits.size(); ++h) {
-                hit_rejected[h] = hit_verdict(all_hits[h], *ctx_, scratch) != PAIR_OK;
+                hit_rejected[h] = hit_verdict(all_hits[h], *ctx_, scratch) != HIT_USABLE;
                 n_valid_hits += hit_rejected[h] ? 0 : 1;
             }
 
