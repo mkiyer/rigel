@@ -152,8 +152,9 @@ one reference and opposite strands, inward once each 5' soft clip is walked back
 `max_frag_length` long along the genome or along one transcript that holds every observed junction (one witness); a
 rejected hit is dropped and a template left with none is withheld. Then the same day, a one-mate hit (a lone
 secondary, a half-filled HI group, a primary whose mate is unmapped) is dropped as no pair, a numeric no-op on the
-STAR panel and the ladder, which hold none. Mates carried by several records and clip walks along a transcript path
-are not yet judged. Measured on the STAR panel at the recommended parameters,
+STAR panel and the ladder, which hold none. And a template's multiplicity is its valid hits, not the aligner's NH
+(2026-10-19): within ±0.16 % on every STAR stratum's transcript and gene error, the ladder identical. Mates carried by
+several records and clip walks along a transcript path are not yet judged. Measured on the STAR panel at the recommended parameters,
 pinned and fractional, against main: transcript error −2.87 % stranded capture-OFF, +1.18 % unstranded capture-OFF,
 +0.29 % stranded capture-ON (gene −3.33 / +3.27 / −0.62 %); true gDNA counted as RNA −10 k to −17 k in the g50
 capture-OFF conditions and +5.5 k capture-ON; 2.7–4.0 k templates withheld per 10 M, none with a correct alignment
@@ -456,6 +457,16 @@ convergence (`DESIGN.md` §4.2); the reader's benefits hold in every view (`DESI
 explicit regularization of the poorly determined directions with a stable solver run to convergence, decided on the
 ladder in both views. `em_screen.py`, `solver_replay.py`, `locus_trajectory.py` and the prototype build
 `site_solverdiag` in `$RIGEL_RUNS/prototypes/2026-10-13_modefree/`.
+GENES ARE NOT UNTOUCHED ON ALIGNED INPUT (2026-10-18, the STAR panel at the recommended parameters). Collapsing the 69
+HI groups of g00 that repeat another group's pair, none near the pair below, moved effective lengths by at most 3.7e-5
+relative and flipped the exact paralogs SIK1 and ENSG00000275993 (SIK1B): their 30 k multimappers align alike at both
+copies, their two long transcripts share one effective length, and only SIK1B's 2,937 unique fragments against
+SIK1's 35 tell them apart. SIK1B read 33,100 of its true 33,063 before the collapse and 6,255 after, the two runs
+ending with different SIK1 isoforms at the floor; with the collapse bundled with the change to `num_hits`, the same
+split held under MAP and at ten times the iteration budget. With three more pairs moving both ways, g00's transcript
+error rose 4.8 % and its gene error 11.7 %. So on aligned input a perturbation of 1e-5 upstream can move tens of
+thousands of fragments between genes, and an A/B that moves any length is read with that in mind; the collapse is
+held until the EM is stable at these loci.
 
 ### the-transfer-policy-loses-to-silence-on-unstranded-capture-off
 `priority: next — 0.8.1, with ISSUES: the-intron-own-solve-on-unstranded-capture-off · kind: defect · 2026-10-14`

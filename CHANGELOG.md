@@ -145,7 +145,10 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   away from each other entered the EM with lengths it could only penalize. Such an alignment is now dropped, and a read pair left with none is withheld: counted in
   `summary.json` (`fragment_stats.withheld_no_valid_pair`, `pairs_rejected`) and written to the annotated BAM as
   unresolved (`ZC` `unpaired`), not counted intergenic. On simulated STAR alignments it drops 0.8–4.7 % of the
-  reported pair alignments, rising with the gDNA share, and none whose alignment is correct.
+  reported pair alignments, rising with the gDNA share, and none whose alignment is correct. A read pair's
+  multiplicity is its valid alignments, not the aligner's `NH`, so a pair whose other alignments were dropped is read
+  as unique; `summary.json` counts the pairs whose `NH` exceeds the alignments reported for them
+  (`fragment_stats.nh_above_reported`, a truncated output).
 - The locus EM gives one answer at any thread count. 0.7.1 split the E-step of its largest loci across the threads
   and added their sums in an order that followed the thread count, so one input gave different tables on machines with
   different core counts (by default `--threads` is the core count); isoforms that share fragments could swap whole

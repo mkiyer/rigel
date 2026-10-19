@@ -236,6 +236,48 @@ def test_a_lone_secondary_without_hi_is_no_hit(index, tmp_path):
     assert stats.n_withheld_no_valid_pair == 0
 
 
+# ── multiplicity: a template's distinct valid hits ──────────────────────────────────────────────────
+
+
+def test_a_template_whose_other_hit_is_invalid_is_unique(index, tmp_path):
+    """NH 2, HI 1 a valid pair and HI 2 one facing outward: one hit is left, so the template is a unique mapper, not
+    a multimapper whose second place does not exist."""
+    records = _pair("one_left", 1010, "100M", 1100, "100M", nh=2, hi=1) + _pair(
+        "one_left", 5300, "100M", 5100, "100M", nh=2, hi=2, secondary=True
+    )
+    stats = _scan(tmp_path, index, records)
+    assert stats.n_fragments == 1
+    assert stats.n_multimapper_groups == 0, "NH, not the hits left, still set the multiplicity"
+
+
+def test_two_distinct_valid_hits_are_a_multimapper(index, tmp_path):
+    records = _pair("two", 1010, "100M", 1100, "100M", nh=2, hi=1) + _pair(
+        "two", 1500, "100M", 1600, "100M", nh=2, hi=2, secondary=True
+    )
+    stats = _scan(tmp_path, index, records)
+    assert stats.n_multimapper_groups == 1
+
+
+def test_a_spliced_and_a_contiguous_reading_stay_two_hits(index, tmp_path):
+    """R1 alike in both groups; R2 `100M` at 1100 in HI 1, `50M300N50M` from 1100 in HI 2. One start, two readings: the
+    competition between them is the point (owner, 2026-10-18), so nothing may merge them into one hit."""
+    records = _pair("compete", 1010, "100M", 1100, "100M", nh=2, hi=1) + _pair(
+        "compete", 1010, "100M", 1100, "50M300N50M", nh=2, hi=2, secondary=True, xs="+"
+    )
+    stats = _scan(tmp_path, index, records)
+    assert stats.n_multimapper_groups == 1
+
+
+def test_an_nh_above_the_reported_groups_is_counted(index, tmp_path):
+    """NH 3 over two HI groups: a truncated output, counted; the two reported hits are the template's multiplicity."""
+    records = _pair("trunc", 1010, "100M", 1100, "100M", nh=3, hi=1) + _pair(
+        "trunc", 1500, "100M", 1600, "100M", nh=3, hi=2, secondary=True
+    )
+    stats = _scan(tmp_path, index, records)
+    assert stats.n_nh_above_reported == 1
+    assert stats.n_multimapper_groups == 1
+
+
 def test_the_annotated_bam_labels_a_withheld_template_unresolved(index, tmp_path):
     """A withheld template's records are written unresolved (ZF 0), class `unpaired`, not as intergenic gDNA."""
     records = [

@@ -364,6 +364,8 @@ struct BamScanStats {
     // Hits whose mates are not one molecule, by `PAIR_*` reason, and the templates left with none
     std::array<int64_t, N_PAIR_VERDICTS> pairs_rejected{};
     int64_t n_withheld_no_valid_pair = 0;
+    // Templates whose NH exceeds their HI groups: the aligner truncated its output
+    int64_t n_nh_above_reported = 0;
 
     // ── the per-fragment splice census ────────────────────────────────────────────────────────────
     //
@@ -431,6 +433,7 @@ struct BamScanStats {
         sj_tags.merge(o.sj_tags);
         for (int32_t v = 0; v < N_PAIR_VERDICTS; v++) pairs_rejected[v] += o.pairs_rejected[v];
         n_withheld_no_valid_pair += o.n_withheld_no_valid_pair;
+        n_nh_above_reported += o.n_nh_above_reported;
         for (size_t i = 0; i < splice_census.size(); i++)
             splice_census[i] += o.splice_census[i];
         n_deposit_not_offered += o.n_deposit_not_offered;
@@ -1936,6 +1939,13 @@ private:
 
         auto hit_result = group_records_by_hit(records);
 
+        // With HI, a template's groups number its NH; fewer means the aligner truncated its output (counted).
+        {
+            bool any_hi = false;
+            for (const auto& r : records) any_hi |= (r.hi >= 0);
+            if (any_hi && nh > static_cast<int32_t>(hit_result.hits.size())) stats.n_nh_above_reported++;
+        }
+
         // Track hit-level mate stats
         for (const auto& [r1s, r2s] : hit_result.hits) {
             if (r1s.empty() || r2s.empty()) {
@@ -1989,7 +1999,9 @@ private:
             }
         }
 
-        int32_t num_hits = std::max(nh, static_cast<int32_t>(all_hits.size()));
+        // ⭐ The template's multiplicity is its valid hits, not the aligner's NH: a hit dropped above is no place the
+        // template could be from.
+        int32_t num_hits = static_cast<int32_t>(all_hits.size());
         bool is_unique_mapper = (num_hits == 1);
         int32_t n_buffered_mm = 0;
 
@@ -2241,6 +2253,7 @@ private:
         stats_dict["n_pairs_rejected_length"] = stats_.pairs_rejected[PAIR_LENGTH];
         stats_dict["n_pairs_rejected_missing_mate"] = stats_.pairs_rejected[PAIR_MISSING_MATE];
         stats_dict["n_withheld_no_valid_pair"] = stats_.n_withheld_no_valid_pair;
+        stats_dict["n_nh_above_reported"] = stats_.n_nh_above_reported;
         // ⭐ The splice census, keyed off the ONE name table. `splice_type_label`'s strings are the
         // `SpliceType` member names lower-cased, so `rigel.splice.census_field` derives the very same
         // key on the Python side without a second table to drift from this one.
@@ -2697,6 +2710,7 @@ public:
                 hit_rejected[h] = hit_verdict(all_hits[h], *ctx_, scratch) != PAIR_OK;
                 n_valid_hits += hit_rejected[h] ? 0 : 1;
             }
+
             if (!all_hits.empty() && n_valid_hits == 0) {
                 for (size_t i = 0; i < raw_group.size(); i++) {
                     set_tag_int(
@@ -2712,7 +2726,7 @@ public:
                 return;
             }
 
-            int32_t num_hits = std::max(nh, n_valid_hits);
+            int32_t num_hits = n_valid_hits;
             int first_valid_hit = 0;
             while (first_valid_hit < static_cast<int>(all_hits.size()) && hit_rejected[first_valid_hit])
                 ++first_valid_hit;

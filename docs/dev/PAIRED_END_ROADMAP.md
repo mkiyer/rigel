@@ -67,8 +67,13 @@ the code is open; each is less critical.
 6. ◐ Complete pairs only: HI groups (a group missing a mate is a counted unpaired alignment, duplicate groups collapse,
   truncated output stops the run, a mixed template keeps its asserted pairs), or the search, as the pairing question
   decides. ☑ One-mate hits dropped, counted as `missing_mate` (2026-10-18): the STAR panel 15/15 and the ladder 48/48
-  identical, as neither holds one; suite 3,063
-7. ☐ `num_hits` counts distinct usable hits (today `max(NH, hits)`)
+  identical, as neither holds one; suite 3,063. ☐ Duplicate groups collapse: held (2026-10-18). Correct, and only
+  39–170 hits per condition, but it trips the EM's fragility at exact paralogs (`ISSUES: the-em-stops-before-it-converges`):
+  g00's SIK1B 33,100 → 6,255 of 33,063, gene error +11.7 %
+7. ☑ `num_hits` counts the template's valid hits, not `max(NH, hits)` (2026-10-19): against the one-mate arm on the
+  STAR panel, transcript error +0.08 % unstranded OFF, +0.16 % stranded OFF, −0.15 % stranded ON (gene −0.01 / +0.15
+  / +0.07 %); the census moves by under 2.3 k per condition; the ladder identical; suite 3,067. Truncated outputs
+  (NH above the HI groups) are counted: none on the STAR panel
 8. ☐ Without HI (minimap2), every same-reference pair validated, the span bound first
 9. ◐ Each hit validated as one molecule along a path, with one witness transcript: K by the resolver's rule; outward
   and too-long pairs rejected; clips walked. ☑ The validator, clips walked along the genome (2026-10-18; the C++ counts

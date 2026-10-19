@@ -603,6 +603,8 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "with_unannotated_sj": stats.n_with_unannotated_sj,
             # Templates withheld because no pair of their mates is one molecule, and the hits dropped for it
             "withheld_no_valid_pair": stats.n_withheld_no_valid_pair,
+            # Templates whose NH exceeds the alignments reported for them (a truncated output)
+            "nh_above_reported": stats.n_nh_above_reported,
             "pairs_rejected": {
                 "missing_mate": stats.n_pairs_rejected_missing_mate,
                 "reference": stats.n_pairs_rejected_reference,

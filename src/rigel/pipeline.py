@@ -145,6 +145,12 @@ def _log_pair_validation(stats: PipelineStats) -> None:
         "facing outward": stats.n_pairs_rejected_outward,
         "too long on every path": stats.n_pairs_rejected_length,
     }
+    if stats.n_nh_above_reported:
+        logger.warning(
+            "%d templates carry an NH above the alignments the aligner reported for them, so their multiplicity is "
+            "read from the alignments present; STAR reports every alignment with --outSAMmultNmax -1",
+            stats.n_nh_above_reported,
+        )
     if not any(rejected.values()):
         return
     logger.info(
@@ -210,6 +216,7 @@ def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
         "n_pairs_rejected_outward",
         "n_pairs_rejected_length",
         "n_withheld_no_valid_pair",
+        "n_nh_above_reported",
         # The deposit hold-out that closes the census identity
         "n_deposit_not_offered",
     ):
