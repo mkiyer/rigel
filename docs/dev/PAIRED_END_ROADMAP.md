@@ -57,26 +57,26 @@ the code is open; each is less critical.
 2. ☑ Transcript strands installed by the index (2026-10-18): a fragment resolved without a scan sees them, so an
   antisense overlap reads strand-ambiguous; pinned and fractional, the STAR panel 15/15 and the oracle ladder 48/48
   quant_accuracy rows identical in every field; suite 3,052
-3. ◐ The pairing question: STAR's HI pairs against Rigel's own search, each scored against the molecule's truth
+3. ☑ The pairing question: STAR's HI pairs against Rigel's own search, each scored against the molecule's truth
   (`ISSUES: star-hi-pairs-against-rigels-own-pairing`; owner, 2026-10-18). ☑ Template level (2026-10-18, 47.9 M
   templates, per-base truth): the validator rejects no correct pair and removes 1.40 M incorrect STAR pairs; HI misses
-  the correct pair in 0.31 % of multi-hit templates, and ignoring HI adds 475 k pairs, 98 % incorrect. ☐ End to end, once
-  both pairing sources exist
+  the correct pair in 0.31 % of multi-hit templates, and ignoring HI adds 475 k pairs, 98 % incorrect. ☑ End to end
+  (2026-10-19, four arms): the search wins every capture-OFF condition with the capture efficiencies at 1; the owner
+  took it for every input, HI not read (`DESIGN.md` §1.1)
 4. ☐ The gates' own proof (the plan's step 1b), before the first change whose identity claim leans on those gates
-5. ☐ Location identity and aliases (D and N apart, M/=/X runs coalesced), which duplicate hits need
-6. ◐ Complete pairs only: HI groups (a group missing a mate is a counted unpaired alignment, duplicate groups collapse,
-  truncated output stops the run, a mixed template keeps its asserted pairs), or the search, as the pairing question
-  decides. ☑ One-mate hits dropped, counted as `missing_mate` (2026-10-18): the STAR panel 15/15 and the ladder 48/48
-  identical, as neither holds one; suite 3,063. ☐ Duplicate groups collapse: held (2026-10-18). Correct, and only
-  39–170 hits per condition, but it trips the EM's fragility at exact paralogs (`ISSUES: the-em-stops-before-it-converges`):
-  g00's SIK1B 33,100 → 6,255 of 33,063, gene error +11.7 %
+5. ◐ Location identity and aliases (D and N apart, M/=/X runs coalesced), which duplicate hits need. ☑ One place per
+  alignment, its aliases written with its hit (2026-10-19, with the search). ☐ NM conflicts between aliases (item 12)
+6. ☑ Complete pairs only: the search for every input (2026-10-19; HI not read, so no HI group, mixed template or
+  duplicate group remains; a truncated output is counted against the records reported per mate). ☑ One-mate hits dropped, counted as `missing_mate` (2026-10-18): the STAR panel 15/15 and the ladder 48/48
+  identical, as neither holds one; suite 3,063. ☑ Duplicate groups collapse, by construction in the search (held
+  2026-10-18 alone: it tripped the EM's fragility at exact paralogs, g00's SIK1B 33,100 → 6,255 of 33,063)
 7. ☑ `num_hits` counts the template's valid hits, not `max(NH, hits)` (2026-10-19): against the one-mate arm on the
   STAR panel, transcript error +0.08 % unstranded OFF, +0.16 % stranded OFF, −0.15 % stranded ON (gene −0.01 / +0.15
   / +0.07 %); the census moves by under 2.3 k per condition; the ladder identical; suite 3,067. Truncated outputs
   (NH above the HI groups) are counted: none on the STAR panel
 8. ◐ Without HI (minimap2), every same-reference pair validated (`GEOMETRIC_PAIRING_DESIGN.md` revision 2, approved
   2026-10-19: the owner's rule, one transcript over both mates, in place of the span bound). ☑ Step 1, the witness
-  rule (item 9). ☐ Step 2, the search, and the four-arm comparison that decides item 3
+  rule (item 9). ☑ Step 2, the search, for every input (2026-10-19; item 3 decided it); suite 3,091
 9. ◐ Each hit validated as one molecule along a path, with one witness transcript: K by the resolver's rule; outward
   and too-long pairs rejected; clips walked. ☑ The validator, clips walked along the genome (2026-10-18; the C++ counts
   match the prototype's on all five STAR conditions within their duplicate HI groups; suite 3,060). Against main on

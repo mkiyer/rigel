@@ -149,6 +149,15 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   rising with the gDNA share, and none whose alignment is correct. A read pair's multiplicity is its valid alignments,
   not the aligner's `NH`, so a pair whose other alignments were dropped is read as unique; `summary.json` counts the
   pairs whose `NH` exceeds the alignments reported for them (`fragment_stats.nh_above_reported`, a truncated output).
+- Rigel pairs a read pair's alignments itself, for every aligner: each alignment of R1 is tried with each alignment of
+  R2 on the same reference and opposite strand, and the pairings that can be one molecule are the read pair's
+  alignments. STAR's `HI` tag is no longer read. 0.7.1 took STAR's pairs from `HI`, and for an aligner without it paired
+  mates whose transcripts overlapped, so any two alignments in one gene paired, an alignment paired once was never tried
+  with another, and a mate's record repeated beside each partner paired again. On simulated STAR alignments the search
+  finds the correct pair wherever a read pair's alignments hold one (STAR's `HI` groups miss it in 0.31 % of read pairs
+  with several alignments), withholds 1.2–1.3 k fewer read pairs per 10 M, and costs nothing measurable on a real
+  library. `fragment_stats.hits_rejected` now counts the pairings tried and dropped, and `nh_above_reported` compares
+  `NH` with the records reported for each mate.
 - The locus EM gives one answer at any thread count. 0.7.1 split the E-step of its largest loci across the threads
   and added their sums in an order that followed the thread count, so one input gave different tables on machines with
   different core counts (by default `--threads` is the core count); isoforms that share fragments could swap whole

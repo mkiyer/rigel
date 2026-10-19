@@ -494,10 +494,10 @@ class TestAnnotatedBamIntegration:
         """Record-identity preservation under NH>1 multimappers.
 
         Simulates a standard scenario, then fabricates NH=2 cross-mapped
-        secondary alignments for a subset of read pairs to force the
-        writer through the no-HI multimapper pairing path
-        (``pair_multimapper_reads``).  The output BAM must still contain
-        exactly the same multiset of records as the augmented input.
+        secondary alignments for a subset of read pairs, so the writer pairs
+        every R1 place with every R2 place and a record joins several hits.
+        The output BAM must still contain exactly the same multiset of
+        records as the augmented input.
         """
         import pysam
         from collections import Counter
@@ -517,9 +517,8 @@ class TestAnnotatedBamIntegration:
         result = scenario.build(n_fragments=200, sim_config=sim_config)
 
         # Augment the BAM: add NH=2 secondary alignments for a subset
-        # of primary records, WITHOUT HI tags, at a different ref
-        # position.  This exercises the non-HI multimapper path and
-        # the cross-pair combinatorial block in pair_multimapper_reads.
+        # of primary records at a different ref position, so each R1
+        # place pairs with each R2 place.
         augmented = tmp_path / "augmented.bam"
         with pysam.AlignmentFile(str(result.bam_path), "rb") as fin:
             header = fin.header

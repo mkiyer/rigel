@@ -212,7 +212,7 @@ Measured:
 
 The repair:
 - every hit places both mates as one molecule, with a computable fragment length;
-- pairs come from STAR's HI groups, or from a bounded R1 × R2 search where the aligner writes no HI;
+- pairs come from a search over every R1 × R2 pair of places, for every aligner (HI not read; `DESIGN.md` §1.1);
 - `num_hits` counts the usable hits;
 - a template without a usable hit is withheld and counted.
 
@@ -224,8 +224,8 @@ one reference and opposite strands, inward once each 5' soft clip is walked back
 junction (one witness); a rejected hit is dropped and a template left with none is withheld. Then the same day, a one-mate hit (a lone
 secondary, a half-filled HI group, a primary whose mate is unmapped) is dropped as no pair, a numeric no-op on the
 STAR panel and the ladder, which hold none. And a template's multiplicity is its valid hits, not the aligner's NH
-(2026-10-19): within ±0.16 % on every STAR stratum's transcript and gene error, the ladder identical. Mates carried by
-several records and clip walks along a transcript path are not yet judged. Measured on the STAR panel at the
+(2026-10-19): within ±0.16 % on every STAR stratum's transcript and gene error, the ladder identical. Since the search
+(2026-10-19) each hit holds one record per mate; clip walks along a transcript path are not yet judged. Measured on the STAR panel at the
 recommended parameters, pinned and fractional, against main: transcript error −2.87 % stranded capture-OFF, +1.18 %
 unstranded capture-OFF, +0.29 % stranded capture-ON (gene −3.33 / +3.27 / −0.62 %); true gDNA counted as RNA −10 k to
 −17 k in the g50 capture-OFF conditions and +5.5 k capture-ON; 2.7–4.0 k templates withheld per 10 M, none with a
@@ -243,39 +243,6 @@ reader amplifying a small change in calibration's input (`ISSUES: the-reader-rea
 the EM's sensitivity at paralogs (`ISSUES: the-em-stops-before-it-converges`).
 Instruments: `quant_accuracy.py` and `calibration_vs_oracle.py` on the aligned panel, with the gDNA law and the capture
 ruler held fixed; the oracle ladder for identity.
-
-### star-hi-pairs-against-rigels-own-pairing
-`priority: now — decides how STAR input is paired, before the scan's HI-group change is built (owner, 2026-10-18: investigate) · kind: question · 2026-10-18`
-STAR writes HI, the index of each pair alignment, carried by both mates' records; minimap2 writes none and reports
-secondaries per mate. The plan pairs STAR input by its HI groups alone, and input without HI by validating every R1 × R2
-pair of locations along a path. Which is better for STAR input is open (owner): forcing HI's pairs trusts the aligner and
-never revives a pair it did not report; ignoring HI and pairing all input by Rigel's own search treats both aligners
-alike, and the targeted review's mixed-HI blocker goes with it. The owner also asks whether Rigel's own pairing is valid.
-Today's pairing without HI joins locations whose transcript sets overlap, so anything inside one gene's span pairs; the
-plan replaces it with geometry along a path, and that is what is compared.
-Decide on the STAR panel, whose read names carry each molecule's true source and coordinates: STAR's HI pairs and the
-pairs the search finds with HI ignored, each scored against the true molecule, template by template (pairs both find,
-pairs only HI asserts, with the search's reason for rejecting them, and pairs only the search finds, true or not), then
-end to end per stratum. Instrument: a prototype of the search over the panel's records, ahead of the HI change.
-Measured 2026-10-18 on the five STAR conditions at the recommended parameters (47.9 M templates), every pair scored
-base by base against the molecule's truth: correct when each aligned base sits where its read base truly maps
-(`$RIGEL_RUNS/prototypes/2026-10-18_pairing_question/`). A looser test, half of a location's bases on the molecule,
-called readings with a short anchor moved across another junction true; it is not quoted.
-- Every template's records carry HI; no HI group misses a mate or holds two locations for one mate; 39–170 groups per
-  condition repeat another group's pair.
-- Rigel's own pairing is valid: the geometric validator rejects no correct pair. Of STAR's pairs in templates with
-  several locations it rejects 1.40 M (20 % of the gDNA ones, 6 % of the mRNA ones), and 1,331–2,109 unique pairs per
-  condition, every one an incorrect reading.
-- Where a correct pair exists among a template's mate locations, the search with HI ignored always finds it. STAR's HI
-  groups miss it in 10,108 of 3.22 M such templates (0.31 %): STAR reported both correct mate readings, in different
-  groups.
-- Ignoring HI adds 475 k pairs STAR did not assert, 2 % of them correct (10,114).
-The search's cost, measured 2026-10-19 with HI ignored on the five conditions: of 76.3 M pairs of distinct locations
-on one reference with opposite strands, 14 % face outward and 68 % lie within `max_frag_length` along the genome, both
-decided with no index lookup; the 18 % longer need a witness, one transcript over both mates
-(`ISSUES: the-scanner-builds-fragments-from-one-mate`).
-Open: the end-to-end comparison of the two pairing sources per stratum, once both are built; the search is needed for
-input without HI anyway, and the validator comes first, since both need it.
 
 ### multimapper-intergenic-alignments
 `priority: now — release-blocking (owner, 2026-10-19): a fragment's valid intergenic and genic alignments compete in the EM · kind: defect · 2026-09-24`
@@ -588,8 +555,8 @@ SIK1's 35 tell them apart. SIK1B read 33,100 of its true 33,063 before the colla
 ending with different SIK1 isoforms at the floor; with the collapse bundled with the change to `num_hits`, the same
 split held under MAP and at ten times the iteration budget. With three more pairs moving both ways, g00's transcript
 error rose 4.8 % and its gene error 11.7 %. So on aligned input a perturbation of 1e-5 upstream can move tens of
-thousands of fragments between genes, and an A/B that moves any length is read with that in mind; the collapse is
-held until the EM is stable at these loci. Again 2026-10-19: the shared-transcript witness removed 620 incorrect hits
+thousands of fragments between genes, and an A/B that moves any length is read with that in mind. The collapse was
+held until the EM is stable at these loci; the search (2026-10-19) makes it by construction, one place per alignment. Again 2026-10-19: the shared-transcript witness removed 620 incorrect hits
 of g00's 11 M, and its gene error rose 28.9 k, the paralogs of chr21's duplicated p-arm swinging (LINC03104 26,348 →
 2,397 of 14,690 against LINC03105 6,179 → 17,240 of 6,034; SIK1B 33,105 → 28,419 against SIK1 77 → 4,752), while its
 transcript error fell 17.9 k through 565 k of movement among 1,750 transcripts; capture-ON's +5.4 k transcript error is
@@ -1733,6 +1700,51 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### star-hi-pairs-against-rigels-own-pairing
+CLOSED 2026-10-19 by the owner's ruling (`DESIGN.md` §1.1): every template is paired by the search, for every aligner,
+and HI is not read. Decided end to end on the STAR panel at the recommended parameters, pinned and fractional, four
+arms from one build (`$RIGEL_RUNS/arms/2026-10-19_geometric_pairing/`): STAR's HI groups (`hi`, then main exactly,
+15/15 rows), those groups with the ones repeating a pair collapsed (`hi-collapsed`), the search with HI ignored
+(`search`), and the pairing without HI it replaced (`legacy`). The capture reader amplifies every scan change
+(`ISSUES: the-reader-reads-false-gdna-as-capture`), so each was read with every capture efficiency at 1 beside the
+shipped run. At 1, the search against `hi` (transcript / gene |error|): g00 −0.56 / −3.51 %, g05 −0.36 / −2.26 %, g50
+κ0.50 −0.49 / −1.09 %, g50 κ0.99 −0.44 / −1.77 % (against `hi-collapsed` −0.31 to −0.61 / −1.43 to −3.49 %); `hi`
+and `hi-collapsed` within 0.13 / 0.34 % of each other; `legacy` close to the search. Shipped, against `hi`:
+unstranded capture-OFF +10.45 / +4.68 % (all g05: +16.3 % there, which is −0.36 % at 1), stranded capture-OFF −2.06 /
+−4.83 %, stranded capture-ON +0.18 / −0.17 %; collapsing the 39–170 repeated groups alone moves these by 2–6 %. The
+search withholds 1.2–1.3 k fewer templates per 10 M and keeps 11–34 k more hits; the oracle ladder 48/48 identical in
+every arm. Its cost: the pinned scan of g50 κ0.50 capture-OFF 30.7 → 32.9 s; VCaP (18.7 M templates, 8 threads) 31.29
+→ 31.42 s, with 223 more fragments, 2,687 more multimappers and 2,584 fewer chimeras.
+STAR writes HI, the index of each pair alignment, carried by both mates' records; minimap2 writes none and reports
+secondaries per mate. The plan pairs STAR input by its HI groups alone, and input without HI by validating every R1 × R2
+pair of locations along a path. Which is better for STAR input is open (owner): forcing HI's pairs trusts the aligner and
+never revives a pair it did not report; ignoring HI and pairing all input by Rigel's own search treats both aligners
+alike, and the targeted review's mixed-HI blocker goes with it. The owner also asks whether Rigel's own pairing is valid.
+Today's pairing without HI joins locations whose transcript sets overlap, so anything inside one gene's span pairs; the
+plan replaces it with geometry along a path, and that is what is compared.
+Decide on the STAR panel, whose read names carry each molecule's true source and coordinates: STAR's HI pairs and the
+pairs the search finds with HI ignored, each scored against the true molecule, template by template (pairs both find,
+pairs only HI asserts, with the search's reason for rejecting them, and pairs only the search finds, true or not), then
+end to end per stratum. Instrument: a prototype of the search over the panel's records, ahead of the HI change.
+Measured 2026-10-18 on the five STAR conditions at the recommended parameters (47.9 M templates), every pair scored
+base by base against the molecule's truth: correct when each aligned base sits where its read base truly maps
+(`$RIGEL_RUNS/prototypes/2026-10-18_pairing_question/`). A looser test, half of a location's bases on the molecule,
+called readings with a short anchor moved across another junction true; it is not quoted.
+- Every template's records carry HI; no HI group misses a mate or holds two locations for one mate; 39–170 groups per
+  condition repeat another group's pair.
+- Rigel's own pairing is valid: the geometric validator rejects no correct pair. Of STAR's pairs in templates with
+  several locations it rejects 1.40 M (20 % of the gDNA ones, 6 % of the mRNA ones), and 1,331–2,109 unique pairs per
+  condition, every one an incorrect reading.
+- Where a correct pair exists among a template's mate locations, the search with HI ignored always finds it. STAR's HI
+  groups miss it in 10,108 of 3.22 M such templates (0.31 %): STAR reported both correct mate readings, in different
+  groups.
+- Ignoring HI adds 475 k pairs STAR did not assert, 2 % of them correct (10,114).
+The search's cost, measured 2026-10-19 with HI ignored on the five conditions: of 76.3 M pairs of distinct locations
+on one reference with opposite strands, 14 % face outward and 68 % lie within `max_frag_length` along the genome, both
+decided with no index lookup; the 18 % longer need a witness, one transcript over both mates
+(`ISSUES: the-scanner-builds-fragments-from-one-mate`).
+
 
 ### sj-strand-tag-chosen-from-the-first-reads
 CLOSED 2026-10-18 by the fix (owner, 2026-10-17: before 0.8.0; the first change of the pipeline-order plan): the

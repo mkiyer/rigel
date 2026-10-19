@@ -136,7 +136,8 @@ def _log_sj_tags(stats: PipelineStats, scan: BamScanConfig) -> None:
 
 
 def _log_hit_verdicts(stats: PipelineStats) -> None:
-    """Say how many hits were dropped, and why, and how many templates that left with no usable hit."""
+    """Say how many pairings of an R1 alignment with an R2 alignment were tried and dropped, and why, and how many
+    templates that left with no usable hit."""
     rejected = {
         "one mate only": stats.n_hits_rejected_missing_mate,
         "two references": stats.n_hits_rejected_reference,
@@ -149,14 +150,15 @@ def _log_hit_verdicts(stats: PipelineStats) -> None:
     }
     if stats.n_nh_above_reported:
         logger.warning(
-            "%d templates carry an NH above the alignments the aligner reported for them, so their multiplicity is "
+            "%d templates carry an NH above the records reported for a mate, so their multiplicity is "
             "read from the alignments present; STAR reports every alignment with --outSAMmultNmax -1",
             stats.n_nh_above_reported,
         )
     if not any(rejected.values()):
         return
     logger.info(
-        "[SCAN] %d hits dropped (%s); templates left with no usable hit, withheld: %d unpaired, %d unannotated splices",
+        "[SCAN] %d pairings dropped (%s); templates left with no usable hit, withheld: %d unpaired, %d unannotated "
+        "splices",
         sum(rejected.values()),
         ", ".join(f"{why} {n}" for why, n in rejected.items() if n),
         stats.n_withheld_unpaired,

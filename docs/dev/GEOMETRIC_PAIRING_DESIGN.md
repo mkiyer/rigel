@@ -3,6 +3,9 @@
 2026-10-19 · code base `9cb85fae` · revision 2. The owner approved revision 1 and asked why the search does not pair by
 shared transcripts. It should, for spliced paths: §5 adopts the owner's rule and withdraws revision 1's span bound.
 Status: step 1 (§5) landed 2026-10-19; its numbers are in `ISSUES: the-scanner-builds-fragments-from-one-mate`.
+Steps 2–4 landed 2026-10-19: the owner took the search for every input, HI not read (`DESIGN.md` §1.1; the four arms in
+CLOSED `ISSUES: star-hi-pairs-against-rigels-own-pairing`). The arms here were named `hi`, `hi-collapsed`, `search`,
+`legacy`. Step 5, `SPLICED_UNANNOT` deleted, is next.
 Every claim about today's code cites a line re-read for this document. Roadmap Phase A items 3, 5 (in part), 6 and 8;
 plan §6–§7.1.
 

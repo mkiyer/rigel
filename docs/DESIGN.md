@@ -444,6 +444,24 @@ Calibration's cost follows the index more than the depth: the geometry and the m
 chain, and ψ solves every RNA-admitting slot that holds a fragment. It is still the largest stage on a deep
 library; the current split is `ISSUES: performance-memory-bounded-solve`'s baseline.
 
+### 1.1 A template's hits: every R1 place with every R2 place, by geometry (owner, 2026-10-16/19)
+
+The scan pairs a template's mate alignments itself, for any aligner, and reads geometry alone: STAR's HI, its own
+pairing, is not read (`template_hits`, `hit_verdict`; `tests/test_hit_verdict.py`).
+
+* **Places.** Records of one alignment are one place: one mate, reference, strand, leftmost aligned position and
+  CIGAR, with M, = and X read as one operation. STAR writes a mate's record beside each of its partners.
+* **Candidates.** Every R1 place with every R2 place on one reference with opposite strands.
+* **The verdict.** The two mates face inward once each 5′ soft clip is walked back. An unspliced pair needs only a
+  length of 1..`max_frag_length` along the genome. A spliced pair, an implicit splice included, needs one annotated
+  transcript compatible with both mates: overlapping both (overlap, not containment: the EM prices the overhang),
+  holding every observed junction, with no aligned base more than K inside one of its introns, and giving a path of
+  1..`max_frag_length` between them. Rigel does not assemble transcripts. A hit that fails is dropped with its reason;
+  a template left with none is withheld.
+* **Why not HI.** With the capture reader's amplification removed, pairing this way beats STAR's HI groups in every
+  capture-OFF condition, it finds the correct pair wherever a template's places hold one, and it costs nothing
+  measurable on a deep library; the record is CLOSED `ISSUES: star-hi-pairs-against-rigels-own-pairing`.
+
 ---
 
 ## 2. The index

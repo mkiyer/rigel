@@ -136,8 +136,8 @@ its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-mult
    2026-10-14. The derivation, the mechanism fixtures, a prototype and the VCaP A/B come next. The release waits
    for its validation on independent artifact-containing evidence on the cluster (owner, 2026-10-14). Since 2026-10-16
    the release-blocking repair is the scan's (`ISSUES: the-scanner-builds-fragments-from-one-mate`), fixed in pipeline
-   order, the scan first, one change at a time (owner, 2026-10-18), with
-   `ISSUES: star-hi-pairs-against-rigels-own-pairing` deciding how STAR input is paired. Since 2026-10-19 the release
+   order, the scan first, one change at a time (owner, 2026-10-18); since 2026-10-19 every input is paired by the
+   search, HI not read (`DESIGN.md` §1.1). Since 2026-10-19 the release
    also waits on two more (owner): first, the highest priority, `ISSUES: the-reader-reads-false-gdna-as-capture` (on aligned input the capture
    efficiencies are most of every capture-OFF condition's error);
    and `ISSUES: multimapper-intergenic-alignments`, a fragment's valid intergenic and genic alignments competing in the EM.

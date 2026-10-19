@@ -16,8 +16,11 @@ it is contradictory (two junctions overlap unequal, or their motifs name both st
 transcript holds), or unsupported (each held, but no one transcript holds them all over both mates). The molecule is
 judged first, so the rule withholds only molecules, each with a fragment length.
 
-A hit that fails is dropped and counted by its reason; a template left with no hit is withheld, not counted intergenic:
-an unannotated splice when the annotated-path rule withheld one of its hits, else unpaired.
+A template's hits come from geometry alone, for any aligner: every R1 place with every R2 place on one reference with
+opposite strands, the aligner's own pairing (STAR's HI) not read. One alignment written in several records (STAR writes a
+mate's record beside each of its partners) is one place. A hit that fails is dropped and counted by its reason; a
+template left with no hit is withheld, not counted intergenic: an unannotated splice when the annotated-path rule
+withheld one of its hits, else unpaired.
 
 The toy reference, 0-based half-open:
 - tK (+): exons [1000,1200) [2100,2400), the intron [1200,2100) for the tolerance case;
@@ -57,9 +60,13 @@ def _gtf(with_t3: bool) -> str:
     )
 
 
-def _index(base, with_t3=False):
+def _index(base, with_t3=False, n_refs=1):
     fasta, gtf = base / "g.fa", base / "a.gtf"
-    fasta.write_text(">chr1\n" + "\n".join(["N" * 80] * (GENOME // 80)) + "\n")
+    fasta.write_text(
+        "".join(
+            f">chr{i + 1}\n" + "\n".join(["N" * 80] * (GENOME // 80)) + "\n" for i in range(n_refs)
+        )
+    )
     pysam.faidx(str(fasta))
     gtf.write_text(_gtf(with_t3))
     TranscriptIndex.build(str(fasta), str(gtf), str(base / "idx"), write_tsv=False)
@@ -153,6 +160,12 @@ def index_t3(tmp_path_factory):
     return _index(tmp_path_factory.mktemp("pairs_t3"), with_t3=True)
 
 
+@pytest.fixture(scope="module")
+def index_two_refs(tmp_path_factory):
+    """The toy index over chr1 and chr2; every transcript on chr1."""
+    return _index(tmp_path_factory.mktemp("pairs_two_refs"), n_refs=2)
+
+
 def test_a_valid_pair_is_a_fragment(index, tmp_path):
     stats = _scan(tmp_path, index, _pair(*CONTROL))
     assert stats.n_fragments == 1
@@ -239,14 +252,19 @@ def test_a_long_spliced_pair_whose_holders_miss_a_mate_is_too_long(index_t3, tmp
 
 
 def test_an_invalid_hit_is_dropped_and_its_template_kept(index, tmp_path):
-    """HI 1 is the control pair, HI 2 a pair facing outward: one hit dropped, one fragment kept."""
-    records = _pair("mixed", 1010, "100M", 1100, "100M", nh=2, hi=1) + _pair(
-        "mixed", 5300, "100M", 5100, "100M", nh=2, hi=2, secondary=True
-    )
+    """R1 at [1010,1110); R2 at [1100,1200), the control pair, and at [900,1000), where the two face away from each
+    other: that hit is dropped, the template kept as one fragment, a unique mapper, not a multimapper whose second place
+    does not exist."""
+    records = [
+        _record("mixed", R1_FWD, 1010, "100M", 1100, nh=2),
+        _record("mixed", R2_REV, 1100, "100M", 1010, nh=2),
+        _record("mixed", R2_REV | SECONDARY, 900, "100M", 1010, nh=2),
+    ]
     stats = _scan(tmp_path, index, records)
     assert stats.n_fragments == 1
     assert _rejected(stats)["outward"] == 1
     assert stats.n_withheld_unpaired == 0
+    assert stats.n_multimapper_groups == 0, "an invalid place still counted toward the multiplicity"
 
 
 def _unmapped_mate(qname, mate_pos):
@@ -273,73 +291,172 @@ def test_a_mate_whose_partner_is_unmapped_is_no_hit(index, tmp_path):
     assert stats.n_withheld_unpaired == 1
 
 
-def test_an_hi_group_missing_a_mate_is_dropped_and_its_template_kept(index, tmp_path):
-    """HI 1 holds both mates; HI 2 holds R1 alone, a half-filled group. The half group is no hit, so calibration is
-    offered one placement, not a read-length second one."""
-    records = _pair("half", 1010, "100M", 1100, "100M", nh=2, hi=1) + [
-        _record("half", R1_FWD | SECONDARY, 1500, "100M", 1600, nh=2, hi=2)
-    ]
-    stats, payload = _scan_full(tmp_path, index, records)
-    assert payload.qc.deferred_multiple_placements == 0, "the one-mate group became a placement"
-    assert stats.n_fragments == 1
-    assert _rejected(stats)["missing_mate"] == 1
-    assert stats.n_withheld_unpaired == 0
-
-
-def test_a_lone_secondary_without_hi_is_no_hit(index, tmp_path):
-    """Without HI, a secondary R1 whose mate is unmapped becomes a one-mate hit; it is dropped, and the primary pair
-    stays, calibration's one placement."""
+def test_a_place_with_no_partner_is_no_hit(index, tmp_path):
+    """A secondary R1 flagged mate-unmapped is one more R1 place: the search tries it with R2 at [1100,1200), where the
+    two face away from each other, so it is no hit, and the primary pair stays, calibration's one placement. The search
+    reads geometry, not the aligner's mate flags."""
     records = _pair("nohi", 1010, "100M", 1100, "100M", nh=2) + [
         _record("nohi", R1_FWD | SECONDARY | 0x8, 1500, "100M", 1500, nh=2)
     ]
     stats, payload = _scan_full(tmp_path, index, records)
     assert payload.qc.deferred_multiple_placements == 0, "the lone secondary became a placement"
     assert stats.n_fragments == 1
-    assert _rejected(stats)["missing_mate"] >= 1
+    assert _rejected(stats)["outward"] == 1 and _rejected(stats)["missing_mate"] == 0
     assert stats.n_withheld_unpaired == 0
+
+
+# ── pairing: every R1 place with every R2 place, by geometry alone ──────────────────────────────────────────────────
+
+
+def test_the_search_finds_a_partner_outside_the_gene(index, tmp_path):
+    """R1 at [2250,2350) in tK's last exon; R2 at [1500,1600) in tK's intron and at [2400,2500), just past tK's end,
+    the true partner (L 250). A pairing by shared transcripts matches R1 with the intron place through gK's nascent
+    span and never tries the true partner; the search tries both, and keeps the one molecule."""
+    records = [
+        _record("outside", R1_FWD, 2250, "100M", 1500, nh=2),
+        _record("outside", R2_REV, 1500, "100M", 2250, nh=2),
+        _record("outside", R2_REV | SECONDARY, 2400, "100M", 2250, nh=2),
+    ]
+    stats = _scan(tmp_path, index, records)
+    assert stats.n_fragments == 1, "the true pair was never tried"
+    assert _rejected(stats)["outward"] == 1 and stats.n_multimapper_groups == 0
+
+
+def test_a_record_repeated_for_each_pair_is_one_location(index, tmp_path):
+    """As STAR writes a template whose R1 has one place and R2 two: R1's record twice, once beside each R2 place. The
+    two R1 records are one alignment, so one place, and the template has two hits, not four."""
+    records = [
+        _record("repeat", R1_FWD, 1010, "100M", 1100, nh=2),
+        _record("repeat", R2_REV, 1100, "100M", 1010, nh=2),
+        _record("repeat", R1_FWD | SECONDARY, 1010, "100M", 1050, nh=2),
+        _record("repeat", R2_REV | SECONDARY, 1050, "100M", 1010, nh=2),
+    ]
+    stats = _scan(tmp_path, index, records)
+    assert stats.n_multimapper_groups == 1
+    assert stats.n_multimapper_alignments == 2, "a repeated record paired again"
+
+
+def test_a_location_paired_once_is_tried_with_every_partner(index, tmp_path):
+    """R1 at [2250,2350) in tK's last exon; R2 at [2300,2400) in that exon (L 150) and at [2400,2500) past tK's end
+    (L 250): two molecules, so a multimapper. A pairing by shared transcripts matches R1 with the exon place and leaves
+    the other as a one-mate hit."""
+    records = [
+        _record("twice", R1_FWD, 2250, "100M", 2300, nh=2),
+        _record("twice", R2_REV, 2300, "100M", 2250, nh=2),
+        _record("twice", R2_REV | SECONDARY, 2400, "100M", 2250, nh=2),
+    ]
+    stats = _scan(tmp_path, index, records)
+    assert stats.n_multimapper_groups == 1 and stats.n_multimapper_alignments == 2
+    assert _rejected(stats)["missing_mate"] == 0
+
+
+def test_a_same_strand_combination_is_no_candidate(index, tmp_path):
+    """R1 forward at [1010,1110) and reverse at [3010,3110), R2 reverse at [1100,1200): the two reverse places are no
+    pair to judge, so the template is one fragment with no rejection counted."""
+    records = [
+        _record("strands", R1_FWD, 1010, "100M", 1100, nh=2),
+        _record("strands", (R1_FWD | SECONDARY | 0x10) & ~0x20, 3010, "100M", 1100, nh=2),
+        _record("strands", R2_REV, 1100, "100M", 1010, nh=2),
+    ]
+    stats = _scan(tmp_path, index, records)
+    assert stats.n_fragments == 1
+    assert _rejected(stats) == dict.fromkeys(REASONS, 0), "a same-strand combination was judged"
+
+
+def test_mates_on_two_references_are_judged_once(index_two_refs, tmp_path):
+    """R1 at two places on chr1 and R2 on chr2, both references in the index: no pair is a candidate, so the first
+    place of each is judged, once, and the template is withheld; its reason is counted once, not per combination."""
+    records = [
+        _record("trans", R1_FWD, 1010, "100M", 1100, nh=2),
+        _record("trans", R1_FWD | SECONDARY, 5010, "100M", 1100, nh=2),
+        _record("trans", R2_REV, 1100, "100M", 1010, nh=2, ref=1),
+    ]
+    stats = _scan(tmp_path, index_two_refs, records)
+    assert stats.n_fragments == 0
+    assert _rejected(stats)["reference"] == 1 and stats.n_withheld_unpaired == 1
+
+
+def test_an_alias_is_written_with_its_alignments_hit(index, tmp_path):
+    """The repeated R1 record of the two-place template, in the annotated BAM: written with the hit of the alignment it
+    repeats, not swept up at the end of its template as an intergenic pass-through."""
+    records = [
+        r for k in range(200) for r in _pair(f"ok{k:03d}", 1010 + k, "100M", 1100 + k, "100M")
+    ]
+    records += [
+        _record("repeat", R1_FWD, 1010, "100M", 1100, nh=2),
+        _record("repeat", R2_REV, 1100, "100M", 1010, nh=2),
+        _record("repeat", R1_FWD | SECONDARY, 1010, "100M", 1050, nh=2),
+        _record("repeat", R2_REV | SECONDARY, 1050, "100M", 1010, nh=2),
+    ]
+    out = tmp_path / "annotated.bam"
+    config = PipelineConfig(
+        em=EMConfig(seed=7), scan=BamScanConfig(total_threads=1), annotated_bam_path=out
+    )
+    run_pipeline(_bam(tmp_path, records), index, config=config)
+    with pysam.AlignmentFile(str(out), "rb") as bam:
+        r1 = [
+            (r.get_tag("ZF"), r.get_tag("ZT"), r.get_tag("ZC"))
+            for r in bam
+            if r.query_name == "repeat" and r.is_read1
+        ]
+    assert len(r1) == 2
+    assert r1[0] == r1[1], "the alias was not written with its alignment's hit"
+    assert r1[0][0] & 0x01 and r1[0][0] != 0x25
 
 
 # ── multiplicity: a template's distinct valid hits ──────────────────────────────────────────────────
 
 
-def test_a_template_whose_other_hit_is_invalid_is_unique(index, tmp_path):
-    """NH 2, HI 1 a valid pair and HI 2 one facing outward: one hit is left, so the template is a unique mapper, not
-    a multimapper whose second place does not exist."""
-    records = _pair("one_left", 1010, "100M", 1100, "100M", nh=2, hi=1) + _pair(
-        "one_left", 5300, "100M", 5100, "100M", nh=2, hi=2, secondary=True
-    )
-    stats = _scan(tmp_path, index, records)
-    assert stats.n_fragments == 1
-    assert stats.n_multimapper_groups == 0, "NH, not the hits left, still set the multiplicity"
-
-
 def test_two_distinct_valid_hits_are_a_multimapper(index, tmp_path):
-    records = _pair("two", 1010, "100M", 1100, "100M", nh=2, hi=1) + _pair(
-        "two", 1500, "100M", 1600, "100M", nh=2, hi=2, secondary=True
-    )
+    """R1 at [1010,1110); R2 at [1100,1200) (L 190) and at [1600,1700) (L 690): two molecules."""
+    records = [
+        _record("two", R1_FWD, 1010, "100M", 1100, nh=2),
+        _record("two", R2_REV, 1100, "100M", 1010, nh=2),
+        _record("two", R2_REV | SECONDARY, 1600, "100M", 1010, nh=2),
+    ]
     stats = _scan(tmp_path, index, records)
-    assert stats.n_multimapper_groups == 1
+    assert stats.n_multimapper_groups == 1 and stats.n_multimapper_alignments == 2
 
 
 def test_a_spliced_and_a_contiguous_reading_stay_two_hits(index, tmp_path):
-    """R1 alike in both groups; R2 from 1150, contiguous in HI 1 (`100M`, 50 bases into tK's intron) and spliced across
-    tK's intron [1200,2100) in HI 2 (`50M900N50M`). One start, two readings of L 240: the competition between them is
-    the point (owner, 2026-10-18), so nothing may merge them into one hit."""
-    records = _pair("compete", 1010, "100M", 1150, "100M", nh=2, hi=1) + _pair(
-        "compete", 1010, "100M", 1150, "50M900N50M", nh=2, hi=2, secondary=True, xs="+"
-    )
+    """R1's record twice, as STAR writes it beside each partner, one place; R2 from 1150, contiguous (`100M`, 50 bases
+    into tK's intron) and spliced across tK's intron [1200,2100) (`50M900N50M`). One start, two readings of L 240: the
+    competition between them is the point (owner, 2026-10-18), so nothing may merge them into one hit."""
+    records = [
+        _record("compete", R1_FWD, 1010, "100M", 1150, nh=2),
+        _record("compete", R2_REV, 1150, "100M", 1010, nh=2),
+        _record("compete", R1_FWD | SECONDARY, 1010, "100M", 1150, nh=2),
+        _record("compete", R2_REV | SECONDARY, 1150, "50M900N50M", 1010, nh=2, xs="+"),
+    ]
     stats = _scan(tmp_path, index, records)
-    assert stats.n_multimapper_groups == 1
+    assert stats.n_multimapper_groups == 1 and stats.n_multimapper_alignments == 2
 
 
-def test_an_nh_above_the_reported_groups_is_counted(index, tmp_path):
-    """NH 3 over two HI groups: a truncated output, counted; the two reported hits are the template's multiplicity."""
-    records = _pair("trunc", 1010, "100M", 1100, "100M", nh=3, hi=1) + _pair(
-        "trunc", 1500, "100M", 1600, "100M", nh=3, hi=2, secondary=True
+def test_an_nh_above_the_records_reported_is_counted(index, tmp_path):
+    """NH 3, and each mate reported in two records: a truncated output, counted. The places reported are the template's
+    multiplicity: R1 at 1010 pairs with R2 at 1100 and 1600, R1 at 1500 with R2 at 1600."""
+    records = _pair("trunc", 1010, "100M", 1100, "100M", nh=3) + _pair(
+        "trunc", 1500, "100M", 1600, "100M", nh=3, secondary=True
     )
     stats = _scan(tmp_path, index, records)
     assert stats.n_nh_above_reported == 1
-    assert stats.n_multimapper_groups == 1
+    assert stats.n_multimapper_groups == 1 and stats.n_multimapper_alignments == 3
+
+
+def test_the_aligners_pairing_is_not_read(index, tmp_path):
+    """STAR's HI groups pair R1 at 1010 with R2 at 10290 (too long) and R1 at 10220 with R2 at 1100 (facing away); the
+    true molecules are the other two combinations, in tK (L 190) and in T1 (L 170). The search reads geometry, not HI,
+    so it keeps both: a multimapper, where pairing by HI would withhold the template."""
+    records = [
+        _record("hi", R1_FWD, 1010, "100M", 10290, nh=2, hi=1),
+        _record("hi", R2_REV, 10290, "100M", 1010, nh=2, hi=1),
+        _record("hi", R1_FWD | SECONDARY, 10220, "100M", 1100, nh=2, hi=2),
+        _record("hi", R2_REV | SECONDARY, 1100, "100M", 10220, nh=2, hi=2),
+    ]
+    stats = _scan(tmp_path, index, records)
+    assert stats.n_fragments == 1, "the pairing followed HI"
+    assert stats.n_multimapper_groups == 1 and stats.n_multimapper_alignments == 2
+    assert _rejected(stats)["length"] == 1 and _rejected(stats)["outward"] == 1
 
 
 def test_the_annotated_bam_labels_a_withheld_template_unresolved(index, tmp_path):

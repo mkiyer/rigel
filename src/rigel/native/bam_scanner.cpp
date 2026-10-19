@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -207,7 +208,8 @@ struct SJCigarEntry {
 };
 
 struct ParsedAlignment {
-    int32_t ref_id;         // tid
+    int32_t ref_id;         // the index's reference id; -1 for a reference outside the index
+    int32_t tid = -1;       // the BAM's reference id
     int32_t ref_start;      // pos
     uint16_t flag;
     // Per-record count of CIGAR sj dropped by the splice-artifact
@@ -220,7 +222,6 @@ struct ParsedAlignment {
     uint16_t n_sj_blacklisted = 0;
     int32_t nm;             // NM tag (edit distance), 0 if absent
     int32_t nh;             // NH tag, 1 if absent
-    int32_t hi;             // HI tag, -1 if absent
 
     // CIGAR-parsed exon blocks and splice junctions
     std::vector<std::pair<int32_t, int32_t>> exons;  // (start, end)
@@ -230,13 +231,14 @@ struct ParsedAlignment {
     int32_t clip_lead = 0;
     int32_t clip_trail = 0;
 
+    // The CIGAR as the alignment's identity (`canonical_cigar`)
+    std::vector<uint32_t> cigar;
+
     bool is_read1()         const { return flag & BAM_FREAD1; }
-    bool is_read2()         const { return flag & BAM_FREAD2; }
     bool is_secondary()     const { return flag & BAM_FSECONDARY; }
     bool is_supplementary() const { return flag & BAM_FSUPPLEMENTARY; }
     bool is_reverse()       const { return flag & BAM_FREVERSE; }
     bool is_proper_pair()   const { return flag & BAM_FPROPER_PAIR; }
-    bool is_mate_unmapped() const { return flag & BAM_FMUNMAP; }
 };
 
 // ================================================================
@@ -704,6 +706,23 @@ static int32_t read_sj_strand(const bam1_t* b, SJTagMode mode, SJTagCounts* coun
     return result;
 }
 
+/// A record's CIGAR as its alignment's identity: M, = and X read as one operation, adjacent runs of it merged (`50=50X`
+/// and `100M` are one alignment); every other operation, soft and hard clips included, as written.
+static void canonical_cigar(const bam1_t* b, std::vector<uint32_t>& out)
+{
+    out.clear();
+    const uint32_t* cigar = bam_get_cigar(b);
+    for (uint32_t i = 0; i < b->core.n_cigar; ++i) {
+        int op = bam_cigar_op(cigar[i]);
+        const uint32_t len = bam_cigar_oplen(cigar[i]);
+        if (op == BAM_CEQUAL || op == BAM_CDIFF) op = BAM_CMATCH;
+        if (op == BAM_CMATCH && !out.empty() && bam_cigar_op(out.back()) == BAM_CMATCH)
+            out.back() = bam_cigar_gen(bam_cigar_oplen(out.back()) + len, BAM_CMATCH);
+        else
+            out.push_back(bam_cigar_gen(len, op));
+    }
+}
+
 // ================================================================
 // Parse a raw htslib bam1_t into a ParsedAlignment value type
 // ================================================================
@@ -723,7 +742,9 @@ static ParsedAlignment parse_bam_record(
     ParsedAlignment rec;
     rec.flag = b->core.flag;
     rec.ref_id = b->core.tid;
+    rec.tid = b->core.tid;
     rec.ref_start = b->core.pos;
+    canonical_cigar(b, rec.cigar);
 
     // BAM aux tags
     rec.nm = 0;
@@ -733,10 +754,6 @@ static ParsedAlignment parse_bam_record(
     rec.nh = 1;
     uint8_t* nh_aux = bam_aux_get(b, "NH");
     if (nh_aux) rec.nh = bam_aux2i(nh_aux);
-
-    rec.hi = -1;
-    uint8_t* hi_aux = bam_aux_get(b, "HI");
-    if (hi_aux) rec.hi = bam_aux2i(hi_aux);
 
     // CIGAR → exon blocks + splice junctions
     int32_t mapped_ref_id = (rec.ref_id >= 0 &&
@@ -845,114 +862,96 @@ static AssembledFragment build_fragment(
 }
 
 // ================================================================
-// Hit grouping
+// A template's hits: every R1 alignment with every R2 alignment
 // ================================================================
 
-struct AlignmentGroup {
-    // Hits: each is (r1_reads, r2_reads)
-    std::vector<std::pair<std::vector<ParsedAlignment*>,
-                          std::vector<ParsedAlignment*>>> hits;
-    // Secondary locations for transcript-aware pairing
-    std::vector<std::vector<ParsedAlignment*>> sec_r1_locs;
-    std::vector<std::vector<ParsedAlignment*>> sec_r2_locs;
+/// A template's candidate hits, each its R1 records and its R2 records; and, per record, the record it is written with
+/// in the annotated BAM when it carries no hit of its own, an alias of an alignment another record represents (-1
+/// otherwise).
+struct TemplateHits {
+    std::vector<std::pair<std::vector<ParsedAlignment*>, std::vector<ParsedAlignment*>>> hits;
+    std::vector<int32_t> alias_of;
 };
 
-static AlignmentGroup group_records_by_hit(
-    std::vector<ParsedAlignment>& usable)
+/// Whether two records carry one alignment: one mate, one BAM reference, one strand, one leftmost aligned position and
+/// one CIGAR (`canonical_cigar`). STAR repeats a mate's record in every pair alignment that shares it.
+static bool same_alignment(const ParsedAlignment& x, const ParsedAlignment& y)
 {
-    AlignmentGroup result;
-
-    // Detect HI tags
-    bool has_hi = false;
-    for (const auto& r : usable) {
-        if (r.hi >= 0) { has_hi = true; break; }
-    }
-
-    if (has_hi) {
-        // Group by HI value
-        std::unordered_map<int32_t,
-            std::pair<std::vector<ParsedAlignment*>,
-                      std::vector<ParsedAlignment*>>> groups;
-
-        for (auto& r : usable) {
-            int32_t hi = (r.hi >= 0) ? r.hi : 0;
-            auto& [r1s, r2s] = groups[hi];
-            if (r.is_read1())
-                r1s.push_back(&r);
-            else if (r.is_read2())
-                r2s.push_back(&r);
-        }
-
-        // Sort by HI for determinism
-        std::vector<int32_t> hi_keys;
-        hi_keys.reserve(groups.size());
-        for (auto& [hi, _] : groups) hi_keys.push_back(hi);
-        std::sort(hi_keys.begin(), hi_keys.end());
-
-        for (int32_t hi : hi_keys) {
-            result.hits.push_back(std::move(groups[hi]));
-        }
-        return result;
-    }
-
-    // No HI tags — separate primary from secondary
-    std::vector<ParsedAlignment*> primary_r1, primary_r2;
-    std::vector<std::pair<std::vector<ParsedAlignment*>,
-                          std::vector<ParsedAlignment*>>> singleton_hits;
-
-    for (auto& r : usable) {
-        if (r.is_supplementary()) {
-            if (r.is_read1())
-                primary_r1.push_back(&r);
-            else
-                primary_r2.push_back(&r);
-        } else if (r.is_secondary()) {
-            if (r.is_mate_unmapped()) {
-                if (r.is_read1())
-                    singleton_hits.push_back({{&r}, {}});
-                else
-                    singleton_hits.push_back({{}, {&r}});
-            } else if (r.is_read1()) {
-                result.sec_r1_locs.push_back({&r});
-            } else {
-                result.sec_r2_locs.push_back({&r});
-            }
-        } else {
-            // Primary
-            if (r.is_read1())
-                primary_r1.push_back(&r);
-            else
-                primary_r2.push_back(&r);
-        }
-    }
-
-    bool has_secondary = !result.sec_r1_locs.empty() ||
-                         !result.sec_r2_locs.empty();
-
-    if (has_secondary) {
-        // Multimapper without HI: include primary as additional locations
-        if (!primary_r1.empty())
-            result.sec_r1_locs.insert(result.sec_r1_locs.begin(), primary_r1);
-        if (!primary_r2.empty())
-            result.sec_r2_locs.insert(result.sec_r2_locs.begin(), primary_r2);
-        result.hits = std::move(singleton_hits);
-        return result;
-    }
-
-    // Unique mapper: primary pair as sole hit
-    if (!primary_r1.empty() || !primary_r2.empty()) {
-        result.hits.push_back({std::move(primary_r1),
-                               std::move(primary_r2)});
-    }
-    result.hits.insert(result.hits.end(),
-                       singleton_hits.begin(), singleton_hits.end());
-    return result;
+    return x.is_read1() == y.is_read1() && x.tid == y.tid && x.is_reverse() == y.is_reverse() &&
+           x.ref_start == y.ref_start && x.cigar == y.cigar;
 }
 
-// ================================================================
-// Multimapper pairing
-// ================================================================
-// Thread-safe: uses caller-supplied ResolverScratch for all resolve calls.
+/// A template's candidate hits, found by geometry alone, for any aligner: the aligner's own pairing (STAR's HI) is not
+/// read. The records are merged into mate locations, one per alignment (`same_alignment`): a primary record represents
+/// its location, the others are its aliases, and a mate's supplementary records ride with its primary location. A
+/// record with no aligned base is a location too, which the verdict passes through unjudged. Every R1 location with
+/// every R2 location on one BAM reference with opposite strands is a candidate for the hit verdict (`hit_verdict`).
+/// When one mate has no location, each location of the other is a one-mate hit (`HIT_MISSING_MATE`); when both have
+/// locations and no pair is a candidate, the first location of each is offered, so the verdict counts the template's
+/// reason once. On the STAR panel this finds the correct pair wherever a template's places hold one, where STAR's HI
+/// groups miss it in 0.31 % of the templates with several places.
+static TemplateHits template_hits(std::vector<ParsedAlignment>& records)
+{
+    struct Location {
+        std::vector<int32_t> members;  // record indices, in record order
+        int32_t rep = -1;
+        std::vector<ParsedAlignment*> supplementary;
+    };
+    TemplateHits out;
+    std::vector<Location> locs[2];
+    std::vector<int32_t> supplementary[2];
+    out.alias_of.assign(records.size(), -1);
+    for (int32_t k = 0; k < static_cast<int32_t>(records.size()); ++k) {
+        const ParsedAlignment& r = records[k];
+        const int m = r.is_read1() ? 0 : 1;
+        if (r.is_supplementary()) {
+            supplementary[m].push_back(k);
+            continue;
+        }
+        auto it = std::find_if(locs[m].begin(), locs[m].end(),
+                               [&](const Location& l) { return same_alignment(records[l.members.front()], r); });
+        if (it == locs[m].end()) locs[m].push_back({{k}, -1, {}});
+        else it->members.push_back(k);
+    }
+    for (auto& mate : locs) {
+        for (auto& l : mate) {
+            l.rep = l.members.front();
+            for (int32_t k : l.members) {
+                if (!records[k].is_secondary()) {
+                    l.rep = k;
+                    break;
+                }
+            }
+            for (int32_t k : l.members)
+                if (k != l.rep) out.alias_of[k] = l.rep;
+        }
+    }
+    for (int m = 0; m < 2; ++m) {
+        auto primary = std::find_if(locs[m].begin(), locs[m].end(),
+                                    [&](const Location& l) { return !records[l.rep].is_secondary(); });
+        if (primary == locs[m].end()) continue;
+        for (int32_t k : supplementary[m]) primary->supplementary.push_back(&records[k]);
+    }
+    auto reads = [&](const Location& l) {
+        std::vector<ParsedAlignment*> v{&records[l.rep]};
+        v.insert(v.end(), l.supplementary.begin(), l.supplementary.end());
+        return v;
+    };
+    if (locs[0].empty() || locs[1].empty()) {
+        for (const auto& l : locs[0]) out.hits.push_back({reads(l), {}});
+        for (const auto& l : locs[1]) out.hits.push_back({{}, reads(l)});
+        return out;
+    }
+    for (const auto& l1 : locs[0]) {
+        const ParsedAlignment& a = records[l1.rep];
+        for (const auto& l2 : locs[1]) {
+            const ParsedAlignment& b = records[l2.rep];
+            if (a.tid == b.tid && a.is_reverse() != b.is_reverse()) out.hits.push_back({reads(l1), reads(l2)});
+        }
+    }
+    if (out.hits.empty()) out.hits.push_back({reads(locs[0].front()), reads(locs[1].front())});
+    return out;
+}
 
 // ================================================================
 // The hit verdict: two mates that can be one molecule, explained by one annotated transcript when spliced
@@ -1015,144 +1014,6 @@ static int32_t hit_verdict(
     if (!f) return ctx.junction_holders(junctions, scratch, scratch.pair_candidates);
     return ctx.pair_holders(junctions, f->exons.front().first, f->exons.back().second, r->exons.front().first,
                             r->exons.back().second, scratch, scratch.pair_candidates);
-}
-
-static std::vector<std::pair<std::vector<ParsedAlignment*>,
-                              std::vector<ParsedAlignment*>>>
-pair_multimapper_reads(
-    std::vector<std::vector<ParsedAlignment*>>& sec_r1_locs,
-    std::vector<std::vector<ParsedAlignment*>>& sec_r2_locs,
-    FragmentResolver& ctx,
-    ResolverScratch& scratch)
-{
-    using Hit = std::pair<std::vector<ParsedAlignment*>,
-                          std::vector<ParsedAlignment*>>;
-    std::vector<Hit> paired;
-
-    if (sec_r1_locs.empty() && sec_r2_locs.empty())
-        return paired;
-
-    struct ResolvedLoc {
-        std::vector<ParsedAlignment*>* reads;
-        std::vector<int32_t> t_inds;
-        int32_t ref_id;
-        int32_t ref_start;
-    };
-
-    auto resolve_location = [&](std::vector<ParsedAlignment*>& reads,
-                                bool is_r2) -> std::vector<int32_t>
-    {
-        AssembledFragment frag = is_r2
-            ? build_fragment({}, reads)
-            : build_fragment(reads, {});
-        std::vector<int32_t> t_inds;
-        if (!frag.exons.empty()) {
-            RawResolveResult cr;
-            ctx._resolve_core(frag.exons, frag.introns,
-                              frag.genomic_footprint(), cr, scratch);
-            t_inds = std::move(cr.t_inds);
-        }
-        return t_inds;
-    };
-
-    std::vector<ResolvedLoc> r1_resolved;
-    r1_resolved.reserve(sec_r1_locs.size());
-    for (auto& r1_reads : sec_r1_locs) {
-        auto t_inds = resolve_location(r1_reads, false);
-        int32_t ref_id = r1_reads.empty() ? -1 : r1_reads[0]->ref_id;
-        int32_t ref_start = r1_reads.empty() ? -1 : r1_reads[0]->ref_start;
-        r1_resolved.push_back({&r1_reads, std::move(t_inds), ref_id, ref_start});
-    }
-
-    std::vector<ResolvedLoc> r2_resolved;
-    r2_resolved.reserve(sec_r2_locs.size());
-    for (auto& r2_reads : sec_r2_locs) {
-        auto t_inds = resolve_location(r2_reads, true);
-        int32_t ref_id = r2_reads.empty() ? -1 : r2_reads[0]->ref_id;
-        int32_t ref_start = r2_reads.empty() ? -1 : r2_reads[0]->ref_start;
-        r2_resolved.push_back({&r2_reads, std::move(t_inds), ref_id, ref_start});
-    }
-
-    // STRICT — pair by transcript-set intersection
-    std::unordered_set<int> r1_paired, r2_paired;
-
-    for (int i = 0; i < static_cast<int>(r1_resolved.size()); i++) {
-        if (r1_resolved[i].t_inds.empty()) continue;
-        for (int j = 0; j < static_cast<int>(r2_resolved.size()); j++) {
-            if (r2_resolved[j].t_inds.empty()) continue;
-            if (has_intersection(r1_resolved[i].t_inds,
-                                 r2_resolved[j].t_inds)) {
-                paired.push_back({*r1_resolved[i].reads,
-                                  *r2_resolved[j].reads});
-                r1_paired.insert(i);
-                r2_paired.insert(j);
-            }
-        }
-    }
-
-    // FALLBACK — same-reference closest distance
-    std::vector<int> unmatched_r1, unmatched_r2;
-    for (int i = 0; i < static_cast<int>(r1_resolved.size()); i++)
-        if (!r1_paired.count(i)) unmatched_r1.push_back(i);
-    for (int j = 0; j < static_cast<int>(r2_resolved.size()); j++)
-        if (!r2_paired.count(j)) unmatched_r2.push_back(j);
-
-    if (!unmatched_r1.empty() && !unmatched_r2.empty()) {
-        std::vector<std::tuple<int32_t, int, int>> candidates;
-        for (int i : unmatched_r1) {
-            for (int j : unmatched_r2) {
-                if (r1_resolved[i].ref_id == r2_resolved[j].ref_id &&
-                    r1_resolved[i].ref_id >= 0) {
-                    int32_t dist = std::abs(r1_resolved[i].ref_start -
-                                            r2_resolved[j].ref_start);
-                    candidates.push_back({dist, i, j});
-                }
-            }
-        }
-        std::sort(candidates.begin(), candidates.end());
-        for (const auto& [dist, i, j] : candidates) {
-            if (!r1_paired.count(i) && !r2_paired.count(j)) {
-                paired.push_back({*r1_resolved[i].reads,
-                                  *r2_resolved[j].reads});
-                r1_paired.insert(i);
-                r2_paired.insert(j);
-            }
-        }
-    }
-
-    // CROSS-PAIR remaining unmatched R1 × R2 combinatorially.
-    // This produces all possible pairings.  Some may be chimeric
-    // (e.g. R1 chr12 × R2 chrX) — those are detected downstream
-    // by _resolve_core and skipped during scoring.  The non-chimeric
-    // combinations (e.g. R1 chr12 × R2 chr12) are valid PE hits
-    // that preserve fragment-length information and give the EM
-    // better resolution than singletons would.
-    std::vector<int> final_r1, final_r2;
-    for (int i = 0; i < static_cast<int>(r1_resolved.size()); i++)
-        if (!r1_paired.count(i)) final_r1.push_back(i);
-    for (int j = 0; j < static_cast<int>(r2_resolved.size()); j++)
-        if (!r2_paired.count(j)) final_r2.push_back(j);
-
-    if (!final_r1.empty() && !final_r2.empty()) {
-        for (int i : final_r1) {
-            for (int j : final_r2) {
-                paired.push_back({*r1_resolved[i].reads,
-                                  *r2_resolved[j].reads});
-                r1_paired.insert(i);
-                r2_paired.insert(j);
-            }
-        }
-    }
-
-    // SINGLETONS — only if one side has reads but the other doesn't.
-    for (int i = 0; i < static_cast<int>(r1_resolved.size()); i++)
-        if (!r1_paired.count(i))
-            paired.push_back({*r1_resolved[i].reads, {}});
-    for (int j = 0; j < static_cast<int>(r2_resolved.size()); j++)
-        if (!r2_paired.count(j))
-            paired.push_back({{}, *r2_resolved[j].reads});
-
-    return paired;
 }
 
 /// One `OfferedFragment` marshalled out of Python, with the storage its spans point into.
@@ -1933,47 +1794,29 @@ private:
             stats.unique++;
         }
 
-        auto hit_result = group_records_by_hit(records);
+        auto hit_result = template_hits(records);
 
-        // With HI, a template's groups number its NH; fewer means the aligner truncated its output (counted).
+        // NH counts a template's pair alignments, and an aligner writes a mate's record in each; a mate reported in
+        // fewer records means the aligner truncated its output (counted). The mate counters, once per template, read
+        // its primary records.
         {
-            bool any_hi = false;
-            for (const auto& r : records) any_hi |= (r.hi >= 0);
-            if (any_hi && nh > static_cast<int32_t>(hit_result.hits.size())) stats.n_nh_above_reported++;
-        }
-
-        // Track hit-level mate stats
-        for (const auto& [r1s, r2s] : hit_result.hits) {
-            if (r1s.empty() || r2s.empty()) {
-                stats.mate_unmapped++;
-            } else {
-                bool found_proper = false;
-                for (const auto* r : r1s) {
-                    if (!r->is_supplementary() && !r->is_secondary()) {
-                        found_proper = r->is_proper_pair();
-                        break;
-                    }
-                }
-                if (found_proper) stats.proper_pair++;
-                else stats.improper_pair++;
+            int32_t n_r1 = 0, n_r2 = 0;
+            const ParsedAlignment* p1 = nullptr;
+            const ParsedAlignment* p2 = nullptr;
+            for (const auto& r : records) {
+                if (r.is_supplementary()) continue;
+                ++(r.is_read1() ? n_r1 : n_r2);
+                if (r.is_secondary()) continue;
+                if (r.is_read1() && !p1) p1 = &r;
+                else if (!r.is_read1() && !p2) p2 = &r;
             }
-        }
-
-        // Multimapper secondary pairing using per-worker scratch
-        std::vector<std::pair<std::vector<ParsedAlignment*>,
-                              std::vector<ParsedAlignment*>>> secondary_pairs;
-        if (!hit_result.sec_r1_locs.empty() ||
-            !hit_result.sec_r2_locs.empty()) {
-            // Thread-safe multimapper pairing using per-worker scratch
-            secondary_pairs = pair_multimapper_reads(
-                hit_result.sec_r1_locs,
-                hit_result.sec_r2_locs,
-                ctx, scratch);
+            if (nh > std::max(n_r1, n_r2)) stats.n_nh_above_reported++;
+            if (!p1 || !p2) stats.mate_unmapped++;
+            else if (p1->is_proper_pair()) stats.proper_pair++;
+            else stats.improper_pair++;
         }
 
         auto& all_hits = hit_result.hits;
-        all_hits.insert(all_hits.end(),
-                        secondary_pairs.begin(), secondary_pairs.end());
 
         // ⭐ A hit is usable when its two mates can be one molecule and one annotated transcript holds every junction
         // it observes (`hit_verdict`). A hit that is not is dropped, counted by its reason; a template left with none
@@ -2673,25 +2516,9 @@ public:
                 return;
             }
 
-            // Group into hits + secondary locations
-            auto hit_result = group_records_by_hit(light_group);
-
-            // Multimapper secondary pairing
-            std::vector<std::pair<std::vector<ParsedAlignment*>,
-                                  std::vector<ParsedAlignment*>>> secondary_pairs;
-            if (!hit_result.sec_r1_locs.empty() ||
-                !hit_result.sec_r2_locs.empty()) {
-                secondary_pairs = pair_multimapper_reads(
-                    hit_result.sec_r1_locs,
-                    hit_result.sec_r2_locs,
-                    *ctx_, scratch);
-            }
-
-            // Combine all hits
+            // The template's candidate hits, as the scan formed them
+            auto hit_result = template_hits(light_group);
             auto& all_hits = hit_result.hits;
-            all_hits.insert(all_hits.end(),
-                            secondary_pairs.begin(),
-                            secondary_pairs.end());
 
             // The scan's hit verdicts, replayed (`hit_verdict`): a rejected hit's records are written as a
             // secondary hit's, and a template left with no hit is written unresolved, class `unannotated_splice`
@@ -2730,13 +2557,13 @@ public:
             auto ann_it = frag_to_row.find(frag_id);
             bool has_ann = (ann_it != frag_to_row.end());
 
-            // Deduplicate raw records across hits: the cross-pair
-            // combinatorial block in pair_multimapper_reads intentionally
-            // produces overlapping hits for EM scoring, so a single raw
-            // record can appear in multiple hits.  For the annotated BAM
-            // output we must write each input record EXACTLY once.
-            // First-containing-hit wins.
+            // Each input record is written EXACTLY once, with the first hit that holds it: one mate location joins
+            // several hits. An alias of an alignment is written with the record that represents it
+            // (`TemplateHits::alias_of`).
             std::vector<bool> rec_written(raw_group.size(), false);
+            std::vector<std::vector<int32_t>> aliases(raw_group.size());
+            for (size_t i = 0; i < hit_result.alias_of.size(); ++i)
+                if (hit_result.alias_of[i] >= 0) aliases[hit_result.alias_of[i]].push_back(static_cast<int32_t>(i));
 
             for (int hit_idx = 0;
                  hit_idx < static_cast<int>(all_hits.size());
@@ -2744,30 +2571,22 @@ public:
             {
                 const auto& [r1_reads, r2_reads] = all_hits[hit_idx];
 
-                // Gather bam1_t* for all records in this hit,
-                // skipping any already emitted by an earlier hit.
-                // Stamp the per-record ZB:i tag (splice-artifact count)
-                // on each bam1_t as we select it — this is a record-local
-                // property of the CIGAR, not a hit-level value, so it
-                // lives outside the uniform stamp_and_write_hit helper.
+                // Gather bam1_t* for all records in this hit, and their aliases, skipping any already emitted by an
+                // earlier hit. Stamp the per-record ZB:i tag (splice-artifact count) on each bam1_t as we select it:
+                // a record-local property of the CIGAR, not a hit-level value.
                 std::vector<bam1_t*> hit_raws;
-                for (const auto* lr : r1_reads) {
-                    ptrdiff_t idx = lr - &light_group[0];
-                    if (rec_written[idx]) continue;
+                auto take = [&](ptrdiff_t idx) {
+                    if (rec_written[idx]) return;
                     rec_written[idx] = true;
-                    set_tag_int(
-                        raw_group[idx], "ZB",
-                        static_cast<int>(light_group[idx].n_sj_blacklisted));
+                    set_tag_int(raw_group[idx], "ZB", static_cast<int>(light_group[idx].n_sj_blacklisted));
                     hit_raws.push_back(raw_group[idx]);
-                }
-                for (const auto* lr : r2_reads) {
-                    ptrdiff_t idx = lr - &light_group[0];
-                    if (rec_written[idx]) continue;
-                    rec_written[idx] = true;
-                    set_tag_int(
-                        raw_group[idx], "ZB",
-                        static_cast<int>(light_group[idx].n_sj_blacklisted));
-                    hit_raws.push_back(raw_group[idx]);
+                };
+                for (const auto* reads : {&r1_reads, &r2_reads}) {
+                    for (const auto* lr : *reads) {
+                        const ptrdiff_t idx = lr - &light_group[0];
+                        take(idx);
+                        for (int32_t a : aliases[idx]) take(a);
+                    }
                 }
                 if (hit_raws.empty()) continue;
 
@@ -2925,46 +2744,10 @@ public:
             // Clone raw record for output
             raw_group.push_back(bam_dup1(b));
 
-            // Build ParsedAlignment (same as BamScanner)
-            ParsedAlignment rec;
-            rec.ref_id = b->core.tid;
-            rec.ref_start = b->core.pos;
-            rec.flag = flag;
-
-            rec.nm = 0;
-            uint8_t* nm_aux = bam_aux_get(b, "NM");
-            if (nm_aux) rec.nm = bam_aux2i(nm_aux);
-
-            rec.nh = 1;
-            uint8_t* nh_aux = bam_aux_get(b, "NH");
-            if (nh_aux) rec.nh = bam_aux2i(nh_aux);
-
-            rec.hi = -1;
-            uint8_t* hi_aux = bam_aux_get(b, "HI");
-            if (hi_aux) rec.hi = bam_aux2i(hi_aux);
-
-            int32_t mapped_ref_id = (rec.ref_id >= 0 &&
-                rec.ref_id < static_cast<int32_t>(tid_to_ref_id_.size()))
-                ? tid_to_ref_id_[rec.ref_id] : -1;
-            parse_cigar(b, rec.exons, rec.sjs);
-            read_soft_clips(b, rec.clip_lead, rec.clip_trail);
-            if (!rec.sjs.empty()) {
-                const int32_t sj_strand = read_sj_strand(b, sj_tag_mode_, nullptr);
-                for (auto& sj : rec.sjs) sj.strand = sj_strand;
-            }
-            rec.ref_id = mapped_ref_id;
-
-            // Apply the same splice-junction blacklist filter that the
-            // scanner uses so the annotated BAM sees a consistent view
-            // of the evidence.  Capture the drop count for the per-record
-            // ZB:i tag stamped below.
-            if (ctx_ && ctx_->has_sj_blacklist()) {
-                int32_t n_dropped =
-                    filter_blacklisted_sjs(rec.sjs, *ctx_, mapped_ref_id);
-                rec.n_sj_blacklisted = static_cast<uint16_t>(n_dropped);
-            }
-
-            light_group.push_back(std::move(rec));
+            // The scan's own parser, the blacklist included, so the annotated BAM sees the evidence the scan saw;
+            // its drop count is the per-record ZB:i tag stamped below.
+            light_group.push_back(
+                parse_bam_record(b, tid_to_ref_id_, sj_tag_mode_, ctx_, nullptr, nullptr, nullptr));
         }
 
         if (read_ret < -1) {

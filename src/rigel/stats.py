@@ -93,7 +93,7 @@ class PipelineStats:
     n_withheld_unannotated_splice: int = (
         0  # templates whose molecules no annotated transcript holds
     )
-    n_nh_above_reported: int = 0  # templates whose NH exceeds their HI groups (truncated output)
+    n_nh_above_reported: int = 0  # NH above a mate's reported records (a truncated output)
 
     # --- The per-fragment splice census (scanner QC; ``rigel report``'s splice breakdown) ---
     #
