@@ -45,6 +45,12 @@ Capture-ON needs them; capture-OFF is hurt both ways by false gDNA read as yield
   regions under 0.9; g50 κ0.99: 493; the simulator's alignments: 62, and no intron below 0.98). A junction is priced
   `c_lo + c_hi − ½(c_intron,lo + c_intron,hi)`, clipped at 0, so one inflated intron zeroes it: 14.4 % of g05's
   transcripts and 3.1 % of g50's have EM lengths under 0.9× their plain length (down to 0.017×).
+IT AMPLIFIES EVERY SCAN CHANGE. A change that moves a few hundred hits moves the error through the reader: the
+annotated-path rule (`ISSUES: the-annotated-path-rule-costs-the-stranded-strata`), then the shared-transcript witness
+(2026-10-19; `ISSUES: the-scanner-builds-fragments-from-one-mate`), which rejects 620 of g00's 11 M hits: g00's gene
+error +4.33 % shipped and +0.01 % with every efficiency at 1, the giant component's gDNA length −9.5 %; capture-ON's
+transcript error +0.86 % shipped and −0.09 % at 1. So a scan change is judged with the efficiencies at 1 beside the
+shipped run until this is fixed.
 The reader reads each object's deconvolved gDNA mass as a point Poisson count, whatever the deconvolution's own
 uncertainty; on the simulator's alignments the efficiencies stay at 1 in every condition here.
 THE PLANNED FIX (2026-10-19), for after the splice-artifact waves (owner: stay on the wave plan; the reader took many
@@ -214,17 +220,27 @@ Rigel reads alignments and does not repair them (owner, 2026-10-16). Fixing this
 for it: `the-gdna-length-contrast-is-ill-conditioned-on-aligned-input` and `region-lengths-count-unobservable-bases`.
 LANDED 2026-10-18, the pair validator (`tests/test_hit_verdict.py`): a hit's two mates must be one molecule, on
 one reference and opposite strands, inward once each 5' soft clip is walked back along the genome, 1 to
-`max_frag_length` long along the genome or along one transcript that holds every observed junction (one witness); a
-rejected hit is dropped and a template left with none is withheld. Then the same day, a one-mate hit (a lone
+`max_frag_length` long along the genome or along one transcript that overlaps both mates and holds every observed
+junction (one witness); a rejected hit is dropped and a template left with none is withheld. Then the same day, a one-mate hit (a lone
 secondary, a half-filled HI group, a primary whose mate is unmapped) is dropped as no pair, a numeric no-op on the
 STAR panel and the ladder, which hold none. And a template's multiplicity is its valid hits, not the aligner's NH
 (2026-10-19): within ±0.16 % on every STAR stratum's transcript and gene error, the ladder identical. Mates carried by
-several records and clip walks along a transcript path are not yet judged. Measured on the STAR panel at the recommended parameters,
-pinned and fractional, against main: transcript error −2.87 % stranded capture-OFF, +1.18 % unstranded capture-OFF,
-+0.29 % stranded capture-ON (gene −3.33 / +3.27 / −0.62 %); true gDNA counted as RNA −10 k to −17 k in the g50
-capture-OFF conditions and +5.5 k capture-ON; 2.7–4.0 k templates withheld per 10 M, none with a correct alignment
-(`ISSUES: star-hi-pairs-against-rigels-own-pairing`); the oracle ladder 48/48 identical. `num_hits` still counts the
-rejected hits, so a template whose other hits were invalid still reads as a multimapper.
+several records and clip walks along a transcript path are not yet judged. Measured on the STAR panel at the
+recommended parameters, pinned and fractional, against main: transcript error −2.87 % stranded capture-OFF, +1.18 %
+unstranded capture-OFF, +0.29 % stranded capture-ON (gene −3.33 / +3.27 / −0.62 %); true gDNA counted as RNA −10 k to
+−17 k in the g50 capture-OFF conditions and +5.5 k capture-ON; 2.7–4.0 k templates withheld per 10 M, none with a
+correct alignment (`ISSUES: star-hi-pairs-against-rigels-own-pairing`); the oracle ladder 48/48 identical.
+LANDED 2026-10-19, one transcript over both mates (the owner's rule): the witness, and a spliced hit's junction holder,
+must overlap both mates (overlap, not containment: the EM prices the overhang), so a gene lying wholly between two
+mates no longer shortens their path. With HI ignored, of 76.3 M mate pairs on the STAR panel it rejects 2,507 more, none
+correct, and walks 27.8 M candidate transcripts where any transcript over the molecule walked 1.97 B. As STAR paired
+them, 280–640 more hits per 10 M templates, each an alternative of a template that keeps another. Against main,
+pinned and fractional: transcript error −0.74 % unstranded capture-OFF, −0.66 % stranded capture-OFF, +0.86 % stranded
+capture-ON (gene +0.06 / +3.82 / +0.31 %); true gDNA counted as RNA −24.3 k capture-ON and −8.2 k g50 unstranded
+capture-OFF, +1.4 k g50 stranded capture-OFF; the ladder 48/48 identical. With every capture efficiency at 1 its own
+effect is −0.03 % transcript and +0.01 % gene error in g00, −0.09 / −0.10 % in capture-ON: the moves are the capture
+reader amplifying a small change in calibration's input (`ISSUES: the-reader-reads-false-gdna-as-capture`), spread by
+the EM's sensitivity at paralogs (`ISSUES: the-em-stops-before-it-converges`).
 Instruments: `quant_accuracy.py` and `calibration_vs_oracle.py` on the aligned panel, with the gDNA law and the capture
 ruler held fixed; the oracle ladder for identity.
 
@@ -254,6 +270,10 @@ called readings with a short anchor moved across another junction true; it is no
   groups miss it in 10,108 of 3.22 M such templates (0.31 %): STAR reported both correct mate readings, in different
   groups.
 - Ignoring HI adds 475 k pairs STAR did not assert, 2 % of them correct (10,114).
+The search's cost, measured 2026-10-19 with HI ignored on the five conditions: of 76.3 M pairs of distinct locations
+on one reference with opposite strands, 14 % face outward and 68 % lie within `max_frag_length` along the genome, both
+decided with no index lookup; the 18 % longer need a witness, one transcript over both mates
+(`ISSUES: the-scanner-builds-fragments-from-one-mate`).
 Open: the end-to-end comparison of the two pairing sources per stratum, once both are built; the search is needed for
 input without HI anyway, and the validator comes first, since both need it.
 
@@ -569,7 +589,12 @@ ending with different SIK1 isoforms at the floor; with the collapse bundled with
 split held under MAP and at ten times the iteration budget. With three more pairs moving both ways, g00's transcript
 error rose 4.8 % and its gene error 11.7 %. So on aligned input a perturbation of 1e-5 upstream can move tens of
 thousands of fragments between genes, and an A/B that moves any length is read with that in mind; the collapse is
-held until the EM is stable at these loci.
+held until the EM is stable at these loci. Again 2026-10-19: the shared-transcript witness removed 620 incorrect hits
+of g00's 11 M, and its gene error rose 28.9 k, the paralogs of chr21's duplicated p-arm swinging (LINC03104 26,348 →
+2,397 of 14,690 against LINC03105 6,179 → 17,240 of 6,034; SIK1B 33,105 → 28,419 against SIK1 77 → 4,752), while its
+transcript error fell 17.9 k through 565 k of movement among 1,750 transcripts; capture-ON's +5.4 k transcript error is
++0.5 k outside its 20 most-moved genes, led by PPP1R26P3/P4. The same at 20× the EM budget and δ 1e-10 (gene +4.32 %);
+with every capture efficiency at 1 the two builds differ by 2 fragments of g00's gene error.
 
 ### the-transfer-policy-loses-to-silence-on-unstranded-capture-off
 `priority: next — 0.8.1, with ISSUES: the-intron-own-solve-on-unstranded-capture-off · kind: defect · 2026-10-14`

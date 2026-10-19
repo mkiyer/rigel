@@ -783,19 +783,53 @@ public:
         return holders.empty() ? HIT_UNSUPPORTED : HIT_USABLE;
     }
 
+    /// Whether transcript ``t``'s span, from its first exon's start to its last exon's end, overlaps both [f_lo, f_hi)
+    /// and [r_lo, r_hi): one transcript compatible with both mates. Overlap, not containment: a
+    /// mate that runs past an annotated end still overlaps, and the EM prices its extra bases as overhang.
+    bool overlaps_both(int32_t t, int32_t f_lo, int32_t f_hi, int32_t r_lo, int32_t r_hi) const
+    {
+        if (t < 0 || t + 1 >= static_cast<int32_t>(exon_offsets_.size())) return false;
+        const int32_t first = exon_offsets_[t], last = exon_offsets_[t + 1] - 1;
+        if (last < first) return false;
+        const int32_t t_lo = exon_starts_[first], t_hi = exon_ends_[last];
+        return t_lo < f_hi && t_hi > f_lo && t_lo < r_hi && t_hi > r_lo;
+    }
+
+    /// Keeps in ``ts`` the transcripts that overlap both mates' aligned spans (`overlaps_both`).
+    void retain_overlapping_both(std::vector<int32_t>& ts, int32_t f_lo, int32_t f_hi, int32_t r_lo,
+                                 int32_t r_hi) const
+    {
+        ts.erase(std::remove_if(ts.begin(), ts.end(),
+                                [&](int32_t t) { return !overlaps_both(t, f_lo, f_hi, r_lo, r_hi); }),
+                 ts.end());
+    }
+
+    /// The transcripts that explain a pair, into ``holders``: each holds every junction in ``junctions``
+    /// (`junction_holders`) and overlaps both mates' aligned spans, [f_lo, f_hi) and [r_lo, r_hi). `HIT_USABLE` when
+    /// there are any; otherwise `junction_holders`' reason, or `HIT_UNSUPPORTED` when every holder misses a mate.
+    int32_t pair_holders(const std::vector<IntronBlock>& junctions, int32_t f_lo, int32_t f_hi, int32_t r_lo,
+                         int32_t r_hi, ResolverScratch& scratch, std::vector<int32_t>& holders) const
+    {
+        const int32_t why = junction_holders(junctions, scratch, holders);
+        if (why != HIT_USABLE) return why;
+        retain_overlapping_both(holders, f_lo, f_hi, r_lo, r_hi);
+        return holders.empty() ? HIT_UNSUPPORTED : HIT_USABLE;
+    }
+
     /// Whether the forward mate ``f`` and the reverse mate ``r``, on reference ``ref_id``, can be one molecule:
     /// `HIT_USABLE`, or `HIT_OUTWARD` or `HIT_LENGTH` (the caller has checked the reference and the strands).
     ///
     /// The forward mate's 5' soft clip is walked back along the genome and the reverse mate's forward, giving the
     /// molecule [a, b); the mates must face inward, with both mates' aligned bases inside it. Its length counts the
     /// bases of [a, b) with every observed skip of either mate removed, and must lie in [1, max_fragment_length].
-    /// Failing that, one annotated transcript that holds every junction the hit observes (``junctions``, as
-    /// `junction_holders` reads them), or, with none observed, any transcript over the molecule, may witness a
-    /// shorter path: its other introns in the stretches neither mate aligned are cut whole by the K rule of
-    /// `collect_transcript_introns_in_gap`, and it offers no path when one of them overlaps an aligned block by more
-    /// than K. One transcript supplies both the observed junctions and the implied introns, so a junction one
-    /// transcript holds and an intron only another holds never make a path together (the targeted review's
-    /// hybrid). Measured against per-base truth on 47.9 M STAR templates, this rejects no correct pair.
+    /// Failing that, one annotated transcript that overlaps both mates and holds every junction the hit observes
+    /// (``junctions``; `pair_holders`) may witness a shorter path: its other introns in the stretches neither mate
+    /// aligned are cut whole by the K rule of `collect_transcript_introns_in_gap`, and it offers no path when one of
+    /// them overlaps an aligned block by more than K. One transcript supplies both the observed junctions and the
+    /// implied introns, so a junction one transcript holds and an intron only another holds never make a path
+    /// together (the targeted review's hybrid); and a transcript that misses a mate never shortens the path between
+    /// them. Measured against per-base truth on the STAR panel, this rejects no correct pair, of 47.9 M templates as
+    /// STAR paired them and of 76.3 M mate pairs with HI ignored.
     int32_t validate_pair(int32_t ref_id, const PairMate& f, const PairMate& r,
                           const std::vector<IntronBlock>& junctions, ResolverScratch& scratch) const
     {
@@ -832,11 +866,17 @@ public:
         const int64_t length = static_cast<int64_t>(b) - a - removed;
         if (length >= 1 && length <= max_len) return HIT_USABLE;
 
-        auto& cands = scratch.pair_candidates;  // the witnesses
-        if (junctions.empty())
-            transcripts_overlapping(ref_id, a, b, scratch, cands);
-        else if (junction_holders(junctions, scratch, cands) != HIT_USABLE)
+        // The witnesses: the transcripts over the forward mate that also overlap the reverse one, holding every
+        // observed junction when there is one.
+        const int32_t f_lo = f.blocks->front().first, f_hi = f.blocks->back().second;
+        const int32_t r_lo = r.blocks->front().first, r_hi = r.blocks->back().second;
+        auto& cands = scratch.pair_candidates;
+        if (junctions.empty()) {
+            transcripts_overlapping(ref_id, f_lo, f_hi, scratch, cands);
+            retain_overlapping_both(cands, f_lo, f_hi, r_lo, r_hi);
+        } else if (pair_holders(junctions, f_lo, f_hi, r_lo, r_hi, scratch, cands) != HIT_USABLE) {
             return HIT_LENGTH;
+        }
 
         auto& aligned = scratch.pair_aligned;  // both mates' aligned blocks
         aligned.assign(f.blocks->begin(), f.blocks->end());

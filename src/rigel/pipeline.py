@@ -145,7 +145,7 @@ def _log_hit_verdicts(stats: PipelineStats) -> None:
         "too long on every path": stats.n_hits_rejected_length,
         "junctions that contradict": stats.n_hits_rejected_contradictory,
         "a novel junction": stats.n_hits_rejected_novel_junction,
-        "junctions no one transcript holds": stats.n_hits_rejected_unsupported,
+        "junctions no one transcript over both mates holds": stats.n_hits_rejected_unsupported,
     }
     if stats.n_nh_above_reported:
         logger.warning(

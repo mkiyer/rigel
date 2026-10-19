@@ -88,9 +88,7 @@ class PipelineStats:
     n_hits_rejected_novel_junction: int = (
         0  # a molecule with a junction no annotated transcript holds
     )
-    n_hits_rejected_unsupported: int = (
-        0  # a molecule whose junctions no one annotated transcript holds together
-    )
+    n_hits_rejected_unsupported: int = 0  # junctions no one transcript over both mates holds
     n_withheld_unpaired: int = 0  # templates none of whose hits is a molecule
     n_withheld_unannotated_splice: int = (
         0  # templates whose molecules no annotated transcript holds

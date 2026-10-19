@@ -955,19 +955,23 @@ static AlignmentGroup group_records_by_hit(
 // Thread-safe: uses caller-supplied ResolverScratch for all resolve calls.
 
 // ================================================================
-// The hit verdict: two mates that can be one molecule, whose junctions one annotated transcript holds
+// The hit verdict: two mates that can be one molecule, explained by one annotated transcript when spliced
 // ================================================================
 
 /// `HIT_USABLE` when a hit's two mates can be one molecule (`FragmentResolver::validate_pair`), or when the hit is not
 /// a pair this rule judges: a mate carried by several records, or a mate off the index. Those stay as they were, for
 /// the changes that own them. Otherwise the reason they cannot; a hit with one mate gives no fragment length at all
-/// (`HIT_MISSING_MATE`). A transcript that witnesses a path must hold every junction the hit observes (``junctions``).
+/// (`HIT_MISSING_MATE`). A transcript that witnesses a path must overlap both mates and hold every junction the hit
+/// observes (``junctions``). ``f`` and ``r`` are set to the forward and reverse mates when the rule judged them.
 static int32_t pair_verdict(
     const std::pair<std::vector<ParsedAlignment*>, std::vector<ParsedAlignment*>>& hit,
     const std::vector<IntronBlock>& junctions,
     const FragmentResolver& ctx,
-    ResolverScratch& scratch)
+    ResolverScratch& scratch,
+    const ParsedAlignment*& f,
+    const ParsedAlignment*& r)
 {
+    f = r = nullptr;
     const ParsedAlignment* m1 = nullptr;
     const ParsedAlignment* m2 = nullptr;
     for (const auto* rec : hit.first) {
@@ -985,17 +989,18 @@ static int32_t pair_verdict(
     if (m1->ref_id < 0 || m2->ref_id < 0) return HIT_USABLE;
     if (m1->ref_id != m2->ref_id) return HIT_REFERENCE;
     if (m1->is_reverse() == m2->is_reverse()) return HIT_STRAND;
-    const ParsedAlignment* f = m1->is_reverse() ? m2 : m1;
-    const ParsedAlignment* r = m1->is_reverse() ? m1 : m2;
+    f = m1->is_reverse() ? m2 : m1;
+    r = m1->is_reverse() ? m1 : m2;
     const PairMate pf{&f->exons, f->clip_lead, f->clip_trail};
     const PairMate pr{&r->exons, r->clip_lead, r->clip_trail};
     return ctx.validate_pair(f->ref_id, pf, pr, junctions, scratch);
 }
 
-/// Why a hit is not usable, or `HIT_USABLE`. Its two mates must be able to be one molecule (`pair_verdict`), and one
-/// annotated transcript must hold every junction it observes, a supplementary record's too (`observed_junctions`,
-/// `FragmentResolver::junction_holders`): the annotated-path rule. The molecule is judged first, so a hit the rule
-/// withholds always has a fragment length.
+/// Why a hit is not usable, or `HIT_USABLE`. Its two mates must be able to be one molecule (`pair_verdict`), and when
+/// it is spliced, one annotated transcript must explain it: hold every junction it observes, a supplementary
+/// record's too (`observed_junctions`), and overlap both mates (`FragmentResolver::pair_holders`): the annotated-path
+/// rule. A hit the pair rule passes through unjudged is held to its junctions alone. The molecule is judged first, so
+/// a hit the rule withholds always has a fragment length.
 static int32_t hit_verdict(
     const std::pair<std::vector<ParsedAlignment*>, std::vector<ParsedAlignment*>>& hit,
     const FragmentResolver& ctx,
@@ -1003,9 +1008,13 @@ static int32_t hit_verdict(
 {
     auto& junctions = scratch.hit_junctions;
     observed_junctions(hit.first, hit.second, junctions);
-    const int32_t pair = pair_verdict(hit, junctions, ctx, scratch);
+    const ParsedAlignment* f = nullptr;
+    const ParsedAlignment* r = nullptr;
+    const int32_t pair = pair_verdict(hit, junctions, ctx, scratch, f, r);
     if (pair != HIT_USABLE || junctions.empty()) return pair;
-    return ctx.junction_holders(junctions, scratch, scratch.pair_candidates);
+    if (!f) return ctx.junction_holders(junctions, scratch, scratch.pair_candidates);
+    return ctx.pair_holders(junctions, f->exons.front().first, f->exons.back().second, r->exons.front().first,
+                            r->exons.back().second, scratch, scratch.pair_candidates);
 }
 
 static std::vector<std::pair<std::vector<ParsedAlignment*>,

@@ -74,12 +74,17 @@ the code is open; each is less critical.
   STAR panel, transcript error +0.08 % unstranded OFF, +0.16 % stranded OFF, −0.15 % stranded ON (gene −0.01 / +0.15
   / +0.07 %); the census moves by under 2.3 k per condition; the ladder identical; suite 3,067. Truncated outputs
   (NH above the HI groups) are counted: none on the STAR panel
-8. ☐ Without HI (minimap2), every same-reference pair validated, the span bound first
+8. ◐ Without HI (minimap2), every same-reference pair validated (`GEOMETRIC_PAIRING_DESIGN.md` revision 2, approved
+  2026-10-19: the owner's rule, one transcript over both mates, in place of the span bound). ☑ Step 1, the witness
+  rule (item 9). ☐ Step 2, the search, and the four-arm comparison that decides item 3
 9. ◐ Each hit validated as one molecule along a path, with one witness transcript: K by the resolver's rule; outward
   and too-long pairs rejected; clips walked. ☑ The validator, clips walked along the genome (2026-10-18; the C++ counts
   match the prototype's on all five STAR conditions within their duplicate HI groups; suite 3,060). Against main on
   the STAR panel: transcript error −2.87 % stranded OFF, +1.18 % unstranded OFF, +0.29 % stranded ON (gene −3.33 /
-  +3.27 / −0.62 %); the ladder identical. ☐ Clip walks along a transcript path (minimap2 input); ☐ one-mate hits and
+  +3.27 / −0.62 %); the ladder identical. ☑ One transcript over both mates (2026-10-19, the owner's rule): the witness
+  and a spliced hit's junction holder overlap both mates; transcript error −0.74 / −0.66 / +0.86 %, gene +0.06 /
+  +3.82 / +0.31 % (g00's paralogs), true gDNA counted RNA −24 k capture-ON; the ladder identical; suite 3,086.
+  ☐ Clip walks along a transcript path (minimap2 input); ☐ one-mate hits and
   mates with several records, which pass through unjudged
 10. ◐ The annotated-path rule: a spliced hit is usable only if one annotated transcript holds all its junctions; its
   contiguous competitor stays. ☑ One junction set per hit, every record's (2026-10-19, 69d003ea): the STAR panel 15/15

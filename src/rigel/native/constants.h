@@ -89,11 +89,11 @@ static constexpr int32_t HIT_STRAND       = 2;  // on one strand
 static constexpr int32_t HIT_OUTWARD      = 3;  // facing away from each other, or a mate past the other's 5' end
 static constexpr int32_t HIT_LENGTH       = 4;  // no path gives a fragment length in [1, max_fragment_length]
 static constexpr int32_t HIT_MISSING_MATE = 5;  // one mate only: no fragment length at all
-// Or they are, and no one annotated transcript holds every junction the hit observes (the annotated-path rule,
-// `FragmentResolver::junction_holders`):
+// Or they are, and no one annotated transcript explains the hit: holds every junction it observes and overlaps both
+// mates (the annotated-path rule, `FragmentResolver::pair_holders`):
 static constexpr int32_t HIT_CONTRADICTORY  = 6;  // two junctions overlap unequal, or their motifs name both strands
 static constexpr int32_t HIT_NOVEL_JUNCTION = 7;  // a junction no transcript holds
-static constexpr int32_t HIT_UNSUPPORTED    = 8;  // each junction held by some transcript, none holding them all
+static constexpr int32_t HIT_UNSUPPORTED    = 8;  // each junction held, but no one holder of them all over both mates
 static constexpr int32_t N_HIT_VERDICTS     = 9;
 
 /// A molecule the annotated-path rule withheld: its template, left with no usable hit, is an unannotated splice.

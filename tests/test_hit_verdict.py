@@ -1,19 +1,20 @@
-"""A hit is usable only when its two mates can be one molecule with a valid fragment length, and one annotated
-transcript holds every junction it observes.
+"""A hit is usable only when its two mates can be one molecule with a valid fragment length, and, when it is spliced,
+one annotated transcript explains it: overlaps both mates and holds every junction it observes.
 
 Every accepted alignment needs a fragment length, which the EM scores by. A hit's two mates must lie on one reference,
 on opposite strands, facing inward once each 5' soft clip is walked back, with both mates' aligned bases inside the
 molecule; its length, the molecule's bases with every observed skip removed, must lie in 1..max_frag_length along the
-genome, or along one annotated transcript that holds every junction the hit observes, that transcript's other introns
-in the unaligned stretches cut by the resolver's K rule. A hit with one mate gives no length at all. Measured on the
-STAR panel (47.9 M templates, per-base truth), the pair rule rejects no correct pair
+genome, or along one annotated transcript that overlaps both mates and holds every junction the hit observes, that
+transcript's other introns in the unaligned stretches cut by the resolver's K rule. A transcript that misses a mate
+never shortens the path between them (owner, 2026-10-19: overlap, not containment). A hit with one mate gives no
+length at all. Measured on the STAR panel (per-base truth), the pair rule rejects no correct pair
 (`ISSUES: star-hi-pairs-against-rigels-own-pairing`).
 
-The annotated-path rule: a spliced hit is usable only if one annotated transcript holds every junction it observes,
-both mates' and any supplementary record's; Rigel does not assemble transcripts. Otherwise it is contradictory (two
-junctions overlap unequal, or their motifs name both strands), a novel junction (one no transcript holds), or
-unsupported (each held, none holding them all). The molecule is judged first, so the rule withholds only molecules,
-each with a fragment length.
+The annotated-path rule: a spliced hit is usable only if one annotated transcript overlaps both mates and holds every
+junction the hit observes, both mates' and any supplementary record's; Rigel does not assemble transcripts. Otherwise
+it is contradictory (two junctions overlap unequal, or their motifs name both strands), a novel junction (one no
+transcript holds), or unsupported (each held, but no one transcript holds them all over both mates). The molecule is
+judged first, so the rule withholds only molecules, each with a fragment length.
 
 A hit that fails is dropped and counted by its reason; a template left with no hit is withheld, not counted intergenic:
 an unannotated splice when the annotated-path rule withheld one of its hits, else unpaired.
@@ -215,6 +216,28 @@ def test_a_witness_holds_a_supplementary_records_junction_too(index_t3, tmp_path
     assert stats.n_fragments == 0 and _rejected(stats)["length"] == 1
 
 
+def test_a_transcript_between_the_mates_is_no_witness(index, tmp_path):
+    """F at [800,900) and R at [2500,2600), both outside tK [1000,2400): 1,800 along the genome. Cutting tK's intron
+    [1200,2100), which lies between them, would give 900, but tK overlaps neither mate, so it offers no path: a
+    witness overlaps both mates (owner, 2026-10-19). Rejected for length."""
+    stats = _scan(tmp_path, index, _pair("between", 800, "100M", 2500, "100M"))
+    assert stats.n_fragments == 0, "a transcript that misses both mates witnessed their path"
+    assert _rejected(stats)["length"] == 1
+    assert stats.n_withheld_unpaired == 1
+
+
+def test_a_long_spliced_pair_whose_holders_miss_a_mate_is_too_long(index_t3, tmp_path):
+    """F `10M100N10M` at 10100 crosses [10110,10210), which T1 and T3 hold; R `10M` at [11850,11860) lies past both
+    transcripts' ends: 1,660 along the genome. T3's intron [10300,11300) between the mates would cut it to 660, but T3
+    does not overlap R, so it offers no path. Rejected for length, which is judged before the junctions, so not
+    withheld as unsupported."""
+    stats = _scan(
+        tmp_path, index_t3, _pair("long_spliced", 10100, "10M100N10M", 11850, "10M", xs="+")
+    )
+    assert stats.n_fragments == 0, "a holder that misses a mate witnessed the path"
+    assert _rejected(stats)["length"] == 1 and _rejected(stats)["unsupported"] == 0
+
+
 def test_an_invalid_hit_is_dropped_and_its_template_kept(index, tmp_path):
     """HI 1 is the control pair, HI 2 a pair facing outward: one hit dropped, one fragment kept."""
     records = _pair("mixed", 1010, "100M", 1100, "100M", nh=2, hi=1) + _pair(
@@ -376,6 +399,20 @@ def test_annotated_junctions_no_one_transcript_holds_are_unsupported(index, inde
     assert _withheld(without)["unannotated_splice"] == 1
     with_t3 = _scan(tmp_path, index_t3, records)
     assert sum(_rejected(with_t3).values()) == 0 and with_t3.n_fragments == 1
+
+
+def test_a_spliced_hit_needs_a_holder_overlapping_both_mates(index, tmp_path):
+    """F splices across tK's intron [1200,2100) (`50M900N50M` from 1150); R lies wholly past tK's end, at [2450,2550).
+    Short along the genome (L 500), so no witness is needed for its length, but tK, its one holder, does not overlap R:
+    no one transcript explains both mates, so the hit is unsupported (owner, 2026-10-19). R at [2350,2450) runs 50
+    bases past tK's end and still overlaps it: overlap, not containment, so that hit is usable, its extra bases the
+    EM's overhang."""
+    past = _scan(tmp_path, index, _pair("past", 1150, "50M900N50M", 2450, "100M", xs="+"))
+    assert past.n_fragments == 0, "a holder that misses a mate made the hit usable"
+    assert _rejected(past)["unsupported"] == 1
+    assert _withheld(past) == {"unpaired": 0, "unannotated_splice": 1}
+    overhang = _scan(tmp_path, index, _pair("overhang", 1150, "50M900N50M", 2350, "100M", xs="+"))
+    assert sum(_rejected(overhang).values()) == 0 and overhang.n_fragments == 1
 
 
 def test_mates_whose_junctions_overlap_unequal_contradict(index, tmp_path):
