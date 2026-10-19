@@ -79,7 +79,8 @@ def test_worker_exception_propagates_to_python(tmp_path):
         from rigel.pipeline import scan_and_buffer
 
         index = TranscriptIndex.load({str(index_dir)!r})
-        scan = BamScanConfig(total_threads=1, read_name_batch_size=1)
+        # a limit above the 70,100-bp molecule, so the pair is a hit and the buffer, not the length rule, refuses it
+        scan = BamScanConfig(total_threads=1, read_name_batch_size=1, max_frag_length=100_000)
         assert scan.resolved_scan_threads() == (1, 0)
         scan_and_buffer({str(bam_path)!r}, index, scan)
     """)

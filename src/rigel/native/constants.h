@@ -77,9 +77,18 @@ static constexpr int32_t AF_INTERGENIC_BIT       = 0x20;
 static constexpr int32_t AF_MULTIMAPPER_DROP_BIT = 0x80;
 
 // The composed values the C++ stamp sites write.
+static constexpr int32_t AF_UNRESOLVED        = 0x00;  // withheld: no pair of the template's mates is one molecule
 static constexpr int32_t AF_GDNA_INTERGENIC   = AF_RESOLVED_BIT | AF_GDNA_BIT | AF_INTERGENIC_BIT;  // 0x25
 static constexpr int32_t AF_RNA_INTERGENIC    = AF_RESOLVED_BIT | AF_INTERGENIC_BIT;                // 0x21
 static constexpr int32_t AF_MULTIMAPPER_DROP  = AF_MULTIMAPPER_DROP_BIT;                            // 0x80
+
+// Why a hit's two mates are not one molecule (`FragmentResolver::validate_pair`); PAIR_OK when they are.
+static constexpr int32_t PAIR_OK         = 0;
+static constexpr int32_t PAIR_REFERENCE  = 1;  // the mates lie on two references
+static constexpr int32_t PAIR_STRAND     = 2;  // on one strand
+static constexpr int32_t PAIR_OUTWARD    = 3;  // facing away from each other, or a mate past the other's 5' end
+static constexpr int32_t PAIR_LENGTH     = 4;  // no path gives a fragment length in [1, max_fragment_length]
+static constexpr int32_t N_PAIR_VERDICTS = 5;
 
 // ================================================================
 // Scoring constants (shared by scoring.cpp and Python side)

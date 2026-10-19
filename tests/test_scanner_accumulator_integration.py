@@ -163,12 +163,14 @@ def _two_contig_read(qname, ref_id, pos, mate_ref_id, mate_pos, is_r1, cigar="10
     return a
 
 
-def _two_contig_bam(bam_path, reads) -> str:
+def _two_contig_bam(bam_path, reads, extra_refs=()) -> str:
+    """The reads as a name-sorted BAM over chr1 and chr2, and ``extra_refs`` the index does not hold."""
     import pysam
 
     header = {
         "HD": {"VN": "1.6", "SO": "queryname"},
-        "SQ": [{"SN": "chr1", "LN": 3000}, {"SN": "chr2", "LN": 3000}],
+        "SQ": [{"SN": "chr1", "LN": 3000}, {"SN": "chr2", "LN": 3000}]
+        + [{"SN": ref, "LN": 3000} for ref in extra_refs],
     }
     bam_path = str(bam_path)
     with pysam.AlignmentFile(bam_path, "wb", header=header) as out:
@@ -180,30 +182,28 @@ def _two_contig_bam(bam_path, reads) -> str:
 
 @pytest.fixture
 def multi_reference_bam(tmp_path):
-    """A two-contig index and a BAM holding one fragment whose mates sit on DIFFERENT references.
+    """A two-contig index and a BAM holding one fragment on a reference the index does not hold.
 
-    This exists to make ``n_deposit_not_offered`` non-zero. Such a fragment is not one molecule and an
-    ``OfferedFragment`` cannot express it — it carries one extent on one region-bound axis — so the
-    deposit adapter refuses it. Computing a span per reference and depositing all of them onto the
-    first block's ``ref_id`` instead lands one contig's coordinates on another's axis. The refusal is
-    right; being silent about it is not, which is what the counter is for.
-
-    It reaches the adapter by the INTERGENIC path: both mates resolve to no candidate transcript, so
-    the fragment is never classified chimeric and is never filtered upstream.
+    This exists to make ``n_deposit_not_offered`` non-zero. The fragment is a valid pair, so the scan
+    resolves it (intergenic: no transcript) and offers it, but it has no region-bound axis to land on,
+    so the deposit adapter refuses it. The refusal is right; being silent about it is not, which is what
+    the counter is for. A pair whose mates sit on two references used to reach the same refusal; it no
+    longer reaches the deposit at all, because the scan withholds a pair that is not one molecule
+    (`tests/test_pair_validation.py`).
 
     Returns ``(bam_path, index)``.
     """
     index = _two_contig_index(tmp_path)
     reads = [
-        # The trans pair: mates on chr1 and chr2, both well clear of the annotation.
-        _two_contig_read("trans", 0, 1500, 1, 1500, True),
-        _two_contig_read("trans", 1, 1500, 0, 1500, False),
+        # A valid pair on chrU, a reference the BAM carries and the index does not.
+        _two_contig_read("unindexed", 2, 1500, 2, 1800, True),
+        _two_contig_read("unindexed", 2, 1800, 2, 1500, False),
         # And one ordinary intergenic pair, so a census that counted NOTHING would not pass by
         # making both sides of the identity zero.
         _two_contig_read("cis", 0, 2000, 0, 2300, True),
         _two_contig_read("cis", 0, 2300, 0, 2000, False),
     ]
-    return _two_contig_bam(tmp_path / "multi_ref.bam", reads), index
+    return _two_contig_bam(tmp_path / "multi_ref.bam", reads, extra_refs=("chrU",)), index
 
 
 def _scan_full(result, index=None):

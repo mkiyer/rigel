@@ -601,6 +601,14 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "chimeric_cis_diff": stats.n_chimeric_cis_strand_diff,
             "with_annotated_sj": stats.n_with_annotated_sj,
             "with_unannotated_sj": stats.n_with_unannotated_sj,
+            # Templates withheld because no pair of their mates is one molecule, and the hits dropped for it
+            "withheld_no_valid_pair": stats.n_withheld_no_valid_pair,
+            "pairs_rejected": {
+                "reference": stats.n_pairs_rejected_reference,
+                "strand": stats.n_pairs_rejected_strand,
+                "outward": stats.n_pairs_rejected_outward,
+                "length": stats.n_pairs_rejected_length,
+            },
             "splice": splice_counts,
         },
         "strand_model": {

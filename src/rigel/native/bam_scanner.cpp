@@ -227,6 +227,10 @@ struct ParsedAlignment {
     std::vector<std::pair<int32_t, int32_t>> exons;  // (start, end)
     std::vector<SJCigarEntry> sjs;
 
+    // The soft clips at the CIGAR's two ends, which the pair validator walks from the read's 5' end
+    int32_t clip_lead = 0;
+    int32_t clip_trail = 0;
+
     bool is_read1()         const { return flag & BAM_FREAD1; }
     bool is_read2()         const { return flag & BAM_FREAD2; }
     bool is_secondary()     const { return flag & BAM_FSECONDARY; }
@@ -357,6 +361,10 @@ struct BamScanStats {
     // The junction-strand tag on each spliced record
     SJTagCounts sj_tags;
 
+    // Hits whose mates are not one molecule, by `PAIR_*` reason, and the templates left with none
+    std::array<int64_t, N_PAIR_VERDICTS> pairs_rejected{};
+    int64_t n_withheld_no_valid_pair = 0;
+
     // ── the per-fragment splice census ────────────────────────────────────────────────────────────
     //
     // ⭐ ONE observation per HIT the scanner offers the accumulator (a multimapper's hits one by one), filed
@@ -421,6 +429,8 @@ struct BamScanStats {
         n_sj_observed += o.n_sj_observed;
         n_sj_blacklisted += o.n_sj_blacklisted;
         sj_tags.merge(o.sj_tags);
+        for (int32_t v = 0; v < N_PAIR_VERDICTS; v++) pairs_rejected[v] += o.pairs_rejected[v];
+        n_withheld_no_valid_pair += o.n_withheld_no_valid_pair;
         for (size_t i = 0; i < splice_census.size(); i++)
             splice_census[i] += o.splice_census[i];
         n_deposit_not_offered += o.n_deposit_not_offered;
@@ -525,6 +535,16 @@ static void merge_strand_obs(StrandObservations& dst, StrandObservations& src) {
 // Example: CIGAR 10M 500N 15M 1000N 125M
 //   sj 1 (500N):  anchor_left = 10,  anchor_right = 15 + 125 = 140
 //   sj 2 (1000N): anchor_left = 10 + 15 = 25, anchor_right = 125
+
+/// The soft clips at the CIGAR's first and last operation.
+static void read_soft_clips(const bam1_t* b, int32_t& lead, int32_t& trail) {
+    lead = trail = 0;
+    const int32_t n_cigar = b->core.n_cigar;
+    if (n_cigar == 0) return;
+    const uint32_t* cigar = bam_get_cigar(b);
+    if (bam_cigar_op(cigar[0]) == BAM_CSOFT_CLIP) lead = bam_cigar_oplen(cigar[0]);
+    if (bam_cigar_op(cigar[n_cigar - 1]) == BAM_CSOFT_CLIP) trail = bam_cigar_oplen(cigar[n_cigar - 1]);
+}
 
 static void parse_cigar(
     const bam1_t* b,
@@ -720,6 +740,7 @@ static ParsedAlignment parse_bam_record(
         rec.ref_id < static_cast<int32_t>(tid_to_ref_id.size()))
         ? tid_to_ref_id[rec.ref_id] : -1;
     parse_cigar(b, rec.exons, rec.sjs);
+    read_soft_clips(b, rec.clip_lead, rec.clip_trail);
     if (!rec.sjs.empty()) {
         const int32_t sj_strand = read_sj_strand(b, sj_tag_mode, sj_tag_counts);
         for (auto& sj : rec.sjs) sj.strand = sj_strand;
@@ -947,6 +968,53 @@ static AlignmentGroup group_records_by_hit(
 // Multimapper pairing
 // ================================================================
 // Thread-safe: uses caller-supplied ResolverScratch for all resolve calls.
+
+// ================================================================
+// Pair validation: a hit is two mates that can be one molecule
+// ================================================================
+
+/// `PAIR_OK` when a hit's two mates can be one molecule (`FragmentResolver::validate_pair`), or when the hit is not
+/// a pair this rule judges: a mate missing (a one-mate hit) or carried by several records, or a mate off the index.
+/// Those stay as they were, for the changes that own them. Otherwise the reason the hit is rejected.
+static int32_t hit_verdict(
+    const std::pair<std::vector<ParsedAlignment*>, std::vector<ParsedAlignment*>>& hit,
+    const FragmentResolver& ctx,
+    ResolverScratch& scratch)
+{
+    const ParsedAlignment* m1 = nullptr;
+    const ParsedAlignment* m2 = nullptr;
+    for (const auto* rec : hit.first) {
+        if (rec->is_supplementary()) continue;
+        if (m1) return PAIR_OK;
+        m1 = rec;
+    }
+    for (const auto* rec : hit.second) {
+        if (rec->is_supplementary()) continue;
+        if (m2) return PAIR_OK;
+        m2 = rec;
+    }
+    if (!m1 || !m2 || m1->exons.empty() || m2->exons.empty()) return PAIR_OK;
+    if (m1->ref_id < 0 || m2->ref_id < 0) return PAIR_OK;
+    if (m1->ref_id != m2->ref_id) return PAIR_REFERENCE;
+    if (m1->is_reverse() == m2->is_reverse()) return PAIR_STRAND;
+    const ParsedAlignment* f = m1->is_reverse() ? m2 : m1;
+    const ParsedAlignment* r = m1->is_reverse() ? m1 : m2;
+    auto& junctions = scratch.pair_junctions;  // the kept junctions both mates observe
+    junctions.clear();
+    for (const ParsedAlignment* m : {f, r})
+        for (const auto& sj : m->sjs) junctions.push_back({m->ref_id, sj.start, sj.end, sj.strand});
+    std::sort(junctions.begin(), junctions.end(), [](const IntronBlock& x, const IntronBlock& y) {
+        if (x.start != y.start) return x.start < y.start;
+        if (x.end != y.end) return x.end < y.end;
+        return x.strand < y.strand;
+    });
+    junctions.erase(std::unique(junctions.begin(), junctions.end(), [](const IntronBlock& x, const IntronBlock& y) {
+        return x.start == y.start && x.end == y.end && x.strand == y.strand;
+    }), junctions.end());
+    const PairMate pf{&f->exons, f->clip_lead, f->clip_trail};
+    const PairMate pr{&r->exons, r->clip_lead, r->clip_trail};
+    return ctx.validate_pair(f->ref_id, pf, pr, junctions, scratch);
+}
 
 static std::vector<std::pair<std::vector<ParsedAlignment*>,
                               std::vector<ParsedAlignment*>>>
@@ -1899,6 +1967,26 @@ private:
         all_hits.insert(all_hits.end(),
                         secondary_pairs.begin(), secondary_pairs.end());
 
+        // ⭐ A hit is two mates that can be one molecule (`hit_verdict`). A rejected hit is dropped, counted by its
+        // reason; a template left with no hit is withheld, and is no fragment.
+        if (!all_hits.empty()) {
+            size_t kept = 0;
+            for (size_t h = 0; h < all_hits.size(); ++h) {
+                const int32_t verdict = hit_verdict(all_hits[h], ctx, scratch);
+                if (verdict != PAIR_OK) {
+                    stats.pairs_rejected[verdict]++;
+                    continue;
+                }
+                if (kept != h) all_hits[kept] = std::move(all_hits[h]);
+                ++kept;
+            }
+            all_hits.resize(kept);
+            if (kept == 0) {
+                stats.n_withheld_no_valid_pair++;
+                return;
+            }
+        }
+
         int32_t num_hits = std::max(nh, static_cast<int32_t>(all_hits.size()));
         bool is_unique_mapper = (num_hits == 1);
         int32_t n_buffered_mm = 0;
@@ -2145,6 +2233,11 @@ private:
         stats_dict["n_sj_tag_untagged"] = stats_.sj_tags.untagged;
         stats_dict["n_sj_tag_conflicting"] = stats_.sj_tags.conflicting;
         stats_dict["n_sj_tag_invalid"] = stats_.sj_tags.invalid;
+        stats_dict["n_pairs_rejected_reference"] = stats_.pairs_rejected[PAIR_REFERENCE];
+        stats_dict["n_pairs_rejected_strand"] = stats_.pairs_rejected[PAIR_STRAND];
+        stats_dict["n_pairs_rejected_outward"] = stats_.pairs_rejected[PAIR_OUTWARD];
+        stats_dict["n_pairs_rejected_length"] = stats_.pairs_rejected[PAIR_LENGTH];
+        stats_dict["n_withheld_no_valid_pair"] = stats_.n_withheld_no_valid_pair;
         // ⭐ The splice census, keyed off the ONE name table. `splice_type_label`'s strings are the
         // `SpliceType` member names lower-cased, so `rigel.splice.census_field` derives the very same
         // key on the Python side without a second table to drift from this one.
@@ -2593,8 +2686,33 @@ public:
                             secondary_pairs.begin(),
                             secondary_pairs.end());
 
-            int32_t num_hits = std::max(nh,
-                static_cast<int32_t>(all_hits.size()));
+            // The scan's pair verdicts, replayed (`hit_verdict`): a rejected hit's records are written as a
+            // secondary hit's, and a template left with no hit is written unresolved, class `unpaired`.
+            std::vector<uint8_t> hit_rejected(all_hits.size(), 0);
+            int32_t n_valid_hits = 0;
+            for (size_t h = 0; h < all_hits.size(); ++h) {
+                hit_rejected[h] = hit_verdict(all_hits[h], *ctx_, scratch) != PAIR_OK;
+                n_valid_hits += hit_rejected[h] ? 0 : 1;
+            }
+            if (!all_hits.empty() && n_valid_hits == 0) {
+                for (size_t i = 0; i < raw_group.size(); i++) {
+                    set_tag_int(
+                        raw_group[i], "ZB",
+                        static_cast<int>(light_group[i].n_sj_blacklisted));
+                }
+                stamp_and_write_hit(raw_group, out, hdr, ".", ".", ".",
+                                    -1, -1,
+                                    AF_UNRESOLVED, 0.0f,
+                                    "unpaired", 0, 0, "unknown", -1);
+                n_records_written += static_cast<int64_t>(raw_group.size());
+                frag_id++;
+                return;
+            }
+
+            int32_t num_hits = std::max(nh, n_valid_hits);
+            int first_valid_hit = 0;
+            while (first_valid_hit < static_cast<int>(all_hits.size()) && hit_rejected[first_valid_hit])
+                ++first_valid_hit;
 
             // Look up annotation for this frag_id
             auto ann_it = frag_to_row.find(frag_id);
@@ -2605,7 +2723,9 @@ public:
             // holds it.
             bool intergenic_rna = false;
             if (!has_ann) {
-                for (const auto& [r1, r2] : all_hits) {
+                for (size_t h = 0; h < all_hits.size(); ++h) {
+                    if (hit_rejected[h]) continue;
+                    const auto& [r1, r2] = all_hits[h];
                     AssembledFragment frag = build_fragment(r1, r2);
                     if (!frag.exons.empty() && frag.has_introns()) {
                         intergenic_rna = true;
@@ -2677,7 +2797,9 @@ public:
 
                     // Determine primary hit
                     bool is_primary = false;
-                    if (num_hits == 1) {
+                    if (hit_rejected[hit_idx]) {
+                        is_primary = false;
+                    } else if (num_hits == 1) {
                         is_primary = true;
                     } else if (best_tid_val >= 0) {
                         // Resolve this hit to see if assigned transcript
@@ -2726,7 +2848,7 @@ public:
                         -1, -1,
                         intergenic_rna ? AF_RNA_INTERGENIC : AF_GDNA_INTERGENIC, 1.0f,
                         ".",
-                        (hit_idx == 0) ? 1 : 0,
+                        (hit_idx == first_valid_hit) ? 1 : 0,
                         0, "unknown", -1);
                     n_intergenic++;
                 }
@@ -2829,6 +2951,7 @@ public:
                 rec.ref_id < static_cast<int32_t>(tid_to_ref_id_.size()))
                 ? tid_to_ref_id_[rec.ref_id] : -1;
             parse_cigar(b, rec.exons, rec.sjs);
+            read_soft_clips(b, rec.clip_lead, rec.clip_trail);
             if (!rec.sjs.empty()) {
                 const int32_t sj_strand = read_sj_strand(b, sj_tag_mode_, nullptr);
                 for (auto& sj : rec.sjs) sj.strand = sj_strand;

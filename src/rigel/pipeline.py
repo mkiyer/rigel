@@ -135,6 +135,25 @@ def _log_sj_tags(stats: PipelineStats, scan: BamScanConfig) -> None:
         )
 
 
+def _log_pair_validation(stats: PipelineStats) -> None:
+    """Say how many hits were dropped because their two mates are not one molecule, and how many templates that
+    left with no hit at all."""
+    rejected = {
+        "two references": stats.n_pairs_rejected_reference,
+        "one strand": stats.n_pairs_rejected_strand,
+        "facing outward": stats.n_pairs_rejected_outward,
+        "too long on every path": stats.n_pairs_rejected_length,
+    }
+    if not any(rejected.values()):
+        return
+    logger.info(
+        "[SCAN] %d hits dropped, their mates not one molecule (%s); %d templates left with no hit, withheld",
+        sum(rejected.values()),
+        ", ".join(f"{why} {n}" for why, n in rejected.items() if n),
+        stats.n_withheld_no_valid_pair,
+    )
+
+
 def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
     """Apply C++ scan statistics to PipelineStats.
 
@@ -183,6 +202,12 @@ def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
         "n_sj_tag_untagged",
         "n_sj_tag_conflicting",
         "n_sj_tag_invalid",
+        # Hits whose mates are not one molecule, and the templates left with none
+        "n_pairs_rejected_reference",
+        "n_pairs_rejected_strand",
+        "n_pairs_rejected_outward",
+        "n_pairs_rejected_length",
+        "n_withheld_no_valid_pair",
         # The deposit hold-out that closes the census identity
         "n_deposit_not_offered",
     ):
@@ -1005,6 +1030,7 @@ def run_pipeline(
     scan = config.scan
     stats, strand_models, buffer, calibration_payload = scan_and_buffer(bam_path, index, scan)
     _log_sj_tags(stats, scan)
+    _log_pair_validation(stats)
 
     # -- The second pass: drain the side buffer, BEFORE calibration --
     calibration_payload = _drain_side_buffer(

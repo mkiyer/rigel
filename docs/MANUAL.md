@@ -64,7 +64,11 @@ rigel -v quant ...       # -v / --verbose: DEBUG-level logging for any subcomman
 
 ### BAM
 
-- **Paired-end** — the scan stops at the first unpaired record
+- **Paired-end** — the scan stops at the first unpaired record. Each reported alignment of a read pair is used only
+  if its two mates can be one molecule: on one reference, on opposite strands, facing inward once each 5' soft clip
+  is walked back, with a fragment length from 1 to `max_frag_length` along the genome, or along one annotated
+  transcript that holds every junction the pair observes. An alignment that fails is dropped; a read pair left with
+  none is withheld, counted in `summary.json` and written to the annotated BAM as unresolved
 - **Name-sorted or collated** — a BAM whose header says `SO:coordinate` is refused, since its mates are not
   adjacent
 - **Aligned to the index's genome** — references are matched by name: a BAM none of whose references is in the
@@ -531,7 +535,7 @@ the current version is **4**. Top-level keys:
 | `configuration` | All resolved pipeline parameters |
 | `input` | Absolute BAM and index paths |
 | `alignment_stats` | Two unit families: record-level counts (`total_reads`, `mapped_reads`, `unmapped_reads`, `secondary_reads`, `supplementary_reads`, `proper_pairs`, `duplicate_reads`, `qc_fail_reads`) and read-name-group counts (`read_groups`, `unique_reads`, `multimapping_reads`). The report's read-fate bar uses the read-group family so its segments share one denominator. An `sj_strand_tag` sub-block counts the spliced records the scan read (secondary and supplementary included) by what their junction-strand tags gave: `tagged` (a strand), `untagged` (none) and `conflicting` (XS and ts disagree, read as ambiguous), with `invalid` the tag values that were neither `+` nor `-`, each read as absent |
-| `fragment_stats` | Total, genic, intergenic, and chimeric breakdowns; annotated/unannotated SJ counts; a `splice` sub-block with the per-fragment splice-type breakdown (`unspliced`, `spliced_annotated`, `spliced_unannotated`, `spliced_implicit`, `splice_artifact`) plus `sj_blacklisted` (blacklisted junctions × records, multimapper records included: the annotated BAM's `ZB` summed), and blacklist provenance `sj_blacklist_size` / `sj_blacklist_loaded` (so `splice_artifact: 0` reads as "detection off — no blacklist in the index" vs "detection on, none found") |
+| `fragment_stats` | Total, genic, intergenic, and chimeric breakdowns; annotated/unannotated SJ counts; a `splice` sub-block with the per-fragment splice-type breakdown (`unspliced`, `spliced_annotated`, `spliced_unannotated`, `spliced_implicit`, `splice_artifact`) plus `sj_blacklisted` (blacklisted junctions × records, multimapper records included: the annotated BAM's `ZB` summed), and blacklist provenance `sj_blacklist_size` / `sj_blacklist_loaded` (so `splice_artifact: 0` reads as "detection off — no blacklist in the index" vs "detection on, none found"); `withheld_no_valid_pair`, the read pairs none of whose alignments makes its two mates one molecule (no fragment, and not intergenic), and `pairs_rejected`, the alignments dropped for it by reason (`reference`, `strand`, `outward`, `length`) |
 | `strand_model` | Protocol (`R1-sense` / `R1-antisense`, and `read1_sense`), strand specificity, `p_r1_sense`, training count, the per-junction strand table's QC (`sj`: `n_sj`, `n_observations` and the junctions' depth, `depth_median`, `depth_p90`, `depth_p99`, `depth_max`), posterior variance, 95% CI; the junction fit behind κ — `kappa` (the spliced reads' sense fraction, `pooled` over every junction and `genuine` over the junctions the three-class fit credits to RNA), `junction_classes` (each class's share — `genuine`, `artifact`, `reversed` — `by_junction` and `by_fragment`; shallow splice artifacts are most of the junctions and few of the fragments; `null` where the strand channel is dead, since the classes are not identified at κ = ½ and `genuine` then equals `pooled`, the κ calibration reads), `strand_live` (whether the protocol preserves strand, the decision calibration's strand channel reads) and `strand_overdispersion` (0, `binomial`, for gDNA and RNA alike); and a `diagnostics` sub-block comparing the all-exonic model to the spliced-only model (`contamination_gap` — a positive value flags unstranded gDNA contamination) |
 | `calibration` | Library-scalar calibration outputs (see below) |
 | `gdna_em_effective_length` | Summary of the loci table's column of that name: its `min`, `median`, `p95`, `max` |
@@ -603,7 +607,7 @@ through unchanged without annotation tags. Rigel's tags replace any tag of the s
 | `ZJ` | int | Gene index into rigel reference (`-1` if unassigned) |
 | `ZF` | int | Assignment flags bitfield (see below) |
 | `ZW` | float | Posterior probability of the assignment |
-| `ZC` | string | Input-ambiguity class: `unambig`, `ambig_same_strand`, `ambig_opp_strand`, `multimapper`; `.` for records not scored by the EM |
+| `ZC` | string | Input-ambiguity class: `unambig`, `ambig_same_strand`, `ambig_opp_strand`, `multimapper`; `unpaired` for a read pair withheld because no alignment makes its mates one molecule (`ZF` 0); `.` for other records not scored by the EM |
 | `ZH` | int | Primary-hit flag: `1` for the winning alignment, `0` otherwise (reflects rigel's EM assignment, which may differ from the aligner's primary FLAG) |
 | `ZN` | int | Number of competing candidate components |
 | `ZS` | string | Splice type: `spliced_annot`, `spliced_unannot`, `spliced_implicit`, `splice_artifact`, `unspliced`, or `unknown` |

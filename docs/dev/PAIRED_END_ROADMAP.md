@@ -69,8 +69,12 @@ the code is open; each is less critical.
   decides
 7. ☐ `num_hits` counts distinct usable hits (today `max(NH, hits)`)
 8. ☐ Without HI (minimap2), every same-reference pair validated, the span bound first
-9. ☐ Each hit validated as one molecule along a path, with one witness transcript: K by the resolver's rule; outward
-  and too-long pairs rejected; clips walked
+9. ◐ Each hit validated as one molecule along a path, with one witness transcript: K by the resolver's rule; outward
+  and too-long pairs rejected; clips walked. ☑ The validator, clips walked along the genome (2026-10-18; the C++ counts
+  match the prototype's on all five STAR conditions within their duplicate HI groups; suite 3,060). Against main on
+  the STAR panel: transcript error −2.87 % stranded OFF, +1.18 % unstranded OFF, +0.29 % stranded ON (gene −3.33 /
+  +3.27 / −0.62 %); the ladder identical. ☐ Clip walks along a transcript path (minimap2 input); ☐ one-mate hits and
+  mates with several records, which pass through unjudged
 10. ☐ The annotated-path rule: a spliced hit is usable only if one annotated transcript holds all its junctions; its
   contiguous competitor stays
 11. ☐ One length rule for overlapping mates

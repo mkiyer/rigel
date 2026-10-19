@@ -312,6 +312,15 @@ struct GapBlock {
     int32_t end;
 };
 
+/// One mate of a candidate pair, as `FragmentResolver::validate_pair` reads it: its aligned blocks, split at each
+/// CIGAR N and ascending, so the holes between consecutive blocks are its observed skips; and the soft clips at the
+/// alignment's two ends (the read's 5' clip is the leading one on a forward mate, the trailing one on a reverse mate).
+struct PairMate {
+    const std::vector<std::pair<int32_t, int32_t>>* blocks;
+    int32_t clip_lead;
+    int32_t clip_trail;
+};
+
 /// The cgranges query buffer and its capacity, owned. `cr_overlap` grows it with `realloc` through the
 /// addresses of `ptr` and `cap`, so it is released with `free`. A move hands both over and leaves the source
 /// empty, as a fresh buffer is: a source keeping its `cap` with no `ptr` would be written through null by
@@ -363,6 +372,16 @@ struct ResolverScratch {
     std::vector<int32_t> tmp_union;
     std::vector<int32_t> all_overlap_t;
     std::vector<int32_t> nrna_t;
+
+    // Reusable scratch for the pair validator (`validate_pair`)
+    std::vector<std::pair<int32_t, int32_t>> pair_skips;
+    std::vector<std::pair<int32_t, int32_t>> pair_aligned;
+    std::vector<std::pair<int32_t, int32_t>> pair_covered;
+    std::vector<GapBlock> pair_stretches;
+    std::vector<IntronBlock> pair_cut;
+    std::vector<IntronBlock> pair_junctions;
+    std::vector<int32_t> pair_candidates;
+    std::vector<int32_t> pair_tmp;
 
     ResolverScratch() = default;
 
@@ -701,6 +720,143 @@ public:
             }
         }
         return false;
+    }
+
+    // ----------------------------------------------------------------
+    // The pair validator: two mates are one molecule, or why not
+    // ----------------------------------------------------------------
+
+    /// Every annotated transcript whose span overlaps [start, end) on ``ref_id``, sorted and unique. The synthetic
+    /// nascent spans are not in the overlap index, and have no introns to offer.
+    void transcripts_overlapping(int32_t ref_id, int32_t start, int32_t end,
+                                 ResolverScratch& scratch, std::vector<int32_t>& out) const
+    {
+        out.clear();
+        if (!cr_ || ref_id < 0 || ref_id >= static_cast<int32_t>(id_to_ref_.size())) return;
+        const int64_t n = cr_overlap(cr_, id_to_ref_[ref_id].c_str(), start, end,
+                                     &scratch.buf.ptr, &scratch.buf.cap);
+        for (int64_t k = 0; k < n; ++k) {
+            const int32_t label = cr_label(cr_, scratch.buf.ptr[k]);
+            if (iv_type_[label] != ITYPE_TRANSCRIPT) continue;
+            for (int32_t i = t_set_offsets_[label]; i < t_set_offsets_[label + 1]; ++i)
+                out.push_back(t_set_data_[i]);
+        }
+        sort_unique(out);
+    }
+
+    /// Whether the forward mate ``f`` and the reverse mate ``r``, on reference ``ref_id``, can be one molecule:
+    /// `PAIR_OK`, or `PAIR_OUTWARD` or `PAIR_LENGTH` (the caller has checked the reference and the strands).
+    ///
+    /// The forward mate's 5' soft clip is walked back along the genome and the reverse mate's forward, giving the
+    /// molecule [a, b); the mates must face inward, with both mates' aligned bases inside it. Its length counts the
+    /// bases of [a, b) with every observed skip of either mate removed, and must lie in [1, max_fragment_length].
+    /// Failing that, one annotated transcript that holds every junction the pair observes (``junctions``, matched
+    /// as `sj_lookup_into` matches them), or, with none observed, any transcript over the molecule, may witness a
+    /// shorter path: its other introns in the stretches neither mate aligned are cut whole by the K rule of
+    /// `collect_transcript_introns_in_gap`, and it offers no path when one of them overlaps an aligned block by more
+    /// than K. One transcript supplies both the observed junctions and the implied introns, so a junction one
+    /// transcript holds and an intron only another holds never make a path together (the targeted review's
+    /// hybrid). Measured against per-base truth on 47.9 M STAR templates, this rejects no correct pair.
+    int32_t validate_pair(int32_t ref_id, const PairMate& f, const PairMate& r,
+                          const std::vector<IntronBlock>& junctions, ResolverScratch& scratch) const
+    {
+        const int32_t K = intron_overhang_tolerance_;
+        const int64_t max_len = max_fragment_length_;
+        const int32_t a = f.blocks->front().first - f.clip_lead;
+        const int32_t b = r.blocks->back().second + r.clip_trail;
+        if (!(a < b && f.blocks->back().second <= b && r.blocks->front().first >= a)) return PAIR_OUTWARD;
+
+        auto& skips = scratch.pair_skips;  // each mate's holes between consecutive blocks, the two merged
+        skips.clear();
+        for (const PairMate* m : {&f, &r})
+            for (size_t i = 1; i < m->blocks->size(); ++i)
+                skips.push_back({(*m->blocks)[i - 1].second, (*m->blocks)[i].first});
+        std::sort(skips.begin(), skips.end());
+        skips.erase(std::unique(skips.begin(), skips.end()), skips.end());
+        int64_t removed = 0;  // the union of the skips inside [a, b)
+        int32_t run_s = 0, run_e = 0;
+        bool open = false;
+        for (auto [s, e] : skips) {
+            s = std::max(s, a);
+            e = std::min(e, b);
+            if (e <= s) continue;
+            if (open && s <= run_e) {
+                run_e = std::max(run_e, e);
+            } else {
+                if (open) removed += run_e - run_s;
+                run_s = s;
+                run_e = e;
+                open = true;
+            }
+        }
+        if (open) removed += run_e - run_s;
+        const int64_t length = static_cast<int64_t>(b) - a - removed;
+        if (length >= 1 && length <= max_len) return PAIR_OK;
+
+        auto& cands = scratch.pair_candidates;  // the witnesses
+        cands.clear();
+        if (junctions.empty()) {
+            transcripts_overlapping(ref_id, a, b, scratch, cands);
+        } else {
+            for (size_t j = 0; j < junctions.size(); ++j) {
+                sj_lookup_into(junctions[j].ref_id, junctions[j].start, junctions[j].end,
+                               junctions[j].strand, scratch.pair_tmp);
+                if (j == 0) {
+                    cands.swap(scratch.pair_tmp);
+                } else {
+                    auto end = std::set_intersection(cands.begin(), cands.end(), scratch.pair_tmp.begin(),
+                                                     scratch.pair_tmp.end(), cands.begin());
+                    cands.erase(end, cands.end());
+                }
+                if (cands.empty()) return PAIR_LENGTH;
+            }
+        }
+
+        auto& aligned = scratch.pair_aligned;  // both mates' aligned blocks
+        aligned.assign(f.blocks->begin(), f.blocks->end());
+        aligned.insert(aligned.end(), r.blocks->begin(), r.blocks->end());
+        std::sort(aligned.begin(), aligned.end());
+        auto& covered = scratch.pair_covered;  // aligned or skipped
+        covered.assign(aligned.begin(), aligned.end());
+        covered.insert(covered.end(), skips.begin(), skips.end());
+        std::sort(covered.begin(), covered.end());
+        auto& stretches = scratch.pair_stretches;  // what neither mate aligned or skipped
+        stretches.clear();
+        int32_t cur = a;
+        for (const auto& [s, e] : covered) {
+            if (s > cur) stretches.push_back({ref_id, cur, std::min(s, b)});
+            cur = std::max(cur, e);
+        }
+        if (cur < b) stretches.push_back({ref_id, cur, b});
+
+        for (int32_t t : cands) {
+            if (t < 0 || t + 1 >= static_cast<int32_t>(exon_offsets_.size())) continue;
+            const int32_t begin = exon_offsets_[t];
+            const int32_t n_introns = exon_offsets_[t + 1] - begin - 1;
+            const int32_t* intron_starts = exon_ends_.data() + begin;
+            const int32_t* intron_ends = exon_starts_.data() + begin + 1;
+            bool path = true;
+            for (int32_t i = 0; i < n_introns && path; ++i) {
+                const int32_t i0 = intron_starts[i], i1 = intron_ends[i];
+                if (i1 <= a || i0 >= b) continue;
+                if (std::binary_search(skips.begin(), skips.end(), std::make_pair(i0, i1))) continue;  // observed
+                for (const auto& [x, y] : aligned)
+                    if (std::min(i1, y) - std::max(i0, x) > K) { path = false; break; }
+            }
+            if (!path) continue;
+            auto& cut = scratch.pair_cut;
+            cut.clear();
+            for (const GapBlock& g : stretches) collect_transcript_introns_in_gap(t, g, K, STRAND_NONE, cut);
+            std::sort(cut.begin(), cut.end(), [](const IntronBlock& x, const IntronBlock& y) {
+                return x.start != y.start ? x.start < y.start : x.end < y.end;
+            });
+            int64_t extra = 0;
+            for (size_t i = 0; i < cut.size(); ++i)
+                if (i == 0 || cut[i].start != cut[i - 1].start || cut[i].end != cut[i - 1].end)
+                    extra += cut[i].end - cut[i].start;
+            if (length - extra >= 1 && length - extra <= max_len) return PAIR_OK;
+        }
+        return PAIR_LENGTH;
     }
 
     /// ⭐ EVERY explanation of this fragment's UNSEQUENCED gaps, grouped so that identical paths are ONE

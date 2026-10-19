@@ -67,7 +67,9 @@ BAM Tag Schema
      - Z
      - Input-ambiguity class (pre-EM candidate-set structure):
        ``unambig``, ``ambig_same_strand``, ``ambig_opp_strand``,
-       ``multimapper``, or ``.`` for fragments that never entered EM
+       ``multimapper``; ``unpaired`` for a template withheld because no
+       alignment makes its two mates one molecule (ZF 0); or ``.`` for
+       other fragments that never entered EM
    * - ZH
      - i
      - Primary hit flag: 1 = winning alignment, 0 = secondary

@@ -77,6 +77,17 @@ class PipelineStats:
     n_sj_tag_conflicting: int = 0  # spliced records whose XS and ts disagree (ambiguous)
     n_sj_tag_invalid: int = 0  # XS or ts tags holding neither '+' nor '-' (read as absent)
 
+    # --- Hits whose two mates are not one molecule, by reason, and the templates left with none ---
+    n_pairs_rejected_reference: int = 0  # the mates on two references
+    n_pairs_rejected_strand: int = 0  # on one strand
+    n_pairs_rejected_outward: int = (
+        0  # facing away from each other, or a mate past the other's 5' end
+    )
+    n_pairs_rejected_length: int = 0  # no path gives a fragment length in [1, max_frag_length]
+    n_withheld_no_valid_pair: int = (
+        0  # templates withheld: no hit left (no fragment, not intergenic)
+    )
+
     # --- The per-fragment splice census (scanner QC; ``rigel report``'s splice breakdown) ---
     #
     # ONE observation per placement the scanner hands the accumulator's deposit adapter — every

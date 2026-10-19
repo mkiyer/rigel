@@ -147,6 +147,16 @@ The repair:
 
 Rigel reads alignments and does not repair them (owner, 2026-10-16). Fixing this exposes two defects that compensated
 for it: `the-gdna-length-contrast-is-ill-conditioned-on-aligned-input` and `region-lengths-count-unobservable-bases`.
+LANDED 2026-10-18, the pair validator (`tests/test_pair_validation.py`): a hit's two mates must be one molecule, on
+one reference and opposite strands, inward once each 5' soft clip is walked back along the genome, 1 to
+`max_frag_length` long along the genome or along one transcript that holds every observed junction (one witness); a
+rejected hit is dropped and a template left with none is withheld. One-mate hits, mates carried by several records
+and clip walks along a transcript path are not yet judged. Measured on the STAR panel at the recommended parameters,
+pinned and fractional, against main: transcript error −2.87 % stranded capture-OFF, +1.18 % unstranded capture-OFF,
++0.29 % stranded capture-ON (gene −3.33 / +3.27 / −0.62 %); true gDNA counted as RNA −10 k to −17 k in the g50
+capture-OFF conditions and +5.5 k capture-ON; 2.7–4.0 k templates withheld per 10 M, none with a correct alignment
+(`ISSUES: star-hi-pairs-against-rigels-own-pairing`); the oracle ladder 48/48 identical. `num_hits` still counts the
+rejected hits, so a template whose other hits were invalid still reads as a multimapper.
 Instruments: `quant_accuracy.py` and `calibration_vs_oracle.py` on the aligned panel, with the gDNA law and the capture
 ruler held fixed; the oracle ladder for identity.
 
