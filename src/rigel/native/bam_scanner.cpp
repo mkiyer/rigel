@@ -28,7 +28,6 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
-#include <set>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -767,52 +766,44 @@ static ParsedAlignment parse_bam_record(
 }
 
 // ================================================================
-// Build AssembledFragment from a hit (r1_records, r2_records)
+// A hit's junctions, and its fragment
 // ================================================================
 
+/// Every junction a hit observes: the kept junctions of each of its records, both mates' and any supplementary
+/// record's, ascending by reference, coordinates and motif strand, each once. The pair validator and the fragment the
+/// resolver reads take this one set.
+static void observed_junctions(
+    const std::vector<ParsedAlignment*>& r1_reads,
+    const std::vector<ParsedAlignment*>& r2_reads,
+    std::vector<IntronBlock>& out)
+{
+    out.clear();
+    for (const auto* reads : {&r1_reads, &r2_reads})
+        for (const auto* rec : *reads)
+            for (const auto& sj : rec->sjs) out.push_back({rec->ref_id, sj.start, sj.end, sj.strand});
+    const auto key = [](const IntronBlock& x) { return std::tie(x.ref_id, x.start, x.end, x.strand); };
+    std::sort(out.begin(), out.end(), [&](const IntronBlock& x, const IntronBlock& y) { return key(x) < key(y); });
+    out.erase(std::unique(out.begin(), out.end(),
+                          [&](const IntronBlock& x, const IntronBlock& y) { return key(x) == key(y); }),
+              out.end());
+}
+
+/// A hit's records as one fragment: their aligned blocks merged per reference and strand, R2's strand flipped, so a
+/// block carries the fragment's strand; the hit's junctions (`observed_junctions`); and NM summed.
 static AssembledFragment build_fragment(
     const std::vector<ParsedAlignment*>& r1_reads,
     const std::vector<ParsedAlignment*>& r2_reads)
 {
-    // Key: (ref_id, strand) → list of exon intervals
-    // We use a simple map with int64_t key = (ref_id << 32) | strand
+    AssembledFragment frag;
+    // Key: (ref_id << 32) | strand → the blocks on it
     std::unordered_map<int64_t, std::vector<std::pair<int32_t, int32_t>>> exon_dict;
-    std::set<std::tuple<int32_t, int32_t, int32_t, int32_t>> intron_set;
-    // (ref_id, start, end, strand)
-
-    auto make_key = [](int32_t ref_id, int32_t strand) -> int64_t {
-        return (static_cast<int64_t>(ref_id) << 32) |
-               (static_cast<uint32_t>(strand));
-    };
-
-    int32_t nm_total = 0;
-
-    // Process R1 reads
-    for (const auto* rec : r1_reads) {
-        int32_t ref_strand = rec->is_reverse() ? STRAND_NEG : STRAND_POS;
-        int64_t key = make_key(rec->ref_id, ref_strand);
-        for (const auto& [s, e] : rec->exons) {
-            exon_dict[key].push_back({s, e});
+    for (const bool r2 : {false, true}) {
+        for (const auto* rec : r2 ? r2_reads : r1_reads) {
+            const int32_t strand = (rec->is_reverse() != r2) ? STRAND_NEG : STRAND_POS;
+            auto& blocks = exon_dict[(static_cast<int64_t>(rec->ref_id) << 32) | static_cast<uint32_t>(strand)];
+            blocks.insert(blocks.end(), rec->exons.begin(), rec->exons.end());
+            frag.nm += rec->nm;
         }
-        for (const auto& sj : rec->sjs) {
-            intron_set.insert({rec->ref_id, sj.start, sj.end, sj.strand});
-        }
-        nm_total += rec->nm;
-    }
-
-    // Process R2 reads — flip strand (R2 strand flip convention)
-    for (const auto* rec : r2_reads) {
-        int32_t ref_strand = rec->is_reverse() ? STRAND_NEG : STRAND_POS;
-        // Flip: POS→NEG, NEG→POS
-        ref_strand = (ref_strand == STRAND_POS) ? STRAND_NEG : STRAND_POS;
-        int64_t key = make_key(rec->ref_id, ref_strand);
-        for (const auto& [s, e] : rec->exons) {
-            exon_dict[key].push_back({s, e});
-        }
-        for (const auto& sj : rec->sjs) {
-            intron_set.insert({rec->ref_id, sj.start, sj.end, sj.strand});
-        }
-        nm_total += rec->nm;
     }
 
     // Merge overlapping/adjacent exon blocks within each (ref, strand) group
@@ -847,18 +838,8 @@ static AssembledFragment build_fragment(
                   return a.strand < b.strand;
               });
 
-    // Sort intron blocks
-    std::vector<IntronBlock> sorted_introns;
-    sorted_introns.reserve(intron_set.size());
-    for (const auto& [ref, s, e, st] : intron_set) {
-        sorted_introns.push_back({ref, s, e, st});
-    }
-    // Already sorted since std::set is ordered
-
-    AssembledFragment frag;
     frag.exons = std::move(merged_exons);
-    frag.introns = std::move(sorted_introns);
-    frag.nm = nm_total;
+    observed_junctions(r1_reads, r2_reads, frag.introns);
     return frag;
 }
 
@@ -979,7 +960,8 @@ static AlignmentGroup group_records_by_hit(
 /// `HIT_USABLE` when a hit's two mates can be one molecule (`FragmentResolver::validate_pair`), or when the hit is not
 /// a pair this rule judges: a mate carried by several records, or a mate off the index. Those stay as they were, for
 /// the changes that own them. Otherwise the reason the hit is rejected; a hit with one mate gives no fragment length
-/// at all (`HIT_MISSING_MATE`).
+/// at all (`HIT_MISSING_MATE`). A transcript that witnesses a path must hold every junction the hit observes, a
+/// supplementary record's too (`observed_junctions`).
 static int32_t hit_verdict(
     const std::pair<std::vector<ParsedAlignment*>, std::vector<ParsedAlignment*>>& hit,
     const FragmentResolver& ctx,
@@ -1004,18 +986,8 @@ static int32_t hit_verdict(
     if (m1->is_reverse() == m2->is_reverse()) return HIT_STRAND;
     const ParsedAlignment* f = m1->is_reverse() ? m2 : m1;
     const ParsedAlignment* r = m1->is_reverse() ? m1 : m2;
-    auto& junctions = scratch.pair_junctions;  // the kept junctions both mates observe
-    junctions.clear();
-    for (const ParsedAlignment* m : {f, r})
-        for (const auto& sj : m->sjs) junctions.push_back({m->ref_id, sj.start, sj.end, sj.strand});
-    std::sort(junctions.begin(), junctions.end(), [](const IntronBlock& x, const IntronBlock& y) {
-        if (x.start != y.start) return x.start < y.start;
-        if (x.end != y.end) return x.end < y.end;
-        return x.strand < y.strand;
-    });
-    junctions.erase(std::unique(junctions.begin(), junctions.end(), [](const IntronBlock& x, const IntronBlock& y) {
-        return x.start == y.start && x.end == y.end && x.strand == y.strand;
-    }), junctions.end());
+    auto& junctions = scratch.hit_junctions;
+    observed_junctions(hit.first, hit.second, junctions);
     const PairMate pf{&f->exons, f->clip_lead, f->clip_trail};
     const PairMate pr{&r->exons, r->clip_lead, r->clip_trail};
     return ctx.validate_pair(f->ref_id, pf, pr, junctions, scratch);
@@ -1815,12 +1787,12 @@ private:
                 //
                 // ⚠ The de-duplication is NOT to prevent double-crediting a sj -- `deposit` normalises a
                 // duplicate away either way. `parse_bam_record` reads XS/ts once per RECORD and
-                // `build_fragment` keys `intron_set` on (ref, start, end, strand), so a pair where one mate
-                // carries the tag yields the same intron twice; dropping the second keeps it out of a
-                // held record, which stores its observed introns as offered and sorts on them.
-                // `intron_set` is ordered, so consecutive comparison is enough; ⛔ it must NOT be re-keyed
-                // or merged in `build_fragment`, which shares it with the resolver (measured: merging
-                // demotes SPLICED_ANNOT to SPLICED_UNANNOT and widens `t_inds`).
+                // `observed_junctions` keys a hit's junctions on (ref, start, end, strand), so a pair where one
+                // mate carries the tag yields the same intron twice; dropping the second keeps it out of a
+                // held record, which stores its observed introns as offered and sorts on them. The junctions
+                // are ordered, so consecutive comparison is enough; ⛔ they must NOT be re-keyed or merged in
+                // `observed_junctions`, which the resolver shares (measured: merging demotes SPLICED_ANNOT to
+                // SPLICED_UNANNOT and widens `t_inds`).
                 auto& observed = ws.arena_observed;
                 const std::size_t obs0 = observed.size();
                 for (const auto& intron : f.introns) {

@@ -27,6 +27,7 @@ from rigel.pipeline import run_pipeline, scan_and_buffer
 GENOME = 20_000
 R1_FWD, R2_REV = 0x1 | 0x2 | 0x40 | 0x20, 0x1 | 0x2 | 0x80 | 0x10
 SECONDARY = 0x100
+SUPPLEMENTARY = 0x800
 
 
 def _gtf(with_t3: bool) -> str:
@@ -173,6 +174,17 @@ def test_one_transcript_witnesses_the_whole_path(index, index_t3, tmp_path):
     assert without.n_fragments == 0 and _rejected(without)["length"] == 1
     with_t3 = _scan(tmp_path, index_t3, records)
     assert with_t3.n_fragments == 1 and sum(_rejected(with_t3).values()) == 0
+
+
+def test_a_witness_holds_a_supplementary_records_junction_too(index_t3, tmp_path):
+    """The pair above with T3, plus R1's supplementary record spliced across tK's intron [1200,2100): T3 holds the
+    primaries' junction and gives L 510, but not the supplementary's, and no transcript holds both, so nothing
+    witnesses a path and the pair is too long. The validator reads every junction the hit observes, the set the
+    resolver reads."""
+    records = _pair("supp", 10100, "10M100N10M", 11700, "10M", xs="+")
+    records.append(_record("supp", R1_FWD | SUPPLEMENTARY, 1190, "10M900N10M", 11700, xs="+"))
+    stats = _scan(tmp_path, index_t3, records)
+    assert stats.n_fragments == 0 and _rejected(stats)["length"] == 1
 
 
 def test_an_invalid_hit_is_dropped_and_its_template_kept(index, tmp_path):

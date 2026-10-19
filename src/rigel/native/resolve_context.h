@@ -379,7 +379,7 @@ struct ResolverScratch {
     std::vector<std::pair<int32_t, int32_t>> pair_covered;
     std::vector<GapBlock> pair_stretches;
     std::vector<IntronBlock> pair_cut;
-    std::vector<IntronBlock> pair_junctions;
+    std::vector<IntronBlock> hit_junctions;  // every junction a hit observes (the scan's `observed_junctions`)
     std::vector<int32_t> pair_candidates;
     std::vector<int32_t> pair_tmp;
 
@@ -750,7 +750,7 @@ public:
     /// The forward mate's 5' soft clip is walked back along the genome and the reverse mate's forward, giving the
     /// molecule [a, b); the mates must face inward, with both mates' aligned bases inside it. Its length counts the
     /// bases of [a, b) with every observed skip of either mate removed, and must lie in [1, max_fragment_length].
-    /// Failing that, one annotated transcript that holds every junction the pair observes (``junctions``, matched
+    /// Failing that, one annotated transcript that holds every junction the hit observes (``junctions``, matched
     /// as `sj_lookup_into` matches them), or, with none observed, any transcript over the molecule, may witness a
     /// shorter path: its other introns in the stretches neither mate aligned are cut whole by the K rule of
     /// `collect_transcript_introns_in_gap`, and it offers no path when one of them overlaps an aligned block by more
