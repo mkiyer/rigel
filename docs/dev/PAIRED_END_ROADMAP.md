@@ -99,6 +99,9 @@ the code is open; each is less critical.
   annotated-BAM tags; the annotation pass checked against the scan by identity
 
 *Phase B, calibration*
+0. ☐ First, the highest priority (owner, 2026-10-19): calibration's strand channel misreads aligned input
+  (`ISSUES: calibrations-strand-channel-misreads-aligned-input`); on g00, 3.29 M transcript error with it, 0.75 M
+  with calibration read as unstranded
 1. ☐ The second pass: an observed annotated splice takes the RNA length law
 2. ☐ The second pass's weights: one placement factor times a unit-free share within the placement
 3. ☐ The second pass reads NM, carried in the deferred bank
@@ -111,7 +114,8 @@ the code is open; each is less critical.
 *Phase C, after calibration (the EM)*
 1. ☐ The per-transcript merge chooses by full likelihood (today the least overhang first)
 2. ☐ The gDNA term a sum over places (the owner's ruling; today the mean)
-3. ☐ Intergenic hits enter the EM
+3. ☐ Intergenic hits enter the EM, release-blocking (owner, 2026-10-19): a fragment's valid intergenic and genic
+  alignments compete (`ISSUES: multimapper-intergenic-alignments`)
 4. ☐ The prior's denominator (today it excludes the multimappers calibration deposited)
 5. ☐ Pruning against one reference
 

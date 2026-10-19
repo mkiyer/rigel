@@ -137,7 +137,9 @@ its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-mult
    for its validation on independent artifact-containing evidence on the cluster (owner, 2026-10-14). Since 2026-10-16
    the release-blocking repair is the scan's (`ISSUES: the-scanner-builds-fragments-from-one-mate`), fixed in pipeline
    order, the scan first, one change at a time (owner, 2026-10-18), with
-   `ISSUES: star-hi-pairs-against-rigels-own-pairing` deciding how STAR input is paired.
+   `ISSUES: star-hi-pairs-against-rigels-own-pairing` deciding how STAR input is paired. Since 2026-10-19 the release
+   also waits on two more (owner): first, the highest priority, `ISSUES: calibrations-strand-channel-misreads-aligned-input`;
+   and `ISSUES: multimapper-intergenic-alignments`, a fragment's valid intergenic and genic alignments competing in the EM.
 7. **The release**: `docs/PUBLISHING.md` is the procedure; what gates it is the state — the deliverable measured per
    stratum, the zero rows clean, the suite at its standing count, `preflight.py --full` green, CI run once by hand, a
    real-data smoke run, the standing risks re-read, and the manual and the changelog true of what ships.
@@ -161,7 +163,7 @@ its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-mult
 `ISSUES: eb-shrinkage-magic-ess` · `ISSUES: the-capture-reference-is-read-at-a-grid-point` ·
 `ISSUES: the-bulk-can-be-calibrations-nascent-rna` · `ISSUES: intron-seeds-near-probes-are-capture-enriched` ·
 `ISSUES: per-transcript-prior-lane` · `ISSUES: message-layer-open-cases` ·
-`ISSUES: scoring-penalties-are-underived-constants` · `ISSUES: multimapper-intergenic-alignments` ·
+`ISSUES: scoring-penalties-are-underived-constants` ·
 `ISSUES: unwitnessed-loci-and-multimappers-at-the-em` · `ISSUES: vcap-dna-only-objects-lose-gdna-at-full-depth` ·
 `ISSUES: debug-capture-memory-is-unbounded` · `ISSUES: expand-the-gdna-spectrum` ·
 `ISSUES: unannotated-transcription-is-booked-as-gdna` · `ISSUES: ruler-witness-geometry-on-transcript-panels` ·

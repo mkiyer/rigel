@@ -17,6 +17,28 @@ the changelog is git.
 Ordered by priority. An entry says what is open and the number a ranking turns on; what was done is git,
 what was ruled is `DESIGN.md`.
 
+### calibrations-strand-channel-misreads-aligned-input
+`priority: now — the highest priority, release-blocking (owner, 2026-10-19) · kind: defect · 2026-10-19`
+On STAR input, calibration's strand channel costs the stranded capture-OFF conditions most of their error. The same
+reads under the tree before the annotated-path rule, pinned and fractional (g00 ss0.99 capture-OFF; truth 7,975,957
+annotated, 2,024,043 nascent):
+
+| run | transcript error | annotated − true | nascent − true |
+|---|---:|---:|---:|
+| shipped: calibration and the EM stranded | 3,285,985 | −352,891 | +334,819 |
+| calibration unstranded, the EM stranded | 745,251 | −37,866 | +32,169 |
+| both unstranded (no strand tag read) | 759,093 | −44,310 | +38,362 |
+| the EM unstranded, calibration stranded | 3,376,570 | −408,915 | +390,086 |
+
+g50 ss0.99 capture-OFF: 226,398 against 202,457 with calibration unstranded (gene 89,904 against 65,440). On the
+simulator's own alignments the channel is neutral (g00 153,799 against 153,131), and capture-ON needs it (g50 ON
+621,052 against 1,051,884). So the EM's strand model is sound, and calibration's strand channel misreads something
+aligned input carries and the simulator's alignments do not. A candidate: reads misplaced across inverted duplications
+read as antisense (on g50 ss0.99, 2.1 % of antisense-oriented RNA's primary spliced records carry a junction no
+transcript holds, against 0.10 % of sense ones; unstranded, 0.12 against 0.11 %).
+Instruments: `$RIGEL_RUNS/arms/2026-10-19_annotated_path/dissect/run_cond.py` (`CAL_UNSTRANDED=1`, `EM_UNSTRANDED=1`,
+`ORACLE=1`; `BASE=1` runs the tree before the rule), `junction_strand_audit.py`.
+
 ### splicing-artifacts
 `priority: now — release-blocking (owner, 2026-10-14): 0.8.0 waits for the mechanism AND its validation on independent artifact-containing evidence (the cluster); the design is externally reviewed, its derivation next · kind: defect · 2026-09-24`
 THE OWNER'S DESIGN (2026-10-14): spliced fragments are the most specific signal the tool has, so artifacts are
@@ -193,6 +215,34 @@ called readings with a short anchor moved across another junction true; it is no
 Open: the end-to-end comparison of the two pairing sources per stratum, once both are built; the search is needed for
 input without HI anyway, and the validator comes first, since both need it.
 
+### multimapper-intergenic-alignments
+`priority: now — release-blocking (owner, 2026-10-19): a fragment's valid intergenic and genic alignments compete in the EM · kind: defect · 2026-09-24`
+THE OWNER'S CASES (2026-10-19). Rigel models RNA only as the reference annotation holds it, so an intergenic spliced
+alignment is a splice artifact or an unannotated transcript, and no "intergenic RNA" exists for it to be:
+1. intergenic only, unique, unspliced: certified gDNA;
+2. intergenic only, unique, spliced: withheld, neither gDNA nor RNA;
+3. a multimapper whose alignments are all intergenic and unspliced: certified gDNA, wherever it lies;
+4. a multimapper with intergenic spliced and unspliced alignments: the spliced ones rejected, the fragment certified
+   gDNA by its unspliced ones;
+5. a multimapper with genic and intergenic alignments, spliced or not: the valid transcript alignments and the
+   intergenic unspliced ones kept, competing in the EM.
+Cases 1–4 hold since the annotated-path rule (`tests/test_hit_verdict.py`), which rejects the spliced alignments no
+annotated transcript holds. Case 5 is this entry.
+A multimapper whose alignments all lie outside genes is intergenic and counted as gDNA — correct. One with an
+alignment in a gene is solved by the EM, and the owner's rule is that it is compatible with gDNA if ANY alignment
+is unspliced. The scanner never buffers a multimapper's alignment that overlaps no transcript
+(`bam_scanner.cpp:1892-1897`: only unique mappers are appended), so a gDNA read from an unannotated processed
+pseudogene whose other alignment splices across the parent gene reaches the EM with its spliced alignment alone
+and is certified RNA on the parent. The owner expects multimappers to matter most. The repair buffers those
+alignments, lets the scorer take a gDNA term from an alignment with no transcript candidate
+(`scoring.cpp`'s `n_cand > 0`) while an all-intergenic group still drops silently, keeps the fragment ledger
+exact, and decides which locus's gDNA component owns a gDNA reading at an intergenic position, outside that
+locus's gDNA length. Unmeasurable on the ladder (`NH` 1); the aligned ladder
+(`$RIGEL_RUNS/aligned_ladder/`) and `tests/scenarios_aligned/test_multimap_counting.py` are where it is
+seen. Taken with `ISSUES: multimapper-blind-support`. Also open for multimappers: the group's gDNA term is the MEAN
+over its eligible alignments (`scoring.cpp`, pinned by `tests/test_pipeline_routing.py`), where uniform gDNA
+placement derives the sum.
+
 ### the-gdna-length-contrast-is-ill-conditioned-on-aligned-input
 `priority: now — release-blocking (owner, 2026-10-15); the third wave of the paired-end repair, designed on the repaired scan · kind: defect · 2026-10-15`
 `fl.py`'s gDNA length law is a two-pool contrast, g = [(1 − a1)·f0 − (1 − a0)·f1] / (a0 − a1). It divides by the
@@ -246,28 +296,6 @@ the third, cross-copy reading of its 50-bp fragments goes; MMP11, with no novel 
 Open: what gDNA evidence calibration should take from a spliced artifact that the scan no longer offers.
 Instruments: `quant_accuracy.py` on the STAR panel, pinned and fractional; the per-gene dissection, two builds side by
 side, in `$RIGEL_RUNS/arms/2026-10-19_annotated_path/dissect/`.
-
-### calibrations-strand-channel-misreads-aligned-input
-`priority: now — the calibration phase; found 2026-10-19 · kind: defect · 2026-10-19`
-On STAR input, calibration's strand channel costs the stranded capture-OFF conditions most of their error. The same
-reads under the tree before the annotated-path rule, pinned and fractional (g00 ss0.99 capture-OFF; truth 7,975,957
-annotated, 2,024,043 nascent):
-
-| run | transcript error | annotated − true | nascent − true |
-|---|---:|---:|---:|
-| shipped: calibration and the EM stranded | 3,285,985 | −352,891 | +334,819 |
-| calibration unstranded, the EM stranded | 745,251 | −37,866 | +32,169 |
-| both unstranded (no strand tag read) | 759,093 | −44,310 | +38,362 |
-| the EM unstranded, calibration stranded | 3,376,570 | −408,915 | +390,086 |
-
-g50 ss0.99 capture-OFF: 226,398 against 202,457 with calibration unstranded (gene 89,904 against 65,440). On the
-simulator's own alignments the channel is neutral (g00 153,799 against 153,131), and capture-ON needs it (g50 ON
-621,052 against 1,051,884). So the EM's strand model is sound, and calibration's strand channel misreads something
-aligned input carries and the simulator's alignments do not. A candidate: reads misplaced across inverted duplications
-read as antisense (on g50 ss0.99, 2.1 % of antisense-oriented RNA's primary spliced records carry a junction no
-transcript holds, against 0.10 % of sense ones; unstranded, 0.12 against 0.11 %).
-Instruments: `$RIGEL_RUNS/arms/2026-10-19_annotated_path/dissect/run_cond.py` (`CAL_UNSTRANDED=1`, `EM_UNSTRANDED=1`,
-`ORACLE=1`; `BASE=1` runs the tree before the rule), `junction_strand_audit.py`.
 
 ### the-anchor-tolerance-applies-beyond-implicit-splicing
 `priority: now — the first wave of the paired-end repair; the owner's scope ruling of 2026-10-16 · kind: defect · 2026-10-16`
@@ -1306,23 +1334,6 @@ derive or put to the owner: the minimum count of 2, the anchor floors 4 / 6 / 11
 mismatch window. The ε of the proposed h-weighted reading (`ISSUES: splicing-artifacts`) must come from the library,
 never from `mismatch_alpha`. A zero alpha gives NaN today (`ISSUES: latent-defects`).
 Instrument: none yet; the splice truth mixes.
-
-### multimapper-intergenic-alignments
-`priority: later — Tier 3, on the aligned ladder after the splice phases; a separate feature after the end-to-end work (owner, 2026-09-24) · kind: defect · 2026-09-24`
-A multimapper whose alignments all lie outside genes is intergenic and counted as gDNA — correct. One with an
-alignment in a gene is solved by the EM, and the owner's rule is that it is compatible with gDNA if ANY alignment
-is unspliced. The scanner never buffers a multimapper's alignment that overlaps no transcript
-(`bam_scanner.cpp:1892-1897`: only unique mappers are appended), so a gDNA read from an unannotated processed
-pseudogene whose other alignment splices across the parent gene reaches the EM with its spliced alignment alone
-and is certified RNA on the parent. The owner expects multimappers to matter most. The repair buffers those
-alignments, lets the scorer take a gDNA term from an alignment with no transcript candidate
-(`scoring.cpp`'s `n_cand > 0`) while an all-intergenic group still drops silently, keeps the fragment ledger
-exact, and decides which locus's gDNA component owns a gDNA reading at an intergenic position, outside that
-locus's gDNA length. Unmeasurable on the ladder (`NH` 1); the aligned ladder
-(`$RIGEL_RUNS/aligned_ladder/`) and `tests/scenarios_aligned/test_multimap_counting.py` are where it is
-seen. Taken with `ISSUES: multimapper-blind-support`. Also open for multimappers: the group's gDNA term is the MEAN
-over its eligible alignments (`scoring.cpp`, pinned by `tests/test_pipeline_routing.py`), where uniform gDNA
-placement derives the sum.
 
 ### unwitnessed-loci-and-multimappers-at-the-em
 `priority: later — the P_g = 0 loci; the multimapper prior moved to its own 0.8.0 entry · kind: defect · 2026-09-21`
