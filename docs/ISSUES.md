@@ -221,28 +221,53 @@ Calibration's region lengths count bases on which no fragment can be observed.
   capture OFF are all-N reads, which no aligner places and the oracle BAM places by truth.
 
 ### the-annotated-path-rule-costs-the-stranded-strata
-`priority: now — the calibration and post-calibration phases, after the scan; the rule landed regardless (owner, 2026-10-19) · kind: defect · 2026-10-19`
+`priority: now — the calibration phase, after the scan; the rule landed regardless (owner, 2026-10-19) · kind: defect · 2026-10-19`
 The annotated-path rule (`tests/test_hit_verdict.py`) withholds a spliced hit that no one annotated transcript holds.
 On the STAR panel at the recommended parameters, pinned and fractional, against the tree before it: transcript error
 −10.2 % unstranded capture-OFF, +4.6 % stranded capture-OFF (g00 +4.7 %, g50 +2.0 %), +1.3 % stranded capture-ON
 (gene −6.2 / +5.2 / +2.2 %); the oracle ladder identical. It rejects 78–91 k hits per condition and withholds
 1.6–1.8 k templates: nearly every rejected hit is one of STAR's alternatives within 2 points of the best, in a template
-that keeps another hit, most of them in segmental duplications. The losses are not the withheld templates:
-- each condition's EM has one component holding 7.5–8.8 M of its 10 M fragments (1,200–1,600 genes), and the changed
-  hit sets move mass across it. At 20× the EM budget and δ 1e-10 the difference is the same, so it is the converged
-  answer that moves, not `ISSUES: the-em-stops-before-it-converges`;
-- direct: NDUFA6-DT, in the CYP2D6/7 duplication, whose 50-bp fragments STAR reads three ways (an annotated junction in
-  each copy, and a novel one between the copies at a score of 97 against 98). With the third dropped the gene falls
-  31,370 → 22,600 of 31,379, and an antisense nascent span rises 4 → 8,066;
-- indirect: genes with no novel junction lose to their own nascent spans, MMP11 24,652 → 18,959 of 24,666 (its span
-  0 → 5,521) and HMOX1 10,910 → 7,790 of 10,922; paralogs in chr22's low-copy repeats move both ways;
-- capture-ON: calibration's gDNA prior in the large component falls 3,117,466 → 3,075,548, and true gDNA counted as RNA
-  rises 42 k. The rejected hits were partly spliced gDNA, which calibration had banked as unspliced gDNA evidence.
-Open: why a part of the component whose own fragments did not change moves at convergence (the RNA prior's allocation
-across the component is the first suspect), and what gDNA evidence calibration should take from a spliced artifact
-that the scan no longer offers.
+that keeps another hit, most of them in segmental duplications.
+LOCALIZED 2026-10-19: the stranded capture-OFF loss is calibration's strand channel on aligned input
+(`ISSUES: calibrations-strand-channel-misreads-aligned-input`), not the rule. With calibration read as unstranded
+(κ = ½) and the EM keeping its strand model, the rule improves g00 by 8.65 % and g50 by 0.42 % (gene −9.31 / −0.54 %),
+as it improves every unstranded condition; with only the EM read as unstranded it still costs g00 4.22 %, and MAP-EM
+and a 20× VBEM budget give the same +4.7 % as the shipped solver. The junction's strand is not the cause: the rule
+matches the XS motif strand, a property of the genome, and on the matched g50 pair no STAR junction is annotated only on
+the other strand, while sense and antisense fragments are rejected alike (0.11 / 0.12 % of the unstranded condition's
+primary spliced RNA records).
+Capture-ON's +1.3 % is the same with calibration read as unstranded (+1.29 %), a separate mechanism: calibration's gDNA
+prior in the large EM component falls 3,117,466 → 3,075,548 and true gDNA counted as RNA rises 42 k, because the
+rejected hits were partly spliced gDNA that calibration had banked as unspliced gDNA evidence.
+The way there: each condition's EM has one component holding 7.5–8.8 M of its 10 M fragments (1,200–1,600 genes),
+across which a changed hit set moves mass; NDUFA6-DT (the CYP2D6/7 duplication) loses 31,370 → 22,600 of 31,379 when
+the third, cross-copy reading of its 50-bp fragments goes; MMP11, with no novel junction and an unchanged buffer, loses
+24,652 → 18,959 of 24,666 to its own nascent span.
+Open: what gDNA evidence calibration should take from a spliced artifact that the scan no longer offers.
 Instruments: `quant_accuracy.py` on the STAR panel, pinned and fractional; the per-gene dissection, two builds side by
 side, in `$RIGEL_RUNS/arms/2026-10-19_annotated_path/dissect/`.
+
+### calibrations-strand-channel-misreads-aligned-input
+`priority: now — the calibration phase; found 2026-10-19 · kind: defect · 2026-10-19`
+On STAR input, calibration's strand channel costs the stranded capture-OFF conditions most of their error. The same
+reads under the tree before the annotated-path rule, pinned and fractional (g00 ss0.99 capture-OFF; truth 7,975,957
+annotated, 2,024,043 nascent):
+
+| run | transcript error | annotated − true | nascent − true |
+|---|---:|---:|---:|
+| shipped: calibration and the EM stranded | 3,285,985 | −352,891 | +334,819 |
+| calibration unstranded, the EM stranded | 745,251 | −37,866 | +32,169 |
+| both unstranded (no strand tag read) | 759,093 | −44,310 | +38,362 |
+| the EM unstranded, calibration stranded | 3,376,570 | −408,915 | +390,086 |
+
+g50 ss0.99 capture-OFF: 226,398 against 202,457 with calibration unstranded (gene 89,904 against 65,440). On the
+simulator's own alignments the channel is neutral (g00 153,799 against 153,131), and capture-ON needs it (g50 ON
+621,052 against 1,051,884). So the EM's strand model is sound, and calibration's strand channel misreads something
+aligned input carries and the simulator's alignments do not. A candidate: reads misplaced across inverted duplications
+read as antisense (on g50 ss0.99, 2.1 % of antisense-oriented RNA's primary spliced records carry a junction no
+transcript holds, against 0.10 % of sense ones; unstranded, 0.12 against 0.11 %).
+Instruments: `$RIGEL_RUNS/arms/2026-10-19_annotated_path/dissect/run_cond.py` (`CAL_UNSTRANDED=1`, `EM_UNSTRANDED=1`,
+`ORACLE=1`; `BASE=1` runs the tree before the rule), `junction_strand_audit.py`.
 
 ### the-anchor-tolerance-applies-beyond-implicit-splicing
 `priority: now — the first wave of the paired-end repair; the owner's scope ruling of 2026-10-16 · kind: defect · 2026-10-16`
