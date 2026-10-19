@@ -47,6 +47,16 @@ Capture-ON needs them; capture-OFF is hurt both ways by false gDNA read as yield
   transcripts and 3.1 % of g50's have EM lengths under 0.9× their plain length (down to 0.017×).
 The reader reads each object's deconvolved gDNA mass as a point Poisson count, whatever the deconvolution's own
 uncertainty; on the simulator's alignments the efficiencies stay at 1 in every condition here.
+THE PLANNED FIX (2026-10-19), for after the splice-artifact waves (owner: stay on the wave plan; the reader took many
+iterations to reach): the reader reads each object's gDNA through calibration's own posterior for it, ψ's
+`Var(log f_g)` (`var_gdna`), instead of as a point count, so an object whose gDNA the solve cannot locate reads the
+prior, the bulk, while located enrichment still reads. Per object and continuous, with no detector, so DESIGN §7.2's
+ruling stands. A probe on the STAR panel: true capture is located (g50 κ0.99 capture-ON, 6,679 objects above 10×:
+median 0.013 nat², 5 % above 1 nat²); the false enrichment mostly is not (g00, 486 objects above 10×: median 9.7 nat²,
+80 % above 1), nor the false depletion (g05, 414 objects below 0.5×: unbounded, 92 % above 1). Not reached by it:
+located false gDNA (g05's 14 objects above 10×, median 0.14 nat²). The order: the derivation in EQUATIONS §11, a
+prototype outside src, then the A/B; its bar is every capture-OFF STAR condition near the efficiencies-at-1 row above,
+capture-ON near shipped, and the ladder's capture rows no worse.
 Instruments: `$RIGEL_RUNS/arms/2026-10-19_annotated_path/dissect/` — `calib_dump.py` (the landscape, bulk, saturation and
 per-region efficiencies; `CAL_UNSTRANDED=1`, `ORACLE=1`), `run_cond.py` (`NO_CAPTURE=1`, `CAL_UNSTRANDED=1`,
 `EM_UNSTRANDED=1`, `ORACLE=1`).
@@ -303,29 +313,34 @@ Calibration's region lengths count bases on which no fragment can be observed.
   capture OFF are all-N reads, which no aligner places and the oracle BAM places by truth.
 
 ### the-annotated-path-rule-costs-the-stranded-strata
-`priority: now — the calibration phase, after the scan; the rule landed regardless (owner, 2026-10-19) · kind: defect · 2026-10-19`
+`priority: now — read again once the capture reader is fixed; the rule landed regardless (owner, 2026-10-19) · kind: defect · 2026-10-19`
 The annotated-path rule (`tests/test_hit_verdict.py`) withholds a spliced hit that no one annotated transcript holds.
 On the STAR panel at the recommended parameters, pinned and fractional, against the tree before it: transcript error
 −10.2 % unstranded capture-OFF, +4.6 % stranded capture-OFF (g00 +4.7 %, g50 +2.0 %), +1.3 % stranded capture-ON
 (gene −6.2 / +5.2 / +2.2 %); the oracle ladder identical. It rejects 78–91 k hits per condition and withholds
 1.6–1.8 k templates: nearly every rejected hit is one of STAR's alternatives within 2 points of the best, in a template
 that keeps another hit, most of them in segmental duplications.
-LOCALIZED 2026-10-19: the stranded capture-OFF loss is calibration's strand channel on aligned input
-(`ISSUES: the-reader-reads-false-gdna-as-capture`), not the rule. With calibration read as unstranded
-(κ = ½) and the EM keeping its strand model, the rule improves g00 by 8.65 % and g50 by 0.42 % (gene −9.31 / −0.54 %),
-as it improves every unstranded condition; with only the EM read as unstranded it still costs g00 4.22 %, and MAP-EM
-and a 20× VBEM budget give the same +4.7 % as the shipped solver. The junction's strand is not the cause: the rule
-matches the XS motif strand, a property of the genome, and on the matched g50 pair no STAR junction is annotated only on
-the other strand, while sense and antisense fragments are rejected alike (0.11 / 0.12 % of the unstranded condition's
-primary spliced RNA records).
-Capture-ON's +1.3 % is the same with calibration read as unstranded (+1.29 %), a separate mechanism: calibration's gDNA
-prior in the large EM component falls 3,117,466 → 3,075,548 and true gDNA counted as RNA rises 42 k, because the
-rejected hits were partly spliced gDNA that calibration had banked as unspliced gDNA evidence.
+WHY ONLY THE STRANDED CONDITIONS (2026-10-19): the rule's own effect is a small gain in every condition, and both
+the losses and the large gains come from the capture reader (`ISSUES: the-reader-reads-false-gdna-as-capture`). With
+every capture efficiency held at 1, the rule moves transcript error by −0.96 % (g00 κ0.99), −1.00 % (g05 κ0.50),
+−0.45 % (g50 κ0.50), −1.17 % (g50 κ0.99 OFF) and −0.10 % (g50 κ0.99 ON), against +4.73 / −14.52 / −0.79 / +2.01 /
++1.28 % as shipped. The reader turns small changes in calibration's false gDNA into large changes in the EM lengths,
+in a direction set by each condition's false-gDNA state, not by its strandedness: in g05 the rule cut the transcripts
+whose capture factor is off by more than 2× from 5.84 % to 1.51 %; in g00, where the bulk sits at the floor
+(saturation 15,528), it moved 198 regions' efficiencies by more than 2× while the false gDNA barely changed
+(32,791 → 32,930), and with them 6 % of the transcripts' factors. The strand channel enters only through g00's false
+gDNA, most of it in both-stranded introns: with calibration read as unstranded the rule improves g00 by 8.65 %. On
+capture-ON the same machinery carries it: calibration's gDNA count for the large component falls 3,117,466 → 3,075,548,
+because the rejected hits were partly spliced gDNA it had banked as unspliced gDNA evidence. The junction's strand is
+not the cause: the rule matches the XS motif strand, a property of the genome, and on the matched g50 pair no STAR
+junction is annotated only on the other strand, while sense and antisense fragments are rejected alike (0.11 / 0.12 %
+of the unstranded condition's primary spliced RNA records).
 The way there: each condition's EM has one component holding 7.5–8.8 M of its 10 M fragments (1,200–1,600 genes),
 across which a changed hit set moves mass; NDUFA6-DT (the CYP2D6/7 duplication) loses 31,370 → 22,600 of 31,379 when
 the third, cross-copy reading of its 50-bp fragments goes; MMP11, with no novel junction and an unchanged buffer, loses
 24,652 → 18,959 of 24,666 to its own nascent span.
-Open: what gDNA evidence calibration should take from a spliced artifact that the scan no longer offers.
+Open: what gDNA evidence calibration should take from a spliced artifact that the scan no longer offers. The rule's
+shipped numbers are the reader's until it is fixed; its own are the efficiencies-at-1 row above.
 Instruments: `quant_accuracy.py` on the STAR panel, pinned and fractional; the per-gene dissection, two builds side by
 side, in `$RIGEL_RUNS/arms/2026-10-19_annotated_path/dissect/`.
 
