@@ -163,7 +163,7 @@ def test_a_pair_facing_outward_is_withheld_not_intergenic(index, tmp_path):
     """F forward at 5300, R reverse ending at 5200: their 5' ends point away from each other."""
     stats = _scan(tmp_path, index, _pair("outward", 5300, "100M", 5100, "100M"))
     assert stats.n_fragments == 0, "an unclipped pair facing outward is no molecule"
-    assert stats.n_intergenic_unspliced == 0
+    assert stats.n_intergenic == 0
     assert _rejected(stats)["outward"] == 1
     assert stats.n_withheld_unpaired == 1
 
@@ -426,14 +426,14 @@ def test_the_rule_judges_a_hit_the_pair_rule_does_not(index, tmp_path):
     records = _pair("offindex", 100, "50M100N50M", 300, "100M", xs="+", ref=1)
     stats = _scan(tmp_path, index, records)
     assert _rejected(stats)["novel_junction"] == 1
-    assert stats.n_fragments == 0 and stats.n_intergenic_spliced == 0
+    assert stats.n_fragments == 0 and stats.n_intergenic == 0
     assert _withheld(stats)["unannotated_splice"] == 1
 
 
 def test_a_spliced_pair_outside_every_gene_is_withheld(index, tmp_path):
     stats = _scan(tmp_path, index, _pair("intergenic", 15000, "50M100N50M", 15200, "100M", xs="+"))
     assert _rejected(stats)["novel_junction"] == 1
-    assert stats.n_fragments == 0 and stats.n_intergenic_spliced == 0
+    assert stats.n_fragments == 0 and stats.n_intergenic == 0
     assert _withheld(stats) == {"unpaired": 0, "unannotated_splice": 1}
 
 

@@ -102,13 +102,11 @@ SUMMARY_KEYS: dict[str, dict] = {
         "count_annotated": 0.0,
         "count_nascent": 0.0,
         "count_gdna_em": 0.0,
-        "count_intergenic_rna": 0,
         "fraction_annotated": 0.0,
         "fraction_nascent": 0.0,
         "fraction_gdna": 0.0,
         "fraction_gdna_em": 0.0,
         "fraction_intergenic": 0.0,
-        "fraction_intergenic_rna": 0.0,
     },
 }
 

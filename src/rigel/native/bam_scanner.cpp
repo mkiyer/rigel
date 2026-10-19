@@ -335,8 +335,7 @@ struct BamScanStats {
     int64_t n_chimeric_trans = 0;
     int64_t n_chimeric_cis_strand_same = 0;
     int64_t n_chimeric_cis_strand_diff = 0;
-    int64_t n_intergenic_unspliced = 0;
-    int64_t n_intergenic_spliced = 0;
+    int64_t n_intergenic = 0;  // templates no hit of which resolves: unspliced, gDNA by construction
     int64_t n_with_exon = 0;
     int64_t n_with_annotated_sj = 0;
     int64_t n_with_unannotated_sj = 0;
@@ -416,8 +415,7 @@ struct BamScanStats {
         n_chimeric_trans += o.n_chimeric_trans;
         n_chimeric_cis_strand_same += o.n_chimeric_cis_strand_same;
         n_chimeric_cis_strand_diff += o.n_chimeric_cis_strand_diff;
-        n_intergenic_unspliced += o.n_intergenic_unspliced;
-        n_intergenic_spliced += o.n_intergenic_spliced;
+        n_intergenic += o.n_intergenic;
         n_with_exon += o.n_with_exon;
         n_with_annotated_sj += o.n_with_annotated_sj;
         n_with_unannotated_sj += o.n_with_unannotated_sj;
@@ -2004,8 +2002,7 @@ private:
         // and count it exactly once (not per-hit).
         bool any_hit_resolved = false;
         bool any_non_chimeric_resolved = false;
-        bool any_unresolved_spliced = false;
-        bool any_unresolved_unspliced = false;
+        bool any_unresolved = false;
 
         // Track chimera per-fragment (not per-hit).
         // A fragment is chimeric only if it resolves but ALL
@@ -2036,22 +2033,17 @@ private:
                 frag.exons, frag.introns,
                 frag.genomic_footprint(), cr, scratch);
 
-            // Empty t_inds: an intergenic fragment.
+            // Empty t_inds: an intergenic fragment. It is unspliced: a spliced hit the scan keeps has a transcript
+            // holding its junctions (`hit_verdict`). Counted once all hits are seen, to count the template once.
             if (cr.t_inds.empty()) {
-                // Defer intergenic counting until after all hits
-                // are processed to avoid multi-counting.
-                if (frag.has_introns()) {
-                    any_unresolved_spliced = true;
-                } else {
-                    any_unresolved_unspliced = true;
-                }
+                any_unresolved = true;
 
                 // unique-mapper zero-candidate fragments are
                 // appended to the buffer so that calibration's
                 // geometric categorization can label them INTERGENIC.
                 //
                 // We do NOT set any_hit_resolved here -- the
-                // n_intergenic_unspliced/_spliced telemetry counter
+                // n_intergenic telemetry counter
                 // (driven by !any_hit_resolved below) must keep firing
                 // so the PipelineStats accountability sum stays
                 // consistent.  The C++ scorer skips empty-t_inds
@@ -2181,14 +2173,7 @@ private:
         // For a multimapper, if any hit resolves, the fragment goes
         // through the EM which handles gDNA allocation — don't also
         // count it as intergenic (that would double-count the molecule).
-        if (!any_hit_resolved &&
-            (any_unresolved_spliced || any_unresolved_unspliced)) {
-            if (any_unresolved_spliced) {
-                stats.n_intergenic_spliced++;
-            } else {
-                stats.n_intergenic_unspliced++;
-            }
-        }
+        if (!any_hit_resolved && any_unresolved) stats.n_intergenic++;
 
         if (n_buffered_mm > 0) {
             stats.n_multimapper_groups++;
@@ -2222,8 +2207,7 @@ private:
         stats_dict["n_chimeric_trans"] = stats_.n_chimeric_trans;
         stats_dict["n_chimeric_cis_strand_same"] = stats_.n_chimeric_cis_strand_same;
         stats_dict["n_chimeric_cis_strand_diff"] = stats_.n_chimeric_cis_strand_diff;
-        stats_dict["n_intergenic_unspliced"] = stats_.n_intergenic_unspliced;
-        stats_dict["n_intergenic_spliced"] = stats_.n_intergenic_spliced;
+        stats_dict["n_intergenic"] = stats_.n_intergenic;
         stats_dict["n_with_exon"] = stats_.n_with_exon;
         stats_dict["n_with_annotated_sj"] = stats_.n_with_annotated_sj;
         stats_dict["n_with_unannotated_sj"] = stats_.n_with_unannotated_sj;
@@ -2737,22 +2721,6 @@ public:
             auto ann_it = frag_to_row.find(frag_id);
             bool has_ann = (ann_it != frag_to_row.end());
 
-            // A fragment the EM never saw is intergenic, and RNA when any hit is spliced, as the scanner counts
-            // it (`n_intergenic_spliced`): a spliced fragment is certified RNA whether or not a transcript
-            // holds it.
-            bool intergenic_rna = false;
-            if (!has_ann) {
-                for (size_t h = 0; h < all_hits.size(); ++h) {
-                    if (hit_rejected[h]) continue;
-                    const auto& [r1, r2] = all_hits[h];
-                    AssembledFragment frag = build_fragment(r1, r2);
-                    if (!frag.exons.empty() && frag.has_introns()) {
-                        intergenic_rna = true;
-                        break;
-                    }
-                }
-            }
-
             // Deduplicate raw records across hits: the cross-pair
             // combinatorial block in pair_multimapper_reads intentionally
             // produces overlapping hits for EM scoring, so a single raw
@@ -2856,16 +2824,16 @@ public:
                     n_annotated++;
                 } else {
                     // No EM annotation for this frag_id: the deterministic
-                    // intergenic fast-path. Unspliced, it is gDNA by construction
+                    // intergenic fast-path. It is gDNA by construction (a spliced
+                    // hit the scan keeps has a transcript holding its junctions),
                     // and ZF carries the intergenic+gDNA bits, so a single AND-mask
-                    // on ZF captures total gDNA; spliced, it is RNA no annotated
-                    // transcript holds. ZW=1.0 because there is no competing
-                    // hypothesis.
+                    // on ZF captures total gDNA. ZW=1.0 because there is no
+                    // competing hypothesis.
                     stamp_and_write_hit(
                         hit_raws, out, hdr,
                         ".", ".", ".",
                         -1, -1,
-                        intergenic_rna ? AF_RNA_INTERGENIC : AF_GDNA_INTERGENIC, 1.0f,
+                        AF_GDNA_INTERGENIC, 1.0f,
                         ".",
                         (hit_idx == first_valid_hit) ? 1 : 0,
                         0, "unknown", -1);

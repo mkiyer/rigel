@@ -31,7 +31,6 @@ from rigel.annotate import (
     AF_NASCENT,
     AF_NASCENT_BIT,
     AF_RESOLVED,
-    AF_RNA_INTERGENIC,
     AF_UNRESOLVED,
     winner_flag,
     winner_flags,
@@ -45,7 +44,6 @@ VALID_ZF_VALUES = {
     AF_NASCENT,
     AF_GDNA_EM,
     AF_GDNA_INTERGENIC,
-    AF_RNA_INTERGENIC,
     AF_CHIMERIC,
     AF_MULTIMAPPER_DROP,
 }
@@ -163,7 +161,6 @@ class TestAnnotationTable:
         assert AF_NASCENT == 0x11
         assert AF_GDNA_EM == 0x05
         assert AF_GDNA_INTERGENIC == 0x25
-        assert AF_RNA_INTERGENIC == 0x21
         assert AF_CHIMERIC == 0x40
         assert AF_MULTIMAPPER_DROP == 0x80
         # All canonical values satisfy the invariants, which include the retired bit's absence
@@ -174,7 +171,6 @@ class TestAnnotationTable:
         assert AF_NASCENT & AF_RESOLVED
         assert AF_GDNA_EM & AF_RESOLVED
         assert AF_GDNA_INTERGENIC & AF_RESOLVED
-        assert AF_RNA_INTERGENIC & AF_RESOLVED and not AF_RNA_INTERGENIC & AF_GDNA_BIT
         assert not (AF_CHIMERIC & AF_RESOLVED)
         assert not (AF_MULTIMAPPER_DROP & AF_RESOLVED)
 
@@ -919,7 +915,7 @@ class TestAnnotatedBamIntegration:
             assert zf & AF_GDNA_BIT, "Intergenic should set is_gdna bit"
             assert zf & AF_INTERGENIC_BIT, "Intergenic should set is_intergenic bit"
             assert rec.get_tag("ZC") == "."
-        assert stats.n_intergenic_unspliced >= 1
+        assert stats.n_intergenic >= 1
 
     def test_zf_spliced_intergenic_withheld(self, scenario, tmp_path):
         """A spliced read pair that no annotated transcript holds is withheld (the annotated-path rule): ZF 0, ZC
@@ -928,7 +924,6 @@ class TestAnnotatedBamIntegration:
         for rec in sentinel:
             assert rec.get_tag("ZF") == AF_UNRESOLVED
             assert rec.get_tag("ZC") == "unannotated_splice"
-        assert stats.n_intergenic_spliced == 0
         assert stats.n_withheld_unannotated_splice >= 1
 
     def test_zf_multimapper_dropped_without_include_multimap(self, scenario, tmp_path):

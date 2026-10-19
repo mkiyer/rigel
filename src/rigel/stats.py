@@ -39,8 +39,7 @@ class PipelineStats:
     n_chimeric_trans: int = 0
     n_chimeric_cis_strand_same: int = 0
     n_chimeric_cis_strand_diff: int = 0
-    n_intergenic_unspliced: int = 0
-    n_intergenic_spliced: int = 0
+    n_intergenic: int = 0  # templates that reach no locus: unspliced, gDNA by construction
     n_with_exon: int = 0
     n_with_annotated_sj: int = 0
     n_with_unannotated_sj: int = 0
@@ -128,17 +127,6 @@ class PipelineStats:
     #: before this counter.
     n_deposit_not_offered: int = 0
 
-    @property
-    def n_intergenic(self) -> int:
-        """Total intergenic fragments (unspliced + spliced)."""
-        return self.n_intergenic_unspliced + self.n_intergenic_spliced
-
     def to_dict(self) -> dict:
-        """Convert to a JSON-serializable dictionary.
-
-        Includes the computed ``n_intergenic`` alongside the raw dataclass
-        fields.
-        """
-        d = asdict(self)
-        d["n_intergenic"] = self.n_intergenic
-        return d
+        """Convert to a JSON-serializable dictionary."""
+        return asdict(self)

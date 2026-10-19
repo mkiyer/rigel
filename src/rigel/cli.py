@@ -352,17 +352,14 @@ def _quantification_pools(
 ) -> dict:
     """``summary.json``'s pools and their fractions of every fragment counted.
 
-    An intergenic fragment reaches no locus. Unspliced, it is gDNA by construction, so ``count_gdna`` is the
-    EM's genic gDNA (``count_gdna_em``) plus the unspliced intergenic fragments; leaving them out would halve the
-    observed contamination of a library with substantial gDNA. Spliced, it is certified RNA that no annotated
-    transcript holds, and it is its own pool (``count_intergenic_rna``). The annotated-transcript
-    (``fraction_annotated``), synthetic-span (``fraction_nascent``), gDNA and intergenic RNA fractions sum to
-    one; ``fraction_gdna_em`` is the EM's genic part alone, and ``fraction_intergenic`` the share of every
-    intergenic fragment, both kinds."""
+    An intergenic fragment reaches no locus. It is unspliced (a spliced hit the scan keeps has a transcript holding
+    its junctions), so gDNA by construction: ``count_gdna`` is the EM's genic gDNA (``count_gdna_em``) plus the
+    intergenic fragments; leaving them out would halve the observed contamination of a library with substantial
+    gDNA. The annotated-transcript (``fraction_annotated``), synthetic-span (``fraction_nascent``) and gDNA fractions
+    sum to one; ``fraction_gdna_em`` is the EM's genic part alone, and ``fraction_intergenic`` the intergenic part."""
     intergenic = stats.n_intergenic
-    intergenic_rna = stats.n_intergenic_spliced
     total_all = count_annotated + count_nascent + count_gdna_em + intergenic
-    count_gdna = count_gdna_em + intergenic - intergenic_rna
+    count_gdna = count_gdna_em + intergenic
 
     def share(x: float) -> float:
         return round(x / total_all, SUMMARY_DECIMALS) if total_all > 0 else 0.0
@@ -372,13 +369,11 @@ def _quantification_pools(
         "count_nascent": round(count_nascent, SUMMARY_COUNT_DECIMALS),
         "count_gdna": round(count_gdna, SUMMARY_COUNT_DECIMALS),
         "count_gdna_em": round(count_gdna_em, SUMMARY_COUNT_DECIMALS),
-        "count_intergenic_rna": intergenic_rna,
         "fraction_annotated": share(count_annotated),
         "fraction_nascent": share(count_nascent),
         "fraction_gdna": share(count_gdna),
         "fraction_gdna_em": share(count_gdna_em),
         "fraction_intergenic": share(intergenic),
-        "fraction_intergenic_rna": share(intergenic_rna),
     }
 
 

@@ -309,13 +309,12 @@ def score_genes(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
 def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
     """The library-level split — the thermometer, not the target.
 
-    Unspliced intergenic fragments are gDNA and the denominator must say so. ``n_intergenic`` counts
-    fragments that reached no locus at all; they never enter the EM, so ``estimator.gdna_em_count``
-    excludes them. Off capture, gDNA is genome-uniform and more than half of it is intergenic, so
-    leaving them out of the numerator while RNA stays in the denominator understates the fraction
-    badly. A SPLICED intergenic fragment is certified RNA that no annotated transcript holds — the test
-    panel's shadow transcripts write them — so it is RNA here. This is ``cli.py``'s ``fraction_gdna`` —
-    ``(gdna_em + n_intergenic_gdna) / (rna + gdna_em + n_intergenic)`` — so the number here is the one a user
+    Intergenic fragments are gDNA and the denominator must say so. ``n_intergenic`` counts fragments
+    that reached no locus at all, all of them unspliced (the scan withholds a spliced hit no transcript
+    holds); they never enter the EM, so ``estimator.gdna_em_count`` excludes them. Off capture, gDNA is
+    genome-uniform and more than half of it is intergenic, so leaving them out of the numerator while RNA
+    stays in the denominator understates the fraction badly. This is ``cli.py``'s ``fraction_gdna`` —
+    ``(gdna_em + n_intergenic) / (rna + gdna_em + n_intergenic)`` — so the number here is the one a user
     reads. ``gdna_em_frac_est`` is kept beside it because the two answer different questions and only one of
     them is the deliverable.
 
@@ -326,7 +325,6 @@ def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
     nrna = float(est.synthetic_count)
     gdna = float(est.gdna_em_count)
     intergenic = float(result.stats.n_intergenic)
-    intergenic_rna = float(result.stats.n_intergenic_spliced)
     oc = truth_summary.get("origin_counts", {})
     t_g = float(oc.get("gdna", float("nan")))
     t_m = float(oc.get("mrna", 0.0))
@@ -344,17 +342,16 @@ def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
         "mrna_true": t_m,
         "nrna_est": nrna,
         "nrna_true": t_n,
-        "rna_est": mrna + nrna + intergenic_rna,
+        "rna_est": mrna + nrna,
         "rna_true": t_r,
         "gdna_est": gdna,
         "gdna_true": t_g,
         #: THE DELIVERABLE — the unspliced intergenic fragments included, cli.py's denominator.
-        "gdna_frac_est": (gdna + intergenic - intergenic_rna) / total_all if total_all > 0 else float("nan"),
+        "gdna_frac_est": (gdna + intergenic) / total_all if total_all > 0 else float("nan"),
         #: the EM's own view, intergenic in NEITHER side. A different question; not the deliverable.
         "gdna_em_frac_est": gdna / total if total > 0 else float("nan"),
         "gdna_frac_true": t_g / (t_g + t_r) if (t_g + t_r) > 0 else float("nan"),
-        "n_intergenic_gdna": intergenic - intergenic_rna,
-        "n_intergenic_rna": intergenic_rna,
+        "n_intergenic_gdna": intergenic,
     }
 
 

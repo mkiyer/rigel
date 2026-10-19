@@ -542,7 +542,7 @@ the current version is **4**. Top-level keys:
 | `calibration` | Library-scalar calibration outputs (see below) |
 | `gdna_em_effective_length` | Summary of the loci table's column of that name: its `min`, `median`, `p95`, `max` |
 | `fragment_length` | Per-category FL **summary statistics only** (`n_observations`, `mean`, `std`, `median`, `mode`, `max_size`, `overflow_count`, `overflow_fraction`) for `global`, `gdna`, `rna` and the five pools. The raw per-bin histograms are in `fragment_lengths.feather` |
-| `quantification` | `n_transcripts` (the annotated transcripts) and `n_nascent` (the nascent spans), `n_genes`, `n_loci`, assignment counts (`n_unambig_assigned`, `n_em_assigned`, and `n_gated_out`: the fragments a hard scoring gate dropped — `--overhang-alpha 0` or `--mismatch-alpha 0` — which no pool holds), and four pools, each a `count_*` beside its `fraction_*` of the four together: `count_annotated` (the annotated transcripts), `count_nascent` (the nascent spans), `count_gdna` (gDNA: the EM's plus the unspliced intergenic fragments, which reach no locus) and `count_intergenic_rna` (the spliced intergenic fragments: RNA no annotated transcript holds, certified by its junction), so `fraction_annotated + fraction_nascent + fraction_gdna + fraction_intergenic_rna = 1`. `count_gdna_em` and `fraction_gdna_em` are the EM's genic gDNA alone, so the intergenic gDNA is `count_gdna − count_gdna_em`. `fraction_intergenic` is the share of every intergenic fragment, both kinds; their count is `fragment_stats.intergenic` |
+| `quantification` | `n_transcripts` (the annotated transcripts) and `n_nascent` (the nascent spans), `n_genes`, `n_loci`, assignment counts (`n_unambig_assigned`, `n_em_assigned`, and `n_gated_out`: the fragments a hard scoring gate dropped — `--overhang-alpha 0` or `--mismatch-alpha 0` — which no pool holds), and three pools, each a `count_*` beside its `fraction_*` of the three together: `count_annotated` (the annotated transcripts), `count_nascent` (the nascent spans) and `count_gdna` (gDNA: the EM's plus the intergenic fragments, which reach no locus and are unspliced, since a spliced alignment is used only when a transcript holds its junctions), so `fraction_annotated + fraction_nascent + fraction_gdna = 1`. `count_gdna_em` and `fraction_gdna_em` are the EM's genic gDNA alone, so the intergenic gDNA is `count_gdna − count_gdna_em`, and `fraction_intergenic` its share; their count is `fragment_stats.intergenic` |
 
 The **`calibration`** block holds exactly the library-wide calibration
 scalars (it is `null` if calibration did not run):
@@ -628,7 +628,7 @@ kind of candidate won, named for the category the tables report it under:
 | 2 | 0x04 | `is_gdna` | Assigned to gDNA (the EM's gDNA component, or unspliced intergenic) |
 | 3 | 0x08 | — | Retired: never set, so no earlier `ZF` value is reused with a new meaning |
 | 4 | 0x10 | `is_nascent` | Assigned to a synthetic nascent span |
-| 5 | 0x20 | `is_intergenic` | No annotation overlap: with `is_gdna` when unspliced; alone when spliced (RNA no annotated transcript holds) |
+| 5 | 0x20 | `is_intergenic` | No annotation overlap, so unspliced gDNA: always with `is_gdna` |
 | 6 | 0x40 | `is_chimeric` | Chimeric fragment, skipped before scoring |
 | 7 | 0x80 | `is_multimapper_dropped` | Multimapper dropped when `--include-multimap` is off |
 
@@ -641,7 +641,6 @@ Canonical `ZF` values (the only ones produced):
 | `0x11` |  17 | Nascent: assigned to a synthetic nascent span |
 | `0x05` |   5 | gDNA, assigned by the EM (annotation-overlapping) |
 | `0x25` |  37 | Intergenic gDNA (unspliced, no annotation overlap) |
-| `0x21` |  33 | Intergenic RNA: spliced, no annotation overlap — RNA no annotated transcript holds |
 | `0x40` |  64 | Chimeric, not scored |
 | `0x80` | 128 | Multimapper dropped, not scored |
 

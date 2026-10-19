@@ -79,7 +79,6 @@ static constexpr int32_t AF_MULTIMAPPER_DROP_BIT = 0x80;
 // The composed values the C++ stamp sites write.
 static constexpr int32_t AF_UNRESOLVED        = 0x00;  // withheld: the template has no usable hit
 static constexpr int32_t AF_GDNA_INTERGENIC   = AF_RESOLVED_BIT | AF_GDNA_BIT | AF_INTERGENIC_BIT;  // 0x25
-static constexpr int32_t AF_RNA_INTERGENIC    = AF_RESOLVED_BIT | AF_INTERGENIC_BIT;                // 0x21
 static constexpr int32_t AF_MULTIMAPPER_DROP  = AF_MULTIMAPPER_DROP_BIT;                            // 0x80
 
 // Why a hit is not usable (`hit_verdict`); HIT_USABLE when it is. Its two mates are not one molecule

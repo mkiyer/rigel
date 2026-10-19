@@ -57,8 +57,8 @@ BAM Tag Schema
        bit 2 = is_gdna (gDNA: unspliced intergenic + EM-gDNA),
        bit 4 = is_nascent (a synthetic span, which Rigel adds to model a
        multi-exon transcript's unspliced RNA); bit 3 is retired and never set;
-       bit 5 = is_intergenic (no transcript holds the fragment: gDNA when
-       unspliced, RNA with no winner-kind bit when spliced), bit 6 = is_chimeric,
+       bit 5 = is_intergenic (no transcript holds the fragment, which is
+       unspliced: always with is_gdna), bit 6 = is_chimeric,
        bit 7 = is_multimapper_dropped.  See ``AF_*`` constants for canonical values.
    * - ZW
      - f
@@ -152,7 +152,6 @@ AF_ANNOTATED: int = AF_RESOLVED | AF_ANNOTATED_BIT  # 0x03
 AF_NASCENT: int = AF_RESOLVED | AF_NASCENT_BIT  # 0x11
 AF_GDNA_EM: int = AF_RESOLVED | AF_GDNA_BIT  # 0x05
 AF_GDNA_INTERGENIC: int = AF_GDNA_EM | AF_INTERGENIC_BIT  # 0x25
-AF_RNA_INTERGENIC: int = AF_RESOLVED | AF_INTERGENIC_BIT  # 0x21
 AF_CHIMERIC: int = AF_CHIMERIC_BIT  # 0x40
 AF_MULTIMAPPER_DROP: int = AF_MULTIMAPPER_DROP_BIT  # 0x80
 

@@ -423,34 +423,28 @@ class _FakeEstimator:
 @dataclasses.dataclass
 class _FakeStats:
     n_intergenic: float
-    n_intergenic_spliced: float = 0.0
 
 
 class _FakeResult:
     """Enough of a ``PipelineResult`` for ``score_library`` — the four numbers it reads."""
 
-    def __init__(self, synthetic_count, gdna_em_count, n_intergenic, n_intergenic_spliced=0.0):
+    def __init__(self, synthetic_count, gdna_em_count, n_intergenic):
         self.estimator = _FakeEstimator(synthetic_count, gdna_em_count)
-        self.stats = _FakeStats(n_intergenic, n_intergenic_spliced)
+        self.stats = _FakeStats(n_intergenic)
 
 
-def test_a_spliced_intergenic_fragment_is_rna_in_the_library_split():
-    """A spliced fragment is certified RNA whether or not an annotated transcript holds it (the test panel's
-    shadow transcripts write them), so of the intergenic fragments only the unspliced ones are gDNA, as in
-    ``cli.py``'s ``fraction_gdna``, and the spliced ones join the RNA estimate."""
-    mrna, gdna_em, intergenic, spliced = 5_000.0, 2_000.0, 3_000.0, 100.0
+def test_every_intergenic_fragment_is_gdna_in_the_library_split():
+    """An intergenic fragment is unspliced (the scan withholds a spliced hit no transcript holds), so every one is
+    gDNA, as in ``cli.py``'s ``fraction_gdna``."""
+    mrna, gdna_em, intergenic = 5_000.0, 2_000.0, 3_000.0
     quant = pd.DataFrame({"transcript_id": ["a"], "count": [mrna]})
     summary = {"origin_counts": {"gdna": 4_900, "mrna": 5_100, "nrna": 0}}
-    lib = QA.score_library(
-        _FakeResult(0.0, gdna_em, n_intergenic=intergenic, n_intergenic_spliced=spliced),
-        quant,
-        summary,
-    )
+    lib = QA.score_library(_FakeResult(0.0, gdna_em, n_intergenic=intergenic), quant, summary)
     assert lib["gdna_frac_est"] == pytest.approx(
-        (gdna_em + intergenic - spliced) / (mrna + gdna_em + intergenic)
+        (gdna_em + intergenic) / (mrna + gdna_em + intergenic)
     )
-    assert (lib["n_intergenic_gdna"], lib["n_intergenic_rna"]) == (intergenic - spliced, spliced)
-    assert lib["rna_est"] == mrna + spliced
+    assert "n_intergenic_rna" not in lib and lib["n_intergenic_gdna"] == intergenic
+    assert lib["rna_est"] == mrna
 
 
 def test_the_count_metrics_do_not_move_when_the_length_model_does():

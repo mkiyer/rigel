@@ -302,16 +302,13 @@ def _quant(summary: SummaryReader) -> dict:
     annotated = q["count_annotated"]
     nascent = q["count_nascent"]
     gdna_em = q["count_gdna_em"]
-    # every intergenic fragment: a spliced one is RNA no annotated transcript holds, an unspliced one gDNA
+    # every intergenic fragment is gDNA: unspliced, since a spliced one the scan keeps has a transcript
     inter = summary["fragment_stats"]["intergenic"]
-    inter_rna = q["count_intergenic_rna"]
-    inter_rna_frac = q["fraction_intergenic_rna"]
     pools = [
         {"label": "Annotated transcripts", "value": annotated, "cls": _C[1]},
         {"label": "Nascent RNA", "value": nascent, "cls": _C[2]},
-        {"label": "Intergenic RNA", "value": inter_rna, "cls": _C[4]},
         {"label": "gDNA (EM)", "value": gdna_em, "cls": _C[8]},
-        {"label": "Intergenic gDNA", "value": inter - inter_rna, "cls": _C[3]},
+        {"label": "Intergenic gDNA", "value": inter, "cls": _C[3]},
     ]
     table = [
         [
@@ -333,19 +330,13 @@ def _quant(summary: SummaryReader) -> dict:
             "genic fragments the EM assigns to gDNA",
         ],
         [
-            "Intergenic RNA",
-            inter_rna,
-            inter_rna_frac,
-            "spliced with no annotation overlap; RNA by its junction",
-        ],
-        [
             "Intergenic gDNA",
-            inter - inter_rna,
-            q["fraction_intergenic"] - inter_rna_frac,
-            "unspliced with no annotation overlap; gDNA by construction",
+            inter,
+            q["fraction_intergenic"],
+            "no annotation overlap; gDNA by construction",
         ],
     ]
-    rna_share = q["fraction_annotated"] + q["fraction_nascent"] + inter_rna_frac
+    rna_share = q["fraction_annotated"] + q["fraction_nascent"]
     kpis = [
         {"l": "Transcripts", "v": q["n_transcripts"], "fmt": "count"},
         {"l": "Genes", "v": q["n_genes"], "fmt": "count"},

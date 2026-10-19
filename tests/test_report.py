@@ -54,14 +54,14 @@ _HAS_VEGA = importlib.util.find_spec("vl_convert") is not None
 #: The ``summary.json`` schema the synthesized substrate mirrors, and the one the real writer must write.
 _SCHEMA = 4
 
-#: The output convention's five pools, as the report names them.
-_POOLS = ("Annotated transcripts", "Nascent RNA", "gDNA (EM)", "Intergenic RNA", "Intergenic gDNA")
+#: The output convention's four pools, as the report names them.
+_POOLS = ("Annotated transcripts", "Nascent RNA", "gDNA (EM)", "Intergenic gDNA")
 
 
 def _write_substrate(d: Path) -> Path:
     d.mkdir(parents=True, exist_ok=True)
-    # The pools, as ``rigel quant`` books them: an unspliced intergenic fragment is gDNA, a spliced one RNA.
-    annotated, nascent, gdna_em, intergenic, intergenic_rna = 500.0, 60.0, 20.0, 70, 0
+    # The pools, as ``rigel quant`` books them: an intergenic fragment is gDNA.
+    annotated, nascent, gdna_em, intergenic = 500.0, 60.0, 20.0, 70
     every = annotated + nascent + gdna_em + intergenic
 
     def share(x):
@@ -125,15 +125,13 @@ def _write_substrate(d: Path) -> Path:
             "n_loci": 35,
             "count_annotated": annotated,
             "count_nascent": nascent,
-            "count_gdna": gdna_em + intergenic - intergenic_rna,
+            "count_gdna": gdna_em + intergenic,
             "count_gdna_em": gdna_em,
-            "count_intergenic_rna": intergenic_rna,
             "fraction_annotated": share(annotated),
             "fraction_nascent": share(nascent),
-            "fraction_gdna": share(gdna_em + intergenic - intergenic_rna),
+            "fraction_gdna": share(gdna_em + intergenic),
             "fraction_gdna_em": share(gdna_em),
             "fraction_intergenic": share(intergenic),
-            "fraction_intergenic_rna": share(intergenic_rna),
         },
         # every category ``rigel quant`` writes, in its order: the anchor, the two modelled pools, and the five
         # pools they are built from (``gdna`` is the two contained pools, ``rna`` the spliced one)
@@ -528,14 +526,9 @@ def test_every_format_tag_the_view_model_emits_is_one_the_front_end_formats(tmp_
 
 def test_each_pool_is_named_once_and_shows_the_summarys_own_count_and_fraction(tmp_path):
     """The bar, its legend, the donut, the table and the KPIs name each pool the same way, in the output
-    convention's words, and show the count and fraction ``summary.json`` holds for it; the intergenic fragments
-    are split by their junction. The words the convention retired name nothing the report shows."""
-    d = _with(
-        _write_substrate(tmp_path / "run"),
-        "quantification",
-        count_intergenic_rna=10,
-        fraction_intergenic_rna=0.015,
-    )
+    convention's words, and show the count and fraction ``summary.json`` holds for it. The words the convention
+    retired name nothing the report shows."""
+    d = _write_substrate(tmp_path / "run")
     summary = json.loads((d / "summary.json").read_text())
     q, intergenic = summary["quantification"], summary["fragment_stats"]["intergenic"]
     quant = build_view_model(load_substrate(d))["quant"]
@@ -543,11 +536,7 @@ def test_each_pool_is_named_once_and_shows_the_summarys_own_count_and_fraction(t
         "Annotated transcripts": (q["count_annotated"], q["fraction_annotated"]),
         "Nascent RNA": (q["count_nascent"], q["fraction_nascent"]),
         "gDNA (EM)": (q["count_gdna_em"], q["fraction_gdna_em"]),
-        "Intergenic RNA": (q["count_intergenic_rna"], q["fraction_intergenic_rna"]),
-        "Intergenic gDNA": (
-            intergenic - q["count_intergenic_rna"],
-            q["fraction_intergenic"] - q["fraction_intergenic_rna"],
-        ),
+        "Intergenic gDNA": (intergenic, q["fraction_intergenic"]),
     }
     assert set(expected) == set(_POOLS)
     assert {p["label"]: p["value"] for p in quant["pools"]} == {
@@ -562,25 +551,12 @@ def test_each_pool_is_named_once_and_shows_the_summarys_own_count_and_fraction(t
     assert not re.findall(r"\b(?:[Mm]ature|mRNA|nRNA)\b", shown)
 
 
-def test_the_pools_book_spliced_intergenic_fragments_as_rna(tmp_path):
-    """A spliced intergenic fragment is RNA no annotated transcript holds: the intergenic gDNA pool is the
-    unspliced remainder, and the RNA share counts it."""
-    d = _with(
-        _write_substrate(tmp_path / "run"),
-        "quantification",
-        count_intergenic_rna=10,
-        fraction_intergenic_rna=0.015,
-        count_gdna=80.0,
-        fraction_gdna=0.125,
-    )
+def test_the_rna_share_is_the_annotated_and_nascent_pools(tmp_path):
+    """Every intergenic fragment is gDNA, so the RNA share is the annotated and nascent fractions."""
+    d = _write_substrate(tmp_path / "run")
     quant = build_view_model(load_substrate(d))["quant"]
-    pools = {p["label"]: p["value"] for p in quant["pools"]}
-    assert pools["Intergenic gDNA"] == 60
-    assert pools["Intergenic RNA"] == 10
     q = json.loads((d / "summary.json").read_text())["quantification"]
-    assert quant["rna_share"] == pytest.approx(
-        q["fraction_annotated"] + q["fraction_nascent"] + q["fraction_intergenic_rna"]
-    )
+    assert quant["rna_share"] == pytest.approx(q["fraction_annotated"] + q["fraction_nascent"])
 
 
 @pytest.mark.parametrize(

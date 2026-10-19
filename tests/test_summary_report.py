@@ -309,38 +309,33 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     sc.cleanup()
 
 
-def test_a_spliced_intergenic_fragment_is_rna_not_gdna():
-    """A spliced fragment is certified RNA whether or not an annotated transcript holds it, so the gDNA count and
-    fraction take only the unspliced intergenic fragments, and the four pools' fractions sum to one."""
+def test_every_intergenic_fragment_is_gdna():
+    """An intergenic fragment is unspliced, since a spliced hit the scan keeps has a transcript holding its junctions,
+    so the gDNA count takes every one, and the three pools' fractions sum to one."""
     from types import SimpleNamespace
 
-    stats = SimpleNamespace(n_intergenic=100, n_intergenic_spliced=30)
     q = cli._quantification_pools(
-        stats, count_annotated=600.0, count_nascent=100.0, count_gdna_em=200.0
+        SimpleNamespace(n_intergenic=100),
+        count_annotated=600.0,
+        count_nascent=100.0,
+        count_gdna_em=200.0,
     )
     assert set(q) == {
         "count_annotated",
         "count_nascent",
         "count_gdna",
         "count_gdna_em",
-        "count_intergenic_rna",
         "fraction_annotated",
         "fraction_nascent",
         "fraction_gdna",
         "fraction_gdna_em",
         "fraction_intergenic",
-        "fraction_intergenic_rna",
     }
-    assert (q["count_gdna"], q["count_gdna_em"], q["count_intergenic_rna"]) == (270.0, 200.0, 30)
-    assert q["fraction_gdna"] == round((200 + 70) / 1000, cli.SUMMARY_DECIMALS)
-    assert q["fraction_intergenic_rna"] == round(30 / 1000, cli.SUMMARY_DECIMALS)
-    fractions = (
-        "fraction_annotated",
-        "fraction_nascent",
-        "fraction_gdna",
-        "fraction_intergenic_rna",
+    assert (q["count_gdna"], q["count_gdna_em"]) == (300.0, 200.0)
+    assert q["fraction_gdna"] == round(300 / 1000, cli.SUMMARY_DECIMALS)
+    assert q["fraction_annotated"] + q["fraction_nascent"] + q["fraction_gdna"] == pytest.approx(
+        1.0
     )
-    assert sum(q[k] for k in fractions) == pytest.approx(1.0)
 
 
 def test_the_strand_block_carries_the_junction_diagnostics_and_one_overdispersion(tmp_path):
