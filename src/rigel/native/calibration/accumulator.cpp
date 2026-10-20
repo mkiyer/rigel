@@ -13,6 +13,8 @@
 #include <string>
 #include <utility>
 
+#include "../path_length.h"
+
 namespace rigel::accumulator {
 
 void DepositCounters::merge_from(const DepositCounters& other) noexcept {
@@ -420,88 +422,20 @@ void Accumulator::sj_edge_ids(const std::int64_t* starts,
 // the deposit
 // ============================================================================
 
-namespace {
-
-/// The introns as a sorted, DISJOINT set clipped to [start, end).
-///
-/// ⚠ Overlapping AND ABUTTING introns both merge. Overlapping ones are contradictory observations of one
-/// molecule -- a real BAM produces them when the mates disagree about an acceptor. Abutting ones imply a
-/// zero-length exon, which is physically impossible, so no single molecule can legitimately use both.
-///
-/// ⚠ Sort the RAW pairs and clip inside the loop, in that order, to match the spec exactly.
-void normalise_introns(const IntronBlock* observed,
-                       std::size_t n_observed,
-                       const IntronBlock* implied,
-                       std::size_t n_implied,
-                       std::int64_t start,
-                       std::int64_t end,
-                       std::vector<std::pair<std::int64_t, std::int64_t>>& out)
-{
-    // ⚠ Both ranges are emplaced BEFORE the sort, so the union needs no second scratch vector and the
-    // caller never has to think about which list came first.
-    out.clear();
-    out.reserve(n_observed + n_implied);
-    for (std::size_t i = 0; i < n_observed; ++i) {
-        out.emplace_back(static_cast<std::int64_t>(observed[i].start),
-                         static_cast<std::int64_t>(observed[i].end));
-    }
-    for (std::size_t i = 0; i < n_implied; ++i) {
-        out.emplace_back(static_cast<std::int64_t>(implied[i].start),
-                         static_cast<std::int64_t>(implied[i].end));
-    }
-    std::sort(out.begin(), out.end());
-
-    std::size_t kept = 0;
-    for (std::size_t i = 0; i < out.size(); ++i) {
-        const std::int64_t intron_start = std::max(out[i].first, start);
-        const std::int64_t intron_end   = std::min(out[i].second, end);
-        if (intron_end <= intron_start) continue;  // zero-length, or entirely outside the fragment
-        if (kept > 0 && intron_start <= out[kept - 1].second) {
-            out[kept - 1].second = std::max(out[kept - 1].second, intron_end);
-            continue;
-        }
-        out[kept++] = {intron_start, intron_end};  // kept <= i, so this never clobbers an unread slot
-    }
-    out.resize(kept);
-}
-
-/// The path's contiguous genomic segments: [start, end) with the (normalised) introns cut out.
-void build_segments(std::int64_t start,
-                    std::int64_t end,
-                    const std::vector<std::pair<std::int64_t, std::int64_t>>& introns,
-                    std::vector<std::pair<std::int64_t, std::int64_t>>& out)
-{
-    out.clear();
-    std::int64_t cursor = start;
-    for (const auto& [intron_start, intron_end] : introns) {
-        if (intron_start > cursor) out.emplace_back(cursor, intron_start);
-        cursor = intron_end;
-    }
-    if (end > cursor) out.emplace_back(cursor, end);
-}
-
-}  // namespace
-
 std::int64_t Accumulator::hypothesis_length(const OfferedFragment& fragment,
                                            const GapHypothesis& hypothesis,
                                            std::int64_t start,
                                            std::int64_t end,
                                            DepositScratch& scratch) const
 {
-    // ⚠ ONE definition of L: the total length of the path's segments. Deriving it any other way invites
-    // two formulas for one quantity, and the obvious second formula -- (end - start) - sum(intron) --
-    // disagrees by up to 1.5x on overlapping introns and goes NEGATIVE on a wide overlap.
+    // ⚠ ONE definition of L, `path_length`, which the resolver also scores each candidate by.
     //
     // The observed introns and the implied ones are UNIONED. They are disjoint by construction -- the
     // enumeration never searches a gap the CIGAR already explained -- so this is a union and not a merge,
     // and `normalise_introns` sorts and clips it either way.
-    normalise_introns(fragment.observed_introns, fragment.n_observed_introns,
-                      hypothesis.introns, hypothesis.n_introns,
-                      start, end, scratch.introns);
-    build_segments(start, end, scratch.introns, scratch.segments);
-    std::int64_t length = 0;
-    for (const auto& [a, b] : scratch.segments) length += b - a;
-    return length;
+    return path_length(fragment.observed_introns, fragment.n_observed_introns,
+                       hypothesis.introns, hypothesis.n_introns,
+                       start, end, scratch.introns, scratch.segments);
 }
 
 DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScratch& scratch) {

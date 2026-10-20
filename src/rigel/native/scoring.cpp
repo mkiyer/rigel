@@ -241,13 +241,13 @@ class NativeFragmentScorer {
     }
 
     /// The fragment's coverage weight on transcript ``t_idx`` (``compute_fragment_weight``), read on the interval it
-    /// occupies in the transcript's OWN 5'->3' coordinates, cut to the transcript. Its start is measured as the
-    /// resolver measures the fragment's length (``tx_frag_length``): inside an exon at the exon's offset; in an
-    /// intron, or before the first exon, the overhang's length before the next exon's start; past the last exon
-    /// that far past the end. So it occupies ``[fwd, fwd + flen)`` forward, and on a minus-strand transcript, whose
-    /// 5'->3' runs against the genome, the mirror ``[t_len - fwd - flen, t_len - fwd)``. A fragment and its mirror
-    /// image on the other strand weigh the same. Held to an independent evaluation of the coverage model on both
-    /// strands in ``tests/test_pipeline_routing.py``.
+    /// occupies in the transcript's OWN 5'->3' coordinates, cut to the transcript. Its start is projected onto the
+    /// transcript: inside an exon at the exon's offset; in an intron, or before the first exon, the overhang's length
+    /// before the next exon's start; past the last exon that far past the end. It extends ``flen``, the length of the
+    /// path the transcript implies. So it occupies ``[fwd, fwd + flen)`` forward, and on a minus-strand transcript,
+    /// whose 5'->3' runs against the genome, the mirror ``[t_len - fwd - flen, t_len - fwd)``. A fragment and its
+    /// mirror image on the other strand weigh the same. Held to an independent evaluation of the coverage model on
+    /// both strands in ``tests/test_pipeline_routing.py``.
     inline double coverage_weight(int32_t genomic_start, int32_t flen, int32_t t_idx) const {
         const int32_t begin   = exon_offsets_[t_idx];
         const int32_t n_exons = exon_offsets_[t_idx + 1] - begin;

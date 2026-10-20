@@ -812,9 +812,15 @@ against 0.0052–0.0093 at 10 % depth.
 transcript-space definition are deleted, and every histogram `build_fl_models` reads comes from the
 payload, so a mixed-frame call is unrepresentable. A gap intron is cut on every fragment, not only
 unspliced ones, with the gaps the CIGAR already explained excluded by exact `(start, end)` equality.
-`FragmentLengthModel` singular is the scorer and stays. The EM's per-candidate length is the same definition with
-the candidate's own introns: the span less every intron of the transcript lying strictly inside it
-(`resolve_context.h`'s `tx_frag_length`). An intron holding an end is not cut, so a read's bases in it count.
+`FragmentLengthModel` singular is the scorer and stays. The EM's per-candidate length is the same definition on the
+candidate's own path: the span less the observed junctions and the candidate's introns that lie in an unsequenced gap
+within K of its ends, the introns its gap hypothesis cuts. One function measures both (`path_length.h`'s
+`path_length`), and the gap search writes each candidate's length from the path it builds. An intron the reads cover,
+or that holds an end, is not cut, so a read's bases in it count: one molecule has one length on a candidate whether
+its mates overlap, run into an intron or stop at its edges. A candidate the reads contradict joins no hypothesis but
+keeps a length, its molecule with the covered intron retained, and the EM prices the covered bases as overhang
+(owner, 2026-10-19; it replaced the endpoint rule, which cut every intron of the candidate between the fragment's two
+ends, covered or not).
 
 ### 3.5 The five length pools
 

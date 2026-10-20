@@ -1657,16 +1657,15 @@ class TranscriptIndex:
                     "Rebuild the index."
                 )
 
-        # 3. Per-transcript exon CSR for transcript-space FL computation.
-        #    build_exon_csr() is the single owner of this CSR (it is also
-        #    consumed by scoring), and it frees ``_t_exon_intervals`` unless
+        # 3. Per-transcript exon CSR: each candidate's introns, for its path through the
+        #    gaps and its length. build_exon_csr() is the single owner of this CSR (it is
+        #    also consumed by scoring), and it frees ``_t_exon_intervals`` unless
         #    retain_test_structures.
-        exon_offsets, exon_starts_flat, exon_ends_flat, exon_cumsum_flat = self.build_exon_csr()
+        exon_offsets, exon_starts_flat, exon_ends_flat, _ = self.build_exon_csr()
         ctx.build_exon_index(
             exon_offsets.tolist(),
             exon_starts_flat.tolist(),
             exon_ends_flat.tolist(),
-            exon_cumsum_flat.tolist(),
         )
 
         # 4. The transcript count, which sizes the resolver's scratch buffers.

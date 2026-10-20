@@ -93,7 +93,13 @@ the code is open; each is less critical.
   landed regardless (owner), the losses in `ISSUES: the-annotated-path-rule-costs-the-stranded-strata`. ☑ The
   intergenic RNA pool deleted. ☑ `SPLICED_UNANNOT` deleted (2026-10-19): the resolver reads `junction_holders`
   and refuses a spliced fragment with no holder; the STAR panel and the ladder identical
-11. ☐ One length rule for overlapping mates
+11. ☑ One length rule for overlapping mates (2026-10-20, rule B, `ONE_LENGTH_RULE_DESIGN.md`): a candidate's length is
+  the length of the path it implies, measured by the deposit's own `path_length`; the endpoint rule deleted. Against
+  main on the STAR panel, pinned and fractional: transcript error −0.004 % unstranded OFF, −0.002 % stranded OFF,
+  −0.058 % stranded ON (gene −0.003 / +0.001 / −0.030 %), the gDNA pool within 1 fragment; with every capture
+  efficiency at 1, −0.043 / +0.057 / +0.005 %; calibration identical (every locus prior, the models, all 56 scan
+  counters); the ladder within ±0.52 % per row; the pinned scan +1.3 %. The drop in gDNA counted as RNA the design
+  expected did not appear: the candidates whose length changed already lose to their overhang penalty. Suite 3,092
 
 *The bundle*
 12. ☐ The rest of one location per alignment: NM conflicts and missing NM counted; unindexed references apart; tag

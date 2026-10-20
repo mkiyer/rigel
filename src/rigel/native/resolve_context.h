@@ -35,6 +35,7 @@ extern "C" {
 
 #include "constants.h"
 #include "ndarray_util.h"
+#include "path_length.h"
 
 namespace nb = nanobind;
 
@@ -364,6 +365,8 @@ struct ResolverScratch {
     std::vector<ExonBlock> implicit_blocks;
     std::vector<GapBlock> implicit_gaps;
     std::vector<IntronBlock> hypothesis_path;  // one candidate's path, while enumerating
+    std::vector<std::pair<int64_t, int64_t>> path_introns;   // its normalised introns (`path_length`)
+    std::vector<std::pair<int64_t, int64_t>> path_segments;  // its segments (`path_length`)
 
     // Reusable sorted-vector set-operation buffers for _resolve_core.
     std::vector<std::vector<int32_t>> exon_t_sets;
@@ -483,11 +486,10 @@ public:
     //     mapping each real-tx hit to its nrna_parent_ entry.
     std::vector<int32_t> nrna_parent_;
 
-    // --- Per-transcript exon structure (CSR layout) for FL computation ---
+    // --- Per-transcript exon structure (CSR layout): each candidate's introns, for its path and its length ---
     std::vector<int32_t> exon_offsets_;    // [n_transcripts + 1]
     std::vector<int32_t> exon_starts_;     // [total_exons] — genomic start coords
     std::vector<int32_t> exon_ends_;       // [total_exons] — genomic end coords
-    std::vector<int32_t> exon_cumsum_;     // [total_exons] — cumulative spliced bp before each exon
 
     // --- Intron-overhang tolerance K (bp), the gap-hypothesis enumeration's slack ---
     int32_t intron_overhang_tolerance_ = 0;
@@ -641,17 +643,15 @@ public:
         nrna_parent_ = nrna_parent;
     }
 
-    /// Build per-transcript exon CSR index for FL computation.
+    /// Build the per-transcript exon CSR: each candidate's introns, for its path and its length.
     void build_exon_index(
         const std::vector<int32_t>& offsets,
         const std::vector<int32_t>& starts,
-        const std::vector<int32_t>& ends,
-        const std::vector<int32_t>& cumsum)
+        const std::vector<int32_t>& ends)
     {
         exon_offsets_ = offsets;
         exon_starts_ = starts;
         exon_ends_ = ends;
-        exon_cumsum_ = cumsum;
     }
 
     bool has_exon_index() const {
@@ -943,6 +943,14 @@ public:
     /// ⚠ The path is compared WHOLE, across every gap, never per gap. A per-gap union can take gap A's
     /// intron from T1 and gap B's from T2 and emit a path no single molecule has; grouping by the whole
     /// path makes that unrepresentable rather than merely avoided.
+    ///
+    /// ⭐ AND EACH CANDIDATE'S LENGTH, from the same path: ``cr.frag_lengths[i]``, aligned to ``candidate_t``, is
+    /// `path_length` of the fragment's extent less the observed junctions and candidate i's introns in the gaps,
+    /// the length the accumulator deposits for that path (-1 when the path has no base). An intron the reads
+    /// cover lies in no gap, so it is never cut, and one molecule has one length on a candidate however its mates
+    /// were read. A candidate the reads contradict (`transcript_contradicts_blocks`) joins no hypothesis, but it
+    /// keeps a length: the molecule it would have made with the covered intron retained, which the EM scores
+    /// beside the covered bases' overhang penalty.
     void enumerate_gap_hypotheses(const std::vector<ExonBlock>& exons,
                                   const std::vector<IntronBlock>& observed_introns,
                                   const std::vector<int32_t>& candidate_t,
@@ -953,6 +961,19 @@ public:
         cr.gap_introns.clear();
         cr.gap_sj_strand.clear();
         cr.gap_intron_offsets.assign(1, 0);
+
+        // The extent the deposit measures: leftmost block start to rightmost block end, the mate gap included.
+        int32_t span_start = exons.front().start, span_end = exons.front().end;
+        for (const auto& e : exons) {
+            span_start = std::min(span_start, e.start);
+            span_end = std::max(span_end, e.end);
+        }
+        auto length_of = [&](const std::vector<IntronBlock>& path) -> int32_t {
+            const int64_t L = path_length(observed_introns.data(), observed_introns.size(), path.data(),
+                                          path.size(), span_start, span_end, scratch.path_introns,
+                                          scratch.path_segments);
+            return L > 0 ? static_cast<int32_t>(L) : -1;
+        };
 
         auto& gaps = scratch.implicit_gaps;
         gaps.clear();
@@ -998,25 +1019,30 @@ public:
                        gaps.end());
         }
 
-        // ⭐ No unsequenced gap ⇒ one hypothesis, the unspliced one, and nothing to arbitrate. The
-        // degenerate case is the general case: `deposit` still receives a set, of size one.
+        // ⭐ No unsequenced gap ⇒ one hypothesis, the unspliced one, and nothing to arbitrate; and one length
+        // on every candidate, the extent less the observed junctions. The degenerate case is the general case:
+        // `deposit` still receives a set, of size one.
         const int32_t K = intron_overhang_tolerance_;
+        auto& path = scratch.hypothesis_path;
+        path.clear();
         if (gaps.empty()) {
+            cr.frag_lengths.assign(candidate_t.size(), length_of(path));
             emit_unspliced_hypothesis(cr);
             return;
         }
 
-        auto& path = scratch.hypothesis_path;
         bool any_candidate_implies_nothing = false;
-
-        for (int32_t t : candidate_t) {
-            if (transcript_contradicts_blocks(t, exons, K)) continue;
+        cr.frag_lengths.assign(candidate_t.size(), -1);
+        for (size_t i = 0; i < candidate_t.size(); ++i) {
+            const int32_t t = candidate_t[i];
             path.clear();
             const int32_t strand = (t >= 0 && t < static_cast<int32_t>(t_strand_arr_.size()))
                                        ? t_strand_arr_[t]
                                        : STRAND_NONE;
             for (const GapBlock& gap : gaps)
                 collect_transcript_introns_in_gap(t, gap, K, strand, path);
+            cr.frag_lengths[i] = length_of(path);
+            if (transcript_contradicts_blocks(t, exons, K)) continue;
             if (path.empty()) {
                 any_candidate_implies_nothing = true;
                 continue;
@@ -1107,74 +1133,6 @@ private:
     }
 
 public:
-
-    /// The fragment's length on transcript ``t_idx``: its genomic span ``[gstart, gend)`` less every
-    /// intron of the transcript it JUMPS, one lying strictly inside the span (``gstart < intron start``
-    /// and ``intron end < gend``). An intron holding an endpoint is not jumped: the read's bases in it are
-    /// the molecule's own (overhang) and count, so a start in an intron is measured back from the NEXT
-    /// exon's start and an end forward from the PREVIOUS exon's end. This is the accumulator's L for the
-    /// path the transcript implies — the span with the path's introns cut out.
-    ///
-    /// Strand-agnostic, and at least 1 whenever ``gend > gstart``: a jumped intron has a base of the
-    /// fragment on each side. Held to a base-by-base count in ``tests/test_transcript_space_fl.py``.
-    ///
-    /// ⚠ An intron strictly inside the span is jumped whether or not a read covered it: only the two
-    /// endpoints are read, so a read-through of a whole intron is not modelled.
-    inline int32_t tx_frag_length(int32_t gstart, int32_t gend, int32_t t_idx) const {
-        const int32_t begin   = exon_offsets_[t_idx];
-        const int32_t n_exons = exon_offsets_[t_idx + 1] - begin;
-        const int32_t span    = gend - gstart;
-        if (n_exons < 2) return span;
-
-        const int32_t* starts = exon_starts_.data() + begin;
-        const int32_t* ends   = exon_ends_.data()   + begin;
-        const int32_t* cumsum = exon_cumsum_.data()  + begin;
-
-        // Intron k is [ends[k], starts[k+1]); it is jumped iff ends[k] > gstart and starts[k+1] < gend,
-        // so the jumped introns are one contiguous run k = lo .. hi.
-        const int lo = static_cast<int>(std::upper_bound(ends, ends + n_exons, gstart) - ends);
-        const int hi = static_cast<int>(std::lower_bound(starts, starts + n_exons, gend) - starts) - 2;
-        if (lo > hi) return span;
-        // Their total: the genomic distance from exon lo's start to exon hi+1's start, less the exonic
-        // bases between those two starts.
-        const int32_t jumped = (starts[hi + 1] - starts[lo]) - (cumsum[hi + 1] - cumsum[lo]);
-        return span - jumped;
-    }
-
-    // ----------------------------------------------------------------
-    // Fragment-length computation
-    // ----------------------------------------------------------------
-
-    /// Thread-safe: the fragment's length on each candidate (``tx_frag_length``). Results are aligned
-    /// to t_inds: frag_lengths[i] is the length for t_inds[i], or -1.
-    void compute_frag_lengths(
-        const std::vector<ExonBlock>& exons,
-        const std::vector<int32_t>& t_inds,
-        std::vector<int32_t>& frag_lengths) const
-    {
-        frag_lengths.assign(t_inds.size(), -1);
-        if (exons.empty() || t_inds.empty()) return;
-
-        // Single exon block: FL is trivially block length (same for all candidates)
-        if (exons.size() == 1) {
-            int32_t fl = exons[0].end - exons[0].start;
-            if (fl > 0) std::fill(frag_lengths.begin(), frag_lengths.end(), fl);
-            return;
-        }
-
-        // Find outermost genomic positions across all alignment blocks
-        int32_t gstart = exons[0].start;
-        int32_t gend = exons[0].end;
-        for (const auto& e : exons) {
-            gstart = std::min(gstart, e.start);
-            gend = std::max(gend, e.end);
-        }
-
-        for (size_t i = 0; i < t_inds.size(); i++) {
-            int32_t fl = tx_frag_length(gstart, gend, t_inds[i]);
-            if (fl > 0) frag_lengths[i] = fl;
-        }
-    }
 
     // ----------------------------------------------------------------
     // SJ map lookup helper
@@ -1505,12 +1463,7 @@ public:
         }
         cr.ambig_strand = mixed ? 1 : 0;
 
-        // --- Fragment lengths ---
-        if (cr.chimera_type == CHIMERA_NONE) {
-            compute_frag_lengths(exons, cr.t_inds, cr.frag_lengths);
-        }
-
-        // --- gap-hypothesis enumeration ---
+        // --- gap-hypothesis enumeration, and each candidate's length on its path ---
         //
         // ⭐ EVERY fragment, whatever its splice type: a SPLICED fragment can also carry an intron in its
         // mate gap.
@@ -1519,7 +1472,7 @@ public:
         // for the second pass is decided where the outcome is reported.
         //
         // ⚠ `chimera_type == CHIMERA_NONE` is KEPT: a chimeric fragment's blocks are not one molecule, so
-        // its gaps are not introns. Such a fragment gets the unspliced hypothesis alone.
+        // its gaps are not introns. Such a fragment gets the unspliced hypothesis alone, and no length.
         if (cr.chimera_type == CHIMERA_NONE) {
             enumerate_gap_hypotheses(exons, introns, cr.t_inds,
                                      cr.splice_type == SPLICE_SPLICED_ANNOT, scratch, cr);

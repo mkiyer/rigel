@@ -1007,8 +1007,7 @@ def _trapezoid_weight(lo, hi, length):
 
 
 def _forward_start(genomic_start, exons):
-    """The fragment's start in the transcript's forward coordinates, measured as the resolver measures a
-    fragment's length (``resolve_context.h``'s ``tx_frag_length``): inside an exon it is the exon's offset; in an
+    """The fragment's start in the transcript's forward coordinates: inside an exon it is the exon's offset; in an
     intron or before the first exon it sits the overhang's length before the next exon's start; past the last
     exon it sits that far past the transcript's end."""
     before = 0

@@ -1,25 +1,30 @@
-"""``compute_frag_lengths`` gives a fragment's length on each candidate transcript: its genomic span less
-every intron of the transcript it JUMPS, i.e. lying strictly inside the span.
+"""A fragment's length on each candidate transcript is the length of the path the candidate implies: its
+genomic span less the junctions the reads observed and less the candidate's own introns lying in an
+unsequenced gap, within K of the gap's ends. An intron the reads cover is the molecule's own sequence and is
+never cut. It is the length calibration deposits for the same path (``Accumulator.length_under``).
 
-Spliced and unspliced fragments; overhang past either end of the transcript and into an internal
-intron, where an endpoint in an intron is a different case from a fragment merely spanning one: the
-intron holding an endpoint is not jumped, and the read's bases in it count; both ends overhanging at
-once; a large unsequenced mate gap spanning one, two or three introns, so the correction has to remove
-every intron in the gap rather than the first; nascent single-exon candidates, whose length is the
+Spliced and unspliced fragments; overhang past either end of the transcript and into an intron; both ends
+overhanging at once; a large unsequenced mate gap spanning one, two or three introns, so the cut has to
+remove every intron in the gap rather than the first; nascent single-exon candidates, whose length is the
 genomic span; negative-strand transcripts, where the length is strand-agnostic; and several candidates of
 different exon structure, which imply DIFFERENT lengths for the same fragment. That last point is why the
-length is per candidate and not per fragment. ``TestLengthRuleByEnumeration`` holds every candidate of
-every fragment with its ends at or beside an exon boundary to a base-by-base count.
+length is per candidate and not per fragment. ``TestOneLengthRule`` reads one molecule three ways and gets
+one length. ``TestLengthRuleByEnumeration`` holds every candidate of thousands of fragments, whose mates
+stop short of introns, overrun them and run through them, to a base-by-base count and to the accumulator's
+own length.
 """
 
+import contextlib
 import textwrap
 
 import numpy as np
 import pytest
 
+from rigel.native import Accumulator as NativeAccumulator
 from rigel.types import Strand, GenomicInterval
 from _resolution_reference import make_fragment, resolve_fragment
 from _index_builder import build_test_index
+from native._accumulator_reference import GapHypothesis
 
 
 def _t_map(index):
@@ -89,6 +94,24 @@ NEG_STRAND_GTF = textwrap.dedent("""\
     chr1\ttest\texon\t5000\t6000\t.\t-\t.\tgene_id "g1"; transcript_id "t_neg"; gene_name "G1"; gene_type "lncRNA";
 """)
 
+# Introns shorter than a mate, so mates run into them and through them
+# 0-based half-open after parse:
+#   g1: t_a exons (100,200), (260,400), (430,600) — introns (200,260), (400,430)
+#       t_b exons (100,200), (400,600)             — intron (200,400) holds t_a's middle exon
+#       t_c exons (150,230), (260,400)             — its first exon runs into t_a's first intron
+#   g2: T2  exons (1000,1200), (1260,1500)         — intron (1200,1260)
+SHORT_INTRON_GTF = textwrap.dedent("""\
+    chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t_a"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t261\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t_a"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t431\t600\t.\t+\t.\tgene_id "g1"; transcript_id "t_a"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t_b"; gene_name "G1"; gene_type "protein_coding";
+    chr1\ttest\texon\t401\t600\t.\t+\t.\tgene_id "g1"; transcript_id "t_b"; gene_name "G1"; gene_type "protein_coding";
+    chr1\ttest\texon\t151\t230\t.\t+\t.\tgene_id "g1"; transcript_id "t_c"; gene_name "G1"; gene_type "protein_coding";
+    chr1\ttest\texon\t261\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t_c"; gene_name "G1"; gene_type "protein_coding";
+    chr1\ttest\texon\t1001\t1200\t.\t+\t.\tgene_id "g2"; transcript_id "T2"; gene_name "G2"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t1261\t1500\t.\t+\t.\tgene_id "g2"; transcript_id "T2"; gene_name "G2"; gene_type "protein_coding"; tag "basic";
+""")
+
 
 # =====================================================================
 # Fixtures
@@ -120,6 +143,27 @@ def neg_strand_index(tmp_path_factory):
     return build_test_index(tmp_path_factory, NEG_STRAND_GTF, genome_size=20000, name="fl_neg")
 
 
+@pytest.fixture(scope="session")
+def short_intron_index(tmp_path_factory):
+    return build_test_index(
+        tmp_path_factory, SHORT_INTRON_GTF, genome_size=2000, name="fl_short_intron"
+    )
+
+
+@contextlib.contextmanager
+def _tuned(index, K, max_frag=0):
+    """The index's resolver with intron-overhang tolerance ``K`` and maximum fragment length ``max_frag``,
+    restored to the session fixtures' defaults (both 0) on exit."""
+    resolver = index.resolver
+    resolver.set_intron_overhang_tolerance(K)
+    resolver.set_max_fragment_length(max_frag)
+    try:
+        yield
+    finally:
+        resolver.set_intron_overhang_tolerance(0)
+        resolver.set_max_fragment_length(0)
+
+
 # =====================================================================
 # Helper to extract FL for a specific transcript from resolve result
 # =====================================================================
@@ -131,6 +175,46 @@ def _get_fl(result, index, t_id):
     t_idx = tm[t_id]
     fl_dict = result.frag_lengths
     return fl_dict.get(t_idx)
+
+
+def _nascent(index, start, end):
+    """The t_index of the nascent span over ``[start, end)``: the synthetic single-exon transcript."""
+    t = index.t_df
+    hit = t[t["is_synthetic"] & (t["start"] == start) & (t["end"] == end)]
+    assert len(hit) == 1, hit
+    return int(hit["t_index"].iloc[0])
+
+
+# =====================================================================
+# One molecule, one length
+# =====================================================================
+
+
+class TestOneLengthRule:
+    """One 170-bp molecule, 1150 to 1320 across T2's 60-bp intron (1200, 1260), read three ways.
+
+    An intron the reads cover is the molecule's own sequence: whether the mates overlap (one block) or each
+    runs into the intron (25 and 15 bases, more than K = 3), T2's length is the span, 170. Only an intron in
+    the unsequenced gap is cut, and only by the candidate that has it: T2 110, the nascent span 170. The
+    endpoint rule cut every intron of the candidate between the fragment's ends, and read the mates that run
+    into the intron as 110 on T2.
+    """
+
+    @pytest.mark.parametrize(
+        "blocks, on_t2, on_nascent",
+        [
+            pytest.param(((1150, 1320),), 170, 170, id="mates-overlap"),
+            pytest.param(((1150, 1225), (1245, 1320)), 170, 170, id="mates-run-into-the-intron"),
+            pytest.param(((1150, 1200), (1260, 1320)), 110, 170, id="the-intron-in-the-gap"),
+        ],
+    )
+    def test_one_molecule_has_one_length(self, short_intron_index, blocks, on_t2, on_nascent):
+        frag = make_fragment(exons=tuple(_exon("chr1", s, e) for s, e in blocks))
+        with _tuned(short_intron_index, K=3, max_frag=1000):
+            result = resolve_fragment(frag, short_intron_index)
+        assert result is not None
+        assert _get_fl(result, short_intron_index, "T2") == on_t2
+        assert result.frag_lengths.get(_nascent(short_intron_index, 1000, 1500)) == on_nascent
 
 
 # =====================================================================
@@ -270,7 +354,7 @@ class TestTranscriptBoundaryOverhang:
 
 
 class TestIntronicOverhang:
-    """Endpoint intronic overhang must be counted; internal is safe to ignore."""
+    """An end overhanging into an intron counts; an intron the mates run into is cut only within K."""
 
     def test_endpoint_overhang_into_intron(self, basic_index):
         """Fragment gend extends past exon1 into the intron.
@@ -294,19 +378,12 @@ class TestIntronicOverhang:
         fl = _get_fl(result, basic_index, "t_basic")
         assert fl == 405
 
-    def test_internal_intronic_overhang_not_inflating(self, basic_index):
-        """Internal block overhangs into intron (not at gstart/gend) don't inflate FL.
+    def test_an_intron_the_mates_run_into_is_kept(self, basic_index):
+        """The mates run 5 and 4 bases into t_basic's intron (2000, 4999), more than K = 3.
 
-        t_basic exons: (999, 2000), (4999, 6000), intron (2000, 4999)
-        Fragment: blocks (1855, 2005), (4995, 5149)
-        The first block extends 5bp into the intron (at 2005) — but this is
-        NOT gend (gend=5149). The second block starts 4bp before exon2
-        (at 4995) — but this is NOT gstart (gstart=1855).
-        gstart = 1855, gend = 5149
-        tx_pos(1855) = 856 (inside exon1)
-        tx_pos(5149) = 1001 + 150 = 1151 (inside exon2)
-        FL = 1151 - 856 = 295
-        Internal block overhangs at 2005 and 4995 are irrelevant.
+        The reads show those bases, so on t_basic the intron is the molecule's own sequence and is not cut: the
+        length is the span, 5149 - 1855 = 3294, and the EM prices the covered bases as overhang. The endpoint
+        rule cut the intron and gave 295, a plausible length for a molecule t_basic cannot have made.
         """
         frag = make_fragment(
             exons=(
@@ -315,10 +392,26 @@ class TestIntronicOverhang:
             ),
             introns=(),
         )
-        result = resolve_fragment(frag, basic_index)
+        with _tuned(basic_index, K=3):
+            result = resolve_fragment(frag, basic_index)
         assert result is not None
-        fl = _get_fl(result, basic_index, "t_basic")
-        assert fl == 295
+        assert _get_fl(result, basic_index, "t_basic") == 3294
+
+    def test_an_overrun_within_K_is_cut(self, basic_index):
+        """The mates run 3 and 2 bases into t_basic's intron, within K = 3: the aligner ran past the donor and
+        the acceptor, so the intron lies in the gap and is cut whole, the overrun bases with it.
+        (5151 - 1853) - 2999 = 299."""
+        frag = make_fragment(
+            exons=(
+                _exon("chr1", 1853, 2003),
+                _exon("chr1", 4997, 5151),
+            ),
+            introns=(),
+        )
+        with _tuned(basic_index, K=3):
+            result = resolve_fragment(frag, basic_index)
+        assert result is not None
+        assert _get_fl(result, basic_index, "t_basic") == 299
 
     def test_gstart_in_intron(self, basic_index):
         """Fragment gstart is in the intron between exons.
@@ -793,90 +886,213 @@ class TestEdgeCases:
 # The rule, against a base-by-base count
 # =====================================================================
 
-# A mate's aligned length: far shorter than every intron of these indexes, so no read covers a whole
-# intron. A read-through is a case the endpoint rule does not model (it jumps any intron strictly inside
-# the span), and the base count below would disagree with it there by design.
-_MATE = 20
+#: The indexes the enumeration draws fragments on: short introns that mates run through, and long ones that a
+#: mate gap spans.
+_ENUMERATED = ("short_intron_index", "three_exon_index", "isoform_index")
+#: Fragments drawn per index.
+_N_FRAGMENTS = 2000
+#: The longest mate drawn: longer than every intron of ``short_intron_index``, so mates run through introns.
+_MAX_MATE = 250
+#: How far from an exon boundary a mate's end is drawn: past K = 3, so an overrun lies within K or beyond it.
+_REACH = 5
+#: The bases a spliced mate aligns on each side of its junction.
+_ANCHORS = (1, 2, 3, 4, 5, 20, 75)
+#: The resolver's maximum fragment length while enumerating, so that a fragment joining the two genes of
+#: ``short_intron_index`` is an ordinary molecule rather than a chimera.
+_MAX_FRAG = 1000
 
 
-def _molecule_length(gstart, gend, exons):
-    """The fragment's length if it came from a transcript with these ``[start, end)`` exons, counted base
-    by base.
-
-    Every exonic base of ``[gstart, gend)`` counts, and so does every non-exonic base before the first
-    exonic one or after the last: the read's own bases hanging off the transcript (overhang). A
-    non-exonic base BETWEEN two exonic ones lies in an intron the fragment jumped and does not count. A
-    fragment touching no exonic base is its genomic span.
-    """
-    pos = np.arange(gstart, gend)
-    exonic = np.zeros(pos.size, dtype=bool)
-    for s, e in exons:
-        exonic |= (pos >= s) & (pos < e)
-    hit = np.flatnonzero(exonic)
-    if hit.size == 0:
-        return gend - gstart
-    return int(hit[0] + hit.size + (pos.size - 1 - hit[-1]))
+def _all_exons(index):
+    """Every transcript's sorted ``[start, end)`` exons, by t_index, nascent spans included."""
+    return {int(t): np.asarray(index.get_exon_intervals(int(t))) for t in index.t_df["t_index"]}
 
 
-def _endpoints(exons):
-    """Every position within 3 bp of an exon boundary, plus each exon's midpoint."""
+def _introns(exons):
+    """A transcript's introns as ``(start, end)`` pairs, from its sorted ``[start, end)`` exons."""
+    return [(int(a), int(b)) for a, b in zip(exons[:-1, 1], exons[1:, 0])]
+
+
+def _points(index):
+    """Every position within ``_REACH`` of an exon boundary of any transcript, nascent spans included, and
+    each exon's midpoint."""
     points = set()
-    for s, e in exons:
-        for b in (int(s), int(e)):
-            points.update(range(b - 3, b + 4))
-        points.add((int(s) + int(e)) // 2)
-    return sorted(points)
+    for t in index.t_df["t_index"]:
+        for s, e in index.get_exon_intervals(int(t)):
+            for b in (int(s), int(e)):
+                points.update(range(b - _REACH, b + _REACH + 1))
+            points.add((int(s) + int(e)) // 2)
+    return np.asarray(sorted(points))
+
+
+def _mate(rng, points):
+    """One mate's aligned interval: two drawn positions at most ``_MAX_MATE`` apart."""
+    while True:
+        start = int(rng.choice(points))
+        ends = points[(points > start) & (points <= start + _MAX_MATE)]
+        if ends.size:
+            return start, int(rng.choice(ends))
+
+
+def _merge(intervals):
+    """Sorted ``(start, end)`` blocks, overlapping and abutting ones merged, as the scanner assembles mates."""
+    blocks = []
+    for s, e in sorted(intervals):
+        if blocks and s <= blocks[-1][1]:
+            blocks[-1] = (blocks[-1][0], max(blocks[-1][1], e))
+        else:
+            blocks.append((s, e))
+    return blocks
+
+
+def _fragments(index, seed):
+    """``_N_FRAGMENTS`` fragments on ``index`` as ``(blocks, observed junctions)``: two mates whose ends are
+    drawn from `_points`, so they stop short of introns, overrun them by every distance up to and past K, and
+    run through them whole. One in three has its first mate spliced across an annotated junction, each anchor
+    drawn from ``_ANCHORS``, and its second mate clear of that junction."""
+    rng = np.random.default_rng(seed)
+    points = _points(index)
+    junctions = sorted({j for exons in _all_exons(index).values() for j in _introns(exons)})
+    for _ in range(_N_FRAGMENTS):
+        if rng.random() < 1 / 3:
+            a, b = junctions[int(rng.integers(len(junctions)))]
+            left, right = (int(x) for x in rng.choice(_ANCHORS, 2))
+            mate = _mate(rng, points)
+            while mate[1] > a and mate[0] < b:
+                mate = _mate(rng, points)
+            yield _merge([(a - left, a), (b, b + right), mate]), ((a, b),)
+        else:
+            yield _merge([_mate(rng, points), _mate(rng, points)]), ()
+
+
+def _resolve_blocks(index, blocks, observed):
+    """The fragment with these blocks and observed junctions, resolved; ``None`` when it has no lengths (no
+    result, or a chimera)."""
+    frag = make_fragment(
+        exons=tuple(_exon("chr1", s, e) for s, e in blocks),
+        introns=tuple(GenomicInterval("chr1", a, b, Strand.POS) for a, b in observed),
+    )
+    result = resolve_fragment(frag, index)
+    return None if result is None or result.chimera_type else result
+
+
+def _gaps(blocks, observed):
+    """The unsequenced gaps: the holes between consecutive blocks that are not an observed junction."""
+    return [(x[1], y[0]) for x, y in zip(blocks, blocks[1:]) if (x[1], y[0]) not in observed]
+
+
+def _implied(exons, gaps, K):
+    """The candidate's introns that overlap an unsequenced gap and lie within ``K`` of its ends: what its path
+    cuts beyond the observed junctions."""
+    return [
+        (a, b)
+        for a, b in _introns(exons)
+        if b > a and any(a < g1 and b > g0 and a >= g0 - K and b <= g1 + K for g0, g1 in gaps)
+    ]
+
+
+def _path_length(blocks, observed, implied):
+    """The bases of the fragment's span, first block's start to last block's end, outside the observed
+    junctions and the implied introns, counted one by one."""
+    pos = np.arange(blocks[0][0], blocks[-1][1])
+    kept = np.ones(pos.size, dtype=bool)
+    for a, b in (*observed, *implied):
+        kept &= (pos < a) | (pos >= b)
+    return int(kept.sum())
+
+
+def _overlap(x, y):
+    """The bases two ``(start, end)`` intervals share; zero or less when they share none."""
+    return min(x[1], y[1]) - max(x[0], y[0])
 
 
 class TestLengthRuleByEnumeration:
-    """Every candidate's length, for every two-mate fragment with its ends at or beside an exon boundary,
-    equals the base-by-base count of ``_molecule_length``.
+    """Every candidate's length, for thousands of drawn fragments on three indexes, is the base-by-base count
+    of the path it implies (`_path_length`), and is the accumulator's length for that path.
 
-    The enumeration puts each end in every intron — on its first base, its last base, and beside them —
-    and past both ends of the transcript. A START in an intron is where the endpoint projection went
-    wrong: measured forward from the PREVIOUS exon's end, it landed one intron length downstream, the
-    length read |true - intron|, and a length of exactly 0 was stored as missing, which the scorer reads
-    as the best possible fit. An END whose last base is an intron's last base read as ending at the next
-    exon's start, dropping the whole intron.
+    The mates' ends sit at and beside exon boundaries, so the mates stop short of introns, overrun them within
+    K and past it, and run through them whole; a third of the fragments carry an observed junction. The
+    endpoint rule this replaced cut every intron of the candidate between the fragment's two ends, so it
+    shortened a candidate whose intron the reads cover: it fails here wherever a mate runs into or through an
+    intron by more than K.
     """
 
-    @pytest.mark.parametrize("fixture", ["three_exon_index", "isoform_index"])
-    def test_every_candidate_length_is_the_base_count(self, fixture, request):
-        index = request.getfixturevalue(fixture)
-        exons = {
-            int(t): np.asarray(index.get_exon_intervals(int(t))) for t in index.t_df["t_index"]
-        }
-        points = _endpoints(np.concatenate(list(exons.values())))
-        n_checked = n_start_in_intron = n_end_on_intron_last_base = 0
+    @pytest.mark.parametrize("K", [0, 3])
+    def test_every_candidate_length_is_its_path_length(self, K, request):
+        n_checked = n_spliced = n_covered = n_within_k = 0
         wrong = []
-        for gstart in points:
-            for gend in points:
-                if gend - gstart < 2 * _MATE + 1:
-                    continue
-                frag = make_fragment(
-                    exons=(
-                        _exon("chr1", gstart, gstart + _MATE),
-                        _exon("chr1", gend - _MATE, gend),
-                    ),
-                    introns=(),
-                )
-                result = resolve_fragment(frag, index)
-                if result is None:
-                    continue
-                lengths = result.frag_lengths
-                for t in result.t_inds:
-                    ex = exons[int(t)]
-                    introns = list(zip(ex[:-1, 1], ex[1:, 0]))
-                    n_checked += 1
-                    n_start_in_intron += any(a <= gstart < b for a, b in introns)
-                    n_end_on_intron_last_base += any(gend == b for _, b in introns)
-                    want = _molecule_length(gstart, gend, ex)
-                    got = lengths.get(int(t))  # a missing length (-1) is absent from the dict
-                    if got != want:
-                        wrong.append((gstart, gend, int(t), got, want))
-        # ⚠ The enumeration must reach both cases it exists for, or a pass means nothing.
-        assert n_start_in_intron > 50, n_start_in_intron
-        assert n_end_on_intron_last_base > 5, n_end_on_intron_last_base
+        for name in _ENUMERATED:
+            index = request.getfixturevalue(name)
+            exons = _all_exons(index)
+            with _tuned(index, K, _MAX_FRAG):
+                for blocks, observed in _fragments(index, seed=0):
+                    result = _resolve_blocks(index, blocks, observed)
+                    if result is None:
+                        continue
+                    gaps = _gaps(blocks, observed)
+                    for t in result.t_inds:
+                        ex = exons[int(t)]
+                        implied = _implied(ex, gaps, K)
+                        want = _path_length(blocks, observed, implied)
+                        got = result.frag_lengths.get(
+                            int(t), 0
+                        )  # a missing length is absent from the dict
+                        n_checked += 1
+                        n_spliced += bool(observed)
+                        n_covered += any(
+                            _overlap(i, x) > K
+                            for i in _introns(ex)
+                            if i not in observed
+                            for x in blocks
+                        )
+                        n_within_k += any(_overlap(i, x) > 0 for i in implied for x in blocks)
+                        if got != want:
+                            wrong.append((name, blocks, observed, int(t), got, want))
+        # ⚠ The enumeration must reach each case it exists for, or a pass means nothing: observed junctions,
+        # introns the reads cover by more than K, and (K > 0) introns cut although a mate runs into them.
+        assert n_spliced > 100, n_spliced
+        assert n_covered > 100, n_covered
+        assert n_within_k > 100 or K == 0, n_within_k
         assert not wrong, (
-            f"{len(wrong)} of {n_checked} lengths wrong (gstart, gend, t, got, want): {wrong[:6]}"
+            f"{len(wrong)} of {n_checked} lengths wrong (index, blocks, observed, t, got, want): {wrong[:4]}"
+        )
+
+    def test_every_candidate_length_is_the_deposits_length(self, request):
+        """The resolver's length on a candidate is ``Accumulator.length_under`` for the path the candidate
+        implies: one formula for L in C++, which the EM and calibration share. The obvious second formula, the
+        span less the summed introns, disagrees wherever a cut intron runs past the fragment's end."""
+        K = 3
+        n_checked = n_clipped = 0
+        wrong = []
+        for name in _ENUMERATED:
+            index = request.getfixturevalue(name)
+            exons = _all_exons(index)
+            accumulator = NativeAccumulator(
+                region_bounds=np.asarray([0, 1 << 30], dtype=np.int64),
+                region_types=np.zeros(1, dtype=np.uint8),
+                max_length=_MAX_FRAG,
+                ref=0,
+            )
+            with _tuned(index, K, _MAX_FRAG):
+                for blocks, observed in _fragments(index, seed=1):
+                    result = _resolve_blocks(index, blocks, observed)
+                    if result is None:
+                        continue
+                    start, end = blocks[0][0], blocks[-1][1]
+                    gaps = _gaps(blocks, observed)
+                    for t in result.t_inds:
+                        implied = _implied(exons[int(t)], gaps, K)
+                        want = accumulator.length_under(
+                            start=start,
+                            end=end,
+                            observed_introns=observed,
+                            hypotheses=(GapHypothesis(tuple(implied)),),
+                        )
+                        got = result.frag_lengths.get(int(t), 0)
+                        n_checked += 1
+                        n_clipped += any(a < start or b > end for a, b in implied)
+                        if got != want:
+                            wrong.append((name, blocks, observed, int(t), got, want))
+        assert n_clipped > 10, n_clipped  # ⚠ the cases a second formula gets wrong are reached
+        assert not wrong, (
+            f"{len(wrong)} of {n_checked} lengths wrong (index, blocks, observed, t, got, want): {wrong[:4]}"
         )

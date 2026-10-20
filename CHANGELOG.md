@@ -158,6 +158,13 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   with several alignments), withholds 1.2–1.3 k fewer read pairs per 10 M, and costs nothing measurable on a real
   library. `fragment_stats.hits_rejected` now counts the pairings tried and dropped, and `nh_above_reported` compares
   `NH` with the records reported for each mate.
+- A fragment's length on a candidate transcript, which the EM scores, is the length calibration measures for the path
+  that transcript implies: the fragment's span less its observed junctions and less the transcript's introns that lie
+  in the unsequenced gap between the mates. 0.7.1 cut every intron of the candidate between the fragment's two ends,
+  including one the reads had sequenced through, so one molecule had different lengths on a transcript depending on
+  whether its mates overlapped, and a read pair running through an intron gave the transcript it contradicts a
+  shortened length. On simulated STAR alignments the transcript table moves by less than 0.06 % in every stratum, and
+  the scan takes 1.3 % longer.
 - The locus EM gives one answer at any thread count. 0.7.1 split the E-step of its largest loci across the threads
   and added their sums in an order that followed the thread count, so one input gave different tables on machines with
   different core counts (by default `--threads` is the core count); isoforms that share fragments could swap whole

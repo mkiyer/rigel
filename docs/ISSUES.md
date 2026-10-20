@@ -2581,9 +2581,10 @@ pairs, taken beside another workload, put the locus-EM stage at +12 % on average
 ~23 s) and the whole run unchanged within ±7 %.
 
 ### a-start-in-an-intron-was-measured-from-the-wrong-exon
-FIXED 2026-09-25 in the resolver (`resolve_context.h`'s `tx_frag_length`, the one length definition of `DESIGN.md`
-§3.4; gate `tests/test_transcript_space_fl.py`'s `TestLengthRuleByEnumeration`, a base-by-base count over every
-two-mate fragment with its ends at or beside an exon boundary). The EM's per-candidate fragment length projected both
+FIXED 2026-09-25 in the resolver (`resolve_context.h`'s `tx_frag_length`, then the one length definition of
+`DESIGN.md` §3.4, since replaced by the path rule there; gate `tests/test_transcript_space_fl.py`'s
+`TestLengthRuleByEnumeration`, then a base-by-base count over every two-mate fragment with its ends at or beside an
+exon boundary). The EM's per-candidate fragment length projected both
 ends into transcript space and measured an end lying in an intron forward from the PREVIOUS exon's end — right for the
 fragment's end, wrong for its start, which landed one intron length downstream: the length read |true − intron| (a
 200-bp fragment starting 1 bp before a 2.8-kb intron's end read 2,610), and a length of exactly 0 was stored as

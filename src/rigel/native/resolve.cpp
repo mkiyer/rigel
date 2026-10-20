@@ -111,8 +111,7 @@ NB_MODULE(_resolve_impl, m) {
              "during _resolve_core; synthetics are not in cgranges.")
         .def("build_exon_index", &FragmentResolver::build_exon_index,
              nb::arg("offsets"), nb::arg("starts"), nb::arg("ends"),
-             nb::arg("cumsum"),
-             "Build per-transcript exon CSR index for FL computation.")
+             "Build the per-transcript exon CSR: each candidate's introns, for its path and its length.")
         .def("set_max_fragment_length",
              &FragmentResolver::set_max_fragment_length,
              nb::arg("max_fragment_length"),
