@@ -122,8 +122,18 @@ the code is open; each is less critical.
   g00. Real libraries, withheld `chimeric` / change in quantified pairs: cfRNA-A 8.52 / −2.96 %, cfRNA-B 0.91 / −0.39 %,
   cfRNA-C 6.49 / −2.95 %, `vcap_mix` 0.36 / −0.23 %; their chimeric fragments 1,795 / 5,099 / 15,711 / 22,287 → 1 / 1 / 1
   / 48. The pinned scan of g50 κ0.50 capture-OFF 33.6 → 33.1 s (A B A B). Suite 3,108
-  - Next, each its own commit: ☐ the overrun rule (owner, 2026-10-20: mates whose 5′ ends face each other are one
-    molecule spanning both); ☐ `n_deposit_not_offered` and the deposit adapter's multi-reference refusal deleted, now
+  - ☑ The overrun rule (2026-10-20, owner): mates whose 5′ ends face each other, clips walked (a < b), are one molecule
+    spanning both, [min(a, R's first base), max(b, F's last)); the containment test deleted. Against main on the STAR
+    panel, pinned and fractional: transcript error −0.74 % unstranded OFF, −0.52 % stranded OFF, −0.77 % stranded ON
+    (gene −1.67 / −1.64 / −1.42 %); with every capture efficiency at 1, −0.03 / +0.09 / +0.15 % (gene −0.81 / −0.28 /
+    +0.17 %). The panel's overruns are misplacements, 85–90 bp past each other (the simulator truncates a read to its
+    fragment, so no correct pair overruns): 0.7–1.4 k more templates quantified per 10 M and 0.5–0.7 k more
+    multimappers; of the 71–221 k hits no longer outward, all but about 20 k fail the annotated-path rule instead. Real
+    libraries, quantified: cfRNA-A +1.96 %, cfRNA-B +0.09 %, cfRNA-C +0.82 %, `vcap_mix` +0.005 % of templates, their
+    overruns 2–16 bp, mostly even. Facing judged on the aligned 5′ ends instead would differ by 2 pairs (cfRNA-C). The
+    oracle ladder holds no overrun or outward pair in 160 M; rename_identity bit-identical on oracle g00. The pinned
+    scan 33.3 → 33.2 s (A B A B). Suite 3,112
+  - Next, each its own commit: ☐ `n_deposit_not_offered` and the deposit adapter's multi-reference refusal deleted, now
     unreachable (126 / 1,468 / 3,662 → 0 on cfRNA-A / B / C); ☐ the resolver's chimera classification deleted (closes
     `ISSUES: chimera-span-over-exon-blocks-only`). The tail rule deferred (`ISSUES: the-tail-rule-waits-for-truth`)
 14. ☐ Each use of K outside implicit splicing, one at a time

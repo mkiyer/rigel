@@ -66,12 +66,14 @@ rigel -v quant ...       # -v / --verbose: DEBUG-level logging for any subcomman
 
 - **Paired-end** — the scan stops at the first unpaired record. Rigel pairs a read pair's alignments itself, for any
   aligner: each alignment of R1 is tried with each alignment of R2, and STAR's `HI` tag is not read. A pairing is used
-  only if the two mates can be one molecule: on one reference, on opposite strands, facing inward once each 5' soft clip
-  is walked back, with a fragment length from 1 to `max_frag_length` along the genome, or along one annotated
-  transcript that overlaps both mates and holds every junction the pair observes; and, if it is spliced, only if one
-  annotated transcript overlapping both mates holds every junction it observes. Rigel does not assemble transcripts: an alignment with a junction no transcript has, or
-  with junctions no one transcript joins, is neither RNA it can place nor gDNA. An alignment that fails is dropped; a
-  read pair left with none is withheld, counted in `summary.json` and written to the annotated BAM as unresolved
+  only if the two mates can be one molecule: on one reference, on opposite strands, their 5' ends facing each other once
+  each 5' soft clip is walked back (a mate may run past the other's 5' end, as when a read was trimmed at its 5' end:
+  the molecule spans both mates), with a fragment length from 1 to `max_frag_length` along the genome, or along one
+  annotated transcript that overlaps both mates and holds every junction the pair observes; and, if it is spliced, only
+  if one annotated transcript overlapping both mates holds every junction it observes. Rigel does not assemble
+  transcripts: an alignment with a junction no transcript has, or with junctions no one transcript joins, is neither RNA
+  it can place nor gDNA. An alignment that fails is dropped; a read pair left with none is withheld, counted in
+  `summary.json` and written to the annotated BAM as unresolved
 - **Name-sorted or collated** — a BAM whose header says `SO:coordinate` is refused, since its mates are not
   adjacent
 - **Aligned to the index's genome** — references are matched by name: a BAM none of whose references is in the

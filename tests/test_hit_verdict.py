@@ -2,8 +2,9 @@
 one annotated transcript explains it: overlaps both mates and holds every junction it observes.
 
 Every accepted alignment needs a fragment length, which the EM scores by. A hit's two mates must lie on one reference,
-on opposite strands, facing inward once each 5' soft clip is walked back, with both mates' aligned bases inside the
-molecule; its length, the molecule's bases with every observed skip removed, must lie in 1..max_frag_length along the
+on opposite strands, their 5' ends facing each other once each 5' soft clip is walked back. The molecule spans both
+mates, so a mate may run past the other's 5' end, as a read trimmed at its 5' end starts inside its molecule (owner,
+2026-10-20). Its length, the molecule's bases with every observed skip removed, must lie in 1..max_frag_length along the
 genome, or along one annotated transcript that overlaps both mates and holds every junction the hit observes, that
 transcript's other introns in the unaligned stretches cut by the resolver's K rule. A transcript that misses a mate
 never shortens the path between them (owner, 2026-10-19: overlap, not containment). A hit with one mate gives no
@@ -139,6 +140,16 @@ def _scan_full(base, index, records, **scan):
     return stats, payload
 
 
+def _scan_buffered(base, index, records, column):
+    """The scan's stats, and one column of every fragment it buffered."""
+    stats, _strand, buffer, _payload = scan_and_buffer(
+        _bam(base, records), index, BamScanConfig(total_threads=1)
+    )
+    return stats, [
+        int(x) for chunk in buffer.iter_chunks_consuming() for x in getattr(chunk, column)
+    ]
+
+
 REASONS = (
     "missing_mate",
     "reference",
@@ -196,6 +207,49 @@ def test_a_5_prime_soft_clip_is_walked_back(index, tmp_path):
     """F `10S90M` at 1020 and R at [1012,1112): on their aligned bases R starts before F's, but F's 5' end, its clip
     walked back, is at 1010, so the mates face inward over [1010,1112) and L is 102."""
     stats = _scan(tmp_path, index, _pair("clipped", 1020, "10S90M", 1012, "100M"))
+    assert stats.n_fragments == 1 and sum(_rejected(stats).values()) == 0
+
+
+OVERRUN = (
+    "overrun",
+    1014,
+    "42M",
+    1010,
+    "42M",
+)  # 5' ends 1014 and 1052; each mate runs 4 past the other's
+
+
+def test_mates_that_run_past_each_others_5_prime_ends_are_one_molecule(index, tmp_path):
+    """F `42M` at [1014,1056) and R `42M` at [1010,1052): their 5' ends face each other, and each mate's aligned bases
+    run 4 past the other's 5' end, as when both reads were trimmed at their 5' ends. One molecule spans both mates,
+    [1010,1056): its footprint is 46."""
+    stats, footprint = _scan_buffered(tmp_path, index, _pair(*OVERRUN), "genomic_footprint")
+    assert stats.n_fragments == 1 and sum(_rejected(stats).values()) == 0, (
+        "mates running past each other's 5' ends were read as facing away"
+    )
+    assert footprint == [46]
+
+
+def test_mates_whose_5_prime_ends_meet_face_away(index, tmp_path):
+    """F at [1052,1094) and R at [1010,1052): the forward mate starts where the reverse one ends, so their 5' ends do
+    not face each other, and the mates are no molecule however they abut."""
+    stats = _scan(tmp_path, index, _pair("abut", 1052, "42M", 1010, "42M"))
+    assert stats.n_fragments == 0 and _rejected(stats)["outward"] == 1
+
+
+def test_a_molecule_past_both_5_prime_ends_is_measured_whole(index, tmp_path):
+    """The pair above spans 46 bases, though its 5' ends lie 38 apart: at max_frag_length 45 it is too long, and at 46
+    it is a molecule."""
+    too_long = _scan(tmp_path, index, _pair(*OVERRUN), max_frag_length=45)
+    assert too_long.n_fragments == 0 and _rejected(too_long)["length"] == 1
+    assert _scan(tmp_path, index, _pair(*OVERRUN), max_frag_length=46).n_fragments == 1
+
+
+def test_spliced_mates_that_run_past_each_other_are_one_molecule(index, tmp_path):
+    """F `46M900N50M` at 1154 and R `50M900N46M` at 1150 both cross tK's intron [1200,2100), and each runs 4 past the
+    other's 5' end: one molecule over [1150,2150), L 100 with the intron removed once."""
+    records = _pair("overrun_spliced", 1154, "46M900N50M", 1150, "50M900N46M", xs="+")
+    stats = _scan(tmp_path, index, records, max_frag_length=100)
     assert stats.n_fragments == 1 and sum(_rejected(stats).values()) == 0
 
 
@@ -475,16 +529,6 @@ def _spanning_chimera(qname="chimera"):
         ),
         _record(qname, R1_FWD, 1175, "77S23M", 1187, sa="chr1,1011,+,77M23H,255,0;"),
         _record(qname, R2_REV, 1187, "100M", 1175),
-    ]
-
-
-def _scan_buffered(base, index, records, column):
-    """The scan's stats, and one column of every fragment it buffered."""
-    stats, _strand, buffer, _payload = scan_and_buffer(
-        _bam(base, records), index, BamScanConfig(total_threads=1)
-    )
-    return stats, [
-        int(x) for chunk in buffer.iter_chunks_consuming() for x in getattr(chunk, column)
     ]
 
 

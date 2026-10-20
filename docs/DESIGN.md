@@ -452,7 +452,10 @@ pairing, is not read (`template_hits`, `hit_verdict`; `tests/test_hit_verdict.py
 * **Places.** Records of one alignment are one place: one mate, reference, strand, leftmost aligned position and
   CIGAR, with M, = and X read as one operation. STAR writes a mate's record beside each of its partners.
 * **Candidates.** Every R1 place with every R2 place on one reference with opposite strands.
-* **The verdict.** The two mates face inward once each 5′ soft clip is walked back. An unspliced pair needs only a
+* **The verdict.** The two mates' 5′ ends face each other once each 5′ soft clip is walked back. The molecule spans
+  both mates (owner, 2026-10-20): a read trimmed at its 5′ end starts inside its molecule, so its mate may run past
+  it, and the molecule runs from the lower of the forward mate's 5′ end and the reverse mate's first aligned base to
+  the higher of the reverse mate's 5′ end and the forward mate's last. An unspliced pair needs only a
   length of 1..`max_frag_length` along the genome. A spliced pair, an implicit splice included, needs one annotated
   transcript compatible with both mates: overlapping both (overlap, not containment: the EM prices the overhang),
   holding every observed junction, with no aligned base more than K inside one of its introns, and giving a path of

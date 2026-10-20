@@ -3,8 +3,8 @@
 2026-10-20 · code base `09f2aeb0` · STAR 2.7.11b source read for this document · for the owner's review. Every claim
 about Rigel's code cites a line re-read for this document, and every claim about STAR cites its source. Every number is
 measured; the receipts are in `$RIGEL_RUNS/arms/2026-10-20_chains/`. Approved 2026-10-20 (owner: chimeric alignments
-withheld now, the overrun rule its own step, the tail rule deferred); step 1 landed the same day, its measurement the
-roadmap's item 13 (`PAIRED_END_ROADMAP.md`).
+withheld now, the overrun rule its own step, the tail rule deferred); steps 1 and 2 landed the same day, their
+measurements the roadmap's item 13 (`PAIRED_END_ROADMAP.md`).
 
 ## 1. The recommendation in brief
 

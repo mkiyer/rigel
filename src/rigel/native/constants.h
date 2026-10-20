@@ -86,7 +86,7 @@ static constexpr int32_t AF_MULTIMAPPER_DROP  = AF_MULTIMAPPER_DROP_BIT;        
 static constexpr int32_t HIT_USABLE       = 0;
 static constexpr int32_t HIT_REFERENCE    = 1;  // the mates lie on two references
 static constexpr int32_t HIT_STRAND       = 2;  // on one strand
-static constexpr int32_t HIT_OUTWARD      = 3;  // facing away from each other, or a mate past the other's 5' end
+static constexpr int32_t HIT_OUTWARD      = 3;  // their 5' ends facing away from each other
 static constexpr int32_t HIT_LENGTH       = 4;  // no path gives a fragment length in [1, max_fragment_length]
 static constexpr int32_t HIT_MISSING_MATE = 5;  // one mate only: no fragment length at all
 // Or they are, and no one annotated transcript explains the hit: holds every junction it observes and overlaps both

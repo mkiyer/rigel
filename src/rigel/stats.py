@@ -86,7 +86,7 @@ class PipelineStats:
     n_hits_rejected_missing_mate: int = 0  # one mate only: no fragment length at all
     n_hits_rejected_reference: int = 0  # the mates on two references
     n_hits_rejected_strand: int = 0  # on one strand
-    n_hits_rejected_outward: int = 0  # facing away, or a mate past the other's 5' end
+    n_hits_rejected_outward: int = 0  # their 5' ends facing away from each other
     n_hits_rejected_length: int = 0  # no path gives a fragment length in [1, max_frag_length]
     n_hits_rejected_contradictory: int = (
         0  # a molecule whose junctions overlap unequal or name both strands

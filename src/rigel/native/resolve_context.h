@@ -822,8 +822,10 @@ public:
     /// `HIT_USABLE`, or `HIT_OUTWARD` or `HIT_LENGTH` (the caller has checked the reference and the strands).
     ///
     /// The forward mate's 5' soft clip is walked back along the genome and the reverse mate's forward, giving the
-    /// molecule [a, b); the mates must face inward, with both mates' aligned bases inside it. Its length counts the
-    /// bases of [a, b) with every observed skip of either mate removed, and must lie in [1, max_fragment_length].
+    /// mates' 5' ends a and b, which must face each other (a < b). The molecule spans both mates, since a read trimmed
+    /// at its 5' end starts inside its molecule and its mate may run past it: [lo, hi), from the lower of a and the
+    /// reverse mate's first aligned base to the higher of b and the forward mate's last. Its length counts the bases
+    /// of [lo, hi) with every observed skip of either mate removed, and must lie in [1, max_fragment_length].
     /// Failing that, one annotated transcript that overlaps both mates and holds every junction the hit observes
     /// (``junctions``; `pair_holders`) may witness a shorter path: its other introns in the stretches neither mate
     /// aligned are cut whole by the K rule of `collect_transcript_introns_in_gap`, and it offers no path when one of
@@ -839,7 +841,9 @@ public:
         const int64_t max_len = max_fragment_length_;
         const int32_t a = f.blocks->front().first - f.clip_lead;
         const int32_t b = r.blocks->back().second + r.clip_trail;
-        if (!(a < b && f.blocks->back().second <= b && r.blocks->front().first >= a)) return HIT_OUTWARD;
+        if (a >= b) return HIT_OUTWARD;
+        const int32_t lo = std::min(a, r.blocks->front().first);
+        const int32_t hi = std::max(b, f.blocks->back().second);
 
         auto& skips = scratch.pair_skips;  // each mate's holes between consecutive blocks, the two merged
         skips.clear();
@@ -848,12 +852,12 @@ public:
                 skips.push_back({(*m->blocks)[i - 1].second, (*m->blocks)[i].first});
         std::sort(skips.begin(), skips.end());
         skips.erase(std::unique(skips.begin(), skips.end()), skips.end());
-        int64_t removed = 0;  // the union of the skips inside [a, b)
+        int64_t removed = 0;  // the union of the skips inside [lo, hi)
         int32_t run_s = 0, run_e = 0;
         bool open = false;
         for (auto [s, e] : skips) {
-            s = std::max(s, a);
-            e = std::min(e, b);
+            s = std::max(s, lo);
+            e = std::min(e, hi);
             if (e <= s) continue;
             if (open && s <= run_e) {
                 run_e = std::max(run_e, e);
@@ -865,7 +869,7 @@ public:
             }
         }
         if (open) removed += run_e - run_s;
-        const int64_t length = static_cast<int64_t>(b) - a - removed;
+        const int64_t length = static_cast<int64_t>(hi) - lo - removed;
         if (length >= 1 && length <= max_len) return HIT_USABLE;
 
         // The witnesses: the transcripts over the forward mate that also overlap the reverse one, holding every
@@ -890,12 +894,12 @@ public:
         std::sort(covered.begin(), covered.end());
         auto& stretches = scratch.pair_stretches;  // what neither mate aligned or skipped
         stretches.clear();
-        int32_t cur = a;
+        int32_t cur = lo;
         for (const auto& [s, e] : covered) {
-            if (s > cur) stretches.push_back({ref_id, cur, std::min(s, b)});
+            if (s > cur) stretches.push_back({ref_id, cur, std::min(s, hi)});
             cur = std::max(cur, e);
         }
-        if (cur < b) stretches.push_back({ref_id, cur, b});
+        if (cur < hi) stretches.push_back({ref_id, cur, hi});
 
         for (int32_t t : cands) {
             if (t < 0 || t + 1 >= static_cast<int32_t>(exon_offsets_.size())) continue;
@@ -906,7 +910,7 @@ public:
             bool path = true;
             for (int32_t i = 0; i < n_introns && path; ++i) {
                 const int32_t i0 = intron_starts[i], i1 = intron_ends[i];
-                if (i1 <= a || i0 >= b) continue;
+                if (i1 <= lo || i0 >= hi) continue;
                 if (std::binary_search(skips.begin(), skips.end(), std::make_pair(i0, i1))) continue;  // observed
                 for (const auto& [x, y] : aligned)
                     if (std::min(i1, y) - std::max(i0, x) > K) { path = false; break; }
