@@ -75,6 +75,13 @@ class PipelineStats:
     n_sj_tag_conflicting: int = 0  # spliced records whose XS and ts disagree (ambiguous)
     n_sj_tag_invalid: int = 0  # XS or ts tags holding neither '+' nor '-' (read as absent)
 
+    # --- NM and NH on each record: absent, or not an integer of 0..2^31-1 (read as absent: NM 0, NH 1) ---
+    n_nm_tag_missing: int = 0
+    n_nm_tag_invalid: int = 0
+    n_nm_conflicting: int = 0  # alignments whose records disagree on NM (each keeps the larger)
+    n_nh_tag_missing: int = 0
+    n_nh_tag_invalid: int = 0
+
     # --- Hits that are not usable, by reason, and the templates left with none (no fragment, not intergenic) ---
     n_hits_rejected_missing_mate: int = 0  # one mate only: no fragment length at all
     n_hits_rejected_reference: int = 0  # the mates on two references

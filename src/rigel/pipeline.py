@@ -135,6 +135,35 @@ def _log_sj_tags(stats: PipelineStats, scan: BamScanConfig) -> None:
         )
 
 
+def _log_record_tags(stats: PipelineStats) -> None:
+    """Say what NM and NH were on the library's records, and warn of an NM that is absent, unreadable or disputed.
+
+    A record without NM reads as 0 edits, so it can outscore an alignment whose mismatches are known. A record without
+    NH is ordinary for an aligner that marks its other alignments secondary instead.
+    """
+    logger.info(
+        "[SCAN] record tags: NM absent on %d records, unreadable on %d, disputed by %d alignments; NH absent on %d "
+        "records, unreadable on %d",
+        stats.n_nm_tag_missing,
+        stats.n_nm_tag_invalid,
+        stats.n_nm_conflicting,
+        stats.n_nh_tag_missing,
+        stats.n_nh_tag_invalid,
+    )
+    if stats.n_nm_tag_missing or stats.n_nm_tag_invalid:
+        logger.warning(
+            "%d records carry no NM and %d an NM that is not an integer; each is read as 0 edits, which can favor it "
+            "over an alignment whose mismatches are known. STAR writes NM with --outSAMattributes NH HI AS nM NM.",
+            stats.n_nm_tag_missing,
+            stats.n_nm_tag_invalid,
+        )
+    if stats.n_nm_conflicting:
+        logger.warning(
+            "%d alignments are written in several records that disagree on NM; each is read with the largest.",
+            stats.n_nm_conflicting,
+        )
+
+
 def _log_hit_verdicts(stats: PipelineStats) -> None:
     """Say how many pairings of an R1 alignment with an R2 alignment were tried and dropped, and why, and how many
     templates that left with no usable hit."""
@@ -992,6 +1021,7 @@ def run_pipeline(
     scan = config.scan
     stats, strand_models, buffer, calibration_payload = scan_and_buffer(bam_path, index, scan)
     _log_sj_tags(stats, scan)
+    _log_record_tags(stats)
     _log_hit_verdicts(stats)
 
     # -- The second pass: drain the side buffer, BEFORE calibration --

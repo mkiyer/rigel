@@ -206,7 +206,7 @@ public:
     std::vector<uint8_t>  splice_type_;
     std::vector<uint8_t>  align_strand_;
     std::vector<uint8_t>  ambig_strand_;
-    std::vector<uint16_t> num_hits_;
+    std::vector<int32_t>  num_hits_;  // a template's valid hits, R1 places times R2 places: past 16 bits in a repeat
     std::vector<uint8_t>  chimera_type_;
     std::vector<int32_t>  t_indices_;
     std::vector<int32_t>  t_offsets_;
@@ -248,7 +248,7 @@ public:
         splice_type_.push_back(static_cast<uint8_t>(r.splice_type));
         align_strand_.push_back(static_cast<uint8_t>(r.align_strand));
         ambig_strand_.push_back(static_cast<uint8_t>(r.ambig_strand));
-        num_hits_.push_back(static_cast<uint16_t>(r.num_hits));
+        num_hits_.push_back(r.num_hits);
         chimera_type_.push_back(static_cast<uint8_t>(r.chimera_type));
 
         // CSR data — parallel arrays to t_indices
@@ -267,7 +267,7 @@ public:
             checked_u16_buffer_value(r.read_length, "read_length"));
         genomic_footprint_.push_back(r.genomic_footprint);
         genomic_start_.push_back(r.genomic_start);
-        nm_.push_back(static_cast<uint16_t>(r.nm));
+        nm_.push_back(checked_u16_buffer_value(r.nm, "nm"));
         size_++;
     }
 

@@ -171,6 +171,14 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   merged into one fragment by coordinate. A read pair with another alignment keeps it; one with none is withheld,
   counted in `summary.json` (`fragment_stats.withheld.off_index`, `hits_rejected.off_index`) and written to the
   annotated BAM as unresolved (`ZC` `off_index`).
+- A record's `NM` and `NH` are read only as integers, and `summary.json` counts the records without each and with it
+  held as another type (`alignment_stats.nm_tag`, `nh_tag`), each read as absent. A record without `NM` reads as 0
+  edits, as in 0.7.1, and the scan now warns of it: it can favor that alignment over one whose mismatches are known.
+  Records of one alignment that disagree on `NM` are read with the largest and counted (`nm_tag.conflicting`); 0.7.1
+  read the first.
+- A read pair with more than 65,535 valid alignments stays a multimapper. 0.7.1 stored the count in 16 bits, so
+  65,536 read as 0 and 65,537 as 1, a unique mapper. An `NM` past 65,535 stops the run with a message naming it, as a
+  read longer than 65,535 bases already did, instead of wrapping.
 - The locus EM gives one answer at any thread count. 0.7.1 split the E-step of its largest loci across the threads
   and added their sums in an order that followed the thread count, so one input gave different tables on machines with
   different core counts (by default `--threads` is the core count); isoforms that share fragments could swap whole

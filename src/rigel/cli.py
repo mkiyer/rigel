@@ -584,6 +584,15 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
                 "conflicting": stats.n_sj_tag_conflicting,
                 "invalid": stats.n_sj_tag_invalid,
             },
+            # NM and NH on each record: ``missing`` without the tag, ``invalid`` holding it as anything but an
+            # integer, each read as absent (NM 0, NH 1); ``conflicting`` counts the alignments whose records
+            # disagree on NM, each read with the larger
+            "nm_tag": {
+                "missing": stats.n_nm_tag_missing,
+                "invalid": stats.n_nm_tag_invalid,
+                "conflicting": stats.n_nm_conflicting,
+            },
+            "nh_tag": {"missing": stats.n_nh_tag_missing, "invalid": stats.n_nh_tag_invalid},
         },
         "fragment_stats": {
             "total": stats.n_fragments,

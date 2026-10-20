@@ -76,7 +76,7 @@ class _FinalizedChunk:
 
     splice_type: np.ndarray  # uint8[N]
     align_strand: np.ndarray  # uint8[N]
-    num_hits: np.ndarray  # uint16[N]
+    num_hits: np.ndarray  # int32[N]
     chimera_type: np.ndarray  # uint8[N]
     t_offsets: np.ndarray  # int32[N+1]
     t_indices: np.ndarray  # int32[M_t]

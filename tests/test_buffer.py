@@ -172,6 +172,8 @@ class TestFragmentAccumulator:
         assert raw["frag_lengths"].dtype == np.int32
         assert raw["exon_bp"].dtype == np.uint16
         assert raw["read_length"].dtype == np.uint16
+        assert raw["nm"].dtype == np.uint16
+        assert raw["num_hits"].dtype == np.int32
         assert "intron_bp" not in raw
 
     def test_append_read_length_overflow_names_column(self, mini_index):
@@ -182,6 +184,23 @@ class TestFragmentAccumulator:
         acc = FragmentAccumulator()
         with pytest.raises(RuntimeError, match="read_length"):
             acc.append(result, 0)
+
+    def test_append_nm_overflow_names_column(self, mini_index):
+        """An NM past 16 bits is refused, naming its column, as read_length is: it would wrap silently."""
+        result = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        result.nm = 65_536
+        acc = FragmentAccumulator()
+        with pytest.raises(RuntimeError, match="'nm'"):
+            acc.append(result, 0)
+
+    def test_num_hits_past_16_bits_is_stored_whole(self, mini_index):
+        """A template's valid hits are its R1 places times its R2 places, so a read pair in a repeat can have more than
+        65,535. In 16 bits 65,536 hits read as 0 and 65,537 as 1, a unique mapper."""
+        result = _resolve(mini_index, [_exon("chr1", 120, 180)])
+        result.num_hits = 65_537
+        acc = FragmentAccumulator()
+        acc.append(result, 0)
+        assert acc.finalize()["num_hits"].tolist() == [65_537]
 
     def test_append_read_length_uint16_boundary(self, mini_index):
         result = _resolve(mini_index, [_exon("chr1", 10_000, 10_000 + 65_535)])

@@ -74,7 +74,7 @@ def _index(base, with_t3=False, n_refs=1):
     return TranscriptIndex.load(str(base / "idx"))
 
 
-def _record(qname, flag, pos, cigar, mate_pos, nh=1, hi=None, xs=None, ts=None, ref=0):
+def _record(qname, flag, pos, cigar, mate_pos, nh=1, hi=None, xs=None, ts=None, ref=0, nm=0):
     a = pysam.AlignedSegment()
     a.query_name = qname
     a.flag = flag
@@ -87,7 +87,7 @@ def _record(qname, flag, pos, cigar, mate_pos, nh=1, hi=None, xs=None, ts=None, 
     a.query_qualities = pysam.qualitystring_to_array("I" * n)
     a.next_reference_id = ref
     a.next_reference_start = mate_pos
-    tags = [("NH", nh, "i"), ("NM", 0, "i")] + ([("HI", hi, "i")] if hi is not None else [])
+    tags = [(tag, v, "i") for tag, v in (("NH", nh), ("NM", nm), ("HI", hi)) if v is not None]
     if xs is not None:
         tags.append(("XS", xs, "A"))
     if ts is not None:
@@ -463,6 +463,66 @@ def test_the_annotated_bam_labels_a_template_off_the_index(index, tmp_path):
     with pysam.AlignmentFile(str(out), "rb") as bam:
         tags = {(r.query_name, r.is_read1): (r.get_tag("ZF"), r.get_tag("ZC")) for r in bam}
     assert tags[("spike", True)] == tags[("spike", False)] == (0, "off_index")
+
+
+# ── a record's integer tags: NM and NH ─────────────────────────────────────────────────────────────────────────
+
+
+def _scan_nm(base, index, records):
+    """The scan's stats, and the NM of each fragment it buffered."""
+    stats, _strand, buffer, _payload = scan_and_buffer(
+        _bam(base, records), index, BamScanConfig(total_threads=1)
+    )
+    return stats, [int(x) for chunk in buffer.iter_chunks_consuming() for x in chunk.nm]
+
+
+def test_a_record_without_nm_is_counted_and_read_as_zero(index, tmp_path):
+    """A record without NM is counted, and its edit distance read as 0: a disclosed approximation, which can favor an
+    alignment of unknown NM over one whose NM is known. STAR writes NM only when asked for it."""
+    records = [
+        _record("no_nm", R1_FWD, 1010, "100M", 1100, nm=3),
+        _record("no_nm", R2_REV, 1100, "100M", 1010, nm=None),
+    ]
+    stats, nm = _scan_nm(tmp_path, index, records)
+    assert nm == [3]
+    assert stats.n_nm_tag_missing == 1 and stats.n_nm_tag_invalid == 0
+
+
+def test_tags_of_another_type_are_counted_and_read_as_absent(index, tmp_path):
+    """NM and NH are integers. One held as a string is an input defect: counted, and read as absent (NM 0, NH 1)."""
+    records = _pair("typed", 1010, "100M", 1100, "100M")
+    records[0].set_tag("NM", "2", "Z")
+    records[1].set_tag("NH", "1", "Z")
+    stats, nm = _scan_nm(tmp_path, index, records)
+    assert nm == [0] and stats.unique == 1
+    assert stats.n_nm_tag_invalid == 1 and stats.n_nh_tag_invalid == 1
+    assert stats.n_nm_tag_missing == 0 and stats.n_nh_tag_missing == 0
+
+
+def test_a_record_without_nh_is_counted(index, tmp_path):
+    """An aligner that writes no NH (bwa) marks its other alignments secondary instead: each record is counted, and its
+    NH reads 1."""
+    records = [
+        _record("no_nh", R1_FWD, 1010, "100M", 1100, nh=None),
+        _record("no_nh", R2_REV, 1100, "100M", 1010, nh=None),
+    ]
+    stats, _nm = _scan_nm(tmp_path, index, records)
+    assert stats.unique == 1
+    assert stats.n_nh_tag_missing == 2
+
+
+def test_records_of_one_alignment_that_disagree_on_nm_keep_the_larger(index, tmp_path):
+    """R1's alignment written twice, as STAR writes it beside each partner, with NM 1 and NM 4: an input defect, counted
+    once for the alignment, which keeps the larger NM. R2 at 1100 and at 1600 (NM 0) make two hits."""
+    records = [
+        _record("nm_conflict", R1_FWD, 1010, "100M", 1100, nh=2, nm=1),
+        _record("nm_conflict", R2_REV, 1100, "100M", 1010, nh=2),
+        _record("nm_conflict", R1_FWD | SECONDARY, 1010, "100M", 1600, nh=2, nm=4),
+        _record("nm_conflict", R2_REV | SECONDARY, 1600, "100M", 1010, nh=2),
+    ]
+    stats, nm = _scan_nm(tmp_path, index, records)
+    assert nm == [4, 4], "the alignment did not keep the larger NM"
+    assert stats.n_nm_conflicting == 1
 
 
 # ── multiplicity: a template's distinct valid hits ──────────────────────────────────────────────────

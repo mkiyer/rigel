@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -123,6 +124,18 @@ struct SJTagCounts {
         tagged += o.tagged;
         untagged += o.untagged;
         conflicting += o.conflicting;
+        invalid += o.invalid;
+    }
+};
+
+// An integer tag on each record of the scan (NM, NH): absent, or held as anything but an integer of 0..2^31-1 (read
+// as absent). The annotation pass reads the same tags and counts nothing.
+struct IntTagCounts {
+    int64_t missing = 0;
+    int64_t invalid = 0;
+
+    void merge(const IntTagCounts& o) {
+        missing += o.missing;
         invalid += o.invalid;
     }
 };
@@ -389,8 +402,11 @@ struct BamScanStats {
     int64_t n_sj_observed = 0;
     int64_t n_sj_blacklisted = 0;
 
-    // The junction-strand tag on each spliced record
+    // The junction-strand tag on each spliced record; NM and NH on each record; and the alignments whose records
+    // disagree on NM (each keeps the larger)
     SJTagCounts sj_tags;
+    IntTagCounts nm_tag, nh_tag;
+    int64_t n_nm_conflicting = 0;
 
     // Hits that are not usable, by `HIT_*` reason, and the templates left with none, by `WITHHELD_*` outcome
     std::array<int64_t, N_HIT_VERDICTS> hits_rejected{};
@@ -460,6 +476,9 @@ struct BamScanStats {
         n_sj_observed += o.n_sj_observed;
         n_sj_blacklisted += o.n_sj_blacklisted;
         sj_tags.merge(o.sj_tags);
+        nm_tag.merge(o.nm_tag);
+        nh_tag.merge(o.nh_tag);
+        n_nm_conflicting += o.n_nm_conflicting;
         for (int32_t v = 0; v < N_HIT_VERDICTS; v++) hits_rejected[v] += o.hits_rejected[v];
         for (int32_t w = 0; w < N_WITHHELD; w++) withheld[w] += o.withheld[w];
         n_nh_above_reported += o.n_nh_above_reported;
@@ -750,21 +769,41 @@ static void canonical_cigar(const bam1_t* b, std::vector<uint32_t>& out)
     }
 }
 
+/// A record's integer tag ``tag``: its value, or ``absent`` when the record lacks it or holds it as anything but an
+/// integer of 0..2^31-1, each counted in ``counts``.
+static int32_t read_int_tag(const bam1_t* b, const char* tag, int32_t absent, IntTagCounts* counts)
+{
+    const uint8_t* aux = bam_aux_get(b, tag);
+    if (!aux) {
+        if (counts) ++counts->missing;
+        return absent;
+    }
+    int64_t v = -1;
+    switch (*aux) {
+        case 'c': case 'C': case 's': case 'S': case 'i': case 'I': v = bam_aux2i(aux); break;
+        default: break;
+    }
+    if (v < 0 || v > std::numeric_limits<int32_t>::max()) {
+        if (counts) ++counts->invalid;
+        return absent;
+    }
+    return static_cast<int32_t>(v);
+}
+
 // ================================================================
 // Parse a raw htslib bam1_t into a ParsedAlignment value type
 // ================================================================
 // Extracts all fields the pipeline needs (scalars, tags, CIGAR-derived
 // exon blocks and splice junctions) so that downstream code never
-// touches bam1_t directly.
+// touches bam1_t directly. ``counts`` takes the per-record counts (the
+// scan's); the annotation pass, which reads the same records again, passes null.
 
 static ParsedAlignment parse_bam_record(
     const bam1_t* b,
     const std::vector<int32_t>& tid_to_ref_id,
     SJTagMode sj_tag_mode,
     const FragmentResolver* resolver,
-    int64_t* n_sj_observed,
-    int64_t* n_sj_blacklisted,
-    SJTagCounts* sj_tag_counts)
+    BamScanStats* counts)
 {
     ParsedAlignment rec;
     rec.flag = b->core.flag;
@@ -773,20 +812,15 @@ static ParsedAlignment parse_bam_record(
     rec.ref_start = b->core.pos;
     canonical_cigar(b, rec.cigar);
 
-    // BAM aux tags
-    rec.nm = 0;
-    uint8_t* nm_aux = bam_aux_get(b, "NM");
-    if (nm_aux) rec.nm = bam_aux2i(nm_aux);
-
-    rec.nh = 1;
-    uint8_t* nh_aux = bam_aux_get(b, "NH");
-    if (nh_aux) rec.nh = bam_aux2i(nh_aux);
+    // BAM aux tags: a missing NM reads 0, a disclosed approximation (counted, and warned of); a missing NH reads 1
+    rec.nm = read_int_tag(b, "NM", 0, counts ? &counts->nm_tag : nullptr);
+    rec.nh = read_int_tag(b, "NH", 1, counts ? &counts->nh_tag : nullptr);
 
     // CIGAR → exon blocks + splice junctions
     parse_cigar(b, rec.exons, rec.sjs);
     read_soft_clips(b, rec.clip_lead, rec.clip_trail);
     if (!rec.sjs.empty()) {
-        const int32_t sj_strand = read_sj_strand(b, sj_tag_mode, sj_tag_counts);
+        const int32_t sj_strand = read_sj_strand(b, sj_tag_mode, counts ? &counts->sj_tags : nullptr);
         for (auto& sj : rec.sjs) sj.strand = sj_strand;
     }
 
@@ -794,13 +828,11 @@ static ParsedAlignment parse_bam_record(
     // CIGAR parsing.  Downstream fragment assembly unions across mates,
     // so this is the permissive rule: a sj survives as long as at
     // least one read supports it with anchors above the blacklist envelope.
+    if (counts) counts->n_sj_observed += static_cast<int64_t>(rec.sjs.size());
     if (resolver && resolver->has_sj_blacklist() && !rec.sjs.empty()) {
-        if (n_sj_observed) *n_sj_observed += static_cast<int64_t>(rec.sjs.size());
-        int32_t n_dropped = filter_blacklisted_sjs(rec.sjs, *resolver, rec.ref_id);
+        const int32_t n_dropped = filter_blacklisted_sjs(rec.sjs, *resolver, rec.ref_id);
         rec.n_sj_blacklisted = static_cast<uint16_t>(n_dropped);
-        if (n_sj_blacklisted) *n_sj_blacklisted += n_dropped;
-    } else if (n_sj_observed) {
-        *n_sj_observed += static_cast<int64_t>(rec.sjs.size());
+        if (counts) counts->n_sj_blacklisted += n_dropped;
     }
 
     return rec;
@@ -894,6 +926,7 @@ static AssembledFragment build_fragment(
 struct TemplateHits {
     std::vector<std::pair<std::vector<ParsedAlignment*>, std::vector<ParsedAlignment*>>> hits;
     std::vector<int32_t> alias_of;
+    int32_t n_nm_conflicting = 0;  // locations whose records disagree on NM
 };
 
 /// Whether two records carry one alignment: one mate, one BAM reference, one strand, one leftmost aligned position and
@@ -947,6 +980,16 @@ static TemplateHits template_hits(std::vector<ParsedAlignment>& records)
             }
             for (int32_t k : l.members)
                 if (k != l.rep) out.alias_of[k] = l.rep;
+            // Records of one alignment that disagree on NM are an input defect: counted, and the larger NM kept.
+            int32_t lo = records[l.rep].nm, hi = lo;
+            for (int32_t k : l.members) {
+                lo = std::min(lo, records[k].nm);
+                hi = std::max(hi, records[k].nm);
+            }
+            if (lo != hi) {
+                ++out.n_nm_conflicting;
+                records[l.rep].nm = hi;
+            }
         }
     }
     for (int m = 0; m < 2; ++m) {
@@ -1548,11 +1591,7 @@ public:
                     }
                     current_qname = qname;
                     current_group.records.push_back(
-                        parse_bam_record(b, tid_to_ref_id_, sj_tag_mode_,
-                                          ctx_,
-                                          &stats_.n_sj_observed,
-                                          &stats_.n_sj_blacklisted,
-                                          &stats_.sj_tags));
+                        parse_bam_record(b, tid_to_ref_id_, sj_tag_mode_, ctx_, &stats_));
                 }
 
                 if (read_ret < -1) {
@@ -1839,6 +1878,7 @@ private:
         }
 
         auto hit_result = template_hits(records);
+        stats.n_nm_conflicting += hit_result.n_nm_conflicting;
 
         // NH counts a template's pair alignments, and an aligner writes a mate's record in each; a mate reported in
         // fewer records means the aligner truncated its output (counted). The mate counters, once per template, read
@@ -2112,6 +2152,11 @@ private:
         stats_dict["n_sj_tag_untagged"] = stats_.sj_tags.untagged;
         stats_dict["n_sj_tag_conflicting"] = stats_.sj_tags.conflicting;
         stats_dict["n_sj_tag_invalid"] = stats_.sj_tags.invalid;
+        stats_dict["n_nm_tag_missing"] = stats_.nm_tag.missing;
+        stats_dict["n_nm_tag_invalid"] = stats_.nm_tag.invalid;
+        stats_dict["n_nm_conflicting"] = stats_.n_nm_conflicting;
+        stats_dict["n_nh_tag_missing"] = stats_.nh_tag.missing;
+        stats_dict["n_nh_tag_invalid"] = stats_.nh_tag.invalid;
         for (int32_t v = HIT_USABLE + 1; v < N_HIT_VERDICTS; v++)
             stats_dict[("n_hits_rejected_" + std::string(hit_verdict_label(v))).c_str()] = stats_.hits_rejected[v];
         for (int32_t w = WITHHELD_NONE + 1; w < N_WITHHELD; w++)
@@ -2753,7 +2798,7 @@ public:
             // The scan's own parser, the blacklist included, so the annotated BAM sees the evidence the scan saw;
             // its drop count is the per-record ZB:i tag stamped below.
             light_group.push_back(
-                parse_bam_record(b, tid_to_ref_id_, sj_tag_mode_, ctx_, nullptr, nullptr, nullptr));
+                parse_bam_record(b, tid_to_ref_id_, sj_tag_mode_, ctx_, nullptr));
         }
 
         if (read_ret < -1) {
