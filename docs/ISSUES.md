@@ -910,6 +910,12 @@ two transcripts' junctions), is lost; an unspliced pair keeps its overlap candid
 of the lost ones are recoverable (owner): a template whose mates both align within one gene, along a path of valid
 length that no single transcript holds, could be counted to that gene and to no transcript. Unique to the gene, it would
 skip the EM, stay out of transcript abundance and add to the gene's. Unmapped mates and chimeras stay lost.
+Deferred, and the code is kept able to take it (owner, 2026-10-19): the gene owns such a fragment, never a transcript.
+What keeps it buildable: the scan judges the molecule before the annotated-path rule, so every hit the rule withholds
+has a fragment length; each rejected hit keeps its reason (contradictory, novel junction, unsupported) at the scan's one
+drop point after `hit_verdict`, where a salvage would take it; and the template's outcome is counted and labelled
+(`unannotated_splice`). The transcript resolver refuses such a fragment by design (no transcript holds its junctions),
+so the salvage resolves it to genes by its own query, outside `_resolve_core` and the transcript EM.
 Open before it is designed:
 - which path gives the length when no transcript holds it;
 - splice artifacts concentrate on unannotated junctions (`ISSUES: splicing-artifacts`), so a gene count that bypasses
