@@ -181,6 +181,7 @@ static const char* hit_verdict_label(int32_t verdict) {
         case HIT_NOVEL_JUNCTION: return "novel_junction";
         case HIT_UNSUPPORTED:    return "unsupported";
         case HIT_OFF_INDEX:      return "off_index";
+        case HIT_CHIMERIC:       return "chimeric";
         default:                 return "unknown";
     }
 }
@@ -191,13 +192,15 @@ static constexpr int32_t WITHHELD_NONE               = 0;
 static constexpr int32_t WITHHELD_UNPAIRED           = 1;  // none of its hits is a molecule
 static constexpr int32_t WITHHELD_UNANNOTATED_SPLICE = 2;  // the annotated-path rule withheld one of its hits
 static constexpr int32_t WITHHELD_OFF_INDEX          = 3;  // one of its hits lies on a reference outside the index
-static constexpr int32_t N_WITHHELD                  = 4;
+static constexpr int32_t WITHHELD_CHIMERIC           = 4;  // one of its hits has a mate aligned in pieces
+static constexpr int32_t N_WITHHELD                  = 5;
 
 static const char* withheld_label(int32_t outcome) {
     switch (outcome) {
         case WITHHELD_UNPAIRED:           return "unpaired";
         case WITHHELD_UNANNOTATED_SPLICE: return "unannotated_splice";
         case WITHHELD_OFF_INDEX:          return "off_index";
+        case WITHHELD_CHIMERIC:           return "chimeric";
         default:                          return "unknown";
     }
 }
@@ -278,6 +281,11 @@ struct ParsedAlignment {
 
     // The CIGAR as the alignment's identity (`canonical_cigar`)
     std::vector<uint32_t> cigar;
+
+    // Whether the record carries SA, naming the other pieces of a chimeric alignment; and, on a location's
+    // representative, whether the location is one such piece (`template_hits`)
+    bool has_sa = false;
+    bool chimeric = false;
 
     bool is_read1()         const { return flag & BAM_FREAD1; }
     bool is_secondary()     const { return flag & BAM_FSECONDARY; }
@@ -811,6 +819,7 @@ static ParsedAlignment parse_bam_record(
     rec.ref_id = (rec.tid >= 0 && rec.tid < static_cast<int32_t>(tid_to_ref_id.size())) ? tid_to_ref_id[rec.tid] : -1;
     rec.ref_start = b->core.pos;
     canonical_cigar(b, rec.cigar);
+    rec.has_sa = bam_aux_get(b, "SA") != nullptr;
 
     // BAM aux tags: a missing NM reads 0, a disclosed approximation (counted, and warned of); a missing NH reads 1
     rec.nm = read_int_tag(b, "NM", 0, counts ? &counts->nm_tag : nullptr);
@@ -842,9 +851,8 @@ static ParsedAlignment parse_bam_record(
 // A hit's junctions, and its fragment
 // ================================================================
 
-/// Every junction a hit observes: the kept junctions of each of its records, both mates' and any supplementary
-/// record's, ascending by reference, coordinates and motif strand, each once. The pair validator and the fragment the
-/// resolver reads take this one set.
+/// Every junction a hit observes: the kept junctions of both mates' records, ascending by reference, coordinates and
+/// motif strand, each once. The pair validator and the fragment the resolver reads take this one set.
 static void observed_junctions(
     const std::vector<ParsedAlignment*>& r1_reads,
     const std::vector<ParsedAlignment*>& r2_reads,
@@ -937,11 +945,23 @@ static bool same_alignment(const ParsedAlignment& x, const ParsedAlignment& y)
            x.ref_start == y.ref_start && x.cigar == y.cigar;
 }
 
+/// Whether a record's read is hard-clipped at its 5' end: the CIGAR's first operation on a forward record, its last on
+/// a reverse one. Those bases are not in the record, so the molecule's end is not either.
+static bool five_prime_hard_clipped(const ParsedAlignment& r)
+{
+    if (r.cigar.empty()) return false;
+    return bam_cigar_op(r.is_reverse() ? r.cigar.back() : r.cigar.front()) == BAM_CHARD_CLIP;
+}
+
 /// A template's candidate hits, found by geometry alone, for any aligner: the aligner's own pairing (STAR's HI) is not
 /// read. The records are merged into mate locations, one per alignment (`same_alignment`): a primary record represents
-/// its location, the others are its aliases, and a mate's supplementary records ride with its primary location. A
-/// record with no aligned base is a location too, which the verdict passes through unjudged. Every R1 location with
-/// every R2 location on one BAM reference with opposite strands is a candidate for the hit verdict (`hit_verdict`).
+/// its location, the others are its aliases. A location is chimeric, one piece of an alignment in pieces, when a record
+/// of it carries SA or its 5' end is hard-clipped, or when that mate has a supplementary record and none of the mate's
+/// records carries SA: which alignment the piece belongs to is then unknown, so every location of the mate is. A
+/// supplementary record is no location and joins no hit; it is written with the same mate's primary location (an
+/// alias), or its first location when none is primary. A record with no aligned base is a location too, which the
+/// verdict passes through unjudged. Every R1 location with every R2 location on one BAM reference with opposite strands
+/// is a candidate for the hit verdict (`hit_verdict`).
 /// When one mate has no location, each location of the other is a one-mate hit (`HIT_MISSING_MATE`); when both have
 /// locations and no pair is a candidate, the first location of each is offered, so the verdict counts the template's
 /// reason once. On the STAR panel this finds the correct pair wherever a template's places hold one, where STAR's HI
@@ -951,7 +971,6 @@ static TemplateHits template_hits(std::vector<ParsedAlignment>& records)
     struct Location {
         std::vector<int32_t> members;  // record indices, in record order
         int32_t rep = -1;
-        std::vector<ParsedAlignment*> supplementary;
     };
     TemplateHits out;
     std::vector<Location> locs[2];
@@ -966,7 +985,7 @@ static TemplateHits template_hits(std::vector<ParsedAlignment>& records)
         }
         auto it = std::find_if(locs[m].begin(), locs[m].end(),
                                [&](const Location& l) { return same_alignment(records[l.members.front()], r); });
-        if (it == locs[m].end()) locs[m].push_back({{k}, -1, {}});
+        if (it == locs[m].end()) locs[m].push_back({{k}, -1});
         else it->members.push_back(k);
     }
     for (auto& mate : locs) {
@@ -993,16 +1012,23 @@ static TemplateHits template_hits(std::vector<ParsedAlignment>& records)
         }
     }
     for (int m = 0; m < 2; ++m) {
+        bool sa = false;
+        for (int32_t k : supplementary[m]) sa |= records[k].has_sa;
+        for (const auto& l : locs[m])
+            for (int32_t k : l.members) sa |= records[k].has_sa;
+        const bool unnamed_chain = !supplementary[m].empty() && !sa;
+        for (const auto& l : locs[m]) {
+            ParsedAlignment& rep = records[l.rep];
+            rep.chimeric = unnamed_chain || five_prime_hard_clipped(rep);
+            for (int32_t k : l.members) rep.chimeric |= records[k].has_sa;
+        }
+        if (locs[m].empty()) continue;
         auto primary = std::find_if(locs[m].begin(), locs[m].end(),
                                     [&](const Location& l) { return !records[l.rep].is_secondary(); });
-        if (primary == locs[m].end()) continue;
-        for (int32_t k : supplementary[m]) primary->supplementary.push_back(&records[k]);
+        const int32_t owner = (primary == locs[m].end() ? locs[m].front() : *primary).rep;
+        for (int32_t k : supplementary[m]) out.alias_of[k] = owner;
     }
-    auto reads = [&](const Location& l) {
-        std::vector<ParsedAlignment*> v{&records[l.rep]};
-        v.insert(v.end(), l.supplementary.begin(), l.supplementary.end());
-        return v;
-    };
+    auto reads = [&](const Location& l) { return std::vector<ParsedAlignment*>{&records[l.rep]}; };
     if (locs[0].empty() || locs[1].empty()) {
         for (const auto& l : locs[0]) out.hits.push_back({reads(l), {}});
         for (const auto& l : locs[1]) out.hits.push_back({{}, reads(l)});
@@ -1025,13 +1051,13 @@ static TemplateHits template_hits(std::vector<ParsedAlignment>& records)
 
 /// `HIT_USABLE` when a hit's two mates can be one molecule (`FragmentResolver::validate_pair`), or when the hit is not
 /// a pair this rule judges: a mate with no aligned base, which stays as it was for the change that owns it. Otherwise
-/// the reason they cannot; a hit with one mate gives no fragment length at all (`HIT_MISSING_MATE`), and one on a
-/// reference the index does not hold has no partition, transcript or length along one (`HIT_OFF_INDEX`). Mates on two
+/// the reason they cannot; a hit with one mate gives no fragment length at all (`HIT_MISSING_MATE`), one on a
+/// reference the index does not hold has no partition, transcript or length along one (`HIT_OFF_INDEX`), and one with
+/// a mate aligned in pieces is a chimeric alignment, which Rigel does not quantify (`HIT_CHIMERIC`). Mates on two
 /// references are two references, wherever they lie: references are told apart by the BAM's ids, as every reference
 /// outside the index shares the index id -1. A transcript that witnesses a path must overlap both mates and hold every
 /// junction the hit observes (``junctions``). ``f`` and ``r`` are set to the forward and reverse mates when the rule
-/// judged them. Each side of a hit is one mate location's record, then that mate's supplementary records
-/// (`template_hits`).
+/// judged them. Each side of a hit is one mate location's record (`template_hits`).
 static int32_t pair_verdict(
     const std::pair<std::vector<ParsedAlignment*>, std::vector<ParsedAlignment*>>& hit,
     const std::vector<IntronBlock>& junctions,
@@ -1045,6 +1071,7 @@ static int32_t pair_verdict(
     const ParsedAlignment* m1 = hit.first.front();
     const ParsedAlignment* m2 = hit.second.front();
     if (m1->ref_id < 0 || m2->ref_id < 0) return m1->tid != m2->tid ? HIT_REFERENCE : HIT_OFF_INDEX;
+    if (m1->chimeric || m2->chimeric) return HIT_CHIMERIC;
     if (m1->exons.empty() || m2->exons.empty()) return HIT_USABLE;
     if (m1->ref_id != m2->ref_id) return HIT_REFERENCE;
     if (m1->is_reverse() == m2->is_reverse()) return HIT_STRAND;
@@ -1056,10 +1083,10 @@ static int32_t pair_verdict(
 }
 
 /// Why a hit is not usable, or `HIT_USABLE`. Its two mates must be able to be one molecule (`pair_verdict`), and when
-/// it is spliced, one annotated transcript must explain it: hold every junction it observes, a supplementary
-/// record's too (`observed_junctions`), and overlap both mates (`FragmentResolver::pair_holders`): the annotated-path
-/// rule. A hit the pair rule passes through unjudged is held to its junctions alone. The molecule is judged first, so
-/// a hit the rule withholds always has a fragment length.
+/// it is spliced, one annotated transcript must explain it: hold every junction it observes (`observed_junctions`) and
+/// overlap both mates (`FragmentResolver::pair_holders`): the annotated-path rule. A hit the pair rule passes through
+/// unjudged is held to its junctions alone. The molecule is judged first, so a hit the rule withholds always has a
+/// fragment length.
 static int32_t hit_verdict(
     const std::pair<std::vector<ParsedAlignment*>, std::vector<ParsedAlignment*>>& hit,
     const FragmentResolver& ctx,
@@ -1078,23 +1105,25 @@ static int32_t hit_verdict(
 
 /// Every hit's verdict into ``verdicts`` (`hit_verdict`: HIT_USABLE or the reason), and why the template is withheld
 /// when it has hits and none is usable: off the index when one of them lies on a reference the index does not hold,
-/// else an unannotated splice when the annotated-path rule withheld one of them, else unpaired (WITHHELD_NONE
-/// otherwise). The scan and the annotation pass both judge a template here, so the BAM the
-/// annotation pass writes says what the scan counted.
+/// else chimeric when one of them has a mate aligned in pieces, else an unannotated splice when the annotated-path
+/// rule withheld one of them, else unpaired (WITHHELD_NONE otherwise). The scan and the annotation pass both judge a
+/// template here, so the BAM the annotation pass writes says what the scan counted.
 static int32_t judge_hits(const TemplateHits& th, const FragmentResolver& ctx, ResolverScratch& scratch,
                           std::vector<int32_t>& verdicts)
 {
     verdicts.clear();
-    bool usable = false, off_index = false, unannotated_splice = false;
+    bool usable = false, off_index = false, chimeric = false, unannotated_splice = false;
     for (const auto& hit : th.hits) {
         const int32_t v = hit_verdict(hit, ctx, scratch);
         verdicts.push_back(v);
         usable |= v == HIT_USABLE;
         off_index |= v == HIT_OFF_INDEX;
+        chimeric |= v == HIT_CHIMERIC;
         unannotated_splice |= is_unannotated_splice(v);
     }
     if (usable || th.hits.empty()) return WITHHELD_NONE;
     if (off_index) return WITHHELD_OFF_INDEX;
+    if (chimeric) return WITHHELD_CHIMERIC;
     return unannotated_splice ? WITHHELD_UNANNOTATED_SPLICE : WITHHELD_UNPAIRED;
 }
 

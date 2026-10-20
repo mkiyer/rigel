@@ -608,6 +608,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
                 "unpaired": stats.n_withheld_unpaired,
                 "unannotated_splice": stats.n_withheld_unannotated_splice,
                 "off_index": stats.n_withheld_off_index,
+                "chimeric": stats.n_withheld_chimeric,
             },
             # Templates whose NH exceeds the alignments reported for them (a truncated output)
             "nh_above_reported": stats.n_nh_above_reported,
@@ -621,6 +622,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
                 "novel_junction": stats.n_hits_rejected_novel_junction,
                 "unsupported": stats.n_hits_rejected_unsupported,
                 "off_index": stats.n_hits_rejected_off_index,
+                "chimeric": stats.n_hits_rejected_chimeric,
             },
             "splice": splice_counts,
         },

@@ -95,8 +95,9 @@ static constexpr int32_t HIT_CONTRADICTORY  = 6;  // two junctions overlap unequ
 static constexpr int32_t HIT_NOVEL_JUNCTION = 7;  // a junction no transcript holds
 static constexpr int32_t HIT_UNSUPPORTED    = 8;  // each junction held, but no one holder of them all over both mates
 // Or it lies where Rigel can place nothing:
-static constexpr int32_t HIT_OFF_INDEX      = 9;  // both mates on one reference the index does not hold
-static constexpr int32_t N_HIT_VERDICTS     = 10;
+static constexpr int32_t HIT_OFF_INDEX      = 9;   // both mates on one reference the index does not hold
+static constexpr int32_t HIT_CHIMERIC       = 10;  // a mate aligned in pieces: its record carries SA, or a 5' hard clip
+static constexpr int32_t N_HIT_VERDICTS     = 11;
 
 /// A molecule the annotated-path rule withheld: its template, left with no usable hit, is an unannotated splice.
 inline bool is_unannotated_splice(int32_t verdict) {

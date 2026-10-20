@@ -96,11 +96,13 @@ class PipelineStats:
     )
     n_hits_rejected_unsupported: int = 0  # junctions no one transcript over both mates holds
     n_hits_rejected_off_index: int = 0  # both mates on one reference the index does not hold
+    n_hits_rejected_chimeric: int = 0  # a mate aligned in pieces (SA, or a 5' hard clip)
     n_withheld_unpaired: int = 0  # templates none of whose hits is a molecule
     n_withheld_unannotated_splice: int = (
         0  # templates whose molecules no annotated transcript holds
     )
     n_withheld_off_index: int = 0  # templates with a hit on a reference outside the index
+    n_withheld_chimeric: int = 0  # templates with a chimeric hit, none usable
     n_nh_above_reported: int = 0  # NH above a mate's reported records (a truncated output)
 
     # --- The per-fragment splice census (scanner QC; ``rigel report``'s splice breakdown) ---

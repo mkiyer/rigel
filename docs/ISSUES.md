@@ -49,7 +49,10 @@ IT AMPLIFIES EVERY SCAN CHANGE. A change that moves a few hundred hits moves the
 annotated-path rule (`ISSUES: the-annotated-path-rule-costs-the-stranded-strata`), then the shared-transcript witness
 (2026-10-19; `ISSUES: the-scanner-builds-fragments-from-one-mate`), which rejects 620 of g00's 11 M hits: g00's gene
 error +4.33 % shipped and +0.01 % with every efficiency at 1, the giant component's gDNA length −9.5 %; capture-ON's
-transcript error +0.86 % shipped and −0.09 % at 1. So a scan change is judged with the efficiencies at 1 beside the
+transcript error +0.86 % shipped and −0.09 % at 1; then chimeric alignments withheld (2026-10-20, `DESIGN.md` §1.1),
+which quantifies 0.8–1.4 k fewer templates per 10 M: transcript / gene error +2.40 / +4.54 % unstranded capture-OFF
+(g50 κ0.50 +5.77 / +9.60 %), +2.37 / +3.12 % stranded capture-OFF, −0.38 / +1.03 % stranded capture-ON shipped, and
++0.22 / +0.73, +0.18 / +0.93, +0.14 / +0.15 % at 1. So a scan change is judged with the efficiencies at 1 beside the
 shipped run until this is fixed.
 The reader reads each object's deconvolved gDNA mass as a point Poisson count, whatever the deconvolution's own
 uncertainty; on the simulator's alignments the efficiencies stay at 1 in every condition here.
@@ -1518,6 +1521,22 @@ alone, with `OWN_EPS` kept as the clamp.
 Such a fragment gets gap hypotheses over any distance and can be promoted to SPLICE_IMPLICIT. Only downstream limits
 catch it: L ≤ max_length in the accumulator, and the scorer's tail decay. The owner picks the rule: all blocks, or the
 subset documented. The extent is also computed in four places.
+
+### the-tail-rule-waits-for-truth
+`priority: later — deferred by the owner until a simulation can give it truth (2026-10-20) · kind: question · 2026-10-20`
+A chimeric alignment whose foreign piece covers only a read's 3′ part, running past its mate's 5′ end, is withheld
+with every other chimeric alignment (`DESIGN.md` §1.1). The tail rule would drop that piece and keep the pair it
+leaves.
+- On cfRNA-A it would recover 4.9 % of the templates, which suggests adapter read-through aligned chimerically.
+- On the STAR panel (g50 κ0.50 capture-OFF) it accepts 700 gDNA templates, every one misplaced, 570 by more than
+  100 bp. The panel's chimeras are STAR's false mate merges, `--peOverlapNbasesMin` merging two mates on a chance
+  exact match of 10 or more bases, and their representative piece is the misplaced one; the BAM cannot say whether
+  STAR merged correctly.
+- The simulator writes no read-through and trims no 5′ end (`wgs_engine.py` truncates a read to its fragment), so no
+  data with truth has the mechanism the rule is for.
+
+It is decided by `quant_accuracy.py` on a simulation with adapter read-through and 5′ trimming, against the tree that
+withholds.
 
 ### capture-probes-on-dropped-duplicates
 `priority: later — at the next panel rebuild (the code-health review, 2026-10-16) · kind: contract · 2026-10-16`

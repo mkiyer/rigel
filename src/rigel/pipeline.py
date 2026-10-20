@@ -177,6 +177,7 @@ def _log_hit_verdicts(stats: PipelineStats) -> None:
         "a novel junction": stats.n_hits_rejected_novel_junction,
         "junctions no one transcript over both mates holds": stats.n_hits_rejected_unsupported,
         "off the index": stats.n_hits_rejected_off_index,
+        "a mate aligned in pieces (chimeric)": stats.n_hits_rejected_chimeric,
     }
     if stats.n_nh_above_reported:
         logger.warning(
@@ -188,12 +189,13 @@ def _log_hit_verdicts(stats: PipelineStats) -> None:
         return
     logger.info(
         "[SCAN] %d pairings dropped (%s); templates left with no usable hit, withheld: %d unpaired, %d unannotated "
-        "splices, %d off the index",
+        "splices, %d off the index, %d chimeric",
         sum(rejected.values()),
         ", ".join(f"{why} {n}" for why, n in rejected.items() if n),
         stats.n_withheld_unpaired,
         stats.n_withheld_unannotated_splice,
         stats.n_withheld_off_index,
+        stats.n_withheld_chimeric,
     )
 
 

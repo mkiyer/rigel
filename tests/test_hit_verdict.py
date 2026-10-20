@@ -11,17 +11,19 @@ length at all. Measured on the STAR panel (per-base truth), the pair rule reject
 (`ISSUES: star-hi-pairs-against-rigels-own-pairing`).
 
 The annotated-path rule: a spliced hit is usable only if one annotated transcript overlaps both mates and holds every
-junction the hit observes, both mates' and any supplementary record's; Rigel does not assemble transcripts. Otherwise
-it is contradictory (two junctions overlap unequal, or their motifs name both strands), a novel junction (one no
-transcript holds), or unsupported (each held, but no one transcript holds them all over both mates). The molecule is
-judged first, so the rule withholds only molecules, each with a fragment length.
+junction the hit observes; Rigel does not assemble transcripts. Otherwise it is contradictory (two junctions overlap
+unequal, or their motifs name both strands), a novel junction (one no transcript holds), or unsupported (each held, but
+no one transcript holds them all over both mates). The molecule is judged first, so the rule withholds only molecules,
+each with a fragment length.
 
 A template's hits come from geometry alone, for any aligner: every R1 place with every R2 place on one reference with
 opposite strands, the aligner's own pairing (STAR's HI) not read. One alignment written in several records (STAR writes a
 mate's record beside each of its partners) is one place. A hit on a reference the index does not hold is dropped, since
-Rigel can place nothing there (owner, 2026-10-20). A hit that fails is dropped and counted by its reason; a template
-left with no hit is withheld, not counted intergenic: off the index when one of its hits lies on a reference outside
-the index, else an unannotated splice when the annotated-path rule withheld one of its hits, else unpaired.
+Rigel can place nothing there (owner, 2026-10-20). So is a hit with a mate aligned in pieces, a chimeric alignment:
+its record carries SA, or its 5' end is hard-clipped (owner, 2026-10-20); a supplementary record joins no hit. A hit
+that fails is dropped and counted by its reason; a template left with no hit is withheld, not counted intergenic: off
+the index when one of its hits lies on a reference outside the index, else chimeric when one of its hits is, else an
+unannotated splice when the annotated-path rule withheld one of its hits, else unpaired.
 
 The toy reference, 0-based half-open:
 - tK (+): exons [1000,1200) [2100,2400), the intron [1200,2100) for the tolerance case;
@@ -42,6 +44,7 @@ from rigel.pipeline import run_pipeline, scan_and_buffer
 
 GENOME = 20_000
 R1_FWD, R2_REV = 0x1 | 0x2 | 0x40 | 0x20, 0x1 | 0x2 | 0x80 | 0x10
+R1_REV, R2_FWD = R1_FWD ^ 0x30, R2_REV ^ 0x30  # each strand bit and its mate's flipped
 SECONDARY = 0x100
 SUPPLEMENTARY = 0x800
 
@@ -74,7 +77,9 @@ def _index(base, with_t3=False, n_refs=1):
     return TranscriptIndex.load(str(base / "idx"))
 
 
-def _record(qname, flag, pos, cigar, mate_pos, nh=1, hi=None, xs=None, ts=None, ref=0, nm=0):
+def _record(
+    qname, flag, pos, cigar, mate_pos, nh=1, hi=None, xs=None, ts=None, ref=0, nm=0, sa=None
+):
     a = pysam.AlignedSegment()
     a.query_name = qname
     a.flag = flag
@@ -92,6 +97,8 @@ def _record(qname, flag, pos, cigar, mate_pos, nh=1, hi=None, xs=None, ts=None, 
         tags.append(("XS", xs, "A"))
     if ts is not None:
         tags.append(("ts", ts, "A"))
+    if sa is not None:
+        tags.append(("SA", sa, "Z"))
     a.set_tags(tags)
     return a
 
@@ -142,6 +149,7 @@ REASONS = (
     "novel_junction",
     "unsupported",
     "off_index",
+    "chimeric",
 )
 
 
@@ -218,17 +226,6 @@ def test_one_transcript_witnesses_the_whole_path(index, index_t3, tmp_path):
     assert without.n_fragments == 0 and _rejected(without)["length"] == 1
     with_t3 = _scan(tmp_path, index_t3, records)
     assert with_t3.n_fragments == 1 and sum(_rejected(with_t3).values()) == 0
-
-
-def test_a_witness_holds_a_supplementary_records_junction_too(index_t3, tmp_path):
-    """The pair above with T3, plus R1's supplementary record spliced across tK's intron [1200,2100): T3 holds the
-    primaries' junction and gives L 510, but not the supplementary's, and no transcript holds both, so nothing
-    witnesses a path and the pair is too long. The validator reads every junction the hit observes, the set the
-    resolver reads."""
-    records = _pair("supp", 10100, "10M100N10M", 11700, "10M", xs="+")
-    records.append(_record("supp", R1_FWD | SUPPLEMENTARY, 1190, "10M900N10M", 11700, xs="+"))
-    stats = _scan(tmp_path, index_t3, records)
-    assert stats.n_fragments == 0 and _rejected(stats)["length"] == 1
 
 
 def test_a_transcript_between_the_mates_is_no_witness(index, tmp_path):
@@ -465,6 +462,138 @@ def test_the_annotated_bam_labels_a_template_off_the_index(index, tmp_path):
     assert tags[("spike", True)] == tags[("spike", False)] == (0, "off_index")
 
 
+# ── chimeric alignments: withheld ──────────────────────────────────────────────────────────────────────────────
+
+
+def _spanning_chimera(qname="chimera"):
+    """A spanning chimera as STAR writes it (`--chimOutType WithinBAM HardClip`): R1's first 77 bases at 1010, written
+    as the supplementary record, and its last 23 at 1175 with R2 at 1187, the representative pair. The SA tags name
+    each other. Read as a pair, the representative's walked clip makes it a molecule of L 189 along the genome."""
+    return [
+        _record(
+            qname, R1_FWD | SUPPLEMENTARY, 1010, "77M23H", 1187, sa="chr1,1176,+,77S23M,255,0;"
+        ),
+        _record(qname, R1_FWD, 1175, "77S23M", 1187, sa="chr1,1011,+,77M23H,255,0;"),
+        _record(qname, R2_REV, 1187, "100M", 1175),
+    ]
+
+
+def _scan_buffered(base, index, records, column):
+    """The scan's stats, and one column of every fragment it buffered."""
+    stats, _strand, buffer, _payload = scan_and_buffer(
+        _bam(base, records), index, BamScanConfig(total_threads=1)
+    )
+    return stats, [
+        int(x) for chunk in buffer.iter_chunks_consuming() for x in getattr(chunk, column)
+    ]
+
+
+def test_a_spanning_chimera_is_withheld(index, tmp_path):
+    """STAR writes a chimeric read in place of its linear alignment, and Rigel does not quantify chimeras: the template
+    is withheld as chimeric. It is no fragment, chimeric or intergenic, and its pieces are not joined into one."""
+    stats = _scan(tmp_path, index, _spanning_chimera())
+    assert stats.n_fragments == 0 and stats.n_intergenic == 0 and stats.n_chimeric == 0
+    assert _rejected(stats)["chimeric"] == 1 and stats.n_withheld_chimeric == 1
+
+
+def test_a_chimeric_mate_keeps_a_self_contained_alignment(index, tmp_path):
+    """The chimera above, and R1 also aligned whole at 1010 (a secondary record with no SA): the chimeric hit is dropped
+    and the template is placed by the whole alignment, a unique mapper."""
+    records = _spanning_chimera("alt") + [
+        _record("alt", R1_FWD | SECONDARY, 1010, "100M", 1187, nh=2)
+    ]
+    stats = _scan(tmp_path, index, records)
+    assert stats.n_fragments == 1 and stats.n_multimapper_groups == 0
+    assert _rejected(stats)["chimeric"] == 1
+
+
+def test_a_secondary_chimeras_pieces_join_no_other_alignment(index, tmp_path):
+    """R1 whole at 1010 with R2 at 1187 (L 277), and R1 also aligned as a secondary chimera: 60 bases at 5000 and its
+    supplementary record at 15000. The pieces were glued onto R1's primary location; now they join nothing, so the
+    fragment spans the pair alone."""
+    records = [
+        _record("sec", R1_FWD, 1010, "100M", 1187, nh=2),
+        _record("sec", R2_REV, 1187, "100M", 1010, nh=2),
+        _record(
+            "sec", R1_FWD | SECONDARY, 5000, "60M40S", 1187, nh=2, sa="chr1,15001,+,60H40M,0,0;"
+        ),
+        _record(
+            "sec",
+            R1_FWD | SECONDARY | SUPPLEMENTARY,
+            15000,
+            "60H40M",
+            1187,
+            nh=2,
+            sa="chr1,5001,+,60M40S,0,0;",
+        ),
+    ]
+    stats, footprint = _scan_buffered(tmp_path, index, records, "genomic_footprint")
+    assert footprint == [277], (
+        "the secondary chimera's supplementary record joined the primary location's fragment"
+    )
+    assert stats.n_multimapper_groups == 0
+
+
+def test_a_chain_without_sa_withholds_its_mate(index, tmp_path):
+    """R1's supplementary record names no partner, and no R1 record carries SA: which alignment it belongs to is
+    ambiguous, so every R1 location is withheld with it."""
+    records = [
+        _record("nosa", R1_FWD, 1010, "60M40S", 1187),
+        _record("nosa", R1_FWD | SUPPLEMENTARY, 5000, "60H40M", 1187),
+        _record("nosa", R2_REV, 1187, "100M", 1010),
+    ]
+    stats = _scan(tmp_path, index, records)
+    assert stats.n_fragments == 0 and stats.n_withheld_chimeric == 1
+
+
+@pytest.mark.parametrize(
+    "flag, cigar, pos, usable",
+    [
+        pytest.param(R1_FWD, "10H90M", 1020, False, id="forward-5prime"),
+        pytest.param(R1_FWD, "90M10H", 1010, True, id="forward-3prime"),
+        pytest.param(R1_REV, "90M10H", 1197, False, id="reverse-5prime"),
+        pytest.param(R1_REV, "10H90M", 1197, True, id="reverse-3prime"),
+    ],
+)
+def test_a_hard_clipped_5prime_end_is_withheld(index, tmp_path, flag, cigar, pos, usable):
+    """A hard clip removes the bases from the record, and at a read's 5' end they are the molecule's end: the mate's
+    alignment is not wholly in its record, so it is read as chimeric. A hard clip at the 3' end ends no molecule.
+    The mate is R2 at 1100 (forward when R1 is reverse) or 1187."""
+    mate_flag = R2_REV if flag == R1_FWD else R2_FWD
+    mate_pos = 1187 if flag == R1_FWD else 1100
+    records = [
+        _record("hard", flag, pos, cigar, mate_pos),
+        _record("hard", mate_flag, mate_pos, "100M", pos),
+    ]
+    stats = _scan(tmp_path, index, records)
+    assert stats.n_fragments == (1 if usable else 0)
+    assert stats.n_withheld_chimeric == (0 if usable else 1)
+
+
+def test_the_annotated_bam_labels_a_chimeric_template(index, tmp_path):
+    """A withheld chimeric template's records, its supplementary record too, are written unresolved (ZF 0), class
+    `chimeric`. A placed template's supplementary record is written with the same mate's primary location, never swept
+    up as intergenic gDNA (ZF 0x25)."""
+    records = [
+        r for k in range(200) for r in _pair(f"ok{k:03d}", 1010 + k, "100M", 1100 + k, "100M")
+    ]
+    records += _spanning_chimera()
+    records += _spanning_chimera("alt") + [
+        _record("alt", R1_FWD | SECONDARY, 1010, "100M", 1187, nh=2)
+    ]
+    out = tmp_path / "annotated.bam"
+    config = PipelineConfig(
+        em=EMConfig(seed=7), scan=BamScanConfig(total_threads=1), annotated_bam_path=out
+    )
+    run_pipeline(_bam(tmp_path, records), index, config=config)
+    with pysam.AlignmentFile(str(out), "rb") as bam:
+        rows = [(r.query_name, r.is_supplementary, r.get_tag("ZF"), r.get_tag("ZC")) for r in bam]
+    chimera = [(zf, zc) for q, _supp, zf, zc in rows if q == "chimera"]
+    assert len(chimera) == 3 and set(chimera) == {(0, "chimeric")}
+    alt_supp = [zf for q, supp, zf, _zc in rows if q == "alt" and supp]
+    assert len(alt_supp) == 1 and alt_supp[0] != 0x25 and alt_supp[0] & 0x01
+
+
 # ── a record's integer tags: NM and NH ─────────────────────────────────────────────────────────────────────────
 
 
@@ -684,15 +813,6 @@ def test_a_junction_is_held_on_its_motifs_strand_or_either_without_one(index, tm
     assert _rejected(opposite)["novel_junction"] == 1 and opposite.n_fragments == 0
     untagged = _scan(tmp_path, index, _pair("untagged", 10100, "10M100N10M", 10300, "10M"))
     assert sum(_rejected(untagged).values()) == 0 and untagged.n_fragments == 1
-
-
-def test_a_supplementary_records_junction_is_judged_too(index, tmp_path):
-    """The pair crosses T1's intron and is a molecule of L 110; R1's supplementary record splices [5010,5510), which
-    no transcript has. The rule reads every record's junctions, as the resolver does."""
-    records = _pair("supp", 10100, "10M100N10M", 10300, "10M", xs="+")
-    records.append(_record("supp", R1_FWD | SUPPLEMENTARY, 5000, "10M500N10M", 10300, xs="+"))
-    stats = _scan(tmp_path, index, records)
-    assert _rejected(stats)["novel_junction"] == 1 and stats.n_fragments == 0
 
 
 def test_the_rule_judges_a_hit_the_pair_rule_does_not(index, tmp_path):

@@ -110,7 +110,22 @@ the code is open; each is less critical.
   one alignment that disagree on NM read with the largest, counted; `num_hits` in 32 bits, NM checked against its 16.
   Identical: the STAR panel carries both tags on every record with no disputed NM, and the oracle BAMs carry no NM,
   which reads 0, their truth (perfect reads), now warned of; rename_identity bit-identical as above; suite 3,102
-13. ☐ Supplementary chains and hard-clipped 5′ ends withheld, and counted
+13. ☑ Chimeric alignments withheld (2026-10-20, owner; `CHIMERIC_ALIGNMENTS_DESIGN.md`, from STAR 2.7.11b's source): a
+  mate location is `chimeric` when a record of it carries `SA` or its 5′ end is hard-clipped, or when that mate has a
+  supplementary record that no `SA` names; a supplementary record joins no hit; a template left with no usable hit is
+  withheld `chimeric`. Against main on the STAR panel, pinned and fractional: transcript error +2.40 % unstranded OFF,
+  +2.37 % stranded OFF, −0.38 % stranded ON (gene +4.54 / +3.12 / +1.03 %), through the capture reader
+  (`ISSUES: the-reader-reads-false-gdna-as-capture`); with every capture efficiency at 1, +0.22 / +0.18 / +0.14 % (gene
+  +0.73 / +0.93 / +0.15 %), the cost of the true fragments STAR's false mate merges wrote as chimeras. Per 10 M: 1.4–2.4 k
+  templates withheld `chimeric`, 0.8–1.4 k fewer quantified, the 8–15 chimeric fragments gone. The ladder identical by
+  construction (its 16 BAMs hold no `SA`, supplementary record or hard clip); rename_identity bit-identical on oracle
+  g00. Real libraries, withheld `chimeric` / change in quantified pairs: cfRNA-A 8.52 / −2.96 %, cfRNA-B 0.91 / −0.39 %,
+  cfRNA-C 6.49 / −2.95 %, `vcap_mix` 0.36 / −0.23 %; their chimeric fragments 1,795 / 5,099 / 15,711 / 22,287 → 1 / 1 / 1
+  / 48. The pinned scan of g50 κ0.50 capture-OFF 33.6 → 33.1 s (A B A B). Suite 3,108
+  - Next, each its own commit: ☐ the overrun rule (owner, 2026-10-20: mates whose 5′ ends face each other are one
+    molecule spanning both); ☐ `n_deposit_not_offered` and the deposit adapter's multi-reference refusal deleted, now
+    unreachable (126 / 1,468 / 3,662 → 0 on cfRNA-A / B / C); ☐ the resolver's chimera classification deleted (closes
+    `ISSUES: chimera-span-over-exon-blocks-only`). The tail rule deferred (`ISSUES: the-tail-rule-waits-for-truth`)
 14. ☐ Each use of K outside implicit splicing, one at a time
 15. ☐ Accounting: one outcome per template, each record's status from its template's outcome, the counters and the
   annotated-BAM tags; the annotation pass checked against the scan by identity

@@ -462,6 +462,13 @@ pairing, is not read (`template_hits`, `hit_verdict`; `tests/test_hit_verdict.py
   contig) is dropped, `off_index`: Rigel has no partition, transcript or length there, and counting it intergenic
   booked it as gDNA. A multimapper keeps its places on the index; a template with none is withheld. References are
   told apart by the BAM's ids, since every reference outside the index shares the index id −1.
+* **Chimeric alignments** (owner, 2026-10-20). Rigel does not quantify chimeras. A mate location that is one piece of an
+  alignment in pieces is not usable, `chimeric`: a record of it carries `SA`, its 5′ end is hard-clipped, or that
+  mate has a supplementary record that no `SA` names. A supplementary record joins no hit, so no block, junction or NM
+  of it reaches a fragment; a template left with no usable hit is withheld. STAR with `WithinBAM` writes a chimeric
+  read in place of its linear alignment and picks the piece holding both mates as the representative; on the panel
+  its chimeras are false mate merges (`--peOverlapNbasesMin`) whose representative is misplaced, so no piece is
+  trusted. One whose foreign piece is only a read's 3′ tail is withheld too (`ISSUES: the-tail-rule-waits-for-truth`).
 * **Why not HI.** With the capture reader's amplification removed, pairing this way beats STAR's HI groups in every
   capture-OFF condition, it finds the correct pair wherever a template's places hold one, and it costs nothing
   measurable on a deep library; the record is CLOSED `ISSUES: star-hi-pairs-against-rigels-own-pairing`.

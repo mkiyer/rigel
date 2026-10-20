@@ -171,6 +171,17 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   merged into one fragment by coordinate. A read pair with another alignment keeps it; one with none is withheld,
   counted in `summary.json` (`fragment_stats.withheld.off_index`, `hits_rejected.off_index`) and written to the
   annotated BAM as unresolved (`ZC` `off_index`).
+- A read the aligner writes in pieces, a chimeric alignment, is not quantified. 0.7.1 joined a read's supplementary
+  records to its alignment, so a read split across two places became one fragment built from every piece, junctions
+  and mismatches included: counted chimeric when the pieces lay on two references or far apart, and otherwise placed
+  as one molecule. An alignment is now a piece of a chimera when a record of it carries `SA` or its 5' end is
+  hard-clipped, or when its read has a supplementary record that no `SA` names. Such an alignment is dropped; a read
+  pair with another alignment keeps it, and one with none is withheld, counted in `summary.json`
+  (`fragment_stats.withheld.chimeric`, `hits_rejected.chimeric`) and written to the annotated BAM as unresolved (`ZC`
+  `chimeric`). STAR with `--chimOutType WithinBAM` writes a chimeric read in place of its linear alignment, and its
+  mate merging (`--peOverlapNbasesMin`) can turn an ordinary read pair into one: on simulated STAR alignments, where
+  every chimera is such a merge, 0.014–0.024 % of read pairs are chimeric. On three cfRNA libraries 0.9–8.5 % of read
+  pairs are, and the read pairs quantified fall by 0.4–3.0 %.
 - A record's `NM` and `NH` are read only as integers, and `summary.json` counts the records without each and with it
   held as another type (`alignment_stats.nm_tag`, `nh_tag`), each read as absent. A record without `NM` reads as 0
   edits, as in 0.7.1, and the scan now warns of it: it can favor that alignment over one whose mismatches are known.
@@ -184,8 +195,8 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   different core counts (by default `--threads` is the core count); isoforms that share fragments could swap whole
   counts. Each thread now runs whole equivalence classes, whose sums are added in the order one thread adds them,
   at no cost in speed.
-- A spliced alignment is used only if one annotated transcript overlaps both mates and holds every junction it observes,
-  both mates' and any supplementary record's; Rigel does not assemble transcripts. An alignment with a junction no
+- A spliced alignment is used only if one annotated transcript overlaps both mates and holds every junction they
+  observe; Rigel does not assemble transcripts. An alignment with a junction no
   transcript has, with annotated junctions no one transcript over both mates joins, or with junctions no one molecule
   can carry (two overlapping without being equal, or motifs naming both strands) is neither RNA Rigel can place nor,
   spliced, gDNA. 0.7.1 called such an alignment an annotated splice once one of its junctions matched and placed it

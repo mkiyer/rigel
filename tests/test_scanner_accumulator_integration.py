@@ -181,35 +181,6 @@ def _two_contig_bam(bam_path, reads, extra_refs=()) -> str:
     return bam_path
 
 
-@pytest.fixture
-def multi_reference_bam(tmp_path):
-    """A two-contig index and a BAM holding one fragment whose blocks lie on two references.
-
-    This exists to make ``n_deposit_not_offered`` non-zero. The fragment is a valid pair on chr1 whose R1 also has a
-    supplementary record on chr2, so the scan resolves it (intergenic: no transcript) and offers it, but no one
-    region-bound axis holds it, so the deposit adapter refuses it. The refusal is right; being silent about it is not,
-    which is what the counter is for. A pair whose mates sit on two references, or on a reference the index does not
-    hold, used to reach the same refusal; neither reaches the deposit now, because the scan drops such a hit
-    (`tests/test_hit_verdict.py`).
-
-    Returns ``(bam_path, index)``.
-    """
-    index = _two_contig_index(tmp_path)
-    split = _two_contig_read("split", 1, 1000, 0, 1800, True)
-    split.flag |= 0x800  # supplementary: the rest of R1, aligned to chr2
-    reads = [
-        # A valid pair on chr1, intergenic, and the supplementary record that puts it on chr2 too.
-        _two_contig_read("split", 0, 1500, 0, 1800, True),
-        _two_contig_read("split", 0, 1800, 0, 1500, False),
-        split,
-        # And one ordinary intergenic pair, so a census that counted NOTHING would not pass by
-        # making both sides of the identity zero.
-        _two_contig_read("cis", 0, 2000, 0, 2300, True),
-        _two_contig_read("cis", 0, 2300, 0, 2000, False),
-    ]
-    return _two_contig_bam(tmp_path / "multi_ref.bam", reads), index
-
-
 def _scan_full(result, index=None):
     """The scan's ``(stats, payload)`` — the two QC objects the census identity spans."""
     config = PipelineConfig(
@@ -516,42 +487,6 @@ class TestSpliceCensus:
             f"the scanner censused {n_artifact} artifacts but the accumulator's deposit total fell "
             f"by {int(clean_payload.qc.deposited) - int(bl_payload.qc.deposited)}"
         )
-
-    def test_the_identity_holds_when_a_fragment_cannot_be_expressed_as_one_molecule(
-        self, multi_reference_bam
-    ):
-        """The identity, on the term that closes the books over the deposit adapter's own refusals.
-
-        PERTURBATION: without this fixture ``n_deposit_not_offered`` is zero on both sides
-        everywhere, and deleting the counter entirely leaves the suite green.
-        """
-        from rigel.splice import SpliceType, census_field
-
-        bam_path, index = multi_reference_bam
-        config = PipelineConfig(em=EMConfig(seed=SEED), scan=BamScanConfig(sj_strand_tag="auto"))
-        stats, _, _, payload = scan_and_buffer(bam_path, index, config.scan)
-
-        census = {st: int(getattr(stats, census_field(st))) for st in SpliceType}
-        qc = payload.qc
-
-        assert int(stats.n_deposit_not_offered) > 0, (
-            "no fragment was held out as unrepresentable, so this test proves nothing about the "
-            "term it exists for"
-        )
-        offered = sum(census.values())
-        assert offered > int(stats.n_deposit_not_offered), (
-            "every censused fragment was held out; the identity would then be satisfiable with a "
-            "deposit count of zero"
-        )
-        accounted = (
-            int(qc.deposited)
-            + int(qc.dropped_too_long)
-            + int(qc.dropped_empty)
-            + int(qc.dropped_strand_undefined)
-            + int(qc.deferred_undetermined_gap)
-            + int(stats.n_deposit_not_offered)
-        )
-        assert offered - census[SpliceType.SPLICE_ARTIFACT] == accounted
 
     # The census being a SUPERSET of the fragment-length observation population is the entire reason
     # it exists, but there is no separate observation counter left to compare it against. The
