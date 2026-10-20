@@ -154,9 +154,9 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument that has a --self-test runs it
 ```
 
-**The standing baseline: 0 failed / 3,092 passed / 0 skipped / 0 xfail, 3,092 collected** — re-derived
-2026-10-20 on the worktree carrying the one length rule (eight cases in place of three; 3,087 after deleting
-`SPLICED_UNANNOT`, 3,091 after the search, HI
+**The standing baseline: 0 failed / 3,096 passed / 0 skipped / 0 xfail, 3,096 collected** — re-derived
+2026-10-20 on the worktree dropping hits off the index (four gates added; 3,092 after the one length rule, 3,087 after
+deleting `SPLICED_UNANNOT`, 3,091 after the search, HI
 not read; 3,086 after the shared-transcript witness, 3,083 after the annotated-path
 rule, 3,068 after one junction set per hit, 3,067 after a template's valid hits as its multiplicity, 3,063 after one-mate
 hits, 3,060 after the pair validator, 3,052 after the index's transcript strands, 3,050 after the junction-strand tag

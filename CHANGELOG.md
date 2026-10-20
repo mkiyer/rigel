@@ -165,6 +165,12 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   whether its mates overlapped, and a read pair running through an intron gave the transcript it contradicts a
   shortened length. On simulated STAR alignments the transcript table moves by less than 0.06 % in every stratum, and
   the scan takes 1.3 % longer.
+- An alignment on a reference the index does not hold (a spike-in, alternate or decoy contig) is dropped, since Rigel
+  can place nothing there. 0.7.1 counted its read pair intergenic, which `summary.json` adds to the gDNA pool, so a
+  spike-in aligned to a contig the index leaves out was read as genomic DNA, and mates on two such references were
+  merged into one fragment by coordinate. A read pair with another alignment keeps it; one with none is withheld,
+  counted in `summary.json` (`fragment_stats.withheld.off_index`, `hits_rejected.off_index`) and written to the
+  annotated BAM as unresolved (`ZC` `off_index`).
 - The locus EM gives one answer at any thread count. 0.7.1 split the E-step of its largest loci across the threads
   and added their sums in an order that followed the thread count, so one input gave different tables on machines with
   different core counts (by default `--threads` is the core count); isoforms that share fragments could swap whole

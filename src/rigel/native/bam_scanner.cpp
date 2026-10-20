@@ -167,6 +167,7 @@ static const char* hit_verdict_label(int32_t verdict) {
         case HIT_CONTRADICTORY:  return "contradictory";
         case HIT_NOVEL_JUNCTION: return "novel_junction";
         case HIT_UNSUPPORTED:    return "unsupported";
+        case HIT_OFF_INDEX:      return "off_index";
         default:                 return "unknown";
     }
 }
@@ -176,12 +177,14 @@ static const char* hit_verdict_label(int32_t verdict) {
 static constexpr int32_t WITHHELD_NONE               = 0;
 static constexpr int32_t WITHHELD_UNPAIRED           = 1;  // none of its hits is a molecule
 static constexpr int32_t WITHHELD_UNANNOTATED_SPLICE = 2;  // the annotated-path rule withheld one of its hits
-static constexpr int32_t N_WITHHELD                  = 3;
+static constexpr int32_t WITHHELD_OFF_INDEX          = 3;  // one of its hits lies on a reference outside the index
+static constexpr int32_t N_WITHHELD                  = 4;
 
 static const char* withheld_label(int32_t outcome) {
     switch (outcome) {
         case WITHHELD_UNPAIRED:           return "unpaired";
         case WITHHELD_UNANNOTATED_SPLICE: return "unannotated_splice";
+        case WITHHELD_OFF_INDEX:          return "off_index";
         default:                          return "unknown";
     }
 }
@@ -978,11 +981,14 @@ static TemplateHits template_hits(std::vector<ParsedAlignment>& records)
 // ================================================================
 
 /// `HIT_USABLE` when a hit's two mates can be one molecule (`FragmentResolver::validate_pair`), or when the hit is not
-/// a pair this rule judges: a mate with no aligned base, or off the index, which stays as it was for the change that
-/// owns it. Otherwise the reason they cannot; a hit with one mate gives no fragment length at all
-/// (`HIT_MISSING_MATE`). A transcript that witnesses a path must overlap both mates and hold every junction the hit
-/// observes (``junctions``). ``f`` and ``r`` are set to the forward and reverse mates when the rule judged them. Each
-/// side of a hit is one mate location's record, then that mate's supplementary records (`template_hits`).
+/// a pair this rule judges: a mate with no aligned base, which stays as it was for the change that owns it. Otherwise
+/// the reason they cannot; a hit with one mate gives no fragment length at all (`HIT_MISSING_MATE`), and one on a
+/// reference the index does not hold has no partition, transcript or length along one (`HIT_OFF_INDEX`). Mates on two
+/// references are two references, wherever they lie: references are told apart by the BAM's ids, as every reference
+/// outside the index shares the index id -1. A transcript that witnesses a path must overlap both mates and hold every
+/// junction the hit observes (``junctions``). ``f`` and ``r`` are set to the forward and reverse mates when the rule
+/// judged them. Each side of a hit is one mate location's record, then that mate's supplementary records
+/// (`template_hits`).
 static int32_t pair_verdict(
     const std::pair<std::vector<ParsedAlignment*>, std::vector<ParsedAlignment*>>& hit,
     const std::vector<IntronBlock>& junctions,
@@ -995,8 +1001,8 @@ static int32_t pair_verdict(
     if (hit.first.empty() || hit.second.empty()) return HIT_MISSING_MATE;
     const ParsedAlignment* m1 = hit.first.front();
     const ParsedAlignment* m2 = hit.second.front();
+    if (m1->ref_id < 0 || m2->ref_id < 0) return m1->tid != m2->tid ? HIT_REFERENCE : HIT_OFF_INDEX;
     if (m1->exons.empty() || m2->exons.empty()) return HIT_USABLE;
-    if (m1->ref_id < 0 || m2->ref_id < 0) return HIT_USABLE;
     if (m1->ref_id != m2->ref_id) return HIT_REFERENCE;
     if (m1->is_reverse() == m2->is_reverse()) return HIT_STRAND;
     f = m1->is_reverse() ? m2 : m1;
@@ -1028,21 +1034,24 @@ static int32_t hit_verdict(
 }
 
 /// Every hit's verdict into ``verdicts`` (`hit_verdict`: HIT_USABLE or the reason), and why the template is withheld
-/// when it has hits and none is usable: an unannotated splice when the annotated-path rule withheld one of them, else
-/// unpaired (WITHHELD_NONE otherwise). The scan and the annotation pass both judge a template here, so the BAM the
+/// when it has hits and none is usable: off the index when one of them lies on a reference the index does not hold,
+/// else an unannotated splice when the annotated-path rule withheld one of them, else unpaired (WITHHELD_NONE
+/// otherwise). The scan and the annotation pass both judge a template here, so the BAM the
 /// annotation pass writes says what the scan counted.
 static int32_t judge_hits(const TemplateHits& th, const FragmentResolver& ctx, ResolverScratch& scratch,
                           std::vector<int32_t>& verdicts)
 {
     verdicts.clear();
-    bool usable = false, unannotated_splice = false;
+    bool usable = false, off_index = false, unannotated_splice = false;
     for (const auto& hit : th.hits) {
         const int32_t v = hit_verdict(hit, ctx, scratch);
         verdicts.push_back(v);
         usable |= v == HIT_USABLE;
+        off_index |= v == HIT_OFF_INDEX;
         unannotated_splice |= is_unannotated_splice(v);
     }
     if (usable || th.hits.empty()) return WITHHELD_NONE;
+    if (off_index) return WITHHELD_OFF_INDEX;
     return unannotated_splice ? WITHHELD_UNANNOTATED_SPLICE : WITHHELD_UNPAIRED;
 }
 

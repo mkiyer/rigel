@@ -183,28 +183,31 @@ def _two_contig_bam(bam_path, reads, extra_refs=()) -> str:
 
 @pytest.fixture
 def multi_reference_bam(tmp_path):
-    """A two-contig index and a BAM holding one fragment on a reference the index does not hold.
+    """A two-contig index and a BAM holding one fragment whose blocks lie on two references.
 
-    This exists to make ``n_deposit_not_offered`` non-zero. The fragment is a valid pair, so the scan
-    resolves it (intergenic: no transcript) and offers it, but it has no region-bound axis to land on,
-    so the deposit adapter refuses it. The refusal is right; being silent about it is not, which is what
-    the counter is for. A pair whose mates sit on two references used to reach the same refusal; it no
-    longer reaches the deposit at all, because the scan withholds a pair that is not one molecule
+    This exists to make ``n_deposit_not_offered`` non-zero. The fragment is a valid pair on chr1 whose R1 also has a
+    supplementary record on chr2, so the scan resolves it (intergenic: no transcript) and offers it, but no one
+    region-bound axis holds it, so the deposit adapter refuses it. The refusal is right; being silent about it is not,
+    which is what the counter is for. A pair whose mates sit on two references, or on a reference the index does not
+    hold, used to reach the same refusal; neither reaches the deposit now, because the scan drops such a hit
     (`tests/test_hit_verdict.py`).
 
     Returns ``(bam_path, index)``.
     """
     index = _two_contig_index(tmp_path)
+    split = _two_contig_read("split", 1, 1000, 0, 1800, True)
+    split.flag |= 0x800  # supplementary: the rest of R1, aligned to chr2
     reads = [
-        # A valid pair on chrU, a reference the BAM carries and the index does not.
-        _two_contig_read("unindexed", 2, 1500, 2, 1800, True),
-        _two_contig_read("unindexed", 2, 1800, 2, 1500, False),
+        # A valid pair on chr1, intergenic, and the supplementary record that puts it on chr2 too.
+        _two_contig_read("split", 0, 1500, 0, 1800, True),
+        _two_contig_read("split", 0, 1800, 0, 1500, False),
+        split,
         # And one ordinary intergenic pair, so a census that counted NOTHING would not pass by
         # making both sides of the identity zero.
         _two_contig_read("cis", 0, 2000, 0, 2300, True),
         _two_contig_read("cis", 0, 2300, 0, 2000, False),
     ]
-    return _two_contig_bam(tmp_path / "multi_ref.bam", reads, extra_refs=("chrU",)), index
+    return _two_contig_bam(tmp_path / "multi_ref.bam", reads), index
 
 
 def _scan_full(result, index=None):

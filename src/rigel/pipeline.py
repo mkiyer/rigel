@@ -147,6 +147,7 @@ def _log_hit_verdicts(stats: PipelineStats) -> None:
         "junctions that contradict": stats.n_hits_rejected_contradictory,
         "a novel junction": stats.n_hits_rejected_novel_junction,
         "junctions no one transcript over both mates holds": stats.n_hits_rejected_unsupported,
+        "off the index": stats.n_hits_rejected_off_index,
     }
     if stats.n_nh_above_reported:
         logger.warning(
@@ -158,11 +159,12 @@ def _log_hit_verdicts(stats: PipelineStats) -> None:
         return
     logger.info(
         "[SCAN] %d pairings dropped (%s); templates left with no usable hit, withheld: %d unpaired, %d unannotated "
-        "splices",
+        "splices, %d off the index",
         sum(rejected.values()),
         ", ".join(f"{why} {n}" for why, n in rejected.items() if n),
         stats.n_withheld_unpaired,
         stats.n_withheld_unannotated_splice,
+        stats.n_withheld_off_index,
     )
 
 
@@ -208,9 +210,9 @@ def _check_bam_header(bam_path: str, index: TranscriptIndex) -> None:
     """Refuse, from its header alone, a BAM the scan would read wrong.
 
     A coordinate-sorted BAM puts a pair's mates apart, and the scan groups adjacent records by read name, so every mate
-    would be its own fragment. References the index does not hold would book every fragment intergenic, and a
-    reference it holds at another length is another assembly. References beyond the index (decoys, alternates, a
-    contig the annotation leaves out) are allowed and named in a warning, since their reads are counted intergenic.
+    would be its own fragment. A BAM none of whose references the index holds was aligned elsewhere, and a reference
+    it holds at another length is another assembly. References beyond the index (decoys, alternates, spike-ins) are
+    allowed and named in a warning: the scan withholds the reads aligned there, counted in no pool.
     """
     import pysam
 
@@ -250,7 +252,8 @@ def _check_bam_header(bam_path: str, index: TranscriptIndex) -> None:
     beyond = [name for name in bam_refs if name not in index.ref_lengths]
     if beyond:
         logger.warning(
-            "%s of the BAM's %s references are not in the index (%s); their reads are counted intergenic.",
+            "%s of the BAM's %s references are not in the index (%s); the reads aligned there are withheld, "
+            "counted in no pool (fragment_stats.withheld.off_index).",
             f"{len(beyond):,}",
             f"{len(bam_refs):,}",
             some(beyond),

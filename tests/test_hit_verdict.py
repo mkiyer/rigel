@@ -18,9 +18,10 @@ judged first, so the rule withholds only molecules, each with a fragment length.
 
 A template's hits come from geometry alone, for any aligner: every R1 place with every R2 place on one reference with
 opposite strands, the aligner's own pairing (STAR's HI) not read. One alignment written in several records (STAR writes a
-mate's record beside each of its partners) is one place. A hit that fails is dropped and counted by its reason; a
-template left with no hit is withheld, not counted intergenic: an unannotated splice when the annotated-path rule
-withheld one of its hits, else unpaired.
+mate's record beside each of its partners) is one place. A hit on a reference the index does not hold is dropped, since
+Rigel can place nothing there (owner, 2026-10-20). A hit that fails is dropped and counted by its reason; a template
+left with no hit is withheld, not counted intergenic: off the index when one of its hits lies on a reference outside
+the index, else an unannotated splice when the annotated-path rule withheld one of its hits, else unpaired.
 
 The toy reference, 0-based half-open:
 - tK (+): exons [1000,1200) [2100,2400), the intron [1200,2100) for the tolerance case;
@@ -140,6 +141,7 @@ REASONS = (
     "contradictory",
     "novel_junction",
     "unsupported",
+    "off_index",
 )
 
 
@@ -404,6 +406,65 @@ def test_an_alias_is_written_with_its_alignments_hit(index, tmp_path):
     assert r1[0][0] & 0x01 and r1[0][0] != 0x25
 
 
+# ── references outside the index: Rigel can place nothing there ─────────────────────────────────────────────────
+
+
+def test_a_pair_off_the_index_is_withheld_not_counted_gdna(index, tmp_path):
+    """Both mates on chr2, a reference the BAM names and the index does not hold (a spike-in, alternate or decoy
+    contig). It has no partition, no transcript and no length along one, so the hit is dropped and the template
+    withheld. It is no intergenic fragment, which `summary.json` counts as gDNA."""
+    stats = _scan(tmp_path, index, _pair("spike", 1010, "100M", 1100, "100M", ref=1))
+    assert stats.n_fragments == 0 and stats.n_intergenic == 0, (
+        "a pair off the index was counted intergenic"
+    )
+    assert _rejected(stats)["off_index"] == 1
+    assert stats.n_withheld_off_index == 1 and stats.n_withheld_unpaired == 0
+
+
+def test_mates_on_two_references_off_the_index_are_two_references(index, tmp_path):
+    """R1 on chr2 and R2 on chr3, neither in the index: mates on two references, as on any two, not one fragment merged
+    by coordinate."""
+    records = [
+        _record("trans_off", R1_FWD, 1010, "100M", 1100, ref=1),
+        _record("trans_off", R2_REV, 1100, "100M", 1010, ref=2),
+    ]
+    stats = _scan(tmp_path, index, records)
+    assert stats.n_fragments == 0 and stats.n_intergenic == 0, (
+        "the two references were merged into one fragment"
+    )
+    assert _rejected(stats)["reference"] == 1 and stats.n_withheld_unpaired == 1
+
+
+def test_a_place_off_the_index_is_no_place_of_the_template(index, tmp_path):
+    """One pair on chr1 (L 190), and the same pair again on chr2, off the index: that place is dropped and counted, and
+    the template is placed on chr1 alone, a unique mapper."""
+    records = _pair("decoy", 1010, "100M", 1100, "100M", nh=2) + _pair(
+        "decoy", 1010, "100M", 1100, "100M", nh=2, secondary=True, ref=1
+    )
+    stats = _scan(tmp_path, index, records)
+    assert stats.n_fragments == 1 and stats.n_intergenic == 0
+    assert stats.n_multimapper_groups == 0, (
+        "the place off the index was one of the template's places"
+    )
+    assert _rejected(stats)["off_index"] == 1
+
+
+def test_the_annotated_bam_labels_a_template_off_the_index(index, tmp_path):
+    """A template off the index is written unresolved (ZF 0), class `off_index`, not as intergenic gDNA (ZF 0x25)."""
+    records = [
+        r for k in range(200) for r in _pair(f"ok{k:03d}", 1010 + k, "100M", 1100 + k, "100M")
+    ]
+    records += _pair("spike", 1010, "100M", 1100, "100M", ref=1)
+    out = tmp_path / "annotated.bam"
+    config = PipelineConfig(
+        em=EMConfig(seed=7), scan=BamScanConfig(total_threads=1), annotated_bam_path=out
+    )
+    run_pipeline(_bam(tmp_path, records), index, config=config)
+    with pysam.AlignmentFile(str(out), "rb") as bam:
+        tags = {(r.query_name, r.is_read1): (r.get_tag("ZF"), r.get_tag("ZC")) for r in bam}
+    assert tags[("spike", True)] == tags[("spike", False)] == (0, "off_index")
+
+
 # ── multiplicity: a template's distinct valid hits ──────────────────────────────────────────────────
 
 
@@ -575,9 +636,13 @@ def test_a_supplementary_records_junction_is_judged_too(index, tmp_path):
 
 
 def test_the_rule_judges_a_hit_the_pair_rule_does_not(index, tmp_path):
-    """A spliced pair on chr2, a reference the index lacks: the pair rule leaves a mate off the index as it was, but
-    no transcript holds its junction, so it is withheld rather than counted intergenic RNA."""
-    records = _pair("offindex", 100, "50M100N50M", 300, "100M", xs="+", ref=1)
+    """F spliced across [1060,1160) inside gK, where no transcript has an intron, and its mate with no aligned base
+    (`100S`): the pair rule leaves such a mate as it was, but no transcript holds the junction, so the hit is withheld
+    rather than counted intergenic RNA."""
+    records = [
+        _record("noalign", R1_FWD, 1010, "50M100N50M", 1300, xs="+"),
+        _record("noalign", R2_REV, 1300, "100S", 1010),
+    ]
     stats = _scan(tmp_path, index, records)
     assert _rejected(stats)["novel_junction"] == 1
     assert stats.n_fragments == 0 and stats.n_intergenic == 0

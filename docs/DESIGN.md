@@ -458,6 +458,10 @@ pairing, is not read (`template_hits`, `hit_verdict`; `tests/test_hit_verdict.py
   holding every observed junction, with no aligned base more than K inside one of its introns, and giving a path of
   1..`max_frag_length` between them. Rigel does not assemble transcripts. A hit that fails is dropped with its reason;
   a template left with none is withheld.
+* **Off the index** (owner, 2026-10-20). A hit on a reference the index does not hold (a spike-in, alternate or decoy
+  contig) is dropped, `off_index`: Rigel has no partition, transcript or length there, and counting it intergenic
+  booked it as gDNA. A multimapper keeps its places on the index; a template with none is withheld. References are
+  told apart by the BAM's ids, since every reference outside the index shares the index id −1.
 * **Why not HI.** With the capture reader's amplification removed, pairing this way beats STAR's HI groups in every
   capture-OFF condition, it finds the correct pair wherever a template's places hold one, and it costs nothing
   measurable on a deep library; the record is CLOSED `ISSUES: star-hi-pairs-against-rigels-own-pairing`.

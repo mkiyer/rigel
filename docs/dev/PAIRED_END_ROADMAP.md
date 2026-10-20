@@ -102,8 +102,11 @@ the code is open; each is less critical.
   expected did not appear: the candidates whose length changed already lose to their overhang penalty. Suite 3,092
 
 *The bundle*
-12. ☐ The rest of one location per alignment: NM conflicts and missing NM counted; unindexed references apart; tag
-  types checked; count widths that cannot wrap
+12. ◐ The rest of one location per alignment. ☑ Off the index (2026-10-20, owner: drop the hit): an alignment on a
+  reference the index does not hold is dropped, `off_index`, never counted intergenic gDNA, and mates on two such
+  references are two references (the BAM's ids). No panel BAM names such a reference, so nothing on the panel can move:
+  rename_identity bit-identical on oracle g00 and STAR g50 ss.50 OFF, the annotated BAM identical; suite 3,096. ☐ NM
+  conflicts and missing NM counted; tag types checked; count widths that cannot wrap
 13. ☐ Supplementary chains and hard-clipped 5′ ends withheld, and counted
 14. ☐ Each use of K outside implicit splicing, one at a time
 15. ☐ Accounting: one outcome per template, each record's status from its template's outcome, the counters and the
