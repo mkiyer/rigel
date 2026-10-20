@@ -36,7 +36,6 @@ using rigel::LOG_HALF;
 using rigel::TAIL_DECAY_LP;
 using rigel::STRAND_NEG;
 using rigel::SPLICE_UNSPLICED;
-using rigel::SPLICE_SPLICED_UNANNOT;
 using rigel::SPLICE_SPLICED_ANNOT;
 using rigel::SPLICE_IMPLICIT;
 using rigel::SPLICE_ARTIFACT;
@@ -226,7 +225,7 @@ class NativeFragmentScorer {
     ///   ARTIFACT   yes: every junction it carried was rejected by the blacklist, so it is unspliced.
     ///   IMPLICIT   yes: its mate gap is unobserved, so gDNA reads it unbroken at the footprint and a
     ///              transcript at its own length, and the fragment length tells them apart.
-    ///   SPLICED_ANNOT / SPLICED_UNANNOT  no: a sequenced junction that survived the blacklist.
+    ///   SPLICED_ANNOT  no: a sequenced junction that survived the blacklist.
     /// Whether gDNA then COMPETES is the likelihood's: its term is the unspliced term at the genomic
     /// footprint whatever the label, and it is pruned exactly as an RNA candidate is (`gdna_competes`).
     inline bool gdna_can_explain(int stype) const {
@@ -510,12 +509,7 @@ private:
         bool has_genomic = (genomic_start_val >= 0);
 
         // Update per-group metadata accumulators (the reported splice type only)
-        if (stype == SPLICE_SPLICED_ANNOT) {
-            st.mm_best_stype = SPLICE_SPLICED_ANNOT;
-        } else if (stype == SPLICE_SPLICED_UNANNOT &&
-                   st.mm_best_stype != SPLICE_SPLICED_ANNOT) {
-            st.mm_best_stype = SPLICE_SPLICED_UNANNOT;
-        }
+        if (stype == SPLICE_SPLICED_ANNOT) st.mm_best_stype = SPLICE_SPLICED_ANNOT;
 
         // gDNA per-hit term, from every hit gDNA can explain (`gdna_can_explain`) that has a transcript
         // candidate (`n_cand > 0`); a spliced hit does not remove gDNA from the group. The EM applies the

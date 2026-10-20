@@ -133,7 +133,6 @@ NB_MODULE(_resolve_impl, m) {
 
     // --- The SpliceType constants, mirrored for the parity gate against rigel.splice ---
     m.attr("SPLICE_UNSPLICED")       = rigel::SPLICE_UNSPLICED;
-    m.attr("SPLICE_SPLICED_UNANNOT") = rigel::SPLICE_SPLICED_UNANNOT;
     m.attr("SPLICE_SPLICED_ANNOT")   = rigel::SPLICE_SPLICED_ANNOT;
     m.attr("SPLICE_IMPLICIT")        = rigel::SPLICE_IMPLICIT;
     m.attr("SPLICE_ARTIFACT")        = rigel::SPLICE_ARTIFACT;

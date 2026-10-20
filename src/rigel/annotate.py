@@ -79,8 +79,8 @@ BAM Tag Schema
      - Number of EM candidate components
    * - ZS
      - Z
-     - Splice type (``unspliced``, ``spliced_unannot``, ``spliced_annot``,
-       ``spliced_implicit``, ``splice_artifact``, or ``unknown``)
+     - Splice type (``unspliced``, ``spliced_annot``, ``spliced_implicit``,
+       ``splice_artifact``, or ``unknown``)
    * - ZL
      - i
      - Locus ID (``-1`` if no locus)

@@ -255,18 +255,19 @@ class TestImplicitSpliceDiscriminant:
         assert result is not None
         assert result.splice_type == int(SpliceType.SPLICED_ANNOT)
 
-    # (k) CIGAR-spliced unannotated fragment → SPLICED_UNANNOT (gate not entered)
-    def test_k_cigar_spliced_unannot_unaffected(self, with_tolerance):
+    # (k) CIGAR-spliced, its junction held by no transcript → refused
+    def test_k_a_spliced_fragment_no_transcript_holds_is_refused(self, with_tolerance):
+        """A junction inside exon 1 that no transcript has. The scan withholds such a hit before it reaches the
+        resolver (the annotated-path rule, `tests/test_hit_verdict.py`), so the resolver takes every junction it is
+        handed to be held by one transcript, and refuses a fragment whose junctions are not."""
         index, set_k = with_tolerance
         set_k(3)
-        # Use an unannotated SJ inside exon 1 region; matches no annotated sj.
-        result = _resolve(
-            index,
-            exons=(_exon(120, 150), _exon(170, 195)),
-            introns=(GenomicInterval("chr1", 150, 170, Strand.POS),),
-        )
-        assert result is not None
-        assert result.splice_type == int(SpliceType.SPLICED_UNANNOT)
+        with pytest.raises(ValueError, match="annotated transcript"):
+            _resolve(
+                index,
+                exons=(_exon(120, 150), _exon(170, 195)),
+                introns=(GenomicInterval("chr1", 150, 170, Strand.POS),),
+            )
 
     # (l) two candidates, only one has contained intron → SPLICED_IMPLICIT
     def test_l_any_candidate_semantics(self, with_tolerance):
@@ -334,12 +335,6 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
     #: [62500,62900) an unsequenced mate gap.
     MIXED_BLOCKS = ((62100, 62200), (62400, 62500), (62900, 63000))
 
-    #: The same molecule with the observed splice landing 2 bp INSIDE the annotated donor, so the
-    #: observed intron is UNANNOTATED and the annotated one sits within the ±K intron-overhang
-    #: tolerance of it.
-    NEAR_MISS_BLOCKS = ((62100, 62202), (62400, 62500), (62900, 63000))
-    NEAR_MISS_OBSERVED = (62202, 62400)
-
     @staticmethod
     def _emitted(result):
         """Every hypothesis as a list of ``(start, end)`` pairs. ``[]`` is the unspliced one."""
@@ -375,26 +370,6 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
             "It must be dropped by EXACT (start, end) equality against the observed introns"
         )
 
-    # U3 — the near-match trap: a different, nearby annotated intron must not be substituted.
-    def test_U3_a_near_match_to_the_observed_gap_is_not_substituted(self, with_tolerance):
-        index, set_k = with_tolerance
-        set_k(3)
-        result = self._resolve_mixed(index, self.NEAR_MISS_BLOCKS, self.NEAR_MISS_OBSERVED)
-        assert result is not None
-        # The genuine mate-gap intron is still found — without this the assertion below would pass on a
-        # detector that never ran at all.
-        #
-        # TWO hypotheses, and the empty one is not an accident: this fragment's observed splice is
-        # UNANNOTATED, so it does NOT certify the molecule as RNA (an unannotated CIGAR-N may be a
-        # misalignment, which is why `FragmentPool.RNA_SPLICED` requires an ANNOTATED sj). The
-        # unspliced — genomic — hypothesis therefore stays live and the accumulator will defer.
-        assert self._emitted(result) == [[self.IMPLIED], []], (
-            "the observed gap [62202,62400) is within the K=3 intron-overhang tolerance of the "
-            "ANNOTATED intron [62200,62400), so dropping only exact matches is what stops a "
-            "DIFFERENT intron being substituted for it. Two overlapping introns then normalise into "
-            "one wider one and L comes out too SHORT — "
-        )
-
     # U4 — the classification does not move. This work is about L, not about labelling.
     def test_U4_splice_type_does_not_move_when_a_gap_intron_is_found(self, with_tolerance):
         index, set_k = with_tolerance
@@ -406,9 +381,6 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
             "splice_type feeds scoring, the buffer, the strand training and the report's census, and "
             "re-labelling would silently move mass between reported categories"
         )
-        near = self._resolve_mixed(index, self.NEAR_MISS_BLOCKS, self.NEAR_MISS_OBSERVED)
-        assert near is not None
-        assert near.splice_type == int(SpliceType.SPLICED_UNANNOT)
 
 
 # ── The scanner: an implicit splice deposits when its path is determined, defers when it is not ─

@@ -222,7 +222,6 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     assert set(splice) == {
         "unspliced",
         "spliced_annotated",
-        "spliced_unannotated",
         "spliced_implicit",
         "splice_artifact",
         "sj_blacklisted",

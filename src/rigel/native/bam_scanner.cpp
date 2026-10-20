@@ -149,7 +149,6 @@ static const char* frag_class_label(int code) {
 static const char* splice_type_label(int code) {
     switch (code) {
         case SPLICE_UNSPLICED:       return "unspliced";
-        case SPLICE_SPLICED_UNANNOT: return "spliced_unannot";
         case SPLICE_SPLICED_ANNOT:   return "spliced_annot";
         case SPLICE_IMPLICIT:        return "spliced_implicit";
         case SPLICE_ARTIFACT:        return "splice_artifact";
@@ -340,7 +339,6 @@ struct BamScanStats {
     int64_t n_intergenic = 0;  // templates no hit of which resolves: unspliced, gDNA by construction
     int64_t n_with_exon = 0;
     int64_t n_with_annotated_sj = 0;
-    int64_t n_with_unannotated_sj = 0;
     int64_t n_same_strand = 0;
     int64_t n_ambig_strand = 0;
 
@@ -420,7 +418,6 @@ struct BamScanStats {
         n_intergenic += o.n_intergenic;
         n_with_exon += o.n_with_exon;
         n_with_annotated_sj += o.n_with_annotated_sj;
-        n_with_unannotated_sj += o.n_with_unannotated_sj;
         n_same_strand += o.n_same_strand;
         n_ambig_strand += o.n_ambig_strand;
         n_strand_trained += o.n_strand_trained;
@@ -1676,8 +1673,8 @@ private:
                 // mate carries the tag yields the same intron twice; dropping the second keeps it out of a
                 // held record, which stores its observed introns as offered and sorts on them. The junctions
                 // are ordered, so consecutive comparison is enough; ⛔ they must NOT be re-keyed or merged in
-                // `observed_junctions`, which the resolver shares (measured: merging demotes SPLICED_ANNOT to
-                // SPLICED_UNANNOT and widens `t_inds`).
+                // `observed_junctions`, which the resolver shares: a merged junction may be one no transcript
+                // holds, and the resolver refuses a fragment with one.
                 auto& observed = ws.arena_observed;
                 const std::size_t obs0 = observed.size();
                 for (const auto& intron : f.introns) {
@@ -1940,8 +1937,6 @@ private:
                 stats.n_with_exon++;
                 if (result.splice_type == SPLICE_SPLICED_ANNOT) {
                     stats.n_with_annotated_sj++;
-                } else if (result.splice_type == SPLICE_SPLICED_UNANNOT) {
-                    stats.n_with_unannotated_sj++;
                 }
 
                 if (result.get_is_same_strand()) {
@@ -2062,7 +2057,6 @@ private:
         stats_dict["n_intergenic"] = stats_.n_intergenic;
         stats_dict["n_with_exon"] = stats_.n_with_exon;
         stats_dict["n_with_annotated_sj"] = stats_.n_with_annotated_sj;
-        stats_dict["n_with_unannotated_sj"] = stats_.n_with_unannotated_sj;
         stats_dict["n_same_strand"] = stats_.n_same_strand;
         stats_dict["n_ambig_strand"] = stats_.n_ambig_strand;
         stats_dict["n_strand_trained"] = stats_.n_strand_trained;

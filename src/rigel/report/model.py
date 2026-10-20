@@ -214,10 +214,7 @@ def _fragments(summary: SummaryReader) -> dict:
     inter = f["intergenic"]
     chim = f["chimeric"]
     sp = summary["fragment_stats.splice"]
-    spliced = sum(
-        sp[k]
-        for k in ("spliced_annotated", "spliced_unannotated", "spliced_implicit", "splice_artifact")
-    )
+    spliced = sum(sp[k] for k in ("spliced_annotated", "spliced_implicit", "splice_artifact"))
 
     ctx = [
         {"label": "Genic", "value": genic, "cls": _C[1]},
@@ -233,7 +230,6 @@ def _fragments(summary: SummaryReader) -> dict:
         {"label": "Unspliced", "value": sp["unspliced"], "cls": "fmuted"},
         {"label": "Annotated", "value": sp["spliced_annotated"], "cls": _C[1]},
         {"label": "Implicit", "value": sp["spliced_implicit"], "cls": _C[2]},
-        {"label": "Unannotated", "value": sp["spliced_unannotated"], "cls": _C[3]},
         {"label": "Artifact", "value": sp["splice_artifact"], "cls": _C[6]},
     ]
     kpis = [

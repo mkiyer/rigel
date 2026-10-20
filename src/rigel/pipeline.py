@@ -194,7 +194,6 @@ def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
         "n_intergenic",
         "n_with_exon",
         "n_with_annotated_sj",
-        "n_with_unannotated_sj",
         "n_same_strand",
         "n_ambig_strand",
         # Strand model training

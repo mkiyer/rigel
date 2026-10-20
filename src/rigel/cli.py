@@ -497,7 +497,6 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     splice_counts = {
         "unspliced": _splice_n(SpliceType.UNSPLICED),
         "spliced_annotated": _splice_n(SpliceType.SPLICED_ANNOT),
-        "spliced_unannotated": _splice_n(SpliceType.SPLICED_UNANNOT),
         "spliced_implicit": _splice_n(SpliceType.SPLICED_IMPLICIT),
         "splice_artifact": _splice_n(SpliceType.SPLICE_ARTIFACT),
         "sj_blacklisted": int(stats.n_sj_blacklisted),
@@ -595,7 +594,6 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "chimeric_cis_same": stats.n_chimeric_cis_strand_same,
             "chimeric_cis_diff": stats.n_chimeric_cis_strand_diff,
             "with_annotated_sj": stats.n_with_annotated_sj,
-            "with_unannotated_sj": stats.n_with_unannotated_sj,
             # Templates withheld, with no usable hit, by outcome; the hits dropped, by reason, are below
             "withheld": {
                 "unpaired": stats.n_withheld_unpaired,

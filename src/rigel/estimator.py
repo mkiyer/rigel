@@ -247,7 +247,7 @@ class AbundanceEstimator:
     def t_counts(self) -> np.ndarray:
         """Total transcript counts (unambig + EM).
 
-        Shape (N_t, NUM_SPLICE_STRAND_COLS) = (N_t, 10).
+        Shape (N_t, NUM_SPLICE_STRAND_COLS) = (N_t, 8).
         """
         return self.unambig_counts + self.em_counts
 

@@ -42,7 +42,6 @@ class PipelineStats:
     n_intergenic: int = 0  # templates that reach no locus: unspliced, gDNA by construction
     n_with_exon: int = 0
     n_with_annotated_sj: int = 0
-    n_with_unannotated_sj: int = 0
     n_same_strand: int = 0
     n_ambig_strand: int = 0
 
@@ -107,7 +106,6 @@ class PipelineStats:
     # ``splice_type_label``. Renaming one of these by hand breaks that correspondence silently,
     # because ``pipeline._apply_scan_stats`` copies them with ``dict.get(key, 0)``.
     n_census_unspliced: int = 0
-    n_census_spliced_unannot: int = 0
     n_census_spliced_annot: int = 0
     n_census_spliced_implicit: int = 0
     n_census_splice_artifact: int = 0

@@ -783,19 +783,17 @@ def test_an_ARTIFACT_splice_is_unspliced_and_a_gdna_candidate_whatever_its_footp
     assert float(em.gdna_log_liks[0]) == _unspliced_term(footprint)
 
 
-@pytest.mark.parametrize("splice_type", [SpliceType.SPLICED_ANNOT, SpliceType.SPLICED_UNANNOT])
-def test_a_sequenced_junction_that_survived_the_blacklist_is_RNA_only(splice_type):
-    em, _ = _one_unit([_hit(splice_type, 300)], [FRAG_AMBIG_SAME_STRAND], [1])
+def test_a_sequenced_junction_that_survived_the_blacklist_is_RNA_only():
+    em, _ = _one_unit([_hit(SpliceType.SPLICED_ANNOT, 300)], [FRAG_AMBIG_SAME_STRAND], [1])
     assert em.is_spliced[0]
     assert em.gdna_log_liks[0] == -np.inf
 
 
-@pytest.mark.parametrize("spliced", [SpliceType.SPLICED_ANNOT, SpliceType.SPLICED_UNANNOT])
-def test_a_multimapper_with_ONE_unspliced_alignment_is_a_gdna_candidate(spliced):
+def test_a_multimapper_with_ONE_unspliced_alignment_is_a_gdna_candidate():
     """One spliced alignment no longer removes gDNA from the group: the unspliced alignment is a place
     gDNA could have come from, and the gDNA term is taken over the eligible alignments alone."""
     em, _ = _one_unit(
-        [_hit(spliced, 300, t=0), _hit(SpliceType.UNSPLICED, 250, t=1)],
+        [_hit(SpliceType.SPLICED_ANNOT, 300, t=0), _hit(SpliceType.UNSPLICED, 250, t=1)],
         [FRAG_MULTIMAPPER] * 2,
         [7, 7],
     )
@@ -908,7 +906,7 @@ def test_a_multimapper_s_gdna_mean_takes_every_eligible_hit_even_one_the_law_can
 def test_a_multimapper_is_RNA_only_when_no_alignment_can_be_gdna_or_its_gdna_is_pruned():
     fl = _live_fl()
     certified, _ = _one_unit(
-        [_hit(SpliceType.SPLICED_ANNOT, 300, t=0), _hit(SpliceType.SPLICED_UNANNOT, 300, t=1)],
+        [_hit(SpliceType.SPLICED_ANNOT, 300, t=0), _hit(SpliceType.SPLICED_ANNOT, 300, t=1)],
         [FRAG_MULTIMAPPER] * 2,
         [9, 9],
         fl=fl,

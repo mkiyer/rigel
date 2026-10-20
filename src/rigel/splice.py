@@ -1,14 +1,15 @@
 """
 rigel.splice — Splice classification enums for the quantification pipeline.
 
-Internal count arrays use 10 columns: 5 splice types × 2 strands
+Internal count arrays use 8 columns: 4 splice types × 2 strands
 (sense/antisense).  The output sums the two strand columns; strand is
 not exposed in user-facing output.
 
 Fragment splice types are based on splice junction status only:
 - UNSPLICED: no splice junctions detected
-- SPLICED_UNANNOT: splice junctions present but not in the reference
-- SPLICED_ANNOT: splice junctions exactly matching the reference
+- SPLICED_ANNOT: splice junctions, every one held by one annotated transcript. There is no other
+  spliced type: the scan withholds a hit whose junctions no one annotated transcript holds (the
+  annotated-path rule), and the resolver refuses one
 - SPLICED_IMPLICIT: the mate gap spans an annotated intron of a candidate
 - SPLICE_ARTIFACT: a CIGAR junction the splice blacklist rejected
 
@@ -23,11 +24,10 @@ class SpliceType(IntEnum):
     """Category of a fragment based on splice junction status."""
 
     UNSPLICED = 0
-    SPLICED_UNANNOT = 1
-    SPLICED_ANNOT = 2
+    SPLICED_ANNOT = 1
     # the two derived classes — neither is a CIGAR splice:
-    SPLICED_IMPLICIT = 3  # PE gap spans an annotated intron of any candidate
-    SPLICE_ARTIFACT = 4  # CIGAR sj was rejected by the SJ blacklist
+    SPLICED_IMPLICIT = 2  # PE gap spans an annotated intron of any candidate
+    SPLICE_ARTIFACT = 3  # CIGAR sj was rejected by the SJ blacklist
 
 
 def census_field(stype: SpliceType) -> str:
@@ -49,34 +49,32 @@ def census_field(stype: SpliceType) -> str:
 
 
 #: ``SpliceType.SPLICED_ANNOT`` as a plain int.
-SPLICE_ANNOT: int = int(SpliceType.SPLICED_ANNOT)  # 2
+SPLICE_ANNOT: int = int(SpliceType.SPLICED_ANNOT)  # 1
 
 
 class SpliceStrandCol(IntEnum):
     """Internal column index for count arrays.
 
-    Layout: 5 splice categories × 2 strands (sense/antisense) = 10 columns.
+    Layout: 4 splice categories × 2 strands (sense/antisense) = 8 columns.
 
     Column formula::
 
         col = splice_type * 2 + int(is_antisense)
 
-    where ``splice_type`` is a :class:`SpliceType` value (0..4).
+    where ``splice_type`` is a :class:`SpliceType` value (0..3).
 
-    Even indices (0, 2, 4, 6, 8) are sense; odd indices (1, 3, 5, 7, 9)
-    are antisense.
+    Even indices (0, 2, 4, 6) are sense; odd indices (1, 3, 5, 7) are
+    antisense.
     """
 
     UNSPLICED_SENSE = 0
     UNSPLICED_ANTISENSE = 1
-    SPLICED_UNANNOT_SENSE = 2
-    SPLICED_UNANNOT_ANTISENSE = 3
-    SPLICED_ANNOT_SENSE = 4
-    SPLICED_ANNOT_ANTISENSE = 5
-    SPLICED_IMPLICIT_SENSE = 6
-    SPLICED_IMPLICIT_ANTISENSE = 7
-    SPLICE_ARTIFACT_SENSE = 8
-    SPLICE_ARTIFACT_ANTISENSE = 9
+    SPLICED_ANNOT_SENSE = 2
+    SPLICED_ANNOT_ANTISENSE = 3
+    SPLICED_IMPLICIT_SENSE = 4
+    SPLICED_IMPLICIT_ANTISENSE = 5
+    SPLICE_ARTIFACT_SENSE = 6
+    SPLICE_ARTIFACT_ANTISENSE = 7
 
     @property
     def category(self) -> SpliceType:
@@ -86,8 +84,4 @@ class SpliceStrandCol(IntEnum):
 NUM_SPLICE_STRAND_COLS = len(SpliceStrandCol)
 
 # Pre-computed column subset (a tuple for immutability and indexing).
-SPLICED_COLS = tuple(
-    c.value
-    for c in SpliceStrandCol
-    if c.category in (SpliceType.SPLICED_ANNOT, SpliceType.SPLICED_UNANNOT)
-)
+SPLICED_COLS = tuple(c.value for c in SpliceStrandCol if c.category == SpliceType.SPLICED_ANNOT)

@@ -26,17 +26,17 @@ namespace rigel {
 static constexpr int8_t ITYPE_EXON           = 0;
 static constexpr int8_t ITYPE_TRANSCRIPT      = 1;
 
-// SpliceType (rigel.splice.SpliceType)
+// SpliceType (rigel.splice.SpliceType). One spliced type: every junction a fragment observes is held by one
+// annotated transcript (the scan's annotated-path rule), so no fragment is spliced across an unannotated junction.
 static constexpr int32_t SPLICE_UNSPLICED       = 0;
-static constexpr int32_t SPLICE_SPLICED_UNANNOT = 1;
-static constexpr int32_t SPLICE_SPLICED_ANNOT   = 2;
+static constexpr int32_t SPLICE_SPLICED_ANNOT   = 1;
 // the two derived classes — neither is a CIGAR splice:
-static constexpr int32_t SPLICE_IMPLICIT        = 3;  // PE gap spans an annotated intron
-static constexpr int32_t SPLICE_ARTIFACT        = 4;  // CIGAR sj rejected by blacklist
+static constexpr int32_t SPLICE_IMPLICIT        = 2;  // PE gap spans an annotated intron
+static constexpr int32_t SPLICE_ARTIFACT        = 3;  // CIGAR sj rejected by blacklist
 // ⚠ Must equal `len(rigel.splice.SpliceType)`. It sizes the scanner's per-fragment splice census,
 // so a category added on one side and not the other is caught by `test_every_splice_type_is_censused`
 // rather than reading zero through the stats dict's `.get(key, 0)`.
-static constexpr size_t NUM_SPLICE_TYPES        = 5;
+static constexpr size_t NUM_SPLICE_TYPES        = 4;
 
 // MergeOutcome (named for the gates in tests/_resolution_reference.py)
 static constexpr int32_t MC_INTERSECTION          = 0;

@@ -18,6 +18,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -367,7 +368,7 @@ struct ResolverScratch {
     // Reusable sorted-vector set-operation buffers for _resolve_core.
     std::vector<std::vector<int32_t>> exon_t_sets;
     std::vector<std::vector<int32_t>> transcript_t_sets;
-    std::vector<std::vector<int32_t>> sj_t_sets;
+    std::vector<int32_t> sj_holders;  // the transcripts holding every junction (`junction_holders`)
     std::vector<int32_t> tmp_a;
     std::vector<int32_t> tmp_union;
     std::vector<int32_t> all_overlap_t;
@@ -426,7 +427,7 @@ struct ResolverScratch {
 
         for (auto& v : exon_t_sets) v.clear();
         for (auto& v : transcript_t_sets) v.clear();
-        sj_t_sets.clear();
+        sj_holders.clear();
         tmp_a.clear();
         tmp_union.clear();
         all_overlap_t.clear();
@@ -1369,35 +1370,27 @@ public:
             }
         }
 
-        // --- SJ matching ---
-        auto& sj_t_sets_vec = scratch.sj_t_sets;
-        bool has_annotated_sj = false;
-        bool has_unannotated_sj = false;
+        // --- The junctions: one annotated transcript holds every one ---
+        // The scan's hit verdict guarantees it (the annotated-path rule, `junction_holders`), so a spliced
+        // fragment without holders is a broken precondition, refused. ``introns`` arrive sorted by
+        // reference, coordinates and motif strand, each once.
+        auto& holders = scratch.sj_holders;
+        holders.clear();
         cr.sj_strand = STRAND_NONE;
         // Reset alongside sj_strand: `cr` is an out-param taken by reference, so a
         // caller that reuses one across fragments would otherwise carry the previous
         // fragment's sj key forward. Every call site builds a fresh `cr` today.
         cr.sj_key_ref = cr.sj_key_start = cr.sj_key_end = -1;
-
-        for (int ii = 0; ii < n_introns; ii++) {
-            sj_t_sets_vec.emplace_back();
-            auto& sj_t = sj_t_sets_vec.back();
-            sj_lookup_into(introns[ii].ref_id, introns[ii].start,
-                           introns[ii].end, introns[ii].strand, sj_t);
-            if (!sj_t.empty()) {
-                has_annotated_sj = true;
-                cr.sj_strand |= introns[ii].strand;
-                if (cr.sj_key_start < 0) {
-                    // First ANNOTATED sj (introns arrive sorted by
-                    // ref/start/end) — the per-sj strand table's key.
-                    cr.sj_key_ref   = introns[ii].ref_id;
-                    cr.sj_key_start = introns[ii].start;
-                    cr.sj_key_end   = introns[ii].end;
-                }
-            } else {
-                sj_t_sets_vec.pop_back();
-                has_unannotated_sj = true;
-            }
+        if (n_introns > 0) {
+            if (junction_holders(introns, scratch, holders) != HIT_USABLE)
+                throw std::invalid_argument(
+                    "_resolve_core: a spliced fragment needs one annotated transcript holding every junction it "
+                    "observes (the scan's hit verdict withholds any other)");
+            for (const auto& x : introns) cr.sj_strand |= x.strand;
+            // The first junction (they arrive sorted) — the per-sj strand table's key.
+            cr.sj_key_ref   = introns[0].ref_id;
+            cr.sj_key_start = introns[0].start;
+            cr.sj_key_end   = introns[0].end;
         }
 
         // --- Resolution: merge and classify ---
@@ -1407,20 +1400,12 @@ public:
         for (const auto& s : transcript_t_sets)
             if (!s.empty()) { any_transcript = true; break; }
 
-        if (has_annotated_sj && any_exon) {
+        if (n_introns > 0) {
+            // The holders the fragment's blocks overlap, or the holders themselves
             auto exon_merge = merge_sets(exon_t_sets);
-            // Never empty: `sj_t_sets_vec` keeps only non-empty lookups, and `has_annotated_sj` means one.
-            auto sj_merge   = merge_sets(sj_t_sets_vec);
-
-            if (!exon_merge.is_empty()) {
-                auto isect = vec_intersect(exon_merge.t_inds,
-                                           sj_merge.t_inds);
-                cr.t_inds = isect.empty() ? std::move(sj_merge.t_inds)
-                                          : std::move(isect);
-            } else {
-                cr.t_inds = std::move(sj_merge.t_inds);
-            }
-            cr.merge_criteria = sj_merge.criteria;
+            auto isect = exon_merge.is_empty() ? std::vector<int32_t>{} : vec_intersect(exon_merge.t_inds, holders);
+            cr.t_inds = isect.empty() ? holders : std::move(isect);
+            cr.merge_criteria = MC_INTERSECTION;
             cr.splice_type = SPLICE_SPLICED_ANNOT;
 
         } else if (any_exon || any_transcript) {
@@ -1455,16 +1440,14 @@ public:
                     (parts.size() == 1) ? best_criteria : MC_UNION;
             }
 
-            cr.splice_type = has_unannotated_sj ? SPLICE_SPLICED_UNANNOT
-                                                : SPLICE_UNSPLICED;
+            cr.splice_type = SPLICE_UNSPLICED;
 
         } else {
             // No exon and no transcript overlap -> truly intergenic.
             // do NOT early-exit; let the fragment flow through
             // the buffer with empty t_inds so calibration can categorize
             // it as INTERGENIC.
-            cr.splice_type = has_unannotated_sj ? SPLICE_SPLICED_UNANNOT
-                                                : SPLICE_UNSPLICED;
+            cr.splice_type = SPLICE_UNSPLICED;
         }
 
         // SPLICE_ARTIFACT promotion.  When the alignment had
@@ -1472,9 +1455,7 @@ public:
         // blacklist (set by caller in cr.n_sj_blacklisted before this
         // call), promote any non-spliced classification so the
         // fragment is held out of calibration.
-        if (cr.n_sj_blacklisted > 0 &&
-            cr.splice_type != SPLICE_SPLICED_ANNOT &&
-            cr.splice_type != SPLICE_SPLICED_UNANNOT) {
+        if (cr.n_sj_blacklisted > 0 && cr.splice_type != SPLICE_SPLICED_ANNOT) {
             cr.splice_type = SPLICE_ARTIFACT;
         }
 
@@ -1611,6 +1592,15 @@ public:
                 nb::cast<int32_t>(intr[nb::int_(3)])
             };
         }
+
+        // As the scan's `observed_junctions` hands them over: ascending by reference, coordinates and motif strand,
+        // each once (`junction_holders` reads them so).
+        const auto key = [](const IntronBlock& x) { return std::tie(x.ref_id, x.start, x.end, x.strand); };
+        std::sort(introns.begin(), introns.end(),
+                  [&](const IntronBlock& x, const IntronBlock& y) { return key(x) < key(y); });
+        introns.erase(std::unique(introns.begin(), introns.end(),
+                                  [&](const IntronBlock& x, const IntronBlock& y) { return key(x) == key(y); }),
+                      introns.end());
 
         int32_t genomic_footprint = nb::cast<int32_t>(
             frag.attr("genomic_footprint"));

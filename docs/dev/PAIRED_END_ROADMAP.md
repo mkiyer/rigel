@@ -91,8 +91,8 @@ the code is open; each is less critical.
   and the ladder 48/48 identical. ☑ The rule (2026-10-19, aff4be8e): transcript error −10.17 % unstranded capture-OFF,
   +4.55 % stranded capture-OFF, +1.28 % stranded capture-ON (gene −6.16 / +5.16 / +2.24 %), the ladder identical;
   landed regardless (owner), the losses in `ISSUES: the-annotated-path-rule-costs-the-stranded-strata`. ☑ The
-  intergenic RNA pool deleted. ☐ `SPLICED_UNANNOT` deleted, once the pairing without HI (8) stops resolving single mates
-  before any verdict
+  intergenic RNA pool deleted. ☑ `SPLICED_UNANNOT` deleted (2026-10-19): the resolver reads `junction_holders`
+  and refuses a spliced fragment with no holder; the STAR panel and the ladder identical
 11. ☐ One length rule for overlapping mates
 
 *The bundle*

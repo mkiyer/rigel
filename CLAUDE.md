@@ -154,9 +154,9 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument that has a --self-test runs it
 ```
 
-**The standing baseline: 0 failed / 3,091 passed / 0 skipped / 0 xfail, 3,091 collected** — re-derived
-2026-10-19 on the worktree carrying the search, HI not read (seven gates added, two HI-group tests deleted; 3,086 after
-the shared-transcript witness, 3,083 after the annotated-path
+**The standing baseline: 0 failed / 3,087 passed / 0 skipped / 0 xfail, 3,087 collected** — re-derived
+2026-10-19 on the worktree deleting `SPLICED_UNANNOT` (four cases folded or deleted with it; 3,091 after the search, HI
+not read; 3,086 after the shared-transcript witness, 3,083 after the annotated-path
 rule, 3,068 after one junction set per hit, 3,067 after a template's valid hits as its multiplicity, 3,063 after one-mate
 hits, 3,060 after the pair validator, 3,052 after the index's transcript strands, 3,050 after the junction-strand tag
 read per record). **Any failure at all is a regression.** Re-derive a count, never adjust one (`TRAPS: re-record-the-baseline`): every gate that scans

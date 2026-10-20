@@ -172,9 +172,10 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   it unspliced, and outside every gene it was counted gDNA. Such an alignment is now dropped and the read pair keeps its
   others; a read pair left with none is withheld, counted in `summary.json`
   (`fragment_stats.withheld.unannotated_splice`, and `hits_rejected` by reason: `contradictory`, `novel_junction`,
-  `unsupported`) and written to the annotated BAM as unresolved (`ZC` `unannotated_splice`). On simulated STAR
-  alignments it drops 78–91 k alignments per 10 M read pairs, almost all of them alternatives of a read pair that keeps
-  another, and withholds 1.6–1.8 k read pairs.
+  `unsupported`) and written to the annotated BAM as unresolved (`ZC` `unannotated_splice`). No fragment is spliced
+  across an unannotated junction, so `summary.json` no longer reports `spliced_unannotated` or `with_unannotated_sj`,
+  and `ZS` has no `spliced_unannot`. On simulated STAR alignments it drops 78–91 k alignments per 10 M read pairs,
+  almost all of them alternatives of a read pair that keeps another, and withholds 1.6–1.8 k read pairs.
 - `--overhang-alpha 0`, documented as a hard gate, gave every candidate without overhang a NaN score, and every
   EM-routed fragment was dropped silently. It is now a hard gate: a candidate with overhang is skipped and the rest
   are scored. At either alpha's 0 an unambiguous spliced fragment, assigned without scoring, now meets the gate too,

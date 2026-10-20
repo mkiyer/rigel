@@ -659,14 +659,12 @@ class TestCountsOutput:
         assert df.loc[1, "effective_length"] == pytest.approx(300.0)
 
     def test_spliced_counts(self):
-        """mrna_spliced captures both SPLICED_ANNOT and SPLICED_UNANNOT."""
+        """count_spliced sums the spliced type's two strand columns, and nothing else."""
         index = _make_index()
         rc = AbundanceEstimator(3, em_config=EMConfig(seed=42))
-        # SPLICED_ANNOT sense
         rc.unambig_counts[0, SpliceStrandCol.SPLICED_ANNOT_SENSE] = 3.0
-        # SPLICED_UNANNOT antisense
-        rc.unambig_counts[0, SpliceStrandCol.SPLICED_UNANNOT_ANTISENSE] = 2.0
-        # UNSPLICED (should not be in mrna_spliced)
+        rc.unambig_counts[0, SpliceStrandCol.SPLICED_ANNOT_ANTISENSE] = 2.0
+        # UNSPLICED (should not be in count_spliced)
         rc.unambig_counts[0, _UNSPLICED_SENSE] = 10.0
 
         df = rc.get_counts_df(index)

@@ -64,7 +64,6 @@ SUMMARY_KEYS: dict[str, dict] = {
     "fragment_stats.splice": {
         "unspliced": 0,
         "spliced_annotated": 0,
-        "spliced_unannotated": 0,
         "spliced_implicit": 0,
         "splice_artifact": 0,
         "sj_blacklisted": 0,

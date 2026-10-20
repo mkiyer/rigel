@@ -1078,7 +1078,6 @@ class TestAnnotatedBamWriterRobustness:
 
     _DOCUMENTED_ZS = {
         "spliced_annot",
-        "spliced_unannot",
         "spliced_implicit",
         "splice_artifact",
         "unspliced",

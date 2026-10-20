@@ -5,7 +5,7 @@ shared transcripts. It should, for spliced paths: §5 adopts the owner's rule an
 Status: step 1 (§5) landed 2026-10-19; its numbers are in `ISSUES: the-scanner-builds-fragments-from-one-mate`.
 Steps 2–4 landed 2026-10-19: the owner took the search for every input, HI not read (`DESIGN.md` §1.1; the four arms in
 CLOSED `ISSUES: star-hi-pairs-against-rigels-own-pairing`). The arms here were named `hi`, `hi-collapsed`, `search`,
-`legacy`. Step 5, `SPLICED_UNANNOT` deleted, is next.
+`legacy`. Step 5, `SPLICED_UNANNOT` deleted, landed 2026-10-19.
 Every claim about today's code cites a line re-read for this document. Roadmap Phase A items 3, 5 (in part), 6 and 8;
 plan §6–§7.1.
 

@@ -92,11 +92,9 @@ def _write_substrate(d: Path) -> Path:
             "chimeric_cis_same": 15,
             "chimeric_cis_diff": 5,
             "with_annotated_sj": 400,
-            "with_unannotated_sj": 20,
             "splice": {
-                "unspliced": 250,
+                "unspliced": 270,
                 "spliced_annotated": 400,
-                "spliced_unannotated": 20,
                 "spliced_implicit": 25,
                 "splice_artifact": 5,
                 "sj_blacklisted": 3,
@@ -253,9 +251,9 @@ def test_view_model_shape(tmp_path):
     assert all("fmt" in v for v in vm["verdicts"])
     # alignment fate never double-counts past the total
     assert sum(seg["value"] for seg in vm["alignment"]["fate"]) <= 1000
-    # splice bar carries implicit + artifact
-    labels = {s["label"] for s in vm["fragments"]["splice"]}
-    assert {"Implicit", "Artifact"} <= labels
+    # the splice bar: the four splice types, one spliced (every junction annotated)
+    labels = [s["label"] for s in vm["fragments"]["splice"]]
+    assert labels == ["Unspliced", "Annotated", "Implicit", "Artifact"]
     # strand contamination gap surfaced
     assert vm["strand"]["contamination_gap"] == 0.05
     # the fragment-length table keeps the categories in the order summary.json lists them

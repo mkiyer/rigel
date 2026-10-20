@@ -23,20 +23,20 @@ from rigel.splice import (
 
 class TestSpliceType:
     def test_values(self):
-        assert int(SpliceType.UNSPLICED) == 0
-        assert int(SpliceType.SPLICED_UNANNOT) == 1
-        assert int(SpliceType.SPLICED_ANNOT) == 2
-        assert int(SpliceType.SPLICED_IMPLICIT) == 3
-        assert int(SpliceType.SPLICE_ARTIFACT) == 4
-
-    def test_length(self):
-        assert len(SpliceType) == 5
+        """One spliced type: a spliced fragment always has one annotated transcript holding every junction it observes
+        (the scan's annotated-path rule, `tests/test_hit_verdict.py`), so there is no unannotated splice to name."""
+        assert [(t.name, int(t)) for t in SpliceType] == [
+            ("UNSPLICED", 0),
+            ("SPLICED_ANNOT", 1),
+            ("SPLICED_IMPLICIT", 2),
+            ("SPLICE_ARTIFACT", 3),
+        ]
 
     def test_native_constants_match_python_enum(self):
         import rigel._resolve_impl as native_resolve
 
         assert native_resolve.SPLICE_UNSPLICED == int(SpliceType.UNSPLICED)
-        assert native_resolve.SPLICE_SPLICED_UNANNOT == int(SpliceType.SPLICED_UNANNOT)
+        assert not hasattr(native_resolve, "SPLICE_SPLICED_UNANNOT")
         assert native_resolve.SPLICE_SPLICED_ANNOT == int(SpliceType.SPLICED_ANNOT)
         assert native_resolve.SPLICE_IMPLICIT == int(SpliceType.SPLICED_IMPLICIT)
         assert native_resolve.SPLICE_ARTIFACT == int(SpliceType.SPLICE_ARTIFACT)
@@ -55,25 +55,25 @@ class TestSpliceType:
 
 
 # =====================================================================
-# SpliceStrandCol — 5 categories × 2 strands = 10 columns
+# SpliceStrandCol — 4 categories × 2 strands = 8 columns
 # =====================================================================
 
 
 class TestSpliceStrandCol:
     def test_num_splice_strand_cols(self):
-        assert NUM_SPLICE_STRAND_COLS == 10
+        assert NUM_SPLICE_STRAND_COLS == 8
 
     def test_enum_values(self):
-        assert int(SpliceStrandCol.UNSPLICED_SENSE) == 0
-        assert int(SpliceStrandCol.UNSPLICED_ANTISENSE) == 1
-        assert int(SpliceStrandCol.SPLICED_UNANNOT_SENSE) == 2
-        assert int(SpliceStrandCol.SPLICED_UNANNOT_ANTISENSE) == 3
-        assert int(SpliceStrandCol.SPLICED_ANNOT_SENSE) == 4
-        assert int(SpliceStrandCol.SPLICED_ANNOT_ANTISENSE) == 5
-        assert int(SpliceStrandCol.SPLICED_IMPLICIT_SENSE) == 6
-        assert int(SpliceStrandCol.SPLICED_IMPLICIT_ANTISENSE) == 7
-        assert int(SpliceStrandCol.SPLICE_ARTIFACT_SENSE) == 8
-        assert int(SpliceStrandCol.SPLICE_ARTIFACT_ANTISENSE) == 9
+        assert [(c.name, int(c)) for c in SpliceStrandCol] == [
+            ("UNSPLICED_SENSE", 0),
+            ("UNSPLICED_ANTISENSE", 1),
+            ("SPLICED_ANNOT_SENSE", 2),
+            ("SPLICED_ANNOT_ANTISENSE", 3),
+            ("SPLICED_IMPLICIT_SENSE", 4),
+            ("SPLICED_IMPLICIT_ANTISENSE", 5),
+            ("SPLICE_ARTIFACT_SENSE", 6),
+            ("SPLICE_ARTIFACT_ANTISENSE", 7),
+        ]
 
     def test_category_property(self):
         for c in SpliceStrandCol:
@@ -87,12 +87,8 @@ class TestSpliceStrandCol:
 
 class TestColumnSubsets:
     def test_spliced_cols(self):
-        assert SPLICED_COLS == (2, 3, 4, 5)
+        assert SPLICED_COLS == (2, 3)
 
     def test_spliced_cols_match_enum(self):
-        expected = tuple(
-            c.value
-            for c in SpliceStrandCol
-            if c.category in (SpliceType.SPLICED_ANNOT, SpliceType.SPLICED_UNANNOT)
-        )
+        expected = tuple(c.value for c in SpliceStrandCol if c.category == SpliceType.SPLICED_ANNOT)
         assert SPLICED_COLS == expected

@@ -43,7 +43,7 @@ class ScoredFragments:
         float32[n_candidates] — per candidate, ``log P_strand + log P_insert`` plus the overhang
         penalty (log-penalty × overhang bases) and the mismatch penalty (log-penalty × NM).
     count_cols : np.ndarray
-        uint8[n_candidates] — ``SpliceStrandCol`` index per candidate (0–9).
+        uint8[n_candidates] — ``SpliceStrandCol`` index per candidate (0–7).
     coverage_weights : np.ndarray
         float32[n_candidates] — coverage weight per candidate.
     is_spliced : np.ndarray
