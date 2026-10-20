@@ -103,8 +103,8 @@ class PipelineStats:
     #
     # The field names are derived, not chosen — ``rigel.splice.census_field`` builds each one from
     # its :class:`~rigel.splice.SpliceType` member name, and the C++ builds the same key from
-    # ``splice_type_label``. Renaming one of these by hand breaks that correspondence silently,
-    # because ``pipeline._apply_scan_stats`` copies them with ``dict.get(key, 0)``.
+    # ``splice_type_label``. ``pipeline._apply_scan_stats`` refuses a scan key with no field, so renaming
+    # one of these by hand fails the scan rather than dropping the count.
     n_census_unspliced: int = 0
     n_census_spliced_annot: int = 0
     n_census_spliced_implicit: int = 0

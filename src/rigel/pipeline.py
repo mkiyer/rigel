@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -56,7 +56,7 @@ from .index import TranscriptIndex
 from .native import BamScanner as _NativeBamScanner
 from .routing import FragmentRouter
 from .scoring import FragmentScorer
-from .splice import SpliceType, census_field
+from .splice import SpliceType
 from .stats import PipelineStats
 from .strand_model import StrandModels
 
@@ -167,72 +167,15 @@ def _log_hit_verdicts(stats: PipelineStats) -> None:
 
 
 def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
-    """Apply C++ scan statistics to PipelineStats.
+    """Copy the C++ scan's counters onto ``stats``, each key onto the field of its name.
 
-    Copies all matching keys from the C++ stats dict to the dataclass.
+    A key with no field is refused, so a counter the scan exports cannot be dropped on the way to ``summary.json``.
     """
-    for key in (
-        # BAM-level
-        "total",
-        "qc_fail",
-        "unmapped",
-        "secondary",
-        "supplementary",
-        "duplicate",
-        "n_read_names",
-        "unique",
-        "multimapping",
-        "proper_pair",
-        "improper_pair",
-        "mate_unmapped",
-        # Fragment-level
-        "n_fragments",
-        "n_chimeric",
-        "n_chimeric_trans",
-        "n_chimeric_cis_strand_same",
-        "n_chimeric_cis_strand_diff",
-        "n_intergenic",
-        "n_with_exon",
-        "n_with_annotated_sj",
-        "n_same_strand",
-        "n_ambig_strand",
-        # Strand model training
-        "n_strand_trained",
-        "n_strand_skipped_no_sj",
-        "n_strand_skipped_ambig_strand",
-        "n_strand_skipped_ambiguous",
-        # Multimapper
-        "n_multimapper_groups",
-        "n_multimapper_alignments",
-        # Splice-artifact blacklist
-        "n_sj_observed",
-        "n_sj_blacklisted",
-        # The junction-strand tag, per spliced record
-        "n_sj_tag_tagged",
-        "n_sj_tag_untagged",
-        "n_sj_tag_conflicting",
-        "n_sj_tag_invalid",
-        # Hits that are not usable, and the templates left with none
-        "n_hits_rejected_missing_mate",
-        "n_hits_rejected_reference",
-        "n_hits_rejected_strand",
-        "n_hits_rejected_outward",
-        "n_hits_rejected_length",
-        "n_hits_rejected_contradictory",
-        "n_hits_rejected_novel_junction",
-        "n_hits_rejected_unsupported",
-        "n_withheld_unpaired",
-        "n_withheld_unannotated_splice",
-        "n_nh_above_reported",
-        # The deposit hold-out that closes the census identity
-        "n_deposit_not_offered",
-    ):
-        setattr(stats, key, stats_dict.get(key, 0))
-
-    # The splice census, enumerated from the enum rather than listed by hand — the whole point of
-    # deriving the key name on both sides is that no third list can fall out of step with it.
-    for stype in SpliceType:
-        setattr(stats, census_field(stype), stats_dict.get(census_field(stype), 0))
+    unknown = sorted(set(stats_dict) - {f.name for f in fields(stats)})
+    if unknown:
+        raise KeyError(f"scan counters with no PipelineStats field: {unknown}")
+    for key, value in stats_dict.items():
+        setattr(stats, key, value)
 
 
 def _warn_if_calibration_strand_unidentifiable(strand_models: StrandModels) -> None:

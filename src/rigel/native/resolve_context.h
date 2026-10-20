@@ -384,6 +384,7 @@ struct ResolverScratch {
     std::vector<GapBlock> pair_stretches;
     std::vector<IntronBlock> pair_cut;
     std::vector<IntronBlock> hit_junctions;  // every junction a hit observes (the scan's `observed_junctions`)
+    std::vector<int32_t> hit_verdicts;       // each hit's verdict, while judging a template (the scan's `judge_hits`)
     std::vector<int32_t> pair_candidates;
     std::vector<int32_t> pair_tmp;
 
