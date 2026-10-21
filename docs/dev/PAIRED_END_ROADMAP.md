@@ -133,9 +133,13 @@ the code is open; each is less critical.
     overruns 2–16 bp, mostly even. Facing judged on the aligned 5′ ends instead would differ by 2 pairs (cfRNA-C). The
     oracle ladder holds no overrun or outward pair in 160 M; rename_identity bit-identical on oracle g00. The pinned
     scan 33.3 → 33.2 s (A B A B). Suite 3,112
-  - Next, each its own commit: ☐ `n_deposit_not_offered` and the deposit adapter's multi-reference refusal deleted, now
-    unreachable (126 / 1,468 / 3,662 → 0 on cfRNA-A / B / C); ☐ the resolver's chimera classification deleted (closes
-    `ISSUES: chimera-span-over-exon-blocks-only`). The tail rule deferred (`ISSUES: the-tail-rule-waits-for-truth`)
+  - ☑ The deposit adapter's unreachable refusals deleted (2026-10-20): a reference outside the accumulator, blocks on
+    two references (126 / 1,468 / 3,662 → 0 on cfRNA-A / B / C since chimeric alignments are withheld), and the dead
+    no-block branch behind them. A numeric no-op: rename_identity bit-identical on oracle g00 and STAR g50 ss.50 OFF
+    (frozen on ebb89ca9); suite 3,112. `n_deposit_not_offered` stays, for the two cases still reachable: no accumulator
+    installed, or a fragment with no aligned block (a hit whose mates have no aligned base)
+  - Next: ☐ the resolver's chimera classification deleted (closes `ISSUES: chimera-span-over-exon-blocks-only`). The
+    tail rule deferred (`ISSUES: the-tail-rule-waits-for-truth`)
 14. ☐ Each use of K outside implicit splicing, one at a time
 15. ☐ Accounting: one outcome per template, each record's status from its template's outcome, the counters and the
   annotated-BAM tags; the annotation pass checked against the scan by identity

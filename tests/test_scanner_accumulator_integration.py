@@ -369,9 +369,9 @@ class TestSpliceCensus:
         scanner has already refused to believe. Identifying and filtering those is the scanner's
         job, and the census is where that decision becomes visible.
 
-        ``n_deposit_not_offered`` covers the fragments the deposit adapter cannot express as one
-        molecule on one region-bound axis — chiefly blocks on more than one reference. Such a return
-        is silent without the counter, and the identity is what makes it countable.
+        ``n_deposit_not_offered`` covers the fragments the deposit adapter cannot offer: no
+        accumulator installed, or no aligned block. Such a return is silent without the counter, and
+        the identity is what makes it countable.
 
         This is the same externally-checkable form as ``sum(deposited_lengths) == qc.deposited`` and
         a DIFFERENT statement: that one says every deposited fragment was binned by length, this one

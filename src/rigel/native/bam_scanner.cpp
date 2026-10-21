@@ -434,10 +434,10 @@ struct BamScanStats {
     // of the three. The five names exist once, in `splice_type_label`.
     std::array<int64_t, NUM_SPLICE_TYPES> splice_census{};
 
-    // Censused, then never offered to `deposit()`: the deposit adapter could not express the
-    // fragment as ONE molecule on ONE region_bound axis (chiefly blocks on more than one reference), or no
-    // accumulator was installed. ⭐ It exists to close the books — without it those `return`s are a
-    // silent loss, which is the pattern this accumulator was rewritten to delete. With it:
+    // Censused, then never offered to `deposit()`: no accumulator was installed, or the fragment has no aligned
+    // block (a hit whose mates have no aligned base, which the pair rule passes unjudged). ⭐ It exists to close the
+    // books — without it that `return` is a silent loss, which is the pattern this accumulator was rewritten to
+    // delete. With it:
     //
     //   Σ census − census[SPLICE_ARTIFACT] == qc.deposited + qc.deferred_undetermined_gap
     //       + qc.deferred_multiple_placements + Σ qc.dropped_* + n_deposit_not_offered
@@ -1771,13 +1771,10 @@ private:
                 // positive decision about the data, not a failure to represent it.
                 if (st == SPLICE_ARTIFACT) return;
 
+                // A usable hit lies on a reference the index holds (`pair_verdict`), and the accumulator holds
+                // every one.
                 if (!ws.acc_set || f.exons.empty()) { ws.stats.n_deposit_not_offered++; return; }
                 const int32_t ref_id = f.exons.front().ref_id;
-                if (ref_id < 0 ||
-                    static_cast<std::size_t>(ref_id) >= ws.acc_set->n_refs()) {
-                    ws.stats.n_deposit_not_offered++;
-                    return;
-                }
 
                 // ── the introns the CIGAR actually stated ─────────────────────────────────────
                 //
@@ -1826,34 +1823,13 @@ private:
                 }
 
                 // The molecule's extent on this reference: leftmost block start to rightmost block end,
-                // MATE GAP INCLUDED, because the gap is part of the molecule and must count toward L.
-                //
-                // ⛔ A fragment with blocks on MORE THAN ONE REFERENCE deposits nothing. It is not one
-                // molecule, and an `OfferedFragment` cannot express it — it carries one
-                // extent on one region_bound axis.
-                std::int64_t start = 0, end = 0;
-                bool any = false;
+                // MATE GAP INCLUDED, because the gap is part of the molecule and must count toward L. Every block
+                // lies on `ref_id`: a hit's two mates lie on one reference (`pair_verdict`), a mate with no aligned
+                // base has no block, and a supplementary record joins no hit.
+                std::int64_t start = f.exons.front().start, end = f.exons.front().end;
                 for (const auto& block : f.exons) {
-                    if (block.ref_id != ref_id) {
-                        ws.stats.n_deposit_not_offered++;
-                        ws.arena_observed.resize(obs0);
-                        ws.pending_hypotheses.resize(hyp0);
-                        return;
-                    }
-                    if (!any) {
-                        start = block.start;
-                        end = block.end;
-                        any = true;
-                    } else {
-                        start = std::min<std::int64_t>(start, block.start);
-                        end = std::max<std::int64_t>(end, block.end);
-                    }
-                }
-                if (!any) {
-                    ws.stats.n_deposit_not_offered++;
-                    ws.arena_observed.resize(obs0);
-                    ws.pending_hypotheses.resize(hyp0);
-                    return;
+                    start = std::min<std::int64_t>(start, block.start);
+                    end = std::max<std::int64_t>(end, block.end);
                 }
 
                 // ⚠ The OBSERVED motif strand, straight from `cr`. A hypothesis carries the strand its
