@@ -205,8 +205,10 @@ Calibration's region lengths count bases on which no fragment can be observed.
   `the-gdna-length-contrast-is-ill-conditioned-on-aligned-input` amplifies the error.
 - **It is more than N.** Two mates can span an N gap, and a repeat can be unobservable to an aligner that keeps unique
   placements.
-- **The simulator hides it.** The simulator draws gDNA over the N runs too: about 0.99 M of 5 M gDNA fragments at g50
-  capture OFF are all-N reads, which no aligner places and the oracle BAM places by truth.
+- **The simulator no longer hides it** (2026-10-21, `ISSUES: the-simulator-draws-over-unknown-sequence`). It drew
+  gDNA over the N runs too, about 0.99 M of 5 M gDNA fragments at g50 capture OFF, all-N reads that no aligner places
+  and the oracle BAM placed by truth, so the oracle ladder's region lengths agreed with its reads. On the re-simulated
+  panels no fragment lies on an N base, on the oracle BAM as on an aligner's.
 
 ### the-gdna-length-contrast-is-ill-conditioned-on-aligned-input
 `priority: now — release-blocking (owner, 2026-10-15); the third wave of the paired-end repair, designed on the repaired scan · stage: calibration · kind: defect · 2026-10-15`
@@ -854,8 +856,6 @@ MOVES A NUMBER (each alone), each item labelled with its stage:
 - *panels:* `Scenario.build_oracle`'s fixed-total branch never reads `gdna_fraction`, so six fixtures simulate NO gDNA,
   among them `test_scan_order_independence`, whose docstring says it puts gDNA in introns. Raise on the combination,
   then repair; the expectations move.
-- *panels:* the simulator's fragment-length sampler: `.astype(int)` truncates (mean frag_mean − 0.5 while `fl_pmf` is
-  evaluated at integers). Land with the next re-simulation.
 - *instruments:* `lift_choices` keys records on (ref, start, end, align_strand, sj_strand) while the native key adds
   the introns and the hypotheses, so tied records that differ in introns pool: oracle truth can replay the wrong
   record, or `drain` can raise. Frequency unmeasured; only oracle truth moves.
@@ -1385,24 +1385,6 @@ capture-physics change, was re-simulated on the current simulator, cached and ce
 fragment-length campaign reopened), which supersedes the 2026-09-28 ruling to retire it. The depth family's unstranded
 rows are ruled in `ISSUES: the-gdna-landscape-collapses-at-low-depth`.
 
-### capture-probes-on-dropped-duplicates
-`priority: later — at the next panel rebuild (the code-health review, 2026-10-16) · stage: panels · kind: contract · 2026-10-16`
-The ladder's capture panel is designed on the raw GTF (`design_suite_probes.py:37`), but simulated against an index
-built with `--collapse-duplicate-transcripts`. A transcript-coordinate probe that names a dropped duplicate is skipped
-at debug level, and is still counted in "Loaded N probes" (`sim/capture/sampler.py:470-476, 514-517`).
-- On the ladder, 2 of 13,824 probes are lost (`ENST00000397293.6`, `ENST00000703226.1`).
-- Their kept twins carry different probes, so real coverage is lost.
-- `ruler_vs_truth.py` and `quant_accuracy.py` skip the same two, so they agree with the simulator.
-
-The fix: refuse an unknown id, or resolve it through `transcript_aliases`, and design the panel on the index's
-transcripts.
-
-### simulated-errors-redraw-the-base
-`priority: later — before any error-bearing panel (the code-health review, 2026-10-16) · stage: panels · kind: defect · 2026-10-16`
-The simulator's error injection draws the replacement over all four bases (`sim/wgs_engine.py:461-465`). A quarter of
-the "substitutions" leave the base unchanged, so the realised rate is ¾ of `error_rate`. Every panel and test uses
-0.0, and no test calls `_introduce_errors_batch`. The fix: draw from the three other bases, and gate the realised rate.
-
 ### debug-capture-memory-is-unbounded
 `priority: later — Tier 4: the fix is in src; the one-real-genome-job rule stands meanwhile · stage: instruments · kind: instrument · 2026-09-28`
 `calibrate(_debug=…)` builds a `SweepCapture` for every sweep with no size or region bound; on the whole human genome
@@ -1700,6 +1682,46 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### the-simulator-draws-over-unknown-sequence
+CLOSED 2026-10-21 (owner: the simulator "should not be sampling from regions with all N"; repeats and unmappable
+sequence stay, an aligner's honest loss). The simulator drew gDNA over the reference's assembly gaps: 18.8 % of the
+ladder's suite genome is N (chr21 6.6 of 46.7 Mb, chr22 11.7 of 50.8 Mb), so about 0.99 M of 5 M gDNA fragments at g50
+capture OFF were all-N reads, which no aligner places and the oracle BAM placed by truth (on the STAR rung of
+2026-10-21 the aligner left about a fifth of the gDNA unplaced off capture). The capture sampler now masks every
+template at its own unknown runs (a gDNA reference; a transcript in its spliced, 5′→3′ coordinates; a nascent span,
+20 of which hold N), so a fragment that would cover an unknown base is never drawn and adds no opportunity, in the
+allocation across templates and the placement within one, with capture and without; the masks cost 0.4 s per condition.
+`ruler_vs_truth.py` builds its truth under the same masks, from the manifest's genome. Gates:
+`tests/test_sim_unknown_sequence.py` (masks per template, the masked partition against enumeration over every start,
+the draws against the masked weights, the reads end to end) and the ruler's self-test (43 checks). Landed with it: the
+length sampler rounds a Normal draw instead of truncating it (the simulated law sat 0.37 bp below `fl_pmf`'s, a
+`latent-defects` panels item), and `fl_pmf` is the rounded Normal's exact mass. The ladder and both fl-gap panels were
+wiped and re-simulated on it.
+
+### capture-probes-on-dropped-duplicates
+CLOSED 2026-10-21: a probe naming a duplicate the index folded binds the kept transcript, the same molecule, through the
+alias table `load_transcripts_from_index` now restores (5 kept transcripts on the ladder carry one), and a probe naming
+no transcript is refused; `ruler_vs_truth.py` loads the same transcripts, so it agrees with the simulator. Gates:
+`tests/test_sim_capture.py`. The finding, as filed (the code-health review, 2026-10-16):
+The ladder's capture panel is designed on the raw GTF (`design_suite_probes.py:37`), but simulated against an index
+built with `--collapse-duplicate-transcripts`. A transcript-coordinate probe that names a dropped duplicate is skipped
+at debug level, and is still counted in "Loaded N probes" (`sim/capture/sampler.py:470-476, 514-517`).
+- On the ladder, 2 of 13,824 probes are lost (`ENST00000397293.6`, `ENST00000703226.1`).
+- Their kept twins carry different probes, so real coverage is lost.
+- `ruler_vs_truth.py` and `quant_accuracy.py` skip the same two, so they agree with the simulator.
+
+The fix: refuse an unknown id, or resolve it through `transcript_aliases`, and design the panel on the index's
+transcripts.
+
+### simulated-errors-redraw-the-base
+CLOSED 2026-10-21: a substitution draws one of the three other bases, each read's count of them is the NM every oracle
+record now carries (0 when error-free), and the realised rate and NM are gated (`tests/test_oracle_bam.py`). The
+ladder and both fl-gap panels simulate at 0.002 per base (owner, 2026-10-21). The finding, as filed (the code-health
+review, 2026-10-16):
+The simulator's error injection draws the replacement over all four bases (`sim/wgs_engine.py:461-465`). A quarter of
+the "substitutions" leave the base unchanged, so the realised rate is ¾ of `error_rate`. Every panel and test uses
+0.0, and no test calls `_introduce_errors_batch`. The fix: draw from the three other bases, and gate the realised rate.
 
 ### the-scanner-builds-fragments-from-one-mate
 CLOSED 2026-10-21 by the scan's repair, in the owner's fix order (2026-10-18; `DESIGN.md` §1.1 and §1.2): every usable

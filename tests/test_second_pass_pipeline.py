@@ -72,7 +72,9 @@ def scenario():
         strand_specificity=0.99,
         seed=SEED,
     )
-    result = sc.build_oracle(n_fragments=4000, sim_config=sim, gdna_fraction=0.25)
+    # Deep enough that many held fragments have hypotheses that both carry weight, so a seed has
+    # something to decide: at 4,000 fragments only 4 of 344 held did, and two seeds drew alike.
+    result = sc.build_oracle(n_fragments=20_000, sim_config=sim, gdna_fraction=0.25)
     yield result
     sc.cleanup()
 

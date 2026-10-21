@@ -100,7 +100,9 @@ simulation:
   frag_min: 50
   frag_max: 500
   read_length: 100
-  error_rate: 0.0
+  # substitutions per base, about an Illumina run's (owner, 2026-10-21): the oracle BAM places every read by
+  # truth and records its NM; an aligner's input carries the errors as sequenced reads do
+  error_rate: 0.002
   n_workers: 8
 
 # ── Abundance — identical to the ladder ─────────────────────────────────────────────────────────

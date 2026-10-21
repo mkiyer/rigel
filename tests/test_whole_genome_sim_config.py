@@ -616,3 +616,55 @@ def test_no_oracle_on_a_config_without_fastqs_is_refused_before_anything_is_simu
     with pytest.raises(ValueError, match="oracle_bam and emit_fastq are both false"):
         script.main()
     assert not outdir.exists()
+
+
+def test_the_length_sampler_is_unbiased_and_its_law_is_exact():
+    """A drawn length is the nearest integer to a normal draw, so the law the instruments integrate (`fl_pmf`, the
+    rounded normal's mass at each integer, truncated) is the sampler's exactly. The sampler once truncated toward
+    zero, so every simulated length law sat half a base below the one `fl_pmf` claims: invisible to the pmf gate
+    above, which reads the largest per-length difference, and plain in the mean.
+
+    Perturbation: `.astype(int)` without rounding moves the mean by about half a base, seven standard errors here."""
+    import numpy as np
+
+    from rigel.sim.sampling import truncated_normal_frag_lengths
+    from rigel.sim.wgs_config import SimulationParams
+    from rigel.sim.whole_genome import fl_pmf
+
+    sim = SimulationParams(frag_mean=206, frag_std=98, frag_min=50, frag_max=500)
+    widths, p = fl_pmf(sim)
+    draws = truncated_normal_frag_lengths(
+        np.random.default_rng(1), 2_000_000, sim.frag_mean, sim.frag_std, sim.frag_min, sim.frag_max
+    )
+    mean = float((widths * p).sum())
+    se = float(np.sqrt((((widths - mean) ** 2) * p).sum() / draws.size))
+    assert abs(draws.mean() - mean) < 4 * se, (draws.mean(), mean, se)
+
+
+def test_the_length_law_is_the_rounded_normals_mass_at_each_integer():
+    """`fl_pmf` is the Normal's mass on ``[k − ½, k + ½)`` at each length of the window, renormalised: the law of a
+    rounded draw. The Normal's density at ``k`` is a different law, only nearly the same at the ladder's spread of
+    98 bases, where the mean gate above cannot tell them apart; at a spread of a base and a half they differ by
+    percents. Checked by quadrature there, and against the sampler.
+
+    Perturbation: the density at each integer departs from the quadrature by percents."""
+    import numpy as np
+    from scipy.integrate import quad
+    from scipy.stats import norm
+
+    from rigel.sim.sampling import truncated_normal_frag_lengths
+    from rigel.sim.wgs_config import SimulationParams
+    from rigel.sim.whole_genome import fl_pmf
+
+    mean, std, lo, hi = 100.3, 1.5, 97, 104
+    widths, p = fl_pmf(SimulationParams(frag_mean=mean, frag_std=std, frag_min=lo, frag_max=hi))
+    exact = np.array([quad(norm(mean, std).pdf, k - 0.5, k + 0.5)[0] for k in range(lo, hi + 1)])
+    exact /= exact.sum()
+    assert widths.tolist() == list(range(lo, hi + 1))
+    np.testing.assert_allclose(p, exact, rtol=1e-9)
+    draws = truncated_normal_frag_lengths(np.random.default_rng(3), 1_000_000, mean, std, lo, hi)
+    freq = np.bincount(draws - lo, minlength=widths.size) / draws.size
+    assert (np.abs(freq - exact) < 5 * np.sqrt(exact * (1 - exact) / draws.size)).all(), (
+        freq,
+        exact,
+    )

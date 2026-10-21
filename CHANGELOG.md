@@ -273,6 +273,15 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   name whose first record is filtered is no longer split around its neighbour, and an aligner's tag of the same name
   as Rigel's (HISAT2's `ZS:i`) is replaced rather than kept.
 - `rigel sim` refuses an empty fragment-length window instead of looping forever.
+- `rigel sim` draws no fragment over unknown sequence: every template (a genomic reference, a transcript, a nascent
+  span) is masked at its own `N` runs, both in how fragments are allotted across templates and in where each lands,
+  with capture or without. It drew genomic DNA across the reference's assembly gaps, as all-`N` reads no aligner places.
+- `rigel sim`'s sequencing errors substitute one of the three other bases (a quarter of them left the base unchanged),
+  and every record of the simulated BAM carries its `NM`.
+- `rigel sim` rounds a drawn fragment length to the nearest integer; it truncated, so the simulated lengths sat about
+  half a base short of the configured law.
+- `rigel sim`'s capture probes: a probe naming a transcript the index folded into an identical one binds the kept
+  transcript, and a probe naming no transcript is refused instead of skipped.
 - A SQUAREM jump that would carry a still-live EM component below the floor is shortened toward the plain EM
   step instead of being clamped there, so which of several transcripts sharing fragments survives no longer
   depends on where the EM started.

@@ -72,6 +72,9 @@ _BYTE_COMPLEMENT = np.zeros(256, dtype=np.uint8)
 for _c, _rc in zip(b"ACGTNacgtn", b"TGCANtgcan"):
     _BYTE_COMPLEMENT[_c] = _rc
 
+#: The four bases in byte order, so ``searchsorted`` reads a base's index off its byte.
+_BASES = np.frombuffer(b"ACGT", dtype=np.uint8)
+
 
 def _seq_to_bytes(seq: str) -> np.ndarray:
     """Convert a DNA string to a numpy uint8 array (writable copy)."""
@@ -364,6 +367,10 @@ class WholeGenomeSimulator:
             transcripts,
             dict(zip(self._ref_names, self._ref_lengths)),
         )
+        # Sequence the reference does not know (`N`) is never drawn, gDNA or RNA, with capture or without: each
+        # template is masked at its own unknown runs, in the allocation across templates and the placement within
+        # one. A shared sampler keeps its partition memo, the masks being the same for every condition.
+        self.capture.mask_unknown_sequence(self.fasta, self._gdna_refs)
         self._bam_header = pysam.AlignmentHeader.from_dict(
             {
                 "HD": {"VN": "1.6", "SO": "unsorted", "GO": "query"},
@@ -452,21 +459,21 @@ class WholeGenomeSimulator:
     # -- Error introduction -------------------------------------------------
 
     def _introduce_errors_batch(self, seqs: np.ndarray) -> np.ndarray:
-        """Apply random substitution errors to a batch of sequences in-place.
-
-        Parameters
-        ----------
-        seqs : 2D uint8 array (count x read_len)
-        """
-        if not self._has_errors:
-            return seqs
+        """Substitute each base of a ``count x read_len`` uint8 batch, in place, with probability ``error_rate``,
+        by one of the three OTHER bases: a draw from all four would put the template's own base back a quarter
+        of the time, so the realised rate would be three quarters of the one configured. Returns each read's
+        number of substitutions, its edit distance from the template it was read from (the oracle BAM's NM).
+        With no errors configured it draws nothing, so an error-free panel's random stream is unchanged."""
         count, read_len = seqs.shape
+        if not self._has_errors:
+            return np.zeros(count, dtype=np.int64)
         mask = self._rng.random((count, read_len)) < self.sim_params.error_rate
         n_errors = int(mask.sum())
         if n_errors > 0:
-            bases = np.array([65, 67, 71, 84], dtype=np.uint8)  # A, C, G, T
-            seqs[mask] = bases[self._rng.integers(4, size=n_errors)]
-        return seqs
+            own = np.searchsorted(_BASES, seqs[mask]) % len(_BASES)
+            shift = self._rng.integers(1, len(_BASES), size=n_errors)
+            seqs[mask] = _BASES[(own + shift) % len(_BASES)]
+        return mask.sum(axis=1)
 
     # -- Post-capture length marginal ---------------------------------------
 
@@ -659,10 +666,9 @@ class WholeGenomeSimulator:
                         r1_seqs[flip_idx].copy(),
                     )
 
-            # Batch error introduction
-            if self._has_errors:
-                self._introduce_errors_batch(r1_seqs)
-                self._introduce_errors_batch(r2_seqs)
+            # Batch error introduction: each read's substitution count is its NM in the oracle BAM
+            r1_nm = self._introduce_errors_batch(r1_seqs)
+            r2_nm = self._introduce_errors_batch(r2_seqs)
 
             # Build query names
             qnames = [
@@ -683,6 +689,8 @@ class WholeGenomeSimulator:
                     qnames,
                     r1_seqs,
                     r2_seqs,
+                    r1_nm,
+                    r2_nm,
                     t,
                     frag_starts,
                     frag_len,
@@ -703,6 +711,8 @@ class WholeGenomeSimulator:
         qnames: list[str],
         r1_seqs: np.ndarray,
         r2_seqs: np.ndarray,
+        r1_nm: np.ndarray,
+        r2_nm: np.ndarray,
         t: Transcript,
         frag_starts: np.ndarray,
         frag_len: int,
@@ -764,7 +774,7 @@ class WholeGenomeSimulator:
                     ref_id,
                     r2_start,
                     r1_tlen,
-                    tags=tags,
+                    tags=[*tags, ("NM", int(r1_nm[i]))],
                 )
             )
             bam_fh.write(
@@ -779,7 +789,7 @@ class WholeGenomeSimulator:
                     ref_id,
                     r1_start,
                     r2_tlen,
-                    tags=tags,
+                    tags=[*tags, ("NM", int(r2_nm[i]))],
                 )
             )
 
@@ -885,9 +895,8 @@ class WholeGenomeSimulator:
                 r1_seqs[neg_idx].copy(),
             )
 
-        if self._has_errors:
-            self._introduce_errors_batch(r1_seqs)
-            self._introduce_errors_batch(r2_seqs)
+        r1_nm = self._introduce_errors_batch(r1_seqs)
+        r2_nm = self._introduce_errors_batch(r2_seqs)
 
         qnames = [
             format_gdna_name(
@@ -937,7 +946,7 @@ class WholeGenomeSimulator:
                         ref_id,
                         r2_start_pos,
                         r1_tlen,
-                        tags=self._nh1_tags,
+                        tags=[*self._nh1_tags, ("NM", int(r1_nm[j]))],
                     )
                 )
                 bam_fh.write(
@@ -952,7 +961,7 @@ class WholeGenomeSimulator:
                         ref_id,
                         r1_start_pos,
                         r2_tlen,
-                        tags=self._nh1_tags,
+                        tags=[*self._nh1_tags, ("NM", int(r2_nm[j]))],
                     )
                 )
         return count

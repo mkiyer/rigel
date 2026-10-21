@@ -71,6 +71,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
+import pysam  # noqa: E402
 
 _REPO = Path(__file__).resolve().parents[2]
 # the checkout's source only when no rigel is installed: a source tree carries no native extension, so
@@ -138,10 +139,12 @@ class Truth:
 
 
 def sampler_truth(sampler: CaptureSampler, lengths, widths, pmf, off_target: float) -> tuple:
-    """``(L_plain, factor_true, probed_frac)`` from the sampler's own partition. The probed fraction is
-    read off the partition at a one-base fragment: every start then carries exactly its own base, so
-    ``(partition(1) − off·L) / binding`` is the count of probed bases (a split probe's pieces at their
-    penalty), and no private probe map is consulted."""
+    """``(L_plain, factor_true, probed_frac)`` from the sampler's own partition. ``L_plain`` counts the starts the
+    simulator could draw without capture, so a transcript's unknown bases (masked by the sampler, never drawn)
+    leave its factor the capture's alone. The probed fraction is read off the partition at a one-base fragment:
+    every start then carries exactly its own base, so ``(partition(1) − off·n) / binding`` over its ``n`` known
+    bases is the count of probed ones (a split probe's pieces at their penalty), and no private probe map is
+    consulted."""
     L = np.asarray(lengths, dtype=np.int64)
     n = L.size
     rows = range(n)
@@ -149,13 +152,14 @@ def sampler_truth(sampler: CaptureSampler, lengths, widths, pmf, off_target: flo
     L_plain = np.zeros(n)
     for w, pw in zip(widths, pmf, strict=True):
         L_true += pw * sampler.partition_array("mrna", rows, L, int(w))
-        L_plain += pw * off_target * np.maximum(0.0, L - w + 1.0)
+        L_plain += pw * off_target * sampler.admissible_counts("mrna", rows, L, int(w))
     ok = L_plain > 0
     factor = np.where(ok, L_true / np.maximum(L_plain, 1e-12), np.nan)
     binding = float(sampler.config.binding_per_base)
     if sampler.enabled and binding > 0.0:
         one = sampler.partition_array("mrna", rows, L, 1)
-        probed = np.clip((one - off_target * L) / (binding * np.maximum(L, 1)), 0.0, 1.0)
+        known = sampler.admissible_counts("mrna", rows, L, 1)
+        probed = np.clip((one - off_target * known) / (binding * np.maximum(known, 1)), 0.0, 1.0)
     else:
         probed = np.zeros(n)
     return L_plain, factor, probed
@@ -196,6 +200,11 @@ def load_sim(index: TranscriptIndex, index_dir: Path, panel_dir: Path, condition
         transcripts,
         ref_lengths,
     )
+    # the masks the reads were drawn under: every template's unknown bases, from the panel's own genome
+    if "genome" not in manifest:
+        raise SystemExit("⛔ the manifest names no genome, so the truth cannot mask what the simulator never drew")
+    with pysam.FastaFile(str(manifest["genome"])) as fasta:
+        sampler.mask_unknown_sequence(fasta, manifest.get("gdna", {}).get("genomic_refs") or [])
     params = type("Sim", (), {k: sim[k] for k in ("frag_mean", "frag_std", "frag_min", "frag_max")})
     widths, pmf = fl_pmf(params)
     gdna_defaults = GDNASimConfig()
@@ -642,6 +651,10 @@ def gdna_space_yield(sim: Sim, blocks: np.ndarray, n_loci: int, id2name: dict, w
             lo = np.maximum(bb[:, 2] - w + 1, 0)
             hi = np.minimum(bb[:, 3] - 1, RL - w)
             n_starts = np.maximum(hi - lo + 1, 0).astype(np.float64)
+            # less the starts the simulator never drew, whose fragment covers an unknown base
+            blocked = sim.sampler._blocked("gdna", name, RL - w + 1, w)
+            if blocked is not None:
+                n_starts -= np.maximum(_blocked_below(blocked, hi + 1) - _blocked_below(blocked, lo), 0)
             sw = np.zeros(bb.shape[0])
             if live:
                 pos, wt = sim.sampler._extra_landscape("gdna", name, RL, w)
@@ -652,6 +665,18 @@ def gdna_space_yield(sim: Sim, blocks: np.ndarray, n_loci: int, id2name: dict, w
                     sw = cs[b] - cs[a]
             np.add.at(Y, bb[:, 0], pw * (sim.off * n_starts + sim.bind * sw))
     return Y
+
+
+def _blocked_below(blocked: np.ndarray, x: np.ndarray) -> np.ndarray:
+    """Per ``x``, how many starts below it lie in the sorted, disjoint ``[start, end)`` runs ``blocked``: every run
+    that starts below ``x`` lies wholly below it except the last, which may hold ``x``."""
+    x = np.asarray(x, dtype=np.int64)
+    length = blocked[:, 1] - blocked[:, 0]
+    before = np.concatenate(([0], np.cumsum(length)))
+    j = np.searchsorted(blocked[:, 0], x, side="left")
+    last = np.maximum(j - 1, 0)
+    partial = np.where(j > 0, np.minimum(x - blocked[last, 0], length[last]), 0)
+    return (before[last] + partial).astype(np.float64)
 
 
 def footprint_gdna_length(region_arrays, block: tuple, gdna_fl_pmf) -> float:
@@ -966,19 +991,50 @@ def self_test() -> int:
         params = type("Sim", (), dict(frag_mean=200, frag_std=50, frag_min=100, frag_max=300))
         widths, pmf = fl_pmf(params)
         # Exercise the manifest loader too: a consumer-only check cannot catch it
-        # silently reusing the RNA law or using RNA parameters as gDNA defaults.
+        # silently reusing the RNA law or using RNA parameters as gDNA defaults. Its genome is known
+        # sequence but for two assembly gaps: one in the unprobed gene's intron, one in its second exon.
+        bases = np.random.default_rng(0).choice(np.frombuffer(b"ACGT", dtype=np.uint8), 16000)
+        bases[12200:12300] = ord("N")
+        bases[13100:13120] = ord("N")
+        genome = Path(tmp) / "known.fa"
+        genome.write_text(">chr1\n" + bases.tobytes().decode() + "\n")
+        pysam.faidx(str(genome))
         manifest = {
+            "genome": str(genome),
             "simulation": {k: getattr(params, k) for k in ("frag_mean", "frag_std", "frag_min", "frag_max")},
-            "gdna": dict(frag_mean=80, frag_std=10, frag_min=60, frag_max=100),
+            "gdna": dict(frag_mean=80, frag_std=10, frag_min=60, frag_max=100, genomic_refs=["chr1"]),
             "capture_configs": [{"label": "off", "config": {"off_target_weight": 1.0}}],
         }
         manifest_path = Path(tmp) / "manifest.json"
         manifest_path.write_text(json.dumps(manifest))
         loaded = load_sim(index, Path(index.index_dir), Path(tmp), "example_capture_off")
-        gw, gp = fl_pmf(type("GDNA", (), manifest["gdna"]))
+        gw, gp = fl_pmf(type("GDNA", (), {k: v for k, v in manifest["gdna"].items() if k != "genomic_refs"}))
         check("the manifest loader keeps distinct RNA and gDNA laws",
               np.array_equal(loaded.widths, widths) and np.array_equal(loaded.pmf, pmf)
               and np.array_equal(loaded.gdna_widths, gw) and np.array_equal(loaded.gdna_pmf, gp))
+        # ⓪ the loader masks what the simulator never drew: the gDNA reference at its gaps, and the unprobed
+        #    transcript at the exon gap in its own coordinates (600 bases of first exon, then 100 into the second)
+        u_row = int(np.flatnonzero(index.t_df.t_id.to_numpy() == "unprobed")[0])
+        check("the loader masks the gDNA reference at the genome's unknown runs",
+              loaded.sampler.unknown("gdna", "chr1").tolist() == [[12200, 12300], [13100, 13120]])
+        check("...and each transcript at its own", loaded.sampler.unknown("mrna", u_row).tolist() == [[700, 720]])
+        L_all = np.array([int(t.length) for t in transcripts], dtype=np.int64)
+        Lm_plain, fm, _ = sampler_truth(loaded.sampler, L_all, widths, pmf, 1.0)
+        enumerated = sum(
+            pw * sum(1 for st in range(int(L_all[u_row]) - int(wv) + 1) if st + int(wv) <= 700 or st >= 720)
+            for wv, pw in zip(widths, pmf, strict=True)
+        )
+        check("a masked transcript's plain length counts only the starts the simulator could draw",
+              abs(Lm_plain[u_row] / enumerated - 1.0) < 1e-12)
+        check("...so masking leaves an uncaptured transcript's factor exactly 1", fm[u_row] == 1.0)
+        manifest_path.write_text(json.dumps({k: v for k, v in manifest.items() if k != "genome"}))
+        try:
+            load_sim(index, Path(index.index_dir), Path(tmp), "example_capture_off")
+            fired = False
+        except SystemExit:
+            fired = True
+        manifest_path.write_text(json.dumps(manifest))
+        check("a manifest naming no genome is refused", fired)
         manifest["gdna"] = {"frag_mean": 100}
         manifest_path.write_text(json.dumps(manifest))
         loaded = load_sim(index, Path(index.index_dir), Path(tmp), "example_capture_off")
@@ -1123,6 +1179,24 @@ def self_test() -> int:
         check("an unprobed footprint's probed fraction is 0", pf_loc[0] == 0.0)
         check("a footprint exactly on a probe part reads 1", abs(pf_loc[1] - 1.0) < 1e-12)
         check("...and one half on it reads ½", abs(pf_loc[2] - 0.5) < 1e-12)
+        # ⑭ under a mask: the gDNA-space yield drops every start whose fragment covers an unknown base, as the
+        #    simulator's own weights do, and a probed transcript's probed fraction is over its known bases
+        sampler.mask_unknown("gdna", "chr1", [(12000, 12100), (2000, 2050)])
+        Ym = gdna_space_yield(gap, blocks, 2, {0: "chr1"}, width_step=1)
+        direct = np.zeros(2)
+        for lid, rid, lo, hi in blocks:
+            for wv, pw in zip(gap.gdna_widths, gap.gdna_pmf, strict=True):
+                direct[lid] += pw * sum(
+                    sampler.fragment_weight("gdna", "chr1", 16000, start, int(wv))
+                    for start in range(max(0, int(lo-wv+1)), min(int(hi), 16000-int(wv)+1))
+                )
+        check("a masked gDNA footprint's yield agrees with direct enumeration of the drawable starts",
+              np.allclose(Ym, direct, rtol=1e-12, atol=1e-9) and (Ym < Ygap).all())
+        sampler.mask_unknown("gdna", "chr1", [])
+        sampler.mask_unknown("mrna", p, [(100, 140)])
+        _, _, probed_m = sampler_truth(sampler, L, widths, pmf, off)
+        check("a fully probed transcript with unknown bases still reads probed fraction 1", abs(probed_m[p] - 1.0) < 1e-9)
+        sampler.mask_unknown("mrna", p, [])
 
     n = len(checks)
     failed = [name for name, ok in checks if not ok]

@@ -322,3 +322,58 @@ class TestWholeGenomeOracleBamHeader:
         for path in (r1_path, r2_path):
             lines = gzip.decompress(Path(path).read_bytes()).decode().splitlines()
             assert lines and {c for quality in lines[3::4] for c in quality} == {BASE_QUALITY}
+
+
+class TestSequencingErrors:
+    """Simulated reads carry substitution errors at the configured rate, and the oracle BAM says how many each
+    record holds (`NM`), as an aligner would: every record carries the tag, 0 on an error-free read."""
+
+    def _simulate(self, tmp_path, error_rate):
+        genome = MutableGenome(length=4000, seed=6, name="ref")
+        fasta_path = genome.write_fasta(tmp_path)
+        sim = WholeGenomeSimulator(
+            fasta_path,
+            [_make_pos_transcript([(200, 900), (1500, 2200)])],
+            SimulationParams(
+                sim_seed=8,
+                frag_mean=200,
+                frag_std=1,
+                frag_min=200,
+                frag_max=200,
+                read_length=60,
+                error_rate=error_rate,
+            ),
+            GDNASimConfig(frag_mean=200, frag_std=1, frag_min=200, frag_max=200),
+            genomic_refs=[genome.name],
+        )
+        try:
+            _, _, bam_path = sim.simulate_and_write(
+                tmp_path / "out", n_rna=600, n_gdna=600, oracle_bam=True, n_workers=1
+            )
+        finally:
+            sim.close()
+        return fasta_path, bam_path
+
+    def test_every_record_carries_NM_and_NM_counts_its_mismatches(self, tmp_path):
+        """Perturbation: no NM tag, or NM counted before the errors, or a substitution that may redraw the base it
+        replaces (a quarter of the 'errors' are then no error, and NM over-counts)."""
+        fasta_path, bam_path = self._simulate(tmp_path, error_rate=0.02)
+        n_bases = n_mismatches = 0
+        with (
+            pysam.FastaFile(str(fasta_path)) as fasta,
+            pysam.AlignmentFile(str(bam_path), "rb") as bam,
+        ):
+            for read in bam.fetch(until_eof=True):
+                ref = _reference_sequence_for_record(read, fasta)
+                mismatches = sum(a != b for a, b in zip(read.query_sequence, ref))
+                assert read.get_tag("NM") == mismatches
+                n_bases += len(ref)
+                n_mismatches += mismatches
+        rate = n_mismatches / n_bases
+        assert abs(rate - 0.02) < 5 * (0.02 * 0.98 / n_bases) ** 0.5, rate
+
+    def test_an_error_free_read_carries_NM_0(self, tmp_path):
+        """Rigel warns of a record without NM, which it reads as 0 edits: the simulator's own BAM must not trip it."""
+        _, bam_path = self._simulate(tmp_path, error_rate=0.0)
+        with pysam.AlignmentFile(str(bam_path), "rb") as bam:
+            assert {read.get_tag("NM") for read in bam.fetch(until_eof=True)} == {0}

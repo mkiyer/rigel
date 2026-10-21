@@ -1065,3 +1065,68 @@ class TestTheConditionalWasAlreadyRight:
 
         assert shares == sorted(shares)
         assert shares[0] < shares[-1]
+
+
+# ── probes on transcripts the index merged ───────────────────────────────────────────────────────
+
+
+def test_a_probe_naming_a_merged_duplicate_binds_its_kept_twin(tmp_path):
+    """The ladder's panel is designed on the raw annotation, and the index folds identical transcripts into one
+    (`--collapse-duplicate-transcripts`), recording each dropped id as the kept one's alias. A probe naming a dropped
+    id was skipped at debug level, its coverage lost (2 of 13,824 on the ladder); it now binds the kept twin, the same
+    molecule.
+
+    Perturbation: skipping the alias, as before, leaves the twin with no probe."""
+    probes = tmp_path / "probes.tsv"
+    probes.write_text("transcript_id\tstart\tend\nT_dropped\t200\t320\n")
+    kept = _transcript("T", [(0, 2000)])
+    kept.aliases = ("T_dropped",)
+    sampler = CaptureSampler.from_config(
+        CaptureConfig(probes=str(probes), binding_per_base=1.0, off_target_weight=1.0),
+        [kept],
+        {"chr1": 2000},
+    )
+    assert sampler.fragment_weight("mrna", 0, 2000, 250, 200) == pytest.approx(71.0)
+
+
+def test_a_probe_naming_no_transcript_is_refused(tmp_path):
+    """A probe whose transcript is neither in the index nor an alias of one names a panel built for another
+    annotation: refused, never skipped, since a skipped probe is coverage the truth silently lacks."""
+    probes = tmp_path / "probes.tsv"
+    probes.write_text("transcript_id\tstart\tend\nT_nowhere\t200\t320\n")
+    with pytest.raises(ValueError, match="T_nowhere"):
+        CaptureSampler.from_config(
+            CaptureConfig(probes=str(probes), binding_per_base=1.0),
+            [_transcript("T", [(0, 2000)])],
+            {"chr1": 2000},
+        )
+
+
+def test_the_simulators_transcripts_carry_the_aliases_the_index_recorded(tmp_path):
+    """`load_transcripts_from_index` is the simulator's transcriptome, and the probe loader resolves a dropped
+    duplicate through the kept transcript's aliases, so the loader must restore them from the index."""
+    from rigel.index import TranscriptIndex
+    from rigel.sim.whole_genome import load_transcripts_from_index
+
+    fasta = tmp_path / "genome.fa"
+    fasta.write_text(">chr1\n" + "ACGT" * 500 + "\n")
+    pysam.faidx(str(fasta))
+    gtf = tmp_path / "ann.gtf"
+    gtf.write_text(
+        'chr1\tsrc\texon\t1\t300\t.\t+\t.\tgene_id "G1"; transcript_id "T1";\n'
+        'chr1\tsrc\texon\t401\t700\t.\t+\t.\tgene_id "G1"; transcript_id "T1";\n'
+        'chr1\tsrc\texon\t1\t300\t.\t+\t.\tgene_id "G1"; transcript_id "T1dup";\n'
+        'chr1\tsrc\texon\t401\t700\t.\t+\t.\tgene_id "G1"; transcript_id "T1dup";\n'
+    )
+    TranscriptIndex.build(
+        str(fasta),
+        str(gtf),
+        str(tmp_path / "idx"),
+        write_tsv=False,
+        collapse_duplicate_transcripts=True,
+    )
+    transcripts = load_transcripts_from_index(tmp_path / "idx")
+    aliases = {t.t_id: t.aliases for t in transcripts if not t.is_synthetic}
+    assert sorted(aliases) in (["T1"], ["T1dup"])
+    (kept,) = aliases
+    assert aliases[kept] == (({"T1", "T1dup"} - {kept}).pop(),)

@@ -54,6 +54,7 @@ from pathlib import Path
 
 import numpy as np
 import yaml
+from scipy.special import ndtr
 
 from rigel.transcript import Transcript
 from rigel.types import Interval, Strand
@@ -482,13 +483,24 @@ def load_transcripts_from_index(index_dir: str | Path) -> list[Transcript]:
     exactly as the index carries them and ``t_index`` equal to the index row — so the simulator, the
     oracle and `rigel quant` all speak about the same transcript set. The GTF loader is not used here because it
     cannot know what the index did (duplicate collapse, nascent consolidation), and a simulator fed the
-    raw GTF would carry a different nascent model from the tool's. Raises if the rebuilt rows are not
-    contiguous ``t_index`` 0..n-1, or if an index row has no exon intervals.
+    raw GTF would carry a different nascent model from the tool's. Each kept transcript carries the ids of the
+    duplicates the index folded into it (its alias table), so a probe panel designed on the raw annotation still
+    binds the molecule its probe names. Raises if the rebuilt rows are not contiguous ``t_index`` 0..n-1, or if an
+    index row has no exon intervals.
     """
-    from ..index import TranscriptIndex
+    import pandas as pd
+
+    from ..index import TRANSCRIPT_ALIASES_FEATHER, TranscriptIndex
 
     index = TranscriptIndex.load(index_dir, retain_test_structures=True)
     t_df = index.t_df
+    aliases: dict[str, list[str]] = {}
+    alias_path = Path(index_dir) / TRANSCRIPT_ALIASES_FEATHER
+    if alias_path.exists():
+        for dropped, kept in pd.read_feather(alias_path)[["dropped_t_id", "kept_t_id"]].itertuples(
+            index=False
+        ):
+            aliases.setdefault(str(kept), []).append(str(dropped))
     transcripts: list[Transcript] = []
     for row in t_df.itertuples(index=False):
         exons = index.get_exon_intervals(int(row.t_index))
@@ -511,6 +523,7 @@ def load_transcripts_from_index(index_dir: str | Path) -> list[Transcript]:
             is_synthetic=bool(row.is_synthetic),
             span_t_index=int(row.span_t_index),
             span_n_contributors=int(row.span_n_contributors),
+            aliases=tuple(sorted(aliases.get(str(row.t_id), ()))),
         )
         t.length = t.compute_length()
         transcripts.append(t)
@@ -798,12 +811,15 @@ def apply_nrna_ratio(
 
 
 def fl_pmf(sim: "SimulationParams") -> tuple[np.ndarray, np.ndarray]:
-    """The fragment-length pmf the engine draws from — a Normal truncated to ``[frag_min, frag_max]``,
-    evaluated exactly rather than sampled, so a quantity derived from it is deterministic.
-    Matches `sampling.truncated_normal_frag_lengths`'s rejection loop in distribution."""
+    """The fragment-length pmf the engine draws from, evaluated exactly rather than sampled, so a quantity derived
+    from it is deterministic: `sampling.truncated_normal_frag_lengths` rounds a Normal draw to the nearest integer
+    and keeps it in ``[frag_min, frag_max]``, so length ``k`` has the Normal's mass on ``[k − ½, k + ½)``,
+    renormalised over the window. Each mass is taken on the side of the mean where it is a difference of two
+    small tails, never of two numbers near 1."""
     widths = np.arange(int(sim.frag_min), int(sim.frag_max) + 1, dtype=np.int64)
-    logp = -0.5 * ((widths - float(sim.frag_mean)) / float(sim.frag_std)) ** 2
-    p = np.exp(logp - logp.max())
+    lo = (widths - 0.5 - float(sim.frag_mean)) / float(sim.frag_std)
+    hi = lo + 1.0 / float(sim.frag_std)
+    p = np.where(lo > 0.0, ndtr(-lo) - ndtr(-hi), ndtr(hi) - ndtr(lo))
     return widths, p / p.sum()
 
 

@@ -20,8 +20,9 @@ def truncated_normal_frag_lengths(
     frag_min: int,
     frag_max: int,
 ) -> np.ndarray:
-    """Sample ``n`` integer fragment lengths from ``Normal(mean, std)`` truncated to
-    ``[frag_min, frag_max]`` (inclusive), via rejection sampling against ``rng``."""
+    """Sample ``n`` integer fragment lengths: a ``Normal(mean, std)`` draw rounded to the nearest integer,
+    truncated to ``[frag_min, frag_max]`` (inclusive), via rejection sampling against ``rng``. Rounding, never
+    truncation toward zero, is what makes the law `whole_genome.fl_pmf` states the one drawn."""
     if frag_min > frag_max:
         # The rejection loop would never fill: no draw lands in an empty window.
         raise ValueError(
@@ -37,7 +38,7 @@ def truncated_normal_frag_lengths(
             int(needed * CONSTANTS.simulator.oversample_ratio)
             + CONSTANTS.simulator.oversample_extra
         )
-        raw = rng.normal(mean, std, size).astype(int)
+        raw = np.rint(rng.normal(mean, std, size)).astype(int)
         valid = raw[(raw >= frag_min) & (raw <= frag_max)]
         nkeep = min(len(valid), needed)
         result[filled : filled + nkeep] = valid[:nkeep]

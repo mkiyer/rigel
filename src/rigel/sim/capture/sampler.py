@@ -9,6 +9,11 @@ start on it (:meth:`CaptureSampler.sample_starts`), and what one concrete fragme
 uniform starts and plain effective lengths. The weight model's parameters are :mod:`capture.config`;
 generating synthetic panels is :mod:`capture.design`.
 
+Sequence the reference does not know (`N`, an assembly gap) is masked per template (:meth:`mask_unknown`,
+:meth:`mask_unknown_sequence`): a fragment that would overlap an unknown base is never drawn and adds no
+opportunity, with capture or without, so neither the allocation across templates nor the placement within one ever
+reaches a gap (`tests/test_sim_unknown_sequence.py`).
+
 A fragment's weight is ``off_target_weight + binding_per_base * overlap``, where ``overlap`` is the
 fragment's best overlap with a single CONTIGUOUS part of a probe in the fragment's own template. A molecule
 hybridises through one contiguous stretch, so a probe split across a splice junction is one part in a
@@ -51,7 +56,37 @@ from .config import CaptureConfig
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CaptureSampler", "ProbeInterval"]
+__all__ = ["CaptureSampler", "ProbeInterval", "unknown_runs"]
+
+_N = ord("N")
+
+
+def unknown_runs(seq: np.ndarray) -> np.ndarray:
+    """``int64[n, 2]`` — the ``[start, end)`` runs of unknown bases (`N`) in an upper-cased byte sequence, ascending."""
+    return _true_runs(np.asarray(seq, dtype=np.uint8) == _N)
+
+
+def _true_runs(mask: np.ndarray) -> np.ndarray:
+    """``int64[n, 2]`` — the ``[start, end)`` runs where a boolean array is true, ascending."""
+    if not mask.any():
+        return np.empty((0, 2), dtype=np.int64)
+    edges = np.diff(np.concatenate(([0], mask.view(np.int8), [0])))
+    return np.stack([np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)], axis=1).astype(
+        np.int64
+    )
+
+
+def _merged(lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
+    """Half-open intervals ascending by start, overlapping ones merged: ``int64[n, 2]``."""
+    if lo.size == 0:
+        return np.empty((0, 2), dtype=np.int64)
+    run_hi = np.maximum.accumulate(hi)
+    opens = np.empty(lo.size, dtype=bool)
+    opens[0] = True
+    opens[1:] = lo[1:] > run_hi[:-1]
+    first = np.flatnonzero(opens)
+    ends = np.maximum.reduceat(hi, first)
+    return np.stack([lo[first], ends], axis=1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +120,11 @@ class CaptureSampler:
         self._tx_id_to_index = {
             str(t.t_id): idx for idx, t in enumerate(transcripts) if t.t_id is not None
         }
+        # a duplicate the index folded into a kept transcript (`--collapse-duplicate-transcripts`) is that
+        # transcript: a probe naming it binds the kept one, the same molecule
+        for idx, t in enumerate(transcripts):
+            for alias in t.aliases:
+                self._tx_id_to_index.setdefault(str(alias), idx)
         self._tx_by_ref: dict[str, list[int]] = defaultdict(list)
         for idx, t in enumerate(transcripts):
             if t.ref is not None:
@@ -122,6 +162,143 @@ class CaptureSampler:
         #: (`tests/test_sim_capture.py::TestNoUnboundedCache`).
         self._partition_memo: dict[tuple, np.ndarray] = {}
         self._partition_memo_population: tuple | None = None
+        #: Per template, the runs of bases the reference does not know: ``{space: {key: int64[n, 2]}}``, sorted,
+        #: disjoint ``[start, end)`` in the template's own coordinates. A fragment overlapping one is never drawn.
+        self._unknown: dict[str, dict[int | str, np.ndarray]] = {}
+
+    # -- Unknown sequence --------------------------------------------------
+
+    @staticmethod
+    def _norm(space: str, key: int | str) -> int | str:
+        return int(key) if space == "mrna" else str(key)
+
+    def mask_unknown(self, space: str, key: int | str, runs) -> None:
+        """Install one template's unknown runs, ``[start, end)`` pairs in any order (replacing any before); they are
+        kept sorted and merged. An unchanged mask keeps the partition memo, which every condition of a panel
+        shares; a changed one clears it."""
+        runs = np.asarray(runs, dtype=np.int64).reshape(-1, 2)
+        if len(runs):
+            if (runs[:, 1] <= runs[:, 0]).any() or (runs[:, 0] < 0).any():
+                raise ValueError(
+                    f"an unknown run is a non-empty [start, end) at or after 0: {runs.tolist()}"
+                )
+            order = np.argsort(runs[:, 0], kind="stable")
+            runs = _merged(runs[order, 0], runs[order, 1])
+        masks = self._unknown.setdefault(space, {})
+        k = self._norm(space, key)
+        old = masks.get(k)
+        if (old is None and len(runs) == 0) or (old is not None and np.array_equal(old, runs)):
+            return
+        if len(runs):
+            masks[k] = runs
+        else:
+            del masks[k]
+        self._partition_memo.clear()
+        self._partition_memo_population = None
+
+    def unknown(self, space: str, key: int | str) -> np.ndarray:
+        """One template's unknown runs, ``int64[n, 2]`` (empty when it has none)."""
+        runs = self._unknown.get(space, {}).get(self._norm(space, key))
+        return np.empty((0, 2), dtype=np.int64) if runs is None else runs
+
+    def mask_unknown_sequence(self, fasta, gdna_refs) -> None:
+        """Mask every template from the reference: each gDNA reference in ``gdna_refs`` at its own `N` runs, and
+        each transcript row at the runs of its template as the read engine builds it (its exons in genomic order,
+        reverse-complemented on the minus strand, so a run's coordinates are read 5′ to 3′). ``fasta`` is a
+        ``pysam.FastaFile`` of the panel's genome."""
+        gdna_refs = {str(r) for r in gdna_refs}
+        for ref in fasta.references:
+            rows = self._tx_by_ref.get(ref, ())
+            if ref not in gdna_refs and not rows:
+                continue
+            # either case: `| 0x20` lower-cases a letter, and only `N` and `n` become `n`
+            isn = (np.frombuffer(fasta.fetch(ref).encode(), dtype=np.uint8) | 0x20) == ord("n")
+            runs = _true_runs(isn)
+            if ref in gdna_refs:
+                self.mask_unknown("gdna", ref, runs)
+            n_before = np.concatenate(([0], np.cumsum(isn)))
+            for t_idx in rows:
+                t = self.transcripts[t_idx]
+                if n_before[t.end] == n_before[t.start]:
+                    self.mask_unknown("mrna", t_idx, ())
+                    continue
+                template = np.concatenate([isn[e.start : e.end] for e in t.exons])
+                if t.strand == Strand.NEG:
+                    template = template[::-1]
+                self.mask_unknown("mrna", t_idx, _true_runs(template))
+
+    def _masked_among(self, space: str, keys) -> list[tuple[int, int | str]]:
+        """``(position, key)`` of each template in ``keys`` that has unknown runs."""
+        masks = self._unknown.get(space)
+        if not masks:
+            return []
+        if space == "mrna":
+            karr = np.asarray(keys, dtype=np.int64)
+            hit = np.flatnonzero(
+                np.isin(karr, np.fromiter(masks, dtype=np.int64, count=len(masks)))
+            )
+            return [(int(i), int(karr[i])) for i in hit]
+        return [(i, str(k)) for i, k in enumerate(keys) if str(k) in masks]
+
+    def _blocked(self, space: str, key: int | str, eff_len: int, width: int) -> np.ndarray | None:
+        """The starts in ``[0, eff_len)`` whose fragment of ``width`` overlaps an unknown base, as merged
+        ``[start, end)`` runs; ``None`` when there are none."""
+        runs = self._unknown.get(space, {}).get(self._norm(space, key))
+        if runs is None or eff_len <= 0:
+            return None
+        lo = np.maximum(runs[:, 0] - int(width) + 1, 0)
+        hi = np.minimum(runs[:, 1], eff_len)
+        keep = hi > lo
+        if not keep.any():
+            return None
+        return _merged(lo[keep], hi[keep])
+
+    def admissible_counts(self, space: str, keys, lengths: np.ndarray, frag_len: int) -> np.ndarray:
+        """Per template, the number of starts whose fragment of ``frag_len`` covers no unknown base."""
+        lengths = np.asarray(lengths, dtype=np.int64)
+        width = int(frag_len)
+        out = np.maximum(0, lengths - width + 1)
+        for i, key in self._masked_among(space, keys):
+            blocked = self._blocked(space, key, int(out[i]), width)
+            if blocked is not None:
+                out[i] -= int((blocked[:, 1] - blocked[:, 0]).sum())
+        return out
+
+    def _zero_blocked(
+        self, buffer, run_offset, run_start, run_keys, eff, keys, space, width
+    ) -> None:
+        """Zero the landscape at every start whose fragment overlaps an unknown base. Runs are disjoint and
+        ascending within a key, so each blocked stretch meets a contiguous slice of the key's runs."""
+        run_end = run_start + np.diff(run_offset)
+        for kp, key in self._masked_among(space, keys):
+            sel = np.flatnonzero(run_keys == kp)
+            if not sel.size:
+                continue
+            blocked = self._blocked(space, key, int(eff[kp]), width)
+            if blocked is None:
+                continue
+            rs, re, ro = run_start[sel], run_end[sel], run_offset[sel]
+            for b_lo, b_hi in blocked.tolist():
+                for i in range(
+                    int(np.searchsorted(re, b_lo, side="right")), int(np.searchsorted(rs, b_hi))
+                ):
+                    lo, hi = max(int(rs[i]), b_lo), min(int(re[i]), b_hi)
+                    if hi > lo:
+                        buffer[int(ro[i]) + lo - int(rs[i]) : int(ro[i]) + hi - int(rs[i])] = 0.0
+
+    def _uniform_starts(
+        self, space: str, key: int | str, eff_len: int, frag_len: int, size: int, rng
+    ) -> np.ndarray:
+        """Uniform draws over the admissible starts: the k-th admissible start, k uniform."""
+        blocked = self._blocked(space, key, eff_len, frag_len)
+        if blocked is None:
+            return rng.integers(0, eff_len, size=size, dtype=np.int64)
+        free = np.concatenate(([0], blocked.ravel(), [eff_len])).reshape(-1, 2)
+        free = free[free[:, 1] > free[:, 0]]
+        before = np.concatenate(([0], np.cumsum(free[:, 1] - free[:, 0])))
+        k = rng.integers(0, int(before[-1]), size=size, dtype=np.int64)
+        seg = np.searchsorted(before, k, side="right") - 1
+        return free[seg, 0] + (k - before[seg])
 
     def _transcripts_overlapping(self, ref: str, lo: int, hi: int) -> np.ndarray:
         """Indices of the transcripts on ``ref`` whose span intersects ``[lo, hi)``."""
@@ -186,9 +363,9 @@ class CaptureSampler:
         if eff_len <= 0:
             return 0.0
 
-        baseline = self.config.off_target_weight * eff_len
         if not self.enabled or self.config.binding_per_base <= 0:
-            return float(baseline)
+            n = self.admissible_counts(space, [key], np.array([int(seq_len)]), frag_len)[0]
+            return float(self.config.off_target_weight * n)
 
         # Prefer the batched path even for a single key: it covers only the merged probe
         # neighbourhoods and caches nothing, where a per-key path materialises and sorts an array
@@ -254,7 +431,10 @@ class CaptureSampler:
         lengths = np.asarray(lengths, dtype=np.int64)
         width = int(frag_len)
         eff = np.maximum(0, lengths - width + 1)
-        result = eff.astype(np.float64) * self.config.off_target_weight
+        result = (
+            self.admissible_counts(space, keys, lengths, width).astype(np.float64)
+            * self.config.off_target_weight
+        )
         if not self.enabled or self.config.binding_per_base <= 0:
             return result
         population = (space, tuple(keys), lengths.tobytes())
@@ -281,7 +461,10 @@ class CaptureSampler:
         if landscape is None:
             self._partition_memo[memo_key] = result
             return result.copy()
-        buffer, run_offset, _run_start, run_first, kept_positions = landscape
+        buffer, run_offset, run_start, run_first, kept_positions = landscape
+        self._zero_blocked(
+            buffer, run_offset, run_start, kept_positions[run_first], eff, keys, space, width
+        )
 
         run_sums = np.add.reduceat(buffer, run_offset[:-1])
         sums = np.bincount(kept_positions[run_first], weights=run_sums, minlength=len(keys))
@@ -384,26 +567,29 @@ class CaptureSampler:
         if eff_len <= 0:
             return np.empty(0, dtype=np.int64)
 
+        n_free = int(self.admissible_counts(space, [key], np.array([int(seq_len)]), frag_len)[0])
+        if n_free <= 0:
+            raise ValueError(
+                f"{count} fragments of {frag_len} bp asked of {space} template {key!r}, where every start covers an "
+                "unknown base: its opportunity is 0, so it can be allocated none"
+            )
         if not self.enabled or self.config.binding_per_base <= 0:
-            return rng.integers(0, eff_len, size=count, dtype=np.int64)
+            return self._uniform_starts(space, key, eff_len, frag_len, count, rng)
 
         extra_starts, raw_weights = self._extra_landscape(space, key, seq_len, frag_len)
         raw_total = float(raw_weights.sum())
-        baseline_mass = self.config.off_target_weight * eff_len
+        baseline_mass = self.config.off_target_weight * n_free
         extra_mass = self.config.binding_per_base * raw_total
         total_mass = baseline_mass + extra_mass
         if raw_total <= 0 or total_mass <= 0:
-            return rng.integers(0, eff_len, size=count, dtype=np.int64)
+            return self._uniform_starts(space, key, eff_len, frag_len, count, rng)
 
         starts = np.empty(count, dtype=np.int64)
         baseline_mask = rng.random(count) < (baseline_mass / total_mass)
         n_baseline = int(baseline_mask.sum())
         if n_baseline > 0:
-            starts[baseline_mask] = rng.integers(
-                0,
-                eff_len,
-                size=n_baseline,
-                dtype=np.int64,
+            starts[baseline_mask] = self._uniform_starts(
+                space, key, eff_len, frag_len, n_baseline, rng
             )
 
         extra_positions = np.where(~baseline_mask)[0]
@@ -430,6 +616,14 @@ class CaptureSampler:
         eff_len = int(seq_len) - int(frag_len) + 1
         if eff_len <= 0 or frag_start < 0 or frag_start >= eff_len:
             return 0.0
+        blocked = self._blocked(space, key, eff_len, frag_len)
+        if (
+            blocked is not None
+            and ((blocked[:, 0] <= frag_start) & (frag_start < blocked[:, 1])).any()
+        ):
+            return 0.0
+        if not self.enabled or self.config.binding_per_base <= 0:
+            return self.config.off_target_weight
         frag_end = frag_start + frag_len
         score = 0
         for interval in self._get_intervals(space, key):
@@ -512,8 +706,10 @@ class CaptureSampler:
     ) -> None:
         t_idx = self._tx_id_to_index.get(transcript_id)
         if t_idx is None:
-            logger.debug("Skipping probe for unknown transcript %s", transcript_id)
-            return
+            raise ValueError(
+                f"{path}:{row_number}: a probe on {transcript_id}, which is neither a transcript of the index nor a "
+                "duplicate it folded into one: the panel was designed on another annotation"
+            )
         tx_len = int(self._tx_lengths[t_idx])
         if start < 0 or end <= start or end > tx_len:
             raise ValueError(
@@ -603,6 +799,16 @@ class CaptureSampler:
         if landscape is None:
             return empty
         buffer, run_offset, run_start, _run_first, _positions = landscape
+        self._zero_blocked(
+            buffer,
+            run_offset,
+            run_start,
+            np.zeros(len(run_start), dtype=np.int64),
+            np.array([eff_len]),
+            [key],
+            space,
+            width,
+        )
 
         # Runs are disjoint and ascending within a key, so concatenating their positions is already
         # sorted — which is the contract `sample_starts` relies on.

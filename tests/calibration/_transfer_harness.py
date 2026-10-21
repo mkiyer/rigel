@@ -806,8 +806,11 @@ def _with_populated_inside(ctx):
     """The toy's inside pieces are EMPTY (shorter than a fragment: no contained fragment, a contained
     opportunity below one base), so the level rule serves nothing there and a gate on the bare toy proves
     nothing. A context is data: populate the two inside slots with consistent counts (both strand
-    channels live, so the step's spread is fitted from two pairs) and a plausible contained
-    opportunity, for the policy and the independent recompute alike."""
+    channels live, so the step's spread is fitted from two pairs) and a contained opportunity that makes
+    each inside twice as dense as what crosses its boundary, for the policy and the independent recompute
+    alike. Denser is what the level rule's no-claim bound needs to bind: an inside no denser than its
+    boundary's crossing is bounded above nowhere on the grid, and the rule then rightly says nothing — a
+    fixed opportunity left that to the simulated draw, and one draw put the boundary above the inside."""
     R = transfer_rows
     is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
@@ -828,7 +831,8 @@ def _with_populated_inside(ctx):
         if i is None:
             continue
         cnt[i] = next(fills)
-        a_g[i] = a_r[i] = 150.0
+        crossing_density = float(np.sum(cnt[b])) / a_g[b]
+        a_g[i] = a_r[i] = float(np.sum(cnt[i])) / (2.0 * crossing_density)
         live[i] = True
     return dataclasses.replace(
         ctx,
