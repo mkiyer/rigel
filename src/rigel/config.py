@@ -217,16 +217,21 @@ class BamScanConfig:
     """Scan buffer spill directory (default ``None`` = system temp dir)."""
 
     intron_overhang_tolerance: int = 3
-    """Intron-overhang tolerance ``K`` (bp): how many bases an alignment may run into an
-    annotated intron, and an annotated intron overhang a mate gap, and still be read as
-    spliced there.
+    """Intron-overhang tolerance ``K`` (bp): how many bases an aligned block's end may lie
+    inside an annotated intron, as when an aligner runs a read a base or two across a splice
+    site. It acts at the edge of a gap the reads did not sequence (an implicit splice) and at
+    a fragment's outer end.
 
-    The resolver applies it when it enumerates a fragment's gap hypotheses: a
-    candidate transcript is excluded as contradicting the alignment only when one of its
-    introns overlaps an aligned block by more than ``K``, and an annotated intron is placed
-    in an unsequenced gap when it overlaps the gap and lies within it widened by ``K`` at
-    each end. The calibration accumulator arbitrates those hypotheses and deposits the
-    survivor, so ``K`` changes calibration's tally, and the scan-cache key includes it.
+    The pair rule applies it along a witness transcript, when two mates are longer than
+    ``max_frag_length`` along the genome: the witness's intron in an unaligned stretch
+    between them is cut whole when it lies within the stretch widened by ``K``, and the
+    witness offers no path when one of its introns holds more than ``K`` aligned bases. The
+    resolver applies the same two tests when it enumerates a fragment's gap hypotheses:
+    a candidate's intron in an unsequenced gap is cut whole within the gap widened by ``K``,
+    and a candidate one of whose introns holds more than ``K`` aligned bases joins no
+    hypothesis. So ``K`` decides which pairs are one molecule, the candidates' lengths and
+    calibration's tally, and the scan-cache key includes it. It never matches a junction:
+    junctions are matched exactly.
     """
 
     def __post_init__(self) -> None:

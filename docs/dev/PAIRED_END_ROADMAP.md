@@ -147,7 +147,16 @@ the code is open; each is less critical.
     (12 hits moving g50 κ0.99 ON's true gDNA counted RNA by +80.8 k, the reader). The oracle ladder bit-identical
     (oracle g00 checked); the pinned scan 32.9 → 31.9 s. Suite 3,093
   - The tail rule deferred (`ISSUES: the-tail-rule-waits-for-truth`)
-14. ☐ Each use of K outside implicit splicing, one at a time
+14. ☑ Each use of K outside implicit splicing (2026-10-21, owner: keep both sites;
+  `INTRON_OVERHANG_TOLERANCE_DESIGN.md`; closes `ISSUES: the-anchor-tolerance-applies-beyond-implicit-splicing` as
+  justified): K acts at a gap's edge and at a fragment's outer end, both a read run 1–3 bases across a splice site, and
+  matches no junction. The outer end's own arm, its slack at 0 alone, against main on the STAR panel, pinned and
+  fractional: with every capture efficiency at 1, transcript / gene error +1.19 / +13.35 % unstranded OFF, +1.51 /
+  +20.12 % stranded OFF, −0.16 / −0.65 % stranded ON, 4.8–9.6 k more fragments withheld per condition; shipped −0.94 /
+  +3.57, −1.05 / +4.26, −0.63 / +2.58 %, the transcript gain the reader's; the oracle ladder within 0.37 %. The record:
+  the config docstring, the CLI help and the MANUAL name both sites and the pair rule's use; tests at 0, K and K + 1 at
+  the outer end and at a gap's edge beside an observed splice, in the pair rule and the resolver, and K never matching a
+  junction, each fired by a break. rename_identity bit-identical on oracle g00 and STAR g50 ss.50 OFF; suite 3,107
 15. ☐ Accounting: one outcome per template, each record's status from its template's outcome, the counters and the
   annotated-BAM tags; the annotation pass checked against the scan by identity
 

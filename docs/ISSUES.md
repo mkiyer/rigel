@@ -336,22 +336,6 @@ shipped numbers are the reader's until it is fixed; its own are the efficiencies
 Instruments: `quant_accuracy.py` on the STAR panel, pinned and fractional; the per-gene dissection, two builds side by
 side, in `$RIGEL_RUNS/arms/2026-10-19_annotated_path/dissect/`.
 
-### the-anchor-tolerance-applies-beyond-implicit-splicing
-`priority: now — the first wave of the paired-end repair; the owner's scope ruling of 2026-10-16 · kind: defect · 2026-10-16`
-`--intron-overhang-tolerance` (K, default 3) belongs to implicitly spliced fragments: mates aligned to different exons
-with a whole intron between them. The owner keeps it in scope there (2026-10-16), "but we must be judicious about
-deciding which cases apply it".
-
-The code applies it more widely (`resolve_context.h:693-696, 797, 807, 813, 846-857`):
-- to every fragment's gap hypotheses, SPLICED_ANNOT included;
-- to `transcript_contradicts_blocks`;
-- to cutting an annotated intron whole when up to K sequenced bases lie inside it. That removes those bases from L, so
-  in effect it moves the splice point to the annotation.
-
-Its documentation says it "tunes the resolver alone", but it moves calibration's tally and the scan-cache key.
-
-Each use outside implicit splicing is either justified or removed, each in its own measured arm.
-
 ### the-release-builds
 `priority: now — release-gating: the owner's actions before tagging; the build fixes landed 2026-10-14 · kind: release · 2026-10-14`
 The build fixes landed 2026-10-14: portable by default (the conda package was compiled with `-march=native`; the
@@ -1717,6 +1701,25 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### the-anchor-tolerance-applies-beyond-implicit-splicing
+CLOSED 2026-10-21 as justified (owner, 2026-10-21: keep both sites). K acts at two places in a fragment, both the
+aligner running a read's end 1–3 bases across a splice site rather than splicing a short anchor: of a true molecule's
+reads that run into its own transcript's introns, 99.6 % at a gap's edge and 95.2 % at the outer end run 3 bases or
+fewer. At the edge of a gap the reads did not sequence (implicit splicing, a spliced hit's mate gap included) K gives
+the molecule's own transcript its true length in 17.6–35.2 k fragments per 10 M templates on the STAR panel, and K = 0
+never a truer one; cutting the intron whole moves no splice point, since the bases run past the donor are the next
+exon's. At the fragment's outer end, the one use outside implicit splicing, it keeps the transcript's hypothesis in
+8.0–15.9 k mRNA fragments per 10 M and keeps 5.1–10.2 k pairs; of the pairs either slack keeps, 99.0–99.3 % are true
+molecules at their exact length. Elsewhere it acts only on the real annotation's 46 introns of 1–3 bases, which a read
+sequences through (1–440 times per real library), and it matches no junction. The outer end's own arm, its slack at 0
+alone, against main on the STAR panel, pinned and fractional: with every capture efficiency at 1, transcript / gene
+error +1.19 / +13.35 % unstranded capture-OFF, +1.51 / +20.12 % stranded capture-OFF, −0.16 / −0.65 % stranded
+capture-ON, and 4.8–9.6 k more fragments withheld per condition; shipped −0.94 / +3.57, −1.05 / +4.26 and −0.63 /
++2.58 %, the transcript gain the capture reader's (`ISSUES: the-reader-reads-false-gdna-as-capture`); the oracle ladder
+within 0.37 % in every stratum. The descriptions now name both sites and the pair rule's use, and tests pin the outer
+end, a gap's edge beside an observed splice, and that K matches no junction (`$RIGEL_RUNS/arms/2026-10-20_k_uses/`,
+`$RIGEL_RUNS/arms/2026-10-21_k_outer_end/`).
 
 ### chimera-span-over-exon-blocks-only
 CLOSED 2026-10-20 by the deletion (owner, 2026-10-20): the resolver's chimera call is gone, and with it the span this

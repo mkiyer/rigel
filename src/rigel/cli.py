@@ -1496,13 +1496,14 @@ def build_parser() -> argparse.ArgumentParser:
         dest="intron_overhang_tolerance",
         type=int,
         default=None,
-        help="Intron-overhang tolerance K (bp): how many bases an alignment may run into an "
-        "annotated intron, and an annotated intron overhang a mate gap, and still be read as "
-        "spliced there. A transcript is excluded as contradicting the alignment only when one of "
-        "its introns overlaps an aligned block by more than K bp, and an intron overlapping a "
-        "fragment's unsequenced gap counts as lying in it when it extends past neither end of the "
-        "gap by more than K bp. It changes the gap hypotheses calibration arbitrates, and so "
-        "calibration's tally. "
+        help="Intron-overhang tolerance K (bp): how many bases an aligned read end may lie inside "
+        "an annotated intron, at the edge of a gap the reads did not sequence or at a fragment's "
+        "outer end, as when an aligner runs a read a base or two across a splice site. A transcript "
+        "is contradicted only by an intron holding more than K aligned bases, and an intron counts "
+        "as lying in an unsequenced gap when it extends past neither end of the gap by more than "
+        "K bp. Along a witness transcript it decides whether two mates are one molecule; it also "
+        "shapes the candidates' lengths and the gap hypotheses calibration arbitrates. Junctions "
+        "are matched exactly. "
         f"Default: {qd['intron_overhang_tolerance']}.",
     )
     adv.add_argument(

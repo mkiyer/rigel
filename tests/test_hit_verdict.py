@@ -295,6 +295,103 @@ def test_the_tolerance_lets_a_mate_run_k_bases_into_an_intron(index, tmp_path):
     assert at_k2.n_fragments == 0 and _rejected(at_k2)["length"] == 1
 
 
+# ── the tolerance K at its two sites: a gap's edge and the fragment's outer end ───────────────────────────────────
+
+#: O's second intron [1300,2400) is long, so a pair across it needs O as its witness; P's [5300,5500) is short, so a pair
+#: across it is one molecule along the genome and the resolver alone judges P.
+OUTER = [
+    ("gO", "O", [(1000, 1100), (1200, 1300), (2400, 2500)]),
+    ("gP", "P", [(5000, 5100), (5200, 5300), (5500, 5600)]),
+]
+#: Bases a mate runs into an intron: none, K, K + 1 at K 3.
+OVERRUNS = [
+    pytest.param(0, True, id="0"),
+    pytest.param(3, True, id="K"),
+    pytest.param(4, False, id="K+1"),
+]
+
+
+@pytest.fixture(scope="module")
+def index_outer(tmp_path_factory):
+    return _index(tmp_path_factory.mktemp("pairs_outer"), OUTER)
+
+
+@pytest.mark.parametrize("d, kept", OVERRUNS)
+def test_a_witness_forgives_k_bases_at_the_fragments_outer_end(index_outer, tmp_path, d, kept):
+    """F `50M` starts d bases inside O's first intron [1100,1200), at the fragment's outer end; R lies at [2420,2470) in
+    O's third exon. The pair is 1,270 + d bases along the genome, so it needs O, whose second intron lies between the
+    mates (L 170 + d). Up to K bases at the outer end leave O a path; at K + 1 the pair is too long."""
+    stats = _scan(
+        tmp_path,
+        index_outer,
+        _pair("outer", 1200 - d, "50M", 2420, "50M"),
+        intron_overhang_tolerance=3,
+    )
+    assert stats.n_fragments == int(kept)
+    assert _rejected(stats)["length"] == int(not kept)
+
+
+@pytest.mark.parametrize("d, kept", OVERRUNS)
+def test_a_witness_cuts_the_gap_intron_beside_an_observed_splice(index_outer, tmp_path, d, kept):
+    """F `40M100N(100+d)M` at 1060 splices O's first intron and runs d bases into its second, [1300,2400), which spans
+    the gap to R at [2420,2470): 1,310 bases along the genome less the observed junction. O's second intron is cut whole
+    up to K bases inside the mate (L 210); at K + 1 O offers no path, and the pair is too long."""
+    records = _pair("beside", 1060, f"40M100N{100 + d}M", 2420, "50M", xs="+")
+    stats = _scan(tmp_path, index_outer, records, intron_overhang_tolerance=3)
+    assert stats.n_fragments == int(kept)
+    assert _rejected(stats)["length"] == int(not kept)
+
+
+@pytest.mark.parametrize("d, implicit", OVERRUNS)
+def test_k_bases_at_the_outer_end_leave_the_transcript_its_gap_intron(
+    index_outer, tmp_path, d, implicit
+):
+    """F `50M` starts d bases inside P's first intron [5100,5200), at the fragment's outer end; R lies at [5520,5570):
+    one molecule along the genome. The gap between them holds P's second intron [5300,5500), which the resolver finds
+    while P stands: up to K bases at the outer end, the fragment is an implicit splice; at K + 1 they contradict P, which
+    then explains nothing, and the fragment is unspliced."""
+    stats = _scan(
+        tmp_path,
+        index_outer,
+        _pair("outer_gap", 5200 - d, "50M", 5520, "50M"),
+        intron_overhang_tolerance=3,
+    )
+    assert stats.n_fragments == 1
+    assert (stats.n_census_spliced_implicit, stats.n_census_unspliced) == (
+        (1, 0) if implicit else (0, 1)
+    )
+
+
+@pytest.mark.parametrize("d, cut", OVERRUNS)
+def test_the_gap_intron_is_cut_within_k_beside_an_observed_splice(index_outer, tmp_path, d, cut):
+    """F `40M100N(100+d)M` at 5060 splices P's first intron and runs d bases into its second, [5300,5500), which spans
+    the gap to R at [5520,5570): 410 bases along the genome less the observed junction. Up to K bases inside the mate,
+    P's second intron is cut whole and P's length is 210, the d bases with it; at K + 1 it is not, and P keeps the
+    410 of the molecule with that intron retained."""
+    records = _pair("beside_gap", 5060, f"40M100N{100 + d}M", 5520, "50M", xs="+")
+    _stats, _strand, buffer, _payload = scan_and_buffer(
+        _bam(tmp_path, records),
+        index_outer,
+        BamScanConfig(total_threads=1, intron_overhang_tolerance=3),
+    )
+    t_p = int(index_outer.t_df.loc[index_outer.t_df.t_id == "P", "t_index"].iloc[0])
+    lengths = {
+        int(t): int(n)
+        for chunk in buffer.iter_chunks_consuming()
+        for t, n in zip(chunk.t_indices, chunk.frag_lengths)
+    }
+    assert lengths[t_p] == (210 if cut else 410)
+
+
+@pytest.mark.parametrize("K", [3, 10])
+def test_k_never_matches_a_junction(index, tmp_path, K):
+    """F `50M901N50M` at 1150 observes [1200,2101), one base from tK's intron [1200,2100): no transcript holds it, so
+    the hit is a novel junction at any K. K forgives aligned bases inside an intron, never a junction that differs."""
+    records = _pair("off_by_one", 1150, "50M901N50M", 2200, "50M", xs="+")
+    stats = _scan(tmp_path, index, records, intron_overhang_tolerance=K)
+    assert stats.n_fragments == 0 and _rejected(stats)["novel_junction"] == 1
+
+
 def test_one_transcript_witnesses_the_whole_path(index, index_t3, tmp_path):
     """F `10M100N10M` at 10100 (T1's junction) and R `10M` at 11700: 1,510 along the genome and along T1. T2's
     intron [10300,11300) would give 510, but T2 does not hold the observed junction, so no hybrid path is formed

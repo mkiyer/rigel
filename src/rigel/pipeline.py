@@ -335,14 +335,13 @@ def scan_and_buffer(
     # The index installs what it knows (the transcript strands among it); the scan sets what is a setting.
     resolve_ctx = index.resolver
 
-    # Intron-overhang tolerance K (bp): how many bases an alignment may run into an annotated intron,
-    # and an annotated intron overhang a mate gap, and still be read as spliced there. The resolver
-    # applies it when it enumerates a fragment's gap hypotheses: a candidate transcript
-    # is excluded as contradicting the alignment only when one of its introns overlaps an aligned
-    # block by more than K, and an annotated intron is placed in an unsequenced gap when it overlaps
-    # the gap and lies within it widened by K at each end. The calibration accumulator arbitrates
-    # those hypotheses and deposits the survivor, so K changes calibration's tally (the scan-cache
-    # key includes it), and it decides which unspliced fragments are relabelled SPLICED_IMPLICIT.
+    # Intron-overhang tolerance K (bp): how many bases an aligned read end may lie inside an annotated
+    # intron, at the edge of an unsequenced gap or at a fragment's outer end. The pair rule applies it
+    # along a witness transcript, and the resolver when it enumerates a fragment's gap hypotheses: an
+    # intron in an unaligned gap is cut whole within the gap widened by K, and a transcript is
+    # contradicted only by an intron holding more than K aligned bases. So K decides which pairs are
+    # one molecule, the candidates' lengths, calibration's tally (the scan-cache key includes it) and
+    # which unspliced fragments are relabelled SPLICED_IMPLICIT.
     resolve_ctx.set_intron_overhang_tolerance(int(scan.intron_overhang_tolerance))
     # The pair rule's fragment-length limit: no pair whose molecule is longer is one.
     resolve_ctx.set_max_fragment_length(int(scan.max_frag_length))

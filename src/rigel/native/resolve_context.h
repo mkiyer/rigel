@@ -661,13 +661,13 @@ public:
     // SPLICED_IMPLICIT detection
     // ----------------------------------------------------------------
 
-    /// Set the intron-overhang tolerance K (bp): how many bases an alignment may run into an annotated intron, and an
-    /// annotated intron overhang a mate gap, and still be read as spliced there. It is the slack in both tests of the
-    /// gap-hypothesis enumeration, which every fragment with an unsequenced gap goes through: an annotated intron in a
-    /// gap may overlap up to K aligned bases on either side and is still cut whole
-    /// (`collect_transcript_introns_in_gap`), and a transcript is contradicted only by an intron overlapping more than
-    /// K bases of an aligned block (`transcript_contradicts_blocks`). Negative K is clamped to 0; the resolver's own
-    /// default, before this is called, is 0.
+    /// Set the intron-overhang tolerance K (bp): how many bases an aligned read end may lie inside an annotated intron,
+    /// at the edge of an unsequenced gap or at a fragment's outer end. It is the slack in the same two tests wherever
+    /// a path along a transcript is drawn, the pair rule's witness (`validate_pair`) and the gap-hypothesis
+    /// enumeration: an annotated intron in an unaligned gap may overlap up to K aligned bases on either side and is
+    /// still cut whole (`collect_transcript_introns_in_gap`), and a transcript is contradicted only by an intron
+    /// holding more than K aligned bases. Negative K is clamped to 0; the resolver's own default, before this is
+    /// called, is 0.
     void set_intron_overhang_tolerance(int32_t K) {
         if (K < 0) K = 0;
         intron_overhang_tolerance_ = K;
