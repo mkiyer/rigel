@@ -1164,6 +1164,22 @@ static void records_used(const std::vector<ParsedAlignment>& records, const Temp
         if (th.alias_of[k] >= 0) used[k] = records[k].is_supplementary() ? 0 : used[th.alias_of[k]];
 }
 
+/// One hit's fragment and its resolution: its mates' blocks and junctions merged (`build_fragment`) and resolved
+/// against the annotation, its records' blacklisted junctions counted so the resolver can call it a splice artifact.
+/// The scan and the annotation pass resolve a hit here alike. A hit with no aligned base has no block and is not
+/// resolved.
+static void resolve_hit(const std::pair<std::vector<ParsedAlignment*>, std::vector<ParsedAlignment*>>& hit,
+                        FragmentResolver& ctx, ResolverScratch& scratch, AssembledFragment& frag, RawResolveResult& cr)
+{
+    frag = build_fragment(hit.first, hit.second);
+    if (frag.exons.empty()) return;
+    int32_t blacklisted = 0;
+    for (const auto* reads : {&hit.first, &hit.second})
+        for (const ParsedAlignment* r : *reads) blacklisted += r->n_sj_blacklisted;
+    cr.n_sj_blacklisted = blacklisted;
+    ctx._resolve_core(frag.exons, frag.introns, frag.genomic_footprint(), cr, scratch);
+}
+
 /// A template's NH: the first record's above 1, else 1 (a missing NH reads 1).
 static int32_t template_nh(const std::vector<ParsedAlignment>& records)
 {
@@ -1993,25 +2009,11 @@ private:
         // Count ONE fragment per physical molecule, not per hit.
         stats.n_fragments++;
 
-        for (const auto& [r1_reads, r2_reads] : all_hits) {
-            AssembledFragment frag = build_fragment(r1_reads, r2_reads);
-
-            if (frag.exons.empty()) continue;
-
-            // aggregate per-record blacklist counts into a
-            // per-fragment total so the resolver can promote
-            // SPLICE_UNSPLICED -> SPLICE_ARTIFACT.
-            int32_t frag_n_sj_blacklisted = 0;
-            for (const auto* r : r1_reads)
-                frag_n_sj_blacklisted += r->n_sj_blacklisted;
-            for (const auto* r : r2_reads)
-                frag_n_sj_blacklisted += r->n_sj_blacklisted;
-
+        for (const auto& hit : all_hits) {
+            AssembledFragment frag;
             RawResolveResult cr;
-            cr.n_sj_blacklisted = frag_n_sj_blacklisted;
-            ctx._resolve_core(
-                frag.exons, frag.introns,
-                frag.genomic_footprint(), cr, scratch);
+            resolve_hit(hit, ctx, scratch, frag, cr);
+            if (frag.exons.empty()) continue;
 
             // Empty t_inds: an intergenic fragment. It is unspliced: a spliced hit the scan keeps has a transcript
             // holding its junctions (`hit_verdict`). Counted once all hits are seen, to count the template once.
@@ -2509,7 +2511,6 @@ public:
         cf32_1d ann_posterior,
         ci8_1d  ann_frag_class,
         ci16_1d ann_n_candidates,
-        cu8_1d  ann_splice_type,
         ci32_1d ann_locus_id,
         int64_t ann_size,
         // String ID lookup
@@ -2532,7 +2533,6 @@ public:
         const float*   post_ptr = ann_posterior.data();
         const int8_t*  fc_ptr   = ann_frag_class.data();
         const int16_t* nc_ptr   = ann_n_candidates.data();
-        const uint8_t* st_ptr   = ann_splice_type.data();
         const int32_t* lid_ptr  = ann_locus_id.data();
 
         // Open input BAM
@@ -2578,8 +2578,9 @@ public:
         int64_t n_records_written = 0;
         int64_t n_filtered_passthrough = 0;
 
-        // Scratch buffer for resolve calls (single-threaded, reused)
+        // Scratch buffer for resolve calls (single-threaded, reused), and each template's record statuses
         ResolverScratch scratch(ctx_->n_transcripts_);
+        std::vector<char> used;
 
         auto process_and_write = [&]() {
             if (light_group.empty()) return;
@@ -2599,7 +2600,7 @@ public:
                 stamp_and_write_hit(raw_group, out, hdr, ".", ".", ".",
                                     -1, -1,
                                     AF_MULTIMAPPER_DROP, 0.0f,
-                                    ".", 1, 0, "unknown", -1);
+                                    ".", 0, 0, "unknown", -1);
                 n_intergenic++;
                 n_records_written += static_cast<int64_t>(raw_group.size());
                 frag_id++;
@@ -2629,151 +2630,86 @@ public:
                 return;
             }
 
+            // A placed read pair. Each record's status follows from it (`records_used`): a used record is written with
+            // the first usable hit holding its alignment, as the winning placement or not (ZH) and with that hit's own
+            // splice type; every other record is an unused alignment of the fragment. All carry the fragment's
+            // annotation: its row's or, with none, the intergenic fast path's, gDNA by construction (a spliced hit
+            // the scan keeps has a transcript holding its junctions), ZW 1 with no competing hypothesis.
+            records_used(light_group, hit_result, verdicts, used);
             const int32_t num_hits = static_cast<int32_t>(std::count(verdicts.begin(), verdicts.end(), HIT_USABLE));
             const int first_valid_hit = static_cast<int>(
                 std::find(verdicts.begin(), verdicts.end(), HIT_USABLE) - verdicts.begin());
 
-            // Look up annotation for this frag_id
             auto ann_it = frag_to_row.find(frag_id);
-            bool has_ann = (ann_it != frag_to_row.end());
+            const bool has_ann = (ann_it != frag_to_row.end());
+            const char* zt = ".";
+            const char* zg = ".";
+            const char* zr = ".";
+            int32_t best_tid = -1, best_gid = -1, zf = AF_GDNA_INTERGENIC, zn = 0, zl = -1;
+            float zw = 1.0f;
+            const char* zc = ".";
+            if (has_ann) {
+                const int64_t row = ann_it->second;
+                best_tid = tid_ptr[row];
+                best_gid = gid_ptr[row];
+                zf = flags_ptr[row];
+                zw = post_ptr[row];
+                zc = frag_class_label(fc_ptr[row]);
+                zn = nc_ptr[row];
+                zl = lid_ptr[row];
+                if (best_tid >= 0 && best_tid < static_cast<int32_t>(t_ids.size())) zt = t_ids[best_tid].c_str();
+                if (best_gid >= 0 && best_gid < static_cast<int32_t>(g_ids.size())) zg = g_ids[best_gid].c_str();
+                if (best_gid >= 0 && best_gid < static_cast<int32_t>(g_names.size())) zr = g_names[best_gid].c_str();
+            }
 
-            // Each input record is written EXACTLY once, with the first hit that holds it: one mate location joins
-            // several hits. An alias of an alignment is written with the record that represents it
-            // (`TemplateHits::alias_of`).
+            // Each input record is written EXACTLY once. An alias of an alignment is written with the record that
+            // represents it (`TemplateHits::alias_of`).
             std::vector<bool> rec_written(raw_group.size(), false);
             std::vector<std::vector<int32_t>> aliases(raw_group.size());
             for (size_t i = 0; i < hit_result.alias_of.size(); ++i)
                 if (hit_result.alias_of[i] >= 0) aliases[hit_result.alias_of[i]].push_back(static_cast<int32_t>(i));
+            auto take = [&](size_t idx, std::vector<bam1_t*>& raws) {
+                if (rec_written[idx]) return;
+                rec_written[idx] = true;
+                set_tag_int(raw_group[idx], "ZB", static_cast<int>(light_group[idx].n_sj_blacklisted));
+                raws.push_back(raw_group[idx]);
+            };
 
-            for (int hit_idx = 0;
-                 hit_idx < static_cast<int>(all_hits.size());
-                 hit_idx++)
-            {
-                const auto& [r1_reads, r2_reads] = all_hits[hit_idx];
-
-                // Gather bam1_t* for all records in this hit, and their aliases, skipping any already emitted by an
-                // earlier hit. Stamp the per-record ZB:i tag (splice-artifact count) on each bam1_t as we select it:
-                // a record-local property of the CIGAR, not a hit-level value.
+            for (int hit_idx = 0; hit_idx < static_cast<int>(all_hits.size()); ++hit_idx) {
+                if (verdicts[hit_idx] != HIT_USABLE) continue;
+                const auto& hit = all_hits[hit_idx];
                 std::vector<bam1_t*> hit_raws;
-                auto take = [&](ptrdiff_t idx) {
-                    if (rec_written[idx]) return;
-                    rec_written[idx] = true;
-                    set_tag_int(raw_group[idx], "ZB", static_cast<int>(light_group[idx].n_sj_blacklisted));
-                    hit_raws.push_back(raw_group[idx]);
-                };
-                for (const auto* reads : {&r1_reads, &r2_reads}) {
+                for (const auto* reads : {&hit.first, &hit.second}) {
                     for (const auto* lr : *reads) {
-                        const ptrdiff_t idx = lr - &light_group[0];
-                        take(idx);
-                        for (int32_t a : aliases[idx]) take(a);
+                        const size_t idx = static_cast<size_t>(lr - &light_group[0]);
+                        take(idx, hit_raws);
+                        for (int32_t a : aliases[idx])
+                            if (used[a]) take(static_cast<size_t>(a), hit_raws);
                     }
                 }
                 if (hit_raws.empty()) continue;
 
-                if (has_ann) {
-                    int64_t row = ann_it->second;
-                    int32_t best_tid_val = tid_ptr[row];
-                    int32_t best_gid_val = gid_ptr[row];
-                    uint8_t flags_val    = flags_ptr[row];
-                    float   post_val     = post_ptr[row];
-                    int8_t  fc_val       = fc_ptr[row];
-                    int16_t nc_val       = nc_ptr[row];
-                    uint8_t st_val       = st_ptr[row];
-
-                    const char* t_id_str = (best_tid_val >= 0 &&
-                        best_tid_val < static_cast<int32_t>(t_ids.size()))
-                        ? t_ids[best_tid_val].c_str() : ".";
-                    const char* g_id_str = (best_gid_val >= 0 &&
-                        best_gid_val < static_cast<int32_t>(g_ids.size()))
-                        ? g_ids[best_gid_val].c_str() : ".";
-                    const char* g_name_str = (best_gid_val >= 0 &&
-                        best_gid_val < static_cast<int32_t>(g_names.size()))
-                        ? g_names[best_gid_val].c_str() : ".";
-
-                    // Determine primary hit
-                    bool is_primary = false;
-                    if (verdicts[hit_idx] != HIT_USABLE) {
-                        is_primary = false;
-                    } else if (num_hits == 1) {
-                        is_primary = true;
-                    } else if (best_tid_val >= 0) {
-                        // Resolve this hit to see if assigned transcript
-                        // is among its candidates
-                        AssembledFragment frag = build_fragment(
-                            r1_reads, r2_reads);
-                        if (!frag.exons.empty()) {
-                            RawResolveResult cr;
-                            ctx_->_resolve_core(
-                                frag.exons, frag.introns,
-                                frag.genomic_footprint(), cr, scratch);
-                            for (int32_t ti : cr.t_inds) {
-                                if (ti == best_tid_val) {
-                                    is_primary = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    int32_t lid_val = lid_ptr[row];
-
-                    stamp_and_write_hit(
-                        hit_raws, out, hdr,
-                        t_id_str, g_id_str, g_name_str,
-                        static_cast<int>(best_tid_val),
-                        static_cast<int>(best_gid_val),
-                        static_cast<int>(flags_val), post_val,
-                        frag_class_label(fc_val),
-                        is_primary ? 1 : 0,
-                        static_cast<int>(nc_val),
-                        splice_type_label(st_val),
-                        static_cast<int>(lid_val));
-
-                    n_annotated++;
-                } else {
-                    // No EM annotation for this frag_id: the deterministic
-                    // intergenic fast-path. It is gDNA by construction (a spliced
-                    // hit the scan keeps has a transcript holding its junctions),
-                    // and ZF carries the intergenic+gDNA bits, so a single AND-mask
-                    // on ZF captures total gDNA. ZW=1.0 because there is no
-                    // competing hypothesis.
-                    stamp_and_write_hit(
-                        hit_raws, out, hdr,
-                        ".", ".", ".",
-                        -1, -1,
-                        AF_GDNA_INTERGENIC, 1.0f,
-                        ".",
-                        (hit_idx == first_valid_hit) ? 1 : 0,
-                        0, "unknown", -1);
-                    n_intergenic++;
-                }
-
-                n_records_written +=
-                    static_cast<int64_t>(hit_raws.size());
+                AssembledFragment frag;
+                RawResolveResult cr;
+                resolve_hit(hit, *ctx_, scratch, frag, cr);
+                bool is_primary = num_hits == 1;
+                if (!is_primary && has_ann && best_tid >= 0)
+                    is_primary = std::find(cr.t_inds.begin(), cr.t_inds.end(), best_tid) != cr.t_inds.end();
+                else if (!is_primary && !has_ann)
+                    is_primary = hit_idx == first_valid_hit;
+                stamp_and_write_hit(hit_raws, out, hdr, zt, zg, zr, best_tid, best_gid, zf, zw, zc,
+                                    is_primary ? 1 : 0, zn,
+                                    frag.exons.empty() ? "unknown" : splice_type_label(cr.splice_type), zl);
+                (has_ann ? n_annotated : n_intergenic)++;
+                n_records_written += static_cast<int64_t>(hit_raws.size());
             }
 
-            // Defensive end-of-group sweep: any raw record not yet
-            // emitted via a hit is written as a single intergenic
-            // pass-through so output record count == input record count.
-            std::vector<bam1_t*> orphan;
-            for (size_t i = 0; i < raw_group.size(); i++) {
-                if (!rec_written[i]) {
-                    set_tag_int(
-                        raw_group[i], "ZB",
-                        static_cast<int>(light_group[i].n_sj_blacklisted));
-                    orphan.push_back(raw_group[i]);
-                }
-            }
-            if (!orphan.empty()) {
-                stamp_and_write_hit(
-                    orphan, out, hdr,
-                    ".", ".", ".",
-                    -1, -1,
-                    AF_GDNA_INTERGENIC, 1.0f,
-                    ".", 0, 0, "unknown", -1);
-                n_intergenic++;
-                n_records_written +=
-                    static_cast<int64_t>(orphan.size());
+            std::vector<bam1_t*> unused;
+            for (size_t i = 0; i < raw_group.size(); ++i) take(i, unused);
+            if (!unused.empty()) {
+                stamp_and_write_hit(unused, out, hdr, zt, zg, zr, best_tid, best_gid, zf, zw, "unused_alignment", 0, zn,
+                                    "unknown", zl);
+                n_records_written += static_cast<int64_t>(unused.size());
             }
 
             frag_id++;
@@ -3396,7 +3332,6 @@ NB_MODULE(_bam_impl, m) {
              nb::arg("ann_posterior"),
              nb::arg("ann_frag_class"),
              nb::arg("ann_n_candidates"),
-             nb::arg("ann_splice_type"),
              nb::arg("ann_locus_id"),
              nb::arg("ann_size"),
              nb::arg("t_ids"),
@@ -3409,7 +3344,7 @@ NB_MODULE(_bam_impl, m) {
              "    Path to name-sorted input BAM.\n"
              "output_path : str\n"
              "    Path for output annotated BAM.\n"
-             "ann_frag_ids .. ann_splice_type : ndarray\n"
+             "ann_frag_ids .. ann_locus_id : ndarray\n"
              "    Annotation arrays (sliced to ann_size).\n"
              "ann_size : int\n"
              "    Number of annotation entries.\n"

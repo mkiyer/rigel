@@ -747,7 +747,6 @@ def _populate_em_annotations(
     # Concatenate per-locus metadata in same order as C++ output
     frag_ids = np.concatenate([p.frag_ids for p in batch_parts])
     frag_class = np.concatenate([p.frag_class for p in batch_parts])
-    splice_type_arr = np.concatenate([p.splice_type for p in batch_parts])
     # True per-fragment locus-subproblem id (so in-locus gDNA winners keep their
     # locus in the ZL tag, instead of collapsing to -1 via the winning transcript).
     locus_ids = np.concatenate(
@@ -783,7 +782,6 @@ def _populate_em_annotations(
         posteriors=posteriors,
         frag_classes=frag_class.view(np.int8),
         n_candidates=n_cand,
-        splice_types=splice_type_arr,
         locus_ids=locus_ids,
     )
 

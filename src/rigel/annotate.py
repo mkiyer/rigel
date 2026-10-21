@@ -18,7 +18,6 @@ assignment decision for each fragment:
 - ``posterior``— posterior probability of the winning assignment
 - ``frag_class`` — fragment class (unambig / ambig_same_strand / …)
 - ``n_candidates`` — number of competing EM candidates
-- ``splice_type`` — splice classification
 
 Pass 2 re-reads the input BAM (same name-sorted order) and stamps each
 record with standard BAM tags.  This pass is implemented entirely in
@@ -67,20 +66,23 @@ BAM Tag Schema
      - Z
      - Input-ambiguity class (pre-EM candidate-set structure):
        ``unambig``, ``ambig_same_strand``, ``ambig_opp_strand``,
-       ``multimapper``; for a template withheld with no usable alignment
-       (ZF 0), ``unannotated_splice`` when one of its alignments is a
-       molecule whose junctions no one annotated transcript holds, else
-       ``unpaired``; or ``.`` for other fragments that never entered EM
+       ``multimapper``, or ``.`` for a fragment that never entered EM;
+       ``unused_alignment`` on a placed read pair's record in none of its
+       usable alignments (a rejected one's, one that pairs with nothing, a
+       supplementary record); for a read pair withheld with no usable
+       alignment (ZF 0), its reason: ``off_index``, ``chimeric``,
+       ``unannotated_splice`` or ``unpaired``
    * - ZH
      - i
-     - Primary hit flag: 1 = winning alignment, 0 = secondary
+     - Primary hit flag: 1 = the winning placement's records, 0 otherwise
    * - ZN
      - i
      - Number of EM candidate components
    * - ZS
      - Z
-     - Splice type (``unspliced``, ``spliced_annot``, ``spliced_implicit``,
-       ``splice_artifact``, or ``unknown``)
+     - The splice type of the record's own placement (``unspliced``,
+       ``spliced_annot``, ``spliced_implicit``, ``splice_artifact``), or
+       ``unknown`` on a record that is no usable alignment
    * - ZL
      - i
      - Locus ID (``-1`` if no locus)
@@ -117,9 +119,9 @@ logger = logging.getLogger(__name__)
 #                                         new meaning
 #   bit 4 (0x10)  is_nascent              the winner is a synthetic span, which Rigel adds to model a
 #                                         multi-exon transcript's unspliced RNA
-#   bit 5 (0x20)  is_intergenic           no transcript holds it (deterministic fast-path): gDNA when
-#                                         unspliced; when spliced, RNA no annotated transcript holds
-#                                         (certified by its junction), with no winner-kind bit
+#   bit 5 (0x20)  is_intergenic           no transcript holds it (deterministic fast-path), so it is
+#                                         unspliced (a spliced hit the scan keeps has a transcript holding
+#                                         its junctions): gDNA
 #   bit 6 (0x40)  retired                 never set: it marked the resolver's chimera call, deleted when a
 #                                         chimeric alignment came to be withheld before resolution
 #   bit 7 (0x80)  is_multimapper_dropped  unresolved reason: --no-include-multimap drop
@@ -131,8 +133,7 @@ logger = logging.getLogger(__name__)
 #   1. is_resolved and is_multimapper_dropped are never both set; ZF = 0, the unresolved sentinel, sets
 #      neither
 #   2. A winner-kind bit {is_annotated, is_gdna, is_nascent} is set only with is_resolved, and then
-#      exactly one is, except a spliced intergenic fragment (RNA no annotated transcript holds),
-#      which sets none
+#      exactly one is
 #   3. is_intergenic -> is_resolved, never with is_annotated or is_nascent
 #   4. bits 3 (0x08) and 6 (0x40) are never set
 # ---------------------------------------------------------------------------
@@ -199,8 +200,6 @@ class AnnotationTable:
         int8 — fragment class code (matches buffer FRAG_* constants, -1=intergenic).
     n_candidates : np.ndarray
         int16 — number of EM candidate components.
-    splice_type : np.ndarray
-        uint8 — SpliceType enum value.
     locus_id : np.ndarray
         int32 — locus id of the EM subproblem (-1 = none, or not yet filled).
     _size : int
@@ -215,7 +214,6 @@ class AnnotationTable:
     posterior: np.ndarray = field(repr=False)
     frag_class: np.ndarray = field(repr=False)
     n_candidates: np.ndarray = field(repr=False)
-    splice_type: np.ndarray = field(repr=False)
     locus_id: np.ndarray = field(repr=False)
     _size: int = 0
 
@@ -231,7 +229,6 @@ class AnnotationTable:
             posterior=np.zeros(capacity, dtype=np.float32),
             frag_class=np.full(capacity, -1, dtype=np.int8),
             n_candidates=np.zeros(capacity, dtype=np.int16),
-            splice_type=np.zeros(capacity, dtype=np.uint8),
             locus_id=np.full(capacity, -1, dtype=np.int32),
         )
 
@@ -244,7 +241,6 @@ class AnnotationTable:
         posterior: float = 0.0,
         frag_class: int = -1,
         n_candidates: int = 0,
-        splice_type: int = 0,
     ) -> None:
         """Append one annotation row."""
         idx = self._size
@@ -257,7 +253,6 @@ class AnnotationTable:
         self.posterior[idx] = posterior
         self.frag_class[idx] = frag_class
         self.n_candidates[idx] = n_candidates
-        self.splice_type[idx] = splice_type
         self._size += 1
 
     def add_batch(
@@ -269,7 +264,6 @@ class AnnotationTable:
         posteriors: np.ndarray,
         frag_classes: np.ndarray,
         n_candidates: np.ndarray,
-        splice_types: np.ndarray,
         locus_ids: np.ndarray | None = None,
     ) -> None:
         """Append multiple annotation rows in batch.
@@ -296,7 +290,6 @@ class AnnotationTable:
         self.posterior[start:end] = posteriors
         self.frag_class[start:end] = frag_classes
         self.n_candidates[start:end] = n_candidates
-        self.splice_type[start:end] = splice_types
         if locus_ids is not None:
             self.locus_id[start:end] = locus_ids
 
@@ -314,7 +307,6 @@ class AnnotationTable:
             "posterior",
             "frag_class",
             "n_candidates",
-            "splice_type",
             "locus_id",
         ):
             old = getattr(self, attr)
@@ -430,7 +422,6 @@ def write_annotated_bam(
         annotations.posterior[:n],
         annotations.frag_class[:n],
         annotations.n_candidates[:n],
-        annotations.splice_type[:n],
         annotations.locus_id[:n],
         n,
         t_ids,

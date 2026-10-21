@@ -425,6 +425,9 @@ private:
         // Det-unambig (growing)
         std::vector<int32_t>*  v_det_ti;
         std::vector<int64_t>*  v_det_fid;
+        // The fragments a hard gate dropped, and their classes: no pool holds them, and the annotated BAM says so
+        std::vector<int64_t>*  v_gated_fid;
+        std::vector<int8_t>*   v_gated_fclass;
         // Unambig counts accumulation (single-pass)
         double* ua_counts;
         int ua_ncols;
@@ -455,6 +458,7 @@ private:
               v_gdna_ll(nullptr), v_fid(nullptr),
               v_fclass(nullptr), v_stype(nullptr),
               v_det_ti(nullptr), v_det_fid(nullptr),
+              v_gated_fid(nullptr), v_gated_fclass(nullptr),
               ua_counts(nullptr), ua_ncols(0), t_str(nullptr),
               cand_cur(0),
               mm_fid(-1), mm_n_members(0),
@@ -659,6 +663,8 @@ private:
             ++stat_mm;
         } else {
             ++stat_gated;
+            st.v_gated_fid->push_back(st.mm_fid);
+            st.v_gated_fclass->push_back(static_cast<int8_t>(FRAG_MULTIMAPPER));
         }
 
         st.reset_mm_group();
@@ -736,6 +742,8 @@ private:
                 const int rl_det = r_len[i] > 0 ? static_cast<int>(r_len[i]) : 1;
                 if ((mm_gate_ && nm_arr[i] > 0) || (oh_gate_ && rl_det - e_bp[start] > 0)) {
                     ++stat_gated;
+                    st.v_gated_fid->push_back(f_id[i]);
+                    st.v_gated_fclass->push_back(static_cast<int8_t>(fclass));
                     continue;
                 }
 
@@ -892,6 +900,8 @@ private:
                     ++stat_em_ao;
             } else {
                 ++stat_gated;
+                st.v_gated_fid->push_back(f_id[i]);
+                st.v_gated_fclass->push_back(static_cast<int8_t>(fclass));
             }
         }
     }
@@ -923,6 +933,8 @@ class StreamingScorer {
     std::vector<uint8_t>*  v_st_;
     std::vector<int32_t>*  v_dti_;
     std::vector<int64_t>*  v_dfid_;
+    std::vector<int64_t>*  v_gfid_;
+    std::vector<int8_t>*   v_gfc_;
 
     NativeFragmentScorer::FillState st_;
 
@@ -957,6 +969,8 @@ public:
         v_st_  = new std::vector<uint8_t>();
         v_dti_ = new std::vector<int32_t>();
         v_dfid_ = new std::vector<int64_t>();
+        v_gfid_ = new std::vector<int64_t>();
+        v_gfc_ = new std::vector<int8_t>();
 
         // Wire up FillState
         st_ = NativeFragmentScorer::FillState{};
@@ -972,6 +986,8 @@ public:
         st_.v_stype      = v_st_;
         st_.v_det_ti     = v_dti_;
         st_.v_det_fid    = v_dfid_;
+        st_.v_gated_fid    = v_gfid_;
+        st_.v_gated_fclass = v_gfc_;
         st_.ua_counts    = unambig_counts.data();
         st_.ua_ncols     =
             static_cast<int>(unambig_counts.shape(1));
@@ -993,6 +1009,8 @@ public:
         delete v_st_;
         delete v_dti_;
         delete v_dfid_;
+        delete v_gfid_;
+        delete v_gfc_;
     }
 
     // Non-copyable
@@ -1056,6 +1074,8 @@ public:
             vec_to_ndarray(v_st_),
             vec_to_ndarray(v_dti_),
             vec_to_ndarray(v_dfid_),
+            vec_to_ndarray(v_gfid_),
+            vec_to_ndarray(v_gfc_),
             stat_det_,
             stat_em_u_,
             stat_em_as_,
@@ -1072,6 +1092,7 @@ public:
         v_fid_ = nullptr;
         v_fc_ = nullptr;  v_st_ = nullptr;
         v_dti_ = nullptr; v_dfid_ = nullptr;
+        v_gfid_ = nullptr; v_gfc_ = nullptr;
 
         return result;
     }

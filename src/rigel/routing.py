@@ -16,9 +16,8 @@ from .estimator import AbundanceEstimator
 from .scored_fragments import ScoredFragments
 from .index import TranscriptIndex
 from .scoring import FragmentScorer
-from .splice import SPLICE_ANNOT
 from .stats import PipelineStats
-from .annotate import winner_flag
+from .annotate import AF_UNRESOLVED, winner_flag
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +116,8 @@ class FragmentRouter:
             splice_types,
             det_tids,
             det_fids,
+            gated_fids,
+            gated_classes,
             n_det,
             n_em_u,
             n_em_as,
@@ -147,8 +148,20 @@ class FragmentRouter:
                     posterior=1.0,
                     frag_class=FRAG_UNAMBIG,
                     n_candidates=1,
-                    splice_type=int(SPLICE_ANNOT),
                 )
+
+        # A fragment a hard gate dropped reaches no pool: unresolved, with its class
+        if annotations is not None and len(gated_fids) > 0:
+            n = len(gated_fids)
+            annotations.add_batch(
+                frag_ids=np.asarray(gated_fids, dtype=np.int64),
+                best_tids=np.full(n, -1, dtype=np.int32),
+                best_gids=np.full(n, -1, dtype=np.int32),
+                tx_flags=np.full(n, AF_UNRESOLVED, dtype=np.uint8),
+                posteriors=np.zeros(n, dtype=np.float32),
+                frag_classes=np.asarray(gated_classes, dtype=np.int8),
+                n_candidates=np.zeros(n, dtype=np.int16),
+            )
 
         return ScoredFragments(
             offsets=offsets,

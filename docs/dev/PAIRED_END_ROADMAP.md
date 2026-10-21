@@ -175,6 +175,15 @@ the code is open; each is less critical.
     report's read fate over every read pair. No quantification number moves: rename_identity bit-identical on oracle
     g00, STAR g50 ss.50 OFF, cfRNA-A and cfRNA-C; every counter equal to the audit's on the nine BAMs, but `vcap_mix`'s
     `secondary_reads`, 13 higher: secondary records flagged unmapped, now counted with their flag. Suite 3,121
+  - ☑ The annotated BAM stamps what the scan decided (2026-10-21): an unused record ZC `unused_alignment`, ZH 0 and ZS
+    `unknown`, with the fragment's other tags (it carried the winning fragment's tags, or, in no hit, intergenic
+    gDNA's), and a supplementary record never written as part of its hit; the multimap option's drops ZH 0 (it was 1); a
+    fragment a hard gate drops an annotation row, ZF 0 with its class (it was stamped intergenic gDNA); ZS each
+    placement's own splice type, from one hit resolution the scan shares (a multimapping fragment's hits carried one
+    type), and the annotation table's `splice_type` column deleted. The records stamped unused, untagged and ZF 0 equal
+    the scan's unused, filtered and unplaced: STAR g50 ss.50 OFF 658,486, 1,995,256 and 23,471; cfRNA-C 52,220, 495,714
+    and 892,319. No quantification number moves: rename_identity bit-identical on the four inputs. The annotation pass
+    resolves every usable hit: cfRNA-C 24.2 → 28.6 s (A B A B). Suite 3,127
 
 *Phase B, calibration*
 0. ☐ First, the highest priority (owner, 2026-10-19): the capture reader reads false gDNA as capture on aligned input

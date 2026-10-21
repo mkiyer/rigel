@@ -719,6 +719,80 @@ def test_a_hard_gate_drops_a_deterministic_fragment_it_fails_as_it_drops_an_em_r
     assert default_stats.n_gated_out == 0
 
 
+def _gated_chunk(route):
+    """One fragment every candidate of which overhangs its exons by 10 bp, so an overhang alpha of 0 gates it, on the
+    route named: assigned deterministically (unambiguous and spliced), EM-routed, or a multimapper's two hits."""
+
+    def bf(t_inds, splice_type):
+        n = len(t_inds)
+        return _BF(
+            t_inds=np.array(t_inds, dtype=np.int32),
+            splice_type=int(splice_type),
+            align_strand=int(Strand.POS),
+            frag_lengths=np.full(n, 200, dtype=np.int32),
+            exon_bp=np.full(n, 90, dtype=np.int16),
+            intron_bp=np.zeros(n, dtype=np.int16),
+            read_length=100,
+        )
+
+    if route == "deterministic":
+        return _Chunk(
+            bfs=[bf([0], SpliceType.SPLICED_ANNOT)], fragment_classes=[FRAG_UNAMBIG], frag_ids=[1]
+        )
+    if route == "em":
+        return _Chunk(
+            bfs=[bf([0, 1], SpliceType.UNSPLICED)],
+            fragment_classes=[FRAG_AMBIG_SAME_STRAND],
+            frag_ids=[1],
+        )
+    return _Chunk(
+        bfs=[bf([0], SpliceType.UNSPLICED), bf([1], SpliceType.UNSPLICED)],
+        fragment_classes=[FRAG_MULTIMAPPER] * 2,
+        frag_ids=[1, 1],
+    )
+
+
+@pytest.mark.parametrize(
+    "route, fragment_class",
+    [
+        ("deterministic", FRAG_UNAMBIG),
+        ("em", FRAG_AMBIG_SAME_STRAND),
+        ("multimapper", FRAG_MULTIMAPPER),
+    ],
+)
+def test_a_gated_fragment_is_annotated_unresolved(route, fragment_class):
+    """A fragment a hard gate drops reaches no pool, and the annotated BAM says so: its row is unresolved (ZF 0) with
+    its class. Without a row the annotation pass took it for the intergenic fast path and stamped it gDNA."""
+    from rigel.annotate import AF_UNRESOLVED, AnnotationTable
+
+    index = _Index(
+        t_to_g=[0, 0],
+        t_to_strand=[int(Strand.POS), int(Strand.POS)],
+        g_to_strand=[int(Strand.POS)],
+    )
+    strand_models, max_frag_size, estimator, stats = _make_env(index)
+    annotations = AnnotationTable.create(capacity=4)
+    _route_buffer(
+        _Buffer([_gated_chunk(route)]),
+        index,
+        strand_models,
+        max_frag_size,
+        estimator,
+        stats,
+        overhang_log_penalty=alpha_log_penalty(0.0),
+        annotations=annotations,
+    )
+    assert stats.n_gated_out == 1
+    assert annotations.size == 1
+    row = (
+        annotations.frag_ids[0],
+        annotations.best_tid[0],
+        annotations.tx_flags[0],
+        annotations.frag_class[0],
+    )
+    assert row == (1, -1, AF_UNRESOLVED, fragment_class)
+
+
 # ── which fragments may be gDNA: one rule, by alignment ───────────────────────────────────────────
 #
 # gDNA can explain an alignment it can produce: an unspliced one; an IMPLICIT one — an unspliced pair whose

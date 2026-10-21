@@ -297,3 +297,97 @@ def test_the_scan_checks_its_counts(index, tmp_path, monkeypatch):
         _bam(tmp_path, _counters_bam_records()), index, BamScanConfig(total_threads=1)
     )
     assert checked == [stats]
+
+
+# ── the annotated BAM stamps what the scan decided ─────────────────────────────────────────────────────────────────
+
+
+def _annotated(tmp_path, index, records, **scan):
+    """Each record's ZF, ZC, ZH and ZS in a run's annotated BAM, keyed by (name, flag, reference, position)."""
+    from rigel.config import EMConfig, PipelineConfig
+    from rigel.pipeline import run_pipeline
+
+    out = tmp_path / "annotated.bam"
+    config = PipelineConfig(
+        scan=BamScanConfig(total_threads=1, **scan),
+        em=EMConfig(seed=1, assignment_mode="fractional"),
+        annotated_bam_path=out,
+    )
+    run_pipeline(_bam(tmp_path, records), index, config=config)
+    with pysam.AlignmentFile(str(out), "rb") as f:
+        return {
+            (r.query_name, r.flag, r.reference_name, r.reference_start): {
+                t: r.get_tag(t) for t in ("ZF", "ZC", "ZH", "ZS") if r.has_tag(t)
+            }
+            for r in f.fetch(until_eof=True)
+        }
+
+
+def _key(name, pos, ref="chr1", pick=lambda r: True):
+    """The annotated BAM's key of the counters BAM's record at ``pos`` in read pair ``name``."""
+    (r,) = [
+        r
+        for r in _counters_bam_records()
+        if r.query_name == name
+        and r.reference_start == pos
+        and f"chr{r.reference_id + 1}" == ref
+        and pick(r)
+    ]
+    return (name, r.flag, ref, pos)
+
+
+def test_an_unused_alignment_is_stamped_unused(index, tmp_path):
+    """A placed read pair's records outside its usable alignments (a rejected hit's, one that pairs with nothing, a
+    supplementary record) carry the fragment's outcome, ZC ``unused_alignment``, ZH 0 and ZS ``unknown``; its used
+    records carry its class and their own alignment's splice type."""
+    tags = _annotated(tmp_path, index, _counters_bam_records())
+    unused = {
+        "c_rejected": _key("c_rejected", 9500),
+        "d_nohit": _key("d_nohit", 100, ref="chr2"),
+        "e_supp": _key("e_supp", 15000),
+    }
+    used = {
+        "c_rejected": _key("c_rejected", 7000),
+        "d_nohit": _key("d_nohit", 4000),
+        "e_supp": _key("e_supp", 3000),
+    }
+    for name, key in unused.items():
+        assert tags[key] == {
+            "ZF": tags[used[name]]["ZF"],
+            "ZC": "unused_alignment",
+            "ZH": 0,
+            "ZS": "unknown",
+        }
+    placed = {"a_unique", "b_multi", "c_rejected", "d_nohit", "e_supp", "q_repeat"}
+    for key, t in tags.items():
+        if key[0] in placed and key not in unused.values():
+            assert t["ZC"] != "unused_alignment" and t["ZS"] == "unspliced", key
+
+
+def test_a_read_pair_the_multimap_option_drops_has_no_winning_alignment(index, tmp_path):
+    tags = _annotated(tmp_path, index, _counters_bam_records(), include_multimap=False)
+    dropped = [
+        t for key, t in tags.items() if key[0] in {"b_multi", "c_rejected", "d_nohit", "q_repeat"}
+    ]
+    assert len(dropped) == 14
+    assert all((t["ZF"], t["ZH"]) == (0x80, 0) for t in dropped)
+
+
+def test_each_alignment_is_stamped_with_its_own_splice_type(index, tmp_path):
+    """A multimapping read pair's placements can splice differently: one across T1's junction and one unspliced, or
+    one across tK's intron implicitly and one unspliced. Each record carries its own placement's splice type."""
+    records = [
+        *_pair("s_annot", 10070, "40M100N10M", 10300, "50M", nh=2, xs="+"),
+        *_pair("s_annot", 13000, "50M", 13200, "50M", nh=2, secondary=True),
+        *_pair("s_implicit", 1150, "50M", 2150, "50M", nh=2),
+        *_pair("s_implicit", 14000, "50M", 14200, "50M", nh=2, secondary=True),
+    ]
+    tags = _annotated(tmp_path, index, records)
+
+    def splice(name, positions):
+        return {t["ZS"] for (n, _f, _ref, pos), t in tags.items() if n == name and pos in positions}
+
+    assert splice("s_annot", {10070, 10300}) == {"spliced_annot"}
+    assert splice("s_annot", {13000, 13200}) == {"unspliced"}
+    assert splice("s_implicit", {1150, 2150}) == {"spliced_implicit"}
+    assert splice("s_implicit", {14000, 14200}) == {"unspliced"}

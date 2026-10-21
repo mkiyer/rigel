@@ -316,7 +316,7 @@ rigel report results/sample/ -o qc.html --title "Sample 42"
 
 The report covers alignment fates, fragment composition (including the splice-artifact
 blacklist status), the strand model, per-category fragment-length distributions, the split of
-the fragments into annotated transcripts, nascent RNA, gDNA (EM), intergenic RNA and intergenic
+the fragments into annotated transcripts, nascent RNA, gDNA (EM) and intergenic
 gDNA, calibration's capture answer (the gDNA bulk density and the saturated
 level over it), a genome-wide gDNA-density track, and
 a searchable gene-expression table, in one offline file.
@@ -627,10 +627,10 @@ through unchanged without annotation tags. Rigel's tags replace any tag of the s
 | `ZJ` | int | Gene index into rigel reference (`-1` if unassigned) |
 | `ZF` | int | Assignment flags bitfield (see below) |
 | `ZW` | float | Posterior probability of the assignment |
-| `ZC` | string | Input-ambiguity class: `unambig`, `ambig_same_strand`, `ambig_opp_strand`, `multimapper`; for a read pair withheld with no usable alignment (`ZF` 0), `off_index` when one of its alignments lies on a reference the index does not hold, else `chimeric` when one of its alignments has a mate aligned in pieces, else `unannotated_splice` when one of its alignments is a molecule whose junctions no one annotated transcript holds, else `unpaired`; `.` for other records not scored by the EM |
-| `ZH` | int | Primary-hit flag: `1` for the winning alignment, `0` otherwise (reflects rigel's EM assignment, which may differ from the aligner's primary FLAG) |
+| `ZC` | string | Input-ambiguity class: `unambig`, `ambig_same_strand`, `ambig_opp_strand`, `multimapper`, or `.` for a fragment the EM never scored; `unused_alignment` on a placed read pair's record that is in none of its usable alignments (one the pair rule rejected, one that pairs with nothing, a supplementary record), with the fragment's other tags; for a read pair withheld with no usable alignment (`ZF` 0), `off_index` when one of its alignments lies on a reference the index does not hold, else `chimeric` when one of its alignments has a mate aligned in pieces, else `unannotated_splice` when one of its alignments is a molecule whose junctions no one annotated transcript holds, else `unpaired` |
+| `ZH` | int | Primary-hit flag: `1` on the records of the winning placement, `0` otherwise (reflects rigel's EM assignment, which may differ from the aligner's primary FLAG) |
 | `ZN` | int | Number of competing candidate components |
-| `ZS` | string | Splice type: `spliced_annot`, `spliced_implicit`, `splice_artifact`, `unspliced`, or `unknown` |
+| `ZS` | string | The splice type of the record's own placement: `spliced_annot`, `spliced_implicit`, `splice_artifact` or `unspliced`; `unknown` on a record that is no usable alignment |
 | `ZL` | int | Locus ID (`-1` if no locus) |
 | `ZB` | int | Number of SJs in **this record's CIGAR** matched to the splice-artifact blacklist and treated as unspliced during scoring. Record-local. Always `0` when no blacklist is loaded. Summed over the BAM it equals `summary.json`'s `fragment_stats.splice.sj_blacklisted`. |
 
@@ -654,7 +654,7 @@ Canonical `ZF` values (the only ones produced):
 
 | ZF (hex) | Dec | Meaning |
 |----------|-----|---------|
-| `0x00` |   0 | Unresolved: scored, but assigned no pool |
+| `0x00` |   0 | Unresolved: a read pair withheld with no usable alignment (`ZC` its reason), or a fragment a hard scoring gate dropped (`ZC` its class) |
 | `0x03` |   3 | Annotated: assigned to a reference transcript, single-exon included |
 | `0x11` |  17 | Nascent: assigned to a synthetic nascent span |
 | `0x05` |   5 | gDNA, assigned by the EM (annotation-overlapping) |
@@ -849,8 +849,8 @@ rigel quant \
     --bam sample.bam --index index/ -o results/ \
     --annotated-bam results/annotated.bam
 
-# Tally the fragments by ZF value (3 annotated, 17 nascent, 5 gDNA by the EM, 37 intergenic gDNA,
-# 33 intergenic RNA): first mate, primary, non-supplementary — one record per fragment
+# Tally the fragments by ZF value (3 annotated, 17 nascent, 5 gDNA by the EM, 37 intergenic gDNA):
+# first mate, primary, non-supplementary — one record per fragment
 samtools view -f 64 -F 0x900 results/annotated.bam \
     | awk '{ for(i=12;i<=NF;i++) if($i ~ /^ZF:i:/) n[substr($i,6)]++ } END { for(v in n) print v, n[v] }' \
     | sort -n

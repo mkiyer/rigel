@@ -74,17 +74,14 @@ def _assert_zf_invariants(zf: int) -> None:
     # 1: resolved XOR mm_dropped — every stamped record is exactly one or the other (the unresolved
     #    sentinel ZF=0 also satisfies this: neither side is set).
     assert not (is_resolved and is_mm_drop), f"ZF={zf:#x}: resolved AND dropped bits both set"
-    # 2: a winner-kind bit only when resolved, and then exactly one, or none for RNA no annotated
-    #    transcript holds (spliced intergenic)
+    # 2: a winner-kind bit only when resolved, and then exactly one
     if is_resolved:
-        assert n_kind == 1 or (n_kind == 0 and is_interg), (
-            f"ZF={zf:#x}: resolved but {n_kind} winner-kind bits set"
-        )
+        assert n_kind == 1, f"ZF={zf:#x}: resolved but {n_kind} winner-kind bits set"
     else:
         assert n_kind == 0, f"ZF={zf:#x}: winner-kind bit set without is_resolved"
-    # 3: intergenic -> resolved, gDNA when unspliced and RNA (no winner-kind bit) when spliced
+    # 3: intergenic -> resolved, and gDNA: an intergenic fragment is unspliced
     if is_interg:
-        assert is_resolved and not (is_annotated or is_nascent), (
+        assert is_resolved and is_gdna and not (is_annotated or is_nascent), (
             f"ZF={zf:#x}: is_intergenic misplaced"
         )
     # 4: the retired bits are never set, nor any bit the table does not name
@@ -115,7 +112,6 @@ class TestAnnotationTable:
             posterior=0.95,
             frag_class=0,
             n_candidates=3,
-            splice_type=1,
         )
         assert tbl.size == 1
         assert tbl.frag_ids[0] == 42
@@ -125,7 +121,6 @@ class TestAnnotationTable:
         assert abs(tbl.posterior[0] - 0.95) < 0.01
         assert tbl.frag_class[0] == 0
         assert tbl.n_candidates[0] == 3
-        assert tbl.splice_type[0] == 1
 
     def test_grow(self):
         tbl = AnnotationTable.create(2)

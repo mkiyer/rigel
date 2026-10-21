@@ -225,6 +225,7 @@ run, naming both passes' counts. The tables are written before the pass, so no q
 
 - `is_multimapper`, the NH test, once the option reads the usable hits (step 4).
 - The pass's own counters (`n_annotated`, `n_intergenic`, …): it reports the scan's outcomes and statuses instead.
+- The annotation table's `splice_type` column, which only ZS read (step 2).
 - A mate location with no aligned base becomes no location, as a supplementary record is: with it go the pair rule's
   pass-through (`bam_scanner.cpp:1065`), the scan's silent skip (`:1937`), `collect_placement`'s unreachable branch
   (`:1766`) and the pass's `exons.empty()` guards; a numeric no-op on every input of §4.

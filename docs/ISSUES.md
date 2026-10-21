@@ -1066,7 +1066,6 @@ exon|intron boundary, while RNA that has not spliced there does.
 - The buffer's finalizer test asserts nothing about "still writes what it holds", and its writer-error test calls
   `cleanup()` before consuming, the reverse of production.
 - The scan-worker exception gate runs one worker, so deleting `output_queue.abort()` stays green.
-- The annotated-BAM ZS check is set membership only, so a label swap passes.
 - The fragment-length proof's L check is still guarded by `if contained is not None`; two spec tests carry leftovers.
 - The docs-citation gate never checks that it scanned anything (an empty glob or a `.hpp` suffix passes); a URL
   containing `/docs/` fails with no remedy; the TRAPS heading regex is written three times.
