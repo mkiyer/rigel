@@ -136,8 +136,8 @@ class PipelineStats:
     n_census_spliced_implicit: int = 0
     n_census_splice_artifact: int = 0
 
-    #: Censused but never offered to the accumulator's ``deposit()``: no accumulator was installed, or the
-    #: fragment has no aligned block (a hit whose mates have no aligned base). It exists so that
+    #: Censused but never offered to the accumulator's ``deposit()``: no accumulator was installed.
+    #: It exists so that
     #:
     #:   Σ census − n_census_splice_artifact
     #:       == qc.deposited + Σ qc.dropped_* + qc.deferred_undetermined_gap

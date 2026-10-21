@@ -980,20 +980,6 @@ def test_a_junction_is_held_on_its_motifs_strand_or_either_without_one(index, tm
     assert sum(_rejected(untagged).values()) == 0 and untagged.n_fragments == 1
 
 
-def test_the_rule_judges_a_hit_the_pair_rule_does_not(index, tmp_path):
-    """F spliced across [1060,1160) inside gK, where no transcript has an intron, and its mate with no aligned base
-    (`100S`): the pair rule leaves such a mate as it was, but no transcript holds the junction, so the hit is withheld
-    rather than counted intergenic RNA."""
-    records = [
-        _record("noalign", R1_FWD, 1010, "50M100N50M", 1300, xs="+"),
-        _record("noalign", R2_REV, 1300, "100S", 1010),
-    ]
-    stats = _scan(tmp_path, index, records)
-    assert _rejected(stats)["novel_junction"] == 1
-    assert stats.n_fragments == 0 and stats.n_intergenic == 0
-    assert _withheld(stats)["unannotated_splice"] == 1
-
-
 def test_a_spliced_pair_outside_every_gene_is_withheld(index, tmp_path):
     stats = _scan(tmp_path, index, _pair("intergenic", 15000, "50M100N50M", 15200, "100M", xs="+"))
     assert _rejected(stats)["novel_junction"] == 1

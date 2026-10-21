@@ -154,8 +154,9 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument that has a --self-test runs it
 ```
 
-**The standing baseline: 0 failed / 3,130 passed / 0 skipped / 0 xfail, 3,130 collected** — re-derived
-2026-10-21 on the worktree checking the annotation pass against the scan (three gates added; 3,127 after stamping each
+**The standing baseline: 0 failed / 3,131 passed / 0 skipped / 0 xfail, 3,131 collected** — re-derived
+2026-10-21 on the worktree making a record with no aligned base no location (three gates added, two deleted; 3,130
+after checking the annotation pass against the scan, three gates added; 3,127 after stamping each
 record's status, six gates added; 3,121 after counting one outcome per read
 pair, fourteen gates added; 3,107 after recording the
 tolerance K's two sites, fourteen gates added; 3,093 after deleting the

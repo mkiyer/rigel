@@ -228,7 +228,8 @@ run, naming both passes' counts. The tables are written before the pass, so no q
 - The annotation table's `splice_type` column, which only ZS read (step 2).
 - A mate location with no aligned base becomes no location, as a supplementary record is: with it go the pair rule's
   pass-through (`bam_scanner.cpp:1065`), the scan's silent skip (`:1937`), `collect_placement`'s unreachable branch
-  (`:1766`) and the pass's `exons.empty()` guards; a numeric no-op on every input of §4.
+  (`:1766`) and the pass's `exons.empty()` guards; a numeric no-op on every input of §4. With it the deposit adapter's
+  filter of an intron on another reference goes too, which only such a record could carry (step 5).
 - The hygiene ledger's two entries 8c6135f5 fixed: the writer re-implementing `parse_bam_record`, and multimap
   detection written twice.
 

@@ -84,8 +84,10 @@ the code is open; each is less critical.
   +3.27 / −0.62 %); the ladder identical. ☑ One transcript over both mates (2026-10-19, the owner's rule): the witness
   and a spliced hit's junction holder overlap both mates; transcript error −0.74 / −0.66 / +0.86 %, gene +0.06 /
   +3.82 / +0.31 % (g00's paralogs), true gDNA counted RNA −24 k capture-ON; the ladder identical; suite 3,086.
-  ☐ Clip walks along a transcript path (minimap2 input); ☐ one-mate hits and
-  mates with several records, which pass through unjudged
+  ☐ Clip walks along a transcript path (minimap2 input). ☑ No hit passes through unjudged (2026-10-21): a hit with
+  one mate is withheld for a missing mate (item 6); a mate's several records are one location per alignment, its
+  other records aliases (item 5) or supplementary pieces (item 13); and a record with no aligned base, the last
+  pass-through, is no location (item 15)
 10. ◐ The annotated-path rule: a spliced hit is usable only if one annotated transcript holds all its junctions; its
   contiguous competitor stays. ☑ One junction set per hit, every record's (2026-10-19, 69d003ea): the STAR panel 15/15
   and the ladder 48/48 identical. ☑ The rule (2026-10-19, aff4be8e): transcript error −10.17 % unstranded capture-OFF,
@@ -162,7 +164,7 @@ the code is open; each is less critical.
     skips, ten lines of code fewer. A numeric no-op: rename_identity bit-identical on oracle g00, STAR g50 ss.50 OFF,
     cfRNA-A and cfRNA-C (frozen on 5482a10c); breaking the shared test at K + 1 or K − 1 fires both callers' outer-end
     cases. The pinned scan 38.8 → 38.6 s (A B A B). Suite 3,107
-15. ◐ Accounting (2026-10-21, owner; `ACCOUNTING_DESIGN.md`): one outcome per read pair and one status per record,
+15. ☑ Accounting (2026-10-21, owner; `ACCOUNTING_DESIGN.md`): one outcome per read pair and one status per record,
   counted by the scan; the annotated BAM stamps them; the annotation pass checked against the scan by identity
   - ☑ Outcomes and statuses, counted (2026-10-21): a read pair is a run of records sharing a name, filtered records
     included, so a pair whose mates are both unmapped is one (excluded), counted nowhere before: 2.8–22 % of the cfRNA
@@ -199,6 +201,13 @@ the code is open; each is less critical.
     −5.00 / −6.17 %, −1.37 / −0.87 %. The option excludes 21.7–37.1 k fewer read pairs per condition, the audit's pairs
     NH calls multimapping with one usable hit, now placed uniquely. At the defaults nothing moves: rename_identity
     bit-identical on oracle g00 and STAR g50 ss.50 OFF. Suite 3,130
+  - ☑ A record with no aligned base is no location (2026-10-21), like a supplementary record: the pair rule passed such
+    a mate unjudged, so the other mate alone made a fragment, a one-mate fragment through a back door; now its read pair
+    is judged on its other records, withheld for a missing mate when its mate has no other. With it go the pair rule's
+    pass-through, the hit verdict's junction-only branch, the scan's and the resolver's guards for a hit with no block,
+    and the deposit adapter's filter of an intron on another reference, which only such a record could carry. No such
+    record exists on the nine BAMs of the audit: rename_identity bit-identical on oracle g00, STAR g50 ss.50 OFF,
+    cfRNA-A and cfRNA-C. Suite 3,131
 
 *Phase B, calibration*
 0. ☐ First, the highest priority (owner, 2026-10-19): the capture reader reads false gDNA as capture on aligned input

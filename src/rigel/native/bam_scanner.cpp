@@ -463,8 +463,7 @@ struct BamScanStats {
     // of the three. The five names exist once, in `splice_type_label`.
     std::array<int64_t, NUM_SPLICE_TYPES> splice_census{};
 
-    // Censused, then never offered to `deposit()`: no accumulator was installed, or the fragment has no aligned
-    // block (a hit whose mates have no aligned base, which the pair rule passes unjudged). ⭐ It exists to close the
+    // Censused, then never offered to `deposit()`: no accumulator was installed. ⭐ It exists to close the
     // books — without it that `return` is a silent loss, which is the pattern this accumulator was rewritten to
     // delete. With it:
     //
@@ -991,9 +990,9 @@ static bool five_prime_hard_clipped(const ParsedAlignment& r)
 /// of it carries SA or its 5' end is hard-clipped, or when that mate has a supplementary record and none of the mate's
 /// records carries SA: which alignment the piece belongs to is then unknown, so every location of the mate is. A
 /// supplementary record is no location and joins no hit; it is written with the same mate's primary location (an
-/// alias), or its first location when none is primary. A record with no aligned base is a location too, which the
-/// verdict passes through unjudged. Every R1 location with every R2 location on one BAM reference with opposite strands
-/// is a candidate for the hit verdict (`hit_verdict`).
+/// alias), or its first location when none is primary. A record with no aligned base has nothing to place and is no
+/// location either; it is written as a supplementary record is. Every R1 location with every R2 location on one BAM
+/// reference with opposite strands is a candidate for the hit verdict (`hit_verdict`).
 /// When one mate has no location, each location of the other is a one-mate hit (`HIT_MISSING_MATE`); when both have
 /// locations and no pair is a candidate, the first location of each is offered, so the verdict counts the template's
 /// reason once. On the STAR panel this finds the correct pair wherever a template's places hold one, where STAR's HI
@@ -1007,12 +1006,17 @@ static TemplateHits template_hits(std::vector<ParsedAlignment>& records)
     TemplateHits out;
     std::vector<Location> locs[2];
     std::vector<int32_t> supplementary[2];
+    std::vector<int32_t> no_base[2];  // records with no aligned base
     out.alias_of.assign(records.size(), -1);
     for (int32_t k = 0; k < static_cast<int32_t>(records.size()); ++k) {
         const ParsedAlignment& r = records[k];
         const int m = r.is_read1() ? 0 : 1;
         if (r.is_supplementary()) {
             supplementary[m].push_back(k);
+            continue;
+        }
+        if (r.exons.empty()) {
+            no_base[m].push_back(k);
             continue;
         }
         auto it = std::find_if(locs[m].begin(), locs[m].end(),
@@ -1059,6 +1063,7 @@ static TemplateHits template_hits(std::vector<ParsedAlignment>& records)
                                     [&](const Location& l) { return !records[l.rep].is_secondary(); });
         const int32_t owner = (primary == locs[m].end() ? locs[m].front() : *primary).rep;
         for (int32_t k : supplementary[m]) out.alias_of[k] = owner;
+        for (int32_t k : no_base[m]) out.alias_of[k] = owner;
     }
     auto reads = [&](const Location& l) { return std::vector<ParsedAlignment*>{&records[l.rep]}; };
     if (locs[0].empty() || locs[1].empty()) {
@@ -1081,9 +1086,8 @@ static TemplateHits template_hits(std::vector<ParsedAlignment>& records)
 // The hit verdict: two mates that can be one molecule, explained by one annotated transcript when spliced
 // ================================================================
 
-/// `HIT_USABLE` when a hit's two mates can be one molecule (`FragmentResolver::validate_pair`), or when the hit is not
-/// a pair this rule judges: a mate with no aligned base, which stays as it was for the change that owns it. Otherwise
-/// the reason they cannot; a hit with one mate gives no fragment length at all (`HIT_MISSING_MATE`), one on a
+/// `HIT_USABLE` when a hit's two mates can be one molecule (`FragmentResolver::validate_pair`), otherwise the reason
+/// they cannot; a hit with one mate gives no fragment length at all (`HIT_MISSING_MATE`), one on a
 /// reference the index does not hold has no partition, transcript or length along one (`HIT_OFF_INDEX`), and one with
 /// a mate aligned in pieces is a chimeric alignment, which Rigel does not quantify (`HIT_CHIMERIC`). Mates on two
 /// references are two references, wherever they lie: references are told apart by the BAM's ids, as every reference
@@ -1104,7 +1108,6 @@ static int32_t pair_verdict(
     const ParsedAlignment* m2 = hit.second.front();
     if (m1->ref_id < 0 || m2->ref_id < 0) return m1->tid != m2->tid ? HIT_REFERENCE : HIT_OFF_INDEX;
     if (m1->chimeric || m2->chimeric) return HIT_CHIMERIC;
-    if (m1->exons.empty() || m2->exons.empty()) return HIT_USABLE;
     if (m1->ref_id != m2->ref_id) return HIT_REFERENCE;
     if (m1->is_reverse() == m2->is_reverse()) return HIT_STRAND;
     f = m1->is_reverse() ? m2 : m1;
@@ -1116,9 +1119,8 @@ static int32_t pair_verdict(
 
 /// Why a hit is not usable, or `HIT_USABLE`. Its two mates must be able to be one molecule (`pair_verdict`), and when
 /// it is spliced, one annotated transcript must explain it: hold every junction it observes (`observed_junctions`) and
-/// overlap both mates (`FragmentResolver::pair_holders`): the annotated-path rule. A hit the pair rule passes through
-/// unjudged is held to its junctions alone. The molecule is judged first, so a hit the rule withholds always has a
-/// fragment length.
+/// overlap both mates (`FragmentResolver::pair_holders`): the annotated-path rule. The molecule is judged first, so a hit
+/// the rule withholds always has a fragment length.
 static int32_t hit_verdict(
     const std::pair<std::vector<ParsedAlignment*>, std::vector<ParsedAlignment*>>& hit,
     const FragmentResolver& ctx,
@@ -1130,7 +1132,6 @@ static int32_t hit_verdict(
     const ParsedAlignment* r = nullptr;
     const int32_t pair = pair_verdict(hit, junctions, ctx, scratch, f, r);
     if (pair != HIT_USABLE || junctions.empty()) return pair;
-    if (!f) return ctx.junction_holders(junctions, scratch, scratch.pair_candidates);
     return ctx.pair_holders(junctions, f->exons.front().first, f->exons.back().second, r->exons.front().first,
                             r->exons.back().second, scratch, scratch.pair_candidates);
 }
@@ -1174,7 +1175,7 @@ static int32_t unpaired_reason(const std::vector<int32_t>& verdicts)
 }
 
 /// Which records of a template are used, ``used[k]`` 1: those whose alignment is a location of a usable hit, an alias
-/// of the location included. A supplementary record joins no hit, so it is never used.
+/// of the location included. A supplementary record, or one with no aligned base, joins no hit, so it is never used.
 static void records_used(const std::vector<ParsedAlignment>& records, const TemplateHits& th,
                          const std::vector<int32_t>& verdicts, std::vector<char>& used)
 {
@@ -1185,18 +1186,17 @@ static void records_used(const std::vector<ParsedAlignment>& records, const Temp
             for (const ParsedAlignment* r : *reads) used[r - records.data()] = 1;
     }
     for (size_t k = 0; k < records.size(); ++k)
-        if (th.alias_of[k] >= 0) used[k] = records[k].is_supplementary() ? 0 : used[th.alias_of[k]];
+        if (th.alias_of[k] >= 0)
+            used[k] = records[k].is_supplementary() || records[k].exons.empty() ? 0 : used[th.alias_of[k]];
 }
 
 /// One hit's fragment and its resolution: its mates' blocks and junctions merged (`build_fragment`) and resolved
 /// against the annotation, its records' blacklisted junctions counted so the resolver can call it a splice artifact.
-/// The scan and the annotation pass resolve a hit here alike. A hit with no aligned base has no block and is not
-/// resolved.
+/// The scan and the annotation pass resolve a hit here alike.
 static void resolve_hit(const std::pair<std::vector<ParsedAlignment*>, std::vector<ParsedAlignment*>>& hit,
                         FragmentResolver& ctx, ResolverScratch& scratch, AssembledFragment& frag, RawResolveResult& cr)
 {
     frag = build_fragment(hit.first, hit.second);
-    if (frag.exons.empty()) return;
     int32_t blacklisted = 0;
     for (const auto* reads : {&hit.first, &hit.second})
         for (const ParsedAlignment* r : *reads) blacklisted += r->n_sj_blacklisted;
@@ -1860,7 +1860,7 @@ private:
 
                 // A usable hit lies on a reference the index holds (`pair_verdict`), and the accumulator holds
                 // every one.
-                if (!ws.acc_set || f.exons.empty()) { ws.stats.n_deposit_not_offered++; return; }
+                if (!ws.acc_set) { ws.stats.n_deposit_not_offered++; return; }
                 const int32_t ref_id = f.exons.front().ref_id;
 
                 // ── the introns the CIGAR actually stated ─────────────────────────────────────
@@ -1870,11 +1870,9 @@ private:
                 // defined — the adapter used to do it here, and doing it in two places is how one
                 // quantity ends up with two formulas.
                 //
-                // ⛔ Restricting to `ref_id` is DEFINITIONAL, not defensive: `OfferedFragment` means the
-                // introns on the reference being deposited, and `Accumulator::deposit` normalises them by
-                // coordinate alone — it never looks at `ref_id` — so an intron from another reference would
-                // be cut out of this reference's path. The exon-block check below cannot catch one: a record
-                // whose CIGAR has an N and no M, D, = or X op adds an intron and no exon block.
+                // ⛔ Every intron lies on `ref_id`, which `OfferedFragment` means and `Accumulator::deposit`, normalising
+                // them by coordinate alone, relies on: a usable hit's two mates lie on one reference, and each has an
+                // aligned base (a record with none is no location, `template_hits`).
                 //
                 // ⚠ The de-duplication is NOT to prevent double-crediting a sj -- `deposit` normalises a
                 // duplicate away either way. `parse_bam_record` reads XS/ts once per RECORD and
@@ -1887,7 +1885,6 @@ private:
                 auto& observed = ws.arena_observed;
                 const std::size_t obs0 = observed.size();
                 for (const auto& intron : f.introns) {
-                    if (intron.ref_id != ref_id) continue;
                     if (observed.size() > obs0 && observed.back().start == intron.start &&
                         observed.back().end == intron.end) {
                         continue;
@@ -2038,7 +2035,6 @@ private:
             AssembledFragment frag;
             RawResolveResult cr;
             resolve_hit(hit, ctx, scratch, frag, cr);
-            if (frag.exons.empty()) continue;
 
             // Empty t_inds: an intergenic fragment. It is unspliced: a spliced hit the scan keeps has a transcript
             // holding its junctions (`hit_verdict`). Counted once all hits are seen, to count the template once.
@@ -2731,7 +2727,7 @@ public:
                     is_primary = hit_idx == first_valid_hit;
                 stamp_and_write_hit(hit_raws, out, hdr, zt, zg, zr, best_tid, best_gid, zf, zw, zc,
                                     is_primary ? 1 : 0, zn,
-                                    frag.exons.empty() ? "unknown" : splice_type_label(cr.splice_type), zl);
+                                    splice_type_label(cr.splice_type), zl);
                 n_records_written += static_cast<int64_t>(hit_raws.size());
             }
 

@@ -456,3 +456,31 @@ def test_an_annotation_pass_given_other_read_pairs_stops_the_run(index, tmp_path
         _run_with_annotation(
             tmp_path, index, bam, before=lambda _result: shutil.copyfile(swapped, bam)
         )
+
+
+@pytest.mark.parametrize("both", [False, True], ids=["one-mate", "both-mates"])
+def test_a_record_with_no_aligned_base_is_no_location(index, tmp_path, both):
+    """A mapped record whose CIGAR aligns no base (``50S``) has nothing to place, so it is no mate location, like a
+    supplementary record: a read pair whose mate has only such a record is withheld for a missing mate, its records
+    unplaced. The pair rule once passed such a mate unjudged, so the other mate alone made a fragment."""
+    r1 = _record("no_base", R1_FWD, 5000, "50S", 5200)
+    r2 = _record("no_base", R2_REV, 5200, "50S" if both else "50M", 5000)
+    stats, _strand, _buffer, _payload = scan_and_buffer(
+        _bam(tmp_path, [r1, r2]), index, BamScanConfig(total_threads=1)
+    )
+    assert (stats.n_fragments, stats.n_withheld_unpaired_missing_mate) == (0, 1)
+    assert (stats.n_records_unplaced, stats.n_records_used) == (2, 0)
+
+
+def test_a_record_with_no_aligned_base_beside_a_used_alignment_is_unused(index, tmp_path):
+    """R1 aligned at 5000 and again with no aligned base, R2 at 5200: the pair is placed on its one usable hit, and the
+    record with no aligned base, written beside R1's alignment, is unused."""
+    records = [
+        *_pair("beside", 5000, "50M", 5200, "50M"),
+        _record("beside", R1_FWD | SECONDARY, 5000, "50S", 5200),
+    ]
+    stats, _strand, _buffer, _payload = scan_and_buffer(
+        _bam(tmp_path, records), index, BamScanConfig(total_threads=1)
+    )
+    assert (stats.n_fragments, stats.n_placed_unique) == (1, 1)
+    assert (stats.n_records_used, stats.n_records_unused) == (2, 1)

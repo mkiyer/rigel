@@ -8,7 +8,6 @@ non-trivial fractional mass into at least one region or boundary.
 
 from __future__ import annotations
 
-import dataclasses
 
 import numpy as np
 import pytest
@@ -124,61 +123,6 @@ def blacklisted_oracle(tmp_path):
 
     yield result, TranscriptIndex.load(result.index_dir)
     sc.cleanup()
-
-
-def _two_contig_index(tmp_path, extra_gtf=""):
-    """chr1 and chr2, 3,000 bp each; one two-exon transcript on chr1 at 101-300 and 501-700, and the GTF rows
-    ``extra_gtf`` adds."""
-    import pysam
-
-    from rigel.index import TranscriptIndex
-
-    fasta, gtf = tmp_path / "g.fa", tmp_path / "a.gtf"
-    fasta.write_text(">chr1\n" + "A" * 3000 + "\n>chr2\n" + "C" * 3000 + "\n")
-    pysam.faidx(str(fasta))
-    gtf.write_text(
-        'chr1\ttest\texon\t101\t300\t.\t+\t.\tgene_id "g1"; transcript_id "t1";\n'
-        'chr1\ttest\texon\t501\t700\t.\t+\t.\tgene_id "g1"; transcript_id "t1";\n' + extra_gtf
-    )
-    index_dir = tmp_path / "idx"
-    TranscriptIndex.build(str(fasta), str(gtf), str(index_dir), write_tsv=False)
-    return TranscriptIndex.load(str(index_dir))
-
-
-def _two_contig_read(qname, ref_id, pos, mate_ref_id, mate_pos, is_r1, cigar="100M"):
-    import pysam
-
-    a = pysam.AlignedSegment()
-    a.query_name = qname
-    a.reference_id = ref_id
-    a.reference_start = pos
-    a.mapping_quality = 60
-    a.flag = 0x1 | (0x40 if is_r1 else 0x80) | (0x20 if is_r1 else 0x10)
-    a.cigarstring = cigar
-    n = a.infer_query_length()
-    a.query_sequence = "A" * n
-    a.query_qualities = pysam.qualitystring_to_array("I" * n)
-    a.next_reference_id = mate_ref_id
-    a.next_reference_start = mate_pos
-    a.set_tags([("NH", 1, "i")])
-    return a
-
-
-def _two_contig_bam(bam_path, reads, extra_refs=()) -> str:
-    """The reads as a name-sorted BAM over chr1 and chr2, and ``extra_refs`` the index does not hold."""
-    import pysam
-
-    header = {
-        "HD": {"VN": "1.6", "SO": "queryname"},
-        "SQ": [{"SN": "chr1", "LN": 3000}, {"SN": "chr2", "LN": 3000}]
-        + [{"SN": ref, "LN": 3000} for ref in extra_refs],
-    }
-    bam_path = str(bam_path)
-    with pysam.AlignmentFile(bam_path, "wb", header=header) as out:
-        for r in reads:
-            out.write(r)
-    pysam.sort("-n", "-o", bam_path, bam_path)
-    return bam_path
 
 
 def _scan_full(result, index=None):
@@ -492,42 +436,3 @@ class TestSpliceCensus:
     # it exists, but there is no separate observation counter left to compare it against. The
     # population statement that survives is the identity above: every censused fragment either
     # deposits, is a named rejection, is held for the second pass, or is a named hold-out.
-
-
-def test_an_intron_on_another_reference_is_not_cut(tmp_path):
-    """The deposit adapter keeps only the introns on the reference it deposits onto.
-
-    A record whose CIGAR has an N and no M, D, = or X op adds an intron and no exon block, so a pair
-    whose exon blocks all sit on chr1 can carry an intron on chr2. The deposit reads an intron's
-    coordinates and never its reference, so kept, that intron would be cut out of the chr1 extent. The
-    intron is annotated on both references (tA, tB), or the scan would withhold the pair before any
-    deposit (`tests/test_hit_verdict.py`).
-    """
-    two_transcripts = "".join(
-        f'{ref}\ttest\texon\t{s}\t{e}\t.\t+\t.\tgene_id "g{t}"; transcript_id "{t}";\n'
-        for ref, t in (("chr1", "tA"), ("chr2", "tB"))
-        for s, e in ((1401, 1520), (1561, 1700))
-    )
-    index = _two_contig_index(tmp_path, two_transcripts)
-
-    def deposit(name, mate_ref_id, mate_cigar):
-        reads = [
-            _two_contig_read("p", 0, 1500, mate_ref_id, 1520, True),
-            _two_contig_read("p", mate_ref_id, 1520, 0, 1500, False, cigar=mate_cigar),
-        ]
-        bam_path = _two_contig_bam(tmp_path / f"{name}.bam", reads)
-        _stats, _sm, _buf, payload = scan_and_buffer(bam_path, index, BamScanConfig())
-        return payload
-
-    no_intron = deposit("no_intron", 1, "10S")
-    other_ref = deposit("other_ref", 1, "5S40N5S")
-    same_ref = deposit("same_ref", 0, "5S40N5S")
-
-    assert int(no_intron.qc.deposited) == 1
-    assert not np.array_equal(same_ref.deposited_lengths, no_intron.deposited_lengths), (
-        "the intron is not cut even on its own reference, so this test proves nothing"
-    )
-    for field in dataclasses.fields(no_intron):
-        value = getattr(no_intron, field.name)
-        if isinstance(value, np.ndarray):
-            np.testing.assert_array_equal(getattr(other_ref, field.name), value, err_msg=field.name)
