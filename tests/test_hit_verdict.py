@@ -50,14 +50,15 @@ SECONDARY = 0x100
 SUPPLEMENTARY = 0x800
 
 
-def _gtf(with_t3: bool) -> str:
-    rows = [
-        ("gK", "tK", [(1000, 1200), (2100, 2400)]),
-        ("gH", "T1", [(10050, 10110), (10210, 10400)]),
-        ("gH", "T2", [(10250, 10300), (11300, 11800)]),
-    ]
-    if with_t3:
-        rows.append(("gH", "T3", [(10050, 10110), (10210, 10300), (11300, 11800)]))
+TOY = [
+    ("gK", "tK", [(1000, 1200), (2100, 2400)]),
+    ("gH", "T1", [(10050, 10110), (10210, 10400)]),
+    ("gH", "T2", [(10250, 10300), (11300, 11800)]),
+]
+T3 = ("gH", "T3", [(10050, 10110), (10210, 10300), (11300, 11800)])
+
+
+def _gtf(rows) -> str:
     return "".join(
         f'chr1\tt\texon\t{s + 1}\t{e}\t.\t+\t.\tgene_id "{g}"; transcript_id "{t}";\n'
         for g, t, exons in rows
@@ -65,7 +66,7 @@ def _gtf(with_t3: bool) -> str:
     )
 
 
-def _index(base, with_t3=False, n_refs=1):
+def _index(base, rows=TOY, n_refs=1):
     fasta, gtf = base / "g.fa", base / "a.gtf"
     fasta.write_text(
         "".join(
@@ -73,7 +74,7 @@ def _index(base, with_t3=False, n_refs=1):
         )
     )
     pysam.faidx(str(fasta))
-    gtf.write_text(_gtf(with_t3))
+    gtf.write_text(_gtf(rows))
     TranscriptIndex.build(str(fasta), str(gtf), str(base / "idx"), write_tsv=False)
     return TranscriptIndex.load(str(base / "idx"))
 
@@ -178,7 +179,7 @@ def index(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def index_t3(tmp_path_factory):
-    return _index(tmp_path_factory.mktemp("pairs_t3"), with_t3=True)
+    return _index(tmp_path_factory.mktemp("pairs_t3"), [*TOY, T3])
 
 
 @pytest.fixture(scope="module")
@@ -251,6 +252,29 @@ def test_spliced_mates_that_run_past_each_other_are_one_molecule(index, tmp_path
     records = _pair("overrun_spliced", 1154, "46M900N50M", 1150, "50M900N46M", xs="+")
     stats = _scan(tmp_path, index, records, max_frag_length=100)
     assert stats.n_fragments == 1 and sum(_rejected(stats).values()) == 0
+
+
+NESTED = [
+    ("gT", "T", [(1000, 1100), (3000, 3060), (4000, 4100)]),
+    ("gU", "U", [(3100, 3400)]),
+]
+
+
+@pytest.fixture(scope="module")
+def index_nested(tmp_path_factory):
+    """T over [1000,4100), and U's one exon [3100,3400) inside T's second intron [3060,4000)."""
+    return _index(tmp_path_factory.mktemp("pairs_nested"), NESTED)
+
+
+def test_a_pair_the_rule_accepts_is_quantified_whole(index_nested, tmp_path):
+    """F `50M1900N50M` at 1050 crosses T's first intron [1100,3000), and R lies at [3150,3250) in U's exon, inside T's
+    second intron: 300 bases along the genome once the junction is removed, and T holds the junction and overlaps both
+    mates. The pair is one molecule, T's RNA spliced at its first intron and not at its second, and the EM takes it
+    whole, though its blocks' transcripts do not meet (T's exons and U's) and its outer span is 2,200 bases."""
+    records = _pair("nested", 1050, "50M1900N50M", 3150, "100M", xs="+")
+    stats = _scan(tmp_path, index_nested, records)
+    assert stats.n_fragments == 1 and sum(_rejected(stats).values()) == 0
+    assert stats.n_with_exon == 1, "a pair the pair rule accepts was set aside as a chimera"
 
 
 def test_a_pair_too_long_along_every_path_is_withheld(index, tmp_path):
@@ -536,7 +560,7 @@ def test_a_spanning_chimera_is_withheld(index, tmp_path):
     """STAR writes a chimeric read in place of its linear alignment, and Rigel does not quantify chimeras: the template
     is withheld as chimeric. It is no fragment, chimeric or intergenic, and its pieces are not joined into one."""
     stats = _scan(tmp_path, index, _spanning_chimera())
-    assert stats.n_fragments == 0 and stats.n_intergenic == 0 and stats.n_chimeric == 0
+    assert stats.n_fragments == 0 and stats.n_intergenic == 0
     assert _rejected(stats)["chimeric"] == 1 and stats.n_withheld_chimeric == 1
 
 

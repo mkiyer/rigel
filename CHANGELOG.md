@@ -108,8 +108,7 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   `pool_gdna_intergenic_exon`, `pool_rna_spliced`), replacing 0.7.1's per-splice-type categories.
 - Writing `loci.feather` no longer scales with loci × transcripts (a deep library's 22,787 loci: 11 s →
   0.15 s), and a spilled fragment buffer holds one chunk less in memory.
-- Chimera detection checks genomic compatibility before calling a fragment a chimera, and an empty
-  hypothesis set no longer dereferences a null pointer in the accumulator.
+- An empty hypothesis set no longer dereferences a null pointer in the accumulator.
 - The locus EM hands loci to its threads one at a time, so long loci no longer queue behind one another
   on a single thread. A benchmark library dominated by a few long loci runs in 69 s instead of 156 s;
   the output is unchanged at any given thread count.
@@ -135,6 +134,12 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   per-fragment cutoff.
 - `gdna_density_kde.feather` and `gdna_density_regions.feather` (`gdna_density_nodes.feather` in 0.7.1): a
   fitted curve of the total fragment density, gDNA and RNA together, that no calibration number read.
+- The resolver's chimera call. 0.7.1 called a fragment chimeric when its blocks' transcripts did not meet, and set it
+  aside unquantified; a chimeric alignment is now withheld before resolution and a read pair's alignment is one
+  molecule by the pair rule, so a resolved fragment is quantified. `summary.json` no longer reports
+  `fragment_stats.chimeric`, `chimeric_trans`, `chimeric_cis_same` or `chimeric_cis_diff`, the annotated BAM no
+  longer sets `ZF` bit 0x40 (retired, never set), and the report drops its chimeric breakdown. The scan runs 3 %
+  faster.
 
 ### Fixed
 

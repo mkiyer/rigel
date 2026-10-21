@@ -10,7 +10,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
-#include <numeric>
 #include <set>
 #include <string>
 #include <utility>
@@ -44,12 +43,6 @@ static constexpr int32_t MC_INTERSECTION_NONEMPTY = 1;
 static constexpr int32_t MC_UNION                 = 2;
 static constexpr int32_t MC_EMPTY                 = 3;
 
-// ChimeraType (named for the gates in tests/_resolution_reference.py)
-static constexpr int32_t CHIMERA_NONE           = 0;
-static constexpr int32_t CHIMERA_TRANS           = 1;
-static constexpr int32_t CHIMERA_CIS_STRAND_SAME = 2;
-static constexpr int32_t CHIMERA_CIS_STRAND_DIFF = 3;
-
 // Strand (rigel.types.Strand)
 static constexpr int32_t STRAND_NONE      = 0;
 static constexpr int32_t STRAND_POS       = 1;
@@ -62,7 +55,6 @@ static constexpr int32_t FRAG_UNAMBIG           = 0;
 static constexpr int32_t FRAG_AMBIG_SAME_STRAND = 1;
 static constexpr int32_t FRAG_AMBIG_OPP_STRAND  = 2;
 static constexpr int32_t FRAG_MULTIMAPPER       = 3;
-static constexpr int32_t FRAG_CHIMERIC          = 4;
 
 // Assignment flags bitfield (written to BAM as ZF:i tag).
 // ZF is the unified per-fragment outcome bitfield.  See
@@ -204,7 +196,6 @@ struct RawResolveResult {
     int32_t genomic_start = -1;
     int32_t merge_criteria = MC_EMPTY;
     int32_t read_length = 0;
-    int32_t chimera_type = CHIMERA_NONE;
     // Parallel arrays to t_inds
     std::vector<int32_t> frag_lengths;
     std::vector<int32_t> t_exon_bp;
@@ -278,18 +269,6 @@ inline void sort_unique(std::vector<int32_t>& v) {
     v.erase(std::unique(v.begin(), v.end()), v.end());
 }
 
-// Check whether two sorted vectors share at least one element.
-inline bool has_intersection(const std::vector<int32_t>& a,
-                             const std::vector<int32_t>& b) {
-    auto ai = a.begin(), bi = b.begin();
-    while (ai != a.end() && bi != b.end()) {
-        if (*ai < *bi) ++ai;
-        else if (*ai > *bi) ++bi;
-        else return true;
-    }
-    return false;
-}
-
 // Sorted-vector intersection.
 inline std::vector<int32_t> vec_intersect(const std::vector<int32_t>& a,
                                           const std::vector<int32_t>& b) {
@@ -348,96 +327,6 @@ inline MergeResult merge_sets(const std::vector<std::vector<int32_t>>& sets) {
     }
     if (!sorted_union.empty()) return {std::move(sorted_union), MC_UNION};
     return {{}, MC_EMPTY};
-}
-
-// Intrachromosomal chimera detection.
-//
-// Compatibility is checked before a fragment is called a chimera.
-// Transcript-set disjointness ALONE is not evidence of a rearrangement: a genomic molecule is
-// contiguous and routinely spans two transcripts that share nothing -- that is what the annotation
-// looks like there. Such fragments carry no junction anywhere in them, so there is nothing to infer a
-// chimera FROM. A candidate is a chimera only if the mates are genomically INCOMPATIBLE: a different
-// reference (the caller gates on `is_interchromosomal`), components on different reference strands, or
-// an implied fragment length beyond the library's `max_fragment_length`.
-inline int32_t detect_chimera(
-    const std::vector<ExonBlock>& exons,
-    const std::vector<std::vector<int32_t>>& exon_t_sets,
-    int32_t max_fragment_length)
-{
-    // Filter to blocks with non-empty transcript sets
-    std::vector<int> item_idx;
-    for (size_t i = 0; i < exon_t_sets.size(); i++)
-        if (!exon_t_sets[i].empty()) item_idx.push_back(static_cast<int>(i));
-
-    int n = static_cast<int>(item_idx.size());
-    if (n <= 1) return CHIMERA_NONE;
-
-    // Union-find
-    std::vector<int> parent(n);
-    std::iota(parent.begin(), parent.end(), 0);
-
-    auto find = [&](int x) -> int {
-        while (parent[x] != x) {
-            parent[x] = parent[parent[x]];
-            x = parent[x];
-        }
-        return x;
-    };
-    auto unite = [&](int a, int b) {
-        int ra = find(a), rb = find(b);
-        if (ra != rb) parent[ra] = rb;
-    };
-
-    for (int i = 0; i < n; i++)
-        for (int j = i + 1; j < n; j++)
-            if (has_intersection(exon_t_sets[item_idx[i]],
-                                 exon_t_sets[item_idx[j]]))
-                unite(i, j);
-
-    // Group into connected components with vector-backed root lookup.
-    std::vector<int> roots(n);
-    for (int i = 0; i < n; i++) roots[i] = find(i);
-    std::vector<int> unique_roots = roots;
-    std::sort(unique_roots.begin(), unique_roots.end());
-    unique_roots.erase(std::unique(unique_roots.begin(), unique_roots.end()),
-                       unique_roots.end());
-    if (unique_roots.size() <= 1) return CHIMERA_NONE;
-
-    std::vector<std::vector<int>> components(unique_roots.size());
-    for (int i = 0; i < n; i++) {
-        auto it = std::lower_bound(unique_roots.begin(), unique_roots.end(), roots[i]);
-        components[static_cast<size_t>(it - unique_roots.begin())].push_back(i);
-    }
-
-    // Strand characterisation
-    std::vector<int32_t> unique_strands;
-    unique_strands.reserve(components.size());
-    for (const auto& members : components) {
-        int32_t strand = STRAND_NONE;
-        for (int idx : members) strand |= exons[item_idx[idx]].strand;
-        unique_strands.push_back(strand);
-    }
-    sort_unique(unique_strands);
-    int32_t chimera_type = (unique_strands.size() == 1)
-        ? CHIMERA_CIS_STRAND_SAME : CHIMERA_CIS_STRAND_DIFF;
-
-    // ⭐⭐⭐ THE COMPATIBILITY CHECK. `unique_strands.size() == 1` says the mates lie on one strand of one
-    // molecule: `build_fragment` keys blocks by (ref_id, ref_strand) with R2's orientation flipped. It does
-    // NOT say they face inward: an outward-facing (RF) pair carries one strand too and passes as an ordinary
-    // molecule. What remains is whether a molecule of the implied length could exist in this library.
-    // ⚠ The span is the implied FRAGMENT LENGTH -- outermost start to outermost end -- and NOT
-    // the gap between the blocks: the two differ by the blocks' own lengths, and the gap would admit a
-    // molecule longer than the library can contain.
-    if (chimera_type == CHIMERA_CIS_STRAND_SAME) {
-        int32_t lo = exons[item_idx[0]].start;
-        int32_t hi = exons[item_idx[0]].end;
-        for (int i = 1; i < n; i++) {
-            lo = std::min(lo, exons[item_idx[i]].start);
-            hi = std::max(hi, exons[item_idx[i]].end);
-        }
-        if (hi - lo <= max_fragment_length) return CHIMERA_NONE;
-    }
-    return chimera_type;
 }
 
 }  // namespace rigel

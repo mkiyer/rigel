@@ -77,8 +77,6 @@ class BenchmarkResult:
         Fragments seen by the pipeline (from stats.n_fragments).
     n_intergenic : int
         Fragments classified as intergenic.
-    n_chimeric : int
-        Fragments classified as chimeric.
     n_gdna_expected : int
         Ground-truth gDNA fragment count (from simulation read names).
     n_gdna_pipeline : float
@@ -93,7 +91,6 @@ class BenchmarkResult:
     n_simulated: int
     n_fragments: int
     n_intergenic: int
-    n_chimeric: int
     n_gdna_expected: int = 0
     n_gdna_pipeline: float = 0.0
     n_nrna_expected: int = 0
@@ -166,7 +163,7 @@ class BenchmarkResult:
             f"Benchmark: {self.scenario_name}",
             f"  Simulated: {self.n_simulated} fragments",
             f"  Pipeline fragments: {self.n_fragments} (alignment rate: {self.alignment_rate:.1%})",
-            f"  Intergenic: {self.n_intergenic}, Chimeric: {self.n_chimeric}",
+            f"  Intergenic: {self.n_intergenic}",
             f"  Total expected: {self.total_expected}, Total observed: {self.total_observed:.0f}",
         ]
         if self.n_gdna_expected > 0 or self.n_gdna_pipeline > 0:
@@ -274,7 +271,6 @@ def run_benchmark(
         n_simulated=scenario_result.n_simulated,
         n_fragments=stats.n_fragments,
         n_intergenic=stats.n_intergenic,
-        n_chimeric=stats.n_chimeric,
         n_gdna_expected=n_gdna_expected,
         n_gdna_pipeline=n_gdna_pipeline,
         n_nrna_expected=n_nrna_expected,

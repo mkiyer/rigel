@@ -472,6 +472,8 @@ pairing, is not read (`template_hits`, `hit_verdict`; `tests/test_hit_verdict.py
   read in place of its linear alignment and picks the piece holding both mates as the representative; on the panel
   its chimeras are false mate merges (`--peOverlapNbasesMin`) whose representative is misplaced, so no piece is
   trusted. One whose foreign piece is only a read's 3′ tail is withheld too (`ISSUES: the-tail-rule-waits-for-truth`).
+  The resolver calls no fragment a chimera: a usable hit is one molecule by the pair rule, so a resolved fragment is
+  quantified whatever its transcripts' overlap and its blocks' outer span.
 * **Why not HI.** With the capture reader's amplification removed, pairing this way beats STAR's HI groups in every
   capture-OFF condition, it finds the correct pair wherever a template's places hold one, and it costs nothing
   measurable on a deep library; the record is CLOSED `ISSUES: star-hi-pairs-against-rigels-own-pairing`.
@@ -598,20 +600,6 @@ calibration's per-locus `gdna_count` (`priors.assemble_priors`, the numerator of
 share, §3.1c) is a soft count of the gDNA fragments that are candidates in one multi-locus, each counted
 once; a first-base count of a locus's fragments is not this quantity, because it drops every fragment that
 overlaps the locus but starts outside it.
-
-### 3.1b-ii Compatibility is checked before a fragment is called a chimera (owner, 2026-08-19)
-
-A fragment is a chimera **only if its mates are genomically incompatible**:
-
-    a different reference   OR   not facing inward   OR   implied fragment length > max_frag_length
-
-⛔ Transcript-set disjointness alone is not evidence of a rearrangement: gDNA is genomically contiguous
-and routinely spans two transcripts that share nothing. The orientation test needed no new predicate:
-`build_fragment` keys blocks by `(ref_id, ref_strand)` with R2's orientation flipped, so
-`unique_strands.size() == 1` (`CHIMERA_CIS_STRAND_SAME`) *is* "facing inward". The length is the implied
-FRAGMENT LENGTH — outermost start to outermost end — never the gap between the blocks
-(`test_resolution.py` gates the distinction). What it cost while wrong: 4,087 gDNA fragments per
-condition, every one a crosser (`TRAPS: a-transcript-predicate-must-not-silently-drop-a-molecule`).
 
 ### 3.1c The prior's odds are calibration's gDNA share of the locus, and its strength has no knob (owner, 2026-08-09/10; the odds AMENDED 2026-09-24)
 
@@ -933,7 +921,7 @@ probabilistically best placement by the abundance of uniquely aligned fragments 
   bank for multimappers beside the gap bank — would duplicate the order, the draw stream, the drain and the
   door, and was not built.
 * **One offer per fragment** (`AccumulatorSet::offer`; the specification is
-  `tests/native/_accumulator_reference.py`, `Accumulator.offer`). Every non-chimeric hit — an intergenic hit
+  `tests/native/_accumulator_reference.py`, `Accumulator.offer`). Every resolved hit — an intergenic hit
   included: gDNA sits anywhere, and a repeat's gDNA often sits exactly there — is collected as a placement and
   the fragment is offered whole after its last hit. One placement goes through `deposit` bit for bit. Per
   placement the strand check and the clip exclude THAT placement alone; none left rejects the fragment ONCE,
@@ -958,7 +946,7 @@ probabilistically best placement by the abundance of uniquely aligned fragments 
   considered, as its own mechanism).
 * **The drain re-enters `deposit` at the chosen placement's reference**, so there is still one tally path;
   `DrainQC.offered_multimapper` says how many records were held on their placements.
-* **The EM is untouched.** It still receives every non-chimeric genic hit of a multimapper (an intergenic hit never
+* **The EM is untouched.** It still receives every genic hit of a multimapper (an intergenic hit never
   reaches it, `ISSUES: multimapper-intergenic-alignments`) and allocates it by
   abundance and the locus priors; what changes is that the locus prior now holds the fragment where the second
   pass drew it. The second pass's placement and the EM's allocation of the same fragment are not reconciled —

@@ -35,10 +35,6 @@ class PipelineStats:
 
     # --- Resolution-level ---
     n_fragments: int = 0
-    n_chimeric: int = 0
-    n_chimeric_trans: int = 0
-    n_chimeric_cis_strand_same: int = 0
-    n_chimeric_cis_strand_diff: int = 0
     n_intergenic: int = 0  # templates that reach no locus: unspliced, gDNA by construction
     n_with_exon: int = 0
     n_with_annotated_sj: int = 0
@@ -108,7 +104,7 @@ class PipelineStats:
     # --- The per-fragment splice census (scanner QC; ``rigel report``'s splice breakdown) ---
     #
     # ONE observation per placement the scanner hands the accumulator's deposit adapter — every
-    # non-chimeric hit, intergenic ones included: once for a unique mapper, once per placement for a
+    # resolved hit, intergenic ones included: once for a unique mapper, once per placement for a
     # multimapping fragment. That population is stated; reading these off a fragment-length category
     # model instead would silently count only the fragments that also yielded a length observation.
     #

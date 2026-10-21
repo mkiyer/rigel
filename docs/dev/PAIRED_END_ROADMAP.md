@@ -138,8 +138,15 @@ the code is open; each is less critical.
     no-block branch behind them. A numeric no-op: rename_identity bit-identical on oracle g00 and STAR g50 ss.50 OFF
     (frozen on ebb89ca9); suite 3,112. `n_deposit_not_offered` stays, for the two cases still reachable: no accumulator
     installed, or a fragment with no aligned block (a hit whose mates have no aligned base)
-  - Next: ☐ the resolver's chimera classification deleted (closes `ISSUES: chimera-span-over-exon-blocks-only`). The
-    tail rule deferred (`ISSUES: the-tail-rule-waits-for-truth`)
+  - ☑ The resolver's chimera call deleted (2026-10-20; closes `ISSUES: chimera-span-over-exon-blocks-only`): with
+    chimeric alignments withheld it only misfired, setting aside 0 / 0 / 2 / 2 / 12 hits of multimapping templates on
+    the STAR conditions, one template on each of cfRNA-A–C and 48 on `vcap_mix`, none on the ladder. Its counters,
+    the `chimeric` fragment class, `summary.json`'s chimeric keys and the report's breakdown deleted; ZF bit 0x40
+    retired. With every capture efficiency at 1: transcript / gene error −0.02 / −0.02 % unstranded OFF, −0.02 /
+    −0.04 % stranded OFF, +0.26 / +0.28 % stranded ON; shipped +0.22 / +0.44, −0.02 / −0.08, +0.68 / +1.91 %
+    (12 hits moving g50 κ0.99 ON's true gDNA counted RNA by +80.8 k, the reader). The oracle ladder bit-identical
+    (oracle g00 checked); the pinned scan 32.9 → 31.9 s. Suite 3,093
+  - The tail rule deferred (`ISSUES: the-tail-rule-waits-for-truth`)
 14. ☐ Each use of K outside implicit splicing, one at a time
 15. ☐ Accounting: one outcome per template, each record's status from its template's outcome, the counters and the
   annotated-BAM tags; the annotation pass checked against the scan by identity

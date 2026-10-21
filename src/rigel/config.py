@@ -221,7 +221,7 @@ class BamScanConfig:
     annotated intron, and an annotated intron overhang a mate gap, and still be read as
     spliced there.
 
-    The resolver applies it when it enumerates a non-chimeric fragment's gap hypotheses: a
+    The resolver applies it when it enumerates a fragment's gap hypotheses: a
     candidate transcript is excluded as contradicting the alignment only when one of its
     introns overlaps an aligned block by more than ``K``, and an annotated intron is placed
     in an unsequenced gap when it overlaps the gap and lies within it widened by ``K`` at

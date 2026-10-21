@@ -43,7 +43,6 @@ using rigel::vec_to_ndarray;
 using rigel::FRAG_UNAMBIG;
 using rigel::FRAG_AMBIG_SAME_STRAND;
 using rigel::FRAG_MULTIMAPPER;
-using rigel::FRAG_CHIMERIC;
 
 // Maximum candidates handled via stack-allocated buffer before falling
 // back to heap allocation.  Avoids malloc in the common case where a
@@ -426,9 +425,6 @@ private:
         // Det-unambig (growing)
         std::vector<int32_t>*  v_det_ti;
         std::vector<int64_t>*  v_det_fid;
-        // Chimeric accumulation (growing)
-        std::vector<int64_t>*  v_chim_fid;
-        std::vector<uint8_t>*  v_chim_stype;
         // Unambig counts accumulation (single-pass)
         double* ua_counts;
         int ua_ncols;
@@ -459,7 +455,6 @@ private:
               v_gdna_ll(nullptr), v_fid(nullptr),
               v_fclass(nullptr), v_stype(nullptr),
               v_det_ti(nullptr), v_det_fid(nullptr),
-              v_chim_fid(nullptr), v_chim_stype(nullptr),
               ua_counts(nullptr), ua_ncols(0), t_str(nullptr),
               cand_cur(0),
               mm_fid(-1), mm_n_members(0),
@@ -700,13 +695,6 @@ private:
         for (int i = 0; i < N; ++i) {
             int fclass = fc[i];
 
-            if (fclass == FRAG_CHIMERIC) {
-                // Accumulate chimeric info for annotation
-                st.v_chim_fid->push_back(f_id[i]);
-                st.v_chim_stype->push_back(s_type[i]);
-                continue;
-            }
-
             // ---- Multimapper: eager scoring ----
             if (fclass == FRAG_MULTIMAPPER) {
                 int64_t fid_val = f_id[i];
@@ -935,8 +923,6 @@ class StreamingScorer {
     std::vector<uint8_t>*  v_st_;
     std::vector<int32_t>*  v_dti_;
     std::vector<int64_t>*  v_dfid_;
-    std::vector<int64_t>*  v_chim_fid_;
-    std::vector<uint8_t>*  v_chim_stype_;
 
     NativeFragmentScorer::FillState st_;
 
@@ -971,8 +957,6 @@ public:
         v_st_  = new std::vector<uint8_t>();
         v_dti_ = new std::vector<int32_t>();
         v_dfid_ = new std::vector<int64_t>();
-        v_chim_fid_   = new std::vector<int64_t>();
-        v_chim_stype_ = new std::vector<uint8_t>();
 
         // Wire up FillState
         st_ = NativeFragmentScorer::FillState{};
@@ -988,8 +972,6 @@ public:
         st_.v_stype      = v_st_;
         st_.v_det_ti     = v_dti_;
         st_.v_det_fid    = v_dfid_;
-        st_.v_chim_fid   = v_chim_fid_;
-        st_.v_chim_stype = v_chim_stype_;
         st_.ua_counts    = unambig_counts.data();
         st_.ua_ncols     =
             static_cast<int>(unambig_counts.shape(1));
@@ -1011,8 +993,6 @@ public:
         delete v_st_;
         delete v_dti_;
         delete v_dfid_;
-        delete v_chim_fid_;
-        delete v_chim_stype_;
     }
 
     // Non-copyable
@@ -1076,8 +1056,6 @@ public:
             vec_to_ndarray(v_st_),
             vec_to_ndarray(v_dti_),
             vec_to_ndarray(v_dfid_),
-            vec_to_ndarray(v_chim_fid_),
-            vec_to_ndarray(v_chim_stype_),
             stat_det_,
             stat_em_u_,
             stat_em_as_,
@@ -1094,8 +1072,6 @@ public:
         v_fid_ = nullptr;
         v_fc_ = nullptr;  v_st_ = nullptr;
         v_dti_ = nullptr; v_dfid_ = nullptr;
-        v_chim_fid_ = nullptr;
-        v_chim_stype_ = nullptr;
 
         return result;
     }
@@ -1160,5 +1136,4 @@ NB_MODULE(_scoring_impl, m) {
     m.attr("FRAG_AMBIG_SAME_STRAND") = rigel::FRAG_AMBIG_SAME_STRAND;
     m.attr("FRAG_AMBIG_OPP_STRAND")  = rigel::FRAG_AMBIG_OPP_STRAND;
     m.attr("FRAG_MULTIMAPPER")       = rigel::FRAG_MULTIMAPPER;
-    m.attr("FRAG_CHIMERIC")          = rigel::FRAG_CHIMERIC;
 }

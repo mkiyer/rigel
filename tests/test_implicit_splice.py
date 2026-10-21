@@ -152,8 +152,7 @@ class TestImplicitSpliceDiscriminant:
         # t_long intron is (1100, 51099). Fragment block 1 is in exon 1 (1050,1100),
         # block 2 falls inside the intron at (10000,10100); both intron boundaries
         # lie far outside the (1100,10000) gap.
-        # block 2 lands intronic → empty t_set for that block; first block is
-        # annotated → not chimeric per "one annotated + one intergenic" rule.
+        # block 2 lands intronic → empty t_set for that block.
         result = _resolve(index, exons=(_exon(1050, 1100), _exon(10000, 10100)))
         assert result is not None
         assert result.splice_type == int(SpliceType.UNSPLICED)
@@ -289,18 +288,6 @@ class TestImplicitSpliceDiscriminant:
         # positive overlap before applying slack.
         # blocks (149,302),(350,399). Both blocks are in exon 1+2 footprints.
         result = _resolve(index, exons=(_exon(149, 302), _exon(350, 399)))
-        assert result is not None
-        assert result.splice_type == int(SpliceType.UNSPLICED)
-
-    # (n) chimeric multi-block fragment → not promoted to SPLICED_IMPLICIT
-    def test_n_chimera_gate_preserved(self, with_tolerance):
-        index, set_k = with_tolerance
-        set_k(3)
-        # Block 1 in t_long exon 1 (1050..1100); block 2 in t_no_intron (53050..53100).
-        # Disjoint t_sets → chimera. Gap (1100, 53050) would otherwise contain
-        # t_long intron (1100, 51099) but the chimera_type != CHIMERA_NONE
-        # gate prevents implicit promotion. Result remains UNSPLICED.
-        result = _resolve(index, exons=(_exon(1050, 1100), _exon(53050, 53100)))
         assert result is not None
         assert result.splice_type == int(SpliceType.UNSPLICED)
 

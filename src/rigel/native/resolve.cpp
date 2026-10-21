@@ -1,9 +1,8 @@
 /**
  * resolve.cpp — nanobind C++ extension for fragment resolution.
  *
- * Fragment resolution: cgranges overlap queries, set merging, chimera
- * detection and fragment-length computation, calling cgranges directly
- * without round-tripping to Python.
+ * Fragment resolution: cgranges overlap queries, set merging and fragment-length computation, calling
+ * cgranges directly without round-tripping to Python.
  *
  * The core logic (FragmentResolver, ResolvedFragment, FragmentAccumulator,
  * constants, helper types) lives in shared headers so that
@@ -36,7 +35,6 @@ NB_MODULE(_resolve_impl, m) {
         .def_ro("align_strand", &ResolvedFragment::align_strand)
         .def_ro("sj_strand", &ResolvedFragment::sj_strand)
         .def_ro("ambig_strand", &ResolvedFragment::ambig_strand)
-        .def_ro("chimera_type", &ResolvedFragment::chimera_type)
         .def_ro("merge_criteria", &ResolvedFragment::merge_criteria)
         .def_ro("read_length", &ResolvedFragment::read_length)
         .def_ro("genomic_footprint", &ResolvedFragment::genomic_footprint)
@@ -115,8 +113,8 @@ NB_MODULE(_resolve_impl, m) {
         .def("set_max_fragment_length",
              &FragmentResolver::set_max_fragment_length,
              nb::arg("max_fragment_length"),
-             "The library's fragment-length limit. A same-strand, same-reference pair whose implied "
-             "fragment length is within it is an ordinary genomic molecule, not a chimera.")
+             "The library's fragment-length limit: no pair whose molecule is longer, along the genome and "
+             "along every witness transcript, is one.")
         .def("set_intron_overhang_tolerance",
              &FragmentResolver::set_intron_overhang_tolerance,
              nb::arg("K"),

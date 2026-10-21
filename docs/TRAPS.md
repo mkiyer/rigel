@@ -900,8 +900,9 @@ disagreed about one quantity for months and nobody diffed them.
 predicate deposits nothing, and the rejected population is never random; the bias concentrates where the
 predicate fires.** A chimera check that joined mates only when their transcript sets intersect dropped
 0.04 % of fragments carrying 2.4 % of every boundary crossing, and hid because every dropped fragment was
-a crosser. Check genomic compatibility (one reference, mates inward, plausible implied length) before
-calling a fragment a chimera, and make the ledger close: `n_fragments == deposited + Σ accounted drops`.
+a crosser. Check genomic compatibility (one reference, mates inward, plausible implied length) before any
+transcript predicate judges a fragment, as the pair rule does, and make the ledger close: `n_fragments == deposited +
+Σ accounted drops`.
 
 **an-object-class-does-not-see-a-terminus. The object strata classify a boundary by the exon-ness of its
 two flanks, so a TSS/TES inside another transcript's intron is indistinguishable from a splice site there,

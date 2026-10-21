@@ -11,14 +11,14 @@ import logging
 
 import numpy as np
 
-from .buffer import FragmentBuffer, FRAG_UNAMBIG, FRAG_CHIMERIC
+from .buffer import FragmentBuffer, FRAG_UNAMBIG
 from .estimator import AbundanceEstimator
 from .scored_fragments import ScoredFragments
 from .index import TranscriptIndex
 from .scoring import FragmentScorer
 from .splice import SPLICE_ANNOT
 from .stats import PipelineStats
-from .annotate import AF_CHIMERIC, winner_flag
+from .annotate import winner_flag
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +43,7 @@ class FragmentRouter:
     index : TranscriptIndex
         Reference index.
     annotations : AnnotationTable or None
-        If provided, deterministic-unambig and chimeric fragments are
-        annotated as they are routed.
+        If provided, deterministic-unambig fragments are annotated as they are routed.
     """
 
     def __init__(
@@ -70,8 +69,7 @@ class FragmentRouter:
 
         Deterministic-unique (SPLICED_ANNOT + FRAG_UNAMBIG) fragments
         are assigned directly via the C++ scoring path.  All other
-        exonic fragments build EM units.  Chimeric fragments are
-        recorded in the annotation table (if active) and skipped.
+        exonic fragments build EM units.
 
         Chunks are consumed from the buffer in order and scored by the
         native ``StreamingScorer``.
@@ -119,8 +117,6 @@ class FragmentRouter:
             splice_types,
             det_tids,
             det_fids,
-            chim_fids,
-            chim_stypes,
             n_det,
             n_em_u,
             n_em_as,
@@ -135,20 +131,6 @@ class FragmentRouter:
         stats.em_routed_ambig_opp_strand_units += int(n_em_ao)
         stats.n_gated_out += int(n_gated)
         stats.em_routed_multimapper_units += int(n_mm)
-
-        # ---- Chimeric annotations (from C++ accumulators) ----
-        if annotations is not None and len(chim_fids) > 0:
-            for j in range(len(chim_fids)):
-                annotations.add(
-                    frag_id=int(chim_fids[j]),
-                    best_tid=-1,
-                    best_gid=-1,
-                    tx_flags=AF_CHIMERIC,
-                    posterior=0.0,
-                    frag_class=FRAG_CHIMERIC,
-                    n_candidates=0,
-                    splice_type=int(chim_stypes[j]),
-                )
 
         # Det-unambig annotations
         if annotations is not None and len(det_tids) > 0:

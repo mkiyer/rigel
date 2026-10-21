@@ -255,9 +255,8 @@ class TestStrandModelsContainer:
 
 class TestTheScannersExonicCounts:
     """The scanner counts the all-exonic diagnostic's 2x2 itself, so its cells are checked against an
-    independent recount of the same fragments from the scan's own buffer: unique mappers that are not
-    chimeric, whose candidates share one strand, filed by alignment strand and the first candidate's
-    strand."""
+    independent recount of the same fragments from the scan's own buffer: unique mappers whose candidates
+    share one strand, filed by alignment strand and the first candidate's strand."""
 
     def test_each_fragment_is_counted_in_its_cell(self, tmp_path):
         from rigel.config import BamScanConfig
@@ -289,12 +288,7 @@ class TestTheScannersExonicCounts:
             with buffer:
                 for chunk in buffer.iter_chunks_consuming():
                     first, end = chunk.t_offsets[:-1], chunk.t_offsets[1:]
-                    keep = (
-                        (chunk.num_hits == 1)
-                        & (chunk.chimera_type == 0)
-                        & (chunk.ambig_strand == 0)
-                        & (end > first)
-                    )
+                    keep = (chunk.num_hits == 1) & (chunk.ambig_strand == 0) & (end > first)
                     align = chunk.align_strand[keep]
                     ref = t_strand[chunk.t_indices[first[keep]]]
                     for (a, s), cell in _CELLS.items():

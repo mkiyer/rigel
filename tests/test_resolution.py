@@ -1,11 +1,9 @@
 """Fragment resolution — turning an aligned pair into a fragment with a candidate transcript set.
 
-Intrachromosomal chimera detection by transcript-set disjointness; fragment resolution end to end;
-the overlap profile and the filtering it drives; discrimination on implied fragment length; the
-intronic base-pair accumulation; and the rule that COMPATIBILITY is checked before anything is
-called a chimera, so a contiguous inward-facing genomic molecule spanning two unrelated transcripts
-stays an ordinary fragment. Several gates are run twice, once against the Python reference and once
-against the C++ kernel the scanner actually executes, because the two can disagree silently.
+Fragment resolution end to end; the overlap profile and the filtering it drives; discrimination on
+implied fragment length; and the intronic base-pair accumulation. Several gates are run twice, once
+against the Python reference and once against the C++ kernel the scanner actually executes, because
+the two can disagree silently.
 """
 
 import textwrap
@@ -16,149 +14,10 @@ from _index_builder import build_test_index
 from rigel.types import Strand, GenomicInterval
 from rigel.splice import SpliceType
 from _resolution_reference import (
-    ChimeraType,
     MergeOutcome,
-    _detect_intrachromosomal_chimera,
     make_fragment,
     resolve_fragment,
 )
-
-
-# =====================================================================
-# _detect_intrachromosomal_chimera
-# =====================================================================
-
-
-class TestDetectIntrachromosomalChimera:
-    """Transcript-set disjointness detection for intrachromosomal chimeras.
-
-    ``max_fragment_length`` is passed EXPLICITLY on every call, and the value is part of each case.
-    Compatibility is checked before a candidate is called a chimera
-    (`TestGenomicCompatibilityIsCheckedBeforeChimera`), so a SAME-STRAND candidate is only a chimera
-    when its implied fragment length exceeds the limit — those cases pass a limit BELOW their own
-    span so they still exercise the disjointness mechanism. The DIFFERENT-STRAND and already-``None``
-    cases are decided before the compatibility check and the value cannot reach them."""
-
-    def test_single_block_none(self):
-        """One annotated block cannot be chimeric."""
-        blocks = (GenomicInterval("chr1", 100, 200, Strand.POS),)
-        t_sets = [frozenset({0, 1})]
-        assert _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=1000) is None
-
-    def test_empty_t_sets_none(self):
-        """All empty transcript sets → not chimeric."""
-        blocks = (
-            GenomicInterval("chr1", 100, 200, Strand.POS),
-            GenomicInterval("chr1", 300, 400, Strand.POS),
-        )
-        t_sets = [frozenset(), frozenset()]
-        assert _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=1000) is None
-
-    def test_one_empty_one_annotated(self):
-        """One annotated, one intergenic → not chimeric."""
-        blocks = (
-            GenomicInterval("chr1", 100, 200, Strand.POS),
-            GenomicInterval("chr1", 300, 400, Strand.POS),
-        )
-        t_sets = [frozenset({0}), frozenset()]
-        assert _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=1000) is None
-
-    def test_shared_transcript_none(self):
-        """Two blocks sharing a transcript → connected → not chimeric."""
-        blocks = (
-            GenomicInterval("chr1", 100, 200, Strand.POS),
-            GenomicInterval("chr1", 300, 400, Strand.POS),
-        )
-        t_sets = [frozenset({0, 1}), frozenset({1, 2})]
-        assert _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=1000) is None
-
-    def test_disjoint_same_strand_chimera(self):
-        """Two blocks with disjoint transcript sets, same strand → CIS_STRAND_SAME."""
-        blocks = (
-            GenomicInterval("chr1", 100, 200, Strand.POS),
-            GenomicInterval("chr1", 1000, 1100, Strand.POS),
-        )
-        t_sets = [frozenset({0, 1}), frozenset({2, 3})]
-        result = _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=500)
-        assert result == ChimeraType.CIS_STRAND_SAME
-
-    def test_disjoint_diff_strand_chimera(self):
-        """Two blocks with disjoint sets, different strands → CIS_STRAND_DIFF."""
-        blocks = (
-            GenomicInterval("chr1", 100, 200, Strand.POS),
-            GenomicInterval("chr1", 500, 600, Strand.NEG),
-        )
-        t_sets = [frozenset({0}), frozenset({5})]
-        result = _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=1000)
-        assert result == ChimeraType.CIS_STRAND_DIFF
-
-    def test_overlapping_disjoint_blocks(self):
-        """Disjoint transcript sets with overlapping genomic coordinates."""
-        blocks = (
-            GenomicInterval("chr1", 100, 500, Strand.POS),
-            GenomicInterval("chr1", 300, 700, Strand.NEG),
-        )
-        t_sets = [frozenset({0}), frozenset({1})]
-        result = _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=1000)
-        assert result == ChimeraType.CIS_STRAND_DIFF
-
-    def test_three_blocks_two_components(self):
-        """Three blocks: two connected (shared tx), one disjoint."""
-        blocks = (
-            GenomicInterval("chr1", 100, 200, Strand.POS),
-            GenomicInterval("chr1", 300, 400, Strand.POS),
-            GenomicInterval("chr1", 2000, 2100, Strand.NEG),
-        )
-        # Block 0 and 1 share transcript 1 → connected
-        # Block 2 is disjoint from both → chimeric
-        t_sets = [frozenset({0, 1}), frozenset({1, 2}), frozenset({5})]
-        result = _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=1000)
-        assert result == ChimeraType.CIS_STRAND_DIFF
-
-    def test_three_disjoint_blocks(self):
-        """Three blocks, all pairwise disjoint → three components → chimeric."""
-        blocks = (
-            GenomicInterval("chr1", 100, 200, Strand.POS),
-            GenomicInterval("chr1", 500, 600, Strand.POS),
-            GenomicInterval("chr1", 1000, 1100, Strand.POS),
-        )
-        t_sets = [frozenset({0}), frozenset({1}), frozenset({2})]
-        result = _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=500)
-        assert result == ChimeraType.CIS_STRAND_SAME
-
-    def test_connected_via_transitive_overlap(self):
-        """A-B overlap, B-C overlap, but A-C are disjoint → all connected."""
-        blocks = (
-            GenomicInterval("chr1", 100, 200, Strand.POS),
-            GenomicInterval("chr1", 300, 400, Strand.POS),
-            GenomicInterval("chr1", 500, 600, Strand.POS),
-        )
-        # A={0,1}, B={1,2}, C={2,3} → A-B share 1, B-C share 2 → all connected
-        t_sets = [frozenset({0, 1}), frozenset({1, 2}), frozenset({2, 3})]
-        assert _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=1000) is None
-
-    def test_adjacent_blocks_zero_gap(self):
-        """Disjoint transcript sets on two abutting blocks: the implied fragment spans 200 bp,
-        past the 100 bp limit, so it is a chimera."""
-        blocks = (
-            GenomicInterval("chr1", 100, 200, Strand.POS),
-            GenomicInterval("chr1", 200, 300, Strand.POS),
-        )
-        t_sets = [frozenset({0}), frozenset({1})]
-        result = _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=100)
-        assert result == ChimeraType.CIS_STRAND_SAME
-
-    def test_mixed_annotated_intergenic_blocks(self):
-        """Annotated blocks are disjoint, intergenic block between them."""
-        blocks = (
-            GenomicInterval("chr1", 100, 200, Strand.POS),
-            GenomicInterval("chr1", 500, 600, Strand.NONE),  # intergenic
-            GenomicInterval("chr1", 1000, 1100, Strand.NEG),
-        )
-        # Block 1 is intergenic (empty set), blocks 0 and 2 are disjoint
-        t_sets = [frozenset({0}), frozenset(), frozenset({5})]
-        result = _detect_intrachromosomal_chimera(blocks, t_sets, max_fragment_length=1000)
-        assert result == ChimeraType.CIS_STRAND_DIFF
 
 
 # =====================================================================
@@ -441,7 +300,6 @@ def test_ambiguous_multiexon_candidate_snapshot(tmp_path_factory):
     }
     assert result.merge_criteria == int(MergeOutcome.UNION)
     assert result.splice_type == int(SpliceType.SPLICED_IMPLICIT)
-    assert result.chimera_type == int(ChimeraType.NONE)
     assert result.read_length == 120
     assert all(result.overlap_bp[t] == (120, 0) for t in result.t_inds)
 
@@ -656,139 +514,3 @@ class TestIntronicBpAccumulation:
         assert result is not None
         assert result.read_length == 100
         assert result.overlap_bp[0] == (100, 0)
-
-
-# =====================================================================
-# COMPATIBILITY BEFORE CHIMERA
-# =====================================================================
-
-
-class TestGenomicCompatibilityIsCheckedBeforeChimera:
-    """A contiguous genomic molecule is not a chimera, however many transcripts it spans.
-
-    Transcript-set disjointness alone calls ``CHIMERA_CIS_STRAND_SAME`` on ordinary gDNA: a genomic
-    fragment is contiguous and routinely covers two transcripts that share nothing, which is what the
-    annotation looks like there rather than evidence of a rearrangement. Such a fragment is a proper
-    inward-facing pair with no junction anywhere in it, so there is no splice evidence for a chimera
-    to be inferred FROM.
-
-    The rule: a fragment is a chimera only if the mates are genomically INCOMPATIBLE — a different
-    reference, an orientation that is not facing inward, or an implied fragment length beyond the
-    library's ``max_frag_length``. Compatibility is checked FIRST.
-
-    Dropping those fragments is not a rounding error, because the predicate fires exactly where
-    transcripts are short and dense, which is exactly where a fragment crosses many boundaries: a
-    small fraction of fragments carries a large fraction of all boundary crossings.
-
-    The orientation half needs no new predicate: ``build_fragment`` keys blocks by
-    ``(ref_id, ref_strand)`` with R2's orientation flipped, so both mates of an inward-facing pair
-    carry the SAME ``strand`` and ``unique_strands.size() == 1`` already MEANS "facing inward".
-    """
-
-    #: two blocks, disjoint transcript sets, same strand — implied fragment span 100..1100 = 1000 bp
-    BLOCKS = (
-        GenomicInterval("chr1", 100, 200, Strand.POS),
-        GenomicInterval("chr1", 1000, 1100, Strand.POS),
-    )
-    T_SETS = [frozenset({0, 1}), frozenset({2, 3})]
-
-    def test_a_compatible_pair_is_not_a_chimera(self):
-        """Same reference, facing inward, span within the maximum: an ordinary genomic molecule."""
-        assert (
-            _detect_intrachromosomal_chimera(self.BLOCKS, self.T_SETS, max_fragment_length=2000)
-            is None
-        ), "a contiguous, inward-facing, in-range genomic fragment was called a chimera"
-
-    def test_an_impossible_span_is_still_a_chimera(self):
-        """The length half of the rule: beyond ``max_frag_length`` no molecule explains the pair."""
-        result = _detect_intrachromosomal_chimera(self.BLOCKS, self.T_SETS, max_fragment_length=500)
-        assert result is not None, "a 1,000 bp span passed a 500 bp limit"
-        assert result == ChimeraType.CIS_STRAND_SAME
-
-    def test_the_span_is_the_OUTER_extent_not_the_gap(self):
-        """The quantity is the implied FRAGMENT LENGTH — outermost start to outermost end — not the
-        gap between the blocks. The two differ by the blocks' own lengths (here 1000 vs 800),
-        and using the gap would admit a fragment 200 bp longer than the library can contain."""
-        assert (
-            _detect_intrachromosomal_chimera(self.BLOCKS, self.T_SETS, max_fragment_length=900)
-            is not None
-        ), "the gap (800) was used where the implied fragment length (1000) is the rule"
-
-    def test_an_outward_facing_pair_is_a_chimera_at_any_span(self):
-        """The orientation half: opposite ``strand`` on the two components means the mates do not face
-        inward, and no fragment length rescues that."""
-        blocks = (
-            GenomicInterval("chr1", 100, 200, Strand.POS),
-            GenomicInterval("chr1", 1000, 1100, Strand.NEG),
-        )
-        result = _detect_intrachromosomal_chimera(blocks, self.T_SETS, max_fragment_length=100_000)
-        assert result is not None, "an outward-facing pair was rescued by the length check"
-        assert result == ChimeraType.CIS_STRAND_DIFF
-
-    def test_the_NATIVE_resolver_agrees(self, tmp_path_factory):
-        """The C++ kernel, not the reference — this is the path the scanner actually runs.
-
-        Two transcripts 200 bp apart sharing nothing. A gDNA fragment covering one block in each is a
-        perfectly ordinary molecule and must resolve with ``chimera_type == NONE``."""
-        gtf = textwrap.dedent("""\
-            chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "gA"; transcript_id "tA"; gene_name "GA"; gene_type "protein_coding"; tag "basic";
-            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "gB"; transcript_id "tB"; gene_name "GB"; gene_type "protein_coding"; tag "basic";
-        """)
-        idx = build_test_index(tmp_path_factory, gtf, name="compat_chimera")
-        idx.resolver.set_max_fragment_length(1000)
-        frag = make_fragment(
-            exons=(
-                GenomicInterval("chr1", 120, 200, Strand.POS),
-                GenomicInterval("chr1", 400, 480, Strand.POS),
-            )
-        )
-        result = resolve_fragment(frag, idx)
-        assert result is not None
-        assert result.chimera_type == int(ChimeraType.NONE), (
-            "the native resolver called a 360 bp inward-facing genomic fragment a chimera"
-        )
-
-    def test_the_NATIVE_resolver_measures_the_SPAN_not_the_gap(self, tmp_path_factory):
-        """The native twin of ``test_the_span_is_the_OUTER_extent_not_the_gap``.
-
-        PERTURBATION: changing the C++ to measure the gap between the blocks fires no other native gate.
-
-        Blocks (100,200) and (1000,1100): implied fragment length **1000**, gap between them **800**. At a
-        limit of 900 the fragment is impossible and the gap is not — so a gap-based rule rescues a molecule
-        100 bp longer than the library can contain."""
-        gtf = textwrap.dedent("""\
-            chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "gA"; transcript_id "tA"; gene_name "GA"; gene_type "protein_coding"; tag "basic";
-            chr1\ttest\texon\t1001\t1100\t.\t+\t.\tgene_id "gB"; transcript_id "tB"; gene_name "GB"; gene_type "protein_coding"; tag "basic";
-        """)
-        idx = build_test_index(tmp_path_factory, gtf, name="compat_span_vs_gap")
-        idx.resolver.set_max_fragment_length(900)
-        frag = make_fragment(
-            exons=(
-                GenomicInterval("chr1", 100, 200, Strand.POS),
-                GenomicInterval("chr1", 1000, 1100, Strand.POS),
-            )
-        )
-        result = resolve_fragment(frag, idx)
-        assert result is not None
-        assert result.chimera_type == int(ChimeraType.CIS_STRAND_SAME), (
-            "a 1,000 bp implied fragment passed a 900 bp limit — the GAP (800) was measured, not the span"
-        )
-
-    def test_the_NATIVE_resolver_still_refuses_an_impossible_span(self, tmp_path_factory):
-        """The control: the same geometry with a limit the span cannot meet stays a chimera, so the
-        gate above is not passing because the rescue is unconditional."""
-        gtf = textwrap.dedent("""\
-            chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "gA"; transcript_id "tA"; gene_name "GA"; gene_type "protein_coding"; tag "basic";
-            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "gB"; transcript_id "tB"; gene_name "GB"; gene_type "protein_coding"; tag "basic";
-        """)
-        idx = build_test_index(tmp_path_factory, gtf, name="compat_chimera_ctl")
-        idx.resolver.set_max_fragment_length(100)
-        frag = make_fragment(
-            exons=(
-                GenomicInterval("chr1", 120, 200, Strand.POS),
-                GenomicInterval("chr1", 400, 480, Strand.POS),
-            )
-        )
-        result = resolve_fragment(frag, idx)
-        assert result is not None
-        assert result.chimera_type == int(ChimeraType.CIS_STRAND_SAME)

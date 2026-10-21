@@ -67,7 +67,6 @@ public:
     int32_t genomic_start = -1;
     int32_t merge_criteria = MC_EMPTY;
     int32_t read_length = 0;
-    int32_t chimera_type = CHIMERA_NONE;
     int32_t num_hits = 1;
     int32_t nm = 0;
 
@@ -100,10 +99,6 @@ public:
 
     // --- Properties for Python model training ---
 
-    bool get_is_chimeric() const {
-        return chimera_type != CHIMERA_NONE;
-    }
-
     bool get_is_same_strand() const {
         return !ambig_strand;
     }
@@ -112,8 +107,7 @@ public:
         return splice_type == SPLICE_SPLICED_ANNOT
             && !ambig_strand
             && (align_strand == STRAND_POS || align_strand == STRAND_NEG)
-            && (sj_strand == STRAND_POS || sj_strand == STRAND_NEG)
-            && chimera_type == CHIMERA_NONE;
+            && (sj_strand == STRAND_POS || sj_strand == STRAND_NEG);
     }
 
     int32_t get_first_t_ind() const {
@@ -175,7 +169,6 @@ public:
         r.genomic_start = cr.genomic_start;
         r.merge_criteria = cr.merge_criteria;
         r.read_length = cr.read_length;
-        r.chimera_type = cr.chimera_type;
         r.exon_bp = std::move(cr.t_exon_bp);
         r.intron_bp = std::move(cr.t_intron_bp);
         r.sj_key_ref = cr.sj_key_ref;
@@ -207,7 +200,6 @@ public:
     std::vector<uint8_t>  align_strand_;
     std::vector<uint8_t>  ambig_strand_;
     std::vector<int32_t>  num_hits_;  // a template's valid hits, R1 places times R2 places: past 16 bits in a repeat
-    std::vector<uint8_t>  chimera_type_;
     std::vector<int32_t>  t_indices_;
     std::vector<int32_t>  t_offsets_;
     std::vector<int32_t>  frag_lengths_;
@@ -232,7 +224,6 @@ public:
         align_strand_.reserve(n_fragments);
         ambig_strand_.reserve(n_fragments);
         num_hits_.reserve(n_fragments);
-        chimera_type_.reserve(n_fragments);
         frag_id_.reserve(n_fragments);
         read_length_.reserve(n_fragments);
         genomic_footprint_.reserve(n_fragments);
@@ -249,7 +240,6 @@ public:
         align_strand_.push_back(static_cast<uint8_t>(r.align_strand));
         ambig_strand_.push_back(static_cast<uint8_t>(r.ambig_strand));
         num_hits_.push_back(r.num_hits);
-        chimera_type_.push_back(static_cast<uint8_t>(r.chimera_type));
 
         // CSR data — parallel arrays to t_indices
         t_indices_.insert(t_indices_.end(),
@@ -283,7 +273,6 @@ public:
         result["splice_type"]       = vec_to_ndarray(std::move(splice_type_));
         result["align_strand"]       = vec_to_ndarray(std::move(align_strand_));
         result["num_hits"]          = vec_to_ndarray(std::move(num_hits_));
-        result["chimera_type"]      = vec_to_ndarray(std::move(chimera_type_));
         result["t_indices"]         = vec_to_ndarray(std::move(t_indices_));
         result["t_offsets"]         = vec_to_ndarray(std::move(t_offsets_));
         result["frag_lengths"]      = vec_to_ndarray(std::move(frag_lengths_));
@@ -372,7 +361,6 @@ struct ResolverScratch {
     std::vector<std::vector<int32_t>> exon_t_sets;
     std::vector<std::vector<int32_t>> transcript_t_sets;
     std::vector<int32_t> sj_holders;  // the transcripts holding every junction (`junction_holders`)
-    std::vector<int32_t> tmp_a;
     std::vector<int32_t> tmp_union;
     std::vector<int32_t> all_overlap_t;
     std::vector<int32_t> nrna_t;
@@ -432,7 +420,6 @@ struct ResolverScratch {
         for (auto& v : exon_t_sets) v.clear();
         for (auto& v : transcript_t_sets) v.clear();
         sj_holders.clear();
-        tmp_a.clear();
         tmp_union.clear();
         all_overlap_t.clear();
         nrna_t.clear();
@@ -494,8 +481,7 @@ public:
 
     // --- Intron-overhang tolerance K (bp), the gap-hypothesis enumeration's slack ---
     int32_t intron_overhang_tolerance_ = 0;
-    //: the library's fragment-length limit; 0 ⇒ no molecule is compatible, so the compatibility
-    //: rescue in `detect_chimera` cannot fire and every disjoint candidate stays a chimera.
+    //: the library's fragment-length limit, which a pair's molecule must not exceed (`validate_pair`)
     int32_t max_fragment_length_ = 0;
 
     // --- Reference name <-> ID ---
@@ -660,11 +646,11 @@ public:
     }
 
     // ----------------------------------------------------------------
-    // Chimera detection
+    // The library's fragment-length limit
     // ----------------------------------------------------------------
 
-    /// The library's fragment-length limit (`BamScanConfig.max_frag_length`), used by
-    /// `detect_chimera` to tell an ordinary genomic molecule from a rearrangement.
+    /// The library's fragment-length limit (`BamScanConfig.max_frag_length`): no pair whose molecule is longer,
+    /// along the genome and along every witness transcript, is one (`validate_pair`).
     void set_max_fragment_length(int32_t L) {
         if (L < 0) throw std::invalid_argument(
             "set_max_fragment_length: must be >= 0, got " + std::to_string(L));
@@ -675,14 +661,13 @@ public:
     // SPLICED_IMPLICIT detection
     // ----------------------------------------------------------------
 
-    /// Set the intron-overhang tolerance K (bp): how many bases an alignment may run into an annotated
-    /// intron, and an annotated intron overhang a mate gap, and still be read as spliced there. It is the
-    /// slack in both tests of the gap-hypothesis enumeration, which every non-chimeric fragment with an
-    /// unsequenced gap goes through: an annotated intron in a gap may overlap up to K aligned bases on
-    /// either side and is still cut whole (`collect_transcript_introns_in_gap`), and a transcript is
-    /// contradicted only by an intron overlapping more than K bases of an aligned block
-    /// (`transcript_contradicts_blocks`). Negative K is clamped to 0; the resolver's own default, before
-    /// this is called, is 0.
+    /// Set the intron-overhang tolerance K (bp): how many bases an alignment may run into an annotated intron, and an
+    /// annotated intron overhang a mate gap, and still be read as spliced there. It is the slack in both tests of the
+    /// gap-hypothesis enumeration, which every fragment with an unsequenced gap goes through: an annotated intron in a
+    /// gap may overlap up to K aligned bases on either side and is still cut whole
+    /// (`collect_transcript_introns_in_gap`), and a transcript is contradicted only by an intron overlapping more than
+    /// K bases of an aligned block (`transcript_contradicts_blocks`). Negative K is clamped to 0; the resolver's own
+    /// default, before this is called, is 0.
     void set_intron_overhang_tolerance(int32_t K) {
         if (K < 0) K = 0;
         intron_overhang_tolerance_ = K;
@@ -1196,15 +1181,6 @@ public:
 
         cr.genomic_footprint = genomic_footprint;
 
-        // --- Interchromosomal chimera detection ---
-        cr.chimera_type = CHIMERA_NONE;
-        scratch.tmp_a.clear();
-        scratch.tmp_a.reserve(static_cast<size_t>(n_exons));
-        for (const auto& e : exons) scratch.tmp_a.push_back(e.ref_id);
-        sort_unique(scratch.tmp_a);
-        bool is_interchromosomal = (scratch.tmp_a.size() > 1);
-        if (is_interchromosomal) cr.chimera_type = CHIMERA_TRANS;
-
         // --- Query each exon block ---
         int n_introns = static_cast<int>(introns.size());
         auto& exon_t_sets = scratch.exon_t_sets;
@@ -1276,11 +1252,6 @@ public:
             sort_unique(block_transcript_t);
         }
 
-        // --- Intrachromosomal chimera detection ---
-        if (!is_interchromosomal) {
-            cr.chimera_type = detect_chimera(exons, exon_t_sets, max_fragment_length_);
-        }
-
         // --- Derive nRNA candidates from real-tx hits ---------------
         // Synthetic nRNAs are intentionally absent from the cgranges
         // index (see _gen_transcript_intervals).  Each real-tx hit
@@ -1288,9 +1259,7 @@ public:
         // nrna_parent_; collect the unique parents the fragment
         // overlaps, accumulate fragment-bp inside each parent's span,
         // and inject them into every per-block exon_t_set so that
-        // merge_sets() naturally picks them up.  Run AFTER chimera
-        // detection (nRNAs would otherwise mask cis-chimeras since
-        // they cover both blocks by construction).
+        // merge_sets() naturally picks them up.
         if (!nrna_parent_.empty()) {
             auto add_nrna = [&](int32_t ti) {
                 if (ti < 0 ||
@@ -1475,17 +1444,7 @@ public:
         //
         // ⛔ THE ACCUMULATOR ARBITRATES. This only enumerates; whether the fragment deposits or is held
         // for the second pass is decided where the outcome is reported.
-        //
-        // ⚠ `chimera_type == CHIMERA_NONE` is KEPT: a chimeric fragment's blocks are not one molecule, so
-        // its gaps are not introns. Such a fragment gets the unspliced hypothesis alone, and no length.
-        if (cr.chimera_type == CHIMERA_NONE) {
-            enumerate_gap_hypotheses(exons, introns, cr.t_inds,
-                                     cr.splice_type == SPLICE_SPLICED_ANNOT, scratch, cr);
-        } else {
-            cr.gap_introns.clear();
-            cr.gap_sj_strand.assign(1, STRAND_NONE);
-            cr.gap_intron_offsets.assign(2, 0);
-        }
+        enumerate_gap_hypotheses(exons, introns, cr.t_inds, cr.splice_type == SPLICE_SPLICED_ANNOT, scratch, cr);
 
         // ⛔ THE SPLICE_IMPLICIT PROMOTION IS UNSPLICED-ONLY.
         // `splice_type` is the scanner's census of what it SAW; it feeds scoring, the buffer, the strand

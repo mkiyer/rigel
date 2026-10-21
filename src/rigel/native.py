@@ -39,7 +39,6 @@ from ._scoring_impl import FRAG_UNAMBIG
 from ._scoring_impl import FRAG_AMBIG_SAME_STRAND
 from ._scoring_impl import FRAG_AMBIG_OPP_STRAND
 from ._scoring_impl import FRAG_MULTIMAPPER
-from ._scoring_impl import FRAG_CHIMERIC
 
 # -- EM solver --------------------------------------------------------------
 from ._em_impl import batch_locus_em_partitioned
@@ -97,7 +96,6 @@ __all__ = [
     "FRAG_AMBIG_SAME_STRAND",
     "FRAG_AMBIG_OPP_STRAND",
     "FRAG_MULTIMAPPER",
-    "FRAG_CHIMERIC",
     # EM
     "batch_locus_em_partitioned",
     "connected_components",

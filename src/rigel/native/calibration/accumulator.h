@@ -621,7 +621,7 @@ private:
 //
 /// ONE alignment of a fragment on ONE reference, with every explanation of its unsequenced gaps — what the
 /// scanner offers per hit. A uniquely mapped fragment offers one; a multimapping fragment one per
-/// non-chimeric hit.
+/// resolved hit.
 struct Placement {
     std::int32_t    ref_id;
     OfferedFragment offered;

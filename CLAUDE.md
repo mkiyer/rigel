@@ -154,8 +154,9 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 python scripts/design/preflight.py --full       # every instrument that has a --self-test runs it
 ```
 
-**The standing baseline: 0 failed / 3,112 passed / 0 skipped / 0 xfail, 3,112 collected** — re-derived
-2026-10-20 on the worktree adding the overrun rule (four gates added; 3,108 after withholding chimeric alignments, nine
+**The standing baseline: 0 failed / 3,093 passed / 0 skipped / 0 xfail, 3,093 collected** — re-derived
+2026-10-20 on the worktree deleting the resolver's chimera call (its twenty gates deleted, one added; 3,112 after the
+overrun rule, four gates added; 3,108 after withholding chimeric alignments, nine
 gates added and three deleted with the gluing of a supplementary record's pieces; 3,102 after counting the record tags
 and widening `num_hits`, 3,096 after dropping hits
 off the index, 3,092 after the one length rule, 3,087 after deleting `SPLICED_UNANNOT`, 3,091 after the search, HI

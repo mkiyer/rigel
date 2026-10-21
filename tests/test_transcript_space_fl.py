@@ -151,17 +151,15 @@ def short_intron_index(tmp_path_factory):
 
 
 @contextlib.contextmanager
-def _tuned(index, K, max_frag=0):
-    """The index's resolver with intron-overhang tolerance ``K`` and maximum fragment length ``max_frag``,
-    restored to the session fixtures' defaults (both 0) on exit."""
+def _tuned(index, K):
+    """The index's resolver with intron-overhang tolerance ``K``, restored to the session fixtures' default (0)
+    on exit."""
     resolver = index.resolver
     resolver.set_intron_overhang_tolerance(K)
-    resolver.set_max_fragment_length(max_frag)
     try:
         yield
     finally:
         resolver.set_intron_overhang_tolerance(0)
-        resolver.set_max_fragment_length(0)
 
 
 # =====================================================================
@@ -210,7 +208,7 @@ class TestOneLengthRule:
     )
     def test_one_molecule_has_one_length(self, short_intron_index, blocks, on_t2, on_nascent):
         frag = make_fragment(exons=tuple(_exon("chr1", s, e) for s, e in blocks))
-        with _tuned(short_intron_index, K=3, max_frag=1000):
+        with _tuned(short_intron_index, K=3):
             result = resolve_fragment(frag, short_intron_index)
         assert result is not None
         assert _get_fl(result, short_intron_index, "T2") == on_t2
@@ -897,8 +895,7 @@ _MAX_MATE = 250
 _REACH = 5
 #: The bases a spliced mate aligns on each side of its junction.
 _ANCHORS = (1, 2, 3, 4, 5, 20, 75)
-#: The resolver's maximum fragment length while enumerating, so that a fragment joining the two genes of
-#: ``short_intron_index`` is an ordinary molecule rather than a chimera.
+#: The accumulator's maximum fragment length.
 _MAX_FRAG = 1000
 
 
@@ -965,14 +962,12 @@ def _fragments(index, seed):
 
 
 def _resolve_blocks(index, blocks, observed):
-    """The fragment with these blocks and observed junctions, resolved; ``None`` when it has no lengths (no
-    result, or a chimera)."""
+    """The fragment with these blocks and observed junctions, resolved; ``None`` when there is no result."""
     frag = make_fragment(
         exons=tuple(_exon("chr1", s, e) for s, e in blocks),
         introns=tuple(GenomicInterval("chr1", a, b, Strand.POS) for a, b in observed),
     )
-    result = resolve_fragment(frag, index)
-    return None if result is None or result.chimera_type else result
+    return resolve_fragment(frag, index)
 
 
 def _gaps(blocks, observed):
@@ -1023,7 +1018,7 @@ class TestLengthRuleByEnumeration:
         for name in _ENUMERATED:
             index = request.getfixturevalue(name)
             exons = _all_exons(index)
-            with _tuned(index, K, _MAX_FRAG):
+            with _tuned(index, K):
                 for blocks, observed in _fragments(index, seed=0):
                     result = _resolve_blocks(index, blocks, observed)
                     if result is None:
@@ -1072,7 +1067,7 @@ class TestLengthRuleByEnumeration:
                 max_length=_MAX_FRAG,
                 ref=0,
             )
-            with _tuned(index, K, _MAX_FRAG):
+            with _tuned(index, K):
                 for blocks, observed in _fragments(index, seed=1):
                     result = _resolve_blocks(index, blocks, observed)
                     if result is None:

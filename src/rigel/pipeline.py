@@ -337,15 +337,14 @@ def scan_and_buffer(
 
     # Intron-overhang tolerance K (bp): how many bases an alignment may run into an annotated intron,
     # and an annotated intron overhang a mate gap, and still be read as spliced there. The resolver
-    # applies it when it enumerates a non-chimeric fragment's gap hypotheses: a candidate transcript
+    # applies it when it enumerates a fragment's gap hypotheses: a candidate transcript
     # is excluded as contradicting the alignment only when one of its introns overlaps an aligned
     # block by more than K, and an annotated intron is placed in an unsequenced gap when it overlaps
     # the gap and lies within it widened by K at each end. The calibration accumulator arbitrates
     # those hypotheses and deposits the survivor, so K changes calibration's tally (the scan-cache
     # key includes it), and it decides which unspliced fragments are relabelled SPLICED_IMPLICIT.
     resolve_ctx.set_intron_overhang_tolerance(int(scan.intron_overhang_tolerance))
-    # `detect_chimera` needs the library's fragment-length limit to tell an ordinary genomic
-    # molecule (contiguous, spanning whatever transcripts lie under it) from a real rearrangement.
+    # The pair rule's fragment-length limit: no pair whose molecule is longer is one.
     resolve_ctx.set_max_fragment_length(int(scan.max_frag_length))
 
     # Create the native scanner

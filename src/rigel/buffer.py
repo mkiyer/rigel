@@ -36,7 +36,6 @@ from .config import CONSTANTS, BamScanConfig
 from .native import (
     FRAG_AMBIG_OPP_STRAND,
     FRAG_AMBIG_SAME_STRAND,
-    FRAG_CHIMERIC,
     FRAG_MULTIMAPPER,
     FRAG_UNAMBIG,
 )
@@ -77,7 +76,6 @@ class _FinalizedChunk:
     splice_type: np.ndarray  # uint8[N]
     align_strand: np.ndarray  # uint8[N]
     num_hits: np.ndarray  # int32[N]
-    chimera_type: np.ndarray  # uint8[N]
     t_offsets: np.ndarray  # int32[N+1]
     t_indices: np.ndarray  # int32[M_t]
     frag_lengths: np.ndarray  # int32[M_t]  (parallel to t_indices, -1 = missing)
@@ -100,7 +98,6 @@ class _FinalizedChunk:
             splice_type=raw["splice_type"],
             align_strand=raw["align_strand"],
             num_hits=raw["num_hits"],
-            chimera_type=raw["chimera_type"],
             t_offsets=raw["t_offsets"],
             t_indices=raw["t_indices"],
             frag_lengths=raw["frag_lengths"],
@@ -123,7 +120,6 @@ class _FinalizedChunk:
                 self.splice_type,
                 self.align_strand,
                 self.num_hits,
-                self.chimera_type,
                 self.t_offsets,
                 self.t_indices,
                 self.frag_lengths,
@@ -148,7 +144,6 @@ class _FinalizedChunk:
             ``FRAG_AMBIG_SAME_STRAND``: same-strand, >1 transcript, NH=1.
             ``FRAG_AMBIG_OPP_STRAND``: ambig-strand transcripts, NH=1.
             ``FRAG_MULTIMAPPER``: NH > 1.
-            ``FRAG_CHIMERIC``: chimeric fragment.
         """
         if self._fragment_classes is not None:
             return self._fragment_classes
@@ -162,8 +157,6 @@ class _FinalizedChunk:
         classes[(self.ambig_strand > 0) & (self.num_hits == 1)] = FRAG_AMBIG_OPP_STRAND
         # Multimapper → always FRAG_MULTIMAPPER (highest priority)
         classes[self.num_hits > 1] = FRAG_MULTIMAPPER
-        # Chimeric → highest priority (overrides all others)
-        classes[self.chimera_type > 0] = FRAG_CHIMERIC
         object.__setattr__(self, "_fragment_classes", classes)
         return classes
 
@@ -219,7 +212,6 @@ def _spill_chunk(chunk: _FinalizedChunk, path: Path) -> None:
             "splice_type": chunk.splice_type,
             "align_strand": chunk.align_strand,
             "num_hits": chunk.num_hits,
-            "chimera_type": chunk.chimera_type,
             "t_inds": t_list,
             "frag_lengths": frag_lengths_list,
             "exon_bp": exon_bp_list,
@@ -256,7 +248,6 @@ def _load_chunk(path: Path) -> _FinalizedChunk:
         splice_type=table.column("splice_type").to_numpy().copy(),
         align_strand=table.column("align_strand").to_numpy().copy(),
         num_hits=table.column("num_hits").to_numpy().copy(),
-        chimera_type=table.column("chimera_type").to_numpy().copy(),
         t_offsets=t_offsets,
         t_indices=t_indices,
         frag_lengths=frag_lengths_arr,

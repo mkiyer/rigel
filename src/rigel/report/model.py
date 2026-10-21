@@ -212,19 +212,12 @@ def _fragments(summary: SummaryReader) -> dict:
     total = f["total"]
     genic = f["genic"]
     inter = f["intergenic"]
-    chim = f["chimeric"]
     sp = summary["fragment_stats.splice"]
     spliced = sum(sp[k] for k in ("spliced_annotated", "spliced_implicit", "splice_artifact"))
 
     ctx = [
         {"label": "Genic", "value": genic, "cls": _C[1]},
         {"label": "Intergenic", "value": inter, "cls": _C[3]},
-        {"label": "Chimeric", "value": chim, "cls": _C[6]},
-    ]
-    chim_bar = [
-        {"label": "Cis, same strand", "value": f["chimeric_cis_same"], "cls": _C[2]},
-        {"label": "Trans", "value": f["chimeric_trans"], "cls": _C[5]},
-        {"label": "Cis, opposite strand", "value": f["chimeric_cis_diff"], "cls": _C[6]},
     ]
     splice_bar = [
         {"label": "Unspliced", "value": sp["unspliced"], "cls": "fmuted"},
@@ -236,7 +229,6 @@ def _fragments(summary: SummaryReader) -> dict:
         {"l": "Fragments", "v": total, "fmt": "count"},
         {"l": "Genic", "v": _pct(genic, total), "fmt": "pct"},
         {"l": "Intergenic", "v": _pct(inter, total), "fmt": "pct"},
-        {"l": "Chimeric", "v": _pct(chim, total), "fmt": "pct"},
         {"l": "Spliced", "v": spliced, "fmt": "count"},
     ]
     # Blacklist provenance so a 0-artifact bar can be read correctly:
@@ -245,7 +237,6 @@ def _fragments(summary: SummaryReader) -> dict:
     return {
         "kpis": kpis,
         "ctx": ctx,
-        "chim": chim_bar,
         "splice": splice_bar,
         "blacklisted": sp["sj_blacklisted"],
         "blacklist": {"size": sp["sj_blacklist_size"], "loaded": sp["sj_blacklist_loaded"]},

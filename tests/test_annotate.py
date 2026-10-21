@@ -20,8 +20,6 @@ from rigel.annotate import (
     AnnotationTable,
     AF_ANNOTATED,
     AF_ANNOTATED_BIT,
-    AF_CHIMERIC,
-    AF_CHIMERIC_BIT,
     AF_GDNA_BIT,
     AF_GDNA_EM,
     AF_GDNA_INTERGENIC,
@@ -44,13 +42,13 @@ VALID_ZF_VALUES = {
     AF_NASCENT,
     AF_GDNA_EM,
     AF_GDNA_INTERGENIC,
-    AF_CHIMERIC,
     AF_MULTIMAPPER_DROP,
 }
 
-#: Bit 3, retired: it marked a single-exon winner (0x09) or a synthetic span's (0x19) under the earlier
-#: layout, so a value carrying it can only be read with that layout's meaning.
-RETIRED_BIT = 0x08
+#: Bits 3 and 6, retired: bit 3 marked a single-exon winner (0x09) or a synthetic span's (0x19) under an
+#: earlier layout, and bit 6 the resolver's chimera call (0x40), deleted; a value carrying either can only
+#: be read with that layout's meaning.
+RETIRED_BITS = 0x08 | 0x40
 
 #: Every bit the table names; a ZF value carries no other.
 NAMED_BITS = (
@@ -59,28 +57,23 @@ NAMED_BITS = (
     | AF_GDNA_BIT
     | AF_NASCENT_BIT
     | AF_INTERGENIC_BIT
-    | AF_CHIMERIC_BIT
     | AF_MULTIMAPPER_DROP_BIT
 )
 
 
 def _assert_zf_invariants(zf: int) -> None:
-    """Assert the five ZF invariants `rigel.annotate` states, and that no bit outside its table is set."""
+    """Assert the four ZF invariants `rigel.annotate` states, and that no bit outside its table is set."""
     is_resolved = bool(zf & AF_RESOLVED)
     is_annotated = bool(zf & AF_ANNOTATED_BIT)
     is_gdna = bool(zf & AF_GDNA_BIT)
     is_nascent = bool(zf & AF_NASCENT_BIT)
     is_interg = bool(zf & AF_INTERGENIC_BIT)
-    is_chim = bool(zf & AF_CHIMERIC_BIT)
     is_mm_drop = bool(zf & AF_MULTIMAPPER_DROP_BIT)
     n_kind = int(is_annotated) + int(is_gdna) + int(is_nascent)
 
-    # 1: resolved XOR (chimeric OR mm_dropped) — every stamped record is
-    #    exactly one or the other (unresolved sentinel ZF=0 also
-    #    satisfies this: neither side is set).
-    assert not (is_resolved and (is_chim or is_mm_drop)), (
-        f"ZF={zf:#x}: resolved AND dropped bits both set"
-    )
+    # 1: resolved XOR mm_dropped — every stamped record is exactly one or the other (the unresolved
+    #    sentinel ZF=0 also satisfies this: neither side is set).
+    assert not (is_resolved and is_mm_drop), f"ZF={zf:#x}: resolved AND dropped bits both set"
     # 2: a winner-kind bit only when resolved, and then exactly one, or none for RNA no annotated
     #    transcript holds (spliced intergenic)
     if is_resolved:
@@ -94,10 +87,8 @@ def _assert_zf_invariants(zf: int) -> None:
         assert is_resolved and not (is_annotated or is_nascent), (
             f"ZF={zf:#x}: is_intergenic misplaced"
         )
-    # 4: chimeric and mm_dropped mutually exclusive
-    assert not (is_chim and is_mm_drop), f"ZF={zf:#x}: chimeric AND mm_dropped both set"
-    # 5: the retired bit is never set, nor any bit the table does not name
-    assert not zf & RETIRED_BIT, f"ZF={zf:#x}: the retired bit 0x08 is set"
+    # 4: the retired bits are never set, nor any bit the table does not name
+    assert not zf & RETIRED_BITS, f"ZF={zf:#x}: a retired bit (0x08, 0x40) is set"
     assert not zf & ~NAMED_BITS, f"ZF={zf:#x}: a bit outside the table is set"
 
 
@@ -154,16 +145,15 @@ class TestAnnotationTable:
         np.testing.assert_array_equal(tbl.best_tid[: tbl.size], np.arange(10))
 
     def test_zf_canonical_values(self):
-        """All canonical ZF values satisfy the invariants, and none reuses the retired bit 0x08."""
+        """All canonical ZF values satisfy the invariants, and none reuses a retired bit (0x08, 0x40)."""
         # Documented composed values
         assert AF_UNRESOLVED == 0x00
         assert AF_ANNOTATED == 0x03
         assert AF_NASCENT == 0x11
         assert AF_GDNA_EM == 0x05
         assert AF_GDNA_INTERGENIC == 0x25
-        assert AF_CHIMERIC == 0x40
         assert AF_MULTIMAPPER_DROP == 0x80
-        # All canonical values satisfy the invariants, which include the retired bit's absence
+        # All canonical values satisfy the invariants, which include the retired bits' absence
         for v in VALID_ZF_VALUES:
             _assert_zf_invariants(v)
         # Resolved-ness is coherent
@@ -171,7 +161,6 @@ class TestAnnotationTable:
         assert AF_NASCENT & AF_RESOLVED
         assert AF_GDNA_EM & AF_RESOLVED
         assert AF_GDNA_INTERGENIC & AF_RESOLVED
-        assert not (AF_CHIMERIC & AF_RESOLVED)
         assert not (AF_MULTIMAPPER_DROP & AF_RESOLVED)
 
     def test_a_transcript_win_is_annotated_or_nascent(self):
@@ -790,9 +779,8 @@ class TestAnnotatedBamIntegration:
     # =================================================================
 
     def test_zf_invariants_and_zc_domain_hold_over_fixture(self, scenario, tmp_path):
-        """Every annotated record satisfies the ZF invariants, and ZC is
-        restricted to the new input-ambiguity enum (no ``intergenic`` /
-        ``chimeric`` strings in ZC).
+        """Every annotated record satisfies the ZF invariants, and ZC is the input-ambiguity class or,
+        on a template withheld with no usable alignment (ZF 0), its reason; never ``intergenic``.
         """
         import pysam
         from rigel.sim import ReadSimConfig
@@ -822,6 +810,7 @@ class TestAnnotatedBamIntegration:
         )
 
         allowed_zc = {"unambig", "ambig_same_strand", "ambig_opp_strand", "multimapper", "."}
+        withheld_zc = {"unpaired", "unannotated_splice", "off_index", "chimeric"}
 
         with pysam.AlignmentFile(str(annotated_bam), "rb") as fout:
             for rec in fout.fetch(until_eof=True):
@@ -831,9 +820,10 @@ class TestAnnotatedBamIntegration:
                 assert zf in VALID_ZF_VALUES, f"Unexpected ZF={zf:#x} on {rec.query_name}"
                 _assert_zf_invariants(zf)
                 zc = rec.get_tag("ZC")
-                assert zc in allowed_zc, f"ZC={zc!r} not in redesign enum on {rec.query_name}"
-                # ZC retains no legacy terminal-outcome strings
-                assert zc not in ("intergenic", "chimeric")
+                assert zc in allowed_zc or (zf == 0 and zc in withheld_zc), (
+                    f"ZC={zc!r} with ZF={zf:#x} on {rec.query_name}"
+                )
+                assert zc != "intergenic", "ZC carries a terminal outcome ZF already states"
 
     @staticmethod
     def _annotate_with_intergenic_sentinel(scenario, tmp_path, *, spliced: bool):

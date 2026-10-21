@@ -52,8 +52,10 @@ error +4.33 % shipped and +0.01 % with every efficiency at 1, the giant componen
 transcript error +0.86 % shipped and −0.09 % at 1; then chimeric alignments withheld (2026-10-20, `DESIGN.md` §1.1),
 which quantifies 0.8–1.4 k fewer templates per 10 M: transcript / gene error +2.40 / +4.54 % unstranded capture-OFF
 (g50 κ0.50 +5.77 / +9.60 %), +2.37 / +3.12 % stranded capture-OFF, −0.38 / +1.03 % stranded capture-ON shipped, and
-+0.22 / +0.73, +0.18 / +0.93, +0.14 / +0.15 % at 1. So a scan change is judged with the efficiencies at 1 beside the
-shipped run until this is fixed.
++0.22 / +0.73, +0.18 / +0.93, +0.14 / +0.15 % at 1; then the resolver's chimera call deleted (2026-10-20), which
+returns 12 multimapping hits of g50 κ0.99 capture-ON's 10 M templates to calibration and the EM: its transcript / gene
+error +0.68 / +1.91 % shipped, its true gDNA counted as RNA +80.8 k, and +0.26 / +0.28 % at 1. So a scan change is
+judged with the efficiencies at 1 beside the shipped run until this is fixed.
 The reader reads each object's deconvolved gDNA mass as a point Poisson count, whatever the deconvolution's own
 uncertainty; on the simulator's alignments the efficiencies stay at 1 in every condition here.
 THE PLANNED FIX (2026-10-19), for after the splice-artifact waves (owner: stay on the wave plan; the reader took many
@@ -341,7 +343,7 @@ with a whole intron between them. The owner keeps it in scope there (2026-10-16)
 deciding which cases apply it".
 
 The code applies it more widely (`resolve_context.h:693-696, 797, 807, 813, 846-857`):
-- to every non-chimeric fragment's gap hypotheses, SPLICED_ANNOT included;
+- to every fragment's gap hypotheses, SPLICED_ANNOT included;
 - to `transcript_contradicts_blocks`;
 - to cutting an annotated intron whole when up to K sequenced bases lie inside it. That removes those bases from L, so
   in effect it moves the splice point to the annotation.
@@ -1512,16 +1514,6 @@ so the window needs f < 1.5e-5/√n. That is below the λ lattice's floor, so th
 widened bracket or on a weakly stranded library. How many slots fall in it is unmeasured. The candidate rule is τ > 0
 alone, with `OWN_EPS` kept as the clamp.
 
-### chimera-span-over-exon-blocks-only
-`priority: later (the code-health review, 2026-10-16) · kind: contract · 2026-10-16`
-`detect_chimera` measures the outermost span over exon-touching blocks only (`constants.h:341-347, 405-410`).
-- An outer block lying in an intron or in intergenic space is left out of "outermost start to outermost end".
-- With at most one exon-touching component, the check never runs.
-
-Such a fragment gets gap hypotheses over any distance and can be promoted to SPLICE_IMPLICIT. Only downstream limits
-catch it: L ≤ max_length in the accumulator, and the scorer's tail decay. The owner picks the rule: all blocks, or the
-subset documented. The extent is also computed in four places.
-
 ### the-tail-rule-waits-for-truth
 `priority: later — deferred by the owner until a simulation can give it truth (2026-10-20) · kind: question · 2026-10-20`
 A chimeric alignment whose foreign piece covers only a read's 3′ part, running past its mate's 5′ end, is withheld
@@ -1725,6 +1717,17 @@ invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g
 the ladder retired 2026-08-13 — the verdict stands as a record, and re-opening one means re-running it on the
 current panel. Where a mechanism's only target was unstranded × capture-ON the row is moot as a 0.8.0
 candidate on top of being refused; the `g00` zero-control column is never moot.
+
+### chimera-span-over-exon-blocks-only
+CLOSED 2026-10-20 by the deletion (owner, 2026-10-20): the resolver's chimera call is gone, and with it the span this
+entry questioned. A chimeric alignment is withheld before resolution (`DESIGN.md` §1.1) and a usable hit is one
+molecule by the pair rule, which bounds its length along the genome or along a witness transcript, so the call only
+misfired: it set aside 0 / 0 / 2 / 2 / 12 hits of multimapping templates on the five STAR conditions (no whole
+template), one template on each of cfRNA-A, B and C and 48 on `vcap_mix`, and none on the oracle ladder. Against main
+on the STAR panel, pinned and fractional, with every capture efficiency at 1: transcript / gene error −0.02 / −0.02 %
+unstranded capture-OFF, −0.02 / −0.04 % stranded capture-OFF, +0.26 / +0.28 % stranded capture-ON (g00 and g05
+identical); shipped +0.22 / +0.44, −0.02 / −0.08 and +0.68 / +1.91 %, through the capture reader
+(`ISSUES: the-reader-reads-false-gdna-as-capture`). The pinned scan 3 % faster.
 
 ### star-hi-pairs-against-rigels-own-pairing
 CLOSED 2026-10-19 by the owner's ruling (`DESIGN.md` §1.1): every template is paired by the search, for every aligner,

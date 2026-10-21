@@ -361,7 +361,7 @@ class StrandModel:
 class StrandModels:
     """Container for the single RNA strand model plus one diagnostic sub-model.
 
-    The primary strand model (``exonic_spliced``) is trained from uniquely mapped, non-chimeric
+    The primary strand model (``exonic_spliced``) is trained from uniquely mapped
     SPLICED_ANNOT fragments whose candidate transcripts share one strand and whose alignment and
     SJ strands are each a single strand.  Annotated splice junctions prove RNA origin,
     making this an uncontaminated measure of library strand specificity.
@@ -371,7 +371,7 @@ class StrandModels:
     One additional sub-model is retained **for diagnostics only** and
     is never used for scoring:
 
-    * **exonic** — trained from every unique-mapper, non-chimeric, unambiguous-strand fragment
+    * **exonic** — trained from every unique-mapper, unambiguous-strand fragment
       that RESOLVES TO A TRANSCRIPT, spliced or not. Comparing its specificity to
       ``exonic_spliced`` reveals gDNA contamination (``contamination_gap`` in the CLI summary):
       unspliced genic fragments include gDNA, which is unstranded, so the mixed estimate is

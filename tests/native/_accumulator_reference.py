@@ -218,7 +218,7 @@ class GapResolution(enum.Enum):
 class Placement:
     """ONE alignment of a fragment on ONE reference, with every explanation of its unsequenced gaps.
 
-    A uniquely mapped fragment has exactly one; a multimapping fragment has one per non-chimeric
+    A uniquely mapped fragment has exactly one; a multimapping fragment has one per resolved
     alignment, each on its own reference with its own extent, strands, observed introns and gap
     hypotheses. This is both what the scanner OFFERS (:meth:`Accumulator.offer`) and what a held record
     STORES, clipped to its reference.
@@ -822,7 +822,7 @@ class Accumulator:
 
         A uniquely mapped fragment is the one-placement case and goes through :meth:`deposit` unchanged
         — bit for bit, counters included. A multimapping fragment arrives with one :class:`Placement`
-        per non-chimeric alignment. The rule:
+        per resolved alignment. The rule:
 
         * per placement, the strand check and the clip EXCLUDE that placement alone (a placement with no
           genome strand has no column; one that clips to nothing is not on its reference). If none

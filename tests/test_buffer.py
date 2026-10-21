@@ -80,7 +80,6 @@ _CHUNK_ARRAY_FIELDS = (
     "splice_type",
     "align_strand",
     "num_hits",
-    "chimera_type",
     "t_offsets",
     "t_indices",
     "frag_lengths",
@@ -435,11 +434,10 @@ class TestFragmentClasses:
             "FRAG_AMBIG_SAME_STRAND",
             "FRAG_AMBIG_OPP_STRAND",
             "FRAG_MULTIMAPPER",
-            "FRAG_CHIMERIC",
         )
         native = [getattr(native_scoring, name) for name in names]
         assert [getattr(buffer_mod, name) for name in names] == native
-        assert native == [0, 1, 2, 3, 4]
+        assert native == [0, 1, 2, 3]
 
 
 # =====================================================================

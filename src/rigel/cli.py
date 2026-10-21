@@ -596,12 +596,8 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         },
         "fragment_stats": {
             "total": stats.n_fragments,
-            "genic": stats.n_fragments - stats.n_intergenic - stats.n_chimeric,
+            "genic": stats.n_fragments - stats.n_intergenic,
             "intergenic": stats.n_intergenic,
-            "chimeric": stats.n_chimeric,
-            "chimeric_trans": stats.n_chimeric_trans,
-            "chimeric_cis_same": stats.n_chimeric_cis_strand_same,
-            "chimeric_cis_diff": stats.n_chimeric_cis_strand_diff,
             "with_annotated_sj": stats.n_with_annotated_sj,
             # Templates withheld, with no usable hit, by outcome; the hits dropped, by reason, are below
             "withheld": {

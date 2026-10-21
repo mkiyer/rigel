@@ -450,7 +450,6 @@
     kpis($("align-kpis"), M.alignment.kpis); stackBar($("align-bar"), M.alignment.fate); legend($("align-legend"), M.alignment.fate, true); alignTable();
     kpis($("frag-kpis"), M.fragments.kpis);
     stackBar($("ctx-bar"), M.fragments.ctx); legend($("ctx-legend"), M.fragments.ctx, true);
-    stackBar($("chim-bar"), M.fragments.chim); legend($("chim-legend"), M.fragments.chim, true);
     stackBar($("sj-bar"), M.fragments.splice); legend($("sj-legend"), M.fragments.splice, true);
     if ($("sj-note")) {
       const bl = M.fragments.blacklist || {}, art = (M.fragments.splice.find(s => s.label === "Artifact") || {}).value || 0;

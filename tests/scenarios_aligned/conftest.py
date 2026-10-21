@@ -118,13 +118,7 @@ def assert_accountability(bench, tolerance=5):
     n_gated_out = sd.get("n_gated_out", 0)
     # n_synthetic_observed already includes nRNA counts (synthetic transcripts),
     # so we don't add n_nrna_pipeline separately.
-    total = (
-        bench.total_observed
-        + bench.n_synthetic_observed
-        + bench.n_gdna_pipeline
-        + bench.n_chimeric
-        + n_gated_out
-    )
+    total = bench.total_observed + bench.n_synthetic_observed + bench.n_gdna_pipeline + n_gated_out
     gap = abs(total - bench.n_fragments)
     assert gap <= tolerance, (
         f"Accountability gap: {gap:.0f} (total={total:.0f}, n_fragments={bench.n_fragments})"

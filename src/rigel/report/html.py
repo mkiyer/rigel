@@ -99,8 +99,6 @@ _SECTIONS = """
           <div>
             <p class="cap">Genomic context</p>
             <div class="stackbar" id="ctx-bar"></div><div class="legend" id="ctx-legend"></div>
-            <p class="cap" style="margin-top:22px">Chimeric breakdown</p>
-            <div class="stackbar" id="chim-bar"></div><div class="legend" id="chim-legend"></div>
           </div>
           <div>
             <p class="cap">Splice junctions · by class</p>

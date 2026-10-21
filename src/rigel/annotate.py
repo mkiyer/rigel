@@ -14,7 +14,7 @@ assignment decision for each fragment:
 - ``best_gid`` — gene index (-1 = intergenic / unassigned)
 - ``tx_flags`` — ZF outcome bitfield (see ``AF_*`` constants; includes
   is_resolved, is_annotated, is_gdna, is_nascent, is_intergenic,
-  is_chimeric, is_multimapper_dropped)
+  is_multimapper_dropped)
 - ``posterior``— posterior probability of the winning assignment
 - ``frag_class`` — fragment class (unambig / ambig_same_strand / …)
 - ``n_candidates`` — number of competing EM candidates
@@ -58,7 +58,7 @@ BAM Tag Schema
        bit 4 = is_nascent (a synthetic span, which Rigel adds to model a
        multi-exon transcript's unspliced RNA); bit 3 is retired and never set;
        bit 5 = is_intergenic (no transcript holds the fragment, which is
-       unspliced: always with is_gdna), bit 6 = is_chimeric,
+       unspliced: always with is_gdna); bit 6 is retired and never set;
        bit 7 = is_multimapper_dropped.  See ``AF_*`` constants for canonical values.
    * - ZW
      - f
@@ -120,21 +120,21 @@ logger = logging.getLogger(__name__)
 #   bit 5 (0x20)  is_intergenic           no transcript holds it (deterministic fast-path): gDNA when
 #                                         unspliced; when spliced, RNA no annotated transcript holds
 #                                         (certified by its junction), with no winner-kind bit
-#   bit 6 (0x40)  is_chimeric             unresolved reason: chimeric
+#   bit 6 (0x40)  retired                 never set: it marked the resolver's chimera call, deleted when a
+#                                         chimeric alignment came to be withheld before resolution
 #   bit 7 (0x80)  is_multimapper_dropped  unresolved reason: --no-include-multimap drop
 #
 # Bits 1, 2 and 4 are the winner-kind bits: they record which kind of candidate won, named for the
 # category the output tables report it under.
 #
 # Invariants (tests/test_annotate.py holds every canonical value and every stamped record to them):
-#   1. is_resolved and (is_chimeric | is_multimapper_dropped) are never both set; ZF = 0, the
-#      unresolved sentinel, sets neither
+#   1. is_resolved and is_multimapper_dropped are never both set; ZF = 0, the unresolved sentinel, sets
+#      neither
 #   2. A winner-kind bit {is_annotated, is_gdna, is_nascent} is set only with is_resolved, and then
 #      exactly one is, except a spliced intergenic fragment (RNA no annotated transcript holds),
 #      which sets none
 #   3. is_intergenic -> is_resolved, never with is_annotated or is_nascent
-#   4. is_chimeric and is_multimapper_dropped are mutually exclusive
-#   5. bit 3 (0x08) is never set
+#   4. bits 3 (0x08) and 6 (0x40) are never set
 # ---------------------------------------------------------------------------
 
 # Primitive bits
@@ -143,7 +143,6 @@ AF_ANNOTATED_BIT: int = 0x02
 AF_GDNA_BIT: int = 0x04
 AF_NASCENT_BIT: int = 0x10
 AF_INTERGENIC_BIT: int = 0x20
-AF_CHIMERIC_BIT: int = 0x40
 AF_MULTIMAPPER_DROP_BIT: int = 0x80
 
 # Canonical composed values (the only legitimate ZF outputs).
@@ -152,7 +151,6 @@ AF_ANNOTATED: int = AF_RESOLVED | AF_ANNOTATED_BIT  # 0x03
 AF_NASCENT: int = AF_RESOLVED | AF_NASCENT_BIT  # 0x11
 AF_GDNA_EM: int = AF_RESOLVED | AF_GDNA_BIT  # 0x05
 AF_GDNA_INTERGENIC: int = AF_GDNA_EM | AF_INTERGENIC_BIT  # 0x25
-AF_CHIMERIC: int = AF_CHIMERIC_BIT  # 0x40
 AF_MULTIMAPPER_DROP: int = AF_MULTIMAPPER_DROP_BIT  # 0x80
 
 

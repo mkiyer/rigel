@@ -56,10 +56,6 @@ SUMMARY_KEYS: dict[str, dict] = {
         "total": 0,
         "genic": 0,
         "intergenic": 0,
-        "chimeric": 0,
-        "chimeric_trans": 0,
-        "chimeric_cis_same": 0,
-        "chimeric_cis_diff": 0,
     },
     "fragment_stats.splice": {
         "unspliced": 0,

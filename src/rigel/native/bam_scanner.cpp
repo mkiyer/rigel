@@ -150,10 +150,8 @@ static const char* frag_class_label(int code) {
         case FRAG_AMBIG_SAME_STRAND: return "ambig_same_strand";
         case FRAG_AMBIG_OPP_STRAND:  return "ambig_opp_strand";
         case FRAG_MULTIMAPPER:       return "multimapper";
-        // Chimeric / intergenic fragments never entered EM; ZC reports the
-        // *input-ambiguity* axis only and is blanked for these cases.  The
-        // outcome is carried entirely by ZF (AF_CHIMERIC / AF_GDNA_INTERGENIC).
-        case FRAG_CHIMERIC:          return ".";
+        // An intergenic fragment never entered the EM; ZC reports the *input-ambiguity* axis only and is
+        // blanked for it. The outcome is carried entirely by ZF (AF_GDNA_INTERGENIC).
         case -1:                     return ".";
         default:                     return "unknown";
     }
@@ -346,8 +344,8 @@ struct StrandContingency {
 };
 
 struct StrandObservations {
-    // exonic: the 2×2 of (align_strand, transcript_strand) over unique-mapper, non-chimeric fragments
-    // whose candidate transcripts share one strand
+    // exonic: the 2×2 of (align_strand, transcript_strand) over unique-mapper fragments whose candidate
+    // transcripts share one strand
     StrandContingency exonic;
 
     // ⭐ The per-sj strand table.
@@ -386,10 +384,6 @@ struct BamScanStats {
 
     // Resolution-level
     int64_t n_fragments = 0;
-    int64_t n_chimeric = 0;
-    int64_t n_chimeric_trans = 0;
-    int64_t n_chimeric_cis_strand_same = 0;
-    int64_t n_chimeric_cis_strand_diff = 0;
     int64_t n_intergenic = 0;  // templates no hit of which resolves: unspliced, gDNA by construction
     int64_t n_with_exon = 0;
     int64_t n_with_annotated_sj = 0;
@@ -466,10 +460,6 @@ struct BamScanStats {
         improper_pair += o.improper_pair;
         mate_unmapped += o.mate_unmapped;
         n_fragments += o.n_fragments;
-        n_chimeric += o.n_chimeric;
-        n_chimeric_trans += o.n_chimeric_trans;
-        n_chimeric_cis_strand_same += o.n_chimeric_cis_strand_same;
-        n_chimeric_cis_strand_diff += o.n_chimeric_cis_strand_diff;
         n_intergenic += o.n_intergenic;
         n_with_exon += o.n_with_exon;
         n_with_annotated_sj += o.n_with_annotated_sj;
@@ -543,7 +533,7 @@ struct WorkerState {
     // fragment's introns restricted to the reference of the hit being collected and de-duplicated, which is
     // what `OfferedFragment::observed_introns` points at.
 
-    // ⭐ ONE OFFER PER FRAGMENT. Every non-chimeric hit of a fragment is collected as a placement — its
+    // ⭐ ONE OFFER PER FRAGMENT. Every resolved hit of a fragment is collected as a placement — its
     // observed introns and its gap hypotheses' implied introns COPIED into these arenas, because the
     // resolver's result dies with the hit — and after the last hit the whole set is offered to the
     // accumulator set at once (`AccumulatorSet::offer`), which is `deposit` for a unique mapper and the
@@ -1936,14 +1926,7 @@ private:
         // For multimappers: count intergenic only if NO hit resolves,
         // and count it exactly once (not per-hit).
         bool any_hit_resolved = false;
-        bool any_non_chimeric_resolved = false;
         bool any_unresolved = false;
-
-        // Track chimera per-fragment (not per-hit).
-        // A fragment is chimeric only if it resolves but ALL
-        // resolved hits are chimeric.
-        bool any_hit_chimeric = false;
-        int32_t worst_chimera_type = CHIMERA_NONE;
 
         // Count ONE fragment per physical molecule, not per hit.
         stats.n_fragments++;
@@ -2005,18 +1988,8 @@ private:
             result.num_hits = num_hits;
             result.nm = frag.nm;
 
-            if (result.get_is_chimeric()) {
-                any_hit_chimeric = true;
-                if (result.chimera_type > worst_chimera_type)
-                    worst_chimera_type = result.chimera_type;
-                accumulator.append(result, frag_id);
-                continue;
-            }
-
-            any_non_chimeric_resolved = true;
-
             // For multimappers, count exon/splice/strand stats only
-            // on the first resolved non-chimeric hit to avoid inflation.
+            // on the first resolved hit to avoid inflation.
             bool count_stats = is_unique_mapper || (n_buffered_mm == 0);
 
             if (count_stats) {
@@ -2075,7 +2048,7 @@ private:
 
             }
 
-            // Every resolved non-chimeric hit is a placement for calibration; the fragment is offered
+            // Every resolved hit is a placement for calibration; the fragment is offered
             // whole after its last hit (`offer_placements`).
             collect_placement(frag, cr);
 
@@ -2088,19 +2061,6 @@ private:
 
         // ⭐ THE OFFER: one per fragment, every placement at once.
         offer_placements();
-
-        // Chimera counting: per-fragment, not per-hit.
-        // A fragment is chimeric only if it resolves but every
-        // resolved hit is chimeric (no non-chimeric alternative).
-        if (any_hit_chimeric && !any_non_chimeric_resolved) {
-            stats.n_chimeric++;
-            if (worst_chimera_type == CHIMERA_TRANS)
-                stats.n_chimeric_trans++;
-            else if (worst_chimera_type == CHIMERA_CIS_STRAND_SAME)
-                stats.n_chimeric_cis_strand_same++;
-            else if (worst_chimera_type == CHIMERA_CIS_STRAND_DIFF)
-                stats.n_chimeric_cis_strand_diff++;
-        }
 
         // Intergenic counting: only if NO hit resolved to transcripts.
         // For a multimapper, if any hit resolves, the fragment goes
@@ -2136,10 +2096,6 @@ private:
         stats_dict["improper_pair"] = stats_.improper_pair;
         stats_dict["mate_unmapped"] = stats_.mate_unmapped;
         stats_dict["n_fragments"] = stats_.n_fragments;
-        stats_dict["n_chimeric"] = stats_.n_chimeric;
-        stats_dict["n_chimeric_trans"] = stats_.n_chimeric_trans;
-        stats_dict["n_chimeric_cis_strand_same"] = stats_.n_chimeric_cis_strand_same;
-        stats_dict["n_chimeric_cis_strand_diff"] = stats_.n_chimeric_cis_strand_diff;
         stats_dict["n_intergenic"] = stats_.n_intergenic;
         stats_dict["n_with_exon"] = stats_.n_with_exon;
         stats_dict["n_with_annotated_sj"] = stats_.n_with_annotated_sj;

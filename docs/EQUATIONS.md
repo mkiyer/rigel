@@ -80,7 +80,7 @@ are already exon endpoints. Boundaries always run `src < dst`, so genomic order 
 there is no graph traversal anywhere.
 
 **1.8 The offer — one fragment, several placements** (`AccumulatorSet::offer`; the specification
-`Accumulator.offer`). A fragment arrives with one PLACEMENT per non-chimeric alignment, each on one
+`Accumulator.offer`). A fragment arrives with one PLACEMENT per resolved alignment, each on one
 reference with its own extent, strands, observed introns and gap hypotheses; its candidate set is the union
 `C = {(p, h) : p a placement, h ∈ H_p}` and the molecule took exactly one element of it. One placement is
 `deposit` unchanged. Otherwise the strand check and the clip exclude a placement alone (none left rejects
