@@ -234,6 +234,11 @@ python scripts/sim/panel.py report --config $CFG --arms base oracle oracle_ruler
 
 # 4. STAGE A is CLOSED — this block is a REGRESSION check, run it after an accumulator or native change.
 python -m pytest tests/native tests/calibration tests/test_scan_order_independence.py -q     # FIDELITY
+
+# 5. A SCAN CHANGE is decided on the STAR panel (TESTING.md §0d), not on the ladder: pinned and fractional, per
+#    stratum, with every capture efficiency at 1 beside the shipped run while the capture reader amplifies scan
+#    changes; the ladder must stay identical where the change should not touch it. Steps 2(a)-(c) read the cached
+#    scan, so once the scan is final every panel is re-cached (`panel.py cache --force`) before calibration is read.
 ```
 
 Steps 0 and 2(a)–(c) take about 15 minutes on a built panel. Run the set together and record it

@@ -1,0 +1,111 @@
+# Session handoff — 2026-10-21
+
+For the next session. Sandbox: nothing here is authoritative; the state is `ISSUES.md` and `ROADMAP.md`, the rulings
+`DESIGN.md`. Read `CLAUDE.md` first, then this, then `ROADMAP.md`'s "Next" and the entries it names.
+
+## Where things stand
+
+- **The scan's repair is landed and pushed** (the fix order's Phase A, items 1–15, 2026-10-18 → 2026-10-21): every
+  usable hit is one molecule of both mates with a fragment length, paired by the search for every aligner (HI not
+  read); chimeric and off-index alignments withheld; one length rule; each read pair one outcome and each record one
+  status, counted (`summary.json` schema 5, `read_pairs`) and checked against the annotation pass. The record is
+  `ISSUES: the-scanner-builds-fragments-from-one-mate` (closed) and `DESIGN.md` §1.1–§1.2; the commits are
+  `git log 07eba0fc^..f763270c`. What the scan still owes: `ISSUES: multimapper-intergenic-alignments`, the scan half
+  of `ISSUES: splicing-artifacts`, and (0.8.1) `ISSUES: clips-are-walked-along-the-genome-only`.
+- **The suite's standing count is 3,131** (CLAUDE.md); `preflight.py --full` green.
+- **ISSUES.md was re-prioritized** (owner, 2026-10-21): every open entry names its `stage:`, and the OPEN section runs by
+  tier, then in the order the tool runs. Closed in the audit: the one-mate entry and `output-names-are-not-consistent`
+  (landed 1fa1c143 on 2026-10-17, still open by mistake). New: `the-second-pass-corrections`,
+  `the-gdna-term-is-a-mean-over-places`, `clips-are-walked-along-the-genome-only`. Promoted to `now`, because the
+  owner's fix order of 2026-10-18 puts them on the release path: `merge-keeps-least-overhang`,
+  `pruning-uses-three-references`, `mismatch-gate-nan-in-multimapper-gdna`,
+  `the-em-prior-share-excludes-drawn-multimappers` (the 0.8.0 cut of 2026-10-14 had kept its shipped denominator).
+- **The report card was re-run on f763270c** ("Rigel Ladder Accuracy", https://claude.ai/artifact/Cek2wmKtitgbDyfM5gNqyj;
+  generator and receipts in `$RIGEL_RUNS/benchmarks/2026-10-21_card/`). The oracle ladder moved by at most ±0.54 % per
+  condition since 2026-10-14 (transcript error −0.13 / −0.13 / +0.09 % on the three in-scope strata): the simulator's
+  alignments do not exercise the scan's repair, which the STAR panel measures. The card's calibration rows read the
+  panels' scan caches, built 2026-10-16/17, and are unchanged to rounding. On the real VCaP mix the gDNA fraction
+  reads 0.257 against its truth of 0.2518 (0.252 on 2026-10-14): the scan now withholds 214 k of its 18.7 M read pairs
+  (unannotated splice 115 k, chimeric 67 k, unpaired 32 k), which changes what the fraction is a share of; not
+  dissected. The issues page is https://claude.ai/artifact/Ah9RoZaM1sHAHoTXWRseFC.
+- **The docs were refreshed**: the CHANGELOG (schema 5, `read_pairs`, the annotated BAM's statuses, the multimap option),
+  the MANUAL's recommended STAR settings (`--sjdbScore 0 --outFilterMultimapScoreRange 2`) and its stale `NH`
+  wording, `TESTING.md` §0d (the STAR panel), `SUCCESS.md`'s step 5 (a scan change). 94 settled sandbox notes were
+  deleted (`git show f763270c:docs/dev/<name>`); the untracked review evidence is in
+  `$RIGEL_RUNS/archive/docs_dev_untracked_2026-10-21/`.
+- **Worktrees**: ten stale ones under the project's parent directory are the owner's to remove (each already on main;
+  their uncommitted prototype edits are saved in `$RIGEL_RUNS/archive/worktree_patches_2026-10-21/`).
+
+## The frame (owner)
+
+- **Fix in the order the tool runs** (2026-10-18, restated 2026-10-21): index → scan and buffer → accumulator →
+  calibration → after calibration, before the EM → EM → after the EM. A defect upstream confounds every fix downstream;
+  the capture reader has amplified every scan change.
+- **The goal** (2026-10-21): gDNA that aligns as spliced is the main error on real data. The recommended STAR settings
+  report the competing alignments, and the multimapper handling is to weigh them, so that splice artifacts are handled
+  downstream.
+- **The capture reader** is a chronic problem, approached only once the stages before it are resolved.
+- **Each change**: audit and design first for anything nontrivial (a design note in this directory, every claim about
+  the code citing a re-read line, every number measured, the owner's approval); then a failing test on a hand-built
+  case, verified failing on main; the fix alone; each gate broken on purpose and seen to fire; the STAR panel at the
+  recommended settings against truth per stratum, pinned and fractional, with every capture efficiency at 1 beside
+  the shipped run; the oracle ladder for regressions; `rename_identity.py` for a no-op; the suite and
+  `preflight.py --full`; then commit, fast-forward main and push, as for items 1–15. Stage explicit paths only; the
+  repository is public.
+
+## Next, in order (ROADMAP.md's "Next")
+
+1. (owner) the cluster's index manifest, `ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`.
+2. `ISSUES: multimapper-intergenic-alignments`, the scan half: buffer a multimapper's hits that overlap no transcript
+   (the scan's intergenic path appends a unique mapper's alone). On its own it may be a numeric no-op for the EM, whose
+   scorer skips a candidate-less hit, so the scorer's gDNA term for such a hit is its own step; how the group's term
+   combines its places is `ISSUES: the-gdna-term-is-a-mean-over-places`, which needs each place's capture efficiency
+   (the sum without it cost RNA multimappers 33.6 k on 2026-10-15). Prior art, on a pre-repair base (port, never
+   apply): `$RIGEL_RUNS/archive/worktree_patches_2026-10-21/rigel-mm-intergenic.*` and `rigel-mm-sum.*`, measured in
+   `$RIGEL_RUNS/prototypes/2026-10-15_mm_intergenic/` and `2026-10-15_mm_sum/`.
+3. `ISSUES: splicing-artifacts`: the derivation first, on paper. The design trail is here (`SPLICE_ARTIFACTS_*`,
+   `GDNA_SPLICE_ARTIFACTS_*`) and the owner's own notes (`my_notes.md`: the RNA reading S and the gDNA reading C both
+   propagate and compete in the EM).
+4. Every panel re-cached once with `--force`, and the identity references re-frozen, when the scan is final. Open for
+   the owner: whether that waits for step 3's scan infrastructure or comes after step 2.
+5. The accumulator: `ISSUES: the-second-pass-corrections`, one arm each; and measure the reach of `ISSUES: latent-defects`'
+   leading intron first.
+6. Calibration, opportunity before the reader: region lengths, the gDNA length law, then the reader (its planned fix:
+   each object's gDNA read through ψ's `Var(log f_g)`), then the annotated-path rule's cost read again.
+7. Before the EM: the merge, the gDNA sum with its NaN, the prior's denominator, pruning. Then the release.
+
+## Open for the owner
+
+- The tier promotions above, and the re-cache's timing (step 4).
+- The VCaP mix's gDNA fraction, 0.252 → 0.257 against 0.2518: read it against the truth of the read pairs the scan
+  still quantifies (the VCaP read-name labels) before taking it for a regression.
+- `ISSUES: instrument-ledger` (j): the STAR panel has no in-tree instrument; every number comes from `run_cond.py`,
+  copied between arm directories. Fold it into `quant_accuracy.py` (another BAM per condition)?
+- The MANUAL's new recommended-STAR paragraph and README line: the wording is new.
+- `SUCCESS.md` says `panel.py score --jobs 2` (7–8.5 GB per condition), the ladder-report skill `--jobs 8`; the card ran
+  at 8 without trouble on this machine.
+
+## Where things are
+
+| what | where |
+|---|---|
+| the STAR panel | `$RIGEL_RUNS/star_panel/<condition>/recommended.bam` (`TESTING.md` §0d) |
+| the STAR-panel harness | `$RIGEL_RUNS/arms/2026-10-21_accounting/run_cond.py` (`NO_CAPTURE=1`: every efficiency at 1; `BASE=1`: the prototype site `RIGEL_PROTO_SITE` names), `tables.py`, `use_proto.py`, `identity_proto.py` |
+| frozen identity references | `$RIGEL_RUNS/arms/2026-10-20_location_rest/rename_ref_oracle_g00.json`; `$RIGEL_RUNS/arms/2026-10-21_k_outer_end/rename_ref_{star_g50u,cfRNA-A,cfRNA-C}.json` |
+| the accounting receipts | `$RIGEL_RUNS/arms/2026-10-21_accounting/` (`summary.md`, `stepN/measure.log`, `breaks_stepN/`) |
+| the report card | `$RIGEL_RUNS/benchmarks/2026-10-21_card/` (`run.sh`, `make_card_data.py`, `build_card.py`); the ladder's earlier arms in `$RIGEL_RUNS/suite/ladder/arms_2026-10-14_before_paired_end_repair/` |
+| the local minimap2 panel | `$RIGEL_RUNS/prototypes/2026-10-15_splice_a/aligned/` (the only local artifact truth; keep) |
+
+## The prompt for the next session
+
+```
+Read CLAUDE.md, then docs/dev/SESSION_HANDOFF.md, then docs/ROADMAP.md's "Next" section and every ISSUES entry its
+scan steps name. We fix Rigel in the order the tool runs (index, scan, accumulator, calibration, before the EM, the
+EM, after it), one small change at a time, and the capture reader waits until the stages before it are resolved.
+
+Start with ISSUES: multimapper-intergenic-alignments, its scan half. Audit and design first, as for items 13–15:
+re-read and cite every code path it names; measure what is at stake on the STAR panel at the recommended settings
+(the multimapping read pairs with an alignment outside every transcript, by true origin, per condition); then write a
+design note in docs/dev for my review, with the steps, the failing tests and the measurement each step will be judged
+on. Write no production code before I approve it.
+```

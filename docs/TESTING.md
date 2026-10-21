@@ -292,6 +292,24 @@ commands with `--config` pointing at each; one `cache` at a time or a `RIGEL_SCR
 `ruler_vs_truth.py --panel-dir` scores each set; the curve is one line per condition. It is a side panel
 in the sense of §0 — its transcript-level number is not a calibration result — and never a ladder rung.
 
+## 0d. The STAR panel — aligned input, where the scan is decided
+
+Five of the ladder's conditions, one or two per in-scope stratum — g00 κ0.99, g05 κ0.50, g50 κ0.50 and g50 κ0.99
+capture OFF, and g50 κ0.99 capture ON (κ the strand specificity) — re-aligned from the simulator's reads by STAR
+2.7.11b at two settings, `production` and `recommended` (the MANUAL's recommended STAR settings), each BAM collated,
+complete and carrying NM: `$RIGEL_RUNS/star_panel/<condition>/{production,recommended}.bam`. They were aligned on the
+cluster; `rustar`, which matches STAR on 99.9 % of the templates of a 100 k-pair sample, aligns locally. Every read
+name carries its molecule's true source and coordinates, so a pair, a placement or an origin is scored against truth
+template by template.
+
+Since 2026-10-18 every scan change is decided on the recommended BAMs (owner: the recommended settings stay, because
+they report the ambiguity the simulator's own alignments hide): pinned and fractional, per stratum, and with every
+capture efficiency at 1 beside the shipped run while `ISSUES: the-reader-reads-false-gdna-as-capture` stands, since
+the reader amplifies every scan change. The ladder's simulator alignments stay the regression check: a scan change
+that should not touch them must leave them identical. What the panel cannot judge: the deferred stratum (unstranded ×
+capture ON is not aligned), more than one realization per condition, and sequencing errors, since the simulator's
+reads carry none. No in-tree instrument reads it yet (`ISSUES: instrument-ledger` (j)).
+
 ---
 
 ## 1. The simulated panel (shared backbone)

@@ -26,9 +26,9 @@ robustness over synthetic accuracy is `DESIGN.md` §0b. On the ladder the in-sco
 junction price is accepted for now, the RNA floor at pure-gDNA objects is closed for 0.8.0, the pseudocount's odds are
 fixed (`DESIGN.md` §3.1c), and which alignments gDNA may explain is ruled (`DESIGN.md` §3.1d). What remains shows on
 real libraries and on the test chromosome's planted panels. The 0.8.0 cut (owner, 2026-10-14) put what a user hits and
-what cannot change once released before in-scope accuracy work; its release-critical items are landed or measured, and
-the release now follows the owner's sequence below. Every change is derived on one page and A/B'd against what ships,
-one issue closed at a time; **splicing artifacts on real data** stay the cluster's track — a real-data problem the
+what cannot change once released before in-scope accuracy work, and its release-critical items are landed or measured;
+since 2026-10-18 the release follows the owner's fix order, in the order the tool runs (below). Every change is derived
+on one page and A/B'd against what ships, one issue closed at a time; **splicing artifacts on real data** stay the cluster's track — a real-data problem the
 simulated panels cannot show, handled across the aligner, the blacklist's builder and Rigel.
 
 ## Where the tool is — one line per claim; run the named instrument for a current number
@@ -39,8 +39,14 @@ simulated panels cannot show, handled across the aligner, the blacklist's builde
 - **The capture reader**: mode-free (owner, 2026-10-13, after two external reviews) — every object's own gDNA density
   against the bulk, no detector (`DESIGN.md` §7.2); on gDNA-poor uncaptured libraries it reads calibration's false gDNA
   as capture — `ruler_vs_truth.py`, `quant_accuracy.py`, `ISSUES: the-reader-reads-false-gdna-as-capture`.
-- **Stage A (the accumulator)**: done; the fragment ledger closes exactly — `tests/test_scan_order_independence.py`; one open deposit
-  defect, the leading intron (`ISSUES: latent-defects`).
+- **The scan**: every usable hit is one molecule of both mates with a fragment length, paired by the search for every
+  aligner (HI not read; `DESIGN.md` §1.1); each read pair has one outcome and each record one status, counted in
+  `summary.json`'s `read_pairs` and checked against the annotation pass (`DESIGN.md` §1.2) — `tests/test_hit_verdict.py`,
+  `tests/test_accounting.py`; a multimapper's intergenic hits never reach the EM
+  (`ISSUES: multimapper-intergenic-alignments`).
+- **Stage A (the accumulator)**: done; the fragment ledger closes exactly — `tests/test_scan_order_independence.py`; one
+  open deposit defect, the leading intron (`ISSUES: latent-defects`); the second pass's four corrections are open
+  (`ISSUES: the-second-pass-corrections`).
 - **Library gDNA fraction**: calibration's is accurate on the ladder's three in-scope strata at full depth and
   structurally blind on the deferred one — `calibration_vs_oracle.py` (its pools); it falls with
   depth on sparse libraries (the landscape line below) and over-calls at low gDNA under capture
@@ -49,7 +55,7 @@ simulated panels cannot show, handled across the aligner, the blacklist's builde
   `quant_accuracy.py` (the pools per row); the RNA floor is closed for 0.8.0 until a fundamentally different
   algorithm (owner, 2026-09-26), `ISSUES: rna-prior-floor-at-pure-gdna-loci`.
 - **The deliverable, end to end**: measured per stratum on the rebuilt ladder under the shared length (the report card
-  of release step 3 re-derives it); stranded × capture-ON has been the worst in-scope stratum and its capture-aware
+  re-derives it, from `quant_accuracy.py`'s arms), and on aligned input on the STAR panel at the recommended parameters; stranded × capture-ON has been the worst in-scope stratum and its capture-aware
   lengths own most of it — the junction price's
   structure, closed for now at diminishing returns (owner, 2026-09-26) — then the capture likelihood's lean toward RNA (the
   synthetic spans over-called at `g98`) and calibration's RNA floor at `g98` — `quant_accuracy.py --arm base` beside
@@ -113,64 +119,82 @@ simulated panels cannot show, handled across the aligner, the blacklist's builde
 - **Reading rules**: rank per stratum, never pooled (`TRAPS: never-pool-the-strata`); quote `mwae` / Σ|err| over every
   object with mass (`calibration_vs_oracle.py`), never an intermediate (`TRAPS: the-intermediate-is-not-the-deliverable`).
 
-## Next — the release sequence (owner, 2026-10-14)
+## Next — in the order the tool runs (owner, 2026-10-18 and 2026-10-21)
 
-The 0.8.0 cut's release-critical items were settled on 2026-10-14: the user-path fixes, the two numeric no-ops and the
-format batch landed; the multimapper prior share was kept as shipped and the ψ double-prior fix was not shipped, each on
-its A/B, their repairs in 0.8.1 (`ISSUES: the-em-prior-share-excludes-drawn-multimappers`,
-`ISSUES: the-gdna-prior-enters-psi-twice`). The release now follows the owner's sequence, in order:
-1. **Docs cleanup**: every permanent doc true of the tree. Done.
-2. **An independent code review.** Done; what it found is in ISSUES, release-relevant first: `ISSUES: the-release-builds`,
-   `ISSUES: the-em-depends-on-its-thread-count`; its smaller items are in `ISSUES: latent-defects` and
-   `ISSUES: hygiene-ledger`.
-3. **The full benchmark run**, the report card regenerated.
-4. **ISSUES cleanup and prioritization**: the OPEN section ordered by priority. Done.
-5. **The survey**: implement or defer, entry by entry. Done (owner, 2026-10-14): the release review's fixes are approved;
-   the splice-artifact work is handled before any release, once the release candidate is clean
-   (`ISSUES: splicing-artifacts`, which now holds the strand pruning); the EM's thread dependence waited for a measured
-   prototype, and landed on it (`ISSUES: the-em-depends-on-its-thread-count`); everything else is deferred as tiered.
-6. **The release issues fixed**, simple ones first and as many closed as possible, each with a falsification test
-   verified failing; a numeric change gets its own A/B window, and a numeric no-op, proven with
-   `rename_identity.py --check`, lands between any two windows. Then the involved ones: the EM's reduction, landed
-   2026-10-14; then the splice-artifact mechanism (`ISSUES: splicing-artifacts`), its design externally reviewed
-   2026-10-14. The derivation, the mechanism fixtures, a prototype and the VCaP A/B come next. The release waits
-   for its validation on independent artifact-containing evidence on the cluster (owner, 2026-10-14). Since 2026-10-16
-   the release-blocking repair is the scan's (`ISSUES: the-scanner-builds-fragments-from-one-mate`), fixed in pipeline
-   order, the scan first, one change at a time (owner, 2026-10-18); since 2026-10-19 every input is paired by the
-   search, HI not read (`DESIGN.md` §1.1). Since 2026-10-19 the release
-   also waits on two more (owner): first, the highest priority, `ISSUES: the-reader-reads-false-gdna-as-capture` (on aligned input the capture
-   efficiencies are most of every capture-OFF condition's error);
-   and `ISSUES: multimapper-intergenic-alignments`, a fragment's valid intergenic and genic alignments competing in the EM.
-7. **The release**: `docs/PUBLISHING.md` is the procedure; what gates it is the state — the deliverable measured per
-   stratum, the zero rows clean, the suite at its standing count, `preflight.py --full` green, CI run once by hand, a
-   real-data smoke run, the standing risks re-read, and the manual and the changelog true of what ships.
+The tool is fixed in the order it runs, one small change at a time, because a defect upstream confounds every fix
+downstream: the capture reader has amplified every scan change (`ISSUES: the-reader-reads-false-gdna-as-capture`). Each
+change gets a failing test on a hand-built case, the fix alone, each gate broken on purpose and seen to fire, the STAR
+panel at the recommended parameters against truth per stratum (pinned and fractional, and while the reader stands with
+every capture efficiency at 1 beside the shipped run), the oracle ladder for regressions, the suite and
+`preflight.py --full`. THE GOAL (owner, 2026-10-21): gDNA that aligns as spliced is the main error on real data; the
+recommended STAR parameters report the competing alignments and the multimapper handling is to weigh them, so that
+splice artifacts are handled downstream (`ISSUES: splicing-artifacts`).
 
-**0.8.1 — first after the release**, each its own derivation and A/B: `ISSUES: the-em-stops-before-it-converges` with
-`ISSUES: the-pseudocount-strength-is-not-derived` and `ISSUES: the-em-prior-share-excludes-drawn-multimappers` ·
-`ISSUES: the-gdna-prior-enters-psi-twice` ·
-`ISSUES: the-transfer-policy-loses-to-silence-on-unstranded-capture-off` with
-`ISSUES: the-intron-own-solve-on-unstranded-capture-off` · `ISSUES: the-scorer-reads-a-census-length-law` with
-`ISSUES: the-pooled-q-in-the-gdna-count` · `ISSUES: psi-reads-kappa-where-the-strand-channel-is-dead` ·
+**The index.**
+1. `ISSUES: an-unrecorded-splice-blacklist-is-dropped-silently`: the cluster's manifest checked before any cluster
+   quant, the owner's.
+
+**The scan and its buffer.** The scan's repair landed between 2026-10-18 and 2026-10-21
+(`ISSUES: the-scanner-builds-fragments-from-one-mate`, closed); what it leaves:
+2. `ISSUES: multimapper-intergenic-alignments`: a multimapper's intergenic hits buffered and given a gDNA term, so its
+   valid intergenic and genic alignments compete in the EM; release-blocking.
+3. `ISSUES: splicing-artifacts`: the derivation, then the scan's infrastructure (junction ids on buffered fragments, the
+   contiguous reading of a spliced fragment), the fixtures, a prototype and the VCaP A/B; the release waits for its
+   validation on the cluster.
+4. **Every panel re-cached once** with `--force`, and the identity references re-frozen, when the scan is final: the
+   caches calibration is measured on date from 2026-10-16/17.
+
+**The accumulator.**
+5. `ISSUES: the-second-pass-corrections`: the length law, the weights, the mismatches and the motif rule, one arm each.
+
+**Calibration**, its opportunity before its capture reader.
+6. `ISSUES: region-lengths-count-unobservable-bases`.
+7. `ISSUES: the-gdna-length-contrast-is-ill-conditioned-on-aligned-input`.
+8. `ISSUES: the-reader-reads-false-gdna-as-capture`: a chronic problem, approached only once the stages before it are
+   resolved (owner, 2026-10-21); the planned fix reads each object's gDNA through calibration's own posterior for it.
+9. `ISSUES: the-annotated-path-rule-costs-the-stranded-strata`, read again on the repaired reader.
+
+**After calibration, before the EM**: the scores, the priors and the lengths the EM is handed.
+10. `ISSUES: merge-keeps-least-overhang`.
+11. `ISSUES: the-gdna-term-is-a-mean-over-places`, with `ISSUES: mismatch-gate-nan-in-multimapper-gdna` and the scorer
+    half of `ISSUES: multimapper-intergenic-alignments`.
+12. `ISSUES: the-em-prior-share-excludes-drawn-multimappers`.
+13. `ISSUES: pruning-uses-three-references`.
+
+**The release.**
+14. `ISSUES: the-release-builds`, then `docs/PUBLISHING.md`'s procedure: the deliverable measured per stratum, the zero
+    rows clean, the suite at its standing count, `preflight.py --full` green, CI run once by hand, a real-data smoke run,
+    the standing risks re-read, and the manual and the changelog true of what ships.
+
+**0.8.1 — first after the release**, each its own derivation and A/B, in the tool's order. The scan:
+`ISSUES: clips-are-walked-along-the-genome-only` · `ISSUES: input-mistakes-pass-silently`. Calibration:
+`ISSUES: the-gdna-prior-enters-psi-twice` · `ISSUES: psi-reads-kappa-where-the-strand-channel-is-dead` ·
 `ISSUES: the-gdna-landscape-collapses-at-low-depth` with `ISSUES: strand-plug-in-bias-on-sparse-libraries` ·
-`ISSUES: the-sparse-capture-losses` with `ISSUES: the-efficiency-posterior-floor-on-empty-pieces` ·
-`ISSUES: an-anchor-only-landscape-reads-as-capture` ·
-`ISSUES: the-transfer-price-arithmetic` · `ISSUES: latent-defects` · `ISSUES: instrument-ledger` ·
-`ISSUES: input-mistakes-pass-silently`.
+`ISSUES: an-anchor-only-landscape-reads-as-capture` · `ISSUES: the-sparse-capture-losses` with
+`ISSUES: the-efficiency-posterior-floor-on-empty-pieces` · `ISSUES: the-transfer-price-arithmetic` ·
+`ISSUES: the-transfer-policy-loses-to-silence-on-unstranded-capture-off` with
+`ISSUES: the-intron-own-solve-on-unstranded-capture-off`. Before the EM: `ISSUES: the-scorer-reads-a-census-length-law`
+with `ISSUES: the-pooled-q-in-the-gdna-count` · `ISSUES: the-pseudocount-strength-is-not-derived`. The EM:
+`ISSUES: the-em-stops-before-it-converges`. Across the stages: `ISSUES: latent-defects` · `ISSUES: instrument-ledger`.
 
-**Later**, each with its entry: `ISSUES: the-edge-density-floor-under-capture` ·
-`ISSUES: capture-on-overcalls-gdna-at-low-gdna` · `ISSUES: nascent-stress-sensitivity` ·
+**Later**, each with its entry, in the tool's order. The index: `ISSUES: overlapping-synthetic-shadows`. The scan:
+`ISSUES: fragments-that-fit-one-gene-but-no-transcript` · `ISSUES: the-tail-rule-waits-for-truth`. The accumulator:
+`ISSUES: drain-contaminates-certified-rna` · `ISSUES: draw-clamp-can-pick-a-zero` ·
+`ISSUES: second-pass-geometry-in-python`. Calibration: `ISSUES: strand-overdispersion-one-shared-value` ·
 `ISSUES: the-fl-boundary-inversion-reads-missing-evidence-as-a-value` ·
 `ISSUES: the-fl-boundary-inversion-has-underived-pieces` · `ISSUES: capture-blind-gdna-divisor` ·
-`ISSUES: eb-shrinkage-magic-ess` · `ISSUES: the-capture-reference-is-read-at-a-grid-point` ·
-`ISSUES: the-bulk-can-be-calibrations-nascent-rna` · `ISSUES: intron-seeds-near-probes-are-capture-enriched` ·
-`ISSUES: per-transcript-prior-lane` · `ISSUES: message-layer-open-cases` ·
-`ISSUES: scoring-penalties-are-underived-constants` ·
-`ISSUES: unwitnessed-loci-and-multimappers-at-the-em` · `ISSUES: vcap-dna-only-objects-lose-gdna-at-full-depth` ·
-`ISSUES: debug-capture-memory-is-unbounded` · `ISSUES: expand-the-gdna-spectrum` ·
-`ISSUES: unannotated-transcription-is-booked-as-gdna` · `ISSUES: ruler-witness-geometry-on-transcript-panels` ·
-`ISSUES: yield-variance-beside-the-count` · `ISSUES: drain-contaminates-certified-rna` ·
-`ISSUES: the-deferred-rna-long-regression-after-factory-removal` · `ISSUES: overlapping-synthetic-shadows` ·
-`ISSUES: performance-memory-bounded-solve` · `ISSUES: fragments-that-fit-one-gene-but-no-transcript` ·
+`ISSUES: eb-shrinkage-magic-ess` · `ISSUES: intron-seeds-near-probes-are-capture-enriched` ·
+`ISSUES: the-edge-density-floor-under-capture` · `ISSUES: capture-on-overcalls-gdna-at-low-gdna` ·
+`ISSUES: the-capture-reference-is-read-at-a-grid-point` · `ISSUES: the-bulk-can-be-calibrations-nascent-rna` ·
+`ISSUES: vcap-dna-only-objects-lose-gdna-at-full-depth` · `ISSUES: unannotated-transcription-is-booked-as-gdna` ·
+`ISSUES: the-deferred-rna-long-regression-after-factory-removal` · `ISSUES: two-own-composition-thresholds` ·
+`ISSUES: message-layer-open-cases`. Before the EM: `ISSUES: per-transcript-prior-lane` ·
+`ISSUES: unwitnessed-loci-and-multimappers-at-the-em` · `ISSUES: scoring-penalties-are-underived-constants` ·
+`ISSUES: coverage-weight-plateau-for-short-transcripts` · `ISSUES: ruler-witness-geometry-on-transcript-panels` ·
+`ISSUES: yield-variance-beside-the-count`. After the EM: `ISSUES: loci-table-recomputes-mrna`. The panels:
+`ISSUES: nascent-stress-sensitivity` · `ISSUES: expand-the-gdna-spectrum` ·
+`ISSUES: capture-probes-on-dropped-duplicates` · `ISSUES: simulated-errors-redraw-the-base`. The instruments:
+`ISSUES: debug-capture-memory-is-unbounded`. Across the stages: `ISSUES: performance-memory-bounded-solve` ·
 `ISSUES: hygiene-ledger`.
 
 **Parked — Tier 5**, each with its entry: `ISSUES: a-pure-gdna-library-reads-as-nascent-rna` ·

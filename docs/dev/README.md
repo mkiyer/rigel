@@ -23,3 +23,11 @@ Everything in this directory is provisional and nothing in it is settled.
    | a panel, a harness, a gate | `docs/TESTING.md` |
 
 A stale dev doc is harmless. A dev doc that something else depends on is not.
+
+## What is here (2026-10-21)
+
+The paired-end repair's roadmap and its wave-1 plan, the splice-artifact design trail (`GDNA_SPLICE_ARTIFACTS_*` and
+`SPLICE_ARTIFACTS_*`), the owner's notes (`my_notes.md`, `TWO_PROBLEMS.md`) and the session handoff
+(`SESSION_HANDOFF.md`). The notes of every settled campaign were deleted on 2026-10-21, their findings already in the
+permanent docs: `git show f763270c:docs/dev/<name>` recovers one. The review evidence that was never tracked is in
+`$RIGEL_RUNS/archive/docs_dev_untracked_2026-10-21/`.

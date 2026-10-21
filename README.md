@@ -133,10 +133,13 @@ Input BAM requirements:
 
 - Paired-end (the scan stops at the first unpaired record)
 - Name-sorted or collated
-- `NH` tag used for multimapper handling when present (otherwise secondary flags)
+- A read pair's multiplicity is its usable alignments; `NH` is read only to find a truncated output
 - For a stranded library, a splice-junction strand tag: `XS` (HISAT2, or STAR with
   `--outSAMstrandField intronMotif`) or `ts` (minimap2). Without one no junction trains the strand
-  model and the library is quantified as unstranded; `--sj-strand-tag auto` only detects which tag is present
+  model and the library is quantified as unstranded; `--sj-strand-tag auto` reads whichever tag each
+  spliced record carries
+- With STAR, align with `--sjdbScore 0 --outFilterMultimapScoreRange 2`, so an unspliced reading competes
+  with an annotated splice (the manual's input requirements say why)
 
 ### 3. Inspect outputs
 

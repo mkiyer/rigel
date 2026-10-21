@@ -5,10 +5,11 @@ order, and its first two changes are implemented.
 
 This file holds the waves, what each must deliver, and the gate between them.
 
-- **The plan for wave 1:** `PAIRED_END_WAVE1_PLAN.md` (revision 4).
-- **The diagnosis behind it:** `PAIRED_END_REPAIR.md` (revision 2, superseded for planning) and its independent
-  review, `PAIRED_END_REPAIR_INDEPENDENT_REVIEW.md`.
-- **The STAR study's brief:** `star_parameters/PROMPT.md`.
+- **The plan for wave 1:** `PAIRED_END_WAVE1_PLAN.md` (revision 5).
+- **Since 2026-10-21 the order is the permanent docs':** `ISSUES.md` runs its open entries in the tool's order, stage
+  by stage, and `ROADMAP.md`'s next steps name them; the Phase B and C items below name their entries. The notes this
+  file names that are no longer in this directory (the diagnosis, its reviews, the STAR study's brief, each item's
+  design) were deleted when they settled: `git show f763270c:docs/dev/<name>` recovers one.
 
 The owner's direction (2026-10-16) is to go slowly, one wave at a time: design it, review it, build it, measure it,
 and reassess before the next.
@@ -64,8 +65,9 @@ the code is open; each is less critical.
   (2026-10-19, four arms): the search wins every capture-OFF condition with the capture efficiencies at 1; the owner
   took it for every input, HI not read (`DESIGN.md` §1.1)
 4. ☐ The gates' own proof (the plan's step 1b), before the first change whose identity claim leans on those gates
-5. ◐ Location identity and aliases (D and N apart, M/=/X runs coalesced), which duplicate hits need. ☑ One place per
-  alignment, its aliases written with its hit (2026-10-19, with the search). ☐ NM conflicts between aliases (item 12)
+5. ☑ Location identity and aliases (D and N apart, M/=/X runs coalesced), which duplicate hits need. ☑ One place per
+  alignment, its aliases written with its hit (2026-10-19, with the search). ☑ NM conflicts between aliases (item 12,
+  2026-10-20: counted, the location reads the largest NM)
 6. ☑ Complete pairs only: the search for every input (2026-10-19; HI not read, so no HI group, mixed template or
   duplicate group remains; a truncated output is counted against the records reported per mate). ☑ One-mate hits dropped, counted as `missing_mate` (2026-10-18): the STAR panel 15/15 and the ladder 48/48
   identical, as neither holds one; suite 3,063. ☑ Duplicate groups collapse, by construction in the search (held
@@ -84,7 +86,8 @@ the code is open; each is less critical.
   +3.27 / −0.62 %); the ladder identical. ☑ One transcript over both mates (2026-10-19, the owner's rule): the witness
   and a spliced hit's junction holder overlap both mates; transcript error −0.74 / −0.66 / +0.86 %, gene +0.06 /
   +3.82 / +0.31 % (g00's paralogs), true gDNA counted RNA −24 k capture-ON; the ladder identical; suite 3,086.
-  ☐ Clip walks along a transcript path (minimap2 input). ☑ No hit passes through unjudged (2026-10-21): a hit with
+  ☐ Clip walks along a transcript path (minimap2 input; `ISSUES: clips-are-walked-along-the-genome-only`, 0.8.1). ☑ No
+  hit passes through unjudged (2026-10-21): a hit with
   one mate is withheld for a missing mate (item 6); a mate's several records are one location per alignment, its
   other records aliases (item 5) or supplementary pieces (item 13); and a record with no aligned base, the last
   pass-through, is no location (item 15)
@@ -209,26 +212,33 @@ the code is open; each is less critical.
     record exists on the nine BAMs of the audit: rename_identity bit-identical on oracle g00, STAR g50 ss.50 OFF,
     cfRNA-A and cfRNA-C. Suite 3,131
 
-*Phase B, calibration*
-0. ☐ First, the highest priority (owner, 2026-10-19): the capture reader reads false gDNA as capture on aligned input
-  (`ISSUES: the-reader-reads-false-gdna-as-capture`); with every efficiency at 1, g00's transcript error falls 3.44 M →
-  0.25 M and every capture-OFF condition's by 18–93 %, while capture-ON needs them (+232 %)
+*Phase B, calibration*, reordered 2026-10-21 in the tool's order (owner: the capture reader only once the stages
+before it are resolved)
 1. ☐ The second pass: an observed annotated splice takes the RNA length law
 2. ☐ The second pass's weights: one placement factor times a unit-free share within the placement
 3. ☐ The second pass reads NM, carried in the deferred bank
-4. ☐ The second pass's motif rule, derived once as the deposit derives it
-5. ☐ The gDNA fragment-length estimator on aligned input
-6. ☐ The capture ruler's false capture on uncaptured libraries: item 0
-7. ☐ The rule for intergenic placements
-8. ☐ Observable opportunity, and the clip-length model
+4. ☐ The second pass's motif rule, derived once as the deposit derives it. Items 1–4 are
+  `ISSUES: the-second-pass-corrections` (the accumulator stage)
+5. ☐ Observable opportunity (`ISSUES: region-lengths-count-unobservable-bases`), and the clip-length model
+  (`ISSUES: clips-are-walked-along-the-genome-only`)
+6. ☐ The gDNA fragment-length estimator on aligned input
+  (`ISSUES: the-gdna-length-contrast-is-ill-conditioned-on-aligned-input`)
+7. ☐ The capture reader reads false gDNA as capture on aligned input, release-blocking (owner, 2026-10-19;
+  `ISSUES: the-reader-reads-false-gdna-as-capture`): with every efficiency at 1, g00's transcript error falls 3.44 M →
+  0.25 M and every capture-OFF condition's by 18–93 %, while capture-ON needs them (+232 %); the capture ruler's false
+  capture on uncaptured libraries is the same defect
+8. ☐ The rule for intergenic placements, part of `ISSUES: multimapper-intergenic-alignments`
 
 *Phase C, after calibration (the EM)*
-1. ☐ The per-transcript merge chooses by full likelihood (today the least overhang first)
-2. ☐ The gDNA term a sum over places (the owner's ruling; today the mean)
+1. ☐ The per-transcript merge chooses by full likelihood (today the least overhang first;
+  `ISSUES: merge-keeps-least-overhang`)
+2. ☐ The gDNA term a sum over places (the owner's ruling; today the mean; `ISSUES: the-gdna-term-is-a-mean-over-places`,
+  with `ISSUES: mismatch-gate-nan-in-multimapper-gdna`)
 3. ☐ Intergenic hits enter the EM, release-blocking (owner, 2026-10-19): a fragment's valid intergenic and genic
   alignments compete (`ISSUES: multimapper-intergenic-alignments`)
-4. ☐ The prior's denominator (today it excludes the multimappers calibration deposited)
-5. ☐ Pruning against one reference
+4. ☐ The prior's denominator (today it excludes the multimappers calibration deposited;
+  `ISSUES: the-em-prior-share-excludes-drawn-multimappers`)
+5. ☐ Pruning against one reference (`ISSUES: pruning-uses-three-references`)
 
 **Wave 1, the scan stage** (plan revision 2 accepted 2026-10-16; revision 3 reviewed 2026-10-17; revision 4 for a
 targeted re-review)

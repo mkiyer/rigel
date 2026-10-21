@@ -1291,9 +1291,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--bam",
         dest="bam_file",
         default=None,
-        help="Name-sorted BAM file. Minimap2 and STAR aligners are "
-        "supported. The NH tag is used when present; otherwise "
-        "multimappers are detected from secondary BAM flags.",
+        help="Name-sorted or collated paired-end BAM file. STAR and minimap2 "
+        "are supported. A read pair's multiplicity is its usable alignments; "
+        "the NH tag is read only to find a truncated output.",
     )
     io_grp.add_argument(
         "--index",

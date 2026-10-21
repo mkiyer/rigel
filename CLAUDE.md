@@ -208,5 +208,6 @@ rigel export results/ -f tsv
 rigel report results/ -o report.html
 ```
 
-Input BAM must be name-sorted or collated; the `NH` tag is used when present, otherwise multimappers are detected
-from secondary flags.
+Input BAM must be paired-end and name-sorted or collated; a read pair's multiplicity is its usable alignments (`NH` is
+read only to find a truncated output). STAR input is aligned with `--sjdbScore 0 --outFilterMultimapScoreRange 2`
+(`docs/MANUAL.md`, input requirements).

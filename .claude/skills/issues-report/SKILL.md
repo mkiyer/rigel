@@ -38,8 +38,10 @@ It REFUSES to write the page, and names each problem, when:
 - an entry would appear on the page other than exactly once.
 
 It WARNS, and still writes the page, on a citation `ISSUES: name` in `ISSUES.md` to a name no entry
-holds (shown on the page with a wavy underline), an OPEN entry out of tier order, and a priority line
-without `kind:`.
+holds (shown on the page with a wavy underline), an OPEN entry out of tier order, a priority line
+without `kind:`, a `stage:` that is not one of the log's stages, and an entry out of the tool's order
+within its tier (the stages run `index`, `scan`, `accumulator`, `calibration`, `pre-EM`, `EM`, `post-EM`,
+then `panels`, `instruments`, `release`, `several`; `ISSUES.md`'s preamble defines them).
 Fix a warning in the log, not in the page.
 
 ## 2. Publish, to the SAME artifact
@@ -59,7 +61,7 @@ current.
 
 | from | what |
 |---|---|
-| `## OPEN` in `ISSUES.md` | each `### name`, then the `` `priority: WORD — reason · kind: K · date` `` line, then the body, rendered as markdown. `ISSUES: name` citations become in-page links |
+| `## OPEN` in `ISSUES.md` | each `### name`, then the `` `priority: WORD — reason · stage: S · kind: K · date` `` line (the stage shown as a dashed chip), then the body, rendered as markdown. `ISSUES: name` citations become in-page links |
 | `## CLOSED / REFUSED` | each name, a verdict chip (the leading CLOSED / REFUSED / RULED word) and the first sentence of its body |
 | `## Next` in `ROADMAP.md` | the order: each column-0 **bold** line is a group heading, each top-level `1.` or `- ` item under it a step (its bold title and the entries it cites), and a group written as one paragraph is one step holding its citations. Steps are numbered in sequence across the groups; an entry carries a `step N` chip for every step that cites it (`step 4 · 5`) |
 

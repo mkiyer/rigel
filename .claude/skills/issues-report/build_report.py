@@ -27,6 +27,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 SKILL = Path(__file__).resolve().parent
 TIERS = ("now", "next", "later", "parked")
+#: where in the tool's run an entry's problem first acts, in the order the tool runs, then the work outside the
+#: run; within a tier the OPEN section runs in this order (ISSUES.md's preamble)
+STAGES = ("index", "scan", "accumulator", "calibration", "pre-EM", "EM", "post-EM", "panels", "instruments",
+          "release", "several")
 PLACEHOLDERS = ("__CHIPS__", "__MAIN__", "__STAMP__")
 
 KEBAB = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -344,7 +348,7 @@ def parse_issues(path: Path) -> tuple[list[dict], list[dict]]:
 
 
 def read_priority(e: dict) -> str | None:
-    """Split the entry's `priority: WORD — reason · kind: K · date` line off its body."""
+    """Split the entry's `priority: WORD — reason · stage: S · kind: K · date` line off its body."""
     body = e["body"]
     if not body or not body[0].startswith("`priority:"):
         return "has no `priority:` line directly under its heading"
@@ -360,6 +364,9 @@ def read_priority(e: dict) -> str | None:
         word = m[1] if m else first[:30]
         return f"has priority '{word}', which is not one of {' / '.join(TIERS)}"
     parts = m[2].split(" · ")
+    stage = next((p for p in parts if p.startswith("stage: ")), None)
+    e["stage"] = stage[len("stage: ") :].strip() if stage else ""
+    parts = [p for p in parts if p is not stage]
     at = next((i for i, p in enumerate(parts) if p.startswith("kind: ")), None)
     reason = " · ".join(parts if at is None else parts[:at])
     e["tier"] = m[1]
@@ -502,6 +509,8 @@ def git_stamp(paths: list[Path]) -> tuple[str, list[str]]:
 def render_issue(e: dict, md: Markdown, step_of: dict[str, list[int]]) -> str:
     date = DATE.search(e["dated"])
     meta = []
+    if e["stage"]:
+        meta.append(f'<span class="chip stage">{esc(e["stage"])}</span>')
     if e["kind"]:
         meta.append(f'<span class="chip">{esc(e["kind"])}</span>')
     if e["name"] in step_of:
@@ -563,6 +572,18 @@ def build(issues: Path, roadmap: Path) -> tuple[str, dict]:
     warnings += [
         f"'{e['name']}' has no `kind:` in its priority line" for e in open_entries if not e["kind"]
     ]
+    warnings += [
+        f"'{e['name']}' has stage '{e['stage'] or '(none)'}', which is not one of {' / '.join(STAGES)}"
+        for e in open_entries
+        if e["stage"] not in STAGES
+    ]
+    staged = [(TIERS.index(e["tier"]), STAGES.index(e["stage"]), e) for e in open_entries if e["stage"] in STAGES]
+    for (ta, sa, _), (tb, sb, e) in zip(staged, staged[1:], strict=False):
+        if ta == tb and sb < sa:
+            warnings.append(
+                f"'{e['name']}' ({e['tier']}, {e['stage']}) sits below a {STAGES[sa]} entry: within its tier "
+                "the OPEN section is out of the tool's order"
+            )
 
     by_tier = {t: [e for e in open_entries if e["tier"] == t] for t in TIERS}
     tiles = "".join(

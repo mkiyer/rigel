@@ -65,8 +65,7 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
 ### Changed
 
 - **Output names (breaking).** RNA is reported as *annotated* (every reference transcript, single-exon included) or
-  *nascent* (Rigel's synthetic spans); counts are `count_<what>` and shares `fraction_<what>`; `summary.json` is
-  schema 4.
+  *nascent* (Rigel's synthetic spans); counts are `count_<what>` and shares `fraction_<what>`.
   - `quant`: `is_single_exon` (was `is_nrna`); `nascent_id` and `count_nascent` (were `nrna_id` and
     `nrna_parent_count`), which name a transcript's synthetic span only, so a transcript whose span is an annotated
     single-exon transcript reads `.` and 0.
@@ -82,6 +81,20 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
     `n_rna_components`, `gdna_em_effective_length`.
   - The annotated BAM's `ZF`: bit 0x02 is an annotated winner and 0x10 a nascent one, and 0x08 is retired, so a
     single-exon winner reads 0x03 (was 0x09) and a synthetic span 0x11 (was 0x19).
+- **One outcome per read pair, one status per record (`summary.json` schema 5).** A read pair is the run of records
+  sharing a name, filtered records included, and the scan gives each exactly one outcome, counted in a new
+  `read_pairs` block that sums to its `total`: `excluded` (every record filtered), `withheld` with no usable alignment,
+  by reason (`unpaired`, `unannotated_splice`, `off_index`, `chimeric`; an unpaired one also by the furthest check its
+  alignments reached, `unpaired_by_reason`), `excluded_by_option`, or `placed`, `unique` or `multimapping`. Each record
+  gets one status, counted in `alignment_stats.records` and summing to `total_reads`: `filtered`, `used`, `unused`
+  (in a placed read pair but in none of its usable alignments) or `unplaced`. `read_pairs` replaces
+  `alignment_stats`' `read_groups`, `unique_reads` and `multimapping_reads` and takes `fragment_stats.withheld`;
+  `alignment_stats.proper_pairs` counts the primary records flagged as a proper pair. A scan whose counts do not
+  close stops the run. The report's read fate reads the same outcomes.
+- **The annotated BAM writes every record's status.** A placed read pair's record that is in none of its usable
+  alignments reads `ZC` `unused_alignment`, each placement carries its own splice type in `ZS`, and a read pair
+  excluded by `--no-include-multimap` reads `ZF` 0x80. The annotation pass is checked against the scan, read pair by
+  read pair: if it saw anything else, the BAM is deleted and the run stops.
 - **Renamed options (breaking).** `rigel index --nascent-tolerance` (was `--nrna-tolerance`) and `rigel quant
   --intron-overhang-tolerance` (was `--splicing-anchor-tolerance`); their `config.yaml` keys follow. The index
   format is version 10, so every index is rebuilt.
@@ -117,7 +130,7 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
 
 - Four `loci.feather` columns no code ever filled (`n_regions_touched`, `multi_locus_region_mass`,
   `partial_coverage_region_mass`, `gdna_eff_len_per_bp`, always 0), and `summary.json`'s
-  `gdna_eff_len.per_bp`, which summarised them; `summary.json` is schema 4.
+  `gdna_eff_len.per_bp`, which summarised them.
 - `summary.json`'s `calibration.capture` block and the report's by-count / by-mass density chart, a
   second density census of the gDNA track with its own thresholds. The report's capture tile and panel
   show calibration's own answer instead: `calibration.gdna_bulk_density`, the uncaptured gDNA level the
@@ -143,18 +156,20 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
 
 ### Fixed
 
-- A read pair's alignment is a fragment only if it places both mates and the two can be one molecule with a valid
-  fragment length: on one reference, on opposite strands, their 5' ends facing each other once each 5' soft clip is
-  walked back (the molecule spans both mates, so a mate may run past the other's 5' end, as when a read was trimmed at
-  its 5' end), and 1 to `max_frag_length` bases long along the genome or along one annotated transcript that overlaps
-  both mates and holds every junction the pair observes. 0.7.1 placed every reported alignment, so a lone mate became a
-  read-length fragment, and mates kilobases apart or facing away from each other entered the EM with lengths it could
-  only penalize. Such an alignment is now dropped, and a read pair left with none is withheld: counted in `summary.json`
-  (`fragment_stats.withheld.unpaired`, `hits_rejected`) and written to the annotated BAM as unresolved (`ZC`
-  `unpaired`), not counted intergenic. On simulated STAR alignments it drops 0.8–4.7 % of the reported pair alignments,
-  rising with the gDNA share, and none whose alignment is correct. A read pair's multiplicity is its valid alignments,
-  not the aligner's `NH`, so a pair whose other alignments were dropped is read as unique; `summary.json` counts the
-  pairs whose `NH` exceeds the alignments reported for them (`fragment_stats.nh_above_reported`, a truncated output).
+- A read pair's alignment is a fragment only if it places both mates (a record that aligns no base, all clips, places
+  nothing) and the two can be one molecule with a valid fragment length: on one reference, on opposite strands, their
+  5' ends facing each other once each 5' soft clip is walked back (the molecule spans both mates, so a mate may run
+  past the other's 5' end, as when a read was trimmed at its 5' end), and 1 to `max_frag_length` bases long along the
+  genome or along one annotated transcript that overlaps both mates and holds every junction the pair observes. 0.7.1
+  placed every reported alignment, so a lone mate became a read-length fragment, and mates kilobases apart or facing
+  away from each other entered the EM with lengths it could only penalize. Such an alignment is now dropped, and a
+  read pair left with none is withheld: counted in `summary.json` (`read_pairs.withheld.unpaired`, by reason in
+  `read_pairs.unpaired_by_reason`, and `fragment_stats.hits_rejected`) and written to the annotated BAM as unresolved
+  (`ZC` `unpaired`), not counted intergenic. On simulated STAR alignments it drops 0.8–4.7 % of the reported pair
+  alignments, rising with the gDNA share, and none whose alignment is correct. A read pair's multiplicity is its valid
+  alignments, not the aligner's `NH`, so a pair whose other alignments were dropped is read as unique; `summary.json`
+  counts the pairs whose `NH` exceeds the alignments reported for them (`fragment_stats.nh_above_reported`, a
+  truncated output).
 - Rigel pairs a read pair's alignments itself, for every aligner: each alignment of R1 is tried with each alignment of
   R2 on the same reference and opposite strand, and the pairings that can be one molecule are the read pair's
   alignments. STAR's `HI` tag is no longer read. 0.7.1 took STAR's pairs from `HI`, and for an aligner without it paired
@@ -175,19 +190,19 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   can place nothing there. 0.7.1 counted its read pair intergenic, which `summary.json` adds to the gDNA pool, so a
   spike-in aligned to a contig the index leaves out was read as genomic DNA, and mates on two such references were
   merged into one fragment by coordinate. A read pair with another alignment keeps it; one with none is withheld,
-  counted in `summary.json` (`fragment_stats.withheld.off_index`, `hits_rejected.off_index`) and written to the
-  annotated BAM as unresolved (`ZC` `off_index`).
+  counted in `summary.json` (`read_pairs.withheld.off_index`, `fragment_stats.hits_rejected.off_index`) and written to
+  the annotated BAM as unresolved (`ZC` `off_index`).
 - A read the aligner writes in pieces, a chimeric alignment, is not quantified. 0.7.1 joined a read's supplementary
   records to its alignment, so a read split across two places became one fragment built from every piece, junctions
   and mismatches included: counted chimeric when the pieces lay on two references or far apart, and otherwise placed
   as one molecule. An alignment is now a piece of a chimera when a record of it carries `SA` or its 5' end is
   hard-clipped, or when its read has a supplementary record that no `SA` names. Such an alignment is dropped; a read
   pair with another alignment keeps it, and one with none is withheld, counted in `summary.json`
-  (`fragment_stats.withheld.chimeric`, `hits_rejected.chimeric`) and written to the annotated BAM as unresolved (`ZC`
-  `chimeric`). STAR with `--chimOutType WithinBAM` writes a chimeric read in place of its linear alignment, and its
-  mate merging (`--peOverlapNbasesMin`) can turn an ordinary read pair into one: on simulated STAR alignments, where
-  every chimera is such a merge, 0.014–0.024 % of read pairs are chimeric. On three cfRNA libraries 0.9–8.5 % of read
-  pairs are, and the read pairs quantified fall by 0.4–3.0 %.
+  (`read_pairs.withheld.chimeric`, `fragment_stats.hits_rejected.chimeric`) and written to the annotated BAM as
+  unresolved (`ZC` `chimeric`). STAR with `--chimOutType WithinBAM` writes a chimeric read in place of its linear
+  alignment, and its mate merging (`--peOverlapNbasesMin`) can turn an ordinary read pair into one: on simulated STAR
+  alignments, where every chimera is such a merge, 0.014–0.024 % of read pairs are chimeric. On three cfRNA libraries
+  0.9–8.5 % of read pairs are, and the read pairs quantified fall by 0.4–3.0 %.
 - A record's `NM` and `NH` are read only as integers, and `summary.json` counts the records without each and with it
   held as another type (`alignment_stats.nm_tag`, `nh_tag`), each read as absent. A record without `NM` reads as 0
   edits, as in 0.7.1, and the scan now warns of it: it can favor that alignment over one whose mismatches are known.
@@ -202,18 +217,22 @@ versions must be rebuilt (`rigel index`; the on-disk format is now version 10).
   counts. Each thread now runs whole equivalence classes, whose sums are added in the order one thread adds them,
   at no cost in speed.
 - A spliced alignment is used only if one annotated transcript overlaps both mates and holds every junction they
-  observe; Rigel does not assemble transcripts. An alignment with a junction no
-  transcript has, with annotated junctions no one transcript over both mates joins, or with junctions no one molecule
-  can carry (two overlapping without being equal, or motifs naming both strands) is neither RNA Rigel can place nor,
-  spliced, gDNA. 0.7.1 called such an alignment an annotated splice once one of its junctions matched and placed it
-  through the union of its junctions' transcripts; with none matching, the EM kept it as RNA while calibration counted
-  it unspliced, and outside every gene it was counted gDNA. Such an alignment is now dropped and the read pair keeps its
-  others; a read pair left with none is withheld, counted in `summary.json`
-  (`fragment_stats.withheld.unannotated_splice`, and `hits_rejected` by reason: `contradictory`, `novel_junction`,
-  `unsupported`) and written to the annotated BAM as unresolved (`ZC` `unannotated_splice`). No fragment is spliced
-  across an unannotated junction, so `summary.json` no longer reports `spliced_unannotated` or `with_unannotated_sj`,
-  and `ZS` has no `spliced_unannot`. On simulated STAR alignments it drops 78–91 k alignments per 10 M read pairs,
-  almost all of them alternatives of a read pair that keeps another, and withholds 1.6–1.8 k read pairs.
+  observe; Rigel does not assemble transcripts. An alignment with a junction no transcript has, with annotated
+  junctions no one transcript over both mates joins, or with junctions no one molecule can carry (two overlapping
+  without being equal, or motifs naming both strands) is neither RNA Rigel can place nor, spliced, gDNA. 0.7.1 called
+  such an alignment an annotated splice once one of its junctions matched and placed it through the union of its
+  junctions' transcripts; with none matching, the EM kept it as RNA while calibration counted it unspliced, and
+  outside every gene it was counted gDNA. Such an alignment is now dropped and the read pair keeps its others; a read
+  pair left with none is withheld, counted in `summary.json` (`read_pairs.withheld.unannotated_splice`, and
+  `fragment_stats.hits_rejected` by reason: `contradictory`, `novel_junction`, `unsupported`) and written to the
+  annotated BAM as unresolved (`ZC` `unannotated_splice`). No fragment is spliced across an unannotated junction, so
+  `summary.json` no longer reports `spliced_unannotated` or `with_unannotated_sj`, and `ZS` has no `spliced_unannot`.
+  On simulated STAR alignments it drops 78–91 k alignments per 10 M read pairs, almost all of them alternatives of a
+  read pair that keeps another, and withholds 1.6–1.8 k read pairs.
+- `--no-include-multimap` excludes a read pair with more than one usable alignment. 0.7.1 excluded every pair the
+  aligner called multimapping, by an `NH` above 1 or a secondary record, before any alignment was judged, so it dropped
+  pairs with a single usable alignment, which Rigel places uniquely: on simulated STAR alignments 21.7–37.1 k more read
+  pairs per 10 M are now kept. `NH` is read only to count a truncated output.
 - `--overhang-alpha 0`, documented as a hard gate, gave every candidate without overhang a NaN score, and every
   EM-routed fragment was dropped silently. It is now a hard gate: a candidate with overhang is skipped and the rest
   are scored. At either alpha's 0 an unambiguous spliced fragment, assigned without scoring, now meets the gate too,

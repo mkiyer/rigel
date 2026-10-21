@@ -89,9 +89,9 @@ rigel -v quant ...       # -v / --verbose: DEBUG-level logging for any subcomman
   `--chimOutType Junctions` the BAM keeps the linear alignment and the chimeric junctions go to their own file. STAR's
   mate merging (`--peOverlapNbasesMin`) merges two mates on a chance 10-base match, and can write an ordinary pair as
   a chimera
-- **`NH` tag** used for multimapper handling when present; otherwise
-  multimappers are detected from secondary BAM flags. A read pair whose `NH` exceeds the records reported for a mate
-  was truncated by the aligner (counted, and warned of: STAR reports every alignment with `--outSAMmultNmax -1`)
+- **Multimappers from the alignments present** — a read pair's multiplicity is its usable alignments, whatever its
+  `NH` says, and `NH` is read only to find a truncated output: a read pair whose `NH` exceeds the records reported for
+  a mate was truncated by the aligner (counted, and warned of: STAR reports every alignment with `--outSAMmultNmax -1`)
 - **An `NM` tag on every record**, its edit distance, which the EM's mismatch penalty reads (STAR writes it with
   `--outSAMattributes NH HI AS nM NM`). A record without one reads as 0 edits, which can favor it over an alignment
   whose mismatches are known, so such records are counted and warned of; records of one alignment that disagree on
@@ -100,6 +100,12 @@ rigel -v quant ...       # -v / --verbose: DEBUG-level logging for any subcomman
   `--outSAMstrandField intronMotif`; `ts` from minimap2). Without one no junction trains the strand model
   and the library is quantified as unstranded; `--sj-strand-tag auto` reads whichever tag each spliced record
   carries, and cannot supply one the aligner did not write
+
+**Recommended STAR settings.** Beside the tags above, align with `--sjdbScore 0` and `--outFilterMultimapScoreRange 2`
+(STAR 2.7.11b). STAR's defaults give an annotated junction a bonus (`--sjdbScore 2`) and report only the alignments
+within 1 point of the best, so a genomic-DNA read that a junction happens to fit can be written spliced with its
+contiguous alternative left out, and Rigel never sees it. With these two settings an unspliced reading competes with an annotated splice, every
+alignment within 2 points of the best is reported, and Rigel weighs them: expect more read pairs to be multimappers.
 
 Name-sort an existing BAM:
 
@@ -193,7 +199,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--bam PATH` | — | Name-sorted BAM. Minimap2 and STAR are supported. `NH` used when present; otherwise multimappers come from secondary flags. |
+| `--bam PATH` | — | Name-sorted or collated paired-end BAM. STAR (with the [recommended settings](#bam)) and minimap2 are supported. A read pair's multiplicity is its usable alignments; `NH` is read only to find a truncated output. |
 | `--index DIR` | — | Directory of `rigel index` files |
 | `-o`, `--output-dir DIR` | — | Output directory for results |
 | `--config FILE` | — | YAML config (same keys as CLI options, underscored). CLI flags override it. See [YAML configuration](#yaml-configuration). |

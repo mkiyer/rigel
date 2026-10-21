@@ -231,11 +231,7 @@ ALLOWED: dict[str, tuple[str, ...]] = {
         "docs/TRAPS.md",
         "tests/test_second_pass_scoring.py",
         "tests/test_sim_genomic_refs.py",
-        "docs/dev/RNA_RELEASE_0_8_0_CAPTURE_REFERENCE_INDEPENDENT_REVIEW.md",
     ),
-    # an external review's own finding ids (A0 here, A1 above and B1 below), in the review that defines them: a
-    # reviewer's record, not a rule citation, kept as it was written
-    "A0": ("docs/dev/RNA_RELEASE_0_8_0_CAPTURE_REFERENCE_INDEPENDENT_REVIEW.md",),
     "A2": (
         "docs/SUCCESS.md",
         "tests/test_second_pass_scoring.py",
@@ -245,7 +241,6 @@ ALLOWED: dict[str, tuple[str, ...]] = {
     "B1": (
         "tests/test_second_pass_scoring.py",
         "tests/test_sim_genomic_refs.py",
-        "docs/dev/RNA_RELEASE_0_8_0_MODEFREE_INDEPENDENT_REVIEW.md",
     ),
     "B2": ("tests/test_second_pass_scoring.py",),
     # gene ids in the implicit-splice GTF fixture, two rungs of `test_vertex_reference.py`'s own G1…G5
