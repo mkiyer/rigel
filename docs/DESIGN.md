@@ -485,7 +485,7 @@ which writes a filtered record where it stands, close one at the same record. It
 **excluded** (every record unmapped, QC-failed or a skipped duplicate); **withheld**, with no usable hit, by reason
 (`off_index` > `chimeric` > `unannotated_splice` > `unpaired`, an unpaired pair also by the furthest check of the pair
 rule any hit reached, `missing_mate` < `reference` < `strand` < `outward` < `length`, and a pair with no hit at all
-`missing_mate`); **excluded by the multimap option**; or **placed**, unique or multimapping by its usable hits. Each
+`missing_mate`); **excluded by the multimap option** (more than one usable hit); or **placed**, unique or multimapping by its usable hits. Each
 record's status follows from its pair's outcome: filtered; used (its alignment is a location of a usable hit); unused
 (in a placed pair, in no usable hit, as a supplementary record always is); or unplaced. The outcomes sum to the read
 pairs and the statuses to the records by construction, so the scan checks both and stops on a difference

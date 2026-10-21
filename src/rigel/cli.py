@@ -77,7 +77,8 @@ def quant_command(args: argparse.Namespace) -> int:
 
     Resolves the arguments (CLI flags over the ``--config`` YAML over the config defaults), loads
     the index, runs :func:`rigel.pipeline.run_pipeline` — one BAM scan, calibration, then the
-    per-locus EM — and writes the output tables, ``summary.json`` and ``config.yaml``.
+    per-locus EM — and writes the output tables, ``summary.json`` and ``config.yaml``; with
+    ``--annotated-bam``, a second pass over the BAM then writes the annotated BAM, checked against the scan.
     """
     from .index import TranscriptIndex
     from .pipeline import run_pipeline
@@ -1339,8 +1340,9 @@ def build_parser() -> argparse.ArgumentParser:
         dest="include_multimap",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help=f"Include multimapping reads (default: {yes_no(qd['include_multimap'])}). "
-        "Detected via NH tag or secondary BAM flag.",
+        help="Include read pairs with more than one usable alignment "
+        f"(default: {yes_no(qd['include_multimap'])}). Off, each is excluded, counted in summary.json and "
+        "written to the annotated BAM as dropped.",
     )
     aln_grp.add_argument(
         "--keep-duplicates",

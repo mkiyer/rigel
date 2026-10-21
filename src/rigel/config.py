@@ -175,7 +175,8 @@ class BamScanConfig:
     skip_duplicates : bool
         Discard reads marked as duplicates (default True).
     include_multimap : bool
-        Include multimapping reads (default True).
+        Include read pairs with more than one usable alignment (default True); off, each is excluded and counted
+        (``summary.json``'s ``read_pairs.excluded_by_option``).
     max_frag_length : int
         Maximum fragment length for histogram models (default 1000).
     sj_strand_tag : str or tuple of str

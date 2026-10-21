@@ -1212,13 +1212,6 @@ static int32_t template_nh(const std::vector<ParsedAlignment>& records)
     return 1;
 }
 
-/// Whether a template is a multimapper: an NH above 1, or a secondary record (for an aligner that writes no NH).
-static bool is_multimapper(const std::vector<ParsedAlignment>& records, int32_t nh)
-{
-    return nh > 1 ||
-           std::any_of(records.begin(), records.end(), [](const ParsedAlignment& r) { return r.is_secondary(); });
-}
-
 /// One `OfferedFragment` marshalled out of Python, with the storage its spans point into.
 ///
 /// ⭐ Shared by `Accumulator.deposit`, `Accumulator.length_under` and `AccumulatorSet.offer` so they cannot
@@ -1967,16 +1960,10 @@ private:
         ws.arena_observed.clear();
         ws.arena_implied.clear();
 
-        // One outcome per template, and one status per record from it: an option-excluded or withheld template's
+        // One outcome per template, and one status per record from it: a withheld or option-excluded template's
         // records are unplaced, a placed one's used or unused.
         const int64_t n_records = static_cast<int64_t>(records.size());
         const int32_t nh = template_nh(records);
-        if (!include_multimap && is_multimapper(records, nh)) {
-            stats.n_excluded_by_option++;
-            stats.n_records_unplaced += n_records;
-            stats.template_digest += pair_digest(frag_id, group.name_hash, n_records, PAIR_EXCLUDED_BY_OPTION, 0, 0);
-            return;
-        }
 
         auto hit_result = template_hits(records);
         stats.n_nm_conflicting += hit_result.n_nm_conflicting;
@@ -2009,11 +1996,18 @@ private:
             stats.template_digest += pair_digest(frag_id, group.name_hash, n_records, withheld, reason, 0);
             return;
         }
+        // The multimap option excludes a template with more than one usable hit, its multiplicity
+        const int32_t n_usable = static_cast<int32_t>(std::count(verdicts.begin(), verdicts.end(), HIT_USABLE));
+        if (!include_multimap && n_usable > 1) {
+            stats.n_excluded_by_option++;
+            stats.n_records_unplaced += n_records;
+            stats.template_digest += pair_digest(frag_id, group.name_hash, n_records, PAIR_EXCLUDED_BY_OPTION, 0, 0);
+            return;
+        }
         records_used(records, hit_result, verdicts, ws.record_used);  // before the usable hits are compacted
         const int64_t n_used = std::count(ws.record_used.begin(), ws.record_used.end(), 1);
         stats.n_records_used += n_used;
         stats.n_records_unused += n_records - n_used;
-        const int32_t n_usable = static_cast<int32_t>(std::count(verdicts.begin(), verdicts.end(), HIT_USABLE));
         stats.template_digest += pair_digest(frag_id, group.name_hash, n_records,
                                              n_usable == 1 ? PAIR_PLACED_UNIQUE : PAIR_PLACED_MULTIMAPPING, 0, n_used);
         size_t kept = 0;
@@ -2622,28 +2616,6 @@ public:
             const int64_t n_records = static_cast<int64_t>(light_group.size());
             const size_t name_hash = std::hash<std::string>{}(current_qname);
 
-            if (!include_multimap_ && is_multimapper(light_group, template_nh(light_group))) {
-                // Write records without annotation (match pass 1 skip)
-                // Pass 1 assigns frag_id per qname group before worker-side
-                // multimapper filtering, so we must still advance frag_id
-                // here to keep pass-2 lookup synchronized.
-                for (size_t i = 0; i < raw_group.size(); i++) {
-                    set_tag_int(
-                        raw_group[i], "ZB",
-                        static_cast<int>(light_group[i].n_sj_blacklisted));
-                }
-                stamp_and_write_hit(raw_group, out, hdr, ".", ".", ".",
-                                    -1, -1,
-                                    AF_MULTIMAPPER_DROP, 0.0f,
-                                    ".", 0, 0, "unknown", -1);
-                n_excluded_by_option++;
-                n_records_unplaced += n_records;
-                template_digest += pair_digest(frag_id, name_hash, n_records, PAIR_EXCLUDED_BY_OPTION, 0, 0);
-                n_records_written += static_cast<int64_t>(raw_group.size());
-                frag_id++;
-                return;
-            }
-
             // The template's candidate hits, as the scan formed them
             auto hit_result = template_hits(light_group);
             auto& all_hits = hit_result.hits;
@@ -2677,8 +2649,20 @@ public:
             // splice type; every other record is an unused alignment of the fragment. All carry the fragment's
             // annotation: its row's or, with none, the intergenic fast path's, gDNA by construction (a spliced hit
             // the scan keeps has a transcript holding its junctions), ZW 1 with no competing hypothesis.
-            records_used(light_group, hit_result, verdicts, used);
             const int32_t num_hits = static_cast<int32_t>(std::count(verdicts.begin(), verdicts.end(), HIT_USABLE));
+            if (!include_multimap_ && num_hits > 1) {  // the multimap option, as the scan applies it
+                for (size_t i = 0; i < raw_group.size(); i++)
+                    set_tag_int(raw_group[i], "ZB", static_cast<int>(light_group[i].n_sj_blacklisted));
+                stamp_and_write_hit(raw_group, out, hdr, ".", ".", ".", -1, -1, AF_MULTIMAPPER_DROP, 0.0f, ".", 0, 0,
+                                    "unknown", -1);
+                n_excluded_by_option++;
+                n_records_unplaced += n_records;
+                template_digest += pair_digest(frag_id, name_hash, n_records, PAIR_EXCLUDED_BY_OPTION, 0, 0);
+                n_records_written += static_cast<int64_t>(raw_group.size());
+                frag_id++;
+                return;
+            }
+            records_used(light_group, hit_result, verdicts, used);
             const int64_t n_used = std::count(used.begin(), used.end(), 1);
             ++(num_hits == 1 ? n_placed_unique : n_placed_multimapping);
             n_records_used += n_used;

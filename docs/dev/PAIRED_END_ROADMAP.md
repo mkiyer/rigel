@@ -191,6 +191,14 @@ the code is open; each is less critical.
     scan's, or given the BAM with two read names swapped, stops. No quantification number moves: rename_identity
     bit-identical on the four inputs. The pinned scan of STAR g50 ss.50 OFF 42.2 → 43.0 s, five A B pairs, +0.6 s
     median. Suite 3,130
+  - ☑ The multimap option on usable hits (2026-10-21): `--no-include-multimap` excludes a read pair with more than one
+    usable hit, judged after the pair rule and the annotated-path rule, where it read the aligner's NH or a secondary
+    record before any hit was judged; `is_multimapper` deleted. Both under the option, against ad750dc2 on the STAR
+    panel, pinned and fractional: transcript / gene error −4.17 / −6.00 % unstranded capture-OFF, −5.08 / −6.17 %
+    stranded capture-OFF, −5.69 / −6.53 % stranded capture-ON; with every capture efficiency at 1, −4.40 / −6.00 %,
+    −5.00 / −6.17 %, −1.37 / −0.87 %. The option excludes 21.7–37.1 k fewer read pairs per condition, the audit's pairs
+    NH calls multimapping with one usable hit, now placed uniquely. At the defaults nothing moves: rename_identity
+    bit-identical on oracle g00 and STAR g50 ss.50 OFF. Suite 3,130
 
 *Phase B, calibration*
 0. ☐ First, the highest priority (owner, 2026-10-19): the capture reader reads false gDNA as capture on aligned input

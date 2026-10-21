@@ -163,20 +163,17 @@ EXPECTED = {
     "n_nh_above_reported": 0,
 }
 
-#: The same BAM under `--no-include-multimap`: the aligner calls b, c, d and q multimapping (NH 2 or a secondary
-#: record), so the option excludes all four before a hit is judged, and their 14 records are unplaced.
+#: The same BAM under `--no-include-multimap`: the option excludes a read pair with more than one usable hit, b and q,
+#: and their 8 records are unplaced. c and d, which the aligner calls multimapping (NH 2 and a secondary record), have
+#: one usable hit each and are placed.
 EXPECTED_WITHOUT_MULTIMAP = {
     **EXPECTED,
-    "n_excluded_by_option": 4,
-    "n_placed_unique": 2,
+    "n_excluded_by_option": 2,
     "n_placed_multimapping": 0,
-    "n_fragments": 2,
-    "n_intergenic": 1,
-    "n_records_used": 4,
-    "n_records_unused": 1,
-    "n_records_unplaced": 30,
-    "n_hits_rejected_outward": 1,
-    "n_hits_rejected_length": 1,
+    "n_fragments": 4,
+    "n_intergenic": 3,
+    "n_records_used": 8,
+    "n_records_unplaced": 24,
 }
 
 
@@ -365,12 +362,13 @@ def test_an_unused_alignment_is_stamped_unused(index, tmp_path):
 
 
 def test_a_read_pair_the_multimap_option_drops_has_no_winning_alignment(index, tmp_path):
+    """The option drops b and q, each with two usable hits; c and d, one usable hit each, are placed."""
     tags = _annotated(tmp_path, index, _counters_bam_records(), include_multimap=False)
-    dropped = [
-        t for key, t in tags.items() if key[0] in {"b_multi", "c_rejected", "d_nohit", "q_repeat"}
-    ]
-    assert len(dropped) == 14
+    dropped = [t for key, t in tags.items() if key[0] in {"b_multi", "q_repeat"}]
+    assert len(dropped) == 8
     assert all((t["ZF"], t["ZH"]) == (0x80, 0) for t in dropped)
+    placed = [t for key, t in tags.items() if key[0] in {"c_rejected", "d_nohit"}]
+    assert len(placed) == 6 and all(t["ZF"] == 0x25 for t in placed)
 
 
 def test_each_alignment_is_stamped_with_its_own_splice_type(index, tmp_path):

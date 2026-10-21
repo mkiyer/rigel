@@ -1094,7 +1094,6 @@ simulator's sharded writers and its whole-genome grid, and the zarr splice black
 (g) COMMENT AND DOC RESIDUE, one content-only sweep:
 - Native: `constants.h`'s four AF bits unused in C++.
 - Calibration: the test named for owned slots; the test helper `_zero_rna_opportunity` zeroing a field already 0.
-- The EM, locus and CLI: `quant_command` omitting the `--annotated-bam` second pass.
 - Tests: over-long test docstrings.
 - The simulator: `splice_motif.py`'s over-long lines.
 - Docs: `TRAPS: an-identity-with-a-qualifier` sizing its complement as "a quarter of the RNA library", a deleted
@@ -1114,7 +1113,6 @@ simulator's sharded writers and its whole-genome grid, and the zarr splice black
 - Scoring is written twice, for multimappers and singles; unifying it also removes the p = ½ antisense disagreement
   (`ISSUES: latent-defects`).
 - SQUAREM's VBEM and MAP branches (about 150 lines) differ only in the weight, the floor and the normalisation.
-- `BamAnnotationWriter::write` re-implements `parse_bam_record`, and multimap detection is written twice.
 - `TranscriptIndex.load` round-trips through frozensets: build the CSR directly.
 - `intervals.feather`'s exons are read three ways: one walk would serve all three.
 - Two functions named `contained_opportunity` sit in layer 2, and one ramp is written twice.
