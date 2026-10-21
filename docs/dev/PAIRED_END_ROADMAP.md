@@ -157,6 +157,11 @@ the code is open; each is less critical.
   the config docstring, the CLI help and the MANUAL name both sites and the pair rule's use; tests at 0, K and K + 1 at
   the outer end and at a gap's edge beside an observed splice, in the pair rule and the resolver, and K never matching a
   junction, each fired by a break. rename_identity bit-identical on oracle g00 and STAR g50 ss.50 OFF; suite 3,107
+  - ☑ One hold test (2026-10-21, owner: if it proves simpler and better code): the pair rule's witness asks
+    `transcript_contradicts_blocks`, as the gap enumeration does, and its inline copy goes with its two unreachable
+    skips, ten lines of code fewer. A numeric no-op: rename_identity bit-identical on oracle g00, STAR g50 ss.50 OFF,
+    cfRNA-A and cfRNA-C (frozen on 5482a10c); breaking the shared test at K + 1 or K − 1 fires both callers' outer-end
+    cases. The pinned scan 38.8 → 38.6 s (A B A B). Suite 3,107
 15. ☐ Accounting: one outcome per template, each record's status from its template's outcome, the counters and the
   annotated-BAM tags; the annotation pass checked against the scan by identity
 

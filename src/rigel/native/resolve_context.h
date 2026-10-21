@@ -369,6 +369,7 @@ struct ResolverScratch {
     std::vector<std::pair<int32_t, int32_t>> pair_skips;
     std::vector<std::pair<int32_t, int32_t>> pair_aligned;
     std::vector<std::pair<int32_t, int32_t>> pair_covered;
+    std::vector<std::pair<int32_t, int32_t>> held_blocks;  // the gap enumeration's blocks, for the hold test
     std::vector<GapBlock> pair_stretches;
     std::vector<IntronBlock> pair_cut;
     std::vector<IntronBlock> hit_junctions;  // every junction a hit observes (the scan's `observed_junctions`)
@@ -666,8 +667,8 @@ public:
     /// a path along a transcript is drawn, the pair rule's witness (`validate_pair`) and the gap-hypothesis
     /// enumeration: an annotated intron in an unaligned gap may overlap up to K aligned bases on either side and is
     /// still cut whole (`collect_transcript_introns_in_gap`), and a transcript is contradicted only by an intron
-    /// holding more than K aligned bases. Negative K is clamped to 0; the resolver's own default, before this is
-    /// called, is 0.
+    /// holding more than K aligned bases (`transcript_contradicts_blocks`). Negative K is clamped to 0; the resolver's
+    /// own default, before this is called, is 0.
     void set_intron_overhang_tolerance(int32_t K) {
         if (K < 0) K = 0;
         intron_overhang_tolerance_ = K;
@@ -675,7 +676,8 @@ public:
 
     /// Does transcript ``t`` contradict the alignment? True when one of its introns overlaps the
     /// INTERIOR of an aligned block -- the read has bases there, so the molecule cannot have spliced them
-    /// out, and ``t`` is not a candidate explanation for anything.
+    /// out, and ``t`` is not a candidate explanation for anything. The pair rule's witness and the gap-hypothesis
+    /// enumeration both ask it.
     ///
     /// ⛔ THE CANDIDATE SET IS NOT ALREADY THIS. `cr.t_inds` comes from `merge_sets`, which falls back to
     /// a UNION when the intersection is empty, so a transcript the reads contradict can be in it. Without
@@ -686,7 +688,7 @@ public:
     /// the same physical thing: an aligner routinely runs a read a base or two past a donor. Without
     /// this the predicate rejects exactly the fragments K exists to accept.
     inline bool transcript_contradicts_blocks(int32_t t,
-                                              const std::vector<ExonBlock>& blocks,
+                                              const std::vector<std::pair<int32_t, int32_t>>& blocks,
                                               int32_t K) const
     {
         if (t < 0 || t + 1 >= static_cast<int32_t>(exon_offsets_.size())) return false;
@@ -696,15 +698,13 @@ public:
         const int32_t* intron_starts = exon_ends_.data() + begin;
         const int32_t* intron_ends   = exon_starts_.data() + begin + 1;
 
-        for (const ExonBlock& block : blocks) {
+        for (const auto& [start, end] : blocks) {
             // First intron that could end inside this block, then walk while it still starts before it.
-            int32_t i = static_cast<int32_t>(
-                std::upper_bound(intron_ends, intron_ends + n_introns, block.start) - intron_ends);
-            for (; i < n_introns && intron_starts[i] < block.end; ++i) {
-                const int32_t overlap = std::min(intron_ends[i], block.end) -
-                                        std::max(intron_starts[i], block.start);
-                if (overlap > K) return true;   // the read has bases the transcript splices out
-            }
+            int32_t i =
+                static_cast<int32_t>(std::upper_bound(intron_ends, intron_ends + n_introns, start) - intron_ends);
+            for (; i < n_introns && intron_starts[i] < end; ++i)
+                if (std::min(intron_ends[i], end) - std::max(intron_starts[i], start) > K)
+                    return true;  // the read has bases the transcript splices out
         }
         return false;
     }
@@ -814,11 +814,11 @@ public:
     /// Failing that, one annotated transcript that overlaps both mates and holds every junction the hit observes
     /// (``junctions``; `pair_holders`) may witness a shorter path: its other introns in the stretches neither mate
     /// aligned are cut whole by the K rule of `collect_transcript_introns_in_gap`, and it offers no path when one of
-    /// them overlaps an aligned block by more than K. One transcript supplies both the observed junctions and the
-    /// implied introns, so a junction one transcript holds and an intron only another holds never make a path
-    /// together (the targeted review's hybrid); and a transcript that misses a mate never shortens the path between
-    /// them. Measured against per-base truth on the STAR panel, this rejects no correct pair, of 47.9 M templates as
-    /// STAR paired them and of 76.3 M mate pairs with HI ignored.
+    /// its introns holds more than K aligned bases (`transcript_contradicts_blocks`). One transcript supplies both the
+    /// observed junctions and the implied introns, so a junction one transcript holds and an intron only another holds
+    /// never make a path together (the targeted review's hybrid); and a transcript that misses a mate never shortens
+    /// the path between them. Measured against per-base truth on the STAR panel, this rejects no correct pair, of
+    /// 47.9 M templates as STAR paired them and of 76.3 M mate pairs with HI ignored.
     int32_t validate_pair(int32_t ref_id, const PairMate& f, const PairMate& r,
                           const std::vector<IntronBlock>& junctions, ResolverScratch& scratch) const
     {
@@ -888,19 +888,7 @@ public:
 
         for (int32_t t : cands) {
             if (t < 0 || t + 1 >= static_cast<int32_t>(exon_offsets_.size())) continue;
-            const int32_t begin = exon_offsets_[t];
-            const int32_t n_introns = exon_offsets_[t + 1] - begin - 1;
-            const int32_t* intron_starts = exon_ends_.data() + begin;
-            const int32_t* intron_ends = exon_starts_.data() + begin + 1;
-            bool path = true;
-            for (int32_t i = 0; i < n_introns && path; ++i) {
-                const int32_t i0 = intron_starts[i], i1 = intron_ends[i];
-                if (i1 <= lo || i0 >= hi) continue;
-                if (std::binary_search(skips.begin(), skips.end(), std::make_pair(i0, i1))) continue;  // observed
-                for (const auto& [x, y] : aligned)
-                    if (std::min(i1, y) - std::max(i0, x) > K) { path = false; break; }
-            }
-            if (!path) continue;
+            if (transcript_contradicts_blocks(t, aligned, K)) continue;
             auto& cut = scratch.pair_cut;
             cut.clear();
             for (const GapBlock& g : stretches) collect_transcript_introns_in_gap(t, g, K, STRAND_NONE, cut);
@@ -1021,6 +1009,10 @@ public:
             return;
         }
 
+        auto& blocks = scratch.held_blocks;  // as `transcript_contradicts_blocks` reads them
+        blocks.clear();
+        for (const auto& e : exons) blocks.push_back({e.start, e.end});
+
         bool any_candidate_implies_nothing = false;
         cr.frag_lengths.assign(candidate_t.size(), -1);
         for (size_t i = 0; i < candidate_t.size(); ++i) {
@@ -1032,7 +1024,7 @@ public:
             for (const GapBlock& gap : gaps)
                 collect_transcript_introns_in_gap(t, gap, K, strand, path);
             cr.frag_lengths[i] = length_of(path);
-            if (transcript_contradicts_blocks(t, exons, K)) continue;
+            if (transcript_contradicts_blocks(t, blocks, K)) continue;
             if (path.empty()) {
                 any_candidate_implies_nothing = true;
                 continue;

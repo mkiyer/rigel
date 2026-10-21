@@ -3,7 +3,7 @@
 2026-10-20 · code base `5482a10c` · for the owner's review. Every claim about Rigel's code cites a line re-read for this
 document. Every number is measured; the receipts are in `$RIGEL_RUNS/arms/2026-10-20_k_uses/`. Approved 2026-10-21
 (owner: keep both sites; the outer end's own arm run before the issue closes; one hold test only if it proves simpler
-and better code); the arm ran and step 2 landed the same day, their measurements the roadmap's item 14
+and better code); the arm ran and steps 2 and 3 landed the same day, their measurements the roadmap's item 14
 (`PAIRED_END_ROADMAP.md`).
 
 ## 1. The recommendation in brief
@@ -160,6 +160,13 @@ fragment's outer soft clips, which no rule here sees (checked case by case on 2 
    - One function for both callers is a simplification.
    - It is not a numeric no-op where two overlapping mates each overlap an intron by K or less but together by more, so
      it needs its identity check and, if anything moves, its own A/B.
+   - **Landed 2026-10-21.** The witness passes its mates' blocks unmerged, as its inline test read them, so the case of
+     two overlapping mates does not arise. The inline test's two skips go, both unreachable: an intron outside the
+     molecule overlaps no aligned block; and an observed junction can hold aligned bases only of the other mate, whose
+     span then overlaps this one's, so the junction covers what lies between them and the pair, at most its reads' bases
+     and clips along the genome, passes before any witness is asked. Ten lines of code fewer. Bit-identical on oracle
+     g00, STAR g50 ss.50 OFF, cfRNA-A and cfRNA-C (frozen on `5482a10c`); the shared test at K + 1 and at K − 1 fires
+     both callers' outer-end cases (`breaks_hold3/`); the pinned scan of STAR g50 ss.50 OFF 38.8 → 38.6 s (A B A B).
 
 ## 6. Tests and breaks
 
